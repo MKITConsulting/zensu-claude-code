@@ -3,7 +3,7 @@ name: adopt-session
 description: >
   [Zensu] Rescue the CURRENT session when a Zensu plugin update landed while it was
   running. Its Session Control record is then intact but the executing installation
-  declares an incompatible lineage, so every stateful tool fails closed: Edit and Write
+  declares an incompatible lineage, so every stateful tool fails closed: Edit, Write and writing Bash
   deny, Bash denies everything but the two recognized commands, subagents cannot start,
   and Stop cannot prove completion. This skill reports whether the running installation
   may take the record over in place, and with `--confirm` performs that adoption: it
@@ -128,7 +128,8 @@ strictly first and falls back to `readOrphanedProjectRootContext`, which REFUSES
 root that still exists — so a vanished worktree is the one disagreement admitted
 alongside the lineage break, and every other one still answers
 `record-unreadable`. Nothing is waived by admitting it: the workflow document
-lived under that root and died with it.
+lived under that root and is not reachable from this record; if it was moved rather
+than deleted, its state still exists there.
 
 The limit: adoption repairs the LINEAGE, not the anchor. The adopted session lands
 in the ordinary orphaned-project-root state, so READ-ONLY Bash and the read-only
@@ -218,9 +219,9 @@ command — read the message.
 row, and read it before you describe the outcome. When the recorded project root still
 exists the session is bound from the next tool call onward — do not tell the user to
 restart. When it is GONE the doctor renders the ❌ orphaned-project-root row instead, and
-that is the expected result rather than a failed repair: the lineage break is cleared, Bash
-and the read-only diagnostics work again, and `Edit` and `Write` stay denied until that exact
-directory is re-created. Say which of the two happened; never report the second as an
+that is the expected result rather than a failed repair: the lineage break is cleared,
+READ-ONLY Bash and the read-only diagnostics work again, and `Edit`, `Write` and any Bash
+command that WRITES stay denied until that exact directory is re-created. Say which of the two happened; never report the second as an
 unqualified success.
 
 ## Invocation Constraints

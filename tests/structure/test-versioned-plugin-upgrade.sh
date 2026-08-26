@@ -1179,7 +1179,11 @@ if [ ! -s "$STOP_OUT" ] \
     && grep -qF '/zensu:adopt-session --confirm' "$STOP_ERR" \
     && grep -qF 'no completion was proven' "$STOP_ERR" \
     && grep -qF 'The recorded project root still EXISTS' "$STOP_ERR" \
-    && ! grep -qF 'SURVIVES and is unchanged' "$STOP_ERR" \
+    `# The deferral arm must state REACHABILITY, never contents. Pinned POSITIVELY,` \
+    `# because the negative form was dead on arrival: it excluded 'SURVIVES and is` \
+    `# unchanged', a literal round 7 had already retired, so the conjunct was always` \
+    `# true and guarded nothing. A live needle fails when the arm over-claims again.` \
+    && grep -qF "deliberately claims nothing about the document's contents" "$STOP_ERR" \
     && ! grep -qF 'this is not a deferral' "$STOP_ERR"; then
   check "AC-C03 the Stop hook releases the lineage state instead of blocking" PASS
 else
@@ -2820,7 +2824,11 @@ if printf '%s' "$GONE_START" \
         >"$GONE_STOP_OUT" 2>"$GONE_STOP_ERR" \
       && grep -qF 'this is not a deferral' "$GONE_STOP_ERR" \
       && grep -qF 'BOTH the recorded project root' "$GONE_STOP_ERR" \
-      && ! grep -qF 'The workflow document itself SURVIVES' "$GONE_STOP_ERR" \
+      `# Same dead-needle correction: this excluded a literal that no longer exists.` \
+      `# The gone-root arm must not borrow the DEFERRAL arm's wording, and the live` \
+      `# discriminator for that arm is the sentence AC-C19 already treats as arm 3.` \
+      && ! grep -qF 'The recorded project root still EXISTS' "$GONE_STOP_ERR" \
+      && ! grep -qF 'nothing is claimed about the workflow document either way' "$GONE_STOP_ERR" \
       && [ ! -s "$GONE_STOP_OUT" ]; then
     check "AC-C15d the Stop hook releases the combined state without claiming the workflow document survived" PASS
   else

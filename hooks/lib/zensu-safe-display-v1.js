@@ -48,12 +48,21 @@ const DOUBLE_SPACE = / {2}/;
 // directory name the user opens Claude Code in controls this substring. A real path
 // containing " : " renders JSON-quoted instead, which is still readable.
 const PAIR_SEPARATOR = / : /;
+// The allowlist above admits \p{L}, and some LETTERS are Default_Ignorable — U+3164
+// HANGUL FILLER, U+115F, U+1160, U+FFA0 — which render as blank in a terminal. A value
+// like `/tmp/x<U+3164>:<U+3164>y` therefore matches the class, contains NO space at
+// all so neither DOUBLE_SPACE nor PAIR_SEPARATOR fires, and would be returned raw
+// while LOOKING like a further `label : value` row. The header's argument ("none of
+// them is a letter, a number or a combining mark") does not cover an invisible letter.
+// The escaping branch already folds these through NON_ASCII, so the fix is to route
+// them there rather than to widen the fold.
+const INVISIBLE = /\p{Default_Ignorable_Code_Point}/u;
 const NON_ASCII = new RegExp('[\\u007f-\\uffff]', 'g');
 const SPACE_RUN = / {2,}/g;
 
 const safeDisplayValue = (value) => {
   const text = String(value);
-  if (SAFE_DISPLAY.test(text) && !DOUBLE_SPACE.test(text) && !PAIR_SEPARATOR.test(text)) {
+  if (SAFE_DISPLAY.test(text) && !INVISIBLE.test(text) && !DOUBLE_SPACE.test(text) && !PAIR_SEPARATOR.test(text)) {
     return text;
   }
   return JSON.stringify(text)

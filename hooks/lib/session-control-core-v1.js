@@ -1522,7 +1522,7 @@ function adoptableRecord(options) {
     // update it wedged the session permanently — every write channel denied,
     // /zensu:doctor reporting "no valid record" for a record sitting intact in
     // plugin data. Nothing is waived by admitting it: the workflow document
-    // lived under that root and died with it, so there is no persisted shape
+    // lived under that root and is not reachable from this record, so there is no persisted shape
     // left for the two runtimes to disagree about, which is the same argument
     // that already relaxes this state for a COMPATIBLE upgrade.
     //

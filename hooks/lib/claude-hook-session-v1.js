@@ -451,7 +451,7 @@ function main() {
     // hook is a real consumer: its incompatible-lineage release tells the user
     // the workflow document survives and that the next Stop enforces the chain
     // again, and both are FALSE once the recorded root is gone — the document
-    // died with it, and the adoption re-mints around the same absent anchor, so
+    // is not reachable from this record, and the adoption re-mints around the same absent anchor, so
     // every later Stop takes the orphan release instead. It has to be able to
     // tell the two apart. The two spellings differ only in where the session id
     // comes from, exactly as the orphan and lineage pairs above do.

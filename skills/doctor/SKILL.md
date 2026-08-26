@@ -314,7 +314,7 @@ classifier will refuse a spawn, not only when the whole table is green.
   re-create exactly the printed directory and the recorded session binds again.
   Otherwise start a fresh session. Meanwhile the session is diagnosable but not
   workable — this read-only report runs, `Stop` is released rather than wedged,
-  and `Edit`/`Write` stay denied because nothing can anchor a write to a
+  and `Edit`, `Write` and any Bash command that WRITES stay denied because nothing can anchor a write to a
   project. Do NOT report this row as a missing record.
 - **A plugin upgrade is normally NOT a binding failure any more.** A record binds
   to any executing installation whose declared version is a compatible lineage of
@@ -338,7 +338,7 @@ classifier will refuse a spawn, not only when the whole table is green.
   Adoption re-binds the session from the next tool call onward — do NOT tell the
   user to restart after a successful one. Carry the same conditional limit the
   row below carries: if the recorded project root is ALSO gone, the adoption
-  clears the lineage break while `Edit` and `Write` stay denied until that exact
+  clears the lineage break while `Edit`, `Write` and any Bash command that WRITES stay denied until that exact
   directory is re-created. This row is reachable in that state — the doctor
   falls back to it whenever the third-fact probe cannot answer — so offering the
   remedy without the clause would promise something this check did not establish.

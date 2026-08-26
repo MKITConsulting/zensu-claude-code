@@ -233,7 +233,8 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
         # and lineage-incompatible would otherwise be reported as a plain lineage
         # break and the user would never learn their project root is gone. That
         # matters after the repair as much as before it: adoption succeeds in this
-        # state and leaves the session orphaned, where Edit and Write still deny.
+        # state and leaves the session orphaned, where Edit, Write and any WRITING
+        # Bash command still deny — read-only Bash and this diagnostic do run.
         # No shape guard here, matching the orphan branch above: the printed path
         # comes from readOrphanedProjectRootContext, which rejects control
         # characters and a non-absolute value before it returns.

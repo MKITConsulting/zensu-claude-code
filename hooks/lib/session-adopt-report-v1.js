@@ -46,8 +46,9 @@ const privateRecordsDirectory = require("./claude-hook-session-v1.js").privateRe
 // forwards `CLAUDE_CODE_SESSION_ID` verbatim, and `core.sessionKey` returns an
 // `scv1_<64hex>` value UNCHANGED — that spelling is the name of a record file in the
 // store, so without this check the store's own directory listing was a list of
-// accepted identities. Called inside buildRequest, alongside the other three inputs,
-// so its refusal reaches the same handler that prints every other cause plainly.
+// accepted identities. Called in main() FIRST, with its own
+// headline and remedy, and again inside buildRequest so the invariant stays local to
+// the function that builds the request and a second caller cannot skip it.
 const validateSessionId = require("./claude-hook-session-v1.js").validateSessionId;
 const buildRequest = () => {
   const pluginData = process.env.ZADOPT_PLUGIN_DATA;
@@ -213,6 +214,25 @@ const REMEDY = {
 // crashed helper rather than as the refusal it was meant to print.
 function main() {
   let request;
+  // TWO refusal classes, two headlines. `buildRequest` performs two independent
+  // checks — the session identity and the private record store — and routing both
+  // into one `catch` printed `private-record-store-unsafe` for a malformed or
+  // DERIVED session id, telling the user to repair a store that was never reached.
+  // That contradicted this file's own contract that every refusal names the
+  // condition it failed; three review seats found it independently. Each class
+  // keeps its own cause and its own remedy now.
+  try {
+    validateSessionId(process.env.ZADOPT_SESSION_ID);
+  } catch (error) {
+    process.stdout.write("Zensu session adoption — NOT adoptable (session-id-unusable)\n\n");
+    process.stdout.write("The session identity this command was given cannot be used: "
+      + safe(error && error.message ? error.message : "unknown") + "\n");
+    process.stdout.write("It is empty, malformed, or a DERIVED Session Control identifier rather than the\n");
+    process.stdout.write("raw host session id. Nothing was read and nothing was changed. Start a fresh\n");
+    process.stdout.write("Claude Code session; the record store is not implicated.\n");
+    process.exitCode = 1;
+    return;
+  }
   try {
     request = buildRequest();
   } catch (error) {
@@ -275,7 +295,8 @@ function main() {
       + (verdict.orphanedProjectRoot ? "  (GONE)" : "") + "\n\n");
     process.stdout.write("The record is intact and this installation can take it over in place.\n");
     // Stated BEFORE the user confirms, not only after: an adoption that leaves
-    // Edit and Write denied is not the rescue an unqualified "adoptable" implies,
+    // Edit, Write and every WRITING Bash command denied is not the rescue an
+    // unqualified "adoptable" implies,
     // and finding that out afterwards reads as a failed repair.
     if (verdict.orphanedProjectRoot) {
       process.stdout.write("\nThe recorded project root no longer exists — a deleted or recycled worktree left\n");

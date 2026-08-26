@@ -138,11 +138,11 @@ if ! zensu_bind_hook_session "$INPUT"; then
   #
   # WHICH HALF decides what is true about the state, and the two must never share
   # one message. With the recorded project root still present the workflow
-  # document is on disk and readable, merely unreachable from HERE, so the
+  # document stays REACHABLE once the session re-binds — this arm establishes
   # guarantee is DEFERRED: adoption re-binds the session, the same document
   # becomes reachable, and the very next Stop enforces it. With that root GONE
-  # the document died with it, and the adoption re-mints around the same absent
-  # anchor — so nothing survives, and every later Stop takes the ORPHAN release
+  # the document is not reachable from this record, and the adoption re-mints
+  # around the same absent anchor — so every later Stop takes the ORPHAN release
   # above rather than this one. The orphan branch cannot claim the combined state
   # first: resolveOrphanedProjectRoot re-applies servesRecordedRuntime, which an
   # incompatible lineage fails. Asking the third fact here is therefore the only

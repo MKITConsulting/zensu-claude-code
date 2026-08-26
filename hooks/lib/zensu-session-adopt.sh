@@ -113,14 +113,24 @@ LEASE="$DIR/review-evidence-lease-v1.js"
 # name substitutes the fold for the whole report: the project line the user reads to
 # decide whether to take the record over is exactly what it renders. Same reasoning
 # as the lease guard above, one module further along.
-#
-# Known and NOT closed here: `claude-path-v1.js` reaches this command transitively
-# (through the binder and the lease owner) and carries no guard of its own, so this
-# list is still incomplete. Stated rather than implied — adding this entry narrows
-# the gap, it does not close it.
 SAFE_DISPLAY_LIB="$DIR/zensu-safe-display-v1.js"
 [ -f "$SAFE_DISPLAY_LIB" ] && [ ! -L "$SAFE_DISPLAY_LIB" ] || {
   printf '%s\n' 'zensu:adopt-session: the display-safety module is missing or symlinked; repair the Zensu plugin installation' >&2
+  exit 1
+}
+
+# The host-path normalizer, reached TRANSITIVELY rather than by a require in the
+# report module — the binder requires it, and so does the lease owner. It is not
+# inert on that path: `canonicalDirectory` runs every trust-boundary path through
+# `normalizeHostPathInput`, including the CLAUDE_PLUGIN_DATA value that locates the
+# private record store, and nothing else re-verifies the EXECUTING tree here (the
+# digest is recomputed against the RECORDED root only). It was left out when the
+# list last grew, with the omission written into a comment as a known gap; a guard
+# list whose completeness lives in prose is the shape this file already rejects for
+# its six siblings.
+PATH_LIB="$DIR/claude-path-v1.js"
+[ -f "$PATH_LIB" ] && [ ! -L "$PATH_LIB" ] || {
+  printf '%s\n' 'zensu:adopt-session: the host-path module is missing or symlinked; repair the Zensu plugin installation' >&2
   exit 1
 }
 

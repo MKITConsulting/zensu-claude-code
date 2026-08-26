@@ -545,7 +545,7 @@ Phase E), which used to make `readContext` throw and answer `record-unreadable` 
 `/zensu:doctor` fell back to the `unbound` row. The fallback cannot widen: the orphan
 reader waives exactly one check and REFUSES a root that still exists, so every other
 disagreement throws in BOTH readers and still lands on `record-unreadable`. Nothing is
-waived by admitting it — the workflow document lived under that root and died with it,
+waived by admitting it — the workflow document lived under that root and is not reachable from this record,
 the same argument that already relaxes a vanished root for a COMPATIBLE upgrade.
 
 `buildContext` gained `allowMissingProjectRoot` for the re-mint. It waives exactly the
@@ -562,7 +562,7 @@ root must NOT be recreated — the provenance write is guarded by the workflow d
 own `existsSync`, so `mutateWorkflowState`, which mkdirs every missing component of
 `<project>/.zensu/state`, is never reached; AC-C16 pins it. Third, the repair fixes the
 LINEAGE and not the anchor: the adopted session lands in the ordinary
-orphaned-project-root state, where `Edit`/`Write` still deny. The report says so before
+orphaned-project-root state, where `Edit`, `Write` and any WRITING Bash command still deny. The report says so before
 and after `--confirm` and the doctor row says so too, because announcing an unqualified
 success there sends the user into a deny they were just told was repaired.
 
@@ -597,8 +597,14 @@ that then closed by admitting a move leaves the state intact. The enforcement ha
 also stay BOUNDED to while the directory is missing, which is what makes it true: re-create
 the root and a later bind takes the deferral arm instead. The same standard governs every
 mirror of it — `docs/session-control.md`, both doctor rows, the adoption report's
-pre-confirm paragraph and its no-workflow-document NOTE, and the two SKILL files
-(`skills/doctor/SKILL.md`, `skills/adopt-session/SKILL.md`). The skills were left off
+pre-confirm paragraph and its no-workflow-document NOTE, the two SKILL files
+(`skills/doctor/SKILL.md`, `skills/adopt-session/SKILL.md`), and the two operator docs
+(`docs/tdd-manager-workflow.md` §"When the session binding itself cannot be resolved",
+`docs/operations.md`'s combined-state troubleshooting row). The roster has now been
+wrong TWICE in the same way — each time it was extended, the newly named members
+turned out to be carrying the forbidden spelling already, and the members added the
+round after that were carrying it too. Treat an unlisted surface that says anything
+about the workflow document as unchecked, not as compliant. The skills were left off
 this list when it was first written and both promptly shipped the forbidden spelling,
 which is the whole argument for naming them here rather than trusting a sweep. **It
 governs the POSITIVE half too**, and that was missed the same way: the deferral arm
@@ -637,8 +643,12 @@ version-shape rule are unchecked:
   JSON string, and now also the doctor report), and `SAFE_VERSION` / `safeVersion`
   in `reviewer-capability-v1.js` (a version reaches the `.*` gate's own JSON deny
   reason, which that gate spells itself rather than through
-  `zensu_emit_hook_session_deny`). Identical alternation, identical `(unreadable)`
-  substitution, deliberate hand-copy; keep all three in step. The count was raised
+  `zensu_emit_hook_session_deny`). Identical ALTERNATION in all three, deliberate hand-copy;
+  keep them in step. The CONSEQUENCE deliberately differs and an earlier wording
+  claimed it did not: `ADOPTION_SAFE_VERSION_RE` performs no substitution at all —
+  a failing version REFUSES the adoption (`EXECUTING_UNIDENTIFIED`) — while the
+  other two substitute `(unreadable)` and keep rendering. Same rule, three members,
+  two outcomes. The count was raised
   to three while the enumeration still named two, which is the drift this bullet
   exists to prevent — state the base or the count means nothing.
 - the review-evidence store layout, hardcoded in `discardSupersededLeases` as
@@ -733,7 +743,11 @@ recognizer's `RECOGNIZED` entry, the doctor branch and row, the Stop release, th
 deny scope at every gate that denies in this state, the skill, — easy to miss
 — a binder exporting a `privateRecordsDirectory` equivalent that applies the
 symlink/alias/permission/ownership checks, because the entry script resolves the
-records directory through it and never by hand-joining, EIGHTH the sweep itself
+records directory through it and never by hand-joining, **and a `validateSessionId`
+equivalent**, which the report module now imports from the same binder and calls
+before anything derived from that id locates a file — a port that takes the entry
+script and the report against a binder without it gets a TypeError inside
+`buildRequest`, which is literally the failure this roster's closing sentence names, EIGHTH the sweep itself
 (`hooks/lib/review-evidence-sweep-v1.js`, plus the owner exports it consumes and the
 entry point's call to it) — a port that skips it re-mints the record and leaves every
 superseded lease wedging the store — and NINTH the third-fact channel: the
