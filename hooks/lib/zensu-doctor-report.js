@@ -1451,23 +1451,30 @@ function truncatedList(rows) {
 //
 // Required LAZILY and guarded, exactly as reviewerDenialRows and ruleCarrierRows
 // require theirs: a load fault must cost this row's polish, never the whole report.
-// The fallback is the plain value, which is what both rows printed before — a
-// degraded render, never a missing finding.
-// The last-resort fold, for the branch where the owner cannot be loaded. It is
-// deliberately NOT the identity: that module carries three module-scope requires
-// of its own, so a load fault is more reachable than a missing file, and
-// returning the raw value there drops exactly the hazard this function exists
-// for. Narrower than SAFE_DISPLAY on purpose — a degraded render should stay
-// readable — but it removes the characters that can HIDE the rest of the line.
-var DISPLAY_HIDERS = new RegExp('[\\u202a-\\u202e\\u2066-\\u2069\\u2028\\u2029]', 'g');
+// A PLAIN require of a dependency-free leaf module, at top level and with no
+// fallback copy — both of which are deliberate reversals.
+//
+// It used to be a guarded LAZY require of `session-adopt-report-v1.js`, which is a
+// feature command's report module carrying five module-scope requires of its own
+// (the session-control core, the lease sweep, the hook binder). That put a
+// four-file load chain behind one string fold, inside the one tool whose entire
+// job is to still speak when the installation is damaged — and the guard's
+// fallback was a SECOND, narrower spelling of the rule, so the two could drift
+// with nothing comparing them. `hooks/lib/zensu-safe-display-v1.js` requires
+// nothing at all and sits in this directory, so it is exactly as reachable as this
+// file is: a load failure there is not a degraded row, it is a broken tree. The
+// lazy-plus-guarded pattern this file uses for `ruleCarrierRows` and
+// `reviewerDenialRows` is for modules with dependencies of their own, and is not
+// the right shape here.
+//
+// The FULL rule, not the narrow fold. The binding line is prose, but it sits in a
+// report built out of `label : value` rows that the doctor skill tells the model to
+// print verbatim, so the pair-forgery guard is exactly as load-bearing here as in
+// the adoption report.
+var safeDisplayRules = require('./zensu-safe-display-v1.js');
 
 function safeDisplay(value) {
-  var text = String(value == null ? '' : value);
-  try {
-    return require('./session-adopt-report-v1.js').safe(text);
-  } catch (e) {
-    return text.replace(DISPLAY_HIDERS, '?');
-  }
+  return safeDisplayRules.safeDisplayValue(String(value == null ? '' : value));
 }
 
 function bindingLine() {
@@ -1483,7 +1490,7 @@ function bindingLine() {
     case 'orphaned-project-root':
       return line(BAD, 'binding: the project root recorded for this session no longer exists'
         + (env.ZDOC_BINDING_PROJECT_ROOT ? ' (' + safeDisplay(env.ZDOC_BINDING_PROJECT_ROOT) + ')' : '')
-        + ' — a deleted or recycled worktree took the workflow state with it, so stateful Zensu tools fail closed while this read-only diagnostic still runs; re-create exactly that directory to resume, or start a fresh Claude Code session');
+        + ' — a deleted or recycled worktree left the workflow state unreachable from this record, so stateful Zensu tools fail closed while this read-only diagnostic still runs; re-create exactly that directory to resume, or start a fresh Claude Code session. If it was moved rather than deleted, its state still exists there');
     // The record is INTACT and only the runtime serving it declares an
     // incompatible lineage — a plugin update that landed mid-session. Before this
     // row existed the state fell through to `unbound` above, whose line asserts
@@ -1503,7 +1510,14 @@ function bindingLine() {
         // — and offering the repair without saying what it does not buy is what
         // this change's own rule calls a defect. Worded conditionally so it stays
         // true in the ordinary case, where the root really is still there.
-        + (env.ZDOC_BINDING_ROOT_UNKNOWN
+        // Compared against the ONE value the producer writes, never by JS
+        // truthiness. ZDOC_* is an injectable channel by design (the whole probe
+        // block is skipped when ZDOC_BINDING is set), so "0", "false" and "no"
+        // would all enable the clause under a bare test. The failure direction is
+        // safe either way — an extra hedge, never a dropped one — but this repo
+        // already pins the quoted-"false" hazard for a config flag, and a channel
+        // with a two-value producer deserves a two-value reader.
+        + (env.ZDOC_BINDING_ROOT_UNKNOWN === '1'
           ? '. Whether the recorded project root still exists could not be determined here; if it is gone, the adoption clears the lineage break while Edit and Write stay denied until that exact directory is re-created'
           : ''));
     // BOTH disagreements at once, and the row exists because each of the two
@@ -1525,7 +1539,7 @@ function bindingLine() {
         // OFFERED, never promised — the same hedge the row above carries and for
         // the same reason: this state is reachable on a DOWNGRADE, which adoption
         // refuses outright as executing-runtime-older.
-        + ' — a deleted or recycled worktree took the workflow state with it while a plugin update landed, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether the running installation may take the record over, then /zensu:adopt-session --confirm. That unblocks Bash and this diagnostic, but Edit and Write stay denied afterwards because the recorded project root is still gone — re-create exactly that directory, or start a fresh Claude Code session, to write again');
+        + ' — a deleted or recycled worktree left the workflow state unreachable from this record while a plugin update landed, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether the running installation may take the record over, then /zensu:adopt-session --confirm. That unblocks Bash and this diagnostic, but Edit and Write stay denied afterwards because the recorded project root is still gone — re-create exactly that directory, or start a fresh Claude Code session, to write again. If it was moved rather than deleted, its state still exists there');
     case 'unavailable':
       return line(BAD, 'binding: hooks/lib/zensu-session.sh is missing or symlinked — Session Control cannot bind');
     default:

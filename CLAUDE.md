@@ -585,9 +585,19 @@ to re-check on every later edit.** `zensu_session_incompatible_runtime` is now t
 two states that disagree about the one fact those surfaces assert: whether the workflow
 document still exists. Anything that speaks about it must ask the third fact and branch —
 `hooks/stop-chain-enforcer.sh` does, and its THREE releases say different things on purpose:
-a deferral when the root is present, "GONE with it, and no later Stop will enforce this
-chain" when it is not, and a state-neutral one claiming NEITHER when the probe could not
-answer. That third arm exists because the channel answers on three statuses — 0 with the
+a deferral when the root is present, "not reachable from this record, and no later Stop can
+enforce this chain while that directory is missing" when it is not, and a state-neutral one
+claiming NEITHER when the probe could not answer. **The wording of that middle arm is
+itself a rule, not a phrasing choice.** Its whole evidence base is one `ENOENT`, which a
+MOVED or renamed root and an unmounted volume produce identically — so it is held to the
+same standard the sibling orphan release 60 lines above it sets, and which that release's
+own comment states: "not reachable", never "gone". It shipped once as "is GONE with it" and
+"no later Stop will enforce this chain", both unprovable from that one fact, in a sentence
+that then closed by admitting a move leaves the state intact. The enforcement half must
+also stay BOUNDED to while the directory is missing, which is what makes it true: re-create
+the root and a later bind takes the deferral arm instead. The same standard governs every
+mirror of it — `docs/session-control.md`, both doctor rows, and the adoption report's
+pre-confirm paragraph and its no-workflow-document NOTE. That third arm exists because the channel answers on three statuses — 0 with the
 path, 3 for a live recorded root, 1 for an unavailable answer — and a caller that reads only
 truthiness collapses the last two, which is precisely how a surface comes to assert a
 workflow document that is gone. The first attempt at this fix contained that collapse. The others carry an unconditional clause instead, which is true in
@@ -615,9 +625,15 @@ version-shape rule are unchecked:
   Every parser reads `${V##*$'\t'}` for the executing half, which takes the LAST
   field: adding a third field silently redirects all five rather than failing.
 - the version-shape rule, spelled THREE times for three different hazards —
-  `ADOPTION_SAFE_VERSION_RE` (a version reaches a FILENAME) and
-  `ZENSU_SAFE_VERSION_RE` (a version reaches a JSON string, and now also the
-  doctor report). Identical alternation, deliberate hand-copy; keep them in step.
+  `ADOPTION_SAFE_VERSION_RE` in `session-control-core-v1.js` (a version reaches a
+  FILENAME), `ZENSU_SAFE_VERSION_RE` in `zensu-session.sh` (a version reaches a
+  JSON string, and now also the doctor report), and `SAFE_VERSION` / `safeVersion`
+  in `reviewer-capability-v1.js` (a version reaches the `.*` gate's own JSON deny
+  reason, which that gate spells itself rather than through
+  `zensu_emit_hook_session_deny`). Identical alternation, identical `(unreadable)`
+  substitution, deliberate hand-copy; keep all three in step. The count was raised
+  to three while the enumeration still named two, which is the drift this bullet
+  exists to prevent — state the base or the count means nothing.
 - the review-evidence store layout, hardcoded in `discardSupersededLeases` as
   `review-evidence/v1/{records,superseded}/<key>` and re-implementing the
   ownership predicate that `review-evidence-lease-v1.js` owns, plus — since the
@@ -666,10 +682,19 @@ condition 1's strict-then-orphan fallback, `requireAbsentDirectoryPath`, and
 `buildContext`'s SECOND parameter. That last one is the trap: a port that takes only the
 enumerated core half has `adoptContext` passing a second argument to a `buildContext` that
 ignores it, so `canonicalDirectory` runs on an absent path and adoption THROWS in exactly
-the state the feature was written for. The third-fact channel is a HOST obligation — the
-`orphaned-incompatible-root` / `model-orphaned-incompatible-root` argv pair and both shell
-wrappers — and a port that skips it gets a Stop hook telling a user whose worktree is gone
-that their chain state survived. `discardSupersededLeases` is NO LONGER
+the state the feature was written for. **`hooks/lib/zensu-safe-display-v1.js` joins
+the core half**, and it is the one entry a port is likeliest to skip because it looks
+cosmetic: it owns `safeDisplayValue` (the `label : value` pair-forgery guard plus the
+positive letter/number/mark allowlist) and `foldDisplayHiders`, it requires NOTHING —
+not even a node builtin — and BOTH report renderers now require it at top level with
+no fallback copy. The rule lived inside `session-adopt-report-v1.js`, a feature
+command's module with five requires of its own, and the doctor reached for it through
+a guarded lazy require with a second, narrower spelling behind the guard: a display
+rule in two implementations, with a four-file load chain behind it, inside the one
+tool whose job is to speak in a damaged installation. A port that takes the doctor
+renderer without this module gets a `MODULE_NOT_FOUND` at load; a port that
+re-authors the fold gets the two-implementation class straight back.
+`discardSupersededLeases` is NO LONGER
 among them — it moved to `hooks/lib/review-evidence-sweep-v1.js` and is the EIGHTH
 host obligation enumerated below. Note that
 `adoptableRecord`'s `options.projectRoot` is now INERT — accepted and never read —
@@ -677,18 +702,25 @@ so a port that takes only the core delta (the condition gone) while its own entr
 script still requires and host-path-renders a project-dir variable still exits
 before printing any report, which is the same wedge in a different place. The two
 halves move together. The host
-half is EIGHT separate obligations, and a port that takes only the core delta gets
+half is NINE separate obligations, and a port that takes only the core delta gets
 `adoptContext` with no reachable caller and keeps the wedge: the entry script, the
 recognizer's `RECOGNIZED` entry, the doctor branch and row, the Stop release, the
 deny scope at every gate that denies in this state, the skill, — easy to miss
 — a binder exporting a `privateRecordsDirectory` equivalent that applies the
 symlink/alias/permission/ownership checks, because the entry script resolves the
-records directory through it and never by hand-joining, and EIGHTH the sweep itself
+records directory through it and never by hand-joining, EIGHTH the sweep itself
 (`hooks/lib/review-evidence-sweep-v1.js`, plus the owner exports it consumes and the
 entry point's call to it) — a port that skips it re-mints the record and leaves every
-superseded lease wedging the store. A port that copies only
-the script gets a TypeError rendered as the wrong refusal. `zensu-codex`,
-`zensu-kiro` and `zensu-antigravity` were NOT included in this change.
+superseded lease wedging the store — and NINTH the third-fact channel: the
+`orphaned-incompatible-root` / `model-orphaned-incompatible-root` argv pair, both
+shell wrappers, and the THREE-way exit status those wrappers carry, without which a
+port gets a Stop hook telling a user whose worktree is gone that their chain state
+survived. That ninth entry sat in the prose ABOVE this enumeration for one release
+while the count still read EIGHT, which is the failure this file records elsewhere
+about its own rosters: a port works from the list, not from the paragraph, so an
+obligation named only in prose is an obligation that gets skipped. A port that
+copies only the script gets a TypeError rendered as the wrong refusal.
+`zensu-codex`, `zensu-kiro` and `zensu-antigravity` were NOT included in this change.
 
 **Two spellings of one root, and only Windows can tell them apart.** The sweep decides
 ownership with `record.plugin_root === executingPluginRoot`, a STRING compare. Leases carry
@@ -733,26 +765,20 @@ themselves deleted when the seam was taken. Getting that set wrong is its own ha
 opposite direction: a reader who believes an uncommitted constant is invisible will
 misread a pin that in fact grades it immediately. Commit first, then measure.
 
-**The Windows timeout for `test-versioned-plugin-upgrade.sh` is MEASURED, and the
-measurement is one sample — and that sample is now two generations stale.** The
-vanished-project-root work took the suite from 91 rows to 107, adding four armed
-sessions, a Stop invocation, a capability-gate drive and three tampered record
-copies, each of which spawns `node` or `bash`. No Windows wall clock was taken
-after any of it. Re-measure on the next green Windows run and replace the figure
-below together with its provenance sentence; do not budget against it meanwhile.
-
-**The Windows timeout for `test-versioned-plugin-upgrade.sh` is MEASURED, and the
-measurement is one sample.** `windows-shard-2` logged
-`PASSED versioned-plugin-upgrade (107613ms)` against the 900000 ms ceiling — roughly
-12%, so about seven eighths of the budget is unused. Taken at the head that carried
-Part C plus the AC-C11/AC-C11b/AC-C12 family.
-
-**That sample is now STALE, and saying so is the point of recording it.** The work
-that took the seam added two further `node --test` drivers to this suite plus roughly
-450 lines of rows, and no Windows wall clock was taken afterwards. The 107613 ms
-figure describes a head that no longer exists. Do not budget against it; re-measure
-on the next green Windows run and replace the number and its provenance sentence
-together.
+**The Windows timeout for `test-versioned-plugin-upgrade.sh` has ONE recorded
+sample, and that sample is now several generations stale.** `windows-shard-2`
+logged `PASSED versioned-plugin-upgrade (107613ms)` against the 900000 ms ceiling —
+roughly 12% — taken at the head that carried Part C plus the AC-C11/AC-C11b/AC-C12
+family. Since then the work that took the seam added two `node --test` drivers, and
+the vanished-project-root work added Part C2: further armed sessions, a Stop
+invocation, capability-gate drives and tampered record copies, each spawning `node`
+or `bash`. No Windows wall clock was taken after any of it, so the figure describes
+a head that no longer exists. Do not budget against it; re-measure on the next green
+Windows run and replace the number and this provenance sentence together. Deliberately
+no row count here: this file's own rule two paragraphs up is that a hand-maintained
+number is what a driven loop cannot catch, and the count written into an earlier
+version of this paragraph had already drifted from the suite's own reported total
+before it was read a second time.
 
 Read the original sample as ONE sample, not as a bound. The sibling
 `stop-enforcer-self-review-routing` note in this file records a 29% spread across

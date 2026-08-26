@@ -16,6 +16,7 @@
 // tests/structure/session-adopt-report-v1.test.js.
 
 const fs = require("node:fs");
+const safeDisplay = require("./zensu-safe-display-v1.js");
 const path = require("node:path");
 const core = require("./session-control-core-v1.js");
 // The superseded-lease sweep. It is NOT part of adoptContext any more: requiring the
@@ -83,32 +84,16 @@ const buildRequest = () => {
 // Every named threat still folds, because none of them is a letter, a number or a
 // combining mark: the bidi overrides are \p{Cf}, U+2028/2029 are \p{Zl}/\p{Zp}, and
 // U+007F is \p{Cc}.
-const SAFE_DISPLAY = /^[\p{L}\p{N}\p{M} _.,:;/\\@+~()=-]*$/u;
-const DOUBLE_SPACE = / {2}/;
-// The class admits a space AND a colon, and DOUBLE_SPACE only rejects two ADJACENT
-// spaces — so a value with single spaces and colons passed through raw and could
-// forge a further `label : value` pair after the line it sits on. That needs no local
-// privilege: context.project_root is minted from the SessionStart cwd and
-// validateContext rejects only NUL, CR and LF in it, so anyone who supplies the
-// directory name the user opens Claude Code in controls this substring. A real path
-// containing " : " now renders JSON-quoted, which is still readable.
-const PAIR_SEPARATOR = / : /;
-const NON_ASCII = /[\u007f-\uffff]/g;
-const SPACE_RUN = / {2,}/g;
-const safe = (value) => {
-  const text = String(value);
-  if (SAFE_DISPLAY.test(text) && !DOUBLE_SPACE.test(text) && !PAIR_SEPARATOR.test(text)) {
-    return text;
-  }
-  return JSON.stringify(text)
-    .replace(NON_ASCII, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"))
-    // The DOUBLE_SPACE invariant applies to BOTH branches. It used to guard only the
-    // fast path, so `/tmp/a"b  project : x` was rendered through JSON.stringify with
-    // the two-space run and the colon intact — the exact forgery the fast-path guard
-    // exists to stop, arriving through the branch meant to be the safer one. Single
-    // spaces survive, so an ordinary quoted path stays readable.
-    .replace(SPACE_RUN, (run) => "\\u0020".repeat(run.length));
-};
+// The rule itself now lives in the dependency-free leaf module beside this one.
+// It was defined HERE first, and the doctor renderer then reached for it with a
+// guarded lazy require plus its own narrower fallback copy — a display rule in two
+// implementations, owned by a feature command that drags four further modules in
+// behind it. `safe` is kept as this file's spelling because the report and its unit
+// suite are written against that name.
+const safe = safeDisplay.safeDisplayValue;
+// Re-exported unchanged so the unit suite keeps pinning the rule through the
+// consumer that renders it, rather than having to know where it now lives.
+const { SAFE_DISPLAY, DOUBLE_SPACE, NON_ASCII } = safeDisplay;
 
 // WHICH directory the sweep refused, empty when it refused nothing.
 //
@@ -285,11 +270,13 @@ function main() {
     // Edit and Write denied is not the rescue an unqualified "adoptable" implies,
     // and finding that out afterwards reads as a failed repair.
     if (verdict.orphanedProjectRoot) {
-      process.stdout.write("\nThe recorded project root no longer exists — a deleted or recycled worktree took\n");
-      process.stdout.write("the workflow state with it. Adoption still applies and is worth doing: it clears\n");
-      process.stdout.write("the lineage break, so Bash and the read-only diagnostics work again. It does NOT\n");
-      process.stdout.write("restore writes — Edit and Write stay denied while the anchor is missing. To write\n");
-      process.stdout.write("again, re-create exactly that directory or start a fresh Claude Code session.\n");
+      process.stdout.write("\nThe recorded project root no longer exists — a deleted or recycled worktree left\n");
+      process.stdout.write("the workflow state unreachable from this record. Adoption still applies and is\n");
+      process.stdout.write("worth doing: it clears the lineage break, so Bash and the read-only diagnostics\n");
+      process.stdout.write("work again. It does NOT restore writes — Edit and Write stay denied while the\n");
+      process.stdout.write("anchor is missing. To write again, re-create exactly that directory or start a\n");
+      process.stdout.write("fresh Claude Code session. If it was moved rather than deleted, its state still\n");
+      process.stdout.write("exists there.\n");
     }
     process.stdout.write("Nothing has been changed. Run the same command with --confirm to adopt.\n");
     return;
@@ -331,8 +318,24 @@ function main() {
     process.stdout.write("This session is bound again from the next tool call onward — no restart is needed.\n");
   }
   if (adopted.provenance === "no-workflow-document") {
-    process.stdout.write("\nNOTE: this session had no workflow document, so there was nothing to record the\n");
-    process.stdout.write("takeover in. That is a normal state, not a fault.\n");
+    // TWO sentences for one provenance value, because that value means two
+    // different things. The guard behind it is an existsSync UNDER
+    // adopted.projectRoot, and in the orphaned case that directory is the absent
+    // one — so `no-workflow-document` is returned unconditionally there, whether
+    // or not the session ever had a document. Printing "this session had no
+    // workflow document ... a normal state" is then a claim the code never
+    // established and is affirmatively wrong in the primary case: the document
+    // lived under that root. Held to the same evidentiary standard the Stop
+    // releases use — "not reachable", never "gone" — since one ENOENT cannot
+    // tell a delete from a move.
+    if (adopted.orphanedProjectRoot) {
+      process.stdout.write("\nNOTE: the recorded project root is gone, so any workflow document it held is not\n");
+      process.stdout.write("reachable from this record and the takeover could not be written into one. If that\n");
+      process.stdout.write("directory was moved rather than deleted, its state still exists there.\n");
+    } else {
+      process.stdout.write("\nNOTE: this session had no workflow document, so there was nothing to record the\n");
+      process.stdout.write("takeover in. That is a normal state, not a fault.\n");
+    }
   } else if (adopted.provenance !== "recorded") {
     process.stdout.write("\nWARNING: the adoption succeeded but its provenance entry could not be written.\n");
     process.stdout.write("The takeover is real and unrecorded in the workflow history; report this rather than repeating it.\n");

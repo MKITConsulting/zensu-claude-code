@@ -4022,6 +4022,13 @@ module.exports = {
   registerContext,
   readContext,
   readOrphanedProjectRootContext,
+  // Exported for the unit layer alone — no production caller requires it; both
+  // of its call sites are in this file. Without a direct handle its three rules
+  // (the UNSAFE_PATH_CHARACTERS class, path.isAbsolute, and the
+  // path.resolve(value) !== value normalization test) are reachable only through
+  // a full synthetic record fixture, and CLAUDE.md already names it a core-half
+  // port obligation, so a port has to be able to pin it cheaply.
+  requireAbsentDirectoryPath,
   ADOPTION_REFUSALS,
   ADOPTION_HISTORY_PHASE,
   ADOPTION_HISTORY_REASON_PREFIX,

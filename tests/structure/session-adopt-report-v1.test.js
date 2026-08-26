@@ -95,10 +95,17 @@ test('S5 a localized path prints as itself', () => {
 });
 
 test('S5 the safe class is expressed by Unicode property, not an ASCII range', () => {
-  const source = fs.readFileSync(REPORT_FILE, 'utf8');
-  assert.ok(/\\p\{L\}/.test(source), 'letters come from the Unicode property');
-  assert.ok(/\\p\{N\}/.test(source), 'numbers come from the Unicode property');
-  assert.ok(/\\p\{M\}/.test(source), 'combining marks are admitted, or accented forms break');
+  // Read off the EXPORTED regex rather than the file's text. The rule moved into
+  // hooks/lib/zensu-safe-display-v1.js — a dependency-free leaf both report
+  // renderers require — and a source grep of this file went red for a rule that had
+  // not changed at all. The pattern text is what the assertion was ever about, and
+  // RegExp#source carries it wherever the constant lives, so this pins the same
+  // three properties without pinning the address.
+  const pattern = report().SAFE_DISPLAY.source;
+  assert.ok(/\\p\{L\}/.test(pattern), 'letters come from the Unicode property');
+  assert.ok(/\\p\{N\}/.test(pattern), 'numbers come from the Unicode property');
+  assert.ok(/\\p\{M\}/.test(pattern), 'combining marks are admitted, or accented forms break');
+  assert.ok(report().SAFE_DISPLAY.unicode, 'the u flag is what makes those properties mean anything');
 });
 
 // ── Finding #17: the same-line label forgery ────────────────────────────────

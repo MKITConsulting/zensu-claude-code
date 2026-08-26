@@ -467,11 +467,17 @@ function main() {
     }
     const state = resolveIncompatibleRuntime(sessionPayload);
     if (state === null) {
-      // UNAVAILABLE, not a negative. `resolveIncompatibleRuntime` answers null
-      // from five sites — a plugin-root mismatch, an absent records directory, a
-      // plugin_data mismatch, an unidentifiable executing version, and its outer
-      // catch, which swallows every fail() including an unreadable record. None
-      // of them establishes that the recorded project root still exists, so none
+      // UNAVAILABLE, not a negative. The property that licenses this arm is
+      // STRUCTURAL, not a census: NO `return null` in
+      // `resolveIncompatibleRuntime` establishes that the recorded project root
+      // still exists — not the plugin-root mismatch, the absent records
+      // directory, the plugin_data mismatch, the `servesRecordedRuntime` arm
+      // (a plain orphan whose lineage is compatible), the unidentifiable
+      // executing version, nor the outer catch that swallows every fail()
+      // including an unreadable record. Stated as the property rather than as a
+      // count because a hand-maintained count is what goes stale: an earlier
+      // wording said "five sites" while listing five of the six, and the omitted
+      // one was the arm a future editor is most likely to reach for. So none
       // of them may claim the positive negative. Folding this into the arm below
       // is exactly what this channel exists to prevent, and it is the shape the
       // first attempt shipped: the Stop hook then reads 3, takes the deferral

@@ -565,13 +565,20 @@ gate_decision_from() {
   # drove an ORPHANED session through a gate, and grading its correct deny as
   # `hook-stderr` reports a working gate as broken.
   #
-  # The second form is the ONE message, not the whole `session-control-v1: `
-  # namespace. That prefix is `fail()`'s for every core failure, so admitting it
-  # wholesale would let an unrelated core fault pass on any row that expects
-  # `allow` — and an empty stdout maps to `allow` below, so such a fault would be
-  # graded as a passing gate. A stack trace still fails on its unprefixed lines.
+  # BOTH forms are ONE message each, never a prefix namespace. That reasoning was
+  # applied to the `session-control-v1: ` half first and left the binder half
+  # wholesale, which was the same hole one door down: `claude hook session
+  # binder: ` prefixes EVERY fail() in that file — `CLAUDE_PLUGIN_DATA does not
+  # exist`, `private Session Control record directory is unsafe`, `session id is
+  # unavailable or unsafe` — so a broken FIXTURE produced a diagnostic that
+  # cleared the allowlist, and with an empty stdout mapping to `allow` below it
+  # was graded as a passing gate on every row expecting `allow`. Only the two
+  # messages this suite's states legitimately produce are admitted: the lineage
+  # disagreement, and the core's own refusal of a vanished project root. A stack
+  # trace still fails on its unprefixed lines, and a fixture fault now fails on
+  # its own text.
   if [ -s "$err" ] \
-    && grep -qvE '^(claude hook session binder: |session-control-v1: context project root does not exist)' "$err"; then
+    && grep -qvE '^(claude hook session binder: context plugin root is not a compatible lineage of the executing plugin|session-control-v1: context project root does not exist)' "$err"; then
     printf 'hook-stderr\n'
     return
   fi
@@ -1402,8 +1409,14 @@ for reason_hook in pre-edit-tdd-reminder.sh pre-bash-source-write-gate.sh pre-wr
     *) reason_payload="$ADOPT_EDIT_PAYLOAD" ;;
   esac
   reason_text="$(gate_reason_from "$SYNTHETIC_BREAKING_ROOT" "$reason_hook" "$reason_payload")"
+  # The Edit/Write limit is part of the pattern, not an afterthought. Four of
+  # these five deniers emit the SHELL scope in zensu-session.sh, and its new
+  # conditional clause had no pin anywhere in tests/ — the only occurrence of that
+  # literal in the whole suite is AC-C20, which grades the JS capability gate.
+  # Both halves of the conditional are matched for the same reason AC-C20 matches
+  # both: the consequent alone survives deleting the guard.
   case "$reason_text" in
-    *"record was minted by 0.17.0 and 0.18.0 is executing"*"/zensu:adopt-session"*) ;;
+    *"record was minted by 0.17.0 and 0.18.0 is executing"*"/zensu:adopt-session"*"If the recorded project root is ALSO gone"*"Edit and Write stay denied afterwards until that exact directory is re-created"*) ;;
     *) LINEAGE_REASON_FAILURES="$LINEAGE_REASON_FAILURES $reason_hook" ;;
   esac
 done
@@ -1550,6 +1563,13 @@ if CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
     bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" >"$ADOPT_REPORT_OUT" 2>&1 \
     && grep -qF 'ADOPTABLE' "$ADOPT_REPORT_OUT" \
     && grep -qF 'Nothing has been changed' "$ADOPT_REPORT_OUT" \
+    `# The DISCRIMINATING negative for the orphan paragraph. This session's` \
+    `# project root is live, so (GONE) and the Edit/Write denial paragraph must` \
+    `# be ABSENT — a verdict.orphanedProjectRoot that was truthy for every record` \
+    `# would leave AC-C15a's positive green while this report told the user their` \
+    `# project root was gone. The --confirm half already carries its own negative.` \
+    && ! grep -qF '(GONE)' "$ADOPT_REPORT_OUT" \
+    && ! grep -qF 'It does NOT restore writes' "$ADOPT_REPORT_OUT" \
     && [ "$(node -p 'require(process.argv[1]).plugin_version' "$ADOPT_RECORD")" = 0.17.0 ]; then
   check "AC-C07 the bare entry point reports adoptable and changes nothing" PASS
 else
@@ -2550,6 +2570,12 @@ GONE_START="$(EVENT=SessionStart SESSION="$GONE_SESSION" CWD="$GONE_PROJECT" nod
 ')"
 GONE_KEY="$(node "$SYNTHETIC_CANDIDATE_ROOT/hooks/lib/session-control-core-v1.js" session-key "$GONE_SESSION")"
 GONE_RECORD="$SHARED_DATA/session-control/v1/records/$GONE_KEY.json"
+# Hoisted ABOVE the fixture branch on purpose. Two rows far below the closing `fi`
+# use it (AC-C21's two doctor drives), and under `set -u` an unset expansion there
+# ABORTS the file — so the else arm's deliberate FAIL rows would be followed by no
+# rows at all, not even the PASS/FAIL summary, and a fixture failure would read as
+# a truncated run rather than as the interpretable report that arm exists to give.
+GONE_DOCTOR_HOME="$TMP/gone-doctor-home"; mkdir -p "$GONE_DOCTOR_HOME"
 if printf '%s' "$GONE_START" \
     | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_CANDIDATE_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
       CLAUDE_PROJECT_DIR="$GONE_PROJECT" \
@@ -2676,7 +2702,6 @@ if printf '%s' "$GONE_START" \
   # The doctor row. Both facts, and never the `unbound` wording — which is the
   # line this whole state used to receive.
   GONE_DOCTOR_OUT="$TMP/adopt-gone-doctor.out"
-  GONE_DOCTOR_HOME="$TMP/gone-doctor-home"; mkdir -p "$GONE_DOCTOR_HOME"
   CLAUDE_CODE_SESSION_ID="$GONE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
     CLAUDE_PROJECT_DIR="$PROJECT" HOME="$GONE_DOCTOR_HOME" \
     bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$GONE_DOCTOR_OUT" 2>/dev/null
@@ -2701,7 +2726,7 @@ if printf '%s' "$GONE_START" \
       && grep -qF 'ADOPTABLE' "$GONE_REPORT_OUT" \
       && grep -qF '(GONE)' "$GONE_REPORT_OUT" \
       && grep -qF 'Nothing has been changed' "$GONE_REPORT_OUT" \
-      && grep -qF 'Edit and Write stay denied while the anchor is missing' "$GONE_REPORT_OUT" \
+      && grep -qF 'It does NOT restore writes' "$GONE_REPORT_OUT" \
       && [ "$(node -p 'require(process.argv[1]).plugin_version' "$GONE_RECORD")" = 0.17.0 ]; then
     check "AC-C15a the bare entry point discloses the vanished anchor and its limit, and changes nothing" PASS
   else
@@ -2994,17 +3019,26 @@ DOCTOR_UNKNOWN_ASSIGNS="$(grep -cE '^ *ZDOC_BINDING_ROOT_UNKNOWN=' "$DOCTOR_LADD
 # one line therefore left the clause permanently unreachable with both rows
 # green — the same shape as every defect the last three rounds caught, found in
 # this suite's own pin while re-checking it by hand.
-DOCTOR_UNKNOWN_SETS="$(grep -cE '\|\| *ZDOC_BINDING_ROOT_UNKNOWN=1' "$DOCTOR_LADDER" 2>/dev/null || true)"
+# Full-line comments are stripped before ANY of the three needles below run.
+# Counting or matching over the raw file left them satisfiable by prose: this very
+# block explains each rule in a comment that quotes it, so deleting the real code
+# and leaving the explanation kept every count at its expected value with the row
+# green — the same vacuity the two anchored counts above were hardened against one
+# round earlier, still open on the three that follow.
+code_only() { grep -vE '^[[:space:]]*#' "$1" 2>/dev/null || true; }
+DOCTOR_UNKNOWN_SETS="$(code_only "$DOCTOR_LADDER" | grep -cE '\|\| *ZDOC_BINDING_ROOT_UNKNOWN=1' || true)"
+STOP_NEUTRAL_GUARD="$(code_only "$STOP_LADDER" | grep -cF 'INCOMPATIBLE_ROOT_STATUS" -ne 3' || true)"
+DOCTOR_POSITIVE_GUARD="$(code_only "$DOCTOR_LADDER" | grep -cF 'ZDOC_ORPHAN_ROOT_STATUS" -eq 3' || true)"
 if [ "$STOP_ARM_GONE" = 1 ] && [ "$STOP_ARM_NEUTRAL" = 1 ] && [ "$STOP_ARM_DEFER" = 1 ] \
     && ! printf '%s' "$STOP_NEUTRAL_TEXT" | grep -qF 'The workflow document itself SURVIVES' \
     && ! printf '%s' "$STOP_NEUTRAL_TEXT" | grep -qF 'this is not a deferral' \
-    && grep -qF 'INCOMPATIBLE_ROOT_STATUS" -ne 3' "$STOP_LADDER" \
-    && grep -qF 'ZDOC_ORPHAN_ROOT_STATUS" -eq 3' "$DOCTOR_LADDER" \
+    && [ "$STOP_NEUTRAL_GUARD" = 1 ] \
+    && [ "$DOCTOR_POSITIVE_GUARD" = 1 ] \
     && [ "$DOCTOR_UNKNOWN_EXPORTS" = 1 ] && [ "$DOCTOR_UNKNOWN_ASSIGNS" = 3 ] \
     && [ "$DOCTOR_UNKNOWN_SETS" = 1 ]; then
   check "AC-C19 the Stop ladder has three emitted arms, the neutral one borrows neither sibling's claim, and the doctor exports the same distinction" PASS
 else
-  check "AC-C19 the Stop ladder has three emitted arms, the neutral one borrows neither sibling's claim, and the doctor exports the same distinction (gone=$STOP_ARM_GONE neutral=$STOP_ARM_NEUTRAL defer=$STOP_ARM_DEFER exports=$DOCTOR_UNKNOWN_EXPORTS assigns=$DOCTOR_UNKNOWN_ASSIGNS sets=$DOCTOR_UNKNOWN_SETS)" FAIL
+  check "AC-C19 the Stop ladder has three emitted arms, the neutral one borrows neither sibling's claim, and the doctor exports the same distinction (gone=$STOP_ARM_GONE neutral=$STOP_ARM_NEUTRAL defer=$STOP_ARM_DEFER neutral_guard=$STOP_NEUTRAL_GUARD positive_guard=$DOCTOR_POSITIVE_GUARD exports=$DOCTOR_UNKNOWN_EXPORTS assigns=$DOCTOR_UNKNOWN_ASSIGNS sets=$DOCTOR_UNKNOWN_SETS)" FAIL
 fi
 
 # AC-C21 — the plain lineage row's CONDITIONAL clause, driven both ways. The
@@ -3030,6 +3064,49 @@ if grep -qF 'could not be determined here' "$DOCTOR_CLAUSE_ON" \
 else
   check "AC-C21 the plain lineage row states the limit when the root is unknown and omits it when it is not" FAIL
   grep -F 'binding:' "$DOCTOR_CLAUSE_ON" 2>/dev/null | head -c 300
+fi
+
+# AC-C21b — the flag is read as the ONE value its producer writes, not by JS
+# truthiness. `ZDOC_BINDING_ROOT_UNKNOWN=0` is the discriminator: under a bare
+# `env.X ? ... : ...` the string "0" is truthy and the clause appears, which would
+# state a hedge for a session whose root was positively determined. The failure
+# direction is safe, so nothing behavioural catches it — only this row does.
+DOCTOR_CLAUSE_ZERO="$TMP/adopt-doctor-clause-zero.out"
+env ZDOC_BINDING=incompatible-runtime ZDOC_BINDING_ROOT_UNKNOWN=0 \
+  ZDOC_BINDING_RECORDED_VERSION=0.17.0 ZDOC_BINDING_EXECUTING_VERSION=0.18.0 \
+  CLAUDE_PLUGIN_DATA="$SHARED_DATA" CLAUDE_PROJECT_DIR="$PROJECT" HOME="$GONE_DOCTOR_HOME" \
+  bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$DOCTOR_CLAUSE_ZERO" 2>/dev/null
+if ! grep -qF 'could not be determined here' "$DOCTOR_CLAUSE_ZERO" \
+    && grep -qF 'declares an incompatible lineage' "$DOCTOR_CLAUSE_ZERO"; then
+  check "AC-C21b a quoted zero does not enable the unknown-root clause" PASS
+else
+  check "AC-C21b a quoted zero does not enable the unknown-root clause" FAIL
+  grep -F 'binding:' "$DOCTOR_CLAUSE_ZERO" 2>/dev/null | head -c 300
+fi
+
+# AC-C21c — safeDisplay is LOAD-BEARING, and nothing anywhere pinned it. The
+# value it folds is the recorded project root, which reaches the row through
+# readOrphanedProjectRootContext, whose only shape guard is
+# UNSAFE_PATH_CHARACTERS — a C0/DEL class that does NOT reject bidi overrides or
+# line separators. Those are exactly the characters that can HIDE the rest of a
+# rendered line, so replacing safeDisplay with the identity would leave every
+# other row green while the doctor printed a spoofable binding line. Driven
+# through the ZDOC_* channel AC-C21 already establishes, with U+202E and U+2028
+# in the injected path.
+DOCTOR_FOLD_OUT="$TMP/adopt-doctor-fold.out"
+DOCTOR_FOLD_PATH="$(printf '/tmp/gone‮gnop x')"
+env ZDOC_BINDING=orphaned-project-root+incompatible-runtime \
+  ZDOC_BINDING_PROJECT_ROOT="$DOCTOR_FOLD_PATH" \
+  ZDOC_BINDING_RECORDED_VERSION=0.17.0 ZDOC_BINDING_EXECUTING_VERSION=0.18.0 \
+  CLAUDE_PLUGIN_DATA="$SHARED_DATA" CLAUDE_PROJECT_DIR="$PROJECT" HOME="$GONE_DOCTOR_HOME" \
+  bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$DOCTOR_FOLD_OUT" 2>/dev/null
+if grep -qF 'BOTH the recorded project root' "$DOCTOR_FOLD_OUT" \
+    && ! LC_ALL=C grep -qF "$(printf '‮')" "$DOCTOR_FOLD_OUT" \
+    && ! LC_ALL=C grep -qF "$(printf ' ')" "$DOCTOR_FOLD_OUT"; then
+  check "AC-C21c the binding row folds display-hiding characters out of the recorded project root" PASS
+else
+  check "AC-C21c the binding row folds display-hiding characters out of the recorded project root" FAIL
+  grep -F 'binding:' "$DOCTOR_FOLD_OUT" 2>/dev/null | head -c 300
 fi
 
 # AC-C20 — the capability gate's Edit/Write clause. That gate is on the `.*`
@@ -3061,8 +3138,14 @@ CAPABILITY_REASON="$(OUT_FILE="$CAPABILITY_OUT" node -e '
   } catch (_e) { process.stdout.write(""); }
 ' 2>/dev/null)" || CAPABILITY_REASON=""
 CAPABILITY_DECISION="$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh "$CAPABILITY_EDIT_PAYLOAD")"
+# The ANTECEDENT is pinned alongside the consequent, and it has to be: this row
+# drives a session whose project root is LIVE, so deleting the guard clause would
+# turn a true conditional into a false unconditional claim in exactly the state
+# measured here, and a consequent-only grep would still pass. Pinning both halves
+# is what makes the row about the CONDITIONAL rather than about the sentence.
 if [ "$CAPABILITY_DECISION" = deny ] \
     && printf '%s' "$CAPABILITY_REASON" | grep -qF 'declares an incompatible lineage' \
+    && printf '%s' "$CAPABILITY_REASON" | grep -qF 'If the recorded project root is ALSO gone' \
     && printf '%s' "$CAPABILITY_REASON" | grep -qF 'Edit and Write stay denied afterwards until that exact directory is re-created'; then
   check "AC-C20 the capability gate DENIES and names the Edit/Write limit alongside the repair" PASS
 else

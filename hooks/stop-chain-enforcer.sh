@@ -187,13 +187,24 @@ if ! zensu_bind_hook_session "$INPUT"; then
       INCOMPATIBLE_DEAD_ROOT=""
     fi
     if [ "$INCOMPATIBLE_ROOT_STATUS" -eq 0 ] && [ -n "$INCOMPATIBLE_DEAD_ROOT" ]; then
-      # Nothing survives in this half, so it must not borrow the deferral
-      # wording. The path itself is NOT interpolated: it would reach a transcript
+      # Nothing is REACHABLE in this half, so it must not borrow the deferral
+      # wording — but it must not overclaim either. The evidence is one ENOENT,
+      # which a MOVED or renamed root and an unmounted volume produce identically,
+      # so this arm holds itself to exactly the standard the sibling orphan
+      # release 60 lines above sets ("not reachable from this record", never
+      # "gone"). An earlier spelling said the document "is GONE with it" and that
+      # "no later Stop will enforce this chain", then closed by admitting a move
+      # leaves the state intact — a self-contradiction, and both halves were
+      # unprovable from the one fact the probe actually established. The
+      # enforcement claim is now BOUNDED to while the directory is missing, which
+      # is also what makes it true: re-create the root and a later bind takes the
+      # `-eq 3` deferral arm below instead.
+      # The path itself is NOT interpolated: it would reach a transcript
       # unfolded, while the doctor folds the same value through the adoption
       # report's display allowlist. Naming /zensu:doctor instead is what the deny
       # scope in zensu-session.sh already does, and it keeps the fold in one
       # place rather than adding a second one here.
-      echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is readable, but BOTH the recorded project root no longer exists and the running installation declares an incompatible lineage (record minted by ${RECORDED_VERSION}, executing ${EXECUTING_VERSION}). The binding that resolves the project root is what failed, so no review-chain or Autopilot state could be read from here: no completion was proven, only an unprovable guard released. The workflow document lived under that directory and is GONE with it — this is not a deferral, and no later Stop will enforce this chain. Run /zensu:adopt-session, then /zensu:adopt-session --confirm, to clear the lineage break so Bash and the read-only diagnostics work again; Edit and Write stay denied afterwards until that exact directory is re-created. /zensu:doctor names the directory. If it was moved rather than deleted, its state still exists there." >&2
+      echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is readable, but BOTH the recorded project root no longer exists and the running installation declares an incompatible lineage (record minted by ${RECORDED_VERSION}, executing ${EXECUTING_VERSION}). The binding that resolves the project root is what failed, so no review-chain or Autopilot state could be read from here: no completion was proven, only an unprovable guard released. The workflow document lived under that directory and is not reachable from this record — this is not a deferral, and no later Stop can enforce this chain while that directory is missing. Run /zensu:adopt-session, then /zensu:adopt-session --confirm, to clear the lineage break so Bash and the read-only diagnostics work again; Edit and Write stay denied afterwards until that exact directory is re-created. /zensu:doctor names the directory. If it was moved rather than deleted, its state still exists there and re-creating exactly that directory restores it." >&2
       exit 0
     fi
     if [ "$INCOMPATIBLE_ROOT_STATUS" -ne 3 ]; then

@@ -499,7 +499,17 @@ function main() {
     // therefore stated the same way the shell scope states it, as a conditional
     // clause true in both halves. Offering the repair without it is the defect,
     // not the nicety; this branch shipped without it for one round.
-    const lineage = hookSession.resolveIncompatibleRuntime(payload);
+    // MAIN only, and that guard is not cosmetic. `/zensu:adopt-session --confirm`
+    // WRITES the immutable record, and `zensu_doctor_allowed` conjoins
+    // `zensu_hook_is_main_principal` — so a reviewer, an evidence worker or any
+    // neutral child that reached this catch would be handed a remedy every gate
+    // refuses it. Deny text is model-read content: pointing a read-only principal
+    // at a privileged write is the shape this repo treats as a defect, not a
+    // nicety. Everything else keeps the generic revalidation deny below, which is
+    // what those principals received before this branch existed.
+    const lineage = principals.classifyPreToolPayload(payload) === principals.PRINCIPALS.MAIN
+      ? hookSession.resolveIncompatibleRuntime(payload)
+      : null;
     if (lineage) {
       deny(`this session's Session Control record is readable, and the running Zensu installation declares an incompatible lineage — the record was minted by ${safeVersion(lineage.recorded)} and ${safeVersion(lineage.executing)} is executing. Run /zensu:adopt-session to check whether this installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — the adoption still clears the lineage break, but Edit and Write stay denied afterwards until that exact directory is re-created; /zensu:doctor names the path when that is the case.`);
       return;

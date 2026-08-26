@@ -191,10 +191,14 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
       ZDOC_BINDING=orphaned-project-root
     else
       # The SECOND narrow follow-up, asked only after the orphan question and
-      # never before it. A record can be both orphaned and lineage-incompatible;
-      # the vanished root is the heavier diagnosis and the one whose remedy is
-      # different, so it wins. Asking in the other order would report a repairable
-      # lineage state for a session whose workflow document is already gone.
+      # never before it — for ORDERING, not for coverage. The orphan probe answers
+      # only for a COMPATIBLE lineage: it re-applies servesRecordedRuntime, which
+      # an incompatible lineage fails, so it CANNOT produce the combined verdict
+      # and a record that is both orphaned and lineage-incompatible falls through
+      # to here. The third probe below is what recovers that case. An earlier
+      # wording said the vanished root "wins" over the lineage question, which
+      # reads as though probe 1 already covered the combination — a maintainer
+      # trusting it could drop probe 3 and silently lose the whole diagnosis.
       # The shape guard runs INSIDE this subshell, where the library that owns
       # ZENSU_SAFE_VERSION_RE is sourced — the doctor's own shell never sees that
       # variable, and under `set -u` referencing it out here aborts the branch and
@@ -233,10 +237,20 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
         # No shape guard here, matching the orphan branch above: the printed path
         # comes from readOrphanedProjectRootContext, which rejects control
         # characters and a non-absolute value before it returns.
+        # `|| exit 1` rather than `&&`, mirroring the versions probe above. Under
+        # `&&` a failed source leaves the SOURCE's status in the subshell's exit
+        # code, and the ladder below reads every value except 3 as unknown — so a
+        # source that happened to exit 3 would clear the unknown flag and let the
+        # plain lineage row DROP its hedge, implicitly asserting the recorded
+        # project root still exists on evidence nobody produced. That is the exact
+        # collapse the block below says it exists to prevent. The library's last
+        # statement is `export -f ... || true`, so today a successful source
+        # returns 0 and a missing file returns 1; this normalizes the CHANNEL, not
+        # a demonstrated 3.
         if ZDOC_BINDING_PROJECT_ROOT="$(
           # shellcheck disable=SC1090
-          source "$DIR/zensu-session.sh" >/dev/null 2>&1 \
-            && zensu_session_incompatible_orphaned_root_model
+          source "$DIR/zensu-session.sh" >/dev/null 2>&1 || exit 1
+          zensu_session_incompatible_orphaned_root_model
         )"; then
           ZDOC_ORPHAN_ROOT_STATUS=0
         else
