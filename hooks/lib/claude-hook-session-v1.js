@@ -22,8 +22,11 @@
 // `recorded<TAB>executing`, two fields and never three;
 // `orphaned-incompatible-root` and its `model-` twin answer the third fact of
 // that state separately — 0 and the dead path when the lineage is incompatible
-// AND the recorded root is gone, 1 otherwise — so the two-field format above can
-// stay exactly as its five parsers read it. None of the seven prints bindings: a
+// AND the recorded root is gone, **3** when it positively is not, and 1 for
+// every unavailable answer — so the two-field format above can stay exactly as
+// its five parsers read it. That three-way status is not decoration: a caller
+// that cannot tell a negative from an unavailable answer must guess, and the
+// wrong guess makes it assert the workflow document survived. None of the seven prints bindings: a
 // session in any of those states must stay unbound. The first three exist so the
 // gates can tell the two RELAXABLE bind failures apart from each other and from
 // all the rest; the last four name a state that is NOT relaxable — for a live
@@ -266,9 +269,6 @@ function resolveIncompatibleRuntime(payload, environment = process.env) {
   }
 }
 
-function incompatibleRuntimeSession(payload, environment = process.env) {
-  return resolveIncompatibleRuntime(payload, environment) !== null;
-}
 
 function validateSessionId(sessionId) {
   if (
@@ -409,9 +409,10 @@ function main() {
     return;
   }
   if (process.argv[2] === 'incompatible-runtime' || process.argv[2] === 'model-incompatible-runtime') {
-    // Exit 0 only when the record is intact and the SOLE disagreement is that
-    // the executing runtime declares an incompatible lineage, and on a match
-    // print `recorded<TAB>executing` so the caller can name both versions
+    // Exit 0 when the record READS and the disagreement is that the executing
+    // runtime declares an incompatible lineage — with or WITHOUT a vanished
+    // project root, which is the third fact the mode below answers — and on a
+    // match print `recorded<TAB>executing` so the caller can name both versions
     // instead of reporting an anonymous mismatch. The two spellings differ only
     // in where the session id comes from, exactly as the orphan pair does.
     // Never any bindings: this state stays unbound until it is adopted.
@@ -465,7 +466,14 @@ function main() {
     }
     const state = resolveIncompatibleRuntime(sessionPayload);
     if (state === null || state.orphanedProjectRoot === null) {
-      process.exitCode = 1;
+      // THREE, not 1, and the distinction is load-bearing for the Stop hook. A
+      // caller that cannot tell "the recorded root is still there" from "the
+      // probe could not answer" has to pick one of them, and picking the first
+      // makes it assert the workflow document survives on nothing but an
+      // inferred negative — the exact false claim this channel was added to
+      // remove. `fail()` and every other error path exit 1, so 3 is a positive
+      // answer and 1 is an unavailable one.
+      process.exitCode = 3;
       return;
     }
     process.stdout.write(`${state.orphanedProjectRoot}\n`);
@@ -504,7 +512,6 @@ if (require.main === module) {
 }
 
 module.exports = {
-  incompatibleRuntimeSession,
   privateRecordsDirectory,
   orphanedProjectRootSession,
   resolveFreshHookProject,

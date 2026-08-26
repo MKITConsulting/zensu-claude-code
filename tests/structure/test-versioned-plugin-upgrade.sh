@@ -1140,7 +1140,8 @@ CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
   bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$DOCTOR_OUT" 2>/dev/null
 if grep -qF 'declares an incompatible lineage' "$DOCTOR_OUT" \
     && grep -qF 'record minted by 0.17.0, executing 0.18.0' "$DOCTOR_OUT" \
-    && ! grep -qF 'no valid Session Control record' "$DOCTOR_OUT"; then
+    && ! grep -qF 'no valid Session Control record' "$DOCTOR_OUT" \
+    && ! grep -qF 'is gone and the running Zensu installation' "$DOCTOR_OUT"; then
   check "AC-C02 the doctor row names both versions and never claims 'no valid record'" PASS
 else
   check "AC-C02 the doctor row names both versions and never claims 'no valid record'" FAIL
@@ -1169,7 +1170,9 @@ printf '%s' "$ADOPT_STOP_PAYLOAD" \
 if [ ! -s "$STOP_OUT" ] \
     && grep -qF 'record minted by 0.17.0, executing 0.18.0' "$STOP_ERR" \
     && grep -qF '/zensu:adopt-session --confirm' "$STOP_ERR" \
-    && grep -qF 'no completion was proven' "$STOP_ERR"; then
+    && grep -qF 'no completion was proven' "$STOP_ERR" \
+    && grep -qF 'The workflow document itself SURVIVES' "$STOP_ERR" \
+    && ! grep -qF 'this is not a deferral' "$STOP_ERR"; then
   check "AC-C03 the Stop hook releases the lineage state instead of blocking" PASS
 else
   check "AC-C03 the Stop hook releases the lineage state instead of blocking" FAIL
@@ -2721,23 +2724,81 @@ if printf '%s' "$GONE_START" \
     head -c 200 "$GONE_ARGV_OUT" 2>/dev/null
   fi
 
-  # The wrapper's refusal arm, through the doctor. Every one of its preconditions
-  # collapses to an empty ZDOC_BINDING_PROJECT_ROOT, and the doctor must then fall
-  # back to the plain lineage row — never to `unbound`, which is the wording this
-  # whole feature exists to remove.
-  GONE_DEGRADED_OUT="$TMP/adopt-gone-degraded.out"
-  CLAUDE_CODE_SESSION_ID="$GONE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+  # The wrapper's refusal arm, driven for REAL. An earlier version of this row
+  # injected ZDOC_BINDING, which skips the whole `if [ -z "${ZDOC_BINDING:-}" ]`
+  # block in zensu-doctor.sh — the block that contains every wrapper call — so it
+  # graded the renderer's switch and could not fail. The honest shape is a session
+  # whose lineage IS incompatible while its project root still EXISTS: there the
+  # third-fact probe runs and must answer empty, so the doctor renders the plain
+  # lineage row. ADOPT_SESSION is that session before AC-C07 adopts it, and
+  # AC-C02 above already ran against it.
+  GONE_NEGATIVE_OUT="$TMP/adopt-gone-negative.out"
+  CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
     CLAUDE_PROJECT_DIR="$PROJECT" HOME="$GONE_DOCTOR_HOME" \
-    ZDOC_BINDING=incompatible-runtime ZDOC_BINDING_RECORDED_VERSION=0.17.0 \
-    ZDOC_BINDING_EXECUTING_VERSION=0.18.0 \
-    bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$GONE_DEGRADED_OUT" 2>/dev/null
-  if grep -qF 'declares an incompatible lineage' "$GONE_DEGRADED_OUT" \
-      && ! grep -qF 'no valid Session Control record' "$GONE_DEGRADED_OUT" \
-      && ! grep -qF 'is gone and the running Zensu installation' "$GONE_DEGRADED_OUT"; then
-    check "AC-C15c a wrapper that cannot answer degrades to the lineage row, never to unbound" PASS
+    bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$GONE_NEGATIVE_OUT" 2>/dev/null
+  if grep -qF 'declares an incompatible lineage' "$GONE_NEGATIVE_OUT" \
+      && ! grep -qF 'is gone and the running Zensu installation' "$GONE_NEGATIVE_OUT" \
+      && ! grep -qF 'no valid Session Control record' "$GONE_NEGATIVE_OUT"; then
+    check "AC-C15c the third-fact probe answers empty for a live project root, so the plain lineage row renders" PASS
   else
-    check "AC-C15c a wrapper that cannot answer degrades to the lineage row, never to unbound" FAIL
-    grep -F 'binding:' "$GONE_DEGRADED_OUT" 2>/dev/null
+    check "AC-C15c the third-fact probe answers empty for a live project root, so the plain lineage row renders" FAIL
+    grep -F 'binding:' "$GONE_NEGATIVE_OUT" 2>/dev/null
+  fi
+
+  # The Stop hook's dead-root release branch, end to end. It releases the Stop
+  # guard and shipped with no executed case; AC-C03 above cannot stand in for it,
+  # because every needle AC-C03 greps appears in BOTH messages. Runs BEFORE the
+  # adoption, which is the only window in which this state exists.
+  GONE_STOP_PAYLOAD="$(EVENT=Stop SESSION="$GONE_SESSION" CWD="$PROJECT" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: process.env.EVENT,
+      session_id: process.env.SESSION,
+      cwd: process.env.CWD,
+    }));
+  ')"
+  GONE_STOP_OUT="$TMP/adopt-gone-stop.out"
+  GONE_STOP_ERR="$TMP/adopt-gone-stop.err"
+  if printf '%s' "$GONE_STOP_PAYLOAD" \
+      | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+        CLAUDE_PROJECT_DIR="$PROJECT" \
+        bash "$SYNTHETIC_BREAKING_ROOT/hooks/stop-chain-enforcer.sh" \
+        >"$GONE_STOP_OUT" 2>"$GONE_STOP_ERR" \
+      && grep -qF 'this is not a deferral' "$GONE_STOP_ERR" \
+      && grep -qF 'BOTH the recorded project root' "$GONE_STOP_ERR" \
+      && ! grep -qF 'The workflow document itself SURVIVES' "$GONE_STOP_ERR" \
+      && [ ! -s "$GONE_STOP_OUT" ]; then
+    check "AC-C15d the Stop hook releases the combined state without claiming the workflow document survived" PASS
+  else
+    check "AC-C15d the Stop hook releases the combined state without claiming the workflow document survived" FAIL
+    head -c 400 "$GONE_STOP_ERR" 2>/dev/null
+  fi
+
+  # The PAYLOAD spelling of the third-fact mode, which the Stop branch above uses
+  # and which nothing else drives; only the model- twin was exercised.
+  GONE_PAYLOAD_OUT="$TMP/adopt-gone-payload-mode.out"
+  if printf '%s' "$GONE_STOP_PAYLOAD" \
+      | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+        node "$SYNTHETIC_BREAKING_ROOT/hooks/lib/claude-hook-session-v1.js" \
+        orphaned-incompatible-root >"$GONE_PAYLOAD_OUT" 2>/dev/null \
+      && [ -n "$GONE_NATIVE" ] && grep -qF "$GONE_NATIVE" "$GONE_PAYLOAD_OUT"; then
+    check "AC-C15e the payload spelling of the third-fact mode prints the dead root" PASS
+  else
+    check "AC-C15e the payload spelling of the third-fact mode prints the dead root" FAIL
+    head -c 200 "$GONE_PAYLOAD_OUT" 2>/dev/null
+  fi
+
+  # And its POSITIVE negative: a live project root must exit 3, not 1. A caller
+  # that cannot tell 3 from 1 has to infer a negative from a failure, which is how
+  # the Stop hook came to assert a surviving workflow document.
+  printf '%s' "$ADOPT_TOOL_PAYLOAD" \
+    | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      node "$SYNTHETIC_BREAKING_ROOT/hooks/lib/claude-hook-session-v1.js" \
+      orphaned-incompatible-root >/dev/null 2>&1
+  GONE_MODE_STATUS=$?
+  if [ "$GONE_MODE_STATUS" -eq 3 ]; then
+    check "AC-C15f a live project root is a positive negative (exit 3), not an unavailable answer" PASS
+  else
+    check "AC-C15f a live project root is a positive negative (exit 3), not an unavailable answer (got $GONE_MODE_STATUS)" FAIL
   fi
 
   # The repair, end to end through the shipped entry point. Three claims in one
@@ -2752,7 +2813,7 @@ if printf '%s' "$GONE_START" \
       >"$GONE_CONFIRM_OUT" 2>&1 \
       && grep -qF 'ADOPTED' "$GONE_CONFIRM_OUT" \
       && grep -qF '(GONE)' "$GONE_CONFIRM_OUT" \
-      && grep -qF 'Edit and' "$GONE_CONFIRM_OUT" \
+      && grep -qF 'Write stay denied' "$GONE_CONFIRM_OUT" \
       && [ ! -e "$GONE_PROJECT" ] \
       && [ "$(node -p 'require(process.argv[1]).plugin_version' "$GONE_RECORD")" = 0.18.0 ] \
       && [ "$(node -p 'require(process.argv[1]).project_root' "$GONE_RECORD")" = "$GONE_NATIVE" ]; then
@@ -2803,7 +2864,10 @@ else
   check "AC-C15 the doctor row names both facts and never claims 'no valid record' (fixture unavailable)" FAIL
   check "AC-C15a the bare entry point discloses the vanished anchor and its limit, and changes nothing (fixture unavailable)" FAIL
   check "AC-C15b the new argv mode refuses an extra argument (fixture unavailable)" FAIL
-  check "AC-C15c a wrapper that cannot answer degrades to the lineage row, never to unbound (fixture unavailable)" FAIL
+  check "AC-C15c the third-fact probe answers empty for a live project root, so the plain lineage row renders (fixture unavailable)" FAIL
+  check "AC-C15d the Stop hook releases the combined state without claiming the workflow document survived (fixture unavailable)" FAIL
+  check "AC-C15e the payload spelling of the third-fact mode prints the dead root (fixture unavailable)" FAIL
+  check "AC-C15f a live project root is a positive negative (exit 3), not an unavailable answer (fixture unavailable)" FAIL
   check "AC-C16 --confirm adopts, keeps the absent anchor, and never recreates the deleted root (fixture unavailable)" FAIL
   check "AC-C17 Edit stays denied after the adoption — the anchor is still gone (fixture unavailable)" FAIL
   check "AC-C18 after the adoption the doctor reports the plain orphaned state (fixture unavailable)" FAIL

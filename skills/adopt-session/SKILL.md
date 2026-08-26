@@ -9,7 +9,9 @@ description: >
   may take the record over in place, and with `--confirm` performs that adoption: it
   mints a new record for the same session under the executing runtime, sets the previous
   one aside unchanged, and records the takeover in the workflow history. The session is
-  bound again from the next tool call onward — no restart. Adoption is authorised by
+  bound again from the next tool call onward — no restart; when the recorded project root is
+  also gone the lineage break is cleared while Edit and Write stay denied until that
+  directory is re-created. Adoption is authorised by
   SCHEMA equality, not by the version numbers, so a release that really changed a
   persisted shape is refused. Use when /zensu:doctor reports an incompatible lineage,
   when tools started failing closed right after a plugin update, or via
@@ -212,8 +214,13 @@ precondition failure, `2` on a bad argument. A non-zero exit is not a broken
 command — read the message.
 
 **Step 4 of 4 — confirm the repair.** Re-run `/zensu:doctor` and report the binding
-row. The session is bound from the next tool call onward; do not tell the user to
-restart.
+row, and read it before you describe the outcome. When the recorded project root still
+exists the session is bound from the next tool call onward — do not tell the user to
+restart. When it is GONE the doctor renders the ❌ orphaned-project-root row instead, and
+that is the expected result rather than a failed repair: the lineage break is cleared, Bash
+and the read-only diagnostics work again, and `Edit` and `Write` stay denied until that exact
+directory is re-created. Say which of the two happened; never report the second as an
+unqualified success.
 
 ## Invocation Constraints
 
@@ -231,4 +238,4 @@ anything onto it.
 Render both command outputs verbatim; they are already formatted. Name both
 versions. Never summarize away a `provenance` other than `recorded`/
 `no-workflow-document`, a non-zero `leases set aside`, a non-zero
-`leases stuck`, or any `WARNING:` line about the lease store. After a successful adoption, do not tell the user to restart.
+`leases stuck`, or any `WARNING:` line about the lease store. After a successful adoption, do not tell the user to restart — and when the recorded project root was gone, say that Edit and Write stay denied until it is re-created rather than reporting an unqualified success.

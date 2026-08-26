@@ -652,7 +652,15 @@ version-shape rule are unchecked:
 
 **Port-relevant.** The core half is `adoptableRecord` / `adoptContext` /
 `executingPluginVersion` / `adoptionWorkflowStatePath` plus `ADOPTION_REFUSALS`, in
-the cross-host `session-control-core-v1.js`. `discardSupersededLeases` is NO LONGER
+the cross-host `session-control-core-v1.js` — and, since the vanished-root work, also
+condition 1's strict-then-orphan fallback, `requireAbsentDirectoryPath`, and
+`buildContext`'s SECOND parameter. That last one is the trap: a port that takes only the
+enumerated core half has `adoptContext` passing a second argument to a `buildContext` that
+ignores it, so `canonicalDirectory` runs on an absent path and adoption THROWS in exactly
+the state the feature was written for. The third-fact channel is a HOST obligation — the
+`orphaned-incompatible-root` / `model-orphaned-incompatible-root` argv pair and both shell
+wrappers — and a port that skips it gets a Stop hook telling a user whose worktree is gone
+that their chain state survived. `discardSupersededLeases` is NO LONGER
 among them — it moved to `hooks/lib/review-evidence-sweep-v1.js` and is the EIGHTH
 host obligation enumerated below. Note that
 `adoptableRecord`'s `options.projectRoot` is now INERT — accepted and never read —
@@ -985,17 +993,27 @@ properties are easy to get wrong and cost the whole feature:
 
 Shell wrappers live in `hooks/lib/zensu-session.sh` (`zensu_session_unregistered`,
 `zensu_session_orphaned_project_root`, `..._model`, plus
-`zensu_session_incompatible_runtime` / `..._model`). The orphaned wrapper **prints the
-dead path on stdout** and the incompatible-runtime pair prints `recorded<TAB>executing`;
+`zensu_session_incompatible_runtime` / `..._model` and
+`zensu_session_incompatible_orphaned_root` / `..._model`). The orphaned wrapper **prints the
+dead path on stdout**, the incompatible-runtime pair prints `recorded<TAB>executing`, and the
+orphaned-root pair prints **the dead path** too;
 inside a PreToolUse gate stdout is the JSON decision channel, so a caller wanting the
 predicate alone must discard it explicitly, and a caller wanting the value must capture
-it into a variable before emitting anything.
+it into a variable before emitting anything. The orphaned-root pair additionally answers on
+THREE statuses — 0 with a path, **3** for a positive negative, 1 for an unavailable answer —
+because a caller that cannot tell the last two apart has to guess, and guessing wrong makes it
+assert a workflow document that is gone.
 
 **The third predicate is a DIAGNOSIS, never a third relaxation.** `zensu_session_incompatible_runtime`
 belongs to this roster only because every gate that consults the two above must decide what
-to do about it too — and the answer is the same everywhere: keep denying. A workflow document
-is still reachable in that state, so relaxing would waive a live guarantee rather than a dead
-one. What it changes is the MESSAGE: `zensu_emit_hook_session_deny` gained a fourth scope,
+to do about it too — and the answer is the same everywhere: keep denying. It matches TWO
+states, and they are unrelaxed for DIFFERENT reasons: with the recorded project root still
+present a workflow document is reachable, so relaxing would waive a live guarantee rather
+than a dead one; with that root gone the document died with it, and what stands in for the
+guarantee is that the state has a real in-place repair — adoption, a user action leaving
+provenance — rather than a silent waiver. A consumer that says anything about the workflow
+document must ask `zensu_session_incompatible_orphaned_root` and branch; the Stop hook does,
+and it is the only one that needs to. What the predicate changes is the MESSAGE: `zensu_emit_hook_session_deny` gained a fourth scope,
 `incompatible-runtime`, taking the two versions as positional arguments. FIVE gates can deny
 in that state: the four shell gates emit that scope, and `pre-reviewer-capability-gate.sh` —
 the `.*` matcher, where `isRecognizedInvocation` is false for every non-Bash tool — spells the
@@ -1022,7 +1040,9 @@ bypass entry would live in is the one that became unreachable — so a detection
 sidecar beside the immutable record, surfaced by `/zensu:doctor`) is still missing.
 
 **Port-relevant.** The core half (`validateContext`'s `allowMissingProjectRoot`,
-`readContextInternal`/`readOrphanedProjectRootContext`) lives in the cross-host
+`readContextInternal`/`readOrphanedProjectRootContext`, and `requireAbsentDirectoryPath`,
+which is the shape-without-existence rule both that reader and `buildContext`'s waived
+branch share) lives in the cross-host
 `session-control-core-v1.js`; the host half (binder mode, shell predicate, gate
 re-decisions, doctor row) is per host. A port that takes only the core delta keeps the
 worktree-deletion wedge; a port that takes neither drifts from this core.

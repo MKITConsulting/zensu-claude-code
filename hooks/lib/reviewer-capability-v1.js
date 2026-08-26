@@ -480,10 +480,17 @@ function main() {
     // here while the Edit gate said the session could be repaired in place. Two
     // denies contradicting each other about the one bind failure that HAS an
     // in-place remedy is exactly what CLAUDE.md forbids, so this branch names the
-    // same cause and remedy the four emitting gates do.
+    // same cause and remedy the four gates emitting the shell scope do.
+    //
+    // The predicate matches TWO states — with and without a vanished recorded
+    // project root — and this gate is on the `.*` matcher, so an Edit lands here:
+    // precisely the tool that stays denied after the adoption. The limit is
+    // therefore stated the same way the shell scope states it, as a conditional
+    // clause true in both halves. Offering the repair without it is the defect,
+    // not the nicety; this branch shipped without it for one round.
     const lineage = hookSession.resolveIncompatibleRuntime(payload);
     if (lineage) {
-      deny(`this session's Session Control record is intact, but the running Zensu installation declares an incompatible lineage — the record was minted by ${lineage.recorded} and ${lineage.executing} is executing. Run /zensu:adopt-session to check whether this installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state.`);
+      deny(`this session's Session Control record is readable, and the running Zensu installation declares an incompatible lineage — the record was minted by ${lineage.recorded} and ${lineage.executing} is executing. Run /zensu:adopt-session to check whether this installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — the adoption still clears the lineage break, but Edit and Write stay denied afterwards until that exact directory is re-created; /zensu:doctor names the path when that is the case.`);
       return;
     }
     deny(`immutable context revalidation failed: ${error.message}`);

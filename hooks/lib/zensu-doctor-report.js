@@ -1453,12 +1453,20 @@ function truncatedList(rows) {
 // require theirs: a load fault must cost this row's polish, never the whole report.
 // The fallback is the plain value, which is what both rows printed before — a
 // degraded render, never a missing finding.
+// The last-resort fold, for the branch where the owner cannot be loaded. It is
+// deliberately NOT the identity: that module carries three module-scope requires
+// of its own, so a load fault is more reachable than a missing file, and
+// returning the raw value there drops exactly the hazard this function exists
+// for. Narrower than SAFE_DISPLAY on purpose — a degraded render should stay
+// readable — but it removes the characters that can HIDE the rest of the line.
+var DISPLAY_HIDERS = new RegExp('[\\u202a-\\u202e\\u2066-\\u2069\\u2028\\u2029]', 'g');
+
 function safeDisplay(value) {
   var text = String(value == null ? '' : value);
   try {
     return require('./session-adopt-report-v1.js').safe(text);
   } catch (e) {
-    return text;
+    return text.replace(DISPLAY_HIDERS, '?');
   }
 }
 
@@ -1486,7 +1494,7 @@ function bindingLine() {
     case 'incompatible-runtime':
       return line(BAD, 'binding: this session\'s Session Control record is intact, but the running Zensu installation declares an incompatible lineage'
         + (env.ZDOC_BINDING_RECORDED_VERSION && env.ZDOC_BINDING_EXECUTING_VERSION
-          ? ' (record minted by ' + env.ZDOC_BINDING_RECORDED_VERSION + ', executing ' + env.ZDOC_BINDING_EXECUTING_VERSION + ')'
+          ? ' (record minted by ' + safeDisplay(env.ZDOC_BINDING_RECORDED_VERSION) + ', executing ' + safeDisplay(env.ZDOC_BINDING_EXECUTING_VERSION) + ')'
           : '')
         + ' — while the plugin is at major 0 the minor is the breaking axis, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether this session can be adopted in place, then /zensu:adopt-session --confirm');
     // BOTH disagreements at once, and the row exists because each of the two
@@ -1503,7 +1511,7 @@ function bindingLine() {
         + (env.ZDOC_BINDING_PROJECT_ROOT ? ' (' + safeDisplay(env.ZDOC_BINDING_PROJECT_ROOT) + ')' : '')
         + ' is gone and the running Zensu installation declares an incompatible lineage'
         + (env.ZDOC_BINDING_RECORDED_VERSION && env.ZDOC_BINDING_EXECUTING_VERSION
-          ? ' (record minted by ' + env.ZDOC_BINDING_RECORDED_VERSION + ', executing ' + env.ZDOC_BINDING_EXECUTING_VERSION + ')'
+          ? ' (record minted by ' + safeDisplay(env.ZDOC_BINDING_RECORDED_VERSION) + ', executing ' + safeDisplay(env.ZDOC_BINDING_EXECUTING_VERSION) + ')'
           : '')
         // OFFERED, never promised — the same hedge the row above carries and for
         // the same reason: this state is reachable on a DOWNGRADE, which adoption

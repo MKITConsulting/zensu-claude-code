@@ -99,6 +99,39 @@ function canonicalDirectory(input, label) {
   return canonical;
 }
 
+// Control characters and DEL. canonicalDirectory rejects a SUBSET of these
+// (`[\0\r\n]`) on the strict path; the two callers below need the wider class,
+// because their value never passes through realpath and reaches a terminal and
+// the model's context as-is.
+const UNSAFE_PATH_CHARACTERS = new RegExp('[\\u0000-\\u001f\\u007f]');
+
+// The shape half of canonicalDirectory's job, for the two callers that must NOT
+// require the directory to exist: the orphan reader below returns a path whose
+// whole point is that it is gone, and buildContext re-mints a record around that
+// same value during adoption.
+//
+// It is NOT a strict subset of canonicalDirectory, and saying so would mislead:
+// it rejects a WIDER control-character class, and it adds an absoluteness and a
+// normalization check that the canonicalizing path gets for free from realpath.
+// Those two are what keep the waived branch from admitting a spelling no
+// canonical comparison will ever match — `/a/b/../c` passes `isAbsolute` alone.
+// Kept as one function rather than inline copies because a shape check guarding
+// a value printed into a terminal is exactly the rule that rots when written
+// twice.
+function requireAbsentDirectoryPath(value, label) {
+  requireText(value, label);
+  if (UNSAFE_PATH_CHARACTERS.test(value)) {
+    fail(`${label} is unsafe`);
+  }
+  if (!path.isAbsolute(value)) {
+    fail(`${label} must be absolute`);
+  }
+  if (path.resolve(value) !== value) {
+    fail(`${label} must be normalized`);
+  }
+  return value;
+}
+
 function isInside(base, candidate) {
   const relative = path.relative(base, candidate);
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
@@ -1350,29 +1383,6 @@ function readContext(options) {
 // not a vanished worktree, and a second disagreement is never relaxed alongside
 // the first. Throws on every one of them; returns the context only for the
 // exact state described above.
-// Control characters and DEL. canonicalDirectory rejects a subset of these on
-// the strict path; the orphan reader skips that function for its EXISTENCE
-// check and must not lose its shape check with it.
-const UNSAFE_PATH_CHARACTERS = new RegExp('[\\u0000-\\u001f\\u007f]');
-
-// Everything canonicalDirectory checks EXCEPT that the directory exists, in one
-// place. Two callers need exactly that split and they must not drift: the orphan
-// reader below returns a path whose whole point is that it is gone, and
-// buildContext re-mints a record around that same value during adoption. Kept as
-// one function rather than two inline copies because a shape check that guards a
-// value printed into a terminal and into the model's context is precisely the
-// kind of rule that rots when it is written twice.
-function requireAbsentDirectoryPath(value, label) {
-  requireText(value, label);
-  if (UNSAFE_PATH_CHARACTERS.test(value)) {
-    fail(`${label} is unsafe`);
-  }
-  if (!path.isAbsolute(value)) {
-    fail(`${label} must be absolute`);
-  }
-  return value;
-}
-
 function readOrphanedProjectRootContext(options) {
   const context = readContextInternal({ ...options, allowMissingProjectRoot: true });
   // Waiving canonicalDirectory waives its EXISTENCE check, which is the point —
