@@ -11,7 +11,13 @@
 #
 # Every ZDOC_* is set with `:=` so a caller (the structure test, or /zensu:doctor
 # after observing loaded MCP tools) can inject a fixed toolchain verdict; real
-# probing only fills the gaps left unset.
+# probing only fills the gaps left unset. That claim scopes to the EXPORTED inputs
+# the renderer reads, not to derived locals such as ZDOC_ROOT or ZDOC_SESSION_PAIR.
+# Two of the exported ones are exceptions, and they are exceptions
+# on purpose: ZDOC_SESSION_KEY and ZDOC_SESSION_PROJECT_ROOT are cleared
+# unconditionally rather than seeded, because their meaning depends on a verdict
+# reached further down and an inherited value would survive the branches that
+# never reach the bind. See the comment at their assignment.
 set -u
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -159,17 +165,62 @@ ZDOC_BINDING_PROJECT_ROOT="${ZDOC_BINDING_PROJECT_ROOT:-}"
 ZDOC_BINDING_RECORDED_VERSION="${ZDOC_BINDING_RECORDED_VERSION:-}"
 ZDOC_BINDING_EXECUTING_VERSION="${ZDOC_BINDING_EXECUTING_VERSION:-}"
 ZDOC_BINDING_VERSIONS=""
+# The session's own key and the RECORD's own project anchor, so the renderer can
+# tell a chain THIS session owns from one it does not, and can refuse the
+# comparison when the record and the caller disagree about which project it is.
+# The bind already computes both and the branch below discarded them, so nothing
+# new is resolved here.
+#
+# Deliberately NOT `:=`-seeded, unlike every other ZDOC_* in this file. These two
+# are the only ones whose meaning depends on a verdict reached further down, and
+# "empty for every verdict except bound" has to be TRUE rather than merely
+# stated: an inherited value would otherwise survive the unknown and unavailable
+# branches, which set a verdict and never reach the bind. The renderer enforces
+# the same invariant from its side (it requires ZDOC_BINDING=bound), because a
+# caller who supplies ZDOC_BINDING skips this whole block.
+ZDOC_SESSION_KEY=""
+ZDOC_SESSION_PROJECT_ROOT=""
 if [ -z "${ZDOC_BINDING:-}" ]; then
   if [ -z "${CLAUDE_CODE_SESSION_ID:-}" ] || [ -z "${CLAUDE_PLUGIN_DATA:-}" ]; then
     ZDOC_BINDING=unknown
   elif [ -L "$DIR/zensu-session.sh" ] || [ ! -f "$DIR/zensu-session.sh" ]; then
     ZDOC_BINDING=unavailable
-  elif (
+  # The status of an assignment whose value is a command substitution IS that
+  # substitution status, so the branch is still decided exactly as the bare
+  # subshell decided it: a bind failure exits non-zero and the orphan /
+  # incompatible-runtime follow-ups below run unchanged. What is new is that the
+  # two values the bind already computed are reached out instead of discarded.
+  #
+  # The shape guard runs INSIDE the subshell that sourced the library, for the
+  # reason ZDOC_BINDING_VERSIONS gives: the value is rendered into the terminal
+  # and into the model context, so one failing the shape is DROPPED rather than
+  # printed. The bind succeeded either way, so the verdict stays bound while the
+  # pair stays empty. Losing them costs one row; printing a bad one is worse.
+  # Both travel on ONE line as `key<TAB>root` so a single substitution decides
+  # the branch; a partial pair is dropped whole for the same reason. The root is
+  # refused for ANY control byte, not just the separator: it is printed into the
+  # report and the doctor skill feeds that exact path to `rm`, which is the policy
+  # session-control-core-v1.js already applies to the same field for the same sink.
+  #
+  # Apostrophes may NOT appear in a comment inside the substitution below. macOS
+  # ships bash 3.2, whose parser mis-handles one there, and the file then fails
+  # to parse entirely rather than at that line. Ordinary comments are fine, which
+  # is why the shellcheck directive can stay.
+  elif ZDOC_SESSION_PAIR="$(
     # shellcheck disable=SC1090
-    source "$DIR/zensu-session.sh" >/dev/null 2>&1 \
-      && zensu_bind_model_session >/dev/null 2>&1
-  ); then
+    source "$DIR/zensu-session.sh" >/dev/null 2>&1 || exit 1
+    zensu_bind_model_session >/dev/null 2>&1 || exit 1
+    [[ "${ZENSU_SESSION_KEY:-}" =~ ^scv1_[a-f0-9]{64}$ ]] || exit 0
+    [ -n "${ZENSU_PROJECT_ROOT:-}" ] || exit 0
+    [ -d "${ZENSU_PROJECT_ROOT:-}" ] || exit 0
+    case "${ZENSU_PROJECT_ROOT:-}" in *[[:cntrl:]]*) exit 0 ;; esac
+    printf '%s\t%s' "${ZENSU_SESSION_KEY:-}" "${ZENSU_PROJECT_ROOT:-}"
+  )"; then
     ZDOC_BINDING=bound
+    if [ -n "$ZDOC_SESSION_PAIR" ]; then
+      ZDOC_SESSION_KEY="${ZDOC_SESSION_PAIR%%$'\t'*}"
+      ZDOC_SESSION_PROJECT_ROOT="${ZDOC_SESSION_PAIR#*$'\t'}"
+    fi
   else
     # An unbound session is not one state. Ask the one narrow follow-up question
     # that has its own remedy: is there a valid record whose recorded project
@@ -224,7 +275,8 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
 fi
 
 export ZDOC_ZENSU ZDOC_NODE ZDOC_PLAYWRIGHT ZDOC_BINDING ZDOC_BINDING_PROJECT_ROOT \
-  ZDOC_BINDING_RECORDED_VERSION ZDOC_BINDING_EXECUTING_VERSION
+  ZDOC_BINDING_RECORDED_VERSION ZDOC_BINDING_EXECUTING_VERSION \
+  ZDOC_SESSION_KEY ZDOC_SESSION_PROJECT_ROOT
 
 if ! command -v node >/dev/null 2>&1; then
   printf 'Zensu doctor — read-only setup diagnostics\n\n  %s  node: not found on PATH — cannot run the JSON/config/state checks\n' '⚠️'

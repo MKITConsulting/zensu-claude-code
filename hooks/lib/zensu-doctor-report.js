@@ -15,8 +15,14 @@
 // Inputs (all overridable so the structure test can point at a sandbox):
 //   ZENSU_DOCTOR_PLUGIN_DIR  plugin root holding .claude-plugin/ + hooks/
 //   ZENSU_CONFIG             full-override config file (else HOME + project)
-//   HOME, CLAUDE_PROJECT_DIR standard config-resolution roots; session state
-//                            is always CLAUDE_PROJECT_DIR/.zensu/state. HOME is
+//   HOME, CLAUDE_PROJECT_DIR config-resolution roots. Session state is NOT among
+//                            them: that block anchors on ZDOC_SESSION_PROJECT_ROOT
+//                            under a bound verdict and falls back to
+//                            CLAUDE_PROJECT_DIR only without one — see
+//                            stateProjectRoot. The Config block and ZDOC_TTL_HOURS
+//                            stay harness-anchored, so a session whose two roots
+//                            differ reads its config overlay and its TTL from one
+//                            and its workflow documents from the other. HOME is
 //                            also the ONLY root the reviewer-spawn permission
 //                            check reads (HOME/.claude/settings.json) — see
 //                            permissionExposureRows below for why no second
@@ -25,6 +31,32 @@
 //   ZDOC_FORGE_PROVIDER/CLI/STATE/EDITION forge detection from the VCS driver
 //   ZDOC_TTL_HOURS           pending-review TTL from the canonical getter
 //   ZDOC_NOW_MS              clock override for deterministic tests
+//   ZDOC_BINDING             the wrapper's binding verdict (bound / unbound /
+//                            orphaned-project-root / incompatible-runtime /
+//                            unavailable / unknown). Read by bindingLine for its
+//                            own row AND by currentSessionKey, which refuses a
+//                            session key that arrives under any other verdict.
+//   ZDOC_SESSION_KEY         this session's own Session Control key, non-empty
+//                            only when the wrapper's binding verdict is bound.
+//                            The ONLY thing that tells a chain this session owns
+//                            from one it does not; empty, malformed, or present
+//                            under a non-bound ZDOC_BINDING means chainRows
+//                            declines that row rather than reading every chain
+//                            as foreign.
+//   ZDOC_SESSION_PROJECT_ROOT the RECORD's own project anchor, from the same
+//                            bind as ZDOC_SESSION_KEY, and the root the WHOLE
+//                            Session state block reads when it is present under a
+//                            bound verdict — every writer anchors there, so the
+//                            harness value is the fallback and not the authority.
+//
+//   PORT NOTE — the foreign-chain row is FOUR halves and a port that takes three
+//   gets a row that silently never renders: the wrapper must export both values
+//   above out of its own bind AND clear both unconditionally rather than
+//   :=-seeding them like every other ZDOC_*, the renderer must anchor the state block on the
+//   recorded root and keep the predicate, the chain-shape OWNER must export
+//   INERT_SHAPES, and the operator docs must carry the diagnose-only limit. Its premise is host-coupled: it presumes a
+//   host that can mint a NEW session id mid-conversation while carrying the
+//   history over. A host that cannot do that has nothing to diagnose here.
 
 'use strict';
 var fs = require('fs');
@@ -1226,7 +1258,117 @@ function ttlHours() {
   if (Number.isInteger(n) && n >= 0 && n <= TTL_HOURS_MAX) return n;
   return TTL_HOURS_FALLBACK;
 }
-function chainRows(entries) {
+// The shapes that carry no work forward. Taken from chain-recovery-v1.js, which
+// OWNS the vocabulary and mints these literals a few lines from where it lists
+// them. A hand-copy here was tried and was wrong in the one direction that
+// matters: it compared against the `NEXT_COMMAND` lookup table, so renaming the
+// literal `chainShape` RETURNS while leaving the table key in place kept the
+// copy agreeing while a genuinely closed foreign chain rendered as an open one.
+// A consumer cannot check the producer it does not own; asking the owner is the
+// only version of this that works.
+function inertShapes(chain) {
+  var shapes = chain && chain.INERT_SHAPES;
+  return Array.isArray(shapes) && shapes.length ? shapes : null;
+}
+
+// Whether the stamp can be read at all, independent of where it falls. Separate
+// from documentAgeMs because "in the future" and "unparseable" are one answer to
+// the windowed question and two different answers to the unwindowed one.
+function documentAgeReadable(entry) {
+  var stamped = entry.state && entry.state.updated_at;
+  return typeof stamped === 'string' && Number.isFinite(Date.parse(stamped));
+}
+
+// The document's own age. `.zensu/state/` is writable from inside a session, so
+// a bare `touch -t` would move a filesystem mtime out of the window without
+// producing a document `validateWorkflowState` accepts — `updated_at` is a field
+// that validator already requires to parse as a finite date, so it is the
+// cheaper thing to trust. It narrows the forgery channel rather than closing it:
+// `session_id_hash` is derivable from the file's own name, so a writer can still
+// mint an accepted document carrying any stamp it likes.
+//
+// No mtime fallback: `readWorkflowState` throws unless `updated_at` parses
+// finite, and a throw sends the file to `invalid` instead of into `states`, so
+// an entry reaching here always carries one. A fallback would be dead code
+// pretending to be a safety net.
+//
+// A stamp in the FUTURE is treated as out of window rather than absolute-valued.
+// This is the sibling `reviewerDenialRows` policy one screen down, and for its
+// reason: a negative age would sail under any `<= ttl` bound forever, so a
+// clock-skewed or planted document would render this row until someone deleted
+// it. Returning null rather than a number keeps "not in the window" and "could
+// not be measured" one answer, which is all the caller needs.
+function documentAgeMs(entry, nowMs) {
+  var stamped = entry.state && entry.state.updated_at;
+  var parsed = typeof stamped === 'string' ? Date.parse(stamped) : NaN;
+  if (!Number.isFinite(parsed) || parsed > nowMs) return null;
+  return nowMs - parsed;
+}
+
+// Shape-validated here as well as in the wrapper, because a malformed injected
+// value must never be TREATED as the current key: every chain would then read as
+// foreign and the row would accuse the session of stranding its own work.
+//
+// The BINDING verdict is required alongside it. The wrapper states that the key
+// is empty for every verdict but `bound`, and it now clears the variable
+// unconditionally so that holds — but the wrapper's whole resolution block is
+// skipped when a caller supplies `ZDOC_BINDING`, so the reader enforces the
+// invariant its producer only asserts. Without this, a report could print the ❌
+// "no valid Session Control record" row and, below it, a row keyed on a session
+// key it had just said does not exist.
+function currentSessionKey() {
+  var key = env.ZDOC_SESSION_KEY;
+  if (env.ZDOC_BINDING !== 'bound') return '';
+  return typeof key === 'string' && /^scv1_[a-f0-9]{64}$/.test(key) ? key : '';
+}
+
+// WHERE the workflow documents actually are. Every writer anchors on the RECORD:
+// `zensu-log.sh` re-exports `CLAUDE_PROJECT_DIR` from `zensu_resolve_project_dir`,
+// which resolves `ZENSU_PROJECT_ROOT` out of the immutable record, before any verb
+// body runs. Reading the raw harness value here instead made this whole block look
+// in a directory no writer uses whenever the two differ — and they differ in the
+// ordinary case, a session whose cwd is a worktree while the harness reports the
+// origin repo. That was not a rendering detail: `readWorkflowState` is rooted here
+// too, so the documents were never read at all.
+//
+// An earlier attempt compared the two and withheld the row when they disagreed.
+// That was worse: it withheld exactly the fork-in-a-worktree case the row exists
+// for, and it did so silently. There is one authority; the caller's value is the
+// fallback, and only because a session with no bound record has nothing better.
+// A path is printed as a deletion target only when a shell can be handed it
+// safely. Three conditions: no component of the chain is a symlink, the resolved
+// file is a plain file inside the scanned root, and every character is drawn from
+// the same conservative set the doctor's own invocation recognizer accepts. Any
+// failure returns '' and the caller withholds the path rather than the finding.
+var DELETABLE_PATH_RE = /^[A-Za-z0-9._\/@+:,=-]+$/;
+
+function deletableTarget(file, root) {
+  try {
+    var current = root;
+    var rest = path.relative(root, file);
+    if (rest === '' || rest.startsWith('..') || path.isAbsolute(rest)) return '';
+    var parts = rest.split(path.sep);
+    for (var i = 0; i < parts.length; i++) {
+      current = path.join(current, parts[i]);
+      var st = fs.lstatSync(current);
+      if (st.isSymbolicLink()) return '';
+      if (i < parts.length - 1 ? !st.isDirectory() : !(st.isFile() && st.nlink === 1)) return '';
+    }
+    return DELETABLE_PATH_RE.test(file) ? file : '';
+  } catch (e) {
+    return '';
+  }
+}
+
+function stateProjectRoot() {
+  var recorded = env.ZDOC_SESSION_PROJECT_ROOT;
+  if (env.ZDOC_BINDING === 'bound' && typeof recorded === 'string' && recorded !== '') {
+    return path.resolve(recorded);
+  }
+  return path.resolve(env.CLAUDE_PROJECT_DIR || '.');
+}
+
+function chainRows(entries, nowMs) {
   if (!entries.length) return;
   var chain;
   try {
@@ -1240,6 +1382,10 @@ function chainRows(entries) {
   var recoverable = [];
   var blocked = [];
   var deadEnds = [];
+  var foreignOpen = [];
+  var ownKey = currentSessionKey();
+  var ttl = ttlHours();
+  var inert = inertShapes(chain);
   entries.forEach(function (entry) {
     var report;
     try {
@@ -1255,9 +1401,33 @@ function chainRows(entries) {
       deadEnds.push(entry.session + ' → ' + report.nextCommand);
       return;
     }
-    if (!report.wedged) return;
-    if (report.recoverable) recoverable.push(entry.session + ' → ' + report.nextCommand);
-    else blocked.push(entry.session + ' → ' + report.nextCommand);
+    if (report.wedged) {
+      if (report.recoverable) recoverable.push(entry.session + ' → ' + report.nextCommand);
+      else blocked.push(entry.session + ' → ' + report.nextCommand);
+      return;
+    }
+    // Reached only by a chain no row above already named. A wedged or dead-end
+    // chain returns first on purpose: those rows carry their own remedy, and a
+    // second row telling the reader to re-arm the same truncated key would
+    // contradict it.
+    if (
+      ownKey === ''
+      || inert === null
+      || entry.key === ownKey
+      || inert.indexOf(report.shape) !== -1
+    ) return;
+    // `0` disables the bound rather than shrinking it to nothing, which is what
+    // this key means everywhere else it is read (docs/configuration.md, and
+    // reviewerDenialRows below). An age this cannot establish is excluded in
+    // BOTH cases: the row states a window, and one that was never measured must
+    // not be claimed.
+    var ageMs = documentAgeMs(entry, nowMs);
+    if (ttl > 0 && (ageMs === null || ageMs / 3600000 > ttl)) return;
+    // With the bound disabled the row advertises no window, so the only thing that
+    // still excludes an entry is a stamp that cannot be read at all — a FUTURE one
+    // is out of a window nobody claimed.
+    if (ttl === 0 && !documentAgeReadable(entry)) return;
+    foreignOpen.push(entry.session + ': ' + report.shape);
   });
   line(
     unclassifiable ? WARN : OK,
@@ -1273,6 +1443,26 @@ function chainRows(entries) {
   }
   if (deadEnds.length) {
     line(WARN, 'chain: ' + deadEnds.length + ' chain(s) at a dead end — a fresh generation is the only exit, from the session that owns each chain: ' + truncatedList(deadEnds));
+  }
+  if (inert === null && ownKey !== '') {
+    line(WARN, 'chain: chain-recovery-v1.js exports no usable inert-shape set — an open chain'
+      + ' not owned by this session cannot be told from a closed one, so that row did not run.'
+      + ' That is a missing check, not an all-clear.');
+  }
+  if (foreignOpen.length) {
+    // States the OBSERVATION, never the cause. This cannot tell a chain whose
+    // session forked away from one a live sibling session is still driving, and
+    // a live sibling is normal in this repository's own worktree workflow — so
+    // asserting a fork would make a false claim about that session and tell the
+    // reader to arm a competing chain. The fork is named as the usual cause and
+    // the remedy is conditional on the reader knowing the session is gone.
+    line(WARN, 'chain: ' + foreignOpen.length + ' open chain(s) not owned by this session'
+      + (ttl > 0 ? ', touched within ' + ttl + 'h' : '')
+      + ' — this session cannot advance them, and they cannot be moved to this key.'
+      + ' If those sessions are still running, nothing is wrong here. If one is gone —'
+      + ' the usual cause is a FORK, where the host mints a new session id mid-conversation'
+      + ' and the work armed under the old key becomes unreachable — re-arm with /zensu:tdd: '
+      + truncatedList(foreignOpen));
   }
 }
 
@@ -1478,13 +1668,21 @@ function bindingLine() {
 function stateBlock(nowMs) {
   block('Session state');
   bindingLine();
-  var projectRoot = path.resolve(env.CLAUDE_PROJECT_DIR || '.');
+  var projectRoot = stateProjectRoot();
   var dir = path.join(projectRoot, '.zensu', 'state');
   var entries;
   try {
     entries = fs.readdirSync(dir);
   } catch (e) {
-    line(OK, 'state: ' + dir + ' does not exist yet — nothing to clean');
+    if (e && e.code === 'ENOENT') {
+      line(OK, 'state: ' + dir + ' does not exist yet — nothing to clean');
+    } else {
+      // Every other errno is a check that did NOT run. Rendering it green hid the
+      // whole Session state block behind an all-clear, which is the one verdict
+      // this file refuses to fake anywhere else.
+      line(WARN, 'state: ' + dir + ' could not be read (' + ((e && e.code) || 'unknown')
+        + ') — the session-state checks did not run. That is a missing check, not an all-clear.');
+    }
     return;
   }
   try {
@@ -1512,6 +1710,7 @@ function stateBlock(nowMs) {
         try {
           states.push({
             session: match[1].slice(0, 13) + '…',
+            key: match[1],
             state: core.readWorkflowState({ projectRoot: projectRoot, sessionId: match[1] }),
           });
         } catch (e) {
@@ -1526,7 +1725,7 @@ function stateBlock(nowMs) {
     if (invalid.length) {
       line(BAD, 'state: ' + invalid.length + ' invalid CAS workflow document(s) — hooks fail closed; inspect ' + invalid.join(', '));
     }
-    chainRows(states);
+    chainRows(states, nowMs);
   }
   reviewerDenialRows(entries, dir, nowMs);
   var pr = path.join(dir, 'pending-review.json');
@@ -1534,8 +1733,32 @@ function stateBlock(nowMs) {
     var st = fs.statSync(pr);
     var ageH = (nowMs - st.mtimeMs) / 3600000;
     var ttl = ttlHours();
-    if (ageH > ttl) {
-      line(WARN, 'state: pending-review.json is ' + Math.floor(ageH) + 'h old (TTL ' + ttl + 'h) — expired, safe to clear');
+    if (ttl === 0) {
+      // `0` DISABLES the guard — docs/configuration.md, `_tdd_pending_file_stale`,
+      // `reviewerDenialRows` and the foreign-chain row all read it that way. This
+      // row did not, and `ageH > 0` is true for every marker older than an instant,
+      // so it called each one expired. Harmless while the row carried no path;
+      // once it names a deletion target the skill acts on, it would have offered a
+      // LIVE deferred-review claim for removal.
+      line(OK, 'state: pending-review.json present; its TTL guard is disabled (pendingReviewTtlHours: 0)');
+    } else if (ageH > ttl) {
+      // The PATH, not just the verdict. The Session state block is anchored on the
+      // record's project root, while the skill's confirmed cleanup used to derive
+      // its target from CLAUDE_PROJECT_DIR — so where the two differ, the report
+      // measured one file and the user was asked to delete another it had never
+      // examined. A deletion offer has to name the thing it measured.
+      //
+      // The path is emitted ONLY when it is safe to hand to a shell. `statSync`
+      // follows symlinks, so a symlinked `.zensu` or `state` would point the
+      // confirmed `rm` outside this project; and the skill interpolates the value
+      // into a double-quoted argument, where `$`, a backtick, `"` and `\` are all
+      // active. Either check failing drops the path and keeps the verdict — the
+      // skill contracts that a row without a path offers no cleanup, so
+      // withholding degrades safely while printing would not.
+      var target = deletableTarget(pr, projectRoot);
+      line(WARN, 'state: pending-review.json is ' + Math.floor(ageH) + 'h old (TTL ' + ttl + 'h) — expired'
+        + (target ? ', safe to clear: ' + target
+          : '. The path is withheld: it is not a plain file reachable without a symlinked component, or it contains a character unsafe to hand to a shell. Clear it by hand.'));
     } else {
       line(OK, 'state: pending-review.json present and within its ' + ttl + 'h TTL');
     }

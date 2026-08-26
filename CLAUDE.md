@@ -1165,6 +1165,137 @@ Consequences of forgetting a new operation:
 
 Invariant: `ZENSU_MUTATION_TOOL_NAMES` must stay a strict superset of every skill's `--workflow-begin --tools` declaration AND of every mutation the CLI map emits. `tests/structure/test-bash-zensu-gate.sh` + `test-skill-workflow-markers.sh` pin the read/mutation classification and the CLI-form detection.
 
+## Foreign-Chain Row (`zensu-doctor.sh` + `zensu-doctor-report.js`)
+
+A session FORK is silent: the host mints a new session id mid-conversation, carries the
+whole history over and re-fires `SessionStart`, so the workflow document armed under the
+old key becomes unreachable and every later `zensu-log.sh` call answers `no-session`. The
+chain stops existing while the user still believes it is running. `/zensu:doctor`'s
+`chain: open chain(s) not owned by this session` row is the only thing that reports it.
+
+**FOUR halves, and a port that takes three ships a row that silently never fires.** The wrapper exports `ZDOC_SESSION_KEY` and
+`ZDOC_SESSION_PROJECT_ROOT` out of its own `zensu_bind_model_session` (one tab-separated
+substitution, so a single status decides the `bound` branch and a partial pair is dropped
+whole); the renderer owns the predicate and its single `bound`-plus-shape guard AND the
+record-anchored state directory; the chain-shape OWNER must export `INERT_SHAPES`, whose
+absence withholds the row; and the operator accounts carry the diagnose-only limit. The premise is
+HOST-COUPLED: a host that cannot mint a new session id mid-conversation has nothing to
+diagnose here.
+
+**The row states an OBSERVATION, never a cause, and that wording is the feature.** Nothing
+available to a read-only renderer distinguishes a forked-away session from a live sibling
+driving its own chain in the same project — and a live sibling is ORDINARY under this
+repository's own worktree rule. An earlier draft asserted the fork as fact and prescribed
+`/zensu:tdd`; that made a false claim about a running session and told the reader to arm a
+competing chain. Only the WORDING changed — the row is still `WARN`, `line()` counts WARN toward
+`warnCount`, and `main()` gates "all checks green" on it, so the green-summary consequence below
+is still live and is listed as a gap rather than as something the reword fixed.
+
+**The whole Session state block is anchored on the RECORD's project root, not on
+`CLAUDE_PROJECT_DIR`, and that is a fix to PRE-EXISTING rows as much as to this one.** Every
+writer anchors there: `zensu-log.sh` re-exports `CLAUDE_PROJECT_DIR` from
+`zensu_resolve_project_dir`, which resolves `ZENSU_PROJECT_ROOT` out of the immutable record,
+before any verb body runs. The renderer read the raw harness value, so whenever the two differed
+— the ordinary case for a session whose cwd is a worktree — `stateBlock` scanned a directory no
+writer uses and `readWorkflowState` never opened the documents at all. `stateProjectRoot` prefers
+the recorded root under a `bound` verdict and falls back to the caller's value only because a
+session with no record has nothing better. **An earlier attempt COMPARED the two and withheld the
+row when they disagreed; that was strictly worse** — it withheld exactly the fork-in-a-worktree
+case the row exists for, and silently. Do not reintroduce the comparison.
+
+**Two conditions withhold the row, and both fail CLOSED.** One withholds it SILENTLY:
+`currentSessionKey` requires `ZDOC_BINDING === 'bound'` beside the shape. The wrapper
+states "empty for every verdict except bound" and now clears both values unconditionally
+rather than `:=`-seeding them — the only two EXPORTED `ZDOC_*` that deviate from that convention,
+because their meaning depends on a verdict reached further down and the `unknown` /
+`unavailable` branches never reach the bind. The reader enforces it anyway, since a caller
+supplying `ZDOC_BINDING` skips the whole resolution block; without that, one report could
+print the ❌ no-record row and, below it, a row keyed on a session key it had just said does
+not exist.
+
+**Ordering is a contract.** The foreign-open push sits BELOW the wedged and dead-end early
+returns. Those rows carry their own remedy, and a second row naming the same truncated key
+with a contradictory instruction is worse than no row. `P1ms2` pins it with an `awk` line
+comparison, because no fixture in the suite builds a wedged chain.
+
+**Age comes from the document's `updated_at`, and there is NO mtime fallback** — `.zensu/state/`
+is session-writable and a bare `touch -t` would move a document out of the window without
+producing anything `validateWorkflowState` accepts. An `updated_at` that does not parse yields no age at all
+and excludes the entry — a fallback would be dead code pretending to be a safety net — and, WHILE THE BOUND IS ARMED, a
+stamp in the FUTURE is treated as outside the window rather than absolute-valued, so a skewed
+or planted one cannot hold the row open forever. At `0` no window is claimed, so only a stamp
+that cannot be read at all excludes an entry. `0`
+DISABLES the bound rather than shrinking it to nothing, matching `docs/configuration.md`
+and the sibling `reviewerDenialRows`; the row then drops its "touched within Nh" clause
+rather than advertising a 0h window.
+
+**Known gaps, accepted and named:**
+
+- **A same-project-root sibling permanently withholds the green summary.** The row is `WARN`, so
+  while another live session holds an open chain under the SAME project root and within the TTL,
+  `/zensu:doctor` cannot print "all checks green". A sibling in its own worktree has its own
+  `.zensu/state` and does not trigger it. `P1mg1` pins the row's contribution to the warning
+  count, which is the same property from the other side.
+- **The Windows wall clock for the enlarged `test-doctor.sh` block is UNMEASURED.** The suite is
+  absent from `tests/profiles/windows-ci.v1.json` and sits in the `excluded` list of
+  `windows-native-structure.v1.json`, so no PR shard runs it — but the weekly Windows Safety
+  structure shards do, and the foreign-chain block roughly doubled the suite's process count
+ .
+  A LOCAL run took 28 s on a loaded machine, but a loaded-local second is not an ubuntu-latest
+  second; that entry now reads 12 — the previous 6 s CI figure doubled — and is labelled an
+  estimate in the file's own note. Take
+  the figure from the next green weekly Windows run and replace both. Say "unmeasured", never
+  "cheap".
+- **"No full session key is printed" scopes to THIS row, not to the block.** The
+  invalid-CAS-document row prints whole `tdd-phase-scv1_<64 hex>.json` filenames, and
+  deliberately: a reader told to inspect a broken document needs its name. The foreign-chain
+  row truncates to 13 characters and is pinned that way; do not restate the requirement as a
+  tree-wide invariant.
+- **The `scv1_` shape is an untracked hand-copy family and this change added two members.**
+  `SESSION_KEY_RE` exists in `session-control-core-v1.js` and is not exported, so the JS copy in
+  the renderer and the bash-native one in the wrapper join the copies already in
+  `zensu-tdd-phase.sh`, `stop-chain-enforcer.sh`, `claude-hook-session-v1.js`,
+  `claude-session-control-v1.js` and `zensu-edit-landing.sh` (whose spelling is `[0-9a-f]`, not
+  `[a-f0-9]` — the family had already drifted). Exporting the owner's constant is the standing
+  fix; recorded here so the copies are acknowledged rather than invisible.
+- **A foreign chain that is WEDGED or at a DEAD END never reaches the row.** Those branches
+  return first, deliberately, so one truncated key is never named twice with contradictory
+  instructions — but the rows that do name it say "from the session that owns each chain",
+  which is unperformable in exactly the state this feature exists to diagnose. The entries
+  now carry a `[not owned by this session]` qualifier and each row says what to do with it;
+  the FORK itself is still not named for them.
+- **The Config block keeps the OLD root.** `configFiles()` still builds the project overlay
+  from `CLAUDE_PROJECT_DIR`, and `ZDOC_TTL_HOURS` is resolved before the bind, so where the two
+  roots differ the doctor judges a `.zensu/config.json` that `zensu-log.sh` never reads. The
+  TTL half is consistent with the Stop enforcer, which does not re-export the root; the config
+  half is not, and is left as-is rather than widened silently.
+- **The `chain-closed` half of the inert set has no behavioural fixture.** Driving a chain to
+  that shape needs a real reviewer spawn to consume the review ticket, which no structure suite
+  can perform. The exclusion is exercised only through `no-session`; `P1ms` covers the rename risk
+  instead, by asserting that `INERT_SHAPES` is exported, holds both shapes, and that every member
+  is a shape the owner's own `NEXT_COMMAND` knows.
+
+**Operator-facing accounts that must move with it:** `skills/doctor/SKILL.md` (the frontmatter
+`session state` clause, the row bullet, and the Phase 3 cleanup, which must delete the path the
+expired row PRINTED rather than re-derive one from `CLAUDE_PROJECT_DIR`) and the
+immutable-parent-context bullet in `docs/session-control.md` §"Claude Code Workflows".
+
+**Version: `patch`.** Walked against §"Runtime Lineage" entry by entry: no context-record or
+workflow-state schema field, no strict key set, no hook added/removed/renamed and no matcher
+changed, no new config key (the row reuses `zensu_pending_review_ttl_hours`), no attestation
+change. The renderer is advisory and cannot deny, and it requires `chain-recovery-v1.js` from its
+own plugin root, so no cross-version module mixing arises. Recorded here because the section also
+states that PRE-EXISTING rows changed where they read, which reads like a breaking change and is
+not one.
+
+**Port-relevant.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were NOT included in this
+change; each carries its own doctor against a different harness, and the fork premise has to be
+re-decided per host before any of the four halves is worth porting.
+
+`tests/structure/test-doctor.sh` P1mg–P1mt1 pin the row, its severity, the summary
+interaction, the withholding guard, the record anchor and its fallback, the TTL semantics in both directions and at `0`, the
+read-only contract, the wrapper source shape, and the three-way wording drift.
+
 ## Relaxable Bind Failures (`hooks/lib/claude-hook-session-v1.js`)
 
 A failed bind to the immutable Session Control record denies, with exactly **two**
@@ -1601,7 +1732,13 @@ part of that contract: the `--chain-status` verb, the `--chain-recover` transact
 consumer since it reads `BLOCKED_RECOVERY_COMMAND`, plus `wedged` / `deadEnd` /
 `recoverable` / `nextCommand` / `shape` off the report), `hooks/stop-chain-enforcer.sh`
 (hardcodes the shape literals `wedged-stale-rearm` and `self-review-unbindable`), the `/zensu:doctor` renderer
-(`hooks/lib/zensu-doctor-report.js`), the ticket issuer, and the rearm writer
+(`hooks/lib/zensu-doctor-report.js`, a field-name consumer — and a CONSUMER of the exported
+`INERT_SHAPES`, never a second hardcoder of it. A hand-copy there was tried and was wrong in the
+one direction that matters: it compared against the `NEXT_COMMAND` lookup table, so renaming the
+literal `chainShape` RETURNS while leaving the table key in place kept the copy agreeing while a
+genuinely closed foreign chain rendered as open. A consumer cannot check a producer it does not
+own, which is why the set moved here; `test-doctor.sh` P1ms pins the export and its contents, P1ms1 that the
+renderer keeps no private copy), the ticket issuer, and the rearm writer
 (`_tdd_rearm_autopilot_review_critical`, which takes `isLinkId`, `RETURN_STAGES` and
 `REARM_MARKER_KEYS` from here) — adding a receipt field or a return stage in the writer
 alone would make every receipt it mints classify as stale and wedge the chain permanently.
@@ -2147,10 +2284,11 @@ The nested clear inside the writer therefore calls the UNLOCKED spelling — the
 lease is not reentrant.
 
 **The note path is anchored on `PROJECT_ROOT`, never on `TDD_STATE_DIR`.** That
-variable is a retired ambient root the repo pins as non-authoritative, and the only
-reader resolves the directory from `CLAUDE_PROJECT_DIR` — honoring an override would
-write the note where `/zensu:doctor` never looks and aim an unlink outside the
-session-bound directory.
+variable is a retired ambient root the repo pins as non-authoritative. The reader
+resolves the directory from the RECORD's project root (`stateProjectRoot`, see
+§"Foreign-Chain Row"), which is the same root the writer's `zensu_resolve_project_dir`
+yields — they agree by construction. Honoring an override would write the note where
+`/zensu:doctor` never looks and aim an unlink outside the session-bound directory.
 
 **Both sides of the note treat it as untrusted.** The session can write that
 directory, so the writer refuses a symlink, a non-file or a hard link and lands an
