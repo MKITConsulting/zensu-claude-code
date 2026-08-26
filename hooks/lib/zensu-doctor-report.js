@@ -1539,7 +1539,7 @@ function bindingLine() {
         // already pins the quoted-"false" hazard for a config flag, and a channel
         // with a two-value producer deserves a two-value reader.
         + (env.ZDOC_BINDING_ROOT_UNKNOWN === '1'
-          ? '. Whether the recorded project root still exists could not be determined here; if it is gone, the adoption clears the lineage break while Edit and Write stay denied until that exact directory is re-created'
+          ? '. Whether the recorded project root still exists could not be determined here; if it is gone, the adoption clears the lineage break while Edit, Write and any Bash command that writes stay denied until that exact directory is re-created'
           : ''));
     // BOTH disagreements at once, and the row exists because each of the two
     // above answers "not me" for it: the orphan probe re-applies
@@ -1560,7 +1560,7 @@ function bindingLine() {
         // OFFERED, never promised — the same hedge the row above carries and for
         // the same reason: this state is reachable on a DOWNGRADE, which adoption
         // refuses outright as executing-runtime-older.
-        + ' — a deleted or recycled worktree left the workflow state unreachable from this record while a plugin update landed, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether the running installation may take the record over, then /zensu:adopt-session --confirm. That unblocks Bash and this diagnostic, but Edit and Write stay denied afterwards because the recorded project root is still gone — re-create exactly that directory, or start a fresh Claude Code session, to write again. If it was moved rather than deleted, its state still exists there');
+        + ' — a deleted or recycled worktree left the workflow state unreachable from this record while a plugin update landed, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether the running installation may take the record over, then /zensu:adopt-session --confirm. That unblocks Bash and this diagnostic, but Edit, Write and any Bash command that writes stay denied afterwards because the recorded project root is still gone — a write cannot be attributed to a project that is not there — re-create exactly that directory, or start a fresh Claude Code session, to write again. If it was moved rather than deleted, its state still exists there');
     case 'unavailable':
       return line(BAD, 'binding: hooks/lib/zensu-session.sh is missing or symlinked — Session Control cannot bind');
     default:

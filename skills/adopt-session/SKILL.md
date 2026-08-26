@@ -10,7 +10,7 @@ description: >
   mints a new record for the same session under the executing runtime, sets the previous
   one aside unchanged, and records the takeover in the workflow history. The session is
   bound again from the next tool call onward — no restart; when the recorded project root is
-  also gone the lineage break is cleared while Edit and Write stay denied until that
+  also gone the lineage break is cleared while Edit, Write and writing Bash stay denied until that
   directory is re-created. Adoption is authorised by
   SCHEMA equality, not by the version numbers, so a release that really changed a
   persisted shape is refused. Use when /zensu:doctor reports an incompatible lineage,
@@ -239,4 +239,4 @@ anything onto it.
 Render both command outputs verbatim; they are already formatted. Name both
 versions. Never summarize away a `provenance` other than `recorded`/
 `no-workflow-document`, a non-zero `leases set aside`, a non-zero
-`leases stuck`, or any `WARNING:` line about the lease store. After a successful adoption, do not tell the user to restart — and when the recorded project root was gone, say that Edit and Write stay denied until it is re-created rather than reporting an unqualified success.
+`leases stuck`, or any `WARNING:` line about the lease store. After a successful adoption, do not tell the user to restart — and when the recorded project root was gone, say that Edit, Write and any Bash command that writes stay denied until it is re-created — read-only Bash and the diagnostics do run — rather than reporting an unqualified success.

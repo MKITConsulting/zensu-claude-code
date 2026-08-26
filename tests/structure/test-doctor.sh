@@ -407,7 +407,7 @@ OUT_NOFOLD="$(ZENSU_DOCTOR_PLUGIN_DIR="$NOCHAIN" ZENSU_CONFIG="$SBOX/good-cfg.js
   node "$NOCHAIN/hooks/lib/zensu-doctor-report.js" 2>&1)"
 NOFOLD_RC=$?
 NOFOLD_ROW="$(printf '%s' "$OUT_NOFOLD" | grep -F 'binding:' || true)"
-if printf '%s' "$NOFOLD_ROW" | grep -qF 'recorded project root' \
+if printf '%s' "$NOFOLD_ROW" | grep -qF 'project root recorded for this session' \
     && ! printf '%s' "$NOFOLD_ROW" | grep -qF '/tmp/zensu-nofold-probe' \
     && ! printf '%s' "$NOFOLD_ROW" | grep -qF '()' \
     && ! printf '%s' "$NOFOLD_ROW" | grep -qF 'unrenderable' \
