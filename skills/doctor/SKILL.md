@@ -336,7 +336,12 @@ classifier will refuse a spawn, not only when the whole table is green.
   condition that failed, and `workflow-schema-mismatch` in particular means a
   persisted shape really did change and a fresh session is the only way forward.
   Adoption re-binds the session from the next tool call onward — do NOT tell the
-  user to restart after a successful one.
+  user to restart after a successful one. Carry the same conditional limit the
+  row below carries: if the recorded project root is ALSO gone, the adoption
+  clears the lineage break while `Edit` and `Write` stay denied until that exact
+  directory is re-created. This row is reachable in that state — the doctor
+  falls back to it whenever the third-fact probe cannot answer — so offering the
+  remedy without the clause would promise something this check did not establish.
 - **❌ binding: this session's Session Control record is readable, but BOTH the
   recorded project root … is gone and the running Zensu installation declares an
   incompatible lineage** → both of the two rows above at once, and it is its own

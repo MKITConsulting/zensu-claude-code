@@ -10,6 +10,17 @@ const hookSession = require('./claude-hook-session-v1.js');
 const evidenceLeases = require('./review-evidence-lease-v1.js');
 const doctorInvocation = require('./zensu-doctor-invocation.js');
 
+// The FOURTH consumer of the `recorded`/`executing` pair, and the one outside the
+// shell family that shares a degradation policy. `zensu_emit_hook_session_deny`,
+// stop-chain-enforcer.sh and zensu-doctor.sh all hold the pair to a shape before
+// printing it, because a plugin_version is only requireText-validated: a newline
+// in it splits one deny reason into several that read as separate hook messages.
+// The same alternation, the same `(unreadable)` substitution.
+const SAFE_VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/;
+const safeVersion = (value) => (
+  typeof value === 'string' && SAFE_VERSION.test(value) ? value : '(unreadable)'
+);
+
 const MAX_PAYLOAD_BYTES = 1024 * 1024;
 const REVIEWER_READ_TOOLS = new Set(['Read', 'Grep', 'Glob']);
 const COMMAND_TOOLS = new Set(['Bash', 'shell', 'exec', 'exec_command', 'terminal', 'command']);
@@ -490,7 +501,7 @@ function main() {
     // not the nicety; this branch shipped without it for one round.
     const lineage = hookSession.resolveIncompatibleRuntime(payload);
     if (lineage) {
-      deny(`this session's Session Control record is readable, and the running Zensu installation declares an incompatible lineage — the record was minted by ${lineage.recorded} and ${lineage.executing} is executing. Run /zensu:adopt-session to check whether this installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — the adoption still clears the lineage break, but Edit and Write stay denied afterwards until that exact directory is re-created; /zensu:doctor names the path when that is the case.`);
+      deny(`this session's Session Control record is readable, and the running Zensu installation declares an incompatible lineage — the record was minted by ${safeVersion(lineage.recorded)} and ${safeVersion(lineage.executing)} is executing. Run /zensu:adopt-session to check whether this installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — the adoption still clears the lineage break, but Edit and Write stay denied afterwards until that exact directory is re-created; /zensu:doctor names the path when that is the case.`);
       return;
     }
     deny(`immutable context revalidation failed: ${error.message}`);

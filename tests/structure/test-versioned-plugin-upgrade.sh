@@ -2745,10 +2745,16 @@ if printf '%s' "$GONE_START" \
       cwd: process.env.CWD,
     }));
   ')"
-  printf '%s' "$LIVE_ROOT_START" \
-    | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_CANDIDATE_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
-      CLAUDE_PROJECT_DIR="$PROJECT" \
-      bash "$SYNTHETIC_CANDIDATE_ROOT/hooks/session-start-session-control.sh" >/dev/null 2>&1
+  if printf '%s' "$LIVE_ROOT_START" \
+      | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_CANDIDATE_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+        CLAUDE_PROJECT_DIR="$PROJECT" \
+        bash "$SYNTHETIC_CANDIDATE_ROOT/hooks/session-start-session-control.sh" >/dev/null 2>&1; then
+    LIVE_ROOT_KEY="$(node "$SYNTHETIC_CANDIDATE_ROOT/hooks/lib/session-control-core-v1.js" session-key "$LIVE_ROOT_SESSION")"
+    [ -f "$SHARED_DATA/session-control/v1/records/$LIVE_ROOT_KEY.json" ] \
+      && LIVE_ROOT_REGISTERED=yes || LIVE_ROOT_REGISTERED=no
+  else
+    LIVE_ROOT_REGISTERED=no
+  fi
   GONE_NEGATIVE_OUT="$TMP/adopt-gone-negative.out"
   CLAUDE_CODE_SESSION_ID="$LIVE_ROOT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
     CLAUDE_PROJECT_DIR="$PROJECT" HOME="$GONE_DOCTOR_HOME" \
@@ -2821,10 +2827,66 @@ if printf '%s' "$GONE_START" \
       node "$SYNTHETIC_BREAKING_ROOT/hooks/lib/claude-hook-session-v1.js" \
       orphaned-incompatible-root >/dev/null 2>&1
   GONE_MODE_STATUS=$?
-  if [ "$GONE_MODE_STATUS" -eq 3 ]; then
-    check "AC-C15f a live project root is a positive negative (exit 3), not an unavailable answer" PASS
+  # The status alone proves nothing without knowing the session IS in the lineage
+  # state: an unregistered or unreadable session used to reach the same arm. Prove
+  # the state first, and prove that an UNAVAILABLE answer is a different status —
+  # a plugin-data directory with no record for this session cannot answer at all.
+  printf '%s' "$LIVE_ROOT_TOOL_PAYLOAD" \
+    | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      node "$SYNTHETIC_BREAKING_ROOT/hooks/lib/claude-hook-session-v1.js" \
+      incompatible-runtime >/dev/null 2>&1
+  LIVE_ROOT_LINEAGE=$?
+  printf '%s' "$LIVE_ROOT_TOOL_PAYLOAD" \
+    | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$FOREIGN_DATA" \
+      node "$SYNTHETIC_BREAKING_ROOT/hooks/lib/claude-hook-session-v1.js" \
+      orphaned-incompatible-root >/dev/null 2>&1
+  GONE_MODE_UNAVAILABLE=$?
+  if [ "$LIVE_ROOT_REGISTERED" = yes ] && [ "$LIVE_ROOT_LINEAGE" -eq 0 ] \
+      && [ "$GONE_MODE_STATUS" -eq 3 ] && [ "$GONE_MODE_UNAVAILABLE" -eq 1 ]; then
+    check "AC-C15f a live project root exits 3 while an unanswerable probe exits 1" PASS
   else
-    check "AC-C15f a live project root is a positive negative (exit 3), not an unavailable answer (got $GONE_MODE_STATUS)" FAIL
+    check "AC-C15f a live project root exits 3 while an unanswerable probe exits 1 (registered=$LIVE_ROOT_REGISTERED lineage=$LIVE_ROOT_LINEAGE negative=$GONE_MODE_STATUS unavailable=$GONE_MODE_UNAVAILABLE)" FAIL
+  fi
+
+  # AC-C14b — the NORMALIZATION arm. AC-C14a trips `must be absolute`; this one
+  # plants an absolute-but-unnormalized spelling, which `path.isAbsolute` admits
+  # and no canonical comparison would ever match. Deleting the check left the
+  # suite green, which is why it is pinned separately from its sibling.
+  TAMPER3_DATA="$TMP/gone-tamper3-data"
+  rm -rf "$TAMPER3_DATA"
+  mkdir -p "$TAMPER3_DATA/session-control/v1/records" && chmod 700 "$TAMPER3_DATA"
+  chmod 700 "$TAMPER3_DATA/session-control" "$TAMPER3_DATA/session-control/v1" \
+    "$TAMPER3_DATA/session-control/v1/records"
+  cp "$GONE_RECORD" "$TAMPER3_DATA/session-control/v1/records/$GONE_KEY.json"
+  if RECORD_IN="$TAMPER3_DATA/session-control/v1/records/$GONE_KEY.json" DATA_IN="$TAMPER3_DATA" node -e '
+      const fs = require("node:fs");
+      const file = process.env.RECORD_IN;
+      const record = JSON.parse(fs.readFileSync(file, "utf8"));
+      record.plugin_data = process.env.DATA_IN;
+      fs.writeFileSync(file, JSON.stringify(record, null, 2) + "\n");
+    '; then
+    TAMPER3_CONTROL="$(adoption_reason "$TAMPER3_DATA/session-control/v1/records" "$GONE_SESSION" "$TAMPER3_DATA" "$GONE_PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
+  else
+    TAMPER3_CONTROL='fixture-unavailable'
+  fi
+  if [ "$TAMPER3_CONTROL" = ok ] \
+      && RECORD_IN="$TAMPER3_DATA/session-control/v1/records/$GONE_KEY.json" node -e '
+      const fs = require("node:fs");
+      const file = process.env.RECORD_IN;
+      const record = JSON.parse(fs.readFileSync(file, "utf8"));
+      // Absolute, so it clears path.isAbsolute; unnormalized, so it must still be
+      // refused. This is the spelling a canonical comparison can never match.
+      record.project_root = record.project_root + "/../" + require("node:path").basename(record.project_root);
+      fs.writeFileSync(file, JSON.stringify(record, null, 2) + "\n");
+    '; then
+    GONE_TAMPERED3="$(adoption_reason "$TAMPER3_DATA/session-control/v1/records" "$GONE_SESSION" "$TAMPER3_DATA" "$GONE_PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
+    if [ "$GONE_TAMPERED3" = record-unreadable ]; then
+      check "AC-C14b an absolute but unnormalized project root is refused, not admitted" PASS
+    else
+      check "AC-C14b an absolute but unnormalized project root is refused, not admitted (control='$TAMPER3_CONTROL' got '$GONE_TAMPERED3')" FAIL
+    fi
+  else
+    check "AC-C14b an absolute but unnormalized project root is refused, not admitted (control='$TAMPER3_CONTROL')" FAIL
   fi
 
   # The repair, end to end through the shipped entry point. Three claims in one
@@ -2887,16 +2949,76 @@ else
   check "AC-C13 a record whose project root is gone is still adoptable across the lineage break (fixture unavailable)" FAIL
   check "AC-C14 a gone project root plus any second disagreement still refuses record-unreadable (fixture unavailable)" FAIL
   check "AC-C14a the orphan reader's own shape guard refuses a non-absolute project root (fixture unavailable)" FAIL
+  check "AC-C14b an absolute but unnormalized project root is refused, not admitted (fixture unavailable)" FAIL
   check "AC-C15 the doctor row names both facts and never claims 'no valid record' (fixture unavailable)" FAIL
   check "AC-C15a the bare entry point discloses the vanished anchor and its limit, and changes nothing (fixture unavailable)" FAIL
   check "AC-C15b the new argv mode refuses an extra argument (fixture unavailable)" FAIL
   check "AC-C15c the third-fact probe answers empty for a live project root, so the plain lineage row renders (fixture unavailable)" FAIL
   check "AC-C15d the Stop hook releases the combined state without claiming the workflow document survived (fixture unavailable)" FAIL
   check "AC-C15e the payload spelling of the third-fact mode prints the dead root (fixture unavailable)" FAIL
-  check "AC-C15f a live project root is a positive negative (exit 3), not an unavailable answer (fixture unavailable)" FAIL
+  check "AC-C15f a live project root exits 3 while an unanswerable probe exits 1 (fixture unavailable)" FAIL
   check "AC-C16 --confirm adopts, keeps the absent anchor, and never recreates the deleted root (fixture unavailable)" FAIL
   check "AC-C17 Edit stays denied after the adoption — the anchor is still gone (fixture unavailable)" FAIL
   check "AC-C18 after the adoption the doctor reports the plain orphaned state (fixture unavailable)" FAIL
+fi
+
+# AC-C19 — the Stop hook's THREE-arm ladder, pinned at SOURCE. The middle arm is
+# the state-neutral message, and it is not behaviourally reachable from the hook:
+# both probes call the same module, so a fault that makes the third-fact probe
+# unavailable also makes the lineage probe fail and the branch is never entered.
+# That leaves it deletable — or givable either sibling's wording — with every
+# behavioural row green, which is exactly the shape rounds 1 and 2 shipped twice.
+# Pin the ladder instead: three arms, and the middle one carrying neither
+# sibling's load-bearing literal.
+STOP_LADDER="$ROOT/hooks/stop-chain-enforcer.sh"
+STOP_ARM_GONE="$(grep -c 'this is not a deferral' "$STOP_LADDER" 2>/dev/null || printf 0)"
+STOP_ARM_NEUTRAL="$(grep -c 'nothing is claimed about the workflow document either way' "$STOP_LADDER" 2>/dev/null || printf 0)"
+STOP_ARM_DEFER="$(grep -c 'The workflow document itself SURVIVES' "$STOP_LADDER" 2>/dev/null || printf 0)"
+STOP_NEUTRAL_LINE="$(grep -n 'nothing is claimed about the workflow document either way' "$STOP_LADDER" 2>/dev/null | head -1 | cut -d: -f1)"
+STOP_NEUTRAL_TEXT="$([ -n "$STOP_NEUTRAL_LINE" ] && sed -n "${STOP_NEUTRAL_LINE}p" "$STOP_LADDER" || printf '')"
+if [ "$STOP_ARM_GONE" -eq 1 ] && [ "$STOP_ARM_NEUTRAL" -eq 1 ] && [ "$STOP_ARM_DEFER" -eq 1 ] \
+    && ! printf '%s' "$STOP_NEUTRAL_TEXT" | grep -qF 'The workflow document itself SURVIVES' \
+    && ! printf '%s' "$STOP_NEUTRAL_TEXT" | grep -qF 'this is not a deferral' \
+    && grep -qF 'INCOMPATIBLE_ROOT_STATUS" -ne 3' "$STOP_LADDER"; then
+  check "AC-C19 the Stop ladder has three arms and the state-neutral one borrows neither sibling's claim" PASS
+else
+  check "AC-C19 the Stop ladder has three arms and the state-neutral one borrows neither sibling's claim (gone=$STOP_ARM_GONE neutral=$STOP_ARM_NEUTRAL defer=$STOP_ARM_DEFER)" FAIL
+fi
+
+# AC-C20 — the capability gate's Edit/Write clause. That gate is on the `.*`
+# matcher, so a non-Bash tool in the lineage state lands there, and its deny was
+# the one surface still offering the repair without the limit. Driven through the
+# gate itself rather than grepped, so a reworded clause fails here and not only in
+# a source pin.
+CAPABILITY_EDIT_PAYLOAD="$(EVENT=PreToolUse SESSION="$LIVE_ROOT_SESSION" CWD="$PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: process.env.EVENT,
+    session_id: process.env.SESSION,
+    cwd: process.env.CWD,
+    tool_name: "Edit",
+    tool_input: {file_path: "README.md", old_string: "a", new_string: "b"},
+  }));
+')"
+CAPABILITY_OUT="$TMP/adopt-capability-clause.out"
+printf '%s' "$CAPABILITY_EDIT_PAYLOAD" \
+  | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" \
+    bash "$SYNTHETIC_BREAKING_ROOT/hooks/pre-reviewer-capability-gate.sh" \
+    >"$CAPABILITY_OUT" 2>/dev/null
+CAPABILITY_REASON="$(OUT_FILE="$CAPABILITY_OUT" node -e '
+  const fs = require("node:fs");
+  const raw = fs.readFileSync(process.env.OUT_FILE, "utf8").trim();
+  if (raw === "") { process.stdout.write(""); process.exit(0); }
+  try {
+    process.stdout.write(JSON.parse(raw).hookSpecificOutput?.permissionDecisionReason || "");
+  } catch (_e) { process.stdout.write(""); }
+' 2>/dev/null)" || CAPABILITY_REASON=""
+if printf '%s' "$CAPABILITY_REASON" | grep -qF 'declares an incompatible lineage' \
+    && printf '%s' "$CAPABILITY_REASON" | grep -qF 'Edit and Write stay denied afterwards until that exact directory is re-created'; then
+  check "AC-C20 the capability gate names the Edit/Write limit alongside the repair" PASS
+else
+  check "AC-C20 the capability gate names the Edit/Write limit alongside the repair" FAIL
+  printf '%s' "$CAPABILITY_REASON" | head -c 300
 fi
 
 # CONV-1 — the skill's refusal table is the one independent re-encoding of

@@ -443,8 +443,9 @@ function main() {
     // The third fact of the combined state, asked separately so the two-field
     // wire format above can stay exactly as its five parsers read it. Exit 0 and
     // print the dead project root only when the record is lineage-incompatible
-    // AND its recorded project root is gone; exit 1 for every other state,
-    // including a plain incompatible lineage whose root still exists.
+    // AND its recorded project root is gone; exit **3** for a plain incompatible
+    // lineage whose root still exists, and 1 only when the question could not be
+    // answered at all. Three statuses, never two: see the split below.
     //
     // BOTH spellings exist, and the hook-payload one is not decoration. The Stop
     // hook is a real consumer: its incompatible-lineage release tells the user
@@ -465,14 +466,28 @@ function main() {
       sessionPayload = readPayload();
     }
     const state = resolveIncompatibleRuntime(sessionPayload);
-    if (state === null || state.orphanedProjectRoot === null) {
+    if (state === null) {
+      // UNAVAILABLE, not a negative. `resolveIncompatibleRuntime` answers null
+      // from five sites — a plugin-root mismatch, an absent records directory, a
+      // plugin_data mismatch, an unidentifiable executing version, and its outer
+      // catch, which swallows every fail() including an unreadable record. None
+      // of them establishes that the recorded project root still exists, so none
+      // of them may claim the positive negative. Folding this into the arm below
+      // is exactly what this channel exists to prevent, and it is the shape the
+      // first attempt shipped: the Stop hook then reads 3, takes the deferral
+      // message, and tells the user their workflow document survived on nothing
+      // but a probe that failed.
+      process.exitCode = 1;
+      return;
+    }
+    if (state.orphanedProjectRoot === null) {
       // THREE, not 1, and the distinction is load-bearing for the Stop hook. A
       // caller that cannot tell "the recorded root is still there" from "the
       // probe could not answer" has to pick one of them, and picking the first
       // makes it assert the workflow document survives on nothing but an
-      // inferred negative — the exact false claim this channel was added to
-      // remove. `fail()` and every other error path exit 1, so 3 is a positive
-      // answer and 1 is an unavailable one.
+      // inferred negative. `fail()` and every other error path exit 1, so 3 is a
+      // POSITIVE answer — the record read, the lineage is incompatible, and the
+      // recorded root is still on disk — and 1 is an unavailable one.
       process.exitCode = 3;
       return;
     }

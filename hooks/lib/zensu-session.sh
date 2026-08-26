@@ -168,9 +168,10 @@ zensu_session_orphaned_project_root() {
   ) 2>/dev/null
 }
 
-# The model-side twin of the predicate above, for /zensu:doctor: same question
-# and same printed path, but no hook payload exists there, so the session id
-# comes from CLAUDE_CODE_SESSION_ID.
+# The model-side twin of the predicate above, for /zensu:doctor: same question,
+# same printed path and the SAME three statuses (0 with the path, 3 for a live
+# recorded root, 1 for an unavailable answer), but no hook payload exists there,
+# so the session id comes from CLAUDE_CODE_SESSION_ID.
 zensu_session_orphaned_project_root_model() {
   local lib_dir binder plugin_root native_plugin_root native_plugin_data
   local msys_env_exclusions
@@ -266,8 +267,11 @@ zensu_session_incompatible_runtime_model() {
 # version pair above stays two TAB-separated fields — five callers read the
 # executing half as `${V##*$'\t'}`, so a third field there would silently
 # redirect all five. Returns 0 and PRINTS the recorded project root only when the
-# lineage is incompatible AND that root is gone; 1 for every other state,
-# including a plain incompatible lineage whose root still exists.
+# lineage is incompatible AND that root is gone; **3** for a plain incompatible
+# lineage whose recorded root still exists; and 1 only when the question could not
+# be answered at all. THREE statuses, never two — a caller that reads only
+# truthiness collapses the last two, and that collapse is what makes a consumer
+# assert a workflow document that is gone.
 #
 # The same stdout warning the two wrappers above carry applies here: inside a
 # PreToolUse gate stdout is the hook's JSON decision channel, so a caller that

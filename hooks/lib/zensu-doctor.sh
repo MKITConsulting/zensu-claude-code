@@ -229,13 +229,29 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
         # No shape guard here, matching the orphan branch above: the printed path
         # comes from readOrphanedProjectRootContext, which rejects control
         # characters and a non-absolute value before it returns.
-        ZDOC_BINDING_PROJECT_ROOT="$(
+        if ZDOC_BINDING_PROJECT_ROOT="$(
           # shellcheck disable=SC1090
           source "$DIR/zensu-session.sh" >/dev/null 2>&1 \
             && zensu_session_incompatible_orphaned_root_model
-        )" || ZDOC_BINDING_PROJECT_ROOT=""
-        if [ -n "$ZDOC_BINDING_PROJECT_ROOT" ]; then
+        )"; then
+          ZDOC_ORPHAN_ROOT_STATUS=0
+        else
+          ZDOC_ORPHAN_ROOT_STATUS=$?
+          ZDOC_BINDING_PROJECT_ROOT=""
+        fi
+        if [ "$ZDOC_ORPHAN_ROOT_STATUS" -eq 0 ] && [ -n "$ZDOC_BINDING_PROJECT_ROOT" ]; then
           ZDOC_BINDING=orphaned-project-root+incompatible-runtime
+        elif [ "$ZDOC_ORPHAN_ROOT_STATUS" -ne 3 ]; then
+          # The probe could not answer, so the plain lineage row's remedy would
+          # be making a promise this check did not establish. Status 3 is the one
+          # answer that positively says the recorded root is still there; every
+          # other non-zero is an unavailable answer, and the row must not read as
+          # if the root were confirmed present. The renderer carries the
+          # conditional Edit/Write clause for exactly this reason, so the plain
+          # row stays correct here — but the reason is recorded rather than left
+          # to be re-derived, because reading only the VALUE and never the STATUS
+          # is the collapse the Stop hook's own comment forbids.
+          ZDOC_BINDING=incompatible-runtime
         fi
       else
         ZDOC_BINDING=unbound

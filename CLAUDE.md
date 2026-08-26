@@ -584,11 +584,17 @@ escape.
 to re-check on every later edit.** `zensu_session_incompatible_runtime` is now true for
 two states that disagree about the one fact those surfaces assert: whether the workflow
 document still exists. Anything that speaks about it must ask the third fact and branch —
-`hooks/stop-chain-enforcer.sh` does, and its two releases say opposite things on purpose
-(deferral when the root is present, "GONE with it, and no later Stop will enforce this
-chain" when it is not). The other three carry an unconditional clause instead, which is
-true in both halves: the deny scope in `zensu-session.sh`, the doctor row, and
-`skills/adopt-session/SKILL.md`. The rule this feature states about itself — what the
+`hooks/stop-chain-enforcer.sh` does, and its THREE releases say different things on purpose:
+a deferral when the root is present, "GONE with it, and no later Stop will enforce this
+chain" when it is not, and a state-neutral one claiming NEITHER when the probe could not
+answer. That third arm exists because the channel answers on three statuses — 0 with the
+path, 3 for a live recorded root, 1 for an unavailable answer — and a caller that reads only
+truthiness collapses the last two, which is precisely how a surface comes to assert a
+workflow document that is gone. The first attempt at this fix contained that collapse. The others carry an unconditional clause instead, which is true in
+both halves: the deny scope in `zensu-session.sh`, the `.*` capability gate's own JS deny in
+`reviewer-capability-v1.js`, both doctor rows, and `skills/adopt-session/SKILL.md`. The
+doctor is in BOTH lists deliberately — it branches to pick a row, and the row it falls back
+to still carries the clause, because the probe can fail. The rule this feature states about itself — what the
 repair does not buy is stated wherever it is offered — is what those clauses satisfy; a
 surface that offers `/zensu:adopt-session` without them is a defect, not a nicety. The
 first draft of this change shipped all four speaking the pre-change contract and the
@@ -1012,8 +1018,8 @@ present a workflow document is reachable, so relaxing would waive a live guarant
 than a dead one; with that root gone the document died with it, and what stands in for the
 guarantee is that the state has a real in-place repair — adoption, a user action leaving
 provenance — rather than a silent waiver. A consumer that says anything about the workflow
-document must ask `zensu_session_incompatible_orphaned_root` and branch; the Stop hook does,
-and it is the only one that needs to. What the predicate changes is the MESSAGE: `zensu_emit_hook_session_deny` gained a fourth scope,
+document must ask `zensu_session_incompatible_orphaned_root` and branch. TWO do: the Stop hook, and
+`zensu-doctor.sh`, which asks the model twin and selects its fourth binding row from it. What the predicate changes is the MESSAGE: `zensu_emit_hook_session_deny` gained a fourth scope,
 `incompatible-runtime`, taking the two versions as positional arguments. FIVE gates can deny
 in that state: the four shell gates emit that scope, and `pre-reviewer-capability-gate.sh` —
 the `.*` matcher, where `isRecognizedInvocation` is false for every non-Bash tool — spells the
