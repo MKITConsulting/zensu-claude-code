@@ -2988,15 +2988,23 @@ DOCTOR_LADDER="$ROOT/hooks/lib/zensu-doctor.sh"
 # default, the positive-answer reset, and the unknown pair).
 DOCTOR_UNKNOWN_EXPORTS="$(grep -cE '^ *ZDOC_BINDING_ROOT_UNKNOWN( |$)' "$DOCTOR_LADDER" 2>/dev/null || true)"
 DOCTOR_UNKNOWN_ASSIGNS="$(grep -cE '^ *ZDOC_BINDING_ROOT_UNKNOWN=' "$DOCTOR_LADDER" 2>/dev/null || true)"
+# The line that SETS the flag is counted separately, because neither of the two
+# counts above reaches it: it sits after a `||`, so it does not begin the line,
+# and AC-C21 injects the value directly rather than computing it. Deleting this
+# one line therefore left the clause permanently unreachable with both rows
+# green — the same shape as every defect the last three rounds caught, found in
+# this suite's own pin while re-checking it by hand.
+DOCTOR_UNKNOWN_SETS="$(grep -cE '\|\| *ZDOC_BINDING_ROOT_UNKNOWN=1' "$DOCTOR_LADDER" 2>/dev/null || true)"
 if [ "$STOP_ARM_GONE" = 1 ] && [ "$STOP_ARM_NEUTRAL" = 1 ] && [ "$STOP_ARM_DEFER" = 1 ] \
     && ! printf '%s' "$STOP_NEUTRAL_TEXT" | grep -qF 'The workflow document itself SURVIVES' \
     && ! printf '%s' "$STOP_NEUTRAL_TEXT" | grep -qF 'this is not a deferral' \
     && grep -qF 'INCOMPATIBLE_ROOT_STATUS" -ne 3' "$STOP_LADDER" \
     && grep -qF 'ZDOC_ORPHAN_ROOT_STATUS" -eq 3' "$DOCTOR_LADDER" \
-    && [ "$DOCTOR_UNKNOWN_EXPORTS" = 1 ] && [ "$DOCTOR_UNKNOWN_ASSIGNS" = 3 ]; then
+    && [ "$DOCTOR_UNKNOWN_EXPORTS" = 1 ] && [ "$DOCTOR_UNKNOWN_ASSIGNS" = 3 ] \
+    && [ "$DOCTOR_UNKNOWN_SETS" = 1 ]; then
   check "AC-C19 the Stop ladder has three emitted arms, the neutral one borrows neither sibling's claim, and the doctor exports the same distinction" PASS
 else
-  check "AC-C19 the Stop ladder has three emitted arms, the neutral one borrows neither sibling's claim, and the doctor exports the same distinction (gone=$STOP_ARM_GONE neutral=$STOP_ARM_NEUTRAL defer=$STOP_ARM_DEFER exports=$DOCTOR_UNKNOWN_EXPORTS assigns=$DOCTOR_UNKNOWN_ASSIGNS)" FAIL
+  check "AC-C19 the Stop ladder has three emitted arms, the neutral one borrows neither sibling's claim, and the doctor exports the same distinction (gone=$STOP_ARM_GONE neutral=$STOP_ARM_NEUTRAL defer=$STOP_ARM_DEFER exports=$DOCTOR_UNKNOWN_EXPORTS assigns=$DOCTOR_UNKNOWN_ASSIGNS sets=$DOCTOR_UNKNOWN_SETS)" FAIL
 fi
 
 # AC-C21 — the plain lineage row's CONDITIONAL clause, driven both ways. The
