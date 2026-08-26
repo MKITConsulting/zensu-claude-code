@@ -534,6 +534,12 @@ if (require.main === module) {
 
 module.exports = {
   privateRecordsDirectory,
+  // Exported so the ADOPTION path can apply the same rule every argv mode in this
+  // file already applies. It was the one entry point that accepted a session id
+  // straight from the environment without it, which made a DERIVED identifier — an
+  // `scv1_<64hex>`, i.e. the name of a record file in the store — an accepted
+  // identity there while the sibling modes refuse exactly that shape.
+  validateSessionId,
   orphanedProjectRootSession,
   resolveFreshHookProject,
   resolveHookSession,

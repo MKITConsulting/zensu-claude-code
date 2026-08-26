@@ -41,8 +41,17 @@ const sweepLeases = require("./review-evidence-sweep-v1.js");
 // denied, and where those conditions are exactly the diagnosis the user needs
 // stated plainly.
 const privateRecordsDirectory = require("./claude-hook-session-v1.js").privateRecordsDirectory;
+// The SAME rule every argv mode in the binder applies to a host session id, applied
+// here because this was the one entry point that did not. `zensu-session-adopt.sh`
+// forwards `CLAUDE_CODE_SESSION_ID` verbatim, and `core.sessionKey` returns an
+// `scv1_<64hex>` value UNCHANGED — that spelling is the name of a record file in the
+// store, so without this check the store's own directory listing was a list of
+// accepted identities. Called inside buildRequest, alongside the other three inputs,
+// so its refusal reaches the same handler that prints every other cause plainly.
+const validateSessionId = require("./claude-hook-session-v1.js").validateSessionId;
 const buildRequest = () => {
   const pluginData = process.env.ZADOPT_PLUGIN_DATA;
+  validateSessionId(process.env.ZADOPT_SESSION_ID);
   return {
     recordsDir: privateRecordsDirectory(pluginData),
     sessionId: process.env.ZADOPT_SESSION_ID,
