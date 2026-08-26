@@ -592,9 +592,12 @@ path, 3 for a live recorded root, 1 for an unavailable answer — and a caller t
 truthiness collapses the last two, which is precisely how a surface comes to assert a
 workflow document that is gone. The first attempt at this fix contained that collapse. The others carry an unconditional clause instead, which is true in
 both halves: the deny scope in `zensu-session.sh`, the `.*` capability gate's own JS deny in
-`reviewer-capability-v1.js`, both doctor rows, and `skills/adopt-session/SKILL.md`. The
-doctor is in BOTH lists deliberately — it branches to pick a row, and the row it falls back
-to still carries the clause, because the probe can fail. The rule this feature states about itself — what the
+`reviewer-capability-v1.js`, the COMBINED doctor row, and `skills/adopt-session/SKILL.md`.
+The plain lineage row is the one exception and states its clause CONDITIONALLY, on
+`ZDOC_BINDING_ROOT_UNKNOWN` — it is unconditionally true only that the row must not promise
+more than the probe established. The doctor is therefore in BOTH lists deliberately: it
+branches to pick a row, and the row it falls back to still carries the clause whenever the
+probe could not answer, because the probe can fail. The rule this feature states about itself — what the
 repair does not buy is stated wherever it is offered — is what those clauses satisfy; a
 surface that offers `/zensu:adopt-session` without them is a defect, not a nicety. The
 first draft of this change shipped all of the four that then existed speaking the pre-change contract and the

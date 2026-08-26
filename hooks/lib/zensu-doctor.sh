@@ -245,7 +245,13 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
         fi
         if [ "$ZDOC_ORPHAN_ROOT_STATUS" -eq 0 ] && [ -n "$ZDOC_BINDING_PROJECT_ROOT" ]; then
           ZDOC_BINDING=orphaned-project-root+incompatible-runtime
-        fi
+          # The probe POSITIVELY answered here, so the unknown flag must not be
+          # set: status 0 is not 3, and an unguarded test would export "unknown"
+          # for the one state where the answer is certain. Placing the flag
+          # outside this branch is exactly the trap the block below claims to
+          # close.
+          ZDOC_BINDING_ROOT_UNKNOWN=""
+        else
         # WHY the status is captured at all, given both remaining arms render the
         # same verdict: it is what makes the claim CHECKABLE. Status 3 positively
         # says the recorded root is still there; every other non-zero says the
@@ -255,8 +261,9 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
         # offer — an earlier revision of this block claimed the renderer already
         # did that and it did not. Export the distinction so the row can say so,
         # and so a future arm cannot be added that silently assumes a negative.
-        ZDOC_BINDING_ROOT_UNKNOWN=""
-        [ "$ZDOC_ORPHAN_ROOT_STATUS" -eq 3 ] || ZDOC_BINDING_ROOT_UNKNOWN=1
+          ZDOC_BINDING_ROOT_UNKNOWN=""
+          [ "$ZDOC_ORPHAN_ROOT_STATUS" -eq 3 ] || ZDOC_BINDING_ROOT_UNKNOWN=1
+        fi
       else
         ZDOC_BINDING=unbound
       fi

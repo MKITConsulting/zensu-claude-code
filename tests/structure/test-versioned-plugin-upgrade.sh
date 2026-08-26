@@ -2980,15 +2980,48 @@ STOP_ARM_NEUTRAL="$(stop_arm_count 'nothing is claimed about the workflow docume
 STOP_ARM_DEFER="$(stop_arm_count 'The workflow document itself SURVIVES')"
 STOP_NEUTRAL_TEXT="$(grep "^ *echo \"zensu chain-enforcer: releasing Stop.*nothing is claimed about the workflow document either way" "$STOP_LADDER" 2>/dev/null | head -1)"
 DOCTOR_LADDER="$ROOT/hooks/lib/zensu-doctor.sh"
+# Anchored the same way the Stop arms are. A bare substring match was satisfied by
+# the explanatory COMMENTS alone, so deleting the export left the renderer's
+# clause permanently inert with this row still green — the same shape as the
+# defect this row exists to catch, one layer out. Count the export line and the
+# assignments separately: one export, and three assignments (the declaration
+# default, the positive-answer reset, and the unknown pair).
+DOCTOR_UNKNOWN_EXPORTS="$(grep -cE '^ *ZDOC_BINDING_ROOT_UNKNOWN( |$)' "$DOCTOR_LADDER" 2>/dev/null || true)"
+DOCTOR_UNKNOWN_ASSIGNS="$(grep -cE '^ *ZDOC_BINDING_ROOT_UNKNOWN=' "$DOCTOR_LADDER" 2>/dev/null || true)"
 if [ "$STOP_ARM_GONE" = 1 ] && [ "$STOP_ARM_NEUTRAL" = 1 ] && [ "$STOP_ARM_DEFER" = 1 ] \
     && ! printf '%s' "$STOP_NEUTRAL_TEXT" | grep -qF 'The workflow document itself SURVIVES' \
     && ! printf '%s' "$STOP_NEUTRAL_TEXT" | grep -qF 'this is not a deferral' \
     && grep -qF 'INCOMPATIBLE_ROOT_STATUS" -ne 3' "$STOP_LADDER" \
     && grep -qF 'ZDOC_ORPHAN_ROOT_STATUS" -eq 3' "$DOCTOR_LADDER" \
-    && grep -qF 'ZDOC_BINDING_ROOT_UNKNOWN' "$DOCTOR_LADDER"; then
+    && [ "$DOCTOR_UNKNOWN_EXPORTS" = 1 ] && [ "$DOCTOR_UNKNOWN_ASSIGNS" = 3 ]; then
   check "AC-C19 the Stop ladder has three emitted arms, the neutral one borrows neither sibling's claim, and the doctor exports the same distinction" PASS
 else
-  check "AC-C19 the Stop ladder has three emitted arms, the neutral one borrows neither sibling's claim, and the doctor exports the same distinction (gone=$STOP_ARM_GONE neutral=$STOP_ARM_NEUTRAL defer=$STOP_ARM_DEFER)" FAIL
+  check "AC-C19 the Stop ladder has three emitted arms, the neutral one borrows neither sibling's claim, and the doctor exports the same distinction (gone=$STOP_ARM_GONE neutral=$STOP_ARM_NEUTRAL defer=$STOP_ARM_DEFER exports=$DOCTOR_UNKNOWN_EXPORTS assigns=$DOCTOR_UNKNOWN_ASSIGNS)" FAIL
+fi
+
+# AC-C21 — the plain lineage row's CONDITIONAL clause, driven both ways. The
+# status-1 path is not reachable end to end (both probes call the same module),
+# but the ZDOC_* values are injectable by design, so the renderer itself can be
+# driven for a positive and a negative. Without this the clause could be deleted
+# and every behavioural row would stay green.
+DOCTOR_CLAUSE_ON="$TMP/adopt-doctor-clause-on.out"
+DOCTOR_CLAUSE_OFF="$TMP/adopt-doctor-clause-off.out"
+env ZDOC_BINDING=incompatible-runtime ZDOC_BINDING_ROOT_UNKNOWN=1 \
+  ZDOC_BINDING_RECORDED_VERSION=0.17.0 ZDOC_BINDING_EXECUTING_VERSION=0.18.0 \
+  CLAUDE_PLUGIN_DATA="$SHARED_DATA" CLAUDE_PROJECT_DIR="$PROJECT" HOME="$GONE_DOCTOR_HOME" \
+  bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$DOCTOR_CLAUSE_ON" 2>/dev/null
+env ZDOC_BINDING=incompatible-runtime \
+  ZDOC_BINDING_RECORDED_VERSION=0.17.0 ZDOC_BINDING_EXECUTING_VERSION=0.18.0 \
+  CLAUDE_PLUGIN_DATA="$SHARED_DATA" CLAUDE_PROJECT_DIR="$PROJECT" HOME="$GONE_DOCTOR_HOME" \
+  bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$DOCTOR_CLAUSE_OFF" 2>/dev/null
+if grep -qF 'could not be determined here' "$DOCTOR_CLAUSE_ON" \
+    && grep -qF 'Edit and Write stay denied until that exact directory is re-created' "$DOCTOR_CLAUSE_ON" \
+    && ! grep -qF 'could not be determined here' "$DOCTOR_CLAUSE_OFF" \
+    && grep -qF 'declares an incompatible lineage' "$DOCTOR_CLAUSE_OFF"; then
+  check "AC-C21 the plain lineage row states the limit when the root is unknown and omits it when it is not" PASS
+else
+  check "AC-C21 the plain lineage row states the limit when the root is unknown and omits it when it is not" FAIL
+  grep -F 'binding:' "$DOCTOR_CLAUSE_ON" 2>/dev/null | head -c 300
 fi
 
 # AC-C20 — the capability gate's Edit/Write clause. That gate is on the `.*`
