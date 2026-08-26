@@ -29,6 +29,13 @@ const expectedProfiles = [
   'windows-shard-5',
   'windows-shard-6',
   'windows-shard-7',
+  // Shard 8 exists for one suite. Measured on run 32998414210, `session-trail-lineage`
+  // took 893084 ms of shard 3's 1800000 ms envelope; the eight suites there summed to
+  // 1800072 ms and `windows-profile-lifecycle-contract` was granted 139971 ms of its
+  // own 420000 ms cap and aborted. No other shard had 893 s of headroom either — the
+  // measured job durations that run were 1630, 1187, 1886, 1779, 1008, 1011 and 1516
+  // seconds — so the suite needed a shard of its own, not a different neighbour.
+  'windows-shard-8',
 ];
 const expectedCommandCount = 43;
 const expectedCommandDigest = '759e33875689db60325a145b8357f592c9d2f0fe2418883b651d2673a4eea2df';

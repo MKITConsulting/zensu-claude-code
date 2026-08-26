@@ -105,7 +105,14 @@ For PR state, run `gh pr view <number> --json state,mergedAt,title,url` yourself
 
 ### 3. Take over — "continue that work here"
 
-0. **Know what the takeover will persist before you run it.** `takeover` records an edge inside the node process, so **no Write-tool hook** sees it — not `pre-write-secret-scan.sh`, not `pre-edit-tdd-reminder.sh` — and the record is machine-wide and permanent until someone runs `lineage --forget`. It stores the target's and your own **absolute worktree path and branch name**. If either side sits in a confidential worktree, that path becomes readable to every window on the machine, including windows signed in to a different account: pass `--no-record` for the inspection and record the handover with `adopt` from a worktree you are willing to name, or accept it deliberately. This is the one persistence in this skill the user never sees a Write for, which is why it belongs here rather than only in the Safety section.
+0. **Know what the takeover will persist before you run it.** `takeover` records an edge inside the node process, so **no Write-tool hook** sees it — not `pre-write-secret-scan.sh`, not `pre-edit-tdd-reminder.sh` — and the record is machine-wide and permanent until someone runs `lineage --forget`.
+
+   It stores **six fields for each side** of the handover — `sessionId`, `accountUuid`, `appPid`, `pid`, `worktree` (absolute) and `branch` — plus `repo.name`, `repo.root`, `reason`, `recordedBy` and `recordedAt` for the edge itself. Two of those decide different things and both need saying out loud:
+
+   - **`worktree` is an absolute path.** If either side sits in a confidential worktree, that path becomes readable to every window on the machine.
+   - **`accountUuid` names which account each side was signed in to.** The record is readable by windows signed in to a *different* account, and it tells them whose session each end was. That is a separate decision from disclosing the path, so it is a separate line rather than a clause.
+
+   Three ways to decline, in order of how much they cost: pass `--no-record` for a read-only inspection; record the handover with `adopt` from a worktree you are willing to name; or set `ZENSU_SESSION_LINEAGE=off`, which durably refuses both of the store's writers — the handover record and `label` — and refuses out loud, so a suppressed record is never mistaken for a failed one. `label --remove` is deliberately still allowed under it: that verb REMOVES recorded information, and a privacy switch that blocked a deletion would work against the person who set it. Otherwise accept it deliberately. This is the one persistence in this skill the user never sees a Write for, which is why it belongs here rather than only in the Safety section.
 
 1. `show <selector>` first and read the **`TAKEOVER` verdict** it prints. Act on that verdict — do not fall back to "it says LIVE, therefore no".
 

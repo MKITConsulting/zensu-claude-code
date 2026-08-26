@@ -2405,6 +2405,27 @@ tolerance as the pattern it validates (the gates compare after shell quote remov
 and an EMPTY derivation is a FAIL rather than a skip — a swallowed `grep -r` failure used
 to read as agreement while the control block still printed PASS.
 
+**Not every member of this set is a gate.** `ZENSU_SESSION_LINEAGE=off` (`skills/session-trail/scripts/trail.mjs`)
+refuses every session-lineage ledger write and is a PRIVACY control: it disables no gate,
+widens no capability, and deliberately records **no** bypass-ledger entry — the ledger
+exists so that everything rendered under "Gates bypassed" is a gate that was escaped, and
+adding this would make that line false. It is in `ESCAPE_STEMS` because the set is derived
+mechanically from every `ZENSU_*=off` literal under `hooks/`, `docs/` and `CLAUDE.md`, and
+because G12's own purpose — a prompt carrier must never TEACH one of these spellings —
+applies to it exactly as it does to the gates. So membership here says something about the
+SPELLING, never about what the variable does.
+
+**State the two counts, because they are NOT the same number and the gap is the point.**
+`ESCAPE_STEMS` now holds TEN stems; `ZENSU_BYPASS_GATE_ALLOWLIST` in
+`hooks/lib/zensu-tdd-phase.sh` holds EIGHT, and `docs/configuration.md` §"Visible opt-outs"
+stays the authoritative ledger roster. TWO stems are therefore in the set and not in the
+ledger, and `ZENSU_SESSION_LINEAGE` is not the first: `ZENSU_AUTOPILOT` was already one,
+because its escape is recorded as an audited `BLOCKED` transition rather than as a ledger
+entry. Do not "reconcile" the two lists — they answer different questions, and a reader
+who makes them agree has either ledgered something that escapes no gate or stopped G12
+from covering a spelling a skill must not teach. A future member needs its own two
+sentences here, and the counts above updated with it.
+
 ## Fixture Mutation Events (`scripts/fixture-mutation-watch.js`)
 
 The promptfoo wrapper attests `tracked_clean` for the immutable eval fixture from TWO
@@ -2730,36 +2751,47 @@ machine, at 66 checks). Windows is roughly 9x slower here, which is the ratio to
 budget new checks against. An earlier note in this section claimed ~4 s on macOS;
 that figure predated the suite roughly doubling and was what the 900000 ceiling had
 originally been reasoned against.
-**The shard budget binds FIRST and is the tighter of the two:** `windows-shard-3`
-carries a `profileTimeoutMs` of 1800000, and that same run consumed **1213416 ms**
-of it across seven suites — `deferred-reset-races` alone took 584150 ms at the same
-900000 cap, plus five more suites whose caps sum to a further 1260000. Two 900000
-caps under one 1800000 profile means whichever runs second cannot receive its own
-ceiling; the same failure §Host-Refused Reviewer Spawn records verbatim ("read the
-shard's remaining budget", not the suite's `timeoutMs`). **That 1213416 ms is now STALE for the same reason the per-suite figure above is** —
-it was taken with `session-trail-lineage` at 70 checks, and the suite is at 268 — the SAME figure the per-suite paragraph above now quotes. The two once disagreed (157 against "past 200") while describing one measurement, which is the drift a single number in two paragraphs invites.
-**The projection is now derived from a measurement rather than from a check count**,
-and the method is the part worth keeping: a local wall clock means nothing on its own,
-because the machine that produced the 31 s baseline is not the machine anyone is
-sitting at. Run the OTHER suite as a cross-machine control. Measured 2026-08-25 on the
-author's machine: the parallel working copy's variant of this suite took **108.5 s at
-88 checks** (1.23 s/check) where this document records 0.47 s/check for the baseline
-machine — so that machine is roughly **2.6x slower per check**. This suite measured
-**213 s at 260 checks** there (0.82 s/check), i.e. about 0.32 s/check on the baseline
-machine, which through the 8.3x Windows ratio projects to roughly **2.6 s/check** and,
-at 268 checks, to **about 700000 ms**. That would put the shard near 1.7M of its 1.8M
-rather than the 1213416 recorded here.
+**THE PROJECTION HAS BEEN REPLACED BY A MEASUREMENT, and it was 28% low.** Run
+32998414210, job 98273571899: `session-trail-lineage` took **893084 ms** where the
+projection below said "about 700000". Keep that gap in view before trusting the next
+projection — the METHOD was sound and the NUMBER was still wrong by four minutes of
+Windows wall clock, which on a shard this tight is the whole margin.
 
-**That projection is why 600000 was REJECTED for this suite, not merely not adopted.**
-The parallel working copy lowered its own ceiling to 600000 on the strength of the
-same green run — correctly, for a suite of 70 checks measuring 274 s. This suite is
-nearly four times that size, and 700000 is already past 600000: adopting the number
-would have traded a suite that fits for one that reports `TIMED_OUT` on every Windows
-run. A ceiling is not portable between two suites sharing an `id`; only the RATIO is.
+**The shard budget binds FIRST and is the tighter of the two, and on that run it
+BOUND.** `windows-shard-3` carries a `profileTimeoutMs` of 1800000. Its eight suites
+reported 137085 + 511955 + 1238 + 11207 + 9543 + 893084 + 95894 + 140066 ms =
+**1800072 ms** — the envelope, exactly. `windows-profile-lifecycle-contract` ran last
+and was granted **139971 ms of its own 420000 ms cap**, then reported `TIMED_OUT`. It
+was not slow; it was not paid for. That is the failure §Host-Refused Reviewer Spawn
+records verbatim ("read the shard's remaining budget", not the suite's `timeoutMs`),
+observed rather than predicted.
 
-Do NOT quote a headroom percentage from any of this; a projection is not a measurement
-and does not authorize raising anything either. Replace both figures from the next
-green Windows shard, and until then treat the shard as the ceiling that binds. A shard abort
+**The suite therefore moved to `windows-shard-8`, alone.** Not to a different
+neighbour: the same run's job durations were shard-1 1630 s, shard-2 1187 s, shard-3
+1886 s, shard-4 1779 s, shard-5 1008 s, shard-6 1011 s, shard-7 1516 s, and 893 s does
+not fit inside any of them under a 1800 s envelope. Adding a shard is what the
+arithmetic left; rebalancing was not available. The move is three files in one commit —
+`tests/profiles/windows-ci.v1.json`, the matrix in `.github/workflows/ci.yml`, and
+`expectedProfiles` in `tests/structure/windows-ci-contract.test.js` — and the contract
+test fails loudly when they disagree. **Shard 3's own eight-member accounting was wrong
+in this file before that move**: it counted seven and omitted `autopilot-release-cli`
+(600000), which is precisely how a headroom claim survives being false.
+
+**The 900000 cap is now KNOWN to be nearly exhausted**: 893084 of 900000 is 99.2%, so
+the suite has roughly seven seconds of its own ceiling left. A single added check can
+turn it red. Alone on shard 8 it has 900 s of shard budget it cannot use, so the cap —
+not the shard — is what binds it now, which is the first time that has been true. Raise
+the cap or shorten the suite before adding to it; do not read "it has its own shard" as
+headroom.
+
+**That measurement is also why 600000 was REJECTED for this suite, not merely not
+adopted.** The parallel working copy lowered its own ceiling to 600000 on the strength
+of a green run of a 70-check variant measuring 274 s. This suite is four times that
+size and measured 893 s: adopting the number would have reported `TIMED_OUT` on every
+Windows run. A ceiling is not portable between two suites sharing an `id`; only the
+RATIO is — and the ratio under-predicted by 28%.
+
+Replace these figures from the next green Windows shard. A shard abort
 truncates the tail of the second suite silently. The caveat lives here and NOT in the manifest:
 `tests/run-profile.js`'s `SUITE_KEYS` rejects any key outside
 `{id, runner, path, args, timeoutMs}` and aborts every Windows shard at manifest load.

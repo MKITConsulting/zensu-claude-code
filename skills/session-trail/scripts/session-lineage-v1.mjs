@@ -42,8 +42,12 @@ function readBoundedFile(file) {
   } catch (e) {
     // ELOOP is O_NOFOLLOW refusing a symlink, ENXIO is O_NONBLOCK refusing a FIFO
     // with no writer: both are "this is not a regular file", not an I/O fault.
+    // ENOENT is a third fact again — the entry was listed and is gone — and it is the
+    // ordinary outcome of a concurrent `--forget --apply`, not damage.
     const code = e && e.code;
-    return { text: null, reason: (code === 'ELOOP' || code === 'ENXIO') ? EDGE_REFUSALS.NOT_A_FILE : EDGE_REFUSALS.UNREADABLE };
+    if (code === 'ELOOP' || code === 'ENXIO') return { text: null, reason: EDGE_REFUSALS.NOT_A_FILE };
+    if (code === 'ENOENT') return { text: null, reason: EDGE_REFUSALS.VANISHED };
+    return { text: null, reason: EDGE_REFUSALS.UNREADABLE };
   }
   try {
     // fstat, not lstat: the properties are asserted on the descriptor that will
@@ -125,11 +129,21 @@ function isNonEmptyString(v) {
 // comment above names as the motivating defect — was still accepted and outranked
 // every record for as long as the append-only store kept it; and
 // `"2026-02-31T00:00:00.000Z"` was accepted as a February date meaning 3 March.
+//
+// The shape and the round-trip together still admitted the far future, which is the
+// SAME outcome by a valid spelling: `9999-12-31T23:59:59.999Z` matches, parses, and
+// reproduces itself, then outranks every real stamp in a store that only appends —
+// permanently, because nothing ever removes it. Only the future is bounded; a ledger
+// is mostly history and an old record is not a suspicious one. The skew is a day
+// rather than a minute because the value is written by whatever clock the recording
+// machine had, and refusing a legitimate handover is the worse of the two errors.
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-export function isIsoInstant(value) {
+export const MAX_FUTURE_SKEW_MS = 24 * 60 * 60 * 1000;
+export function isIsoInstant(value, now = Date.now()) {
   if (typeof value !== 'string' || !ISO_INSTANT.test(value)) return false;
   const t = Date.parse(value);
-  return Number.isFinite(t) && new Date(t).toISOString() === value;
+  if (!Number.isFinite(t) || new Date(t).toISOString() !== value) return false;
+  return t <= now + MAX_FUTURE_SKEW_MS;
 }
 
 // ONE comparison rule for `recordedAt`, used at every site that orders records.
@@ -543,6 +557,15 @@ export const EDGE_REFUSALS = Object.freeze({
   // FIFO O_NONBLOCK refused. Distinct from UNREADABLE because the remedy differs:
   // something was PLANTED here, rather than something being wrong with the disk.
   NOT_A_FILE: 'not-a-file',
+  // Listed by the directory scan and gone by the open. This is the NORMAL case for
+  // the concurrency model the store is built for — `--forget --apply` unlinks records
+  // while other windows read — so it is not counted as a refusal at all. Reported as
+  // UNREADABLE it entered `refused`, and a non-empty `refused` blocks
+  // `--backfill --apply`: one window's routine cleanup made an unrelated backfill in
+  // another window refuse and write nothing. The reason is NAMED rather than folded
+  // into the exclusion so the branch that drops it says what it is dropping; no
+  // consumer counts it, and none needs to — a race is not a finding.
+  VANISHED: 'vanished',
   // Past MAX_RECORD_BYTES. The store is machine-wide, so this is a bound being
   // enforced, not a fault — and a user seeing it should look at the record, not the
   // permissions.
@@ -628,7 +651,14 @@ export function classifyEdge(raw) {
 
 // `directoryError` is reported separately from a per-record refusal: an
 // unreadable DIRECTORY must never render as "nothing was recorded".
-export function readEdges(edgesDir, stopAt = null) {
+// `max` is a seam for the unit layer, never a caller policy: the DIRECTION of the
+// slice below is the whole property, and planting MAX_EDGE_RECORDS+1 files to observe
+// it would cost twenty thousand writes on a Windows shard this suite already saturates.
+// `listNames` is the second unit seam, for the same reason `writeEdge` already accepts
+// `nameFor`: winning the race against a real unlink is not reproducible, while the
+// behaviour that matters — a real open, a real ENOENT, the classification and the
+// exclusion below — is exercised end to end once the listing can be chosen.
+export function readEdges(edgesDir, stopAt = null, max = MAX_EDGE_RECORDS, listNames = fs.readdirSync) {
   const edges = [];
   const refused = [];
   if (!ledgerPathUnlinked(edgesDir, stopAt)) {
@@ -636,19 +666,59 @@ export function readEdges(edgesDir, stopAt = null) {
   }
   let names;
   try {
-    names = fs.readdirSync(edgesDir);
+    names = listNames(edgesDir);
   } catch (e) {
     if (e && e.code === 'ENOENT') return { edges, refused, directoryError: null, truncated: false };
     return { edges, refused, directoryError: e && e.code ? e.code : 'EUNKNOWN', truncated: false };
   }
   // Sorted before the cap so the bound is deterministic rather than whatever order
   // the filesystem happened to hand back.
-  const candidates = names.filter((n) => n.endsWith('.json') && !n.startsWith('.')).sort();
-  const truncated = candidates.length > MAX_EDGE_RECORDS;
-  for (const n of candidates.slice(0, MAX_EDGE_RECORDS)) {
+  //
+  // And sliced from the TAIL. `edgeFileName` prefixes every record with `Date.now()`,
+  // so ascending order is chronological and taking the HEAD retained the twenty
+  // thousand OLDEST records: past the cap every new handover became invisible to
+  // `lineage`, `--where`, `instances` and — the half with no recovery — `--forget`,
+  // while `writeEdge` went on succeeding. `--backfill --apply` could not repair it
+  // either, because it refuses on `truncated`.
+  // The name must be a single path COMPONENT. With the default listing that holds
+  // structurally, and the filter below was equivalent; once the listing can be
+  // supplied, `path.join` would normalise a crafted `../` OUT of the ledger, and
+  // `readBoundedFile`'s O_NOFOLLOW binds the final component only. An escaping name is
+  // REPORTED rather than dropped, because it is the one shape an operator must see.
+  //
+  // Deliberately NOT the full `isEdgeFileName`: that predicate also refuses control
+  // characters, for the destructive verb's RENDERING, and its own comment says a record
+  // under any other spelling is still one the operator is entitled to forget. Applying
+  // it here hid such a record from `--forget` — the reader's job is to find records,
+  // not to judge how they were named.
+  const usable = [];
+  // The escape test runs BEFORE the dot-name skip, because `../x.json` begins with a
+  // dot: checked the other way round, the one shape this guard exists for is the one
+  // shape it silently drops.
+  for (const n of names) {
+    if (typeof n !== 'string' || !n.endsWith('.json')) continue;
+    if (path.basename(n) !== n) { refused.push({ file: n, reason: EDGE_REFUSALS.NOT_A_FILE }); continue; }
+    if (n.startsWith('.')) continue;
+    usable.push(n);
+  }
+  const candidates = usable.sort();
+  // The seam may only TIGHTEN. Unclamped, a caller could pass a larger `max` and remove
+  // the cap entirely — on a directory the comment above MAX_EDGE_RECORDS describes as
+  // writable by every session on this machine. Same rule as the plan reader's
+  // `openMode`: a caller can take the stricter path, never widen it.
+  const cap = Number.isInteger(max) && max >= 0 ? Math.min(max, MAX_EDGE_RECORDS) : MAX_EDGE_RECORDS;
+  const truncated = candidates.length > cap;
+  // Not `slice(-max)`: a max of 0 makes that `slice(0)`, which returns EVERYTHING —
+  // the one input where the shorthand inverts the bound it is spelling.
+  for (const n of candidates.slice(Math.max(0, candidates.length - cap))) {
     let raw;
     const read = readBoundedFile(path.join(edgesDir, n));
-    if (read.text === null) { refused.push({ file: n, reason: read.reason }); continue; }
+    if (read.text === null) {
+      // A vanished record is a race, not a refusal: counting it would block
+      // `--backfill --apply` on another window's ordinary cleanup.
+      if (read.reason !== EDGE_REFUSALS.VANISHED) refused.push({ file: n, reason: read.reason });
+      continue;
+    }
     try { raw = JSON.parse(read.text); } catch {
       refused.push({ file: n, reason: EDGE_REFUSALS.CORRUPT });
       continue;
@@ -695,12 +765,23 @@ function outranks(candidate, incumbent) {
 // count. The cap bounds how many records are READ; it never bounded what is done
 // with them. Measured before this: 315 ms at n=2000, 1669 ms at n=5000, which puts
 // the cap's own 20 000 at roughly 27 s.
+// The buckets are ORDERED here, once, rather than at every hop. `walkChain` re-sorted
+// and re-copied the successor list of the node it stood on at each step, and
+// `chainWalks` runs one walk per root — so many roots leading into one hub with many
+// successors paid for one sorted pass per root over the same bucket. Ordering at build
+// time is one pass per bucket for the whole render, and it leaves the ordering RULE in
+// a single place: the walk below only filters.
+export function successorOrder(a, b) {
+  return (confidenceRank(b.confidence) - confidenceRank(a.confidence)) || byRecordedAtAsc(b, a);
+}
+
 export function indexBySource(edges) {
   const byFrom = new Map();
   for (const e of edges) {
     if (!byFrom.has(e.from.sessionId)) byFrom.set(e.from.sessionId, []);
     byFrom.get(e.from.sessionId).push(e);
   }
+  for (const bucket of byFrom.values()) bucket.sort(successorOrder);
   return byFrom;
 }
 
@@ -713,6 +794,10 @@ export function indexBySource(edges) {
 // word. Two parameters describing one thing is the seam; taking either spelling of
 // the one thing closes it while keeping the reason the index existed, which is that
 // the caller avoids one rebuild per root.
+// PRECONDITION on the Map branch: the buckets must already be in `successorOrder`. The
+// walk stopped sorting when `indexBySource` started, so a Map from any other producer
+// yields a differently-ordered chain and nothing here can notice. Every caller in this
+// tree passes either an array or a Map this module built; a future one must do the same.
 export function walkChain(sessionId, source, maxHops = 64) {
   const byFrom = source instanceof Map ? source : indexBySource(source || []);
   const links = [];
@@ -721,12 +806,17 @@ export function walkChain(sessionId, source, maxHops = 64) {
   let revisited = false;
   let cur = sessionId;
   for (let hop = 0; hop < maxHops; hop += 1) {
-    // Confidence first, then newest — the same order dedupeEdges applies, so the
-    // chain a reader is shown and the record that survives cannot disagree.
-    const candidates = (byFrom.get(cur) || [])
-      .filter((e) => !seen.has(e.to.sessionId))
-      .sort((a, b) => (confidenceRank(b.confidence) - confidenceRank(a.confidence))
-        || byRecordedAtAsc(b, a));
+    // Already ordered by `indexBySource` — confidence first, then newest, the same
+    // order dedupeEdges applies, so the chain a reader is shown and the record that
+    // survives cannot disagree. `filter` preserves it, so no hop sorts.
+    const outgoing = byFrom.get(cur) || [];
+    const candidates = outgoing.filter((e) => !seen.has(e.to.sessionId));
+    // A revisit is what the FILTER did, not where the walk stopped. Assigned only in
+    // the terminal arm below, the flag reported a revisit exclusively when the revisit
+    // was the last option: A>B, B>A, B>C answered false, because B also led on and the
+    // dropped edge appears in neither `candidates` nor `forks`. Measured at this hop it
+    // also survives the hop-bound exit, which never reaches that arm at all.
+    if (candidates.length !== outgoing.length) revisited = true;
     if (!candidates.length) {
       // WHY the walk stopped is the whole point. "No unseen successor" has two very
       // different causes: the chain genuinely ended, or it led back into a node this
@@ -734,7 +824,7 @@ export function walkChain(sessionId, source, maxHops = 64) {
       // (adopt A>B, then adopt B>A from the original window). Reported as an ordinary
       // end, the renderer printed CONTINUED IN <b> with no caveat while the newest
       // edge in the ledger said the work had come back.
-      revisited = (byFrom.get(cur) || []).some((e) => seen.has(e.to.sessionId));
+      revisited = revisited || outgoing.some((e) => seen.has(e.to.sessionId));
       break;
     }
     const [next, ...rest] = candidates;
@@ -858,18 +948,38 @@ export function normalizeLabels(raw) {
 // discipline the edge records were given: two concurrent labels lost one
 // silently, and a crash mid-write left JSON that the reader swallows into "no
 // labels at all".
-export function writeLabels(labelsFile, labels, stopAt = null) {
+// Split in two so the CHECKED window can be the rename alone. Everything expensive —
+// the directory walk and the whole temp write — happens in `stageLabels`, outside it.
+export function stageLabels(labelsFile, labels, stopAt = null) {
   // The base directory, not a reconstructed edges path: `ledgerPaths` owns the
   // layout, and writing a label used to create `edges/` as a side effect.
   ensureLedgerDir(path.dirname(labelsFile), stopAt);
   const tmp = path.join(path.dirname(labelsFile), `.labels-${process.pid}-${crypto.randomBytes(6).toString('hex')}.tmp`);
   fs.writeFileSync(tmp, `${JSON.stringify(labels, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
+  return tmp;
+}
+
+// NOT exported, either of them. `stageLabels` derives its temp path from `labelsFile`,
+// so within this module no caller can name the rename source or the unlink target —
+// which is the confinement the single `writeLabels` had by construction. Exporting them
+// would hand out an unconfined rename and an unconfined unlink with both operands
+// caller-supplied, and `removeEdgeFiles`, the module's other destructive verb, spends
+// three checks to avoid exactly that.
+function discardStagedLabels(tmp) {
+  try { fs.unlinkSync(tmp); } catch { /* whatever brought us here is the real error */ }
+}
+
+function commitLabels(tmp, labelsFile) {
   try {
     fs.renameSync(tmp, labelsFile);
   } catch (e) {
-    try { fs.unlinkSync(tmp); } catch { /* the rename failure is the real error */ }
+    discardStagedLabels(tmp);
     throw e;
   }
+}
+
+export function writeLabels(labelsFile, labels, stopAt = null) {
+  commitLabels(stageLabels(labelsFile, labels, stopAt), labelsFile);
 }
 
 // Owns the WHOLE read-modify-write, which is what `writeLabels` alone could not.
@@ -881,10 +991,18 @@ export function writeLabels(labelsFile, labels, stopAt = null) {
 // exited 0.
 //
 // The retry is bounded and the check is the file's identity plus size, read
-// immediately before the landing. This is not a lock — two writers can still
-// interleave — but it closes the window that was wide open, and an update that
+// immediately before the landing — and "immediately" is now literal. It used to be
+// read before `writeLabels`, which then ran `ensureLedgerDir` and a full temp write
+// before reaching its rename, so a writer landing anywhere in that span was
+// overwritten silently while the loser printed success and exited 0. Staging happens
+// FIRST and the check sits between it and the rename, which is the only step left
+// inside the window. This is still not a lock — two writers can interleave between the
+// check and the rename — but the span is now a single syscall, and an update that
 // cannot be landed is REPORTED rather than silently dropped.
-export function updateLabels(labelsFile, mutate, stopAt = null, attempts = 5) {
+//
+// `stage` is injectable because it IS the window: a test that interferes from `mutate`
+// reaches only the half the check already caught.
+export function updateLabels(labelsFile, mutate, stopAt = null, attempts = 5, stage = stageLabels) {
   for (let i = 0; i < attempts; i += 1) {
     const before = labelsFingerprint(labelsFile);
     // The ceiling this function already holds. readLabels' guard is CONDITIONAL, so
@@ -896,8 +1014,14 @@ export function updateLabels(labelsFile, mutate, stopAt = null, attempts = 5) {
     if (current.unreadable) throw new Error(`refusing to overwrite an unreadable labels file: ${labelsFile}`);
     if (current.schemaMismatch) throw new Error(`refusing to overwrite a labels file from another schema: ${labelsFile}`);
     const next = mutate(current.labels);
-    if (labelsFingerprint(labelsFile) !== before) continue; // someone landed first — redo on their copy
-    writeLabels(labelsFile, next, stopAt);
+    const staged = stage(labelsFile, next, stopAt);
+    if (labelsFingerprint(labelsFile) !== before) {
+      // Someone landed first — redo on their copy, and take our unpublished temp file
+      // with us rather than leaving it in a machine-wide directory.
+      discardStagedLabels(staged);
+      continue;
+    }
+    commitLabels(staged, labelsFile);
     return next;
   }
   throw new Error(`could not land a labels update in ${attempts} attempts — another window kept writing`);

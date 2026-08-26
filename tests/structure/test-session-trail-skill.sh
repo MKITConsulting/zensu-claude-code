@@ -458,7 +458,16 @@ write_sites() { # <file>
     # unless they are named here.
     /(writeFileSync|mkdirSync|chmodSync|renameSync|unlinkSync|linkSync)\(/ {
       ok = 0
-      if (fn == "ledgerWrite" || fn == "writeEdge" || fn == "ensureLedgerDir" || fn == "writeLabels" || fn == "removeEdgeFiles") ok = 1
+      if (fn == "ledgerWrite" || fn == "writeEdge" || fn == "ensureLedgerDir" || fn == "removeEdgeFiles") ok = 1
+      # `writeLabels` is GONE from this list, not forgotten: it is now
+      # `commitLabels(stageLabels(...))` and performs no `fs.*Sync` of its own, so the
+      # name could never match again and a dead entry advertises reach the list does
+      # not have. Its three parts are named instead. The widening is by count and not
+      # by reach -- the same directory walk, the same O_EXCL temp, the same rename,
+      # split only so the fingerprint window `updateLabels` checks can be the rename
+      # alone -- and two of the three are module-private, so no caller outside can
+      # name the rename source or the unlink target.
+      if (fn == "stageLabels" || fn == "commitLabels" || fn == "discardStagedLabels") ok = 1
       if (!ok) printf "%s:%s:%d ", FILENAME, (fn == "" ? "<top-level>" : fn), NR
     }
   ' "$1"
@@ -482,9 +491,12 @@ else
   check "T11b-control the write-site rule matched NOTHING for:$T11B_MISS — those branches are unpinned" FAIL
 fi
 # A write AFTER a ledger writer's closing brace must not inherit its name.
-printf 'export function writeLabels() {\n  fs.renameSync(a, b);\n}\nfs.writeFileSync(elsewhere, "x");\n' > "$CONTROL_MJS"
-# By NAME, not merely non-empty: a non-empty result is also produced when
-# writeLabels is dropped from the allowlist, which is a different defect.
+printf 'export function commitLabels() {\n  fs.renameSync(a, b);\n}\nfs.writeFileSync(elsewhere, "x");\n' > "$CONTROL_MJS"
+# By NAME, not merely non-empty: a non-empty result is also produced when the named
+# writer is dropped from the allowlist, which is a different defect. The fixture names
+# `commitLabels` because `writeLabels` is no longer on the list -- it performs no
+# primitive of its own now -- so using it here would make this control pass for the
+# wrong reason.
 case "$(write_sites "$CONTROL_MJS")" in
   *"<top-level>"*) check "T11b-control a write after a ledger writer closing brace is reported as top-level" PASS ;;
   *) check "T11b-control a write after a ledger writer closing brace was not reported as top-level" FAIL ;;

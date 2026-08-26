@@ -334,7 +334,12 @@ fi
 # The first version covered three of these, so a skill teaching ZENSU_CHAIN=off —
 # the most tempting one for a long unattended loop, since it silences the chain
 # enforcer — passed with the label "pattern proven live".
-ESCAPE_STEMS='TDD_GATE BASH_WRITE_GATE TEST_WITNESS CHAIN MCP_GATE SECRET_SCAN EDIT_LANDING_GATE AUTOPILOT REQUIREMENTS_GATE'
+# SESSION_LINEAGE is a member of this SET but not of the bypass ledger: it is a privacy
+# control that disables no gate and records no entry. It belongs here because the set is
+# derived mechanically from every ZENSU_*=off literal under hooks/, docs/ and CLAUDE.md,
+# and G12's own purpose — a prompt carrier must never TEACH one of these spellings —
+# applies to it exactly as it does to the nine gates.
+ESCAPE_STEMS='TDD_GATE BASH_WRITE_GATE TEST_WITNESS CHAIN MCP_GATE SECRET_SCAN EDIT_LANDING_GATE AUTOPILOT REQUIREMENTS_GATE SESSION_LINEAGE'
 # Quote tolerance: the gates decide the escape AFTER shell quote removal
 # (pre-edit-tdd-reminder.sh compares "${ZENSU_TDD_GATE:-}" = "off"), so prose
 # teaching ZENSU_CHAIN='off' disables the gate at runtime. A bare =off pattern

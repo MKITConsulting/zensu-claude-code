@@ -1183,3 +1183,174 @@ test('a symlinked VERSION directory is stepped over too', { skip: process.platfo
 test('a missing store answers empty rather than throwing', () => {
   assert.deepEqual(mod.otherSchemaLedgers(path.join(tmp(), 'nothing-here')), []);
 });
+
+test('a competing write that lands while the replacement is being staged is still detected', () => {
+  // The fingerprint was described as read "immediately before the landing", but
+  // `writeLabels` then ran `ensureLedgerDir` and a full temp write before reaching
+  // `renameSync` — so a writer landing inside that span was overwritten silently, and
+  // the process that lost the update printed success and exited 0. Only the rename may
+  // sit inside the checked window.
+  //
+  // The staging step is injected because it IS the window: interfering from `mutate`
+  // reaches only the half the check already caught.
+  const root = tmp();
+  const p = mod.ledgerPaths(root);
+  mod.writeLabels(p.labels, mod.emptyLabels(), root);
+  let interfered = false;
+  const stage = (labelsFile, labels, stopAt) => {
+    if (!interfered) {
+      interfered = true;
+      const theirs = mod.emptyLabels();
+      theirs.accounts.other = 'Theirs';
+      mod.writeLabels(labelsFile, theirs, stopAt);
+    }
+    return mod.stageLabels(labelsFile, labels, stopAt);
+  };
+  const out = mod.updateLabels(p.labels, (l) => {
+    const next = mod.normalizeLabels(l);
+    next.accounts.mine = 'Mine';
+    return next;
+  }, root, 5, stage);
+  assert.equal(interfered, true, 'the interference has to have happened for this to mean anything');
+  assert.equal(out.accounts.mine, 'Mine', 'our own update still lands');
+  assert.equal(out.accounts.other, 'Theirs', 'and the competing write is not silently overwritten');
+  assert.equal(mod.readLabels(p.labels, root).labels.accounts.other, 'Theirs');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('the successor index is ordered once, so no hop re-sorts the bucket it stands on', () => {
+  // The per-root index rebuild is gone, but each hop still re-filtered, re-sorted and
+  // re-copied the successor list of its own node, and `chainWalks` runs one walk per
+  // root — so many roots into one hub with many successors paid for one sorted pass
+  // per root over the same bucket. Sorting inside the index puts the ordering rule in
+  // ONE place and leaves the walk with a filter.
+  const hub = [
+    edge('h', 'x', at(1)),
+    { ...edge('h', 'y', at(2)), confidence: 'confirmed' },
+    edge('h', 'z', at(3)),
+  ];
+  const idx = mod.indexBySource(hub);
+  const order = idx.get('h').map((e) => e.to.sessionId);
+  // Confidence first, then newest — the same rule `dedupeEdges` and the walk apply,
+  // which is exactly why it must not be spelled twice.
+  assert.deepEqual(order, ['y', 'z', 'x']);
+  // And the walk still answers what it answered before: the index is the only thing
+  // that moved.
+  assert.equal(mod.walkChain('h', hub).links[0].to.sessionId, 'y');
+});
+
+test('a record that vanished during the scan is not reported as an I/O fault', () => {
+  // The store is machine-wide and append-only, and `--forget --apply` unlinks records
+  // while other windows are reading: a name listed by readdir and gone by the open is
+  // the NORMAL case for this concurrency model, not a disk or permission problem.
+  // Reported as UNREADABLE it entered `refused`, and a non-empty `refused` blocks
+  // `--backfill --apply` — so one window's routine cleanup made an unrelated backfill
+  // in another window refuse and write nothing.
+  //
+  // The listing is injected for the same reason `writeEdge` already accepts `nameFor`:
+  // winning the race against a real unlink is not reproducible, while the behaviour
+  // under test — a real open, a real ENOENT, the classification and the exclusion —
+  // is exercised end to end.
+  const root = tmp();
+  const p = mod.ledgerPaths(root);
+  fs.mkdirSync(p.edges, { recursive: true });
+  fs.writeFileSync(path.join(p.edges, '1-a.json'), JSON.stringify(edge('a', 'b', at(1))));
+  // The vocabulary first, and asserted as a VALUE rather than as a difference: an
+  // absent key is unequal to everything, so `notEqual` alone passed against a reason
+  // that did not exist.
+  assert.equal(typeof mod.EDGE_REFUSALS.VANISHED, 'string');
+  assert.notEqual(mod.EDGE_REFUSALS.VANISHED, mod.EDGE_REFUSALS.UNREADABLE);
+  // The seam has to be HONOURED, or the case below proves nothing: a listing naming
+  // only the vanished record must yield no edges at all, which the real readdir —
+  // holding the surviving file — could never produce.
+  const gone = mod.readEdges(p.edges, null, mod.MAX_EDGE_RECORDS, () => ['2-gone.json']);
+  assert.equal(gone.edges.length, 0, 'the injected listing decides what is opened');
+  assert.deepEqual(gone.refused, [], 'a vanished record is not something a human can act on');
+  const out = mod.readEdges(p.edges, null, mod.MAX_EDGE_RECORDS, () => ['1-a.json', '2-gone.json']);
+  assert.equal(out.edges.length, 1, 'the surviving record still reads');
+  assert.deepEqual(out.refused, [], 'and the vanished neighbour still does not block it');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a stamp far above now is refused, so an append-only store cannot be permanently outranked', () => {
+  // The `9999` outcome the ordering comment names as the motivating defect, reached
+  // through a spelling that satisfies every existing guard: the shape matches,
+  // Date.parse is finite, and the round-trip reproduces it exactly. Such a record then
+  // wins the dedupe survivor, the branch preference and the `--where` answer for as
+  // long as the store keeps it, which is forever.
+  assert.equal(mod.isIsoInstant('9999-12-31T23:59:59.999Z'), false);
+  assert.equal(mod.isIsoInstant(new Date(Date.now() + 3 * 86400000).toISOString()), false);
+  // The past stays unbounded — a real ledger is mostly history, and a record is not
+  // suspicious for being old.
+  assert.equal(mod.isIsoInstant('2020-01-01T00:00:00.000Z'), true);
+  // And a small skew is still a legitimate now: refusing at exactly `Date.now()` would
+  // reject a record this machine had just written.
+  assert.equal(mod.isIsoInstant(new Date(Date.now() + 60000).toISOString()), true);
+  // The refusal has to reach the record, not only the predicate.
+  const far = { ...edge('a', 'b', at(1)), recordedAt: '9999-12-31T23:59:59.999Z' };
+  const v = mod.classifyEdge(far);
+  assert.equal(v.ok, false);
+  assert.equal(v.reason, mod.EDGE_REFUSALS.MALFORMED);
+});
+
+test('a revisit is reported even when the node it happened at also has a continuation', () => {
+  // The documented reset flow (adopt a>b, then adopt b>a from the original window)
+  // is only invisible when the node ALSO leads somewhere: the filter drops the seen
+  // successor silently and `forks` is built from the filtered list, so neither
+  // channel mentions it. Assigning the flag in the no-candidates arm alone made it
+  // depend on the revisit being the LAST option rather than on it having happened.
+  const shape = [
+    { ...edge('a', 'b', at(1)), confidence: 'confirmed' },
+    { ...edge('b', 'a', at(2)), confidence: 'confirmed' },
+    { ...edge('b', 'c', at(3)), confidence: 'confirmed' },
+  ];
+  const w = mod.walkChain('a', shape);
+  assert.equal(w.links.length, 2, 'the walk still follows the continuation');
+  assert.equal(w.revisited, true, 'a dropped successor is a revisit whether or not the walk stopped there');
+  // Positive control on the same shape minus the continuation: the terminal arm this
+  // change keeps as the `||` case must still answer true on its own.
+  assert.equal(mod.walkChain('a', shape.slice(0, 2)).revisited, true);
+  // And a chain that genuinely ends still reports neither.
+  assert.equal(mod.walkChain('a', [shape[0]]).revisited, false);
+});
+
+test('the cap keeps the NEWEST records, so a store past it still answers about today', () => {
+  // Exercised through the optional `max` rather than by planting MAX_EDGE_RECORDS+1
+  // files: the DIRECTION of the slice is the whole property, and twenty thousand
+  // writes would buy nothing but wall clock on the Windows shard this suite already
+  // saturates.
+  const root = tmp();
+  const p = mod.ledgerPaths(root);
+  fs.mkdirSync(p.edges, { recursive: true });
+  for (let i = 1; i <= 4; i += 1) {
+    fs.writeFileSync(path.join(p.edges, `${i}-r.json`), JSON.stringify(edge(`s${i}`, `t${i}`, at(i))));
+  }
+  const out = mod.readEdges(p.edges, null, 3);
+  assert.equal(out.truncated, true, 'a bounded read must still say it was bounded');
+  const ids = out.edges.map((e) => e.from.sessionId).sort();
+  assert.deepEqual(ids, ['s2', 's3', 's4'], 'the OLDEST record is the one dropped, never the newest');
+  // The one input the implementation comment singles out. `slice(-0)` is `slice(0)`,
+  // which returns EVERYTHING, so this line is red for the shorthand and green for the
+  // arithmetic that replaced it — and nothing else in the suite distinguishes them.
+  assert.equal(mod.readEdges(p.edges, null, 0).edges.length, 0, 'a cap of zero admits nothing');
+  // A seam may only TIGHTEN. A caller asking for more than the module's own bound gets
+  // the module's bound, or the cap on a machine-wide directory is caller policy.
+  assert.equal(mod.readEdges(p.edges, null, mod.MAX_EDGE_RECORDS + 1000).edges.length, 4);
+  // And the injected listing is held to the same NAME rule the real one satisfies
+  // structurally: a name that is not a single path component is refused, not joined.
+  const escaped = mod.readEdges(p.edges, null, mod.MAX_EDGE_RECORDS, () => ['../outside.json', '1-r.json']);
+  assert.equal(escaped.edges.length, 1, 'only the well-named record is read');
+  assert.deepEqual(escaped.refused.map((r) => r.file), ['../outside.json']);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('the future bound is the declared constant, not merely an order of magnitude', () => {
+  // Both sides of the boundary, against a FIXED clock and the exported value. The
+  // behavioural case above brackets the bound between a minute and three days, which
+  // any value in that range satisfies — so the constant itself was unpinned and could
+  // move without a red.
+  const T = Date.parse('2026-06-01T00:00:00.000Z');
+  const at = (ms) => new Date(T + ms).toISOString();
+  assert.equal(mod.isIsoInstant(at(mod.MAX_FUTURE_SKEW_MS), T), true, 'exactly at the bound is still now');
+  assert.equal(mod.isIsoInstant(at(mod.MAX_FUTURE_SKEW_MS + 1), T), false, 'one millisecond past it is not');
+});

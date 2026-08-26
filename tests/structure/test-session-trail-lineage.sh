@@ -65,22 +65,45 @@ UNIT_SKIP="$(printf '%s' "$UNIT_OUT" | sed -n 's/^.*[[:space:]]skipped \([0-9][0
 case "$UNIT_TOTAL" in ''|*[!0-9]*) UNIT_TOTAL=0 ;; esac
 case "$UNIT_PASS" in ''|*[!0-9]*) UNIT_PASS=0 ;; esac
 case "$UNIT_SKIP" in ''|*[!0-9]*) UNIT_SKIP=0 ;; esac
-# EXACT, not a floor. A pass floor accepts a case that quietly started skipping
-# itself -- which is precisely how a platform-gated case dies: the gate widens, the
-# case stops running, and the suite still reports green with a smaller pass count
-# than the floor allows for. TWELVE cases carry `skip: process.platform === 'win32'`
-# (symlinks, modes, and the O_NONBLOCK probe); TWO of those ALSO skip as root,
-# where a mode guard cannot be observed at all. Both numbers are hand-maintained on
-# purpose: deriving them from the file under test would make the check agree with
-# whatever that file currently says.
+# EXACT, not a floor -- and now that applies to the TOTAL as well. A pass floor
+# accepts a case that quietly started skipping itself, which is precisely how a
+# platform-gated case dies: the gate widens, the case stops running, and the suite
+# still reports green with a smaller pass count than the floor allows for. The old
+# `-ge 61` against 71 registered cases left ten of them deletable with everything
+# green, so the floor had the same defect one axis over.
+#
+# SEVENTEEN cases carry a win32 skip, in TWO spellings: twelve write the plain
+# boolean `skip: process.platform === 'win32'` and five write a ternary that yields a
+# STRING reason, which node:test counts as a skip just the same. Counting one spelling
+# reported 12 against an actual 17 and took the whole lineage suite red on
+# windows-shard-3 for a reason unrelated to the module. TWO of the seventeen ALSO skip
+# as root, where a mode guard cannot be observed at all.
+#
+# All three numbers stay hand-maintained on purpose: deriving them from the file under
+# test would make the check agree with whatever that file currently says.
 UNIT_PLATFORM="$(node -p 'process.platform' 2>/dev/null)"
 UNIT_ROOT="$(node -p 'process.platform !== "win32" && typeof process.getuid === "function" && process.getuid() === 0 ? 2 : 0' 2>/dev/null)"
 case "$UNIT_ROOT" in ''|*[!0-9]*) UNIT_ROOT=0 ;; esac
-if [ "$UNIT_PLATFORM" = "win32" ]; then UNIT_SKIP_WANT=12; else UNIT_SKIP_WANT="$UNIT_ROOT"; fi
-if [ "$UNIT_RC" = "0" ] && [ "$UNIT_TOTAL" -ge 61 ] && [ "$UNIT_SKIP" = "$UNIT_SKIP_WANT" ] && [ "$UNIT_PASS" = "$((UNIT_TOTAL - UNIT_SKIP))" ]; then
+UNIT_TOTAL_WANT=78
+UNIT_WIN_SKIP_WANT=17
+# The win32 count is enforced only ON win32, so a case whose gate widened would drift
+# until the Windows shard ran -- one CI round after the edit, which is how the
+# 12-against-17 miss reached a shard in the first place. Derived here as a SECOND,
+# independent count from the source, so the number fails on the platform the edit is
+# made on. Deliberately a different measurement from the runtime one: this counts
+# DECLARATIONS, that counts node:test's own tally, and they agree only while both hold.
+UNIT_SKIP_DECLS="$(grep -c 'skip: process.platform' "$PLUGIN_DIR/tests/structure/session-lineage-v1.test.js" || true)"
+case "$UNIT_SKIP_DECLS" in ''|*[!0-9]*) UNIT_SKIP_DECLS=0 ;; esac
+if [ "$UNIT_SKIP_DECLS" = "$UNIT_WIN_SKIP_WANT" ]; then
+  check "L-unit-decls the win32 skip expectation matches the declarations in the file ($UNIT_SKIP_DECLS)" PASS
+else
+  check "L-unit-decls win32 skip declarations drifted (source has $UNIT_SKIP_DECLS, the expectation is $UNIT_WIN_SKIP_WANT)" FAIL
+fi
+if [ "$UNIT_PLATFORM" = "win32" ]; then UNIT_SKIP_WANT="$UNIT_WIN_SKIP_WANT"; else UNIT_SKIP_WANT="$UNIT_ROOT"; fi
+if [ "$UNIT_RC" = "0" ] && [ "$UNIT_TOTAL" = "$UNIT_TOTAL_WANT" ] && [ "$UNIT_SKIP" = "$UNIT_SKIP_WANT" ] && [ "$UNIT_PASS" = "$((UNIT_TOTAL - UNIT_SKIP))" ]; then
   check "L-unit session-lineage-v1.test.js passes ($UNIT_PASS/$UNIT_TOTAL cases, $UNIT_SKIP skipped on $UNIT_PLATFORM)" PASS
 else
-  check "L-unit session-lineage-v1.test.js (rc=$UNIT_RC pass=${UNIT_PASS:-0} total=${UNIT_TOTAL:-0} skipped=${UNIT_SKIP:-0}, want total>=61 and exactly $UNIT_SKIP_WANT skipped on $UNIT_PLATFORM)" FAIL
+  check "L-unit session-lineage-v1.test.js (rc=$UNIT_RC pass=${UNIT_PASS:-0} total=${UNIT_TOTAL:-0} skipped=${UNIT_SKIP:-0}, want exactly $UNIT_TOTAL_WANT cases and exactly $UNIT_SKIP_WANT skipped on $UNIT_PLATFORM)" FAIL
   printf '%s\n' "$UNIT_OUT" | tail -20
 fi
 
@@ -914,7 +937,17 @@ try {
 ' "$CFG/zensu/session-lineage/v1/labels.json" "$1"
 }
 window_keys() { label_keys windows; }
-[ -n "$(window_keys)" ] && check "L32c-control a pid-shaped key lands in the window namespace" PASS || check "L32c-control a pid-shaped key lands in the window namespace (windows is empty)" FAIL
+if [ -n "$(window_keys)" ]; then
+  check "L32c-control a pid-shaped key lands in the window namespace" PASS
+else
+  # Every window-keyed check below depends on this one, and when the process probe
+  # cannot answer they all fail against a labels.json that was never created — which
+  # is what happened on the Windows runner and cost a whole shard to diagnose. The
+  # probe's own health line is printed HERE so the next reader gets the cause with the
+  # first failure instead of eight symptoms.
+  check "L32c-control a pid-shaped key lands in the window namespace (windows is empty)" FAIL
+  echo "        probe: $(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --diagnose 2>&1 | grep -i 'process start' || echo 'diagnose produced no process-start line')"
+fi
 trail "$STORE" "$SID_C" "$LIVE_PID" label --remove "$LIVE_PID" >/dev/null
 [ -z "$(window_keys)" ] && check "L32c label --remove reaches the window namespace too, not only accounts" PASS || check "L32c label --remove reaches the window namespace (windows holds $(window_keys))" FAIL
 
@@ -1446,7 +1479,14 @@ cyc 1 "$SID_A" "$SID_B"
 TXT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --repo "$OTHER_REPO")"
 case "$TXT" in *MIGRATION*) check "L49 a populated current store is not reported as a migration just because THIS repo has no handovers" FAIL ;; *) check "L49 a populated current store is not reported as a migration just because THIS repo has no handovers" PASS ;; esac
 OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --repo "$OTHER_REPO" --json)"
-[ "$(jq_field "$OUT" otherSchemaLedgers)" = "[]" ] && check "L49a and the machine channel agrees -- the probe did not run" PASS || check "L49a the machine channel agrees (got $(jq_field "$OUT" otherSchemaLedgers))" FAIL
+# The machine channel REPORTS what it enumerated, and always enumerates. It used to
+# skip the probe whenever the current store held anything and emit `[]` regardless, so
+# a consumer could not tell "checked, none" from "not checked" -- and the human notice
+# decayed with it. The text above stays free of MIGRATION; only the payload carries it.
+case "$(jq_field "$OUT" otherSchemaLedgers)" in
+  '[]'|ABSENT|'') check "L49a the machine channel reports the foreign store it enumerated" FAIL ;;
+  *) check "L49a the machine channel reports the foreign store it enumerated" PASS ;;
+esac
 # The control: with the current store genuinely empty, the migration report must
 # still fire without --all, or the fix would simply have disabled the feature.
 reset_ledger
@@ -1648,9 +1688,21 @@ const fs = require("node:fs");
 try { process.stdout.write(fs.lstatSync(process.argv[1]).isSymbolicLink() ? "YES" : "NO"); }
 catch { process.stdout.write("NO"); }
 ' "$CFG/zensu/session-lineage/v1/edges")"
-[ "$IS_LINK" = YES ] && check "L55c-control the edges path is really a symlink, not a copy this host substituted" PASS || check "L55c-control the edges path is really a symlink (got $IS_LINK)" FAIL
-OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --json --all)"
-case "$(jq_field "$OUT" ledgerError)" in ''|null|ABSENT|PARSE_ERROR) check "L55c a symlinked edges directory is reported, not read through (got $(jq_field "$OUT" ledgerError))" FAIL ;; *) check "L55c a symlinked edges directory is reported, not read through" PASS ;; esac
+# `ln -s` exiting 0 is not evidence of a symlink: Git Bash on the Windows runner
+# satisfies it with a copy or a shortcut that native Node does not follow, and the two
+# directories then genuinely differ -- so NOT reporting a ledgerError is the CORRECT
+# answer there, and failing on it graded the host rather than the guard. The control
+# already measured the premise; it just treated a host that cannot hold it as a defect.
+# Stated as a skip, so a host that silently stopped creating symlinks is visible
+# instead of being absorbed into a pass.
+if [ "$IS_LINK" = YES ]; then
+  check "L55c-control the edges path is really a symlink, not a copy this host substituted" PASS
+  OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --json --all)"
+  case "$(jq_field "$OUT" ledgerError)" in ''|null|ABSENT|PARSE_ERROR) check "L55c a symlinked edges directory is reported, not read through (got $(jq_field "$OUT" ledgerError))" FAIL ;; *) check "L55c a symlinked edges directory is reported, not read through" PASS ;; esac
+else
+  skip "L55c-control this host did not create a symlink (ln -s produced $IS_LINK) — the premise does not hold here"
+  skip "L55c a symlinked edges directory is reported, not read through — unverifiable without a real symlink"
+fi
 rm -f "$CFG/zensu/session-lineage/v1/edges"
 reset_ledger
 
@@ -1815,28 +1867,28 @@ case "$IN_BODY" in *"truncatedNote("*) check "L57h the record cap reaches the in
 CTRL_CHAR="$(printf '\001')"
 reset_ledger
 LBL_PID="$LIVE_PID"
-OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label "$LBL_PID" "window under test" --all)"
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label "$LBL_PID" "window under test")"
 STORED_KEY="$(window_keys)"
 case "$STORED_KEY" in ''|UNREADABLE) check "L58-control the set path stored a window label to remove" FAIL ;; *) check "L58-control the set path stored a window label to remove" PASS ;; esac
 # The raw spelling fails /^\d+(@|$)/ and the bounded one passes it, so the two
 # disagree about which namespace to look in.
-OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label --remove "${CTRL_CHAR}${LBL_PID}" --all --json)"
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label --remove "${CTRL_CHAR}${LBL_PID}" --json)"
 [ "$(jq_field "$OUT" kind)" = "window" ] && check "L58 the key kind is decided on the bounded spelling, not the raw one" PASS || check "L58 the key kind is decided on the bounded spelling (kind=$(jq_field "$OUT" kind))" FAIL
 [ "$(jq_field "$OUT" removed)" = "true" ] && check "L58a and the label the tool stored is one that spelling can remove" PASS || check "L58a the label is removable through the bounded spelling (removed=$(jq_field "$OUT" removed))" FAIL
 
 # A key that bounds to nothing must be refused, not restored to its raw form. The
 # `|| target` fallback made the bound a no-op for precisely the input it exists to
 # reject, and that value then became a stored key and a printed one.
-OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label --remove "${CTRL_CHAR}${CTRL_CHAR}" --all 2>&1)"
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label --remove "${CTRL_CHAR}${CTRL_CHAR}" 2>&1)"
 case "$OUT" in *"no usable"*|*"not a usable"*) check "L58b a key that bounds to nothing is refused rather than used raw" PASS ;; *) check "L58b a key that bounds to nothing is refused (got $(printf '%s' "${OUT:-<empty>}" | tr -d '\001' | head -c 90))" FAIL ;; esac
 # The same rule on the SET path, which stores the key rather than only reading it.
-OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label "${CTRL_CHAR}${CTRL_CHAR}" "some text" --all 2>&1)"
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label "${CTRL_CHAR}${CTRL_CHAR}" "some text" 2>&1)"
 case "$OUT" in *"no usable"*|*"not a usable"*) check "L58c and the set path refuses it too, before it reaches the file" PASS ;; *) check "L58c the set path refuses an unusable key (got $(printf '%s' "${OUT:-<empty>}" | tr -d '\001' | head -c 90))" FAIL ;; esac
 # The ordinary spellings must survive both changes -- a guard that refused every
 # key would satisfy the two assertions above on its own.
-OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label "$ACCT_A" "ordinary account label" --all --json)"
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label "$ACCT_A" "ordinary account label" --json)"
 [ "$(jq_field "$OUT" kind)" = "account" ] && check "L58d-control an ordinary account key still sets, and still reads as an account" PASS || check "L58d-control an ordinary account key still sets (kind=$(jq_field "$OUT" kind))" FAIL
-OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label --remove "$ACCT_A" --all --json)"
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label --remove "$ACCT_A" --json)"
 [ "$(jq_field "$OUT" removed)" = "true" ] && check "L58e-control and removing it still works through the plain spelling" PASS || check "L58e-control removing an ordinary account key still works (removed=$(jq_field "$OUT" removed))" FAIL
 reset_ledger
 
@@ -2138,6 +2190,192 @@ if printf '%s\n' "$PROBE_FN" | grep -q "PSModulePath: path.join(root," \
   check "L64b PSModulePath is derived from the resolved root, never inherited" PASS
 else
   check "L64b PSModulePath is derived from the resolved root, never inherited" FAIL
+fi
+
+# -- L65 -- --where resolves against DEDUPLICATED edges ---------------------
+# The listing branches walk dedupeEdges(...); this one walked the raw array. Running
+# `takeover` twice is documented as routine, and two records for one pair then made the
+# walk see two candidates from the same node: it took one and reported the OTHER as a
+# fork, so the answer named the session as a branch away from itself. Unscoped is
+# correct and documented; undeduped is not, and dedupeEdges collapses on the session
+# pair alone, so deduping preserves the unscoped property exactly.
+reset_ledger
+cyc 1 "$SID_A" "$SID_B"
+cyc 2 "$SID_A" "$SID_B"
+DUP_OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --where "$SID_A" --json --all)"
+DUP_FORKS="$(jq_field "$DUP_OUT" forks)"
+if [ "$DUP_FORKS" = "[]" ]; then
+  check "L65 a re-run takeover is one handover, not a fork of the session with itself" PASS
+else
+  check "L65 a re-run takeover is one handover (forks=${DUP_FORKS:-<empty>})" FAIL
+fi
+# The answer itself must survive the dedupe: collapsing must not lose the link.
+DUP_CUR="$(jq_field "$DUP_OUT" current.sessionId)"
+if [ "$DUP_CUR" = "$SID_B" ]; then
+  check "L65a-control the deduplicated walk still answers with the continuing session" PASS
+else
+  check "L65a-control the deduplicated walk still answers (want $SID_B, got ${DUP_CUR:-<empty>})" FAIL
+fi
+# Positive control: a REAL fork -- one node, two different successors -- is still
+# reported, so the dedupe cannot be mistaken for suppressing forks altogether.
+reset_ledger
+cyc 1 "$SID_A" "$SID_B"
+cyc 2 "$SID_A" "$SID_C"
+FORK_OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --where "$SID_A" --json --all)"
+case "$(jq_field "$FORK_OUT" forks)" in
+  '[]'|ABSENT|'') check "L65b-control a genuine fork is still reported after the dedupe" FAIL ;;
+  *) check "L65b-control a genuine fork is still reported after the dedupe" PASS ;;
+esac
+
+# -- L66 -- every parsed flag is scoped to the verbs that read it -----------
+# refuseForeignFlags built `supplied` from ten of the eighteen flags parseArgs
+# accepts, so `--json`, `--all`, `--live`, `--no-git`, `--config-dir`, `--days`,
+# `--prompts` and `--repo` were accepted by every verb and silently ignored by the
+# ones that never read them. SKILL.md states the refusal is general with two
+# exceptions, so the gap was a documented promise the code did not keep.
+DAYS_OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --days 3 --all)"
+case "$DAYS_OUT" in
+  *"not a flag of \`lineage\`"*) check "L66 lineage refuses --days instead of answering machine-wide behind it" PASS ;;
+  *) check "L66 lineage refuses --days (got ${DAYS_OUT:-<empty>})" FAIL ;;
+esac
+# The two flags every verb genuinely reads must stay accepted, or the whole suite --
+# which appends --config-dir to every invocation -- would be refusing itself.
+CFGOK="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --json --all)"
+case "$CFGOK" in
+  *"not a flag of"*) check "L66a-control --config-dir and --json stay accepted everywhere" FAIL ;;
+  *) check "L66a-control --config-dir and --json stay accepted everywhere" PASS ;;
+esac
+# And a flag a verb DOES read is still accepted on it.
+PROMPT_OK="$(trail "$STORE" "$SID_C" "$LIVE_PID" list --days 3 --all)"
+case "$PROMPT_OK" in
+  *"not a flag of"*) check "L66b-control list still accepts --days, which it reads" FAIL ;;
+  *) check "L66b-control list still accepts --days, which it reads" PASS ;;
+esac
+# A SECOND bite, on the row that forced six existing invocations to change: `label`
+# reaches no scan, so it must refuse the scan flags. Without this, `--days` on
+# `lineage` was the only one of the eight newly scoped flags with a behavioural test.
+LBL_ALL="$(trail "$STORE" "$SID_C" "$LIVE_PID" label "$ACCT_A" "x" --all 2>&1)"
+case "$LBL_ALL" in
+  *"not a flag of \`label\`"*) check "L66c label refuses --all, which it never reads" PASS ;;
+  *) check "L66c label refuses --all (got ${LBL_ALL:-<empty>})" FAIL ;;
+esac
+# The two lists refuseForeignFlags depends on must stay the same length: parseArgs
+# recognises N flags and `supplied` must report N. A nineteenth flag added to the
+# parser alone re-opens exactly the defect L66 exists to remove, and nothing else in
+# the tree compares them.
+FLAG_PARSED="$(grep -oE "a === '--[a-z-]+'" "$TRAIL_MJS" | sort -u | wc -l | tr -d ' ')"
+FLAG_SCOPED="$(grep -oE "supplied\.push\('--[a-z-]+'\)" "$TRAIL_MJS" | sort -u | wc -l | tr -d ' ')"
+if [ "$FLAG_PARSED" = "$FLAG_SCOPED" ] && [ "$FLAG_PARSED" -ge 18 ]; then
+  check "L66d every flag parseArgs recognises is one refuseForeignFlags scopes ($FLAG_PARSED)" PASS
+else
+  check "L66d flag scoping is incomplete (parseArgs recognises $FLAG_PARSED, refuseForeignFlags reports $FLAG_SCOPED)" FAIL
+fi
+
+# -- L67 -- the other-schema disclosure does not decay ----------------------
+# renderMigration returned early on ownCount > 0, so after a schema bump the notice
+# fired only until the first record landed in the new store and then never again while
+# the old history sat beside it. The --json half emitted an empty array for a store it
+# had never enumerated, so a consumer could not tell "checked, none" from "not checked".
+reset_ledger
+mkdir -p "$CFG/zensu/session-lineage/v0/edges"
+printf '{"schemaVersion":0,"from":{"sessionId":"a"},"to":{"sessionId":"b"}}' > "$CFG/zensu/session-lineage/v0/edges/1-aaaaaaaaaaaaaaaa.json"
+cyc 1 "$SID_A" "$SID_B"
+MIG_JSON="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --json --all)"
+case "$(jq_field "$MIG_JSON" otherSchemaLedgers)" in
+  '[]'|ABSENT|'') check "L67 --json reports the foreign store it enumerated, not an empty array it never checked" FAIL ;;
+  *) check "L67 --json reports the foreign store it enumerated, not an empty array it never checked" PASS ;;
+esac
+MIG_TEXT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --all)"
+case "$MIG_TEXT" in
+  *"another schema"*) check "L67a the disclosure survives the first record landing in the current store" PASS ;;
+  *) check "L67a the disclosure survives the first record landing in the current store" FAIL ;;
+esac
+# It must not swallow the ordinary answer either: the current store's own chain still
+# renders beside the disclosure.
+case "$MIG_TEXT" in
+  *"$(printf '%.8s' "$SID_A")"*) check "L67b-control the current store's own chain still renders beside it" PASS ;;
+  *) check "L67b-control the current store's own chain still renders beside it" FAIL ;;
+esac
+rm -rf "$CFG/zensu/session-lineage/v0"
+
+# -- L68 -- a durable opt-out for a machine-wide, permanent store -----------
+# Collection was default-on with no way to decline it: --no-record is per-invocation
+# and takeover-only, and no config key or environment variable disabled the write. The
+# store is machine-wide, permanent until someone runs `lineage --forget`, and outside
+# every Write-tool gate, so "never record my lineage" was not expressible at all.
+reset_ledger
+OPTOUT="$(ZENSU_SESSION_LINEAGE=off trail "$STORE" "$SID_C" "$LIVE_PID" takeover "$SID_A" --all)"
+if [ "$(edge_count)" = "0" ]; then
+  check "L68 ZENSU_SESSION_LINEAGE=off writes no ledger record" PASS
+else
+  check "L68 ZENSU_SESSION_LINEAGE=off writes no ledger record (edges=$(edge_count))" FAIL
+fi
+# Refusing SILENTLY would be worse than not offering the switch: a user who set it
+# must be able to see that it took effect.
+case "$OPTOUT" in
+  *"ZENSU_SESSION_LINEAGE"*) check "L68a the refusal names the variable that caused it" PASS ;;
+  *) check "L68a the refusal names the variable that caused it (got ${OPTOUT:-<empty>})" FAIL ;;
+esac
+# The confirmation verb is covered too, or the opt-out leaks through the one command
+# whose entire purpose is to write the record.
+ZENSU_SESSION_LINEAGE=off trail "$STORE" "$SID_C" "$LIVE_PID" adopt "$SID_A" --all >/dev/null 2>&1
+if [ "$(edge_count)" = "0" ]; then
+  check "L68b the opt-out covers adopt, not only takeover" PASS
+else
+  check "L68b the opt-out covers adopt, not only takeover (edges=$(edge_count))" FAIL
+fi
+# Positive control: without the variable the same takeover still records, so the case
+# above cannot pass because the command was broken for an unrelated reason.
+reset_ledger
+trail "$STORE" "$SID_C" "$LIVE_PID" takeover "$SID_A" --all >/dev/null 2>&1
+if [ "$(edge_count)" != "0" ]; then
+  check "L68c-control the same takeover records when the variable is unset" PASS
+else
+  check "L68c-control the same takeover records when the variable is unset" FAIL
+fi
+# The documented "any other value leaves recording on" half. Without it a regression to
+# a presence test -- `if (process.env.ZENSU_SESSION_LINEAGE)` -- passes every check
+# above, because they only ever distinguish "off" from absent.
+reset_ledger
+ZENSU_SESSION_LINEAGE=on trail "$STORE" "$SID_C" "$LIVE_PID" takeover "$SID_A" --all >/dev/null 2>&1
+if [ "$(edge_count)" != "0" ]; then
+  check "L68d-control a value that is not 'off' leaves recording on" PASS
+else
+  check "L68d-control a value that is not 'off' leaves recording on (edges=$(edge_count))" FAIL
+fi
+# The label namespace is the store's SECOND writer, in the same directory. Gating only
+# the edge write left the switch's own promise false.
+reset_ledger
+ZENSU_SESSION_LINEAGE=off trail "$STORE" "$SID_C" "$LIVE_PID" label "$ACCT_A" "should not land" >/dev/null 2>&1
+if [ ! -f "$CFG/zensu/session-lineage/v1/labels.json" ] || [ "$(label_keys accounts)" = "" ]; then
+  check "L68e the opt-out covers the labels write, not only the edge write" PASS
+else
+  check "L68e the opt-out covers the labels write (accounts=$(label_keys accounts))" FAIL
+fi
+
+# -- L69 -- the win32 process probe carries no argument-quoting dependency --
+# The probe passed a -Command string containing embedded double quotes through
+# execFileSync. Node quotes Windows arguments by escaping `"` as `\"`, and
+# powershell.exe's own parser then re-reads those backslashes -- the documented
+# mangling class. An empty process table makes windowKey() answer null, so no window
+# label is ever written; eight checks in this suite failed on the Windows runner
+# against a labels.json that had never been created. Encoding removes the ambiguity
+# rather than guessing which layer ate which character.
+# The QUOTED TOKEN, not the bare word: the comment two lines above the code spells
+# `-EncodedCommand` in prose, so a bare needle was satisfied by the explanation of the
+# fix rather than by the fix. And the token must occur exactly ONCE, or a second copy
+# in prose re-opens the same hole the quoted form just closed.
+ENC_HITS="$(grep -c -- "'-EncodedCommand'," "$TRAIL_MJS" || true)"
+case "$ENC_HITS" in ''|*[!0-9]*) ENC_HITS=0 ;; esac
+if [ "$ENC_HITS" = "1" ]; then
+  check "L69 the win32 probe passes its program through an encoded channel" PASS
+else
+  check "L69 the win32 probe passes its program through an encoded channel (argument-position hits: $ENC_HITS)" FAIL
+fi
+if grep -q -- "-Command'," "$TRAIL_MJS"; then
+  check "L69a no -Command spelling survives beside it" FAIL
+else
+  check "L69a no -Command spelling survives beside it" PASS
 fi
 
 # -- L28/L29 -- the suite's own isolation, scanned rather than assumed ------

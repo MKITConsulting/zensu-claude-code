@@ -130,7 +130,7 @@ function parseArgs(argv) {
     _: [], days: 21, prompts: 12, json: false, all: false, live: false, git: true, repo: null, force: false,
     configDir: null, where: null, diagnose: false, backfill: false, apply: false, record: true, reason: null, self: false,
     forget: null, remove: null,
-    daysExplicit: false,
+    daysExplicit: false, promptsExplicit: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -160,7 +160,7 @@ function parseArgs(argv) {
     // "(N earlier omitted)" self-report suppressed by the same NaN. The mistake
     // ran towards maximum disclosure and reported nothing.
     else if (a === '--days') { out.days = numericOperand(a, argv[++i]); out.daysExplicit = true; }
-    else if (a === '--prompts') out.prompts = numericOperand(a, argv[++i]);
+    else if (a === '--prompts') { out.prompts = numericOperand(a, argv[++i]); out.promptsExplicit = true; }
     else if (a === '--repo') out.repo = stringOperand(a, argv[++i]);
     else if (a.startsWith('--')) fail(`unknown flag: ${a}`);
     else out._.push(a);
@@ -938,13 +938,22 @@ function processTable() {
       let shellStat;
       try { shellStat = fs.lstatSync(shell); } catch { return PROC_TABLE; }
       if (!shellStat.isFile()) return PROC_TABLE;
-      out = execFileSync(shell, ['-NoProfile', '-NonInteractive', '-Command',
-        // The CreationDate is rendered explicitly, in UTC and under the invariant
-        // culture. `"$($_.CreationDate)"` follows the ambient culture, so changing
-        // the machine's locale or timezone changed the token and silently unbound
-        // every window label — the POSIX branch pins LC_ALL/TZ for the same reason
-        // and the token's own comment leans on that pin.
-        "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.CreationDate.ToUniversalTime().ToString('yyyyMMddHHmmss',[Globalization.CultureInfo]::InvariantCulture))`t$($_.Name)\" }"],
+      // The CreationDate is rendered explicitly, in UTC and under the invariant
+      // culture. `"$($_.CreationDate)"` follows the ambient culture, so changing
+      // the machine's locale or timezone changed the token and silently unbound
+      // every window label — the POSIX branch pins LC_ALL/TZ for the same reason
+      // and the token's own comment leans on that pin.
+      const program = "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.CreationDate.ToUniversalTime().ToString('yyyyMMddHHmmss',[Globalization.CultureInfo]::InvariantCulture))`t$($_.Name)\" }";
+      // -EncodedCommand, not -Command. The program carries embedded double quotes, and
+      // Node escapes those as `\"` when it builds a Windows command line; powershell.exe
+      // then re-reads the backslashes with its own rules, which is the documented
+      // argument-mangling class. The observable result was an EMPTY process table on the
+      // Windows runner: windowKey() answered null, no window label was ever written, and
+      // eight checks failed against a labels.json that had never been created. Base64
+      // UTF-16LE removes the ambiguity instead of guessing which layer ate which
+      // character — there is nothing left for either parser to interpret.
+      out = execFileSync(shell, ['-NoProfile', '-NonInteractive', '-EncodedCommand',
+        Buffer.from(program, 'utf16le').toString('base64')],
       { encoding: 'utf8',
         timeout: 8000,
         stdio: ['ignore', 'pipe', 'ignore'],
@@ -1083,8 +1092,34 @@ function windowOf(pid, table = processTable()) {
 // second one's records, and a consumer that never read at all still rendered a
 // clean null ledger error as though it had measured one.
 
+// The one durable way to decline collection. `--no-record` is per-invocation and
+// `takeover`-only, so a user who wants no lineage recorded at all had nothing to set:
+// the store is machine-wide, permanent until someone runs `lineage --forget`, and
+// written from inside a node process that no Write-tool hook can see.
+//
+// It REFUSES rather than returning quietly, and the message names the variable — a
+// switch whose effect is indistinguishable from a broken command teaches the user
+// nothing, and every caller of `ledgerWrite` already renders the reason it was given.
+// The check lives at the single write chokepoint on purpose: a per-verb check is one
+// a later verb can forget.
+const LINEAGE_DISABLED = 'lineage recording is disabled by ZENSU_SESSION_LINEAGE=off — nothing was written';
+
+function lineageRecordingDisabled() {
+  return String(process.env.ZENSU_SESSION_LINEAGE || '').trim().toLowerCase() === 'off';
+}
+
 function ledgerWrite(edge) {
+  if (lineageRecordingDisabled()) throw new Error(LINEAGE_DISABLED);
   return writeEdge(LEDGER_DIR, edge, Date.now(), CONFIG_ROOT);
+}
+
+// The store has TWO writers, and the switch has to cover both or its promise is false:
+// `labels.json` sits in the same directory as the edges and names accounts and windows.
+// `label --remove` is deliberately NOT gated — it REMOVES recorded information, and a
+// privacy control that blocked a deletion would work against the person who set it.
+function labelsSet(mutate) {
+  if (lineageRecordingDisabled()) throw new Error(LINEAGE_DISABLED);
+  return updateLabels(LABELS_FILE, mutate, CONFIG_ROOT);
 }
 
 // A refused record is COUNTED, never dropped silently, and a directory that could
@@ -2928,7 +2963,7 @@ function cmdLabel(opts) {
   // its own bounded retry.
   let next;
   try {
-    next = updateLabels(LABELS_FILE, (cur) => {
+    next = labelsSet((cur) => {
       // Object.assign onto the module's own maps: an object-literal spread would give
       // them Object.prototype back, and a `__proto__` key would then hit the inherited
       // setter, store nothing, and still be reported as written.
@@ -2941,7 +2976,7 @@ function cmdLabel(opts) {
       if (kind === 'window') merged.windows[target] = bounded;
       else merged.accounts[target] = bounded;
       return merged;
-    }, CONFIG_ROOT);
+    });
   } catch (e) {
     fail(`could not write ${LABELS_FILE}: ${e && e.message ? e.message : 'write failed'}`);
   }
@@ -3220,7 +3255,11 @@ function renderLedgerFault(led) {
 
 function truncatedNote(led) {
   return led && led.truncated
-    ? `only the first ${MAX_EDGE_RECORDS} record(s) were read — this is a prefix of the ledger, not a measurement of it`
+    // "the first" was true while the reader sliced from the head. It now keeps the
+    // NEWEST records, and this one owner feeds every truncation line the operator sees
+    // — including BACKFILL REFUSED — so the sentence pointed at precisely the half that
+    // was evicted.
+    ? `only the most recent ${MAX_EDGE_RECORDS} record(s) were read — this is the newest slice of the ledger, not a measurement of it`
     : null;
 }
 
@@ -3230,10 +3269,22 @@ function truncatedNote(led) {
 // a repo that simply has no handovers report machine-wide blindness while the
 // current store held plenty for other repos — and suppressed the ordinary guidance
 // while doing it. Returns true when it rendered, so a caller knows to stop.
+//
+// And it no longer EXTINGUISHES itself. Gated on `ownCount > 0` the notice fired only
+// until the first record landed in the new store and then never again, while the old
+// history sat beside it unread — the fact it reports is about the STORE and does not
+// stop being true because one record has since been written. The full block still
+// belongs to the empty-store case, where there is no other answer to give; once the
+// current store answers for itself the disclosure shrinks to one line above that
+// answer rather than replacing it.
 function renderMigration(ownCount) {
-  if (ownCount > 0) return false;
   const foreign = otherSchemaLedgers(CONFIG_ROOT);
   if (!foreign.length) return false;
+  if (ownCount > 0) {
+    const held = foreign.reduce((n, f) => n + f.records, 0);
+    print(`! ${held} record(s) live in another schema directory and are NOT read here — run \`lineage --diagnose\` for the paths.\n`);
+    return false;
+  }
   print('This build reads none of the records this machine already holds:\n');
   for (const f of foreign) print(`  v${f.version} (${f.relation} schema)   ${f.records} record(s)${f.truncated ? ' (bounded read)' : ''}   ${f.dir}`);
   print('');
@@ -3429,7 +3480,7 @@ function cmdLineage(opts) {
       process.exit(2);
     }
     if (!match.length) {
-      if (opts.json) return print(JSON.stringify({ query: opts.where, found: false, otherSchemaLedgers: (led.edges.length || led.directoryError) ? [] : otherSchemaLedgers(CONFIG_ROOT), ledgerTruncated: led.truncated, ledgerError: led.directoryError, schemaNewer: led.schemaNewer, skipped: SKIPPED }, null, 2));
+      if (opts.json) return print(JSON.stringify({ query: opts.where, found: false, otherSchemaLedgers: led.directoryError ? [] : otherSchemaLedgers(CONFIG_ROOT), ledgerTruncated: led.truncated, ledgerError: led.directoryError, schemaNewer: led.schemaNewer, skipped: SKIPPED }, null, 2));
       // The same migration check the listing path takes. Without it this sibling
       // branch kept offering the reconstruction on a store the schema had moved out
       // from under — the exact offer the listing path stopped making, surviving one
@@ -3498,7 +3549,7 @@ function cmdLineage(opts) {
     // of the records this machine holds" is a claim about the store, and a repo
     // with no handovers of its own is not evidence for it. Computed only when the
     // own store is empty, which keeps a directory read off every ordinary call.
-    return print(JSON.stringify({ repo: ctx && ctx.root, chains, edgeCount: scoped.length, otherSchemaLedgers: (led.edges.length || led.directoryError) ? [] : otherSchemaLedgers(CONFIG_ROOT), ledgerTruncated: led.truncated, ledgerError: led.directoryError, schemaNewer: led.schemaNewer, skipped: SKIPPED }, null, 2));
+    return print(JSON.stringify({ repo: ctx && ctx.root, chains, edgeCount: scoped.length, otherSchemaLedgers: led.directoryError ? [] : otherSchemaLedgers(CONFIG_ROOT), ledgerTruncated: led.truncated, ledgerError: led.directoryError, schemaNewer: led.schemaNewer, skipped: SKIPPED }, null, 2));
   }
   print(`SCOPE  ${ctx ? `${ctx.name} (${ctx.root})` : 'ALL REPOS'}`);
   print(`RECORDED HANDOVERS: ${scoped.length}\n`);
@@ -3525,6 +3576,11 @@ function cmdLineage(opts) {
     print(`Past ones can be reconstructed as GUESSES: node ${scriptPath()} lineage --backfill`);
     return;
   }
+  // The disclosure belongs on THIS path too. `renderMigration` was reachable only from
+  // the empty-scope branch above, so as soon as the current store could answer for
+  // itself the fact that a foreign schema directory still holds unread history stopped
+  // being mentioned at all — the decay this notice must not have.
+  renderMigration(led.edges.length);
   const { roots: textRootIds, walks: textWalkById } = chainWalks(scoped);
   for (const root of textRootIds) {
     const { links, forks, truncated: walkTruncated, revisited } = textWalkById.get(root);
@@ -3638,18 +3694,40 @@ const COMMANDS = {
 // session's approval is not approval for every busy row in a survey — so it is
 // listed there rather than refused. `instances` emits no verdict at all, so it
 // has no such contract to keep and refuses it.
+//
+// Ten of the eighteen flags were scoped and eight were not, so `--json`, `--all`,
+// `--live`, `--no-git`, `--config-dir`, `--days`, `--prompts` and `--repo` were
+// accepted by every verb and quietly ignored by the ones that never read them:
+// `lineage --days 3` answered machine-wide while the user believed they had asked for
+// a three-day window. SKILL.md states the refusal is general with two exceptions, so
+// the gap was a promise the code did not keep.
+//
+// `--config-dir` is consumed by `resolveRoots` before dispatch and `--json` selects the
+// output shape, so both are read by every verb; listing them ten times would be ten
+// copies of one row.
+const GLOBAL_FLAGS = ['--json', '--config-dir'];
+
+// The SCAN flags: `buildIndex` keys its cache on exactly these, so any verb reaching it
+// — directly, or through `resolve()` — genuinely reads them. `--live` is NOT among
+// them, because only `list` passes it through; every other caller forces `live: false`.
+const SCAN_FLAGS = ['--all', '--repo', '--days', '--no-git'];
+
 const COMMAND_FLAGS = {
-  list: ['--force'],
-  instances: [],
-  show: ['--force'],
-  handoff: ['--force'],
-  limited: ['--force'],
-  takeover: ['--force', '--no-record', '--reason'],
-  lineage: ['--diagnose', '--backfill', '--forget', '--where', '--apply'],
+  list: ['--force', ...SCAN_FLAGS, '--live'],
+  instances: [...SCAN_FLAGS],
+  show: ['--force', ...SCAN_FLAGS, '--prompts'],
+  handoff: ['--force', ...SCAN_FLAGS],
+  limited: ['--force', ...SCAN_FLAGS],
+  takeover: ['--force', '--no-record', '--reason', ...SCAN_FLAGS, '--prompts'],
+  // `--days` is deliberately absent: the listing branch reads `opts.all` and
+  // `opts.repo` and nothing else from the scan set.
+  lineage: ['--diagnose', '--backfill', '--forget', '--where', '--apply', '--all', '--repo'],
   // `adopt` IS the record, so `--no-record` would leave a verb whose entire
   // output is suppressed. It used to be accepted and then ignored, which wrote the
   // machine-wide record the flag said it was skipping.
-  adopt: ['--reason'],
+  adopt: ['--reason', ...SCAN_FLAGS],
+  // No selector scan at all: a label is keyed by account or window, so `resolve()` is
+  // never reached and none of the scan flags decides anything here.
   label: ['--remove', '--self'],
   'window-probe': [],
 };
@@ -3660,7 +3738,22 @@ function refuseForeignFlags(opts, cmd) {
   // from COMMAND_FLAGS would otherwise silently accept every flag, which is the
   // defect this function exists to remove.
   if (!mine) fail(`internal: \`${cmd}\` has no flag table`);
+  const accepted = [...GLOBAL_FLAGS, ...mine];
   const supplied = [];
+  // Every flag `parseArgs` sets, in its declaration order. A flag missing from this
+  // list is accepted by every verb and silently ignored by the ones that do not read
+  // it, which is exactly the defect this function exists to remove — so the two lists
+  // have to stay the same length.
+  if (opts.json) supplied.push('--json');
+  if (opts.all) supplied.push('--all');
+  if (opts.live) supplied.push('--live');
+  if (!opts.git) supplied.push('--no-git');
+  if (opts.configDir !== null) supplied.push('--config-dir');
+  // The two numeric operands are reported only when the user actually typed them:
+  // both carry a default, so presence cannot be read off the value.
+  if (opts.daysExplicit) supplied.push('--days');
+  if (opts.promptsExplicit) supplied.push('--prompts');
+  if (opts.repo !== null) supplied.push('--repo');
   if (opts.diagnose) supplied.push('--diagnose');
   if (opts.backfill) supplied.push('--backfill');
   if (opts.apply) supplied.push('--apply');
@@ -3671,7 +3764,7 @@ function refuseForeignFlags(opts, cmd) {
   if (opts.forget !== null) supplied.push('--forget');
   if (opts.remove !== null) supplied.push('--remove');
   if (opts.where !== null) supplied.push('--where');
-  const foreign = supplied.filter((f) => !mine.includes(f));
+  const foreign = supplied.filter((f) => !accepted.includes(f));
   if (foreign.length) fail(`${foreign.join(' and ')} is not a flag of \`${cmd}\` — it would have been parsed and then ignored`);
 }
 
