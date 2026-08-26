@@ -2732,8 +2732,25 @@ if printf '%s' "$GONE_START" \
   # third-fact probe runs and must answer empty, so the doctor renders the plain
   # lineage row. ADOPT_SESSION is that session before AC-C07 adopts it, and
   # AC-C02 above already ran against it.
+  # Its own freshly registered session, NOT $ADOPT_SESSION: AC-C07 above already
+  # adopted that one, so by the time this row runs it binds normally and the
+  # doctor renders the healthy row — which would fail this check for a reason
+  # that has nothing to do with the probe.
+  LIVE_ROOT_SESSION='versioned-upgrade-live-project-root'
+  LIVE_ROOT_START="$(EVENT=SessionStart SESSION="$LIVE_ROOT_SESSION" CWD="$PROJECT" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: process.env.EVENT,
+      source: "startup",
+      session_id: process.env.SESSION,
+      cwd: process.env.CWD,
+    }));
+  ')"
+  printf '%s' "$LIVE_ROOT_START" \
+    | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_CANDIDATE_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      CLAUDE_PROJECT_DIR="$PROJECT" \
+      bash "$SYNTHETIC_CANDIDATE_ROOT/hooks/session-start-session-control.sh" >/dev/null 2>&1
   GONE_NEGATIVE_OUT="$TMP/adopt-gone-negative.out"
-  CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+  CLAUDE_CODE_SESSION_ID="$LIVE_ROOT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
     CLAUDE_PROJECT_DIR="$PROJECT" HOME="$GONE_DOCTOR_HOME" \
     bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$GONE_NEGATIVE_OUT" 2>/dev/null
   if grep -qF 'declares an incompatible lineage' "$GONE_NEGATIVE_OUT" \
@@ -2790,7 +2807,16 @@ if printf '%s' "$GONE_START" \
   # And its POSITIVE negative: a live project root must exit 3, not 1. A caller
   # that cannot tell 3 from 1 has to infer a negative from a failure, which is how
   # the Stop hook came to assert a surviving workflow document.
-  printf '%s' "$ADOPT_TOOL_PAYLOAD" \
+  LIVE_ROOT_TOOL_PAYLOAD="$(EVENT=PreToolUse SESSION="$LIVE_ROOT_SESSION" CWD="$PROJECT" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: process.env.EVENT,
+      session_id: process.env.SESSION,
+      cwd: process.env.CWD,
+      tool_name: "Read",
+      tool_input: {file_path: "README.md"},
+    }));
+  ')"
+  printf '%s' "$LIVE_ROOT_TOOL_PAYLOAD" \
     | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
       node "$SYNTHETIC_BREAKING_ROOT/hooks/lib/claude-hook-session-v1.js" \
       orphaned-incompatible-root >/dev/null 2>&1
