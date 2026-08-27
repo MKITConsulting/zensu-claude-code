@@ -944,19 +944,48 @@ function processTable() {
       // the machine's locale or timezone changed the token and silently unbound
       // every window label — the POSIX branch pins LC_ALL/TZ for the same reason
       // and the token's own comment leans on that pin.
-      const program = "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.CreationDate.ToUniversalTime().ToString('yyyyMMddHHmmss',[Globalization.CultureInfo]::InvariantCulture))`t$($_.Name)\" }";
+      // Three lines rather than one, and every one of them is a COST control. Module
+      // auto-loading walks and analyses every module PSModulePath names before the
+      // first cmdlet resolves, so it is turned off and the one module actually needed
+      // is imported by name. The query names its four columns instead of selecting a
+      // whole Win32_Process instance, which is what WMI would otherwise marshal for
+      // every process on the machine.
+      const program = [
+        "$PSModuleAutoLoadingPreference='None'",
+        'Import-Module CimCmdlets -ErrorAction Stop',
+        "Get-CimInstance -Query 'SELECT ProcessId,ParentProcessId,CreationDate,Name FROM Win32_Process'"
+          + " | ForEach-Object { \"$($_.ProcessId)`t$($_.ParentProcessId)`t"
+          + "$($_.CreationDate.ToUniversalTime().ToString('yyyyMMddHHmmss',[Globalization.CultureInfo]::InvariantCulture))`t$($_.Name)\" }",
+      ].join('\n');
       // -EncodedCommand, not -Command. The program carries embedded double quotes, and
       // Node escapes those as `\"` when it builds a Windows command line; powershell.exe
       // then re-reads the backslashes with its own rules, which is the documented
-      // argument-mangling class. The observable result was an EMPTY process table on the
-      // Windows runner: windowKey() answered null, no window label was ever written, and
-      // eight checks failed against a labels.json that had never been created. Base64
-      // UTF-16LE removes the ambiguity instead of guessing which layer ate which
-      // character — there is nothing left for either parser to interpret.
+      // argument-mangling class. Base64 UTF-16LE removes the ambiguity instead of
+      // guessing which layer ate which character — there is nothing left for either
+      // parser to interpret. Keep it, but do NOT credit it with fixing the Windows
+      // failure: runs 32998414210 and 33018717088 straddle its introduction and carry
+      // the six window-namespace failures word for word. It removed a real hazard that
+      // was not the one biting.
       out = execFileSync(shell, ['-NoProfile', '-NonInteractive', '-EncodedCommand',
         Buffer.from(program, 'utf16le').toString('base64')],
       { encoding: 'utf8',
-        timeout: 8000,
+        // Both a correctness and a RUNTIME bound, and the measurement says this number
+        // must go DOWN rather than up. One full run of
+        // tests/structure/test-session-trail-lineage.sh enters this function 115 times
+        // (counted, macOS, 2026-08-27), so a probe that stalls costs 115x its timeout:
+        // at 8000 that is 920s against the 997s the suite actually took on run
+        // 33052576528 -- the stall was very nearly the whole wall clock, and only ~77s
+        // was real work. 12000 would have put the failing case at ~1457s against a
+        // 1500000 cap, which is no margin at all. 5000 keeps a stalling probe inside
+        // ~650s while still admitting a working one: with the startup-cost controls
+        // above a healthy probe answers in a fraction of this.
+        //
+        // The uncompromised fix is not a timeout at all -- it is not spawning
+        // powershell.exe 115 times. A short-TTL process-table cache in the config dir
+        // would collapse that to a handful, and every Windows user of this CLI pays the
+        // same start-up today. That is a feature with its own containment and symlink
+        // rules, deliberately not smuggled into a CI repair.
+        timeout: 5000,
         stdio: ['ignore', 'pipe', 'pipe'],
         // The environment is pinned here for the same reason it is pinned on the POSIX
         // arm below, and one reason more: `-NoProfile` does not cover module resolution,
@@ -969,16 +998,20 @@ function processTable() {
           windir: root,
           SystemDrive: path.parse(root).root.replace(/\\+$/, ''),
           ComSpec: path.join(root, 'System32', 'cmd.exe'),
-          // The previous spelling replaced the environment wholesale and left a
-          // Windows process without PATH, windir, SystemDrive or ComSpec. Get-CimInstance
-          // reaches WMI through the provider host under System32\Wbem, so that
-          // omission is the first thing to suspect. INFERRED, not observed: the runner
-          // discarded stderr, so all the evidence there is says 229 of 288 checks
-          // consumed the whole 900s budget -- about 3.9s per check against a probe
-          // capped at 8s -- while every window-namespace check failed against a
-          // labels.json the probe never let anything write. A stall on every
-          // invocation fits that arithmetic; a fast failure does not. The stderr
-          // capture below is what settles it rather than reasoning about it again.
+          // OBSERVED, not inferred: once probeFault() started reporting, run
+          // 33052576528 answered `probe-failed — ETIMEDOUT signal SIGTERM`. The probe
+          // does not fail, it STALLS, and it did so on every invocation — which is why
+          // six window-namespace checks failed against a labels.json nothing was ever
+          // allowed to write.
+          //
+          // An environment replaced wholesale is what makes powershell.exe slow to
+          // start. LOCALAPPDATA is the load-bearing one: the module analysis cache
+          // lives under it, and a process that cannot find it re-analyses every module
+          // PSModulePath names on EVERY start. PATH, windir, SystemDrive and ComSpec
+          // are restored beside it because Windows components assume they exist, and
+          // System32\Wbem is where the WMI provider host lives. The PSModulePath pin
+          // that this whole block exists for is kept — that is the value an inherited
+          // entry could redirect, and it is still ours.
           PATH: [
             path.join(root, 'System32'),
             root,
@@ -989,6 +1022,11 @@ function processTable() {
           PATHEXT: '.COM;.EXE;.BAT;.CMD',
           TEMP: process.env.TEMP || path.join(root, 'Temp'),
           TMP: process.env.TMP || path.join(root, 'Temp'),
+          LOCALAPPDATA: process.env.LOCALAPPDATA || '',
+          APPDATA: process.env.APPDATA || '',
+          USERPROFILE: process.env.USERPROFILE || '',
+          HOMEDRIVE: process.env.HOMEDRIVE || '',
+          HOMEPATH: process.env.HOMEPATH || '',
         } });
     } else {
       // Absolute path and a pinned environment, as hooks/lib/session-control-core-v1.js

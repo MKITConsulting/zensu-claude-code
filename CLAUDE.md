@@ -2810,14 +2810,33 @@ between them moved nothing — it removed a real argument-mangling hazard, so ke
 but do not credit it with a fix it did not deliver. The probe's environment was
 replaced wholesale and left the process without `PATH`, `windir`, `SystemDrive` or
 `ComSpec`; `Get-CimInstance` reaches WMI through the provider host under
-`System32\Wbem`, which nothing named. That omission is the leading suspect and is
-now fixed, and the `PSModulePath` pin the security comment exists for is kept.
-**The cause is INFERRED, never observed**: the probe discarded stderr and its `catch`
-was bare, so two CI rounds produced no account of the failure at all. `probeFault()`
-now records the exit code, signal and first stderr line, and `processStartTimeHealth()`
-renders it as `probe-failed — …` where it used to say only `no-process-table`. If the
-six checks are still red on the next run, the `START TIMES` line in `lineage --diagnose`
-carries the reason — read it before theorising again. The L32c-control probe line that
+`System32\Wbem`, which nothing named. That omission was the leading suspect and did
+NOT fix it, and the `PSModulePath` pin the security comment exists for is kept.
+
+**The cause is now OBSERVED, and it is a STALL, not a failure.** `probeFault()` records
+the exit code, signal and first stderr line, and `processStartTimeHealth()` renders it
+as `probe-failed — …` where it used to say only `no-process-table`. Run 33052576528
+answered `probe-failed — ETIMEDOUT signal SIGTERM`: powershell.exe was killed at its
+timeout every single time, having written nothing to stderr. **The arithmetic closes
+it.** One full suite run enters `processTable()` **115 times** (counted on macOS,
+2026-08-27), so an 8000 ms stall costs 920 s — against the 997 s that run actually took.
+The probe stall was very nearly the entire Windows wall clock of this suite; only about
+77 s was real work, and the earlier "the cap is too small" reading was a symptom.
+
+**Therefore the probe timeout goes DOWN, not up**, which is the opposite of the
+instinct: 12000 would have put the failing case at ~1457 s against a 1500000 cap. It is
+5000, so a stalling probe stays inside ~650 s while a working one still fits. What
+should make it fast is the startup-cost control in the program itself —
+`$PSModuleAutoLoadingPreference='None'` plus an explicit `Import-Module CimCmdlets`,
+a four-column `SELECT` instead of whole instances, and `LOCALAPPDATA` restored so the
+module analysis cache is not rebuilt on every start. **The uncompromised fix is none of
+these**: it is not spawning powershell.exe 115 times. A short-TTL process-table cache in
+the config dir would collapse that to a handful and would pay off for every Windows user
+of this CLI, not just for CI. It carries its own containment and symlink rules, so it is
+named here rather than smuggled into a CI repair.
+
+If the six checks are still red, read the `START TIMES` line in `lineage --diagnose`
+before theorising again. The L32c-control probe line that
 was supposed to surface this greped for `process start` while the text channel prints
 `START TIMES`, so it never matched on any platform and reported its own fallback as
 though it were a finding; a diagnostic whose needle is never exercised is worse than
