@@ -405,8 +405,13 @@ esac
 # the path, and must carry the reason exactly once. Two earlier versions of this comment
 # claimed the opposite ("the whole parenthetical disappears") while the assertion below
 # required the placeholder — three review seats caught the contradiction, which is the
-# third time a stale needle or claim has been found in this block. The empty-value half
-# of that ternary has no executed case anywhere. P1mf above proves the
+# third time a stale needle or claim has been found in this block — and this sentence is
+# the FOURTH: it used to describe an "empty-value half of that ternary" with no executed
+# case, and foldSlot has no ternary. An empty value returns {text:'', present:false,
+# ok:true} BEFORE the guarded require, and parentheticalWriter drops the parenthetical on
+# !present — so that path is module-INDEPENDENT and P1ad2 already drives it. What has no
+# case is "empty value AND unloadable module", which is behaviourally identical to the
+# loadable one precisely because the early return precedes the try. P1mf above proves the
 # renderer still LOADS without its sibling; it sets no ZDOC_BINDING, so bindingLine()
 # returns undefined and the fold is never called. Without this row the branch has no
 # executed case anywhere.
@@ -446,6 +451,21 @@ fi
 # by CLAUDE.md, and what this row is about is how MANY times it appears. Both remaining
 # multi-slot bindings are driven, because they compose their parentheticals differently
 # — the combined one interleaves a path slot between two version slots.
+#
+# WHICH ARM CARRIES THE PIN, stated because the loop reads as though both do.
+# parentheticalWriter returns on the FIRST failing slot, so a row already emits one
+# sentence without the `stated` flag whenever it composes ONE parenthetical.
+# `incompatible-runtime` calls paren() exactly once and is therefore 1 either way: it is
+# a control, not a bite. Only `orphaned-project-root+incompatible-runtime`, with two
+# paren() calls, goes to 2 when `stated` is removed. Delete the flag and this loop fails
+# on its second iteration alone.
+#
+# And a bound on what the count can prove at all: `stated` is scoped to one bindingLine()
+# call, but bindingLine() has a single call site and the module ends in process.exit, so
+# ONE process renders ONE row. Widening that scope to the module is therefore
+# UNOBSERVABLE here, and no check in this suite can catch it. The production comment says
+# the scope is per-call; this pin covers the per-slot half of that claim, not the
+# per-row-versus-per-process half.
 for NOFOLD_CASE in 'incompatible-runtime' 'orphaned-project-root+incompatible-runtime'; do
   NOFOLD_MULTI="$(ZENSU_DOCTOR_PLUGIN_DIR="$NOCHAIN" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$CAS_PROJECT" \
     ZDOC_BINDING="$NOFOLD_CASE" ZDOC_BINDING_PROJECT_ROOT=/tmp/zensu-nofold-probe \

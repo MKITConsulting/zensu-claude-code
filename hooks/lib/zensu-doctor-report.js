@@ -1806,6 +1806,23 @@ function foldSlot(value) {
   }
 }
 
+// The same fold for a path embedded in PROSE rather than in a `label : value` slot.
+// stateBlock's three rows interpolated their directory raw while the binding row beside
+// them folded, so `/tmp/a : b` — a directory name anyone who starts a session controls,
+// screened for control bytes only — rendered unfolded in a report the doctor skill tells
+// the model to print verbatim. The fold was a four-file load chain when those rows were
+// written; it is a dependency-free leaf now, so applying it is one call and the reason
+// for the exemption is gone.
+//
+// Returns a STRING because a prose row has no parenthetical to attach a record to, and
+// it borrows bindingLine's fallback sentence rather than dropping the value: two other
+// surfaces tell the user the doctor names this directory.
+function foldPath(value) {
+  var slot = foldSlot(value);
+  if (!slot.present) return '';
+  return slot.ok ? slot.text : '(not rendered — the display-safety module could not be loaded)';
+}
+
 // A parenthetical is stated ONCE PER ROW, not once per slot. Under a missing fold
 // module the two-version row rendered
 //   (record minted by <sentence>, executing <sentence>)
@@ -1924,12 +1941,12 @@ function stateBlock(nowMs) {
     entries = fs.readdirSync(dir);
   } catch (e) {
     if (e && e.code === 'ENOENT') {
-      line(OK, 'state: ' + dir + ' does not exist yet — nothing to clean');
+      line(OK, 'state: ' + foldPath(dir) + ' does not exist yet — nothing to clean');
     } else {
       // Every other errno is a check that did NOT run. Rendering it green hid the
       // whole Session state block behind an all-clear, which is the one verdict
       // this file refuses to fake anywhere else.
-      line(WARN, 'state: ' + dir + ' could not be read (' + ((e && e.code) || 'unknown')
+      line(WARN, 'state: ' + foldPath(dir) + ' could not be read (' + ((e && e.code) || 'unknown')
         + ') — the session-state checks did not run. That is a missing check, not an all-clear.');
     }
     return;
@@ -1937,7 +1954,7 @@ function stateBlock(nowMs) {
   try {
     fs.accessSync(dir, fs.constants.W_OK);
   } catch (e) {
-    line(BAD, 'state: ' + dir + ' is not writable — chain markers cannot be recorded');
+    line(BAD, 'state: ' + foldPath(dir) + ' is not writable — chain markers cannot be recorded');
   }
   var workflowDocs = entries.filter(function (f) {
     return /^tdd-phase-scv1_[a-f0-9]{64}\.json$/.test(f);
