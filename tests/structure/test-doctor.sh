@@ -397,7 +397,7 @@ case "$OUT_NOMOD" in
 esac
 # P1mf1 — the SAME minimal root, now driven with a binding value, which is the only
 # way to reach the display fold's load-failure branch. $NOCHAIN carries the core and
-# the renderer but not zensu-safe-display-v1.js, so safeDisplay's guarded require
+# the renderer but not zensu-safe-display-v1.js, so foldSlot's guarded require
 # throws. For a NON-EMPTY value — which is what this row drives — it then returns its
 # stated REASON, not the empty string; the empty string is returned only when the value
 # was empty to begin with. The contract that branch states is therefore "replace the

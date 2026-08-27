@@ -379,7 +379,8 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
           && [ -n "$ZDOC_BINDING_PROJECT_ROOT" ]; then
           ZDOC_BINDING=orphaned-project-root+incompatible-runtime
           # The probe POSITIVELY answered here, so the unknown flag must not be
-          # set: status 0 is not 3, and an unguarded test would export "unknown"
+          # set: the gone status is not the present one, and an unguarded test would
+          # export "unknown"
           # for the one state where the answer is certain. Placing the flag
           # outside this branch is exactly the trap the block below claims to
           # close.

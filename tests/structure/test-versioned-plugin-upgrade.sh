@@ -197,7 +197,7 @@ git -C "$PROVENANCE_SOURCE" init -q
 git -C "$PROVENANCE_SOURCE" config user.name 'Versioned Upgrade Test'
 git -C "$PROVENANCE_SOURCE" config user.email 'versioned-upgrade@zensu.invalid'
 git -C "$PROVENANCE_SOURCE" config core.hooksPath \
-  "$(if [ "$(uname -s)" = MINGW* ] || [ "$(uname -s)" = MSYS* ]; then printf NUL; else printf /dev/null; fi)"
+  "$(case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*|CYGWIN*) printf NUL ;; *) printf /dev/null ;; esac)"
 printf '%s\n' '{"name":"zensu","version":"0.16.1"}' \
   > "$PROVENANCE_SOURCE/.claude-plugin/plugin.json"
 printf '%s\n' '{"name":"zensu","plugins":[{"name":"zensu","source":{"source":"github","repo":"MKITConsulting/zensu-claude-code","ref":"v0.16.1"},"version":"0.16.1"}]}' \
@@ -247,7 +247,7 @@ git -C "$SYMLINK_SOURCE" init -q
 git -C "$SYMLINK_SOURCE" config user.name 'Versioned Upgrade Test'
 git -C "$SYMLINK_SOURCE" config user.email 'versioned-upgrade@zensu.invalid'
 git -C "$SYMLINK_SOURCE" config core.hooksPath \
-  "$(if [ "$(uname -s)" = MINGW* ] || [ "$(uname -s)" = MSYS* ]; then printf NUL; else printf /dev/null; fi)"
+  "$(case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*|CYGWIN*) printf NUL ;; *) printf /dev/null ;; esac)"
 printf '%s\n' '{"name":"zensu","version":"0.16.1"}' \
   > "$SYMLINK_SOURCE/.claude-plugin/plugin.json"
 printf '%s\n' '#!/bin/bash' 'exit 0' > "$SYMLINK_SOURCE/hooks/example.sh"
@@ -3295,12 +3295,12 @@ else
   grep -F 'binding:' "$DOCTOR_CLAUSE_ZERO" 2>/dev/null | head -c 300
 fi
 
-# AC-C21c — safeDisplay is LOAD-BEARING, and nothing anywhere pinned it. The
+# AC-C21c — the display fold is LOAD-BEARING, and nothing anywhere pinned it. The
 # value it folds is the recorded project root, which reaches the row through
 # readOrphanedProjectRootContext, whose only shape guard is
 # UNSAFE_PATH_CHARACTERS — a C0/DEL class that does NOT reject bidi overrides or
 # line separators. Those are exactly the characters that can HIDE the rest of a
-# rendered line, so replacing safeDisplay with the identity would leave every
+# rendered line, so replacing safeDisplayValue with the identity would leave every
 # other row green while the doctor printed a spoofable binding line. Driven
 # through the ZDOC_* channel AC-C21 already establishes, with U+202E and U+2028
 # in the injected path.

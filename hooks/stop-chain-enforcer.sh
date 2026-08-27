@@ -174,8 +174,10 @@ if ! zensu_bind_hook_session "$INPUT"; then
     fi
     # The THIRD fact, on its own channel so the version pair stays two fields.
     # stdout is captured, never leaked, and the STATUS is read as well as the
-    # value: 0 with a path means the root is gone, 3 means it positively is not,
-    # and anything else means the probe could not answer. Collapsing 3 and "could
+    # value: ZENSU_ROOT_STATE_GONE with a path means the root is gone,
+    # ZENSU_ROOT_STATE_PRESENT means it positively is not,
+    # and anything else means the probe could not answer. Collapsing the present
+    # status and "could
     # not answer" into one empty value is what would make the deferral branch
     # below assert a surviving workflow document on an inferred negative — the
     # exact false claim this channel exists to remove. Every sibling degrade in
@@ -198,7 +200,7 @@ if ! zensu_bind_hook_session "$INPUT"; then
       # unprovable from the one fact the probe actually established. The
       # enforcement claim is now BOUNDED to while the directory is missing, which
       # is also what makes it true: re-create the root and a later bind takes the
-      # `-eq 3` deferral arm below instead.
+      # ZENSU_ROOT_STATE_PRESENT deferral arm below instead.
       # The path itself is NOT interpolated: it would reach a transcript
       # unfolded, while the doctor folds the same value through the adoption
       # report's display allowlist. Naming /zensu:doctor instead is what the deny

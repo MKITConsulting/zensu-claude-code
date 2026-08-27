@@ -139,7 +139,7 @@ const INVISIBLE = /\p{Default_Ignorable_Code_Point}/u;
 // inside a word. The unit case walks the entire set in all three positions rather
 // than testing a list, so the completeness is measured on every run instead of
 // asserted here.
-const COLON_CONFUSABLE_LETTER = new RegExp('(?:^| )\\p{Lm}|\\p{Lm} ', 'u');
+const SEPARATOR_ADJACENT_MODIFIER_LETTER = new RegExp('(?:^| )\\p{Lm}|\\p{Lm} ', 'u');
 const NON_ASCII = new RegExp('[\\u007f-\\uffff]', 'g');
 const SPACE_RUN = / {2,}/g;
 
@@ -148,7 +148,7 @@ const SPACE_RUN = / {2,}/g;
 // the forgery is over the RENDERED LINE, and the two come apart at the value's right
 // edge: `/home/u/repo:` is harmless alone — nothing follows the colon — and becomes a
 // separator the instant the project rows append their ` (GONE)` marker. The trailing
-// carve-out in COLON_CONFUSABLE_LETTER has exactly the same seam, for the same reason.
+// carve-out in SEPARATOR_ADJACENT_MODIFIER_LETTER has exactly the same seam, for the same reason.
 //
 // Only the POSITIONAL rules see the joined string. SAFE_DISPLAY and INVISIBLE stay on
 // the value alone: they judge which characters the value may contain, and the caller's
@@ -162,7 +162,7 @@ const SPACE_RUN = / {2,}/g;
 const safeDisplayValue = (value, followedBy = '') => {
   const text = String(value);
   const inLine = text + String(followedBy);
-  if (SAFE_DISPLAY.test(text) && !INVISIBLE.test(text) && !COLON_CONFUSABLE_LETTER.test(inLine)
+  if (SAFE_DISPLAY.test(text) && !INVISIBLE.test(text) && !SEPARATOR_ADJACENT_MODIFIER_LETTER.test(inLine)
     && !DOUBLE_SPACE.test(inLine) && !PAIR_SEPARATOR.test(inLine)) {
     return text;
   }
@@ -198,7 +198,7 @@ const safeDisplayValue = (value, followedBy = '') => {
 // The list now carries EVERY rule the fast path applies, and that is the point rather
 // than tidiness: this file is named in CLAUDE.md as a core-half port obligation, so a
 // porter reads this block to learn what the fold is. While INVISIBLE,
-// COLON_CONFUSABLE_LETTER and PAIR_SEPARATOR were missing from it, that reader saw a
+// SEPARATOR_ADJACENT_MODIFIER_LETTER and PAIR_SEPARATOR were missing from it, that reader saw a
 // strictly weaker fold than the one that ships — the same failure this file already
 // paid for in the opposite direction with foldDisplayHiders, an exported rule weaker
 // than the real one. The alternative on offer was to label the three survivors as
@@ -213,7 +213,7 @@ module.exports = {
   DOUBLE_SPACE,
   NON_ASCII,
   INVISIBLE,
-  COLON_CONFUSABLE_LETTER,
+  SEPARATOR_ADJACENT_MODIFIER_LETTER,
   PAIR_SEPARATOR,
   safeDisplayValue,
 };
