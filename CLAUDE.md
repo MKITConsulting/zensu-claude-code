@@ -947,6 +947,22 @@ store-layout bullet below, and nowhere else — a ledger that contradicts itself
 its own pins is the failure mode it exists to prevent. The wire format and the
 version-shape rule are unchecked:
 
+- the root-status pair `ZENSU_ROOT_STATE_GONE` / `ZENSU_ROOT_STATE_PRESENT`, owned by
+  `hooks/lib/zensu-session.sh`, with TWO consumers that reach it by DIFFERENT routes —
+  and the route is the part a reader gets wrong. `stop-chain-enforcer.sh` sources the
+  owner in its PARENT shell and compares against those names directly;
+  `zensu-doctor.sh` sources it only inside command substitutions, where the name is out
+  of scope and reading it under `set -u` aborted the whole diagnostic, so it copies the
+  VALUES out in one subshell and compares against its own `ZDOC_ROOT_STATE_*`. One
+  definition, two spellings, on purpose. There is deliberately no `_UNKNOWN` member: it
+  is the residual, so nothing compares against it. AC-C19 in
+  `tests/structure/test-versioned-plugin-upgrade.sh` pins both MEMBERS in both files, in
+  each consumer's own spelling, plus a negative needle forbidding the defaulted
+  `${ZDOC_ROOT_STATE_GONE:-0}` form. That negative needle is not decoration: the pair
+  shipped with only `_PRESENT` pinned, and the doctor had meanwhile put the literal back
+  through exactly such a default, on the member no needle covered — a half-pinned pair
+  reads greener than an unpinned one. When adding a member, pin it in both files before
+  writing any comment that says both are covered.
 - the `recorded<TAB>executing` wire format — one producer
   (`claude-hook-session-v1.js`) and five parsers (`zensu-doctor.sh`,
   `stop-chain-enforcer.sh`, `pre-bash-zensu-gate.sh`, `pre-edit-tdd-reminder.sh`,
@@ -1150,6 +1166,21 @@ no row count here: this file's own rule two paragraphs up is that a hand-maintai
 number is what a driven loop cannot catch, and the count written into an earlier
 version of this paragraph had already drifted from the suite's own reported total
 before it was read a second time.
+
+**THAT SAMPLE NO LONGER COVERS THE FILE, and the headroom is UNMEASURED until a green
+Windows run replaces it.** The PR #272 review round added five checks to this suite —
+including one that COPIES the whole lib directory and executes the adoption entry point
+twice — and rewrote a case in `tests/structure/session-adopt-report-v1.test.js`, which
+this suite drives from the WORKING TREE, into a walk over the entire Unicode code space
+(`for (let cp = 0; cp <= 0x10ffff; cp += 1)`, three property regexes per code point).
+The 152553 ms figure predates all of it. `tests/session-control/run.sh` sits on the same
+`windows-shard-2` and grew too. The ceiling was deliberately NOT raised: raising it
+without a measurement trades a visible `TIMED_OUT` for a silently truncated tail, which
+is the failure this file records for two sibling suites. Say "unmeasured", not "17% of
+cap" — the percentage is arithmetic over a stale numerator. Same reason as ever, the
+caveat cannot live in the manifest: `tests/run-profile.js`'s `SUITE_KEYS` throws on any
+key outside `{id, runner, path, args, timeoutMs}` and aborts every Windows shard at
+manifest load.
 
 Read this sample as ONE sample, not as a bound. The sibling
 `stop-enforcer-self-review-routing` note in this file records a 29% spread across

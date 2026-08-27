@@ -23,11 +23,41 @@ if [ ! -f "$SUITE" ]; then
   exit 1
 fi
 
-bash "$SUITE"
-STATUS=$?
+# A registered-case FLOOR, not just the exit status. tests/session-control/run.sh is a
+# bare `node --test`, and that exits 0 for a file which registers ZERO cases — so a
+# suite emptied by a bad glob, a syntax error inside a skipped block, or a rename that
+# silently stops matching reports exactly like a green run. Five sibling drivers in this
+# tree already carry the floor for that reason; this one did not, while four new cases
+# were being added to the file it runs.
+#
+# The floor is spelled here rather than derived from the suite's own output, for the
+# reason this tree states about every hand-maintained count: a number derived from what
+# it is checking agrees with whatever it finds. Raise it deliberately when cases land.
+SC_FLOOR=141
 
-if [ "$STATUS" -eq 0 ]; then
+OUT="$(mktemp "${TMPDIR:-/tmp}/zensu-session-control-core-XXXXXX")" \
+  || { printf '%s\n' 'test-session-control-core: cannot create temp file' >&2; exit 1; }
+trap 'rm -f "$OUT"' EXIT
+
+bash "$SUITE" 2>&1 | tee "$OUT"
+STATUS=${PIPESTATUS[0]}
+
+SUMMARY_LIB="$ROOT/tests/structure/lib-unit-summary.sh"
+FLOOR_OK=1
+if [ -f "$SUMMARY_LIB" ]; then
+  # shellcheck source=/dev/null
+  . "$SUMMARY_LIB" 2>/dev/null || true
+  if command -v unit_cases_registered_floor >/dev/null 2>&1; then
+    unit_cases_registered_floor "$OUT" "$SC_FLOOR" || FLOOR_OK=0
+  fi
+fi
+
+if [ "$STATUS" -eq 0 ] && [ "$FLOOR_OK" = 1 ]; then
   printf '%s\n' '----' 'test-session-control-core: session-control core suite PASS'
+elif [ "$STATUS" -eq 0 ]; then
+  printf '%s\n' '----' \
+    "test-session-control-core: session-control core suite FAIL (exited 0 but registered fewer than $SC_FLOOR cases)"
+  STATUS=1
 else
   printf '%s\n' '----' "test-session-control-core: session-control core suite FAIL (exit $STATUS)"
 fi
