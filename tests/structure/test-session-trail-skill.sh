@@ -35,8 +35,12 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SKILL_DIR="$PLUGIN_DIR/skills/session-trail"
+# Named the same way the lineage suite names its own file, and for the same
+# reason: T10c scans it for unsandboxed invocations of the script under test.
+SELF_SUITE_FILE="$PLUGIN_DIR/tests/structure/test-session-trail-skill.sh"
 SKILL_MD="$SKILL_DIR/SKILL.md"
 TRAIL_MJS="$SKILL_DIR/scripts/trail.mjs"
+LEDGER_MJS="$SKILL_DIR/scripts/session-lineage-v1.mjs"
 PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
 README_MD="$PLUGIN_DIR/README.md"
 
@@ -46,7 +50,16 @@ BARE_COMMAND_REF='`/session-trail'
 # Word stems carry their own umlauts; a bare [äöüßÄÖÜ] class is intentionally
 # omitted because, under a byte-wise locale, it false-matches multibyte
 # punctuation (em-dash, arrows).
-GERMAN_RE='sitzung|übernahme|prüf|änder|überarbeit|arbeitsbereich|zusammenfass'
+# The German WEEKDAY and MONTH abbreviations are in the set because a real
+# violation slipped past the noun list: a comment illustrating what `ps -o lstart=`
+# prints under a German locale carried `So. 23 Aug. 18:16:44 2026`, and none of the
+# nouns above matches it. `So.`/`Mo.`/… are anchored on the trailing period and a
+# word boundary so English prose is unaffected — `Mi` in "Miller" and a bare `Do`
+# do not match, and `Sa.` at the end of a sentence would, which is why the check
+# scans source comments rather than prose. `Mär`/`Mai`/`Okt`/`Dez` are the month
+# forms that differ from English; the ones that coincide cannot be discriminated
+# and are deliberately absent rather than pretended.
+GERMAN_RE='sitzung|übernahme|prüf|änder|überarbeit|arbeitsbereich|zusammenfass|[^a-zäöüß.]so\.[[:space:]]*[0-9]|[^a-zäöüß.]mo\.[[:space:]]*[0-9]|[^a-zäöüß.]di\.[[:space:]]*[0-9]|[^a-zäöüß.]mi\.[[:space:]]*[0-9]|[^a-zäöüß.]do\.[[:space:]]*[0-9]|[^a-zäöüß.]fr\.[[:space:]]*[0-9]|[^a-zäöüß.]sa\.[[:space:]]*[0-9]|[0-9][[:space:]]*mär\.|[0-9][[:space:]]*mai\.|[0-9][[:space:]]*okt\.|[0-9][[:space:]]*dez\.'
 # Every write channel node exposes, not just the obvious Sync names — the
 # contract this pins is "the script never mutates other sessions' records", and
 # a single missed spelling silently retires it. The promises API is caught at
@@ -69,7 +82,37 @@ WRITE_RE='\b(writeFileSync|appendFileSync|rmSync|rmdirSync|unlinkSync|mkdirSync|
 # matches itself and the count falls on both sides. These are bare stems, the
 # same shape the repo's language rule already permits as a pattern alternation;
 # no German prose is written anywhere.
-GERMAN_STEMS=(sitzung übernahme prüf änder überarbeit arbeitsbereich zusammenfass)
+# One entry per ALTERNATION BRANCH, and every branch is TOP-LEVEL for that reason:
+# the arity cross-check below splits the pattern on `|`, so a grouped branch such
+# as `(so|mo)\.` would be counted as two and could never agree with this list.
+# The left edge excludes a PERIOD as well as a letter. `[^a-zäöüß]` accepted one,
+# so `libfoo.so.1` read as a German weekday date — a language guard that cries wolf
+# gets widened until it stops guarding, which the paragraph above already says about
+# the first spelling of this same branch. Known bound, stated rather than left to be
+# discovered: a negated class must CONSUME a character, so a date at column 0 is
+# invisible to these branches. GIT_CALL_RE below solves that with `(^|…)`, which is
+# unavailable here because the arity cross-check splits on `|` and would count a
+# grouped branch twice.
+# The left edge is a NEGATED CLASS, not `\b`: BSD grep does not honour `\b` in an
+# ERE, so the first spelling of this rule reported a clean tree over the very
+# comment it was written for — the same portability trap the review found in a
+# sibling check's `\s`. A negated class is POSIX and matches the backtick the real
+# violation sat behind, which a leading `[[:space:]]` would have missed.
+# The weekday and month abbreviations are here because a real violation slipped
+# past the noun list — a comment illustrating `ps -o lstart=` output under a German
+# locale carried `So. 23 Aug. 18:16:44 2026`, and no noun matches that.
+#
+# Each branch matches the DATE SHAPE, not the abbreviation: a weekday must be
+# followed by a day number and a month must be preceded by one. The first spelling
+# matched the abbreviation alone and immediately fired on an English sentence in
+# this very repo ("a read command that writes must say so. `--no-record`") — "so."
+# and "do." end English sentences all the time, and a language guard that cries
+# wolf gets widened until it stops guarding. Only the four month forms that DIFFER
+# from English are listed; the ones that coincide cannot be discriminated and are
+# left out rather than pretended.
+GERMAN_STEMS=(sitzung übernahme prüf änder überarbeit arbeitsbereich zusammenfass \
+  'so. 23' 'mo. 23' 'di. 23' 'mi. 23' 'do. 23' 'fr. 23' 'sa. 23' \
+  '23 mär.' '23 mai.' '23 okt.' '23 dez.')
 # openSync is legitimate for reading; a write, append or read/write mode is not.
 OPEN_WRITE_RE="openSync\([^)]*,[[:space:]]*['\"](w|a|r\+)"
 # The script shells out to git. Only read-only verbs may appear in an argv.
@@ -299,31 +342,192 @@ if command -v node >/dev/null 2>&1; then
   # T10b — a parse is not a load. Executing an unknown command reaches the
   # dispatcher's fallback without touching the filesystem, so this is the
   # cheapest evidence that the module actually initialises in its new home.
-  SMOKE_ERR="$(node "$TRAIL_MJS" __zensu_smoke__ 2>&1 >/dev/null)"; SMOKE_RC=$?
+  SMOKE_SANDBOX="$(mktemp -d -t zensu-t10b-XXXXXX)"
+  SMOKE_ERR="$(env -u CLAUDE_CONFIG_DIR HOME="$SMOKE_SANDBOX" USERPROFILE="$SMOKE_SANDBOX" node "$TRAIL_MJS" __zensu_smoke__ --config-dir "$SMOKE_SANDBOX" 2>&1 >/dev/null)"; SMOKE_RC=$?
+  rm -rf "$SMOKE_SANDBOX"
   if [ "$SMOKE_RC" = "1" ] && printf '%s' "$SMOKE_ERR" | grep -qF 'session-trail: unknown command:'; then
     check "T10b trail.mjs loads and reaches its dispatcher (unknown-command exit 1)" PASS
   else
     check "T10b trail.mjs loads and reaches its dispatcher (rc=$SMOKE_RC err=${SMOKE_ERR:-<empty>})" FAIL
+  fi
+  # T10c — the same isolation the lineage suite pins for its own invocations. That
+  # scan reads $SELF_FILE, so it can only ever see one of the three suites that
+  # execute this script, and this one ran unsandboxed against the developer's real
+  # ~/.claude for exactly that reason. A parse (`node --check`) is not an
+  # execution and is excluded.
+  T10C_TOTAL="$(grep -c 'node "\$TRAIL_MJS"' "$SELF_SUITE_FILE" || true)"
+  T10C_SANDBOXED="$(grep -c 'HOME="\$SMOKE_SANDBOX" USERPROFILE="\$SMOKE_SANDBOX" node "\$TRAIL_MJS"' "$SELF_SUITE_FILE" || true)"
+  if [ "$T10C_TOTAL" -ge 1 ] && [ "$T10C_TOTAL" = "$T10C_SANDBOXED" ]; then
+    check "T10c every trail.mjs execution in this suite runs against a sandbox root ($T10C_SANDBOXED/$T10C_TOTAL)" PASS
+  else
+    check "T10c a trail.mjs execution here resolves the developer's real config root (sandboxed=$T10C_SANDBOXED of $T10C_TOTAL)" FAIL
   fi
 else
   skip "T10/T10b trail.mjs load checks (node unavailable)"
 fi
 
 # T11 — the script reads shared session state; it must never mutate it. The
-# three patterns cover the fs write names, a write-mode openSync, and a
-# mutating git verb; T0 proves each one still bites.
+# lineage ledger is the ONE deliberate exception, so the ban is scoped rather
+# than blanket: creating and writing the ledger is allowed, everything else
+# is not. A blanket ban was the original contract and had to be narrowed when
+# the ledger landed; narrowing it to "no destructive primitive at all, and every
+# surviving write targets the ledger" (T11b) keeps the property that matters —
+# another session's transcript, registry entry or worktree is never touched.
 # It scans the whole skill directory, not just trail.mjs, so a second script
 # added later is covered without editing this check.
+#
+# DESTRUCTIVE_WRITE_RE is WRITE_RE minus the SIX primitives the ledger needs:
+# writeFileSync, mkdirSync, chmodSync, renameSync and unlinkSync (the atomic label
+# write added the last two), plus linkSync, which the exclusive record landing added.
+# T11b re-constrains all six by target.
+#
+# Why linkSync moved OFF this list rather than the writer moving off linkSync: it
+# destroys nothing. It creates a name and fails EEXIST when one already exists, which
+# is strictly narrower than the renameSync and unlinkSync already permitted here —
+# both of which really do destroy. The record landing needs exactly that property:
+# rename replaces a colliding destination silently, so the retry loop guarding it
+# could only ever fire on the temp name, and its "unique edge record" message was a
+# guarantee the mechanism did not implement. T11b keeps linkSync confined to writeEdge.
+# Keeping it as its own literal rather than editing WRITE_RE preserves T0's
+# proof that the original pattern still bites.
+# Controlled below by T11-control: T0 proves WRITE_RE bites, which says nothing
+# about this DERIVED literal — a lost `|` would retire a channel with T0 green.
+DESTRUCTIVE_WRITE_RE='\b(appendFileSync|rmSync|rmdirSync|copyFileSync|cpSync|truncateSync|symlinkSync|utimesSync|writeSync|createWriteStream)\b|fs\.promises\.|promises\.(write|append|mkdir|rm|unlink|rename|copyFile)|node:fs/promises'
 WRITE_HIT=""
-grep -rqE "$WRITE_RE" "$SKILL_DIR" "${SCRIPT_INCLUDES[@]}" && WRITE_HIT="$WRITE_HIT fs-write"
+grep -rqE "$DESTRUCTIVE_WRITE_RE" "$SKILL_DIR" "${SCRIPT_INCLUDES[@]}" && WRITE_HIT="$WRITE_HIT destructive-fs-write"
 grep -rqE "$OPEN_WRITE_RE" "$SKILL_DIR" "${SCRIPT_INCLUDES[@]}" && WRITE_HIT="$WRITE_HIT open-write-mode"
 grep -rqE "$GIT_WRITE_RE" "$SKILL_DIR" "${SCRIPT_INCLUDES[@]}" && WRITE_HIT="$WRITE_HIT git-mutation"
 grep -rqE "$GIT_WORKTREE_WRITE_RE" "$SKILL_DIR" "${SCRIPT_INCLUDES[@]}" && WRITE_HIT="$WRITE_HIT git-worktree-mutation"
+# T11-control — the derived pattern must match every spelling it names, and must
+# NOT match the three the ledger legitimately uses.
+T11_HITS=0
+for spelling in appendFileSync rmSync rmdirSync copyFileSync cpSync truncateSync symlinkSync utimesSync writeSync createWriteStream; do
+  printf '%s\n' "$spelling" | grep -qE "$DESTRUCTIVE_WRITE_RE" && T11_HITS=$((T11_HITS+1))
+done
+# Arity guard, as GERMAN_RE and GIT_MUTATION_VERBS have: a branch added to the
+# pattern without a control line would otherwise be pinned but never proved.
+DW_BRANCHES="$(printf '%s' "$DESTRUCTIVE_WRITE_RE" | sed 's/|fs\\.promises.*//' | tr '|' '\n' | grep -c .)"
+[ "$DW_BRANCHES" = "10" ] || check "T11-control DESTRUCTIVE_WRITE_RE has $DW_BRANCHES named spellings, the control list has 10" FAIL
+if [ "$T11_HITS" = "10" ]; then
+  check "T11-control the destructive-write pattern still matches all 10 spellings it names" PASS
+else
+  check "T11-control the destructive-write pattern matched only $T11_HITS of 10 spellings" FAIL
+fi
+T11_FALSE=0
+for permitted in writeFileSync mkdirSync chmodSync renameSync unlinkSync linkSync; do
+  printf '%s\n' "$permitted" | grep -qE "$DESTRUCTIVE_WRITE_RE" && T11_FALSE=$((T11_FALSE+1))
+done
+[ "$T11_FALSE" = "0" ] && check "T11-control the pattern does not match the six primitives the ledger legitimately needs" PASS || check "T11-control the pattern wrongly matches $T11_FALSE permitted primitive(s)" FAIL
+
 SCRIPT_N="$(grep -rlE '.' "$SKILL_DIR" "${SCRIPT_INCLUDES[@]}" | grep -c .)"
 if [ "$SCRIPT_N" -gt 0 ] && [ -z "$WRITE_HIT" ]; then
-  check "T11 none of the $SCRIPT_N shipped scripts opens a write channel (fs writes, write-mode openSync, mutating git verb)" PASS
+  check "T11 none of the $SCRIPT_N shipped scripts deletes, renames, appends, or runs a mutating git verb" PASS
 else
-  check "T11 write channel in a shipped script:${WRITE_HIT:- none} (scripts scanned=$SCRIPT_N)" FAIL
+  check "T11 forbidden write channel in a shipped script:${WRITE_HIT:- none} (scripts scanned=$SCRIPT_N)" FAIL
+fi
+
+# T11b — every write that DOES survive must land in the lineage ledger. Checked
+# by enclosing function rather than by line text, so reformatting the call does
+# not silently retire the check: a write inside a function that is not one of the
+# named ledger writers is a finding even if its target happens to read innocuously.
+# `removeEdgeFiles` is the FIFTH name on that list and the only one that DESTROYS a
+# record rather than landing one. It is a deliberate widening, not an oversight: the
+# store is append-only and machine-wide, so before it existed a mistaken takeover
+# stood forever on every window and the operator's only recourse was deleting a file
+# whose name the tool never showed them. What confines it is the function itself --
+# a name must be a single path component, a non-file is refused rather than followed,
+# and `lineage --forget` is a dry run until --apply. This rule can only say WHERE a
+# write lives; it never could say what one does.
+# In awk, `\b` is a BACKSPACE escape, not a word boundary — an earlier spelling of
+# this rule used it and therefore matched nothing at all, making T11b an
+# unconditional PASS and leaving the three primitives it exists to constrain
+# completely unpinned. The `\(` anchor is what actually selects a call site.
+# The allowlist is by enclosing function NAME only: a target-substring escape
+# (`$0 ~ /LEDGER_DIR/`) accepted any line that merely mentioned the identifier,
+# including in a trailing comment.
+write_sites() { # <file>
+  awk '
+    /^(export )?function [A-Za-z0-9_]+/ { fn = ($1 == "export") ? $3 : $2; sub(/\(.*/, "", fn) }
+    # A write following the closing brace of a writer is NOT part of that writer:
+    # without this reset a top-level call, an arrow function or an object method
+    # inherited the previous declaration name and passed the allowlist.
+    /^\}/ { fn = "" }
+    # unlinkSync and linkSync are in the alternation deliberately: both are absent
+    # from DESTRUCTIVE_WRITE_RE so T11-control keeps its meaning, which would leave
+    # the delete primitive and the exclusive-landing primitive unpinned everywhere
+    # unless they are named here.
+    /(writeFileSync|mkdirSync|chmodSync|renameSync|unlinkSync|linkSync)\(/ {
+      ok = 0
+      if (fn == "ledgerWrite" || fn == "writeEdge" || fn == "ensureLedgerDir" || fn == "removeEdgeFiles") ok = 1
+      # `writeLabels` is GONE from this list, not forgotten: it is now
+      # `commitLabels(stageLabels(...))` and performs no `fs.*Sync` of its own, so the
+      # name could never match again and a dead entry advertises reach the list does
+      # not have. Its three parts are named instead. The widening is by count and not
+      # by reach -- the same directory walk, the same O_EXCL temp, the same rename,
+      # split only so the fingerprint window `updateLabels` checks can be the rename
+      # alone -- and two of the three are module-private, so no caller outside can
+      # name the rename source or the unlink target.
+      if (fn == "stageLabels" || fn == "commitLabels" || fn == "discardStagedLabels") ok = 1
+      if (!ok) printf "%s:%s:%d ", FILENAME, (fn == "" ? "<top-level>" : fn), NR
+    }
+  ' "$1"
+}
+
+# T0-style control: a planted write outside the ledger MUST be reported, or this
+# check is the unconditional PASS it was before. The suite's own header requires
+# every negative check to be paired with a control it must match.
+CONTROL_MJS="$(mktemp -t zensu-t11b-control-XXXXXX)" && mv "$CONTROL_MJS" "$CONTROL_MJS.mjs" && CONTROL_MJS="$CONTROL_MJS.mjs"
+# DERIVED from the alternation, one planted line per branch: two fixtures that
+# both planted writeFileSync would have let mkdirSync, chmodSync, renameSync and
+# unlinkSync be deleted from the rule with every control still green.
+T11B_MISS=""
+for prim in writeFileSync mkdirSync chmodSync renameSync unlinkSync linkSync; do
+  printf 'function cmdSomething() {\n  fs.%s(somewhereElse, "x");\n}\n' "$prim" > "$CONTROL_MJS"
+  [ -n "$(write_sites "$CONTROL_MJS")" ] || T11B_MISS="$T11B_MISS $prim"
+done
+if [ -z "$T11B_MISS" ]; then
+  check "T11b-control the write-site rule reports a planted write for every primitive it names" PASS
+else
+  check "T11b-control the write-site rule matched NOTHING for:$T11B_MISS — those branches are unpinned" FAIL
+fi
+# A write AFTER a ledger writer's closing brace must not inherit its name.
+printf 'export function commitLabels() {\n  fs.renameSync(a, b);\n}\nfs.writeFileSync(elsewhere, "x");\n' > "$CONTROL_MJS"
+# By NAME, not merely non-empty: a non-empty result is also produced when the named
+# writer is dropped from the allowlist, which is a different defect. The fixture names
+# `commitLabels` because `writeLabels` is no longer on the list -- it performs no
+# primitive of its own now -- so using it here would make this control pass for the
+# wrong reason.
+case "$(write_sites "$CONTROL_MJS")" in
+  *"<top-level>"*) check "T11b-control a write after a ledger writer closing brace is reported as top-level" PASS ;;
+  *) check "T11b-control a write after a ledger writer closing brace was not reported as top-level" FAIL ;;
+esac
+printf 'export function writeEdge() {\n  fs.writeFileSync(f, "x", { flag: "wx" });\n}\n' > "$CONTROL_MJS"
+if [ -z "$(write_sites "$CONTROL_MJS")" ]; then
+  check 'T11b-control the rule does NOT report a ledger write, including an `export function` one' PASS
+else
+  check "T11b-control the rule wrongly reports a ledger write" FAIL
+fi
+rm -f "$CONTROL_MJS"
+
+# Driven over the same file set T11 scans, so a second script added later is
+# covered — T11's comment already claims that, and scoping T11b to trail.mjs alone
+# left the claim false for the three primitives T11 stopped covering.
+WRITE_SITES=""
+SCANNED=0
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  SCANNED=$((SCANNED+1))
+  WRITE_SITES="$WRITE_SITES$(write_sites "$f")"
+done <<EOF
+$(grep -rlE '.' "$SKILL_DIR" "${SCRIPT_INCLUDES[@]}")
+EOF
+# The loop must have seen every file T11 counted; an unquoted expansion used to
+# shrink the set silently on a path containing a space.
+[ "$SCANNED" = "$SCRIPT_N" ] || check "T11b scanned $SCANNED of $SCRIPT_N shipped scripts" FAIL
+if [ -z "$WRITE_SITES" ]; then
+  check "T11b every surviving fs write in the shipped scripts lands in the lineage ledger" PASS
+else
+  check "T11b fs write outside the lineage ledger: $WRITE_SITES" FAIL
 fi
 
 # T12 — registration, exactly as every sibling skill is registered.
@@ -356,18 +560,42 @@ if grep -rqiE "$GERMAN_RE" "$SKILL_DIR"; then
 else
   check "T15 skill is English-only (no German tokens)" PASS
 fi
+# T15-control — a negative check that matches nothing is indistinguishable from a
+# clean tree. Both halves of the pattern are proven to bite on planted text, and
+# the weekday half specifically, because that is the half a real violation used.
+T15_CTRL="$(mktemp -t zensu-t15-XXXXXX)"
+printf 'a Sitzung line\n' > "$T15_CTRL"
+grep -qiE "$GERMAN_RE" "$T15_CTRL" && T15_NOUN=YES || T15_NOUN=NO
+printf '// prints So. 23 Aug. 18:16:44 2026 there\n' > "$T15_CTRL"
+grep -qiE "$GERMAN_RE" "$T15_CTRL" && T15_DAY=YES || T15_DAY=NO
+printf '// Sunday 23 August 2026. Miller says so. `--no-record` is the flag.\n' > "$T15_CTRL"
+grep -qiE "$GERMAN_RE" "$T15_CTRL" && T15_FALSE=YES || T15_FALSE=NO
+rm -f "$T15_CTRL"
+if [ "$T15_NOUN" = YES ] && [ "$T15_DAY" = YES ] && [ "$T15_FALSE" = NO ]; then
+  check "T15-control the language pattern bites a planted noun AND a planted weekday, and leaves English prose alone" PASS
+else
+  check "T15-control language pattern (noun=$T15_NOUN weekday=$T15_DAY englishFalsePositive=$T15_FALSE)" FAIL
+fi
 
 # T16 — the command surface is pinned in BOTH directions against the dispatcher
 # itself, not against a hand-kept list: every dispatched command must have a
 # documented table row, and every documented row must be dispatched. A
 # hardcoded list can only catch a lost command, never one added and left
 # undocumented — and it drifts, silently, the moment the script changes.
-DISPATCHED="$(grep -oE "cmd === '[A-Za-z0-9_-]+'" "$TRAIL_MJS" | sed "s/.*'\(.*\)'/\1/" | sort -u)"
+# Read off the COMMANDS table, which IS the dispatcher: the if/else chain this
+# once scanned for `cmd === '<name>'` was replaced by that table so the flag rows
+# and the routed set could be held adjacent, and the old grep then reported zero
+# dispatched commands while every one of them still routed.
+DISPATCHED="$(awk '/^const COMMANDS = \{/{f=1;next} f&&/^\};/{exit} f&&match($0,/^  '"'"'?[A-Za-z0-9_-]+'"'"'?:/){k=substr($0,3,RLENGTH-3); gsub(/'"'"'/,"",k); print k}' "$TRAIL_MJS" | sort -u)"
 DISPATCH_N="$(printf '%s\n' "$DISPATCHED" | grep -c .)"
 # Scoped to the '## The tool' section, not to line-start: the TAKEOVER verdict
 # table carries the same token shape and is excluded today only by its list
 # indent, so a future dedent would make three verdicts read as commands.
-DOCUMENTED="$(section_of '## The tool' | grep -oE '^\| `[A-Za-z0-9_-]+( <selector>)?`' | sed -e 's/^| `//' -e 's/ <selector>`$//' -e 's/`$//' | sort -u)"
+# The FIRST token inside the row's backticks is the command; whatever operand or
+# flag spelling follows it is the row's business. Matching the whole cell instead
+# would leave a verb undetected the moment its documentation gains an argument —
+# which is exactly how `label <accountUuid|appPid|--self> <text>` went unseen.
+DOCUMENTED="$(section_of '## The tool' | grep -oE '^\| `[A-Za-z0-9_-]+' | sed -e 's/^| `//' | sort -u)"
 UNDOCUMENTED=""; UNDISPATCHED=""
 for c in $DISPATCHED; do
   printf '%s\n' "$DOCUMENTED" | grep -qxF "$c" || UNDOCUMENTED="$UNDOCUMENTED $c"
@@ -459,10 +687,13 @@ while IFS='|' read -r label clause; do
   [ -n "$label" ] || continue
   printf '%s\n' "$LIMITS" | grep -qF "$clause" || LIMIT_MISS="$LIMIT_MISS [$label]"
 done <<'LIMIT_PINS'
-config-dir|never reads that variable
-platform|macOS-only
+config-dir|`CLAUDE_CONFIG_DIR` is honoured now
+platform|macOS-verified and elsewhere a guess
 dirname-scoping|transcript-directory name
 third-party-content|enters this conversation
+account-provenance|desktop record ONLY
+account-provenance-negative|may **not** infer an account
+ledger-completeness|only as complete as the ledger
 LIMIT_PINS
 if [ -n "$LIMITS" ] && [ -z "$LIMIT_MISS" ]; then
   check "T21 every limit's operative clause survives in '## Limits of what this can know'" PASS
@@ -492,6 +723,77 @@ missing-cwd|cwd not recorded
 skipped-note|record\(s\) unreadable and skipped
 selector-failure-note|the target may be one of them
 GUARD_PINS
+# T22a -- the write-channel enumeration in SKILL.md is a model-facing safety claim
+# that ends in "and nothing else", and it drifted the moment the edge record began
+# landing by rename: the sentence still named ONE temp family while the module
+# minted TWO. Pinned from BOTH sides -- the prose must name each family, and the
+# count of temp-file prefixes in the module must equal the count the prose names --
+# so adding a third temp family without amending the sentence fails here rather
+# than turning the enumeration into a quiet falsehood.
+TEMP_FAMILIES="$(grep -cE '\.[a-z]+-\$\{process\.pid\}' "$LEDGER_MJS")"
+SKILL_FAMILIES=0
+grep -qF '`.edge-*.tmp`' "$SKILL_MD" && SKILL_FAMILIES=$((SKILL_FAMILIES+1))
+grep -qF '`.labels-*.tmp`' "$SKILL_MD" && SKILL_FAMILIES=$((SKILL_FAMILIES+1))
+if [ "$TEMP_FAMILIES" = "2" ] && [ "$SKILL_FAMILIES" = "2" ] \
+  && grep -qF 'no delete or rename outside its own two temp families' "$SKILL_MD"; then
+  check "T22a the write-channel enumeration names every temp family the ledger mints ($SKILL_FAMILIES/$TEMP_FAMILIES)" PASS
+else
+  check "T22a write-channel enumeration drift: module mints $TEMP_FAMILIES temp families, SKILL.md names $SKILL_FAMILIES" FAIL
+fi
+
+# T22b -- a session id is an IDENTIFIER PREFIX, never prose, and the two bounds in
+# this tool differ in exactly the way that matters: oneLine truncates with U+2026,
+# a bare slice does not. SKILL.md tells the model to report the short session id
+# from `instances` and points at that command for "where did that session go";
+# --where takes a >= 6-character prefix and matches with startsWith, so an id
+# rendered as 7 characters plus an ellipsis clears the length floor and can never
+# match -- and the answer is the confident "No lineage recorded" this feature
+# exists to avoid. Pinned as an absence plus a floor: the absence is the rule, the
+# floor is what keeps the absence from being satisfied by deleting the renderers.
+# The floor is the CURRENT count, not a token minimum: at >= 4 against a population
+# of 12, nine renderers could be deleted and the check would still pass -- and the
+# `instances` row, the one the defect was actually in, is not distinguishable from
+# any of the other eleven by a count. So the row is ALSO named literally. A count
+# and a named site fail for different reasons: the count catches a renderer that
+# quietly disappears, the literal catches this one being switched back.
+# The count is over SITES, not lines: three of these lines carry two renderings
+# each, so `grep -c` reported 12 for a population of 15 and either member of those
+# three pairs stayed deletable. `grep -o | wc -l` counts what the label claims.
+# The bound is `sessionTag`, and it is the ONLY spelling. Two families of display
+# bound existed in this tree at once: a `showId(...).slice(0, 8)` pair added here and
+# `instanceId`/`sessionTag` added on main, both solving "bound the value a reader
+# retypes as a selector". Measured before they were unified, `showId(x).slice(0, 8)`
+# rendered a zero-width space as a SPACE — `a<ZWSP>bcdefgh` came out `"a bcdefg"`,
+# seven real characters in an eight-column field — and an ESC byte came out
+# `"abc [31m"`. `sessionTag` strips the zero-advance class FIRST and is what every
+# renderer now calls, so a `list` row and an `instances` row still name the same
+# prefix, which is the only thing an 8-character id is for.
+#
+# Both directions are pinned. A raw slice must not come back (that is the defect), and
+# the call-site count is a floor at the CURRENT population, so deleting any single
+# bound fails rather than being absorbed. The `oneLine` absence is unchanged: binding
+# an id through it would put U+2026 inside a rendered prefix.
+SID_ONELINE="$(grep -cE 'oneLine\([^)]*[sS]essionId' "$TRAIL_MJS" || true)"
+SID_SLICE="$(grep -oE '[sS]essionId\)?\.slice\(0, 8\)' "$TRAIL_MJS" | wc -l | tr -d ' ')"
+SID_TAG="$(grep -oF 'sessionTag(' "$TRAIL_MJS" | wc -l | tr -d ' ')"
+if [ "$SID_TAG" -ge 18 ]; then
+  check "T22c every session-id render goes through sessionTag ($SID_TAG sites incl. the definition)" PASS
+else
+  check "T22c a session-id display bound was removed (sessionTag sites=$SID_TAG, must be >= 18)" FAIL
+fi
+if [ "$SID_SLICE" = "0" ]; then
+  check "T22c-a no session id is clipped by a raw slice, which drops a column to a zero-width character" PASS
+else
+  check "T22c-a a raw session-id slice came back ($SID_SLICE site(s))" FAIL
+fi
+# The remaining half of the old T22b, which counted raw slices as the DESIRED state
+# and is now covered in the opposite direction by T22c-a: binding an id through
+# `oneLine` would put U+2026 inside a rendered prefix, so the id must never reach it.
+if [ "$SID_ONELINE" = "0" ]; then
+  check "T22b no session id is rendered through oneLine, whose clip puts an ellipsis inside the prefix" PASS
+else
+  check "T22b a session id is rendered through oneLine ($SID_ONELINE site(s), must be 0)" FAIL
+fi
 # The count must reach the user on EVERY command, not just `list`: each command
 # path can increment it. Pinned two ways — the note is emitted from flush(), and
 # every --json payload carries the field.
@@ -505,13 +807,22 @@ grep -qxF "JSON_MODE = opts.json && cmd !== 'handoff';" "$TRAIL_MJS" || GUARD_MI
 # POSITION, not just presence: moving the assignment below the dispatch restores
 # the exact defect this guard exists to prevent, with every check still green.
 JM_LINE="$(grep -n "^JSON_MODE = opts.json" "$TRAIL_MJS" | head -1 | cut -d: -f1)"
-DISPATCH_LINE="$(grep -n "^if (cmd === 'list')" "$TRAIL_MJS" | head -1 | cut -d: -f1)"
+DISPATCH_LINE="$(grep -n '^handler(opts);' "$TRAIL_MJS" | head -1 | cut -d: -f1)"
 { [ -n "$JM_LINE" ] && [ -n "$DISPATCH_LINE" ] && [ "$JM_LINE" -lt "$DISPATCH_LINE" ]; } \
   || GUARD_MISS="$GUARD_MISS [json-mode-order($JM_LINE vs $DISPATCH_LINE)]"
 if grep -qE 'skippedNote\(\)' "$TRAIL_MJS" && grep -qE '^function flush\(\)' "$TRAIL_MJS"; then
-  JSON_EMITS="$(grep -c 'opts\.json) return print(JSON\.stringify' "$TRAIL_MJS")"
-  JSON_WITH_SKIPPED="$(grep 'opts\.json) return print(JSON\.stringify' "$TRAIL_MJS" | grep -c 'skipped: SKIPPED')"
+  # Driven off EVERY payload emission, not off the one-line `opts.json) return
+  # print(JSON.stringify` spelling: a multi-line `if (opts.json) {` site was
+  # invisible to that grep, so four payloads went unpinned while the check
+  # reported a full house. The expected count is pinned too, so a new emission
+  # must be registered here rather than silently dropping out of the guard.
+  JSON_EMITS="$(grep -c 'print(JSON\.stringify(' "$TRAIL_MJS")"
+  JSON_WITH_SKIPPED="$(grep -c 'skipped: SKIPPED' "$TRAIL_MJS")"
   [ "$JSON_EMITS" = "$JSON_WITH_SKIPPED" ] || GUARD_MISS="$GUARD_MISS [json-skipped($JSON_WITH_SKIPPED/$JSON_EMITS)]"
+  # 14 -> 19: `lineage --forget` emits three payloads (unreadable ledger, dry run,
+  # applied) and `label --remove` two (nothing to remove, removed). 19 -> 20: the
+  # window-probe test seam emits its result on the same machine carrier.
+  [ "$JSON_EMITS" = "20" ] || GUARD_MISS="$GUARD_MISS [json-emit-count($JSON_EMITS, expected 20)]"
 else
   GUARD_MISS="$GUARD_MISS [note-not-in-flush]"
 fi
@@ -1302,6 +1613,71 @@ if [ -z "$T31_BAD" ]; then
 else
   check "T31 json cause contract:$T31_BAD" FAIL
 fi
+
+# T32 — the persisted field list, which is a PRIVACY claim, not a description.
+# A reader decides whether a takeover from a confidential worktree is acceptable
+# by reading it. Two endpoint fields were dropped from the record; a doc that
+# still lists them overstates the exposure, and one that lists too few would
+# understate it -- so both directions are pinned. The claims live in three
+# separate paragraphs (the durable-carrier note and the two --json disclosures),
+# and it is the disclosure paragraphs that a reader reaches first.
+T32_MISS=""
+# Scoped to the lines that describe the LEDGER. The data-sources table above
+# legitimately documents `cwd` and `title` as fields of the live registry, the
+# transcript and the desktop record -- a file-wide negative would fail on three
+# correct rows and force them to be reworded to satisfy a check about a different
+# file entirely.
+LEDGER_CLAIMS="$(grep -E 'edge|ledger|lineage --json' "$SKILL_MD" | grep -vE '^\| `<config root>/(sessions|projects)|^\| `~/Library')"
+printf '%s' "$LEDGER_CLAIMS" | grep -qE '`cwd`|absolute .?cwd.?' && T32_MISS="$T32_MISS [cwd-still-listed]"
+printf '%s' "$LEDGER_CLAIMS" | grep -qE '`title`|session title' && T32_MISS="$T32_MISS [title-still-listed]"
+printf '%s' "$LEDGER_CLAIMS" | grep -q 'sessionId`, `accountUuid`, `appPid`, `pid`, `worktree` and `branch`' || T32_MISS="$T32_MISS [current-field-list-absent]"
+[ -n "$LEDGER_CLAIMS" ] && check "T32-control the ledger claim lines were actually extracted" PASS || check "T32-control no ledger claim lines were found, so the scan below is vacuous" FAIL
+# And that each needle can bite: extraction proves awk found lines, never that the
+# patterns discriminate. Planted through the same greps the scan uses.
+T32_CTRL="$(printf 'an edge stores the `cwd` and the session title of both endpoints\n')"
+printf '%s' "$T32_CTRL" | grep -qE '`cwd`|absolute .?cwd.?' && T32_CWD=YES || T32_CWD=NO
+printf '%s' "$T32_CTRL" | grep -qE '`title`|session title' && T32_TITLE=YES || T32_TITLE=NO
+{ [ "$T32_CWD" = YES ] && [ "$T32_TITLE" = YES ]; } && check "T32-control both removed-field needles bite a planted claim" PASS || check "T32-control the removed-field needles matched nothing (cwd=$T32_CWD title=$T32_TITLE), so T32 is vacuous" FAIL
+if [ -z "$T32_MISS" ]; then
+  check "T32 SKILL.md names the fields an edge actually persists, and no longer names the two that were removed" PASS
+else
+  check "T32 SKILL.md persisted-field list:$T32_MISS" FAIL
+fi
+
+# T33 — a store that can be written but never emptied is a different promise from
+# one that can. Both halves are documented, because the removal path is what makes
+# the permanence claim survivable.
+T33_MISS=""
+grep -q 'lineage --forget' "$SKILL_MD" || T33_MISS="$T33_MISS [forget-undocumented]"
+grep -q 'label --remove' "$SKILL_MD" || T33_MISS="$T33_MISS [label-remove-undocumented]"
+# The ORDERED vocabulary, not the bare word. `grep -q 'confidence'` was satisfied
+# by the term appearing anywhere in a 239-line file, so the paragraph could lose a
+# tier or the order and stay green -- and the paragraph it nominally guards is
+# exactly the one a review found contradicted by the code.
+grep -qF '`confirmed` > `provisional` > `inferred`' "$SKILL_MD" || T33_MISS="$T33_MISS [tier-order-undocumented]"
+for tier in confirmed provisional inferred; do
+  grep -qF "\`$tier\`" "$SKILL_MD" || T33_MISS="$T33_MISS [tier-$tier-undocumented]"
+done
+if [ -z "$T33_MISS" ]; then
+  check "T33 SKILL.md documents the removal path and the confidence tier" PASS
+else
+  check "T33 SKILL.md new verbs and flags:$T33_MISS" FAIL
+fi
+
+# T34 — the ledger write is not visible to any Write-tool hook, and the flow that
+# performs it must say so where the decision is taken, not only in a Safety
+# section the reader may reach afterwards.
+T34_MISS=""
+FLOW3="$(awk '/^### 3\. Take over/{f=1;next} /^### /{f=0} f' "$SKILL_MD")"
+printf '%s' "$FLOW3" | grep -q 'no Write-tool hook' || T34_MISS="$T34_MISS [flow3-ungated-write]"
+printf '%s' "$FLOW3" | grep -q -- '--no-record' || T34_MISS="$T34_MISS [flow3-opt-out]"
+grep -q 'confidential' "$SKILL_MD" || T34_MISS="$T34_MISS [confidential-worktree]"
+if [ -z "$T34_MISS" ]; then
+  check "T34 the take-over flow states the ungated write and its opt-out where the decision is made" PASS
+else
+  check "T34 take-over flow disclosure:$T34_MISS" FAIL
+fi
+[ -n "$FLOW3" ] && check "T34-control the take-over flow section was actually extracted" PASS || check "T34-control the take-over flow section was not found, so the scan above is vacuous" FAIL
 
 echo "----"
 echo "test-session-trail-skill: $PASS PASS / $FAIL FAIL / $SKIP SKIP"

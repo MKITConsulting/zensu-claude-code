@@ -26,6 +26,7 @@ UNIT="$PLUGIN_DIR/tests/structure/evidence-crosscheck-v1.test.js"
 TDD_MD="$PLUGIN_DIR/skills/tdd/SKILL.md"
 SELF_MD="$PLUGIN_DIR/skills/self-review/SKILL.md"
 PROFILE="$PLUGIN_DIR/tests/profiles/promptfoo-local-only.v1.json"
+WORKFLOW_DOC="$PLUGIN_DIR/docs/tdd-manager-workflow.md"
 
 PASS=0; FAIL=0
 check() {
@@ -40,7 +41,7 @@ finish() {
   [ "$FAIL" -eq 0 ]
 }
 
-for f in "$LIB" "$UNIT" "$TDD_MD" "$SELF_MD" "$PROFILE"; do
+for f in "$LIB" "$UNIT" "$TDD_MD" "$SELF_MD" "$PROFILE" "$WORKFLOW_DOC"; do
   if [ ! -f "$f" ]; then
     check "P0 required file exists: $f" FAIL
     finish
@@ -73,10 +74,10 @@ fi
 # node --test prints the summary as `ℹ pass <n>` on this runtime and `# pass <n>`
 # on the TAP-style one; accept either so the floor does not silently stop biting.
 UNIT_PASS="$(grep -Eo '^[#ℹ] pass [0-9]+' "$WORK/unit.out" 2>/dev/null | grep -Eo '[0-9]+$' | head -1)"
-if [ -n "$UNIT_PASS" ] && [ "$UNIT_PASS" -ge 25 ]; then
-  check "P1a the unit suite registered at least 25 cases (actual: $UNIT_PASS)" PASS
+if [ -n "$UNIT_PASS" ] && [ "$UNIT_PASS" -ge 32 ]; then
+  check "P1a the unit suite registered at least 32 cases (actual: $UNIT_PASS)" PASS
 else
-  check "P1a the unit suite registered at least 25 cases (actual: ${UNIT_PASS:-none})" FAIL
+  check "P1a the unit suite registered at least 32 cases (actual: ${UNIT_PASS:-none})" FAIL
 fi
 
 # ── P2: end-to-end CLI ──────────────────────────────────────────────────────
@@ -231,6 +232,24 @@ if grep -qF '"test-evidence-crosscheck.sh"' "$PROFILE"; then
   check "P4 this suite is registered in promptfoo-local-only.v1.json" PASS
 else
   check "P4 this suite is registered in promptfoo-local-only.v1.json" FAIL
+fi
+
+# ── P5: the operator-facing carrier names the library, not the retired grep ──
+# docs/tdd-manager-workflow.md calls itself the source of truth for the Phase 5/6
+# cross-check, and it taught `grep -F -q 'cmd="X"' witness.log` long after the skill
+# forbade hand-grepping in bold. The negative guard above covers $TDD_MD and $SELF_MD
+# only, so that carrier could regress to the retired recipe with every suite green.
+# The negative needle is the RECIPE FRAGMENT alone, byte-identical to the P3c guard
+# above — anchoring it on the old prose lead-in ("then runs …") let the same recipe
+# return under any other wording with this row still green. Kept scoped to
+# $WORKFLOW_DOC: docs/architecture.md quotes the retired recipe deliberately, as
+# history, and would false-positive if the guard were widened to docs/.
+if grep -qF 'hooks/lib/zensu-evidence-crosscheck.js' "$WORKFLOW_DOC" \
+  && grep -qF -- 'not a hand-written `grep` — is the recipe' "$WORKFLOW_DOC" \
+  && ! grep -qF -- "grep -F -q 'cmd=" "$WORKFLOW_DOC"; then
+  check "P5 workflow doc names the cross-check library and no longer teaches the hand-grep" PASS
+else
+  check "P5 workflow doc names the cross-check library and no longer teaches the hand-grep" FAIL
 fi
 
 finish

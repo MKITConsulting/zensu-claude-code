@@ -180,6 +180,20 @@ else
   check "V24 the unrunnable-cross-check verdict is defined for the What-I-built cell and sourced in Phase 4 step 2" FAIL
 fi
 
+# V25 — Phase 5 checkpoints are scoped, so the full suite runs only in the Phase 6 audit
+# and again in the /zensu:tdd convergence branch. This stage's fix round is the LAST edit
+# of the chain, so when it edits, its own re-run is the only thing standing between the
+# user and a closing verdict measured before that edit. test-tdd-manager-patches.sh DOES
+# read this file (R17-P11), but it pins only the two `| scope: full` spellings in this
+# paragraph — not the imperative itself nor its "tree that ships" reason, which are what
+# these two needles cover. Delete them and the rule goes with every row there still green.
+if grep -qF -- 'Phase 6 **step 1 full suite**' "$SKILL_MD" \
+  && grep -qF -- 'the run whose verdict describes the tree that ships' "$SKILL_MD"; then
+  check "V25 the self-review fix round re-runs the full suite over its own amended tree" PASS
+else
+  check "V25 the self-review fix round re-runs the full suite over its own amended tree" FAIL
+fi
+
 echo "----"
 echo "test-self-review-skill: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

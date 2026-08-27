@@ -44,7 +44,42 @@ Both are handled by Session Control v1:
   already has a record, still fail closed instead of creating a replacement
   anchor. A fork inherits no workflow state: it starts with its own baseline
   document, and Claude Code's `SessionStart` payload carries no parent session
-  id to inherit from. The five
+  id to inherit from. **That is silent, and `/zensu:doctor` is the only thing
+  that reports it.** A fork is not announced: the host mints the new id
+  mid-conversation, carries the whole history over and re-fires `SessionStart`,
+  so nothing in the conversation marks the boundary while the chain armed under
+  the old key becomes unreachable and every later `zensu-log.sh` call answers
+  `no-session`. The `chain: open chain(s) not owned by this session` row names a
+  chain in the project that is open, foreign, within the pending-review TTL, and not
+  already named by the wedged or dead-end rows
+  (`0` disables that bound rather than the row), aging it against an `updated_at`
+  inside a document that must still pass `validateWorkflowState`, which a bare
+  `touch` cannot produce. That NARROWS the forgery channel; it does not close it,
+  because that validator derives `session_id_hash` from the file's own name with
+  no secret and no MAC, so a writer with access to the state directory can still
+  mint an accepted document carrying any stamp it likes. While the bound is armed, a stamp in the
+  FUTURE is treated as outside the window rather than absolute-valued, so a
+  skewed or planted one cannot hold the row open forever; at `0` no window is
+  claimed, so nothing is excluded on age at all: `validateWorkflowState` already refuses any
+document whose `updated_at` does not parse, so every entry that reaches the row carries a
+readable one and a guard for the unreadable case would be dead code. **The row states an OBSERVATION, never a cause**, and that wording is
+  load-bearing: it cannot distinguish a forked-away session from a live sibling
+  driving its own chain in the same project, and a live sibling is ordinary in a
+  worktree workflow — so it names the fork as the usual cause and makes the
+  re-arm remedy conditional on the reader knowing that session is gone. The whole `Session state` block reads the state directory under the RECORD's
+  project root rather than under `CLAUDE_PROJECT_DIR`, because that is where
+  every writer puts it: `zensu-log.sh` re-exports `CLAUDE_PROJECT_DIR` from
+  `zensu_resolve_project_dir`, which resolves the recorded root, before any
+  verb runs. `ZDOC_SESSION_PROJECT_ROOT` carries that root out of the same
+  bind as the key, and the harness value is only the fallback for a session
+  with no bound record. Two conditions withhold it. One is silent:
+  `ZDOC_SESSION_KEY` must be present under a `bound` verdict, which the reader
+  enforces itself because the wrapper's resolution block is skipped whenever a
+  caller supplies `ZDOC_BINDING`. **It DIAGNOSES
+  only.** An armed chain cannot be moved to a new session key, so the remedy is to
+  re-arm with `/zensu:tdd`; `/zensu:adopt-session` does not apply, because it
+  repairs a lineage break and not a changed session id. The
+  five
   exact plugin-scoped reviewer identities receive
   `reviewer-readonly-v1`; the plugin-scoped `zensu:zensu-plm` and every other
   unknown or custom agent receive neutral `host-profile-v1`. This also applies

@@ -21,7 +21,12 @@ RESULT_TEST="$ROOT/evals/session-control/tests/upgrade-results.test.js"
 NIGHTLY="$ROOT/.github/workflows/session-control-nightly.yml"
 RELEASE="$ROOT/.github/workflows/release.yml"
 CI="$ROOT/.github/workflows/ci.yml"
-ROOT_README="$ROOT/README.md"
+# The FD3 credential boundary is documented in docs/session-control.md, not in
+# the README. It lived there until 84aab18 (#228) moved the deep session-control
+# prose out verbatim; that commit followed the pin with twelve other structure
+# tests and missed this one, so the check has been RED on main ever since —
+# invisibly, because this suite is localStructureTests and CI never runs it.
+SESSION_CONTROL_DOC="$ROOT/docs/session-control.md"
 EVAL_README="$ROOT/evals/session-control/README.md"
 CHANGELOG="$ROOT/CHANGELOG.md"
 RELEASE_GATE_DOC="$ROOT/docs/session-control-release-gate.md"
@@ -638,8 +643,8 @@ fi
   && check 'GitHub Actions use only deterministic non-Promptfoo gates' PASS \
   || check 'GitHub Actions use only deterministic non-Promptfoo gates' FAIL
 
-contains 'Root README documents the Bubblewrap FD3 credential boundary' \
-  "$ROOT_README" \
+contains 'Session Control docs document the Bubblewrap FD3 credential boundary' \
+  "$SESSION_CONTROL_DOC" \
   'through its `--args` file descriptor 3, never through the process'
 contains 'Eval README documents the exact POSIX Promptfoo matrix' \
   "$EVAL_README" \

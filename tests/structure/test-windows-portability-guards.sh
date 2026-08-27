@@ -26,6 +26,7 @@ CORE="$ROOT/hooks/lib/session-control-core-v1.js"
 BINDER="$ROOT/hooks/lib/claude-hook-session-v1.js"
 AUTOPILOT_STATE="$ROOT/hooks/lib/zensu-autopilot-state.sh"
 PLAN_PAYLOAD="$ROOT/hooks/lib/plan-payload-v1.js"
+SESSION_LINEAGE="$ROOT/skills/session-trail/scripts/session-lineage-v1.mjs"
 ARTIFACT_REDACT="$ROOT/hooks/lib/zensu-artifact-redact-v1.js"
 BEST_SOLUTION_HOOK="$ROOT/hooks/user-prompt-best-solution-first.sh"
 EVIDENCE_DISCIPLINE_HOOK="$ROOT/hooks/session-start-evidence-discipline.sh"
@@ -481,6 +482,38 @@ if [ "$(grep -cF 'process.platform !== "win32" && Number.isInteger(fs.constants.
   check "plan-payload reader omits unsupported O_NOFOLLOW on Windows" PASS
 else
   check "plan-payload reader omits unsupported O_NOFOLLOW on Windows" FAIL
+fi
+
+# The session-lineage ledger reader is the third hardened open in a requireable
+# module, and the FIRST one outside hooks/. Same reason it is listed: every count
+# pin above is per-file and therefore blind to a NEW file carrying a secure open,
+# so a file that is merely correct today has nothing keeping it correct. The
+# properties are the ones that make the read safe against a store the session can
+# write: BOTH flags are resolved once in the Windows-safe spelling, the descriptor --
+# not the path -- carries the regular-file and size assertions, and the size cap
+# is applied to the fstat result rather than to a prior lstat.
+#
+# O_NONBLOCK is pinned beside O_NOFOLLOW because it closes a hazard the descriptor
+# checks structurally cannot: O_RDONLY on a FIFO blocks until a writer appears, and
+# the fstat/isFile assertions run AFTER the open. One planted entry in a directory
+# every session on the machine can write wedged every reader on the host. It carries
+# the same platform gate, for the same reason -- the constant is absent on win32.
+# Both spellings are single-quoted now: the file used a double-quoted "win32" on the
+# NOFOLLOW line and a single-quoted one eleven lines below, for the same platform
+# gate, in a module whose every other literal is single-quoted. Normalising it later
+# would have reddened this suite, which is the coupling CLAUDE.md's roster records.
+if [ "$(grep -cF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)" "$SESSION_LINEAGE")" -eq 1 ] \
+  && [ "$(grep -cF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NONBLOCK)" "$SESSION_LINEAGE")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.openSync(file, fs.constants.O_RDONLY | NOFOLLOW | NONBLOCK)' "$SESSION_LINEAGE")" -eq 1 ] \
+  && [ "$(grep -cF 'const st = fs.fstatSync(fd);' "$SESSION_LINEAGE")" -eq 1 ] \
+  && grep -qF 'if (!st.isFile()) return { text: null, reason: EDGE_REFUSALS.NOT_A_FILE };' "$SESSION_LINEAGE" \
+  && grep -qF 'if (st.size > MAX_RECORD_BYTES) return { text: null, reason: EDGE_REFUSALS.OVERSIZE };' "$SESSION_LINEAGE" \
+  && ! grep -qF '| (fs.constants.O_NOFOLLOW || 0)' "$SESSION_LINEAGE" \
+  && ! grep -qF '| (fs.constants.O_NONBLOCK || 0)' "$SESSION_LINEAGE" \
+  && ! grep -qF 'fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW' "$SESSION_LINEAGE"; then
+  check "session-lineage ledger reader asserts on the descriptor with a Windows-safe flag" PASS
+else
+  check "session-lineage ledger reader asserts on the descriptor with a Windows-safe flag" FAIL
 fi
 
 # The artifact redactor is another requireable module carrying a hardened

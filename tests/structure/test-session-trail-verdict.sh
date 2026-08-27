@@ -64,7 +64,16 @@ trap 'rm -rf "$FAKE"' EXIT
 # V0 — the premise. A homedir that is not the fixture root means every lookup
 # below would run against the developer's real ~/.claude, so this SKIPs the
 # suite rather than letting it pass or fail for the wrong reason.
-RESOLVED_HOME="$(HOME="$FAKE" node -e 'process.stdout.write(require("node:os").homedir())' 2>/dev/null)"
+# CLAUDE_CONFIG_DIR is unset for every invocation below, and --config-dir names the
+# sandbox explicitly. Since trail.mjs began honouring that variable, $HOME is only a
+# FALLBACK: with it exported, every fixture read here would resolve against the
+# developer's real config root and the two takeover calls would write real ledger
+# edges there, all while V0 still passed.
+FAKE_CFG="$FAKE/.claude"
+trailrun() { env -u CLAUDE_CONFIG_DIR HOME="$FAKE" USERPROFILE="$FAKE" node "$TRAIL_MJS" "$@" --config-dir "$FAKE_CFG"; }
+# USERPROFILE too: the probe has to measure the environment trailrun uses, or it
+# skips all 33 checks on Windows for a redirection every invocation does supply.
+RESOLVED_HOME="$(HOME="$FAKE" USERPROFILE="$FAKE" node -e 'process.stdout.write(require("node:os").homedir())' 2>/dev/null)"
 if [ "$RESOLVED_HOME" != "$FAKE" ]; then
   skip "all session-trail verdict behaviour checks (os.homedir() does not follow \$HOME here: got '${RESOLVED_HOME:-<empty>}')"
   report; exit 0
@@ -225,7 +234,7 @@ archive() { # <sessionId> [isArchived=true]
 # is already the hard requirement, jq is not.
 field() { # <sessionId> <dotted-path> [extra trail.mjs flags...]
   local sid="$1" key="$2"; shift 2
-  HOME="$FAKE" node "$TRAIL_MJS" show "$sid" --all --no-git --json "$@" 2>/dev/null \
+  trailrun show "$sid" --all --no-git --json "$@" 2>/dev/null \
     | HOME="$FAKE" node -e '
 const key = process.argv[1];
 let s = "";
@@ -388,7 +397,7 @@ fi
 # must never be rendered against every busy row on the machine. The BUSY count is
 # a POSITIVE CONTROL: without it an empty, crashed or row-less survey scores zero
 # CONTESTED and the check passes having exercised nothing.
-LIST_OUT="$(HOME="$FAKE" node "$TRAIL_MJS" list --all --no-git --force 2>/dev/null)"
+LIST_OUT="$(trailrun list --all --no-git --force 2>/dev/null)"
 LIST_BUSY="$(printf '%s\n' "$LIST_OUT" | grep -c 'BUSY')"
 LIST_FORCED="$(printf '%s\n' "$LIST_OUT" | grep -c 'CONTESTED')"
 if [ "$LIST_BUSY" -gt 0 ] && [ "$LIST_FORCED" = "0" ]; then
@@ -401,7 +410,7 @@ fi
 # round-1 fix was missing: it was applied to the visible text only, so the machine
 # payload kept stamping CONTESTED on every row while the terminal looked correct.
 survey_json_contested() { # <command>
-  HOME="$FAKE" node "$TRAIL_MJS" "$1" --all --no-git --force --json 2>/dev/null \
+  trailrun "$1" --all --no-git --force --json 2>/dev/null \
     | HOME="$FAKE" node -e '
 let s = "";
 process.stdin.on("data", (d) => { s += d; });
@@ -441,7 +450,7 @@ fi
 # output is PERSISTED and read by another instance, and neither was exercised at
 # all: a `measuredLevel` → `level` slip there would have recorded an authorization
 # as if it were the measurement, with every other check green.
-TAKEOVER_JSON="$(HOME="$FAKE" node "$TRAIL_MJS" takeover bbbbbbbb-0000-0000-0000-000000000002 --all --force --json 2>/dev/null \
+TAKEOVER_JSON="$(trailrun takeover bbbbbbbb-0000-0000-0000-000000000002 --all --force --no-record --json 2>/dev/null \
   | HOME="$FAKE" node -e '
 let s = "";
 process.stdin.on("data", (d) => { s += d; });
@@ -454,8 +463,8 @@ process.stdin.on("end", () => {
 # The MARKDOWN body, not just the JSON payload: `--json` returns before the brief
 # is built, so a `measuredLevel` -> `level` slip in the file that actually gets
 # written to ~/.claude/handoffs/ is invisible to the payload check.
-TAKEOVER_MD="$(HOME="$FAKE" node "$TRAIL_MJS" takeover bbbbbbbb-0000-0000-0000-000000000002 --all --force 2>/dev/null)"
-HANDOFF_MD="$(HOME="$FAKE" node "$TRAIL_MJS" handoff bbbbbbbb-0000-0000-0000-000000000002 --all --force 2>/dev/null)"
+TAKEOVER_MD="$(trailrun takeover bbbbbbbb-0000-0000-0000-000000000002 --all --force --no-record 2>/dev/null)"
+HANDOFF_MD="$(trailrun handoff bbbbbbbb-0000-0000-0000-000000000002 --all --force 2>/dev/null)"
 # The line labelled "measured" must carry the MEASURED reason. Asserting only the
 # level cannot see a `measuredReason` -> `reason` slip, because the authorization
 # sentence sits on its own separate line either way.
@@ -542,8 +551,8 @@ fi
 # V16b — the human-readable carrier. Every other check reads --json, so the four
 # verdict-guidance lines were pinned as strings but never as attached to the right
 # level: exchanging two guards left both suites green.
-SHOW_BUSY="$(HOME="$FAKE" node "$TRAIL_MJS" show bbbbbbbb-0000-0000-0000-000000000002 --all --no-git 2>/dev/null)"
-SHOW_FORCED="$(HOME="$FAKE" node "$TRAIL_MJS" show bbbbbbbb-0000-0000-0000-000000000002 --all --no-git --force 2>/dev/null)"
+SHOW_BUSY="$(trailrun show bbbbbbbb-0000-0000-0000-000000000002 --all --no-git 2>/dev/null)"
+SHOW_FORCED="$(trailrun show bbbbbbbb-0000-0000-0000-000000000002 --all --no-git --force 2>/dev/null)"
 V16B_BAD=""
 case "$SHOW_BUSY" in *"TAKEOVER BUSY"*) ;; *) V16B_BAD="$V16B_BAD no-busy-line" ;; esac
 case "$SHOW_BUSY" in *"hazard report, not a refusal"*) ;; *) V16B_BAD="$V16B_BAD busy-advice-missing" ;; esac
@@ -555,8 +564,8 @@ case "$SHOW_FORCED" in *"hazard report, not a refusal"*) V16B_BAD="$V16B_BAD con
 # The other two levels, because a probe showed the FREE and PROBABLY_FREE entries
 # could be swapped with every check still green: their advice was pinned as text
 # in the table but never as attached to the level that emits it.
-SHOW_FREE="$(HOME="$FAKE" node "$TRAIL_MJS" show ffffffff-0000-0000-0000-000000000006 --all --no-git 2>/dev/null)"
-SHOW_PF="$(HOME="$FAKE" node "$TRAIL_MJS" show aaaaaaaa-0000-0000-0000-000000000001 --all --no-git 2>/dev/null)"
+SHOW_FREE="$(trailrun show ffffffff-0000-0000-0000-000000000006 --all --no-git 2>/dev/null)"
+SHOW_PF="$(trailrun show aaaaaaaa-0000-0000-0000-000000000001 --all --no-git 2>/dev/null)"
 case "$SHOW_FREE" in *"TAKEOVER FREE"*) ;; *) V16B_BAD="$V16B_BAD no-free-line" ;; esac
 case "$SHOW_FREE" in *"Nothing holds this worktree"*) ;; *) V16B_BAD="$V16B_BAD free-advice-missing" ;; esac
 case "$SHOW_FREE" in *"Proceed, but tell the user not to type"*) V16B_BAD="$V16B_BAD free-shows-probably-free-advice" ;; esac
@@ -706,6 +715,21 @@ CWD_IN_ANCHOR_PATTERN_SOURCE="  const top = git(process.cwd(), ['rev-parse']);"
 # either branch silently truncates the block for every arm that reads it, and the
 # arms are presence checks, so the loss would not announce itself.
 writes_block() { grep -E -A4 '^WRITES' || true; }
+
+# A mutated copy of trail.mjs must sit at the same DEPTH inside a plugin-shaped tree,
+# never loose in $FAKE. The script statically imports `./session-lineage-v1.mjs` and
+# resolves `../../../hooks/lib/claude-path-v1.js` at start-up, so a bare copy fails to
+# LOAD -- and every arm below it then reads "the command produced nothing" as though
+# it were the property under test. Measured: all three mutant arms went inert that way
+# at once. `bash-source-write-parse.js` is deliberately NOT staged, because W22's whole
+# subject is that gate being absent.
+mutant_path() { # <tag> -> path to place the mutated trail.mjs at
+  local d="$FAKE/mut-$1/skills/session-trail/scripts"
+  mkdir -p "$d" "$FAKE/mut-$1/hooks/lib"
+  cp "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$d/" 2>/dev/null
+  cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$FAKE/mut-$1/hooks/lib/" 2>/dev/null
+  printf '%s' "$d/trail.mjs"
+}
 
 W_ALLOWED="$(ZENSU_PROJECT_ROOT="$WT_A" HOME="$FAKE" node "$TRAIL_MJS" show "$SID_A" --all --no-git 2>/dev/null | writes_block)"
 W1_BAD=""
@@ -1046,12 +1070,12 @@ done
 # THERE, so the mutation removes it and the same extraction must report ABSENT — if
 # it does not, the extraction is reading something other than the payload field and
 # says so here rather than reading as coverage.
-W7B_MUT="$FAKE/trail-w7b-mutated.mjs"
-# The mutation removes the `writes` KEY, not a key-plus-neighbour spelling. Keying
-# on the adjacency `writes: …, skipped: SKIPPED }` made this arm report
-# `payload-spelling-moved` the moment any other field was added to the same
-# literal — a true statement about the spelling, but it retires the bite for a
-# change that has nothing to do with `writes`.
+# Main's needle, which keys on the `writes` KEY alone rather than on its adjacency to
+# a neighbour: keying on `writes: …, skipped: SKIPPED }` retired the bite the moment
+# any other field joined the same literal, which is exactly what this branch's
+# `lineage` field did. Kept with this branch's `mutant_path`, because a mutated copy
+# loose in $FAKE cannot LOAD -- trail.mjs statically imports its sibling module.
+W7B_MUT="$(mutant_path w7b)"
 sed 's/writes: writeAnchor(r\.wt), //' "$TRAIL_MJS" > "$W7B_MUT" 2>/dev/null
 if grep -qF 'writes: writeAnchor(r.wt),' "$W7B_MUT" 2>/dev/null \
   || ! grep -qF 'takeover: tv,' "$W7B_MUT" 2>/dev/null; then
@@ -1511,8 +1535,8 @@ fi
 # row, so two spellings of one id defeat the field entirely. `cmdShow`'s OWNER row
 # carried the same defect at width 64.
 #
-# The ellipsis arm IS scoped to this fixture's own row — `grep -a 'inst inst-A'`
-# cannot match the `archive()` fixture, which `appTag` renders as `inst inst-000`.
+# The ellipsis arm IS scoped to this fixture's own row — `grep -a 'account inst-A'`
+# cannot match the `archive()` fixture, which renders a different account name.
 # That is sufficient: this fixture's instance name is fifteen characters, well past
 # the eight-character prefix, so the clip is exposed here. An earlier wording
 # claimed the arm covered every long instance name in the suite; it does not.
@@ -1537,7 +1561,10 @@ fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
 ' "$FAKE" "$W13_SID" "$W13_WT" 2>/dev/null
   printf '{"cliSessionId":"%s","isArchived":false,"title":"app fixture","model":"opus","effort":"high","permissionMode":"default"}\n' "$W13_SID" > "$W13_DIR/local_$W13_SID.json"
   W13_BAD=""
-  W13_LIST="$(HOME="$FAKE" node "$TRAIL_MJS" list --all 2>/dev/null | grep -a 'inst inst-A' || true)"
+  # `account`, not `inst`: the first-level directory under the desktop store IS the
+  # account uuid this line renders, so the same store-derived value reaches the same
+  # fixed column under a different label. The property under test is unchanged.
+  W13_LIST="$(HOME="$FAKE" node "$TRAIL_MJS" list --all 2>/dev/null | grep -a 'account inst-A' || true)"
   [ -n "$W13_LIST" ] || W13_BAD="$W13_BAD appTag-row-absent"
   case "$W13_LIST" in *"$W13_ESC"*) W13_BAD="$W13_BAD appTag-esc-survived" ;; esac
   case "$W13_LIST" in *'…'*) W13_BAD="$W13_BAD appTag-clips-to-seven-plus-ellipsis" ;; esac
@@ -1741,7 +1768,7 @@ W16_LEN="$(w16_resumed_len "$TRAIL_MJS")"
 [ "${W16_LEN:-999}" -le 40 ] 2>/dev/null || W16_BAD="$W16_BAD resumedUntil-not-clipped-in-the-brief(len=$W16_LEN)"
 # The bite arm: with the clip removed the same extraction must exceed it, or the
 # assertion above is measuring a value that was never long enough to be clipped.
-W16_MUT="$FAKE/trail-w16-mutated.mjs"
+W16_MUT="$(mutant_path w16)"
 sed 's/resumedUntil: flat(lastTurnAt, 40) ?? null,/resumedUntil: lastTurnAt ?? null,/' "$TRAIL_MJS" > "$W16_MUT" 2>/dev/null
 if ! grep -qF 'resumedUntil: lastTurnAt ?? null,' "$W16_MUT" 2>/dev/null; then
   W16_BAD="$W16_BAD bite-mutation-did-not-apply(bound-spelling-moved)"
@@ -2438,7 +2465,7 @@ case "$W22_RESOLVED" in
   MISSING:*|"") W22_BAD="$W22_BAD gate-specifier-does-not-resolve($W22_RESOLVED)" ;;
 esac
 # BEHAVIORAL: an unloadable gate degrades, and says which channel failed.
-W22_MUT="$FAKE/trail-w22-nogate.mjs"
+W22_MUT="$(mutant_path w22)"
 sed 's#bash-source-write-parse.js#bash-source-write-parse-absent-on-purpose.js#' "$TRAIL_MJS" > "$W22_MUT" 2>/dev/null
 if ! grep -qF 'bash-source-write-parse-absent-on-purpose.js' "$W22_MUT" 2>/dev/null; then
   W22_BAD="$W22_BAD bite-mutation-did-not-apply(require-spelling-moved)"

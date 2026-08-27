@@ -25,6 +25,10 @@ const CHAIN_OUTCOMES = ['', 'pass', 'no-changes', 'max-rounds'];
 const RECOVERABLE_SHAPES = ['wedged-stale-rearm'];
 const DEAD_END_SHAPES = ['self-review-unbindable'];
 const STUCK_SHAPES = Object.freeze([...RECOVERABLE_SHAPES, ...DEAD_END_SHAPES]);
+// The shapes that carry no work forward. Exported so a consumer never hand-copies
+// them; keep in step with the literals `chainShape` returns below. See CLAUDE.md
+// §"Chain Shape & Rearm Receipt".
+const INERT_SHAPES = Object.freeze(['no-session', 'chain-closed']);
 
 const NEXT_COMMAND = {
   'no-session': 'run /zensu:tdd to arm a chain',
@@ -288,6 +292,7 @@ function countRecoveries(state) {
 
 module.exports = {
   BLOCKED_RECOVERY_COMMAND,
+  INERT_SHAPES,
   NEXT_COMMAND,
   REARM_MARKER_KEYS,
   RECOVERABLE_SHAPES,
