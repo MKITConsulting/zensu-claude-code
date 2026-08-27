@@ -1064,10 +1064,10 @@ fi
 # guard condition and returning the text unchanged left the suite green.
 REPORT_UNIT="$ROOT/tests/structure/session-adopt-report-v1.test.js"
 if [ -f "$REPORT_UNIT" ] && node --test "$REPORT_UNIT" >"$TMP/report-unit.out" 2>&1 \
-  && unit_cases_registered_floor "$TMP/report-unit.out" 25; then
+  && unit_cases_registered_floor "$TMP/report-unit.out" 27; then
   check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), driven from here)" PASS
 else
-  check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), want >= 25 registered — driven from here)" FAIL
+  check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), want >= 27 registered — driven from here)" FAIL
   grep -E "^not ok|^# (fail|pass|tests) |Error|expected:|actual:|operator:" \
     "$TMP/report-unit.out" 2>/dev/null | head -40
 fi
@@ -3171,11 +3171,32 @@ STOP_NEUTRAL_GUARD="$(code_only "$STOP_LADDER" | grep -cF 'INCOMPATIBLE_ROOT_STA
 # VALUE into ZDOC_ROOT_STATE_PRESENT from the owner instead — still one definition,
 # still no literal.
 DOCTOR_POSITIVE_GUARD="$(code_only "$DOCTOR_LADDER" | grep -cF 'ZDOC_ORPHAN_ROOT_STATUS" -eq "$ZDOC_ROOT_STATE_PRESENT"' || true)"
+# The two needles above cover the PRESENT member only, and for one round that was the
+# whole pin while the comment in zensu-session.sh claimed both files were held to the
+# NAMED spelling. They were not: nothing in tests/ named _GONE at all, and the doctor
+# was meanwhile spelling `"${ZDOC_ROOT_STATE_GONE:-0}"` — a default that restores the
+# literal the pair exists to remove. A half-pinned pair is worse than an unpinned one,
+# because the green row reads as covering the contract.
+#
+# Both members are pinned now, in both consumers. The doctor needle deliberately
+# matches the GUARDED spelling rather than the bare comparison: `-n` first is what
+# makes the screen above it have an effect, so a revert to the defaulted form fails
+# here even though it would still compare against the same name.
+STOP_GONE_GUARD="$(code_only "$STOP_LADDER" | grep -cF 'INCOMPATIBLE_ROOT_STATUS" -eq "$ZENSU_ROOT_STATE_GONE"' || true)"
+DOCTOR_GONE_GUARD="$(code_only "$DOCTOR_LADDER" | grep -cF 'ZDOC_ORPHAN_ROOT_STATUS" -eq "$ZDOC_ROOT_STATE_GONE"' || true)"
+DOCTOR_GONE_REQUIRED="$(code_only "$DOCTOR_LADDER" | grep -cF '[ -n "$ZDOC_ROOT_STATE_GONE" ]' || true)"
+# The defaulted spelling must be ABSENT, not merely outnumbered — this is the arm that
+# regressed, so it gets a negative needle of its own rather than relying on the count.
+DOCTOR_GONE_DEFAULTED="$(code_only "$DOCTOR_LADDER" | grep -cF 'ZDOC_ROOT_STATE_GONE:-' || true)"
 if [ "$STOP_ARM_GONE" = 1 ] && [ "$STOP_ARM_NEUTRAL" = 1 ] && [ "$STOP_ARM_DEFER" = 1 ] \
     && ! printf '%s' "$STOP_NEUTRAL_TEXT" | grep -qF 'The recorded project root still EXISTS' \
     && ! printf '%s' "$STOP_NEUTRAL_TEXT" | grep -qF 'this is not a deferral' \
     && [ "$STOP_NEUTRAL_GUARD" = 1 ] \
     && [ "$DOCTOR_POSITIVE_GUARD" = 1 ] \
+    && [ "$STOP_GONE_GUARD" = 1 ] \
+    && [ "$DOCTOR_GONE_GUARD" = 1 ] \
+    && [ "$DOCTOR_GONE_REQUIRED" = 1 ] \
+    && [ "$DOCTOR_GONE_DEFAULTED" = 0 ] \
     && [ "$DOCTOR_UNKNOWN_EXPORTS" = 1 ] && [ "$DOCTOR_UNKNOWN_ASSIGNS" = 3 ] \
     && [ "$DOCTOR_UNKNOWN_SETS" = 1 ]; then
   check "AC-C19 the Stop ladder has three emitted arms, the neutral one borrows neither sibling's claim, and the doctor exports the same distinction" PASS

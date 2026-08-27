@@ -39,7 +39,10 @@
 // still render colon-like and comes back verbatim. That is an accepted residual, not
 // an oversight — rejecting combining marks would fold every localized path, which is
 // the degradation the wide alphabet exists to avoid. What the guard DOES close is the
-// literal separator, the double space, the invisible letters and the modifier letters.
+// literal separator in BOTH spellings the consumers emit — ` : ` and `: ` — plus the
+// double space, the invisible letters and the modifier letters. Name the spellings:
+// an earlier wording said only "the literal separator" while the rule covered one of
+// the two, so the sentence read as complete over a guard that was not.
 // Say it that way; do not write "cannot forge a row".
 
 // The alphabet is deliberately WIDE — \p{L}\p{N}\p{M} rather than ASCII — so an
@@ -56,8 +59,27 @@ const DOUBLE_SPACE = / {2}/;
 // privilege: context.project_root is minted from the SessionStart cwd and
 // validateContext rejects only NUL, CR and LF in it, so anyone who supplies the
 // directory name the user opens Claude Code in controls this substring. A real path
-// containing " : " renders JSON-quoted instead, which is still readable.
-const PAIR_SEPARATOR = / : /;
+// containing a separator-shaped colon renders JSON-quoted instead, which is still
+// readable.
+//
+// The rule was FIRST written as / : / — space-colon-space — and that was measured
+// against the wrong thing: it describes how this comment spells a pair, not how the
+// consumers spell a ROW. Neither of them uses it. session-adopt-report-v1.js writes
+// `"  superseded record: "` and zensu-doctor-report.js renders `binding: …`; both put
+// NO space before the colon. So `/home/u/superseded record: /tmp/evil` satisfied the
+// whole fast path and was returned RAW, forging a row in the exact spelling the report
+// emits — the forgery this constant exists to stop, arriving through the one spelling
+// it did not cover.
+//
+// The rule is therefore ONE SIDE plus a space, either side: a colon that has a space
+// on its left or on its right. That subsumes / : / and closes `: ` with it. It is
+// deliberately NOT "every colon": `C:/Users/u/repo`, `D:\work` and `/tmp/a:b` carry no
+// adjacent space, cannot read as a separator, and keep rendering as themselves — which
+// is the whole reason the alphabet admits a colon at all. The ESCAPING branch below is
+// stricter still and escapes every colon unconditionally; the two branches differ on
+// purpose, because there the value has already lost the fast path and readability is
+// no longer the thing being protected.
+const PAIR_SEPARATOR = / :|: /;
 // The allowlist above admits \p{L}, and some LETTERS are Default_Ignorable — U+3164
 // HANGUL FILLER, U+115F, U+1160, U+FFA0 — which render as blank in a terminal. A value
 // like `/tmp/x<U+3164>:<U+3164>y` therefore matches the class, contains NO space at

@@ -274,11 +274,23 @@ zensu_session_incompatible_runtime_model() {
 # below warns about, one level up: not a caller reading truthiness, but a maintainer
 # reading a literal.
 #
-# Both consumers compare against these names: hooks/stop-chain-enforcer.sh takes its
-# gone arm and its neutral arm through them, and hooks/lib/zensu-doctor.sh does the
-# same. Keep them in step — AC-C19 in tests/structure/test-versioned-plugin-upgrade.sh
-# greps for the NAMED spelling in both files precisely so a silent revert to a literal
-# fails rather than passing.
+# Both consumers reach the trichotomy through these names, but NOT by the same route,
+# and the difference is worth stating because an earlier wording here flattened it into
+# "both compare against these names" and was wrong about one of them.
+# hooks/stop-chain-enforcer.sh sources this file in its PARENT shell, so it compares
+# against ZENSU_ROOT_STATE_* directly. hooks/lib/zensu-doctor.sh sources it only inside
+# command substitutions, where the name is out of scope and reading it under `set -u`
+# aborted the whole diagnostic; it copies the VALUES out in one subshell and compares
+# against its own ZDOC_ROOT_STATE_* instead. Still one definition, still no literal —
+# but the doctor is held to a DERIVED name, not to this one.
+#
+# Keep them in step — AC-C19 in tests/structure/test-versioned-plugin-upgrade.sh greps
+# for both members in both files, in the spelling each consumer actually uses, so a
+# silent revert to a literal fails rather than passing. That claim was false for one
+# round: only the PRESENT member was pinned, nothing named _GONE at all, and the doctor
+# had meanwhile reintroduced the literal through a `:-0` default on exactly the member
+# no needle covered. Do not write "both files" here without checking that both MEMBERS
+# are pinned too.
 #
 # Deliberately values, not a wrapper function: the two consumers reach the trichotomy
 # through DIFFERENT probes — the payload flavour and the `_model` twin — and in

@@ -365,7 +365,18 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
           ZDOC_ORPHAN_ROOT_STATUS=$?
           ZDOC_BINDING_PROJECT_ROOT=""
         fi
-        if [ "$ZDOC_ORPHAN_ROOT_STATUS" -eq "${ZDOC_ROOT_STATE_GONE:-0}" ] && [ -n "$ZDOC_BINDING_PROJECT_ROOT" ]; then
+        # The GONE half is guarded exactly like the PRESENT half below, and for the
+        # same reason. It shipped as "${ZDOC_ROOT_STATE_GONE:-0}", which defeated both
+        # halves of the screen above it: an owner that is unreadable, or whose constant
+        # was retyped, yielded the empty string and the default then put the literal 0
+        # back — the magic number this pair exists to remove — while still being able to
+        # select the row that ASSERTS the recorded project root is gone. Requiring the
+        # value instead routes an unresolvable constant to the else arm, which renders
+        # the hedged row and sets the unknown flag. That is the fail-safe direction: a
+        # missing constant must cost a definite claim, never manufacture one.
+        if [ -n "$ZDOC_ROOT_STATE_GONE" ] \
+          && [ "$ZDOC_ORPHAN_ROOT_STATUS" -eq "$ZDOC_ROOT_STATE_GONE" ] \
+          && [ -n "$ZDOC_BINDING_PROJECT_ROOT" ]; then
           ZDOC_BINDING=orphaned-project-root+incompatible-runtime
           # The probe POSITIVELY answered here, so the unknown flag must not be
           # set: status 0 is not 3, and an unguarded test would export "unknown"

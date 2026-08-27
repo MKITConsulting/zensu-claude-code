@@ -264,6 +264,30 @@ test('S5 a " : " separator inside a value forces the quoted rendering', () => {
   assert.ok(rendered.startsWith('"'), 'a value carrying " : " is JSON-quoted');
 });
 
+test('S5 the separator is folded in the spelling the consumers actually emit', () => {
+  // The rule was written against ` : ` while NEITHER consumer spells a row that way.
+  // session-adopt-report-v1.js writes `"  superseded record: "` and the doctor renderer
+  // emits rows like `binding: …` — a colon with NO space before it. So a value carrying
+  // `: ` forged a row in the exact spelling the report emits, and the fast path returned
+  // it raw because PAIR_SEPARATOR did not match. Both spellings must fold; the value is
+  // attacker-influenced through project_root, and skills/doctor/SKILL.md tells the model
+  // to print these rows verbatim.
+  const forgery = '/home/u/superseded record: /tmp/evil';
+  const rendered = report().safe(forgery);
+  assert.notEqual(rendered, forgery);
+  assert.ok(rendered.startsWith('"'), 'a value carrying ": " is JSON-quoted');
+});
+
+test('S5 an ordinary colon with no adjacent space still renders raw', () => {
+  // The widened rule must not fold a drive letter or a bare `k:v` with no space —
+  // otherwise every Windows-spelled root would degrade to the escaped rendering. This
+  // is the discrimination that keeps the widening from becoming "escape every colon".
+  for (const ordinary of ['C:/Users/u/repo', '/tmp/a:b', 'D:\\work\\repo']) {
+    assert.equal(report().safe(ordinary), ordinary,
+      `${ordinary} carries no separator-shaped colon and must render as itself`);
+  }
+});
+
 test('S5 the double-space invariant holds on the fallback branch too', () => {
   // Finding #18's third defect: the fallback applied JSON.stringify plus the
   // non-ASCII fold but NEVER the double-space check, so `/tmp/a"b  project : x` was
