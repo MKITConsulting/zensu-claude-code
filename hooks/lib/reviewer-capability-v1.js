@@ -520,7 +520,7 @@ function main() {
     if (lineage) {
       const cause = `this session's Session Control record is readable, and the running Zensu installation declares an incompatible lineage — the record was minted by ${safeVersion(lineage.recorded)} and ${safeVersion(lineage.executing)} is executing.`;
       if (principals.classifyPreToolPayload(payload) === principals.PRINCIPALS.MAIN) {
-        deny(`${cause} Run /zensu:adopt-session to check whether this installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — the adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write, afterwards until that exact directory is re-created; /zensu:doctor names the path when that is the case.`);
+        deny(`${cause} Run /zensu:adopt-session to check whether this installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — the adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created; /zensu:doctor names the path when that is the case.`);
         return;
       }
       deny(`${cause} The repair writes the immutable record and is reserved for the main thread, so it is not available here — report this to the main thread rather than retrying.`);
