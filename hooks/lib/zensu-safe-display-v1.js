@@ -143,10 +143,27 @@ const COLON_CONFUSABLE_LETTER = new RegExp('(?:^| )\\p{Lm}|\\p{Lm} ', 'u');
 const NON_ASCII = new RegExp('[\\u007f-\\uffff]', 'g');
 const SPACE_RUN = / {2,}/g;
 
-const safeDisplayValue = (value) => {
+// `followedBy` is what the CALLER will render immediately after this value on the same
+// line. It exists because the completeness argument above is stated over the value while
+// the forgery is over the RENDERED LINE, and the two come apart at the value's right
+// edge: `/home/u/repo:` is harmless alone — nothing follows the colon — and becomes a
+// separator the instant the project rows append their ` (GONE)` marker. The trailing
+// carve-out in COLON_CONFUSABLE_LETTER has exactly the same seam, for the same reason.
+//
+// Only the POSITIONAL rules see the joined string. SAFE_DISPLAY and INVISIBLE stay on
+// the value alone: they judge which characters the value may contain, and the caller's
+// own marker is not the value's business. A caller that appends nothing is unaffected,
+// which is every caller that does not opt in.
+//
+// The marker carries ONE space for this to work. Two would make DOUBLE_SPACE fire on
+// every appended render, folding every orphaned root and making the disclosure
+// unreadable precisely when it is being disclosed — the guard tripping over its own
+// caller rather than over an attacker.
+const safeDisplayValue = (value, followedBy = '') => {
   const text = String(value);
-  if (SAFE_DISPLAY.test(text) && !INVISIBLE.test(text) && !COLON_CONFUSABLE_LETTER.test(text)
-    && !DOUBLE_SPACE.test(text) && !PAIR_SEPARATOR.test(text)) {
+  const inLine = text + String(followedBy);
+  if (SAFE_DISPLAY.test(text) && !INVISIBLE.test(text) && !COLON_CONFUSABLE_LETTER.test(inLine)
+    && !DOUBLE_SPACE.test(inLine) && !PAIR_SEPARATOR.test(inLine)) {
     return text;
   }
   return JSON.stringify(text)

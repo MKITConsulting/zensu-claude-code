@@ -291,8 +291,11 @@ function main() {
     process.stdout.write("Zensu session adoption — ADOPTABLE\n\n");
     process.stdout.write("  record minted by : " + safe(verdict.recorded) + "\n");
     process.stdout.write("  executing        : " + safe(verdict.executing) + "\n");
-    process.stdout.write("  project          : " + safe(verdict.context.project_root)
-      + (verdict.orphanedProjectRoot ? "  (GONE)" : "") + "\n\n");
+    // Same seam as the adopted row below: the marker is handed to safe() so a value
+    // ending in a separator-shaped character is folded before the marker completes it.
+    process.stdout.write("  project          : "
+      + safe(verdict.context.project_root, verdict.orphanedProjectRoot ? " (GONE)" : "")
+      + (verdict.orphanedProjectRoot ? " (GONE)" : "") + "\n\n");
     // The unqualified sentence is only earned when a workflow document was
     // actually readable. In the orphaned branch condition 6 never ran, so
     // claiming the record is "intact" at the same strength as on the ordinary
@@ -347,8 +350,13 @@ function main() {
   // The anchor the session is bound to from here on. It is carried from the
   // record, never from where this command was invoked, and naming it is the one
   // place the user learns which project that actually is.
-  process.stdout.write("  project          : " + safe(adopted.projectRoot)
-    + (adopted.orphanedProjectRoot ? "  (GONE)" : "") + "\n");
+  // The marker is passed to safe() as well as appended. A root ending in a colon, or in
+  // a colon-confusable modifier letter, is harmless until this marker lands after it and
+  // completes a separator — so the fold has to see what will follow. One space, not two:
+  // two would trip the double-space rule on every appended render.
+  process.stdout.write("  project          : "
+    + safe(adopted.projectRoot, adopted.orphanedProjectRoot ? " (GONE)" : "")
+    + (adopted.orphanedProjectRoot ? " (GONE)" : "") + "\n");
   process.stdout.write("  superseded record: " + safe(adopted.supersededFile) + "\n");
   process.stdout.write("  provenance       : " + safe(adopted.provenance) + "\n");
   process.stdout.write("  leases set aside : " + leases.discarded + "\n");

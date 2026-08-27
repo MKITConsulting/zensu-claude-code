@@ -314,6 +314,31 @@ test('S5 an ordinary colon with no adjacent space still renders raw', () => {
   }
 });
 
+test('S5 a trailing separator folds when the caller appends text after the value', () => {
+  // The completeness argument for the trailing carve-out is stated over the VALUE
+  // ("nothing follows it") while the threat is over the RENDERED LINE — and two call
+  // sites do append: the project rows write `safe(root) + " (GONE)"`. A root ending in
+  // a colon, or in a colon-confusable modifier letter, is harmless on its own and forms
+  // a separator the moment that marker lands after it. The fold has to judge what will
+  // actually be rendered, so the caller passes what follows.
+  const { safe } = report();
+  for (const tail of ['/home/u/repo:', '/home/u/repoː']) {
+    assert.equal(safe(tail), tail,
+      `${JSON.stringify(tail)} is harmless with nothing after it and must render raw`);
+    assert.notEqual(safe(tail, ' (GONE)'), tail,
+      `${JSON.stringify(tail)} forms a separator once " (GONE)" follows it and must fold`);
+  }
+});
+
+test('S5 the appended marker never folds an ordinary value by itself', () => {
+  // The marker is ours, so it must not be what trips the guard: if it did, every
+  // orphaned root would degrade to the escaped rendering and the disclosure would be
+  // unreadable exactly when it matters. This is why the marker carries ONE space.
+  const { safe } = report();
+  const ordinary = '/home/u/repo';
+  assert.equal(safe(ordinary, ' (GONE)'), ordinary);
+});
+
 test('S5 the double-space invariant holds on the fallback branch too', () => {
   // Finding #18's third defect: the fallback applied JSON.stringify plus the
   // non-ASCII fold but NEVER the double-space check, so `/tmp/a"b  project : x` was
