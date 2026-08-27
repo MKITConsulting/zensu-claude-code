@@ -2777,20 +2777,26 @@ test fails loudly when they disagree. **Shard 3's own eight-member accounting wa
 in this file before that move**: it counted seven and omitted `autopilot-release-cli`
 (600000), which is precisely how a headroom claim survives being false.
 
-**The cap is 1500000, and the previous 900000 is recorded here because it FAILED on
-the very next run.** 893084 of 900000 is 99.2%, and this file said so — "a single added
+**The cap is 600000, and every earlier number is recorded here because each was wrong
+in a different, instructive way.** 893084 of 900000 is 99.2%, and this file said so — "a single added
 check can turn it red" — while the manifest shipped 900000 anyway. Run 33018717088 then
 spent 900138 ms reaching 229 of 288 checks and was killed by that cap. Two samples of
 byte-identical content therefore read 893084 (completed) and >900138 (killed at 79%),
-which projects to roughly 1132000 ms; the spread is the same run-to-run variance this
-file already records for stop-enforcer-self-review-routing, where 29% separated two
-green runs on one runner class. 1500000 is 33% over the projection and still under the
-1800000 ms profile envelope, so a real overrun surfaces as a suite `TIMED_OUT` rather
-than a profile abort. Alone on shard 8 the cap — not the shard — is what binds this
-suite, which is the first time that has been true here. **The lesson is not the number.
-A ceiling set at the measurement is a ceiling already breached**: one sample is a lower
-bound on a distribution, never a bound on the next run, so budget against the projected
-worst case and re-measure after adding checks.
+and both were measuring a STALLED SUBPROCESS rather than the suite:
+the win32 process probe timed out 115 times at 8000 ms, roughly 920 s of that 997 s.
+The cap was then briefly 1500000, sized against a projection built on those poisoned
+samples. Once the probe was fixed, run 33054489866 reported `PASSED
+session-trail-lineage (154673ms)`, 280 PASS / 0 FAIL / 4 SKIP — so 1500000 was ten
+times the real figure.
+
+**Three sizing errors, three different lessons, and the middle one is the one that
+generalises.** A ceiling set AT the measurement is already breached — one sample is a
+lower bound on a distribution, never a bound on the next run. A ceiling set from a
+projection is only as good as what the samples measured, and these measured a defect.
+And a ceiling set far ABOVE the measurement stops being a tripwire at all: 600000 is
+3.9x the real figure and deliberately BELOW the ~650 s a reintroduced probe stall would
+cost, so that regression trips the cap instead of merely making CI slow. Alone on shard
+8 the cap — not the shard — is what binds this suite.
 
 **That measurement is also why 600000 was REJECTED for this suite, not merely not
 adopted.** The parallel working copy lowered its own ceiling to 600000 on the strength
@@ -2835,8 +2841,11 @@ the config dir would collapse that to a handful and would pay off for every Wind
 of this CLI, not just for CI. It carries its own containment and symlink rules, so it is
 named here rather than smuggled into a CI repair.
 
-If the six checks are still red, read the `START TIMES` line in `lineage --diagnose`
-before theorising again. The L32c-control probe line that
+**It worked.** Run 33054489866: `PASSED session-trail-lineage (154673ms)`, 280 PASS /
+0 FAIL / 4 SKIP, with every window-namespace check green and no `probe-failed` line
+anywhere — 997 s down to 155 s. If they ever go red again, read the `START TIMES` line
+in `lineage --diagnose` before theorising: that line is the whole reason this took one
+round instead of three. The L32c-control probe line that
 was supposed to surface this greped for `process start` while the text channel prints
 `START TIMES`, so it never matched on any platform and reported its own fallback as
 though it were a finding; a diagnostic whose needle is never exercised is worse than

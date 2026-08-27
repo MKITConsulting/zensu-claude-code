@@ -36,15 +36,19 @@ const expectedProfiles = [
   // measured job durations that run were 1630, 1187, 1886, 1779, 1008, 1011 and 1516
   // seconds — so the suite needed a shard of its own, not a different neighbour.
   //
-  // The suite's own cap was then set to 900000 against that 893084 ms measurement —
-  // 0.8% of headroom, and the next run (33018717088) spent 900138 ms reaching 229 of
-  // 288 checks and was killed by it. Two samples of byte-identical content therefore
-  // read 893084 (completed) and >900138 (killed at 79%), which projects to about
-  // 1132000 ms and matches the run-to-run spread this repo already records for
-  // stop-enforcer-self-review-routing. The cap is 1500000 now: 33% over that
-  // projection, and still under the 1800000 ms profile envelope so a genuine overrun
-  // surfaces as a suite TIMED_OUT rather than a profile abort. Budget against the
-  // projection, never against the cap, and re-measure after adding checks.
+  // Every one of those numbers described a suite whose Windows wall clock was almost
+  // entirely a stalled subprocess, and they are kept only so the sizing lesson is not
+  // relearned. 893084 ms (run 32998414210, completed) and >900138 ms (33018717088,
+  // killed at 229 of 288) both measured trail.mjs's win32 process probe timing out
+  // 115 times at 8000 ms — about 920 s of the 997 s. Once the probe was fixed, run
+  // 33054489866 reported PASSED session-trail-lineage (154673 ms), 280 PASS / 0 FAIL /
+  // 4 SKIP. The cap is 600000: 3.9x the real measurement, generous against the
+  // run-to-run spread this repo records elsewhere, and deliberately BELOW the ~650 s a
+  // reintroduced stall would cost, so that regression trips the cap instead of merely
+  // making CI slow. The 1500000 it briefly carried was ten times the measurement and
+  // would have hidden exactly that. Budget against the measurement with headroom —
+  // never at it, which is what 900000 did, and never so far above it that the cap
+  // stops being a tripwire.
   'windows-shard-8',
 ];
 const expectedCommandCount = 43;
