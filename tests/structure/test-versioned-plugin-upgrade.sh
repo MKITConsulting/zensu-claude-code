@@ -2971,7 +2971,8 @@ if printf '%s' "$GONE_START" \
       >"$GONE_CONFIRM_OUT" 2>&1 \
       && grep -qF 'ADOPTED' "$GONE_CONFIRM_OUT" \
       && grep -qF '(GONE)' "$GONE_CONFIRM_OUT" \
-      && grep -qF 'and so does any Bash command the source-write gate can attribute as a write' "$GONE_CONFIRM_OUT" \
+      && grep -qF 'while Edit, Write and MultiEdit stay denied, and so does any Bash command' "$GONE_CONFIRM_OUT" \
+      && grep -qF 'the source-write gate can attribute as a write — a write cannot be attributed' "$GONE_CONFIRM_OUT" \
       && [ ! -e "$GONE_PROJECT" ] \
       && [ "$(node -p 'require(process.argv[1]).plugin_version' "$GONE_RECORD")" = 0.18.0 ] \
       && [ "$(node -p 'require(process.argv[1]).project_root' "$GONE_RECORD")" = "$GONE_NATIVE" ]; then

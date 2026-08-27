@@ -426,7 +426,7 @@ if printf '%s' "$NOFOLD_ROW" | grep -qF 'project root recorded for this session'
     && [ "$NOFOLD_RC" -eq 0 ]; then
   check "P1mg an unloadable display-fold module replaces the value with its reason and keeps the row" PASS
 else
-  check "P1mg an unloadable display-fold module drops the value and keeps the row (rc=$NOFOLD_RC)" FAIL
+  check "P1mg an unloadable display-fold module replaces the value with its reason and keeps the row (rc=$NOFOLD_RC)" FAIL
   printf '%s' "$NOFOLD_ROW" | head -c 300
 fi
 

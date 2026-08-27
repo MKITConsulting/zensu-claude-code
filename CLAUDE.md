@@ -878,7 +878,7 @@ root must NOT be recreated — the provenance write is guarded by the workflow d
 own `existsSync`, so `mutateWorkflowState`, which mkdirs every missing component of
 `<project>/.zensu/state`, is never reached; AC-C16 pins it. Third, the repair fixes the
 LINEAGE and not the anchor: the adopted session lands in the ordinary
-orphaned-project-root state, where `Edit`, `Write` and any WRITING Bash command still deny. The report says so before
+orphaned-project-root state, where `Edit`, `Write`, `MultiEdit` and any WRITING Bash command still deny. The report says so before
 and after `--confirm` and the doctor row says so too, because announcing an unqualified
 success there sends the user into a deny they were just told was repaired.
 

@@ -3,14 +3,14 @@ name: adopt-session
 description: >
   [Zensu] Rescue the CURRENT session when a Zensu plugin update landed while it was
   running. Its Session Control record is then intact but the executing installation
-  declares an incompatible lineage, so every stateful tool fails closed: Edit, Write and writing Bash
+  declares an incompatible lineage, so every stateful tool fails closed: Edit, Write, MultiEdit and writing Bash
   deny, Bash denies everything but the two recognized commands, subagents cannot start,
   and Stop cannot prove completion. This skill reports whether the running installation
   may take the record over in place, and with `--confirm` performs that adoption: it
   mints a new record for the same session under the executing runtime, sets the previous
   one aside unchanged, and records the takeover in the workflow history. The session is
   bound again from the next tool call onward — no restart; when the recorded project root is
-  also gone the lineage break is cleared while Edit, Write and writing Bash stay denied until that
+  also gone the lineage break is cleared while Edit, Write, MultiEdit and writing Bash stay denied until that
   directory is re-created. Adoption is authorised by
   SCHEMA equality, not by the version numbers, so a release that really changed a
   persisted shape is refused. Use when /zensu:doctor reports an incompatible lineage,
@@ -137,7 +137,7 @@ than deleted, its state still exists there.
 
 The limit: adoption repairs the LINEAGE, not the anchor. The adopted session lands
 in the ordinary orphaned-project-root state, so READ-ONLY Bash and the read-only
-diagnostics work again while `Edit`, `Write` and any Bash command that WRITES stay
+diagnostics work again while `Edit`, `Write`, `MultiEdit` and any Bash command that WRITES stay
 denied until that directory is re-created. The report says so before and after `--confirm`; repeat it rather than
 announcing an unqualified success, or the user walks straight into a deny they
 were just told was fixed. The adoption never re-creates the deleted directory.
@@ -224,7 +224,7 @@ row, and read it before you describe the outcome. When the recorded project root
 exists the session is bound from the next tool call onward — do not tell the user to
 restart. When it is GONE the doctor renders the ❌ orphaned-project-root row instead, and
 that is the expected result rather than a failed repair: the lineage break is cleared,
-READ-ONLY Bash and the read-only diagnostics work again, and `Edit`, `Write` and any Bash
+READ-ONLY Bash and the read-only diagnostics work again, and `Edit`, `Write`, `MultiEdit` and any Bash
 command that WRITES stay denied until that exact directory is re-created. Say which of the two happened; never report the second as an
 unqualified success.
 

@@ -359,9 +359,11 @@ function main() {
     process.stdout.write("This session's lineage break is repaired from the next tool call onward — no restart\n");
     process.stdout.write("is needed. The recorded project root is still gone, so the session is now in the\n");
     process.stdout.write("orphaned-project-root state: READ-ONLY Bash and the read-only diagnostics work,\n");
-    process.stdout.write("while Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write, — a write cannot\n");
-    process.stdout.write("be attributed to a project that is not there. Re-create exactly that directory,\n");
-    process.stdout.write("or start a fresh Claude Code session, to write again.\n");
+    process.stdout.write("while Edit, Write and MultiEdit stay denied, and so does any Bash command\n");
+    process.stdout.write("the source-write gate can attribute as a write — a write cannot be attributed\n");
+    process.stdout.write("to a project that is not there. NotebookEdit is the one mutation that still\n");
+    process.stdout.write("passes, in a healthy session too. Re-create exactly that directory, or start a\n");
+    process.stdout.write("fresh Claude Code session, to write again.\n");
   } else {
     process.stdout.write("This session is bound again from the next tool call onward — no restart is needed.\n");
   }
