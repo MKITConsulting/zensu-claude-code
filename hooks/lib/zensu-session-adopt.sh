@@ -174,6 +174,21 @@ command -v node >/dev/null 2>&1 || {
 # other stateful helper does, and are excluded from Git Bash's heuristic
 # environment conversion so a drive spelling is not reinterpreted twice.
 # shellcheck disable=SC1090
+# The two SHELL siblings. Every JS module in this command's require graph is guarded
+# above; these two were not, and `source` executes arbitrary shell IN THIS PROCESS,
+# which is strictly more powerful than a `require`. The read-only /zensu:doctor already
+# refuses a symlinked `zensu-session.sh` and renders a dedicated row for it, so the
+# write-capable command was the weaker of the two on the same file. Same bound as the
+# others, stated rather than implied: `[ ! -L ]` catches a link, not a replaced regular
+# file, so this is consistency in a defense-in-depth convention, not an independent
+# control.
+for _zsa_lib in "$DIR/zensu-session.sh" "$DIR/zensu-host-path.sh"; do
+  [ -f "$_zsa_lib" ] && [ ! -L "$_zsa_lib" ] || {
+    printf '%s\n' "zensu:adopt-session: ${_zsa_lib##*/} is missing or symlinked; repair the Zensu plugin installation" >&2
+    exit 1
+  }
+done
+
 source "$DIR/zensu-session.sh" >/dev/null 2>&1 || {
   printf '%s\n' 'zensu:adopt-session: the Session Control shell library is unavailable' >&2
   exit 1

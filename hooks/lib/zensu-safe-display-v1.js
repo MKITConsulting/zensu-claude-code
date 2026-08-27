@@ -31,6 +31,16 @@
 // that is strictly weaker than the real one, unexercised, and reachable by a future
 // caller who mistakes it for the fold is worse than no export at all. If a narrow
 // fold is ever genuinely needed, add it WITH its consumer and its case, in one change.
+//
+// WHAT THE PAIR GUARD DOES NOT PROVE, stated because three review rounds have now
+// found this file claiming more than it delivers. It is a heuristic against a VISUAL
+// forgery, and a character allowlist cannot close that class outright: `\p{M}` is
+// admitted DELIBERATELY, so a combining mark stacked on an admitted character can
+// still render colon-like and comes back verbatim. That is an accepted residual, not
+// an oversight — rejecting combining marks would fold every localized path, which is
+// the degradation the wide alphabet exists to avoid. What the guard DOES close is the
+// literal separator, the double space, the invisible letters and the modifier letters.
+// Say it that way; do not write "cannot forge a row".
 
 // The alphabet is deliberately WIDE — \p{L}\p{N}\p{M} rather than ASCII — so an
 // ordinary non-ASCII home directory renders as itself instead of as an escape soup,
@@ -56,13 +66,29 @@ const PAIR_SEPARATOR = / : /;
 // them is a letter, a number or a combining mark") does not cover an invisible letter.
 // The escaping branch already folds these through NON_ASCII, so the fix is to route
 // them there rather than to widen the fold.
+// SIDE EFFECT, intended and recorded so a later reader does not "restore" it: this
+// class also contains `\p{M}` members — the variation selectors U+FE00-FE0F and the
+// combining grapheme joiner U+034F — so an ideographic-variation-sequence directory
+// name now takes the escaping branch and renders `\u`-folded rather than raw. That is
+// the degradation the wide alphabet exists to avoid, accepted here because a value
+// that can carry an invisible letter is exactly the value this guard exists for and
+// the two cannot be separated by category.
 const INVISIBLE = /\p{Default_Ignorable_Code_Point}/u;
+// The SECOND way a letter defeats the pair guard: not by being invisible, but by
+// LOOKING like the separator. U+02D0 MODIFIER LETTER TRIANGULAR COLON is general
+// category Lm, so `\p{L}` admits it, it is not default-ignorable, and it renders as a
+// colon — `/tmp/p \u02d0 recorded` matched the class and came back verbatim. Modifier
+// letters do not occur in ordinary localized paths, so rejecting the category costs
+// the wide-alphabet goal nothing. (U+A789 MODIFIER LETTER COLON was reported alongside
+// it and is NOT in this class at all — checked rather than assumed.)
+const MODIFIER_LETTER = /\p{Lm}/u;
 const NON_ASCII = new RegExp('[\\u007f-\\uffff]', 'g');
 const SPACE_RUN = / {2,}/g;
 
 const safeDisplayValue = (value) => {
   const text = String(value);
-  if (SAFE_DISPLAY.test(text) && !INVISIBLE.test(text) && !DOUBLE_SPACE.test(text) && !PAIR_SEPARATOR.test(text)) {
+  if (SAFE_DISPLAY.test(text) && !INVISIBLE.test(text) && !MODIFIER_LETTER.test(text)
+    && !DOUBLE_SPACE.test(text) && !PAIR_SEPARATOR.test(text)) {
     return text;
   }
   return JSON.stringify(text)
@@ -78,7 +104,13 @@ const safeDisplayValue = (value) => {
     // value that failed SAFE_DISPLAY for an UNRELATED reason kept its ` : ` intact and
     // arrived quoted but still able to read as a further row. The two halves of one
     // guard were resting on different arguments; now they rest on the same one.
-    .replace(/ : /g, ' \\u003a ');
+    // Escape the COLON, not the pair, and do not consume the surrounding spaces. The
+    // first spelling was `.replace(/ : /g, ' \\u003a ')`, which ate both spaces while
+    // its replacement ended in one — so a chained `p : : evil` restarted the scan past
+    // the shared middle space, and the junction of the replacement's trailing space and
+    // the surviving colon formed a FRESH ` : `. Measured: `"/tmp/p \\u003a : evil"`.
+    // A colon that cannot survive at all cannot form a pair, whatever its neighbours do.
+    .replace(/:/g, '\\u003a');
 };
 
 // SAFE_DISPLAY is read BY NAME by tests/structure/session-adopt-report-v1.test.js,
