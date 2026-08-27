@@ -156,11 +156,21 @@ if [ -n "$ADOPT_RUN" ] && [ -d "$ADOPT_RUN" ] && [ ! -L "$ADOPT_RUN" ]; then
     bash "$ADOPT_RUN/hooks/lib/zensu-session-adopt.sh" >/dev/null 2>"$ADOPT_RUN/missing.err" || true
     # The NOUN is asserted, not just the sentence: the table maps each file to its own
     # noun, and a loop that reported the wrong row would otherwise read as correct.
+    #
+    # And the guard message must be the LAST line on stderr, which is the half that
+    # actually pins `exit 1`. Asserting only that the message APPEARS does not: delete
+    # the exit and the printf still runs, so a message-only check passes against a guard
+    # that no longer stops anything. Measured on this tree — armed, stderr is exactly the
+    # one refusal; disarmed, the script continues and a second line follows it from a
+    # later stage. Any later stage will do, so the check reads "nothing follows" rather
+    # than naming whichever message happens to be next.
+    ADOPT_LAST_LINE="$(tail -n 1 "$ADOPT_RUN/missing.err" 2>/dev/null || true)"
     if [ "$ADOPT_INTACT_HITS" = 0 ] \
-      && grep -qF "the display-safety module $_adopt_needle" "$ADOPT_RUN/missing.err" 2>/dev/null; then
+      && grep -qF "the display-safety module $_adopt_needle" "$ADOPT_RUN/missing.err" 2>/dev/null \
+      && [ "$ADOPT_LAST_LINE" = "zensu:adopt-session: the display-safety module $_adopt_needle" ]; then
       ADOPT_GUARD_VERDICT="ok"
     else
-      ADOPT_GUARD_VERDICT="intact_hits=$ADOPT_INTACT_HITS want 0; missing_arm=$(grep -cF "$_adopt_needle" "$ADOPT_RUN/missing.err" 2>/dev/null || true) want >=1"
+      ADOPT_GUARD_VERDICT="intact_hits=$ADOPT_INTACT_HITS want 0; missing_arm=$(grep -cF "$_adopt_needle" "$ADOPT_RUN/missing.err" 2>/dev/null || true) want >=1; last_line=${ADOPT_LAST_LINE:-<empty>}"
     fi
   fi
   rm -rf "$ADOPT_RUN"
