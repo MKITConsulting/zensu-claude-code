@@ -144,6 +144,38 @@ fi
 # fixture whatever happens — there is no bound session here — so a status check alone would
 # pass against a gutted guard. The control arm is what makes the positive arm mean something:
 # with all seven modules present the guard message must be ABSENT.
+# The membership half above compares the table against a HARDCODED list, which catches a
+# row deleted from the table and cannot catch an edge added to the require GRAPH — the
+# property the table's own header actually claims ("EVERY module this command loads").
+# Both halves were hand-maintained name lists, so the refactor moved the copy-paste
+# hazard rather than removing it, and this file's header records the precedent: a module
+# was left out when the list last grew, and the omission was written up as a known gap.
+#
+# Derive the closure instead. Walk relative `require('./x.js')` specifiers transitively
+# from the entry module and compare the reachable set against the table's first column.
+# A new require in any of the seven now fails here instead of loading unguarded.
+ADOPT_CLOSURE="$(node -e '
+const fs = require("fs"), path = require("path");
+const lib = process.argv[1], seen = new Set(), queue = ["session-adopt-report-v1.js"];
+while (queue.length) {
+  const f = queue.shift();
+  if (seen.has(f)) continue;
+  seen.add(f);
+  let src = "";
+  try { src = fs.readFileSync(path.join(lib, f), "utf8"); } catch { continue; }
+  for (const m of src.matchAll(/require\(\s*["\x27]\.\/([A-Za-z0-9._-]+\.js)["\x27]\s*\)/g)) {
+    if (!seen.has(m[1])) queue.push(m[1]);
+  }
+}
+process.stdout.write([...seen].sort().join("\n"));
+' "$ROOT/hooks/lib" 2>/dev/null || true)"
+ADOPT_TABLE_FILES="$(printf '%s\n' "$ADOPT_TABLE" | sed 's/|.*//' | grep . | sort || true)"
+if [ -n "$ADOPT_CLOSURE" ] && [ "$ADOPT_CLOSURE" = "$ADOPT_TABLE_FILES" ]; then
+  check "the required-module table equals the entry module's transitive require closure" PASS
+else
+  check "the required-module table equals the entry module's transitive require closure (only_in_graph:$(comm -23 <(printf '%s\n' "$ADOPT_CLOSURE") <(printf '%s\n' "$ADOPT_TABLE_FILES") | tr '\n' ' ') only_in_table:$(comm -13 <(printf '%s\n' "$ADOPT_CLOSURE") <(printf '%s\n' "$ADOPT_TABLE_FILES") | tr '\n' ' '))" FAIL
+fi
+
 ADOPT_RUN="$(mktemp -d "${TMPDIR:-/tmp}/zensu-adopt-guard-XXXXXX" 2>/dev/null || true)"
 ADOPT_GUARD_VERDICT="unrun"
 if [ -n "$ADOPT_RUN" ] && [ -d "$ADOPT_RUN" ] && [ ! -L "$ADOPT_RUN" ]; then

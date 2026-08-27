@@ -33,9 +33,28 @@
 //   ZDOC_NOW_MS              clock override for deterministic tests
 //   ZDOC_BINDING             the wrapper's binding verdict (bound / unbound /
 //                            orphaned-project-root / incompatible-runtime /
-//                            unavailable / unknown). Read by bindingLine for its
-//                            own row AND by currentSessionKey, which refuses a
-//                            session key that arrives under any other verdict.
+//                            orphaned-project-root+incompatible-runtime /
+//                            unavailable / unknown). The COMBINED verdict is a
+//                            real value the wrapper sets, not a description of
+//                            two: it is the state where the lineage broke AND the
+//                            recorded project root is gone, and bindingLine
+//                            switches on it for its own three-slot row. It was
+//                            missing from this roster while that row was being
+//                            rewritten. Read by bindingLine for its own row AND by
+//                            currentSessionKey, which refuses a session key that
+//                            arrives under any other verdict.
+//   ZDOC_BINDING_PROJECT_ROOT        the recorded project root, non-empty under
+//                            orphaned-project-root and under the combined verdict.
+//                            Folded before rendering — it is a directory name the
+//                            session's own starter chose.
+//   ZDOC_BINDING_RECORDED_VERSION    the version that minted the record, and
+//   ZDOC_BINDING_EXECUTING_VERSION   the version now executing; both non-empty
+//                            under incompatible-runtime and under the combined
+//                            verdict, both folded, both shape-screened upstream.
+//   ZDOC_BINDING_ROOT_UNKNOWN        set when the orphan probe could not answer,
+//                            which is what makes the plain lineage row state its
+//                            Edit/Write clause CONDITIONALLY instead of asserting
+//                            a workflow document it has not established.
 //   ZDOC_SESSION_KEY         this session's own Session Control key, non-empty
 //                            only when the wrapper's binding verdict is bound.
 //                            The ONLY thing that tells a chain this session owns
