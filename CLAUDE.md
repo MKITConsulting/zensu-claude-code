@@ -1088,21 +1088,23 @@ opposite direction: a reader who believes an uncommitted constant is invisible w
 misread a pin that in fact grades it immediately. Commit first, then measure.
 
 **The Windows timeout for `test-versioned-plugin-upgrade.sh` has ONE recorded
-sample, and that sample is now several generations stale.** `windows-shard-2`
-logged `PASSED versioned-plugin-upgrade (107613ms)` against the 900000 ms ceiling —
-roughly 12% — taken at the head that carried Part C plus the AC-C11/AC-C11b/AC-C12
-family. Since then the work that took the seam added two `node --test` drivers, and
-the vanished-project-root work added Part C2: further armed sessions, a Stop
-invocation, capability-gate drives and tampered record copies, each spawning `node`
-or `bash`. No Windows wall clock was taken after any of it, so the figure describes
-a head that no longer exists. Do not budget against it; re-measure on the next green
-Windows run and replace the number and this provenance sentence together. Deliberately
+sample, taken on the head that carries Part C2.** `windows-shard-2` logged
+`PASSED versioned-plugin-upgrade (152553ms)` against the 900000 ms ceiling — roughly
+17% — on the green run of commit `22dd388`. It is the first Windows wall clock taken
+after the seam work added two `node --test` drivers and the vanished-project-root
+work added Part C2: further armed sessions, a Stop invocation, capability-gate
+drives and tampered record copies, each spawning `node` or `bash`. It SUPERSEDES the
+previous sample of 107613 ms, which was taken at the head carrying Part C plus the
+AC-C11/AC-C11b/AC-C12 family; the two are 42% apart on content that grew, which is
+the growth this figure now prices in and the caveat below refuses to treat as a
+bound. Re-measure on the next green Windows run after a change that adds process
+runs, and replace the number and this provenance sentence together. Deliberately
 no row count here: this file's own rule two paragraphs up is that a hand-maintained
 number is what a driven loop cannot catch, and the count written into an earlier
 version of this paragraph had already drifted from the suite's own reported total
 before it was read a second time.
 
-Read the original sample as ONE sample, not as a bound. The sibling
+Read this sample as ONE sample, not as a bound. The sibling
 `stop-enforcer-self-review-routing` note in this file records a 29% spread across
 two green runs of byte-identical content on the same runner class, so a single
 figure says nothing about the worst case — it says only that the suite is not
