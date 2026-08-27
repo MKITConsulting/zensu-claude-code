@@ -322,8 +322,10 @@ function main() {
       // existsSync on the workflow document, which is false for an absent root.
       process.stdout.write("\nNOT CHECKED: with no readable workflow document, the schema-equality check that\n");
       process.stdout.write("normally authorises a takeover was not performed, and a document restored later\n");
-      process.stdout.write("is not verified against this runtime. Re-creating the directory BEFORE adopting\n");
-      process.stdout.write("is what lets that check run; adopting first skips it for good.\n");
+      process.stdout.write("is checked only when it is first read, not here. Re-creating the directory\n");
+      process.stdout.write("BEFORE adopting is the better order: the check then names its own refusal\n");
+      process.stdout.write("(workflow-schema-mismatch, with a remedy) instead of an anonymous fail-closed\n");
+      process.stdout.write("deny at the first read after the repair.\n");
     }
     process.stdout.write("Nothing has been changed. Run the same command with --confirm to adopt.\n");
     return;
