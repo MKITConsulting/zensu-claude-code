@@ -3230,6 +3230,15 @@ DOCTOR_POSITIVE_GUARD="$(code_only "$DOCTOR_LADDER" | grep -cF 'ZDOC_ORPHAN_ROOT
 # matches the GUARDED spelling rather than the bare comparison: `-n` first is what
 # makes the screen above it have an effect, so a revert to the defaulted form fails
 # here even though it would still compare against the same name.
+# The decimal SCREEN is pinned by presence, one per member, and that bound is stated
+# rather than implied: its own branches are NOT executed anywhere. Reaching them needs a
+# bound session — the doctor exits at `unavailable` long before the copy block in any
+# fixture this suite can build — and the branch only fires when the OWNER retypes a
+# constant, which no fixture does. What IS executed is the consequence: the `-n`
+# requirement at each comparison site, without which the screen has no effect at all,
+# because an emptied value would simply fall back to a literal. Pin the pair together so
+# removing either half fails, and do not describe the screen itself as covered.
+DOCTOR_STATE_SCREENS="$(code_only "$DOCTOR_LADDER" | grep -cE "case \"\\\$ZDOC_ROOT_STATE_(GONE|PRESENT)\" in ''\|\*\[!0-9\]\*\)" || true)"
 STOP_GONE_GUARD="$(code_only "$STOP_LADDER" | grep -cF 'INCOMPATIBLE_ROOT_STATUS" -eq "$ZENSU_ROOT_STATE_GONE"' || true)"
 DOCTOR_GONE_GUARD="$(code_only "$DOCTOR_LADDER" | grep -cF 'ZDOC_ORPHAN_ROOT_STATUS" -eq "$ZDOC_ROOT_STATE_GONE"' || true)"
 DOCTOR_GONE_REQUIRED="$(code_only "$DOCTOR_LADDER" | grep -cF '[ -n "$ZDOC_ROOT_STATE_GONE" ]' || true)"
@@ -3245,11 +3254,39 @@ if [ "$STOP_ARM_GONE" = 1 ] && [ "$STOP_ARM_NEUTRAL" = 1 ] && [ "$STOP_ARM_DEFER
     && [ "$DOCTOR_GONE_GUARD" = 1 ] \
     && [ "$DOCTOR_GONE_REQUIRED" = 1 ] \
     && [ "$DOCTOR_GONE_DEFAULTED" = 0 ] \
+    && [ "$DOCTOR_STATE_SCREENS" = 2 ] \
     && [ "$DOCTOR_UNKNOWN_EXPORTS" = 1 ] && [ "$DOCTOR_UNKNOWN_ASSIGNS" = 3 ] \
     && [ "$DOCTOR_UNKNOWN_SETS" = 1 ]; then
   check "AC-C19 the Stop ladder has three emitted arms, the neutral one borrows neither sibling's claim, and the doctor exports the same distinction" PASS
 else
   check "AC-C19 the Stop ladder has three emitted arms, the neutral one borrows neither sibling's claim, and the doctor exports the same distinction (gone=$STOP_ARM_GONE neutral=$STOP_ARM_NEUTRAL defer=$STOP_ARM_DEFER neutral_guard=$STOP_NEUTRAL_GUARD positive_guard=$DOCTOR_POSITIVE_GUARD exports=$DOCTOR_UNKNOWN_EXPORTS assigns=$DOCTOR_UNKNOWN_ASSIGNS sets=$DOCTOR_UNKNOWN_SETS)" FAIL
+fi
+
+# AC-C19b — the `(unreadable)` substitution, EXECUTED. CLAUDE.md names three copies of
+# the version-shape rule and this file disclosed that only the non-main arm shipped a
+# case; the truth was wider — a grep of tests/ found the substitution driven NOWHERE, in
+# any of the three. Two of them genuinely have no seam: reviewer-capability-v1.js exports
+# nothing, and the doctor's screen sits mid-script. This one is an ordinary function in a
+# sourceable library, so the gap here was reach, not testability.
+#
+# Three properties, because substituting is only the first of them: the placeholder
+# appears, the lineage wording and the in-place remedy SURVIVE the substitution (the
+# defect this policy replaced dropped to a different scope and told the user to start a
+# fresh session), and the injected quote does not reach the JSON. The input carries a
+# double quote precisely because this value lands in a JSON string.
+SAFE_VER_OUT="$(bash -c '
+  . "$1/hooks/lib/zensu-session.sh" 2>/dev/null || exit 9
+  zensu_emit_hook_session_deny incompatible-runtime "0.17.0\"evil" "0.18.0"
+' _ "$ROOT" 2>/dev/null || true)"
+if printf '%s' "$SAFE_VER_OUT" | grep -qF '(unreadable)' \
+  && printf '%s' "$SAFE_VER_OUT" | grep -qF 'declares an incompatible lineage' \
+  && printf '%s' "$SAFE_VER_OUT" | grep -qF '/zensu:adopt-session' \
+  && printf '%s' "$SAFE_VER_OUT" | grep -qF '0.18.0' \
+  && ! printf '%s' "$SAFE_VER_OUT" | grep -qF '0.17.0"evil' \
+  && ! printf '%s' "$SAFE_VER_OUT" | grep -qF 'start a fresh Claude Code session before using stateful tools'; then
+  check "AC-C19b a malformed version is substituted with (unreadable) and the lineage remedy survives it" PASS
+else
+  check "AC-C19b a malformed version is substituted with (unreadable) and the lineage remedy survives it (out=${SAFE_VER_OUT:0:120})" FAIL
 fi
 
 # AC-C21 — the plain lineage row's CONDITIONAL clause, driven both ways. The
