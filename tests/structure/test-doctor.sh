@@ -433,6 +433,36 @@ else
   printf '%s' "$NOFOLD_ROW" | head -c 300
 fi
 
+# P1mf2 — the MULTI-VALUE row, which P1mf1 above cannot reach. P1mf1 drives
+# orphaned-project-root, a ONE-slot row, so it could not observe what happened when a
+# row had two: the fold was called per slot and its load-failure sentence was
+# substituted into each, rendering
+#   (record minted by <sentence>, executing <sentence>)
+# — the reason repeated, the fact that BOTH values are missing buried, and the sentence
+# reading as though it were a version. The combined row has three slots and said it
+# three times. The fold is one `require`, so a failure is a property of the ROW.
+#
+# Pinned as a COUNT rather than as a shape: the wording is already pinned by P1mf1 and
+# by CLAUDE.md, and what this row is about is how MANY times it appears. Both remaining
+# multi-slot bindings are driven, because they compose their parentheticals differently
+# — the combined one interleaves a path slot between two version slots.
+for NOFOLD_CASE in 'incompatible-runtime' 'orphaned-project-root+incompatible-runtime'; do
+  NOFOLD_MULTI="$(ZENSU_DOCTOR_PLUGIN_DIR="$NOCHAIN" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$CAS_PROJECT" \
+    ZDOC_BINDING="$NOFOLD_CASE" ZDOC_BINDING_PROJECT_ROOT=/tmp/zensu-nofold-probe \
+    ZDOC_BINDING_RECORDED_VERSION=0.17.0 ZDOC_BINDING_EXECUTING_VERSION=0.18.0 \
+    node "$NOCHAIN/hooks/lib/zensu-doctor-report.js" 2>&1 | grep -F 'binding:' || true)"
+  NOFOLD_N="$(printf '%s' "$NOFOLD_MULTI" | grep -oF 'not rendered — the display-safety module could not be loaded' | wc -l | tr -d ' ')"
+  if [ "$NOFOLD_N" = 1 ] \
+      && ! printf '%s' "$NOFOLD_MULTI" | grep -qF '/tmp/zensu-nofold-probe' \
+      && ! printf '%s' "$NOFOLD_MULTI" | grep -qF '((' \
+      && ! printf '%s' "$NOFOLD_MULTI" | grep -qF 'minted by not rendered'; then
+    check "P1mf2 a multi-value row states the fold failure once, not once per slot ($NOFOLD_CASE)" PASS
+  else
+    check "P1mf2 a multi-value row states the fold failure once, not once per slot ($NOFOLD_CASE, saw $NOFOLD_N)" FAIL
+    printf '%s' "$NOFOLD_MULTI" | head -c 300
+  fi
+done
+
 # --- open chain not owned by this session ----------------------------------
 # A forked or re-initialized Claude Code session receives a NEW session id while
 # carrying its history over, so the chain armed under the old key is unreachable

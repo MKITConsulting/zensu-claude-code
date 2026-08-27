@@ -1783,21 +1783,72 @@ function truncatedList(rows) {
 // report built out of `label : value` rows that the doctor skill tells the model to
 // print verbatim, so the pair-forgery guard is exactly as load-bearing here as in
 // the adoption report.
-function safeDisplay(value) {
+var FOLD_UNAVAILABLE = 'not rendered — the display-safety module could not be loaded';
+
+// One slot, folded ONCE. The three fields are separate: `present` is about the input
+// (an empty value has never produced a parenthetical), `ok` is about the fold. Keeping
+// them apart is what lets the caller distinguish "there was nothing to say" from
+// "there was something and it could not be rendered" — the previous shape returned a
+// single string and conflated the two, so every call site had to fold twice to ask
+// both questions, and the load-failure SENTENCE became the value.
+function foldSlot(value) {
   var text = String(value == null ? '' : value);
+  if (text === '') return { text: '', present: false, ok: true };
   try {
-    return require('./zensu-safe-display-v1.js').safeDisplayValue(text);
+    return { text: require('./zensu-safe-display-v1.js').safeDisplayValue(text), present: true, ok: true };
   } catch (e) {
     // NOT the empty string, and not the raw value either. Empty made the ternaries
     // drop the parenthetical silently — but `stop-chain-enforcer.sh` and the shell
     // deny scope both tell the user "/zensu:doctor names the directory", and neither
     // is conditional on this module loading. Silently omitting it leaves those two
     // surfaces asserting something this row stopped delivering. Say why instead.
-    return text === '' ? '' : 'not rendered — the display-safety module could not be loaded';
+    return { text: '', present: true, ok: false };
   }
 }
 
+// A parenthetical is stated ONCE PER ROW, not once per slot. Under a missing fold
+// module the two-version row rendered
+//   (record minted by <sentence>, executing <sentence>)
+// which repeats the reason, buries the fact that BOTH values are missing, and reads as
+// if the sentence were a version. The combined row has three slots and would have said
+// it three times. The fold is one `require`, so a failure is a property of the ROW, not
+// of a slot: `stated` closes over one bindingLine() call and the second group that
+// would repeat it renders nothing instead.
+//
+// The SINGLE-slot rendering is deliberately byte-identical to what shipped —
+// ' (not rendered — …)' — because test-doctor.sh P1mf1 and the CLAUDE.md account of
+// this fallback both pin that exact string, including that the call site's own
+// parentheses are the only ones (the doubled-paren defect this file already fixed
+// twice).
+function parentheticalWriter() {
+  var stated = false;
+  return function (slots, render) {
+    for (var i = 0; i < slots.length; i += 1) {
+      if (!slots[i].present) return '';
+    }
+    for (var j = 0; j < slots.length; j += 1) {
+      if (!slots[j].ok) {
+        if (stated) return '';
+        stated = true;
+        return ' (' + FOLD_UNAVAILABLE + ')';
+      }
+    }
+    return ' (' + render(slots.map(function (slot) { return slot.text; })) + ')';
+  };
+}
+
 function bindingLine() {
+  // One writer per CALL, so `stated` scopes to the row this invocation renders.
+  var paren = parentheticalWriter();
+  var one = function (value) {
+    return paren([foldSlot(value)], function (v) { return v[0]; });
+  };
+  var versions = function () {
+    return paren(
+      [foldSlot(env.ZDOC_BINDING_RECORDED_VERSION), foldSlot(env.ZDOC_BINDING_EXECUTING_VERSION)],
+      function (v) { return 'record minted by ' + v[0] + ', executing ' + v[1]; },
+    );
+  };
   switch (env.ZDOC_BINDING) {
     case 'bound':
       return line(OK, 'binding: this session has a valid Session Control record — stateful tools can run');
@@ -1809,7 +1860,7 @@ function bindingLine() {
     // line above would send them looking for a record that is right there.
     case 'orphaned-project-root':
       return line(BAD, 'binding: the project root recorded for this session no longer exists'
-        + (safeDisplay(env.ZDOC_BINDING_PROJECT_ROOT) ? ' (' + safeDisplay(env.ZDOC_BINDING_PROJECT_ROOT) + ')' : '')
+        + one(env.ZDOC_BINDING_PROJECT_ROOT)
         + ' — a deleted or recycled worktree left the workflow state unreachable from this record, so stateful Zensu tools fail closed while this read-only diagnostic still runs; re-create exactly that directory to resume, or start a fresh Claude Code session. If it was moved rather than deleted, its state still exists there');
     // The record is INTACT and only the runtime serving it declares an
     // incompatible lineage — a plugin update that landed mid-session. Before this
@@ -1820,9 +1871,7 @@ function bindingLine() {
     // this is the only binding row whose remedy repairs the session in place.
     case 'incompatible-runtime':
       return line(BAD, 'binding: this session\'s Session Control record is intact, but the running Zensu installation declares an incompatible lineage'
-        + (safeDisplay(env.ZDOC_BINDING_RECORDED_VERSION) && safeDisplay(env.ZDOC_BINDING_EXECUTING_VERSION)
-          ? ' (record minted by ' + safeDisplay(env.ZDOC_BINDING_RECORDED_VERSION) + ', executing ' + safeDisplay(env.ZDOC_BINDING_EXECUTING_VERSION) + ')'
-          : '')
+        + versions()
         + ' — while the plugin is at major 0 the minor is the breaking axis, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether this session can be adopted in place, then /zensu:adopt-session --confirm'
         // The limit belongs on THIS row too, not only on the combined one. The row
         // is reachable for a session whose recorded project root is also gone —
@@ -1851,11 +1900,9 @@ function bindingLine() {
     // row states that limit instead of promising a full rescue.
     case 'orphaned-project-root+incompatible-runtime':
       return line(BAD, 'binding: this session\'s Session Control record is readable, but BOTH the recorded project root'
-        + (safeDisplay(env.ZDOC_BINDING_PROJECT_ROOT) ? ' (' + safeDisplay(env.ZDOC_BINDING_PROJECT_ROOT) + ')' : '')
+        + one(env.ZDOC_BINDING_PROJECT_ROOT)
         + ' is gone and the running Zensu installation declares an incompatible lineage'
-        + (safeDisplay(env.ZDOC_BINDING_RECORDED_VERSION) && safeDisplay(env.ZDOC_BINDING_EXECUTING_VERSION)
-          ? ' (record minted by ' + safeDisplay(env.ZDOC_BINDING_RECORDED_VERSION) + ', executing ' + safeDisplay(env.ZDOC_BINDING_EXECUTING_VERSION) + ')'
-          : '')
+        + versions()
         // OFFERED, never promised — the same hedge the row above carries and for
         // the same reason: this state is reachable on a DOWNGRADE, which adoption
         // refuses outright as executing-runtime-older.

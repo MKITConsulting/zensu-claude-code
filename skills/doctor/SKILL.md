@@ -367,7 +367,15 @@ classifier will refuse a spawn, not only when the whole table is green.
   that directory and is not reachable from this record, so no chain state is
   reachable and no later `Stop` can enforce it while that directory is missing —
   do not tell the user their review chain resumes. If it was moved rather than
-  deleted, re-creating exactly that directory restores it.
+  deleted, its state still exists there — and say the ORDER, because it decides
+  whether a check runs at all: re-creating exactly that directory **first** is the
+  better order. Adoption then reads that workflow document and verifies its schema,
+  so a genuine break is named as `workflow-schema-mismatch` with a remedy; adopting
+  first skips that check, because it is guarded on the document being reachable, and
+  a document restored afterwards surfaces a mismatch later as an anonymous
+  fail-closed deny. Re-creating first also yields a fully bound session rather than
+  an orphaned one. Never close this row by telling the user to adopt and then
+  restore — that is the order every offer implies and the one that loses the check.
   **The converse also has no row, and it matters for a trust question.** Because
   the rule compares declared versions and never content, a *bound* session's
   enforcing runtime may be a different installation that merely shares
