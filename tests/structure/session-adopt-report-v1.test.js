@@ -94,6 +94,63 @@ test('S5 a localized path prints as itself', () => {
   }
 });
 
+// ── The colon-confusable guard, in BOTH directions ──────────────────────────
+//
+// The guard that folds a colon-LOOKING letter had no executed case in either
+// direction, and the fixture set had its hole exactly where the risk was: every
+// localized fixture above happens to avoid the one category the guard rejected.
+//
+// The negative direction is the one that matters, and writing it found a real defect.
+// The rule was `\p{Lm}`, the whole Modifier_Letter category, justified in the module
+// by "modifier letters do not occur in ordinary localized paths". That is false.
+// U+30FC KATAKANA-HIRAGANA PROLONGED SOUND MARK is Lm and appears in a large share of
+// ordinary Japanese words (データ, サーバー, コーヒー), and U+02BC MODIFIER LETTER
+// APOSTROPHE is Lm and carries real orthographies (Oʻzbekiston). Both were folded into
+// escape soup — precisely the degradation the wide alphabet exists to prevent, landing
+// on exactly the developers whose paths are not ASCII.
+//
+// Measured rather than assumed: of the colon-confusable characters, only U+02D0 and
+// U+02D1 are BOTH Modifier_Letter and admitted by SAFE_DISPLAY. U+FF1A, U+2236, U+A789
+// and U+02F8 are not \p{L} at all, so the allowlist already excludes them and the fold
+// branch already escapes every colon it emits. The guard therefore names those two
+// characters instead of a category.
+test('S5 a colon-confusable modifier letter is folded', () => {
+  for (const confusable of ['ː', 'ˑ']) {
+    const hostile = `/tmp/p ${confusable} recorded`;
+    const rendered = report().safe(hostile);
+    assert.notEqual(rendered, hostile, `${confusable} must not be returned raw`);
+    assert.match(rendered, /^"/, 'it must take the escaping branch');
+  }
+});
+
+test('S5 an invisible letter cannot be returned raw', () => {
+  // The conjunct this pins was deletable with every other case in this file still
+  // green, which is what "uncovered branch" meant here. U+3164 HANGUL FILLER is a
+  // LETTER, so SAFE_DISPLAY admits it; it renders as blank, so the value LOOKS like a
+  // further `label : value` row; and it introduces no space at all, so neither
+  // DOUBLE_SPACE nor PAIR_SEPARATOR fires. The invisible-character guard is the only
+  // thing standing between this value and a raw return — which is exactly why its
+  // absence has to be observable from this file.
+  const hidden = '/tmp/xㅤ:ㅤy';
+  const rendered = report().safe(hidden);
+  assert.notEqual(rendered, hidden, 'an invisible letter must not be returned raw');
+  assert.match(rendered, /^"/, 'it must take the escaping branch');
+  assert.equal(/ㅤ/.test(rendered), false, 'and the filler itself must not survive as a raw byte');
+});
+
+test('S5 an ordinary path carrying a modifier letter still prints as itself', () => {
+  // Each of these is an ordinary directory name, not a threat. If this case ever goes
+  // red because the guard widened back to a category, the wide-alphabet promise in the
+  // module header has been broken again.
+  for (const localized of [
+    '/Users/tanaka/データ',
+    '/Users/tanaka/サーバー',
+    '/Users/anvar/Oʼzbekiston',
+  ]) {
+    assert.equal(report().safe(localized), localized, `${localized} must print as itself`);
+  }
+});
+
 test('S5 the safe class is expressed by Unicode property, not an ASCII range', () => {
   // Read off the EXPORTED regex rather than the file's text. The rule moved into
   // hooks/lib/zensu-safe-display-v1.js — a dependency-free leaf both report
@@ -106,6 +163,32 @@ test('S5 the safe class is expressed by Unicode property, not an ASCII range', (
   assert.ok(/\\p\{N\}/.test(pattern), 'numbers come from the Unicode property');
   assert.ok(/\\p\{M\}/.test(pattern), 'combining marks are admitted, or accented forms break');
   assert.ok(report().SAFE_DISPLAY.unicode, 'the u flag is what makes those properties mean anything');
+});
+
+test('S5 the exported constants predict the exported function', () => {
+  // The export list carried SAFE_DISPLAY, DOUBLE_SPACE and NON_ASCII while the function
+  // applied three FURTHER rules that were not exported at all, so a reader of the export
+  // surface — and CLAUDE.md names this file as a core-half port obligation, so that
+  // reader is a porter — saw a strictly weaker fold than the one that ships. This file
+  // has already paid for that exact mistake once, in the opposite direction, with
+  // foldDisplayHiders.
+  //
+  // Derived from the FUNCTION, never from a hand-kept list: a new guard added to
+  // safeDisplayValue and not exported turns this red on its own, which a literal roster
+  // could not do.
+  const leaf = require(path.join(LIB, 'zensu-safe-display-v1.js'));
+  const source = fs.readFileSync(path.join(LIB, 'zensu-safe-display-v1.js'), 'utf8');
+  const body = source.slice(source.indexOf('const safeDisplayValue'));
+  const applied = new Set(
+    Array.from(body.matchAll(/\b([A-Z][A-Z0-9_]{2,})\.test\(/g), (m) => m[1]),
+  );
+  assert.ok(applied.size >= 5, `expected the fast path to apply several named rules, saw ${applied.size}`);
+  for (const rule of applied) {
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(leaf, rule),
+      `${rule} is applied by safeDisplayValue but is not exported — the constants must describe the function`,
+    );
+  }
 });
 
 test('S5 the display rule has exactly ONE owner', () => {

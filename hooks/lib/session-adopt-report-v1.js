@@ -487,6 +487,13 @@ function reportLeaseWarnings(leases) {
   process.stdout.write(renderLeaseWarnings(leases));
 }
 
+// THIS IS A RE-EXPORT SURFACE, NOT THE RULE'S HOME, and it deliberately names fewer
+// rules than `safe` applies — `safe` also folds invisible letters, colon-confusable
+// modifier letters and the pair separator. Read hooks/lib/zensu-safe-display-v1.js for
+// the complete set; its export block carries every guard the fold applies and a test
+// derives that list from the function itself. The three names below are kept only
+// because this surface carried them before the rule moved to the leaf, so removing
+// them would be an unrelated break. Do not infer the fold from this list.
 module.exports = {
   DOUBLE_SPACE,
   NON_ASCII,

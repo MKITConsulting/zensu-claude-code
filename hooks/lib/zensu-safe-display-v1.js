@@ -81,13 +81,33 @@ const INVISIBLE = /\p{Default_Ignorable_Code_Point}/u;
 // letters do not occur in ordinary localized paths, so rejecting the category costs
 // the wide-alphabet goal nothing. (U+A789 MODIFIER LETTER COLON was reported alongside
 // it and is NOT in this class at all — checked rather than assumed.)
-const MODIFIER_LETTER = /\p{Lm}/u;
+//
+// CORRECTION, and the paragraph above is left standing because it states the threat
+// correctly: the RULE was `\p{Lm}`, the whole category, justified by "modifier letters
+// do not occur in ordinary localized paths". THAT CLAIM WAS FALSE, and it cost exactly
+// the group the wide alphabet exists to protect. U+30FC KATAKANA-HIRAGANA PROLONGED
+// SOUND MARK is Lm and carries a large share of ordinary Japanese words, and U+02BC
+// MODIFIER LETTER APOSTROPHE is Lm and carries real orthographies. Both were folded
+// into escape soup by a guard aimed at neither.
+//
+// The class is therefore the two characters actually confusable with the separator,
+// not a category. Measured rather than assumed: of the colon-confusables, only U+02D0
+// and U+02D1 are BOTH Modifier_Letter AND admitted by SAFE_DISPLAY. U+FF1A FULLWIDTH
+// COLON, U+2236 RATIO, U+A789 MODIFIER LETTER COLON and U+02F8 MODIFIER LETTER RAISED
+// COLON are not \p{L} at all, so the allowlist already excludes them and they reach the
+// fold branch, which escapes every colon it emits.
+//
+// A NAMED SET cannot be proven complete the way a category can, and that is the
+// accepted trade: the category was provably complete about a threat nobody has and
+// provably wrong about paths people really use. A confusable found later is added here
+// WITH its case — the same rule this file already states for a narrow fold.
+const COLON_CONFUSABLE_LETTER = new RegExp('[\\u02d0\\u02d1]', 'u');
 const NON_ASCII = new RegExp('[\\u007f-\\uffff]', 'g');
 const SPACE_RUN = / {2,}/g;
 
 const safeDisplayValue = (value) => {
   const text = String(value);
-  if (SAFE_DISPLAY.test(text) && !INVISIBLE.test(text) && !MODIFIER_LETTER.test(text)
+  if (SAFE_DISPLAY.test(text) && !INVISIBLE.test(text) && !COLON_CONFUSABLE_LETTER.test(text)
     && !DOUBLE_SPACE.test(text) && !PAIR_SEPARATOR.test(text)) {
     return text;
   }
@@ -120,9 +140,25 @@ const safeDisplayValue = (value) => {
 // would be an unrelated break. They are internals of safeDisplayValue, not public
 // rules, and no test reads either of them: an earlier version of this comment claimed
 // the suite "pins all three by name", which was false for two of the three.
+// The list now carries EVERY rule the fast path applies, and that is the point rather
+// than tidiness: this file is named in CLAUDE.md as a core-half port obligation, so a
+// porter reads this block to learn what the fold is. While INVISIBLE,
+// COLON_CONFUSABLE_LETTER and PAIR_SEPARATOR were missing from it, that reader saw a
+// strictly weaker fold than the one that ships — the same failure this file already
+// paid for in the opposite direction with foldDisplayHiders, an exported rule weaker
+// than the real one. The alternative on offer was to label the three survivors as
+// deprecated aliases; exporting the full set was taken instead, because it makes the
+// surface TRUE rather than annotating it as untrue.
+//
+// tests/structure/session-adopt-report-v1.test.js derives the expected names from
+// safeDisplayValue's own body, so a rule added to the function and not added here turns
+// that case red without anyone maintaining a roster.
 module.exports = {
   SAFE_DISPLAY,
   DOUBLE_SPACE,
   NON_ASCII,
+  INVISIBLE,
+  COLON_CONFUSABLE_LETTER,
+  PAIR_SEPARATOR,
   safeDisplayValue,
 };
