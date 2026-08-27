@@ -42,15 +42,22 @@ trap 'rm -f "$OUT"' EXIT
 bash "$SUITE" 2>&1 | tee "$OUT"
 STATUS=${PIPESTATUS[0]}
 
+# Sourced UNCONDITIONALLY and treated as REQUIRED. The first version guarded the source
+# with `[ -f ]` and the call with `command -v`, leaving FLOOR_OK=1 when either was
+# missing — so a renamed or deleted helper restored exactly the zero-case blindness the
+# floor was added to remove, silently, with the driver still printing PASS. A check that
+# fails open is not a check. Every sibling driver sources it at top level, where a
+# missing helper makes the later call a command-not-found and the row goes red.
 SUMMARY_LIB="$ROOT/tests/structure/lib-unit-summary.sh"
-FLOOR_OK=1
-if [ -f "$SUMMARY_LIB" ]; then
-  # shellcheck source=/dev/null
-  . "$SUMMARY_LIB" 2>/dev/null || true
-  if command -v unit_cases_registered_floor >/dev/null 2>&1; then
-    unit_cases_registered_floor "$OUT" "$SC_FLOOR" || FLOOR_OK=0
-  fi
+# shellcheck source=/dev/null
+. "$SUMMARY_LIB" 2>/dev/null || true
+if ! command -v unit_cases_registered_floor >/dev/null 2>&1; then
+  printf '%s\n' '----' \
+    'test-session-control-core: the shared summary parse is unavailable — the case floor did NOT run' >&2
+  exit 1
 fi
+FLOOR_OK=1
+unit_cases_registered_floor "$OUT" "$SC_FLOOR" || FLOOR_OK=0
 
 if [ "$STATUS" -eq 0 ] && [ "$FLOOR_OK" = 1 ]; then
   printf '%s\n' '----' 'test-session-control-core: session-control core suite PASS'

@@ -169,7 +169,7 @@ while (queue.length) {
 }
 process.stdout.write([...seen].sort().join("\n"));
 ' "$ROOT/hooks/lib" 2>/dev/null || true)"
-ADOPT_TABLE_FILES="$(printf '%s\n' "$ADOPT_TABLE" | sed 's/|.*//' | grep . | sort || true)"
+ADOPT_TABLE_FILES="$(printf '%s\n' "$ADOPT_TABLE" | sed 's/|.*//' | grep . | LC_ALL=C sort || true)"
 if [ -n "$ADOPT_CLOSURE" ] && [ "$ADOPT_CLOSURE" = "$ADOPT_TABLE_FILES" ]; then
   check "the required-module table equals the entry module's transitive require closure" PASS
 else
@@ -182,10 +182,10 @@ if [ -n "$ADOPT_RUN" ] && [ -d "$ADOPT_RUN" ] && [ ! -L "$ADOPT_RUN" ]; then
   mkdir -p "$ADOPT_RUN/hooks/lib"
   if cp "$ROOT"/hooks/lib/*.js "$ADOPT_SRC" "$ADOPT_RUN/hooks/lib/" 2>/dev/null; then
     _adopt_needle='is missing or symlinked; repair the Zensu plugin installation'
-    bash "$ADOPT_RUN/hooks/lib/zensu-session-adopt.sh" >/dev/null 2>"$ADOPT_RUN/intact.err" || true
+    env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PLUGIN_DATA bash "$ADOPT_RUN/hooks/lib/zensu-session-adopt.sh" >/dev/null 2>"$ADOPT_RUN/intact.err" || true
     ADOPT_INTACT_HITS="$(grep -cF "$_adopt_needle" "$ADOPT_RUN/intact.err" 2>/dev/null || true)"
     rm -f "$ADOPT_RUN/hooks/lib/zensu-safe-display-v1.js"
-    bash "$ADOPT_RUN/hooks/lib/zensu-session-adopt.sh" >/dev/null 2>"$ADOPT_RUN/missing.err" || true
+    env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PLUGIN_DATA bash "$ADOPT_RUN/hooks/lib/zensu-session-adopt.sh" >/dev/null 2>"$ADOPT_RUN/missing.err" || true
     # The NOUN is asserted, not just the sentence: the table maps each file to its own
     # noun, and a loop that reported the wrong row would otherwise read as correct.
     #
@@ -3277,6 +3277,17 @@ DOCTOR_GONE_REQUIRED="$(code_only "$DOCTOR_LADDER" | grep -cF '[ -n "$ZDOC_ROOT_
 # The defaulted spelling must be ABSENT, not merely outnumbered — this is the arm that
 # regressed, so it gets a negative needle of its own rather than relying on the count.
 DOCTOR_GONE_DEFAULTED="$(code_only "$DOCTOR_LADDER" | grep -cF 'ZDOC_ROOT_STATE_GONE:-' || true)"
+# The PRESENT half gets the identical pair, and the omission is worth naming: the round
+# that added the GONE needles reproduced the very defect it was fixing — it pinned one
+# member and left the other, in a block whose own comment says a half-pinned pair reads
+# greener than an unpinned one. Deleting the `-n` guard at the PRESENT site left AC-C19
+# green, because DOCTOR_POSITIVE_GUARD matches the comparison line unchanged.
+DOCTOR_PRESENT_REQUIRED="$(code_only "$DOCTOR_LADDER" | grep -cF '[ -n "$ZDOC_ROOT_STATE_PRESENT" ]' || true)"
+DOCTOR_PRESENT_DEFAULTED="$(code_only "$DOCTOR_LADDER" | grep -cF 'ZDOC_ROOT_STATE_PRESENT:-' || true)"
+# The Stop hook is the SECOND consumer of the same pair and screened neither member. It
+# does now, routing an unresolvable one to the state-neutral arm through a FLAG rather
+# than a sentinel status — a sentinel would still be compared against the bad value.
+STOP_STATE_SCREENS="$(code_only "$STOP_LADDER" | grep -c 'ZENSU_ROOT_STATE_UNRESOLVED=1' || true)"
 if [ "$STOP_ARM_GONE" = 1 ] && [ "$STOP_ARM_NEUTRAL" = 1 ] && [ "$STOP_ARM_DEFER" = 1 ] \
     && ! printf '%s' "$STOP_NEUTRAL_TEXT" | grep -qF 'The recorded project root still EXISTS' \
     && ! printf '%s' "$STOP_NEUTRAL_TEXT" | grep -qF 'this is not a deferral' \
@@ -3287,11 +3298,14 @@ if [ "$STOP_ARM_GONE" = 1 ] && [ "$STOP_ARM_NEUTRAL" = 1 ] && [ "$STOP_ARM_DEFER
     && [ "$DOCTOR_GONE_REQUIRED" = 1 ] \
     && [ "$DOCTOR_GONE_DEFAULTED" = 0 ] \
     && [ "$DOCTOR_STATE_SCREENS" = 2 ] \
+    && [ "$DOCTOR_PRESENT_REQUIRED" = 1 ] \
+    && [ "$DOCTOR_PRESENT_DEFAULTED" = 0 ] \
+    && [ "$STOP_STATE_SCREENS" = 2 ] \
     && [ "$DOCTOR_UNKNOWN_EXPORTS" = 1 ] && [ "$DOCTOR_UNKNOWN_ASSIGNS" = 3 ] \
     && [ "$DOCTOR_UNKNOWN_SETS" = 1 ]; then
   check "AC-C19 the Stop ladder has three emitted arms, the neutral one borrows neither sibling's claim, and the doctor exports the same distinction" PASS
 else
-  check "AC-C19 the Stop ladder has three emitted arms, the neutral one borrows neither sibling's claim, and the doctor exports the same distinction (gone=$STOP_ARM_GONE neutral=$STOP_ARM_NEUTRAL defer=$STOP_ARM_DEFER neutral_guard=$STOP_NEUTRAL_GUARD positive_guard=$DOCTOR_POSITIVE_GUARD exports=$DOCTOR_UNKNOWN_EXPORTS assigns=$DOCTOR_UNKNOWN_ASSIGNS sets=$DOCTOR_UNKNOWN_SETS)" FAIL
+  check "AC-C19 the Stop ladder has three emitted arms, the neutral one borrows neither sibling's claim, and the doctor exports the same distinction (gone=$STOP_ARM_GONE neutral=$STOP_ARM_NEUTRAL defer=$STOP_ARM_DEFER neutral_guard=$STOP_NEUTRAL_GUARD positive_guard=$DOCTOR_POSITIVE_GUARD exports=$DOCTOR_UNKNOWN_EXPORTS assigns=$DOCTOR_UNKNOWN_ASSIGNS sets=$DOCTOR_UNKNOWN_SETS stop_gone=$STOP_GONE_GUARD dgone=$DOCTOR_GONE_GUARD dgone_req=$DOCTOR_GONE_REQUIRED dgone_default=$DOCTOR_GONE_DEFAULTED dpresent_req=$DOCTOR_PRESENT_REQUIRED dpresent_default=$DOCTOR_PRESENT_DEFAULTED screens=$DOCTOR_STATE_SCREENS stop_screens=$STOP_STATE_SCREENS)" FAIL
 fi
 
 # AC-C19b — the `(unreadable)` substitution, EXECUTED. CLAUDE.md names three copies of
@@ -3310,15 +3324,25 @@ SAFE_VER_OUT="$(bash -c '
   . "$1/hooks/lib/zensu-session.sh" 2>/dev/null || exit 9
   zensu_emit_hook_session_deny incompatible-runtime "0.17.0\"evil" "0.18.0"
 ' _ "$ROOT" 2>/dev/null || true)"
+# BOTH slots are driven. The first version passed a malformed RECORDED version and a
+# valid executing one, so deleting line 487's executing substitution changed nothing any
+# assertion observed — one rule applied twice, with a case for one application.
+SAFE_VER_OUT2="$(bash -c '
+  . "$1/hooks/lib/zensu-session.sh" 2>/dev/null || exit 9
+  zensu_emit_hook_session_deny incompatible-runtime "0.17.0" "0.18.0 evil"
+' _ "$ROOT" 2>/dev/null || true)"
 if printf '%s' "$SAFE_VER_OUT" | grep -qF '(unreadable)' \
   && printf '%s' "$SAFE_VER_OUT" | grep -qF 'declares an incompatible lineage' \
   && printf '%s' "$SAFE_VER_OUT" | grep -qF '/zensu:adopt-session' \
   && printf '%s' "$SAFE_VER_OUT" | grep -qF '0.18.0' \
   && ! printf '%s' "$SAFE_VER_OUT" | grep -qF '0.17.0"evil' \
+  && printf '%s' "$SAFE_VER_OUT2" | grep -qF '(unreadable)' \
+  && printf '%s' "$SAFE_VER_OUT2" | grep -qF '0.17.0' \
+  && ! printf '%s' "$SAFE_VER_OUT2" | grep -qF '0.18.0 evil' \
   && ! printf '%s' "$SAFE_VER_OUT" | grep -qF 'start a fresh Claude Code session before using stateful tools'; then
-  check "AC-C19b a malformed version is substituted with (unreadable) and the lineage remedy survives it" PASS
+  check "AC-C19b a malformed version is substituted with (unreadable) in EITHER slot and the lineage remedy survives it" PASS
 else
-  check "AC-C19b a malformed version is substituted with (unreadable) and the lineage remedy survives it (out=${SAFE_VER_OUT:0:120})" FAIL
+  check "AC-C19b a malformed version is substituted with (unreadable) in EITHER slot and the lineage remedy survives it (recorded=${SAFE_VER_OUT:0:80} executing=${SAFE_VER_OUT2:0:80})" FAIL
 fi
 
 # AC-C21 — the plain lineage row's CONDITIONAL clause, driven both ways. The
