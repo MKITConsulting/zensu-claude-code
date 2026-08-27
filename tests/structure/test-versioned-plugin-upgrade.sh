@@ -1421,7 +1421,7 @@ for reason_hook in pre-edit-tdd-reminder.sh pre-bash-source-write-gate.sh pre-wr
   # Both halves of the conditional are matched for the same reason AC-C20 matches
   # both: the consequent alone survives deleting the guard.
   case "$reason_text" in
-    *"record was minted by 0.17.0 and 0.18.0 is executing"*"/zensu:adopt-session"*"If the recorded project root is ALSO gone"*"Edit, Write and any Bash command that writes stay denied afterwards until that exact directory is re-created"*) ;;
+    *"record was minted by 0.17.0 and 0.18.0 is executing"*"/zensu:adopt-session"*"If the recorded project root is ALSO gone"*"Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created"*) ;;
     *) LINEAGE_REASON_FAILURES="$LINEAGE_REASON_FAILURES $reason_hook" ;;
   esac
 done
@@ -2971,7 +2971,7 @@ if printf '%s' "$GONE_START" \
       >"$GONE_CONFIRM_OUT" 2>&1 \
       && grep -qF 'ADOPTED' "$GONE_CONFIRM_OUT" \
       && grep -qF '(GONE)' "$GONE_CONFIRM_OUT" \
-      && grep -qF 'any Bash command that writes stay denied' "$GONE_CONFIRM_OUT" \
+      && grep -qF 'and so does any Bash command the source-write gate can attribute as a write' "$GONE_CONFIRM_OUT" \
       && [ ! -e "$GONE_PROJECT" ] \
       && [ "$(node -p 'require(process.argv[1]).plugin_version' "$GONE_RECORD")" = 0.18.0 ] \
       && [ "$(node -p 'require(process.argv[1]).project_root' "$GONE_RECORD")" = "$GONE_NATIVE" ]; then
@@ -3102,7 +3102,7 @@ env ZDOC_BINDING=incompatible-runtime \
   CLAUDE_PLUGIN_DATA="$SHARED_DATA" CLAUDE_PROJECT_DIR="$PROJECT" HOME="$GONE_DOCTOR_HOME" \
   bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$DOCTOR_CLAUSE_OFF" 2>/dev/null
 if grep -qF 'could not be determined here' "$DOCTOR_CLAUSE_ON" \
-    && grep -qF 'Edit, Write and any Bash command that writes stay denied until that exact directory is re-created' "$DOCTOR_CLAUSE_ON" \
+    && grep -qF 'Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created' "$DOCTOR_CLAUSE_ON" \
     && ! grep -qF 'could not be determined here' "$DOCTOR_CLAUSE_OFF" \
     && grep -qF 'declares an incompatible lineage' "$DOCTOR_CLAUSE_OFF"; then
   check "AC-C21 the plain lineage row states the limit when the root is unknown and omits it when it is not" PASS
@@ -3223,7 +3223,7 @@ CAPABILITY_DECISION="$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewe
 if [ "$CAPABILITY_DECISION" = deny ] \
     && printf '%s' "$CAPABILITY_REASON" | grep -qF 'declares an incompatible lineage' \
     && printf '%s' "$CAPABILITY_REASON" | grep -qF 'If the recorded project root is ALSO gone' \
-    && printf '%s' "$CAPABILITY_REASON" | grep -qF 'Edit, Write and any Bash command that writes stay denied afterwards until that exact directory is re-created'; then
+    && printf '%s' "$CAPABILITY_REASON" | grep -qF 'Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created'; then
   check "AC-C20 the capability gate DENIES and names the Edit/Write limit alongside the repair" PASS
 else
   check "AC-C20 the capability gate DENIES and names the Edit/Write limit alongside the repair (decision=${CAPABILITY_DECISION:-unset})" FAIL
