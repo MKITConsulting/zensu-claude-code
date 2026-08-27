@@ -179,9 +179,10 @@ PHASE3_SKILL="$(sed -n '/^## Phase 3:/,/^## Response Style/p' "$SKILL_MD")"
 if printf '%s\n' "$PHASE3_SKILL" | grep -qF 'Never delete, rename, rewrite, or enumerate' \
   && printf '%s\n' "$PHASE3_SKILL" | grep -qF 'zensu-log.sh --review-rearm' \
   && printf '%s\n' "$PHASE3_SKILL" | grep -qF 'Do NOT re-derive it from' \
-  && printf '%s\n' "$PHASE3_SKILL" | grep -qF 'expired, safe to clear: <absolute path>' \
-  && printf '%s\n' "$PHASE3_SKILL" | grep -qF 'Set `PENDING` to that exact path' \
-  && printf '%s\n' "$PHASE3_SKILL" | grep -qF 'rm -f -- "$PENDING"' \
+  && printf '%s\n' "$PHASE3_SKILL" | grep -qF "expired, safe to clear: '<absolute path>'" \
+  && printf '%s\n' "$PHASE3_SKILL" | grep -qF 'already SHELL-QUOTED' \
+  && printf '%s\n' "$PHASE3_SKILL" | grep -qF 'PRECONDITION, not a substitute for yours' \
+  && printf '%s\n' "$PHASE3_SKILL" | grep -qF 'rm -f -- <the quoted literal' \
   && ! printf '%s\n' "$PHASE3_SKILL" | awk '/^```/{inside=!inside;next} inside{print}' | grep -Eq '(^|[[:space:]])find[[:space:]]'; then
   check "P2m cleanup protects CAS documents and limits the only write to exact pending-review.json" PASS
 else
@@ -521,12 +522,20 @@ case "$OUT" in
 esac
 # The row must not assert a fork: it cannot tell a forked-away session from a
 # live sibling, and this repository mandates worktree workflows where live
-# siblings are ordinary. It states the observation, names the fork as the usual
-# cause, and makes the remedy conditional.
+# siblings are ordinary. It states the observation and makes the remedy
+# conditional on the reader establishing which cause applies.
 case "$OUT" in
-  *'cannot be moved to this key'*'If those sessions are still running, nothing is wrong here'*'re-arm with /zensu:tdd'*)
+  *'cannot be moved to this key'*'Check whether the owning session is still running before acting'*)
     check "P1mj the row states the observation and a conditional remedy" PASS ;;
   *) check "P1mj the row states the observation and a conditional remedy (got: $OUT)" FAIL ;;
+esac
+# The CAUSE ORDER is the contract, not decoration. The predicate is dominated by a
+# session that ended without --chain-done, so naming the fork first and opening with
+# "nothing is wrong here" described the rare case and dismissed the common one.
+case "$OUT" in
+  *'Usually a session that ended without /zensu:tdd --chain-done'*'It can also be a'*'live sibling'*'or a FORK'*)
+    check "P1mj1 the row names the abandoned chain before the fork" PASS ;;
+  *) check "P1mj1 the row names the abandoned chain before the fork (got: $OUT)" FAIL ;;
 esac
 
 strand_absent "P1mk this session's OWN open chain is never reported" \
@@ -563,12 +572,37 @@ case "$OUT_FALLBACK" in
     check "P1mm3 an absent record anchor falls back to CLAUDE_PROJECT_DIR" PASS ;;
   *) check "P1mm3 an absent record anchor falls back to CLAUDE_PROJECT_DIR (got: $OUT_FALLBACK)" FAIL ;;
 esac
+# Both halves of the row's contract DISCLOSE when they cannot run. The wrapper half
+# — a bound verdict whose session key never arrived — used to withhold the row in
+# silence while the rest of the report looked healthy, which is exactly the verdict
+# a diagnostic may not give. Reachable through the shipped wrapper whenever one of
+# its shape guards drops the pair.
+OUT_NOKEY="$(strand_report "" "$STRAND_NOW_MS" bound "$STRAND_PROJECT")"
+case "$OUT_NOKEY" in
+  *'the session key did not reach this report'*'missing check, not an all-clear'*)
+    check "P1mm5 a bound verdict with no session key discloses instead of falling silent" PASS ;;
+  *) check "P1mm5 a bound verdict with no session key discloses instead of falling silent (got: $OUT_NOKEY)" FAIL ;;
+esac
+# ...and it still withholds the row itself; disclosure is not permission to guess.
+strand_absent "P1mm6 the disclosure never renders the row it could not compute" "$OUT_NOKEY"
 # The fallback is bound-only: a recorded anchor supplied under any other verdict
 # is not the record speaking, so it must not redirect where the doctor looks.
 OUT_UNBOUND_ROOT="$(strand_report "$STRAND_FOREIGN_KEY" "$STRAND_NOW_MS" unbound "$SBOX/some-other-root")"
 case "$OUT_UNBOUND_ROOT" in
   *"$STRAND_ANCHOR"*) check "P1mm4 a recorded anchor under a non-bound verdict never redirects the scan" PASS ;;
   *) check "P1mm4 a recorded anchor under a non-bound verdict never redirects the scan (got: $OUT_UNBOUND_ROOT)" FAIL ;;
+esac
+# A non-ENOENT errno on the state directory must not render as health. ENOTDIR is
+# the arm reachable without a privileged principal: a regular file where the state
+# directory belongs. P1t chmods that directory to 0500, which leaves it READABLE, so
+# it lands on the write-access row instead and never reaches this branch.
+NOTDIR_PROJECT="$SBOX/notdir-project"; mkdir -p "$NOTDIR_PROJECT/.zensu"
+: > "$NOTDIR_PROJECT/.zensu/state"
+OUT_NOTDIR="$(strand_report "$STRAND_FOREIGN_KEY" "$STRAND_NOW_MS" bound "$NOTDIR_PROJECT")"
+case "$OUT_NOTDIR" in
+  *'could not be read'*'missing check, not an all-clear'*)
+    check "P1mn0 a non-ENOENT state-directory errno is disclosed, not reported as health" PASS ;;
+  *) check "P1mn0 a non-ENOENT state-directory errno is disclosed, not reported as health (got: $OUT_NOTDIR)" FAIL ;;
 esac
 strand_absent "P1mn a foreign open chain past the TTL is not reported" \
   "$(strand_report "$STRAND_FOREIGN_KEY" "$(( STRAND_NOW_MS + 100 * 3600 * 1000 ))")"
@@ -589,6 +623,15 @@ esac
 case "$OUT_TTL0" in
   *'touched within 0h'*) check "P1mq1 a disabled bound is not advertised as a 0h window" FAIL ;;
   *) check "P1mq1 a disabled bound is not advertised as a 0h window" PASS ;;
+esac
+# The POSITIVE half. Without it the whole ternary could be deleted and every check
+# here would stay green: P1mg matches `*` between the phrase and the key, which
+# swallows the clause whether or not it is there, and P1mq/P1mq2 match the phrase
+# alone. The row states the window it is bounded by; that is contract, not garnish.
+case "$OUT" in
+  *"$STRAND_PHRASE, touched within 6h"*)
+    check "P1mq1a an armed bound IS advertised as its window" PASS ;;
+  *) check "P1mq1a an armed bound IS advertised as its window (got: $OUT)" FAIL ;;
 esac
 # At `0` the row claims no window, so a FUTURE stamp is not out of one. Only a stamp
 # that cannot be read at all may still exclude an entry there.
@@ -623,11 +666,29 @@ export CLAUDE_CODE_SESSION_ID="$STRAND_SAVED_SESSION"
 unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
   ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
 
-# The wrapper half, at source: a real bind needs a live host session, so the
-# structural pin is what stands. It must cover the shape-failure DIRECTION, not
-# only the shape — flipping `|| exit 0` to `|| exit 1` makes the elif fail, so a
-# genuinely bound session is reported `unbound`, and a pattern that stopped at
-# the regex would still match.
+# The wrapper half is pinned AT SOURCE, and the reason is measured rather than
+# assumed. An earlier version of this note claimed a real bind needs a live host
+# session; that is FALSE and was disproved here. Against the `strand-open` baseline
+# above, `zensu_bind_model_session` returns 0 from a plain child process and yields
+# both the scv1_ key and the project root, and the wrapper's exact substitution
+# body — source, bind, four shape guards, tab-joined printf — reproduces that with
+# rc=0 and a correct pair when run inline.
+#
+# What could NOT be made to work is the wrapper END TO END: `bash "$HELPER"` with
+# that same environment still reports `binding: this session has no valid Session
+# Control record`. The cause is NOT the comment inside the substitution (removing it
+# changes nothing, measured) and NOT the shape guards (each exits 0, which would
+# still yield `bound`). It was not established, so the end-to-end check was removed
+# rather than left failing or weakened until it passed.
+#
+# CONSEQUENCE, stated so nobody reads the greps as more than they are: the branch
+# that PRODUCES the pair, and that decides ZDOC_BINDING for EVERY session, has no
+# executed coverage. A grep sees the `|| exit 0` literal; it cannot see the
+# composite exit status, the TAB split, or the pair reaching the renderer.
+# The structural pin must therefore cover the shape-failure DIRECTION, not only the
+# shape — flipping `|| exit 0` to `|| exit 1` makes the elif fail, so a genuinely
+# bound session is reported `unbound`, and a pattern that stopped at the regex would
+# still match.
 if grep -qF 'elif ZDOC_SESSION_PAIR="$(' "$HELPER" \
   && grep -qE 'ZENSU_SESSION_KEY:-\}" =~ \^scv1_\[a-f0-9\]\{64\}\$ \]\] \|\| exit 0' "$HELPER" \
   && grep -qE '\[ -d "\$\{ZENSU_PROJECT_ROOT:-\}" \] \|\| exit 0' "$HELPER" \
@@ -657,6 +718,13 @@ fi
 # `chain-closed` needs a real reviewer spawn to consume the review ticket, which
 # no test can perform. The rename risk it names is closed at the root instead —
 # both inert literals must still be shapes the OWNER mints.
+#
+# The membership test drives `classifyChain` and reads the shape it RETURNS. An
+# earlier version compared against the `NEXT_COMMAND` lookup table instead, which
+# reproduced the exact blindness this export was created to remove: renaming what
+# `chainShape` returns while leaving the table key in place kept the check green
+# while a genuinely closed foreign chain rendered as an open one. A consumer-side
+# table is not the producer.
 STRAND_VOCAB="$(node -e '
   var chain = require(process.argv[1] + "/hooks/lib/chain-recovery-v1.js");
   var want = ["no-session", "chain-closed"];
@@ -666,9 +734,16 @@ STRAND_VOCAB="$(node -e '
     verdict = "NOT-EXPORTED";
   } else {
     var missing = want.filter(function (s) { return got.indexOf(s) === -1; });
-    var unminted = got.filter(function (s) { return !(s in chain.NEXT_COMMAND); });
+    var minted = {};
+    [
+      { active: false },
+      { active: true, implComplete: true, chainDone: true },
+    ].forEach(function (doc) {
+      try { minted[chain.chainShape(doc)] = true; } catch (e) { /* shape not derivable */ }
+    });
+    var unminted = got.filter(function (s) { return !minted[s]; });
     if (missing.length) verdict = "MISSING-FROM-INERT:" + missing.join(",");
-    else if (unminted.length) verdict = "NOT-A-SHAPE:" + unminted.join(",");
+    else if (unminted.length) verdict = "NOT-RETURNED-BY-CLASSIFY:" + unminted.join(",");
     else verdict = "ok";
   }
   process.stdout.write(verdict);
@@ -763,7 +838,12 @@ case "$OUT" in *'1 invalid CAS workflow document(s) — hooks fail closed'*"$(ba
 : > "$STATE_DIR_CANON/pending-review.json"
 touch -t 202001010000 "$STATE_DIR_CANON/pending-review.json" 2>/dev/null
 OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
-case "$OUT" in *'pending-review.json is'*'old (TTL'*"expired, safe to clear: $STATE_DIR_CANON/pending-review.json"*) check "P1n expired pending-review ⚠️ names the exact file it measured" PASS ;; *) check "P1n expired pending-review ⚠️ names the exact file it measured (got: $OUT)" FAIL ;; esac
+# The path is emitted SHELL-QUOTED and from the CANONICAL root, so the skill can
+# use it verbatim and the "no symlinked component" claim covers the root itself.
+# On macOS `mktemp -d` yields a path under /var/folders, and /var is a symlink to
+# /private/var — so the expectation has to be the resolved spelling, not $SBOX.
+STATE_DIR_REAL="$(cd -P -- "$STATE_DIR_CANON" && pwd -P)"
+case "$OUT" in *'pending-review.json is'*'old (TTL'*"expired, safe to clear: '$STATE_DIR_REAL/pending-review.json'"*) check "P1n expired pending-review ⚠️ names the exact file it measured, shell-quoted" PASS ;; *) check "P1n expired pending-review ⚠️ names the exact file it measured, shell-quoted (got: $OUT)" FAIL ;; esac
 : > "$STATE_DIR_CANON/pending-review.json"
 OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
 case "$OUT" in *'pending-review.json present and within'*) check "P1o fresh pending-review ✅" PASS ;; *) check "P1o fresh pending-review ✅ (got: $OUT)" FAIL ;; esac
@@ -779,9 +859,17 @@ case "$OUT_TTL0PR" in
   *'its TTL guard is disabled'*) check "P1o1 a TTL of 0 disables the pending-review guard instead of expiring every marker" PASS ;;
   *) check "P1o1 a TTL of 0 disables the pending-review guard instead of expiring every marker (got: $OUT_TTL0PR)" FAIL ;;
 esac
+# Anchored, for the reason `strand_absent` exists: run_report discards stderr and the
+# renderer exits 0 on any throw, so a bare absence check passes over a report that
+# never rendered. Require the pending-review verdict itself before grading absence.
 case "$OUT_TTL0PR" in
-  *'safe to clear'*) check "P1o2 a disabled guard never offers a deletion target" FAIL ;;
-  *) check "P1o2 a disabled guard never offers a deletion target" PASS ;;
+  *'pending-review.json'*) ;;
+  *) check "P1o2 a disabled guard never offers a deletion target — VACUOUS: no pending-review verdict rendered" FAIL ;;
+esac
+case "$OUT_TTL0PR" in
+  *'pending-review.json'*'safe to clear'*) check "P1o2 a disabled guard never offers a deletion target" FAIL ;;
+  *'pending-review.json'*) check "P1o2 a disabled guard never offers a deletion target" PASS ;;
+  *) ;;
 esac
 
 # The printed path is a deletion target the skill hands to `rm`. A symlinked
@@ -797,15 +885,79 @@ case "$OUT_SYM" in
   *) check "P1o3 a symlinked state directory withholds the deletion target (got: $OUT_SYM)" FAIL ;;
 esac
 
-# The skill interpolates the path into a double-quoted `rm` argument, where these
-# characters are active.
-DQ_PROJECT="$SBOX/dq\$(id)project"; mkdir -p "$DQ_PROJECT/.zensu/state"
+# A shell-active character is now OFFERED, not withheld: the value is emitted
+# single-quoted, where every byte but the quote is literal. The earlier policy was
+# a character allowlist, which excluded `path.sep` — so on win32 no candidate could
+# ever match and the cleanup was unreachable on that host — and excluded the space,
+# so an ordinary `~/My Projects/...` was refused with a message blaming the user.
+DQ_PROJECT="$SBOX/dq\$(id) project"; mkdir -p "$DQ_PROJECT/.zensu/state"
 : > "$DQ_PROJECT/.zensu/state/pending-review.json"
 touch -t 202001010000 "$DQ_PROJECT/.zensu/state/pending-review.json" 2>/dev/null
+DQ_REAL="$(cd -P -- "$DQ_PROJECT/.zensu/state" && pwd -P)"
 OUT_DQ="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$DQ_PROJECT")"
 case "$OUT_DQ" in
-  *'expired'*'The path is withheld'*) check "P1o4 a shell-active character in the path withholds the deletion target" PASS ;;
-  *) check "P1o4 a shell-active character in the path withholds the deletion target (got: $OUT_DQ)" FAIL ;;
+  *"expired, safe to clear: '$DQ_REAL/pending-review.json'"*) check "P1o4 a shell-active character and a space are quoted, not refused" PASS ;;
+  *) check "P1o4 a shell-active character and a space are quoted, not refused (got: $OUT_DQ)" FAIL ;;
+esac
+# The quoting is what makes that safe, so pin the quoting itself rather than only
+# the presence of the path: an unquoted emission would satisfy a bare path match.
+case "$OUT_DQ" in
+  *"safe to clear: '"*) check "P1o4a the offered path is single-quoted" PASS ;;
+  *) check "P1o4a the offered path is single-quoted (got: $OUT_DQ)" FAIL ;;
+esac
+
+# A control byte is still refused. Quoting would make it harmless to the shell,
+# but it would corrupt the report line a model reads back.
+CTRL_DIR="$(printf '%s/ctrl\tproject' "$SBOX")"
+if mkdir -p "$CTRL_DIR/.zensu/state" 2>/dev/null; then
+  : > "$CTRL_DIR/.zensu/state/pending-review.json"
+  touch -t 202001010000 "$CTRL_DIR/.zensu/state/pending-review.json" 2>/dev/null
+  OUT_CTRL="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$CTRL_DIR")"
+  case "$OUT_CTRL" in
+    *'withheld because its path carries a control character'*) check "P1o4b a control byte in the path withholds the deletion target" PASS ;;
+    *'safe to clear'*) check "P1o4b a control byte in the path withholds the deletion target (offered it)" FAIL ;;
+    *) check "P1o4b a control byte in the path withholds the deletion target (got: $OUT_CTRL)" FAIL ;;
+  esac
+else
+  check "P1o4b a control byte in the path withholds the deletion target (SKIP: filesystem refused the name)" PASS
+fi
+
+# The `nlink === 1` arm. A hard-linked marker is refused because the confirmed `rm`
+# would leave the other name behind while the report claimed the file was cleared.
+HL_PROJECT="$SBOX/hardlink-project"; mkdir -p "$HL_PROJECT/.zensu/state"
+: > "$HL_PROJECT/.zensu/state/pending-review.json"
+if ln "$HL_PROJECT/.zensu/state/pending-review.json" "$SBOX/hardlink-twin" 2>/dev/null; then
+  touch -t 202001010000 "$HL_PROJECT/.zensu/state/pending-review.json" 2>/dev/null
+  OUT_HL="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$HL_PROJECT")"
+  case "$OUT_HL" in
+    *'withheld because it has more than one hard link'*) check "P1o5 a hard-linked marker withholds the deletion target" PASS ;;
+    *'safe to clear'*) check "P1o5 a hard-linked marker withholds the deletion target (offered it)" FAIL ;;
+    *) check "P1o5 a hard-linked marker withholds the deletion target (got: $OUT_HL)" FAIL ;;
+  esac
+else
+  check "P1o5 a hard-linked marker withholds the deletion target (SKIP: filesystem has no hard links)" PASS
+fi
+
+# The marker's OWN `ts` decides its age, matching `_tdd_pending_file_stale`. Reading
+# the mtime alone let this row call a marker expired that the Stop enforcer still
+# treats as live. The file is BACKDATED and carries a fresh `ts`: mtime alone says
+# expired, `ts` says fresh, so only the correct reader renders the fresh row.
+TS_PROJECT="$SBOX/ts-project"; mkdir -p "$TS_PROJECT/.zensu/state"
+printf '{"ts":"%s"}' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$TS_PROJECT/.zensu/state/pending-review.json"
+touch -t 202001010000 "$TS_PROJECT/.zensu/state/pending-review.json" 2>/dev/null
+OUT_TS="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$TS_PROJECT")"
+case "$OUT_TS" in
+  *'pending-review.json present and within'*) check "P1o6 the marker's own ts outranks the filesystem mtime" PASS ;;
+  *) check "P1o6 the marker's own ts outranks the filesystem mtime (got: $OUT_TS)" FAIL ;;
+esac
+# The fallback still works: no `ts` at all, and the backdated mtime decides.
+NOTS_PROJECT="$SBOX/nots-project"; mkdir -p "$NOTS_PROJECT/.zensu/state"
+printf '{}' > "$NOTS_PROJECT/.zensu/state/pending-review.json"
+touch -t 202001010000 "$NOTS_PROJECT/.zensu/state/pending-review.json" 2>/dev/null
+OUT_NOTS="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$NOTS_PROJECT")"
+case "$OUT_NOTS" in
+  *'expired'*) check "P1o6a a marker without ts still ages on the filesystem mtime" PASS ;;
+  *) check "P1o6a a marker without ts still ages on the filesystem mtime (got: $OUT_NOTS)" FAIL ;;
 esac
 
 # --- host-refused reviewer spawn note --------------------------------------

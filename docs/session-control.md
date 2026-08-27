@@ -60,7 +60,9 @@ Both are handled by Session Control v1:
   mint an accepted document carrying any stamp it likes. While the bound is armed, a stamp in the
   FUTURE is treated as outside the window rather than absolute-valued, so a
   skewed or planted one cannot hold the row open forever; at `0` no window is
-  claimed, so only a stamp that cannot be read at all excludes an entry. **The row states an OBSERVATION, never a cause**, and that wording is
+  claimed, so nothing is excluded on age at all: `validateWorkflowState` already refuses any
+document whose `updated_at` does not parse, so every entry that reaches the row carries a
+readable one and a guard for the unreadable case would be dead code. **The row states an OBSERVATION, never a cause**, and that wording is
   load-bearing: it cannot distinguish a forked-away session from a live sibling
   driving its own chain in the same project, and a live sibling is ordinary in a
   worktree workflow — so it names the fork as the usual cause and makes the

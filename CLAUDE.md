@@ -1191,6 +1191,40 @@ competing chain. Only the WORDING changed — the row is still `WARN`, `line()` 
 `warnCount`, and `main()` gates "all checks green" on it, so the green-summary consequence below
 is still live and is listed as a gap rather than as something the reword fixed.
 
+**The CAUSE ORDER inside that wording is itself a contract, and it was wrong once.** The row's
+predicate is every open chain in this project not owned by this session and inside the TTL. The
+DOMINANT member of that set is a session that ended without `--chain-done` — a closed terminal —
+not a fork. An earlier wording named the fork as "the usual cause" and opened with "if those
+sessions are still running, nothing is wrong here": it described the rare case and dismissed the
+common one, which trains a reader to ignore the row. The abandoned chain is named FIRST, the live
+sibling second, the fork third, and `P1mj1` pins that order. Note what this does NOT change: for
+an abandoned chain the state really is stale, so the row is correctly a warning — demoting it to
+`OK` was considered and rejected, because a row that can never affect the summary is a row people
+stop reading. The green-summary cost is the price and is recorded as a gap below.
+
+**The deletion target is SHELL-QUOTED, never filtered against a character class.** A
+`DELETABLE_PATH_RE` allowlist was tried first and was wrong in BOTH directions: it excluded
+`path.sep`, so on win32 no candidate could ever match and the whole pending-review cleanup was
+unreachable on that host, and it excluded the space, so an ordinary `~/My Projects/...` was
+refused with a message blaming the user's filesystem. `shellQuotePath` single-quotes instead,
+which is total; only a CONTROL byte is still refused, because quoting makes it harmless to the
+shell but not to the report line a model reads back. `deletableTarget` also walks from the
+CANONICAL root (`realpathSync.native`) rather than the caller's spelling, which is what makes the
+"no component of the chain is a symlink" claim TRUE rather than true-below-the-root — requiring
+`root` to equal its own realpath instead would refuse every macOS session under `/var/folders`.
+Its `..` test is the ANCHORED form, and it returns `{path, reason}` so the row names WHICH check
+failed: an unresolvable disjunction reads as a fault in the user's filesystem. `skills/doctor/SKILL.md`
+Phase 3 consumes the quoted literal verbatim and re-verifies the chain AFTER the confirmation,
+because the renderer measured it before.
+
+**The pending-review row ages on the marker's own `ts`, not on the filesystem mtime.**
+`pendingReviewStamp` mirrors `_tdd_pending_file_stale` in `hooks/lib/zensu-tdd-phase.sh`, which is
+the canonical staleness reader for that file. Reading the mtime alone let the doctor print
+"expired, safe to clear" for a marker the Stop enforcer still treated as LIVE — the same class the
+`ttl === 0` fix closed, on the other axis. Two readers of one file must not disagree about which
+markers are dead. The `ts` read is size-bounded; an absent or unparseable `ts` still falls back to
+the mtime, so the pre-existing behaviour survives.
+
 **The whole Session state block is anchored on the RECORD's project root, not on
 `CLAUDE_PROJECT_DIR`, and that is a fix to PRE-EXISTING rows as much as to this one.** Every
 writer anchors there: `zensu-log.sh` re-exports `CLAUDE_PROJECT_DIR` from
@@ -1203,7 +1237,7 @@ session with no record has nothing better. **An earlier attempt COMPARED the two
 row when they disagreed; that was strictly worse** — it withheld exactly the fork-in-a-worktree
 case the row exists for, and silently. Do not reintroduce the comparison.
 
-**Two conditions withhold the row, and both fail CLOSED.** One withholds it SILENTLY:
+**Two conditions withhold the row, both fail CLOSED, and BOTH now DISCLOSE.**
 `currentSessionKey` requires `ZDOC_BINDING === 'bound'` beside the shape. The wrapper
 states "empty for every verdict except bound" and now clears both values unconditionally
 rather than `:=`-seeding them — the only two EXPORTED `ZDOC_*` that deviate from that convention,
@@ -1211,7 +1245,12 @@ because their meaning depends on a verdict reached further down and the `unknown
 `unavailable` branches never reach the bind. The reader enforces it anyway, since a caller
 supplying `ZDOC_BINDING` skips the whole resolution block; without that, one report could
 print the ❌ no-record row and, below it, a row keyed on a session key it had just said does
-not exist.
+not exist. The wrapper half used to withhold SILENTLY, which is the one verdict a diagnostic
+may not give — it now emits its own "missing check, not an all-clear" row, and the module
+half's row is no longer conjoined on `ownKey !== ''`, because that conjunction meant a tree
+which broke BOTH halves printed NEITHER row. `rowArmed` names the arming rule once, above the
+loop, so the filter and the two disclosures cannot drift apart. `P1mm5`/`P1mm6` pin the
+wrapper half in both directions.
 
 **Ordering is a contract.** The foreign-open push sits BELOW the wedged and dead-end early
 returns. Those rows carry their own remedy, and a second row naming the same truncated key
@@ -1231,6 +1270,29 @@ rather than advertising a 0h window.
 
 **Known gaps, accepted and named:**
 
+- **A model holding the PREVIOUS release's skill body deletes a file this report never
+  examined, and no renderer-side change can prevent it.** `skills/doctor/SKILL.md` as shipped in
+  **0.19.0** says to DERIVE the target: "`${CLAUDE_PROJECT_DIR}/.zensu/state`". Under the lineage
+  rule a `0.19.0 → 0.19.x` update keeps the session running, so the NEW renderer measures the
+  RECORD root while the model still holds that instruction — and where the two differ, which is
+  exactly the worktree case this feature exists for, the confirmed `rm` removes the other tree's
+  marker. Verified against the installed 0.19.0 skill, not inferred. Three larger fixes were
+  considered and none closes it: quoting the path does not help (an old body never reads the
+  row's path), a `--clear-pending --confirm` verb does not help (an old body does not know it
+  exists), and suppressing the word "expired" would delete the finding in the one case it
+  matters. What bounds the harm: the user still confirms, and the damage is one stale marker.
+  What this change DOES do is make the CURRENT skill safe — it consumes the printed literal and
+  re-verifies after the confirmation. Do not describe this as mitigated.
+- **The branch that PRODUCES the exported pair has no executed coverage, and the reason is
+  measured.** `P1mp`/`P1mp1` are source greps. An earlier note claimed a real bind needs a live
+  host session; that is FALSE — against the suite's own `strand-open` baseline
+  `zensu_bind_model_session` returns 0 from a plain child process, and the wrapper's exact
+  substitution body reproduces the correct pair inline. What could not be made to work is
+  `bash "$HELPER"` end to end, which still reports no valid record in that fixture; the cause was
+  not established (it is not the in-substitution comment and not the shape guards, both measured).
+  The end-to-end check was REMOVED rather than weakened until it passed. So the composite exit
+  status, the TAB split and the pair reaching the renderer are unexercised — on a branch that
+  decides `ZDOC_BINDING` for every session, not just this row.
 - **A same-project-root sibling permanently withholds the green summary.** The row is `WARN`, so
   while another live session holds an open chain under the SAME project root and within the TTL,
   `/zensu:doctor` cannot print "all checks green". A sibling in its own worktree has its own
@@ -1239,8 +1301,7 @@ rather than advertising a 0h window.
 - **The Windows wall clock for the enlarged `test-doctor.sh` block is UNMEASURED.** The suite is
   absent from `tests/profiles/windows-ci.v1.json` and sits in the `excluded` list of
   `windows-native-structure.v1.json`, so no PR shard runs it — but the weekly Windows Safety
-  structure shards do, and the foreign-chain block roughly doubled the suite's process count
- .
+  structure shards do, and the foreign-chain block roughly doubled the suite's process count.
   A LOCAL run took 28 s on a loaded machine, but a loaded-local second is not an ubuntu-latest
   second; that entry now reads 12 — the previous 6 s CI figure doubled — and is labelled an
   estimate in the file's own note. Take
@@ -1253,17 +1314,22 @@ rather than advertising a 0h window.
   tree-wide invariant.
 - **The `scv1_` shape is an untracked hand-copy family and this change added two members.**
   `SESSION_KEY_RE` exists in `session-control-core-v1.js` and is not exported, so the JS copy in
-  the renderer and the bash-native one in the wrapper join the copies already in
-  `zensu-tdd-phase.sh`, `stop-chain-enforcer.sh`, `claude-hook-session-v1.js`,
-  `claude-session-control-v1.js` and `zensu-edit-landing.sh` (whose spelling is `[0-9a-f]`, not
-  `[a-f0-9]` — the family had already drifted). Exporting the owner's constant is the standing
-  fix; recorded here so the copies are acknowledged rather than invisible.
+  the renderer and the bash-native one in the wrapper join a family that already spans several
+  files. **A prose census goes stale the next time a site is added, so this is a GREP and not a
+  list: before changing this shape, run `grep -rn 'scv1_' hooks/` and change every site.** An
+  earlier revision of this bullet DID enumerate them and undercounted — the renderer already
+  held four copies before this change added a fifth. Two facts a grep cannot supply: the
+  unexported owner is `SESSION_KEY_RE`, and `zensu-edit-landing.sh` spells the class `[0-9a-f]`
+  rather than `[a-f0-9]`, so the family had already drifted. Exporting the owner's constant is
+  the standing fix.
 - **A foreign chain that is WEDGED or at a DEAD END never reaches the row.** Those branches
   return first, deliberately, so one truncated key is never named twice with contradictory
   instructions — but the rows that do name it say "from the session that owns each chain",
   which is unperformable in exactly the state this feature exists to diagnose. The entries
-  now carry a `[not owned by this session]` qualifier and each row says what to do with it;
-  the FORK itself is still not named for them.
+  say "from the session that owns each chain" and nothing more. A qualifier naming the
+  ownership was drafted and is NOT implemented — an earlier revision of this bullet claimed
+  it shipped, which was false; grep finds the phrase only on the foreign-open row and the
+  inert disclosure. The FORK is not named for them either.
 - **The Config block keeps the OLD root.** `configFiles()` still builds the project overlay
   from `CLAUDE_PROJECT_DIR`, and `ZDOC_TTL_HOURS` is resolved before the bind, so where the two
   roots differ the doctor judges a `.zensu/config.json` that `zensu-log.sh` never reads. The
@@ -1273,7 +1339,11 @@ rather than advertising a 0h window.
   that shape needs a real reviewer spawn to consume the review ticket, which no structure suite
   can perform. The exclusion is exercised only through `no-session`; `P1ms` covers the rename risk
   instead, by asserting that `INERT_SHAPES` is exported, holds both shapes, and that every member
-  is a shape the owner's own `NEXT_COMMAND` knows.
+  is a shape `chainShape` actually RETURNS — driven by calling it, not by membership in the
+  sibling `NEXT_COMMAND` table. That earlier spelling reproduced the exact blindness this export
+  was created to remove: renaming only the returned literal left the table key in place and kept
+  the check green while a genuinely closed foreign chain rendered as an open one. Measured, not
+  argued — the classifier-driven form catches that rename and the table-driven form does not.
 
 **Operator-facing accounts that must move with it:** `skills/doctor/SKILL.md` (the frontmatter
 `session state` clause, the row bullet, and the Phase 3 cleanup, which must delete the path the

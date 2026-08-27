@@ -43,6 +43,12 @@ fi
 
 # Resolve the pending-review TTL through the CANONICAL getter the Stop enforcer
 # uses, so the doctor never reports a TTL the real hooks would disagree with.
+# This runs BEFORE the session bind, so it necessarily reads the config overlay
+# under CLAUDE_PROJECT_DIR; the bind block below re-resolves it from the record
+# root when the two differ. Remember whether the caller pinned it, because that
+# choice must survive the re-resolution.
+ZDOC_TTL_PINNED=""
+[ -n "${ZDOC_TTL_HOURS:-}" ] && ZDOC_TTL_PINNED=1
 if [ -z "${ZDOC_TTL_HOURS:-}" ] && [ -f "$DIR/zensu-config.sh" ]; then
   # shellcheck source=/dev/null
   . "$DIR/zensu-config.sh" 2>/dev/null || true
@@ -195,12 +201,19 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
   # reason ZDOC_BINDING_VERSIONS gives: the value is rendered into the terminal
   # and into the model context, so one failing the shape is DROPPED rather than
   # printed. The bind succeeded either way, so the verdict stays bound while the
-  # pair stays empty. Losing them costs one row; printing a bad one is worse.
+  # pair stays empty. Losing them costs the foreign-chain row AND reverts the
+  # whole Session state block to CLAUDE_PROJECT_DIR, which is the directory no
+  # writer uses whenever the two roots differ; the renderer discloses both with
+  # their own WARN rows rather than rendering as health. Printing a bad one is
+  # still worse than losing them.
   # Both travel on ONE line as `key<TAB>root` so a single substitution decides
   # the branch; a partial pair is dropped whole for the same reason. The root is
   # refused for ANY control byte, not just the separator: it is printed into the
   # report and the doctor skill feeds that exact path to `rm`, which is the policy
   # session-control-core-v1.js already applies to the same field for the same sink.
+  # A SYMLINKED root is refused too, matching zensu_resolve_project_dir, which is
+  # the authority every writer resolves through: it fails such a root outright, so
+  # accepting one here would report on a tree no writer can reach.
   #
   # Apostrophes may NOT appear in a comment inside the substitution below. macOS
   # ships bash 3.2, whose parser mis-handles one there, and the file then fails
@@ -208,10 +221,12 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
   # is why the shellcheck directive can stay.
   elif ZDOC_SESSION_PAIR="$(
     # shellcheck disable=SC1090
+    # no apostrophes in comments here: bash 3.2 parse bug, see above
     source "$DIR/zensu-session.sh" >/dev/null 2>&1 || exit 1
     zensu_bind_model_session >/dev/null 2>&1 || exit 1
     [[ "${ZENSU_SESSION_KEY:-}" =~ ^scv1_[a-f0-9]{64}$ ]] || exit 0
     [ -n "${ZENSU_PROJECT_ROOT:-}" ] || exit 0
+    [ ! -L "${ZENSU_PROJECT_ROOT:-}" ] || exit 0
     [ -d "${ZENSU_PROJECT_ROOT:-}" ] || exit 0
     case "${ZENSU_PROJECT_ROOT:-}" in *[[:cntrl:]]*) exit 0 ;; esac
     printf '%s\t%s' "${ZENSU_SESSION_KEY:-}" "${ZENSU_PROJECT_ROOT:-}"
@@ -220,6 +235,26 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
     if [ -n "$ZDOC_SESSION_PAIR" ]; then
       ZDOC_SESSION_KEY="${ZDOC_SESSION_PAIR%%$'\t'*}"
       ZDOC_SESSION_PROJECT_ROOT="${ZDOC_SESSION_PAIR#*$'\t'}"
+      # The TTL is resolved far above this block, where the parent shell does not
+      # yet hold the record root, so it came from the config overlay under
+      # CLAUDE_PROJECT_DIR. The Session state block now reads the RECORD root, so
+      # where the two differ that TTL judged one tree and governed rows about
+      # another — including the pending-review row, whose verdict becomes a
+      # deletion offer. Re-resolve from the tree that is actually scanned. A TTL
+      # the caller pinned explicitly is never overridden.
+      if [ -z "${ZDOC_TTL_PINNED:-}" ] \
+        && [ "$ZDOC_SESSION_PROJECT_ROOT" != "${CLAUDE_PROJECT_DIR:-}" ] \
+        && command -v zensu_pending_review_ttl_hours >/dev/null 2>&1; then
+        ZDOC_TTL_REBOUND="$(
+          CLAUDE_PROJECT_DIR="$ZDOC_SESSION_PROJECT_ROOT" \
+            zensu_pending_review_ttl_hours 2>/dev/null
+        )"
+        case "$ZDOC_TTL_REBOUND" in
+          ''|*[!0-9]*) ;;
+          *) ZDOC_TTL_HOURS="$ZDOC_TTL_REBOUND"; export ZDOC_TTL_HOURS ;;
+        esac
+        unset ZDOC_TTL_REBOUND
+      fi
     fi
   else
     # An unbound session is not one state. Ask the one narrow follow-up question

@@ -452,23 +452,28 @@ are re-armed only by `/zensu:reset-review-limit` through the trusted
 Only when the **Session state** block explicitly reports
 `pending-review.json ... expired`, you MAY offer to remove that one exact file:
 
-1. Take the path the row PRINTED, verbatim — the expired row ends
-   `— expired, safe to clear: <absolute path>`. Do NOT re-derive it from
-   `${CLAUDE_PROJECT_DIR}`: the Session state block is anchored on the record's
-   project root, and where the two differ (a session whose cwd is a worktree)
-   re-deriving would delete a file the report never examined and that may belong
-   to a live sibling session. If the row carries no path, do not offer a cleanup.
-2. Set `PENDING` to that exact path. Require a regular, non-symlink file inside a
-   directory named `.zensu/state`, and require NO component of that chain to be a
-   symlink — a symlinked `state` directory with a real file behind it satisfies a
-   check on the final component alone and points the removal outside the project.
-   The renderer already withholds the path when either that or a shell-unsafe
-   character applies, so a row without one is a refusal, not an omission. Show this
-   exact path; do not list the directory.
+1. Take the literal the row PRINTED, verbatim — the expired row ends
+   `— expired, safe to clear: '<absolute path>'`, already SHELL-QUOTED so it can be
+   used as-is. Do NOT re-derive it from `${CLAUDE_PROJECT_DIR}`: the Session state
+   block is anchored on the record's project root, and where the two differ (a
+   session whose cwd is a worktree) re-deriving would delete a file the report never
+   examined and that may belong to a live sibling session. Do not add quotes of your
+   own around it, and do not strip the ones it carries. If the row carries no path,
+   do not offer a cleanup — the row then names the exact reason it was withheld.
+2. Re-verify the chain YOURSELF before acting on it, and do it in step 4 rather
+   than here: the renderer measured it before the confirmation below, and a
+   component can be replaced during that window. Require a regular, non-symlink
+   file inside a directory named `.zensu/state`, and require NO component of that
+   chain to be a symlink — a symlinked `state` directory with a real file behind it
+   satisfies a check on the final component alone and points the removal outside the
+   project. The renderer's own check is a PRECONDITION, not a substitute for yours.
+   Show this exact path; do not list the directory.
 3. Confirm via `AskUserQuestion`: "Remove expired pending-review.json" or
    "Keep it".
-4. On explicit confirmation only, run `rm -f -- "$PENDING"`. Never use a glob,
-   `find`, parent traversal, or worktree discovery.
+4. On explicit confirmation only, re-run the step-2 checks — if anything changed
+   since the confirmation, abort and say so — then run `rm -f -- <the quoted literal
+   from the row>`. Never use a glob, `find`, parent traversal, or worktree
+   discovery.
 5. Non-interactive runs remain report-only.
 
 An invalid CAS workflow document is a fail-closed diagnostic, never a cleanup

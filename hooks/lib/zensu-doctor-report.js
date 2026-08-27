@@ -1266,17 +1266,16 @@ function ttlHours() {
 // copy agreeing while a genuinely closed foreign chain rendered as an open one.
 // A consumer cannot check the producer it does not own; asking the owner is the
 // only version of this that works.
+// The element check is not decoration. Arity alone accepts an export whose members
+// are not the strings `chainShape` returns — a different type, or a different
+// spelling — and `indexOf` then never matches, so every closed foreign chain
+// renders as an open one with no row saying the check did not run. That is the
+// silent wrong answer moving the set here was meant to remove; anything unusable
+// falls through to `null` and the disclosed WARN.
 function inertShapes(chain) {
   var shapes = chain && chain.INERT_SHAPES;
-  return Array.isArray(shapes) && shapes.length ? shapes : null;
-}
-
-// Whether the stamp can be read at all, independent of where it falls. Separate
-// from documentAgeMs because "in the future" and "unparseable" are one answer to
-// the windowed question and two different answers to the unwindowed one.
-function documentAgeReadable(entry) {
-  var stamped = entry.state && entry.state.updated_at;
-  return typeof stamped === 'string' && Number.isFinite(Date.parse(stamped));
+  if (!Array.isArray(shapes) || !shapes.length) return null;
+  return shapes.every(function (s) { return typeof s === 'string' && s !== ''; }) ? shapes : null;
 }
 
 // The document's own age. `.zensu/state/` is writable from inside a session, so
@@ -1335,37 +1334,90 @@ function currentSessionKey() {
 // That was worse: it withheld exactly the fork-in-a-worktree case the row exists
 // for, and it did so silently. There is one authority; the caller's value is the
 // fallback, and only because a session with no bound record has nothing better.
-// A path is printed as a deletion target only when a shell can be handed it
-// safely. Three conditions: no component of the chain is a symlink, the resolved
-// file is a plain file inside the scanned root, and every character is drawn from
-// the same conservative set the doctor's own invocation recognizer accepts. Any
-// failure returns '' and the caller withholds the path rather than the finding.
-var DELETABLE_PATH_RE = /^[A-Za-z0-9._\/@+:,=-]+$/;
-
-function deletableTarget(file, root) {
-  try {
-    var current = root;
-    var rest = path.relative(root, file);
-    if (rest === '' || rest.startsWith('..') || path.isAbsolute(rest)) return '';
-    var parts = rest.split(path.sep);
-    for (var i = 0; i < parts.length; i++) {
-      current = path.join(current, parts[i]);
-      var st = fs.lstatSync(current);
-      if (st.isSymbolicLink()) return '';
-      if (i < parts.length - 1 ? !st.isDirectory() : !(st.isFile() && st.nlink === 1)) return '';
-    }
-    return DELETABLE_PATH_RE.test(file) ? file : '';
-  } catch (e) {
-    return '';
-  }
-}
-
 function stateProjectRoot() {
   var recorded = env.ZDOC_SESSION_PROJECT_ROOT;
   if (env.ZDOC_BINDING === 'bound' && typeof recorded === 'string' && recorded !== '') {
     return path.resolve(recorded);
   }
   return path.resolve(env.CLAUDE_PROJECT_DIR || '.');
+}
+
+// A path is printed as a deletion target only when a shell can be handed it
+// safely, because `skills/doctor/SKILL.md` Phase 3 feeds exactly these bytes to
+// `rm`. Three conditions: NO component of the chain is a symlink — the scanned
+// root included, which is why the walk starts from its canonical spelling rather
+// than from the caller's; the resolved file is a plain, single-linked file inside
+// that root; and the path carries no control byte. Any failure returns '' and the
+// caller withholds the path rather than the finding.
+//
+// The value is emitted SHELL-QUOTED rather than filtered against a character
+// class. An allowlist was tried first and was wrong in BOTH directions: it
+// excluded `path.sep`, so on win32 no candidate could ever match and the cleanup
+// was unreachable on that host entirely, and it excluded the space, so an ordinary
+// `~/My Projects/...` was refused with a message blaming the user's filesystem.
+// Inside single quotes every byte but the quote itself is literal, so quoting is
+// the total answer the class was approximating. A control byte is still refused:
+// quoting would make it harmless to the shell, but it would corrupt the report
+// line a model reads back.
+//
+// `root` is canonicalized rather than compared against its own realpath. Requiring
+// equality would refuse every macOS session under `/var/folders`, which is a
+// symlink to `/private/var` — an ordinary temp root, not a hostile one. Resolving
+// instead makes the stated invariant TRUE, and the printed path is then the one
+// `rm` will actually act on.
+var CONTROL_BYTE_RE = /[\u0000-\u001f\u007f]/;
+
+function shellQuotePath(value) {
+  return "'" + value.split("'").join("'\\''") + "'";
+}
+
+// Returns `{ path, reason }`. Exactly one is ever non-empty. The reason is
+// rendered to the operator, because "the path is withheld" plus an unresolvable
+// disjunction reads as a fault in their filesystem rather than as the specific
+// condition the renderer actually hit.
+function deletableTarget(file, root) {
+  try {
+    var rest = path.relative(root, file);
+    if (rest === '' || rest === '..' || rest.startsWith('..' + path.sep) || path.isAbsolute(rest)) {
+      return { path: '', reason: 'it resolves outside the scanned project root' };
+    }
+    var current = fs.realpathSync.native(root);
+    var parts = rest.split(path.sep);
+    for (var i = 0; i < parts.length; i++) {
+      current = path.join(current, parts[i]);
+      var st = fs.lstatSync(current);
+      if (st.isSymbolicLink()) return { path: '', reason: 'a component of its path is a symlink' };
+      if (i < parts.length - 1) {
+        if (!st.isDirectory()) return { path: '', reason: 'a component of its path is not a directory' };
+      } else if (!st.isFile()) {
+        return { path: '', reason: 'it is not a plain file' };
+      } else if (st.nlink !== 1) {
+        return { path: '', reason: 'it has more than one hard link' };
+      }
+    }
+    if (CONTROL_BYTE_RE.test(current)) return { path: '', reason: 'its path carries a control character' };
+    return { path: shellQuotePath(current), reason: '' };
+  } catch (e) {
+    return { path: '', reason: 'it could not be examined (' + (e && e.code ? e.code : 'unknown error') + ')' };
+  }
+}
+
+// The marker's OWN `ts` decides its age when it carries one, exactly as
+// `_tdd_pending_file_stale` in `hooks/lib/zensu-tdd-phase.sh` decides staleness.
+// Reading the filesystem mtime alone let this row print "safe to clear" for a
+// marker the Stop enforcer still treats as LIVE: an mtime-preserving restore, a
+// `cp -p` or a container layer moves the two apart without touching `ts`, and
+// `.zensu/state/` is session-writable besides. Two readers of one file must not
+// disagree about which markers are dead. The size bound keeps a planted file from
+// turning a diagnostic row into an unbounded read.
+function pendingReviewStamp(file, st) {
+  try {
+    if (st.size <= 65536) {
+      var parsed = Date.parse(JSON.parse(fs.readFileSync(file, 'utf8')).ts);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  } catch (e) { /* an absent or unreadable `ts` falls back to the filesystem stamp */ }
+  return st.mtimeMs;
 }
 
 function chainRows(entries, nowMs) {
@@ -1386,6 +1438,10 @@ function chainRows(entries, nowMs) {
   var ownKey = currentSessionKey();
   var ttl = ttlHours();
   var inert = inertShapes(chain);
+  // Whether the foreign-open row can render AT ALL. Neither half depends on an
+  // entry, so it is decided once here rather than re-tested per entry and then
+  // re-spelled independently by the disclosures below.
+  var rowArmed = ownKey !== '' && inert !== null;
   entries.forEach(function (entry) {
     var report;
     try {
@@ -1410,23 +1466,21 @@ function chainRows(entries, nowMs) {
     // chain returns first on purpose: those rows carry their own remedy, and a
     // second row telling the reader to re-arm the same truncated key would
     // contradict it.
-    if (
-      ownKey === ''
-      || inert === null
-      || entry.key === ownKey
-      || inert.indexOf(report.shape) !== -1
-    ) return;
+    // `rowArmed` is loop-INVARIANT and is named once, above, so the arming rule and
+    // the disclosures below cannot drift apart. Only the two conditions that really
+    // vary per entry are tested here.
+    if (!rowArmed || entry.key === ownKey || inert.indexOf(report.shape) !== -1) return;
     // `0` disables the bound rather than shrinking it to nothing, which is what
     // this key means everywhere else it is read (docs/configuration.md, and
-    // reviewerDenialRows below). An age this cannot establish is excluded in
-    // BOTH cases: the row states a window, and one that was never measured must
-    // not be claimed.
+    // reviewerDenialRows below). At `0` no window is claimed, so nothing is
+    // excluded on age at all: every entry reaching here carries an `updated_at`
+    // that parses finite, because `validateWorkflowState` refuses any document
+    // whose stamp does not and `stateBlock` routes that throw to `invalid`
+    // instead of into `states`. A guard for the unreadable case would be dead
+    // code pretending to be a safety net — the same argument documentAgeMs makes
+    // one screen up for the absent mtime fallback.
     var ageMs = documentAgeMs(entry, nowMs);
     if (ttl > 0 && (ageMs === null || ageMs / 3600000 > ttl)) return;
-    // With the bound disabled the row advertises no window, so the only thing that
-    // still excludes an entry is a stamp that cannot be read at all — a FUTURE one
-    // is out of a window nobody claimed.
-    if (ttl === 0 && !documentAgeReadable(entry)) return;
     foreignOpen.push(entry.session + ': ' + report.shape);
   });
   line(
@@ -1444,9 +1498,22 @@ function chainRows(entries, nowMs) {
   if (deadEnds.length) {
     line(WARN, 'chain: ' + deadEnds.length + ' chain(s) at a dead end — a fresh generation is the only exit, from the session that owns each chain: ' + truncatedList(deadEnds));
   }
-  if (inert === null && ownKey !== '') {
+  // BOTH halves of the row's contract disclose, and neither is conjoined on the
+  // other. Gating the module half on `ownKey !== ''` meant a tree that broke both
+  // printed NEITHER row: the inert disclosure was suppressed by the missing key,
+  // and the key had no disclosure of its own. Silence is the one verdict this row
+  // cannot qualify.
+  if (inert === null) {
     line(WARN, 'chain: chain-recovery-v1.js exports no usable inert-shape set — an open chain'
       + ' not owned by this session cannot be told from a closed one, so that row did not run.'
+      + ' That is a missing check, not an all-clear.');
+  }
+  // The wrapper half. A `bound` verdict with no session key is reachable through
+  // the shipped wrapper whenever one of its shape guards drops the pair, and it
+  // silently withheld the row while the report otherwise looked healthy.
+  if (env.ZDOC_BINDING === 'bound' && ownKey === '') {
+    line(WARN, 'chain: the session key did not reach this report — an open chain owned by'
+      + ' another session cannot be identified, so that row did not run.'
       + ' That is a missing check, not an all-clear.');
   }
   if (foreignOpen.length) {
@@ -1454,14 +1521,32 @@ function chainRows(entries, nowMs) {
     // session forked away from one a live sibling session is still driving, and
     // a live sibling is normal in this repository's own worktree workflow — so
     // asserting a fork would make a false claim about that session and tell the
-    // reader to arm a competing chain. The fork is named as the usual cause and
-    // the remedy is conditional on the reader knowing the session is gone.
+    // reader to arm a competing chain.
+    //
+    // The CAUSE ORDER is deliberate and was corrected once. An earlier wording
+    // named the fork as "the usual cause" and opened with "if those sessions are
+    // still running, nothing is wrong here". Neither held: the predicate is every
+    // open chain in this project not owned by this session and inside the TTL, and
+    // the dominant member of that set is a session that ENDED without --chain-done,
+    // for which nothing is running and the state IS stale. Naming the rare cause
+    // first, then telling the reader the common case is fine, trains them to
+    // dismiss the row.
+    //
+    // It stays WARN, and the cost is accepted rather than hidden: `line()` counts
+    // WARN toward `warnCount` and `main()` gates "all checks green" on it, so a
+    // second session in the SAME project root suppresses the green summary while
+    // it runs. Demoting to OK was the alternative and is worse — an abandoned open
+    // chain is real stale state the user should clear, and a row that can never
+    // affect the summary is a row people stop reading. A sibling working in its own
+    // worktree has its own .zensu/state and never triggers this.
     line(WARN, 'chain: ' + foreignOpen.length + ' open chain(s) not owned by this session'
       + (ttl > 0 ? ', touched within ' + ttl + 'h' : '')
       + ' — this session cannot advance them, and they cannot be moved to this key.'
-      + ' If those sessions are still running, nothing is wrong here. If one is gone —'
-      + ' the usual cause is a FORK, where the host mints a new session id mid-conversation'
-      + ' and the work armed under the old key becomes unreachable — re-arm with /zensu:tdd: '
+      + ' Usually a session that ended without /zensu:tdd --chain-done, in which case the'
+      + ' state is stale and re-arming here with /zensu:tdd is the exit. It can also be a'
+      + ' live sibling session, where nothing is wrong, or a FORK — the host minting a new'
+      + ' session id mid-conversation, which leaves the work armed under the old key'
+      + ' unreachable. Check whether the owning session is still running before acting: '
       + truncatedList(foreignOpen));
   }
 }
@@ -1731,7 +1816,7 @@ function stateBlock(nowMs) {
   var pr = path.join(dir, 'pending-review.json');
   try {
     var st = fs.statSync(pr);
-    var ageH = (nowMs - st.mtimeMs) / 3600000;
+    var ageH = (nowMs - pendingReviewStamp(pr, st)) / 3600000;
     var ttl = ttlHours();
     if (ttl === 0) {
       // `0` DISABLES the guard — docs/configuration.md, `_tdd_pending_file_stale`,
@@ -1748,17 +1833,18 @@ function stateBlock(nowMs) {
       // measured one file and the user was asked to delete another it had never
       // examined. A deletion offer has to name the thing it measured.
       //
-      // The path is emitted ONLY when it is safe to hand to a shell. `statSync`
-      // follows symlinks, so a symlinked `.zensu` or `state` would point the
-      // confirmed `rm` outside this project; and the skill interpolates the value
-      // into a double-quoted argument, where `$`, a backtick, `"` and `\` are all
-      // active. Either check failing drops the path and keeps the verdict — the
-      // skill contracts that a row without a path offers no cleanup, so
-      // withholding degrades safely while printing would not.
+      // The path is emitted ONLY when a shell can be handed it safely, and
+      // SHELL-QUOTED so the skill can use it verbatim. `statSync` follows symlinks,
+      // so a symlinked `.zensu` or `state` would point the confirmed `rm` outside
+      // this project. A failing check drops the path and keeps the verdict — the
+      // skill contracts that a row without a path offers no cleanup, so withholding
+      // degrades safely while printing would not — and the row names WHICH check
+      // failed, because an unresolvable disjunction reads as a fault in the user's
+      // filesystem rather than as the condition the renderer actually hit.
       var target = deletableTarget(pr, projectRoot);
       line(WARN, 'state: pending-review.json is ' + Math.floor(ageH) + 'h old (TTL ' + ttl + 'h) — expired'
-        + (target ? ', safe to clear: ' + target
-          : '. The path is withheld: it is not a plain file reachable without a symlinked component, or it contains a character unsafe to hand to a shell. Clear it by hand.'));
+        + (target.path ? ', safe to clear: ' + target.path
+          : '. The path is withheld because ' + target.reason + '. Clear it by hand.'));
     } else {
       line(OK, 'state: pending-review.json present and within its ' + ttl + 'h TTL');
     }
