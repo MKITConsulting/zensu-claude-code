@@ -68,3 +68,6 @@ evals/tdd-manager/**
 
 # Transient fixtures from tests/structure/test-bash-source-write-gate.sh
 tests/.bswgate-tmp.*/
+
+# c8 coverage output (npm run session-trail:coverage)
+coverage/

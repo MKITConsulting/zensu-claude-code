@@ -29,9 +29,30 @@ const expectedProfiles = [
   'windows-shard-5',
   'windows-shard-6',
   'windows-shard-7',
+  // Shard 8 exists for one suite. Measured on run 32998414210, `session-trail-lineage`
+  // took 893084 ms of shard 3's 1800000 ms envelope; the eight suites there summed to
+  // 1800072 ms and `windows-profile-lifecycle-contract` was granted 139971 ms of its
+  // own 420000 ms cap and aborted. No other shard had 893 s of headroom either — the
+  // measured job durations that run were 1630, 1187, 1886, 1779, 1008, 1011 and 1516
+  // seconds — so the suite needed a shard of its own, not a different neighbour.
+  //
+  // Every one of those numbers described a suite whose Windows wall clock was almost
+  // entirely a stalled subprocess, and they are kept only so the sizing lesson is not
+  // relearned. 893084 ms (run 32998414210, completed) and >900138 ms (33018717088,
+  // killed at 229 of 288) both measured trail.mjs's win32 process probe timing out
+  // 115 times at 8000 ms — about 920 s of the 997 s. Once the probe was fixed, run
+  // 33054489866 reported PASSED session-trail-lineage (154673 ms), 280 PASS / 0 FAIL /
+  // 4 SKIP. The cap is 600000: 3.9x the real measurement, generous against the
+  // run-to-run spread this repo records elsewhere, and deliberately BELOW the ~650 s a
+  // reintroduced stall would cost, so that regression trips the cap instead of merely
+  // making CI slow. The 1500000 it briefly carried was ten times the measurement and
+  // would have hidden exactly that. Budget against the measurement with headroom —
+  // never at it, which is what 900000 did, and never so far above it that the cap
+  // stops being a tripwire.
+  'windows-shard-8',
 ];
-const expectedCommandCount = 42;
-const expectedCommandDigest = '81b923b5cccac8b8fe5843a86d27f12504131abef2819d33becd1a3c7fc80f3b';
+const expectedCommandCount = 43;
+const expectedCommandDigest = '759e33875689db60325a145b8357f592c9d2f0fe2418883b651d2673a4eea2df';
 
 function allSuites() {
   return Object.values(manifest.profiles).flatMap((profile) => profile.suites);

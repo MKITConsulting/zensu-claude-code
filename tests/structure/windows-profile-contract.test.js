@@ -45,7 +45,7 @@ test('complete profile contract binds every runtime and referenced suite byte', 
   ));
   assert.equal(
     Object.values(current.profiles).reduce((sum, profile) => sum + profile.suites.length, 0),
-    42,
+    43,
   );
   const root = copyContractRoot();
   try {
