@@ -395,7 +395,7 @@ case "$OUT_NOMOD" in
   *)
     check "P1mf a missing chain module degrades to a warning (got: $OUT_NOMOD)" FAIL ;;
 esac
-# P1mg — the SAME minimal root, now driven with a binding value, which is the only
+# P1mf1 — the SAME minimal root, now driven with a binding value, which is the only
 # way to reach the display fold's load-failure branch. $NOCHAIN carries the core and
 # the renderer but not zensu-safe-display-v1.js, so safeDisplay's guarded require
 # throws. For a NON-EMPTY value — which is what this row drives — it then returns its
@@ -427,9 +427,9 @@ if printf '%s' "$NOFOLD_ROW" | grep -qF 'project root recorded for this session'
     && printf '%s' "$NOFOLD_ROW" | grep -qF '(not rendered — the display-safety module could not be loaded)' \
     && ! printf '%s' "$NOFOLD_ROW" | grep -qF '((' \
     && [ "$NOFOLD_RC" -eq 0 ]; then
-  check "P1mg an unloadable display-fold module replaces the value with its reason and keeps the row" PASS
+  check "P1mf1 an unloadable display-fold module replaces the value with its reason and keeps the row" PASS
 else
-  check "P1mg an unloadable display-fold module replaces the value with its reason and keeps the row (rc=$NOFOLD_RC)" FAIL
+  check "P1mf1 an unloadable display-fold module replaces the value with its reason and keeps the row (rc=$NOFOLD_RC)" FAIL
   printf '%s' "$NOFOLD_ROW" | head -c 300
 fi
 
