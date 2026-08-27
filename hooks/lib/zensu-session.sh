@@ -204,7 +204,7 @@ zensu_session_orphaned_project_root_model() {
 # but the two halves are unrelaxed for different reasons: with the recorded root
 # still present a workflow document is reachable, so relaxing a write gate would
 # waive a live guarantee rather than a dead one; with that root gone the document
-# died with it, and what stands in for the guarantee is that the state has a real
+# is not reachable from this record, and what stands in for the guarantee is that the state has a real
 # in-place repair (adoption) rather than a silent waiver. A caller that says
 # anything about the workflow document must ask the third fact separately —
 # zensu_session_incompatible_orphaned_root below — and branch on it. It exists so

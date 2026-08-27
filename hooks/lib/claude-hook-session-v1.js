@@ -194,7 +194,7 @@ function orphanedProjectRootSession(payload, environment = process.env) {
 // the recorded project root still exists a workflow document IS reachable, so
 // relaxing a write gate would waive a live guarantee — unlike the two states
 // above, where nothing is left to waive. When that root is GONE the document
-// died with it, and what keeps the state unrelaxed is instead that it has a real
+// is not reachable from this record, and what keeps the state unrelaxed is instead that it has a real
 // in-place repair: adoption, a deliberate user action that leaves provenance,
 // rather than a silent waiver. Any caller that says something about the
 // workflow document must read `orphanedProjectRoot` and branch; the Stop hook

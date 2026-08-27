@@ -1451,9 +1451,9 @@ function truncatedList(rows) {
 //
 // Required LAZILY and guarded, exactly as reviewerDenialRows and ruleCarrierRows
 // require theirs: a load fault must cost this row's polish, never the whole report.
-// A guarded LAZY require, and the fallback DROPS the value rather than folding it
-// with a second copy of the rule. Three decisions, each of which was made the other
-// way first.
+// A guarded LAZY require, and the fallback REPLACES the value with a stated reason
+// rather than folding it with a second copy of the rule. Three decisions, each of
+// which was made the other way first.
 //
 // WHERE the rule lives: `hooks/lib/zensu-safe-display-v1.js`, a leaf that requires
 // nothing at all. It used to live in `session-adopt-report-v1.js` — a feature
@@ -1469,21 +1469,20 @@ function truncatedList(rows) {
 // one degraded row into no report at all. Same reasoning as `ruleCarrierRows` and
 // `reviewerDenialRows` two blocks down.
 //
-// WHY the fallback returns the EMPTY STRING: the previous guard fell back to a
-// SECOND, narrower spelling of the fold, so one rule had two implementations with
-// nothing comparing them. Re-authoring it here is what the extraction exists to stop.
-// With the rule unavailable, the honest move is the one `zensu-doctor.sh` already
-// makes for a version pair that fails its shape guard — it emits a bare `printf
-// '\t'`, the value arrives empty, and the ternary omits the whole parenthetical.
-// Losing the path is a worse message; rendering it unfolded is a wrong one.
+// WHY the fallback NAMES ITS REASON instead of dropping the value silently: the
+// previous guard fell back to a SECOND, narrower spelling of the fold, so one rule
+// had two implementations with nothing comparing them. Re-authoring it here is what
+// the extraction exists to stop. But dropping the value outright is not free either:
+// `stop-chain-enforcer.sh` and the shell deny scope both tell the user
+// "/zensu:doctor names the directory", unconditionally, so a silent omission leaves
+// those two surfaces asserting something this row stopped delivering.
 //
-// It returned the literal `(unrenderable)` for one review round, which did NOT do
-// what this comment said: the call sites tested the RAW env var, so the parenthetical
-// still fired and the row rendered `... no longer exists ((unrenderable)) — ...`,
-// doubled parens and all, replacing the row's only actionable datum with a
-// placeholder that reads as if the PATH were unreadable rather than the fold
-// unavailable. Every call site now tests the FOLDED result, which is what makes
-// "drop the value and keep the row" true rather than merely intended.
+// The returned string carries NO parentheses of its own. Two earlier spellings got
+// this wrong in the same way: `(unrenderable)` and then
+// `(not rendered — …)` were both wrapped AGAIN by the call site's `' (' + … + ')'`,
+// rendering `... no longer exists ((not rendered — …)) — ...`. Every call site tests
+// the FOLDED result, so an empty fold still omits the whole parenthetical; a non-empty
+// one must supply only its TEXT.
 //
 // The FULL rule, not a narrow fold. The binding line is prose, but it sits in a
 // report built out of `label : value` rows that the doctor skill tells the model to
@@ -1499,7 +1498,7 @@ function safeDisplay(value) {
     // deny scope both tell the user "/zensu:doctor names the directory", and neither
     // is conditional on this module loading. Silently omitting it leaves those two
     // surfaces asserting something this row stopped delivering. Say why instead.
-    return text === '' ? '' : '(not rendered — the display-safety module could not be loaded)';
+    return text === '' ? '' : 'not rendered — the display-safety module could not be loaded';
   }
 }
 
@@ -1551,8 +1550,8 @@ function bindingLine() {
     // servesRecordedRuntime, which an incompatible lineage fails, and the lineage
     // probe used to read strictly and throw on the absent root. The combination
     // therefore fell through to `unbound`, whose line is false here in the same
-    // way it is false one row up. It is adoptable — the workflow document died
-    // with the worktree, so there is no persisted shape left to disagree about —
+    // way it is false one row up. It is adoptable — the workflow document is not
+    // reachable from this record, so there is no persisted shape left to disagree about —
     // but adoption leaves the session ORPHANED rather than fully bound, so the
     // row states that limit instead of promising a full rescue.
     case 'orphaned-project-root+incompatible-runtime':
@@ -1565,7 +1564,7 @@ function bindingLine() {
         // OFFERED, never promised — the same hedge the row above carries and for
         // the same reason: this state is reachable on a DOWNGRADE, which adoption
         // refuses outright as executing-runtime-older.
-        + ' — a deleted or recycled worktree left the workflow state unreachable from this record while a plugin update landed, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether the running installation may take the record over, then /zensu:adopt-session --confirm. That unblocks Bash and this diagnostic, but Edit, Write and any Bash command that writes stay denied afterwards because the recorded project root is still gone — a write cannot be attributed to a project that is not there — re-create exactly that directory, or start a fresh Claude Code session, to write again. If it was moved rather than deleted, its state still exists there');
+        + ' — a deleted or recycled worktree left the workflow state unreachable from this record while a plugin update landed, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether the running installation may take the record over, then /zensu:adopt-session --confirm. That unblocks READ-ONLY Bash and this diagnostic, but Edit, Write and any Bash command that writes stay denied afterwards because the recorded project root is still gone — a write cannot be attributed to a project that is not there — re-create exactly that directory, or start a fresh Claude Code session, to write again. If it was moved rather than deleted, its state still exists there');
     case 'unavailable':
       return line(BAD, 'binding: hooks/lib/zensu-session.sh is missing or symlinked — Session Control cannot bind');
     default:

@@ -720,15 +720,17 @@ doctor renderer keeps its require LAZY and GUARDED, because that file deliberate
 has no hard sibling require — `test-doctor.sh` P1mf builds a plugin root carrying
 exactly the core and that renderer, to prove a missing `chain-recovery-v1.js`
 degrades to one warning row rather than killing the report, and a top-level require
-made the renderer unloadable in that tree. Its fallback returns the EMPTY STRING
-rather than re-authoring the fold, and **every call site tests the FOLDED result**, so
-the whole parenthetical disappears — dropping the value is the move `zensu-doctor.sh`
-already makes for a version pair that fails its shape guard. That coupling is the part
-to keep: the fallback returned a non-empty `(unrenderable)` for one round while the
-call sites still tested the RAW environment variable, and the row rendered
-`… no longer exists ((unrenderable)) — …`, doubled parens and all, which is the
-opposite of what its own comment promised. A port that re-authors the fold, or that
-guards on the raw value, gets one of those two defects back.
+made the renderer unloadable in that tree. Its fallback NAMES ITS REASON — the row prints
+`(not rendered — the display-safety module could not be loaded)` — rather than
+re-authoring the fold or dropping the value silently, because two other surfaces tell
+the user "/zensu:doctor names the directory" unconditionally. **Every call site tests
+the FOLDED result**, so an empty fold still omits the whole parenthetical. **The
+returned string must carry no parentheses of its own**, and that is the part to keep:
+the fallback shipped as `(unrenderable)` in one round and as `(not rendered — …)` in
+the next, and BOTH were wrapped again by the call site's `' (' + … + ')'`, rendering
+`… no longer exists ((not rendered — …)) — …`. The same defect, twice, in successive
+fixes for it. A port that re-authors the fold, guards on the raw value, or returns a
+pre-parenthesized string gets one of those defects back.
 `discardSupersededLeases` is NO LONGER
 among them — it moved to `hooks/lib/review-evidence-sweep-v1.js` and is the EIGHTH
 host obligation enumerated below. Note that
@@ -1092,7 +1094,7 @@ belongs to this roster only because every gate that consults the two above must 
 to do about it too — and the answer is the same everywhere: keep denying. It matches TWO
 states, and they are unrelaxed for DIFFERENT reasons: with the recorded project root still
 present a workflow document is reachable, so relaxing would waive a live guarantee rather
-than a dead one; with that root gone the document died with it, and what stands in for the
+than a dead one; with that root gone the document is not reachable from this record, and what stands in for the
 guarantee is that the state has a real in-place repair — adoption, a user action leaving
 provenance — rather than a silent waiver. A consumer that says anything about the workflow
 document must ask `zensu_session_incompatible_orphaned_root` and branch. TWO do: the Stop hook, and

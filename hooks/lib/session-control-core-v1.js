@@ -1371,7 +1371,7 @@ function readContext(options) {
 // reader): every part of the record validates exactly as readContext demands,
 // and its recorded project root is simply gone — the harness recycled or the user deleted that
 // worktree. The workflow document lives at <project_root>/.zensu/state/, so it
-// died with the directory: no review chain and no Autopilot run remain
+// is not reachable from this record: no review chain and no Autopilot run remain
 // reachable, which is the same argument that already releases a session with no
 // record at all.
 //
