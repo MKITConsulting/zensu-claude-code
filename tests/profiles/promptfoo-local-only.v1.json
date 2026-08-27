@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "ciStructureTests": [
     "test-agent-context.sh",
+    "test-artifact-redaction.sh",
     "test-autopilot-adversarial-recovery.sh",
     "test-autopilot-bound-payload-windows.sh",
     "test-autopilot-chain-integration.sh",

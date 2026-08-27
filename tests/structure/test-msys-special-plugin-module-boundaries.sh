@@ -10,7 +10,10 @@
 #      node shim below enforces it by rejecting the root in any argv token.
 #   2. render the module DIRECTORY through hooks/lib/zensu-host-path.sh, append
 #      the file name, and transport the result in an environment variable
-#      (hooks/lib/zensu-tdd-phase.sh and hooks/plan-approved-delegate.sh).
+#      (hooks/lib/zensu-tdd-phase.sh, hooks/plan-approved-delegate.sh, the
+#      `append` verb in hooks/lib/zensu-log.sh, hooks/post-artifact-redact.sh
+#      and hooks/post-bash-witness.sh). The last three carry
+#      zensu-artifact-redact-v1.js, which is probed alongside the plan lib below.
 #
 # The shim cannot police mechanism 2 by scanning argv, and widening it to reject
 # the root in ANY environment value would reject every invocation, because
@@ -328,6 +331,24 @@ if [ -n "$PLAN_LIB" ] && [ -f "$PLAN_LIB" ] && [ -r "$PLAN_LIB" ] && [ ! -L "$PL
   check "plan-gate module converts and loads from the special plugin root" PASS
 else
   check "plan-gate module converts and loads from the special plugin root" FAIL
+fi
+
+# The artifact redactor is the second module carried this way, and it is the one
+# with a SIBLING require (`./claude-path-v1.js`) — so a conversion that produced a
+# loadable path for one file could still fail on the relative resolution inside
+# it. Both hooks route a load fault to a silent no-redaction path, so an
+# unprobed failure here is invisible in production.
+REDACT_LIB="${PLAN_LIB_DIR:+$PLAN_LIB_DIR/zensu-artifact-redact-v1.js}"
+if [ -n "$REDACT_LIB" ] && [ -f "$REDACT_LIB" ] && [ -r "$REDACT_LIB" ] && [ ! -L "$REDACT_LIB" ] \
+  && ZENSU_REDACT_LIB="$REDACT_LIB" node -e '
+    const m=require(process.env.ZENSU_REDACT_LIB);
+    process.exit(typeof m.redact==="function" && typeof m.redactFile==="function"
+      && typeof m.writeArtifactLine==="function" && typeof m.defaultHome==="function"
+      && typeof m.msysSpelling==="function" ? 0 : 1);
+  ' 2>/dev/null; then
+  check "artifact redactor converts and loads (with its sibling require) from the special plugin root" PASS
+else
+  check "artifact redactor converts and loads (with its sibling require) from the special plugin root" FAIL
 fi
 
 
