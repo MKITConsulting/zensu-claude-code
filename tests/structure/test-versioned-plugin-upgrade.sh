@@ -2766,6 +2766,35 @@ if printf '%s' "$GONE_START" \
     head -c 400 "$GONE_REPORT_OUT" 2>/dev/null
   fi
 
+  # AC-C15a1 — the session-id-unusable refusal class, which had NO test anywhere in
+  # the tree. It exists because routing both of buildRequest's independent checks
+  # into one catch printed `private-record-store-unsafe` for a malformed or DERIVED
+  # session id, telling the user to repair a store that was never reached. The
+  # DERIVED id is the realistic way in: $GONE_KEY is the scv1_ key this suite
+  # already computed, and handing it back as the RAW session id is exactly the
+  # confusion the class is named for.
+  #
+  # The NEGATIVE is the load-bearing assertion, not the headline: re-merging the two
+  # catches would keep the store-unsafe wording and still refuse, so a positive-only
+  # row would stay green through the precise regression this class was split to
+  # prevent. The "not implicated" sentence is pinned for the same reason — it is the
+  # half that tells the user their store is fine.
+  GONE_BADID_OUT="$TMP/adopt-gone-badid.out"
+  CLAUDE_CODE_SESSION_ID="$GONE_KEY" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" \
+    bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" >"$GONE_BADID_OUT" 2>&1
+  GONE_BADID_RC=$?
+  if [ "$GONE_BADID_RC" -ne 0 ] \
+      && grep -qF 'NOT adoptable (session-id-unusable)' "$GONE_BADID_OUT" \
+      && grep -qF 'the record store is not implicated' "$GONE_BADID_OUT" \
+      && grep -qF 'Nothing was read and nothing was changed' "$GONE_BADID_OUT" \
+      && ! grep -qF 'private-record-store-unsafe' "$GONE_BADID_OUT"; then
+    check "AC-C15a1 a derived session id is refused as session-id-unusable, never as an unsafe store" PASS
+  else
+    check "AC-C15a1 a derived session id is refused as session-id-unusable, never as an unsafe store (rc=$GONE_BADID_RC)" FAIL
+    head -c 400 "$GONE_BADID_OUT" 2>/dev/null
+  fi
+
   # The new argv mode's own argument guard. Reached transitively by AC-C15, so
   # nothing observed its refusal arm.
   GONE_ARGV_OUT="$TMP/adopt-gone-argv.out"
@@ -2965,6 +2994,15 @@ if printf '%s' "$GONE_START" \
   # naive implementation breaks, because the provenance writer mkdirs every
   # missing component of <project>/.zensu/state.
   GONE_CONFIRM_OUT="$TMP/adopt-gone-confirm.out"
+  # The re-minted record is compared against the SUPERSEDED copy by full key set, not
+  # by the two fields this row used to check. Two fields cannot see a field that was
+  # dropped, renamed or added, and this record is the session-identity store: a
+  # re-mint that silently loses a key is exactly the class the adoption design forbids
+  # ("no record field is ever added" is an invariant, and losing one is worse). The
+  # comparison is cheap because both documents are on disk at this point — keeping the
+  # superseded copy readable is a deliberate property of the design, not an accident,
+  # so this row also pins that the copy is there at all.
+  GONE_SUPERSEDED="$SHARED_DATA/session-control/v1/records/$GONE_KEY.superseded-0.17.0.json"
   if CLAUDE_CODE_SESSION_ID="$GONE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
       CLAUDE_PROJECT_DIR="$PROJECT" \
       bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
@@ -2975,7 +3013,16 @@ if printf '%s' "$GONE_START" \
       && grep -qF 'the source-write gate can attribute as a write — a write cannot be attributed' "$GONE_CONFIRM_OUT" \
       && [ ! -e "$GONE_PROJECT" ] \
       && [ "$(node -p 'require(process.argv[1]).plugin_version' "$GONE_RECORD")" = 0.18.0 ] \
-      && [ "$(node -p 'require(process.argv[1]).project_root' "$GONE_RECORD")" = "$GONE_NATIVE" ]; then
+      && [ "$(node -p 'require(process.argv[1]).project_root' "$GONE_RECORD")" = "$GONE_NATIVE" ] \
+      && [ -f "$GONE_SUPERSEDED" ] \
+      && node -e '
+        const a = Object.keys(require(process.argv[1])).sort();
+        const b = Object.keys(require(process.argv[2])).sort();
+        if (JSON.stringify(a) !== JSON.stringify(b)) {
+          process.stderr.write("key sets differ\nre-minted:  " + a.join(",") + "\nsuperseded: " + b.join(",") + "\n");
+          process.exit(1);
+        }
+      ' "$GONE_RECORD" "$GONE_SUPERSEDED"; then
     check "AC-C16 --confirm adopts, keeps the absent anchor, and never recreates the deleted root" PASS
   else
     check "AC-C16 --confirm adopts, keeps the absent anchor, and never recreates the deleted root (project recreated: $([ -e "$GONE_PROJECT" ] && echo yes || echo no))" FAIL
@@ -3146,7 +3193,18 @@ env ZDOC_BINDING=orphaned-project-root+incompatible-runtime \
   ZDOC_BINDING_RECORDED_VERSION=0.17.0 ZDOC_BINDING_EXECUTING_VERSION=0.18.0 \
   CLAUDE_PLUGIN_DATA="$SHARED_DATA" CLAUDE_PROJECT_DIR="$PROJECT" HOME="$GONE_DOCTOR_HOME" \
   bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$DOCTOR_FOLD_OUT" 2>/dev/null
+# The two negatives below did not discriminate, and the surviving positive did not
+# help: it matches the row's PROSE, not its value, so a fold that dropped the value
+# entirely satisfied all three. Measured against a synthetic report carrying the
+# sentence and no value at all - it passed. Two positives close that. The first says
+# the value reached the row at all; the second says it was FOLDED rather than merely
+# removed, which is the claim this block's own comment makes and the stronger of the
+# two. That second needle is the literal six-character escape the fold EMITS
+# (backslash-u-2-0-2-e), never the raw character - grepping for the raw one here would
+# assert the exact opposite of the intent, and the negatives below already own it.
 if grep -qF 'BOTH the recorded project root' "$DOCTOR_FOLD_OUT" \
+    && grep -qF '/tmp/gone' "$DOCTOR_FOLD_OUT" \
+    && grep -qF "\\u202e" "$DOCTOR_FOLD_OUT" \
     && ! LC_ALL=C grep -qF "$(printf '‮')" "$DOCTOR_FOLD_OUT" \
     && ! LC_ALL=C grep -qF "$(printf ' ')" "$DOCTOR_FOLD_OUT"; then
   check "AC-C21c the binding row folds display-hiding characters out of the recorded project root" PASS
@@ -3229,6 +3287,60 @@ if [ "$CAPABILITY_DECISION" = deny ] \
 else
   check "AC-C20 the capability gate DENIES and names the Edit/Write limit alongside the repair (decision=${CAPABILITY_DECISION:-unset})" FAIL
   printf '%s' "$CAPABILITY_REASON" | head -c 300
+fi
+
+# AC-C20a — the OTHER arm of the same branch, which AC-C20 above cannot reach. The
+# gate splits on classifyPreToolPayload, and the only thing that makes a payload
+# non-main is the presence of an agent_type/agent_id field, so the same Edit payload
+# with a subagent marker takes the other deny. It was unexercised anywhere in the tree
+# (zero occurrences of its sentence in any suite), which matters because the two arms
+# are asymmetric BY DESIGN and each half of that asymmetry is a decision someone made:
+#
+#   - the CAUSE is deliberately given to a constrained child too, because withholding
+#     it dropped a non-main principal back to `immutable context revalidation failed`,
+#     naming neither the lineage nor either version;
+#   - the REMEDY is deliberately withheld, because /zensu:adopt-session --confirm
+#     WRITES the immutable record and zensu_doctor_allowed conjoins
+#     zensu_hook_is_main_principal — pointing a read-only principal at a privileged
+#     write hands it a command every gate refuses it.
+#
+# The ABSENCE needle is therefore the load-bearing one: a future edit that unified the
+# two arms would keep every positive here green while handing a subagent the command.
+CAPABILITY_SUB_PAYLOAD="$(EVENT=PreToolUse SESSION="$LIVE_ROOT_SESSION" CWD="$PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: process.env.EVENT,
+    session_id: process.env.SESSION,
+    cwd: process.env.CWD,
+    agent_type: "zensu:code-reviewer",
+    tool_name: "Edit",
+    tool_input: {file_path: "README.md", old_string: "a", new_string: "b"},
+  }));
+')"
+CAPABILITY_SUB_OUT="$TMP/adopt-capability-subagent.out"
+printf '%s' "$CAPABILITY_SUB_PAYLOAD" \
+  | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" \
+    bash "$SYNTHETIC_BREAKING_ROOT/hooks/pre-reviewer-capability-gate.sh" \
+    >"$CAPABILITY_SUB_OUT" 2>/dev/null
+CAPABILITY_SUB_REASON="$(OUT_FILE="$CAPABILITY_SUB_OUT" node -e '
+  const fs = require("node:fs");
+  const raw = fs.readFileSync(process.env.OUT_FILE, "utf8").trim();
+  if (raw === "") { process.stdout.write(""); process.exit(0); }
+  try {
+    process.stdout.write(JSON.parse(raw).hookSpecificOutput?.permissionDecisionReason || "");
+  } catch (_e) { process.stdout.write(""); }
+' 2>/dev/null)" || CAPABILITY_SUB_REASON=""
+CAPABILITY_SUB_DECISION="$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh "$CAPABILITY_SUB_PAYLOAD")"
+if [ "$CAPABILITY_SUB_DECISION" = deny ] \
+    && printf '%s' "$CAPABILITY_SUB_REASON" | grep -qF 'declares an incompatible lineage' \
+    && printf '%s' "$CAPABILITY_SUB_REASON" | grep -qF 'minted by 0.17.0' \
+    && printf '%s' "$CAPABILITY_SUB_REASON" | grep -qF '0.18.0 is executing' \
+    && printf '%s' "$CAPABILITY_SUB_REASON" | grep -qF 'reserved for the main thread' \
+    && ! printf '%s' "$CAPABILITY_SUB_REASON" | grep -qF '/zensu:adopt-session'; then
+  check "AC-C20a a subagent gets the cause and both versions, and is NOT handed the repair command" PASS
+else
+  check "AC-C20a a subagent gets the cause and both versions, and is NOT handed the repair command (decision=${CAPABILITY_SUB_DECISION:-unset})" FAIL
+  printf '%s' "$CAPABILITY_SUB_REASON" | head -c 300
 fi
 
 # CONV-1 — the skill's refusal table is the one independent re-encoding of
