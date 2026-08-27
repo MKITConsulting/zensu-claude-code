@@ -182,13 +182,31 @@ if ! zensu_bind_hook_session "$INPUT"; then
     # below assert a surviving workflow document on an inferred negative — the
     # exact false claim this channel exists to remove. Every sibling degrade in
     # this file hedges rather than guesses, and so does this one.
+    # The same decimal screen the doctor applies, for the same reason and with the same
+    # fail-safe direction. `set -u` covers a REMOVED constant — that aborts — but says
+    # nothing about a RETYPED one, and a non-numeric value makes both `[ … -eq … ]` and
+    # `[ … -ne … ]` below return non-zero with `integer expression expected` on a stderr
+    # this hook does not redirect. Both arms would then be skipped and control would
+    # reach the deferral release, which asserts "The recorded project root still EXISTS"
+    # — a definite claim derived from a constant that could not be resolved. That is the
+    # exact direction the doctor's guard was added to prevent, and this consumer was
+    # left reading the pair raw.
+    ZENSU_ROOT_STATE_UNRESOLVED=""
+    case "${ZENSU_ROOT_STATE_GONE:-}" in ''|*[!0-9]*) ZENSU_ROOT_STATE_UNRESOLVED=1 ;; esac
+    case "${ZENSU_ROOT_STATE_PRESENT:-}" in ''|*[!0-9]*) ZENSU_ROOT_STATE_UNRESOLVED=1 ;; esac
     if INCOMPATIBLE_DEAD_ROOT="$(zensu_session_incompatible_orphaned_root "$INPUT")"; then
-      INCOMPATIBLE_ROOT_STATUS="$ZENSU_ROOT_STATE_GONE"
+      INCOMPATIBLE_ROOT_STATUS="${ZENSU_ROOT_STATE_GONE:-0}"
     else
       INCOMPATIBLE_ROOT_STATUS=$?
       INCOMPATIBLE_DEAD_ROOT=""
     fi
-    if [ "$INCOMPATIBLE_ROOT_STATUS" -eq "$ZENSU_ROOT_STATE_GONE" ] && [ -n "$INCOMPATIBLE_DEAD_ROOT" ]; then
+    # An unresolvable constant is routed to the state-neutral arm through the FLAG, not
+    # through a sentinel status: a sentinel would still be compared against the
+    # unresolvable value and hit the same `integer expression expected`. The flag short-
+    # circuits both comparisons before either operand is read.
+    if [ -z "$ZENSU_ROOT_STATE_UNRESOLVED" ] \
+      && [ "$INCOMPATIBLE_ROOT_STATUS" -eq "$ZENSU_ROOT_STATE_GONE" ] \
+      && [ -n "$INCOMPATIBLE_DEAD_ROOT" ]; then
       # Nothing is REACHABLE in this half, so it must not borrow the deferral
       # wording — but it must not overclaim either. The evidence is one ENOENT,
       # which a MOVED or renamed root and an unmounted volume produce identically,
@@ -209,7 +227,8 @@ if ! zensu_bind_hook_session "$INPUT"; then
       echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is readable, but BOTH the recorded project root no longer exists and the running installation declares an incompatible lineage (record minted by ${RECORDED_VERSION}, executing ${EXECUTING_VERSION}). The binding that resolves the project root is what failed, so no review-chain or Autopilot state could be read from here: no completion was proven, only an unprovable guard released. The workflow document lived under that directory and is not reachable from this record — this is not a deferral, and no later Stop can enforce this chain while that directory is missing. If it was moved rather than deleted, its state still exists there, and re-creating exactly that directory FIRST is the better order: adoption then reads that document and checks its schema here, so a mismatch is named as workflow-schema-mismatch rather than surfacing later as an anonymous fail-closed deny at the first read. Otherwise run /zensu:adopt-session, then /zensu:adopt-session --confirm, to clear the lineage break so READ-ONLY Bash and the read-only diagnostics work again; Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created — a write cannot be attributed to a project that is not there. /zensu:doctor names the directory." >&2
       exit 0
     fi
-    if [ "$INCOMPATIBLE_ROOT_STATUS" -ne "$ZENSU_ROOT_STATE_PRESENT" ]; then
+    if [ -n "$ZENSU_ROOT_STATE_UNRESOLVED" ] \
+      || [ "$INCOMPATIBLE_ROOT_STATUS" -ne "$ZENSU_ROOT_STATE_PRESENT" ]; then
       # The probe could not answer. Assert NEITHER half: the state-neutral
       # release says only what this hook actually established, which is that the
       # binding failed and no completion was proven.

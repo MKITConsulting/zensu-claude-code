@@ -475,7 +475,16 @@ function renderLeaseWarnings(leases) {
     }
   }
   if (leases.failed.length > 0) {
-    w("\nWARNING: " + leases.failed.length + " review-evidence lease(s) could NOT be set aside: " + leases.failed.map(safe).join(", ") + "\n");
+    // NOT `.map(safe)`. Array.prototype.map calls its callback as (element, index,
+    // array), so the point-free form fed the ARRAY INDEX into safe()'s `followedBy`
+    // parameter — telling the guard something false at the one site where the
+    // parameter's contract is definitely violated. Inert (a digit forms no separator,
+    // and extra context can only ADD matches), but a guard fed a lie is a guard nobody
+    // can reason about. Each name is also bracketed, because these are raw readdir
+    // entries folded in ISOLATION: an entry beginning with a colon would otherwise abut
+    // the join's separator and put a ` :` into the rendered line that no fold ever saw.
+    w("\nWARNING: " + leases.failed.length + " review-evidence lease(s) could NOT be set aside: "
+      + leases.failed.map(function (n) { return "[" + safe(n) + "]"; }).join(" ") + "\n");
     // Do NOT assert which of the several possible causes applies. An entry lands here
     // when the move collided with a file already set aside, when the link or the
     // unlink half failed, or on an ordinary I/O error — naming only "they still name

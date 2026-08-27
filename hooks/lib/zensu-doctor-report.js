@@ -1227,7 +1227,7 @@ function configBlock() {
         // file, so it cannot say the loader applies it — an oversized MALFORMED config still
         // makes rd() return {}. What IS knowable: the loader has no size limit, so the file
         // is not skipped for its SIZE. Whether it parses is outside what this check saw.
-        line(WARN, 'config: ' + f + ' is ' + r.err + ' — this check declined to read it and '
+        line(WARN, 'config: ' + foldPath(f, ' is ') + ' is ' + r.err + ' — this check declined to read it and '
           + 'cannot judge it; the config loader has no size limit, so the file is not skipped '
           + 'for its size, but whether it parses is unknown to this check');
       } else {
@@ -1248,7 +1248,7 @@ function configBlock() {
               ? ' (the whole file is ignored, defaults apply)'
               : ' (the whole file is ignored; the other config source still applies)'));
         } else {
-          line(BAD, 'config: ' + f + ' is ' + r.err + ' — this check could not read it and '
+          line(BAD, 'config: ' + foldPath(f, ' is ') + ' is ' + r.err + ' — this check could not read it and '
             + 'cannot say what the config loader gets from it');
         }
       }
@@ -1257,7 +1257,7 @@ function configBlock() {
     var hits = [];
     walkQuotedBooleans(r.data, '', hits);
     if (hits.length) {
-      line(WARN, 'config: quoted boolean(s) in ' + f + ' are ignored by strict `===` checks — ' + hits.join('; ') + ' (drop the quotes)');
+      line(WARN, 'config: quoted boolean(s) in ' + foldPath(f, ' are ') + ' are ignored by strict `===` checks — ' + hits.join('; ') + ' (drop the quotes)');
     } else {
       line(OK, 'config: valid JSON, no quoted-boolean traps in ' + f);
     }
@@ -1357,6 +1357,37 @@ function currentSessionKey() {
 // here because `stateProjectRoot` below is the first consumer.
 var CONTROL_BYTE_RE = /[\u0000-\u001f\u007f]/;
 
+
+// The ROW-FORGERY half of the display fold, without its character allowlist.
+//
+// `deletableTarget` cannot use the fold itself: the skill copies its bytes into an `rm`,
+// so a folded path names a file that does not exist. But it cannot skip the question
+// either — `current` derives from the recorded project root, screened for NUL/CR/LF
+// only, so a directory named `/home/u/x provenance : recorded` renders a forged
+// `label : value` pair inside the one line the skill is told it may use verbatim.
+//
+// Applying `safeDisplayValue` here was tried first and was WRONG in the other direction:
+// its allowlist rejects every shell-active character, so an ordinary `~/My $tuff/repo`
+// was withheld as unrenderable when `shellQuotePath` handles exactly that — P1o4/P1o4a
+// caught it. The allowlist protects a value being READ; these four rules protect the
+// ROW's structure, and only the second question applies to a path that will be quoted.
+//
+// The rules are IMPORTED, never re-spelled: that module owns them, and a second copy
+// here is the two-implementation class the extraction removed. A load failure answers
+// TRUE — withholding a copyable path costs one convenience, emitting an unchecked one is
+// the defect this exists to prevent.
+function forgesReportRow(value) {
+  try {
+    var rules = require('./zensu-safe-display-v1.js');
+    return rules.PAIR_SEPARATOR.test(value)
+      || rules.DOUBLE_SPACE.test(value)
+      || rules.SEPARATOR_ADJACENT_MODIFIER_LETTER.test(value)
+      || rules.INVISIBLE.test(value);
+  } catch (e) {
+    return true;
+  }
+}
+
 // The reader re-enforces the ONE invariant of its producer that has a consequence
 // here, which is the rule `currentSessionKey` states one function up: a caller
 // supplying `ZDOC_BINDING` skips the wrapper's whole resolution block, so a guard
@@ -1435,6 +1466,17 @@ function deletableTarget(file, root) {
       }
     }
     if (CONTROL_BYTE_RE.test(current)) return { path: '', reason: 'its path carries a control character' };
+    // The FOURTH row carrying this project-root-derived path, and the one the fold
+    // cannot be applied to: the skill copies these bytes into an `rm`, so folding here
+    // would hand it a path that does not exist. Withhold instead. `current` comes from
+    // the same recorded root the three folded `state:` rows use — screened for NUL, CR
+    // and LF only — so without this a root named `/home/u/x provenance : recorded`
+    // reaches the row as a forged `label : value` pair inside the one line the file's
+    // own comment says the skill may use verbatim. Dropping only the copyable literal
+    // keeps the verdict and its reason, which is the shape every other refusal here uses.
+    if (forgesReportRow(current)) {
+      return { path: '', reason: 'its path would read as a second report row' };
+    }
     return { path: shellQuotePath(current), reason: '' };
   } catch (e) {
     return { path: '', reason: 'it could not be examined (' + (e && e.code ? e.code : 'unknown error') + ')' };
@@ -1810,11 +1852,15 @@ var FOLD_UNAVAILABLE = 'not rendered — the display-safety module could not be 
 // "there was something and it could not be rendered" — the previous shape returned a
 // single string and conflated the two, so every call site had to fold twice to ask
 // both questions, and the load-failure SENTENCE became the value.
-function foldSlot(value) {
+function foldSlot(value, followedBy) {
   var text = String(value == null ? '' : value);
   if (text === '') return { text: '', present: false, ok: true };
   try {
-    return { text: require('./zensu-safe-display-v1.js').safeDisplayValue(text), present: true, ok: true };
+    return {
+      text: require('./zensu-safe-display-v1.js').safeDisplayValue(text, followedBy || ''),
+      present: true,
+      ok: true,
+    };
   } catch (e) {
     // NOT the empty string, and not the raw value either. Empty made the ternaries
     // drop the parenthetical silently — but `stop-chain-enforcer.sh` and the shell
@@ -1836,10 +1882,27 @@ function foldSlot(value) {
 // Returns a STRING because a prose row has no parenthetical to attach a record to, and
 // it borrows bindingLine's fallback sentence rather than dropping the value: two other
 // surfaces tell the user the doctor names this directory.
-function foldPath(value) {
-  var slot = foldSlot(value);
+// It CONSUMES FOLD_UNAVAILABLE rather than re-authoring it. The first version of this
+// function spelled the sentence out while this comment claimed it borrowed one — a
+// shared constant with an unconsumed copy beside it, which this repository records as
+// worse than either honest duplication or one source, because it advertises a single
+// source that does not exist.
+//
+// It DOES return a pre-parenthesized string, and that is the one deliberate departure
+// from the slot fold's contract: a prose row supplies no call-site parentheses, so
+// there is nothing here to double them against. `foldSlot` must keep returning bare
+// text for exactly the opposite reason.
+//
+// `followedBy` is threaded through for the same reason the leaf takes it: all three
+// call sites append prose beginning with a space. It is not needed TODAY — `dir` is
+// always `<root>/.zensu/state`, so the folded value ends in the literal `state` and
+// neither a trailing colon nor a trailing modifier letter is reachable — but that is a
+// property of the argument, not of this helper, and a fourth caller would reopen the
+// seam with no signal.
+function foldPath(value, followedBy) {
+  var slot = foldSlot(value, followedBy);
   if (!slot.present) return '';
-  return slot.ok ? slot.text : '(not rendered — the display-safety module could not be loaded)';
+  return slot.ok ? slot.text : '(' + FOLD_UNAVAILABLE + ')';
 }
 
 // A parenthetical is stated ONCE PER ROW, not once per slot. Under a missing fold
@@ -1960,12 +2023,12 @@ function stateBlock(nowMs) {
     entries = fs.readdirSync(dir);
   } catch (e) {
     if (e && e.code === 'ENOENT') {
-      line(OK, 'state: ' + foldPath(dir) + ' does not exist yet — nothing to clean');
+      line(OK, 'state: ' + foldPath(dir, ' does not exist yet') + ' does not exist yet — nothing to clean');
     } else {
       // Every other errno is a check that did NOT run. Rendering it green hid the
       // whole Session state block behind an all-clear, which is the one verdict
       // this file refuses to fake anywhere else.
-      line(WARN, 'state: ' + foldPath(dir) + ' could not be read (' + ((e && e.code) || 'unknown')
+      line(WARN, 'state: ' + foldPath(dir, ' could not be read') + ' could not be read (' + ((e && e.code) || 'unknown')
         + ') — the session-state checks did not run. That is a missing check, not an all-clear.');
     }
     return;
@@ -1973,7 +2036,7 @@ function stateBlock(nowMs) {
   try {
     fs.accessSync(dir, fs.constants.W_OK);
   } catch (e) {
-    line(BAD, 'state: ' + foldPath(dir) + ' is not writable — chain markers cannot be recorded');
+    line(BAD, 'state: ' + foldPath(dir, ' is not writable') + ' is not writable — chain markers cannot be recorded');
   }
   var workflowDocs = entries.filter(function (f) {
     return /^tdd-phase-scv1_[a-f0-9]{64}\.json$/.test(f);
