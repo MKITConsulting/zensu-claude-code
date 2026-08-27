@@ -104,8 +104,10 @@ PLUGIN_ROOT="$(cd "$DIR/../.." && pwd -P)" || {
 # shape this replacement wants more of. tests/structure/test-versioned-plugin-upgrade.sh
 # pins both halves: that no per-module hand-copied guard returns, and that no module
 # silently drops off this list.
+_zsa_seen=0
 while IFS='|' read -r _zsa_file _zsa_noun; do
   [ -n "$_zsa_file" ] || continue
+  _zsa_seen=$((_zsa_seen + 1))
   [ -f "$DIR/$_zsa_file" ] && [ ! -L "$DIR/$_zsa_file" ] || {
     printf '%s\n' "zensu:adopt-session: the $_zsa_noun is missing or symlinked; repair the Zensu plugin installation" >&2
     exit 1
@@ -119,6 +121,19 @@ review-evidence-lease-v1.js|review-evidence lease module
 zensu-safe-display-v1.js|display-safety module
 claude-path-v1.js|host-path module
 ZSA_REQUIRED_MODULES
+# A loop that never ran verified nothing, and said so to no one. The seven guards this
+# replaced could not skip — each was a straight-line test — so consolidating them into
+# one loop introduced a failure mode they did not have: this script sets `set -u` but
+# NOT `set -e`, so a failed redirection reports and then falls straight through to the
+# node invocation with zero modules checked. Counting the rows closes it on every
+# shell, and also catches a table truncated to a prefix, which no per-row test can see.
+# The number is spelled here rather than derived because the table is the thing being
+# verified: deriving the expectation from it would make the check agree with whatever
+# it found.
+[ "$_zsa_seen" -eq 7 ] || {
+  printf '%s\n' 'zensu:adopt-session: the required-module table could not be read in full; repair the Zensu plugin installation' >&2
+  exit 1
+}
 
 CONFIRM=0
 case "${1:-}" in

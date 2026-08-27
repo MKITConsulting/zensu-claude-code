@@ -201,7 +201,27 @@ test('S5 the exported constants predict the exported function', () => {
   // could not do.
   const leaf = require(path.join(LIB, 'zensu-safe-display-v1.js'));
   const source = fs.readFileSync(path.join(LIB, 'zensu-safe-display-v1.js'), 'utf8');
-  const body = source.slice(source.indexOf('const safeDisplayValue'));
+  // BOUND THE SLICE AT THE EXPORT BLOCK. It ran to EOF for one round, which put
+  // `module.exports = { SAFE_DISPLAY, … }` inside `body` — so the reverse-direction
+  // check below, `body.includes(key)` over the exported keys, was true by construction
+  // and could never fail. The check written to catch foldDisplayHiders was itself the
+  // vacuous pin this file keeps warning about.
+  // The bound is the FUNCTION's own end, not the export block. Two bounds were tried
+  // and only this one measures what the check claims. Unbounded ran to EOF, so
+  // `module.exports = { … }` sat inside `body` and the reverse check below was true by
+  // construction. Bounding at `module.exports` is better but still admits anything
+  // DEFINED between the function and the export list: a weak rule declared there and
+  // exported finds its own definition text and passes. Only the function body can
+  // answer "does safeDisplayValue reference this".
+  const startAt = source.indexOf('const safeDisplayValue');
+  assert.ok(startAt > 0, 'safeDisplayValue is declared in the leaf module');
+  const endAt = source.indexOf('\n};', startAt);
+  assert.ok(endAt > startAt, 'safeDisplayValue has a terminating `};` to bound the slice at');
+  const body = source.slice(startAt, endAt);
+  assert.ok(
+    !body.includes('module.exports'),
+    'the sliced body must stop before the export list, or the reverse check below reads its own answer',
+  );
   const applied = new Set(
     Array.from(body.matchAll(/\b([A-Z][A-Z0-9_]{2,})\.test\(/g), (m) => m[1]),
   );
@@ -221,11 +241,17 @@ test('S5 the exported constants predict the exported function', () => {
   //
   // Containment, never set equality: SPACE_RUN is referenced by the fold branch and
   // deliberately NOT exported, so equality would fail on a module that is correct.
+  //
+  // EVERY export is judged, not just the SCREAMING_CASE ones. The filter used to skip
+  // anything that was not `[A-Z][A-Z0-9_]{2,}`, which skipped exactly the shape this
+  // check is named for: foldDisplayHiders is camelCase, so a re-added one was
+  // `continue`d past before the assertion ran. Only the entry point is exempt, because
+  // it is the function the others are measured against.
   for (const key of Object.keys(leaf)) {
-    if (!/^[A-Z][A-Z0-9_]{2,}$/.test(key)) continue;
+    if (key === 'safeDisplayValue') continue;
     assert.ok(
       body.includes(key),
-      `${key} is exported as a display rule but safeDisplayValue never references it — an exported rule the fold does not apply is what foldDisplayHiders was`,
+      `${key} is exported but safeDisplayValue never references it — an exported rule the fold does not apply is what foldDisplayHiders was`,
     );
   }
 });

@@ -133,6 +133,44 @@ else
   check "the adoption entry point guards its required modules from one table, not seven copies (refusals=$ADOPT_REFUSALS want 2, table_lines=$(printf '%s\n' "$ADOPT_TABLE" | grep -c . ), missing:${ADOPT_MODULES_MISSING:- none})" FAIL
 fi
 
+# The two checks above are SOURCE pins, and on their own they leave the guard disarmable
+# by a single token. The refactor concentrated seven independent `exit 1`s into one loop
+# body: delete just that `exit 1` and the printf survives, so ADOPT_REFUSALS stays 2 and
+# the membership half still sees all seven rows — green, with every module unguarded.
+# The row count cannot close it either, because deleting the exit does not change how
+# many rows are read. Only a RUN can, so this drives one.
+#
+# The discriminator is the MESSAGE, not the exit status. The script exits non-zero in this
+# fixture whatever happens — there is no bound session here — so a status check alone would
+# pass against a gutted guard. The control arm is what makes the positive arm mean something:
+# with all seven modules present the guard message must be ABSENT.
+ADOPT_RUN="$(mktemp -d "${TMPDIR:-/tmp}/zensu-adopt-guard-XXXXXX" 2>/dev/null || true)"
+ADOPT_GUARD_VERDICT="unrun"
+if [ -n "$ADOPT_RUN" ] && [ -d "$ADOPT_RUN" ] && [ ! -L "$ADOPT_RUN" ]; then
+  mkdir -p "$ADOPT_RUN/hooks/lib"
+  if cp "$ROOT"/hooks/lib/*.js "$ADOPT_SRC" "$ADOPT_RUN/hooks/lib/" 2>/dev/null; then
+    _adopt_needle='is missing or symlinked; repair the Zensu plugin installation'
+    bash "$ADOPT_RUN/hooks/lib/zensu-session-adopt.sh" >/dev/null 2>"$ADOPT_RUN/intact.err" || true
+    ADOPT_INTACT_HITS="$(grep -cF "$_adopt_needle" "$ADOPT_RUN/intact.err" 2>/dev/null || true)"
+    rm -f "$ADOPT_RUN/hooks/lib/zensu-safe-display-v1.js"
+    bash "$ADOPT_RUN/hooks/lib/zensu-session-adopt.sh" >/dev/null 2>"$ADOPT_RUN/missing.err" || true
+    # The NOUN is asserted, not just the sentence: the table maps each file to its own
+    # noun, and a loop that reported the wrong row would otherwise read as correct.
+    if [ "$ADOPT_INTACT_HITS" = 0 ] \
+      && grep -qF "the display-safety module $_adopt_needle" "$ADOPT_RUN/missing.err" 2>/dev/null; then
+      ADOPT_GUARD_VERDICT="ok"
+    else
+      ADOPT_GUARD_VERDICT="intact_hits=$ADOPT_INTACT_HITS want 0; missing_arm=$(grep -cF "$_adopt_needle" "$ADOPT_RUN/missing.err" 2>/dev/null || true) want >=1"
+    fi
+  fi
+  rm -rf "$ADOPT_RUN"
+fi
+if [ "$ADOPT_GUARD_VERDICT" = ok ]; then
+  check "the adoption entry point actually REFUSES a removed required module, naming that module's noun" PASS
+else
+  check "the adoption entry point actually REFUSES a removed required module, naming that module's noun ($ADOPT_GUARD_VERDICT)" FAIL
+fi
+
 TMP_RAW="$(mktemp -d "${TMPDIR:-/tmp}/zensu-versioned-upgrade-XXXXXX")" \
   || { printf '%s\n' 'test-versioned-plugin-upgrade: cannot create isolated temp directory' >&2; exit 1; }
 [ -n "$TMP_RAW" ] && [ -d "$TMP_RAW" ] && [ ! -L "$TMP_RAW" ] \
