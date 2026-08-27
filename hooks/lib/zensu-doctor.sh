@@ -362,8 +362,31 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
         # offer — an earlier revision of this block claimed the renderer already
         # did that and it did not. Export the distinction so the row can say so,
         # and so a future arm cannot be added that silently assumes a negative.
+        # The status vocabulary is NAMED in zensu-session.sh, and this file only ever
+        # sources that library inside a command substitution — every `source` call
+        # here is in a subshell — so the name is not in scope out here, and under
+        # `set -u` reading it directly aborts the whole diagnostic. Read the VALUE out
+        # of the owner instead of re-spelling the literal: that keeps ONE definition,
+        # which is the entire point of giving the trichotomy a name.
+        #
+        # The guard fails SAFE, and the direction is deliberate: a rename or removal
+        # in the owner yields an empty string and the flag stays SET, so the row says
+        # the question could not be determined. Defaulting to the literal instead
+        # would silently restore the magic number this change exists to remove.
+          ZDOC_ROOT_STATE_PRESENT="$(
+            # shellcheck disable=SC1090
+            source "$DIR/zensu-session.sh" >/dev/null 2>&1 \
+              && printf '%s' "${ZENSU_ROOT_STATE_PRESENT:-}"
+          )" || ZDOC_ROOT_STATE_PRESENT=""
+        # The `|| ZDOC_BINDING_ROOT_UNKNOWN=1` shape is kept deliberately: AC-C19 counts
+        # this exact line, because it sits after a `||` and so no anchored count of the
+        # assignments above reaches it — deleting it once left the clause permanently
+        # unreachable with every row still green. An `if` block reads more plainly and
+        # was tried; it makes that pin count zero, which is the wrong trade.
           ZDOC_BINDING_ROOT_UNKNOWN=""
-          [ "$ZDOC_ORPHAN_ROOT_STATUS" -eq 3 ] || ZDOC_BINDING_ROOT_UNKNOWN=1
+          [ -n "$ZDOC_ROOT_STATE_PRESENT" ] \
+            && [ "$ZDOC_ORPHAN_ROOT_STATUS" -eq "$ZDOC_ROOT_STATE_PRESENT" ] \
+            || ZDOC_BINDING_ROOT_UNKNOWN=1
         fi
       else
         ZDOC_BINDING=unbound

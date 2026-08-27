@@ -266,6 +266,28 @@ zensu_session_incompatible_runtime_model() {
   ) 2>/dev/null
 }
 
+# THE THREE-WAY STATUS HAS A NAME, and this is it. The trichotomy below is a good
+# design and it was spelled as a bare `3` in two hooks plus a structure pin, with the
+# vocabulary living only in the prose of this comment — so a reader of either call site
+# saw a magic number and could not tell `3` (a POSITIVE negative: the root is there)
+# from the failure status it sits next to. That is exactly the collapse the paragraph
+# below warns about, one level up: not a caller reading truthiness, but a maintainer
+# reading a literal.
+#
+# Both consumers compare against these names now: hooks/stop-chain-enforcer.sh takes
+# its neutral arm when the answer is NOT present, and hooks/lib/zensu-doctor.sh sets
+# its unknown flag on the same test. Keep them in step — AC-C19 in
+# tests/structure/test-versioned-plugin-upgrade.sh greps for the NAMED spelling in both
+# files precisely so a silent revert to a literal fails rather than passing.
+#
+# Deliberately values, not a wrapper function: the two consumers reach the trichotomy
+# through DIFFERENT probes — the payload flavour and the `_model` twin — and in
+# opposite directions, so a single accessor would have to take a flavour argument and
+# would buy nothing the names do not already buy.
+ZENSU_ROOT_STATE_GONE=0
+ZENSU_ROOT_STATE_UNKNOWN=1
+ZENSU_ROOT_STATE_PRESENT=3
+
 # The THIRD fact of the incompatible-lineage state, asked separately so the
 # version pair above stays two TAB-separated fields — five callers read the
 # executing half as `${V##*$'\t'}`, so a third field there would silently

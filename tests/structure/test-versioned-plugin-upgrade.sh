@@ -3120,8 +3120,18 @@ DOCTOR_UNKNOWN_ASSIGNS="$(grep -cE '^ *ZDOC_BINDING_ROOT_UNKNOWN=' "$DOCTOR_LADD
 # round earlier, still open on the three that follow.
 code_only() { grep -vE '^[[:space:]]*#' "$1" 2>/dev/null || true; }
 DOCTOR_UNKNOWN_SETS="$(code_only "$DOCTOR_LADDER" | grep -cE '\|\| *ZDOC_BINDING_ROOT_UNKNOWN=1' || true)"
-STOP_NEUTRAL_GUARD="$(code_only "$STOP_LADDER" | grep -cF 'INCOMPATIBLE_ROOT_STATUS" -ne 3' || true)"
-DOCTOR_POSITIVE_GUARD="$(code_only "$DOCTOR_LADDER" | grep -cF 'ZDOC_ORPHAN_ROOT_STATUS" -eq 3' || true)"
+STOP_NEUTRAL_GUARD="$(code_only "$STOP_LADDER" | grep -cF 'INCOMPATIBLE_ROOT_STATUS" -ne "$ZENSU_ROOT_STATE_PRESENT"' || true)"
+# Both needles now require the NAMED status rather than a bare 3, which is what the
+# maintainability finding asked for: the trichotomy's vocabulary lives once, in
+# zensu-session.sh, and a silent revert to the literal fails here.
+#
+# The two spellings differ ON PURPOSE and that is not drift. The Stop hook sources
+# zensu-session.sh in its PARENT shell, so it reads the owner's name directly. The
+# doctor sources it only inside command substitutions, so the name is out of scope
+# there and reading it under `set -u` aborted the whole diagnostic; it copies the
+# VALUE into ZDOC_ROOT_STATE_PRESENT from the owner instead — still one definition,
+# still no literal.
+DOCTOR_POSITIVE_GUARD="$(code_only "$DOCTOR_LADDER" | grep -cF 'ZDOC_ORPHAN_ROOT_STATUS" -eq "$ZDOC_ROOT_STATE_PRESENT"' || true)"
 if [ "$STOP_ARM_GONE" = 1 ] && [ "$STOP_ARM_NEUTRAL" = 1 ] && [ "$STOP_ARM_DEFER" = 1 ] \
     && ! printf '%s' "$STOP_NEUTRAL_TEXT" | grep -qF 'The recorded project root still EXISTS' \
     && ! printf '%s' "$STOP_NEUTRAL_TEXT" | grep -qF 'this is not a deferral' \
