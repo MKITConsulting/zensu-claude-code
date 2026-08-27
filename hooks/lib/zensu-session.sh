@@ -274,18 +274,28 @@ zensu_session_incompatible_runtime_model() {
 # below warns about, one level up: not a caller reading truthiness, but a maintainer
 # reading a literal.
 #
-# Both consumers compare against these names now: hooks/stop-chain-enforcer.sh takes
-# its neutral arm when the answer is NOT present, and hooks/lib/zensu-doctor.sh sets
-# its unknown flag on the same test. Keep them in step — AC-C19 in
-# tests/structure/test-versioned-plugin-upgrade.sh greps for the NAMED spelling in both
-# files precisely so a silent revert to a literal fails rather than passing.
+# Both consumers compare against these names: hooks/stop-chain-enforcer.sh takes its
+# gone arm and its neutral arm through them, and hooks/lib/zensu-doctor.sh does the
+# same. Keep them in step — AC-C19 in tests/structure/test-versioned-plugin-upgrade.sh
+# greps for the NAMED spelling in both files precisely so a silent revert to a literal
+# fails rather than passing.
 #
 # Deliberately values, not a wrapper function: the two consumers reach the trichotomy
 # through DIFFERENT probes — the payload flavour and the `_model` twin — and in
 # opposite directions, so a single accessor would have to take a flavour argument and
 # would buy nothing the names do not already buy.
+# TWO names, not three, and the missing one is deliberate. The third state —
+# "the question could not be answered" — is the RESIDUAL: it is every status that is
+# neither of these two, so no site ever compares against it and a constant for it would
+# be a name nothing consumes. This file's own neighbourhood states the rule that made
+# that decision: an exported rule with no consumer, reachable by a future caller who
+# mistakes it for the real one, is worse than no export at all
+# (hooks/lib/zensu-safe-display-v1.js, on the retired foldDisplayHiders).
+#
+# A first version of this block did declare a third, `ZENSU_ROOT_STATE_UNKNOWN=1`, and a
+# review seat caught that it had no consumer anywhere while the literals it was meant to
+# replace were still spelled at four sites. Both of the names below are consumed.
 ZENSU_ROOT_STATE_GONE=0
-ZENSU_ROOT_STATE_UNKNOWN=1
 ZENSU_ROOT_STATE_PRESENT=3
 
 # The THIRD fact of the incompatible-lineage state, asked separately so the

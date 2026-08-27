@@ -114,13 +114,36 @@ test('S5 a localized path prints as itself', () => {
 // and U+02F8 are not \p{L} at all, so the allowlist already excludes them and the fold
 // branch already escapes every colon it emits. The guard therefore names those two
 // characters instead of a category.
-test('S5 a colon-confusable modifier letter is folded', () => {
-  for (const confusable of ['ː', 'ˑ']) {
-    const hostile = `/tmp/p ${confusable} recorded`;
-    const rendered = report().safe(hostile);
-    assert.notEqual(rendered, hostile, `${confusable} must not be returned raw`);
-    assert.match(rendered, /^"/, 'it must take the escaping branch');
+test('S5 a space-adjacent modifier letter is folded, whatever it is', () => {
+  // DERIVED, not enumerated. A named set of colon-confusables cannot be proven
+  // complete — the first attempt at this guard listed U+02D0 and U+02D1 and let the
+  // whole Lisu tone-letter run U+A4F8-U+A4FD through, which a review seat caught.
+  // So this case does not test a list: it walks EVERY code point that is
+  // Modifier_Letter AND admitted by SAFE_DISPLAY AND not default-ignorable, and
+  // requires each one to fold in all three positions a forgery can occupy.
+  //
+  // Those three positions are the whole threat. The report renders `label : value`
+  // rows, so a forged row needs the confusable to sit BETWEEN two spaces — which,
+  // for a value spliced in after `label : `, means either surrounded by spaces of
+  // its own, or leading (the separator supplies the space before it), or followed
+  // by a space. A trailing one has nothing after it and forges nothing.
+  const SAFE = report().SAFE_DISPLAY;
+  const shapes = [(c) => `/tmp/p ${c} recorded`, (c) => `${c} y`, (c) => `x ${c}`];
+  let checked = 0;
+  for (let cp = 0; cp <= 0x10ffff; cp += 1) {
+    if (cp >= 0xd800 && cp <= 0xdfff) continue;
+    const c = String.fromCodePoint(cp);
+    if (!/\p{Lm}/u.test(c) || !SAFE.test(c) || /\p{Default_Ignorable_Code_Point}/u.test(c)) continue;
+    checked += 1;
+    for (const shape of shapes) {
+      const hostile = shape(c);
+      assert.notEqual(
+        report().safe(hostile), hostile,
+        `U+${cp.toString(16).toUpperCase()} must not be returned raw in ${JSON.stringify(hostile)}`,
+      );
+    }
   }
+  assert.ok(checked > 300, `expected the Lm-within-SAFE_DISPLAY set to be large, walked ${checked}`);
 });
 
 test('S5 an invisible letter cannot be returned raw', () => {
@@ -187,6 +210,22 @@ test('S5 the exported constants predict the exported function', () => {
     assert.ok(
       Object.prototype.hasOwnProperty.call(leaf, rule),
       `${rule} is applied by safeDisplayValue but is not exported — the constants must describe the function`,
+    );
+  }
+
+  // THE REVERSE DIRECTION, which is the one this module's history actually failed in.
+  // foldDisplayHiders was an EXPORTED rule strictly weaker than the real fold, with no
+  // consumer and no executed case; four review seats found it independently. The loop
+  // above cannot see that shape at all — it walks what the function APPLIES, and a
+  // re-added weak export applies nothing.
+  //
+  // Containment, never set equality: SPACE_RUN is referenced by the fold branch and
+  // deliberately NOT exported, so equality would fail on a module that is correct.
+  for (const key of Object.keys(leaf)) {
+    if (!/^[A-Z][A-Z0-9_]{2,}$/.test(key)) continue;
+    assert.ok(
+      body.includes(key),
+      `${key} is exported as a display rule but safeDisplayValue never references it — an exported rule the fold does not apply is what foldDisplayHiders was`,
     );
   }
 });

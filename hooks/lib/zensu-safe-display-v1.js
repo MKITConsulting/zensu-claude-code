@@ -90,18 +90,34 @@ const INVISIBLE = /\p{Default_Ignorable_Code_Point}/u;
 // MODIFIER LETTER APOSTROPHE is Lm and carries real orthographies. Both were folded
 // into escape soup by a guard aimed at neither.
 //
-// The class is therefore the two characters actually confusable with the separator,
-// not a category. Measured rather than assumed: of the colon-confusables, only U+02D0
-// and U+02D1 are BOTH Modifier_Letter AND admitted by SAFE_DISPLAY. U+FF1A FULLWIDTH
-// COLON, U+2236 RATIO, U+A789 MODIFIER LETTER COLON and U+02F8 MODIFIER LETTER RAISED
-// COLON are not \p{L} at all, so the allowlist already excludes them and they reach the
-// fold branch, which escapes every colon it emits.
+// TWO WRONG ANSWERS WERE TRIED FIRST, and both are recorded because the third only
+// makes sense against them. (1) The whole category: provably complete about the
+// threat, and provably wrong about paths people really use. (2) A NAMED SET of
+// colon-confusables, [U+02D0 U+02D1]: it fixed the localized paths and reopened the
+// forgery, because a named set cannot be proven complete. A review seat found the
+// Lisu tone-letter run U+A4F8-U+A4FD straight through it — U+A4FD is Lm, is admitted
+// by SAFE_DISPLAY, is not default-ignorable, and renders as two stacked dots.
+// Measured afterwards: 404 code points are Modifier_Letter AND admitted by
+// SAFE_DISPLAY, and that set was returned raw.
 //
-// A NAMED SET cannot be proven complete the way a category can, and that is the
-// accepted trade: the category was provably complete about a threat nobody has and
-// provably wrong about paths people really use. A confusable found later is added here
-// WITH its case — the same rule this file already states for a narrow fold.
-const COLON_CONFUSABLE_LETTER = new RegExp('[\\u02d0\\u02d1]', 'u');
+// THE RULE IS POSITIONAL, so it needs no set at all. A forged row needs the character
+// to read as the ` : ` separator, and PAIR_SEPARATOR says what that means: a space on
+// each side. So what matters is not WHICH modifier letter it is but WHERE it sits.
+// The three positions a forgery can occupy, and no others:
+//   ` X `   surrounded by its own spaces
+//   `^X `   leading — the rendered `label : ` supplies the space before it
+//   ` X`    preceded by a space, with whatever follows in the row
+// A TRAILING modifier letter is deliberately NOT matched: nothing follows it, so it
+// cannot open a second pair, and matching it would fold `/Users/tanaka/サーバー` and
+// `/Users/a/人々`, which is the regression this whole paragraph exists to avoid.
+//
+// This is complete over the CATEGORY — every one of the 404, whatever it looks like —
+// while costing ordinary orthography nothing, because a prolonged sound mark, an
+// iteration mark, a tatweel or a modifier apostrophe never stands between spaces
+// inside a word. The unit case walks the entire set in all three positions rather
+// than testing a list, so the completeness is measured on every run instead of
+// asserted here.
+const COLON_CONFUSABLE_LETTER = new RegExp('(?:^| )\\p{Lm}|\\p{Lm} ', 'u');
 const NON_ASCII = new RegExp('[\\u007f-\\uffff]', 'g');
 const SPACE_RUN = / {2,}/g;
 

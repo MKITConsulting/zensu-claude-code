@@ -159,7 +159,6 @@ command -v node >/dev/null 2>&1 || {
 # Both crossings into native Node go through the host-path renderer, as every
 # other stateful helper does, and are excluded from Git Bash's heuristic
 # environment conversion so a drive spelling is not reinterpreted twice.
-# shellcheck disable=SC1090
 # The two SHELL siblings. Every JS module in this command's require graph is guarded
 # above; these two were not, and `source` executes arbitrary shell IN THIS PROCESS,
 # which is strictly more powerful than a `require`. The read-only /zensu:doctor already
@@ -175,6 +174,10 @@ for _zsa_lib in "$DIR/zensu-session.sh" "$DIR/zensu-host-path.sh"; do
   }
 done
 
+# Directly above the `source` it suppresses, and not a line earlier: shellcheck binds a
+# directive to the NEXT COMMAND, and while it sat above the comment block it bound to the
+# `for` loop instead, leaving this line unsuppressed. Pre-existing, found in review.
+# shellcheck disable=SC1090
 source "$DIR/zensu-session.sh" >/dev/null 2>&1 || {
   printf '%s\n' 'zensu:adopt-session: the Session Control shell library is unavailable' >&2
   exit 1

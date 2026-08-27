@@ -1039,13 +1039,24 @@ degrades to one warning row rather than killing the report, and a top-level requ
 made the renderer unloadable in that tree. Its fallback NAMES ITS REASON — the row prints
 `(not rendered — the display-safety module could not be loaded)` — rather than
 re-authoring the fold or dropping the value silently, because two other surfaces tell
-the user "/zensu:doctor names the directory" unconditionally. **Every call site tests
-the FOLDED result**, so an empty fold still omits the whole parenthetical. **The
-returned string must carry no parentheses of its own**, and that is the part to keep:
-the fallback shipped as `(unrenderable)` in one round and as `(not rendered — …)` in
-the next, and BOTH were wrapped again by the call site's `' (' + … + ')'`, rendering
-`… no longer exists ((not rendered — …)) — …`. The same defect, twice, in successive
-fixes for it. A port that re-authors the fold, guards on the raw value, or returns a
+the user "/zensu:doctor names the directory" unconditionally. **The fold returns a
+RECORD, not a string** — `foldSlot` answers `{text, present, ok}`, where `present` is
+about the INPUT (an empty value has never produced a parenthetical) and `ok` is about
+the fold. The two were once conflated in one returned string, which forced every call
+site to fold TWICE to ask both questions and made the load-failure SENTENCE the value.
+**A fold failure is stated once per ROW, never once per slot.** `parentheticalWriter`
+owns that: one writer per `bindingLine()` call, with a `stated` flag closed over it. It
+is not cosmetic — with the sentence substituted per slot, the two-version row rendered
+`(record minted by <sentence>, executing <sentence>)`, which repeats the reason, buries
+the fact that BOTH values are missing, and reads as though the sentence were a version;
+the combined row has three slots and said it three times. `P1mf2` in `test-doctor.sh`
+pins the COUNT, on both remaining multi-slot bindings; `P1mf1` pins that the SINGLE-slot
+rendering is unchanged. **The returned string must carry no parentheses of its own**,
+and that is the part to keep: the fallback shipped as `(unrenderable)` in one round and
+as `(not rendered — …)` in the next, and BOTH were wrapped again by the call site's
+`' (' + … + ')'`, rendering `… no longer exists ((not rendered — …)) — …`. The same
+defect, twice, in successive fixes for it. A port that re-authors the fold, collapses
+`present` and `ok` back into one value, states the reason per slot, or returns a
 pre-parenthesized string gets one of those defects back.
 `discardSupersededLeases` is NO LONGER
 among them — it moved to `hooks/lib/review-evidence-sweep-v1.js` and is the EIGHTH

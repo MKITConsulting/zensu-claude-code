@@ -334,6 +334,27 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
         # statement is `export -f ... || true`, so today a successful source
         # returns 0 and a missing file returns 1; this normalizes the CHANNEL, not
         # a demonstrated 3.
+        # The status VOCABULARY is named in zensu-session.sh, and every `source` of that
+        # library in this file is inside a command substitution, so the names are not in
+        # scope out here — reading one directly under `set -u` aborted the whole
+        # diagnostic. Both values are copied out of the owner in ONE subshell rather than
+        # re-spelled as literals, which is the point of naming them at all.
+        #
+        # Each is then SCREENED as a decimal, the same guard ZDOC_TTL_REBOUND gets above.
+        # An owner that RETYPED a value — `PRESENT=present` rather than `=3` — passes a
+        # bare non-empty test and then reaches `-eq` with a non-numeric operand, which
+        # bash reports on a stderr this script does NOT redirect and which the model reads
+        # verbatim. Screening turns that into the empty value the fail-safe already
+        # handles.
+        ZDOC_ROOT_STATE_PAIR="$(
+          # shellcheck disable=SC1090
+          source "$DIR/zensu-session.sh" >/dev/null 2>&1 \
+            && printf '%s\t%s' "${ZENSU_ROOT_STATE_GONE:-}" "${ZENSU_ROOT_STATE_PRESENT:-}"
+        )" || ZDOC_ROOT_STATE_PAIR=""
+        ZDOC_ROOT_STATE_GONE="${ZDOC_ROOT_STATE_PAIR%%$'\t'*}"
+        ZDOC_ROOT_STATE_PRESENT="${ZDOC_ROOT_STATE_PAIR#*$'\t'}"
+        case "$ZDOC_ROOT_STATE_GONE" in ''|*[!0-9]*) ZDOC_ROOT_STATE_GONE='' ;; esac
+        case "$ZDOC_ROOT_STATE_PRESENT" in ''|*[!0-9]*) ZDOC_ROOT_STATE_PRESENT='' ;; esac
         if ZDOC_BINDING_PROJECT_ROOT="$(
           # shellcheck disable=SC1090
           source "$DIR/zensu-session.sh" >/dev/null 2>&1 || exit 1
@@ -344,7 +365,7 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
           ZDOC_ORPHAN_ROOT_STATUS=$?
           ZDOC_BINDING_PROJECT_ROOT=""
         fi
-        if [ "$ZDOC_ORPHAN_ROOT_STATUS" -eq 0 ] && [ -n "$ZDOC_BINDING_PROJECT_ROOT" ]; then
+        if [ "$ZDOC_ORPHAN_ROOT_STATUS" -eq "${ZDOC_ROOT_STATE_GONE:-0}" ] && [ -n "$ZDOC_BINDING_PROJECT_ROOT" ]; then
           ZDOC_BINDING=orphaned-project-root+incompatible-runtime
           # The probe POSITIVELY answered here, so the unknown flag must not be
           # set: status 0 is not 3, and an unguarded test would export "unknown"
@@ -373,11 +394,6 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
         # in the owner yields an empty string and the flag stays SET, so the row says
         # the question could not be determined. Defaulting to the literal instead
         # would silently restore the magic number this change exists to remove.
-          ZDOC_ROOT_STATE_PRESENT="$(
-            # shellcheck disable=SC1090
-            source "$DIR/zensu-session.sh" >/dev/null 2>&1 \
-              && printf '%s' "${ZENSU_ROOT_STATE_PRESENT:-}"
-          )" || ZDOC_ROOT_STATE_PRESENT=""
         # The `|| ZDOC_BINDING_ROOT_UNKNOWN=1` shape is kept deliberately: AC-C19 counts
         # this exact line, because it sits after a `||` and so no anchored count of the
         # assignments above reaches it — deleting it once left the clause permanently

@@ -109,18 +109,28 @@ fi
 # loop uses a lowercase `_zsa_` loop variable and is deliberately not matched, because
 # it is the shape this check wants MORE of.
 ADOPT_SRC="$ROOT/hooks/lib/zensu-session-adopt.sh"
-ADOPT_HANDCOPIED="$(grep -cE '^\[ -f "\$[A-Z_]+" \] && \[ ! -L "\$[A-Z_]+" \]' "$ADOPT_SRC" 2>/dev/null || true)"
+# The COPY half counts the emitted refusal, not a spelling of the guard. A regex over
+# the `[ -f "$VAR" ] && [ ! -L "$VAR" ]` shape matched exactly ONE way of writing the
+# copy: an indented one, or one written in the table's own `"$DIR/foo.js"` style, kept
+# the counter at zero. Any hand copy must reproduce the message, so the message is what
+# is counted — expected 2, the module loop and the shell-sibling loop.
+ADOPT_REFUSALS="$(grep -cF 'is missing or symlinked; repair the Zensu plugin installation' "$ADOPT_SRC" 2>/dev/null || true)"
+# The MEMBERSHIP half reads the heredoc ONLY. Grepping the whole file could not tell a
+# guarded module from one merely NAMED in the table's own header comment, where all
+# seven also appear — so deleting a row while its comment line survived left this green,
+# which is precisely the silent-omission failure the pin exists to catch.
+ADOPT_TABLE="$(awk '/<<.ZSA_REQUIRED_MODULES./{f=1;next} /^ZSA_REQUIRED_MODULES$/{f=0} f' "$ADOPT_SRC" 2>/dev/null || true)"
 ADOPT_MODULES_MISSING=""
 for _adopt_mod in session-control-core-v1.js claude-hook-session-v1.js \
     session-adopt-report-v1.js review-evidence-sweep-v1.js \
     review-evidence-lease-v1.js zensu-safe-display-v1.js claude-path-v1.js; do
-  grep -qF "$_adopt_mod" "$ADOPT_SRC" 2>/dev/null \
+  printf '%s\n' "$ADOPT_TABLE" | grep -qE "^${_adopt_mod}\|" \
     || ADOPT_MODULES_MISSING="$ADOPT_MODULES_MISSING $_adopt_mod"
 done
-if [ "$ADOPT_HANDCOPIED" = 0 ] && [ -z "$ADOPT_MODULES_MISSING" ]; then
+if [ "$ADOPT_REFUSALS" = 2 ] && [ -n "$ADOPT_TABLE" ] && [ -z "$ADOPT_MODULES_MISSING" ]; then
   check "the adoption entry point guards its required modules from one table, not seven copies" PASS
 else
-  check "the adoption entry point guards its required modules from one table, not seven copies (hand-copied=$ADOPT_HANDCOPIED missing:${ADOPT_MODULES_MISSING:- none})" FAIL
+  check "the adoption entry point guards its required modules from one table, not seven copies (refusals=$ADOPT_REFUSALS want 2, table_lines=$(printf '%s\n' "$ADOPT_TABLE" | grep -c . ), missing:${ADOPT_MODULES_MISSING:- none})" FAIL
 fi
 
 TMP_RAW="$(mktemp -d "${TMPDIR:-/tmp}/zensu-versioned-upgrade-XXXXXX")" \
@@ -1054,10 +1064,10 @@ fi
 # guard condition and returning the text unchanged left the suite green.
 REPORT_UNIT="$ROOT/tests/structure/session-adopt-report-v1.test.js"
 if [ -f "$REPORT_UNIT" ] && node --test "$REPORT_UNIT" >"$TMP/report-unit.out" 2>&1 \
-  && unit_cases_registered_floor "$TMP/report-unit.out" 21; then
+  && unit_cases_registered_floor "$TMP/report-unit.out" 25; then
   check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), driven from here)" PASS
 else
-  check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), want >= 21 registered — driven from here)" FAIL
+  check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), want >= 25 registered — driven from here)" FAIL
   grep -E "^not ok|^# (fail|pass|tests) |Error|expected:|actual:|operator:" \
     "$TMP/report-unit.out" 2>/dev/null | head -40
 fi
@@ -3241,9 +3251,15 @@ env ZDOC_BINDING=orphaned-project-root+incompatible-runtime \
 # two. That second needle is the literal six-character escape the fold EMITS
 # (backslash-u-2-0-2-e), never the raw character - grepping for the raw one here would
 # assert the exact opposite of the intent, and the negatives below already own it.
-if grep -qF 'BOTH the recorded project root' "$DOCTOR_FOLD_OUT" \
-    && grep -qF '/tmp/gone' "$DOCTOR_FOLD_OUT" \
-    && grep -qF "\\u202e" "$DOCTOR_FOLD_OUT" \
+# The two POSITIVES are scoped to the binding row, the way the sibling AC-C21d already
+# scopes its assertions: grepping the whole file cannot tell a folded value that landed
+# on THIS row from the same bytes appearing anywhere else in the report. The two
+# NEGATIVES stay on the whole file deliberately — there, whole-file absence is the
+# stronger claim, not the weaker one.
+DOCTOR_FOLD_ROW="$(grep -F 'binding:' "$DOCTOR_FOLD_OUT" 2>/dev/null || true)"
+if printf '%s' "$DOCTOR_FOLD_ROW" | grep -qF 'BOTH the recorded project root' \
+    && printf '%s' "$DOCTOR_FOLD_ROW" | grep -qF '/tmp/gone' \
+    && printf '%s' "$DOCTOR_FOLD_ROW" | grep -qF "\\u202e" \
     && ! LC_ALL=C grep -qF "$(printf '‮')" "$DOCTOR_FOLD_OUT" \
     && ! LC_ALL=C grep -qF "$(printf ' ')" "$DOCTOR_FOLD_OUT"; then
   check "AC-C21c the binding row folds display-hiding characters out of the recorded project root" PASS

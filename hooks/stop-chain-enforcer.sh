@@ -181,12 +181,12 @@ if ! zensu_bind_hook_session "$INPUT"; then
     # exact false claim this channel exists to remove. Every sibling degrade in
     # this file hedges rather than guesses, and so does this one.
     if INCOMPATIBLE_DEAD_ROOT="$(zensu_session_incompatible_orphaned_root "$INPUT")"; then
-      INCOMPATIBLE_ROOT_STATUS=0
+      INCOMPATIBLE_ROOT_STATUS="$ZENSU_ROOT_STATE_GONE"
     else
       INCOMPATIBLE_ROOT_STATUS=$?
       INCOMPATIBLE_DEAD_ROOT=""
     fi
-    if [ "$INCOMPATIBLE_ROOT_STATUS" -eq 0 ] && [ -n "$INCOMPATIBLE_DEAD_ROOT" ]; then
+    if [ "$INCOMPATIBLE_ROOT_STATUS" -eq "$ZENSU_ROOT_STATE_GONE" ] && [ -n "$INCOMPATIBLE_DEAD_ROOT" ]; then
       # Nothing is REACHABLE in this half, so it must not borrow the deferral
       # wording — but it must not overclaim either. The evidence is one ENOENT,
       # which a MOVED or renamed root and an unmounted volume produce identically,
