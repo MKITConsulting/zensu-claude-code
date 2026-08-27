@@ -139,6 +139,19 @@ const INVISIBLE = /\p{Default_Ignorable_Code_Point}/u;
 // inside a word. The unit case walks the entire set in all three positions rather
 // than testing a list, so the completeness is measured on every run instead of
 // asserted here.
+//
+// THAT COST ARGUMENT IS STATED OVER THE VALUE ALONE, and it stops holding for a caller
+// that passes `followedBy`. A root ending in a prolonged sound mark — `/Users/tanaka/
+// サーバー` — has a space after it once the project rows append their ` (GONE)` marker,
+// so it matches the second alternative and takes the escaping branch, in exactly the
+// orphaned-root report that asks the user to re-create that directory. Accepted rather
+// than relaxed: the doctor spells rows `label: value` with NO space before the colon, so
+// a modifier letter with a space only on its right is a real forgery in the spelling the
+// consumers actually emit, and narrowing the rule to reclaim the trailing case would
+// reopen it. The honest fix is at the call site — put the marker in the LABEL so nothing
+// follows a folded value — and it is not taken here because the marker's position is
+// part of the report's shipped layout. Recorded so the next reader meets the trade
+// rather than the unqualified claim above.
 const SEPARATOR_ADJACENT_MODIFIER_LETTER = new RegExp('(?:^| )\\p{Lm}|\\p{Lm} ', 'u');
 const NON_ASCII = new RegExp('[\\u007f-\\uffff]', 'g');
 const SPACE_RUN = / {2,}/g;

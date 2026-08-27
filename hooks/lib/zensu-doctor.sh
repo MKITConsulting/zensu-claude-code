@@ -387,7 +387,7 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
           ZDOC_BINDING_ROOT_UNKNOWN=""
         else
         # WHY the status is captured at all, given both remaining arms render the
-        # same verdict: it is what makes the claim CHECKABLE. Status 3 positively
+        # same verdict: it is what makes the claim CHECKABLE. The PRESENT status positively
         # says the recorded root is still there; every other non-zero says the
         # question could not be answered. The plain `incompatible-runtime` row
         # therefore has to be true in BOTH cases, which is why its body carries

@@ -942,13 +942,22 @@ surface that offers `/zensu:adopt-session` without them is a defect, not a nicet
 first draft of this change shipped all of the four that then existed speaking the pre-change contract and the
 review caught it.
 
-**Three re-encodings move with this.** Their coverage is stated once, in the
-store-layout bullet below, and nowhere else — a ledger that contradicts itself about
-its own pins is the failure mode it exists to prevent. The wire format and the
-version-shape rule are unchecked:
+**FOUR re-encodings move with this**, and they do NOT share one coverage statement any
+more. The root-status pair states its own, because it is the only member with a real pin;
+the store layout states its own, in its bullet below; the wire format and the
+version-shape rule are UNCHECKED and say so. Read each bullet's own coverage sentence —
+an earlier lead-in here said coverage was stated "once … and nowhere else" while listing
+three bullets over four, and the version-shape bullet twelve lines down records that
+exact drift in its own words ("state the base or the count means nothing"):
 
-- the root-status pair `ZENSU_ROOT_STATE_GONE` / `ZENSU_ROOT_STATE_PRESENT`, owned by
-  `hooks/lib/zensu-session.sh`, with TWO consumers that reach it by DIFFERENT routes —
+- the root-status pair `ZENSU_ROOT_STATE_GONE` / `ZENSU_ROOT_STATE_PRESENT`. The shell
+  constants live in `hooks/lib/zensu-session.sh`, but that file is a MIRROR, not the
+  definition: the values are exit statuses produced by `hooks/lib/claude-hook-session-v1.js`,
+  which sets `process.exitCode = 3` as a bare literal, and nothing compares the two sides.
+  Say "mirror", or a maintainer following this entry to "change the trichotomy" edits the
+  shell constant and silently degrades both consumers to their hedged arms while AC-C19
+  stays green — that pin covers the CONSUMERS' spellings only, and the producer is pinned
+  separately by AC-C15f with its own bare `3`. TWO consumers reach the pair by DIFFERENT routes —
   and the route is the part a reader gets wrong. `stop-chain-enforcer.sh` sources the
   owner in its PARENT shell and compares against those names directly;
   `zensu-doctor.sh` sources it only inside command substitutions, where the name is out
@@ -1033,9 +1042,21 @@ enumerated core half has `adoptContext` passing a second argument to a `buildCon
 ignores it, so `canonicalDirectory` runs on an absent path and adoption THROWS in exactly
 the state the feature was written for. **`hooks/lib/zensu-safe-display-v1.js` joins
 the core half**, and it is the one entry a port is likeliest to skip because it looks
-cosmetic: it owns `safeDisplayValue` — the `label : value` pair-forgery guard plus the
-positive letter/number/mark allowlist — it requires NOTHING, not even a node builtin,
-and both report renderers consume it. **ONE rule, deliberately.** A second, narrower
+cosmetic: it owns `safeDisplayValue(value, followedBy)` — the `label : value` pair-forgery
+guard plus the positive letter/number/mark allowlist — it requires NOTHING, not even a node
+builtin, and both report renderers consume it. **The SECOND parameter is part of the
+obligation and is the easiest half to drop.** It carries what the caller will render
+immediately after the value; only the POSITIONAL rules see the join, because the allowlist
+judges which characters the VALUE may contain and the caller's marker is not the value's
+business; and a caller's appended marker must carry ONE space, or the double-space rule
+fires on every appended render and folds the disclosure exactly when it is being disclosed.
+A port that implements the one-argument description gets a function that silently ignores
+its second argument — unlike the `buildContext` second-parameter trap this roster already
+names, which at least throws. The doctor renderer's `foldPath` is a THIRD member beside
+`foldSlot` and `parentheticalWriter`: it carries the fold to the prose rows, and a port that
+copies the other two re-ships the raw-interpolation defect. It is also the one deliberate
+exception to the no-parentheses rule below — a prose row supplies no call-site parentheses,
+so `foldPath` returns a pre-parenthesized string while `foldSlot` must not. **ONE rule, deliberately.** A second, narrower
 `foldDisplayHiders` shipped here for one review round: it was written for the doctor's
 load-failure fallback, that fallback was then changed to DROP the value instead of
 folding it, and the export survived with no consumer and no executed case while this
@@ -1181,6 +1202,18 @@ cap" — the percentage is arithmetic over a stale numerator. Same reason as eve
 caveat cannot live in the manifest: `tests/run-profile.js`'s `SUITE_KEYS` throws on any
 key outside `{id, runner, path, args, timeoutMs}` and aborts every Windows shard at
 manifest load.
+
+**And the SUITE cap is the wrong ceiling to reason about alone — the SHARD envelope binds
+first.** `windows-shard-2` carries `profileTimeoutMs: 1800000` across eight entries, and
+`versioned-plugin-upgrade` is the LAST object in that array. `tests/run-profile.js`
+computes `effectiveTimeoutMs: Math.min(suite.timeoutMs, remaining)` where `remaining` is
+the shard budget minus everything already spent, so this suite receives the REMAINDER, not
+its own 900000. That is not hypothetical: this file records shard-3's eight suites summing
+to 1800072 ms, with its last entry granted 139971 ms of a 420000 ms cap and reporting
+`TIMED_OUT` — "It was not slow; it was not paid for." Shard-2's job duration is UNMEASURED
+here too, so a genuine overrun in this suite may surface as a profile abort rather than the
+suite `TIMED_OUT` its ceiling exists to make visible. Record both figures when the next
+green Windows run supplies them.
 
 Read this sample as ONE sample, not as a bound. The sibling
 `stop-enforcer-self-review-routing` note in this file records a 29% spread across

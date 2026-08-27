@@ -27,7 +27,9 @@ fi
 # bare `node --test`, and that exits 0 for a file which registers ZERO cases — so a
 # suite emptied by a bad glob, a syntax error inside a skipped block, or a rename that
 # silently stops matching reports exactly like a green run. Five sibling drivers in this
-# tree already carry the floor for that reason; this one did not, while four new cases
+# tree call `unit_cases_registered_floor` directly and five more reach it through the
+# `_text` wrapper — state the base, or the count means nothing. This one carried neither,
+# while four new cases
 # were being added to the file it runs.
 #
 # The floor is spelled here rather than derived from the suite's own output, for the

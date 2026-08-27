@@ -153,7 +153,12 @@ fi
 #
 # Derive the closure instead. Walk relative `require('./x.js')` specifiers transitively
 # from the entry module and compare the reachable set against the table's first column.
-# A new require in any of the seven now fails here instead of loading unguarded.
+# A new `require("./x.js")` in any of the seven fails here instead of loading unguarded.
+# The walk models ONE specifier spelling, deliberately and not completely: a computed
+# `require(path.join(...))`, an extension-less `./x`, or a `../` relative one is invisible
+# to it and would shrink the closure while it still compared set-equal. Every relative
+# require under hooks/lib currently carries the literal `./x.js` form, so the pin is live
+# today; the bound is stated so the next reader does not take it for a resolver.
 ADOPT_CLOSURE="$(node -e '
 const fs = require("fs"), path = require("path");
 const lib = process.argv[1], seen = new Set(), queue = ["session-adopt-report-v1.js"];

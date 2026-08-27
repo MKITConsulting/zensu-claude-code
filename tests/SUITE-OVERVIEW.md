@@ -277,8 +277,14 @@ that suite's failure.
 | `owned-process.test.js` | 2 | `test-claude-promptfoo-wrapper.sh` | owned-process lifecycle |
 
 Plus `tests/session-control/session-control-core-v1.test.js` — the Session Control core
-unit suite, reached via `tests/session-control/run.sh`, which is invoked **only** by the
-Windows profiles / legacy canary, **not** by `run-all.sh`.
+unit suite, reached via `tests/session-control/run.sh`. It is driven by
+`tests/structure/test-session-control-core.sh`, which `run-all.sh` collects like every
+other structure suite, so it runs on EVERY host under `--ci` — not only on the Windows
+profiles. That driver is what closed the gap the suite's own header describes ("On Linux
+and macOS the whole suite was therefore green by omission"); this sentence still said
+"Windows only" for a round after it landed. Its hand-maintained registered-case floor is
+**141**, enforced by the driver and required rather than skipped when the shared summary
+parse is unavailable.
 `tests/session-control/initialize-baseline.sh` is a shared fixture helper sourced by
 ~8 autopilot / chain structure suites.
 
@@ -318,14 +324,14 @@ assert, `# ` = comment.
 
 ## 7. Windows contract profiles (`tests/profiles/windows-ci.v1.json`)
 
-7 bounded profiles, 42 suite entries, run as a blocking PR matrix in `ci.yml` via
+8 bounded profiles, 43 suite entries, run as a blocking PR matrix in `ci.yml` via
 `node tests/run-profile.js <profile>`. The table below is re-derived from the JSON rather
 than described — the previous five-profile layout (`windows-reset-session`,
 `windows-leases-routing`, `windows-native-state`, `windows-installed-core`,
 `windows-native-branches`) no longer exists under any of those names, and only its total
 of 40 survived the reshard, and this branch's new suite takes it to 41.
-`tests/structure/windows-ci-contract.test.js` pins exactly these seven keys and the
-42-entry total, so a shard renamed there and not here is drift this table cannot catch
+`tests/structure/windows-ci-contract.test.js` pins exactly these eight keys and the
+43-entry total, so a shard renamed there and not here is drift this table cannot catch
 on its own:
 
 | Profile | Suites | Members |
@@ -337,6 +343,7 @@ on its own:
 | `windows-shard-5` | 7 | autopilot-plan-delegate, coverage-report-windows-paths, post-review-self-review-handoff, session-id-v1, session-safe-file-read, upgrade-provider-zero-launch, windows-portability-guards |
 | `windows-shard-6` | 5 | bash-source-write-gate, deferred-transfer-reset, marketplace-fixture, session-control-claude, upgrade-process-windows-boundaries |
 | `windows-shard-7` | 2 | review-worker-evidence-lease, stop-enforcer-self-review-routing |
+| `windows-shard-8` | 1 | session-trail-lineage |
 
 Runner guarantees: full manifest + audited command catalog validated before any child
 starts; every suite bound to a validated content digest; per-suite **and** 30-minute
