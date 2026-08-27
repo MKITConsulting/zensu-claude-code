@@ -29,7 +29,7 @@ it again, and no test will say so. Re-derive rather than trust when the numbers 
 |---|---|---|
 | `tests/structure/test-*.sh` (deterministic shell) | **142** — 135 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
 | *(reconciliation)* | a `--ci` run reports **135 structure suites + 5 offline evals = 140 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 142 − 135 gap | — |
-| `tests/structure/*.test.js` (`node --test` units) | **20 files** | invoked *by* parent `.sh` suites |
+| `tests/structure/*.test.js` (`node --test` units) | **23 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
 | Windows contract profiles | **7** (`windows-shard-1`…`-7`, 42 suite entries) | `ci.yml` matrix, `run-profile.js` |
@@ -228,7 +228,7 @@ each other on counts, terminology, navigation and the specification's BLOCKED st
 Structure gates for the Promptfoo harnesses. GitHub Actions never invokes the Promptfoo
 binary; these guard the local harness contract.
 
-## 4. `node --test` unit suites (20 files)
+## 4. `node --test` unit suites (23 files)
 
 Not run standalone — each is driven by a parent shell suite, so a JS failure surfaces as
 that suite's failure.
@@ -242,9 +242,10 @@ that suite's failure.
 | `chain-recovery-v1.test.js` | 21 | `test-chain-recover.sh` | chain shape lattice + rearm-receipt predicate |
 | `reviewer-spawn-denial-v1.test.js` | 29 | `test-stop-enforcer-self-review-routing.sh` | host-refused reviewer spawn: structural `tool_use_id` keying, the host error flag, the marker prefix, tail/line bounds, degrade-to-none |
 | `plan-payload-v1.test.js` | 20 | `test-plan-payload-fallback.sh` | plan-source precedence table, hardened plan-file reader refusals, O_NOFOLLOW-unavailable fallback |
-| `zensu-doctor-invocation.test.js` | 24 | `test-versioned-plugin-upgrade.sh` | `/zensu:doctor` invocation allowlist. The row read *none found* while that suite has driven it all along — a registry that under-reports a driver is worse than one with a gap, because it invites someone to add a second driver or delete the file |
+| `zensu-doctor-invocation.test.js` | 26 | `test-versioned-plugin-upgrade.sh` | `/zensu:doctor` invocation allowlist. The row read *none found* while that suite has driven it all along — a registry that under-reports a driver is worse than one with a gap, because it invites someone to add a second driver or delete the file |
 | `review-evidence-sweep-v1.test.js` | 32 | `test-versioned-plugin-upgrade.sh` | superseded-lease sweep: the ownership selector, the canonicalized repair root, and the ancestor probe that separates *no store here* from *an ancestor is a file* |
 | `session-adopt-report-v1.test.js` | 21 | `test-versioned-plugin-upgrade.sh` | the adoption report payload: `safe()` in both directions (ordinary path verbatim; bidi, line separators and DEL folded; a localized path unchanged), the `label : value` pair-forgery guard on both branches, the in-place lease repair, and that the display rule has exactly ONE owner |
+| `rule-block-v1.test.js` | 10 | `test-best-solution-first.sh` | the one-line marker-block reader both rule carriers share: marker position, the FILE and BLOCK ceilings, the short-read and swapped-file refusals |
 | `playwright-mcp-proxy.test.js` | 16 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy |
 | `verify-feature-transcript-check.test.js` | 14 | `test-promptfoo-verify-feature.sh` | transcript assertion contract |
 | `fixture-mutation-watch.test.js` | 19 | `test-claude-promptfoo-wrapper.sh` | fixture-event classification: the gated classes (`.git`, the watch root's own name, run-owned ancestors) adjudicated by the manifest, ordinary paths by touch-after-start, and that both watch backends route through one decision spelled once |
