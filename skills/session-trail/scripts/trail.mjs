@@ -918,6 +918,7 @@ function windowLabel(appPid) {
 // ONLY source of accountUuid, and its path outside macOS is unverified — when the
 // store is unreachable, this still groups sessions by window correctly.
 let PROC_TABLE = null;
+let PROC_TABLE_FAULT = null;
 
 function processTable() {
   if (PROC_TABLE) return PROC_TABLE;
@@ -956,7 +957,7 @@ function processTable() {
         Buffer.from(program, 'utf16le').toString('base64')],
       { encoding: 'utf8',
         timeout: 8000,
-        stdio: ['ignore', 'pipe', 'ignore'],
+        stdio: ['ignore', 'pipe', 'pipe'],
         // The environment is pinned here for the same reason it is pinned on the POSIX
         // arm below, and one reason more: `-NoProfile` does not cover module resolution,
         // so `Get-CimInstance` is auto-loaded from whatever `PSModulePath` names. An
@@ -965,6 +966,25 @@ function processTable() {
         // window-grouping route, which every caller already treats as optional.
         env: {
           SystemRoot: root,
+          windir: root,
+          SystemDrive: path.parse(root).root.replace(/\\+$/, ''),
+          ComSpec: path.join(root, 'System32', 'cmd.exe'),
+          // The previous spelling replaced the environment wholesale and left a
+          // Windows process without PATH, windir, SystemDrive or ComSpec. Get-CimInstance
+          // reaches WMI through the provider host under System32\Wbem, so that
+          // omission is the first thing to suspect. INFERRED, not observed: the runner
+          // discarded stderr, so all the evidence there is says 229 of 288 checks
+          // consumed the whole 900s budget -- about 3.9s per check against a probe
+          // capped at 8s -- while every window-namespace check failed against a
+          // labels.json the probe never let anything write. A stall on every
+          // invocation fits that arithmetic; a fast failure does not. The stderr
+          // capture below is what settles it rather than reasoning about it again.
+          PATH: [
+            path.join(root, 'System32'),
+            root,
+            path.join(root, 'System32', 'Wbem'),
+            path.join(root, 'System32', 'WindowsPowerShell', 'v1.0'),
+          ].join(';'),
           PSModulePath: path.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules'),
           PATHEXT: '.COM;.EXE;.BAT;.CMD',
           TEMP: process.env.TEMP || path.join(root, 'Temp'),
@@ -983,7 +1003,7 @@ function processTable() {
         env: { PATH: '/usr/bin:/bin', LC_ALL: 'C', LANG: 'C', TZ: 'UTC' },
       });
     }
-  } catch { return PROC_TABLE; }
+  } catch (e) { PROC_TABLE_FAULT = probeFault(e); return PROC_TABLE; }
   for (const line of out.split('\n')) {
     const t = line.trim();
     if (!t) continue;
@@ -1030,9 +1050,21 @@ function processTable() {
 // fails, `started` is null for every row, and every window label silently stops
 // resolving with nothing anywhere saying why. This is the command whose entire job
 // is explaining why something does not resolve.
+function probeFault(e) {
+  if (!e) return 'unknown';
+  const parts = [];
+  if (e.code) parts.push(String(e.code));
+  if (e.signal) parts.push(`signal ${e.signal}`);
+  if (typeof e.status === 'number' && e.status !== 0) parts.push(`exit ${e.status}`);
+  const err = e.stderr ? String(e.stderr).split('\n').map((l) => l.trim()).find(Boolean) : '';
+  if (err) parts.push(err);
+  const text = parts.join(' ') || String((e && e.message) || 'unknown');
+  return text.replace(/\s+/g, ' ').slice(0, 200);
+}
+
 function processStartTimeHealth() {
   const table = processTable();
-  if (!table.size) return 'no-process-table';
+  if (!table.size) return PROC_TABLE_FAULT ? `probe-failed — ${PROC_TABLE_FAULT}` : 'no-process-table';
   let withStart = 0;
   for (const e of table.values()) if (e && e.started) withStart += 1;
   if (withStart === 0) return 'unreadable — window labels cannot resolve';

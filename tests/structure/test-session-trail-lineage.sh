@@ -946,7 +946,7 @@ else
   # probe's own health line is printed HERE so the next reader gets the cause with the
   # first failure instead of eight symptoms.
   check "L32c-control a pid-shaped key lands in the window namespace (windows is empty)" FAIL
-  echo "        probe: $(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --diagnose 2>&1 | grep -i 'process start' || echo 'diagnose produced no process-start line')"
+  echo "        probe: $(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --diagnose 2>&1 | grep -iE 'START TIMES' || echo 'diagnose produced no START TIMES line')"
 fi
 trail "$STORE" "$SID_C" "$LIVE_PID" label --remove "$LIVE_PID" >/dev/null
 [ -z "$(window_keys)" ] && check "L32c label --remove reaches the window namespace too, not only accounts" PASS || check "L32c label --remove reaches the window namespace (windows holds $(window_keys))" FAIL

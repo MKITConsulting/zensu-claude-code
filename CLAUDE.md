@@ -2777,12 +2777,20 @@ test fails loudly when they disagree. **Shard 3's own eight-member accounting wa
 in this file before that move**: it counted seven and omitted `autopilot-release-cli`
 (600000), which is precisely how a headroom claim survives being false.
 
-**The 900000 cap is now KNOWN to be nearly exhausted**: 893084 of 900000 is 99.2%, so
-the suite has roughly seven seconds of its own ceiling left. A single added check can
-turn it red. Alone on shard 8 it has 900 s of shard budget it cannot use, so the cap —
-not the shard — is what binds it now, which is the first time that has been true. Raise
-the cap or shorten the suite before adding to it; do not read "it has its own shard" as
-headroom.
+**The cap is 1500000, and the previous 900000 is recorded here because it FAILED on
+the very next run.** 893084 of 900000 is 99.2%, and this file said so — "a single added
+check can turn it red" — while the manifest shipped 900000 anyway. Run 33018717088 then
+spent 900138 ms reaching 229 of 288 checks and was killed by that cap. Two samples of
+byte-identical content therefore read 893084 (completed) and >900138 (killed at 79%),
+which projects to roughly 1132000 ms; the spread is the same run-to-run variance this
+file already records for stop-enforcer-self-review-routing, where 29% separated two
+green runs on one runner class. 1500000 is 33% over the projection and still under the
+1800000 ms profile envelope, so a real overrun surfaces as a suite `TIMED_OUT` rather
+than a profile abort. Alone on shard 8 the cap — not the shard — is what binds this
+suite, which is the first time that has been true here. **The lesson is not the number.
+A ceiling set at the measurement is a ceiling already breached**: one sample is a lower
+bound on a distribution, never a bound on the next run, so budget against the projected
+worst case and re-measure after adding checks.
 
 **That measurement is also why 600000 was REJECTED for this suite, not merely not
 adopted.** The parallel working copy lowered its own ceiling to 600000 on the strength
@@ -2790,6 +2798,30 @@ of a green run of a 70-check variant measuring 274 s. This suite is four times t
 size and measured 893 s: adopting the number would have reported `TIMED_OUT` on every
 Windows run. A ceiling is not portable between two suites sharing an `id`; only the
 RATIO is — and the ratio under-predicted by 28%.
+
+**The win32 process probe has NEVER passed on Windows, and that is a standing state
+rather than a regression.** `processTable()` in `skills/session-trail/scripts/trail.mjs`
+runs `Get-CimInstance Win32_Process` and keys every window label on the pid plus its
+start time; on the runner it yields nothing, so `windowKey()` answers null, no
+`labels.json` window entry is ever written, and L32c-control, L35, L35c, L52-control,
+L52 and L52a fail against a file that was never created. Runs 32998414210 and
+33018717088 carry those failures WORD FOR WORD, and the `-EncodedCommand` change
+between them moved nothing — it removed a real argument-mangling hazard, so keep it,
+but do not credit it with a fix it did not deliver. The probe's environment was
+replaced wholesale and left the process without `PATH`, `windir`, `SystemDrive` or
+`ComSpec`; `Get-CimInstance` reaches WMI through the provider host under
+`System32\Wbem`, which nothing named. That omission is the leading suspect and is
+now fixed, and the `PSModulePath` pin the security comment exists for is kept.
+**The cause is INFERRED, never observed**: the probe discarded stderr and its `catch`
+was bare, so two CI rounds produced no account of the failure at all. `probeFault()`
+now records the exit code, signal and first stderr line, and `processStartTimeHealth()`
+renders it as `probe-failed — …` where it used to say only `no-process-table`. If the
+six checks are still red on the next run, the `START TIMES` line in `lineage --diagnose`
+carries the reason — read it before theorising again. The L32c-control probe line that
+was supposed to surface this greped for `process start` while the text channel prints
+`START TIMES`, so it never matched on any platform and reported its own fallback as
+though it were a finding; a diagnostic whose needle is never exercised is worse than
+none, because it answers confidently.
 
 Replace these figures from the next green Windows shard. A shard abort
 truncates the tail of the second suite silently. The caveat lives here and NOT in the manifest:

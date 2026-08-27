@@ -35,6 +35,16 @@ const expectedProfiles = [
   // own 420000 ms cap and aborted. No other shard had 893 s of headroom either — the
   // measured job durations that run were 1630, 1187, 1886, 1779, 1008, 1011 and 1516
   // seconds — so the suite needed a shard of its own, not a different neighbour.
+  //
+  // The suite's own cap was then set to 900000 against that 893084 ms measurement —
+  // 0.8% of headroom, and the next run (33018717088) spent 900138 ms reaching 229 of
+  // 288 checks and was killed by it. Two samples of byte-identical content therefore
+  // read 893084 (completed) and >900138 (killed at 79%), which projects to about
+  // 1132000 ms and matches the run-to-run spread this repo already records for
+  // stop-enforcer-self-review-routing. The cap is 1500000 now: 33% over that
+  // projection, and still under the 1800000 ms profile envelope so a genuine overrun
+  // surfaces as a suite TIMED_OUT rather than a profile abort. Budget against the
+  // projection, never against the cap, and re-measure after adding checks.
   'windows-shard-8',
 ];
 const expectedCommandCount = 43;
