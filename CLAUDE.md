@@ -828,6 +828,42 @@ disagreement throws in BOTH readers and still lands on `record-unreadable`. Noth
 waived by admitting it — the workflow document lived under that root and is not reachable from this record,
 the same argument that already relaxes a vanished root for a COMPATIBLE upgrade.
 
+**That "nothing is waived" sentence is TRUE ONLY WHILE THE ROOT STAYS GONE, and the
+gap is named here rather than left for the next reader to find.** The authorising axis
+of adoption is SCHEMA equality, and `CLAUDE.md` calls that gate self-closing — a release
+that moves a persisted shape makes the document unreadable and adoption declines with no
+new check to remember. In THIS state it does not close: condition 6 is guarded by
+`fs.existsSync(workflowFile)`, which is false for an absent root, so `readWorkflowState`
+never runs and `workflow-schema-mismatch` is unreachable. The same predicate later in
+`adoptContext` skips the `RUNTIME_ADOPTED` history entry, which invariant 1 names as the
+design's ONLY provenance mechanism while invariant 2 forbids a bypass-ledger entry — so
+an adoption here leaves the superseded record's filename as its only durable evidence.
+Neither is a defect in the mechanism and neither is worth a control-flow change: what was
+wrong was the CLAIM. The adoption report now discloses in this branch that no workflow
+document could be read, so the schema check was not performed and a document restored
+later is not verified. Say "not evaluated", never "verified", and note the ORDER:
+re-creating the directory BEFORE adopting is what lets condition 6 run at all.
+
+**`readOrphanedProjectRootContext` is STRICTER than the code it replaced, which is not
+obvious from a diff that reads as an extraction.** The two inline rules it dropped were
+the unsafe-character test and `path.isAbsolute`; `requireAbsentDirectoryPath` applies a
+THIRD, `path.resolve(value) !== value`. That reader backs `orphanedProjectRootSession`,
+so a recorded `project_root` which is not a `path.resolve` fixed point now loses the
+relaxation entirely — the wedge this feature family exists to remove, restored for that
+one value class. The rule is kept on the read path deliberately: applying it only where
+the value is written would move the refusal out of `adoptableRecord` into a throw inside
+`adoptContext` and would break the AC-C14b row. Exposure is narrow because every root is
+minted through `realpathSync.native`, whose POSIX output is normalized; the residual is a
+win32 UNC share root, where `path.win32.resolve` appends a separator `realpathSync.native`
+does not. That spelling is UNVERIFIED in both directions — no suite exercises it, so do
+not record it as covered.
+
+**Removed with this feature, and named here because the roster is what a port works
+from:** `incompatibleRuntimeSession` is gone from `hooks/lib/claude-hook-session-v1.js`'s
+exports along with its definition. Every ADDITION in that change was added to the roster
+above; the removal was not, and a port that keeps its own equivalent keeps a predicate
+nothing calls.
+
 `buildContext` gained `allowMissingProjectRoot` for the re-mint. It waives exactly the
 existence check `validateContext` waives and re-applies that function's shape half
 through a SHARED `requireAbsentDirectoryPath` — the orphan reader calls it too, so the

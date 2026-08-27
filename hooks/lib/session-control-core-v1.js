@@ -1392,8 +1392,25 @@ function readOrphanedProjectRootContext(options) {
   // whose project_root alone was edited to an absent path carrying newlines or
   // ANSI escapes would classify as the relaxable state and get its bytes echoed
   // into a terminal and into the model's context — a record the strict
-  // readContext fails closed on. Re-apply the shape half, so EXISTENCE stays
-  // the only waived check.
+  // readContext fails closed on.
+  //
+  // Do NOT read this as "EXISTENCE is the only waived check" — that is what this
+  // comment used to say, and three review seats independently caught it. The two
+  // rules this call replaced were the unsafe-character test and `path.isAbsolute`.
+  // requireAbsentDirectoryPath applies a THIRD, `path.resolve(value) !== value`,
+  // so this reader is STRICTER than the code it replaced, not merely relocated.
+  // The rule is kept here deliberately: applying it only where the value is
+  // WRITTEN would move the refusal out of adoptableRecord into a throw inside
+  // adoptContext, and would break the AC-C14b row that pins an absolute-but-
+  // unnormalized project_root as `record-unreadable`.
+  //
+  // The accepted residual, stated because this reader is what un-wedges a
+  // session: a recorded project_root that is not a `path.resolve` fixed point
+  // now loses the relaxation entirely. Every root is minted through
+  // realpathSync.native, whose POSIX output is normalized, so the exposure is a
+  // win32 UNC share root, where path.win32.resolve appends a separator
+  // realpathSync.native does not. That spelling is UNVERIFIED in both
+  // directions — no suite exercises it.
   requireAbsentDirectoryPath(context.project_root, 'context project root');
   // lstat, never realpath: realpath follows a symlink and would report a
   // dangling link as absent, quietly turning a present-but-wrong root into the

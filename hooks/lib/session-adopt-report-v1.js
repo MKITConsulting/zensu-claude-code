@@ -293,20 +293,37 @@ function main() {
     process.stdout.write("  executing        : " + safe(verdict.executing) + "\n");
     process.stdout.write("  project          : " + safe(verdict.context.project_root)
       + (verdict.orphanedProjectRoot ? "  (GONE)" : "") + "\n\n");
-    process.stdout.write("The record is intact and this installation can take it over in place.\n");
+    // The unqualified sentence is only earned when a workflow document was
+    // actually readable. In the orphaned branch condition 6 never ran, so
+    // claiming the record is "intact" at the same strength as on the ordinary
+    // path overstates what was checked — see the qualified line below.
+    if (!verdict.orphanedProjectRoot) {
+      process.stdout.write("The record is intact and this installation can take it over in place.\n");
+    }
     // Stated BEFORE the user confirms, not only after: an adoption that leaves
     // Edit, Write and every WRITING Bash command denied is not the rescue an
     // unqualified "adoptable" implies,
     // and finding that out afterwards reads as a failed repair.
     if (verdict.orphanedProjectRoot) {
+      process.stdout.write("The record itself is readable and this installation can take it over in place.\n");
       process.stdout.write("\nThe recorded project root no longer exists — a deleted or recycled worktree left\n");
       process.stdout.write("the workflow state unreachable from this record. Adoption still applies and is\n");
       process.stdout.write("worth doing: it clears the lineage break, so READ-ONLY Bash and the read-only\n");
-      process.stdout.write("diagnostics work again. It does NOT restore writes — Edit, Write and any Bash\n");
-      process.stdout.write("command that writes stay denied while the anchor is missing, because a write\n");
-      process.stdout.write("cannot be attributed to a project that is not there. To write again, re-create\n");
-      process.stdout.write("exactly that directory or start a fresh Claude Code session. If it was moved\n");
-      process.stdout.write("rather than deleted, its state still exists there.\n");
+      process.stdout.write("diagnostics work again. It does NOT restore writes — Edit, Write and MultiEdit\n");
+      process.stdout.write("stay denied, and so does any Bash command the source-write gate can attribute\n");
+      process.stdout.write("as a write, because a write cannot be attributed to a project that is not\n");
+      process.stdout.write("there. NotebookEdit is the one mutation that still passes, in a healthy\n");
+      process.stdout.write("session too. To write again, re-create exactly that directory or start a\n");
+      process.stdout.write("fresh Claude Code session. If it was moved rather than deleted, its state\n");
+      process.stdout.write("still exists there.\n");
+      // The schema-equality check that authorises an ordinary takeover did NOT
+      // run here, and a report that stays silent about it lets the user read a
+      // weaker check as the stronger one. Condition 6 is guarded by an
+      // existsSync on the workflow document, which is false for an absent root.
+      process.stdout.write("\nNOT CHECKED: with no readable workflow document, the schema-equality check that\n");
+      process.stdout.write("normally authorises a takeover was not performed, and a document restored later\n");
+      process.stdout.write("is not verified against this runtime. Re-creating the directory BEFORE adopting\n");
+      process.stdout.write("is what lets that check run; adopting first skips it for good.\n");
     }
     process.stdout.write("Nothing has been changed. Run the same command with --confirm to adopt.\n");
     return;
@@ -342,7 +359,7 @@ function main() {
     process.stdout.write("This session's lineage break is repaired from the next tool call onward — no restart\n");
     process.stdout.write("is needed. The recorded project root is still gone, so the session is now in the\n");
     process.stdout.write("orphaned-project-root state: READ-ONLY Bash and the read-only diagnostics work,\n");
-    process.stdout.write("while Edit, Write and any Bash command that writes stay denied — a write cannot\n");
+    process.stdout.write("while Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write, — a write cannot\n");
     process.stdout.write("be attributed to a project that is not there. Re-create exactly that directory,\n");
     process.stdout.write("or start a fresh Claude Code session, to write again.\n");
   } else {

@@ -54,7 +54,11 @@ If the doctor row instead says the session has **no** record, or names ONLY a
 recorded **project root** that no longer exists with no lineage break beside it,
 this skill does not apply — those are different states with different remedies,
 and it will refuse (the second as `already-served`, because that runtime already
-serves the record).
+serves the record). "Refuse" is exact about the record and not about the whole
+command: the `--confirm` form still re-runs the idempotent lease sweep in that
+state, which sets aside superseded lease records. Nothing is re-minted and the
+record is untouched — but a reader who takes "refuse" to mean "does nothing at
+all" would be wrong about the lease store.
 
 ## Do NOT Use For
 
@@ -240,4 +244,4 @@ anything onto it.
 Render both command outputs verbatim; they are already formatted. Name both
 versions. Never summarize away a `provenance` other than `recorded`/
 `no-workflow-document`, a non-zero `leases set aside`, a non-zero
-`leases stuck`, or any `WARNING:` line about the lease store. After a successful adoption, do not tell the user to restart — and when the recorded project root was gone, say that Edit, Write and any Bash command that writes stay denied until it is re-created — read-only Bash and the diagnostics do run — rather than reporting an unqualified success.
+`leases stuck`, or any `WARNING:` line about the lease store. After a successful adoption, do not tell the user to restart — and when the recorded project root was gone, say that Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write, until it is re-created — read-only Bash and the diagnostics do run — rather than reporting an unqualified success.
