@@ -407,10 +407,17 @@ OUT_NOFOLD="$(ZENSU_DOCTOR_PLUGIN_DIR="$NOCHAIN" ZENSU_CONFIG="$SBOX/good-cfg.js
   node "$NOCHAIN/hooks/lib/zensu-doctor-report.js" 2>&1)"
 NOFOLD_RC=$?
 NOFOLD_ROW="$(printf '%s' "$OUT_NOFOLD" | grep -F 'binding:' || true)"
+# Pinned POSITIVELY on the text that actually ships, plus a negative on the DOUBLED
+# parenthesis. Both earlier negatives went dead the moment the contract they described
+# changed: '()' cannot appear because the ternary tests the folded value, and
+# 'unrenderable' was retired two rounds ago — so the row passed while the property it
+# names had stopped holding. The doubled-paren negative is the one that matters: the
+# fallback string must carry NO parentheses of its own, because the call site adds a
+# pair, and that exact mistake shipped twice in successive fixes for it.
 if printf '%s' "$NOFOLD_ROW" | grep -qF 'project root recorded for this session' \
     && ! printf '%s' "$NOFOLD_ROW" | grep -qF '/tmp/zensu-nofold-probe' \
-    && ! printf '%s' "$NOFOLD_ROW" | grep -qF '()' \
-    && ! printf '%s' "$NOFOLD_ROW" | grep -qF 'unrenderable' \
+    && printf '%s' "$NOFOLD_ROW" | grep -qF '(not rendered — the display-safety module could not be loaded)' \
+    && ! printf '%s' "$NOFOLD_ROW" | grep -qF '((' \
     && [ "$NOFOLD_RC" -eq 0 ]; then
   check "P1mg an unloadable display-fold module drops the value and keeps the row" PASS
 else
