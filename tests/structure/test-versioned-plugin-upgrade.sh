@@ -2635,7 +2635,17 @@ if printf '%s' "$GONE_START" \
   # satisfies the refusal this row asserts, and the row passes for the wrong
   # reason. That is the discipline the AC-C13 control above states and JUDGE-3
   # applies.
-  if RECORD_IN="$TAMPER_DATA/session-control/v1/records/$GONE_KEY.json" DATA_IN="$TAMPER_DATA" node -e '
+  # The record holds plugin_data in the spelling buildContext canonicalized at
+  # mint time, and adoptableRecord canonicalizes the CALLER's value before
+  # comparing the two raw strings. On Git Bash the shell holds /d/a/... while
+  # that canonical spelling is D:\a\..., so writing the shell's own $TAMPER_DATA
+  # here makes the CONTROL refuse plugin-data-mismatch — on Windows only, with
+  # a POSIX run staying green. native_root renders the same spelling the record
+  # would have carried; the directory still exists at this point, which is what
+  # AC-C13's note says is no longer true for the project root by then.
+  TAMPER_DATA_NATIVE="$(native_root "$TAMPER_DATA")" || TAMPER_DATA_NATIVE=""
+  if [ -n "$TAMPER_DATA_NATIVE" ] \
+      && RECORD_IN="$TAMPER_DATA/session-control/v1/records/$GONE_KEY.json" DATA_IN="$TAMPER_DATA_NATIVE" node -e '
       const fs = require("node:fs");
       const file = process.env.RECORD_IN;
       const record = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -2679,7 +2689,17 @@ if printf '%s' "$GONE_START" \
   chmod 700 "$TAMPER2_DATA/session-control" "$TAMPER2_DATA/session-control/v1" \
     "$TAMPER2_DATA/session-control/v1/records"
   cp "$GONE_RECORD" "$TAMPER2_DATA/session-control/v1/records/$GONE_KEY.json"
-  if RECORD_IN="$TAMPER2_DATA/session-control/v1/records/$GONE_KEY.json" DATA_IN="$TAMPER2_DATA" node -e '
+  # The record holds plugin_data in the spelling buildContext canonicalized at
+  # mint time, and adoptableRecord canonicalizes the CALLER's value before
+  # comparing the two raw strings. On Git Bash the shell holds /d/a/... while
+  # that canonical spelling is D:\a\..., so writing the shell's own $TAMPER2_DATA
+  # here makes the CONTROL refuse plugin-data-mismatch — on Windows only, with
+  # a POSIX run staying green. native_root renders the same spelling the record
+  # would have carried; the directory still exists at this point, which is what
+  # AC-C13's note says is no longer true for the project root by then.
+  TAMPER2_DATA_NATIVE="$(native_root "$TAMPER2_DATA")" || TAMPER2_DATA_NATIVE=""
+  if [ -n "$TAMPER2_DATA_NATIVE" ] \
+      && RECORD_IN="$TAMPER2_DATA/session-control/v1/records/$GONE_KEY.json" DATA_IN="$TAMPER2_DATA_NATIVE" node -e '
       const fs = require("node:fs");
       const file = process.env.RECORD_IN;
       const record = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -2898,7 +2918,17 @@ if printf '%s' "$GONE_START" \
   chmod 700 "$TAMPER3_DATA/session-control" "$TAMPER3_DATA/session-control/v1" \
     "$TAMPER3_DATA/session-control/v1/records"
   cp "$GONE_RECORD" "$TAMPER3_DATA/session-control/v1/records/$GONE_KEY.json"
-  if RECORD_IN="$TAMPER3_DATA/session-control/v1/records/$GONE_KEY.json" DATA_IN="$TAMPER3_DATA" node -e '
+  # The record holds plugin_data in the spelling buildContext canonicalized at
+  # mint time, and adoptableRecord canonicalizes the CALLER's value before
+  # comparing the two raw strings. On Git Bash the shell holds /d/a/... while
+  # that canonical spelling is D:\a\..., so writing the shell's own $TAMPER3_DATA
+  # here makes the CONTROL refuse plugin-data-mismatch — on Windows only, with
+  # a POSIX run staying green. native_root renders the same spelling the record
+  # would have carried; the directory still exists at this point, which is what
+  # AC-C13's note says is no longer true for the project root by then.
+  TAMPER3_DATA_NATIVE="$(native_root "$TAMPER3_DATA")" || TAMPER3_DATA_NATIVE=""
+  if [ -n "$TAMPER3_DATA_NATIVE" ] \
+      && RECORD_IN="$TAMPER3_DATA/session-control/v1/records/$GONE_KEY.json" DATA_IN="$TAMPER3_DATA_NATIVE" node -e '
       const fs = require("node:fs");
       const file = process.env.RECORD_IN;
       const record = JSON.parse(fs.readFileSync(file, "utf8"));
