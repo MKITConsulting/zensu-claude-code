@@ -94,6 +94,35 @@ else
   check "the adoption entry point owns the sweep call now that the core does not" FAIL
 fi
 
+# The required-module guard list is ONE table, not a copy-paste run. WORKING TREE,
+# not HEAD — this is a source pin, so it grades the edit in front of you.
+#
+# The list is the point, not the tidiness. This file's own history records
+# claude-path-v1.js "left out when the list last grew, with the omission written into
+# a comment as a known gap": a list that grows by copy-paste is a list that loses a
+# member, and the loss is silent because each surviving block still passes. So both
+# halves are pinned — the per-module hand-copied FORM must be gone, and every module
+# the entry point loads must still be named.
+#
+# The form needle is anchored at the start of a line and requires an ALL-CAPS single
+# variable, which is what the seven hand-copied blocks looked like; the shell-sibling
+# loop uses a lowercase `_zsa_` loop variable and is deliberately not matched, because
+# it is the shape this check wants MORE of.
+ADOPT_SRC="$ROOT/hooks/lib/zensu-session-adopt.sh"
+ADOPT_HANDCOPIED="$(grep -cE '^\[ -f "\$[A-Z_]+" \] && \[ ! -L "\$[A-Z_]+" \]' "$ADOPT_SRC" 2>/dev/null || true)"
+ADOPT_MODULES_MISSING=""
+for _adopt_mod in session-control-core-v1.js claude-hook-session-v1.js \
+    session-adopt-report-v1.js review-evidence-sweep-v1.js \
+    review-evidence-lease-v1.js zensu-safe-display-v1.js claude-path-v1.js; do
+  grep -qF "$_adopt_mod" "$ADOPT_SRC" 2>/dev/null \
+    || ADOPT_MODULES_MISSING="$ADOPT_MODULES_MISSING $_adopt_mod"
+done
+if [ "$ADOPT_HANDCOPIED" = 0 ] && [ -z "$ADOPT_MODULES_MISSING" ]; then
+  check "the adoption entry point guards its required modules from one table, not seven copies" PASS
+else
+  check "the adoption entry point guards its required modules from one table, not seven copies (hand-copied=$ADOPT_HANDCOPIED missing:${ADOPT_MODULES_MISSING:- none})" FAIL
+fi
+
 TMP_RAW="$(mktemp -d "${TMPDIR:-/tmp}/zensu-versioned-upgrade-XXXXXX")" \
   || { printf '%s\n' 'test-versioned-plugin-upgrade: cannot create isolated temp directory' >&2; exit 1; }
 [ -n "$TMP_RAW" ] && [ -d "$TMP_RAW" ] && [ ! -L "$TMP_RAW" ] \

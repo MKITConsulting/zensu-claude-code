@@ -62,77 +62,63 @@ PLUGIN_ROOT="$(cd "$DIR/../.." && pwd -P)" || {
   printf '%s\n' 'zensu:adopt-session: cannot resolve the executing plugin root' >&2
   exit 1
 }
-CORE="$DIR/session-control-core-v1.js"
-[ -f "$CORE" ] && [ ! -L "$CORE" ] || {
-  printf '%s\n' 'zensu:adopt-session: the Session Control runtime is missing or symlinked; repair the Zensu plugin installation' >&2
-  exit 1
-}
-# The binder is loaded by the report module for its private-store constructor, so it
-# gets the same guard the core does — zensu-session.sh applies it to this exact file
-# at three sites, and a symlinked binder must not be the one library this
-# write-capable script loads unchecked.
-BINDER="$DIR/claude-hook-session-v1.js"
-[ -f "$BINDER" ] && [ ! -L "$BINDER" ] || {
-  printf '%s\n' 'zensu:adopt-session: the Session Control binder is missing or symlinked; repair the Zensu plugin installation' >&2
-  exit 1
-}
-# The report itself. It used to be a `node -e` payload carried inside this script as a
-# single-quoted string, which is why safe() had no test in either direction; it is a
-# real module now and gets the same missing-or-symlinked guard as the two libraries
-# above, because this is the file the write-capable command actually executes.
-REPORT="$DIR/session-adopt-report-v1.js"
-[ -f "$REPORT" ] && [ ! -L "$REPORT" ] || {
-  printf '%s\n' 'zensu:adopt-session: the adoption report module is missing or symlinked; repair the Zensu plugin installation' >&2
-  exit 1
-}
-# The sweep the report invokes after adoptContext, guarded for the same reason: a
-# missing or symlinked sweep must stop this command BEFORE any record is mutated,
-# not after.
-SWEEP="$DIR/review-evidence-sweep-v1.js"
-[ -f "$SWEEP" ] && [ ! -L "$SWEEP" ] || {
-  printf '%s\n' 'zensu:adopt-session: the review-evidence sweep module is missing or symlinked; repair the Zensu plugin installation' >&2
-  exit 1
-}
-# The lease-store OWNER, which the sweep requires. It is new to this command's load
-# graph — before the seam the core hand-copied its constants precisely to avoid the
-# require cycle — and it is the module that decides WHICH leases move
-# (leaseRecordIsOwned) and that creates and chmods the store (ensurePrivateDirectory,
-# storage). Leaving it unguarded while its four siblings are guarded would mean the
-# one command still reachable in a tamper-suspicious state loads its move selector
-# from a file nothing checked.
-LEASE="$DIR/review-evidence-lease-v1.js"
-[ -f "$LEASE" ] && [ ! -L "$LEASE" ] || {
-  printf '%s\n' 'zensu:adopt-session: the review-evidence lease module is missing or symlinked; repair the Zensu plugin installation' >&2
-  exit 1
-}
-
-# The display-safety rules. Newest member of this command's load graph — the report
-# requires it at TOP LEVEL, and node's require FOLLOWS symlinks — and it is the one
-# module that decides what every value in the report is allowed to look like before
-# it reaches a terminal and the model's context. Unguarded, a link planted at this
-# name substitutes the fold for the whole report: the project line the user reads to
-# decide whether to take the record over is exactly what it renders. Same reasoning
-# as the lease guard above, one module further along.
-SAFE_DISPLAY_LIB="$DIR/zensu-safe-display-v1.js"
-[ -f "$SAFE_DISPLAY_LIB" ] && [ ! -L "$SAFE_DISPLAY_LIB" ] || {
-  printf '%s\n' 'zensu:adopt-session: the display-safety module is missing or symlinked; repair the Zensu plugin installation' >&2
-  exit 1
-}
-
-# The host-path normalizer, reached TRANSITIVELY rather than by a require in the
-# report module — the binder requires it, and so does the lease owner. It is not
-# inert on that path: `canonicalDirectory` runs every trust-boundary path through
-# `normalizeHostPathInput`, including the CLAUDE_PLUGIN_DATA value that locates the
-# private record store, and nothing else re-verifies the EXECUTING tree here (the
-# digest is recomputed against the RECORDED root only). It was left out when the
-# list last grew, with the omission written into a comment as a known gap; a guard
-# list whose completeness lives in prose is the shape this file already rejects for
-# its six siblings.
-PATH_LIB="$DIR/claude-path-v1.js"
-[ -f "$PATH_LIB" ] && [ ! -L "$PATH_LIB" ] || {
-  printf '%s\n' 'zensu:adopt-session: the host-path module is missing or symlinked; repair the Zensu plugin installation' >&2
-  exit 1
-}
+# EVERY module this command loads, guarded from ONE table. These were seven
+# byte-for-byte copies differing only in a variable name, a path and a noun, while the
+# two SHELL siblings further down were already guarded by a loop — one file carrying
+# two spellings of one rule, with the better one demonstrated in the same file.
+#
+# The LIST is the safety property, not the tidiness. This file's own history records
+# claude-path-v1.js being left out when the list last grew, with the omission written
+# into a comment as a known gap: a list that grows by copy-paste is a list that loses a
+# member, and the loss is silent because every surviving copy still passes.
+#
+# Each row keeps its noun, so all seven emitted messages are unchanged. Why each module
+# is on the list, carried over from the guards this replaces:
+#   session-control-core-v1.js   the runtime that reads and re-mints the record
+#   claude-hook-session-v1.js    loaded by the report for its private-store constructor.
+#                                zensu-session.sh guards this exact file at three sites,
+#                                and a symlinked binder must not be the one library this
+#                                write-capable script loads unchecked
+#   session-adopt-report-v1.js   the file this command actually executes
+#   review-evidence-sweep-v1.js  invoked after adoptContext; a missing or symlinked
+#                                sweep must stop this command BEFORE any record is
+#                                mutated, not after
+#   review-evidence-lease-v1.js  the lease-store OWNER the sweep requires, so the one
+#                                command still reachable in a tamper-suspicious state
+#                                does not load its move selector from an unchecked file
+#   zensu-safe-display-v1.js     decides what every value in the report may look like
+#                                before it reaches a terminal and the model's context.
+#                                node's require FOLLOWS symlinks, so a link planted at
+#                                this name substitutes the fold for the whole report —
+#                                including the project line the user reads to decide
+#   claude-path-v1.js            reached TRANSITIVELY, and not inert on that path:
+#                                canonicalDirectory runs every trust-boundary path
+#                                through normalizeHostPathInput, including the
+#                                CLAUDE_PLUGIN_DATA value that locates the private
+#                                record store, and nothing else re-verifies the
+#                                EXECUTING tree here
+#
+# The loop runs in THIS shell — a `while … done < input` is not a subshell in bash — so
+# `exit 1` still stops the command rather than only the loop. The loop variable is
+# lowercase and `_zsa_`-prefixed, matching the shell-sibling loop below, which is the
+# shape this replacement wants more of. tests/structure/test-versioned-plugin-upgrade.sh
+# pins both halves: that no per-module hand-copied guard returns, and that no module
+# silently drops off this list.
+while IFS='|' read -r _zsa_file _zsa_noun; do
+  [ -n "$_zsa_file" ] || continue
+  [ -f "$DIR/$_zsa_file" ] && [ ! -L "$DIR/$_zsa_file" ] || {
+    printf '%s\n' "zensu:adopt-session: the $_zsa_noun is missing or symlinked; repair the Zensu plugin installation" >&2
+    exit 1
+  }
+done <<'ZSA_REQUIRED_MODULES'
+session-control-core-v1.js|Session Control runtime
+claude-hook-session-v1.js|Session Control binder
+session-adopt-report-v1.js|adoption report module
+review-evidence-sweep-v1.js|review-evidence sweep module
+review-evidence-lease-v1.js|review-evidence lease module
+zensu-safe-display-v1.js|display-safety module
+claude-path-v1.js|host-path module
+ZSA_REQUIRED_MODULES
 
 CONFIRM=0
 case "${1:-}" in
