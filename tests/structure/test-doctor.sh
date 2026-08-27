@@ -178,8 +178,11 @@ fi
 PHASE3_SKILL="$(sed -n '/^## Phase 3:/,/^## Response Style/p' "$SKILL_MD")"
 if printf '%s\n' "$PHASE3_SKILL" | grep -qF 'Never delete, rename, rewrite, or enumerate' \
   && printf '%s\n' "$PHASE3_SKILL" | grep -qF 'zensu-log.sh --review-rearm' \
-  && printf '%s\n' "$PHASE3_SKILL" | grep -qF 'PENDING="$STATE_DIR/pending-review.json"' \
-  && printf '%s\n' "$PHASE3_SKILL" | grep -qF 'rm -f -- "$PENDING"' \
+  && printf '%s\n' "$PHASE3_SKILL" | grep -qF 'Do NOT re-derive it from' \
+  && printf '%s\n' "$PHASE3_SKILL" | grep -qF "expired, safe to clear: '<absolute path>'" \
+  && printf '%s\n' "$PHASE3_SKILL" | grep -qF 'already SHELL-QUOTED' \
+  && printf '%s\n' "$PHASE3_SKILL" | grep -qF 'PRECONDITION, not a substitute for yours' \
+  && printf '%s\n' "$PHASE3_SKILL" | grep -qF 'rm -f -- <the quoted literal' \
   && ! printf '%s\n' "$PHASE3_SKILL" | awk '/^```/{inside=!inside;next} inside{print}' | grep -Eq '(^|[[:space:]])find[[:space:]]'; then
   check "P2m cleanup protects CAS documents and limits the only write to exact pending-review.json" PASS
 else
@@ -393,6 +396,437 @@ case "$OUT_NOMOD" in
     check "P1mf a missing chain module degrades to a warning (got: $OUT_NOMOD)" FAIL ;;
 esac
 
+# --- open chain not owned by this session ----------------------------------
+# A forked or re-initialized Claude Code session receives a NEW session id while
+# carrying its history over, so the chain armed under the old key is unreachable
+# and every later helper call answers `no-session`. Nothing reported that, which
+# is what this row exists for. Both fixture documents are produced by shipped
+# verbs (--tdd-begin, --tdd-reset) rather than hand-written, so the rows grade
+# the real classifier.
+#
+# `initialize-baseline.sh` exports CLAUDE_PLUGIN_DATA and CLAUDE_CODE_SESSION_ID
+# besides the project dir, so all three are saved here and restored at the end of
+# the block: restoring only the last would leave a session bound to a project
+# nobody else in this file is looking at, for the remaining ~2000 lines.
+#
+# Deliberately NOT a subshell, though that would restore them for free. `check`
+# increments its tallies in the shell that runs it, so a subshell would PRINT a
+# FAIL and let the suite still exit 0 — measured, not hypothetical: the first
+# version of this block did exactly that, reporting `0 FAIL` with two failures on
+# screen. The env dance is the cheaper of the two mistakes.
+STRAND_SAVED_PROJECT="${CLAUDE_PROJECT_DIR:-}"
+STRAND_SAVED_DATA="${CLAUDE_PLUGIN_DATA:-}"
+STRAND_SAVED_SESSION="${CLAUDE_CODE_SESSION_ID:-}"
+STRAND_PROJECT="$SBOX/strand-project"
+mkdir -p "$STRAND_PROJECT"
+export CLAUDE_PROJECT_DIR="$STRAND_PROJECT"
+# ORDER IS LOAD-BEARING: the inert document must be written FIRST, so its
+# `updated_at` is OLDER than the clock below (which is pinned to the open
+# document). Armed the other way round the inert entry was excluded by the
+# future-stamp guard before the inert-shape filter ever ran, and P1mh passed with
+# that filter deleted — measured, not hypothetical.
+# shellcheck disable=SC1091
+source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" strand-inert
+bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --tdd-begin --session strand-inert >/dev/null 2>&1
+bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --tdd-reset --session strand-inert >/dev/null 2>&1
+# shellcheck disable=SC1091
+source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" strand-open
+bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --tdd-begin --session strand-open >/dev/null 2>&1
+STRAND_OPEN_KEY="$(node "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" session-key strand-open)"
+STRAND_INERT_KEY="$(node "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" session-key strand-inert)"
+# A third key: a session owning neither document, which is the state a fork lands in.
+STRAND_FOREIGN_KEY="$(node "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" session-key strand-observer)"
+# The clock is pinned to the open document's own `updated_at`, which is what the
+# renderer ages against — not to its mtime, and not to a literal. The TTL arms
+# below move the clock a fixed distance from this point.
+STRAND_NOW_MS="$(CLAUDE_PROJECT_DIR="$STRAND_PROJECT" node -e '
+  var core = require(process.argv[1] + "/hooks/lib/session-control-core-v1.js");
+  var s = core.readWorkflowState({ projectRoot: process.argv[2], sessionId: process.argv[3] });
+  process.stdout.write(String(Date.parse(s.updated_at)));
+' "$PLUGIN_DIR" "$STRAND_PROJECT" "$STRAND_OPEN_KEY")"
+STRAND_INERT_MS="$(CLAUDE_PROJECT_DIR="$STRAND_PROJECT" node -e '
+  var core = require(process.argv[1] + "/hooks/lib/session-control-core-v1.js");
+  var s = core.readWorkflowState({ projectRoot: process.argv[2], sessionId: process.argv[3] });
+  process.stdout.write(String(Date.parse(s.updated_at)));
+' "$PLUGIN_DIR" "$STRAND_PROJECT" "$STRAND_INERT_KEY")"
+# P1mh only bites while the inert document is not NEWER than the clock: the renderer
+# filters inert shapes before it ages anything, so a later stamp would exclude the
+# entry through the future-stamp guard instead and the filter under test would go
+# untested. Arming order produces that relation; this asserts it.
+if [ -n "$STRAND_INERT_MS" ] && [ "$STRAND_INERT_MS" -le "$STRAND_NOW_MS" ]; then
+  check "P1mh0 the inert fixture is not newer than the clock, so P1mh tests the inert filter" PASS
+else
+  check "P1mh0 the inert fixture is not newer than the clock (inert=$STRAND_INERT_MS now=$STRAND_NOW_MS)" FAIL
+fi
+STRAND_PHRASE='open chain(s) not owned by this session'
+# Every healthy render of this fixture names both documents in the shapes row.
+# The absence arms below assert it BEFORE testing for absence: `strand_report`
+# discards stderr and the renderer catches every throw and still exits 0, so an
+# output that merely lacks the needle proves nothing on its own.
+STRAND_ANCHOR='chain: 2 review chain(s)'
+strand_report() {
+  # $1 = ZDOC_SESSION_KEY, $2 = now in ms, $3 = ZDOC_BINDING (default bound),
+  # $4 = ZDOC_SESSION_PROJECT_ROOT (default the scanned project), $5 = TTL hours
+  ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent ZDOC_TTL_HOURS="${5:-6}" \
+  ZDOC_BINDING="${3:-bound}" ZDOC_SESSION_KEY="$1" ZDOC_NOW_MS="$2" \
+  ZDOC_SESSION_PROJECT_ROOT="${4-$STRAND_PROJECT}" \
+  ZENSU_DOCTOR_PLUGIN_DIR="$PLUGIN_DIR" ZENSU_CONFIG="" CLAUDE_PROJECT_DIR="$STRAND_PROJECT" \
+    node "$REPORT" 2>/dev/null
+}
+strand_absent() {
+  # $1 = check id + description, $2 = the report to grade
+  case "$2" in
+    *"$STRAND_ANCHOR"*) ;;
+    *) check "$1 — VACUOUS: the run produced no classified report" FAIL; return ;;
+  esac
+  case "$2" in
+    *"$STRAND_PHRASE"*) check "$1" FAIL ;;
+    *) check "$1" PASS ;;
+  esac
+}
+
+OUT="$(strand_report "$STRAND_FOREIGN_KEY" "$STRAND_NOW_MS")"
+# The glyph is part of the contract, not decoration: `line()` counts only WARN
+# toward warnCount, and main() prints "all checks green" while that count is 0.
+# A row silently demoted to OK would leave every text assertion below green.
+case "$OUT" in
+  *"⚠️  chain: 1 $STRAND_PHRASE"*"${STRAND_OPEN_KEY:0:13}"*': implementing'*)
+    check "P1mg a foreign open chain within the TTL is reported, as a warning" PASS ;;
+  *) check "P1mg a foreign open chain within the TTL is reported, as a warning (got: $OUT)" FAIL ;;
+esac
+# The row's own severity, measured differentially. An earlier version asserted the
+# absence of "all checks green", which `strand_report` makes unreachable on its own
+# (it injects ZDOC_ZENSU=absent, ZDOC_FORGE_STATE=missing and ZDOC_PLAYWRIGHT=absent,
+# three WARN rows), so it passed even with the row demoted to OK. Counting warnings
+# with and without the row is what actually bites.
+strand_warncount() {
+  printf '%s' "$1" | sed -n 's/^Summary:.*[^0-9]\([0-9][0-9]*\) ⚠️.*/\1/p' | head -1
+}
+STRAND_W_WITH="$(strand_warncount "$OUT")"
+STRAND_W_WITHOUT="$(strand_warncount "$(strand_report "$STRAND_OPEN_KEY" "$STRAND_NOW_MS")")"
+if [ -n "$STRAND_W_WITH" ] && [ -n "$STRAND_W_WITHOUT" ] \
+  && [ "$STRAND_W_WITH" -eq "$(( STRAND_W_WITHOUT + 1 ))" ]; then
+  check "P1mg1 the row adds exactly one warning to the summary count" PASS
+else
+  check "P1mg1 the row adds exactly one warning to the summary count (with=$STRAND_W_WITH without=$STRAND_W_WITHOUT)" FAIL
+fi
+case "$OUT" in
+  *"$STRAND_PHRASE"*"${STRAND_INERT_KEY:0:13}"*)
+    check "P1mh an inert (no-session) foreign chain is never named" FAIL ;;
+  *) check "P1mh an inert (no-session) foreign chain is never named" PASS ;;
+esac
+case "$OUT" in
+  *"$STRAND_OPEN_KEY"*) check "P1mi the row never prints a full session key" FAIL ;;
+  *) check "P1mi the row never prints a full session key" PASS ;;
+esac
+# The row must not assert a fork: it cannot tell a forked-away session from a
+# live sibling, and this repository mandates worktree workflows where live
+# siblings are ordinary. It states the observation and makes the remedy
+# conditional on the reader establishing which cause applies.
+case "$OUT" in
+  *'cannot be moved to this key'*'Check whether the owning session is still running before acting'*)
+    check "P1mj the row states the observation and a conditional remedy" PASS ;;
+  *) check "P1mj the row states the observation and a conditional remedy (got: $OUT)" FAIL ;;
+esac
+# The CAUSE ORDER is the contract, not decoration. The predicate is dominated by a
+# session that ended without --chain-done, so naming the fork first and opening with
+# "nothing is wrong here" described the rare case and dismissed the common one.
+case "$OUT" in
+  *'Usually a session that ended without /zensu:tdd --chain-done'*'It can also be a'*'live sibling'*'or a FORK'*)
+    check "P1mj1 the row names the abandoned chain before the fork" PASS ;;
+  *) check "P1mj1 the row names the abandoned chain before the fork (got: $OUT)" FAIL ;;
+esac
+
+strand_absent "P1mk this session's OWN open chain is never reported" \
+  "$(strand_report "$STRAND_OPEN_KEY" "$STRAND_NOW_MS")"
+strand_absent "P1ml with no current session key the row is absent" \
+  "$(strand_report "" "$STRAND_NOW_MS")"
+# A malformed injected key must not be TREATED as the current key: every chain
+# would then read as foreign and the row would accuse the session of stranding
+# its own work.
+strand_absent "P1mm a malformed current session key never enables the row" \
+  "$(strand_report "scv1_not-a-key" "$STRAND_NOW_MS")"
+# The wrapper states the key is empty for every verdict but `bound`. That block
+# is skipped whenever a caller supplies ZDOC_BINDING, so the reader enforces it:
+# without this the report could print the ❌ no-record row and, below it, a row
+# keyed on a session key it had just said does not exist.
+strand_absent "P1mm1 a well-formed key under a non-bound verdict never enables the row" \
+  "$(strand_report "$STRAND_FOREIGN_KEY" "$STRAND_NOW_MS" unbound)"
+# Every WRITER anchors the state directory on the record's project root, so the
+# whole Session state block must read there too. Pointing the record anchor at an
+# empty directory has to move the block, not merely change one row: if it still
+# read CLAUDE_PROJECT_DIR the two strand documents would still be classified.
+OUT_ELSEWHERE="$(strand_report "$STRAND_FOREIGN_KEY" "$STRAND_NOW_MS" bound "$SBOX/some-other-root")"
+case "$OUT_ELSEWHERE" in
+  *"$STRAND_ANCHOR"*) check "P1mm2 the state block follows the record anchor, not CLAUDE_PROJECT_DIR" FAIL ;;
+  *'no CAS workflow documents yet'*|*'does not exist yet'*)
+    check "P1mm2 the state block follows the record anchor, not CLAUDE_PROJECT_DIR" PASS ;;
+  *) check "P1mm2 the state block follows the record anchor (got: $OUT_ELSEWHERE)" FAIL ;;
+esac
+# With no recorded anchor there is nothing better than the caller's value, so the
+# block falls back to it rather than going blind.
+OUT_FALLBACK="$(strand_report "$STRAND_FOREIGN_KEY" "$STRAND_NOW_MS" bound "")"
+case "$OUT_FALLBACK" in
+  *"$STRAND_ANCHOR"*"$STRAND_PHRASE"*)
+    check "P1mm3 an absent record anchor falls back to CLAUDE_PROJECT_DIR" PASS ;;
+  *) check "P1mm3 an absent record anchor falls back to CLAUDE_PROJECT_DIR (got: $OUT_FALLBACK)" FAIL ;;
+esac
+# Both halves of the row's contract DISCLOSE when they cannot run. The wrapper half
+# — a bound verdict whose session key never arrived — used to withhold the row in
+# silence while the rest of the report looked healthy, which is exactly the verdict
+# a diagnostic may not give. Reachable through the shipped wrapper whenever one of
+# its shape guards drops the pair.
+OUT_NOKEY="$(strand_report "" "$STRAND_NOW_MS" bound "$STRAND_PROJECT")"
+case "$OUT_NOKEY" in
+  *'the session key did not reach this report'*'missing check, not an all-clear'*)
+    check "P1mm5 a bound verdict with no session key discloses instead of falling silent" PASS ;;
+  *) check "P1mm5 a bound verdict with no session key discloses instead of falling silent (got: $OUT_NOKEY)" FAIL ;;
+esac
+# ...and it still withholds the row itself; disclosure is not permission to guess.
+strand_absent "P1mm6 the disclosure never renders the row it could not compute" "$OUT_NOKEY"
+# The fallback is bound-only: a recorded anchor supplied under any other verdict
+# is not the record speaking, so it must not redirect where the doctor looks.
+OUT_UNBOUND_ROOT="$(strand_report "$STRAND_FOREIGN_KEY" "$STRAND_NOW_MS" unbound "$SBOX/some-other-root")"
+case "$OUT_UNBOUND_ROOT" in
+  *"$STRAND_ANCHOR"*) check "P1mm4 a recorded anchor under a non-bound verdict never redirects the scan" PASS ;;
+  *) check "P1mm4 a recorded anchor under a non-bound verdict never redirects the scan (got: $OUT_UNBOUND_ROOT)" FAIL ;;
+esac
+# A non-ENOENT errno on the state directory must not render as health. ENOTDIR is
+# the arm reachable without a privileged principal: a regular file where the state
+# directory belongs. P1t chmods that directory to 0500, which leaves it READABLE, so
+# it lands on the write-access row instead and never reaches this branch.
+NOTDIR_PROJECT="$SBOX/notdir-project"; mkdir -p "$NOTDIR_PROJECT/.zensu"
+: > "$NOTDIR_PROJECT/.zensu/state"
+OUT_NOTDIR="$(strand_report "$STRAND_FOREIGN_KEY" "$STRAND_NOW_MS" bound "$NOTDIR_PROJECT")"
+case "$OUT_NOTDIR" in
+  *'could not be read'*'missing check, not an all-clear'*)
+    check "P1mn0 a non-ENOENT state-directory errno is disclosed, not reported as health" PASS ;;
+  *) check "P1mn0 a non-ENOENT state-directory errno is disclosed, not reported as health (got: $OUT_NOTDIR)" FAIL ;;
+esac
+strand_absent "P1mn a foreign open chain past the TTL is not reported" \
+  "$(strand_report "$STRAND_FOREIGN_KEY" "$(( STRAND_NOW_MS + 100 * 3600 * 1000 ))")"
+# Bounded in both directions: a document dated in the FUTURE yields a negative
+# age that a one-sided `<= ttl` never crosses, so it would render forever.
+strand_absent "P1mo a future-dated document does not render the row forever" \
+  "$(strand_report "$STRAND_FOREIGN_KEY" "$(( STRAND_NOW_MS - 100 * 3600 * 1000 ))")"
+
+# `0` DISABLES the bound everywhere else this key is read (docs/configuration.md,
+# and reviewerDenialRows in the same renderer). A predicate that merely compared
+# against 0 would silently delete the whole row instead.
+OUT_TTL0="$(strand_report "$STRAND_FOREIGN_KEY" "$(( STRAND_NOW_MS + 100 * 3600 * 1000 ))" bound "$STRAND_PROJECT" 0)"
+case "$OUT_TTL0" in
+  *"1 $STRAND_PHRASE"*"${STRAND_OPEN_KEY:0:13}"*)
+    check "P1mq a TTL of 0 disables the age bound rather than the whole row" PASS ;;
+  *) check "P1mq a TTL of 0 disables the age bound rather than the whole row (got: $OUT_TTL0)" FAIL ;;
+esac
+case "$OUT_TTL0" in
+  *'touched within 0h'*) check "P1mq1 a disabled bound is not advertised as a 0h window" FAIL ;;
+  *) check "P1mq1 a disabled bound is not advertised as a 0h window" PASS ;;
+esac
+# The POSITIVE half. Without it the whole ternary could be deleted and every check
+# here would stay green: P1mg matches `*` between the phrase and the key, which
+# swallows the clause whether or not it is there, and P1mq/P1mq2 match the phrase
+# alone. The row states the window it is bounded by; that is contract, not garnish.
+case "$OUT" in
+  *"$STRAND_PHRASE, touched within 6h"*)
+    check "P1mq1a an armed bound IS advertised as its window" PASS ;;
+  *) check "P1mq1a an armed bound IS advertised as its window (got: $OUT)" FAIL ;;
+esac
+# At `0` the row claims no window, so a FUTURE stamp is not out of one. Only a stamp
+# that cannot be read at all may still exclude an entry there.
+OUT_TTL0_FUTURE="$(strand_report "$STRAND_FOREIGN_KEY" "$(( STRAND_NOW_MS - 100 * 3600 * 1000 ))" bound "$STRAND_PROJECT" 0)"
+case "$OUT_TTL0_FUTURE" in
+  *"1 $STRAND_PHRASE"*"${STRAND_OPEN_KEY:0:13}"*)
+    check "P1mq2 a disabled bound does not exclude a future-dated document" PASS ;;
+  *) check "P1mq2 a disabled bound does not exclude a future-dated document (got: $OUT_TTL0_FUTURE)" FAIL ;;
+esac
+
+# FR-004: the doctor is read-only, and this is the one block pointing the
+# renderer at a live state directory built by shipped verbs.
+STRAND_BEFORE="$(cd "$STRAND_PROJECT/.zensu/state" && for f in *; do printf '%s:%s:%s\n' "$f" "$(wc -c <"$f")" "$(node -e 'process.stdout.write(String(require("fs").statSync(process.argv[1]).mtimeMs))' "$f")"; done)"
+strand_report "$STRAND_FOREIGN_KEY" "$STRAND_NOW_MS" >/dev/null
+STRAND_AFTER="$(cd "$STRAND_PROJECT/.zensu/state" && for f in *; do printf '%s:%s:%s\n' "$f" "$(wc -c <"$f")" "$(node -e 'process.stdout.write(String(require("fs").statSync(process.argv[1]).mtimeMs))' "$f")"; done)"
+case "$STRAND_BEFORE" in
+  *"tdd-phase-${STRAND_OPEN_KEY}.json"*"tdd-phase-${STRAND_INERT_KEY}.json"*|*"tdd-phase-${STRAND_INERT_KEY}.json"*"tdd-phase-${STRAND_OPEN_KEY}.json"*)
+    check "P1mr1 the read-only snapshot named both workflow documents" PASS ;;
+  *) check "P1mr1 the read-only snapshot named both workflow documents" FAIL ;;
+esac
+if [ -n "$STRAND_BEFORE" ] && [ "$STRAND_BEFORE" = "$STRAND_AFTER" ]; then
+  check "P1mr a report run leaves every workflow document byte- and mtime-identical" PASS
+else
+  check "P1mr a report run leaves every workflow document byte- and mtime-identical" FAIL
+fi
+export CLAUDE_PROJECT_DIR="$STRAND_SAVED_PROJECT"
+export CLAUDE_PLUGIN_DATA="$STRAND_SAVED_DATA"
+export CLAUDE_CODE_SESSION_ID="$STRAND_SAVED_SESSION"
+# `initialize-baseline.sh` also binds these five through `zensu_bind_model_session`.
+# Latent rather than live today — the later real-wrapper runs unset them first — but
+# leaving them bound to a project nobody else here looks at is a trap, not a saving.
+unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
+  ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+
+# The wrapper half is pinned AT SOURCE, and the reason is measured rather than
+# assumed. An earlier version of this note claimed a real bind needs a live host
+# session; that is FALSE and was disproved here. Against the `strand-open` baseline
+# above, `zensu_bind_model_session` returns 0 from a plain child process and yields
+# both the scv1_ key and the project root, and the wrapper's exact substitution
+# body — source, bind, four shape guards, tab-joined printf — reproduces that with
+# rc=0 and a correct pair when run inline.
+#
+# What could NOT be made to work is the wrapper END TO END: `bash "$HELPER"` with
+# that same environment still reports `binding: this session has no valid Session
+# Control record`. The cause is NOT the comment inside the substitution (removing it
+# changes nothing, measured) and NOT the shape guards (each exits 0, which would
+# still yield `bound`). It was not established, so the end-to-end check was removed
+# rather than left failing or weakened until it passed.
+#
+# CONSEQUENCE, stated so nobody reads the greps as more than they are: the branch
+# that PRODUCES the pair, and that decides ZDOC_BINDING for EVERY session, has no
+# executed coverage. A grep sees the `|| exit 0` literal; it cannot see the
+# composite exit status, the TAB split, or the pair reaching the renderer.
+# The structural pin must therefore cover the shape-failure DIRECTION, not only the
+# shape — flipping `|| exit 0` to `|| exit 1` makes the elif fail, so a genuinely
+# bound session is reported `unbound`, and a pattern that stopped at the regex would
+# still match.
+if grep -qF 'elif ZDOC_SESSION_PAIR="$(' "$HELPER" \
+  && grep -qE 'ZENSU_SESSION_KEY:-\}" =~ \^scv1_\[a-f0-9\]\{64\}\$ \]\] \|\| exit 0' "$HELPER" \
+  && grep -qE '\[ -d "\$\{ZENSU_PROJECT_ROOT:-\}" \] \|\| exit 0' "$HELPER" \
+  && grep -qF 'case "${ZENSU_PROJECT_ROOT:-}" in *[[:cntrl:]]*) exit 0' "$HELPER" \
+  && grep -qE '^export ZDOC_ZENSU' "$HELPER" \
+  && grep -qF 'ZDOC_SESSION_KEY ZDOC_SESSION_PROJECT_ROOT' "$HELPER"; then
+  check "P1mp the wrapper shape-guards the bound pair, drops on failure, and exports it" PASS
+else
+  check "P1mp the wrapper shape-guards the bound pair, drops on failure, and exports it" FAIL
+fi
+# Neither value may be `:=`-seeded: an inherited one would survive the `unknown`
+# and `unavailable` branches, which set a verdict and never reach the bind.
+STRAND_CLEAR_ORDER="$(awk '
+  /^ZDOC_SESSION_KEY=""/ && !k { k = NR }
+  /^ZDOC_SESSION_PROJECT_ROOT=""/ && !r { r = NR }
+  /^if \[ -z "\$\{ZDOC_BINDING:-\}" \]; then/ && !g { g = NR }
+  END { print (k && r && g && k < g && r < g) ? "ok" : "bad" }' "$HELPER")"
+if [ "$STRAND_CLEAR_ORDER" = ok ] \
+  && ! grep -qF 'ZDOC_SESSION_KEY="${ZDOC_SESSION_KEY:-}"' "$HELPER" \
+  && ! grep -qF 'ZDOC_SESSION_PROJECT_ROOT="${ZDOC_SESSION_PROJECT_ROOT:-}"' "$HELPER"; then
+  check "P1mp1 the session pair is cleared unconditionally, never :=-seeded" PASS
+else
+  check "P1mp1 the session pair is cleared unconditionally, never :=-seeded" FAIL
+fi
+
+# I7's behavioural half is unreachable from a structure suite: driving a chain to
+# `chain-closed` needs a real reviewer spawn to consume the review ticket, which
+# no test can perform. The rename risk it names is closed at the root instead —
+# both inert literals must still be shapes the OWNER mints.
+#
+# The membership test drives `classifyChain` and reads the shape it RETURNS. An
+# earlier version compared against the `NEXT_COMMAND` lookup table instead, which
+# reproduced the exact blindness this export was created to remove: renaming what
+# `chainShape` returns while leaving the table key in place kept the check green
+# while a genuinely closed foreign chain rendered as an open one. A consumer-side
+# table is not the producer.
+STRAND_VOCAB="$(node -e '
+  var chain = require(process.argv[1] + "/hooks/lib/chain-recovery-v1.js");
+  var want = ["no-session", "chain-closed"];
+  var got = chain.INERT_SHAPES;
+  var verdict;
+  if (!Array.isArray(got)) {
+    verdict = "NOT-EXPORTED";
+  } else {
+    var missing = want.filter(function (s) { return got.indexOf(s) === -1; });
+    var minted = {};
+    [
+      { active: false },
+      { active: true, implComplete: true, chainDone: true },
+    ].forEach(function (doc) {
+      try { minted[chain.chainShape(doc)] = true; } catch (e) { /* shape not derivable */ }
+    });
+    var unminted = got.filter(function (s) { return !minted[s]; });
+    if (missing.length) verdict = "MISSING-FROM-INERT:" + missing.join(",");
+    else if (unminted.length) verdict = "NOT-RETURNED-BY-CLASSIFY:" + unminted.join(",");
+    else verdict = "ok";
+  }
+  process.stdout.write(verdict);
+' "$PLUGIN_DIR")"
+[ "$STRAND_VOCAB" = ok ] \
+  && check "P1ms the owner exports INERT_SHAPES holding both shapes it mints" PASS \
+  || check "P1ms the owner exports INERT_SHAPES holding both shapes it mints ($STRAND_VOCAB)" FAIL
+# A plugin root whose owner module loads but exports an unusable INERT_SHAPES.
+# `[]` is the cheapest shape: inertShapes() answers null for an empty array.
+BADINERT="$SBOX/badinert"
+mkdir -p "$BADINERT/.claude-plugin" "$BADINERT/hooks/lib"
+printf '{"name":"zensu","version":"1.2.3"}\n' > "$BADINERT/.claude-plugin/plugin.json"
+printf '{"plugins":[{"name":"zensu","version":"1.2.3"}]}\n' > "$BADINERT/.claude-plugin/marketplace.json"
+printf '{"hooks":{}}\n' > "$BADINERT/hooks/hooks.json"
+cp "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" "$BADINERT/hooks/lib/"
+cp "$PLUGIN_DIR/hooks/lib/zensu-doctor-report.js" "$BADINERT/hooks/lib/"
+sed "s/^const INERT_SHAPES = .*/const INERT_SHAPES = Object.freeze([]);/" \
+  "$PLUGIN_DIR/hooks/lib/chain-recovery-v1.js" > "$BADINERT/hooks/lib/chain-recovery-v1.js"
+OUT_BADINERT="$(ZDOC_ZENSU=absent ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent ZDOC_TTL_HOURS=6 ZDOC_BINDING=bound \
+  ZDOC_SESSION_KEY="$STRAND_FOREIGN_KEY" ZDOC_NOW_MS="$STRAND_NOW_MS" \
+  ZDOC_SESSION_PROJECT_ROOT="$STRAND_PROJECT" \
+  ZENSU_DOCTOR_PLUGIN_DIR="$BADINERT" ZENSU_CONFIG="" CLAUDE_PROJECT_DIR="$STRAND_PROJECT" \
+  node "$BADINERT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
+case "$OUT_BADINERT" in
+  *'exports no usable inert-shape set'*'missing check, not an all-clear'*)
+    check "P1ms3 an unusable inert-shape export is disclosed, not withheld silently" PASS ;;
+  *) check "P1ms3 an unusable inert-shape export is disclosed, not withheld silently (got: $OUT_BADINERT)" FAIL ;;
+esac
+case "$OUT_BADINERT" in
+  *"$STRAND_PHRASE"*) check "P1ms4 an unusable inert-shape export never renders the row itself" FAIL ;;
+  *) check "P1ms4 an unusable inert-shape export never renders the row itself" PASS ;;
+esac
+
+if grep -vE '^[[:space:]]*//' "$REPORT" | grep -qF 'chain.INERT_SHAPES' \
+  && ! grep -vE '^[[:space:]]*//' "$REPORT" | grep -qE "'no-session'|\"no-session\"" \
+  && ! grep -vE '^[[:space:]]*//' "$REPORT" | grep -qE "'chain-closed'|\"chain-closed\""; then
+  check "P1ms1 the renderer consumes the owner's inert set and keeps no private copy" PASS
+else
+  check "P1ms1 the renderer consumes the owner's inert set and keeps no private copy" FAIL
+fi
+# A wedged or dead-end chain carries its own remedy row. The foreign-open push
+# must come BELOW those early returns, or one truncated key is named twice with
+# contradictory instructions.
+STRAND_ORDER="$(awk '
+  /if \(report\.deadEnd\)/ && !d { d = NR }
+  /if \(report\.wedged\)/ && !w { w = NR }
+  /^ *return;/ { r[NR] = 1 }
+  /foreignOpen\.push/ && !p { p = NR }
+  END {
+    if (!d || !w || !p) { print "missing"; exit }
+    if (!(d < w && w < p)) { print "order"; exit }
+    for (i = d; i < w; i++) if (r[i]) rd = 1
+    for (i = w; i < w + 6 && i < p; i++) if (r[i]) rw = 1
+    print (rd && rw) ? "ok" : "no-return"
+  }' "$REPORT")"
+[ "$STRAND_ORDER" = ok ] \
+  && check "P1ms2 both early returns stand between the shape branches and the push" PASS \
+  || check "P1ms2 both early returns stand between the shape branches and the push ($STRAND_ORDER)" FAIL
+
+# FR-005: the row's wording is a three-way hand copy (renderer, skill, docs).
+# Every other row family in this suite is pinned on both sides; so is this one.
+STRAND_DOC_OK=1
+for phrase in 'open chain(s) not owned by this session' 'cannot be moved to this key'; do
+  grep -qF -- "$phrase" "$REPORT" || STRAND_DOC_OK=0
+done
+grep -qF -- 'open chain(s) not owned by this session' "$SKILL_MD" || STRAND_DOC_OK=0
+grep -qF -- 'open chain(s) not owned by this session' "$PLUGIN_DIR/docs/session-control.md" || STRAND_DOC_OK=0
+[ "$STRAND_DOC_OK" -eq 1 ] \
+  && check "P1mt the row wording is emitted AND documented in the skill and the docs" PASS \
+  || check "P1mt the row wording is emitted AND documented in the skill and the docs" FAIL
+# The diagnose-only limit is the one claim a reader must not lose: without it the
+# remedy reads as "there is a way to move the chain", and there is not.
+if grep -qF 'cannot be moved' "$SKILL_MD" \
+  && grep -qF 'does not apply — it repairs a lineage' "$SKILL_MD" \
+  && grep -qF 'cannot be moved' "$PLUGIN_DIR/docs/session-control.md"; then
+  check "P1mt1 both operator documents carry the diagnose-only limit" PASS
+else
+  check "P1mt1 both operator documents carry the diagnose-only limit" FAIL
+fi
+
+export CLAUDE_PROJECT_DIR="$CAS_PROJECT"
+
 node -e '
   const fs=require("fs"), p=process.argv[1], j=JSON.parse(fs.readFileSync(p,"utf8"));
   j.reviewRound="7"; fs.writeFileSync(p, JSON.stringify(j));
@@ -404,10 +838,127 @@ case "$OUT" in *'1 invalid CAS workflow document(s) — hooks fail closed'*"$(ba
 : > "$STATE_DIR_CANON/pending-review.json"
 touch -t 202001010000 "$STATE_DIR_CANON/pending-review.json" 2>/dev/null
 OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
-case "$OUT" in *'pending-review.json is'*'old (TTL'*'expired'*) check "P1n expired pending-review ⚠️" PASS ;; *) check "P1n expired pending-review ⚠️ (got: $OUT)" FAIL ;; esac
+# The path is emitted SHELL-QUOTED and from the CANONICAL root, so the skill can
+# use it verbatim and the "no symlinked component" claim covers the root itself.
+# On macOS `mktemp -d` yields a path under /var/folders, and /var is a symlink to
+# /private/var — so the expectation has to be the resolved spelling, not $SBOX.
+STATE_DIR_REAL="$(cd -P -- "$STATE_DIR_CANON" && pwd -P)"
+case "$OUT" in *'pending-review.json is'*'old (TTL'*"expired, safe to clear: '$STATE_DIR_REAL/pending-review.json'"*) check "P1n expired pending-review ⚠️ names the exact file it measured, shell-quoted" PASS ;; *) check "P1n expired pending-review ⚠️ names the exact file it measured, shell-quoted (got: $OUT)" FAIL ;; esac
 : > "$STATE_DIR_CANON/pending-review.json"
 OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
 case "$OUT" in *'pending-review.json present and within'*) check "P1o fresh pending-review ✅" PASS ;; *) check "P1o fresh pending-review ✅ (got: $OUT)" FAIL ;; esac
+
+# `0` DISABLES the guard everywhere else it is read. This row did not honour that,
+# so every present marker read as expired — harmless until the row began naming a
+# deletion target the skill acts on, at which point it offered a LIVE claim for
+# removal.
+: > "$STATE_DIR_CANON/pending-review.json"
+touch -t 202001010000 "$STATE_DIR_CANON/pending-review.json" 2>/dev/null
+OUT_TTL0PR="$(ZDOC_TTL_HOURS=0 run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
+case "$OUT_TTL0PR" in
+  *'its TTL guard is disabled'*) check "P1o1 a TTL of 0 disables the pending-review guard instead of expiring every marker" PASS ;;
+  *) check "P1o1 a TTL of 0 disables the pending-review guard instead of expiring every marker (got: $OUT_TTL0PR)" FAIL ;;
+esac
+# Anchored, for the reason `strand_absent` exists: run_report discards stderr and the
+# renderer exits 0 on any throw, so a bare absence check passes over a report that
+# never rendered. Require the pending-review verdict itself before grading absence.
+case "$OUT_TTL0PR" in
+  *'pending-review.json'*) ;;
+  *) check "P1o2 a disabled guard never offers a deletion target — VACUOUS: no pending-review verdict rendered" FAIL ;;
+esac
+case "$OUT_TTL0PR" in
+  *'pending-review.json'*'safe to clear'*) check "P1o2 a disabled guard never offers a deletion target" FAIL ;;
+  *'pending-review.json'*) check "P1o2 a disabled guard never offers a deletion target" PASS ;;
+  *) ;;
+esac
+
+# The printed path is a deletion target the skill hands to `rm`. A symlinked
+# component would point that outside the project, and `statSync` follows symlinks.
+SYM_PROJECT="$SBOX/sym-project"; mkdir -p "$SYM_PROJECT/.zensu" "$SBOX/sym-real"
+ln -s "$SBOX/sym-real" "$SYM_PROJECT/.zensu/state" 2>/dev/null
+: > "$SBOX/sym-real/pending-review.json"
+touch -t 202001010000 "$SBOX/sym-real/pending-review.json" 2>/dev/null
+OUT_SYM="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$SYM_PROJECT")"
+case "$OUT_SYM" in
+  *'expired'*'The path is withheld'*) check "P1o3 a symlinked state directory withholds the deletion target" PASS ;;
+  *'expired, safe to clear'*) check "P1o3 a symlinked state directory withholds the deletion target (offered it)" FAIL ;;
+  *) check "P1o3 a symlinked state directory withholds the deletion target (got: $OUT_SYM)" FAIL ;;
+esac
+
+# A shell-active character is now OFFERED, not withheld: the value is emitted
+# single-quoted, where every byte but the quote is literal. The earlier policy was
+# a character allowlist, which excluded `path.sep` — so on win32 no candidate could
+# ever match and the cleanup was unreachable on that host — and excluded the space,
+# so an ordinary `~/My Projects/...` was refused with a message blaming the user.
+DQ_PROJECT="$SBOX/dq\$(id) project"; mkdir -p "$DQ_PROJECT/.zensu/state"
+: > "$DQ_PROJECT/.zensu/state/pending-review.json"
+touch -t 202001010000 "$DQ_PROJECT/.zensu/state/pending-review.json" 2>/dev/null
+DQ_REAL="$(cd -P -- "$DQ_PROJECT/.zensu/state" && pwd -P)"
+OUT_DQ="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$DQ_PROJECT")"
+case "$OUT_DQ" in
+  *"expired, safe to clear: '$DQ_REAL/pending-review.json'"*) check "P1o4 a shell-active character and a space are quoted, not refused" PASS ;;
+  *) check "P1o4 a shell-active character and a space are quoted, not refused (got: $OUT_DQ)" FAIL ;;
+esac
+# The quoting is what makes that safe, so pin the quoting itself rather than only
+# the presence of the path: an unquoted emission would satisfy a bare path match.
+case "$OUT_DQ" in
+  *"safe to clear: '"*) check "P1o4a the offered path is single-quoted" PASS ;;
+  *) check "P1o4a the offered path is single-quoted (got: $OUT_DQ)" FAIL ;;
+esac
+
+# A control byte is still refused. Quoting would make it harmless to the shell,
+# but it would corrupt the report line a model reads back.
+CTRL_DIR="$(printf '%s/ctrl\tproject' "$SBOX")"
+if mkdir -p "$CTRL_DIR/.zensu/state" 2>/dev/null; then
+  : > "$CTRL_DIR/.zensu/state/pending-review.json"
+  touch -t 202001010000 "$CTRL_DIR/.zensu/state/pending-review.json" 2>/dev/null
+  OUT_CTRL="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$CTRL_DIR")"
+  case "$OUT_CTRL" in
+    *'withheld because its path carries a control character'*) check "P1o4b a control byte in the path withholds the deletion target" PASS ;;
+    *'safe to clear'*) check "P1o4b a control byte in the path withholds the deletion target (offered it)" FAIL ;;
+    *) check "P1o4b a control byte in the path withholds the deletion target (got: $OUT_CTRL)" FAIL ;;
+  esac
+else
+  check "P1o4b a control byte in the path withholds the deletion target (SKIP: filesystem refused the name)" PASS
+fi
+
+# The `nlink === 1` arm. A hard-linked marker is refused because the confirmed `rm`
+# would leave the other name behind while the report claimed the file was cleared.
+HL_PROJECT="$SBOX/hardlink-project"; mkdir -p "$HL_PROJECT/.zensu/state"
+: > "$HL_PROJECT/.zensu/state/pending-review.json"
+if ln "$HL_PROJECT/.zensu/state/pending-review.json" "$SBOX/hardlink-twin" 2>/dev/null; then
+  touch -t 202001010000 "$HL_PROJECT/.zensu/state/pending-review.json" 2>/dev/null
+  OUT_HL="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$HL_PROJECT")"
+  case "$OUT_HL" in
+    *'withheld because it has more than one hard link'*) check "P1o5 a hard-linked marker withholds the deletion target" PASS ;;
+    *'safe to clear'*) check "P1o5 a hard-linked marker withholds the deletion target (offered it)" FAIL ;;
+    *) check "P1o5 a hard-linked marker withholds the deletion target (got: $OUT_HL)" FAIL ;;
+  esac
+else
+  check "P1o5 a hard-linked marker withholds the deletion target (SKIP: filesystem has no hard links)" PASS
+fi
+
+# The marker's OWN `ts` decides its age, matching `_tdd_pending_file_stale`. Reading
+# the mtime alone let this row call a marker expired that the Stop enforcer still
+# treats as live. The file is BACKDATED and carries a fresh `ts`: mtime alone says
+# expired, `ts` says fresh, so only the correct reader renders the fresh row.
+TS_PROJECT="$SBOX/ts-project"; mkdir -p "$TS_PROJECT/.zensu/state"
+printf '{"ts":"%s"}' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$TS_PROJECT/.zensu/state/pending-review.json"
+touch -t 202001010000 "$TS_PROJECT/.zensu/state/pending-review.json" 2>/dev/null
+OUT_TS="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$TS_PROJECT")"
+case "$OUT_TS" in
+  *'pending-review.json present and within'*) check "P1o6 the marker's own ts outranks the filesystem mtime" PASS ;;
+  *) check "P1o6 the marker's own ts outranks the filesystem mtime (got: $OUT_TS)" FAIL ;;
+esac
+# The fallback still works: no `ts` at all, and the backdated mtime decides.
+NOTS_PROJECT="$SBOX/nots-project"; mkdir -p "$NOTS_PROJECT/.zensu/state"
+printf '{}' > "$NOTS_PROJECT/.zensu/state/pending-review.json"
+touch -t 202001010000 "$NOTS_PROJECT/.zensu/state/pending-review.json" 2>/dev/null
+OUT_NOTS="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$NOTS_PROJECT")"
+case "$OUT_NOTS" in
+  *'expired'*) check "P1o6a a marker without ts still ages on the filesystem mtime" PASS ;;
+  *) check "P1o6a a marker without ts still ages on the filesystem mtime (got: $OUT_NOTS)" FAIL ;;
+esac
 
 # --- host-refused reviewer spawn note --------------------------------------
 # Only the Stop chain-enforcer can see the refusal (it reads the transcript this

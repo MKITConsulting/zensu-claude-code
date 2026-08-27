@@ -11,8 +11,8 @@ description: >
   in ~/.claude/settings.json expose the zensu:code-reviewer spawn to a refusal
   before any chain has wedged), and session state (state dir writable, canonical
   CAS workflow documents valid, each review chain's shape plus any wedged chain and
-  its recovery command, any reviewer spawn the host permission layer refused,
-  expired pending-review surfaced).
+  its recovery command, any open chain not owned by this session, any reviewer spawn
+  the host permission layer refused, expired pending-review surfaced).
   The only write is an explicit, user-confirmed cleanup of one
   expired pending-review.json — CAS workflow documents are never deleted. Use
   when the user asks to "diagnose zensu", "check my zensu
@@ -98,8 +98,18 @@ literal path, so the recognizer rejects the assignment and denies the WHOLE
 invocation — and the command it denies is this one, the first thing a wedged user
 is told to run, in exactly the bind failure it exists to diagnose. You would see a
 gate deny instead of the doctor's own message, because the recognizer runs first.
-Dropping it costs at most the project-local config row: `zensu-doctor.sh` falls
-back to `${CLAUDE_PROJECT_DIR:-.}` and the report guards every use of it.
+**What dropping it costs depends on whether the session is bound.** A BOUND
+session keeps its whole `Session state` block: that block anchors on the record's
+project root, and the bind needs only `CLAUDE_CODE_SESSION_ID` and
+`CLAUDE_PLUGIN_DATA`. What is lost there is the project `.zensu/config.json`
+candidate and the forge probe. An UNBOUND session has no recorded root to fall
+back to, so the renderer resolves `CLAUDE_PROJECT_DIR || '.'` against the
+directory the wrapper `cd`s into (`<plugin>/hooks/lib`) and every row below —
+chain shapes, wedged and dead-end chains, an open chain not owned by this
+session, invalid workflow documents, refused reviewer spawns, pending-review —
+collapses into one "does not exist yet" line. So: still omit the assignment
+rather than emitting an empty one, and when the block does collapse, report the
+missing block instead of reading its absence as health.
 
 ```bash
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" ZDOC_PLAYWRIGHT_TOOLS=ready bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"
@@ -361,9 +371,35 @@ classifier will refuse a spawn, not only when the whole table is green.
   run **from the session that owns that chain** (the row prints its truncated
   session key) — this skill never recovers one on its behalf. When the row reads
   "wedged but not recoverable in place", repeat the blocker it names verbatim
-  instead: the specific blocker the row names — see `/zensu:recover-chain` for the full roster. A separate "at a dead end" row means no repair applies at all and
+  instead — see `/zensu:recover-chain` for the full roster. A separate "at a dead end" row means no repair applies at all and
   a fresh `/zensu:tdd` generation is the only exit. A chain that was repaired
   earlier renders `repaired N×`.
+- **⚠️ chain: open chain(s) not owned by this session** → this session is not the
+  one that armed them. **Ask before diagnosing:** the row cannot tell a chain
+  whose session forked away from one a live sibling session is still driving, and
+  in this repository's worktree workflow a live sibling is ordinary. If those
+  sessions are still running, nothing is wrong — say so rather than prescribing a
+  remedy. If one is gone, the usual cause is a FORK: Claude Code mints a new
+  session id mid-conversation, carries the history over and re-fires
+  `SessionStart`, so the document armed under the old key becomes unreachable and
+  every later helper call answers `no-session` — the chain stops existing while
+  the user still believes it is running. Then name `/zensu:tdd` to re-arm. Either
+  way say plainly that the chain **cannot be moved** to this key: the row
+  DIAGNOSES only, and `/zensu:adopt-session` does not apply — it repairs a lineage
+  break, not a changed session id. The row is bounded by the same TTL the
+  pending-review row uses (`0` disables the bound rather than the row), and one guard withholds it
+  SILENTLY: `ZDOC_SESSION_KEY` must be present and well formed under a `bound`
+  verdict. A missing inert-shape set also withholds it, but with its own row. There is no comparison between the record's project anchor and
+  `CLAUDE_PROJECT_DIR` — the whole `Session state` block simply READS the record's
+  root, because that is where every writer puts the documents.
+- **⚠️ state: `<dir>` could not be read (`<errno>`)** → the session-state checks did
+  NOT run. Relay it as a missing check, never as an all-clear: no chain shape, no
+  wedged or foreign-chain row and no pending-review verdict was computed, so their
+  absence says nothing. Name the errno and the directory the row prints.
+- **⚠️ chain: chain-recovery-v1.js exports no usable inert-shape set** → the plugin
+  installation is inconsistent: an open chain cannot be told from a closed one, so
+  the foreign-chain row did not run. Again a missing check, not an all-clear.
+  Recommend reinstalling or updating the plugin; no Zensu command repairs it.
 - **⚠️ state: the host permission layer refused the zensu:code-reviewer spawn**
   → this is NOT a Zensu gate and no Zensu command repairs it. The Stop
   chain-enforcer saw the refusal in the session transcript and left the note this
@@ -416,16 +452,28 @@ are re-armed only by `/zensu:reset-review-limit` through the trusted
 Only when the **Session state** block explicitly reports
 `pending-review.json ... expired`, you MAY offer to remove that one exact file:
 
-1. Derive the current worktree's exact state directory without scanning:
-   `${CLAUDE_PROJECT_DIR}/.zensu/state`; Claude concretizes the native project
-   placeholder when this skill is loaded.
-   Reject a missing directory or any symlink.
-2. Set `PENDING="$STATE_DIR/pending-review.json"`. Require a regular,
-   non-symlink file. Show this exact path; do not list the directory.
+1. Take the literal the row PRINTED, verbatim — the expired row ends
+   `— expired, safe to clear: '<absolute path>'`, already SHELL-QUOTED so it can be
+   used as-is. Do NOT re-derive it from `${CLAUDE_PROJECT_DIR}`: the Session state
+   block is anchored on the record's project root, and where the two differ (a
+   session whose cwd is a worktree) re-deriving would delete a file the report never
+   examined and that may belong to a live sibling session. Do not add quotes of your
+   own around it, and do not strip the ones it carries. If the row carries no path,
+   do not offer a cleanup — the row then names the exact reason it was withheld.
+2. Re-verify the chain YOURSELF before acting on it, and do it in step 4 rather
+   than here: the renderer measured it before the confirmation below, and a
+   component can be replaced during that window. Require a regular, non-symlink
+   file inside a directory named `.zensu/state`, and require NO component of that
+   chain to be a symlink — a symlinked `state` directory with a real file behind it
+   satisfies a check on the final component alone and points the removal outside the
+   project. The renderer's own check is a PRECONDITION, not a substitute for yours.
+   Show this exact path; do not list the directory.
 3. Confirm via `AskUserQuestion`: "Remove expired pending-review.json" or
    "Keep it".
-4. On explicit confirmation only, run `rm -f -- "$PENDING"`. Never use a glob,
-   `find`, parent traversal, or worktree discovery.
+4. On explicit confirmation only, re-run the step-2 checks — if anything changed
+   since the confirmation, abort and say so — then run `rm -f -- <the quoted literal
+   from the row>`. Never use a glob, `find`, parent traversal, or worktree
+   discovery.
 5. Non-interactive runs remain report-only.
 
 An invalid CAS workflow document is a fail-closed diagnostic, never a cleanup

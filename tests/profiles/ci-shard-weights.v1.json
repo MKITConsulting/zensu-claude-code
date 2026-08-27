@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "defaultSeconds": 20,
-  "note": "Balance hint only. Coverage never depends on it: the partition is computed from the ENFORCED suite inventory, so an unlisted suite still runs -- it is merely costed at defaultSeconds and the split drifts. Measured on ubuntu-latest, CI run 31374620366; structure/test-gauntlet-loop-skill.sh measured separately on ubuntu-latest in CI run 32574149642 (1.045 s between its own PASS line and its predecessor's).",
+  "note": "Balance hint only. Coverage never depends on it: the partition is computed from the ENFORCED suite inventory, so an unlisted suite still runs -- it is merely costed at defaultSeconds and the split drifts. Measured on ubuntu-latest, CI run 31374620366; structure/test-gauntlet-loop-skill.sh measured separately on ubuntu-latest in CI run 32574149642 (1.045 s between its own PASS line and its predecessor's). structure/test-doctor.sh is an ESTIMATE, not a CI measurement: the foreign-chain block roughly doubled its process count, so 12 is the previous 6 s ubuntu-latest figure doubled; a local run took 28 s but on a loaded machine, and a loaded-local second is not an ubuntu-latest second, so that number is NOT the basis. Replace it with the next real CI figure rather than trusting 12.",
   "seconds": {
     "evals/config-gate (--self-check)": 584,
     "evals/reset-review-limit (self-check)": 3,
@@ -38,7 +38,7 @@
     "structure/test-deferred-review-fallback.sh": 31,
     "structure/test-doc-generation-guidance.sh": 1,
     "structure/test-docs-skill.sh": 1,
-    "structure/test-doctor.sh": 6,
+    "structure/test-doctor.sh": 12,
     "structure/test-drift-assertion-or-logic.sh": 3,
     "structure/test-drift-audit-regex.sh": 1,
     "structure/test-edit-landing-audit.sh": 1,
