@@ -1334,9 +1334,31 @@ function currentSessionKey() {
 // That was worse: it withheld exactly the fork-in-a-worktree case the row exists
 // for, and it did so silently. There is one authority; the caller's value is the
 // fallback, and only because a session with no bound record has nothing better.
+// Control bytes, refused wherever a value reaches the report or a shell. Declared
+// here because `stateProjectRoot` below is the first consumer.
+var CONTROL_BYTE_RE = /[\u0000-\u001f\u007f]/;
+
+// The reader re-enforces the ONE invariant of its producer that has a consequence
+// here, which is the rule `currentSessionKey` states one function up: a caller
+// supplying `ZDOC_BINDING` skips the wrapper's whole resolution block, so a guard
+// that lives only there is not a guard. `dir` is printed RAW in three rows, so a
+// newline in the recorded root injects fabricated lines into a report the model
+// reads back and summarizes.
+//
+// Deliberately NOT re-checked here: that the root is an existing directory. The
+// wrapper refuses a non-directory, and adding the same test to this side would make
+// an unreadable recorded root fall back to `CLAUDE_PROJECT_DIR` — silently scanning
+// a DIFFERENT project, which is worse than letting `readdirSync` fail and say so.
+// One missing directory should be reported, not routed around.
+//
+// Neither case is reachable through the shipped invocation (the wrapper clears both
+// values unconditionally and the recognizer's assignment allowlist is closed). It is
+// here for the PORT NOTE at the top of this file: a port that gets the clear-vs-seed
+// rule right and the shape guard wrong lands the value here with nothing to catch it.
 function stateProjectRoot() {
   var recorded = env.ZDOC_SESSION_PROJECT_ROOT;
-  if (env.ZDOC_BINDING === 'bound' && typeof recorded === 'string' && recorded !== '') {
+  if (env.ZDOC_BINDING === 'bound' && typeof recorded === 'string' && recorded !== ''
+    && !CONTROL_BYTE_RE.test(recorded)) {
     return path.resolve(recorded);
   }
   return path.resolve(env.CLAUDE_PROJECT_DIR || '.');
@@ -1365,8 +1387,6 @@ function stateProjectRoot() {
 // symlink to `/private/var` — an ordinary temp root, not a hostile one. Resolving
 // instead makes the stated invariant TRUE, and the printed path is then the one
 // `rm` will actually act on.
-var CONTROL_BYTE_RE = /[\u0000-\u001f\u007f]/;
-
 function shellQuotePath(value) {
   return "'" + value.split("'").join("'\\''") + "'";
 }
