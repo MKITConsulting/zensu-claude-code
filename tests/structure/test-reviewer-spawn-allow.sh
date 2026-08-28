@@ -234,6 +234,45 @@ case "$DOC_OFF" in
   *) check "A19a the active row is suppressed while the grant is off" PASS ;;
 esac
 
+# ── A19b/A19c the doctor must not assert a cause it never established ────────
+# reviewerSpawnAutoAllowDisabled folded every readJson failure into one boolean whose only
+# renderer names ONE cause. A trailing comma then sent the user hunting for a key they
+# never wrote — the failure this file's own doctrine forbids one branch below, where the
+# module-load row deliberately "names the load rather than asserting which file is absent".
+# The fixture is created HERE and not reused from A31 below: at this point in the file
+# that path does not exist yet, so a doctor run against it would take the missing-config
+# branch and every assertion in this block would pass for the wrong reason.
+printf 'this is not json\n' > "$SBOX/doc-broken.json"
+DOC_BROKEN="$(doctor "$SBOX/doc-broken.json")"
+case "$DOC_BROKEN" in
+  *"permissions:"*) check "A19bpre the report reached its permissions block (absence anchor)" PASS ;;
+  *) check "A19bpre the report reached its permissions block (absence anchor)" FAIL ;;
+esac
+case "$DOC_BROKEN" in
+  *"a config source could not be read or parsed"*)
+    check "A19b an unjudgeable config renders its own could-not-judge row" PASS ;;
+  *) check "A19b an unjudgeable config renders its own could-not-judge row" FAIL ;;
+esac
+case "$DOC_BROKEN" in
+  *"reviewer-spawn grant is switched off"*)
+    check "A19b1 an unjudgeable config is NOT reported as a user configuration choice" FAIL ;;
+  *) check "A19b1 an unjudgeable config is NOT reported as a user configuration choice" PASS ;;
+esac
+
+# The size case is worse than a wrong cause: readJson caps at CONFIG_MAX_BYTES while the
+# ENFORCING reader has no cap, so an oversized well-formed config is read and applied by
+# the hook — which GRANTS — while this row claimed the grant was switched off.
+node -e '
+  const fs = require("fs");
+  fs.writeFileSync(process.argv[1], JSON.stringify({ pad: "x".repeat(1024 * 1024 + 64) }) + "\n");
+' "$SBOX/oversize.json"
+DOC_BIG="$(doctor "$SBOX/oversize.json")"
+case "$DOC_BIG" in
+  *"reviewer-spawn grant is switched off"*)
+    check "A19c an oversized config is never rendered as switched off" FAIL ;;
+  *) check "A19c an oversized config is never rendered as switched off" PASS ;;
+esac
+
 # A20 with permission mode auto and no allow rule, the advice must change:
 # the grant already covers the spawn the old row told the user to add a rule for.
 printf '{"permissions":{"defaultMode":"auto"}}\n' > "$DOC_HOME/.claude/settings.json"
@@ -450,8 +489,24 @@ fi
 # globally: that file travels with a checked-out repository.
 STICKY_HOME="$SBOX/sticky-home"; STICKY_PROJ="$SBOX/sticky-project"
 mkdir -p "$STICKY_HOME/.zensu" "$STICKY_PROJ/.zensu"
-printf '{"hooks":{"reviewerSpawnAutoAllow":false}}\n' > "$STICKY_HOME/.zensu/config.json"
 printf '{"hooks":{"reviewerSpawnAutoAllow":true}}\n' > "$STICKY_PROJ/.zensu/config.json"
+# A32pre is the control this check lacked. A32 varies TWO environment axes at once — it
+# strips ZENSU_CONFIG and redirects both HOME and CLAUDE_PROJECT_DIR — and the hook has
+# several silent exits before the flag is ever read, so an empty result alone could mean
+# any of them. Prove the SAME fixture grants first; then the only thing A32 changes is the
+# global file's value, and its silence can only be the sticky withdrawal.
+printf '{"hooks":{"reviewerSpawnAutoAllow":true}}\n' > "$STICKY_HOME/.zensu/config.json"
+STICKY_CTL="$(node -e '
+  process.stdout.write(JSON.stringify({hook_event_name:"PreToolUse",session_id:process.argv[1],
+    cwd:process.argv[2],tool_name:"Agent",tool_input:{subagent_type:"zensu:code-reviewer"}}));
+' "$SESSION_ID" "$PROJECT" \
+  | env -u ZENSU_CONFIG CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" \
+    CLAUDE_PROJECT_DIR="$STICKY_PROJ" HOME="$STICKY_HOME" \
+    bash "$HOOK" 2>/dev/null)"
+printf '%s' "$STICKY_CTL" | granted \
+  && check "A32pre the sticky fixture grants before the global withdrawal (control)" PASS \
+  || check "A32pre the sticky fixture grants before the global withdrawal (control)" FAIL
+printf '{"hooks":{"reviewerSpawnAutoAllow":false}}\n' > "$STICKY_HOME/.zensu/config.json"
 STICKY_OUT="$(node -e '
   process.stdout.write(JSON.stringify({hook_event_name:"PreToolUse",session_id:process.argv[1],
     cwd:process.argv[2],tool_name:"Agent",tool_input:{subagent_type:"zensu:code-reviewer"}}));
@@ -461,6 +516,51 @@ STICKY_OUT="$(node -e '
     bash "$HOOK" 2>/dev/null)"
 [ -z "$STICKY_OUT" ] && check "A32 a project overlay cannot re-arm a globally withdrawn grant" PASS \
   || check "A32 a project overlay cannot re-arm a globally withdrawn grant" FAIL
+
+# ── A31a a config the reader cannot REACH is not the same as one that is absent ──
+# one() mapped every statSync error to "absent", so an EACCES/ENOTDIR/ELOOP on a config
+# path was read as "no config here" and the grant survived a withdrawal the process could
+# not reach. A regular file in the parent position yields ENOTDIR for every user including
+# root, so this arm cannot go vacuous in a container. A5 is the granting control: it runs
+# the same helper in the same environment and differs only in the config path.
+printf 'x\n' > "$SBOX/notadir"
+if [ -z "$(run_hook "zensu:code-reviewer" Agent "$SESSION_ID" "$SBOX/notadir/config.json")" ]; then
+  check "A31a a config path the reader cannot traverse withdraws the grant" PASS
+else
+  check "A31a a config path the reader cannot traverse withdraws the grant" FAIL
+fi
+
+# ── A31b the sentinel and value domains must not collide ─────────────────────
+# one() returned either a parsed JSON value or a sentinel STRING. JSON.parse('"absent"')
+# is the string absent, so a config whose whole content is that literal took the
+# not-present branch: present, unusable, and the grant survived.
+printf '"absent"\n' > "$SBOX/sentinel.json"
+if [ -z "$(run_hook "zensu:code-reviewer" Agent "$SESSION_ID" "$SBOX/sentinel.json")" ]; then
+  check "A31b a config whose content is the sentinel literal withdraws the grant" PASS
+else
+  check "A31b a config whose content is the sentinel literal withdraws the grant" FAIL
+fi
+
+# ── A32a an EMPTY candidate list must withdraw, not grant ────────────────────
+# Driven against the helper rather than the hook, because with HOME unset there is no
+# place to put a granting config and no positive control could exist through run_hook.
+# A32apre IS that control: the same stripped environment with HOME restored to a
+# config-free tree must still GRANT, so a failure of A32a names the empty list and not
+# some unrelated decline the stripped environment caused.
+STRICT_PROBE='source "$1/hooks/lib/zensu-config.sh"; zensu_hook_enabled_strict reviewerSpawnAutoAllow'
+mkdir -p "$SBOX/empty-home"
+if env -u ZENSU_CONFIG -u CLAUDE_PROJECT_DIR HOME="$SBOX/empty-home" \
+     bash -c "$STRICT_PROBE" _ "$PLUGIN_DIR"; then
+  check "A32apre a config-free HOME still grants (control for A32a)" PASS
+else
+  check "A32apre a config-free HOME still grants (control for A32a)" FAIL
+fi
+if env -u ZENSU_CONFIG -u HOME -u CLAUDE_PROJECT_DIR \
+     bash -c "$STRICT_PROBE" _ "$PLUGIN_DIR"; then
+  check "A32a an empty candidate list withdraws the grant" FAIL
+else
+  check "A32a an empty candidate list withdraws the grant" PASS
+fi
 
 # ── A33 the autoMode.allow prose row is suppressed while the grant is active ──
 printf '{"permissions":{"defaultMode":"auto"},"autoMode":{"allow":["prefer zensu:code-reviewer"]}}\n' > "$DOC_HOME/.claude/settings.json"
@@ -534,6 +634,167 @@ case "$BANNER_NOMOD" in
     check "A36 the banner withholds the grant line when the decision module is absent" FAIL ;;
   *) check "A36 the banner withholds the grant line when the decision module is absent" PASS ;;
 esac
+
+# ── A37 the doctor applies the SAME module guard the hook applies ────────────
+# pre-agent-reviewer-allow.sh refuses a symlinked decider outright ([ ! -L ]), but the
+# report used require() and statSync, which both follow links — so on a --plugin-dir or
+# dotfile-managed tree the ✅ row asserted a grant the hook declines on every spawn.
+# A37pre is the control: the SAME root with a real file must render the ✅ row, so a
+# failure of A37 names the symlink and not the throwaway root's own incompleteness.
+mk_root "$SBOX/root-symlink" nomodule hook
+cp -R "$PLUGIN_DIR/agents" "$SBOX/root-symlink/agents"
+cp "$PLUGIN_DIR/hooks/lib/reviewer-spawn-allow-v1.js" "$SBOX/root-symlink/hooks/lib/"
+cp "$PLUGIN_DIR/hooks/lib/reviewer-spawn-denial-v1.js" "$SBOX/root-symlink/hooks/lib/"
+cp "$PLUGIN_DIR/hooks/lib/claude-principal-v1.js" "$SBOX/root-symlink/hooks/lib/"
+DOC_REALMOD="$(doctor_at "$SBOX/root-symlink")"
+case "$DOC_REALMOD" in
+  *"admits its own read-only reviewer spawns"*)
+    check "A37pre a real module in the throwaway root renders the active row (control)" PASS ;;
+  *) check "A37pre a real module in the throwaway root renders the active row (control)" FAIL ;;
+esac
+if ln -sf "$PLUGIN_DIR/hooks/lib/reviewer-spawn-allow-v1.js" \
+     "$SBOX/root-symlink/hooks/lib/reviewer-spawn-allow-v1.js" \
+   && [ -L "$SBOX/root-symlink/hooks/lib/reviewer-spawn-allow-v1.js" ]; then
+  DOC_SYMLINK="$(doctor_at "$SBOX/root-symlink")"
+  case "$DOC_SYMLINK" in
+    *"admits its own read-only reviewer spawns"*)
+      check "A37 a symlinked decision module is refused, matching the hook's own guard" FAIL ;;
+    *) check "A37 a symlinked decision module is refused, matching the hook's own guard" PASS ;;
+  esac
+else
+  # ln -s exiting 0 is not evidence of a symlink on every host; refuse to report a
+  # verdict the fixture never established.
+  check "A37 a symlinked decision module is refused (SKIPPED — no real symlink)" FAIL
+fi
+
+# A37a the same guard on the HOOK path. A symlinked hook is a broken installation, not an
+# installation predating the feature, so it must WARN rather than fall silent — silence is
+# the one verdict this check cannot qualify.
+mk_root "$SBOX/root-symhook" module nomodule
+cp -R "$PLUGIN_DIR/agents" "$SBOX/root-symhook/agents"
+cp "$PLUGIN_DIR/hooks/lib/reviewer-spawn-denial-v1.js" "$SBOX/root-symhook/hooks/lib/"
+cp "$PLUGIN_DIR/hooks/lib/claude-principal-v1.js" "$SBOX/root-symhook/hooks/lib/"
+if ln -sf "$PLUGIN_DIR/hooks/pre-agent-reviewer-allow.sh" \
+     "$SBOX/root-symhook/hooks/pre-agent-reviewer-allow.sh" \
+   && [ -L "$SBOX/root-symhook/hooks/pre-agent-reviewer-allow.sh" ]; then
+  DOC_SYMHOOK="$(doctor_at "$SBOX/root-symhook")"
+  case "$DOC_SYMHOOK" in
+    *"admits its own read-only reviewer spawns"*)
+      check "A37a a symlinked grant hook is never reported as an active grant" FAIL ;;
+    *"pre-agent-reviewer-allow.sh"*)
+      check "A37a a symlinked grant hook is never reported as an active grant" PASS ;;
+    *) check "A37a a symlinked grant hook is never reported as an active grant" FAIL ;;
+  esac
+else
+  check "A37a a symlinked grant hook is refused (SKIPPED — no real symlink)" FAIL
+fi
+
+# ── A38 the ✅ row's frontmatter claim is now BACKED, not asserted ────────────
+# The row says "Each is confined to Read/Grep/Glob by its agent frontmatter" while the
+# renderer never opened a file under agents/. It is true only because the module now drops
+# any member whose frontmatter is not exactly the read trio — so a tampered agent must
+# vanish from the rendered list while the untampered ones stay granted. Withholding the
+# whole row would be the wrong fix: the other agents are legitimately confined.
+mk_root "$SBOX/root-tampered" module nomodule
+cp -R "$PLUGIN_DIR/agents" "$SBOX/root-tampered/agents"
+cp "$PLUGIN_DIR/hooks/lib/reviewer-spawn-denial-v1.js" "$SBOX/root-tampered/hooks/lib/"
+cp "$PLUGIN_DIR/hooks/lib/claude-principal-v1.js" "$SBOX/root-tampered/hooks/lib/"
+cp "$PLUGIN_DIR/hooks/pre-agent-reviewer-allow.sh" "$SBOX/root-tampered/hooks/"
+DOC_UNTAMPERED="$(doctor_at "$SBOX/root-tampered")"
+case "$DOC_UNTAMPERED" in
+  *"zensu:review-judge"*)
+    check "A38pre the untampered root lists review-judge among the granted (control)" PASS ;;
+  *) check "A38pre the untampered root lists review-judge among the granted (control)" FAIL ;;
+esac
+perl -0pi -e 's/^tools:.*$/tools: Read, Grep, Glob, Bash/m' "$SBOX/root-tampered/agents/review-judge.md"
+grep -qF 'tools: Read, Grep, Glob, Bash' "$SBOX/root-tampered/agents/review-judge.md" \
+  && check "A38tamper the fixture edit landed (re-read, not assumed)" PASS \
+  || check "A38tamper the fixture edit landed (re-read, not assumed)" FAIL
+DOC_TAMPERED="$(doctor_at "$SBOX/root-tampered")"
+case "$DOC_TAMPERED" in
+  *"zensu:review-judge"*)
+    check "A38 an agent armed beyond the read trio is dropped from the granted set" FAIL ;;
+  *) check "A38 an agent armed beyond the read trio is dropped from the granted set" PASS ;;
+esac
+case "$DOC_TAMPERED" in
+  *"admits its own read-only reviewer spawns (zensu:code-reviewer,"*)
+    check "A38a the remaining confined agents stay granted" PASS ;;
+  *) check "A38a the remaining confined agents stay granted" FAIL ;;
+esac
+
+# ── A39 the hook's own stderr stays clean, and its read is bounded ───────────
+# Every sibling PreToolUse hook in this tree spells the read `$(cat 2>/dev/null || true)`.
+# This one took the bare form, so a payload carrying a NUL byte puts bash's own
+# "ignored null byte in input" warning on the channel the hook otherwise reserves for its
+# single deliberate loud branch — the inherited-plugin-root mismatch.
+A39_ERR="$(printf 'x\000y' \
+  | CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" ZENSU_CONFIG="$NO_CONFIG" \
+    bash "$HOOK" 2>&1 >/dev/null)"
+[ -z "$A39_ERR" ] && check "A39 a payload with a NUL byte leaves the hook's stderr clean" PASS \
+  || check "A39 a payload with a NUL byte leaves the hook's stderr clean" FAIL
+
+# The module's MAX_PAYLOAD_BYTES bounds the LAST of three full copies of the payload; the
+# shell holds the first with no ceiling at all. Pinned at source because the memory bound
+# is not observable from the outside, and the sibling technique already exists in
+# hooks/lib/zensu-config.sh.
+if grep -qE 'head -c' "$HOOK"; then
+  check "A39a the hook caps its stdin read at the shell boundary" PASS
+else
+  check "A39a the hook caps its stdin read at the shell boundary" FAIL
+fi
+
+# ── A40 the cheapest condition runs before the ones that cost processes ──────
+# All four conditions are conjunctive, so this is a cost ordering with no behavioural
+# signature — every decline path emits identical silence either way. Pinned at source
+# because there is nothing observable to assert: an ordinary Agent spawn that names no
+# confined reviewer must not pay a principal read, a Session Control bind and two node
+# starts to be refused by a check that reads stdin alone.
+A40_DEC="$(grep -n 'node ./reviewer-spawn-allow-v1.js' "$HOOK" | head -1 | cut -d: -f1)"
+A40_BIND="$(grep -n 'zensu_bind_hook_session' "$HOOK" | head -1 | cut -d: -f1)"
+A40_PRIN="$(grep -n 'zensu_hook_is_main_principal' "$HOOK" | head -1 | cut -d: -f1)"
+A40_CFG="$(grep -n 'zensu_hook_enabled_strict' "$HOOK" | head -1 | cut -d: -f1)"
+if [ -n "$A40_DEC" ] && [ -n "$A40_BIND" ] && [ -n "$A40_PRIN" ] && [ -n "$A40_CFG" ] \
+   && [ "$A40_DEC" -lt "$A40_BIND" ] && [ "$A40_DEC" -lt "$A40_PRIN" ] \
+   && [ "$A40_DEC" -lt "$A40_CFG" ]; then
+  check "A40 the decider precedes the principal, session and config conditions" PASS
+else
+  check "A40 the decider precedes the principal, session and config conditions" FAIL
+fi
+
+# ── A41 the capability disclosure is not silenceable by an unrelated flag ────
+# hooks.sessionBanner is a NOISE control — "hide this banner", usage hints, the skills
+# list — and it is read permissively, so a .zensu/config.json travelling inside a checked
+# out repository can set it. The grant's own reader was made sticky and fail-closed
+# precisely so such a file cannot RE-ARM the bypass; nothing stopped it HIDING the
+# announcement while the bypass stayed active. A capability the plugin hands itself is
+# disclosed on its own terms or not at all.
+printf '{"hooks":{"sessionBanner":false}}\n' > "$SBOX/nobanner.json"
+BANNER_QUIET="$(banner "$SBOX/nobanner.json")"
+case "$BANNER_QUIET" in
+  *"Zensu PLM v"*)
+    check "A41pre the noise half of the banner IS silenced (control)" FAIL ;;
+  *) check "A41pre the noise half of the banner IS silenced (control)" PASS ;;
+esac
+case "$BANNER_QUIET" in
+  *"Reviewer spawns"*)
+    check "A41 the grant disclosure survives hooks.sessionBanner=false" PASS ;;
+  *) check "A41 the grant disclosure survives hooks.sessionBanner=false" FAIL ;;
+esac
+
+# A41a the banner is the SECOND of exactly two production callers of the fail-closed
+# reader, and the unpinned one: A21/A22/A36 all pass identically under either reader, so
+# without this pair the choice could be reverted here with every check green.
+if grep -qF 'zensu_hook_enabled_strict reviewerSpawnAutoAllow' "$BANNER"; then
+  check "A41a the banner reads the flag through zensu_hook_enabled_strict" PASS
+else
+  check "A41a the banner reads the flag through zensu_hook_enabled_strict" FAIL
+fi
+if grep -qE '(^|[^_])zensu_hook_enabled reviewerSpawnAutoAllow' "$BANNER"; then
+  check "A41b the permissive reader is not used on this key in the banner" FAIL
+else
+  check "A41b the permissive reader is not used on this key in the banner" PASS
+fi
 
 echo "----"
 echo "test-reviewer-spawn-allow: $PASS PASS / $FAIL FAIL"

@@ -12,7 +12,11 @@
 # inherited-plugin-root mismatch is therefore reported on stderr and then declines,
 # where a gate would exit 2.
 #
-# Four conditions, all required:
+# Four conditions, all required. They are CONJUNCTIVE, so their order is free to choose,
+# and the order below is a COST ordering rather than a semantic one: condition 4 is the
+# cheapest and the one that rejects the overwhelming majority of spawns, so it runs first
+# and the three that cost process launches run only for a name that could actually be
+# granted. Nothing is weakened by that — the decision is emitted only after all four pass.
 #   1. the main principal — a subagent never earns a grant for another subagent;
 #   2. a bound Session Control record — an unbindable session gets nothing;
 #   3. hooks.reviewerSpawnAutoAllow is not exactly false in ANY config source, read
@@ -42,11 +46,36 @@ fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
 unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 
-PAYLOAD="$(cat)"
+# Capped and suppressed, like every sibling PreToolUse hook in this tree. The decision
+# module's MAX_PAYLOAD_BYTES bounds the LAST of three full copies of this payload — the
+# principal reader and the session binder each receive one before it — so a ceiling here
+# is the only one that bounds the shell's own copy. One byte over the module's limit is
+# enough for it to refuse, which keeps the limit itself spelled in exactly one place. The
+# trailing sentinel survives command substitution stripping trailing newlines.
+PAYLOAD="$( { head -c 4194305; printf 'X'; } 2>/dev/null )" || PAYLOAD="X"
+PAYLOAD="${PAYLOAD%X}"
 
 DECIDER="$CLAUDE_PLUGIN_ROOT/hooks/lib/reviewer-spawn-allow-v1.js"
 [ -f "$DECIDER" ] && [ ! -L "$DECIDER" ] || exit 0
 command -v node >/dev/null 2>&1 || exit 0
+
+# The decider is a pure function of stdin: it requires only its sibling modules through
+# relative specifiers and reads no environment at all. Rendering plugin paths here and
+# gating on them with `|| exit 0` added a FIFTH condition to the four this hook documents
+# — an unset or unrenderable CLAUDE_PLUGIN_DATA silently withdrew the grant while the
+# banner and the doctor row still asserted it. Do not reintroduce it.
+#
+# It runs FIRST because it is the cheapest of the four and the one that rejects the common
+# case. Every ordinary Agent/Task spawn in a session reaches this hook, and almost none of
+# them names a confined reviewer; deciding that from stdin alone costs one node start,
+# where the three conditions below cost a principal read, a Session Control bind (itself
+# two bash starts plus a node start) and a second node start for the config read. The
+# order is a COST ordering, not a semantic one — all four remain required, and the grant
+# is emitted only after every one of them has passed.
+DECISION="$(printf '%s' "$PAYLOAD" | (
+  cd -P -- "$CLAUDE_PLUGIN_ROOT/hooks/lib" && node ./reviewer-spawn-allow-v1.js
+) 2>/dev/null)" || exit 0
+[ -n "$DECISION" ] || exit 0
 
 source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-agent-context.sh" 2>/dev/null || exit 0
 zensu_hook_is_main_principal "$PAYLOAD" PreToolUse || exit 0
@@ -61,15 +90,5 @@ source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-config.sh" 2>/dev/null || exit 0
 # a capability: the same fallback would restore a grant the user withdrew.
 zensu_hook_enabled_strict reviewerSpawnAutoAllow || exit 0
 
-# The decider is a pure function of stdin: it requires only its two sibling modules
-# through relative specifiers and reads no environment at all. Rendering plugin paths
-# here and gating on them with `|| exit 0` added a FIFTH condition to the four this
-# hook documents — an unset or unrenderable CLAUDE_PLUGIN_DATA silently withdrew the
-# grant while the banner and the doctor row still asserted it. Do not reintroduce it.
-DECISION="$(printf '%s' "$PAYLOAD" | (
-  cd -P -- "$CLAUDE_PLUGIN_ROOT/hooks/lib" && node ./reviewer-spawn-allow-v1.js
-) 2>/dev/null)" || exit 0
-
-[ -n "$DECISION" ] || exit 0
 printf '%s\n' "$DECISION"
 exit 0

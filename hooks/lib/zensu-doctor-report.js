@@ -1149,21 +1149,42 @@ function reviewerSpawnCheckDisabled(cfgReads) {
 // merge instead was wrong in both directions — a project overlay replacing the `hooks`
 // node erased a global `false` here while the hook still granted, and an unreadable file
 // read as "not disabled" while the hook declined.
+// Three answers, not two. Folding every readJson failure into "disabled" made the only
+// renderer of that boolean assert ONE cause — the config key — for a trailing comma the
+// user never wrote, which is the failure this file's own doctrine forbids one function
+// below. Worse for the SIZE class: readJson caps at CONFIG_MAX_BYTES while the enforcing
+// zensu_hook_enabled_strict has no cap, so an oversized well-formed config is read and
+// applied by the hook — which GRANTS — while the row claimed the grant was switched off.
+// A cap is this reader's own bound, never a verdict about the config.
 function reviewerSpawnAutoAllowDisabled(cfgReads) {
-  var disabled = false;
+  var verdict = false;
   cfgReads.forEach(function (entry) {
     var r = entry.r;
     if (!r || r.missing) return;
-    // Present but unjudgeable: the enforcing reader declines, so the grant is not in force.
-    if (!r.ok) { disabled = true; return; }
+    if (!r.ok) {
+      // A check-limited failure (this reader's size cap, a non-regular file) establishes
+      // nothing about the config — the enforcing reader has neither bound. A genuine parse
+      // failure DOES decline there too, so the grant really is not in force; only the
+      // reported CAUSE differs from an explicit key.
+      raise(r.cap || r.io ? 'unjudgeable' : 'broken');
+      return;
+    }
     var data = r.data;
-    if (!data || typeof data !== 'object' || Array.isArray(data)) { disabled = true; return; }
+    if (!data || typeof data !== 'object' || Array.isArray(data)) { raise('broken'); return; }
     if (data.hooks === undefined) return;
     var hooks = data.hooks;
-    if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) { disabled = true; return; }
-    if (hooks.reviewerSpawnAutoAllow === false) disabled = true;
+    if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) { raise('broken'); return; }
+    if (hooks.reviewerSpawnAutoAllow === false) raise('off');
   });
-  return disabled;
+  return verdict;
+
+  // An explicit key is the most informative answer, then a config that is present but
+  // unusable, then a bound this check could not see past. Never let a weaker finding
+  // overwrite a stronger one just because it was read later.
+  function raise(next) {
+    var rank = { unjudgeable: 1, broken: 2, off: 3 };
+    if (!verdict || rank[next] > rank[verdict]) verdict = next;
+  }
 }
 // Is the grant hook actually referenced by hooks.json? File presence alone is not the
 // grant: an unwired script never runs, and the ✅ row would then assert a capability the
@@ -1209,15 +1230,32 @@ function reviewerSpawnGrantRows(disabled) {
   // asymmetric case IS worth a row: the hook is installed but its decision module is not,
   // because then the hook loads nothing and silently declines while the reader has every
   // reason to believe the grant is in force.
+  // lstat, not stat: pre-agent-reviewer-allow.sh refuses a symlinked decider outright
+  // ([ -f ] && [ ! -L ]), so a report that follows links can assert a grant the hook
+  // declines on every spawn. A symlinked hook is a BROKEN installation rather than one
+  // predating the feature, so it must reach a row instead of the silent return below.
+  var hookPath = path.join(root, 'hooks', 'pre-agent-reviewer-allow.sh');
   var hookInstalled = false;
+  var hookIsLink = false;
   try {
-    hookInstalled = fs.statSync(path.join(root, 'hooks', 'pre-agent-reviewer-allow.sh')).isFile();
+    var hookStat = fs.lstatSync(hookPath);
+    hookIsLink = hookStat.isSymbolicLink();
+    hookInstalled = hookStat.isFile() || hookIsLink;
   } catch (e) { hookInstalled = false; }
   if (!hookInstalled) return false;
+  if (hookIsLink) {
+    line(WARN, 'permissions: hooks/pre-agent-reviewer-allow.sh is a symlink. The hook itself '
+      + 'refuses a symlinked decision module and this report holds its own paths to the same '
+      + 'standard, so no reviewer-spawn grant is in force. This is a broken installation, not a '
+      + 'configuration choice.');
+    return false;
+  }
   var agents = null;
   var spawnTools = null;
   try {
-    var allow = require(path.join(root, 'hooks', 'lib', 'reviewer-spawn-allow-v1.js'));
+    var modPath = path.join(root, 'hooks', 'lib', 'reviewer-spawn-allow-v1.js');
+    if (!fs.lstatSync(modPath).isFile()) throw new Error('decision module is not a regular file');
+    var allow = require(modPath);
     if (Array.isArray(allow.CONFINED_REVIEWER_AGENTS) && allow.CONFINED_REVIEWER_AGENTS.length) {
       agents = allow.CONFINED_REVIEWER_AGENTS.slice();
     }
@@ -1251,7 +1289,21 @@ function reviewerSpawnGrantRows(disabled) {
       + 'grant is in force. This is a broken installation, not a configuration choice.');
     return false;
   }
-  if (disabled) {
+  if (disabled === 'unjudgeable') {
+    line(WARN, 'permissions: a config source could not be read or parsed within this check\'s own '
+      + 'bounds, so whether the reviewer-spawn grant is in force could not be judged. That is a '
+      + 'missing check, not a configuration choice: the enforcing reader carries no size limit of '
+      + 'its own, so it may well be granting on the same file.');
+    return false;
+  }
+  if (disabled === 'broken') {
+    line(WARN, 'permissions: a config source could not be read or parsed, so the enforcing reader '
+      + 'declines and no reviewer-spawn grant is in force. That is a broken config file, not a '
+      + 'configuration choice — no hooks.reviewerSpawnAutoAllow key was involved. Fix the file to '
+      + 'get the grant back.');
+    return false;
+  }
+  if (disabled === 'off') {
     line(WARN, 'permissions: the reviewer-spawn grant is switched off by hooks.reviewerSpawnAutoAllow '
       + 'in .zensu/config.json, so the host permission layer decides every reviewer spawn. Under '
       + 'permission mode "auto" the classifier can refuse one, and a refused spawn leaves the review '

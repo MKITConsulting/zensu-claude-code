@@ -219,7 +219,21 @@ classifier will refuse a spawn, not only when the whole table is green.
   is `false`, so the host permission layer decides every reviewer spawn again. Under
   permission mode `auto` the classifier can refuse one, and a refused spawn leaves the
   review chain with no review it can close on. It is a configuration choice, not a fault —
-  relay it as the trade-off it is, and do not change the flag on the user's behalf.
+  relay it as the trade-off it is, and do not change the flag on the user's behalf. This
+  row now fires ONLY for an explicit `false`; the two rows below carry the cases that used
+  to be folded into it and reported as a choice the user never made.
+- **⚠️ permissions: a config source could not be read or parsed within this check's own bounds**
+  → the report could not judge whether the grant is in force. This is a MISSING CHECK, never
+  an all-clear and never a verdict about the config: the enforcing reader carries no size
+  limit of its own, so it may well be granting on the very file this check declined to read.
+  Relay the uncertainty as uncertainty and point the user at the file.
+- **⚠️ permissions: a config source could not be read or parsed, so the enforcing reader declines**
+  → a broken config file, not a configuration choice. No `hooks.reviewerSpawnAutoAllow` key
+  was involved and the user should not go looking for one; fixing the file restores the grant.
+- **⚠️ permissions: pre-agent-reviewer-allow.sh is a symlink** → a broken installation. The
+  hook refuses a symlinked decision module outright and this report holds its own paths to
+  the same standard, so no grant is in force. Common on a `--plugin-dir` checkout or a
+  dotfile-managed tree; relay it as an installation problem, not a permission one.
 - **⚠️ permissions: pre-agent-reviewer-allow.sh is installed but its decision module … could not be loaded**
   → a broken installation, not a choice: the hook loads nothing and declines every spawn,
   so no grant is in force while the banner and this plugin's docs say one is. The row names

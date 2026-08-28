@@ -241,3 +241,32 @@ test('every confined agent is frontmatter-restricted to the read trio', () => {
     );
   }
 });
+
+test('the read-trio invariant is enforced at decision time, not only at build time', () => {
+  const os = require('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'revallow-fm-'));
+  const write = (stem, tools) => fs.writeFileSync(
+    path.join(dir, stem + '.md'),
+    '---\nname: ' + stem + '\ntools: ' + tools + '\n---\nbody\n',
+  );
+  write('good', 'Read, Grep, Glob');
+  write('armed', 'Read, Grep, Glob, Bash');
+  write('untooled', 'Read, Grep');
+  fs.writeFileSync(path.join(dir, 'nofrontmatter.md'), 'no frontmatter here\n');
+
+  const kept = allow.confinedByFrontmatter(dir, [
+    'zensu:good', 'zensu:armed', 'zensu:untooled', 'zensu:nofrontmatter', 'zensu:absent',
+  ]);
+
+  assert.deepStrictEqual(kept, ['zensu:good'],
+    'only an agent whose frontmatter declares exactly the read trio may be granted');
+});
+
+test('the module derives its agents directory from its own location, not the environment', () => {
+  const source = fs.readFileSync(path.join(LIB, 'reviewer-spawn-allow-v1.js'), 'utf8');
+  const body = source.slice(source.indexOf("'use strict'"));
+  assert.ok(/__dirname/.test(body),
+    'the agents directory must be derived from __dirname');
+  assert.ok(!/process\.env/.test(body),
+    'the decider must read no environment at all — that is what keeps the hook at four conditions');
+});

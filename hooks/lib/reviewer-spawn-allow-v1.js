@@ -86,6 +86,8 @@
 
 'use strict';
 
+var fs = require('fs');
+var path = require('path');
 var denial = require('./reviewer-spawn-denial-v1.js');
 var principal = require('./claude-principal-v1.js');
 
@@ -105,10 +107,40 @@ function pluginScoped(sets) {
   return out.sort();
 }
 
-var CONFINED_REVIEWER_AGENTS = Object.freeze(pluginScoped([
+var READ_TRIO = Object.freeze(['Glob', 'Grep', 'Read']);
+
+function declaredTools(agentsDir, name) {
+  var stem = name.indexOf(PLUGIN_SCOPE) === 0 ? name.slice(PLUGIN_SCOPE.length) : name;
+  if (stem === '' || stem.indexOf('/') !== -1 || stem.indexOf('\\') !== -1
+      || stem === '.' || stem === '..') return null;
+  var text;
+  try {
+    text = fs.readFileSync(path.join(agentsDir, stem + '.md'), 'utf8');
+  } catch (e) {
+    return null;
+  }
+  var parts = text.split('---');
+  if (parts.length < 2) return null;
+  var found = /^tools:[ \t]*(.+)$/m.exec(parts[1]);
+  if (!found) return null;
+  return found[1].split(',').map(function (s) { return s.trim(); })
+    .filter(function (s) { return s !== ''; }).sort();
+}
+
+function confinedByFrontmatter(agentsDir, names) {
+  return names.filter(function (name) {
+    var tools = declaredTools(agentsDir, name);
+    if (!tools || tools.length !== READ_TRIO.length) return false;
+    return tools.every(function (tool, i) { return tool === READ_TRIO[i]; });
+  });
+}
+
+var AGENTS_DIR = path.join(__dirname, '..', '..', 'agents');
+
+var CONFINED_REVIEWER_AGENTS = Object.freeze(confinedByFrontmatter(AGENTS_DIR, pluginScoped([
   principal.REVIEWER_TYPES,
   principal.EVIDENCE_WORKER_TYPES,
-]));
+])));
 
 var SPAWN_TOOL_NAMES = denial.SPAWN_TOOL_NAMES;
 
@@ -195,6 +227,8 @@ module.exports = {
   ALLOW_BYPASS_SOURCE_BUILD: ALLOW_BYPASS_SOURCE_BUILD,
   PLUGIN_SCOPE: PLUGIN_SCOPE,
   CONFINED_REVIEWER_AGENTS: CONFINED_REVIEWER_AGENTS,
+  READ_TRIO: READ_TRIO,
+  confinedByFrontmatter: confinedByFrontmatter,
   SPAWN_TOOL_NAMES: SPAWN_TOOL_NAMES,
   MAX_PAYLOAD_BYTES: MAX_PAYLOAD_BYTES,
   REFUSALS: REFUSALS,

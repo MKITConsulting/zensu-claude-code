@@ -183,7 +183,10 @@ matcher spelling in FIVE places — `hooks/hooks.json`, `docs/configuration.md`,
 `hooks/post-artifact-redact.sh` that actually selects the branch, which is the one
 a `NotebookEdit` added to the matcher would silently miss; the hook
 count in `docs/configuration.md` (header, prose, and the `#hooks-N` anchor in
-`docs/architecture.md`, which `test-readme-hook-count-sync.sh` does NOT cover); the
+`docs/architecture.md` — the anchor was outside H3's file list until the reviewer-spawn
+grant landed, and `test-readme-hook-count-sync.sh` H3 now scans that file too, so all three
+are pinned; H3 remains purely NEGATIVE, forbidding a stray number without asserting that a
+`#hooks-N` reference still exists, so a reworded or deleted cross-link still passes); the
 secure-open inventory in `tests/structure/test-windows-portability-guards.sh`; and
 the `msysSpelling` inverse, which is a HAND-COPY of `claude-path-v1.js`'s rule
 validated by round-tripping through `msysDrivePrefix` — that module exports no
@@ -675,7 +678,13 @@ carve-outs kept here so a releaser meets them where they will look:
   root, and the upgraded case re-measures the executing tree against the caller's
   claim rather than against the record. Do not over-bump defensively; do
   re-derive this if the added hook writes session state, participates in a strict
-  key set, **or can DENY**. The third disqualifier is the one an earlier wording
+  key set, **or can return a `permissionDecision` of ANY kind — deny, ask OR allow**.
+  The list said only DENY until the reviewer-spawn grant landed, and a releaser
+  matching on it would have found no entry covering a hook that GRANTS and
+  classified `patch`. The exemption's own closing test already settles it without
+  the list: the exempt shape is an ADVISORY hook "whose only output is
+  `additionalContext`", which a hook emitting a `permissionDecision` is not, in
+  either direction. The third disqualifier is the one an earlier wording
   left out, and it is the one that matters: a hook that can refuse a tool call
   changes the capability set of every session an older runtime is still serving,
   which is exactly what makes a matcher change breaking in the bullet above. A new
@@ -688,8 +697,17 @@ carve-outs kept here so a releaser meets them where they will look:
 - **adding a permissively-read config key** is likewise NOT in this list and is
   a `patch`, for a reason unrelated to the hook inventory: `zensu_hook_enabled` tests only
   `j.hooks[key] === false`, so an older runtime ignores a key it does not know
-  rather than failing on it. A key read by a STRICT validator is the opposite
-  case and belongs under the strict-key-set bullet above;
+  rather than failing on it. A key read by a STRICT VALIDATOR is the opposite
+  case and belongs under the strict-key-set bullet above — but read that bullet's
+  own definition before matching on the word "strict": its members REJECT an
+  unknown or missing key. `zensu_hook_enabled_strict` does no such thing. It reads
+  one key by name, grants when it is absent, and is strict about the VALUE and the
+  READ, not about the key SET — so `hooks.reviewerSpawnAutoAllow` keeps the `patch`
+  argument above. The reason it survives is worth stating, because it is not the
+  obvious one: the strictness lives in a NEW reader that older runtimes do not
+  have, never in a validator they run, so a config carrying that key degrades to a
+  no-op there exactly as an unknown key always did. Strict value reading is not
+  strict key-set validation; do not conflate them and over-bump;
 - the **attestation shape**, which is itself a schema two versions must agree
   on. A change to it has to ship in the release that *introduces* the policy it
   serves, never one release later.

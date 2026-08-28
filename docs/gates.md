@@ -166,10 +166,19 @@ instruction that cannot succeed until its cap releases the guard.
   `hooks.reviewerSpawnAutoAllow` not set to exactly `false`; and membership in the confined set.
 - **The set is derived, never spelled.** It is `claude-principal-v1.js`'s `REVIEWER_TYPES` plus
   `EVIDENCE_WORKER_TYPES` — the same classifier `SubagentStart` uses to inject
-  `reviewer-readonly-v1` — restricted to the plugin-scoped `zensu:` names. Each is confined to
-  `Read`/`Grep`/`Glob` by its agent frontmatter, so granting the SPAWN grants the child nothing:
-  its own tool calls are permission-checked separately. Bare names (`code-reviewer`, …) are
-  **excluded** because a project may define a same-named agent with `tools: Bash`.
+  `reviewer-readonly-v1` — restricted to the plugin-scoped `zensu:` names, and then filtered
+  again at decision time: `confinedByFrontmatter` reads each candidate's `agents/<stem>.md`
+  and keeps only those whose `tools:` line is exactly `Read`/`Grep`/`Glob`, so a member added
+  to those sets for principal reasons cannot acquire a classifier-free spawn by name alone.
+  Bare names (`code-reviewer`, …) are **excluded** because a project may define a same-named
+  agent with `tools: Bash`.
+- **What bounds the CHILD is in this tree, not an assumption about the host.**
+  `hooks/pre-reviewer-capability-gate.sh` runs on the `.*` PreToolUse matcher and denies any
+  tool outside the read trio for a `REVIEWER` principal, and confines its reads to the project
+  root. It is fail-closed and carries no config off-switch, so it holds whether or not the host
+  re-checks the child's own calls — a claim about the host would be unverified, and this one is
+  checkable. Weakening `readOnlyViolation`, or giving that gate an off-switch, removes the only
+  backstop this grant has.
 - **The grant covers the CALL, not only the identity.** Only `tool_name` and
   `tool_input.subagent_type` are examined; every other input field travels unexamined,
   including `prompt` and `isolation: "worktree"` — and that last one is a host-performed
