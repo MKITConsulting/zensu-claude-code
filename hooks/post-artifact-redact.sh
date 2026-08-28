@@ -70,7 +70,7 @@ fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
 unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 
-INPUT="$(cat 2>/dev/null || true)"
+{ INPUT="$(cat 2>/dev/null || true)"; } 2>/dev/null
 source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-agent-context.sh"
 # The principal check stays SILENT on purpose. A subagent tool call is the
 # ordinary outcome of a `.*`-shaped matcher, not a refusal, and a note here would

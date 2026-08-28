@@ -723,10 +723,14 @@ case "$DOC_TAMPERED" in
 esac
 
 # ── A39 the hook's own stderr stays clean, and its read is bounded ───────────
-# Every sibling PreToolUse hook in this tree spells the read `$(cat 2>/dev/null || true)`.
-# This one took the bare form, so a payload carrying a NUL byte puts bash's own
-# "ignored null byte in input" warning on the channel the hook otherwise reserves for its
-# single deliberate loud branch — the inherited-plugin-root mismatch.
+# A payload carrying a NUL byte puts bash's own "ignored null byte in input" warning on the
+# channel this hook otherwise reserves for its single deliberate loud branch — the
+# inherited-plugin-root mismatch. The warning comes from the shell PERFORMING the
+# substitution, so an inner 2>/dev/null cannot catch it; every stdin-reading hook in this
+# tree therefore wraps its read in an OUTER `{ ...; } 2>/dev/null`, the shape
+# zensu_tdd_mode_marker_state already used. Only bash >= 4.4 warns, so this check can only
+# fail on Linux: Apple bash 3.2 drops the NUL silently and the suite passes on macOS either
+# way. Verify a change to this read under bash 5, never against a local run alone.
 A39_ERR="$(printf 'x\000y' \
   | CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" \
     CLAUDE_PROJECT_DIR="$PROJECT" ZENSU_CONFIG="$NO_CONFIG" \

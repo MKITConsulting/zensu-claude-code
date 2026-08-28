@@ -43,7 +43,7 @@ unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 
 command -v node >/dev/null 2>&1 || exit 0
 
-INPUT="$(cat 2>/dev/null || true)"
+{ INPUT="$(cat 2>/dev/null || true)"; } 2>/dev/null
 
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 ZENSU_SESSION_BOUND=true
