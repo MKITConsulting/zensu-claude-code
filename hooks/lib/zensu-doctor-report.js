@@ -733,7 +733,8 @@ function deferredShapeRowText(err, scope) {
     + '; the ' + scope + ' could not be determined. That is a missing part of the check, not an '
     + 'all-clear.';
 }
-// Reused verbatim by the ask row and the exposure row. Its second clause is now the
+// Reused verbatim by the ask row, the exposure row and the granted exposure row — THREE
+// consumers since the reviewer-spawn grant landed. Its second clause is now the
 // constant DENY_OUTRANKS below, so the two IN-FILE copies — this caveat and the
 // reactive row — SHARE one source instead of being byte-identical by hand. That was
 // the remaining defect in this class: a shared constant sitting beside an unconsumed
@@ -945,7 +946,7 @@ function mentionsReviewerAgent(rules) {
 // — the list simply has two members — instead of being asserted in prose above an `else`,
 // and the inventory of early exits is the run of single-member returns you can read off
 // the page rather than a paragraph enumerating them.
-function classifyPermissionExposure(shape) {
+function classifyPermissionExposure(shape, grantActive) {
   if (!shape.ok) {
     // NOT "could not be read": this verdict is reached only after the file was read and
     // parsed successfully, and naming the wrong cause sends the user hunting for a
@@ -987,7 +988,12 @@ function classifyPermissionExposure(shape) {
     verdicts.push({ kind: 'deferred', err: shape.deferredExposure,
       scope: 'auto-mode exposure of the reviewer spawn' });
   } else if (!granted && mode === 'auto') {
-    verdicts.push({ kind: 'auto-exposure' });
+    // The plugin's own PreToolUse grant admits the reviewer spawn before the classifier is
+    // consulted, so telling this user to add a permissions.allow rule for it would be
+    // advice for a problem they no longer have. It is a DIFFERENT verdict, not a dropped
+    // one: the mode is still auto, every OTHER spawn is still classifier-subject, and a
+    // deny or ask rule still outranks the grant.
+    verdicts.push({ kind: grantActive ? 'auto-exposure-granted' : 'auto-exposure' });
   }
   // Its OWN deferred carrier comes first: when `autoMode.allow` is unreadable this verdict
   // cannot make its claim about it, and saying nothing there would be the silence this
@@ -996,7 +1002,13 @@ function classifyPermissionExposure(shape) {
   if (shape.deferredAutoMode) {
     verdicts.push({ kind: 'deferred', err: shape.deferredAutoMode,
       scope: 'autoMode.allow guidance row' });
-  } else if (!granted && mentionsReviewerAgent(shape.autoMode.allow)) {
+  } else if (!granted && !grantActive && mentionsReviewerAgent(shape.autoMode.allow)) {
+    // `!grantActive` for the same reason `!granted` is here: this row exists to correct a
+    // user who mistook prose guidance for a grant, and a user who already HOLDS a grant has
+    // nothing to correct. Without the conjunct both this row and `auto-exposure-granted`
+    // fire together, and this one's closing sentence — only a permissions.allow entry
+    // grants the spawn — flatly contradicts the other. It is also a WARN, so it would deny
+    // a green summary for an exposure the grant already covers.
     verdicts.push({ kind: 'automode-prose' });
   }
   // What this still does NOT say, unchanged: a deny in a spelling this check declined to
@@ -1007,6 +1019,12 @@ function classifyPermissionExposure(shape) {
 // The TEXT, keyed by verdict kind, and the only place a row is worded. Adding a row means
 // adding a kind here and returning it above; neither half can grow a branch the other does
 // not know about.
+//
+// THREE maps now, not two, and the third has the OPPOSITE totality contract: `ROW_LEVEL`
+// below is consumed as `ROW_LEVEL[v.kind] || WARN`, so it MAY silently not know about a
+// kind and that omission means WARN. A kind missing from `ROW_TEXT` throws instead, and the
+// throw is swallowed by the wrapper, costing every exposure row. Keep the invariant above
+// as stated for `ROW_TEXT`; do not extend it to `ROW_LEVEL`, whose default is deliberate.
 var ROW_TEXT = {
   shape: function (v) { return shapeRowText(v.err); },
   deferred: function (v) { return deferredShapeRowText(v.err, v.scope); },
@@ -1060,6 +1078,14 @@ var ROW_TEXT = {
   // dangles whenever the row above did not print — the same defect the deny row was
   // corrected for. Which verdicts precede it is now read off classifyPermissionExposure
   // rather than restated here.
+  'auto-exposure-granted': function () {
+    return 'permissions: permission mode "auto" is set in ~/.claude/settings.json and no '
+      + 'permissions.allow entry there spells either "Agent(' + REVIEWER_AGENT + ')" or the bare '
+      + '"Agent" — but this plugin admits its own confined reviewer spawns through the PreToolUse '
+      + 'hook pre-agent-reviewer-allow.sh before the classifier is consulted, so no settings edit is '
+      + 'needed for them. This covers the plugin\'s own reviewers only; every other spawn in this '
+      + 'session is still classifier-subject.' + DENY_FIRST_CAVEAT;
+  },
   'automode-prose': function () {
     return 'permissions: an autoMode.allow entry in ~/.claude/settings.json mentions '
       + REVIEWER_AGENT + ', but autoMode.allow carries classifier guidance in prose — it is not a '
@@ -1067,11 +1093,18 @@ var ROW_TEXT = {
       + '"Agent(' + REVIEWER_AGENT + ')" or the bare "Agent" does.';
   }
 };
+// Severity, keyed by the same verdict kind. WARN is the default because every verdict here
+// reports something the reader has to act on — except the granted one, which reports that
+// the action is already taken and would read as an open problem in a ⚠️ table. A kind
+// missing from this map is a warning; only an explicit entry lowers it.
+var ROW_LEVEL = {
+  'auto-exposure-granted': OK
+};
 // Read, classify, render — three steps, and the branch ladder lives in exactly one of
 // them. It emits when it has something to say and stays silent otherwise;
 // permissionExposureRowsInner below turns that silence into a statement, so no branch
 // here has to remember to close itself out.
-function permissionExposureLadder(file) {
+function permissionExposureLadder(file, grantActive) {
   var r = readSettingsJson(file);
   if (r.missing) return;
   if (!r.ok) {
@@ -1079,8 +1112,8 @@ function permissionExposureLadder(file) {
       + '; the reviewer-spawn permission check did not run. That is a missing check, not an all-clear.');
     return;
   }
-  classifyPermissionExposure(settingsShape(r.data)).forEach(function (v) {
-    line(WARN, ROW_TEXT[v.kind](v));
+  classifyPermissionExposure(settingsShape(r.data), grantActive).forEach(function (v) {
+    line(ROW_LEVEL[v.kind] || WARN, ROW_TEXT[v.kind](v));
   });
 }
 // The check speaks on EVERY path. Silence used to be its default verdict and the one
@@ -1137,15 +1170,202 @@ function reviewerSpawnCheckDisabled(cfgReads) {
   });
   return disabled;
 }
-function permissionExposureRows(disabled) {
+// Same permissive read as reviewerSpawnCheckDisabled, against the OTHER key. Two
+// readers rather than one parameterised helper because the two flags govern opposite
+// things — one suppresses a diagnostic, this one withdraws a capability grant — and a
+// shared reader would invite a caller to pass the wrong key without the name saying so.
+// Mirrors `zensu_hook_enabled_strict`, which is what actually enforces this key — NOT
+// `zensu_hook_enabled`, and not the merged read. That reader is STICKY and FAIL-CLOSED:
+// `false` in ANY candidate file withdraws the grant regardless of precedence, and a
+// candidate that is present but unreadable or malformed withdraws it too. Mirroring the
+// merge instead was wrong in both directions — a project overlay replacing the `hooks`
+// node erased a global `false` here while the hook still granted, and an unreadable file
+// read as "not disabled" while the hook declined.
+// Three answers, not two. Folding every readJson failure into "disabled" made the only
+// renderer of that boolean assert ONE cause — the config key — for a trailing comma the
+// user never wrote, which is the failure this file's own doctrine forbids one function
+// below. Worse for the SIZE class: readJson caps at CONFIG_MAX_BYTES while the enforcing
+// zensu_hook_enabled_strict has no cap, so an oversized well-formed config is read and
+// applied by the hook — which GRANTS — while the row claimed the grant was switched off.
+// A cap is this reader's own bound, never a verdict about the config.
+function reviewerSpawnAutoAllowDisabled(cfgReads) {
+  var verdict = false;
+  cfgReads.forEach(function (entry) {
+    var r = entry.r;
+    if (!r || r.missing) return;
+    if (!r.ok) {
+      // A check-limited failure (this reader's size cap, a non-regular file) establishes
+      // nothing about the config — the enforcing reader has neither bound. A genuine parse
+      // failure DOES decline there too, so the grant really is not in force; only the
+      // reported CAUSE differs from an explicit key.
+      raise(r.cap || r.io ? 'unjudgeable' : 'broken');
+      return;
+    }
+    var data = r.data;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) { raise('broken'); return; }
+    if (data.hooks === undefined) return;
+    var hooks = data.hooks;
+    if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) { raise('broken'); return; }
+    if (hooks.reviewerSpawnAutoAllow === false) raise('off');
+  });
+  return verdict;
+
+  // An explicit key is the most informative answer, then a config that is present but
+  // unusable, then a bound this check could not see past. Never let a weaker finding
+  // overwrite a stronger one just because it was read later.
+  function raise(next) {
+    var rank = { unjudgeable: 1, broken: 2, off: 3 };
+    if (!verdict || rank[next] > rank[verdict]) verdict = next;
+  }
+}
+// Is the grant hook actually referenced by hooks.json? File presence alone is not the
+// grant: an unwired script never runs, and the ✅ row would then assert a capability the
+// harness never invokes.
+// Three answers, not two. Collapsing "could not read hooks.json" into "not wired" would
+// assert a specific cause the parse never established — the failure this file's own
+// doctrine forbids one function below. Reads through the hardened `readJson`, whose header
+// records the measured FIFO hang that the bare readFileSync used here at first gives up.
+// The MATCHER is part of the answer: a hook registered under a matcher that does not test
+// true for the spawn tool names is exactly as inert as an unregistered one.
+function reviewerSpawnHookWired(root, spawnTools) {
+  var r = readJson(path.join(root, 'hooks', 'hooks.json'));
+  if (r.missing || !r.ok) return 'unknown';
+  var data = r.data;
+  if (!data || typeof data !== 'object') return 'unknown';
+  var groups = (data.hooks && data.hooks.PreToolUse) || [];
+  if (!Array.isArray(groups)) return 'unknown';
+  var tools = Array.isArray(spawnTools) && spawnTools.length ? spawnTools : ['Agent', 'Task'];
+  var wired = false;
+  groups.forEach(function (g) {
+    if (!g || !Array.isArray(g.hooks)) return;
+    var named = g.hooks.some(function (h) {
+      return h && typeof h.command === 'string'
+        && h.command.indexOf('pre-agent-reviewer-allow.sh') !== -1;
+    });
+    if (!named) return;
+    var re;
+    try { re = new RegExp(typeof g.matcher === 'string' && g.matcher ? g.matcher : '.*'); }
+    catch (e) { return; }
+    if (tools.every(function (t) { return re.test(t); })) wired = true;
+  });
+  return wired ? 'wired' : 'unwired';
+}
+// The grant is a capability the plugin hands ITSELF, so it is reported whether it is on
+// or off — a silent grant would be the same undisclosed widening this row exists to make
+// visible. The agent list is read from the owning module through a LAZY, guarded require,
+// exactly as reviewerDenialRows does: a load fault costs this row, never the whole report.
+function reviewerSpawnGrantRows(disabled) {
+  var root = pluginDir();
+  // Absence of the HOOK means this installation predates the grant feature — there is no
+  // grant, nothing to disclose, and the ordinary exposure rows below already give that
+  // reader the right advice. Warning there would fire on every older plugin root. The
+  // asymmetric case IS worth a row: the hook is installed but its decision module is not,
+  // because then the hook loads nothing and silently declines while the reader has every
+  // reason to believe the grant is in force.
+  // lstat, not stat: pre-agent-reviewer-allow.sh refuses a symlinked decider outright
+  // ([ -f ] && [ ! -L ]), so a report that follows links can assert a grant the hook
+  // declines on every spawn. A symlinked hook is a BROKEN installation rather than one
+  // predating the feature, so it must reach a row instead of the silent return below.
+  var hookPath = path.join(root, 'hooks', 'pre-agent-reviewer-allow.sh');
+  var hookInstalled = false;
+  var hookIsLink = false;
   try {
-    permissionExposureRowsInner(disabled);
+    var hookStat = fs.lstatSync(hookPath);
+    hookIsLink = hookStat.isSymbolicLink();
+    hookInstalled = hookStat.isFile() || hookIsLink;
+  } catch (e) { hookInstalled = false; }
+  if (!hookInstalled) return false;
+  if (hookIsLink) {
+    line(WARN, 'permissions: hooks/pre-agent-reviewer-allow.sh is a symlink. The hook itself '
+      + 'refuses a symlinked decision module and this report holds its own paths to the same '
+      + 'standard, so no reviewer-spawn grant is in force. This is a broken installation, not a '
+      + 'configuration choice.');
+    return false;
+  }
+  var agents = null;
+  var spawnTools = null;
+  try {
+    var modPath = path.join(root, 'hooks', 'lib', 'reviewer-spawn-allow-v1.js');
+    if (!fs.lstatSync(modPath).isFile()) throw new Error('decision module is not a regular file');
+    var allow = require(modPath);
+    if (Array.isArray(allow.CONFINED_REVIEWER_AGENTS) && allow.CONFINED_REVIEWER_AGENTS.length) {
+      agents = allow.CONFINED_REVIEWER_AGENTS.slice();
+    }
+    if (Array.isArray(allow.SPAWN_TOOL_NAMES) && allow.SPAWN_TOOL_NAMES.length) {
+      spawnTools = allow.SPAWN_TOOL_NAMES.slice();
+    }
+  } catch (e) { agents = null; }
+  var wiring = reviewerSpawnHookWired(root, spawnTools);
+  if (wiring === 'unknown') {
+    line(WARN, 'permissions: hooks/pre-agent-reviewer-allow.sh is installed but hooks/hooks.json '
+      + 'could not be read or parsed, so whether the harness invokes it — and therefore whether '
+      + 'any reviewer-spawn grant is in force — could not be judged by this check.');
+    return false;
+  }
+  if (wiring === 'unwired') {
+    line(WARN, 'permissions: hooks/pre-agent-reviewer-allow.sh is present on disk but hooks/hooks.json '
+      + 'does not register it on a PreToolUse matcher covering the spawn tools, so the harness never '
+      + 'invokes it for a spawn and no reviewer-spawn grant is in force. This is a broken '
+      + 'installation, not a configuration choice.');
+    return false;
+  }
+  if (!agents) {
+    // Three distinct causes reach here — the module itself, either of the two siblings it
+    // requires, and an empty derived set — so the row names the load rather than asserting
+    // which file is absent. Naming the wrong cause is the failure this file's own doctrine
+    // forbids one branch above.
+    line(WARN, 'permissions: hooks/pre-agent-reviewer-allow.sh is installed but its decision module '
+      + 'hooks/lib/reviewer-spawn-allow-v1.js could not be loaded — it, or one of the siblings it '
+      + 'requires (reviewer-spawn-denial-v1.js, claude-principal-v1.js), is missing or unreadable, '
+      + 'or the set it derives is empty. That hook then declines every spawn and no reviewer-spawn '
+      + 'grant is in force. This is a broken installation, not a configuration choice.');
+    return false;
+  }
+  if (disabled === 'unjudgeable') {
+    line(WARN, 'permissions: a config source could not be read or parsed within this check\'s own '
+      + 'bounds, so whether the reviewer-spawn grant is in force could not be judged. That is a '
+      + 'missing check, not a configuration choice: the enforcing reader carries no size limit of '
+      + 'its own, so it may well be granting on the same file.');
+    return false;
+  }
+  if (disabled === 'broken') {
+    line(WARN, 'permissions: a config source could not be read or parsed, so the enforcing reader '
+      + 'declines and no reviewer-spawn grant is in force. That is a broken config file, not a '
+      + 'configuration choice — no hooks.reviewerSpawnAutoAllow key was involved. Fix the file to '
+      + 'get the grant back.');
+    return false;
+  }
+  if (disabled === 'off') {
+    line(WARN, 'permissions: the reviewer-spawn grant is switched off by hooks.reviewerSpawnAutoAllow '
+      + 'in .zensu/config.json, so the host permission layer decides every reviewer spawn. Under '
+      + 'permission mode "auto" the classifier can refuse one, and a refused spawn leaves the review '
+      + 'chain with no review it can close on.');
+    return false;
+  }
+  line(OK, 'permissions: this plugin admits its own read-only reviewer spawns (' + agents.join(', ')
+    + ') through the PreToolUse hook pre-agent-reviewer-allow.sh, so the host permission layer — '
+    + 'including the auto-mode classifier — is not consulted for them. Each is confined to '
+    + 'Read/Grep/Glob by its agent frontmatter, and the grant covers only these plugin-scoped names. '
+    + 'It admits the whole spawn CALL, not only the identity: other tool_input fields such as '
+    + 'isolation travel unexamined, and the read-trio confinement bounds what the child may then do. '
+    + 'Three conditions this check cannot see still apply per call: the spawn must come from the '
+    + 'main thread; the session must bind to a valid Session Control record — in an unbound session '
+    + 'the hook declines and no grant is in force, so read the binding rows in this report '
+    + 'alongside this one; and the hook re-reads the flag fail-closed at call time, so a host where '
+    + 'that read cannot run declines even though this row rendered. '
+    + 'A permissions.deny or permissions.ask entry still overrides it. Turn it '
+    + 'off with hooks.reviewerSpawnAutoAllow=false.');
+  return true;
+}
+function permissionExposureRows(disabled, grantActive) {
+  try {
+    permissionExposureRowsInner(disabled, grantActive);
   } catch (e) {
     line(WARN, 'permissions: the reviewer-spawn permission check failed to run. That is a missing '
       + 'check, not an all-clear.');
   }
 }
-function permissionExposureRowsInner(disabled) {
+function permissionExposureRowsInner(disabled, grantActive) {
   if (disabled) {
     line(OK, 'permissions: the reviewer-spawn permission check is switched off by '
       + 'hooks.reviewerSpawnPermissionCheck in .zensu/config.json, so it did not run. That is a '
@@ -1163,7 +1383,7 @@ function permissionExposureRowsInner(disabled) {
     return;
   }
   var before = out.length;
-  permissionExposureLadder(file);
+  permissionExposureLadder(file, grantActive);
   if (out.length !== before) return;
   line(OK, 'permissions: no reviewer-spawn exposure found in ~/.claude/settings.json — that is the '
     + 'only settings source this check reads, and the permission mode can be active for a session '
@@ -1246,7 +1466,11 @@ function configBlock() {
   if (!anyPresent) {
     line(OK, 'config: no config file present — built-in defaults apply');
   }
-  permissionExposureRows(reviewerSpawnCheckDisabled(cfgReads));
+  // The grant row comes FIRST and its state is threaded into the exposure check below,
+  // because the exposure check's auto-mode advice is only correct when the grant is not
+  // already covering the spawn it recommends a rule for.
+  var grantActive = reviewerSpawnGrantRows(reviewerSpawnAutoAllowDisabled(cfgReads));
+  permissionExposureRows(reviewerSpawnCheckDisabled(cfgReads), grantActive);
   // Here rather than in pluginBlock() because the row needs the resolved flag, and
   // cfgReads is gathered in this block. It reports on plugin DATA, so it reads as a
   // continuation of `hooks wiring` above.

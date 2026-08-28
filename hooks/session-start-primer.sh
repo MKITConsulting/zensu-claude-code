@@ -23,7 +23,7 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 zensu_hook_enabled sessionBanner || exit 0
 command -v node >/dev/null 2>&1 || exit 0
 
-INPUT="$(cat)"
+{ INPUT="$(cat)"; } 2>/dev/null
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-agent-context.sh"
 zensu_hook_is_main_principal "$INPUT" SessionStart || exit 0
 

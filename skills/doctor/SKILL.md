@@ -190,6 +190,22 @@ classifier will refuse a spawn, not only when the whole table is green.
   `hooks/lib/rule-block-v1.js` could not be loaded, so carrier health is unknown.
   Report it as unknown, never as healthy — the row exists precisely so a clean
   report cannot mean "nobody looked".
+- **✅ permissions: … admits its own read-only reviewer spawns** → the plugin's own
+  PreToolUse hook `pre-agent-reviewer-allow.sh` grants those spawns before the host
+  permission layer is consulted, so the auto-mode classifier cannot refuse them. This is a
+  capability the plugin hands ITSELF, which is why it is reported in both states and why
+  the flag that turns it off cannot silence the row. Relay what it covers and what it does
+  not: only the plugin-scoped reviewer agents listed in the row, each confined to
+  `Read`/`Grep`/`Glob`; every other subagent spawn in the session is still
+  classifier-subject; and a `permissions.deny` or `permissions.ask` entry still overrides
+  the grant. State the scope precisely — the grant admits the whole spawn CALL, including
+  host-side effects of other `tool_input` fields such as `isolation`, and the read-trio
+  confinement bounds only what the child may then do.
+- **✅ permissions: … no settings edit is needed for them** → permission mode `auto` is set
+  and no `permissions.allow` rule names the reviewer spawn, but the grant above already
+  admits it, so the ordinary "add `Agent(zensu:code-reviewer)`" remedy does not apply. Do
+  NOT relay that remedy against this row. The deny-first caveat still travels with it,
+  because a deny rule outranks the grant just as it outranks an allow rule.
 - **⚠️ permissions: … the zensu:code-reviewer spawn** → the proactive counterpart
   to the refused-spawn state row below: it reads `~/.claude/settings.json` and
   reports the exposure *before* a chain wedges, so it is a warning about what
@@ -209,6 +225,37 @@ classifier will refuse a spawn, not only when the whole table is green.
   effect. An `autoMode.allow` entry is classifier guidance in prose, not a
   permission rule; if the row says so, the user's earlier attempt did not grant
   anything.
+- **⚠️ permissions: … the reviewer-spawn grant is switched off** → `hooks.reviewerSpawnAutoAllow`
+  is `false`, so the host permission layer decides every reviewer spawn again. Under
+  permission mode `auto` the classifier can refuse one, and a refused spawn leaves the
+  review chain with no review it can close on. It is a configuration choice, not a fault —
+  relay it as the trade-off it is, and do not change the flag on the user's behalf. This
+  row now fires ONLY for an explicit `false`; the two rows below carry the cases that used
+  to be folded into it and reported as a choice the user never made.
+- **⚠️ permissions: a config source could not be read or parsed within this check's own bounds**
+  → the report could not judge whether the grant is in force. This is a MISSING CHECK, never
+  an all-clear and never a verdict about the config: the enforcing reader carries no size
+  limit of its own, so it may well be granting on the very file this check declined to read.
+  Relay the uncertainty as uncertainty and point the user at the file.
+- **⚠️ permissions: a config source could not be read or parsed, so the enforcing reader declines**
+  → a broken config file, not a configuration choice. No `hooks.reviewerSpawnAutoAllow` key
+  was involved and the user should not go looking for one; fixing the file restores the grant.
+- **⚠️ permissions: pre-agent-reviewer-allow.sh is a symlink** → a broken installation. The
+  hook refuses a symlinked decision module outright and this report holds its own paths to
+  the same standard, so no grant is in force. Common on a `--plugin-dir` checkout or a
+  dotfile-managed tree; relay it as an installation problem, not a permission one.
+- **⚠️ permissions: pre-agent-reviewer-allow.sh is installed but its decision module … could not be loaded**
+  → a broken installation, not a choice: the hook loads nothing and declines every spawn,
+  so no grant is in force while the banner and this plugin's docs say one is. The row names
+  the load rather than one file, because the module or either of its two required siblings
+  can cause it. Reinstall or repair the plugin root rather than editing any settings file.
+- **⚠️ permissions: … hooks.json does not register it on a PreToolUse matcher covering the spawn tools**
+  → also a broken installation: the script exists but the harness never invokes it for a
+  spawn, so no grant is in force. A hook registered under a matcher that does not cover the
+  spawn tool names is exactly as inert as an unregistered one. Repair the plugin root.
+- **⚠️ permissions: … hooks/hooks.json could not be read or parsed** → the wiring could not
+  be judged, so whether any grant is in force is unknown. Relay it as a missing check, never
+  as a verdict either way; the report's own hooks-wiring rows name the underlying fault.
 - **✅ permissions: … switched off by hooks.reviewerSpawnPermissionCheck** → the check did
   NOT run. It is green because nothing is wrong, not because nothing was found, and the
   row says so itself — relay that distinction rather than folding this row into an

@@ -77,6 +77,46 @@ zensu_hook_enabled() {
   [ "$val" = "1" ]
 }
 
+# Fail-CLOSED twin of zensu_hook_enabled, for a flag whose "enabled" state GRANTS a
+# capability instead of running a protection. zensu_hook_enabled returns enabled when
+# `node` is missing and again when the read produces no value, because for every
+# ordinary flag that direction keeps a protection running. `reviewerSpawnAutoAllow`
+# inverts the stakes: there "enabled" means the host permission layer is bypassed, so
+# the same fallback would silently restore a capability the user explicitly withdrew.
+# This reader grants only when NO candidate says false and no candidate is present but
+# unusable. An ABSENT candidate is skipped, because a no-config install is the documented
+# default-on case — but an EMPTY candidate list is refused outright, since then nothing was
+# consulted at all and "nothing said false" would be vacuous. Only a clean ENOENT counts as
+# absent: every other stat failure (EACCES, ENOTDIR, ELOOP) is a config the reader could not
+# REACH, and reading that as "no config here" is what let a withdrawal the user recorded
+# survive unseen. one() returns a TAGGED result rather than either a parsed value or a
+# sentinel string, because those two domains collided: JSON.parse('"absent"') is the string
+# absent, so a config whose whole content was that literal took the not-present branch.
+# Do NOT fold it into zensu_hook_enabled — that helper's default is right for its own
+# callers, and one shared default cannot serve both directions.
+# It deliberately does NOT go through cfg(). Two properties the merged read cannot give:
+#
+#   1. rd() swallows every read error and returns {}, so a config that is PRESENT but
+#      unreadable or malformed is indistinguishable from one that is absent — and for this
+#      flag "indistinguishable" means the grant survives a state the user cannot see. A
+#      present candidate that will not parse DECLINES here.
+#   2. cfg() lets the project overlay REPLACE the global value, so a `.zensu/config.json`
+#      inside a checked-out repository could re-arm a bypass the user withdrew globally.
+#      Withdrawal is STICKY instead: `false` in ANY candidate disables, whichever file
+#      carries it. That is the right precedence for a switch that governs a permission
+#      bypass and the wrong one for an ordinary feature flag, which is the whole reason
+#      this reader is separate rather than a parameter on the one above.
+#
+# ZENSU_CONFIG still overrides the pair outright, matching cfg()'s own contract.
+_ZENSU_STRICT_JS='function one(p){var fs=require("fs");try{fs.statSync(p)}catch(e){return {s:(e&&e.code==="ENOENT")?"absent":"bad"}}try{return {s:"ok",v:JSON.parse(fs.readFileSync(p,"utf8"))}}catch(e){return {s:"bad"}}}function cands(){var e=process.env.ZENSU_CONFIG;if(e)return [e];var o=[];if(process.env.HOME)o.push(process.env.HOME+"/.zensu/config.json");if(process.env.CLAUDE_PROJECT_DIR)o.push(process.env.CLAUDE_PROJECT_DIR+"/.zensu/config.json");return o}function verdict(k){var list=cands();if(!list.length)return "0";for(var i=0;i<list.length;i++){var r=one(list[i]);if(r.s==="absent")continue;if(r.s==="bad")return "0";var v=r.v;if(!v||typeof v!=="object"||Array.isArray(v))return "0";var h=v.hooks;if(h===undefined)continue;if(!h||typeof h!=="object"||Array.isArray(h))return "0";if(h[k]===false)return "0"}return "1"}'
+zensu_hook_enabled_strict() {
+  local key="$1"
+  command -v node >/dev/null 2>&1 || return 1
+  local val
+  val=$(_zensu_config_node -e "$_ZENSU_STRICT_JS"' process.stdout.write(verdict(process.argv[1]))' "$key" 2>/dev/null)
+  [ "$val" = "1" ]
+}
+
 # Strict RED→GREEN TDD enable check — the INVERSE default of zensu_hook_enabled.
 # tddImplementation defaults to FALSE (vanilla mode): strict runs ONLY on an
 # explicit boolean `true`; absent / false / non-boolean all resolve to vanilla,

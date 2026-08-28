@@ -15,7 +15,7 @@ fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
 unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 
-PAYLOAD="$(cat)"
+{ PAYLOAD="$(cat)"; } 2>/dev/null
 
 source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-agent-context.sh"
 zensu_hook_is_main_principal "$PAYLOAD" PreToolUse || exit 0

@@ -81,6 +81,7 @@
     "test-review-worker-evidence-lease.sh",
     "test-reviewer-capability-gate.sh",
     "test-reviewer-readonly-v1.sh",
+    "test-reviewer-spawn-allow.sh",
     "test-run-all-preflight-watchdog.sh",
     "test-run-all-required-offline-suites.sh",
     "test-run-all-sharding.sh",
