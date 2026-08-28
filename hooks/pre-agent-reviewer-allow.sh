@@ -51,8 +51,11 @@ unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 # principal reader and the session binder each receive one before it — so a ceiling here
 # is the only one that bounds the shell's own copy. One byte over the module's limit is
 # enough for it to refuse, which keeps the limit itself spelled in exactly one place. The
-# trailing sentinel survives command substitution stripping trailing newlines.
-PAYLOAD="$( { head -c 4194305; printf 'X'; } 2>/dev/null )" || PAYLOAD="X"
+# trailing sentinel survives command substitution stripping trailing newlines. The NUL
+# strip is what keeps stderr clean: bash 5 warns "ignored null byte in input" from the
+# OUTER shell, so the group's own 2>/dev/null cannot catch it, and Apple bash 3.2 does not
+# warn at all — the divergence is invisible on macOS and fails A39 only on Linux.
+PAYLOAD="$( { head -c 4194305 | tr -d '\0'; printf 'X'; } 2>/dev/null )" || PAYLOAD="X"
 PAYLOAD="${PAYLOAD%X}"
 
 DECIDER="$CLAUDE_PLUGIN_ROOT/hooks/lib/reviewer-spawn-allow-v1.js"
