@@ -3296,6 +3296,159 @@ the flag. Exactly ONE invocation there omits it — the L10 case, whose whole su
 that the variable is honoured — and `L28` pins that it stays exactly one, because a
 second exemption is indistinguishable from a forgotten `env -u`.
 
+## Takeover Destination (`worktreeAdvice` in `skills/session-trail/scripts/trail.mjs`)
+
+**A THIRD session-trail axis, and the one most easily confused with the other two.**
+§"Git Mutation Tables" tracks the WRITE-ANCHOR contract — *may I write there* — in six
+carriers. §"Session Lineage Ledger" tracks a chain of sessions handing work to each
+other. This one asks *will the directory still exist while I work in it*, and it shares
+no code with either. All three live in the same skill; a change to one lands in none of
+the others.
+
+**The answer is now the same on every arm: a worktree of the taker's OWN.** There used
+to be one exception — an already-archived session whose directory had survived was
+adopted in place — and it was the worst arm to except rather than the safest. A survivor
+is the tree `git worktree remove` refused on, which is close to by construction a DIRTY
+one, so a takeover's first commit removes exactly the condition that kept it alive.
+SKILL.md §6 measures the shape: 498 of 657 archived worktree-sessions lost their
+directory, and 37 of 40 sampled survivors were dirty. The arms now decide only what to
+SAY, never whether to stay — an arm that returns without a `git worktree add` line has
+reintroduced the defect, which is what `WT8k` grades over a source-derived roster of all
+eight fixtures rather than a hand list.
+
+**`archivedSurvivor` is named for what it MEASURES.** It was `safeToAdopt`, and that name
+was the defect in one word: it selected the arm whose directory had survived an archive
+attempt and read that as clearance. Renaming it was not cosmetic — the predicate is
+unchanged and the conclusion inverted.
+
+**The rule has TWO halves and the second is easy to drop.** Choosing a directory settles
+where COMMITTED work goes; a `git worktree add` carries nothing else. The present-directory
+arms therefore also carry `carryOver`, the recipe that moves the uncommitted half out, and
+the gone arms state that half did not survive rather than printing a recipe whose source
+is not there to read. FOUR properties of that recipe are safety and none survives being
+tidied — and the count is the thing to check first when this section and the code disagree,
+because it was THREE and went stale the moment `--binary` was added:
+
+- `--no-textconv --no-ext-diff -c core.fsmonitor=false`. A textconv driver, a
+  `diff.external` driver and an fsmonitor hook are arbitrary commands git runs FOR you
+  while producing the diff, so "treat the output as untrusted" is half a statement — the
+  execution precedes any output to distrust. **State the bound exactly: these close the
+  three they NAME, not the class.** A `filter.<driver>.clean` is consulted on the same
+  comparison and no flag here disables it. An earlier wording of this paragraph said the
+  flags made the untrusted-config sentence "complete", which was false in precisely that
+  direction; the residual is now disclosed in the emitted text, in SKILL.md and here.
+- `--binary`, which is not about config at all and whose failure is TOTAL rather than
+  partial. Measured against git 2.51.0: without it a modified binary file yields a stanza
+  `git apply` refuses, and apply is all-or-nothing, so a co-changed TEXT file does not land
+  either. On a text-only diff the two patches are byte-identical. It does widen what lands
+  unread — a base85 hunk cannot be reviewed by opening the patch — which the emitted text
+  says rather than leaving "open $PATCH" to imply a review it cannot give.
+- `mktemp` over a fixed `/tmp` name: a predictable path in a shared /tmp is a symlink
+  waiting to have been planted, and `>` follows one.
+- The `grep 120000` and `apply --stat` lines are COMMANDS positioned BETWEEN the diff and
+  the apply, because a caution printed after the apply line is read after the apply has run.
+  `--stat` shows WHICH files, never their content and — measured against git 2.51.0 — never
+  the MODE: a tracked symlink staged in the source renders there as a bland `x | 1 +`, and
+  `git apply` recreates the link wherever the source pointed it. Only the patch body names
+  the mode, which is what the grep reads. That is also why the untracked-half caution may
+  NOT be worded as "the one hazard": symlinks arrive by TWO routes, tracked and untracked,
+  and each half of the recipe carries its own check.
+
+**Coupled carriers, and the pin that holds them:** `worktreeAdvice`'s command literals —
+`takeYourOwn`'s and the gone leg's `git worktree add` spellings AND every `carryOver`
+command — are hand-restated in `skills/session-trail/SKILL.md` flow 3 step 4, in its table
+and its fenced block. `T35`/`T35-control` in `tests/structure/test-session-trail-skill.sh`
+extract every two-space command literal out of the FUNCTION (not out of one array — scoping
+the extraction to `carryOver` left the two literals that encode the rule unpinned) and
+require each verbatim in SKILL.md. `T35-control` asserts an EXACT count, not a floor: a
+floor survives deleting the `apply --stat` step from both carriers at once, which is the
+edit the pin exists to stop. `T35b` scans flow 3 step 4 SCOPED, because `symlink` and
+`mktemp` both occur in unrelated passages of the same file and a whole-file grep passes
+while the recipe's own rationale is gone.
+
+**`WORKTREE_ADVICE_COMMAND` / `adviceBlock` are a producer/consumer contract between one
+array and two briefs.** A command line is one indented exactly two spaces; prose sits at
+column zero. It is deliberately NOT a `git `-anchored rule any more — `carryOver` opens
+with `PATCH="$(mktemp)" && …` — and the widening cuts both ways: a prose line that acquires
+a two-space lead-in is published inside a ```bash fence in two persisted briefs. `WT8p`
+grades both directions structurally rather than against a verb allowlist. Before the
+extraction the two briefs disagreed about the same array — `cmdHandoff` re-fenced per line,
+`cmdTakeover` fenced nothing — so a recipe was runnable in one brief and prose in the other.
+Contiguous commands coalesce into ONE fence, and it takes TWO pins to hold that — one per
+renderer. `WT8q` drives `cmdTakeover` and `WT8q2` drives `cmdHandoff`, which is the call
+site whose own comment names it as the origin of the per-line-fencing defect. One was not
+enough and that is measured, not argued: with only `WT8q`, reverting `cmdHandoff` alone
+left every check in both suites green. Both render a PRESENT-leg brief, which no other
+fixture here does — every other one is directory-gone, and a single isolated command cannot
+show coalescing at all. `WT8r` consumes those same two renders rather than making its own,
+and covers the other axis: the `r.cwdExists` prose branches in both briefs, graded against
+the gone leg so it cannot pass by rendering one branch twice.
+
+**Known gaps, accepted and named:**
+
+- **The rule is prose, not a gate.** Nothing stops a session working in another session's
+  worktree; the source-write gate only refuses a COMMIT outside the anchor, which is the
+  other axis. This change makes every rendered recommendation point at the taker's own
+  worktree — it does not enforce one.
+- **The carry-over's untracked half carries a hazard no git flag touches.** `ls-files
+  --others --exclude-standard` reports a SYMLINK by name like any other path, so a copy
+  follows it out of the worktree — in a repository you have not vetted, that is how a key
+  or another checkout leaves its directory. The emitted text and SKILL.md both say to check
+  each entry with `test -L` and copy regular files only, and say it applies to copying by
+  hand as well, because the "do not run this at all" escape does not answer it. TWO pins,
+  one per carrier, because they are graded by different suites: `T35b` covers the SKILL.md
+  copy, and `WT8m3`/`WT8m4` cover the EMITTED text — the one that reaches a persisted brief,
+  and the one `T35` cannot see, since its extractor matches command literals and this
+  caution is the prose beside them.
+- **`adviceBlock`'s `firstPrefix`-on-a-leading-command branch has no executed case.** Every
+  arm opens with a prose sentence naming its cause, so the branch is dormant by
+  construction; it exists so the helper does not silently eat `cmdHandoff`'s `- ` bullet the
+  first time an arm is reordered. `adviceBlock` is not exported, so there is no unit seam to
+  drive it from either. Disclosed at the branch and here rather than left to be discovered.
+- **The line-anchored citations from `docs/multi-repo-chains-*` into this skill broke THREE
+  times during one change**, silently each time, because `test-multi-repo-doc-citations.sh`
+  states in its own header that a citation landing on a different but still substantive line
+  is invisible to it. `T36` in `tests/structure/test-session-trail-skill.sh` is the tripwire,
+  and it lives in THIS skill's suite rather than in the docs' because the file that MOVES the
+  target is this one. It pairs each citation with a needle naming the cited CONTENT; when it
+  fails, re-derive the line and fix the doc — never weaken the needle. **Seven rows, across
+  BOTH carriers**: grading only the spec was the first spelling, and it reproduced the very
+  defect it was written for, since the overview HTML twins three of those citations and had
+  already drifted once inside this change. One row hardcodes its own line number, because the
+  spec cites `SKILL.md` twice and a generic regex cannot tell them apart — that row's regex
+  moves with the citation, which fixing the doc alone does not do. It has since caught
+  further drifts, from both carriers at once — the first time that class failed loudly
+  instead of silently. No ordinal here on purpose: the drift count lives only in run logs,
+  so a number written down would be hand-maintained and would go stale, which is the failure
+  mode this file warns about elsewhere. `T36-control` derives the citation POPULATION by
+  scanning both documents rather than counting its own rows, so a citation into this skill
+  that no row covers fails loudly instead of being graded by nothing.
+  `test-multi-repo-doc-citations.sh`'s header points here, because an editor working from
+  the docs' side would naturally run that suite and a green run there says nothing about
+  these citations. **Re-derive each citation PER SITE, never by pattern sweep.** A regex
+  over `trail\.mjs:\d+` was used twice to update these and collapsed both HTML citations
+  onto one number both times — the two `<p class="src">` lines carry no prose to key on, so
+  a sweep cannot tell the `gitState` card from the `printResume` one. `T36` caught it on
+  both occasions, which is the only reason this is a note rather than a shipped defect.
+  A symbol-resolved citation format would remove the fragility rather than catch it, and is
+  not implemented.
+- **`--resume` still lands in the source worktree by design.** The printed resume line is
+  unchanged, and `FRESH_SESSION_SOURCES` excludes `resume`, so a resumed session keeps the
+  original anchor. `--fork-session` is the route whose anchor is the directory it starts in,
+  and the only one where the own-worktree rule and the write anchor land on the same place —
+  but only the HANDOFF brief and SKILL.md flow 3 step 4 name it. The takeover brief renders
+  no resume line at all, so it does not, and any claim that "both briefs" name the fork is
+  false. Either way it is guidance, not a mechanism.
+- **The `noStore` branch of `unreadableWhy` is unreachable from `test-session-trail-verdict.sh`.**
+  `$FAKE` is one directory for the whole run, and the `archive()` helper itself does the
+  `mkdir -p` on the store path; its FIRST call sits in the top-level fixture-setup block,
+  over two thousand lines before any WT8 fixture is graded. So the store exists by then and
+  `r.ccdStore` can never read `false` there. Two wrong causes were written down before that
+  one — the WT8 block's own `archive()` calls (which run AFTER the unreadable fixture is
+  graded) and the W13 case's `mkdir -p` (which is real but not first) — so name the helper
+  and its first call site, not a line number that moves. Pre-existing, predates this rule,
+  and it means one of the two hedged wordings has no executed case anywhere.
+
 ## Pull Request Workflow
 
 **Never commit or push to a closed or merged PR's branch.** Once a PR is merged or closed, its branch is dead — additional commits there belong on a new branch with a new PR.

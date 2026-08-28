@@ -1025,6 +1025,33 @@ printf '%s\n' "$FLOW3" | grep -qF 'cd -- <cwd> && claude --resume <id>' || ANCHO
 # and pin the fresh-source case that the cd advice actually belongs to.
 printf '%s\n' "$FLOW3" | grep -qF 're-anchors nothing' || ANCHOR_MISS="$ANCHOR_MISS [resume-reanchor-claim-missing]"
 printf '%s\n' "$FLOW3" | grep -qF 'FRESH_SESSION_SOURCES' || ANCHOR_MISS="$ANCHOR_MISS [fresh-source-mechanism-not-named]"
+# Naming the identifier is not the same as quoting its VALUE, and flow 3 quotes the value.
+# That is a hand-copy of a constant owned by Session Control, a wholly separate subsystem
+# that `trail.mjs` never imports — so if its Set ever loses or gains a member, SKILL.md's
+# claim that `--fork-session` is the route whose anchor is the directory it starts in goes
+# silently false while a presence-only grep stays green. Compare the actual members.
+FRESH_SRC_FILE="$PLUGIN_DIR/hooks/lib/claude-session-control-v1.js"
+FRESH_SRC_MEMBERS="$(grep -oE "FRESH_SESSION_SOURCES = new Set\(\[[^]]*\]" "$FRESH_SRC_FILE" 2>/dev/null | grep -oE "'[a-z]+'" | tr -d "'" | sort | tr '\n' ',')"
+if [ -z "$FRESH_SRC_MEMBERS" ]; then
+  ANCHOR_MISS="$ANCHOR_MISS [fresh-source-set-unreadable-at-$(basename "$FRESH_SRC_FILE")]"
+else
+  # Scoped to the BRACED value, exactly like the reverse arm below. A bare substring over
+  # the whole flow-3 slice is not a membership check: `resume` occurs three times in that
+  # prose as `claude --resume`, so adding it to the Set would leave the quoted
+  # `{startup, clear, fork}` stale while this arm passed — the silent-false the comment
+  # above says it prevents. Any member whose name is an ordinary word in the prose has the
+  # same problem, which is why both directions read the braces.
+  for m in $(printf '%s' "$FRESH_SRC_MEMBERS" | tr ',' ' '); do
+    printf '%s\n' "$FLOW3" | grep -qE "\{[^}]*\b$m\b[^}]*\}" || ANCHOR_MISS="$ANCHOR_MISS [fresh-source-member-$m-not-quoted]"
+  done
+  # And the other direction: a member REMOVED from the Set must not survive in the prose.
+  for m in startup clear fork resume compact; do
+    case ",$FRESH_SRC_MEMBERS" in
+      *",$m,"*) ;;
+      *) printf '%s\n' "$FLOW3" | grep -qE "\{[^}]*\b$m\b[^}]*\}" && ANCHOR_MISS="$ANCHOR_MISS [fresh-source-$m-quoted-but-not-in-set]" ;;
+    esac
+  done
+fi
 printf '%s\n' "$FLOW3" | grep -qF -- '--fork-session' || ANCHOR_MISS="$ANCHOR_MISS [fork-case-not-named]"
 printf '%s\n' "$FLOW3" | grep -qF 'WORKTREE' || ANCHOR_MISS="$ANCHOR_MISS [cwd-vs-worktree-distinction-missing]"
 printf '%s\n' "$FLOW3" | grep -qF 'handoff brief (flow 4)' || ANCHOR_MISS="$ANCHOR_MISS [desktop-route-missing]"
@@ -1678,6 +1705,200 @@ else
   check "T34 take-over flow disclosure:$T34_MISS" FAIL
 fi
 [ -n "$FLOW3" ] && check "T34-control the take-over flow section was actually extracted" PASS || check "T34-control the take-over flow section was not found, so the scan above is vacuous" FAIL
+
+# T35 — the carry-over recipe is a HAND-COPY. `worktreeAdvice`'s `carryOver` array in
+# trail.mjs emits it to a taker; SKILL.md flow 3 step 4 restates it for the model. Both
+# are read as instructions and nothing else compares them, so a one-sided edit — the
+# `mktemp` dropped on one side, the `--stat` read step dropped on the other — leaves the
+# model following a recipe the tool no longer prints. The literals are extracted from
+# trail.mjs rather than typed here: a hand-typed expectation is a THIRD copy.
+T35_MISS=""
+# The whole `worktreeAdvice` region, so BOTH command-bearing arrays are in range: the
+# `carryOver` recipe and the `takeYourOwn` / gone-leg `git worktree add` lines, which are
+# the ones that actually encode the rule (which arm gets `-b`). Extracting only
+# `carryOver` left the two literals SKILL.md's own table restates entirely unpinned.
+# The closing anchor is indentation-tolerant on purpose: a `^  \];` anchor would, after a
+# reformat, never reset the range and would silently swallow unrelated arrays further
+# down a 4000-line file instead of failing.
+ADVICE_SRC="$(awk '/^function worktreeAdvice\(r\) \{/{f=1} f{print} /^\}/{if(f && NR>1) f=0}' "$TRAIL_MJS")"
+ADVICE_CMDS="$(printf '%s\n' "$ADVICE_SRC" | sed -n "s/^ *'  \(.*\)',\{0,1\}\$/\1/p")"
+ADVICE_N="$(printf '%s\n' "$ADVICE_CMDS" | grep -c . || true)"
+# EXACT, not a floor. A floor of two survives the deletion of the `apply --stat` step —
+# the one command whose whole purpose is to be read before the destructive line — from
+# BOTH carriers at once, which is precisely the edit this pin exists to stop.
+T35_EXPECT=7
+if [ "${ADVICE_N:-0}" != "$T35_EXPECT" ]; then
+  check "T35-control extracted $ADVICE_N advice commands from trail.mjs, expected $T35_EXPECT — the recipe changed, or the extraction stopped matching; update the count deliberately" FAIL
+else
+  check "T35-control extracted all $ADVICE_N advice commands from worktreeAdvice" PASS
+  while IFS= read -r cmd; do
+    [ -n "$cmd" ] || continue
+    grep -qF -- "$cmd" "$SKILL_MD" || T35_MISS="$T35_MISS [$cmd]"
+  done <<EOF
+$ADVICE_CMDS
+EOF
+  if [ -z "$T35_MISS" ]; then
+    check "T35 all $ADVICE_N commands trail.mjs emits are restated verbatim in SKILL.md" PASS
+  else
+    check "T35 SKILL.md is missing commands trail.mjs emits:$T35_MISS" FAIL
+  fi
+  # The safety REASONS travel with the commands. Without them the block reads as a
+  # convenience recipe and the next editor drops a flag, the temp-file discipline, or the
+  # read step's position — each of which was a real review finding on this recipe.
+  #
+  # SCOPED to flow 3 step 4, not the whole file: `symlink` and `mktemp` both occur in
+  # unrelated passages (the write-anchor discussion names a symlink as a cause of an
+  # ambiguous spelling), so a whole-file grep passes while the recipe's own rationale is
+  # gone — the exact false pass this check exists to avoid.
+  STEP4="$(awk '/^4\. \*\*Decide WHERE to continue/{f=1} f{print} /^### 4\. Handoff brief/{f=0}' "$SKILL_MD")"
+  T35B_MISS=""
+  if [ -z "$STEP4" ]; then
+    check "T35b-control flow 3 step 4 could not be extracted from SKILL.md, so the rationale scan is vacuous" FAIL
+  else
+    check "T35b-control flow 3 step 4 was extracted for the scoped rationale scan" PASS
+    # Every needle here must be unique to the PROSE it defends. A bare `mktemp`, `textconv`
+    # or `fsmonitor` is satisfied by the fenced command block, which sits inside this same
+    # slice and which T35 already pins verbatim — so those three could never fail while T35
+    # passed, and deleting the rationale bullets outright would have gone unnoticed. A bare
+    # `clean` was worse than redundant: "only a clean apply removes it", two lines further
+    # down, satisfies it while saying nothing about a clean FILTER. Each needle below is a
+    # phrase that occurs only in the sentence it guards.
+    printf '%s' "$STEP4" | grep -qF 'rather than a fixed' || T35B_MISS="$T35B_MISS [mktemp-rationale]"
+    printf '%s' "$STEP4" | grep -qF 'symlink waiting to have been planted' || T35B_MISS="$T35B_MISS [predictable-path-hazard]"
+    printf '%s' "$STEP4" | grep -qF 'before it lands, not afterwards' || T35B_MISS="$T35B_MISS [read-before-apply]"
+    printf '%s' "$STEP4" | grep -qF 'textconv driver' || T35B_MISS="$T35B_MISS [textconv-rationale]"
+    printf '%s' "$STEP4" | grep -qF 'diff.external` driver' || T35B_MISS="$T35B_MISS [external-diff-rationale]"
+    printf '%s' "$STEP4" | grep -qF 'fsmonitor` hook' || T35B_MISS="$T35B_MISS [fsmonitor-rationale]"
+    # The RESIDUAL, which is the half a reader acts on. The three flags close the three
+    # vectors they name and not the class — a clean filter runs on the same comparison and
+    # none of them disables it. A review caught the earlier wording claiming the flags made
+    # the untrusted-config sentence complete, so the disclosure is pinned rather than left
+    # to survive the next reword.
+    printf '%s' "$STEP4" | grep -qF 'filter.<driver>.clean' || T35B_MISS="$T35B_MISS [clean-filter-residual]"
+    printf '%s' "$STEP4" | grep -qF 'accepted residual' || T35B_MISS="$T35B_MISS [residual-named-as-such]"
+    # `--binary` shipped in the command with no rationale in either reader-facing carrier
+    # for a round, which is exactly how a flag reads as noise and gets tidied away. Its
+    # failure is TOTAL — a co-changed text file does not land either — and it widens what
+    # lands unread, since a base85 hunk cannot be reviewed by opening the patch.
+    printf '%s' "$STEP4" | grep -qF 'refused the **whole** patch' || T35B_MISS="$T35B_MISS [binary-all-or-nothing]"
+    printf '%s' "$STEP4" | grep -qF 'base85' || T35B_MISS="$T35B_MISS [binary-unreadable-residual]"
+    # The TRACKED symlink route. `apply --stat` shows no mode, so a staged symlink reads as
+    # an ordinary one-line change and `git apply` recreates it; only the patch body names
+    # `120000`. The untracked caution was worded as "the one hazard" while this route
+    # existed, so the two-routes statement is pinned, not just the grep.
+    printf '%s' "$STEP4" | grep -qF '120000' || T35B_MISS="$T35B_MISS [tracked-symlink-mode]"
+    printf '%s' "$STEP4" | grep -qF 'never the mode' || T35B_MISS="$T35B_MISS [stat-shows-no-mode]"
+    printf '%s' "$STEP4" | grep -qF 'two routes and no git flag closes either' || T35B_MISS="$T35B_MISS [two-symlink-routes]"
+    # `--stat` shows which files, never their content. Without this the middle command
+    # reads as a content review it cannot perform.
+    printf '%s' "$STEP4" | grep -qF 'never the changed lines' || T35B_MISS="$T35B_MISS [stat-scope-not-content]"
+    # The untracked half of AC-003 is a two-space command line, so `T35` pins the command
+    # itself; what stays here is the SYMLINK caution beside it. That is ONE of the two
+    # routes a symlink reaches the taker by — `ls-files` reports one by name like any other
+    # path and a copy follows it out of the worktree — and the tracked route is pinned two
+    # needles up, by the `120000` and `never the mode` literals. Neither is closed by any
+    # git flag, which is why both halves of the recipe carry their own check.
+    printf '%s' "$STEP4" | grep -qF 'can be a **symlink**' || T35B_MISS="$T35B_MISS [untracked-symlink-caution]"
+    printf '%s' "$STEP4" | grep -qF 'test -L' || T35B_MISS="$T35B_MISS [untracked-symlink-check]"
+    if [ -z "$T35B_MISS" ]; then
+      check "T35b flow 3 step 4 keeps every safety reason behind the recipe's shape" PASS
+    else
+      check "T35b flow 3 step 4 carry-over rationale:$T35B_MISS" FAIL
+    fi
+  fi
+fi
+
+# T36 — the line-anchored citations INTO this skill from the multi-repo design docs.
+# `test-multi-repo-doc-citations.sh` grades those docs and states its own bound in its
+# header: a citation that comes to point at a DIFFERENT BUT SUBSTANTIVE line is invisible
+# to it, and roughly 94% of lines in the cited files are substantive. That bound is not
+# theoretical — three of these four citations broke during a single change to this skill,
+# each time silently, each time with that suite green, because every edit above a cited
+# line shifts it. The docs are not the natural owner of the check either: the file that
+# MOVES the target is this skill, so the tripwire belongs in this skill's own suite.
+#
+# Each row is <doc-line-carrier> plus a needle that identifies the cited CONTENT. The
+# needle is the durable half; the line number is the fragile half the needle protects.
+# When this fails, re-derive the line and update the doc — do not weaken the needle.
+# BOTH carriers. The spec and the overview HTML cite the same three targets, and grading
+# only the spec reproduces the exact defect this change already hit once: the HTML twin of
+# a sentence corrected in the spec was missed, and stayed wrong for a full round with every
+# suite green. One carrier graded is one carrier that drifts silently.
+#
+# Row 3's regex carries its own line NUMBER, because the spec cites SKILL.md twice and a
+# generic `SKILL\.md:[0-9]+` cannot tell the two apart. So when that citation is
+# re-derived, the regex here moves with it — that is the one row where fixing the doc is
+# not enough.
+T36_MISS=""
+T36_ROWS=0
+t36_cite() { # <cited-file> <needle> <citing-file> <citation-regex>
+  local target="$1" needle="$2" doc="$3" re="$4" ln hits
+  T36_ROWS=$((T36_ROWS + 1))
+  # An empty needle matches every line, so a row added without one would pass while
+  # grading nothing — the same trap `wt_case` guards in the sibling suite.
+  if [ -z "$needle" ]; then
+    T36_MISS="$T36_MISS [empty-needle:$re]"
+    return
+  fi
+  # Count MATCHES, not matching LINES. `grep -c` reports lines even with `-o`, and the
+  # overview HTML already carries the shape that distinction matters for: one
+  # `<p class="src">` line holding two citations separated by a middot. A line-count guard
+  # reads that as a single unambiguous hit and then `head -1` grades one of the two.
+  hits="$(grep -oE "$re" "$doc" | grep -c . || true)"
+  # `head -1` below grades only the first match, so more than one is not a stricter
+  # check — it is an ungraded citation hiding behind a graded one.
+  if [ "${hits:-0}" -gt 1 ]; then
+    T36_MISS="$T36_MISS [ambiguous-citation:$(basename "$doc"):$re:$hits-matches]"
+    return
+  fi
+  # `tr -dc` rather than a `[0-9]+$` anchor: one carrier spells the citation inside
+  # backticks, so the match does not END with the number and the anchored form silently
+  # extracted nothing — reported as a missing citation, which looks like a real failure
+  # and is not. No path fragment in any regex below carries a digit, so stripping to
+  # digits yields exactly the line number.
+  ln="$(grep -oE "$re" "$doc" | head -1 | tr -dc '0-9')"
+  if [ -z "$ln" ]; then
+    T36_MISS="$T36_MISS [no-citation-in:$(basename "$doc"):$re]"
+  elif ! sed -n "${ln}p" "$target" | grep -qF -- "$needle"; then
+    T36_MISS="$T36_MISS [$(basename "$doc"):$(basename "$target"):$ln-does-not-name:$needle]"
+  fi
+}
+T36_SPEC="$PLUGIN_DIR/docs/multi-repo-chains-spec.md"
+T36_HTML="$PLUGIN_DIR/docs/multi-repo-chains-overview.html"
+t36_cite "$TRAIL_MJS" 'function gitState' "$T36_SPEC" 'skills/session-trail/scripts/trail\.mjs:[0-9]+'
+t36_cite "$TRAIL_MJS" 'claude --resume' "$T36_SPEC" '`trail\.mjs:[0-9]+`'
+t36_cite "$SKILL_MD" 'ONLY write channel' "$T36_SPEC" 'skills/session-trail/SKILL\.md:75'
+t36_cite "$SKILL_MD" 'scopes by transcript-directory' "$T36_SPEC" 'skills/session-trail/SKILL\.md:2[0-9]+'
+# For THESE three the HTML spells each citation as its own `<p class="src">` line, so the
+# two trail.mjs rows need distinguishing regexes exactly as the spec's two SKILL.md rows
+# do. That is not a property of the document — elsewhere it puts two citations on one
+# `<p class="src">` line separated by a middot, which is what the match-count guard above
+# exists to catch if a future row lands on such a line.
+#
+# The two HTML rows disambiguate by the line number's leading DIGITS, which is the weakest
+# thing here: the `<p class="src">` lines carry no other context, so there is nothing else
+# on the line to key on. It has already earned its keep — a bulk citation rewrite collapsed
+# both onto one number and this pair reported `no-citation-in` plus `2-matches` rather than
+# passing over a clobbered citation. When a target crosses a hundred boundary these two
+# prefixes move with it, and the failure says which.
+t36_cite "$TRAIL_MJS" 'function gitState' "$T36_HTML" 'trail\.mjs:20[0-9]+'
+t36_cite "$TRAIL_MJS" 'claude --resume' "$T36_HTML" 'trail\.mjs:27[0-9]+'
+t36_cite "$SKILL_MD" 'scopes by transcript-directory' "$T36_HTML" 'skills/session-trail/SKILL\.md:2[0-9]+'
+# The POPULATION, scanned out of the documents rather than counted off the row table
+# above. `T36_ROWS` counts rows this test declares; it can never notice a citation the
+# docs grew that no row covers — a `session-lineage-v1.mjs:NNN` would be graded by
+# nothing while the floor stayed satisfied. This is the same independent-scanner
+# discipline the sibling doc suite applies in its own C3.
+T36_FOUND="$( { grep -oE 'skills/session-trail/[A-Za-z0-9_./-]+\.(mjs|md):[0-9]+' "$T36_SPEC" "$T36_HTML"; grep -oE '(^|[^/])trail\.mjs:[0-9]+' "$T36_SPEC" "$T36_HTML"; } 2>/dev/null | grep -c . || true)"
+if [ "${T36_FOUND:-0}" != "$T36_ROWS" ]; then
+  check "T36-control the docs carry $T36_FOUND citations into this skill but only $T36_ROWS rows grade them — add a row for the new citation, or drop the row whose citation is gone" FAIL
+elif [ "$T36_ROWS" -lt 7 ]; then
+  check "T36-control only $T36_ROWS citation rows were evaluated, so the tripwire is weaker than it reads" FAIL
+elif [ -z "$T36_MISS" ]; then
+  check "T36 all $T36_ROWS line-anchored citations from the multi-repo docs still name the content they claim" PASS
+else
+  check "T36 a multi-repo citation into this skill points at the wrong line:$T36_MISS" FAIL
+fi
 
 echo "----"
 echo "test-session-trail-skill: $PASS PASS / $FAIL FAIL / $SKIP SKIP"

@@ -463,6 +463,12 @@ process.stdin.on("end", () => {
 # The MARKDOWN body, not just the JSON payload: `--json` returns before the brief
 # is built, so a `measuredLevel` -> `level` slip in the file that actually gets
 # written to ~/.claude/handoffs/ is invisible to the payload check.
+# WHICH worktreeAdvice arm these two exercise is not stated by their fixture and is
+# worth writing down, because WT8n/WT8n1/WT8n2/WT8p2 below read them: `bbbbbbbb-…-0002`
+# is built by `fix` with no `archive` and no `mkcwd`, so it lands on the DIRECTORY-GONE
+# leg with an unreadable archive flag. Those checks are written against arm-independent
+# text for that reason. Adding an `mkcwd`/`archive` call for this fixture — e.g. to
+# extend the V2 case it was originally built for — silently moves them to another arm.
 TAKEOVER_MD="$(trailrun takeover bbbbbbbb-0000-0000-0000-000000000002 --all --force --no-record 2>/dev/null)"
 HANDOFF_MD="$(trailrun handoff bbbbbbbb-0000-0000-0000-000000000002 --all --force 2>/dev/null)"
 # The line labelled "measured" must carry the MEASURED reason. Asserting only the
@@ -2550,24 +2556,34 @@ wt_case "WT8a a session with no desktop record is told the archive state could n
 fix "$WT8_ADOPT" "$DEAD_PID" 60 end_turn none
 mkcwd "$WT8_ADOPT"
 archive "$WT8_ADOPT"
-wt_case "WT8b an archived session whose directory survived is advised to adopt it in place" \
-  "$WT8_ADOPT" 'Adopt it in place' 'Take your own'
-# The adopt row must not over-claim. `liveRegistry` reads `~/.claude/sessions`, whose
-# entries are SESSIONS — the desktop app that performs archiving is not one of them, so
-# "nothing recorded there can remove it" is a true statement about a registry that by
-# construction cannot list the agent that removes worktrees. Section 6 measures the
-# counter-example: the 159 survivors of 657 were overwhelmingly DIRTY, which is what
-# `git worktree remove` refuses on — so an archived-and-surviving directory is close to
-# by construction one archiving already tried to delete. A takeover's first act is to
-# commit, which removes exactly that protection.
-wt_case "WT8b2 the adopt row states what was observed rather than promising nothing can remove it" \
-  "$WT8_ADOPT" 'archiving already ran once and this directory survived' 'nothing recorded there can remove it'
+# This row used to be the ONE arm that left the taker in the source worktree, and it
+# was the worst arm to make an exception of. Section 6 measures why: the 159 survivors
+# of 657 were overwhelmingly DIRTY, which is exactly what `git worktree remove` refuses
+# on — so an archived-and-surviving directory is close to by construction one archiving
+# already tried to delete, and a takeover's first act is to commit, which removes that
+# protection. The lead now names the survival as the HAZARD; the forbidden clause is the
+# live-pid arm's, so the two archived legs cannot collapse into one.
+wt_case "WT8b an archived session whose directory survived is sent to its own worktree, not left in that one" \
+  "$WT8_ADOPT" 'survived that archive run' 'still registered and alive'
+wt_case "WT8b2 that row reads the survival as a hazard rather than as clearance to work there" \
+  "$WT8_ADOPT" 'the worst place to continue' 'Never continue in a worktree that still belongs'
+# The behavioural pins above discriminate between arms; none of them can see a REGRESSION
+# that reintroduces the in-place recommendation under a new arm, because a new arm is not
+# in the fixture roster. A source pin can, and it is cheap.
+if grep -qF -- 'Adopt it in place' "$TRAIL_MJS"; then
+  check "WT8b3 trail.mjs no longer offers to adopt the source worktree in place" FAIL
+else
+  check "WT8b3 trail.mjs no longer offers to adopt the source worktree in place" PASS
+fi
 
 fix "$WT8_ALIVE" "$LIVE_PID" 60 end_turn none
 mkcwd "$WT8_ALIVE"
 archive "$WT8_ALIVE"
-wt_case "WT8d an archived session whose pid is still alive is NOT advised to adopt its worktree" \
-  "$WT8_ALIVE" 'still registered and alive' 'Adopt it in place'
+# The forbidden clause is the archived-SURVIVOR lead, not the retired 'Adopt it in
+# place': that string no longer exists anywhere, so keying on it would make this case
+# pass against a function that emitted both archived leads at once.
+wt_case "WT8d an archived session whose pid is still alive gets the live-pid cause, not the survivor one" \
+  "$WT8_ALIVE" 'still registered and alive' 'survived that archive run'
 
 fix "$WT8_FALSE" "$DEAD_PID" 60 end_turn none
 mkcwd "$WT8_FALSE"
@@ -2578,26 +2594,31 @@ wt_case "WT8e a record that says NOT archived gets the definite rule, not the un
 # Gone leg. No mkcwd: absence of the directory is the whole point.
 fix "$WT8_ADOPT_GONE" "$DEAD_PID" 60 end_turn none
 archive "$WT8_ADOPT_GONE"
-wt_case "WT8c an archived, dead session whose directory is gone is told to restore it" \
-  "$WT8_ADOPT_GONE" 'Restore it with' 'Adopt it in place'
-# The gone leg tells the reader to run `git worktree add <path> <session-branch>` with
-# no `-b`. That is a CLAIM that the branch is free, and it carries no measurement while
-# the opposite claim in the same rule does. If git refuses, the advice must not
-# dead-end: the two obvious moves from there are `--force` and `git checkout`, and the
-# second is what this very rule forbids.
-wt_case "WT8c2 the restore row names what to do when git refuses the branch" \
-  "$WT8_ADOPT_GONE" 'already checked out' 'Adopt it in place'
+# This row used to RESTORE the source session's own recorded path. It no longer does —
+# the branch is free once the directory is gone, so the taker adds it at a path of their
+# own and the source path is never a create target. The forbidden clause is the hedged
+# lead the two unarchived gone arms share, so the definite cause cannot decay into it.
+wt_case "WT8c an archived, dead session whose directory is gone takes its own path, not the recorded one" \
+  "$WT8_ADOPT_GONE" 'archiving removed it' 'an archive that has not run yet'
+# The gone leg runs `git worktree add <path> <session-branch>` with no `-b`. That is a
+# CLAIM that the branch is free, and it carries no measurement while the opposite claim
+# in the same rule does. If git refuses, the advice must not dead-end: the two obvious
+# moves from there are `--force` and `git checkout`, and the second is what this very
+# rule forbids. The forbidden clause is the present leg's own recipe lead — a gone arm
+# that leaked it would be handing out a carry-over patch from a directory that is gone.
+wt_case "WT8c2 the gone leg names what to do when git refuses the branch" \
+  "$WT8_ADOPT_GONE" 'already checked out' 'do not continue in theirs'
 
 fix "$WT8_GONE_UNREAD" "$DEAD_PID" 60 end_turn none
-wt_case "WT8f a directory-gone session that is not known-archived takes its own path, not a restore" \
-  "$WT8_GONE_UNREAD" 'Take your own path instead' 'Restore it with'
+wt_case "WT8f a directory-gone session that is not known-archived takes its own path" \
+  "$WT8_GONE_UNREAD" 'never re-create theirs' 'archiving removed it'
 wt_case "WT8f2 that same session is not told it is unarchived when no record exists" \
   "$WT8_GONE_UNREAD" 'could not be read' 'This session is not archived'
 
 fix "$WT8_GONE_ALIVE" "$LIVE_PID" 60 end_turn none
 archive "$WT8_GONE_ALIVE"
-wt_case "WT8i an archived session whose pid is alive AND whose directory is gone is not told to restore" \
-  "$WT8_GONE_ALIVE" 'still registered and alive' 'Restore it with'
+wt_case "WT8i an archived session whose pid is alive AND whose directory is gone gets the live-pid cause" \
+  "$WT8_GONE_ALIVE" 'still registered and alive' 'archiving removed it'
 # The gone leg's reason travels with its own lead. A shared trailing sentence was
 # FALSE in this arm: the record says archived and a pid is alive, so the archive
 # demonstrably HAS run, and the hazard is that process acting on the path.
@@ -2608,6 +2629,241 @@ fix "$WT8_GONE_FALSE" "$DEAD_PID" 60 end_turn none
 archive "$WT8_GONE_FALSE" false
 wt_case "WT8j a record saying NOT archived, directory gone, gets the definite wording rather than the hedge" \
   "$WT8_GONE_FALSE" 'This session is not archived' 'could not be read'
+
+# WT8k — the rule itself, over EVERY arm rather than one at a time. Each case above
+# discriminates between two arms; none of them can say that no arm leaves the taker
+# where they are. The roster is derived from the declarations for the same reason the
+# prefix check below is: a hand list cannot detect its own omission.
+# The UUID SHAPE, not a loose `[0-9a-f-]+`. That looser class matched any decimal
+# constant, so `WT8_PRESENT_EXPECT=5` silently joined the fixture roster and WT8k then
+# reported the digit `5` as an arm with no create recipe — caught by this check failing,
+# which is the right outcome, but the roster must not admit a neighbour again.
+WT8_ALL="$(grep -oE '^WT8_[A-Z_]+=[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$' "$0" | sed 's/^WT8_[A-Z_]*=//')"
+WT8_ALL_N="$(printf '%s\n' "$WT8_ALL" | grep -c .)"
+WT8_STAY=""
+for sid in $WT8_ALL; do
+  got="$(wt_advice "$sid")"
+  case "$got" in *'git worktree add'*) ;; *) WT8_STAY="$WT8_STAY ${sid%%-*}" ;; esac
+done
+if [ "${WT8_ALL_N:-0}" -lt 8 ]; then
+  check "WT8k the derived arm roster is short (found $WT8_ALL_N of 8), so the rule check is weaker than it reads" FAIL
+elif [ -n "$WT8_STAY" ]; then
+  check "WT8k every arm routes the taker into a worktree of their own (arms with no create recipe:$WT8_STAY)" FAIL
+else
+  check "WT8k every one of the $WT8_ALL_N arms routes the taker into a worktree of their own" PASS
+fi
+
+# WT8m — the carry-over half, and its ABSENCE where it cannot run. A `git worktree add`
+# moves committed work only; the uncommitted half is what the old rule silently left
+# behind. On the gone leg the source directory is not there to read, so a recipe would
+# name an unreadable source — the arm must say that instead of printing one.
+# NEWLINE-joined, which is why this cannot reuse `field`/`wt_advice`: those end in
+# `String(v)`, and on an array that is `Array.prototype.toString` — a COMMA join with
+# no newline anywhere. Every line-anchored assertion below (`^  git `, `^[[:space:]]`)
+# needs real line boundaries, and the comma form also silently defeats any `wt_case`
+# needle that spans two elements.
+wt_lines() { # <sessionId> — the advice array, one element per line
+  trailrun show "$1" --all --no-git --json 2>/dev/null \
+    | HOME="$FAKE" node -e '
+let s = "";
+process.stdin.on("data", (d) => { s += d; });
+process.stdin.on("end", () => {
+  let o;
+  try { o = JSON.parse(s); } catch { process.stdout.write("PARSE_ERROR"); return; }
+  const a = o.worktreeAdvice;
+  if (!Array.isArray(a)) { process.stdout.write("ABSENT"); return; }
+  process.stdout.write(a.join("\n"));
+});'
+}
+wt_case "WT8m a present-directory arm carries the uncommitted work across, not just the branch" \
+  "$WT8_ADOPT" 'Carry the rest across yourself' 'nothing left to carry across'
+wt_case "WT8m2 a directory-gone arm says the uncommitted work went with the directory" \
+  "$WT8_ADOPT_GONE" 'nothing left to carry across' 'Carry the rest across yourself'
+# WT8m3 — the SYMLINK caution on the untracked half, graded on the EMITTED text. `T35b` in
+# the sibling suite pins the SKILL.md copy, and only that one: `T35`'s extractor matches
+# command literals, so the prose beside them is unpinned there. This is the copy that
+# actually reaches a persisted takeover brief, and it is the unprotected half of the fix
+# for a security finding — `ls-files` reports a symlink by name like any other path, so a
+# copy follows it out of a worktree nobody vetted.
+wt_case "WT8m3 the emitted carry-over warns that an untracked entry can be a symlink" \
+  "$WT8_ADOPT" 'copy REGULAR FILES ONLY' 'nothing left to carry across'
+wt_case "WT8m4 the emitted carry-over names the check, not just the hazard" \
+  "$WT8_ADOPT" 'Check each with test -L first' 'nothing left to carry across'
+
+# WT8p — the two-space indent is not cosmetic: a command line indented any other way
+# renders as prose inside a numbered instruction and stops being runnable. `cmdHandoff`
+# USED to re-fence exactly `/^\s{2}git /` on its own; that verb-anchored rule is retired
+# and both briefs now render through one `adviceBlock` call, so the sentence below is the
+# live one and this one is here only to date it.
+# The rule `adviceBlock` fences on is STRUCTURAL — two leading spaces means command,
+# column zero means prose — so it is graded structurally rather than against a list of
+# known verbs. A verb allowlist was tried and is the wrong shape twice over: it goes
+# stale the moment an arm grows a command starting with some other token, and it says
+# nothing at all about the second direction, where a PROSE line acquires a two-space
+# lead-in and is published inside a ```bash fence in two persisted briefs.
+#
+# So: every line is either a command indented exactly two spaces, or prose at column
+# zero. The `odd` probe below catches a WRONG non-zero indent — one space, three or more,
+# or a tab — whatever token the line starts with. It cannot catch a command flush LEFT,
+# because all three of its alternatives require the first character to be whitespace, and
+# a zero-indent line is indistinguishable from prose by shape alone. That direction is
+# covered by the exact per-leg COUNTS instead: strip the indent from any one command and
+# the count drops. The two together are the rule; neither is it on its own.
+# A literal tab, never `grep -P`. `grep -c` PRINTS its count and still exits 1 when that
+# count is zero, so a `grep -cP … || grep -c …` chain runs BOTH greps in the ordinary
+# defect-free case and the substitution captures "0\n0" — which is not an integer, so the
+# `-eq` below errors and appends a tab-indent offender that does not exist. Measured, in
+# both directions: it reproduces under a PCRE-capable grep (ugrep 7.8.4 here, and GNU grep
+# on the Linux structure shards) and is masked under the BSD grep a non-interactive bash
+# resolves on this host — which is exactly how it passed here while being broken in CI.
+# The polarity is worth stating: it manufactures a false FAILURE, it does not hide a real
+# tab. One invocation, no PCRE, and the `|| true` then guards nothing but the zero-count
+# exit it is there for.
+WT8_TAB="$(printf '\t')"
+WT8_INDENT_BAD=""
+# EVERY arm, from the derived roster. Two arms cover every COMMAND — they share one
+# `takeYourOwn`/`carryOver` body and one gone-leg body — but each of the eight contributes
+# its own prose LEAD, and a lead that acquired a two-space prefix is published inside a
+# ```bash fence in two persisted briefs. That is the second direction this rule exists to
+# grade, and six of the eight leads went ungraded while the PASS line said "every advice
+# line". The rule is arm-independent, so no per-arm expectation is needed here.
+for sid in $WT8_ALL; do
+  odd="$(wt_lines "$sid" | grep -cE '^([[:space:]]$|[[:space:]]{1}[^[:space:]]|[[:space:]]{3,})' || true)"
+  tabbed="$(wt_lines "$sid" | grep -c "^$WT8_TAB" || true)"
+  [ "${odd:-0}" -eq 0 ] || WT8_INDENT_BAD="$WT8_INDENT_BAD ${sid%%-*}(odd-indent:$odd)"
+  [ "${tabbed:-0}" -eq 0 ] || WT8_INDENT_BAD="$WT8_INDENT_BAD ${sid%%-*}(tab-indent:$tabbed)"
+done
+# EXACT per-leg counts, not floors. `odd` above can only see a line whose FIRST character
+# is whitespace, so a command that lost its indentation entirely is invisible to it — the
+# comment's "or a command flush left" clause was true of the intent and not of the regex.
+# A count closes that: strip the two spaces from any one command and the leg's count drops.
+# Hand-maintained on purpose, like T35-control's, and the failure message says so.
+WT8_PRESENT_EXPECT=6
+WT8_GONE_EXPECT=1
+WT8_CMD_PRESENT="$(wt_lines "$WT8_ADOPT" | grep -cE '^  [^[:space:]]' || true)"
+WT8_CMD_GONE="$(wt_lines "$WT8_ADOPT_GONE" | grep -cE '^  [^[:space:]]' || true)"
+if [ "${WT8_CMD_PRESENT:-0}" != "$WT8_PRESENT_EXPECT" ] || [ "${WT8_CMD_GONE:-0}" != "$WT8_GONE_EXPECT" ]; then
+  check "WT8p command count moved (present=$WT8_CMD_PRESENT expected $WT8_PRESENT_EXPECT, gone=$WT8_CMD_GONE expected $WT8_GONE_EXPECT) — a command lost its two-space prefix, or the recipe changed and the count needs updating deliberately" FAIL
+elif [ -n "$WT8_INDENT_BAD" ]; then
+  check "WT8p every advice line is a two-space command or column-zero prose (offenders:$WT8_INDENT_BAD)" FAIL
+else
+  check "WT8p every advice line is a two-space command or column-zero prose (commands present=$WT8_CMD_PRESENT gone=$WT8_CMD_GONE)" PASS
+fi
+
+# WT8q — `adviceBlock`'s COALESCING, which nothing else in this file can see. Every
+# other brief rendered here is built from a directory-GONE fixture, whose advice array
+# holds a single isolated command; the multi-command carry-over recipe only exists on
+# the present leg, so the exact regression `adviceBlock` was written to fix — one fence
+# per command instead of one fence per recipe — reproduces green against every other
+# check in this block. This is the FIRST of the two present-leg renders: it drives
+# `cmdTakeover`, and `WT8q2` below drives `cmdHandoff`, which is the call site whose own
+# comment names it as the origin of that defect. One is not enough — reverting
+# `cmdHandoff` alone left this check green.
+WT8_PRESENT_MD="$(trailrun takeover "$WT8_ADOPT" --all --force --no-record 2>/dev/null)"
+# Which fenced bash block a needle lands in; empty when it is outside every fence.
+fence_of() { # <markdown> <needle>
+  printf '%s\n' "$1" | awk -v needle="$2" '
+    /^[[:space:]]*```bash/ { n += 1; inb = 1; next }
+    /^[[:space:]]*```/     { inb = 0; next }
+    inb && index($0, needle) { print n; exit }
+  '
+}
+WT8Q_A="$(fence_of "$WT8_PRESENT_MD" 'PATCH="$(mktemp)"')"
+WT8Q_B="$(fence_of "$WT8_PRESENT_MD" 'apply --stat')"
+WT8Q_C="$(fence_of "$WT8_PRESENT_MD" 'rm -f "$PATCH"')"
+if [ -z "$WT8_PRESENT_MD" ]; then
+  check "WT8q the present-leg takeover brief could not be rendered, so coalescing is unchecked" FAIL
+elif [ -z "$WT8Q_A" ] || [ -z "$WT8Q_B" ] || [ -z "$WT8Q_C" ]; then
+  check "WT8q a carry-over command is outside every bash fence (mktemp=${WT8Q_A:-none} stat=${WT8Q_B:-none} rm=${WT8Q_C:-none})" FAIL
+elif [ "$WT8Q_A" != "$WT8Q_B" ] || [ "$WT8Q_B" != "$WT8Q_C" ]; then
+  check "WT8q the carry-over recipe was split across fences instead of coalesced (mktemp=$WT8Q_A stat=$WT8Q_B rm=$WT8Q_C)" FAIL
+else
+  check "WT8q the carry-over commands render inside ONE bash fence (#$WT8Q_A)" PASS
+fi
+# WT8q2 — the SAME property on the HANDOFF brief, which is the call site that historically
+# fenced per line. `adviceBlock`'s own comment names `cmdHandoff` as the origin of the
+# defect, so grading coalescing only through `cmdTakeover` left the guilty renderer
+# uncovered: reverting `cmdHandoff` alone satisfied every other check in both suites.
+WT8_PRESENT_HO="$(trailrun handoff "$WT8_ADOPT" --all --force 2>/dev/null)"
+WT8Q2_A="$(fence_of "$WT8_PRESENT_HO" 'PATCH="$(mktemp)"')"
+WT8Q2_B="$(fence_of "$WT8_PRESENT_HO" 'apply --stat')"
+WT8Q2_C="$(fence_of "$WT8_PRESENT_HO" 'rm -f "$PATCH"')"
+if [ -z "$WT8_PRESENT_HO" ]; then
+  check "WT8q2 the present-leg handoff brief could not be rendered, so its coalescing is unchecked" FAIL
+elif [ -z "$WT8Q2_A" ] || [ -z "$WT8Q2_B" ] || [ -z "$WT8Q2_C" ]; then
+  check "WT8q2 a carry-over command is outside every bash fence in the handoff brief (mktemp=${WT8Q2_A:-none} stat=${WT8Q2_B:-none} rm=${WT8Q2_C:-none})" FAIL
+elif [ "$WT8Q2_A" != "$WT8Q2_B" ] || [ "$WT8Q2_B" != "$WT8Q2_C" ]; then
+  check "WT8q2 the handoff brief split the carry-over recipe across fences (mktemp=$WT8Q2_A stat=$WT8Q2_B rm=$WT8Q2_C)" FAIL
+else
+  check "WT8q2 the handoff brief coalesces the carry-over recipe into ONE bash fence (#$WT8Q2_A)" PASS
+fi
+# WT8r — the `r.cwdExists` TRUE branches in both briefs. Same blind spot as WT8q: every
+# other rendered brief here takes the false branch, so these two paragraphs were dead
+# code as far as this suite was concerned.
+# `WT8_PRESENT_HO` is rendered once, by WT8q2 above — same fixture, same command.
+WT8R_BAD=""
+printf '%s' "$WT8_PRESENT_MD" | grep -qF 'Read the old tree there' || WT8R_BAD="$WT8R_BAD [takeover-missing-present-prose]"
+printf '%s' "$WT8_PRESENT_MD" | grep -qF 'GONE right now' && WT8R_BAD="$WT8R_BAD [takeover-leaked-gone-prose]"
+printf '%s' "$WT8_PRESENT_HO" | grep -qF 'runs in the old worktree' || WT8R_BAD="$WT8R_BAD [handoff-missing-present-prose]"
+printf '%s' "$WT8_PRESENT_HO" | grep -qF 'fails outright' && WT8R_BAD="$WT8R_BAD [handoff-leaked-gone-prose]"
+# The opposite leg, so the check cannot pass by rendering the same branch twice.
+printf '%s' "$TAKEOVER_MD" | grep -qF 'GONE right now' || WT8R_BAD="$WT8R_BAD [takeover-gone-leg-missing]"
+printf '%s' "$HANDOFF_MD" | grep -qF 'fails outright' || WT8R_BAD="$WT8R_BAD [handoff-gone-leg-missing]"
+if [ -z "$WT8_PRESENT_MD" ] || [ -z "$WT8_PRESENT_HO" ]; then
+  check "WT8r a present-leg brief could not be rendered, so the cwdExists branches are unchecked" FAIL
+elif [ -z "$WT8R_BAD" ]; then
+  check "WT8r both briefs render the cwdExists-true prose on a present worktree and the gone prose on a missing one" PASS
+else
+  check "WT8r cwdExists branch rendering:$WT8R_BAD" FAIL
+fi
+# The consumer side of the same property, end to end rather than by convention.
+if printf '%s\n' "$HANDOFF_MD" | grep -B1 -F 'git worktree add' | grep -qF '```bash'; then
+  check "WT8p2 the handoff brief renders the advice's git command inside a bash fence" PASS
+else
+  check "WT8p2 the handoff brief renders the advice's git command inside a bash fence" FAIL
+fi
+
+# WT8n — the takeover brief's own `cd` fence. It names the SOURCE worktree
+# unconditionally, and used to sit under "Then, in whichever directory that decision
+# names:" — so a reader who ran the runnable line landed in the directory the advice
+# above had just sent them away from. Under the rule this path is never the destination,
+# so it is labelled rather than hedged.
+if [ -z "$TAKEOVER_MD" ]; then
+  check "WT8n the takeover brief could not be rendered, so its cd fence is unchecked" FAIL
+elif printf '%s' "$TAKEOVER_MD" | grep -qF 'Then, in whichever directory that decision names'; then
+  check "WT8n the takeover brief no longer presents the source worktree as the place the decision names" FAIL
+elif ! printf '%s' "$TAKEOVER_MD" | grep -qF 'It is the SOURCE, not the destination'; then
+  check "WT8n the takeover brief labels its cd fence as the source path" FAIL
+else
+  check "WT8n the takeover brief labels its cd fence as the source, not as the destination" PASS
+fi
+# WT8n and WT8n2 above assert UNCONDITIONAL prose — text `cmdTakeover` pushes whether or
+# not the `worktreeAdvice` loop above it produced anything. So they cannot see the loop
+# being deleted, which is the regression that would silently strip the rule out of the
+# brief while leaving its framing sentences in place. This is the check that can, and it
+# keys on the one string every arm emits.
+if [ -z "$TAKEOVER_MD" ]; then
+  check "WT8n1 the takeover brief could not be rendered, so its advice block is unchecked" FAIL
+elif ! printf '%s' "$TAKEOVER_MD" | grep -qF 'git worktree add'; then
+  check "WT8n1 the takeover brief actually carries the worktreeAdvice recipe, not just its framing" FAIL
+elif ! printf '%s\n' "$TAKEOVER_MD" | grep -B2 -F 'git worktree add' | grep -qF '```bash'; then
+  check "WT8n1 the takeover brief fences that recipe the way the handoff brief does" FAIL
+else
+  check "WT8n1 the takeover brief carries the worktreeAdvice recipe, fenced" PASS
+fi
+# The handoff sibling carried a hedge ("that is not always where the work should
+# continue") that was true only while one arm still adopted in place. No arm does.
+if [ -z "$HANDOFF_MD" ]; then
+  check "WT8n2 the handoff brief could not be rendered, so its resume line is unchecked" FAIL
+elif printf '%s' "$HANDOFF_MD" | grep -qF 'That is not always'; then
+  check "WT8n2 the handoff brief no longer hedges about a destination no arm names" FAIL
+elif ! printf '%s' "$HANDOFF_MD" | grep -qF 'never names as the place to continue'; then
+  check "WT8n2 the handoff brief states that the recorded path is not the destination" FAIL
+elif ! printf '%s' "$HANDOFF_MD" | grep -qF -- '--fork-session'; then
+  check "WT8n2 the handoff brief names the fork route, which is the one that anchors on your own worktree" FAIL
+else
+  check "WT8n2 the handoff brief states the recorded path is not the destination and names the fork route" PASS
+fi
 
 # The prefix premise, DERIVED from the declarations rather than hand-listed: a
 # hand list cannot detect its own omission, and the floor would then restate the

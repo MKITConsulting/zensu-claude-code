@@ -290,21 +290,21 @@ never from the parser's own environment.
 has exactly one `cwd` and one transcript. What degrades is fidelity, and one part
 of it degrades dangerously.
 
-`gitState(cwd, full)` (`skills/session-trail/scripts/trail.mjs:1980`) takes a
+`gitState(cwd, full)` (`skills/session-trail/scripts/trail.mjs:2059`) takes a
 single path, and that path is the anchor. In this topology the anchor is clean
 while the changed files sit in the code roots, so a `takeover` brief would report
 no uncommitted changes for a session with a dirty tree in two other repositories.
 That is the same silent-green failure as §2, relocated into the handover path.
 
-The fix costs no schema. `trail.mjs` has no write channel
-(`skills/session-trail/SKILL.md:51`); it may read the anchor's workflow document,
+The fix costs no schema. `trail.mjs` has exactly one write channel, the lineage ledger
+(`skills/session-trail/SKILL.md:75`); it may read the anchor's workflow document,
 take `codeRoots`, and call `gitState` once per union member, rendering the results
 grouped by label.
 
 Two properties stay as they are, deliberately:
 
 - **Resume happens in the anchor, always.** The printed
-  `cd <cwd> && claude --resume <id>` (`trail.mjs:2597`) already lands there.
+  `cd <cwd> && claude --resume <id>` (`trail.mjs:2741`) already lands there.
   Resuming inside a code root would present a different `CLAUDE_PROJECT_DIR` while
   the recorded `project_root` still EXISTS, and a present-but-different root is
   never relaxed — the orphaned relaxation requires the recorded path to be absent.
@@ -318,7 +318,7 @@ Two properties stay as they are, deliberately:
   who trusts that list.
 - **Discovery stays anchor-scoped.** `list` keeps only transcript directories
   whose name starts with the slug of the repo's main checkout
-  (`skills/session-trail/SKILL.md:152`), so from a code root's repository the
+  (`skills/session-trail/SKILL.md:253`), so from a code root's repository the
   session is reachable only via `--all` or from the anchor. This is pre-existing
   behavior that multi-repo makes more consequential; this proposal does not
   change it and must not claim to.
