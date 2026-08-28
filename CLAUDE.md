@@ -1344,6 +1344,39 @@ rather than advertising a 0h window.
   was created to remove: renaming only the returned literal left the table key in place and kept
   the check green while a genuinely closed foreign chain rendered as an open one. Measured, not
   argued — the classifier-driven form catches that rename and the table-driven form does not.
+- **An OWN chain parked at `implementing` renders at `OK`, and that is the shape a session
+  lands in when it DECLINES the review chain rather than fails it.**
+  `hooks/stop-chain-enforcer.sh:951` releases Stop unconditionally while `SESSION_IMPL_COMPLETE`
+  is not `true`, so a session that arms `--tdd-begin`, does the work and never runs
+  `--tdd-complete` is never asked for a reviewer: no directive, no cap, and no bypass-ledger
+  entry — the ledger records gate ESCAPES and no gate was ever reached. `chainShape` then
+  answers `implementing`, which is in neither `RECOVERABLE_SHAPES` nor `DEAD_END_SHAPES`, and
+  the foreign-open row excludes it by `entry.key === ownKey`. It therefore reaches ONLY the
+  count row, whose severity is `unclassifiable ? WARN : OK` — so the shape IS printed and "all
+  checks green" still holds beside it. Observed as a real session outcome, not constructed: a
+  session whose harness prompt forbade the `Agent` tool declined the five-agent fan-out,
+  withheld `--tdd-complete` for exactly that reason, and self-reviewed instead.
+  **Warning on `implementing` alone is NOT the fix** — that is the shape of every chain that is
+  legitimately mid-implementation, so such a row would fire throughout every normal run and be
+  trained away within a day. **An AGE bound is not the fix either, and it was the first thing
+  proposed here.** The foreign-open row already ages on `updated_at` against
+  `zensu_pending_review_ttl_hours`, and reusing that for an OWN chain measures WALL TIME — which
+  a powered-off machine, a paused session, an overnight break and a holiday all accumulate with
+  nothing wrong. Such a row reports the user's calendar, not the model's behaviour, and the
+  existing foreign-open row carries the same weakness rather than justifying a second copy of it.
+  **COUNT TURNS, NOT TIME.** The distinguishing signal is how often this session ENDED A TURN
+  while the chain was still `implementing` and the worktree still reported changed files — the
+  shape of a model working alongside an undeclared gate rather than through it. A machine that
+  is off counts zero, a paused session counts zero, a holiday counts zero, and only continued
+  work past the open gate counts up. The mechanism already exists in this same file for the
+  phase one step later: `hooks/stop-chain-enforcer.sh:954-956` counts Stop blocks against
+  `autoFixMaxRounds + 3` rather than against a clock. What is missing is the equivalent counter
+  for the implementing phase plus a workflow-state slot to hold it — which under §"Runtime
+  Lineage" is a schema change and therefore a `minor`, so it should travel with a schema change
+  that is landing anyway rather than buy a release of its own. The nudge must stay ADVISORY and
+  never become a block: a long legitimate implementation genuinely does span many turns, so a
+  false positive may cost a line of text and must never cost a wedged chain. Not implemented
+  here, and named so it is not rediscovered from a green report over an unreviewed chain.
 
 **Operator-facing accounts that must move with it:** `skills/doctor/SKILL.md` (the frontmatter
 `session state` clause, the row bullet, and the Phase 3 cleanup, which must delete the path the
