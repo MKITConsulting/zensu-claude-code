@@ -2830,6 +2830,18 @@ zensu_pending_review_file() {
   echo "${project_root}/.zensu/state/pending-review.json"
 }
 
+# The claim sibling, exported so a consumer outside this module does not
+# re-encode the suffix. A copy that drifts fails OPEN in the one place it
+# matters: adoption RENAMES the marker onto the claim, so in the adopted state
+# only the claim exists — and a reader looking for the wrong name would then see
+# neither file and answer "no work" while another session's deferred review is
+# live.
+zensu_pending_review_claim_file() {
+  local pending_file
+  pending_file="$(zensu_pending_review_file)" || return 1
+  echo "${pending_file}.claim"
+}
+
 _tdd_write_pending_review_critical() {
   local pf="$1"
   local files="$2"

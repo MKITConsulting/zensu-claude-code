@@ -1014,13 +1014,331 @@ three `stop-chain-enforcer.sh` sites, both `post-review-tdd-delegate.sh` sites, 
 must stay so: `_autopilot_begin_standalone_tdd_critical`,
 `_autopilot_adopt_pending_review_critical`, and both fences in
 `_autopilot_deferred_contention_result`. All four call
-`_autopilot_read_workspace_critical` DIRECTLY, because each is already inside the
-project lease; there is deliberately no public wrapper, and one that existed
-without a caller carried a second, divergent defaulting policy. Owner-scoping that second group would let a
+`_autopilot_read_workspace_critical` DIRECTLY, and the reason DIFFERS per group —
+saying "each is already inside the project lease" is false for half of them. The
+two locked fences are inside it. The two contention fences deliberately read
+UNLOCKED, because they are reached precisely when the lease could not be
+acquired; their own header calls that a read-only proof. What holds for all four
+is that none of them may take a SECOND lease acquisition. The public
+`autopilot_read_workspace` is the wrapper for callers
+OUTSIDE it — it takes the lease itself — and it has exactly ONE: the
+`post-review-tdd-delegate.sh` preflight, which passes a single argument. The Stop hook's rc=4
+read was deleted when the fence began publishing its sentence, so the wrapper's preference
+parameter currently has no production caller at all — S7h2 guards it for the next one. The symbol to look for is `autopilot_read_workspace`'s third
+parameter, not a line number. Do NOT restate this as "there is deliberately no public
+wrapper": that sentence stood here while the delegate was already calling one, and
+it now contradicts the rc=4 account below in the same section. Owner-scoping that second group would let a
 standalone `/zensu:tdd` chain arm underneath another session's durable run in the same tree.
 The team-review identity check is a THIRD shape: it resolves the owner from the RUN record
 and then asks the first question, because the pointer that must still designate that run is
 its owner's, not the attesting caller's.
+
+**The two deferred-review fences ask the owner-independent question and then WEIGH the
+answer; that is not a fourth shape and it is not owner-scoping.** They still call
+`_autopilot_read_workspace_critical` and a foreign run is still fully visible to them —
+what changed is the CONSEQUENCE of a hold. `_autopilot_workspace_hold_blocks_adoption`
+refuses on either of two independent grounds: the holder's `ownerSessionId` equals this
+session (in production only reachable when the owner-keyed pointer read failed while the
+run record is live, so releasing would infer completion for an active OWN generation), or
+`_autopilot_deferred_work_present` reports deferred-review work. With neither, the fence
+returns **6**, the code the Stop hook already treats as a normal no-work result. Every
+unreadable input — an absent holder, an unparseable record, an unresolvable pending path —
+answers BLOCKING, so the relaxation costs nothing fail-open. Only the FIRST fence of
+`_autopilot_deferred_contention_result` takes this; its second fence stays unconditional,
+because `tdd_pending_review_owned_by_other` has proven a foreign claim by the time it runs.
+
+**`_autopilot_deferred_work_present` TRACKS `_tdd_adopt_pending_review_critical`'s "no
+work" verdict; it is a HAND COPY of that ladder and must never be described as "the exact
+predicate".** A bare `[ -f ]` existence test disagrees with the owner in BOTH directions and
+each disagreement costs something real, which is why the copy carries three parts rather
+than one. An UNSAFE marker — symlink, FIFO, directory, dangling link — is tamper evidence
+the owner REFUSES on (`_tdd_path_safe … regular-or-absent`), so a bare test would relax the
+fence on exactly the state the owner blocks on; the copy applies the same guard and reports
+work PRESENT. A plain marker past the TTL is "no work" to the owner, which DELETES it and
+returns 2 — so reporting it present rebuilds the permanent wedge, and because the fence
+returns before that deleter runs, nothing would ever reap it either; the copy therefore
+takes `ttl_hours` (threaded from `$4` in the locked fence and `$3` in the contention one, and passed on as the FIRST argument)
+and excuses it through `_tdd_pending_file_stale`. A stale CLAIM is deliberately NOT excused,
+because the owner reconciles a claim rather than dropping it. The residual divergences are
+named rather than papered over, and the honest form is GENERIC because an enumeration goes
+stale: any state the owner reaches only AFTER reading claim METADATA is "no work" to it and
+"work present" here. Three exist today — a claim whose reconcile status is `owned`, a
+`done|cancelled` claim with no queued marker, and a `done|cancelled` claim whose queued marker
+is itself stale — all over-approximations that keep a refusal, never a relaxation. Note also
+that the copy reads the marker under the OUTER lease only, never the pending lease that
+governs it, so a marker published concurrently can read as absent; the marker stays queued and
+a later Stop adopts it. The standing fix for all of this is to export the source-selection
+ladder from `zensu-tdd-phase.sh` so both modules call one predicate.
+
+The threading is `ttl_hours` FIRST, `root` second, in both helpers — they take their two shared
+operands in the same order on purpose, because both are optional with defaults and a
+transposed call would produce a plausible-but-wrong anchor rather than an arity error.
+
+**The own-run arm weighs an IDENTITY, so it must not be decided by filename sort order.**
+`read-workspace` reported `inventory.find(...)` — the first nonterminal holder by sorted run
+filename — and several runs can hold one tree, because a record carrying no `workspaceRoot`
+holds EVERY tree in its project. A legacy foreign record sorting first would therefore
+shadow the caller's own live run and flip the arm from block to release. The mode now
+filters to ALL holders and accepts an optional fourth argument, a preferred
+`ownerSessionId`, which both fences pass. **This does not owner-scope the question:** the
+preference selects WHICH holder is reported, never WHETHER the tree is held, and with no
+preference supplied the result is byte-identical to the first holder. `path_indexes` for
+`read-workspace` stays `(0 1)` — the new argument is an identifier, not a path.
+
+**What that fixed, stated because it was a shipped defect and not a hypothetical.** The
+check ran BEFORE anything asked whether a deferred review existed, so a session whose own
+chain was inactive (`OUTER_PRESENT=false` plus `SESSION_ACTIVE!=true` → `ADOPT_ELIGIBLE`)
+was denied at Stop by a foreign run it had nothing to do with — and, because occupancy is
+CONTAINMENT in both directions, by a run whose worktree merely sat below its tree. Measured
+on 0.19.0 against a live consuming project: `autopilot_read_active` correctly answered
+`rc=1` for the foreign session while `autopilot_adopt_pending_review` answered `rc=4`, with
+no `pending-review.json` anywhere in that project. **`test-autopilot-stop-enforcer.sh` S7
+PINNED that behaviour** — a foreign session's Stop was asserted to `block` — so this is a
+deliberate policy change, not only a bug fix: S7 now asserts it RELEASES and still mutates
+nothing, `S7d` is the discriminator that a queued deferred review restores the refusal, and
+`S8g` is the control that an own active generation still fails closed. Do not "restore" S7.
+
+**The rc=4 refusal names the holder, and that is load-bearing rather than cosmetic.** THREE
+sites ON THE DEFERRED-REVIEW ADOPTION PATH produce rc=4 and all three render the existing
+`_autopilot_workspace_refusal` on stderr — the locked fence, and BOTH fences of
+`_autopilot_deferred_contention_result`,
+including the second one, which refuses unconditionally and had been discarding the record.
+State that base: `_autopilot_begin_standalone_tdd_critical` is a FOURTH caller of the same
+renderer, on the standalone-begin path, and it refuses unconditionally — so a change to the
+renderer reaches it too, and it passes its own session id for the same reason the three below
+do.
+That omission mattered precisely because the contention path is reached when the Outer lease
+could not be taken, which is exactly when the hook's own lease-taking read fails too: the run
+id was then named on NEITHER channel. `stop-chain-enforcer.sh`'s rc=4 arm takes the sentence the
+fence PUBLISHED and performs no read of its own. It once re-read the holder here, and the rule
+then was that the read had to carry `$SESSION_ID` as the holder preference — several runs can
+hold one tree, and an unpreferenced read reports `holders[0]` while the fence judged a
+different record, so the remedy could point at a run that is not the blocker. Publishing the
+sentence removed the read and the rule with it; do not restore either from this paragraph.
+
+**Three remedy texts, not one; the distinction is a safety property, and ONE site decides it.**
+When the named holder is FOREIGN the block reason names `/zensu:autopilot-release` and the
+operator stderr line quotes `zensu-log.sh --autopilot-release --run <id> --confirm` — one
+renderer, two audiences, and only the stderr one is read by a human. When it is owned by THIS session the
+reason must NOT offer that command: the release worker skips its self-release guard in exactly
+this state — the guard fires only while the owner pointer still designates the run, and this
+arm is reachable only when that pointer read failed — so following it would cancel the
+session's own live generation. The third is the unnamed fallback when the holder cannot be
+read at all, and it prescribes NO release command either — ownership is unknown on that
+branch, and the own-run case is the LIKELY one there, because it is reached under the same
+lease contention that made the read fail. Prescribing a release would aim it at this session's
+own live generation in exactly the state the renderer withholds it from. So no branch pairs a
+run id with a release command it has not verified as foreign, and
+`_autopilot_workspace_refusal` emits the CLI spelling `zensu-log.sh --autopilot-release --run
+<id> --confirm` for the OPERATOR audience and the slash form for the MODEL audience — one
+renderer, two forms, and the audience argument is what selects. The unnamed fallback's own wording is pinned by S7n, and only
+by S7n. S8g used to hold it and was re-pointed at the own-run wording when the published
+sentence began reaching that fixture, which left it briefly uncovered; S7n is a SOURCE pin,
+because the branch is unreachable from any fixture — the fence blocks for every holder it
+cannot read, and a `stateValid` record always satisfies the renderer's shape tests. It asserts
+the literal quotes no `--confirm` and no `zensu-log.sh` and names both ownership
+possibilities. The holder clause is emitted LAST, and the reason has changed: it originally
+had to be, because its named form ended in a shell command and anything appended was copied
+along with it (an earlier spelling produced `--confirm.`). The MODEL form the block reason now
+carries ends in a slash-command name instead, so the ordering is retained for consistency and
+to keep a future reword from reintroducing the hazard, not because it is still load-bearing.
+
+**A SECOND copy of the foreign sentence lives in the `begin` worker mode**, emitted from the
+JS when a durable begin is refused, and it is pinned in a DIFFERENT suite
+(`tests/structure/test-autopilot-state-machine.sh` W3, which greps the `workspace held by
+nonterminal run …` lead and the `/zensu:autopilot-release` guided form, and asserts `--confirm`
+is ABSENT — do not send a maintainer looking for a needle the suite now forbids). It
+carries NO own-run branch, and the reason is ORDERING rather than a missing identity: the worker
+DOES have the caller's `ownerSessionId` in that mode. What keeps the text foreign-only is that
+the own-run cases above it (`hiddenNonterminal`, the pointer's own nonterminal run) already
+`fail(4)`, and `candidate.runId !== runId` excludes the last survivor — so no own run reaches
+that branch. Those checks must stay ABOVE it; widening them would emit a foreign remedy for the
+caller's own live run. S7m now compares the two byte for byte by extracting the worker's
+template and rendering the helper against the same run id, so a reword of either turns that
+check red; before it, the two were pinned only in separate suites and could drift silently.
+
+**The own-vs-foreign choice belongs to the RENDERER, and putting it anywhere else fails open.**
+`_autopilot_workspace_refusal` takes the caller's session id as an OPTIONAL second argument and
+selects the wording itself; every caller that can see its own run passes it. An earlier
+spelling decided it in `stop-chain-enforcer.sh` from a second `_autopilot_holder_owner` read,
+and that read's failure mode was the dangerous one: an unresolvable owner compared UNEQUAL to
+the session id and selected the FOREIGN text, so the hook offered the release command against
+this session's own live generation exactly when it could not establish ownership. Worse, the
+library's own stderr line still quoted that command regardless, so the withholding was
+contradicted on the operator channel. One decision site, inside the renderer, removes both:
+the hook now resolves two names rather than three, and its only failure mode is the unnamed
+fallback. A caller that omits the id gets the foreign wording — so omitting it is the thing to
+check when a new call site is added. **Two arguments, not one:** a site that renders the
+holder must ALSO forward the preference to the READ that produced it. The standalone-begin
+fence passed the id to the renderer and not to the read for one round, which meant it could
+never emit the own-run wording and would quote a release command against whichever record
+sorted first. Three reviewers found that independently; treat "renders the holder" as
+implying both.
+
+**The fence PUBLISHES its rendered sentence, and the hook prefers it over re-deriving one.**
+`_autopilot_publish_workspace_refusal` sets `ZENSU_AUTOPILOT_WORKSPACE_HOLD_TEXT` beside every
+rc=4 render, and BOTH public entry points — `autopilot_adopt_pending_review` and
+`autopilot_begin_standalone_tdd` — clear it first, so a stale sentence can never be reused.
+(The name carries the library prefix on purpose: it is the only module-scope assignment in this
+file, and the house precedent for a sourced-library global the Stop hook reads by name is
+`ZENSU_SAFE_VERSION_RE`.) **TWO forms are rendered from one holder.** The OPERATOR form goes to
+stderr and quotes the audited `zensu-log.sh --autopilot-release --run <id> --confirm`, because a
+human reads it. The MODEL form is what the block reason carries and names `/zensu:autopilot-release`
+INSTEAD — `--confirm` is the consent control, so a complete invocation in a model-facing channel
+routes around the only place that control exists, and a bare `zensu-log.sh` is a name a model
+would resolve against the repository it is standing in. S7k pins all three shapes. This exists because the hook's own read happens AFTER the lease is released and the
+worker reports `preferred || holders[0]`: a second FOREIGN run publishing in that window could
+be named instead of the record the fence judged, and the rendered remedy quotes a real CANCEL.
+Deriving it once, under the lease, from the judged record closes that window — and it made the
+CONTENDED path strictly better, which is the measurable part: S8g now sees the run NAMED with
+the own-run wording where it previously got only the unnamed fallback, because the contention
+fence's unlocked read succeeds exactly when the hook's lease-taking one cannot.
+`_autopilot_locked_run` runs its callback in the current shell and the Stop hook calls the
+public verb without a subshell, which is what lets a variable carry it.
+
+**The hook now takes the published sentence and NEVER re-derives one**, and the fallback that
+briefly stood beside it was deleted rather than kept. Its stated trigger — "a runtime that does
+not publish" — was unreachable (the plugin root is derived from the hook script itself and
+re-checked, so hook and library are always one tree), while its REAL trigger was a failed render
+— in which case a second read is a fresh chance to name the WRONG run, not a recovery. Deleting
+it removed this file's last module-private `_autopilot_*` call: `hooks/` outside this library now
+contains none. The suite still drives five private helpers directly, which is what
+S7f/S7f2/S7g/S7h/S7j/S7k/S7m rest on.
+
+Assertions inside ONE suite pin the wording — `tests/structure/test-autopilot-stop-enforcer.sh`
+S7d's guided-form needle plus its assertion that `--confirm` is ABSENT — the AUDITED
+`--autopilot-release --run <id> --confirm` needle moved to S7k when the block reason took the
+model form, and S7k carries the `grep -qF --` guard that spelling still needs (without it grep
+parses the pattern as options and the check passes vacuously, which it did),
+S7d's positive assertion on the `Retrying Stop cannot clear the hold` clause — it was a
+NEGATIVE assertion on a literal that existed nowhere in the tree, which could never fail and
+left AC-004's no-retry-advice half unpinned — S7i's containment-case naming needle, S7k's three-shape renderer pin (operator form quotes the
+audited command, model form names only the guided skill, own-run holder gets neither)
+(the release command must be ABSENT there and present for a foreign holder), S7j's negative
+shape tests on both renderers, S7n's source pin on the unnamed fallback (behaviourally
+unreachable, so a source pin is the only available control), S8i's end-to-end own-run pin (the run named, the release
+command absent), S8g's contended own-run pin (the same property reached through the PUBLISHED
+sentence rather than the hook's read), S7m's byte comparison of the `begin` worker's twin
+against the renderer, and the shared `holds this working tree` lead — so rewording it
+is a same-suite edit, EXCEPT for the own-run clause: S7o pins `which belongs to this session`
+and `finish or repair that run` against `skills/autopilot-release/SKILL.md`, which teaches the
+model to recognize that case by those literals. The needles are deliberately different: a bare
+`autopilot-release` substring matches BOTH branches and would have let the named and unnamed
+paths pass each other's check.
+
+**The relaxation DISCLOSES.** `_autopilot_workspace_hold_blocks_adoption` prints one stderr
+line before returning false, because rc=6 is otherwise indistinguishable from "no run held the
+tree at all" and a guard that stands down invisibly is the shape this repository treats as
+worse than the wedge it removes. It is not a bypass-ledger entry and must not become one: no
+user-supplied switch was escaped. S7g captures that stderr separately and requires it — the
+hook fixtures cannot, because `invoke()` discards stderr, so without a direct capture the line
+could be deleted with every check green. **Accepted cost, named because it is not obvious:**
+the line is UNRATED and the state that produces it is a steady state, not an event — an
+ordinary session with no own run and no active chain reaches `ADOPT_ELIGIBLE` on every turn
+end, so the disclosure repeats on every Stop for as long as the foreign run stays nonterminal.
+Gating it would remove the observability it exists for; the repetition is the price.
+
+**Two ordering rules inside the fence, both learned by having them wrong.** The ladder
+has the WORK arm LAST, and every arm above it returns the same value — 0, blocking. So while a
+marker exists a `blocks` result is UNATTRIBUTABLE, and a check that drives the guards then
+proves nothing about any of them. State the mechanism, not the outcome: an earlier wording here
+said the work arm "masks every guard above it", which has the order backwards. That is why S7f keeps only
+the marker-decided arm and S7f2 re-drives every input guard, plus the claim and unsafe-marker arms, after `rm -f`. And the `root`
+parameters default to `${CLAUDE_PROJECT_DIR:-}` rather than to empty — an empty value is
+indistinguishable from unset to `_tdd_path_safe`, so defaulting to empty would CLEAR a correct
+anchor and reinstate the nearest-existing-ancestor fallback the parameter exists to prevent.
+
+**The library ALSO writes that sentence to stderr from inside the fence, and the redundancy
+is deliberate.** They serve different consumers — operator stderr versus the model-facing
+block reason — and it is the CONTENDED case that needs both: there the library renders a
+NAMED line from its unlocked read while the hook's lease-taking read fails and falls back to
+the unnamed remedy. Removing either loses the run id on one of the two paths. Accepted cost:
+on a contended Stop the user can see the sentence twice, and the two reads are taken at
+different instants.
+
+**Version: `patch`.** Walked against §"Runtime Lineage" entry by entry: no context-record or
+workflow-state schema field, no strict key set (the run schema's `STATE_KEYS` /
+`STATE_KEYS_WORKSPACE` are untouched), no hook added, removed or renamed and no matcher
+changed, no new config key (the fence reuses `zensu_pending_review_ttl_hours`), no
+attestation change. The `read-workspace` worker mode gains an OPTIONAL fourth argument, which
+is a call convention inside one installation and never a persisted shape — an older runtime
+passing three args gets its previous answer. The Stop hook denies strictly LESS than before,
+which cannot make state written by one runtime unreadable to the other; the capability rule
+in that section is about ADDING a hook that can deny, and relaxing an existing hook's deny is
+not in the list. Recorded here because the section's other `**Version.**` paragraph reads
+`minor` and describes the ORIGINAL pointer/schema change, not this delta.
+
+**The audience is a property of the CHANNEL, and all three model-read channels were routed to
+the guided form.** The two that a first pass left behind were `_autopilot_begin_standalone_tdd_critical`'s
+stderr — the tool RESULT of a `zensu-log.sh --tdd-begin` a model runs — and the `begin` worker's
+own `fail(4, …)` twin, surfaced by `zensu-log.sh` the same way. Both now emit
+`/zensu:autopilot-release` rather than a runnable `--confirm` invocation, which cost W3 and W13
+in `test-autopilot-state-machine.sh` and re-pointed S7m at the renderer's MODEL form. The
+OPERATOR form survives on exactly one channel: the Stop hook's stderr, where a human reads it.
+`_autopilot_publish_workspace_refusal` therefore takes the stderr audience as its third
+argument, and `_autopilot_workspace_refusal` REFUSES an unrecognized audience rather than
+defaulting to the permissive spelling.
+
+**CLOSED, and recorded so it is not re-opened as a gap:** the contention fence's
+foreign-holder-WITH-WORK rc=4 arm had no executed case — S8g reaches that fence through the
+own-run arm and S8h through the release arm — and S8j now drives it, asserting the run is named
+and no runnable cancel is quoted.
+
+**Known gap: the `root` parameter of `_autopilot_deferred_work_present` and
+`_autopilot_workspace_hold_blocks_adoption` is UNPINNED, for TWO reasons and the second is
+structural.** Asserting that the fence blocks pins nothing there, because the
+predicate fails closed and every failure mode gives that same answer. The discriminating shape
+needs the anchor alone to decide, and an attempt at it did not reproduce that split — the marker
+path is resolved through `zensu_resolve_project_dir` rather than through the symlinked component
+such a fixture plants. And every fixture in that suite lives under `$TMP`, while
+`_tdd_paths_safe` always trusts `${TMPDIR:-/tmp}` as an anchor, so the argument can never BE the
+deciding anchor there. A discriminating check needs a fixture rooted outside both `TMPDIR` and
+`HOME`. Recorded rather than papered over with a check that passes for an unestablished reason.
+
+**Known gap: `_autopilot_deferred_work_present` tracks the MARKER half of the owner's ladder
+only.** (Anchor by SYMBOL, not by line: every line reference into this file went stale within a
+round while the symbol names did not.) Any claim file
+at all reports work present, while the owner reads claim METADATA and answers no-work for a
+claim reconciled `owned` by another session and for a `done|cancelled` claim with nothing
+queued. So with the tree free those states release, and under a foreign hold they still block —
+the same class of refusal this change removes, one case narrower. Direction is a retained
+refusal, never a relaxation, which is why it ships; closing it needs a read-only reconciliation
+status `zensu-tdd-phase.sh` does not export, which is the recorded standing fix.
+
+**Known gap: the own-run arm is a correctness guard, not an authorization boundary.** It
+decides on `ownerSessionId`, an unauthenticated field in a directory this file elsewhere
+records as session-writable, and `stateValid` checks only its SHAPE — there is no MAC and no
+counter over a run record. So a session can flip its OWN fence between block and relax by
+editing its own record, exactly as it could already by deleting it. The holder preference
+closes the ACCIDENTAL shadowing (a legacy foreign record sorting ahead of the caller's live
+run); it does not close a deliberate write, and nothing here should be read as doing so.
+
+**Known gap: a stale marker under a held tree is never reaped.** The release arm returns
+before `tdd_adopt_pending_review` runs, and that call is what owns the `rm -f` for an expired
+marker. The marker is inert while stale and is reaped by the first adoption after the hold
+clears, so this is a leak rather than a wedge — but the fence's own comment argues the
+reaping asymmetry against the OPPOSITE choice, and it applies to the branch that shipped too.
+
+**Known gap, accepted and named: the contention path samples work-presence once, unlocked.**
+`_autopilot_deferred_contention_result` is reached precisely because the Outer lease could
+not be acquired, and its own header describes a check-prove-recheck TOCTOU bracket that
+re-reads OCCUPANCY only. The new work-presence input is read once, outside that bracket, so
+a marker published concurrently by `tdd_write_pending_review` (which takes the pending lock,
+not the Outer one) is missed for this Stop. The consequence is a DEFERRED adoption, never a
+lost one — the marker stays queued and the next Stop sees it.
+
+**CONTAINMENT is pinned, and it took a real git fixture to do it.** Every other check in the
+suite builds a plain `mktemp -d` project, so holder and stopper resolve the SAME workspace
+key and only EQUALITY is exercised — the containment branch of `mayHoldWorkspace` is never
+taken. S7i is the one that reaches it: `git init` plus `git worktree add` of a NESTED
+worktree, the run begun with that worktree declared through `autopilot_begin_run`'s sixth
+argument, and the Stop driven from the CONTAINING tree. It asserts both directions in that
+one tree — release with nothing queued, and a refusal naming `contain_run` once a marker
+exists. That is the exact shape of the reported production defect, so it is the check to
+keep working if the fixture ever goes red. Note the two prerequisites it silently needs: a
+usable `git worktree` (it fails loudly rather than skipping if the directory is absent) and
+`autopilot_begin_run`'s workspace override, which refuses anything that is not itself a git
+toplevel.
 
 **One resolver decides the workspace for the writer and for every gate.**
 `_autopilot_session_workspace` resolves cwd → git toplevel → canonical path, and falls back
@@ -1114,9 +1432,14 @@ hand; the release pipeline owns it.
   `tests/structure/test-autopilot-plan-delegate.sh`. Those five cases were written against
   the refusal receipt and now assert the silence instead; F45c in particular no longer pins
   an ORDERING between the ownership and origin refusals, because neither is reachable.
-- `/zensu:doctor` still carries NO Autopilot row of any kind, so a held workspace is visible
-  only in the `--autopilot-begin` refusal and in `/zensu:autopilot-release`. Do not claim
-  doctor visibility until that row exists.
+- `/zensu:doctor` still carries NO Autopilot row of any kind. A held workspace is visible in
+  the `--autopilot-begin` refusal, in the standalone-TDD begin refusal, in the deferred-review
+  Stop refusal (which names the holding run whenever it can be read — including when it
+  belongs to this session, where only the release COMMAND is withheld — and names no run at
+  all when the read failed), in the
+  stderr line the fence prints when it stands down, and in `/zensu:autopilot-release`. Do not
+  claim doctor visibility until that row exists — and keep this enumeration in step with the
+  rc=4 account above, which is where those refusals are specified.
 - The `SESSION_CONTEXT_UNAVAILABLE` arm in `plan-approved-delegate.sh` is defense in depth, not
   the live path: `zensu_bind_hook_session` refuses an unresolvable session earlier, so the receipt
   a caller actually sees in that state is `RUNTIME_UNAVAILABLE`. Measured by P8a-P8c in
@@ -1128,7 +1451,27 @@ hand; the release pipeline owns it.
 
 Moving together with the scope: `_autopilot_owner_key`, `_autopilot_active_path`,
 `_autopilot_legacy_active_path`, `autopilot_workspace_root`, `_autopilot_session_workspace`,
-`_autopilot_read_workspace_critical`, `_autopilot_rendered_dir`, `autopilot_release_run`, the `read-active` / `read-workspace` /
+`_autopilot_read_workspace_critical`, `autopilot_read_workspace` and
+`_autopilot_workspace_refusal` — which `stop-chain-enforcer.sh`'s rc=4 arm NO LONGER resolves at
+all: it once resolved three names there by `declare -F`, and all three are gone (the ownership
+read moved into the renderer, and the re-read fallback was deleted). What the arm now depends on
+across the file boundary is the VARIABLE spelling, not a function name; the one surviving
+`declare -F` in that file guards `autopilot_adopt_pending_review` and is unrelated —
+`_autopilot_holder_owner`, `_autopilot_holder_run_id`, `zensu_pending_review_claim_file` (exported from
+`zensu-tdd-phase.sh` so the `.claim` suffix is not re-encoded here — a drifted copy would fail
+OPEN, because adoption RENAMES the marker onto the claim and a reader looking for the wrong name
+would see neither file and answer "no work" while a deferred review is live) and
+`_autopilot_publish_workspace_refusal` (both intra-file: the Stop
+hook calls neither, so renaming either is a single-file edit), plus the module-scope
+`ZENSU_AUTOPILOT_WORKSPACE_HOLD_TEXT` that publisher sets — THAT spelling is what
+`stop-chain-enforcer.sh`'s rc=4 arm reads across the file boundary, so renaming IT is a
+cross-file edit whose failure mode is the unnamed fallback — `_autopilot_deferred_work_present`,
+`_autopilot_workspace_hold_blocks_adoption` (whose pending predicate is a HAND COPY of
+`_tdd_adopt_pending_review_critical`'s ladder, pinned end-to-end by S7/S7d/S7e/S7i and
+arm-by-arm by S7f/S7f2/S7g, which drive it directly because no hook fixture reaches those
+guards; S7h and S7h2 pin the holder preference at the private and PUBLIC read; S8i pins the own-run remedy end to end through the LOCKED
+fence, and S8g reaches the same wording through the CONTENTION fence — its stub kills
+`_autopilot_locked_run`, so the two cover both publish paths rather than one twice), `_autopilot_rendered_dir`, `autopilot_release_run`, the `read-active` / `read-workspace` /
 `begin` / `apply` / `release` / budget worker modes with their `path_indexes`,
 `projectRootIndex` and `workspaceRootIndex` entries, the worker's own second re-encoding of the
 pointer name (`activePointerFor`, `OWNER_POINTER_PREFIX`, `LEGACY_POINTER_NAME`), the SEVEN hook
@@ -1137,8 +1480,16 @@ pointer spellings, `hooks/lib/zensu-log.sh` (the `--workspace` flag, the owner-a
 `--autopilot-status`, and the `--autopilot-release` verb with its derived event id),
 `skills/autopilot/SKILL.md`, `skills/autopilot-release/SKILL.md`, and the plugin manifest's
 skill list. Operator-facing accounts that must move with it: `README.md`'s skill table,
-`docs/tdd-manager-workflow.md` §"Autopilot run scope" and the `session-start-autopilot-resume.sh`
-row in `docs/configuration.md`.
+`docs/tdd-manager-workflow.md` §"Autopilot run scope", the `session-start-autopilot-resume.sh`
+row in `docs/configuration.md`, and — easy to miss, because the roster named only the resume
+row while the deferred-review fence account lives elsewhere — the `stop-chain-enforcer.sh`
+row in `docs/configuration.md` — and its `pendingReviewTtlHours` row, the ONLY written statement
+anywhere that at `0` a marker of any age sustains this refusal indefinitely. The
+`stop-chain-enforcer.sh` row PARAPHRASES the fence's pending-work precondition but
+QUOTES both remedy spellings — `/zensu:autopilot-release` and the audited
+`zensu-log.sh --autopilot-release --run <id> --confirm` — so a reword of either remedy is a
+cross-file edit. Only the refusal SENTENCE itself is pinned solely by the
+`test-autopilot-stop-enforcer.sh` assertions above.
 `tests/structure/test-autopilot-state-machine.sh` pins the pointer, the two refusals and the
 legacy fallback; `test-autopilot-adversarial-recovery.sh` X1a pins the `begin`, `read-active`,
 `release` and `read-workspace` `path_indexes` literals. It does NOT pin every mode in the table

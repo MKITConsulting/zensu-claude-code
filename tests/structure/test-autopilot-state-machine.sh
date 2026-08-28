@@ -1341,7 +1341,8 @@ CONC_REFUSAL_OK=true
 CONC_REFUSAL="$(autopilot_begin_run run_conc_c session_conc_c "$CONC_PROJECT" false true "$CONC_A" 2>&1)" \
   && CONC_REFUSAL_OK=false
 printf '%s' "$CONC_REFUSAL" | grep -qF 'workspace held by nonterminal run run_conc_a' || CONC_REFUSAL_OK=false
-printf '%s' "$CONC_REFUSAL" | grep -qF -- '--autopilot-release --run run_conc_a --confirm' || CONC_REFUSAL_OK=false
+printf '%s' "$CONC_REFUSAL" | grep -qF -- '/zensu:autopilot-release' || CONC_REFUSAL_OK=false
+printf '%s' "$CONC_REFUSAL" | grep -qF -- '--confirm' && CONC_REFUSAL_OK=false
 [ ! -e "$CONC_PROJECT/.zensu/state/autopilot-run-run_conc_c.json" ] || CONC_REFUSAL_OK=false
 if [ "$CONC_REFUSAL_OK" = true ]; then
   check "W3 a third session is refused the held working tree and told how to release it" PASS
@@ -1632,14 +1633,18 @@ fi
 
 # The refusal must carry the run id, because --autopilot-status is owner-scoped
 # and structurally cannot show a foreign run: without this the user is told to
-# release a run whose id no command will disclose.
+# release a run whose id no command will disclose. It must name the GUIDED form
+# and NOT a runnable `--confirm` invocation: this stderr is the tool result of a
+# `zensu-log.sh --tdd-begin` the model runs, so it is a model-read channel, and
+# `--confirm` is the consent control the guided skill enforces.
 if [ "$GATE_HOLD_RC" -eq 0 ] \
   && grep -qF -- 'run_gate_holder' "$GATE_ERR" \
-  && grep -qF -- '--autopilot-release --run run_gate_holder --confirm' "$GATE_ERR" \
-  && grep -qF -- 'ask that session to cancel it' "$GATE_ERR"; then
-  check "W13 the standalone refusal names the holding run and the release command" PASS
+  && grep -qF -- '/zensu:autopilot-release' "$GATE_ERR" \
+  && ! grep -qF -- '--confirm' "$GATE_ERR" \
+  && ! grep -qF -- 'zensu-log.sh' "$GATE_ERR"; then
+  check "W13 the standalone refusal names the holding run and the guided release skill, never a runnable cancel" PASS
 else
-  check "W13 standalone refusal must disclose the holder and its release command" FAIL
+  check "W13 standalone refusal must disclose the holder and the guided release path" FAIL
 fi
 
 # Positive control. Without it a resolver drift that over-blocks every standalone
@@ -1650,7 +1655,7 @@ fi
 # every code the gate itself can return, and require its refusal to be absent.
 if [ "$GATE_HOLD_RC" -eq 0 ] \
   && [ "$GATE_FREE_RC" -ne 4 ] && [ "$GATE_FREE_RC" -ne 3 ] && [ "$GATE_FREE_RC" -ne 2 ] \
-  && ! grep -qF -- '--autopilot-release --run' "$GATE_FREE_ERR"; then
+  && ! grep -qF -- '/zensu:autopilot-release' "$GATE_FREE_ERR"; then
   check "W14 a standalone chain is permitted in a sibling tree the run does not hold" PASS
 else
   check "W14 standalone gate must permit an unheld sibling tree (hold=$GATE_HOLD_RC free=$GATE_FREE_RC, want 0/past-the-gate)" FAIL

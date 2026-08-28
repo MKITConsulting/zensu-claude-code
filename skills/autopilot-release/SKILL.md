@@ -51,7 +51,7 @@ the working tree stays refused permanently, because `CANCEL` requires the owner.
   release accepts the owner there, because otherwise the run has no exit at all.
 - It records no bypass-ledger entry. The ledger records gate ESCAPES so that everything
   under "Gates bypassed" is true, and this escapes no gate — it ends a run.
-- It refuses while the owning session still looks active (exit `7`): that session's workflow
+- It refuses while the owning session still looks active (exit `7`) — but ONLY when the caller does NOT own the run; that check sits inside the foreign-owner branch, so it never fires for the torn-`begin` own-run case above: that session's workflow
   document `.zensu/state/tdd-phase-<owner>.json` is aged against the same staleness bound
   `/zensu:doctor` uses. That is a heuristic, not proof of death — an owner that never wrote a
   workflow document is not covered, and the durable record still does not name who cancelled a
@@ -70,9 +70,24 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-status
 ```
 
 A run belonging to another session is deliberately invisible there. The run id you need is the
-one quoted in the `--autopilot-begin` refusal — that refusal is the only line that names it.
-Do not guess it and do not enumerate the state directory looking for candidates; an id you did
-not read from a refusal is not evidence.
+one quoted in a refusal that names it. Three do: the `--autopilot-begin` refusal, the
+standalone `/zensu:tdd` begin refusal raised when a durable run already holds the tree, and
+the Stop refusal raised when a deferred review cannot be adopted for the same reason. Do not
+guess it and do not enumerate the state directory looking for candidates; an id you did not
+read from a refusal is not evidence.
+
+One case is explicitly NOT a release: when a refusal says the holding run belongs to THIS
+session, it names the run but deliberately withholds the release command, because in that
+state the verb's self-release guard does not fire and it would cancel this session's own live
+generation. Finish or repair that run instead. Recognize that case POSITIVELY, by the clause it
+carries: an own-run refusal says `which belongs to this session` and `finish or repair that run`,
+while a foreign one says `run /zensu:autopilot-release`. (Both literals are pinned against the
+renderer by S7o in `tests/structure/test-autopilot-stop-enforcer.sh`, so a reword of either side
+turns that check red rather than silently breaking this rule.) Do NOT key on the absence of a
+release command — the model-facing foreign form quotes no runnable command either, so absence
+no longer discriminates. Do NOT generalize the rule to any refusal that omits a command: the owner-mismatch
+Stop refusal (`active run … is owned by another top-level session`) also names a run without
+one, and there the owner really is someone else.
 
 Report to the user, in one short block: the run id, the stage the refusal named, and the
 fact that the run belongs to another session. Then ask whether to end it.
@@ -87,7 +102,7 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-release --run
 the user's behalf. Wait for the user to say yes in this conversation first.
 
 The command runs under the same project lock as every other writer, so it cannot interleave
-with a live owner mid-event. It refuses a terminal run, refuses a run this session owns, and
+with a live owner mid-event. It refuses a terminal run, refuses a run this session owns WHILE that session's pointer still designates it (the torn-`begin` exception above is exactly the gap), and
 is idempotent: an interrupted release repeated with the same arguments reports success
 rather than a conflict.
 

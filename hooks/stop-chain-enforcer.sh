@@ -905,11 +905,45 @@ if [ "$ADOPT_ELIGIBLE" = "true" ]; then
     case "$ADOPT_RC" in
       6) ;; # no pending marker/claim; this is a normal no-work result
       4)
-        # The locked read or its descriptor-backed contention fallback proved
-        # that a durable run became active after the initial absent snapshot.
-        # Do not take a second contended read here: its legacy rc=1 conflates
-        # lock timeout with absence and could erase that stronger proof.
-        emit_block "Zensu Autopilot Stop denied: a durable run became active while deferred review adoption was waiting for the Outer lock. Retry Stop so the current durable state can be routed safely."
+        # A nonterminal durable run holds this working tree. The occupancy
+        # comparison is CONTAINMENT in both directions, so the holder may be a
+        # run driving a worktree nested below this tree -- or above it. The hold
+        # therefore persists for as long as that run stays nonterminal, and the
+        # previous wording ("retry Stop") prescribed a retry that could never
+        # succeed. Name the holder instead.
+        #
+        # This arm used to re-read the holder here, and both the rationale for
+        # that read and the rule that it must carry the fence's holder preference
+        # lived at this spot. Both are gone with the read; the paragraph below is
+        # the single rationale now.
+        # Take the sentence the fence PUBLISHED and never re-derive one. It was
+        # rendered from the record the fence actually judged; any read here would
+        # happen after that fence returned, and the worker reports
+        # `preferred || holders[0]`, so a second FOREIGN run publishing in the
+        # window could be named instead. There is deliberately NO fallback read:
+        # the hook and the library always come from one tree (the plugin root is
+        # derived from this script and re-checked above), so a non-publishing
+        # library cannot pair with a publishing hook — and the only way the value
+        # is empty is that the render itself failed, in which case a second read
+        # would be a fresh chance to name the WRONG run rather than a recovery.
+        # Removing it also removes this file's last module-private call.
+        DEFERRED_HOLD_TEXT="${ZENSU_AUTOPILOT_WORKSPACE_HOLD_TEXT:-}"
+        if [ -z "$DEFERRED_HOLD_TEXT" ]; then
+          # The holder could not be read, so ownership is UNKNOWN here — and the
+          # own-run case is the LIKELY one on this branch, because it is reached
+          # under the same lease contention that made the read fail. Prescribing
+          # a release would therefore aim `--autopilot-release` at this session's
+          # own live generation in exactly the state the renderer withholds it.
+          # Name the condition and the two possibilities instead of a command.
+          DEFERRED_HOLD_TEXT="the holding run could not be identified from here; if it belongs to another session, ask that session to finish or cancel it, and if it is this session's own run, finish or repair it rather than releasing it"
+        fi
+        # The holder clause still goes LAST. The reason it originally had to --
+        # its named form ended in a shell command -- no longer applies, because
+        # the MODEL form this arm carries ends in a slash-command name rather
+        # than a runnable invocation. The ordering is retained for consistency
+        # with the operator line and so a future reword cannot reintroduce the
+        # hazard by appending prose to a command.
+        emit_block "Zensu Autopilot Stop denied: a nonterminal durable Autopilot run holds this working tree, so this Stop can neither adopt deferred review work here nor infer completion. Retrying Stop cannot clear the hold while that run stays nonterminal. ${DEFERRED_HOLD_TEXT}"
         exit 0
         ;;
       *)

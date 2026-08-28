@@ -59,7 +59,10 @@ invoke() {
 decision() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{console.log(JSON.parse(s).decision||"allow")}catch(_){console.log("allow")}})'; }
 context() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{process.stdout.write(JSON.parse(s).reason||"")}catch(_){process.exit(1)}})'; }
 field_ok() { FILE="$1" EXPR="$2" node -e 'const j=require(process.env.FILE);process.exit(Function("j",`return Boolean(${process.env.EXPR})`)(j)?0:1)' 2>/dev/null; }
-digest() { node -e 'const fs=require("fs"),crypto=require("crypto");process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$1"; }
+# A missing file must NOT digest to the empty string: six "owner state unmutated"
+# conjuncts compare two digests, and "" = "" would pass vacuously if the run file
+# were ever renamed or never published.
+digest() { node -e 'const fs=require("fs"),crypto=require("crypto");try{process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));}catch(_){process.stdout.write("MISSING:"+process.argv[1]);process.exit(1);}' "$1"; }
 
 copy_runtime() {
   local destination="$1" runtime_entry
@@ -166,12 +169,375 @@ OUT6B="$(invoke "$P4" stop_session_cancel)"
   && check "S6b terminal history without a pointer remains compatible with Stop" PASS \
   || check "S6b terminal-only history is treated as absent" FAIL
 
+# A foreign session sharing this working tree with someone else's durable run
+# has nothing to adopt while no pending review exists here. The occupancy fence
+# ran BEFORE any pending artifact was consulted, so it denied that session's
+# Stop -- and told it to retry, which can never succeed while the foreign run
+# stays nonterminal. It must release now, and must still not mutate the owner's
+# run. S7d is the discriminator that the refusal returns once work IS pending;
+# S8g is the control that an OWN active generation still fails closed here.
 P5="$TMP/owner"; start "$P5" stop_run_owner stop_session_owner
 RF5="$(autopilot_run_file stop_run_owner "$P5")"; BEFORE5="$(digest "$RF5")"
-OUT7="$(invoke "$P5" foreign_session)"; AFTER5="$(digest "$RF5")"
-if [ "$(printf '%s' "$OUT7" | decision)" = block ] && [ "$BEFORE5" = "$AFTER5" ]; then
-  check "S7 foreign session blocks without mutating owner state" PASS
-else check "S7 foreign session blocks without mutation" FAIL; fi
+# `[ -z "$OUT7" ]` alone is satisfied by every fail-open early exit in the hook
+# and by `invoke` itself failing in `activate_session`, so the release arm needs
+# a positive control: the invoke must SUCCEED, and S7d below must then block in
+# THIS SAME project once a marker exists. Same tree, same foreign session, one
+# variable changed -- that pair is what proves the fence was reached at all.
+OUT7="$(invoke "$P5" foreign_session)"; RC7=$?; AFTER5="$(digest "$RF5")"
+if [ "$RC7" -eq 0 ] && [ -z "$OUT7" ] && [ "$BEFORE5" = "$AFTER5" ]; then
+  check "S7 foreign hold with nothing to adopt releases without mutating owner state" PASS
+else check "S7 foreign hold must release when no deferred review is pending (rc=$RC7 out=$OUT7 digest_changed=$( [ "$BEFORE5" = "$AFTER5" ] && echo no || echo yes))" FAIL; fi
+
+# Discriminator for S7, deliberately in the SAME project P5 with the SAME
+# foreign session: with a deferred review actually queued in this tree the
+# foreign run CAN interleave with the adoption, so the fence must still refuse
+# -- and the refusal must NAME the holding run and its release remedy, because
+# `--autopilot-status` is owner-scoped and structurally cannot show it. The
+# needle is the FULL release command, not the bare word, so this cannot be
+# satisfied by the unnamed fallback sentence S8g exercises.
+activate_session "$P5" stop_session_owner || exit 1
+CLAUDE_PROJECT_DIR="$P5" bash "$LOG" --pending-review --files 'src/foreign-pending.ts' \
+  --summary 'review queued while a foreign durable run holds the tree' >/dev/null
+PF5="$P5/.zensu/state/pending-review.json"
+BEFORE5P="$(digest "$RF5")"; BEFORE5M="$(digest "$PF5")"
+OUT7D="$(invoke "$P5" foreign_session)"; AFTER5P="$(digest "$RF5")"
+if [ "$(printf '%s' "$OUT7D" | decision)" = block ] \
+  && printf '%s' "$OUT7D" | grep -qF 'holds this working tree' \
+  && printf '%s' "$OUT7D" | grep -qF 'stop_run_owner' \
+  && printf '%s' "$OUT7D" | grep -qF 'run /zensu:autopilot-release' \
+  && ! printf '%s' "$OUT7D" | grep -qF -- '--confirm' \
+  && printf '%s' "$OUT7D" | grep -qF 'Retrying Stop cannot clear the hold' \
+  && [ "$BEFORE5P" = "$AFTER5P" ] \
+  && [ -f "$PF5" ] && [ "$BEFORE5M" = "$(digest "$PF5")" ] \
+  && [ ! -e "${PF5}.claim" ]; then
+  check "S7d a queued deferred review keeps the foreign-hold refusal, names the run, and leaves the marker queued" PASS
+else check "S7d pending deferred review must still refuse under a foreign hold (decision=$(printf '%s' "$OUT7D" | decision) marker=$( [ -f "$PF5" ] && echo present || echo gone) claim=$( [ -e "${PF5}.claim" ] && echo minted || echo none))" FAIL; fi
+
+# A marker past the TTL is what the OWNING module calls "no work" -- it deletes
+# it and returns 2. Blocking on it would rebuild the permanent wedge, and the
+# fence returns before that deleter ever runs, so nothing would reap it either.
+P5S="$TMP/owner-stale"; start "$P5S" stop_run_owner_stale stop_session_owner_stale
+CLAUDE_PROJECT_DIR="$P5S" bash "$LOG" --pending-review --files 'src/stale-pending.ts' \
+  --summary 'review queued long ago' >/dev/null
+PF5S="$P5S/.zensu/state/pending-review.json"
+node -e '
+  const fs=require("fs"); const f=process.argv[1];
+  const j=JSON.parse(fs.readFileSync(f,"utf8"));
+  j.ts=new Date(Date.now()-48*3600*1000).toISOString();
+  fs.writeFileSync(f, JSON.stringify(j));
+' "$PF5S"
+# Without these two premises the check passes for the wrong reason: a marker
+# that was never written, or a backdate that threw, both release as "no marker
+# at all" -- which is exactly what this fixture must NOT be measuring.
+S7E_PREMISE=1
+[ -f "$PF5S" ] || S7E_PREMISE=0
+S7E_TTL="$(ZENSU_CONFIG="$TMP/missing.json" zensu_pending_review_ttl_hours 2>/dev/null)"
+case "$S7E_TTL" in ''|*[!0-9]*) S7E_TTL=6 ;; esac
+# At 0 the staleness test is disabled, so the conclusion below would not follow.
+[ "$S7E_TTL" -gt 0 ] || S7E_PREMISE=0
+TTL_HOURS="$S7E_TTL" field_ok "$PF5S" 'Date.now()-Date.parse(j.ts) > Number(process.env.TTL_HOURS)*3600*1000' || S7E_PREMISE=0
+OUT7S="$(invoke "$P5S" foreign_stale_session)"; RC7S=$?
+if [ "$S7E_PREMISE" -eq 1 ] && [ "$RC7S" -eq 0 ] && [ -z "$OUT7S" ]; then
+  check "S7e an expired deferred-review marker does not keep the foreign-hold refusal alive" PASS
+else check "S7e expired marker must not wedge a foreign session under a hold (premise=$S7E_PREMISE rc=$RC7S)" FAIL; fi
+
+# The fence's own guards, driven directly: every unreadable input must answer
+# BLOCKING, and the work discrimination must be visible without a Stop. None of
+# these arms is reachable through the hook fixtures above, so inverting any one
+# of them would otherwise leave every suite green.
+#
+# The ORDER here is load-bearing. The WORK arm is LAST in the fence's ladder and
+# every arm above it returns the same value -- 0, blocking -- so while `P5` still
+# carries S7d's marker a `blocks` result is UNATTRIBUTABLE to any single arm, and
+# a check that drives the guards then proves nothing about them. So S7f keeps
+# ONLY the arm the marker itself decides, `rm -f "$PF5"` disarms it, and S7f2
+# re-drives every guard in the state where each is the only thing that can
+# produce a block.
+activate_session "$P5" stop_session_owner || exit 1
+# Run ids are three characters minimum in the product (`_autopilot_identifier_ok`
+# and the worker's `identifier`), so the fixtures use ids a real record could
+# carry — otherwise tightening the renderer's shape test to match the product's
+# own floor would turn these checks red for a correct change.
+HOLD_SELF="$(printf '{"runId":"hold_run_self","stage":"PLANNING","ownerSessionId":"%s"}' "$ZENSU_SESSION_KEY")"
+HOLD_FOREIGN='{"runId":"hold_run_foreign","stage":"PLANNING","ownerSessionId":"scv1_deadbeef"}'
+guard_blocks() {
+  local label="$1"; shift
+  if _autopilot_workspace_hold_blocks_adoption "$@"; then return 0; fi
+  GUARD_FAILED="${GUARD_FAILED:+$GUARD_FAILED,}$label"
+  return 1
+}
+GUARD_FAILED=""
+guard_blocks queued-marker "$HOLD_FOREIGN" "$ZENSU_SESSION_KEY" 0 "$P5" || true
+if [ -z "$GUARD_FAILED" ]; then
+  check "S7f a queued marker alone makes a foreign hold block" PASS
+else check "S7f queued marker must block under a foreign hold (failed: $GUARD_FAILED)" FAIL; fi
+
+rm -f "$PF5"
+GUARD_FAILED=""
+# The disarm is a PREMISE of everything below: with the marker still there the
+# work arm blocks on its own and every guard above it stays green under
+# inversion.
+[ ! -e "$PF5" ] || GUARD_FAILED="marker-not-disarmed"
+guard_blocks empty-holder "" "$ZENSU_SESSION_KEY" 0 "$P5" || true
+guard_blocks malformed-holder 'not json' "$ZENSU_SESSION_KEY" 0 "$P5" || true
+guard_blocks holder-without-owner '{"runId":"hold_run_x","stage":"PLANNING"}' "$ZENSU_SESSION_KEY" 0 "$P5" || true
+guard_blocks own-owner "$HOLD_SELF" "$ZENSU_SESSION_KEY" 0 "$P5" || true
+guard_blocks empty-session "$HOLD_FOREIGN" "" 0 "$P5" || true
+# The two halves of the ladder the marker itself does not decide. A CLAIM is
+# unconditional work (the owner reconciles a claim rather than dropping it), and
+# an UNSAFE marker is tamper evidence the owner refuses on -- a bare `[ -f ]`
+# would read both of the latter as absent and RELAX the fence.
+: > "${PF5}.claim"
+guard_blocks claim-only "$HOLD_FOREIGN" "$ZENSU_SESSION_KEY" 0 "$P5" || true
+rm -f "${PF5}.claim"
+[ ! -e "${PF5}.claim" ] || GUARD_FAILED="${GUARD_FAILED:+$GUARD_FAILED,}claim-not-disarmed"
+# A DIRECTORY at the marker path, not a symlink: `_tdd_path_safe`'s
+# regular-or-absent mode rejects it on every host, while `[ -f ]` reads it as
+# absent -- so it still discriminates against a bare existence test. Git Bash
+# can satisfy `ln -s` with a copy, which would have made the symlink shape fail
+# for an environment reason on the weekly Windows structure shards.
+mkdir -p "$PF5"
+guard_blocks unsafe-marker "$HOLD_FOREIGN" "$ZENSU_SESSION_KEY" 0 "$P5" || true
+rm -rf "$PF5"
+# NOT PINNED HERE, deliberately: the `root` argument. Asserting BLOCK pins
+# nothing, because the predicate fails CLOSED and every failure mode produces
+# that same answer. The discriminating shape would need the ANCHOR alone to
+# decide — a symlinked `.zensu` component that the anchored `_tdd_path_safe`
+# refuses while the unanchored fallback accepts — and an attempt at it did NOT
+# reproduce that split (the marker path is resolved through
+# `zensu_resolve_project_dir`, so it does not travel through the symlinked
+# component the fixture plants). There is a SECOND, structural half: every
+# fixture here lives under `$TMP`, and `_tdd_paths_safe` always trusts
+# `${TMPDIR:-/tmp}` as an anchor, so the `root` argument can never be the
+# deciding one in this suite at all. A discriminating check needs a fixture
+# rooted OUTSIDE both `TMPDIR` and `HOME`. Rather than ship a check that passes
+# for a reason nobody established, the gap is recorded here and in CLAUDE.md.
+if [ -z "$GUARD_FAILED" ]; then
+  check "S7f2 with the marker gone, every fence guard plus the claim and unsafe-marker arms is the sole reason a hold still blocks" PASS
+else check "S7f2 marker-independent guards must block (failed: $GUARD_FAILED)" FAIL; fi
+
+# `autopilot_read_workspace` is a READ: it must answer "free" on a project that
+# has no state directory without creating one. Only the mkdir side effect
+# distinguishes the two storage checks, so nothing else would observe a revert.
+P5N="$TMP/read-does-not-create"; mkdir -p "$P5N"
+activate_session "$P5N" stop_session_read_only || exit 1
+P5N_REAL="$(cd "$P5N" && pwd -P)"
+# Binding a session may itself materialize the directory; clear it so the read
+# is measured against a project that genuinely has none.
+rm -rf "$P5N/.zensu"
+autopilot_read_workspace "$P5N_REAL" "$P5N_REAL" >/dev/null 2>&1; RC7N=$?
+if [ "$RC7N" -eq 1 ] && [ ! -d "$P5N/.zensu/state" ]; then
+  check "S7l reading the workspace of a project with no state directory answers free without creating one" PASS
+else check "S7l the workspace read must not create the state directory (rc=$RC7N dir=$( [ -d "$P5N/.zensu/state" ] && echo created || echo absent))" FAIL; fi
+# S7l bound a different session; the checks below compare against `$P5`'s key,
+# which `HOLD_SELF` was built from, so restore it before they run.
+activate_session "$P5" stop_session_owner || exit 1
+
+# The release arm, plus the stderr disclosure that is the only signal a seen
+# hold was deliberately not enforced. Capture stderr separately: silence here
+# would be indistinguishable from "no run held the tree at all".
+ERR7G="$(_autopilot_workspace_hold_blocks_adoption "$HOLD_FOREIGN" "$ZENSU_SESSION_KEY" 0 "$P5" 2>&1 >/dev/null)"; RC7G=$?
+# The disclosure must NAME the holder: a fixed string cannot be correlated with
+# the refusal or `--autopilot-status` output that does name one, which is the
+# stated reason the run-id reader exists.
+if [ "$RC7G" -ne 0 ] \
+  && printf '%s' "$ERR7G" | grep -qF 'no deferred review to interleave with' \
+  && printf '%s' "$ERR7G" | grep -qF 'hold_run_foreign' \
+  && ! printf '%s' "$ERR7G" | grep -qF '(unnamed)'; then
+  check "S7g a foreign holder with no queued marker does not block, and discloses by name that it stood down" PASS
+else check "S7g foreign holder without work must release and disclose by name (rc=$RC7G err=$ERR7G)" FAIL; fi
+
+# The renderer's own shape tests, in the rejecting direction. Every other check
+# reaches it with `stateValid` output, so loosening either regex is otherwise
+# invisible -- and a rejection matters: it makes the fence treat the holder as
+# unreadable, which is the fail-closed side.
+# The newline case must reach the REGEX, not `JSON.parse`. A raw newline inside
+# a JSON string is invalid JSON, so building it with `printf '...\n...'` would
+# be rejected one guard too early and the check would pass while the regex was
+# unpinned. The single-quoted literal keeps `\n` as the two-character JSON
+# escape, which parses cleanly into a runId that really contains a newline.
+REND_FAILED=""
+rend_rejects() {
+  local label="$1"; shift
+  if "$@" >/dev/null 2>&1; then REND_FAILED="${REND_FAILED:+$REND_FAILED,}$label"; fi
+}
+rend_rejects runid-newline _autopilot_workspace_refusal '{"runId":"ok_run\nInjected: line","stage":"PLANNING","ownerSessionId":"xyz"}' '' operator
+rend_rejects stage-lowercase _autopilot_workspace_refusal '{"runId":"ok_run","stage":"planning","ownerSessionId":"xyz"}' '' operator
+rend_rejects owner-spaced _autopilot_holder_owner '{"ownerSessionId":"has space"}'
+rend_rejects owner-leading-underscore _autopilot_holder_owner '{"ownerSessionId":"_leading"}'
+# The audience is REQUIRED and closed: an omission or an unknown value must
+# refuse rather than fall through to the form quoting the audited command.
+rend_rejects audience-omitted _autopilot_workspace_refusal '{"runId":"ok_run","stage":"PLANNING","ownerSessionId":"xyz"}'
+rend_rejects audience-unknown _autopilot_workspace_refusal '{"runId":"ok_run","stage":"PLANNING","ownerSessionId":"xyz"}' '' Operator
+_autopilot_workspace_refusal '{"runId":"ok_run","stage":"PLANNING","ownerSessionId":"xyz"}' '' operator >/dev/null 2>&1 \
+  || REND_FAILED="${REND_FAILED:+$REND_FAILED,}positive-control"
+# `identifier` admits `.` and `:` in an ownerSessionId, so the reader must too --
+# a narrower class would report a product-minted record as unreadable and block.
+_autopilot_holder_owner '{"ownerSessionId":"a.b:c-d_e"}' >/dev/null 2>&1 \
+  || REND_FAILED="${REND_FAILED:+$REND_FAILED,}owner-dotted-control"
+if [ -z "$REND_FAILED" ]; then
+  check "S7j the holder renderers refuse a newline in runId, a lowercase stage and a spaced owner, and still accept a valid record" PASS
+else check "S7j holder renderer shape tests must reject malformed fields (failed: $REND_FAILED)" FAIL; fi
+
+# The own-run remedy: the renderer must NOT quote the release command when the
+# holder belongs to the calling session, because that verb skips its
+# self-release guard in exactly that state.
+OWN7K="$(_autopilot_workspace_refusal "$HOLD_SELF" "$ZENSU_SESSION_KEY" operator 2>/dev/null)"
+OWN7K_MODEL="$(_autopilot_workspace_refusal "$HOLD_SELF" "$ZENSU_SESSION_KEY" model 2>/dev/null)"
+FOREIGN7K="$(_autopilot_workspace_refusal "$HOLD_FOREIGN" "$ZENSU_SESSION_KEY" operator 2>/dev/null)"
+# The MODEL form must never carry a ready-to-run release invocation: --confirm is
+# the consent control, and a complete command hands the model a way around it.
+MODEL7K="$(_autopilot_workspace_refusal "$HOLD_FOREIGN" "$ZENSU_SESSION_KEY" model 2>/dev/null)"
+# The exclusion needle is the BARE stem: `--autopilot-release` is not a substring
+# of `/zensu:autopilot-release`, so an own-run render that offered the guided form
+# would have passed the narrower spelling. Both audiences are checked.
+if printf '%s' "$OWN7K" | grep -qF 'belongs to this session' \
+  && printf '%s' "$OWN7K_MODEL" | grep -qF 'belongs to this session' \
+  && ! printf '%s' "$OWN7K" | grep -qF 'autopilot-release' \
+  && ! printf '%s' "$OWN7K_MODEL" | grep -qF 'autopilot-release' \
+  && printf '%s' "$OWN7K_MODEL" | grep -qF 'finish or repair that run' \
+  && printf '%s' "$FOREIGN7K" | grep -qF -- '--autopilot-release --run hold_run_foreign --confirm' \
+  && printf '%s' "$MODEL7K" | grep -qF 'hold_run_foreign' \
+  && printf '%s' "$MODEL7K" | grep -qF 'run /zensu:autopilot-release' \
+  && ! printf '%s' "$MODEL7K" | grep -qF -- '--confirm' \
+  && ! printf '%s' "$MODEL7K" | grep -qF 'zensu-log.sh'; then
+  check "S7k the operator form quotes the audited command, the model form names only the guided skill, and an own-run holder gets neither" PASS
+else check "S7k own-run refusal must withhold the release command (own=$OWN7K own_model=$OWN7K_MODEL foreign=$FOREIGN7K model=$MODEL7K)" FAIL; fi
+
+# The holder PREFERENCE decides which of several holders the fence judges, and
+# the own-run arm rests on it. A record carrying no `workspaceRoot` holds every
+# tree in its project, so a legacy foreign one can sort ahead of this session's
+# own live run; without the preference the fence would weigh the foreign record
+# and release while an own generation is still active.
+# The second holder is hand-written rather than begun: `autopilot_begin_run`
+# refuses a second run over the same tree, which is the very rule that makes a
+# legacy record — one carrying no `workspaceRoot`, and so holding every tree in
+# its project — the realistic way two holders coexist.
+P5W="$TMP/holder-preference"; start "$P5W" zz_own_run stop_session_pref_own
+OWN5W="$(autopilot_run_file zz_own_run "$P5W")"
+LEGACY5W="$(dirname "$OWN5W")/$(basename "$OWN5W" | sed 's/zz_own_run/aa_legacy_foreign/')"
+node -e '
+  const fs=require("fs");
+  const j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
+  j.runId="aa_legacy_foreign";
+  j.ownerSessionId="scv1_"+"f".repeat(64);
+  delete j.workspaceRoot;
+  fs.writeFileSync(process.argv[2], JSON.stringify(j, null, 2));
+' "$OWN5W" "$LEGACY5W"
+activate_session "$P5W" stop_session_pref_own || exit 1
+P5W_REAL="$(cd "$P5W" && pwd -P)"
+PREF_OWN="$(_autopilot_read_workspace_critical "$P5W_REAL" "$P5W_REAL" "$ZENSU_SESSION_KEY" 2>/dev/null | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).runId')"
+PREF_NONE="$(_autopilot_read_workspace_critical "$P5W_REAL" "$P5W_REAL" 2>/dev/null | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).runId')"
+if [ "$PREF_OWN" = zz_own_run ] && [ "$PREF_NONE" = aa_legacy_foreign ]; then
+  check "S7h the holder preference reports this session's own run where sort order would report the legacy foreign one" PASS
+else check "S7h holder preference must outrank sort order (preferred=$PREF_OWN unpreferenced=$PREF_NONE)" FAIL; fi
+
+# The same property through the PUBLIC wrapper. S7h drives the private critical
+# function, so without this the wrapper could stop forwarding the argument with
+# every check still green. Note what this does NOT claim: after the Stop hook's
+# re-read was deleted, the wrapper's preference parameter has no production
+# caller at all -- `post-review-tdd-delegate.sh` passes one argument. This guards
+# it for the next caller, not a live path.
+PUB_OWN="$(autopilot_read_workspace "$P5W_REAL" "$P5W_REAL" "$ZENSU_SESSION_KEY" 2>/dev/null | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).runId' 2>/dev/null)"
+PUB_NONE="$(autopilot_read_workspace "$P5W_REAL" "$P5W_REAL" 2>/dev/null | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).runId' 2>/dev/null)"
+if [ "$PUB_OWN" = zz_own_run ] && [ "$PUB_NONE" = aa_legacy_foreign ]; then
+  check "S7h2 the public workspace read forwards the holder preference the Stop hook passes it" PASS
+else check "S7h2 the public wrapper must forward the preference (preferred=$PUB_OWN unpreferenced=$PUB_NONE)" FAIL; fi
+
+# The unnamed fallback is unreachable from a fixture — the fence blocks for every
+# holder it cannot read, and a `stateValid` record always satisfies the
+# renderer's shape tests — so a SOURCE pin is the only available control. The
+# hazard its own comment names is a future edit appending a release command
+# there, which would otherwise ship green.
+FALLBACK_LINE="$(grep -F 'the holding run could not be identified from here' "$PLUGIN_DIR/hooks/stop-chain-enforcer.sh" | head -1)"
+if [ -n "$FALLBACK_LINE" ] \
+  && ! printf '%s' "$FALLBACK_LINE" | grep -qF -- '--confirm' \
+  && ! printf '%s' "$FALLBACK_LINE" | grep -qF 'zensu-log.sh' \
+  && printf '%s' "$FALLBACK_LINE" | grep -qF 'another session' \
+  && printf '%s' "$FALLBACK_LINE" | grep -qF "this session's own run"; then
+  check "S7n the unnamed fallback names both ownership possibilities and quotes no runnable release" PASS
+else check "S7n the unnamed fallback must not gain a release command (line=$FALLBACK_LINE)" FAIL; fi
+
+# The rc=4 arm must derive its sentence from the published value and take no
+# second holder read: a read after the fence returned is a fresh chance to name
+# a run the fence never judged, with a remedy that cancels.
+if ! grep -qE 'autopilot_read_workspace|_autopilot_read_workspace_critical|_autopilot_workspace_refusal' "$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"; then
+  check "S7n2 the Stop hook derives the holder sentence from the published value and re-reads nothing" PASS
+else check "S7n2 the rc=4 arm must not re-read the holder" FAIL; fi
+
+# `skills/autopilot-release/SKILL.md` teaches the model to recognize the own-run
+# case by two literals of this renderer. Nothing compared them, so a reword of
+# either side would leave the model reading an own-run hold as foreign — and
+# pointing a cancel at this session's own live generation.
+SKILL_OWN="$PLUGIN_DIR/skills/autopilot-release/SKILL.md"
+# Build the holder from the CURRENT session key: earlier checks re-bind the
+# session, so `$HOLD_SELF` was minted against a key that is no longer active and
+# the own-run branch would not fire.
+HOLD_SELF_NOW="$(printf '{"runId":"hold_run_self","stage":"PLANNING","ownerSessionId":"%s"}' "$ZENSU_SESSION_KEY")"
+OWN_RENDER="$(_autopilot_workspace_refusal "$HOLD_SELF_NOW" "$ZENSU_SESSION_KEY" model 2>/dev/null)"
+SKILL_OK=1
+for needle in 'which belongs to this session' 'finish or repair that run'; do
+  printf '%s' "$OWN_RENDER" | grep -qF "$needle" || SKILL_OK=0
+  grep -qF "$needle" "$SKILL_OWN" || SKILL_OK=0
+done
+if [ "$SKILL_OK" -eq 1 ]; then
+  check "S7o every own-run literal the release skill teaches is one the renderer actually emits" PASS
+else check "S7o the skill's own-run recognizer must match the renderer (render=$OWN_RENDER)" FAIL; fi
+
+# The `begin` worker mode emits its own copy of the foreign sentence. Nothing
+# compared the two, so a reword of the renderer left them silently divergent --
+# and the worker copy is what a MODEL sees when `--autopilot-begin` refuses,
+# which is why it is compared against the renderer's MODEL form.
+TWIN_RENDERER="$(_autopilot_workspace_refusal '{"runId":"twin_run","stage":"PLANNING","ownerSessionId":"scv1_deadbeef"}' '' model 2>/dev/null)"
+TWIN_WORKER="$(grep -A 2 'workspace held by nonterminal run \${workspaceHolder.runId}' "$LIB" \
+  | sed -e 's/^ *+ *//' -e 's/^ *//' -e 's/`//g' -e 's/\${workspaceHolder.runId}/twin_run/g' -e 's/\${workspaceHolder.stage}/PLANNING/g' \
+  | tr -d '\n' | sed -e 's/^fail(4, *//' -e 's/);* *$//' -e 's/^ *//')"
+if [ -n "$TWIN_RENDERER" ] && [ -n "$TWIN_WORKER" ] \
+  && [ "$(printf '%s' "$TWIN_RENDERER" | tr -d '\n')" = "$TWIN_WORKER" ]; then
+  check "S7m the begin worker's refusal sentence is byte-identical to the renderer's foreign wording" PASS
+else check "S7m the two refusal spellings must not drift (renderer=$TWIN_RENDERER worker=$TWIN_WORKER)" FAIL; fi
+
+# CONTAINMENT, the premise the refusal states to the user. Every fixture above
+# is a plain directory, so holder and stopper resolve the SAME workspace key and
+# only equality is exercised. Here the run drives a git worktree NESTED under the
+# project, and the Stop comes from the containing tree — the shape that produced
+# the reported defect. Both directions of the A/B run in this one tree.
+P5C="$TMP/containment"
+mkdir -p "$P5C" && ( cd "$P5C" && git init -q . && git -c user.email=a@b -c user.name=t commit -q --allow-empty -m base ) >/dev/null 2>&1
+P5C_REAL="$(cd "$P5C" && pwd -P)"
+NESTED5C="$P5C_REAL/nested-wt"
+( cd "$P5C_REAL" && git worktree add -q -b nested-branch "$NESTED5C" ) >/dev/null 2>&1
+if ! command -v git >/dev/null 2>&1 || [ ! -d "$NESTED5C" ]; then
+  check "S7i containment fixture needs git and a usable worktree — environment, not product" FAIL
+else
+  activate_session "$P5C" stop_session_contain_owner || exit 1
+  autopilot_begin_run contain_run "$ZENSU_SESSION_KEY" "$P5C" false true "$NESTED5C" >/dev/null
+  RF5C="$(autopilot_run_file contain_run "$P5C")"
+  # Anti-vacuity: without these the fixture passes under plain EQUALITY. If the
+  # workspace override were ignored the run would record the project root, the
+  # holder would hold its own tree by contains(x,x), and every assertion below
+  # would still pass while the containment branch was never taken.
+  TOP_ROOT5C="$(cd "$P5C_REAL" && git rev-parse --show-toplevel 2>/dev/null)"
+  TOP_NEST5C="$(cd "$NESTED5C" && git rev-parse --show-toplevel 2>/dev/null)"
+  S7I_PREMISE=1
+  [ -n "$TOP_ROOT5C" ] && [ -n "$TOP_NEST5C" ] && [ "$TOP_ROOT5C" != "$TOP_NEST5C" ] || S7I_PREMISE=0
+  field_ok "$RF5C" 'typeof j.workspaceRoot==="string" && j.workspaceRoot!==j.projectRoot' || S7I_PREMISE=0
+  HELD5C="$(autopilot_read_workspace "$P5C_REAL" "$P5C_REAL" 2>/dev/null | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).runId' 2>/dev/null)"
+  BEFORE5C="$(digest "$RF5C")"
+  OUT7C="$(invoke "$P5C" foreign_contain_session)"; RC7C=$?
+  activate_session "$P5C" stop_session_contain_owner || exit 1
+  CLAUDE_PROJECT_DIR="$P5C" bash "$LOG" --pending-review --files 'src/contained.ts' \
+    --summary 'review queued in the containing tree' >/dev/null
+  OUT7C2="$(invoke "$P5C" foreign_contain_session)"
+  if [ "$S7I_PREMISE" -eq 1 ] && [ "$HELD5C" = contain_run ] \
+    && [ "$RC7C" -eq 0 ] && [ -z "$OUT7C" ] \
+    && [ "$(printf '%s' "$OUT7C2" | decision)" = block ] \
+    && printf '%s' "$OUT7C2" | grep -qF 'contain_run' \
+    && printf '%s' "$OUT7C2" | grep -qF 'run /zensu:autopilot-release' \
+    && [ "$BEFORE5C" = "$(digest "$RF5C")" ]; then
+    check "S7i a run driving a NESTED worktree holds the containing tree: release with nothing queued, refusal naming it once a marker exists" PASS
+  else check "S7i containment hold must release without work and refuse with it (premise=$S7I_PREMISE held=$HELD5C rc=$RC7C)" FAIL; fi
+fi
 
 P5T="$TMP/owner-terminal"; start "$P5T" stop_run_owner_terminal stop_session_owner_terminal
 autopilot_apply_event stop_run_owner_terminal cancel-owner-terminal CANCEL '{}' "$P5T" >/dev/null
@@ -230,12 +596,88 @@ OUT8G="$(printf '%s' '{"hook_event_name":"Stop","session_id":"stop_session_conte
     bash "$CONTENTION_PLUGIN/hooks/stop-chain-enforcer.sh" 2>/dev/null)"
 AFTER8G="$(digest "$RF6G")"
 if [ "$(printf '%s' "$OUT8G" | decision)" = block ] \
-  && printf '%s' "$OUT8G" | grep -qF 'became active while deferred review adoption was waiting for the Outer lock' \
+  && printf '%s' "$OUT8G" | grep -qF 'nonterminal durable Autopilot run holds this working tree' \
+  && printf '%s' "$OUT8G" | grep -qF 'stop_run_contention' \
+  && printf '%s' "$OUT8G" | grep -qF 'belongs to this session' \
+  && ! printf '%s' "$OUT8G" | grep -qF 'autopilot-release' \
   && [ -s "$TMP/adoption-contention-read" ] \
   && [ -s "$TMP/adoption-contention-lock" ] \
   && [ "$BEFORE8G" = "$AFTER8G" ]; then
   check "S8g active Outer proof cannot degrade to absent after adoption contention" PASS
 else check "S8g adoption contention must fail closed on the proven active Outer" FAIL; fi
+
+# The same contention path, but the holder belongs to ANOTHER session and no
+# deferred review is queued. S8g proves the own-generation arm still fails
+# closed; this is the only fixture that reaches the contention fence's release
+# arm at all, so without it that arm could be deleted with every suite green.
+P6H="$TMP/adoption-foreign-contention"
+start "$P6H" stop_run_foreign_contention stop_session_foreign_owner
+RF6H="$(autopilot_run_file stop_run_foreign_contention "$P6H")"
+BEFORE8H="$(digest "$RF6H")"
+bind_runtime_session "$CONTENTION_PLUGIN" "$P6H" stop_session_foreign_stopper foreign-contention
+OUT8H="$(printf '%s' '{"hook_event_name":"Stop","session_id":"stop_session_foreign_stopper"}' \
+  | CLAUDE_PROJECT_DIR="$P6H" CLAUDE_PLUGIN_ROOT="$CONTENTION_PLUGIN" \
+    REAL_AUTOPILOT_STATE_LIB="$LIB" \
+    ZENSU_CONTENTION_READ_MARKER="$TMP/foreign-contention-read" \
+    ZENSU_CONTENTION_LOCK_MARKER="$TMP/foreign-contention-lock" \
+    bash "$CONTENTION_PLUGIN/hooks/stop-chain-enforcer.sh" 2>/dev/null)"
+AFTER8H="$(digest "$RF6H")"
+if [ -z "$OUT8H" ] \
+  && [ -s "$TMP/foreign-contention-lock" ] \
+  && [ "$BEFORE8H" = "$AFTER8H" ]; then
+  check "S8h contended foreign hold with nothing queued releases without mutating the owner's run" PASS
+else check "S8h contended foreign hold must release when nothing is pending (out=$OUT8H lock=$( [ -s "$TMP/foreign-contention-lock" ] && echo yes || echo no) digest_changed=$( [ "$BEFORE8H" = "$AFTER8H" ] && echo no || echo yes))" FAIL; fi
+
+# The contention fence's foreign-holder-WITH-WORK arm: S8h covers its release
+# arm and S8g its own-run arm, so without this the rc=4 branch on that path had
+# no executed case at all. Same fixture as S8h plus a queued marker.
+activate_session "$P6H" stop_session_foreign_owner || exit 1
+CLAUDE_PROJECT_DIR="$P6H" bash "$LOG" --pending-review --files 'src/contended-pending.ts' \
+  --summary 'review queued while a contended foreign hold stands' >/dev/null
+PF6H="$P6H/.zensu/state/pending-review.json"
+BEFORE8J="$(digest "$RF6H")"
+bind_runtime_session "$CONTENTION_PLUGIN" "$P6H" stop_session_foreign_stopper foreign-contention-work
+OUT8J="$(printf '%s' '{"hook_event_name":"Stop","session_id":"stop_session_foreign_stopper"}' \
+  | CLAUDE_PROJECT_DIR="$P6H" CLAUDE_PLUGIN_ROOT="$CONTENTION_PLUGIN" \
+    REAL_AUTOPILOT_STATE_LIB="$LIB" \
+    ZENSU_CONTENTION_READ_MARKER="$TMP/foreign-contention-work-read" \
+    ZENSU_CONTENTION_LOCK_MARKER="$TMP/foreign-contention-work-lock" \
+    bash "$CONTENTION_PLUGIN/hooks/stop-chain-enforcer.sh" 2>/dev/null)"
+if [ "$(printf '%s' "$OUT8J" | decision)" = block ] \
+  && [ -s "$TMP/foreign-contention-work-lock" ] \
+  && printf '%s' "$OUT8J" | grep -qF 'stop_run_foreign_contention' \
+  && printf '%s' "$OUT8J" | grep -qF 'run /zensu:autopilot-release' \
+  && ! printf '%s' "$OUT8J" | grep -qF -- '--confirm' \
+  && [ -f "$PF6H" ] \
+  && [ "$BEFORE8J" = "$(digest "$RF6H")" ]; then
+  check "S8j the contended foreign hold still refuses once a review is queued, naming the run without a runnable cancel" PASS
+else check "S8j contended foreign hold with work must refuse (out=$OUT8J marker=$( [ -f "$PF6H" ] && echo present || echo gone))" FAIL; fi
+
+# The own-run remedy END TO END through the LOCKED fence. S8g reaches the same
+# wording through the CONTENTION fence (its stub kills `_autopilot_locked_run`),
+# so the two cover the two publish paths rather than one path twice. Stubbing
+# only `autopilot_read_active` here keeps the lease real, so the locked fence is
+# the one that renders and publishes.
+OWN_PLUGIN="$TMP/own-run-remedy-plugin"; copy_runtime "$OWN_PLUGIN"
+OWN_PLUGIN="$(cd "$OWN_PLUGIN" && pwd -P)"
+printf '%s\n' \
+  'source "$REAL_AUTOPILOT_STATE_LIB"' \
+  'autopilot_read_active() { return 1; }' \
+  > "$OWN_PLUGIN/hooks/lib/zensu-autopilot-state.sh"
+P6I="$TMP/own-run-remedy"; start "$P6I" own_remedy_run stop_session_own_remedy
+RF6I="$(autopilot_run_file own_remedy_run "$P6I")"; BEFORE8I="$(digest "$RF6I")"
+bind_runtime_session "$OWN_PLUGIN" "$P6I" stop_session_own_remedy own-run-remedy
+OUT8I="$(printf '%s' '{"hook_event_name":"Stop","session_id":"stop_session_own_remedy"}' \
+  | CLAUDE_PROJECT_DIR="$P6I" CLAUDE_PLUGIN_ROOT="$OWN_PLUGIN" \
+    REAL_AUTOPILOT_STATE_LIB="$LIB" \
+    bash "$OWN_PLUGIN/hooks/stop-chain-enforcer.sh" 2>/dev/null)"
+if [ "$(printf '%s' "$OUT8I" | decision)" = block ] \
+  && printf '%s' "$OUT8I" | grep -qF 'own_remedy_run' \
+  && printf '%s' "$OUT8I" | grep -qF 'belongs to this session' \
+  && ! printf '%s' "$OUT8I" | grep -qF 'autopilot-release' \
+  && [ "$BEFORE8I" = "$(digest "$RF6I")" ]; then
+  check "S8i an own-run holder is named in the block reason but never offered the release command" PASS
+else check "S8i own-run rc=4 must name the run and withhold the release command (reason=$(printf '%s' "$OUT8I" | context))" FAIL; fi
 
 P6E="$TMP/hidden-orphan"; start "$P6E" stop_run_old_terminal stop_session_old_terminal
 autopilot_apply_event stop_run_old_terminal cancel-old-terminal CANCEL '{}' "$P6E" >/dev/null
