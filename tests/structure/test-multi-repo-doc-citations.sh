@@ -160,6 +160,7 @@ const BASENAME_PATH = Object.assign(Object.create(null), {
   "pre-bash-source-write-gate.sh": "hooks/pre-bash-source-write-gate.sh",
   "pre-edit-tdd-reminder.sh": "hooks/pre-edit-tdd-reminder.sh",
   "pre-bash-zensu-gate.sh": "hooks/pre-bash-zensu-gate.sh",
+  "pre-reviewer-capability-gate.sh": "hooks/pre-reviewer-capability-gate.sh",
   "pre-write-secret-scan.sh": "hooks/pre-write-secret-scan.sh",
   "trail.mjs": "skills/session-trail/scripts/trail.mjs",
   "stop-chain-enforcer.sh": "hooks/stop-chain-enforcer.sh",
