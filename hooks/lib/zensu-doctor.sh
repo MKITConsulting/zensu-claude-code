@@ -58,6 +58,22 @@ if [ -z "${ZDOC_TTL_HOURS:-}" ] && [ -f "$DIR/zensu-config.sh" ]; then
 fi
 export ZDOC_TTL_HOURS
 
+# Same canonical-getter rule as the TTL above, and the same known bound: this
+# runs before the session bind, so where the record root and CLAUDE_PROJECT_DIR
+# differ it reads the overlay under the latter. Deliberately NOT re-resolved
+# after the bind, and the cost is stated rather than glossed: a stale value
+# changes which chains the parked-at-implementing row names, and a stale `0`
+# withholds that row entirely — the renderer treats 0 as "switched off" and says
+# so in its own row rather than falling silent.
+if [ -z "${ZDOC_IMPL_STOP_NUDGE_AFTER:-}" ] && [ -f "$DIR/zensu-config.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$DIR/zensu-config.sh" 2>/dev/null || true
+  if command -v zensu_impl_stop_nudge_after >/dev/null 2>&1; then
+    ZDOC_IMPL_STOP_NUDGE_AFTER="$(zensu_impl_stop_nudge_after 2>/dev/null)"
+  fi
+fi
+export ZDOC_IMPL_STOP_NUDGE_AFTER
+
 # zensu CLI: installed? authenticated? (auth probe is best-effort + quiet)
 if [ -z "${ZDOC_ZENSU:-}" ]; then
   if command -v zensu >/dev/null 2>&1; then

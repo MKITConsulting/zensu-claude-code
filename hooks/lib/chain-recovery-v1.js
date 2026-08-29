@@ -114,6 +114,7 @@ function normalizeChainState(input) {
     ? input.deferredReviewClaim
     : '';
   normalized.stopBlockCount = naturalOr(input.stopBlockCount, 0);
+  normalized.implStopCount = naturalOr(input.implStopCount, 0);
   return normalized;
 }
 
@@ -273,6 +274,7 @@ function classifyChain(input) {
       && state.reviewRound >= 1,
     reviewRound: state.reviewRound,
     stopBlockCount: state.stopBlockCount,
+    implStopCount: state.implStopCount,
     revision: Number.isSafeInteger(state.revision) ? state.revision : null,
     lastEvent: typeof state.last_event === 'string' ? state.last_event : null,
     recoveries: countRecoveries(state),

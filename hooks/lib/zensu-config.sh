@@ -320,6 +320,15 @@ zensu_pending_review_ttl_hours() {
   echo "$val"
 }
 
+zensu_impl_stop_nudge_after() {
+  local default=12
+  command -v node >/dev/null 2>&1 || { echo "$default"; return 0; }
+  local val
+  val=$(_zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();var n=j.hooks&&j.hooks.implStopNudgeAfter;console.log(Number.isInteger(n)&&n>=0&&n<=1000000?String(n):process.argv[1])' "$default" 2>/dev/null)
+  [ -z "$val" ] && { echo "$default"; return 0; }
+  echo "$val"
+}
+
 zensu_context_nudge_enabled() {
   command -v node >/dev/null 2>&1 || return 0
   local val

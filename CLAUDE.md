@@ -550,8 +550,9 @@ enumeration in `docs/configuration.md`, and discipline patch 11 in
   earlier session in the same project satisfies it. Disclosed on stderr, not silent, and the
   same switch already carries its own ledger entry.
 - **The git-environment scrub is scoped to this verb, and its sibling is not scrubbed.**
-  `--tdd-complete`'s three scope `git` calls run through a subshell that unsets `GIT_DIR`,
-  `GIT_WORK_TREE` and `GIT_INDEX_FILE`; the `--chain-done` zero-change terminus in the same file
+  `--tdd-complete`'s three scope `git` calls run through a subshell that unsets the THIRTEEN
+  `GIT_*` variables `_tc_git` lists — discovery and config-injection levers alike, not just the
+  three this paragraph used to name; the `--chain-done` zero-change terminus in the same file
   still calls bare `git`, so a one-token prefix there still drives its change count to zero. The
   wrapper is defined INSIDE the `--tdd-complete` case arm, which makes the asymmetry structural
   rather than a one-line follow-up: sharing it means hoisting the definition above the verb
@@ -1362,8 +1363,10 @@ rather than advertising a 0h window.
   was created to remove: renaming only the returned literal left the table key in place and kept
   the check green while a genuinely closed foreign chain rendered as an open one. Measured, not
   argued — the classifier-driven form catches that rename and the table-driven form does not.
-- **An OWN chain parked at `implementing` renders at `OK`, and that is the shape a session
-  lands in when it DECLINES the review chain rather than fails it.**
+- **RESOLVED — see §"Implementing-Phase Turn Counter" below; the rest of this bullet is the
+  original finding, in past tense.** An OWN chain parked at `implementing` USED TO render at
+  `OK`, and that is the shape a session lands in when it DECLINES the review chain rather than
+  fails it.
   `hooks/stop-chain-enforcer.sh:951` releases Stop unconditionally while `SESSION_IMPL_COMPLETE`
   is not `true`, so a session that arms `--tdd-begin`, does the work and never runs
   `--tdd-complete` is never asked for a reviewer: no directive, no cap, and no bypass-ledger
@@ -1393,8 +1396,13 @@ rather than advertising a 0h window.
   Lineage" is a schema change and therefore a `minor`, so it should travel with a schema change
   that is landing anyway rather than buy a release of its own. The nudge must stay ADVISORY and
   never become a block: a long legitimate implementation genuinely does span many turns, so a
-  false positive may cost a line of text and must never cost a wedged chain. Not implemented
-  here, and named so it is not rediscovered from a green report over an unreviewed chain.
+  false positive may cost a line of text and must never cost a wedged chain.
+  **THIS IS NOW IMPLEMENTED**, and it lives in its own section — see
+  §"Implementing-Phase Turn Counter" below. It is deliberately NOT written up here: the
+  paragraphs that close this section (its operator accounts, its `patch` verdict) were written
+  about the foreign-chain row and are still true of it, so a second feature documented inside
+  this section's gap list puts two version verdicts under one heading and makes one of them
+  read as false.
 
 **Operator-facing accounts that must move with it:** `skills/doctor/SKILL.md` (the frontmatter
 `session state` clause, the row bullet, and the Phase 3 cleanup, which must delete the path the
@@ -1416,6 +1424,169 @@ re-decided per host before any of the four halves is worth porting.
 `tests/structure/test-doctor.sh` P1mg–P1mt1 pin the row, its severity, the summary
 interaction, the withholding guard, the record anchor and its fallback, the TTL semantics in both directions and at `0`, the
 read-only contract, the wrapper source shape, and the three-way wording drift.
+
+**The `patch` verdict above is about the foreign-chain row ALONE.** The turn counter in the
+next section is a separate feature with its own verdict; do not read that paragraph as
+covering it.
+
+## Implementing-Phase Turn Counter (`hooks/stop-chain-enforcer.sh` + `zensu-tdd-phase.sh`)
+
+`zensu_impl_stop_nudge` counts a TURN whenever a Stop ends with the chain still at
+`implementing` and the worktree reporting changed source, and at or past
+`hooks.implStopNudgeAfter` (default 12) it writes ONE advisory line to stderr and still
+releases. **The default is a JUDGEMENT, not a measurement, and it moved once already:** at 5
+it fired during ordinary work — the implementing phase of this repository's own chains ends
+more than five turns with a dirty tree routinely, including the chain that built this
+feature — which is exactly the "trained away within a day" failure the rejections below
+exist to prevent. 12 buys headroom over a long honest implementation while still being far
+short of a parked chain. Re-derive it if anyone ever measures the real distribution. `/zensu:doctor` renders the same finding as a `WARN` chain row for chains this
+session owns. It exists because the release at the `SESSION_IMPL_COMPLETE != "true"` branch
+is unconditional, so a chain that never runs `--tdd-complete` is asked for no reviewer at
+all — no directive, no cap, and no bypass-ledger entry, because the ledger records gate
+ESCAPES and no gate is ever reached.
+
+**Three shapes were rejected, and each rejection is load-bearing.** Warning on the shape
+alone is what every legitimately mid-implementation chain looks like, so the row would fire
+throughout every normal run and be trained away within a day. An AGE bound reports the
+user's calendar rather than the model's behaviour — a powered-off machine, a paused session,
+an overnight break and a holiday all accumulate wall clock with nothing wrong, and they
+accumulate zero here. And BLOCKING is out: a long legitimate implementation genuinely spans
+many turns, so a false positive may cost a line of text and must never wedge a chain.
+
+**Both surfaces name ONE exit, with its preconditions, and never the zero-change terminus.**
+`--tdd-complete` refuses without an edit-landing receipt and without a usable
+`## Requirements` table, and BOTH gates arm on the same dirty tree the notice requires — so
+naming the verb bare would hand the reader a command that refuses in the same breath. From
+shape `implementing` no review ticket has ever been consumed, so `--chain-done` is the
+UNQUALIFIED no-ticket terminus and a mid-run commit drives its change-count guard to zero:
+offering it would teach an exit that closes a chain nothing reviewed, defeating the
+guarantee this feature exists to protect.
+
+**Sites that move together:** `WORKFLOW_INTEGER_EXTENSIONS` in `session-control-core-v1.js`;
+the THREE closed counter key sets in `zensu-tdd-phase.sh` (`tdd_get_counter`,
+`tdd_increment_counter`, and the `names` map in `_tdd_increment_counter_critical`, transition
+token `impl_guard`); **the EIGHT reset sites**, which `delete` the key rather than zeroing it,
+matching how those callbacks treat the Autopilot link fields — a counter that survives a re-arm
+makes chain 2 of a session render "parked" on its first turn, which is exactly the false
+positive the rejections above exist to avoid. **State the criterion correctly, because a first
+draft got it wrong and the wrong version is what mis-scoped the search:** the roster is
+"every site that ARMS a generation **plus every full document reset, wherever it lives**", NOT
+"every site that touches `stopBlockCount`" (the `codeReviewDone` and `reviewRound` resets are
+review-budget resets and are correctly skipped). Only two of the eight arm — `tdd_set_flag` on
+`active`→true and `_tdd_begin_session_critical`; the rest are teardowns, and reading the roster
+as arm-only is what left the JS twins out at first. Six live in `zensu-tdd-phase.sh`; the other
+TWO are in `session-control-core-v1.js` — `resetDeferredReviewState` and the
+`deferred-review-transfer` draft — which reset every sibling field including the peer
+`WORKFLOW_INTEGER_EXTENSIONS` member `autopilotAttempt`. `deferredReviewStateIsIdle` in that
+same file is deliberately NOT extended: it tests `stopBlockCount === 0`, and an absent key is
+not `0`, so adding this one would make every reset chain read as non-idle.
+`zensu_impl_stop_nudge_after` in `zensu-config.sh` against `IMPL_STOP_NUDGE_FALLBACK`
+/ `IMPL_STOP_NUDGE_MAX` in `zensu-doctor-report.js`, which are a hand-copy of its default and
+bounds; and the `ZDOC_IMPL_STOP_NUDGE_AFTER` export in `zensu-doctor.sh` against
+`implStopThreshold`; and **`chain-recovery-v1.js`**, which owns both the remedy vocabulary
+and the counter's projection — `normalizeChainState` / `classifyChain` carry
+`implStopCount` beside `stopBlockCount`, the doctor row reads `report.implStopCount` and
+`report.nextCommand` rather than the raw document, and `--chain-status` therefore reports the
+count for free. The Stop hook is the ONE surface that still hand-authors the remedy, because the module is
+not loaded there — so the bound `--tdd-complete` spelling exists in exactly TWO places,
+`shapeCommand` and `complete_cmd`. `INNER_BOUND_ARGS` in the same hook renders the identical
+flag TRIPLE but only ever onto `--chain-done`, so it shares the spelling and not the verb;
+do not read it as a third `--tdd-complete` renderer. §"Requirements-Table Gate" keeps the
+tree-wide roster of bound `--tdd-complete` spellings — consult that rather than a count here.
+**A BLANK value falls back rather than disabling** — `Number('')` is `0`,
+which passes the `>= 0` bound, so treating blank as absent is what keeps a wrapper fault from
+silently deleting the row. **`0` emits an explicit switched-off `OK` row**, the same rule
+`hooks.reviewerSpawnPermissionCheck` follows: a disabled check must never be
+indistinguishable from a clean one.
+
+**The probe excludes the plugin's own `.zensu` tree**, and that is not cosmetic: Phase 2
+writes a plan and a log there unconditionally, so in any repository that tracks those
+artifacts — which this repo's own artifact policy encourages — every chain would read as
+dirty from its second turn and the predicate would stop discriminating. The probe is
+`timeout`-bounded, guarded by `command -v git`, carries `--no-optional-locks` so a diagnostic
+never rewrites the user's index, and takes NO pipeline, because a `| head` would replace
+git's exit status with `head`'s and turn a missing repository into a clean tree. It keeps the
+THREE-variable `GIT_*` scrub rather than `_tc_git`'s thirteen, deliberately: this probe gates
+an advisory, not a refusal, and the finding proposing the wider list was judged a false
+positive on that ground.
+
+**Operator-facing accounts that must move with it:** the `implStopNudgeAfter` row AND the
+`stop-chain-enforcer.sh` row in `docs/configuration.md`, discipline patch 13 in
+`docs/tdd-manager-workflow.md` (plus the patch RANGE in `docs/gates.md`, which is a separate
+file and drifts silently, AND that file's bounded-counter enumeration and its Mermaid node
+label, which named two counters where there are now three), and the parked-chain bullet plus
+the frontmatter `session state` clause in `skills/doctor/SKILL.md`.
+`tests/structure/test-impl-stop-counter.sh` pins the counter, both surfaces, the reset on
+re-arm, the `.zensu` pathspec exclusion and its positive control, the non-git inertness and the
+schema-membership bite; `tests/structure/test-doctor.sh` `P1mt2`/`P1mt3` pin the row's
+three-way wording and its NEGATIVE terminus claim.
+
+**Version: `minor` by policy, and the measurement is recorded beside it rather than used to
+argue it away.** §"Runtime Lineage" lists "any field added" to the workflow-state schema as
+breaking. Measured: `validateWorkflowExtensions` type-checks only the fields it LISTS and only
+when present, so it never rejects an unknown key; `validateWorkflowToken` accepts any
+`^[a-z][a-z0-9_-]{0,63}$`, so `impl_guard` passes; and `normalizeChainState` spreads unknown
+keys through — an older runtime really does read a document carrying `implStopCount`. The
+recommendation stays `minor` anyway: the author of a change is the wrong party to grant it its
+own carve-out, and this file records that both existing carve-outs survived on argument rather
+than on their author's say-so.
+
+**Known gaps, accepted and named:**
+
+- **The stated packaging condition was NOT met.** The design note asks that the schema change
+  travel with another one that is landing anyway; none is. It buys a `minor` of its own.
+- **The Windows wall clock is UNMEASURED.** The suite is deliberately absent from
+  `tests/profiles/windows-ci.v1.json`, whose shards are already close to their
+  `profileTimeoutMs`, so it never runs on the blocking Windows PR shard. It IS in
+  `ciStructureTests`, which `run-windows-safety-shard.js` builds the weekly Windows Safety
+  structure inventory from, so it DOES run there, with no measurement yet. Say "unmeasured",
+  never "POSIX only".
+- **No `tests/profiles/ci-shard-weights.v1.json` entry**, so the suite is costed at
+  `defaultSeconds`. That file requires a real CI figure and its own note sanctions the
+  omission; add it from the first green ubuntu-latest `--ci` run rather than estimating.
+- **The threshold is resolved BEFORE the session bind** and, unlike the TTL, is never
+  re-resolved against the record root, so it inherits the Config-block root gap the previous
+  section names.
+- **A blocked Stop is not a turn, and that makes the whole check INERT for a healthy durable
+  Autopilot run.** `emit_block` sets `DECISION_EMITTED` and the nudge returns on it, so a Stop
+  the enforcer itself refuses is neither counted nor commented on — correct semantics, and the
+  reason the bound `--autopilot-run …` spelling the notice can build is reachable only for a
+  chain whose outer run is already DONE, BLOCKED or CANCELLED: `outer_finish` blocks on this
+  very branch for every owned non-terminal run under budget. The standalone path, which is the
+  case this feature was built for, is unaffected. The guard has no behavioural coverage: the
+  suite builds no durable-run fixture.
+- **The own-chain row withholds the green summary for the whole time a legitimate
+  implementation runs past the bound**, exactly as §"Foreign-Chain Row" records for a
+  same-project sibling. The stderr notice also repeats on EVERY Stop past the bound — nothing
+  latches it. Raising the default from 5 to 12 deferred that cost; it did not remove it, and
+  saying otherwise would be the "trained away within a day" dynamic the rejections above name.
+  **The durable fix is a discriminator, not another number**, and it is NOT implemented: demote
+  the row to `OK` when the counter ADVANCED since the previous report — evidence of ongoing work
+  — and keep `WARN` only when it did not, which is the parked-versus-busy distinction the row's
+  own text claims to make and a turn count alone cannot. It needs somewhere to remember the
+  previous reading, and the doctor is read-only by contract, so it is a design change rather
+  than a tweak.
+- **Counting a turn is now a freshness heartbeat for a NEIGHBOURING row.** The increment goes
+  through `mutateWorkflowState`, which stamps `updated_at`, and that field is what
+  `documentAgeMs` ages the foreign-open row on. So a chain being counted can no longer age out
+  of another same-project session's foreign-open WARN row. The direction is defensible — an
+  actively counted chain is not abandoned — but it deepens the "same-project-root sibling
+  permanently withholds the green summary" gap the previous section records.
+- **Only `0` is disclosed as "switched off".** A large in-range threshold — the config accepts
+  up to 1000000, while `_tdd_increment_counter_critical` throws at that same ceiling — suppresses
+  the row silently on both surfaces. No gate is escaped and no capability is gained; it costs one
+  advisory row. Keying the disclosure on reachability rather than on the literal `0` is the fix.
+- **The `timeout` fallback is unbounded.** When `timeout` is absent — base macOS and some Git
+  Bash installs, the premise the sibling transcript probe states in its own comment — the same
+  `git status` runs with no deadline on the Stop path. The degrade is fail-open through the
+  existing `|| return 0`, and a portable watchdog was judged out of proportion for an advisory;
+  named here rather than left to be discovered.
+- **The probe is defeated by a mid-run commit and is scoped to the project subtree.** A chain
+  that commits each turn measures a clean tree and is never counted — the same accepted hole
+  §"Requirements-Table Gate" records for `--tdd-complete`. And `-- .` under `-C "$PROJECT_ROOT"`
+  bounds the probe to the project, while the edit-landing audit it points at is repo-root
+  anchored, so a project root nested in a larger repository can carry landed edits the audit
+  sees and this probe does not.
 
 ## Relaxable Bind Failures (`hooks/lib/claude-hook-session-v1.js`)
 

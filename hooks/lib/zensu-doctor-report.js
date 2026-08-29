@@ -30,6 +30,8 @@
 //   ZDOC_NODE/ZENSU/PLAYWRIGHT            tool probe results from the wrapper/skill
 //   ZDOC_FORGE_PROVIDER/CLI/STATE/EDITION forge detection from the VCS driver
 //   ZDOC_TTL_HOURS           pending-review TTL from the canonical getter
+//   ZDOC_IMPL_STOP_NUDGE_AFTER  parked-at-implementing turn bound from the
+//                            canonical getter; blank falls back, 0 disables the row
 //   ZDOC_NOW_MS              clock override for deterministic tests
 //   ZDOC_BINDING             the wrapper's binding verdict (bound / unbound /
 //                            orphaned-project-root / incompatible-runtime /
@@ -71,6 +73,12 @@ var BAD = '❌';
 // (test/no-wrapper) invocation and must stay in lockstep with that getter.
 var TTL_HOURS_FALLBACK = 6;
 var TTL_HOURS_MAX = 8760;
+// Mirror of hooks/lib/zensu-config.sh zensu_impl_stop_nudge_after (default 12,
+// bounds 0..1000000): the wrapper passes the canonical value via
+// ZDOC_IMPL_STOP_NUDGE_AFTER; these apply only to a direct (test/no-wrapper)
+// invocation and must stay in lockstep with that getter.
+var IMPL_STOP_NUDGE_FALLBACK = 12;
+var IMPL_STOP_NUDGE_MAX = 1000000;
 var CHAIN_ROW_LIMIT = 8;
 var NOTE_MAX_BYTES = 4096;
 var SETTINGS_MAX_BYTES = 1048576;
@@ -1482,6 +1490,18 @@ function ttlHours() {
   if (Number.isInteger(n) && n >= 0 && n <= TTL_HOURS_MAX) return n;
   return TTL_HOURS_FALLBACK;
 }
+
+// An ABSENT or blank value falls back, and the distinction is load-bearing:
+// `Number('')` is `0`, which passes the `n >= 0` bound and means "disabled", so a
+// wrapper fault that exported an empty string would silently delete the row
+// instead of degrading to the documented default.
+function implStopThreshold() {
+  var raw = env.ZDOC_IMPL_STOP_NUDGE_AFTER;
+  if (typeof raw !== 'string' || raw.trim() === '') return IMPL_STOP_NUDGE_FALLBACK;
+  var n = Number(raw);
+  if (Number.isInteger(n) && n >= 0 && n <= IMPL_STOP_NUDGE_MAX) return n;
+  return IMPL_STOP_NUDGE_FALLBACK;
+}
 // The shapes that carry no work forward. Taken from chain-recovery-v1.js, which
 // OWNS the vocabulary and mints these literals a few lines from where it lists
 // them. A hand-copy here was tried and was wrong in the one direction that
@@ -1679,6 +1699,8 @@ function chainRows(entries, nowMs) {
   var blocked = [];
   var deadEnds = [];
   var foreignOpen = [];
+  var parkedImpl = [];
+  var implThreshold = implStopThreshold();
   var ownKey = currentSessionKey();
   var ttl = ttlHours();
   var inert = inertShapes(chain);
@@ -1705,6 +1727,27 @@ function chainRows(entries, nowMs) {
       if (report.recoverable) recoverable.push(entry.session + ' → ' + report.nextCommand);
       else blocked.push(entry.session + ' → ' + report.nextCommand);
       return;
+    }
+    // Below the two early returns, on the same side of the ordering contract as
+    // the foreign-open push: a chain already named as wedged or dead-ended must
+    // never be named a second time with a different instruction. Gated on the
+    // session key ALONE — deliberately not on `rowArmed`, whose `inert` half
+    // belongs to the foreign-open filter and would withhold this row for a reason
+    // it does not depend on, silently.
+    if (implThreshold > 0 && ownKey !== '' && entry.key === ownKey
+      && report.shape === 'implementing') {
+      // Read through the classifier, not off the raw document: that module owns
+      // chain semantics, projects the sibling counters the same way, and serialises
+      // the whole report as the `--chain-status` payload, so reaching around it
+      // would leave that verb structurally blind to how long a chain has been parked.
+      var parkedCount = report.implStopCount;
+      if (Number.isSafeInteger(parkedCount) && parkedCount >= implThreshold) {
+        // The command comes from the OWNING module, never hand-authored here: for
+        // an Autopilot-bound chain `shapeCommand` returns the spelling carrying
+        // --autopilot-run / --autopilot-attempt / --chain-id, and the bare verb is
+        // refused outright for such a chain. Same rule the three sibling rows follow.
+        parkedImpl.push(entry.session + ': ' + parkedCount + ' turns → ' + report.nextCommand);
+      }
     }
     // Reached only by a chain no row above already named. A wedged or dead-end
     // chain returns first on purpose: those rows carry their own remedy, and a
@@ -1742,6 +1785,41 @@ function chainRows(entries, nowMs) {
   if (deadEnds.length) {
     line(WARN, 'chain: ' + deadEnds.length + ' chain(s) at a dead end — a fresh generation is the only exit, from the session that owns each chain: ' + truncatedList(deadEnds));
   }
+  // Counted in TURNS, never in elapsed time. An age bound would report the
+  // user's calendar rather than the model's behaviour: a powered-off machine, a
+  // paused session and a holiday all accumulate wall clock with nothing wrong,
+  // and they accumulate zero here. The shape alone is never enough either — it
+  // is what every legitimately mid-implementation chain looks like — so the
+  // count is what separates working from parked.
+  // Singular by construction: the push is gated on `entry.key === ownKey` and each
+  // entry carries a distinct key, so at most one chain can ever qualify. Rendering
+  // a count here would invite a later reader to widen the filter believing the row
+  // already supports several.
+  if (parkedImpl.length) {
+    // Names ONE exit and names its preconditions with it. `--tdd-complete` refuses
+    // without an edit-landing receipt and without a usable Requirements table, and
+    // both gates arm on the same dirty tree this row requires, so naming the verb
+    // bare would be a remedy that refuses in the same breath. The zero-change
+    // terminus is deliberately NOT offered: from this shape it is the unqualified
+    // no-ticket terminus, and after a mid-run commit it closes a chain nothing
+    // reviewed. The command itself comes from the owning module, so a bound chain
+    // gets its own spelling rather than the standalone one.
+    line(WARN, 'chain: this session owns a chain parked at `implementing`'
+      + ' across at least ' + implThreshold + ' turns that ended with a changed worktree'
+      + ' — no reviewer has been asked for, so nothing in it has been reviewed. Counted in turns,'
+      + ' never in elapsed time, so a paused session or a powered-off machine never reaches this row.'
+      + ' The exit is the review chain: run the /zensu:tdd Phase 6 step 5b edit-landing audit and give'
+      + ' the plan a usable `## Requirements` table first, because the completion verb refuses without'
+      + ' both while the tree is dirty: ' + truncatedList(parkedImpl));
+  } else if (implThreshold === 0 && !(env.ZDOC_BINDING === 'bound' && ownKey === '')) {
+    // Disabling must not produce silence — the same rule the reviewer-spawn
+    // permission check follows. A reader who sees no row has to be able to tell
+    // "nothing to report" from "this check did not run". Suppressed when the
+    // missing-key disclosure below already names this row, so one absent check is
+    // never given two different causes in the same report.
+    line(OK, 'chain: the parked-at-`implementing` check is switched off'
+      + ' (`hooks.implStopNudgeAfter` is 0), so no chain was measured for it.');
+  }
   // BOTH halves of the row's contract disclose, and neither is conjoined on the
   // other. Gating the module half on `ownKey !== ''` meant a tree that broke both
   // printed NEITHER row: the inert disclosure was suppressed by the missing key,
@@ -1758,6 +1836,8 @@ function chainRows(entries, nowMs) {
   if (env.ZDOC_BINDING === 'bound' && ownKey === '') {
     line(WARN, 'chain: the session key did not reach this report — an open chain owned by'
       + ' another session cannot be identified, so that row did not run.'
+      + ' The parked-at-`implementing` row is withheld for the same reason, since without'
+      + ' the key an own chain cannot be told from a foreign one.'
       + ' That is a missing check, not an all-clear.');
   }
   if (foreignOpen.length) {
@@ -2049,7 +2129,7 @@ function stateBlock(nowMs) {
     }
     var valid = workflowDocs.length - invalid.length;
     if (valid) {
-      line(OK, 'state: ' + valid + ' validated CAS workflow document(s); reviewRound/stopBlockCount are integrated fields');
+      line(OK, 'state: ' + valid + ' validated CAS workflow document(s); reviewRound/stopBlockCount/implStopCount are integrated fields');
     }
     if (invalid.length) {
       line(BAD, 'state: ' + invalid.length + ' invalid CAS workflow document(s) — hooks fail closed; inspect ' + invalid.join(', '));

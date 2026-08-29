@@ -252,6 +252,7 @@ bash "$LOG" --chain-recover --session "$SID" >/dev/null 2>&1
 BUDGET_RC=$?
 [ "$BUDGET_RC" -eq 0 ] && [ "$(status_field reviewRound)" = "4" ] \
   && [ "$(status_field stopBlockCount)" = "2" ] \
+  && [ "$(status_field implStopCount)" = "0" ] \
   && check "T11 recovery preserves the review and Stop budgets (no free round)" PASS \
   || check "T11 recovery preserves the review and Stop budgets (rc=$BUDGET_RC round=$(status_field reviewRound) stops=$(status_field stopBlockCount))" FAIL
 

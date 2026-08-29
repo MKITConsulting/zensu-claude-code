@@ -368,7 +368,7 @@ CAS_FILE="$CAS_ST/tdd-phase-${CAS_KEY}.json"
 # Retired sidecars are inert and must neither be counted nor interpreted.
 : > "$CAS_ST/rounds-retired.json"; : > "$CAS_ST/retired.stopblocks"
 OUT="$(run_report "$PLUGIN_DIR" "$SBOX/good-cfg.json" "$CAS_PROJECT")"
-case "$OUT" in *'1 validated CAS workflow document(s); reviewRound/stopBlockCount are integrated fields'*) check "P1m valid CAS workflow document is reported with integrated counters" PASS ;; *) check "P1m valid CAS workflow state (got: $OUT)" FAIL ;; esac
+case "$OUT" in *'1 validated CAS workflow document(s); reviewRound/stopBlockCount/implStopCount are integrated fields'*) check "P1m valid CAS workflow document is reported with integrated counters" PASS ;; *) check "P1m valid CAS workflow state (got: $OUT)" FAIL ;; esac
 case "$OUT" in *'per-session marker'*|*'1 rounds'*|*'1 stopblocks'*) check "P1ma retired sidecars are not counted as session state" FAIL ;; *) check "P1ma retired sidecars are not counted as session state" PASS ;; esac
 
 # the chain block: shape row, truncated session key, no false alarm, exit 0
@@ -823,6 +823,25 @@ if grep -qF 'cannot be moved' "$SKILL_MD" \
   check "P1mt1 both operator documents carry the diagnose-only limit" PASS
 else
   check "P1mt1 both operator documents carry the diagnose-only limit" FAIL
+fi
+# Same three-way hand copy for the parked-at-implementing row: renderer, skill,
+# docs. Without this, rewording one carrier goes stale in silence.
+PARKED_DOC_OK=1
+grep -qF -- 'parked at `implementing`' "$REPORT" || PARKED_DOC_OK=0
+grep -qF -- 'parked at `implementing`' "$SKILL_MD" || PARKED_DOC_OK=0
+grep -qF -- 'Implementing-phase turn counter' "$PLUGIN_DIR/docs/tdd-manager-workflow.md" \
+  || PARKED_DOC_OK=0
+[ "$PARKED_DOC_OK" -eq 1 ] \
+  && check "P1mt2 the parked-chain row wording is emitted AND documented in the skill and the docs" PASS \
+  || check "P1mt2 the parked-chain row wording is emitted AND documented in the skill and the docs" FAIL
+# The one claim a reader must not lose here is the NEGATIVE one: this row must
+# never teach the zero-change terminus, which from shape `implementing` is the
+# unqualified no-ticket terminus. Pin it on both carriers.
+if ! grep -n 'parked at `implementing`' -A 8 "$REPORT" | grep -qF -- '--chain-done' \
+  && grep -qF 'Never offer the' "$SKILL_MD"; then
+  check "P1mt3 the parked-chain row never offers the zero-change terminus" PASS
+else
+  check "P1mt3 the parked-chain row never offers the zero-change terminus" FAIL
 fi
 
 export CLAUDE_PROJECT_DIR="$CAS_PROJECT"

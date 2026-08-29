@@ -81,6 +81,18 @@ test('an absent deferred-review claim is readable but never reads as "no claim"'
   assert.equal(report.shape, 'ready-for-review');
   assert.equal(report.deferredReviewClaim, 'unknown');
 
+  // The implementing-phase counter travels the same path and needs the same bite:
+  // without `naturalOr` the spread carries an ABSENT key through as `undefined`,
+  // every consumer's `Number.isSafeInteger` guard then reads false, the doctor row
+  // is skipped, and no negative case notices.
+  const noCounter = doc({});
+  delete noCounter.implStopCount;
+  assert.equal(chain.classifyChain(noCounter).implStopCount, 0);
+  for (const bad of [-1, 1.5, 'x', null, {}]) {
+    assert.equal(chain.classifyChain(doc({ implStopCount: bad })).implStopCount, 0);
+  }
+  assert.equal(chain.classifyChain(doc({ implStopCount: 7 })).implStopCount, 7);
+
   const wedged = doc(Object.assign({ reviewRearm: DISAGREEING }, BOUND_LINK));
   delete wedged.deferredReviewClaim;
   const blocked = chain.classifyChain(wedged);

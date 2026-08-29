@@ -11,7 +11,8 @@ description: >
   in ~/.claude/settings.json expose the zensu:code-reviewer spawn to a refusal
   before any chain has wedged), and session state (state dir writable, canonical
   CAS workflow documents valid, each review chain's shape plus any wedged chain and
-  its recovery command, any open chain not owned by this session, any reviewer spawn
+  its recovery command, any open chain not owned by this session, any chain this
+  session owns left parked at implementing, any reviewer spawn
   the host permission layer refused, expired pending-review surfaced).
   The only write is an explicit, user-confirmed cleanup of one
   expired pending-review.json — CAS workflow documents are never deleted. Use
@@ -439,6 +440,28 @@ classifier will refuse a spawn, not only when the whole table is green.
   verdict. A missing inert-shape set also withholds it, but with its own row. There is no comparison between the record's project anchor and
   `CLAUDE_PROJECT_DIR` — the whole `Session state` block simply READS the record's
   root, because that is where every writer puts the documents.
+- **⚠️ chain: this session owns a chain parked at `implementing`** → the
+  session armed a chain, kept working, and never marked the implementation
+  complete, so no reviewer was ever asked for. This is not a wedge and not an
+  error: the Stop hook releases in that state by design, which is exactly why
+  nothing else reports it. Relay the count and the ONE exit the row prints — the
+  review chain, entered with `--tdd-complete` after the Phase 6 step 5b
+  edit-landing audit and with a usable `## Requirements` table in the plan, both
+  of which that verb refuses without while the tree is dirty. **Never offer the
+  zero-change terminus here.** From this shape no review ticket has ever been
+  consumed, so `--chain-done` is the unqualified no-ticket terminus, and after a
+  mid-run commit its change-count guard measures zero and closes a chain in which
+  nothing was reviewed. **Say what the number means:** it
+  counts TURNS that ended with a changed worktree, never elapsed time, so a
+  paused session, an overnight break or a powered-off machine never produce it —
+  something really did keep working alongside an open gate. The bound is
+  `hooks.implStopNudgeAfter` (default `12`). At `0` the check is switched off and
+  says so in its own `✅` row — a disabled check must never read as a clean one.
+  One condition withholds the row, and it DISCLOSES rather than falling silent:
+  `ZDOC_SESSION_KEY` must be present and well formed under a `bound` verdict,
+  because without it an own chain cannot be told from someone else's, and the
+  session-key row above names this row when that happens. It deliberately does
+  not depend on the inert-shape set, which belongs to the foreign-chain row.
 - **⚠️ state: `<dir>` could not be read (`<errno>`)** → the session-state checks did
   NOT run. Relay it as a missing check, never as an all-clear: no chain shape, no
   wedged or foreign-chain row and no pending-review verdict was computed, so their

@@ -589,7 +589,14 @@ if [ -r "$AUTOPILOT_STATE_LIB" ]; then
   fi
 fi
 
+# Records that a decision has been written to stdout. An advisory that runs AFTER
+# a decision-bearing call must be able to tell a release from a block: an outer
+# Autopilot run can block on the very release path the implementing-phase nudge
+# sits on, and a stderr line asserting "Stop is not blocked" beside a
+# decision:"block" on stdout contradicts the authoritative channel.
+DECISION_EMITTED=false
 emit_block() {
+  DECISION_EMITTED=true
   printf '%s' "$1" | node -e '
     const reason = require("node:fs").readFileSync(0, "utf8");
     process.stdout.write(JSON.stringify({decision:"block",reason}));
@@ -942,13 +949,85 @@ if [ "$ADOPT_ELIGIBLE" = "true" ]; then
   fi
 fi
 
+# Counts a TURN spent with an armed chain still at `implementing` and real source
+# changes in the tree, and past the configured bound says so once on stderr. It
+# never blocks: a long legitimate implementation genuinely spans many turns, so a
+# false positive may cost a line of text and must never wedge a chain. Every
+# failure returns 0 with the release untouched — a diagnostic that changes a
+# routing decision is worse than no diagnostic.
+#
+# The three GIT_* variables are unset for the reason `_tc_git` in zensu-log.sh
+# states: a careless or inherited prefix would otherwise point the probe at a
+# different tree. That helper unsets thirteen; this one deliberately does not
+# widen to match, because it gates an advisory rather than a refusal, and the
+# panel finding proposing the wider list was judged a false positive on exactly
+# that ground. `</dev/null` keeps a child from holding a lease keeper's pipe open.
+#
+# The pathspec excludes the plugin's own `.zensu` tree. Phase 2 writes a plan and
+# a log there unconditionally, so without it every chain reads as dirty from its
+# second turn onward in any repository that tracks those artifacts, and the probe
+# would stop discriminating at all.
+zensu_impl_stop_nudge() {
+  local threshold count changed complete_cmd
+  # This runs AFTER outer_finish, which can emit a decision:"block" for a durable
+  # Autopilot run on this very path. In that state the turn did not end, so
+  # counting it would be wrong and saying "Stop is not blocked" would contradict
+  # the decision already on stdout. Neither happens.
+  [ "${DECISION_EMITTED:-false}" = "true" ] && return 0
+  threshold="$(zensu_impl_stop_nudge_after 2>/dev/null)" || return 0
+  case "$threshold" in ''|*[!0-9]*) return 0 ;; esac
+  [ "$threshold" -gt 0 ] 2>/dev/null || return 0
+  command -v git >/dev/null 2>&1 || return 0
+  # No pipeline here: a `| head` would replace git's own exit status with head's,
+  # so a missing repository would read as a clean tree instead of as a failure.
+  changed="$(
+    unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+    if command -v timeout >/dev/null 2>&1; then
+      timeout 5 git --no-optional-locks -C "$PROJECT_ROOT" status --porcelain \
+        -- . ':(exclude).zensu' 2>/dev/null </dev/null
+    else
+      git --no-optional-locks -C "$PROJECT_ROOT" status --porcelain \
+        -- . ':(exclude).zensu' 2>/dev/null </dev/null
+    fi
+  )" || return 0
+  [ -n "$changed" ] || return 0
+  count="$(tdd_increment_counter "$SESSION_ID" implStopCount 2>/dev/null </dev/null)" || return 0
+  case "$count" in ''|*[!0-9]*) return 0 ;; esac
+  [ "$count" -ge "$threshold" ] 2>/dev/null || return 0
+  # Names ONE exit, and names its preconditions with it. `--tdd-complete` refuses
+  # without an edit-landing receipt and without a usable Requirements table, and
+  # both gates arm on the same dirty tree this notice requires — so naming the
+  # verb alone would hand the reader a command that refuses in the same breath.
+  # A BOUND chain refuses for a different reason again: the verb demands the three
+  # Autopilot link flags, so the bare spelling is rejected outright there and the
+  # bound flags are carried instead.
+  # The zero-change terminus is deliberately NOT offered: from this shape it is
+  # the unqualified no-ticket terminus, and after a mid-run commit it would close
+  # a chain in which nothing was reviewed.
+  # Rendered here rather than reusing LOG_COMMAND, which is assigned far below this
+  # call site: a bare flag with no program is not a command the reader can run.
+  complete_cmd="CLAUDE_PLUGIN_DATA=$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}") bash $(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh") --tdd-complete"
+  if [ -n "${INNER_BOUND_RUN:-}" ]; then
+    # Quoted the way the sibling INNER_BOUND_ARGS renderer quotes the same three
+    # values into the same command shape: they come from the workflow document,
+    # which the session can write, and this line is text a model is meant to run.
+    # All three spelled with the same `:-` the guard above uses. The four are
+    # always written together today, so this is latent rather than live — but a
+    # guard whose body does not honour its own precondition is the shape a later
+    # edit turns into a `set -u` abort in the middle of a Stop.
+    complete_cmd="${complete_cmd} --autopilot-run $(printf '%q' "${INNER_BOUND_RUN:-}") --autopilot-attempt $(printf '%q' "${INNER_BOUND_ATTEMPT:-}") --chain-id $(printf '%q' "${INNER_BOUND_CHAIN:-}")"
+  fi
+  echo "Zensu review chain: this session has now ended ${count} turns with its chain still at 'implementing' while the worktree reports changed source files, so no reviewer has been asked for yet and nothing here has been reviewed. The exit is the review chain: run the /zensu:tdd Phase 6 step 5b edit-landing audit, make sure the plan carries a usable '## Requirements' table, then mark the implementation complete with ${complete_cmd} — that verb refuses without both while the tree is dirty. This is a notice; Stop is not blocked, and it is silent again once the chain moves on." >&2
+  return 0
+}
+
 # Every path below this point still has a chain to enforce. These three do not —
 # no session, implementation not finished, chain already closed — so they retire
 # a refusal note here rather than in the routing branches, which they never
 # reach. They are not the only retire sites; the escapes and the BLOCKED-outer
 # release above clear too, and the cap path clears on a converged chain.
 if [ "$SESSION_ACTIVE" != "true" ]; then reviewer_denial_note_clear; outer_finish; exit 0; fi
-if [ "$SESSION_IMPL_COMPLETE" != "true" ]; then reviewer_denial_note_clear; outer_finish; exit 0; fi
+if [ "$SESSION_IMPL_COMPLETE" != "true" ]; then reviewer_denial_note_clear; outer_finish; zensu_impl_stop_nudge; exit 0; fi
 if [ "$SESSION_CHAIN_DONE" = "true" ]; then reviewer_denial_note_clear; outer_finish; exit 0; fi
 
 MAX_ROUNDS="$(zensu_autofix_max_rounds)"

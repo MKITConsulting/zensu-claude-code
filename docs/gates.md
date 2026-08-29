@@ -266,4 +266,4 @@ plan must carry a usable `## Requirements` table.
   the two gates share one change-set computation precisely so neither inherits the other's
   switch. Both escapes are recorded in the per-session bypass ledger.
 
-**Full workflow reference:** [docs/tdd-manager-workflow.md](tdd-manager-workflow.md) — Mermaid flow chart, per-step FSM state diagram, hook gate behavior table, environment variables contract, discipline patches 1-11, four-channel logging.
+**Full workflow reference:** [docs/tdd-manager-workflow.md](tdd-manager-workflow.md) — Mermaid flow chart, per-step FSM state diagram, hook gate behavior table, environment variables contract, discipline patches 1-13, four-channel logging.
