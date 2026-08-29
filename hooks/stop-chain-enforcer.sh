@@ -903,7 +903,19 @@ if [ "$ADOPT_ELIGIBLE" = "true" ]; then
   else
     ADOPT_RC=$?
     case "$ADOPT_RC" in
-      6) ;; # no pending marker/claim; this is a normal no-work result
+      # rc=6 has TWO causes and they are not the same state. Either there is no
+      # pending marker or claim at all, or a nonterminal run holds this working
+      # tree and the fence weighed the hold as not concerning this Stop. Both are
+      # a normal no-work result here, and no new code distinguishes them on
+      # purpose: the Stop decision is identical, and a third code would have to be
+      # understood by every caller of the adoption verb to buy nothing.
+      #
+      # The SECOND cause has a consequence worth naming where a reader will meet
+      # it: the fence returns before `tdd_adopt_pending_review` runs, and that
+      # call owns the `rm -f` for an EXPIRED marker. So a stale marker under a
+      # held tree is not reaped by this Stop. It is inert while stale and the
+      # first adoption after the hold clears removes it -- a leak, not a wedge.
+      6) ;;
       4)
         # A nonterminal durable run holds this working tree. The occupancy
         # comparison is CONTAINMENT in both directions, so the holder may be a
@@ -912,10 +924,6 @@ if [ "$ADOPT_ELIGIBLE" = "true" ]; then
         # previous wording ("retry Stop") prescribed a retry that could never
         # succeed. Name the holder instead.
         #
-        # This arm used to re-read the holder here, and both the rationale for
-        # that read and the rule that it must carry the fence's holder preference
-        # lived at this spot. Both are gone with the read; the paragraph below is
-        # the single rationale now.
         # Take the sentence the fence PUBLISHED and never re-derive one. It was
         # rendered from the record the fence actually judged; any read here would
         # happen after that fence returned, and the worker reports
@@ -937,12 +945,8 @@ if [ "$ADOPT_ELIGIBLE" = "true" ]; then
           # Name the condition and the two possibilities instead of a command.
           DEFERRED_HOLD_TEXT="the holding run could not be identified from here; if it belongs to another session, ask that session to finish or cancel it, and if it is this session's own run, finish or repair it rather than releasing it"
         fi
-        # The holder clause still goes LAST. The reason it originally had to --
-        # its named form ended in a shell command -- no longer applies, because
-        # the MODEL form this arm carries ends in a slash-command name rather
-        # than a runnable invocation. The ordering is retained for consistency
-        # with the operator line and so a future reword cannot reintroduce the
-        # hazard by appending prose to a command.
+        # The holder clause goes LAST, so a future reword cannot append prose to
+        # a command the way an earlier spelling produced `--confirm.`.
         emit_block "Zensu Autopilot Stop denied: a nonterminal durable Autopilot run holds this working tree, so this Stop can neither adopt deferred review work here nor infer completion. Retrying Stop cannot clear the hold while that run stays nonterminal. ${DEFERRED_HOLD_TEXT}"
         exit 0
         ;;

@@ -1350,6 +1350,36 @@ else
   check "W3 same-workspace begin refused with the release command" FAIL
 fi
 
+# W3a -- the `begin` worker must apply the SAME shape tests the shell renderer
+# applies before interpolating a holder into its refusal. The renderer refuses a
+# runId carrying a newline and a stage outside the closed set; its twin in the
+# worker had neither, and S7m compares only the EMITTED TEXT, so it is
+# structurally blind to a guard present on one side and missing on the other.
+#
+# SOURCE PIN, and the reason is a real limit rather than a shortcut: the holder
+# comes from `readRunInventory`, which validates every record with the very
+# predicates this guard uses, so no record that reaches the branch can fail it.
+# A behavioural fixture would have to plant a record `stateValid` accepts and
+# `identifier`/`STAGES` reject, and no such record exists. Pinning the guard is
+# the only available control, and it is the same trade the renderer's own
+# unreachable backstop is pinned under.
+W3A_BRANCH="$(awk '/const workspaceHolder = inventory.find/{f=1} f{print} f&&/\/zensu:autopilot-release`\);/{exit}' "$LIB")"
+W3A_OK=1
+printf '%s' "$W3A_BRANCH" | grep -qF 'identifier(workspaceHolder.runId)' || W3A_OK=0
+printf '%s' "$W3A_BRANCH" | grep -qF 'STAGES.has(workspaceHolder.stage)' || W3A_OK=0
+# The guard must sit BEFORE the interpolating fail, not after it.
+W3A_GUARD_AT="$(printf '%s' "$W3A_BRANCH" | grep -n 'identifier(workspaceHolder.runId)' | head -1 | cut -d: -f1)"
+W3A_EMIT_AT="$(printf '%s' "$W3A_BRANCH" | grep -n 'workspace held by nonterminal run ${workspaceHolder.runId}' | head -1 | cut -d: -f1)"
+[ -n "$W3A_GUARD_AT" ] && [ -n "$W3A_EMIT_AT" ] && [ "$W3A_GUARD_AT" -lt "$W3A_EMIT_AT" ] || W3A_OK=0
+# Control: the slice really contains the emitting line, so a needle that stops
+# matching cannot be mistaken for a guard that moved.
+[ -n "$W3A_EMIT_AT" ] || W3A_OK=0
+if [ "$W3A_OK" -eq 1 ]; then
+  check "W3a the begin worker shape-tests the holder before interpolating it, using its own identifier and STAGES vocabulary" PASS
+else
+  check "W3a begin worker must shape-test the holder before rendering it (guard=$W3A_GUARD_AT emit=$W3A_EMIT_AT)" FAIL
+fi
+
 # --- Release: the one path that ends a run the caller does not own ---
 # W4 used to fold four independent properties into one boolean and asserted
 # only zero/non-zero, so any of them could regress into a different refusal
@@ -1653,9 +1683,14 @@ fi
 # and 3 for a rejected argument, and this fixture's call fails at
 # tdd_begin_session anyway, so a bare "not 4" passes on any of them. Exclude
 # every code the gate itself can return, and require its refusal to be absent.
+# The negative needle is the sentence LEAD, not a remedy spelling. The renderer
+# emits three foreign/own shapes and only the model one contains `/zensu:`, so a
+# regression that emitted the OPERATOR refusal on this free-tree path would have
+# satisfied a `/zensu:autopilot-release` needle while refusing exactly what this
+# check exists to permit. Every shape starts with this lead.
 if [ "$GATE_HOLD_RC" -eq 0 ] \
   && [ "$GATE_FREE_RC" -ne 4 ] && [ "$GATE_FREE_RC" -ne 3 ] && [ "$GATE_FREE_RC" -ne 2 ] \
-  && ! grep -qF -- '/zensu:autopilot-release' "$GATE_FREE_ERR"; then
+  && ! grep -qF -- 'workspace held by nonterminal run' "$GATE_FREE_ERR"; then
   check "W14 a standalone chain is permitted in a sibling tree the run does not hold" PASS
 else
   check "W14 standalone gate must permit an unheld sibling tree (hold=$GATE_HOLD_RC free=$GATE_FREE_RC, want 0/past-the-gate)" FAIL

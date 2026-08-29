@@ -1066,8 +1066,13 @@ stale: any state the owner reaches only AFTER reading claim METADATA is "no work
 `done|cancelled` claim with no queued marker, and a `done|cancelled` claim whose queued marker
 is itself stale — all over-approximations that keep a refusal, never a relaxation. Note also
 that the copy reads the marker under the OUTER lease only, never the pending lease that
-governs it, so a marker published concurrently can read as absent; the marker stays queued and
-a later Stop adopts it. The standing fix for all of this is to export the source-selection
+governs it, so a marker published concurrently can read as absent. The marker is never LOST by
+that: it stays queued, and the next Stop that samples it acts on it — with the tree free that
+is the adoption, under a foreign hold it is the fence refusing again. What a missed sample
+defers is therefore the REFUSAL, never the adoption, which is the same correction the
+known-gap paragraph further down states in full; keep the three sites in step and do not
+reintroduce "a later Stop adopts it", which names an outcome the held case cannot reach. The
+standing fix for all of this is to export the source-selection
 ladder from `zensu-tdd-phase.sh` so both modules call one predicate.
 
 The threading is `ttl_hours` FIRST, `root` second, in both helpers — they take their two shared
@@ -1158,8 +1163,10 @@ template and rendering the helper against the same run id, so a reword of either
 check red; before it, the two were pinned only in separate suites and could drift silently.
 
 **The own-vs-foreign choice belongs to the RENDERER, and putting it anywhere else fails open.**
-`_autopilot_workspace_refusal` takes the caller's session id as an OPTIONAL second argument and
-selects the wording itself; every caller that can see its own run passes it. An earlier
+`_autopilot_workspace_refusal` takes the caller's session id as its second argument and selects
+the wording itself; every caller that can see its own run passes it. The argument is POSITIONALLY
+REQUIRED and only its VALUE may be empty — the renderer refuses on `[ "$#" -eq 3 ]`, so "optional"
+was the wrong word for it and a two-argument call does not fall back to a form, it refuses. An earlier
 spelling decided it in `stop-chain-enforcer.sh` from a second `_autopilot_holder_owner` read,
 and that read's failure mode was the dangerous one: an unresolvable owner compared UNEQUAL to
 the session id and selected the FOREIGN text, so the hook offered the release command against
@@ -1230,13 +1237,22 @@ paths pass each other's check.
 line before returning false, because rc=6 is otherwise indistinguishable from "no run held the
 tree at all" and a guard that stands down invisibly is the shape this repository treats as
 worse than the wedge it removes. It is not a bypass-ledger entry and must not become one: no
-user-supplied switch was escaped. S7g captures that stderr separately and requires it — the
+user-supplied switch was escaped. **The premise under that argument is UNVERIFIED and is
+recorded as such:** nothing measured in this work establishes that this host surfaces
+Stop-hook stderr to the user on a non-blocking exit 0. If it does not, the relaxation has no
+observable at all and the disclosure argument above buys nothing — so verify it before
+leaning on it, and do not restate the claim as though it were established. S7g captures that stderr separately and requires it — the
 hook fixtures cannot, because `invoke()` discards stderr, so without a direct capture the line
 could be deleted with every check green. **Accepted cost, named because it is not obvious:**
 the line is UNRATED and the state that produces it is a steady state, not an event — an
 ordinary session with no own run and no active chain reaches `ADOPT_ELIGIBLE` on every turn
 end, so the disclosure repeats on every Stop for as long as the foreign run stays nonterminal.
-Gating it would remove the observability it exists for; the repetition is the price.
+Gating it would remove the observability it exists for; the repetition is the price — but
+the price has a known, unpaid remedy and it is named here rather than left to be rediscovered:
+this repository already ships the shape that keeps the observability without the noise, the
+per-session band file in `user-prompt-context-nudge.sh`, which here would key on the pair
+(session, holder run id) so the line prints once per hold rather than once per turn end. Not
+implemented; a follow-up, not a defect.
 
 **Two ordering rules inside the fence, both learned by having them wrong.** The ladder
 has the WORK arm LAST, and every arm above it returns the same value — 0, blocking. So while a
@@ -1313,19 +1329,35 @@ editing its own record, exactly as it could already by deleting it. The holder p
 closes the ACCIDENTAL shadowing (a legacy foreign record sorting ahead of the caller's live
 run); it does not close a deliberate write, and nothing here should be read as doing so.
 
+**There is a SECOND direction, and it runs the other way.** The preference selects the holder
+by `ownerSessionId`, so a co-tenant that writes ONE shape-valid record carrying a VICTIM's
+owner id and a `workspaceRoot` containing the victim's tree steers that victim's fence onto the
+own-run arm — and the own-run arm withholds the release command and names a run the victim can
+neither see through `--autopilot-status` (which is owner-scoped) nor release. The direction is
+non-destructive and it cannot make a fence RELAX: the own-run arm blocks. But it is a foreign
+writer changing what another session is told, which is more than "a session can flip its own
+fence", and the state directory is writable from inside any session in the project.
+
 **Known gap: a stale marker under a held tree is never reaped.** The release arm returns
 before `tdd_adopt_pending_review` runs, and that call is what owns the `rm -f` for an expired
 marker. The marker is inert while stale and is reaped by the first adoption after the hold
 clears, so this is a leak rather than a wedge — but the fence's own comment argues the
 reaping asymmetry against the OPPOSITE choice, and it applies to the branch that shipped too.
 
-**Known gap, accepted and named: the contention path samples work-presence once, unlocked.**
-`_autopilot_deferred_contention_result` is reached precisely because the Outer lease could
-not be acquired, and its own header describes a check-prove-recheck TOCTOU bracket that
-re-reads OCCUPANCY only. The new work-presence input is read once, outside that bracket, so
-a marker published concurrently by `tdd_write_pending_review` (which takes the pending lock,
-not the Outer one) is missed for this Stop. The consequence is a DEFERRED adoption, never a
-lost one — the marker stays queued and the next Stop sees it.
+**Known gap, accepted and named: work-presence is sampled once, unlocked, at BOTH fences.**
+Scoping this to the contention path was wrong and read as if holding the Outer lease made the
+locked fence immune. It does not: the Outer lease and the PENDING lease are different
+resources and `_autopilot_deferred_work_present` takes neither, so
+`tdd_write_pending_review` — which takes the pending lock — can publish a marker that either
+fence misses. The contention fence has the sample outside its own check-prove-recheck bracket
+as well, but that bracket only ever re-read OCCUPANCY, so it was never the thing that would
+have covered this.
+
+State the consequence precisely, because an earlier wording got it backwards: what is deferred
+is the REFUSAL, not the adoption. A missed marker makes this Stop RELEASE; on the next Stop the
+marker is visible, so the fence sees work in play and the foreign hold BLOCKS again. The marker
+is never lost, and no Stop adopts anything it should not — but "a DEFERRED adoption" described
+an outcome that does not occur, since a held tree is exactly where adoption does not happen.
 
 **CONTAINMENT is pinned, and it took a real git fixture to do it.** Every other check in the
 suite builds a plain `mktemp -d` project, so holder and stopper resolve the SAME workspace
@@ -1460,7 +1492,12 @@ across the file boundary is the VARIABLE spelling, not a function name; the one 
 `_autopilot_holder_owner`, `_autopilot_holder_run_id`, `zensu_pending_review_claim_file` (exported from
 `zensu-tdd-phase.sh` so the `.claim` suffix is not re-encoded here — a drifted copy would fail
 OPEN, because adoption RENAMES the marker onto the claim and a reader looking for the wrong name
-would see neither file and answer "no work" while a deferred review is live) and
+would see neither file and answer "no work" while a deferred review is live; the accessor now
+takes an OPTIONAL pre-resolved pending path, and the owner module's five former hand-spellings
+call it, so `zensu-tdd-phase.sh` spells the suffix exactly ONCE. A SIXTH spelling survives outside
+that module and belongs on this roster: `hooks/lib/session-control-core-v1.js` hardcodes the whole
+filename `pending-review.json.claim`, which no accessor can reach and nothing pins against this
+one) and
 `_autopilot_publish_workspace_refusal` (both intra-file: the Stop
 hook calls neither, so renaming either is a single-file edit), plus the module-scope
 `ZENSU_AUTOPILOT_WORKSPACE_HOLD_TEXT` that publisher sets — THAT spelling is what

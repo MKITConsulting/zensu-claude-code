@@ -2836,9 +2836,23 @@ zensu_pending_review_file() {
 # only the claim exists — and a reader looking for the wrong name would then see
 # neither file and answer "no work" while another session's deferred review is
 # live.
+# The OPTIONAL argument is a pending-marker path the caller already holds.
+# Without it this resolves the project root itself, which reaches
+# `zensu_resolve_project_dir` and its own `node -e` -- a second full resolution
+# for a value the caller almost always just computed. Every caller inside this
+# module holds it, and so does the Autopilot fence, which runs this on a path
+# reached at every turn end inside the project-wide lease.
+#
+# An EMPTY argument is not "omitted": it is a caller whose own resolution failed,
+# and answering `.claim` for it would name a file in whatever directory the
+# relative path resolved against. It refuses instead.
 zensu_pending_review_claim_file() {
-  local pending_file
-  pending_file="$(zensu_pending_review_file)" || return 1
+  local pending_file="${1:-}"
+  if [ "$#" -ge 1 ]; then
+    [ -n "$pending_file" ] || return 1
+  else
+    pending_file="$(zensu_pending_review_file)" || return 1
+  fi
   echo "${pending_file}.claim"
 }
 
@@ -3160,7 +3174,7 @@ tdd_pending_review_owned_by_other() {
   native_project_root="$(_tdd_native_project_path "$project_root")" || return 1
   pf="$(zensu_pending_review_file)"
   dir="$(dirname "$pf")"
-  claim_file="${pf}.claim"
+  claim_file="$(zensu_pending_review_claim_file "$pf")" || return 1
   _tdd_path_safe "$claim_file" regular-or-absent "$dir" || return 1
   [ -f "$claim_file" ] && [ ! -L "$claim_file" ] || return 1
   native_claim_file="$(_tdd_native_project_path "$claim_file")" || return 1
@@ -3197,7 +3211,7 @@ tdd_adopt_pending_review() {
   owner_pid="$(_tdd_native_process_pid "$owner_pid")" || return 1
   pf="$(zensu_pending_review_file)"
   dir="$(dirname "$pf")"
-  claim_file="${pf}.claim"
+  claim_file="$(zensu_pending_review_claim_file "$pf")" || return 1
   _tdd_prepare_directory "$dir" || return 1
   _tdd_path_safe "$pf" regular-or-absent "$dir" || return 1
   _tdd_path_safe "$claim_file" regular-or-absent "$dir" || return 1
@@ -3269,7 +3283,7 @@ tdd_mark_pending_review_handoff() {
   session_id="$(zensu_resolve_session_id "$supplied_session")" || return 1
   pf="$(zensu_pending_review_file)"
   dir="$(dirname "$pf")"
-  claim_file="${pf}.claim"
+  claim_file="$(zensu_pending_review_claim_file "$pf")" || return 1
   _tdd_path_safe "$claim_file" regular-or-absent "$dir" || return 1
   _tdd_locked_run "$pf" _tdd_mark_pending_review_handoff_critical \
     "$pf" "$claim_file" "$session_id" "$owner_pid"
@@ -3470,7 +3484,7 @@ tdd_release_pending_review_claim() {
   session_id="$(zensu_resolve_session_id "$supplied_session")" || return 1
   pf="$(zensu_pending_review_file)"
   dir="$(dirname "$pf")"
-  claim_file="${pf}.claim"
+  claim_file="$(zensu_pending_review_claim_file "$pf")" || return 1
   _tdd_prepare_directory "$dir" || return 1
   _tdd_paths_safe "$pf" regular-or-absent "$claim_file" regular-or-absent || return 1
   _tdd_locked_run "$pf" _tdd_release_pending_review_claim_critical \
@@ -3526,7 +3540,7 @@ tdd_reset_pending_review_claim() {
   fi
   pf="$(zensu_pending_review_file)"
   dir="$(dirname "$pf")"
-  claim_file="${pf}.claim"
+  claim_file="$(zensu_pending_review_claim_file "$pf")" || return 1
   _tdd_prepare_directory "$dir" || return 1
   _tdd_paths_safe "$pf" regular-or-absent "$claim_file" regular-or-absent || return 1
   _tdd_locked_run "$pf" _tdd_reset_pending_review_claim_critical \
