@@ -903,13 +903,51 @@ if [ "$ADOPT_ELIGIBLE" = "true" ]; then
   else
     ADOPT_RC=$?
     case "$ADOPT_RC" in
-      6) ;; # no pending marker/claim; this is a normal no-work result
+      # rc=6 has TWO causes and they are not the same state. Either there is no
+      # pending marker or claim at all, or a nonterminal run holds this working
+      # tree and the fence weighed the hold as not concerning this Stop. Both are
+      # a normal no-work result here, and no new code distinguishes them on
+      # purpose: the Stop decision is identical, and a third code would have to be
+      # understood by every caller of the adoption verb to buy nothing.
+      #
+      # The SECOND cause has a consequence worth naming where a reader will meet
+      # it: the fence returns before `tdd_adopt_pending_review` runs, and that
+      # call owns the `rm -f` for an EXPIRED marker. So a stale marker under a
+      # held tree is not reaped by this Stop. It is inert while stale and the
+      # first adoption after the hold clears removes it -- a leak, not a wedge.
+      6) ;;
       4)
-        # The locked read or its descriptor-backed contention fallback proved
-        # that a durable run became active after the initial absent snapshot.
-        # Do not take a second contended read here: its legacy rc=1 conflates
-        # lock timeout with absence and could erase that stronger proof.
-        emit_block "Zensu Autopilot Stop denied: a durable run became active while deferred review adoption was waiting for the Outer lock. Retry Stop so the current durable state can be routed safely."
+        # A nonterminal durable run holds this working tree. The occupancy
+        # comparison is CONTAINMENT in both directions, so the holder may be a
+        # run driving a worktree nested below this tree -- or above it. The hold
+        # therefore persists for as long as that run stays nonterminal, and the
+        # previous wording ("retry Stop") prescribed a retry that could never
+        # succeed. Name the holder instead.
+        #
+        # Take the sentence the fence PUBLISHED and never re-derive one. It was
+        # rendered from the record the fence actually judged; any read here would
+        # happen after that fence returned, and the worker reports
+        # `preferred || holders[0]`, so a second FOREIGN run publishing in the
+        # window could be named instead. There is deliberately NO fallback read:
+        # the hook and the library always come from one tree (the plugin root is
+        # derived from this script and re-checked above), so a non-publishing
+        # library cannot pair with a publishing hook — and the only way the value
+        # is empty is that the render itself failed, in which case a second read
+        # would be a fresh chance to name the WRONG run rather than a recovery.
+        # Removing it also removes this file's last module-private call.
+        DEFERRED_HOLD_TEXT="${ZENSU_AUTOPILOT_WORKSPACE_HOLD_TEXT:-}"
+        if [ -z "$DEFERRED_HOLD_TEXT" ]; then
+          # The holder could not be read, so ownership is UNKNOWN here — and the
+          # own-run case is the LIKELY one on this branch, because it is reached
+          # under the same lease contention that made the read fail. Prescribing
+          # a release would therefore aim `--autopilot-release` at this session's
+          # own live generation in exactly the state the renderer withholds it.
+          # Name the condition and the two possibilities instead of a command.
+          DEFERRED_HOLD_TEXT="the holding run could not be identified from here; if it belongs to another session, ask that session to finish or cancel it, and if it is this session's own run, finish or repair it rather than releasing it"
+        fi
+        # The holder clause goes LAST, so a future reword cannot append prose to
+        # a command the way an earlier spelling produced `--confirm.`.
+        emit_block "Zensu Autopilot Stop denied: a nonterminal durable Autopilot run holds this working tree, so this Stop can neither adopt deferred review work here nor infer completion. Retrying Stop cannot clear the hold while that run stays nonterminal. ${DEFERRED_HOLD_TEXT}"
         exit 0
         ;;
       *)
