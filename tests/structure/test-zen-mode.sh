@@ -427,12 +427,264 @@ P19="$(mktemp -d -t zenmode-XXXXXX)"; S19="z19-$$"
 new_session "$P19" "$S19"; helper "$P19" "$S19" --on >/dev/null
 RAW19="$(fire "$P19" "$S19" "do a thing")"
 MISSING19=""
-for FRAG19 in "recap" "first sentence" "OVERRIDES" "one next step" "ONE question" "Step N of M" "user's own language"; do
+for FRAG19 in "recap" "first sentence" "OVERRIDES" "one next step" "ONE question" "chain-progress" "user's own language"; do
   printf '%s' "$RAW19" | grep -qiF "$FRAG19" || MISSING19="$MISSING19 '$FRAG19'"
 done
 [ -z "$MISSING19" ] && check "Z19 reminder carries recap/result-first/precedence/one-step/one-question/anchor/language rules" PASS \
   || check "Z19 reminder missing:$MISSING19" FAIL
 rm -rf "$P19"
+
+# Z19b the two carriers of rule 6 must describe the SAME anchor. Nothing pinned
+# them against each other before: Z19/Z20 read the hook only, Z22-Z25 read
+# SKILL.md only, and the Z20 comment records that the two files deliberately
+# number their rules differently, so no numbering pin exists either. That was
+# tolerable while the rule was one five-word literal; the chain-progress anchor
+# is a rendered SHAPE, so a one-sided reword now leaves the injected reminder and
+# the skill contract asking for different lines with every check still green.
+# Both sides are whitespace-normalized first, exactly as test-promptfoo-zen-mode
+# P8 does — SKILL.md is prose and gets rewrapped, so a line-anchored grep would
+# fail on a reflow that changed no meaning.
+if command -v node >/dev/null 2>&1; then
+  MISS19B="$(HOOK="$HOOK" SKILL="$SKILL" EVALS="$PLUGIN_DIR/evals/zen-mode-reaction/scenarios" node -e '
+    const fs = require("fs");
+    const path = require("path");
+    const norm = (s) => s.replace(/\s+/g, " ").trim();
+    const hook = fs.readFileSync(process.env.HOOK, "utf8");
+    const blocks = [...hook.matchAll(/"additionalContext":\s*"((?:[^"\\]|\\.)*)"/g)]
+      .map((m) => { try { return JSON.parse("\"" + m[1] + "\""); } catch (_) { return ""; } });
+    const active = blocks.find((s) => s.startsWith("zen-mode is ACTIVE"));
+    if (!active) { process.stdout.write("hook-has-no-ACTIVE-directive"); process.exit(0); }
+    const want = norm(active);
+    const bad = [];
+    // The SKILL.md side is SLICED to rule 6. Comparing the whole file would let
+    // rule 6 be gutted while the literals survive anywhere else in the document,
+    // which is agreement about the file and not about the rule.
+    const skillAll = fs.readFileSync(process.env.SKILL, "utf8");
+    const from = skillAll.indexOf("**Anchor multi-step work.**");
+    const to = skillAll.indexOf("7. **Gloss the jargon.**");
+    if (from < 0 || to < 0 || to <= from) bad.push("skill:rule-6-slice-not-locatable");
+    const carriers = { hook: norm(active) };
+    if (from >= 0 && to > from) carriers.skill = norm(skillAll.slice(from, to));
+    // The eval scenarios embed this directive verbatim and are enforced
+    // only by test-promptfoo-zen-mode.sh, which is a LOCAL-only suite that CI
+    // never runs. That is exactly how their copies drifted unnoticed once
+    // before, so this CI-run suite covers them too.
+    // The roster is DERIVED, not hand-listed: a fourth scenario added to
+    // evals/zen-mode-reaction/ would otherwise carry an unchecked directive copy
+    // with this suite green. The floor keeps an emptied or moved directory loud.
+    let scenarios = [];
+    try { scenarios = fs.readdirSync(process.env.EVALS).filter((f) => f.endsWith(".yaml")).sort(); }
+    catch (_) { bad.push("eval-dir:unreadable"); }
+    if (scenarios.length < 3) bad.push("eval-dir:expected-at-least-3-scenarios-got-" + scenarios.length);
+    // Each scenario is SLICED to its spec_block for the same reason SKILL.md is
+    // sliced: a scenario carries several JavaScript assertion bodies with
+    // free-text reason strings, any of which could satisfy a needle while the
+    // embedded directive itself had drifted.
+    for (const f of scenarios) {
+      const p = path.join(process.env.EVALS, f);
+      let raw;
+      try { raw = fs.readFileSync(p, "utf8"); }
+      catch (_) { bad.push("eval:" + f + ":unreadable"); continue; }
+      const start = raw.indexOf("spec_block: |");
+      if (start < 0) { bad.push("eval:" + f + ":no-spec-block"); continue; }
+      const rest = raw.slice(start);
+      const end = rest.search(/\n[A-Za-z_][A-Za-z0-9_]*:/);
+      carriers["eval:" + f] = norm(end < 0 ? rest : rest.slice(0, end));
+    }
+    // One distinguishing literal per anchor requirement, so no clause can be
+    // deleted from a carrier with this check still green. In requirement order:
+    // AC-001 position (with its carve-out fallback), AC-002 the four marks via
+    // the example path plus the failed/blocked mark named in prose, AC-003 the
+    // no-counter prohibition, AC-004 the observation rule stated
+    // unconditionally AND its consequence, AC-005 only-the-steps, AC-006 the
+    // label casing rule, plus the ACTIVATION TRIGGER, which the two carriers
+    // once spelled differently, and the separator disclaimer.
+    const shared = [
+      "chain-progress",
+      "✓fetch ✓parse ▶render",
+      "✗",
+      "·",
+      "observed finish AND pass",
+      "for the step running now",
+      "for one not yet reached",
+      "failing or unresolved outcome",
+      "for one that failed or is blocked",
+      "above the closing next step",
+      "when the one-next-step rule is suspended",
+      "add no separate",
+      "A step is marked done from an observation, never from the plan",
+      "a step you did not see finish stays",
+      "steps this run actually has",
+      "pad with steps nobody planned",
+      "drop one the run traversed",
+      "a position, not a history",
+      "mark of its current attempt",
+      "deliberately did not perform",
+      "canonical pipeline",
+      "short lower-case step names",
+      "the words around them follow the user",
+      "spans several turns",
+      "not a mark",
+    ];
+    // The safety carve-out travels in the SAME verbatim directive string as the
+    // anchor, and the only full-fidelity check on the eval copies (P8) is
+    // local-only, so CI never runs it. Without these, a reworded carve-out would
+    // leave safety-carve-out.yaml — the one live-model check that a warning is
+    // never compressed — grading a directive no session receives, with every CI
+    // suite green. They apply ONLY to carriers that hold the WHOLE directive:
+    // the SKILL carrier is sliced to rule 6, and the carve-out is rule 9.
+    const wholeDirectiveOnly = [
+      "EXCEPTION — for security warnings, irreversible or destructive actions",
+      "full-sentence rule is NEVER suspended",
+      "never treated as a routine decision you may settle yourself",
+    ];
+    for (const name of Object.keys(carriers)) {
+      const text = carriers[name];
+      for (const s of shared) if (!text.includes(norm(s))) bad.push(name + ":missing<" + s.slice(0, 28) + ">");
+      if (name !== "skill") {
+        for (const s of wholeDirectiveOnly) {
+          if (!text.includes(norm(s))) bad.push(name + ":missing-carve-out<" + s.slice(0, 28) + ">");
+        }
+      }
+      // An eval carrier embeds the WHOLE directive, so compare the whole thing
+      // rather than a needle list. Three carve-out needles cannot cover the
+      // credentials trigger, the enumerated suspension list or the
+      // code-context clause; P8 does compare in full, but that suite is
+      // local-only and CI never runs it. This is the CI-side equivalent.
+      if (name.startsWith("eval:") && !text.includes(want)) {
+        bad.push(name + ":directive-not-verbatim");
+      }
+      // The anchor REPLACED the bare marker. Every carrier still names it, but
+      // only inside the prohibition — never again as the instruction.
+      if (/anchor multi-step work with a .?Step N of M/.test(text)) bad.push(name + ":still-instructs-bare-marker");
+      if (/Carry a .?Step N of M.? marker/.test(text)) bad.push(name + ":still-instructs-bare-marker");
+    }
+    // Positive sentinel: this program writes to stdout only when it FINDS
+    // something, so an empty capture used to be indistinguishable from a throw
+    // and reported PASS. The caller requires this exact token.
+    process.stdout.write(bad.length ? bad.join(",") : "OK");
+  ' 2>/dev/null)"
+  RC19B=$?
+  if [ "$RC19B" -ne 0 ]; then
+    check "Z19b cross-carrier pin could not run (node exit $RC19B) — not an all-clear" FAIL
+  elif [ "$MISS19B" = "OK" ]; then
+    check "Z19b every directive carrier agrees on the chain-progress anchor (trigger, position, marks, prohibition, observation rule)" PASS
+  else
+    check "Z19b directive carriers disagree about the anchor: ${MISS19B:-<empty output, program produced no verdict>}" FAIL
+  fi
+else
+  # The suite already invokes node unconditionally (Z5, Z6, new_session, classify),
+  # so a nodeless host cannot reach a green run anyway. Recording a PASS here would
+  # credit a check that did not execute.
+  check "Z19b cross-carrier pin did not run — node is not on PATH" FAIL
+fi
+
+# Z19c the hook-directive extractor above is a hand-copy of the one P8 uses in
+# test-promptfoo-zen-mode.sh. Two copies of a parser that both fail by returning
+# nothing is the shape that lets a change to the hook's emission silently
+# neutralize both suites, so they are pinned against each other by source.
+# An earlier spelling of this check could not fail: it grepped THIS file for a
+# literal that its own pattern argument contained, so the count stayed >= 1 even
+# with the extractor deleted, and the regex it is named for was assigned to a
+# variable nothing read. It now extracts the regex SOURCE from each suite and
+# compares the two strings, with each file's own comparison lines excluded so a
+# pattern argument cannot satisfy the check it belongs to.
+if command -v node >/dev/null 2>&1; then
+  MISS19C="$(A="$0" B="$PLUGIN_DIR/tests/structure/test-promptfoo-zen-mode.sh" node -e '
+    const fs = require("fs");
+    // Compare the WHOLE extractor statement range, not just the regex line. A
+    // line-scoped comparison left the two other hand-copied halves — the
+    // JSON.parse unescape and the ACTIVE selector — free to diverge, which is
+    // exactly the drift this check is named for; it also reported a false red
+    // when both suites were improved identically, because it pinned the current
+    // spelling rather than the two copies against each other.
+    const FROM = "const blocks = ";
+    const TO = "const active = ";
+    const pick = (p) => {
+      const src = fs.readFileSync(p, "utf8");
+      const a = src.indexOf(FROM);
+      if (a < 0) return null;
+      const b = src.indexOf(TO, a);
+      if (b < 0) return null;
+      const end = src.indexOf("\n", b);
+      // Normalize whitespace so indentation differences between the two suites
+      // are not read as a divergence; the STATEMENTS are what must agree.
+      return src.slice(a, end < 0 ? src.length : end).replace(/\s+/g, " ").trim();
+    };
+    const a = pick(process.env.A);
+    const b = pick(process.env.B);
+    const bad = [];
+    if (a === null) bad.push("test-zen-mode:extractor-not-locatable");
+    if (b === null) bad.push("test-promptfoo-zen-mode:extractor-not-locatable");
+    if (a !== null && b !== null && a !== b) bad.push("extractor-source-differs");
+    process.stdout.write(bad.length ? bad.join(",") : "OK");
+  ' 2>/dev/null)"
+  RC19C=$?
+  if [ "$RC19C" -ne 0 ]; then
+    check "Z19c extractor comparison could not run (node exit $RC19C) — not an all-clear" FAIL
+  elif [ "$MISS19C" = "OK" ]; then
+    check "Z19c the whole ACTIVE-directive extractor is identical in both zen-mode suites" PASS
+  else
+    check "Z19c the ACTIVE-directive extractor has diverged: ${MISS19C:-<empty output, program produced no verdict>}" FAIL
+  fi
+else
+  check "Z19c extractor comparison did not run — node is not on PATH" FAIL
+fi
+
+# Z19d docs/configuration.md carries the anchor for OPERATORS and is read by no
+# other suite, while sibling features pin their own config-doc rows. A reworded
+# rule 6 must not leave the operator doc describing a different line.
+if command -v node >/dev/null 2>&1; then
+  MISS19D="$(CFG="$PLUGIN_DIR/docs/configuration.md" node -e '
+    const fs = require("fs");
+    // The hook ROW is the one whose FIRST cell names the hook. The config-key
+    // rows below it name the same file in their second cell, and a further row
+    // mentions it in prose, so a bare substring match selects four lines.
+    const rows = fs.readFileSync(process.env.CFG, "utf8").split("\n")
+      .filter((l) => /^\|\s*`user-prompt-zen-mode\.sh`\s*\|/.test(l));
+    if (rows.length !== 1) { process.stdout.write("expected-exactly-one-zen-hook-row-got-" + rows.length); process.exit(0); }
+    const row = rows[0];
+    // The operator row is held to a DEFINED SUBSET of the Z19b clause set, not to
+    // parity — an earlier comment here claimed parity and a grep disproved it.
+    // What the row must carry: the activation trigger, the placement and its
+    // carve-out fallback, all four marks, the pass qualification, the
+    // unresolved half, the observation rule, the retry rule, the
+    // only-the-steps rule, the no-canonical-pipeline rule, the casing rule, the
+    // omission exception, the not-a-mark declaration and the counter
+    // prohibition. What it deliberately omits, because a config table is a
+    // summary and not a second copy of the directive: the step-source and
+    // planless-fallback sentences, and the per-mark definition phrases beyond
+    // the glyphs themselves.
+    const need = [
+      "chain-progress", "✓", "▶", "·", "✗",
+      "spans several turns",
+      "marked from an observation and never from the plan",
+      "above the closing next step",
+      "when the one-next-step rule is suspended",
+      "mark of its current attempt",
+      "observed finish AND pass",
+      "failing or unresolved outcome",
+      "this run actually has",
+      "canonical pipeline",
+      "short lower-case step names",
+      "deliberately did not perform",
+      "not a mark",
+      "add no separate",
+    ];
+    const bad = need.filter((n) => !row.includes(n)).map((n) => "missing<" + n.slice(0, 24) + ">");
+    process.stdout.write(bad.length ? bad.join(",") : "OK");
+  ' 2>/dev/null)"
+  RC19D=$?
+  if [ "$RC19D" -ne 0 ]; then
+    check "Z19d config-doc row check could not run (node exit $RC19D) — not an all-clear" FAIL
+  elif [ "$MISS19D" = "OK" ]; then
+    check "Z19d docs/configuration.md zen-mode row describes the anchor, all four marks and the observation rule" PASS
+  else
+    check "Z19d docs/configuration.md zen-mode row is out of step: ${MISS19D:-<empty output, program produced no verdict>}" FAIL
+  fi
+else
+  check "Z19d config-doc row check did not run — node is not on PATH" FAIL
+fi
 
 # Z20 the safety carve-out survives into the per-prompt reminder, not just the skill.
 # The carve-out must also lift the one-question and one-next-step caps, or a
@@ -510,11 +762,12 @@ fi
 if printf '%s' "$SKILL_FLAT" | grep -qiF 'Never compress a warning' \
   && printf '%s' "$SKILL_FLAT" | grep -qiF 'irreversible or destructive' \
   && printf '%s' "$SKILL_FLAT" | grep -qiF 'credentials' \
-  && printf '%s' "$SKILL_FLAT" | grep -qiF 'Rules 3, 4, 5, 7 and 8 are suspended' \
+  && printf '%s' "$SKILL_FLAT" | grep -qiF 'Rules 3, 4, 5 and 8, and rule 7' \
+  && printf '%s' "$SKILL_FLAT" | grep -qiF 'jargon gloss is NOT' \
   && printf '%s' "$SKILL_FLAT" | grep -qiF 'never suspended'; then
-  check "Z23 SKILL.md carve-out lifts rules 3/4/5/7/8 but keeps the full-sentence rule" PASS
+  check "Z23 SKILL.md carve-out lifts rules 3/4/5/8 and rule 7's changed-lines half, keeps the gloss and the full-sentence rule" PASS
 else
-  check "Z23 SKILL.md safety carve-out missing, or does not lift 5/8, or lifts the precedence rule" FAIL
+  check "Z23 SKILL.md safety carve-out missing, or does not lift 5/8, or lifts the gloss or the precedence rule" FAIL
 fi
 
 # Z24 SKILL.md forbids trading findings for brevity

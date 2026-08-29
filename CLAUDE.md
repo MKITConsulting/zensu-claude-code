@@ -3296,6 +3296,64 @@ the flag. Exactly ONE invocation there omits it — the L10 case, whose whole su
 that the variable is honoured — and `L28` pins that it stays exactly one, because a
 second exemption is indistinguishable from a forgotten `env -u`.
 
+## zen-mode Chain-Progress Anchor (`user-prompt-zen-mode.sh` rule 6)
+
+Rule 6 of the zen-mode contract asks for a one-line progress anchor above the closing
+next step. It lives in the hook, the skill, the operator doc row and EVERY
+`evals/zen-mode-reaction/scenarios/*.yaml`, and `tests/structure/test-zen-mode.sh` pins all
+of them — the count is deliberately not written out here, because the eval roster is DERIVED
+from the directory and a hand-maintained numeral is exactly what a driven loop cannot catch: `hooks/user-prompt-zen-mode.sh` (the ACTIVE `additionalContext` directive — the
+authoritative copy, re-injected every prompt), `skills/zen-mode/SKILL.md` rule 6,
+`docs/configuration.md`'s `user-prompt-zen-mode.sh` hook row, and every
+`evals/zen-mode-reaction/scenarios/*.yaml`, which embed the whole directive verbatim.
+Z19b pins the directive carriers against each other, Z19c pins the extraction regex
+across the two zen suites, Z19d pins the operator row.
+
+**The anchor is deliberately DECOUPLED from `hooks/lib/zensu-autopilot-state.sh`.** An
+earlier revision used that module's `STAGES` set as the label vocabulary, and review
+found the copy already wrong in three ways: `GATES` (unconditional) was missing while
+`VALIDATE`/`COVER` (gated on `state.options`) were listed, `AWAIT_TDD` was missing too,
+and the four marks are linear while that machine is cyclic — `GATES`, `CONVERGE`,
+`VALIDATE` and `COVER` all re-enter through `toAwaitTdd`, so a retried stage had no
+defined mark. The rule now names the steps the SESSION observed plus the ones it told
+the user it would take, and explicitly forbids copying a canonical pipeline out of
+another component. **Do not reintroduce the coupling**, and note that the worked EXAMPLE
+is part of it: a model copies the example before it obeys the prohibition beside it, so
+the example's step names must belong to no shipped component (they are checked against
+`.claude-plugin/plugin.json`'s skill list by hand — `implement` is a skill and `verify` is the stem of `verify-feature`,
+`fetch`/`parse`/`render` are not).
+
+**Three couplings fire in the UNOBVIOUS direction**, the same shape §"Gate-Disable
+Prefixes" records for G12 — an ordinary edit elsewhere reddens a suite named for the
+zen-mode hook, and nothing points at it from the side that changes:
+
+- Z19b DERIVES its eval carrier roster from `evals/zen-mode-reaction/scenarios` with a
+  `< 3` floor, so ADDING or REMOVING a scenario reddens this suite. The derivation
+  replaced a hand-listed roster precisely because an added scenario was silently
+  uncovered.
+- Z19c binds `tests/structure/test-promptfoo-zen-mode.sh` and compares the
+  ACTIVE-directive extraction regex SOURCE, so editing that suite reddens this one.
+- Z19d greps the `docs/configuration.md` hook row and anchors on
+  `^\|\s*`user-prompt-zen-mode\.sh`\s*\|`, so rewording that row — or renaming the hook
+  file — reddens this suite.
+
+**The safety carve-out rides in the SAME directive string as the anchor**, and P8 in
+`test-promptfoo-zen-mode.sh` — the only full-fidelity check that the eval copies match
+the hook — is `localStructureTests` and never runs in CI (`run-all.sh --ci` skips it).
+Z19b therefore carries three carve-out needles applied to the whole-directive carriers
+only, NOT to the `skill` carrier, which is sliced to rule 6 while the carve-out is rule 9.
+Without them a reworded carve-out would leave `safety-carve-out.yaml` grading a directive
+no session receives, with every CI suite green.
+
+**Known gap, accepted:** `docs/architecture.md`'s hand-computed zen-mode injection
+figures (the character count and the KB/KiB totals derived from it) go stale whenever
+this directive changes, and nothing pins them — `C6` in
+`tests/structure/test-evidence-discipline.sh` pins only the evidence-discipline hook's
+`emits N characters`. That document states in its own words that those numbers are
+illustrative and unmaintained. A separate pre-existing error sits in the same paragraph:
+it attributes `C6` to `tests/structure/test-best-solution-first.sh`, which contains no
+`C6` at all.
+
 ## Pull Request Workflow
 
 **Never commit or push to a closed or merged PR's branch.** Once a PR is merged or closed, its branch is dead — additional commits there belong on a new branch with a new PR.

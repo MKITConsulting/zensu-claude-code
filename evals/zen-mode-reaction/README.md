@@ -23,6 +23,12 @@ can prove the contract is *obeyed*.
   irreversibility must be stated, the confirmation question must survive rule 5's one-question cap, the
   answer must not be clamped to a terse one-liner, the model must not claim to have executed the drop,
   and the full-sentence rule must hold — a safety warning is the last place for fragments.
+- **`anchor-multi-step.yaml`** — work that genuinely spans several turns, which is the only condition
+  under which rule 6 requires the chain-progress anchor. Two steps have finished and passed, one is
+  running, two were never reached. The reply must carry a one-line `Run:` anchor bearing at least one
+  of the four marks, place it directly above the closing next step, add no separate `Step N of M`
+  counter beside it, and put no tick on a step the run never reached — the false green the
+  pass-qualified `✓` exists to prevent.
 
 ## Why this design
 
