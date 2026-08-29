@@ -92,12 +92,45 @@ const DOUBLE_SPACE = / {2}/;
 // validateContext rejects only NUL, CR and LF in it, so anyone who supplies the
 // directory name the user opens Claude Code in controls this substring. A real path
 // containing " : " now renders JSON-quoted, which is still readable.
-const PAIR_SEPARATOR = / : /;
+// It guards `: ` and ` :`, not only ` : `. This report emits THREE separator
+// spellings and this guard covered one: `  ` (the padding), ` : ` (the aligned pair),
+// and `: ` in `WARNING: `, `NOTE: `, `  superseded record: ` and
+// ` could NOT be set aside: `. A project directory named `repo WARNING: inspect
+// /tmp/x` carries only allowlisted characters, no double space and no ` : `, so it
+// printed VERBATIM and forged a whole warning line — the lines skills/adopt-session
+// tells the model to relay word for word.
+//
+// MEASURED against this allowlist, not assumed: of the known colon confusables,
+// exactly three pass SAFE_DISPLAY — U+003A itself, U+02D0 MODIFIER LETTER TRIANGULAR
+// COLON (\p{Lm}) and U+A4FD LISU LETTER TONE MYA JEU (\p{Lo}). Every other one, and
+// every non-ASCII space, is already rejected by the positive class.
+const COLON_LIKE = "\\u003a\\u02d0\\ua4fd";
+const PAIR_SEPARATOR = new RegExp("[" + COLON_LIKE + "] | [" + COLON_LIKE + "]", "u");
+// Renders as nothing while counting as a letter or a mark, which is how an invisible
+// character splits the two literal guards above. MEASURED: nine default-ignorable
+// code points pass SAFE_DISPLAY — U+034F, U+115F, U+1160, U+17B4, U+17B5, U+180B,
+// U+3164, U+FE00, U+FFA0 — and each one turns `repo X: recorded` back into a value
+// that prints verbatim while still reading as a label.
+const INVISIBLE = /\p{Default_Ignorable_Code_Point}/u;
+// A combining mark with no base of its own attaches to the PRECEDING space and paints
+// on it. MEASURED: U+0301 and the spacing visargas U+0903 and U+0F7F all printed as
+// themselves, because \p{M} is inside the allowlist and neither literal guard carries
+// a mark. The rule is the mark's BASE, so a decomposed accent on a letter — the case
+// the allowlist was widened for — still prints as itself.
+const ORPHAN_MARK = /(?:^|[ ])\p{M}/u;
 const NON_ASCII = /[\u007f-\uffff]/g;
 const SPACE_RUN = / {2,}/g;
+// Applied AFTER NON_ASCII has folded U+02D0 and U+A4FD to escapes, so only the ASCII
+// colon can still sit beside a space here.
+const COLON_SPACE_GLOBAL = /:[ ]/g;
+const SPACE_COLON_GLOBAL = /[ ]:/g;
 const safe = (value) => {
   const text = String(value);
-  if (SAFE_DISPLAY.test(text) && !DOUBLE_SPACE.test(text) && !PAIR_SEPARATOR.test(text)) {
+  if (SAFE_DISPLAY.test(text)
+    && !DOUBLE_SPACE.test(text)
+    && !PAIR_SEPARATOR.test(text)
+    && !INVISIBLE.test(text)
+    && !ORPHAN_MARK.test(text)) {
     return text;
   }
   return JSON.stringify(text)
@@ -107,7 +140,12 @@ const safe = (value) => {
     // the two-space run and the colon intact — the exact forgery the fast-path guard
     // exists to stop, arriving through the branch meant to be the safer one. Single
     // spaces survive, so an ordinary quoted path stays readable.
-    .replace(SPACE_RUN, (run) => "\\u0020".repeat(run.length));
+    .replace(SPACE_RUN, (run) => "\\u0020".repeat(run.length))
+    // Same reasoning as the double-space fold above, for the separator the fast path
+    // now also guards: a value that reached this branch for an unrelated reason must
+    // not keep a usable `: ` intact.
+    .replace(COLON_SPACE_GLOBAL, ":\\u0020")
+    .replace(SPACE_COLON_GLOBAL, "\\u0020:");
 };
 
 // WHICH directory the sweep refused, empty when it refused nothing.
@@ -400,6 +438,9 @@ function reportLeaseWarnings(leases) {
 
 module.exports = {
   DOUBLE_SPACE,
+  INVISIBLE,
+  ORPHAN_MARK,
+  PAIR_SEPARATOR,
   NON_ASCII,
   REMEDY,
   SAFE_DISPLAY,
