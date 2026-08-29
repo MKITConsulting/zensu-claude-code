@@ -1,11 +1,14 @@
 # Gates
 
-Four PreToolUse gates keep an agent inside the workflow conventions, plus TWO
+Five PreToolUse gates keep an agent inside the workflow conventions, plus TWO
 completion-time `--tdd-complete` refusals of the same class: the edit-landing
 receipt (discipline patch 10 in [tdd-manager-workflow.md](tdd-manager-workflow.md))
-and §Requirements-Table Gate below, which has its own section here. All six are
-convention-nudges with a documented escape hatch, not security boundaries — see
-[Session Control](session-control.md) for the part that is.
+and §Requirements-Table Gate below, which has its own section here. Six of the
+seven are convention-nudges with a documented escape hatch, not security
+boundaries — see [Session Control](session-control.md) for the part that is. The
+exception, §Plugin-Data Guard, deliberately has no escape hatch, and it is still not
+a security boundary: it closes one channel to one directory and names the ones it
+leaves open.
 
 **Two commands stay reachable when the Session Control bind fails**, in every
 bind failure including a record that exists and disagrees, and they are
@@ -192,6 +195,91 @@ instruction that cannot succeed until its cap releases the guard.
 - **It is disclosed in both states.** The SessionStart banner names the grant while it is on, and a
   `/zensu:doctor` row reports it either way — that row is not silenceable by the flag. A capability
   the plugin hands itself is exactly the thing that must not be quiet.
+
+## Plugin-Data Guard
+
+A further PreToolUse gate (`pre-write-plugin-data-guard.sh`, on `Edit|Write|MultiEdit` and
+`NotebookEdit`) — the ordinals in this file stop here; the count lives in the intro — denies a file-mutating tool call whose resolved target lies inside
+`CLAUDE_PLUGIN_DATA`. That store holds this session's immutable Session Control record
+(`<plugin data>/session-control/v1/`) and the review-evidence leases, so without this a gate can
+end up reading its own boundary from a file the gated party rewrote. It does **not** cover
+`<project>/.zensu/state/`, so do not read it as protecting "the anchors every gate binds to" —
+see the residuals below.
+
+**It closes a measured hole, not a hypothetical one — on the main thread.** Measured 2026-08-28
+and recorded in [multi-repo-chains-spec.md](multi-repo-chains-spec.md) §6.1.2: all three
+PreToolUse hooks that match a `Write` — `pre-reviewer-capability-gate.sh` on the `.*` matcher,
+plus `pre-edit-tdd-reminder.sh` and `pre-write-secret-scan.sh` — answered *allow* for a target
+inside the store, in every chain state (no chain armed, a vanilla chain armed, and a strict chain
+at `RED_WRITE`). None of them performs a containment check. The main-thread qualifier is
+load-bearing: `hooks/lib/reviewer-capability-v1.js` already denies every NON-main principal a
+write into this store and returns early for `main-v1`, so the net delta of this gate is exactly
+main-thread `Edit`/`Write`/`MultiEdit`/`NotebookEdit` — which is the channel the measurement found
+open. It is a hook of its own rather than a
+branch inside the phase gate because that hook returns early while no chain is armed, which is
+exactly the state in which the store is read.
+
+**Scope is deliberately narrow, and the asymmetry is accepted.** Only the store is protected. A
+write anywhere else outside the project root stays allowed here, so this gate is narrower than
+the source-write gate's rule (B), which denies every redirect escaping the project root (temp
+roots excepted). The wider rule would need a temp carve-out of its own and would refuse ordinary
+work on files outside the project; closing the measured hole does not. It applies to **every
+principal** — a subagent must not be able to write the store either.
+
+**Seven residuals, named because "the store is protected" is false without them.** First, the
+**Bash channel is not covered at all**: `bash-source-write-parse.js` filters candidate targets
+through its `SRC` extension set, which carries no `json`, and `mv`/`cp` are documented as out of
+scope — so a shell redirect, copy, move or link into the store passes every Bash gate. Anything
+holding `Bash` still reaches the store, and closing that means an extension-independent rule in
+the Bash parser, which this change does not add. Second, **`<project>/.zensu/state/` is not in
+the store and is not covered**: the workflow document, the frozen `vanilla` flag and the bypass
+ledger live there, and `pre-edit-tdd-reminder.sh` returns early while no chain is armed. Third, a
+**hard link** outside the store to a file inside it is judged by its own path and allowed;
+creating one needs `ln`, so it sits behind the first residual. Residuals two and three are
+main-thread-only — `reviewer-capability-v1.js` covers both for a non-main principal. Fourth, only
+the four tool names in the module's `WRITE_TOOLS` are judged: `apply_patch` is in that sibling's
+`MUTATING_FILE_TOOLS` and is **not** here, and no MCP write tool is matched, so an unknown tool
+allows. Fifth, the store's **location** comes from the ambient `CLAUDE_PLUGIN_DATA` rather than
+from the bound Session Control record's authoritative `plugin_data`; a wrong or absent value
+disarms the gate, disclosed on stderr. Binding the record here would add a deny path to a control
+whose entire fault direction is *allow*, so the ambient read is deliberate — and stated, because
+"no escape exists" would otherwise read as stronger than it is. Sixth, the plugin **root** is not
+covered — only the data store is; `reviewer-capability-v1.js` protects both trees for a non-main
+principal — a superset of the protected ROOT SET, though resolved by a weaker walk, so on a
+`<symlink>/../x` spelling this gate denies where that one allows. Seventh, the decision is taken at
+PreToolUse while the tool opens the file afterwards, so a component swapped in between is
+followed — a property of the hook shape, not of the walk, and the reason this gate is described
+as a control rather than a guarantee.
+
+**Resolution imitates the kernel, component by component.** Two bypasses of the same class were
+measured here before the walk existed, and both came from resolving the spelling before resolving
+the links: a **dangling** leaf symlink into the store (`realpath` cannot resolve a destination that
+does not exist yet, while the tool's own `open(O_CREAT)` follows the link in), and
+`<symlink-into-store>/../x` (`path.resolve` collapses `..` **lexically**, so the link was never
+read). `resolveTargetPath` therefore follows a symlink at every component and applies `..` to the
+already-resolved prefix, bounded on both the component count and the link hops.
+
+**There is no escape**, by design: no `ZENSU_*=off` variable and no config flag. A switch would
+hand back exactly the capability the guard removes, so nothing here lands a bypass-ledger entry
+either — there is no gate escape to record. `session-start-evidence-discipline.sh` is the
+precedent for a control with no switch.
+
+**Every fault allows, except the shared plugin-root identity guard.** A missing `node`, an
+absent, empty or unresolvable `CLAUDE_PLUGIN_DATA`, an unparseable payload, or a module that will
+not load returns *allow*. The exception is the plugin-root check every sibling gate carries: a
+mismatched inherited `CLAUDE_PLUGIN_ROOT` still refuses with exit 2, and on this matcher that
+refusal blocks the call. Three of the allowing faults carry a stderr note: the
+containment module failing to load, a payload the module cannot read (a **payload** fault, not a
+load fault), and an unusable `CLAUDE_PLUGIN_DATA` — the one that turns the control off completely
+and would otherwise render byte-identical to a clean allow. Three faults are **silent** and cannot
+carry a note at all, because the shell wrapper returns before `node` runs: a missing `node`, a
+`hooks/lib` its `cd -P` cannot enter, and a `plugin-data-guard-v1.js` that is absent or is a
+symlink. Denying there would block ordinary in-project
+writes, which is strictly worse than the hole this closes. Containment is not re-implemented:
+`within` and `msysToDrive` come from `hooks/lib/bash-source-write-parse.js`, and the decision
+lives in `hooks/lib/plugin-data-guard-v1.js`.
+`tests/structure/test-plugin-data-guard.sh` pins the behavior, both directions, in all three
+chain states.
 
 ## TDD Phase Gate
 

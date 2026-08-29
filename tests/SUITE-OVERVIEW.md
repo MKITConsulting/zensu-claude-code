@@ -13,9 +13,12 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (144 = 137 + 7), **and §3 is too**: its eleven CI group headers
-sum to 137, the twelfth (local-only) adds 7, and every one of the 144 manifest suites appears
-in exactly one group. §7's profile table was re-derived from
+reconciled to that manifest (146 = 139 + 7). **§3 is NOT fully reconciled to it**, and the
+residual is stated rather than asserted away: its eleven CI group headers sum to 138 and the
+twelfth (local-only) adds 7, so one CI suite in the manifest — `test-session-trail-lineage.sh` —
+appears in no §3 group. That gap predates both the plugin-data guard, which is filed under
+§"Bash gates, witness & secrets", and the reviewer-spawn grant, which is filed under
+§"Review chain & findings". §7's profile table was re-derived from
 `tests/profiles/windows-ci.v1.json` rather than described, so its seven shard ids and their
 membership are the JSON's own, and the entry total is **42**.
 
@@ -41,9 +44,9 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **144** — 137 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **137 structure suites + 5 offline evals = 142 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 144 − 137 gap | — |
-| `tests/structure/*.test.js` (`node --test` units) | **24 files** | invoked *by* parent `.sh` suites |
+| `tests/structure/test-*.sh` (deterministic shell) | **146** — 139 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **139 structure suites + 5 offline evals = 144 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 146 − 139 gap | — |
+| `tests/structure/*.test.js` (`node --test` units) | **25 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
 | Windows contract profiles | **7** (`windows-shard-1`…`-7`, 42 suite entries) | `ci.yml` matrix, `run-profile.js` |
@@ -54,8 +57,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 144 structure suites + 5 offline evals | none |
-| `--ci` | 137 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 146 structure suites + 5 offline evals | none |
+| `--ci` | 139 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -145,17 +148,26 @@ generation- and ticket-bound termination, the single planning gate, review-budge
 rearm/retirement, the read-only SessionStart resume hook, and a composed full-lifecycle
 walk.
 
-### Bash gates, witness & secrets (8)
+### Bash gates, witness & secrets (9)
 `artifact-redaction` · `bash-source-write-gate` · `bash-zensu-gate` · `bypass-ledger` ·
-`post-bash-witness` · `secret-scan-gate` · `skill-workflow-markers` ·
+`plugin-data-guard` · `post-bash-witness` · `secret-scan-gate` · `skill-workflow-markers` ·
 `witness-scenario-assertions`
 
 Covers the PreToolUse(Bash) source-write gate incl. rule (C) git-repo escape
 (183 probe cases + a 30-case pure unit suite), the `zensu <noun> <verb>` write gate,
 the bypass ledger (gate escapes only — ~100 assertions), the post-Bash witness log
 (anti-hallucination trail), the build-time guard that a skill never runs a zensu
-mutation without `--workflow-begin` / `--workflow-end` markers, the secret-scan gate, and
-the writer-side redaction that keeps `.zensu/plans` and `.zensu/logs` artifacts free of
+mutation without `--workflow-begin` / `--workflow-end` markers, the secret-scan gate, the
+plugin-data containment gate (66 checks, skip-aware floor `EXPECTED_CHECKS=65`: the store denied in all
+three chain states with an in-project allow control each and an armed-state premise, all four
+write tool names, the anchored-containment and relative-target bites, the symlink family — a
+symlinked directory, a dangling leaf, and `..` after a symlink into the store, each with a
+control in the other direction — a case-variant store prefix, a two-hop symlink, the deny-reason
+and no-escape assertions, a payload-declared non-main principal whose premise consults
+`claude-principal-v1.js` itself, a second-path-field row, six faults covered — four asserting their own reason literal and two asserting the documented
+silence, the exit-2 plugin-root refusal, two source-absence checks with controls, and a
+two-group matcher shape compared against the module's exported tool set), and the writer-side
+redaction that keeps `.zensu/plans` and `.zensu/logs` artifacts free of
 absolute developer paths (~100 assertions).
 
 ### Skill contracts (20)

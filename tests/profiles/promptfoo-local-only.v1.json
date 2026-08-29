@@ -59,6 +59,7 @@
     "test-plan-payload-fallback.sh",
     "test-plan-requirement-ids.sh",
     "test-plan-review-skill.sh",
+    "test-plugin-data-guard.sh",
     "test-post-bash-witness.sh",
     "test-post-review-autopilot-claim.sh",
     "test-post-review-outer-ownership-root.sh",
