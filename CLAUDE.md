@@ -2104,10 +2104,10 @@ Ten things are coupled and must move together:
   module is required LAZILY inside `reviewerDenialRows`, so a load failure
   degrades one row, while a top-level require would take the whole report down.
   `DENIAL_RULE` in `stop-chain-enforcer.sh` carries the same identity again — and so
-  do five further files. **Do not treat any enumeration of them as complete.** The
-  literal lives in EIGHT files under `hooks/` (27 occurrences, measured 2026-08-23 —
-  and the grep instruction below is itself one of them, which is why the occurrence
-  number moves when this very paragraph is edited and the FILE count does not),
+  do six further files. **Do not treat any enumeration of them as complete.** The
+  literal lives in NINE files under `hooks/` (29 matching lines, measured 2026-08-29
+  as `grep -rc … | awk` summed — and the grep instruction below is itself one of them,
+  which is why the number moves when this very paragraph is edited),
   including two functional comparisons a rename breaks silently:
   `post-review-tdd-delegate.sh`'s `SUBAGENT_TYPE` test and `claude-principal-v1.js`'s
   list entry. A census in prose goes stale the next time a site is added, which is why
@@ -2115,8 +2115,16 @@ Ten things are coupled and must move together:
   `grep -rn 'zensu:code-reviewer' hooks/` and change every site.** ONE pair is
   machine-checked — `test-doctor.sh` P1by pins `REVIEWER_AGENT` against the exporting
   `REVIEWER_SUBAGENT_TYPE`, the pair most likely to diverge because the require is lazy
-  and nothing at load time compares them. **The other six files are NOT pinned**, in
-  the same sense `WRAP` is unpinned above. Rename the agent in one place only and
+  and nothing at load time compares them. A SECOND carrier is pinned, and the count
+  below is derived from both: `ZENSU_REVIEW_SPAWN_IN_SCOPE` in
+  `hooks/lib/zensu-tdd-phase.sh` made that file the NINTH carrier, and because it names
+  `zensu:review-aspect` and `zensu:review-judge` in the same sentence a rename of ANY of
+  the three identities lands there — so T38 in
+  `tests/structure/test-stop-enforcer-self-review-routing.sh` asserts all three on the
+  emitted directive. Nine files, three pinned (the lazy-require pair plus this one),
+  so **the other six files are NOT pinned**, in the same sense `WRAP` is unpinned
+  above. Re-derive that number when a carrier is added or a pin lands; it is arithmetic
+  over two facts stated here, not an independent claim. Rename the agent in one place only and
   the surviving copies keep telling the user to allow a subagent name nothing
   spawns, with every check green.
   Beside the reactive row, that file's `permissionExposureRows` reads
@@ -2496,6 +2504,13 @@ the doctor row — is re-decided per host. `scanTranscript(path, options)` takes
   skew, so diagnose it by checking whether the executing plugin root actually contains
   `hooks/lib/reviewer-spawn-denial-v1.js` before touching the marker set. T36b pins the
   guard and its position ahead of the invocation.
+- **The "one further attempt" sanction can be re-offered.** Its withdrawal keys on
+  `REVIEWER_DENIALS >= 2`, and that count is computed over the scanned transcript tail
+  (`MAX_TAIL_BYTES` / `MAX_LINES`), not over durable state — so in a long enough session
+  two earlier refusals scroll out of the window and the arm sanctions a retry again.
+  Closing it means carrying the count in per-session state. The code comment beside the
+  arm in `stop-chain-enforcer.sh` and the `**Known gap:**` clause in
+  `docs/tdd-manager-workflow.md`'s host-refusal paragraph are the other two carriers.
 - The verdict has no chain-generation lower bound. After a cap release and a fresh
   `/zensu:tdd`, the newest reviewer result in the transcript is still the old refusal,
   so the branch fires again before any new spawn is attempted. The reason text handles
@@ -2673,6 +2688,67 @@ new warning bullet placed above the exposure one fails that pin while naming the
   shell suite only. `tests/structure/reviewer-spawn-allow-v1.test.js` does exactly that: it maps
   each member to `agents/<name>.md` and requires the exact read trio, so widening
   `REVIEWER_TYPES` with an unconfined agent fails there.
+
+## Review-Spawn Scope Sentence (`ZENSU_REVIEW_SPAWN_IN_SCOPE`)
+
+Some hosts inject a session rule telling the model not to spawn a subagent the user
+did not ask for. On Claude Code 2.1.248 it arrives as the `heron_brook` prompt
+section, whose built-in fallback a server-supplied `tengu_heron_brook` value replaces
+wholesale. It is prompt-level steering, **not a gate** — no hook enforces it and no
+bypass-ledger entry records it — and a model that reads it as a flat prohibition
+withholds the very spawns the review chain is made of, silently, until the Stop cap
+releases the guard. That is an observed session outcome, not a hypothesis.
+
+**The sentence does NOT rule on that rule's scope, and two rejected drafts are why.**
+The rule's condition is PROVENANCE — who asked — and a hook cannot observe it:
+`plan-approved-delegate.sh` has a documented fast-path that arms the workflow
+non-interactively with no human present, and the Stop enforcer itself arms an adopted
+deferred-review generation, so on both paths the spawns genuinely ARE unrequested. The
+first draft asserted the user had asked (false on both). The second asserted the rule
+"is about ad-hoc fan-out", which swapped the rule's own criterion for one the plugin
+can always satisfy — the same error one clause over. What ships states the observable
+SHAPE and then ROUTES: withholding is allowed, but not silently, so the user decides.
+Never re-open this by giving the plugin a verdict on a restraint it does not own.
+
+**One owner, three render sites, one deliberate non-site.** The owner is
+`hooks/lib/zensu-tdd-phase.sh` under its own `# --- Review-spawn scope sentence (shared directive text)` banner — NOT part of the bypass-ledger section it sits below, whose two message
+constants have their own contract. It is rendered by `stop-chain-enforcer.sh`'s resume
+directive and by BOTH severity arms of `post-review-tdd-delegate.sh`'s fix-round
+directive. The host-refusal branch deliberately does not render it: **do not restate
+that arm as user-gated** — it fires on `reviewer_spawn_denied`, the scanner's own
+`blocked` verdict, with no user utterance involved. It is withheld because that branch
+already tells the model the spawn CANNOT succeed, so a scope argument there would read
+as pressure to work around a refusal.
+
+**Residual carriers, stated rather than closed.** `skills/tdd/SKILL.md` Phase 6
+orders the FIRST spawn of every chain before any hook directive exists, so a session
+that withholds the very first fan-out learns this only after one blocked Stop — one
+turn, not a wedge. And `hooks/lib/chain-recovery-v1.js`'s `NEXT_COMMAND` instructs a
+reviewer spawn from JS, where a shell constant is structurally unreachable; if those
+hints ever need the clause the owner MOVES to a shared JS module, it is never
+hand-copied.
+
+**Two further skill flows order the same panel and are NOT covered, and the bound
+there is worse.** `skills/cover/SKILL.md` and `skills/wargame/SKILL.md` (with its
+`references/goal-contract.md`) both mandate the review-aspect + code-reviewer fan-out,
+and `cover` states in its own body that it is skill-driven and NOT Stop-hook-gated. So
+KNOWN BOUND 1's mitigation — "one blocked Stop, not a wedge" — does not apply there:
+a withheld fan-out in those flows is permanently silent. That is stated, not fixed. The
+sentence says "armed in this session", which is literally about a `--tdd-begin` chain,
+so those flows are out of its scope by construction rather than by oversight — but a
+reader must not take the two-carrier residual list above as the whole picture.
+
+`tests/structure/test-stop-enforcer-self-review-routing.sh` T38-T41 pin the render, the
+non-render, the one-owner boundary (occurrence counts, no consumer redeclaration, no
+hand-copy under `hooks/`, `skills/` or `docs/`, a single-line plain-assignment form with no `:-`, and no borrowed branch
+discriminator) and the operator account's use of the identifier.
+`docs/tdd-manager-workflow.md` §"The review-spawn scope sentence" is the operator
+account. **Port-relevant:** the premise is host-coupled — a port must re-decide whether
+its harness carries an equivalent rule class at all, and re-spell all three agent
+identities. `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were NOT included.
+
+The windowed-`REVIEWER_DENIALS` gap this work uncovered belongs to
+§"Host-Refused Reviewer Spawn" and is recorded in that section's own gap list, not here.
 
 ## Marker-Block Carriers (`session-start-evidence-discipline.sh` + `user-prompt-best-solution-first.sh`)
 

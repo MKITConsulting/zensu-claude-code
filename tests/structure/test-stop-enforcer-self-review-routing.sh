@@ -576,6 +576,100 @@ else
   check "T37 a second refusal withdraws the retry sanction instead of re-offering it" FAIL
 fi
 
+# T38-T41 pin ZENSU_REVIEW_SPAWN_IN_SCOPE (T41 covers the operator account that
+# names it). Without them the sentence is invisible to
+# every check in this file: each reason assertion greps ONE clause, and the resume
+# discriminator ('Resume the /zensu:tdd Phase 6 review sequence') survives the
+# sentence's removal, so deleting it changed no verdict. T39's negative is the arm
+# that matters — the host-refusal branch must NOT carry it, and T37's own negative
+# needle cannot see that because the exhausted arm never held the phrase it greps.
+IN_SCOPE_NEEDLE='If a session rule leads you to withhold them, do not withhold silently'
+IN_SCOPE_OWNER="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+IN_SCOPE_DELEGATE_FILE="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
+# All three agent identities are asserted, not just one: this constant made its
+# owner a NEW carrier of the identity triple, and the repo's control for renaming
+# those is a manual grep. Pinning them here is what keeps a missed rename loud.
+if printf '%s' "$REASON8" | grep -qF "$IN_SCOPE_NEEDLE" \
+  && printf '%s' "$REASON8" | grep -qF 'zensu:review-aspect panel' \
+  && printf '%s' "$REASON8" | grep -qF 'zensu:review-judge second pass when it is enabled' \
+  && printf '%s' "$REASON8" | grep -qF 'zensu:code-reviewer consolidation'; then
+  check "T38 the resume directive renders the in-scope sentence, naming all three spawns" PASS
+else
+  check "T38 the resume directive renders the in-scope sentence, naming all three spawns" FAIL
+fi
+
+# The two negatives are anchored on a POSITIVE that proves each reason was
+# actually captured — an empty or unset capture satisfies a bare `!` and reports
+# PASS while testing nothing, which is the idiom this file states for itself at
+# the PRE18/PRE22 checks above. Both arms render from the same REASON= site and
+# differ only in DENIAL_RETRY_CLAUSE, so the second arm guards a future split
+# rather than an independent render site today.
+# The needle-liveness conjunct is the third anchor: without it, a reword of the
+# owner's sentence that left IN_SCOPE_NEEDLE stale would make both negatives true
+# against a string that exists nowhere.
+if grep -qF "$IN_SCOPE_NEEDLE" "$IN_SCOPE_OWNER" \
+  && printf '%s' "$REASON7C" | grep -qF 'refused by the HOST permission layer' \
+  && printf '%s' "$REASON7" | grep -qF 'refused by the HOST permission layer' \
+  && ! printf '%s' "$REASON7C" | grep -qF "$IN_SCOPE_NEEDLE" \
+  && ! printf '%s' "$REASON7" | grep -qF "$IN_SCOPE_NEEDLE"; then
+  check "T39 neither host-refusal arm renders the in-scope sentence" PASS
+else
+  check "T39 neither host-refusal arm renders the in-scope sentence" FAIL
+fi
+
+# Source-level: one owner, and every renderer CONSUMES it.
+# Counts are OCCURRENCES, not lines: both delegate consumptions and the enforcer's
+# sit on single mega-lines, so a duplicate interpolation added inside one of them
+# is invisible to `grep -c`.
+# The no-redeclaration arms are what actually pin AC-001: `grep -c` over the OWNER
+# alone cannot see a consumer file re-declaring the constant between the `source`
+# and its own render, which shadows the library value with every other count green.
+# The tree-wide arm catches a verbatim prose copy in a third file, which no
+# per-file count can.
+# The FORM arm keeps the definition a plain assignment: a `${VAR:-…}` respelling
+# would satisfy the count while making model-facing directive text environment-
+# overridable.
+# The last two arms keep a future reword from borrowing a branch discriminator,
+# which would hollow out the negatives at T37, T39 and the four
+# 'refused by the HOST permission layer' negatives elsewhere in this file.
+occ() { grep -oF "$1" "$2" 2>/dev/null | wc -l | tr -d ' '; }
+IN_SCOPE_DEF="$(occ 'ZENSU_REVIEW_SPAWN_IN_SCOPE="' "$IN_SCOPE_OWNER")"
+IN_SCOPE_STOP="$(occ '${ZENSU_REVIEW_SPAWN_IN_SCOPE}' "$STOP")"
+IN_SCOPE_DELEGATE="$(occ '${ZENSU_REVIEW_SPAWN_IN_SCOPE}' "$IN_SCOPE_DELEGATE_FILE")"
+# The redeclaration scan matches the ASSIGNMENT, not one quoting style: a shadow
+# spelled with single quotes or $'…' would score 0 against a `="`-only needle.
+# The hand-copy scan covers hooks/, skills/ and docs/ — skills/ is where the design
+# says a fourth copy is likeliest, so a hooks-only scan would miss exactly the case
+# it is written for. tests/ is excluded: this file legitimately holds the needle.
+IN_SCOPE_REDECL="$(( $(grep -cE '^[[:space:]]*(readonly |declare |export )?ZENSU_REVIEW_SPAWN_IN_SCOPE=' "$STOP" || true) + $(grep -cE '^[[:space:]]*(readonly |declare |export )?ZENSU_REVIEW_SPAWN_IN_SCOPE=' "$IN_SCOPE_DELEGATE_FILE" || true) ))"
+IN_SCOPE_TREE="$(grep -rlF "$IN_SCOPE_NEEDLE" "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/skills" "$PLUGIN_DIR/docs" 2>/dev/null | wc -l | tr -d ' ')"
+IN_SCOPE_LINE="$(grep '^ZENSU_REVIEW_SPAWN_IN_SCOPE=' "$IN_SCOPE_OWNER" || true)"
+IN_SCOPE_DEF_LINES="$(grep -c '^ZENSU_REVIEW_SPAWN_IN_SCOPE=' "$IN_SCOPE_OWNER" || true)"
+if [ "$IN_SCOPE_DEF" = "1" ] && [ "$IN_SCOPE_STOP" = "1" ] && [ "$IN_SCOPE_DELEGATE" = "2" ] \
+  && [ "$IN_SCOPE_REDECL" = "0" ] && [ "$IN_SCOPE_TREE" = "1" ] && [ "$IN_SCOPE_DEF_LINES" = "1" ] \
+  && printf '%s' "$IN_SCOPE_LINE" | grep -qF 'ZENSU_REVIEW_SPAWN_IN_SCOPE="These spawns' \
+  && printf '%s' "$IN_SCOPE_LINE" | grep -qF 'a host permission refusal is still a refusal."' \
+  && ! printf '%s' "$IN_SCOPE_LINE" | grep -qF ':-' \
+  && ! printf '%s' "$IN_SCOPE_LINE" | grep -qF 'refused by the HOST permission layer' \
+  && ! printf '%s' "$IN_SCOPE_LINE" | grep -qF 'Resume the /zensu:tdd Phase 6 review sequence'; then
+  check "T40 one owner, three consumers, no redeclaration or hand-copy, and no borrowed discriminator" PASS
+else
+  check "T40 one owner, three consumers, no redeclaration or hand-copy, and no borrowed discriminator" FAIL
+fi
+
+# The operator account names the constant by identifier. Nothing else compares the
+# two, so a rename would leave that paragraph pointing at a symbol that no longer
+# exists with every other check green.
+# Anchored on the POSITIVE account's own heading, not on the identifier alone: the
+# identifier also appears in the host-refusal paragraph's omission clause, so a bare
+# name grep survives deletion of the paragraph this check exists to protect.
+if grep -qF '**The review-spawn scope sentence.**' "$PLUGIN_DIR/docs/tdd-manager-workflow.md" \
+  && grep -qF 'ZENSU_REVIEW_SPAWN_IN_SCOPE' "$PLUGIN_DIR/docs/tdd-manager-workflow.md"; then
+  check "T41 the operator account still carries the positive paragraph and names the constant" PASS
+else
+  check "T41 the operator account still carries the positive paragraph and names the constant" FAIL
+fi
+
 # The observed gap this capture came from was NOT a detection failure: the
 # session ran a plugin installation that predated this module entirely, so the
 # probe's own guard returned before node was ever invoked and every Stop kept the

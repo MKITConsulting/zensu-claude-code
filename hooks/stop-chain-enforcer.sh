@@ -1175,6 +1175,11 @@ elif reviewer_spawn_denied; then
   # forbids two sentences earlier. The scanner already counts every refused
   # reviewer result in the scanned tail, so a second refusal is observable:
   # after it, the sanction is withdrawn instead of repeated.
+  # KNOWN BOUND: that count is windowed, not durable. The scanner reads only the
+  # transcript tail (MAX_TAIL_BYTES / MAX_LINES in reviewer-spawn-denial-v1.js), so
+  # in a long enough session two earlier refusals can scroll out and the sanction
+  # returns. Closing it means carrying the count in per-session state; stated here
+  # rather than left to be rediscovered from a retry loop nobody expected.
   REVIEWER_DENIAL_ROUTED=true
   if [ "${REVIEWER_DENIALS:-0}" -ge 2 ]; then
     DENIAL_RETRY_CLAUSE="A retry has already been spent and was refused again, so there is no attempt left to make: stop and report this to the user."
@@ -1211,7 +1216,7 @@ else
   # The self-review branch at the top of this ladder never evaluates the probe
   # and therefore never sets this, which is the whole point of the flag.
   REVIEWER_DENIAL_ROUTED=true
-  REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:tdd Phase 6 review sequence where it left off: fan out the five zensu:review-aspect agents over the changed files ('git diff --name-only HEAD'), merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default), run the Phase 6 step 4c Finding Verification Gate over the merged list when hooks.findingVerification is enabled (the default) and annotate every finding it does not confirm '[Unverified — do not fix]', issue a fresh review ticket, then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' ${INNER_REVIEW_HEADERS}${INNER_REVIEW_SUFFIX} the merged findings + build/test status. Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. Only valid exception: if implementation produced ZERO file changes, run: ${LOG_COMMAND} --chain-done${INNER_ZERO_CHANGE_ARGS}; then stop.${INNER_ZERO_CHANGE_NOTE}"
+  REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:tdd Phase 6 review sequence where it left off: fan out the five zensu:review-aspect agents over the changed files ('git diff --name-only HEAD'), merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default), run the Phase 6 step 4c Finding Verification Gate over the merged list when hooks.findingVerification is enabled (the default) and annotate every finding it does not confirm '[Unverified — do not fix]', issue a fresh review ticket, then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' ${INNER_REVIEW_HEADERS}${INNER_REVIEW_SUFFIX} the merged findings + build/test status. ${ZENSU_REVIEW_SPAWN_IN_SCOPE} Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. Only valid exception: if implementation produced ZERO file changes, run: ${LOG_COMMAND} --chain-done${INNER_ZERO_CHANGE_ARGS}; then stop.${INNER_ZERO_CHANGE_NOTE}"
   REASON="${REASON} ${STATE_LEGEND} ${LEGEND_CLOSER_WITH_EXCEPTION}"
 fi
 

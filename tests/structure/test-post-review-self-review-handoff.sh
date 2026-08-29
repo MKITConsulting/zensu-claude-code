@@ -112,7 +112,31 @@ if echo "$CTX_A" | grep -q -- "--chain-done"; then
 else
   check "P3 PASS menu must NOT instruct --chain-done (self-review owns terminus)" PASS
 fi
-echo "$CTX_A" | grep -qF "subagent_type='zensu:code-reviewer'" && check "P4 fix-loop (case C) reviewer re-spawn still present" PASS || check "P4 case C reviewer respawn" FAIL
+# The delegate's own copy of the review-spawn scope sentence, asserted on the
+# EMITTED additionalContext rather than at source. The routing suite pins the two
+# interpolation sites by count; this is the only check that reads what a model
+# actually receives from this hook.
+echo "$CTX_A" | grep -qF "If a session rule leads you to withhold them, do not withhold silently" \
+  && check "P3a fix-round directive carries the review-spawn scope sentence" PASS \
+  || check "P3a fix-round directive carries the review-spawn scope sentence" FAIL
+# The delegate has TWO severity arms and every other fixture takes the default one,
+# so the include-suggestions arm's copy of the sentence was emitted by nothing. A
+# source-level count cannot tell a rendered interpolation from a literal that never
+# expands, which is the whole reason P3a exists for the other arm.
+INCLSUGG="$STATE_DIR/incl-sugg.json"
+printf '{"hooks":{"autoFixIncludeSuggestions":true}}' > "$INCLSUGG"
+CTX_A2="$(postrev "$SID_A" "$INCLSUGG")"
+# The arm-unique literals are what make this a pin rather than a repeat of P3a: both
+# arms emit the same sentence, so the needle alone passes whichever arm rendered. The
+# include arm labels its fix branch "case B", the default arm "case C".
+if echo "$CTX_A2" | grep -qF "If a session rule leads you to withhold them, do not withhold silently" \
+  && echo "$CTX_A2" | grep -qF "Do NOT mark the chain done in case B" \
+  && ! echo "$CTX_A2" | grep -qF "Do NOT mark the chain done in case C"; then
+  check "P3b the include-suggestions arm is the one that rendered, and it carries it too" PASS
+else
+  check "P3b the include-suggestions arm is the one that rendered, and it carries it too" FAIL
+fi
+echo "$CTX_A" | grep -qF "subagent_type='zensu:code-reviewer'" && check "P4 fix-loop (case C) reviewer re-spawn still present" PASS || check "P4 fix-loop (case C) reviewer re-spawn still present" FAIL
 if echo "$CTX_A" | grep -qF "$PLUGIN_DIR/hooks/lib/zensu-log.sh" \
   && ! echo "$CTX_A" | grep -qF '${CLAUDE_PLUGIN_ROOT}'; then
   check "P4a PASS handoff embeds the concrete session plugin root" PASS
