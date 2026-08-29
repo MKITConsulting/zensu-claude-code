@@ -2400,6 +2400,322 @@ function siblings(opts, row) {
   return rows.filter((r) => r.wt === row.wt && r.sessionId !== row.sessionId);
 }
 
+// The ONE recipe every arm ends in, hoisted to module scope with its rationale
+// because none of it reads the record: not `r`, not the archive flag, not the
+// liveness. It was re-allocated on every call and, together with this comment,
+// occupied roughly half of a function named for a DECISION it did not start
+// making until the constants were behind it. The coupling the old placement
+// argued for is real and unaffected — `worktreeAdvice` is still the only consumer
+// — but a constant does not have to sit lexically inside the decision to travel
+// with it.
+//
+// There is no longer an arm that leaves the taker in the source session's
+// worktree: the archived-and-surviving directory used to be the exception, and it
+// was the worst candidate rather than the best one — it survived because
+// `git worktree remove` refuses on a DIRTY tree, so a takeover's first commit
+// removes the only thing that kept it.
+//
+// EVERY command line is indented two spaces and every prose line starts at column
+// zero, because `adviceBlock` fences on exactly that shape for both briefs.
+//
+// COUPLED CARRIER: `skills/session-trail/SKILL.md` flow 3 step 4 restates this
+// recipe for the model, in a fenced block of its own. It is a hand-copy — the two
+// must move together, and `test-session-trail-skill.sh` extracts EVERY two-space command
+// literal from this constant through the end of `worktreeAdvice` and requires each one
+// verbatim in that section, so a one-sided edit fails rather than drifts.
+//
+// EIGHT properties of this recipe are safety, not layout, and each one is a flag, a
+// quoting decision or a position a future editor would otherwise read as noise. The
+// COUNT is load-bearing: it read THREE for a round after `--binary` was added and FOUR
+// for a round after that, and the two reader-facing carriers of this sentence — here and
+// SKILL.md — must agree on it, so check the number first when they disagree.
+//
+//  * `--no-textconv --no-ext-diff -c core.fsmonitor=false`. "Run git against a directory
+//    you do not control" is not merely a read: a repository carries its own config, and
+//    a `.gitattributes` textconv driver, a `diff.external` driver and an `fsmonitor`
+//    hook are all arbitrary commands git runs FOR you while producing the diff.
+//    Treating the OUTPUT as untrusted does nothing about any of them — the execution
+//    precedes any output to distrust. These three close the three they name and NOT
+//    the class: a `filter.<driver>.clean` is consulted on the same comparison and no
+//    flag here disables it. That residual is stated in the emitted text rather than
+//    papered over, because a claim to have closed "the config risk" would be false.
+//  * `--binary`, which is not an optimization and whose failure is not partial.
+//    MEASURED against git 2.51.0: a repo with one modified binary asset and one
+//    modified text file produced a `Binary files … differ` stanza with no index line,
+//    and `git apply` then refused the WHOLE patch — the text file did not land either,
+//    because apply is all-or-nothing. With `--binary` both landed. On a text-only diff
+//    the two patches are byte-identical, so it costs nothing in the ordinary case. It
+//    DOES widen what can land unread — a base85 hunk cannot be reviewed by opening the
+//    patch — which is why the emitted text says so instead of leaving "open $PATCH to
+//    read it" to imply a review it cannot give for that content.
+//  * `mktemp` rather than a fixed `/tmp` name: a predictable path in a shared /tmp is
+//    a symlink waiting to have been planted, and a `>` redirect follows one. The template
+//    is spelled out rather than passed to `-t`, which means a PREFIX on BSD and a
+//    deprecated template on GNU coreutils — unportable in a recipe pasted on an unknown
+//    host. The name exists so a leftover patch is findable, and a leftover is the normal
+//    failure case: a failed apply keeps it deliberately, so the text says to delete it.
+//  * Every path placeholder inside a runnable line is SINGLE-QUOTED — every one, including
+//    the `<path>`, `<name>` and `<session-branch>` operands of the two `git worktree add`
+//    lines, not just the two `-C` operands. The reader substitutes them by hand, and an
+//    ordinary `~/My Projects/repo` word-splits into a wrong operand without them; the same
+//    quoting neutralizes `$( )`, `;`, `&&` and `|` in a path that came out of a session
+//    record. ONE residual: a path containing an apostrophe closes the quoting at
+//    substitution time, so that one is spelled `'\''` — which is exactly what
+//    `briefShellArg` does for every path this tool substitutes itself — and everywhere else
+//    in this file that job IS `briefShellArg`'s, which cannot reach a placeholder a human
+//    fills in.
+//  * The reading steps are their own COMMANDS sitting BETWEEN the diff and the apply,
+//    because a caution printed after the apply line is read after the apply has already
+//    run. `--stat` shows WHICH files, not what is in them, so the text says to open the
+//    patch for content rather than letting "read it first" imply more than it gives.
+//  * The destructive apply is separated from them by a COLUMN-ZERO prose line, which
+//    breaks `adviceBlock`'s run and puts it in a fence of its own. Contiguous commands
+//    coalesce into ONE fence and one fence is one copy button, so with all four together
+//    the steps that exist to be read first shipped in the same paste as the line that
+//    writes — and the between-the-diff-and-the-apply argument is about execution ORDER,
+//    which only holds if the human stops between the third command and the fourth.
+//  * The untracked half is a runnable NUL-safe LOOP testing `[ -f ] && [ ! -L ]`, not a
+//    sentence naming `test -L`. `test -L` is a symlink test offered as the implementation
+//    of a regular-file rule, so it admits FIFOs, device nodes and sockets; `[ -f ]` alone
+//    is the mirror defect, because it FOLLOWS a symlink. **The pair does NOT exclude a hard
+//    link** — MEASURED: a hard link is a second directory entry for a regular file, so
+//    `[ -f ]` is true, `[ ! -L ]` is true and it passes both. An earlier wording of this
+//    bullet, of the emitted text and of the review finding that prompted the change all
+//    claimed the pair closed that case; it does not, and it is disclosed as a residual with
+//    the link-count test named beside it. Prose also left the reader to improvise a loop
+//    that word-splits on a filename with a space, which is why this step is emitted.
+//  * The DESTINATION parent is checked as well as the source leaf. `mkdir -p` succeeds on
+//    an existing symlink-to-directory and `cp` writes through it, so a link inside the
+//    taker's own new worktree is a third route out of it — and that tree is populated from
+//    the same repository the text calls unvetted. ONE residual: `mkdir -p` runs before the
+//    containment comparison, so an escaping directory can be created even though no
+//    content is copied into it.
+//
+// The MODE grep is a COMMAND for the same reason the `--stat` line is: MEASURED against
+// git 2.51.0, a tracked symlink staged in the source worktree renders in `apply --stat` as
+// a bland `stolen.txt | 1 +` with no mode shown at all, and `git apply` then recreates the
+// link pointing wherever the source said — `/etc/passwd` in the probe. So the untracked-half
+// caution was never "the one hazard": symlinks reach the taker by TWO routes, and only the
+// patch body names the mode. It matches TWO modes over TWO alternations: the four mode
+// HEADERS for `120000` and `100755`, and the INDEX line for `120000` — the latter because a
+// tracked symlink whose target is merely repointed carries its mode only there (MEASURED:
+// `index 62c2b6a..e6c46ff 120000`, no header), which is the one case where apply rewrites a
+// live link. It stays silent on a patch that changes no mode and touches no symlink, and ONE
+// residual is deliberate: a file that was ALREADY executable and only changed content also
+// carries `100755` on its index line and is NOT matched, because every modified build script
+// would fire and the check would be trained away.
+const CARRY_OVER = [
+  'The branch carries only what was COMMITTED. Carry the rest across yourself, and treat',
+  '<their worktree> the way the Safety section treats every other path out of a foreign',
+  'session: a repository you have not vetted, running its own config, whose diff is',
+  'third-party data. If it is a worktree you would not cd into, do not run this at all —',
+  'copy the files across by hand instead. The first three flags stop that config running',
+  'a textconv, an external-diff or an fsmonitor command of its own. They do NOT close a',
+  'clean filter, which is consulted on the same comparison — that one stays a residual.',
+  '--binary is not about config: without it a modified binary file yields a stanza git',
+  'apply refuses, and apply is all-or-nothing, so the whole carry-over lands nothing.',
+  '  PATCH="$(mktemp "${TMPDIR:-/tmp}/session-trail-carryover.XXXXXX")" && git -C \'<their worktree>\' -c core.fsmonitor=false diff --no-textconv --no-ext-diff --binary HEAD > "$PATCH"',
+  '  grep -nE \'^(new file |deleted file |old |new )mode (120000|100755)|^index [0-9a-f]+\\.\\.[0-9a-f]+ 120000\' "$PATCH"',
+  '  git -C \'<your new worktree>\' apply --stat "$PATCH"',
+  'Read that grep and that file list before the next line — it is the one that WRITES,',
+  'and it is deliberately NOT in the same block as the two steps above it, so that one',
+  'copy button cannot run all four at once.',
+  'If the grep printed anything, do not run the apply: mode 120000 is a SYMLINK and',
+  '100755 an EXECUTABLE, --stat shows neither of them, and git apply recreates a link',
+  'pointing wherever the source said. Drop those paths out of the patch first.',
+  'The second alternation reads the index line, and it is not decoration: MEASURED against',
+  'git 2.51.0, a tracked symlink whose TARGET was repointed produces only',
+  '"index 62c2b6a..e6c46ff 120000" and NO mode header, so a header-only pattern is silent on',
+  'exactly the case where apply rewrites a live link. ONE residual, stated rather than',
+  'implied: a file that was ALREADY executable and only changed content carries its 100755',
+  'on the index line too, and that is deliberately NOT matched — every modified build script',
+  'would fire and the check would be trained away within a week. Read the patch file list',
+  'for those.',
+  '  git -C \'<your new worktree>\' apply "$PATCH" && rm -f "$PATCH"',
+  '--stat shows WHICH files and how much, never what is in them and never a mode, which',
+  'is why the grep is a step and not a footnote. Open "$PATCH" itself for content,',
+  'remembering that a --binary hunk is base85 and cannot be read that way — for those,',
+  'trust the file list or do not apply. A failed apply deliberately keeps "$PATCH" so you',
+  'can inspect it; only a clean apply removes it. When you are done inspecting it, delete',
+  'it yourself with rm -f "$PATCH": it holds every uncommitted change from a worktree you',
+  'have not vetted, and it did not exist outside that worktree before you ran this.',
+  'That patch holds tracked files only. Copy REGULAR FILES ONLY, and do it with this loop',
+  'rather than by eye — an untracked entry can be a SYMLINK, and ls-files reports it by',
+  'name like any other path:',
+  '  SRC=\'<their worktree>\' DST=\'<your new worktree>\'',
+  '  DSTR=$(CDPATH= cd -P -- "$DST" && pwd -P) &&',
+  '  git -C "$SRC" -c core.fsmonitor=false ls-files --others --exclude-standard -z |',
+  '  while IFS= read -r -d \'\' f; do',
+  '  n=$(printf \'%s\' "$f" | tr -d \'\\000-\\037\\177\'); s="$SRC/$f"; d=${f%/*}; [ "$d" = "$f" ] && d=.',
+  '  [ -n "$DSTR" ] || { printf \'SKIPPED (destination root unresolved): %s\\n\' "$n"; continue; }',
+  '  [ -f "$s" ] && [ ! -L "$s" ] || { printf \'SKIPPED (not a regular file): %s\\n\' "$n"; continue; }',
+  '  mkdir -p -- "$DST/$d" 2>/dev/null || { printf \'SKIPPED (parent could not be created): %s\\n\' "$n"; continue; }',
+  '  p=$(CDPATH= cd -P -- "$DST/$d" 2>/dev/null && pwd -P) || { printf \'SKIPPED (parent not readable): %s\\n\' "$n"; continue; }',
+  '  case "$p/" in "$DSTR"/*) ;; *) printf \'SKIPPED (destination escapes your worktree): %s\\n\' "$n"; continue;; esac',
+  '  [ ! -L "$DST/$f" ] || { printf \'SKIPPED (destination is a symlink): %s\\n\' "$n"; continue; }',
+  '  cp -- "$s" "$DST/$f" 2>/dev/null || { printf \'FAILED (copy): %s\\n\' "$n"; continue; }',
+  '  done',
+  'The PAIR of tests is the rule and neither half is optional: [ -f ] alone FOLLOWS a',
+  'symlink, so the obvious spelling passes the very thing the caution is about, and [ ! -L ]',
+  'alone admits anything that is not a symlink. Together they exclude symlinks, FIFOs, device',
+  'nodes and sockets — and that is the whole list. A HARD LINK is an ACCEPTED RESIDUAL, not a',
+  'case this closes: it is a second directory entry for a regular file, so it passes BOTH',
+  'halves (measured: [ -f ] true, [ ! -L ] true, link count 2). If the source tree is one you',
+  'genuinely do not trust, add a link-count test — [ "$(stat -f %l "$s" 2>/dev/null || stat -c',
+  '%h "$s")" = 1 ] — which is left out of the line above only because the two stat spellings',
+  'are not portable in a recipe pasted on an unknown host.',
+  'd is derived with ${f%/*} rather than $(dirname "$f") because command substitution strips',
+  'trailing newlines, so a directory literally named "d<newline>" would have created the wrong',
+  'parent — which is exactly the safety -z and the NUL-delimited read exist to provide. Those',
+  'two are what stop a filename holding a space or a newline from splitting into two wrong',
+  'paths. The control bound sits on the FILENAME — that is what $n is — and never on the',
+  'diagnostic line, so a crafted name cannot scroll the SKIPPED list away or forge a row in it,',
+  'and that list is what tells you which entries the test rejected. printf\'s own format supplies',
+  'the terminator, which is why $n may delete the whole class including \\012. An earlier spelling',
+  'bounded the LINE and therefore had to spare \\012 — which handed the one control byte the',
+  'source controls straight back.',
+  'THREE smaller decisions on those lines, for the same reason they are not obvious. CDPATH=',
+  'prefixes both cd calls because cd consults that variable for a relative operand and PRINTS',
+  'the path it resolved, which the substitution would capture — measuring a tree the following',
+  'mkdir and cp, which never consult it, do not touch. And the DSTR= line ends in && rather',
+  'than || exit 1 because exit in a block pasted into an INTERACTIVE SHELL closes that shell,',
+  'taking with it the $PATCH variable this same recipe tells you to remove; a && b | c parses',
+  'as a && (b | c), so the chain skips the loop without it. And [ -n "$DSTR" ] is not',
+  'redundant beside that chain: it makes the containment check REFUSE an empty root rather',
+  'than match one, because case "$p/" in "$DSTR"/*) degrades to /* — which matches every',
+  'absolute path — the moment $DSTR is empty. The chain protects you when the block is',
+  'pasted whole; this line protects you when it is not.',
+  'The DESTINATION is checked on both halves, and neither is decoration. mkdir -p SUCCEEDS on',
+  'an existing symlink-to-directory and cp WRITES THROUGH a symlinked destination file, so a',
+  'link anywhere inside <your new worktree> sends the copy back out of your tree — measured,',
+  'not argued. A per-component test cannot express that: [ ! -L "$DST/$d" ] lstats the whole',
+  'path, so a symlinked "a" in "a/b" is followed and passes, and for a top-level entry d is "."',
+  'where the test can never be true. So the RESOLVED parent is compared against the resolved',
+  'root instead, and the leaf is tested separately. That is a THIRD route out, beside the two',
+  'symlink routes below. ONE residual: mkdir -p runs before the comparison, so an escaping',
+  'directory can be created even though no content is copied into it.',
+  'In a repository you have not vetted this is how a key or another checkout leaves its',
+  'directory, and it applies to copying by hand exactly as it does here.',
+  'RESIDUALS worth knowing before you run it, none of them closed by the checks above.',
+  '--exclude-standard skips everything .gitignore\'d, so ignored-but-real files — a local env',
+  'file, editor state — do NOT travel; move those by hand. Each test and its copy are two',
+  'separate steps, so a source OR a destination replaced between them is followed: run this',
+  'while nothing is writing to either tree. [ ! -L ] uses lstat, so a destination that is a',
+  'HARD LINK to a file outside the tree passes it exactly as a source hard link does. A silent',
+  'run is not proof of success: the pipeline reports the loop\'s status, so a source that is',
+  'not a repository produces no copies, no SKIPPED lines and status 0 — read git\'s own stderr.',
+  'read -r -d \'\' is a bash and zsh spelling; in a plain POSIX sh the loop body never runs, and',
+  'it fails the same silent way. And substitute the worktree ROOT for <their worktree>: ls-files',
+  'is scoped to the directory you give it and prints paths relative to it, while the patch step',
+  'above is repository-wide — a subdirectory yields a complete patch and a truncated copy that',
+  'lands at the root of your tree.',
+  'Per-entry is enough: a symlinked directory is reported as one leaf and never walked',
+  'through, so nothing is listed from BEHIND a link that this test would miss. Symlinks',
+  'reach you by TWO routes — this one and the tracked one the grep above covers — and no',
+  'git flag closes either.',
+];
+
+// The create recipe alone. It no longer spreads `CARRY_OVER`, because the carry-over
+// half is CONDITIONAL on something this constant cannot see: whether a process is
+// still registered for the tree the recipe is about to read.
+const TAKE_YOUR_OWN = [
+  'Take your own on a NEW branch — do not continue in theirs:',
+  '  git worktree add \'<path>\' -b \'claude/<name>-cont\' \'<session-branch>\'',
+  'A second worktree on the SAME branch is refused while the original still exists, and',
+  'cp -R is not the copy route: the copy keeps the original gitdir and dies with it.',
+];
+
+// Spliced ahead of `CARRY_OVER` whenever a pid is registered for that worktree, on
+// EVERY present arm rather than only the archived one. The recipe's first step reads
+// another agent's working tree, and only two of the four leads name a live process at
+// all — the other two fall through to wording that says nothing about it, so the
+// reader got a full snapshot recipe with no signal that the source was live. States
+// what was OBSERVED (a registration) and what it costs, not what the other session
+// is doing.
+const LIVE_SNAPSHOT_CAUTION = (pid) => [
+  `Before the next part: pid ${pid} is still registered for that worktree, and the first`,
+  'step SNAPSHOTS it. Take the snapshot while that session is idle — a diff read mid-edit',
+  'can carry a half-written file, and applying it here lands a state neither tree ever had.',
+];
+
+// One table, four arms, two legs — and the ARM is chosen once, above the split.
+// Each cell is a FUNCTION rather than an array because two of the arms interpolate
+// a measured value (the live pid, and why the archive state could not be read);
+// making every cell a function keeps the table one shape instead of two.
+//
+// The REASON travels with its own lead, because a shared trailing sentence was
+// false in a third of the cells: in the archived-but-alive arm the archive
+// demonstrably HAS run, and the hazard is the registered process acting on that
+// path — not an archive that has not run yet.
+const ADVICE_LEADS = {
+  // States what was OBSERVED, and states it as a hazard rather than as clearance.
+  // SKILL.md section 6 measures the counter-example to the old reading: of 657
+  // archived worktree-sessions, the 159 survivors were overwhelmingly DIRTY, which
+  // is exactly what `git worktree remove` refuses on.
+  //
+  // On the GONE leg the same arm selects "archived, no live pid, and the recorded
+  // directory is not readable". Its lead used to say "archiving removed it", which is a
+  // CAUSE: three independent observations welded into one causal claim the predicate
+  // never measured. `dirExists` is a `statSync` in a try/catch, so a deleted
+  // subdirectory, a rename, an unmounted volume and an unreadable parent all answer
+  // false the same way. It states the three observations instead.
+  survivor: {
+    present: () => [
+      'Archived and dead, and this directory survived that archive run — which almost always',
+      'means it is DIRTY, since a dirty tree is what `git worktree remove` refuses on. That',
+      'makes it the worst place to continue rather than a safe one: your first commit removes',
+      'the only reason it is still here.',
+    ],
+    gone: () => [
+      'Archived, no live pid is registered, and the recorded directory is not readable from',
+      'here. Those are three separate observations, not one cause: an archive run, a rename,',
+      'a deleted subdirectory and an unmounted volume all read the same from outside.',
+    ],
+  },
+  live: {
+    present: ({ pid }) => [
+      `Archived, but pid ${pid} is still registered and alive, so it can still remove or`,
+      'move this worktree. Treat it as not archived.',
+    ],
+    gone: ({ pid }) => [
+      `Archived, but pid ${pid} is still registered and alive, and the recorded directory is gone.`,
+      'That process can still create or move a worktree at that path, so re-creating its own path',
+      'would put your work back under it.',
+    ],
+  },
+  unreadable: {
+    present: ({ why }) => [
+      `The archive state could not be read (${why}), so treat this worktree as one`,
+      'that still belongs to an archivable session.',
+    ],
+    gone: ({ why }) => [
+      `The archive state could not be read (${why}), and the recorded directory is gone.`,
+      'Re-creating its own path would leave the work exposed to an archive that has not run yet.',
+    ],
+  },
+  active: {
+    present: () => [
+      'Never continue in a worktree that still belongs to an archivable session — archiving',
+      'deletes it under you.',
+    ],
+    gone: () => [
+      'This session is not archived, and the recorded directory is gone.',
+      'Re-creating its own path would leave the work exposed to an archive that has not run yet.',
+    ],
+  },
+};
+
+// ONE implementation of the leg decision, because it has THREE consumers and they must not
+// drift: `worktreeAdvice` picks its lead AND its body from it, `cmdShow` decides from the
+// same answer whether to print the pointer at the carry-over recipe its survey view
+// withholds, and `printResume` decides whether to print its own copy of the gone-leg create
+// command. Every one of those was a hand-written `r.cwdExists` at some point, and one of them
+// drifted INSIDE this function — the lead came from here while the body came from a raw
+// re-derivation, which would have emitted a gone lead above a present body. No fixture
+// renders a gone-leg `show`, so nothing would have caught the `cmdShow` half either. Before
+// adding a renderer that depends on the leg, grep `cwdExists`.
+function adviceLeg(r) { return r.cwdExists ? 'present' : 'gone'; }
+
 // WHERE to continue another session's work. Distinct from the write-anchor
 // question `writeAnchor` answers: that one asks whether this session MAY write
 // there, this one asks whether the directory will still EXIST. Archiving removes
@@ -2424,7 +2740,14 @@ function siblings(opts, row) {
 // half did not survive. That is data migration rather than directory choice, and it
 // lives here because it is the same decision's other half — an arm that routes you
 // away from a tree without telling you what you are leaving in it is half a rule.
-function worktreeAdvice(r) {
+// `options.carryOver === false` returns the DECISION half only — the arm's lead and the
+// create recipe — for a caller that renders a survey rather than a paste-and-run brief.
+// It is deliberately opt-OUT: the briefs, which are what a human pastes from, get the
+// whole thing by default, and a new caller that forgets the option gets more rather than
+// less. On the gone leg there is no carry-over half at all, so the option changes nothing
+// there.
+function worktreeAdvice(r, options = {}) {
+  const withCarryOver = options.carryOver !== false;
   const archived = r.app ? r.app.archived === true : null;
   // `null` is not `false`. It means no record was readable for this session, and
   // asserting "not archived" there is exactly what SKILL.md forbids.
@@ -2440,179 +2763,68 @@ function worktreeAdvice(r) {
   // instance under its own CLAUDE_CONFIG_DIR is invisible here; each arm says what
   // was actually observed rather than claiming more.
   const liveDespiteArchive = archived === true && !!r.live;
-  // Named for what it MEASURES, not for a permission it no longer grants. It was
-  // `safeToAdopt`, and that name was the defect in one word: it selected the arm
-  // whose directory had survived an archive attempt, and a survivor is the tree
-  // `git worktree remove` refused on, not a tree nothing wants to remove.
-  const archivedSurvivor = archived === true && !liveDespiteArchive;
+  // Named for what the EXPRESSION computes, which carries no directory term at all.
+  // It was `safeToAdopt` — a name that read as clearance — and then `archivedSurvivor`,
+  // which read as "the directory survived" and needed eight lines of apology on the
+  // gone leg explaining that it means the opposite there. A name that has to be
+  // defended at one of its two use sites is the wrong name; the directory split
+  // happens one level down, in `leg`.
+  const archivedAndDead = archived === true && !liveDespiteArchive;
   // `cwdExists` measures the session's RECORDED cwd, which may be a subdirectory
   // the session started in rather than the worktree root. The wording names that
   // value rather than a line label: when the directory is gone `wt === cwd`, so no
   // rendered line carries a root-vs-subdirectory signal at all.
-  // The ONE recipe every arm ends in. There is no longer an arm that leaves the
-  // taker in the source session's worktree: the archived-and-surviving directory
-  // used to be the exception, and it was the worst candidate rather than the best
-  // one — it survived because `git worktree remove` refuses on a DIRTY tree, so a
-  // takeover's first commit removes the only thing that kept it.
-  //
-  // EVERY command line is indented two spaces and every prose line starts at column
-  // zero, because `adviceBlock` fences on exactly that shape for both briefs.
-  //
-  // COUPLED CARRIER: `skills/session-trail/SKILL.md` flow 3 step 4 restates this
-  // recipe for the model, in a fenced block of its own. It is a hand-copy — the two
-  // must move together, and `test-session-trail-skill.sh` pins the two command
-  // literals against this array so a one-sided edit fails rather than drifts.
-  //
-  // FOUR properties of this recipe are safety, not layout, and each one is a flag or
-  // a position a future editor would otherwise read as noise. The COUNT is load-bearing:
-  // it read THREE for a round after `--binary` was added, and the three carriers of this
-  // sentence — here, SKILL.md and CLAUDE.md — must agree on it, so check the number first
-  // when they disagree.
-  //
-  //  * `--no-textconv --no-ext-diff -c core.fsmonitor=false`. "Run git against a directory
-  //    you do not control" is not merely a read: a repository carries its own config, and
-  //    a `.gitattributes` textconv driver, a `diff.external` driver and an `fsmonitor`
-  //    hook are all arbitrary commands git runs FOR you while producing the diff.
-  //    Treating the OUTPUT as untrusted does nothing about any of them — the execution
-  //    precedes any output to distrust. These three close the three they name and NOT
-  //    the class: a `filter.<driver>.clean` is consulted on the same comparison and no
-  //    flag here disables it. That residual is stated in the emitted text rather than
-  //    papered over, because a claim to have closed "the config risk" would be false.
-  //  * `--binary`, which is not an optimization and whose failure is not partial.
-  //    MEASURED against git 2.51.0: a repo with one modified binary asset and one
-  //    modified text file produced a `Binary files … differ` stanza with no index line,
-  //    and `git apply` then refused the WHOLE patch — the text file did not land either,
-  //    because apply is all-or-nothing. With `--binary` both landed. On a text-only diff
-  //    the two patches are byte-identical, so it costs nothing in the ordinary case. It
-  //    DOES widen what can land unread — a base85 hunk cannot be reviewed by opening the
-  //    patch — which is why the emitted text says so instead of leaving "open $PATCH to
-  //    read it" to imply a review it cannot give for that content.
-  //  * `mktemp` rather than a fixed `/tmp` name: a predictable path in a shared /tmp is
-  //    a symlink waiting to have been planted, and a `>` redirect follows one.
-  //  * The reading steps are their own COMMANDS sitting BETWEEN the diff and the apply,
-  //    because a caution printed after the apply line is read after the apply has already
-  //    run. `--stat` shows WHICH files, not what is in them, so the text says to open the
-  //    patch for content rather than letting "read it first" imply more than it gives.
-  //
-  // The `120000` grep is a COMMAND for the same reason the `--stat` line is: MEASURED
-  // against git 2.51.0, a tracked symlink staged in the source worktree renders in
-  // `apply --stat` as a bland `stolen.txt | 1 +` with no mode shown at all, and `git
-  // apply` then recreates the link pointing wherever the source said — `/etc/passwd` in
-  // the probe. So the untracked-half caution was never "the one hazard": symlinks reach
-  // the taker by TWO routes, and only the patch body names the mode. The grep catches
-  // both shapes (`new file mode 120000` and a `100644` → `120000` swap) and is silent on
-  // a text-only patch.
-  const carryOver = [
-    'The branch carries only what was COMMITTED. Carry the rest across yourself, and treat',
-    '<their worktree> the way the Safety section treats every other path out of a foreign',
-    'session: a repository you have not vetted, running its own config, whose diff is',
-    'third-party data. The first three flags stop that config running a textconv, an',
-    'external-diff or an fsmonitor command of its own. They do NOT close a clean filter,',
-    'which is consulted on the same comparison — that one stays a residual. --binary is not',
-    'about config: without it a modified binary file yields a stanza git apply refuses, and',
-    'apply is all-or-nothing, so the whole carry-over lands nothing.',
-    '  PATCH="$(mktemp)" && git -C <their worktree> -c core.fsmonitor=false diff --no-textconv --no-ext-diff --binary HEAD > "$PATCH"',
-    '  grep -n "120000" "$PATCH"',
-    '  git -C <your new worktree> apply --stat "$PATCH"',
-    '  git -C <your new worktree> apply "$PATCH" && rm -f "$PATCH"',
-    'Read those two middle lines before the last one runs. --stat shows WHICH files, not',
-    'what is in them, and it does NOT show a mode — a tracked SYMLINK arrives as an',
-    'ordinary one-line change there and git apply recreates it pointing wherever the source',
-    'said, which is why the grep is a step and not a footnote: mode 120000 is a symlink.',
-    'Open "$PATCH" itself for content, remembering that a --binary hunk is base85 and',
-    'cannot be read that way — for those, trust the file list or do not apply. A failed',
-    'apply deliberately keeps "$PATCH" so you can inspect it; only a clean apply removes it.',
-    'That patch holds tracked files only. List the rest:',
-    '  git -C <their worktree> ls-files --others --exclude-standard',
-    'and copy REGULAR FILES ONLY. An untracked entry can be a SYMLINK, and ls-files reports',
-    'it by name like any other path — copying it follows the link and pulls whatever it',
-    'points at into your worktree, which in a repository you have not vetted is how a key or',
-    'another checkout leaves its directory. Check each with test -L first. That applies to',
-    'copying by hand exactly as it does here. Per-entry is enough: a symlinked directory is',
-    'reported as one leaf and never walked through, so nothing is listed from BEHIND a link',
-    'that test -L would miss. Symlinks reach you by TWO routes — this one and the tracked',
-    'one the grep above covers — and no git flag closes either.',
-  ];
-  const takeYourOwn = [
-    'Take your own on a NEW branch — do not continue in theirs:',
-    '  git worktree add <path> -b claude/<name>-cont <session-branch>',
-    'A second worktree on the SAME branch is refused while the original still exists, and',
-    'cp -R is not the copy route: the copy keeps the original gitdir and dies with it.',
-    ...carryOver,
-  ];
-  if (!r.cwdExists) {
-    // The REASON travels with its own lead, because a shared one was false in a
-    // third of the cells: in the archived-but-alive arm the archive demonstrably
-    // HAS run, and the hazard is the registered process acting on that path.
-    //
-    // `archivedSurvivor` reads oddly on THIS leg and is correct anyway: the predicate
-    // carries no directory term at all — it is `archived === true && !liveDespiteArchive`
-    // — and the directory split happens one level up. Here it selects "archived, no live
-    // pid, and the directory did NOT survive", which is why this arm's own lead says
-    // archiving removed it. The name is kept rather than split in two because one
-    // predicate feeding both legs is what stops the legs drifting, which is the whole
-    // point of hoisting the three decisions above the split.
-    const goneLead = archivedSurvivor
-      ? [
-        'Archived, dead, and the recorded directory is gone — archiving removed it.',
-      ]
-      : liveDespiteArchive
-        ? [
-          `Archived, but pid ${livePid(r.live)} is still registered and alive, and the recorded directory is gone.`,
-          'That process can still create or move a worktree at that path, so re-creating its own path',
-          'would put your work back under it.',
-        ]
-        : unreadable
-          ? [
-            `The archive state could not be read (${unreadableWhy}), and the recorded directory is gone.`,
-            'Re-creating its own path would leave the work exposed to an archive that has not run yet.',
-          ]
-          : [
-            'This session is not archived, and the recorded directory is gone.',
-            'Re-creating its own path would leave the work exposed to an archive that has not run yet.',
-          ];
-    // No `carryOver` here, and the omission is the statement: the directory that held
-    // the uncommitted work is gone, so a patch recipe would name a source that cannot
-    // be read. Saying so is the honest form of the same rule.
+  // The ARM is decided once, above the directory split, and both legs then index
+  // one table. Lifting the three predicates was only half the job: the four-way
+  // LADDER that consumes them was hand-written twice, in the same order, and this
+  // change's own history is the argument — retiring the old early return forced
+  // the identical reordering edit to be made by hand in both places, where a
+  // one-sided version parses, renders, and is caught only if a fixture happens to
+  // cover the affected arm. The precedence now exists exactly once.
+  const arm = archivedAndDead ? 'survivor'
+    : liveDespiteArchive ? 'live'
+      : unreadable ? 'unreadable'
+        : 'active';
+  const leg = adviceLeg(r);
+  // Fail closed rather than let an undefined cell throw mid-render: `cmdTakeover` has
+  // already written its machine-wide lineage edge by the time it reaches this, and the
+  // output buffer is only flushed at the end of `main()` — so an uncaught throw here
+  // would land an edge while printing nothing, including the LINEAGE announcement that a
+  // read command which writes is required to make.
+  const cell = ADVICE_LEADS[arm] && ADVICE_LEADS[arm][leg];
+  if (!cell) fail(`internal: no advice lead for ${arm}/${leg}`);
+  const lead = cell({ pid: livePid(r.live), why: unreadableWhy });
+  if (leg === 'gone') {
+    // No `CARRY_OVER` here, and the omission is a statement about THIS PATH rather than
+    // about the work: the recorded directory cannot be read, so the recipe would name a
+    // source that is not there. It used to say "only the branch survived, so there is
+    // nothing left to carry across" and then, four lines later, that the recorded path
+    // may have been a SUBDIRECTORY of a root that still exists — which, if true, means
+    // the uncommitted work is sitting in that root untouched. Both sentences were in
+    // the same array. The claim is now bounded to what one `statSync` can support.
     return [
-      ...goneLead,
+      ...lead,
       'Take your own path — never re-create theirs:',
-      '  git worktree add <path> <session-branch>',
-      'Anything uncommitted went with the directory; only the branch survived, so there is',
-      'nothing left to carry across.',
+      '  git worktree add \'<path>\' \'<session-branch>\'',
+      'The recorded path is not readable from here, so the carry-over recipe',
+      'cannot run against it as printed. That is one directory check, not a proof that the',
+      'uncommitted work is gone.',
       'If git answers that the branch is already checked out somewhere, the recorded path was',
       'a SUBDIRECTORY of a root that still exists — that root holds the branch, so add yours',
-      'with -b claude/<name>-cont instead. Not --force, and not git checkout elsewhere.',
+      'with -b claude/<name>-cont instead. Not --force, and not git checkout elsewhere. That',
+      'root is also where the carry-over recipe DOES apply: run it against the root that',
+      'still exists, substituting it for <their worktree>, rather than against the path',
+      'recorded here.',
       'That path comes out of another session\'s transcript, so read it before you act on it.',
     ];
   }
-  // States what was OBSERVED, and states it as a hazard rather than as clearance.
-  // Section 6 measures the counter-example to the old reading: of 657 archived
-  // worktree-sessions, the 159 survivors were overwhelmingly DIRTY, which is exactly
-  // what `git worktree remove` refuses on. So an archived directory that is still
-  // here is close to by construction one archiving already tried to delete.
-  const lead = archivedSurvivor
-    ? [
-      'Archived and dead, and this directory survived that archive run — which almost always',
-      'means it is DIRTY, since a dirty tree is what `git worktree remove` refuses on. That',
-      'makes it the worst place to continue rather than a safe one: your first commit removes',
-      'the only reason it is still here.',
-    ]
-    : liveDespiteArchive
-      ? [
-        `Archived, but pid ${livePid(r.live)} is still registered and alive, so it can still remove or`,
-        'move this worktree. Treat it as not archived.',
-      ]
-      : unreadable
-        ? [
-          `The archive state could not be read (${unreadableWhy}), so treat this worktree as one`,
-          'that still belongs to an archivable session.',
-        ]
-        : [
-          'Never continue in a worktree that still belongs to an archivable session — archiving',
-          'deletes it under you.',
-        ];
-  return [...lead, ...takeYourOwn];
+  if (!withCarryOver) return [...lead, ...TAKE_YOUR_OWN];
+  return [
+    ...lead,
+    ...TAKE_YOUR_OWN,
+    ...(r.live ? LIVE_SNAPSHOT_CAUTION(livePid(r.live)) : []),
+    ...CARRY_OVER,
+  ];
 }
 
 // A COMMAND line inside `worktreeAdvice`'s output is one indented by two spaces;
@@ -2701,9 +2913,17 @@ function cmdShow(opts) {
   // whether taking over is safe, `writesLines` whether you may write there, and
   // this whether the directory will still exist while you do.
   print('');
-  const wtAdvice = worktreeAdvice(r);
+  // The DECISION half only. This is a survey view — nine-space prefix, no fence — and
+  // the carry-over recipe is dozens of lines of paste-and-run text whose home is a persisted
+  // brief. Dumping it here cost `show` the one property it has, which is that you can
+  // scan it. The `--json` payload above is NOT summarized: it is a data carrier.
+  const wtAdvice = worktreeAdvice(r, { carryOver: false });
   print(`WHERE    ${wtAdvice[0]}`);
   for (const advice of wtAdvice.slice(1)) print(`         ${advice}`);
+  if (adviceLeg(r) === 'present') {
+    print('         The uncommitted half needs a carry-over recipe this view does not print.');
+    print('         Run handoff or takeover for it — those write a brief you paste from.');
+  }
   for (const line of writesLines(w)) print(line);
   print('\n--- PROMPT TIMELINE ---');
   const ps = r.prompts || [];
@@ -2741,7 +2961,12 @@ function printResume(r) {
   print(`  cd -- ${briefShellArg(r.cwd)} && claude --resume ${briefShellArg(r.sessionId)}`);
   print(`  cd -- ${briefShellArg(r.cwd)} && claude --resume ${briefShellArg(r.sessionId)} --fork-session`);
   if (r.pr) print(`  claude --from-pr ${r.pr.number}`);
-  if (!r.cwdExists) print('  # worktree missing — recreate it first: git worktree add <path> <branch>');
+  // Points at the taker's OWN path, not at re-creating the recorded one. This line is
+  // rendered a few rows below the WHERE block, which on the same leg has already said
+  // "Take your own path — never re-create theirs": the two contradicted each other in one
+  // screen of output, and SKILL.md flow 3 step 4 claims to be the only place that decides
+  // where to continue.
+  if (adviceLeg(r) === 'gone') print("  # worktree missing — take your own: git worktree add '<path>' '<session-branch>'");
 }
 
 const PLAN_DIRS = ['.zensu/plans', 'docs/plans', '.claude/plans', 'plans'];
@@ -2940,20 +3165,29 @@ function cmdTakeover(opts) {
   // point; the takeover brief carried none. It is labelled rather than warned about,
   // because under the rule above this path is NEVER the destination.
   //
-  // "the worktree ROOT", not "the directory this session RECORDED": the fence below
-  // renders `r.wt`, and `r.wt` is derived — `buildIndexUncached` walks UP from the
-  // recorded cwd to the nearest git root whenever that cwd exists. The two differ
-  // exactly when the session started in a subdirectory, which `cmdShow` prints as a
-  // separate CWD row and this brief never shows at all, so naming the recorded value
-  // here would label one path with the other's provenance.
-  L.push('   The path below is the WORKTREE ROOT of the session you are taking over.');
-  L.push('   It is the SOURCE, not the destination — the decision above never names it as the');
+  // The "worktree ROOT" claim is CONDITIONAL, because `r.wt` is only a worktree root on
+  // one leg. `buildIndexUncached` computes `(dirExists(cwd) && worktreeRoot(cwd)) || cwd`,
+  // so the derivation is skipped outright when the recorded directory is unreadable — and
+  // even where it runs, `worktreeRoot` gives up after 12 parent levels with no `.git`.
+  // Claiming a root on the gone leg contradicted the advice a few lines above it, which
+  // tells the reader the recorded path may have been a SUBDIRECTORY of a root that still
+  // exists: a reader just told this IS the root does not go looking above it, in exactly
+  // the state that remedy exists for. The same value is what the carry-over recipe expects
+  // substituted for <their worktree>, where `git -C` fails if it is not a repository.
   if (r.cwdExists) {
+    L.push('   The path below is the WORKTREE ROOT of the session you are taking over.');
+    L.push('   It is the SOURCE, not the destination — the decision above never names it as the');
     L.push('   place to continue. Read the old tree there and take the carry-over patch from it;');
     L.push('   do the work in the worktree you created.');
   } else {
-    L.push('   place to continue, and it is GONE right now, so the line below will fail and');
-    L.push('   everything uncommitted went with it. Work in the worktree you created, off the branch.');
+    L.push('   The path below is the directory this session RECORDED. Nothing resolved it to a');
+    L.push('   worktree root, because it is not readable from here — it may be a subdirectory of');
+    L.push('   a root rather than the root itself.');
+    L.push('   It is the SOURCE, not the destination — the decision above never names it as the');
+    L.push('   place to continue, and it is GONE right now, so the line below will fail as');
+    L.push('   printed. Check whether a root ABOVE it still exists: if one does, the uncommitted');
+    L.push('   work is still there and the carry-over recipe applies against that root. Either');
+    L.push('   way, work in the worktree you created, off the branch.');
   }
   L.push('');
   L.push('```bash');
@@ -3099,7 +3333,11 @@ function cmdHandoff(opts) {
   L.push(r.cwdExists
     ? 'anchors on the directory you start it in. Left as printed it runs in the old worktree.'
     : 'anchors on the directory you start it in. Left as printed the `cd` fails outright — that');
-  if (!r.cwdExists) L.push('directory is gone, and the uncommitted work went with it.');
+  // Bounded to what one directory check supports, matching the advice block above it in
+  // this same brief: the recorded path being unreadable is not a proof that the work is
+  // gone, and the advice a few lines up already tells the reader a root ABOVE it may
+  // still hold it. The two used to contradict each other inside one persisted artifact.
+  if (!r.cwdExists) L.push('directory is not readable from here — check whether a root above it still holds the work.');
   L.push('```bash');
   L.push(`cd -- ${briefShellArg(r.cwd)} && claude --resume ${briefShellArg(r.sessionId)}`);
   L.push('```');
@@ -3908,17 +4146,6 @@ function windowProbe(raw) {
 
 function scriptPath() { return fileURLToPath(import.meta.url); }
 
-const argv = process.argv.slice(2);
-const opts = parseArgs(argv);
-const cmd = opts._[0] || 'list';
-// Keyed to whether a JSON payload is actually EMITTED, not to the flag:
-// handoff ignores --json and always emits markdown, so suppressing the note
-// there would drop the count on every channel at once.
-JSON_MODE = opts.json && cmd !== 'handoff';
-// Roots are resolved before any command runs, never at module load: --config-dir
-// is only known once argv is parsed, and a command that read the default root first
-// would write its ledger into ~/.claude while reading sessions from elsewhere.
-resolveRoots(opts.configDir);
 // The two tables are adjacent because the invariant between them is the whole
 // point: every dispatched command needs a flag row, or it accepts every flag in
 // the namespace again. Keys drive the usage string too, so a tenth command cannot
@@ -4020,10 +4247,66 @@ function refuseForeignFlags(opts, cmd) {
   if (foreign.length) fail(`${foreign.join(' and ')} is not a flag of \`${cmd}\` — it would have been parsed and then ignored`);
 }
 
-// The unknown-command refusal stays FIRST: a typo must be reported as a typo, not
-// as a flag that does not belong to the command the user did not name.
-const handler = Object.prototype.hasOwnProperty.call(COMMANDS, cmd) ? COMMANDS[cmd] : null;
-if (!handler) fail(`unknown command: ${cmd} (${Object.keys(COMMANDS).join(' | ')})`);
-refuseForeignFlags(opts, cmd);
-handler(opts);
-flush();
+// Everything argv-dependent lives in here rather than at module scope, so that an
+// `import` of this file parses no arguments, resolves no roots and dispatches no
+// command. That is what makes the advice helpers below unit-testable at all: they
+// are pure functions of a plain record, and the only thing that had ever stood
+// between them and a `node --test` file was this dispatch running on import.
+function main() {
+  const argv = process.argv.slice(2);
+  const opts = parseArgs(argv);
+  const cmd = opts._[0] || 'list';
+  // Keyed to whether a JSON payload is actually EMITTED, not to the flag:
+  // handoff ignores --json and always emits markdown, so suppressing the note
+  // there would drop the count on every channel at once.
+  JSON_MODE = opts.json && cmd !== 'handoff';
+  // Roots are resolved before any command runs, never at module load: --config-dir
+  // is only known once argv is parsed, and a command that read the default root first
+  // would write its ledger into ~/.claude while reading sessions from elsewhere.
+  resolveRoots(opts.configDir);
+  // The unknown-command refusal stays FIRST: a typo must be reported as a typo, not
+  // as a flag that does not belong to the command the user did not name.
+  const handler = Object.prototype.hasOwnProperty.call(COMMANDS, cmd) ? COMMANDS[cmd] : null;
+  if (!handler) fail(`unknown command: ${cmd} (${Object.keys(COMMANDS).join(' | ')})`);
+  refuseForeignFlags(opts, cmd);
+  handler(opts);
+  flush();
+}
+
+// REALPATHS on both sides, never the raw strings. An installed plugin root is
+// routinely reached through a symlink, and a string compare would then answer
+// "not the entry point" for a genuine CLI invocation — turning the whole command
+// into a silent no-op, which is far worse than the import side effect this guard
+// removes. `path.resolve` is the fallback for a path that cannot be realpath'd,
+// so an unreadable ancestor degrades to the old comparison rather than throwing.
+//
+// An ABSENT `process.argv[1]` returns false on purpose: that is `node -e` or a
+// REPL, where there is no script to be the entry point of and no command was
+// asked for. An importer is the other side of the same coin — argv[1] is the
+// importer's own entry, so the comparison fails and the CLI stays silent.
+function isEntryPoint() {
+  const invoked = process.argv[1];
+  if (typeof invoked !== 'string' || invoked === '') return false;
+  // `.native`, like every other canonicalization in this file: the JS implementation does
+  // not return the on-disk case or the long form of a Windows 8.3 name, and a mismatch on
+  // this one comparison silences the whole CLI rather than producing a visible error.
+  const real = (p) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(p); } };
+  return real(invoked) === real(scriptPath());
+}
+
+// The advice surface: FOUR names — three functions of a plain record, plus the regex that
+// grades their output. Nothing else in this file can be driven without a filesystem, which
+// is what makes this the right export set. Named exports rather than a default, so a
+// consumer's import list says what it uses.
+//
+// ONE impurity, stated because an importer would otherwise be entitled to assume none:
+// `worktreeAdvice` calls `fail()` on an internally inconsistent `ADVICE_LEADS` lookup, and
+// `fail` flushes, writes stderr and calls `process.exit`. That path is unreachable today —
+// four literal arms against two literal legs, all eight cells present — and the choice is
+// right for the CLI, where a half-rendered brief beside a written ledger edge is worse than
+// a loud exit. An importer must not treat the function as total; if this surface is ever
+// extracted into its own module, replacing that `fail()` with a thrown error is the first
+// obligation the move carries.
+export { adviceBlock, worktreeAdvice, adviceLeg, WORKTREE_ADVICE_COMMAND };
+
+if (isEntryPoint()) main();
