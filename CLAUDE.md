@@ -3296,6 +3296,262 @@ the flag. Exactly ONE invocation there omits it — the L10 case, whose whole su
 that the variable is honoured — and `L28` pins that it stays exactly one, because a
 second exemption is indistinguishable from a forgotten `env -u`.
 
+## Takeover Destination (`worktreeAdvice` in `skills/session-trail/scripts/trail.mjs`)
+
+**A THIRD session-trail axis, and the one most easily confused with the other two.**
+§"Git Mutation Tables" tracks the WRITE-ANCHOR contract — *may I write there* — in six
+carriers. §"Session Lineage Ledger" tracks a chain of sessions handing work to each
+other. This one asks *will the directory still exist while I work in it*, and it shares
+no code with either. All three live in the same skill; a change to one lands in none of
+the others.
+
+**The answer is now the same on every arm: a worktree of the taker's OWN.** There used
+to be one exception — an already-archived session whose directory had survived was
+adopted in place — and it was the worst arm to except rather than the safest. A survivor
+is the tree `git worktree remove` refused on, and 37 of 40 sampled survivors were dirty,
+so a takeover's first commit very often removes the condition that kept it alive.
+**That is a correlation over 40 samples, and the wording has to stay one:** "close to by
+construction" asserted a MECHANISM the sample does not support, and it stood here and in
+`SKILL.md` while the emitted text hedged it correctly as "almost always" — a maintainer-
+facing overstatement above a user-facing statement that was already right. SKILL.md §6
+measures the other half of the shape: 498 of 657 archived worktree-sessions lost their
+directory. The arms now decide only what to SAY, never whether to stay — an arm that
+returns without a `git worktree add` line has reintroduced the defect, which is what
+`WT8k` grades over a source-derived roster of all eight fixtures rather than a hand list.
+`WT8L`/`WT8L2` grade the half `WT8k` cannot see: the `-b` SPELLING, in both directions.
+That was the one measured routing decision the change turned on and nothing asserted it —
+deleting `-b claude/<name>-cont` left every check in both suites green. The gone arm's
+forbidden needle is the LONGER `add <path> -b claude/`, because its own prose legitimately
+offers `-b claude/<name>-cont` as the remedy when git reports the branch already checked
+out somewhere.
+
+**`archivedAndDead` is named for what the EXPRESSION computes.** It was `safeToAdopt` —
+a name that read as clearance — and then `archivedSurvivor`, which read as "the directory
+survived" and needed eight lines of apology on the gone leg explaining that it means the
+opposite there. The predicate carries no directory term at all
+(`archived === true && !liveDespiteArchive`); the directory split happens one level down,
+in `leg`. A name that has to be defended at one of its two use sites is the wrong name,
+and the apology comment went with the rename rather than surviving it.
+
+**The arm is decided ONCE, above the directory split, and both legs index `ADVICE_LEADS`.**
+Lifting the three predicates was only half the job — the four-way LADDER that consumes them
+was hand-written twice, in the same order, and this feature's own history is the argument:
+retiring the old early return forced the identical reordering edit to be made by hand in
+both places, where a one-sided version parses, renders, and is caught only if a fixture
+happens to cover the affected arm. Each cell of the table is a FUNCTION, because two arms
+interpolate a measured value (the live pid, and why the archive state could not be read),
+and one shape is cheaper to hold than two.
+
+**The rule has TWO halves and the second is easy to drop.** Choosing a directory settles
+where COMMITTED work goes; a `git worktree add` carries nothing else. The present-directory
+arms therefore also carry `CARRY_OVER`, the recipe that moves the uncommitted half out, and
+the gone arms say the recipe cannot run against a path that is not readable rather than
+printing one whose source is not there.
+
+**The safety properties of that recipe are enumerated in the two reader-facing carriers,
+and this section deliberately restates neither them nor their COUNT.** It used to, and that made a FOURTH hand-maintained copy of text that
+already exists in the code comment above `CARRY_OVER`, in the emitted array a human reads,
+and in `SKILL.md` flow 3 step 4 — a four-way agreement whose own paragraph recorded that it
+had already gone stale once (it read THREE for a round after `--binary` was added, and FOUR
+for a round after the quoting, the paste-unit split and the regular-files-only loop landed).
+The two READER-FACING carriers are the authority: the `CARRY_OVER` rationale comment in
+`skills/session-trail/scripts/trail.mjs` and `skills/session-trail/SKILL.md` flow 3 step 4,
+which must agree with each other on the COUNT and on every property. `T35b` pins the
+SKILL.md copy needle by needle and `WT8m3`/`WT8m4`/`WT8m5` plus
+`tests/structure/worktree-advice-v1.test.js` pin the EMITTED array. State the bound with
+them: no check compares the two COUNTS, and the rationale COMMENT above `CARRY_OVER` has
+no pin at all — which is where three stale claims were found in one review cycle. That
+agreement is held by review, not by a suite. What stays here
+is the pin roster below and the gaps at the end — the parts that exist nowhere else.
+
+**Three hand-maintained counts encode ONE fact, in TWO files, and they are related by
+arithmetic nothing computes:** `WT8_PRESENT_EXPECT` and `WT8_GONE_EXPECT` in
+`tests/structure/test-session-trail-verdict.sh`, and `T35_EXPECT` in
+`tests/structure/test-session-trail-skill.sh`, where **`T35_EXPECT` = `WT8_PRESENT_EXPECT` +
+`WT8_GONE_EXPECT`**. Adding one command to `CARRY_OVER` reddens two suites in two files, and
+each failure message now names its sibling so the second edit is not a hunt. The VALUES are
+deliberately not repeated in this file: they moved three times inside one review cycle and
+this paragraph was stale after every one of them, which is the drift a fourth hand copy
+always produces. Read them from the two suites; what this paragraph owns is the RELATION.
+**They must NOT
+be derived, and that is worth stating so nobody "fixes" them into vacuity:** the same
+extraction that would produce the expectation also loses the two-space prefix, so a derived
+expectation drops in lockstep with the defect and passes. The exactness is load-bearing;
+what was missing was signposting.
+
+**Coupled carriers, and the pin that holds them:** the advice command literals —
+`TAKE_YOUR_OWN`'s and the gone leg's `git worktree add` spellings AND every `CARRY_OVER`
+command — are hand-restated in `skills/session-trail/SKILL.md` flow 3 step 4, in its table
+and its fenced blocks. A FOURTH copy of the gone-leg spelling lives in `printResume` and is
+OUTSIDE the extractor's range, which ends at `worktreeAdvice`'s closing brace: it is
+byte-identical today and a one-sided edit to it is unpinned. `T35`/`T35-control` in `tests/structure/test-session-trail-skill.sh`
+extract every two-space command literal from the first hoisted constant through the END of
+`worktreeAdvice` — a RANGE, not one array, because scoping it to `CARRY_OVER` would leave
+the two literals that encode the rule unpinned, and because the constants now live at module
+scope while the gone leg's command is still inside the function. Its `sed` decodes the one
+JavaScript escape those literals carry (`\'`, from the shell-quoted placeholders); without
+that, every quoted command reads as missing from a markdown carrier that agrees with it.
+**Both scans are SCOPED to flow 3 step 4.** The rationale scan always was, because `symlink`
+and `mktemp` occur in unrelated passages and a whole-file grep passes while the recipe's own
+rationale is gone. The COMMAND scan was not, and that made it presence-in-the-file rather
+than presence-in-the-right-cell: transposing the `-b` and no-`-b` spellings between the
+table's *Directory present* and *Directory gone* columns left both literals in the file, so
+the model read the rule backwards with every check green — and moving the fenced recipe out
+of step 4 entirely was invisible the same way. `T35-control` asserts an EXACT count, not a
+floor: a floor survives deleting the `apply --stat` step from both carriers at once, which is
+the edit the pin exists to stop. `T35b-control` guards both scans against an empty slice.
+
+**`WORKTREE_ADVICE_COMMAND` / `adviceBlock` are a producer/consumer contract between one
+array and two briefs.** A command line is one indented exactly two spaces; prose sits at
+column zero. It is deliberately NOT a `git `-anchored rule any more — `CARRY_OVER` opens
+with a `PATCH="$(mktemp …)" && …` line, and its copy loop carries `while`, `[`, `mkdir` and
+`done` lines besides — and the widening cuts both ways: a prose line that acquires
+a two-space lead-in is published inside a ```bash fence in two persisted briefs. `WT8p`
+grades both directions structurally rather than against a verb allowlist. Before the
+extraction the two briefs disagreed about the same array — `cmdHandoff` re-fenced per line,
+`cmdTakeover` fenced nothing — so a recipe was runnable in one brief and prose in the other.
+Contiguous commands coalesce into ONE fence, and it takes TWO pins to hold that — one per
+renderer. `WT8q` drives `cmdTakeover` and `WT8q2` drives `cmdHandoff`, which is the call
+site whose own comment names it as the origin of the per-line-fencing defect. One was not
+enough and that is measured, not argued: with only `WT8q`, reverting `cmdHandoff` alone
+left every check in both suites green. Both render a PRESENT-leg brief, which no other
+fixture here does — every other one is directory-gone, and a single isolated command cannot
+show coalescing at all. `WT8r` consumes those same two renders rather than making its own,
+and covers the other axis: the `r.cwdExists` prose branches in both briefs, graded against
+the gone leg so it cannot pass by rendering one branch twice.
+
+**Coalescing is now a TWO-SIDED property, and both pins assert the split as well.** One
+fence is one COPY BUTTON, so coalescing all four carry-over commands put the destructive
+`git apply` in the same paste unit as the `grep` and the `apply --stat` that exist to gate
+it — and the "these steps sit between the diff and the apply" argument is about execution
+ORDER, which only holds if the human stops between the third command and the fourth. A
+column-zero prose line breaks `adviceBlock`'s run, so the two READING steps still coalesce
+(splitting those from each other would reintroduce the per-line fencing) while the
+destructive line sits in a later fence of its own. `WT8q`/`WT8q2` grade both halves, because
+either one alone is satisfied by the shape they exist to reject.
+
+**A THIRD consumer renders the same array and no check reached it.** `cmdShow` prints every
+line into a survey view with a nine-space prefix and no fence; when the carry-over recipe
+landed the array grew from roughly six lines to dozens, so `show` began dumping a
+paste-and-run recipe into the middle of the one output whose value is that you can scan it.
+`worktreeAdvice(r, { carryOver: false })` returns the decision half only, and `cmdShow`
+points at the briefs for the rest. The option is opt-OUT on purpose: the briefs are what a
+human pastes from, and a new caller that forgets it gets more rather than less. The `--json`
+payload is deliberately NOT summarized — it is a data carrier, and every `wt_case` in the
+verdict suite reads the advice through it, which is what `WT8s` grades from both sides.
+
+**The advice surface was NOT extracted into a `worktree-advice-v1.mjs` sibling, and the
+decline is recorded here so it is not re-litigated from scratch — twice already a round
+reported it as recorded when it was not.** The repo's own convention for an extracted module
+is exactly that shape: `session-lineage-v1.mjs` sits in the same directory with its own
+`node --test` file. Three facts argue for taking it. The unit file is already NAMED
+`worktree-advice-v1.test.js`, for a module that does not exist. Importing the "pure" advice
+surface evaluates `claude-path-v1.js`, `bash-source-write-parse.js` and `session-lineage-v1.mjs`
+at load, because they are `trail.mjs`'s own imports. And `worktreeAdvice` can reach
+`process.exit` through `fail()`, which is not a thing a library does to its importer.
+
+What argued against taking it in the round that raised it is concrete rather than
+conservative: `T35`'s extractor anchors `^const CARRY_OVER = \[`, `^function worktreeAdvice\(`,
+`^\}$` and `^const WORKTREE_ADVICE_COMMAND` against `$TRAIL_MJS`, and that anchor set has
+already gone dead once without a sound. Moving the constants re-points four anchors,
+`T35_EXPECT`, this roster and the unit file's import in one edit.
+
+**The trigger is a second importer, or the next change that has to re-point those anchors
+anyway.** The move carries three obligations: re-home `livePid`, replace the `fail()` call
+with a thrown error, and re-point the extractor.
+
+**Known gaps, accepted and named:**
+
+- **The rule is prose, not a gate.** Nothing stops a session working in another session's
+  worktree; the source-write gate only refuses a COMMIT outside the anchor, which is the
+  other axis. This change makes every rendered recommendation point at the taker's own
+  worktree — it does not enforce one.
+- **The carry-over's untracked half carries a hazard no git flag touches**, and it is now
+  a RUNNABLE loop rather than a sentence. `ls-files --others --exclude-standard` reports a
+  SYMLINK by name like any other path, so a copy follows it out of the worktree — in a
+  repository you have not vetted, that is how a key or another checkout leaves its
+  directory. The check is the PAIR `[ -f "$s" ] && [ ! -L "$s" ]`, and neither half is
+  optional: `test -L` alone — which both carriers used to name as *the* check — is a symlink
+  test offered as the implementation of a REGULAR-FILE rule, so FIFOs, device nodes and
+  sockets pass it; `[ -f ]` alone FOLLOWS a symlink, which is the mirror defect and the
+  obvious spelling a reader reaches for. **A HARD LINK passes BOTH halves and is an accepted
+  RESIDUAL, not a case the pair closes** — MEASURED, a hard link is a second directory entry
+  for a regular file. The review finding that prompted the loop, the first emitted wording and
+  an earlier revision of this bullet all claimed otherwise; the two reader-facing carriers now
+  state the residual and name the link-count test beside it. It is emitted rather than described because prose left the reader to
+  improvise a loop that word-splits on a filename with a space. It still applies to copying
+  by hand, because the "do not run this at all" escape does not answer it — and that escape
+  now lives in the EMITTED array too, not only in SKILL.md, since SKILL.md is read by the
+  model while the array lands in the brief a human pastes from. Pinned on both carriers, by different
+  suites: `T35b` covers the SKILL.md copy, and `WT8m3`/`WT8m4`/`WT8m5` plus
+  `tests/structure/worktree-advice-v1.test.js` cover the EMITTED text — the one that reaches a persisted brief,
+  and the one `T35` cannot see, since its extractor matches command literals and these
+  cautions are the prose beside them.
+- **`adviceBlock` IS exported now, and its dormant branch has an executed case.** The
+  `firstPrefix`-on-a-leading-command arm is still dormant by construction — every arm opens
+  with a prose sentence naming its cause — and it exists so the helper does not silently eat
+  `cmdHandoff`'s `- ` bullet the first time an arm is reordered. `trail.mjs` now guards its
+  CLI dispatch on being the process entry point and exports FOUR names — `adviceBlock`,
+  `worktreeAdvice`, `adviceLeg` and `WORKTREE_ADVICE_COMMAND` — so
+  `tests/structure/worktree-advice-v1.test.js` drives that branch, an empty input and a
+  single-line input directly. `adviceLeg` is the ONE implementation of the present/gone
+  decision, and it exists because that decision has three consumers: `worktreeAdvice` picks
+  its lead AND its body from it, `cmdShow` decides from the same answer whether to print the
+  pointer at the recipe its survey view withholds, and `printResume` decides whether to print
+  its own copy of the gone-leg create command. Every one of those was a hand-written
+  `r.cwdExists` at some point in this feature's history, and one of them drifted INSIDE a
+  single function — the lead came from `adviceLeg` while the body came from a raw
+  re-derivation. Before adding a renderer that depends on the leg, grep `cwdExists`. The entry-point guard
+  compares REALPATHS on both sides: an installed plugin root is routinely reached through a
+  symlink, and a string compare would answer "not the entry point" for a genuine invocation,
+  turning the whole CLI into a silent no-op — far worse than the import side effect it
+  removes. The unit file is driven from `test-session-trail-verdict.sh`, because
+  `tests/run-all.sh` discovers only `test-*.sh`; its case count is hand-maintained and EXACT
+  there, for the same reason `T35_EXPECT` is.
+- **The line-anchored citations from `docs/multi-repo-chains-*` into this skill broke THREE
+  times during one change**, silently each time, because `test-multi-repo-doc-citations.sh`
+  states in its own header that a citation landing on a different but still substantive line
+  is invisible to it. `T36` in `tests/structure/test-session-trail-skill.sh` is the tripwire,
+  and it lives in THIS skill's suite rather than in the docs' because the file that MOVES the
+  target is this one. It pairs each citation with a needle naming the cited CONTENT; when it
+  fails, re-derive the line and fix the doc — never weaken the needle. **Seven rows, across
+  BOTH carriers**: grading only the spec was the first spelling, and it reproduced the very
+  defect it was written for, since the overview HTML twins three of those citations and had
+  already drifted once inside this change. One row hardcodes its own line number, because the
+  spec cites `SKILL.md` twice and a generic regex cannot tell them apart — that row's regex
+  moves with the citation, which fixing the doc alone does not do. It has since caught
+  further drifts, from both carriers at once — the first time that class failed loudly
+  instead of silently. No ordinal here on purpose: the drift count lives only in run logs,
+  so a number written down would be hand-maintained and would go stale, which is the failure
+  mode this file warns about elsewhere. `T36-control` derives the citation POPULATION by
+  scanning both documents rather than counting its own rows, so a citation into this skill
+  that no row covers fails loudly instead of being graded by nothing.
+  `test-multi-repo-doc-citations.sh`'s header points here, because an editor working from
+  the docs' side would naturally run that suite and a green run there says nothing about
+  these citations. **Re-derive each citation PER SITE, never by pattern sweep.** A regex
+  over `trail\.mjs:\d+` was used twice to update these and collapsed both HTML citations
+  onto one number both times — the two `<p class="src">` lines carry no prose to key on, so
+  a sweep cannot tell the `gitState` card from the `printResume` one. `T36` caught it on
+  both occasions, which is the only reason this is a note rather than a shipped defect.
+  A symbol-resolved citation format would remove the fragility rather than catch it, and is
+  not implemented.
+- **`--resume` still lands in the source worktree by design.** The printed resume line is
+  unchanged, and `FRESH_SESSION_SOURCES` excludes `resume`, so a resumed session keeps the
+  original anchor. `--fork-session` is the route whose anchor is the directory it starts in,
+  and the only one where the own-worktree rule and the write anchor land on the same place —
+  but only the HANDOFF brief and SKILL.md flow 3 step 4 name it. The takeover brief renders
+  no resume line at all, so it does not, and any claim that "both briefs" name the fork is
+  false. Either way it is guidance, not a mechanism.
+- **The `noStore` branch of `unreadableWhy` is unreachable from `test-session-trail-verdict.sh`.**
+  `$FAKE` is one directory for the whole run, and the `archive()` helper itself does the
+  `mkdir -p` on the store path; its FIRST call sits in the top-level fixture-setup block,
+  over two thousand lines before any WT8 fixture is graded. So the store exists by then and
+  `r.ccdStore` can never read `false` there. Two wrong causes were written down before that
+  one — the WT8 block's own `archive()` calls (which run AFTER the unreadable fixture is
+  graded) and the W13 case's `mkdir -p` (which is real but not first) — so name the helper
+  and its first call site, not a line number that moves. Pre-existing, predates this rule,
+  and it means one of the two hedged wordings has no executed case anywhere.
+
 ## Pull Request Workflow
 
 **Never commit or push to a closed or merged PR's branch.** Once a PR is merged or closed, its branch is dead — additional commits there belong on a new branch with a new PR.

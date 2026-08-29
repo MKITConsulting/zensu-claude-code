@@ -43,7 +43,7 @@ is ever measured for the suite.
 |---|---|---|
 | `tests/structure/test-*.sh` (deterministic shell) | **144** — 137 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
 | *(reconciliation)* | a `--ci` run reports **137 structure suites + 5 offline evals = 142 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 144 − 137 gap | — |
-| `tests/structure/*.test.js` (`node --test` units) | **24 files** | invoked *by* parent `.sh` suites |
+| `tests/structure/*.test.js` (`node --test` units) | **26 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
 | Windows contract profiles | **7** (`windows-shard-1`…`-7`, 42 suite entries) | `ci.yml` matrix, `run-profile.js` |
@@ -245,7 +245,7 @@ each other on counts, terminology, navigation and the specification's BLOCKED st
 Structure gates for the Promptfoo harnesses. GitHub Actions never invokes the Promptfoo
 binary; these guard the local harness contract.
 
-## 4. `node --test` unit suites (24 files)
+## 4. `node --test` unit suites (26 files)
 
 Not run standalone — each is driven by a parent shell suite, so a JS failure surfaces as
 that suite's failure.
@@ -259,7 +259,7 @@ that suite's failure.
 | `chain-recovery-v1.test.js` | 21 | `test-chain-recover.sh` | chain shape lattice + rearm-receipt predicate |
 | `reviewer-spawn-denial-v1.test.js` | 29 | `test-stop-enforcer-self-review-routing.sh` | host-refused reviewer spawn: structural `tool_use_id` keying, the host error flag, the marker prefix, tail/line bounds, degrade-to-none |
 | `plan-payload-v1.test.js` | 20 | `test-plan-payload-fallback.sh` | plan-source precedence table, hardened plan-file reader refusals, O_NOFOLLOW-unavailable fallback |
-| `zensu-doctor-invocation.test.js` | 24 | *none found* | `/zensu:doctor` invocation allowlist — no `.sh` suite and no `run-all.sh` entry drives this file |
+| `zensu-doctor-invocation.test.js` | 24 | `test-versioned-plugin-upgrade.sh` | `/zensu:doctor` invocation allowlist — driven from that suite, which binds it as `RECOGNIZER_UNIT` and grades it against a registered-case floor; it has no `run-all.sh` entry of its own, because discovery is `test-*.sh` only |
 | `playwright-mcp-proxy.test.js` | 16 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy |
 | `verify-feature-transcript-check.test.js` | 14 | `test-promptfoo-verify-feature.sh` | transcript assertion contract |
 | `fixture-mutation-watch.test.js` | 19 | `test-claude-promptfoo-wrapper.sh` | fixture-event classification: the gated classes (`.git`, the watch root's own name, run-owned ancestors) adjudicated by the manifest, ordinary paths by touch-after-start, and that both watch backends route through one decision spelled once |
@@ -274,10 +274,17 @@ that suite's failure.
 | `owned-process.test.js` | 2 | `test-claude-promptfoo-wrapper.sh` | owned-process lifecycle |
 | `reviewer-spawn-allow-v1.test.js` | 18 | `test-reviewer-spawn-allow.sh` | the reviewer-spawn grant's derived agent set, its silence on every non-grant path, and the one-definition scan |
 
-Three further files — `review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js` and
-`session-adopt-report-v1.test.js` — exist on disk without a row here. That drift predates
-the reviewer-spawn grant and is recorded rather than silently absorbed; the counts above
-are derived from the real directory listing, so they include those three.
+Five further files — `review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js`,
+`session-lineage-v1.test.js`, `worktree-advice-v1.test.js` and
+`session-adopt-report-v1.test.js` — exist on disk without a row here. For FOUR of them that drift predates the reviewer-spawn
+grant; `worktree-advice-v1.test.js` is different and the distinction is worth keeping —
+it was added by the session-trail takeover-destination change and left rowless
+deliberately, because SUITE-OVERVIEW.md itself is graded by no suite and a row here would
+be one more hand-maintained copy of a count nothing checks. The unit file IS driven — by
+`test-session-trail-verdict.sh`, which pins its case count exactly — so it is rowless
+here, not ungraded there. Both are recorded rather than silently
+absorbed; the counts above are derived from the real directory listing, so they include
+all five.
 
 Plus `tests/session-control/session-control-core-v1.test.js` — the Session Control core
 unit suite, reached via `tests/session-control/run.sh`, which is invoked **only** by the
