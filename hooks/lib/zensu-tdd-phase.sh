@@ -2679,6 +2679,107 @@ ZENSU_BYPASS_GATE_ALLOWLIST="ZENSU_TDD_GATE ZENSU_BASH_WRITE_GATE ZENSU_MCP_GATE
 ZENSU_BYPASS_UNREADABLE_TEXT="UNREADABLE — workflow state could not be validated; this is NOT a clean ledger"
 ZENSU_BYPASS_ABSENT_TEXT="UNREADABLE — no workflow document exists for this session; this is NOT a clean ledger"
 
+# --- Review-spawn scope sentence (shared directive text) -------------------
+# Its own banner rather than a tail of the bypass-ledger section above: this is
+# directive prose a model reads, not ledger machinery, and CLAUDE.md's locality
+# claim about the two ledger message constants should stay readable as written.
+#
+# Some hosts carry a session rule telling the model not to spawn a subagent the
+# user did not ask for. On Claude Code 2.1.248 that rule reaches the model as the
+# `heron_brook` prompt section, whose built-in fallback a server-supplied
+# `tengu_heron_brook` value replaces wholesale — so this text describes the CLASS
+# of rule and never quotes its wording, which would age out. A model that reads
+# such a rule as a flat prohibition withholds the spawns the review chain is made
+# of, and the chain then wedges until the Stop cap releases it.
+#
+# It does NOT rule on that rule's scope, and the difference is the whole design.
+# The rule's condition is PROVENANCE — who asked — and a hook cannot observe that:
+# `plan-approved-delegate.sh` has a documented fast-path that arms the workflow
+# non-interactively with no human present, and the Stop enforcer itself arms an
+# adopted deferred-review generation, so on both paths the spawns genuinely are
+# unrequested. An earlier draft asserted the user had asked; a second asserted the
+# rule "is about ad-hoc fan-out", which swapped the rule's own criterion for one
+# the plugin can always satisfy. Both were wrong in the same direction. What is
+# left states the observable SHAPE and then ROUTES: withholding is allowed, but it
+# must be said out loud so the user decides, which removes the silent wedge without
+# the plugin adjudicating a restraint it does not own.
+#
+# It names the spawns in the PLURAL. The incident this exists for is a session that
+# declined the five-agent fan-out, not one that declined a single call. The judge
+# pass is named conditionally because `hooks.reviewJudge` can disable it, and every
+# renderer around this constant already carries that gate.
+#
+# TWO hooks render it and neither may re-author it: `stop-chain-enforcer.sh` (the
+# resume directive) and `post-review-tdd-delegate.sh` (the fix-round re-review
+# directive, both severity arms). It is deliberately NOT rendered by the
+# host-refusal branch. Do not restate that arm as user-gated: it fires on
+# `reviewer_spawn_denied`, the scanner's own `blocked` verdict, with no user
+# utterance involved. The reason is that the branch already tells the model the
+# spawn CANNOT succeed, so a scope argument there would read as pressure to work
+# around a refusal, and "A session rule …" would sit beside a permission deny rule
+# with no antecedent to tell the two apart.
+#
+# KNOWN BOUND 0, and it is the one the original roster missed entirely: this sentence
+# only ever reaches a model that got as far as a BLOCKED Stop. A session that reads a
+# host rule as a prohibition normally withholds `--tdd-complete` as well — declining
+# the fan-out and then asserting a completion it did not reach would be the dishonest
+# move — and `hooks/stop-chain-enforcer.sh` releases Stop UNCONDITIONALLY while
+# `SESSION_IMPL_COMPLETE` is not true. In that ordering neither render site is reached
+# at all: no directive, no cap, no bypass-ledger entry, and the chain parks at
+# `implementing`. So bound 1's "one blocked Stop, not a wedge" covers the
+# withhold-AFTER-completion ordering only. CLAUDE.md §"Foreign-Chain Row" records the
+# withhold-BEFORE-completion shape as an observed session outcome and names the only
+# instrument that could see it — counting turns ended while `implementing` with a
+# changed worktree, never wall time. Not addressed here; a turn counter is a
+# workflow-state field and therefore a MINOR release under §"Runtime Lineage".
+#
+# KNOWN BOUND 1: the EARLIEST spawn of a chain is ordered by `skills/tdd/SKILL.md`
+# Phase 6, before any hook directive exists, and that carrier deliberately does not
+# repeat this text — the skill body is in context only because the workflow was
+# invoked, and a third unpinned copy is the drift class CLAUDE.md warns about. So a
+# session that withholds the very first fan-out learns this only after one blocked
+# Stop. One turn, not a wedge; stated rather than left to be rediscovered.
+#
+# KNOWN BOUND 2: `hooks/lib/chain-recovery-v1.js` `NEXT_COMMAND` also instructs a
+# `zensu:code-reviewer` spawn, and its text reaches the model through `zensu-log.sh`
+# and the doctor renderer. A shell constant is structurally unreachable from a JS
+# module, so those carriers cannot consume this owner. This bound is NOT planned to be
+# closed: `NEXT_COMMAND` entries are one-clause remediation hints, and appending a
+# ~500-character scope paragraph to one would be disproportionate. An earlier wording
+# here prescribed moving the owner "to a shared JS module", which inverts the problem —
+# a JS module is exactly as unreachable from `sh` as `sh` is from JS, and all three
+# render sites are POSIX shell, so that remedy would trade one unreachable carrier for
+# three. If a cross-language carrier is ever genuinely needed, the shape that serves
+# both is the one this repo already ships: `hooks/lib/rule-block-v1.js`'s
+# `readRuleBlock`, one line of model-facing prose in a marker block under `docs/`,
+# read by shell hooks and by the doctor renderer alike.
+#
+# KNOWN BOUND 3, and it is the WORST of them: several skill flows order the same
+# review-aspect + code-reviewer fan-out without arming a chain — `cover` says in its
+# own body that it is skill-driven and not Stop-hook-gated — so bound 1's mitigation
+# does not apply there and a withheld fan-out in those flows is PERMANENTLY silent,
+# not one blocked Stop. This sentence says "armed in this session", which puts them
+# outside its scope by construction rather than by oversight; it does not make the
+# gap smaller. The roster is deliberately NOT enumerated here: a prose census goes
+# stale the next time a carrier is added, which is the failure this repo already
+# writes down for the sibling identity one section over — the first enumeration
+# shipped naming three files while nine carried the identity. Before deciding this
+# bound is closed, enumerate them:
+#   grep -rn 'zensu:review-aspect' skills/
+# and judge per file whether it ORDERS a fan-out or merely describes one.
+# CLAUDE.md §"Review-Spawn Scope Sentence" holds the same four bounds and must move
+# with this comment.
+# The build the premise above was read against, recorded the way every other
+# host-coupled literal in this tree records its provenance
+# (DENIAL_MARKERS_SOURCE_BUILD, SETTINGS_SOURCE_BUILD, ALLOW_BYPASS_SOURCE_BUILD).
+# The sentence answers a HOST prompt section; if that section is retired or reworked,
+# nothing in this file stops rendering and no check turns red — the constant is what
+# gives a maintainer a re-verification date to compare against. T46 cross-checks it
+# against the build named in the comment block, the same pairing P1bd performs for
+# the settings ladder.
+ZENSU_REVIEW_SPAWN_SCOPE_SOURCE_BUILD="2.1.248"
+ZENSU_REVIEW_SPAWN_IN_SCOPE="These spawns are the defined shape of the Zensu review chain armed in this session — the zensu:review-aspect panel, the zensu:review-judge second pass when it is enabled, and the zensu:code-reviewer consolidation. If a session rule leads you to withhold them, do not withhold silently and do not work around it: say so in your next message and let the user decide. It grants no permission — a host permission refusal is still a refusal."
+
 _tdd_bypass_shape_ok() {
   case "${1:-}" in
     *[[:space:]]*|*$'\n'*|'') return 1 ;;
