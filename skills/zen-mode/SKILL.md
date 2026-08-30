@@ -138,8 +138,8 @@ the rules are recorded in English, the answer follows the user.
    exception: a step the run deliberately did not perform — skipped, not
    applicable, descoped — is left off the line rather than marked failed, because
    the four marks carry no "did not apply" and `✗` would misreport it. Use short
-   lower-case step names, and let only the words around them follow the user's
-   language.
+   lower-case step names taken from the run itself, and translate only the words
+   around them into the user's language.
 
    **A step is marked done from an observation, never from the plan**, so a step
    you did not see finish stays `·`. The marks already show the position, so add
@@ -155,9 +155,9 @@ the rules are recorded in English, the answer follows the user.
    length and detail. Rules 3, 4, 5 and 8, and rule 7's changed-lines-only half,
    are suspended for them — the jargon gloss is NOT, because a safety warning is
    the last place to leave a term unexplained, and the injected directive keeps
-   it too. Such an
-   answer may list every required step instead of one, may show whatever code
-   context is needed, and a confirmation question before an irreversible action
+   it too. Such an answer may list every required step instead of one, may show
+   whatever code context is needed, and a confirmation question before an
+   irreversible action
    is never suppressed by the one-question cap and is never a "routine decision"
    to settle yourself. **Rule 1, rule 2, rule 6 and the Precedence section below
    are never suspended** — a safety warning is the last place for fragments.

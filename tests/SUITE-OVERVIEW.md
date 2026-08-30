@@ -19,6 +19,11 @@ in exactly one group. §7's profile table was re-derived from
 `tests/profiles/windows-ci.v1.json` rather than described, so its seven shard ids and their
 membership are the JSON's own, and the entry total is **42**.
 
+**Two files below the registry are still unlisted.** `session-lineage-v1.test.js` has no row;
+the count above was raised from 24 to 26 to match the real listing, so the table is one row
+short of the number beside it. Recorded rather than quietly reconciled — an audited count that
+disagrees with its own table is the shape this document exists to prevent.
+
 **Nothing machine-checks any of this.** The reconciliation above is a hand audit performed
 at this commit, not an invariant: the next suite added without touching §3 silently breaks
 it again, and no test will say so. Re-derive rather than trust when the numbers matter.
@@ -43,7 +48,7 @@ is ever measured for the suite.
 |---|---|---|
 | `tests/structure/test-*.sh` (deterministic shell) | **144** — 137 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
 | *(reconciliation)* | a `--ci` run reports **137 structure suites + 5 offline evals = 142 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 144 − 137 gap | — |
-| `tests/structure/*.test.js` (`node --test` units) | **24 files** | invoked *by* parent `.sh` suites |
+| `tests/structure/*.test.js` (`node --test` units) | **26 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
 | Windows contract profiles | **7** (`windows-shard-1`…`-7`, 42 suite entries) | `ci.yml` matrix, `run-profile.js` |
@@ -261,6 +266,7 @@ that suite's failure.
 | `plan-payload-v1.test.js` | 20 | `test-plan-payload-fallback.sh` | plan-source precedence table, hardened plan-file reader refusals, O_NOFOLLOW-unavailable fallback |
 | `zensu-doctor-invocation.test.js` | 24 | *none found* | `/zensu:doctor` invocation allowlist — no `.sh` suite and no `run-all.sh` entry drives this file |
 | `playwright-mcp-proxy.test.js` | 16 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy |
+| `zen-anchor-assertions.test.js` | 7 | `test-zen-mode.sh` (Z29) | zen-mode eval GRADERS: every javascript assertion body compiled, and a pinned pass/fail vector for the two anchor scenarios plus the safety carve-out |
 | `verify-feature-transcript-check.test.js` | 14 | `test-promptfoo-verify-feature.sh` | transcript assertion contract |
 | `fixture-mutation-watch.test.js` | 19 | `test-claude-promptfoo-wrapper.sh` | fixture-event classification: the gated classes (`.git`, the watch root's own name, run-owned ancestors) adjudicated by the manifest, ordinary paths by touch-after-start, and that both watch backends route through one decision spelled once |
 | `session-control-lineage.test.js` | 13 | `test-versioned-plugin-upgrade.sh` | runtime-lineage axis: same-major (same-minor while major is `0`), never-backwards, sibling plugin root |

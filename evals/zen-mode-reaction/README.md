@@ -29,6 +29,24 @@ can prove the contract is *obeyed*.
   of the four marks, place it directly above the closing next step, add no separate `Step N of M`
   counter beside it, and put no tick on a step the run never reached — the false green the
   pass-qualified `✓` exists to prevent.
+- **`anchor-failed-step.yaml`** — the same rule's other half, which the scenario above cannot reach
+  because its framing states that nothing has failed and nothing was skipped. Here the test step
+  FAILED and is not being retried, and the changelog step was dropped on the user's own instruction.
+  The reply must mark the failed step `✗` and never a tick, leave the deliberately dropped step OFF
+  the line rather than marking it failed, and still say in prose what went wrong — the mark governs
+  the position only, and a compressed report that omits a problem is a wrong report.
+
+**The graders themselves are unit-tested.** Every javascript assertion body in this directory is
+extracted and COMPILED by `tests/structure/zen-anchor-assertions.test.js`, driven from
+`tests/structure/test-zen-mode.sh` (which CI does run). Sixteen of the twenty-three are also RUN
+against canned replies and pinned to a pass/fail vector: both anchor scenarios and this suite's
+safety carve-out. The seven in `contract-compliance.yaml` and `precedence-over-compression.yaml`
+reach the compile check only, which cannot see a logic defect — say "compile-checked", never
+"tested", of those. That closes the gap this suite's
+local-only status would otherwise leave: before it, a logically broken grader satisfied every
+structure check and surfaced only on a manual promptfoo run. Two real defects were found that way —
+a step-list branch that could never match a `-` bullet, and a tick guard that only fired on three
+hardcoded English step names.
 
 ## Why this design
 

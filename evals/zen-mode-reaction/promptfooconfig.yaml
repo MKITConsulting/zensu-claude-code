@@ -1,4 +1,4 @@
-description: "zen-mode model-reaction eval (contract compliance, precedence over a compression mode, the never-compress safety carve-out, and the rule-6 chain-progress anchor). Grades how the model REACTS to the injected zen-mode contract."
+description: "zen-mode model-reaction eval (contract compliance, precedence over a compression mode, the never-compress safety carve-out, the rule-6 chain-progress anchor, and that anchor's failed-and-omitted half). Grades how the model REACTS to the injected zen-mode contract."
 
 providers:
   - id: 'exec: ../../scripts/claude-promptfoo-wrapper.sh'
@@ -21,6 +21,7 @@ tests:
   - file://scenarios/precedence-over-compression.yaml
   - file://scenarios/safety-carve-out.yaml
   - file://scenarios/anchor-multi-step.yaml
+  - file://scenarios/anchor-failed-step.yaml
 
 evaluateOptions:
   maxConcurrency: 2

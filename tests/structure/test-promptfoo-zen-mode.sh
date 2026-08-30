@@ -51,6 +51,15 @@ check "P1 promptfooconfig.yaml exists" PASS
 
 if [ "${#SCENARIOS[@]}" -lt 3 ]; then
   check "P0 scenarios directory holds at least 3 scenarios (found ${#SCENARIOS[@]})" FAIL
+  # Exit here rather than falling through, the way the missing-$CFG branch above
+  # does. Bash before 4.4 — and macOS ships 3.2, which is the only shell this
+  # local-only suite ever runs under — treats "${SCENARIOS[@]}" on an EMPTY array
+  # as an unbound variable under `set -u`, so the next loop would abort the whole
+  # script with `SCENARIOS[@]: unbound variable` instead of the diagnosis this
+  # very check was written to give.
+  echo "----"
+  echo "test-promptfoo-zen-mode: $PASS PASS / $FAIL FAIL"
+  exit 1
 else
   check "P0 scenario roster derived from the directory (${#SCENARIOS[@]} scenarios)" PASS
 fi
@@ -108,6 +117,11 @@ if command -v node >/dev/null 2>&1; then
   # the directive completely ungraded — measured, not theorised: a reworded safety
   # carve-out in the new file kept this check green. The floor keeps an emptied or
   # moved directory loud rather than silently vacuous.
+  # Stderr to its OWN file, never merged into the verdict. With `2>&1` a single
+  # node notice was concatenated onto the sentinel and reported as directive
+  # DRIFT — a false red naming the wrong cause — while the rc branch, added to
+  # preserve that output, printed none of it.
+  P8_ERR="$(mktemp -t zenp8-XXXXXX)"
   DRIFT="$(HOOK="$HOOK" CFG="$CFG" DIR="$EVAL_DIR/scenarios" node -e '
     const fs = require("fs");
     const path = require("path");
@@ -142,15 +156,27 @@ if command -v node >/dev/null 2>&1; then
       try { text = fs.readFileSync(p, "utf8"); } catch (_) { bad.push(f + ":unreadable"); continue; }
       if (!norm(text).includes(want)) bad.push(f);
     }
-    process.stdout.write(bad.join(","));
-  ' 2>/dev/null)"
-  if [ -z "$DRIFT" ]; then
+    // A POSITIVE sentinel, not an empty string. With `bad.join(",")` alone,
+    // "nothing drifted" and "the program threw before it could decide" are the
+    // same observation — and stderr was discarded, so the throw left no trace
+    // either. That made the check this file calls load-bearing report PASS for
+    // a program that produced no verdict at all.
+    process.stdout.write(bad.length ? bad.join(",") : "OK");
+  ' 2>"$P8_ERR")"
+  P8_RC=$?
+  P8_STDERR="$(tr -s '[:space:]' ' ' < "$P8_ERR" | cut -c1-200)"
+  rm -f "$P8_ERR"
+  if [ "$P8_RC" -ne 0 ]; then
+    check "P8 directive comparison could not run (node exit $P8_RC): ${P8_STDERR:-<no stderr>} — not an all-clear" FAIL
+  elif [ "$DRIFT" = "OK" ]; then
     check "P8 every scenario embeds the hook's ACTIVE directive verbatim (no copy drift)" PASS
   else
-    check "P8 scenario text has drifted from hooks/user-prompt-zen-mode.sh: $DRIFT" FAIL
+    check "P8 scenario text has drifted from hooks/user-prompt-zen-mode.sh: ${DRIFT:-<empty output, program produced no verdict>}" FAIL
   fi
 else
-  check "P8 (skipped — node not on PATH)" PASS
+  # FAIL, not a skipped PASS: recording a pass here would credit a check that
+  # did not execute, which is exactly what the sentinel above exists to stop.
+  check "P8 directive comparison did not run — node is not on PATH" FAIL
 fi
 
 # P9 the safety scenario is the reason this eval exists: it must grade the
@@ -208,22 +234,40 @@ if command -v node >/dev/null 2>&1; then
     check "P12 promptfooconfig missing one of description/providers/prompts/tests" FAIL
   fi
 else
-  check "P12 (skipped — node not on PATH)" PASS
+  check "P12 config-shape check did not run — node is not on PATH" FAIL
 fi
 
 # P13 Promptfoo suites are local-only by policy: this pin belongs in
 # localStructureTests, never in the CI set.
 if command -v node >/dev/null 2>&1; then
+  # A POSITIVE sentinel and a captured exit status, the same shape as P8 above.
+  # The success arm used to be `[ -z "$CLASS" ]`, which is how the defect below
+  # stayed invisible: this program carried a top-level `return`, which `node -e`
+  # rejects as an illegal return statement, so it threw before reading anything,
+  # stderr was discarded, stdout was empty, and the arm reported PASS. Measured
+  # against the real, present profile on node v23: exit 1, empty output, PASS.
+  # The check guarding the "never a CI gate" policy had never executed at all.
+  # The verdict is a variable now rather than an early return for that reason.
   CLASS="$(node -e '
     const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
     const self = "test-promptfoo-zen-mode.sh";
-    if (j.ciStructureTests.includes(self)) { process.stdout.write("in-ci-set"); return; }
-    process.stdout.write(j.localStructureTests.includes(self) ? "" : "unclassified");
+    const ci = j.ciStructureTests, local = j.localStructureTests;
+    let verdict;
+    if (!Array.isArray(ci) || !Array.isArray(local)) verdict = "profile-missing-a-suite-list";
+    else if (ci.includes(self)) verdict = "in-ci-set";
+    else verdict = local.includes(self) ? "OK" : "unclassified";
+    process.stdout.write(verdict);
   ' "$PROFILE" 2>/dev/null)"
-  [ -z "$CLASS" ] && check "P13 classified as a local-only Promptfoo suite (never a CI gate)" PASS \
-    || check "P13 suite classification: $CLASS" FAIL
+  P13_RC=$?
+  if [ "$P13_RC" -ne 0 ]; then
+    check "P13 suite classification could not be read (node exit $P13_RC) — not an all-clear" FAIL
+  elif [ "$CLASS" = "OK" ]; then
+    check "P13 classified as a local-only Promptfoo suite (never a CI gate)" PASS
+  else
+    check "P13 suite classification: ${CLASS:-<empty output, program produced no verdict>}" FAIL
+  fi
 else
-  check "P13 (skipped — node not on PATH)" PASS
+  check "P13 local-only classification check did not run — node is not on PATH" FAIL
 fi
 
 # P14 the README must state that this is advisory and costs API credits, so a
