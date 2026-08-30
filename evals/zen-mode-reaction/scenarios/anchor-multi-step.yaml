@@ -97,10 +97,23 @@ assert:
       // so the verb set errs toward ACCEPTING and any addition to it should too.
       const anchorSteps = [...rows[anchorIdx].clean.matchAll(/[✓▶·✗]\s*([^\s✓▶·✗]+)/g)]
         .map((m) => m[1].toLowerCase()).filter((t) => t.length >= 3);
+      // Several of these words are also nouns, so the leading token alone is not
+      // an imperative: "Run time on the legacy path is 20 minutes." and "Release
+      // notes are still missing." are caveats that open with one. A FINITE COPULA
+      // anywhere in the row is what distinguishes them — an imperative names an
+      // action to take and does not assert that something is the case. No pinned
+      // step row carries one.
       const IMPERATIVE = /^(?:open|update|run|re-?run|retry|write|add|remove|delete|drop|fix|land|push|pull|merge|rebase|review|publish|release|close|finish|verify|check|wait|ask|confirm|restore|revert|record|document|report|send|ship|tag|bump|clean|migrate|deploy|rollback|roll)\b/i;
+      const DECLARATIVE = /\b(is|are|was|were|has|have|had|remains?|stays?|looks?|seems?)\b/i;
+      // The copula test guards BOTH weak arms, not just the imperative one.
+      // "Review of the adapter is still open." names an anchor step and is still
+      // a caveat; without this the anchor-token arm reproduced the same defect
+      // one arm over. The numbered / `step N` arm is left alone: that spelling
+      // is explicit enough to mean a step whatever follows it.
       const strong = (r) => /^(?:\d+[.)]|step\b)/i.test(r.clean)
-        || anchorSteps.some((t) => r.clean.toLowerCase().includes(t))
-        || IMPERATIVE.test(r.clean.replace(/^[-*\u2022]\s*/, ""));
+        || (!DECLARATIVE.test(r.clean)
+            && (anchorSteps.some((t) => r.clean.toLowerCase().includes(t))
+                || IMPERATIVE.test(r.clean.replace(/^[-*\u2022]\s*/, ""))));
       const stepish = (r) => strong(r) || /^[-*\u2022]\s/.test(r.raw);
       const shortTail = tail.length > 0 && tail.length <= 2;
       const stepList = tail.length > 2 && tail.every(stepish) && tail.some(strong);

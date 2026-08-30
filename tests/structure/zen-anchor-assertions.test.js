@@ -51,8 +51,15 @@
 // `secrets.IMMUTABLE_RELEASES_ADMIN_TOKEN`. What holds the boundary there is
 // the two mechanisms named above: `persist-credentials: false` on both
 // checkouts, and step-scoped `env:` blocks that put those tokens on OTHER
-// steps, never on the suite step. `.github/workflows/ci.yml` is the easy case —
-// `pull_request` / `push`, `contents: read`, no secret anywhere.
+// steps, never on the suite step. In `.github/workflows/ci.yml` the suite step's
+// own `env:` carries only the shard indices and the checkout disables persisted
+// credentials; do NOT also claim `contents: read` for it, as an earlier wording
+// did — that job declares no `permissions:` block at all, and the file's two
+// `contents: read` lines belong to other jobs, so the suite step's token scope
+// is a repository default this file cannot state.
+// Properties 3 and 4 are the two that are MACHINE-CHECKED, by
+// `tests/structure/test-workflow-checkout-credentials.sh` (a ciStructureTests
+// member). Properties 1 and 2 are held by prose alone.
 // Hoisting a secret to job-level `env:`, restoring the checkout default, adding
 // a `pull_request_target` trigger, making SCENARIO_DIR configurable, or feeding
 // real transcript output through `runGrader` each invalidate this on their own.
@@ -359,7 +366,7 @@ const CASES = [
     reply: [
       "Recap: nothing has changed since your last message.",
       "",
-      "Der Adapter ist umgeschrieben.",
+      "The adapter has been rewritten.",
       "",
       "**Next step:** I will wait for the test run to finish.",
     ].join("\n"),
@@ -417,6 +424,25 @@ const CASES = [
       "- Land the branch.",
     ].join("\n"),
     expect: [true, true, true, true, true, true],
+  },
+  {
+    name: "a caveat list whose rows open with words from the imperative set",
+    // The DECLARATIVE guard's discriminator. Several imperative-set words are
+    // also nouns, so the leading token alone does not mean "step": every row
+    // here opens with one and every row is a caveat. Row 3 additionally names an
+    // anchor step, which is why the copula test guards that arm too.
+    reply: [
+      "Recap: the adapter rewrite landed.",
+      "",
+      "The call sites are inventoried and the adapter is rewritten.",
+      "",
+      "Run: \u2713inventory \u2713adapter \u25b6tests \u00b7changelog \u00b7pr",
+      "",
+      "- Run time on the legacy path is 20 minutes.",
+      "- Release notes are still missing.",
+      "- Review of the adapter is still open.",
+    ].join("\n"),
+    expect: [true, false, true, true, true, true],
   },
 ];
 
@@ -671,12 +697,23 @@ test("the case table exercises every grader in both directions", () => {
   // `[tool_use:` marker IS the rule that grader implements, so a case carrying
   // one pins exactly it. Such a case passes its reply RAW rather than through
   // `envelope`, which is why the loop honours `c.raw`.
+  // `floor` is the REGISTRATION step for a new case, the same convention
+  // test-session-trail-skill.sh T22 uses and Z29's own comment cites. Without it
+  // nothing counted CASES at all: Z29's floor counts `test()` registrations, and
+  // three cases were added in one round without adding a test, so each of them
+  // could be deleted again with `node --test` still reporting 7 and every column
+  // still both-directional — the three arms they exist to pin silently unpinned.
+  // Raise the number in the same commit that adds a case.
   const tables = [
-    { label: "anchor-multi-step", cases: CASES, exempt: 0 },
-    { label: "anchor-failed-step", cases: FAILED_CASES, exempt: 0 },
-    { label: "safety-carve-out", cases: SAFETY_CASES, exempt: 0 },
+    { label: "anchor-multi-step", cases: CASES, exempt: 0, floor: 11 },
+    { label: "anchor-failed-step", cases: FAILED_CASES, exempt: 0, floor: 8 },
+    { label: "safety-carve-out", cases: SAFETY_CASES, exempt: 0, floor: 5 },
   ];
   for (const t of tables) {
+    assert.ok(
+      t.cases.length >= t.floor,
+      `${t.label}: ${t.cases.length} cases, expected at least ${t.floor} — a case was removed without lowering the floor deliberately`,
+    );
     const width = t.cases[0].expect.length;
     for (let i = 0; i < width - t.exempt; i += 1) {
       const seen = new Set(t.cases.map((c) => c.expect[i]));

@@ -954,7 +954,16 @@ else
     // line, so a violation sitting outside a regex literal went unreported
     // whenever an exempt match happened to come first — which is the ordinary
     // shape of the one line this scan deliberately exempts.
-    const STEM = /\b(und|oder|nicht|Datei|Dateien|werden|kann|muss|sollte|wenn|dann|aber|auch|noch|schon|bitte|ohne)\b/gi;
+    // The roster rewrite widened WHICH files are scanned and left the vocabulary
+    // alone, and a German canned reply then sat in the unit file with Z26 green:
+    // "Der Adapter ist umgeschrieben." contains no umlaut and no member of the
+    // original list. The high-frequency German function words are in now — the
+    // articles and copulas that no German sentence avoids — which is what makes
+    // the scan a check on the LANGUAGE rather than on one word list.
+    // `sie`, `war`, `den`, `dem`, `am`, `im`, `so` and `will` are deliberately
+    // OUT: each is an ordinary English word or a common identifier fragment, and
+    // the sibling reason for excluding der/die/das applies to them too.
+    const STEM = /\b(und|oder|nicht|Datei|Dateien|werden|kann|muss|sollte|wenn|dann|aber|auch|noch|schon|bitte|ohne|ist|sind|wurde|wurden|einen|eine|einem|einer|eines|nach|durch|über|unter|zwischen|beim|vom|zum|zur|diese|dieser|dieses|jede|jeder|alle|keine|kein|sich|wird|haben|hat|dass|weil|damit|sondern|jedoch|bereits|immer|niemals)\b/gi;
     const UML = /[äöüÄÖÜß]/g;
     // Spans of a line that sit inside a /.../ regex literal. Deliberately crude:
     // it over-approximates toward EXEMPTING, so a false exemption is possible and

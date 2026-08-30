@@ -30,10 +30,16 @@ phrase lists in lockstep across every directive variant (strict and vanilla)
 — never edit one variant alone.
 
 **Second carve-out — eval grader alternations matching MODEL output.** The same
-narrow allowance extends to one further place, and to nothing else:
-`evals/zen-mode-reaction/scenarios/anchor-failed-step.yaml`, whose
-failure-in-the-prose grader carries German arms (`fehlgeschlag`, `fehlschlag`,
-`gescheitert`, `rot`, `schlägt fehl`) beside its English ones. The reason is the same in kind
+narrow allowance extends to one further SHAPE: an alternation matched against
+model PROSE whose language the product does not control. It is stated as a shape
+rather than as a file-and-grader list because the list was written that way once
+and was wrong in both directions within a single round — it named
+`anchor-failed-step.yaml`'s failure-in-the-prose grader "and nothing else" while
+the German counter-grader arms (`schritt`, `von`, `aus`) sat in that file AND in
+`anchor-multi-step.yaml`, which the list excluded by name. Two members exist
+today, both under `evals/zen-mode-reaction/scenarios/`: the failure-in-the-prose
+grader (`fehlgeschlag`, `fehlschlag`, `gescheitert`, `rot`, `schlägt fehl`) and
+the `Step N of M` counter grader, which appears in both anchor scenarios. The reason is the same in kind
 but the source is the other side of the exchange: the zen-mode directive that
 scenario grades says the words around the anchor's marks follow the USER's own
 language, so a correct reply to a German-speaking user is German prose. An
@@ -46,15 +52,16 @@ carve-out only for another grader in the same position — a pattern matched
 against text whose language the product does not control — and never for prose,
 a comment, or a fixture.
 
-**The FILE SCOPE above is enforced by nothing, and so is the arm list.** `Z26` in
+**The MEMBERSHIP above is enforced by nothing, and neither is any arm list.** `Z26` in
 `tests/structure/test-zen-mode.sh` is what makes this checkable, and its allowance is
 MECHANICAL and file-independent: it exempts a match sitting inside a `/.../` regex
 literal in ANY carrier it scans, which is precisely what keeps prose, comments and
 fixtures violations everywhere. So the load-bearing half is enforced and the
 ENUMERATION is not — a German arm added to a grader in `safety-carve-out.yaml` would
-pass the guard with this paragraph unamended, and so would a sixth arm in the existing
-one. Both lists are hand-maintained, and this sentence is the only thing that asks for
-the edit. Do not read the enumeration as a bound the suite holds.
+pass the guard with this paragraph unamended, and so would a further arm in an existing
+one. The SHAPE is what governs; the two members named above are a census taken at one
+moment, not a bound the suite holds. Check by grep before relying on it, and never
+strip a German arm because this paragraph did not list its grader.
 
 ## Artifact Path Redaction (`hooks/lib/zensu-artifact-redact-v1.js`)
 
