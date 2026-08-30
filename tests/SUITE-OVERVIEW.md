@@ -19,10 +19,14 @@ in exactly one group. §7's profile table was re-derived from
 `tests/profiles/windows-ci.v1.json` rather than described, so its seven shard ids and their
 membership are the JSON's own, and the entry total is **42**.
 
-**Two files below the registry are still unlisted.** `session-lineage-v1.test.js` has no row;
-the count above was raised from 24 to 26 to match the real listing, so the table is one row
-short of the number beside it. Recorded rather than quietly reconciled — an audited count that
-disagrees with its own table is the shape this document exists to prevent.
+**FOUR files under `tests/structure/` have no table row in section 4**, against 22 rows for 26
+files on disk: `review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js`,
+`session-adopt-report-v1.test.js` (all three named in the prose below the table) and
+`session-lineage-v1.test.js` (named nowhere). The count above was raised from 24 to 26 to match
+the real listing, and section 4's own header numeral was DROPPED rather than corrected, so one
+place owns the number. Recorded rather than quietly reconciled — an audited count that disagrees
+with its own table is the shape this document exists to prevent, and an earlier revision of this
+very paragraph said "two files" while naming one, which is the same failure one level down.
 
 **Nothing machine-checks any of this.** The reconciliation above is a hand audit performed
 at this commit, not an invariant: the next suite added without touching §3 silently breaks
@@ -250,7 +254,7 @@ each other on counts, terminology, navigation and the specification's BLOCKED st
 Structure gates for the Promptfoo harnesses. GitHub Actions never invokes the Promptfoo
 binary; these guard the local harness contract.
 
-## 4. `node --test` unit suites (24 files)
+## 4. `node --test` unit suites
 
 Not run standalone — each is driven by a parent shell suite, so a JS failure surfaces as
 that suite's failure.

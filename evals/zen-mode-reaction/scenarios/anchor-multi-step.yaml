@@ -104,16 +104,24 @@ assert:
       // action to take and does not assert that something is the case. No pinned
       // step row carries one.
       const IMPERATIVE = /^(?:open|update|run|re-?run|retry|write|add|remove|delete|drop|fix|land|push|pull|merge|rebase|review|publish|release|close|finish|verify|check|wait|ask|confirm|restore|revert|record|document|report|send|ship|tag|bump|clean|migrate|deploy|rollback|roll)\b/i;
+      // The copula veto judges the MAIN clause only. Applied to the whole row it
+      // killed the imperative arm on any step carrying a subordinate clause —
+      // "Update the changelog once the suite is green." is an instruction, and a
+      // three-row list of them was graded a violation. The trailing subordinator
+      // is stripped first; "Run time on the legacy path is 20 minutes." keeps its
+      // copula in the main clause and stays weak.
+      const SUBORDINATE = /\s+(?:once|when|after|before|while|if|unless|until|as soon as|so that|because)\b[\s\S]*$/i;
       const DECLARATIVE = /\b(is|are|was|were|has|have|had|remains?|stays?|looks?|seems?)\b/i;
+      const mainClause = (r) => r.clean.replace(SUBORDINATE, "");
       // The copula test guards BOTH weak arms, not just the imperative one.
       // "Review of the adapter is still open." names an anchor step and is still
       // a caveat; without this the anchor-token arm reproduced the same defect
       // one arm over. The numbered / `step N` arm is left alone: that spelling
       // is explicit enough to mean a step whatever follows it.
       const strong = (r) => /^(?:\d+[.)]|step\b)/i.test(r.clean)
-        || (!DECLARATIVE.test(r.clean)
+        || (!DECLARATIVE.test(mainClause(r))
             && (anchorSteps.some((t) => r.clean.toLowerCase().includes(t))
-                || IMPERATIVE.test(r.clean.replace(/^[-*\u2022]\s*/, ""))));
+                || IMPERATIVE.test(mainClause(r).replace(/^[-*\u2022]\s*/, ""))));
       const stepish = (r) => strong(r) || /^[-*\u2022]\s/.test(r.raw);
       const shortTail = tail.length > 0 && tail.length <= 2;
       const stepList = tail.length > 2 && tail.every(stepish) && tail.some(strong);

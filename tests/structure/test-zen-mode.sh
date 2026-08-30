@@ -1162,17 +1162,24 @@ else
   Z29_PASS_N="$(printf '%s\n' "$Z29_OUT" | sed -n 's/^# pass \([0-9]*\)$/\1/p;s/^. pass \([0-9]*\)$/\1/p' | head -1)"
   Z29_SKIP_N="$(printf '%s\n' "$Z29_OUT" | sed -n 's/^# skipped \([0-9]*\)$/\1/p;s/^. skipped \([0-9]*\)$/\1/p' | head -1)"
   [ -n "$Z29_SKIP_N" ] || Z29_SKIP_N=0
+  Z29_FAIL_N="$(printf '%s\n' "$Z29_OUT" | sed -n 's/^# fail \([0-9]*\)$/\1/p;s/^. fail \([0-9]*\)$/\1/p' | head -1)"
+  [ -n "$Z29_FAIL_N" ] || Z29_FAIL_N=unknown
   Z29_SEEN=$(( ${Z29_PASS_N:-0} + Z29_SKIP_N ))
   # The floors are the REGISTRATION step for a new case, the convention this repo
   # records for test-session-trail-skill.sh T22. At 3 against a file of 6 they
   # admitted the deletion of every case that actually executes a grader — the
   # vector tests and the both-directions test — while staying green. Raise this
   # number in the same commit that adds a case.
-  Z29_FLOOR=7
-  if [ "$Z29_RC" -eq 0 ] && [ -n "$Z29_PASS_N" ] && [ "$Z29_SEEN" -ge "$Z29_FLOOR" ] && [ "$Z29_PASS_N" -ge "$Z29_FLOOR" ]; then
+  Z29_FLOOR=8
+  # ONE floor, over REGISTRATIONS. The pair `Z29_SEEN >= FLOOR && Z29_PASS_N >=
+  # FLOOR` could never fail independently — skips are non-negative, so the first
+  # conjunct held whenever the second did — and it defeated the stated intent:
+  # marking a case `test.skip` left it registered but reported FAIL. `Z29_SEEN`
+  # is the registration count, and a non-zero `# fail` is what turns this red.
+  if [ "$Z29_RC" -eq 0 ] && [ -n "$Z29_PASS_N" ] && [ "$Z29_FAIL_N" = "0" ] && [ "$Z29_SEEN" -ge "$Z29_FLOOR" ]; then
     check "Z29 the eval graders' unit contract passes ($Z29_PASS_N cases)" PASS
   else
-    check "Z29 eval-grader unit contract: rc=$Z29_RC pass=${Z29_PASS_N:-none} skipped=$Z29_SKIP_N (want registered >= $Z29_FLOOR and pass >= $Z29_FLOOR): $(printf '%s' "$Z29_OUT" | grep -E '^.?[[:space:]]*(not ok|✖)' | head -2 | tr '\n' ' ')" FAIL
+    check "Z29 eval-grader unit contract: rc=$Z29_RC pass=${Z29_PASS_N:-none} skipped=$Z29_SKIP_N (want registered >= $Z29_FLOOR and fail 0, got fail=$Z29_FAIL_N): $(printf '%s' "$Z29_OUT" | grep -E '^.?[[:space:]]*(not ok|✖)' | head -2 | tr '\n' ' ')" FAIL
   fi
 fi
 

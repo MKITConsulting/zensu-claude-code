@@ -3387,10 +3387,22 @@ zen-mode hook, and nothing points at it from the side that changes:
 - Z29 drives `tests/structure/zen-anchor-assertions.test.js`, which derives its scenario
   roster from that same directory and pins each anchor scenario's grader COUNT and its
   pass/fail VECTOR. So adding, removing or reordering a grader inside a scenario reddens
-  this suite, and so does adding a case to the unit file: Z29's floors are the
-  REGISTRATION step for a new case, the convention this repo records for
-  `test-session-trail-skill.sh` T22. They sat at 3 against a file of 6 and admitted the
-  deletion of every case that actually executes a grader.
+  this suite. TWO floors guard the unit file and they count different things — do not
+  conflate them, as an earlier revision of this bullet did. `Z29_FLOOR` lives in
+  `test-zen-mode.sh` and counts `test()` REGISTRATIONS; the per-table `floor:` values live
+  in the unit file and count CASES. Both fire on REMOVAL only: adding a case or a test
+  cannot turn either red, so raising the matching number in the same commit that adds one is
+  a CONVENTION the file states in its own comment, not an enforcement — the same convention
+  `test-session-trail-skill.sh` T22 records. `Z29_FLOOR` sat at 3 against a file of 6 and
+  admitted the deletion of every case that actually executes a grader; the per-table floors
+  were added after three cases were landed in one round without a test, which left each of
+  them deletable with everything green. WHICH CEILING PAYS for the driver, stated because
+  both sibling sections state it for theirs and re-deriving it is a grep across four
+  manifests: `test-zen-mode.sh` has NO `windows-ci.v1.json` entry — it is in that profile's
+  sibling `windows-native-structure.v1.json` `excluded` list with a reason — so no per-suite
+  Windows cap can be blown here, and its `node --test` cost lands on the ubuntu shard
+  partition through `ci-shard-weights.v1.json`, at the unchanged `defaultSeconds`. That file
+  calls its own numbers a balance hint on which coverage never depends.
 
 **The safety carve-out rides in the SAME directive string as the anchor**, and P8 in
 `test-promptfoo-zen-mode.sh` — the only full-fidelity check that the eval copies match
@@ -3411,11 +3423,14 @@ currently has none of. The cost is real on both sides and is why it was not take
 change: a malformed block drops the injection SILENTLY, which for zen-mode means the mode
 quietly stops; every eval `spec_block` copy still needs its own text regardless, so it
 removes one copy and not all of them; and it is a migration commit of its own rather than a
-line in a fix. **The fact that actually settles the cost is a NUMBER, and an earlier
-revision of this paragraph omitted it:** `hooks/lib/rule-block-v1.js` declares
-`MAX_BLOCK = 4000` and refuses a larger block, while `Z30` holds this directive at a
-measured 4664 under a ceiling of 4750 — so EVERY admissible value is above the shared
-reader's limit. Adopting the seam is therefore not "a migration commit of its own" but a
+line in a fix. **The fact that actually settles the cost is a BOUND, and an earlier
+revision of this paragraph omitted it:** `hooks/lib/rule-block-v1.js` declares `MAX_BLOCK`
+and refuses a larger block, and `Z30`'s floor for this directive — its declared ceiling
+minus its declared headroom — sits ABOVE that constant, so EVERY admissible directive
+length is over the shared reader's limit. The comparison is stated qualitatively on
+purpose: §"Marker-Block Carriers" above says to name that constant and never to spell its
+value, because a prose copy of the number goes stale silently, and the copy it already had
+to remove from `docs/architecture.md` is the precedent. Adopting the seam is therefore not "a migration commit of its own" but a
 re-decision of a bound shared with the two always-on marker-block carriers, which is a
 larger change than the paragraph implied and lands squarely in the silent
 dropped-injection failure it warns about. Recorded so the next reader knows the

@@ -69,7 +69,16 @@ assert:
       // name the step `suite` or `test-suite` rather than `tests`. A matcher of
       // `/^tests?/i` alone graded a perfectly marked reply as a violation, which
       // is the one outcome this eval must never produce.
-      const failed = pairs.filter((p) => /^(?:tests?|testing|test[-_]?suite|suite|spec|specs)\b|^tests?/i.test(p.step));
+      // TWO roles, deliberately split. The permissive set answers "did the anchor
+      // name the test run at all"; the EXACT set is what `every` then judges.
+      // Conflating them made the widening cut both ways: with an anchor reading
+      // `\u2717tests \u00b7spec-update`, `spec-update` joined the judged set carrying
+      // `\u00b7` and a correct reply was graded a violation.
+      const NAMES_RUN = /^(?:tests?|testing|test[-_]?suite|suite|spec|specs)\b|^tests?/i;
+      const EXACT_RUN = /^(?:tests?|testing|test[-_]?suite|suite|specs?)$/i;
+      const named = pairs.filter((p) => NAMES_RUN.test(p.step));
+      const exact = pairs.filter((p) => EXACT_RUN.test(p.step));
+      const failed = exact.length > 0 ? exact : named;
       const ok = failed.length > 0 && failed.every((p) => p.mark === '✗');
       return {
         pass: ok,
@@ -169,4 +178,23 @@ assert:
         reason: said
           ? "The failure is stated in the prose, not only as a glyph."
           : "The test run failed, but the prose never says so — the mark governs the position only, and the failure still has to be reported.",
+      };
+  - type: javascript
+    value: |
+      // The ask is "where are we?" — a status question, so the answer is prose
+      // and a tool call is out of contract, exactly as in the sibling
+      // anchor-multi-step.yaml. This scenario needs the guard for a reason of
+      // its own: the directive it embeds tells the model to run the zen-mode
+      // helper's --off verb itself when the user asks to leave the mode. That
+      // condition is not met by this prompt, but nothing here graded a model
+      // that acted on it anyway, and a local promptfoo run would then write a
+      // marker into the developer's own .zensu/state/.
+      const raw = String(output);
+      const tool = raw.includes('[tool_use:');
+      return {
+        pass: !tool,
+        score: tool ? 0 : 1,
+        reason: tool
+          ? "A status question triggered a tool call; the answer should be prose only."
+          : "No tool call: the status question was answered in prose.",
       };

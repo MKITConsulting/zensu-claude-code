@@ -154,9 +154,12 @@ The **flag** exists because this rule governs how a decision is *presented*, not
 The **per-prompt** event, rather than `SessionStart`, is the whole point: a rule delivered once fades as the context fills, and it fades exactly when an agent starts optimizing for the smallest disturbance to what already exists. There is no de-bounce band — unlike `user-prompt-context-nudge.sh`, which is right to fire once per threshold band — because the moment an agent is about to frame a question is not observable in advance.
 
 **What it costs, measured rather than asserted — and exactly one of these figures is
-enforced.** `C6` in `tests/structure/test-evidence-discipline.sh` derives the emitted length
-from the hook itself and requires this paragraph to match it, so the injection size below is
-machine-pinned and cannot drift. Every OTHER number here — the sibling's emitted length, the
+enforced.** `C6` in `tests/structure/test-evidence-discipline.sh` derives an emitted length
+from a hook and greps this paragraph for it. Name the figure, because the referent is easy to
+get backwards: what `C6` pins is the **939-character** figure stated below for
+`session-start-evidence-discipline.sh`, not the 1756/1764 headline for this hook — a grep of
+`tests/` for either of those two numbers returns nothing, and the 6.3 KB per-turn total derived
+from 1764 is unpinned with them. Every OTHER number here — the sibling's emitted length, the
 KB estimates and the per-turn totals — is hand-computed and illustrative: they were correct
 when written, nothing re-derives them, and a change to any input silently ages them. Read them
 as an order of magnitude, not as a measurement, and do not add a new figure here expecting the
