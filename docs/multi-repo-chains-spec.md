@@ -220,6 +220,64 @@ answer on the user's behalf. Choosing between those is design work this document
 does not do. Until it is done, §8 constraint 2 is an intention rather than a
 property, and stage 2 must not be implemented.
 
+### 6.1.2 What a carrier costs today — MEASURED
+
+The three candidates above are not equally priced, and the price is not the one
+§6.1.1 implies. Measured on 2026-08-28 against this repository at `a0ffb05`, on
+macOS, by driving the real hooks over synthetic payloads with a real Session
+Control session.
+
+**Three PreToolUse hooks govern a `Write`, not two.** `hooks/hooks.json:5`
+registers `pre-reviewer-capability-gate.sh` on the `.*` matcher
+(`hooks/hooks.json:9`), beside `pre-edit-tdd-reminder.sh` and
+`pre-write-secret-scan.sh` on `Edit|Write|MultiEdit`. A deny from any one of them
+wins, so all three were driven. Three destinations were used — a file inside the
+project, a file inside `CLAUDE_PLUGIN_DATA`, and a file in an unrelated directory
+— in three chain states.
+
+| Chain state | inside project | inside plugin data | unrelated directory |
+|---|---|---|---|
+| no chain armed | allow | allow | allow |
+| vanilla chain armed | allow | allow | allow |
+| strict chain at `RED_WRITE` | allow | allow | allow |
+
+All nine cells are `allow` for all three hooks. **No hook on this matcher performs
+a containment check of any kind.**
+
+**Consequence for §6.1.1.** Moving the list out of the project tree buys nothing
+on its own. Both file-based candidates live under `CLAUDE_PLUGIN_DATA` — the
+Session Control record store is `<plugin data>/session-control/v1/` — and a
+`Write` there is ungated in every measured state, including the state in which
+stage 2 would READ the list, namely at arming with no chain yet armed. Candidates
+1 and 2 are therefore not carriers today. They become carriers only once a
+containment check exists on the Edit matcher.
+
+**The ordering is a requirement, not a preference.** The gate first, then the
+file, then the seal. Built the other way round, the list looks trustworthy and is
+not, which is the exact failure §8.1 exists to name.
+
+**That gate is itself a breaking change.** Under CLAUDE.md §"Runtime Lineage
+(`version_type` is load-bearing)", adding a hook is a `patch` UNLESS it can DENY;
+a hook that can refuse a tool call changes the capability set of every session an
+older runtime is still serving. So the containment check costs a `minor` release
+on top of whatever the carrier itself costs.
+
+**Only candidate 3 escapes this.** An interactive confirmation at arming persists
+nothing, so it needs no gate. Its cost — every arming needs a human, which ends
+unattended `/zensu:autopilot` runs — is unchanged, and it is now the only
+candidate whose price did not rise.
+
+**Two limits of this measurement, stated rather than implied.** First, a strict
+chain at `UNINITIALIZED` denies all three destinations, but with the phase
+wording and for the unrelated directory too: that is TDD discipline, not
+containment, and it lifts at `RED_WRITE` and `REFACTOR`
+(`hooks/pre-edit-tdd-reminder.sh:209`). Reading that deny as a boundary is the
+mistake this paragraph exists to prevent. Second, the first run of this
+measurement recorded a false DENY from the capability gate for every destination,
+because the payload carried no `cwd`
+(`hooks/lib/reviewer-capability-v1.js:59`); any re-measurement must carry one, or
+it will report a containment that is not there.
+
 ### 6.2 Validation, performed once at arming
 
 This is a capability check, not path hygiene. A path is accepted only if all of the
@@ -461,6 +519,29 @@ from a file the gated party can rewrite.
 shows no channel currently satisfies requirement 2 either. Stage 2 must not be
 implemented until a carrier the session cannot write is chosen, or an integrity
 mechanism over `codeRoots[]` is specified as a stage-2 precondition.
+
+**The Session Control record does not authenticate its own contents either.**
+This matters because §6.1.1 offers that record as a carrier, which reads as
+though it settles requirement 1. `validateContext`
+(`hooks/lib/session-control-core-v1.js:546`) enforces the schema pair, a fixed
+list of required fields, and that `source_revision` equals `runtime_digest` — but
+that digest is computed by `manifestRuntimeEntries` (`:391`) over the executing
+plugin tree's `hooks`, `agents`, `skills`, `docs` and `templates` plus the
+manifest. Nothing in it covers the record's own fields. A `code_roots` entry
+rewritten in place would leave the digest untouched and validate. There is also
+no strict key set on the record — which is what would let the field be added
+without a `SCHEMA_VERSION` bump, and equally what keeps an altered field from
+being rejected.
+
+**Consequence.** The record contributes immutability of the ANCHOR and of the
+executing runtime, never of the list. Candidate 1 satisfies requirement 1 only in
+combination with the containment gate of §6.1.2, and its security rests entirely
+on the records directory being unwritable by the session. Two obligations travel
+with it: `adoptContext` re-mints through `buildContext`
+(`hooks/lib/session-control-core-v1.js:1576`), so a new field
+must be threaded there or it is silently dropped at every adoption; and a
+`SCHEMA_VERSION` bump makes `readContext` throw, so adoption refuses across that
+one release boundary as `record-unreadable` (`:1389`).
 
 The existing inline escapes (`ZENSU_BASH_WRITE_GATE=off`,
 `ZENSU_EDIT_LANDING_GATE=off`) are unchanged and keep landing their bypass-ledger

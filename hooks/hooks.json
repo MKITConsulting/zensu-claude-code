@@ -26,6 +26,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-write-plugin-data-guard.sh\"",
+            "timeout": 60
+          },
+          {
+            "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-edit-tdd-reminder.sh\""
           },
           {
@@ -37,6 +42,11 @@
       {
         "matcher": "NotebookEdit",
         "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-write-plugin-data-guard.sh\"",
+            "timeout": 60
+          },
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-write-secret-scan.sh\""
