@@ -26,7 +26,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-write-plugin-data-guard.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-write-plugin-data-guard.sh\"",
+            "timeout": 60
           },
           {
             "type": "command",
@@ -43,7 +44,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-write-plugin-data-guard.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-write-plugin-data-guard.sh\"",
+            "timeout": 60
           },
           {
             "type": "command",

@@ -226,7 +226,7 @@ roots excepted). The wider rule would need a temp carve-out of its own and would
 work on files outside the project; closing the measured hole does not. It applies to **every
 principal** — a subagent must not be able to write the store either.
 
-**Seven residuals, named because "the store is protected" is false without them.** First, the
+**Eleven residuals, named because "the store is protected" is false without them.** First, the
 **Bash channel is not covered at all**: `bash-source-write-parse.js` filters candidate targets
 through its `SRC` extension set, which carries no `json`, and `mv`/`cp` are documented as out of
 scope — so a shell redirect, copy, move or link into the store passes every Bash gate. Anything
@@ -249,7 +249,7 @@ principal — a superset of the protected ROOT SET, though resolved by a weaker 
 `<symlink>/../x` spelling this gate denies where that one allows. Seventh, the decision is taken at
 PreToolUse while the tool opens the file afterwards, so a component swapped in between is
 followed — a property of the hook shape, not of the walk, and the reason this gate is described
-as a control rather than a guarantee.
+as a control rather than a guarantee. Eighth, composing the first and the sixth, the decision module lives inside that unprotected plugin root, so one ungated main-thread `Edit` — or anything holding `Bash`, by the first — removes or replaces it and the wrapper then declines for the rest of the session, disclosed on stderr rather than silently; and ninth, the mirror of the third: a symlink **inside** the store whose target is outside is judged by its resolved location and allowed, so one `ln -s` in the store converts into ongoing Edit-channel control over what a reader gets back from that record path. Tenth, nothing bounds where the project root may point, so one naming a directory *inside* the store carves that subtree out of the over-arm valve; the total disarm this replaced allowed the whole store in the same configuration, so it is a residual of the valve rather than a regression. **At `store === projectRoot` the carve-out is the whole store and the gate denies nothing at all** — the two are the same directory, so every in-store target is also in-project. The scoped form is never *more permissive* than the total disarm it replaced, but it is not strictly stricter either: at equality the two are identical. Eleventh, the valve's project root is the ambient `CLAUDE_PROJECT_DIR`, which this repository records as **not** the authoritative project anchor — every writer resolves the bound record's `project_root` instead. Where the two diverge, which is the ordinary case for a session whose cwd is a worktree, the valve carves out the harness root while the session writes somewhere else: a worktree inside the store but outside that root is denied, and `overArmUnchecked` stays false because the root *did* resolve. Binding the record here would put a session lookup on every `Edit`, so the divergence is stated rather than closed.
 
 **Resolution imitates the kernel, component by component.** Two bypasses of the same class were
 measured here before the walk existed, and both came from resolving the spelling before resolving
@@ -264,20 +264,45 @@ hand back exactly the capability the guard removes, so nothing here lands a bypa
 either — there is no gate escape to record. `session-start-evidence-discipline.sh` is the
 precedent for a control with no switch.
 
-**Every fault allows, except the shared plugin-root identity guard.** A missing `node`, an
+**Every fault allows, with two exceptions.** The shared plugin-root identity guard refuses with
+exit 2, and a resolution that hits an internal bound refuses with its own reason
+(`target-resolution-truncated`): the walk gave up before it finished, so "outside" is a claim it
+did not earn, and answering it once allowed a spelling that lands in the store. No legitimate input
+reaches a bound, so that refusal costs an adversarial spelling and nothing else. A missing `node`, an
 absent, empty or unresolvable `CLAUDE_PLUGIN_DATA`, an unparseable payload, or a module that will
-not load returns *allow*. The exception is the plugin-root check every sibling gate carries: a
-mismatched inherited `CLAUDE_PLUGIN_ROOT` still refuses with exit 2, and on this matcher that
-refusal blocks the call. Three of the allowing faults carry a stderr note: the
+not load returns *allow*. The first of those two exceptions is the plugin-root check every sibling gate
+carries: a mismatched inherited `CLAUDE_PLUGIN_ROOT` still refuses with exit 2, and on this matcher that
+refusal blocks the call. **Four** of the allowing faults carry a stderr note: the
 containment module failing to load, a payload the module cannot read (a **payload** fault, not a
-load fault), and an unusable `CLAUDE_PLUGIN_DATA` — the one that turns the control off completely
-and would otherwise render byte-identical to a clean allow. Three faults are **silent** and cannot
-carry a note at all, because the shell wrapper returns before `node` runs: a missing `node`, a
+load fault), an unusable `CLAUDE_PLUGIN_DATA` — the one that turns the control off completely
+and would otherwise render byte-identical to a clean allow — and a payload with **no path field**,
+which is what a renamed or restructured host field looks like from here. A fifth note is not a
+fault at all: when the caller supplies no project root the over-arm valve cannot be evaluated, and
+an armed decision says so rather than skipping the check in silence. Three further faults are outside the
+module's reach, because the shell wrapper returns before `node` runs: a missing `node`, a
 `hooks/lib` its `cd -P` cannot enter, and a `plugin-data-guard-v1.js` that is absent or is a
-symlink. Denying there would block ordinary in-project
+symlink. They are **not silent** — the wrapper writes its own stderr note at each of the three,
+naming the cause and the consequence, and at both of its exit-2 plugin-root branches
+(self-resolution failure and inherited-root mismatch) as well. What cannot reach them is the module's *typed* reason, which
+is a limit on the channel and never on whether the operator is told. Denying there would block ordinary in-project
 writes, which is strictly worse than the hole this closes. Containment is not re-implemented:
 `within` and `msysToDrive` come from `hooks/lib/bash-source-write-parse.js`, and the decision
 lives in `hooks/lib/plugin-data-guard-v1.js`.
+
+**The over-arm valve, because a misconfigured store has no in-session escape.** A
+`CLAUDE_PLUGIN_DATA` that *contains or equals* the project root would otherwise arm the gate over
+the whole workspace and deny every write — and this gate ships with no config flag and no env
+bypass, so the session could not edit the file that would fix it. The valve carves out **in-project
+targets only**: a write inside the project goes through with its own reason
+(`target-in-project-under-containing-store`, deliberately NOT the no-store reason,
+so a working gate never announces that it did not run), while every other target inside the store
+still denies — except at equality, where there is no "other target": see residual 10. The project root comes from `CLAUDE_PROJECT_DIR`, read in the hook's host half and
+passed in; when it cannot be resolved — unset, relative, or a directory that is gone, which is what
+a removed worktree looks like — the valve cannot be evaluated and an armed decision says so on
+stderr instead of skipping the check in silence. Nothing bounds where the project root may point,
+so one naming a directory *inside* the store carves that subtree out; that is residual 10, and it
+is not a regression, because the total disarm this replaced allowed the whole store in the same
+configuration.
 `tests/structure/test-plugin-data-guard.sh` pins the behavior, both directions, in all three
 chain states.
 

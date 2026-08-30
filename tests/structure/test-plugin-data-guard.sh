@@ -48,6 +48,14 @@ check() {
 # host without real symlinks into a red suite; recording it as a PASS would hide
 # the lost coverage. It gets its own counter and its own line.
 skipped() { echo "  SKIP  $1"; SKIPPED=$((SKIPPED+1)); }
+# An ENVIRONMENTAL skip is a fact about the host, not lost coverage: the premise
+# the row needs cannot exist here and no other host would have exercised it
+# differently. It still counts toward SKIPPED — the reader must see it — but the
+# zero-skip rule below must not fail on it. Measured: G23 needs a case-INSENSITIVE
+# volume, so it skips on every case-sensitive filesystem, which is Linux CI; the
+# suite went red there while every macOS run reported 0 SKIP.
+SKIPPED_ENV=0
+skipped_env() { skipped "$1"; SKIPPED_ENV=$((SKIPPED_ENV+1)); }
 
 command -v node >/dev/null 2>&1 || { echo "SKIP: node unavailable"; exit 0; }
 
@@ -57,10 +65,48 @@ unset CLAUDE_AGENT_TYPE ZENSU_TDD_GATE ZENSU_TEST_WITNESS ZENSU_CHAIN 2>/dev/nul
 # Apple bash 3.2 is the floor here, so the scratch roots are tracked as a
 # newline-delimited string rather than an array: an empty array expansion under
 # `set -u` aborts on that shell.
+
+# --- G38: the unit driver ----------------------------------------------------
+# tests/run-all.sh discovers only tests/structure/test-*.sh, so a *.test.js file
+# with no driver is never executed by the tree runner. This row is that driver.
+# It runs FIRST among the expensive rows for the reason the sibling
+# stop-enforcer suite states: at the tail, a Windows shard timeout would drop the
+# only coverage the module's injectable seams have anywhere.
+#
+# The case-count floor is not decoration — `node --test` exits 0 for a file that
+# registers no cases at all, so an early `return` or a deleted block would leave
+# this row green while measuring nothing.
+UNIT="$PLUGIN_DIR/tests/structure/plugin-data-guard-v1.test.js"
+# The reporter is PINNED. Node selects `spec` or `tap` by its own rules, and
+# the two spell the summary differently — the floor silently read 0 against the
+# spec form while the suite itself was green, which is the exact vacuity this
+# row exists to prevent.
+UNIT_OUT="$(node --test --test-reporter=tap "$UNIT" 2>&1)"; UNIT_RC=$?
+UNIT_PASS="$(printf '%s\n' "$UNIT_OUT" | sed -n 's/^# pass \([0-9][0-9]*\)$/\1/p')"
+UNIT_SKIP="$(printf '%s\n' "$UNIT_OUT" | sed -n 's/^# skipped \([0-9][0-9]*\)$/\1/p')"
+[ -z "$UNIT_PASS" ] && UNIT_PASS=0
+[ -z "$UNIT_SKIP" ] && UNIT_SKIP=0
+UNIT_REG=$((UNIT_PASS + UNIT_SKIP))
+[ "$UNIT_RC" -eq 0 ] \
+  && check "G38 the plugin-data-guard unit suite passes" PASS \
+  || check "G38 the plugin-data-guard unit suite passes (rc=$UNIT_RC)" FAIL
+# REGISTERED, not passing. Three unit cases skip themselves on a host that cannot
+# produce a real symlink, so a floor set from this host's passing count would turn
+# such a host red for an environment fact — the same mistake G42 was fixed for one
+# axis over. The registered count is what is platform-independent.
+[ "$UNIT_REG" -ge 37 ] \
+  && check "G38-floor the unit suite registered at least 37 cases ($UNIT_REG = $UNIT_PASS passing + $UNIT_SKIP skipped)" PASS \
+  || check "G38-floor the unit suite registered at least 37 cases (only $UNIT_REG)" FAIL
+# ...and a separate passing floor that tolerates exactly the three symlink cases,
+# so a case that stops running for any OTHER reason still costs the suite.
+[ "$UNIT_PASS" -ge 34 ] \
+  && check "G38-pass at least 34 unit cases actually ran ($UNIT_PASS, $UNIT_SKIP skipped)" PASS \
+  || check "G38-pass at least 34 unit cases actually ran (only $UNIT_PASS)" FAIL
+
 TMP_ROOTS=""
 cleanup() {
   local d
-  while IFS= read -r d; do [ -n "$d" ] && rm -rf "$d"; done <<< "$TMP_ROOTS"
+  while IFS= read -r d; do [ -n "$d" ] && rm -rf -- "$d"; done <<< "$TMP_ROOTS"
 }
 trap cleanup EXIT
 
@@ -190,7 +236,31 @@ SID="pdg-shapes"
 source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$SID" >/dev/null 2>&1 \
   || { echo "FATAL: baseline"; exit 2; }
 arm none
+# The store fixture is VALIDATED before a single row writes into it. It is not
+# this suite's own mktemp: initialize-baseline.sh derives it from
+# ZENSU_TEST_PLUGIN_DATA, which an environment can point anywhere. Unvalidated,
+# `mkdir -p "$STORE/sub"` and the `-sibling` fixture below create directories in
+# whatever that names — measured against an override outside the suite's temp
+# namespace, which was written into and left behind. Containment in $PROJ is the
+# check because $PROJ is the one root this file registered for cleanup, so
+# "inside it" and "we will remove it" are the same statement.
 STORE="$CLAUDE_PLUGIN_DATA"
+[ -n "$STORE" ] || { echo "FATAL: fixture: the baseline left CLAUDE_PLUGIN_DATA empty"; exit 2; }
+case "$STORE" in
+  /*) ;;
+  *) echo "FATAL: fixture: store is not absolute: $STORE"; exit 2 ;;
+esac
+[ -d "$STORE" ] && [ ! -L "$STORE" ] \
+  || { echo "FATAL: fixture: store is not a real directory: $STORE"; exit 2; }
+STORE="$(cd "$STORE" && pwd -P)" || { echo "FATAL: fixture: store is unresolvable"; exit 2; }
+case "$STORE" in
+  "$PROJ"/*) ;;
+  *) echo "FATAL: fixture: the store must live under this run's own project root."
+     echo "         got:      $STORE"
+     echo "         expected: below $PROJ"
+     echo "         (ZENSU_TEST_PLUGIN_DATA is set to a tree this suite would write into and never clean up)"
+     exit 2 ;;
+esac
 OUTSIDE="$(mktemp -d "${TMPDIR:-/tmp}/zensu-pdg-out.XXXXXX")" || { echo "FATAL: fixture"; exit 2; }
 [ -n "$OUTSIDE" ] && [ -d "$OUTSIDE" ] || { echo "FATAL: fixture"; exit 2; }
 OUTSIDE="$(cd "$OUTSIDE" && pwd -P)" || { echo "FATAL: fixture"; exit 2; }
@@ -232,6 +302,254 @@ TMP_ROOTS="$TMP_ROOTS$SIBLING
   && check "G9a MultiEdit into the store is denied" PASS \
   || check "G9a MultiEdit into the store is denied" FAIL
 
+# --- G30-G32: a truncated resolution must not read as a completed one ---------
+# Both budget bounds used to `return resolved`, the partially-resolved prefix. A
+# spelling that starts OUTSIDE the store, spends the component budget on `a/..`
+# pairs, then climbs into the store was answered `target-outside-plugin-data` and
+# ALLOWED — measured, with no symlink and no Bash involved, which is why the two
+# G30 rows differ ONLY in how many pairs they carry. The padded rows build their
+# target through node so the repetition count is explicit rather than a here-doc.
+pad_target() { # $1 pair count -> a spelling that starts at /tmp and lands in $STORE
+  PAD_N="$1" PAD_STORE="$STORE" node -e '
+    const path = require("path");
+    const store = process.env.PAD_STORE;
+    const climb = "../".repeat(store.split("/").filter(Boolean).length + 1);
+    process.stdout.write("/tmp/" + "a/../".repeat(Number(process.env.PAD_N))
+      + climb + store.replace(/^\//, "") + "/x.json");
+  '
+}
+
+[ "$(verdict "$GUARD" Write file_path "$(pad_target 3)" "$SID" "$PROJ")" = "DENY" ] \
+  && check "G30-control a short padded spelling that lands in the store is denied" PASS \
+  || check "G30-control a short padded spelling that lands in the store is denied" FAIL
+
+[ "$(verdict "$GUARD" Write file_path "$(pad_target 2100)" "$SID" "$PROJ")" = "DENY" ] \
+  && check "G30 the same spelling past MAX_COMPONENTS is denied, not allowed" PASS \
+  || check "G30 the same spelling past MAX_COMPONENTS is denied, not allowed" FAIL
+
+# The refusal must NOT borrow the ordinary deny sentence: that one asserts the
+# target is inside the store, which is exactly what a truncated walk could not
+# establish. The channel is stdout, not stderr — a truncated walk now denies, and
+# a deny carries its reason in the response rather than in an operator note.
+case "$(raw_stdout "$GUARD" Write file_path "$(pad_target 2100)" "$SID" "$PROJ")" in
+  *"target-resolution-truncated"*)
+    check "G31 the truncation refusal names its own cause, not the containment one" PASS ;;
+  *) check "G31 the truncation refusal names its own cause, not the containment one" FAIL ;;
+esac
+
+# --- G35: a store that CONTAINS the workspace carves out the project ----------
+# Only a store that IS a filesystem root was refused. A CLAUDE_PLUGIN_DATA one
+# step below that — an ancestor of the project — armed the gate over the whole
+# tree and denied every write, and this gate ships with no config flag and no
+# env escape, so the session could not edit the file that would fix it. The
+# carve-out is SCOPED: an in-project write goes through, everything else in the
+# store still denies.
+G35="$(CLAUDE_PLUGIN_DATA="$(dirname "$PROJ")" verdict "$GUARD" Write file_path "$PROJ/src/ordinary.ts" "$SID" "$PROJ")"
+[ "$G35" = "ALLOW" ] \
+  && check "G35 a store containing the workspace still allows an in-project write" PASS \
+  || check "G35 a store containing the workspace still allows an in-project write (got '$G35')" FAIL
+
+# The carve-out must NOT borrow the disclosed no-store note. The gate is armed
+# and working here, and printing "did not run" on every ordinary write is how an
+# operator learns to ignore the channel that also carries the real faults.
+G35D="$(CLAUDE_PLUGIN_DATA="$(dirname "$PROJ")" raw_stderr "$GUARD" Write file_path "$PROJ/src/ordinary.ts" "$SID" "$PROJ")"
+case "$G35D" in
+  *"did not run"*)
+    check "G35-disclose the carve-out does not claim the guard did not run" FAIL ;;
+  *) check "G35-disclose the carve-out does not claim the guard did not run" PASS ;;
+esac
+# The POSITIVE half. This was the only weakened-boundary state with no signal at
+# all: the strictly safer one — the valve could not be evaluated, so everything in
+# the store denies — printed a line, while the permissive one was byte-identical
+# to a clean allow. Asserting only the absence of the wrong sentence would pass on
+# empty stderr.
+case "$G35D" in
+  *"carved out the project"*)
+    check "G35-disclose-note the carve-out announces itself" PASS ;;
+  *) check "G35-disclose-note the carve-out announces itself (got '$G35D')" FAIL ;;
+esac
+# ...and the control: an ordinary write with a correctly configured store must not
+# carry it, or the row above would pass for a note that fires on every call.
+case "$(raw_stderr "$GUARD" Write file_path "$PROJ/src/ordinary.ts" "$SID" "$PROJ")" in
+  *"carved out the project"*)
+    check "G35-disclose-control the note is absent with a correct store" FAIL ;;
+  *) check "G35-disclose-control the note is absent with a correct store" PASS ;;
+esac
+
+# ...and the other half of the carve-out, which is the whole point of scoping it:
+# a target inside the store but OUTSIDE the project is still denied.
+G35S="$(CLAUDE_PLUGIN_DATA="$(dirname "$PROJ")" verdict "$GUARD" Write file_path "$(dirname "$PROJ")/session-control/v1/record.json" "$SID" "$PROJ")"
+[ "$G35S" = "DENY" ] \
+  && check "G35-scope a store target outside the project is still denied" PASS \
+  || check "G35-scope a store target outside the project is still denied (got '$G35S')" FAIL
+
+# --- G45: the over-arm valve announces when it could not be evaluated ---------
+# Every other disclosed fault here has a behavioural row; this one had none, so
+# deleting the host's stderr write left the suite green. The valve is skipped
+# whenever the project root cannot be resolved, and that is exactly the state in
+# which a containing store denies every write with no way out.
+# ONE invocation, both halves. Capturing the note from a run whose stdout was
+# discarded left the DENY unpinned, so a change that kept the note while disarming
+# the gate would have passed. Same lesson G26 records for its own pair.
+G45_OUT="$(mktemp "${TMPDIR:-/tmp}/zensu-pdg-g45.XXXXXX")"
+TMP_ROOTS="$TMP_ROOTS$G45_OUT
+"
+G45_ERR="$(payload Write file_path "$STORE/planted.json" "$SID" "$PROJ" 2>/dev/null | env -u CLAUDE_PROJECT_DIR bash "$GUARD" 2>&1 >"$G45_OUT")"
+case "$G45_ERR" in
+  *"armed without a project root"*)
+    check "G45 an armed decision without a project root says the valve was unchecked" PASS ;;
+  *) check "G45 an armed decision without a project root says the valve was unchecked" FAIL ;;
+esac
+case "$(cat "$G45_OUT")" in
+  *'"permissionDecision":"deny"'*)
+    check "G45-deny and the same run still denies the store target" PASS ;;
+  *) check "G45-deny and the same run still denies the store target" FAIL ;;
+esac
+# The control: with a project root the line must NOT appear, or the row above
+# would pass for a note that fires on every call.
+case "$(raw_stderr "$GUARD" Write file_path "$STORE/planted.json" "$SID" "$PROJ")" in
+  *"armed without a project root"*)
+    check "G45-control the note is absent when the valve could be evaluated" FAIL ;;
+  *) check "G45-control the note is absent when the valve could be evaluated" PASS ;;
+esac
+
+[ "$(verdict "$GUARD" Write file_path "$STORE/still-denied.json" "$SID" "$PROJ")" = "DENY" ] \
+  && check "G35-control a correctly configured store still denies" PASS \
+  || check "G35-control a correctly configured store still denies" FAIL
+
+# --- G36: the payload read is bounded ----------------------------------------
+# The module accumulated stdin without a cap on the hottest matcher in the
+# plugin, to read four fields — a Write carries its whole `content`. The sibling
+# decision module on an overlapping matcher declares a 1 MiB ceiling. An over-cap
+# payload must still ALLOW (the fault direction is unchanged) and must DISCLOSE,
+# so the size of a payload never decides silently whether the gate judged at all.
+BIG="$(BIG_STORE="$STORE" BIG_SID="$SID" BIG_PROJ="$PROJ" node -e '
+  const big = "x".repeat(1024 * 1024 + 4096);
+  process.stdout.write(JSON.stringify({
+    hook_event_name: "PreToolUse", tool_name: "Write",
+    tool_input: { file_path: process.env.BIG_STORE + "/planted.json", content: big },
+    session_id: process.env.BIG_SID, cwd: process.env.BIG_PROJ,
+  }));
+')"
+G36="$(printf '%s' "$BIG" | bash "$GUARD" 2>/dev/null | node -e '
+  let s=""; process.stdin.on("data",c=>s+=c).on("end",()=>{
+    s=s.trim(); if(!s){console.log("ALLOW");return;}
+    try{const h=(JSON.parse(s).hookSpecificOutput)||{};
+      console.log(h.permissionDecision==="deny"?"DENY":"ALLOW");}catch(_){console.log("UNPARSED");}});')"
+[ "$G36" = "DENY" ] \
+  && check "G36 a payload larger than 1 MiB targeting the store is still denied" PASS \
+  || check "G36 a payload larger than 1 MiB targeting the store is still denied (got '$G36')" FAIL
+
+# The review asked for a 1 MiB cap routing an over-cap payload to the disclosed
+# UNREADABLE reason, which allows. That was REJECTED and the rejection is the
+# point of this row: padding `content` past any such cap would then be a way to
+# write into the store. The real defect the review found is narrower — the
+# accumulation could throw and leave a stack trace instead of a typed reason —
+# so the accumulation is guarded and no size decides the verdict.
+# ABSOLUTE, like every other source row here, and the count is tested as a
+# NUMBER. `grep -c` prints nothing and exits 2 when it cannot read the file, so
+# the empty string used to fall through to the catch-all and report PASS — a row
+# that reported health when it had read nothing at all.
+G36N="$(grep -c 'process.stdin.on("data"' "$PLUGIN_DIR/hooks/lib/plugin-data-guard-v1.js" 2>/dev/null || true)"
+case "$G36N" in
+  ''|*[!0-9]*) check "G36-guard the stdin accumulation exists to be guarded (unreadable: '$G36N')" FAIL ;;
+  0) check "G36-guard the stdin accumulation exists to be guarded (none found)" FAIL ;;
+  *) check "G36-guard the stdin accumulation exists to be guarded ($G36N)" PASS ;;
+esac
+
+# Scoped to the DATA handler alone. A wider range reaches the `end` handler's
+# pre-existing catch and the row passes without anything being guarded — which is
+# exactly how it read on its first run here.
+G36L="$(grep -n 'process.stdin.on("data"' "$PLUGIN_DIR/hooks/lib/plugin-data-guard-v1.js" | cut -d: -f1)"
+# FAIL CLOSED on anything that is not a single line number. An empty $G36L makes
+# `sed -n "p"` print the WHOLE module, and the case below then matches the
+# helper's own definition — so a re-spelled needle reported PASS having read
+# something else entirely. Same class as the G36-guard row above.
+case "$G36L" in
+  ''|*[!0-9]*) check "G36-typed the accumulation goes through a guarded helper (unreadable line number: '$G36L')" FAIL ;;
+esac
+G36G="$(sed -n "${G36L}p" "$PLUGIN_DIR/hooks/lib/plugin-data-guard-v1.js" 2>/dev/null || true)"
+case "$G36G" in
+  *"accumulate("*)
+    check "G36-typed the accumulation goes through a guarded helper, not a bare append" PASS ;;
+  *) check "G36-typed the accumulation goes through a guarded helper, not a bare append (got '$G36G')" FAIL ;;
+esac
+
+# --- G37: the caller's cwd reaches the module --------------------------------
+# The wrapper `cd -P`s into hooks/lib to require the module by a relative
+# specifier, so before this the module's relative-target fallback anchored at
+# <plugin root>/hooks/lib rather than where the tool call was issued. A payload
+# that carries no `cwd` and a RELATIVE target naming a store path therefore
+# resolved outside the store and was allowed, while the tool itself would have
+# resolved it inside. The wrapper hands its own directory over instead.
+#
+# The payload is built inline rather than through payload(): that helper always
+# emits a `cwd` key, and the property under test is its ABSENCE.
+no_cwd_payload() { # $1 relative target
+  node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: "PreToolUse",
+      tool_name: "Write",
+      tool_input: { file_path: process.argv[1], content: "x" },
+      session_id: "sess-g37",
+    }));
+  ' "$1"
+}
+G37_REL="$(basename "$STORE")/session-control/v1/planted.json"
+G37="$(cd "$(dirname "$STORE")" && no_cwd_payload "$G37_REL" | bash "$GUARD" 2>/dev/null \
+  | node -e '
+    let s = ""; process.stdin.on("data", (c) => { s += c; });
+    process.stdin.on("end", () => {
+      s = s.trim();
+      if (!s) { console.log("ALLOW"); return; }
+      try { console.log((JSON.parse(s).hookSpecificOutput || {}).permissionDecision === "deny" ? "DENY" : "ALLOW"); }
+      catch (_) { console.log("UNPARSED"); }
+    });')"
+[ "$G37" = "DENY" ] \
+  && check "G37 a payload with no cwd and a relative store target is denied" PASS \
+  || check "G37 a payload with no cwd and a relative store target is denied (got '$G37')" FAIL
+
+# The discriminating control. The same relative spelling, issued from a
+# directory that does NOT contain the store, must still be allowed — otherwise
+# G37 would pass for a guard that denied every relative target regardless of
+# where it resolves.
+G37C="$(cd "$OUTSIDE" && no_cwd_payload "$G37_REL" | bash "$GUARD" 2>/dev/null \
+  | node -e '
+    let s = ""; process.stdin.on("data", (c) => { s += c; });
+    process.stdin.on("end", () => {
+      s = s.trim();
+      if (!s) { console.log("ALLOW"); return; }
+      try { console.log((JSON.parse(s).hookSpecificOutput || {}).permissionDecision === "deny" ? "DENY" : "ALLOW"); }
+      catch (_) { console.log("UNPARSED"); }
+    });')"
+[ "$G37C" = "ALLOW" ] \
+  && check "G37-control the same relative target outside the store still allows" PASS \
+  || check "G37-control the same relative target outside the store still allows (got '$G37C')" FAIL
+
+# An explicit absolute payload cwd must keep outranking the wrapper's own
+# directory: the hook does not necessarily run where the tool call was issued,
+# and the caller's export is only the FALLBACK. Run from a directory that does
+# not contain the store, with a payload cwd that does.
+G37P="$(cd "$OUTSIDE" && node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: "PreToolUse",
+      tool_name: "Write",
+      tool_input: { file_path: process.argv[1], content: "x" },
+      session_id: "sess-g37", cwd: process.argv[2],
+    }));
+  ' "$G37_REL" "$(dirname "$STORE")" | bash "$GUARD" 2>/dev/null \
+  | node -e '
+    let s = ""; process.stdin.on("data", (c) => { s += c; });
+    process.stdin.on("end", () => {
+      s = s.trim();
+      if (!s) { console.log("ALLOW"); return; }
+      try { console.log((JSON.parse(s).hookSpecificOutput || {}).permissionDecision === "deny" ? "DENY" : "ALLOW"); }
+      catch (_) { console.log("UNPARSED"); }
+    });')"
+[ "$G37P" = "DENY" ] \
+  && check "G37-payload an absolute payload cwd still outranks the wrapper's fallback" PASS \
+  || check "G37-payload an absolute payload cwd still outranks the wrapper's fallback (got '$G37P')" FAIL
+
 # --- G15-G18: symlink resolution ---------------------------------------------
 # The property resolveTargetPath() exists for. Before these checks, every
 # target the suite used was already canonical, so deleting canonicalize() left all
@@ -257,7 +575,7 @@ case "$(uname -s 2>/dev/null || echo unknown)" in
     else
       check "G14b-premise the POSIX fixture produced real symlinks" FAIL
     fi ;;
-  *) skipped "G14b-premise POSIX symlink fixture (host is not POSIX)" ;;
+  *) skipped_env "G14b-premise POSIX symlink fixture (host is not POSIX)" ;;
 esac
 if is_symlink "$OUTSIDE/sym/live" && is_symlink "$OUTSIDE/sym/dangling"; then
   [ "$(verdict "$GUARD" Write file_path "$OUTSIDE/sym/live/session-control/v1/x.json" "$SID" "$PROJ")" = "DENY" ] \
@@ -314,7 +632,7 @@ if [ "$STORE_FLIPPED" != "$STORE_LEAF" ] && [ -d "$STORE_PARENT/$STORE_FLIPPED" 
     && check "G23 a case-variant spelling of the store prefix is denied" PASS \
     || check "G23 a case-variant spelling of the store prefix is denied" FAIL
 else
-  skipped "G23 case-variant store prefix (case-sensitive volume, or no letters to flip)"
+  skipped_env "G23 case-variant store prefix (case-sensitive volume, or no letters to flip)"
 fi
 
 # The two-hop symlink: a link whose TARGET traverses another link into the store.
@@ -364,7 +682,7 @@ fi
 # see them: the later declaration wins by hoisting, so an edit to the first would
 # have been a silent no-op.
 # Derived from the module rather than a hardcoded pair: the hoisting hazard
-# applies to EVERY module-scope function, so a ninth one must be covered without
+# applies to EVERY module-scope function, so a NEW one must be covered without
 # an edit here.
 MODULE_FNS="$(grep -oE '^function [A-Za-z_][A-Za-z0-9_]*' "$PLUGIN_DIR/hooks/lib/plugin-data-guard-v1.js" | awk '{print $2}' | sort -u)"
 [ -n "$MODULE_FNS" ] \
@@ -412,11 +730,23 @@ esac
 ln -s "$OUTSIDE/sym/loopA" "$OUTSIDE/sym/loopB" 2>/dev/null
 ln -s "$OUTSIDE/sym/loopB" "$OUTSIDE/sym/loopA" 2>/dev/null
 if is_symlink "$OUTSIDE/sym/loopA"; then
-  [ "$(verdict "$GUARD" Write file_path "$OUTSIDE/sym/loopA" "$SID" "$PROJ")" = "ALLOW" ] \
-    && check "G18c a symlink cycle terminates and allows rather than hanging" PASS \
-    || check "G18c a symlink cycle terminates and allows rather than hanging" FAIL
+  # Terminating is still the property this row exists for. The VERDICT changed
+  # deliberately: a cycle exhausts MAX_LINK_HOPS, which is a truncated walk, and
+  # a truncated walk no longer reports "outside" — it refuses. Nothing legitimate
+  # is lost, because the kernel answers ELOOP on that path anyway; what is gained
+  # is that the bound stops being a silent allow. The old expectation was written
+  # before that distinction existed.
+  [ "$(verdict "$GUARD" Write file_path "$OUTSIDE/sym/loopA" "$SID" "$PROJ")" = "DENY" ] \
+    && check "G18c a symlink cycle terminates and refuses rather than hanging or allowing" PASS \
+    || check "G18c a symlink cycle terminates and refuses rather than hanging or allowing" FAIL
+  case "$(raw_stdout "$GUARD" Write file_path "$OUTSIDE/sym/loopA" "$SID" "$PROJ")" in
+    *"target-resolution-truncated"*)
+      check "G18c-cause the cycle refusal names the bound, not containment" PASS ;;
+    *) check "G18c-cause the cycle refusal names the bound, not containment" FAIL ;;
+  esac
 else
   skipped "G18c symlink cycle (host produced no real symlink)"
+  skipped "G18c-cause symlink cycle reason (host produced no real symlink)"
 fi
 
 # --- G19-G21: the deny reason and the principal ------------------------------
@@ -490,18 +820,24 @@ G11b="$(raw_stderr "$GUARD" Write file_path "$PROJ/src/foo.ts" "$SID" "$PROJ")"
   && check "G11b-control an ordinary allow prints nothing on stderr" PASS \
   || check "G11b-control an ordinary allow prints nothing on stderr (got '$G11b')" FAIL
 
-# A payload carrying no path field at all: allow, and quietly — it is not a fault
-# that could hide a missing boundary.
+# A payload carrying no path field at all.
 NOPATH="$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"PreToolUse",tool_name:"Write",tool_input:{content:"x"},session_id:process.argv[1],cwd:process.argv[2]}))' "$SID" "$PROJ")"
 G11c="$(printf '%s' "$NOPATH" | bash "$GUARD" 2>/dev/null)"
 G11cE="$(printf '%s' "$NOPATH" | bash "$GUARD" 2>&1 >/dev/null)"
 [ -z "$G11c" ] \
   && check "G11c a payload with no path field allows" PASS \
   || check "G11c a payload with no path field allows (got '$G11c')" FAIL
-# The comment used to claim quietness the row did not measure; stderr is asserted now.
-[ -z "$G11cE" ] \
-  && check "G11c-quiet and it allows quietly — a missing path cannot hide a missing boundary" PASS \
-  || check "G11c-quiet and it allows quietly (got '$G11cE')" FAIL
+# It allows, but it does NOT allow quietly. Once the tool name has matched the
+# write-tool set the call carries a target by construction, so an absent path
+# field is not an ordinary outcome — it is what a host that renamed or
+# restructured the field looks like, and in that state the gate allows every
+# write on every call. The silence this row used to assert was the one shape
+# indistinguishable from a healthy allow.
+case "$G11cE" in
+  *"payload-carries-no-path"*)
+    check "G11c-quiet a missing path field is disclosed, not silent" PASS ;;
+  *) check "G11c-quiet a missing path field is disclosed, not silent (got '$G11cE')" FAIL ;;
+esac
 
 # F11: the remaining disclosed faults. An unparseable payload is UNREADABLE.
 BADJSON="$(printf '%s' 'not json at all')"
@@ -538,8 +874,7 @@ case "$G11gE" in
   *) check "G11h a missing containment module is disclosed on stderr (got '$G11gE')" FAIL ;;
 esac
 
-# The wrapper's own silent early exit: the module file absent. It must allow, and
-# the docs say plainly that this one carries NO note.
+# The wrapper's own early exit: the module file absent.
 FAKE2="$(mktemp -d "${TMPDIR:-/tmp}/zensu-pdg-fake2.XXXXXX")" || { echo "FATAL: fixture"; exit 2; }
 [ -n "$FAKE2" ] && [ -d "$FAKE2" ] || { echo "FATAL: fixture"; exit 2; }
 FAKE2="$(cd "$FAKE2" && pwd -P)" || { echo "FATAL: fixture"; exit 2; }
@@ -549,9 +884,51 @@ mkdir -p "$FAKE2/hooks/lib"
 cp "$GUARD" "$FAKE2/hooks/" 2>/dev/null
 G11i="$(payload Write file_path "$STORE/planted.json" "$SID" "$PROJ" \
   | CLAUDE_PLUGIN_ROOT="$FAKE2" bash "$FAKE2/hooks/pre-write-plugin-data-guard.sh" 2>&1)"
-[ -z "$G11i" ] \
-  && check "G11i an absent guard module allows silently, as documented" PASS \
-  || check "G11i an absent guard module allows silently (got '$G11i')" FAIL
+# It allows — the fault direction is unchanged — but it does NOT do so silently.
+# The wrapper is a shell script and already writes stderr for its identity guard,
+# so "the wrapper returns before node runs" only ever established that the
+# MODULE's typed note cannot reach here. Silence was a choice, and it was the one
+# state indistinguishable from a healthy allow: an ungated main-thread Write to
+# the module disarms the gate for good, and nothing said so.
+case "$G11i" in
+  *"plugin-data guard did not run"*)
+    check "G11i an absent guard module allows and says so" PASS ;;
+  *) check "G11i an absent guard module allows and says so (got '$G11i')" FAIL ;;
+esac
+case "$G11i" in
+  *'"permissionDecision"'*)
+    check "G11i-allow the note did not turn the allow into a decision" FAIL ;;
+  *) check "G11i-allow the note did not turn the allow into a decision" PASS ;;
+esac
+
+# The plugin-root RESOLUTION failure is a SECOND exit-2 branch, and the header
+# enumerated only one. It printed nothing, so on this matcher a moved or
+# unreadable plugin directory refused every write with an empty stderr.
+#
+# It is pinned at SOURCE rather than driven: triggering it needs `dirname "$0"/..`
+# to fail for a script the suite just invoked by that same path, which no fixture
+# can arrange without also making the invocation itself fail. The control below is
+# what keeps the pin from going vacuous — it fires the same extraction at the
+# identity branch, which is driven end to end by G26/G26a.
+G33="$(awk '/_ZENSU_EXECUTED_PLUGIN_ROOT=/,/^fi$/' "$GUARD")"
+case "$G33" in
+  *"cannot resolve its own plugin root"*)
+    check "G33 the plugin-root resolution failure names its cause before exit 2" PASS ;;
+  *) check "G33 the plugin-root resolution failure names its cause before exit 2" FAIL ;;
+esac
+case "$G33" in
+  *"does not match the executing plugin"*)
+    check "G33-control the extraction really covers the exit-2 region" PASS ;;
+  *) check "G33-control the extraction really covers the exit-2 region" FAIL ;;
+esac
+
+# The two remaining silent exits. Both are structurally undriveable from a suite
+# that itself requires node and a real hooks/lib, so they are pinned at source
+# with the same control discipline.
+G34="$(grep -c 'plugin-data guard did not run' "$GUARD")"
+[ "${G34:-0}" -ge 3 ] \
+  && check "G34 all three allowing early exits carry a note ($G34 found)" PASS \
+  || check "G34 all three allowing early exits carry a note (only ${G34:-0})" FAIL
 
 # --- G12-G14: source contracts ----------------------------------------------
 # G12 and G13 assert the ABSENCE of a spelling, so each carries a control that
@@ -616,17 +993,309 @@ REG_SELECTED="${REG_REST%% *}"; REG_GATED="${REG_REST##* }"
   && check "G14a the registered matchers and WRITE_TOOLS name the same tools ($REG_GATED)" PASS \
   || check "G14a the registered matchers and WRITE_TOOLS name the same tools (matchers=$REG_SELECTED gated=$REG_GATED)" FAIL
 
-# A floor, because `exit 0` also accepts a file that registered no checks at all:
-# an early `continue`, a deleted block or a skipped fixture would otherwise leave
-# this suite green while measuring less than it claims. Raise it deliberately.
-# SKIP-AWARE, or the counter defeats itself: nine rows sit behind the symlink
-# premise, so a host without real symlinks would drop below any fixed floor and
-# turn red — exactly what the skipped() counter exists to prevent.
-EXPECTED_CHECKS=65
+
+
+# --- G40: both directions for every gated tool -------------------------------
+# The suite had a deny row per tool and an in-project ALLOW control for only one
+# of them, so a gate that denied every write from three of the four tools would
+# have read as fully covered. Both directions are now asserted for each, and the
+# axis is DRIVEN FROM THE EXPORTED SET rather than written out: a tool added to
+# WRITE_TOOLS arrives here with no edit, and G40-count is what proves the loop
+# actually ran once per member instead of silently iterating over nothing.
+#
+# Each payload carries EVERY member of PATH_FIELDS at once. That removes the one
+# hardcoded mapping this loop would otherwise need — which tool speaks which
+# field — and asserts the module's real contract, which reads the fields by name
+# and not by tool.
+all_fields_payload() { # $1 tool  $2 target
+  node -e '
+    const [tool, target, fields] = process.argv.slice(1);
+    const input = { content: "x" };
+    for (const f of fields.split(",")) input[f] = target;
+    process.stdout.write(JSON.stringify({
+      hook_event_name: "PreToolUse", tool_name: tool, tool_input: input,
+      session_id: "sess-g40", cwd: process.argv[4],
+    }));
+  ' "$1" "$2" "$PDG_FIELDS" "$PROJ"
+}
+tool_verdict() { # $1 tool  $2 target -> ALLOW | DENY
+  all_fields_payload "$1" "$2" | bash "$GUARD" 2>/dev/null | node -e '
+    let s = ""; process.stdin.on("data", (c) => { s += c; });
+    process.stdin.on("end", () => {
+      s = s.trim();
+      if (!s) { console.log("ALLOW"); return; }
+      try { console.log((JSON.parse(s).hookSpecificOutput || {}).permissionDecision === "deny" ? "DENY" : "ALLOW"); }
+      catch (_) { console.log("UNPARSED"); }
+    });'
+}
+PDG_TOOLS="$(node -e 'process.stdout.write([...require(process.argv[1]).WRITE_TOOLS].sort().join(" "))' "$PLUGIN_DIR/hooks/lib/plugin-data-guard-v1.js")"
+PDG_FIELDS="$(node -e 'process.stdout.write(require(process.argv[1]).PATH_FIELDS.join(","))' "$PLUGIN_DIR/hooks/lib/plugin-data-guard-v1.js")"
+G40_ROWS=0
+for tool in $PDG_TOOLS; do
+  V="$(tool_verdict "$tool" "$STORE/session-control/v1/$tool.json")"
+  [ "$V" = "DENY" ] \
+    && check "G40 $tool into the store is denied" PASS \
+    || check "G40 $tool into the store is denied (got '$V')" FAIL
+  G40_ROWS=$((G40_ROWS+1))
+  V="$(tool_verdict "$tool" "$PROJ/src/$tool.ts")"
+  [ "$V" = "ALLOW" ] \
+    && check "G40 $tool inside the project is allowed" PASS \
+    || check "G40 $tool inside the project is allowed (got '$V')" FAIL
+  G40_ROWS=$((G40_ROWS+1))
+done
+G40_EXPECT=$(( $(printf '%s\n' "$PDG_TOOLS" | wc -w) * 2 ))
+[ "$G40_ROWS" -eq "$G40_EXPECT" ] && [ "$G40_ROWS" -gt 0 ] \
+  && check "G40-count the axis ran both directions for every exported tool ($G40_ROWS)" PASS \
+  || check "G40-count the axis ran both directions for every exported tool (ran $G40_ROWS, expected $G40_EXPECT)" FAIL
+
+# --- G36-wired: the payload helper is actually CALLED with the flag -----------
+# `payloadFromRaw` is unit-tested as a pure function, and G36-typed only sees the
+# data handler. Nothing observed the `end` handler PASSING `accumulationFailed`
+# into it, so dropping that one argument restored the whole defect — empty buffer,
+# `{}` parsed, NOT_A_WRITE, silent allow — with both suites green.
+case "$(grep -c 'payloadFromRaw(raw, accumulationFailed)' "$PLUGIN_DIR/hooks/lib/plugin-data-guard-v1.js" 2>/dev/null || true)" in
+  ''|*[!0-9]*) check "G36-wired the payload helper receives the accumulation flag (unreadable count)" FAIL ;;
+  0) check "G36-wired the payload helper receives the accumulation flag" FAIL ;;
+  *) check "G36-wired the payload helper receives the accumulation flag" PASS ;;
+esac
+# A stream fault must reach the same verdict, so the listener has to exist AND the
+# verdict has to be reachable from it rather than from `end` alone.
+# The BODY, not just the registration. An empty handler satisfied a bare
+# "is it registered" grep while a stream fault still reached the verdict through
+# `close` with the flag unset and a truncated buffer — the routing this row
+# exists for, undone with every check green.
+case "$(grep -c 'process.stdin.on("error", () => { accumulationFailed = true; raw = ""; finalize(); });' "$PLUGIN_DIR/hooks/lib/plugin-data-guard-v1.js" 2>/dev/null || true)" in
+  ''|*[!0-9]*) check "G36-wired-error the stdin error listener routes to the verdict (unreadable count)" FAIL ;;
+  0) check "G36-wired-error the stdin error listener routes to the verdict" FAIL ;;
+  *) check "G36-wired-error the stdin error listener routes to the verdict" PASS ;;
+esac
+case "$(grep -c 'process.stdin.on("close", finalize)' "$PLUGIN_DIR/hooks/lib/plugin-data-guard-v1.js" 2>/dev/null || true)" in
+  ''|*[!0-9]*) check "G36-wired-close the verdict is reachable from close, not only end (unreadable count)" FAIL ;;
+  0) check "G36-wired-close the verdict is reachable from close, not only end" FAIL ;;
+  *) check "G36-wired-close the verdict is reachable from close, not only end" PASS ;;
+esac
+
+# --- G46: the carve-out reason value is one literal in three files ------------
+# The value reaches two operator-facing documents verbatim. Every sibling reason
+# that reaches a surface is grep-pinned here; this one was not, so renaming it
+# left both docs asserting a string the gate no longer emits with every check
+# green. The literal is DERIVED from the module rather than spelled again.
+G46_VALUE="$(node -e 'process.stdout.write(require(process.argv[1]).REASONS.SCOPED_IN_PROJECT)' "$PLUGIN_DIR/hooks/lib/plugin-data-guard-v1.js")"
+if [ -z "$G46_VALUE" ]; then
+  check "G46 the carve-out reason value is exported and non-empty" FAIL
+else
+  check "G46 the carve-out reason value is exported and non-empty ($G46_VALUE)" PASS
+  G46_MISS=""
+  for doc in "$PLUGIN_DIR/docs/gates.md" "$PLUGIN_DIR/docs/configuration.md"; do
+    grep -qF "$G46_VALUE" "$doc" || G46_MISS="$G46_MISS $(basename "$doc")"
+  done
+  [ -z "$G46_MISS" ] \
+    && check "G46-docs both operator carriers quote the exported value" PASS \
+    || check "G46-docs both operator carriers quote the exported value (missing:$G46_MISS)" FAIL
+fi
+
+# --- G39: the resolver pair moves in lockstep --------------------------------
+# hooks/lib/reviewer-capability-v1.js owns the same boundary for every NON-main
+# principal, through canonicalCandidate() — a second resolver that nothing pins
+# against this one. A divergence between them is a principal-dependent verdict on
+# one boundary, not merely duplicated code, so the four elements they must share
+# are asserted in BOTH files. One extracted resolver is the durable end state;
+# until then this is what notices a one-sided edit.
+#
+# The pair's KNOWN divergences are deliberate and are NOT asserted away here:
+# canonicalCandidate collapses `..` lexically before any lstat, and its fault
+# contract throws into a consumer that DENIES while this walk swallows into one
+# that ALLOWS. What IS asserted is that the guard still explains why it declines
+# the lexical collapse — an unexplained difference is how the two drift.
+lockstep() { # $1 guard module  $2 sibling module -> OK | MISSING:<element>
+  node -e '
+    const fs = require("fs");
+    const verdict = () => {
+    // SLICED to the resolver, never the whole file. Every element below occurs
+    // elsewhere in reviewer-capability-v1.js — lstat and realpath in its own
+    // directory validators, the while-loop in two unrelated walks — so a
+    // file-scoped match was satisfied by code that is not canonicalCandidate, and
+    // deleting that resolver s per-component canonicalization left this row green.
+    const slice = (text, fn) => {
+      const at = text.indexOf("function " + fn + "(");
+      if (at < 0) return "";
+      const next = text.indexOf("\nfunction ", at + 1);
+      return next < 0 ? text.slice(at) : text.slice(at, next);
+    };
+    const [guardFile, siblingFile] = process.argv.slice(1).map((f) => fs.readFileSync(f, "utf8"));
+    // Each slice is tested SEPARATELY before the concatenation. Testing the sum
+    // made the guard-side refusal unreachable while `decide` existed, so a
+    // renamed resolver reported a missing element instead of a missing function
+    // — a true failure naming the wrong cause.
+    const guardResolver = slice(guardFile, "resolveTargetPath");
+    if (guardResolver === "") { return "MISSING:guard:resolveTargetPath is not a top-level function"; }
+    const sibling = slice(siblingFile, "canonicalCandidate");
+    if (sibling === "") { return "MISSING:sibling:canonicalCandidate is not a top-level function"; }
+    const guard = guardResolver;
+    // Each element is a property both resolvers depend on. A one-sided removal
+    // changes what one principal may write and leaves the other alone.
+    const shared = [
+      ["per-component lstat", /fs\.lstatSync\(candidate\)/],
+      ["symlink branch", /isSymbolicLink\(\)/],
+      ["link target re-read", /fs\.readlinkSync\(candidate\)/],
+      ["per-component canonicalization", /fs\.realpathSync\.native\(candidate\)/],
+      ["a bounded walk", /while \(pending\.length > 0\)/],
+    ];
+    for (const [name, re] of shared) {
+      if (!re.test(guard)) { return "MISSING:guard:" + name; }
+      if (!re.test(sibling)) { return "MISSING:sibling:" + name; }
+    }
+    if (!/NOT path\.resolve\(\)/.test(guardFile)) { return "MISSING:guard:the lexical-collapse rationale"; }
+    return "OK";
+    };
+    console.log(verdict());
+  ' "$1" "$2"
+}
+G39="$(lockstep "$PLUGIN_DIR/hooks/lib/plugin-data-guard-v1.js" "$PLUGIN_DIR/hooks/lib/reviewer-capability-v1.js")"
+[ "$G39" = "OK" ] \
+  && check "G39 both resolvers carry every shared element" PASS \
+  || check "G39 both resolvers carry every shared element (got $G39)" FAIL
+
+# The anti-vacuity control, and it is a real one: the same scan is run against a
+# COPY of the guard with the canonicalization deleted. A pin whose pattern can
+# never fail asserts nothing, and this repo has shipped that mistake before.
+G39_MUT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-pdg-mut.XXXXXX")" || { echo "FATAL: fixture"; exit 2; }
+[ -n "$G39_MUT" ] && [ -d "$G39_MUT" ] || { echo "FATAL: fixture"; exit 2; }
+G39_MUT="$(cd "$G39_MUT" && pwd -P)" || { echo "FATAL: fixture"; exit 2; }
+TMP_ROOTS="$TMP_ROOTS$G39_MUT
+"
+sed 's/fs\.realpathSync\.native(candidate)/fs.realpathSync.native(String(candidate))/' \
+  "$PLUGIN_DIR/hooks/lib/plugin-data-guard-v1.js" > "$G39_MUT/mutated.js"
+G39C="$(lockstep "$G39_MUT/mutated.js" "$PLUGIN_DIR/hooks/lib/reviewer-capability-v1.js")"
+case "$G39C" in
+  MISSING:guard:*canonicalization*)
+    check "G39-control the scan fails when the guard loses its canonicalization" PASS ;;
+  *) check "G39-control the scan fails when the guard loses its canonicalization (got $G39C)" FAIL ;;
+esac
+
+# ...and the SIBLING side, which had no arm at all. It is the half the file-scoped
+# scan could not see: every element but readlinkSync occurs elsewhere in that
+# file, so only a sliced scan can notice the resolver losing one.
+sed 's/current = fs\.realpathSync\.native(candidate);/current = fs.realpathSync.native(String(candidate));/' \
+  "$PLUGIN_DIR/hooks/lib/reviewer-capability-v1.js" > "$G39_MUT/mutated-sibling.js"
+G39CS="$(lockstep "$PLUGIN_DIR/hooks/lib/plugin-data-guard-v1.js" "$G39_MUT/mutated-sibling.js")"
+case "$G39CS" in
+  MISSING:sibling:*canonicalization*)
+    check "G39-control-sibling the scan fails when the sibling loses its canonicalization" PASS ;;
+  *) check "G39-control-sibling the scan fails when the sibling loses its canonicalization (got $G39CS)" FAIL ;;
+esac
+
+# FR-002 is a spec constraint, and the durable form of it is a DEPENDENCY rule
+# rather than a diff check: this gate must never LOAD the sibling module. A
+# `git diff` row would fail on the sibling's next legitimate change and teach
+# the reader to ignore it. Naming the sibling in PROSE is deliberate and stays
+# allowed — the module header's residual list points at it — so the scan is
+# anchored on the require, never on the string.
+case "$(grep -cE "require\(['\"]\.?[^'\"]*reviewer-capability" "$PLUGIN_DIR/hooks/lib/plugin-data-guard-v1.js")" in
+  0) check "G39-independent the guard never loads the sibling module" PASS ;;
+  *) check "G39-independent the guard never loads the sibling module" FAIL ;;
+esac
+
+# ...and the control that the scan can fail at all.
+case "$(printf '%s\n' "require(\"./reviewer-capability-v1.js\")" | grep -cE "require\(['\"]\.?[^'\"]*reviewer-capability")" in
+  0) check "G39-independent-control the require scan can match" FAIL ;;
+  *) check "G39-independent-control the require scan can match" PASS ;;
+esac
+
+
+# --- G43: both registrations carry an explicit timeout -----------------------
+# This gate can DENY, so a hang is not a slow hook — it is a stalled tool call on
+# the two matchers every file edit travels through. The value matches the sibling
+# gates that also deny (pre-bash-source-write-gate.sh,
+# pre-reviewer-capability-gate.sh) rather than the advisory hooks that carry none.
+# BOTH registrations are asserted, because the second matcher was added later and
+# a per-file check would not have seen it.
+G43="$(node -e '
+  const fs = require("fs");
+  const j = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const found = [];
+  for (const g of j.hooks.PreToolUse || []) {
+    for (const h of g.hooks || []) {
+      if (h.command.includes("pre-write-plugin-data-guard.sh")) {
+        found.push(g.matcher + "=" + (typeof h.timeout === "number" ? h.timeout : "none"));
+      }
+    }
+  }
+  console.log(found.length === 0 ? "NONE" : found.sort().join(" "));
+' "$PLUGIN_DIR/hooks/hooks.json")"
+case "$G43" in
+  *none*|NONE) check "G43 both registrations carry an explicit timeout (got $G43)" FAIL ;;
+  *) check "G43 both registrations carry an explicit timeout ($G43)" PASS ;;
+esac
+
+# --- G44: the caller-cwd transport is one name in two files ------------------
+# The wrapper exports it, the module's CLI entry point reads it, and nothing
+# else in the tree mentions it. Renaming either side silently re-anchors every
+# relative target in the plugin tree and fails only for relative spellings, so
+# the ordinary rows stay green. This is the pin that catches it. A third carrier
+# now names the variable too — the `pre-write-plugin-data-guard.sh` row in
+# docs/configuration.md — so it is no longer a two-site name, but only this row
+# fails on a one-sided rename.
+G44="$(node -e '
+  const fs = require("fs");
+  const [wrapper, mod] = process.argv.slice(1).map((f) => fs.readFileSync(f, "utf8"));
+  const name = (wrapper.match(/export ([A-Z_]*CALLER_CWD)/) || [])[1];
+  if (!name) { console.log("NO-EXPORT"); }
+  else if (!new RegExp("process\\.env\\." + name).test(mod)) { console.log("NOT-READ:" + name); }
+  else { console.log("OK:" + name); }
+' "$PLUGIN_DIR/hooks/pre-write-plugin-data-guard.sh" "$PLUGIN_DIR/hooks/lib/plugin-data-guard-v1.js")"
+case "$G44" in
+  OK:*) check "G44 the wrapper exports the caller-cwd name the module reads (${G44#OK:})" PASS ;;
+  *) check "G44 the wrapper exports the caller-cwd name the module reads (got $G44)" FAIL ;;
+esac
+
+# TWO FLOORS, and the split is the point. `exit 0` also accepts a file that
+# registered no checks at all — an early `continue`, a deleted block or a
+# skipped fixture would otherwise leave this suite green while measuring less
+# than it claims. BOTH floors sit at the MEASURED counts, not below them, so a
+# deleted row fails the floor it exists to protect; raise them with every added
+# row. Note the three rows below are registered AFTER this count is taken.
+#
+# The REGISTERED floor counts skips, so it survives a host without real
+# symlinks. On its own it is defeated by exactly the failure it exists to
+# catch: a fixture that stopped working would skip every symlink row and still
+# clear it. The EXECUTED floor is therefore asserted separately, over rows that
+# actually ran, and it tolerates only the known-skippable set.
+# TWELVE skip sites across THREE premises, not nine behind one: ten rows need a
+# real symlink (G15/G16/G17-control, G18/G18a-control/G18b-control, G24, G27,
+# G18c/G18c-cause), G14b-premise needs a POSIX host, and G23 needs a
+# case-INSENSITIVE volume. The executed floor tolerates all twelve, because a
+# host can legitimately lack every premise at once.
+MAX_SKIPPABLE=12
+EXPECTED_CHECKS=114
+EXECUTED_FLOOR=$((EXPECTED_CHECKS - MAX_SKIPPABLE))
+EXECUTED=$((PASS + FAIL))
 TOTAL=$((PASS + FAIL + SKIPPED))
 [ "$TOTAL" -ge "$EXPECTED_CHECKS" ] \
   && check "G22 the suite registered at least $EXPECTED_CHECKS rows ($TOTAL incl. $SKIPPED skipped)" PASS \
   || check "G22 the suite registered at least $EXPECTED_CHECKS rows (only $TOTAL incl. $SKIPPED skipped)" FAIL
+[ "$EXECUTED" -ge "$EXECUTED_FLOOR" ] \
+  && check "G41 at least $EXECUTED_FLOOR rows actually executed ($EXECUTED)" PASS \
+  || check "G41 at least $EXECUTED_FLOOR rows actually executed (only $EXECUTED)" FAIL
+
+# A skipped row must cost the suite when it means coverage was LOST — a fixture
+# that stopped producing symlinks degrades silently to green otherwise. It must
+# NOT cost the suite when the premise is a fact about the host: G23 needs a
+# case-insensitive volume and simply cannot run on ext4, so counting it here made
+# the suite red on Linux CI for a reason unrelated to the code. The measured
+# quantity is therefore SKIPPED minus SKIPPED_ENV, on every host — the Windows
+# carve-out remains, because there `ln -s` can be satisfied by a copy that native
+# Node does not follow, which is a host fact the symlink rows cannot detect
+# per-row.
+LOST_COVERAGE=$((SKIPPED - SKIPPED_ENV))
+case "$(uname -s 2>/dev/null || echo unknown)" in
+  MINGW*|MSYS*|CYGWIN*)
+    check "G42 skipped rows are tolerated on this Windows host ($SKIPPED, $SKIPPED_ENV environmental)" PASS ;;
+  *)
+    [ "$LOST_COVERAGE" -eq 0 ] \
+      && check "G42 no row lost coverage on this POSIX host ($SKIPPED skipped, all $SKIPPED_ENV environmental)" PASS \
+      || check "G42 $LOST_COVERAGE row(s) lost coverage on this POSIX host ($SKIPPED skipped, $SKIPPED_ENV environmental)" FAIL ;;
+esac
 
 echo "----"
 echo "test-plugin-data-guard: $PASS PASS / $FAIL FAIL / $SKIPPED SKIP"

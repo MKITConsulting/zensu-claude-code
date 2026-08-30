@@ -46,7 +46,7 @@ is ever measured for the suite.
 |---|---|---|
 | `tests/structure/test-*.sh` (deterministic shell) | **146** — 139 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
 | *(reconciliation)* | a `--ci` run reports **139 structure suites + 5 offline evals = 144 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 146 − 139 gap | — |
-| `tests/structure/*.test.js` (`node --test` units) | **25 files** | invoked *by* parent `.sh` suites |
+| `tests/structure/*.test.js` (`node --test` units) | **26 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
 | Windows contract profiles | **7** (`windows-shard-1`…`-7`, 42 suite entries) | `ci.yml` matrix, `run-profile.js` |
@@ -158,7 +158,7 @@ Covers the PreToolUse(Bash) source-write gate incl. rule (C) git-repo escape
 the bypass ledger (gate escapes only — ~100 assertions), the post-Bash witness log
 (anti-hallucination trail), the build-time guard that a skill never runs a zensu
 mutation without `--workflow-begin` / `--workflow-end` markers, the secret-scan gate, the
-plugin-data containment gate (66 checks, skip-aware floor `EXPECTED_CHECKS=65`: the store denied in all
+plugin-data containment gate (117 checks; floors at the measured counts — `EXPECTED_CHECKS=114` registered, an executed-row floor of 102 tolerating all twelve skippable rows, and a POSIX host that fails on any skip representing LOST coverage: the store denied in all
 three chain states with an in-project allow control each and an armed-state premise, all four
 write tool names, the anchored-containment and relative-target bites, the symlink family — a
 symlinked directory, a dangling leaf, and `..` after a symlink into the store, each with a
@@ -257,7 +257,7 @@ each other on counts, terminology, navigation and the specification's BLOCKED st
 Structure gates for the Promptfoo harnesses. GitHub Actions never invokes the Promptfoo
 binary; these guard the local harness contract.
 
-## 4. `node --test` unit suites (24 files)
+## 4. `node --test` unit suites (26 files)
 
 Not run standalone — each is driven by a parent shell suite, so a JS failure surfaces as
 that suite's failure.
@@ -269,6 +269,7 @@ that suite's failure.
 | `finding-verify-v1.test.js` | 26 | `test-finding-verification.sh` | finding-verification grading module |
 | `profile-runner.test.js` | 23 | Windows profile suite | `run-profile.js` lifecycle, digests, deadlines |
 | `chain-recovery-v1.test.js` | 21 | `test-chain-recover.sh` | chain shape lattice + rearm-receipt predicate |
+| `plugin-data-guard-v1.test.js` | 37 | `test-plugin-data-guard.sh` (G38) | plugin-data containment: the separator class both ways, both resolution bounds, the truncated-walk refusal, the filesystem-root and containing-store arms, the containment export-shape arm via a copied module beside a stub parser, the cwd ranking, and the realpath fast path over targets that exist |
 | `reviewer-spawn-denial-v1.test.js` | 29 | `test-stop-enforcer-self-review-routing.sh` | host-refused reviewer spawn: structural `tool_use_id` keying, the host error flag, the marker prefix, tail/line bounds, degrade-to-none |
 | `plan-payload-v1.test.js` | 20 | `test-plan-payload-fallback.sh` | plan-source precedence table, hardened plan-file reader refusals, O_NOFOLLOW-unavailable fallback |
 | `zensu-doctor-invocation.test.js` | 24 | *none found* | `/zensu:doctor` invocation allowlist — no `.sh` suite and no `run-all.sh` entry drives this file |
@@ -286,7 +287,7 @@ that suite's failure.
 | `owned-process.test.js` | 2 | `test-claude-promptfoo-wrapper.sh` | owned-process lifecycle |
 | `reviewer-spawn-allow-v1.test.js` | 18 | `test-reviewer-spawn-allow.sh` | the reviewer-spawn grant's derived agent set, its silence on every non-grant path, and the one-definition scan |
 
-Three further files — `review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js` and
+Four further files — `review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js`, `session-lineage-v1.test.js` and
 `session-adopt-report-v1.test.js` — exist on disk without a row here. That drift predates
 the reviewer-spawn grant and is recorded rather than silently absorbed; the counts above
 are derived from the real directory listing, so they include those three.
