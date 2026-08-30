@@ -927,18 +927,35 @@ Z26_LIST="$SKILL
 $HOOK
 $HELPER
 $PLUGIN_DIR/tests/structure/zen-anchor-assertions.test.js"
+Z26_FIXED=4
+Z26_SCEN=0
 for Z26_F in "$PLUGIN_DIR"/evals/zen-mode-reaction/scenarios/*.yaml; do
-  [ -f "$Z26_F" ] && Z26_LIST="$Z26_LIST
+  [ -f "$Z26_F" ] || continue
+  Z26_LIST="$Z26_LIST
 $Z26_F"
+  Z26_SCEN=$(( Z26_SCEN + 1 ))
 done
-if ! command -v node >/dev/null 2>&1; then
+# The floor used to be a bare `scanned < 4`, which is exactly the size of the
+# hand-listed half — so a glob that matched nothing (a path typo, a `.yml`
+# extension, a host where the `-f` guard mis-fires) silently dropped every eval
+# scenario and Z26 still reported PASS, back to the blindness the rewrite was
+# made to remove. The derived half is counted HERE, where the roster is built,
+# and the expected TOTAL is passed in, so both halves are covered by one
+# equality rather than by a constant that only ever described one of them.
+if [ "$Z26_SCEN" -lt 3 ]; then
+  check "Z26 the derived half of the English-only roster matched only $Z26_SCEN scenario file(s) — the glob has moved" FAIL
+elif ! command -v node >/dev/null 2>&1; then
   check "Z26 English-only scan did not run — node is not on PATH" FAIL
 else
-  LANG_BAD="$(printf '%s\n' "$Z26_LIST" | node -e '
+  LANG_BAD="$(printf '%s\n' "$Z26_LIST" | Z26_WANT=$(( Z26_FIXED + Z26_SCEN )) node -e '
     const fs = require("fs"), path = require("path");
     // Stems that are also English words are excluded on purpose; see above.
-    const STEM = /\b(und|oder|nicht|Datei|Dateien|werden|kann|muss|sollte|wenn|dann|aber|auch|noch|schon|bitte|ohne)\b/i;
-    const UML = /[äöüÄÖÜß]/;
+    // BOTH carry `g`: a non-global regex returns only the FIRST match on a
+    // line, so a violation sitting outside a regex literal went unreported
+    // whenever an exempt match happened to come first — which is the ordinary
+    // shape of the one line this scan deliberately exempts.
+    const STEM = /\b(und|oder|nicht|Datei|Dateien|werden|kann|muss|sollte|wenn|dann|aber|auch|noch|schon|bitte|ohne)\b/gi;
+    const UML = /[äöüÄÖÜß]/g;
     // Spans of a line that sit inside a /.../ regex literal. Deliberately crude:
     // it over-approximates toward EXEMPTING, so a false exemption is possible and
     // a false violation is not — and the roster is what makes the check bite.
@@ -962,15 +979,23 @@ else
         text.split("\n").forEach((line, n) => {
           const spans = literalSpans(line);
           for (const re of [UML, STEM]) {
-            const hit = re.exec(line);
-            if (hit && !inLiteral(spans, hit.index)) {
+            re.lastIndex = 0;
+            let hit;
+            while ((hit = re.exec(line))) {
+              if (inLiteral(spans, hit.index)) continue;
               bad.push(path.basename(f) + ":" + (n + 1) + ":" + (re === UML ? "umlaut" : "german-stem"));
+              break;
             }
           }
         });
       }
-      // A floor, so an emptied or mis-globbed roster cannot read as an all-clear.
-      if (scanned < 4) bad.push("roster-scanned-only-" + scanned + "-files");
+      // An EQUALITY against the roster the shell actually built, never a bare
+      // floor: a file that cannot be read is already reported above, and this
+      // catches the rest — a roster that shrank between being built and being
+      // scanned reads as a failure rather than as an all-clear.
+      const want = Number(process.env.Z26_WANT);
+      if (!Number.isInteger(want) || want < 4) bad.push("roster-size-unresolved");
+      else if (scanned !== want) bad.push("roster-scanned-" + scanned + "-of-" + want + "-files");
       process.stdout.write(bad.length ? bad.slice(0, 6).join(" ") : "OK");
     });
   ' 2>/dev/null)"

@@ -84,14 +84,23 @@ assert:
       // A bullet marker alone is too weak to mean "step list": ANY three-line
       // bulleted tail satisfied it, a closing caveat list included, and that is
       // exactly the shape this rule exists to reject. A row counts STRONGLY when
-      // it is numbered, says `step`, or names one of the anchor's own steps; a
-      // bare bullet still counts weakly, so a legitimately worded list is not
-      // failed for avoiding those spellings. The list must carry at least one
-      // strong row.
+      // it is numbered, says `step`, names one of the anchor's own steps, or
+      // OPENS WITH AN IMPERATIVE — the thing that actually separates a list of
+      // things to do from a list of things to note. The list must carry at least
+      // one strong row; the rest may be bare bullets.
+      //
+      // The imperative arm is not decoration. Without it the anchor-token arm
+      // was doing all the work, so a list that merely PARAPHRASED its steps had
+      // no strong row at all: retyping one bullet of the pinned compliant reply
+      // from "Update the changelog." to "Update the change log." graded it a
+      // violation. A false red is the one outcome this eval must never produce,
+      // so the verb set errs toward ACCEPTING and any addition to it should too.
       const anchorSteps = [...rows[anchorIdx].clean.matchAll(/[✓▶·✗]\s*([^\s✓▶·✗]+)/g)]
         .map((m) => m[1].toLowerCase()).filter((t) => t.length >= 3);
+      const IMPERATIVE = /^(?:open|update|run|re-?run|retry|write|add|remove|delete|drop|fix|land|push|pull|merge|rebase|review|publish|release|close|finish|verify|check|wait|ask|confirm|restore|revert|record|document|report|send|ship|tag|bump|clean|migrate|deploy|rollback|roll)\b/i;
       const strong = (r) => /^(?:\d+[.)]|step\b)/i.test(r.clean)
-        || anchorSteps.some((t) => r.clean.toLowerCase().includes(t));
+        || anchorSteps.some((t) => r.clean.toLowerCase().includes(t))
+        || IMPERATIVE.test(r.clean.replace(/^[-*\u2022]\s*/, ""));
       const stepish = (r) => strong(r) || /^[-*\u2022]\s/.test(r.raw);
       const shortTail = tail.length > 0 && tail.length <= 2;
       const stepList = tail.length > 2 && tail.every(stepish) && tail.some(strong);
