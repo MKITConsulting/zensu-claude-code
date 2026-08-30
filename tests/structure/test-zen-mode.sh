@@ -960,10 +960,13 @@ else
     // original list. The high-frequency German function words are in now — the
     // articles and copulas that no German sentence avoids — which is what makes
     // the scan a check on the LANGUAGE rather than on one word list.
-    // `sie`, `war`, `den`, `dem`, `am`, `im`, `so` and `will` are deliberately
-    // OUT: each is an ordinary English word or a common identifier fragment, and
-    // the sibling reason for excluding der/die/das applies to them too.
-    const STEM = /\b(und|oder|nicht|Datei|Dateien|werden|kann|muss|sollte|wenn|dann|aber|auch|noch|schon|bitte|ohne|ist|sind|wurde|wurden|einen|eine|einem|einer|eines|nach|durch|über|unter|zwischen|beim|vom|zum|zur|diese|dieser|dieses|jede|jeder|alle|keine|kein|sich|wird|haben|hat|dass|weil|damit|sondern|jedoch|bereits|immer|niemals)\b/gi;
+    // `sie`, `war`, `den`, `dem`, `am`, `im`, `so`, `will`, `hat` and `alle` are
+    // deliberately OUT: each is an ordinary English word, a proper-name fragment
+    // or a common identifier fragment, and the sibling reason for excluding
+    // der/die/das applies to them too. Do NOT trust this sentence — Z26b below
+    // DRIVES the list against an English probe corpus, because an earlier
+    // revision made exactly this claim while `hat` and `alle` were still in it.
+    const STEM = /\b(und|oder|nicht|Datei|Dateien|werden|kann|muss|sollte|wenn|dann|aber|auch|noch|schon|bitte|ohne|ist|sind|wurde|wurden|einen|eine|einem|einer|eines|nach|durch|über|unter|zwischen|beim|vom|zum|zur|diese|dieser|dieses|jede|jeder|keine|kein|sich|wird|haben|dass|weil|damit|sondern|jedoch|bereits|immer|niemals)\b/gi;
     const UML = /[äöüÄÖÜß]/g;
     // Spans of a line that sit inside a /.../ regex literal. Deliberately crude:
     // it over-approximates toward EXEMPTING, so a false exemption is possible and
@@ -1015,6 +1018,55 @@ else
     check "Z26 every zen-mode carrier is English-only outside a regex literal (skill, hook, helper, unit file, every eval scenario)" PASS
   else
     check "Z26 English-only violated: ${LANG_BAD:-<empty output, program produced no verdict>}" FAIL
+  fi
+fi
+
+# ── Z26b: no stem may be an ordinary English word ────────────────────────────
+# The list started with der/die/das/mit EXCLUDED on exactly this ground — "let
+# the process die" and "MIT license" are legitimate English prose. Widening it to
+# catch a German sentence with no umlaut re-introduced the defect: `hat` is an
+# English noun and `alle` heads a proper name, so an ordinary English line would
+# have been reported as a violation. A false red in the guard that gates every
+# carrier is worse than a missed stem, so the list is driven against an English
+# probe corpus rather than trusted to a comment claiming the exclusion was made.
+if ! command -v node >/dev/null 2>&1; then
+  check "Z26b stem-list English probe did not run — node is not on PATH" FAIL
+else
+  STEM_BAD="$(SUITE="$0" node -e '
+    const fs = require("fs");
+    const src = fs.readFileSync(process.env.SUITE, "utf8");
+    const m = src.match(/const STEM = \/\\b\(([^)]*)\)\\b\/gi;/);
+    if (!m) { process.stdout.write("stem-list-not-locatable"); }
+    else {
+      const stems = m[1].split("|");
+      // Ordinary English prose a maintainer could legitimately write in any of
+      // the scanned carriers. Each line must scan CLEAN.
+      const ENGLISH = [
+        "The hat is on the table and the coat is on the hook.",
+        "Alle Corporation ships a linter we do not use.",
+        "Return the value under the key, then check it once more.",
+        "This is an ordinary sentence about a step list and a next step.",
+        "The suite is green, nothing failed, and no case was skipped.",
+        "Read the file, then write it back without the trailing newline.",
+        "A wide-brimmed hat, a die-cast model, and an MIT license.",
+      ];
+      const bad = [];
+      for (const stem of stems) {
+        const re = new RegExp("\\b" + stem + "\\b", "i");
+        for (const line of ENGLISH) {
+          if (re.test(line)) { bad.push(stem); break; }
+        }
+      }
+      process.stdout.write(bad.length ? bad.join(",") : "OK");
+    }
+  ' 2>/dev/null)"
+  STEM_RC=$?
+  if [ "$STEM_RC" -ne 0 ]; then
+    check "Z26b stem-list probe could not run (node exit $STEM_RC) — not an all-clear" FAIL
+  elif [ "$STEM_BAD" = "OK" ]; then
+    check "Z26b no German stem in the English-only list is also an ordinary English word" PASS
+  else
+    check "Z26b these stems match ordinary English prose and would false-red a legitimate edit: ${STEM_BAD:-<empty output, program produced no verdict>}" FAIL
   fi
 fi
 
