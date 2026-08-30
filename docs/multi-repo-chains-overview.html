@@ -573,7 +573,7 @@
       anchor is clean while the changed files sit in the satellites, so a takeover brief would claim
       no uncommitted changes for a session with a dirty tree in two other repositories — the same
       silent green as section 2, relocated into the handover path.</p>
-      <p class="src">trail.mjs:1980</p>
+      <p class="src">trail.mjs:2059</p>
     </div>
     <div class="card">
       <span class="tag warn">Discovery</span>
@@ -582,14 +582,14 @@
       repo's main checkout. From a code root's repository the session is reachable only via
       <code>--all</code>, otherwise only from the anchor. Pre-existing behavior that multi-repo makes
       more consequential.</p>
-      <p class="src">skills/session-trail/SKILL.md:152</p>
+      <p class="src">skills/session-trail/SKILL.md:274</p>
     </div>
     <div class="card">
       <span class="tag ok">Resume</span>
       <h3>Already correct today</h3>
       <p>The printed continuation line <code>cd ${r.cwd} &amp;&amp; claude --resume …</code> lands in
       the anchor. That is exactly the right place and needs no change.</p>
-      <p class="src">trail.mjs:2597</p>
+      <p class="src">trail.mjs:2961</p>
     </div>
   </div>
 
@@ -604,7 +604,8 @@
 
   <div class="note quiet">
     <strong>The fix costs no schema — but it is not free.</strong>
-    <p><code>trail.mjs</code> has no write channel. It may read the anchor's workflow document, take
+    <p><code>trail.mjs</code> has exactly one write channel, the lineage ledger, and this touches
+    none of it. It may read the anchor's workflow document, take
     the root list, and call <code>gitState</code> once per root. No new registry, no
     change to <code>~/.claude</code>, no lineage cost. That places it in stage 2, not stage 3.</p>
     <p>The cost worth naming, as &sect;6.4 of the specification insists: <code>trail.mjs</code> may

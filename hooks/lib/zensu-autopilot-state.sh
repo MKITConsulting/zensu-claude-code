@@ -1237,12 +1237,23 @@ if (mode === "read-active") {
 // adoption, and the contention probe ask — they must not be owner-scoped, or a
 // standalone chain could start underneath another session's durable run.
 if (mode === "read-workspace") {
-  const [stateDir, expectedProjectRoot, workspaceRoot] = args;
+  const [stateDir, expectedProjectRoot, workspaceRoot, preferOwnerSessionId] = args;
   if (!nonEmpty(workspaceRoot, 4096)) fail(3, "invalid workspace root");
   const inventory = readRunInventory(stateDir, expectedProjectRoot);
-  const holder = inventory.find(candidate => !TERMINAL.has(candidate.stage)
+  const holders = inventory.filter(candidate => !TERMINAL.has(candidate.stage)
     && mayHoldWorkspace(candidate, workspaceRoot));
-  if (!holder) fail(1, "no nonterminal run holds this workspace");
+  if (holders.length === 0) fail(1, "no nonterminal run holds this workspace");
+  // The answer stays owner-INDEPENDENT: which holder is reported never changes
+  // WHETHER the tree is held. The optional preference exists because a caller
+  // that weighs the holder's identity must not have that decision made by
+  // filename sort order -- a record carrying no `workspaceRoot` holds EVERY
+  // tree in its project, so a legacy foreign record can sort ahead of the
+  // caller's own live run. With no preference supplied this is byte-identical
+  // to reporting the first holder.
+  const preferred = nonEmpty(preferOwnerSessionId, 128)
+    ? holders.find(candidate => candidate.ownerSessionId === preferOwnerSessionId)
+    : null;
+  const holder = preferred || holders[0];
   process.stdout.write(`${JSON.stringify(holder, null, 2)}\n`);
   process.exit(0);
 }
@@ -1316,9 +1327,26 @@ if (mode === "begin") {
   const workspaceHolder = inventory.find(candidate => candidate.runId !== runId
     && !TERMINAL.has(candidate.stage) && mayHoldWorkspace(candidate, workspaceRoot));
   if (workspaceHolder) {
+    // The GUIDED form, not the runnable one: this refusal is surfaced by
+    // `zensu-log.sh` as the tool result of a command a model runs, so --confirm
+    // -- the consent control -- must not arrive pre-supplied. The holder here is
+    // always FOREIGN: the own-run cases above (hiddenNonterminal, the pointer
+    // run) already fail(4) and `candidate.runId !== runId` excludes the last
+    // survivor, which is why this copy needs no own-run branch. Keep those
+    // checks ABOVE this one.
+    // SHAPE-TEST both fields before interpolating, exactly as the shell renderer
+    // does. They reach a model-facing refusal, so a newline or a control byte
+    // would split one diagnostic into several. The vocabulary is this worker's
+    // OWN -- `identifier` and `STAGES` -- rather than a hand copy of the
+    // renderer's regex, so the guard cannot drift from the validator that
+    // produced the record. Unreachable through `stateValid` output today, which
+    // is exactly why a backstop must not be looser than what it backs.
+    if (!identifier(workspaceHolder.runId) || !STAGES.has(workspaceHolder.stage)) {
+      fail(4, "workspace is held by a nonterminal run whose record could not be rendered");
+    }
     fail(4, `workspace held by nonterminal run ${workspaceHolder.runId} (stage ${workspaceHolder.stage}); `
-      + `ask that session to cancel it, or once it is idle release it with: `
-      + `zensu-log.sh --autopilot-release --run ${workspaceHolder.runId} --confirm`);
+      + `report it to the user and, only after they say yes, run `
+      + `/zensu:autopilot-release`);
   }
 
   const existing = inventory.find(candidate => candidate.runId === runId);
@@ -1757,9 +1785,18 @@ _autopilot_read_active_critical() {
   _autopilot_node read-active "$active_file" "$state_dir" "$root" "$owner" "$legacy_file"
 }
 
+# The optional third argument selects WHICH holder is reported when several hold
+# the tree; it never changes whether the tree is held, so this stays the
+# owner-INDEPENDENT question. Supply it from any caller that WEIGHS the holder's
+# identity OR RENDERS the holder to a user — the second half matters and is easy
+# to miss: `_autopilot_begin_standalone_tdd_critical` refuses unconditionally and
+# weighs nothing, yet must still forward it, because the sentence it prints
+# differs for an own run and quotes a destructive command for a foreign one.
+# Either way the point is the same: the decision must not be made by filename
+# sort order.
 _autopilot_read_workspace_critical() {
-  local root="$1" workspace="$2" state_dir="$1/.zensu/state"
-  _autopilot_node read-workspace "$state_dir" "$root" "$workspace"
+  local root="$1" workspace="$2" prefer_owner="${3:-}" state_dir="$1/.zensu/state"
+  _autopilot_node read-workspace "$state_dir" "$root" "$workspace" "$prefer_owner"
 }
 
 autopilot_read_active() {
@@ -2283,42 +2320,218 @@ autopilot_store_team_review_payload() {
     "$root" "$run_id" "$operation_key" "$head_sha" "$source_file" "$provider"
 }
 
+# `read-workspace` already returns the holding record; rendering it here is the
+# only way the run id reaches the user. `--autopilot-status` is owner-scoped and
+# structurally cannot show a foreign run, and no verb lists holders — so a
+# refusal that discards this record names a remedy nobody can carry out.
+# The THIRD argument is REQUIRED and closed: `operator` or `model`, nothing else.
+# An omission or an unknown value returns non-zero with NO output — it does not
+# fall back to a form. That direction is deliberate: the OPERATOR form quotes the
+# audited `zensu-log.sh --autopilot-release --run <id> --confirm` command, so
+# defaulting to it would hand a runnable cancel to whichever channel forgot to
+# say who reads it. Any site whose output a MODEL reads passes `model`.
+#
+# All THREE arguments are POSITIONALLY REQUIRED -- `[ "$#" -eq 3 ]` -- and only
+# the VALUE of the second may be empty. Calling it "optional" reads as omittable
+# and it is not: a two-argument call refuses. The second argument is the calling
+# session's id, and supplying a real one is what keeps this renderer honest about
+# its own remedy. `--autopilot-release`
+# skips its self-release guard in exactly the state where the caller's own run
+# turns up as the holder — that guard fires only while the owner pointer still
+# designates the run — so quoting the release command there tells the caller to
+# cancel its own live generation. With the id supplied, an own-run holder gets
+# the finish-or-repair sentence instead. A caller that omits it gets the foreign
+# wording unconditionally, which is why every site that can see its own run
+# passes it.
+_autopilot_workspace_refusal() {
+  local holder="${1:-}" caller_session="${2:-}" audience="${3:-}" env_exclusions
+  [ -n "$holder" ] || return 1
+  # The audience is REQUIRED, not defaulted. Refusing a typo was only half the
+  # property: an OMISSION would have silently yielded the operator form, which
+  # quotes the complete `--confirm` invocation — the exact axis this split
+  # exists for. Requiring it turns a prose obligation into an arity error.
+  [ "$#" -eq 3 ] || return 1
+  case "$audience" in operator|model) ;; *) return 1 ;; esac
+  env_exclusions="$(_autopilot_msys_env_exclusions "CALLER_SESSION;REFUSAL_AUDIENCE")" || return 1
+  # The record is PIPED, not exported. `stateValid` accepts up to 512 events, so
+  # a pretty-printed holder can be tens of kilobytes -- past a single
+  # environment string on Linux and past the whole environment block under the
+  # Windows process creation that Git Bash uses. An E2BIG spawn failure here
+  # reads as "holder unreadable", which the fence treats as BLOCKING: the wedge
+  # this whole change removes would come back for any run with a long history.
+  # `emit_block` in the Stop hook already uses this shape for the same reason.
+  printf '%s' "$holder" | MSYS2_ENV_CONV_EXCL="$env_exclusions" \
+    CALLER_SESSION="${caller_session}" REFUSAL_AUDIENCE="${audience}" node -e '
+    let input = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", chunk => { input += chunk; });
+    process.stdin.on("end", () => {
+    let value;
+    try { value = JSON.parse(input); } catch (_) { process.exit(1); }
+    // Shape-test rather than type-test, and BIND once: this text reaches a
+    // model-facing block reason, so a newline or a control byte in either field
+    // would split one diagnostic into several, and validating one expression
+    // while emitting another lets the two diverge. Every current caller hands
+    // over `stateValid` output, so this refuses nothing produced today.
+    const runId = value ? String(value.runId || "") : "";
+    const stage = value ? String(value.stage || "") : "";
+    // The stage test is MEMBERSHIP, deliberately, and this set is a hand copy of
+    // the module-scope `STAGES` above -- the renderer runs in its own `node -e`
+    // program and cannot see it. A guard whose only job is to hold when the
+    // upstream stops holding must not be LOOSER than that upstream: `stateValid`
+    // gates this field on the closed set, while a bare `[A-Z_]{1,32}` shape rule
+    // would admit `IGNORE_PRIOR` or `SEE_BELOW` straight into a model-facing
+    // block reason. Keep the two in step; `test-autopilot-stop-enforcer.sh`
+    // compares them.
+    const RENDERABLE_STAGES = new Set([
+      "PLANNING", "AWAIT_TDD", "TDD_RUNNING", "GATES", "CONVERGE", "OPEN_PR",
+      "TEAM_REVIEW", "FIX_FINDINGS", "VALIDATE", "COVER", "DELIVER", "BLOCKED",
+      "DONE", "CANCELLED",
+    ]);
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(runId)
+        || !RENDERABLE_STAGES.has(stage)) process.exit(1);
+    const caller = String(process.env.CALLER_SESSION || "");
+    // Every branch below RETURNS rather than calling `process.exit(0)`. Stdout
+    // here is always a pipe (the caller is a command substitution), and Node
+    // documents pipe writes as asynchronous on macOS, where `process.exit()`
+    // drops a pending write. Truncation was NOT demonstrated for these ~200-byte
+    // messages, because the libuv try-write path completes them inline -- so it is
+    // removal of a hazard class, not a fix for an observed defect. Returning
+    // costs nothing: the handler is the last thing the program does.
+    if (caller !== "" && String(value.ownerSessionId || "") === caller) {
+      process.stdout.write(`workspace held by nonterminal run ${runId} (stage ${stage}), `
+        + `which belongs to this session; its durable state is still active here, `
+        + `so finish or repair that run rather than releasing it\n`);
+      return;
+    }
+    if (String(process.env.REFUSAL_AUDIENCE || "") === "model") {
+      // The model-facing form deliberately does NOT quote a ready-to-run
+      // release command. That command is a real CANCEL of a live run owned by
+      // another session, and --confirm is the consent control: the skill
+      // requires an explicit yes in the conversation before it is issued, so
+      // handing a model a complete invocation routes around the only place that
+      // control exists. It also refuses to name a bare zensu-log.sh, which a
+      // model would resolve against the repository it is standing in.
+      process.stdout.write(`workspace held by nonterminal run ${runId} (stage ${stage}); `
+        + `report it to the user and, only after they say yes, run `
+        + `/zensu:autopilot-release\n`);
+      return;
+    }
+    process.stdout.write(`workspace held by nonterminal run ${runId} (stage ${stage}); `
+      + `ask that session to cancel it, or once it is idle release it with: `
+      + `zensu-log.sh --autopilot-release --run ${runId} --confirm\n`);
+    });
+  ' 2>/dev/null
+}
+
+# Publish the rendered refusal so a caller does not have to RE-DERIVE it.
+# `stop-chain-enforcer.sh` used to take a second read AFTER the fence returned,
+# and the worker reports `preferred || holders[0]` — so a second FOREIGN run
+# publishing in that window could be named instead of the record the fence
+# actually judged, and the rendered remedy quotes a real CANCEL. Publishing here
+# means the message is derived ONCE from the record the fence judged. Say that
+# precisely rather than "under the lease": TWO of the four publish sites are the
+# fences of `_autopilot_deferred_contention_result`, which is reached exactly
+# BECAUSE the lease could not be taken and whose own header calls it a read-only
+# proof. What makes the value travel is not the lease but the call chain — every
+# frame between the assignment and the hook's read runs in the current shell.
+# Both public entry points clear it first, so a stale sentence cannot be reused.
+#
+# TWO forms are produced. The operator form goes to stderr and quotes the audited
+# CLI verb, because a human reads it. The MODEL form is what the block reason
+# carries, and it names `/zensu:autopilot-release` instead: that command is a real
+# CANCEL of another session's live run and `--confirm` is its consent control, so
+# handing a model a complete invocation would route around the only place that
+# control exists.
+ZENSU_AUTOPILOT_WORKSPACE_HOLD_TEXT=""
+_autopilot_publish_workspace_refusal() {
+  # The audience is REQUIRED here TOO. Guarding only the inner renderer left the
+  # property open where it matters: this wrapper is the API a new call site uses,
+  # so its default was the surviving axis on which an omission could silently
+  # emit the runnable `--confirm` form. An omission now degrades to the hook's
+  # unnamed fallback rather than to the audited command.
+  #
+  # EVERY refusing arm returns NON-ZERO, and the codes are DISTINCT because the
+  # two causes need different responses. Returning 0 made a refusal
+  # indistinguishable from a successful publish, so a caller that wanted to fall
+  # back could not tell that it had to. The cleared variable is still the
+  # fail-safe; the status is what lets a new call site NOTICE.
+  #
+  #   1 -- the CALLER is wrong: a bad arity or an unrecognized audience. A defect
+  #        at the call site, identical on every run.
+  #   2 -- the RENDER failed: the arguments were accepted and the model form still
+  #        could not be produced. That is the transient spawn failure this
+  #        function's own comments name as the motivating hazard, so it may not
+  #        share a code with a caller defect -- and it may not report success,
+  #        which is what it used to do.
+  [ "$#" -eq 3 ] || { ZENSU_AUTOPILOT_WORKSPACE_HOLD_TEXT=""; return 1; }
+  local holder="${1:-}" caller_session="${2:-}" stderr_audience="${3:-}" stderr_text model_text
+  case "$stderr_audience" in operator|model) ;; *) ZENSU_AUTOPILOT_WORKSPACE_HOLD_TEXT=""; return 1 ;; esac
+  # The MODEL form is rendered FIRST and exactly ONCE, and everything else is
+  # derived from that success. The two forms used to be rendered INDEPENDENTLY,
+  # so a transient spawn failure on either one left the operator line naming the
+  # run while the block reason fell back to the hook's unnamed sentence: two
+  # channels contradicting each other about one hold, a stream apart. Ordering it
+  # this way makes the published sentence the thing that decides — without it
+  # there is nothing to print, and the refusal degrades consistently to unnamed.
+  model_text="$(_autopilot_workspace_refusal "$holder" "$caller_session" model 2>/dev/null)" || model_text=""
+  ZENSU_AUTOPILOT_WORKSPACE_HOLD_TEXT="$model_text"
+  # A FAILED model render published NOTHING, so this may not answer 0. The status
+  # used to cover arity and audience only, while the paragraph above it claimed
+  # the status is what lets a caller notice -- leaving the runtime spawn failure
+  # it names as the hazard the single outcome that still reported success. The
+  # DEGRADATION is unchanged: nothing is published and the refusal falls back to
+  # the hook's unnamed sentence. What changes is that a caller can see it.
+  [ -n "$model_text" ] || return 2
+  # The stderr AUDIENCE is a property of the channel, not of this function. For
+  # the Stop hook a human reads that stream, so the audited command is right
+  # there. For the standalone-begin fence it is the tool RESULT of a
+  # `zensu-log.sh --tdd-begin` a model runs — and on that path nothing reads the
+  # published value, so the stderr line is the only output the model gets.
+  #
+  # A FAILED operator render falls back to the model text rather than to silence.
+  # That is a degradation — the audited command is withheld — but it cannot
+  # contradict the block reason, because it IS the block reason.
+  if [ "$stderr_audience" = model ]; then
+    stderr_text="$model_text"
+  else
+    stderr_text="$(_autopilot_workspace_refusal "$holder" "$caller_session" operator 2>/dev/null)" || stderr_text=""
+    [ -n "$stderr_text" ] || stderr_text="$model_text"
+  fi
+  printf '%s\n' "$stderr_text" >&2
+  return 0
+}
+
 # Starting a standalone inner generation must serialize with every durable
 # outer begin/start. The decision and inner write therefore share the canonical
 # Outer -> Inner lock order. BLOCKED is resumable and still owns the WORKSPACE;
 # only a workspace no nonterminal run holds permits this unbound generation.
 # The question is owner-INDEPENDENT on purpose: a standalone chain must not
-# start underneath another session's durable run in the same working tree.
-# `read-workspace` already returns the holding record; rendering it here is the
-# only way the run id reaches the user. `--autopilot-status` is owner-scoped and
-# structurally cannot show a foreign run, and no verb lists holders — so a
-# refusal that discards this record names a remedy nobody can carry out.
-_autopilot_workspace_refusal() {
-  local holder="${1:-}" env_exclusions
-  [ -n "$holder" ] || return 1
-  env_exclusions="$(_autopilot_msys_env_exclusions HOLDER_JSON)" || return 1
-  MSYS2_ENV_CONV_EXCL="$env_exclusions" HOLDER_JSON="$holder" node -e '
-    let value;
-    try { value = JSON.parse(String(process.env.HOLDER_JSON || "")); } catch { process.exit(1); }
-    if (!value || typeof value.runId !== "string" || typeof value.stage !== "string") process.exit(1);
-    process.stdout.write(`workspace held by nonterminal run ${value.runId} (stage ${value.stage}); `
-      + `ask that session to cancel it, or once it is idle release it with: `
-      + `zensu-log.sh --autopilot-release --run ${value.runId} --confirm\n`);
-  ' 2>/dev/null </dev/null
-}
-
+# start underneath another session's durable run in the same working tree — and
+# unlike the deferred-review fences below, this one refuses UNCONDITIONALLY on a
+# hold, because arming a chain under a foreign run is the harm itself.
 _autopilot_begin_standalone_tdd_critical() {
   local root="$1" session_id="$2" vanilla="$3" workspace="${4:-}"
   local read_rc holder
   [ -n "$workspace" ] || workspace="$(_autopilot_session_workspace "$root")" || return 2
-  if holder="$(_autopilot_read_workspace_critical "$root" "$workspace" 2>/dev/null)"; then
+  # The preference is forwarded here for the same reason the deferred-review
+  # fences forward it: this site RENDERS the holder to a user, and the renderer
+  # weighs the holder's identity. Without it the read returns `holders[0]` by
+  # sorted filename, so a legacy foreign record could be named — with its
+  # release command — while the caller's own run is the one that actually
+  # blocks. The refusal itself stays unconditional; only which record it names
+  # changes.
+  if holder="$(_autopilot_read_workspace_critical "$root" "$workspace" "$session_id" 2>/dev/null)"; then
     read_rc=0
   else
     read_rc=$?
   fi
   case "$read_rc" in
     0)
-      _autopilot_workspace_refusal "$holder" >&2 || true
+      # `model`, not the default: this refusal reaches the caller as the tool
+      # result of a `zensu-log.sh --tdd-begin` the model runs, so its stderr is a
+      # model-read channel and must not carry a runnable `--confirm` invocation.
+      _autopilot_publish_workspace_refusal "$holder" "$session_id" model
       return 4
       ;;
     1) ;;
@@ -2332,16 +2545,41 @@ _autopilot_begin_standalone_tdd_critical() {
 # answer this: it is owner-scoped by construction, so a foreign run is invisible
 # to it. Exit 0 means the tree is held and prints the holding record, 1 means it
 # is free, anything else is a read that failed and must be treated as held.
+# The optional THIRD argument is the holder preference and must be forwarded, or
+# a caller that reports the holder to a user names `holders[0]` while the fence
+# that refused judged a different record. Stated, so it is not assumed live: this
+# parameter currently has NO production caller — the Stop hook's re-read was
+# deleted once the fence began publishing its sentence, and the one remaining
+# production call (`post-review-tdd-delegate.sh`) passes a single argument. S7h2
+# guards it for the next caller.
+#
+# The divergence between the PREFERRED holder and `holders[0]` is not cosmetic:
+# the OPERATOR form of the rendered remedy is
+# `zensu-log.sh --autopilot-release --run <id> --confirm`, which applies a real
+# CANCEL with no liveness check, so naming the wrong run points a destructive
+# command at a live foreign one. (The model form names only the guided skill.)
 autopilot_read_workspace() {
-  local root workspace
+  local root workspace prefer_owner="${3:-}"
   root="$(_autopilot_project_root "${1:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
   workspace="${2:-}"
   [ -n "$workspace" ] || workspace="$(_autopilot_session_workspace "$root")" || return 2
-  _autopilot_prepare_storage "$root" || return 2
-  _autopilot_locked_run "$root" "" _autopilot_read_workspace_critical "$root" "$workspace"
+  # An unrecognizable preference is dropped to "no preference" rather than
+  # travelling to the worker, matching `autopilot_read_active`s gate on its own
+  # owner argument. It can only change WHICH holder is reported, never whether
+  # the tree is held, so dropping it is always safe.
+  [ -z "$prefer_owner" ] || _autopilot_session_id_ok "$prefer_owner" || prefer_owner=""
+  # A verb named `read` must not create the state DIRECTORY.
+  # `_autopilot_read_storage_ready` validates without the `mkdir -p` that
+  # `_autopilot_prepare_storage` performs, and answers 1 when the directory is
+  # simply absent -- the same "nothing holds this tree" verdict the locked read
+  # would reach. The project lease below still lands its own lock artifacts
+  # inside an EXISTING state directory; that is not what this swap is about.
+  _autopilot_read_storage_ready "$root" || return $?
+  _autopilot_locked_run "$root" "" _autopilot_read_workspace_critical "$root" "$workspace" "$prefer_owner"
 }
 
 autopilot_begin_standalone_tdd() {
+  ZENSU_AUTOPILOT_WORKSPACE_HOLD_TEXT=""
   local root session_id="${2:-}" vanilla="${3:-false}" workspace
   [ "$#" -eq 3 ] || return 3
   [ -n "$session_id" ] && [ "${#session_id}" -le 128 ] || return 3
@@ -2354,6 +2592,222 @@ autopilot_begin_standalone_tdd() {
     "$root" "$session_id" "$vanilla" "$workspace"
 }
 
+# The holder's owner, or a non-zero status when the record cannot be read. The
+# caller treats an unreadable holder as blocking, so this never has to guess.
+_autopilot_holder_owner() {
+  [ "$#" -eq 1 ] || return 1
+  local holder="${1:-}"
+  [ -n "$holder" ] || return 1
+  # Piped for the same reason as the renderer above: a large but schema-valid
+  # record must not turn this into an E2BIG spawn failure, which the caller
+  # reads as an unreadable holder and answers by blocking.
+  printf '%s' "$holder" | node -e '
+    let input = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", chunk => { input += chunk; });
+    process.stdin.on("end", () => {
+    let value;
+    try { value = JSON.parse(input); } catch (_) { process.exit(1); }
+    // Bind once: validating one expression and emitting another lets the two
+    // diverge for a non-string JSON value that `String()` coerces cleanly.
+    const owner = value ? String(value.ownerSessionId || "") : "";
+    // The class mirrors `identifier`, which is what `stateValid` actually gates
+    // `ownerSessionId` with -- NOT `sessionIdentifier`, which an earlier comment
+    // here named. `identifier` forbids a leading `_`/`-` and PERMITS `.` and
+    // `:`, and `_autopilot_identifier_ok` admits the same, so a narrower class
+    // would answer "holder unreadable" -- i.e. BLOCKING -- for a record the
+    // product itself minted, re-instating the wedge this change removes.
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{2,127}$/.test(owner)) process.exit(1);
+    process.stdout.write(owner);
+    });
+  ' 2>/dev/null
+}
+
+# The holder's run id, for the disclosure line. Separate from the owner reader so
+# neither has to widen its own shape rule for the other's field.
+_autopilot_holder_run_id() {
+  [ "$#" -eq 1 ] || return 1
+  local holder="${1:-}"
+  [ -n "$holder" ] || return 1
+  printf '%s' "$holder" | node -e '
+    let input = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", chunk => { input += chunk; });
+    process.stdin.on("end", () => {
+    let value;
+    try { value = JSON.parse(input); } catch (_) { process.exit(1); }
+    const runId = value ? String(value.runId || "") : "";
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(runId)) process.exit(1);
+    process.stdout.write(runId);
+    });
+  ' 2>/dev/null
+}
+
+# Is there deferred-review work at all? This tracks `_tdd_adopt_pending_review_critical`'s
+# own "no work" verdict, and it is a HAND COPY of that ladder -- the two must be
+# read together, because a bare existence test disagrees with it in BOTH
+# directions and each disagreement costs something real:
+#
+#   * An unsafe marker (symlink, FIFO, directory, dangling link) is TAMPER
+#     EVIDENCE to the owner, which refuses rather than treating it as absent.
+#     `[ -f ]` alone reads those shapes as "no work" and would RELAX the fence on
+#     exactly the state the owner blocks on, so they report PRESENT here.
+#   * A plain marker past the TTL is "no work" to the owner, which DELETES it and
+#     returns 2. Reporting it present would re-create the permanent wedge this
+#     fence exists to remove -- and the fence returns before the deleter ever
+#     runs, so nothing would ever reap it either.
+#
+# A stale CLAIM is deliberately NOT excused: the owner reconciles a claim rather
+# than dropping it, because a claim is a crash-recovery ownership record.
+#
+# **Say what this copy does NOT reproduce.** It tracks the marker half of the
+# ladder only. Any claim file at all reports work PRESENT here, while the owner
+# reads the claim METADATA and answers "no work" (rc=2, which the fence maps to
+# 6) for a claim reconciled `owned` by another session, and for a
+# `done|cancelled` claim with nothing queued behind it. So with the tree FREE
+# those states release while under a foreign hold they still block — the same
+# class of refusal this change exists to remove, one case narrower. The direction
+# is a retained refusal rather than a relaxation, which is why it ships; closing
+# it needs a read-only reconciliation status the owning module does not export,
+# and that is the recorded standing fix.
+#
+# Both relax inputs are SESSION-WRITABLE: `.zensu/state/` is reachable from
+# inside a session, so deleting the marker or backdating its `ts` releases the
+# hold. That is why the release arm discloses on stderr -- the disclosure is the
+# only observable, and it is deliberate rather than decorative. This predicate
+# also reads the marker under the OUTER project lease only, never the pending
+# lease that governs that file, so a marker being published concurrently can
+# read as absent. The marker is never LOST by that: it stays queued, and the next
+# Stop that samples it acts on it -- with the tree free that is the adoption, and
+# under a foreign hold it is this fence refusing again. So what a missed sample
+# defers is the REFUSAL, never the adoption; a held tree is precisely where no
+# adoption happens. Do not restate this as "a later Stop adopts it": that wording
+# describes an outcome the held case cannot reach.
+# Anything that cannot be resolved reports work PRESENT: the only consequence of
+# this answer is whether an occupancy refusal stands, so failing closed is free.
+# The marker path comes from `zensu_pending_review_file` -- the SAME derivation
+# `tdd_adopt_pending_review` uses -- rather than from the caller's `$root`, and
+# that is deliberate: the question is "is there work the adoption would do", so
+# the adoption's own authority is the correct one. The two agree by construction
+# on the production path, where the Stop hook re-exports `PROJECT_ROOT` from
+# `zensu_resolve_project_dir` and passes it in. `$root` is still taken, because
+# `_tdd_path_safe` anchors its containment on `CLAUDE_PROJECT_DIR` and the two
+# fences do not inherit the same value -- the locked one runs under
+# `_autopilot_locked_run`, which sets it, and the contention one does not. Left
+# unset, the guard falls back to the nearest existing ancestor and stops lstat'ing
+# a symlinked `.zensu` component, which is the whole reason the guard is here.
+_autopilot_deferred_work_present() {
+  [ "$#" -eq 2 ] || return 0
+  local ttl_hours="${1:-0}" root="${2:-${CLAUDE_PROJECT_DIR:-}}" pending_file claim_file
+  pending_file="$(zensu_pending_review_file 2>/dev/null </dev/null)" || return 0
+  [ -n "$pending_file" ] || return 0
+  claim_file="$(zensu_pending_review_claim_file "$pending_file" 2>/dev/null </dev/null)" || return 0
+  [ -n "$claim_file" ] || return 0
+  # NO builtin short-circuit ahead of the guard, and the omission is the point.
+  # A `[ ! -e ] && [ ! -L ]` pair tests the LEAF only, while `_tdd_paths_safe`
+  # walks EVERY component and refuses on a symlinked ANCESTOR. With `.zensu/state`
+  # a symlink to a directory that lacks the marker, `-e` is false (it follows the
+  # prefix to an absent leaf) and `-L` is false (it lstats that absent leaf), so a
+  # leaf-only test answers "absent in every form" and the fence RELAXES -- the one
+  # direction this predicate may never fail in. That ancestor walk is the whole
+  # reason the guard is here, so nothing may answer ahead of it. A shortcut that
+  # ALSO walked the ancestors would be a hand copy of the guard's own rule, which
+  # this repository records as its recurring drift class; the seam is to call the
+  # owner, and it is taken here.
+  #
+  # Skipping the spawn was what the shortcut bought, and the cost is paid back
+  # rather than merely accepted: `_tdd_paths_safe` takes (path, mode) PAIRS and
+  # validates them in a SINGLE `node -e`, so this steady state now costs ONE spawn
+  # where the ladder before the shortcut cost two. What is genuinely lost is the
+  # zero-spawn case when neither path exists -- and that case is not separable
+  # from the relaxing one with builtins alone, which is exactly the finding.
+  #
+  # `</dev/null` on every child spawned here: each runs inside the project lease,
+  # and one that inherits the keeper coprocess pipe holds its write end open.
+  # `zensu_pending_review_file` above is a spawn too -- it reaches
+  # `zensu_resolve_project_dir`, which runs its own `node -e`. The claim accessor
+  # beside it is NOT, because it is handed the path this frame already resolved.
+  CLAUDE_PROJECT_DIR="$root" _tdd_paths_safe \
+    "$pending_file" regular-or-absent \
+    "$claim_file" regular-or-absent </dev/null || return 0
+  # MARKER first, CLAIM second -- the read order is the race fix, and the
+  # verdicts are unchanged by it: a fresh marker is work, a claim is
+  # unconditional work, and the TTL still applies to the marker alone. A STALE
+  # marker must fall THROUGH to the claim rather than answering here, because the
+  # owner reconciles a claim rather than dropping it.
+  if [ -f "$pending_file" ]; then
+    _tdd_pending_file_stale "$pending_file" "$ttl_hours" </dev/null || return 0
+  fi
+  [ -f "$claim_file" ] && return 0
+  return 1
+}
+
+# A held workspace refuses this Stop only when the hold can actually affect it.
+# TWO independent reasons, and the fence needs BOTH to stay correct:
+#
+#   1. The holder is THIS session's own run. In production that state is only
+#      reachable when the owner-keyed pointer read failed while the run record is
+#      live, so releasing would infer completion for an active own generation
+#      (`test-autopilot-stop-enforcer.sh` S8g models exactly this). Because this
+#      arm weighs the holder's IDENTITY, both call sites pass the session id into
+#      `_autopilot_read_workspace_critical` as its holder preference: several runs
+#      can hold one tree -- a record carrying no `workspaceRoot` holds every tree
+#      in its project -- and without the preference a foreign record sorting first
+#      would shadow the caller's own live run and flip this arm to release.
+#   2. There is deferred-review work a foreign run could interleave with. That is
+#      what the owner-INDEPENDENT occupancy rule exists to protect.
+#
+# With neither, there is nothing to adopt and nothing to protect. Refusing there
+# blocked the Stop of every session whose working tree merely CONTAINS -- or is
+# contained by -- the holder's worktree, with a message prescribing a retry that
+# could never succeed. This is NOT an owner-scoping of the fence: a foreign run
+# stays fully visible to it, and its refusal stands whenever work is in play.
+_autopilot_workspace_hold_blocks_adoption() {
+  # EXACT, not a range: `root` is the last argument and a dropped one widens the
+  # containment anchor, which fails toward RELAX rather than toward blocking.
+  [ "$#" -eq 4 ] || return 0
+  local holder="${1:-}" session_id="${2:-}" ttl_hours="${3:-0}" root="${4:-${CLAUDE_PROJECT_DIR:-}}" owner
+  [ -n "$holder" ] || return 0
+  owner="$(_autopilot_holder_owner "$holder")" || return 0
+  [ -n "$session_id" ] || return 0
+  [ "$owner" = "$session_id" ] && return 0
+  _autopilot_deferred_work_present "$ttl_hours" "$root" && return 0
+  # Disclose the one state in which a seen hold is deliberately not enforced.
+  # Silence here is indistinguishable from "no run held the tree at all", and a
+  # relaxation nobody can observe is the shape this repository treats as worse
+  # than the wedge it removes.
+  # Name the run: a fixed string cannot be correlated with the `--autopilot-status`
+  # or refusal output that does name one, and it repeats on every Stop.
+  printf 'zensu: nonterminal Autopilot run %s holds this working tree but has no deferred review to interleave with; Stop is not blocked on it\n' \
+    "$(_autopilot_holder_run_id "$holder" 2>/dev/null || printf '(unnamed)')" >&2
+  return 1
+}
+
+# The deferred-review hold verdict, shared by the two fences that ask it. Four
+# operands had to be spelled identically at two sites and the block was
+# byte-identical between them -- a memory item rather than a call site. Answers
+# 4 when the hold stands, having PUBLISHED the sentence from the record it
+# judged, and 6 when the hold does not concern this Stop.
+#
+# The SECOND contention fence deliberately does NOT call this. By the time it
+# runs, `tdd_pending_review_owned_by_other` has proven a foreign claim, so work
+# is known to be in play and its refusal is unconditional. Keeping that outside
+# the helper is what makes the asymmetry visible as a different call rather than
+# as a flag a reader has to find.
+#
+# A wrong arity answers 4, the blocking direction, and publishes nothing -- so
+# the caller degrades to the unnamed remedy rather than to a release command it
+# never derived.
+_autopilot_deferred_hold_verdict() {
+  [ "$#" -eq 4 ] || return 4
+  local holder="$1" session_id="$2" ttl_hours="$3" root="$4"
+  if _autopilot_workspace_hold_blocks_adoption "$holder" "$session_id" "$ttl_hours" "$root"; then
+    _autopilot_publish_workspace_refusal "$holder" "$session_id" operator
+    return 4
+  fi
+  return 6
+}
+
 # Deferred-review adoption has the same ownership boundary as a standalone TDD
 # begin, but its inner operation first claims the project-wide pending marker.
 # Keep the complete lock order Outer project -> pending marker -> Inner session:
@@ -2361,15 +2815,21 @@ autopilot_begin_standalone_tdd() {
 # decides, and adoption must finish its claim+seed before the Outer lock releases.
 _autopilot_adopt_pending_review_critical() {
   local root="$1" session_id="$2" vanilla="$3" ttl_hours="$4" owner_pid="$5"
-  local workspace="${6:-}" read_rc adopt_rc
+  local workspace="${6:-}" read_rc adopt_rc holder
   [ -n "$workspace" ] || workspace="$(_autopilot_session_workspace "$root")" || return 2
-  if _autopilot_read_workspace_critical "$root" "$workspace" >/dev/null 2>&1; then
+  if holder="$(_autopilot_read_workspace_critical "$root" "$workspace" "$session_id" 2>/dev/null)"; then
     read_rc=0
   else
     read_rc=$?
   fi
   case "$read_rc" in
-    0) return 4 ;;
+    0)
+      # Nothing to adopt and no own generation to protect: the shared verdict
+      # answers the ordinary no-work result instead of denying a Stop this hold
+      # does not concern.
+      _autopilot_deferred_hold_verdict "$holder" "$session_id" "$ttl_hours" "$root"
+      return $?
+      ;;
     1) ;;
     *) return "$read_rc" ;;
   esac
@@ -2394,16 +2854,25 @@ _autopilot_adopt_pending_review_critical() {
 # stable foreign plain claim, then check Outer again as the TOCTOU fence. A run
 # published after that final absent/terminal read linearizes after this Stop.
 _autopilot_deferred_contention_result() {
-  local root="$1" session_id="$2" ttl_hours="$3" workspace="${4:-}" read_rc
+  local root="$1" session_id="$2" ttl_hours="$3" workspace="${4:-}" read_rc holder
   [ -n "$workspace" ] || workspace="$(_autopilot_session_workspace "$root")" || return 2
   _autopilot_storage_safe "$root" "" || return 2
-  if _autopilot_read_workspace_critical "$root" "$workspace" >/dev/null 2>&1; then
+  if holder="$(_autopilot_read_workspace_critical "$root" "$workspace" "$session_id" 2>/dev/null)"; then
     read_rc=0
   else
     read_rc=$?
   fi
   case "$read_rc" in
-    0) return 4 ;;
+    # Same discrimination as the locked fence above, and for the same reason:
+    # this read runs BEFORE any pending artifact is consulted, so without it a
+    # foreign hold denies a Stop that has nothing to adopt. The SECOND fence
+    # below deliberately keeps the unconditional refusal -- by then
+    # `tdd_pending_review_owned_by_other` has proven a foreign claim, so work is
+    # known to be in play.
+    0)
+      _autopilot_deferred_hold_verdict "$holder" "$session_id" "$ttl_hours" "$root"
+      return $?
+      ;;
     1) ;;
     # This unlocked read may observe begin's durable run before its active
     # pointer is published. Storage safety was proven above, so this is
@@ -2415,13 +2884,21 @@ _autopilot_deferred_contention_result() {
   tdd_pending_review_owned_by_other "$session_id" "$ttl_hours" || return 8
 
   _autopilot_storage_safe "$root" "" || return 2
-  if _autopilot_read_workspace_critical "$root" "$workspace" >/dev/null 2>&1; then
+  # A foreign claim is proven by now, so this fence refuses unconditionally --
+  # but it must still RENDER the holder. It is reached only under Outer-lease
+  # contention, which is exactly when the Stop hook's own lease-taking read
+  # fails, so discarding the record here left the run id named on neither
+  # channel. All THREE rc=4 producers therefore call the same renderer.
+  if holder="$(_autopilot_read_workspace_critical "$root" "$workspace" "$session_id" 2>/dev/null)"; then
     read_rc=0
   else
     read_rc=$?
   fi
   case "$read_rc" in
-    0) return 4 ;;
+    0)
+      _autopilot_publish_workspace_refusal "$holder" "$session_id" operator
+      return 4
+      ;;
     1) return 6 ;;
     # The final fence can see the same valid run->pointer publication window.
     # Without a conclusive absent/terminal/active result, retry under Outer.
@@ -2431,6 +2908,7 @@ _autopilot_deferred_contention_result() {
 }
 
 autopilot_adopt_pending_review() {
+  ZENSU_AUTOPILOT_WORKSPACE_HOLD_TEXT=""
   local root session_id="${2:-}" vanilla="${3:-false}" ttl_hours="${4:-0}"
   local owner_pid="${5:-$$}" lock_attempt=0 rc contention_rc workspace
   [ "$#" -eq 4 ] || [ "$#" -eq 5 ] || return 3

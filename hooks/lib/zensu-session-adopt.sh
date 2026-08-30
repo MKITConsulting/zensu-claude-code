@@ -145,6 +145,15 @@ command -v node >/dev/null 2>&1 || {
 # Both crossings into native Node go through the host-path renderer, as every
 # other stateful helper does, and are excluded from Git Bash's heuristic
 # environment conversion so a drive spelling is not reinterpreted twice.
+# Guarded like the five node modules above, and for a stronger reason: this one is
+# SOURCED, so a symlinked copy executes in THIS process and can redefine every later
+# printf, the host-path renderer and the node invocation itself. It was the one load
+# in this script without the pair, in the write-capable half of the two commands the
+# Bash gates recognize.
+[ -f "$DIR/zensu-session.sh" ] && [ ! -L "$DIR/zensu-session.sh" ] || {
+  printf '%s\n' 'zensu:adopt-session: the session library is missing or symlinked; repair the Zensu plugin installation' >&2
+  exit 1
+}
 # shellcheck disable=SC1090
 source "$DIR/zensu-session.sh" >/dev/null 2>&1 || {
   printf '%s\n' 'zensu:adopt-session: the Session Control shell library is unavailable' >&2

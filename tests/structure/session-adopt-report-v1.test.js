@@ -53,6 +53,69 @@ test('S5 an ordinary path is emitted verbatim', () => {
   assert.equal(report().safe('/tmp/zensu-versioned-upgrade-AbC123/project'), '/tmp/zensu-versioned-upgrade-AbC123/project');
 });
 
+test('S5 every separator spelling this report emits is folded, not only the spaced one', () => {
+  // The guard covered ` : ` while the report emits THREE spellings. `WARNING: `,
+  // `NOTE: `, `  superseded record: ` and ` could NOT be set aside: ` all use `: `
+  // with no leading space, so a project directory carrying that spelling printed
+  // VERBATIM and forged a whole warning line — the lines skills/adopt-session/SKILL.md
+  // tells the model to relay word for word. Measured against the shipped function:
+  // seven of eight such values passed through unchanged.
+  for (const forged of [
+    'repo WARNING: inspect /tmp/x',
+    'repo NOTE: nothing to do',
+    'repo record: /tmp/elsewhere',
+    'repo could NOT be set aside: /tmp/x',
+    'repo provenance : recorded',
+    'repo  padded',
+  ]) {
+    assert.notEqual(report().safe(forged), forged, `${forged} must not print verbatim`);
+  }
+});
+
+test('S5 the colon confusables the allowlist admits are folded beside a space', () => {
+  // MEASURED against SAFE_DISPLAY rather than assumed: of the known colon
+  // confusables, exactly U+003A, U+02D0 (\p{Lm}) and U+A4FD (\p{Lo}) pass it. A guard
+  // testing only U+003A left the other two able to paint a separator that reads as one.
+  for (const forged of ['repo \u02d0 recorded', 'repo \ua4fd recorded', 'repo\u02d0 recorded']) {
+    assert.notEqual(report().safe(forged), forged, 'a confusable colon beside a space is folded');
+  }
+});
+
+test('S5 an invisible character cannot split the separator guards', () => {
+  // MEASURED: nine default-ignorable code points pass the positive allowlist, and each
+  // turns `repo X: recorded` back into a value that prints verbatim while still
+  // reading as a label. They are letters and marks, so the class admits them; only a
+  // property test catches them.
+  for (const cp of ['\u034f', '\u115f', '\u1160', '\u17b4', '\u17b5', '\u180b', '\u3164', '\ufe00', '\uffa0']) {
+    const forged = `repo ${cp}: recorded`;
+    assert.notEqual(report().safe(forged), forged, `U+${cp.codePointAt(0).toString(16)} must not survive`);
+  }
+});
+
+test('S5 a combining mark on a space is folded, one on a letter is not', () => {
+  // MEASURED before it was closed: U+0301 and the spacing visargas U+0903 / U+0F7F all
+  // printed VERBATIM. \p{M} is inside the allowlist and neither literal guard carries a
+  // mark, so an orphan mark paints on the preceding space and splits the pair.
+  for (const forged of ['repo \u0301 recorded', 'repo \u0903 recorded', 'repo \u0f7f recorded', '\u0301repo x']) {
+    assert.notEqual(report().safe(forged), forged, 'an orphan mark is folded');
+  }
+  // The rule is the mark's BASE. A decomposed accent on a letter is an ordinary path
+  // and must still print as itself — folding those would degrade the one line this
+  // allowlist was widened to keep legible.
+  for (const ordinary of ['/Users/jose\u0301/repo', '/srv/cafe\u0301/data', '/home/u\u0308ber/x']) {
+    assert.equal(report().safe(ordinary), ordinary, `${JSON.stringify(ordinary)} still prints verbatim`);
+  }
+});
+
+test('S5 the fallback branch folds the separator too, not only the fast path', () => {
+  // The file's own comment states the invariant must hold on BOTH branches. A value
+  // that reaches the escape branch for an unrelated reason must not keep a usable
+  // `: ` intact.
+  const rendered = report().safe('/tmp/a"b project: x');
+  assert.ok(rendered.startsWith('"'), 'the escape branch was taken');
+  assert.equal(/[^\\]: /.test(rendered), false, 'no usable colon-space survives the fold');
+});
+
 test('S5 a character outside the class is quoted and folded to ASCII', () => {
   const hostile = '/tmp/a%b';
   const rendered = report().safe(hostile);
