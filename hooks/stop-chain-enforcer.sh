@@ -275,6 +275,18 @@ STATE_FILE="$(tdd_state_file "$SESSION_ID")"
 REVIEWER_DENIAL_STATUS=""
 REVIEWER_DENIAL_KIND=""
 REVIEWER_DENIALS=0
+# The probe's OWN status word, kept beside the routing status rather than folded
+# into it. `REVIEWER_DENIAL_STATUS` deliberately collapses `errored`, `unreadable`
+# and `none` to `none`, because none of the three is a verdict this hook may ROUTE
+# on — but they are not the same fact, and the scope sentence needs the difference:
+# `errored` is a reviewer result the host flagged as an error whose text matched no
+# marker. The module's own header lists three causes — a reworded host message, a
+# subagent crash, a transport failure — so it does NOT establish a refusal; what it
+# establishes is that a refusal cannot be ruled out. Folding it into `none` is right
+# for routing and wrong for deciding whether to argue about withholding.
+# `unprobed` is the state before any probe ran (no transcript path, module absent,
+# node failed) — distinct from a probe that ran and found nothing.
+REVIEWER_DENIAL_RAW="unprobed"
 # Set only by the branch that routes this Stop as a host refusal — see the mint
 # guard at the end of the file. Declared here so `set -u` holds on every path.
 REVIEWER_DENIAL_ROUTED=false
@@ -300,11 +312,28 @@ reviewer_spawn_denial_probe() {
     probe="$(node "$lib" --transcript "$TRANSCRIPT_PATH" 2>/dev/null)" || return 0
   fi
   case "$probe" in
-    'status=blocked '*) REVIEWER_DENIAL_STATUS="blocked" ;;
-    'status=clear '*) REVIEWER_DENIAL_STATUS="clear" ;;
+    'status=blocked '*) REVIEWER_DENIAL_STATUS="blocked"; REVIEWER_DENIAL_RAW="blocked" ;;
+    'status=clear '*) REVIEWER_DENIAL_STATUS="clear"; REVIEWER_DENIAL_RAW="clear" ;;
     # `status=errored` and `status=unreadable` deliberately fall through here:
-    # neither is a verdict this hook may act on, so both leave `none`.
-    *) return 0 ;;
+    # neither is a verdict this hook may act on, so both leave `none`. Each records
+    # its own word in REVIEWER_DENIAL_RAW first and then returns exactly as before —
+    # the routing status, the kind and the denials count are untouched, so nothing
+    # below this `case` can tell the difference.
+    'status=errored '*) REVIEWER_DENIAL_RAW="errored"; return 0 ;;
+    'status=unreadable '*) REVIEWER_DENIAL_RAW="unreadable"; return 0 ;;
+    'status=none '*) REVIEWER_DENIAL_RAW="none"; return 0 ;;
+    # The residual NAMES itself instead of inheriting the `unprobed` initializer. This
+    # `case` hand-enumerates a vocabulary `reviewer-spawn-denial-v1.js` owns and does not
+    # export, so a status added there lands here — and an implicit residual class is the
+    # exact failure this repository already records for the artifact-redaction reason
+    # sets. `unknown` is outside the render allowlist below, so an unrecognized verdict
+    # withholds the scope sentence rather than rendering it by default.
+    'status='*) REVIEWER_DENIAL_RAW="unknown"; return 0 ;;
+    # Output that is not a status line at all. Named for the same reason as `unknown`
+    # directly above: an arm that inherits the `unprobed` initializer lands in the RENDER
+    # allowlist, so the parseable-but-unrecognized case and the unparseable case would take
+    # opposite directions for one evidence class. Neither is in the allowlist.
+    *) REVIEWER_DENIAL_RAW="unparseable"; return 0 ;;
   esac
   # The kind is read as a FIELD, not matched against a local copy of the marker
   # set. That set lives in the module and is re-encoded exactly once more below,
@@ -1131,8 +1160,19 @@ STATE_LEGEND="Session state: mode=strict, implComplete=${SESSION_IMPL}, chainDon
 if [ "$SESSION_VANILLA" = "true" ]; then
   STATE_LEGEND="Session state: mode=vanilla, implComplete=${SESSION_IMPL}, chainDone=${SESSION_CHAIN}. In vanilla mode the RED/GREEN FSM is not driven, so the 'phase' and 'history' fields carry no signal here and are never by themselves evidence of a corrupt or never-started session."
 fi
+# HAND-COPY CLASS: the three closers below share the frame "That observation does not
+# change what must happen next: the instruction above … still governs before this turn may
+# end." verbatim and differ only in the middle clause. Reword one and reword all three; no
+# check compares the shared frame across them.
 LEGEND_CLOSER="That observation does not change what must happen next: the instruction above still governs before this turn may end."
 LEGEND_CLOSER_WITH_EXCEPTION="That observation does not change what must happen next: the instruction above — including the single exception it explicitly states — still governs before this turn may end."
+# The plural sibling, used only where the reason really does state more than one
+# sanctioned deviation. The resume directive states two once the review-spawn scope
+# sentence renders — the zero-change terminus and the say-so-out-loud route — and a
+# closer insisting on "the single exception" there is a false statement about the very
+# instruction it closes, which is exactly the kind of contradiction a model resolves
+# in favour of the hard prohibition.
+LEGEND_CLOSER_WITH_EXCEPTIONS="That observation does not change what must happen next: the instruction above — including the exceptions it explicitly states — still governs before this turn may end."
 LOG_HELPER_Q="$(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")"
 PLUGIN_DATA_Q="$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}")"
 LOG_COMMAND="CLAUDE_PLUGIN_DATA=${PLUGIN_DATA_Q} bash ${LOG_HELPER_Q}"
@@ -1216,8 +1256,83 @@ else
   # The self-review branch at the top of this ladder never evaluates the probe
   # and therefore never sets this, which is the whole point of the flag.
   REVIEWER_DENIAL_ROUTED=true
-  REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:tdd Phase 6 review sequence where it left off: fan out the five zensu:review-aspect agents over the changed files ('git diff --name-only HEAD'), merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default), run the Phase 6 step 4c Finding Verification Gate over the merged list when hooks.findingVerification is enabled (the default) and annotate every finding it does not confirm '[Unverified — do not fix]', issue a fresh review ticket, then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' ${INNER_REVIEW_HEADERS}${INNER_REVIEW_SUFFIX} the merged findings + build/test status. ${ZENSU_REVIEW_SPAWN_IN_SCOPE} Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. Only valid exception: if implementation produced ZERO file changes, run: ${LOG_COMMAND} --chain-done${INNER_ZERO_CHANGE_ARGS}; then stop.${INNER_ZERO_CHANGE_NOTE}"
-  REASON="${REASON} ${STATE_LEGEND} ${LEGEND_CLOSER_WITH_EXCEPTION}"
+  # The scope sentence is WITHHELD on exactly one RECOGNIZED probe verdict: `errored`, a
+  # reviewer result the host flagged as an error whose text matched no DENIAL_MARKERS
+  # prefix. `reviewer-spawn-denial-v1.js`'s own header lists three causes for it — a
+  # reworded host message, a subagent crash, a transport failure — and tells callers to
+  # treat it as no detection. This caller diverges for the RENDER decision only, never for
+  # routing, and the reason is what `errored` does establish: a refusal cannot be RULED
+  # OUT there. Telling a model that may be holding one not to withhold silently and not to
+  # work around it is the adjacency the owner comment forbids, and worse than the case it
+  # considers, because this reason carries no permission text at all — nothing tells the
+  # model which restraint is meant.
+  #
+  # `none` and `unprobed` deliberately still render. Measured, not assumed:
+  # `reviewer-spawn-denial-v1.js` answers `verdict('none')` when no reviewer result
+  # exists at all, which is every chain's FIRST resume Stop — the case this sentence
+  # exists for — and `unprobed` is an installation with no scanner module, where the
+  # fail-open direction is the whole design. A `clear`-only gate would delete the
+  # feature rather than narrow it.
+  # `hooks.reviewSpawnScopeSentence` is read PERMISSIVELY (zensu_hook_enabled, not the
+  # strict reader): for this key "enabled" means a sentence renders, so an unreadable
+  # config falling back to enabled restores the default rather than a capability.
+  # The render side is a closed ALLOWLIST, not a deny-list: an unrecognized verdict —
+  # including the `unknown` the probe's residual arm names — withholds by default rather
+  # than by position in the ladder. `unreadable` RENDERS. Its usual provenance is the
+  # module's `readTail` failure path — a rotated or deleted transcript, a FIFO, an EACCES
+  # path — which precedes any inspection of a tool result; it can also come from the
+  # module's outer catch, which does wrap the scan. Either way the DIRECTION is what
+  # decides: it is the same could-not-look outcome as a probe that timed out or an
+  # installation with no scanner module, and both of those leave `unprobed`, which renders.
+  # An earlier revision withheld on `unreadable` while rendering on those two — one
+  # evidence class taking two opposite directions inside one block.
+  #
+  # `errored` is the only RECOGNIZED verdict that withholds, on the reasoning above — a
+  # refusal cannot be ruled out, not that one was established. An UNRECOGNIZED
+  # verdict withholds too, by allowlist closure rather than by observation, and `blocked`
+  # never reaches this `case` at all — the `elif` above consumes it.
+  #
+  # The config read is anchored on the RECORD's project root. This hook resolves
+  # `PROJECT_ROOT` from `zensu_resolve_project_dir` but never exports
+  # `CLAUDE_PROJECT_DIR`, and `cfg()` builds its project overlay from that variable —
+  # so an unwrapped read here would resolve the overlay from whatever the harness
+  # supplied, while the delegate's read (which does export it) resolves from the
+  # record. One key would then govern one render site and not the other, which is
+  # exactly what both operator accounts promise it does not. Wrapped in a subshell
+  # rather than exported for the whole hook, deliberately: SEVEN pre-existing reads in
+  # this file across FIVE keys would otherwise be re-rooted with it — `chainEnforcer`
+  # twice, `autopilotEnforcer`, `pendingReviewTtlHours` twice, `tddImplementation` and
+  # `autoFixMaxRounds`. That is the right direction, but it is a separate behaviour
+  # change needing its own pins, and one of them is deliberately ambient-rooted today:
+  # the TTL read stays in step with the doctor's own, which CLAUDE.md records.
+  IN_SCOPE_CLAUSE=""
+  SCOPE_SENTENCE_RENDERED=false
+  if ( export CLAUDE_PROJECT_DIR="$PROJECT_ROOT"; zensu_hook_enabled reviewSpawnScopeSentence ); then
+    case "$REVIEWER_DENIAL_RAW" in
+      clear|none|unprobed|unreadable)
+        IN_SCOPE_CLAUSE="${ZENSU_REVIEW_SPAWN_IN_SCOPE} "
+        SCOPE_SENTENCE_RENDERED=true
+        ;;
+      *) : ;;
+    esac
+  fi
+  # The closer AND the body's exception lead-in must both count what the reason states,
+  # and both are selected from an explicit flag rather than from the clause's emptiness:
+  # the clause carries a trailing space, so `[ -n ... ]` stays true even for an emptied
+  # constant and would pick the plural closer for a reason with one exception. An `if`
+  # rather than `[ ... ] && ...`, which is the short-circuit shape this file forbids a
+  # few lines below.
+  if [ "$SCOPE_SENTENCE_RENDERED" = "true" ]; then
+    INNER_RESUME_CLOSER="$LEGEND_CLOSER_WITH_EXCEPTIONS"
+    INNER_EXCEPTION_LEAD="Two valid exceptions. First:"
+    INNER_EXCEPTION_SECOND=" Second: if a session rule leads you to withhold the fan-out, say so in your next message instead of ending the turn silently — that is the route the sentence above sanctions. It is a report, not a terminus: this Stop guard is bounded, but it does not release on a report, so state the withholding once and let the user decide rather than repeating it every turn."
+  else
+    INNER_RESUME_CLOSER="$LEGEND_CLOSER_WITH_EXCEPTION"
+    INNER_EXCEPTION_LEAD="Only valid exception:"
+    INNER_EXCEPTION_SECOND=""
+  fi
+  REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:tdd Phase 6 review sequence where it left off: fan out the five zensu:review-aspect agents over the changed files ('git diff --name-only HEAD'), merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default), run the Phase 6 step 4c Finding Verification Gate over the merged list when hooks.findingVerification is enabled (the default) and annotate every finding it does not confirm '[Unverified — do not fix]', issue a fresh review ticket, then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' ${INNER_REVIEW_HEADERS}${INNER_REVIEW_SUFFIX} the merged findings + build/test status. ${IN_SCOPE_CLAUSE}Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. ${INNER_EXCEPTION_LEAD} if implementation produced ZERO file changes, run: ${LOG_COMMAND} --chain-done${INNER_ZERO_CHANGE_ARGS}; then stop.${INNER_ZERO_CHANGE_NOTE}${INNER_EXCEPTION_SECOND}"
+  REASON="${REASON} ${STATE_LEGEND} ${INNER_RESUME_CLOSER}"
 fi
 
 if ! tdd_mark_pending_review_handoff "$SESSION_ID" "$DEFERRED_OWNER_PID" 2>/dev/null; then

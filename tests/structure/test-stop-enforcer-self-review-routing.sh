@@ -405,7 +405,9 @@ else
 fi
 if printf '%s' "$REASON7" | grep -qF 'Session state: mode=vanilla, implComplete=true, chainDone=false.' \
   && printf '%s' "$REASON7" | grep -qF 'refused by the HOST permission layer' \
-  && [ "$(printf '%s' "$REASON7" | grep -oF 'Session state: mode=' | wc -l | tr -d ' ')" -eq 1 ]; then
+  && [ "$(printf '%s' "$REASON7" | grep -oF 'Session state: mode=' | wc -l | tr -d ' ')" -eq 1 ] \
+  && printf '%s' "$REASON7" | grep -qF 'including the single exception it explicitly states' \
+  && ! printf '%s' "$REASON7" | grep -qF 'including the exceptions it explicitly states'; then
   check "T16 denial reason carries the state legend exactly once" PASS
 else
   check "T16 denial reason carries the state legend exactly once" FAIL
@@ -607,7 +609,15 @@ fi
 # The needle-liveness conjunct is the third anchor: without it, a reword of the
 # owner's sentence that left IN_SCOPE_NEEDLE stale would make both negatives true
 # against a string that exists nowhere.
+# A FOURTH anchor, in the same namespace as the assertion: the source-side conjunct
+# proves the string exists in a FILE, while the two negatives measure EMITTED output.
+# That left one shape uncovered — a change that keeps the constant intact but breaks
+# the literal match against emitted text (an encoding or normalisation change in the
+# reason channel) would satisfy the file anchor while making both negatives true for
+# the wrong reason. REASON8 is already captured and already proven by T38 to carry the
+# needle, so closing it costs no extra Stop.
 if grep -qF "$IN_SCOPE_NEEDLE" "$IN_SCOPE_OWNER" \
+  && printf '%s' "$REASON8" | grep -qF "$IN_SCOPE_NEEDLE" \
   && printf '%s' "$REASON7C" | grep -qF 'refused by the HOST permission layer' \
   && printf '%s' "$REASON7" | grep -qF 'refused by the HOST permission layer' \
   && ! printf '%s' "$REASON7C" | grep -qF "$IN_SCOPE_NEEDLE" \
@@ -633,19 +643,51 @@ fi
 # which would hollow out the negatives at T37, T39 and the four
 # 'refused by the HOST permission layer' negatives elsewhere in this file.
 occ() { grep -oF "$1" "$2" 2>/dev/null | wc -l | tr -d ' '; }
+# `occ` exists for the multi-match-per-line case, and nothing in the tree produces one:
+# every occurrence it counts today sits alone on its line. So if it silently degraded
+# to line counting, every arm below would stay green and the stated protection would be
+# gone — the "a control that never fires" class this repo flags elsewhere. Two lines
+# make the discrimination real.
+printf 'x ${IN_SCOPE_CLAUSE} y ${IN_SCOPE_CLAUSE}\n' > "$STATE_DIR/occ-probe"
+if [ "$(occ '${IN_SCOPE_CLAUSE}' "$STATE_DIR/occ-probe")" = "2" ]; then
+  check "T40pre occ() counts occurrences, not lines" PASS
+else
+  check "T40pre occ() counts occurrences, not lines" FAIL
+fi
+# Both consumers now interpolate the constant ONCE, into a local `IN_SCOPE_CLAUSE`
+# that carries the config gate (and, in the Stop enforcer, the probe gate) — so the
+# constant's own count is 1 per consumer and the RENDER count moved to the clause.
+# Both are pinned: dropping the clause count would restore exactly the blind spot the
+# occurrence form exists for, since the delegate's two arms sit on single mega-lines.
 IN_SCOPE_DEF="$(occ 'ZENSU_REVIEW_SPAWN_IN_SCOPE="' "$IN_SCOPE_OWNER")"
 IN_SCOPE_STOP="$(occ '${ZENSU_REVIEW_SPAWN_IN_SCOPE}' "$STOP")"
 IN_SCOPE_DELEGATE="$(occ '${ZENSU_REVIEW_SPAWN_IN_SCOPE}' "$IN_SCOPE_DELEGATE_FILE")"
+IN_SCOPE_CLAUSE_STOP="$(occ '${IN_SCOPE_CLAUSE}' "$STOP")"
+IN_SCOPE_CLAUSE_DELEGATE="$(occ '${IN_SCOPE_CLAUSE}' "$IN_SCOPE_DELEGATE_FILE")"
 # The redeclaration scan matches the ASSIGNMENT, not one quoting style: a shadow
 # spelled with single quotes or $'…' would score 0 against a `="`-only needle.
-# The hand-copy scan covers hooks/, skills/ and docs/ — skills/ is where the design
-# says a fourth copy is likeliest, so a hooks-only scan would miss exactly the case
-# it is written for. tests/ is excluded: this file legitimately holds the needle.
-IN_SCOPE_REDECL="$(( $(grep -cE '^[[:space:]]*(readonly |declare |export )?ZENSU_REVIEW_SPAWN_IN_SCOPE=' "$STOP" || true) + $(grep -cE '^[[:space:]]*(readonly |declare |export )?ZENSU_REVIEW_SPAWN_IN_SCOPE=' "$IN_SCOPE_DELEGATE_FILE" || true) ))"
-IN_SCOPE_TREE="$(grep -rlF "$IN_SCOPE_NEEDLE" "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/skills" "$PLUGIN_DIR/docs" 2>/dev/null | wc -l | tr -d ' ')"
-IN_SCOPE_LINE="$(grep '^ZENSU_REVIEW_SPAWN_IN_SCOPE=' "$IN_SCOPE_OWNER" || true)"
-IN_SCOPE_DEF_LINES="$(grep -c '^ZENSU_REVIEW_SPAWN_IN_SCOPE=' "$IN_SCOPE_OWNER" || true)"
-if [ "$IN_SCOPE_DEF" = "1" ] && [ "$IN_SCOPE_STOP" = "1" ] && [ "$IN_SCOPE_DELEGATE" = "2" ] \
+# tests/ is excluded from the hand-copy scan: this file legitimately holds the needle.
+# The scanned roots are enumerated at the scan itself, a few lines below.
+IN_SCOPE_REDECL="$(( $(grep -cE '^[[:space:]]*(readonly |declare |export |local |typeset )?ZENSU_REVIEW_SPAWN_IN_SCOPE=' "$STOP" || true) + $(grep -cE '^[[:space:]]*(readonly |declare |export |local |typeset )?ZENSU_REVIEW_SPAWN_IN_SCOPE=' "$IN_SCOPE_DELEGATE_FILE" || true) ))"
+# `agents/` and `templates/` were silently out of scope, and both ship model-facing
+# prose in this repo (agents/*.md frontmatter and bodies, templates/tdd-plan.md,
+# templates/pr-body.md, templates/autopilot-pr-body.md) — the file class most likely to
+# attract a verbatim copy of a directive paragraph. Repo-root CLAUDE.md is included for
+# the same reason; it paraphrases today, which is what keeps the expected count at 1.
+# `tests/` stays carved out: this file legitimately holds the needle.
+IN_SCOPE_TREE="$(grep -rlF "$IN_SCOPE_NEEDLE" \
+  "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/skills" "$PLUGIN_DIR/docs" \
+  "$PLUGIN_DIR/agents" "$PLUGIN_DIR/templates" "$PLUGIN_DIR/CLAUDE.md" \
+  2>/dev/null | wc -l | tr -d ' ')"
+# The owner-side uniqueness scan used to be NARROWER than the consumer-side one, in the
+# wrong direction: an indented or single-quoted second assignment inside the owner
+# scored 0 against a `^`-anchored `="`-only needle while every other arm stayed green,
+# and the shipped value would be whichever assignment ran last. One spelling for all
+# three files also keeps the next correction to it from landing in only two of them.
+IN_SCOPE_LINE="$(grep -E '^[[:space:]]*(readonly |declare |export |local |typeset )?ZENSU_REVIEW_SPAWN_IN_SCOPE=' "$IN_SCOPE_OWNER" || true)"
+IN_SCOPE_DEF_LINES="$(grep -cE '^[[:space:]]*(readonly |declare |export |local |typeset )?ZENSU_REVIEW_SPAWN_IN_SCOPE=' "$IN_SCOPE_OWNER" || true)"
+if [ "$IN_SCOPE_DEF" = "1" ] && [ "$IN_SCOPE_STOP" = "1" ] && [ "$IN_SCOPE_DELEGATE" = "1" ] \
+  && [ "$IN_SCOPE_CLAUSE_STOP" = "1" ] && [ "$IN_SCOPE_CLAUSE_DELEGATE" = "2" ] \
   && [ "$IN_SCOPE_REDECL" = "0" ] && [ "$IN_SCOPE_TREE" = "1" ] && [ "$IN_SCOPE_DEF_LINES" = "1" ] \
   && printf '%s' "$IN_SCOPE_LINE" | grep -qF 'ZENSU_REVIEW_SPAWN_IN_SCOPE="These spawns' \
   && printf '%s' "$IN_SCOPE_LINE" | grep -qF 'a host permission refusal is still a refusal."' \
@@ -654,7 +696,110 @@ if [ "$IN_SCOPE_DEF" = "1" ] && [ "$IN_SCOPE_STOP" = "1" ] && [ "$IN_SCOPE_DELEG
   && ! printf '%s' "$IN_SCOPE_LINE" | grep -qF 'Resume the /zensu:tdd Phase 6 review sequence'; then
   check "T40 one owner, three consumers, no redeclaration or hand-copy, and no borrowed discriminator" PASS
 else
-  check "T40 one owner, three consumers, no redeclaration or hand-copy, and no borrowed discriminator" FAIL
+  # Ten conjuncts under one label told the reader nothing about WHICH failed — a
+  # legitimately added render site, a doc that quoted the sentence, and a reworded
+  # opening clause all printed the same line. The count arms are a REGISTRATION
+  # mechanism (a new render site is supposed to fail here until the number is raised),
+  # so this message is that mechanism's whole user interface. Same idiom as T18/T22/T26.
+  check "T40 one owner, three consumers, no redeclaration or hand-copy, and no borrowed discriminator (def=$IN_SCOPE_DEF stop=$IN_SCOPE_STOP delegate=$IN_SCOPE_DELEGATE clauseStop=$IN_SCOPE_CLAUSE_STOP clauseDelegate=$IN_SCOPE_CLAUSE_DELEGATE redecl=$IN_SCOPE_REDECL tree=$IN_SCOPE_TREE lines=$IN_SCOPE_DEF_LINES)" FAIL
+fi
+
+# The windowed-REVIEWER_DENIALS bound is stated in THREE places — the code comment
+# beside the arm it affects, the CLAUDE.md gap bullet, and the docs host-refusal
+# paragraph — and the CLAUDE.md bullet names the other two as "the other two carriers".
+# A declared coupling pinned by nothing is the drift class this repo treats as its main
+# defect mode; T41 six lines down is the same pattern applied to the other prose
+# coupling. Each needle is distinctive enough to survive a reword of its surrounding
+# paragraph and specific enough to fail on deletion.
+if grep -qF 'scroll out and the sanction' "$STOP" \
+  && grep -qF 'two earlier refusals scroll out of the window' "$PLUGIN_DIR/CLAUDE.md" \
+  && grep -qF 'the withdrawal is scoped to the scanned transcript tail' "$PLUGIN_DIR/docs/tdd-manager-workflow.md"; then
+  check "T49 all three carriers of the windowed-REVIEWER_DENIALS bound are still present" PASS
+else
+  check "T49 all three carriers of the windowed-REVIEWER_DENIALS bound are still present" FAIL
+fi
+
+# T50-T53 pin the gate's RENDER side, which T38 covered for `clear` alone. The design
+# forbids a `clear`-only gate in so many words, and the whole rest of the suite stayed
+# green under one — so these are the arms that make that statement enforceable.
+#
+# The classification changed in this round: `unreadable` now RENDERS. It is returned
+# BEFORE any tool result is inspected (a rotated or deleted transcript, a FIFO, an
+# EACCES path), which is the same "could not look" evidence state as a probe that
+# timed out or an installation with no scanner module — and both of those already
+# rendered. Withholding on one while rendering on the other was one class taking two
+# opposite directions inside one block. Only `errored` — a result the host flagged as
+# an error whose text matched no known refusal literal — withholds now, because that
+# is the only verdict in which a refusal was actually observed.
+if grep -qF "$IN_SCOPE_NEEDLE" "$IN_SCOPE_OWNER" \
+  && printf '%s' "$REASON11b" | grep -qF 'Resume the /zensu:tdd Phase 6 review sequence' \
+  && printf '%s' "$REASON11b" | grep -qF "$IN_SCOPE_NEEDLE"; then
+  check "T50 an unreadable transcript renders the scope sentence, like every other could-not-look state" PASS
+else
+  check "T50 an unreadable transcript renders the scope sentence, like every other could-not-look state" FAIL
+fi
+
+# `none` (a transcript with no reviewer result — every chain's FIRST resume Stop) and
+# `unprobed` (no transcript path at all). Both captures already exist; T19 asserted only
+# the resume discriminator on them, so a `clear`-only gate was invisible to the suite.
+if printf '%s' "$REASON9" | grep -qF "$IN_SCOPE_NEEDLE" \
+  && printf '%s' "$REASON10" | grep -qF "$IN_SCOPE_NEEDLE"; then
+  check "T51 the none and unprobed states both render the scope sentence" PASS
+else
+  check "T51 the none and unprobed states both render the scope sentence" FAIL
+fi
+
+# The residual arm. `REVIEWER_DENIAL_RAW` is a hand-enumeration of a vocabulary the
+# scanner module owns and does not export, so a status added there lands in the `case`'s
+# default. Source-pinned rather than behavioural: no fixture can make the module emit a
+# word it does not have. The render side must be a closed ALLOWLIST and the default must
+# name itself, so an unknown verdict withholds instead of inheriting the initializer.
+# Anchored to a whole line, not a substring: `grep -qF` on the alternation still matches
+# after a member is PREPENDED, and would also be satisfied by a comment quoting it. Both
+# residual arms must name themselves — the parseable-but-unrecognized one and the
+# unparseable one — because an arm that inherits the initializer lands in the render
+# allowlist, which is the split this round removed for `unreadable`.
+if grep -qE '^[[:space:]]*clear\|none\|unprobed\|unreadable\)[[:space:]]*$' "$STOP" \
+  && grep -qF 'REVIEWER_DENIAL_RAW="unknown"' "$STOP" \
+  && grep -qF 'REVIEWER_DENIAL_RAW="unparseable"' "$STOP"; then
+  check "T54 the render side is a closed allowlist and an unrecognized status names itself" PASS
+else
+  check "T54 the render side is a closed allowlist and an unrecognized status names itself" FAIL
+fi
+
+if grep -qF 'export CLAUDE_PROJECT_DIR="$PROJECT_ROOT"; zensu_hook_enabled reviewSpawnScopeSentence' "$STOP"; then
+  check "T58 the Stop site resolves the scope-sentence flag from the record's project root" PASS
+else
+  check "T58 the Stop site resolves the scope-sentence flag from the record's project root" FAIL
+fi
+
+
+# `config.example.json` is advertised as carrying every flag, and ten sibling suites pin
+# their own key there. Without this arm the file can silently lose the key.
+if grep -qF '"reviewSpawnScopeSentence"' "$PLUGIN_DIR/config.example.json"; then
+  check "T55 config.example.json carries the reviewSpawnScopeSentence flag" PASS
+else
+  check "T55 config.example.json carries the reviewSpawnScopeSentence flag" FAIL
+fi
+
+# The false bypass-ledger claim, pinned NEGATIVELY in all three carriers it was copied
+# into. `hooks.chainEnforcer=false` is a config-disabled gate, and this repo's own
+# authoritative residual list says config-disabled gates are deliberately not ledgered —
+# only the eight ZENSU_* env escapes are. The positive anchor keeps the check from
+# passing on a file that lost the row entirely.
+# Assembled from two halves so this file never holds the forbidden literal verbatim —
+# the scan covers this suite too, and a check that contains its own needle can never pass.
+LEDGER_FALSE_CLAIM="disables the whole guard and lands"' a bypass-ledger entry'
+if grep -qF 'reviewSpawnScopeSentence' "$PLUGIN_DIR/docs/configuration.md" \
+  && grep -qF 'disables the whole guard' "$PLUGIN_DIR/docs/configuration.md" \
+  && grep -qF 'a bypass-ledger entry' "$PLUGIN_DIR/docs/configuration.md" \
+  && ! grep -qF "$LEDGER_FALSE_CLAIM" "$PLUGIN_DIR/docs/configuration.md" \
+  && ! grep -qF "$LEDGER_FALSE_CLAIM" "$PLUGIN_DIR/CLAUDE.md" \
+  && ! grep -qF "$LEDGER_FALSE_CLAIM" "$PLUGIN_DIR/docs/tdd-manager-workflow.md" \
+  && ! grep -qF "$LEDGER_FALSE_CLAIM" "$0"; then
+  check "T56 no carrier claims a config-disabled gate lands a bypass-ledger entry" PASS
+else
+  check "T56 no carrier claims a config-disabled gate lands a bypass-ledger entry" FAIL
 fi
 
 # The operator account names the constant by identifier. Nothing else compares the
@@ -663,11 +808,230 @@ fi
 # Anchored on the POSITIVE account's own heading, not on the identifier alone: the
 # identifier also appears in the host-refusal paragraph's omission clause, so a bare
 # name grep survives deletion of the paragraph this check exists to protect.
+# The CLAUDE.md section is the THIRD carrier, and the owner comment asserts a coupling
+# to it in so many words ("CLAUDE.md §... holds the same four bounds and must move with
+# this comment"). Nothing compared them: the tree scan is a hand-copy scan, not a
+# presence check, so that pointer could dangle with every other arm green.
 if grep -qF '**The review-spawn scope sentence.**' "$PLUGIN_DIR/docs/tdd-manager-workflow.md" \
-  && grep -qF 'ZENSU_REVIEW_SPAWN_IN_SCOPE' "$PLUGIN_DIR/docs/tdd-manager-workflow.md"; then
+  && grep -qF 'ZENSU_REVIEW_SPAWN_IN_SCOPE' "$PLUGIN_DIR/docs/tdd-manager-workflow.md" \
+  && grep -qF '## Review-Spawn Scope Sentence (`ZENSU_REVIEW_SPAWN_IN_SCOPE`)' "$PLUGIN_DIR/CLAUDE.md"; then
   check "T41 the operator account still carries the positive paragraph and names the constant" PASS
 else
   check "T41 the operator account still carries the positive paragraph and names the constant" FAIL
+fi
+
+# T42-T43 pin the clause's GATE, which is a different question from T38/T39.
+# T38/T39 ask WHICH BRANCH renders it; these ask whether the resume branch itself
+# may render it given what the reviewer-spawn probe actually established.
+#
+# `reviewer_spawn_denied` is true only for `status=blocked`, so the shell's own
+# `case` folds `status=errored` and `status=unreadable` into `none` and both reach
+# the resume branch. `errored` is the shape a host produces when it refuses with a
+# body that matches no DENIAL_MARKERS prefix — a REAL refusal the scanner could not
+# classify. Rendering "do not withhold silently and do not work around it" there is
+# precisely the adjacency the owner comment says must never occur, and worse than
+# the case it considers: the reason carries no permission text at all to tell the
+# model which restraint is meant. T39 is structurally blind to it because both of
+# its captures come from `blocked` runs.
+#
+# The gate deliberately suppresses on `errored`/`unreadable` ONLY, never on `none`.
+# Measured, not assumed: `reviewer-spawn-denial-v1.js` returns `verdict('none')`
+# when no reviewer result exists at all, which is every chain's FIRST resume Stop —
+# the case this sentence exists for. A `status=clear`-only gate would therefore
+# delete the feature rather than narrow it.
+TRANSCRIPT_ERRORED="$STATE_DIR/transcript-errored.jsonl"
+cat >"$TRANSCRIPT_ERRORED" <<'ERRORED_EOF'
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"te","name":"Agent","input":{"subagent_type":"zensu:code-reviewer","prompt":"PRE-MERGED FINDINGS (fan-out)"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"te","is_error":true,"content":"The operation could not be completed for an unstated reason."}]}}
+ERRORED_EOF
+OUT_ERRORED="$(stop_run '{"session_id":"'"$SID7B_RAW"'","transcript_path":"'"$TRANSCRIPT_ERRORED"'"}')"
+REASON_ERRORED="$(printf '%s' "$OUT_ERRORED" | reason)"
+# Three positive anchors before the negative, matching T39's idiom: needle liveness
+# in the owner, the resume discriminator (proving this really is the resume branch),
+# and the absence of the host-refusal text (proving the probe did NOT say `blocked`).
+if grep -qF "$IN_SCOPE_NEEDLE" "$IN_SCOPE_OWNER" \
+  && printf '%s' "$REASON_ERRORED" | grep -qF 'Resume the /zensu:tdd Phase 6 review sequence' \
+  && ! printf '%s' "$REASON_ERRORED" | grep -qF 'refused by the HOST permission layer' \
+  && ! printf '%s' "$REASON_ERRORED" | grep -qF "$IN_SCOPE_NEEDLE"; then
+  check "T42 an unclassifiable refusal keeps the resume directive but withholds the scope sentence" PASS
+else
+  check "T42 an unclassifiable refusal keeps the resume directive but withholds the scope sentence" FAIL
+fi
+
+# The positive control for T42, and the AC-004 half: when the clause DOES render,
+# the appended legend closer must not still claim a single exception. Before this
+# change the reason stated one deviation (the zero-change terminus) and the closer
+# said "the single exception it explicitly states"; the clause adds a second
+# sanctioned route, so the singular closer became a false statement about the very
+# instruction it closes. REASON8 is the clean-probe capture T38 already uses.
+if printf '%s' "$REASON8" | grep -qF "$IN_SCOPE_NEEDLE" \
+  && printf '%s' "$REASON8" | grep -qF 'including the exceptions it explicitly states' \
+  && ! printf '%s' "$REASON8" | grep -qF 'including the single exception it explicitly states'; then
+  check "T43 a rendered scope sentence is closed by the plural-exception legend" PASS
+else
+  check "T43 a rendered scope sentence is closed by the plural-exception legend" FAIL
+fi
+
+# T52-T53 sit HERE, after T42's capture, rather than beside T50/T51 above: they read
+# $REASON_ERRORED, and under `set -u` a check placed before its capture aborts the whole
+# suite rather than failing one line.
+#
+# The withhold side's OWN closer. T43 pins the plural on a rendered reason; without this
+# arm both closers could collapse to the plural with every check green — the same false
+# statement AC-004 exists to remove, in the other direction.
+if printf '%s' "$REASON_ERRORED" | grep -qF 'including the single exception it explicitly states' \
+  && ! printf '%s' "$REASON_ERRORED" | grep -qF 'including the exceptions it explicitly states'; then
+  check "T52 a withheld scope sentence keeps the singular-exception legend" PASS
+else
+  check "T52 a withheld scope sentence keeps the singular-exception legend" FAIL
+fi
+
+# The body's own lead-in must agree with the closer. Before this round the body said
+# "Only valid exception:" while the plural closer said "the exceptions it explicitly
+# states", so one emitted directive asserted both that there is exactly one sanctioned
+# deviation and that there are several. The withhold side keeps the singular lead, which
+# is what the negative on $REASON_ERRORED pins.
+if printf '%s' "$REASON8" | grep -qF 'Two valid exceptions.' \
+  && ! printf '%s' "$REASON8" | grep -qF 'Only valid exception:' \
+  && printf '%s' "$REASON_ERRORED" | grep -qF 'Only valid exception:' \
+  && ! printf '%s' "$REASON_ERRORED" | grep -qF 'Two valid exceptions.'; then
+  check "T53 the exception lead-in agrees with the closer on both sides of the gate" PASS
+else
+  check "T53 the exception lead-in agrees with the closer on both sides of the gate" FAIL
+fi
+
+# The lead-in and the closer both COUNT the exceptions; nothing asserted that the second
+# one is actually STATED. Emptying it left a directive announcing two exceptions, stating
+# one, and closing by naming "the exceptions" in the plural — the exact false-statement
+# class T43/T52/T53 exist to remove — with both suites green.
+#
+# The bound is part of the assertion, not decoration. The route this exception sanctions
+# does NOT release the Stop guard: reporting the withholding and ending the turn re-fires
+# Stop and re-injects the same reason until the cap. The host-refusal branch discloses
+# exactly that about its own report-to-the-user instruction ("This guard is bounded and
+# will not wedge the session"); without the same disclosure here the directive reads as
+# offering a way out that it does not have.
+if printf '%s' "$REASON8" | grep -qF 'Second: if a session rule leads you to withhold the fan-out' \
+  && printf '%s' "$REASON8" | grep -qF 'this Stop guard is bounded' \
+  && printf '%s' "$REASON_ERRORED" | grep -qF 'Only valid exception:' \
+  && ! printf '%s' "$REASON_ERRORED" | grep -qF 'Second: if a session rule leads you to withhold the fan-out'; then
+  check "T57 the second exception is stated, discloses its bound, and appears only where it is sanctioned" PASS
+else
+  check "T57 the second exception is stated, discloses its bound, and appears only where it is sanctioned" FAIL
+fi
+
+# The owner comment records a SECOND draft discarded for "swapping the rule's own
+# criterion for one the plugin can always satisfy". A clause contrasting the chain's
+# spawns with subagents "chosen ad hoc" restates that criterion one noun over: every
+# spawn this sentence renders beside belongs to a declared chain, so the predicate is
+# one the plugin satisfies unconditionally. Asserted on the emitted directive, and
+# conjoined with the three identities so it cannot pass on an empty capture.
+if printf '%s' "$REASON8" | grep -qF 'zensu:review-aspect panel' \
+  && printf '%s' "$REASON8" | grep -qF 'zensu:code-reviewer consolidation' \
+  && printf '%s' "$REASON8" | grep -qF 'armed in this session' \
+  && ! printf '%s' "$REASON8" | grep -qF 'not subagents chosen ad hoc'; then
+  check "T44 the scope sentence states the chain's shape without the ad-hoc contrast" PASS
+else
+  check "T44 the scope sentence states the chain's shape without the ad-hoc contrast" FAIL
+fi
+
+# This is the ONE piece of model-facing prose in the tree whose subject is a
+# HOST-level session rule, and it renders on every resume directive and every fix
+# round including on hosts that carry no such rule. Every comparable surface here is
+# switchable (hooks.selfReview, hooks.reviewJudge, hooks.findingVerification,
+# hooks.reviewerSpawnAutoAllow, hooks.bestSolutionFirst); without a key of its own the
+# only lever is hooks.chainEnforcer=false, which disables the whole guard and is not
+# ledgered either: a config-disabled gate has no decision point to record, so only the
+# ZENSU_* env escapes ever produce an entry. Permissively read, so an unreadable config
+# keeps the default.
+CFG_NO_SCOPE="$STATE_DIR/config-no-scope-sentence.json"
+printf '%s\n' '{"hooks":{"reviewSpawnScopeSentence":false}}' >"$CFG_NO_SCOPE"
+OUT_NOSCOPE="$(stop_run '{"session_id":"'"$SID7B_RAW"'","transcript_path":"'"$TRANSCRIPT_CLEAR"'"}' "$CFG_NO_SCOPE")"
+REASON_NOSCOPE="$(printf '%s' "$OUT_NOSCOPE" | reason)"
+if grep -qF "$IN_SCOPE_NEEDLE" "$IN_SCOPE_OWNER" \
+  && printf '%s' "$REASON_NOSCOPE" | grep -qF 'Resume the /zensu:tdd Phase 6 review sequence' \
+  && ! printf '%s' "$REASON_NOSCOPE" | grep -qF "$IN_SCOPE_NEEDLE" \
+  && printf '%s' "$REASON_NOSCOPE" | grep -qF 'Only valid exception:' \
+  && printf '%s' "$REASON_NOSCOPE" | grep -qF 'including the single exception it explicitly states' \
+  && ! printf '%s' "$REASON_NOSCOPE" | grep -qF 'Second: if a session rule leads you to withhold the fan-out'; then
+  check "T45 hooks.reviewSpawnScopeSentence=false suppresses the sentence, not the directive" PASS
+else
+  check "T45 hooks.reviewSpawnScopeSentence=false suppresses the sentence, not the directive" FAIL
+fi
+
+# The premise the whole feature rests on is a HOST fact — which prompt section
+# carries the rule, on which Claude Code build. Every sibling host literal in this
+# tree records its build in a constant cross-checked against the comment that names
+# it (DENIAL_MARKERS_SOURCE_BUILD, SETTINGS_SOURCE_BUILD, ALLOW_BYPASS_SOURCE_BUILD).
+# Without one, a host that retires that prompt section leaves this sentence arguing
+# against a rule that no longer exists, with every check green.
+SCOPE_BUILD="$(grep -m1 '^ZENSU_REVIEW_SPAWN_SCOPE_SOURCE_BUILD=' "$IN_SCOPE_OWNER" | sed 's/.*="//; s/".*//')"
+# Uniqueness, for the same reason T40 pins it for the sibling constant: with a second,
+# later assignment the shipped value is whichever ran last and `-m1` compares the wrong one.
+SCOPE_BUILD_LINES="$(grep -cE '^[[:space:]]*(readonly |declare |export |local |typeset )?ZENSU_REVIEW_SPAWN_SCOPE_SOURCE_BUILD=' "$IN_SCOPE_OWNER" || true)"
+# Anchored to the scope-sentence comment block rather than to the whole 2800-line file:
+# an unrelated host literal recording the same build elsewhere would otherwise satisfy this
+# after the block lost its own provenance sentence.
+SCOPE_BLOCK="$(awk '/^# --- Review-spawn scope sentence/,/^ZENSU_REVIEW_SPAWN_IN_SCOPE=/' "$IN_SCOPE_OWNER")"
+if [ -n "$SCOPE_BUILD" ] && [ "$SCOPE_BUILD_LINES" = "1" ] \
+  && printf '%s' "$SCOPE_BLOCK" | grep -qF "Claude Code $SCOPE_BUILD"; then
+  check "T46 the scope sentence records its host build and the comment names the same one" PASS
+else
+  check "T46 the scope sentence records its host build and the comment names the same one (build=${SCOPE_BUILD:-<absent>} defs=${SCOPE_BUILD_LINES:-0} blockLines=$(printf '%s' "$SCOPE_BLOCK" | grep -c . || true))" FAIL
+fi
+
+# The carrier census in CLAUDE.md is the repo's own manual-grep control for renaming
+# this identity, and its derived unpinned count is arithmetic over it — so a stale
+# number sends a maintainer to check one file too few. Measured here rather than
+# restated, which is what keeps it from going stale again.
+census_word() {
+  case "$1" in
+    8) printf 'EIGHT' ;; 9) printf 'NINE' ;; 10) printf 'TEN' ;;
+    11) printf 'ELEVEN' ;; 12) printf 'TWELVE' ;; 13) printf 'THIRTEEN' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+census_lower() {
+  case "$1" in
+    5) printf 'five' ;; 6) printf 'six' ;; 7) printf 'seven' ;; 8) printf 'eight' ;;
+    9) printf 'nine' ;; 10) printf 'ten' ;; 11) printf 'eleven' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+CENSUS_FILES="$(grep -rlF 'zensu:code-reviewer' "$PLUGIN_DIR/hooks" 2>/dev/null | wc -l | tr -d ' ')"
+CENSUS_LINES="$(grep -rhF 'zensu:code-reviewer' "$PLUGIN_DIR/hooks" 2>/dev/null | wc -l | tr -d ' ')"
+# The pinned count is stated in CLAUDE.md as prose and subtracted here. Pinning the prose
+# literal keeps the two from drifting: add a fourth pin and this arm fails, instead of the
+# check quietly enforcing a sentence that has become false.
+CENSUS_PINNED=3
+CENSUS_UNPINNED="$((CENSUS_FILES - CENSUS_PINNED))"
+if [ "$(census_word "$CENSUS_FILES")" = "$CENSUS_FILES" ] || [ "$(census_lower "$CENSUS_UNPINNED")" = "$CENSUS_UNPINNED" ]; then
+  check "T47pre the census word tables have no entry for $CENSUS_FILES / $CENSUS_UNPINNED — extend the table, the census itself may be fine" FAIL
+fi
+if [ "$CENSUS_FILES" -gt "$CENSUS_PINNED" ] \
+  && grep -qF "three pinned (the lazy-require pair plus this one)" "$PLUGIN_DIR/CLAUDE.md" \
+  && grep -qF "$(census_word "$CENSUS_FILES") files under \`hooks/\` ($CENSUS_LINES matching lines" "$PLUGIN_DIR/CLAUDE.md" \
+  && grep -qF "the other $(census_lower "$CENSUS_UNPINNED") files are NOT pinned" "$PLUGIN_DIR/CLAUDE.md"; then
+  check "T47 the CLAUDE.md carrier census matches the tree ($CENSUS_FILES files, $CENSUS_LINES lines)" PASS
+else
+  check "T47 the CLAUDE.md carrier census matches the tree ($CENSUS_FILES files, $CENSUS_LINES lines, unpinned=$CENSUS_UNPINNED)" FAIL
+fi
+
+# The three KNOWN BOUND notes. BOUND 2's remedy named a shared JS module, which is
+# exactly as unreachable from the three POSIX-shell render sites as the shell
+# constant is from JS. BOUND 3 shipped a hand-maintained roster of three files while
+# nine under skills/ carry the identity — the census failure mode this repo already
+# writes down for the sibling identity, one bound over. BOUND 0 is the ordering the
+# roster missed entirely: a model that withholds the fan-out normally also withholds
+# --tdd-complete, and stop-chain-enforcer.sh releases Stop unconditionally in that
+# state, so neither render site is ever reached.
+if grep -qF 'KNOWN BOUND 0' "$IN_SCOPE_OWNER" \
+  && grep -qF 'KNOWN BOUND 0' "$PLUGIN_DIR/CLAUDE.md" \
+  && grep -qF "grep -rn 'zensu:review-aspect' skills/" "$IN_SCOPE_OWNER" \
+  && grep -qF 'a JS module is exactly as unreachable from' "$IN_SCOPE_OWNER"; then
+  check "T48 the bound roster carries BOUND 0, a grep instruction, and no unreachable remedy" PASS
+else
+  check "T48 the bound roster carries BOUND 0, a grep instruction, and no unreachable remedy" FAIL
 fi
 
 # The observed gap this capture came from was NOT a detection failure: the
@@ -968,6 +1332,50 @@ else
 fi
 
 start_session "stop-routing-restore"
+
+# T59 runs LAST among the real checks, and deliberately: it arms its OWN session, and
+# `start_session` re-exports CLAUDE_PROJECT_DIR and the plugin-data root for that session.
+# Placed earlier it silently re-pointed every later SID7B check at the wrong session — five
+# checks went red at once for a reason none of them was about.
+# T59 is the BEHAVIOURAL half of T58, and it is what makes that claim more than a literal
+# grep. Every other config fixture in this file arrives through ZENSU_CONFIG, which
+# short-circuits `cfg()` before the project overlay is consulted at all — so the overlay
+# path, the one the export governs and the one `docs/configuration.md` documents as
+# writable from inside a session, was exercised by nothing. Here the overlay is written
+# under the RECORD's project root while the ambient CLAUDE_PROJECT_DIR points somewhere
+# else, and ZENSU_CONFIG is unset. Both directions are asserted: the record root's overlay
+# must win, and an overlay under the ambient root alone must NOT suppress the sentence.
+T59_RAW="stop-scope-overlay"
+start_session "$T59_RAW"
+T59_SESSION="$STARTED_SESSION_KEY"
+T59_PROJECT="$STARTED_PROJECT_ROOT"
+bash "$LOG" --tdd-begin --session "$T59_SESSION" >/dev/null
+bash "$LOG" --tdd-complete --session "$T59_SESSION" >/dev/null
+T59_AMBIENT="$STATE_DIR/t59-ambient"
+T59_HOME="$STATE_DIR/t59-home"
+mkdir -p "$T59_AMBIENT/.zensu" "$T59_HOME" "$T59_PROJECT/.zensu"
+# HOME is sandboxed because these are the only two runs in this file that remove the
+# ZENSU_CONFIG sentinel: `cfg()` then falls back to $HOME/.zensu/config.json as the global
+# base under the project overlay, so without this the check reads the developer's own file
+# and can fail — or pass vacuously — for a reason that has nothing to do with the anchoring.
+t59_run() {
+  printf '%s' '{"session_id":"'"$T59_RAW"'","transcript_path":"'"$TRANSCRIPT_CLEAR"'","hook_event_name":"Stop"}' \
+    | env -u ZENSU_CONFIG HOME="$T59_HOME" CLAUDE_PROJECT_DIR="$T59_AMBIENT" bash "$STOP" 2>/dev/null | reason
+}
+printf '%s\n' '{"hooks":{"reviewSpawnScopeSentence":false}}' > "$T59_PROJECT/.zensu/config.json"
+T59_RECORD_OUT="$(t59_run)"
+rm -f "$T59_PROJECT/.zensu/config.json"
+printf '%s\n' '{"hooks":{"reviewSpawnScopeSentence":false}}' > "$T59_AMBIENT/.zensu/config.json"
+T59_AMBIENT_OUT="$(t59_run)"
+rm -f "$T59_AMBIENT/.zensu/config.json"
+if printf '%s' "$T59_RECORD_OUT" | grep -qF 'Resume the /zensu:tdd Phase 6 review sequence' \
+  && ! printf '%s' "$T59_RECORD_OUT" | grep -qF "$IN_SCOPE_NEEDLE" \
+  && printf '%s' "$T59_AMBIENT_OUT" | grep -qF "$IN_SCOPE_NEEDLE"; then
+  check "T59 the record root's config overlay governs the flag, the ambient root's does not" PASS
+else
+  check "T59 the record root's config overlay governs the flag, the ambient root's does not" FAIL
+fi
+
 
 echo "----"
 echo "test-stop-enforcer-self-review-routing: $PASS PASS / $FAIL FAIL"
