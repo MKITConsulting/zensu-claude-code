@@ -29,6 +29,40 @@ recognize what multilingual users actually type, never as prose. Keep these
 phrase lists in lockstep across every directive variant (strict and vanilla)
 — never edit one variant alone.
 
+**Second carve-out — eval grader alternations matching MODEL output.** The same
+narrow allowance extends to one further SHAPE: an alternation matched against
+model PROSE whose language the product does not control. It is stated as a shape
+rather than as a file-and-grader list because the list was written that way once
+and was wrong in both directions within a single round — it named
+`anchor-failed-step.yaml`'s failure-in-the-prose grader "and nothing else" while
+the German counter-grader arms (`schritt`, `von`, `aus`) sat in that file AND in
+`anchor-multi-step.yaml`, which the list excluded by name. Two members exist
+today, both under `evals/zen-mode-reaction/scenarios/`: the failure-in-the-prose
+grader (`fehlgeschlag`, `fehlschlag`, `gescheitert`, `rot`, `schlägt fehl`) and
+the `Step N of M` counter grader, which appears in both anchor scenarios. The reason is the same in kind
+but the source is the other side of the exchange: the zen-mode directive that
+scenario grades says the words around the anchor's marks follow the USER's own
+language, so a correct reply to a German-speaking user is German prose. An
+English-only alternation would report that correct reply as a violation, which
+`evals/zen-mode-reaction/README.md` names as the one outcome an eval must never
+produce. The FIXTURES are a different matter and carry no allowance: every
+canned reply in `tests/structure/zen-anchor-assertions.test.js` is English,
+because a fixture is authored text rather than a match literal. Extend this
+carve-out only for another grader in the same position — a pattern matched
+against text whose language the product does not control — and never for prose,
+a comment, or a fixture.
+
+**The MEMBERSHIP above is enforced by nothing, and neither is any arm list.** `Z26` in
+`tests/structure/test-zen-mode.sh` is what makes this checkable, and its allowance is
+MECHANICAL and file-independent: it exempts a match sitting inside a `/.../` regex
+literal in ANY carrier it scans, which is precisely what keeps prose, comments and
+fixtures violations everywhere. So the load-bearing half is enforced and the
+ENUMERATION is not — a German arm added to a grader in `safety-carve-out.yaml` would
+pass the guard with this paragraph unamended, and so would a further arm in an existing
+one. The SHAPE is what governs; the two members named above are a census taken at one
+moment, not a bound the suite holds. Check by grep before relying on it, and never
+strip a German arm because this paragraph did not list its grader.
+
 ## Artifact Path Redaction (`hooks/lib/zensu-artifact-redact-v1.js`)
 
 Consuming repos commit `.zensu/plans/{ts}_tdd-{slug}.md` and
@@ -4137,6 +4171,143 @@ with a thrown error, and re-point the extractor.
   graded) and the W13 case's `mkdir -p` (which is real but not first) — so name the helper
   and its first call site, not a line number that moves. Pre-existing, predates this rule,
   and it means one of the two hedged wordings has no executed case anywhere.
+
+## zen-mode Chain-Progress Anchor (`user-prompt-zen-mode.sh` rule 6)
+
+Rule 6 of the zen-mode contract asks for a one-line progress anchor above the closing
+next step. It lives in the hook, the skill, the operator doc row and EVERY
+`evals/zen-mode-reaction/scenarios/*.yaml`, and `tests/structure/test-zen-mode.sh` pins all
+of them — the count is deliberately not written out here, because the eval roster is DERIVED
+from the directory and a hand-maintained numeral is exactly what a driven loop cannot catch: `hooks/user-prompt-zen-mode.sh` (the ACTIVE `additionalContext` directive — the
+authoritative copy, re-injected every prompt), `skills/zen-mode/SKILL.md` rule 6,
+`docs/configuration.md`'s `user-prompt-zen-mode.sh` hook row, and every
+`evals/zen-mode-reaction/scenarios/*.yaml`, which embed the whole directive verbatim.
+Z19b pins the directive carriers against each other, Z19c pins the extraction regex
+across the two zen suites, Z19d pins the operator row.
+
+**The anchor is deliberately DECOUPLED from `hooks/lib/zensu-autopilot-state.sh`.** An
+earlier revision used that module's `STAGES` set as the label vocabulary, and review
+found the copy already wrong in three ways: `GATES` (unconditional) was missing while
+`VALIDATE`/`COVER` (gated on `state.options`) were listed, `AWAIT_TDD` was missing too,
+and the four marks are linear while that machine is cyclic — `GATES`, `CONVERGE`,
+`VALIDATE` and `COVER` all re-enter through `toAwaitTdd`, so a retried stage had no
+defined mark. The rule now names the steps the SESSION observed plus the ones it told
+the user it would take, and explicitly forbids copying a canonical pipeline out of
+another component. **Do not reintroduce the coupling**, and note that the worked EXAMPLE
+is part of it: a model copies the example before it obeys the prohibition beside it, so
+the example's step names must belong to no shipped component (they are checked against
+`.claude-plugin/plugin.json`'s skill list by hand — `implement` is a skill and `verify` is the stem of `verify-feature`,
+`fetch`/`parse`/`render` are not).
+
+**Five couplings fire in the UNOBVIOUS direction**, the same shape §"Gate-Disable
+Prefixes" records for G12 — an ordinary edit elsewhere reddens a suite named for the
+zen-mode hook, and nothing points at it from the side that changes:
+
+- Z19b DERIVES its eval carrier roster from `evals/zen-mode-reaction/scenarios`, so
+  ADDING or REMOVING a scenario reddens this suite. Both halves are real only because
+  the floor is taken from the count `promptfooconfig.yaml` REGISTERS: an earlier
+  spelling floored on a bare absolute literal, so deleting a scenario together with its
+  registration left a consistent smaller world in which nothing turned red — and this is
+  the ONLY CI-run check that reads that directory, the sibling that compares against the
+  config being local-only. The derivation must be able to fail LOUDLY when it derives
+  NOTHING: a `registered > 0` conjunct guarded the comparison at first, so a changed
+  registration spelling silently dropped the floor back to the absolute one. Measured
+  against a fixture, the same real loss reported
+  `eval-dir:4-scenarios-but-config-registers-5` with an intact config and reported []
+  once the spelling moved. It pushes `eval-config:registers-only-N` below three and then
+  compares unconditionally.
+- `tests/structure/test-best-solution-first.sh` B14/B14a/B14b pin THIS directive's SCOPE
+  clause — its ranking obligation and the anti-inflation counterweight — so editing that
+  clause reddens a suite named for the best-solution-first hook, with nothing in this
+  section pointing at it. Note the boundary: a rule-6-only edit does NOT trip B14, so the
+  coupling is invisible until the day someone condenses the whole directive.
+- Z19c binds `tests/structure/test-promptfoo-zen-mode.sh` and compares the
+  ACTIVE-directive extraction regex SOURCE, so editing that suite reddens this one.
+- Z19d greps the `docs/configuration.md` hook row and anchors on
+  `^\|\s*`user-prompt-zen-mode\.sh`\s*\|`, so rewording that row — or renaming the hook
+  file — reddens this suite.
+- Z29 drives `tests/structure/zen-anchor-assertions.test.js`, which derives its scenario
+  roster from that same directory and pins each anchor scenario's grader COUNT and its
+  pass/fail VECTOR. So adding, removing or reordering a grader inside a scenario reddens
+  this suite. TWO floors guard the unit file and they count different things — do not
+  conflate them, as an earlier revision of this bullet did. `Z29_FLOOR` lives in
+  `test-zen-mode.sh` and counts `test()` REGISTRATIONS; the per-table `floor:` values live
+  in the unit file and count CASES. Both fire on REMOVAL only: adding a case or a test
+  cannot turn either red, so raising the matching number in the same commit that adds one is
+  a CONVENTION the file states in its own comment, not an enforcement — the same convention
+  `test-session-trail-skill.sh` T22 records. `Z29_FLOOR` sat at 3 against a file of 6 and
+  admitted the deletion of every case that actually executes a grader; the per-table floors
+  were added after three cases were landed in one round without a test, which left each of
+  them deletable with everything green. WHICH CEILING PAYS for the driver, stated because
+  both sibling sections state it for theirs and re-deriving it is a grep across four
+  manifests: `test-zen-mode.sh` has NO `windows-ci.v1.json` entry — it is in that profile's
+  sibling `windows-native-structure.v1.json` `excluded` list with a reason — so no per-suite
+  Windows cap can be blown here, and its `node --test` cost lands on the ubuntu shard
+  partition through `ci-shard-weights.v1.json`, at the unchanged `defaultSeconds`. That file
+  calls its own numbers a balance hint on which coverage never depends.
+
+**The safety carve-out rides in the SAME directive string as the anchor**, and P8 in
+`test-promptfoo-zen-mode.sh` — the only full-fidelity check that the eval copies match
+the hook — is `localStructureTests` and never runs in CI (`run-all.sh --ci` skips it).
+Z19b therefore carries three carve-out needles applied to the whole-directive carriers
+only, NOT to the `skill` carrier, which is sliced to rule 6 while the carve-out is rule 9.
+Without them a reworded carve-out would leave `safety-carve-out.yaml` grading a directive
+no session receives, with every CI suite green.
+
+**A run-time seam exists for the carrier problem and was DECLINED, deliberately.**
+`hooks/lib/rule-block-v1.js` exports `readRuleBlock`, and both
+`hooks/session-start-evidence-discipline.sh` and `hooks/user-prompt-best-solution-first.sh`
+consume it instead of holding a copy; `/zensu:doctor` already renders a `rule carriers:`
+row for those two. Adopting it here would move the directive into a markdown block, delete
+Z19c outright (neither suite would need a hand-copied extractor), and give zen-mode an
+operator surface that can tell "stopped injecting" from "user turned it off" — which it
+currently has none of. The cost is real on both sides and is why it was not taken in this
+change: a malformed block drops the injection SILENTLY, which for zen-mode means the mode
+quietly stops; every eval `spec_block` copy still needs its own text regardless, so it
+removes one copy and not all of them; and it is a migration commit of its own rather than a
+line in a fix. **The fact that actually settles the cost is a BOUND, and an earlier
+revision of this paragraph omitted it:** `hooks/lib/rule-block-v1.js` declares `MAX_BLOCK`
+and refuses a larger block, and `Z30`'s floor for this directive — its declared ceiling
+minus its declared headroom — sits ABOVE that constant, so EVERY admissible directive
+length is over the shared reader's limit. The comparison is stated qualitatively on
+purpose: §"Marker-Block Carriers" above says to name that constant and never to spell its
+value, because a prose copy of the number goes stale silently, and the copy it already had
+to remove from `docs/architecture.md` is the precedent. Adopting the seam is therefore not "a migration commit of its own" but a
+re-decision of a bound shared with the two always-on marker-block carriers, which is a
+larger change than the paragraph implied and lands squarely in the silent
+dropped-injection failure it warns about. Recorded so the next reader knows the
+alternative was weighed, not missed.
+
+**The injection is now BOUNDED, and that is what makes the figures maintainable.** `Z30` in
+`tests/structure/test-zen-mode.sh` measures the emitted directive through `node`
+(`String.length`, because the text carries four non-ASCII marks and `${#var}` counts bytes
+or code points depending on locale) and holds it one-sidedly: growth past the declared
+ceiling fails, and so does a shrink further below it than the declared headroom, because a
+ceiling that has drifted away from its text has stopped being a tripwire. The rule 6
+rewrite took the directive from 2951 to 4664 characters — 57% — with nothing observing it.
+
+**Known gap, accepted:** the KB/KiB totals in `docs/architecture.md` are still hand-derived
+from that character count, so they age whenever the directive moves even though the count
+itself is now pinned. They were corrected in this change (4664 + 1764 ≈ 6.3 KB per turn),
+and the `C6` attribution error in the same paragraph — it named
+`tests/structure/test-best-solution-first.sh`, which contains no `C6` — was corrected with
+them.
+
+**Version: `patch`.** Walked against §"Runtime Lineage (`version_type` is load-bearing)"
+entry by entry: no context-record or workflow-state schema field, no strict key set, no
+hook added, removed or renamed and no matcher changed, no new config key (`zenMode` and
+`zenModeDefault` are pre-existing), and no attestation change. The hook's only output is
+`additionalContext`, which is exactly the ADVISORY shape the hook-inventory exemption
+names, and it returns no `permissionDecision` in either direction. Two things read like a
+breaking change here and are not, which is why the walk is written down rather than left to
+be re-derived: the runtime digest DOES move, because `manifestRuntimeEntries` folds `hooks`
+and `docs` in wholesale — but `readContextInternal` measures the RECORDED root — and the
+directive is stateless, re-emitted from the executing tree on every prompt, so nothing
+persisted crosses the upgrade. The only per-session artefact zen-mode owns is the
+`{"active":true|false}` marker, whose shape is untouched. Choosing `minor` would be
+actively harmful rather than merely wasteful: while the plugin is at major `0` the minor is
+the breaking axis, so it would refuse every in-flight session until the user ran
+`/zensu:adopt-session --confirm`.
 
 ## Pull Request Workflow
 
