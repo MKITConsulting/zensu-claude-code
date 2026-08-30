@@ -19,14 +19,14 @@ in exactly one group. §7's profile table was re-derived from
 `tests/profiles/windows-ci.v1.json` rather than described, so its seven shard ids and their
 membership are the JSON's own, and the entry total is **42**.
 
-**FOUR files under `tests/structure/` have no table row in section 4**, against 22 rows for 26
-files on disk: `review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js`,
-`session-adopt-report-v1.test.js` (all three named in the prose below the table) and
-`session-lineage-v1.test.js` (named nowhere). The count above was raised from 24 to 26 to match
-the real listing, and section 4's own header numeral was DROPPED rather than corrected, so one
-place owns the number. Recorded rather than quietly reconciled — an audited count that disagrees
-with its own table is the shape this document exists to prevent, and an earlier revision of this
-very paragraph said "two files" while naming one, which is the same failure one level down.
+**Section 4's own header numeral was DROPPED rather than corrected**, so exactly one place
+owns the unit-file count and a header can no longer contradict it. It had said 24 while the
+count above said 26; both were then stale again within one merge, because the directory had
+moved to 27. The rowless files are enumerated ONCE, in the closing note under section 4's
+table — deliberately not repeated here, since a second copy of that list is the drift this
+document exists to prevent. Recorded rather than quietly reconciled: an audited count that
+disagrees with its own table is the failure shape, and an earlier revision of this very
+paragraph said "two files" while naming one, which is the same failure one level down.
 
 **Nothing machine-checks any of this.** The reconciliation above is a hand audit performed
 at this commit, not an invariant: the next suite added without touching §3 silently breaks
@@ -52,7 +52,7 @@ is ever measured for the suite.
 |---|---|---|
 | `tests/structure/test-*.sh` (deterministic shell) | **144** — 137 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
 | *(reconciliation)* | a `--ci` run reports **137 structure suites + 5 offline evals = 142 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 144 − 137 gap | — |
-| `tests/structure/*.test.js` (`node --test` units) | **26 files** | invoked *by* parent `.sh` suites |
+| `tests/structure/*.test.js` (`node --test` units) | **27 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
 | Windows contract profiles | **7** (`windows-shard-1`…`-7`, 42 suite entries) | `ci.yml` matrix, `run-profile.js` |
@@ -268,7 +268,7 @@ that suite's failure.
 | `chain-recovery-v1.test.js` | 21 | `test-chain-recover.sh` | chain shape lattice + rearm-receipt predicate |
 | `reviewer-spawn-denial-v1.test.js` | 29 | `test-stop-enforcer-self-review-routing.sh` | host-refused reviewer spawn: structural `tool_use_id` keying, the host error flag, the marker prefix, tail/line bounds, degrade-to-none |
 | `plan-payload-v1.test.js` | 20 | `test-plan-payload-fallback.sh` | plan-source precedence table, hardened plan-file reader refusals, O_NOFOLLOW-unavailable fallback |
-| `zensu-doctor-invocation.test.js` | 24 | *none found* | `/zensu:doctor` invocation allowlist — no `.sh` suite and no `run-all.sh` entry drives this file |
+| `zensu-doctor-invocation.test.js` | 24 | `test-versioned-plugin-upgrade.sh` | `/zensu:doctor` invocation allowlist — driven from that suite, which binds it as `RECOGNIZER_UNIT` and grades it against a registered-case floor; it has no `run-all.sh` entry of its own, because discovery is `test-*.sh` only |
 | `playwright-mcp-proxy.test.js` | 16 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy |
 | `zen-anchor-assertions.test.js` | 7 | `test-zen-mode.sh` (Z29) | zen-mode eval GRADERS: every javascript assertion body compiled, and a pinned pass/fail vector for the two anchor scenarios plus the safety carve-out |
 | `verify-feature-transcript-check.test.js` | 14 | `test-promptfoo-verify-feature.sh` | transcript assertion contract |
@@ -284,10 +284,17 @@ that suite's failure.
 | `owned-process.test.js` | 2 | `test-claude-promptfoo-wrapper.sh` | owned-process lifecycle |
 | `reviewer-spawn-allow-v1.test.js` | 18 | `test-reviewer-spawn-allow.sh` | the reviewer-spawn grant's derived agent set, its silence on every non-grant path, and the one-definition scan |
 
-Three further files — `review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js` and
-`session-adopt-report-v1.test.js` — exist on disk without a row here. That drift predates
-the reviewer-spawn grant and is recorded rather than silently absorbed; the counts above
-are derived from the real directory listing, so they include those three.
+Five further files — `review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js`,
+`session-lineage-v1.test.js`, `worktree-advice-v1.test.js` and
+`session-adopt-report-v1.test.js` — exist on disk without a row here. For FOUR of them that drift predates the reviewer-spawn
+grant; `worktree-advice-v1.test.js` is different and the distinction is worth keeping —
+it was added by the session-trail takeover-destination change and left rowless
+deliberately, because SUITE-OVERVIEW.md itself is graded by no suite and a row here would
+be one more hand-maintained copy of a count nothing checks. The unit file IS driven — by
+`test-session-trail-verdict.sh`, which pins its case count exactly — so it is rowless
+here, not ungraded there. Both are recorded rather than silently
+absorbed; the counts above are derived from the real directory listing, so they include
+all five.
 
 Plus `tests/session-control/session-control-core-v1.test.js` — the Session Control core
 unit suite, reached via `tests/session-control/run.sh`, which is invoked **only** by the

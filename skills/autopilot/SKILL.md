@@ -110,10 +110,15 @@ the pull request. Pass `--workspace <path>` only when the run drives a tree othe
 current one, and only when that tree lies under the project root — a worktree
 outside the project is refused.
 
-A refusal naming a nonterminal run in this working tree quotes the audited release command.
-That command cancels a run owned by ANOTHER session, so it is the user's call: report the
-refusal and the command, and never run it unasked. `/zensu:autopilot-release` is the
-guided form.
+A refusal naming a nonterminal run in this working tree points at the release path. Two
+cautions travel with it. First, `--autopilot-begin` has three refusals that name a run, and only
+the workspace-hold one is foreign by construction — the own-run cases fail above it, so its
+holder can never be yours. The other two, `nonterminal orphan … requires exact recovery` and
+`active run … is not terminal`, DO name a run of your own; the release verb refuses a caller
+that owns the run, and such a run is finished or repaired rather than released. Second, when the run really is another session's, cancelling it is the
+user's call: report the refusal and use `/zensu:autopilot-release`, the guided form that
+reports the holding run first and mutates nothing without an explicit yes. Never run the raw
+verb unasked.
 
 This must succeed before `ExitPlanMode`. Append exactly one invisible binding line to the
 plan CONTENT you pass to `ExitPlanMode` — the gate matches the marker in the bytes the

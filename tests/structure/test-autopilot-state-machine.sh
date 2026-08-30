@@ -1341,12 +1341,43 @@ CONC_REFUSAL_OK=true
 CONC_REFUSAL="$(autopilot_begin_run run_conc_c session_conc_c "$CONC_PROJECT" false true "$CONC_A" 2>&1)" \
   && CONC_REFUSAL_OK=false
 printf '%s' "$CONC_REFUSAL" | grep -qF 'workspace held by nonterminal run run_conc_a' || CONC_REFUSAL_OK=false
-printf '%s' "$CONC_REFUSAL" | grep -qF -- '--autopilot-release --run run_conc_a --confirm' || CONC_REFUSAL_OK=false
+printf '%s' "$CONC_REFUSAL" | grep -qF -- '/zensu:autopilot-release' || CONC_REFUSAL_OK=false
+printf '%s' "$CONC_REFUSAL" | grep -qF -- '--confirm' && CONC_REFUSAL_OK=false
 [ ! -e "$CONC_PROJECT/.zensu/state/autopilot-run-run_conc_c.json" ] || CONC_REFUSAL_OK=false
 if [ "$CONC_REFUSAL_OK" = true ]; then
   check "W3 a third session is refused the held working tree and told how to release it" PASS
 else
   check "W3 same-workspace begin refused with the release command" FAIL
+fi
+
+# W3a -- the `begin` worker must apply the SAME shape tests the shell renderer
+# applies before interpolating a holder into its refusal. The renderer refuses a
+# runId carrying a newline and a stage outside the closed set; its twin in the
+# worker had neither, and S7m compares only the EMITTED TEXT, so it is
+# structurally blind to a guard present on one side and missing on the other.
+#
+# SOURCE PIN, and the reason is a real limit rather than a shortcut: the holder
+# comes from `readRunInventory`, which validates every record with the very
+# predicates this guard uses, so no record that reaches the branch can fail it.
+# A behavioural fixture would have to plant a record `stateValid` accepts and
+# `identifier`/`STAGES` reject, and no such record exists. Pinning the guard is
+# the only available control, and it is the same trade the renderer's own
+# unreachable backstop is pinned under.
+W3A_BRANCH="$(awk '/const workspaceHolder = inventory.find/{f=1} f{print} f&&/\/zensu:autopilot-release`\);/{exit}' "$LIB")"
+W3A_OK=1
+printf '%s' "$W3A_BRANCH" | grep -qF 'identifier(workspaceHolder.runId)' || W3A_OK=0
+printf '%s' "$W3A_BRANCH" | grep -qF 'STAGES.has(workspaceHolder.stage)' || W3A_OK=0
+# The guard must sit BEFORE the interpolating fail, not after it.
+W3A_GUARD_AT="$(printf '%s' "$W3A_BRANCH" | grep -n 'identifier(workspaceHolder.runId)' | head -1 | cut -d: -f1)"
+W3A_EMIT_AT="$(printf '%s' "$W3A_BRANCH" | grep -n 'workspace held by nonterminal run ${workspaceHolder.runId}' | head -1 | cut -d: -f1)"
+[ -n "$W3A_GUARD_AT" ] && [ -n "$W3A_EMIT_AT" ] && [ "$W3A_GUARD_AT" -lt "$W3A_EMIT_AT" ] || W3A_OK=0
+# Control: the slice really contains the emitting line, so a needle that stops
+# matching cannot be mistaken for a guard that moved.
+[ -n "$W3A_EMIT_AT" ] || W3A_OK=0
+if [ "$W3A_OK" -eq 1 ]; then
+  check "W3a the begin worker shape-tests the holder before interpolating it, using its own identifier and STAGES vocabulary" PASS
+else
+  check "W3a begin worker must shape-test the holder before rendering it (guard=$W3A_GUARD_AT emit=$W3A_EMIT_AT)" FAIL
 fi
 
 # --- Release: the one path that ends a run the caller does not own ---
@@ -1632,14 +1663,18 @@ fi
 
 # The refusal must carry the run id, because --autopilot-status is owner-scoped
 # and structurally cannot show a foreign run: without this the user is told to
-# release a run whose id no command will disclose.
+# release a run whose id no command will disclose. It must name the GUIDED form
+# and NOT a runnable `--confirm` invocation: this stderr is the tool result of a
+# `zensu-log.sh --tdd-begin` the model runs, so it is a model-read channel, and
+# `--confirm` is the consent control the guided skill enforces.
 if [ "$GATE_HOLD_RC" -eq 0 ] \
   && grep -qF -- 'run_gate_holder' "$GATE_ERR" \
-  && grep -qF -- '--autopilot-release --run run_gate_holder --confirm' "$GATE_ERR" \
-  && grep -qF -- 'ask that session to cancel it' "$GATE_ERR"; then
-  check "W13 the standalone refusal names the holding run and the release command" PASS
+  && grep -qF -- '/zensu:autopilot-release' "$GATE_ERR" \
+  && ! grep -qF -- '--confirm' "$GATE_ERR" \
+  && ! grep -qF -- 'zensu-log.sh' "$GATE_ERR"; then
+  check "W13 the standalone refusal names the holding run and the guided release skill, never a runnable cancel" PASS
 else
-  check "W13 standalone refusal must disclose the holder and its release command" FAIL
+  check "W13 standalone refusal must disclose the holder and the guided release path" FAIL
 fi
 
 # Positive control. Without it a resolver drift that over-blocks every standalone
@@ -1648,9 +1683,14 @@ fi
 # and 3 for a rejected argument, and this fixture's call fails at
 # tdd_begin_session anyway, so a bare "not 4" passes on any of them. Exclude
 # every code the gate itself can return, and require its refusal to be absent.
+# The negative needle is the sentence LEAD, not a remedy spelling. The renderer
+# emits three foreign/own shapes and only the model one contains `/zensu:`, so a
+# regression that emitted the OPERATOR refusal on this free-tree path would have
+# satisfied a `/zensu:autopilot-release` needle while refusing exactly what this
+# check exists to permit. Every shape starts with this lead.
 if [ "$GATE_HOLD_RC" -eq 0 ] \
   && [ "$GATE_FREE_RC" -ne 4 ] && [ "$GATE_FREE_RC" -ne 3 ] && [ "$GATE_FREE_RC" -ne 2 ] \
-  && ! grep -qF -- '--autopilot-release --run' "$GATE_FREE_ERR"; then
+  && ! grep -qF -- 'workspace held by nonterminal run' "$GATE_FREE_ERR"; then
   check "W14 a standalone chain is permitted in a sibling tree the run does not hold" PASS
 else
   check "W14 standalone gate must permit an unheld sibling tree (hold=$GATE_HOLD_RC free=$GATE_FREE_RC, want 0/past-the-gate)" FAIL

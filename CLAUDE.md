@@ -1066,13 +1066,363 @@ three `stop-chain-enforcer.sh` sites, both `post-review-tdd-delegate.sh` sites, 
 must stay so: `_autopilot_begin_standalone_tdd_critical`,
 `_autopilot_adopt_pending_review_critical`, and both fences in
 `_autopilot_deferred_contention_result`. All four call
-`_autopilot_read_workspace_critical` DIRECTLY, because each is already inside the
-project lease; there is deliberately no public wrapper, and one that existed
-without a caller carried a second, divergent defaulting policy. Owner-scoping that second group would let a
+`_autopilot_read_workspace_critical` DIRECTLY, and the reason DIFFERS per group —
+saying "each is already inside the project lease" is false for half of them. The
+two locked fences are inside it. The two contention fences deliberately read
+UNLOCKED, because they are reached precisely when the lease could not be
+acquired; their own header calls that a read-only proof. What holds for all four
+is that none of them may take a SECOND lease acquisition. The public
+`autopilot_read_workspace` is the wrapper for callers
+OUTSIDE it — it takes the lease itself — and it has exactly ONE: the
+`post-review-tdd-delegate.sh` preflight, which passes a single argument. The Stop hook's rc=4
+read was deleted when the fence began publishing its sentence, so the wrapper's preference
+parameter currently has no production caller at all — S7h2 guards it for the next one. The symbol to look for is `autopilot_read_workspace`'s third
+parameter, not a line number. Do NOT restate this as "there is deliberately no public
+wrapper": that sentence stood here while the delegate was already calling one, and
+it now contradicts the rc=4 account below in the same section. Owner-scoping that second group would let a
 standalone `/zensu:tdd` chain arm underneath another session's durable run in the same tree.
 The team-review identity check is a THIRD shape: it resolves the owner from the RUN record
 and then asks the first question, because the pointer that must still designate that run is
 its owner's, not the attesting caller's.
+
+**The two deferred-review fences ask the owner-independent question and then WEIGH the
+answer; that is not a fourth shape and it is not owner-scoping.** They still call
+`_autopilot_read_workspace_critical` and a foreign run is still fully visible to them —
+what changed is the CONSEQUENCE of a hold. `_autopilot_workspace_hold_blocks_adoption`
+refuses on either of two independent grounds: the holder's `ownerSessionId` equals this
+session (in production only reachable when the owner-keyed pointer read failed while the
+run record is live, so releasing would infer completion for an active OWN generation), or
+`_autopilot_deferred_work_present` reports deferred-review work. With neither, the fence
+returns **6**, the code the Stop hook already treats as a normal no-work result. Every
+unreadable input — an absent holder, an unparseable record, an unresolvable pending path —
+answers BLOCKING, so the relaxation costs nothing fail-open. Only the FIRST fence of
+`_autopilot_deferred_contention_result` takes this; its second fence stays unconditional,
+because `tdd_pending_review_owned_by_other` has proven a foreign claim by the time it runs.
+
+**`_autopilot_deferred_work_present` TRACKS `_tdd_adopt_pending_review_critical`'s "no
+work" verdict; it is a HAND COPY of that ladder and must never be described as "the exact
+predicate".** A bare `[ -f ]` existence test disagrees with the owner in BOTH directions and
+each disagreement costs something real, which is why the copy carries three parts rather
+than one. An UNSAFE marker — symlink, FIFO, directory, dangling link — is tamper evidence
+the owner REFUSES on (`_tdd_path_safe … regular-or-absent`), so a bare test would relax the
+fence on exactly the state the owner blocks on; the copy applies the same guard and reports
+work PRESENT. A plain marker past the TTL is "no work" to the owner, which DELETES it and
+returns 2 — so reporting it present rebuilds the permanent wedge, and because the fence
+returns before that deleter runs, nothing would ever reap it either; the copy therefore
+takes `ttl_hours` (threaded from `$4` in the locked fence and `$3` in the contention one, and passed on as the FIRST argument)
+and excuses it through `_tdd_pending_file_stale`. A stale CLAIM is deliberately NOT excused,
+because the owner reconciles a claim rather than dropping it. The residual divergences are
+named rather than papered over, and the honest form is GENERIC because an enumeration goes
+stale: any state the owner reaches only AFTER reading claim METADATA is "no work" to it and
+"work present" here. Three exist today — a claim whose reconcile status is `owned`, a
+`done|cancelled` claim with no queued marker, and a `done|cancelled` claim whose queued marker
+is itself stale — all over-approximations that keep a refusal, never a relaxation. Note also
+that the copy reads the marker under the OUTER lease only, never the pending lease that
+governs it, so a marker published concurrently can read as absent. The marker is never LOST by
+that: it stays queued, and the next Stop that samples it acts on it — with the tree free that
+is the adoption, under a foreign hold it is the fence refusing again. What a missed sample
+defers is therefore the REFUSAL, never the adoption, which is the same correction the
+known-gap paragraph further down states in full; keep the three sites in step and do not
+reintroduce "a later Stop adopts it", which names an outcome the held case cannot reach. The
+standing fix for all of this is to export the source-selection
+ladder from `zensu-tdd-phase.sh` so both modules call one predicate.
+
+The threading is `ttl_hours` FIRST, `root` second, in both helpers — they take their two shared
+operands in the same order on purpose, because both are optional with defaults and a
+transposed call would produce a plausible-but-wrong anchor rather than an arity error.
+
+**The own-run arm weighs an IDENTITY, so it must not be decided by filename sort order.**
+`read-workspace` reported `inventory.find(...)` — the first nonterminal holder by sorted run
+filename — and several runs can hold one tree, because a record carrying no `workspaceRoot`
+holds EVERY tree in its project. A legacy foreign record sorting first would therefore
+shadow the caller's own live run and flip the arm from block to release. The mode now
+filters to ALL holders and accepts an optional fourth argument, a preferred
+`ownerSessionId`, which both fences pass. **This does not owner-scope the question:** the
+preference selects WHICH holder is reported, never WHETHER the tree is held, and with no
+preference supplied the result is byte-identical to the first holder. `path_indexes` for
+`read-workspace` stays `(0 1)` — the new argument is an identifier, not a path.
+
+**What that fixed, stated because it was a shipped defect and not a hypothetical.** The
+check ran BEFORE anything asked whether a deferred review existed, so a session whose own
+chain was inactive (`OUTER_PRESENT=false` plus `SESSION_ACTIVE!=true` → `ADOPT_ELIGIBLE`)
+was denied at Stop by a foreign run it had nothing to do with — and, because occupancy is
+CONTAINMENT in both directions, by a run whose worktree merely sat below its tree. Measured
+on 0.19.0 against a live consuming project: `autopilot_read_active` correctly answered
+`rc=1` for the foreign session while `autopilot_adopt_pending_review` answered `rc=4`, with
+no `pending-review.json` anywhere in that project. **`test-autopilot-stop-enforcer.sh` S7
+PINNED that behaviour** — a foreign session's Stop was asserted to `block` — so this is a
+deliberate policy change, not only a bug fix: S7 now asserts it RELEASES and still mutates
+nothing, `S7d` is the discriminator that a queued deferred review restores the refusal, and
+`S8g` is the control that an own active generation still fails closed. Do not "restore" S7.
+
+**The rc=4 refusal names the holder, and that is load-bearing rather than cosmetic.** THREE
+sites ON THE DEFERRED-REVIEW ADOPTION PATH produce rc=4 and all three render the existing
+`_autopilot_workspace_refusal` on stderr — the locked fence, and BOTH fences of
+`_autopilot_deferred_contention_result`,
+including the second one, which refuses unconditionally and had been discarding the record.
+State that base: `_autopilot_begin_standalone_tdd_critical` is a FOURTH caller of the same
+renderer, on the standalone-begin path, and it refuses unconditionally — so a change to the
+renderer reaches it too, and it passes its own session id for the same reason the three below
+do.
+That omission mattered precisely because the contention path is reached when the Outer lease
+could not be taken, which is exactly when the hook's own lease-taking read fails too: the run
+id was then named on NEITHER channel. `stop-chain-enforcer.sh`'s rc=4 arm takes the sentence the
+fence PUBLISHED and performs no read of its own. It once re-read the holder here, and the rule
+then was that the read had to carry `$SESSION_ID` as the holder preference — several runs can
+hold one tree, and an unpreferenced read reports `holders[0]` while the fence judged a
+different record, so the remedy could point at a run that is not the blocker. Publishing the
+sentence removed the read and the rule with it; do not restore either from this paragraph.
+
+**Three remedy texts, not one; the distinction is a safety property, and ONE site decides it.**
+When the named holder is FOREIGN the block reason names `/zensu:autopilot-release` and the
+operator stderr line quotes `zensu-log.sh --autopilot-release --run <id> --confirm` — one
+renderer, two audiences, and only the stderr one is read by a human. When it is owned by THIS session the
+reason must NOT offer that command: the release worker skips its self-release guard in exactly
+this state — the guard fires only while the owner pointer still designates the run, and this
+arm is reachable only when that pointer read failed — so following it would cancel the
+session's own live generation. The third is the unnamed fallback when the holder cannot be
+read at all, and it prescribes NO release command either — ownership is unknown on that
+branch, and the own-run case is the LIKELY one there, because it is reached under the same
+lease contention that made the read fail. Prescribing a release would aim it at this session's
+own live generation in exactly the state the renderer withholds it from. So no branch pairs a
+run id with a release command it has not verified as foreign, and
+`_autopilot_workspace_refusal` emits the CLI spelling `zensu-log.sh --autopilot-release --run
+<id> --confirm` for the OPERATOR audience and the slash form for the MODEL audience — one
+renderer, two forms, and the audience argument is what selects. The unnamed fallback's own wording is pinned by S7n, and only
+by S7n. S8g used to hold it and was re-pointed at the own-run wording when the published
+sentence began reaching that fixture, which left it briefly uncovered; S7n is a SOURCE pin,
+because the branch is unreachable from any fixture — the fence blocks for every holder it
+cannot read, and a `stateValid` record always satisfies the renderer's shape tests. It asserts
+the literal quotes no `--confirm` and no `zensu-log.sh` and names both ownership
+possibilities. The holder clause is emitted LAST, and the reason has changed: it originally
+had to be, because its named form ended in a shell command and anything appended was copied
+along with it (an earlier spelling produced `--confirm.`). The MODEL form the block reason now
+carries ends in a slash-command name instead, so the ordering is retained for consistency and
+to keep a future reword from reintroducing the hazard, not because it is still load-bearing.
+
+**A SECOND copy of the foreign sentence lives in the `begin` worker mode**, emitted from the
+JS when a durable begin is refused, and it is pinned in a DIFFERENT suite
+(`tests/structure/test-autopilot-state-machine.sh` W3, which greps the `workspace held by
+nonterminal run …` lead and the `/zensu:autopilot-release` guided form, and asserts `--confirm`
+is ABSENT — do not send a maintainer looking for a needle the suite now forbids). It
+carries NO own-run branch, and the reason is ORDERING rather than a missing identity: the worker
+DOES have the caller's `ownerSessionId` in that mode. What keeps the text foreign-only is that
+the own-run cases above it (`hiddenNonterminal`, the pointer's own nonterminal run) already
+`fail(4)`, and `candidate.runId !== runId` excludes the last survivor — so no own run reaches
+that branch. Those checks must stay ABOVE it; widening them would emit a foreign remedy for the
+caller's own live run. S7m now compares the two byte for byte by extracting the worker's
+template and rendering the helper against the same run id, so a reword of either turns that
+check red; before it, the two were pinned only in separate suites and could drift silently.
+
+**The own-vs-foreign choice belongs to the RENDERER, and putting it anywhere else fails open.**
+`_autopilot_workspace_refusal` takes the caller's session id as its second argument and selects
+the wording itself; every caller that can see its own run passes it. The argument is POSITIONALLY
+REQUIRED and only its VALUE may be empty — the renderer refuses on `[ "$#" -eq 3 ]`, so "optional"
+was the wrong word for it and a two-argument call does not fall back to a form, it refuses. An earlier
+spelling decided it in `stop-chain-enforcer.sh` from a second `_autopilot_holder_owner` read,
+and that read's failure mode was the dangerous one: an unresolvable owner compared UNEQUAL to
+the session id and selected the FOREIGN text, so the hook offered the release command against
+this session's own live generation exactly when it could not establish ownership. Worse, the
+library's own stderr line still quoted that command regardless, so the withholding was
+contradicted on the operator channel. One decision site, inside the renderer, removes both:
+the hook now resolves two names rather than three, and its only failure mode is the unnamed
+fallback. A caller that omits the id gets the foreign wording — so omitting it is the thing to
+check when a new call site is added. **Two arguments, not one:** a site that renders the
+holder must ALSO forward the preference to the READ that produced it. The standalone-begin
+fence passed the id to the renderer and not to the read for one round, which meant it could
+never emit the own-run wording and would quote a release command against whichever record
+sorted first. Three reviewers found that independently; treat "renders the holder" as
+implying both.
+
+**The fence PUBLISHES its rendered sentence, and the hook prefers it over re-deriving one.**
+`_autopilot_publish_workspace_refusal` sets `ZENSU_AUTOPILOT_WORKSPACE_HOLD_TEXT` beside every
+rc=4 render, and BOTH public entry points — `autopilot_adopt_pending_review` and
+`autopilot_begin_standalone_tdd` — clear it first, so a stale sentence can never be reused.
+(The name carries the library prefix on purpose: it is the only module-scope assignment in this
+file, and the house precedent for a sourced-library global the Stop hook reads by name is
+`ZENSU_SAFE_VERSION_RE`.) **TWO forms are rendered from one holder.** The OPERATOR form goes to
+stderr and quotes the audited `zensu-log.sh --autopilot-release --run <id> --confirm`, because a
+human reads it. The MODEL form is what the block reason carries and names `/zensu:autopilot-release`
+INSTEAD — `--confirm` is the consent control, so a complete invocation in a model-facing channel
+routes around the only place that control exists, and a bare `zensu-log.sh` is a name a model
+would resolve against the repository it is standing in. S7k pins all three shapes. This exists because the hook's own read happens AFTER the lease is released and the
+worker reports `preferred || holders[0]`: a second FOREIGN run publishing in that window could
+be named instead of the record the fence judged, and the rendered remedy quotes a real CANCEL.
+Deriving it once, under the lease, from the judged record closes that window — and it made the
+CONTENDED path strictly better, which is the measurable part: S8g now sees the run NAMED with
+the own-run wording where it previously got only the unnamed fallback, because the contention
+fence's unlocked read succeeds exactly when the hook's lease-taking one cannot.
+`_autopilot_locked_run` runs its callback in the current shell and the Stop hook calls the
+public verb without a subshell, which is what lets a variable carry it.
+
+**The hook now takes the published sentence and NEVER re-derives one**, and the fallback that
+briefly stood beside it was deleted rather than kept. Its stated trigger — "a runtime that does
+not publish" — was unreachable (the plugin root is derived from the hook script itself and
+re-checked, so hook and library are always one tree), while its REAL trigger was a failed render
+— in which case a second read is a fresh chance to name the WRONG run, not a recovery. Deleting
+it removed this file's last module-private `_autopilot_*` call: `hooks/` outside this library now
+contains none. The suite still drives five private helpers directly, which is what
+S7f/S7f2/S7g/S7h/S7j/S7k/S7m rest on.
+
+Assertions inside ONE suite pin the wording — `tests/structure/test-autopilot-stop-enforcer.sh`
+S7d's guided-form needle plus its assertion that `--confirm` is ABSENT — the AUDITED
+`--autopilot-release --run <id> --confirm` needle moved to S7k when the block reason took the
+model form, and S7k carries the `grep -qF --` guard that spelling still needs (without it grep
+parses the pattern as options and the check passes vacuously, which it did),
+S7d's positive assertion on the `Retrying Stop cannot clear the hold` clause — it was a
+NEGATIVE assertion on a literal that existed nowhere in the tree, which could never fail and
+left AC-004's no-retry-advice half unpinned — S7i's containment-case naming needle, S7k's three-shape renderer pin (operator form quotes the
+audited command, model form names only the guided skill, own-run holder gets neither)
+(the release command must be ABSENT there and present for a foreign holder), S7j's negative
+shape tests on both renderers, S7n's source pin on the unnamed fallback (behaviourally
+unreachable, so a source pin is the only available control), S8i's end-to-end own-run pin (the run named, the release
+command absent), S8g's contended own-run pin (the same property reached through the PUBLISHED
+sentence rather than the hook's read), S7m's byte comparison of the `begin` worker's twin
+against the renderer, and the shared `holds this working tree` lead — so rewording it
+is a same-suite edit, EXCEPT for the own-run clause: S7o pins `which belongs to this session`
+and `finish or repair that run` against `skills/autopilot-release/SKILL.md`, which teaches the
+model to recognize that case by those literals. The needles are deliberately different: a bare
+`autopilot-release` substring matches BOTH branches and would have let the named and unnamed
+paths pass each other's check.
+
+**The relaxation DISCLOSES.** `_autopilot_workspace_hold_blocks_adoption` prints one stderr
+line before returning false, because rc=6 is otherwise indistinguishable from "no run held the
+tree at all" and a guard that stands down invisibly is the shape this repository treats as
+worse than the wedge it removes. It is not a bypass-ledger entry and must not become one: no
+user-supplied switch was escaped. **The premise under that argument is UNVERIFIED and is
+recorded as such:** nothing measured in this work establishes that this host surfaces
+Stop-hook stderr to the user on a non-blocking exit 0. If it does not, the relaxation has no
+observable at all and the disclosure argument above buys nothing — so verify it before
+leaning on it, and do not restate the claim as though it were established. S7g captures that stderr separately and requires it — the
+hook fixtures cannot, because `invoke()` discards stderr, so without a direct capture the line
+could be deleted with every check green. **Accepted cost, named because it is not obvious:**
+the line is UNRATED and the state that produces it is a steady state, not an event — an
+ordinary session with no own run and no active chain reaches `ADOPT_ELIGIBLE` on every turn
+end, so the disclosure repeats on every Stop for as long as the foreign run stays nonterminal.
+Gating it would remove the observability it exists for; the repetition is the price — but
+the price has a known, unpaid remedy and it is named here rather than left to be rediscovered:
+this repository already ships the shape that keeps the observability without the noise, the
+per-session band file in `user-prompt-context-nudge.sh`, which here would key on the pair
+(session, holder run id) so the line prints once per hold rather than once per turn end. Not
+implemented; a follow-up, not a defect.
+
+**Two ordering rules inside the fence, both learned by having them wrong.** The ladder
+has the WORK arm LAST, and every arm above it returns the same value — 0, blocking. So while a
+marker exists a `blocks` result is UNATTRIBUTABLE, and a check that drives the guards then
+proves nothing about any of them. State the mechanism, not the outcome: an earlier wording here
+said the work arm "masks every guard above it", which has the order backwards. That is why S7f keeps only
+the marker-decided arm and S7f2 re-drives every input guard, plus the claim and unsafe-marker arms, after `rm -f`. And the `root`
+parameters default to `${CLAUDE_PROJECT_DIR:-}` rather than to empty — an empty value is
+indistinguishable from unset to `_tdd_path_safe`, so defaulting to empty would CLEAR a correct
+anchor and reinstate the nearest-existing-ancestor fallback the parameter exists to prevent.
+
+**The library ALSO writes that sentence to stderr from inside the fence, and the redundancy
+is deliberate.** They serve different consumers — operator stderr versus the model-facing
+block reason — and it is the CONTENDED case that needs both: there the library renders a
+NAMED line from its unlocked read while the hook's lease-taking read fails and falls back to
+the unnamed remedy. Removing either loses the run id on one of the two paths. Accepted cost:
+on a contended Stop the user can see the sentence twice, and the two reads are taken at
+different instants.
+
+**Version: `patch`.** Walked against §"Runtime Lineage" entry by entry: no context-record or
+workflow-state schema field, no strict key set (the run schema's `STATE_KEYS` /
+`STATE_KEYS_WORKSPACE` are untouched), no hook added, removed or renamed and no matcher
+changed, no new config key (the fence reuses `zensu_pending_review_ttl_hours`), no
+attestation change. The `read-workspace` worker mode gains an OPTIONAL fourth argument, which
+is a call convention inside one installation and never a persisted shape — an older runtime
+passing three args gets its previous answer. The Stop hook denies strictly LESS than before,
+which cannot make state written by one runtime unreadable to the other; the capability rule
+in that section is about ADDING a hook that can deny, and relaxing an existing hook's deny is
+not in the list. Recorded here because the section's other `**Version.**` paragraph reads
+`minor` and describes the ORIGINAL pointer/schema change, not this delta.
+
+**The audience is a property of the CHANNEL, and all three model-read channels were routed to
+the guided form.** The two that a first pass left behind were `_autopilot_begin_standalone_tdd_critical`'s
+stderr — the tool RESULT of a `zensu-log.sh --tdd-begin` a model runs — and the `begin` worker's
+own `fail(4, …)` twin, surfaced by `zensu-log.sh` the same way. Both now emit
+`/zensu:autopilot-release` rather than a runnable `--confirm` invocation, which cost W3 and W13
+in `test-autopilot-state-machine.sh` and re-pointed S7m at the renderer's MODEL form. The
+OPERATOR form survives on exactly one channel: the Stop hook's stderr, where a human reads it.
+`_autopilot_publish_workspace_refusal` therefore takes the stderr audience as its third
+argument, and `_autopilot_workspace_refusal` REFUSES an unrecognized audience rather than
+defaulting to the permissive spelling.
+
+**CLOSED, and recorded so it is not re-opened as a gap:** the contention fence's
+foreign-holder-WITH-WORK rc=4 arm had no executed case — S8g reaches that fence through the
+own-run arm and S8h through the release arm — and S8j now drives it, asserting the run is named
+and no runnable cancel is quoted.
+
+**Known gap: the `root` parameter of `_autopilot_deferred_work_present` and
+`_autopilot_workspace_hold_blocks_adoption` is UNPINNED, for TWO reasons and the second is
+structural.** Asserting that the fence blocks pins nothing there, because the
+predicate fails closed and every failure mode gives that same answer. The discriminating shape
+needs the anchor alone to decide, and an attempt at it did not reproduce that split — the marker
+path is resolved through `zensu_resolve_project_dir` rather than through the symlinked component
+such a fixture plants. And every fixture in that suite lives under `$TMP`, while
+`_tdd_paths_safe` always trusts `${TMPDIR:-/tmp}` as an anchor, so the argument can never BE the
+deciding anchor there. A discriminating check needs a fixture rooted outside both `TMPDIR` and
+`HOME`. Recorded rather than papered over with a check that passes for an unestablished reason.
+
+**Known gap: `_autopilot_deferred_work_present` tracks the MARKER half of the owner's ladder
+only.** (Anchor by SYMBOL, not by line: every line reference into this file went stale within a
+round while the symbol names did not.) Any claim file
+at all reports work present, while the owner reads claim METADATA and answers no-work for a
+claim reconciled `owned` by another session and for a `done|cancelled` claim with nothing
+queued. So with the tree free those states release, and under a foreign hold they still block —
+the same class of refusal this change removes, one case narrower. Direction is a retained
+refusal, never a relaxation, which is why it ships; closing it needs a read-only reconciliation
+status `zensu-tdd-phase.sh` does not export, which is the recorded standing fix.
+
+**Known gap: the own-run arm is a correctness guard, not an authorization boundary.** It
+decides on `ownerSessionId`, an unauthenticated field in a directory this file elsewhere
+records as session-writable, and `stateValid` checks only its SHAPE — there is no MAC and no
+counter over a run record. So a session can flip its OWN fence between block and relax by
+editing its own record, exactly as it could already by deleting it. The holder preference
+closes the ACCIDENTAL shadowing (a legacy foreign record sorting ahead of the caller's live
+run); it does not close a deliberate write, and nothing here should be read as doing so.
+
+**There is a SECOND direction, and it runs the other way.** The preference selects the holder
+by `ownerSessionId`, so a co-tenant that writes ONE shape-valid record carrying a VICTIM's
+owner id and a `workspaceRoot` containing the victim's tree steers that victim's fence onto the
+own-run arm — and the own-run arm withholds the release command and names a run the victim can
+neither see through `--autopilot-status` (which is owner-scoped) nor release. The direction is
+non-destructive and it cannot make a fence RELAX: the own-run arm blocks. But it is a foreign
+writer changing what another session is told, which is more than "a session can flip its own
+fence", and the state directory is writable from inside any session in the project.
+
+**Known gap: a stale marker under a held tree is never reaped.** The release arm returns
+before `tdd_adopt_pending_review` runs, and that call is what owns the `rm -f` for an expired
+marker. The marker is inert while stale and is reaped by the first adoption after the hold
+clears, so this is a leak rather than a wedge — but the fence's own comment argues the
+reaping asymmetry against the OPPOSITE choice, and it applies to the branch that shipped too.
+
+**Known gap, accepted and named: work-presence is sampled once, unlocked, at BOTH fences.**
+Scoping this to the contention path was wrong and read as if holding the Outer lease made the
+locked fence immune. It does not: the Outer lease and the PENDING lease are different
+resources and `_autopilot_deferred_work_present` takes neither, so
+`tdd_write_pending_review` — which takes the pending lock — can publish a marker that either
+fence misses. The contention fence has the sample outside its own check-prove-recheck bracket
+as well, but that bracket only ever re-read OCCUPANCY, so it was never the thing that would
+have covered this.
+
+State the consequence precisely, because an earlier wording got it backwards: what is deferred
+is the REFUSAL, not the adoption. A missed marker makes this Stop RELEASE; on the next Stop the
+marker is visible, so the fence sees work in play and the foreign hold BLOCKS again. The marker
+is never lost, and no Stop adopts anything it should not — but "a DEFERRED adoption" described
+an outcome that does not occur, since a held tree is exactly where adoption does not happen.
+
+**CONTAINMENT is pinned, and it took a real git fixture to do it.** Every other check in the
+suite builds a plain `mktemp -d` project, so holder and stopper resolve the SAME workspace
+key and only EQUALITY is exercised — the containment branch of `mayHoldWorkspace` is never
+taken. S7i is the one that reaches it: `git init` plus `git worktree add` of a NESTED
+worktree, the run begun with that worktree declared through `autopilot_begin_run`'s sixth
+argument, and the Stop driven from the CONTAINING tree. It asserts both directions in that
+one tree — release with nothing queued, and a refusal naming `contain_run` once a marker
+exists. That is the exact shape of the reported production defect, so it is the check to
+keep working if the fixture ever goes red. Note the two prerequisites it silently needs: a
+usable `git worktree` (it fails loudly rather than skipping if the directory is absent) and
+`autopilot_begin_run`'s workspace override, which refuses anything that is not itself a git
+toplevel.
 
 **One resolver decides the workspace for the writer and for every gate.**
 `_autopilot_session_workspace` resolves cwd → git toplevel → canonical path, and falls back
@@ -1166,9 +1516,14 @@ hand; the release pipeline owns it.
   `tests/structure/test-autopilot-plan-delegate.sh`. Those five cases were written against
   the refusal receipt and now assert the silence instead; F45c in particular no longer pins
   an ORDERING between the ownership and origin refusals, because neither is reachable.
-- `/zensu:doctor` still carries NO Autopilot row of any kind, so a held workspace is visible
-  only in the `--autopilot-begin` refusal and in `/zensu:autopilot-release`. Do not claim
-  doctor visibility until that row exists.
+- `/zensu:doctor` still carries NO Autopilot row of any kind. A held workspace is visible in
+  the `--autopilot-begin` refusal, in the standalone-TDD begin refusal, in the deferred-review
+  Stop refusal (which names the holding run whenever it can be read — including when it
+  belongs to this session, where only the release COMMAND is withheld — and names no run at
+  all when the read failed), in the
+  stderr line the fence prints when it stands down, and in `/zensu:autopilot-release`. Do not
+  claim doctor visibility until that row exists — and keep this enumeration in step with the
+  rc=4 account above, which is where those refusals are specified.
 - The `SESSION_CONTEXT_UNAVAILABLE` arm in `plan-approved-delegate.sh` is defense in depth, not
   the live path: `zensu_bind_hook_session` refuses an unresolvable session earlier, so the receipt
   a caller actually sees in that state is `RUNTIME_UNAVAILABLE`. Measured by P8a-P8c in
@@ -1180,7 +1535,32 @@ hand; the release pipeline owns it.
 
 Moving together with the scope: `_autopilot_owner_key`, `_autopilot_active_path`,
 `_autopilot_legacy_active_path`, `autopilot_workspace_root`, `_autopilot_session_workspace`,
-`_autopilot_read_workspace_critical`, `_autopilot_rendered_dir`, `autopilot_release_run`, the `read-active` / `read-workspace` /
+`_autopilot_read_workspace_critical`, `autopilot_read_workspace` and
+`_autopilot_workspace_refusal` — which `stop-chain-enforcer.sh`'s rc=4 arm NO LONGER resolves at
+all: it once resolved three names there by `declare -F`, and all three are gone (the ownership
+read moved into the renderer, and the re-read fallback was deleted). What the arm now depends on
+across the file boundary is the VARIABLE spelling, not a function name; the one surviving
+`declare -F` in that file guards `autopilot_adopt_pending_review` and is unrelated —
+`_autopilot_holder_owner`, `_autopilot_holder_run_id`, `zensu_pending_review_claim_file` (exported from
+`zensu-tdd-phase.sh` so the `.claim` suffix is not re-encoded here — a drifted copy would fail
+OPEN, because adoption RENAMES the marker onto the claim and a reader looking for the wrong name
+would see neither file and answer "no work" while a deferred review is live; the accessor now
+takes an OPTIONAL pre-resolved pending path, and the owner module's five former hand-spellings
+call it, so `zensu-tdd-phase.sh` spells the suffix exactly ONCE. A SIXTH spelling survives outside
+that module and belongs on this roster: `hooks/lib/session-control-core-v1.js` hardcodes the whole
+filename `pending-review.json.claim`, which no accessor can reach and nothing pins against this
+one) and
+`_autopilot_publish_workspace_refusal` (both intra-file: the Stop
+hook calls neither, so renaming either is a single-file edit), plus the module-scope
+`ZENSU_AUTOPILOT_WORKSPACE_HOLD_TEXT` that publisher sets — THAT spelling is what
+`stop-chain-enforcer.sh`'s rc=4 arm reads across the file boundary, so renaming IT is a
+cross-file edit whose failure mode is the unnamed fallback — `_autopilot_deferred_work_present`,
+`_autopilot_workspace_hold_blocks_adoption` (whose pending predicate is a HAND COPY of
+`_tdd_adopt_pending_review_critical`'s ladder, pinned end-to-end by S7/S7d/S7e/S7i and
+arm-by-arm by S7f/S7f2/S7g, which drive it directly because no hook fixture reaches those
+guards; S7h and S7h2 pin the holder preference at the private and PUBLIC read; S8i pins the own-run remedy end to end through the LOCKED
+fence, and S8g reaches the same wording through the CONTENTION fence — its stub kills
+`_autopilot_locked_run`, so the two cover both publish paths rather than one twice), `_autopilot_rendered_dir`, `autopilot_release_run`, the `read-active` / `read-workspace` /
 `begin` / `apply` / `release` / budget worker modes with their `path_indexes`,
 `projectRootIndex` and `workspaceRootIndex` entries, the worker's own second re-encoding of the
 pointer name (`activePointerFor`, `OWNER_POINTER_PREFIX`, `LEGACY_POINTER_NAME`), the SEVEN hook
@@ -1189,8 +1569,16 @@ pointer spellings, `hooks/lib/zensu-log.sh` (the `--workspace` flag, the owner-a
 `--autopilot-status`, and the `--autopilot-release` verb with its derived event id),
 `skills/autopilot/SKILL.md`, `skills/autopilot-release/SKILL.md`, and the plugin manifest's
 skill list. Operator-facing accounts that must move with it: `README.md`'s skill table,
-`docs/tdd-manager-workflow.md` §"Autopilot run scope" and the `session-start-autopilot-resume.sh`
-row in `docs/configuration.md`.
+`docs/tdd-manager-workflow.md` §"Autopilot run scope", the `session-start-autopilot-resume.sh`
+row in `docs/configuration.md`, and — easy to miss, because the roster named only the resume
+row while the deferred-review fence account lives elsewhere — the `stop-chain-enforcer.sh`
+row in `docs/configuration.md` — and its `pendingReviewTtlHours` row, the ONLY written statement
+anywhere that at `0` a marker of any age sustains this refusal indefinitely. The
+`stop-chain-enforcer.sh` row PARAPHRASES the fence's pending-work precondition but
+QUOTES both remedy spellings — `/zensu:autopilot-release` and the audited
+`zensu-log.sh --autopilot-release --run <id> --confirm` — so a reword of either remedy is a
+cross-file edit. Only the refusal SENTENCE itself is pinned solely by the
+`test-autopilot-stop-enforcer.sh` assertions above.
 `tests/structure/test-autopilot-state-machine.sh` pins the pointer, the two refusals and the
 legacy fallback; `test-autopilot-adversarial-recovery.sh` X1a pins the `begin`, `read-active`,
 `release` and `read-workspace` `path_indexes` literals. It does NOT pin every mode in the table
@@ -3329,6 +3717,262 @@ the unset is BELT, not the mechanism: `--config-dir` already outranks the variab
 the flag. Exactly ONE invocation there omits it — the L10 case, whose whole subject is
 that the variable is honoured — and `L28` pins that it stays exactly one, because a
 second exemption is indistinguishable from a forgotten `env -u`.
+
+## Takeover Destination (`worktreeAdvice` in `skills/session-trail/scripts/trail.mjs`)
+
+**A THIRD session-trail axis, and the one most easily confused with the other two.**
+§"Git Mutation Tables" tracks the WRITE-ANCHOR contract — *may I write there* — in six
+carriers. §"Session Lineage Ledger" tracks a chain of sessions handing work to each
+other. This one asks *will the directory still exist while I work in it*, and it shares
+no code with either. All three live in the same skill; a change to one lands in none of
+the others.
+
+**The answer is now the same on every arm: a worktree of the taker's OWN.** There used
+to be one exception — an already-archived session whose directory had survived was
+adopted in place — and it was the worst arm to except rather than the safest. A survivor
+is the tree `git worktree remove` refused on, and 37 of 40 sampled survivors were dirty,
+so a takeover's first commit very often removes the condition that kept it alive.
+**That is a correlation over 40 samples, and the wording has to stay one:** "close to by
+construction" asserted a MECHANISM the sample does not support, and it stood here and in
+`SKILL.md` while the emitted text hedged it correctly as "almost always" — a maintainer-
+facing overstatement above a user-facing statement that was already right. SKILL.md §6
+measures the other half of the shape: 498 of 657 archived worktree-sessions lost their
+directory. The arms now decide only what to SAY, never whether to stay — an arm that
+returns without a `git worktree add` line has reintroduced the defect, which is what
+`WT8k` grades over a source-derived roster of all eight fixtures rather than a hand list.
+`WT8L`/`WT8L2` grade the half `WT8k` cannot see: the `-b` SPELLING, in both directions.
+That was the one measured routing decision the change turned on and nothing asserted it —
+deleting `-b claude/<name>-cont` left every check in both suites green. The gone arm's
+forbidden needle is the LONGER `add <path> -b claude/`, because its own prose legitimately
+offers `-b claude/<name>-cont` as the remedy when git reports the branch already checked
+out somewhere.
+
+**`archivedAndDead` is named for what the EXPRESSION computes.** It was `safeToAdopt` —
+a name that read as clearance — and then `archivedSurvivor`, which read as "the directory
+survived" and needed eight lines of apology on the gone leg explaining that it means the
+opposite there. The predicate carries no directory term at all
+(`archived === true && !liveDespiteArchive`); the directory split happens one level down,
+in `leg`. A name that has to be defended at one of its two use sites is the wrong name,
+and the apology comment went with the rename rather than surviving it.
+
+**The arm is decided ONCE, above the directory split, and both legs index `ADVICE_LEADS`.**
+Lifting the three predicates was only half the job — the four-way LADDER that consumes them
+was hand-written twice, in the same order, and this feature's own history is the argument:
+retiring the old early return forced the identical reordering edit to be made by hand in
+both places, where a one-sided version parses, renders, and is caught only if a fixture
+happens to cover the affected arm. Each cell of the table is a FUNCTION, because two arms
+interpolate a measured value (the live pid, and why the archive state could not be read),
+and one shape is cheaper to hold than two.
+
+**The rule has TWO halves and the second is easy to drop.** Choosing a directory settles
+where COMMITTED work goes; a `git worktree add` carries nothing else. The present-directory
+arms therefore also carry `CARRY_OVER`, the recipe that moves the uncommitted half out, and
+the gone arms say the recipe cannot run against a path that is not readable rather than
+printing one whose source is not there.
+
+**The safety properties of that recipe are enumerated in the two reader-facing carriers,
+and this section deliberately restates neither them nor their COUNT.** It used to, and that made a FOURTH hand-maintained copy of text that
+already exists in the code comment above `CARRY_OVER`, in the emitted array a human reads,
+and in `SKILL.md` flow 3 step 4 — a four-way agreement whose own paragraph recorded that it
+had already gone stale once (it read THREE for a round after `--binary` was added, and FOUR
+for a round after the quoting, the paste-unit split and the regular-files-only loop landed).
+The two READER-FACING carriers are the authority: the `CARRY_OVER` rationale comment in
+`skills/session-trail/scripts/trail.mjs` and `skills/session-trail/SKILL.md` flow 3 step 4,
+which must agree with each other on the COUNT and on every property. `T35b` pins the
+SKILL.md copy needle by needle and `WT8m3`/`WT8m4`/`WT8m5` plus
+`tests/structure/worktree-advice-v1.test.js` pin the EMITTED array. State the bound with
+them: no check compares the two COUNTS, and the rationale COMMENT above `CARRY_OVER` has
+no pin at all — which is where three stale claims were found in one review cycle. That
+agreement is held by review, not by a suite. What stays here
+is the pin roster below and the gaps at the end — the parts that exist nowhere else.
+
+**Three hand-maintained counts encode ONE fact, in TWO files, and they are related by
+arithmetic nothing computes:** `WT8_PRESENT_EXPECT` and `WT8_GONE_EXPECT` in
+`tests/structure/test-session-trail-verdict.sh`, and `T35_EXPECT` in
+`tests/structure/test-session-trail-skill.sh`, where **`T35_EXPECT` = `WT8_PRESENT_EXPECT` +
+`WT8_GONE_EXPECT`**. Adding one command to `CARRY_OVER` reddens two suites in two files, and
+each failure message now names its sibling so the second edit is not a hunt. The VALUES are
+deliberately not repeated in this file: they moved three times inside one review cycle and
+this paragraph was stale after every one of them, which is the drift a fourth hand copy
+always produces. Read them from the two suites; what this paragraph owns is the RELATION.
+**They must NOT
+be derived, and that is worth stating so nobody "fixes" them into vacuity:** the same
+extraction that would produce the expectation also loses the two-space prefix, so a derived
+expectation drops in lockstep with the defect and passes. The exactness is load-bearing;
+what was missing was signposting.
+
+**Coupled carriers, and the pin that holds them:** the advice command literals —
+`TAKE_YOUR_OWN`'s and the gone leg's `git worktree add` spellings AND every `CARRY_OVER`
+command — are hand-restated in `skills/session-trail/SKILL.md` flow 3 step 4, in its table
+and its fenced blocks. A FOURTH copy of the gone-leg spelling lives in `printResume` and is
+OUTSIDE the extractor's range, which ends at `worktreeAdvice`'s closing brace: it is
+byte-identical today and a one-sided edit to it is unpinned. `T35`/`T35-control` in `tests/structure/test-session-trail-skill.sh`
+extract every two-space command literal from the first hoisted constant through the END of
+`worktreeAdvice` — a RANGE, not one array, because scoping it to `CARRY_OVER` would leave
+the two literals that encode the rule unpinned, and because the constants now live at module
+scope while the gone leg's command is still inside the function. Its `sed` decodes the one
+JavaScript escape those literals carry (`\'`, from the shell-quoted placeholders); without
+that, every quoted command reads as missing from a markdown carrier that agrees with it.
+**Both scans are SCOPED to flow 3 step 4.** The rationale scan always was, because `symlink`
+and `mktemp` occur in unrelated passages and a whole-file grep passes while the recipe's own
+rationale is gone. The COMMAND scan was not, and that made it presence-in-the-file rather
+than presence-in-the-right-cell: transposing the `-b` and no-`-b` spellings between the
+table's *Directory present* and *Directory gone* columns left both literals in the file, so
+the model read the rule backwards with every check green — and moving the fenced recipe out
+of step 4 entirely was invisible the same way. `T35-control` asserts an EXACT count, not a
+floor: a floor survives deleting the `apply --stat` step from both carriers at once, which is
+the edit the pin exists to stop. `T35b-control` guards both scans against an empty slice.
+
+**`WORKTREE_ADVICE_COMMAND` / `adviceBlock` are a producer/consumer contract between one
+array and two briefs.** A command line is one indented exactly two spaces; prose sits at
+column zero. It is deliberately NOT a `git `-anchored rule any more — `CARRY_OVER` opens
+with a `PATCH="$(mktemp …)" && …` line, and its copy loop carries `while`, `[`, `mkdir` and
+`done` lines besides — and the widening cuts both ways: a prose line that acquires
+a two-space lead-in is published inside a ```bash fence in two persisted briefs. `WT8p`
+grades both directions structurally rather than against a verb allowlist. Before the
+extraction the two briefs disagreed about the same array — `cmdHandoff` re-fenced per line,
+`cmdTakeover` fenced nothing — so a recipe was runnable in one brief and prose in the other.
+Contiguous commands coalesce into ONE fence, and it takes TWO pins to hold that — one per
+renderer. `WT8q` drives `cmdTakeover` and `WT8q2` drives `cmdHandoff`, which is the call
+site whose own comment names it as the origin of the per-line-fencing defect. One was not
+enough and that is measured, not argued: with only `WT8q`, reverting `cmdHandoff` alone
+left every check in both suites green. Both render a PRESENT-leg brief, which no other
+fixture here does — every other one is directory-gone, and a single isolated command cannot
+show coalescing at all. `WT8r` consumes those same two renders rather than making its own,
+and covers the other axis: the `r.cwdExists` prose branches in both briefs, graded against
+the gone leg so it cannot pass by rendering one branch twice.
+
+**Coalescing is now a TWO-SIDED property, and both pins assert the split as well.** One
+fence is one COPY BUTTON, so coalescing all four carry-over commands put the destructive
+`git apply` in the same paste unit as the `grep` and the `apply --stat` that exist to gate
+it — and the "these steps sit between the diff and the apply" argument is about execution
+ORDER, which only holds if the human stops between the third command and the fourth. A
+column-zero prose line breaks `adviceBlock`'s run, so the two READING steps still coalesce
+(splitting those from each other would reintroduce the per-line fencing) while the
+destructive line sits in a later fence of its own. `WT8q`/`WT8q2` grade both halves, because
+either one alone is satisfied by the shape they exist to reject.
+
+**A THIRD consumer renders the same array and no check reached it.** `cmdShow` prints every
+line into a survey view with a nine-space prefix and no fence; when the carry-over recipe
+landed the array grew from roughly six lines to dozens, so `show` began dumping a
+paste-and-run recipe into the middle of the one output whose value is that you can scan it.
+`worktreeAdvice(r, { carryOver: false })` returns the decision half only, and `cmdShow`
+points at the briefs for the rest. The option is opt-OUT on purpose: the briefs are what a
+human pastes from, and a new caller that forgets it gets more rather than less. The `--json`
+payload is deliberately NOT summarized — it is a data carrier, and every `wt_case` in the
+verdict suite reads the advice through it, which is what `WT8s` grades from both sides.
+
+**The advice surface was NOT extracted into a `worktree-advice-v1.mjs` sibling, and the
+decline is recorded here so it is not re-litigated from scratch — twice already a round
+reported it as recorded when it was not.** The repo's own convention for an extracted module
+is exactly that shape: `session-lineage-v1.mjs` sits in the same directory with its own
+`node --test` file. Three facts argue for taking it. The unit file is already NAMED
+`worktree-advice-v1.test.js`, for a module that does not exist. Importing the "pure" advice
+surface evaluates `claude-path-v1.js`, `bash-source-write-parse.js` and `session-lineage-v1.mjs`
+at load, because they are `trail.mjs`'s own imports. And `worktreeAdvice` can reach
+`process.exit` through `fail()`, which is not a thing a library does to its importer.
+
+What argued against taking it in the round that raised it is concrete rather than
+conservative: `T35`'s extractor anchors `^const CARRY_OVER = \[`, `^function worktreeAdvice\(`,
+`^\}$` and `^const WORKTREE_ADVICE_COMMAND` against `$TRAIL_MJS`, and that anchor set has
+already gone dead once without a sound. Moving the constants re-points four anchors,
+`T35_EXPECT`, this roster and the unit file's import in one edit.
+
+**The trigger is a second importer, or the next change that has to re-point those anchors
+anyway.** The move carries three obligations: re-home `livePid`, replace the `fail()` call
+with a thrown error, and re-point the extractor.
+
+**Known gaps, accepted and named:**
+
+- **The rule is prose, not a gate.** Nothing stops a session working in another session's
+  worktree; the source-write gate only refuses a COMMIT outside the anchor, which is the
+  other axis. This change makes every rendered recommendation point at the taker's own
+  worktree — it does not enforce one.
+- **The carry-over's untracked half carries a hazard no git flag touches**, and it is now
+  a RUNNABLE loop rather than a sentence. `ls-files --others --exclude-standard` reports a
+  SYMLINK by name like any other path, so a copy follows it out of the worktree — in a
+  repository you have not vetted, that is how a key or another checkout leaves its
+  directory. The check is the PAIR `[ -f "$s" ] && [ ! -L "$s" ]`, and neither half is
+  optional: `test -L` alone — which both carriers used to name as *the* check — is a symlink
+  test offered as the implementation of a REGULAR-FILE rule, so FIFOs, device nodes and
+  sockets pass it; `[ -f ]` alone FOLLOWS a symlink, which is the mirror defect and the
+  obvious spelling a reader reaches for. **A HARD LINK passes BOTH halves and is an accepted
+  RESIDUAL, not a case the pair closes** — MEASURED, a hard link is a second directory entry
+  for a regular file. The review finding that prompted the loop, the first emitted wording and
+  an earlier revision of this bullet all claimed otherwise; the two reader-facing carriers now
+  state the residual and name the link-count test beside it. It is emitted rather than described because prose left the reader to
+  improvise a loop that word-splits on a filename with a space. It still applies to copying
+  by hand, because the "do not run this at all" escape does not answer it — and that escape
+  now lives in the EMITTED array too, not only in SKILL.md, since SKILL.md is read by the
+  model while the array lands in the brief a human pastes from. Pinned on both carriers, by different
+  suites: `T35b` covers the SKILL.md copy, and `WT8m3`/`WT8m4`/`WT8m5` plus
+  `tests/structure/worktree-advice-v1.test.js` cover the EMITTED text — the one that reaches a persisted brief,
+  and the one `T35` cannot see, since its extractor matches command literals and these
+  cautions are the prose beside them.
+- **`adviceBlock` IS exported now, and its dormant branch has an executed case.** The
+  `firstPrefix`-on-a-leading-command arm is still dormant by construction — every arm opens
+  with a prose sentence naming its cause — and it exists so the helper does not silently eat
+  `cmdHandoff`'s `- ` bullet the first time an arm is reordered. `trail.mjs` now guards its
+  CLI dispatch on being the process entry point and exports FOUR names — `adviceBlock`,
+  `worktreeAdvice`, `adviceLeg` and `WORKTREE_ADVICE_COMMAND` — so
+  `tests/structure/worktree-advice-v1.test.js` drives that branch, an empty input and a
+  single-line input directly. `adviceLeg` is the ONE implementation of the present/gone
+  decision, and it exists because that decision has three consumers: `worktreeAdvice` picks
+  its lead AND its body from it, `cmdShow` decides from the same answer whether to print the
+  pointer at the recipe its survey view withholds, and `printResume` decides whether to print
+  its own copy of the gone-leg create command. Every one of those was a hand-written
+  `r.cwdExists` at some point in this feature's history, and one of them drifted INSIDE a
+  single function — the lead came from `adviceLeg` while the body came from a raw
+  re-derivation. Before adding a renderer that depends on the leg, grep `cwdExists`. The entry-point guard
+  compares REALPATHS on both sides: an installed plugin root is routinely reached through a
+  symlink, and a string compare would answer "not the entry point" for a genuine invocation,
+  turning the whole CLI into a silent no-op — far worse than the import side effect it
+  removes. The unit file is driven from `test-session-trail-verdict.sh`, because
+  `tests/run-all.sh` discovers only `test-*.sh`; its case count is hand-maintained and EXACT
+  there, for the same reason `T35_EXPECT` is.
+- **The line-anchored citations from `docs/multi-repo-chains-*` into this skill broke THREE
+  times during one change**, silently each time, because `test-multi-repo-doc-citations.sh`
+  states in its own header that a citation landing on a different but still substantive line
+  is invisible to it. `T36` in `tests/structure/test-session-trail-skill.sh` is the tripwire,
+  and it lives in THIS skill's suite rather than in the docs' because the file that MOVES the
+  target is this one. It pairs each citation with a needle naming the cited CONTENT; when it
+  fails, re-derive the line and fix the doc — never weaken the needle. **Seven rows, across
+  BOTH carriers**: grading only the spec was the first spelling, and it reproduced the very
+  defect it was written for, since the overview HTML twins three of those citations and had
+  already drifted once inside this change. One row hardcodes its own line number, because the
+  spec cites `SKILL.md` twice and a generic regex cannot tell them apart — that row's regex
+  moves with the citation, which fixing the doc alone does not do. It has since caught
+  further drifts, from both carriers at once — the first time that class failed loudly
+  instead of silently. No ordinal here on purpose: the drift count lives only in run logs,
+  so a number written down would be hand-maintained and would go stale, which is the failure
+  mode this file warns about elsewhere. `T36-control` derives the citation POPULATION by
+  scanning both documents rather than counting its own rows, so a citation into this skill
+  that no row covers fails loudly instead of being graded by nothing.
+  `test-multi-repo-doc-citations.sh`'s header points here, because an editor working from
+  the docs' side would naturally run that suite and a green run there says nothing about
+  these citations. **Re-derive each citation PER SITE, never by pattern sweep.** A regex
+  over `trail\.mjs:\d+` was used twice to update these and collapsed both HTML citations
+  onto one number both times — the two `<p class="src">` lines carry no prose to key on, so
+  a sweep cannot tell the `gitState` card from the `printResume` one. `T36` caught it on
+  both occasions, which is the only reason this is a note rather than a shipped defect.
+  A symbol-resolved citation format would remove the fragility rather than catch it, and is
+  not implemented.
+- **`--resume` still lands in the source worktree by design.** The printed resume line is
+  unchanged, and `FRESH_SESSION_SOURCES` excludes `resume`, so a resumed session keeps the
+  original anchor. `--fork-session` is the route whose anchor is the directory it starts in,
+  and the only one where the own-worktree rule and the write anchor land on the same place —
+  but only the HANDOFF brief and SKILL.md flow 3 step 4 name it. The takeover brief renders
+  no resume line at all, so it does not, and any claim that "both briefs" name the fork is
+  false. Either way it is guidance, not a mechanism.
+- **The `noStore` branch of `unreadableWhy` is unreachable from `test-session-trail-verdict.sh`.**
+  `$FAKE` is one directory for the whole run, and the `archive()` helper itself does the
+  `mkdir -p` on the store path; its FIRST call sits in the top-level fixture-setup block,
+  over two thousand lines before any WT8 fixture is graded. So the store exists by then and
+  `r.ccdStore` can never read `false` there. Two wrong causes were written down before that
+  one — the WT8 block's own `archive()` calls (which run AFTER the unreadable fixture is
+  graded) and the W13 case's `mkdir -p` (which is real but not first) — so name the helper
+  and its first call site, not a line number that moves. Pre-existing, predates this rule,
+  and it means one of the two hedged wordings has no executed case anywhere.
 
 ## zen-mode Chain-Progress Anchor (`user-prompt-zen-mode.sh` rule 6)
 
