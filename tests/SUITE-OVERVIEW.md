@@ -22,6 +22,15 @@ appears in no §3 group. That gap predates both the plugin-data guard, which is 
 `tests/profiles/windows-ci.v1.json` rather than described, so its seven shard ids and their
 membership are the JSON's own, and the entry total is **42**.
 
+**Section 4's own header numeral was DROPPED rather than corrected**, so exactly one place
+owns the unit-file count and a header can no longer contradict it. It had said 24 while the
+count above said 26; both were then stale again within one merge, because the directory had
+moved to 27. The rowless files are enumerated ONCE, in the closing note under section 4's
+table — deliberately not repeated here, since a second copy of that list is the drift this
+document exists to prevent. Recorded rather than quietly reconciled: an audited count that
+disagrees with its own table is the failure shape, and an earlier revision of this very
+paragraph said "two files" while naming one, which is the same failure one level down.
+
 **Nothing machine-checks any of this.** The reconciliation above is a hand audit performed
 at this commit, not an invariant: the next suite added without touching §3 silently breaks
 it again, and no test will say so. Re-derive rather than trust when the numbers matter.
@@ -46,7 +55,7 @@ is ever measured for the suite.
 |---|---|---|
 | `tests/structure/test-*.sh` (deterministic shell) | **146** — 139 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
 | *(reconciliation)* | a `--ci` run reports **139 structure suites + 5 offline evals = 144 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 146 − 139 gap | — |
-| `tests/structure/*.test.js` (`node --test` units) | **27 files** | invoked *by* parent `.sh` suites |
+| `tests/structure/*.test.js` (`node --test` units) | *(count not maintained here — see §4)* | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
 | Windows contract profiles | **7** (`windows-shard-1`…`-7`, 42 suite entries) | `ci.yml` matrix, `run-profile.js` |
@@ -257,7 +266,7 @@ each other on counts, terminology, navigation and the specification's BLOCKED st
 Structure gates for the Promptfoo harnesses. GitHub Actions never invokes the Promptfoo
 binary; these guard the local harness contract.
 
-## 4. `node --test` unit suites (27 files)
+## 4. `node --test` unit suites
 
 Not run standalone — each is driven by a parent shell suite, so a JS failure surfaces as
 that suite's failure.
@@ -274,6 +283,7 @@ that suite's failure.
 | `plan-payload-v1.test.js` | 20 | `test-plan-payload-fallback.sh` | plan-source precedence table, hardened plan-file reader refusals, O_NOFOLLOW-unavailable fallback |
 | `zensu-doctor-invocation.test.js` | 24 | `test-versioned-plugin-upgrade.sh` | `/zensu:doctor` invocation allowlist — driven from that suite, which binds it as `RECOGNIZER_UNIT` and grades it against a registered-case floor; it has no `run-all.sh` entry of its own, because discovery is `test-*.sh` only |
 | `playwright-mcp-proxy.test.js` | 16 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy |
+| `zen-anchor-assertions.test.js` | 7 | `test-zen-mode.sh` (Z29) | zen-mode eval GRADERS: every javascript assertion body compiled, and a pinned pass/fail vector for the two anchor scenarios plus the safety carve-out |
 | `verify-feature-transcript-check.test.js` | 14 | `test-promptfoo-verify-feature.sh` | transcript assertion contract |
 | `fixture-mutation-watch.test.js` | 19 | `test-claude-promptfoo-wrapper.sh` | fixture-event classification: the gated classes (`.git`, the watch root's own name, run-owned ancestors) adjudicated by the manifest, ordinary paths by touch-after-start, and that both watch backends route through one decision spelled once |
 | `session-control-lineage.test.js` | 13 | `test-versioned-plugin-upgrade.sh` | runtime-lineage axis: same-major (same-minor while major is `0`), never-backwards, sibling plugin root |
@@ -296,8 +306,9 @@ deliberately, because SUITE-OVERVIEW.md itself is graded by no suite and a row h
 be one more hand-maintained copy of a count nothing checks. The unit file IS driven — by
 `test-session-trail-verdict.sh`, which pins its case count exactly — so it is rowless
 here, not ungraded there. Both are recorded rather than silently
-absorbed; the counts above are derived from the real directory listing, so they include
-all five.
+absorbed. The inventory row above no longer carries a unit-file numeral at all, for the
+same reason this paragraph gives: it was a hand-maintained count nothing grades, and it
+went stale on its next merge.
 
 Plus `tests/session-control/session-control-core-v1.test.js` — the Session Control core
 unit suite, reached via `tests/session-control/run.sh`, which is invoked **only** by the
