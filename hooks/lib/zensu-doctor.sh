@@ -41,6 +41,21 @@ if [ -z "$DIR" ] || [ "$ZDOC_ROOT" = "$DIR" ] || [ -L "$ZDOC_ROOT" ] || [ ! -d "
   exit 0
 fi
 
+# ONE source per run, for BOTH canonical getters below. There were two — one
+# inside each resolve block — and in an ordinary invocation neither ZDOC_ variable
+# is pre-set, so both guards passed and the library was sourced twice. That was
+# shipped while the round-3 plan recorded the single-source requirement as met,
+# which is why the count is now pinned (C33) rather than left to reading.
+# The condition is deliberately the DISJUNCTION of the two resolve guards: a
+# caller that pins both values still sources nothing, and a caller that pins one
+# sources once. Hoisting it unconditionally would put a source on a path that
+# needs no getter at all.
+if { [ -z "${ZDOC_TTL_HOURS:-}" ] || [ -z "${ZDOC_IMPL_STOP_NUDGE_AFTER:-}" ]; } \
+  && [ -f "$DIR/zensu-config.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$DIR/zensu-config.sh" 2>/dev/null || true
+fi
+
 # Resolve the pending-review TTL through the CANONICAL getter the Stop enforcer
 # uses, so the doctor never reports a TTL the real hooks would disagree with.
 # This runs BEFORE the session bind, so it necessarily reads the config overlay
@@ -49,9 +64,7 @@ fi
 # choice must survive the re-resolution.
 ZDOC_TTL_PINNED=""
 [ -n "${ZDOC_TTL_HOURS:-}" ] && ZDOC_TTL_PINNED=1
-if [ -z "${ZDOC_TTL_HOURS:-}" ] && [ -f "$DIR/zensu-config.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$DIR/zensu-config.sh" 2>/dev/null || true
+if [ -z "${ZDOC_TTL_HOURS:-}" ]; then
   if command -v zensu_pending_review_ttl_hours >/dev/null 2>&1; then
     ZDOC_TTL_HOURS="$(zensu_pending_review_ttl_hours 2>/dev/null)"
   fi
@@ -62,12 +75,10 @@ export ZDOC_TTL_HOURS
 # runs before the session bind, so where the record root and CLAUDE_PROJECT_DIR
 # differ it reads the overlay under the latter. Deliberately NOT re-resolved
 # after the bind, and the cost is stated rather than glossed: a stale value
-# changes which chains the parked-at-implementing row names, and a stale `0`
+# changes which chains the implementing-turns row names, and a stale `0`
 # withholds that row entirely — the renderer treats 0 as "switched off" and says
 # so in its own row rather than falling silent.
-if [ -z "${ZDOC_IMPL_STOP_NUDGE_AFTER:-}" ] && [ -f "$DIR/zensu-config.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$DIR/zensu-config.sh" 2>/dev/null || true
+if [ -z "${ZDOC_IMPL_STOP_NUDGE_AFTER:-}" ]; then
   if command -v zensu_impl_stop_nudge_after >/dev/null 2>&1; then
     ZDOC_IMPL_STOP_NUDGE_AFTER="$(zensu_impl_stop_nudge_after 2>/dev/null)"
   fi

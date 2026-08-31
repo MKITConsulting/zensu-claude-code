@@ -278,6 +278,35 @@ REVIEWER_DENIALS=0
 # Set only by the branch that routes this Stop as a host refusal — see the mint
 # guard at the end of the file. Declared here so `set -u` holds on every path.
 REVIEWER_DENIAL_ROUTED=false
+# NEVER claim ANYTHING about this literal's position or its surroundings inside the notice.
+# Two revisions tried. The first said "it is the last thing on the line so the path can be
+# copied whole", which is false about its own line — the notice is a single `echo` that
+# continues for several sentences after the interpolation. The second replaced it with
+# "(nothing is appended to that path)", which is false in the same way and for the same
+# reason, and its guarding comment described bytes the code did not emit. The rule is now
+# simply stated and nothing is said about where it sits; if a copy-safety property is ever
+# wanted, make it true by construction — put the interpolation last in the emitted string —
+# rather than by asserting it.
+# The one spelling of the remedy, hoisted here because its two consumers sit on
+# opposite sides of the file: `DENIAL_RULE` in the blocked-Stop branch far below,
+# and `zensu_impl_stop_nudge`, which runs from an early exit ABOVE that branch and
+# therefore cannot see an assignment made there — the same ordering constraint the
+# `complete_cmd` renderer states about LOG_COMMAND. The nudge shipped one round
+# naming no rule and no file at all, which left the reader of the earliest-firing
+# refusal surface told that a permission must be lifted and unable to learn which.
+# Names ONLY the user-scoped file: the project-local spelling is a path this agent
+# could write, and pointing at it beside the exact rule that grants the refused
+# capability is an invitation the surrounding prose can only ask it to decline.
+REVIEWER_SPAWN_ALLOW_RULE="Add the rule \"Agent(zensu:code-reviewer)\" to permissions.allow in the user settings file ~/.claude/settings.json"
+# The allow rule ALONE is not a remedy, and shipping it alone made the earliest-firing
+# refusal surface the weakest of the four. Deny is evaluated before ask and allow, so
+# behind a standing deny rule the named allow changes nothing — and the sanction arm
+# below would then act on a user who reports, in good faith, that they granted it. Every
+# sibling surface already carries this clause; `DENIAL_REMEDY` builds a kind-aware
+# version, and the doctor renderer has its own `DENY_FIRST_CAVEAT`. Stated
+# unconditionally here rather than rebuilt per kind, because this surface is advisory
+# and a wrong kind would cost more than a redundant sentence.
+REVIEWER_SPAWN_DENY_FIRST="Deny is evaluated before ask and allow, so remove any deny rule naming the Agent tool first — while one stands, adding the allow rule changes nothing."
 reviewer_spawn_denial_probe() {
   local lib probe
   [ -n "$REVIEWER_DENIAL_STATUS" ] && return 0
@@ -309,10 +338,16 @@ reviewer_spawn_denial_probe() {
   # The kind is read as a FIELD, not matched against a local copy of the marker
   # set. That set lives in the module and is re-encoded exactly once more below,
   # in the `case` arms that render cause and remedy; a third copy here bought
-  # nothing. The value is only ever a `case` SELECTOR — it is never interpolated
-  # into the reason string — and its unknown arm is already the safe one, so a
-  # value this hook does not recognize degrades to "unclassified" rather than
-  # reaching an operator-visible string. `reviewerDenialRows` vets it a second
+  # nothing. The rule this comment used to state — that the value is only ever a `case`
+  # SELECTOR and never reaches operator-visible text — is OVERTAKEN, and saying
+  # so here matters because this is the comment a maintainer adding a marker
+  # reads. Only its NARROW half survives: neither site reaches the hook's JSON
+  # `reason`, which is built from DENIAL_CAUSE/DENIAL_REMEDY below. TWO stderr
+  # messages do render the raw value — the cap-release diagnosis further down,
+  # which predates the turn counter, and `zensu_impl_stop_nudge`'s refused-spawn
+  # notice — so a renamed or added `kind` moves operator-visible bytes in two
+  # places with no shell edit. The unknown arm is still the safe one, so an
+  # unrecognized value degrades to "unclassified" rather than to a wrong remedy. `reviewerDenialRows` vets it a second
   # time against the same module before rendering a row.
   # Reading it generically also makes a marker ADDED to the module take effect
   # here with no matching shell edit: the closed set silently degraded such a
@@ -409,7 +444,10 @@ reviewer_denial_notes_reap() {
   [ -f "$1" ] || return 0
   # The SAME TTL the doctor ages a note out against, read from the same config
   # key. A note past it is the one the doctor's own row calls safe to delete.
-  ttl="$(zensu_pending_review_ttl_hours 2>/dev/null)" || ttl=0
+  # `</dev/null` for the same reason the writer below carries it: this runs inside the
+  # lease, and the shared config getter spawns `node` with no redirect of its own, so it
+  # cannot be placed in the callee.
+  ttl="$(zensu_pending_review_ttl_hours 2>/dev/null </dev/null)" || ttl=0
   case "$ttl" in ''|*[!0-9]*) ttl=0 ;; esac
   # stdin is redirected below alongside the output channels, and that is not
   # cosmetic: this runs INSIDE the lease, whose keeper is a bash coprocess, and a
@@ -478,9 +516,30 @@ reviewer_denial_note_clear() {
   reviewer_note_locked reviewer_denial_note_clear_unlocked
 }
 
+# `</dev/null` on the node child below matches the sibling reaper three functions
+# down, which has carried it all along, and the house rule this repository states for
+# anything spawned inside the lease. STATE THE MECHANISM HONESTLY, because review
+# found the usual account of it questionable and no run in this session settled it:
+# the keeper's control channel is the coprocess descriptor pair, NOT fd 0, so a
+# redirect of fd 0 cannot by itself detach a child from that pipe. What the redirect
+# does guarantee is that the child never BLOCKS reading a shared stdin, which is the
+# half that is mechanically certain. Applied because it is free, because the sibling
+# has it, and because divergence between two adjacent writers is its own hazard —
+# not because the descriptor argument was verified here.
+#
+# State the CRITERION, never a count: a count of the unredirected children in this
+# region has now gone stale twice in two rounds. The rule is that every child which
+# could READ stdin carries `</dev/null`; the ones left without it — the `dirname`
+# below and the `rm` in `reviewer_denial_note_clear_unlocked` — are argv-only and
+# cannot block, which is why they are exempt rather than overlooked. The implementing-turns counter is what made all
+# of this hot — this writer was reached only from the blocked-Stop routing site and
+# the cap-release site, and now runs on every dirty turn end past the threshold, which
+# also makes the reap's own guard pass every time.
 reviewer_denial_note_write_unlocked() {
   local note
   note="$(reviewer_denial_note_path)" || return 0
+  # Deliberately NOT redirected: `dirname` reads argv and cannot block on stdin, so it
+  # is the one child in this lease region the rule above does not apply to.
   [ -d "$(dirname "$note")" ] || return 0
   if reviewer_spawn_denied; then
     # The state directory is writable from inside the session, so the note is
@@ -519,7 +578,7 @@ reviewer_denial_note_write_unlocked() {
         // Safe now that only this pid can name it.
         try { fs.rmSync(tmp,{force:true}); } catch (_) { /* nothing else to do */ }
       }
-    ' >/dev/null 2>&1 || true
+    ' </dev/null >/dev/null 2>&1 || true
   elif [ "$REVIEWER_DENIAL_STATUS" = "clear" ]; then
     # The UNLOCKED spelling on purpose: this already runs inside the lease, and
     # the lease is not reentrant — taking it again here would fail to acquire and
@@ -968,7 +1027,7 @@ fi
 # second turn onward in any repository that tracks those artifacts, and the probe
 # would stop discriminating at all.
 zensu_impl_stop_nudge() {
-  local threshold count changed complete_cmd
+  local threshold count changed complete_cmd nudge_denial_attempt status_cmd
   # This runs AFTER outer_finish, which can emit a decision:"block" for a durable
   # Autopilot run on this very path. In that state the turn did not end, so
   # counting it would be wrong and saying "Stop is not blocked" would contradict
@@ -991,8 +1050,35 @@ zensu_impl_stop_nudge() {
     fi
   )" || return 0
   [ -n "$changed" ] || return 0
-  count="$(tdd_increment_counter "$SESSION_ID" implStopCount 2>/dev/null </dev/null)" || return 0
-  case "$count" in ''|*[!0-9]*) return 0 ;; esac
+  # Rendered for the same reason `complete_cmd` is, and stated here because the
+  # counter-failure arms below shipped a BARE `zensu-log.sh --chain-status`: a flag
+  # with no interpreter, no path and no CLAUDE_PLUGIN_DATA is not a command the
+  # reader can run, and those arms offer exactly one action. `LOG_COMMAND` is
+  # assigned far below this call site, so it cannot be borrowed.
+  status_cmd="CLAUDE_PLUGIN_DATA=$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}") bash $(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh") --chain-status"
+  # A failed increment used to take the SAME exit as a clean tree, so a stuck
+  # counter — a contended or stale lock, an inactive chain, a value at the storage
+  # ceiling — disarmed this surface permanently and silently while the doctor kept
+  # rendering off the frozen value. Two surfaces disagreeing about whether anything
+  # is being measured is exactly the silence this feature exists to remove, so the
+  # failure says so once. Still fail-open: the release is untouched either way.
+  #
+  # Say what is TRUE of the other surface, not what is convenient. An earlier
+  # wording claimed the doctor row was "measuring nothing" too, and then sent the
+  # reader to /zensu:doctor in the same breath — but a failed increment leaves the
+  # persisted counter intact, so that row keeps rendering the last recorded value
+  # and the reader arrives at a row full of numbers having just been told it says
+  # nothing. The comment three lines above had it right while the message did not.
+  if ! count="$(tdd_increment_counter "$SESSION_ID" implStopCount 2>/dev/null </dev/null)"; then
+    echo "Zensu review chain: the implementing-phase turn counter could not be advanced for this session, so this notice has stopped measuring anything. The counter is stuck, not reset — the last recorded value stands and is now older than this turn. Read it with ${status_cmd}, which reports implStopCount whatever its value; the /zensu:doctor chain row is threshold-gated and shows no count until that recorded value reaches the bound. Stop is not blocked." >&2
+    return 0
+  fi
+  case "$count" in
+    ''|*[!0-9]*)
+      echo "Zensu review chain: the implementing-phase turn counter returned an unreadable value for this session, so this notice has stopped measuring anything. The counter is stuck, not reset — the last recorded value stands and is now older than this turn. Read it with ${status_cmd}, which reports implStopCount whatever its value; the /zensu:doctor chain row is threshold-gated and shows no count until that recorded value reaches the bound. Stop is not blocked." >&2
+      return 0
+      ;;
+  esac
   [ "$count" -ge "$threshold" ] 2>/dev/null || return 0
   # Names ONE exit, and names its preconditions with it. `--tdd-complete` refuses
   # without an edit-landing receipt and without a usable Requirements table, and
@@ -1017,7 +1103,83 @@ zensu_impl_stop_nudge() {
     # edit turns into a `set -u` abort in the middle of a Stop.
     complete_cmd="${complete_cmd} --autopilot-run $(printf '%q' "${INNER_BOUND_RUN:-}") --autopilot-attempt $(printf '%q' "${INNER_BOUND_ATTEMPT:-}") --chain-id $(printf '%q' "${INNER_BOUND_CHAIN:-}")"
   fi
-  echo "Zensu review chain: this session has now ended ${count} turns with its chain still at 'implementing' while the worktree reports changed source files, so no reviewer has been asked for yet and nothing here has been reviewed. The exit is the review chain: run the /zensu:tdd Phase 6 step 5b edit-landing audit, make sure the plan carries a usable '## Requirements' table, then mark the implementation complete with ${complete_cmd} — that verb refuses without both while the tree is dirty. This is a notice; Stop is not blocked, and it is silent again once the chain moves on." >&2
+  # When the host permission layer refused this session's `zensu:code-reviewer`
+  # spawn, the ordinary remedy below is INCOMPLETE — but an earlier revision
+  # over-corrected and WITHHELD `--tdd-complete` outright, which was worse. Both
+  # halves of that judgment are worth keeping, because the second is what a later
+  # reader would otherwise undo:
+  #
+  # Incomplete, because completing while the refusal still stands moves the chain
+  # out of `implementing` into a gate the host will not let it pass, and every
+  # later Stop then routes to the branches below this one and BLOCKS until the cap
+  # releases. A reader who is told only "complete it" walks into that.
+  #
+  # Worse, because `reviewer_spawn_denied` carries NO generation or recency bound:
+  # it answers `blocked` whenever the last reviewer result anywhere in the module's
+  # bounded transcript tail carries a marker. The self-correction that module's own
+  # gap note relies on — "as soon as one spawn is attempted" — cannot happen HERE:
+  # this path never blocks, so the cap never releases it, and withholding the verb
+  # keeps the chain where no ticket can be issued and therefore no spawn attempted.
+  # One stale refusal, from a generation that has long since converged, pinned every
+  # later turn into the withhold arm for the rest of the session. That is a state
+  # with no exit, produced to avoid a state that at least ends at the cap.
+  #
+  # A real bound needs an arming instant to compare the transcript timestamp
+  # against, and the workflow document carries none — `history[].ts` is optional and
+  # stays empty in vanilla mode. Supplying one is a workflow-state schema field and
+  # therefore a MINOR release under the runtime-lineage rule. So the bound is not
+  # paid for here: the notice NAMES the exit and states the refusal beside it, and
+  # stale evidence costs a sentence instead of the chain.
+  #
+  # The probe's INPUT is the transcript, never the note file, which is why the
+  # `reviewer_denial_note_clear` that runs earlier on this same statement retires
+  # the note without taking the diagnosis away. Memoization is NOT what saves it:
+  # that clear never consults the probe, so there is no cached verdict to inherit
+  # and this is the first call. Naming memoization as the cause would send a later
+  # reader hunting for an ordering guarantee that does not exist — and would make
+  # the branch look fragile to a reordering that in fact cannot affect it.
+  if reviewer_spawn_denied; then
+    # MINT the note. Without this the diagnosis died with the Stop: the clear on
+    # the same statement above unlinks any earlier note, this branch minted none,
+    # and `reviewerDenialRows` returns early on an empty note set — so /zensu:doctor
+    # said nothing about the refusal while its own chain row went on printing
+    # `--tdd-complete`. Two surfaces, one chain, opposite advice, and the surface
+    # with the evidence was the silent one. The probe is memoized, so the write
+    # costs no second transcript read. A converged chain must never mint one, and
+    # cannot reach here: this function runs only from the `SESSION_IMPL_COMPLETE !=
+    # true` exit, and a chain whose implementation is not complete has no review to
+    # have converged.
+    reviewer_denial_note
+    # Both arms name an action the reader can actually take. The previous ladder
+    # sanctioned "ONE further spawn attempt" from a state where a spawn was
+    # unreachable — a review ticket requires `implComplete`, which requires the very
+    # verb the same message forbade two sentences earlier. With the verb named again
+    # the route exists: complete, and the chain spawns the reviewer itself.
+    if [ "${REVIEWER_DENIALS:-0}" -ge 2 ] 2>/dev/null; then
+      nudge_denial_attempt="Two refusals already stand, so do not complete into that gate on a hope: report the refusal to the user and wait for them to confirm they have lifted it."
+    else
+      nudge_denial_attempt="Report the refusal and the rule above to the user in your next message rather than acting on it silently; if they say in this conversation that they have just lifted it, completing the implementation is the right next move — the chain issues its own ticket and spawns the reviewer, and a second refusal means stop and say so."
+    fi
+    echo "Zensu review chain: this session has now ended ${count} turns with its chain still at 'implementing' while the worktree reports a changed file outside '.zensu', so the review chain has not asked for a reviewer and nothing here has been reviewed. Read the next sentence before acting on that, because it is compatible with a spawn that WAS attempted: the host permission layer refused this session's zensu:code-reviewer spawn (kind: ${REVIEWER_DENIAL_KIND:-unclassified}, refusals observed: ${REVIEWER_DENIALS:-0}). That is a harness permission setting outside this conversation, so the user has to lift it, and you must never edit a settings file yourself to widen your own permissions. ${REVIEWER_SPAWN_DENY_FIRST} ${REVIEWER_SPAWN_ALLOW_RULE}. The exit is still the review chain: run the /zensu:tdd Phase 6 step 5b edit-landing audit, make sure the plan carries a usable '## Requirements' table, then mark the implementation complete with ${complete_cmd} — that verb refuses without both while the tree is dirty. Take that exit once the permission exists; while it does not, completing only moves the chain to a gate the host will not let it pass and every later Stop blocks until the cap releases. ${nudge_denial_attempt} Stop is not blocked; this notice repeats at each turn end while the worktree still reports a changed file outside '.zensu' and the chain is still at 'implementing'." >&2
+    return 0
+  fi
+  # Says what the probe MEASURES. `git status --porcelain` reports untracked
+  # entries as well as tracked modifications, so "changed source files" was a
+  # claim a reader could falsify with one stray build artifact — and a notice
+  # whose opening clause the reader disproves is one they stop reading.
+  #
+  # It also promises no future silence. Nothing latches this notice: the
+  # comparison above holds on every later Stop, so it is written at every turn
+  # end until implComplete flips. An earlier wording closed with "it is silent
+  # again once the chain moves on", which the very next turn broke.
+  #
+  # The replacement for that wording was itself falsifiable and is now corrected:
+  # "until the chain moves past 'implementing'" names ONE of the three conditions
+  # this function tests. A clean tree returns above, and a stuck counter diverts to
+  # its own message, so the notice can go silent with the chain exactly where it
+  # was — and a reader who took silence as progress would be wrong. The clause
+  # names the conditions the code actually re-tests.
+  echo "Zensu review chain: this session has now ended ${count} turns with its chain still at 'implementing' while the worktree reports a changed file outside '.zensu', so the review chain has not asked for a reviewer and nothing here has been reviewed. The exit is the review chain: run the /zensu:tdd Phase 6 step 5b edit-landing audit, make sure the plan carries a usable '## Requirements' table, then mark the implementation complete with ${complete_cmd} — that verb refuses without both while the tree is dirty. Stop is not blocked; this notice repeats at each turn end while the worktree still reports a changed file outside '.zensu' and the chain is still at 'implementing'." >&2
   return 0
 }
 
@@ -1264,7 +1426,10 @@ elif reviewer_spawn_denied; then
   # path this very agent could write, and pointing at it — beside the exact rule
   # that grants the refused capability — is an invitation the prose below can
   # only ask it to decline. The user-facing doctor row carries the fuller form.
-  DENIAL_RULE="Add the rule \"Agent(zensu:code-reviewer)\" to permissions.allow in the user settings file ~/.claude/settings.json"
+  # The literal itself lives at the top of the file, because the implementing-turns
+  # notice needs the same sentence from an exit ABOVE this branch; this name is
+  # kept so the surrounding `case` reads unchanged.
+  DENIAL_RULE="$REVIEWER_SPAWN_ALLOW_RULE"
   case "$REVIEWER_DENIAL_KIND" in
     auto-mode-classifier)
       DENIAL_CAUSE="the Claude Code auto mode classifier refused it ('Permission for this action was denied by the Claude Code auto mode classifier')"

@@ -827,21 +827,61 @@ fi
 # Same three-way hand copy for the parked-at-implementing row: renderer, skill,
 # docs. Without this, rewording one carrier goes stale in silence.
 PARKED_DOC_OK=1
-grep -qF -- 'parked at `implementing`' "$REPORT" || PARKED_DOC_OK=0
-grep -qF -- 'parked at `implementing`' "$SKILL_MD" || PARKED_DOC_OK=0
+grep -qF -- 'turns at `implementing`' "$REPORT" || PARKED_DOC_OK=0
+grep -qF -- 'turns at `implementing`' "$SKILL_MD" || PARKED_DOC_OK=0
 grep -qF -- 'Implementing-phase turn counter' "$PLUGIN_DIR/docs/tdd-manager-workflow.md" \
   || PARKED_DOC_OK=0
 [ "$PARKED_DOC_OK" -eq 1 ] \
-  && check "P1mt2 the parked-chain row wording is emitted AND documented in the skill and the docs" PASS \
-  || check "P1mt2 the parked-chain row wording is emitted AND documented in the skill and the docs" FAIL
+  && check "P1mt2 the implementing-turns row wording is emitted AND documented in the skill and the docs" PASS \
+  || check "P1mt2 the implementing-turns row wording is emitted AND documented in the skill and the docs" FAIL
+# The CAVEAT half, which nothing pinned. The row's NAME was held three ways while the clause
+# that carries the refusal — the half AC-013 turns on — could be deleted from either carrier
+# with every suite green, leaving the model relaying the row without the obligation to carry
+# it. Both carriers are required, and the control proves each file was read.
+P1MT4_R="$(grep -cF 'refused-spawn row below' "$REPORT" || true)"
+P1MT4_S="$(grep -cF 'refused-spawn row below' "$SKILL_MD" || true)"
+if [ "$P1MT4_R" -ge 1 ] && [ "$P1MT4_S" -ge 1 ]; then
+  check "P1mt4 the caveat is present in the renderer AND documented in the skill" PASS
+else
+  check "P1mt4 the caveat is present in the renderer AND documented in the skill (renderer=$P1MT4_R skill=$P1MT4_S)" FAIL
+fi
+# P1mt5 — the row's OPENING clause, compared rather than described. The scoping correction
+# reached the renderer and the Stop branch and missed the skill, which is the carrier a model
+# relays; the unqualified form is a false statement about review coverage, because a flow like
+# /zensu:cover spawns a reviewer without arming a chain. Extracted from the renderer and
+# required in the skill, normalised for case and line wrapping the way C39 does.
+P1MT5_PHRASE="$(grep -o 'the review chain has not asked for a reviewer' "$REPORT" | head -1)"
+[ -n "$P1MT5_PHRASE" ] \
+  && check "P1mt5pre the row's scoped opening was located in the renderer, so the comparison is not vacuous" PASS \
+  || check "P1mt5pre the row's scoped opening was located in the renderer, so the comparison is not vacuous" FAIL
+P1MT5_OK=0
+if [ -n "$P1MT5_PHRASE" ] && [ -r "$SKILL_MD" ]; then
+  tr -s '[:space:]' ' ' < "$SKILL_MD" | tr 'A-Z' 'a-z' | grep -qF "$P1MT5_PHRASE" && P1MT5_OK=1
+fi
+[ "$P1MT5_OK" = "1" ] \
+  && check "P1mt5 the skill carries the row's scoped opening, not the unqualified form" PASS \
+  || check "P1mt5 the skill carries the row's scoped opening, not the unqualified form" FAIL
 # The one claim a reader must not lose here is the NEGATIVE one: this row must
 # never teach the zero-change terminus, which from shape `implementing` is the
 # unqualified no-ticket terminus. Pin it on both carriers.
-if ! grep -n 'parked at `implementing`' -A 8 "$REPORT" | grep -qF -- '--chain-done' \
-  && grep -qF 'Never offer the' "$SKILL_MD"; then
-  check "P1mt3 the parked-chain row never offers the zero-change terminus" PASS
+# EXTRACTED, not windowed. `-A 8` was written when the row was eight lines long; the
+# statement now runs from its `line(WARN,` to the `truncatedList(parkedImpl))` append,
+# and the refusal caveat added between them sat OUTSIDE the window — so a `--chain-done`
+# introduced there would have passed. The slice is taken between the two anchors and
+# its emptiness is checked first, because an anchor that stops matching turns a
+# negative assertion into one that cannot fail.
+P1MT3_ROW="$(awk '/line\(WARN, .chain: this session owns a chain/{f=1} f{print} f&&/truncatedList\(parkedImpl\)\)/{exit}' "$REPORT")"
+if [ -z "$P1MT3_ROW" ]; then
+  check "P1mt3pre the implementing-turns row statement was located, so the scan is not vacuous" FAIL
 else
-  check "P1mt3 the parked-chain row never offers the zero-change terminus" FAIL
+  check "P1mt3pre the implementing-turns row statement was located, so the scan is not vacuous" PASS
+fi
+if ! printf '%s\n' "$P1MT3_ROW" | grep -qF -- '--chain-done' \
+  && [ -n "$P1MT3_ROW" ] \
+  && grep -qF 'Never offer the' "$SKILL_MD"; then
+  check "P1mt3 the implementing-turns row never offers the zero-change terminus" PASS
+else
+  check "P1mt3 the implementing-turns row never offers the zero-change terminus" FAIL
 fi
 
 export CLAUDE_PROJECT_DIR="$CAS_PROJECT"

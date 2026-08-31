@@ -12,7 +12,7 @@ description: >
   before any chain has wedged), and session state (state dir writable, canonical
   CAS workflow documents valid, each review chain's shape plus any wedged chain and
   its recovery command, any open chain not owned by this session, any chain this
-  session owns left parked at implementing, any reviewer spawn
+  session owns that has ended many turns at implementing, any reviewer spawn
   the host permission layer refused, expired pending-review surfaced).
   The only write is an explicit, user-confirmed cleanup of one
   expired pending-review.json — CAS workflow documents are never deleted. Use
@@ -440,9 +440,15 @@ classifier will refuse a spawn, not only when the whole table is green.
   verdict. A missing inert-shape set also withholds it, but with its own row. There is no comparison between the record's project anchor and
   `CLAUDE_PROJECT_DIR` — the whole `Session state` block simply READS the record's
   root, because that is where every writer puts the documents.
-- **⚠️ chain: this session owns a chain parked at `implementing`** → the
+- **⚠️ chain: this session owns a chain that has ended N turns at `implementing`** → the
   session armed a chain, kept working, and never marked the implementation
-  complete, so no reviewer was ever asked for. This is not a wedge and not an
+  complete, so the review chain has not asked for a reviewer and nothing in it has been
+  reviewed. Say it with that scope, never as "no reviewer was ever asked for": a flow
+  like `/zensu:cover` spawns one without arming a chain, so the unqualified form is a
+  false statement about review coverage in the feature whose purpose is that coverage is
+  not misreported. The caveat below reports such a spawn when a note records it. The row states what the counter
+  measures — turns that ENDED with a changed worktree — rather than calling the
+  chain parked: the chains that reach the bound are the ones still being worked on. This is not a wedge and not an
   error: the Stop hook releases in that state by design, which is exactly why
   nothing else reports it. Relay the count and the ONE exit the row prints — the
   review chain, entered with `--tdd-complete` after the Phase 6 step 5b
@@ -456,12 +462,31 @@ classifier will refuse a spawn, not only when the whole table is green.
   paused session, an overnight break or a powered-off machine never produce it —
   something really did keep working alongside an open gate. The bound is
   `hooks.implStopNudgeAfter` (default `12`). At `0` the check is switched off and
-  says so in its own `✅` row — a disabled check must never read as a clean one.
+  says so in its own `✅` row — a disabled check must never read as a clean one. At the
+  getter's own maximum (`999999`) a SECOND `✅` row says the check cannot fire in practice,
+  because no session ends that many turns. Relay either row as a switched-off check, never
+  as a clean one — and note the bound between them: any value the counter will not reach in a real
+  session suppresses the row with no disclosure at all, so the ABSENCE of both rows is not
+  proof the check is armed.
   One condition withholds the row, and it DISCLOSES rather than falling silent:
   `ZDOC_SESSION_KEY` must be present and well formed under a `bound` verdict,
-  because without it an own chain cannot be told from someone else's, and the
-  session-key row above names this row when that happens. It deliberately does
+  because without it an own chain cannot be told from someone else's. The
+  session-key row above names this row when that happens **only while the check is
+  armed**, and armed means BOTH bounds: `hooks.implStopNudgeAfter` above `0` and below the
+  getter's maximum. At either literal the row is withheld for its own reason, which its own
+  `✅` row states, so the session-key row does not claim it as well — at `0` the row is withheld by
+  configuration rather than by the missing key, the switched-off `✅` row above
+  already says so, and the session-key row drops the clause so one absent row is
+  never given two causes. It deliberately does
   not depend on the inert-shape set, which belongs to the foreign-chain row.
+- **The row QUALIFIES the exit while this session stands refused, and never withholds
+  it.** When a live `reviewer-spawn-denied-<session key>.json` note exists for the same
+  chain, the row still names the command and adds a sentence saying a note records that
+  the host permission layer refused the `zensu:code-reviewer` spawn, pointing at the
+  refused-spawn row below. Relay both halves: the command AND the caveat. Do not drop
+  the caveat to shorten the row, and do not read its ABSENCE as proof no refusal is
+  outstanding — the note is cleared on every Stop and re-minted only by one that reaches
+  the notice, so a clean-tree turn leaves the caveat off while the refusal stands.
 - **⚠️ state: `<dir>` could not be read (`<errno>`)** → the session-state checks did
   NOT run. Relay it as a missing check, never as an all-clear: no chain shape, no
   wedged or foreign-chain row and no pending-review verdict was computed, so their

@@ -22,7 +22,8 @@
     "reviewJudge": true,
     "findingVerification": true,
     "reviewerSpawnAutoAllow": true,
-    "pendingReviewTtlHours": 6
+    "pendingReviewTtlHours": 6,
+    "implStopNudgeAfter": 12
   },
   "context": {
     "compactionNudge": true,
