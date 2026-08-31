@@ -2312,6 +2312,35 @@ function stateBlock(nowMs) {
   var workflowDocs = entries.filter(function (f) {
     return /^tdd-phase-scv1_[a-f0-9]{64}\.json$/.test(f);
   }).sort();
+  // The bound session's OWN document. Every row below judges the documents that
+  // EXIST; not one of them asks whether this session's is among them — which is
+  // how a report came back fully green over a session whose capability gate was
+  // denying every tool. It sits ABOVE the count rows on purpose: those describe a
+  // population, and a population can look healthy while the caller's own member of
+  // it is gone.
+  //
+  // Armed on the session key alone, the way the foreign-chain row's own disclosure
+  // is: the key is what makes the question answerable at all, and a missing key is
+  // a missing check rather than a pass. Deliberately NOT gated on the document
+  // count — the finding is the same whether the directory holds none or a hundred.
+  var ownBaselineKey = currentSessionKey();
+  if (ownBaselineKey === '') {
+    line(WARN, 'state: this session\'s own workflow document was not checked — no bound '
+      + 'session key is available here. That is a missing check, not an all-clear.');
+  } else if (workflowDocs.indexOf('tdd-phase-' + ownBaselineKey + '.json') === -1) {
+    // The full filename, as the invalid-document row prints full filenames: a
+    // reader sent to repair a specific path needs its name. The 13-character
+    // truncation belongs to the foreign-chain row, whose subject is somebody
+    // else's session.
+    line(BAD, 'state: this session\'s own workflow document is MISSING ('
+      + path.join(dir, 'tdd-phase-' + ownBaselineKey + '.json')
+      + ') — while it is gone the capability gate denies every tool in this session, '
+      + 'because a deleted document must never be read as "no chain was ever active". '
+      + 'A deleted and re-created worktree loses it, since .zensu/state/ is gitignored. '
+      + 'If the record is intact and served, run /zensu:adopt-session for the diagnosis '
+      + 'and /zensu:adopt-session --confirm to rebuild it; rebuilding is a loss, not a '
+      + 'restore — a review chain that was live when it vanished is gone.');
+  }
   if (!workflowDocs.length) {
     line(OK, 'state: no CAS workflow documents yet');
   } else {

@@ -100,6 +100,22 @@ function canonicalDirectory(value, label, rejectAlias = false) {
   return canonical;
 }
 
+// The ONE cause in this file that has an in-place remedy, tagged rather than
+// matched by message text. A deny that names a remedy is worth having only if it
+// names it for the right cause, and a substring test against prose is how that
+// claim goes quietly wrong on the next reword.
+//
+// Tagged ONLY for a clean ENOENT. `is unsafe` and `is not canonical` are tamper
+// shapes and stay on the generic wording: something is sitting at that path, and
+// offering a rebuild there would tell the user to build over the evidence.
+const BASELINE_MISSING_CODE = 'ZENSU_WORKFLOW_BASELINE_MISSING';
+
+function baselineMissing(message) {
+  const error = new Error(message);
+  error.code = BASELINE_MISSING_CODE;
+  return error;
+}
+
 function revalidateWorkflowState(options) {
   // SessionStart always creates one project-bound baseline CAS record. Validate
   // its existing path before calling the core reader so deletion can never
@@ -113,7 +129,11 @@ function revalidateWorkflowState(options) {
     let stat;
     try {
       stat = fs.lstatSync(candidate);
-    } catch {
+    } catch (error) {
+      // A clean ENOENT is the repairable shape: the repair's own
+      // initializeWorkflowState creates these components. Every other errno is
+      // NOT absence and keeps the generic wording.
+      if (error && error.code === 'ENOENT') throw baselineMissing(`${label} is missing`);
       throw new Error(`${label} is missing`);
     }
     if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`${label} is unsafe`);
@@ -126,7 +146,10 @@ function revalidateWorkflowState(options) {
   let stateStat;
   try {
     stateStat = fs.lstatSync(stateFile);
-  } catch {
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      throw baselineMissing('activated workflow CAS state is missing');
+    }
     throw new Error('activated workflow CAS state is missing');
   }
   if (
@@ -484,6 +507,20 @@ function main() {
     const lineage = hookSession.resolveIncompatibleRuntime(payload);
     if (lineage) {
       deny(`this session's Session Control record is intact, but the running Zensu installation declares an incompatible lineage — the record was minted by ${lineage.recorded} and ${lineage.executing} is executing. Run /zensu:adopt-session to check whether this installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state.`);
+      return;
+    }
+    // The SECOND named cause, and the second one with an in-place remedy. It sits
+    // below the lineage branch deliberately: the two are mutually exclusive in
+    // practice — a lineage break throws inside resolveHookSession, before this
+    // file ever reaches the workflow document — and where they are not, adoption
+    // is the correct remedy, because the repair below requires a SERVED record.
+    //
+    // The generic wording is what this branch removes. "immutable context
+    // revalidation failed: activated workflow CAS state is missing" is accurate
+    // and names no way out, in a state where this hook denies every tool and the
+    // only reachable commands are the two the Bash recognizer admits.
+    if (error && error.code === BASELINE_MISSING_CODE) {
+      deny("this session's Session Control record is intact and served by the running Zensu installation, but the workflow document it anchors is missing — a deleted and re-created worktree loses it, because .zensu/state/ is gitignored. It is NOT read as \"no chain was ever active\": that is why every tool is denied. Run /zensu:adopt-session to see the diagnosis, and /zensu:adopt-session --confirm to rebuild the document; both stay reachable in this state. Rebuilding is a loss, not a restore — a review chain that was live when the document vanished is gone.");
       return;
     }
     deny(`immutable context revalidation failed: ${error.message}`);

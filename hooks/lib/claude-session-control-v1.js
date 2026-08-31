@@ -178,10 +178,43 @@ function main() {
       if (isFresh && eventCwd !== context.project_root) {
         fail('fresh SessionStart cwd does not match the existing session project');
       }
-      core.readWorkflowState({
-        projectRoot: context.project_root,
-        sessionId: payload.session_id,
-      });
+      // The record exists and this runtime serves it, so the ONE thing that can
+      // still be gone is the workflow document the record anchors. A bare
+      // readWorkflowState failed the hook there, which repaired nothing and left
+      // the session wedged: the capability gate denies every tool while the
+      // document is absent, and no later SessionStart could help either, because
+      // this same branch would fail again.
+      //
+      // The argument for healing it is the one the sibling *no record* branch
+      // already makes below in its own words — refusing creates no document, and
+      // no document fails every stateful hook closed for the rest of the session.
+      // It grants nothing a fresh session would not have: a baseline reading
+      // "never active", which is all a rebuilt one can say.
+      //
+      // ENOENT ONLY. `unsafe` (a symlink, a hard link, a non-file, an oversized
+      // file) and `unreadable` (present, does not validate) still fail here:
+      // something IS at that path, and rebuilding over it would destroy the
+      // evidence. classifyWorkflowBaseline performs the PRESENT read itself, so
+      // this replaces the previous readWorkflowState rather than adding a second.
+      const baselineFile = core.adoptionWorkflowStatePath(context.project_root, payload.session_id);
+      const baselineState = core.classifyWorkflowBaseline(
+        baselineFile,
+        context.project_root,
+        payload.session_id,
+      );
+      if (baselineState === core.BASELINE_STATES.MISSING) {
+        // Records its own BASELINE_REBUILT history entry, so an automatic heal is
+        // never silent — the same provenance the confirmed repair leaves.
+        core.repairWorkflowBaseline({
+          recordsDir,
+          sessionId: payload.session_id,
+          pluginData,
+          executingPluginRoot: pluginRoot,
+          host: 'claude',
+        });
+      } else if (baselineState !== core.BASELINE_STATES.PRESENT) {
+        fail(`SessionStart workflow document is ${baselineState}: ${baselineFile}`);
+      }
     } else {
       // No record for this session id, whatever the source claims: a fork, a
       // resume whose private record was pruned, or a continuation across a

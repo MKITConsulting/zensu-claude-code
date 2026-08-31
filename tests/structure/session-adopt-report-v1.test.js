@@ -350,3 +350,171 @@ test('F1 a busy lock is not reported as an unsafe records directory', () => {
   assert.equal(/not a plain directory you own/.test(locked), false,
     'it must not claim the two store-shape causes');
 });
+
+// ── WB / the workflow-baseline half of an already-served run ────────────────
+// The record needs nothing and the workflow document it ANCHORS can still be
+// gone; while it is, the capability gate denies every tool in the session. This
+// is the second thing --confirm repairs. See §"Workflow-Baseline Repair" in
+// CLAUDE.md.
+
+const CORE = () => require(path.join(LIB, 'session-control-core-v1.js'));
+
+test('WB the fault predicate calls tamper a fault and a healthy document not one', () => {
+  const { baselineFault } = report();
+  const core = CORE();
+  assert.equal(baselineFault(undefined), '', 'no baseline half is not a fault');
+  assert.equal(baselineFault({ state: core.BASELINE_STATES.PRESENT }), '',
+    'a healthy document is the ordinary state of a lease-only repair run');
+  assert.equal(baselineFault({ state: core.BASELINE_STATES.MISSING }), '',
+    'missing is what --confirm acts on, not a fault in itself');
+  assert.equal(baselineFault({ state: core.BASELINE_STATES.UNSAFE }),
+    core.BASELINE_STATES.UNSAFE);
+  assert.equal(baselineFault({ state: core.BASELINE_STATES.UNREADABLE }),
+    core.BASELINE_STATES.UNREADABLE);
+  assert.equal(baselineFault({ refusal: core.BASELINE_REFUSALS.NOT_SERVED }),
+    core.BASELINE_REFUSALS.NOT_SERVED, 'a bind refusal is a fault of this half');
+  assert.equal(baselineFault({ fault: 'rebuild-failed' }), 'rebuild-failed');
+});
+
+test('WB the headline and exit code compose BOTH halves, and either failing is enough', () => {
+  const { repairHeadline, repairExitCode } = report();
+  const core = CORE();
+  const cleanSweep = { discarded: 0, failed: [], unsafe: '' };
+  const stuckSweep = { discarded: 1, failed: ['a.json'], unsafe: '' };
+  const rebuilt = { state: core.BASELINE_STATES.MISSING, rebuilt: true, provenance: 'recorded' };
+  const tampered = { state: core.BASELINE_STATES.UNSAFE };
+
+  assert.match(repairHeadline(cleanSweep, rebuilt), /workflow baseline rebuilt/);
+  assert.match(repairHeadline(cleanSweep, tampered), /workflow baseline NOT repaired/);
+  assert.match(repairHeadline(cleanSweep, { state: core.BASELINE_STATES.PRESENT }),
+    /nothing to repair/i, 'a healthy document plus a clean sweep is still nothing to repair');
+  // Both halves reported, never one standing in for the other.
+  const both = repairHeadline(stuckSweep, rebuilt);
+  assert.match(both, /workflow baseline rebuilt/);
+  assert.match(both, /lease store NOT repaired/);
+
+  assert.equal(repairExitCode(cleanSweep, rebuilt), 0);
+  assert.equal(repairExitCode(cleanSweep, tampered), 1, 'a refused baseline half exits non-zero');
+  assert.equal(repairExitCode(stuckSweep, rebuilt), 1,
+    'a rebuilt baseline does not launder a stuck lease');
+});
+
+test('WB the report-only diagnosis names the document and the command that repairs it', () => {
+  const { renderBaselineDiagnosis } = report();
+  const core = CORE();
+  const text = renderBaselineDiagnosis({
+    state: core.BASELINE_STATES.MISSING,
+    path: '/p/.zensu/state/tdd-phase-scv1_' + 'a'.repeat(64) + '.json',
+    projectRoot: '/p',
+  }, 'sid');
+  assert.match(text, /MISSING/);
+  assert.ok(text.includes('/p/.zensu/state/tdd-phase-scv1_' + 'a'.repeat(64) + '.json'),
+    'the path is named, because the reader is being sent to repair that file');
+  assert.match(text, /--confirm/, 'the remedy that exists is named');
+  // The cost has to travel with the offer. A user who reads "rebuild" as "restore"
+  // will not go looking for the chain that is gone.
+  assert.match(text, /loss, not a restore/);
+});
+
+test('WB a tamper shape is diagnosed WITHOUT offering the rebuild', () => {
+  const { renderBaselineDiagnosis } = report();
+  const core = CORE();
+  for (const state of [core.BASELINE_STATES.UNSAFE, core.BASELINE_STATES.UNREADABLE]) {
+    const text = renderBaselineDiagnosis({ state, path: '/p/x.json', projectRoot: '/p' }, 'sid');
+    assert.match(text, /will NOT rebuild it/,
+      state + ' says plainly that it is not repaired');
+    assert.equal(/--confirm/.test(text), false,
+      'offering --confirm here would tell the user to build over the evidence');
+  }
+});
+
+test('WB a healthy document says nothing, and an unjudgeable one is a missing check', () => {
+  const { renderBaselineDiagnosis } = report();
+  const core = CORE();
+  assert.equal(
+    renderBaselineDiagnosis({ state: core.BASELINE_STATES.PRESENT, path: '/p/x.json' }, 'sid'),
+    '',
+    'the ordinary case adds no noise to an already-served report',
+  );
+  const unjudged = renderBaselineDiagnosis({ refusal: core.BASELINE_REFUSALS.NOT_SERVED }, 'sid');
+  assert.match(unjudged, /could NOT be judged/);
+  assert.match(unjudged, /missing check rather than an all-clear/,
+    'silence is the one verdict a diagnostic may not give');
+});
+
+test('WB the confirm notes report an unrecorded provenance rather than absorbing it', () => {
+  const { renderBaselineNotes } = report();
+  const core = CORE();
+  const clean = renderBaselineNotes({
+    state: core.BASELINE_STATES.MISSING, rebuilt: true, provenance: 'recorded', path: '/p/x.json',
+  });
+  assert.match(clean, /rebuilt at/);
+  assert.equal(/WARNING/.test(clean), false, 'a clean rebuild is not a warning');
+
+  const unrecorded = renderBaselineNotes({
+    state: core.BASELINE_STATES.MISSING,
+    rebuilt: true,
+    provenance: 'unavailable: lock busy',
+    path: '/p/x.json',
+  });
+  assert.match(unrecorded, /WARNING/);
+  assert.match(unrecorded, /unrecorded in the workflow history/,
+    'a real repair with an unwritten provenance is reported, never folded into the success line');
+
+  assert.equal(renderBaselineNotes({ state: core.BASELINE_STATES.PRESENT }), '');
+});
+
+test('WB the repair acts on a missing document only, and never reaches the core otherwise', () => {
+  const { repairBaseline } = report();
+  const core = CORE();
+  // A request that would throw if it were ever used. Every non-missing state must
+  // return before the core is called, so this stands in for "the core was not
+  // reached" without needing a synthetic install.
+  const poisoned = null;
+  for (const state of [
+    core.BASELINE_STATES.PRESENT,
+    core.BASELINE_STATES.UNSAFE,
+    core.BASELINE_STATES.UNREADABLE,
+  ]) {
+    const input = { state, path: '/p/x.json' };
+    assert.deepEqual(repairBaseline(poisoned, input), input,
+      state + ' is returned unchanged, with no write attempted');
+  }
+  assert.equal(repairBaseline(poisoned, undefined), undefined);
+});
+
+test('WB surviving evidence is a closed set, never a listing of the state directory', () => {
+  const { survivingEvidence } = report();
+  const os = require('node:os');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-evidence-'));
+  const stateDir = path.join(root, '.zensu', 'state');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const core = CORE();
+  const key = core.sessionKey('sid');
+  for (const name of [
+    'pending-review.json',
+    'pending-review.json.claim',
+    'reviewer-spawn-denied-' + key + '.json',
+    'autopilot-active-' + 'b'.repeat(64) + '.json',
+    'tdd-phase-' + key + '.json',
+    'unrelated-note.json',
+    'secrets.env',
+  ]) {
+    fs.writeFileSync(path.join(stateDir, name), '{}');
+  }
+  const listed = survivingEvidence(root, 'sid');
+  assert.deepEqual(listed, [
+    'autopilot-active-' + 'b'.repeat(64) + '.json',
+    'pending-review.json',
+    'pending-review.json.claim',
+    'reviewer-spawn-denied-' + key + '.json',
+  ], 'only the closed candidate set is named, sorted');
+  // The output is read back by a model, and the directory is session-writable, so
+  // an arbitrary filename must never reach it.
+  assert.equal(listed.includes('secrets.env'), false);
+  assert.equal(listed.includes('unrelated-note.json'), false);
+  assert.deepEqual(survivingEvidence(path.join(root, 'absent'), 'sid'), [],
+    'an unreadable state directory is an empty list, never a throw');
+  assert.deepEqual(survivingEvidence('', 'sid'), []);
+  fs.rmSync(root, { recursive: true, force: true });
+});

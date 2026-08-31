@@ -1041,6 +1041,131 @@ Part C pins the named state, the doctor row, the Stop release, the Bash-matcher
 allowance with its ordinary-command discrimination, the refusal truth table, the
 end-to-end repair, and that the reserved phase cannot be minted through `--phase`.
 
+## Workflow-Baseline Repair (`workflowBaselineVerdict` / `repairWorkflowBaseline`)
+
+**A DIFFERENT wedge from the one adoption exits, and confusing the two is the mistake
+this section exists to prevent.** Adoption answers "this runtime may not SERVE the
+record". This answers "this runtime serves it perfectly well, and the workflow
+document the record anchors is GONE". They share a section boundary and nothing else:
+adoption re-mints a record, this rebuilds a document, and neither is reachable in the
+other's state.
+
+The cause is ordinary rather than exotic: a git worktree deleted and re-created loses
+`<project>/.zensu/state/tdd-phase-<key>.json`, because `.zensu/*` is gitignored, and a
+COMPACTION continues the SAME session instead of minting a new one. `revalidateWorkflowState`
+in `hooks/lib/reviewer-capability-v1.js` then throws on the `.*` matcher, so **every tool
+denies** — Edit, Write, Bash, subagents.
+
+**The deny is CORRECT and STAYS. Nothing here relaxes it.** Reading a deleted document
+as "never active" is exactly how a session would escape an armed review chain by
+deleting one file. The repair REBUILDS the document; it never waives the gate. Do not
+"simplify" this into a relaxable bind failure — the two relaxable states in
+§"Relaxable Bind Failures" share an argument this one does not: there NO workflow
+document is reachable, so relaxing waives a dead guarantee. Here the document is
+exactly what is missing, and its absence is the signal.
+
+**THE SEAM WAS ALREADY THERE, and taking it is why the recognizer is untouched.**
+`already-served` + `--confirm` is ALREADY the "the record is fine, something beside it
+is wedged" path in `session-adopt-report-v1.js` (`shouldRepairInPlace`), and it swept
+the lease store. The baseline is its SECOND repairable item. Consequently
+`hooks/lib/zensu-doctor-invocation.js` is unchanged: the recognized list stays at two
+and `RECOGNIZED.adopt.args` stays `["--confirm"]`. A new command or a new flag would
+have needed its own justification written down the way that file demands; reusing the
+seam needed none.
+
+**The baseline half runs BEFORE the lease sweep**, and that is a decision rather than
+layout: a wedged session cannot make a tool call until the document is back, while a
+stuck lease only costs it a review. Both halves compose into ONE headline and ONE exit
+code (`repairHeadline` / `repairExitCode`, both taking the baseline as an OPTIONAL
+second argument so the pre-existing single-argument contract and its four unit
+assertions are byte-identical). EITHER half failing exits non-zero — a rebuilt baseline
+does not launder a stuck lease.
+
+**ONLY `missing` is repairable, and the other two arms are the discrimination test.**
+`classifyWorkflowBaseline` answers `present` / `missing` / `unsafe` / `unreadable`, and
+the ORDER is the contract: the safety tests (symlink, hard link, non-file,
+`> MAX_JSON_BYTES`) run BEFORE the parse, so tamper is reported as tamper rather than
+as a document that failed to validate. `unsafe` and `unreadable` are REFUSED with their
+bytes left alone — something is at that path, and rebuilding over it would destroy the
+evidence and hand the session its capabilities back in the same step. A check that only
+proves "a missing document is rebuilt" passes identically in a tree that rebuilds
+anything it cannot read; AC-002 in `test-versioned-plugin-upgrade.sh` is the row that
+separates them.
+
+**The bind is the INVERSE of adoption's condition 3.** Adoption refuses when the
+executing runtime already serves the record; this REQUIRES it. A record this runtime
+may not serve is a lineage break with its own exit, and rebuilding a document under a
+runtime not allowed to read the record anchoring it would be the wrong repair for the
+wrong cause. `BASELINE_REFUSALS` is deliberately a SEPARATE vocabulary from
+`ADOPTION_REFUSALS` — one shared set would invite a caller to render one's remedy for
+the other's cause.
+
+**Provenance is a history entry and NOT a bypass-ledger entry**, the same rule
+`--chain-recover` and adoption follow, and for the same two reasons. A record or state
+FIELD would be a persisted shape change, which under §"Runtime Lineage" costs a
+breaking release and would wedge every session then running. And the ledger records
+gate ESCAPES so that everything rendered under "Gates bypassed" is true — this escaped
+no gate, because the document a gate would have read was already gone.
+`BASELINE_REBUILT` and the `baseline-rebuilt: ` reason prefix are therefore reserved at
+**all four** existing guard sites (`zensu-log.sh --phase` ×2, `zensu-tdd-phase.sh` ×2),
+beside `CHAIN_RECOVERED` and `RUNTIME_ADOPTED`: a forgeable provenance entry is worse
+than none, because it is believed.
+
+**SessionStart heals the same state without a user, and the argument is not new.** The
+*record exists* branch of `claude-session-control-v1.js` classified nothing and called
+`readWorkflowState`, which failed the hook and repaired nothing — and no later
+SessionStart could help either, because that same branch would fail again. It now
+re-initializes on a clean **ENOENT only**; invalid JSON, a failed validation, a symlink
+and a hard link still fail there. The justification is the one the sibling *no record*
+branch already makes in its own comment: refusing creates no document, and no document
+fails every stateful hook closed for the rest of the session.
+
+**Moving together:** `BASELINE_STATES` / `BASELINE_REFUSALS` / `BASELINE_HISTORY_PHASE` /
+`BASELINE_HISTORY_REASON_PREFIX` / `classifyWorkflowBaseline` / `workflowBaselineVerdict` /
+`repairWorkflowBaseline` / the newly exported `adoptionWorkflowStatePath` in
+`session-control-core-v1.js`; the four reserved-phase guards; `baselineVerdict` /
+`repairBaseline` / `baselineFault` / `leaseFault` / `renderBaselineDiagnosis` /
+`renderBaselineNotes` / `survivingEvidence` plus the two-argument `repairHeadline` /
+`repairExitCode` in `session-adopt-report-v1.js`; `BASELINE_MISSING_CODE` and its three
+throw sites in `reviewer-capability-v1.js`; the `case 1)` reason in
+`stop-chain-enforcer.sh`; and the `stateBlock` row in `zensu-doctor-report.js`.
+**Operator-facing accounts:** `skills/adopt-session/SKILL.md` §"Strict Scope" and its
+`already-served` refusal row, the two state rows in `skills/doctor/SKILL.md`,
+`docs/session-control.md` §"Unbindable sessions" (as a FOURTH state that is NOT one of
+the two relaxable bind failures), and `docs/gates.md` §"Missing Workflow Baseline".
+
+**Version: `patch`.** Walked against §"Runtime Lineage" entry by entry: no context-record
+or workflow-state schema field (`BASELINE_REBUILT` is a history-entry VALUE, and
+`workflowState`/`event` are shape-validated by `validateWorkflowToken`, not members of a
+vocabulary); no strict key set; no hook added, removed or renamed and no matcher changed;
+no new config key; no attestation change; and no change to the recognized command set or
+its argument list. The capability gate's deny is a REWORDING of an existing deny, not a
+new one — the shape it refuses is byte-identical.
+
+**Known gaps, accepted and named:**
+
+- **The rebuild is a real LOSS, not a restore.** A chain that was live when the document
+  vanished is gone, and the rebuilt baseline reads "never active" because that is all a
+  fresh baseline can say. Nothing in the rebuilt document says what was lost. The
+  mitigations are disclosure only: the writer is unreachable without `--confirm`, the
+  report lists the session-keyed evidence that survived (`pending-review.json`, its
+  `.claim`, an Autopilot pointer, a reviewer-denial note) WITHOUT interpreting it, and
+  every carrier states the cost beside the command.
+- **The SessionStart self-heal is not user-confirmed.** A session could delete its own
+  document and wait for an automatic compaction. The history entry makes that visible;
+  nothing prevents it. It matches the existing *no record* branch, which already
+  re-registers without consent for the same reason — but say "matches", never "is
+  therefore safe".
+- **Windows is unverified for the in-session half.** `zensu-doctor-invocation.js` refuses
+  on win32 by design, so the repair command is unreachable there exactly as
+  `/zensu:doctor` is. Only the SessionStart self-heal and the doctor row apply on that
+  host, and `test-versioned-plugin-upgrade.sh` Part D has no Windows profile entry.
+- **The evidence listing is a closed candidate set, and it is not complete.** The
+  Autopilot pointer is matched by SHAPE (`autopilot-active-<64 hex>.json`) rather than by
+  this session's owner hash, because that hash is not derivable from what the report
+  holds. So a foreign session's pointer can be listed. It is listed, never interpreted,
+  which is why that is acceptable — but do not describe the list as "this session's".
+
 ## Autopilot Run Scope (`hooks/lib/zensu-autopilot-state.sh`)
 
 A durable Autopilot run is scoped by TWO independent axes, and confusing them is the

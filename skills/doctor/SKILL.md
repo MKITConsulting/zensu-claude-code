@@ -487,6 +487,17 @@ classifier will refuse a spawn, not only when the whole table is green.
   the caveat to shorten the row, and do not read its ABSENCE as proof no refusal is
   outstanding — the note is cleared on every Stop and re-minted only by one that reaches
   the notice, so a clean-tree turn leaves the caveat off while the refusal stands.
+- **❌ state: this session's own workflow document is MISSING** → the record is
+  intact and the document it anchors is gone, so the capability gate is denying
+  every tool in this session. A deleted and re-created worktree causes it, because
+  `.zensu/state/` is gitignored. Relay the path the row prints, and both halves of
+  the remedy: `/zensu:adopt-session` for the diagnosis, `/zensu:adopt-session
+  --confirm` to rebuild — AND that rebuilding is a loss rather than a restore, so a
+  review chain that was live when the document vanished is gone. Never relay the
+  command without the cost.
+- **⚠️ state: this session's own workflow document was not checked** → no bound
+  session key was available, so the check above did not run. A missing check, never
+  an all-clear.
 - **⚠️ state: `<dir>` could not be read (`<errno>`)** → the session-state checks did
   NOT run. Relay it as a missing check, never as an all-clear: no chain shape, no
   wedged or foreign-chain row and no pending-review verdict was computed, so their

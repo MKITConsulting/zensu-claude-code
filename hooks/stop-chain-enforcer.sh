@@ -666,7 +666,13 @@ case "$INNER_STATUS" in
     # SessionStart creates this baseline before any model action. Once the
     # immutable session context is bound, a missing baseline is deletion or an
     # incomplete initialization and must never be reinterpreted as inactivity.
-    printf '%s\n' '{"decision":"block","reason":"Zensu review-chain Stop denied: the mandatory current-session workflow baseline is missing. Start a fresh Claude Code session or repair the Session Control state; do not infer completion."}'
+    #
+    # It keeps BLOCKING — that is the whole point, and nothing here relaxes it.
+    # What changed is the remedy: "repair the Session Control state" named no
+    # command, in a state where the capability gate denies every tool and only
+    # the two commands the Bash recognizer admits are reachable. The same remedy
+    # the capability gate now names is the one that exists.
+    printf '%s\n' '{"decision":"block","reason":"Zensu review-chain Stop denied: the mandatory current-session workflow baseline is missing. Do not infer completion. If the record is intact and served, run /zensu:adopt-session to see the diagnosis and /zensu:adopt-session --confirm to rebuild the document; otherwise start a fresh Claude Code session."}'
     exit 0
     ;;
   *)

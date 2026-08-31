@@ -306,6 +306,41 @@ configuration.
 `tests/structure/test-plugin-data-guard.sh` pins the behavior, both directions, in all three
 chain states.
 
+## Missing Workflow Baseline
+
+The `.*` capability gate (`hooks/pre-reviewer-capability-gate.sh`) revalidates the session's
+workflow document before any capability decision, and denies when it is gone. That is
+deliberate and unchanged: a deleted document must never be read as *no chain was ever
+active*, or deleting one file would release an armed review chain. Because the hook matches
+every tool, the deny costs the session everything — Edit, Write, Bash, subagents.
+
+What changed is that the state is **named and repairable** instead of a permanent wedge. The
+cause is ordinary: a git worktree deleted and re-created loses the document, because
+`.zensu/state/` is gitignored, and a compaction continues the SAME session rather than
+minting a new one.
+
+- **The deny names the cause and the command** — `/zensu:adopt-session` for the diagnosis and
+  `/zensu:adopt-session --confirm` to rebuild — instead of the generic `immutable context
+  revalidation failed`, which is accurate and names no way out. Both commands stay reachable,
+  because the Bash recognizer admits them in every bind failure.
+- **Only a clean `ENOENT` is named that way.** A document that is present but unsafe or
+  unreadable keeps the generic wording: something is at that path, and offering a rebuild
+  there would tell the user to build over the evidence.
+- **The Stop hook still BLOCKS** and names the same command. It does not release: nothing
+  proves completion, and the release would be a claim the plugin cannot make.
+- **`/zensu:doctor` reports it.** Before this, `stateBlock` only judged the documents that
+  exist and never asked whether the bound session's own was among them, so a report came back
+  fully green over a session in which every tool was being denied.
+- **`SessionStart` heals it on its own** at the next resume or compaction, on `ENOENT` only,
+  writing the same `BASELINE_REBUILT` provenance entry the confirmed repair writes.
+
+Rebuilding is a **loss, not a restore**: a review chain that was live when the document
+vanished is gone, and the rebuilt baseline reads *never active*. That is why the writer is
+never reached without `--confirm`, why the report lists the session-state files that
+survived, and why it records **no** bypass-ledger entry — it escaped no gate, because the
+document a gate would have read was already gone. See
+[Session Control](session-control.md#unbindable-sessions) for the full account.
+
 ## TDD Phase Gate
 
 Unlike prompt-based TDD ("please write tests first"), the `/zensu:tdd` workflow **structurally prevents** violations via a PreToolUse FSM gate on Edit/Write/MultiEdit:

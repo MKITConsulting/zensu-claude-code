@@ -4448,3 +4448,214 @@ test('external process lease reclaims a live PID with a mismatched start identit
     token: acquired.token,
   });
 });
+
+// ── Workflow-baseline repair ────────────────────────────────────────────────
+//
+// A DIFFERENT wedge from the one adoption exits, and the distinction is the whole
+// point: the record is intact and SERVED by the executing runtime, and the
+// workflow document the record anchors is gone. While it is, the capability gate
+// denies every tool in the session. See §"Workflow-Baseline Repair" in CLAUDE.md.
+
+function baselineOptions(f, overrides = {}) {
+  return {
+    recordsDir: f.recordsDir,
+    sessionId: RAW_SESSION,
+    pluginData: f.pluginData,
+    executingPluginRoot: f.pluginRoot,
+    host: f.host,
+    ...overrides,
+  };
+}
+
+// The CANONICAL project root, and the reason it is a helper rather than
+// f.projectRoot inline: readContext canonicalizes the recorded root, so on macOS
+// the verdict answers /private/var/... while the fixture's own spelling is
+// /var/... . A raw compare here fails against perfectly correct code, which is
+// exactly what it did on the first run of these tests.
+function baselineProject(f) {
+  return fs.realpathSync.native(f.projectRoot);
+}
+
+function baselineFile(f) {
+  return core.adoptionWorkflowStatePath(baselineProject(f), RAW_SESSION);
+}
+
+// A real SIBLING of the recorded root, because servesRecordedRuntime requires one
+// whatever the declared version says. Local rather than reusing siblingPluginRoot,
+// which reads f.currentContext — a field only the deferred-review fixtures set.
+function baselineSibling(f, version) {
+  const root = fs.mkdtempSync(path.join(path.dirname(f.pluginRoot), 'zensu-baseline-sibling-'));
+  const manifestDir = f.host === 'codex' ? '.codex-plugin' : '.claude-plugin';
+  fs.mkdirSync(path.join(root, manifestDir), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, manifestDir, 'plugin.json'),
+    JSON.stringify({ name: 'zensu', version }),
+  );
+  return fs.realpathSync.native(root);
+}
+
+test('WB1 the classification names all four shapes, and both tamper shapes are one verdict', (t) => {
+  const f = fixture('claude');
+  register(f);
+  const file = core.adoptionWorkflowStatePath(f.projectRoot, RAW_SESSION);
+  const classify = () => core.classifyWorkflowBaseline(file, f.projectRoot, RAW_SESSION);
+
+  assert.equal(classify(), core.BASELINE_STATES.MISSING);
+  initialize(f);
+  assert.equal(classify(), core.BASELINE_STATES.PRESENT);
+
+  // Present and does not validate is UNREADABLE, never missing: something is
+  // there, and calling it absent would aim the repair at a path it cannot own.
+  fs.writeFileSync(file, '{not json');
+  assert.equal(classify(), core.BASELINE_STATES.UNREADABLE);
+
+  // A hard link is a second directory entry for a real file, so it passes every
+  // test a plain regular file passes except nlink. It is the shape an isFile or
+  // size test alone would admit.
+  fs.unlinkSync(file);
+  const elsewhere = path.join(f.projectRoot, 'elsewhere.json');
+  fs.writeFileSync(elsewhere, '{}');
+  fs.linkSync(elsewhere, file);
+  assert.equal(classify(), core.BASELINE_STATES.UNSAFE, 'a hard link is unsafe, not readable');
+
+  if (WINDOWS_SYMLINK_SKIP) {
+    t.diagnostic(WINDOWS_SYMLINK_SKIP);
+    return;
+  }
+  fs.unlinkSync(file);
+  fs.symlinkSync(elsewhere, file);
+  assert.equal(classify(), core.BASELINE_STATES.UNSAFE, 'a symlink is unsafe, not readable');
+});
+
+test('WB2 the verdict refuses every bind it cannot establish, and names which', () => {
+  const f = fixture('claude');
+
+  // No record at all — the read fails, and the refusal says so rather than
+  // reporting a verdict about a document nothing anchors.
+  assert.deepEqual(
+    core.workflowBaselineVerdict(baselineOptions(f)),
+    { ok: false, reason: core.BASELINE_REFUSALS.RECORD_UNREADABLE },
+  );
+
+  register(f);
+
+  const otherData = fs.mkdtempSync(path.join(f.root, 'other-plugin-data-'));
+  assert.deepEqual(
+    core.workflowBaselineVerdict(baselineOptions(f, { pluginData: otherData })),
+    { ok: false, reason: core.BASELINE_REFUSALS.PLUGIN_DATA },
+    'the plugin-data boundary is never relaxed here either',
+  );
+
+  // The INVERSE of adoption's condition 3: this repair REQUIRES the executing
+  // runtime to serve the record. A lineage break has its own exit, and rebuilding
+  // a document under a runtime not allowed to read the record anchoring it would
+  // be the wrong repair for the wrong cause. The fixture declares 9.8.7, so a
+  // major step is what breaks the lineage.
+  const foreign = baselineSibling(f, '10.0.0');
+  assert.deepEqual(
+    core.workflowBaselineVerdict(baselineOptions(f, { executingPluginRoot: foreign })),
+    { ok: false, reason: core.BASELINE_REFUSALS.NOT_SERVED },
+  );
+});
+
+test('WB3 only a missing document is repairable', () => {
+  const f = fixture('claude');
+  register(f);
+
+  const missing = core.workflowBaselineVerdict(baselineOptions(f));
+  assert.equal(missing.ok, true);
+  assert.equal(missing.state, core.BASELINE_STATES.MISSING);
+  assert.equal(missing.repairable, true);
+  assert.equal(missing.projectRoot, baselineProject(f));
+  assert.equal(missing.path, baselineFile(f));
+
+  initialize(f);
+  const present = core.workflowBaselineVerdict(baselineOptions(f));
+  assert.equal(present.state, core.BASELINE_STATES.PRESENT);
+  assert.equal(present.repairable, false, 'a healthy document is never rebuilt over');
+
+  fs.writeFileSync(present.path, '{not json');
+  const unreadable = core.workflowBaselineVerdict(baselineOptions(f));
+  assert.equal(unreadable.state, core.BASELINE_STATES.UNREADABLE);
+  assert.equal(unreadable.repairable, false, 'tamper is never repaired away');
+});
+
+test('WB4 the repair rebuilds the document, records BASELINE_REBUILT once, and ledgers nothing', () => {
+  const f = fixture('claude');
+  register(f);
+  const file = baselineFile(f);
+  assert.equal(fs.existsSync(file), false, 'precondition: the document is genuinely absent');
+
+  const repaired = core.repairWorkflowBaseline(baselineOptions(f));
+  assert.equal(repaired.path, file);
+  assert.equal(repaired.projectRoot, baselineProject(f));
+  assert.equal(repaired.provenance, 'recorded');
+  assert.equal(fs.existsSync(file), true);
+
+  const state = core.readWorkflowState({ projectRoot: f.projectRoot, sessionId: RAW_SESSION });
+  const rebuilt = state.history.filter((entry) => entry.phase === core.BASELINE_HISTORY_PHASE);
+  assert.equal(rebuilt.length, 1, 'exactly one provenance entry, never a second on the same repair');
+  assert.equal(rebuilt[0].reason, core.BASELINE_HISTORY_REASON_PREFIX + core.BASELINE_STATES.MISSING);
+  // `ts`, never `timestamp`: the key every other history writer sets and the one
+  // validateWorkflowExtensions validates.
+  assert.ok(typeof rebuilt[0].ts === 'string' && rebuilt[0].ts.length > 0);
+
+  // The bypass ledger records gate ESCAPES so that everything rendered under
+  // "Gates bypassed" is true. This escaped no gate — the document a gate would
+  // have read was already gone — so an entry here would make that line false.
+  assert.deepEqual(state.bypasses, [], 'the repair is never a bypass-ledger entry');
+});
+
+test('WB5 the repair refuses a document that is present but unsafe or unreadable', () => {
+  const f = fixture('claude');
+  register(f);
+  const file = core.adoptionWorkflowStatePath(f.projectRoot, RAW_SESSION);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+
+  fs.writeFileSync(file, '{not json');
+  assert.throws(
+    () => core.repairWorkflowBaseline(baselineOptions(f)),
+    /workflow-document-unreadable/,
+  );
+  // The refusal leaves the bytes alone: rebuilding over them would destroy the
+  // one thing a reader needs to tell tamper from a truncated write.
+  assert.equal(fs.readFileSync(file, 'utf8'), '{not json');
+
+  fs.unlinkSync(file);
+  const elsewhere = path.join(f.projectRoot, 'elsewhere.json');
+  fs.writeFileSync(elsewhere, '{}');
+  fs.linkSync(elsewhere, file);
+  assert.throws(
+    () => core.repairWorkflowBaseline(baselineOptions(f)),
+    /workflow-document-unsafe/,
+  );
+});
+
+test('WB6 a second repair refuses instead of rebuilding over the first', () => {
+  const f = fixture('claude');
+  register(f);
+  core.repairWorkflowBaseline(baselineOptions(f));
+  const file = core.adoptionWorkflowStatePath(f.projectRoot, RAW_SESSION);
+  const before = fs.readFileSync(file, 'utf8');
+  assert.throws(
+    () => core.repairWorkflowBaseline(baselineOptions(f)),
+    /workflow-document-present/,
+    'the second call sees a present document and refuses it as unrepairable',
+  );
+  assert.equal(fs.readFileSync(file, 'utf8'), before, 'a refused repair changes nothing');
+});
+
+test('WB7 a bind the repair cannot establish refuses before any write', () => {
+  const f = fixture('claude');
+  register(f);
+  const foreign = baselineSibling(f, '10.0.0');
+  assert.throws(
+    () => core.repairWorkflowBaseline(baselineOptions(f, { executingPluginRoot: foreign })),
+    /not-served-by-executing-runtime/,
+  );
+  assert.equal(
+    fs.existsSync(core.adoptionWorkflowStatePath(f.projectRoot, RAW_SESSION)),
+    false,
+    'a refused bind never creates the document it declined to judge',
+  );
+});

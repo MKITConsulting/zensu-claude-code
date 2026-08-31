@@ -87,6 +87,28 @@ It does NOT relax the lineage rule for anything else, rewrite any record, touch
 the workflow document's decision fields, relax the plugin-data boundary, grant a
 review round, set a terminal flag, or edit code.
 
+**A SECOND repair rides on the `already-served` refusal, and it is a different
+wedge from the one above.** There the executing runtime may not SERVE the record;
+here it serves it perfectly well and the workflow document the record anchors is
+GONE. A worktree deleted and re-created loses it, because `.zensu/state/` is
+gitignored, and a compaction that continues the SAME session never mints a new
+one. While it is gone the capability gate denies every tool in the session — which
+is deliberate and unchanged: a deleted document must never be read as "no chain
+was ever active".
+
+The read-only run names it; `--confirm` rebuilds it and appends one
+`BASELINE_REBUILT` history entry. Only a MISSING document is rebuilt. A document
+that is present but unreadable, a symlink, a hard link, a non-file or an
+oversized one is REFUSED and its bytes are left alone — something is at that
+path, and rebuilding over it would destroy the evidence.
+
+**Rebuilding is a loss, not a restore, and the user has to hear that before
+confirming.** A review chain that was live when the document vanished is gone;
+the rebuilt baseline reads "never active", because that is all a fresh baseline
+can say. The report lists the session-state files that survived — a pending
+review, its claim, an Autopilot pointer, a reviewer-denial note — without
+interpreting them, so the user can judge what was lost.
+
 The cost is real and stated plainly: the pin weakens from "the measured code is
 the enforcing code" to "the enforcing code shares the persisted shapes of the
 measured code". Do not run it to make an unrelated failure go away.
@@ -150,7 +172,7 @@ render that verbatim too.
 | `private-record-store-unsafe` | Entry-point refusal, raised before `adoptableRecord` runs: the private record store itself could not be opened safely — missing, aliased, or carrying unsafe permissions or ownership. |
 | `record-unreadable` | The record no longer re-verifies against the installation that minted it — pruned from the cache, altered, or a real schema change. |
 | `plugin-data-mismatch` | The record belongs to a different plugin-data store. Never relaxed. |
-| `already-served` | Nothing to RE-MINT. The record is correct, but the lease store may still be wedged: an adoption writes the record first and sweeps the store afterwards, so a run that died in between leaves exactly this state. Re-running with `--confirm` repeats the sweep idempotently and re-mints nothing. If tools still fail after that, run `/zensu:doctor`. |
+| `already-served` | Nothing to RE-MINT, and TWO things beside the record can still be wedged. **The workflow document** this session is anchored to may be gone — a deleted and re-created worktree loses it, because `.zensu/state/` is gitignored — and while it is, the capability gate denies every tool in the session. **The lease store** is the second: an adoption writes the record first and sweeps the store afterwards, so a run that died in between leaves exactly that state. The report below the remedy says which of the two applies. Re-running with `--confirm` repairs both, idempotently, and re-mints nothing. If tools still fail after that, run `/zensu:doctor`. |
 | `not-a-sibling-installation` | The executing tree is not an upgrade of the recorded one (for example a `--plugin-dir` checkout). |
 | `executing-runtime-unidentified` | The executing installation declares no usable version. |
 | `executing-runtime-older` | The executing installation is OLDER. Only forwards is ever allowed. |

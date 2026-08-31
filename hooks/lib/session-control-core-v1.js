@@ -1702,6 +1702,181 @@ function adoptContext(options) {
   };
 }
 
+// A DIFFERENT wedge from the one adoption exits, and confusing the two is the
+// mistake this block exists to prevent. Adoption answers "this runtime may not
+// serve the record"; this answers "this runtime serves the record perfectly
+// well, and the workflow document the record anchors is GONE". The observed
+// cause is a worktree deleted and re-created — `.zensu/state/` is gitignored, so
+// the document does not come back — followed by a compaction that continues the
+// SAME session rather than starting a new one.
+//
+// The state is fail-closed by design and STAYS so. revalidateWorkflowState in
+// reviewer-capability-v1.js throws on a missing document precisely so that
+// deleting one file cannot turn an armed chain into "never active", and that
+// hook is on the `.*` matcher, so it denies every tool. Nothing here relaxes it.
+// The repair REBUILDS the document and leaves provenance behind.
+//
+// What it costs, stated here because the code cannot state it later: a chain
+// that was live when the document vanished is GONE. The rebuilt baseline reads
+// "never active", because that is all a fresh baseline can say. That is why no
+// caller reaches the writer without the user's confirmation, and why the writer
+// records BASELINE_REBUILT.
+const BASELINE_STATES = {
+  PRESENT: 'present',
+  MISSING: 'missing',
+  UNSAFE: 'unsafe',
+  UNREADABLE: 'unreadable',
+};
+
+// Refusals name the BIND, never the document: reaching a verdict about the
+// document at all requires the record to be provably this session's and this
+// runtime's. Separate vocabulary from ADOPTION_REFUSALS on purpose — the two
+// commands answer different questions, and one shared set would invite a caller
+// to render one's remedy for the other's cause.
+const BASELINE_REFUSALS = {
+  RECORD_UNREADABLE: 'record-unreadable',
+  PLUGIN_DATA: 'plugin-data-mismatch',
+  NOT_SERVED: 'not-served-by-executing-runtime',
+};
+
+const BASELINE_HISTORY_PHASE = 'BASELINE_REBUILT';
+const BASELINE_HISTORY_REASON_PREFIX = 'baseline-rebuilt: ';
+
+function baselineRefusal(reason) {
+  return { ok: false, reason };
+}
+
+// Classifies the document without reading it when a cheaper test already
+// decides, and the ORDER is the contract: the safety tests run before the parse,
+// so a symlink or a hard link is reported as tamper rather than as a document
+// that merely failed to validate. It mirrors revalidateWorkflowState in
+// reviewer-capability-v1.js — the gate whose refusal sends a user here — so the
+// two agree about which shapes are unsafe. MAX_JSON_BYTES is the same bound
+// readRegularFile applies, so a document called oversized here is one the reader
+// would refuse anyway.
+function classifyWorkflowBaseline(file, projectRoot, sessionId) {
+  let stat;
+  try {
+    stat = fs.lstatSync(file);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return BASELINE_STATES.MISSING;
+    // Anything else — EACCES, ENOTDIR, a symlink loop — is NOT absence.
+    // Reporting it as missing would aim the repair at a path it cannot own.
+    return BASELINE_STATES.UNSAFE;
+  }
+  if (stat.isSymbolicLink() || !stat.isFile() || stat.nlink !== 1 || stat.size > MAX_JSON_BYTES) {
+    return BASELINE_STATES.UNSAFE;
+  }
+  try {
+    readWorkflowState({ projectRoot, sessionId });
+  } catch {
+    return BASELINE_STATES.UNREADABLE;
+  }
+  return BASELINE_STATES.PRESENT;
+}
+
+// Never throws, for the reason adoptableRecord never throws: every caller is
+// already on a failure path, and an exception would replace a named condition
+// with a stack trace.
+function workflowBaselineVerdict(options) {
+  let context;
+  let executingPluginRoot;
+  let pluginData;
+  try {
+    executingPluginRoot = canonicalDirectory(options.executingPluginRoot, 'executing plugin root');
+    pluginData = canonicalDirectory(options.pluginData, 'plugin data');
+    context = readContext({
+      recordsDir: options.recordsDir,
+      sessionId: options.sessionId,
+      expectedHost: options.host,
+    });
+  } catch {
+    return baselineRefusal(BASELINE_REFUSALS.RECORD_UNREADABLE);
+  }
+  if (context.plugin_data !== pluginData) {
+    return baselineRefusal(BASELINE_REFUSALS.PLUGIN_DATA);
+  }
+  // The INVERSE of adoption's condition 3, deliberately. Adoption refuses when
+  // the executing runtime already serves the record; this REQUIRES it. A record
+  // this runtime may not serve is a lineage break with its own exit — routing it
+  // here would rebuild a document under a runtime that is not allowed to read
+  // the record anchoring it.
+  if (!servesRecordedRuntime(context, executingPluginRoot, context.host)) {
+    return baselineRefusal(BASELINE_REFUSALS.NOT_SERVED);
+  }
+  const file = adoptionWorkflowStatePath(context.project_root, options.sessionId);
+  const state = classifyWorkflowBaseline(file, context.project_root, options.sessionId);
+  return {
+    ok: true,
+    state,
+    // ONLY `missing` is repairable. `unsafe` and `unreadable` mean something IS
+    // sitting at that path; rebuilding over it would destroy the evidence and
+    // hand the session its capabilities back in the same step.
+    repairable: state === BASELINE_STATES.MISSING,
+    path: file,
+    projectRoot: context.project_root,
+    context,
+  };
+}
+
+// Rebuilds a MISSING baseline and records that it did. The verdict is evaluated
+// twice — once by the caller to report, once here to act — for the reason
+// adoptContext re-evaluates its own: between the two, the document could have
+// come back, or something could have been planted at its path.
+function repairWorkflowBaseline(options) {
+  const verdict = workflowBaselineVerdict(options);
+  if (!verdict.ok) fail(`workflow baseline is not repairable: ${verdict.reason}`);
+  if (!verdict.repairable) {
+    fail(`workflow baseline is not repairable: workflow-document-${verdict.state}`);
+  }
+  // Idempotent by construction: it returns an existing document untouched, so a
+  // concurrent writer that won the race is never overwritten.
+  initializeWorkflowState({
+    projectRoot: verdict.projectRoot,
+    sessionId: options.sessionId,
+  });
+  // Provenance is a history entry and NOT a record or state field, exactly as it
+  // is for the adoption and for --chain-recover: a field would be a persisted
+  // shape change, which under the runtime-lineage rule costs a breaking release
+  // and would wedge every session then running.
+  //
+  // And deliberately NOT a bypass-ledger entry. The ledger records gate ESCAPES
+  // so that everything rendered under "Gates bypassed" is true; this escaped no
+  // gate, because the document a gate would have read was already gone.
+  let provenance = 'recorded';
+  try {
+    mutateWorkflowState({
+      projectRoot: verdict.projectRoot,
+      sessionId: options.sessionId,
+      actor: 'main-v1',
+      workflowState: 'baseline_rebuilt',
+      event: 'baseline-rebuilt',
+    }, (state) => {
+      const history = Array.isArray(state.history) ? state.history : [];
+      // `ts`, never `timestamp`: that is the key validateWorkflowExtensions
+      // validates and the one every existing history writer sets.
+      history.push({
+        step: '',
+        phase: BASELINE_HISTORY_PHASE,
+        ts: nowIso(),
+        reason: `${BASELINE_HISTORY_REASON_PREFIX}${verdict.state}`,
+      });
+      state.history = history;
+      return state;
+    });
+  } catch (error) {
+    // Reported, never smoothed over, and never rolled back: the document is real
+    // and its provenance is not. Undoing a rebuild that already succeeded would
+    // put the session back in the state this repair exists to leave.
+    provenance = `unavailable: ${error && error.message ? error.message : 'unknown'}`;
+  }
+  return {
+    path: verdict.path,
+    projectRoot: verdict.projectRoot,
+    provenance,
+  };
+}
+
 function renderMainContext(contextInput) {
   const context = validateContext(contextInput);
   return [
@@ -3937,6 +4112,22 @@ module.exports = {
   ADOPTION_HISTORY_REASON_PREFIX,
   adoptableRecord,
   adoptContext,
+  // The read-only path helper. Exported because SessionStart needs to ASK where
+  // the document is without creating it — workflowStateFile resolves through
+  // ensureDescendantDirectory and mkdirs every missing component, which is right
+  // for a writer and wrong for a probe.
+  adoptionWorkflowStatePath,
+  BASELINE_STATES,
+  BASELINE_REFUSALS,
+  BASELINE_HISTORY_PHASE,
+  BASELINE_HISTORY_REASON_PREFIX,
+  // Exported for the unit layer alone: driving the unsafe/unreadable arms
+  // through workflowBaselineVerdict needs a full synthetic install, so without a
+  // direct handle the classification truth table would ship with two arms that
+  // nothing executes.
+  classifyWorkflowBaseline,
+  workflowBaselineVerdict,
+  repairWorkflowBaseline,
   renderMainContext,
   renderReviewerContext,
   renderEvidenceWorkerContext,
