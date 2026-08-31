@@ -4527,6 +4527,24 @@ test('WB1 the classification names all four shapes, and both tamper shapes are o
   assert.equal(classify(), core.BASELINE_STATES.UNSAFE, 'a symlink is unsafe, not readable');
 });
 
+test('WB1a an lstat error that is not ENOENT is UNSAFE, never missing', () => {
+  const f = fixture('claude');
+  register(f);
+  // A FILE where the state directory belongs. lstat then answers ENOTDIR on
+  // POSIX — an error, but not absence. Reporting it as missing would aim the
+  // repair at a path it cannot own, which is the same "ENOENT is not proof of
+  // absence" lesson the review-evidence sweep records in its own header.
+  const zensuDir = path.join(f.projectRoot, '.zensu');
+  fs.mkdirSync(zensuDir, { recursive: true });
+  fs.writeFileSync(path.join(zensuDir, 'state'), 'not a directory');
+  assert.equal(
+    core.classifyWorkflowBaseline(baselineFile(f), baselineProject(f), RAW_SESSION),
+    core.BASELINE_STATES.UNSAFE,
+  );
+  // And the verdict refuses to repair it, so the error can never be rebuilt over.
+  assert.equal(core.workflowBaselineVerdict(baselineOptions(f)).repairable, false);
+});
+
 test('WB2 the verdict refuses every bind it cannot establish, and names which', () => {
   const f = fixture('claude');
 
