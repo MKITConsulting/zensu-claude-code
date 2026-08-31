@@ -302,23 +302,53 @@ zensu_combined_summary_enabled() {
   [ "$val" = "1" ]
 }
 
-zensu_autofix_max_rounds() {
-  local default=5
+# One bounded-integer reader behind every `hooks.<key>` that is a number with a
+# range. There were three character-identical copies with four literals swapped,
+# which is the hand-copy shape this repository treats as a first-class hazard
+# everywhere else — and it had already cost something concrete: the newest copy's
+# upper bound shipped unpinned against its own hand-copy in the doctor renderer.
+#
+# The MIN is inclusive here. `zensu_autofix_max_rounds` spelled its own as `n>0`;
+# for a value that has already passed `Number.isInteger`, `n>0` and `n>=1` are the
+# same predicate, so the collapse is behaviour-preserving rather than a widening.
+# C58 in tests/structure/test-impl-stop-counter.sh drives all three getters against
+# their own min, max, one-below-min, one-above-max, a non-integer, a quoted number and
+# an absent key, and it is what any future change to this helper owes the three call
+# sites below. It replaced a claim about a hand-run matrix that was committed nowhere —
+# naming evidence the suite does not carry is the same defect as a stale comment.
+#
+# Argument order is (key, default, min, max) and reaches node as argv 2..4 with the
+# default at argv[1], which is the position the previous three copies already used.
+_zensu_config_bounded_int() {
+  local key="$1" default="$2" min="$3" max="$4" val
   command -v node >/dev/null 2>&1 || { echo "$default"; return 0; }
-  local val
-  val=$(_zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();var n=j.hooks&&j.hooks.autoFixMaxRounds;console.log(Number.isInteger(n)&&n>0&&n<=99?String(n):process.argv[1])' "$default" 2>/dev/null)
+  # `hasOwnProperty` plus the object/array test, matching the strict reader above. Every
+  # caller today passes a literal key, so nothing inherited is reachable in practice — but
+  # this is now a reusable primitive whose three previous copies used static dot access,
+  # and the contract that its key must be a trusted literal is not one a future caller can
+  # see. The `typeof`/`Array.isArray` conjunct is not cosmetic: with `hasOwnProperty`
+  # alone, a `"hooks": "abcde"` or `"hooks": [1,2,3]` makes `hooks.length` an own integer
+  # property that can pass the bounds below.
+  val=$(_zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();var h=j.hooks;var k=process.argv[2];var n=(h&&typeof h==="object"&&!Array.isArray(h)&&Object.prototype.hasOwnProperty.call(h,k))?h[k]:undefined;console.log(Number.isInteger(n)&&n>=Number(process.argv[3])&&n<=Number(process.argv[4])?String(n):process.argv[1])' "$default" "$key" "$min" "$max" 2>/dev/null)
   [ -z "$val" ] && { echo "$default"; return 0; }
   echo "$val"
 }
 
-zensu_pending_review_ttl_hours() {
-  local default=6
-  command -v node >/dev/null 2>&1 || { echo "$default"; return 0; }
-  local val
-  val=$(_zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();var n=j.hooks&&j.hooks.pendingReviewTtlHours;console.log(Number.isInteger(n)&&n>=0&&n<=8760?String(n):process.argv[1])' "$default" 2>/dev/null)
-  [ -z "$val" ] && { echo "$default"; return 0; }
-  echo "$val"
-}
+# key default min max — the positional-literal contract binds ALL THREE lines below.
+# `getter_operand` in tests/structure/test-impl-stop-counter.sh reads operands straight out of
+# the `implStopNudgeAfter` call (C29, C31, C31a) and the `pendingReviewTtlHours` call (C57) for
+# the two constant-mirror pins, and out of ALL THREE for C58's bound matrix, which fails with
+# `operands-unreadable` when any of them stops parsing. Keep the four operands as positional
+# literals on one line in each.
+#
+# The helper is `hooks.<key>`-only BY CONSTRUCTION: its node program spells the
+# namespace itself. `zensu_context_nudge_threshold` and `zensu_context_window_size`
+# read `j.context.*` and are therefore not omitted members of this family — folding
+# them in would mean widening this contract with a namespace parameter, which is a
+# different decision from the one taken here.
+zensu_autofix_max_rounds()        { _zensu_config_bounded_int autoFixMaxRounds 5 1 99; }
+zensu_pending_review_ttl_hours()  { _zensu_config_bounded_int pendingReviewTtlHours 6 0 8760; }
+zensu_impl_stop_nudge_after()     { _zensu_config_bounded_int implStopNudgeAfter 12 0 999999; }
 
 zensu_context_nudge_enabled() {
   command -v node >/dev/null 2>&1 || return 0

@@ -245,15 +245,27 @@ esac
 
 # ---------------------------------------------------------------- budgets, flags, revision
 new_chain "chain-recover-budget"
-seed "s.reviewRound=4;s.stopBlockCount=2;s.bypasses=[\"ZENSU_TDD_GATE\"];$STALE_RECEIPT" || true
+# `implStopCount` is seeded NON-ZERO on purpose. Asserting `= "0"` after a recovery
+# that never seeded it discriminated nothing: an absent key projects as `0`
+# (chain-recovery-v1.test.js pins that), so a repair that deleted the counter or
+# reset it to zero satisfied the check just as a preserving one did — while the
+# label claimed preservation. 7 is arbitrary; what matters is that it is neither 0
+# nor equal to either sibling budget, so a cross-wired read fails too.
+seed "s.reviewRound=4;s.stopBlockCount=2;s.implStopCount=7;s.bypasses=[\"ZENSU_TDD_GATE\"];$STALE_RECEIPT" || true
 REV_BEFORE="$(state_field revision)"
 DOC_BEFORE="$(read_document)"
+# Positive control: without it a seed that silently failed would leave the counter
+# at 0 and the assertion below would be back to the shape this replaces.
+[ "$(status_field implStopCount)" = "7" ] \
+  && check "T11pre the seed really planted a non-zero implementing-turns counter" PASS \
+  || check "T11pre the seed really planted a non-zero implementing-turns counter (got '$(status_field implStopCount)')" FAIL
 bash "$LOG" --chain-recover --session "$SID" >/dev/null 2>&1
 BUDGET_RC=$?
 [ "$BUDGET_RC" -eq 0 ] && [ "$(status_field reviewRound)" = "4" ] \
   && [ "$(status_field stopBlockCount)" = "2" ] \
-  && check "T11 recovery preserves the review and Stop budgets (no free round)" PASS \
-  || check "T11 recovery preserves the review and Stop budgets (rc=$BUDGET_RC round=$(status_field reviewRound) stops=$(status_field stopBlockCount))" FAIL
+  && [ "$(status_field implStopCount)" = "7" ] \
+  && check "T11 recovery preserves the review, Stop and implementing-turns budgets (no free round)" PASS \
+  || check "T11 recovery preserves the review, Stop and implementing-turns budgets (rc=$BUDGET_RC round=$(status_field reviewRound) stops=$(status_field stopBlockCount) impl=$(status_field implStopCount))" FAIL
 
 [ "$(status_field chainDone)" = "false" ] && [ "$(status_field codeReviewDone)" = "false" ] \
   && [ "$(status_field selfReviewFixed)" = "false" ] \

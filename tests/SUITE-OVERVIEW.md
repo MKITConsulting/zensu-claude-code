@@ -13,14 +13,17 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (146 = 139 + 7). **§3 is NOT fully reconciled to it**, and the
-residual is stated rather than asserted away: its eleven CI group headers sum to 138 and the
-twelfth (local-only) adds 7, so one CI suite in the manifest — `test-session-trail-lineage.sh` —
-appears in no §3 group. That gap predates both the plugin-data guard, which is filed under
-§"Bash gates, witness & secrets", and the reviewer-spawn grant, which is filed under
-§"Review chain & findings". §7's profile table was re-derived from
-`tests/profiles/windows-ci.v1.json` rather than described, so its seven shard ids and their
-membership are the JSON's own, and the entry total is **42**.
+reconciled to that manifest (147 = 140 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 140 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 147). **§3 is NOT fully reconciled to it**, and the residual is stated rather than
+asserted away: its eleven CI group headers sum to 139 against 140 CI-classified suites, so one CI
+suite appears in no §3 group. `main` recorded that suite as `test-session-trail-lineage.sh`; this
+merge did not re-derive the NAME, because §3 lists suites in prose rather than by filename and a
+wrong name in a group is worse than none. The gap predates both the plugin-data guard, filed under
+§"Bash gates, witness & secrets", and the reviewer-spawn grant, filed under §"Review chain &
+findings". §7's profile table was re-derived from `tests/profiles/windows-ci.v1.json` rather than
+described, so its eight shard ids and their membership are the JSON's own, and the entry total
+is **43**.
 
 **Section 4's own header numeral was DROPPED rather than corrected**, so exactly one place
 owns the unit-file count and a header can no longer contradict it. It had said 24 while the
@@ -55,10 +58,10 @@ is ever measured for the suite.
 |---|---|---|
 | `tests/structure/test-*.sh` (deterministic shell) | **146** — 139 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
 | *(reconciliation)* | a `--ci` run reports **139 structure suites + 5 offline evals = 144 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 146 − 139 gap | — |
-| `tests/structure/*.test.js` (`node --test` units) | *(count not maintained here — see §4)* | invoked *by* parent `.sh` suites |
+| `tests/structure/*.test.js` (`node --test` units) | **28 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
-| Windows contract profiles | **7** (`windows-shard-1`…`-7`, 42 suite entries) | `ci.yml` matrix, `run-profile.js` |
+| Windows contract profiles | **8** (`windows-shard-1`…`-8`, 43 suite entries) | `ci.yml` matrix, `run-profile.js` |
 | Windows safety shards | scheduled/manual matrix | `windows-safety.yml` |
 | Approx. assertions in structure layer | **~4,200** (~3,740 in the CI set) | — |
 
@@ -104,8 +107,9 @@ rejection, fail-closed behavior on an unreadable state file, diagnostics on fail
 state verbs, and the SessionStart banner. `session-control-claude` alone carries ~140
 assertions.
 
-### TDD engine & phase gate (16)
-`edit-landing-audit` · `evidence-discipline` · `pre-edit-hook-mirror` ·
+### TDD engine & phase gate (17)
+`edit-landing-audit` · `evidence-discipline` · `impl-stop-counter` ·
+`pre-edit-hook-mirror` ·
 `pretool-config-prompts` · `requirements-table-gate` ·
 `smoke-main-thread-chain` · `tdd-begin-chain-reset` ·
 `tdd-complete-receipt-gate` · `tdd-full-cycle` · `tdd-manager-patches` ·
@@ -352,16 +356,15 @@ assert, `# ` = comment.
 
 ## 7. Windows contract profiles (`tests/profiles/windows-ci.v1.json`)
 
-7 bounded profiles, 42 suite entries, run as a blocking PR matrix in `ci.yml` via
+8 bounded profiles, 43 suite entries, run as a blocking PR matrix in `ci.yml` via
 `node tests/run-profile.js <profile>`. The table below is re-derived from the JSON rather
 than described — the previous five-profile layout (`windows-reset-session`,
 `windows-leases-routing`, `windows-native-state`, `windows-installed-core`,
-`windows-native-branches`) no longer exists under any of those names, and only its total
-of 40 survived the reshard; the table above re-derives the current total from the JSON as 42.
+`windows-native-branches`) no longer exists under any of those names.
 The reviewer-spawn-allow suite is deliberately NOT among them — see CLAUDE.md §"Reviewer-Spawn
 Grant", known gaps.
-`tests/structure/windows-ci-contract.test.js` pins exactly these seven keys and the
-42-entry total, so a shard renamed there and not here is drift this table cannot catch
+`tests/structure/windows-ci-contract.test.js` pins exactly these eight keys and the
+43-entry total, so a shard renamed there and not here is drift this table cannot catch
 on its own:
 
 | Profile | Suites | Members |
@@ -373,6 +376,7 @@ on its own:
 | `windows-shard-5` | 7 | autopilot-plan-delegate, coverage-report-windows-paths, post-review-self-review-handoff, session-id-v1, session-safe-file-read, upgrade-provider-zero-launch, windows-portability-guards |
 | `windows-shard-6` | 5 | bash-source-write-gate, deferred-transfer-reset, marketplace-fixture, session-control-claude, upgrade-process-windows-boundaries |
 | `windows-shard-7` | 2 | review-worker-evidence-lease, stop-enforcer-self-review-routing |
+| `windows-shard-8` | 1 | session-trail-lineage |
 
 Runner guarantees: full manifest + audited command catalog validated before any child
 starts; every suite bound to a validated content digest; per-suite **and** 30-minute
@@ -380,7 +384,7 @@ per-profile deadlines; a supervisor alive until the whole process tree is dead;
 disposable home/temp tree; strict env allowlist (no credentials, auth homes,
 interpreter preloads, or live/API modes).
 
-The aggregate check `Deterministic suite (windows-latest)` downloads exactly those 7
+The aggregate check `Deterministic suite (windows-latest)` downloads exactly those 8
 reports and validates SHA / run-attempt consistency, the exact ordered suite inventory,
 and a complete execution-contract digest binding manifest + catalog + runner +
 supervisor + Job-Object helper + summarizer + workflow config + every referenced suite
@@ -390,7 +394,7 @@ file. Fails closed on missing, failed, timed-out, or incompletely-cleaned profil
 
 | Workflow | Invokes |
 |---|---|
-| `ci.yml` | `bash tests/run-all.sh --ci` (Ubuntu, blocking) + the 7 Windows profiles via `run-profile.js` |
+| `ci.yml` | `bash tests/run-all.sh --ci` (Ubuntu, blocking) + the 8 Windows profiles via `run-profile.js` |
 | `release.yml` | `bash tests/run-all.sh --ci` **twice** — once in `prepare` against the local release commit, once in `publish` against the exact `github.sha`; plus runtime-digest and clean-tree evidence |
 | `windows-safety.yml` | `node tests/run-windows-safety-shard.js <kind> <shard> <total>` — scheduled weekly + manual; partitions the former Windows monolith (legacy canary + every non-Promptfoo structure test + all 3 offline eval runners) without duplication or loss, 30-minute command deadline |
 

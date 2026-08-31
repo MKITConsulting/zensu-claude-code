@@ -30,6 +30,8 @@
 //   ZDOC_NODE/ZENSU/PLAYWRIGHT            tool probe results from the wrapper/skill
 //   ZDOC_FORGE_PROVIDER/CLI/STATE/EDITION forge detection from the VCS driver
 //   ZDOC_TTL_HOURS           pending-review TTL from the canonical getter
+//   ZDOC_IMPL_STOP_NUDGE_AFTER  implementing-turns bound from the
+//                            canonical getter; blank falls back, 0 disables the row
 //   ZDOC_NOW_MS              clock override for deterministic tests
 //   ZDOC_BINDING             the wrapper's binding verdict (bound / unbound /
 //                            orphaned-project-root / incompatible-runtime /
@@ -69,8 +71,43 @@ var BAD = '❌';
 // Mirror of hooks/lib/zensu-config.sh zensu_pending_review_ttl_hours: the wrapper
 // passes the canonical value via ZDOC_TTL_HOURS; these apply only to a direct
 // (test/no-wrapper) invocation and must stay in lockstep with that getter.
+// PINNED by C57 in tests/structure/test-impl-stop-counter.sh, which derives both sides —
+// these two constants against the getter's own operands, through `getter_operand`. The pair
+// declared itself a mirror in prose and was pinned by nothing until the three duplicated
+// getters collapsed onto one call shape that a single extractor could read.
 var TTL_HOURS_FALLBACK = 6;
 var TTL_HOURS_MAX = 8760;
+// Mirror of hooks/lib/zensu-config.sh zensu_impl_stop_nudge_after (default 12,
+// bounds 0..999999): the wrapper passes the canonical value via
+// ZDOC_IMPL_STOP_NUDGE_AFTER; these apply only to a direct (test/no-wrapper)
+// invocation and must stay in lockstep with that getter.
+var IMPL_STOP_NUDGE_FALLBACK = 12;
+// STRICTLY BELOW the counter's own storage ceiling. `_tdd_increment_counter_critical`
+// refuses `current >= 1000000` before incrementing, so a configured threshold of
+// exactly 1000000 could be reached once and never again — the notice firing a single
+// time while this row kept rendering off the frozen value.
+// PINNED, and by three checks with three different jobs: C14a and C31a compare the
+// DEFAULT pair (`IMPL_STOP_NUDGE_FALLBACK` against the getter's `12`), and C31 compares
+// the MAX pair. Each derives its side from source rather than restating a number, so
+// neither literal can be edited alone. `C31` names one comparison throughout this block.
+//
+// WHAT it derives them from moved, and the old spelling is named here because a
+// comment that sends a maintainer after bytes the code no longer carries is its own
+// defect. The three duplicated getters collapsed onto `_zensu_config_bounded_int`, so
+// `zensu_impl_stop_nudge_after` has no function body of its own any more — the bound
+// comparison lives in the shared helper as `n<=Number(process.argv[4])` and the value
+// travels as an operand of the one-line
+// `_zensu_config_bounded_int implStopNudgeAfter 12 0 999999` call.
+//
+// C31 and C31a read that call through the single `getter_operand` extraction, and they read
+// DIFFERENT operands: C31 takes the captured max (`999999`), C31a the captured default
+// (`12`). C14a compares the same default by RUNNING the getter in a subshell rather than
+// extracting an operand, which is why it is a separate check and not a third extraction.
+// Naming one operand for all of them was wrong in the first revision of this sentence, and
+// naming C29 among them was wrong in the second — C29 is a behavioural fallback check.
+// The extraction is anchored on the getter's own definition line, so an unrelated bound
+// elsewhere in that file cannot satisfy it.
+var IMPL_STOP_NUDGE_MAX = 999999;
 var CHAIN_ROW_LIMIT = 8;
 var NOTE_MAX_BYTES = 4096;
 var SETTINGS_MAX_BYTES = 1048576;
@@ -789,6 +826,11 @@ var DENY_FIRST_CAVEAT = ' Remove any deny rule that names the Agent tool first �
 // unchanged, which is what keeps P1be and P1qr green. A shared constant with an
 // unconsumed copy beside it is worse than either honest duplication or one source,
 // because it advertises a single source that does not exist.
+// The deny-first class gained a SEVENTH member outside this file:
+// `REVIEWER_SPAWN_DENY_FIRST` in `hooks/stop-chain-enforcer.sh`, interpolated into the
+// implementing-turns refused-spawn notice and pinned by `C27`. Named here because the
+// census ABOVE — beside `DENY_OUTRANKS` — enumerates the copies this file cannot reach,
+// and it was one short.
 var SELF_PERMISSION_BAR = 'no agent may edit a settings file to widen its own permissions';
 // Only the two spellings verified against a live permission decision on Claude
 // Code SETTINGS_SOURCE_BUILD are accepted. A wildcard form may well work too,
@@ -1477,10 +1519,29 @@ function configBlock() {
   ruleCarrierRows(cfgReads);
 }
 
+// ONE reader for every bounded `ZDOC_*` integer, because the rule below is what
+// the two callers kept getting differently. An ABSENT or blank value falls back,
+// and that distinction is load-bearing: `Number('')` is `0`, `0` passes the
+// `n >= 0` bound, and for BOTH of these variables `0` is the documented value
+// that DISABLES the guard. `zensu-doctor.sh` exports each of them unconditionally
+// after a conditional resolve, so a wrapper fault reaches this file as an empty
+// string — which used to switch the pending-review TTL off silently. The
+// implementing-turns reader guarded it; its twin did not, so the class was named
+// and one of its two instances repaired. Now there is one instance.
+function boundedEnvInt(name, fallback, max) {
+  var raw = env[name];
+  if (typeof raw !== 'string' || raw.trim() === '') return fallback;
+  var n = Number(raw);
+  if (Number.isInteger(n) && n >= 0 && n <= max) return n;
+  return fallback;
+}
+
 function ttlHours() {
-  var n = Number(env.ZDOC_TTL_HOURS);
-  if (Number.isInteger(n) && n >= 0 && n <= TTL_HOURS_MAX) return n;
-  return TTL_HOURS_FALLBACK;
+  return boundedEnvInt('ZDOC_TTL_HOURS', TTL_HOURS_FALLBACK, TTL_HOURS_MAX);
+}
+
+function implStopThreshold() {
+  return boundedEnvInt('ZDOC_IMPL_STOP_NUDGE_AFTER', IMPL_STOP_NUDGE_FALLBACK, IMPL_STOP_NUDGE_MAX);
 }
 // The shapes that carry no work forward. Taken from chain-recovery-v1.js, which
 // OWNS the vocabulary and mints these literals a few lines from where it lists
@@ -1664,7 +1725,17 @@ function pendingReviewStamp(file, st) {
   return st.mtimeMs;
 }
 
-function chainRows(entries, nowMs) {
+// `dirEntries` and `stateDir` are the raw `.zensu/state` listing and its path, and
+// they are here for ONE question: does this session still stand refused? Without
+// them the implementing-turns row recommended the completion verb on exactly the
+// chain whose Stop notice had just qualified it, so the two surfaces contradicted
+// each other in the same minute. Both are optional — a caller with no listing gets
+// the previous behaviour, never a TypeError. **Accepted design debt, named rather
+// than left to be discovered:** they are one datum split into an unchecked pair, and
+// an omitted argument degrades to "no refusal" SILENTLY, which is the shape this file
+// refuses everywhere else. There is exactly one caller and it passes both, so the
+// degradation is unreachable today; make them required if a second caller appears.
+function chainRows(entries, nowMs, dirEntries, stateDir) {
   if (!entries.length) return;
   var chain;
   try {
@@ -1679,8 +1750,25 @@ function chainRows(entries, nowMs) {
   var blocked = [];
   var deadEnds = [];
   var foreignOpen = [];
+  // A STRING, not a list. The push is gated on `entry.key === ownKey` and each entry
+  // carries a distinct key, so at most one chain can ever qualify — holding a single
+  // value puts that invariant in the type instead of in a comment defending an array
+  // that could only ever have one element.
+  var parkedImpl = '';
+  // The row states the MEASURED magnitude, so the count has to survive the loop.
+  // Rendering `implThreshold` instead made the sentence read "across at least 12
+  // turns" at turn 300 — the bound, not the finding.
+  var parkedTurns = 0;
+  var implThreshold = implStopThreshold();
   var ownKey = currentSessionKey();
   var ttl = ttlHours();
+  // Gated on the same two conditions the only consumer needs. State the gate honestly:
+  // it is WEAKER than the consumer's, which additionally requires the entry to be this
+  // session's own chain at `implementing` with the counter at or past the bound — so a
+  // bound session with a note and no implementing chain still pays one note read.
+  // Resolved here rather than above, because it consumes the `ttl` on the line before.
+  var ownRefused = implThreshold > 0 && ownKey !== ''
+    && ownRefusalNoteLive(dirEntries || [], stateDir || '', ownKey, nowMs, ttl);
   var inert = inertShapes(chain);
   // Whether the foreign-open row can render AT ALL. Neither half depends on an
   // entry, so it is decided once here rather than re-tested per entry and then
@@ -1705,6 +1793,70 @@ function chainRows(entries, nowMs) {
       if (report.recoverable) recoverable.push(entry.session + ' → ' + report.nextCommand);
       else blocked.push(entry.session + ' → ' + report.nextCommand);
       return;
+    }
+    // Below the two early returns, on the same side of the ordering contract as
+    // the foreign-open push: a chain already named as wedged or dead-ended must
+    // never be named a second time with a different instruction. Gated on the
+    // session key ALONE — deliberately not on `rowArmed`, whose `inert` half
+    // belongs to the foreign-open filter and would withhold this row for a reason
+    // it does not depend on, silently.
+    if (implThreshold > 0 && ownKey !== '' && entry.key === ownKey
+      && report.shape === 'implementing') {
+      // Read through the classifier, not off the raw document: that module owns
+      // chain semantics, projects the sibling counters the same way, and serialises
+      // the whole report as the `--chain-status` payload, so reaching around it
+      // would leave that verb structurally blind to how long a chain has been parked.
+      var parkedCount = report.implStopCount;
+      if (Number.isSafeInteger(parkedCount) && parkedCount >= implThreshold) {
+        // The command comes from the OWNING module, never hand-authored here: for
+        // an Autopilot-bound chain `shapeCommand` returns the spelling carrying
+        // --autopilot-run / --autopilot-attempt / --chain-id, and the bare verb is
+        // refused outright for such a chain. Same rule the three sibling rows follow.
+        parkedTurns = parkedCount;
+        // The command is ALWAYS named. An earlier revision withheld it while a live
+        // refusal note stood, and that was wrong twice over. First, the note is an
+        // unauthenticated file in a session-writable directory, so withholding let
+        // anything able to write there DELETE the row's only remedy and assert a
+        // host refusal that never happened. Second, the note is minted only by a
+        // Stop that gets all the way through the dirty-tree and threshold gates,
+        // while this row renders off the persisted counter alone — so one clean-tree
+        // turn cleared the note and silently restored the bare recommendation, which
+        // is the exact contradiction the withholding was introduced to remove.
+        // Qualifying instead is stable under both: a missing note costs the caveat,
+        // never the remedy, and a planted one can only add a caveat.
+        // `report.nextCommand` arrives UNQUOTED, and what makes that safe is named here
+        // because a first version of this comment named the WRONG thing and was refuted
+        // in review. The bound is `autopilotLinkage` in chain-recovery-v1.js:
+        // `shapeCommand` only interpolates `runId` / `attempt` / `chainId` under
+        // `linkage === 'bound'`, which requires `isLinkId` on both ids —
+        // `/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/`, 1..128 characters, so no whitespace and no
+        // shell metacharacter — and an integer attempt in 1..999. Every other producer
+        // of `nextCommand` is a STATIC MODULE STRING: the two frozen tables, plus the
+        // `STALE_RECEIPT_CAVEAT` literal one branch concatenates onto a table value. So this row carries no unbounded
+        // dynamic text, and WIDENING `isLinkId` is what would open the channel.
+        //
+        // NOT the `entry.key === ownKey` gate above: that bounds only WHOSE document is
+        // read and would not stop a self-written run id if the character class were
+        // relaxed.
+        //
+        // And the Stop hook's `%q` is not evidence of a disagreement either — but state
+        // WHY correctly, because a first revision of this sentence said that path has "no
+        // `isLinkId` gate at all", and that is false. `tdd_chain_snapshot` in
+        // `zensu-tdd-phase.sh` carries a character-identical copy of the predicate and
+        // exits non-zero when either id fails it, and the Stop hook routes that failure to
+        // its blocking arm. So both paths gate; the `%q` is defence in depth over a HAND
+        // COPY of one predicate, not the only bound on an ungated read. That copy is the
+        // thing to know when widening: the class is written out in several places under
+        // `hooks/`, and at least one of them has already drifted (`zensu-autopilot-state.sh`
+        // spells the same class with a minimum length of 3). Widening `isLinkId` is a
+        // multi-site decision, not a one-file one.
+        //
+        // Quoting in `shapeCommand` as defence in depth would still be reasonable and is
+        // deliberately not taken here: its output is `NEXT_COMMAND`, pinned by name in
+        // chain-recovery-v1.test.js, test-chain-recover.sh and skills/recover-chain's
+        // shape table, so it is its own change with its own pin updates.
+        parkedImpl = entry.session + ': ' + parkedCount + ' turns → ' + report.nextCommand;
+      }
     }
     // Reached only by a chain no row above already named. A wedged or dead-end
     // chain returns first on purpose: those rows carry their own remedy, and a
@@ -1742,6 +1894,80 @@ function chainRows(entries, nowMs) {
   if (deadEnds.length) {
     line(WARN, 'chain: ' + deadEnds.length + ' chain(s) at a dead end — a fresh generation is the only exit, from the session that owns each chain: ' + truncatedList(deadEnds));
   }
+  // Counted in TURNS, never in elapsed time. An age bound would report the
+  // user's calendar rather than the model's behaviour: a powered-off machine, a
+  // paused session and a holiday all accumulate wall clock with nothing wrong,
+  // and they accumulate zero here. The shape alone is never enough either — it
+  // is what every legitimately mid-implementation chain looks like — so the
+  // count is what separates working from parked.
+  if (parkedImpl !== '') {
+    // Names ONE exit and names its preconditions with it. `--tdd-complete` refuses
+    // without an edit-landing receipt and without a usable Requirements table, and
+    // both gates arm on the same dirty tree this row requires, so naming the verb
+    // bare would be a remedy that refuses in the same breath. The zero-change
+    // terminus is deliberately NOT offered: from this shape it is the unqualified
+    // no-ticket terminus, and after a mid-run commit it closes a chain nothing
+    // reviewed. The command itself comes from the owning module, so a bound chain
+    // gets its own spelling rather than the standalone one.
+    // Says what the counter MEASURES. It advances only on a turn that ended with
+    // a changed worktree, so the chains reaching the bound are the busiest ones —
+    // "parked" asserted the opposite, and a reader on turn 13 of genuine work can
+    // disprove that opening clause at a glance. The magnitude is the finding, so
+    // the rendered number is the count, never the bound.
+    line(WARN, 'chain: this session owns a chain that has ended ' + parkedTurns
+      + ' turns at `implementing` with a changed worktree'
+      + ' — the review chain has not asked for a reviewer, so nothing in it has been reviewed.'
+      + ' (That is compatible with a spawn that WAS attempted: the caveat below reports one when'
+      + ' a note records it.) Counted in turns,'
+      + ' never in elapsed time, so a paused session or a powered-off machine never reaches this row.'
+      + ' The exit is the review chain: run the /zensu:tdd Phase 6 step 5b edit-landing audit and give'
+      + ' the plan a usable `## Requirements` table first, because the completion verb refuses without'
+      + ' both while the tree is dirty.'
+      // QUALIFIES, never withholds. The caveat is worded so that its absence costs
+      // the reader nothing they can act wrongly on: with no live note the row is the
+      // ordinary remedy it always was, and with one the reader is told to lift the
+      // permission first. It says "a note records" rather than asserting the refusal
+      // outright, because the note is unauthenticated — the row below grades it.
+      + (ownRefused
+        ? ' A note in this session\'s state directory records that the host permission layer'
+          + ' refused its ' + REVIEWER_AGENT + ' spawn — see the refused-spawn row below. That permission'
+          + ' has to be lifted before the exit is taken, or the chain moves to a gate it cannot pass.'
+          // The BAR travels with the instruction, as it does at every other site in this file
+          // that asks for a permission change. It was the one site without it, on a row the
+          // skill orders relayed verbatim — and the note that triggers it is unauthenticated,
+          // so anything able to write the state directory could otherwise attach a bar-less
+          // "lift that permission" to the chain row.
+          + ' You have to apply this yourself — ' + SELF_PERMISSION_BAR + '.'
+        : '')
+      + ' ' + parkedImpl);
+  } else if (implThreshold >= IMPL_STOP_NUDGE_MAX) {
+    // The value that reaches this arm is the getter's own MAXIMUM, and nothing stronger
+    // should be claimed about it. A first wording said it was "at or above the counter's
+    // storage ceiling", which is false — the ceiling is one HIGHER, as this file's own
+    // IMPL_STOP_NUDGE_MAX comment says in the opposite direction — and it reached emitted
+    // operator text the doctor skill orders relayed. What is true is that no session ends
+    // that many turns, so the check cannot fire in practice; the literal `0` arm below was
+    // the only disclosure there was, which made a config value a silent off-switch for a
+    // review-integrity diagnostic, with no row and no bypass-ledger entry because no gate
+    // was escaped. Disabling must disclose however it is spelled.
+    line(OK, 'chain: the implementing-turns check cannot fire in practice — '
+      + '`hooks.implStopNudgeAfter` is ' + implThreshold + ', the highest value the getter'
+      + ' accepts, and no session ends that many turns. That is a switched-off check, not a'
+      + ' clean one.');
+  } else if (implThreshold === 0) {
+    // Disabling must not produce silence — the same rule the reviewer-spawn
+    // permission check follows. A reader who sees no row has to be able to tell
+    // "nothing to report" from "this check did not run".
+    //
+    // The coordination with the missing-key disclosure below runs in ONE
+    // direction, and it is this one: at threshold 0 the row is withheld because
+    // the check is switched off, and would be withheld with a perfectly good key.
+    // An earlier revision suppressed THIS row instead, which left the disclosure
+    // below blaming the missing key for a row that configuration had turned off —
+    // the wrong cause, and the exact confusion the coordination exists to prevent.
+    line(OK, 'chain: the implementing-turns check is switched off'
+      + ' (`hooks.implStopNudgeAfter` is 0), so no chain was measured for it.');
+  }
   // BOTH halves of the row's contract disclose, and neither is conjoined on the
   // other. Gating the module half on `ownKey !== ''` meant a tree that broke both
   // printed NEITHER row: the inert disclosure was suppressed by the missing key,
@@ -1756,8 +1982,19 @@ function chainRows(entries, nowMs) {
   // the shipped wrapper whenever one of its shape guards drops the pair, and it
   // silently withheld the row while the report otherwise looked healthy.
   if (env.ZDOC_BINDING === 'bound' && ownKey === '') {
+    // The implementing-turns clause is CONDITIONAL on the check being armed, and ARMED
+    // means BOTH bounds, not just the lower one. At threshold 0 that row is withheld by
+    // configuration, and at the getter's maximum it is withheld because the check cannot
+    // fire — each has its own row above saying so, and claiming the missing key here as
+    // well would give one absent row two contradictory causes in the same report. The
+    // upper bound was missing when the cannot-fire row landed, which reproduced that
+    // defect one literal over.
     line(WARN, 'chain: the session key did not reach this report — an open chain owned by'
       + ' another session cannot be identified, so that row did not run.'
+      + (implThreshold > 0 && implThreshold < IMPL_STOP_NUDGE_MAX
+        ? ' The implementing-turns row is withheld for the same reason, since without'
+          + ' the key an own chain cannot be told from a foreign one.'
+        : '')
       + ' That is a missing check, not an all-clear.');
   }
   if (foreignOpen.length) {
@@ -1849,23 +2086,84 @@ function readNoteJson(file) {
 // report the cause outside the turn it happened in. The enforcer retires the
 // note itself on every terminal path, but a session that never Stops again
 // cannot, so a note also ages out against the same TTL as pending-review.
+// The `kind` is untrusted: only values the writer itself issues are accepted.
+// Extracted from `reviewerDenialRows` because a SECOND consumer needs the same
+// judgement — see `ownRefusalNoteLive` — and two copies of "which notes count"
+// is precisely the two-surfaces-disagree failure this feature exists to remove.
+function denialKindsAllowed() {
+  try {
+    var denial = require(path.join(pluginDir(), 'hooks', 'lib', 'reviewer-spawn-denial-v1.js'));
+    if (Array.isArray(denial.DENIAL_MARKERS)) {
+      return denial.DENIAL_MARKERS.map(function (m) {
+        return m && typeof m.kind === 'string' ? m.kind : '';
+      }).filter(Boolean);
+    }
+  } catch (e) { /* every kind then reads as unrecognized */ }
+  return [];
+}
+
+// ONE verdict for a parsed note, returned as a WORD rather than a boolean so the
+// counting consumer keeps its three buckets while the withholding consumer can
+// test for one. A boolean here would have forced `reviewerDenialRows` to keep its
+// own copy to tell `rejected` from `stale`, which is the copy this extraction
+// removes. `allowed` is threaded rather than recomputed: a plugin root that cannot
+// load the classifier vets no kind, and neither consumer may silently upgrade the
+// other's judgement of that.
+function classifyDenialNote(parsed, allowed, ttl, nowMs) {
+  if (parsed === NOTE_MISSING) return 'missing';
+  var vettable = allowed.length > 0;
+  if (!parsed || parsed.schemaVersion !== 1 || typeof parsed.kind !== 'string'
+    // Integer and positive, not merely finite: a timestamp the writer could
+    // never have produced is not evidence about the present.
+    || !Number.isInteger(parsed.detectedAtMs) || parsed.detectedAtMs <= 0
+    || (vettable && parsed.kind !== '' && allowed.indexOf(parsed.kind) === -1)) return 'rejected';
+  // `0` DISABLES the TTL (docs/configuration.md), and the canonical
+  // `_tdd_pending_file_stale` reads it the same way. Dropping this conjunct
+  // would age every live note out instantly at that setting and suppress the
+  // one actionable row this whole feature exists to render.
+  //
+  // The future-timestamp arm closes the other side: a negative age never
+  // exceeds the TTL, so without it a clock that stepped backwards — or a
+  // planted stamp — makes the note immortal and keeps recommending a
+  // permission change for a refusal that is not current. Stale is the honest
+  // bucket: its own text already says the note says nothing about now.
+  if (ttl > 0 && (parsed.detectedAtMs > nowMs
+      || (nowMs - parsed.detectedAtMs) / 3600000 > ttl)) return 'stale';
+  return 'live';
+}
+
+// Does THIS session still stand refused? The implementing-turns row asks so it can
+// QUALIFY its remedy — never to withhold it. State it that way: an earlier revision
+// DID withhold the completion verb while a live note stood, and this comment still
+// described that behaviour after the code reversed it. The row now always names the
+// command and adds a caveat when a note records a refusal; the reasoning for that
+// reversal, and the two defects withholding caused, are recorded at the row itself. The workflow-document sibling check `reviewerDenialRows` applies is not
+// repeated — the key reaching this function came from a validated document, so the
+// sibling exists by construction.
+// `ttl` is THREADED, not re-read. `chainRows` already resolves it for its own use, and
+// the section that advertises these consumers as sharing one implementation would
+// otherwise be advertising one RULE resolved from three separate reads of the same
+// environment variable. Same value today; the point is that the claim is literal.
+function ownRefusalNoteLive(entries, dir, ownKey, nowMs, ttl) {
+  if (!ownKey) return false;
+  var name = 'reviewer-spawn-denied-' + ownKey + '.json';
+  if (entries.indexOf(name) === -1) return false;
+  // The SAME sibling-document anchor `reviewerDenialRows` applies, enforced here
+  // rather than argued from the call site. It holds by construction today — the key
+  // reaches this function from a validated `tdd-phase-<key>.json` — but that is a
+  // property of ONE caller, and a comment asserting it would be inherited silently
+  // by the next one. One line is cheaper than that risk.
+  if (entries.indexOf('tdd-phase-' + ownKey + '.json') === -1) return false;
+  return classifyDenialNote(readNoteJson(path.join(dir, name)), denialKindsAllowed(),
+    ttl, nowMs) === 'live';
+}
+
 function reviewerDenialRows(entries, dir, nowMs) {
   var notes = entries.filter(function (f) {
     return /^reviewer-spawn-denied-scv1_[a-f0-9]{64}\.json$/.test(f);
   }).sort();
   if (!notes.length) return;
-  // The `kind` is untrusted too: only values the writer itself issues are
-  // accepted, and the tally is prototype-free so a key like `constructor`
-  // cannot become the count it is rendered with.
-  var allowed = [];
-  try {
-    var denial = require(path.join(pluginDir(), 'hooks', 'lib', 'reviewer-spawn-denial-v1.js'));
-    if (Array.isArray(denial.DENIAL_MARKERS)) {
-      allowed = denial.DENIAL_MARKERS.map(function (m) {
-        return m && typeof m.kind === 'string' ? m.kind : '';
-      }).filter(Boolean);
-    }
-  } catch (e) { /* every kind then reads as unrecognized */ }
+  var allowed = denialKindsAllowed();
   var kinds = Object.create(null);
   var ttl = ttlHours();
   var valid = 0;
@@ -1893,27 +2191,19 @@ function reviewerDenialRows(entries, dir, nowMs) {
       rejected += 1;
       return;
     }
-    if (!parsed || parsed.schemaVersion !== 1 || typeof parsed.kind !== 'string'
-      // Integer and positive, not merely finite: a timestamp the writer could
-      // never have produced is not evidence about the present.
-      || !Number.isInteger(parsed.detectedAtMs) || parsed.detectedAtMs <= 0
-      || (vettable && parsed.kind !== '' && allowed.indexOf(parsed.kind) === -1)) {
-      rejected += 1;
-      return;
-    }
-    // `0` DISABLES the TTL (docs/configuration.md), and the canonical
-    // `_tdd_pending_file_stale` reads it the same way. Dropping this conjunct
-    // would age every live note out instantly at that setting and suppress the
-    // one actionable row this whole feature exists to render.
-    //
-    // The future-timestamp arm closes the other side: a negative age never
-    // exceeds the TTL, so without it a clock that stepped backwards — or a
-    // planted stamp — makes the note immortal and keeps recommending a
-    // permission change for a refusal that is not current. Stale is the honest
-    // bucket: its own text already says the note says nothing about now.
-    if (ttl > 0 && (parsed.detectedAtMs > nowMs
-        || (nowMs - parsed.detectedAtMs) / 3600000 > ttl)) {
-      stale += 1;
+    // The shape and freshness rules live in `classifyDenialNote`, shared with
+    // `ownRefusalNoteLive`. The three buckets are why that helper returns a word
+    // rather than a boolean.
+    var verdict = classifyDenialNote(parsed, allowed, ttl, nowMs);
+    // EXHAUSTIVE on purpose: only 'live' reaches the tally. The first spelling
+    // handled 'rejected' and 'stale' and let everything else fall through to
+    // `valid += 1`, so a 'missing' verdict would have been counted as a real
+    // refusal — a fabricated row telling the user to widen a permission. It was
+    // unreachable only because of the single early return above it, which is
+    // exactly the kind of load-bearing accident a later edit removes.
+    if (verdict !== 'live') {
+      if (verdict === 'stale') stale += 1;
+      else rejected += 1;
       return;
     }
     var kind = vettable ? (parsed.kind || 'unclassified') : 'unknown';
@@ -2049,12 +2339,15 @@ function stateBlock(nowMs) {
     }
     var valid = workflowDocs.length - invalid.length;
     if (valid) {
-      line(OK, 'state: ' + valid + ' validated CAS workflow document(s); reviewRound/stopBlockCount are integrated fields');
+      line(OK, 'state: ' + valid + ' validated CAS workflow document(s); reviewRound/stopBlockCount/implStopCount are integrated fields');
     }
     if (invalid.length) {
       line(BAD, 'state: ' + invalid.length + ' invalid CAS workflow document(s) — hooks fail closed; inspect ' + invalid.join(', '));
     }
-    chainRows(states, nowMs);
+    // The listing and its directory travel with the states so the implementing-turns
+    // row can ask whether this session still stands refused. `reviewerDenialRows`
+    // below renders the refusal itself, which is why that row says "below".
+    chainRows(states, nowMs, entries, dir);
   }
   reviewerDenialRows(entries, dir, nowMs);
   var pr = path.join(dir, 'pending-review.json');

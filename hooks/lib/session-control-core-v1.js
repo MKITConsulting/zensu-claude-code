@@ -1808,6 +1808,7 @@ const WORKFLOW_BOOLEAN_EXTENSIONS = [
 const WORKFLOW_INTEGER_EXTENSIONS = [
   'reviewRound',
   'stopBlockCount',
+  'implStopCount',
   'autopilotAttempt',
 ];
 
@@ -2916,6 +2917,7 @@ function retireDeferredReviewOwner(options) {
         draft.reviewTicketConsumed = true;
         draft.reviewRound = 0;
         draft.stopBlockCount = 0;
+        delete draft.implStopCount;
         draft.deferredReviewClaim = '';
         return draft;
       });
@@ -3445,6 +3447,7 @@ function resetDeferredReviewState(state) {
   state.step_id = '';
   state.history = [];
   delete state.reviewRearm;
+  delete state.implStopCount;
   delete state.autopilotRunId;
   delete state.autopilotAttempt;
   delete state.autopilotReturnStage;

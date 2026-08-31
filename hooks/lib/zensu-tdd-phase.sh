@@ -818,6 +818,7 @@ _tdd_write_flag_critical() {
         if (process.env.KEY === "active" && value) {
           state.reviewRound = 0;
           state.stopBlockCount = 0;
+          delete state.implStopCount;
         }
         if (process.env.KEY === "codeReviewDone" && value) state.stopBlockCount = 0;
         return state;
@@ -832,7 +833,7 @@ _tdd_increment_counter_critical() {
   CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" KEY="$key" \
     node -e '
       const core = require(process.env.CONTROL_CORE);
-      const names = { reviewRound: "review_progress", stopBlockCount: "stop_guard" };
+      const names = { reviewRound: "review_progress", stopBlockCount: "stop_guard", implStopCount: "impl_guard" };
       if (!Object.prototype.hasOwnProperty.call(names, process.env.KEY)) process.exit(2);
       const next = core.mutateWorkflowState({
         projectRoot: process.env.PROJECT_ROOT,
@@ -855,7 +856,7 @@ _tdd_increment_counter_critical() {
 
 tdd_increment_counter() {
   local supplied_session="${1:-}" key="${2:-}" session_id state_file
-  case "$key" in reviewRound|stopBlockCount) ;; *) return 1 ;; esac
+  case "$key" in reviewRound|stopBlockCount|implStopCount) ;; *) return 1 ;; esac
   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
   session_id="$(zensu_resolve_session_id "$supplied_session")" || return 1
   state_file="$(tdd_state_file "$session_id")" || return 1
@@ -921,6 +922,7 @@ _tdd_write_clear_critical() {
       s.reviewRound = 0; s.stopBlockCount = 0;
       s.reviewTicket = ""; s.reviewTicketConsumed = true;
       s.deferredReviewClaim = ""; s.stopBlockCount = 0;
+      delete s.implStopCount;
       delete s.reviewRearm;
       delete s.autopilotRunId; delete s.autopilotAttempt;
       delete s.autopilotReturnStage; delete s.chainId; delete s.chainOutcome;
@@ -958,7 +960,7 @@ _tdd_clear_standalone_session_critical() {
       s.active=false;s.implComplete=false;s.chainDone=false;s.codeReviewDone=false;
       s.selfReviewFixed=false;s.workflowActive=false;s.workflowTools=[];s.vanilla=false;
       s.bypasses=[];s.reviewTicket="";s.reviewTicketConsumed=true;s.reviewRound=0;
-      s.deferredReviewClaim="";s.stopBlockCount=0;delete s.reviewRearm;
+      s.deferredReviewClaim="";s.stopBlockCount=0;delete s.implStopCount;delete s.reviewRearm;
       s.phase="UNINITIALIZED";s.step_id="";s.history=[];
       return s;
     });
@@ -997,7 +999,7 @@ _tdd_clear_autopilot_session_critical() {
       s.active=false;s.implComplete=false;s.chainDone=false;s.codeReviewDone=false;
       s.selfReviewFixed=false;s.workflowActive=false;s.workflowTools=[];s.vanilla=false;
       s.bypasses=[];s.reviewTicket="";s.reviewTicketConsumed=true;s.reviewRound=0;
-      s.deferredReviewClaim="";s.stopBlockCount=0;delete s.reviewRearm;
+      s.deferredReviewClaim="";s.stopBlockCount=0;delete s.implStopCount;delete s.reviewRearm;
       delete s.autopilotRunId;delete s.autopilotAttempt;delete s.autopilotReturnStage;
       delete s.chainId;delete s.chainOutcome;s.phase="UNINITIALIZED";s.step_id="";s.history=[];
       return s;
@@ -1032,6 +1034,7 @@ _tdd_write_chain_reset_critical() {
       s.codeReviewDone = false; s.selfReviewFixed = false;
       s.reviewTicket = ""; s.reviewTicketConsumed = true; s.reviewRound = 0;
       s.deferredReviewClaim = ""; s.stopBlockCount = 0;
+      delete s.implStopCount;
       delete s.reviewRearm;
       return s;
     });
@@ -1099,6 +1102,7 @@ _tdd_begin_session_critical() {
       s.reviewRound = 0;
       s.deferredReviewClaim = process.env.DEFERRED_CLAIM || "";
       s.stopBlockCount = 0;
+      delete s.implStopCount;
       s.bypasses = [];
       delete s.reviewRearm;
       if (process.env.AUTOPILOT_RUN_ID) {
@@ -2561,7 +2565,7 @@ zensu_workflow_active()  { tdd_get_flag "${1:-}" workflowActive; }
 
 tdd_get_counter() {
   local state_file="${1:-}" key="${2:-}" result status value
-  case "$key" in reviewRound|stopBlockCount) ;; *) echo "invalid"; return 0 ;; esac
+  case "$key" in reviewRound|stopBlockCount|implStopCount) ;; *) echo "invalid"; return 0 ;; esac
   result="$(_tdd_read_validated_state "$state_file" counter "$key")"
   status="${result%%$'\n'*}"
   case "$status" in

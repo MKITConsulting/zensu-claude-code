@@ -368,7 +368,7 @@ CAS_FILE="$CAS_ST/tdd-phase-${CAS_KEY}.json"
 # Retired sidecars are inert and must neither be counted nor interpreted.
 : > "$CAS_ST/rounds-retired.json"; : > "$CAS_ST/retired.stopblocks"
 OUT="$(run_report "$PLUGIN_DIR" "$SBOX/good-cfg.json" "$CAS_PROJECT")"
-case "$OUT" in *'1 validated CAS workflow document(s); reviewRound/stopBlockCount are integrated fields'*) check "P1m valid CAS workflow document is reported with integrated counters" PASS ;; *) check "P1m valid CAS workflow state (got: $OUT)" FAIL ;; esac
+case "$OUT" in *'1 validated CAS workflow document(s); reviewRound/stopBlockCount/implStopCount are integrated fields'*) check "P1m valid CAS workflow document is reported with integrated counters" PASS ;; *) check "P1m valid CAS workflow state (got: $OUT)" FAIL ;; esac
 case "$OUT" in *'per-session marker'*|*'1 rounds'*|*'1 stopblocks'*) check "P1ma retired sidecars are not counted as session state" FAIL ;; *) check "P1ma retired sidecars are not counted as session state" PASS ;; esac
 
 # the chain block: shape row, truncated session key, no false alarm, exit 0
@@ -823,6 +823,74 @@ if grep -qF 'cannot be moved' "$SKILL_MD" \
   check "P1mt1 both operator documents carry the diagnose-only limit" PASS
 else
   check "P1mt1 both operator documents carry the diagnose-only limit" FAIL
+fi
+# Same three-way hand copy for the parked-at-implementing row: renderer, skill,
+# docs. Without this, rewording one carrier goes stale in silence.
+PARKED_DOC_OK=1
+grep -qF -- 'turns at `implementing`' "$REPORT" || PARKED_DOC_OK=0
+grep -qF -- 'turns at `implementing`' "$SKILL_MD" || PARKED_DOC_OK=0
+grep -qF -- 'Implementing-phase turn counter' "$PLUGIN_DIR/docs/tdd-manager-workflow.md" \
+  || PARKED_DOC_OK=0
+[ "$PARKED_DOC_OK" -eq 1 ] \
+  && check "P1mt2 the implementing-turns row wording is emitted AND documented in the skill and the docs" PASS \
+  || check "P1mt2 the implementing-turns row wording is emitted AND documented in the skill and the docs" FAIL
+# The CAVEAT half, which nothing pinned. The row's NAME was held three ways while the clause
+# that carries the refusal — the half AC-013 turns on — could be deleted from either carrier
+# with every suite green, leaving the model relaying the row without the obligation to carry
+# it. Both carriers are required, and the control proves each file was read.
+P1MT4_R="$(grep -cF 'refused-spawn row below' "$REPORT" || true)"
+P1MT4_S="$(grep -cF 'refused-spawn row below' "$SKILL_MD" || true)"
+if [ "$P1MT4_R" -ge 1 ] && [ "$P1MT4_S" -ge 1 ]; then
+  check "P1mt4 the caveat is present in the renderer AND documented in the skill" PASS
+else
+  check "P1mt4 the caveat is present in the renderer AND documented in the skill (renderer=$P1MT4_R skill=$P1MT4_S)" FAIL
+fi
+# P1mt5 — the row's OPENING clause, compared rather than described. The scoping correction
+# reached the renderer and the Stop branch and missed the skill, which is the carrier a model
+# relays; the unqualified form is a false statement about review coverage, because a flow like
+# /zensu:cover spawns a reviewer without arming a chain. Extracted from the renderer and
+# required in the skill, normalised for case and line wrapping the way C39 does.
+# The pattern carries a `[a-z ]*` segment and the extracted side is lowercased, matching
+# C39. A fixed whole-phrase needle tracked no reword at all: any change to the sentence
+# emptied the extraction and failed P1mt5pre instead of comparing the NEW wording against
+# the skill, which is the drift this pin exists to catch.
+P1MT5_PHRASE="$(grep -o 'the review chain has[a-z ]*asked for a reviewer' "$REPORT" | head -1 | tr 'A-Z' 'a-z')"
+[ -n "$P1MT5_PHRASE" ] \
+  && check "P1mt5pre the row's scoped opening was located in the renderer, so the comparison is not vacuous" PASS \
+  || check "P1mt5pre the row's scoped opening was located in the renderer, so the comparison is not vacuous" FAIL
+P1MT5_OK=0
+if [ -n "$P1MT5_PHRASE" ] && [ -r "$SKILL_MD" ]; then
+  tr -s '[:space:]' ' ' < "$SKILL_MD" | tr 'A-Z' 'a-z' | grep -qF "$P1MT5_PHRASE" && P1MT5_OK=1
+fi
+[ "$P1MT5_OK" = "1" ] \
+  && check "P1mt5 the skill carries the row's scoped opening, not the unqualified form" PASS \
+  || check "P1mt5 the skill carries the row's scoped opening, not the unqualified form" FAIL
+# The one claim a reader must not lose here is the NEGATIVE one: this row must
+# never teach the zero-change terminus, which from shape `implementing` is the
+# unqualified no-ticket terminus. Pin it on both carriers.
+# EXTRACTED, not windowed. `-A 8` was written when the row was eight lines long; the
+# statement runs from its `line(WARN,` to the `parkedImpl` append, and the refusal
+# caveat added between them sat OUTSIDE the window — so a `--chain-done` introduced
+# there would have passed. The slice is taken between the two anchors.
+#
+# The END anchor was `truncatedList(parkedImpl))` and moved when `parkedImpl` stopped
+# being a one-element array. Note what that cost: the emptiness control PASSED, because
+# a stale end anchor does not empty the slice — it runs it to end of file, which swept in
+# a `--chain-done` from an unrelated row and turned the negative assertion red. So the
+# control guards the START anchor only; a stale END anchor fails loudly here instead,
+# and both directions are the reason this is a slice rather than a window.
+P1MT3_ROW="$(awk '/line\(WARN, .chain: this session owns a chain/{f=1} f{print} f&&/\+ parkedImpl\);/{exit}' "$REPORT")"
+if [ -z "$P1MT3_ROW" ]; then
+  check "P1mt3pre the implementing-turns row statement was located, so the scan is not vacuous" FAIL
+else
+  check "P1mt3pre the implementing-turns row statement was located, so the scan is not vacuous" PASS
+fi
+if ! printf '%s\n' "$P1MT3_ROW" | grep -qF -- '--chain-done' \
+  && [ -n "$P1MT3_ROW" ] \
+  && grep -qF 'Never offer the' "$SKILL_MD"; then
+  check "P1mt3 the implementing-turns row never offers the zero-change terminus" PASS
+else
+  check "P1mt3 the implementing-turns row never offers the zero-change terminus" FAIL
 fi
 
 export CLAUDE_PROJECT_DIR="$CAS_PROJECT"

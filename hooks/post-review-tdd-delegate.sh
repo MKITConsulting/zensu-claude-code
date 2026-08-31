@@ -298,6 +298,12 @@ if [ "$AUTOPILOT_KIND" = bound ]; then
   AUTOPILOT_RUN_Q="$(printf '%q' "$AUTOPILOT_RUN")"
   AUTOPILOT_ATTEMPT_Q="$(printf '%q' "$AUTOPILOT_ATTEMPT")"
   AUTOPILOT_CHAIN_Q="$(printf '%q' "$AUTOPILOT_CHAIN")"
+  # The SECOND shell rendering of the Autopilot flag triple. The first is
+  # `zensu_autopilot_link_args` in `hooks/stop-chain-enforcer.sh`, which was parameterized
+  # so this site could consume it once it moves into `hooks/lib/`. Named here rather than
+  # only there, because the trigger recorded at that function is "the next change that
+  # touches the delegate's own bound-args line" — this one — and a trigger nobody reads at
+  # the site that fires it is not a trigger. Do not diverge the quoting or the flag order.
   AUTOPILOT_BOUND_ARGS=" --autopilot-run ${AUTOPILOT_RUN_Q} --autopilot-attempt ${AUTOPILOT_ATTEMPT_Q} --chain-id ${AUTOPILOT_CHAIN_Q}"
   AUTOPILOT_ENVELOPE_DIRECTIVE=$'\n\nOfficial Autopilot handoff envelope — append these three lines unchanged and exactly once after the required headers of every reviewer respawn and self-review invocation:\n'"ZENSU-DELEGATED-CALLER: autopilot"$'\n'"AUTOPILOT-BINDING: run=${AUTOPILOT_RUN} attempt=${AUTOPILOT_ATTEMPT} chain=${AUTOPILOT_CHAIN}"$'\n'"AUTOPILOT-STAGE: ${AUTOPILOT_RETURN_STAGE}"
   AUTOPILOT_CARRY_PHRASE=" Preserve the official three-line Autopilot envelope printed below unchanged and exactly once in the self-review invocation."
