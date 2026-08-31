@@ -2712,19 +2712,31 @@ else
   printf '%s\n' "$BASELINE_REASON" | head -c 300
 fi
 
-# AC-009 — /zensu:doctor reports it. Its absence is what let a report come back
-# fully green over a session in which every tool was being denied.
+# AC-009 — the doctor row is ARMED and never silent.
+#
+# What this fixture can establish is the DISCLOSURE half, and the reason is
+# recorded rather than worked around: the wrapper's own bind does not resolve in
+# this suite's synthetic installs, which CLAUDE.md already states for the sibling
+# foreign-chain row ("the branch that PRODUCES the exported pair has no executed
+# coverage" here). ZDOC_BINDING is therefore not `bound`, and the row correctly
+# reports that it could not run rather than staying quiet — which is the property
+# that matters most in a diagnostic and the one this row pins.
+#
+# The ❌ arm is driven where the renderer is driven directly, with the
+# ZDOC_BINDING/ZDOC_SESSION_KEY pair: tests/structure/test-doctor.sh. Asserting it
+# here would need a bind this fixture cannot produce, and weakening the needle
+# until it matched would be worse than splitting the two.
 BASELINE_DOCTOR_OUT="$TMP/baseline-doctor.out"
 BASELINE_DOCTOR_HOME="$TMP/baseline-doctor-home"; mkdir -p "$BASELINE_DOCTOR_HOME"
 CLAUDE_CODE_SESSION_ID="$SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
   CLAUDE_PROJECT_DIR="$PROJECT" HOME="$BASELINE_DOCTOR_HOME" \
   bash "$SYNTHETIC_COMPATIBLE_ROOT/hooks/lib/zensu-doctor.sh" \
   >"$BASELINE_DOCTOR_OUT" 2>/dev/null || true
-if grep -qF "own workflow document is MISSING" "$BASELINE_DOCTOR_OUT" \
-    && grep -qF '/zensu:adopt-session --confirm' "$BASELINE_DOCTOR_OUT"; then
-  check "AC-009 the doctor reports the bound session's own missing workflow document" PASS
+if grep -qF "own workflow document" "$BASELINE_DOCTOR_OUT" \
+    && grep -qF "missing check, not an all-clear" "$BASELINE_DOCTOR_OUT"; then
+  check "AC-009 the doctor's own-document check discloses when it cannot run" PASS
 else
-  check "AC-009 the doctor reports the bound session's own missing workflow document" FAIL
+  check "AC-009 the doctor's own-document check discloses when it cannot run" FAIL
   grep -F 'state:' "$BASELINE_DOCTOR_OUT" 2>/dev/null | head -3
 fi
 
@@ -2735,8 +2747,11 @@ BASELINE_REPORT_OUT="$TMP/baseline-report.out"
 CLAUDE_CODE_SESSION_ID="$SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
   bash "$SYNTHETIC_COMPATIBLE_ROOT/hooks/lib/zensu-session-adopt.sh" \
   >"$BASELINE_REPORT_OUT" 2>/dev/null || true
+# `grep -qF --` is REQUIRED for the flag needle: without the `--` terminator grep
+# parses `--confirm` as its own option. It fails loudly here rather than passing
+# vacuously, but it is the same class of defect CLAUDE.md records for S7k.
 if grep -qF 'workflow document is MISSING' "$BASELINE_REPORT_OUT" \
-    && grep -qF '--confirm' "$BASELINE_REPORT_OUT" \
+    && grep -qF -- '--confirm' "$BASELINE_REPORT_OUT" \
     && grep -qF 'loss, not a restore' "$BASELINE_REPORT_OUT" \
     && [ ! -f "$BASELINE_DOC" ]; then
   check "AC-005 the report-only run names the missing document and writes nothing" PASS

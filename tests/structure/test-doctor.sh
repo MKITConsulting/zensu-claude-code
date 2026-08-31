@@ -3104,6 +3104,73 @@ case "$RC_NOMOD_OUT" in *'block is intact'*)
   check "P5h a missing module wrongly still claimed a carrier was intact" FAIL ;;
   *) check "P5h a missing module claims nothing about carrier health" PASS ;; esac
 
+# ── P6 the bound session's OWN workflow document ────────────────────────────
+#
+# Every other state row judges the documents that EXIST; not one asked whether
+# this session's is among them. That is how a report came back fully green over a
+# session whose capability gate was denying every tool — the state the
+# workflow-baseline repair exists for (CLAUDE.md §"Workflow-Baseline Repair").
+#
+# Driven HERE rather than in test-versioned-plugin-upgrade.sh because the ❌ arm
+# needs a `bound` verdict with a session key, and that suite's synthetic installs
+# cannot produce one — the same limitation CLAUDE.md records for the sibling
+# foreign-chain row. There the DISCLOSURE arm is pinned instead.
+P6_PROJECT="$SBOX/p6-project"
+P6_KEY="scv1_$(node -e 'process.stdout.write("a".repeat(64))')"
+mkdir -p "$P6_PROJECT/.zensu/state"
+run_report_own() { # run_report_own <binding> <session-key>
+  ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" CLAUDE_PROJECT_DIR="$P6_PROJECT" \
+  ZDOC_BINDING="$1" ZDOC_SESSION_KEY="$2" ZDOC_SESSION_PROJECT_ROOT="$P6_PROJECT" \
+    node "$REPORT" 2>/dev/null
+}
+
+P6_OUT="$(run_report_own bound "$P6_KEY")"
+case "$P6_OUT" in
+  *"own workflow document is MISSING"*)
+    # The remedy and its COST travel together. A user who reads "rebuild" as
+    # "restore" will not go looking for the chain that is gone.
+    case "$P6_OUT" in
+      *'/zensu:adopt-session --confirm'*)
+        case "$P6_OUT" in
+          *'loss, not a'*) check "P6a a bound session's absent own document is a ❌ row naming the remedy and its cost" PASS ;;
+          *) check "P6a own-document row omits the cost (got: $P6_OUT)" FAIL ;;
+        esac ;;
+      *) check "P6a own-document row omits the remedy (got: $P6_OUT)" FAIL ;;
+    esac ;;
+  *) check "P6a own-document row missing (got: $P6_OUT)" FAIL ;;
+esac
+
+# The positive control. Without it the row above passes in a tree where it fires
+# unconditionally, which would warn on every healthy session.
+: > "$P6_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json"
+P6_PRESENT="$(run_report_own bound "$P6_KEY")"
+case "$P6_PRESENT" in
+  *"own workflow document is MISSING"*) check "P6b the row fires on a present document too" FAIL ;;
+  *) check "P6b a present own document renders no row" PASS ;;
+esac
+rm -f "$P6_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json"
+
+# Silence is the one verdict a diagnostic may not give: with no bound key the
+# check did not run, and the report has to say so rather than omit the row.
+P6_UNBOUND="$(run_report_own unbound '')"
+case "$P6_UNBOUND" in
+  *"own workflow document was not checked"*"missing check, not an all-clear"*)
+    check "P6c an unavailable session key discloses a missing check rather than staying silent" PASS ;;
+  *) check "P6c unbound own-document disclosure (got: $P6_UNBOUND)" FAIL ;;
+esac
+
+# A session key supplied under a NON-bound verdict must not arm the row: the
+# renderer would otherwise print a finding keyed on an identity it had just said
+# does not exist. Same invariant currentSessionKey enforces for the chain rows.
+P6_MISMATCH="$(run_report_own unbound "$P6_KEY")"
+case "$P6_MISMATCH" in
+  *"own workflow document is MISSING"*)
+    check "P6d a session key under a non-bound verdict wrongly armed the row" FAIL ;;
+  *) check "P6d a session key is ignored unless the binding verdict is bound" PASS ;;
+esac
+
 rm -rf "$SBOX"
 echo "----"
 echo "test-doctor: $PASS PASS / $FAIL FAIL"
