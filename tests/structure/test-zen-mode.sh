@@ -427,12 +427,346 @@ P19="$(mktemp -d -t zenmode-XXXXXX)"; S19="z19-$$"
 new_session "$P19" "$S19"; helper "$P19" "$S19" --on >/dev/null
 RAW19="$(fire "$P19" "$S19" "do a thing")"
 MISSING19=""
-for FRAG19 in "recap" "first sentence" "OVERRIDES" "one next step" "ONE question" "Step N of M" "user's own language"; do
+for FRAG19 in "recap" "first sentence" "OVERRIDES" "one next step" "ONE question" "chain-progress" "user's own language"; do
   printf '%s' "$RAW19" | grep -qiF "$FRAG19" || MISSING19="$MISSING19 '$FRAG19'"
 done
 [ -z "$MISSING19" ] && check "Z19 reminder carries recap/result-first/precedence/one-step/one-question/anchor/language rules" PASS \
   || check "Z19 reminder missing:$MISSING19" FAIL
 rm -rf "$P19"
+
+# Z19b the two carriers of rule 6 must describe the SAME anchor. Nothing pinned
+# them against each other before: Z19/Z20 read the hook only, Z22-Z25 read
+# SKILL.md only, and the Z20 comment records that the two files deliberately
+# number their rules differently, so no numbering pin exists either. That was
+# tolerable while the rule was one five-word literal; the chain-progress anchor
+# is a rendered SHAPE, so a one-sided reword now leaves the injected reminder and
+# the skill contract asking for different lines with every check still green.
+# Both sides are whitespace-normalized first, exactly as test-promptfoo-zen-mode
+# P8 does — SKILL.md is prose and gets rewrapped, so a line-anchored grep would
+# fail on a reflow that changed no meaning.
+if command -v node >/dev/null 2>&1; then
+  MISS19B="$(HOOK="$HOOK" SKILL="$SKILL" EVALS="$PLUGIN_DIR/evals/zen-mode-reaction/scenarios" node -e '
+    const fs = require("fs");
+    const path = require("path");
+    const norm = (s) => s.replace(/\s+/g, " ").trim();
+    const hook = fs.readFileSync(process.env.HOOK, "utf8");
+    const blocks = [...hook.matchAll(/"additionalContext":\s*"((?:[^"\\]|\\.)*)"/g)]
+      .map((m) => { try { return JSON.parse("\"" + m[1] + "\""); } catch (_) { return ""; } });
+    const active = blocks.find((s) => s.startsWith("zen-mode is ACTIVE"));
+    if (!active) { process.stdout.write("hook-has-no-ACTIVE-directive"); process.exit(0); }
+    const want = norm(active);
+    const bad = [];
+    // The SKILL.md side is SLICED to rule 6. Comparing the whole file would let
+    // rule 6 be gutted while the literals survive anywhere else in the document,
+    // which is agreement about the file and not about the rule.
+    const skillAll = fs.readFileSync(process.env.SKILL, "utf8");
+    const from = skillAll.indexOf("**Anchor multi-step work.**");
+    // The slice END must not name a DIFFERENT rule. Keying it on rule 7 title
+    // meant that renaming rule 7 — an edit with nothing to do with the anchor —
+    // reported the anchor slice as unlocatable, which is a misleading cause.
+    // The next top-level numbered item is the boundary the content actually has.
+    const nextItem = from >= 0 ? skillAll.slice(from).search(/\n\d+\. \*\*/) : -1;
+    const to = from >= 0 && nextItem > 0 ? from + nextItem : -1;
+    if (from < 0 || to < 0 || to <= from) bad.push("skill:rule-6-slice-not-locatable");
+    const carriers = { hook: norm(active) };
+    if (from >= 0 && to > from) carriers.skill = norm(skillAll.slice(from, to));
+    // The eval scenarios embed this directive verbatim and are enforced
+    // only by test-promptfoo-zen-mode.sh, which is a LOCAL-only suite that CI
+    // never runs. That is exactly how their copies drifted unnoticed once
+    // before, so this CI-run suite covers them too.
+    // The roster is DERIVED, not hand-listed: a fourth scenario added to
+    // evals/zen-mode-reaction/ would otherwise carry an unchecked directive copy
+    // with this suite green. The floor keeps an emptied or moved directory loud.
+    let scenarios = [];
+    try { scenarios = fs.readdirSync(process.env.EVALS).filter((f) => f.endsWith(".yaml")).sort(); }
+    catch (_) { bad.push("eval-dir:unreadable"); }
+    if (scenarios.length < 3) bad.push("eval-dir:expected-at-least-3-scenarios-got-" + scenarios.length);
+    // The floor above is an absolute one and cannot see the loss of a scenario
+    // added AFTER it was written: deleting one together with its registration
+    // used to leave a consistent smaller world in which nothing turned red, and
+    // this is the ONLY CI-run check that reads this directory (the sibling that
+    // compares against the config is local-only). So take the real floor from
+    // the count the config REGISTERS, which rises on its own with the next
+    // scenario. The sibling suite states this same reasoning at its own floor.
+    let registered = 0;
+    try {
+      const cfgText = fs.readFileSync(path.join(process.env.EVALS, "..", "promptfooconfig.yaml"), "utf8");
+      registered = (cfgText.match(/file:\/\/scenarios\/[^\s]+\.yaml/g) || []).length;
+    } catch (_) { bad.push("eval-config:unreadable"); }
+    // The derivation must be able to fail LOUDLY when it derives nothing. A
+    // `registered > 0` conjunct here silently dropped the derived floor back to
+    // the absolute one whenever the registration spelling moved: measured
+    // against a fixture, deleting a scenario reported
+    // `eval-dir:4-scenarios-but-config-registers-5` with an intact config and
+    // reported NOTHING once the spelling changed, for the same real loss.
+    if (registered < 3) {
+      bad.push("eval-config:registers-only-" + registered + "-the-registration-spelling-moved");
+    }
+    if (scenarios.length < registered) {
+      bad.push("eval-dir:" + scenarios.length + "-scenarios-but-config-registers-" + registered);
+    }
+    // Each scenario is SLICED to its spec_block for the same reason SKILL.md is
+    // sliced: a scenario carries several JavaScript assertion bodies with
+    // free-text reason strings, any of which could satisfy a needle while the
+    // embedded directive itself had drifted.
+    for (const f of scenarios) {
+      const p = path.join(process.env.EVALS, f);
+      let raw;
+      try { raw = fs.readFileSync(p, "utf8"); }
+      catch (_) { bad.push("eval:" + f + ":unreadable"); continue; }
+      const start = raw.indexOf("spec_block: |");
+      if (start < 0) { bad.push("eval:" + f + ":no-spec-block"); continue; }
+      const rest = raw.slice(start);
+      const end = rest.search(/\n[A-Za-z_][A-Za-z0-9_]*:/);
+      carriers["eval:" + f] = norm(end < 0 ? rest : rest.slice(0, end));
+    }
+    // One distinguishing literal per anchor requirement. State the reach
+    // honestly: for the EVAL carriers this list is belt on top of a verbatim
+    // comparison of the whole directive, so nothing there can be deleted
+    // silently. The SKILL carrier gets no such comparison — it is sliced to
+    // rule 6 and judged by these literals ALONE — so a rule-6 sentence with no
+    // literal here CAN be reworded on that carrier with this check still green.
+    // Add one whenever a clause starts carrying weight. In requirement order:
+    // AC-001 position (with its carve-out fallback), AC-002 the four marks via
+    // the example path plus the failed/blocked mark named in prose, AC-003 the
+    // no-counter prohibition, AC-004 the observation rule stated
+    // unconditionally AND its consequence, AC-005 only-the-steps, AC-006 the
+    // label casing rule, plus the ACTIVATION TRIGGER, which the two carriers
+    // once spelled differently, and the separator disclaimer.
+    const shared = [
+      "chain-progress",
+      "✓fetch ✓parse ▶render",
+      // The prefix itself. Every live assertion in the eval keys on /^Run:/, so
+      // renaming it in the hook and regenerating the copies together would once
+      // have left every structure check green while every grader became
+      // unsatisfiable. The bare glyphs below stay bare on purpose: the two
+      // carriers quote them differently (single quotes in the hook, backticks in
+      // the skill), and their discriminating neighbours are pinned separately as
+      // "for one not yet reached" and "for one that failed or is blocked".
+      "Run:",
+      "one-line chain-progress",
+      "run in order",
+      "when you have named none",
+      "illustrative rather than a list to reuse",
+      "prose of the turn it happened in",
+      "✗",
+      "·",
+      "observed finish AND pass",
+      "for the step running now",
+      "for one not yet reached",
+      "failing or unresolved outcome",
+      "for one that failed or is blocked",
+      "above the closing next step",
+      "when the one-next-step rule is suspended",
+      "add no separate",
+      "A step is marked done from an observation, never from the plan",
+      "a step you did not see finish stays",
+      "steps this run actually has",
+      "pad with steps nobody planned",
+      "drop one the run traversed",
+      "a position, not a history",
+      "mark of its current attempt",
+      "deliberately did not perform",
+      "canonical pipeline",
+      "short lower-case step names",
+      // Disambiguated on purpose. The earlier wording read two ways — step
+      // names are exempt from translation, or step names come from the run and
+      // only the prose around them is localised — and the two give a
+      // non-English reader a different line. This needle pins the reading that
+      // survived: names come from the run, the words around them are
+      // translated. (No apostrophes in this block: it lives inside a
+      // single-quoted node -e program, where one would end the shell string.)
+      "translate only the words around them",
+      "spans several turns",
+      "not a mark",
+    ];
+    // The safety carve-out travels in the SAME verbatim directive string as the
+    // anchor, and the only full-fidelity check on the eval copies (P8) is
+    // local-only, so CI never runs it. Without these, a reworded carve-out would
+    // leave safety-carve-out.yaml — the one live-model check that a warning is
+    // never compressed — grading a directive no session receives, with every CI
+    // suite green. They apply ONLY to carriers that hold the WHOLE directive:
+    // the SKILL carrier is sliced to rule 6, and the carve-out is rule 9.
+    const wholeDirectiveOnly = [
+      "EXCEPTION — for security warnings, irreversible or destructive actions",
+      "full-sentence rule is NEVER suspended",
+      "never treated as a routine decision you may settle yourself",
+    ];
+    for (const name of Object.keys(carriers)) {
+      const text = carriers[name];
+      // An eval carrier embeds the WHOLE directive, so the verbatim containment
+      // check below already subsumes every needle: a string containing `want`
+      // contains each of its substrings. Running the lists over them as well
+      // proved nothing and cost legibility — one reworded clause in the hook
+      // changes `want`, so a single edit emitted well over a hundred
+      // missing<...> entries concatenated into one check label, from which the
+      // reader had to work out that the news was "regenerate the eval copies".
+      if (name.startsWith("eval:")) {
+        if (!text.includes(want)) bad.push(name + ":directive-not-verbatim");
+        // The bare-marker regression pins below still apply to every carrier.
+        if (/anchor multi-step work with a .?Step N of M/.test(text)) bad.push(name + ":still-instructs-bare-marker");
+        if (/Carry a .?Step N of M.? marker/.test(text)) bad.push(name + ":still-instructs-bare-marker");
+        continue;
+      }
+      for (const s of shared) if (!text.includes(norm(s))) bad.push(name + ":missing<" + s.slice(0, 28) + ">");
+      if (name !== "skill") {
+        for (const s of wholeDirectiveOnly) {
+          if (!text.includes(norm(s))) bad.push(name + ":missing-carve-out<" + s.slice(0, 28) + ">");
+        }
+      }
+      // The eval carriers took their verbatim comparison in the branch above and
+      // continued; what follows applies to the hook and the skill.
+      //
+      // The anchor REPLACED the bare marker. Every carrier still names it, but
+      // only inside the prohibition — never again as the instruction.
+      if (/anchor multi-step work with a .?Step N of M/.test(text)) bad.push(name + ":still-instructs-bare-marker");
+      if (/Carry a .?Step N of M.? marker/.test(text)) bad.push(name + ":still-instructs-bare-marker");
+    }
+    // Positive sentinel: this program writes to stdout only when it FINDS
+    // something, so an empty capture used to be indistinguishable from a throw
+    // and reported PASS. The caller requires this exact token.
+    process.stdout.write(bad.length ? bad.join(",") : "OK");
+  ' 2>/dev/null)"
+  RC19B=$?
+  if [ "$RC19B" -ne 0 ]; then
+    check "Z19b cross-carrier pin could not run (node exit $RC19B) — not an all-clear" FAIL
+  elif [ "$MISS19B" = "OK" ]; then
+    check "Z19b every directive carrier agrees on the chain-progress anchor (trigger, position, marks, prohibition, observation rule)" PASS
+  else
+    check "Z19b directive carriers disagree about the anchor: ${MISS19B:-<empty output, program produced no verdict>}" FAIL
+  fi
+else
+  # The suite already invokes node unconditionally (Z5, Z6, new_session, classify),
+  # so a nodeless host cannot reach a green run anyway. Recording a PASS here would
+  # credit a check that did not execute.
+  check "Z19b cross-carrier pin did not run — node is not on PATH" FAIL
+fi
+
+# Z19c the hook-directive extractor above is a hand-copy of the one P8 uses in
+# test-promptfoo-zen-mode.sh. Two copies of a parser that both fail by returning
+# nothing is the shape that lets a change to the hook's emission silently
+# neutralize both suites, so they are pinned against each other by source.
+# An earlier spelling of this check could not fail: it grepped THIS file for a
+# literal that its own pattern argument contained, so the count stayed >= 1 even
+# with the extractor deleted, and the regex it is named for was assigned to a
+# variable nothing read. It now extracts the regex SOURCE from each suite and
+# compares the strings.
+# A later spelling took only the FIRST extractor range per file, which held only
+# while there was one copy per file. Z30 below added a second copy to THIS file,
+# and a behaviour-preserving edit to it then left this check and Z30 both green:
+# the copy the pin is named for was invisible to it. `collect()` gathers EVERY
+# range in every file now and the whole set must agree, so a copy added later is
+# covered without editing this check. The count is reported in the verdict, and
+# a file yielding none is a failure rather than an absent contribution.
+if command -v node >/dev/null 2>&1; then
+  MISS19C="$(A="$0" B="$PLUGIN_DIR/tests/structure/test-promptfoo-zen-mode.sh" node -e '
+    const fs = require("fs");
+    // Compare the WHOLE extractor statement range, not just the regex line. A
+    // line-scoped comparison left the two other hand-copied halves — the
+    // JSON.parse unescape and the ACTIVE selector — free to diverge, which is
+    // exactly the drift this check is named for; it also reported a false red
+    // when both suites were improved identically, because it pinned the current
+    // spelling rather than the two copies against each other.
+    // Built by concatenation so this check does not match its OWN declarations:
+    // spelling either marker whole here makes the scanner report a third,
+    // nonsense "copy" made of this very block. The file records the same trap
+    // for an earlier spelling of Z19c.
+    const FROM = "const " + "blocks = ";
+    const TO = "const " + "active = ";
+    // EVERY range in the file, not the first. Normalize whitespace so
+    // indentation differences between the two suites are not read as a
+    // divergence; the STATEMENTS are what must agree.
+    const collect = (p) => {
+      const src = fs.readFileSync(p, "utf8");
+      const out = [];
+      let a = src.indexOf(FROM);
+      while (a >= 0) {
+        const b = src.indexOf(TO, a);
+        if (b < 0) break;
+        const end = src.indexOf("\n", b);
+        out.push(src.slice(a, end < 0 ? src.length : end).replace(/\s+/g, " ").trim());
+        a = src.indexOf(FROM, end < 0 ? src.length : end);
+      }
+      return out;
+    };
+    const bad = [];
+    const named = [["test-zen-mode", process.env.A], ["test-promptfoo-zen-mode", process.env.B]];
+    const all = [];
+    for (const [label, file] of named) {
+      const found = collect(file);
+      if (!found.length) bad.push(label + ":extractor-not-locatable");
+      for (const f of found) all.push([label, f]);
+    }
+    // Two copies live in test-zen-mode.sh (Z19b and Z30) and one in the sibling.
+    // A floor keeps a silently shrinking set from reading as agreement.
+    if (all.length < 3) bad.push("only-" + all.length + "-extractor-copies-found");
+    const differing = all.filter(([, f]) => f !== all[0][1]);
+    if (all.length && differing.length) {
+      bad.push("extractor-source-differs:" + [...new Set(differing.map(([l]) => l))].join("+"));
+    }
+    process.stdout.write(bad.length ? bad.join(",") : "OK");
+  ' 2>/dev/null)"
+  RC19C=$?
+  if [ "$RC19C" -ne 0 ]; then
+    check "Z19c extractor comparison could not run (node exit $RC19C) — not an all-clear" FAIL
+  elif [ "$MISS19C" = "OK" ]; then
+    check "Z19c every ACTIVE-directive extractor copy is identical across both zen-mode suites" PASS
+  else
+    check "Z19c the ACTIVE-directive extractor has diverged: ${MISS19C:-<empty output, program produced no verdict>}" FAIL
+  fi
+else
+  check "Z19c extractor comparison did not run — node is not on PATH" FAIL
+fi
+
+# Z19d docs/configuration.md carries the anchor for OPERATORS and is read by no
+# other suite, while sibling features pin their own config-doc rows. A reworded
+# rule 6 must not leave the operator doc describing a different line.
+if command -v node >/dev/null 2>&1; then
+  MISS19D="$(CFG="$PLUGIN_DIR/docs/configuration.md" node -e '
+    const fs = require("fs");
+    // The hook ROW is the one whose FIRST cell names the hook. The config-key
+    // rows below it name the same file in their second cell, and a further row
+    // mentions it in prose, so a bare substring match selects four lines.
+    const rows = fs.readFileSync(process.env.CFG, "utf8").split("\n")
+      .filter((l) => /^\|\s*`user-prompt-zen-mode\.sh`\s*\|/.test(l));
+    if (rows.length !== 1) { process.stdout.write("expected-exactly-one-zen-hook-row-got-" + rows.length); process.exit(0); }
+    const row = rows[0];
+    // The operator row is held to a DEFINED SUBSET, and the subset was CUT to
+    // this size on purpose. An earlier one required eighteen literals, which
+    // forced the cell to reproduce most of rule 6 — roughly 1,300 characters
+    // inside one table cell — and made every reword of the rule a mandatory
+    // two-file edit. That is the very thing the comment beside it claimed to
+    // prevent: a config table is a summary, not a second copy of the directive.
+    //
+    // What an OPERATOR deciding whether to set `zenMode: false` actually needs:
+    // what the line is, when it appears, what the four glyphs are, where it
+    // sits, that a mark asserts an observation rather than a plan, and that it
+    // replaces the old counter. Everything finer — the carve-out fallback, the
+    // retry rule, the pass qualification, the only-the-steps and
+    // no-canonical-pipeline rules, the casing rule, the omission exception —
+    // belongs to the skill, which the row links, and stays pinned across the
+    // real carriers by Z19b.
+    const need = [
+      "chain-progress", "✓", "▶", "·", "✗",
+      "spans several turns",
+      "marked from an observation and never from the plan",
+      "above the closing next step",
+      "add no separate",
+    ];
+    const bad = need.filter((n) => !row.includes(n)).map((n) => "missing<" + n.slice(0, 24) + ">");
+    process.stdout.write(bad.length ? bad.join(",") : "OK");
+  ' 2>/dev/null)"
+  RC19D=$?
+  if [ "$RC19D" -ne 0 ]; then
+    check "Z19d config-doc row check could not run (node exit $RC19D) — not an all-clear" FAIL
+  elif [ "$MISS19D" = "OK" ]; then
+    check "Z19d docs/configuration.md zen-mode row describes the anchor, all four marks and the observation rule" PASS
+  else
+    check "Z19d docs/configuration.md zen-mode row is out of step: ${MISS19D:-<empty output, program produced no verdict>}" FAIL
+  fi
+else
+  check "Z19d config-doc row check did not run — node is not on PATH" FAIL
+fi
 
 # Z20 the safety carve-out survives into the per-prompt reminder, not just the skill.
 # The carve-out must also lift the one-question and one-next-step caps, or a
@@ -451,6 +785,31 @@ printf '%s' "$RAW20" | grep -qiF 'full-sentence rule is NEVER suspended' \
   || MISSING20="$MISSING20 'full-sentence rule is NEVER suspended'"
 printf '%s' "$RAW20" | grep -qE 'rules? [0-9], *[0-9].*do not apply' \
   && MISSING20="$MISSING20 (carve-out names rule NUMBERS — hook and SKILL.md number differently)"
+# SKILL.md rule 9 asserts a property OF THIS DIRECTIVE — "the jargon gloss is
+# NOT [suspended] ... and the injected directive keeps it too" — and nothing
+# compared the two. Z23 greps the skill without the hook, Z19b excludes the
+# skill carrier from the whole-directive needles, and this check greps the hook
+# without the gloss. So a one-sided edit to the hook suspension list would make
+# that sentence a false statement about the shipped directive with every check
+# green. The list is enumerated by description, so the absence of a gloss word
+# in it is the checkable form of the claim.
+# The list is pinned EXACTLY rather than scanned for a forbidden word. Forbidding
+# only `gloss|jargon` left every OTHER safety rule free to join the suspension
+# list unnoticed, which is a widening of the carve-out and the more dangerous
+# direction. The extraction is also no longer `[^.]*`: that stops at the first
+# period, so a list that ever grows an internal one would silently be compared in
+# part. It takes everything up to the sentence-ending period followed by a space
+# and a capital, and the comparison is whitespace-normalized.
+SUSPEND20_WANT="the length target, the depth-on-demand rule, the one-question cap, the one-next-step rule, and the changed-lines-only rule"
+SUSPEND20="$(printf '%s' "$RAW20" \
+  | sed -n 's/.*the following are suspended: \(.*\)/\1/p' \
+  | sed 's/\. [A-Z].*$//' \
+  | head -1 | tr -s '[:space:]' ' ' | sed 's/^ *//;s/ *$//;s/\.$//')"
+if [ -z "$SUSPEND20" ]; then
+  MISSING20="$MISSING20 (no enumerated suspension list found — the gloss claim cannot be checked)"
+elif [ "$SUSPEND20" != "$SUSPEND20_WANT" ]; then
+  MISSING20="$MISSING20 (the hook suspension list is not the pinned five: got '$SUSPEND20')"
+fi
 [ -z "$MISSING20" ] && check "Z20 carve-out lifts the caps but never the full-sentence rule, and names no rule numbers" PASS \
   || check "Z20 reminder carve-out:$MISSING20" FAIL
 rm -rf "$P20"
@@ -510,11 +869,12 @@ fi
 if printf '%s' "$SKILL_FLAT" | grep -qiF 'Never compress a warning' \
   && printf '%s' "$SKILL_FLAT" | grep -qiF 'irreversible or destructive' \
   && printf '%s' "$SKILL_FLAT" | grep -qiF 'credentials' \
-  && printf '%s' "$SKILL_FLAT" | grep -qiF 'Rules 3, 4, 5, 7 and 8 are suspended' \
+  && printf '%s' "$SKILL_FLAT" | grep -qiF 'Rules 3, 4, 5 and 8, and rule 7' \
+  && printf '%s' "$SKILL_FLAT" | grep -qiF 'jargon gloss is NOT' \
   && printf '%s' "$SKILL_FLAT" | grep -qiF 'never suspended'; then
-  check "Z23 SKILL.md carve-out lifts rules 3/4/5/7/8 but keeps the full-sentence rule" PASS
+  check "Z23 SKILL.md carve-out lifts rules 3/4/5/8 and rule 7's changed-lines half, keeps the gloss and the full-sentence rule" PASS
 else
-  check "Z23 SKILL.md safety carve-out missing, or does not lift 5/8, or lifts the precedence rule" FAIL
+  check "Z23 SKILL.md safety carve-out missing, or does not lift 5/8, or lifts the gloss or the precedence rule" FAIL
 fi
 
 # Z24 SKILL.md forbids trading findings for brevity
@@ -547,20 +907,168 @@ fi
 # umlaut class as literals and would always match itself.
 # Stems that are also English words (der/die/das/mit) are excluded on purpose —
 # "let the process die" and "MIT license" are legitimate English prose, and a
-# case-insensitive scan would flag them. A grep error (rc >= 2) is a FAIL, never a
-# silent "no match".
-GERMAN_RE='\b(und|oder|nicht|Datei|Dateien|werden|kann|muss|sollte|wenn|dann|aber|auch|noch|schon|bitte|ohne)\b'
-LANG_BAD=""
-for F26 in "$SKILL" "$HOOK" "$HELPER"; do
-  if node -e 'process.exit(/[äöüÄÖÜß]/.test(require("fs").readFileSync(process.argv[1],"utf8"))?1:0)' "$F26" 2>/dev/null; then :; else
-    LANG_BAD="$LANG_BAD $(basename "$F26"):umlaut"
-  fi
-  grep -qiE "$GERMAN_RE" "$F26"; RC26=$?
-  [ "$RC26" -eq 0 ] && LANG_BAD="$LANG_BAD $(basename "$F26"):german-stem"
-  [ "$RC26" -ge 2 ] && LANG_BAD="$LANG_BAD $(basename "$F26"):grep-error-rc$RC26"
+# case-insensitive scan would flag them.
+#
+# The roster is DERIVED, never hand-listed. It was the skill/hook/helper triple
+# while this feature owned three files, and the guard that exists to catch a
+# German fixture could then not see the two carriers this change added: with
+# German prose planted in a canned reply of the unit file, Z26 reported PASS and
+# the suite stayed green. Every zen-mode-owned carrier is scanned now — the
+# triple, every eval scenario, and the grader unit file.
+#
+# ONE allowance, and it is the CLAUDE.md §Language carve-out spelled
+# mechanically rather than by filename: a match is exempt only when it sits
+# inside a `/.../` regex literal on its line. That is what makes the failure
+# alternation in anchor-failed-step.yaml legal — it matches text whose language
+# the product does not control — while prose, a comment and a canned fixture in
+# the very same file stay violations. Keying the allowance to a file name would
+# have exempted all three.
+Z26_LIST="$SKILL
+$HOOK
+$HELPER
+$PLUGIN_DIR/tests/structure/zen-anchor-assertions.test.js"
+Z26_FIXED=4
+Z26_SCEN=0
+for Z26_F in "$PLUGIN_DIR"/evals/zen-mode-reaction/scenarios/*.yaml; do
+  [ -f "$Z26_F" ] || continue
+  Z26_LIST="$Z26_LIST
+$Z26_F"
+  Z26_SCEN=$(( Z26_SCEN + 1 ))
 done
-[ -z "$LANG_BAD" ] && check "Z26 skill/hook/helper are English-only (no umlauts, no German stems)" PASS \
-  || check "Z26 English-only violated:$LANG_BAD" FAIL
+# The floor used to be a bare `scanned < 4`, which is exactly the size of the
+# hand-listed half — so a glob that matched nothing (a path typo, a `.yml`
+# extension, a host where the `-f` guard mis-fires) silently dropped every eval
+# scenario and Z26 still reported PASS, back to the blindness the rewrite was
+# made to remove. The derived half is counted HERE, where the roster is built,
+# and the expected TOTAL is passed in, so both halves are covered by one
+# equality rather than by a constant that only ever described one of them.
+if [ "$Z26_SCEN" -lt 3 ]; then
+  check "Z26 the derived half of the English-only roster matched only $Z26_SCEN scenario file(s) — the glob has moved" FAIL
+elif ! command -v node >/dev/null 2>&1; then
+  check "Z26 English-only scan did not run — node is not on PATH" FAIL
+else
+  LANG_BAD="$(printf '%s\n' "$Z26_LIST" | Z26_WANT=$(( Z26_FIXED + Z26_SCEN )) node -e '
+    const fs = require("fs"), path = require("path");
+    // Stems that are also English words are excluded on purpose; see above.
+    // BOTH carry `g`: a non-global regex returns only the FIRST match on a
+    // line, so a violation sitting outside a regex literal went unreported
+    // whenever an exempt match happened to come first — which is the ordinary
+    // shape of the one line this scan deliberately exempts.
+    // The roster rewrite widened WHICH files are scanned and left the vocabulary
+    // alone, and a German canned reply then sat in the unit file with Z26 green:
+    // "Der Adapter ist umgeschrieben." contains no umlaut and no member of the
+    // original list. The high-frequency German function words are in now — the
+    // articles and copulas that no German sentence avoids — which is what makes
+    // the scan a check on the LANGUAGE rather than on one word list.
+    // `sie`, `war`, `den`, `dem`, `am`, `im`, `so`, `will`, `hat` and `alle` are
+    // deliberately OUT: each is an ordinary English word, a proper-name fragment
+    // or a common identifier fragment, and the sibling reason for excluding
+    // der/die/das applies to them too. Do NOT trust this sentence — Z26b below
+    // DRIVES the list against an English probe corpus, because an earlier
+    // revision made exactly this claim while `hat` and `alle` were still in it.
+    const STEM = /\b(und|oder|nicht|Datei|Dateien|werden|kann|muss|sollte|wenn|dann|aber|auch|noch|schon|bitte|ohne|ist|sind|wurde|wurden|einen|eine|einem|einer|eines|nach|durch|über|unter|zwischen|beim|vom|zum|zur|diese|dieser|dieses|jede|jeder|keine|kein|sich|wird|haben|dass|weil|damit|sondern|jedoch|bereits|immer|niemals)\b/gi;
+    const UML = /[äöüÄÖÜß]/g;
+    // Spans of a line that sit inside a /.../ regex literal. Deliberately crude:
+    // it over-approximates toward EXEMPTING, so a false exemption is possible and
+    // a false violation is not — and the roster is what makes the check bite.
+    const literalSpans = (line) => {
+      const spans = [];
+      const re = /\/(?![*\/])(?:\\.|\[(?:\\.|[^\]\\])*\]|[^\/\\\n])+\/[a-z]*/g;
+      let m;
+      while ((m = re.exec(line))) spans.push([m.index, m.index + m[0].length]);
+      return spans;
+    };
+    const inLiteral = (spans, i) => spans.some(([a, b]) => i >= a && i < b);
+    let input = "";
+    process.stdin.on("data", (c) => { input += c; });
+    process.stdin.on("end", () => {
+      const bad = [];
+      let scanned = 0;
+      for (const f of input.split("\n").map((x) => x.trim()).filter(Boolean)) {
+        let text;
+        try { text = fs.readFileSync(f, "utf8"); } catch (_) { bad.push(path.basename(f) + ":unreadable"); continue; }
+        scanned += 1;
+        text.split("\n").forEach((line, n) => {
+          const spans = literalSpans(line);
+          for (const re of [UML, STEM]) {
+            re.lastIndex = 0;
+            let hit;
+            while ((hit = re.exec(line))) {
+              if (inLiteral(spans, hit.index)) continue;
+              bad.push(path.basename(f) + ":" + (n + 1) + ":" + (re === UML ? "umlaut" : "german-stem"));
+              break;
+            }
+          }
+        });
+      }
+      // An EQUALITY against the roster the shell actually built, never a bare
+      // floor: a file that cannot be read is already reported above, and this
+      // catches the rest — a roster that shrank between being built and being
+      // scanned reads as a failure rather than as an all-clear.
+      const want = Number(process.env.Z26_WANT);
+      if (!Number.isInteger(want) || want < 4) bad.push("roster-size-unresolved");
+      else if (scanned !== want) bad.push("roster-scanned-" + scanned + "-of-" + want + "-files");
+      process.stdout.write(bad.length ? bad.slice(0, 6).join(" ") : "OK");
+    });
+  ' 2>/dev/null)"
+  LANG_RC=$?
+  if [ "$LANG_RC" -ne 0 ]; then
+    check "Z26 English-only scan could not run (node exit $LANG_RC) — not an all-clear" FAIL
+  elif [ "$LANG_BAD" = "OK" ]; then
+    check "Z26 every zen-mode carrier is English-only outside a regex literal (skill, hook, helper, unit file, every eval scenario)" PASS
+  else
+    check "Z26 English-only violated: ${LANG_BAD:-<empty output, program produced no verdict>}" FAIL
+  fi
+fi
+
+# ── Z26b: no stem may be an ordinary English word ────────────────────────────
+# The list started with der/die/das/mit EXCLUDED on exactly this ground — "let
+# the process die" and "MIT license" are legitimate English prose. Widening it to
+# catch a German sentence with no umlaut re-introduced the defect: `hat` is an
+# English noun and `alle` heads a proper name, so an ordinary English line would
+# have been reported as a violation. A false red in the guard that gates every
+# carrier is worse than a missed stem, so the list is driven against an English
+# probe corpus rather than trusted to a comment claiming the exclusion was made.
+if ! command -v node >/dev/null 2>&1; then
+  check "Z26b stem-list English probe did not run — node is not on PATH" FAIL
+else
+  STEM_BAD="$(SUITE="$0" node -e '
+    const fs = require("fs");
+    const src = fs.readFileSync(process.env.SUITE, "utf8");
+    const m = src.match(/const STEM = \/\\b\(([^)]*)\)\\b\/gi;/);
+    if (!m) { process.stdout.write("stem-list-not-locatable"); }
+    else {
+      const stems = m[1].split("|");
+      // Ordinary English prose a maintainer could legitimately write in any of
+      // the scanned carriers. Each line must scan CLEAN.
+      const ENGLISH = [
+        "The hat is on the table and the coat is on the hook.",
+        "Alle Corporation ships a linter we do not use.",
+        "Return the value under the key, then check it once more.",
+        "This is an ordinary sentence about a step list and a next step.",
+        "The suite is green, nothing failed, and no case was skipped.",
+        "Read the file, then write it back without the trailing newline.",
+        "A wide-brimmed hat, a die-cast model, and an MIT license.",
+      ];
+      const bad = [];
+      for (const stem of stems) {
+        const re = new RegExp("\\b" + stem + "\\b", "i");
+        for (const line of ENGLISH) {
+          if (re.test(line)) { bad.push(stem); break; }
+        }
+      }
+      process.stdout.write(bad.length ? bad.join(",") : "OK");
+    }
+  ' 2>/dev/null)"
+  STEM_RC=$?
+  if [ "$STEM_RC" -ne 0 ]; then
+    check "Z26b stem-list probe could not run (node exit $STEM_RC) — not an all-clear" FAIL
+  elif [ "$STEM_BAD" = "OK" ]; then
+    check "Z26b no German stem in the English-only list is also an ordinary English word" PASS
+  else
+    check "Z26b these stems match ordinary English prose and would false-red a legitimate edit: ${STEM_BAD:-<empty output, program produced no verdict>}" FAIL
+  fi
+fi
 
 # Z27 config.example.json documents both flags, and documents zenModeDefault at
 # its real shipped value — an example showing false would misstate the default.
@@ -584,6 +1092,147 @@ if node -e '
   check "Z28 plugin.json / marketplace version + ref stay in sync (no stray bump)" PASS
 else
   check "Z28 version sync broken" FAIL
+fi
+
+# ── Z30: a ceiling on the always-on per-prompt injection ────────────────────
+# This hook is the plugin's largest always-on carrier and the only one with no
+# length bound: its two marker-block siblings each ship a MAX_BLOCK plus a
+# review-ceiling tripwire precisely so a rule block cannot grow unnoticed. This
+# one had neither, and rule 6 grew the directive from 2951 to 4664 characters —
+# a 57% rise on a channel that fires on EVERY prompt of every zen-mode session,
+# with zenModeDefault shipping true. Nothing observed it, and docs/architecture.md
+# still derived a per-turn total from the old figure.
+#
+# The bound is ONE-SIDED and is a tripwire, not a budget: the remaining slack
+# under the ceiling may not EXCEED the declared headroom. Growth past the ceiling
+# fails, and so does a shrink far below it — a ceiling that has drifted away from
+# its text has stopped being a tripwire. The headroom is absolute, never a
+# preserved percentage, and 89 is the figure the sibling suites use for "roughly
+# one clause".
+#
+# Measured through node, never ${#var}: bash counts bytes under LC_ALL=C and code
+# points otherwise, while the emitted value is a JSON string carrying four
+# non-ASCII marks.
+# One implementation of "is this a plain non-negative integer", driven by Z30a
+# below. `case` matches the WHOLE string, unlike a line-scoped grep.
+zen_is_plain_number() {
+  case "${1-}" in
+    ''|*[!0-9]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# The headroom is BORROWED from the two marker-block carriers, where 89 is the
+# remainder of the evidence carrier's own round ceiling and stands for "roughly
+# one clause". State what that borrowing does NOT buy: this constant is enrolled
+# in neither of the guarantees those two have. It is not compared against the
+# sibling headrooms by the cross-carrier equality arm in
+# test-windows-portability-guards.sh, which covers only that pair, and there is
+# no run-time fail-safe beneath it — nothing in hooks/user-prompt-zen-mode.sh
+# refuses an over-long directive the way rule-block-v1.js refuses an over-long
+# block. So this is a build-time tripwire and nothing else; a directive that grew
+# past the ceiling would still be injected in full by an installed plugin.
+ZEN_DIRECTIVE_CEILING=4750
+ZEN_DIRECTIVE_HEADROOM=89
+if ! command -v node >/dev/null 2>&1; then
+  check "Z30 directive length bound did not run — node is not on PATH" FAIL
+else
+  ZEN_LEN="$(HOOK="$HOOK" node -e '
+    const fs = require("fs");
+    const hook = fs.readFileSync(process.env.HOOK, "utf8");
+    const blocks = [...hook.matchAll(/"additionalContext":\s*"((?:[^"\\]|\\.)*)"/g)]
+      .map((m) => { try { return JSON.parse("\"" + m[1] + "\""); } catch (_) { return ""; } });
+    const active = blocks.find((s) => s.startsWith("zen-mode is ACTIVE"));
+    process.stdout.write(active === undefined ? "NONE" : String(active.length));
+  ' 2>/dev/null)"
+  ZEN_LEN_RC=$?
+  if [ "$ZEN_LEN_RC" -ne 0 ] || ! zen_is_plain_number "$ZEN_LEN"; then
+    check "Z30 directive length could not be measured (rc=$ZEN_LEN_RC, got '${ZEN_LEN:-<empty>}') — not an all-clear" FAIL
+  else
+    ZEN_SLACK=$(( ZEN_DIRECTIVE_CEILING - ZEN_LEN ))
+    if [ "$ZEN_SLACK" -lt 0 ]; then
+      check "Z30 the injected directive is $ZEN_LEN chars, past the declared ceiling of $ZEN_DIRECTIVE_CEILING — argue the growth and raise the ceiling deliberately" FAIL
+    elif [ "$ZEN_SLACK" -gt "$ZEN_DIRECTIVE_HEADROOM" ]; then
+      check "Z30 the directive is $ZEN_LEN chars, $ZEN_SLACK below the ceiling of $ZEN_DIRECTIVE_CEILING (headroom $ZEN_DIRECTIVE_HEADROOM) — the ceiling has drifted away from the text" FAIL
+    else
+      check "Z30 injected directive is $ZEN_LEN chars, $ZEN_SLACK under its declared ceiling" PASS
+    fi
+  fi
+fi
+
+# ── Z30a: the numeric guard above is itself driven ──────────────────────────
+# Z30's guard used `grep -qE '^[0-9]+$'`, which matches per LINE, over a value
+# captured with `2>&1`. A node warning printed beside the number satisfied that
+# guard, and the arithmetic on the next line then received a multi-line operand.
+# Measured on bash 3.2: `$(( CEILING - ZEN_LEN ))` reads the first word as a
+# variable name, `set -u` aborts the shell there, and the abort exits 0 — so the
+# suite reports SUCCESS to run-all.sh having never printed its summary and never
+# run Z29 below. A silent green is the one verdict this suite may not give, so
+# the predicate is a named function driven by its own negative cases rather than
+# an inline expression nothing exercises.
+Z30A_FAIL=""
+for Z30A_BAD in "Warning: some node notice
+4664" "" "4664 " "12x" "-5"; do
+  if zen_is_plain_number "$Z30A_BAD" 2>/dev/null; then
+    Z30A_FAIL="$Z30A_FAIL [accepted '$(printf '%s' "$Z30A_BAD" | tr '\n' '/')']"
+  fi
+done
+if ! zen_is_plain_number "4664" 2>/dev/null; then
+  Z30A_FAIL="$Z30A_FAIL [rejected a plain number]"
+fi
+if [ -n "$Z30A_FAIL" ]; then
+  check "Z30a the directive-length numeric guard is not whole-string:$Z30A_FAIL" FAIL
+else
+  check "Z30a the directive-length numeric guard rejects a multi-line, empty, padded, mixed and signed value" PASS
+fi
+
+# ── Z29: the eval graders' own unit contract ────────────────────────────────
+# The scenarios under evals/zen-mode-reaction/ are the only place the emitted
+# anchor is ever graded against a model, and that suite is local-only — so the
+# grader BODIES were executed by nothing at all. The sibling suite's P6/P7/P9b
+# are presence checks (a `type: javascript` key, no llm-rubric, an envelope
+# extractor), all of which a logically broken grader satisfies. Two real defects
+# lived behind that: a step-list branch that could never match a `-` bullet, so
+# a compliant reply was graded as a violation, and a tick guard that only fired
+# on three hardcoded English step names while the directive tells the model to
+# choose its own. The unit file runs every grader against canned replies and
+# pins the pass/fail vector, so a grader that stops catching what it is named
+# for turns THIS suite — which is in ciStructureTests — red.
+Z29_UNIT="$PLUGIN_DIR/tests/structure/zen-anchor-assertions.test.js"
+if [ ! -f "$Z29_UNIT" ]; then
+  check "Z29 the eval graders' unit contract is missing from disk" FAIL
+elif ! command -v node >/dev/null 2>&1; then
+  # FAIL, not a skip: recording a PASS here would credit a check that did not
+  # execute, which is the one verdict this suite may not give.
+  check "Z29 eval-grader unit contract did not run — node is not on PATH" FAIL
+else
+  Z29_OUT="$(node --test "$Z29_UNIT" 2>&1)"
+  Z29_RC=$?
+  # A case-count floor as well as the exit status: `node --test` exits 0 for a
+  # file that registers ZERO cases, so the status alone cannot tell a green run
+  # from a file that stopped being discovered.
+  Z29_PASS_N="$(printf '%s\n' "$Z29_OUT" | sed -n 's/^# pass \([0-9]*\)$/\1/p;s/^. pass \([0-9]*\)$/\1/p' | head -1)"
+  Z29_SKIP_N="$(printf '%s\n' "$Z29_OUT" | sed -n 's/^# skipped \([0-9]*\)$/\1/p;s/^. skipped \([0-9]*\)$/\1/p' | head -1)"
+  [ -n "$Z29_SKIP_N" ] || Z29_SKIP_N=0
+  Z29_FAIL_N="$(printf '%s\n' "$Z29_OUT" | sed -n 's/^# fail \([0-9]*\)$/\1/p;s/^. fail \([0-9]*\)$/\1/p' | head -1)"
+  [ -n "$Z29_FAIL_N" ] || Z29_FAIL_N=unknown
+  Z29_SEEN=$(( ${Z29_PASS_N:-0} + Z29_SKIP_N ))
+  # The floors are the REGISTRATION step for a new case, the convention this repo
+  # records for test-session-trail-skill.sh T22. At 3 against a file of 6 they
+  # admitted the deletion of every case that actually executes a grader — the
+  # vector tests and the both-directions test — while staying green. Raise this
+  # number in the same commit that adds a case.
+  Z29_FLOOR=8
+  # ONE floor, over REGISTRATIONS. The pair `Z29_SEEN >= FLOOR && Z29_PASS_N >=
+  # FLOOR` could never fail independently — skips are non-negative, so the first
+  # conjunct held whenever the second did — and it defeated the stated intent:
+  # marking a case `test.skip` left it registered but reported FAIL. `Z29_SEEN`
+  # is the registration count, and a non-zero `# fail` is what turns this red.
+  if [ "$Z29_RC" -eq 0 ] && [ -n "$Z29_PASS_N" ] && [ "$Z29_FAIL_N" = "0" ] && [ "$Z29_SEEN" -ge "$Z29_FLOOR" ]; then
+    check "Z29 the eval graders' unit contract passes ($Z29_PASS_N cases)" PASS
+  else
+    check "Z29 eval-grader unit contract: rc=$Z29_RC pass=${Z29_PASS_N:-none} skipped=$Z29_SKIP_N (want registered >= $Z29_FLOOR and fail 0, got fail=$Z29_FAIL_N): $(printf '%s' "$Z29_OUT" | grep -E '^.?[[:space:]]*(not ok|✖)' | head -2 | tr '\n' ' ')" FAIL
+  fi
 fi
 
 echo "----"

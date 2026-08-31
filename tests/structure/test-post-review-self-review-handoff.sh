@@ -112,7 +112,100 @@ if echo "$CTX_A" | grep -q -- "--chain-done"; then
 else
   check "P3 PASS menu must NOT instruct --chain-done (self-review owns terminus)" PASS
 fi
-echo "$CTX_A" | grep -qF "subagent_type='zensu:code-reviewer'" && check "P4 fix-loop (case C) reviewer re-spawn still present" PASS || check "P4 case C reviewer respawn" FAIL
+# The delegate's own copy of the review-spawn scope sentence, asserted on the
+# EMITTED additionalContext rather than at source. The routing suite pins the two
+# interpolation sites by count; this is the only check that reads what a model
+# actually receives from this hook.
+# Asserted against the SOURCED constant, not a hand-copied slice of it: this suite
+# already sources the owner library above, so $ZENSU_REVIEW_SPAWN_IN_SCOPE is live here.
+# A slice would be a fourth and fifth copy of the sentence in a change whose whole
+# thesis is that it has exactly one owner, and it would pass a reword of any clause
+# outside the copied words. The non-empty guard is load-bearing: `grep -qF ""` matches
+# everything, so an emptied constant would otherwise report PASS.
+if [ -n "${ZENSU_REVIEW_SPAWN_IN_SCOPE:-}" ] \
+  && echo "$CTX_A" | grep -qF "$ZENSU_REVIEW_SPAWN_IN_SCOPE"; then
+  check "P3a fix-round directive carries the review-spawn scope sentence" PASS
+else
+  check "P3a fix-round directive carries the review-spawn scope sentence" FAIL
+fi
+# The delegate has TWO severity arms and every other fixture takes the default one,
+# so the include-suggestions arm's copy of the sentence was emitted by nothing. A
+# source-level count cannot tell a rendered interpolation from a literal that never
+# expands, which is the whole reason P3a exists for the other arm.
+INCLSUGG="$STATE_DIR/incl-sugg.json"
+printf '{"hooks":{"autoFixIncludeSuggestions":true}}' > "$INCLSUGG"
+CTX_A2="$(postrev "$SID_A" "$INCLSUGG")"
+# The arm-unique literals are what make this a pin rather than a repeat of P3a: both
+# arms emit the same sentence, so the needle alone passes whichever arm rendered. The
+# include arm labels its fix branch "case B", the default arm "case C".
+if [ -n "${ZENSU_REVIEW_SPAWN_IN_SCOPE:-}" ] \
+  && echo "$CTX_A2" | grep -qF "$ZENSU_REVIEW_SPAWN_IN_SCOPE" \
+  && echo "$CTX_A2" | grep -qF "Do NOT mark the chain done in case B" \
+  && ! echo "$CTX_A2" | grep -qF "Do NOT mark the chain done in case C"; then
+  check "P3b the include-suggestions arm is the one that rendered, and it carries it too" PASS
+else
+  check "P3b the include-suggestions arm is the one that rendered, and it carries it too" FAIL
+fi
+# Both arms close with an EXHAUSTIVE status-line enumeration ("one of these status
+# lines"), and neither member could express the action the scope sentence asks for —
+# so a model that withheld the fan-out had to either open with a status line that was
+# false about what it did, or break the enumeration. Pinned on BOTH arms because they
+# are hand-parallel: an edit to one alone silently diverges them, which is the same
+# gap P3b exists for.
+WITHHOLD_LINE="Withholding the review fan-out — reporting to the user for a decision"
+if echo "$CTX_A" | grep -qF "$WITHHOLD_LINE" \
+  && echo "$CTX_A2" | grep -qF "$WITHHOLD_LINE"; then
+  check "P3c both severity arms permit a status line expressing a withheld fan-out" PASS
+else
+  check "P3c both severity arms permit a status line expressing a withheld fan-out" FAIL
+fi
+# The delegate half of hooks.reviewSpawnScopeSentence. The routing suite pins the
+# Stop half; without this one the key could suppress the sentence at one render site
+# and not the other, with both suites green.
+NOSCOPE="$STATE_DIR/no-scope-sentence.json"
+printf '{"hooks":{"reviewSpawnScopeSentence":false}}' > "$NOSCOPE"
+CTX_A3="$(postrev "$SID_A" "$NOSCOPE")"
+if [ -n "${ZENSU_REVIEW_SPAWN_IN_SCOPE:-}" ] \
+  && echo "$CTX_A3" | grep -qF "subagent_type='zensu:code-reviewer'" \
+  && ! echo "$CTX_A3" | grep -qF "$ZENSU_REVIEW_SPAWN_IN_SCOPE"; then
+  check "P3d hooks.reviewSpawnScopeSentence=false suppresses the delegate's copy too" PASS
+else
+  check "P3d hooks.reviewSpawnScopeSentence=false suppresses the delegate's copy too" FAIL
+fi
+# The status line and the sentence that sanctions it must travel together. Emitting
+# 'Withholding the review fan-out …' while the only text explaining that route is
+# config-suppressed leaves an enumeration whose fourth member no case covers — the
+# directive would offer an opener it never justifies. Asserted on the SAME capture as
+# P3d, so the pair is observed in one run rather than in two independent ones.
+# The negative's own capture carries a positive anchor: postrev() returns "" on any
+# failure, and CTX_A3 is the third consecutive ticket issuance against this session, so an
+# empty capture is a realistic mode — and a bare `!` over an empty string reports PASS
+# while testing nothing.
+if echo "$CTX_A" | grep -qF "$WITHHOLD_LINE" \
+  && echo "$CTX_A3" | grep -qF "subagent_type='zensu:code-reviewer'" \
+  && ! echo "$CTX_A3" | grep -qF "$WITHHOLD_LINE"; then
+  check "P3e the withhold status line is suppressed with the sentence that sanctions it" PASS
+else
+  check "P3e the withhold status line is suppressed with the sentence that sanctions it" FAIL
+fi
+# The sentence sanctions a report; the next clause in both arms forbids ending the turn.
+# The Stop site reconciles that with its own bound; this site carries a different one,
+# because withholding here leaves the chain open rather than meeting a cap. Pinned on the
+# emitted context, and pinned as travelling WITH the sentence.
+# ORDER is the assertion, not presence: a sanctioned route placed BEFORE a flat
+# prohibition is the shape a model resolves in favour of the prohibition, which is why the
+# Stop site states its own second exception after "Do NOT end your turn". `awk` reports the
+# byte offset of each needle so the comparison is on position, not on two independent greps.
+P3F_ORDER="$(printf '%s' "$CTX_A" | awk '{ p=index($0,"do NOT end your turn first"); e=index($0,"The one exception to that:"); print (p>0 && e>p) ? "ok" : "bad" }' | grep -c '^ok$' || true)"
+if [ "${P3F_ORDER:-0}" -ge 1 ] \
+  && echo "$CTX_A" | grep -qF 'the Stop guard, which is bounded but does not release on a report' \
+  && echo "$CTX_A3" | grep -qF "subagent_type='zensu:code-reviewer'" \
+  && ! echo "$CTX_A3" | grep -qF 'The one exception to that:'; then
+  check "P3f the fix-round exception follows the do-not-stop clause and travels with the sentence" PASS
+else
+  check "P3f the fix-round exception follows the do-not-stop clause and travels with the sentence" FAIL
+fi
+echo "$CTX_A" | grep -qF "subagent_type='zensu:code-reviewer'" && check "P4 fix-loop (case C) reviewer re-spawn still present" PASS || check "P4 fix-loop (case C) reviewer re-spawn still present" FAIL
 if echo "$CTX_A" | grep -qF "$PLUGIN_DIR/hooks/lib/zensu-log.sh" \
   && ! echo "$CTX_A" | grep -qF '${CLAUDE_PLUGIN_ROOT}'; then
   check "P4a PASS handoff embeds the concrete session plugin root" PASS

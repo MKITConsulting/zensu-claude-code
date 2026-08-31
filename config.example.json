@@ -21,6 +21,7 @@
     "secretScan": true,
     "reviewJudge": true,
     "findingVerification": true,
+    "reviewSpawnScopeSentence": true,
     "reviewerSpawnAutoAllow": true,
     "pendingReviewTtlHours": 6,
     "implStopNudgeAfter": 12

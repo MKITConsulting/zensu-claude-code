@@ -96,7 +96,7 @@ It reaches every process through three deliberately redundant carriers, because 
 
 The hook reads the block out of the canonical file at run time rather than carrying its own copy, so it cannot drift from the `agents/*.md` and `skills/*/SKILL.md` prompt carriers when the rule is reworded. (The carrier population is pinned as `EXPECTED_AGENTS` + `EXPECTED_SKILLS` in `tests/structure/test-evidence-discipline.sh`; it is deliberately not restated as a literal here, because a numeral goes stale on every new skill and nothing fails closed on it.)
 
-It is the only **advisory** hook without a config flag — `hooks.sessionBanner:false`, or disabling every other hook, does not silence it. Other hooks carry no flag either (`session-start-session-control.sh`, `pre-reviewer-capability-gate.sh`, `session-start-autopilot-resume.sh`, `post-artifact-redact.sh`, the two `review-evidence-subagent-*` hooks), but those are enforcement or evidence-plumbing hooks that must not be disableable at all; what makes this one unusual is that every other *advisory, context-injecting* hook is flagged. It is also fail-silent: an unknown event, a malformed payload, a missing `node`, or a rule file that is absent, symlinked, swapped between the pre-check and the open, oversized in FILE or in BLOCK, short-read, or malformed exits `0` with no output. The one branch that is not silent is a mismatched inherited `CLAUDE_PLUGIN_ROOT`, which refuses with exit `2` on stderr; every other path lets an always-on hook through rather than blocking a prompt or a spawn. The two size bounds are separate: a file far under the file ceiling can still carry one over-long block, and that is refused too.
+It is the only **advisory** hook without a config flag — `hooks.sessionBanner:false`, or disabling every other hook, does not silence it. Other hooks carry no flag either (`session-start-session-control.sh`, `pre-reviewer-capability-gate.sh`, `pre-write-plugin-data-guard.sh`, `session-start-autopilot-resume.sh`, `post-artifact-redact.sh`, the two `review-evidence-subagent-*` hooks), but those are enforcement or evidence-plumbing hooks that must not be disableable at all; what makes this one unusual is that every other *advisory, context-injecting* hook is flagged. It is also fail-silent: an unknown event, a malformed payload, a missing `node`, or a rule file that is absent, symlinked, swapped between the pre-check and the open, oversized in FILE or in BLOCK, short-read, or malformed exits `0` with no output. The one branch that is not silent is a mismatched inherited `CLAUDE_PLUGIN_ROOT`, which refuses with exit `2` on stderr; every other path lets an always-on hook through rather than blocking a prompt or a spawn. The two size bounds are separate: a file far under the file ceiling can still carry one over-long block, and that is refused too.
 
 **The block names no file, on purpose.** A `reviewer-readonly-v1` subagent resolves tool paths against the *project* root, not the plugin root, so a `docs/evidence-discipline.md` pointer inside the block could only ever resolve into the repository under review — letting a hostile repo plant that path and have its own text ingested as the authoritative rule. The two leased `evidence-worker-v1` agents would additionally burn a bounded turn on a read their lease denies. So the block declares itself complete and forbids any workspace file claiming to be the rule from overriding it; agents act on the block, humans and the hook read the file.
 
@@ -104,7 +104,7 @@ It is the only **advisory** hook without a config flag — `hooks.sessionBanner:
 
 One reviewer is not a plugin file and so cannot be a carrier: a **repo-custom review persona** (`.claude/agents/zensu-review-*.md`) is authored by the repository under review. `/zensu:pr-team-review` and `/zensu:plan-review` are covered by construction — they spawn a custom seat *as* one of the confined plugin workers, which carries the block like any agent. `/zensu:tdd` is the one path that spawns a custom persona under its own `subagent_type`, so its fan-out prepends the canonical block to that spawn prompt, read from the canonical file at run time rather than duplicated. The suite pins all of it, including the premise: if either other skill ever starts spawning custom seats under their own type, that path loses its carrier the same silent way, and the check fails.
 
-The prose is the floor, not the ceiling. Where the discipline can be enforced by machinery it already is — the [witness cross-check](configuration.md#hooks-24) matches every claimed `cmd="…"` against an independent record of what actually ran, REVIEW PACKET v1 makes reviewers reject an evidence-less spawn rather than review from imagination, `/zensu:verify-feature` reports `PARTIAL` instead of inferring an outcome, and `/zensu:wargame` marks an unsettled assumption `RECON NEEDED` with the check that settles it. When extending the plugin, prefer a check that fails closed over a sentence asking the model to be careful.
+The prose is the floor, not the ceiling. Where the discipline can be enforced by machinery it already is — the [witness cross-check](configuration.md#hooks-25) matches every claimed `cmd="…"` against an independent record of what actually ran, REVIEW PACKET v1 makes reviewers reject an evidence-less spawn rather than review from imagination, `/zensu:verify-feature` reports `PARTIAL` instead of inferring an outcome, and `/zensu:wargame` marks an unsettled assumption `RECON NEEDED` with the check that settles it. When extending the plugin, prefer a check that fails closed over a sentence asking the model to be careful.
 
 That cross-check is `hooks/lib/zensu-evidence-crosscheck.js`, and it is code for a reason worth stating precisely. It used to be a prose recipe — "for each `cmd="X"` claim, run `grep -F -q 'cmd="X"'` against the witness log", plus a hand-executed tail scan. The recipe is not known to be wrong on its own: the witness JSON-encodes each recorded command, and that escaping happens to defeat the obvious attack where the `printf` that *wrote* a claim ends up corroborating it. What failed, in a real session on this repository, was the execution — the procedure was carried out by hand, every claim came back `verified`, and that verdict reached a human before anyone noticed nothing had actually been established. A check that must be re-derived and re-run by hand has no failure mode anyone can test and no exit code any gate can consume.
 
@@ -113,7 +113,7 @@ Moving it into a library fixes that and adds what the prose never had: a witness
 ## Best Solution First
 
 A second normative rule ships the same way, and the pair is now a **pattern worth naming**: a rule block lives under `docs/` between HTML markers, and a hook reads it out of that file *at run time* and injects it as `additionalContext`. The canonical file is the only copy; the carrier cannot drift from it; and `docs/` sits inside the Session Control runtime digest, so the declared source of truth is tamper-evident within a session — while the executing plugin root is the recorded one. `servesRecordedRuntime` lets a compatible sibling install serve a record it did not mint, and both carriers read from the *executing* root, so across a mid-session upgrade the injected bytes come from a tree no in-session digest measured; each rule's own build-time pins are what bind the text there. A third such rule belongs here too — and one already exists without following it:
-`hooks/user-prompt-zen-mode.sh` injects a ~2.9 KB always-on contract on the same
+`hooks/user-prompt-zen-mode.sh` injects a ~4.7 KB always-on contract on the same
 `UserPromptSubmit` channel, hardcoded as a shell heredoc rather than read from a marker
 block. It is named here so the next reader does not conclude it was overlooked.
 
@@ -154,22 +154,29 @@ The **flag** exists because this rule governs how a decision is *presented*, not
 The **per-prompt** event, rather than `SessionStart`, is the whole point: a rule delivered once fades as the context fills, and it fades exactly when an agent starts optimizing for the smallest disturbance to what already exists. There is no de-bounce band — unlike `user-prompt-context-nudge.sh`, which is right to fire once per threshold band — because the moment an agent is about to frame a question is not observable in advance.
 
 **What it costs, measured rather than asserted — and exactly one of these figures is
-enforced.** `C6` in `tests/structure/test-best-solution-first.sh` derives the emitted length
-from the hook itself and requires this paragraph to match it, so the injection size below is
-machine-pinned and cannot drift. Every OTHER number here — the sibling's emitted length, the
+enforced.** `C6` in `tests/structure/test-evidence-discipline.sh` derives an emitted length
+from a hook and greps this paragraph for it. Name the figure, because the referent is easy to
+get backwards: what `C6` pins is the **939-character** figure stated below for
+`session-start-evidence-discipline.sh`, not the 1756/1764 headline for this hook — a grep of
+`tests/` for either of those two numbers returns nothing, and the 6.3 KB per-turn total derived
+from 1764 is unpinned with them. Every OTHER number here — the sibling's emitted length, the
 KB estimates and the per-turn totals — is hand-computed and illustrative: they were correct
 when written, nothing re-derives them, and a change to any input silently ages them. Read them
 as an order of magnitude, not as a measurement, and do not add a new figure here expecting the
 suite to keep it honest. Driving the hook directly, each injection
 is **1756 characters / 1764 bytes** of `additionalContext`, identical on both legs. For scale,
 `session-start-evidence-discipline.sh` emits 939 characters, and `hooks/user-prompt-zen-mode.sh`
-injects roughly 2.9 KB on the same prompt channel. A `/zensu:tdd` review round spawns five
+injects roughly 4.7 KB on the same prompt channel. The DIRECTIVE behind that figure is bounded
+since the chain-progress anchor landed — `Z30` in `tests/structure/test-zen-mode.sh` holds it
+under a declared ceiling — but `Z30` reads the hook and never opens this document, so the number
+written here is hand-derived like every other one below, and ages the same way. `C6` above stays
+the only figure a check reads out of this paragraph. A `/zensu:tdd` review round spawns five
 `review-aspect` agents plus a judge and a code-reviewer, so the `SubagentStart` leg adds about
 **at least** 12 KB across one fan-out — more with repo-custom personas, and again per auto-fix
 round. The dominant term, though, is the other leg, and it is the one the design deliberately
 leaves unbounded: `UserPromptSubmit` fires every prompt with no de-bounce, so with zen-mode active
-— the shipped default — the standing per-prompt injection is 2951 + 1764 = about **4.6 KB every
-turn**, roughly 92 KiB over 20 turns and 276 KiB over 60. That is the real price of "resident
+— the shipped default — the standing per-prompt injection is 4664 + 1764 = about **6.3 KB every
+turn**, roughly 126 KiB over 20 turns and 377 KiB over 60. That is the real price of "resident
 rather than periodic", and it should be argued on those numbers rather than on the fan-out figure.
 The subagent leg deliberately has no per-`agent_type` filter — the requirement
 was that the rule reach subagents, and the block's own precedence clause tells a confined reviewer
