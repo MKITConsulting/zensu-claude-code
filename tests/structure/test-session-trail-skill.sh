@@ -1959,8 +1959,8 @@ t36_cite "$SKILL_MD" 'scopes by transcript-directory' "$T36_SPEC" 'skills/sessio
 # both onto one number and this pair reported `no-citation-in` plus `2-matches` rather than
 # passing over a clobbered citation. When a target crosses a hundred boundary these two
 # prefixes move with it, and the failure says which.
-t36_cite "$TRAIL_MJS" 'function gitState' "$T36_HTML" 'trail\.mjs:20[0-9]+'
-t36_cite "$TRAIL_MJS" 'claude --resume' "$T36_HTML" 'trail\.mjs:2[1-9][0-9][0-9]'
+t36_cite "$TRAIL_MJS" 'function gitState' "$T36_HTML" 'trail\.mjs:21[0-9][0-9]'
+t36_cite "$TRAIL_MJS" 'claude --resume' "$T36_HTML" 'trail\.mjs:33[0-9][0-9]'
 t36_cite "$SKILL_MD" 'scopes by transcript-directory' "$T36_HTML" 'skills/session-trail/SKILL\.md:2[0-9]+'
 # The POPULATION, scanned out of the documents rather than counted off the row table
 # above. `T36_ROWS` counts rows this test declares; it can never notice a citation the

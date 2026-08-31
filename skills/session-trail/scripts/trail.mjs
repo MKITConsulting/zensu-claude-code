@@ -129,7 +129,7 @@ function parseArgs(argv) {
   const out = {
     _: [], days: 21, prompts: 12, json: false, all: false, live: false, git: true, repo: null, force: false,
     configDir: null, where: null, diagnose: false, backfill: false, apply: false, record: true, reason: null, self: false,
-    forget: null, remove: null,
+    forget: null, remove: null, anchor: null,
     daysExplicit: false, promptsExplicit: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -162,6 +162,14 @@ function parseArgs(argv) {
     else if (a === '--days') { out.days = numericOperand(a, argv[++i]); out.daysExplicit = true; }
     else if (a === '--prompts') { out.prompts = numericOperand(a, argv[++i]); out.promptsExplicit = true; }
     else if (a === '--repo') out.repo = stringOperand(a, argv[++i]);
+    // An OPERAND, never a positional, for the reason the two destructive flags
+    // above state: a positional swallowed from a neighbouring flag would name an
+    // anchor the caller never typed, and this one decides whether a WRITE is
+    // reported as possible. It is not validated here beyond being a string —
+    // `writeAnchor` applies the absolute-only admission every channel shares, so
+    // a relative value is REFUSED there rather than resolved against a cwd this
+    // process happens to have.
+    else if (a === '--anchor') out.anchor = stringOperand(a, argv[++i]);
     else if (a.startsWith('--')) fail(`unknown flag: ${a}`);
     else out._.push(a);
   }
@@ -204,6 +212,29 @@ function dirExists(p) {
 
 function normSlug(s) {
   return s.replace(/[^A-Za-z0-9]/g, '-');
+}
+
+// The repository IDENTITY of one directory, and nothing else. `repoContext` answers a
+// larger question — it also spawns `worktree list --porcelain` to build a `worktrees`
+// Set that four listing call sites consume — and `continuationPlan` needed only `.root`
+// from each of two calls, so it paid for two extra subprocesses per `ready` render and
+// then discarded the result. Kept as a separate function rather than a flag on
+// `repoContext`: the callers want different shapes, not one shape with a mode.
+//
+// NAME COLLISION, stated because it is latent rather than broken. `buildEdge` in
+// `session-lineage-v1.mjs` destructures a PARAMETER of this same name, and this file
+// supplies it explicitly as `repoRootOf: (root) => nearestRepoRoot(root, new Map())`
+// — a DIFFERENT function that walks ancestors for a `.git` rather than asking git.
+// Nothing is shadowed today because that property is written out. The trap is a later
+// tidy-up to object shorthand `{ repoRootOf }`, which would silently substitute this
+// `rev-parse`-based one into the lineage ledger's edge records. Keep that call site
+// explicit, or rename one of the two.
+function repoRootOf(startDir) {
+  if (!dirExists(startDir)) return null;
+  const common = git(startDir, ['rev-parse', '--git-common-dir']);
+  if (!common) return null;
+  const abs = path.isAbsolute(common) ? common : path.resolve(startDir, common);
+  return path.basename(abs) === '.git' ? path.dirname(abs) : abs;
 }
 
 function repoContext(startDir) {
@@ -398,7 +429,19 @@ function containment(callerRoot, targetRoot) {
 // off a measurement that was never taken is the one wrong answer. In an ordinary
 // subprocess neither variable is normally present, so `unknown` is the expected
 // reading and the routing advice below it is what carries the value.
-function writeAnchor(targetWt) {
+// The closed set of causes a `covered: null` can have. It is the single OWNER of that
+// list and `CONTINUATION_REASONS` spreads it rather than hand-copying it — but say the
+// binding precisely, because only one side of it is structural: `writeAnchor` below
+// still spells each code as a bare literal and never reads this constant, so the
+// PRODUCER is bound by a check (WC12b) and not by the language. Three of its four
+// producer sites are ternaries or a `const` assignment and match no literal-shaped
+// needle, which is why the check derives them rather than grepping for one shape.
+const ANCHOR_REASONS = Object.freeze([
+  'no-channel', 'channel-not-absolute', 'target-absent', 'target-not-absolute',
+  'gate-unavailable', 'ambiguous-spelling', 'weak-channel',
+]);
+
+function writeAnchor(targetWt, opts) {
   // Absolute-only, and the winner is carried verbatim — see the header above for
   // why each half is load-bearing. The rationale lives THERE rather than here
   // because W3b extracts this body and greps it, so naming the rejected
@@ -415,12 +458,22 @@ function writeAnchor(targetWt) {
   // together: adding a third weak channel meant remembering two independent edits,
   // and the failure direction at the downgrade is the false `allowed` this feature
   // may never produce. Renaming a label was already pinned; ADDING one was not.
+  // `flag:--anchor` is FIRST and TRUSTED. Neither environment variable normally
+  // reaches a subprocess a session spawns — SKILL.md states `unknown` as the
+  // expected reading — while the session driving this command does know its own
+  // immutable root and can state it. A caller-supplied value is exactly as
+  // authoritative as ZENSU_PROJECT_ROOT and no more: both are assertions this
+  // process cannot check, and a wrong one here yields a wrong `allowed`, which is
+  // the one verdict this feature may never produce. That is why it must not be
+  // spelled as a weaker channel to be safe — a `false` here would silently
+  // downgrade every deliberate anchor to `null` and make the flag useless.
   const candidates = [
+    { label: 'flag:--anchor', value: opts && opts.anchor, trusted: true },
     { label: 'env:ZENSU_PROJECT_ROOT', value: process.env.ZENSU_PROJECT_ROOT, trusted: true },
     { label: 'env:CLAUDE_PROJECT_DIR', value: process.env.CLAUDE_PROJECT_DIR, trusted: false }
   ];
   const present = (c) => Boolean(c.value) && String(c.value).trim() !== '';
-  const fromEnv = candidates.find((c) => present(c) && path.isAbsolute(String(c.value)));
+  const winner = candidates.find((c) => present(c) && path.isAbsolute(String(c.value)));
   // KNOWN LIMIT, stated rather than implied: `rejected` reaches the reader only when
   // NO channel resolved, because `source` is its single consumer and a winner takes
   // precedence there. So `ZENSU_PROJECT_ROOT` set to a relative path while an
@@ -429,8 +482,8 @@ function writeAnchor(targetWt) {
   // refused. Surfacing it needs a second return field and a render line; that is a
   // shape change, and `W11_REL_FALLBACK` pins the current answer.
   const rejected = candidates.find((c) => present(c) && !path.isAbsolute(String(c.value)));
-  const callerRoot = fromEnv ? String(fromEnv.value) : null;
-  const source = fromEnv ? fromEnv.label : (rejected ? `rejected:${rejected.label}` : 'unknown');
+  const callerRoot = winner ? String(winner.value) : null;
+  const source = winner ? winner.label : (rejected ? `rejected:${rejected.label}` : 'unknown');
   // Absolute-only on the TARGET side too — see the header for why, and note that
   // the rationale has to live THERE: W3b greps this body for the name of the
   // rejected derivation, so spelling it here trips the pin that proves it absent.
@@ -461,7 +514,7 @@ function writeAnchor(targetWt) {
       targetRoot: targetWt || null,
       covered: null,
       source,
-      sourceTrusted: fromEnv.trusted,
+      sourceTrusted: winner.trusted,
       reasonCode: targetWt ? 'target-not-absolute' : 'target-absent',
       reason: targetWt
         ? 'the target session\'s recorded worktree is not an absolute path, so it cannot anchor the comparison either'
@@ -477,7 +530,7 @@ function writeAnchor(targetWt) {
       targetRoot,
       covered: null,
       source: 'rejected:gate-unavailable',
-      sourceTrusted: fromEnv.trusted,
+      sourceTrusted: winner.trusted,
       reasonCode: 'gate-unavailable',
       reason: 'the source-write gate module could not be loaded, so its own containment predicate was never asked',
     };
@@ -499,14 +552,14 @@ function writeAnchor(targetWt) {
   // `contained` is already `null` when the two readings disagreed; this downgrade
   // only ever discards a `true`, so the two null causes compose without either
   // masking the other.
-  const covered = (contained === true && !fromEnv.trusted) ? null : contained;
+  const covered = (contained === true && !winner.trusted) ? null : contained;
   const reason = covered !== null
     ? null
     : contained === null
       ? 'the target worktree\'s literal and resolved spellings disagree — a symlink in its path, or a case or short-name difference on this filesystem — so it is inside this anchor when reached by cd and outside it when written out, and the gate compares the anchor resolved against the path as written'
       : 'CLAUDE_PROJECT_DIR is this host\'s wider project directory, not the immutable root the gate compares, so containment in it settles nothing';
   const reasonCode = covered !== null ? null : contained === null ? 'ambiguous-spelling' : 'weak-channel';
-  return { callerRoot, targetRoot, covered, source, sourceTrusted: fromEnv.trusted, reasonCode, reason };
+  return { callerRoot, targetRoot, covered, source, sourceTrusted: winner.trusted, reasonCode, reason };
 }
 
 // Rendered as its own block rather than folded into the TAKEOVER advice, because
@@ -647,8 +700,9 @@ function flatPath(p) {
 // the same brief and a reader could not tell which spelling is real. (The handoff
 // brief's bullet and its operand are deliberately different values — `r.wt` vs
 // `r.cwd` — so there the harm is simply that the operand is not the path.)
-// All FOUR runnable lines use `briefShellArg` — the two brief ones and the two
-// `printResume` prints, which flow 3 now names as the remedy for a blocked commit.
+// All FIVE runnable lines use `briefShellArg` — the two brief ones, the two
+// `printResume` prints, which flow 3 names as the remedy for a blocked commit, and the
+// one `continuationPlan` renders on its `already-contained` branch.
 // `CONTROL_RUN` FIRST, then `oneLine`. The two bounds are not interchangeable and
 // neither subsumes the other: `oneLine` collapses `/\s+/`, and JS `\s` is only the
 // line-break class plus a few spaces — it does not cover ESC, the rest of C0, DEL
@@ -662,11 +716,13 @@ function briefPath(p) {
   return oneLine(String(p == null ? '' : p).replace(CONTROL_RUN, ' '), 200).replace(/`/g, "'") || '(unknown)';
 }
 
-// The FOUR carriers that must stay UNCLIPPED and be safe to paste: the takeover
+// The FIVE carriers that must stay UNCLIPPED and be safe to paste: the takeover
 // brief's `## How to continue` step 1 and the handoff brief's `## Continue this
-// work` block, both inside a ```bash fence, plus `printResume`'s two `show`
-// prints, which are plain terminal output. The skill tells a reader all four are
-// runnable. Single-quoting is what neutralizes `$( )`, `;`, `&&` and
+// work` block, both inside a ```bash fence, `printResume`'s two `show` prints,
+// which are plain terminal output, and `continuationPlan`'s `already-contained`
+// line, which reaches the same `show` output. The skill tells a reader all five are
+// runnable. (Counting by `claude --resume` alone finds four — the takeover brief's
+// fence is a bare `cd`, which is exactly as paste-critical.) Single-quoting is what neutralizes `$( )`, `;`, `&&` and
 // `|` — the metacharacters `briefPath`'s backtick swap leaves live — and the
 // POSIX `'\''` idiom closes and reopens the quote around an embedded apostrophe.
 // No length clip: a shortened path is a DIFFERENT path that `cd` still accepts.
@@ -2872,13 +2928,306 @@ function adviceBlock(lines, indent, firstPrefix) {
   return out;
 }
 
+// The CONTAINMENT axis of a takeover, and deliberately a SECOND renderer beside
+// `worktreeAdvice` rather than a branch inside it. The two answer different
+// questions — "will this directory still be here" (archive) versus "may I commit
+// in it" (anchor) — and the answers do not compose: `worktreeAdvice` can route you
+// into a worktree of your own on every arm and STILL leave you unable to commit,
+// because the path it renders is a `<path>` placeholder and nothing there measures
+// the anchor. This renderer supplies the operand that placeholder wants. Both
+// render, neither overrides the other, and each names its own axis so a reader is
+// never told that one answer settles the other.
+//
+// It emits COMMANDS and runs none, and the reason is APPROVAL, not gate coverage —
+// an earlier wording claimed the latter and was wrong about the two commands that
+// matter most. Every write this script performs happens inside node, where no
+// PreToolUse gate can see it; the session-lineage ledger is the one such write this
+// repository already accepts, recorded as a permission posture rather than a
+// precedent. Rendering puts the block in front of a human before anything runs, and
+// step 1 exists so they can redirect it.
+//
+// What the gate ACTUALLY judges, stated precisely because the block invites the
+// reader to substitute their own target: of the four writing commands below, only
+// `git apply` (a member of `GIT_MUTATIONS`) and the `>` patch redirect are seen.
+// `git worktree add` is NOT — `bash-source-write-parse.js` gates `worktree` for
+// `remove`/`move` only, and its own header says `add` "stays ungated" because it
+// legitimately targets a path outside the current root. The `tar` extraction is not
+// seen either: `detectChannels` recognizes redirects, `tee`, `sed -i`, `dd of=` and
+// heredocs, and a `tar -xf -` carries none of them. So the two commands that
+// actually create the continuation are ungated, and the guards above — same
+// repository, existing anchor, resolved branch — are what stands in for that.
+const CONTINUATION_REASONS = new Set([
+  // decided here
+  'escapes-anchor', 'already-contained', 'weak-channel-no-target', 'branch-unresolved',
+  'cross-repository', 'anchor-not-a-repository', 'source-not-a-repository',
+  'anchor-absent', 'unclassified',
+  // carried verbatim from writeAnchor's own closed set, so a null cause keeps its
+  // name across the two objects instead of collapsing into one useless code
+  ...ANCHOR_REASONS,
+]);
+
+// The relative placement, spelled ONCE. It reaches `path.join` for the target and the
+// patch AND the `check-ignore` operand in the rendered step 1; a hand-copy in the
+// third site would have reported "ignored" about a directory the other steps do not use.
+const CONTINUATION_DIR = ['.claude', 'worktrees'];
+
+// A branch name reaches a DIRECTORY name and a NEW branch name here, so it is
+// reduced to a conservative class rather than quoted: quoting makes a string safe
+// for the shell, not sane as a path component. A leading `claude/` is stripped
+// first, or the rendered branch would read `claude/claude-<name>-cont`.
+function continuationSlug(branch, wt) {
+  const raw = String(branch || '').replace(/^refs\/heads\//, '').replace(/^claude\//, '')
+    || path.basename(String(wt || ''));
+  const s = raw.replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 60).replace(/^-+|-+$/g, '');
+  return s || 'session';
+}
+
+function continuationPlan(r, w, branch) {
+  // The source path is taken from the verdict object rather than from `r.wt`, and
+  // not only to satisfy L61's raw-render scan. `writeAnchor` is what decided this
+  // plan may be rendered at all, and `targetRoot` is the exact value it measured
+  // containment against — reading the record a second time would let the two drift
+  // apart, so the commands would address a tree the verdict never judged.
+  //
+  // The implication runs ONE way: a null `src` means no verdict, never the converse.
+  // `writeAnchor`'s two early returns spell `targetRoot: targetWt || null` — the RAW
+  // argument, not the validated absolute local — so on `no-channel`, which SKILL.md
+  // calls the ordinary case in a subprocess, `src` is a perfectly good absolute path
+  // beside a `covered: null`. What is load-bearing is the other half: every branch
+  // that builds a TARGET is one where `covered === false`, and that requires it.
+  const src = w.targetRoot;
+  const none = (status, reasonCode, lines) => ({ status, reasonCode, target: null, branch: null, source: src || null, lines });
+  if (w.covered === true) {
+    return none('not-needed', 'already-contained', [
+      'CONTINUE not needed — that worktree is already inside this session\'s anchor, so a',
+      '         commit there lands. Resume it where it is:',
+      `           cd -- ${briefShellArg(r.cwd)} && claude --resume ${briefShellArg(r.sessionId)}`,
+    ]);
+  }
+  // `covered === false` off the weak channel is still SOUND as a deny — non-containment
+  // in the wider root implies non-containment in the narrower one — but its `callerRoot`
+  // is that wider root, and a target path built from it may land OUTSIDE the immutable
+  // root the gate actually compares. So the finding is reported and the path is withheld:
+  // a plausible-looking target that still denies is worse than no target at all.
+  if (w.covered === false && w.sourceTrusted !== true) {
+    return none('blocked', 'weak-channel-no-target', [
+      'CONTINUE blocked — that worktree escapes the anchor this process could measure, but',
+      '         that anchor is CLAUDE_PROJECT_DIR, not the immutable root the gate compares,',
+      '         so a target path derived from it could still land outside it.',
+      '         Pass your own project root to get one: --anchor <your project root>',
+    ]);
+  }
+  if (w.covered !== false) {
+    // `unclassified`, never `no-channel`: that code's own sentence asserts "no
+    // ZENSU_PROJECT_ROOT or CLAUDE_PROJECT_DIR in this process", a specific cause that
+    // an unrecognized code gives no reason to believe. Naming a cause that may not hold
+    // is the mistake `writesLines`' header records having made once already.
+    return none('unknown', CONTINUATION_REASONS.has(w.reasonCode) ? w.reasonCode : 'unclassified', [
+      // States only what holds in EVERY cause. "the anchor could not be measured" is
+      // true of one of the seven: under `weak-channel` the anchor resolved and the
+      // comparison succeeded, and only its TRUST was withdrawn; under
+      // `ambiguous-spelling` both sides were read and disagreed. `writesLines` records
+      // having made exactly this mistake — naming the anchor as the missing piece sent
+      // a reader to check an environment variable that was already correct. The cause
+      // travels in `w.reason`, bound like every other third-party value that reaches a
+      // rendered line, because this renderer must not assume its caller went through
+      // `writeAnchor`.
+      'CONTINUE unknown — containment could not be settled, so assume a commit in that',
+      `         worktree would be denied (${flatPath(w.reason) || 'no anchor channel resolved'}).`,
+      '         Pass your own project root to get a continuation plan: --anchor <your project root>',
+    ]);
+  }
+  // An anchor that names nothing on disk still passes `writeAnchor`, whose admission
+  // is `path.isAbsolute` and no filesystem check — and `canonicalPair` drops BOTH
+  // operands to their lexical spelling when either `realpath` throws, so the
+  // disagreement-to-null protection never fires either. The plan would then render a
+  // target under a directory that does not exist. Caught here rather than in
+  // `writeAnchor`, which deliberately performs no I/O on its channels.
+  //
+  // FIRST among the withholding guards, deliberately. It costs one `statSync`, needs
+  // no branch read, and it is the only refusal that names a value the CALLER typed.
+  // Behind the branch guard it was unreachable under `--no-git`, where the branch is
+  // always unmeasurable — so a mistyped `--anchor` was reported as a git problem and
+  // the user needed two round trips to see their own typo. It also has to stay above
+  // the repository comparison, which returns null for an absent directory too and
+  // would report the specific fault as the vaguer one.
+  if (!dirExists(w.callerRoot)) {
+    return none('blocked', 'anchor-absent', [
+      'CONTINUE blocked — the anchor you supplied is not an existing directory, so no worktree',
+      `         could be created under it: ${flatPath(w.callerRoot)}`,
+      '         Check the value you passed to `--anchor`; nothing upstream stats it, so an absolute',
+      '         path that names nothing still wins the channel and produces a verdict.',
+    ]);
+  }
+  // ABOVE the branch guard, because it is the CAUSE of the symptom that guard reports.
+  // Measured during self-review: a source worktree that exists but is not a repository
+  // makes `gitState` answer null, so `branch` is falsy and `branch-unresolved` fired
+  // first — leaving this branch UNREACHABLE while SKILL.md told a `--json` consumer to
+  // expect the code. A documented code that can never be emitted is a false promise, and
+  // the more specific diagnosis is the better one anyway: "that worktree is not in a
+  // repository" beats "no branch name could be read from it".
+  const srcRepoRoot = repoRootOf(src);
+  if (!srcRepoRoot) {
+    return none('blocked', 'source-not-a-repository', [
+      'CONTINUE blocked — that session\'s worktree is not inside a git repository this process can',
+      '         read, so there is no branch to continue from. It may have been removed, or it may',
+      '         never have been a worktree — check the WORKTREE line above.',
+    ]);
+  }
+  // The branch operand comes ONLY from a live read of the source worktree, and there
+  // is deliberately no fallback to `r.branch`. That field is transcript metadata
+  // recorded when the session started; measured against this worktree it answered
+  // `main` while the tree was actually on `claude/plugin-auto-mode-permissions-665942`,
+  // and the rendered line would then have branched the continuation off `main` and
+  // silently left every commit behind. A missing branch is reported, never guessed.
+  //
+  // The literal `HEAD` is REFUSED alongside a falsy one, and a `!branch` test alone
+  // does not catch it: `gitState` reads the branch with `rev-parse --abbrev-ref HEAD`,
+  // which answers the string `HEAD` on a detached checkout — truthy, so it reached
+  // `worktree add … -b 'claude/HEAD-cont' 'HEAD'`, where the start-point resolved
+  // against the ANCHOR repository's own HEAD rather than the source's. Silent,
+  // because `claude/HEAD-cont` is a valid ref name and `HEAD` always resolves. This
+  // file already spells that sentinel twice — `handoffPath`'s `b !== 'HEAD'` and the
+  // transcript reader's `b === 'HEAD'` — so the guard is the file's own idiom, not a
+  // new rule. Detached worktrees are ordinary here: several in this repository's own
+  // `.claude/worktrees/` are on a detached HEAD.
+  if (!branch || branch === 'HEAD') {
+    return none('blocked', 'branch-unresolved', [
+      'CONTINUE blocked — that worktree escapes this session\'s anchor, but no branch name could',
+      '         be read from it, so no continuation can name a base commit. Either the branch was',
+      '         not measured (`--no-git`, or the worktree is missing), or the checkout is DETACHED,',
+      '         where the only answer is the literal `HEAD` and it would resolve against your own',
+      '         repository rather than that one. The session record\'s branch field is not a',
+      '         substitute: it is what the session STARTED on, and branching off a stale value',
+      '         leaves the work behind. Re-run with git enabled, or continue from an explicit',
+      `         commit read there yourself: git -C ${briefShellArg(src)} rev-parse HEAD`,
+    ]);
+  }
+  // The base ref is measured in the SOURCE worktree and resolved in the ANCHOR's
+  // repository, so the two must be one repository. `containment` is lexical path
+  // containment and is satisfied by two unrelated trees — and `docs/gates.md` names
+  // "another repository" as one of the three shapes this block is offered for. Where
+  // the anchor repo happens to carry a branch of the same name (`main`, `develop`),
+  // step 2 would create the worktree at ITS commit and step 3 would apply a foreign
+  // diff on top; a diff that only adds files applies cleanly, so the wrong-tree
+  // outcome is not even loud. Withheld rather than guessed at.
+  // The two roots are CANONICALIZED TOGETHER before they are compared, and that is not
+  // defensive habit — a raw `!==` here withheld a valid plan. `repoContext` builds its
+  // root from `rev-parse --git-common-dir`, which answers a RELATIVE `.git` in a main
+  // checkout (resolved against the caller's spelling) and the ABSOLUTE path git
+  // recorded at `worktree add` time in a linked one. Measured on this host: one
+  // repository under a temp root answered `/var/folders/…/main` from its main checkout
+  // and `/private/var/folders/…/main` from its own worktree. `canonicalPair` is the
+  // file's existing all-or-nothing normalizer, so one `realpath` failure drops BOTH to
+  // the lexical spelling rather than putting them in different namespaces — the same
+  // reason it exists for the containment comparison.
+  const anchorRepoRoot = repoRootOf(w.callerRoot);
+  const [srcRoot, anchorRoot] = (srcRepoRoot && anchorRepoRoot)
+    ? canonicalPair(srcRepoRoot, anchorRepoRoot)
+    : ['', ''];
+  // THREE causes, three codes. Collapsing them read as one condition and was one code,
+  // but the remedies differ — "point --anchor at a repository" is not "these are two
+  // repositories" — and a `--json` consumer branching on `reasonCode`, which SKILL.md
+  // tells it to do, could not tell them apart. `writeAnchor` splits `target-absent` from
+  // `target-not-absolute` for the same reason one function up.
+  if (!anchorRepoRoot) {
+    return none('blocked', 'anchor-not-a-repository', [
+      'CONTINUE blocked — the anchor you supplied is a directory, but not a git repository, so no',
+      `         worktree can be created under it: ${flatPath(w.callerRoot)}`,
+      '         Point `--anchor` at your project root — the tree your own session was started in.',
+    ]);
+  }
+  if (srcRoot !== anchorRoot) {
+    return none('blocked', 'cross-repository', [
+      'CONTINUE blocked — that worktree and your anchor are not the same repository, so a',
+      '         continuation created in yours could not name that one\'s branch as its base: the',
+      '         name would resolve against YOUR history. Copying work across repositories is a',
+      '         different operation from continuing a session, and this block will not guess at it.',
+    ]);
+  }
+  const slug = continuationSlug(branch, src);
+  const target = path.join(w.callerRoot, ...CONTINUATION_DIR, `${slug}-cont`);
+  const newBranch = `claude/${slug}-cont`;
+  // The same segment the two joins above use, spelled for the rendered command. A
+  // literal here would let the check report on a directory the other steps do not use.
+  const REL = CONTINUATION_DIR.join('/');
+  const A = briefShellArg(w.callerRoot);
+  // The source operands are anchored on the worktree TOPLEVEL, not on the recorded
+  // path, because the two halves of step 3 use different path bases and only one of
+  // them tolerates a subdirectory. Measured on this host: from a subdirectory,
+  // `git diff HEAD` still reports TOPLEVEL-relative paths (which `git apply` at the
+  // target root then places correctly), while `ls-files --others` lists paths relative
+  // to that subdirectory AND omits everything above it — so the tar half would have
+  // relocated the untracked files to the target root and silently dropped the rest.
+  // SKILL.md warns in its own words that the recorded path "may be a SUBDIRECTORY the
+  // session started in rather than a worktree root", so this is the ordinary case, not
+  // an edge one. Falls back to `src` when the read fails, which is no worse than before.
+  const srcTop = git(src, ['rev-parse', '--show-toplevel']) || src;
+  const S = briefShellArg(srcTop);
+  const T = briefShellArg(target);
+  return {
+    status: 'ready',
+    reasonCode: 'escapes-anchor',
+    target,
+    branch: newBranch,
+    source: src || null,
+    lines: [
+      'CONTINUE ready — that worktree escapes this session\'s anchor, so `git add` and',
+      '         `git commit` there will deny. The gate\'s test is CONTAINMENT, so continue in',
+      '         a worktree nested INSIDE your own anchor instead — that one is writable from',
+      '         this session, with no bypass and no ledger entry.',
+      '         1. confirm the placement is ignored — a tracked worktree directory is its own mess.',
+      '            Three outcomes, not two: `cmd && A || B` would report every failure as the',
+      '            middle one, sending you to change a path when the anchor is what is wrong.',
+      `              git -C ${A} check-ignore -q ${briefShellArg(REL)}; case $? in 0) echo ignored;; 1) echo 'NOT ignored — pick another path';; *) echo 'could not check — is the anchor a git worktree?';; esac`,
+      '            On NOT ignored, substitute an ignored directory of your own and use it in',
+      '            place of the target in steps 2-4 — every path below that starts with the anchor.',
+      '         2. create it on a NEW branch. A second worktree on the SAME branch is refused',
+      '            while the original still exists, which is why `-b` is not optional:',
+      // `--` before the positionals: shell quoting protects the SHELL, not git's own
+      // option parser, and the trailing commit-ish is the one operand that arrives
+      // verbatim from another repository's refs — `continuationSlug`'s character class
+      // is applied to the slug, never to `branch`. Measured rather than assumed:
+      // `git branch -- -evil` refuses ("not a valid branch name") while
+      // `git check-ref-format refs/heads/-evil` ACCEPTS, so a ref planted through a
+      // plumbing command can carry a leading dash even though the porcelain will not
+      // create one. `git worktree add -b <new> -- <path> <commit-ish>` was verified to
+      // work, so the separator costs nothing.
+      // `refs/heads/<name>`, not the bare name. Since the cross-repository guard above
+      // now guarantees ONE repository, a tag of the same name lives in that same
+      // namespace, and a bare name is the one ambiguous spelling there. git warns on an
+      // ambiguous refname rather than resolving silently, so this removes a warning and
+      // a wrong base rather than a silent corruption — and a full ref is still a valid
+      // commit-ish for `worktree add`.
+      `              git -C ${A} worktree add -b ${briefShellArg(newBranch)} -- ${T} ${briefShellArg('refs/heads/' + branch)}`,
+      '         3. carry the UNCOMMITTED work across — the branch alone carries only what',
+      '            was committed. Do NOT improvise that step: run `handoff` or `takeover`',
+      '            and use the recipe they print (`CARRY_OVER` in this script). Its safety',
+      '            is in details a shorter spelling loses — the config flags that stop a',
+      '            textconv, an external-diff or an fsmonitor command running while the',
+      '            diff is produced,',
+      '            `--binary` (without it a modified binary file makes `apply` refuse the',
+      '            whole patch), `mktemp` over a predictable name, and the symlink check',
+      '            that sits BETWEEN the diff and the apply because a caution printed after',
+      '            the apply is read after it has run. Substitute these two paths for its',
+      '            placeholders — the recipe cannot compute them, which is why this block',
+      '            exists:',
+      `              <their worktree> = ${S}`,
+      `              <your new worktree> = ${T}`,
+      '         Nothing above writes to the source worktree: a git mutation aimed at that tree',
+      '         is refused by this same gate, and would touch another session\'s index.',
+    ],
+  };
+}
+
 function cmdShow(opts) {
   const base = resolve(opts, opts._[1]);
   const r = hydrate(base);
   const g = opts.git ? gitState(r.wt, true) : null;
   const v = activityVerdict(r, opts.force);
-  const w = writeAnchor(r.wt);
-  if (opts.json) return print(JSON.stringify({ ...r, git: g, takeover: v, writes: w, worktreeAdvice: worktreeAdvice(r), skipped: SKIPPED }, null, 2));
+  const w = writeAnchor(r.wt, opts);
+  const cont = continuationPlan(r, w, g && g.branch);
+  if (opts.json) return print(JSON.stringify({ ...r, git: g, takeover: v, writes: w, continuation: cont, worktreeAdvice: worktreeAdvice(r), skipped: SKIPPED }, null, 2));
   print(`SESSION  ${flatPath(r.sessionId)}`);
   print(`TITLE    ${oneLine(flatPath(r.title), 200) || '(none)'}`);
   // Bounded like every other third-party value: the registry record is another
@@ -2925,6 +3274,12 @@ function cmdShow(opts) {
     print('         Run handoff or takeover for it — those write a brief you paste from.');
   }
   for (const line of writesLines(w)) print(line);
+  // BELOW `writesLines`, and never inside it. The verdict suite reads that block with
+  // `grep -E -A4 '^WRITES'` and its own comment records that the window has no
+  // headroom — a sixth line on either branch silently truncates it for every arm that
+  // reads it, and those arms are presence checks, so the loss would not announce
+  // itself. A separate `CONTINUE` head keeps this renderer free to grow.
+  for (const line of cont.lines) print(line);
   print('\n--- PROMPT TIMELINE ---');
   const ps = r.prompts || [];
   const shown = ps.slice(-Math.max(1, opts.prompts));
@@ -3060,7 +3415,13 @@ function cmdTakeover(opts) {
   // read by the session that ran the command, in the process whose environment was
   // measured, so withholding the measurement made this the one single-selector
   // invocation carrying no write-anchor information at all.
-  if (opts.json) return print(JSON.stringify({ ...r, git: g, diff: d, target, takeover: tv, lineage, writes: writeAnchor(r.wt), worktreeAdvice: worktreeAdvice(r), skipped: SKIPPED }, null, 2));
+  // `continuation` travels on exactly the same terms, and for a sharper version of the
+  // same reason: it names a TARGET PATH derived from the measuring process's anchor, so
+  // in a brief opened by a different session that path would be a confident instruction
+  // pointing into the wrong tree. The markdown keeps `writeAnchorCaution`'s static
+  // sentence and no continuation at all.
+  const tw = writeAnchor(r.wt, opts);
+  if (opts.json) return print(JSON.stringify({ ...r, git: g, diff: d, target, takeover: tv, lineage, writes: tw, continuation: continuationPlan(r, tw, g && g.branch), worktreeAdvice: worktreeAdvice(r), skipped: SKIPPED }, null, 2));
   const L = [];
   L.push(`# Takeover: ${briefPath(r.title || path.basename(r.wt))}`);
   L.push('');
@@ -4148,8 +4509,10 @@ function scriptPath() { return fileURLToPath(import.meta.url); }
 
 // The two tables are adjacent because the invariant between them is the whole
 // point: every dispatched command needs a flag row, or it accepts every flag in
-// the namespace again. Keys drive the usage string too, so a tenth command cannot
-// be added to one and forgotten in the other.
+// the namespace again. Keys drive the usage string too, so an eleventh command cannot
+// be added to one and forgotten in the other. (TEN is the count today; the two numerals
+// nearby were written when it was nine and are corrected here rather than left to be
+// re-derived by the next reader.)
 const COMMANDS = {
   list: cmdList,
   instances: cmdInstances,
@@ -4164,7 +4527,7 @@ const COMMANDS = {
 };
 
 // The flag namespace is global — parseArgs accepts every flag for every command —
-// while the rules about them lived inside two handlers. The dispatcher routes NINE,
+// while the rules about them lived inside two handlers. The dispatcher routes TEN,
 // so `takeover x --forget y --apply` parsed both, recorded an edge, and named
 // neither: exactly the silence the mode-exclusivity guard refuses INSIDE `lineage`,
 // surviving one layer up. The rule belongs where the command name is decided.
@@ -4174,7 +4537,7 @@ const COMMANDS = {
 // listed there rather than refused. `instances` emits no verdict at all, so it
 // has no such contract to keep and refuses it.
 //
-// Ten of the eighteen flags were scoped and eight were not, so `--json`, `--all`,
+// Ten of the eighteen flags AT THE TIME were scoped and eight were not, so `--json`, `--all`,
 // `--live`, `--no-git`, `--config-dir`, `--days`, `--prompts` and `--repo` were
 // accepted by every verb and quietly ignored by the ones that never read them:
 // `lineage --days 3` answered machine-wide while the user believed they had asked for
@@ -4194,10 +4557,23 @@ const SCAN_FLAGS = ['--all', '--repo', '--days', '--no-git'];
 const COMMAND_FLAGS = {
   list: ['--force', ...SCAN_FLAGS, '--live'],
   instances: [...SCAN_FLAGS],
-  show: ['--force', ...SCAN_FLAGS, '--prompts'],
+  // `--anchor` is scoped to the two commands that RENDER a containment verdict, and
+  // it is deliberately NOT in SCAN_FLAGS: it decides nothing about the selector scan,
+  // and putting it there would admit it on `list`, `instances`, `handoff` and
+  // `limited`, none of which answer the question it exists to anchor.
+  //
+  // On `takeover` it is a DOCUMENTED accept-and-ignore for the markdown path, like
+  // `--force` on `list` above — and unlike `--no-record` on `adopt`, which was refused
+  // because it suppressed that verb's ENTIRE output. Here only one carrier is
+  // affected: `takeover --json` consumes it, while the markdown brief deliberately
+  // carries no continuation at all, because a brief is read by a different session
+  // than the one measured and a rendered target path there points into the wrong
+  // tree. Naming it here rather than leaving a reader to discover the asymmetry from
+  // a flag that quietly did nothing.
+  show: ['--force', ...SCAN_FLAGS, '--prompts', '--anchor'],
   handoff: ['--force', ...SCAN_FLAGS],
   limited: ['--force', ...SCAN_FLAGS],
-  takeover: ['--force', '--no-record', '--reason', ...SCAN_FLAGS, '--prompts'],
+  takeover: ['--force', '--no-record', '--reason', ...SCAN_FLAGS, '--prompts', '--anchor'],
   // `--days` is deliberately absent: the listing branch reads `opts.all` and
   // `opts.repo` and nothing else from the scan set.
   lineage: ['--diagnose', '--backfill', '--forget', '--where', '--apply', '--all', '--repo'],
@@ -4243,6 +4619,7 @@ function refuseForeignFlags(opts, cmd) {
   if (opts.forget !== null) supplied.push('--forget');
   if (opts.remove !== null) supplied.push('--remove');
   if (opts.where !== null) supplied.push('--where');
+  if (opts.anchor !== null) supplied.push('--anchor');
   const foreign = supplied.filter((f) => !accepted.includes(f));
   if (foreign.length) fail(`${foreign.join(' and ')} is not a flag of \`${cmd}\` — it would have been parsed and then ignored`);
 }

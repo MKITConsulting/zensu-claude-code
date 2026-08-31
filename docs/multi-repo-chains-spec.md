@@ -36,25 +36,25 @@ Nothing in this proposal weakens that.
 Two of the consumers named in §6.3 do NOT sit on that binding: the terminus
 count reads `git -C "${CLAUDE_PROJECT_DIR:-.}"` (`hooks/lib/zensu-log.sh:1270`) and
 the audit's default `--project` is `${CLAUDE_PROJECT_DIR:-.}`
-(`hooks/lib/zensu-edit-landing.sh:36`) — both ambient, both with a `.` fallback.
+(`hooks/lib/zensu-edit-landing.sh:41`) — both ambient, both with a `.` fallback.
 Which root that variable names in a multi-root topology, and what the fallback
 means when it is unset, is an open question (§11).
 
 **The edit-landing audit already takes a `--project` argument** — it defaults to
-`CLAUDE_PROJECT_DIR` (`hooks/lib/zensu-edit-landing.sh:36`, flag at `:49`) and
-enumerates the change set with `git -C "$REPO_ROOT"` (`:69-93`). But its receipt
-lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:266`), while
+`CLAUDE_PROJECT_DIR` (`hooks/lib/zensu-edit-landing.sh:41`, flag at `:56`) and
+enumerates the change set with `git -C "$REPO_ROOT"` (`:83-105`). But its receipt
+lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:292`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
 (`hooks/lib/zensu-log.sh:696`). Running the audit once per repository therefore
 writes receipts nothing reads, and each run reports the other repository's claims
 as not landed, so no run can exit 0.
 
 **The receipt gate is scoped by the anchor's change count.**
-`hooks/lib/zensu-log.sh:668-670` counts `git diff --name-only HEAD` plus untracked
-files under a root resolved by `zensu_resolve_project_dir()` (`:615`) — not the
+`hooks/lib/zensu-log.sh:756-758` counts `git diff --name-only HEAD` plus untracked
+files under a root resolved by `zensu_resolve_project_dir()` (`:703`) — not the
 ambient variable, and with the git environment scrubbed — and skips the receipt
 requirement entirely at zero. A clean orchestrator therefore closes the chain with
-no receipt at all. The comment at `:585` states this mirrors the `--chain-done`
+no receipt at all. The comment at `:673` states this mirrors the `--chain-done`
 dirty-tree refusal; the `--chain-done` site itself was not read for this document.
 
 **The write gate confines Bash writes, the edit gate does not confine paths.**
@@ -139,7 +139,7 @@ Stage 1 ships no multi-root capability. It removes the silent green.
 
 1. **The terminus reads the receipt's verdict, not its existence.** This is the
    larger half of the silent green and the original draft of this section missed
-   it. The gate is `if [ ! -f "$_el_receipt" ]` — an existence test — and the audit
+   it. The gate is `if [ ! -f "$_tc_receipt" ] || [ -L "$_tc_receipt" ]` — an existence-and-not-a-symlink test — and the audit
    writes its receipt *before* its own exit status is produced, carrying `clean` as
    a field rather than as a precondition for writing. An audit that reports
    `EDIT NOT LANDED` and exits non-zero therefore still satisfies the gate today.
@@ -332,10 +332,10 @@ dropped: a dropped root is a root nothing audits.
 
 | Consumer | Change | Site |
 |---|---|---|
-| Edit-landing | Enumerate the union; resolve each claim through its label; write ONE merged receipt beside the anchor's workflow document, carrying a per-root verdict. | `hooks/lib/zensu-edit-landing.sh`, receipt path `:266` |
+| Edit-landing | Enumerate the union; resolve each claim through its label; write ONE merged receipt beside the anchor's workflow document, carrying a per-root verdict. | `hooks/lib/zensu-edit-landing.sh`, receipt path `:292` |
 | Review packet | Enumerate `changed_files` per root and emit them label-prefixed. | `skills/tdd/SKILL.md` step 10.2 |
 | Write gate | Rules (B) and (C) accept a path inside ANY union member. | `hooks/lib/bash-source-write-parse.js:817`, `:863` |
-| Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:668-670` |
+| Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:756-758` |
 | Capability confinement (stage 3) | The reviewer's root check and its protected-root set both take the union. | `hooks/lib/reviewer-capability-v1.js:319`, `:300` |
 
 The write gate receives the union the same way it receives the anchor today —
@@ -348,21 +348,23 @@ never from the parser's own environment.
 has exactly one `cwd` and one transcript. What degrades is fidelity, and one part
 of it degrades dangerously.
 
-`gitState(cwd, full)` (`skills/session-trail/scripts/trail.mjs:2059`) takes a
+`gitState(cwd, full)` (`skills/session-trail/scripts/trail.mjs:2115`) takes a
 single path, and that path is the anchor. In this topology the anchor is clean
 while the changed files sit in the code roots, so a `takeover` brief would report
 no uncommitted changes for a session with a dirty tree in two other repositories.
 That is the same silent-green failure as §2, relocated into the handover path.
 
-The fix costs no schema. `trail.mjs` has exactly one write channel, the lineage ledger
-(`skills/session-trail/SKILL.md:75`); it may read the anchor's workflow document,
+The fix costs no schema, and it adds no write of its own. `trail.mjs`'s only write
+channel is the lineage ledger (`skills/session-trail/SKILL.md:75`) — it had none when
+this paragraph was first written, and the ledger has since given it one, so state what
+the FIX costs rather than what the script lacks. It may read the anchor's workflow document,
 take `codeRoots`, and call `gitState` once per union member, rendering the results
 grouped by label.
 
 Two properties stay as they are, deliberately:
 
 - **Resume happens in the anchor, always.** The printed
-  `cd <cwd> && claude --resume <id>` (`trail.mjs:2961`) already lands there.
+  `cd -- <cwd> && claude --resume <id>` (`trail.mjs:3316`) already lands there.
   Resuming inside a code root would present a different `CLAUDE_PROJECT_DIR` while
   the recorded `project_root` still EXISTS, and a present-but-different root is
   never relaxed — the orphaned relaxation requires the recorded path to be absent.
@@ -376,7 +378,7 @@ Two properties stay as they are, deliberately:
   who trusts that list.
 - **Discovery stays anchor-scoped.** `list` keeps only transcript directories
   whose name starts with the slug of the repo's main checkout
-  (`skills/session-trail/SKILL.md:274`), so from a code root's repository the
+  (`skills/session-trail/SKILL.md:285`), so from a code root's repository the
   session is reachable only via `--all` or from the anchor. This is pre-existing
   behavior that multi-repo makes more consequential; this proposal does not
   change it and must not claim to.
