@@ -239,8 +239,13 @@ unset _zensu_inner_hint
 AUTOPILOT_STATE_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
 CONFIG_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 TDD_PHASE_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+# The watchdog ladder both out-of-process children on this path go through. It lives in
+# `hooks/lib/` rather than here because a THIRD site with the same exposure already exists
+# — `user-prompt-context-nudge.sh` reads a host-supplied transcript path — and a helper
+# defined in a leaf hook cannot serve it. Three review rounds asked for this move.
+BOUNDED_RUN_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-bounded-run.sh"
 if [ ! -r "$SESSION_LIB" ] || [ ! -r "$CONFIG_LIB" ] || [ ! -r "$TDD_PHASE_LIB" ] \
-    || [ ! -r "$AUTOPILOT_STATE_LIB" ]; then
+    || [ ! -r "$AUTOPILOT_STATE_LIB" ] || [ ! -r "$BOUNDED_RUN_LIB" ]; then
   if [ "$DURABLE_STATE_HINT_EXISTS" = "true" ]; then emit_runtime_unavailable_block
   elif [ "$INNER_STATE_EXISTS" = "true" ]; then emit_inner_runtime_unavailable_block
   fi
@@ -264,6 +269,7 @@ PROJECT_ROOT="$(zensu_resolve_project_dir)" || exit 0
 SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")" || exit 0
 source "$CONFIG_LIB"
 source "$TDD_PHASE_LIB"
+source "$BOUNDED_RUN_LIB"
 STATE_FILE="$(tdd_state_file "$SESSION_ID")"
 
 # A reviewer spawn the HOST refused never executes, so no PreToolUse or
@@ -319,6 +325,7 @@ REVIEWER_SPAWN_ALLOW_RULE="Add the rule \"Agent(zensu:code-reviewer)\" to permis
 # unconditionally here rather than rebuilt per kind, because this surface is advisory
 # and a wrong kind would cost more than a redundant sentence.
 REVIEWER_SPAWN_DENY_FIRST="Deny is evaluated before ask and allow, so remove any deny rule naming the Agent tool first — while one stands, adding the allow rule changes nothing."
+
 reviewer_spawn_denial_probe() {
   local lib probe
   [ -n "$REVIEWER_DENIAL_STATUS" ] && return 0
@@ -334,12 +341,12 @@ reviewer_spawn_denial_probe() {
   # network-backed storage while this runs on the Stop path with no deadline
   # above it. A kill degrades exactly like every other probe failure: the
   # existing `|| return 0` leaves the verdict `none` and routing untouched.
-  # `timeout` is absent on base macOS and some Git Bash installs, hence the guard.
-  if command -v timeout >/dev/null 2>&1; then
-    probe="$(timeout 5 node "$lib" --transcript "$TRANSCRIPT_PATH" 2>/dev/null)" || return 0
-  else
-    probe="$(node "$lib" --transcript "$TRANSCRIPT_PATH" 2>/dev/null)" || return 0
-  fi
+  # One ladder, shared with the git probe — see `zensu_run_bounded`. This child carries
+  # the LARGER exposure of the two (the transcript path is host-supplied and may sit on
+  # network-backed storage), so it must never be the one left behind when the ladder
+  # gains an arm. The `2>/dev/null` applies to the wrapper and is inherited by the
+  # child it execs, which is why no redirection has to be threaded through it.
+  probe="$(zensu_run_bounded node "$lib" --transcript "$TRANSCRIPT_PATH" 2>/dev/null)" || return 0
   case "$probe" in
     'status=blocked '*) REVIEWER_DENIAL_STATUS="blocked"; REVIEWER_DENIAL_RAW="blocked" ;;
     'status=clear '*) REVIEWER_DENIAL_STATUS="clear"; REVIEWER_DENIAL_RAW="clear" ;;
@@ -446,6 +453,9 @@ reviewer_denial_note_path() {
 # clear is `rm -f` and the write republishes identical bytes under a fresh
 # timestamp — and preferable to the alternative of silently skipping it.
 reviewer_note_locked() {
+  # Same `set -u` + bash 3.2 hazard as `zensu_run_bounded`'s guard, and `return 0` IS the right
+  # direction here: this function's contract is that it never changes the Stop decision.
+  [ "$#" -gt 0 ] || return 0
   _tdd_locked_run "$STATE_FILE" "$@" 2>/dev/null && return 0
   "$@"
   return 0
@@ -1075,6 +1085,42 @@ if [ "$ADOPT_ELIGIBLE" = "true" ]; then
   fi
 fi
 
+# The ONE renderer of the Autopilot link flags. Two hand-authored copies existed —
+# same three variables, same `printf '%q'` quoting, same command shape — and their
+# guards had already drifted apart cosmetically (`[ -n "$INNER_BOUND_RUN" ]` against
+# `[ -n "${INNER_BOUND_RUN:-}" ]`), which is the fingerprint of a second authoring
+# rather than of a shared intent. Nothing held them together, so a change to the
+# quoting or to the flag names would have landed in one and not the other.
+#
+# It carries its OWN leading space and answers EMPTY when the run id is empty, so both
+# call sites append it unconditionally and neither needs a guard of its own.
+#
+# It takes the three values as PARAMETERS rather than reading the `INNER_BOUND_*`
+# globals. That is what makes it liftable: `hooks/post-review-tdd-delegate.sh` builds
+# the byte-identical triple from its own differently-named globals, and a function that
+# reads this file's variable names can never serve it. Moving this into `hooks/lib/` to
+# collapse that residual is NOT taken here — it is a second hook's change with its own
+# review — but the signature no longer stands in the way. THE TRIGGER, restated because the
+# first version fired on a formatting edit and bought nothing: a change to the SHAPE of
+# the flag sequence — a flag added, removed, renamed or reordered — or a third shell
+# renderer of the same triple. Re-indenting the delegate's line is not that.
+#
+# The two copies are no longer merely "pinned separately": C61 compares the delegate's
+# flag sequence against this renderer's, so a divergence in what `zensu-log.sh` parses
+# fails loudly. What is still unheld is the OPERAND quoting, which legitimately differs
+# between the two (conversions here, pre-quoted variables there). The remaining copy after that
+# would be `shapeCommand` in chain-recovery-v1.js, which is JS and structurally out of
+# reach of any shell function.
+#
+# Callers pass `${INNER_BOUND_*:-}`: the four are always written together today, so
+# reading an unset one is latent rather than live, but a `set -u` abort in the middle of
+# a Stop is not a failure mode worth leaving one edit away.
+zensu_autopilot_link_args() {
+  local run="${1:-}" attempt="${2:-}" chain="${3:-}"
+  [ -n "$run" ] || return 0
+  printf ' --autopilot-run %q --autopilot-attempt %q --chain-id %q' "$run" "$attempt" "$chain"
+}
+
 # Counts a TURN spent with an armed chain still at `implementing` and real source
 # changes in the tree, and past the configured bound says so once on stderr. It
 # never blocks: a long legitimate implementation genuinely spans many turns, so a
@@ -1094,28 +1140,63 @@ fi
 # second turn onward in any repository that tracks those artifacts, and the probe
 # would stop discriminating at all.
 zensu_impl_stop_nudge() {
-  local threshold count changed complete_cmd nudge_denial_attempt status_cmd
+  local threshold count changed complete_cmd nudge_denial_attempt status_cmd probe_rc
   # This runs AFTER outer_finish, which can emit a decision:"block" for a durable
   # Autopilot run on this very path. In that state the turn did not end, so
   # counting it would be wrong and saying "Stop is not blocked" would contradict
   # the decision already on stdout. Neither happens.
-  [ "${DECISION_EMITTED:-false}" = "true" ] && return 0
+  # An `if`, not `[ … ] && …`: this file states twice that the short-circuit form leaves a
+  # non-zero status on the false branch, and new code should not be the exception.
+  if [ "${DECISION_EMITTED:-false}" = "true" ]; then return 0; fi
+  # The FREE check comes first. `zensu_impl_stop_nudge_after` spawns node, and on a
+  # host with no git this function can never fire, so learning a threshold that will
+  # never be compared cost a process spawn at every turn end of every
+  # armed-but-incomplete chain — on a branch whose contract is to release
+  # immediately. Ordering only: no branch changes its verdict, because neither test
+  # reads anything the other writes.
+  command -v git >/dev/null 2>&1 || return 0
   threshold="$(zensu_impl_stop_nudge_after 2>/dev/null)" || return 0
   case "$threshold" in ''|*[!0-9]*) return 0 ;; esac
   [ "$threshold" -gt 0 ] 2>/dev/null || return 0
-  command -v git >/dev/null 2>&1 || return 0
   # No pipeline here: a `| head` would replace git's own exit status with head's,
   # so a missing repository would read as a clean tree instead of as a failure.
-  changed="$(
+  # The watchdog ladder lives in `zensu_run_bounded`, shared with the transcript
+  # probe. The command is spelled ONCE here: three arms each repeating this line meant
+  # the pathspec below existed in triplicate, and since the arms are mutually exclusive
+  # per host, a divergence between them could not fail behaviourally on any machine.
+  # A hand-rolled background-plus-poll watchdog was rejected as well — it adds latency
+  # to every counted Stop and leaves a temp file and a killed child on a path whose
+  # whole contract is to release immediately.
+  if changed="$(
     unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
-    if command -v timeout >/dev/null 2>&1; then
-      timeout 5 git --no-optional-locks -C "$PROJECT_ROOT" status --porcelain \
-        -- . ':(exclude).zensu' 2>/dev/null </dev/null
-    else
-      git --no-optional-locks -C "$PROJECT_ROOT" status --porcelain \
-        -- . ':(exclude).zensu' 2>/dev/null </dev/null
-    fi
-  )" || return 0
+    zensu_run_bounded git --no-optional-locks -C "$PROJECT_ROOT" status --porcelain \
+      -- . ':(exclude).zensu' 2>/dev/null </dev/null
+  )"; then
+    :
+  else
+    probe_rc=$?
+    # An INTERRUPTED probe is not a clean tree, and before this branch the two were the
+    # same silence. The watchdog made that reachable: a killed child exits 124, 137 or
+    # 143, and on stalled storage the tree may well be dirty. The counter-failure arms
+    # below say so for their own class of "measurement did not happen"; this is the same
+    # class on the input side.
+    #
+    # DISCRIMINATE ON THE STATUS, and only on those three. A first version fired on every
+    # non-zero exit and asserted the watchdog as the cause — which is wrong twice. `git
+    # status` also exits 128 for a directory that is not a repository at all, for
+    # `safe.directory` dubious ownership and for a corrupt index; nothing above this line
+    # establishes that `$PROJECT_ROOT` is inside a repository, so those are ordinary. And
+    # on a host with NEITHER watchdog — base macOS, measured — `zensu_run_bounded` runs
+    # the command unbounded, so the stated cause could never be true there for any
+    # failure. Every other status stays silent, which is the behaviour that was already
+    # there and the one C15's recorded decision covers.
+    case "$probe_rc" in
+      124|137|143)
+        echo "Zensu review chain: the worktree probe for the implementing-phase turn counter was interrupted by its watchdog, so this turn was neither counted nor reported on. That is not the same as a clean tree. Stop is not blocked." >&2
+        ;;
+    esac
+    return 0
+  fi
   [ -n "$changed" ] || return 0
   # Rendered for the same reason `complete_cmd` is, and stated here because the
   # counter-failure arms below shipped a BARE `zensu-log.sh --chain-status`: a flag
@@ -1136,6 +1217,27 @@ zensu_impl_stop_nudge() {
   # persisted counter intact, so that row keeps rendering the last recorded value
   # and the reader arrives at a row full of numbers having just been told it says
   # nothing. The comment three lines above had it right while the message did not.
+  #
+  # LOCK DOMAIN — a decision, not an oversight, written down so the next reader does
+  # not "fix" it. `tdd_increment_counter` reaches `_tdd_increment_counter_critical`
+  # directly, so this write holds only the CAS lock. The sibling counter on this same
+  # hook, `tdd_increment_stop_budget`, takes the EXTERNAL lease instead, so the
+  # workflow document has two writer classes that do not serialise against each
+  # other and this one joined the weaker domain. Taking the lease here was weighed and
+  # REJECTED, and the ground must be stated precisely because a first version of it was
+  # falsified by a line two calls earlier: `reviewer_denial_note_clear`, on this same
+  # statement, takes that external lease unconditionally — so this path is NOT lease-free
+  # and what is being weighed is a SECOND acquisition, not first contact. That second take
+  # would buy atomicity against a writer class nobody has demonstrated running concurrently
+  # with this Stop, and cost another contended acquisition on a branch whose contract is to
+  # release immediately. The durable answer, NAMED rather than taken here, is to hoist this
+  # increment INTO the lease the clear already holds, which removes the two-writer split
+  # instead of documenting it. The residual is
+  # accepted and named rather than hidden — a lease-only writer restoring its own
+  # snapshot would revert this count and move `revision`, the CAS token, backwards.
+  # The split predates this counter; what is new is only that a second writer joined
+  # the weaker side of it. The sibling can afford the lease because its own path
+  # BLOCKS, and this one cannot for exactly the same reason.
   if ! count="$(tdd_increment_counter "$SESSION_ID" implStopCount 2>/dev/null </dev/null)"; then
     echo "Zensu review chain: the implementing-phase turn counter could not be advanced for this session, so this notice has stopped measuring anything. The counter is stuck, not reset — the last recorded value stands and is now older than this turn. Read it with ${status_cmd}, which reports implStopCount whatever its value; the /zensu:doctor chain row is threshold-gated and shows no count until that recorded value reaches the bound. Stop is not blocked." >&2
     return 0
@@ -1160,16 +1262,11 @@ zensu_impl_stop_nudge() {
   # Rendered here rather than reusing LOG_COMMAND, which is assigned far below this
   # call site: a bare flag with no program is not a command the reader can run.
   complete_cmd="CLAUDE_PLUGIN_DATA=$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}") bash $(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh") --tdd-complete"
-  if [ -n "${INNER_BOUND_RUN:-}" ]; then
-    # Quoted the way the sibling INNER_BOUND_ARGS renderer quotes the same three
-    # values into the same command shape: they come from the workflow document,
-    # which the session can write, and this line is text a model is meant to run.
-    # All three spelled with the same `:-` the guard above uses. The four are
-    # always written together today, so this is latent rather than live — but a
-    # guard whose body does not honour its own precondition is the shape a later
-    # edit turns into a `set -u` abort in the middle of a Stop.
-    complete_cmd="${complete_cmd} --autopilot-run $(printf '%q' "${INNER_BOUND_RUN:-}") --autopilot-attempt $(printf '%q' "${INNER_BOUND_ATTEMPT:-}") --chain-id $(printf '%q' "${INNER_BOUND_CHAIN:-}")"
-  fi
+  # One renderer, no guard: `zensu_autopilot_link_args` is empty for a standalone
+  # chain and carries its own leading space. `INNER_BOUND_ARGS` cannot be borrowed
+  # here — it is assigned far below this call site — but its INPUTS are the same three
+  # variables, which is why the renderer takes THEM as parameters rather than the string.
+  complete_cmd="${complete_cmd}$(zensu_autopilot_link_args "${INNER_BOUND_RUN:-}" "${INNER_BOUND_ATTEMPT:-}" "${INNER_BOUND_CHAIN:-}")"
   # When the host permission layer refused this session's `zensu:code-reviewer`
   # spawn, the ordinary remedy below is INCOMPLETE — but an earlier revision
   # over-corrected and WITHHELD `--tdd-complete` outright, which was worse. Both
@@ -1462,10 +1559,7 @@ INNER_SELF_REVIEW_ENVELOPE=" "
 INNER_REVIEW_HEADERS="whose prompt starts with exactly two header lines — first 'PRE-MERGED FINDINGS (fan-out)', second 'REVIEW-TICKET: <ticket>'"
 INNER_REVIEW_SUFFIX=", followed by"
 if [ -n "$INNER_BOUND_RUN" ]; then
-  INNER_BOUND_RUN_Q="$(printf '%q' "$INNER_BOUND_RUN")"
-  INNER_BOUND_ATTEMPT_Q="$(printf '%q' "$INNER_BOUND_ATTEMPT")"
-  INNER_BOUND_CHAIN_Q="$(printf '%q' "$INNER_BOUND_CHAIN")"
-  INNER_BOUND_ARGS=" --autopilot-run ${INNER_BOUND_RUN_Q} --autopilot-attempt ${INNER_BOUND_ATTEMPT_Q} --chain-id ${INNER_BOUND_CHAIN_Q}"
+  INNER_BOUND_ARGS="$(zensu_autopilot_link_args "$INNER_BOUND_RUN" "$INNER_BOUND_ATTEMPT" "$INNER_BOUND_CHAIN")"
   INNER_ZERO_CHANGE_ARGS="${INNER_BOUND_ARGS} --outcome no-changes"
   INNER_ZERO_CHANGE_NOTE=" That terminus records 'no-changes' as this attempt's audited Autopilot outcome, so the durable run keeps a receipt that distinguishes it from a reviewed close."
   INNER_SELF_REVIEW_ENVELOPE=$' Carry this exact official three-line Autopilot envelope into the skill unchanged and exactly once:\n'"ZENSU-DELEGATED-CALLER: autopilot"$'\n'"AUTOPILOT-BINDING: run=${INNER_BOUND_RUN} attempt=${INNER_BOUND_ATTEMPT} chain=${INNER_BOUND_CHAIN}"$'\n'"AUTOPILOT-STAGE: ${INNER_BOUND_RETURN_STAGE}"$'\n'

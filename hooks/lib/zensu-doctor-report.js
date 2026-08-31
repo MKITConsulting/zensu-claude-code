@@ -71,6 +71,10 @@ var BAD = '❌';
 // Mirror of hooks/lib/zensu-config.sh zensu_pending_review_ttl_hours: the wrapper
 // passes the canonical value via ZDOC_TTL_HOURS; these apply only to a direct
 // (test/no-wrapper) invocation and must stay in lockstep with that getter.
+// PINNED by C57 in tests/structure/test-impl-stop-counter.sh, which derives both sides —
+// these two constants against the getter's own operands, through `getter_operand`. The pair
+// declared itself a mirror in prose and was pinned by nothing until the three duplicated
+// getters collapsed onto one call shape that a single extractor could read.
 var TTL_HOURS_FALLBACK = 6;
 var TTL_HOURS_MAX = 8760;
 // Mirror of hooks/lib/zensu-config.sh zensu_impl_stop_nudge_after (default 12,
@@ -82,12 +86,27 @@ var IMPL_STOP_NUDGE_FALLBACK = 12;
 // refuses `current >= 1000000` before incrementing, so a configured threshold of
 // exactly 1000000 could be reached once and never again — the notice firing a single
 // time while this row kept rendering off the frozen value.
-// PINNED, and by a different check from the default's: C14a compares the DEFAULT pair
-// (`IMPL_STOP_NUDGE_FALLBACK` against the getter's `12`), and C31 slices the getter's
-// own function body out of zensu-config.sh and compares BOTH literals against these
-// two. C31 derives each side from source rather than restating a number, so neither
-// literal can be edited alone — and it reads the getter's `n<=999999` out of the
-// function body, not out of the file, so an unrelated bound elsewhere cannot satisfy it.
+// PINNED, and by three checks with three different jobs: C14a and C31a compare the
+// DEFAULT pair (`IMPL_STOP_NUDGE_FALLBACK` against the getter's `12`), and C31 compares
+// the MAX pair. Each derives its side from source rather than restating a number, so
+// neither literal can be edited alone. `C31` names one comparison throughout this block.
+//
+// WHAT it derives them from moved, and the old spelling is named here because a
+// comment that sends a maintainer after bytes the code no longer carries is its own
+// defect. The three duplicated getters collapsed onto `_zensu_config_bounded_int`, so
+// `zensu_impl_stop_nudge_after` has no function body of its own any more — the bound
+// comparison lives in the shared helper as `n<=Number(process.argv[4])` and the value
+// travels as an operand of the one-line
+// `_zensu_config_bounded_int implStopNudgeAfter 12 0 999999` call.
+//
+// C31 and C31a read that call through the single `getter_operand` extraction, and they read
+// DIFFERENT operands: C31 takes the captured max (`999999`), C31a the captured default
+// (`12`). C14a compares the same default by RUNNING the getter in a subshell rather than
+// extracting an operand, which is why it is a separate check and not a third extraction.
+// Naming one operand for all of them was wrong in the first revision of this sentence, and
+// naming C29 among them was wrong in the second — C29 is a behavioural fallback check.
+// The extraction is anchored on the getter's own definition line, so an unrelated bound
+// elsewhere in that file cannot satisfy it.
 var IMPL_STOP_NUDGE_MAX = 999999;
 var CHAIN_ROW_LIMIT = 8;
 var NOTE_MAX_BYTES = 4096;
@@ -1731,7 +1750,11 @@ function chainRows(entries, nowMs, dirEntries, stateDir) {
   var blocked = [];
   var deadEnds = [];
   var foreignOpen = [];
-  var parkedImpl = [];
+  // A STRING, not a list. The push is gated on `entry.key === ownKey` and each entry
+  // carries a distinct key, so at most one chain can ever qualify — holding a single
+  // value puts that invariant in the type instead of in a comment defending an array
+  // that could only ever have one element.
+  var parkedImpl = '';
   // The row states the MEASURED magnitude, so the count has to survive the loop.
   // Rendering `implThreshold` instead made the sentence read "across at least 12
   // turns" at turn 300 — the bound, not the finding.
@@ -1801,7 +1824,38 @@ function chainRows(entries, nowMs, dirEntries, stateDir) {
         // is the exact contradiction the withholding was introduced to remove.
         // Qualifying instead is stable under both: a missing note costs the caveat,
         // never the remedy, and a planted one can only add a caveat.
-        parkedImpl.push(entry.session + ': ' + parkedCount + ' turns → ' + report.nextCommand);
+        // `report.nextCommand` arrives UNQUOTED, and what makes that safe is named here
+        // because a first version of this comment named the WRONG thing and was refuted
+        // in review. The bound is `autopilotLinkage` in chain-recovery-v1.js:
+        // `shapeCommand` only interpolates `runId` / `attempt` / `chainId` under
+        // `linkage === 'bound'`, which requires `isLinkId` on both ids —
+        // `/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/`, 1..128 characters, so no whitespace and no
+        // shell metacharacter — and an integer attempt in 1..999. Every other producer
+        // of `nextCommand` is a STATIC MODULE STRING: the two frozen tables, plus the
+        // `STALE_RECEIPT_CAVEAT` literal one branch concatenates onto a table value. So this row carries no unbounded
+        // dynamic text, and WIDENING `isLinkId` is what would open the channel.
+        //
+        // NOT the `entry.key === ownKey` gate above: that bounds only WHOSE document is
+        // read and would not stop a self-written run id if the character class were
+        // relaxed.
+        //
+        // And the Stop hook's `%q` is not evidence of a disagreement either — but state
+        // WHY correctly, because a first revision of this sentence said that path has "no
+        // `isLinkId` gate at all", and that is false. `tdd_chain_snapshot` in
+        // `zensu-tdd-phase.sh` carries a character-identical copy of the predicate and
+        // exits non-zero when either id fails it, and the Stop hook routes that failure to
+        // its blocking arm. So both paths gate; the `%q` is defence in depth over a HAND
+        // COPY of one predicate, not the only bound on an ungated read. That copy is the
+        // thing to know when widening: the class is written out in several places under
+        // `hooks/`, and at least one of them has already drifted (`zensu-autopilot-state.sh`
+        // spells the same class with a minimum length of 3). Widening `isLinkId` is a
+        // multi-site decision, not a one-file one.
+        //
+        // Quoting in `shapeCommand` as defence in depth would still be reasonable and is
+        // deliberately not taken here: its output is `NEXT_COMMAND`, pinned by name in
+        // chain-recovery-v1.test.js, test-chain-recover.sh and skills/recover-chain's
+        // shape table, so it is its own change with its own pin updates.
+        parkedImpl = entry.session + ': ' + parkedCount + ' turns → ' + report.nextCommand;
       }
     }
     // Reached only by a chain no row above already named. A wedged or dead-end
@@ -1846,11 +1900,7 @@ function chainRows(entries, nowMs, dirEntries, stateDir) {
   // and they accumulate zero here. The shape alone is never enough either — it
   // is what every legitimately mid-implementation chain looks like — so the
   // count is what separates working from parked.
-  // Singular by construction: the push is gated on `entry.key === ownKey` and each
-  // entry carries a distinct key, so at most one chain can ever qualify. Rendering
-  // a count here would invite a later reader to widen the filter believing the row
-  // already supports several.
-  if (parkedImpl.length) {
+  if (parkedImpl !== '') {
     // Names ONE exit and names its preconditions with it. `--tdd-complete` refuses
     // without an edit-landing receipt and without a usable Requirements table, and
     // both gates arm on the same dirty tree this row requires, so naming the verb
@@ -1889,7 +1939,7 @@ function chainRows(entries, nowMs, dirEntries, stateDir) {
           // "lift that permission" to the chain row.
           + ' You have to apply this yourself — ' + SELF_PERMISSION_BAR + '.'
         : '')
-      + ' ' + truncatedList(parkedImpl));
+      + ' ' + parkedImpl);
   } else if (implThreshold >= IMPL_STOP_NUDGE_MAX) {
     // The value that reaches this arm is the getter's own MAXIMUM, and nothing stronger
     // should be claimed about it. A first wording said it was "at or above the counter's
@@ -2082,11 +2132,12 @@ function classifyDenialNote(parsed, allowed, ttl, nowMs) {
   return 'live';
 }
 
-// Does THIS session still stand refused? The implementing-turns row asks, because
-// while a live note stands it must not print the completion verb: the Stop notice
-// that minted the note names that verb only with the refusal stated beside it, and
-// a bare recommendation here is the second surface contradicting the first on one
-// chain. The workflow-document sibling check `reviewerDenialRows` applies is not
+// Does THIS session still stand refused? The implementing-turns row asks so it can
+// QUALIFY its remedy — never to withhold it. State it that way: an earlier revision
+// DID withhold the completion verb while a live note stood, and this comment still
+// described that behaviour after the code reversed it. The row now always names the
+// command and adds a caveat when a note records a refusal; the reasoning for that
+// reversal, and the two defects withholding caused, are recorded at the row itself. The workflow-document sibling check `reviewerDenialRows` applies is not
 // repeated — the key reaching this function came from a validated document, so the
 // sibling exists by construction.
 // `ttl` is THREADED, not re-read. `chainRows` already resolves it for its own use, and

@@ -1718,8 +1718,8 @@ read through one `boundedEnvInt`, so absent and blank take the fallback and only
 integer wins. `ttlHours()` has THREE call sites — this row, the pending-review verdict and
 `reviewerDenialRows` — and a FOURTH consumer of the resolved value, `ownRefusalNoteLive`,
 which takes it as a parameter rather than re-reading it. Word it that way: counting it as a
-fourth CALL SITE double-counts the read this row already performs. That fourth consumer
-which decides whether the implementing-turns row carries its refusal caveat. That last one
+fourth CALL SITE double-counts the read this row already performs. That fourth consumer is
+what decides whether the implementing-turns row carries its refusal caveat. That last one
 carries a consequence the discussion above does not otherwise cover: at the documented `0`,
 `classifyDenialNote` never returns `stale`, so a note of any age keeps qualifying that row.
 
@@ -1803,7 +1803,8 @@ carries a consequence the discussion above does not otherwise cover: at the docu
   original finding, in past tense.** An OWN chain parked at `implementing` USED TO render at
   `OK`, and that is the shape a session lands in when it DECLINES the review chain rather than
   fails it.
-  `hooks/stop-chain-enforcer.sh:951` releases Stop unconditionally while `SESSION_IMPL_COMPLETE`
+  `hooks/stop-chain-enforcer.sh`'s `SESSION_IMPL_COMPLETE` early return releases Stop
+  unconditionally while that flag
   is not `true`, so a session that arms `--tdd-begin`, does the work and never runs
   `--tdd-complete` is never asked for a reviewer: no directive, no cap, and no bypass-ledger
   entry — the ledger records gate ESCAPES and no gate was ever reached. `chainShape` then
@@ -1826,8 +1827,14 @@ carries a consequence the discussion above does not otherwise cover: at the docu
   shape of a model working alongside an undeclared gate rather than through it. A machine that
   is off counts zero, a paused session counts zero, a holiday counts zero, and only continued
   work past the open gate counts up. The mechanism already exists in this same file for the
-  phase one step later: `hooks/stop-chain-enforcer.sh:954-956` counts Stop blocks against
-  `autoFixMaxRounds + 3` rather than against a clock. What is missing is the equivalent counter
+  phase one step later: the `CAP` release in `hooks/stop-chain-enforcer.sh` counts Stop blocks
+  against `autoFixMaxRounds + 3` rather than against a clock.
+  **Anchor by SYMBOL here, never by line number.** Both references above once carried one
+  (`:951` and `:954-956`) and both went stale in the same commit that inserted
+  `zensu_impl_stop_nudge` above them — a line number in prose is a claim nothing recomputes,
+  and no reader can tell a correct one from a drifted one without opening the file. C41 in
+  `tests/structure/test-impl-stop-counter.sh` forbids the FORM rather than pinning today's
+  numbers, which would only reset the clock on the same defect. What is missing is the equivalent counter
   for the implementing phase plus a workflow-state slot to hold it — which under §"Runtime
   Lineage" is a schema change and therefore a `minor`, so it should travel with a schema change
   that is landing anyway rather than buy a release of its own. The nudge must stay ADVISORY and
@@ -1875,7 +1882,8 @@ it fired during ordinary work — the implementing phase of this repository's ow
 more than five turns with a dirty tree routinely, including the chain that built this
 feature — which is exactly the "trained away within a day" failure the rejections below
 exist to prevent. 12 buys headroom over a long honest implementation while still being far
-short of a parked chain. Re-derive it if anyone ever measures the real distribution. `/zensu:doctor` renders the same finding as a `WARN` chain row for chains this
+short of a parked chain. Re-derive it if anyone ever measures the real distribution.
+`/zensu:doctor` renders the same finding as a `WARN` chain row for chains this
 session owns. It exists because the release at the `SESSION_IMPL_COMPLETE != "true"` branch
 is unconditional, so a chain that never runs `--tdd-complete` is asked for no reviewer at
 all — no directive, no cap, and no bypass-ledger entry, because the ledger records gate
@@ -1933,7 +1941,13 @@ cleared the note and silently restored the bare recommendation. Qualifying is st
 both: a missing note costs the caveat, never the remedy, and a planted one can only add a
 caveat.
 
-**A THIRD consequence of the same asymmetry, and it is a CONFIGURATION one:** the mint sits past the threshold comparison while the clear is unconditional, so `hooks.implStopNudgeAfter: 0` — and every turn below the threshold — deletes a refusal note without re-recording it. The switched-off `✅` row says only that no chain was measured; it does not say the refusal diagnostic stopped persisting. Recorded in the `implStopNudgeAfter` row rather than fixed, because moving the mint above the comparison would persist a diagnostic for a check the operator switched off.
+**A THIRD consequence of the same asymmetry, and it is a CONFIGURATION one:** the mint sits
+past the threshold comparison while the clear is unconditional, so `hooks.implStopNudgeAfter:
+0` — and every turn below the threshold — deletes a refusal note without re-recording it. The
+switched-off `✅` row says only that no chain was measured; it does not say the refusal
+diagnostic stopped persisting. Recorded in the `implStopNudgeAfter` row rather than fixed,
+because moving the mint above the comparison would persist a diagnostic for a check the
+operator switched off.
 
 **KNOWN GAP, the residual of exactly that asymmetry.** `reviewer_denial_note_clear` runs
 unconditionally at the impl-not-complete exit while the mint sits behind the nudge's own gates,
@@ -1949,8 +1963,10 @@ session keeps ending dirty turns past the bound. Scope it that way rather than c
 unreachable outright: once the session stops producing such turns the note is no longer
 re-stamped and both arms apply normally — which is precisely the case the reaper exists for.
 The conclusion is unchanged, because the window that matters is the one where the branch is
-firing: while it fires, there is no recency bound on this path. The TTL is the only recency control this feature has — the probe
-itself has none — so on this path there is no recency bound at all. **Name the route, because two successive drafts of this sentence named the wrong one.**
+firing: while it fires, there is no recency bound on this path. The TTL is the only recency
+control this feature has — the probe
+itself has none — so on this path there is no recency bound at all. **Name the route, because
+two successive drafts of this sentence named the wrong one.**
 Ordinary convergence does not reach it — `reviewer-spawn-denial-v1.js` derives its status from
 the LAST reviewer result in the tail, so a spawn that succeeds after the refusal flips the
 verdict to `clear`. But neither does the cap-release or self-review route, which the previous
@@ -1959,15 +1975,47 @@ the `SESSION_IMPL_COMPLETE != "true"` exit, and a capped or self-reviewing chain
 `implComplete === true` and never reaches it. What actually reaches it is what the probe's
 selector admits: ANY refused `zensu:code-reviewer` spawn anywhere in the scanned tail while
 `implComplete` is false — including one from a flow that never armed a chain at all, since
-`/zensu:cover` orders that spawn and states it never runs `--tdd-begin`. The CHAIN never spawns a reviewer at `implementing`, so the self-heal is not
+`/zensu:cover` orders that spawn and states it never runs `--tdd-begin`. The CHAIN never spawns
+a reviewer at `implementing`, so the self-heal is not
 GUARANTEED — but it is not impossible either, and the sentence before this one is why: a flow
 like `/zensu:cover` can spawn one without arming a chain, and a successful spawn there does
 flip the verdict to `clear`. Say "not guaranteed", never "cannot occur", and the note is re-stamped
-every dirty turn end. That is WIDER than either earlier draft, not narrower. NOT fixed here, and the cheap fix is on record rather than left to
+every dirty turn end. That is WIDER than either earlier draft, not narrower. NOT fixed here,
+and the cheap fix is on record rather than left to
 be rediscovered: read the existing note's `detectedAtMs` before the clear and carry it forward on
 a re-mint with an unchanged `kind`, so the TTL ages the REFUSAL rather than the turn.
 
-**Sites that move together:** `WORKFLOW_INTEGER_EXTENSIONS` in `session-control-core-v1.js`;
+**Sites that move together:** `zensu_run_bounded` in `hooks/lib/zensu-bounded-run.sh`, the ONE
+watchdog ladder for the two Stop-path children that read outside the process — the `git status` this
+counter runs and the refused-spawn transcript read. They carried hand-copied ladders and the
+`gtimeout` arm reached only one of them; `C49` and `C56a` pin each call site by name, `C42`/`C42a`
+pin the ladder's own arms and their order, `C56` forbids a `return` in the arm positions its
+pattern can see and `C56d` requires an unwrapped `"$@"` to survive in the body — neither reads
+ARM POSITION, so do not restate them as pinning "the last arm". It LIVES in `hooks/lib/` because a third consumer already exists —
+`user-prompt-context-nudge.sh` reads a host-supplied transcript path with no watchdog at all —
+and a helper defined in a leaf hook cannot serve it. Three review rounds asked for that move
+before it was taken. **What is still owed at that third site is the WRAPPING**, one `source`
+line plus one call, left to its own review because it alters a second hook's behaviour and
+belongs to that hook's suite. Its exposure is also WIDER than the Stop hook's and the comment
+there now says so: that reader opens with a plain `openSync` after a shell `[ -f ]` in another
+process, where the Stop-path reader hardens the open, so a FIFO in the TOCTOU window blocks it.
+Both the watchdog and the hardened open are owed there. Then `_zensu_config_bounded_int` in
+`zensu-config.sh`, which is now
+the sole body behind `zensu_impl_stop_nudge_after` AND behind `zensu_autofix_max_rounds` and
+`zensu_pending_review_ttl_hours` — so a change to it reaches the auto-fix budget and the
+pending-review TTL, two features documented in other sections entirely. The three getters are
+one-line calls whose four operands must stay positional literals, because `impl_getter_operand`
+in `tests/structure/test-impl-stop-counter.sh` reads the default and the max straight out of
+the implementing-turns call for C29 and C31. The extraction is `getter_operand`, parameterized
+on getter and key, and it reaches ALL THREE keys — say three, not two: the two CONSTANT-MIRROR
+pins cover two of them (`implStopNudgeAfter` through C29/C31/C31a, and `pendingReviewTtlHours`
+through **C57**, which pins `TTL_HOURS_FALLBACK` / `TTL_HOURS_MAX` in the doctor renderer
+against the TTL getter's own operands — a pair that declared itself a mirror in prose and was
+pinned nowhere until the collapse made one extractor able to hold it), and **C58** reads every
+getter's operands through the same extraction to drive its bound matrix. So `autoFixMaxRounds`
+has no renderer mirror, but its call line is bound by the positional-literal contract too: an
+operand that stops being readable there fails C58. Then
+`WORKFLOW_INTEGER_EXTENSIONS` in `session-control-core-v1.js`;
 the THREE closed counter key sets in `zensu-tdd-phase.sh` (`tdd_get_counter`,
 `tdd_increment_counter`, and the `names` map in `_tdd_increment_counter_critical`, transition
 token `impl_guard`); **the EIGHT reset sites**, which `delete` the key rather than zeroing it,
@@ -1991,7 +2039,7 @@ on a symmetry that does not exist: an absent key reads as `0` in all three reade
 `deferredReviewStateIsIdle` in that
 same file is deliberately NOT extended: it tests `stopBlockCount === 0`, and an absent key is
 not `0`, so adding this one would make every reset chain read as non-idle.
-`zensu_impl_stop_nudge_after` in `zensu-config.sh` against `IMPL_STOP_NUDGE_FALLBACK`
+Then `zensu_impl_stop_nudge_after` in `zensu-config.sh` against `IMPL_STOP_NUDGE_FALLBACK`
 / `IMPL_STOP_NUDGE_MAX` in `zensu-doctor-report.js`, which are a hand-copy of its default and
 bounds; and the `ZDOC_IMPL_STOP_NUDGE_AFTER` export in `zensu-doctor.sh` against
 `implStopThreshold` — that file sources `zensu-config.sh` ONCE for both getters, and the count
@@ -2015,9 +2063,16 @@ state the module exists to detect. An installation older than v0.18.2 therefore 
 ordinary notice, exactly as that section records for its own surfaces, and nothing surfaces
 the skew. The Stop hook is the ONE surface that still hand-authors the remedy, because the module is
 not loaded there — so the bound `--tdd-complete` spelling exists in exactly TWO places,
-`shapeCommand` and `complete_cmd`. `INNER_BOUND_ARGS` in the same hook renders the identical
-flag TRIPLE but only ever onto `--chain-done`, so it shares the spelling and not the verb;
-do not read it as a third `--tdd-complete` renderer. §"Requirements-Table Gate" keeps the
+`shapeCommand` and `complete_cmd`. `INNER_BOUND_ARGS` in the same hook carries the identical
+flag TRIPLE but only ever onto `--chain-done`, so it shares the ARGUMENTS and not the verb;
+do not read it as a third `--tdd-complete` renderer. Since the round that consolidated them
+the two no longer share a spelling either — they share an IMPLEMENTATION,
+`zensu_autopilot_link_args`, which is the single SHELL renderer of that triple and is pinned
+at exactly one site by `C45`. **That pin is file-scoped and the contract is not:**
+`hooks/post-review-tdd-delegate.sh` builds the same string from its own `AUTOPILOT_*`
+globals, and `hooks/lib/chain-recovery-v1.js`'s `shapeCommand` builds it in JS, where a
+shell function is structurally unreachable. Two residual copies, named here rather than
+implied by a claim of oneness. §"Requirements-Table Gate" keeps the
 tree-wide roster of bound `--tdd-complete` spellings — consult that rather than a count here.
 **A BLANK value falls back rather than disabling** — `Number('')` is `0`,
 which passes the `>= 0` bound, so treating blank as absent is what keeps a wrapper fault from
@@ -2058,8 +2113,8 @@ directory able to delete the row's only remedy, and a single clean-tree Stop cle
 while the row still renders off the persisted counter. The liveness rule is shared, not copied:
 `classifyDenialNote` returns `live|stale|rejected|missing` so `reviewerDenialRows` keeps its
 three buckets while `ownRefusalNoteLive` tests for one, and `denialKindsAllowed` is the single
-module load. `C27n` pins the mint; `C35pre`/`C35`/`C35s` pin the un-noted, live-note and
-stale-note arms, ALL THREE of which require the command to be present.
+module load. `C27n` pins the mint; `C35pre`/`C35`/`C35s`/`C35r` pin the un-noted, live-note,
+stale-note and shape-rejected arms, ALL FOUR of which require the command to be present.
 
 **`REVIEWER_SPAWN_ALLOW_RULE` is module-scope for an ORDERING reason, not a style one.** Its two
 consumers sit on opposite sides of the file: `DENIAL_RULE` in the blocked-Stop branch, and the
@@ -2072,11 +2127,16 @@ settings path, for the reason §"Host-Refused Reviewer Spawn" gives.
 writes a plan and a log there unconditionally, so in any repository that tracks those
 artifacts — which this repo's own artifact policy encourages — every chain would read as
 dirty from its second turn and the predicate would stop discriminating. The probe is
-`timeout`-bounded WHEN `timeout` EXISTS — the unqualified form stood here eighty lines above
-its own correction in the gap list, and `timeout` is absent on base macOS and some Git Bash
-installs, where the fallback runs unbounded. The SAME conditional applies to a second
+watchdog-bounded WHEN a watchdog EXISTS — the unqualified form stood here eighty lines above
+its own correction in the gap list. The ladder is `timeout`, then `gtimeout` (the spelling a
+Homebrew coreutils install puts on PATH), then unbounded; on base macOS NEITHER exists, so
+there the last arm is what runs. The SAME conditional applies to a second
 child: the refused-spawn branch puts the transcript probe on this path too, and that read has
-no deadline on the same hosts. **State the CRITERION, not an ordinal — an enumeration here was written as
+no deadline on the same hosts. It is the same conditional LITERALLY now — both children call
+`zensu_run_bounded`, which exists because the arm added to one of two hand-copied ladders
+was missing from the other, and the one left behind was the child whose own comment records
+the LARGER exposure (a host-supplied transcript path that may sit on network-backed storage).
+**State the CRITERION, not an ordinal — an enumeration here was written as
 "a THIRD child" and was already short by one on the day it landed.** EVERY `node` child this
 path spawns is unbounded on hosts without `timeout`, and the TWO the lease adds carry no
 `timeout` guard on ANY host: the denial-note writer and the reaper's own scan. The counter is
@@ -2088,6 +2148,25 @@ git's exit status with `head`'s and turn a missing repository into a clean tree.
 THREE-variable `GIT_*` scrub rather than `_tc_git`'s thirteen, deliberately: this probe gates
 an advisory, not a refusal, and the finding proposing the wider list was judged a false
 positive on that ground.
+
+**SEVEN checks in `tests/structure/test-impl-stop-counter.sh` grade THIS FILE, and the
+coupling fires in the UNOBVIOUS direction** — the shape §"Gate-Disable Prefixes" records
+for G12 and §"Session Lineage Ledger" for its own two. An ordinary CLAUDE.md prose edit
+reddens a suite named for the implementing-turns counter, and nothing points at the remedy
+from the side that changes. They are: `C41`, which forbids a `<file>:<line>` source anchor
+ANYWHERE in this file and is filename-independent, so a source filename followed by a colon
+and a line number trips it in any section — including in a sentence explaining the rule, which
+is how this paragraph first turned it red; `C42b`, which requires the word `gtimeout`
+somewhere in the file; `C51`, `C52` and `C59`, which require the literals `zensu_autopilot_link_args`,
+`_zensu_config_bounded_int` and `zensu_run_bounded`, so renaming any of the three shared owners
+without amending this section turns them red; `C53`, which
+extracts the PARAGRAPH containing `The SAME conditional applies to a second` and requires
+`gtimeout` inside it — the slice itself spans lines, so rewrapping the paragraph is safe, but
+that ANCHOR SENTENCE must stay unbroken on one line or the slice comes back empty, and moving
+it to another paragraph is not safe either; and `C39`, which is the one that grades PROSE
+rather than a symbol — it requires this file to carry the emitted `threshold-gated` clause as
+many times as it carries that clause's lead-in, so rewording or dropping that sentence here
+reddens it, with the least self-explanatory failure text of the seven.
 
 **Operator-facing accounts that must move with it:** the `implStopNudgeAfter` row AND the
 `stop-chain-enforcer.sh` row in `docs/configuration.md`, discipline patch 13 in
@@ -2114,7 +2193,40 @@ recommendation stays `minor` anyway: the author of a change is the wrong party t
 own carve-out, and this file records that both existing carve-outs survived on argument rather
 than on their author's say-so.
 
+**The verdict is about the RELEASE, not about any single review round, and saying so matters
+because a reviewer walked a later round's file list against §"Runtime Lineage" and correctly
+derived `patch` from it.** The field lands in `WORKFLOW_INTEGER_EXTENSIONS`
+(`session-control-core-v1.js`) and the three counter key sets (`zensu-tdd-phase.sh`); a fix
+round that touches neither of those files changes no persisted shape and would score `patch`
+on its own. Score the verdict against the whole diff the release ships — here, everything
+since the branch point — never against the working-tree diff of the round in front of you.
+
 **Known gaps, accepted and named:**
+
+- **The doctor row's remedy is not RUNNABLE, while the Stop surface's is.** The row
+  interpolates `report.nextCommand`, which the owning module renders as a bare
+  `zensu-log.sh --tdd-complete …` — no interpreter, no path, no `CLAUDE_PLUGIN_DATA`. The
+  Stop hook renders the same verb in full, for the reason its own comment gives: a flag with
+  no program is not a command the reader can run. Taking the command from the owning module
+  was the right dependency direction and the runnability gap travelled with it. The fix is to
+  prefix module-supplied `zensu-log.sh` spellings in the RENDERER — leaving `NEXT_COMMAND`
+  alone, since the module cannot know the plugin root — and it belongs to all four chain rows
+  rather than this one, which is why it is not taken inside a change set already five review
+  rounds deep.
+- **The increment joined the WEAKER lock domain, deliberately.** `tdd_increment_counter`
+  reaches `_tdd_increment_counter_critical` directly, so this write holds only the CAS lock,
+  while the sibling counter on the same hook, `tdd_increment_stop_budget`, takes the EXTERNAL
+  lease. The document therefore has two writer classes that do not serialise against each
+  other. Taking the lease here was weighed and REJECTED: it is contended precisely on a path
+  whose contract is to release immediately, so buying atomicity against a writer class nobody
+  has demonstrated running concurrently with this Stop would trade a real every-turn latency
+  regression for a hypothetical lost advisory count. The residual is that a lease-only writer
+  restoring its own snapshot could revert this count and move `revision`, the CAS token,
+  backwards. The split PREDATES this counter; what is new is that a second writer joined the
+  weaker side of it. The sibling can afford the lease because its own path BLOCKS, and this
+  one cannot for the same reason. `C44` pins that the decision stays recorded at the call site
+  and `C46` that the `docs/configuration.md` row does not lend it `stopBlockCount`'s
+  atomicity qualifier.
 
 - **The stated packaging condition was NOT met.** The design note asks that the schema change
   travel with another one that is landing anyway; none is. It buys a `minor` of its own.
@@ -2172,13 +2284,22 @@ than on their author's say-so.
   any value the counter will not reach in a real session still suppresses the row silently
   on both surfaces without saying so — a threshold of 5000 is as effective an off-switch as
   999999 and discloses nothing. Say it that way, never as a numeric RANGE: the default is 12
-  and the row renders there, so "every value from 1 to 999998" was false. Keying BOTH surfaces on reachability rather than on two literals is the remaining
+  and the row renders there, so "every value from 1 to 999998" was false. Keying BOTH surfaces
+  on reachability rather than on two literals is the remaining
   fix. **Do not read the new row as closing this bullet.**
-- **The `timeout` fallback is unbounded.** When `timeout` is absent — base macOS and some Git
-  Bash installs, the premise the sibling transcript probe states in its own comment — the same
-  `git status` runs with no deadline on the Stop path. The degrade is fail-open through the
-  existing `|| return 0`, and a portable watchdog was judged out of proportion for an advisory;
-  named here rather than left to be discovered.
+- **The watchdog fallback is unbounded, and on base macOS the fallback is the DEFAULT.** The
+  ladder probes `timeout`, then `gtimeout` (the Homebrew coreutils spelling), then runs
+  `git status` with no deadline at all. MEASURED on the maintainer's own host: neither binary
+  exists on base macOS, so the unbounded arm is not an edge case there — it is what runs.
+  **Do not describe `|| return 0` as the mitigation.** It tests an EXIT STATUS, so it degrades
+  a git that returns and can do nothing about one that hangs, which is the only failure a
+  watchdog exists for; an earlier wording here named it as though it covered the hang. Two
+  fixes were weighed and both rejected, so this stays a stated bound rather than a TODO:
+  making the probe inert without a watchdog would switch the whole diagnostic off on exactly
+  the platform it was built for, and a hand-rolled background-plus-poll watchdog adds latency
+  to every counted Stop plus a temp file and a killed child on a path whose contract is to
+  release immediately. `C42`/`C42a`/`C42b` in `tests/structure/test-impl-stop-counter.sh` pin
+  the ladder and hold this bullet against it.
 - **The probe is defeated by a mid-run commit and is scoped to the project subtree.** A chain
   that commits each turn measures a clean tree and is never counted — the same accepted hole
   §"Requirements-Table Gate" records for `--tdd-complete`. And `-- .` under `-C "$PROJECT_ROOT"`
@@ -2824,6 +2945,17 @@ renderer keeps no private copy), the ticket issuer, and the rearm writer
 `REARM_MARKER_KEYS` from here) — adding a receipt field or a return stage in the writer
 alone would make every receipt it mints classify as stale and wedge the chain permanently.
 
+`isLinkId` carries a SECOND obligation that is easy to miss from this roster, and it is not
+about the receipt: `shapeCommand` interpolates `autopilotRunId`, `autopilotAttempt` and
+`chainId` into a command string UNQUOTED, and the only thing that makes that safe is that
+`autopilotLinkage` reaches it solely under `linkage === 'bound'`, which requires `isLinkId` on
+both ids. Consumers relay `nextCommand` verbatim — the `/zensu:doctor` chain rows print it as a
+remedy to run — so WIDENING that character class and this interpolation must be re-decided
+together. The class is also HAND-COPIED: `tdd_chain_snapshot` in `zensu-tdd-phase.sh` spells it
+character-identically, and `zensu-autopilot-state.sh` already spells it with a different minimum
+length, so a widening is a multi-site decision. `chain-recovery-v1.test.js` pins the shell
+metacharacters against both interpolated ids.
+
 An eighth place hardcodes the same receipt schema independently: the `reviewRearm` validator
 in `hooks/lib/session-control-core-v1.js` rejects the ENTIRE workflow document when the key
 set does not match, which fails every hook closed — strictly worse than a wedged chain. A
@@ -3119,8 +3251,11 @@ Ten things are coupled and must move together:
   rows — `docs/tdd-manager-workflow.md` §"The proactive counterpart, before any
   chain wedges" is the third account and is NOT covered by that pin.
 - **Every row that INSTRUCTS a settings edit carries `SELF_PERMISSION_BAR`**, and
-  all five call sites consume it — the exposure row, the reactive refused-spawn row,
-  the deny row, the ask row and the could-not-judge row. The two that previously
+  all SIX call sites consume it — the exposure row, the reactive refused-spawn row,
+  the deny row, the ask row, the could-not-judge row, and the refusal caveat the
+  implementing-turns row appends when a live note records a refused spawn. That sixth
+  arrived with the turn counter and this census was left at five for a round, which is
+  the drift the enumeration exists to prevent. The two that previously
   spelled the sentence inline now consume the constant with their emitted bytes
   unchanged, which is what keeps P1be and P1qr green. A shared constant with an
   unconsumed copy beside it is worse than either honest duplication or one source,
@@ -3451,7 +3586,7 @@ yields — they agree by construction. Honoring an override would write the note
 §"Implementing-Phase Turn Counter" needed the same predicate to decide whether its chain row
 carries a refusal caveat; `ownRefusalNoteLive` is NOT an extraction but a new second consumer
 built on them, so the pre-existing `reviewerDenialRows` pins do not cover it — its only coverage
-is `C35pre`/`C35`/`C35s` in `tests/structure/test-impl-stop-counter.sh`. A change to the note schema therefore
+is `C35pre`/`C35`/`C35s`/`C35r` in `tests/structure/test-impl-stop-counter.sh`. A change to the note schema therefore
 reaches a row in a different feature; the verdict is a WORD rather than a boolean precisely so
 the counting consumer keeps its three buckets while the qualifying one tests for `live`.
 

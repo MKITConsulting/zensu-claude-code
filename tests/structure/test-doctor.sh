@@ -850,7 +850,11 @@ fi
 # relays; the unqualified form is a false statement about review coverage, because a flow like
 # /zensu:cover spawns a reviewer without arming a chain. Extracted from the renderer and
 # required in the skill, normalised for case and line wrapping the way C39 does.
-P1MT5_PHRASE="$(grep -o 'the review chain has not asked for a reviewer' "$REPORT" | head -1)"
+# The pattern carries a `[a-z ]*` segment and the extracted side is lowercased, matching
+# C39. A fixed whole-phrase needle tracked no reword at all: any change to the sentence
+# emptied the extraction and failed P1mt5pre instead of comparing the NEW wording against
+# the skill, which is the drift this pin exists to catch.
+P1MT5_PHRASE="$(grep -o 'the review chain has[a-z ]*asked for a reviewer' "$REPORT" | head -1 | tr 'A-Z' 'a-z')"
 [ -n "$P1MT5_PHRASE" ] \
   && check "P1mt5pre the row's scoped opening was located in the renderer, so the comparison is not vacuous" PASS \
   || check "P1mt5pre the row's scoped opening was located in the renderer, so the comparison is not vacuous" FAIL
@@ -865,12 +869,17 @@ fi
 # never teach the zero-change terminus, which from shape `implementing` is the
 # unqualified no-ticket terminus. Pin it on both carriers.
 # EXTRACTED, not windowed. `-A 8` was written when the row was eight lines long; the
-# statement now runs from its `line(WARN,` to the `truncatedList(parkedImpl))` append,
-# and the refusal caveat added between them sat OUTSIDE the window — so a `--chain-done`
-# introduced there would have passed. The slice is taken between the two anchors and
-# its emptiness is checked first, because an anchor that stops matching turns a
-# negative assertion into one that cannot fail.
-P1MT3_ROW="$(awk '/line\(WARN, .chain: this session owns a chain/{f=1} f{print} f&&/truncatedList\(parkedImpl\)\)/{exit}' "$REPORT")"
+# statement runs from its `line(WARN,` to the `parkedImpl` append, and the refusal
+# caveat added between them sat OUTSIDE the window — so a `--chain-done` introduced
+# there would have passed. The slice is taken between the two anchors.
+#
+# The END anchor was `truncatedList(parkedImpl))` and moved when `parkedImpl` stopped
+# being a one-element array. Note what that cost: the emptiness control PASSED, because
+# a stale end anchor does not empty the slice — it runs it to end of file, which swept in
+# a `--chain-done` from an unrelated row and turned the negative assertion red. So the
+# control guards the START anchor only; a stale END anchor fails loudly here instead,
+# and both directions are the reason this is a slice rather than a window.
+P1MT3_ROW="$(awk '/line\(WARN, .chain: this session owns a chain/{f=1} f{print} f&&/\+ parkedImpl\);/{exit}' "$REPORT")"
 if [ -z "$P1MT3_ROW" ]; then
   check "P1mt3pre the implementing-turns row statement was located, so the scan is not vacuous" FAIL
 else

@@ -65,6 +65,23 @@ STATE_DIR="$ZENSU_PROJECT_ROOT/.zensu/state"
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 STATE_FILE="${STATE_DIR}/context-nudge-${SESSION_ID}.txt"
 
+# UNBOUNDED, and named here so the obligation has an observer where the edit happens.
+# `$TRANSCRIPT` is host-supplied and lives outside the project root, so it can sit on
+# stalled or network-backed storage while this runs with no deadline above it.
+#
+# The ladder that bounds the Stop hook's equivalent children now lives in
+# `hooks/lib/zensu-bounded-run.sh` and is reachable from here with one `source` line;
+# wrapping this spawn is a one-line change deliberately left to its own review, because it
+# alters this hook's behaviour and belongs to this hook's own suite. Do not hand-copy the
+# ladder — source it.
+#
+# STATE THE EXPOSURE HONESTLY, because a first version of this comment called it "the same
+# exposure" the Stop hook bounds, and it is WIDER. That reader hardens its open — NUL
+# rejection, an `lstat` regular-file test before opening, `O_NOFOLLOW|O_NONBLOCK`, an
+# `fstat` re-check — which is why the Stop hook's residual narrows to a regular file on
+# stalled storage. This one opens with a plain `openSync(path, "r")` after a shell `[ -f ]`
+# in a different process, so a FIFO planted in the TOCTOU window blocks it outright. Both
+# the watchdog and the hardened open are owed here; neither is taken in this change set.
 TRANSCRIPT="$TRANSCRIPT" WINDOW="$WINDOW" THRESHOLD="$THRESHOLD" STATE_FILE="$STATE_FILE" node -e '
   const fs = require("fs");
   try {

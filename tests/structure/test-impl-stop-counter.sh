@@ -21,6 +21,7 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 REPORT="$PLUGIN_DIR/hooks/lib/zensu-doctor-report.js"
+BOUNDED_LIB="$PLUGIN_DIR/hooks/lib/zensu-bounded-run.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -31,6 +32,31 @@ check() {
 
 command -v node >/dev/null 2>&1 || { echo "SKIP: node unavailable"; exit 0; }
 command -v git  >/dev/null 2>&1 || { echo "SKIP: git unavailable"; exit 0; }
+
+# ONE extraction of a shell function body from the hook, and it is defined up here
+# because its three former call sites are hundreds of lines apart. They had drifted
+# into three different awk spellings — one with the brace in the start pattern and one
+# without, one with an anchored `/^\}$/` end and one with an unanchored `/^\}/` — which
+# fail DIFFERENTLY: an unmatched anchored end runs the range to end of file rather than
+# emptying it, so a check reading the over-extracted body can match live code from a
+# LATER function and pass while the thing it names has been deleted. That is not a
+# hypothesis; the sibling suite carries the same lesson about a stale awk anchor in
+# test-doctor.sh, and C44 below is exactly a check whose needle also occurs outside
+# this function. `$2` non-empty strips full-line comments.
+hook_fn_body() {  # $1 = function name, $2 = "code" to strip comments, $3 = file (default $STOP)
+  local body file="${3:-$STOP}"
+  body="$(awk -v fn="^$1\\\\(\\\\) \\\\{" '$0 ~ fn,/^\}$/' "$file")"
+  # An awk RANGE whose end pattern never matches silently runs to EOF. Refuse to
+  # return such a body at all, so every consumer fails loudly instead of grading the
+  # rest of the file. STATE WHAT THIS PROVES: that the range ended at SOME column-0
+  # brace, not that it ended at the named function's own. This hook embeds `node -e`
+  # programs inside these functions, and a reformatting that unindented one of their
+  # closing braces would truncate the body while this guard still reported success —
+  # and a truncated body is what makes a negative check pass for free. The consumer
+  # labels say "ended at a column-0 brace" for that reason and no stronger.
+  [ -n "$body" ] && [ "$(printf '%s\n' "$body" | tail -1)" = "}" ] || return 1
+  if [ -n "${2:-}" ]; then printf '%s\n' "$body" | grep -v '^[[:space:]]*#'; else printf '%s\n' "$body"; fi
+}
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 STATE_DIR="$(mktemp -d)"; export STATE_DIR
@@ -109,6 +135,27 @@ C1_RAW="impl-clean"
 start_session "$C1_RAW"
 C1="$STARTED_SESSION_KEY"
 bash "$LOG" --tdd-begin --session "$C1" >/dev/null 2>&1
+C1_ARM_RC=$?
+# C1 was the only scenario here with no precondition control, and it is the one that
+# most needs one: it is the first scenario, the first use of start_session in the run,
+# and the only holder of the clean-worktree negative. BOTH its assertions are satisfied
+# by a chain that never armed — an inactive session returns at the SESSION_ACTIVE branch
+# one line ABOVE the wired one, so the nudge is never called, counter_of answers 0 and
+# C1b passes; and decision() maps empty stdout to "allow", so C1a passes too. Same
+# control pair C8 and C15 carry, for the same reason.
+[ "$C1_ARM_RC" -eq 0 ] \
+  && check "C1pre the clean-worktree chain actually armed" PASS \
+  || check "C1pre the clean-worktree chain actually armed (rc=$C1_ARM_RC)" FAIL
+C1_ACTIVE="$(bash -c '
+  set -u
+  # shellcheck disable=SC1090
+  source "$1/hooks/lib/zensu-tdd-phase.sh" >/dev/null 2>&1 || { echo unavailable; exit 0; }
+  f="$(tdd_state_file "$2")" || { echo unavailable; exit 0; }
+  tdd_session_active "$f"
+' _ "$PLUGIN_DIR" "$C1" 2>/dev/null)"
+[ "$C1_ACTIVE" = "true" ] \
+  && check "C1pre2 that chain really is active, so the branch is reachable" PASS \
+  || check "C1pre2 that chain really is active, so the branch is reachable (got '$C1_ACTIVE')" FAIL
 clean_wt
 OUT="$(stop_out "$C1_RAW" "$CFG5")"
 [ "$(printf '%s' "$OUT" | decision)" = "allow" ] \
@@ -314,7 +361,7 @@ CLOCK_RE='\bdate\b|updated_at|EPOCHSECONDS|SECONDS|mtime'
 # Full-line comments are stripped deliberately: rationale prose is allowed to use
 # ordinary English words the alternation matches, and comparing comment TEXT would
 # turn this red for a reason unrelated to the property being pinned.
-BODY="$(awk '/^zensu_impl_stop_nudge\(\) \{/,/^\}/' "$STOP" | grep -v '^[[:space:]]*#')"
+BODY="$(hook_fn_body zensu_impl_stop_nudge code)"
 if [ -z "$BODY" ]; then
   check "C9 zensu_impl_stop_nudge body could not be extracted" FAIL
 elif ! printf 'x=$(date +%%s)\n' | grep -qE "$CLOCK_RE"; then
@@ -368,6 +415,17 @@ WARN_WITHOUT="$(doctor_report "$C10" 99 | grep -c '⚠️')"
 [ "$((WARN_WITH - WARN_WITHOUT))" -eq 1 ] \
   && check "C10b the parked row adds exactly one warning, so it withholds the green summary" PASS \
   || check "C10b the parked row adds exactly one warning (with=$WARN_WITH without=$WARN_WITHOUT)" FAIL
+# The count here is 3 and every render above uses a threshold EQUAL to it or above
+# it, so `parkedCount >= implThreshold` mutated to `===` survived C10, C10b, C11, C12
+# and C20 — the doctor twin of the hole C34 closed on the Stop surface. Repeating
+# past the bound rather than firing once at it is a documented property of this row,
+# so it needs a case that only `>=` satisfies. C38pre further down runs the identical
+# render and is strictly stronger, so this is not the sole holder of that boundary —
+# said here because a reader deleting either check would otherwise not know.
+REP="$(doctor_report "$C10" 1)"
+printf '%s' "$REP" | grep -qF 'turns at `implementing`' \
+  && check "C47 above the threshold the doctor row still renders, so >= is not ==" PASS \
+  || check "C47 above the threshold the doctor row still renders, so >= is not ==" FAIL
 REP="$(doctor_report "$C10" 99)"
 printf '%s' "$REP" | grep -qF 'turns at `implementing`' \
   && check "C11 below the threshold the doctor stays quiet" FAIL \
@@ -402,11 +460,65 @@ printf '%s' "$REP" | grep -qF 'the implementing-turns check is switched off' \
 # armed last: the ambient CLAUDE_PLUGIN_DATA resolves to it, and a later
 # start_session would silently redirect these Stops at a different store.
 C16_BEFORE="$(counter_of "$C10")"
+# The precondition this check never had, and it is not decoration. Both sides of the
+# comparison below read through `counter_of`, which answers the literal string
+# `unavailable` once a later `start_session` has redirected the ambient session — and
+# `unavailable = unavailable` passes while observing nothing at all. That is not
+# hypothetical: a fallback-value scenario added above this line put its own
+# `start_session` between C10's arming and these reads, and every check in the file
+# stayed green while the one case covering "a counted session stops counting" had
+# stopped measuring. Requiring a POSITIVE count makes the placement rule the banner
+# comment states enforceable instead of merely stated.
+[ "$C16_BEFORE" -gt 0 ] 2>/dev/null \
+  && check "C16pre C10's chain is still the ambient session and had really counted, so C16 measures something" PASS \
+  || check "C16pre C10's chain is still the ambient session and had really counted (got '$C16_BEFORE')" FAIL
 clean_wt
 stop_out "$C10_RAW" "$CFG5" >/dev/null
 [ "$(counter_of "$C10")" = "$C16_BEFORE" ] \
   && check "C16 a counted session stops counting once the worktree is clean again" PASS \
   || check "C16 a counted session stops counting once the worktree is clean ($C16_BEFORE -> $(counter_of "$C10"))" FAIL
+
+# C12b alone proves only "not disabled" — a fallback of 1, or of 99, satisfies it
+# while the check's own name claims the DEFAULT. Grading the VALUE needs a chain whose
+# count sits exactly ON the default, and that is the whole reason this scenario runs
+# its own Stops instead of reusing C10's chain: at C10's count of 3 the thresholds 12
+# and 13 are indistinguishable, so a first attempt at this check compared two reports
+# that were identical for a reason unrelated to the fallback and passed against a
+# renderer whose fallback had been mutated to 13. A comparison that cannot separate
+# the value it names is worse than none.
+#
+# The default is READ from the shell getter rather than written as a literal, so this
+# cannot drift away from the config side either — and it is read here rather than
+# borrowed from C14's `$DEF`, which is assigned further down and would be an unbound
+# variable under `set -u`.
+C48_DEF="$(bash -c 'set -u; ZENSU_CONFIG="$2" ; source "$1/hooks/lib/zensu-config.sh"; zensu_impl_stop_nudge_after' _ "$PLUGIN_DIR" "$STATE_DIR/no-such-config.json" 2>/dev/null)"
+C48_RAW="impl-fallback"
+start_session "$C48_RAW"
+C48="$STARTED_SESSION_KEY"
+bash "$LOG" --tdd-begin --session "$C48" >/dev/null 2>&1
+C48_ARM_RC=$?
+dirty
+C48_N=0
+while [ -n "$C48_DEF" ] && [ "$C48_N" -lt "$C48_DEF" ]; do
+  stop_out "$C48_RAW" "$CFG5" >/dev/null
+  C48_N=$((C48_N + 1))
+done
+C48_COUNT="$(counter_of "$C48")"
+[ "$C48_ARM_RC" -eq 0 ] && [ -n "$C48_DEF" ] && [ "$C48_COUNT" = "$C48_DEF" ] \
+  && check "C48pre the chain armed and its count sits exactly on the getter's default, so the thresholds below differ" PASS \
+  || check "C48pre the chain armed and its count sits exactly on the getter's default (rc=$C48_ARM_RC def='$C48_DEF' count='$C48_COUNT')" FAIL
+# The BITE: at a count of exactly the default, one more than the default must render
+# differently. Without this the comparison below is satisfied by any two thresholds
+# the count happens to sit under.
+C48_AT="$(doctor_report "$C48" "$C48_DEF")"
+C48_OVER="$(doctor_report "$C48" "$((C48_DEF + 1))")"
+[ -n "$C48_AT" ] && [ "$C48_AT" != "$C48_OVER" ] \
+  && check "C48pre2 the default and one above it really render differently at this count" PASS \
+  || check "C48pre2 the default and one above it really render differently at this count" FAIL
+C48_BLANK="$(ZDOC_IMPL_STOP_NUDGE_AFTER='' doctor_report_unset "$C48")"
+[ -n "$C48_BLANK" ] && [ "$C48_BLANK" = "$C48_AT" ] \
+  && check "C48 a blank threshold renders exactly as the documented default does, not merely as something enabled" PASS \
+  || check "C48 a blank threshold renders exactly as the documented default does, not merely as something enabled" FAIL
 
 # --- C20: the row names only chains this session owns ---------------------
 # Nothing pinned the ownership half: with only ONE qualifying chain in the state
@@ -453,14 +565,18 @@ fi
 # Deleting either half would make the nudge count a turn that never ended and
 # assert "Stop is not blocked" beside a decision:"block" on stdout.
 # Anchored on the WHOLE guard statement and on emit_block's own extracted body: a
-# grep for the bare variable name passes with `&& return 0` deleted, with the
+# grep for the bare variable name passes with the early return deleted, with the
 # comparison inverted, or with the assignment moved out of emit_block entirely.
-EMIT_BODY="$(awk '/^emit_block\(\) \{/,/^\}/' "$STOP")"
+# The needle tracks the guard's SPELLING, so it moved when the guard was rewritten
+# from `[ … ] && return 0` to the `if` form this file's own rule requires — that is
+# the cost of anchoring on a whole statement, and it is the point: a looser needle
+# would not have noticed the rewrite either way.
+EMIT_BODY="$(hook_fn_body emit_block code)"
 if [ -z "$EMIT_BODY" ]; then
   check "C22 emit_block body could not be extracted" FAIL
 elif printf '%s' "$EMIT_BODY" | grep -qE '^[[:space:]]*DECISION_EMITTED=true$' \
   && grep -qE '^DECISION_EMITTED=false$' "$STOP" \
-  && printf '%s' "$BODY" | grep -qE '^[[:space:]]*\[ "\$\{DECISION_EMITTED:-false\}" = "true" \] && return 0$'; then
+  && printf '%s' "$BODY" | grep -qE '^[[:space:]]*if \[ "\$\{DECISION_EMITTED:-false\}" = "true" \]; then return 0; fi$'; then
   check "C22 emit_block records the decision and the nudge returns on it" PASS
 else
   check "C22 emit_block records the decision and the nudge returns on it" FAIL
@@ -626,8 +742,8 @@ C25_LINE="$(printf '%s\n' "$C25_REP" | grep -F 'turns at `implementing`' || true
 if [ -z "$C25_LINE" ]; then
   check "C25 the implementing-turns row is present so its wording can be graded" FAIL
 else
-  # Bound to the SENTENCE, not to the line. The row appends truncatedList(parkedImpl),
-  # whose single element already reads "<key>: 3 turns → <command>" — so a bare
+  # Bound to the SENTENCE, not to the line. The row appends `parkedImpl`,
+  # whose value already reads "<key>: 3 turns → <command>" — so a bare
   # `3 turns` needle is satisfied by the suffix even if the sentence itself went back
   # to rendering the threshold. `ended 3 turns at` can only come from the sentence.
   printf '%s' "$C25_LINE" | grep -qF 'ended 3 turns at' \
@@ -909,9 +1025,29 @@ getter_with() {  # $1 = config path; prints the resolved threshold
 # renderer's declaration for exactly this reason, and a hardcoded `12` here turns
 # C29 red on a legitimate default change — for a reason unrelated to the bound it
 # grades.
-C29_DEFAULT="$(awk '/^zensu_impl_stop_nudge_after\(\)/{f=1} f{print} f&&/^}/{exit}' \
-  "$PLUGIN_DIR/hooks/lib/zensu-config.sh" \
-  | sed -n 's/.*local default=\([0-9][0-9]*\).*/\1/p' | head -1)"
+# ONE extraction of the getter's operands, used by C29 and C31 alike. There were two
+# spellings of it, and they drifted the moment the three duplicated getters collapsed
+# onto `_zensu_config_bounded_int`: C31 was re-pointed and C29 was left reading a
+# `local default=` line that no longer exists. Its own control caught that, which is
+# the only reason it was a red check rather than a silently vacuous one — and the
+# lesson is the same one the production collapse was about, one file over.
+# PARAMETERIZED on the getter and its key, because the collapse made all three getters
+# one-line calls with the same operand shape — so one extractor can pin all three
+# hand-copied constant pairs instead of only the implementing-turns one.
+# Both names are interpolated into a grep ERE and a sed BRE, so they must be plain
+# identifiers. Every caller passes one; the contract is stated rather than enforced,
+# because a key containing `.` would silently match any character and one containing `/`
+# would break the `s` command — neither failure would look like a bad argument.
+getter_operand() {  # $1 = getter name, $2 = config key (identifier chars only), $3 = 1|2|3
+  grep -E "^$1\(\)" "$PLUGIN_DIR/hooks/lib/zensu-config.sh" \
+    | head -1 \
+    | sed -n "s/.*_zensu_config_bounded_int  *$2  *\([0-9][0-9]*\)  *\([0-9][0-9]*\)  *\([0-9][0-9]*\).*/\\1 \\2 \\3/p" \
+    | awk -v i="$3" '{print $i}'
+}
+impl_getter_operand() {  # $1 = 1|2|3 for default|min|max
+  getter_operand zensu_impl_stop_nudge_after implStopNudgeAfter "$1"
+}
+C29_DEFAULT="$(impl_getter_operand 1)"
 [ -n "$C29_DEFAULT" ] \
   && check "C29dpre the getter's own default was located, so the comparison is not vacuous" PASS \
   || check "C29dpre the getter's own default was located, so the comparison is not vacuous" FAIL
@@ -956,12 +1092,20 @@ rm -f "$PROJ/.zensu/state/pending-review.json"
 # different things" failure this whole feature exists to remove.
 #
 # BOTH sides are derived from source, so neither literal can be edited alone, and
-# the getter's bound is read out of its own FUNCTION BODY rather than out of the
-# file: an unrelated `n<=999999` elsewhere in zensu-config.sh must not satisfy it.
-C31_FN="$(awk '/^zensu_impl_stop_nudge_after\(\)/{f=1} f{print} f&&/^}/{exit}' \
-  "$PLUGIN_DIR/hooks/lib/zensu-config.sh")"
-C31_CFG_DEFAULT="$(printf '%s\n' "$C31_FN" | sed -n 's/.*local default=\([0-9][0-9]*\).*/\1/p' | head -1)"
-C31_CFG_MAX="$(printf '%s\n' "$C31_FN" | sed -n 's/.*n<=\([0-9][0-9]*\).*/\1/p' | head -1)"
+# the getter's bound is read out of its own DEFINITION LINE rather than out of the
+# file: an unrelated `999999` elsewhere in zensu-config.sh must not satisfy it.
+#
+# The extraction was re-pointed when the three duplicated getters collapsed onto
+# `_zensu_config_bounded_int`. Before that, the default came from a `local default=`
+# line and the bound from an inline `n<=` comparison; both now travel as positional
+# operands of one call, which is why the getter's own comment says those four
+# operands must stay literals on a single line. It goes through `impl_getter_operand`
+# rather than re-spelling the sed, because the two hand-copies of that spelling are
+# exactly what drifted. The control below is what makes the re-point safe: if the
+# extraction stops matching, C31pre fails loudly rather than letting `"" = ""` report
+# agreement between two values nobody holds.
+C31_CFG_DEFAULT="$(impl_getter_operand 1)"
+C31_CFG_MAX="$(impl_getter_operand 3)"
 C31_DOC_DEFAULT="$(sed -n 's/^var IMPL_STOP_NUDGE_FALLBACK = \([0-9][0-9]*\);$/\1/p' "$REPORT" | head -1)"
 C31_DOC_MAX="$(sed -n 's/^var IMPL_STOP_NUDGE_MAX = \([0-9][0-9]*\);$/\1/p' "$REPORT" | head -1)"
 # The control runs FIRST and is not decoration: every extraction above is a rename
@@ -1015,7 +1159,7 @@ fi
 # of that paragraph turned C32 red with every production string correct — and, worse, a tail
 # deleted from one arm and quoted in a comment kept C32_TAILS at 2 with C32 green. The sibling
 # extraction earlier in this file already strips the same way.
-C32_FN="$(awk '/^zensu_impl_stop_nudge\(\)/{f=1} f{print} f&&/^}/{exit}' "$STOP" | grep -v '^[[:space:]]*#')"
+C32_FN="$(hook_fn_body zensu_impl_stop_nudge code)"
 C32_ECHOES="$(printf '%s\n' "$C32_FN" | grep -c '>&2' || true)"
 [ -n "$C32_FN" ] && [ "$C32_ECHOES" -ge 3 ] \
   && check "C32pre the stripped function body is non-empty and still carries its notices" PASS \
@@ -1386,6 +1530,484 @@ done
 [ "$C37_BAD" = "0" ] \
   && check "C37 no notice branch promises future silence the code does not keep" PASS \
   || check "C37 no notice branch promises future silence the code does not keep (found $C37_BAD)" FAIL
+
+# --- C41: CLAUDE.md names SYMBOLS, never line numbers, for this hook -----------
+# Two anchors in the foreign-chain bullet went stale the moment this feature
+# inserted a function above them: `:951` named the SESSION_IMPL_COMPLETE release
+# and `:954-956` the CAP release, which sit far below that now. A line number in
+# prose is a claim that rots silently — nothing recomputes it and no reader can
+# tell a correct one from a drifted one without opening the file — so the FORM is
+# forbidden rather than corrected to today's numbers, which would only reset the
+# clock on the same defect.
+C41_MD="$PLUGIN_DIR/CLAUDE.md"
+# Filename-INDEPENDENT, because the rule it enforces is. A `zensu-tdd-phase.sh:1198`
+# or a `zensu-doctor-report.js:1808` anchor rots in exactly the same way and read as
+# permitted while the guard named one hook. The whole file carries zero matches of the
+# broader class today, so widening costs no red check and closes the form for every
+# carrier the rule names.
+C41_RE='\.(sh|js|mjs|json|md):[0-9]'
+C41_CTRL="$(printf 'a hooks/stop-chain-enforcer.sh:951 line\nand zensu-doctor-report.js:1808 too\n' | grep -cE "$C41_RE" || true)"
+[ "$C41_CTRL" = "2" ] \
+  && check "C41pre the line-anchor pattern matches the form it forbids" PASS \
+  || check "C41pre the line-anchor pattern matches the form it forbids (got '$C41_CTRL')" FAIL
+C41_HITS="$(grep -cE "$C41_RE" "$C41_MD" || true)"
+C41_WHERE="$(grep -nE "$C41_RE" "$C41_MD" | head -3 | tr '\n' ' ' || true)"
+[ "$C41_HITS" = "0" ] \
+  && check "C41 CLAUDE.md carries no <file>:<line> source anchor" PASS \
+  || check "C41 CLAUDE.md carries no <file>:<line> source anchor (found $C41_HITS: $C41_WHERE)" FAIL
+
+# The next several all read the SAME function body. `hook_fn_body` refuses a body
+# whose closing brace it did not reach, so an over-extraction fails here rather than
+# silently handing every check below the rest of the file.
+C42_BODY="$(hook_fn_body zensu_impl_stop_nudge)"
+# The comment-stripped companion. Checks that grade CODE take this one: the hook writes
+# the pathspec literal and the words `command -v timeout` in prose as well, so a raw body
+# lets a sentence satisfy a positive check and break a negative one.
+C42_CODE="$(hook_fn_body zensu_impl_stop_nudge code)"
+# The `tdd_increment_counter` conjunct grades the STRIPPED body: the function's own LOCK
+# DOMAIN comment names that identifier, so on the raw body the precondition survived the
+# call site being deleted — and C43, C44, C50, C56a and C56b all rest on it.
+[ -n "$C42_BODY" ] && [ -n "$C42_CODE" ] && printf '%s' "$C42_CODE" | grep -qF 'tdd_increment_counter' \
+  && check "C42pre the nudge function body was extracted and ended at a column-0 brace" PASS \
+  || check "C42pre the nudge function body was extracted and ended at a column-0 brace" FAIL
+
+# --- C42: the shared watchdog ladder probes gtimeout as well as timeout --------
+# MEASURED on the maintainer's own host: neither `timeout` nor `gtimeout` exists
+# on base macOS. `gtimeout` is what a Homebrew coreutils install actually puts on
+# PATH, so probing only `timeout` misses the one watchdog such a host is likely to
+# have. The unbounded fallback is KEPT on purpose — C56 pins that arm, and the
+# CLAUDE.md gap bullet states its bound, which C42b/C53 hold against this ladder.
+#
+# The ladder lives in `zensu_run_bounded` now, shared with the transcript probe,
+# so it is read out of THAT body: a check pointed at the nudge would go green on a
+# ladder the nudge no longer contains.
+C42_LADDER="$(hook_fn_body zensu_run_bounded code "$BOUNDED_LIB")"
+[ -n "$C42_LADDER" ] \
+  && check "C42lpre the shared watchdog helper's body was extracted and ended at a column-0 brace" PASS \
+  || check "C42lpre the shared watchdog helper's body was extracted and ended at a column-0 brace" FAIL
+printf '%s' "$C42_LADDER" | grep -qF 'command -v gtimeout' \
+  && check "C42 the shared ladder falls back to gtimeout before running unbounded" PASS \
+  || check "C42 the shared ladder falls back to gtimeout before running unbounded" FAIL
+# ORDER, not presence. A ladder that probed `gtimeout` first would satisfy a bare
+# presence pair while the stated preference was false, so compare positions the way
+# C43 does.
+C42A_T="$(printf '%s\n' "$C42_LADDER" | grep -n 'command -v timeout' | head -1 | cut -d: -f1)"
+C42A_G="$(printf '%s\n' "$C42_LADDER" | grep -n 'command -v gtimeout' | head -1 | cut -d: -f1)"
+[ -n "$C42A_T" ] && [ -n "$C42A_G" ] && [ "$C42A_T" -lt "$C42A_G" ] \
+  && check "C42a the ladder prefers timeout, so gtimeout is a fallback and not a replacement" PASS \
+  || check "C42a the ladder prefers timeout, so gtimeout is a fallback and not a replacement (timeout='$C42A_T' gtimeout='$C42A_G')" FAIL
+# The gap bullet must describe the shipped ladder. It named only `timeout`, which
+# made the sentence false the moment a second watchdog was probed — and its own
+# claim of a mitigation was what the review finding rejected.
+grep -qF 'gtimeout' "$C41_MD" \
+  && check "C42b the CLAUDE.md gap bullet names the second watchdog the code probes" PASS \
+  || check "C42b the CLAUDE.md gap bullet names the second watchdog the code probes" FAIL
+
+# --- C43: the free checks come before the node spawn ---------------------------
+# `zensu_impl_stop_nudge_after` spawns node. On a host with no git the feature can
+# never fire, so paying a process spawn first is a cost every armed-but-incomplete
+# chain carries at every turn end for nothing. Compare positions within the body.
+#
+# COMMENTS ARE STRIPPED FIRST, and that is not tidiness. The comment explaining this
+# very ordering names `zensu_impl_stop_nudge_after`, so an unfiltered scan found the
+# PROSE ahead of the code and reported the ordering as still wrong after it had been
+# fixed. An oracle that reads its own explanation is measuring the wrong file.
+C43_CODE="$C42_CODE"
+C43_GIT="$(printf '%s\n' "$C43_CODE" | grep -n 'command -v git' | head -1 | cut -d: -f1)"
+C43_CFG="$(printf '%s\n' "$C43_CODE" | grep -n 'zensu_impl_stop_nudge_after' | head -1 | cut -d: -f1)"
+[ -n "$C43_GIT" ] && [ -n "$C43_CFG" ] \
+  && check "C43pre both ordering landmarks were located in the function body" PASS \
+  || check "C43pre both ordering landmarks were located in the function body (git='$C43_GIT' cfg='$C43_CFG')" FAIL
+[ -n "$C43_GIT" ] && [ -n "$C43_CFG" ] && [ "$C43_GIT" -lt "$C43_CFG" ] \
+  && check "C43 the free git probe precedes the threshold node spawn" PASS \
+  || check "C43 the free git probe precedes the threshold node spawn (git line $C43_GIT, spawn line $C43_CFG)" FAIL
+
+# --- C44: the lock-domain decision is recorded, not left to be rediscovered -----
+# The increment holds only the CAS lock while the sibling stop-budget counter takes
+# the external lease, so the document has two writer classes that do not serialise
+# against each other. Taking the lease here was REJECTED — this branch's contract is
+# to release immediately and a contended lock already costs seconds — but a decision
+# nobody wrote down is indistinguishable from an oversight, and the next reader would
+# "fix" it straight into the latency regression it was rejected to avoid.
+printf '%s' "$C42_BODY" | grep -qF 'tdd_increment_stop_budget' \
+  && check "C44 the increment call site names the sibling lease writer it deliberately diverges from" PASS \
+  || check "C44 the increment call site names the sibling lease writer it deliberately diverges from" FAIL
+
+# --- C45: the Autopilot flag triple has ONE rendering site ---------------------
+# Two hand-authored copies of the same three-flag string existed, from the same three
+# variables with the same printf '%q' quoting, and their guards had already drifted
+# apart cosmetically — the fingerprint of a second authoring. Count non-comment
+# rendering sites in the hook.
+# Counted by OCCURRENCE of one unsplittable token, not by matching all three flags on
+# one line. The line-anchored form could not see a copy whose printf format was wrapped
+# across two lines, and counted two same-line copies as one — either way reporting
+# "exactly one place" for a file that had two. The three-flag pattern is kept as the
+# SHAPE control, so a token count that stops corresponding to a real rendering site
+# fails loudly rather than drifting into a bare word count.
+C45_RE='\-\-autopilot-run .*--autopilot-attempt .*--chain-id'
+C45_CTRL="$(printf ' x=" --autopilot-run $A --autopilot-attempt $B --chain-id $C"\n' | grep -cE "$C45_RE" || true)"
+[ "$C45_CTRL" = "1" ] \
+  && check "C45pre the triple pattern matches a rendering site" PASS \
+  || check "C45pre the triple pattern matches a rendering site (got '$C45_CTRL')" FAIL
+C45_SITES="$(grep -v '^[[:space:]]*#' "$STOP" | grep -oF -- '--autopilot-run' | wc -l | tr -d ' ')"
+C45_SHAPE="$(grep -v '^[[:space:]]*#' "$STOP" | grep -cE "$C45_RE" || true)"
+[ "$C45_SITES" = "1" ] && [ "$C45_SHAPE" = "1" ] \
+  && check "C45 the Autopilot flag triple is rendered in exactly one place in the Stop hook" PASS \
+  || check "C45 the Autopilot flag triple is rendered in exactly one place in the Stop hook (tokens=$C45_SITES shaped=$C45_SHAPE)" FAIL
+
+# --- C46: the docs row does not lend stopBlockCount's atomicity to this counter -
+# The row earns "atomically increments" for `stopBlockCount`, which is written under
+# the external lease. The implementing-turns counter is not, and a reader who carries
+# the qualifier down the same cell would believe a guarantee nothing provides.
+# SCOPED TO THE ROW, not the file. Both needles are about co-location — the qualifier
+# and the sentence that stops it carrying down the cell have to be in the SAME table
+# row, or a reader of that row still inherits the wrong guarantee. Whole-file greps
+# stay green when the scoping sentence is moved into any other row, which is exactly
+# the shape the labels claim to forbid. C20 and C25 scope rows for the same reason.
+C46_DOC="$PLUGIN_DIR/docs/configuration.md"
+C46_ROW="$(grep -F '| `stop-chain-enforcer.sh` |' "$C46_DOC" | head -1)"
+[ -n "$C46_ROW" ] && printf '%s' "$C46_ROW" | grep -qF 'atomically increments the integrated' \
+  && check "C46pre the row was located and still carries the qualifier this check scopes" PASS \
+  || check "C46pre the row was located and still carries the qualifier this check scopes" FAIL
+printf '%s' "$C46_ROW" | grep -qF 'holds only the CAS lock' \
+  && check "C46 the same row states that the implementing-turns counter takes no lease" PASS \
+  || check "C46 the same row states that the implementing-turns counter takes no lease" FAIL
+
+# --- C49: the SIBLING watchdog on this same Stop path uses the same ladder ------
+# `reviewer_spawn_denial_probe` runs on the very path the nudge does, and its own
+# comment records the LARGER exposure: the transcript path is host-supplied, lives
+# outside the project root, and can sit on stalled or network-backed storage. Adding
+# `gtimeout` to the git probe and not to that one left the lower-risk child bounded
+# on a Homebrew-coreutils host and the higher-risk one unbounded.
+#
+# The body is taken COMMENT-STRIPPED. A first spelling took it raw, and the probe's own
+# comment names `zensu_run_bounded` — so deleting the actual invocation left C49 green,
+# reading its own explanation. The same defect C43 records one block up, reintroduced.
+C49_BODY="$(hook_fn_body reviewer_spawn_denial_probe code)"
+[ -n "$C49_BODY" ] \
+  && check "C49pre the sibling probe body was extracted and ended at a column-0 brace" PASS \
+  || check "C49pre the sibling probe body was extracted and ended at a column-0 brace" FAIL
+# It must CONSUME the shared ladder rather than carry its own arm: a second copy is how
+# the two diverged in the first place. Anchored on the INVOCATION form, not the bare
+# symbol, so a mention cannot stand in for a call.
+printf '%s' "$C49_BODY" | grep -qF 'zensu_run_bounded node' \
+  && check "C49 the sibling transcript probe consumes the shared watchdog ladder" PASS \
+  || check "C49 the sibling transcript probe consumes the shared watchdog ladder" FAIL
+printf '%s' "$C49_BODY" | grep -qE 'command -v (timeout|gtimeout)' \
+  && check "C49a the sibling probe keeps no private copy of the ladder" FAIL \
+  || check "C49a the sibling probe keeps no private copy of the ladder" PASS
+
+# --- C49b was REMOVED, twice over, and the reason is recorded rather than retried --
+# The first spelling counted ladder invocations and asserted two. That fires on the
+# CORRECT behaviour — a third wrapped child turns it red — and is blind to the wrong one,
+# because a child added WITHOUT the ladder adds no occurrence and leaves the count at two.
+#
+# The second spelling tried to become the membership check its own comment described: scan
+# for command-position child spawns, excuse the two lease children CLAUDE.md declares
+# unbounded, and require the remainder to be empty. Two independent reviewers found it
+# still asserted the same frozen count, and that its spawn regex could not even see the
+# `VAR=value node -e` spelling this hook uses seven times — including in both declared
+# children, so the exclusion list excused nothing.
+#
+# It is GONE rather than rewritten a third time, because the criterion is not expressible
+# here. What the shared ladder serves is "children that read OUTSIDE this process", and no
+# grep can tell that from the many `printf … | node -e` children that read this process's
+# own stdin. A census that flagged all of them would be wrong; one that flagged none would
+# be the frozen count again. The two children that DO qualify are pinned individually and
+# by name — C49 for the transcript read, C56a for the git probe. State the bound with them:
+# that holds for the TWO children that exist today and for no future one. A third
+# out-of-process child added without the ladder is caught by nothing here — C60 compares
+# ladder COPIES, not consumers, so it stays green. That is the residual this deletion
+# accepts, named rather than dressed up as coverage.
+
+# --- C61: the SECOND shell rendering agrees with the first, byte for byte -------
+# C45 is scoped to the Stop hook while the contract is not: `post-review-tdd-delegate.sh`
+# builds the same three flags from its own globals, `zensu-log.sh` parses the result, and
+# nothing held the two against each other — a flag-order or quoting divergence there could
+# land green. Compare the FLAG SEQUENCE of both renderings, which is the part `zensu-log.sh`
+# reads; the operand spellings legitimately differ (`%q` conversions here, pre-quoted
+# variables there). This is the byte-comparison shape CLAUDE.md records for S7m.
+C61_DELEGATE="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
+c61_flags() { grep -oE '\-\-autopilot-run [^ ]+ --autopilot-attempt [^ ]+ --chain-id' | head -1 | sed 's/[^ ]*\$[^ ]*/<operand>/g; s/%q/<operand>/g'; }
+# Derived HERE, not borrowed from C55's body: that variable is assigned further down the
+# file, so reading it would have compared the delegate against an empty string.
+C61_OWNER="$(hook_fn_body zensu_autopilot_link_args code | c61_flags)"
+C61_COPY="$(grep -vE '^[[:space:]]*#' "$C61_DELEGATE" | c61_flags)"
+[ -n "$C61_OWNER" ] && [ -n "$C61_COPY" ] \
+  && check "C61pre both renderings were located, so the comparison below is not two empty strings" PASS \
+  || check "C61pre both renderings were located (owner='$C61_OWNER' copy='$C61_COPY')" FAIL
+[ "$C61_OWNER" = "$C61_COPY" ] \
+  && check "C61 the delegate's hand-authored copy carries the same flag sequence as the single renderer" PASS \
+  || check "C61 the delegate's hand-authored copy carries the same flag sequence (owner='$C61_OWNER' copy='$C61_COPY')" FAIL
+
+# --- C50: the watchdog ladder spells its payload ONCE --------------------------
+# The arms are mutually exclusive per host, so a divergence between them cannot fail
+# behaviourally anywhere: on a Linux CI runner only the `timeout` arm ever executes,
+# while base macOS takes the last one. Three copies of the pathspec the surrounding
+# comment calls load-bearing is the same one-rendering-site hazard C45 exists to
+# forbid for the Autopilot flag triple, three lines away from it.
+#
+# COMMENT-STRIPPED, because the same pathspec literal is written in prose elsewhere in
+# this hook: an unstripped count would go red when a sentence moves and stay green when
+# the probe is deleted beside a comment that mentions it.
+C50_SPELLINGS="$(printf '%s\n' "$C42_CODE" | grep -c "exclude).zensu" || true)"
+[ "$C50_SPELLINGS" = "1" ] \
+  && check "C50 the nudge spells the git probe exactly once" PASS \
+  || check "C50 the nudge spells the git probe exactly once (found $C50_SPELLINGS)" FAIL
+
+# --- C51/C52: CLAUDE.md registers what this change made shared -----------------
+# Both are new single sources of truth, and this repository's whole convention is
+# that a shared owner is named on a roster so the next reader finds its consumers.
+grep -qF 'zensu_autopilot_link_args' "$C41_MD" \
+  && check "C51 CLAUDE.md names the single renderer of the Autopilot flag triple" PASS \
+  || check "C51 CLAUDE.md names the single renderer of the Autopilot flag triple" FAIL
+grep -qF '_zensu_config_bounded_int' "$C41_MD" \
+  && check "C52 CLAUDE.md names the shared bounded-int config helper" PASS \
+  || check "C52 CLAUDE.md names the shared bounded-int config helper" FAIL
+# The third shared owner this change introduced. Without it, renaming the ladder would
+# redden only the checks that grade the HOOK, and the fix would land in this file while
+# the CLAUDE.md roster went stale unnoticed — which is the drift C51/C52 exist to stop.
+grep -qF 'zensu_run_bounded' "$C41_MD" \
+  && check "C59 CLAUDE.md names the shared watchdog ladder" PASS \
+  || check "C59 CLAUDE.md names the shared watchdog ladder" FAIL
+
+# --- C53: the watchdog PROSE and the watchdog CODE describe one ladder ---------
+# C42b greps the whole file, so the gap bullet alone satisfies it while the section's
+# main prose still says `timeout`-only eighty lines above — the exact drift shape that
+# paragraph already records about itself once. Scope the assertion to the paragraph
+# carrying the claim.
+# Anchored on the CLAIM, not on the adjective. A first spelling keyed on
+# "`timeout`-bounded WHEN" and went vacuous the moment that phrase was corrected —
+# a check that only fires while the defect's exact wording survives is worth nothing.
+# "The SAME conditional applies to a second" is the sentence whose truth depends on
+# both children carrying the same ladder, so it is the right thing to hold.
+C53_PARA="$(awk -v RS='' '/The SAME conditional applies to a second/' "$C41_MD" | head -40)"
+[ -n "$C53_PARA" ] \
+  && check "C53pre the watchdog paragraph was located, so the scan is not vacuous" PASS \
+  || check "C53pre the watchdog paragraph was located, so the scan is not vacuous" FAIL
+printf '%s' "$C53_PARA" | grep -qF 'gtimeout' \
+  && check "C53 the paragraph making the watchdog claim names both binaries the code probes" PASS \
+  || check "C53 the paragraph making the watchdog claim names both binaries the code probes" FAIL
+
+# --- C54: the renderer's coupling comment names the extraction that exists -----
+# It named `n<=999999` read "out of the function body", a spelling the config collapse
+# removed entirely. A guarding comment that sends a maintainer after bytes the code
+# does not carry is the failure class this file's C39 exists for.
+# POSITIVE, not negative. A first spelling forbade the string `n<=999999` anywhere in
+# the file and then matched the very sentence that explains the spelling is gone — a
+# negative assertion that cannot distinguish a stale claim from its own correction.
+# What matters is that the comment names the extraction that EXISTS, and that it no
+# longer claims to read a bound out of a function body the collapse removed.
+# `getter_operand`, not `impl_getter_operand`: the extractor was parameterized and the
+# comment names the owning function. The shorter needle matches either spelling, so this
+# does not have to move again when a caller does.
+grep -qF 'getter_operand' "$REPORT" \
+  && check "C54 the renderer comment names the extraction that actually holds its constants" PASS \
+  || check "C54 the renderer comment names the extraction that actually holds its constants" FAIL
+# The companion is FLATTENED before matching, because the claim it forbids wraps across
+# comment lines and `grep -F` matches per line. Comment markers are stripped too: the
+# first spelling matched `out of the // function body`, which pins ONE wrap of one
+# sentence — reintroduce the claim on a single line and the needle is absent, so the
+# check passes while the forbidden text is right there. C54actl proves the needle can
+# match the claim in any wrap, which is what a negative check owes its reader.
+c54_flat() { tr '\n' ' ' | sed 's|//| |g' | tr -s ' '; }
+C54_CTL="$(printf '// … read out of the\n// function body, not the file\n' | c54_flat | grep -c 'read out of the function body' || true)"
+[ "$C54_CTL" = "1" ] \
+  && check "C54actl the flattened needle matches the claim regardless of how it wraps" PASS \
+  || check "C54actl the flattened needle matches the claim regardless of how it wraps (got '$C54_CTL')" FAIL
+c54_flat < "$REPORT" | grep -q 'read out of the function body' \
+  && check "C54a the comment no longer claims a bound is read out of the getter's function body" FAIL \
+  || check "C54a the comment no longer claims a bound is read out of the getter's function body" PASS
+
+# --- C55: the flag triple is rendered with %q, and something says so -----------
+# The three operands arrive raw from the workflow document, which the session can
+# write, and land in text a model is told to run. C45 counts rendering SITES and
+# matches `%s` exactly as well as `%q`, so the quoting the consolidation comment cites
+# as the risk it removes was itself unguarded.
+C55_BODY="$(hook_fn_body zensu_autopilot_link_args code)"
+C55_FMT="$(printf '%s\n' "$C55_BODY" | grep -c -- "--autopilot-run %q --autopilot-attempt %q --chain-id %q" || true)"
+[ "$C55_FMT" = "1" ] \
+  && check "C55 the single renderer shell-quotes all three session-writable operands" PASS \
+  || check "C55 the single renderer shell-quotes all three session-writable operands (found $C55_FMT)" FAIL
+# A SUBSTRING match cannot see a FOURTH operand appended to the same format string, and an
+# unquoted one would reach model-read text exactly as the three quoted ones do. Forbid any
+# other conversion in this body, with a control proving the pattern sees one.
+# A TOTAL rule, not a blacklist of spellings. Enumerating conversion letters missed `%c`,
+# `%f` and the `%*s` / `%#x` / `%+d` flag forms, every one of which would reach the same
+# model-read remedy string unquoted. Count every `%` with `%%` collapsed first, and require
+# the total to equal the count of `%q`: any other conversion, in any spelling, breaks it.
+c55_pcts() { tr -d '\n' | sed 's/%%//g' | grep -o "$1" | wc -l | tr -d ' '; }
+C55_SAMPLE="  printf ' --a %q --b %c'"
+C55_CTL_ALL="$(printf '%s' "$C55_SAMPLE" | c55_pcts '%')"
+C55_CTL_Q="$(printf '%s' "$C55_SAMPLE" | c55_pcts '%q')"
+[ "$C55_CTL_ALL" = "2" ] && [ "$C55_CTL_Q" = "1" ] \
+  && check "C55ctl the conversion count sees a %c the letter blacklist missed" PASS \
+  || check "C55ctl the conversion count sees a %c the letter blacklist missed (all=$C55_CTL_ALL q=$C55_CTL_Q)" FAIL
+C55_ALL="$(printf '%s\n' "$C55_BODY" | c55_pcts '%')"
+C55_Q="$(printf '%s\n' "$C55_BODY" | c55_pcts '%q')"
+[ "$C55_Q" = "3" ] && [ "$C55_ALL" = "$C55_Q" ] \
+  && check "C55a every conversion in the renderer is a %q" PASS \
+  || check "C55a every conversion in the renderer is a %q (all=$C55_ALL q=$C55_Q)" FAIL
+
+# --- C56: the unbounded third arm is pinned, not just its rationale ------------
+# C42/C42a/C42b observe only that two `command -v` probes and one doc word exist, so
+# replacing the last arm with `return 0` — the alternative the comment records as
+# REJECTED — left every one of them green. The arm the whole decision is about needs
+# a pin of its own, in the same spirit as C44 pinning the lock-domain decision.
+# Two halves, because the rejected alternative could be reinstated on either side.
+# The HELPER must still RUN the command when neither binary exists — its last arm is a
+# bare `"$@"`, not a `return`. The pattern accepts a `return` in command position after a
+# `;` as well as at the start of a line: the first spelling anchored on `^[[:space:]]*`
+# only, so the same inert arm written as a one-liner slipped past it. C56ctl proves the
+# pattern can match the form it forbids, which the first spelling also lacked.
+# ONE pattern, bound once and shared by the control and the assertion. Two hardcoded
+# copies would let a one-sided edit leave the control green over a changed assertion —
+# which is what C32_PATTERN, C33_PATTERN, C41_RE and C45_RE all exist to avoid.
+# The pattern accepts `return` in EVERY command position, not only after `;` or at line
+# start: `|| return 0` and `&& return 0` are the spellings the inert arm would most naturally
+# take, and the first version saw neither. The control plants one of each.
+C56_RE='(^|;|\|\||&&|then|\{)[[:space:]]*(else[[:space:]]+)?return[[:space:]]'
+C56_CTL="$(printf '  if x; then a; else return 1; fi\n  y || return 0\n  z && return 0\n' | grep -cE "$C56_RE" || true)"
+[ "$C56_CTL" = "3" ] \
+  && check "C56ctl the inert-arm pattern matches every command position the form can take" PASS \
+  || check "C56ctl the inert-arm pattern matches every command position the form can take (got '$C56_CTL')" FAIL
+# SCOPED TO THE LADDER, not the whole helper body. The helper's own arity guard is itself a
+# `|| return 1`, so a whole-body scan would either miss the inert arm — which the narrow
+# pattern did — or, once widened, condemn that guard and report it AS the inert arm: a true
+# failure with a false diagnosis. Slice from the first watchdog probe onward.
+C56_ARMS="$(printf '%s\n' "$C42_LADDER" | awk '/command -v timeout/{f=1} f{print}')"
+[ -n "$C56_ARMS" ] \
+  && check "C56pre the ladder's arms were sliced out of the helper, so the scan below is not vacuous" PASS \
+  || check "C56pre the ladder's arms were sliced out of the helper, so the scan below is not vacuous" FAIL
+printf '%s\n' "$C56_ARMS" | grep -qE "$C56_RE" \
+  && check "C56 the shared ladder still runs the command unbounded rather than the rejected inert arm" FAIL \
+  || check "C56 the shared ladder still runs the command unbounded rather than the rejected inert arm" PASS
+printf '%s\n' "$C42_LADDER" | grep -qE '^[[:space:]]*"\$@"' \
+  && check "C56d the ladder contains a bare invocation of the caller's command" PASS \
+  || check "C56d the ladder contains a bare invocation of the caller's command" FAIL
+# And the CALLERS must invoke unconditionally. A caller that guarded its command on a
+# watchdog being present would reinstate the same rejected behaviour one level up, with
+# the helper left innocent. Both read the COMMENT-STRIPPED body, because this hook
+# discusses `command -v timeout` in prose and a raw body would grade the discussion.
+printf '%s\n' "$C42_CODE" | grep -qE 'zensu_run_bounded git ' \
+  && check "C56a the git probe runs through the ladder unconditionally" PASS \
+  || check "C56a the git probe runs through the ladder unconditionally" FAIL
+printf '%s\n' "$C42_CODE" | grep -qE 'command -v (timeout|gtimeout)' \
+  && check "C56b the git probe keeps no watchdog-presence guard of its own" FAIL \
+  || check "C56b the git probe keeps no watchdog-presence guard of its own" PASS
+
+# --- C60: the ladder exists ONCE in the whole hook, not once per function ------
+# The consolidation's actual purchase is ONE ladder, and every other check that grades it is
+# scoped to a function body — so a THIRD function spelling its own `command -v timeout` arm
+# passes all of them, which is exactly the divergence the consolidation removed. Compare the
+# whole-file count against the count inside the shared helper: equal means no second copy.
+C60_HELPER="$(printf '%s\n' "$C42_LADDER" | grep -cE 'command -v (timeout|gtimeout)' || true)"
+# Across BOTH files, because the ladder moved into its own library: the hook must carry
+# none of it and the library exactly the two probes. A count scoped to one file would go
+# green on a copy living in the other.
+C60_HOOK="$(grep -vE '^[[:space:]]*#' "$STOP" | grep -cE 'command -v (timeout|gtimeout)' || true)"
+C60_LIB="$(grep -vE '^[[:space:]]*#' "$BOUNDED_LIB" | grep -cE 'command -v (timeout|gtimeout)' || true)"
+[ "$C60_HELPER" = "2" ] \
+  && check "C60pre the shared helper carries exactly the two probes, so the comparison is anchored" PASS \
+  || check "C60pre the shared helper carries exactly the two probes (found $C60_HELPER)" FAIL
+[ "$C60_HOOK" = "0" ] && [ "$C60_LIB" = "$C60_HELPER" ] \
+  && check "C60 the watchdog ladder lives only in its own library, nowhere in the hook" PASS \
+  || check "C60 the watchdog ladder lives only in its own library (hook=$C60_HOOK lib=$C60_LIB helper=$C60_HELPER)" FAIL
+
+# --- C57: the TTL constant pair is pinned too, now that one extractor can ------
+# `TTL_HOURS_FALLBACK` / `TTL_HOURS_MAX` in the doctor renderer declare themselves a
+# mirror of `zensu_pending_review_ttl_hours` in prose and were pinned by nothing. The
+# collapse onto `_zensu_config_bounded_int` made every getter a one-line call with the
+# same operand shape, so the extractor that already held the implementing-turns pair
+# holds this one for the cost of two arguments. Recorded as an open gap in the same
+# round it became cheap to close, which is the wrong place to leave it.
+C57_CFG_DEF="$(getter_operand zensu_pending_review_ttl_hours pendingReviewTtlHours 1)"
+C57_CFG_MAX="$(getter_operand zensu_pending_review_ttl_hours pendingReviewTtlHours 3)"
+C57_DOC_DEF="$(sed -n 's/^var TTL_HOURS_FALLBACK = \([0-9][0-9]*\);$/\1/p' "$REPORT" | head -1)"
+C57_DOC_MAX="$(sed -n 's/^var TTL_HOURS_MAX = \([0-9][0-9]*\);$/\1/p' "$REPORT" | head -1)"
+if [ -n "$C57_CFG_DEF" ] && [ -n "$C57_CFG_MAX" ] && [ -n "$C57_DOC_DEF" ] && [ -n "$C57_DOC_MAX" ]; then
+  check "C57pre all four TTL literals were located, so the comparison below is not vacuous" PASS
+  [ "$C57_CFG_DEF" = "$C57_DOC_DEF" ] && [ "$C57_CFG_MAX" = "$C57_DOC_MAX" ] \
+    && check "C57 the doctor's TTL constants match the getter's own default and bound" PASS \
+    || check "C57 the doctor's TTL constants match the getter's own default and bound (cfg=$C57_CFG_DEF/$C57_CFG_MAX doctor=$C57_DOC_DEF/$C57_DOC_MAX)" FAIL
+else
+  check "C57pre all four TTL literals were located, so the comparison below is not vacuous (cfg=$C57_CFG_DEF/$C57_CFG_MAX doctor=$C57_DOC_DEF/$C57_DOC_MAX)" FAIL
+fi
+
+# --- C58: the shared bounded-int helper's arithmetic, for ALL THREE call sites -
+# The helper's own comment claimed a characterization matrix as the thing any future
+# change to it owes the three getters. That matrix was run by hand and committed
+# nowhere, so the claim named evidence the suite did not carry — and only
+# `implStopNudgeAfter`'s bound was exercised at all. This is that matrix, table-driven
+# and in the suite, so the claim is now true and the two other call sites have their
+# bound arithmetic covered rather than assumed.
+c58_get() {  # $1 = getter, $2 = json config body
+  printf '%s' "$2" > "$STATE_DIR/c58.json"
+  bash -c 'set -u; ZENSU_CONFIG="$2"; source "$1/hooks/lib/zensu-config.sh"; "$3"' \
+    _ "$PLUGIN_DIR" "$STATE_DIR/c58.json" "$1" 2>/dev/null
+}
+C58_FAILS=""
+# The bounds are DERIVED through the same `getter_operand` C57 uses, not hand-copied:
+# restating them here would turn C58 red on a legitimate bound change for a reason
+# unrelated to the arithmetic it grades.
+for c58row in \
+  "zensu_autofix_max_rounds:autoFixMaxRounds" \
+  "zensu_pending_review_ttl_hours:pendingReviewTtlHours" \
+  "zensu_impl_stop_nudge_after:implStopNudgeAfter"; do
+  c58fn="${c58row%%:*}"; c58key="${c58row#*:}"
+  c58def="$(getter_operand "$c58fn" "$c58key" 1)"
+  c58min="$(getter_operand "$c58fn" "$c58key" 2)"
+  c58max="$(getter_operand "$c58fn" "$c58key" 3)"
+  if [ -z "$c58def" ] || [ -z "$c58min" ] || [ -z "$c58max" ]; then
+    C58_FAILS="$C58_FAILS $c58fn(operands-unreadable)"
+    continue
+  fi
+  # at-min and at-max are ACCEPTED; one below min and one above max fall back; a
+  # non-integer and a QUOTED IN-RANGE number fall back; an absent key falls back.
+  #
+  # The quoted case uses the MIN, never the default: quoting the default made acceptance
+  # and rejection produce the same string, so replacing `Number.isInteger` with a coercing
+  # `Number` left the row green. The min differs from the default in all three rows.
+  for c58case in "$c58min:$c58min" "$c58max:$c58max" "$((c58min - 1)):$c58def" \
+                 "$((c58max + 1)):$c58def" "1.5:$c58def" "\"$c58min\":$c58def"; do
+    c58in="${c58case%%:*}"; c58want="${c58case#*:}"
+    c58got="$(c58_get "$c58fn" "{\"hooks\":{\"$c58key\":$c58in}}")"
+    [ "$c58got" = "$c58want" ] || C58_FAILS="$C58_FAILS $c58fn($c58in)->$c58got!=$c58want"
+  done
+  c58got="$(c58_get "$c58fn" '{"hooks":{}}')"
+  [ "$c58got" = "$c58def" ] || C58_FAILS="$C58_FAILS $c58fn(absent)->$c58got!=$c58def"
+done
+# The control matters: a typo in the loop would leave C58_FAILS empty and report a green
+# matrix that never ran. Require the accepted cases to have produced real values first.
+# The object-shape conjunct (`typeof h === "object" && !Array.isArray(h)`) is unreachable
+# through the three shipped getters, because none of their keys is one a string or an array
+# owns. Drive the helper DIRECTLY with the key `length` against both shapes: with
+# `hasOwnProperty` alone, `"abcdefgh".length` and `[1,2,3,4,5].length` are own integers that
+# would pass the bounds and be echoed instead of the default.
+c58_direct() {  # $1 = json config body
+  printf '%s' "$1" > "$STATE_DIR/c58d.json"
+  bash -c 'set -u; ZENSU_CONFIG="$2"; source "$1/hooks/lib/zensu-config.sh"; _zensu_config_bounded_int length 5 1 99' \
+    _ "$PLUGIN_DIR" "$STATE_DIR/c58d.json" 2>/dev/null
+}
+C58_STR="$(c58_direct '{"hooks":"abcdefgh"}')"
+# SEVEN elements, not five: with a five-element array `hooks.length` IS the default, so
+# deleting `!Array.isArray(h)` produced the same answer as the guarded path and the arm
+# could not fail. The string arm discriminates on its own; this one now does too.
+C58_ARR="$(c58_direct '{"hooks":[1,2,3,4,5,6,7]}')"
+C58_OBJ="$(c58_direct '{"hooks":{"length":7}}')"
+[ "$C58_OBJ" = "7" ] \
+  && check "C58cpre the direct helper call really reads a hooks key, so the two below mean something" PASS \
+  || check "C58cpre the direct helper call really reads a hooks key (got '$C58_OBJ')" FAIL
+[ "$C58_STR" = "5" ] && [ "$C58_ARR" = "5" ] \
+  && check "C58c a string or array hooks value yields the default, never its own length" PASS \
+  || check "C58c a string or array hooks value yields the default (string='$C58_STR' array='$C58_ARR')" FAIL
+C58_CTL="$(c58_get zensu_impl_stop_nudge_after '{"hooks":{"implStopNudgeAfter":7}}')"
+[ "$C58_CTL" = "7" ] \
+  && check "C58pre the matrix harness really drives the getters, so an empty failure list means something" PASS \
+  || check "C58pre the matrix harness really drives the getters (got '$C58_CTL')" FAIL
+[ -z "$C58_FAILS" ] \
+  && check "C58 all three bounded-int getters honour their own min, max, fallback and absent-key behaviour" PASS \
+  || check "C58 all three bounded-int getters honour their own bounds (failures:$C58_FAILS)" FAIL
 
 echo ""
 echo "impl-stop-counter: $PASS passed, $FAIL failed"
