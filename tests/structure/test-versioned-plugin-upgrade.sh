@@ -2954,7 +2954,7 @@ if [ "$#" -eq 4 ] && [ "$1" -ne 0 ] 2>/dev/null && [ "$2" -ne 0 ] \
   BASELINE_DIRECT_OK=true
 fi
 if [ "$BASELINE_DIRECT_OK" = true ] && [ "$BASELINE_DIRECT_ENTRIES" = "1" ]; then
-  check "AC-D04b the reserved phase and reason are refused by tdd_write_phase AND _tdd_write_phase_critical, while an ordinary phase still writes" PASS
+  check "AC-D04b the reserved phase and reason are refused by tdd_write_phase AND _tdd_write_phase_critical, and the document gained no second provenance entry" PASS
 else
   check "AC-D04b the reserved phase and reason are refused by both exported writers (rcs=$BASELINE_DIRECT_OUT entries=$BASELINE_DIRECT_ENTRIES)" FAIL
   head -c 400 "$TMP/baseline-direct.err" 2>/dev/null
