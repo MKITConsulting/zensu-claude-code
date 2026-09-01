@@ -2297,7 +2297,7 @@ function stateBlock(nowMs) {
   // branch rendered an all-clear and returned above the row. An ENOENT here is
   // positive proof the bound session's own document is gone, which is the strongest
   // form of the finding, not a reason to withhold it.
-  function ownDocumentVerdict(present, discloseWithoutKey) {
+  function ownDocumentVerdict(discloseWithoutKey) {
     var ownKey = currentSessionKey();
     if (ownKey === '') {
       // NARROWED on the directory-absent path, and the narrowing is deliberate.
@@ -2315,40 +2315,60 @@ function stateBlock(nowMs) {
       }
       return;
     }
-    var ownFile = path.join(dir, 'tdd-phase-' + ownKey + '.json');
-    // The FOUR-state classifier decides, not a filename-presence test, and the
-    // difference decides which remedy the row prints. `readdirSync` follows
-    // symlinks, so a dangling `.zensu/state` yielded ENOENT here and the row
-    // promised a rebuild the repair refuses by design — the same contradiction
-    // the Stop arm and the capability gate were just corrected for. The mirror
-    // case was worse because it was silent: a `.zensu/state` symlinked to a real
-    // directory holding the document made `present` true and rendered NOTHING,
-    // while the gate denied every tool. A load fault falls back to the presence
-    // test rather than dropping the row.
-    var ownShape = null;
-    var ownUnsafeAt = ownFile;
+    // The FOUR-state classifier decides, not a filename-presence test, and not a
+    // shape-only approximation of it either. `readdirSync` follows symlinks, so a
+    // dangling `.zensu/state` yielded ENOENT and the row promised a rebuild the
+    // repair refuses by design — the same contradiction the Stop arm and the
+    // capability gate were corrected for. The mirror case was worse because it was
+    // silent: a `.zensu/state` symlinked to a real directory holding the document
+    // made `present` true and rendered NOTHING while the gate denied every tool.
+    //
+    // The FULL classifier is reachable from here, and an earlier revision claimed
+    // it was not. `core.sessionKey` is idempotent — it accepts an `scv1_<64 hex>`
+    // key and returns it unchanged — which `stateBlock` already relies on further
+    // down, where it passes a matched key straight to `core.readWorkflowState`. So
+    // the shape-only detour cost the row its `unreadable` arm for no reason: a
+    // present-but-unreadable own document is exactly a wedged session, and it was
+    // being left to the anonymous population row that names neither this session
+    // nor a remedy.
+    var ownCore = null;
+    var ownState = null;
+    var ownFile = null;
     try {
-      var ownCore = require(path.join(pluginDir(), 'hooks', 'lib', 'session-control-core-v1.js'));
-      ownShape = ownCore.classifyWorkflowBaselineShape(ownFile, projectRoot);
-      if (ownShape === 'unsafe') ownUnsafeAt = ownCore.baselineUnsafeComponent(projectRoot, ownFile);
-    } catch (e) { ownShape = null; }
-    // The SHAPE half is what this renderer can reach: it holds a session key, not
-    // a raw session id, so the parse (which would separate PRESENT from
-    // UNREADABLE) is not available here. That is enough for the decision this row
-    // makes — MISSING gets the rebuild remedy, UNSAFE does not — and an
-    // unreadable-but-well-shaped document is already reported by the invalid-CAS
-    // row below.
-    if (ownShape === 'unsafe') {
-      line(BAD, 'state: this session\'s own workflow document is UNSAFE ('
-        + ownUnsafeAt + ') — the capability gate denies every tool in this session, and this '
+      ownCore = require(path.join(pluginDir(), 'hooks', 'lib', 'session-control-core-v1.js'));
+      ownFile = ownCore.adoptionWorkflowStatePath(projectRoot, ownKey);
+      ownState = ownCore.classifyWorkflowBaseline(ownFile, projectRoot, ownKey);
+    } catch (e) { ownState = null; }
+    if (ownFile === null) ownFile = path.join(dir, 'tdd-phase-' + ownKey + '.json');
+    if (ownState === 'present') return;
+    if (ownState === 'unsafe' || ownState === 'unreadable') {
+      // The NAMER is in its own try, deliberately. Folding it into the block above
+      // meant that a core which loaded but did not export it threw AFTER the
+      // verdict was computed, the catch reset the verdict to null, and a correct
+      // BAD tamper row degraded to SILENCE — the one verdict this file refuses to
+      // fake anywhere else. A namer failure may cost the component name; it may
+      // never cost the finding.
+      var ownAt = ownFile;
+      if (ownState === 'unsafe') {
+        try { ownAt = ownCore.baselineUnsafeComponent(projectRoot, ownFile) || ownFile; }
+        catch (e2) { ownAt = ownFile; }
+      }
+      line(BAD, 'state: this session\'s own workflow document is ' + ownState.toUpperCase()
+        + ' (' + ownAt + ') — the capability gate denies every tool in this session, and this '
         + 'is NOT a missing document, so /zensu:adopt-session --confirm will REFUSE to '
         + 'rebuild it: something is sitting at that path. Run /zensu:adopt-session for the '
         + 'diagnosis, inspect what is there before doing anything else, then start a fresh '
         + 'session.');
       return;
     }
-    if (ownShape === 'present') return;
-    if (ownShape === null && present) return;
+    if (ownState === null) {
+      // The check did NOT run. Returning on the legacy presence test here would
+      // render an all-clear for a verdict this renderer never reached.
+      line(WARN, 'state: this session\'s own workflow document could not be classified — the '
+        + 'Session Control core did not load from ' + pluginDir() + '. That is a missing '
+        + 'check, not an all-clear.');
+      return;
+    }
     // The full filename, as the invalid-document row prints full filenames: a
     // reader sent to repair a specific path needs its name. The 13-character
     // truncation belongs to the foreign-chain row, whose subject is somebody
@@ -2368,7 +2388,7 @@ function stateBlock(nowMs) {
   } catch (e) {
     if (e && e.code === 'ENOENT') {
       line(OK, 'state: ' + dir + ' does not exist yet — nothing to clean');
-      ownDocumentVerdict(false, false);
+      ownDocumentVerdict(false);
     } else {
       // Every other errno is a check that did NOT run. Rendering it green hid the
       // whole Session state block behind an all-clear, which is the one verdict
@@ -2397,12 +2417,7 @@ function stateBlock(nowMs) {
   // is: the key is what makes the question answerable at all, and a missing key is
   // a missing check rather than a pass. Deliberately NOT gated on the document
   // count — the finding is the same whether the directory holds none or a hundred.
-  var ownBaselineKey = currentSessionKey();
-  ownDocumentVerdict(
-    ownBaselineKey !== ''
-      && workflowDocs.indexOf('tdd-phase-' + ownBaselineKey + '.json') !== -1,
-    true,
-  );
+  ownDocumentVerdict(true);
   if (!workflowDocs.length) {
     line(OK, 'state: no CAS workflow documents yet');
   } else {

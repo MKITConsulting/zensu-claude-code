@@ -243,6 +243,14 @@ printf '{"hooks":{"reviewJudge":true,"secretScan":false}}\n' > "$SBOX/good-cfg.j
 # .js, so the wiring row — which reads hooks/*.sh — does not see it as unwired.
 mkdir -p "$SBOX/plug/hooks/lib" "$SBOX/plug/docs"
 cp "$PLUGIN_DIR/hooks/lib/rule-block-v1.js" "$SBOX/plug/hooks/lib/rule-block-v1.js"
+# The Session Control core, for the SAME reason and with a sharper consequence.
+# `ownDocumentVerdict` requires it out of `pluginDir()` to classify this session's
+# own workflow document; without it every P6 arm took the load-failure path and
+# the four-state classification — including the whole UNSAFE row — was unexecuted
+# and deletable with this suite green. Copied rather than stubbed: a stub would
+# let the row go green against a classifier nothing ships.
+cp "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" "$SBOX/plug/hooks/lib/session-control-core-v1.js"
+cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$SBOX/plug/hooks/lib/claude-path-v1.js" 2>/dev/null || true
 cp "$PLUGIN_DIR/docs/best-solution-first.md" "$SBOX/plug/docs/best-solution-first.md"
 cp "$PLUGIN_DIR/docs/evidence-discipline.md" "$SBOX/plug/docs/evidence-discipline.md"
 
@@ -3143,13 +3151,63 @@ case "$P6_OUT" in
 esac
 
 # The positive control. Without it the row above passes in a tree where it fires
-# unconditionally, which would warn on every healthy session.
-: > "$P6_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json"
+# unconditionally, which would warn on every healthy session. It uses a REAL
+# document rather than an empty file: the row consults the four-state classifier,
+# for which an empty file is UNREADABLE — so an empty-file control would exclude
+# only the MISSING wording and pass while the UNREADABLE row fired, which is the
+# presence-only semantics this control exists to rule out.
+P6_INIT_RC=0
+CORE_PATH="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" P6P="$P6_PROJECT" P6K="$P6_KEY" \
+  node -e '
+    const core = require(process.env.CORE_PATH);
+    core.initializeWorkflowState({ projectRoot: process.env.P6P, sessionId: process.env.P6K });
+  ' >/dev/null 2>&1 || P6_INIT_RC=$?
 P6_PRESENT="$(run_report_own bound "$P6_KEY")"
 case "$P6_PRESENT" in
-  *"own workflow document is MISSING"*) check "P6b the row fires on a present document too" FAIL ;;
-  *) check "P6b a present own document renders no row" PASS ;;
+  *"own workflow document is"*)
+    check "P6b a healthy own document renders no row (init_rc=$P6_INIT_RC)" FAIL ;;
+  *) check "P6b a healthy own document renders no row" PASS ;;
 esac
+
+# P6g — the UNSAFE arm. A hard link passes every test a plain regular file passes
+# except nlink, so it is the shape a presence test admits. The row must NOT offer
+# the rebuild: the repair refuses this by design, and promising it here is the
+# contradiction the Stop arm and the capability gate were corrected for.
+P6_LINK_SRC="$SBOX/p6-link-src.json"
+printf '%s' '{}' >"$P6_LINK_SRC"
+rm -f "$P6_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json"
+ln "$P6_LINK_SRC" "$P6_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json"
+P6_UNSAFE="$(run_report_own bound "$P6_KEY")"
+case "$P6_UNSAFE" in
+  *"own workflow document is UNSAFE"*"will REFUSE"*)
+    check "P6g a hard-linked own document is UNSAFE and is offered no rebuild" PASS ;;
+  *) check "P6g a hard-linked own document is UNSAFE and is offered no rebuild (got: $P6_UNSAFE)" FAIL ;;
+esac
+case "$P6_UNSAFE" in
+  *"own workflow document is MISSING"*)
+    check "P6g2 the UNSAFE arm must not also render the MISSING remedy" FAIL ;;
+  *) check "P6g2 the UNSAFE arm renders no MISSING remedy" PASS ;;
+esac
+rm -f "$P6_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json" "$P6_LINK_SRC"
+
+# P6h — the load-failure path DISCLOSES rather than returning silently. Round 3
+# found a shape where a partially loadable core discarded a correct verdict and
+# rendered nothing; a check that cannot run must say so.
+P6_NOCORE="$SBOX/p6-nocore"
+mkdir -p "$P6_NOCORE/hooks/lib"
+cp "$PLUGIN_DIR/hooks/lib/rule-block-v1.js" "$P6_NOCORE/hooks/lib/rule-block-v1.js"
+: > "$P6_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json"
+P6_NOCORE_OUT="$(ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_DOCTOR_PLUGIN_DIR="$P6_NOCORE" CLAUDE_PROJECT_DIR="$P6_PROJECT" \
+  ZDOC_BINDING=bound ZDOC_SESSION_KEY="$P6_KEY" ZDOC_SESSION_PROJECT_ROOT="$P6_PROJECT" \
+  node "$REPORT" 2>/dev/null)"
+case "$P6_NOCORE_OUT" in
+  *"could not be classified"*"missing check, not an all-clear"*)
+    check "P6h an unloadable core discloses a missing check rather than staying silent" PASS ;;
+  *) check "P6h an unloadable core discloses a missing check (got: $P6_NOCORE_OUT)" FAIL ;;
+esac
+rm -f "$P6_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json"
 rm -f "$P6_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json"
 
 # Silence is the one verdict a diagnostic may not give: with no bound key the

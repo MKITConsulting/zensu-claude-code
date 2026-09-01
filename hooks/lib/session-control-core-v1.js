@@ -1761,6 +1761,17 @@ const BASELINE_HISTORY_REASON_PREFIX = 'baseline-rebuilt: ';
 const BASELINE_ALREADY_PRESENT_CODE = 'ZENSU_WORKFLOW_BASELINE_ALREADY_PRESENT';
 const BASELINE_NOT_REPAIRABLE_CODE = 'ZENSU_WORKFLOW_BASELINE_NOT_REPAIRABLE';
 
+// The PREDICATE, not the raw constant, is what consumers must use. Comparing
+// `error.code === core.BASELINE_ALREADY_PRESENT_CODE` reads as a match whenever
+// BOTH sides are undefined — a port that copies the writer without the constant,
+// or any tree where the export is dropped, then reports EVERY refusal as the
+// benign race: headline "nothing to repair", exit 0, tamper included. A function
+// that tests a non-empty string cannot fail that way.
+function isBaselineAlreadyPresent(error) {
+  return Boolean(error) && error.code === BASELINE_ALREADY_PRESENT_CODE
+    && typeof BASELINE_ALREADY_PRESENT_CODE === 'string' && BASELINE_ALREADY_PRESENT_CODE !== '';
+}
+
 function baselineRefusal(reason) {
   return { ok: false, reason };
 }
@@ -4267,6 +4278,7 @@ module.exports = {
   BASELINE_NOT_REPAIRABLE_CODE,
   baselineUnsafeComponent,
   classifyWorkflowBaselineShape,
+  isBaselineAlreadyPresent,
   BASELINE_HISTORY_PHASE,
   BASELINE_HISTORY_REASON_PREFIX,
   // Exported for the unit layer alone: driving the unsafe/unreadable arms

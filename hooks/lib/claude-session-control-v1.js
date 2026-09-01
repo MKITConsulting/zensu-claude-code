@@ -241,7 +241,11 @@ function main() {
           // Re-classifying here worked but put the decision in the host adapter,
           // where the sibling caller made the opposite one; the core now types the
           // two cases apart so both hosts branch on one judgement.
-          if (error && error.code === core.BASELINE_ALREADY_PRESENT_CODE) {
+          // The PREDICATE, never the raw constant: `undefined === undefined` reads
+          // as a match, so a tree where the export is missing would report every
+          // refusal — tamper included — as the benign race.
+          if (typeof core.isBaselineAlreadyPresent === 'function'
+            && core.isBaselineAlreadyPresent(error)) {
             // Someone else healed it. That is the outcome this branch wanted.
           } else {
             throw error;

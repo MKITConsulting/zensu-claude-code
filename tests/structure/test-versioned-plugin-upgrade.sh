@@ -2944,9 +2944,16 @@ BASELINE_DIRECT_OUT="$(
     rc_pub_phase=0;  tdd_write_phase "$sid" forged BASELINE_REBUILT >/dev/null 2>&1 || rc_pub_phase=$?
     rc_pub_reason=0; tdd_write_phase "$sid" forged IMPL "baseline-rebuilt: forged" >/dev/null 2>&1 || rc_pub_reason=$?
     rc_crit_phase=0
-    _tdd_write_phase_critical "$sf" "$sid" forged BASELINE_REBUILT "" >/dev/null 2>&1 || rc_crit_phase=$?
+    # SIX arguments, not five. The function reads the sixth (a timestamp) AFTER its
+    # six guard returns, and the library runs under set -u — so a five-argument
+    # call on a tree with the guard DELETED aborts the subshell at the unbound
+    # expansion before any write is attempted. The mutation probe showed exactly
+    # that: the rcs line came back EMPTY and only the public writer forged an
+    # entry. With the sixth argument a removed guard really reaches
+    # mutateWorkflowState, which is what the history assertion below can see.
+    _tdd_write_phase_critical "$sf" "$sid" forged BASELINE_REBUILT "" "" >/dev/null 2>&1 || rc_crit_phase=$?
     rc_crit_reason=0
-    _tdd_write_phase_critical "$sf" "$sid" forged IMPL "baseline-rebuilt: forged" >/dev/null 2>&1 || rc_crit_reason=$?
+    _tdd_write_phase_critical "$sf" "$sid" forged IMPL "baseline-rebuilt: forged" "" >/dev/null 2>&1 || rc_crit_reason=$?
     rc_control=0
     tdd_write_phase "$sid" control IMPL "ordinary reason" >/dev/null 2>&1 || rc_control=$?
     echo "$rc_pub_phase:$rc_pub_reason:$rc_crit_phase:$rc_crit_reason:$rc_control"

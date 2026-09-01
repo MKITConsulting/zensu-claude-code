@@ -319,7 +319,11 @@ const repairBaseline = (request, baseline) => {
     // cleared first" for a session that was already fine, while the SessionStart
     // caller swallowed the identical throw. The core now types the two apart so
     // both callers make ONE judgement.
-    if (error && error.code === core.BASELINE_ALREADY_PRESENT_CODE) {
+    // The PREDICATE, never the raw constant: `undefined === undefined` reads as a
+    // match, so a tree where the export is missing would report every refusal —
+    // tamper included — as the benign race, with exit 0 and "nothing to repair".
+    if (typeof core.isBaselineAlreadyPresent === "function"
+      && core.isBaselineAlreadyPresent(error)) {
       return { ...baseline, state: core.BASELINE_STATES.PRESENT, healedElsewhere: true };
     }
     return {
@@ -436,6 +440,16 @@ function renderBaselineNotes(baseline, sessionId) {
   const out = [];
   const w = (line) => out.push(line);
   if (!baseline) return "";
+  if (baseline.healedElsewhere) {
+    // Its OWN sentence, which is this function's stated contract. Without it the
+    // benign race rendered byte-identical to "the document was fine all along":
+    // headline "nothing to repair", `workflow baseline: present`, exit 0 — for a
+    // user whose report-only run had just called the document MISSING.
+    w("\nNOTE: the workflow document was missing when this command reported it, and was\n");
+    w("rebuilt by something else — a concurrent SessionStart, or a second window — before\n");
+    w("--confirm acted. This run rebuilt nothing, and the session is usable again.\n");
+    return out.join("");
+  }
   if (baseline.rebuilt) {
     w("\nNOTE: the workflow document was missing and has been rebuilt at\n");
     w("  " + safe(baseline.path) + "\n");
@@ -605,11 +619,33 @@ function main() {
     // break PLUS a missing baseline lands here: the record is re-minted, the
     // report reads fully successful, and the capability gate then denies every
     // later tool call for the one reason this report did not mention.
-    process.stdout.write("\nWARNING: this session has NO workflow document, so there was nothing to record the\n");
-    process.stdout.write("takeover in — and while it is gone the capability gate denies EVERY tool in this\n");
-    process.stdout.write("session. The adoption above is real and is not enough on its own.\n");
-    process.stdout.write("Re-run this command with --confirm to rebuild the document; rebuilding is a loss,\n");
-    process.stdout.write("not a restore — a review chain that was live when it vanished is gone.\n");
+    // CLASSIFY before promising. `adoptContext` decides this provenance with
+    // `fs.existsSync`, which FOLLOWS symlinks and returns false on any error — so
+    // a dangling symlink or an EACCES at the leaf lands here too, and an
+    // unconditional "re-run with --confirm to rebuild" then points at a repair
+    // that refuses by design. That is the same `test -e` hazard the Stop arm was
+    // qualified for and the doctor row was moved off, left standing on this one
+    // carrier.
+    let adoptedShape = null;
+    try {
+      adoptedShape = core.classifyWorkflowBaselineShape(
+        core.adoptionWorkflowStatePath(adopted.projectRoot, request.sessionId),
+        adopted.projectRoot,
+      );
+    } catch (_error) { adoptedShape = null; }
+    process.stdout.write("\nWARNING: this session has no usable workflow document, so there was nothing to\n");
+    process.stdout.write("record the takeover in — and while that is so the capability gate denies EVERY\n");
+    process.stdout.write("tool in this session. The adoption above is real and is not enough on its own.\n");
+    if (adoptedShape === core.BASELINE_STATES.UNSAFE) {
+      process.stdout.write("Something is SITTING at that path, so --confirm will REFUSE to rebuild it:\n");
+      process.stdout.write("  " + safe(core.baselineUnsafeComponent(adopted.projectRoot,
+        core.adoptionWorkflowStatePath(adopted.projectRoot, request.sessionId))) + "\n");
+      process.stdout.write("Inspect that before doing anything else, then start a fresh session.\n");
+    } else {
+      process.stdout.write("Re-run this command with --confirm to rebuild the document, provided it is\n");
+      process.stdout.write("genuinely absent rather than replaced; rebuilding is a loss, not a restore — a\n");
+      process.stdout.write("review chain that was live when it vanished is gone.\n");
+    }
   } else if (adopted.provenance !== "recorded") {
     process.stdout.write("\nWARNING: the adoption succeeded but its provenance entry could not be written.\n");
     process.stdout.write("The takeover is real and unrecorded in the workflow history; report this rather than repeating it.\n");
