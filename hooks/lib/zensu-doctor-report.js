@@ -2315,13 +2315,46 @@ function stateBlock(nowMs) {
       }
       return;
     }
-    if (present) return;
+    var ownFile = path.join(dir, 'tdd-phase-' + ownKey + '.json');
+    // The FOUR-state classifier decides, not a filename-presence test, and the
+    // difference decides which remedy the row prints. `readdirSync` follows
+    // symlinks, so a dangling `.zensu/state` yielded ENOENT here and the row
+    // promised a rebuild the repair refuses by design — the same contradiction
+    // the Stop arm and the capability gate were just corrected for. The mirror
+    // case was worse because it was silent: a `.zensu/state` symlinked to a real
+    // directory holding the document made `present` true and rendered NOTHING,
+    // while the gate denied every tool. A load fault falls back to the presence
+    // test rather than dropping the row.
+    var ownShape = null;
+    var ownUnsafeAt = ownFile;
+    try {
+      var ownCore = require(path.join(pluginDir(), 'hooks', 'lib', 'session-control-core-v1.js'));
+      ownShape = ownCore.classifyWorkflowBaselineShape(ownFile, projectRoot);
+      if (ownShape === 'unsafe') ownUnsafeAt = ownCore.baselineUnsafeComponent(projectRoot, ownFile);
+    } catch (e) { ownShape = null; }
+    // The SHAPE half is what this renderer can reach: it holds a session key, not
+    // a raw session id, so the parse (which would separate PRESENT from
+    // UNREADABLE) is not available here. That is enough for the decision this row
+    // makes — MISSING gets the rebuild remedy, UNSAFE does not — and an
+    // unreadable-but-well-shaped document is already reported by the invalid-CAS
+    // row below.
+    if (ownShape === 'unsafe') {
+      line(BAD, 'state: this session\'s own workflow document is UNSAFE ('
+        + ownUnsafeAt + ') — the capability gate denies every tool in this session, and this '
+        + 'is NOT a missing document, so /zensu:adopt-session --confirm will REFUSE to '
+        + 'rebuild it: something is sitting at that path. Run /zensu:adopt-session for the '
+        + 'diagnosis, inspect what is there before doing anything else, then start a fresh '
+        + 'session.');
+      return;
+    }
+    if (ownShape === 'present') return;
+    if (ownShape === null && present) return;
     // The full filename, as the invalid-document row prints full filenames: a
     // reader sent to repair a specific path needs its name. The 13-character
     // truncation belongs to the foreign-chain row, whose subject is somebody
     // else's session.
     line(BAD, 'state: this session\'s own workflow document is MISSING ('
-      + path.join(dir, 'tdd-phase-' + ownKey + '.json')
+      + ownFile
       + ') — while it is gone the capability gate denies every tool in this session, '
       + 'because a deleted document must never be read as "no chain was ever active". '
       + 'A deleted and re-created worktree loses it, since .zensu/state/ is gitignored. '

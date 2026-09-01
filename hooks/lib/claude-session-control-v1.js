@@ -205,14 +205,29 @@ function main() {
       if (baselineState === core.BASELINE_STATES.MISSING) {
         try {
           // Records its own BASELINE_REBUILT history entry, so an automatic heal is
-          // never silent — the same provenance the confirmed repair leaves.
-          core.repairWorkflowBaseline({
+          // never silent — the same provenance the confirmed repair leaves. The
+          // RESULT is read rather than discarded: repairWorkflowBaseline catches a
+          // failed mutateWorkflowState internally and returns
+          // `provenance: "unavailable: ..."` instead of throwing, so an
+          // unrecorded rebuild would otherwise leave no trace on the ONE path that
+          // runs without the user asking for it. The confirmed path already
+          // surfaces this; this one said nothing.
+          const healed = core.repairWorkflowBaseline({
             recordsDir,
             sessionId: payload.session_id,
             pluginData,
             executingPluginRoot: pluginRoot,
             host: 'claude',
           });
+          if (healed && healed.provenance !== 'recorded') {
+            process.stderr.write(
+              'zensu SessionStart: the workflow document was rebuilt but its '
+              + 'BASELINE_REBUILT provenance entry could not be written ('
+              + String(healed.provenance) + '). The rebuild is real and '
+              + 'unrecorded in the workflow history; report this rather than '
+              + 'repeating it.\n',
+            );
+          }
         } catch (error) {
           // repairWorkflowBaseline re-evaluates the verdict and refuses anything
           // that is no longer `missing`. Between the classify above and its own
@@ -220,15 +235,17 @@ function main() {
           // and this adapter has NO local catch, so that benign race exited the
           // whole SessionStart hook non-zero and left the session with no baseline
           // for the rest of its life: the exact class of wedge this branch exists
-          // to remove. Re-classify rather than matching the refusal text: a
-          // document that is now PRESENT is the outcome we wanted; every other
-          // state still fails, so a planted symlink or hard link is not laundered
-          // into a success by this catch.
-          if (core.classifyWorkflowBaseline(
-            baselineFile,
-            context.project_root,
-            payload.session_id,
-          ) !== core.BASELINE_STATES.PRESENT) throw error;
+          // to remove.
+          //
+          // The CODE decides, not a second classification and not the message.
+          // Re-classifying here worked but put the decision in the host adapter,
+          // where the sibling caller made the opposite one; the core now types the
+          // two cases apart so both hosts branch on one judgement.
+          if (error && error.code === core.BASELINE_ALREADY_PRESENT_CODE) {
+            // Someone else healed it. That is the outcome this branch wanted.
+          } else {
+            throw error;
+          }
         }
       } else if (baselineState !== core.BASELINE_STATES.PRESENT) {
         fail(`SessionStart workflow document is ${baselineState}: ${baselineFile}`);

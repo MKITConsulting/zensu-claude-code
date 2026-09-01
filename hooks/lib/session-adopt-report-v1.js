@@ -284,7 +284,14 @@ const baselineVerdict = (request) => {
     };
   }
   if (!verdict.ok) return { refusal: verdict.reason };
-  return { state: verdict.state, path: verdict.path, projectRoot: verdict.projectRoot };
+  return {
+    state: verdict.state,
+    path: verdict.path,
+    // The component the refusal is about. Naming the leaf for an ancestor fault
+    // sends the operator to a path that need not exist.
+    unsafeAt: verdict.unsafeAt || null,
+    projectRoot: verdict.projectRoot,
+  };
 };
 
 // The baseline half of a --confirm run. It runs BEFORE the lease sweep, and the
@@ -305,6 +312,16 @@ const repairBaseline = (request, baseline) => {
       path: repaired.path,
     };
   } catch (error) {
+    // A BENIGN race is not a fault. Between this command's verdict and the core's
+    // own re-check, a concurrent SessionStart or a second window can heal the
+    // document — which is the outcome this command wanted. Reporting that as
+    // `rebuild-failed` gave exit 1 and told the user "the cause above has to be
+    // cleared first" for a session that was already fine, while the SessionStart
+    // caller swallowed the identical throw. The core now types the two apart so
+    // both callers make ONE judgement.
+    if (error && error.code === core.BASELINE_ALREADY_PRESENT_CODE) {
+      return { ...baseline, state: core.BASELINE_STATES.PRESENT, healedElsewhere: true };
+    }
     return {
       ...baseline,
       fault: "rebuild-failed",
@@ -389,7 +406,16 @@ function renderBaselineDiagnosis(baseline, sessionId) {
   if (baseline && (baseline.state === core.BASELINE_STATES.UNSAFE
     || baseline.state === core.BASELINE_STATES.UNREADABLE)) {
     w("\nThis session's workflow document is " + safe(baseline.state).toUpperCase() + ":\n");
-    w("  " + safe(baseline.path) + "\n");
+    // The OFFENDING component, which is not always the leaf: the directory ladder
+    // reports the same UNSAFE token for a symlinked `.zensu` or `.zensu/state`,
+    // and with one of those replaced the leaf below it need not exist at all —
+    // so printing the leaf sent the operator to a path they could not inspect and
+    // told them to remove a file that was not there.
+    w("  " + safe(baseline.unsafeAt || baseline.path) + "\n");
+    if (baseline.unsafeAt && baseline.unsafeAt !== baseline.path) {
+      w("  (the document itself is " + safe(baseline.path) + ", but the component above\n");
+      w("  is what makes it unsafe — inspect that one)\n");
+    }
     // No repair is offered here, deliberately. Something IS sitting at that path;
     // rebuilding over it would destroy the evidence and hand the session its
     // capabilities back in the same step.
@@ -427,9 +453,17 @@ function renderBaselineNotes(baseline, sessionId) {
   if (baselineFault(baseline)) {
     // The lead states WHAT happened; the diagnosis owns the cause, the detail and
     // the remedy. Writing the fault token and `detail` here as well printed both
-    // twice, and the sessionId is threaded rather than passed as "" — an empty id
-    // makes core.sessionKey throw, so survivingEvidence's catch silently returned
-    // an empty list and the surviving-evidence block never rendered on this path.
+    // twice.
+    //
+    // The sessionId is threaded rather than passed as "", and the honest bound is
+    // that it is currently UNREAD on this path: the diagnosis's local-fault branch
+    // returns before the MISSING branch that lists surviving evidence, and
+    // `baselineFault` is truthy only for a local fault or for a tamper state,
+    // which takes its own branch. It is threaded anyway because passing "" was an
+    // active defect rather than a neutral placeholder — an empty id makes
+    // core.sessionKey throw, so survivingEvidence would silently return an empty
+    // list the moment a branch reordering made it reachable, which is exactly the
+    // failure this parameter now cannot have.
     w("\nWARNING: the workflow document was NOT repaired.\n");
     w(renderBaselineDiagnosis(baseline, sessionId));
     return out.join("");

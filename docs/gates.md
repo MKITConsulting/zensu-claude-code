@@ -15,8 +15,11 @@ bind failure including a record that exists and disagrees, and they are
 recognized by `hooks/lib/zensu-doctor-invocation.js` rather than by any
 individual gate: `/zensu:doctor`, which writes nothing, and
 `/zensu:adopt-session`, whose writes are confined to the calling session's own
-record, one workflow history entry, and a move of that session's stale
-review-evidence leases; it carries its own justification in the header of
+record, one workflow history entry, a move of that session's stale
+review-evidence leases, and — on an `already-served` refusal with `--confirm`
+only — that session's own missing workflow document plus its `.zensu` ancestors
+under the recorded project root; it carries its own justification, and the
+authoritative four-class enumeration, in the header of
 `hooks/lib/zensu-session-adopt.sh`. Both are matched as exact whitelisted shapes
 — a closed set of assignments, one `bash <script in the executing installation>`,
 and for the adoption at most the literal `--confirm`. Every hook on the `Bash`

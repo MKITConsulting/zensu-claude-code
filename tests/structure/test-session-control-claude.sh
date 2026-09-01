@@ -1095,5 +1095,55 @@ case "$(uname -s)" in
     ;;
 esac
 
+# --------------------------------------------------------- SessionStart baseline self-heal
+#
+# The record-exists branch re-initializes a MISSING workflow document on a clean
+# ENOENT, and FAILS for anything else. Both arms were uncovered: no test in the
+# tree removed the document and re-fired SessionStart, and the fresh-creation row
+# far above asserts only that a NEW session gets one. That mattered because the
+# narrowing carries the whole safety argument — changing `=== MISSING` to
+# `!== PRESENT` would make an automatic, UNCONFIRMED rebuild run over a planted
+# symlink or hard link, and nothing in the tree would have gone red.
+
+rm -f "$BASELINE_A"
+HEAL_PAYLOAD="$(payload SessionStart "$SID_A" "$PROJECT_A")"
+HEAL_RC=0
+printf '%s' "$HEAL_PAYLOAD" | CLAUDE_PLUGIN_ROOT="$ROOT" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
+  CLAUDE_ENV_FILE="$ENV_FILE" bash "$HOOK" >"$TMP/heal.out" 2>"$TMP/heal.err" || HEAL_RC=$?
+if [ "$HEAL_RC" -eq 0 ] && [ -f "$BASELINE_A" ] && node -e '
+  const core = require(process.argv[1]);
+  const state = core.readWorkflowState({projectRoot: process.argv[2], sessionId: process.argv[3]});
+  const h = Array.isArray(state.history) ? state.history : [];
+  const rebuilt = h.filter((e) => e && e.phase === "BASELINE_REBUILT");
+  process.exit(rebuilt.length === 1 && typeof rebuilt[0].ts === "string" && rebuilt[0].ts !== ""
+    && Array.isArray(state.bypasses) && state.bypasses.length === 0 ? 0 : 1);
+' "$CORE" "$PROJECT_A" "$SID_A"; then
+  check "SessionStart heals a MISSING workflow document and records exactly one BASELINE_REBUILT entry" PASS
+else
+  check "SessionStart heals a MISSING workflow document and records exactly one BASELINE_REBUILT entry (rc=$HEAL_RC)" FAIL
+  head -c 300 "$TMP/heal.err" 2>/dev/null
+fi
+
+# The DISCRIMINATOR. Without it the row above passes identically in a tree that
+# rebuilds anything it cannot read, which is the property the ENOENT-only bound
+# exists to hold.
+HEAL_LINK_SRC="$TMP/heal-link-src.json"
+printf '%s' '{"planted":true}' >"$HEAL_LINK_SRC"
+rm -f "$BASELINE_A"
+ln "$HEAL_LINK_SRC" "$BASELINE_A"
+TAMPER_RC=0
+printf '%s' "$HEAL_PAYLOAD" | CLAUDE_PLUGIN_ROOT="$ROOT" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
+  CLAUDE_ENV_FILE="$ENV_FILE" bash "$HOOK" >"$TMP/heal-tamper.out" 2>"$TMP/heal-tamper.err" \
+  || TAMPER_RC=$?
+if [ "$TAMPER_RC" -ne 0 ] \
+    && [ "$(cat "$BASELINE_A" 2>/dev/null)" = '{"planted":true}' ] \
+    && [ "$(cat "$HEAL_LINK_SRC" 2>/dev/null)" = '{"planted":true}' ]; then
+  check "SessionStart refuses a hard-linked workflow document and leaves its bytes alone" PASS
+else
+  check "SessionStart refuses a hard-linked workflow document and leaves its bytes alone (rc=$TAMPER_RC)" FAIL
+  head -c 300 "$TMP/heal-tamper.err" 2>/dev/null
+fi
+rm -f "$BASELINE_A"
+
 printf '%s\n' "----" "test-session-control-claude: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

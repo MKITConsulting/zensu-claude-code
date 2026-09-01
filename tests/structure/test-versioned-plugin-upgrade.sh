@@ -2715,7 +2715,7 @@ fi
 
 rm -f "$BASELINE_DOC"
 
-# AC-007 — the deny NAMES the cause and the command. The generic wording is what
+# AC-D07 — the deny NAMES the cause and the command. The generic wording is what
 # this row exists to keep out: it is accurate and names no way out, in a state
 # where this hook denies every tool.
 BASELINE_DENY="$(gate_decision_from "$SYNTHETIC_COMPATIBLE_ROOT" \
@@ -2763,7 +2763,7 @@ else
   printf '%s\n' "$BASELINE_TAMPER_REASON" | head -c 300
 fi
 
-# AC-009 — the doctor row is ARMED and never silent.
+# AC-D09 — the doctor row is ARMED and never silent.
 #
 # What this fixture can establish is the DISCLOSURE half, and the reason is
 # recorded rather than worked around: the wrapper's own bind does not resolve in
@@ -2795,7 +2795,7 @@ else
   grep -F 'state:' "$BASELINE_DOCTOR_OUT" 2>/dev/null | head -3
 fi
 
-# AC-005 — the report-only run diagnoses it and WRITES NOTHING. Proven by the
+# AC-D05 — the report-only run diagnoses it and WRITES NOTHING. Proven by the
 # file still being absent, never by the output alone: "it is read-only" is the
 # premise the PreToolUse recognizer's admission of this command rests on.
 BASELINE_REPORT_OUT="$TMP/baseline-report.out"
@@ -2815,7 +2815,7 @@ else
   head -c 300 "$BASELINE_REPORT_OUT" 2>/dev/null
 fi
 
-# AC-006 / AC-011 — --confirm rebuilds it, and the session can run tools again.
+# AC-D06 / AC-D11 — --confirm rebuilds it, and the session can run tools again.
 BASELINE_CONFIRM_OUT="$TMP/baseline-confirm.out"
 CLAUDE_CODE_SESSION_ID="$SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
   bash "$SYNTHETIC_COMPATIBLE_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
@@ -2830,7 +2830,7 @@ else
   head -c 300 "$BASELINE_CONFIRM_OUT" 2>/dev/null
 fi
 
-# AC-003 end to end — exactly one provenance entry, and NO bypass-ledger entry.
+# AC-D03 end to end — exactly one provenance entry, and NO bypass-ledger entry.
 # The ledger records gate ESCAPES so that everything under "Gates bypassed" is
 # true; this escaped no gate, because the document a gate would have read was
 # already gone.
@@ -2856,7 +2856,7 @@ else
   check "AC-D11 the session runs ordinary commands again after the repair (saw $BASELINE_AFTER)" FAIL
 fi
 
-# AC-006 second half — a second --confirm is a no-op on the baseline rather than
+# AC-D06 second half — a second --confirm is a no-op on the baseline rather than
 # a second rebuild, and must not report one.
 BASELINE_SECOND_OUT="$TMP/baseline-second.out"
 CLAUDE_CODE_SESSION_ID="$SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
@@ -2872,7 +2872,7 @@ else
   head -c 300 "$BASELINE_SECOND_OUT" 2>/dev/null
 fi
 
-# AC-004 — the provenance phase and its reason prefix cannot be minted by a
+# AC-D04 — the provenance phase and its reason prefix cannot be minted by a
 # caller, the same protection CHAIN_RECOVERED and RUNTIME_ADOPTED carry, for the
 # same reason: a forgeable provenance entry is worse than none, because it is
 # believed. CLAUDE_CODE_SESSION_ID is REQUIRED — zensu-log.sh binds the model
@@ -2983,7 +2983,7 @@ else
   head -c 400 "$TMP/baseline-direct.err" 2>/dev/null
 fi
 
-# AC-002 end to end — a document that is PRESENT but unreadable is never rebuilt
+# AC-D02 end to end — a document that is PRESENT but unreadable is never rebuilt
 # over. This is the discrimination test for the whole feature: without it, "the
 # repair rebuilds a missing document" and "the repair rebuilds anything it cannot
 # read" pass exactly the same checks.

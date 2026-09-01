@@ -1752,6 +1752,15 @@ const BASELINE_REFUSALS = {
 const BASELINE_HISTORY_PHASE = 'BASELINE_REBUILT';
 const BASELINE_HISTORY_REASON_PREFIX = 'baseline-rebuilt: ';
 
+// The two ways repairWorkflowBaseline can refuse, as CODES rather than as prose a
+// caller has to substring-match. The distinction is the whole reason they exist:
+// ALREADY_PRESENT is benign — someone else healed the document between the
+// caller's verdict and this one, which is the outcome the caller wanted — while
+// NOT_REPAIRABLE means something is sitting at that path and the refusal is the
+// point. Callers that cannot tell them apart end up contradicting each other.
+const BASELINE_ALREADY_PRESENT_CODE = 'ZENSU_WORKFLOW_BASELINE_ALREADY_PRESENT';
+const BASELINE_NOT_REPAIRABLE_CODE = 'ZENSU_WORKFLOW_BASELINE_NOT_REPAIRABLE';
+
 function baselineRefusal(reason) {
   return { ok: false, reason };
 }
@@ -1772,7 +1781,16 @@ function baselineRefusal(reason) {
 // rebuildable, while the write then failed at ensureDescendantDirectory and the
 // report told the user to retry the repair that cannot succeed. The gate this
 // claims to mirror has always checked them; the claim was false until it did.
-function classifyWorkflowBaseline(file, projectRoot, sessionId) {
+// The SHAPE half, split out because it needs no session id. Everything above the
+// parse — the directory ladder and the leaf's safety tests — answers MISSING or
+// UNSAFE from the filesystem alone, and PRESENT here means only "the shape is
+// fine, now read it". `/zensu:doctor` holds a session KEY rather than a raw
+// session id, so it can reach this and not the full classifier; without the split
+// it was left deciding MISSING from a `readdirSync` listing, which follows
+// symlinks and therefore promised a rebuild for shapes the repair refuses by
+// design, and rendered NOTHING when a symlinked component resolved to a real
+// directory holding the document while the gate denied every tool.
+function classifyWorkflowBaselineShape(file, projectRoot) {
   // The ladder is anchored on the RESOLVED project root, not on the caller's
   // spelling. revalidateWorkflowState can compare each component against itself
   // because its projectRoot arrives canonical from the bound record; this function
@@ -1785,8 +1803,15 @@ function classifyWorkflowBaseline(file, projectRoot, sessionId) {
   let rootReal;
   try {
     rootReal = fs.realpathSync.native(projectRoot);
-  } catch (error) {
-    if (error && error.code === 'ENOENT') return BASELINE_STATES.MISSING;
+  } catch {
+    // UNSAFE for EVERY failure, ENOENT included, and that is not the same rule
+    // the component loop below uses. An absent COMPONENT is what the repair
+    // creates; an absent PROJECT ROOT is not — `initializeWorkflowState` fails on
+    // it, so calling it MISSING would set `repairable: true` and put the report
+    // back to offering a rebuild that cannot succeed, which is the exact shape
+    // this ladder was added to remove. A vanished recorded root is already owned
+    // by `readContext`, which refuses it as `record-unreadable` before any caller
+    // reaches here.
     return BASELINE_STATES.UNSAFE;
   }
   const zensuDirectory = path.join(rootReal, '.zensu');
@@ -1821,12 +1846,55 @@ function classifyWorkflowBaseline(file, projectRoot, sessionId) {
   if (stat.isSymbolicLink() || !stat.isFile() || stat.nlink !== 1 || stat.size > MAX_JSON_BYTES) {
     return BASELINE_STATES.UNSAFE;
   }
+  return BASELINE_STATES.PRESENT;
+}
+
+function classifyWorkflowBaseline(file, projectRoot, sessionId) {
+  const shape = classifyWorkflowBaselineShape(file, projectRoot);
+  if (shape !== BASELINE_STATES.PRESENT) return shape;
   try {
     readWorkflowState({ projectRoot, sessionId });
   } catch {
     return BASELINE_STATES.UNREADABLE;
   }
   return BASELINE_STATES.PRESENT;
+}
+
+// WHICH component made the verdict UNSAFE. The state alone cannot say: the ladder
+// returns the same bare token for a symlinked `.zensu`, a symlinked
+// `.zensu/state` and a bad leaf. Naming the leaf for all three sent the operator
+// to a path that need not exist — with `.zensu/state` symlinked elsewhere the
+// leaf is not there at all — while the diagnosis said "something is at that path"
+// and "remove the file". This file already fixed that class for the lease sweep
+// with `nameComponent()`; this is the same remedy for the same defect.
+//
+// Recomputed rather than threaded out of the classifier, so the classifier keeps
+// its one-value return and every existing caller and pin is untouched. It is only
+// ever called once, on a verdict already known to be UNSAFE.
+function baselineUnsafeComponent(projectRoot, file) {
+  let rootReal;
+  try {
+    rootReal = fs.realpathSync.native(projectRoot);
+  } catch {
+    return projectRoot;
+  }
+  const zensuDirectory = path.join(rootReal, '.zensu');
+  for (const candidate of [zensuDirectory, path.join(zensuDirectory, 'state')]) {
+    let componentStat;
+    try {
+      componentStat = fs.lstatSync(candidate);
+    } catch (error) {
+      if (error && error.code === 'ENOENT') continue;
+      return candidate;
+    }
+    if (componentStat.isSymbolicLink() || !componentStat.isDirectory()) return candidate;
+    try {
+      if (fs.realpathSync.native(candidate) !== candidate) return candidate;
+    } catch {
+      return candidate;
+    }
+  }
+  return file;
 }
 
 // Never throws, for the reason adoptableRecord never throws: every caller is
@@ -1868,6 +1936,11 @@ function workflowBaselineVerdict(options) {
     // hand the session its capabilities back in the same step.
     repairable: state === BASELINE_STATES.MISSING,
     path: file,
+    // The component the refusal is ABOUT, so a diagnosis can send the operator to
+    // the thing that is actually there. Equals `path` when the leaf is at fault.
+    unsafeAt: state === BASELINE_STATES.UNSAFE
+      ? baselineUnsafeComponent(context.project_root, file)
+      : null,
     projectRoot: context.project_root,
     context,
   };
@@ -1881,7 +1954,24 @@ function repairWorkflowBaseline(options) {
   const verdict = workflowBaselineVerdict(options);
   if (!verdict.ok) fail(`workflow baseline is not repairable: ${verdict.reason}`);
   if (!verdict.repairable) {
-    fail(`workflow baseline is not repairable: workflow-document-${verdict.state}`);
+    // TYPED, not a prose string. The refusal has two meanings a caller must be
+    // able to tell apart, and matching on the message is how that claim goes
+    // quietly wrong — the same argument reviewer-capability-v1.js makes for
+    // BASELINE_MISSING_CODE. `present` is a BENIGN race: between the caller's
+    // verdict and this one, a concurrent SessionStart or a second window healed
+    // the document, and the caller wanted it healed. Everything else is tamper.
+    // Without the code the two shipped callers disagreed: the SessionStart
+    // adapter re-classified and swallowed the race, while the adopt report
+    // reported `rebuild-failed`, exited 1, and told the user the cause had to be
+    // cleared first — for a session that was already fine.
+    const error = new Error(
+      `workflow baseline is not repairable: workflow-document-${verdict.state}`,
+    );
+    error.code = verdict.state === BASELINE_STATES.PRESENT
+      ? BASELINE_ALREADY_PRESENT_CODE
+      : BASELINE_NOT_REPAIRABLE_CODE;
+    error.baselineState = verdict.state;
+    throw error;
   }
   // Idempotent by construction: it returns an existing document untouched, so a
   // concurrent writer that won the race is never overwritten.
@@ -4173,6 +4263,10 @@ module.exports = {
   adoptionWorkflowStatePath,
   BASELINE_STATES,
   BASELINE_REFUSALS,
+  BASELINE_ALREADY_PRESENT_CODE,
+  BASELINE_NOT_REPAIRABLE_CODE,
+  baselineUnsafeComponent,
+  classifyWorkflowBaselineShape,
   BASELINE_HISTORY_PHASE,
   BASELINE_HISTORY_REASON_PREFIX,
   // Exported for the unit layer alone: driving the unsafe/unreadable arms

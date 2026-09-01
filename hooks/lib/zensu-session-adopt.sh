@@ -49,7 +49,9 @@
 #           document, plus one BASELINE_REBUILT history entry. It refuses a
 #           document that is present-but-unreadable, a symlink, a hard link, a
 #           non-file or an oversized one, leaving those bytes alone. It touches
-#           nothing outside <recorded project>/.zensu/state.
+#           nothing outside <recorded project>/.zensu — stated as `.zensu` and not
+#           `.zensu/state`, because the mkdir above creates BOTH components and
+#           `.zensu` is not inside `.zensu/state`.
 #       (b) write class 3, the lease sweep, re-run over the same session key. It
 #           touches nothing outside
 #           <plugin_data>/review-evidence/v1/{records,superseded}/<session key>.

@@ -1068,10 +1068,12 @@ exactly what is missing, and its absence is the signal.
 `already-served` + `--confirm` is ALREADY the "the record is fine, something beside it
 is wedged" path in `session-adopt-report-v1.js` (`shouldRepairInPlace`), and it swept
 the lease store. The baseline is its SECOND repairable item. Consequently
-`hooks/lib/zensu-doctor-invocation.js` is unchanged: the recognized list stays at two
-and `RECOGNIZED.adopt.args` stays `["--confirm"]`. A new command or a new flag would
-have needed its own justification written down the way that file demands; reusing the
-seam needed none.
+`hooks/lib/zensu-doctor-invocation.js`'s recognized COMMAND SET is unchanged: the
+recognized list stays at two and `RECOGNIZED.adopt.args` stays `["--confirm"]`. A new
+command or a new flag would have needed its own justification written down the way that
+file demands; reusing the seam needed none. Do NOT write "that file is unchanged" — its
+write-class comment DID move, it is on the roster below, and this paragraph and that
+roster contradicted each other about the same file for a release.
 
 **The baseline half runs BEFORE the lease sweep**, and that is a decision rather than
 layout: a wedged session cannot make a tool call until the document is back, while a
@@ -1139,13 +1141,19 @@ which consumes FIVE exported core symbols (`adoptionWorkflowStatePath`,
 `classifyWorkflowBaseline`, `BASELINE_STATES.MISSING`, `BASELINE_STATES.PRESENT`,
 `repairWorkflowBaseline`) and is the one caller with no local `fail` of its own — it was
 missing from this roster for a release, so a rename would have sent a maintainer to six
-sites and not to the self-heal; and the write-class enumerations in
-`hooks/lib/zensu-session-adopt.sh`'s header, `hooks/lib/zensu-doctor-invocation.js` and
-`reviewer-capability-v1.js`'s recognized-command comment — the adopt header is the
-document the PreToolUse recognizer's admission RESTS on, and the `--confirm` baseline
-repair added a FOURTH write class (this session's workflow document plus its
-`.zensu/state` ancestors, under the recorded project root) that all three enumerated as
-three for a release.
+sites and not to the self-heal; and the write-class enumerations, of which there are **FIVE** and not three:
+`hooks/lib/zensu-session-adopt.sh`'s header, `hooks/lib/zensu-doctor-invocation.js`,
+`reviewer-capability-v1.js`'s recognized-command comment, **`docs/session-control.md`
+§"Unbindable sessions"** and **the recognized-commands intro of `docs/gates.md`**. The
+adopt header is the document the PreToolUse recognizer's admission RESTS on, and the
+`--confirm` baseline repair added a FOURTH write class (this session's workflow document
+plus its `.zensu` ancestors, under the recorded project root) that all five enumerated as
+three for a release — the two DOC carriers were still stale a full round after the three
+code carriers were fixed, precisely because this roster named three. TWO of the four
+classes leave the plugin-data store, the document and the history entry, and the history
+entry is written on the ORDINARY adoption with no `already-served` qualifier; the
+recognizer's comment called the document write "the one" that leaves the store, which was
+false.
 **Operator-facing accounts:** `skills/adopt-session/SKILL.md` §"Strict Scope", its
 `already-served` refusal row, its "Do NOT Use For" bullet (TWO `--confirm` exceptions,
 not one — the lease store AND the workflow document; routing the second to
@@ -1218,6 +1226,37 @@ new one — the shape it refuses is byte-identical.
   `baselineVerdict` fires only for a throw AFTER a successful bind, which needs a real
   bound record the report unit suite does not build. Its sibling `rebuild-failed` IS
   driven from its producer. Stated rather than faked with a hand-built object.
+- **`classifyWorkflowBaseline`'s `file` parameter is derivable from its other two and
+  the relation is not enforced.** The directory ladder is anchored on
+  `fs.realpathSync.native(projectRoot)` while the leaf is lstat'ed on the caller's own
+  string, so a third caller passing a mismatched pair would have the ladder judge one
+  tree and the leaf name another, silently. Both shipped callers derive it with
+  `adoptionWorkflowStatePath`. Dropping the parameter is the durable fix and is NOT taken
+  here, because it churns every call site and pin for no behaviour change.
+- **`ownDocumentVerdict(present, discloseWithoutKey)` threads call-site identity through
+  a boolean**, so the policy it selects lives only in a comment. Passing the directory
+  state instead would read from a value that names the condition.
+- **`MAX_JSON_BYTES` (core) and `MAX_PAYLOAD_BYTES` (`reviewer-capability-v1.js`) are a
+  hand-copied pair with no pin.** They are equal today. Were the gate's bound lowered, a
+  document between the two would be denied by the `.*` gate while the classifier answered
+  PRESENT — so both the adopt report and the doctor row would call the document fine in a
+  session where every tool is refused. The gate already requires the core; importing the
+  bound is the fix.
+- **Four arms of the directory ladder have no executed case:** the root-realpath failure,
+  the component-lstat non-ENOENT errno, and the `realpathSync.native(candidate) !==
+  candidate` arm. `WB5a` covers the component-symlink arm and `WB1a` the non-directory
+  half. The canonical arm is the one that mirrors the gate's `is not canonical` check, so
+  a divergence between the two ladders would not be observed.
+- **Nothing in this repository can measure `hooks/lib` coverage.** The only `c8` script in
+  `package.json` includes `skills/session-trail/scripts/*.mjs`; the 80.93% / 72.63%
+  figures quoted for this feature came from an ad-hoc invocation and are not reproducible
+  by any command in the tree. An explicit `hooks:coverage` script is the fix. Note also
+  what re-measuring would NOT have caught: the vacuous `AC-D04b` is invisible to a
+  line-coverage tool, because the guard lines ARE executed.
+- **`renderBaselineNotes`'s `sessionId` is currently unread.** The diagnosis's local-fault
+  branch returns before the branch that lists surviving evidence, so the threading is
+  dead today. It is kept because passing `""` was an active defect — `core.sessionKey`
+  throws on it — rather than a neutral placeholder.
 - **One `--confirm` run derives the same bind three times**, and all three
   `BASELINE_REFUSALS` members are therefore unreachable from both shipped callers — both
   reach the verdict only after the bind is already established. The obvious fix, an entry
