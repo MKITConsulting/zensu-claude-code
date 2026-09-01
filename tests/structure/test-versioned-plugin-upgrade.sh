@@ -3423,9 +3423,15 @@ env ZDOC_BINDING=orphaned-project-root+incompatible-runtime \
 # on THIS row from the same bytes appearing anywhere else in the report. The two
 # NEGATIVES stay on the whole file deliberately — there, whole-file absence is the
 # stronger claim, not the weaker one.
+# The value-reached-the-row needle is a fragment of the VALUE, never its POSIX
+# spelling. It was `/tmp/gone`, and that could not match on Windows: Git Bash rewrites
+# a POSIX `/tmp/...` argument into the native `C:/Users/.../Temp/...` on the way into a
+# native binary, so the row legitimately carried the converted path and the check failed
+# for the host's spelling rather than for the fold. `gnop` is the reversed-text fragment
+# the fixture itself plants, survives that conversion, and appears in no prose here.
 DOCTOR_FOLD_ROW="$(grep -F 'binding:' "$DOCTOR_FOLD_OUT" 2>/dev/null || true)"
 if printf '%s' "$DOCTOR_FOLD_ROW" | grep -qF 'BOTH the recorded project root' \
-    && printf '%s' "$DOCTOR_FOLD_ROW" | grep -qF '/tmp/gone' \
+    && printf '%s' "$DOCTOR_FOLD_ROW" | grep -qF 'gnop' \
     && printf '%s' "$DOCTOR_FOLD_ROW" | grep -qF "\\u202e" \
     && ! LC_ALL=C grep -qF "$(printf '‮')" "$DOCTOR_FOLD_OUT" \
     && ! LC_ALL=C grep -qF "$(printf ' ')" "$DOCTOR_FOLD_OUT"; then

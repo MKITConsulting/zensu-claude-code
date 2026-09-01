@@ -523,9 +523,9 @@ mechanism over `codeRoots[]` is specified as a stage-2 precondition.
 **The Session Control record does not authenticate its own contents either.**
 This matters because §6.1.1 offers that record as a carrier, which reads as
 though it settles requirement 1. `validateContext`
-(`hooks/lib/session-control-core-v1.js:546`) enforces the schema pair, a fixed
+(`hooks/lib/session-control-core-v1.js:599`) enforces the schema pair, a fixed
 list of required fields, and that `source_revision` equals `runtime_digest` — but
-that digest is computed by `manifestRuntimeEntries` (`:391`) over the executing
+that digest is computed by `manifestRuntimeEntries` (`:424`) over the executing
 plugin tree's `hooks`, `agents`, `skills`, `docs` and `templates` plus the
 manifest. Nothing in it covers the record's own fields. A `code_roots` entry
 rewritten in place would leave the digest untouched and validate. There is also
