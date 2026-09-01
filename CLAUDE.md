@@ -4682,8 +4682,12 @@ subject:
   comparisons already used.
 
 **The suite isolates by `--config-dir` and `$ZENSU_CCD_STORE`, deliberately not by
-`$HOME`.** Its sibling `test-session-trail-verdict.sh` redirects HOME and therefore
-skips itself whole on Windows, where `os.homedir()` reads `USERPROFILE`. Both suites
+`$HOME`.** Its sibling `test-session-trail-verdict.sh` redirects the home directory
+instead — and it does NOT skip itself on Windows, which an earlier revision of this
+paragraph claimed: `trailrun` sets `USERPROFILE` alongside `HOME` and that suite's own
+V0 probe measures the PAIR, so the redirection succeeds where `os.homedir()` reads
+`USERPROFILE`. §"Git Mutation Tables" says the WC block "will therefore run on
+Windows", and the two paragraphs now agree. Both suites
 also unset `CLAUDE_CONFIG_DIR`, because `trail.mjs` honours it and `$HOME` is only a
 fallback — with it exported, a fixture read would resolve against the developer's
 real config root and a `takeover` would write a real edge there. In the lineage suite

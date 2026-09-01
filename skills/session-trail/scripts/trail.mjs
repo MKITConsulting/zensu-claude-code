@@ -438,7 +438,7 @@ function containment(callerRoot, targetRoot) {
 // needle, which is why the check derives them rather than grepping for one shape.
 const ANCHOR_REASONS = Object.freeze([
   'no-channel', 'channel-not-absolute', 'target-absent', 'target-not-absolute',
-  'gate-unavailable', 'ambiguous-spelling', 'weak-channel',
+  'gate-unavailable', 'ambiguous-spelling', 'weak-channel', 'anchor-outside-record-root',
 ]);
 
 function writeAnchor(targetWt, opts) {
@@ -552,13 +552,47 @@ function writeAnchor(targetWt, opts) {
   // `contained` is already `null` when the two readings disagreed; this downgrade
   // only ever discards a `true`, so the two null causes compose without either
   // masking the other.
-  const covered = (contained === true && !winner.trusted) ? null : contained;
+  // A SECOND unsound `true`, and it rides the channel that outranks everything else.
+  // `flag:--anchor` is FIRST and trusted, and it has to be: neither variable normally
+  // reaches a subprocess, so a flag that lost to an absent value would be useless.
+  // But that ranking is about AVAILABILITY, never about PROVENANCE.
+  // `ZENSU_PROJECT_ROOT` is exported by this plugin's own hook out of the immutable
+  // Session Control record; `--anchor` is an argv token composed from a model's
+  // context. When the flag names a tree the record root does NOT contain, containment
+  // in it settles nothing about the root the gate actually compares — the identical
+  // asymmetry the paragraph above states for CLAUDE_PROJECT_DIR — and the answer was
+  // printed as `allowed` with the hedge deliberately withheld, which is the one
+  // verdict this feature may never produce. An anchor at or INSIDE the record root is
+  // NARROWER, so its `true` implies the gate's own and survives untouched; that is
+  // why the test is containment rather than equality. A `null` from `containment` is
+  // a disagreement this cannot resolve, so it downgrades with the rest.
+  //
+  // KNOWN RESIDUAL, stated rather than implied: only the TRUE half is discarded. A
+  // `covered: false` measured against an anchor the record root does not contain is
+  // unsound too — non-containment in an UNRELATED tree implies nothing about the
+  // immutable root — and `continuationPlan` builds its target from that same
+  // `callerRoot`, so the target can land outside the root the gate compares. Closing
+  // that means either downgrading `false` as well, which removes the CONTINUE plan
+  // for the case, or returning this flag so `continuationPlan` can widen its
+  // `weak-channel-no-target` refusal — a shape change to the documented `--json`
+  // contract. Both are decisions of their own and neither is taken here.
+  const recordRoot = process.env.ZENSU_PROJECT_ROOT;
+  const anchorOutsideRecord = winner.label === 'flag:--anchor'
+    && Boolean(recordRoot) && String(recordRoot).trim() !== ''
+    && path.isAbsolute(String(recordRoot))
+    && containment(String(recordRoot), callerRoot) !== true;
+  const covered = (contained === true && (!winner.trusted || anchorOutsideRecord)) ? null : contained;
   const reason = covered !== null
     ? null
     : contained === null
       ? 'the target worktree\'s literal and resolved spellings disagree — a symlink in its path, or a case or short-name difference on this filesystem — so it is inside this anchor when reached by cd and outside it when written out, and the gate compares the anchor resolved against the path as written'
-      : 'CLAUDE_PROJECT_DIR is this host\'s wider project directory, not the immutable root the gate compares, so containment in it settles nothing';
-  const reasonCode = covered !== null ? null : contained === null ? 'ambiguous-spelling' : 'weak-channel';
+      : anchorOutsideRecord
+        ? 'the --anchor you supplied is not inside ZENSU_PROJECT_ROOT, which is the immutable root the gate compares, so containment in the anchor settles nothing'
+        : 'CLAUDE_PROJECT_DIR is this host\'s wider project directory, not the immutable root the gate compares, so containment in it settles nothing';
+  // ONE line, deliberately, however long it gets: WC12b derives this function's
+  // emitted code set from the quoted literals on lines that mention `reasonCode`,
+  // and wrapping the ternary hides every one of them from that derivation.
+  const reasonCode = covered !== null ? null : contained === null ? 'ambiguous-spelling' : anchorOutsideRecord ? 'anchor-outside-record-root' : 'weak-channel';
   return { callerRoot, targetRoot, covered, source, sourceTrusted: winner.trusted, reasonCode, reason };
 }
 
@@ -2956,11 +2990,16 @@ function adviceBlock(lines, indent, firstPrefix) {
 // heredocs, and a `tar -xf -` carries none of them. So the two commands that
 // actually create the continuation are ungated, and the guards above — same
 // repository, existing anchor, resolved branch — are what stands in for that.
+// The DOCUMENTED `--json` contract, and nothing else. It has no runtime consumer:
+// the unknown branch's guard tests `ANCHOR_REASONS`, the producer's own set, because
+// a `writes.reasonCode` can only ever have come from there. This union is what a
+// `--json` reader may see in `continuation.reasonCode`, which is what SKILL.md
+// enumerates and what WC12 grades this function's own emissions against.
 const CONTINUATION_REASONS = new Set([
   // decided here
   'escapes-anchor', 'already-contained', 'weak-channel-no-target', 'branch-unresolved',
   'cross-repository', 'anchor-not-a-repository', 'source-not-a-repository',
-  'anchor-absent', 'unclassified',
+  'source-directory-missing', 'source-toplevel-unresolved', 'anchor-absent', 'unclassified',
   // carried verbatim from writeAnchor's own closed set, so a null cause keeps its
   // name across the two objects instead of collapsing into one useless code
   ...ANCHOR_REASONS,
@@ -2998,6 +3037,24 @@ function continuationPlan(r, w, branch) {
   const src = w.targetRoot;
   const none = (status, reasonCode, lines) => ({ status, reasonCode, target: null, branch: null, source: src || null, lines });
   if (w.covered === true) {
+    // The directory is checked HERE, and nowhere upstream does anything check it.
+    // `writeAnchor` performs no I/O on its channels, and `canonicalPair` drops BOTH
+    // operands to their lexical spelling when `realpathSync` throws — which is
+    // exactly what a deleted worktree does — so containment still answers true for
+    // a path that is gone. This is the ONE branch that renders a runnable command,
+    // so an unguarded true here hands the reader `cd` into nothing under the claim
+    // that a commit there lands. Not an exotic shape: `git worktree remove` is what
+    // archiving a session does, and `.claude/worktrees/<name>` under one's own root
+    // is the layout this repository mandates, so a contained worktree that no
+    // longer exists is the ordinary archived-own-repo case.
+    if (!r.cwdExists) {
+      return none('blocked', 'source-directory-missing', [
+        'CONTINUE blocked — that worktree is inside this session\'s anchor, so a commit there',
+        '         would land, but its directory is GONE and there is nothing to resume. See the',
+        '         WORKTREE line above. If the work is still wanted, re-create a worktree from',
+        '         that session\'s branch — the branch keeps everything that was committed.',
+      ]);
+    }
     return none('not-needed', 'already-contained', [
       'CONTINUE not needed — that worktree is already inside this session\'s anchor, so a',
       '         commit there lands. Resume it where it is:',
@@ -3022,7 +3079,15 @@ function continuationPlan(r, w, branch) {
     // ZENSU_PROJECT_ROOT or CLAUDE_PROJECT_DIR in this process", a specific cause that
     // an unrecognized code gives no reason to believe. Naming a cause that may not hold
     // is the mistake `writesLines`' header records having made once already.
-    return none('unknown', CONTINUATION_REASONS.has(w.reasonCode) ? w.reasonCode : 'unclassified', [
+    // The set tested is the PRODUCER's, not the union. `w.reasonCode` can only ever
+    // have come from `writeAnchor`, so `ANCHOR_REASONS` is the exact domain of a code
+    // worth carrying through. `CONTINUATION_REASONS` additionally holds the nine codes
+    // this function decides ITSELF, and one of those can only arrive from a producer
+    // that is not `writeAnchor` — which is precisely the case this fallback exists
+    // for. Testing the union made the guard widest exactly where it had to be
+    // narrowest, and left it disagreeing with the comment three lines down, which
+    // reasons over "one of the seven".
+    return none('unknown', ANCHOR_REASONS.includes(w.reasonCode) ? w.reasonCode : 'unclassified', [
       // States only what holds in EVERY cause. "the anchor could not be measured" is
       // true of one of the seven: under `weak-channel` the anchor resolved and the
       // comparison succeeded, and only its TRUST was withdrawn; under
@@ -3033,7 +3098,14 @@ function continuationPlan(r, w, branch) {
       // rendered line, because this renderer must not assume its caller went through
       // `writeAnchor`.
       'CONTINUE unknown — containment could not be settled, so assume a commit in that',
-      `         worktree would be denied (${flatPath(w.reason) || 'no anchor channel resolved'}).`,
+      // The FALLBACK is cause-neutral, and that is the same rule the paragraph above
+      // states — it just has to hold here too, which it did not. `no anchor channel
+      // resolved` asserted the one cause this branch is least entitled to name: it
+      // runs precisely when `w.reason` is empty, i.e. when the caller may not have
+      // gone through `writeAnchor` at all, and it is false for at least two of the
+      // seven codes that DO come from there. Naming a cause that may not hold is the
+      // mistake `writesLines`' own header records having made once already.
+      `         worktree would be denied (${flatPath(w.reason) || 'cause not reported'}).`,
       '         Pass your own project root to get a continuation plan: --anchor <your project root>',
     ]);
   }
@@ -3074,35 +3146,18 @@ function continuationPlan(r, w, branch) {
       '         never have been a worktree — check the WORKTREE line above.',
     ]);
   }
-  // The branch operand comes ONLY from a live read of the source worktree, and there
-  // is deliberately no fallback to `r.branch`. That field is transcript metadata
-  // recorded when the session started; measured against this worktree it answered
-  // `main` while the tree was actually on `claude/plugin-auto-mode-permissions-665942`,
-  // and the rendered line would then have branched the continuation off `main` and
-  // silently left every commit behind. A missing branch is reported, never guessed.
+  // ABOVE the branch guard, for the same reason `source-not-a-repository` is: the
+  // guard below REPORTS a symptom these two are the cause of. Nothing between them
+  // reads `branch` — `repoRootOf`, `canonicalPair` and both refusals are
+  // branch-independent, and only `continuationSlug` and the rendered start-point
+  // need it — so behind the guard they were unreachable under `--no-git`, where the
+  // branch is never measurable. A mistyped or foreign `--anchor` was then reported
+  // as a git problem, and re-running with git enabled produced a DIFFERENT refusal:
+  // two round trips to see a value the caller typed. Both name a caller-supplied
+  // value, which is the same argument the `anchor-absent` guard above carries. The
+  // cost is one extra `repoRootOf` on paths that previously short-circuited at the
+  // branch; no state's meaning changes.
   //
-  // The literal `HEAD` is REFUSED alongside a falsy one, and a `!branch` test alone
-  // does not catch it: `gitState` reads the branch with `rev-parse --abbrev-ref HEAD`,
-  // which answers the string `HEAD` on a detached checkout — truthy, so it reached
-  // `worktree add … -b 'claude/HEAD-cont' 'HEAD'`, where the start-point resolved
-  // against the ANCHOR repository's own HEAD rather than the source's. Silent,
-  // because `claude/HEAD-cont` is a valid ref name and `HEAD` always resolves. This
-  // file already spells that sentinel twice — `handoffPath`'s `b !== 'HEAD'` and the
-  // transcript reader's `b === 'HEAD'` — so the guard is the file's own idiom, not a
-  // new rule. Detached worktrees are ordinary here: several in this repository's own
-  // `.claude/worktrees/` are on a detached HEAD.
-  if (!branch || branch === 'HEAD') {
-    return none('blocked', 'branch-unresolved', [
-      'CONTINUE blocked — that worktree escapes this session\'s anchor, but no branch name could',
-      '         be read from it, so no continuation can name a base commit. Either the branch was',
-      '         not measured (`--no-git`, or the worktree is missing), or the checkout is DETACHED,',
-      '         where the only answer is the literal `HEAD` and it would resolve against your own',
-      '         repository rather than that one. The session record\'s branch field is not a',
-      '         substitute: it is what the session STARTED on, and branching off a stale value',
-      '         leaves the work behind. Re-run with git enabled, or continue from an explicit',
-      `         commit read there yourself: git -C ${briefShellArg(src)} rev-parse HEAD`,
-    ]);
-  }
   // The base ref is measured in the SOURCE worktree and resolved in the ANCHOR's
   // repository, so the two must be one repository. `containment` is lexical path
   // containment and is satisfied by two unrelated trees — and `docs/gates.md` names
@@ -3145,6 +3200,35 @@ function continuationPlan(r, w, branch) {
       '         different operation from continuing a session, and this block will not guess at it.',
     ]);
   }
+  // The branch operand comes ONLY from a live read of the source worktree, and there
+  // is deliberately no fallback to `r.branch`. That field is transcript metadata
+  // recorded when the session started; measured against this worktree it answered
+  // `main` while the tree was actually on `claude/plugin-auto-mode-permissions-665942`,
+  // and the rendered line would then have branched the continuation off `main` and
+  // silently left every commit behind. A missing branch is reported, never guessed.
+  //
+  // The literal `HEAD` is REFUSED alongside a falsy one, and a `!branch` test alone
+  // does not catch it: `gitState` reads the branch with `rev-parse --abbrev-ref HEAD`,
+  // which answers the string `HEAD` on a detached checkout — truthy, so it reached
+  // `worktree add … -b 'claude/HEAD-cont' 'HEAD'`, where the start-point resolved
+  // against the ANCHOR repository's own HEAD rather than the source's. Silent,
+  // because `claude/HEAD-cont` is a valid ref name and `HEAD` always resolves. This
+  // file already spells that sentinel twice — `handoffPath`'s `b !== 'HEAD'` and the
+  // transcript reader's `b === 'HEAD'` — so the guard is the file's own idiom, not a
+  // new rule. Detached worktrees are ordinary here: several in this repository's own
+  // `.claude/worktrees/` are on a detached HEAD.
+  if (!branch || branch === 'HEAD') {
+    return none('blocked', 'branch-unresolved', [
+      'CONTINUE blocked — that worktree escapes this session\'s anchor, but no branch name could',
+      '         be read from it, so no continuation can name a base commit. Either the branch was',
+      '         not measured (`--no-git`, or the worktree is missing), or the checkout is DETACHED,',
+      '         where the only answer is the literal `HEAD` and it would resolve against your own',
+      '         repository rather than that one. The session record\'s branch field is not a',
+      '         substitute: it is what the session STARTED on, and branching off a stale value',
+      '         leaves the work behind. Re-run with git enabled, or continue from an explicit',
+      `         commit read there yourself: git -C ${briefShellArg(src)} rev-parse HEAD`,
+    ]);
+  }
   const slug = continuationSlug(branch, src);
   const target = path.join(w.callerRoot, ...CONTINUATION_DIR, `${slug}-cont`);
   const newBranch = `claude/${slug}-cont`;
@@ -3161,8 +3245,28 @@ function continuationPlan(r, w, branch) {
   // relocated the untracked files to the target root and silently dropped the rest.
   // SKILL.md warns in its own words that the recorded path "may be a SUBDIRECTORY the
   // session started in rather than a worktree root", so this is the ordinary case, not
-  // an edge one. Falls back to `src` when the read fails, which is no worse than before.
-  const srcTop = git(src, ['rev-parse', '--show-toplevel']) || src;
+  // an edge one.
+  //
+  // REFUSED when the read fails, never substituted. Falling back to `src` emitted
+  // exactly the spelling the paragraph above measures as lossy, dressed as a measured
+  // operand — and "no worse than before" understated it: before this block existed the
+  // reader faced a placeholder they would naturally fill with the worktree root, so
+  // substituting hands them a value that silently reintroduces the drop they were
+  // about to avoid. A refusal costs the plan; a wrong operand costs the untracked
+  // files. Reachable in practice through a git this process cannot run in that tree —
+  // an ownership refusal, a `.git` file pointing nowhere, a git that is gone from PATH
+  // between the walk above and this line.
+  const srcTop = git(src, ['rev-parse', '--show-toplevel']);
+  if (!srcTop) {
+    return none('blocked', 'source-toplevel-unresolved', [
+      'CONTINUE blocked — that worktree\'s repository root could not be read, so the carry-over',
+      '         operand cannot be measured. The recorded path is NOT a substitute: it may be a',
+      '         subdirectory the session started in, and the untracked half of the carry-over',
+      '         lists paths relative to it and omits everything above — so a carry-over run from',
+      '         there would relocate some files and silently drop the rest. Read the root',
+      `         yourself and fill the recipe in by hand: git -C ${briefShellArg(src)} rev-parse --show-toplevel`,
+    ]);
+  }
   const S = briefShellArg(srcTop);
   const T = briefShellArg(target);
   return {
@@ -3181,7 +3285,7 @@ function continuationPlan(r, w, branch) {
       '            middle one, sending you to change a path when the anchor is what is wrong.',
       `              git -C ${A} check-ignore -q ${briefShellArg(REL)}; case $? in 0) echo ignored;; 1) echo 'NOT ignored — pick another path';; *) echo 'could not check — is the anchor a git worktree?';; esac`,
       '            On NOT ignored, substitute an ignored directory of your own and use it in',
-      '            place of the target in steps 2-4 — every path below that starts with the anchor.',
+      '            place of the target in steps 2 and 3 — every path below starts with the anchor.',
       '         2. create it on a NEW branch. A second worktree on the SAME branch is refused',
       '            while the original still exists, which is why `-b` is not optional:',
       // `--` before the positionals: shell quoting protects the SHELL, not git's own
@@ -3209,11 +3313,13 @@ function continuationPlan(r, w, branch) {
       '            `--binary` (without it a modified binary file makes `apply` refuse the',
       '            whole patch), `mktemp` over a predictable name, and the symlink check',
       '            that sits BETWEEN the diff and the apply because a caution printed after',
-      '            the apply is read after it has run. Substitute these two paths for its',
+      '            the apply is read after it has run. Substitute these two values for its',
       '            placeholders — the recipe cannot compute them, which is why this block',
-      '            exists:',
-      `              <their worktree> = ${S}`,
-      `              <your new worktree> = ${T}`,
+      '            exists. Replace each placeholder TOGETHER WITH the single quotes around',
+      '            it: the values below bring their own, and two quoted words written back',
+      '            to back are ONE word to the shell — empty, for a path with a space.',
+      `              '<their worktree>' = ${S}`,
+      `              '<your new worktree>' = ${T}`,
       '         Nothing above writes to the source worktree: a git mutation aimed at that tree',
       '         is refused by this same gate, and would touch another session\'s index.',
     ],
