@@ -293,6 +293,30 @@ else
   check "secret scanner loads its decider from the special plugin root" FAIL
 fi
 
+# The plugin-data guard sits on the same two matchers as the secret scanner and
+# transports its module the same way (cd -P into hooks/lib, then a cwd-relative
+# require). It is the one hook on that matcher whose failure to load removes a
+# DENY rather than an advisory, so a root the shim rejects in argv must still let
+# it decide.
+GUARD_PAYLOAD="$(SESSION_VALUE="$SESSION" PROJECT_VALUE="$NATIVE_PROJECT" TARGET_VALUE="$PLUGIN_DATA/session-control/v1/planted.json" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: "PreToolUse", session_id: process.env.SESSION_VALUE,
+    cwd: process.env.PROJECT_VALUE, tool_name: "Write",
+    tool_input: { file_path: process.env.TARGET_VALUE, content: "x" },
+  }));
+')"
+GUARD_OUT="$(printf '%s' "$GUARD_PAYLOAD" \
+  | CLAUDE_PLUGIN_ROOT="$PLUGIN" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" HOME="$HOME_DIR" ZENSU_CONFIG="$CONFIG" \
+    bash "$PLUGIN/hooks/pre-write-plugin-data-guard.sh" 2>"$RAW_TMP/plugin-data-guard.err")"
+GUARD_RC=$?
+if [ "$GUARD_RC" -eq 0 ] \
+    && printf '%s' "$GUARD_OUT" | grep -qF '"permissionDecision":"deny"'; then
+  check "plugin-data guard loads its decider from the special plugin root" PASS
+else
+  check "plugin-data guard loads its decider from the special plugin root" FAIL
+fi
+
 BASH_PAYLOAD="$(SESSION_VALUE="$SESSION" PROJECT_VALUE="$NATIVE_PROJECT" node -e '
   process.stdout.write(JSON.stringify({
     hook_event_name: "PreToolUse", session_id: process.env.SESSION_VALUE,

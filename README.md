@@ -5,7 +5,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.19.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.20.0-green.svg)](CHANGELOG.md)
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
 
@@ -205,7 +205,7 @@ supported.
 |----------|---------------|
 | [Architecture](docs/architecture.md) | The three layers, the workflow diagram, evidence discipline, typical flows |
 | [Review chain](docs/review-chain.md) | The reviewer agents, custom repo personas, skill overlays, templates |
-| [Gates](docs/gates.md) | The write gates, the secret scan, the TDD phase gate, and the completion-time requirements-table gate |
+| [Gates](docs/gates.md) | The write gates, the secret scan, the plugin-data containment guard, the TDD phase gate, and the completion-time requirements-table gate |
 | [Session control](docs/session-control.md) | Subagent safety, the security boundary, unbindable sessions |
 | [Configuration](docs/configuration.md) | Every hook, every flag, merge order, environment variables |
 | [Operations](docs/operations.md) | Upgrade path, platform support, troubleshooting |

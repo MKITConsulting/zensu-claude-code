@@ -1,11 +1,14 @@
 # Gates
 
-Four PreToolUse gates keep an agent inside the workflow conventions, plus TWO
+Five PreToolUse gates keep an agent inside the workflow conventions, plus TWO
 completion-time `--tdd-complete` refusals of the same class: the edit-landing
 receipt (discipline patch 10 in [tdd-manager-workflow.md](tdd-manager-workflow.md))
-and §Requirements-Table Gate below, which has its own section here. All six are
-convention-nudges with a documented escape hatch, not security boundaries — see
-[Session Control](session-control.md) for the part that is.
+and §Requirements-Table Gate below, which has its own section here. Six of the
+seven are convention-nudges with a documented escape hatch, not security
+boundaries — see [Session Control](session-control.md) for the part that is. The
+exception, §Plugin-Data Guard, deliberately has no escape hatch, and it is still not
+a security boundary: it closes one channel to one directory and names the ones it
+leaves open.
 
 **Two commands stay reachable when the Session Control bind fails**, in every
 bind failure including a record that exists and disagrees, and they are
@@ -146,6 +149,163 @@ errors **fail open** with a stderr note. Bypass with `ZENSU_SECRET_SCAN=off` (en
 for Bash); disable via `hooks.secretScan:false`.
 `tests/structure/test-secret-scan-gate.sh` pins the behavior.
 
+## Reviewer-Spawn Grant
+
+The one entry in this file that **opens** rather than closes. `pre-agent-reviewer-allow.sh` is a
+PreToolUse hook on the `Agent|Task` matcher that returns `permissionDecision: "allow"` for Zensu's
+own capability-confined reviewer subagents, which short-circuits the host permission pipeline
+**before** the auto-mode classifier is consulted.
+
+It exists because a classifier refusal is invisible to every other mechanism here. The spawn never
+executes, so no PreToolUse or PostToolUse hook observes it, and the Stop chain-enforcer repeats an
+instruction that cannot succeed until its cap releases the guard.
+`hooks/lib/reviewer-spawn-denial-v1.js` diagnoses that state after the fact; this hook prevents it.
+
+- **It can only grant or stay silent.** It never emits deny or ask, and every failure path is a
+  silent `exit 0` — the opposite of the fail-closed direction the gates above take. A non-zero exit
+  from a PreToolUse hook blocks the tool call, so a fail-closed grant hook would break every Agent
+  spawn in the session, including the reviewer it exists to admit.
+- **Four conditions, all required.** The main principal; a bound Session Control record;
+  `hooks.reviewerSpawnAutoAllow` not set to exactly `false`; and membership in the confined set.
+- **The set is derived, never spelled.** It is `claude-principal-v1.js`'s `REVIEWER_TYPES` plus
+  `EVIDENCE_WORKER_TYPES` — the same classifier `SubagentStart` uses to inject
+  `reviewer-readonly-v1` — restricted to the plugin-scoped `zensu:` names, and then filtered
+  again at decision time: `confinedByFrontmatter` reads each candidate's `agents/<stem>.md`
+  and keeps only those whose `tools:` line is exactly `Read`/`Grep`/`Glob`, so a member added
+  to those sets for principal reasons cannot acquire a classifier-free spawn by name alone.
+  Bare names (`code-reviewer`, …) are **excluded** because a project may define a same-named
+  agent with `tools: Bash`.
+- **What bounds the CHILD is in this tree, not an assumption about the host.**
+  `hooks/pre-reviewer-capability-gate.sh` runs on the `.*` PreToolUse matcher and denies any
+  tool outside the read trio for a `REVIEWER` principal, and confines its reads to the project
+  root. It is fail-closed and carries no config off-switch, so it holds whether or not the host
+  re-checks the child's own calls — a claim about the host would be unverified, and this one is
+  checkable. Weakening `readOnlyViolation`, or giving that gate an off-switch, removes the only
+  backstop this grant has.
+- **The grant covers the CALL, not only the identity.** Only `tool_name` and
+  `tool_input.subagent_type` are examined; every other input field travels unexamined,
+  including `prompt` and `isolation: "worktree"` — and that last one is a host-performed
+  filesystem action caused by the spawn itself, so it sits outside the `Read`/`Grep`/`Glob`
+  confinement the frontmatter provides. Read that confinement as bounding what the CHILD may
+  do, never as bounding the call.
+- **Three host limits bound it**, and none is a defect to be fixed by widening the grant: a
+  `permissions.deny` or `permissions.ask` rule still overrides it; another hook on the same matcher
+  returning deny or ask outranks it (the host ranks deny > ask > allow); and an SDK session
+  supplying `canUseTool` forces the full pipeline.
+- **It is disclosed in both states.** The SessionStart banner names the grant while it is on, and a
+  `/zensu:doctor` row reports it either way — that row is not silenceable by the flag. A capability
+  the plugin hands itself is exactly the thing that must not be quiet.
+
+## Plugin-Data Guard
+
+A further PreToolUse gate (`pre-write-plugin-data-guard.sh`, on `Edit|Write|MultiEdit` and
+`NotebookEdit`) — the ordinals in this file stop here; the count lives in the intro — denies a file-mutating tool call whose resolved target lies inside
+`CLAUDE_PLUGIN_DATA`. That store holds this session's immutable Session Control record
+(`<plugin data>/session-control/v1/`) and the review-evidence leases, so without this a gate can
+end up reading its own boundary from a file the gated party rewrote. It does **not** cover
+`<project>/.zensu/state/`, so do not read it as protecting "the anchors every gate binds to" —
+see the residuals below.
+
+**It closes a measured hole, not a hypothetical one — on the main thread.** Measured 2026-08-28
+and recorded in [multi-repo-chains-spec.md](multi-repo-chains-spec.md) §6.1.2: all three
+PreToolUse hooks that match a `Write` — `pre-reviewer-capability-gate.sh` on the `.*` matcher,
+plus `pre-edit-tdd-reminder.sh` and `pre-write-secret-scan.sh` — answered *allow* for a target
+inside the store, in every chain state (no chain armed, a vanilla chain armed, and a strict chain
+at `RED_WRITE`). None of them performs a containment check. The main-thread qualifier is
+load-bearing: `hooks/lib/reviewer-capability-v1.js` already denies every NON-main principal a
+write into this store and returns early for `main-v1`, so the net delta of this gate is exactly
+main-thread `Edit`/`Write`/`MultiEdit`/`NotebookEdit` — which is the channel the measurement found
+open. It is a hook of its own rather than a
+branch inside the phase gate because that hook returns early while no chain is armed, which is
+exactly the state in which the store is read.
+
+**Scope is deliberately narrow, and the asymmetry is accepted.** Only the store is protected. A
+write anywhere else outside the project root stays allowed here, so this gate is narrower than
+the source-write gate's rule (B), which denies every redirect escaping the project root (temp
+roots excepted). The wider rule would need a temp carve-out of its own and would refuse ordinary
+work on files outside the project; closing the measured hole does not. It applies to **every
+principal** — a subagent must not be able to write the store either.
+
+**Eleven residuals, named because "the store is protected" is false without them.** First, the
+**Bash channel is not covered at all**: `bash-source-write-parse.js` filters candidate targets
+through its `SRC` extension set, which carries no `json`, and `mv`/`cp` are documented as out of
+scope — so a shell redirect, copy, move or link into the store passes every Bash gate. Anything
+holding `Bash` still reaches the store, and closing that means an extension-independent rule in
+the Bash parser, which this change does not add. Second, **`<project>/.zensu/state/` is not in
+the store and is not covered**: the workflow document, the frozen `vanilla` flag and the bypass
+ledger live there, and `pre-edit-tdd-reminder.sh` returns early while no chain is armed. Third, a
+**hard link** outside the store to a file inside it is judged by its own path and allowed;
+creating one needs `ln`, so it sits behind the first residual. Residuals two and three are
+main-thread-only — `reviewer-capability-v1.js` covers both for a non-main principal. Fourth, only
+the four tool names in the module's `WRITE_TOOLS` are judged: `apply_patch` is in that sibling's
+`MUTATING_FILE_TOOLS` and is **not** here, and no MCP write tool is matched, so an unknown tool
+allows. Fifth, the store's **location** comes from the ambient `CLAUDE_PLUGIN_DATA` rather than
+from the bound Session Control record's authoritative `plugin_data`; a wrong or absent value
+disarms the gate, disclosed on stderr. Binding the record here would add a deny path to a control
+whose entire fault direction is *allow*, so the ambient read is deliberate — and stated, because
+"no escape exists" would otherwise read as stronger than it is. Sixth, the plugin **root** is not
+covered — only the data store is; `reviewer-capability-v1.js` protects both trees for a non-main
+principal — a superset of the protected ROOT SET, though resolved by a weaker walk, so on a
+`<symlink>/../x` spelling this gate denies where that one allows. Seventh, the decision is taken at
+PreToolUse while the tool opens the file afterwards, so a component swapped in between is
+followed — a property of the hook shape, not of the walk, and the reason this gate is described
+as a control rather than a guarantee. Eighth, composing the first and the sixth, the decision module lives inside that unprotected plugin root, so one ungated main-thread `Edit` — or anything holding `Bash`, by the first — removes or replaces it and the wrapper then declines for the rest of the session, disclosed on stderr rather than silently; and ninth, the mirror of the third: a symlink **inside** the store whose target is outside is judged by its resolved location and allowed, so one `ln -s` in the store converts into ongoing Edit-channel control over what a reader gets back from that record path. Tenth, nothing bounds where the project root may point, so one naming a directory *inside* the store carves that subtree out of the over-arm valve; the total disarm this replaced allowed the whole store in the same configuration, so it is a residual of the valve rather than a regression. **At `store === projectRoot` the carve-out is the whole store and the gate denies nothing at all** — the two are the same directory, so every in-store target is also in-project. The scoped form is never *more permissive* than the total disarm it replaced, but it is not strictly stricter either: at equality the two are identical. Eleventh, the valve's project root is the ambient `CLAUDE_PROJECT_DIR`, which this repository records as **not** the authoritative project anchor — every writer resolves the bound record's `project_root` instead. Where the two diverge, which is the ordinary case for a session whose cwd is a worktree, the valve carves out the harness root while the session writes somewhere else: a worktree inside the store but outside that root is denied, and `overArmUnchecked` stays false because the root *did* resolve. Binding the record here would put a session lookup on every `Edit`, so the divergence is stated rather than closed.
+
+**Resolution imitates the kernel, component by component.** Two bypasses of the same class were
+measured here before the walk existed, and both came from resolving the spelling before resolving
+the links: a **dangling** leaf symlink into the store (`realpath` cannot resolve a destination that
+does not exist yet, while the tool's own `open(O_CREAT)` follows the link in), and
+`<symlink-into-store>/../x` (`path.resolve` collapses `..` **lexically**, so the link was never
+read). `resolveTargetPath` therefore follows a symlink at every component and applies `..` to the
+already-resolved prefix, bounded on both the component count and the link hops.
+
+**There is no escape**, by design: no `ZENSU_*=off` variable and no config flag. A switch would
+hand back exactly the capability the guard removes, so nothing here lands a bypass-ledger entry
+either — there is no gate escape to record. `session-start-evidence-discipline.sh` is the
+precedent for a control with no switch.
+
+**Every fault allows, with two exceptions.** The shared plugin-root identity guard refuses with
+exit 2, and a resolution that hits an internal bound refuses with its own reason
+(`target-resolution-truncated`): the walk gave up before it finished, so "outside" is a claim it
+did not earn, and answering it once allowed a spelling that lands in the store. No legitimate input
+reaches a bound, so that refusal costs an adversarial spelling and nothing else. A missing `node`, an
+absent, empty or unresolvable `CLAUDE_PLUGIN_DATA`, an unparseable payload, or a module that will
+not load returns *allow*. The first of those two exceptions is the plugin-root check every sibling gate
+carries: a mismatched inherited `CLAUDE_PLUGIN_ROOT` still refuses with exit 2, and on this matcher that
+refusal blocks the call. **Four** of the allowing faults carry a stderr note: the
+containment module failing to load, a payload the module cannot read (a **payload** fault, not a
+load fault), an unusable `CLAUDE_PLUGIN_DATA` — the one that turns the control off completely
+and would otherwise render byte-identical to a clean allow — and a payload with **no path field**,
+which is what a renamed or restructured host field looks like from here. A fifth note is not a
+fault at all: when the caller supplies no project root the over-arm valve cannot be evaluated, and
+an armed decision says so rather than skipping the check in silence. Three further faults are outside the
+module's reach, because the shell wrapper returns before `node` runs: a missing `node`, a
+`hooks/lib` its `cd -P` cannot enter, and a `plugin-data-guard-v1.js` that is absent or is a
+symlink. They are **not silent** — the wrapper writes its own stderr note at each of the three,
+naming the cause and the consequence, and at both of its exit-2 plugin-root branches
+(self-resolution failure and inherited-root mismatch) as well. What cannot reach them is the module's *typed* reason, which
+is a limit on the channel and never on whether the operator is told. Denying there would block ordinary in-project
+writes, which is strictly worse than the hole this closes. Containment is not re-implemented:
+`within` and `msysToDrive` come from `hooks/lib/bash-source-write-parse.js`, and the decision
+lives in `hooks/lib/plugin-data-guard-v1.js`.
+
+**The over-arm valve, because a misconfigured store has no in-session escape.** A
+`CLAUDE_PLUGIN_DATA` that *contains or equals* the project root would otherwise arm the gate over
+the whole workspace and deny every write — and this gate ships with no config flag and no env
+bypass, so the session could not edit the file that would fix it. The valve carves out **in-project
+targets only**: a write inside the project goes through with its own reason
+(`target-in-project-under-containing-store`, deliberately NOT the no-store reason,
+so a working gate never announces that it did not run), while every other target inside the store
+still denies — except at equality, where there is no "other target": see residual 10. The project root comes from `CLAUDE_PROJECT_DIR`, read in the hook's host half and
+passed in; when it cannot be resolved — unset, relative, or a directory that is gone, which is what
+a removed worktree looks like — the valve cannot be evaluated and an armed decision says so on
+stderr instead of skipping the check in silence. Nothing bounds where the project root may point,
+so one naming a directory *inside* the store carves that subtree out; that is residual 10, and it
+is not a regression, because the total disarm this replaced allowed the whole store in the same
+configuration.
+`tests/structure/test-plugin-data-guard.sh` pins the behavior, both directions, in all three
+chain states.
+
 ## TDD Phase Gate
 
 Unlike prompt-based TDD ("please write tests first"), the `/zensu:tdd` workflow **structurally prevents** violations via a PreToolUse FSM gate on Edit/Write/MultiEdit:
@@ -219,4 +379,4 @@ plan must carry a usable `## Requirements` table.
   the two gates share one change-set computation precisely so neither inherits the other's
   switch. Both escapes are recorded in the per-session bypass ledger.
 
-**Full workflow reference:** [docs/tdd-manager-workflow.md](tdd-manager-workflow.md) — Mermaid flow chart, per-step FSM state diagram, hook gate behavior table, environment variables contract, discipline patches 1-11, four-channel logging.
+**Full workflow reference:** [docs/tdd-manager-workflow.md](tdd-manager-workflow.md) — Mermaid flow chart, per-step FSM state diagram, hook gate behavior table, environment variables contract, discipline patches 1-13, four-channel logging.

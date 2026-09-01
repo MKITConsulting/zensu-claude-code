@@ -22,15 +22,18 @@ const RETURN_STAGES = Object.freeze(['GATES', 'CONVERGE', 'FIX_FINDINGS', 'VALID
 const RECOVERY_HISTORY_PHASE = 'CHAIN_RECOVERED';
 const RECOVERY_HISTORY_REASON_PREFIX = 'chain-recovered: ';
 const CHAIN_OUTCOMES = ['', 'pass', 'no-changes', 'max-rounds'];
-const RECOVERABLE_SHAPES = ['wedged-stale-rearm'];
-const DEAD_END_SHAPES = ['self-review-unbindable'];
+// FROZEN like every other exported shape table. `RECOVERABLE_SHAPES` is exported and feeds
+// `recoverable`, the flag that authorizes `--chain-recover`, while `STUCK_SHAPES` spreads it
+// at load — so a mutation would move `recoverable` and `blocked` without moving `wedged`.
+const RECOVERABLE_SHAPES = Object.freeze(['wedged-stale-rearm']);
+const DEAD_END_SHAPES = Object.freeze(['self-review-unbindable']);
 const STUCK_SHAPES = Object.freeze([...RECOVERABLE_SHAPES, ...DEAD_END_SHAPES]);
 // The shapes that carry no work forward. Exported so a consumer never hand-copies
 // them; keep in step with the literals `chainShape` returns below. See CLAUDE.md
 // §"Chain Shape & Rearm Receipt".
 const INERT_SHAPES = Object.freeze(['no-session', 'chain-closed']);
 
-const NEXT_COMMAND = {
+const NEXT_COMMAND = Object.freeze({
   'no-session': 'run /zensu:tdd to arm a chain',
   implementing: 'zensu-log.sh --tdd-complete once the implementation is done',
   'chain-closed': 'none — this chain already reached its terminus',
@@ -48,9 +51,9 @@ const NEXT_COMMAND = {
     'zensu-log.sh --review-ticket, then spawn zensu:code-reviewer — the consumed rounds stand, so the next completion counts against the same budget',
   'ready-for-review': 'zensu-log.sh --review-ticket, then spawn zensu:code-reviewer',
   'wedged-stale-rearm': 'zensu-log.sh --chain-recover',
-};
+});
 
-const BLOCKED_RECOVERY_COMMAND = {
+const BLOCKED_RECOVERY_COMMAND = Object.freeze({
   'partial-link':
     'run /zensu:tdd for a fresh generation — the Autopilot linkage is incomplete and cannot be repaired in place',
   'deferred-claim':
@@ -63,7 +66,7 @@ const BLOCKED_RECOVERY_COMMAND = {
     'this document has no readable deferredReviewClaim field, so recovery cannot prove no deferred-review claim is outstanding; it refuses rather than guess — start a fresh generation with /zensu:tdd',
   'link-shape':
     'this document carries a rearm receipt without a complete Autopilot binding, which no writer in this plugin can produce; recovery only repairs a bound generation, so start a fresh one with /zensu:tdd',
-};
+});
 
 const STALE_RECEIPT_CAVEAT =
   ' (note: this chain also carries a rearm receipt that disagrees with its own document, so no FRESH ticket can be issued — finish this generation with what it already holds, or start a fresh one with /zensu:tdd; on a standalone chain a budget reset drops the receipt as a side effect, on a bound one it does not)';
@@ -114,6 +117,7 @@ function normalizeChainState(input) {
     ? input.deferredReviewClaim
     : '';
   normalized.stopBlockCount = naturalOr(input.stopBlockCount, 0);
+  normalized.implStopCount = naturalOr(input.implStopCount, 0);
   return normalized;
 }
 
@@ -206,6 +210,14 @@ function chainShape(state, rearmReceipt) {
 
 const STALE_RECEIPT_CAVEAT_SHAPES = ['ticket-unclaimed', 'awaiting-self-review'];
 
+// The one branch below that interpolates state into a command string, and the reason it
+// needs no quoting is a PRECONDITION rather than a property of this function: it is
+// reachable only under `linkage === 'bound'`, which `autopilotLinkage` grants only when
+// both ids pass `isLinkId` (no whitespace, no shell metacharacter) and the attempt is an
+// integer in 1..999. Consumers relay `nextCommand` verbatim — the doctor's chain rows
+// print it as a remedy to run — so WIDENING `isLinkId` is what would open that channel,
+// and the widening and this interpolation must be re-decided together. Noted here rather
+// than only at a consumer, because a consumer cannot check a producer it does not own.
 function shapeCommand(shape, linkage, autopilot, rearmReceipt) {
   if (STALE_RECEIPT_CAVEAT_SHAPES.indexOf(shape) >= 0 && rearmReceipt === 'stale') {
     return NEXT_COMMAND[shape] + STALE_RECEIPT_CAVEAT;
@@ -273,6 +285,7 @@ function classifyChain(input) {
       && state.reviewRound >= 1,
     reviewRound: state.reviewRound,
     stopBlockCount: state.stopBlockCount,
+    implStopCount: state.implStopCount,
     revision: Number.isSafeInteger(state.revision) ? state.revision : null,
     lastEvent: typeof state.last_event === 'string' ? state.last_event : null,
     recoveries: countRecoveries(state),

@@ -1,0 +1,200 @@
+description: "zen-mode active, a run whose test step FAILED and whose changelog step the user dropped: the model should mark the failure, leave the dropped step off the line entirely, and still say in prose what went wrong."
+vars:
+  spec_block: |
+    A Claude Code hook injected this system note before your turn (verbatim):
+
+      zen-mode is ACTIVE. The user is working at low capacity and needs substance kept whole but noise removed. Shape this response accordingly, writing in the user's own language: (1) Open with ONE short recap line covering what happened since their last message; omit it when nothing happened. (2) Give the result in the first sentence after that — no preamble, no announcing what is coming. (3) Stay near 8 lines and leave out caveats and history you were not asked for, and trade-offs or alternatives you were NOT asked to choose between — never the options of a decision that is actually in front of the user; when you deliberately withheld depth, close with a short offer instead. (4) Write full, short sentences. This OVERRIDES any other compressed or telegraphic style mode that is active: no dropped articles, no sentence fragments — telegraphic text is harder to read at low capacity, not easier. (5) Ask at most ONE question per turn, and settle routine decisions yourself, reporting them rather than asking. (6) Gloss unavoidable jargon in three words or fewer, show code as changed lines only, and anchor work that spans several turns with a one-line chain-progress line, placed directly above the closing next step — or above the final step list when the one-next-step rule is suspended. Render the steps of THIS run in order on ONE line, each prefixed '✓' for a step you observed finish AND pass, '▶' for the step running now, '·' for one not yet reached, and '✗' for one that failed or is blocked; a step that finished with a failing or unresolved outcome is '✗' and never a tick — for example 'Run: ✓fetch ✓parse ▶render', where 'Run:' is a fixed English prefix and not a mark, and where those step names are illustrative rather than a list to reuse. The line describes where the run stands NOW, so a step that failed and is being retried carries the mark of its current attempt rather than of the attempt that failed — the anchor is a position, not a history; that governs the MARK only, and an earlier failure is still reported in the prose of the turn it happened in. Name the steps this run actually has, taking them from what this session observed and from the steps you have already told the user you will take — when you have named none, show the steps so far plus the one running. Never copy a canonical pipeline out of another component, never pad with steps nobody planned, and never drop one the run traversed, with one exception: a step the run deliberately did not perform is left off the line rather than marked failed. Use short lower-case step names taken from the run itself, and translate only the words around them into the user's language. A step is marked done from an observation, never from the plan, so a step you did not see finish stays '·'. The marks already show the position, so add no separate 'Step N of M' counter beside them. (7) End with exactly ONE next step, never two parallel suggestions. SCOPE — this mode changes presentation only, never substance: never drop a failing test, an unfinished step, a risk, or a limitation to make an answer shorter, and never drop an option the user is choosing between or demote the one you would defend as best — brevity applies to how an option is described, never to which options exist or how they are ranked; equally, this never licenses inflating scope, so when the durable answer genuinely is to do less, that option goes first, on the merits. Shorten the prose, never the findings; a compressed report that omits a problem is a wrong report. EXCEPTION — for security warnings, irreversible or destructive actions, and anything involving credentials, the following are suspended: the length target, the depth-on-demand rule, the one-question cap, the one-next-step rule, and the changed-lines-only rule. Such an answer gets its full ordinary length and detail, may list every required step rather than one, may show whatever code context is needed, and a confirmation question before an irreversible action is never suppressed by the one-question cap and is never treated as a routine decision you may settle yourself. The full-sentence rule is NEVER suspended — a safety warning is the last place for fragments. The user leaves the mode by writing 'normal mode', 'zen off', 'zen-mode off', 'turn off zen', or 'stop zen'; if they ask to leave it in any other wording or in another language, that counts too — run the zen-mode helper's --off verb yourself (hooks/lib/zensu-zen-mode.sh in the Zensu plugin, invoked exactly as skills/zen-mode/SKILL.md renders it) and confirm in one clause. Never leave the user stuck in this mode because their wording did not match a literal.
+
+    This is turn five of a migration you are running for the user. You inventoried
+    the call sites and you rewrote the adapter, and both of those finished and
+    passed. You then ran the test suite and it FAILED — three cases in the adapter
+    layer are red. You have not retried it; you are waiting for the user to say
+    how to proceed. Earlier in the run the user told you to leave the changelog
+    alone, so that step was deliberately not performed. Opening the pull request
+    has not been reached.
+
+    Now answer the user's message: where are we?
+assert:
+  - type: javascript
+    value: |
+      // The anchor is required here for the same reason as in the sibling
+      // scenario: the work spans several turns. This grader only establishes
+      // that a marked anchor exists at all, so the four below can say something
+      // about its CONTENT rather than each re-deriving its presence.
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const undecorate = (s) => s.trim().replace(/^[>\-*#\s]+/, '').replace(/\*\*/g, '').replace(/`/g, '').trim();
+      const anchor = prose.split('\n').map(undecorate).find((l) => /^Run:/.test(l));
+      const ok = !!anchor && /[✓▶·✗]/.test(anchor);
+      return {
+        pass: ok,
+        score: ok ? 1 : 0,
+        reason: ok
+          ? "Anchor present and marked: " + anchor
+          : "No `Run:` line carrying one of the four marks.",
+      };
+  - type: javascript
+    value: |
+      // The rule is explicit that a step which finished with a failing or
+      // unresolved outcome is `✗` and never a tick — the two marks sit on one
+      // axis, outcome, not on two. The framing fixes the test step as failed and
+      // NOT retried, so `✗` is the only correct mark for it. This is the half of
+      // the mark vocabulary the sibling scenario never exercises, because its
+      // framing states that nothing has failed.
+      //
+      // The step is located by name rather than by position: the directive lets
+      // the model choose short names of its own, but this framing names the step
+      // "test suite", so a token starting `test` is the fair anchor. A reply that
+      // renames it beyond recognition fails here, and that is the intended
+      // reading — an anchor whose steps cannot be tied to the run it describes
+      // is not doing the job the rule gives it.
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const undecorate = (s) => s.trim().replace(/^[>\-*#\s]+/, '').replace(/\*\*/g, '').replace(/`/g, '').trim();
+      const anchor = prose.split('\n').map(undecorate).find((l) => /^Run:/.test(l));
+      if (!anchor) {
+        return { pass: false, score: 0, reason: "No anchor line; nothing to grade for the failed mark." };
+      }
+      // Marks bind to the token that follows them, so parse pairs rather than
+      // searching the whole line: `✓adapter ✗tests` must not read as "tests is
+      // ticked" merely because a tick appears earlier on the line.
+      const pairs = [...anchor.matchAll(/([✓▶·✗])\s*([^\s✓▶·✗]+)/g)].map((m) => ({ mark: m[1], step: m[2] }));
+      // The framing says "you ran the test suite", so the model may reasonably
+      // name the step `suite` or `test-suite` rather than `tests`. A matcher of
+      // `/^tests?/i` alone graded a perfectly marked reply as a violation, which
+      // is the one outcome this eval must never produce.
+      // TWO roles, deliberately split. The permissive set answers "did the anchor
+      // name the test run at all"; the EXACT set is what `every` then judges.
+      // Conflating them made the widening cut both ways: with an anchor reading
+      // `\u2717tests \u00b7spec-update`, `spec-update` joined the judged set carrying
+      // `\u00b7` and a correct reply was graded a violation.
+      const NAMES_RUN = /^(?:tests?|testing|test[-_]?suite|suite|spec|specs)\b|^tests?/i;
+      const EXACT_RUN = /^(?:tests?|testing|test[-_]?suite|suite|specs?)$/i;
+      const named = pairs.filter((p) => NAMES_RUN.test(p.step));
+      const exact = pairs.filter((p) => EXACT_RUN.test(p.step));
+      const failed = exact.length > 0 ? exact : named;
+      const ok = failed.length > 0 && failed.every((p) => p.mark === '✗');
+      return {
+        pass: ok,
+        score: ok ? 1 : 0,
+        reason: ok
+          ? "The failed step carries `✗`: " + failed.map((p) => p.mark + p.step).join(' ')
+          : failed.length === 0
+            ? "No step on the anchor names the test run, so the failure cannot be read from it: " + anchor
+            : "The test step must carry `✗` — a failing outcome is never a tick; got " + failed.map((p) => p.mark + p.step).join(' '),
+      };
+  - type: javascript
+    value: |
+      // The one exception the rule names: a step the run deliberately did not
+      // perform — skipped, not applicable, descoped — is LEFT OFF the line rather
+      // than marked failed, because the four marks carry no "did not apply" and
+      // `✗` would misreport it. The framing drops the changelog step on the
+      // user's own instruction, so any changelog token on the anchor line is a
+      // violation whatever mark it carries.
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const undecorate = (s) => s.trim().replace(/^[>\-*#\s]+/, '').replace(/\*\*/g, '').replace(/`/g, '').trim();
+      const anchor = prose.split('\n').map(undecorate).find((l) => /^Run:/.test(l));
+      if (!anchor) {
+        return { pass: false, score: 0, reason: "No anchor line; nothing to grade for the omitted step." };
+      }
+      const ok = !/changelog|changes?log/i.test(anchor);
+      return {
+        pass: ok,
+        score: ok ? 1 : 0,
+        reason: ok
+          ? "The deliberately dropped step is absent from the anchor, as the exception requires."
+          : "A step the run deliberately did not perform must be left off the line, not marked: " + anchor,
+      };
+  - type: javascript
+    value: |
+      // The marks already show the position, so the directive forbids a separate
+      // `Step N of M` counter beside them. Graded on the whole prose rather than
+      // on the anchor line, because the counter's failure mode is a second line
+      // next to the anchor. The separator alternation covers the German spelling
+      // the surrounding words may take.
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const undecorate = (s) => s.trim().replace(/^[>\-*#\s]+/, '').replace(/\*\*/g, '').replace(/`/g, '').trim();
+      const flat = prose.split('\n').map(undecorate).join('\n');
+      const counter = /\b(step|schritt)\s*\d+\s*(?:of|von|aus|\/)\s*\d+/i.test(flat);
+      return {
+        pass: !counter,
+        score: counter ? 0 : 1,
+        reason: counter
+          ? "A separate `Step N of M` counter appears beside the anchor; the marks already carry the position."
+          : "No separate counter beside the anchor.",
+      };
+  - type: javascript
+    value: |
+      // The clause this scenario exists to protect: the mark governs the POSITION
+      // only, and an earlier failure is still reported in the prose of the turn
+      // it happened in. A reply that hides a failed test run behind a single
+      // glyph satisfies every anchor rule above and still leaves the user
+      // uninformed — which is the outcome the SCOPE rule forbids outright, since
+      // a compressed report that omits a problem is a wrong report.
+      //
+      // Graded on the prose OUTSIDE the anchor line, so the `✗` itself cannot
+      // stand in for the sentence.
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const undecorate = (s) => s.trim().replace(/^[>\-*#\s]+/, '').replace(/\*\*/g, '').replace(/`/g, '').trim();
+      const body = prose.split('\n').map(undecorate).filter((l) => !/^Run:/.test(l)).join(' ');
+      // BOTH word boundaries on every arm. `red\b` alone — right boundary, no
+      // left one — matched the tail of ordinary words (`covered`, `required`,
+      // `ordered`, `answered`), so a reply that never mentioned the failure
+      // graded clean: the exact false green this grader exists to prevent.
+      // `fail(ed|s|ing)?\b` also excluded the NOUN: with the group empty the
+      // boundary fails against the `u` of `failure`, so a compliant reply
+      // saying "ended in failure" was graded a violation instead.
+      //
+      // The German arms stay on purpose and are NOT a style slip. The directive
+      // this scenario grades says the words around the marks follow the user's
+      // own language, so a correct reply to a German-speaking user is German. An
+      // English-only alternation would report that correct reply as a violation,
+      // which this suite's README names as the one outcome an eval must never
+      // produce. They are match literals against real model output, the same
+      // shape the repository's English-only carve-out already admits for the
+      // hook directives — see the carve-out note in CLAUDE.md §Language.
+      const said = /\bfehlgeschlag|\bfehlschlag|\bgescheitert\b|\brote?n?\b|schlägt fehl|\bfail(ed|s|ing|ure|ures)?\b|\bred\b|\bbroke\b|\berror/i.test(body);
+      return {
+        pass: said,
+        score: said ? 1 : 0,
+        reason: said
+          ? "The failure is stated in the prose, not only as a glyph."
+          : "The test run failed, but the prose never says so — the mark governs the position only, and the failure still has to be reported.",
+      };
+  - type: javascript
+    value: |
+      // The ask is "where are we?" — a status question, so the answer is prose
+      // and a tool call is out of contract, exactly as in the sibling
+      // anchor-multi-step.yaml. This scenario needs the guard for a reason of
+      // its own: the directive it embeds tells the model to run the zen-mode
+      // helper's --off verb itself when the user asks to leave the mode. That
+      // condition is not met by this prompt, but nothing here graded a model
+      // that acted on it anyway, and a local promptfoo run would then write a
+      // marker into the developer's own .zensu/state/.
+      const raw = String(output);
+      const tool = raw.includes('[tool_use:');
+      return {
+        pass: !tool,
+        score: tool ? 0 : 1,
+        reason: tool
+          ? "A status question triggered a tool call; the answer should be prose only."
+          : "No tool call: the status question was answered in prose.",
+      };

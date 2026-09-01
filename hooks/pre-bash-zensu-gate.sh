@@ -40,7 +40,7 @@ unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 
 command -v node >/dev/null 2>&1 || exit 0
 
-INPUT="$(cat 2>/dev/null || true)"
+{ INPUT="$(cat 2>/dev/null || true)"; } 2>/dev/null
 
 # Parse the Bash command into zensu invocations. Emits one line per invocation,
 # tab-separated "<noun>\t<verb>". Emits nothing — so the

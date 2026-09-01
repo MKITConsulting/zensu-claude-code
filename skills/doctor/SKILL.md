@@ -11,7 +11,8 @@ description: >
   in ~/.claude/settings.json expose the zensu:code-reviewer spawn to a refusal
   before any chain has wedged), and session state (state dir writable, canonical
   CAS workflow documents valid, each review chain's shape plus any wedged chain and
-  its recovery command, any open chain not owned by this session, any reviewer spawn
+  its recovery command, any open chain not owned by this session, any chain this
+  session owns that has ended many turns at implementing, any reviewer spawn
   the host permission layer refused, expired pending-review surfaced).
   The only write is an explicit, user-confirmed cleanup of one
   expired pending-review.json — CAS workflow documents are never deleted. Use
@@ -190,6 +191,22 @@ classifier will refuse a spawn, not only when the whole table is green.
   `hooks/lib/rule-block-v1.js` could not be loaded, so carrier health is unknown.
   Report it as unknown, never as healthy — the row exists precisely so a clean
   report cannot mean "nobody looked".
+- **✅ permissions: … admits its own read-only reviewer spawns** → the plugin's own
+  PreToolUse hook `pre-agent-reviewer-allow.sh` grants those spawns before the host
+  permission layer is consulted, so the auto-mode classifier cannot refuse them. This is a
+  capability the plugin hands ITSELF, which is why it is reported in both states and why
+  the flag that turns it off cannot silence the row. Relay what it covers and what it does
+  not: only the plugin-scoped reviewer agents listed in the row, each confined to
+  `Read`/`Grep`/`Glob`; every other subagent spawn in the session is still
+  classifier-subject; and a `permissions.deny` or `permissions.ask` entry still overrides
+  the grant. State the scope precisely — the grant admits the whole spawn CALL, including
+  host-side effects of other `tool_input` fields such as `isolation`, and the read-trio
+  confinement bounds only what the child may then do.
+- **✅ permissions: … no settings edit is needed for them** → permission mode `auto` is set
+  and no `permissions.allow` rule names the reviewer spawn, but the grant above already
+  admits it, so the ordinary "add `Agent(zensu:code-reviewer)`" remedy does not apply. Do
+  NOT relay that remedy against this row. The deny-first caveat still travels with it,
+  because a deny rule outranks the grant just as it outranks an allow rule.
 - **⚠️ permissions: … the zensu:code-reviewer spawn** → the proactive counterpart
   to the refused-spawn state row below: it reads `~/.claude/settings.json` and
   reports the exposure *before* a chain wedges, so it is a warning about what
@@ -209,6 +226,37 @@ classifier will refuse a spawn, not only when the whole table is green.
   effect. An `autoMode.allow` entry is classifier guidance in prose, not a
   permission rule; if the row says so, the user's earlier attempt did not grant
   anything.
+- **⚠️ permissions: … the reviewer-spawn grant is switched off** → `hooks.reviewerSpawnAutoAllow`
+  is `false`, so the host permission layer decides every reviewer spawn again. Under
+  permission mode `auto` the classifier can refuse one, and a refused spawn leaves the
+  review chain with no review it can close on. It is a configuration choice, not a fault —
+  relay it as the trade-off it is, and do not change the flag on the user's behalf. This
+  row now fires ONLY for an explicit `false`; the two rows below carry the cases that used
+  to be folded into it and reported as a choice the user never made.
+- **⚠️ permissions: a config source could not be read or parsed within this check's own bounds**
+  → the report could not judge whether the grant is in force. This is a MISSING CHECK, never
+  an all-clear and never a verdict about the config: the enforcing reader carries no size
+  limit of its own, so it may well be granting on the very file this check declined to read.
+  Relay the uncertainty as uncertainty and point the user at the file.
+- **⚠️ permissions: a config source could not be read or parsed, so the enforcing reader declines**
+  → a broken config file, not a configuration choice. No `hooks.reviewerSpawnAutoAllow` key
+  was involved and the user should not go looking for one; fixing the file restores the grant.
+- **⚠️ permissions: pre-agent-reviewer-allow.sh is a symlink** → a broken installation. The
+  hook refuses a symlinked decision module outright and this report holds its own paths to
+  the same standard, so no grant is in force. Common on a `--plugin-dir` checkout or a
+  dotfile-managed tree; relay it as an installation problem, not a permission one.
+- **⚠️ permissions: pre-agent-reviewer-allow.sh is installed but its decision module … could not be loaded**
+  → a broken installation, not a choice: the hook loads nothing and declines every spawn,
+  so no grant is in force while the banner and this plugin's docs say one is. The row names
+  the load rather than one file, because the module or either of its two required siblings
+  can cause it. Reinstall or repair the plugin root rather than editing any settings file.
+- **⚠️ permissions: … hooks.json does not register it on a PreToolUse matcher covering the spawn tools**
+  → also a broken installation: the script exists but the harness never invokes it for a
+  spawn, so no grant is in force. A hook registered under a matcher that does not cover the
+  spawn tool names is exactly as inert as an unregistered one. Repair the plugin root.
+- **⚠️ permissions: … hooks/hooks.json could not be read or parsed** → the wiring could not
+  be judged, so whether any grant is in force is unknown. Relay it as a missing check, never
+  as a verdict either way; the report's own hooks-wiring rows name the underlying fault.
 - **✅ permissions: … switched off by hooks.reviewerSpawnPermissionCheck** → the check did
   NOT run. It is green because nothing is wrong, not because nothing was found, and the
   row says so itself — relay that distinction rather than folding this row into an
@@ -421,6 +469,53 @@ classifier will refuse a spawn, not only when the whole table is green.
   verdict. A missing inert-shape set also withholds it, but with its own row. There is no comparison between the record's project anchor and
   `CLAUDE_PROJECT_DIR` — the whole `Session state` block simply READS the record's
   root, because that is where every writer puts the documents.
+- **⚠️ chain: this session owns a chain that has ended N turns at `implementing`** → the
+  session armed a chain, kept working, and never marked the implementation
+  complete, so the review chain has not asked for a reviewer and nothing in it has been
+  reviewed. Say it with that scope, never as "no reviewer was ever asked for": a flow
+  like `/zensu:cover` spawns one without arming a chain, so the unqualified form is a
+  false statement about review coverage in the feature whose purpose is that coverage is
+  not misreported. The caveat below reports such a spawn when a note records it. The row states what the counter
+  measures — turns that ENDED with a changed worktree — rather than calling the
+  chain parked: the chains that reach the bound are the ones still being worked on. This is not a wedge and not an
+  error: the Stop hook releases in that state by design, which is exactly why
+  nothing else reports it. Relay the count and the ONE exit the row prints — the
+  review chain, entered with `--tdd-complete` after the Phase 6 step 5b
+  edit-landing audit and with a usable `## Requirements` table in the plan, both
+  of which that verb refuses without while the tree is dirty. **Never offer the
+  zero-change terminus here.** From this shape no review ticket has ever been
+  consumed, so `--chain-done` is the unqualified no-ticket terminus, and after a
+  mid-run commit its change-count guard measures zero and closes a chain in which
+  nothing was reviewed. **Say what the number means:** it
+  counts TURNS that ended with a changed worktree, never elapsed time, so a
+  paused session, an overnight break or a powered-off machine never produce it —
+  something really did keep working alongside an open gate. The bound is
+  `hooks.implStopNudgeAfter` (default `12`). At `0` the check is switched off and
+  says so in its own `✅` row — a disabled check must never read as a clean one. At the
+  getter's own maximum (`999999`) a SECOND `✅` row says the check cannot fire in practice,
+  because no session ends that many turns. Relay either row as a switched-off check, never
+  as a clean one — and note the bound between them: any value the counter will not reach in a real
+  session suppresses the row with no disclosure at all, so the ABSENCE of both rows is not
+  proof the check is armed.
+  One condition withholds the row, and it DISCLOSES rather than falling silent:
+  `ZDOC_SESSION_KEY` must be present and well formed under a `bound` verdict,
+  because without it an own chain cannot be told from someone else's. The
+  session-key row above names this row when that happens **only while the check is
+  armed**, and armed means BOTH bounds: `hooks.implStopNudgeAfter` above `0` and below the
+  getter's maximum. At either literal the row is withheld for its own reason, which its own
+  `✅` row states, so the session-key row does not claim it as well — at `0` the row is withheld by
+  configuration rather than by the missing key, the switched-off `✅` row above
+  already says so, and the session-key row drops the clause so one absent row is
+  never given two causes. It deliberately does
+  not depend on the inert-shape set, which belongs to the foreign-chain row.
+- **The row QUALIFIES the exit while this session stands refused, and never withholds
+  it.** When a live `reviewer-spawn-denied-<session key>.json` note exists for the same
+  chain, the row still names the command and adds a sentence saying a note records that
+  the host permission layer refused the `zensu:code-reviewer` spawn, pointing at the
+  refused-spawn row below. Relay both halves: the command AND the caveat. Do not drop
+  the caveat to shorten the row, and do not read its ABSENCE as proof no refusal is
+  outstanding — the note is cleared on every Stop and re-minted only by one that reaches
+  the notice, so a clean-tree turn leaves the caveat off while the refusal stands.
 - **⚠️ state: `<dir>` could not be read (`<errno>`)** → the session-state checks did
   NOT run. Relay it as a missing check, never as an all-clear: no chain shape, no
   wedged or foreign-chain row and no pending-review verdict was computed, so their

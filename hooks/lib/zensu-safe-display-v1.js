@@ -80,6 +80,14 @@ const DOUBLE_SPACE = / {2}/;
 // purpose, because there the value has already lost the fast path and readability is
 // no longer the thing being protected.
 const PAIR_SEPARATOR = / :|: /;
+// A THIRD forgery class, and the one this module did not have: a combining mark with
+// no base of its own attaches to the PRECEDING space and paints on it. MEASURED on the
+// installed runtime by the change that first shipped it: U+0301 and the spacing
+// visargas U+0903 and U+0F7F all printed as themselves, because \p{M} sits inside the
+// allowlist and neither literal guard above carries a mark. The rule keys on the mark's
+// BASE, so a decomposed accent on a LETTER — the case the wide alphabet was widened for
+// — still renders as itself.
+const ORPHAN_MARK = /(?:^|[ ])\p{M}/u;
 // The allowlist above admits \p{L}, and some LETTERS are Default_Ignorable — U+3164
 // HANGUL FILLER, U+115F, U+1160, U+FFA0 — which render as blank in a terminal. A value
 // like `/tmp/x<U+3164>:<U+3164>y` therefore matches the class, contains NO space at
@@ -176,7 +184,8 @@ const safeDisplayValue = (value, followedBy = '') => {
   const text = String(value);
   const inLine = text + String(followedBy);
   if (SAFE_DISPLAY.test(text) && !INVISIBLE.test(text) && !SEPARATOR_ADJACENT_MODIFIER_LETTER.test(inLine)
-    && !DOUBLE_SPACE.test(inLine) && !PAIR_SEPARATOR.test(inLine)) {
+    && !DOUBLE_SPACE.test(inLine) && !PAIR_SEPARATOR.test(inLine)
+    && !ORPHAN_MARK.test(inLine)) {
     return text;
   }
   return JSON.stringify(text)
@@ -228,5 +237,6 @@ module.exports = {
   INVISIBLE,
   SEPARATOR_ADJACENT_MODIFIER_LETTER,
   PAIR_SEPARATOR,
+  ORPHAN_MARK,
   safeDisplayValue,
 };

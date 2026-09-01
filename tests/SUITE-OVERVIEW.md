@@ -13,11 +13,26 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (143 = 136 + 7), **and §3 is too**: its eleven CI group headers
-sum to 136, the twelfth (local-only) adds 7, and every one of the 143 manifest suites appears
-in exactly one group. §7's profile table was re-derived from
-`tests/profiles/windows-ci.v1.json` rather than described, so its seven shard ids and their
-membership are the JSON's own, and the entry total is **42**.
+reconciled to that manifest (147 = 140 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 140 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 147). **§3 is NOT fully reconciled to it**, and the residual is stated rather than
+asserted away: its eleven CI group headers sum to 139 against 140 CI-classified suites, so one CI
+suite appears in no §3 group. `main` recorded that suite as `test-session-trail-lineage.sh`; this
+merge did not re-derive the NAME, because §3 lists suites in prose rather than by filename and a
+wrong name in a group is worse than none. The gap predates both the plugin-data guard, filed under
+§"Bash gates, witness & secrets", and the reviewer-spawn grant, filed under §"Review chain &
+findings". §7's profile table was re-derived from `tests/profiles/windows-ci.v1.json` rather than
+described, so its eight shard ids and their membership are the JSON's own, and the entry total
+is **43**.
+
+**Section 4's own header numeral was DROPPED rather than corrected**, so exactly one place
+owns the unit-file count and a header can no longer contradict it. It had said 24 while the
+count above said 26; both were then stale again within one merge, because the directory had
+moved to 27. The rowless files are enumerated ONCE, in the closing note under section 4's
+table — deliberately not repeated here, since a second copy of that list is the drift this
+document exists to prevent. Recorded rather than quietly reconciled: an audited count that
+disagrees with its own table is the failure shape, and an earlier revision of this very
+paragraph said "two files" while naming one, which is the same failure one level down.
 
 **Nothing machine-checks any of this.** The reconciliation above is a hand audit performed
 at this commit, not an invariant: the next suite added without touching §3 silently breaks
@@ -41,12 +56,12 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **143** — 136 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **136 structure suites + 5 offline evals = 141 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 143 − 136 gap | — |
-| `tests/structure/*.test.js` (`node --test` units) | **23 files** | invoked *by* parent `.sh` suites |
+| `tests/structure/test-*.sh` (deterministic shell) | **146** — 139 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **139 structure suites + 5 offline evals = 144 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 146 − 139 gap | — |
+| `tests/structure/*.test.js` (`node --test` units) | **28 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
-| Windows contract profiles | **7** (`windows-shard-1`…`-7`, 42 suite entries) | `ci.yml` matrix, `run-profile.js` |
+| Windows contract profiles | **8** (`windows-shard-1`…`-8`, 43 suite entries) | `ci.yml` matrix, `run-profile.js` |
 | Windows safety shards | scheduled/manual matrix | `windows-safety.yml` |
 | Approx. assertions in structure layer | **~4,200** (~3,740 in the CI set) | — |
 
@@ -54,8 +69,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 143 structure suites + 5 offline evals | none |
-| `--ci` | 135 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 146 structure suites + 5 offline evals | none |
+| `--ci` | 139 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -92,8 +107,9 @@ rejection, fail-closed behavior on an unreadable state file, diagnostics on fail
 state verbs, and the SessionStart banner. `session-control-claude` alone carries ~140
 assertions.
 
-### TDD engine & phase gate (16)
-`edit-landing-audit` · `evidence-discipline` · `pre-edit-hook-mirror` ·
+### TDD engine & phase gate (17)
+`edit-landing-audit` · `evidence-discipline` · `impl-stop-counter` ·
+`pre-edit-hook-mirror` ·
 `pretool-config-prompts` · `requirements-table-gate` ·
 `smoke-main-thread-chain` · `tdd-begin-chain-reset` ·
 `tdd-complete-receipt-gate` · `tdd-full-cycle` · `tdd-manager-patches` ·
@@ -110,7 +126,7 @@ unreadable marker forces nothing), the two preconditions `--tdd-complete` refuse
 the edit-landing receipt and the plan's `## Requirements` table that `/zensu:converge`
 anchors on — and the 5-agent review fan-out wiring in `skills/tdd/SKILL.md`.
 
-### Review chain & findings (26)
+### Review chain & findings (27)
 `chain-recover` · `chain-terminus-zero-change-gate` · `deferred-review-claim` ·
 `deferred-review-fallback` · `evidence-crosscheck` · `finding-verification` ·
 `pending-review-ttl` ·
@@ -118,7 +134,7 @@ anchors on — and the 5-agent review fan-out wiring in `skills/tdd/SKILL.md`.
 `post-review-self-review-handoff` · `post-review-tdd-scope` · `reset-review-limit-skill` ·
 `reset-review-limit-transaction` · `review-aspect-agent` · `review-judge` ·
 `review-personas` · `review-worker-evidence-lease` · `reviewer-capability-gate` ·
-`reviewer-readonly-v1` · `self-review-flags` · `self-review-markers` · `self-review-skill` ·
+`reviewer-readonly-v1` · `reviewer-spawn-allow` · `self-review-flags` · `self-review-markers` · `self-review-skill` ·
 `stop-enforcer-escapes` · `stop-enforcer-self-review-routing` ·
 `stop-enforcer-subagent-noop` · `stop-session-binding-recovery`
 
@@ -145,17 +161,26 @@ generation- and ticket-bound termination, the single planning gate, review-budge
 rearm/retirement, the read-only SessionStart resume hook, and a composed full-lifecycle
 walk.
 
-### Bash gates, witness & secrets (8)
+### Bash gates, witness & secrets (9)
 `artifact-redaction` · `bash-source-write-gate` · `bash-zensu-gate` · `bypass-ledger` ·
-`post-bash-witness` · `secret-scan-gate` · `skill-workflow-markers` ·
+`plugin-data-guard` · `post-bash-witness` · `secret-scan-gate` · `skill-workflow-markers` ·
 `witness-scenario-assertions`
 
 Covers the PreToolUse(Bash) source-write gate incl. rule (C) git-repo escape
 (183 probe cases + a 30-case pure unit suite), the `zensu <noun> <verb>` write gate,
 the bypass ledger (gate escapes only — ~100 assertions), the post-Bash witness log
 (anti-hallucination trail), the build-time guard that a skill never runs a zensu
-mutation without `--workflow-begin` / `--workflow-end` markers, the secret-scan gate, and
-the writer-side redaction that keeps `.zensu/plans` and `.zensu/logs` artifacts free of
+mutation without `--workflow-begin` / `--workflow-end` markers, the secret-scan gate, the
+plugin-data containment gate (117 checks; floors at the measured counts — `EXPECTED_CHECKS=114` registered, an executed-row floor of 102 tolerating all twelve skippable rows, and a POSIX host that fails on any skip representing LOST coverage: the store denied in all
+three chain states with an in-project allow control each and an armed-state premise, all four
+write tool names, the anchored-containment and relative-target bites, the symlink family — a
+symlinked directory, a dangling leaf, and `..` after a symlink into the store, each with a
+control in the other direction — a case-variant store prefix, a two-hop symlink, the deny-reason
+and no-escape assertions, a payload-declared non-main principal whose premise consults
+`claude-principal-v1.js` itself, a second-path-field row, six faults covered — four asserting their own reason literal and two asserting the documented
+silence, the exit-2 plugin-root refusal, two source-absence checks with controls, and a
+two-group matcher shape compared against the module's exported tool set), and the writer-side
+redaction that keeps `.zensu/plans` and `.zensu/logs` artifacts free of
 absolute developer paths (~100 assertions).
 
 ### Skill contracts (20)
@@ -245,7 +270,7 @@ each other on counts, terminology, navigation and the specification's BLOCKED st
 Structure gates for the Promptfoo harnesses. GitHub Actions never invokes the Promptfoo
 binary; these guard the local harness contract.
 
-## 4. `node --test` unit suites (23 files)
+## 4. `node --test` unit suites
 
 Not run standalone — each is driven by a parent shell suite, so a JS failure surfaces as
 that suite's failure.
@@ -257,13 +282,15 @@ that suite's failure.
 | `finding-verify-v1.test.js` | 26 | `test-finding-verification.sh` | finding-verification grading module |
 | `profile-runner.test.js` | 23 | Windows profile suite | `run-profile.js` lifecycle, digests, deadlines |
 | `chain-recovery-v1.test.js` | 21 | `test-chain-recover.sh` | chain shape lattice + rearm-receipt predicate |
+| `plugin-data-guard-v1.test.js` | 37 | `test-plugin-data-guard.sh` (G38) | plugin-data containment: the separator class both ways, both resolution bounds, the truncated-walk refusal, the filesystem-root and containing-store arms, the containment export-shape arm via a copied module beside a stub parser, the cwd ranking, and the realpath fast path over targets that exist |
 | `reviewer-spawn-denial-v1.test.js` | 29 | `test-stop-enforcer-self-review-routing.sh` | host-refused reviewer spawn: structural `tool_use_id` keying, the host error flag, the marker prefix, tail/line bounds, degrade-to-none |
 | `plan-payload-v1.test.js` | 20 | `test-plan-payload-fallback.sh` | plan-source precedence table, hardened plan-file reader refusals, O_NOFOLLOW-unavailable fallback |
-| `zensu-doctor-invocation.test.js` | 26 | `test-versioned-plugin-upgrade.sh` | `/zensu:doctor` invocation allowlist. The row read *none found* while that suite has driven it all along — a registry that under-reports a driver is worse than one with a gap, because it invites someone to add a second driver or delete the file |
+| `zensu-doctor-invocation.test.js` | 26 | `test-versioned-plugin-upgrade.sh` | `/zensu:doctor` invocation allowlist — driven from that suite, which binds it as `RECOGNIZER_UNIT` and grades it against a registered-case floor; it has no `run-all.sh` entry of its own, because discovery is `test-*.sh` only |
 | `review-evidence-sweep-v1.test.js` | 32 | `test-versioned-plugin-upgrade.sh` | superseded-lease sweep: the ownership selector, the canonicalized repair root, and the ancestor probe that separates *no store here* from *an ancestor is a file* |
-| `session-adopt-report-v1.test.js` | 29 | `test-versioned-plugin-upgrade.sh` | the adoption report payload: `safe()` in both directions (ordinary path verbatim; bidi, line separators and DEL folded; a localized path unchanged), the `label : value` pair-forgery guard on both branches, the space-adjacency rule that folds every Modifier_Letter a forged row could use (walked over the whole category rather than a list), the separator in BOTH spellings the consumers emit (`space-colon-space` and `colon-space`) with an ordinary colon still rendering raw, the trailing-position seam where the caller appends text after the value, the invisible-letter guard, that the exported constants and the applied rules predict each other in both directions, the in-place lease repair, and that the display rule has exactly ONE owner |
+| `session-adopt-report-v1.test.js` | 34 | `test-versioned-plugin-upgrade.sh` | the adoption report payload: `safe()` in both directions (ordinary path verbatim; bidi, line separators and DEL folded; a localized path unchanged), the `label : value` pair-forgery guard on both branches, the space-adjacency rule that folds every Modifier_Letter a forged row could use (walked over the whole category rather than a list), the separator in BOTH spellings the consumers emit (`space-colon-space` and `colon-space`) with an ordinary colon still rendering raw, the trailing-position seam where the caller appends text after the value, the invisible-letter guard, that the exported constants and the applied rules predict each other in both directions, the in-place lease repair, and that the display rule has exactly ONE owner |
 | `rule-block-v1.test.js` | 10 | `test-best-solution-first.sh` | the one-line marker-block reader both rule carriers share: marker position, the FILE and BLOCK ceilings, the short-read and swapped-file refusals |
 | `playwright-mcp-proxy.test.js` | 16 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy |
+| `zen-anchor-assertions.test.js` | 7 | `test-zen-mode.sh` (Z29) | zen-mode eval GRADERS: every javascript assertion body compiled, and a pinned pass/fail vector for the two anchor scenarios plus the safety carve-out |
 | `verify-feature-transcript-check.test.js` | 14 | `test-promptfoo-verify-feature.sh` | transcript assertion contract |
 | `fixture-mutation-watch.test.js` | 19 | `test-claude-promptfoo-wrapper.sh` | fixture-event classification: the gated classes (`.git`, the watch root's own name, run-owned ancestors) adjudicated by the manifest, ordinary paths by touch-after-start, and that both watch backends route through one decision spelled once |
 | `session-control-lineage.test.js` | 13 | `test-versioned-plugin-upgrade.sh` | runtime-lineage axis: same-major (same-minor while major is `0`), never-backwards, sibling plugin root |
@@ -275,6 +302,20 @@ that suite's failure.
 | `windows-profile-contract.test.js` | 4 | Windows profiles | profile contract |
 | `process-supervisor.test.js` | 3 | wrapper / profile suites | bounded supervisor + process-tree teardown |
 | `owned-process.test.js` | 2 | `test-claude-promptfoo-wrapper.sh` | owned-process lifecycle |
+| `reviewer-spawn-allow-v1.test.js` | 18 | `test-reviewer-spawn-allow.sh` | the reviewer-spawn grant's derived agent set, its silence on every non-grant path, and the one-definition scan |
+
+Five further files — `review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js`,
+`session-lineage-v1.test.js`, `worktree-advice-v1.test.js` and
+`session-adopt-report-v1.test.js` — exist on disk without a row here. For FOUR of them that drift predates the reviewer-spawn
+grant; `worktree-advice-v1.test.js` is different and the distinction is worth keeping —
+it was added by the session-trail takeover-destination change and left rowless
+deliberately, because SUITE-OVERVIEW.md itself is graded by no suite and a row here would
+be one more hand-maintained copy of a count nothing checks. The unit file IS driven — by
+`test-session-trail-verdict.sh`, which pins its case count exactly — so it is rowless
+here, not ungraded there. Both are recorded rather than silently
+absorbed. The inventory row above no longer carries a unit-file numeral at all, for the
+same reason this paragraph gives: it was a hand-maintained count nothing grades, and it
+went stale on its next merge.
 
 Plus `tests/session-control/session-control-core-v1.test.js` — the Session Control core
 unit suite, reached via `tests/session-control/run.sh`. It is driven by
@@ -328,8 +369,9 @@ assert, `# ` = comment.
 `node tests/run-profile.js <profile>`. The table below is re-derived from the JSON rather
 than described — the previous five-profile layout (`windows-reset-session`,
 `windows-leases-routing`, `windows-native-state`, `windows-installed-core`,
-`windows-native-branches`) no longer exists under any of those names, and only its total
-of 40 survived the reshard, and this branch's new suite takes it to 41.
+`windows-native-branches`) no longer exists under any of those names.
+The reviewer-spawn-allow suite is deliberately NOT among them — see CLAUDE.md §"Reviewer-Spawn
+Grant", known gaps.
 `tests/structure/windows-ci-contract.test.js` pins exactly these eight keys and the
 43-entry total, so a shard renamed there and not here is drift this table cannot catch
 on its own:
@@ -351,7 +393,7 @@ per-profile deadlines; a supervisor alive until the whole process tree is dead;
 disposable home/temp tree; strict env allowlist (no credentials, auth homes,
 interpreter preloads, or live/API modes).
 
-The aggregate check `Deterministic suite (windows-latest)` downloads exactly those 7
+The aggregate check `Deterministic suite (windows-latest)` downloads exactly those 8
 reports and validates SHA / run-attempt consistency, the exact ordered suite inventory,
 and a complete execution-contract digest binding manifest + catalog + runner +
 supervisor + Job-Object helper + summarizer + workflow config + every referenced suite
@@ -361,7 +403,7 @@ file. Fails closed on missing, failed, timed-out, or incompletely-cleaned profil
 
 | Workflow | Invokes |
 |---|---|
-| `ci.yml` | `bash tests/run-all.sh --ci` (Ubuntu, blocking) + the 7 Windows profiles via `run-profile.js` |
+| `ci.yml` | `bash tests/run-all.sh --ci` (Ubuntu, blocking) + the 8 Windows profiles via `run-profile.js` |
 | `release.yml` | `bash tests/run-all.sh --ci` **twice** — once in `prepare` against the local release commit, once in `publish` against the exact `github.sha`; plus runtime-digest and clean-tree evidence |
 | `windows-safety.yml` | `node tests/run-windows-safety-shard.js <kind> <shard> <total>` — scheduled weekly + manual; partitions the former Windows monolith (legacy canary + every non-Promptfoo structure test + all 3 offline eval runners) without duplication or loss, 30-minute command deadline |
 

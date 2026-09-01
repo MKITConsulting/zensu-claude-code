@@ -102,7 +102,9 @@ const buildRequest = () => {
 const safe = safeDisplay.safeDisplayValue;
 // Re-exported unchanged so the unit suite keeps pinning the rule through the
 // consumer that renders it, rather than having to know where it now lives.
-const { SAFE_DISPLAY, DOUBLE_SPACE, NON_ASCII } = safeDisplay;
+const {
+  SAFE_DISPLAY, DOUBLE_SPACE, NON_ASCII, INVISIBLE, PAIR_SEPARATOR, ORPHAN_MARK,
+} = safeDisplay;
 
 // WHICH directory the sweep refused, empty when it refused nothing.
 //
@@ -513,6 +515,9 @@ function reportLeaseWarnings(leases) {
 // them would be an unrelated break. Do not infer the fold from this list.
 module.exports = {
   DOUBLE_SPACE,
+  INVISIBLE,
+  ORPHAN_MARK,
+  PAIR_SEPARATOR,
   NON_ASCII,
   REMEDY,
   SAFE_DISPLAY,

@@ -307,8 +307,13 @@ unset _zensu_inner_hint
 AUTOPILOT_STATE_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
 CONFIG_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 TDD_PHASE_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+# The watchdog ladder both out-of-process children on this path go through. It lives in
+# `hooks/lib/` rather than here because a THIRD site with the same exposure already exists
+# — `user-prompt-context-nudge.sh` reads a host-supplied transcript path — and a helper
+# defined in a leaf hook cannot serve it. Three review rounds asked for this move.
+BOUNDED_RUN_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-bounded-run.sh"
 if [ ! -r "$SESSION_LIB" ] || [ ! -r "$CONFIG_LIB" ] || [ ! -r "$TDD_PHASE_LIB" ] \
-    || [ ! -r "$AUTOPILOT_STATE_LIB" ]; then
+    || [ ! -r "$AUTOPILOT_STATE_LIB" ] || [ ! -r "$BOUNDED_RUN_LIB" ]; then
   if [ "$DURABLE_STATE_HINT_EXISTS" = "true" ]; then emit_runtime_unavailable_block
   elif [ "$INNER_STATE_EXISTS" = "true" ]; then emit_inner_runtime_unavailable_block
   fi
@@ -332,6 +337,7 @@ PROJECT_ROOT="$(zensu_resolve_project_dir)" || exit 0
 SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")" || exit 0
 source "$CONFIG_LIB"
 source "$TDD_PHASE_LIB"
+source "$BOUNDED_RUN_LIB"
 STATE_FILE="$(tdd_state_file "$SESSION_ID")"
 
 # A reviewer spawn the HOST refused never executes, so no PreToolUse or
@@ -343,9 +349,51 @@ STATE_FILE="$(tdd_state_file "$SESSION_ID")"
 REVIEWER_DENIAL_STATUS=""
 REVIEWER_DENIAL_KIND=""
 REVIEWER_DENIALS=0
+# The probe's OWN status word, kept beside the routing status rather than folded
+# into it. `REVIEWER_DENIAL_STATUS` deliberately collapses `errored`, `unreadable`
+# and `none` to `none`, because none of the three is a verdict this hook may ROUTE
+# on — but they are not the same fact, and the scope sentence needs the difference:
+# `errored` is a reviewer result the host flagged as an error whose text matched no
+# marker. The module's own header lists three causes — a reworded host message, a
+# subagent crash, a transport failure — so it does NOT establish a refusal; what it
+# establishes is that a refusal cannot be ruled out. Folding it into `none` is right
+# for routing and wrong for deciding whether to argue about withholding.
+# `unprobed` is the state before any probe ran (no transcript path, module absent,
+# node failed) — distinct from a probe that ran and found nothing.
+REVIEWER_DENIAL_RAW="unprobed"
 # Set only by the branch that routes this Stop as a host refusal — see the mint
 # guard at the end of the file. Declared here so `set -u` holds on every path.
 REVIEWER_DENIAL_ROUTED=false
+# NEVER claim ANYTHING about this literal's position or its surroundings inside the notice.
+# Two revisions tried. The first said "it is the last thing on the line so the path can be
+# copied whole", which is false about its own line — the notice is a single `echo` that
+# continues for several sentences after the interpolation. The second replaced it with
+# "(nothing is appended to that path)", which is false in the same way and for the same
+# reason, and its guarding comment described bytes the code did not emit. The rule is now
+# simply stated and nothing is said about where it sits; if a copy-safety property is ever
+# wanted, make it true by construction — put the interpolation last in the emitted string —
+# rather than by asserting it.
+# The one spelling of the remedy, hoisted here because its two consumers sit on
+# opposite sides of the file: `DENIAL_RULE` in the blocked-Stop branch far below,
+# and `zensu_impl_stop_nudge`, which runs from an early exit ABOVE that branch and
+# therefore cannot see an assignment made there — the same ordering constraint the
+# `complete_cmd` renderer states about LOG_COMMAND. The nudge shipped one round
+# naming no rule and no file at all, which left the reader of the earliest-firing
+# refusal surface told that a permission must be lifted and unable to learn which.
+# Names ONLY the user-scoped file: the project-local spelling is a path this agent
+# could write, and pointing at it beside the exact rule that grants the refused
+# capability is an invitation the surrounding prose can only ask it to decline.
+REVIEWER_SPAWN_ALLOW_RULE="Add the rule \"Agent(zensu:code-reviewer)\" to permissions.allow in the user settings file ~/.claude/settings.json"
+# The allow rule ALONE is not a remedy, and shipping it alone made the earliest-firing
+# refusal surface the weakest of the four. Deny is evaluated before ask and allow, so
+# behind a standing deny rule the named allow changes nothing — and the sanction arm
+# below would then act on a user who reports, in good faith, that they granted it. Every
+# sibling surface already carries this clause; `DENIAL_REMEDY` builds a kind-aware
+# version, and the doctor renderer has its own `DENY_FIRST_CAVEAT`. Stated
+# unconditionally here rather than rebuilt per kind, because this surface is advisory
+# and a wrong kind would cost more than a redundant sentence.
+REVIEWER_SPAWN_DENY_FIRST="Deny is evaluated before ask and allow, so remove any deny rule naming the Agent tool first — while one stands, adding the allow rule changes nothing."
+
 reviewer_spawn_denial_probe() {
   local lib probe
   [ -n "$REVIEWER_DENIAL_STATUS" ] && return 0
@@ -361,26 +409,49 @@ reviewer_spawn_denial_probe() {
   # network-backed storage while this runs on the Stop path with no deadline
   # above it. A kill degrades exactly like every other probe failure: the
   # existing `|| return 0` leaves the verdict `none` and routing untouched.
-  # `timeout` is absent on base macOS and some Git Bash installs, hence the guard.
-  if command -v timeout >/dev/null 2>&1; then
-    probe="$(timeout 5 node "$lib" --transcript "$TRANSCRIPT_PATH" 2>/dev/null)" || return 0
-  else
-    probe="$(node "$lib" --transcript "$TRANSCRIPT_PATH" 2>/dev/null)" || return 0
-  fi
+  # One ladder, shared with the git probe — see `zensu_run_bounded`. This child carries
+  # the LARGER exposure of the two (the transcript path is host-supplied and may sit on
+  # network-backed storage), so it must never be the one left behind when the ladder
+  # gains an arm. The `2>/dev/null` applies to the wrapper and is inherited by the
+  # child it execs, which is why no redirection has to be threaded through it.
+  probe="$(zensu_run_bounded node "$lib" --transcript "$TRANSCRIPT_PATH" 2>/dev/null)" || return 0
   case "$probe" in
-    'status=blocked '*) REVIEWER_DENIAL_STATUS="blocked" ;;
-    'status=clear '*) REVIEWER_DENIAL_STATUS="clear" ;;
+    'status=blocked '*) REVIEWER_DENIAL_STATUS="blocked"; REVIEWER_DENIAL_RAW="blocked" ;;
+    'status=clear '*) REVIEWER_DENIAL_STATUS="clear"; REVIEWER_DENIAL_RAW="clear" ;;
     # `status=errored` and `status=unreadable` deliberately fall through here:
-    # neither is a verdict this hook may act on, so both leave `none`.
-    *) return 0 ;;
+    # neither is a verdict this hook may act on, so both leave `none`. Each records
+    # its own word in REVIEWER_DENIAL_RAW first and then returns exactly as before —
+    # the routing status, the kind and the denials count are untouched, so nothing
+    # below this `case` can tell the difference.
+    'status=errored '*) REVIEWER_DENIAL_RAW="errored"; return 0 ;;
+    'status=unreadable '*) REVIEWER_DENIAL_RAW="unreadable"; return 0 ;;
+    'status=none '*) REVIEWER_DENIAL_RAW="none"; return 0 ;;
+    # The residual NAMES itself instead of inheriting the `unprobed` initializer. This
+    # `case` hand-enumerates a vocabulary `reviewer-spawn-denial-v1.js` owns and does not
+    # export, so a status added there lands here — and an implicit residual class is the
+    # exact failure this repository already records for the artifact-redaction reason
+    # sets. `unknown` is outside the render allowlist below, so an unrecognized verdict
+    # withholds the scope sentence rather than rendering it by default.
+    'status='*) REVIEWER_DENIAL_RAW="unknown"; return 0 ;;
+    # Output that is not a status line at all. Named for the same reason as `unknown`
+    # directly above: an arm that inherits the `unprobed` initializer lands in the RENDER
+    # allowlist, so the parseable-but-unrecognized case and the unparseable case would take
+    # opposite directions for one evidence class. Neither is in the allowlist.
+    *) REVIEWER_DENIAL_RAW="unparseable"; return 0 ;;
   esac
   # The kind is read as a FIELD, not matched against a local copy of the marker
   # set. That set lives in the module and is re-encoded exactly once more below,
   # in the `case` arms that render cause and remedy; a third copy here bought
-  # nothing. The value is only ever a `case` SELECTOR — it is never interpolated
-  # into the reason string — and its unknown arm is already the safe one, so a
-  # value this hook does not recognize degrades to "unclassified" rather than
-  # reaching an operator-visible string. `reviewerDenialRows` vets it a second
+  # nothing. The rule this comment used to state — that the value is only ever a `case`
+  # SELECTOR and never reaches operator-visible text — is OVERTAKEN, and saying
+  # so here matters because this is the comment a maintainer adding a marker
+  # reads. Only its NARROW half survives: neither site reaches the hook's JSON
+  # `reason`, which is built from DENIAL_CAUSE/DENIAL_REMEDY below. TWO stderr
+  # messages do render the raw value — the cap-release diagnosis further down,
+  # which predates the turn counter, and `zensu_impl_stop_nudge`'s refused-spawn
+  # notice — so a renamed or added `kind` moves operator-visible bytes in two
+  # places with no shell edit. The unknown arm is still the safe one, so an
+  # unrecognized value degrades to "unclassified" rather than to a wrong remedy. `reviewerDenialRows` vets it a second
   # time against the same module before rendering a row.
   # Reading it generically also makes a marker ADDED to the module take effect
   # here with no matching shell edit: the closed set silently degraded such a
@@ -450,6 +521,9 @@ reviewer_denial_note_path() {
 # clear is `rm -f` and the write republishes identical bytes under a fresh
 # timestamp — and preferable to the alternative of silently skipping it.
 reviewer_note_locked() {
+  # Same `set -u` + bash 3.2 hazard as `zensu_run_bounded`'s guard, and `return 0` IS the right
+  # direction here: this function's contract is that it never changes the Stop decision.
+  [ "$#" -gt 0 ] || return 0
   _tdd_locked_run "$STATE_FILE" "$@" 2>/dev/null && return 0
   "$@"
   return 0
@@ -477,7 +551,10 @@ reviewer_denial_notes_reap() {
   [ -f "$1" ] || return 0
   # The SAME TTL the doctor ages a note out against, read from the same config
   # key. A note past it is the one the doctor's own row calls safe to delete.
-  ttl="$(zensu_pending_review_ttl_hours 2>/dev/null)" || ttl=0
+  # `</dev/null` for the same reason the writer below carries it: this runs inside the
+  # lease, and the shared config getter spawns `node` with no redirect of its own, so it
+  # cannot be placed in the callee.
+  ttl="$(zensu_pending_review_ttl_hours 2>/dev/null </dev/null)" || ttl=0
   case "$ttl" in ''|*[!0-9]*) ttl=0 ;; esac
   # stdin is redirected below alongside the output channels, and that is not
   # cosmetic: this runs INSIDE the lease, whose keeper is a bash coprocess, and a
@@ -546,9 +623,30 @@ reviewer_denial_note_clear() {
   reviewer_note_locked reviewer_denial_note_clear_unlocked
 }
 
+# `</dev/null` on the node child below matches the sibling reaper three functions
+# down, which has carried it all along, and the house rule this repository states for
+# anything spawned inside the lease. STATE THE MECHANISM HONESTLY, because review
+# found the usual account of it questionable and no run in this session settled it:
+# the keeper's control channel is the coprocess descriptor pair, NOT fd 0, so a
+# redirect of fd 0 cannot by itself detach a child from that pipe. What the redirect
+# does guarantee is that the child never BLOCKS reading a shared stdin, which is the
+# half that is mechanically certain. Applied because it is free, because the sibling
+# has it, and because divergence between two adjacent writers is its own hazard —
+# not because the descriptor argument was verified here.
+#
+# State the CRITERION, never a count: a count of the unredirected children in this
+# region has now gone stale twice in two rounds. The rule is that every child which
+# could READ stdin carries `</dev/null`; the ones left without it — the `dirname`
+# below and the `rm` in `reviewer_denial_note_clear_unlocked` — are argv-only and
+# cannot block, which is why they are exempt rather than overlooked. The implementing-turns counter is what made all
+# of this hot — this writer was reached only from the blocked-Stop routing site and
+# the cap-release site, and now runs on every dirty turn end past the threshold, which
+# also makes the reap's own guard pass every time.
 reviewer_denial_note_write_unlocked() {
   local note
   note="$(reviewer_denial_note_path)" || return 0
+  # Deliberately NOT redirected: `dirname` reads argv and cannot block on stdin, so it
+  # is the one child in this lease region the rule above does not apply to.
   [ -d "$(dirname "$note")" ] || return 0
   if reviewer_spawn_denied; then
     # The state directory is writable from inside the session, so the note is
@@ -587,7 +685,7 @@ reviewer_denial_note_write_unlocked() {
         // Safe now that only this pid can name it.
         try { fs.rmSync(tmp,{force:true}); } catch (_) { /* nothing else to do */ }
       }
-    ' >/dev/null 2>&1 || true
+    ' </dev/null >/dev/null 2>&1 || true
   elif [ "$REVIEWER_DENIAL_STATUS" = "clear" ]; then
     # The UNLOCKED spelling on purpose: this already runs inside the lease, and
     # the lease is not reentrant — taking it again here would fail to acquire and
@@ -657,7 +755,14 @@ if [ -r "$AUTOPILOT_STATE_LIB" ]; then
   fi
 fi
 
+# Records that a decision has been written to stdout. An advisory that runs AFTER
+# a decision-bearing call must be able to tell a release from a block: an outer
+# Autopilot run can block on the very release path the implementing-phase nudge
+# sits on, and a stderr line asserting "Stop is not blocked" beside a
+# decision:"block" on stdout contradicts the authoritative channel.
+DECISION_EMITTED=false
 emit_block() {
+  DECISION_EMITTED=true
   printf '%s' "$1" | node -e '
     const reason = require("node:fs").readFileSync(0, "utf8");
     process.stdout.write(JSON.stringify({decision:"block",reason}));
@@ -971,13 +1076,51 @@ if [ "$ADOPT_ELIGIBLE" = "true" ]; then
   else
     ADOPT_RC=$?
     case "$ADOPT_RC" in
-      6) ;; # no pending marker/claim; this is a normal no-work result
+      # rc=6 has TWO causes and they are not the same state. Either there is no
+      # pending marker or claim at all, or a nonterminal run holds this working
+      # tree and the fence weighed the hold as not concerning this Stop. Both are
+      # a normal no-work result here, and no new code distinguishes them on
+      # purpose: the Stop decision is identical, and a third code would have to be
+      # understood by every caller of the adoption verb to buy nothing.
+      #
+      # The SECOND cause has a consequence worth naming where a reader will meet
+      # it: the fence returns before `tdd_adopt_pending_review` runs, and that
+      # call owns the `rm -f` for an EXPIRED marker. So a stale marker under a
+      # held tree is not reaped by this Stop. It is inert while stale and the
+      # first adoption after the hold clears removes it -- a leak, not a wedge.
+      6) ;;
       4)
-        # The locked read or its descriptor-backed contention fallback proved
-        # that a durable run became active after the initial absent snapshot.
-        # Do not take a second contended read here: its legacy rc=1 conflates
-        # lock timeout with absence and could erase that stronger proof.
-        emit_block "Zensu Autopilot Stop denied: a durable run became active while deferred review adoption was waiting for the Outer lock. Retry Stop so the current durable state can be routed safely."
+        # A nonterminal durable run holds this working tree. The occupancy
+        # comparison is CONTAINMENT in both directions, so the holder may be a
+        # run driving a worktree nested below this tree -- or above it. The hold
+        # therefore persists for as long as that run stays nonterminal, and the
+        # previous wording ("retry Stop") prescribed a retry that could never
+        # succeed. Name the holder instead.
+        #
+        # Take the sentence the fence PUBLISHED and never re-derive one. It was
+        # rendered from the record the fence actually judged; any read here would
+        # happen after that fence returned, and the worker reports
+        # `preferred || holders[0]`, so a second FOREIGN run publishing in the
+        # window could be named instead. There is deliberately NO fallback read:
+        # the hook and the library always come from one tree (the plugin root is
+        # derived from this script and re-checked above), so a non-publishing
+        # library cannot pair with a publishing hook — and the only way the value
+        # is empty is that the render itself failed, in which case a second read
+        # would be a fresh chance to name the WRONG run rather than a recovery.
+        # Removing it also removes this file's last module-private call.
+        DEFERRED_HOLD_TEXT="${ZENSU_AUTOPILOT_WORKSPACE_HOLD_TEXT:-}"
+        if [ -z "$DEFERRED_HOLD_TEXT" ]; then
+          # The holder could not be read, so ownership is UNKNOWN here — and the
+          # own-run case is the LIKELY one on this branch, because it is reached
+          # under the same lease contention that made the read fail. Prescribing
+          # a release would therefore aim `--autopilot-release` at this session's
+          # own live generation in exactly the state the renderer withholds it.
+          # Name the condition and the two possibilities instead of a command.
+          DEFERRED_HOLD_TEXT="the holding run could not be identified from here; if it belongs to another session, ask that session to finish or cancel it, and if it is this session's own run, finish or repair it rather than releasing it"
+        fi
+        # The holder clause goes LAST, so a future reword cannot append prose to
+        # a command the way an earlier spelling produced `--confirm.`.
+        emit_block "Zensu Autopilot Stop denied: a nonterminal durable Autopilot run holds this working tree, so this Stop can neither adopt deferred review work here nor infer completion. Retrying Stop cannot clear the hold while that run stays nonterminal. ${DEFERRED_HOLD_TEXT}"
         exit 0
         ;;
       *)
@@ -1010,13 +1153,275 @@ if [ "$ADOPT_ELIGIBLE" = "true" ]; then
   fi
 fi
 
+# The ONE renderer of the Autopilot link flags. Two hand-authored copies existed —
+# same three variables, same `printf '%q'` quoting, same command shape — and their
+# guards had already drifted apart cosmetically (`[ -n "$INNER_BOUND_RUN" ]` against
+# `[ -n "${INNER_BOUND_RUN:-}" ]`), which is the fingerprint of a second authoring
+# rather than of a shared intent. Nothing held them together, so a change to the
+# quoting or to the flag names would have landed in one and not the other.
+#
+# It carries its OWN leading space and answers EMPTY when the run id is empty, so both
+# call sites append it unconditionally and neither needs a guard of its own.
+#
+# It takes the three values as PARAMETERS rather than reading the `INNER_BOUND_*`
+# globals. That is what makes it liftable: `hooks/post-review-tdd-delegate.sh` builds
+# the byte-identical triple from its own differently-named globals, and a function that
+# reads this file's variable names can never serve it. Moving this into `hooks/lib/` to
+# collapse that residual is NOT taken here — it is a second hook's change with its own
+# review — but the signature no longer stands in the way. THE TRIGGER, restated because the
+# first version fired on a formatting edit and bought nothing: a change to the SHAPE of
+# the flag sequence — a flag added, removed, renamed or reordered — or a third shell
+# renderer of the same triple. Re-indenting the delegate's line is not that.
+#
+# The two copies are no longer merely "pinned separately": C61 compares the delegate's
+# flag sequence against this renderer's, so a divergence in what `zensu-log.sh` parses
+# fails loudly. What is still unheld is the OPERAND quoting, which legitimately differs
+# between the two (conversions here, pre-quoted variables there). The remaining copy after that
+# would be `shapeCommand` in chain-recovery-v1.js, which is JS and structurally out of
+# reach of any shell function.
+#
+# Callers pass `${INNER_BOUND_*:-}`: the four are always written together today, so
+# reading an unset one is latent rather than live, but a `set -u` abort in the middle of
+# a Stop is not a failure mode worth leaving one edit away.
+zensu_autopilot_link_args() {
+  local run="${1:-}" attempt="${2:-}" chain="${3:-}"
+  [ -n "$run" ] || return 0
+  printf ' --autopilot-run %q --autopilot-attempt %q --chain-id %q' "$run" "$attempt" "$chain"
+}
+
+# Counts a TURN spent with an armed chain still at `implementing` and real source
+# changes in the tree, and past the configured bound says so once on stderr. It
+# never blocks: a long legitimate implementation genuinely spans many turns, so a
+# false positive may cost a line of text and must never wedge a chain. Every
+# failure returns 0 with the release untouched — a diagnostic that changes a
+# routing decision is worse than no diagnostic.
+#
+# The three GIT_* variables are unset for the reason `_tc_git` in zensu-log.sh
+# states: a careless or inherited prefix would otherwise point the probe at a
+# different tree. That helper unsets thirteen; this one deliberately does not
+# widen to match, because it gates an advisory rather than a refusal, and the
+# panel finding proposing the wider list was judged a false positive on exactly
+# that ground. `</dev/null` keeps a child from holding a lease keeper's pipe open.
+#
+# The pathspec excludes the plugin's own `.zensu` tree. Phase 2 writes a plan and
+# a log there unconditionally, so without it every chain reads as dirty from its
+# second turn onward in any repository that tracks those artifacts, and the probe
+# would stop discriminating at all.
+zensu_impl_stop_nudge() {
+  local threshold count changed complete_cmd nudge_denial_attempt status_cmd probe_rc
+  # This runs AFTER outer_finish, which can emit a decision:"block" for a durable
+  # Autopilot run on this very path. In that state the turn did not end, so
+  # counting it would be wrong and saying "Stop is not blocked" would contradict
+  # the decision already on stdout. Neither happens.
+  # An `if`, not `[ … ] && …`: this file states twice that the short-circuit form leaves a
+  # non-zero status on the false branch, and new code should not be the exception.
+  if [ "${DECISION_EMITTED:-false}" = "true" ]; then return 0; fi
+  # The FREE check comes first. `zensu_impl_stop_nudge_after` spawns node, and on a
+  # host with no git this function can never fire, so learning a threshold that will
+  # never be compared cost a process spawn at every turn end of every
+  # armed-but-incomplete chain — on a branch whose contract is to release
+  # immediately. Ordering only: no branch changes its verdict, because neither test
+  # reads anything the other writes.
+  command -v git >/dev/null 2>&1 || return 0
+  threshold="$(zensu_impl_stop_nudge_after 2>/dev/null)" || return 0
+  case "$threshold" in ''|*[!0-9]*) return 0 ;; esac
+  [ "$threshold" -gt 0 ] 2>/dev/null || return 0
+  # No pipeline here: a `| head` would replace git's own exit status with head's,
+  # so a missing repository would read as a clean tree instead of as a failure.
+  # The watchdog ladder lives in `zensu_run_bounded`, shared with the transcript
+  # probe. The command is spelled ONCE here: three arms each repeating this line meant
+  # the pathspec below existed in triplicate, and since the arms are mutually exclusive
+  # per host, a divergence between them could not fail behaviourally on any machine.
+  # A hand-rolled background-plus-poll watchdog was rejected as well — it adds latency
+  # to every counted Stop and leaves a temp file and a killed child on a path whose
+  # whole contract is to release immediately.
+  if changed="$(
+    unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+    zensu_run_bounded git --no-optional-locks -C "$PROJECT_ROOT" status --porcelain \
+      -- . ':(exclude).zensu' 2>/dev/null </dev/null
+  )"; then
+    :
+  else
+    probe_rc=$?
+    # An INTERRUPTED probe is not a clean tree, and before this branch the two were the
+    # same silence. The watchdog made that reachable: a killed child exits 124, 137 or
+    # 143, and on stalled storage the tree may well be dirty. The counter-failure arms
+    # below say so for their own class of "measurement did not happen"; this is the same
+    # class on the input side.
+    #
+    # DISCRIMINATE ON THE STATUS, and only on those three. A first version fired on every
+    # non-zero exit and asserted the watchdog as the cause — which is wrong twice. `git
+    # status` also exits 128 for a directory that is not a repository at all, for
+    # `safe.directory` dubious ownership and for a corrupt index; nothing above this line
+    # establishes that `$PROJECT_ROOT` is inside a repository, so those are ordinary. And
+    # on a host with NEITHER watchdog — base macOS, measured — `zensu_run_bounded` runs
+    # the command unbounded, so the stated cause could never be true there for any
+    # failure. Every other status stays silent, which is the behaviour that was already
+    # there and the one C15's recorded decision covers.
+    case "$probe_rc" in
+      124|137|143)
+        echo "Zensu review chain: the worktree probe for the implementing-phase turn counter was interrupted by its watchdog, so this turn was neither counted nor reported on. That is not the same as a clean tree. Stop is not blocked." >&2
+        ;;
+    esac
+    return 0
+  fi
+  [ -n "$changed" ] || return 0
+  # Rendered for the same reason `complete_cmd` is, and stated here because the
+  # counter-failure arms below shipped a BARE `zensu-log.sh --chain-status`: a flag
+  # with no interpreter, no path and no CLAUDE_PLUGIN_DATA is not a command the
+  # reader can run, and those arms offer exactly one action. `LOG_COMMAND` is
+  # assigned far below this call site, so it cannot be borrowed.
+  status_cmd="CLAUDE_PLUGIN_DATA=$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}") bash $(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh") --chain-status"
+  # A failed increment used to take the SAME exit as a clean tree, so a stuck
+  # counter — a contended or stale lock, an inactive chain, a value at the storage
+  # ceiling — disarmed this surface permanently and silently while the doctor kept
+  # rendering off the frozen value. Two surfaces disagreeing about whether anything
+  # is being measured is exactly the silence this feature exists to remove, so the
+  # failure says so once. Still fail-open: the release is untouched either way.
+  #
+  # Say what is TRUE of the other surface, not what is convenient. An earlier
+  # wording claimed the doctor row was "measuring nothing" too, and then sent the
+  # reader to /zensu:doctor in the same breath — but a failed increment leaves the
+  # persisted counter intact, so that row keeps rendering the last recorded value
+  # and the reader arrives at a row full of numbers having just been told it says
+  # nothing. The comment three lines above had it right while the message did not.
+  #
+  # LOCK DOMAIN — a decision, not an oversight, written down so the next reader does
+  # not "fix" it. `tdd_increment_counter` reaches `_tdd_increment_counter_critical`
+  # directly, so this write holds only the CAS lock. The sibling counter on this same
+  # hook, `tdd_increment_stop_budget`, takes the EXTERNAL lease instead, so the
+  # workflow document has two writer classes that do not serialise against each
+  # other and this one joined the weaker domain. Taking the lease here was weighed and
+  # REJECTED, and the ground must be stated precisely because a first version of it was
+  # falsified by a line two calls earlier: `reviewer_denial_note_clear`, on this same
+  # statement, takes that external lease unconditionally — so this path is NOT lease-free
+  # and what is being weighed is a SECOND acquisition, not first contact. That second take
+  # would buy atomicity against a writer class nobody has demonstrated running concurrently
+  # with this Stop, and cost another contended acquisition on a branch whose contract is to
+  # release immediately. The durable answer, NAMED rather than taken here, is to hoist this
+  # increment INTO the lease the clear already holds, which removes the two-writer split
+  # instead of documenting it. The residual is
+  # accepted and named rather than hidden — a lease-only writer restoring its own
+  # snapshot would revert this count and move `revision`, the CAS token, backwards.
+  # The split predates this counter; what is new is only that a second writer joined
+  # the weaker side of it. The sibling can afford the lease because its own path
+  # BLOCKS, and this one cannot for exactly the same reason.
+  if ! count="$(tdd_increment_counter "$SESSION_ID" implStopCount 2>/dev/null </dev/null)"; then
+    echo "Zensu review chain: the implementing-phase turn counter could not be advanced for this session, so this notice has stopped measuring anything. The counter is stuck, not reset — the last recorded value stands and is now older than this turn. Read it with ${status_cmd}, which reports implStopCount whatever its value; the /zensu:doctor chain row is threshold-gated and shows no count until that recorded value reaches the bound. Stop is not blocked." >&2
+    return 0
+  fi
+  case "$count" in
+    ''|*[!0-9]*)
+      echo "Zensu review chain: the implementing-phase turn counter returned an unreadable value for this session, so this notice has stopped measuring anything. The counter is stuck, not reset — the last recorded value stands and is now older than this turn. Read it with ${status_cmd}, which reports implStopCount whatever its value; the /zensu:doctor chain row is threshold-gated and shows no count until that recorded value reaches the bound. Stop is not blocked." >&2
+      return 0
+      ;;
+  esac
+  [ "$count" -ge "$threshold" ] 2>/dev/null || return 0
+  # Names ONE exit, and names its preconditions with it. `--tdd-complete` refuses
+  # without an edit-landing receipt and without a usable Requirements table, and
+  # both gates arm on the same dirty tree this notice requires — so naming the
+  # verb alone would hand the reader a command that refuses in the same breath.
+  # A BOUND chain refuses for a different reason again: the verb demands the three
+  # Autopilot link flags, so the bare spelling is rejected outright there and the
+  # bound flags are carried instead.
+  # The zero-change terminus is deliberately NOT offered: from this shape it is
+  # the unqualified no-ticket terminus, and after a mid-run commit it would close
+  # a chain in which nothing was reviewed.
+  # Rendered here rather than reusing LOG_COMMAND, which is assigned far below this
+  # call site: a bare flag with no program is not a command the reader can run.
+  complete_cmd="CLAUDE_PLUGIN_DATA=$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}") bash $(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh") --tdd-complete"
+  # One renderer, no guard: `zensu_autopilot_link_args` is empty for a standalone
+  # chain and carries its own leading space. `INNER_BOUND_ARGS` cannot be borrowed
+  # here — it is assigned far below this call site — but its INPUTS are the same three
+  # variables, which is why the renderer takes THEM as parameters rather than the string.
+  complete_cmd="${complete_cmd}$(zensu_autopilot_link_args "${INNER_BOUND_RUN:-}" "${INNER_BOUND_ATTEMPT:-}" "${INNER_BOUND_CHAIN:-}")"
+  # When the host permission layer refused this session's `zensu:code-reviewer`
+  # spawn, the ordinary remedy below is INCOMPLETE — but an earlier revision
+  # over-corrected and WITHHELD `--tdd-complete` outright, which was worse. Both
+  # halves of that judgment are worth keeping, because the second is what a later
+  # reader would otherwise undo:
+  #
+  # Incomplete, because completing while the refusal still stands moves the chain
+  # out of `implementing` into a gate the host will not let it pass, and every
+  # later Stop then routes to the branches below this one and BLOCKS until the cap
+  # releases. A reader who is told only "complete it" walks into that.
+  #
+  # Worse, because `reviewer_spawn_denied` carries NO generation or recency bound:
+  # it answers `blocked` whenever the last reviewer result anywhere in the module's
+  # bounded transcript tail carries a marker. The self-correction that module's own
+  # gap note relies on — "as soon as one spawn is attempted" — cannot happen HERE:
+  # this path never blocks, so the cap never releases it, and withholding the verb
+  # keeps the chain where no ticket can be issued and therefore no spawn attempted.
+  # One stale refusal, from a generation that has long since converged, pinned every
+  # later turn into the withhold arm for the rest of the session. That is a state
+  # with no exit, produced to avoid a state that at least ends at the cap.
+  #
+  # A real bound needs an arming instant to compare the transcript timestamp
+  # against, and the workflow document carries none — `history[].ts` is optional and
+  # stays empty in vanilla mode. Supplying one is a workflow-state schema field and
+  # therefore a MINOR release under the runtime-lineage rule. So the bound is not
+  # paid for here: the notice NAMES the exit and states the refusal beside it, and
+  # stale evidence costs a sentence instead of the chain.
+  #
+  # The probe's INPUT is the transcript, never the note file, which is why the
+  # `reviewer_denial_note_clear` that runs earlier on this same statement retires
+  # the note without taking the diagnosis away. Memoization is NOT what saves it:
+  # that clear never consults the probe, so there is no cached verdict to inherit
+  # and this is the first call. Naming memoization as the cause would send a later
+  # reader hunting for an ordering guarantee that does not exist — and would make
+  # the branch look fragile to a reordering that in fact cannot affect it.
+  if reviewer_spawn_denied; then
+    # MINT the note. Without this the diagnosis died with the Stop: the clear on
+    # the same statement above unlinks any earlier note, this branch minted none,
+    # and `reviewerDenialRows` returns early on an empty note set — so /zensu:doctor
+    # said nothing about the refusal while its own chain row went on printing
+    # `--tdd-complete`. Two surfaces, one chain, opposite advice, and the surface
+    # with the evidence was the silent one. The probe is memoized, so the write
+    # costs no second transcript read. A converged chain must never mint one, and
+    # cannot reach here: this function runs only from the `SESSION_IMPL_COMPLETE !=
+    # true` exit, and a chain whose implementation is not complete has no review to
+    # have converged.
+    reviewer_denial_note
+    # Both arms name an action the reader can actually take. The previous ladder
+    # sanctioned "ONE further spawn attempt" from a state where a spawn was
+    # unreachable — a review ticket requires `implComplete`, which requires the very
+    # verb the same message forbade two sentences earlier. With the verb named again
+    # the route exists: complete, and the chain spawns the reviewer itself.
+    if [ "${REVIEWER_DENIALS:-0}" -ge 2 ] 2>/dev/null; then
+      nudge_denial_attempt="Two refusals already stand, so do not complete into that gate on a hope: report the refusal to the user and wait for them to confirm they have lifted it."
+    else
+      nudge_denial_attempt="Report the refusal and the rule above to the user in your next message rather than acting on it silently; if they say in this conversation that they have just lifted it, completing the implementation is the right next move — the chain issues its own ticket and spawns the reviewer, and a second refusal means stop and say so."
+    fi
+    echo "Zensu review chain: this session has now ended ${count} turns with its chain still at 'implementing' while the worktree reports a changed file outside '.zensu', so the review chain has not asked for a reviewer and nothing here has been reviewed. Read the next sentence before acting on that, because it is compatible with a spawn that WAS attempted: the host permission layer refused this session's zensu:code-reviewer spawn (kind: ${REVIEWER_DENIAL_KIND:-unclassified}, refusals observed: ${REVIEWER_DENIALS:-0}). That is a harness permission setting outside this conversation, so the user has to lift it, and you must never edit a settings file yourself to widen your own permissions. ${REVIEWER_SPAWN_DENY_FIRST} ${REVIEWER_SPAWN_ALLOW_RULE}. The exit is still the review chain: run the /zensu:tdd Phase 6 step 5b edit-landing audit, make sure the plan carries a usable '## Requirements' table, then mark the implementation complete with ${complete_cmd} — that verb refuses without both while the tree is dirty. Take that exit once the permission exists; while it does not, completing only moves the chain to a gate the host will not let it pass and every later Stop blocks until the cap releases. ${nudge_denial_attempt} Stop is not blocked; this notice repeats at each turn end while the worktree still reports a changed file outside '.zensu' and the chain is still at 'implementing'." >&2
+    return 0
+  fi
+  # Says what the probe MEASURES. `git status --porcelain` reports untracked
+  # entries as well as tracked modifications, so "changed source files" was a
+  # claim a reader could falsify with one stray build artifact — and a notice
+  # whose opening clause the reader disproves is one they stop reading.
+  #
+  # It also promises no future silence. Nothing latches this notice: the
+  # comparison above holds on every later Stop, so it is written at every turn
+  # end until implComplete flips. An earlier wording closed with "it is silent
+  # again once the chain moves on", which the very next turn broke.
+  #
+  # The replacement for that wording was itself falsifiable and is now corrected:
+  # "until the chain moves past 'implementing'" names ONE of the three conditions
+  # this function tests. A clean tree returns above, and a stuck counter diverts to
+  # its own message, so the notice can go silent with the chain exactly where it
+  # was — and a reader who took silence as progress would be wrong. The clause
+  # names the conditions the code actually re-tests.
+  echo "Zensu review chain: this session has now ended ${count} turns with its chain still at 'implementing' while the worktree reports a changed file outside '.zensu', so the review chain has not asked for a reviewer and nothing here has been reviewed. The exit is the review chain: run the /zensu:tdd Phase 6 step 5b edit-landing audit, make sure the plan carries a usable '## Requirements' table, then mark the implementation complete with ${complete_cmd} — that verb refuses without both while the tree is dirty. Stop is not blocked; this notice repeats at each turn end while the worktree still reports a changed file outside '.zensu' and the chain is still at 'implementing'." >&2
+  return 0
+}
+
 # Every path below this point still has a chain to enforce. These three do not —
 # no session, implementation not finished, chain already closed — so they retire
 # a refusal note here rather than in the routing branches, which they never
 # reach. They are not the only retire sites; the escapes and the BLOCKED-outer
 # release above clear too, and the cap path clears on a converged chain.
 if [ "$SESSION_ACTIVE" != "true" ]; then reviewer_denial_note_clear; outer_finish; exit 0; fi
-if [ "$SESSION_IMPL_COMPLETE" != "true" ]; then reviewer_denial_note_clear; outer_finish; exit 0; fi
+if [ "$SESSION_IMPL_COMPLETE" != "true" ]; then reviewer_denial_note_clear; outer_finish; zensu_impl_stop_nudge; exit 0; fi
 if [ "$SESSION_CHAIN_DONE" = "true" ]; then reviewer_denial_note_clear; outer_finish; exit 0; fi
 
 MAX_ROUNDS="$(zensu_autofix_max_rounds)"
@@ -1199,8 +1604,19 @@ STATE_LEGEND="Session state: mode=strict, implComplete=${SESSION_IMPL}, chainDon
 if [ "$SESSION_VANILLA" = "true" ]; then
   STATE_LEGEND="Session state: mode=vanilla, implComplete=${SESSION_IMPL}, chainDone=${SESSION_CHAIN}. In vanilla mode the RED/GREEN FSM is not driven, so the 'phase' and 'history' fields carry no signal here and are never by themselves evidence of a corrupt or never-started session."
 fi
+# HAND-COPY CLASS: the three closers below share the frame "That observation does not
+# change what must happen next: the instruction above … still governs before this turn may
+# end." verbatim and differ only in the middle clause. Reword one and reword all three; no
+# check compares the shared frame across them.
 LEGEND_CLOSER="That observation does not change what must happen next: the instruction above still governs before this turn may end."
 LEGEND_CLOSER_WITH_EXCEPTION="That observation does not change what must happen next: the instruction above — including the single exception it explicitly states — still governs before this turn may end."
+# The plural sibling, used only where the reason really does state more than one
+# sanctioned deviation. The resume directive states two once the review-spawn scope
+# sentence renders — the zero-change terminus and the say-so-out-loud route — and a
+# closer insisting on "the single exception" there is a false statement about the very
+# instruction it closes, which is exactly the kind of contradiction a model resolves
+# in favour of the hard prohibition.
+LEGEND_CLOSER_WITH_EXCEPTIONS="That observation does not change what must happen next: the instruction above — including the exceptions it explicitly states — still governs before this turn may end."
 LOG_HELPER_Q="$(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")"
 PLUGIN_DATA_Q="$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}")"
 LOG_COMMAND="CLAUDE_PLUGIN_DATA=${PLUGIN_DATA_Q} bash ${LOG_HELPER_Q}"
@@ -1211,10 +1627,7 @@ INNER_SELF_REVIEW_ENVELOPE=" "
 INNER_REVIEW_HEADERS="whose prompt starts with exactly two header lines — first 'PRE-MERGED FINDINGS (fan-out)', second 'REVIEW-TICKET: <ticket>'"
 INNER_REVIEW_SUFFIX=", followed by"
 if [ -n "$INNER_BOUND_RUN" ]; then
-  INNER_BOUND_RUN_Q="$(printf '%q' "$INNER_BOUND_RUN")"
-  INNER_BOUND_ATTEMPT_Q="$(printf '%q' "$INNER_BOUND_ATTEMPT")"
-  INNER_BOUND_CHAIN_Q="$(printf '%q' "$INNER_BOUND_CHAIN")"
-  INNER_BOUND_ARGS=" --autopilot-run ${INNER_BOUND_RUN_Q} --autopilot-attempt ${INNER_BOUND_ATTEMPT_Q} --chain-id ${INNER_BOUND_CHAIN_Q}"
+  INNER_BOUND_ARGS="$(zensu_autopilot_link_args "$INNER_BOUND_RUN" "$INNER_BOUND_ATTEMPT" "$INNER_BOUND_CHAIN")"
   INNER_ZERO_CHANGE_ARGS="${INNER_BOUND_ARGS} --outcome no-changes"
   INNER_ZERO_CHANGE_NOTE=" That terminus records 'no-changes' as this attempt's audited Autopilot outcome, so the durable run keeps a receipt that distinguishes it from a reviewed close."
   INNER_SELF_REVIEW_ENVELOPE=$' Carry this exact official three-line Autopilot envelope into the skill unchanged and exactly once:\n'"ZENSU-DELEGATED-CALLER: autopilot"$'\n'"AUTOPILOT-BINDING: run=${INNER_BOUND_RUN} attempt=${INNER_BOUND_ATTEMPT} chain=${INNER_BOUND_CHAIN}"$'\n'"AUTOPILOT-STAGE: ${INNER_BOUND_RETURN_STAGE}"$'\n'
@@ -1243,6 +1656,11 @@ elif reviewer_spawn_denied; then
   # forbids two sentences earlier. The scanner already counts every refused
   # reviewer result in the scanned tail, so a second refusal is observable:
   # after it, the sanction is withdrawn instead of repeated.
+  # KNOWN BOUND: that count is windowed, not durable. The scanner reads only the
+  # transcript tail (MAX_TAIL_BYTES / MAX_LINES in reviewer-spawn-denial-v1.js), so
+  # in a long enough session two earlier refusals can scroll out and the sanction
+  # returns. Closing it means carrying the count in per-session state; stated here
+  # rather than left to be rediscovered from a retry loop nobody expected.
   REVIEWER_DENIAL_ROUTED=true
   if [ "${REVIEWER_DENIALS:-0}" -ge 2 ]; then
     DENIAL_RETRY_CLAUSE="A retry has already been spent and was refused again, so there is no attempt left to make: stop and report this to the user."
@@ -1253,7 +1671,10 @@ elif reviewer_spawn_denied; then
   # path this very agent could write, and pointing at it — beside the exact rule
   # that grants the refused capability — is an invitation the prose below can
   # only ask it to decline. The user-facing doctor row carries the fuller form.
-  DENIAL_RULE="Add the rule \"Agent(zensu:code-reviewer)\" to permissions.allow in the user settings file ~/.claude/settings.json"
+  # The literal itself lives at the top of the file, because the implementing-turns
+  # notice needs the same sentence from an exit ABOVE this branch; this name is
+  # kept so the surrounding `case` reads unchanged.
+  DENIAL_RULE="$REVIEWER_SPAWN_ALLOW_RULE"
   case "$REVIEWER_DENIAL_KIND" in
     auto-mode-classifier)
       DENIAL_CAUSE="the Claude Code auto mode classifier refused it ('Permission for this action was denied by the Claude Code auto mode classifier')"
@@ -1279,8 +1700,83 @@ else
   # The self-review branch at the top of this ladder never evaluates the probe
   # and therefore never sets this, which is the whole point of the flag.
   REVIEWER_DENIAL_ROUTED=true
-  REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:tdd Phase 6 review sequence where it left off: fan out the five zensu:review-aspect agents over the changed files ('git diff --name-only HEAD'), merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default), run the Phase 6 step 4c Finding Verification Gate over the merged list when hooks.findingVerification is enabled (the default) and annotate every finding it does not confirm '[Unverified — do not fix]', issue a fresh review ticket, then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' ${INNER_REVIEW_HEADERS}${INNER_REVIEW_SUFFIX} the merged findings + build/test status. Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. Only valid exception: if implementation produced ZERO file changes, run: ${LOG_COMMAND} --chain-done${INNER_ZERO_CHANGE_ARGS}; then stop.${INNER_ZERO_CHANGE_NOTE}"
-  REASON="${REASON} ${STATE_LEGEND} ${LEGEND_CLOSER_WITH_EXCEPTION}"
+  # The scope sentence is WITHHELD on exactly one RECOGNIZED probe verdict: `errored`, a
+  # reviewer result the host flagged as an error whose text matched no DENIAL_MARKERS
+  # prefix. `reviewer-spawn-denial-v1.js`'s own header lists three causes for it — a
+  # reworded host message, a subagent crash, a transport failure — and tells callers to
+  # treat it as no detection. This caller diverges for the RENDER decision only, never for
+  # routing, and the reason is what `errored` does establish: a refusal cannot be RULED
+  # OUT there. Telling a model that may be holding one not to withhold silently and not to
+  # work around it is the adjacency the owner comment forbids, and worse than the case it
+  # considers, because this reason carries no permission text at all — nothing tells the
+  # model which restraint is meant.
+  #
+  # `none` and `unprobed` deliberately still render. Measured, not assumed:
+  # `reviewer-spawn-denial-v1.js` answers `verdict('none')` when no reviewer result
+  # exists at all, which is every chain's FIRST resume Stop — the case this sentence
+  # exists for — and `unprobed` is an installation with no scanner module, where the
+  # fail-open direction is the whole design. A `clear`-only gate would delete the
+  # feature rather than narrow it.
+  # `hooks.reviewSpawnScopeSentence` is read PERMISSIVELY (zensu_hook_enabled, not the
+  # strict reader): for this key "enabled" means a sentence renders, so an unreadable
+  # config falling back to enabled restores the default rather than a capability.
+  # The render side is a closed ALLOWLIST, not a deny-list: an unrecognized verdict —
+  # including the `unknown` the probe's residual arm names — withholds by default rather
+  # than by position in the ladder. `unreadable` RENDERS. Its usual provenance is the
+  # module's `readTail` failure path — a rotated or deleted transcript, a FIFO, an EACCES
+  # path — which precedes any inspection of a tool result; it can also come from the
+  # module's outer catch, which does wrap the scan. Either way the DIRECTION is what
+  # decides: it is the same could-not-look outcome as a probe that timed out or an
+  # installation with no scanner module, and both of those leave `unprobed`, which renders.
+  # An earlier revision withheld on `unreadable` while rendering on those two — one
+  # evidence class taking two opposite directions inside one block.
+  #
+  # `errored` is the only RECOGNIZED verdict that withholds, on the reasoning above — a
+  # refusal cannot be ruled out, not that one was established. An UNRECOGNIZED
+  # verdict withholds too, by allowlist closure rather than by observation, and `blocked`
+  # never reaches this `case` at all — the `elif` above consumes it.
+  #
+  # The config read is anchored on the RECORD's project root. This hook resolves
+  # `PROJECT_ROOT` from `zensu_resolve_project_dir` but never exports
+  # `CLAUDE_PROJECT_DIR`, and `cfg()` builds its project overlay from that variable —
+  # so an unwrapped read here would resolve the overlay from whatever the harness
+  # supplied, while the delegate's read (which does export it) resolves from the
+  # record. One key would then govern one render site and not the other, which is
+  # exactly what both operator accounts promise it does not. Wrapped in a subshell
+  # rather than exported for the whole hook, deliberately: SEVEN pre-existing reads in
+  # this file across FIVE keys would otherwise be re-rooted with it — `chainEnforcer`
+  # twice, `autopilotEnforcer`, `pendingReviewTtlHours` twice, `tddImplementation` and
+  # `autoFixMaxRounds`. That is the right direction, but it is a separate behaviour
+  # change needing its own pins, and one of them is deliberately ambient-rooted today:
+  # the TTL read stays in step with the doctor's own, which CLAUDE.md records.
+  IN_SCOPE_CLAUSE=""
+  SCOPE_SENTENCE_RENDERED=false
+  if ( export CLAUDE_PROJECT_DIR="$PROJECT_ROOT"; zensu_hook_enabled reviewSpawnScopeSentence ); then
+    case "$REVIEWER_DENIAL_RAW" in
+      clear|none|unprobed|unreadable)
+        IN_SCOPE_CLAUSE="${ZENSU_REVIEW_SPAWN_IN_SCOPE} "
+        SCOPE_SENTENCE_RENDERED=true
+        ;;
+      *) : ;;
+    esac
+  fi
+  # The closer AND the body's exception lead-in must both count what the reason states,
+  # and both are selected from an explicit flag rather than from the clause's emptiness:
+  # the clause carries a trailing space, so `[ -n ... ]` stays true even for an emptied
+  # constant and would pick the plural closer for a reason with one exception. An `if`
+  # rather than `[ ... ] && ...`, which is the short-circuit shape this file forbids a
+  # few lines below.
+  if [ "$SCOPE_SENTENCE_RENDERED" = "true" ]; then
+    INNER_RESUME_CLOSER="$LEGEND_CLOSER_WITH_EXCEPTIONS"
+    INNER_EXCEPTION_LEAD="Two valid exceptions. First:"
+    INNER_EXCEPTION_SECOND=" Second: if a session rule leads you to withhold the fan-out, say so in your next message instead of ending the turn silently — that is the route the sentence above sanctions. It is a report, not a terminus: this Stop guard is bounded, but it does not release on a report, so state the withholding once and let the user decide rather than repeating it every turn."
+  else
+    INNER_RESUME_CLOSER="$LEGEND_CLOSER_WITH_EXCEPTION"
+    INNER_EXCEPTION_LEAD="Only valid exception:"
+    INNER_EXCEPTION_SECOND=""
+  fi
+  REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:tdd Phase 6 review sequence where it left off: fan out the five zensu:review-aspect agents over the changed files ('git diff --name-only HEAD'), merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default), run the Phase 6 step 4c Finding Verification Gate over the merged list when hooks.findingVerification is enabled (the default) and annotate every finding it does not confirm '[Unverified — do not fix]', issue a fresh review ticket, then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' ${INNER_REVIEW_HEADERS}${INNER_REVIEW_SUFFIX} the merged findings + build/test status. ${IN_SCOPE_CLAUSE}Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. ${INNER_EXCEPTION_LEAD} if implementation produced ZERO file changes, run: ${LOG_COMMAND} --chain-done${INNER_ZERO_CHANGE_ARGS}; then stop.${INNER_ZERO_CHANGE_NOTE}${INNER_EXCEPTION_SECOND}"
+  REASON="${REASON} ${STATE_LEGEND} ${INNER_RESUME_CLOSER}"
 fi
 
 if ! tdd_mark_pending_review_handoff "$SESSION_ID" "$DEFERRED_OWNER_PID" 2>/dev/null; then

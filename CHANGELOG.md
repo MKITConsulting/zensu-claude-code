@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-08-31
+
+### Added
+
+- **gates**: Deny file-tool writes into the plugin data store (#279)
+- **zen-mode**: Anchor multi-turn work with a chain-progress line (#276)
+- **review-chain**: State the review-spawn scope in the resume and fix-round directives (#277)
+- **session-trail**: Route every takeover into the taker's own worktree (#275)
+- **permissions**: Admit Zensu's own confined reviewer spawns before the classifier (#271)
+- **doctor**: Report a chain stranded by a session fork (#270)
+- **tdd**: Scope the Phase 5 checkpoint to the completed phase's tests (#269)
+- **session-trail**: Record every takeover as a lineage edge (#268)
+- **artifacts**: Make .zensu plans and logs publication-safe at write time (#255)
+
+### Changed
+
+- **doctor**: Record the own-chain implementing gap and its counter fix (#273)
+
+### Fixed
+
+- **session-control**: Close three gaps in the adoption report's display guard (#280)
+- **autopilot**: Release a Stop a foreign run holds with no review queued (#274)
+- **session-trail**: Never continue in a worktree an archivable session owns (#266)
+
 ### Added
 
 - **artifacts**: Publication-safe `.zensu/` plans and logs. Consuming repos commit

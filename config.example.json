@@ -21,7 +21,10 @@
     "secretScan": true,
     "reviewJudge": true,
     "findingVerification": true,
-    "pendingReviewTtlHours": 6
+    "reviewSpawnScopeSentence": true,
+    "reviewerSpawnAutoAllow": true,
+    "pendingReviewTtlHours": 6,
+    "implStopNudgeAfter": 12
   },
   "context": {
     "compactionNudge": true,

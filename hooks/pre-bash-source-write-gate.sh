@@ -71,7 +71,7 @@ esac
 
 # Drain stdin before any early exit so an upstream writer never sees a broken
 # pipe (mirrors pre-bash-zensu-gate.sh's ordering).
-INPUT="$(cat 2>/dev/null || true)"
+{ INPUT="$(cat 2>/dev/null || true)"; } 2>/dev/null
 
 emit_deny() {
   REASON="$1" node -e '
