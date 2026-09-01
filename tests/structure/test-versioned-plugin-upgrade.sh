@@ -2826,35 +2826,42 @@ else
   printf '%s\n' "$BASELINE_NOZENSU_REASON" | head -c 300
 fi
 
-# AC-D09 — the doctor row is ARMED and never silent.
+# AC-D09 — the doctor row is ARMED and never silent, which is the property that
+# matters most in a diagnostic and the only one this fixture can establish.
 #
-# What this fixture can establish is the DISCLOSURE half, and the reason is
-# recorded rather than worked around: the wrapper's own bind does not resolve in
-# this suite's synthetic installs, which CLAUDE.md already states for the sibling
-# foreign-chain row ("the branch that PRODUCES the exported pair has no executed
-# coverage" here). ZDOC_BINDING is therefore not `bound`, and the row correctly
-# reports that it could not run rather than staying quiet — which is the property
-# that matters most in a diagnostic and the one this row pins.
+# BOTH arms are accepted, and that is a correction rather than a weakening. This
+# row used to require the DISCLOSURE arm alone, on the stated premise that "the
+# wrapper's own bind does not resolve in this suite's synthetic installs". That
+# premise was taken from a macOS observation and is FALSE on Linux and on Windows,
+# where the bind DOES resolve: the row then correctly renders the ❌ MISSING
+# finding for a document this block has just deleted, and a check demanding the
+# other wording failed for a reason that had nothing to do with the renderer.
+# Measured, not argued — ubuntu-latest and windows-shard-2 both reported the
+# MISSING row here while macOS reported the disclosure.
 #
-# The ❌ arm is driven where the renderer is driven directly, with the
-# ZDOC_BINDING/ZDOC_SESSION_KEY pair: tests/structure/test-doctor.sh. Asserting it
-# here would need a bind this fixture cannot produce, and weakening the needle
-# until it matched would be worse than splitting the two.
+# Silence is the one verdict this row refuses, so silence is what it tests for.
+# Each arm is ONE ordered pattern rather than two independent greps: `missing
+# check, not an all-clear` occurs at six other sites in zensu-doctor-report.js and
+# `own workflow document` occurs on the BAD row too, so separate -qF calls could be
+# satisfied by two unrelated lines while the disclosure itself was gone.
+#
+# The ❌ arm is ALSO driven where the renderer is driven directly, with the
+# ZDOC_BINDING/ZDOC_SESSION_KEY pair: tests/structure/test-doctor.sh P6a, which is
+# where its wording, its glyph and its remedy are pinned. This row pins neither
+# arm's text beyond what distinguishes it from silence.
 BASELINE_DOCTOR_OUT="$TMP/baseline-doctor.out"
 BASELINE_DOCTOR_HOME="$TMP/baseline-doctor-home"; mkdir -p "$BASELINE_DOCTOR_HOME"
 CLAUDE_CODE_SESSION_ID="$SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
   CLAUDE_PROJECT_DIR="$PROJECT" HOME="$BASELINE_DOCTOR_HOME" \
   bash "$SYNTHETIC_COMPATIBLE_ROOT/hooks/lib/zensu-doctor.sh" \
   >"$BASELINE_DOCTOR_OUT" 2>/dev/null || true
-# ONE ordered pattern, not two independent greps. `missing check, not an all-clear`
-# occurs at six other sites in zensu-doctor-report.js and `own workflow document`
-# occurs on the BAD row too, so two separate -qF calls could be satisfied by two
-# unrelated lines while the disclosure itself was gone.
 if grep -q "own workflow document was not checked.*missing check, not an all-clear" \
+    "$BASELINE_DOCTOR_OUT" \
+  || grep -q "own workflow document is MISSING.*/zensu:adopt-session --confirm" \
     "$BASELINE_DOCTOR_OUT"; then
-  check "AC-D09 the doctor's own-document check discloses when it cannot run" PASS
+  check "AC-D09 the doctor's own-document check is armed and never silent" PASS
 else
-  check "AC-D09 the doctor's own-document check discloses when it cannot run" FAIL
+  check "AC-D09 the doctor's own-document check is armed and never silent" FAIL
   grep -F 'state:' "$BASELINE_DOCTOR_OUT" 2>/dev/null | head -3
 fi
 

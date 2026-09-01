@@ -3728,7 +3728,28 @@ UNMEASURED until a green Windows run reports a new figure; if the shard starts r
 `TIMED_OUT`, this is the first thing to re-measure, and note that the 1800000 ms shard
 budget below would surface such a run as a profile abort rather than a suite timeout.
 
-**The shard budget is the SECOND ceiling, and it binds first.** `windows-shard-7`'s
+**IT DID REPORT `TIMED_OUT`, and the prediction above held exactly.** On the PR carrying
+the workflow-baseline repair, `windows-shard-7` reported
+`TIMED_OUT stop-enforcer-self-review-routing (1500157ms)` against its own 1500000 cap while
+the same shard was GREEN on `main` — so the content this suite scans grew past the edge the
+paragraph above says it was sitting on. The remedy was NOT to raise the cap inside the
+shard: the sibling `review-worker-evidence-lease` measured 158850 ms on that run, so the
+1800000 shard budget left roughly 141000 ms of room and a raise would have bought 9% against
+an unknown requirement. The SIBLING moved instead, to `windows-shard-8`, which measured a
+196 s job against the same 1800000 budget after `session-trail-lineage` came down to 154673 ms
+— the same rebalance-rather-than-add move this file records for that suite, and it costs no
+new CI job because a suite moving between existing profiles changes no key in
+`expectedProfiles`. `stop-enforcer-self-review-routing` now holds `windows-shard-7` ALONE at
+`timeoutMs: 1740000`, deliberately below the 1800000 profile budget so an overrun still
+surfaces as a visible suite `TIMED_OUT` rather than as a profile abort that truncates the
+tail silently. **The true runtime is STILL unmeasured** — the suite was killed, so all that
+is known is that it exceeds 1500 s; 1740000 is 16% above the cap it failed at, not a figure
+any green run produced. Replace it from the first green Windows run, and do not read the
+move as headroom that was measured.
+
+**The shard budget is the SECOND ceiling, and it binds first — though on the run that
+forced the rebalance above it was the SUITE cap that bound, not the shard.**
+`windows-shard-7`'s
 `profileTimeoutMs` is 1800000 and every profile is pinned to that same value
 (`windows-ci-contract.test.js`), which is itself pinned against the job's
 `timeout-minutes: 35`. A suite therefore never receives its configured `timeoutMs` — it
