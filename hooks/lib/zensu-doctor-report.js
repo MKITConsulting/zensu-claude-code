@@ -1667,7 +1667,14 @@ function forgesReportRow(value) {
     return rules.PAIR_SEPARATOR.test(value)
       || rules.DOUBLE_SPACE.test(value)
       || rules.SEPARATOR_ADJACENT_MODIFIER_LETTER.test(value)
-      || rules.INVISIBLE.test(value);
+      || rules.INVISIBLE.test(value)
+      // ORPHAN_MARK arrived with the merge, from the branch that closed the same
+      // forgery class in the report. It belongs here for the same reason as its four
+      // siblings: a combining mark on a space paints ON that space, which is a ROW
+      // STRUCTURE forgery rather than an unreadable character. Omitting it would make
+      // this predicate a stale subset of the rule set it claims to consult — the
+      // divergence a shared owner exists to prevent.
+      || rules.ORPHAN_MARK.test(value);
   } catch (e) {
     return true;
   }
