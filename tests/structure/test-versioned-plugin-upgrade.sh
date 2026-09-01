@@ -2925,7 +2925,15 @@ BASELINE_DIRECT_OUT="$(
     _tdd_write_phase_critical "$sf" "$sid" forged BASELINE_REBUILT "" >/dev/null 2>&1 || rc_crit_phase=$?
     rc_crit_reason=0
     _tdd_write_phase_critical "$sf" "$sid" forged IMPL "baseline-rebuilt: forged" >/dev/null 2>&1 || rc_crit_reason=$?
-    rc_control=0;    tdd_write_phase "$sid" control IMPL "ordinary reason" >/dev/null 2>&1 || rc_control=$?
+    # The CONTROL goes through the same path-taking entry point as the two
+    # critical arms above. tdd_write_phase derives the state file through the
+    # session binder, which does not resolve in this subshell — so a control on
+    # THAT function would report 1 for a reason unrelated to the guards and prove
+    # nothing. Its own guards are still attributable: they are the first
+    # statements in the function, above any resolution, which is why its two arms
+    # above are meaningful on their own.
+    rc_control=0
+    _tdd_write_phase_critical "$sf" "$sid" control IMPL "ordinary reason" >/dev/null 2>&1 || rc_control=$?
     echo "$rc_pub_phase:$rc_pub_reason:$rc_crit_phase:$rc_crit_reason:$rc_control"
   ' _ "$SYNTHETIC_COMPATIBLE_ROOT" "$SESSION" "$BASELINE_DOC" 2>/dev/null
 )"
