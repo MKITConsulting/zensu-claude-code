@@ -2747,8 +2747,15 @@ BASELINE_TAMPER_REASON="$(baseline_gate_reason_from "$SYNTHETIC_COMPATIBLE_ROOT"
 BASELINE_TAMPER_DENY="$(gate_decision_from "$SYNTHETIC_COMPATIBLE_ROOT" \
   pre-reviewer-capability-gate.sh "$COMPATIBLE_BASH")"
 rm -f "$BASELINE_DOC"
+# The SPECIFIC cause is required, not only the generic lead. `immutable context
+# revalidation failed` is emitted for EVERY untagged throw from
+# revalidateWorkflowState, including ones raised before the document is reached —
+# so a hard link that failed to be created, or a deny from earlier in the walk,
+# would satisfy the generic needle alone and this row would pass without ever
+# exercising the tamper branch it is named for.
 if [ "$BASELINE_TAMPER_DENY" = deny ] \
     && printf '%s' "$BASELINE_TAMPER_REASON" | grep -qF 'immutable context revalidation failed' \
+    && printf '%s' "$BASELINE_TAMPER_REASON" | grep -qF 'activated workflow CAS state is unsafe' \
     && ! printf '%s' "$BASELINE_TAMPER_REASON" | grep -qF 'the workflow document it anchors is missing'; then
   check "AC-D07b a hard-linked document keeps the generic wording and is offered no rebuild" PASS
 else
@@ -2899,31 +2906,40 @@ fi
 # zensu-tdd-phase.sh (tdd_write_phase and _tdd_write_phase_critical) were driven
 # by NOTHING and all four lines could be deleted with the whole tree green, while
 # any caller that sources the phase library could then forge a BASELINE_REBUILT
-# provenance entry. T12h2 in test-chain-recover.sh is the sibling precedent for
-# this shape: drive the exported writer directly, not only the verb.
+# provenance entry. T12h2 in test-chain-recover.sh is the sibling precedent.
 #
-# The HISTORY COUNT is the control, and it is a stronger one than a positive call
-# would have been. Both guards sit at the very top of their functions, before any
-# state access, so a refusal on its own would also be produced by a broken
-# fixture. What a broken GUARD produces is different and observable: the two
-# BASELINE_REBUILT calls would run on into the real write path and the rebuilt
-# document would gain a SECOND provenance entry. Asserting the count is still
-# exactly one therefore fails in precisely the tree this row exists to catch — a
-# forgeable provenance entry — while a fixture that cannot write at all yields no
-# rcs line and fails too. A positive call was tried first and is NOT usable here:
-# reaching the real write path from this subshell kills it silently, because the
-# session binder does not resolve outside the hook environment.
+# THE BIND IS THE WHOLE POINT, and a first version of this row got it wrong in a
+# way worth recording. It sourced zensu-session.sh and called only
+# zensu_resolve_session_id, which is a pure hash and exports nothing. Without
+# ZENSU_SESSION_KEY / ZENSU_PROJECT_ROOT / ZENSU_SESSION_CONTEXT, tdd_state_file
+# and _tdd_bound_project_root both fail — so with the guards DELETED the four
+# calls still returned non-zero, for a reason unrelated to the guards, and the
+# row passed while observing nothing at all. zensu_bind_model_session is what
+# supplies them; the session is already registered by the Part D fixture.
+#
+# TWO controls, because one axis is not enough. A POSITIVE call must SUCCEED
+# through the same entry point, which proves the fixture can write at all; and
+# the FULL history must grow by exactly that one entry with no forged entry in
+# it. Counting only BASELINE_REBUILT phases was blind to the two REASON-guard
+# calls, which pass phase IMPL: a forged write through a deleted reason guard
+# would land an IMPL entry that filter never counted.
+BASELINE_HIST_BEFORE="$(
+  DOC="$BASELINE_DOC" node -e '
+    const fs = require("node:fs");
+    try {
+      const d = JSON.parse(fs.readFileSync(process.env.DOC, "utf8"));
+      process.stdout.write(String(Array.isArray(d.history) ? d.history.length : -1));
+    } catch (_e) { process.stdout.write("-1"); }
+  ' 2>/dev/null
+)"
 BASELINE_DIRECT_OUT="$(
   CLAUDE_CODE_SESSION_ID="$SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
   CLAUDE_PROJECT_DIR="$PROJECT" CLAUDE_PLUGIN_ROOT="$SYNTHETIC_COMPATIBLE_ROOT" \
   bash -c '
-    . "$1/hooks/lib/zensu-session.sh"
-    . "$1/hooks/lib/zensu-tdd-phase.sh"
-    sid="$(zensu_resolve_session_id "$2")" || { echo "resolve-failed"; exit 0; }
-    # The state file is passed IN rather than derived. tdd_state_file resolves the
-    # project root through the session binder, which is a second thing that can
-    # fail for reasons unrelated to the guards under test — and this row is about
-    # the guards, not about path resolution.
+    . "$1/hooks/lib/zensu-session.sh" || { echo "source-failed"; exit 0; }
+    zensu_bind_model_session >/dev/null 2>&1 || { echo "bind-failed"; exit 0; }
+    . "$1/hooks/lib/zensu-tdd-phase.sh" || { echo "phase-source-failed"; exit 0; }
+    sid="$ZENSU_SESSION_KEY"
     sf="$3"
     rc_pub_phase=0;  tdd_write_phase "$sid" forged BASELINE_REBUILT >/dev/null 2>&1 || rc_pub_phase=$?
     rc_pub_reason=0; tdd_write_phase "$sid" forged IMPL "baseline-rebuilt: forged" >/dev/null 2>&1 || rc_pub_reason=$?
@@ -2931,32 +2947,39 @@ BASELINE_DIRECT_OUT="$(
     _tdd_write_phase_critical "$sf" "$sid" forged BASELINE_REBUILT "" >/dev/null 2>&1 || rc_crit_phase=$?
     rc_crit_reason=0
     _tdd_write_phase_critical "$sf" "$sid" forged IMPL "baseline-rebuilt: forged" >/dev/null 2>&1 || rc_crit_reason=$?
-    echo "$rc_pub_phase:$rc_pub_reason:$rc_crit_phase:$rc_crit_reason"
+    rc_control=0
+    tdd_write_phase "$sid" control IMPL "ordinary reason" >/dev/null 2>&1 || rc_control=$?
+    echo "$rc_pub_phase:$rc_pub_reason:$rc_crit_phase:$rc_crit_reason:$rc_control"
   ' _ "$SYNTHETIC_COMPATIBLE_ROOT" "$SESSION" "$BASELINE_DOC" 2>"$TMP/baseline-direct.err"
 )"
-BASELINE_DIRECT_ENTRIES="$(
+BASELINE_HIST_AFTER="$(
   DOC="$BASELINE_DOC" node -e '
     const fs = require("node:fs");
     try {
       const d = JSON.parse(fs.readFileSync(process.env.DOC, "utf8"));
       const h = Array.isArray(d.history) ? d.history : [];
-      process.stdout.write(String(h.filter((e) => e && e.phase === "BASELINE_REBUILT").length));
-    } catch (_e) { process.stdout.write("unreadable"); }
+      const forged = h.filter((e) => e && (e.phase === "BASELINE_REBUILT"
+        || (typeof e.reason === "string" && e.reason.indexOf("baseline-rebuilt: ") === 0))).length;
+      process.stdout.write(h.length + ":" + forged);
+    } catch (_e) { process.stdout.write("-1:-1"); }
   ' 2>/dev/null
 )"
+# A delimited read rather than `set --`: clobbering the script's positional
+# parameters at file scope would reach any row appended below, and Part D is the
+# file's tail, which is exactly where new rows land.
+BD_RC1=""; BD_RC2=""; BD_RC3=""; BD_RC4=""; BD_RC5=""
+IFS=':' read -r BD_RC1 BD_RC2 BD_RC3 BD_RC4 BD_RC5 <<<"$BASELINE_DIRECT_OUT"
 BASELINE_DIRECT_OK=false
-OLD_IFS="$IFS"; IFS=':'
-# shellcheck disable=SC2086
-set -- $BASELINE_DIRECT_OUT
-IFS="$OLD_IFS"
-if [ "$#" -eq 4 ] && [ "$1" -ne 0 ] 2>/dev/null && [ "$2" -ne 0 ] \
-    && [ "$3" -ne 0 ] && [ "$4" -ne 0 ]; then
+if [ -n "$BD_RC5" ] \
+    && [ "$BD_RC1" -ne 0 ] 2>/dev/null && [ "$BD_RC2" -ne 0 ] \
+    && [ "$BD_RC3" -ne 0 ] && [ "$BD_RC4" -ne 0 ] && [ "$BD_RC5" -eq 0 ] \
+    && [ "$BASELINE_HIST_AFTER" = "$((BASELINE_HIST_BEFORE + 1)):1" ]; then
   BASELINE_DIRECT_OK=true
 fi
-if [ "$BASELINE_DIRECT_OK" = true ] && [ "$BASELINE_DIRECT_ENTRIES" = "1" ]; then
-  check "AC-D04b the reserved phase and reason are refused by tdd_write_phase AND _tdd_write_phase_critical, and the document gained no second provenance entry" PASS
+if [ "$BASELINE_DIRECT_OK" = true ]; then
+  check "AC-D04b both exported writers refuse the reserved phase AND the reserved reason, an ordinary phase still writes, and no forged provenance entry landed" PASS
 else
-  check "AC-D04b the reserved phase and reason are refused by both exported writers (rcs=$BASELINE_DIRECT_OUT entries=$BASELINE_DIRECT_ENTRIES)" FAIL
+  check "AC-D04b both exported writers refuse the reserved phase and reason (rcs=$BASELINE_DIRECT_OUT history=$BASELINE_HIST_BEFORE->$BASELINE_HIST_AFTER)" FAIL
   head -c 400 "$TMP/baseline-direct.err" 2>/dev/null
 fi
 
