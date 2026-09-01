@@ -42,6 +42,27 @@ reject_text() {
   fi
 }
 
+# WORKING TREE, not HEAD. Driven first: tests/run-all.sh discovers only
+# test-*.sh, so this is the only path by which the wrapper's executable coverage
+# runs at all, and a later timeout must not be able to drop it.
+RUN_STEP_TEST="$ROOT/tests/structure/release-run-step.test.js"
+if [ -f "$RUN_STEP_TEST" ]; then
+  RUN_STEP_OUT="$(node --test "$RUN_STEP_TEST" 2>&1)"
+  RUN_STEP_RC=$?
+  RUN_STEP_CASES="$(printf '%s\n' "$RUN_STEP_OUT" | sed -n 's/^. tests \([0-9]*\)$/\1/p' | head -1)"
+  # The floor is the REGISTRATION step for a new case: raise this number in the
+  # same commit that adds one. Without it a case can be added and then deleted
+  # again with this driver still green.
+  if [ "$RUN_STEP_RC" -eq 0 ] && [ "${RUN_STEP_CASES:-0}" -ge 11 ]; then
+    check "run_step behavioural suite passes ($RUN_STEP_CASES cases)" PASS
+  else
+    check "run_step behavioural suite passes (rc=$RUN_STEP_RC cases=${RUN_STEP_CASES:-none})" FAIL
+    printf '%s\n' "$RUN_STEP_OUT" | tail -20
+  fi
+else
+  check "run_step behavioural suite exists" FAIL
+fi
+
 VERSION="$(jq -r '.version' "$PLUGIN" 2>/dev/null)"
 expect_jq "Production source uses the official GitHub source type" "$MARKETPLACE" \
   '.plugins | length == 1 and .[0].source.source == "github"'
@@ -88,8 +109,88 @@ expect_text "New releases are created as drafts" "$WORKFLOW" \
               --draft --title "$TAG" --target "${{ github.sha }}"'
 expect_text "Draft asset upload is explicit" "$WORKFLOW" \
   'gh release upload "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY"'
+# Publication used to run `gh release edit "$TAG" --draft=false`. gh exposes no
+# by-id form for that subcommand, so the one call that flips the release live
+# depended on tag resolution while the release still carried no tag. The id is
+# already inside the verified draft object, so the PATCH addresses it directly.
 expect_text "Draft publication is explicit" "$WORKFLOW" \
-  'gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false'
+  'gh api --method PATCH -H '"'"'Accept: application/vnd.github+json'"'"''
+expect_text "Draft publication addresses the release by id" "$WORKFLOW" \
+  '"repos/$GITHUB_REPOSITORY/releases/$PUBLISH_ID"'
+expect_text "Draft publication clears the draft flag" "$WORKFLOW" \
+  '-F draft=false'
+expect_text "Publication refuses a draft that carries no release id" "$WORKFLOW" \
+  'verified draft carries no release id; refusing to publish'
+reject_text "Publication is not addressed through the tag-only gh subcommand" "$WORKFLOW" \
+  'release edit "$TAG"'
+
+# Release run 33397732337 died in this step after emitting exactly one line — the
+# draft URL — with no ::error:: and no stderr, which made the cause unrecoverable.
+# Every command that can fail under `set -euo pipefail` without annotating itself
+# now runs through run_step.
+expect_text "A failing release command annotates itself" "$WORKFLOW" \
+  'echo "::error::${label} failed (exit ${rc}): ${first:-no stderr output}"'
+expect_text "A failing release command replays its own stderr" "$WORKFLOW" \
+  'printf '"'"'%s\n'"'"' "--- stderr of: $* ---" >&2'
+expect_text "The diagnostic wrapper captures the failed command's exit status" "$WORKFLOW" \
+  '"$@" 2>"$err_file" || rc=$?'
+expect_text "The diagnostic wrapper returns that status to its caller" "$WORKFLOW" \
+  'return "$rc"'
+expect_text "The diagnostic wrapper owns the stdout sink through --quiet" "$WORKFLOW" \
+  '"$@" >/dev/null 2>"$err_file" || rc=$?'
+expect_text "Draft creation runs through the diagnostic wrapper" "$WORKFLOW" \
+  'run_step "draft release creation for $TAG" \'
+expect_text "Existing-draft asset upload runs through the diagnostic wrapper" "$WORKFLOW" \
+  'run_step "asset upload to the existing draft $TAG" \'
+expect_text "New-draft asset upload runs through the diagnostic wrapper" "$WORKFLOW" \
+  'run_step "asset upload to the new draft $TAG" \'
+expect_text "Metadata normalization runs through the diagnostic wrapper" "$WORKFLOW" \
+  'run_step --quiet "draft metadata normalization for $TAG (id $release_id)" \'
+expect_text "Publication runs through the diagnostic wrapper" "$WORKFLOW" \
+  'run_step --quiet "publishing draft release $TAG (id $PUBLISH_ID)" \'
+expect_text "The publish id is type-checked, matching its sibling extraction" "$WORKFLOW" \
+  'PUBLISH_ID="$(printf '"'"'%s'"'"' "$RELEASE" | jq -er '"'"'.id | select(type == "number")'"'"')"'
+expect_text "The diagnostic temp file is anchored under the runner temp dir" "$WORKFLOW" \
+  'err_file="$(mktemp "${RUNNER_TEMP:-/tmp}/release-run-step.XXXXXX")"'
+
+# A trailing redirect on a run_step INVOCATION used to bind to the function and
+# discard the ::error:: annotation. The annotation now lives on fd 3, so that class
+# is closed BY CONSTRUCTION and this scan is defence in depth, not the guarantee.
+# It is kept because it is cheap and because it names the hazard for a reader.
+# The pattern is deliberately wider than the literal that shipped: `> /dev/null`,
+# `1>/dev/null`, `&>/dev/null` and `>"$f"` all bind the same way.
+RUN_STEP_SCAN="$(awk '
+  /^[[:space:]]*#/ { next }
+  /(^|[;&|(]|[[:space:]])run_step[[:space:]]/ { inv = 1 }
+  inv { print }
+  inv && !/\\$/ { inv = 0 }
+' "$WORKFLOW")"
+RUN_STEP_SEEN="$(printf '%s\n' "$RUN_STEP_SCAN" | grep -cE '(^|[^[:alnum:]_])run_step[[:space:]]' || true)"
+RUN_STEP_REDIRECTED="$(printf '%s\n' "$RUN_STEP_SCAN" | grep -cE '[0-9]*&?>[[:space:]]*("?/dev/null"?|&[0-9])' || true)"
+# An EMPTY derivation is a FAIL, not a skip: a negative scan whose extractor stops
+# matching reports zero and passes having examined nothing. Same rule as G12a.
+if [ "$RUN_STEP_SEEN" -lt 5 ]; then
+  check "run_step invocation scan finds every call site (saw $RUN_STEP_SEEN, expected >= 5)" FAIL
+else
+  check "run_step invocation scan finds every call site ($RUN_STEP_SEEN)" PASS
+fi
+if [ "$RUN_STEP_REDIRECTED" -eq 0 ]; then
+  check "No run_step invocation carries its own stdout redirect" PASS
+else
+  check "No run_step invocation carries its own stdout redirect" FAIL
+fi
+expect_text "Workflow annotations are written on a dedicated descriptor" "$WORKFLOW" \
+  'exec 3>&1'
+expect_text "The wrapper writes its annotation to that descriptor" "$WORKFLOW" \
+  'no stderr output}" >&3'
+expect_text "The wrapper refuses a call with no command" "$WORKFLOW" \
+  'run_step called without a label and a command'
+expect_text "The release lookup distinguishes not-found from an API failure" "$WORKFLOW" \
+  'could not read the release list for $TAG; refusing to create a second draft'
+expect_text "The pre-publish asset check names its own failure" "$WORKFLOW" \
+  'draft asset for $TAG is incomplete or has the wrong digest immediately before publish'
+expect_text "The closing asset check re-reads rather than re-deriving" "$WORKFLOW" \
+  'published asset for $TAG is incomplete or has the wrong digest on a fresh read'
 expect_text "Published releases must report immutable=true" "$WORKFLOW" \
   'verify_metadata "$CANDIDATE" false true'
 expect_text "Publication polls a bounded ten attempts" "$WORKFLOW" \
