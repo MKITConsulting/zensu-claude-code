@@ -46,12 +46,16 @@ different states with different remedies, and it will refuse.
 
 ## Do NOT Use For
 
-- A session that is binding normally — with ONE exception, which is the whole
-  reason the repair branch exists: if review-evidence operations started failing
-  after a plugin update, the record is fine and the LEASE STORE is wedged. That
-  session binds normally and is still the right caller; run the `--confirm` form and
-  it re-runs the sweep as an idempotent repair. For any other failure, that is
-  `/zensu:doctor`.
+- A session that is binding normally — with TWO exceptions, which are the whole
+  reason the repair branch exists. Both bind normally and are still the right
+  caller, and both are served by the `--confirm` form as an idempotent repair:
+  - **the LEASE STORE is wedged** — review-evidence operations started failing
+    after a plugin update. `--confirm` re-runs the sweep.
+  - **this session's WORKFLOW DOCUMENT is gone** — every tool denies with
+    `activated workflow CAS state is missing`, which is what the capability gate's
+    own deny now tells you to run this command for. `--confirm` rebuilds it.
+    `/zensu:doctor` is read-only and CANNOT rebuild it, so do not route here.
+  For any other failure, that is `/zensu:doctor`.
 - Clearing a review chain or granting a budget. The chain state survives adoption
   untouched and is enforced again on the very next Stop.
 - Any bind failure other than the declared-incompatible lineage — the refusal
@@ -189,11 +193,18 @@ the update has to be re-gathered.
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh" --confirm
 ```
 
-Render the output verbatim. Four things are NOT clean states and must be
+Render the output verbatim. FIVE things are NOT clean states and must be
 surfaced rather than summarized away:
 
-- a `provenance` other than `recorded` or `no-workflow-document` means the
-  takeover happened but was not written into the history;
+- a `workflow baseline` value other than `present` or `rebuilt` — and any
+  `WARNING:` line about the workflow document. `rebuilt` is a real repair and
+  still carries a cost the user has to hear: the chain that was live when the
+  document vanished is gone. Anything else means the document was NOT repaired,
+  and the cause named in the report has to be cleared before re-running;
+- a `provenance` of anything but `recorded` means the takeover happened but was
+  not written into the history. `no-workflow-document` is NOT a clean value: it
+  means the session has no workflow document at all, so the capability gate keeps
+  denying every tool until a `--confirm` run rebuilds it;
 - a non-zero `leases set aside` means evidence reservations were dropped and
   have to be gathered again;
 - a non-zero `leases stuck` is the serious one — those entries could NOT be moved
@@ -210,11 +221,13 @@ surfaced rather than summarized away:
   tamper signal, and by an ordinary I/O failure such as a full or read-only store.
   The command cannot tell those apart, so neither can you.
 
-Exit codes: `0` on a successful report, adoption, or in-place lease repair — the
-repair is a third exit-0 shape and prints `ALREADY SERVED (...)` rather than
-`ADOPTED`; a repair whose sweep was refused or left leases stuck exits `1`. `1` on a refusal or a
-precondition failure, `2` on a bad argument. A non-zero exit is not a broken
-command — read the message.
+Exit codes: `0` on a successful report, adoption, or in-place repair — the
+in-place repair is a third exit-0 shape and prints `ALREADY SERVED (...)` rather
+than `ADOPTED`. It has TWO halves and EITHER one failing exits `1`: a workflow
+baseline that could not be judged or rebuilt, or a sweep that was refused or left
+leases stuck. A rebuilt baseline does not launder a stuck lease, and a clean sweep
+does not launder a refused rebuild. `1` on a refusal or a precondition failure,
+`2` on a bad argument. A non-zero exit is not a broken command — read the message.
 
 **Step 4 of 4 — confirm the repair.** Re-run `/zensu:doctor` and report the binding
 row. The session is bound from the next tool call onward; do not tell the user to
@@ -234,6 +247,8 @@ anything onto it.
 ## Response Style
 
 Render both command outputs verbatim; they are already formatted. Name both
-versions. Never summarize away a `provenance` other than `recorded`/
-`no-workflow-document`, a non-zero `leases set aside`, a non-zero
-`leases stuck`, or any `WARNING:` line about the lease store. After a successful adoption, do not tell the user to restart.
+versions. Never summarize away a `workflow baseline` value other than `present`,
+a `provenance` other than `recorded`, a non-zero `leases set aside`, a non-zero
+`leases stuck`, or any `WARNING:` line the command prints — about the workflow
+document or about the lease store. After a successful adoption, do not tell the
+user to restart.

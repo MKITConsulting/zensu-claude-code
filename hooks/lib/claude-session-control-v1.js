@@ -203,15 +203,33 @@ function main() {
         payload.session_id,
       );
       if (baselineState === core.BASELINE_STATES.MISSING) {
-        // Records its own BASELINE_REBUILT history entry, so an automatic heal is
-        // never silent — the same provenance the confirmed repair leaves.
-        core.repairWorkflowBaseline({
-          recordsDir,
-          sessionId: payload.session_id,
-          pluginData,
-          executingPluginRoot: pluginRoot,
-          host: 'claude',
-        });
+        try {
+          // Records its own BASELINE_REBUILT history entry, so an automatic heal is
+          // never silent — the same provenance the confirmed repair leaves.
+          core.repairWorkflowBaseline({
+            recordsDir,
+            sessionId: payload.session_id,
+            pluginData,
+            executingPluginRoot: pluginRoot,
+            host: 'claude',
+          });
+        } catch (error) {
+          // repairWorkflowBaseline re-evaluates the verdict and refuses anything
+          // that is no longer `missing`. Between the classify above and its own
+          // read, a concurrent writer can legitimately have created the document —
+          // and this adapter has NO local catch, so that benign race exited the
+          // whole SessionStart hook non-zero and left the session with no baseline
+          // for the rest of its life: the exact class of wedge this branch exists
+          // to remove. Re-classify rather than matching the refusal text: a
+          // document that is now PRESENT is the outcome we wanted; every other
+          // state still fails, so a planted symlink or hard link is not laundered
+          // into a success by this catch.
+          if (core.classifyWorkflowBaseline(
+            baselineFile,
+            context.project_root,
+            payload.session_id,
+          ) !== core.BASELINE_STATES.PRESENT) throw error;
+        }
       } else if (baselineState !== core.BASELINE_STATES.PRESENT) {
         fail(`SessionStart workflow document is ${baselineState}: ${baselineFile}`);
       }

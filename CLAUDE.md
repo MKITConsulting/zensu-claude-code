@@ -1126,13 +1126,50 @@ fails every stateful hook closed for the rest of the session.
 `session-control-core-v1.js`; the four reserved-phase guards; `baselineVerdict` /
 `repairBaseline` / `baselineFault` / `leaseFault` / `renderBaselineDiagnosis` /
 `renderBaselineNotes` / `survivingEvidence` plus the two-argument `repairHeadline` /
-`repairExitCode` in `session-adopt-report-v1.js`; `BASELINE_MISSING_CODE` and its three
-throw sites in `reviewer-capability-v1.js`; the `case 1)` reason in
-`stop-chain-enforcer.sh`; and the `stateBlock` row in `zensu-doctor-report.js`.
-**Operator-facing accounts:** `skills/adopt-session/SKILL.md` §"Strict Scope" and its
-`already-served` refusal row, the two state rows in `skills/doctor/SKILL.md`,
+`repairExitCode` in `session-adopt-report-v1.js`; `BASELINE_MISSING_CODE` and its TWO
+throw sites in `reviewer-capability-v1.js` — say two, and note that they produce THREE
+tagged causes only because one sits inside a two-element directory loop; a reader
+counting `baselineMissing(` finds two, and the roster said three for a release; the
+`case 1)` reason in `stop-chain-enforcer.sh`; the `stateBlock` row in
+`zensu-doctor-report.js` — which is ONE renderer, `ownDocumentVerdict`, called from BOTH
+the `readdirSync` ENOENT branch and the populated path, because it was a hand-written row
+on the populated path alone and was therefore unreachable in the shape the feature
+targets; **the record-exists SessionStart branch in `claude-session-control-v1.js`**,
+which consumes FIVE exported core symbols (`adoptionWorkflowStatePath`,
+`classifyWorkflowBaseline`, `BASELINE_STATES.MISSING`, `BASELINE_STATES.PRESENT`,
+`repairWorkflowBaseline`) and is the one caller with no local `fail` of its own — it was
+missing from this roster for a release, so a rename would have sent a maintainer to six
+sites and not to the self-heal; and the write-class enumerations in
+`hooks/lib/zensu-session-adopt.sh`'s header, `hooks/lib/zensu-doctor-invocation.js` and
+`reviewer-capability-v1.js`'s recognized-command comment — the adopt header is the
+document the PreToolUse recognizer's admission RESTS on, and the `--confirm` baseline
+repair added a FOURTH write class (this session's workflow document plus its
+`.zensu/state` ancestors, under the recorded project root) that all three enumerated as
+three for a release.
+**Operator-facing accounts:** `skills/adopt-session/SKILL.md` §"Strict Scope", its
+`already-served` refusal row, its "Do NOT Use For" bullet (TWO `--confirm` exceptions,
+not one — the lease store AND the workflow document; routing the second to
+`/zensu:doctor` is wrong, that command is read-only and cannot rebuild), its "FIVE
+things are NOT clean states" list, its exit-code paragraph (EITHER half failing exits 1)
+and its Response Style rule; the two state rows in `skills/doctor/SKILL.md`;
 `docs/session-control.md` §"Unbindable sessions" (as a FOURTH state that is NOT one of
-the two relaxable bind failures), and `docs/gates.md` §"Missing Workflow Baseline".
+the two relaxable bind failures, and whose absence from the per-gate table is stated
+there rather than left to be noticed); and `docs/gates.md` §"Missing Workflow Baseline".
+
+**Port-relevant.** The core half is `BASELINE_STATES` / `BASELINE_REFUSALS` /
+`BASELINE_HISTORY_PHASE` / `BASELINE_HISTORY_REASON_PREFIX` / `classifyWorkflowBaseline` /
+`workflowBaselineVerdict` / `repairWorkflowBaseline` / the newly exported
+`adoptionWorkflowStatePath`, all in the host-neutral `session-control-core-v1.js`. The
+host half is SEVEN obligations, and a port that takes only the core delta gets a writer
+with no reachable caller and keeps the wedge: the adopt-report renderer and its two-argument
+`repairHeadline`/`repairExitCode`, the capability-gate deny branch and its
+`BASELINE_MISSING_CODE` tagging, the SessionStart adapter, the Stop `case 1)` reason, the
+doctor row, the four reserved-phase guards, and — easiest to miss — the write-class
+justification the host's own gate admission rests on, which the baseline repair extends.
+`zensu-codex`, `zensu-kiro` and `zensu-antigravity` were NOT included in this change; each
+carries its own recognizer and its own doctor against a different harness, and the
+directory-component ladder in `classifyWorkflowBaseline` has to be re-decided against
+whatever that host canonicalizes.
 
 **Version: `patch`.** Walked against §"Runtime Lineage" entry by entry: no context-record
 or workflow-state schema field (`BASELINE_REBUILT` is a history-entry VALUE, and
@@ -1156,10 +1193,38 @@ new one — the shape it refuses is byte-identical.
   nothing prevents it. It matches the existing *no record* branch, which already
   re-registers without consent for the same reason — but say "matches", never "is
   therefore safe".
-- **Windows is unverified for the in-session half.** `zensu-doctor-invocation.js` refuses
-  on win32 by design, so the repair command is unreachable there exactly as
-  `/zensu:doctor` is. Only the SessionStart self-heal and the doctor row apply on that
-  host, and `test-versioned-plugin-upgrade.sh` Part D has no Windows profile entry.
+- **Windows is unverified for the in-session half — and scope that claim to the
+  RECOGNIZER, not to the suite.** `zensu-doctor-invocation.js` refuses on win32 by
+  design, so the repair COMMAND is unreachable there exactly as `/zensu:doctor` is; only
+  the SessionStart self-heal and the doctor row apply on that host. Do NOT write "Part D
+  has no Windows profile entry": that was false when it was written.
+  `test-versioned-plugin-upgrade.sh` is registered in `windows-ci.v1.json`,
+  `windows-native-structure.v1.json` and `windows-ci-command-catalog.v1.json`. What IS
+  open there is the BUDGET: neither the `timeoutMs` nor the shard weight was re-measured
+  after Part D, Part D is the file's TAIL, and a `TIMED_OUT` therefore takes exactly
+  these rows. Take the figure from the next green Windows shard.
+- **The doctor's directory-absent arm is NARROWED, deliberately.** When
+  `<project>/.zensu/state` is absent AND no bound session key is available, the
+  own-document row is WITHHELD rather than disclosed. The judge pass asked for the
+  disclosure in both cases; warning there fires on every ordinary run in a fresh project
+  and is the "trained away within a day" failure this file records for the
+  implementing-turns row. The defect the row exists for — a green report over a session
+  whose capability gate is denying every tool — requires a BOUND session, which is
+  exactly the case where the key is available and the ❌ row does fire. The POPULATED
+  path still discloses. `P6e`/`P6f` in `test-doctor.sh` pin both halves.
+- **`verdict-unavailable` has no executed case and cannot get one from the unit layer.**
+  `workflowBaselineVerdict` wraps its whole bind derivation in a try that returns a
+  REFUSAL, so a caller-supplied fault lands as `record-unreadable`; the catch in
+  `baselineVerdict` fires only for a throw AFTER a successful bind, which needs a real
+  bound record the report unit suite does not build. Its sibling `rebuild-failed` IS
+  driven from its producer. Stated rather than faked with a hand-built object.
+- **One `--confirm` run derives the same bind three times**, and all three
+  `BASELINE_REFUSALS` members are therefore unreachable from both shipped callers — both
+  reach the verdict only after the bind is already established. The obvious fix, an entry
+  point taking an already-validated verdict, is REJECTED rather than pending: the second
+  derivation inside `repairWorkflowBaseline` is the TOCTOU re-check, and accepting the
+  caller's verdict would delete it. The cost is a repeated runtime-digest computation on
+  a path that runs once per repair.
 - **The evidence listing is a closed candidate set, and it is not complete.** The
   Autopilot pointer is matched by SHAPE (`autopilot-active-<64 hex>.json`) rather than by
   this session's owner hash, because that hash is not derivable from what the report

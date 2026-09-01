@@ -484,8 +484,11 @@ function main() {
     // here is reached before the Bash gates ever run. It admits exactly two
     // recognized commands for the main thread: hooks/lib/zensu-doctor.sh, which
     // writes nothing, and hooks/lib/zensu-session-adopt.sh, which writes its own
-    // session's record, one workflow history entry and a move of its own stale
-    // review-evidence leases, and carries its own justification in its header. A
+    // session's record, one workflow history entry, a move of its own stale
+    // review-evidence leases, and — with --confirm on an already-served refusal
+    // only — its own missing workflow document plus that document's .zensu/state
+    // ancestors in the recorded project, and carries its own justification in its
+    // header. A
     // remedy the user cannot invoke is not a remedy.
     //
     // This gate is the FIFTH denier in the incompatible-runtime state, and the

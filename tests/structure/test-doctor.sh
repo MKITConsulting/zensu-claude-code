@@ -3171,6 +3171,37 @@ case "$P6_MISMATCH" in
   *) check "P6d a session key is ignored unless the binding verdict is bound" PASS ;;
 esac
 
+# P6e — the shape the whole feature targets, and the one the row could not see.
+# `.zensu/state/` is gitignored, so a deleted and re-created worktree loses the
+# WHOLE DIRECTORY, not just the file. stateBlock's readdirSync then took its
+# ENOENT branch, printed "does not exist yet — nothing to clean" as an OK row and
+# RETURNED above the own-document row — so the doctor reported green over exactly
+# the session whose capability gate was denying every tool. Every other P6 arm
+# runs under `mkdir -p "$P6_PROJECT/.zensu/state"`, which is why none of them
+# reached it. An ENOENT here is positive proof the document is gone, which is the
+# strongest form of the finding, not a reason to withhold it.
+rm -rf "$P6_PROJECT/.zensu/state"
+P6_NODIR="$(run_report_own bound "$P6_KEY")"
+case "$P6_NODIR" in
+  *"own workflow document is MISSING"*"/zensu:adopt-session --confirm"*)
+    check "P6e an absent .zensu/state still reports the bound session's own missing document" PASS ;;
+  *) check "P6e an absent .zensu/state must not read as an all-clear (got: $P6_NODIR)" FAIL ;;
+esac
+# The DELIBERATE NARROWING, pinned so it stays a decision rather than drift. With
+# an absent directory AND no bound key the row is WITHHELD: a project with no
+# .zensu/state at all and no bound session is a fresh install, and warning there
+# fires on every ordinary run — the "trained away within a day" failure this
+# repository records for the implementing-turns row. P6c above pins that the
+# POPULATED path still discloses, so the narrowing is scoped to the one case where
+# no claim about a session's own document is being made at all.
+P6_NODIR_UNBOUND="$(run_report_own unbound '')"
+case "$P6_NODIR_UNBOUND" in
+  *"own workflow document"*)
+    check "P6f an absent .zensu/state with no bound key wrongly rendered an own-document row" FAIL ;;
+  *) check "P6f an absent .zensu/state with no bound key withholds the row (narrowed on purpose)" PASS ;;
+esac
+mkdir -p "$P6_PROJECT/.zensu/state"
+
 rm -rf "$SBOX"
 echo "----"
 echo "test-doctor: $PASS PASS / $FAIL FAIL"

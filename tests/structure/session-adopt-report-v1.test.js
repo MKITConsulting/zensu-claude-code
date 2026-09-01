@@ -518,3 +518,69 @@ test('WB surviving evidence is a closed set, never a listing of the state direct
   assert.deepEqual(survivingEvidence('', 'sid'), []);
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+test('WB the two local fail-safes are reached from their PRODUCERS, not only asserted on hand-built objects', () => {
+  const { baselineVerdict, repairBaseline, baselineFault } = report();
+  const core = CORE();
+  // Both catches are exported and documented as this command's fail-safes, and
+  // neither was executed: the loop below used to pass a poisoned request only with
+  // states that return BEFORE the try, and the fault assertions fed hand-built
+  // objects to the predicate rather than to the producer. Removing either
+  // try/catch left the suite green while a crashed core threw out of main().
+  // KNOWN BOUND, stated rather than faked: `verdict-unavailable` is NOT reachable
+  // from here. core.workflowBaselineVerdict wraps its own bind derivation in a
+  // try that returns a REFUSAL, so a caller-supplied fault lands as
+  // `record-unreadable` and the catch in baselineVerdict only fires for a throw
+  // AFTER a successful bind — which needs a real bound record this unit layer
+  // does not build. What is asserted here is the reachable half plus the shape
+  // the renderer keys on.
+  const verdictRefusal = baselineVerdict(null);
+  assert.equal(verdictRefusal.refusal, core.BASELINE_REFUSALS.RECORD_UNREADABLE);
+  assert.equal(baselineFault(verdictRefusal), core.BASELINE_REFUSALS.RECORD_UNREADABLE);
+  assert.equal(baselineFault({ fault: 'verdict-unavailable' }), 'verdict-unavailable');
+
+  const rebuildFault = repairBaseline(null, { state: core.BASELINE_STATES.MISSING, path: '/p/x.json' });
+  assert.equal(rebuildFault.fault, 'rebuild-failed');
+  assert.ok(rebuildFault.detail && rebuildFault.detail.length > 0);
+  assert.equal(baselineFault(rebuildFault), 'rebuild-failed');
+});
+
+test('WB a failed rebuild never re-offers the repair that just refused', () => {
+  const { repairBaseline, renderBaselineNotes, renderBaselineDiagnosis } = report();
+  const core = CORE();
+  const failed = repairBaseline(null, { state: core.BASELINE_STATES.MISSING, path: '/p/x.json' });
+  // repairBaseline spreads the verdict, so `state` survives as MISSING. With the
+  // state branches ahead of the fault branch this rendered "Re-run this command
+  // with --confirm to rebuild it" underneath the line saying the rebuild had just
+  // been refused — a remedy that is the operation that already failed.
+  const diagnosis = renderBaselineDiagnosis(failed, 'sid');
+  assert.equal(diagnosis.includes('Re-run this'), false, 'no retry advice after a refused rebuild');
+  assert.ok(diagnosis.includes('rebuild-failed'));
+  assert.ok(diagnosis.includes('will fail the same way'));
+  const notes = renderBaselineNotes(failed, 'sid');
+  assert.ok(notes.includes('was NOT repaired'));
+  // And the cause plus its detail are stated ONCE, not twice.
+  assert.equal(notes.split('rebuild-failed').length - 1, 1, 'the fault token is not printed twice');
+});
+
+test('WB the surviving-evidence cap bounds a session-writable directory', () => {
+  const { survivingEvidence } = report();
+  const os = require('node:os');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-evidence-cap-'));
+  const stateDir = path.join(root, '.zensu', 'state');
+  fs.mkdirSync(stateDir, { recursive: true });
+  // The autopilot pointer is matched by SHAPE, so an unbounded number of entries
+  // can match and the cap is the only thing standing between that directory and
+  // the model-read report. The previous fixture planted four matching names, so
+  // the slice never truncated and the bound was unverified.
+  for (let i = 0; i < 15; i += 1) {
+    const hex = i.toString(16).padStart(2, '0').repeat(32).slice(0, 64);
+    fs.writeFileSync(path.join(stateDir, 'autopilot-active-' + hex + '.json'), '{}');
+  }
+  const listed = survivingEvidence(root, 'sid');
+  assert.equal(listed.length, 12, 'the listing is capped at EVIDENCE_MAX');
+  // An unusable session id is an empty list, never a throw and never a partial
+  // listing that looks like a finding.
+  assert.deepEqual(survivingEvidence(root, ''), []);
+  fs.rmSync(root, { recursive: true, force: true });
+});

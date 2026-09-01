@@ -1718,9 +1718,19 @@ function adoptContext(options) {
 //
 // What it costs, stated here because the code cannot state it later: a chain
 // that was live when the document vanished is GONE. The rebuilt baseline reads
-// "never active", because that is all a fresh baseline can say. That is why no
-// caller reaches the writer without the user's confirmation, and why the writer
-// records BASELINE_REBUILT.
+// "never active", because that is all a fresh baseline can say. That is why the
+// writer records BASELINE_REBUILT on every path.
+//
+// Say what GATES it precisely, because an earlier wording here claimed a consent
+// control that does not exist. TWO callers reach this writer and NEITHER is user
+// consent. The adopt entry point requires the literal `--confirm` in argv, which
+// is a token the model supplies to itself — the same prose-backed, not
+// consent-backed shape CLAUDE.md already records for `--autopilot-release`; the
+// "wait for the user to say yes" rule lives in skills/adopt-session/SKILL.md, not
+// in a gate. And claude-session-control-v1.js's SessionStart record-exists branch
+// reaches it with NO token at all, on a clean ENOENT, so a session could delete
+// its own document and wait for an automatic compaction. That is an accepted gap
+// recorded in CLAUDE.md §"Workflow-Baseline Repair", not a control.
 const BASELINE_STATES = {
   PRESENT: 'present',
   MISSING: 'missing',
@@ -1754,7 +1764,51 @@ function baselineRefusal(reason) {
 // two agree about which shapes are unsafe. MAX_JSON_BYTES is the same bound
 // readRegularFile applies, so a document called oversized here is one the reader
 // would refuse anyway.
+//
+// The DIRECTORY components are judged first, and leaving them out was a real
+// defect rather than an omission: `lstat` resolves every component except the
+// last, so a symlinked `.zensu` or `.zensu/state` whose target lacks the document
+// answered ENOENT and classified MISSING/repairable — a tamper shape offered as
+// rebuildable, while the write then failed at ensureDescendantDirectory and the
+// report told the user to retry the repair that cannot succeed. The gate this
+// claims to mirror has always checked them; the claim was false until it did.
 function classifyWorkflowBaseline(file, projectRoot, sessionId) {
+  // The ladder is anchored on the RESOLVED project root, not on the caller's
+  // spelling. revalidateWorkflowState can compare each component against itself
+  // because its projectRoot arrives canonical from the bound record; this function
+  // is also called with a raw fixture path, and on macOS a temp root is spelled
+  // `/var/...` by the caller and `/private/var/...` by the kernel — so requiring
+  // the caller's own spelling to be canonical reported every healthy document
+  // under such a root as tamper. Resolving the root once keeps the property that
+  // matters (no symlink at `.zensu` or `.zensu/state`) without inheriting an
+  // ancestor's legitimate aliasing.
+  let rootReal;
+  try {
+    rootReal = fs.realpathSync.native(projectRoot);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return BASELINE_STATES.MISSING;
+    return BASELINE_STATES.UNSAFE;
+  }
+  const zensuDirectory = path.join(rootReal, '.zensu');
+  for (const candidate of [zensuDirectory, path.join(zensuDirectory, 'state')]) {
+    let componentStat;
+    try {
+      componentStat = fs.lstatSync(candidate);
+    } catch (error) {
+      // A clean ENOENT is the repairable shape: initializeWorkflowState creates
+      // these components. Every other errno is NOT absence.
+      if (error && error.code === 'ENOENT') return BASELINE_STATES.MISSING;
+      return BASELINE_STATES.UNSAFE;
+    }
+    if (componentStat.isSymbolicLink() || !componentStat.isDirectory()) {
+      return BASELINE_STATES.UNSAFE;
+    }
+    try {
+      if (fs.realpathSync.native(candidate) !== candidate) return BASELINE_STATES.UNSAFE;
+    } catch {
+      return BASELINE_STATES.UNSAFE;
+    }
+  }
   let stat;
   try {
     stat = fs.lstatSync(file);

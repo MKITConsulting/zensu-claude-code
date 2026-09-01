@@ -23,8 +23,28 @@ if [ ! -f "$SUITE" ]; then
   exit 1
 fi
 
-bash "$SUITE"
+# A REGISTRATION FLOOR, matching the three sibling unit drivers in
+# test-versioned-plugin-upgrade.sh. Without one, exit 0 also accepts a file that
+# registers fewer cases than it used to — so an accidentally deleted block of
+# tests is indistinguishable from a green run. That is not hypothetical here: the
+# workflow-baseline cases (WB1-WB7 plus WB1a and WB5a) are the only coverage
+# anywhere for classifyWorkflowBaseline, workflowBaselineVerdict and
+# repairWorkflowBaseline, and this driver was the one place that could have caught
+# their removal. Raise the number in the same commit that adds a case — the floor
+# fires on REMOVAL only, so adding one can never turn it red on its own.
+# shellcheck source=tests/structure/lib-unit-summary.sh
+. "$ROOT/tests/structure/lib-unit-summary.sh"
+
+CORE_UNIT_OUT="$(mktemp "${TMPDIR:-/tmp}/zensu-core-unit-XXXXXX")"
+bash "$SUITE" >"$CORE_UNIT_OUT" 2>&1
 STATUS=$?
+cat "$CORE_UNIT_OUT"
+
+if [ "$STATUS" -eq 0 ] && ! unit_cases_registered_floor "$CORE_UNIT_OUT" 146; then
+  printf '%s\n' "test-session-control-core: registered ${UNIT_CASES_TESTS:-?} cases, want >= 146" >&2
+  STATUS=1
+fi
+rm -f "$CORE_UNIT_OUT"
 
 if [ "$STATUS" -eq 0 ]; then
   printf '%s\n' '----' 'test-session-control-core: session-control core suite PASS'

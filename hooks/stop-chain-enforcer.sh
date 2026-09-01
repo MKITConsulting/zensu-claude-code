@@ -672,7 +672,17 @@ case "$INNER_STATUS" in
     # command, in a state where the capability gate denies every tool and only
     # the two commands the Bash recognizer admits are reachable. The same remedy
     # the capability gate now names is the one that exists.
-    printf '%s\n' '{"decision":"block","reason":"Zensu review-chain Stop denied: the mandatory current-session workflow baseline is missing. Do not infer completion. If the record is intact and served, run /zensu:adopt-session to see the diagnosis and /zensu:adopt-session --confirm to rebuild the document; otherwise start a fresh Claude Code session."}'
+    #
+    # The remedy is QUALIFIED, and the qualifier is load-bearing rather than
+    # hedging. This arm is selected by tdd_chain_snapshot's `[ -e "$state_file" ]`
+    # test, and `test -e` FOLLOWS symlinks — so a DANGLING symlink at the document
+    # path lands here too, while every other reader of that path uses lstat and
+    # answers "unsafe" instead: classifyWorkflowBaseline, revalidateWorkflowState
+    # and the doctor row all refuse to rebuild over something that is sitting
+    # there. Promising an unconditional rebuild here would send that user to a
+    # repair that refuses by design. Naming the condition is what keeps this arm
+    # and the repair from contradicting each other.
+    printf '%s\n' '{"decision":"block","reason":"Zensu review-chain Stop denied: the mandatory current-session workflow baseline is missing. Do not infer completion. If the record is intact and served AND the document is genuinely absent rather than replaced, run /zensu:adopt-session to see the diagnosis and /zensu:adopt-session --confirm to rebuild it. The diagnosis is what tells the two apart: a symlink, a hard link or a non-file at that path is a tamper signal, the repair refuses it by design, and the remedy there is to inspect it and start a fresh Claude Code session."}'
     exit 0
     ;;
   *)

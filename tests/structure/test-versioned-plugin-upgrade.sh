@@ -1005,10 +1005,10 @@ fi
 # guard condition and returning the text unchanged left the suite green.
 REPORT_UNIT="$ROOT/tests/structure/session-adopt-report-v1.test.js"
 if [ -f "$REPORT_UNIT" ] && node --test "$REPORT_UNIT" >"$TMP/report-unit.out" 2>&1 \
-  && unit_cases_registered_floor "$TMP/report-unit.out" 20; then
+  && unit_cases_registered_floor "$TMP/report-unit.out" 36; then
   check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), driven from here)" PASS
 else
-  check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), want >= 20 registered — driven from here)" FAIL
+  check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), want >= 36 registered — driven from here)" FAIL
   grep -E "^not ok|^# (fail|pass|tests) |Error|expected:|actual:|operator:" \
     "$TMP/report-unit.out" 2>/dev/null | head -40
 fi
@@ -2646,19 +2646,27 @@ fi
 # The DECISION channel alone is not enough here: the point of the change is WHICH
 # reason a deny carries, and a generic "immutable context revalidation failed"
 # would satisfy any check that only reads the word `deny`.
-gate_reason_from() {
+# NAMED apart from the gate_reason_from at :1338 on purpose. This used to reuse
+# that name, which SHADOWED the earlier definition for every call below this line
+# — and the copy silently dropped the two env neutralizations the original's own
+# comment calls load-bearing, so a developer with ZENSU_API_URL or ZENSU_MCP_GATE
+# exported would have got an empty reason and a failure misdiagnosed as the scope
+# being gone. It carries them now, reads the ONE field the hook actually emits
+# (`permissionDecisionReason`; `permissionDecision_reason` existed nowhere in
+# hooks/ and made the first disjunct dead), and parses the payload once.
+baseline_gate_reason_from() {
   local root="$1" hook="$2" payload="$3" out="$TMP/baseline-gate.out"
   printf '%s' "$payload" \
     | CLAUDE_PLUGIN_ROOT="$root" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
-      CLAUDE_PROJECT_DIR="$PROJECT" \
+      CLAUDE_PROJECT_DIR="$PROJECT" ZENSU_API_URL= ZENSU_MCP_GATE= \
       bash "$root/hooks/$hook" >"$out" 2>/dev/null || true
   OUT_FILE="$out" node -e '
     const fs = require("node:fs");
     const raw = fs.readFileSync(process.env.OUT_FILE, "utf8").trim();
     if (raw === "") { process.stdout.write("\n"); process.exit(0); }
     try {
-      process.stdout.write(`${JSON.parse(raw).hookSpecificOutput?.permissionDecision_reason
-        || JSON.parse(raw).hookSpecificOutput?.permissionDecisionReason || ""}\n`);
+      const parsed = JSON.parse(raw);
+      process.stdout.write(`${parsed?.hookSpecificOutput?.permissionDecisionReason || ""}\n`);
     } catch (_error) { process.stdout.write("unparseable\n"); }
   '
 }
@@ -2700,16 +2708,40 @@ rm -f "$BASELINE_DOC"
 # where this hook denies every tool.
 BASELINE_DENY="$(gate_decision_from "$SYNTHETIC_COMPATIBLE_ROOT" \
   pre-reviewer-capability-gate.sh "$COMPATIBLE_BASH")"
-BASELINE_REASON="$(gate_reason_from "$SYNTHETIC_COMPATIBLE_ROOT" \
+BASELINE_REASON="$(baseline_gate_reason_from "$SYNTHETIC_COMPATIBLE_ROOT" \
   pre-reviewer-capability-gate.sh "$COMPATIBLE_BASH")"
 if [ "$BASELINE_DENY" = deny ] \
     && printf '%s' "$BASELINE_REASON" | grep -qF 'the workflow document it anchors is missing' \
     && printf '%s' "$BASELINE_REASON" | grep -qF '/zensu:adopt-session --confirm' \
     && ! printf '%s' "$BASELINE_REASON" | grep -qF 'immutable context revalidation failed'; then
-  check "AC-007 a missing workflow document denies with a named cause and a reachable remedy" PASS
+  check "AC-D07 a missing workflow document denies with a named cause and a reachable remedy" PASS
 else
-  check "AC-007 a missing workflow document denies with a named cause and a reachable remedy (decision=$BASELINE_DENY)" FAIL
+  check "AC-D07 a missing workflow document denies with a named cause and a reachable remedy (decision=$BASELINE_DENY)" FAIL
   printf '%s\n' "$BASELINE_REASON" | head -c 300
+fi
+
+# AC-D07b — the DISCRIMINATION half, and the half AC-D07 alone cannot establish.
+# A document that is PRESENT but tampered must keep the GENERIC wording: something
+# IS at that path, the repair refuses it by design, and recommending a rebuild
+# there tells the user to build over the evidence. Without this row, tagging the
+# `is unsafe` throw with baselineMissing() leaves the whole tree green while the
+# gate names the one remedy that cannot work — which is the contradiction this
+# change set exists to remove, reintroduced from the other side.
+BASELINE_LINK_SRC="$TMP/baseline-link-src.json"
+printf '{}' >"$BASELINE_LINK_SRC"
+ln "$BASELINE_LINK_SRC" "$BASELINE_DOC"
+BASELINE_TAMPER_REASON="$(baseline_gate_reason_from "$SYNTHETIC_COMPATIBLE_ROOT" \
+  pre-reviewer-capability-gate.sh "$COMPATIBLE_BASH")"
+BASELINE_TAMPER_DENY="$(gate_decision_from "$SYNTHETIC_COMPATIBLE_ROOT" \
+  pre-reviewer-capability-gate.sh "$COMPATIBLE_BASH")"
+rm -f "$BASELINE_DOC"
+if [ "$BASELINE_TAMPER_DENY" = deny ] \
+    && printf '%s' "$BASELINE_TAMPER_REASON" | grep -qF 'immutable context revalidation failed' \
+    && ! printf '%s' "$BASELINE_TAMPER_REASON" | grep -qF 'the workflow document it anchors is missing'; then
+  check "AC-D07b a hard-linked document keeps the generic wording and is offered no rebuild" PASS
+else
+  check "AC-D07b a hard-linked document keeps the generic wording and is offered no rebuild (decision=$BASELINE_TAMPER_DENY)" FAIL
+  printf '%s\n' "$BASELINE_TAMPER_REASON" | head -c 300
 fi
 
 # AC-009 — the doctor row is ARMED and never silent.
@@ -2732,11 +2764,15 @@ CLAUDE_CODE_SESSION_ID="$SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
   CLAUDE_PROJECT_DIR="$PROJECT" HOME="$BASELINE_DOCTOR_HOME" \
   bash "$SYNTHETIC_COMPATIBLE_ROOT/hooks/lib/zensu-doctor.sh" \
   >"$BASELINE_DOCTOR_OUT" 2>/dev/null || true
-if grep -qF "own workflow document" "$BASELINE_DOCTOR_OUT" \
-    && grep -qF "missing check, not an all-clear" "$BASELINE_DOCTOR_OUT"; then
-  check "AC-009 the doctor's own-document check discloses when it cannot run" PASS
+# ONE ordered pattern, not two independent greps. `missing check, not an all-clear`
+# occurs at six other sites in zensu-doctor-report.js and `own workflow document`
+# occurs on the BAD row too, so two separate -qF calls could be satisfied by two
+# unrelated lines while the disclosure itself was gone.
+if grep -q "own workflow document was not checked.*missing check, not an all-clear" \
+    "$BASELINE_DOCTOR_OUT"; then
+  check "AC-D09 the doctor's own-document check discloses when it cannot run" PASS
 else
-  check "AC-009 the doctor's own-document check discloses when it cannot run" FAIL
+  check "AC-D09 the doctor's own-document check discloses when it cannot run" FAIL
   grep -F 'state:' "$BASELINE_DOCTOR_OUT" 2>/dev/null | head -3
 fi
 
@@ -2754,9 +2790,9 @@ if grep -qF 'workflow document is MISSING' "$BASELINE_REPORT_OUT" \
     && grep -qF -- '--confirm' "$BASELINE_REPORT_OUT" \
     && grep -qF 'loss, not a restore' "$BASELINE_REPORT_OUT" \
     && [ ! -f "$BASELINE_DOC" ]; then
-  check "AC-005 the report-only run names the missing document and writes nothing" PASS
+  check "AC-D05 the report-only run names the missing document and writes nothing" PASS
 else
-  check "AC-005 the report-only run names the missing document and writes nothing" FAIL
+  check "AC-D05 the report-only run names the missing document and writes nothing" FAIL
   head -c 300 "$BASELINE_REPORT_OUT" 2>/dev/null
 fi
 
@@ -2769,9 +2805,9 @@ BASELINE_CONFIRM_RC=$?
 if [ "$BASELINE_CONFIRM_RC" -eq 0 ] \
     && grep -qF 'workflow baseline rebuilt' "$BASELINE_CONFIRM_OUT" \
     && [ -f "$BASELINE_DOC" ]; then
-  check "AC-006 --confirm rebuilds the missing workflow document and exits 0" PASS
+  check "AC-D06 --confirm rebuilds the missing workflow document and exits 0" PASS
 else
-  check "AC-006 --confirm rebuilds the missing workflow document and exits 0 (rc=$BASELINE_CONFIRM_RC)" FAIL
+  check "AC-D06 --confirm rebuilds the missing workflow document and exits 0 (rc=$BASELINE_CONFIRM_RC)" FAIL
   head -c 300 "$BASELINE_CONFIRM_OUT" 2>/dev/null
 fi
 
@@ -2788,17 +2824,17 @@ if BASELINE_DOC="$BASELINE_DOC" node -e '
     if (!String(rebuilt[0].reason || "").startsWith("baseline-rebuilt: ")) process.exit(1);
     if (!Array.isArray(state.bypasses) || state.bypasses.length !== 0) process.exit(1);
   '; then
-  check "AC-003 the rebuilt document carries one BASELINE_REBUILT entry and an empty ledger" PASS
+  check "AC-D03 the rebuilt document carries one BASELINE_REBUILT entry and an empty ledger" PASS
 else
-  check "AC-003 the rebuilt document carries one BASELINE_REBUILT entry and an empty ledger" FAIL
+  check "AC-D03 the rebuilt document carries one BASELINE_REBUILT entry and an empty ledger" FAIL
 fi
 
 BASELINE_AFTER="$(gate_decision_from "$SYNTHETIC_COMPATIBLE_ROOT" \
   pre-reviewer-capability-gate.sh "$COMPATIBLE_BASH")"
 if [ "$BASELINE_AFTER" = allow ]; then
-  check "AC-011 the session runs ordinary commands again after the repair" PASS
+  check "AC-D11 the session runs ordinary commands again after the repair" PASS
 else
-  check "AC-011 the session runs ordinary commands again after the repair (saw $BASELINE_AFTER)" FAIL
+  check "AC-D11 the session runs ordinary commands again after the repair (saw $BASELINE_AFTER)" FAIL
 fi
 
 # AC-006 second half — a second --confirm is a no-op on the baseline rather than
@@ -2811,9 +2847,9 @@ BASELINE_SECOND_RC=$?
 if [ "$BASELINE_SECOND_RC" -eq 0 ] \
     && ! grep -qF 'workflow baseline rebuilt' "$BASELINE_SECOND_OUT" \
     && grep -qF 'workflow baseline: present' "$BASELINE_SECOND_OUT"; then
-  check "AC-006 a second --confirm reports the document as present, not rebuilt again" PASS
+  check "AC-D06 a second --confirm reports the document as present, not rebuilt again" PASS
 else
-  check "AC-006 a second --confirm reports the document as present, not rebuilt again (rc=$BASELINE_SECOND_RC)" FAIL
+  check "AC-D06 a second --confirm reports the document as present, not rebuilt again (rc=$BASELINE_SECOND_RC)" FAIL
   head -c 300 "$BASELINE_SECOND_OUT" 2>/dev/null
 fi
 
@@ -2839,10 +2875,67 @@ if [ "$BASELINE_FORGE_PHASE_RC" -ne 0 ] \
     && grep -qF 'BASELINE_REBUILT is written only by the workflow-baseline repair' "$BASELINE_FORGE_ERR" \
     && [ "$BASELINE_FORGE_REASON_RC" -ne 0 ] \
     && grep -qF "a 'baseline-rebuilt: ' reason is reserved for the workflow-baseline repair" "$BASELINE_FORGE_REASON_ERR"; then
-  check "AC-004 the BASELINE_REBUILT phase and reason cannot be minted through --phase" PASS
+  check "AC-D04 the BASELINE_REBUILT phase and reason cannot be minted through --phase" PASS
 else
-  check "AC-004 the BASELINE_REBUILT phase and reason cannot be minted through --phase (phase_rc=$BASELINE_FORGE_PHASE_RC reason_rc=$BASELINE_FORGE_REASON_RC)" FAIL
+  check "AC-D04 the BASELINE_REBUILT phase and reason cannot be minted through --phase (phase_rc=$BASELINE_FORGE_PHASE_RC reason_rc=$BASELINE_FORGE_REASON_RC)" FAIL
   head -c 200 "$BASELINE_FORGE_ERR" 2>/dev/null; head -c 200 "$BASELINE_FORGE_REASON_ERR" 2>/dev/null
+fi
+
+# AC-D04b — the OTHER TWO guard sites, and the reason this row exists at all.
+# AC-D04 above goes through zensu-log.sh, which refuses at its own --phase guards
+# and exits 2 BEFORE tdd_write_phase is ever reached — so the guards inside
+# zensu-tdd-phase.sh (tdd_write_phase and _tdd_write_phase_critical) were driven
+# by NOTHING and all four lines could be deleted with the whole tree green, while
+# any caller that sources the phase library could then forge a BASELINE_REBUILT
+# provenance entry. T12h2 in test-chain-recover.sh is the sibling precedent for
+# this shape: drive the exported writer directly, not only the verb.
+#
+# The CONTROL is what makes it discriminating. Both guards sit at the very top of
+# their functions, before any state access, so a refusal alone would also be
+# produced by a broken fixture. The same calls with an ORDINARY phase and an
+# ORDINARY reason must SUCCEED against the same session and state file — and they
+# can, because AC-D06 above rebuilt the document.
+BASELINE_DIRECT_OUT="$(
+  CLAUDE_CODE_SESSION_ID="$SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+  CLAUDE_PROJECT_DIR="$PROJECT" CLAUDE_PLUGIN_ROOT="$SYNTHETIC_COMPATIBLE_ROOT" \
+  bash -c '
+    . "$1/hooks/lib/zensu-session.sh"
+    . "$1/hooks/lib/zensu-tdd-phase.sh"
+    sid="$(zensu_resolve_session_id "$2")" || { echo "resolve-failed"; exit 0; }
+    sf="$(tdd_state_file "$sid")" || { echo "statefile-failed"; exit 0; }
+    rc_pub_phase=0;  tdd_write_phase "$sid" forged BASELINE_REBUILT >/dev/null 2>&1 || rc_pub_phase=$?
+    rc_pub_reason=0; tdd_write_phase "$sid" forged IMPL "baseline-rebuilt: forged" >/dev/null 2>&1 || rc_pub_reason=$?
+    rc_crit_phase=0
+    _tdd_write_phase_critical "$sf" "$sid" forged BASELINE_REBUILT "" >/dev/null 2>&1 || rc_crit_phase=$?
+    rc_crit_reason=0
+    _tdd_write_phase_critical "$sf" "$sid" forged IMPL "baseline-rebuilt: forged" >/dev/null 2>&1 || rc_crit_reason=$?
+    rc_control=0;    tdd_write_phase "$sid" control IMPL "ordinary reason" >/dev/null 2>&1 || rc_control=$?
+    echo "$rc_pub_phase:$rc_pub_reason:$rc_crit_phase:$rc_crit_reason:$rc_control"
+  ' _ "$SYNTHETIC_COMPATIBLE_ROOT" "$SESSION" 2>/dev/null
+)"
+BASELINE_DIRECT_ENTRIES="$(
+  DOC="$BASELINE_DOC" node -e '
+    const fs = require("node:fs");
+    try {
+      const d = JSON.parse(fs.readFileSync(process.env.DOC, "utf8"));
+      const h = Array.isArray(d.history) ? d.history : [];
+      process.stdout.write(String(h.filter((e) => e && e.phase === "BASELINE_REBUILT").length));
+    } catch (_e) { process.stdout.write("unreadable"); }
+  ' 2>/dev/null
+)"
+BASELINE_DIRECT_OK=false
+OLD_IFS="$IFS"; IFS=':'
+# shellcheck disable=SC2086
+set -- $BASELINE_DIRECT_OUT
+IFS="$OLD_IFS"
+if [ "$#" -eq 5 ] && [ "$1" -ne 0 ] 2>/dev/null && [ "$2" -ne 0 ] \
+    && [ "$3" -ne 0 ] && [ "$4" -ne 0 ] && [ "$5" -eq 0 ]; then
+  BASELINE_DIRECT_OK=true
+fi
+if [ "$BASELINE_DIRECT_OK" = true ] && [ "$BASELINE_DIRECT_ENTRIES" = "1" ]; then
+  check "AC-D04b the reserved phase and reason are refused by tdd_write_phase AND _tdd_write_phase_critical, while an ordinary phase still writes" PASS
+else
+  check "AC-D04b the reserved phase and reason are refused by both exported writers (rcs=$BASELINE_DIRECT_OUT entries=$BASELINE_DIRECT_ENTRIES)" FAIL
 fi
 
 # AC-002 end to end — a document that is PRESENT but unreadable is never rebuilt
@@ -2859,9 +2952,9 @@ BASELINE_TAMPER_RC=$?
 if [ "$BASELINE_TAMPER_RC" -ne 0 ] \
     && grep -qF 'workflow baseline NOT repaired' "$BASELINE_TAMPER_OUT" \
     && [ "$(cat "$BASELINE_DOC")" = '{not json' ]; then
-  check "AC-002 an unreadable document is refused and its bytes are left alone" PASS
+  check "AC-D02 an unreadable document is refused and its bytes are left alone" PASS
 else
-  check "AC-002 an unreadable document is refused and its bytes are left alone (rc=$BASELINE_TAMPER_RC)" FAIL
+  check "AC-D02 an unreadable document is refused and its bytes are left alone (rc=$BASELINE_TAMPER_RC)" FAIL
   head -c 300 "$BASELINE_TAMPER_OUT" 2>/dev/null
 fi
 cp "$TMP/baseline-doc.bak" "$BASELINE_DOC"

@@ -335,11 +335,17 @@ minting a new one.
   writing the same `BASELINE_REBUILT` provenance entry the confirmed repair writes.
 
 Rebuilding is a **loss, not a restore**: a review chain that was live when the document
-vanished is gone, and the rebuilt baseline reads *never active*. That is why the writer is
-never reached without `--confirm`, why the report lists the session-state files that
-survived, and why it records **no** bypass-ledger entry — it escaped no gate, because the
-document a gate would have read was already gone. See
+vanished is gone, and the rebuilt baseline reads *never active*. That is why the report lists
+the session-state files that survived, and why it records **no** bypass-ledger entry — it
+escaped no gate, because the document a gate would have read was already gone. See
 [Session Control](session-control.md#unbindable-sessions) for the full account.
+
+**Neither writer path is user-consented, and this document said otherwise for one release.**
+The adopt path requires the literal `--confirm` in argv, which is a token the model supplies
+to itself — prose-backed, not consent-backed, exactly as `--autopilot-release`'s flag is; the
+"wait for the user to say yes" rule lives in `skills/adopt-session/SKILL.md`. The
+`SessionStart` self-heal above requires no token at all. Do not restate the writer as
+gated on `--confirm`: that sentence contradicted the `SessionStart` bullet four lines above it.
 
 ## TDD Phase Gate
 

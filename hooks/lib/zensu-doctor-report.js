@@ -2289,12 +2289,53 @@ function stateBlock(nowMs) {
   bindingLine();
   var projectRoot = stateProjectRoot();
   var dir = path.join(projectRoot, '.zensu', 'state');
+  // ONE renderer for the own-document verdict, called from BOTH the ENOENT branch
+  // below and the populated-directory path further down. It was a hand-written row
+  // in the second place only, and that made the row unreachable in the very shape
+  // this check exists for: `.zensu/state/` is gitignored, so a deleted and
+  // re-created worktree loses the whole DIRECTORY, not just the file — the ENOENT
+  // branch rendered an all-clear and returned above the row. An ENOENT here is
+  // positive proof the bound session's own document is gone, which is the strongest
+  // form of the finding, not a reason to withhold it.
+  function ownDocumentVerdict(present, discloseWithoutKey) {
+    var ownKey = currentSessionKey();
+    if (ownKey === '') {
+      // NARROWED on the directory-absent path, and the narrowing is deliberate.
+      // A project with no `.zensu/state` at all and no bound session is a fresh
+      // install: warning there fires on every ordinary run and is trained away
+      // within a day, which is the failure mode this repository records for the
+      // implementing-turns row. The defect this check exists for — a green report
+      // over a session whose capability gate is denying every tool — requires a
+      // BOUND session, and that is exactly the case where the key is available.
+      // On the POPULATED path the disclosure still fires: there are documents
+      // here and this one could not be checked against them.
+      if (discloseWithoutKey) {
+        line(WARN, 'state: this session\'s own workflow document was not checked — no bound '
+          + 'session key is available here. That is a missing check, not an all-clear.');
+      }
+      return;
+    }
+    if (present) return;
+    // The full filename, as the invalid-document row prints full filenames: a
+    // reader sent to repair a specific path needs its name. The 13-character
+    // truncation belongs to the foreign-chain row, whose subject is somebody
+    // else's session.
+    line(BAD, 'state: this session\'s own workflow document is MISSING ('
+      + path.join(dir, 'tdd-phase-' + ownKey + '.json')
+      + ') — while it is gone the capability gate denies every tool in this session, '
+      + 'because a deleted document must never be read as "no chain was ever active". '
+      + 'A deleted and re-created worktree loses it, since .zensu/state/ is gitignored. '
+      + 'If the record is intact and served, run /zensu:adopt-session for the diagnosis '
+      + 'and /zensu:adopt-session --confirm to rebuild it; rebuilding is a loss, not a '
+      + 'restore — a review chain that was live when it vanished is gone.');
+  }
   var entries;
   try {
     entries = fs.readdirSync(dir);
   } catch (e) {
     if (e && e.code === 'ENOENT') {
       line(OK, 'state: ' + dir + ' does not exist yet — nothing to clean');
+      ownDocumentVerdict(false, false);
     } else {
       // Every other errno is a check that did NOT run. Rendering it green hid the
       // whole Session state block behind an all-clear, which is the one verdict
@@ -2324,23 +2365,11 @@ function stateBlock(nowMs) {
   // a missing check rather than a pass. Deliberately NOT gated on the document
   // count — the finding is the same whether the directory holds none or a hundred.
   var ownBaselineKey = currentSessionKey();
-  if (ownBaselineKey === '') {
-    line(WARN, 'state: this session\'s own workflow document was not checked — no bound '
-      + 'session key is available here. That is a missing check, not an all-clear.');
-  } else if (workflowDocs.indexOf('tdd-phase-' + ownBaselineKey + '.json') === -1) {
-    // The full filename, as the invalid-document row prints full filenames: a
-    // reader sent to repair a specific path needs its name. The 13-character
-    // truncation belongs to the foreign-chain row, whose subject is somebody
-    // else's session.
-    line(BAD, 'state: this session\'s own workflow document is MISSING ('
-      + path.join(dir, 'tdd-phase-' + ownBaselineKey + '.json')
-      + ') — while it is gone the capability gate denies every tool in this session, '
-      + 'because a deleted document must never be read as "no chain was ever active". '
-      + 'A deleted and re-created worktree loses it, since .zensu/state/ is gitignored. '
-      + 'If the record is intact and served, run /zensu:adopt-session for the diagnosis '
-      + 'and /zensu:adopt-session --confirm to rebuild it; rebuilding is a loss, not a '
-      + 'restore — a review chain that was live when it vanished is gone.');
-  }
+  ownDocumentVerdict(
+    ownBaselineKey !== ''
+      && workflowDocs.indexOf('tdd-phase-' + ownBaselineKey + '.json') !== -1,
+    true,
+  );
   if (!workflowDocs.length) {
     line(OK, 'state: no CAS workflow documents yet');
   } else {

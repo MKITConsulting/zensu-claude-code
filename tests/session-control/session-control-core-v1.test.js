@@ -4624,7 +4624,7 @@ test('WB4 the repair rebuilds the document, records BASELINE_REBUILT once, and l
   assert.deepEqual(state.bypasses, [], 'the repair is never a bypass-ledger entry');
 });
 
-test('WB5 the repair refuses a document that is present but unsafe or unreadable', () => {
+test('WB5 the repair refuses a document that is present but unsafe or unreadable', (t) => {
   const f = fixture('claude');
   register(f);
   const file = core.adoptionWorkflowStatePath(f.projectRoot, RAW_SESSION);
@@ -4647,6 +4647,65 @@ test('WB5 the repair refuses a document that is present but unsafe or unreadable
     () => core.repairWorkflowBaseline(baselineOptions(f)),
     /workflow-document-unsafe/,
   );
+  // The tamper arm asserts the SAME property the unreadable arm above does, and
+  // it did not: a refusal that first unlinked or truncated the link would throw
+  // the identical message and pass. The link, its target's bytes and the link
+  // count are all part of the evidence the refusal exists to preserve.
+  assert.equal(fs.readFileSync(elsewhere, 'utf8'), '{}', 'the link target is untouched');
+  assert.equal(fs.lstatSync(file).nlink, 2, 'the hard link still has two entries');
+  assert.ok(fs.existsSync(file), 'the refusal did not unlink the document path');
+
+  if (WINDOWS_SYMLINK_SKIP) {
+    t.diagnostic(WINDOWS_SYMLINK_SKIP);
+    return;
+  }
+  // A SYMLINK driven through the REPAIR had no case anywhere — WB1 exercises that
+  // shape through the classifier only, so the writer's own refusal of it was
+  // unverified in both directions.
+  fs.unlinkSync(file);
+  const outside = path.join(f.projectRoot, 'outside.json');
+  fs.writeFileSync(outside, '{"kept":true}');
+  fs.symlinkSync(outside, file);
+  assert.throws(
+    () => core.repairWorkflowBaseline(baselineOptions(f)),
+    /workflow-document-unsafe/,
+  );
+  assert.equal(fs.readFileSync(outside, 'utf8'), '{"kept":true}', 'the symlink target is untouched');
+  assert.ok(fs.lstatSync(file).isSymbolicLink(), 'the symlink itself survived the refusal');
+});
+
+test('WB5a a symlinked .zensu/state component is UNSAFE, never a repairable absence', (t) => {
+  const f = fixture('claude');
+  register(f);
+  if (WINDOWS_SYMLINK_SKIP) {
+    t.diagnostic(WINDOWS_SYMLINK_SKIP);
+    return;
+  }
+  const file = core.adoptionWorkflowStatePath(f.projectRoot, RAW_SESSION);
+  const stateDir = path.dirname(file);
+  fs.mkdirSync(path.dirname(stateDir), { recursive: true });
+  // An EMPTY real directory somewhere else, reached through a symlink at the
+  // `.zensu/state` position. `lstat` resolves every component EXCEPT the last, so
+  // before the directory ladder existed this answered ENOENT on the leaf and
+  // classified MISSING/repairable — a tamper shape offered as rebuildable, whose
+  // write then failed at ensureDescendantDirectory and whose report told the user
+  // to retry the repair that cannot succeed.
+  const decoy = path.join(f.projectRoot, 'decoy-state');
+  fs.mkdirSync(decoy, { recursive: true });
+  fs.symlinkSync(decoy, stateDir);
+  assert.equal(
+    core.classifyWorkflowBaseline(file, f.projectRoot, RAW_SESSION),
+    core.BASELINE_STATES.UNSAFE,
+    'a symlinked state directory is tamper, not absence',
+  );
+  const verdict = core.workflowBaselineVerdict(baselineOptions(f));
+  assert.equal(verdict.ok, true);
+  assert.equal(verdict.repairable, false, 'and it is therefore not repairable');
+  assert.throws(
+    () => core.repairWorkflowBaseline(baselineOptions(f)),
+    /workflow-document-unsafe/,
+  );
+  assert.ok(fs.lstatSync(stateDir).isSymbolicLink(), 'the refusal left the component alone');
 });
 
 test('WB6 a second repair refuses instead of rebuilding over the first', () => {

@@ -215,6 +215,8 @@ What it does: mints a new record for the same session under the executing runtim
 
 A compatible upgrade has no column here on purpose: it binds, so every cell would read "behaves as a healthy session". The third column is the **incompatible** remainder.
 
+The **missing workflow document** above has no column here for the same kind of reason, stated so the omission is a decision rather than an oversight: every column in this table is a BIND failure, and that state is not one — the record binds and is served. What differs there is not which gate relaxes its binding, but what each gate does once it has bound and finds the document gone: `pre-reviewer-capability-gate.sh` denies with the named cause and the repair command, `stop-chain-enforcer.sh` blocks with the same command, and `/zensu:doctor` reports the row. None of those is a relaxation, so none of them belongs in a relaxation table.
+
 | Gate | Matcher | No record at all | Orphaned project root | Record present but incompatibly wrong |
 |------|---------|------------------|-----------------------|---------------------------------------|
 | `pre-reviewer-capability-gate.sh` | `.*` | **main thread only** returns to its pre-Session-Control capabilities (the branch it reaches unrestricted anyway); every reviewer, evidence worker and neutral child stays denied | same relaxation — and it is load-bearing: this gate matches **every** tool, so if it denied here the Bash relaxation below would never be reached and `/zensu:doctor` would stay denied in practice | denies every principal, **except** the two recognized commands on the main thread (see above) |

@@ -347,6 +347,29 @@ const survivingEvidence = (projectRoot, sessionId) => {
 function renderBaselineDiagnosis(baseline, sessionId) {
   const out = [];
   const w = (line) => out.push(line);
+  // The FAULT test runs FIRST, and the order is the contract. repairBaseline's
+  // catch spreads the verdict, so a failed rebuild keeps `state: MISSING` — with
+  // the state branches first, that shape reached the MISSING branch and printed
+  // "Re-run this command with --confirm to rebuild it" underneath the line saying
+  // the rebuild had just been refused. A remedy that is the operation that
+  // already failed is worse than none, and it was reachable: a symlinked
+  // .zensu/state classifies MISSING while ensureDescendantDirectory refuses it.
+  // NARROWER than baselineFault on purpose. baselineFault also reports `unsafe`
+  // and `unreadable` as faults — correct for the headline and the exit code,
+  // wrong here, because those two have their OWN wording below and testing the
+  // broad predicate first swallowed it. What must precede the state branches is a
+  // LOCAL fault only: this command could not judge, or its rebuild was refused.
+  const localFault = (baseline && typeof baseline.fault === "string" && baseline.fault)
+    || (baseline && typeof baseline.refusal === "string" && baseline.refusal)
+    || "";
+  if (localFault) {
+    w("\nThe workflow document of this session could NOT be judged or repaired ("
+      + safe(localFault) + ").\n");
+    if (baseline && baseline.detail) w("  " + safe(baseline.detail) + "\n");
+    w("That is a missing check rather than an all-clear, and the cause above has to be\n");
+    w("cleared first — re-running this command will fail the same way. Run /zensu:doctor.\n");
+    return out.join("");
+  }
   if (baseline && baseline.state === core.BASELINE_STATES.MISSING) {
     w("\nThis session's workflow document is MISSING:\n");
     w("  " + safe(baseline.path) + "\n");
@@ -376,13 +399,6 @@ function renderBaselineDiagnosis(baseline, sessionId) {
     w("truncated write. Once you know which, remove the file and start a fresh session.\n");
     return out.join("");
   }
-  const fault = baselineFault(baseline);
-  if (fault) {
-    w("\nThe workflow document of this session could NOT be judged (" + safe(fault) + ").\n");
-    if (baseline && baseline.detail) w("  " + safe(baseline.detail) + "\n");
-    w("That is a missing check rather than an all-clear. Run /zensu:doctor.\n");
-    return out.join("");
-  }
   return "";
 }
 
@@ -390,7 +406,7 @@ function renderBaselineDiagnosis(baseline, sessionId) {
 // the user as its own sentence: a rebuild whose provenance could not be written is
 // a real repair with an unrecorded cause, and folding it into the success line
 // would lose the one fact a later reader needs.
-function renderBaselineNotes(baseline) {
+function renderBaselineNotes(baseline, sessionId) {
   const out = [];
   const w = (line) => out.push(line);
   if (!baseline) return "";
@@ -409,9 +425,13 @@ function renderBaselineNotes(baseline) {
     return out.join("");
   }
   if (baselineFault(baseline)) {
-    w("\nWARNING: the workflow document was NOT repaired (" + safe(baselineFault(baseline)) + ").\n");
-    if (baseline.detail) w("  " + safe(baseline.detail) + "\n");
-    w(renderBaselineDiagnosis(baseline, ""));
+    // The lead states WHAT happened; the diagnosis owns the cause, the detail and
+    // the remedy. Writing the fault token and `detail` here as well printed both
+    // twice, and the sessionId is threaded rather than passed as "" — an empty id
+    // makes core.sessionKey throw, so survivingEvidence's catch silently returned
+    // an empty list and the surviving-evidence block never rendered on this path.
+    w("\nWARNING: the workflow document was NOT repaired.\n");
+    w(renderBaselineDiagnosis(baseline, sessionId));
     return out.join("");
   }
   return "";
@@ -493,7 +513,7 @@ function main() {
         process.stdout.write("Nothing needed repairing. If tools are still failing, the cause is a different\n");
         process.stdout.write("one — run /zensu:doctor.\n");
       }
-      process.stdout.write(renderBaselineNotes(baseline));
+      process.stdout.write(renderBaselineNotes(baseline, request.sessionId));
       reportLeaseWarnings(repaired);
       process.exitCode = repairExitCode(repaired, baseline);
       return;
@@ -545,8 +565,17 @@ function main() {
   process.stdout.write("  leases stuck     : " + leases.failed.length + "\n\n");
   process.stdout.write("This session is bound again from the next tool call onward — no restart is needed.\n");
   if (adopted.provenance === "no-workflow-document") {
-    process.stdout.write("\nNOTE: this session had no workflow document, so there was nothing to record the\n");
-    process.stdout.write("takeover in. That is a normal state, not a fault.\n");
+    // NOT "a normal state, not a fault" — that wording predates the
+    // workflow-baseline repair and is now false in the composed state it names.
+    // adoptableRecord condition 6 tolerates a missing document, so a lineage
+    // break PLUS a missing baseline lands here: the record is re-minted, the
+    // report reads fully successful, and the capability gate then denies every
+    // later tool call for the one reason this report did not mention.
+    process.stdout.write("\nWARNING: this session has NO workflow document, so there was nothing to record the\n");
+    process.stdout.write("takeover in — and while it is gone the capability gate denies EVERY tool in this\n");
+    process.stdout.write("session. The adoption above is real and is not enough on its own.\n");
+    process.stdout.write("Re-run this command with --confirm to rebuild the document; rebuilding is a loss,\n");
+    process.stdout.write("not a restore — a review chain that was live when it vanished is gone.\n");
   } else if (adopted.provenance !== "recorded") {
     process.stdout.write("\nWARNING: the adoption succeeded but its provenance entry could not be written.\n");
     process.stdout.write("The takeover is real and unrecorded in the workflow history; report this rather than repeating it.\n");
