@@ -12,7 +12,10 @@ description: >
   bound again from the next tool call onward — no restart. Adoption is authorised by
   SCHEMA equality, not by the version numbers, so a release that really changed a
   persisted shape is refused. Use when /zensu:doctor reports an incompatible lineage,
-  when tools started failing closed right after a plugin update, or via
+  when tools started failing closed right after a plugin update, when this session's own
+  workflow document is gone and every tool denies with `activated workflow CAS state is
+  missing` — a served record whose baseline a deleted and re-created worktree took with
+  it, which is NOT a plugin update and which `--confirm` rebuilds in place — or via
   /zensu:adopt-session. No network or API key. It never edits code, never touches the
   workflow document's decision fields, and never bypasses a review.
 ---

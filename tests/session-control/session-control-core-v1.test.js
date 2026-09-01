@@ -4631,9 +4631,16 @@ test('WB5 the repair refuses a document that is present but unsafe or unreadable
   fs.mkdirSync(path.dirname(file), { recursive: true });
 
   fs.writeFileSync(file, '{not json');
+  // The CODE, not only the message. The message is what the core's own comment
+  // tells callers never to match on, and both shipped consumers branch on
+  // `error.code` alone — so a swapped ternary would report a real tamper refusal
+  // as the benign race ("nothing to repair", exit 0) with every message assertion
+  // still green.
   assert.throws(
     () => core.repairWorkflowBaseline(baselineOptions(f)),
-    /workflow-document-unreadable/,
+    (error) => /workflow-document-unreadable/.test(error.message)
+      && error.code === core.BASELINE_NOT_REPAIRABLE_CODE
+      && core.isBaselineAlreadyPresent(error) === false,
   );
   // The refusal leaves the bytes alone: rebuilding over them would destroy the
   // one thing a reader needs to tell tamper from a truncated write.
@@ -4645,7 +4652,19 @@ test('WB5 the repair refuses a document that is present but unsafe or unreadable
   fs.linkSync(elsewhere, file);
   assert.throws(
     () => core.repairWorkflowBaseline(baselineOptions(f)),
-    /workflow-document-unsafe/,
+    (error) => /workflow-document-unsafe/.test(error.message)
+      && error.code === core.BASELINE_NOT_REPAIRABLE_CODE,
+  );
+  // The LEAF-level control for WB5a's ancestor case. `baselineUnsafeComponent`
+  // could return the leaf unconditionally and WB5a alone would not see it — the
+  // two together are what make the namer's answer discriminating.
+  // CANONICAL on both sides. The ladder anchors on the resolved project root, and
+  // on macOS a temp root is spelled `/var/...` by the caller and `/private/var/...`
+  // by the kernel — the same trap the classifier's own comment records.
+  assert.equal(
+    core.workflowBaselineVerdict(baselineOptions(f)).unsafeAt,
+    path.join(fs.realpathSync.native(path.dirname(file)), path.basename(file)),
+    'a bad LEAF names the leaf',
   );
   // The tamper arm asserts the SAME property the unreadable arm above does, and
   // it did not: a refusal that first unlinked or truncated the link would throw
@@ -4701,9 +4720,17 @@ test('WB5a a symlinked .zensu/state component is UNSAFE, never a repairable abse
   const verdict = core.workflowBaselineVerdict(baselineOptions(f));
   assert.equal(verdict.ok, true);
   assert.equal(verdict.repairable, false, 'and it is therefore not repairable');
+  // WHICH component, not just that one is unsafe. With `.zensu/state` symlinked
+  // the leaf need not exist at all, so naming it sent the operator to a path they
+  // could not inspect — the defect `baselineUnsafeComponent` was written to fix,
+  // and nothing asserted its answer until here. WB5's leaf case is the control.
+  const realStateDir = path.join(fs.realpathSync.native(f.projectRoot), '.zensu', 'state');
+  assert.equal(verdict.unsafeAt, realStateDir, 'the ANCESTOR is named, not the leaf');
+  assert.notEqual(verdict.unsafeAt, file, 'and the leaf is not what is reported');
   assert.throws(
     () => core.repairWorkflowBaseline(baselineOptions(f)),
-    /workflow-document-unsafe/,
+    (error) => /workflow-document-unsafe/.test(error.message)
+      && error.code === core.BASELINE_NOT_REPAIRABLE_CODE,
   );
   assert.ok(fs.lstatSync(stateDir).isSymbolicLink(), 'the refusal left the component alone');
 });
@@ -4716,8 +4743,10 @@ test('WB6 a second repair refuses instead of rebuilding over the first', () => {
   const before = fs.readFileSync(file, 'utf8');
   assert.throws(
     () => core.repairWorkflowBaseline(baselineOptions(f)),
-    /workflow-document-present/,
-    'the second call sees a present document and refuses it as unrepairable',
+    (error) => /workflow-document-present/.test(error.message)
+      && error.code === core.BASELINE_ALREADY_PRESENT_CODE
+      && core.isBaselineAlreadyPresent(error) === true,
+    'the second call sees a present document and refuses it as the benign race',
   );
   assert.equal(fs.readFileSync(file, 'utf8'), before, 'a refused repair changes nothing');
 });

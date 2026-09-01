@@ -10,7 +10,8 @@ description: >
   string is silently ignored by strict === checks, and whether the permission rules
   in ~/.claude/settings.json expose the zensu:code-reviewer spawn to a refusal
   before any chain has wedged), and session state (state dir writable, canonical
-  CAS workflow documents valid, each review chain's shape plus any wedged chain and
+  CAS workflow documents valid, whether THIS session's own workflow document is
+  there and usable, each review chain's shape plus any wedged chain and
   its recovery command, any open chain not owned by this session, any chain this
   session owns that has ended many turns at implementing, any reviewer spawn
   the host permission layer refused, expired pending-review surfaced).
@@ -495,6 +496,22 @@ classifier will refuse a spawn, not only when the whole table is green.
   --confirm` to rebuild — AND that rebuilding is a loss rather than a restore, so a
   review chain that was live when the document vanished is gone. Never relay the
   command without the cost.
+- **❌ state: this session's own workflow document is UNSAFE / UNREADABLE** → the
+  opposite instruction from the row above, and the reason this bullet exists: something
+  IS sitting at that path — a symlink, a hard link, a non-file, an oversized file, or a
+  present document that does not validate — so `/zensu:adopt-session --confirm` will
+  REFUSE to rebuild it, by design. Relay the component the row prints, which is not
+  always the document itself: with `.zensu` or `.zensu/state` replaced, the leaf need not
+  exist at all. Tell the user to run `/zensu:adopt-session` for the diagnosis, inspect
+  what is there before doing anything else, and then start a fresh Claude Code session.
+  Never relay the rebuild command for this row.
+- **⚠️ state: this session's own workflow document could not be classified** → the
+  Session Control core did not load from the plugin directory the row names, so the check
+  did NOT run. A missing check, never an all-clear.
+- **⚠️ state: this session's own workflow document came back with a classification this
+  build does not recognize** → the core answered with a state this report does not know,
+  which means the two are from different builds. A missing check, never an all-clear, and
+  never a reason to relay a rebuild.
 - **⚠️ state: this session's own workflow document was not checked** → no bound
   session key was available, so the check above did not run. A missing check, never
   an all-clear.

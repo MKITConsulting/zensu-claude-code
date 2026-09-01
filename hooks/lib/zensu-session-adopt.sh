@@ -8,14 +8,21 @@
 # inherit /zensu:doctor's justification and needs its own, stated here because
 # hooks/lib/zensu-doctor-invocation.js points at this header:
 #
-#   - FOUR write classes, all confined: one record for THIS session in the
-#     private plugin-data store; one workflow history entry in the recorded
-#     project; this session's own workflow document plus its `.zensu/state`
-#     ancestors under the recorded project root, created with mode 0o700 and
-#     reachable ONLY on an `already-served` refusal with `--confirm` (see the
-#     bounded-exception paragraph below); and any review-evidence lease naming the previous installation,
+#   - FOUR write classes, all confined, and the ORDER here is their NUMBERING:
+#     the bounded-exception paragraph below labels the lease sweep "write class 3"
+#     and the workflow-baseline repair "write class 4", as do all four sibling
+#     carriers, while this list used to present them the other way round one screen
+#     above. (1) one record for THIS session in the
+#     private plugin-data store; (2) one workflow history entry in the recorded
+#     project; (3) any review-evidence lease naming the previous installation,
 #     MOVED (never deleted) out of that session's own lease records directory
-#     into a sibling `superseded/` one. The selector is broader than "names the
+#     into a sibling `superseded/` one; and (4) this session's own workflow document
+#     plus its `.zensu` ancestors under the recorded project root, created with mode
+#     0o700 and reachable ONLY on an `already-served` refusal with `--confirm` (see
+#     the bounded-exception paragraph below) — stated as `.zensu` and not
+#     `.zensu/state`, because the mkdir creates BOTH components and `.zensu` is not
+#     inside `.zensu/state`, which is the argument that paragraph already makes and
+#     which this bullet contradicted. The lease selector is broader than "names the
 #     previous installation" and narrower than "everything listRecords rejects":
 #     the keep-predicate is a SUPERSET of that reader's accept set, mirroring three
 #     of its conjuncts, so a stale lease, one whose id disagrees with its filename,

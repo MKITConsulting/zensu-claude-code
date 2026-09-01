@@ -2775,6 +2775,57 @@ else
   printf '%s\n' "$BASELINE_TAMPER_REASON" | head -c 300
 fi
 
+# AC-D07c/AC-D07d — the absent DIRECTORY, which is the shape this whole feature
+# exists for and which AC-D07 does not reach. That row deletes the leaf while
+# `.zensu` and `.zensu/state` stay in place, so the component arm of
+# revalidateWorkflowState's ENOENT tagging was exercised by nothing — and a
+# deleted and re-created worktree loses the whole DIRECTORY, because
+# `.zensu/state/` is gitignored. The doctor row needed its own fixture (P6e in
+# test-doctor.sh) for exactly this reason; the GATE that actually denies had none.
+# Untagging either component arm leaves the flagship session denied with the
+# generic wording that names no way out, and every other row here green.
+#
+# The two arms are checked separately because the loop runs twice with different
+# labels; the deny TEXT is identical for both, so what discriminates is that the
+# component ENOENT is tagged at all.
+BASELINE_STATE_DIR="$(dirname -- "$BASELINE_DOC")"
+BASELINE_ZENSU_DIR="$(dirname -- "$BASELINE_STATE_DIR")"
+BASELINE_ZENSU_BAK="$TMP/baseline-zensu-bak"
+
+rm -rf "$BASELINE_STATE_DIR"
+BASELINE_NOSTATE_DENY="$(gate_decision_from "$SYNTHETIC_COMPATIBLE_ROOT" \
+  pre-reviewer-capability-gate.sh "$COMPATIBLE_BASH")"
+BASELINE_NOSTATE_REASON="$(baseline_gate_reason_from "$SYNTHETIC_COMPATIBLE_ROOT" \
+  pre-reviewer-capability-gate.sh "$COMPATIBLE_BASH")"
+if [ "$BASELINE_NOSTATE_DENY" = deny ] \
+    && printf '%s' "$BASELINE_NOSTATE_REASON" | grep -qF 'the workflow document it anchors is missing' \
+    && printf '%s' "$BASELINE_NOSTATE_REASON" | grep -qF '/zensu:adopt-session --confirm' \
+    && ! printf '%s' "$BASELINE_NOSTATE_REASON" | grep -qF 'immutable context revalidation failed'; then
+  check "AC-D07c an absent .zensu/state denies with the named cause, not the generic wording" PASS
+else
+  check "AC-D07c an absent .zensu/state denies with the named cause (decision=$BASELINE_NOSTATE_DENY)" FAIL
+  printf '%s\n' "$BASELINE_NOSTATE_REASON" | head -c 300
+fi
+
+# The component ABOVE it. Moved aside rather than deleted, so nothing else the
+# fixture keeps under `.zensu` is destroyed by a check about its absence.
+mv "$BASELINE_ZENSU_DIR" "$BASELINE_ZENSU_BAK"
+BASELINE_NOZENSU_DENY="$(gate_decision_from "$SYNTHETIC_COMPATIBLE_ROOT" \
+  pre-reviewer-capability-gate.sh "$COMPATIBLE_BASH")"
+BASELINE_NOZENSU_REASON="$(baseline_gate_reason_from "$SYNTHETIC_COMPATIBLE_ROOT" \
+  pre-reviewer-capability-gate.sh "$COMPATIBLE_BASH")"
+mv "$BASELINE_ZENSU_BAK" "$BASELINE_ZENSU_DIR"
+mkdir -p "$BASELINE_STATE_DIR"
+if [ "$BASELINE_NOZENSU_DENY" = deny ] \
+    && printf '%s' "$BASELINE_NOZENSU_REASON" | grep -qF 'the workflow document it anchors is missing' \
+    && printf '%s' "$BASELINE_NOZENSU_REASON" | grep -qF '/zensu:adopt-session --confirm' \
+    && ! printf '%s' "$BASELINE_NOZENSU_REASON" | grep -qF 'immutable context revalidation failed'; then
+  check "AC-D07d an absent .zensu denies with the named cause, not the generic wording" PASS
+else
+  check "AC-D07d an absent .zensu denies with the named cause (decision=$BASELINE_NOZENSU_DENY)" FAIL
+  printf '%s\n' "$BASELINE_NOZENSU_REASON" | head -c 300
+fi
+
 # AC-D09 — the doctor row is ARMED and never silent.
 #
 # What this fixture can establish is the DISCLOSURE half, and the reason is

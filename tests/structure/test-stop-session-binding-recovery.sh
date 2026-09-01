@@ -316,6 +316,14 @@ fi
 # What changed is the remedy. "repair the Session Control state" named no
 # command, in a state where the capability gate denies every tool and only the
 # two commands the Bash recognizer admits are reachable at all.
+#
+# The QUALIFIER is asserted too, and it is not decoration: this arm is selected by
+# a `test -e`, which FOLLOWS symlinks, so a dangling symlink lands here while every
+# other reader of that path answers "unsafe" and the repair refuses it. Deleting
+# the qualifying sentence leaves an unconditional "run --confirm to rebuild it",
+# which is the contradiction between this surface and the repair that the sibling
+# rows (P6g2 in test-doctor.sh, AC-D07b in test-versioned-plugin-upgrade.sh) pin
+# from the other two sides — and B8 would have stayed green through it.
 arm stop-bind-baseline || { echo "B8 fixture failed" >&2; exit 1; }
 BASELINE_DOC8="$ARMED_ROOT/.zensu/state/tdd-phase-$ZENSU_SESSION_KEY.json"
 [ -f "$BASELINE_DOC8" ] || { echo "B8 fixture: no workflow document to remove" >&2; exit 1; }
@@ -326,6 +334,8 @@ REASON8="$(printf '%s' "$OUT8" | reason)"
 if [ "$(printf '%s' "$OUT8" | decision)" = "block" ] \
   && printf '%s' "$REASON8" | grep -qF 'workflow baseline is missing' \
   && printf '%s' "$REASON8" | grep -qF '/zensu:adopt-session --confirm' \
+  && printf '%s' "$REASON8" | grep -qF 'genuinely absent rather than replaced' \
+  && printf '%s' "$REASON8" | grep -qF 'the repair refuses it by design' \
   && ! printf '%s' "$REASON8" | grep -qF 'repair the Session Control state'; then
   check "B8 a missing workflow baseline still blocks, and now names a remedy that exists" PASS
 else

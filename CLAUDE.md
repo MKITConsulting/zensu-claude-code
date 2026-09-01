@@ -1091,8 +1091,11 @@ as a document that failed to validate. `unsafe` and `unreadable` are REFUSED wit
 bytes left alone — something is at that path, and rebuilding over it would destroy the
 evidence and hand the session its capabilities back in the same step. A check that only
 proves "a missing document is rebuilt" passes identically in a tree that rebuilds
-anything it cannot read; AC-002 in `test-versioned-plugin-upgrade.sh` is the row that
-separates them.
+anything it cannot read. The rows that separate them are `AC-D02` (an unreadable
+document is refused and its bytes are left alone) and `AC-D07b` (a hard-linked document
+keeps the generic gate wording and is offered no rebuild), both in
+`test-versioned-plugin-upgrade.sh` — `AC-002` is a PLAN id and names no row in any suite,
+which is what this sentence claimed for a release.
 
 **The bind is the INVERSE of adoption's condition 3.** Adoption refuses when the
 executing runtime already serves the record; this REQUIRES it. A record this runtime
@@ -1108,10 +1111,32 @@ FIELD would be a persisted shape change, which under §"Runtime Lineage" costs a
 breaking release and would wedge every session then running. And the ledger records
 gate ESCAPES so that everything rendered under "Gates bypassed" is true — this escaped
 no gate, because the document a gate would have read was already gone.
-`BASELINE_REBUILT` and the `baseline-rebuilt: ` reason prefix are therefore reserved at
-**all four** existing guard sites (`zensu-log.sh --phase` ×2, `zensu-tdd-phase.sh` ×2),
-beside `CHAIN_RECOVERED` and `RUNTIME_ADOPTED`: a forgeable provenance entry is worse
-than none, because it is believed.
+`BASELINE_REBUILT` and the `baseline-rebuilt: ` reason prefix are therefore reserved
+beside `CHAIN_RECOVERED` and `RUNTIME_ADOPTED` at the same guard bodies those two use:
+`zensu-log.sh --phase`, `tdd_write_phase` and `_tdd_write_phase_critical` — THREE bodies
+carrying TWO literals each. State the unit or the number means nothing: an earlier
+wording here read "all four ... (`zensu-log.sh --phase` ×2, `zensu-tdd-phase.sh` ×2)",
+which counts literals in one place and functions in the other and matches no count in
+the tree. §"Adopting a Record Across a Lineage Break" and §"Chain Shape & Rearm Receipt"
+both say "two guard sites" for this SAME set, bundling the phase library's pair as one;
+that is the same set counted differently, not a fourth answer.
+
+**And the reserved phase is evidence a heal HAPPENED, never evidence that none did.**
+The entry is the feature's only disclosure, and it is erasable by exactly the session it
+discloses: `initializeWorkflowState` writes the rebuilt document with `active: false`,
+`pre-edit-tdd-reminder.sh` returns early while a session is not active — above its
+`.zensu/state` classification — and `bash-source-write-parse.js` carries no `.zensu` rule
+at all, so neither the Edit matcher nor any Bash gate covers that path. The four
+reserved-phase guards stop the phase being MINTED through the plugin's verbs; nothing
+stops the entry being DELETED by a direct write, and `validateWorkflowExtensions` checks
+`history` structurally with no MAC and no counter. So "a forgeable provenance entry is
+worse than none, because it is believed" is the right reason for reserving the phase and
+is NOT a claim that the entry is tamper-evident. A real control needs a rebuild counter
+in the plugin-data store — which `pre-write-plugin-data-guard.sh` defends for main-thread
+file tools and `reviewer-capability-v1.js` for every other principal — compared against
+the document's own `history` by `/zensu:doctor`. That is a store-layout addition rather
+than a workflow-state field, so it does not cost the breaking `minor` this section
+declines to pay. NOT implemented; recorded so the bound is not read as a guarantee.
 
 **SessionStart heals the same state without a user, and the argument is not new.** The
 *record exists* branch of `claude-session-control-v1.js` classified nothing and called
@@ -1124,7 +1149,16 @@ fails every stateful hook closed for the rest of the session.
 
 **Moving together:** `BASELINE_STATES` / `BASELINE_REFUSALS` / `BASELINE_HISTORY_PHASE` /
 `BASELINE_HISTORY_REASON_PREFIX` / `classifyWorkflowBaseline` / `workflowBaselineVerdict` /
-`repairWorkflowBaseline` / the newly exported `adoptionWorkflowStatePath` in
+`repairWorkflowBaseline` / the newly exported `adoptionWorkflowStatePath` — and FIVE more
+this roster omitted for a release, every one of which has a production consumer outside
+the core: `classifyWorkflowBaselineShape` and `baselineUnsafeComponent` (the adopt report
+and, for the second, the doctor row), `isBaselineAlreadyPresent` with its two
+`BASELINE_ALREADY_PRESENT_CODE` / `BASELINE_NOT_REPAIRABLE_CODE` constants, which travel
+as ONE unit: a tree carrying the writer without the predicate reports EVERY refusal —
+tamper included — as the benign race, headline "nothing to repair", exit 0, which is the
+one omission here whose failure is silent. Plus `baselineComponentLadder`, the single walk
+`classifyWorkflowBaselineShape` and `baselineUnsafeComponent` now share, whose two readers
+deliberately disagree on the absent-component arm — all in
 `session-control-core-v1.js`; the four reserved-phase guards; `baselineVerdict` /
 `repairBaseline` / `baselineFault` / `leaseFault` / `renderBaselineDiagnosis` /
 `renderBaselineNotes` / `survivingEvidence` plus the two-argument `repairHeadline` /
@@ -1137,11 +1171,13 @@ counting `baselineMissing(` finds two, and the roster said three for a release; 
 the `readdirSync` ENOENT branch and the populated path, because it was a hand-written row
 on the populated path alone and was therefore unreachable in the shape the feature
 targets; **the record-exists SessionStart branch in `claude-session-control-v1.js`**,
-which consumes FIVE exported core symbols (`adoptionWorkflowStatePath`,
+which consumes SIX exported core symbols (`adoptionWorkflowStatePath`,
 `classifyWorkflowBaseline`, `BASELINE_STATES.MISSING`, `BASELINE_STATES.PRESENT`,
-`repairWorkflowBaseline`) and is the one caller with no local `fail` of its own — it was
+`repairWorkflowBaseline`, `isBaselineAlreadyPresent`) and is the one caller with no local
+`catch` around the repair, so an untyped throw there exits the whole hook — it was
 missing from this roster for a release, so a rename would have sent a maintainer to six
-sites and not to the self-heal; and the write-class enumerations, of which there are **FIVE** and not three:
+sites and not to the self-heal. Say `catch`, never `fail`: that branch DOES call the
+module-level `fail`, and a maintainer checking the claim by grepping finds it at once; and the write-class enumerations, of which there are **FIVE** and not three:
 `hooks/lib/zensu-session-adopt.sh`'s header, `hooks/lib/zensu-doctor-invocation.js`,
 `reviewer-capability-v1.js`'s recognized-command comment, **`docs/session-control.md`
 §"Unbindable sessions"** and **the recognized-commands intro of `docs/gates.md`**. The
@@ -1159,7 +1195,16 @@ false.
 not one — the lease store AND the workflow document; routing the second to
 `/zensu:doctor` is wrong, that command is read-only and cannot rebuild), its "FIVE
 things are NOT clean states" list, its exit-code paragraph (EITHER half failing exits 1)
-and its Response Style rule; the two state rows in `skills/doctor/SKILL.md`;
+and its Response Style rule; its FRONTMATTER description, which covered only the lineage
+break while the capability gate now routes a served-record session here as well; the FOUR
+state rows in `skills/doctor/SKILL.md` — not two, and the pair that was missing is the one
+that matters, because the UNSAFE/UNREADABLE row says `--confirm` will REFUSE while the
+documented MISSING row says to run it, so a model holding only the MISSING bullet relays a
+rebuild the repair declines by design — plus that file's frontmatter `session state`
+clause, which reads as a complete inventory of the block and did not name this row; the
+`stop-chain-enforcer.sh` row in `docs/configuration.md`, whose blocking-state list
+presents itself as complete and does not name a missing workflow baseline (a state whose
+record binds perfectly well);
 `docs/session-control.md` §"Unbindable sessions" (as a FOURTH state that is NOT one of
 the two relaxable bind failures, and whose absence from the per-gate table is stated
 there rather than left to be noticed); and `docs/gates.md` §"Missing Workflow Baseline".
@@ -1167,7 +1212,12 @@ there rather than left to be noticed); and `docs/gates.md` §"Missing Workflow B
 **Port-relevant.** The core half is `BASELINE_STATES` / `BASELINE_REFUSALS` /
 `BASELINE_HISTORY_PHASE` / `BASELINE_HISTORY_REASON_PREFIX` / `classifyWorkflowBaseline` /
 `workflowBaselineVerdict` / `repairWorkflowBaseline` / the newly exported
-`adoptionWorkflowStatePath`, all in the host-neutral `session-control-core-v1.js`. The
+`adoptionWorkflowStatePath` — plus `classifyWorkflowBaselineShape`,
+`baselineUnsafeComponent`, `baselineComponentLadder` and the
+`isBaselineAlreadyPresent` + two-constant unit, which this list omitted for a release: a
+port copying exactly it ships an adopt report and a doctor row calling three undefined
+functions, and reports every tamper refusal as "nothing to repair" — all in the
+host-neutral `session-control-core-v1.js`. The
 host half is SEVEN obligations, and a port that takes only the core delta gets a writer
 with no reachable caller and keeps the wedge: the adopt-report renderer and its two-argument
 `repairHeadline`/`repairExitCode`, the capability-gate deny branch and its
@@ -1233,7 +1283,7 @@ new one — the shape it refuses is byte-identical.
   tree and the leaf name another, silently. Both shipped callers derive it with
   `adoptionWorkflowStatePath`. Dropping the parameter is the durable fix and is NOT taken
   here, because it churns every call site and pin for no behaviour change.
-- **`ownDocumentVerdict(present, discloseWithoutKey)` threads call-site identity through
+- **`ownDocumentVerdict(discloseWithoutKey)` threads call-site identity through
   a boolean**, so the policy it selects lives only in a comment. Passing the directory
   state instead would read from a value that names the condition.
 - **`MAX_JSON_BYTES` (core) and `MAX_PAYLOAD_BYTES` (`reviewer-capability-v1.js`) are a
@@ -1243,8 +1293,10 @@ new one — the shape it refuses is byte-identical.
   session where every tool is refused. The gate already requires the core; importing the
   bound is the fix.
 - **Four arms of the directory ladder have no executed case:** the root-realpath failure,
-  the component-lstat non-ENOENT errno, and the `realpathSync.native(candidate) !==
-  candidate` arm. `WB5a` covers the component-symlink arm and `WB1a` the non-directory
+  the component-lstat non-ENOENT errno, the `realpathSync.native(candidate) !== candidate`
+  arm, and the THROW from that same component realpath — which an earlier wording of this
+  bullet promised as a fourth and then listed three, in a bullet whose whole purpose is to
+  bound what is unverified. `WB5a` covers the component-symlink arm and `WB1a` the non-directory
   half. The canonical arm is the one that mirrors the gate's `is not canonical` check, so
   a divergence between the two ladders would not be observed.
 - **Nothing in this repository can measure `hooks/lib` coverage.** The only `c8` script in

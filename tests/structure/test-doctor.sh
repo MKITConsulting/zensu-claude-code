@@ -3134,9 +3134,14 @@ run_report_own() { # run_report_own <binding> <session-key>
     node "$REPORT" 2>/dev/null
 }
 
+# The GLYPH is part of the contract, not decoration — the same rule this file
+# states for the strand rows. `line()` counts ❌ into badCount and the summary
+# gates "all checks green" on it, so a row silently demoted to OK would leave
+# every prose assertion below green while /zensu:doctor printed this finding
+# beside an all-clear. No P6 arm read the glyph until this was added.
 P6_OUT="$(run_report_own bound "$P6_KEY")"
 case "$P6_OUT" in
-  *"own workflow document is MISSING"*)
+  *"❌  state: this session's own workflow document is MISSING"*)
     # The remedy and its COST travel together. A user who reads "rebuild" as
     # "restore" will not go looking for the chain that is gone.
     case "$P6_OUT" in
@@ -3179,7 +3184,7 @@ rm -f "$P6_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json"
 ln "$P6_LINK_SRC" "$P6_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json"
 P6_UNSAFE="$(run_report_own bound "$P6_KEY")"
 case "$P6_UNSAFE" in
-  *"own workflow document is UNSAFE"*"will REFUSE"*)
+  *"❌  state: this session's own workflow document is UNSAFE"*"will REFUSE"*)
     check "P6g a hard-linked own document is UNSAFE and is offered no rebuild" PASS ;;
   *) check "P6g a hard-linked own document is UNSAFE and is offered no rebuild (got: $P6_UNSAFE)" FAIL ;;
 esac
@@ -3189,6 +3194,55 @@ case "$P6_UNSAFE" in
   *) check "P6g2 the UNSAFE arm renders no MISSING remedy" PASS ;;
 esac
 rm -f "$P6_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json" "$P6_LINK_SRC"
+
+# P6i — the UNREADABLE arm, which had no fixture anywhere. It shares the UNSAFE
+# row with the tamper shapes, and that sharing is exactly what makes it worth a
+# check of its own: narrowing the row's condition to `unsafe` alone leaves
+# `unreadable` falling through to the MISSING row, which offers a rebuild that
+# `repairBaseline` refuses by design. The mutation is one word and no suite saw it.
+printf '%s' '{not json' >"$P6_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json"
+P6_UNREADABLE="$(run_report_own bound "$P6_KEY")"
+case "$P6_UNREADABLE" in
+  *"❌  state: this session's own workflow document is UNREADABLE"*"will REFUSE"*)
+    check "P6i a present-but-unparseable own document is UNREADABLE and is offered no rebuild" PASS ;;
+  *) check "P6i a present-but-unparseable own document is UNREADABLE (got: $P6_UNREADABLE)" FAIL ;;
+esac
+case "$P6_UNREADABLE" in
+  *"own workflow document is MISSING"*)
+    check "P6i2 the UNREADABLE arm must not also render the MISSING remedy" FAIL ;;
+  *) check "P6i2 the UNREADABLE arm renders no MISSING remedy" PASS ;;
+esac
+rm -f "$P6_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json"
+
+# P6j — a classification this renderer does not recognize. The ladder's residual
+# arm used to be the MISSING row, so a state added or renamed in the core made
+# every healthy session read "your own document is MISSING — run --confirm to
+# rebuild it". The core is stubbed rather than edited, because the point is a
+# renderer that outlives a core it no longer agrees with.
+P6_BADSTATE="$SBOX/p6-badstate"
+mkdir -p "$P6_BADSTATE/hooks/lib"
+cp "$PLUGIN_DIR/hooks/lib/rule-block-v1.js" "$P6_BADSTATE/hooks/lib/rule-block-v1.js"
+cat >"$P6_BADSTATE/hooks/lib/session-control-core-v1.js" <<'STUBCORE'
+const path = require("node:path");
+module.exports = {
+  BASELINE_STATES: {
+    PRESENT: "present", MISSING: "missing", UNSAFE: "unsafe", UNREADABLE: "unreadable",
+  },
+  adoptionWorkflowStatePath: (root, key) => path.join(root, ".zensu", "state", "tdd-phase-" + key + ".json"),
+  classifyWorkflowBaseline: () => "quarantined",
+};
+STUBCORE
+P6_BADSTATE_OUT="$(ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh   ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent   ZENSU_DOCTOR_PLUGIN_DIR="$P6_BADSTATE" CLAUDE_PROJECT_DIR="$P6_PROJECT"   ZDOC_BINDING=bound ZDOC_SESSION_KEY="$P6_KEY" ZDOC_SESSION_PROJECT_ROOT="$P6_PROJECT"   node "$REPORT" 2>/dev/null)"
+case "$P6_BADSTATE_OUT" in
+  *"⚠️  state: this session's own workflow document came back with a classification this build does not recognize"*)
+    check "P6j an unrecognized classification is a missing check, not the MISSING row" PASS ;;
+  *) check "P6j an unrecognized classification must not render the MISSING row (got: $P6_BADSTATE_OUT)" FAIL ;;
+esac
+case "$P6_BADSTATE_OUT" in
+  *"own workflow document is MISSING"*)
+    check "P6j2 an unrecognized classification wrongly rendered the rebuild recommendation" FAIL ;;
+  *) check "P6j2 an unrecognized classification renders no rebuild recommendation" PASS ;;
+esac
 
 # P6h — the load-failure path DISCLOSES rather than returning silently. Round 3
 # found a shape where a partially loadable core discarded a correct verdict and
@@ -3203,7 +3257,7 @@ P6_NOCORE_OUT="$(ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_
   ZDOC_BINDING=bound ZDOC_SESSION_KEY="$P6_KEY" ZDOC_SESSION_PROJECT_ROOT="$P6_PROJECT" \
   node "$REPORT" 2>/dev/null)"
 case "$P6_NOCORE_OUT" in
-  *"could not be classified"*"missing check, not an all-clear"*)
+  *"⚠️  state: this session's own workflow document could not be classified"*"missing check, not an all-clear"*)
     check "P6h an unloadable core discloses a missing check rather than staying silent" PASS ;;
   *) check "P6h an unloadable core discloses a missing check (got: $P6_NOCORE_OUT)" FAIL ;;
 esac
@@ -3214,7 +3268,7 @@ rm -f "$P6_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json"
 # check did not run, and the report has to say so rather than omit the row.
 P6_UNBOUND="$(run_report_own unbound '')"
 case "$P6_UNBOUND" in
-  *"own workflow document was not checked"*"missing check, not an all-clear"*)
+  *"⚠️  state: this session's own workflow document was not checked"*"missing check, not an all-clear"*)
     check "P6c an unavailable session key discloses a missing check rather than staying silent" PASS ;;
   *) check "P6c unbound own-document disclosure (got: $P6_UNBOUND)" FAIL ;;
 esac
@@ -3241,7 +3295,7 @@ esac
 rm -rf "$P6_PROJECT/.zensu/state"
 P6_NODIR="$(run_report_own bound "$P6_KEY")"
 case "$P6_NODIR" in
-  *"own workflow document is MISSING"*"/zensu:adopt-session --confirm"*)
+  *"❌  state: this session's own workflow document is MISSING"*"/zensu:adopt-session --confirm"*)
     check "P6e an absent .zensu/state still reports the bound session's own missing document" PASS ;;
   *) check "P6e an absent .zensu/state must not read as an all-clear (got: $P6_NODIR)" FAIL ;;
 esac

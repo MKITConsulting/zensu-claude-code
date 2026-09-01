@@ -486,8 +486,11 @@ function main() {
     // writes nothing, and hooks/lib/zensu-session-adopt.sh, which writes its own
     // session's record, one workflow history entry, a move of its own stale
     // review-evidence leases, and — with --confirm on an already-served refusal
-    // only — its own missing workflow document plus that document's .zensu/state
-    // ancestors in the recorded project, and carries its own justification in its
+    // only — its own missing workflow document plus that document's .zensu
+    // ancestors in the recorded project (`.zensu` and not `.zensu/state`: the mkdir
+    // creates BOTH components, and `.zensu` is not inside `.zensu/state` — the adopt
+    // header makes that argument and two carriers still spelled the narrower one),
+    // and carries its own justification in its
     // header. A
     // remedy the user cannot invoke is not a remedy.
     //
