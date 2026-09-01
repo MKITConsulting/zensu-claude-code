@@ -3742,10 +3742,19 @@ new CI job because a suite moving between existing profiles changes no key in
 `expectedProfiles`. `stop-enforcer-self-review-routing` now holds `windows-shard-7` ALONE at
 `timeoutMs: 1740000`, deliberately below the 1800000 profile budget so an overrun still
 surfaces as a visible suite `TIMED_OUT` rather than as a profile abort that truncates the
-tail silently. **The true runtime is STILL unmeasured** — the suite was killed, so all that
-is known is that it exceeds 1500 s; 1740000 is 16% above the cap it failed at, not a figure
-any green run produced. Replace it from the first green Windows run, and do not read the
-move as headroom that was measured.
+tail silently.
+
+**The green figure arrived on the very next run and is now the one to budget against:
+`PASSED stop-enforcer-self-review-routing (1482704ms)`**, alone on `windows-shard-7`, with
+the whole shard job at 1579 s. Two things about it are worth keeping. It is BELOW the
+1500000 cap the previous run breached at 1500157 ms, so the failure was the documented 29%
+spread landing on its slow side rather than a step change — which is exactly why a single
+sample must not be read as headroom. And 1482704 against 1740000 is **85% of cap**, the same
+share this section already called too tight at the old ceiling; the difference is that the
+suite now holds the shard alone, so the only other bound is the 1800000 profile budget it
+no longer shares. Treat further growth here as needing a shard of its own, not another
+raise. The sibling measured `PASSED review-worker-evidence-lease (113321ms)` on
+`windows-shard-8`, whose two suites together came to roughly 265 s against 1800000.
 
 **The shard budget is the SECOND ceiling, and it binds first — though on the run that
 forced the rebalance above it was the SUITE cap that bound, not the shard.**
