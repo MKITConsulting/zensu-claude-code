@@ -217,6 +217,27 @@ const leaseFault = (repaired) =>
 // record ANCHORS can still be gone, and while it is, reviewer-capability-v1.js
 // denies every tool in the session. See §"Workflow-Baseline Repair" in CLAUDE.md.
 //
+// EVERY comparison against a baseline state token goes through this accessor, and
+// that is a contract rather than a style. A bare `core.BASELINE_STATES.MISSING`
+// throws a TypeError when the loaded core predates the baseline exports — and this
+// command's whole job is to answer in a state where everything else fails closed,
+// so a crash here is the worst available outcome. `baselineVerdict` already wraps
+// its own call for exactly that reason; a bare dereference in the comparisons
+// AROUND it undoes the contract from outside the try. One site sat on a
+// POST-MUTATION path, after the record swap had already been committed, where a
+// throw would have lost the closing warning and every lease result with it.
+// A positive `typeof` test, never `=== undefined`: an absent export would
+// otherwise match an absent state and read as a hit, which is the same trap the
+// `isBaselineAlreadyPresent` predicate below exists to avoid.
+const baselineState = (name) => {
+  const states = (core && core.BASELINE_STATES) || {};
+  return typeof states[name] === "string" && states[name] ? states[name] : null;
+};
+const isBaselineState = (value, name) => {
+  const token = baselineState(name);
+  return token !== null && value === token;
+};
+
 // The half is FAULTED, never merely "not done", when the document is present but
 // unsafe or unreadable: something is sitting at that path, and this command
 // refuses to build over it. `present` is not a fault — it is the ordinary state
@@ -225,8 +246,8 @@ const baselineFault = (baseline) => {
   if (!baseline) return "";
   if (typeof baseline.fault === "string" && baseline.fault) return baseline.fault;
   if (typeof baseline.refusal === "string" && baseline.refusal) return baseline.refusal;
-  if (baseline.state === core.BASELINE_STATES.UNSAFE
-    || baseline.state === core.BASELINE_STATES.UNREADABLE) {
+  if (isBaselineState(baseline.state, "UNSAFE")
+    || isBaselineState(baseline.state, "UNREADABLE")) {
     return baseline.state;
   }
   return "";
@@ -302,7 +323,7 @@ const baselineVerdict = (request) => {
 // shape, a refused bind — is returned unchanged, so this function can be called
 // unconditionally and the caller does not re-implement the repairable rule.
 const repairBaseline = (request, baseline) => {
-  if (!baseline || baseline.state !== core.BASELINE_STATES.MISSING) return baseline;
+  if (!baseline || !isBaselineState(baseline.state, "MISSING")) return baseline;
   try {
     const repaired = core.repairWorkflowBaseline(request);
     return {
@@ -324,7 +345,7 @@ const repairBaseline = (request, baseline) => {
     // tamper included — as the benign race, with exit 0 and "nothing to repair".
     if (typeof core.isBaselineAlreadyPresent === "function"
       && core.isBaselineAlreadyPresent(error)) {
-      return { ...baseline, state: core.BASELINE_STATES.PRESENT, healedElsewhere: true };
+      return { ...baseline, state: baselineState("PRESENT") || baseline.state, healedElsewhere: true };
     }
     return {
       ...baseline,
@@ -341,17 +362,34 @@ const repairBaseline = (request, baseline) => {
 // not earned. A closed candidate set plus a cap, because the directory is
 // session-writable and this output is read back by a model.
 const EVIDENCE_MAX = 12;
+// The four NAMES below are hand-copies and there is no accessor to take them
+// from: `pending-review.json` is owned by `zensu_pending_review_file`,
+// `pending-review.json.claim` by `zensu_pending_review_claim_file` (both shell,
+// in hooks/lib/zensu-tdd-phase.sh), `reviewer-spawn-denied-<key>.json` by
+// hooks/stop-chain-enforcer.sh and hooks/lib/zensu-doctor-report.js, and the
+// `autopilot-active-` prefix by `OWNER_POINTER_PREFIX` in
+// hooks/lib/zensu-autopilot-state.sh. The failure direction is SILENT
+// SUBTRACTION: a renamed artifact simply drops out of a list this command
+// presents to the user as what survived, with nothing reporting that anything
+// was missed. They are on the coupled-site roster in CLAUDE.md for that reason.
+//
+// The DIRECTORY is no longer among them. It used to re-join `.zensu`/`state` by
+// hand inside the very feature whose core declares that layout once; it is now
+// derived from the document's own resolved path, so a layout move cannot leave
+// this reader scanning a directory no writer uses.
 const survivingEvidence = (projectRoot, sessionId) => {
   if (typeof projectRoot !== "string" || !projectRoot) return [];
   let key;
+  let stateDirectory;
   try {
     key = core.sessionKey(sessionId);
+    stateDirectory = path.dirname(core.adoptionWorkflowStatePath(projectRoot, sessionId));
   } catch {
     return [];
   }
   let entries;
   try {
-    entries = fs.readdirSync(path.join(projectRoot, ".zensu", "state"));
+    entries = fs.readdirSync(stateDirectory);
   } catch {
     return [];
   }
@@ -391,7 +429,7 @@ function renderBaselineDiagnosis(baseline, sessionId) {
     w("cleared first — re-running this command will fail the same way. Run /zensu:doctor.\n");
     return out.join("");
   }
-  if (baseline && baseline.state === core.BASELINE_STATES.MISSING) {
+  if (baseline && isBaselineState(baseline.state, "MISSING")) {
     w("\nThis session's workflow document is MISSING:\n");
     w("  " + safe(baseline.path) + "\n");
     w("\nWhile it is gone the capability gate denies EVERY tool in this session, because a\n");
@@ -407,8 +445,8 @@ function renderBaselineDiagnosis(baseline, sessionId) {
     }
     return out.join("");
   }
-  if (baseline && (baseline.state === core.BASELINE_STATES.UNSAFE
-    || baseline.state === core.BASELINE_STATES.UNREADABLE)) {
+  if (baseline && (isBaselineState(baseline.state, "UNSAFE")
+    || isBaselineState(baseline.state, "UNREADABLE"))) {
     w("\nThis session's workflow document is " + safe(baseline.state).toUpperCase() + ":\n");
     // The OFFENDING component, which is not always the leaf: the directory ladder
     // reports the same UNSAFE token for a symlinked `.zensu` or `.zensu/state`,
@@ -636,7 +674,7 @@ function main() {
     process.stdout.write("\nWARNING: this session has no usable workflow document, so there was nothing to\n");
     process.stdout.write("record the takeover in — and while that is so the capability gate denies EVERY\n");
     process.stdout.write("tool in this session. The adoption above is real and is not enough on its own.\n");
-    if (adoptedShape === core.BASELINE_STATES.UNSAFE) {
+    if (isBaselineState(adoptedShape, "UNSAFE")) {
       process.stdout.write("Something is SITTING at that path, so --confirm will REFUSE to rebuild it:\n");
       process.stdout.write("  " + safe(core.baselineUnsafeComponent(adopted.projectRoot,
         core.adoptionWorkflowStatePath(adopted.projectRoot, request.sessionId))) + "\n");

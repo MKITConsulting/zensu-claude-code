@@ -2340,8 +2340,24 @@ function stateBlock(nowMs) {
       ownState = ownCore.classifyWorkflowBaseline(ownFile, projectRoot, ownKey);
     } catch (e) { ownState = null; }
     if (ownFile === null) ownFile = path.join(dir, 'tdd-phase-' + ownKey + '.json');
-    if (ownState === 'present') return;
-    if (ownState === 'unsafe' || ownState === 'unreadable') {
+    // The state tokens come from the LOADED core, never from literals copied into
+    // this renderer. The ladder's residual arm is the MISSING row, so a value this
+    // renderer failed to recognise was rendered as "your own document is MISSING —
+    // run --confirm to rebuild it" for a perfectly healthy session, taking the
+    // summary red with it. Reading the vocabulary from the same module that
+    // produced the verdict turns a renamed or added state into the MISSING-CHECK
+    // disclosure below instead of a false finding, and nothing in the tree
+    // compares this renderer's spelling against the core's.
+    var ownStates = (ownCore && ownCore.BASELINE_STATES) || {};
+    function ownToken(name) {
+      return typeof ownStates[name] === 'string' && ownStates[name] ? ownStates[name] : null;
+    }
+    function ownIs(name) {
+      var token = ownToken(name);
+      return token !== null && ownState === token;
+    }
+    if (ownIs('PRESENT')) return;
+    if (ownIs('UNSAFE') || ownIs('UNREADABLE')) {
       // The NAMER is in its own try, deliberately. Folding it into the block above
       // meant that a core which loaded but did not export it threw AFTER the
       // verdict was computed, the catch reset the verdict to null, and a correct
@@ -2349,7 +2365,7 @@ function stateBlock(nowMs) {
       // fake anywhere else. A namer failure may cost the component name; it may
       // never cost the finding.
       var ownAt = ownFile;
-      if (ownState === 'unsafe') {
+      if (ownIs('UNSAFE')) {
         try { ownAt = ownCore.baselineUnsafeComponent(projectRoot, ownFile) || ownFile; }
         catch (e2) { ownAt = ownFile; }
       }
@@ -2367,6 +2383,16 @@ function stateBlock(nowMs) {
       line(WARN, 'state: this session\'s own workflow document could not be classified — the '
         + 'Session Control core did not load from ' + pluginDir() + '. That is a missing '
         + 'check, not an all-clear.');
+      return;
+    }
+    // An unrecognized verdict is a MISSING CHECK, never the MISSING row. The row
+    // below carries a rebuild recommendation, and handing that to a session whose
+    // document is fine is the opposite of the finding this block exists to make.
+    if (!ownIs('MISSING')) {
+      line(WARN, 'state: this session\'s own workflow document came back with a '
+        + 'classification this build does not recognize (' + String(ownState) + ') from the '
+        + 'Session Control core in ' + pluginDir() + '. That is a missing check, not an '
+        + 'all-clear.');
       return;
     }
     // The full filename, as the invalid-document row prints full filenames: a

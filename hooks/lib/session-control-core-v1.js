@@ -1767,9 +1767,13 @@ const BASELINE_NOT_REPAIRABLE_CODE = 'ZENSU_WORKFLOW_BASELINE_NOT_REPAIRABLE';
 // or any tree where the export is dropped, then reports EVERY refusal as the
 // benign race: headline "nothing to repair", exit 0, tamper included. A function
 // that tests a non-empty string cannot fail that way.
+// The guard is the FUNCTION, never a conjunct inside it. Two `typeof` tests used
+// to sit here against a module-scope literal declared a few lines above, where
+// they can never be false — they read as a defense while defending nothing. What
+// actually removes the hazard is that a consumer compares through a call instead
+// of against a constant it would have to import.
 function isBaselineAlreadyPresent(error) {
-  return Boolean(error) && error.code === BASELINE_ALREADY_PRESENT_CODE
-    && typeof BASELINE_ALREADY_PRESENT_CODE === 'string' && BASELINE_ALREADY_PRESENT_CODE !== '';
+  return Boolean(error) && error.code === BASELINE_ALREADY_PRESENT_CODE;
 }
 
 function baselineRefusal(reason) {
@@ -1801,16 +1805,31 @@ function baselineRefusal(reason) {
 // symlinks and therefore promised a rebuild for shapes the repair refuses by
 // design, and rendered NOTHING when a symlinked component resolved to a real
 // directory holding the document while the gate denied every tool.
-function classifyWorkflowBaselineShape(file, projectRoot) {
-  // The ladder is anchored on the RESOLVED project root, not on the caller's
-  // spelling. revalidateWorkflowState can compare each component against itself
-  // because its projectRoot arrives canonical from the bound record; this function
-  // is also called with a raw fixture path, and on macOS a temp root is spelled
-  // `/var/...` by the caller and `/private/var/...` by the kernel — so requiring
-  // the caller's own spelling to be canonical reported every healthy document
-  // under such a root as tamper. Resolving the root once keeps the property that
-  // matters (no symlink at `.zensu` or `.zensu/state`) without inheriting an
-  // ancestor's legitimate aliasing.
+// ONE walk over the directory components, reporting BOTH the verdict and the
+// component that produced it. It existed twice — once in the classifier that
+// DECIDES the verdict, once in the namer that decides WHICH path the operator is
+// told to inspect — as two hand-written copies with nothing pinning them
+// together. Adding a component or changing a safety test in the classifier alone
+// left the namer falling through to the leaf and naming it for an ancestor fault,
+// which is verbatim the defect the namer was written to fix, and it would have
+// failed silently. Both public signatures are unchanged.
+//
+// The components are composed from WORKFLOW_STATE_SEGMENTS rather than spelled
+// here, because that constant's own comment calls itself the ONE spelling of the
+// document's location: a layout move that edited it while these walks kept
+// validating `.zensu/state` would have judged one tree while the leaf named
+// another.
+//
+// The walk is anchored on the RESOLVED project root, not on the caller's
+// spelling. revalidateWorkflowState can compare each component against itself
+// because its projectRoot arrives canonical from the bound record; the classifier
+// is also called with a raw fixture path, and on macOS a temp root is spelled
+// `/var/...` by the caller and `/private/var/...` by the kernel — so requiring
+// the caller's own spelling to be canonical reported every healthy document under
+// such a root as tamper. Resolving the root once keeps the property that matters
+// (no symlink at `.zensu` or `.zensu/state`) without inheriting an ancestor's
+// legitimate aliasing.
+function baselineComponentLadder(projectRoot) {
   let rootReal;
   try {
     rootReal = fs.realpathSync.native(projectRoot);
@@ -1823,28 +1842,39 @@ function classifyWorkflowBaselineShape(file, projectRoot) {
     // this ladder was added to remove. A vanished recorded root is already owned
     // by `readContext`, which refuses it as `record-unreadable` before any caller
     // reaches here.
-    return BASELINE_STATES.UNSAFE;
+    return { rootReal: null, verdict: BASELINE_STATES.UNSAFE, at: projectRoot };
   }
-  const zensuDirectory = path.join(rootReal, '.zensu');
-  for (const candidate of [zensuDirectory, path.join(zensuDirectory, 'state')]) {
+  let candidate = rootReal;
+  for (const segment of WORKFLOW_STATE_SEGMENTS) {
+    candidate = path.join(candidate, segment);
     let componentStat;
     try {
       componentStat = fs.lstatSync(candidate);
     } catch (error) {
       // A clean ENOENT is the repairable shape: initializeWorkflowState creates
       // these components. Every other errno is NOT absence.
-      if (error && error.code === 'ENOENT') return BASELINE_STATES.MISSING;
-      return BASELINE_STATES.UNSAFE;
+      if (error && error.code === 'ENOENT') {
+        return { rootReal, verdict: BASELINE_STATES.MISSING, at: candidate };
+      }
+      return { rootReal, verdict: BASELINE_STATES.UNSAFE, at: candidate };
     }
     if (componentStat.isSymbolicLink() || !componentStat.isDirectory()) {
-      return BASELINE_STATES.UNSAFE;
+      return { rootReal, verdict: BASELINE_STATES.UNSAFE, at: candidate };
     }
     try {
-      if (fs.realpathSync.native(candidate) !== candidate) return BASELINE_STATES.UNSAFE;
+      if (fs.realpathSync.native(candidate) !== candidate) {
+        return { rootReal, verdict: BASELINE_STATES.UNSAFE, at: candidate };
+      }
     } catch {
-      return BASELINE_STATES.UNSAFE;
+      return { rootReal, verdict: BASELINE_STATES.UNSAFE, at: candidate };
     }
   }
+  return { rootReal, verdict: null, at: null };
+}
+
+function classifyWorkflowBaselineShape(file, projectRoot) {
+  const ladder = baselineComponentLadder(projectRoot);
+  if (ladder.verdict !== null) return ladder.verdict;
   let stat;
   try {
     stat = fs.lstatSync(file);
@@ -1883,28 +1913,15 @@ function classifyWorkflowBaseline(file, projectRoot, sessionId) {
 // its one-value return and every existing caller and pin is untouched. It is only
 // ever called once, on a verdict already known to be UNSAFE.
 function baselineUnsafeComponent(projectRoot, file) {
-  let rootReal;
-  try {
-    rootReal = fs.realpathSync.native(projectRoot);
-  } catch {
-    return projectRoot;
-  }
-  const zensuDirectory = path.join(rootReal, '.zensu');
-  for (const candidate of [zensuDirectory, path.join(zensuDirectory, 'state')]) {
-    let componentStat;
-    try {
-      componentStat = fs.lstatSync(candidate);
-    } catch (error) {
-      if (error && error.code === 'ENOENT') continue;
-      return candidate;
-    }
-    if (componentStat.isSymbolicLink() || !componentStat.isDirectory()) return candidate;
-    try {
-      if (fs.realpathSync.native(candidate) !== candidate) return candidate;
-    } catch {
-      return candidate;
-    }
-  }
+  const ladder = baselineComponentLadder(projectRoot);
+  // The two readings of one walk deliberately DIVERGE on the absent-component arm,
+  // and keeping that divergence is the reason this is a shared ladder rather than
+  // a shared return value. A clean ENOENT is MISSING to the classifier, because
+  // the repair creates those components; to the NAMER an absent component is not
+  // what made anything unsafe, so it falls through to the leaf exactly as the
+  // hand-written copy did by continuing past it.
+  if (ladder.rootReal === null) return projectRoot;
+  if (ladder.verdict === BASELINE_STATES.UNSAFE) return ladder.at;
   return file;
 }
 
@@ -1986,10 +2003,28 @@ function repairWorkflowBaseline(options) {
   }
   // Idempotent by construction: it returns an existing document untouched, so a
   // concurrent writer that won the race is never overwritten.
-  initializeWorkflowState({
+  //
+  // DECIDE FROM THE LOCKED CHECK, never from the verdict above it. That verdict is
+  // taken outside the state-directory lock, so a document created between it and
+  // this call is invisible to it — and the refusal ladder above only fires when
+  // the verdict ITSELF saw PRESENT. Reporting the narrower window as a rebuild
+  // this run performed appended a SECOND `BASELINE_REBUILT` entry onto somebody
+  // else's heal and printed "has been rebuilt" for work this run did not do,
+  // breaking the exactly-one invariant the suites pin. Routing it through the
+  // same typed refusal both callers already handle costs nothing and makes the
+  // benign race read the same however narrow the window was.
+  const initialized = initializeWorkflowStateDetailed({
     projectRoot: verdict.projectRoot,
     sessionId: options.sessionId,
   });
+  if (!initialized.created) {
+    const raced = new Error(
+      `workflow baseline is not repairable: workflow-document-${BASELINE_STATES.PRESENT}`,
+    );
+    raced.code = BASELINE_ALREADY_PRESENT_CODE;
+    raced.baselineState = BASELINE_STATES.PRESENT;
+    throw raced;
+  }
   // Provenance is a history entry and NOT a record or state field, exactly as it
   // is for the adoption and for --chain-recover: a field would be a persisted
   // shape change, which under the runtime-lineage rule costs a breaking release
@@ -2529,12 +2564,19 @@ function mutateWorkflowState(options, mutation) {
   ));
 }
 
-function initializeWorkflowState(options) {
+// The detailed form reports whether THIS call created the document. Every
+// pre-existing caller wants the document itself and is served by the wrapper
+// below, so the contract they were written against is unchanged; the repair is
+// the one caller that has to tell a creation from a find, because it appends a
+// provenance entry claiming it performed one.
+function initializeWorkflowStateDetailed(options) {
   const key = sessionKey(options.sessionId);
   const stateDirectory = workflowStateDirectory(options.projectRoot);
   const file = path.join(stateDirectory, `${WORKFLOW_STATE_PREFIX}${key}.json`);
   return withFileLock(stateDirectory, `state-${key}`, () => {
-    if (fs.existsSync(file)) return validateWorkflowState(readJson(file), key);
+    if (fs.existsSync(file)) {
+      return { state: validateWorkflowState(readJson(file), key), created: false };
+    }
     const initial = stampWorkflowState({
       active: false,
       vanilla: false,
@@ -2555,8 +2597,12 @@ function initializeWorkflowState(options) {
       history: [],
     }, key, 'idle', 'session-start', undefined, 0);
     atomicWriteJson(file, initial);
-    return initial;
+    return { state: initial, created: true };
   });
+}
+
+function initializeWorkflowState(options) {
+  return initializeWorkflowStateDetailed(options).state;
 }
 
 function transitionWorkflowState(options) {
@@ -4276,15 +4322,28 @@ module.exports = {
   BASELINE_REFUSALS,
   BASELINE_ALREADY_PRESENT_CODE,
   BASELINE_NOT_REPAIRABLE_CODE,
+  // PRODUCTION consumers, not test seams — a port that drops either ships a
+  // report and a doctor row calling an undefined function. `baselineUnsafeComponent`
+  // is read by hooks/lib/zensu-doctor-report.js (the own-document row) and by
+  // hooks/lib/session-adopt-report-v1.js (the adopted-with-no-document warning);
+  // `classifyWorkflowBaselineShape` by the same report.
   baselineUnsafeComponent,
   classifyWorkflowBaselineShape,
+  // Likewise production, and the one whose absence is SILENT rather than loud:
+  // hooks/lib/session-adopt-report-v1.js and hooks/lib/claude-session-control-v1.js
+  // both route the benign race through it, and a tree without it reports every
+  // refusal — tamper included — as "nothing to repair" with exit 0. The two
+  // constants below it travel with it for the same reason.
   isBaselineAlreadyPresent,
   BASELINE_HISTORY_PHASE,
   BASELINE_HISTORY_REASON_PREFIX,
-  // Exported for the unit layer alone: driving the unsafe/unreadable arms
-  // through workflowBaselineVerdict needs a full synthetic install, so without a
-  // direct handle the classification truth table would ship with two arms that
-  // nothing executes.
+  // ALSO a production consumer, and the comment here used to say the opposite:
+  // hooks/lib/claude-session-control-v1.js calls it for the SessionStart self-heal
+  // and hooks/lib/zensu-doctor-report.js for the own-document row. A port reading
+  // "for the unit layer alone" would have dropped both. It IS additionally the
+  // handle the unit layer needs, because driving the unsafe/unreadable arms
+  // through workflowBaselineVerdict needs a full synthetic install — so without it
+  // the classification truth table would ship with two arms nothing executes.
   classifyWorkflowBaseline,
   workflowBaselineVerdict,
   repairWorkflowBaseline,
