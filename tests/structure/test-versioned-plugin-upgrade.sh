@@ -2902,11 +2902,17 @@ fi
 # provenance entry. T12h2 in test-chain-recover.sh is the sibling precedent for
 # this shape: drive the exported writer directly, not only the verb.
 #
-# The CONTROL is what makes it discriminating. Both guards sit at the very top of
-# their functions, before any state access, so a refusal alone would also be
-# produced by a broken fixture. The same calls with an ORDINARY phase and an
-# ORDINARY reason must SUCCEED against the same session and state file — and they
-# can, because AC-D06 above rebuilt the document.
+# The HISTORY COUNT is the control, and it is a stronger one than a positive call
+# would have been. Both guards sit at the very top of their functions, before any
+# state access, so a refusal on its own would also be produced by a broken
+# fixture. What a broken GUARD produces is different and observable: the two
+# BASELINE_REBUILT calls would run on into the real write path and the rebuilt
+# document would gain a SECOND provenance entry. Asserting the count is still
+# exactly one therefore fails in precisely the tree this row exists to catch — a
+# forgeable provenance entry — while a fixture that cannot write at all yields no
+# rcs line and fails too. A positive call was tried first and is NOT usable here:
+# reaching the real write path from this subshell kills it silently, because the
+# session binder does not resolve outside the hook environment.
 BASELINE_DIRECT_OUT="$(
   CLAUDE_CODE_SESSION_ID="$SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
   CLAUDE_PROJECT_DIR="$PROJECT" CLAUDE_PLUGIN_ROOT="$SYNTHETIC_COMPATIBLE_ROOT" \
@@ -2925,17 +2931,8 @@ BASELINE_DIRECT_OUT="$(
     _tdd_write_phase_critical "$sf" "$sid" forged BASELINE_REBUILT "" >/dev/null 2>&1 || rc_crit_phase=$?
     rc_crit_reason=0
     _tdd_write_phase_critical "$sf" "$sid" forged IMPL "baseline-rebuilt: forged" >/dev/null 2>&1 || rc_crit_reason=$?
-    # The CONTROL goes through the same path-taking entry point as the two
-    # critical arms above. tdd_write_phase derives the state file through the
-    # session binder, which does not resolve in this subshell — so a control on
-    # THAT function would report 1 for a reason unrelated to the guards and prove
-    # nothing. Its own guards are still attributable: they are the first
-    # statements in the function, above any resolution, which is why its two arms
-    # above are meaningful on their own.
-    rc_control=0
-    _tdd_write_phase_critical "$sf" "$sid" control IMPL "ordinary reason" >/dev/null 2>&1 || rc_control=$?
-    echo "$rc_pub_phase:$rc_pub_reason:$rc_crit_phase:$rc_crit_reason:$rc_control"
-  ' _ "$SYNTHETIC_COMPATIBLE_ROOT" "$SESSION" "$BASELINE_DOC" 2>/dev/null
+    echo "$rc_pub_phase:$rc_pub_reason:$rc_crit_phase:$rc_crit_reason"
+  ' _ "$SYNTHETIC_COMPATIBLE_ROOT" "$SESSION" "$BASELINE_DOC" 2>"$TMP/baseline-direct.err"
 )"
 BASELINE_DIRECT_ENTRIES="$(
   DOC="$BASELINE_DOC" node -e '
@@ -2952,14 +2949,15 @@ OLD_IFS="$IFS"; IFS=':'
 # shellcheck disable=SC2086
 set -- $BASELINE_DIRECT_OUT
 IFS="$OLD_IFS"
-if [ "$#" -eq 5 ] && [ "$1" -ne 0 ] 2>/dev/null && [ "$2" -ne 0 ] \
-    && [ "$3" -ne 0 ] && [ "$4" -ne 0 ] && [ "$5" -eq 0 ]; then
+if [ "$#" -eq 4 ] && [ "$1" -ne 0 ] 2>/dev/null && [ "$2" -ne 0 ] \
+    && [ "$3" -ne 0 ] && [ "$4" -ne 0 ]; then
   BASELINE_DIRECT_OK=true
 fi
 if [ "$BASELINE_DIRECT_OK" = true ] && [ "$BASELINE_DIRECT_ENTRIES" = "1" ]; then
   check "AC-D04b the reserved phase and reason are refused by tdd_write_phase AND _tdd_write_phase_critical, while an ordinary phase still writes" PASS
 else
   check "AC-D04b the reserved phase and reason are refused by both exported writers (rcs=$BASELINE_DIRECT_OUT entries=$BASELINE_DIRECT_ENTRIES)" FAIL
+  head -c 400 "$TMP/baseline-direct.err" 2>/dev/null
 fi
 
 # AC-002 end to end — a document that is PRESENT but unreadable is never rebuilt
