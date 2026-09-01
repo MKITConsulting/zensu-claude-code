@@ -445,7 +445,7 @@ rm -rf "$P19"
 # P8 does — SKILL.md is prose and gets rewrapped, so a line-anchored grep would
 # fail on a reflow that changed no meaning.
 if command -v node >/dev/null 2>&1; then
-  MISS19B="$(HOOK="$HOOK" SKILL="$SKILL" EVALS="$PLUGIN_DIR/evals/zen-mode-reaction/scenarios" node -e '
+  MISS19B="$(PLUGIN_DIR="$PLUGIN_DIR" HOOK="$HOOK" SKILL="$SKILL" EVALS="$PLUGIN_DIR/evals/zen-mode-reaction/scenarios" node -e '
     const fs = require("fs");
     const path = require("path");
     const norm = (s) => s.replace(/\s+/g, " ").trim();
@@ -456,6 +456,26 @@ if command -v node >/dev/null 2>&1; then
     if (!active) { process.stdout.write("hook-has-no-ACTIVE-directive"); process.exit(0); }
     const want = norm(active);
     const bad = [];
+    // The one dynamic field in the directive, and the two halves that make the
+    // substitution possible at all. A carrier that lost either would emit a
+    // directive whose anchor sentence names a value nothing ever fills in.
+    const MARKER = "ZENSU CHAIN ANCHOR: ";
+    if (!want.includes(MARKER)) bad.push("hook:directive-carries-no-anchor-marker");
+    if (!active.includes("{{ZENSU_CHAIN_ANCHOR}}")) bad.push("hook:directive-carries-no-anchor-placeholder");
+    // Derived from the OWNER, never re-spelled here: a grammar copy in this file
+    // would drift from the module the hook actually validates against.
+    let producible = [];
+    try {
+      const mod = require(path.join(process.env.PLUGIN_DIR, "hooks", "lib", "zen-anchor-v1.js"));
+      // BOTH readings of every shape: `chain-closed` renders a different line
+      // under `reviewed`, and the reviewed one is a token a carrier may
+      // legitimately use. Omitting it left the hook-grammar arm below never
+      // driving that token, and would have reported a correct carrier as
+      // carrying an anchor no hook can produce.
+      producible = [...new Set(Object.keys(mod.SHAPE_POSITION)
+        .flatMap((s) => [mod.anchorToken(s), mod.anchorToken(s, { reviewed: true })]))];
+    } catch (_) { bad.push("anchor-module:unloadable"); }
+    if (!producible.length) bad.push("anchor-module:no-producible-token");
     // The SKILL.md side is SLICED to rule 6. Comparing the whole file would let
     // rule 6 be gutted while the literals survive anywhere else in the document,
     // which is agreement about the file and not about the rule.
@@ -480,14 +500,16 @@ if command -v node >/dev/null 2>&1; then
     let scenarios = [];
     try { scenarios = fs.readdirSync(process.env.EVALS).filter((f) => f.endsWith(".yaml")).sort(); }
     catch (_) { bad.push("eval-dir:unreadable"); }
-    if (scenarios.length < 3) bad.push("eval-dir:expected-at-least-3-scenarios-got-" + scenarios.length);
+    if (scenarios.length < 5) bad.push("eval-dir:expected-at-least-5-scenarios-got-" + scenarios.length);
     // The floor above is an absolute one and cannot see the loss of a scenario
     // added AFTER it was written: deleting one together with its registration
     // used to leave a consistent smaller world in which nothing turned red, and
     // this is the ONLY CI-run check that reads this directory (the sibling that
     // compares against the config is local-only). So take the real floor from
     // the count the config REGISTERS, which rises on its own with the next
-    // scenario. The sibling suite states this same reasoning at its own floor.
+    // scenario. The sibling suite states this same reasoning at its own DERIVED
+    // floor; its absolute one is stated nowhere, so do not read the reference as
+    // agreement about both halves.
     let registered = 0;
     try {
       const cfgText = fs.readFileSync(path.join(process.env.EVALS, "..", "promptfooconfig.yaml"), "utf8");
@@ -499,7 +521,14 @@ if command -v node >/dev/null 2>&1; then
     // against a fixture, deleting a scenario reported
     // `eval-dir:4-scenarios-but-config-registers-5` with an intact config and
     // reported NOTHING once the spelling changed, for the same real loss.
-    if (registered < 3) {
+    //
+    // The derived comparison catches an UNCOORDINATED loss only: `registered`
+    // falls in lockstep with `scenarios.length`, so deleting a scenario TOGETHER
+    // with its registration leaves a consistent smaller world. The absolute
+    // floor is what closes that, and it is therefore the CURRENT scenario count
+    // rather than a round number below it — raising it is the registration step
+    // for a new scenario, exactly as `Z29_FLOOR` and `Z31_FLOOR` work.
+    if (registered < 5) {
       bad.push("eval-config:registers-only-" + registered + "-the-registration-spelling-moved");
     }
     if (scenarios.length < registered) {
@@ -526,57 +555,55 @@ if command -v node >/dev/null 2>&1; then
     // silently. The SKILL carrier gets no such comparison — it is sliced to
     // rule 6 and judged by these literals ALONE — so a rule-6 sentence with no
     // literal here CAN be reworded on that carrier with this check still green.
-    // Add one whenever a clause starts carrying weight. In requirement order:
-    // AC-001 position (with its carve-out fallback), AC-002 the four marks via
-    // the example path plus the failed/blocked mark named in prose, AC-003 the
-    // no-counter prohibition, AC-004 the observation rule stated
-    // unconditionally AND its consequence, AC-005 only-the-steps, AC-006 the
-    // label casing rule, plus the ACTIVATION TRIGGER, which the two carriers
-    // once spelled differently, and the separator disclaimer.
+    // The rule, stated WITHOUT a per-requirement index: one distinguishing
+    // literal for every clause of rule 6 that carries weight, and add one
+    // whenever a clause starts carrying weight. The previous wording mapped the
+    // needles onto AC-001..AC-006 of the contract this rewrite retired, and it
+    // named a label-casing rule and a separator disclaimer that no longer exist
+    // in any carrier — a maintainer consulting it looked for a mapping that had
+    // stopped being true. An index over a list that is edited more often than
+    // the comment is exactly the drift this suite exists to catch elsewhere.
     const shared = [
       "chain-progress",
-      "✓fetch ✓parse ▶render",
-      // The prefix itself. Every live assertion in the eval keys on /^Run:/, so
-      // renaming it in the hook and regenerating the copies together would once
-      // have left every structure check green while every grader became
-      // unsatisfiable. The bare glyphs below stay bare on purpose: the two
-      // carriers quote them differently (single quotes in the hook, backticks in
-      // the skill), and their discriminating neighbours are pinned separately as
-      // "for one not yet reached" and "for one that failed or is blocked".
-      "Run:",
-      "one-line chain-progress",
-      "run in order",
-      "when you have named none",
-      "illustrative rather than a list to reuse",
-      "prose of the turn it happened in",
+      // The prefix and the marker the hook substitutes into. Every live
+      // assertion in the two anchor scenarios keys on /^Zensu:/, so renaming it
+      // in the hook and regenerating the copies together would once again leave
+      // every structure check green while every grader became unsatisfiable.
+      // The bare glyphs below stay bare on purpose: the two carriers quote them
+      // differently (single quotes in the hook, backticks in the skill), and
+      // their discriminating neighbours are pinned separately as "for one not
+      // yet reached" and "for one that failed or is blocked".
+      "Zensu:",
+      "ZENSU CHAIN ANCHOR",
+      // The contract itself: the line is SUPPLIED, so the model renders it and
+      // never derives one. A carrier that drops either clause has reverted to
+      // the previous contract, in which the anchor rendered for ad-hoc work
+      // with no Zensu process behind it.
+      "render that line verbatim",
+      "no Zensu chain is armed",
+      "invent steps",
+      "carry an anchor over from an earlier turn",
+      "Zensu-driven development process",
+      "never from the plan",
+      "canonical pipeline",
       "✗",
       "·",
-      "observed finish AND pass",
+      "for a step that finished and passed",
       "for the step running now",
       "for one not yet reached",
-      "failing or unresolved outcome",
       "for one that failed or is blocked",
       "above the closing next step",
       "when the one-next-step rule is suspended",
       "add no separate",
-      "A step is marked done from an observation, never from the plan",
-      "a step you did not see finish stays",
-      "steps this run actually has",
-      "pad with steps nobody planned",
-      "drop one the run traversed",
       "a position, not a history",
-      "mark of its current attempt",
-      "deliberately did not perform",
-      "canonical pipeline",
-      "short lower-case step names",
+      "prose of the turn it happened in",
       // Disambiguated on purpose. The earlier wording read two ways — step
-      // names are exempt from translation, or step names come from the run and
-      // only the prose around them is localised — and the two give a
-      // non-English reader a different line. This needle pins the reading that
-      // survived: names come from the run, the words around them are
-      // translated. (No apostrophes in this block: it lives inside a
+      // names are exempt from translation, or the words around the line are
+      // what gets translated — and the two give a non-English reader a
+      // different line. The supplied line is fixed, so only the second reading
+      // survives. (No apostrophes in this block: it lives inside a
       // single-quoted node -e program, where one would end the shell string.)
-      "translate only the words around them",
+      "translate only the words around",
       "spans several turns",
       "not a mark",
     ];
@@ -602,7 +629,19 @@ if command -v node >/dev/null 2>&1; then
       // missing<...> entries concatenated into one check label, from which the
       // reader had to work out that the news was "regenerate the eval copies".
       if (name.startsWith("eval:")) {
-        if (!text.includes(want)) bad.push(name + ":directive-not-verbatim");
+        // The directive carries exactly ONE dynamic field — the anchor token the
+        // hook substitutes at emit time — so the comparison is verbatim up to
+        // that marker and then asks the OWNER whether the value after it is one
+        // it can produce. Comparing the whole string would fail on every
+        // scenario for a reason that is not drift; skipping the tail would let a
+        // scenario carry an anchor no hook could ever emit, which is exactly the
+        // ungraded copy this check exists to prevent.
+        const head = want.slice(0, want.indexOf(MARKER) + MARKER.length);
+        if (!text.includes(head)) { bad.push(name + ":directive-not-verbatim"); continue; }
+        const rest = text.slice(text.indexOf(head) + head.length).trim();
+        if (!producible.some((t) => rest.startsWith(t))) {
+          bad.push(name + ":anchor-token-not-producible");
+        }
         // The bare-marker regression pins below still apply to every carrier.
         if (/anchor multi-step work with a .?Step N of M/.test(text)) bad.push(name + ":still-instructs-bare-marker");
         if (/Carry a .?Step N of M.? marker/.test(text)) bad.push(name + ":still-instructs-bare-marker");
@@ -621,6 +660,41 @@ if command -v node >/dev/null 2>&1; then
       // only inside the prohibition — never again as the instruction.
       if (/anchor multi-step work with a .?Step N of M/.test(text)) bad.push(name + ":still-instructs-bare-marker");
       if (/Carry a .?Step N of M.? marker/.test(text)) bad.push(name + ":still-instructs-bare-marker");
+    }
+    // The SKILL carrier is judged by the `shared` literals ALONE, and that list
+    // deliberately holds no step name — so the worked example there was a second
+    // copy of the module vocabulary that nothing compared against the owner.
+    // Renaming a step moved the module, the hook (which derives at runtime) and
+    // every eval carrier while that one line kept teaching the old words.
+    // `producible` is already derived above; one branch closes it.
+    if (carriers.skill !== undefined && producible.length
+        && !producible.some((t) => t !== "none" && carriers.skill.includes(norm(t)))) {
+      bad.push("skill:worked-example-is-not-a-producible-anchor");
+    }
+    // The hook re-spells the token grammar of the module on purpose — that
+    // second reader is what stops a swapped module from blessing its own bad
+    // token — but nothing held the two in step. The end-to-end arm renders only
+    // `▶` and `·`, so deleting `✓` or `✗` from the character class in the hook
+    // degraded every affected shape to `none` with the whole suite green.
+    // Extract that regex SOURCE and drive it against what the owner produces.
+    const hookReRaw = hook.match(/\/\^\(\?:none\|Zensu:[^\n]*?\/\.test\(token\)/);
+    if (!hookReRaw) {
+      bad.push("hook:token-grammar-not-locatable");
+    } else {
+      const lit = hookReRaw[0].slice(0, hookReRaw[0].lastIndexOf("/.test(token)") + 1);
+      let re = null;
+      try { re = new RegExp(lit.slice(1, -1)); } catch (_) { bad.push("hook:token-grammar-not-a-regex"); }
+      if (re) {
+        for (const t of producible) {
+          if (!re.test(t)) bad.push("hook:token-grammar-rejects<" + t + ">");
+        }
+        // Negative control: without it the branch passes for a grammar that
+        // accepts everything, which is the same blindness in the other
+        // direction.
+        for (const t of ["Zensu:", "Zensu: implement", "zensu: ✓implement", "Zensu: ✓Implement", "Zensu: ✓implement extra"]) {
+          if (re.test(t)) bad.push("hook:token-grammar-accepts<" + t + ">");
+        }
+      }
     }
     // Positive sentinel: this program writes to stdout only when it FINDS
     // something, so an empty capture used to be indistinguishable from a throw
@@ -749,7 +823,13 @@ if command -v node >/dev/null 2>&1; then
     const need = [
       "chain-progress", "✓", "▶", "·", "✗",
       "spans several turns",
-      "marked from an observation and never from the plan",
+      // The contract the row must not misdescribe: the anchor is SUPPLIED by
+      // the hook and read out of the workflow document this session owns, and
+      // its absence is a statement rather than a gap. (No apostrophes in this
+      // block: it lives inside a single-quoted node -e program.)
+      "ZENSU CHAIN ANCHOR",
+      "never from the plan",
+      "no Zensu chain is armed",
       "above the closing next step",
       "add no separate",
     ];
@@ -926,8 +1006,10 @@ fi
 Z26_LIST="$SKILL
 $HOOK
 $HELPER
-$PLUGIN_DIR/tests/structure/zen-anchor-assertions.test.js"
-Z26_FIXED=4
+$PLUGIN_DIR/tests/structure/zen-anchor-assertions.test.js
+$PLUGIN_DIR/hooks/lib/zen-anchor-v1.js
+$PLUGIN_DIR/tests/structure/zen-anchor-v1.test.js"
+Z26_FIXED=6
 Z26_SCEN=0
 for Z26_F in "$PLUGIN_DIR"/evals/zen-mode-reaction/scenarios/*.yaml; do
   [ -f "$Z26_F" ] || continue
@@ -942,7 +1024,7 @@ done
 # made to remove. The derived half is counted HERE, where the roster is built,
 # and the expected TOTAL is passed in, so both halves are covered by one
 # equality rather than by a constant that only ever described one of them.
-if [ "$Z26_SCEN" -lt 3 ]; then
+if [ "$Z26_SCEN" -lt 5 ]; then
   check "Z26 the derived half of the English-only roster matched only $Z26_SCEN scenario file(s) — the glob has moved" FAIL
 elif ! command -v node >/dev/null 2>&1; then
   check "Z26 English-only scan did not run — node is not on PATH" FAIL
@@ -1099,6 +1181,10 @@ fi
 # length bound: its two marker-block siblings each ship a MAX_BLOCK plus a
 # review-ceiling tripwire precisely so a rule block cannot grow unnoticed. This
 # one had neither, and rule 6 grew the directive from 2951 to 4664 characters —
+# then SHRANK it to 4208 when the anchor stopped being derived by the model and
+# started being supplied by this hook. Both moves were invisible until this
+# window existed, which is the argument for keeping it one-sided in BOTH
+# directions: a ceiling that has drifted away from its text is not a tripwire.
 # a 57% rise on a channel that fires on EVERY prompt of every zen-mode session,
 # with zenModeDefault shipping true. Nothing observed it, and docs/architecture.md
 # still derived a per-turn total from the old figure.
@@ -1107,8 +1193,9 @@ fi
 # under the ceiling may not EXCEED the declared headroom. Growth past the ceiling
 # fails, and so does a shrink far below it — a ceiling that has drifted away from
 # its text has stopped being a tripwire. The headroom is absolute, never a
-# preserved percentage, and 89 is the figure the sibling suites use for "roughly
-# one clause".
+# preserved percentage. The sibling marker-block carriers use 89 for "roughly one
+# clause"; this suite uses 95, which is NOT that figure — see the constant below
+# for why the window was re-derived rather than copied.
 #
 # Measured through node, never ${#var}: bash counts bytes under LC_ALL=C and code
 # points otherwise, while the emitted value is a JSON string carrying four
@@ -1122,28 +1209,51 @@ zen_is_plain_number() {
   esac
 }
 
-# The headroom is BORROWED from the two marker-block carriers, where 89 is the
-# remainder of the evidence carrier's own round ceiling and stands for "roughly
-# one clause". State what that borrowing does NOT buy: this constant is enrolled
-# in neither of the guarantees those two have. It is not compared against the
+# The headroom was BORROWED from the two marker-block carriers at 89 and is no
+# longer: the supplied-anchor rewrite shrank the directive from 4664 to 4208, so
+# the window was RE-DERIVED against the new text — ceiling 4300, headroom 95 —
+# rather than carried over. Keeping 89 would have pinned a window around a length
+# that no longer exists, which is the drift this tripwire is for. State what the
+# figure does NOT buy: this constant is enrolled in neither of the guarantees the
+# two marker-block carriers have. It is not compared against the
 # sibling headrooms by the cross-carrier equality arm in
 # test-windows-portability-guards.sh, which covers only that pair, and there is
 # no run-time fail-safe beneath it — nothing in hooks/user-prompt-zen-mode.sh
 # refuses an over-long directive the way rule-block-v1.js refuses an over-long
 # block. So this is a build-time tripwire and nothing else; a directive that grew
 # past the ceiling would still be injected in full by an installed plugin.
-ZEN_DIRECTIVE_CEILING=4750
-ZEN_DIRECTIVE_HEADROOM=89
+ZEN_DIRECTIVE_CEILING=4300
+ZEN_DIRECTIVE_HEADROOM=95
 if ! command -v node >/dev/null 2>&1; then
   check "Z30 directive length bound did not run — node is not on PATH" FAIL
 else
-  ZEN_LEN="$(HOOK="$HOOK" node -e '
+  # MEASURE WHAT A SESSION RECEIVES, not the template. The source literal still
+  # holds the {{ZENSU_CHAIN_ANCHOR}} placeholder, which the hook replaces at emit
+  # time; measuring the template understated the emitted worst case by the
+  # difference between the placeholder and the longest token the module can
+  # produce. The token set is derived from that module, never re-spelled here.
+  ZEN_LEN="$(PLUGIN_DIR="$PLUGIN_DIR" HOOK="$HOOK" node -e '
     const fs = require("fs");
+    const path = require("path");
     const hook = fs.readFileSync(process.env.HOOK, "utf8");
     const blocks = [...hook.matchAll(/"additionalContext":\s*"((?:[^"\\]|\\.)*)"/g)]
       .map((m) => { try { return JSON.parse("\"" + m[1] + "\""); } catch (_) { return ""; } });
     const active = blocks.find((s) => s.startsWith("zen-mode is ACTIVE"));
-    process.stdout.write(active === undefined ? "NONE" : String(active.length));
+    if (active === undefined) { process.stdout.write("NONE"); process.exit(0); }
+    const MARKER = "{{ZENSU_CHAIN_ANCHOR}}";
+    if (!active.includes(MARKER)) { process.stdout.write(String(active.length)); process.exit(0); }
+    let longest = "";
+    try {
+      const mod = require(path.join(process.env.PLUGIN_DIR, "hooks", "lib", "zen-anchor-v1.js"));
+      for (const shape of Object.keys(mod.SHAPE_POSITION)) {
+        for (const opts of [undefined, { reviewed: true }]) {
+          const t = mod.anchorToken(shape, opts);
+          if (t.length > longest.length) longest = t;
+        }
+      }
+    } catch (_) { process.stdout.write("NONE"); process.exit(0); }
+    if (!longest) { process.stdout.write("NONE"); process.exit(0); }
+    process.stdout.write(String(active.replace(MARKER, longest).length));
   ' 2>/dev/null)"
   ZEN_LEN_RC=$?
   if [ "$ZEN_LEN_RC" -ne 0 ] || ! zen_is_plain_number "$ZEN_LEN"; then
@@ -1222,7 +1332,7 @@ else
   # admitted the deletion of every case that actually executes a grader — the
   # vector tests and the both-directions test — while staying green. Raise this
   # number in the same commit that adds a case.
-  Z29_FLOOR=8
+  Z29_FLOOR=10
   # ONE floor, over REGISTRATIONS. The pair `Z29_SEEN >= FLOOR && Z29_PASS_N >=
   # FLOOR` could never fail independently — skips are non-negative, so the first
   # conjunct held whenever the second did — and it defeated the stated intent:
@@ -1232,6 +1342,198 @@ else
     check "Z29 the eval graders' unit contract passes ($Z29_PASS_N cases)" PASS
   else
     check "Z29 eval-grader unit contract: rc=$Z29_RC pass=${Z29_PASS_N:-none} skipped=$Z29_SKIP_N (want registered >= $Z29_FLOOR and fail 0, got fail=$Z29_FAIL_N): $(printf '%s' "$Z29_OUT" | grep -E '^.?[[:space:]]*(not ok|✖)' | head -2 | tr '\n' ' ')" FAIL
+  fi
+fi
+
+
+# ── Z31: the anchor module's own unit contract ──────────────────────────────
+# tests/run-all.sh discovers only test-*.sh, so the node --test file that pins
+# the shape -> line mapping needs a driver here. Same shape as Z29, and for the
+# same reason: node --test exits 0 for a file registering zero cases, so a floor
+# over REGISTRATIONS is what keeps a silently emptied file from reading as
+# agreement. Raise it in the same commit that adds a case.
+Z31_UNIT="$PLUGIN_DIR/tests/structure/zen-anchor-v1.test.js"
+Z31_FLOOR=12
+if [ ! -f "$Z31_UNIT" ]; then
+  check "Z31 the anchor module's unit contract is missing from disk" FAIL
+elif ! command -v node >/dev/null 2>&1; then
+  check "Z31 anchor-module unit contract did not run — node is not on PATH" FAIL
+else
+  Z31_OUT="$(node --test "$Z31_UNIT" 2>&1)"
+  Z31_RC=$?
+  Z31_PASS_N="$(printf '%s\n' "$Z31_OUT" | sed -n 's/^# pass \([0-9]*\)$/\1/p;s/^. pass \([0-9]*\)$/\1/p' | head -1)"
+  Z31_SKIP_N="$(printf '%s\n' "$Z31_OUT" | sed -n 's/^# skipped \([0-9]*\)$/\1/p;s/^. skipped \([0-9]*\)$/\1/p' | head -1)"
+  [ -n "$Z31_SKIP_N" ] || Z31_SKIP_N=0
+  Z31_FAIL_N="$(printf '%s\n' "$Z31_OUT" | sed -n 's/^# fail \([0-9]*\)$/\1/p;s/^. fail \([0-9]*\)$/\1/p' | head -1)"
+  [ -n "$Z31_FAIL_N" ] || Z31_FAIL_N=unknown
+  Z31_SEEN=$(( ${Z31_PASS_N:-0} + Z31_SKIP_N ))
+  if [ "$Z31_RC" -eq 0 ] && [ -n "$Z31_PASS_N" ] && [ "$Z31_FAIL_N" = "0" ] && [ "$Z31_SEEN" -ge "$Z31_FLOOR" ]; then
+    check "Z31 the anchor module's unit contract passes ($Z31_PASS_N cases)" PASS
+  else
+    check "Z31 anchor-module unit contract: rc=$Z31_RC pass=${Z31_PASS_N:-none} skipped=$Z31_SKIP_N (want registered >= $Z31_FLOOR and fail 0, got fail=$Z31_FAIL_N)" FAIL
+  fi
+fi
+
+# ── Z32: the anchor the hook actually EMITS ─────────────────────────────────
+# Z19b compares the carriers and Z31 pins the mapping; neither observes the one
+# thing a session sees, which is the token that reaches the injected directive.
+# All three arms below drive the real hook against a real Session Control record.
+#
+# The fail-open arm is the load-bearing one: every fault must leave the mode
+# ACTIVE and the anchor absent, because a missing anchor costs a line of
+# presentation while a wrong one misreports where the session stands.
+arm_chain() { # <project> <session_id>
+  # ZENSU_CONFIG is pinned here for the reason stated at the `helper` definition
+  # above: --tdd-begin resolves hooks.tddImplementation, and without the pin it
+  # would read whatever ~/.zensu/config.json the developer happens to have.
+  CLAUDE_CODE_SESSION_ID="$2" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" CLAUDE_PROJECT_DIR="$1" \
+    ZENSU_CONFIG="$NO_CONFIG" \
+    bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --tdd-begin >/dev/null 2>&1
+}
+# Reads the hook's JSON on stdin and prints the token after the marker.
+anchor_of() {
+  node -e '
+    let s=""; process.stdin.on("data",c=>s+=c);
+    process.stdin.on("end",()=>{
+      try{
+        const a=(JSON.parse(s).hookSpecificOutput||{}).additionalContext||"";
+        const M="ZENSU CHAIN ANCHOR: ";
+        const i=a.indexOf(M);
+        process.stdout.write(i<0?"<no-marker>":a.slice(i+M.length).trim());
+      }catch(_){process.stdout.write("<badjson>");}
+    });
+  '
+}
+
+P32="$(mktemp -d -t zenmode-anchor-XXXXXX)"; S32="z32-$$"
+new_session "$P32" "$S32"
+A32_NONE="$(fire "$P32" "$S32" "where are we?" | anchor_of)"
+arm_chain "$P32" "$S32"
+A32_ARMED="$(fire "$P32" "$S32" "where are we?" | anchor_of)"
+if [ "$A32_NONE" = "none" ]; then
+  check "Z32a no chain armed -> the directive says none, so no anchor is rendered" PASS
+else
+  check "Z32a expected none with no chain armed, got '$A32_NONE'" FAIL
+fi
+if [ "$A32_ARMED" = "Zensu: ▶implement ·review ·self-review" ]; then
+  check "Z32b an armed chain -> the directive carries the position read from the workflow document" PASS
+else
+  check "Z32b expected the implementing anchor, got '$A32_ARMED'" FAIL
+fi
+
+# Fail-open: a workflow document the reader cannot classify must cost the
+# anchor, never the mode. Corrupting the document is the cheapest fault that
+# reaches the same catch as a missing module or a dead node.
+Z32_DOC="$(find "$P32/.zensu/state" -maxdepth 1 -name 'tdd-phase-*.json' 2>/dev/null | head -1)"
+if [ -z "$Z32_DOC" ]; then
+  check "Z32c fail-open arm could not run — arming wrote no workflow document" FAIL
+else
+  printf '{ not json' > "$Z32_DOC"
+  Z32C_OUT="$(fire "$P32" "$S32" "where are we?")"
+  Z32C_ANCHOR="$(printf '%s' "$Z32C_OUT" | anchor_of)"
+  Z32C_KIND="$(printf '%s' "$Z32C_OUT" | classify)"
+  if [ "$Z32C_ANCHOR" = "none" ] && [ "$Z32C_KIND" = "UserPromptSubmit|ON" ]; then
+    check "Z32c an unreadable workflow document costs the anchor, not the mode" PASS
+  else
+    check "Z32c fail-open broke (anchor='$Z32C_ANCHOR' kind='$Z32C_KIND')" FAIL
+  fi
+
+  # Z32d a workflow document that is not a REGULAR file must not be opened at
+  # all. `.zensu/state/` is writable from inside a session and no gate covers it
+  # while the chain is inactive, so a FIFO there is reachable; the shared reader
+  # opens O_RDONLY|O_NOFOLLOW with no O_NONBLOCK and only then fstats for
+  # isFile(), so the open never returns. On a hook that fires on EVERY prompt
+  # that wedges the session with no escape from inside — the prompt never
+  # reaches the model and the off-phrase branch is never evaluated. The hook
+  # therefore lstats the document before the reader can open it.
+  #
+  # THE BOUND IS THE CHECK. A regression here does not produce a wrong value, it
+  # produces no value at all, so the arm has to time the hook out and report
+  # rather than wait for it. The first spelling ran `fire` inside a command
+  # substitution with a background killer, and MEASURED against a hook with the
+  # guard removed it hung past two minutes anyway: a command substitution reads
+  # until every writer closes the pipe, and killing the shell leaves the blocked
+  # `node` holding it open. So the output goes to a FILE, `set -m` puts the job
+  # in its own process group, and the timeout kills that GROUP.
+  rm -f "$Z32_DOC"
+  if ! mkfifo "$Z32_DOC" 2>/dev/null; then
+    check "Z32d FIFO arm could not run — mkfifo is unavailable on this host" FAIL
+  else
+    Z32D_FILE="$P32/.z32d-out"
+    : > "$Z32D_FILE"
+    set -m
+    ( fire "$P32" "$S32" "where are we?" > "$Z32D_FILE" 2>/dev/null ) &
+    Z32D_PID=$!
+    set +m
+    Z32D_WAITED=0
+    while kill -0 "$Z32D_PID" 2>/dev/null && [ "$Z32D_WAITED" -lt 20 ]; do
+      sleep 1
+      Z32D_WAITED=$(( Z32D_WAITED + 1 ))
+    done
+    if kill -0 "$Z32D_PID" 2>/dev/null; then
+      kill -9 -"$Z32D_PID" 2>/dev/null || kill -9 "$Z32D_PID" 2>/dev/null
+      check "Z32d the hook did not complete within ${Z32D_WAITED}s with a FIFO at the workflow document — either the lstat guard is gone, in which case every prompt of such a session wedges, or this host is slower than the bound" FAIL
+    else
+      Z32D_OUT="$(cat "$Z32D_FILE")"
+      Z32D_ANCHOR="$(printf '%s' "$Z32D_OUT" | anchor_of)"
+      Z32D_KIND="$(printf '%s' "$Z32D_OUT" | classify)"
+      if [ "$Z32D_ANCHOR" = "none" ] && [ "$Z32D_KIND" = "UserPromptSubmit|ON" ]; then
+        check "Z32d a FIFO at the workflow document costs the anchor and never blocks the prompt" PASS
+      else
+        check "Z32d FIFO guard broke (anchor='$Z32D_ANCHOR' kind='$Z32D_KIND')" FAIL
+      fi
+    fi
+    rm -f "$Z32D_FILE" "$Z32_DOC"
+  fi
+fi
+
+# Z33 the byte tests that guard the substituted token, driven directly.
+#
+# They are the LAST reader before the value is spliced into the emitted JSON, and
+# nothing exercised them: by the time they run, $ZEN_ANCHOR can only be `none`, a
+# module-produced token, or empty — the node program re-checks the grammar
+# itself — so every fixture in this file drives the accepting path only. All
+# three could be deleted with the whole suite green, which is the same
+# guard-with-no-negative-case shape the sibling unit file records as a defect.
+# They are hoisted into `zen_anchor_sanitized` so a check can reach them at all,
+# and the function is EXTRACTED from the shipped hook rather than copied here, so
+# this pins the text that actually runs.
+Z33_SRC="$(awk '/^zen_anchor_sanitized\(\) \{/,/^\}$/' "$HOOK")"
+if [ -z "$Z33_SRC" ]; then
+  check "Z33 the anchor sanitizer could not be extracted from the hook — the pin is not measuring anything" FAIL
+else
+  Z33_BAD=""
+  z33_expect() { # <input> <expected>
+    Z33_GOT="$(eval "$Z33_SRC"; zen_anchor_sanitized "$1")"
+    [ "$Z33_GOT" = "$2" ] || Z33_BAD="$Z33_BAD in<$1>got<$Z33_GOT>want<$2>"
+  }
+  # Positive controls first: without them a function that answered `none` for
+  # everything would satisfy every rejection case below.
+  z33_expect 'none' 'none'
+  z33_expect 'Zensu: ✓implement ▶review ·self-review' 'Zensu: ✓implement ▶review ·self-review'
+  z33_expect 'Zensu: ✓implement ✓review ✗self-review' 'Zensu: ✓implement ✓review ✗self-review'
+  # Prefix test: anything that is neither `none` nor a `Zensu: ` line.
+  z33_expect '' 'none'
+  z33_expect 'Ablauf: ✓a' 'none'
+  z33_expect 'zensu: ✓a' 'none'
+  # The metacharacter test. `"` and `\` would break the JSON string; `&`, `|` and
+  # `$` and the backtick are what the substitution and the surrounding shell
+  # would otherwise reinterpret.
+  z33_expect 'Zensu: ✓a"b' 'none'
+  z33_expect 'Zensu: ✓a\b' 'none'
+  z33_expect 'Zensu: ✓a&b' 'none'
+  z33_expect 'Zensu: ✓a|b' 'none'
+  z33_expect 'Zensu: ✓a$b' 'none'
+  z33_expect 'Zensu: ✓a`b' 'none'
+  # The control-byte test. A CR or a TAB inside a JSON string makes the whole
+  # directive unparseable, which loses the mode silently rather than the anchor.
+  z33_expect "$(printf 'Zensu: \342\234\223a\tb')" 'none'
+  z33_expect "$(printf 'Zensu: \342\234\223a\rb')" 'none'
+  if [ -z "$Z33_BAD" ]; then
+    check "Z33 the token sanitizer accepts the producible vocabulary and refuses every byte the emission cannot carry" PASS
+  else
+    check "Z33 token sanitizer:$Z33_BAD" FAIL
   fi
 fi
 

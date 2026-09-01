@@ -58,7 +58,7 @@ is ever measured for the suite.
 |---|---|---|
 | `tests/structure/test-*.sh` (deterministic shell) | **146** — 139 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
 | *(reconciliation)* | a `--ci` run reports **139 structure suites + 5 offline evals = 144 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 146 − 139 gap | — |
-| `tests/structure/*.test.js` (`node --test` units) | **28 files** | invoked *by* parent `.sh` suites |
+| `tests/structure/*.test.js` (`node --test` units) | **29 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
 | Windows contract profiles | **8** (`windows-shard-1`…`-8`, 43 suite entries) | `ci.yml` matrix, `run-profile.js` |
@@ -287,7 +287,8 @@ that suite's failure.
 | `plan-payload-v1.test.js` | 20 | `test-plan-payload-fallback.sh` | plan-source precedence table, hardened plan-file reader refusals, O_NOFOLLOW-unavailable fallback |
 | `zensu-doctor-invocation.test.js` | 24 | `test-versioned-plugin-upgrade.sh` | `/zensu:doctor` invocation allowlist — driven from that suite, which binds it as `RECOGNIZER_UNIT` and grades it against a registered-case floor; it has no `run-all.sh` entry of its own, because discovery is `test-*.sh` only |
 | `playwright-mcp-proxy.test.js` | 16 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy |
-| `zen-anchor-assertions.test.js` | 7 | `test-zen-mode.sh` (Z29) | zen-mode eval GRADERS: every javascript assertion body compiled, and a pinned pass/fail vector for the two anchor scenarios plus the safety carve-out |
+| `zen-anchor-assertions.test.js` | 10 | `test-zen-mode.sh` (Z29) | zen-mode eval GRADERS: every javascript assertion body compiled, and a pinned pass/fail vector for the two anchor scenarios plus the safety carve-out |
+| `zen-anchor-v1.test.js` | 12 | `test-zen-mode.sh` (Z31) | zen-mode chain anchor: the shape -> line mapping against the classifier's own total set, the failed mark read from the owner rather than restated, the closed-chain reading that must not claim an unrun review, the `reviewed` derivation the hook used to own, and the token predicate |
 | `verify-feature-transcript-check.test.js` | 14 | `test-promptfoo-verify-feature.sh` | transcript assertion contract |
 | `fixture-mutation-watch.test.js` | 19 | `test-claude-promptfoo-wrapper.sh` | fixture-event classification: the gated classes (`.git`, the watch root's own name, run-owned ancestors) adjudicated by the manifest, ordinary paths by touch-after-start, and that both watch backends route through one decision spelled once |
 | `session-control-lineage.test.js` | 13 | `test-versioned-plugin-upgrade.sh` | runtime-lineage axis: same-major (same-minor while major is `0`), never-backwards, sibling plugin root |

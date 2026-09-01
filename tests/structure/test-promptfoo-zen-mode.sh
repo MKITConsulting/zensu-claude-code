@@ -122,7 +122,7 @@ if command -v node >/dev/null 2>&1; then
   # DRIFT — a false red naming the wrong cause — while the rc branch, added to
   # preserve that output, printed none of it.
   P8_ERR="$(mktemp -t zenp8-XXXXXX)"
-  DRIFT="$(HOOK="$HOOK" CFG="$CFG" DIR="$EVAL_DIR/scenarios" node -e '
+  DRIFT="$(PLUGIN_DIR="$PLUGIN_DIR" HOOK="$HOOK" CFG="$CFG" DIR="$EVAL_DIR/scenarios" node -e '
     const fs = require("fs");
     const path = require("path");
     let hook;
@@ -134,6 +134,24 @@ if command -v node >/dev/null 2>&1; then
     if (!active) { process.stdout.write("hook-has-no-ACTIVE-directive"); process.exit(0); }
     const norm = (s) => s.replace(/\s+/g, " ").trim();
     const want = norm(active);
+    // ONE dynamic field: the anchor token the hook substitutes at emit time. The
+    // comparison is verbatim up to that marker and then asks the OWNER whether
+    // the value after it is one it can produce. Comparing the whole string would
+    // fail on every scenario for a reason that is not drift; ignoring the tail
+    // would admit an anchor no hook could ever emit.
+    const MARKER = "ZENSU CHAIN ANCHOR: ";
+    if (!want.includes(MARKER)) { process.stdout.write("hook-directive-carries-no-anchor-marker"); process.exit(0); }
+    let producible = [];
+    try {
+      const mod = require(path.join(process.env.PLUGIN_DIR, "hooks", "lib", "zen-anchor-v1.js"));
+      // BOTH readings of every shape — see the identical derivation in
+      // test-zen-mode.sh: `chain-closed` renders a different line under
+      // `reviewed`, and that token is one a scenario may legitimately carry.
+      producible = [...new Set(Object.keys(mod.SHAPE_POSITION)
+        .flatMap((s) => [mod.anchorToken(s), mod.anchorToken(s, { reviewed: true })]))];
+    } catch (_) { process.stdout.write("anchor-module-unloadable"); process.exit(0); }
+    if (!producible.length) { process.stdout.write("anchor-module-produced-no-token"); process.exit(0); }
+    const head = want.slice(0, want.indexOf(MARKER) + MARKER.length);
     let scenarios = [];
     try { scenarios = fs.readdirSync(process.env.DIR).filter((f) => f.endsWith(".yaml")).sort(); }
     catch (_) { process.stdout.write("scenarios-dir-unreadable"); process.exit(0); }
@@ -144,7 +162,7 @@ if command -v node >/dev/null 2>&1; then
     try {
       registered = (fs.readFileSync(process.env.CFG, "utf8").match(/file:\/\/scenarios\/[^\s]+\.yaml/g) || []).length;
     } catch (_) { process.stdout.write("config-unreadable"); process.exit(0); }
-    if (registered < 3) { process.stdout.write("config-registers-only-" + registered + "-scenarios"); process.exit(0); }
+    if (registered < 5) { process.stdout.write("config-registers-only-" + registered + "-scenarios"); process.exit(0); }
     if (scenarios.length < registered) {
       process.stdout.write("directory-has-" + scenarios.length + "-scenarios-but-config-registers-" + registered);
       process.exit(0);
@@ -154,7 +172,10 @@ if command -v node >/dev/null 2>&1; then
       const p = path.join(process.env.DIR, f);
       let text;
       try { text = fs.readFileSync(p, "utf8"); } catch (_) { bad.push(f + ":unreadable"); continue; }
-      if (!norm(text).includes(want)) bad.push(f);
+      const flat = norm(text);
+      if (!flat.includes(head)) { bad.push(f); continue; }
+      const rest = flat.slice(flat.indexOf(head) + head.length).trim();
+      if (!producible.some((t) => rest.startsWith(t))) bad.push(f + ":anchor-token-not-producible");
     }
     // A POSITIVE sentinel, not an empty string. With `bad.join(",")` alone,
     // "nothing drifted" and "the program threw before it could decide" are the

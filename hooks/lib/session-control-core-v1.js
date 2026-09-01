@@ -1406,7 +1406,9 @@ function readOrphanedProjectRootContext(options) {
 // composes it with the creating helpers; adoptionWorkflowStatePath composes it
 // without them. Both must agree, or the read-only probe and the read it guards
 // resolve to different files.
-const WORKFLOW_STATE_SEGMENTS = ['.zensu', 'state'];
+// Frozen because it is EXPORTED: an external consumer that pushed a segment
+// would move where this module itself resolves every workflow document.
+const WORKFLOW_STATE_SEGMENTS = Object.freeze(['.zensu', 'state']);
 const WORKFLOW_STATE_PREFIX = 'tdd-phase-';
 
 const ADOPTION_REFUSALS = {
@@ -3922,6 +3924,13 @@ module.exports = {
   SCHEMA_VERSION,
   WORKFLOW_SCHEMA,
   ATTESTATION_SCHEMA,
+  // The workflow-document LAYOUT, exported so a caller that must judge the file
+  // before this module opens it does not re-spell the path. `workflowStateFile`
+  // is deliberately NOT the export for that job: it reaches
+  // `ensureDescendantDirectory`, so merely asking it for the path CREATES the
+  // directory, which is the opposite of what a read-only pre-check wants.
+  WORKFLOW_STATE_SEGMENTS,
+  WORKFLOW_STATE_PREFIX,
   sessionIdHash,
   sessionKey,
   computeRuntimeDigest,

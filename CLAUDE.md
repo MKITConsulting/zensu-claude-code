@@ -36,10 +36,15 @@ rather than as a file-and-grader list because the list was written that way once
 and was wrong in both directions within a single round — it named
 `anchor-failed-step.yaml`'s failure-in-the-prose grader "and nothing else" while
 the German counter-grader arms (`schritt`, `von`, `aus`) sat in that file AND in
-`anchor-multi-step.yaml`, which the list excluded by name. Two members exist
-today, both under `evals/zen-mode-reaction/scenarios/`: the failure-in-the-prose
-grader (`fehlgeschlag`, `fehlschlag`, `gescheitert`, `rot`, `schlägt fehl`) and
-the `Step N of M` counter grader, which appears in both anchor scenarios. The reason is the same in kind
+`anchor-multi-step.yaml`, which the list excluded by name. THREE members exist
+today, all under `evals/zen-mode-reaction/scenarios/`: the failure-in-the-prose
+grader (`fehlgeschlag`, `fehlschlag`, `gescheitert`, `rot`, `schlägt fehl`), the
+`Step N of M` counter grader, which appears in both anchor scenarios, and the
+anchor-prefix grader in `contract-compliance.yaml`, whose `/^(Zensu|Run|Ablauf):/`
+alternation admits the German lead-in a correct reply to a German-speaking user
+carries. That third one landed while this census still read "two", which is the
+same drift the paragraph above records — check by grep before relying on the
+count. The reason is the same in kind
 but the source is the other side of the exchange: the zen-mode directive that
 scenario grades says the words around the anchor's marks follow the USER's own
 language, so a correct reply to a German-speaking user is German prose. An
@@ -4906,34 +4911,119 @@ with a thrown error, and re-point the extractor.
 
 ## zen-mode Chain-Progress Anchor (`user-prompt-zen-mode.sh` rule 6)
 
-Rule 6 of the zen-mode contract asks for a one-line progress anchor above the closing
-next step. It lives in the hook, the skill, the operator doc row and EVERY
+Rule 6 of the zen-mode contract carries a one-line progress anchor above the closing next
+step. **The hook SUPPLIES that line; the model no longer derives it.** The directive ends
+with a `ZENSU CHAIN ANCHOR:` field carrying either a `Zensu: …` line to render verbatim or
+the word `none`, and `none` means no Zensu chain is armed and no anchor is rendered at all.
+The rule lives in the hook, the skill, the operator doc row and EVERY
 `evals/zen-mode-reaction/scenarios/*.yaml`, and `tests/structure/test-zen-mode.sh` pins all
 of them — the count is deliberately not written out here, because the eval roster is DERIVED
-from the directory and a hand-maintained numeral is exactly what a driven loop cannot catch: `hooks/user-prompt-zen-mode.sh` (the ACTIVE `additionalContext` directive — the
+from the directory and a hand-maintained numeral is exactly what a driven loop cannot catch:
+`hooks/user-prompt-zen-mode.sh` (the ACTIVE `additionalContext` directive — the
 authoritative copy, re-injected every prompt), `skills/zen-mode/SKILL.md` rule 6,
 `docs/configuration.md`'s `user-prompt-zen-mode.sh` hook row, and every
 `evals/zen-mode-reaction/scenarios/*.yaml`, which embed the whole directive verbatim.
 Z19b pins the directive carriers against each other, Z19c pins the extraction regex
 across the two zen suites, Z19d pins the operator row.
 
-**The anchor is deliberately DECOUPLED from `hooks/lib/zensu-autopilot-state.sh`.** An
-earlier revision used that module's `STAGES` set as the label vocabulary, and review
-found the copy already wrong in three ways: `GATES` (unconditional) was missing while
-`VALIDATE`/`COVER` (gated on `state.options`) were listed, `AWAIT_TDD` was missing too,
-and the four marks are linear while that machine is cyclic — `GATES`, `CONVERGE`,
-`VALIDATE` and `COVER` all re-enter through `toAwaitTdd`, so a retried stage had no
-defined mark. The rule now names the steps the SESSION observed plus the ones it told
-the user it would take, and explicitly forbids copying a canonical pipeline out of
-another component. **Do not reintroduce the coupling**, and note that the worked EXAMPLE
-is part of it: a model copies the example before it obeys the prohibition beside it, so
-the example's step names must belong to no shipped component (they are checked against
-`.claude-plugin/plugin.json`'s skill list by hand — `implement` is a skill and `verify` is the stem of `verify-feature`,
-`fetch`/`parse`/`render` are not).
+**Why the model stopped deriving it.** The anchor rendered for ANY multi-turn work, so a
+session that merely answered "what is this Python process?" still closed with
+`Flow: ✓processes ✓identified ✓transcript ✓cause` — four invented steps that read like
+evidence and described no process at all. The observed session was conducted in German and
+its anchor was rendered in German; it is translated here because this repository is
+English-only outside a match literal, and these words are prose rather than literals. The anchor only means something inside a
+Zensu-driven development process; outside one it is decoration wearing the costume of a
+progress report. Reported by the user against a real session, not theorised.
 
-**Five couplings fire in the UNOBVIOUS direction**, the same shape §"Gate-Disable
+**The DECOUPLING RULE this amends — read the amendment, not just the prohibition.** An
+earlier revision derived the label vocabulary from `hooks/lib/zensu-autopilot-state.sh`'s
+`STAGES`, and review found that HAND-COPY already wrong in three ways: `GATES`
+(unconditional) was missing while `VALIDATE`/`COVER` (gated on `state.options`) were listed,
+`AWAIT_TDD` was missing too, and the four marks are linear while that machine is cyclic —
+`GATES`, `CONVERGE`, `VALIDATE` and `COVER` all re-enter through `toAwaitTdd`, so a retried
+stage had no defined mark. **That prohibition stands and is unchanged for `STAGES`.** What
+the anchor now does is a different mechanism: a LIVE READ of an owner-EXPORTED classifier.
+`hooks/lib/chain-recovery-v1.js` exports its shape literals precisely so consumers never
+re-spell them — CLAUDE.md already records the `INERT_SHAPES` case where a table-driven copy
+went silently wrong and the classifier-driven form caught it. `hooks/lib/zen-anchor-v1.js`
+therefore maps a shape the classifier PRODUCED, holds no second copy of anything, and
+answers `none` for any shape it does not map, so a shape added to `chainShape` costs an
+anchor rather than producing a wrong one. **Two of its three inputs are READ from the
+owner rather than restated**, and both were restated first: the FAILED mark comes from
+`RECOVERABLE_SHAPES` / `DEAD_END_SHAPES` (a hand-written `blocked` set had marked
+`ticket-spent` and `ticket-lost` as failures under a comment claiming the owner treated
+them as wedged — the owner calls neither wedged, and its own remedy for both is an
+ordinary advance instruction), and the TOTAL shape set comes from the new `ALL_SHAPES`
+export (the consumer's drift guard had used `NEXT_COMMAND`'s key set as a proxy for an
+invariant that module never enforced). Both exports were added to `chain-recovery-v1.js`
+by this change; a missing one makes the module render NO anchor rather than guess through
+it. Do NOT read this as licence to copy a stage table:
+`zensu-autopilot-state.sh`'s `STAGES` stays out of scope, for the cyclic-versus-linear reason
+above. The worked EXAMPLE in both carriers is now the real vocabulary rather than a
+placeholder, which is what removes the old hazard that a model copied the example before it
+obeyed the prohibition beside it. It lives in the SKILL carrier alone — the hook derives
+its own at runtime and carries no example — and `Z19b` requires that line to be a token
+`zen-anchor-v1.js` can actually produce, because the `shared` needle list it is otherwise
+judged by deliberately holds no step name, so a renamed step used to move the module, the
+hook and every eval carrier while that one line kept teaching the old words.
+
+**The mechanism, end to end.** ONE node process does both things this hook needs from
+outside the shell — the prompt text and the anchor — because it fires on every prompt of
+every zen-mode session and a second spawn on that channel is not free; the anchor is only
+needed once the mode has resolved to ACTIVE, which is decided before that call. It resolves
+`ZENSU_PROJECT_ROOT` (the host-native spelling node needs — NOT the shell-namespace
+`ZEN_ROOT` the marker paths are built from) plus the `scv1_` session key, calls
+`session-control-core-v1.js`'s `readWorkflowState` (which takes that key as its `sessionId`,
+exactly as `zensu-doctor-report.js` calls it), classifies with `chain-recovery-v1.js`,
+renders through `zen-anchor-v1.js`, and substitutes the result into the directive's
+`{{ZENSU_CHAIN_ANCHOR}}` placeholder by shell PARAMETER EXPANSION. **The read is guarded by
+an `lstat` on the document that does TWO jobs**, and neither is an optimisation:
+`readWorkflowState` reaches `ensureDescendantDirectory`, which CREATES the missing
+components, so without a guard a per-prompt hook would mkdir `<project>/.zensu/state` in any
+project that has none — and the shared reader opens before it checks that the file is
+regular, which is the blocking hazard the paragraph further down states in full. The
+document path is built from the owner-exported `WORKFLOW_STATE_SEGMENTS` /
+`WORKFLOW_STATE_PREFIX`, so the layout is not re-spelled here; an earlier spelling used an
+`existsSync` on a hand-written two-segment path, and both halves of that are retired. The
+placeholder is what keeps the directive a STATIC literal in source, so Z19b, Z30 and P8 can
+still extract and measure it; the eval carriers hold a rendered token instead, and both
+suites compare verbatim up to the marker and then ask the module whether the token is one it
+can produce. **Every fault answers `none`** — an absent, unreadable, foreign or
+unclassifiable document, a document that is not a REGULAR file, a module that will not load,
+a `node` that runs and fails, or a value that fails the module's own token predicate. A
+missing anchor costs a line of presentation; a wrong one misreports where the session
+stands. **A `node` that is ABSENT is NOT in that list**, and the distinction is not
+pedantic: `zensu_bind_hook_session` already requires one, so the hook exits above this
+point and injects NOTHING — zen-mode is not re-injected at all that turn. AC-005 of the
+plan names "missing node" among the faults that leave the mode active, which no hook in
+this plugin can satisfy; the carriers say "a `node` that runs and fails" instead.
+
+**The token is spliced into a JSON string, so its charset is load-bearing — and it is checked
+THREE times, by three readers that do not share a spelling.** The module's `anchorTokenSafe`
+is the first, and it is an output-SHAPE contract rather than an escaping rule: `none`, or
+`Zensu:` plus mark/step pairs, and nothing else. The hook's own node program re-checks
+against a grammar spelled in the HOOK, which is what a swapped module cannot change — the
+module blessing its own output is exactly the case the belt exists for, and it is the ONLY
+grammar reader on that path. The shell then applies a BYTE test: a quote breaks the JSON, a
+backslash changes what an escape means, and any control byte — a CR or a TAB, not only LF —
+is invalid inside a JSON string and would lose the whole directive silently. Its `&`, `|`,
+`$` and backtick arms are RETAINED from the `sed` era rather than needed by the current
+expansion; they cost nothing, since no producible token carries them. **Say what the byte
+test does NOT do:** its prefix arm still accepts `Zensu: <arbitrary prose>`, deliberately,
+because the grammar belongs to the node program above it. A comment here once claimed that
+acceptance had been fixed, which would invite the next reader to relax the one grammar check
+on the path; what the earlier spelling really lacked was the control-byte arm. ALL THREE
+modules are `lstat`ed before ANY is required, so a symlink or a non-regular file in
+`hooks/lib` is refused rather than loaded — verifying and requiring one at a time did NOT
+hold that property, because `zen-anchor-v1.js` requires `chain-recovery-v1.js` at top level
+and so executed the sibling before its own guard ran.
+
+**The couplings below fire in the UNOBVIOUS direction**, the same shape §"Gate-Disable
 Prefixes" records for G12 — an ordinary edit elsewhere reddens a suite named for the
-zen-mode hook, and nothing points at it from the side that changes:
+zen-mode hook, and nothing points at it from the side that changes. The count is
+deliberately NOT written out: this same section states that rule for its eval roster,
+and a first revision of this list opened "Five couplings" above seven bullets, which
+is the drift the rule exists to prevent.
 
 - Z19b DERIVES its eval carrier roster from `evals/zen-mode-reaction/scenarios`, so
   ADDING or REMOVING a scenario reddens this suite. Both halves are real only because
@@ -4943,103 +5033,241 @@ zen-mode hook, and nothing points at it from the side that changes:
   the ONLY CI-run check that reads that directory, the sibling that compares against the
   config being local-only. The derivation must be able to fail LOUDLY when it derives
   NOTHING: a `registered > 0` conjunct guarded the comparison at first, so a changed
-  registration spelling silently dropped the floor back to the absolute one. Measured
-  against a fixture, the same real loss reported
-  `eval-dir:4-scenarios-but-config-registers-5` with an intact config and reported []
-  once the spelling moved. It pushes `eval-config:registers-only-N` below three and then
-  compares unconditionally.
+  registration spelling silently dropped the floor back to the absolute one.
+- Z19b ALSO loads `hooks/lib/zen-anchor-v1.js` to derive the producible token set, so
+  renaming that module or its `SHAPE_POSITION` / `anchorToken` exports reddens this suite
+  AND `test-promptfoo-zen-mode.sh` P8, which derives the same set the same way. Z30 loads it
+  for the same reason — it substitutes the LONGEST producible token into the template before
+  measuring, because the source literal still holds the placeholder and measuring that
+  understated what a session receives.
+- `hooks/lib/chain-recovery-v1.js` now owes this feature TWO exports it did not have:
+  `ALL_SHAPES` (the total set the anchor's key parity is pinned against, and which
+  `zen-anchor-v1.test.js` in turn pins against the literals in `chainShape`'s own source)
+  and `DEAD_END_SHAPES` (half of the stuck set the failed mark is read from). Removing
+  either leaves the chain-recovery suite green while the zen suite goes red, but by
+  DIFFERENT mechanisms, and stating the outcome alone hid that: `stuckShapes` reads
+  `RECOVERABLE_SHAPES` and `DEAD_END_SHAPES` only, so removing `DEAD_END_SHAPES` makes
+  `anchorToken` answer `none` for every shape, while removing `ALL_SHAPES` leaves
+  `anchorToken` fully functional and reddens only the key-parity case in
+  `zen-anchor-v1.test.js`.
+- `tests/SUITE-OVERVIEW.md` carries a row per driven `node --test` file with its
+  REGISTRATION count, so adding or removing a case in either zen unit file makes that
+  table stale — silently, since nothing compares them. It ALSO carries a section 1 total
+  for `tests/structure/*.test.js`, and that file names itself the single owner of that
+  figure, so adding a unit FILE — which this change did — makes a second, different entry
+  stale. The per-file obligation was stated here and the total was not, and the total is
+  exactly the one that went wrong.
 - `tests/structure/test-best-solution-first.sh` B14/B14a/B14b pin THIS directive's SCOPE
   clause — its ranking obligation and the anti-inflation counterweight — so editing that
-  clause reddens a suite named for the best-solution-first hook, with nothing in this
-  section pointing at it. Note the boundary: a rule-6-only edit does NOT trip B14, so the
-  coupling is invisible until the day someone condenses the whole directive.
+  clause reddens a suite named for the best-solution-first hook. Note the boundary: a
+  rule-6-only edit does NOT trip B14, so the coupling is invisible until the day someone
+  condenses the whole directive.
 - Z19c binds `tests/structure/test-promptfoo-zen-mode.sh` and compares the
   ACTIVE-directive extraction regex SOURCE, so editing that suite reddens this one.
 - Z19d greps the `docs/configuration.md` hook row and anchors on
-  `^\|\s*`user-prompt-zen-mode\.sh`\s*\|`, so rewording that row — or renaming the hook
+  ``^\|\s*`user-prompt-zen-mode\.sh`\s*\|``, so rewording that row — or renaming the hook
   file — reddens this suite.
 - Z29 drives `tests/structure/zen-anchor-assertions.test.js`, which derives its scenario
   roster from that same directory and pins each anchor scenario's grader COUNT and its
   pass/fail VECTOR. So adding, removing or reordering a grader inside a scenario reddens
   this suite. TWO floors guard the unit file and they count different things — do not
-  conflate them, as an earlier revision of this bullet did. `Z29_FLOOR` lives in
-  `test-zen-mode.sh` and counts `test()` REGISTRATIONS; the per-table `floor:` values live
-  in the unit file and count CASES. Both fire on REMOVAL only: adding a case or a test
-  cannot turn either red, so raising the matching number in the same commit that adds one is
-  a CONVENTION the file states in its own comment, not an enforcement — the same convention
-  `test-session-trail-skill.sh` T22 records. `Z29_FLOOR` sat at 3 against a file of 6 and
-  admitted the deletion of every case that actually executes a grader; the per-table floors
-  were added after three cases were landed in one round without a test, which left each of
-  them deletable with everything green. WHICH CEILING PAYS for the driver, stated because
-  both sibling sections state it for theirs and re-deriving it is a grep across four
-  manifests: `test-zen-mode.sh` has NO `windows-ci.v1.json` entry — it is in that profile's
-  sibling `windows-native-structure.v1.json` `excluded` list with a reason — so no per-suite
-  Windows cap can be blown here, and its `node --test` cost lands on the ubuntu shard
-  partition through `ci-shard-weights.v1.json`, at the unchanged `defaultSeconds`. That file
-  calls its own numbers a balance hint on which coverage never depends.
+  conflate them. `Z29_FLOOR` lives in `test-zen-mode.sh` and counts `test()` REGISTRATIONS;
+  the per-table `floor:` values live in the unit file and count CASES. Both fire on REMOVAL
+  only, so raising the matching number in the same commit that adds one is a CONVENTION the
+  file states in its own comment, not an enforcement. **Both anchor tables were LOWERED**
+  (14 → 12 and 10 → 8) when the mark-derivation graders went: the cases that drove them
+  described a decision the reply no longer makes. That is a deliberate lowering with its
+  reason recorded at the constant, and lowering it again needs the same note.
+- Z31 drives `tests/structure/zen-anchor-v1.test.js`, the anchor module's own unit
+  contract, with the same registration floor. Z32 drives the hook end to end against a real
+  Session Control record: `none` with no chain, the implementing position with one armed,
+  and — the load-bearing arm — an unreadable workflow document costing the ANCHOR and never
+  the MODE.
+
+**Which ceiling pays for the two `node --test` drivers:** `test-zen-mode.sh` has NO
+`windows-ci.v1.json` entry — it is in that profile's sibling `windows-native-structure.v1.json`
+`excluded` list with a reason — so no per-suite Windows cap can be blown here, and the cost
+lands on the ubuntu shard partition through `ci-shard-weights.v1.json`. That file carries an
+EXPLICIT entry for this suite (a figure that happens to equal `defaultSeconds`, which is why a
+first revision of this paragraph mistook it for the default), and its own note says the seconds
+map was measured on one named CI run. That measurement predates both drivers: Z31 adds a
+`node --test` process and Z32 adds a session registration, three hook invocations and one
+`--tdd-begin` against a temp project. Treat the entry as UNREMEASURED and take a new figure
+from the next green ubuntu run — the wording that file already uses for `test-doctor.sh` and
+`test-autopilot-stop-enforcer.sh`. No Windows wall clock exists for it either, so say
+"unmeasured", never "cheap".
 
 **The safety carve-out rides in the SAME directive string as the anchor**, and P8 in
 `test-promptfoo-zen-mode.sh` — the only full-fidelity check that the eval copies match
 the hook — is `localStructureTests` and never runs in CI (`run-all.sh --ci` skips it).
 Z19b therefore carries three carve-out needles applied to the whole-directive carriers
 only, NOT to the `skill` carrier, which is sliced to rule 6 while the carve-out is rule 9.
-Without them a reworded carve-out would leave `safety-carve-out.yaml` grading a directive
-no session receives, with every CI suite green.
+Without them a reworded carve-out would leave `safety-carve-out.yaml` — the one live-model
+check that a warning is never compressed — grading a directive no session receives, with
+every CI suite green.
 
 **A run-time seam exists for the carrier problem and was DECLINED, deliberately.**
 `hooks/lib/rule-block-v1.js` exports `readRuleBlock`, and both
 `hooks/session-start-evidence-discipline.sh` and `hooks/user-prompt-best-solution-first.sh`
-consume it instead of holding a copy; `/zensu:doctor` already renders a `rule carriers:`
-row for those two. Adopting it here would move the directive into a markdown block, delete
-Z19c outright (neither suite would need a hand-copied extractor), and give zen-mode an
-operator surface that can tell "stopped injecting" from "user turned it off" — which it
-currently has none of. The cost is real on both sides and is why it was not taken in this
-change: a malformed block drops the injection SILENTLY, which for zen-mode means the mode
-quietly stops; every eval `spec_block` copy still needs its own text regardless, so it
-removes one copy and not all of them; and it is a migration commit of its own rather than a
-line in a fix. **The fact that actually settles the cost is a BOUND, and an earlier
-revision of this paragraph omitted it:** `hooks/lib/rule-block-v1.js` declares `MAX_BLOCK`
-and refuses a larger block, and `Z30`'s floor for this directive — its declared ceiling
-minus its declared headroom — sits ABOVE that constant, so EVERY admissible directive
-length is over the shared reader's limit. The comparison is stated qualitatively on
-purpose: §"Marker-Block Carriers" above says to name that constant and never to spell its
-value, because a prose copy of the number goes stale silently, and the copy it already had
-to remove from `docs/architecture.md` is the precedent. Adopting the seam is therefore not "a migration commit of its own" but a
-re-decision of a bound shared with the two always-on marker-block carriers, which is a
-larger change than the paragraph implied and lands squarely in the silent
-dropped-injection failure it warns about. Recorded so the next reader knows the
-alternative was weighed, not missed.
+consume it instead of holding a copy; `/zensu:doctor` already renders a `rule carriers:` row
+for those two. Adopting it here would move the directive into a markdown block, delete Z19c
+outright (neither suite would need a hand-copied extractor), and give zen-mode an operator
+surface that can tell "stopped injecting" from "user turned it off" — which it currently has
+none of. The cost is real on both sides: a malformed block drops the injection SILENTLY,
+which for zen-mode means the mode quietly stops; every eval `spec_block` copy still needs its
+own text regardless, so it removes one copy and not all of them. **And the bound that
+settles it is `MAX_BLOCK`**, which `rule-block-v1.js` declares and this file must never
+re-spell as a number: the Z30 floor still sits ABOVE it, so every admissible directive length
+is over the shared reader's limit — but the margin NARROWED when rule 6 shrank, so re-derive
+it rather than trusting this sentence. A further obstacle is new: the directive now carries a
+substituted field, and a markdown block read at run time would have to carry the placeholder
+and the substitution with it.
 
-**The injection is now BOUNDED, and that is what makes the figures maintainable.** `Z30` in
+**The injection is BOUNDED, and that is what makes the figures maintainable.** `Z30` in
 `tests/structure/test-zen-mode.sh` measures the emitted directive through `node`
-(`String.length`, because the text carries four non-ASCII marks and `${#var}` counts bytes
-or code points depending on locale) and holds it one-sidedly: growth past the declared
+(`String.length`, because the text carries non-ASCII marks and `${#var}` counts bytes or code
+points depending on locale) and holds it one-sidedly in BOTH directions: growth past the
 ceiling fails, and so does a shrink further below it than the declared headroom, because a
-ceiling that has drifted away from its text has stopped being a tripwire. The rule 6
-rewrite took the directive from 2951 to 4664 characters — 57% — with nothing observing it.
+ceiling that has drifted away from its text has stopped being a tripwire. The rule-6 rewrite
+took the directive from 2951 to 4664 characters — 57% — with nothing observing it; the
+supplied-anchor rewrite then SHRANK it to **4208** (the static literal, placeholder included)
+and the window was re-derived to a ceiling of 4300 with 95 of headroom. **4208 is the static
+literal and 4224 is what Z30 MEASURES** — it substitutes the longest producible token for the
+placeholder first — so the realized slack is 76 rather than the 92 the static figure invites,
+and both pass. 4224 is also the figure the per-turn totals use.
 
 **Known gap, accepted:** the KB/KiB totals in `docs/architecture.md` are still hand-derived
 from that character count, so they age whenever the directive moves even though the count
-itself is now pinned. They were corrected in this change (4664 + 1764 ≈ 6.3 KB per turn),
-and the `C6` attribution error in the same paragraph — it named
-`tests/structure/test-best-solution-first.sh`, which contains no `C6` — was corrected with
-them.
+itself is pinned. They were corrected in this change (4224 + 1756 ≈ 5980 characters per turn,
+about 117 KiB over 20 turns and 351 KiB over 60). Both operands are stated in the SAME unit
+on purpose: an earlier wording summed 4224 characters with the sibling's 1764-BYTE figure.
+
+**A CLOSED chain does not mean a reviewed one, and the anchor must not say it does.**
+`chainShape` answers `chain-closed` on `chainDone === true` BEFORE it looks at any ticket
+or round, and the zero-change `--chain-done` terminus sets that flag with no ticket and no
+round — so rendering three ticks there tells the user a review finished and passed when
+none ever ran, which is presentation asserting a substantive fact and exactly what the
+zen-mode SCOPE rule forbids. The host passes `reviewed` (derived from the classifier's own
+`codeReviewDone` / `reviewRound`), and only an explicit `true` buys the ticks; anything
+else renders `✓implement ·review ·self-review`. The direction is the module's standing
+one: a reading that cannot make a false claim.
+
+**Port-relevant.** The core half is `anchorToken` / `anchorTokenSafe` / `SHAPE_POSITION` /
+`ANCHOR_STEPS` / `ANCHOR_NONE` / `ANCHOR_PREFIX` / the four marks / `ANCHOR_TOKEN_RE` /
+`reviewedFromReport`, in `hooks/lib/zen-anchor-v1.js`, together with its ONE sibling
+require — the classifier whose shapes it maps and whose stuck sets it reads, without which
+it does not load at all. `reviewedFromReport` was a HOST obligation for one round and is
+not any more: it reads classifier fields only, nothing about it is host-specific, and the
+one rule whose failure mode is a false completion claim is the last one to ask every port
+to re-derive — it was also unreachable from the module's own unit file while it lived in
+the hook. The host half is SIX obligations a port must re-decide: WHICH document carries
+the chain and which identity names it; the MODULE TRANSPORT (this host runs `node` with its
+cwd inside `hooks/lib` — the first of the two mechanisms
+`test-msys-special-plugin-module-boundaries.sh` sanctions — because the second needs a
+`zensu-host-path.sh` render and that is a second process on the hottest path in the plugin);
+the substitution into the directive AND its own independent re-check of the token (this host
+spells the grammar a second time inside its node program precisely so a swapped module
+cannot both produce a bad token and bless it); the charset belt appropriate to that host's
+transport — the module's predicate is an output-SHAPE contract, not a JSON escaping rule,
+and a port with a different transport still owes its own check; the pre-open guard on the
+document, which does TWO jobs here (this host's `readWorkflowState` CREATES the state
+directory, and its shared reader opens without `O_NONBLOCK`, so a non-regular file at the
+document path would block a per-prompt hook forever); and the operator accounts. A port that
+takes only the module gets a mapping with no reachable caller. `zensu-codex`, `zensu-kiro`
+and `zensu-antigravity` were NOT included in this change.
+
+**A NON-REGULAR document is refused before it is opened, and that guard is about blocking
+rather than tidiness.** `.zensu/state/` is writable from inside a session and no gate covers
+it while the chain is inactive, so a `mkfifo` at the workflow document's path is reachable
+from in-session. `readRegularFileSnapshot` opens `O_RDONLY|O_NOFOLLOW` and only THEN `fstat`s
+for `isFile()` — there is no `O_NONBLOCK` — so the open on a FIFO never returns, and this
+hook fires on EVERY prompt. That wedges the session with no escape from inside: the prompt
+never reaches the model, so the off-phrase branch is never evaluated either. The hook
+therefore `lstat`s the document first, and builds its path from the OWNER's newly exported
+`WORKFLOW_STATE_SEGMENTS` / `WORKFLOW_STATE_PREFIX` rather than re-spelling the layout — the
+export exists because `workflowStateFile` cannot serve a read-only pre-check: asking it for
+the path CREATES the directory. The `timeout` now on the `hooks.json` registration is BELT,
+not the fix; a killed child returns nothing, which costs that turn's off-phrase detection.
+The uncompromised fix is in the shared reader — an unconditional `lstat` pre-check plus
+`O_NONBLOCK` on POSIX, which would close the class for every caller — and it is deliberately
+NOT taken here, because that module is required by every gate and the change needs its own
+regression pass. **State the guard as a NARROWING, never as a boundary.** The `lstat` and the
+open are two syscalls against a path the session can write, so a writer that swaps the
+document between them still reaches the blocking open: an unbounded per-prompt wedge becomes
+a race the writer must win on every prompt. And the class stays open for every OTHER caller
+of that reader — `readWorkflowStateSnapshot` takes the identical path — which are merely not
+per-prompt. Whether this host lets the prompt through when a `UserPromptSubmit` hook hits its
+`timeout` is UNVERIFIED; nothing in this work measured it. `Z32d` plants a real FIFO and BOUNDS the hook, reporting a block rather than
+waiting for it: the first spelling used a command substitution with a background killer and,
+measured against a hook with the guard removed, hung past two minutes anyway, because a
+command substitution reads until every writer closes the pipe and the blocked `node` still
+held it.
+
+**ALL modules are verified before ANY is required, and the one-at-a-time spelling did not
+hold the property it claimed.** `zen-anchor-v1.js` requires `chain-recovery-v1.js` at top
+level, so verifying and requiring one module at a time loaded and EXECUTED the sibling on the
+first `require` — before its own `lstat` could refuse it. A guard that runs after the file has
+executed is not a guard. Two independent reviewers reported this in the same round.
+
+**The substitution is parameter expansion, not `sed`.** The ACTIVE directive was the only one
+of the hook's three emissions that depended on an external command, and nothing examined that
+command's exit status: an absent or failing `sed` produced empty stdout, the model received no
+zen-mode context at all, and the unconditional `exit 0` made that indistinguishable from the
+hook not running. Every other fault in that file is routed to `none`; this one was routed to
+silence. The expansions need no process, and the placeholder is held in a variable so it stays
+a literal pattern rather than a glob.
+
+**The three byte tests are a FUNCTION, `zen_anchor_sanitized`, for a coverage reason.** As
+inline `case` blocks they were unreachable from every fixture — by the time they run the value
+can only be `none`, a module-produced token, or empty — so all three could be deleted with the
+suite green. `Z33` extracts the function from the shipped hook and drives it, with the
+accepting cases first so a function that answered `none` for everything could not satisfy the
+rejections.
+
+**Known gap, accepted:** a rendered `✓review` reports what a READABLE DOCUMENT CLAIMED, never
+evidence that a review ran. `validateWorkflowState` is structural — it derives
+`session_id_hash` from the file's own name, there is no MAC, and `.zensu/state/` is writable
+from inside the session — so a forged document can put a completion line in front of a user
+this directive itself describes as working at low capacity, on every turn. The reachable
+outputs are a closed set, so this is not a text-injection channel; it is a completion SIGNAL a
+co-tenant writer controls. Authenticating it needs a persisted signal, which is a
+workflow-state schema change and therefore a `minor`, which the `patch` walk below declines.
+
+**Known gap, accepted:** the `ZENSU CHAIN ANCHOR: ` field is identified to the model by a
+fixed, guessable literal with no per-turn binding, so the same literal in content the model
+reads LATER in the turn — a repo file, a pasted diff, a fetched page — can compete with the
+injected one. It occurs in this repository's own tests. The impact is a wrong assurance line,
+not instruction hijack: the heredoc is quoted and the only substituted value is the
+closed-vocabulary token. Binding it (a per-turn nonce in the field name, named by the
+directive as the only one it may trust) is the fix and is not implemented.
+
+**Known gap, accepted:** the anchor covers the review CHAIN only — `implement`, `review`,
+`self-review`. An Autopilot run's own stages are deliberately absent, for the cyclic-versus-
+linear reason stated above, so a durable run shows the inner chain's position and not the
+outer run's. `classifyChain` supplies `linkage` and `autopilot`, so surfacing the run id is
+available and was not taken.
 
 **Version: `patch`.** Walked against §"Runtime Lineage (`version_type` is load-bearing)"
 entry by entry: no context-record or workflow-state schema field, no strict key set, no
 hook added, removed or renamed and no matcher changed, no new config key (`zenMode` and
-`zenModeDefault` are pre-existing), and no attestation change. The hook's only output is
-`additionalContext`, which is exactly the ADVISORY shape the hook-inventory exemption
-names, and it returns no `permissionDecision` in either direction. Two things read like a
-breaking change here and are not, which is why the walk is written down rather than left to
-be re-derived: the runtime digest DOES move, because `manifestRuntimeEntries` folds `hooks`
-and `docs` in wholesale — but `readContextInternal` measures the RECORDED root — and the
-directive is stateless, re-emitted from the executing tree on every prompt, so nothing
-persisted crosses the upgrade. The only per-session artefact zen-mode owns is the
-`{"active":true|false}` marker, whose shape is untouched. Choosing `minor` would be
-actively harmful rather than merely wasteful: while the plugin is at major `0` the minor is
-the breaking axis, so it would refuse every in-flight session until the user ran
-`/zensu:adopt-session --confirm`.
+`zenModeDefault` are pre-existing, and this change deliberately adds none), and no
+attestation change. The hook's only output is `additionalContext`, which is exactly the
+ADVISORY shape the hook-inventory exemption names, and it returns no `permissionDecision` in
+either direction. The hook now READS the workflow document; it writes nothing to it, so no
+persisted shape moves. Two later additions were walked separately and neither moves the
+verdict: a `timeout` key on the existing `hooks.json` registration is not a hook added,
+removed or renamed and not a matcher change, and the two new exports on
+`session-control-core-v1.js` (`WORKFLOW_STATE_SEGMENTS`, `WORKFLOW_STATE_PREFIX`) are
+additive — an older runtime that does not read them is unaffected, and no validator gains a
+key. Two things read like a breaking change here and are not, which is why
+the walk is written down rather than left to be re-derived: the runtime digest DOES move,
+because `manifestRuntimeEntries` folds `hooks` and `docs` in wholesale — but
+`readContextInternal` measures the RECORDED root — and the directive is re-emitted from the
+executing tree on every prompt, so nothing persisted crosses the upgrade. The only
+per-session artefact zen-mode owns is the `{"active":true|false}` marker, whose shape is
+untouched. Choosing `minor` would be actively harmful rather than merely wasteful: while the
+plugin is at major `0` the minor is the breaking axis, so it would refuse every in-flight
+session until the user ran `/zensu:adopt-session --confirm`.
 
 ## Pull Request Workflow
 
