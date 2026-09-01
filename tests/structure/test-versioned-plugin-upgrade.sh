@@ -2437,6 +2437,15 @@ fi
 # routing it back through the FAILURE branch — reporting a completed adoption as
 # an anomaly — would have been invisible. The fixture already exists: the same
 # .zensu-less project TEST-4 just proved the bare form leaves alone.
+#
+# The EXPECTATION moved with the workflow-baseline repair, and the move is the
+# point rather than a rename. This branch used to close with "That is a normal
+# state, not a fault", which adoptableRecord condition 6 makes reachable together
+# with a MISSING baseline — so the report read fully successful while the
+# capability gate then denied every later tool call for the one reason the report
+# had just called normal. The adoption is still NOT a fault and must still be
+# announced as ADOPTED; what changed is that the missing document is now named as
+# the wedge it is, with the command that clears it.
 INERT_CONFIRM_OUT="$TMP/adopt-inert-confirm.out"
 if CLAUDE_CODE_SESSION_ID="$INERT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
     CLAUDE_PROJECT_DIR="$INERT_PROJECT" \
@@ -2444,10 +2453,13 @@ if CLAUDE_CODE_SESSION_ID="$INERT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
     >"$INERT_CONFIRM_OUT" 2>&1 \
     && grep -qF 'ADOPTED' "$INERT_CONFIRM_OUT" \
     && grep -qF 'provenance       : no-workflow-document' "$INERT_CONFIRM_OUT" \
-    && grep -qF 'had no workflow document' "$INERT_CONFIRM_OUT"; then
-  check "AC-C10 a session with no workflow document adopts and says so, rather than reporting a fault" PASS
+    && grep -qF 'has NO workflow document' "$INERT_CONFIRM_OUT" \
+    && grep -qF 'denies EVERY tool' "$INERT_CONFIRM_OUT" \
+    && grep -qF -- '--confirm to rebuild the document' "$INERT_CONFIRM_OUT" \
+    && ! grep -qF 'normal state, not a fault' "$INERT_CONFIRM_OUT"; then
+  check "AC-C10 a session with no workflow document adopts, and the missing document is named as a wedge rather than as normal" PASS
 else
-  check "AC-C10 a session with no workflow document adopts and says so, rather than reporting a fault" FAIL
+  check "AC-C10 a session with no workflow document adopts, and the missing document is named as a wedge rather than as normal" FAIL
   head -c 400 "$INERT_CONFIRM_OUT" 2>/dev/null
 fi
 
@@ -2902,7 +2914,11 @@ BASELINE_DIRECT_OUT="$(
     . "$1/hooks/lib/zensu-session.sh"
     . "$1/hooks/lib/zensu-tdd-phase.sh"
     sid="$(zensu_resolve_session_id "$2")" || { echo "resolve-failed"; exit 0; }
-    sf="$(tdd_state_file "$sid")" || { echo "statefile-failed"; exit 0; }
+    # The state file is passed IN rather than derived. tdd_state_file resolves the
+    # project root through the session binder, which is a second thing that can
+    # fail for reasons unrelated to the guards under test — and this row is about
+    # the guards, not about path resolution.
+    sf="$3"
     rc_pub_phase=0;  tdd_write_phase "$sid" forged BASELINE_REBUILT >/dev/null 2>&1 || rc_pub_phase=$?
     rc_pub_reason=0; tdd_write_phase "$sid" forged IMPL "baseline-rebuilt: forged" >/dev/null 2>&1 || rc_pub_reason=$?
     rc_crit_phase=0
@@ -2911,7 +2927,7 @@ BASELINE_DIRECT_OUT="$(
     _tdd_write_phase_critical "$sf" "$sid" forged IMPL "baseline-rebuilt: forged" >/dev/null 2>&1 || rc_crit_reason=$?
     rc_control=0;    tdd_write_phase "$sid" control IMPL "ordinary reason" >/dev/null 2>&1 || rc_control=$?
     echo "$rc_pub_phase:$rc_pub_reason:$rc_crit_phase:$rc_crit_reason:$rc_control"
-  ' _ "$SYNTHETIC_COMPATIBLE_ROOT" "$SESSION" 2>/dev/null
+  ' _ "$SYNTHETIC_COMPATIBLE_ROOT" "$SESSION" "$BASELINE_DOC" 2>/dev/null
 )"
 BASELINE_DIRECT_ENTRIES="$(
   DOC="$BASELINE_DOC" node -e '
