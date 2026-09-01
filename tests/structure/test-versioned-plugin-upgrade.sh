@@ -2446,17 +2446,29 @@ fi
 # had just called normal. The adoption is still NOT a fault and must still be
 # announced as ADOPTED; what changed is that the missing document is now named as
 # the wedge it is, with the command that clears it.
+#
+# The needles are matched against a NEWLINE-FLATTENED copy of the report rather
+# than against the file, and that is load-bearing rather than tidy: the renderer
+# hard-wraps its warning paragraph, so "denies EVERY tool" is split across two
+# lines and a line-scoped `grep -F` can NEVER match it. Written line-scoped, this
+# check could only ever fail — and it did, silently pinning wording that had
+# already moved ("has NO workflow document" became "no usable workflow document"
+# when the UNSAFE branch landed). Pinning the SENTENCE keeps the assertion honest
+# across a re-wrap; pinning the line breaks pins the typography instead.
 INERT_CONFIRM_OUT="$TMP/adopt-inert-confirm.out"
-if CLAUDE_CODE_SESSION_ID="$INERT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
-    CLAUDE_PROJECT_DIR="$INERT_PROJECT" \
-    bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
-    >"$INERT_CONFIRM_OUT" 2>&1 \
-    && grep -qF 'ADOPTED' "$INERT_CONFIRM_OUT" \
-    && grep -qF 'provenance       : no-workflow-document' "$INERT_CONFIRM_OUT" \
-    && grep -qF 'has NO workflow document' "$INERT_CONFIRM_OUT" \
-    && grep -qF 'denies EVERY tool' "$INERT_CONFIRM_OUT" \
-    && grep -qF -- '--confirm to rebuild the document' "$INERT_CONFIRM_OUT" \
-    && ! grep -qF 'normal state, not a fault' "$INERT_CONFIRM_OUT"; then
+CLAUDE_CODE_SESSION_ID="$INERT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+  CLAUDE_PROJECT_DIR="$INERT_PROJECT" \
+  bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+  >"$INERT_CONFIRM_OUT" 2>&1
+INERT_CONFIRM_RC=$?
+INERT_CONFIRM_FLAT="$(tr '\n' ' ' <"$INERT_CONFIRM_OUT" 2>/dev/null || printf '')"
+if [ "$INERT_CONFIRM_RC" -eq 0 ] \
+    && printf '%s' "$INERT_CONFIRM_FLAT" | grep -qF 'ADOPTED' \
+    && printf '%s' "$INERT_CONFIRM_FLAT" | grep -qF 'provenance       : no-workflow-document' \
+    && printf '%s' "$INERT_CONFIRM_FLAT" | grep -qF 'no usable workflow document' \
+    && printf '%s' "$INERT_CONFIRM_FLAT" | grep -qF 'denies EVERY tool in this session' \
+    && printf '%s' "$INERT_CONFIRM_FLAT" | grep -qF -- '--confirm to rebuild the document' \
+    && ! printf '%s' "$INERT_CONFIRM_FLAT" | grep -qF 'normal state, not a fault'; then
   check "AC-C10 a session with no workflow document adopts, and the missing document is named as a wedge rather than as normal" PASS
 else
   check "AC-C10 a session with no workflow document adopts, and the missing document is named as a wedge rather than as normal" FAIL
