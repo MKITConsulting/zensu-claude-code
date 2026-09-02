@@ -116,6 +116,51 @@ if [ "$RESOLVED_HOME" != "$FAKE" ]; then
 fi
 check "V0 os.homedir() follows the synthetic HOME, so every fixture below is read instead of the real machine" PASS
 
+# V0b — the WC block runs trail.mjs under its OWN synthetic home ($CONT_HOME, the
+# canonical spelling), and every one of those invocations has to redirect the same
+# PAIR trailrun does. The probe above measures the pair, so a block that sets only
+# HOME is NOT skipped on Windows — it runs, `os.homedir()` keeps pointing at the
+# real profile, the fixture session is not found, and every check inside fails for
+# a reason unrelated to what it names. Counted out of the source rather than
+# asserted per call site: an invocation added later without the pair fails here
+# instead of on the next weekly Windows run. Both needles are assembled with
+# backslashes so this check cannot match itself.
+V0B_H_NEEDLE="HOME=\"\$CONT_HOME\""
+V0B_U_NEEDLE="USERPROFILE=\"\$CONT_HOME\""
+V0B_SELF="$PLUGIN_DIR/tests/structure/test-session-trail-verdict.sh"
+V0B_H="$(grep -oF -- "$V0B_H_NEEDLE" "$V0B_SELF" | wc -l | tr -d ' ')"
+V0B_U="$(grep -oF -- "$V0B_U_NEEDLE" "$V0B_SELF" | wc -l | tr -d ' ')"
+if [ "${V0B_H:-0}" -gt 0 ] && [ "${V0B_H:-0}" = "${V0B_U:-0}" ]; then
+  check "V0b every \$CONT_HOME invocation redirects USERPROFILE too, so the WC block measures the fixture on Windows" PASS
+else
+  check "V0b \$CONT_HOME redirections disagree: HOME=${V0B_H:-0} USERPROFILE=${V0B_U:-0} — every HOME redirection in the WC block needs USERPROFILE beside it" FAIL
+fi
+
+# V0c — CLAUDE.md carried TWO paragraphs about this suite on Windows and they said
+# opposite things: one that the WC block "will therefore run on Windows", the other
+# that this suite "redirects HOME and therefore skips itself whole on Windows". The
+# second is the stale one, and V0 above is the evidence — `trailrun` sets USERPROFILE
+# beside HOME and the probe measures the PAIR, so the redirection succeeds and the
+# suite does not skip. Graded from HERE because this suite is the claim's subject: a
+# reader who trusts the stale sentence concludes the block is unverifiable on Windows
+# when it is merely unmeasured, which is the opposite conclusion.
+V0C_STALE_NEEDLE='skips itself whole on Windows'
+V0C_MD="$PLUGIN_DIR/CLAUDE.md"
+if [ ! -f "$V0C_MD" ]; then
+  skip "V0c CLAUDE.md is not present in this tree, so the cross-file claim cannot be graded"
+elif grep -qF -- "$V0C_STALE_NEEDLE" "$V0C_MD"; then
+  check "V0c CLAUDE.md still says this suite skips itself whole on Windows, which V0 contradicts" FAIL
+else
+  check "V0c CLAUDE.md no longer claims this suite skips itself on Windows" PASS
+fi
+
+# The control for V0c's negative half: the needle must still match the wording it
+# forbids, or the check above passes for the wrong reason.
+case "Its sibling test-session-trail-verdict.sh redirects HOME and therefore $V0C_STALE_NEEDLE, where os.homedir() reads USERPROFILE." in
+  *"$V0C_STALE_NEEDLE"*) check "V0c-control the stale-claim needle still matches the wording it forbids" PASS ;;
+  *) check "V0c-control the stale-claim needle matches nothing — V0c is inert" FAIL ;;
+esac
+
 # ── Fixture builder ─────────────────────────────────────────────────────────
 # Written as a script rather than inlined per case: the transcripts need real
 # mtimes and real ISO timestamps, and `touch -t` / `date -d` spell those
@@ -124,15 +169,20 @@ cat > "$FAKE/mkfix.mjs" <<'MKFIX'
 import fs from 'node:fs';
 import path from 'node:path';
 
-// argv: home sessionId pid idleMin lastKind queueMode
-const [home, sessionId, pidRaw, idleRaw, lastKind, queueMode] = process.argv.slice(2);
+// argv: home sessionId pid idleMin lastKind queueMode [cwdOverride]
+// The override exists because the derived cwd is always a DIRECT child of
+// `<home>/work`, and one arm needs a recorded cwd that is a real SUBDIRECTORY of a
+// worktree — the shape SKILL.md calls ordinary and that no fixture could otherwise
+// produce. `home` still decides where the transcript is written, so it cannot be
+// repurposed for this: `show` reads transcripts from os.homedir() alone.
+const [home, sessionId, pidRaw, idleRaw, lastKind, queueMode, cwdOverride] = process.argv.slice(2);
 const pid = Number(pidRaw);
 const idleMin = Number(idleRaw);
 const now = Date.now();
 const mtime = now - idleMin * 60000;
 const iso = (ms) => new Date(ms).toISOString();
 
-const cwd = path.join(home, 'work', `wt-${sessionId.slice(0, 8)}`);
+const cwd = cwdOverride || path.join(home, 'work', `wt-${sessionId.slice(0, 8)}`);
 const slug = cwd.replace(/[^A-Za-z0-9]/g, '-');
 const dir = path.join(home, '.claude', 'projects', slug);
 fs.mkdirSync(dir, { recursive: true });
@@ -1118,8 +1168,16 @@ done
 # `lineage` field did. Kept with this branch's `mutant_path`, because a mutated copy
 # loose in $FAKE cannot LOAD -- trail.mjs statically imports its sibling module.
 W7B_MUT="$(mutant_path w7b)"
-sed 's/writes: writeAnchor(r\.wt), //' "$TRAIL_MJS" > "$W7B_MUT" 2>/dev/null
-if grep -qF 'writes: writeAnchor(r.wt),' "$W7B_MUT" 2>/dev/null \
+# The needle keys on the payload KEY and accepts any single-expression value, rather
+# than on one spelling of the value. It was `writes: writeAnchor(r.wt), ` verbatim,
+# and it went inert — reporting PRESENT with nothing mutated — the moment the call
+# was hoisted to a local so a second field could reuse the same measured object.
+# That is the third time a pin here nailed a SPELLING and broke on a change that
+# strengthened what it protects; the guard below now tests the mutation's own
+# postcondition (no payload carries a `writes:` key any more) instead of asserting
+# the old text is gone, so it cannot pass while the sed matched nothing.
+sed -E 's/writes: [A-Za-z_][A-Za-z0-9_.]*(\([^)]*\))?, //' "$TRAIL_MJS" > "$W7B_MUT" 2>/dev/null
+if grep -qE 'writes: [A-Za-z_]' "$W7B_MUT" 2>/dev/null \
   || ! grep -qF 'takeover: tv,' "$W7B_MUT" 2>/dev/null; then
   W7B_BAD="$W7B_BAD bite-mutation-did-not-apply(payload-spelling-moved)"
 else
@@ -1282,9 +1340,10 @@ else
   check "W8b plain-text path bounding:$W8B_BAD" FAIL
 fi
 
-# W9 — `briefShellArg`, the helper that guards the FOUR runnable command lines.
-# This check drives the two BRIEF ones; `printResume`'s two `show` prints are
-# covered structurally by T29's `bad_cd_carriers`, which greps both emitters. It had
+# W9 — `briefShellArg`, the helper that guards the FIVE runnable command lines.
+# This check drives the two BRIEF ones; `printResume`'s two `show` prints and
+# `continuationPlan`'s `already-contained` line are covered structurally by T29's
+# `bad_cd_carriers`, which greps the emitters rather than enumerating them. It had
 # no assertion of its own: swapping it back to `briefPath` kept every other check
 # green, because T29's exemption list accepts either helper and W8's fixture plants
 # no shell metacharacter. The property is quoting, so the fixture must carry the
@@ -2211,7 +2270,7 @@ fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
   # widened this class with `\p{Mn}\p{Me}` — ordinary COMBINING MARKS, which is the
   # normal on-disk (NFD) spelling of any accented name on macOS. That rewrote
   # `…/Café/wt` to `…/Cafe /wt`, a directory that does not exist, and `briefShellArg`
-  # builds the four runnable `cd` lines from the same class while its own header fixes
+  # builds the five runnable `cd` lines from the same class while its own header fixes
   # the contract as byte-exact. A combining mark neither reorders nor hides a line, so
   # it buys no display safety and costs only exactness; the bound belongs to `\p{Cf}`,
   # whose members are what actually reorder or vanish.
@@ -3054,6 +3113,827 @@ elif [ "$WT8_N" != "$WT8_UNIQ" ]; then
   check "WT8-ids two fixture ids share an 8-char prefix ($WT8_N ids, $WT8_UNIQ distinct) — they share one cwd and the gone-leg cases stop discriminating" FAIL
 else
   check "WT8-ids all $WT8_N worktree-advice fixture ids hold distinct 8-char prefixes, so no two share a cwd" PASS
+fi
+
+# ===========================================================================
+# CONTINUE — the continuation-worktree plan (WC*)
+# ===========================================================================
+# WINDOWS IS UNMEASURED HERE, WHICH IS NOT THE SAME AS UNREACHABLE — an earlier
+# wording of this header said "no shard runs it" and that was wrong. This suite is
+# in the `excluded` list of tests/profiles/windows-native-structure.v1.json and
+# absent from windows-ci.v1.json, so the BLOCKING PR shards skip it; but it IS in
+# `ciStructureTests` in tests/profiles/promptfoo-local-only.v1.json, and the weekly
+# windows-safety run executes it. So this block WILL run on Windows, it has simply
+# never done so yet — and it is the first case in this file to create a real git
+# repository and worktree, which is new platform surface and new wall clock for a
+# suite whose Windows runtime nobody has measured. Both preconditions below SKIP
+# rather than fail for exactly that reason: a git that will not build the fixture,
+# or a filesystem whose canonical spelling differs, is an environment property, not
+# a defect in what these arms test.
+#
+# These fixtures need a REAL git worktree on disk, which no other case in this
+# file does. `continuationPlan` takes its base branch ONLY from a live gitState
+# read of the source worktree, and mkfix.mjs writes transcripts and registry
+# records while creating no directory at all — so against the ordinary fixtures
+# every escaping case answers `branch-unresolved`, and the one branch that renders
+# commands would have no coverage anywhere. The repo is therefore built at the
+# exact path mkfix.mjs derives, `$FAKE/work/wt-<first 8 of the session id>`, which
+# is what lets a single ordinary fixture session point into it.
+#
+# The block anchors itself on the CANONICAL spelling of $FAKE, which every other
+# case here can ignore and this one cannot. `containment` answers `null` when a
+# target's literal and resolved spellings disagree, and on macOS `mktemp -d` hands
+# back `/var/folders/…` for a directory the kernel calls `/private/var/folders/…`.
+# The ordinary fixtures never touch that: their worktrees do not exist, so
+# `realpathSync` throws and both sides keep the lexical spelling. Creating a real
+# one made every arm below degrade to `CONTINUE unknown` — a whole block reporting
+# on `ambiguous-spelling` instead of on containment. WC0 asserts the premise rather
+# than trusting it, because the degradation is silent and reads like a verdict.
+SID_C=cccccccc-0000-0000-0000-000000000001
+SID_D=dddddddd-0000-0000-0000-000000000001
+SID_E=eeeeeeee-0000-0000-0000-000000000001
+CONT_HOME="$(cd "$FAKE" && pwd -P 2>/dev/null || printf '%s' "$FAKE")"
+CONT_WT="$CONT_HOME/work/wt-cccccccc"
+CONT_DETACHED="$CONT_HOME/work/wt-dddddddd"
+CONT_REPO="$CONT_HOME/contrepo"
+CONT_BRANCH=claude/cont-fixture
+# The anchor is a SIBLING WORKTREE OF THE SAME REPOSITORY, not a bare directory.
+# It has to be: `continuationPlan` compares `repoRootOf(src)` against
+# `repoRootOf(anchor)` and withholds the plan as `cross-repository` when they
+# differ, because the base ref is measured in the source and resolved in the anchor's
+# repository — where a same-named branch would silently name a different commit. A
+# plain `mkdir` anchor (the first spelling of this fixture) therefore exercised the
+# refusal, not the plan. It is a SIBLING so containment still fails, which is the
+# other half of what every arm below needs.
+CONT_ANCHOR="$CONT_HOME/anchorwt"
+CONT_FOREIGN="$CONT_HOME/foreignrepo"
+CONT_GIT=0
+CONT_OK=0
+command -v git >/dev/null 2>&1 && CONT_GIT=1
+mkdir -p "$CONT_HOME/work"
+if [ "$CONT_GIT" = 1 ] \
+  && git init -q "$CONT_REPO" >/dev/null 2>&1 \
+  && git -C "$CONT_REPO" -c user.email=t@example.invalid -c user.name=t commit -q --allow-empty -m base >/dev/null 2>&1 \
+  && git -C "$CONT_REPO" worktree add -q "$CONT_WT" -b "$CONT_BRANCH" >/dev/null 2>&1 \
+  && git -C "$CONT_REPO" worktree add -q "$CONT_ANCHOR" -b claude/anchor-fixture >/dev/null 2>&1 \
+  && git -C "$CONT_REPO" worktree add -q --detach "$CONT_DETACHED" >/dev/null 2>&1 \
+  && git init -q "$CONT_FOREIGN" >/dev/null 2>&1 \
+  && git -C "$CONT_FOREIGN" -c user.email=t@example.invalid -c user.name=t commit -q --allow-empty -m base >/dev/null 2>&1; then
+  CONT_OK=1
+fi
+
+# The canonicality premise is a PRECONDITION, not an assertion. `containment`
+# answers null when a target's literal and resolved spellings disagree, so on such a
+# filesystem every arm below would silently measure `ambiguous-spelling` instead of
+# what it names. Failing there would report an environment property as a defect —
+# and would redden the weekly Windows run for a reason unrelated to this feature.
+if [ "$CONT_OK" = 1 ] && [ "$(cd "$CONT_WT" && pwd -P 2>/dev/null)" != "$CONT_WT" ]; then
+  CONT_OK=2
+fi
+
+if [ "$CONT_OK" = 2 ]; then
+  skip "WC* the fixture worktree's literal and resolved spellings disagree on this filesystem — containment cannot be decided and every arm would test ambiguous-spelling instead"
+elif [ "$CONT_GIT" != 1 ]; then
+  # The ONLY skip-worthy cause: no git at all. Everything else the fixture needs is
+  # this suite's own doing.
+  skip "WC* git is not on PATH — the continuation block needs a real repository and is unverified in this run"
+elif [ "$CONT_OK" != 1 ]; then
+  # git is present and the fixture still failed, so this is a REGRESSION in the
+  # fixture, not an environment limitation. A skip here would let the whole block
+  # vanish while the suite still exited 0 — 17 checks reading as coverage that never
+  # ran, which is the failure mode this file repairs over and over.
+  check "WC-fixture git is available but the continuation fixture could not be built — the whole WC block would silently not run" FAIL
+else
+  # Built with the CANONICAL home, not through `fix()`: mkfix.mjs derives the
+  # session's cwd from the home ARGUMENT, so passing $FAKE would record the
+  # `/var/folders/…` spelling into the transcript and reintroduce exactly the
+  # ambiguity WC0 exists to exclude.
+  if ! CONT_ERR="$(HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$FAKE/mkfix.mjs" "$CONT_HOME" "$SID_C" "$DEAD_PID" 60 end_turn none 2>&1 >/dev/null)"; then
+    check "WC-fixture build failed for '$SID_C': ${CONT_ERR:-<no stderr>}" FAIL
+  fi
+
+  # The positive control for the precondition above: reaching this arm at all means
+  # the premise held, and stating it keeps "the block ran" distinguishable from "the
+  # block was skipped" in a log a reader scans for WC lines.
+  check "WC0 the fixture worktree is spelled canonically, so containment is decidable and the arms below measure what they name" PASS
+
+  # Every invocation clears BOTH environment channels, so a developer running this
+  # suite from inside a Zensu session cannot have their own ZENSU_PROJECT_ROOT
+  # decide an arm. The anchor under test is passed explicitly or not at all.
+  cshow() { env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$TRAIL_MJS" show "$SID_C" --all "$@" 2>/dev/null; }
+  # -A32 yields a 33-line window (the match plus 32). The `ready` branch — the longest
+  # of the seven — renders 23 lines, measured 2026-08-28 by counting the block in real
+  # output, so the slack is 10. Re-derive it that way rather than trusting this number:
+  # -A24 was down to three lines after ONE clarifying sentence, and a truncation is
+  # silent here because every arm below is a presence check. Unlike `writes_block`'s
+  # -A4 window this one may grow — having its own head is what buys that.
+  #
+  # It also SLICES at the first `--- ` banner. Without that the window spills into
+  # `--- PROMPT TIMELINE ---` and `printResume`, which emits its own
+  # `git worktree add <path> <branch>` line when the worktree is missing — so every
+  # ABSENCE arm below would be reading a neighbour's output for the needle it forbids.
+  cont_block() { grep -E -A32 '^CONTINUE' | awk '/^--- /{exit} {print}' || true; }
+
+  # `CARRY_OVER`'s own text, extracted once and used by every arm below that has to
+  # reason about the recipe. Each array element is a JS string LITERAL, so its own
+  # delimiters come off before the escapes are unwound — otherwise the closing quote
+  # lands beside the recipe's own and the extraction manufactures the '' that WC1b
+  # forbids. The trailing comma and the closing quote are stripped as two independent
+  # steps: one combined expression would eat a comma that legitimately ends a sentence.
+  C_CARRY="$(awk '/^const CARRY_OVER = \[/{f=1;next} f && /^\];$/{exit} f{print}' "$TRAIL_MJS" \
+    | sed -e "s/^[[:space:]]*'//" -e "s/,$//" -e "s/'$//" -e "s/\\\\'/'/g")"
+
+  # The re-authoring guard, DERIVED from the recipe instead of hand-listed. It prints
+  # every `CARRY_OVER` command line that appears verbatim in the block handed to it,
+  # and nothing when the block only POINTS at the recipe.
+  #
+  # A command line is one indented two spaces inside the recipe — the same convention
+  # `WORKTREE_ADVICE_COMMAND` uses one function over. The LENGTH FLOOR is a stated
+  # bound, not a detail: `done` and other short fragments would match ordinary prose
+  # and report a re-inline that is not there, so lines under 12 characters are not
+  # forbidden. That leaves the loop's own closers uncovered, which is acceptable —
+  # they carry none of the safety properties, and every line that does is far longer.
+  recipe_reinlined() {
+    printf '%s\n' "$C_CARRY" | grep '^  ' | sed 's/^  //' | awk 'length($0) >= 12' \
+      | while IFS= read -r rc; do
+          case "$1" in *"$rc"*) printf '%s\n' "$rc" ;; *) ;; esac
+        done
+  }
+
+  C_READY="$(cshow --anchor "$CONT_ANCHOR" | cont_block)"
+  WC1_BAD=""
+  case "$C_READY" in "CONTINUE ready"*) ;; *) WC1_BAD="$WC1_BAD not-ready" ;; esac
+  case "$C_READY" in *"$CONT_ANCHOR/.claude/worktrees/cont-fixture-cont"*) ;; *) WC1_BAD="$WC1_BAD no-target-path" ;; esac
+  # `--` before the positionals: shell quoting protects the shell, not git's own option
+  # parser, and the trailing commit-ish arrives verbatim from another repository's refs.
+  # The start-point is a FULL ref. A bare name shares one namespace with tags, and the
+  # cross-repository guard now guarantees the two live in the SAME namespace.
+  case "$C_READY" in *"-b 'claude/cont-fixture-cont' -- '"*"' 'refs/heads/claude/cont-fixture'"*) ;; *) WC1_BAD="$WC1_BAD wrong-branch-operands" ;; esac
+  # The carry-over half is `CARRY_OVER`'s, and this block POINTS at it rather than
+  # re-authoring it. Graded in BOTH directions, because a presence check alone would
+  # pass a block that names the recipe and then inlines a shorter one beside it: the
+  # recipe's own command literals must be ABSENT here. A second spelling of that half
+  # is how its safety properties get lost one at a time — the config flags that stop a
+  # textconv, diff.external or fsmonitor driver executing, `--binary`, `mktemp`, and
+  # the symlink check positioned between the diff and the apply.
+  case "$C_READY" in *"\`CARRY_OVER\`"*) ;; *) WC1_BAD="$WC1_BAD no-carry-over-pointer" ;; esac
+  WC1_REINLINED="$(recipe_reinlined "$C_READY" | head -3 | tr '\n' '|')"
+  [ -z "$WC1_REINLINED" ] || WC1_BAD="$WC1_BAD recipe-reauthored:$WC1_REINLINED"
+  # The two operands `CARRY_OVER` ships as placeholders and cannot compute. Without
+  # them the pointer sends a reader to a recipe they still have to fill in by hand,
+  # which is the whole gap this block exists to close.
+  case "$C_READY" in *"'<their worktree>' = "*) ;; *) WC1_BAD="$WC1_BAD no-source-operand" ;; esac
+  case "$C_READY" in *"'<your new worktree>' = "*) ;; *) WC1_BAD="$WC1_BAD no-target-operand" ;; esac
+  [ -z "$WC1_BAD" ] \
+    && check "WC1 an escaping worktree with a trusted anchor renders a full continuation plan" PASS \
+    || check "WC1 continuation plan incomplete or wrong:$WC1_BAD" FAIL
+
+  # The slug strips a leading `claude/` before it reaches a branch name AND a
+  # directory name. Without the strip both read `claude/claude-cont-fixture-cont`,
+  # which is not wrong so much as a name nobody would type twice.
+  case "$C_READY" in
+    *claude-cont-fixture-cont*) check "WC1a the leading claude/ is not folded into the slug (found claude-cont-fixture-cont)" FAIL ;;
+    *) check "WC1a the source branch's leading claude/ is stripped before the slug is built" PASS ;;
+  esac
+
+  # WC1b — the two operands are SUBSTITUTED into placeholders `CARRY_OVER` already
+  # QUOTES, so the block has to name each placeholder in the spelling the recipe
+  # carries, quotes included. Replacing the bare `<their worktree>` with a value
+  # that brings its own quotes yields ''/abs/path'': the shell concatenates that
+  # into ONE word, which is EMPTY for a path containing a space, and runs a
+  # fragment of the path as a command. Derived from the recipe rather than
+  # hand-listed — the JS escapes are unwound and the shape is read off
+  # `CARRY_OVER` itself — so a change to its quoting fails here instead of
+  # silently making this block's instruction wrong.
+  WC1B_BAD=""
+  [ -n "$C_CARRY" ] || WC1B_BAD="$WC1B_BAD carry-over-not-extracted"
+  for C_PH in '<their worktree>' '<your new worktree>'; do
+    case "$C_CARRY" in *"'$C_PH'"*) ;; *) WC1B_BAD="$WC1B_BAD recipe-unquoted:$C_PH" ;; esac
+    case "$C_READY" in *"'$C_PH' = "*) ;; *) WC1B_BAD="$WC1B_BAD operand-spelling:$C_PH" ;; esac
+  done
+  case "$C_READY" in *"''"*) WC1B_BAD="$WC1B_BAD adjacent-quotes" ;; *) ;; esac
+  [ -z "$WC1B_BAD" ] \
+    && check "WC1b each operand names its CARRY_OVER placeholder in the recipe's own quoted spelling" PASS \
+    || check "WC1b operand/placeholder shape mismatch:$WC1B_BAD" FAIL
+
+  # WC1c — the same property measured on a path that actually needs it, and
+  # measured by PERFORMING the substitution the block instructs rather than by
+  # eyeballing its shape. Every other fixture here has a space-free path, which is
+  # exactly why the defect survived: adjacent quotes concatenate silently for an
+  # ordinary path and only collapse when one carries a space. The anchor is built
+  # on its own rather than in the fixture chain, so a filesystem that cannot carry
+  # the name SKIPs this one arm instead of failing the whole block.
+  CONT_ANCHOR_SP="$CONT_HOME/anchor wt"
+  if git -C "$CONT_REPO" worktree add -q "$CONT_ANCHOR_SP" -b claude/anchor-space >/dev/null 2>&1; then
+    C_SPACE="$(cshow --anchor "$CONT_ANCHOR_SP" | cont_block)"
+    C_SP_TARGET="$CONT_ANCHOR_SP/.claude/worktrees/cont-fixture-cont"
+    C_OP_S="$(printf '%s\n' "$C_SPACE" | grep -F "'<their worktree>' = " | head -1 | sed "s/^.*'<their worktree>' = //")"
+    C_OP_T="$(printf '%s\n' "$C_SPACE" | grep -F "'<your new worktree>' = " | head -1 | sed "s/^.*'<your new worktree>' = //")"
+    C_ASSIGN="$(printf '%s\n' "$C_CARRY" | grep -F "SRC='<their worktree>'" | head -1)"
+    WC1C_BAD=""
+    case "$C_SPACE" in "CONTINUE ready"*) ;; *) WC1C_BAD="$WC1C_BAD not-ready" ;; esac
+    [ -n "$C_OP_S" ] || WC1C_BAD="$WC1C_BAD source-operand-not-extractable"
+    [ -n "$C_OP_T" ] || WC1C_BAD="$WC1C_BAD target-operand-not-extractable"
+    [ -n "$C_ASSIGN" ] || WC1C_BAD="$WC1C_BAD recipe-assignment-not-found"
+    if [ -z "$WC1C_BAD" ]; then
+      # The pattern is held in a VARIABLE, not written inline: shell quote removal
+      # strips a literal `'…'` in pattern position, so an inline spelling replaces
+      # the BARE placeholder inside the recipe's own quotes and manufactures the
+      # very ''…'' this arm exists to forbid. Unquoted here on purpose — the
+      # pattern carries no glob metacharacter, so it matches literally.
+      C_PH_SQ="'<their worktree>'"
+      C_PH_TQ="'<your new worktree>'"
+      C_SUB="${C_ASSIGN//$C_PH_SQ/$C_OP_S}"
+      C_SUB="${C_SUB//$C_PH_TQ/$C_OP_T}"
+      case "$C_SUB" in *"''"*) WC1C_BAD="$WC1C_BAD substitution-yields-adjacent-quotes" ;; *) ;; esac
+      case "$C_SUB" in *"DST='$C_SP_TARGET'"*) ;; *) WC1C_BAD="$WC1C_BAD target-not-one-quoted-word" ;; esac
+    fi
+    [ -z "$WC1C_BAD" ] \
+      && check "WC1c substituting the printed operands into the recipe's own assignment keeps a space-carrying path one quoted word" PASS \
+      || check "WC1c space-carrying anchor mishandled:$WC1C_BAD" FAIL
+  else
+    skip "WC1c the fixture could not create a worktree whose path contains a space on this filesystem"
+  fi
+
+  # WC1d — step 1's remedy points the reader at the later steps by NUMBER, and the
+  # fourth of them disappeared when the carry-over half became a pointer to
+  # `CARRY_OVER`. A reference to a step the block does not render reads as though an
+  # output line were missing. Derived rather than pinned to a literal: the highest
+  # number any `steps …` reference names may not exceed the highest number the block
+  # actually renders, so the two move together whatever the wording.
+  WC1D_MAX="$(printf '%s\n' "$C_READY" | sed -n 's/^ *\([0-9][0-9]*\)\. .*/\1/p' | sort -n | tail -1)"
+  WC1D_HI="$(printf '%s\n' "$C_READY" | grep -oE 'steps [0-9]+[^.]*' | grep -oE '[0-9]+' | sort -n | tail -1)"
+  WC1D_BAD=""
+  [ -n "$WC1D_MAX" ] || WC1D_BAD="$WC1D_BAD no-step-numbers-rendered"
+  [ -n "$WC1D_HI" ] || WC1D_BAD="$WC1D_BAD no-step-reference-found"
+  if [ -n "$WC1D_MAX" ] && [ -n "$WC1D_HI" ] && [ "$WC1D_HI" -gt "$WC1D_MAX" ]; then
+    WC1D_BAD="$WC1D_BAD reference-names-step-$WC1D_HI-but-only-$WC1D_MAX-are-rendered"
+  fi
+  [ -z "$WC1D_BAD" ] \
+    && check "WC1d the block's own step reference names no step it does not render" PASS \
+    || check "WC1d step reference wrong:$WC1D_BAD" FAIL
+
+  # WC1e — the re-authoring guard's forbidden set has to be DERIVED from `CARRY_OVER`,
+  # not hand-listed. The hand-listed spelling named three literals, one of which
+  # (`tar -C`) is a spelling the recipe has never had — its untracked half is an
+  # `ls-files -z | while read | cp` loop — while the two lines that actually WRITE,
+  # `git apply --stat` and `git apply && rm -f`, were forbidden by nothing. A re-inline
+  # carrying exactly the destructive half was caught by nothing while WC1 went on
+  # reporting a full continuation plan. Graded in both directions: the guard must fire
+  # on a block carrying that line, and must NOT fire on the block as rendered.
+  WC1E_DESTRUCTIVE="$(printf '%s\n' "$C_CARRY" | grep -F 'apply "$PATCH" && rm -f' | head -1 | sed 's/^  *//')"
+  WC1E_HAY="$C_READY
+              $WC1E_DESTRUCTIVE"
+  WC1E_BAD=""
+  [ -n "$WC1E_DESTRUCTIVE" ] || WC1E_BAD="$WC1E_BAD destructive-line-not-found-in-recipe"
+  [ -n "$(recipe_reinlined "$WC1E_HAY" 2>/dev/null)" ] || WC1E_BAD="$WC1E_BAD guard-misses-the-destructive-line"
+  [ -z "$(recipe_reinlined "$C_READY" 2>/dev/null)" ] || WC1E_BAD="$WC1E_BAD guard-fires-on-the-block-as-rendered"
+  [ -z "$WC1E_BAD" ] \
+    && check "WC1e the re-authoring guard covers CARRY_OVER's own writing commands and does not fire on the rendered block" PASS \
+    || check "WC1e re-authoring guard coverage wrong:$WC1E_BAD" FAIL
+
+  # An anchor that CONTAINS the worktree must prescribe nothing. This is the arm a
+  # renderer that always emits its plan would fail, and the one a reader relies on
+  # to know their ordinary resume still works.
+  C_IN="$(cshow --anchor "$CONT_HOME" | cont_block)"
+  WC2_BAD=""
+  case "$C_IN" in "CONTINUE not needed"*) ;; *) WC2_BAD="$WC2_BAD not-withheld" ;; esac
+  case "$C_IN" in *"worktree add"*) WC2_BAD="$WC2_BAD prescribed-anyway" ;; *) ;; esac
+  [ -z "$WC2_BAD" ] \
+    && check "WC2 an anchor that contains the worktree prescribes no continuation" PASS \
+    || check "WC2 contained anchor mishandled:$WC2_BAD" FAIL
+
+  # WC2a — the contained arm is the FIRST branch and the only one that renders a
+  # RUNNABLE command, and it rendered it with no check that the directory still
+  # exists. `canonicalPair` drops both operands to their lexical spelling when
+  # `realpathSync` throws, which is exactly the deleted-worktree case, so
+  # containment still answers true for a path that is gone and the block printed
+  # `cd -- '<gone>' && claude --resume` under the claim that a commit there lands.
+  # `.claude/worktrees/<name>` under one's own root is the layout this repository
+  # mandates, so an archived session of one's OWN repo is the ordinary shape
+  # reaching this branch, not an exotic one. The fixture's directory is deliberately
+  # never created — mkfix.mjs records the path without making it.
+  SID_F=ffffffff-0000-0000-0000-000000000001
+  if ! CONT_ERR="$(HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$FAKE/mkfix.mjs" "$CONT_HOME" "$SID_F" "$DEAD_PID" 60 end_turn none 2>&1 >/dev/null)"; then
+    check "WC2a-fixture build failed: ${CONT_ERR:-<no stderr>}" FAIL
+  fi
+  C_GONE="$(env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$TRAIL_MJS" show "$SID_F" --all --anchor "$CONT_HOME" 2>/dev/null | cont_block)"
+  WC2A_BAD=""
+  case "$C_GONE" in "CONTINUE "*) ;; *) WC2A_BAD="$WC2A_BAD no-continue-block" ;; esac
+  case "$C_GONE" in *"claude --resume"*) WC2A_BAD="$WC2A_BAD prescribed-a-runnable-resume" ;; *) ;; esac
+  case "$C_GONE" in *"worktree add"*) WC2A_BAD="$WC2A_BAD prescribed-a-plan" ;; *) ;; esac
+  case "$C_GONE" in *"GONE"*|*"gone"*|*"missing"*) ;; *) WC2A_BAD="$WC2A_BAD state-not-reported" ;; esac
+  [ -z "$WC2A_BAD" ] \
+    && check "WC2a a contained worktree whose directory is gone gets no runnable resume command" PASS \
+    || check "WC2a gone contained worktree mishandled:$WC2A_BAD" FAIL
+
+  C_NONE="$(cshow | cont_block)"
+  WC3_BAD=""
+  case "$C_NONE" in "CONTINUE unknown"*) ;; *) WC3_BAD="$WC3_BAD not-unknown" ;; esac
+  case "$C_NONE" in *"--anchor"*) ;; *) WC3_BAD="$WC3_BAD no-remedy-named" ;; esac
+  case "$C_NONE" in *"worktree add"*) WC3_BAD="$WC3_BAD prescribed-anyway" ;; *) ;; esac
+  [ -z "$WC3_BAD" ] \
+    && check "WC3 with no measurable anchor the plan is withheld and names --anchor as the remedy" PASS \
+    || check "WC3 unmeasurable anchor mishandled:$WC3_BAD" FAIL
+
+  # A relative value must be REFUSED, never completed against whatever directory
+  # this process happens to be in. Both halves are asserted: the writes channel
+  # reports it as rejected, and no absolute target is invented from it.
+  C_REL="$(cshow --anchor 'rel/ative' | cont_block)"
+  C_REL_W="$(cshow --anchor 'rel/ative' | writes_block)"
+  WC4_BAD=""
+  case "$C_REL_W" in *'flag:--anchor is set but is not an absolute path'*) ;; *) WC4_BAD="$WC4_BAD not-rejected" ;; esac
+  case "$C_REL" in "CONTINUE unknown"*) ;; *) WC4_BAD="$WC4_BAD not-unknown" ;; esac
+  case "$C_REL" in *"/rel/ative"*) WC4_BAD="$WC4_BAD resolved-against-cwd" ;; *) ;; esac
+  [ -z "$WC4_BAD" ] \
+    && check "WC4 a relative --anchor is refused as a channel and never resolved into a target" PASS \
+    || check "WC4 relative anchor mishandled:$WC4_BAD" FAIL
+
+  # The branch discipline, which is the finding that made this feature safe: the
+  # session record's own branch field is what the session STARTED on. Measured on
+  # the real tree during development it answered `main` for a worktree actually on
+  # claude/plugin-auto-mode-permissions-665942, so a fallback to it would have
+  # branched the continuation off main and left every commit behind.
+  C_NOGIT="$(cshow --no-git --anchor "$CONT_ANCHOR" | cont_block)"
+  WC5_BAD=""
+  case "$C_NOGIT" in "CONTINUE blocked"*) ;; *) WC5_BAD="$WC5_BAD not-blocked" ;; esac
+  case "$C_NOGIT" in *"worktree add"*) WC5_BAD="$WC5_BAD guessed-a-base" ;; *) ;; esac
+  [ -z "$WC5_BAD" ] \
+    && check "WC5 with no live branch read the plan is blocked rather than branched off a stale record value" PASS \
+    || check "WC5 unresolved branch mishandled:$WC5_BAD" FAIL
+
+  # CLAUDE_PROJECT_DIR is a SOUND deny and an UNSOUND target: non-containment in the
+  # wider root implies non-containment in the narrower one, but a path built from
+  # the wider root can still land outside the immutable one. So the finding renders
+  # and the path is withheld.
+  C_WEAK="$(env -u ZENSU_PROJECT_ROOT CLAUDE_PROJECT_DIR="$CONT_ANCHOR" HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$TRAIL_MJS" show "$SID_C" --all 2>/dev/null | cont_block)"
+  WC6_BAD=""
+  case "$C_WEAK" in "CONTINUE blocked"*) ;; *) WC6_BAD="$WC6_BAD not-blocked" ;; esac
+  case "$C_WEAK" in *CLAUDE_PROJECT_DIR*) ;; *) WC6_BAD="$WC6_BAD cause-not-named" ;; esac
+  case "$C_WEAK" in *"worktree add"*) WC6_BAD="$WC6_BAD target-from-wider-root" ;; *) ;; esac
+  [ -z "$WC6_BAD" ] \
+    && check "WC6 a deny measured off CLAUDE_PROJECT_DIR reports the finding and withholds the target path" PASS \
+    || check "WC6 weak-channel target mishandled:$WC6_BAD" FAIL
+
+  # Precedence. Both env channels are set to values that would produce a DIFFERENT
+  # verdict, so a flag that merely joined the list instead of leading it would show.
+  C_PREC="$(ZENSU_PROJECT_ROOT="$FAKE" CLAUDE_PROJECT_DIR="$FAKE" HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$TRAIL_MJS" show "$SID_C" --all --json --anchor "$CONT_ANCHOR" 2>/dev/null)"
+  WC7_SRC="$(printf '%s' "$C_PREC" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);process.stdout.write(`${j.writes.source}|${j.writes.sourceTrusted}|${j.continuation.status}`)}catch{process.stdout.write("PARSE-FAIL")}})' 2>/dev/null)"
+  [ "$WC7_SRC" = 'flag:--anchor|true|ready' ] \
+    && check "WC7 --anchor outranks both environment channels and is carried as a trusted one" PASS \
+    || check "WC7 --anchor precedence wrong (got '${WC7_SRC:-<empty>}', wanted 'flag:--anchor|true|ready')" FAIL
+
+  # WC20 — the ranking WC7 pins is right and has to stay, since neither variable
+  # normally reaches a subprocess and a flag that lost to an absent value would be
+  # useless. What WC7 cannot see is that the two channels are not equally
+  # PROVENANCED: ZENSU_PROJECT_ROOT is exported by this plugin's own hook out of the
+  # immutable Session Control record, while `--anchor` is an argv token composed from
+  # a model's context. When the flag names a tree that ESCAPES that record root,
+  # containment in it does not imply containment in the root the gate actually
+  # compares — the identical asymmetry CLAUDE_PROJECT_DIR carries — so `allowed` off
+  # it is unsound while `denied here` stays sound. Exactly the TRUE half is
+  # discarded, and the ranking is untouched.
+  WC20_READ='let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);process.stdout.write(`${j.writes.covered}|${j.writes.reasonCode}|${j.writes.source}`)}catch{process.stdout.write("PARSE-FAIL")}})'
+  C_DIS="$(env -u CLAUDE_PROJECT_DIR ZENSU_PROJECT_ROOT="$CONT_REPO" HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$TRAIL_MJS" show "$SID_C" --all --json --anchor "$CONT_HOME" 2>/dev/null)"
+  WC20_GOT="$(printf '%s' "$C_DIS" | node -e "$WC20_READ" 2>/dev/null)"
+  [ "$WC20_GOT" = 'null|anchor-outside-record-root|flag:--anchor' ] \
+    && check "WC20 an --anchor that escapes ZENSU_PROJECT_ROOT no longer produces a trusted allowed" PASS \
+    || check "WC20 anchor/record disagreement wrong (got '${WC20_GOT:-<empty>}', wanted 'null|anchor-outside-record-root|flag:--anchor')" FAIL
+
+  # The two controls that keep WC20 from being a blanket refusal. An anchor INSIDE
+  # the record root is NARROWER, so containment in it implies containment in the
+  # root the gate compares and the `true` is sound; and with no record root present
+  # there is nothing to disagree with, which is the case the flag was built for.
+  C_AGREE="$(env -u CLAUDE_PROJECT_DIR ZENSU_PROJECT_ROOT="$CONT_HOME" HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$TRAIL_MJS" show "$SID_C" --all --json --anchor "$CONT_HOME" 2>/dev/null)"
+  WC20A_GOT="$(printf '%s' "$C_AGREE" | node -e "$WC20_READ" 2>/dev/null)"
+  [ "$WC20A_GOT" = 'true|null|flag:--anchor' ] \
+    && check "WC20a an --anchor at or inside the record root keeps its trusted allowed" PASS \
+    || check "WC20a agreeing anchor wrong (got '${WC20A_GOT:-<empty>}', wanted 'true|null|flag:--anchor')" FAIL
+
+  C_FLAGONLY="$(env -u CLAUDE_PROJECT_DIR -u ZENSU_PROJECT_ROOT HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$TRAIL_MJS" show "$SID_C" --all --json --anchor "$CONT_HOME" 2>/dev/null)"
+  WC20B_GOT="$(printf '%s' "$C_FLAGONLY" | node -e "$WC20_READ" 2>/dev/null)"
+  [ "$WC20B_GOT" = 'true|null|flag:--anchor' ] \
+    && check "WC20b with no record root present the flag alone still produces a trusted allowed" PASS \
+    || check "WC20b flag-only anchor wrong (got '${WC20B_GOT:-<empty>}', wanted 'true|null|flag:--anchor')" FAIL
+
+  # No git mutation may be aimed at the SOURCE worktree: it lies outside the anchor,
+  # so this same gate would refuse it, and it would touch another session's index.
+  # The assertion is over the SET of subcommands the block addresses to that tree with
+  # the ONE spelling it uses — `git -C '<src>' <verb>` — not over a blacklist, which
+  # could not see a verb nobody thought of. State the bound: a command reaching that
+  # tree by `cd`, by `--git-dir=`, or through any spelling `briefShellArg` does not
+  # single-quote is invisible to this extraction.
+  #
+  # The EMPTY set is the expected answer now that the carry-over half is `CARRY_OVER`'s:
+  # this block names the source worktree only as a substitution operand, never as the
+  # target of a command. An empty set would be vacuous on its own, so the ANCHOR side is
+  # graded in the same breath as a positive control — it must be non-empty, which proves
+  # the extraction still finds the spelling it is written against. Without that control a
+  # broken `grep -F` would report the source side clean for the wrong reason.
+  SRC_VERBS="$(printf '%s\n' "$C_READY" | grep -F "git -C '$CONT_WT' " | sed "s|.*git -C '$CONT_WT' \\([a-z-]*\\).*|\\1|" | sort -u | tr '\n' ' ')"
+  DST_VERBS="$(printf '%s\n' "$C_READY" | grep -F "git -C '$CONT_ANCHOR' " | sed "s|.*git -C '$CONT_ANCHOR' \\([a-z-]*\\).*|\\1|" | sort -u | tr '\n' ' ')"
+  case "$SRC_VERBS:$DST_VERBS" in
+    ":") check "WC8 the extraction found no git command at all — it is broken, not the block" FAIL ;;
+    ":"*) check "WC8 no git command is addressed to the source worktree (anchor side: $DST_VERBS)" PASS ;;
+    "diff ls-files :"*) check "WC8 only read-only git verbs (diff, ls-files) are addressed to the source worktree" PASS ;;
+    *) check "WC8 a git verb is addressed to the source worktree: '$SRC_VERBS'" FAIL ;;
+  esac
+
+  # The whole reason CONTINUE has its own head. `writes_block` is a -A4 window with
+  # no headroom, and this asserts the new block did not move into it.
+  WC9_WINDOW="$(cshow --anchor "$CONT_ANCHOR" | writes_block)"
+  case "$WC9_WINDOW" in
+    "") check "WC9 the WRITES window came back EMPTY, so the negative scan below would report PASS having read nothing" FAIL ;;
+    *CONTINUE*) check "WC9 the continuation block leaked into the WRITES -A4 window and will truncate it" FAIL ;;
+    WRITES*) check "WC9 the continuation block renders outside the WRITES window" PASS ;;
+    *) check "WC9 the WRITES window does not begin with the WRITES head (got '$(printf '%.40s' "$WC9_WINDOW")')" FAIL ;;
+  esac
+
+  # `takeover`'s MARKDOWN is read by a different session than the one measured, so a
+  # rendered target path there is a confident instruction into the wrong tree. The
+  # brief keeps the static caution, exactly as it does for WRITES.
+  C_BRIEF="$(env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$TRAIL_MJS" takeover "$SID_C" --all --no-record --anchor "$CONT_ANCHOR" 2>/dev/null)"
+  WC10_BAD=""
+  case "$C_BRIEF" in *"cont-fixture-cont"*) WC10_BAD="$WC10_BAD target-in-brief" ;; *) ;; esac
+  case "$C_BRIEF" in *"Before editing:"*) ;; *) WC10_BAD="$WC10_BAD static-caution-missing" ;; esac
+  [ -z "$WC10_BAD" ] \
+    && check "WC10 the takeover brief carries the static caution and no measured continuation target" PASS \
+    || check "WC10 takeover brief carries the wrong thing:$WC10_BAD" FAIL
+
+  C_TJ="$(env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$TRAIL_MJS" takeover "$SID_C" --all --json --no-record --anchor "$CONT_ANCHOR" 2>/dev/null \
+    | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);const c=j.continuation||{};process.stdout.write([c.status,c.reasonCode,typeof c.target,typeof c.branch,typeof j.skipped].join("|"))}catch{process.stdout.write("PARSE-FAIL")}})' 2>/dev/null)"
+  [ "$C_TJ" = 'ready|escapes-anchor|string|string|number' ] \
+    && check "WC11 takeover --json carries the measured continuation object beside skipped" PASS \
+    || check "WC11 takeover --json continuation wrong (got '${C_TJ:-<empty>}')" FAIL
+
+  # Every reasonCode the renderer can emit must be a member of the exported closed
+  # set, derived from source on both sides. A hand-listed expectation here could not
+  # detect its own omission; a typo'd code would otherwise reach a --json consumer
+  # branching on a set that never contained it.
+  CONT_BODY="$(awk '/^function continuationPlan\(/{f=1} f{print} f&&/^}/{exit}' "$TRAIL_MJS")"
+  CONT_SET="$(awk '/^const CONTINUATION_REASONS = new Set\(\[/{f=1} f{print} f&&/^\]\);/{exit}' "$TRAIL_MJS" | grep -oE "'[a-z-]+'" | tr -d "'" | sort -u)"
+  CONT_EMITTED="$(printf '%s\n' "$CONT_BODY" | grep -oE "none\('[a-z-]+', '[a-z-]+'|reasonCode: '[a-z-]+'" | grep -oE "'[a-z-]+'\$" | tr -d "'" | sort -u)"
+  CONT_ORPHAN="$(comm -23 <(printf '%s\n' "$CONT_EMITTED") <(printf '%s\n' "$CONT_SET") | tr '\n' ' ')"
+  # The derivation is LITERAL-shaped, and one call site is not: the `unknown` branch
+  # passes `CONTINUATION_REASONS.has(w.reasonCode) ? w.reasonCode : 'unclassified'`, an
+  # expression, so neither alternation matches it. A blind scan of that kind reads as
+  # agreement, so the site is COUNTED rather than assumed: every `none(` call except
+  # the known dynamic one must be derivable, and a second undetected dynamic site
+  # fails here instead of quietly shrinking the set.
+  CONT_NONE_N="$(printf '%s\n' "$CONT_BODY" | grep -c "none('" || true)"
+  CONT_LIT_N="$(printf '%s\n' "$CONT_BODY" | grep -c "none('[a-z-]*', '[a-z-]*'" || true)"
+  CONT_DYNAMIC=$(( ${CONT_NONE_N:-0} - ${CONT_LIT_N:-0} ))
+  if [ -z "$CONT_BODY" ] || [ -z "$CONT_SET" ] || [ -z "$CONT_EMITTED" ]; then
+    check "WC12-pre a derivation came back empty (body=${#CONT_BODY} set=${#CONT_SET} emitted=${#CONT_EMITTED}) — the membership check is inert" FAIL
+  elif [ "$CONT_DYNAMIC" != 1 ]; then
+    check "WC12-dyn expected exactly ONE non-literal none() call (the unknown branch); found $CONT_DYNAMIC of ${CONT_NONE_N:-0} — the reason-code derivation is blind to that many site(s)" FAIL
+  elif [ -n "${CONT_ORPHAN// /}" ]; then
+    check "WC12 continuationPlan emits reason code(s) absent from CONTINUATION_REASONS: $CONT_ORPHAN" FAIL
+  else
+    check "WC12 every reason code continuationPlan emits is a member of the closed set" PASS
+  fi
+
+  # The PRODUCER half of the reason-code coupling, which WC12 does not reach. Sharing
+  # `ANCHOR_REASONS` bound the CONSUMER structurally — `CONTINUATION_REASONS` spreads it
+  # — but `writeAnchor` still spells each code as a bare literal and never reads the
+  # constant, so a renamed code there is caught by nothing in the language. It would
+  # surface as every null cause collapsing to the `unclassified` fallback, which is a
+  # degraded verdict rather than a loud one. The derivation cannot use WC12's
+  # literal-shaped needle: three of the four producer sites are ternaries or a `const`
+  # assignment, so it takes every quoted lowercase literal on a line mentioning
+  # `reasonCode` inside `writeAnchor`'s own body.
+  WA_BODY="$(awk '/^function writeAnchor\(/{f=1} f{print} f&&/^}/{exit}' "$TRAIL_MJS")"
+  WA_SET="$(awk '/^const ANCHOR_REASONS = Object.freeze\(\[/{f=1} f{print} f&&/^\]\);/{exit}' "$TRAIL_MJS" | grep -oE "'[a-z-]+'" | tr -d "'" | sort -u)"
+  WA_EMITTED="$(printf '%s\n' "$WA_BODY" | grep -F 'reasonCode' | grep -oE "'[a-z][a-z-]+'" | tr -d "'" | sort -u)"
+  WA_ORPHAN="$(comm -23 <(printf '%s\n' "$WA_EMITTED") <(printf '%s\n' "$WA_SET") | tr '\n' ' ')"
+  WA_MISSING="$(comm -13 <(printf '%s\n' "$WA_EMITTED") <(printf '%s\n' "$WA_SET") | tr '\n' ' ')"
+  if [ -z "$WA_BODY" ] || [ -z "$WA_SET" ] || [ -z "$WA_EMITTED" ]; then
+    check "WC12b-pre a derivation came back empty (body=${#WA_BODY} set=${#WA_SET} emitted=${#WA_EMITTED}) — the producer coupling is unchecked" FAIL
+  elif [ -n "${WA_ORPHAN// /}" ]; then
+    check "WC12b writeAnchor emits reason code(s) absent from ANCHOR_REASONS: $WA_ORPHAN" FAIL
+  elif [ -n "${WA_MISSING// /}" ]; then
+    # BOTH directions. A code left in the set after its producer was removed makes the
+    # closed set a superset of what can happen, which is how a stale name survives.
+    check "WC12b ANCHOR_REASONS holds code(s) writeAnchor no longer emits: $WA_MISSING" FAIL
+  else
+    check "WC12b writeAnchor's emitted reason codes and ANCHOR_REASONS are the same set, in both directions" PASS
+  fi
+
+  # --- bite arms -----------------------------------------------------------
+  # A mutant tree must ALSO stage bash-source-write-parse.js, which `mutant_path`
+  # deliberately omits because W22's whole subject is that gate being absent. With
+  # it absent here `writeAnchor` answers gate-unavailable, every arm below would
+  # read `CONTINUE unknown`, and both bites would "pass" while testing nothing.
+  cont_mutant() { # <tag> -> path to place the mutated trail.mjs at
+    local d="$FAKE/cmut-$1/skills/session-trail/scripts"
+    mkdir -p "$d" "$FAKE/cmut-$1/hooks/lib"
+    cp "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$d/" 2>/dev/null
+    cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$FAKE/cmut-$1/hooks/lib/" 2>/dev/null
+    cp "$PLUGIN_DIR/hooks/lib/bash-source-write-parse.js" "$FAKE/cmut-$1/hooks/lib/" 2>/dev/null
+    printf '%s' "$d/trail.mjs"
+  }
+
+  # A DETACHED source checkout. `rev-parse --abbrev-ref HEAD` answers the literal
+  # string `HEAD` there, which is truthy — so a `!branch` guard alone passed it
+  # through and rendered `worktree add … -b 'claude/HEAD-cont' … 'HEAD'`, where the
+  # start-point resolved against the ANCHOR repository's HEAD rather than the
+  # source's. Silent, because `claude/HEAD-cont` is a valid ref name and `HEAD` always
+  # resolves. Detached worktrees are ordinary: this repository's own `.claude/worktrees/`
+  # holds several.
+  if ! CONT_ERR="$(HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$FAKE/mkfix.mjs" "$CONT_HOME" "$SID_D" "$DEAD_PID" 60 end_turn none 2>&1 >/dev/null)"; then
+    check "WC15-fixture build failed for '$SID_D': ${CONT_ERR:-<no stderr>}" FAIL
+  fi
+  C_DET="$(env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$TRAIL_MJS" show "$SID_D" --all --anchor "$CONT_ANCHOR" 2>/dev/null | cont_block)"
+  WC15_BAD=""
+  case "$C_DET" in "CONTINUE blocked"*) ;; *) WC15_BAD="$WC15_BAD not-blocked" ;; esac
+  case "$C_DET" in *DETACHED*) ;; *) WC15_BAD="$WC15_BAD cause-not-named" ;; esac
+  case "$C_DET" in *"worktree add"*) WC15_BAD="$WC15_BAD rendered-a-plan" ;; *) ;; esac
+  case "$C_DET" in *"claude/HEAD-cont"*) WC15_BAD="$WC15_BAD HEAD-became-a-branch-name" ;; *) ;; esac
+  [ -z "$WC15_BAD" ] \
+    && check "WC15 a DETACHED source checkout is blocked, not branched off the literal HEAD in the anchor's repo" PASS \
+    || check "WC15 detached source mishandled:$WC15_BAD" FAIL
+  # The bite for WC15, distinct from WC13's: that one removes the whole guard, this one
+  # removes only the HEAD half, which is the clause a `!branch` test cannot express.
+  MUT_HEAD="$(cont_mutant head)"
+  sed "s@^  if (!branch || branch === 'HEAD') {\$@  if (!branch) {@" "$TRAIL_MJS" > "$MUT_HEAD"
+  if ! grep -qF "  if (!branch) {" "$MUT_HEAD"; then
+    check "WC15b-pre the HEAD-clause mutation matched nothing — WC15's bite is unproven" FAIL
+  else
+    case "$(env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$MUT_HEAD" show "$SID_D" --all --anchor "$CONT_ANCHOR" 2>/dev/null | cont_block)" in
+      *"claude/HEAD-cont"*) check "WC15b WC15 bites: without the HEAD clause the same fixture renders a plan branching off the literal HEAD" PASS ;;
+      *) check "WC15b removing the HEAD clause did not change the verdict — WC15 does not bite" FAIL ;;
+    esac
+  fi
+
+  # The anchor and the source must be ONE repository: the base ref is measured in the
+  # source and resolved in the anchor's repo, so a same-named branch there would name a
+  # different commit and step 3 would apply a foreign diff on top of it — cleanly, if
+  # the diff only adds files. Containment is lexical and cannot see this.
+  C_XREPO="$(env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$TRAIL_MJS" show "$SID_C" --all --anchor "$CONT_FOREIGN" 2>/dev/null | cont_block)"
+  WC16_BAD=""
+  case "$C_XREPO" in "CONTINUE blocked"*) ;; *) WC16_BAD="$WC16_BAD not-blocked" ;; esac
+  case "$C_XREPO" in *"same repository"*) ;; *) WC16_BAD="$WC16_BAD cause-not-named" ;; esac
+  case "$C_XREPO" in *"worktree add"*) WC16_BAD="$WC16_BAD rendered-a-plan" ;; *) ;; esac
+  [ -z "$WC16_BAD" ] \
+    && check "WC16 an anchor in a DIFFERENT repository is blocked rather than handed the source's branch name" PASS \
+    || check "WC16 cross-repository mishandled:$WC16_BAD" FAIL
+
+  # The discriminating case for the SPELLING, which WC16's fixture cannot see: both its
+  # worktrees are created by one `git -C "$CONT_REPO" worktree add` and therefore record
+  # the identical string. A MAIN CHECKOUT as the anchor is different in kind —
+  # `rev-parse --git-common-dir` answers a relative `.git` there and git's own recorded
+  # ABSOLUTE path in a linked worktree, so on this host the same repository read
+  # `/var/folders/…` from one side and `/private/var/folders/…` from the other. A raw
+  # `!==` therefore withheld a perfectly valid plan; `canonicalPair` is what makes this
+  # arm pass, and deleting it turns this into a `cross-repository` refusal.
+  C_MAINANCHOR="$(env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$TRAIL_MJS" show "$SID_C" --all --anchor "$CONT_REPO" 2>/dev/null | cont_block)"
+  case "$C_MAINANCHOR" in
+    "CONTINUE ready"*) check "WC16b a MAIN CHECKOUT anchor and a linked source worktree are one repository, despite two spellings of its root" PASS ;;
+    *"same repository"*) check "WC16b the two spellings of one repository root were compared raw — a valid plan is withheld as cross-repository" FAIL ;;
+    *) check "WC16b a main-checkout anchor produced neither a plan nor the repo refusal (got '$(printf '%.60s' "$C_MAINANCHOR")')" FAIL ;;
+  esac
+
+  # The anchor is a directory but NOT a repository — a distinct code from `cross-repository`
+  # since the split, because "point --anchor at your project root" is a different remedy from
+  # "these are two repositories". The directory must not CONTAIN the source, or the
+  # `already-contained` branch answers first and this one is never reached.
+  mkdir -p "$CONT_HOME/plaindir"
+  C_NOREPO="$(env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$TRAIL_MJS" show "$SID_C" --all --anchor "$CONT_HOME/plaindir" 2>/dev/null | cont_block)"
+  WC16c_BAD=""
+  case "$C_NOREPO" in "CONTINUE blocked"*) ;; *) WC16c_BAD="$WC16c_BAD not-blocked" ;; esac
+  case "$C_NOREPO" in *"not a git repository"*) ;; *) WC16c_BAD="$WC16c_BAD cause-not-named" ;; esac
+  case "$C_NOREPO" in *"are not the same repository"*) WC16c_BAD="$WC16c_BAD reported-as-cross-repository" ;; *) ;; esac
+  case "$C_NOREPO" in *"worktree add"*) WC16c_BAD="$WC16c_BAD rendered-a-plan" ;; *) ;; esac
+  [ -z "$WC16c_BAD" ] \
+    && check "WC16c an anchor that is a directory but not a repository gets its own refusal, not the cross-repository one" PASS \
+    || check "WC16c non-repository anchor mishandled:$WC16c_BAD" FAIL
+
+  # A source worktree that EXISTS but is not a repository. This branch was UNREACHABLE
+  # when it sat below the branch guard — `gitState` answers null for such a tree, so
+  # `branch` was falsy and `branch-unresolved` fired first — while SKILL.md told a
+  # `--json` consumer to expect the code. Found in self-review, by reading the ladder
+  # rather than by any check; this arm is what keeps it reachable.
+  mkdir -p "$CONT_HOME/work/wt-eeeeeeee"
+  if ! CONT_ERR="$(HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$FAKE/mkfix.mjs" "$CONT_HOME" "$SID_E" "$DEAD_PID" 60 end_turn none 2>&1 >/dev/null)"; then
+    check "WC16d-fixture build failed: ${CONT_ERR:-<no stderr>}" FAIL
+  fi
+  C_SRCNOREPO="$(env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$TRAIL_MJS" show "$SID_E" --all --anchor "$CONT_ANCHOR" 2>/dev/null | cont_block)"
+  WC16d_BAD=""
+  case "$C_SRCNOREPO" in "CONTINUE blocked"*) ;; *) WC16d_BAD="$WC16d_BAD not-blocked" ;; esac
+  case "$C_SRCNOREPO" in *"not inside a git repository"*) ;; *) WC16d_BAD="$WC16d_BAD cause-not-named" ;; esac
+  case "$C_SRCNOREPO" in *"no branch name could"*) WC16d_BAD="$WC16d_BAD reported-as-branch-unresolved" ;; *) ;; esac
+  [ -z "$WC16d_BAD" ] \
+    && check "WC16d a source worktree that is not a repository gets its own refusal rather than the branch one that masked it" PASS \
+    || check "WC16d non-repository source mishandled:$WC16d_BAD" FAIL
+
+  # WC16e / WC16f — the SAME masking defect WC16d exists for, one branch further
+  # down. Nothing between the branch guard and the repository comparison reads
+  # `branch`: `repoRootOf`, `canonicalPair` and both refusals are branch-independent,
+  # and only the slug and the rendered start-point need it. Behind the branch guard
+  # the two anchor-side refusals were therefore unreachable under `--no-git`, where
+  # the branch is never measurable — so a mistyped or foreign `--anchor` was reported
+  # as a git problem and the user needed a second run to see their own typo, which
+  # then produced a DIFFERENT refusal. WC16c and WC16 cover the same two states with
+  # git enabled, so only the `--no-git` spelling discriminates the order.
+  C_NOGIT_NOREPO="$(env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$TRAIL_MJS" show "$SID_C" --all --no-git --anchor "$CONT_HOME/plaindir" 2>/dev/null | cont_block)"
+  WC16e_BAD=""
+  case "$C_NOGIT_NOREPO" in "CONTINUE blocked"*) ;; *) WC16e_BAD="$WC16e_BAD not-blocked" ;; esac
+  case "$C_NOGIT_NOREPO" in *"not a git repository"*) ;; *) WC16e_BAD="$WC16e_BAD cause-not-named" ;; esac
+  case "$C_NOGIT_NOREPO" in *"no branch name could"*) WC16e_BAD="$WC16e_BAD masked-by-branch-guard" ;; *) ;; esac
+  [ -z "$WC16e_BAD" ] \
+    && check "WC16e under --no-git a non-repository anchor is reported as itself, not as a missing branch" PASS \
+    || check "WC16e non-repository anchor masked under --no-git:$WC16e_BAD" FAIL
+
+  C_NOGIT_XREPO="$(env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$TRAIL_MJS" show "$SID_C" --all --no-git --anchor "$CONT_FOREIGN" 2>/dev/null | cont_block)"
+  WC16f_BAD=""
+  case "$C_NOGIT_XREPO" in "CONTINUE blocked"*) ;; *) WC16f_BAD="$WC16f_BAD not-blocked" ;; esac
+  case "$C_NOGIT_XREPO" in *"same repository"*) ;; *) WC16f_BAD="$WC16f_BAD cause-not-named" ;; esac
+  case "$C_NOGIT_XREPO" in *"no branch name could"*) WC16f_BAD="$WC16f_BAD masked-by-branch-guard" ;; *) ;; esac
+  [ -z "$WC16f_BAD" ] \
+    && check "WC16f under --no-git a foreign-repository anchor is reported as itself, not as a missing branch" PASS \
+    || check "WC16f cross-repository masked under --no-git:$WC16f_BAD" FAIL
+
+  # An absolute path that names nothing still wins the channel — `writeAnchor`'s
+  # admission is `path.isAbsolute` with no filesystem check, and `canonicalPair` drops
+  # BOTH sides to their lexical spelling when either realpath throws, so the
+  # disagreement-to-null protection does not fire either.
+  C_ABSENT="$(env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$TRAIL_MJS" show "$SID_C" --all --anchor "$CONT_HOME/no/such/dir" 2>/dev/null | cont_block)"
+  WC17_BAD=""
+  case "$C_ABSENT" in "CONTINUE blocked"*) ;; *) WC17_BAD="$WC17_BAD not-blocked" ;; esac
+  case "$C_ABSENT" in *"not an existing directory"*) ;; *) WC17_BAD="$WC17_BAD cause-not-named" ;; esac
+  case "$C_ABSENT" in *"worktree add"*) WC17_BAD="$WC17_BAD rendered-a-plan" ;; *) ;; esac
+  [ -z "$WC17_BAD" ] \
+    && check "WC17 an anchor that names no directory is blocked rather than given a target underneath it" PASS \
+    || check "WC17 absent anchor mishandled:$WC17_BAD" FAIL
+
+  # The slug is the one new bounding rule in this change, and it reaches a DIRECTORY
+  # name and a NEW BRANCH name. Every other value reaching a rendered line in this file
+  # has a hostile fixture; this gives it one. The branch really is created, so the
+  # characters are ones git itself accepts in a ref.
+  # Every character here was measured as ACCEPTED by `git branch` (2026-08-28): the ref
+  # rules forbid space, `~`, `^`, `:`, `?`, `*`, `[`, `\` and `..`, and forbid nothing
+  # else on this line — so a real branch can carry a single quote, a backtick, `$`, a
+  # pipe and a redirect, all of which reach a rendered shell command.
+  CONT_UGLY="claude/a&b\$c(d);e\`f'g|h>i"
+  if git -C "$CONT_REPO" branch -- "$CONT_UGLY" >/dev/null 2>&1 \
+    && git -C "$CONT_WT" checkout -q "$CONT_UGLY" >/dev/null 2>&1; then
+    C_UGLY="$(env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$TRAIL_MJS" show "$SID_C" --all --anchor "$CONT_ANCHOR" 2>/dev/null | cont_block)"
+    WC18_TARGET="$(printf '%s\n' "$C_UGLY" | grep -oE "worktree add -b '[^']*' -- '[^']*'" | head -1)"
+    WC18_BAD=""
+    case "$C_UGLY" in "CONTINUE ready"*) ;; *) WC18_BAD="$WC18_BAD not-ready" ;; esac
+    # Nothing outside the conservative class may survive into either name.
+    case "$WC18_TARGET" in *'&'*|*'$'*|*'('*|*')'*|*';'*|*'`'*|*"'g"*|*'|'*|*'>'*) WC18_BAD="$WC18_BAD hostile-character-survived" ;; *) ;; esac
+    case "$WC18_TARGET" in *"/.claude/worktrees/"*) ;; *) WC18_BAD="$WC18_BAD target-left-the-layout" ;; esac
+    [ -z "$WC18_BAD" ] \
+      && check "WC18 a hostile branch name is reduced before it reaches a directory name and a new branch name" PASS \
+      || check "WC18 hostile slug mishandled:$WC18_BAD (target=${WC18_TARGET:-<none>})" FAIL
+    git -C "$CONT_WT" checkout -q "$CONT_BRANCH" >/dev/null 2>&1
+  else
+    check "WC18 the hostile-branch fixture could not be created, so the slug's bounding rule is unexercised" FAIL
+  fi
+
+  # The flag's own foreign-command refusal. `COMMAND_FLAGS` scopes it, but the refusal
+  # only fires because `refuseForeignFlags` pushes it onto `supplied` — delete that one
+  # line and `list --anchor <abs>` is accepted and silently ignored, which is the exact
+  # defect that function exists to remove, with every other suite green.
+  WC19_LIST="$(env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$TRAIL_MJS" list --all --anchor "$CONT_ANCHOR" 2>&1)"
+  WC19_SHOW="$(env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$TRAIL_MJS" show "$SID_C" --all --anchor "$CONT_ANCHOR" 2>&1)"
+  WC19_BAD=""
+  case "$WC19_LIST" in *"not a flag of \`list\`"*) ;; *) WC19_BAD="$WC19_BAD list-accepted-it" ;; esac
+  case "$WC19_SHOW" in *"not a flag of"*) WC19_BAD="$WC19_BAD show-refused-its-own-flag" ;; *) ;; esac
+  [ -z "$WC19_BAD" ] \
+    && check "WC19 --anchor is refused by a command that never reads it, and still accepted by one that does" PASS \
+    || check "WC19 --anchor scoping wrong:$WC19_BAD" FAIL
+
+
+  # The control for the staging itself. Without it a mutant tree that fails to load
+  # the gate makes both bites vacuous in the safe-looking direction.
+  MUT_CTL="$(cont_mutant control)"
+  cp "$TRAIL_MJS" "$MUT_CTL"
+  case "$(env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$MUT_CTL" show "$SID_C" --all --anchor "$CONT_ANCHOR" 2>/dev/null | cont_block)" in
+    "CONTINUE ready"*) check "WC13-control an unmutated copy in the mutant tree still renders ready, so the gate is staged and the bites below are live" PASS ;;
+    *) check "WC13-control the mutant tree does not reproduce the baseline verdict — every bite below is inert" FAIL ;;
+  esac
+
+  MUT_BR="$(cont_mutant branch)"
+  # `@` as the delimiter, not `|`: the guard's own `||` would close a `|`-delimited
+  # sed expression mid-pattern. That mismatch is caught by the WC13-pre arm below
+  # rather than silently producing an unmutated copy — which is exactly why the
+  # postcondition is checked instead of the substitution being trusted.
+  sed 's@^  if (!branch || branch === .HEAD.) {$@  if (false) {@' "$TRAIL_MJS" > "$MUT_BR"
+  if ! grep -qF '  if (false) {' "$MUT_BR"; then
+    check "WC13-pre the branch-guard mutation matched nothing — WC5's bite is unproven" FAIL
+  else
+    case "$(env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$MUT_BR" show "$SID_C" --all --no-git --anchor "$CONT_ANCHOR" 2>/dev/null | cont_block)" in
+      "CONTINUE blocked"*) check "WC13 removing the branch guard did not change the verdict — WC5 does not bite" FAIL ;;
+      *) check "WC13 WC5 bites: with the branch guard removed the same fixture stops reporting blocked" PASS ;;
+    esac
+  fi
+
+  MUT_TR="$(cont_mutant trust)"
+  sed "s|{ label: 'flag:--anchor', value: opts \&\& opts.anchor, trusted: true }|{ label: 'flag:--anchor', value: opts \&\& opts.anchor, trusted: false }|" "$TRAIL_MJS" > "$MUT_TR"
+  if ! grep -qF "label: 'flag:--anchor', value: opts && opts.anchor, trusted: false" "$MUT_TR"; then
+    check "WC14-pre the trust-flag mutation matched nothing — WC1/WC7's bite is unproven" FAIL
+  else
+    case "$(env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$MUT_TR" show "$SID_C" --all --anchor "$CONT_ANCHOR" 2>/dev/null | cont_block)" in
+      "CONTINUE ready"*) check "WC14 marking the flag channel untrusted did not change the verdict — the trust flag does not bite" FAIL ;;
+      *) check "WC14 the trust flag bites: an untrusted flag channel stops producing a target path" PASS ;;
+    esac
+  fi
+
+  # WC12c — the unknown branch's guard recognises a code its PRODUCER could have
+  # emitted, and `writeAnchor` is that producer: a 7-member set. Testing the 16-member
+  # union instead also admits the 9 codes `continuationPlan` decides itself, which can
+  # only ever arrive from a producer that is NOT `writeAnchor` — precisely the case the
+  # `unclassified` fallback exists for. The guard was widest exactly where it had to be
+  # narrowest, and the comment two lines below it reasons over "one of the seven", so
+  # the code and its own comment named different sets. Driven through a mutant that
+  # makes `writeAnchor` return a locally-decided code, which no real input can produce.
+  MUT_RC="$(cont_mutant reasoncode)"
+  sed "s|reasonCode: rejectedChannel ? 'channel-not-absolute' : 'no-channel',|reasonCode: rejectedChannel ? 'channel-not-absolute' : 'escapes-anchor',|" "$TRAIL_MJS" > "$MUT_RC"
+  if ! grep -qF "reasonCode: rejectedChannel ? 'channel-not-absolute' : 'escapes-anchor'," "$MUT_RC"; then
+    check "WC12c-pre the producer-code mutation matched nothing — the guard's set is unchecked" FAIL
+  else
+    WC12C_GOT="$(env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$MUT_RC" show "$SID_C" --all --json 2>/dev/null \
+      | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);process.stdout.write(`${j.writes.reasonCode}|${j.continuation.reasonCode}`)}catch{process.stdout.write("PARSE-FAIL")}})' 2>/dev/null)"
+    [ "$WC12C_GOT" = 'escapes-anchor|unclassified' ] \
+      && check "WC12c a code writeAnchor could not have produced is reported as unclassified, not carried through" PASS \
+      || check "WC12c producer-set guard wrong (got '${WC12C_GOT:-<empty>}', wanted 'escapes-anchor|unclassified')" FAIL
+  fi
+
+  # WC21 — the source operand is anchored on the worktree TOPLEVEL, not on the
+  # recorded path, and this is the fixture that makes the two DIFFER. The recorded
+  # path "may be a SUBDIRECTORY the session started in" in SKILL.md's own words, and
+  # the two halves of the carry-over use different bases: `git diff HEAD` reports
+  # toplevel-relative paths from anywhere, while `ls-files --others` lists paths
+  # relative to the subdirectory AND omits everything above it. Until this arm every
+  # fixture recorded a worktree root, so the value this line exists to compute was
+  # never observed differing from `src` in either direction.
+  SID_G=99999999-0000-0000-0000-000000000001
+  mkdir -p "$CONT_WT/sub"
+  if ! CONT_ERR="$(HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$FAKE/mkfix.mjs" "$CONT_HOME" "$SID_G" "$DEAD_PID" 60 end_turn none "$CONT_WT/sub" 2>&1 >/dev/null)"; then
+    check "WC21-fixture build failed: ${CONT_ERR:-<no stderr>}" FAIL
+  fi
+  C_SUB="$(env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$TRAIL_MJS" show "$SID_G" --all --anchor "$CONT_ANCHOR" 2>/dev/null | cont_block)"
+  WC21_BAD=""
+  case "$C_SUB" in "CONTINUE ready"*) ;; *) WC21_BAD="$WC21_BAD not-ready" ;; esac
+  case "$C_SUB" in *"'<their worktree>' = '$CONT_WT'"*) ;; *) WC21_BAD="$WC21_BAD operand-is-not-the-toplevel" ;; esac
+  case "$C_SUB" in *"'<their worktree>' = '$CONT_WT/sub'"*) WC21_BAD="$WC21_BAD operand-is-the-subdirectory" ;; *) ;; esac
+  [ -z "$WC21_BAD" ] \
+    && check "WC21 a recorded cwd one level below the worktree root still yields the TOPLEVEL as the source operand" PASS \
+    || check "WC21 subdirectory source mishandled:$WC21_BAD" FAIL
+
+  # WC21a — and when that read FAILS the block refuses rather than substituting the
+  # recorded path. The comment above the line measures that substitution as lossy for
+  # the untracked half, so handing it over as a measured-looking operand is worse than
+  # the placeholder a reader would otherwise have filled in themselves. The failure is
+  # not producible from fixture content — the source is a healthy worktree by
+  # construction — so it is driven through a mutant that points the read at a
+  # directory that is not there. Mutating the ARGUMENT does not work and the reason
+  # is worth recording: `git rev-parse --show-toplevel-nope` echoes the unknown
+  # option and exits 0, so the helper returns a truthy string and the read never
+  # fails. The cwd is the operand that actually makes `execFileSync` throw.
+  MUT_TOP="$(cont_mutant toplevel)"
+  sed "s|git(src, \['rev-parse', '--show-toplevel'\])|git(src + '/zensu-no-such-dir', ['rev-parse', '--show-toplevel'])|" "$TRAIL_MJS" > "$MUT_TOP"
+  if ! grep -qF "git(src + '/zensu-no-such-dir', ['rev-parse', '--show-toplevel'])" "$MUT_TOP"; then
+    check "WC21a-pre the toplevel mutation matched nothing — the refusal is unchecked" FAIL
+  else
+    C_TOPFAIL="$(env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$MUT_TOP" show "$SID_C" --all --anchor "$CONT_ANCHOR" 2>/dev/null | cont_block)"
+    WC21A_BAD=""
+    case "$C_TOPFAIL" in "CONTINUE blocked"*) ;; *) WC21A_BAD="$WC21A_BAD not-blocked" ;; esac
+    case "$C_TOPFAIL" in *"'<their worktree>' = "*) WC21A_BAD="$WC21A_BAD rendered-an-operand-anyway" ;; *) ;; esac
+    case "$C_TOPFAIL" in *"worktree add"*) WC21A_BAD="$WC21A_BAD rendered-a-plan" ;; *) ;; esac
+    [ -z "$WC21A_BAD" ] \
+      && check "WC21a an unreadable source toplevel is refused rather than substituted with the recorded path" PASS \
+      || check "WC21a toplevel-read failure mishandled:$WC21A_BAD" FAIL
+  fi
+
+  # WC22 — the unknown branch's own comment requires its line to state "only what
+  # holds in EVERY cause", and its fallback did the opposite: it asserted that no
+  # anchor channel resolved, which is one of the seven and false for at least two of
+  # them (`weak-channel` resolved the anchor and only withdrew its trust;
+  # `ambiguous-spelling` read both sides and found them disagreeing). It is used
+  # exactly where this renderer knows LEAST — an empty `w.reason`, i.e. a caller that
+  # may not have gone through `writeAnchor` at all. Graded as a SHAPE rather than
+  # against a literal: whatever the wording, the parenthetical may not name a channel.
+  MUT_RS="$(cont_mutant reason)"
+  sed "s|: 'no ZENSU_PROJECT_ROOT.*|: '',|" "$TRAIL_MJS" > "$MUT_RS"
+  if grep -qF "no ZENSU_PROJECT_ROOT or CLAUDE_PROJECT_DIR in this process" "$MUT_RS"; then
+    check "WC22-pre the empty-reason mutation matched nothing — the fallback is unchecked" FAIL
+  else
+    C_NOREASON="$(env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$CONT_HOME" USERPROFILE="$CONT_HOME" node "$MUT_RS" show "$SID_C" --all 2>/dev/null | cont_block)"
+    WC22_CAUSE="$(printf '%s\n' "$C_NOREASON" | grep -F 'would be denied (' | head -1 | sed 's/.*would be denied (//; s/)\.*$//')"
+    WC22_BAD=""
+    case "$C_NOREASON" in "CONTINUE unknown"*) ;; *) WC22_BAD="$WC22_BAD not-unknown" ;; esac
+    [ -n "$WC22_CAUSE" ] || WC22_BAD="$WC22_BAD cause-not-extractable"
+    case "$WC22_CAUSE" in
+      *ZENSU_PROJECT_ROOT*|*CLAUDE_PROJECT_DIR*|*anchor*|*channel*) WC22_BAD="$WC22_BAD names-a-cause:$WC22_CAUSE" ;;
+      *) ;;
+    esac
+    [ -z "$WC22_BAD" ] \
+      && check "WC22 with no reason to report the unknown line names no cause of its own" PASS \
+      || check "WC22 unknown fallback mishandled:$WC22_BAD" FAIL
+  fi
 fi
 
 report

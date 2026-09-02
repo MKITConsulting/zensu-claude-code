@@ -1959,8 +1959,8 @@ t36_cite "$SKILL_MD" 'scopes by transcript-directory' "$T36_SPEC" 'skills/sessio
 # both onto one number and this pair reported `no-citation-in` plus `2-matches` rather than
 # passing over a clobbered citation. When a target crosses a hundred boundary these two
 # prefixes move with it, and the failure says which.
-t36_cite "$TRAIL_MJS" 'function gitState' "$T36_HTML" 'trail\.mjs:20[0-9]+'
-t36_cite "$TRAIL_MJS" 'claude --resume' "$T36_HTML" 'trail\.mjs:2[1-9][0-9][0-9]'
+t36_cite "$TRAIL_MJS" 'function gitState' "$T36_HTML" 'trail\.mjs:21[0-9][0-9]'
+t36_cite "$TRAIL_MJS" 'claude --resume' "$T36_HTML" 'trail\.mjs:34[0-9][0-9]'
 t36_cite "$SKILL_MD" 'scopes by transcript-directory' "$T36_HTML" 'skills/session-trail/SKILL\.md:2[0-9]+'
 # The POPULATION, scanned out of the documents rather than counted off the row table
 # above. `T36_ROWS` counts rows this test declares; it can never notice a citation the
@@ -1977,6 +1977,37 @@ elif [ -z "$T36_MISS" ]; then
 else
   check "T36 a multi-repo citation into this skill points at the wrong line:$T36_MISS" FAIL
 fi
+
+# T37 — the `WRITES` sentence is what a consumer reads to decide whether `allowed`
+# is even REACHABLE, so an absolute in it is not merely stale. It said the line
+# answers `allowed` or `denied here` only when one of the two ENVIRONMENT variables
+# is present, which `flag:--anchor` made false: that channel is ranked first and
+# carried as trusted, and the verdict suite's own WC arms invoke
+# `env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR … --anchor` and assert a verdict.
+# The positive half is DERIVED from `writeAnchor`'s own candidate labels, so a fourth
+# channel has to reach this sentence too; the negative half carries a control,
+# because a needle that stops matching would otherwise degrade into a free PASS.
+T37_LABELS="$(awk '/const candidates = \[/{f=1} f{print} f&&/\];/{exit}' "$TRAIL_MJS" \
+  | grep -oE "label: '[A-Za-z:_-]+'" | sed "s/label: '//; s/'$//" | sed 's/^env://; s/^flag://' | sort -u)"
+T37_ABSOLUTE='**only** when `ZENSU_PROJECT_ROOT` or `CLAUDE_PROJECT_DIR` is present in its own environment'
+T37_LINE="$(grep -F 'answers `allowed` or `denied here`' "$SKILL_MD" | head -1)"
+T37_MISS=""
+[ -n "$T37_LINE" ] || T37_MISS="$T37_MISS writes-sentence-not-found"
+[ -n "$T37_LABELS" ] || T37_MISS="$T37_MISS candidate-labels-not-derived"
+for t37_lab in $T37_LABELS; do
+  case "$T37_LINE" in *"$t37_lab"*) ;; *) T37_MISS="$T37_MISS channel-unnamed:$t37_lab" ;; esac
+done
+case "$T37_LINE" in *"$T37_ABSOLUTE"*) T37_MISS="$T37_MISS still-claims-the-two-variables-are-the-only-channels" ;; *) ;; esac
+[ -z "$T37_MISS" ] \
+  && check "T37 the WRITES sentence names every channel writeAnchor ranks and claims no two of them are the only ones" PASS \
+  || check "T37 WRITES channel sentence wrong:$T37_MISS" FAIL
+
+# The control for T37's negative half: the needle must still match the sentence it
+# was written against, or the check above passes for the wrong reason.
+case "but it answers \`allowed\` or \`denied here\` $T37_ABSOLUTE — neither normally reaches" in
+  *"$T37_ABSOLUTE"*) check "T37b the absolute-claim needle still matches the wording it forbids" PASS ;;
+  *) check "T37b the absolute-claim needle matches nothing — T37's negative half is inert" FAIL ;;
+esac
 
 echo "----"
 echo "test-session-trail-skill: $PASS PASS / $FAIL FAIL / $SKIP SKIP"
