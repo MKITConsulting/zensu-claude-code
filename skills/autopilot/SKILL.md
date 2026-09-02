@@ -363,8 +363,10 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    (`$(git rev-parse --show-toplevel)/.zensu/templates/autopilot-pr-body.md` when that file
    exists, else `$ROOT/templates/autopilot-pr-body.md` under the validated session plugin root): it carries a per-AC checklist table keyed
    by the stable `AC-###` IDs — one row per AC, with verification evidence for each active AC
-   (deprecated rows stay listed with status `deprecated`, no evidence; status filled in after
-   step 6). The body also carries one audit line
+   (deprecated rows stay listed with status `⚪ deprecated`, no evidence; status filled in after
+   step 6). Every `Status` cell carries a leading marker — 🟢 pass, 🟡 partial, 🟡 unvalidated,
+   🔴 fail, ⚪ deprecated — prefixing the word rather than replacing it; ⚪ is bound to
+   provenance, so use it only for a row the spec already marks deprecated. The body also carries one audit line
    `Gates bypassed during build: <list|none|UNREADABLE — …>`
    from the bypass ledger: after EVERY `/zensu:tdd` chain in this build (the initial one and
    each fix loop), run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --bypass-list`
@@ -419,7 +421,7 @@ Run these in order. Implement **via the Zensu workflow** throughout.
 After all delivery invariants and current-head evidence are durable, apply
 `DELIVERY_COMPLETE`. Stop at a **ready, pushed PR** whose body contains a per-AC pass/fail table keyed by the
 stable `AC-###` IDs — one evidence entry per active ID; deprecated rows stay listed with
-status `deprecated`, no evidence — and the `Gates bypassed during build:` audit line
+status `⚪ deprecated`, no evidence — and the `Gates bypassed during build:` audit line
 (the step-3 union, `none` when clean). Then:
 - **Do NOT merge, push a release, or deploy.** The final merge is the human's.
 - Report: the PR link, the per-AC table, what looped and why, and anything decided

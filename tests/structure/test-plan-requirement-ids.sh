@@ -177,6 +177,15 @@ if grep -qF 'per active `AC-###` ID' "$COVER_DRIVERS_MD" && grep -qF "deprecated
 else
   check "P8b cover rules/drivers.md --from-acs mapping keyed by active AC-### IDs" FAIL
 fi
+# P8c — source (3) is the PR body, whose Status cells now carry a marker PREFIX
+# (🟢 pass, …). Without this tolerance the driver would compare the cell against
+# a bare literal and silently stop skipping deprecated rows. Nothing else pins it.
+if grep -qF 'match the status WORD inside the cell' "$COVER_DRIVERS_MD" \
+  && grep -qF '⚪ deprecated' "$COVER_DRIVERS_MD"; then
+  check "P8c cover rules/drivers.md tolerates the PR-body Status marker prefix" PASS
+else
+  check "P8c cover rules/drivers.md tolerates the PR-body Status marker prefix" FAIL
+fi
 
 echo "----"
 echo "test-plan-requirement-ids: $PASS PASS / $FAIL FAIL"
