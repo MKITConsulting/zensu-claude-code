@@ -2454,13 +2454,55 @@ pinned. THREE needles in `docs/gates.md` §"Source-Write Gate" ARE pinned, by T2
 containment claim, so rewording it fails the suite. That file is no longer wholly
 unpinned; see the section below.
 
-**The gate's ANCHOR contract is restated in SIX carriers outside the parser, and
+**The gate's ANCHOR contract is restated in NINE carriers outside the parser, and
 nothing pins them against it.** `writeAnchor` / `writesLines` / `writeAnchorCaution`
-in `skills/session-trail/scripts/trail.mjs`, flow 3 and the Limits bullet in
-`skills/session-trail/SKILL.md`, and the cross-worktree paragraph in
-`docs/gates.md` §"Source-Write Gate". They do NOT carry the same content, and the
-difference is what decides where an edit is owed. All of them state the CONTAINMENT
-rule.
+/ `continuationPlan` in `skills/session-trail/scripts/trail.mjs`, flow 3, the step-4
+placement paragraph and the Limits bullet in `skills/session-trail/SKILL.md`, and
+BOTH paragraphs of `docs/gates.md` §"Source-Write Gate" — the cross-worktree one and
+the continuation one beside it, which states the rule again in its own words. They do NOT carry
+the same content, and the difference is what decides where an edit is owed. All of
+them state the CONTAINMENT rule.
+
+**`continuationPlan` is the one carrier that ACTS on the rule instead of only
+restating it**, and its three narrowings are the reason it may. It renders and never
+executes, and the reason is APPROVAL rather than gate coverage — a first wording claimed
+the latter and was wrong about the two commands that matter. This script's writes happen
+inside node where no PreToolUse gate can see them, so a worktree it created would be
+unseen; but so are two of the four it RENDERS. Only `git apply` and the patch redirect
+are judged: `bash-source-write-parse.js` gates `worktree` for `remove`/`move` only and
+says `add` "stays ungated", and `detectChannels` recognizes no `tar -xf -`. What stands
+in for the gate there is the renderer's own refusals — same repository, existing anchor,
+resolved branch — which is why they are load-bearing rather than cosmetic. Four carriers
+state this and all four must say it the same way. It prescribes a target path only off a TRUSTED channel: `covered ===
+false` measured through `CLAUDE_PROJECT_DIR` is a sound DENY but its `callerRoot` is
+the wider root, so a path derived from it can land outside the immutable one, and the
+finding is reported with the path withheld (`weak-channel-no-target`). And its base
+branch comes only from a LIVE read of the source worktree, never from the session
+record's `branch` field — measured 2026-08-27, that field answered `main` for a
+worktree actually on `claude/plugin-auto-mode-permissions-665942`, so the rendered
+`git worktree add … -b` would have branched the continuation off `main` and left every
+commit behind; with no live read it answers `branch-unresolved` rather than guessing.
+Its `CONTINUATION_REASONS` set is closed and CARRIES `writeAnchor`'s own reason codes
+verbatim, so renaming one there silently degrades every null cause here to
+`unclassified` — the two sets move together, and `unclassified` is deliberately NOT
+`no-channel`, whose own sentence asserts that neither environment variable was set. The `takeover` MARKDOWN brief deliberately
+carries none of it, on the same terms as `writes`: a brief is read by a different
+session than the one measured, where a rendered target path is a confident instruction
+into the wrong tree.
+
+**Windows is UNMEASURED here, not unreachable, and the distinction was got wrong
+once.** `tests/structure/test-session-trail-verdict.sh` is in the `excluded` list of
+`tests/profiles/windows-native-structure.v1.json` and absent from
+`tests/profiles/windows-ci.v1.json`, so the BLOCKING PR shards skip it — but it IS in
+`ciStructureTests` in `tests/profiles/promptfoo-local-only.v1.json`, so the weekly
+windows-safety run executes it. The WC block will therefore run on Windows; it simply
+never has yet. It is also the first case in that suite to create a real git repository
+and worktree, which is new platform surface AND new wall clock for a suite whose
+Windows runtime nobody has measured — take the figure from the first weekly run after
+this lands. Both of its preconditions SKIP rather than fail, deliberately: a git that
+cannot build the fixture, and a filesystem whose canonical spelling differs from the
+literal one, are environment properties, and failing on either would redden a weekly
+run for a reason unrelated to this feature.
 
 **The two env channels are NOT equally authoritative, and only one direction of the
 weaker one is sound.** `claude-hook-session-v1.js` reads `CLAUDE_PROJECT_DIR` solely
@@ -2480,7 +2522,8 @@ VERBATIM (`.trim()` decides presence only; a trailing space is legal in a POSIX
 directory name and the gate receives the untrimmed value). `W10`/`W11` pin all
 four. The environment variables are named by `writeAnchor`'s header,
 `writesLines`'
-emitted text and SKILL.md flow 3. The rule letters are named by `writeAnchor`'s
+emitted text, `continuationPlan`'s own `weak-channel-no-target` line (which spells
+`CLAUDE_PROJECT_DIR` to a user) and SKILL.md flow 3. The rule letters are named by `writeAnchor`'s
 header (A, B and C), `writesLines` (A, B and C), flow 3 (A, B and C) and `docs/gates.md`
 (C only). `writeAnchorCaution` names neither — deliberately, because it is persisted
 into a brief a stranger reads. The Limits bullet withholds only those two things: it
@@ -2490,8 +2533,8 @@ then points at flow 3 for the routing rule. Do not describe it as an index entry
 an earlier wording here did, and `T30` in `test-session-trail-skill.sh` now fails on
 that claim for as long as the bullet really carries the hook roster. A change to
 `within()`, to how `project_root` is minted (`claude-session-control-v1.js`
-`projectRoot: eventCwd`), or to which hook exports `ZENSU_PROJECT_ROOT` leaves all
-six wrong with both session-trail suites green — they drive `trail.mjs` against its
+`projectRoot: eventCwd`), or to which hook exports `ZENSU_PROJECT_ROOT` leaves every
+carrier enumerated above wrong with both session-trail suites green — they drive `trail.mjs` against its
 own definition and grep the prose for literals. `writeAnchor` no longer holds a hand-copy of
 `within`: the parser now defines it at MODULE scope and EXPORTS it, and
 `trail.mjs` requires the parser and CALLS it, so the containment rule has one
@@ -2525,8 +2568,10 @@ source — which is exactly where this answers `allowed`, and the third realpath
 sides while the gate realpaths only its roots and resolves a `cd` operand
 lexically. That asymmetry is the property to re-check before letting the
 hand-copy
-drift. `writeAnchor`'s measured verdict never leaves `show`'s stdout and
-`show --json`; what reaches a `~/.claude/handoffs/` brief is `writeAnchorCaution`'s
+drift. `writeAnchor`'s measured verdict reaches THREE carriers — `show`'s stdout,
+`show --json` and `takeover --json` — and the third was already true before the
+continuation work; an earlier wording here named only the first two and was wrong.
+What reaches a `~/.claude/handoffs/` brief is `writeAnchorCaution`'s
 STATIC containment sentence, deliberately unmeasured because a brief is read by a
 session it was not measured against. A correction to that WORDING does not reach
 files already written.
@@ -4301,7 +4346,7 @@ rather than defaulting to `[]`. The unknown-command refusal stays FIRST, so a ty
 reported as a typo. Two entries are DELIBERATE accept-and-ignore, not oversights:
 `--force` on `list` and `limited`, which SKILL.md documents as a survey rule —
 `instances` emits no verdict and so refuses it. `L56h` derives both key sets from
-source and compares them, so a tenth command cannot be added to one alone;
+source and compares them, so an eleventh command cannot be added to one alone;
 `test-session-trail-skill.sh`'s `T16` and its `json-mode-order` guard read `COMMANDS`
 and `handler(opts)` and BOTH went red when the if/else chain was replaced — they are
 part of this coupling, not collateral.
@@ -4637,8 +4682,12 @@ subject:
   comparisons already used.
 
 **The suite isolates by `--config-dir` and `$ZENSU_CCD_STORE`, deliberately not by
-`$HOME`.** Its sibling `test-session-trail-verdict.sh` redirects HOME and therefore
-skips itself whole on Windows, where `os.homedir()` reads `USERPROFILE`. Both suites
+`$HOME`.** Its sibling `test-session-trail-verdict.sh` redirects the home directory
+instead — and it does NOT skip itself on Windows, which an earlier revision of this
+paragraph claimed: `trailrun` sets `USERPROFILE` alongside `HOME` and that suite's own
+V0 probe measures the PAIR, so the redirection succeeds where `os.homedir()` reads
+`USERPROFILE`. §"Git Mutation Tables" says the WC block "will therefore run on
+Windows", and the two paragraphs now agree. Both suites
 also unset `CLAUDE_CONFIG_DIR`, because `trail.mjs` honours it and `$HOME` is only a
 fallback — with it exported, a fixture read would resolve against the developer's
 real config root and a `takeover` would write a real edge there. In the lineage suite
