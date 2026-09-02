@@ -256,6 +256,67 @@ zensu_session_incompatible_runtime_model() {
   ) 2>/dev/null
 }
 
+# Returns 0 ONLY when a Session Control record is intact in every respect and the
+# SOLE disagreement is that the installation which minted it no longer exists on
+# disk — what the host's plugin-cache pruning produces for a session that
+# outlived a few releases. Like the lineage predicate above it is NAMED, never
+# relaxed: a workflow document is still reachable, and adoption re-mints the
+# record under the running installation. Disjoint from the lineage predicate by
+# construction (that one needs the strict read to succeed, this one needs it to
+# fail), and deliberately blind to lineage, because the remedy is the same
+# either way. The decision lives in claude-hook-session-v1.js.
+#
+# On a match this PRINTS the same `recorded<TAB>executing` pair the lineage
+# predicate prints, so every consumer of that pair reads this one unchanged. The
+# same stdout warning applies: a caller wanting the predicate alone MUST discard
+# stdout explicitly (`>/dev/null`).
+zensu_session_pruned_plugin_root() {
+  local payload="${1:-}"
+  local lib_dir binder plugin_root native_plugin_root native_plugin_data
+  local msys_env_exclusions
+  [ -n "$payload" ] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  plugin_root="$(cd "$lib_dir/../.." && pwd -P)" || return 1
+  binder="$lib_dir/claude-hook-session-v1.js"
+  [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
+  native_plugin_root="$(bash "$lib_dir/zensu-host-path.sh" "$plugin_root")" || return 1
+  native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}")" || return 1
+  msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
+    || return 1
+  (
+    cd -P -- "$lib_dir" || exit 1
+    printf '%s' "$payload" \
+      | MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
+        CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
+        node ./claude-hook-session-v1.js pruned-plugin-root
+  ) 2>/dev/null
+}
+
+# The model-side twin, for /zensu:doctor: same question, same printed pair, the
+# session id from CLAUDE_CODE_SESSION_ID.
+zensu_session_pruned_plugin_root_model() {
+  local lib_dir binder plugin_root native_plugin_root native_plugin_data
+  local msys_env_exclusions
+  [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] || return 1
+  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  plugin_root="$(cd "$lib_dir/../.." && pwd -P)" || return 1
+  binder="$lib_dir/claude-hook-session-v1.js"
+  [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
+  native_plugin_root="$(bash "$lib_dir/zensu-host-path.sh" "$plugin_root")" || return 1
+  native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "$CLAUDE_PLUGIN_DATA")" || return 1
+  msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
+    || return 1
+  (
+    cd -P -- "$lib_dir" || exit 1
+    MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
+      CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
+      node ./claude-hook-session-v1.js model-pruned-plugin-root
+  ) 2>/dev/null
+}
+
 # Returns 0 ONLY when this PreToolUse payload is one of the two recognized Bash
 # calls: the read-only /zensu:doctor diagnostic, or /zensu:adopt-session. This is
 # NOT a relaxable-state predicate and does not belong beside the two above: those
@@ -342,9 +403,12 @@ zensu_doctor_allowed() {
 #                     gate needs is missing — so the doctor is denied too
 #   incompatible-runtime  the caller POSITIVELY identified the lineage state and
 #                     supplies both declared versions ($2 recorded, $3 executing);
-#                     this is the one scope that can name a remedy which fixes
-#                     the session in place rather than telling the user to start
-#                     over
+#                     this scope names a remedy which fixes the session in place
+#                     rather than telling the user to start over
+#   pruned-plugin-root  the caller POSITIVELY identified that the installation
+#                     which minted the record is gone from the plugin cache, and
+#                     supplies the same version pair; the remedy is the same
+#                     in-place adoption, the cause is a different one
 #
 # The version pair is interpolated into a JSON string, so it is held to a strict
 # shape first. A manifest version is ordinary text as far as the record schema is
@@ -368,6 +432,16 @@ zensu_emit_hook_session_deny() {
     [[ "$recorded" =~ $ZENSU_SAFE_VERSION_RE ]] || recorded="(unreadable)"
     [[ "$executing" =~ $ZENSU_SAFE_VERSION_RE ]] || executing="(unreadable)"
     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is intact, and the only disagreement is that the running Zensu installation declares an incompatible lineage — the record was minted by %s and %s is executing. While the plugin is at major 0 the minor is the breaking axis, so a plugin update that landed mid-session stops serving the record and every stateful tool fails closed. The record is NOT damaged and NOT missing. Run /zensu:adopt-session to check whether this session can be adopted by the running installation in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If it refuses, the persisted shapes really did change and a fresh Claude Code session is the only way forward."}}\n' \
+      "$recorded" "$executing"
+    return
+  fi
+  if [ "$scope" = pruned-plugin-root ]; then
+    local recorded="${2:-}" executing="${3:-}"
+    # Same degradation policy as the lineage scope: substitute, keep the wording,
+    # never lose the in-place remedy over two unreadable numbers.
+    [[ "$recorded" =~ $ZENSU_SAFE_VERSION_RE ]] || recorded="(unreadable)"
+    [[ "$executing" =~ $ZENSU_SAFE_VERSION_RE ]] || executing="(unreadable)"
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is intact, but the Zensu installation that minted it (version %s) has been removed from the plugin cache — the host keeps only a few versions — so the running installation (%s) cannot re-verify the record and every stateful tool fails closed. The record is NOT damaged and NOT missing. Run /zensu:adopt-session to check whether the running installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If it refuses, a persisted shape really did change and a fresh Claude Code session is the only way forward."}}\n' \
       "$recorded" "$executing"
     return
   fi
@@ -460,4 +534,5 @@ export -f zensu_bind_hook_session zensu_bind_model_session zensu_emit_hook_sessi
   zensu_session_unregistered \
   zensu_session_orphaned_project_root zensu_session_orphaned_project_root_model \
   zensu_session_incompatible_runtime zensu_session_incompatible_runtime_model \
+  zensu_session_pruned_plugin_root zensu_session_pruned_plugin_root_model \
   zensu_session_key zensu_resolve_session_id zensu_resolve_project_dir 2>/dev/null || true

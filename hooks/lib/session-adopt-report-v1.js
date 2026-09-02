@@ -238,7 +238,7 @@ const shouldRepairInPlace = (verdict, confirmed) =>
 // the misleading doctor row left them.
 const REMEDY = {
   [core.ADOPTION_REFUSALS.RECORD_UNREADABLE]:
-    "The record could not be re-verified against the installation that minted it. Its recorded project root may be gone, that installation may have been pruned from the plugin cache, the record may have been altered, or a persisted schema really did change in this release. Adoption cannot tell these apart, and in this state /zensu:doctor cannot name the directory either. Start a fresh Claude Code session.",
+    "The record could not be re-verified against the installation that minted it. Its recorded project root may be gone, the record may have been altered, or a persisted schema really did change in this release. A minting installation that was merely pruned from the plugin cache is no longer one of these — that state is adoptable — so this refusal means something else disagrees. Adoption cannot tell the remaining causes apart, and in this state /zensu:doctor cannot name the directory either. Start a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.PLUGIN_DATA]:
     "The record belongs to a different plugin-data store — typically a development checkout against an installed plugin, or the reverse. That boundary is never relaxed. Start a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.ALREADY_SERVED]:
@@ -252,6 +252,15 @@ const REMEDY = {
   [core.ADOPTION_REFUSALS.WORKFLOW_SCHEMA]:
     "The workflow document of this session cannot be read by the executing runtime, which means a persisted shape really did change. This is the case adoption must refuse. Start a fresh Claude Code session.",
 };
+
+// The one adoptable state in which the record could NOT be re-measured: the
+// installation that minted it is gone from the plugin cache. Said on the row
+// that names the minting version, so the user learns why the strict read failed
+// without a detour through /zensu:doctor, and repeated as one sentence because
+// a parenthetical alone does not say what adoption will do about it.
+const PRUNED_NOTE = " (installation no longer on disk)";
+const PRUNED_EXPLANATION = "The installation that minted the record has been pruned from the plugin cache, so the\nrecord could not be re-measured; adoption re-mints it under the running installation.\n";
+const prunedNote = (pruned) => (pruned ? PRUNED_NOTE : "");
 
 // Wrapped in a function because `node -e` evaluates at module top level, where a
 // bare `return` is a syntax error — and a syntax error here would surface as a
@@ -314,10 +323,13 @@ function main() {
 
   if (process.env.ZADOPT_CONFIRM !== "1") {
     process.stdout.write("Zensu session adoption — ADOPTABLE\n\n");
-    process.stdout.write("  record minted by : " + safe(verdict.recorded) + "\n");
+    process.stdout.write("  record minted by : " + safe(verdict.recorded) + prunedNote(verdict.prunedPluginRoot) + "\n");
     process.stdout.write("  executing        : " + safe(verdict.executing) + "\n");
     process.stdout.write("  project          : " + safe(verdict.context.project_root) + "\n\n");
     process.stdout.write("The record is intact and this installation can take it over in place.\n");
+    if (verdict.prunedPluginRoot) {
+      process.stdout.write(PRUNED_EXPLANATION);
+    }
     process.stdout.write("Nothing has been changed. Run the same command with --confirm to adopt.\n");
     return;
   }
@@ -333,7 +345,7 @@ function main() {
     adopted.context.plugin_root,
   );
   process.stdout.write("Zensu session adoption — ADOPTED\n\n");
-  process.stdout.write("  record minted by : " + safe(adopted.recorded) + "\n");
+  process.stdout.write("  record minted by : " + safe(adopted.recorded) + prunedNote(adopted.prunedPluginRoot) + "\n");
   process.stdout.write("  now served by    : " + safe(adopted.executing) + "\n");
   // The anchor the session is bound to from here on. It is carried from the
   // record, never from where this command was invoked, and naming it is the one
@@ -344,6 +356,9 @@ function main() {
   process.stdout.write("  leases set aside : " + leases.discarded + "\n");
   process.stdout.write("  leases stuck     : " + leases.failed.length + "\n\n");
   process.stdout.write("This session is bound again from the next tool call onward — no restart is needed.\n");
+  if (adopted.prunedPluginRoot) {
+    process.stdout.write(PRUNED_EXPLANATION);
+  }
   if (adopted.provenance === "no-workflow-document") {
     process.stdout.write("\nNOTE: this session had no workflow document, so there was nothing to record the\n");
     process.stdout.write("takeover in. That is a normal state, not a fault.\n");

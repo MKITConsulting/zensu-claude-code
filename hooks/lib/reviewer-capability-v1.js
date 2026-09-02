@@ -486,6 +486,15 @@ function main() {
       deny(`this session's Session Control record is intact, but the running Zensu installation declares an incompatible lineage — the record was minted by ${lineage.recorded} and ${lineage.executing} is executing. Run /zensu:adopt-session to check whether this installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state.`);
       return;
     }
+    // The other named state with the same in-place remedy, and the SIXTH denier
+    // for it: the installation that minted the record was pruned from the
+    // plugin cache. Disjoint from the lineage question above, so the order of
+    // the two is immaterial.
+    const pruned = hookSession.resolvePrunedPluginRoot(payload);
+    if (pruned) {
+      deny(`this session's Session Control record is intact, but the Zensu installation that minted it (version ${pruned.recorded}) has been removed from the plugin cache, so the running installation (${pruned.executing}) cannot re-verify the record. Run /zensu:adopt-session to check whether this installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state.`);
+      return;
+    }
     deny(`immutable context revalidation failed: ${error.message}`);
     return;
   }

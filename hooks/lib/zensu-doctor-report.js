@@ -2277,6 +2277,19 @@ function bindingLine() {
           ? ' (record minted by ' + env.ZDOC_BINDING_RECORDED_VERSION + ', executing ' + env.ZDOC_BINDING_EXECUTING_VERSION + ')'
           : '')
         + ' — while the plugin is at major 0 the minor is the breaking axis, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether this session can be adopted in place, then /zensu:adopt-session --confirm');
+    // The record is INTACT and the installation that minted it has been pruned
+    // from the plugin cache — the host keeps only a few versions, and a session
+    // that outlives them lands here. Nothing can re-verify the record any more,
+    // so no installation serves it; before this row existed the state fell
+    // through to `unbound` above, which asserts "no valid record" — false — and
+    // the Stop hook looped on it. Same in-place remedy as the lineage row, a
+    // different cause, so it is named separately.
+    case 'pruned-plugin-root':
+      return line(BAD, 'binding: this session\'s Session Control record is intact, but the installation that minted it has been removed from the plugin cache'
+        + (env.ZDOC_BINDING_RECORDED_VERSION && env.ZDOC_BINDING_EXECUTING_VERSION
+          ? ' (record minted by ' + env.ZDOC_BINDING_RECORDED_VERSION + ', executing ' + env.ZDOC_BINDING_EXECUTING_VERSION + ')'
+          : '')
+        + ' — the record can no longer be re-verified, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether this session can be adopted in place, then /zensu:adopt-session --confirm');
     case 'unavailable':
       return line(BAD, 'binding: hooks/lib/zensu-session.sh is missing or symlinked — Session Control cannot bind');
     default:

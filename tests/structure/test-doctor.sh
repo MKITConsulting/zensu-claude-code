@@ -1369,6 +1369,31 @@ case "$OUT" in
     esac ;;
   *) check "P1ad2 orphaned row without a path (got: $OUT)" FAIL ;;
 esac
+# A record whose minting installation was pruned from the plugin cache is the
+# fourth named bind failure: intact record, no installation able to re-verify
+# it, adoption the remedy. It must render its own row with both versions and
+# never the no-record sentence, and still classify when the pair is unavailable.
+OUT="$(ZDOC_BINDING_RECORDED_VERSION=0.17.0 ZDOC_BINDING_EXECUTING_VERSION=0.18.0 run_report_binding pruned-plugin-root)"
+case "$OUT" in
+  *'has been removed from the plugin cache (record minted by 0.17.0, executing 0.18.0)'*)
+    case "$OUT" in
+      *'has no valid Session Control record'*|*'declares an incompatible lineage'*)
+        check "P1ad3 pruned-installation binding row (also claims another state: $OUT)" FAIL ;;
+      *'/zensu:adopt-session --confirm'*)
+        check "P1ad3 a pruned minting installation renders its own ❌ row naming both versions and the adopt remedy" PASS ;;
+      *) check "P1ad3 pruned-installation binding row names no remedy (got: $OUT)" FAIL ;;
+    esac ;;
+  *) check "P1ad3 pruned-installation binding row (got: $OUT)" FAIL ;;
+esac
+OUT="$(run_report_binding pruned-plugin-root)"
+case "$OUT" in
+  *'has been removed from the plugin cache'*)
+    case "$OUT" in
+      *'removed from the plugin cache ('*) check "P1ad4 pruned row without a pair (stray parenthesis: $OUT)" FAIL ;;
+      *) check "P1ad4 the pruned row still classifies when the version pair is unavailable" PASS ;;
+    esac ;;
+  *) check "P1ad4 pruned row without a pair (got: $OUT)" FAIL ;;
+esac
 OUT="$(run_report_binding unavailable)"
 case "$OUT" in *'zensu-session.sh is missing or symlinked'*) check "P1ae unavailable binder renders a ❌ binding row" PASS ;; *) check "P1ae unavailable binder binding row (got: $OUT)" FAIL ;; esac
 OUT="$(run_report_binding unknown)"

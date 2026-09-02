@@ -99,6 +99,30 @@ function canonicalDirectory(input, label) {
   return canonical;
 }
 
+// The shape half of canonicalDirectory for a path that is EXPECTED to be absent.
+// The two relaxed readers below each waive that function's existence check for
+// one recorded root, and this is what they re-apply instead. It is NOT a strict
+// subset of canonicalDirectory: it rejects a WIDER control-character class — the
+// value is echoed to stderr and into the /zensu:doctor report, which the doctor
+// skill renders verbatim — and it adds an absoluteness and a normalization
+// check, because `/a/b/../c` passes isAbsolute alone and would never compare
+// equal to the canonical spelling every other site holds.
+const UNSAFE_PATH_CHARACTERS = new RegExp('[\\u0000-\\u001f\\u007f]');
+
+function requireAbsentDirectoryPath(input, label) {
+  const value = requireText(input, label);
+  if (UNSAFE_PATH_CHARACTERS.test(value)) {
+    fail(`${label} is unsafe`);
+  }
+  if (!path.isAbsolute(value)) {
+    fail(`${label} must be absolute`);
+  }
+  if (path.resolve(value) !== value) {
+    fail(`${label} must be normalized`);
+  }
+  return value;
+}
+
 function isInside(base, candidate) {
   const relative = path.relative(base, candidate);
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
@@ -537,14 +561,17 @@ function buildContext(options) {
   };
 }
 
-// `options.allowMissingProjectRoot` waives ONE check and nothing else: whether
-// the recorded project root still exists on disk. It defaults to off, so every
-// caller that does not opt in keeps the strict behaviour. The only opt-in
-// caller is readOrphanedProjectRootContext, which separately PROVES the path is
-// absent — waiving the check does not mean the field is unvalidated, because
-// the requireText loop below still rejects a missing, blank, or unsafe value.
+// `options.allowMissingProjectRoot` and `options.allowMissingPluginRoot` each
+// waive ONE check and nothing else: whether that recorded root still exists on
+// disk. Both default to off, so every caller that does not opt in keeps the
+// strict behaviour. Each has exactly one opt-in caller —
+// readOrphanedProjectRootContext and readPrunedPluginRootContext — which
+// separately PROVES the path is absent and re-applies the shape half through
+// requireAbsentDirectoryPath. Waiving the check does not mean the field is
+// unvalidated: the requireText loop below still rejects a missing or blank value.
 function validateContext(context, expectedHost, options) {
   const allowMissingProjectRoot = Boolean(options && options.allowMissingProjectRoot);
+  const allowMissingPluginRoot = Boolean(options && options.allowMissingPluginRoot);
   if (!context || typeof context !== 'object' || Array.isArray(context)) {
     fail('context record must be an object');
   }
@@ -573,7 +600,9 @@ function validateContext(context, expectedHost, options) {
   if (!allowMissingProjectRoot) {
     canonicalDirectory(context.project_root, 'context project root');
   }
-  canonicalDirectory(context.plugin_root, 'context plugin root');
+  if (!allowMissingPluginRoot) {
+    canonicalDirectory(context.plugin_root, 'context plugin root');
+  }
   canonicalDirectory(context.plugin_data, 'context plugin data');
   if (!HASH_RE.test(context.runtime_digest)) {
     fail('context runtime digest is invalid');
@@ -1294,23 +1323,35 @@ function readContextInternal(options) {
   const file = contextRecordFile(recordsDir, options.sessionId);
   const context = validateContext(readJson(file), options.expectedHost, {
     allowMissingProjectRoot: options.allowMissingProjectRoot,
+    allowMissingPluginRoot: options.allowMissingPluginRoot,
   });
   if (context.session_id_hash !== sessionIdHash(options.sessionId)) {
     fail('context session hash mismatch');
   }
-  const currentDigest = computeRuntimeDigest(context.plugin_root, context.host);
-  if (currentDigest !== context.runtime_digest) {
-    fail('context runtime digest mismatch');
-  }
-  const { manifest } = pluginMetadata(context.plugin_root, context.host);
-  if (manifest.version !== context.plugin_version) {
-    fail('context plugin version mismatch');
+  // With the minting installation gone there is nothing to re-measure: the
+  // digest and the declared version stay shape-checked by validateContext and
+  // are otherwise taken on the record's word. That is the stated cost of the
+  // pruned-root waiver, and readPrunedPluginRootContext — its only caller —
+  // proves the root is absent before it hands the record to anyone.
+  if (!options.allowMissingPluginRoot) {
+    const currentDigest = computeRuntimeDigest(context.plugin_root, context.host);
+    if (currentDigest !== context.runtime_digest) {
+      fail('context runtime digest mismatch');
+    }
+    const { manifest } = pluginMetadata(context.plugin_root, context.host);
+    if (manifest.version !== context.plugin_version) {
+      fail('context plugin version mismatch');
+    }
   }
   return context;
 }
 
 function readContext(options) {
-  return readContextInternal({ ...options, allowMissingProjectRoot: false });
+  return readContextInternal({
+    ...options,
+    allowMissingProjectRoot: false,
+    allowMissingPluginRoot: false,
+  });
 }
 
 // One of the two bind failures a caller may treat as "nothing left to enforce"
@@ -1330,28 +1371,18 @@ function readContext(options) {
 // not a vanished worktree, and a second disagreement is never relaxed alongside
 // the first. Throws on every one of them; returns the context only for the
 // exact state described above.
-// Control characters and DEL. canonicalDirectory rejects a subset of these on
-// the strict path; the orphan reader skips that function for its EXISTENCE
-// check and must not lose its shape check with it.
-const UNSAFE_PATH_CHARACTERS = new RegExp('[\\u0000-\\u001f\\u007f]');
-
 function readOrphanedProjectRootContext(options) {
   const context = readContextInternal({ ...options, allowMissingProjectRoot: true });
   // Waiving canonicalDirectory waives its EXISTENCE check, which is the point —
   // but it would also waive that function's shape validation, and this value is
   // not inert: callers print it to stderr and into the /zensu:doctor report,
-  // which the doctor skill renders verbatim. Without these two guards a record
+  // which the doctor skill renders verbatim. Without the shape half a record
   // whose project_root alone was edited to an absent path carrying newlines or
   // ANSI escapes would classify as the relaxable state and get its bytes echoed
   // into a terminal and into the model's context — a record the strict
-  // readContext fails closed on. Re-apply the shape half, so EXISTENCE stays
-  // the only waived check.
-  if (UNSAFE_PATH_CHARACTERS.test(context.project_root)) {
-    fail('context project root is unsafe');
-  }
-  if (!path.isAbsolute(context.project_root)) {
-    fail('context project root must be absolute');
-  }
+  // readContext fails closed on. Re-apply it, so EXISTENCE stays the only
+  // waived check.
+  requireAbsentDirectoryPath(context.project_root, 'context project root');
   // lstat, never realpath: realpath follows a symlink and would report a
   // dangling link as absent, quietly turning a present-but-wrong root into the
   // relaxable state.
@@ -1365,6 +1396,31 @@ function readOrphanedProjectRootContext(options) {
   // `return context`, which would hand back a root that still exists if fail()
   // ever stopped throwing: the exact value this reader must never return.
   fail('context project root still exists');
+}
+
+// The relaxed reader for the OTHER recorded root. An installation the host has
+// pruned from its plugin cache leaves a record that is intact in every respect
+// except that its plugin_root no longer exists — and with it every way to
+// re-measure the runtime digest or re-read the declared version. Existence is
+// the one waived check, and it is proven rather than assumed: the path must be
+// absent (lstat, never realpath, for the reason the orphan reader states), and
+// its PARENT must still be a real directory, because a pruned installation
+// leaves its cache directory behind while a record naming a root under a
+// directory that never existed is not this state. Lineage is deliberately NOT
+// judged here — the state is reachable under a compatible lineage too, and in
+// both cases the record cannot be served; the callers decide what the absence
+// means, and adoption is the one exit.
+function readPrunedPluginRootContext(options) {
+  const context = readContextInternal({ ...options, allowMissingPluginRoot: true });
+  requireAbsentDirectoryPath(context.plugin_root, 'context plugin root');
+  canonicalDirectory(path.dirname(context.plugin_root), 'context plugin root parent');
+  try {
+    fs.lstatSync(context.plugin_root);
+  } catch (error) {
+    if (error.code === 'ENOENT') return context;
+    fail('context plugin root is unreadable');
+  }
+  fail('context plugin root still exists');
 }
 
 // ---------------------------------------------------------------------------
@@ -1463,6 +1519,7 @@ function adoptableRecord(options) {
   let executingPluginRoot;
   let pluginData;
   let context;
+  let prunedPluginRoot = false;
   try {
     executingPluginRoot = canonicalDirectory(options.executingPluginRoot, 'executing plugin root');
     pluginData = canonicalDirectory(options.pluginData, 'plugin data');
@@ -1470,11 +1527,25 @@ function adoptableRecord(options) {
     // the runtime digest against the RECORDED root and re-reads that root's
     // manifest, so a forged or hand-edited record cannot reach adoption; it also
     // enforces the context schema and that the recorded project root exists.
-    context = readContext({
+    //
+    // A recorded installation the host PRUNED from its cache is the ONE
+    // disagreement admitted past the strict read, and only through that read
+    // failing first: readPrunedPluginRootContext waives the root's existence
+    // alone, proves the absence, and keeps every other check. Nothing can
+    // re-measure a tree that is gone, so the digest and the declared version
+    // are taken on the record's word there — the stated cost, and the reason
+    // such a record is adopted once rather than served.
+    const readerOptions = {
       recordsDir: options.recordsDir,
       sessionId: options.sessionId,
       expectedHost: options.host,
-    });
+    };
+    try {
+      context = readContext(readerOptions);
+    } catch {
+      context = readPrunedPluginRootContext(readerOptions);
+      prunedPluginRoot = true;
+    }
   } catch {
     return adoptionRefusal(ADOPTION_REFUSALS.RECORD_UNREADABLE);
   }
@@ -1493,7 +1564,10 @@ function adoptableRecord(options) {
   //
   // Condition 3 — nothing to adopt when this runtime already serves the record.
   // Refusing here keeps adoption from being a way to re-mint a healthy session.
-  if (servesRecordedRuntime(context, executingPluginRoot, context.host)) {
+  // A pruned root serves nothing — the strict read already failed — so the
+  // check is skipped for it: a compatible-but-pruned record is adoptable, not
+  // "already served", because no installation can bind it any more.
+  if (!prunedPluginRoot && servesRecordedRuntime(context, executingPluginRoot, context.host)) {
     return adoptionRefusal(ADOPTION_REFUSALS.ALREADY_SERVED);
   }
   // Condition 4 — the same structural bound servesRecordedRuntime applies: a
@@ -1549,6 +1623,7 @@ function adoptableRecord(options) {
     context,
     recorded: context.plugin_version,
     executing: executingVersion,
+    prunedPluginRoot,
   };
 }
 
@@ -1646,6 +1721,7 @@ function adoptContext(options) {
       recorded: verdict.recorded,
       executing: verdict.executing,
       projectRoot: verdict.context.project_root,
+      prunedPluginRoot: verdict.prunedPluginRoot,
     };
   });
 
@@ -3932,6 +4008,8 @@ module.exports = {
   registerContext,
   readContext,
   readOrphanedProjectRootContext,
+  readPrunedPluginRootContext,
+  requireAbsentDirectoryPath,
   ADOPTION_REFUSALS,
   ADOPTION_HISTORY_PHASE,
   ADOPTION_HISTORY_REASON_PREFIX,
