@@ -2525,7 +2525,13 @@ pruned_gate_decision() {
     printf 'hook-exit-nonzero\n'
     return
   fi
-  if [ -s "$err" ] && grep -qv '^claude hook session binder: ' "$err"; then
+  # In THIS state the bind fails inside the core, not inside the binder, so the
+  # authoritative diagnostic on stderr is the raw core line rather than the
+  # binder-prefixed one gate_decision_from tolerates. It is exactly the line the
+  # Stop hook tells the user to read, so it is expected here — and only it.
+  if [ -s "$err" ] \
+      && grep -qv -e '^claude hook session binder: ' \
+        -e '^session-control-v1: context plugin root does not exist$' "$err"; then
     printf 'hook-stderr\n'
     return
   fi
