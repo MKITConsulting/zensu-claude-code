@@ -5142,25 +5142,56 @@ itself is pinned. They were corrected in this change (4224 + 1756 ≈ 5980 chara
 about 117 KiB over 20 turns and 351 KiB over 60). Both operands are stated in the SAME unit
 on purpose: an earlier wording summed 4224 characters with the sibling's 1764-BYTE figure.
 
-**A CLOSED chain does not mean a reviewed one, and the anchor must not say it does.**
-`chainShape` answers `chain-closed` on `chainDone === true` BEFORE it looks at any ticket
-or round, and the zero-change `--chain-done` terminus sets that flag with no ticket and no
-round — so rendering three ticks there tells the user a review finished and passed when
-none ever ran, which is presentation asserting a substantive fact and exactly what the
-zen-mode SCOPE rule forbids. The host passes `reviewed` (derived from the classifier's own
-`codeReviewDone` / `reviewRound`), and only an explicit `true` buys the ticks; anything
-else renders `✓implement ·review ·self-review`. The direction is the module's standing
-one: a reading that cannot make a false claim.
+**A CLOSED chain renders NO anchor, and the two readings that preceded that are why.**
+`chain-closed` maps to `null`, the same value `no-session` carries, which is how the owner
+already groups them — `INERT_SHAPES` holds exactly those two.
+
+Both earlier readings asserted something untrue. `done: 3` claimed passes: `chainShape`
+answers `chain-closed` on `chainDone === true` before it looks at any ticket or round, and
+the gate on it was `codeReviewDone === true || reviewRound >= 1`, where BOTH operands say a
+round was ISSUED rather than that it succeeded. The classifier cannot say more —
+`chainOutcome` is a workflow-state key whose vocabulary includes `max-rounds`, and
+`classifyChain` does not put it on its report at all — so a chain that ran one round and
+closed without converging was indistinguishable from one that passed, while the directive
+publishes the tick as "a step that finished and passed". The fallback reading `done: 1`
+claimed the opposite: it renders the pending mark, which that same directive publishes as
+"not yet reached", for a chain that is over.
+
+**The PERSISTENCE is what made either one more than a one-turn slip.** The workflow document
+survives the terminus — the phase library treats active-plus-implComplete-plus-chainDone as a
+regular state — and the hook re-resolves on EVERY prompt with no recency bound, so a closed
+chain kept rendering its line over unrelated work for the rest of the session. That is
+precisely the "anchor rendered for work with no Zensu process behind it" defect this whole
+module exists to remove, reintroduced one shape over.
+
+Rendering on the CLOSING turn alone would be defensible and the shape cannot express it:
+`chain-closed` cannot distinguish "just closed" from "closed two hours ago". That needs a
+recency signal the classifier does not supply. Mapping to `null` removed the
+`unreviewedDone` rung, the `options.reviewed` parameter and the whole `reviewedFromReport`
+derivation with it, so `anchorToken` now takes a shape and nothing else.
+
+**KNOWN RESIDUAL of the same class, one shape over, and it is NOT fixed here.**
+`awaiting-self-review` and `self-review-unbindable` are both reached from
+`codeReviewDone === true`, and the bound max-round handoff states its own postcondition as
+outcome `max-rounds` WITH `codeReviewDone` true. So a review that exhausted its budget
+without converging still renders a ticked `review` step. Every in-vocabulary answer is worse
+or larger: the pending mark would claim a review still ahead of one that is over, and the
+honest mark is the failed one, which this module renders only for shapes the owner's own
+stuck sets name. The real fix is to surface `chainOutcome` on the classifier report —
+additively — and render the failed mark for `max-rounds`; that is a change to the report
+shape and belongs in its own commit.
 
 **Port-relevant.** The core half is `anchorToken` / `anchorTokenSafe` / `SHAPE_POSITION` /
 `ANCHOR_STEPS` / `ANCHOR_NONE` / `ANCHOR_PREFIX` / the four marks / `ANCHOR_TOKEN_RE` /
-`reviewedFromReport`, in `hooks/lib/zen-anchor-v1.js`, together with its ONE sibling
+`stuckShapes`, in `hooks/lib/zen-anchor-v1.js`, together with its ONE sibling
 require — the classifier whose shapes it maps and whose stuck sets it reads, without which
-it does not load at all. `reviewedFromReport` was a HOST obligation for one round and is
-not any more: it reads classifier fields only, nothing about it is host-specific, and the
-one rule whose failure mode is a false completion claim is the last one to ask every port
-to re-derive — it was also unreachable from the module's own unit file while it lived in
-the hook. The host half is SIX obligations a port must re-decide: WHICH document carries
+it does not load at all. `stuckShapes` is exported for its TEST SEAM alone: its optional
+`owner` parameter is what makes the two `return null` guards reachable, and production
+always calls it with no argument. There is deliberately NO `reviewed` input of any kind —
+an earlier round carried one as a host obligation and then moved it into the module, and
+mapping `chain-closed` to `null` deleted it outright; a port that reintroduces one has
+reintroduced the false-completion class. The host half is FIVE obligations a port must
+re-decide: WHICH document carries
 the chain and which identity names it; the MODULE TRANSPORT (this host runs `node` with its
 cwd inside `hooks/lib` — the first of the two mechanisms
 `test-msys-special-plugin-module-boundaries.sh` sanctions — because the second needs a
@@ -5169,10 +5200,10 @@ the substitution into the directive AND its own independent re-check of the toke
 spells the grammar a second time inside its node program precisely so a swapped module
 cannot both produce a bad token and bless it); the charset belt appropriate to that host's
 transport — the module's predicate is an output-SHAPE contract, not a JSON escaping rule,
-and a port with a different transport still owes its own check; the pre-open guard on the
-document, which does TWO jobs here (this host's `readWorkflowState` CREATES the state
-directory, and its shared reader opens without `O_NONBLOCK`, so a non-regular file at the
-document path would block a per-prompt hook forever); and the operator accounts. A port that
+and a port with a different transport still owes its own check; and the operator accounts.
+The pre-open guard on the document is no longer among them in the same way: it still exists
+because this host's `readWorkflowState` CREATES the state directory, but the BLOCKING half
+moved into the shared reader, where a port inherits it from the core rather than owing it. A port that
 takes only the module gets a mapping with no reachable caller. `zensu-codex`, `zensu-kiro`
 and `zensu-antigravity` were NOT included in this change.
 
@@ -5186,18 +5217,33 @@ never reaches the model, so the off-phrase branch is never evaluated either. The
 therefore `lstat`s the document first, and builds its path from the OWNER's newly exported
 `WORKFLOW_STATE_SEGMENTS` / `WORKFLOW_STATE_PREFIX` rather than re-spelling the layout — the
 export exists because `workflowStateFile` cannot serve a read-only pre-check: asking it for
-the path CREATES the directory. The `timeout` now on the `hooks.json` registration is BELT,
-not the fix; a killed child returns nothing, which costs that turn's off-phrase detection.
-The uncompromised fix is in the shared reader — an unconditional `lstat` pre-check plus
-`O_NONBLOCK` on POSIX, which would close the class for every caller — and it is deliberately
-NOT taken here, because that module is required by every gate and the change needs its own
-regression pass. **State the guard as a NARROWING, never as a boundary.** The `lstat` and the
-open are two syscalls against a path the session can write, so a writer that swaps the
-document between them still reaches the blocking open: an unbounded per-prompt wedge becomes
-a race the writer must win on every prompt. And the class stays open for every OTHER caller
-of that reader — `readWorkflowStateSnapshot` takes the identical path — which are merely not
-per-prompt. Whether this host lets the prompt through when a `UserPromptSubmit` hook hits its
-`timeout` is UNVERIFIED; nothing in this work measured it. `Z32d` plants a real FIFO and BOUNDS the hook, reporting a block rather than
+the path CREATES the directory.
+
+**THE UNCOMPROMISED FIX WAS TAKEN, and the hook-side guard is now belt rather than the
+boundary.** `readRegularFileSnapshot` adds `O_NONBLOCK` to its open, guarded exactly as
+`O_NOFOLLOW` already is because the constant is not defined on every build. POSIX specifies
+the flag has no effect on the open of a REGULAR file, so no legitimate caller changes
+behaviour, and on a FIFO or device the open returns immediately and the existing descriptor
+`isFile()` check rejects it. That closes the class for EVERY caller of that reader rather
+than narrowing it for one — `readWorkflowStateSnapshot` and every gate that reads a workflow
+document inherit it.
+
+The earlier round declined that fix on the ground that the module is required by every gate
+and needs its own regression pass. The ground was sound and the CONCLUSION did not follow,
+which review named: this same change already edits that module for two exports, so the bar
+was being applied inconsistently. Taking the flag is the smaller of the two remaining
+options, because the alternative left a check-then-use race the writer could retry on every
+prompt.
+
+The hook's own `lstat` STAYS, for the directory-creation job it also does and as defence in
+depth on the blocking one. The `timeout` on the `hooks.json` registration stays too, and its
+own bound is unchanged: a killed hook emits nothing at all, so that turn loses the whole
+directive — the anchor, the contract and the off-phrase branch — which is the one fault in
+this file that is not routed to `none`. Whether this host lets the prompt through when a
+`UserPromptSubmit` hook hits its `timeout`, and whether it kills the process group or only
+the direct child, are both UNVERIFIED; nothing in this work measured either.
+
+`Z32d` plants a real FIFO and BOUNDS the hook, reporting a block rather than
 waiting for it: the first spelling used a command substitution with a background killer and,
 measured against a hook with the guard removed, hung past two minutes anyway, because a
 command substitution reads until every writer closes the pipe and the blocked `node` still

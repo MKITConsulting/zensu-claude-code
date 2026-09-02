@@ -87,27 +87,54 @@ const SHAPE_POSITION = Object.freeze({
   'ticket-spent': Object.freeze({ done: 1 }),
   'ticket-lost': Object.freeze({ done: 1 }),
   'wedged-stale-rearm': Object.freeze({ done: 1 }),
+  // KNOWN RESIDUAL, and it is the SAME class the `chain-closed` entry below was
+  // rewritten to remove — stated here rather than left for the next reader to
+  // rediscover. Both shapes are reached from `codeReviewDone === true`, and that
+  // flag does not mean the review PASSED: `zensu-tdd-phase.sh`'s bound max-round
+  // handoff states its own postcondition as "outcome=max-rounds +
+  // codeReviewDone=true while chainDone stays false". So a chain whose review
+  // exhausted its budget without converging still renders `✓review`, which the
+  // directive publishes as "finished and passed".
+  //
+  // It is NOT fixed here because every in-vocabulary answer is worse or larger.
+  // `done: 1` would render `▶review` for a review that is over — the opposite
+  // false claim. The honest mark is `✗`, which this module already renders for a
+  // stuck shape, but "stuck" is decided by the owner's shape sets and neither of
+  // these is in them. The real fix is an OUTCOME signal: `chainOutcome` is a
+  // workflow-state key (`'' | 'pass' | 'no-changes' | 'max-rounds'`) that
+  // `classifyChain` does not put on its report. Surfacing it there — additively —
+  // and rendering `✗review` for `max-rounds` closes the class for good. That is a
+  // change to the classifier's report shape and belongs in its own commit.
   'awaiting-self-review': Object.freeze({ done: 2 }),
   'self-review-unbindable': Object.freeze({ done: 2 }),
-  // A closed chain is the one shape whose reading depends on more than the
-  // shape. `chainShape` answers `chain-closed` on `chainDone === true` BEFORE it
-  // looks at any ticket or round, and the zero-change `--chain-done` terminus
-  // sets that flag with no ticket and no round — so rendering three ticks there
-  // would tell the user a review finished and passed when none ever ran. The
-  // caller supplies `reviewed`; without it the closure is read as unreviewed,
-  // which is the direction that cannot make a false claim.
+  // A CLOSED chain renders NO anchor, for the same reason `no-session` does not:
+  // it carries no work forward. The owner groups the two itself — `INERT_SHAPES`
+  // is `['no-session', 'chain-closed']`, and `NEXT_COMMAND['chain-closed']` reads
+  // "none — this chain already reached its terminus".
   //
-  // BOUND on the THIRD tick, stated because the rung above does not cover it:
-  // `reviewed` is evidence about the REVIEW step, and `done: 3` marks
-  // `self-review` as well. So the third tick means "the chain reached its
-  // terminus", not "the self-review stage ran and passed" — `--chain-done` is
-  // what `/zensu:self-review` owns, but the Autopilot-bound writer sets
-  // `chainDone` from the consumed ticket and the round count without consulting
-  // `selfReviewFixed`. A second rung on `selfReviewFixed` was considered and
-  // REJECTED: that field latches whether the stage FIXED anything, so a chain
-  // that self-reviewed and found nothing would render `·self-review` — trading
-  // one imprecise mark for a false one.
-  'chain-closed': Object.freeze({ done: 3, unreviewedDone: 1 }),
+  // Two earlier spellings both rendered here and both asserted something untrue,
+  // which is why this entry is `null` rather than a cleverer position. `done: 3`
+  // claimed passes: `chainShape` answers `chain-closed` on `chainDone === true`
+  // BEFORE it looks at any ticket or round, and `classifyChain`'s report does not
+  // carry `chainOutcome` at all — that field reaches a consumer only as
+  // `report.autopilot.outcome`, under bound linkage — so a chain that ran one
+  // round and closed on `max-rounds` was indistinguishable from one that passed,
+  // while the directive publishes `✓` as "a step that finished and passed". The
+  // fallback reading `done: 1` claimed the opposite: it renders `·review`, which
+  // that same directive publishes as "not yet reached", for a chain that is over.
+  //
+  // The PERSISTENCE is what makes either one more than a one-turn slip. The
+  // workflow document is not cleared by `--chain-done` — `zensu-tdd-phase.sh`
+  // treats `active === true && implComplete === true && chainDone === true` as a
+  // regular state — and the hook re-resolves the anchor on EVERY prompt with no
+  // recency bound. So a closed chain kept rendering its line over unrelated work
+  // for the rest of the session, which is precisely the "anchor rendered for work
+  // with no Zensu process behind it" defect this whole module exists to remove.
+  //
+  // Rendering on the CLOSING turn alone would be defensible, but the shape cannot
+  // express it: `chain-closed` cannot distinguish "just closed" from "closed two
+  // hours ago". That needs a recency signal the classifier does not supply.
+  'chain-closed': null,
 });
 
 // The one predicate both the hook and the suites apply to a token. It is
@@ -139,20 +166,19 @@ function anchorTokenSafe(token) {
   return typeof token === 'string' && ANCHOR_TOKEN_RE.test(token);
 }
 
-// The `reviewed` input `chain-closed` depends on, derived HERE rather than by
-// each host. It reads only fields `chain-recovery-v1.js` puts on its report, so
-// nothing about it is host-specific, and the failure mode of getting it wrong is
-// the one this module exists to prevent: three ticks in front of a user for a
-// chain no reviewer ever saw. An earlier spelling left it to the caller and
-// listed it as a port obligation, which asked every port to re-derive the single
-// rule with a false-completion failure mode — and left it unreachable from this
-// module's own unit file.
+// NOTHING here derives whether a review PASSED, and that absence is deliberate.
+// An earlier revision carried `reviewedFromReport`, which read
+// `codeReviewDone === true || reviewRound >= 1` off the classifier report and
+// gated the closed-chain ticks on it. Both operands say a round was ISSUED, never
+// that it succeeded, so the rendered `✓` — published to the user as "finished and
+// passed" — was a claim this module had no evidence for. The classifier does not
+// expose one: `chainOutcome` (`'' | 'pass' | 'no-changes' | 'max-rounds'`) is a
+// workflow-state key that `classifyChain` does not put on its report.
 //
-// A non-object report answers false, which is the unreviewed direction.
-function reviewedFromReport(report) {
-  if (!report || typeof report !== 'object') return false;
-  return report.codeReviewDone === true || report.reviewRound >= 1;
-}
+// Mapping `chain-closed` to `null` removed the only consumer, so the derivation,
+// its `unreviewedDone` rung and the `options.reviewed` parameter all went with
+// it. Do NOT reintroduce a "reviewed" input without a real outcome signal: the
+// cheap-looking spelling is the one that shipped the false claim.
 
 // Read from the owner, never restated here. A shape the classifier calls stuck
 // renders `✗`; every other in-play shape renders `▶`. Rule 6 puts the two marks
@@ -163,40 +189,44 @@ function reviewedFromReport(report) {
 // silently wrong: `DEAD_END_SHAPES` was not exported yet, so every dead-ended
 // chain rendered as running with every check green. An owner this module cannot
 // read is a state it must not guess through.
-function stuckShapes() {
-  const recoverable = chain.RECOVERABLE_SHAPES;
-  const deadEnd = chain.DEAD_END_SHAPES;
+// The `owner` parameter is a TEST SEAM and nothing else: production always calls
+// this with no argument. It exists because both `return null` guards were
+// unreachable from any check — the unit file requires the real sibling, so both
+// operands were always present non-empty arrays, and reverting the function to
+// the silently-wrong `(recoverable||[]).concat(deadEnd||[])` left every case
+// green. A guard added in response to a shipped defect deserves an executed case.
+function stuckShapes(owner) {
+  const source = owner || chain;
+  const recoverable = source.RECOVERABLE_SHAPES;
+  const deadEnd = source.DEAD_END_SHAPES;
   if (!Array.isArray(recoverable) || !recoverable.length) return null;
   if (!Array.isArray(deadEnd) || !deadEnd.length) return null;
   return recoverable.concat(deadEnd);
 }
 
 // shape -> the anchor line the model renders verbatim, or ANCHOR_NONE.
-// An unknown shape, a non-string, and the inert `no-session` all answer
-// ANCHOR_NONE — the fail-open direction, because a missing anchor costs a line
-// of presentation while a wrong one misreports where the session stands.
+// An unknown shape, a non-string, and BOTH inert shapes — `no-session` and
+// `chain-closed` — answer ANCHOR_NONE. That is the fail-open direction: a
+// missing anchor costs a line of presentation, while a wrong one misreports
+// where the session stands.
 //
-// `options.reviewed` is consulted for `chain-closed` alone: true only when the
-// caller has established that this chain actually ran a review.
-function anchorToken(shape, options) {
+// It takes NO options. The signature was `(shape, options)` while `chain-closed`
+// still rendered; every position now follows from the shape alone, so a caller
+// has nothing left to supply and cannot influence what a shape renders.
+function anchorToken(shape) {
   if (typeof shape !== 'string') return ANCHOR_NONE;
   if (!Object.prototype.hasOwnProperty.call(SHAPE_POSITION, shape)) return ANCHOR_NONE;
   const position = SHAPE_POSITION[shape];
   if (!position) return ANCHOR_NONE;
   const stuck = stuckShapes();
   if (stuck === null) return ANCHOR_NONE;
-  const reviewed = !!(options && options.reviewed === true);
-  const done = (position.unreviewedDone !== undefined && !reviewed)
-    ? position.unreviewedDone
-    : position.done;
+  const done = position.done;
   const running = stuck.indexOf(shape) >= 0 ? MARK_BLOCKED : MARK_RUNNING;
   const rendered = ANCHOR_PREFIX + ANCHOR_STEPS
     .map(function (step, index) {
       let mark = MARK_PENDING;
       if (index < done) mark = MARK_DONE;
-      else if (index === done && done < ANCHOR_STEPS.length && position.unreviewedDone === undefined) {
-        mark = running;
-      }
+      else if (index === done) mark = running;
       return ' ' + mark + step;
     })
     .join('');
@@ -215,5 +245,5 @@ module.exports = {
   SHAPE_POSITION,
   anchorToken,
   anchorTokenSafe,
-  reviewedFromReport,
+  stuckShapes,
 };

@@ -161,67 +161,77 @@ test('the failed mark is READ from the owner, never restated here', () => {
   );
 });
 
-test('a closed chain never claims a review that did not run', () => {
-  // `chainShape` answers `chain-closed` on `chainDone === true` BEFORE it looks
-  // at any ticket or round, and the zero-change `--chain-done` terminus sets that
-  // flag with no ticket and no round. Three ticks there would tell the user a
-  // review finished and passed when none ever ran — presentation asserting a
-  // substantive fact, which the zen-mode SCOPE rule forbids outright.
-  assert.strictEqual(anchor.anchorToken('chain-closed'), 'Zensu: ✓implement ·review ·self-review');
-  assert.strictEqual(
-    anchor.anchorToken('chain-closed', { reviewed: false }),
-    'Zensu: ✓implement ·review ·self-review'
-  );
-  // Only an explicit `true` buys the ticks; anything else reads as unreviewed.
-  for (const junk of [undefined, null, {}, { reviewed: 'yes' }, { reviewed: 1 }]) {
-    assert.strictEqual(
-      anchor.anchorToken('chain-closed', junk),
-      'Zensu: ✓implement ·review ·self-review',
-      JSON.stringify(junk)
-    );
-  }
-  assert.strictEqual(
-    anchor.anchorToken('chain-closed', { reviewed: true }),
-    'Zensu: ✓implement ✓review ✓self-review'
-  );
-  // The anchor keeps `chain-closed` although the doctor's foreign-chain row
-  // excludes it as inert: the turn that CLOSES a chain is exactly the turn whose
-  // anchor says so. A deliberate difference of purpose, not drift.
+test('a closed chain renders NO anchor at all', () => {
+  // Both earlier readings of `chain-closed` asserted something untrue. `done: 3`
+  // claimed passes: `chainShape` answers `chain-closed` on `chainDone === true`
+  // before it looks at any ticket or round, and the classifier report carries no
+  // `chainOutcome`, so a chain closed on `max-rounds` was indistinguishable from
+  // one that passed while the directive publishes the tick as "finished and
+  // passed". The unreviewed fallback `done: 1` claimed the opposite, rendering
+  // `·review` — "not yet reached" — for a chain that is over.
+  //
+  // The persistence is what made either one more than a one-turn slip: the
+  // workflow document survives `--chain-done`, and the hook re-resolves on every
+  // prompt with no recency bound, so the line kept rendering over unrelated work.
+  assert.strictEqual(anchor.anchorToken('chain-closed'), anchor.ANCHOR_NONE);
+  // Both inert shapes now agree, which is how the owner already groups them.
   assert.ok(chain.INERT_SHAPES.includes('chain-closed'));
   assert.ok(chain.INERT_SHAPES.includes('no-session'));
-  assert.strictEqual(anchor.anchorToken('no-session'), anchor.ANCHOR_NONE);
+  for (const shape of chain.INERT_SHAPES) {
+    assert.strictEqual(anchor.anchorToken(shape), anchor.ANCHOR_NONE, shape);
+  }
+  // The key stays in SHAPE_POSITION so the parity check against ALL_SHAPES still
+  // covers it; only its VALUE is null.
+  assert.ok(Object.prototype.hasOwnProperty.call(anchor.SHAPE_POSITION, 'chain-closed'));
+  assert.strictEqual(anchor.SHAPE_POSITION['chain-closed'], null);
 });
 
-test('the reviewed input is derived here, from classifier fields only', () => {
-  // This derivation used to live in the hook, where no unit case could reach it
-  // and where every port was asked to re-implement the one rule whose failure
-  // mode is a false completion claim. It reads only fields `classifyChain` puts
-  // on its report, so it is host-neutral and belongs beside the mapping it feeds.
-  assert.strictEqual(anchor.reviewedFromReport({ codeReviewDone: true }), true);
-  assert.strictEqual(anchor.reviewedFromReport({ reviewRound: 1 }), true);
-  assert.strictEqual(anchor.reviewedFromReport({ reviewRound: 7 }), true);
-  // The shape the guard exists for: a zero-change `--chain-done`, closed with no
-  // ticket, no round and no reviewer.
-  assert.strictEqual(
-    anchor.reviewedFromReport({ chainDone: true, codeReviewDone: false, reviewRound: 0 }),
-    false
-  );
-  for (const junk of [undefined, null, 'yes', 42, []]) {
-    assert.strictEqual(anchor.reviewedFromReport(junk), false, JSON.stringify(junk));
+test('no shape renders a completion claim for the whole chain', () => {
+  // The directive publishes the tick as "a step that finished and passed", so a
+  // fully ticked line asserts that the review AND the self-review both passed.
+  // Nothing in the classifier report can establish that, which is why no shape
+  // may produce it. This is the invariant the `chain-closed` rewrite bought; it
+  // is asserted over the whole set rather than for that one shape, so a future
+  // entry cannot reintroduce the claim somewhere else.
+  const allTicked = anchor.ANCHOR_PREFIX
+    + anchor.ANCHOR_STEPS.map((s) => ' ' + anchor.MARK_DONE + s).join('');
+  for (const shape of Object.keys(anchor.SHAPE_POSITION)) {
+    assert.notStrictEqual(anchor.anchorToken(shape), allTicked, shape);
   }
-  // End to end through the mapping, which is the pairing that actually renders.
-  assert.strictEqual(
-    anchor.anchorToken('chain-closed', {
-      reviewed: anchor.reviewedFromReport({ chainDone: true, codeReviewDone: false, reviewRound: 0 }),
-    }),
-    'Zensu: ✓implement ·review ·self-review'
-  );
-  assert.strictEqual(
-    anchor.anchorToken('chain-closed', {
-      reviewed: anchor.reviewedFromReport({ chainDone: true, codeReviewDone: true, reviewRound: 2 }),
-    }),
-    'Zensu: ✓implement ✓review ✓self-review'
-  );
+});
+
+test('anchorToken takes no options, so a caller cannot influence a shape', () => {
+  // The signature was `(shape, options)` while `chain-closed` consulted a
+  // `reviewed` flag the hook derived. That flag was the false-completion input;
+  // with it gone, every position follows from the shape alone. Passing junk as a
+  // second argument must therefore change nothing.
+  assert.strictEqual(anchor.anchorToken.length, 1);
+  for (const junk of [undefined, null, {}, { reviewed: true }, { reviewed: 'yes' }, 42]) {
+    assert.strictEqual(
+      anchor.anchorToken('implementing', junk),
+      'Zensu: \u25b6implement \u00b7review \u00b7self-review',
+      JSON.stringify(junk)
+    );
+    assert.strictEqual(anchor.anchorToken('chain-closed', junk), anchor.ANCHOR_NONE);
+  }
+});
+
+test('a degraded owner renders no anchor rather than guessing', () => {
+  // The guard these two `return null` arms provide was added after a measured
+  // defect: `DEAD_END_SHAPES` was not exported, the first spelling defaulted to
+  // the running mark, and every dead-ended chain rendered as running with the
+  // suite green. Until `stuckShapes` took an owner parameter the arms were
+  // unreachable from any check, because the unit file always requires the real
+  // sibling — reverting to `(recoverable||[]).concat(deadEnd||[])` left every
+  // case passing. The parameter exists for this test and for nothing else.
+  assert.strictEqual(anchor.stuckShapes({ RECOVERABLE_SHAPES: ['a'] }), null);
+  assert.strictEqual(anchor.stuckShapes({ DEAD_END_SHAPES: ['b'] }), null);
+  assert.strictEqual(anchor.stuckShapes({ RECOVERABLE_SHAPES: [], DEAD_END_SHAPES: [] }), null);
+  assert.strictEqual(anchor.stuckShapes({ RECOVERABLE_SHAPES: 'a', DEAD_END_SHAPES: ['b'] }), null);
+  // The positive control: the real owner still yields a usable set, so the three
+  // refusals above cannot be satisfied by a function that answers null always.
+  const real = anchor.stuckShapes();
+  assert.ok(Array.isArray(real) && real.length >= 2);
 });
 
 test('the token predicate refuses every character the substitution cannot carry', () => {

@@ -1353,7 +1353,7 @@ fi
 # over REGISTRATIONS is what keeps a silently emptied file from reading as
 # agreement. Raise it in the same commit that adds a case.
 Z31_UNIT="$PLUGIN_DIR/tests/structure/zen-anchor-v1.test.js"
-Z31_FLOOR=12
+Z31_FLOOR=14
 if [ ! -f "$Z31_UNIT" ]; then
   check "Z31 the anchor module's unit contract is missing from disk" FAIL
 elif ! command -v node >/dev/null 2>&1; then
@@ -1420,6 +1420,41 @@ if [ "$A32_ARMED" = "Zensu: ▶implement ·review ·self-review" ]; then
   check "Z32b an armed chain -> the directive carries the position read from the workflow document" PASS
 else
   check "Z32b expected the implementing anchor, got '$A32_ARMED'" FAIL
+fi
+
+# Z32e a CLOSED chain must render NO anchor through the real hook.
+#
+# This is the arm nothing had. The end-to-end coverage was `none` (no chain),
+# `implementing`, and two fail-open shapes — so the hook's own handling of the one
+# shape that used to make a completion claim was proven only at the unit layer,
+# where the mapping is called directly. A regression that reintroduced a rendered
+# `chain-closed` line would have passed every check in this suite.
+#
+# The document is mutated in place rather than driven through a terminus verb,
+# because closing a chain properly needs a consumed review ticket and a real
+# reviewer spawn, which no structure suite can perform. `validateWorkflowState`
+# judges shape plus a self-derivable hash, so a shape-valid edit is readable.
+Z32E_DOC="$(find "$P32/.zensu/state" -maxdepth 1 -name 'tdd-phase-*.json' 2>/dev/null | head -1)"
+if [ -z "$Z32E_DOC" ]; then
+  check "Z32e closed-chain arm could not run — arming wrote no workflow document" FAIL
+elif ! node -e '
+    const fs = require("fs");
+    const f = process.argv[1];
+    const j = JSON.parse(fs.readFileSync(f, "utf8"));
+    j.implComplete = true;
+    j.chainDone = true;
+    fs.writeFileSync(f, JSON.stringify(j));
+  ' "$Z32E_DOC" 2>/dev/null; then
+  check "Z32e closed-chain arm could not run — the workflow document could not be rewritten" FAIL
+else
+  Z32E_OUT="$(fire "$P32" "$S32" "where are we?")"
+  Z32E_ANCHOR="$(printf '%s' "$Z32E_OUT" | anchor_of)"
+  Z32E_KIND="$(printf '%s' "$Z32E_OUT" | classify)"
+  if [ "$Z32E_ANCHOR" = "none" ] && [ "$Z32E_KIND" = "UserPromptSubmit|ON" ]; then
+    check "Z32e a closed chain renders no anchor, and the mode stays active" PASS
+  else
+    check "Z32e a closed chain rendered '$Z32E_ANCHOR' (kind '$Z32E_KIND') — a terminated chain must carry no progress line" FAIL
+  fi
 fi
 
 # Fail-open: a workflow document the reader cannot classify must cost the

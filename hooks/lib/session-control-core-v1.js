@@ -154,6 +154,23 @@ function readRegularFileSnapshot(
 ) {
   const noFollow = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)
     ? fs.constants.O_NOFOLLOW : 0;
+  // O_NONBLOCK is what keeps this reader from BLOCKING, which is a different
+  // hazard from the symlink one O_NOFOLLOW covers. `open(2)` on a FIFO with no
+  // writer waits forever, and the `isFile()` rejection below cannot help: it runs
+  // on the DESCRIPTOR, so it is reached only once the open has already returned.
+  // Every caller reads a path under `<project>/.zensu/state/`, which is writable
+  // from inside a session and covered by no gate while a chain is inactive, so a
+  // planted FIFO is reachable — and one caller, the zen-mode UserPromptSubmit
+  // hook, reads on EVERY prompt, which turns a blocked open into a session with
+  // no way out: the prompt never reaches the model, so the off-phrase escape is
+  // never evaluated either.
+  //
+  // POSIX specifies the flag has no effect on the open of a REGULAR file, so no
+  // legitimate caller changes behaviour; on a FIFO or device the open returns
+  // immediately and the existing `fstat` `isFile()` check rejects it. Guarded the
+  // same way as O_NOFOLLOW because the constant is not defined on every build.
+  const nonBlock = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NONBLOCK)
+    ? fs.constants.O_NONBLOCK : 0;
   let descriptor;
   let pathBefore = null;
   const parent = path.dirname(file);
@@ -176,7 +193,7 @@ function readRegularFileSnapshot(
       if (pathBefore.isSymbolicLink()) fail(`symlink file rejected: ${file}`);
     }
     try {
-      descriptor = fs.openSync(file, fs.constants.O_RDONLY | noFollow);
+      descriptor = fs.openSync(file, fs.constants.O_RDONLY | noFollow | nonBlock);
     } catch (error) {
       if (missingAllowed && error.code === 'ENOENT') return null;
       if (error.code === 'ELOOP' || error.code === 'EMLINK') {

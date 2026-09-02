@@ -168,7 +168,7 @@ zen_prompt_and_anchor() {
         const doc = path.join(dir, core.WORKFLOW_STATE_PREFIX + core.sessionKey(key) + ".json");
         if (!fs.lstatSync(doc).isFile()) throw new Error("workflow document is not a regular file");
         const report = chain.classifyChain(core.readWorkflowState({ projectRoot: root, sessionId: key }));
-        const token = mod.anchorToken(report.shape, { reviewed: mod.reviewedFromReport(report) });
+        const token = mod.anchorToken(report.shape);
         if (/^(?:none|Zensu:(?: [✓▶·✗][a-z][a-z-]*)+)$/.test(token)) {
           anchor = token;
         }
