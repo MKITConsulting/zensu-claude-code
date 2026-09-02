@@ -28,24 +28,24 @@ const expectedProfiles = [
   'windows-shard-4',
   'windows-shard-5',
   'windows-shard-6',
-  // Shard 7 carries `stop-enforcer-self-review-routing` ALONE, and its cap was raised
-  // 1500000 -> 1740000 for the reason the shard-8 note below states in its own closing
-  // sentence: the old cap sat AT the measurement. Run 33433936017 (green `main`,
-  // 8dade15) reported PASSED at 1487825 ms against 1500000 — 99.2%, about 12 s of
-  // headroom — and the very next PR run, 33508327387, reported TIMED_OUT at 1500158 ms.
-  // A 0.8% step is far inside the run-to-run spread this repo records for this same
-  // suite (985846 ms and 1274496 ms on byte-identical content, a 29% spread), so that
-  // cap was a coin flip on every run rather than a tripwire. `review-worker-evidence-lease`
-  // (~140720 ms) moved to shard 8 so the remaining budget is the shard's whole 1800000,
-  // and 1740000 is 1.17x the green measurement while staying BELOW the envelope, so a
-  // genuine overrun still surfaces as this suite's TIMED_OUT rather than a profile abort.
+  // Shard 7 is solo for the same reason shard 8 is, and it got there the same way.
+  // `stop-enforcer-self-review-routing` carried a 1500000 ms cap against a measured
+  // 1487825 ms (run 33433936017, green on main) — 99.2% of its own ceiling, which is
+  // "budget AT the measurement", the error the shard-8 note below ends by naming. The
+  // next run over the same content (33437827832) was killed at 1500142 ms. Its
+  // neighbour `review-worker-evidence-lease` (measured 137147 ms) moved to shard 8,
+  // whose two suites now measure ~292 s inside an 1800000 ms envelope, and the cap
+  // rose to 1700000 — about 14% over the last completing measurement, with ~100 s of
+  // profile budget left so a slow run still surfaces as a suite TIMED_OUT rather than
+  // as a profile abort that truncates the tail silently.
   //
-  // KNOWN RESIDUAL: 17% does not absorb the 29% spread recorded above, and no cap inside
-  // an 1800000 ms envelope can at this suite's current size — 1.29 x 1487825 is 1919294.
-  // The durable fix is to make the suite cheaper or split it across two shards; this
-  // change buys headroom, it does not remove the exposure.
+  // 14% is thin against the 29% run-to-run spread this repo records for THIS suite,
+  // and 1800000 is the hard envelope, so the raise cannot be larger without moving
+  // `timeout-minutes` and every profile's `profileTimeoutMs` together. The durable
+  // fix is the one shard 8 got: find why this suite needs 25 minutes on Windows.
+  // Until then, expect this cap to bind again.
   'windows-shard-7',
-  // Shard 8 was created for one suite and now carries two. Measured on run 32998414210, `session-trail-lineage`
+  // Shard 8 now carries two suites; it was created for one. Measured on run 32998414210, `session-trail-lineage`
   // took 893084 ms of shard 3's 1800000 ms envelope; the eight suites there summed to
   // 1800072 ms and `windows-profile-lifecycle-contract` was granted 139971 ms of its
   // own 420000 ms cap and aborted. No other shard had 893 s of headroom either — the
@@ -66,9 +66,9 @@ const expectedProfiles = [
   // never at it, which is what 900000 did, and never so far above it that the cap
   // stops being a tripwire.
   //
-  // `review-worker-evidence-lease` was moved here from shard 7 (~140720 ms of this
-  // shard's 1800000 ms envelope). Neither suite constrains the other: lineage's own
-  // cap is 600000 and the lease suite's is 300000, so they sum to less than half.
+  // The second suite arrived later: `review-worker-evidence-lease` was moved off
+  // shard 7 (see the note above) because this shard had the headroom and that one had
+  // none. 154673 + 137147 ms of measured work against an 1800000 ms envelope.
   'windows-shard-8',
 ];
 const expectedCommandCount = 43;

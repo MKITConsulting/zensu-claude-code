@@ -358,7 +358,7 @@
           "runner": "bash",
           "path": "tests/structure/test-stop-enforcer-self-review-routing.sh",
           "args": [],
-          "timeoutMs": 1740000
+          "timeoutMs": 1700000
         }
       ]
     },
@@ -367,18 +367,18 @@
       "profileTimeoutMs": 1800000,
       "suites": [
         {
-          "id": "session-trail-lineage",
-          "runner": "bash",
-          "path": "tests/structure/test-session-trail-lineage.sh",
-          "args": [],
-          "timeoutMs": 600000
-        },
-        {
           "id": "review-worker-evidence-lease",
           "runner": "bash",
           "path": "tests/structure/test-review-worker-evidence-lease.sh",
           "args": [],
           "timeoutMs": 300000
+        },
+        {
+          "id": "session-trail-lineage",
+          "runner": "bash",
+          "path": "tests/structure/test-session-trail-lineage.sh",
+          "args": [],
+          "timeoutMs": 600000
         }
       ]
     }
