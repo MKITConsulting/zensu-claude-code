@@ -28,8 +28,24 @@ const expectedProfiles = [
   'windows-shard-4',
   'windows-shard-5',
   'windows-shard-6',
+  // Shard 7 carries `stop-enforcer-self-review-routing` ALONE, and its cap was raised
+  // 1500000 -> 1740000 for the reason the shard-8 note below states in its own closing
+  // sentence: the old cap sat AT the measurement. Run 33433936017 (green `main`,
+  // 8dade15) reported PASSED at 1487825 ms against 1500000 — 99.2%, about 12 s of
+  // headroom — and the very next PR run, 33508327387, reported TIMED_OUT at 1500158 ms.
+  // A 0.8% step is far inside the run-to-run spread this repo records for this same
+  // suite (985846 ms and 1274496 ms on byte-identical content, a 29% spread), so that
+  // cap was a coin flip on every run rather than a tripwire. `review-worker-evidence-lease`
+  // (~140720 ms) moved to shard 8 so the remaining budget is the shard's whole 1800000,
+  // and 1740000 is 1.17x the green measurement while staying BELOW the envelope, so a
+  // genuine overrun still surfaces as this suite's TIMED_OUT rather than a profile abort.
+  //
+  // KNOWN RESIDUAL: 17% does not absorb the 29% spread recorded above, and no cap inside
+  // an 1800000 ms envelope can at this suite's current size — 1.29 x 1487825 is 1919294.
+  // The durable fix is to make the suite cheaper or split it across two shards; this
+  // change buys headroom, it does not remove the exposure.
   'windows-shard-7',
-  // Shard 8 exists for one suite. Measured on run 32998414210, `session-trail-lineage`
+  // Shard 8 was created for one suite and now carries two. Measured on run 32998414210, `session-trail-lineage`
   // took 893084 ms of shard 3's 1800000 ms envelope; the eight suites there summed to
   // 1800072 ms and `windows-profile-lifecycle-contract` was granted 139971 ms of its
   // own 420000 ms cap and aborted. No other shard had 893 s of headroom either — the
@@ -49,6 +65,10 @@ const expectedProfiles = [
   // would have hidden exactly that. Budget against the measurement with headroom —
   // never at it, which is what 900000 did, and never so far above it that the cap
   // stops being a tripwire.
+  //
+  // `review-worker-evidence-lease` was moved here from shard 7 (~140720 ms of this
+  // shard's 1800000 ms envelope). Neither suite constrains the other: lineage's own
+  // cap is 600000 and the lease suite's is 300000, so they sum to less than half.
   'windows-shard-8',
 ];
 const expectedCommandCount = 43;

@@ -3604,10 +3604,26 @@ added a session and a Stop after the range was taken, and the T38-T59 scope-sent
 added a second post-range increment on top of that — one further session and two further
 `bash "$STOP"` invocations in T59, plus roughly twenty source and behavioural checks. The
 ceiling was NOT raised for either: 85% of cap was already the slow sample's share, and this
-file's own rule is that a ceiling comes from a green wall clock and never from an estimate. Treat the remaining headroom as
-UNMEASURED until a green Windows run reports a new figure; if the shard starts reporting
-`TIMED_OUT`, this is the first thing to re-measure, and note that the 1800000 ms shard
-budget below would surface such a run as a profile abort rather than a suite timeout.
+file's own rule is that a ceiling comes from a green wall clock and never from an estimate.
+
+**IT WAS RE-MEASURED, AND IT HAD ALREADY GONE RED.** The paragraph above said to re-measure
+if the shard ever reported `TIMED_OUT`; it did. Run 33433936017 (green `main` at 8dade15)
+reported `PASSED stop-enforcer-self-review-routing (1487825ms)` against the 1500000 cap —
+**99.2%, about 12 s of headroom** — and the very next PR run, 33508327387, reported
+`TIMED_OUT` at 1500158 ms. A 0.8% step is far inside the 29% spread recorded above for
+byte-identical content, so `main` itself was a coin flip on every run: the cap had stopped
+being a tripwire and become a lottery. Two things changed together.
+`review-worker-evidence-lease` (~140720 ms) MOVED to `windows-shard-8`, so this suite is
+now ALONE on shard 7 and its remaining budget is the shard's whole 1800000; and the cap went
+**1500000 -> 1740000**, which is 1.17x the green measurement and stays BELOW the envelope so
+a real overrun still surfaces as this suite's `TIMED_OUT` rather than as a profile abort.
+
+**KNOWN RESIDUAL, and it is the reason this is a mitigation rather than a fix:** 17% does
+not absorb the 29% spread, and at this suite's current size no cap inside an 1800000 ms
+envelope can — 1.29 x 1487825 is 1919294, which exceeds the envelope itself. The durable
+answer is to make the suite cheaper or split it across two shards, which is a change of its
+own. Until then, treat a `TIMED_OUT` here as the suite outgrowing its shard, never as a
+defect in whatever change happened to be under test.
 
 **The shard budget is the SECOND ceiling, and it binds first.** `windows-shard-7`'s
 `profileTimeoutMs` is 1800000 and every profile is pinned to that same value
