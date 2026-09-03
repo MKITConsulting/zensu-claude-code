@@ -5484,6 +5484,35 @@ ORDER instead, since the guard's second job is preventing a per-prompt `mkdir` o
 `.zensu/state`. `Z32e` was byte-identical to two fail-open checks and now requires SILENCE on
 stderr; `Z19b` discarded the regex FLAGS, so an added `i` widened the shipped reader invisibly.
 
+**TWO WRITERS LAND THAT MARKER, and hardening one of them left the guarantee false.**
+`hooks/lib/zensu-zen-mode.sh` is the OUT-OF-BAND remedy, and the hook NAMES it in the sentence
+it prints when the in-band `zen off` escape is unavailable — so for exactly the corrupt marker
+path that makes the hook decline, the user was being pointed at a writer that still carried all
+three hazards: no `.zensu` component in its symlink guard, no non-regular arm (a FIFO there
+hangs a plain redirect with no reader), and a truncating `>`. Both writers now carry the same
+three guards and both publish by `O_EXCL` temp plus rename. **State the rename's effect
+precisely**, because the `nlink !== 1` test does not do what a first comment credited it with:
+`rename(2)` repoints a NAME and never truncates the linked inode, so the hard-link destroy
+primitive is defused by the rename itself; the `nlink` check makes the writer REFUSE rather
+than write on a hard-linked marker, which is a defensible signal and not the defence. The temp
+suffix is random rather than the pid, because nothing reaps a temp left by a killed write and a
+later invocation landing on the same pid would then fail the `O_EXCL` open and report only
+`COULD NOT BE DEACTIVATED` — a one-off crash turned into a permanent refusal of the in-band exit.
+
+**A NON-TRAVERSABLE state directory used to impose the mode too**, on the permission axis rather
+than the file-type one. `test -L`, `-e` and `-f` all fail with EACCES, so the ladder fell through
+to the configured default. The asymmetry that shows the ladder already knew the right answer: an
+unreadable MARKER resolves OFF one arm up; only the unreadable DIRECTORY fell the wrong way.
+
+**Round 3 shipped four of its seven fixes with no check at all**, which is the same class this
+whole feature exists to close — the round that found four defects inside round 2's own code
+repeated the pattern. `Z50` pins the marker guards on BOTH writers plus the rename landing,
+`Z51` pins the recovery ladder including its `124|137` watchdog-skip arm and all three distinct
+causes, and `Z52` scans EVERY `node` child rather than the one function `Z35`/`Z41`/`Z46`/`Z48`
+all derive from — round 3 added two further programs outside that slice, so writing
+`PAYLOAD="$INPUT" node -e ...` in the recovery child would have put the verbatim prompt back
+into an argv with `Z41` green.
+
 **Which ceiling pays for the two `node --test` drivers:** `test-zen-mode.sh` has NO
 `windows-ci.v1.json` entry — it is in that profile's sibling `windows-native-structure.v1.json`
 `excluded` list with a reason — so no per-suite Windows cap can be blown here, and the cost
