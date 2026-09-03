@@ -61,7 +61,7 @@ check "T1.3 ExitPlanMode tool succeeded"      "$(contains "$DOC_LOG" "tool=ExitP
 check "T1.4 Escape-hatch path indicated"      "$(contains "$DOC_LOG" "Skipping TDD|escape.?hatch|doc.only|README|CHANGELOG|markdown only|non-executable")"
 check "T1.5 No tdd-manager Agent dispatch"    "$(not_contains "$DOC_LOG" "source=agent:custom:zensu:tdd-manager")"
 
-# ─── Test 2: Code-change plan → ask, then /zensu:tdd on Yes ─────
+# ─── Test 2: Code-change plan → ask the route, then /zensu:tdd on that label ─────
 echo "" | tee -a "$REPORT"
 echo "▸ Test 2: Code-change plan (delegation path)" | tee -a "$REPORT"
 CODE_OUT="$RESULTS_DIR/code-${TIMESTAMP}.out"

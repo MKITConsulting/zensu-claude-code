@@ -1,14 +1,16 @@
 # Plan-Approval Hook E2E Eval
 
-End-to-end tests for the `PostToolUse` hook on `ExitPlanMode` that delegates
-approved plans to `zensu:tdd-manager`.
+End-to-end tests for the `PostToolUse` hook on `ExitPlanMode` that asks which
+delivery route an approved plan takes — `/zensu:autopilot`, `/zensu:tdd`,
+`/zensu:pilot`, or implementing directly — and routes to the chosen skill in the
+main thread.
 
 ## What it tests
 
 | Scenario | Expected behavior |
 |----------|-------------------|
-| Doc-only plan approved | Hook fires; Claude takes escape-hatch (no `tdd-manager`) |
-| Code-change plan approved | Hook fires; Claude delegates to `zensu:tdd-manager` |
+| Doc-only plan approved | Hook fires; Claude takes the docs-only escape-hatch and asks nothing |
+| Code-change plan approved | Hook fires; Claude asks the four-route question; selecting the Zensu-workflow option by LABEL routes to `/zensu:tdd` |
 | Plan rejected | Hook does NOT fire (verified separately — `-p` mode auto-denies) |
 
 ## Why expect

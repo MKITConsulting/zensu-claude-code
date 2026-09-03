@@ -101,9 +101,11 @@ closes none.
   coverage.
 - **Charter approval is intercepted under the shipped default.**
   `plan-approved-delegate.sh` fires on
-  `ExitPlanMode` and directs the main thread to ask whether to run `/zensu:tdd`
-  before anything else; `user-prompt-tdd-reminder.sh` re-injects the same steering on
-  every prompt while no chain is active, and in non-interactive Auto Mode the
+  `ExitPlanMode` and directs the main thread to ask which delivery route the plan
+  takes — `/zensu:autopilot`, `/zensu:tdd`, `/zensu:pilot`, or implementing directly —
+  before anything else; `user-prompt-tdd-reminder.sh` re-injects the NARROWER `/zensu:tdd`
+  yes/no question on every prompt while no chain is active — it offers neither
+  `/zensu:autopilot` nor `/zensu:pilot`, and in non-interactive Auto Mode the
   fast-path runs the workflow without asking. Approving a gauntlet charter through
   plan mode therefore hands the mission to a different skill. Decide that question
   deliberately before the loop starts, or approve the charter with `AskUserQuestion`
@@ -231,8 +233,9 @@ rules for expensive tools or external services.
 
 **Get the charter approved before spawning anything.**
 Approve it with `AskUserQuestion`. Do NOT reach for plan mode: `ExitPlanMode` is
-intercepted by `plan-approved-delegate.sh`, which hands the mission to
-`/zensu:tdd` — see "Inside the Zensu plugin" above. Take that hand-off only as a
+intercepted by `plan-approved-delegate.sh`, which asks which delivery route to take
+and hands the mission to whichever is chosen — `/zensu:autopilot`, `/zensu:tdd`,
+`/zensu:pilot`, or implementing directly — see "Inside the Zensu plugin" above. Take that hand-off only as a
 deliberate decision, never as the default route to an approval. A long unattended
 run started from a misread goal burns the whole budget.
 

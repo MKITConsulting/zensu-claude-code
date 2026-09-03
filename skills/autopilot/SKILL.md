@@ -309,7 +309,12 @@ exists, else `$ROOT/templates/autopilot-spec.md` under the validated session plu
 gates / validate commands the probe chose, so the user sees exactly what will run) via
 **ExitPlanMode**, and wait for approval. If the probe wrote or would write
 `.zensu/autopilot.yaml`, propose committing it (secret-free, shared) — but **never commit
-without the user's explicit OK**. Immediately before `ExitPlanMode`, create the durable run
+without the user's explicit OK**. **Strip any pre-existing `<!-- zensu-autopilot:... -->` line out of the incoming
+feature description before appending this run's marker.** The plan-approval gate now
+offers this route for an ordinary approved plan, and a plan whose earlier run is DONE or
+CANCELLED still carries that run's marker; appending a second one makes the gate refuse
+the approval as `PLAN_MARKER_MISSING_OR_AMBIGUOUS`, which is the single planning gate this
+run cannot get past. Immediately before `ExitPlanMode`, create the durable run
 with `--autopilot-begin` and include its exact `<!-- zensu-autopilot:<RUN_ID> -->` marker in
 the plan content you pass to `ExitPlanMode`. Do not proceed if either operation fails.
 

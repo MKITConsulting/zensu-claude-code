@@ -39,7 +39,7 @@ flowchart TD
 
     subgraph Implementation["Layer 2: Implementation"]
         C -->|"/zensu:implement"| D["Load Feature Context"]
-        PLAIN["Plan approval (ExitPlanMode)<br/>plain Claude Code, no Zensu"] -->|"ask, then invoke skill on yes"| E
+        PLAIN["Plan approval (ExitPlanMode)<br/>plain Claude Code, no Zensu"] -->|"ask which delivery route;<br/>only the /zensu:tdd route is drawn"| E
         D --> E["/zensu:tdd skill<br/>(main thread)"]
         E --> MODE{"mode at --tdd-begin:<br/>/zensu:tdd-mode session choice ><br/>--tdd-mode caller default ><br/>hooks.tddImplementation"}
         MODE -->|"resolved: vanilla (default)<br/>no RED→GREEN, gate passes through"| VAN["IMPL — write code directly<br/>(tests at discretion)"]
