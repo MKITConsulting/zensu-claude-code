@@ -2792,6 +2792,8 @@ EOF
       && grep -qF 'installation no longer on disk' "$PRUNED_REPORT_OUT" \
       && grep -qF 'ADOPTED' "$PRUNED_CONFIRM_OUT" \
       && grep -qF 'installation no longer on disk' "$PRUNED_CONFIRM_OUT" \
+      && grep -qF 'could not be re-measured' "$PRUNED_REPORT_OUT" \
+      && grep -qF 'could not be re-measured' "$PRUNED_CONFIRM_OUT" \
       && grep -qF 'record minted by : 0.17.0' "$PRUNED_CONFIRM_OUT" \
       && grep -qF 'now served by    : 0.18.0' "$PRUNED_CONFIRM_OUT" \
       && [ -f "$PRUNED_DATA/session-control/v1/records/$PRUNED_KEY.superseded-0.17.0.json" ] \

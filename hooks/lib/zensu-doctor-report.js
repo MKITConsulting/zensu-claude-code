@@ -35,9 +35,14 @@
 //   ZDOC_NOW_MS              clock override for deterministic tests
 //   ZDOC_BINDING             the wrapper's binding verdict (bound / unbound /
 //                            orphaned-project-root / incompatible-runtime /
-//                            unavailable / unknown). Read by bindingLine for its
-//                            own row AND by currentSessionKey, which refuses a
-//                            session key that arrives under any other verdict.
+//                            pruned-plugin-root / unavailable / unknown). Read by
+//                            bindingLine for its own row AND by currentSessionKey,
+//                            which refuses a session key that arrives under any
+//                            other verdict. Keep this enumeration complete: a
+//                            verdict the wrapper emits and bindingLine's switch
+//                            does not know falls to its `default`, and a port
+//                            implementing only what is listed here would render
+//                            no binding row at all in that state.
 //   ZDOC_SESSION_KEY         this session's own Session Control key, non-empty
 //                            only when the wrapper's binding verdict is bound.
 //                            The ONLY thing that tells a chain this session owns

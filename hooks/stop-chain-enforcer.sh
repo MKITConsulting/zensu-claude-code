@@ -177,14 +177,29 @@ if ! zensu_bind_hook_session "$INPUT"; then
   # The FOURTH release, for the other named state with the same in-place remedy:
   # the installation that minted the record has been pruned from the plugin
   # cache, so no installation can serve the record and nothing can re-verify it.
-  # Everything the lineage release above says holds here word for word — the
-  # binding failed, the chain cannot be read from here, the document survives,
-  # adoption re-binds — and it was the state this hook still looped on: it fell
+  # FOUR of the lineage release's statements carry over verbatim — the binding
+  # failed, the chain cannot be read from here, the document survives, adoption
+  # re-binds — and it was the state this hook still looped on: it fell
   # through to the block below, unbounded, in a session whose every other
   # channel was already denied. Disjoint from the lineage arm by construction
   # (that predicate needs the strict read to succeed, this one needs it to
   # fail), so the order of the two arms is immaterial. The version pair is
   # captured for the message and never leaked to stdout.
+  #
+  # INDUCIBILITY — stated here because both sibling arms state their own, and
+  # this arm's channel is NEITHER of theirs. The lineage arm fires when the
+  # EXECUTING version changes; this one fires when the RECORDED directory
+  # disappears. Removing that directory is reachable from inside a healthy,
+  # chain-armed session on a COMPATIBLE lineage: the recorded root is not the
+  # root the session is running from, so deleting it breaks nothing underneath
+  # the session. Nothing gates it either — bash-source-write-parse.js carries
+  # `rm` only as a git subcommand, and pre-write-plugin-data-guard.sh is
+  # registered on the Edit and Notebook matchers and covers the data store, not
+  # the plugin root. So a session can convert its own blocking Stop into a
+  # release by deleting a directory it does not execute from, and the release is
+  # unledgered for the same reason the other three are. Accepted on the same
+  # terms as the orphan arm's `mv` channel: the alternative wedges every
+  # genuinely pruned session forever with no in-session escape.
   if PRUNED_RUNTIME="$(zensu_session_pruned_plugin_root "$INPUT")" \
     && [ -n "$PRUNED_RUNTIME" ]; then
     RECORDED_VERSION="${PRUNED_RUNTIME%%$'\t'*}"

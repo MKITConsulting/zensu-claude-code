@@ -561,10 +561,30 @@ function buildContext(options) {
   };
 }
 
-// `options.allowMissingProjectRoot` and `options.allowMissingPluginRoot` each
-// waive ONE check and nothing else: whether that recorded root still exists on
-// disk. Both default to off, so every caller that does not opt in keeps the
-// strict behaviour. Each has exactly one opt-in caller —
+// `options.allowMissingProjectRoot` and `options.allowMissingPluginRoot` are NOT
+// symmetric, and the asymmetry is stated HERE because this is the block a caller
+// reads before opting in.
+//
+// `allowMissingProjectRoot` waives ONE check and nothing else: whether that
+// recorded root still exists on disk.
+//
+// `allowMissingPluginRoot` waives THREE, because readContextInternal reads the
+// same flag a SECOND time — the root's existence here, plus the runtime-digest
+// re-measure and the manifest-version match there. It CANNOT be narrowed: both of
+// those read the tree that is gone (computeRuntimeDigest and pluginMetadata are
+// handed context.plugin_root), so they have no input once the installation is
+// pruned. Splitting the flag in two would advertise a separation that does not
+// exist.
+//
+// State what that costs precisely, because it reads worse than it is: the waiver
+// drops a CONSISTENCY check, not a barrier. runtime_digest is a content hash of a
+// readable tree computed by an exported pure function — never a secret — so anyone
+// able to write the private records directory could always mint a record carrying
+// a correct digest for the executing tree. The barrier is that directory itself,
+// and every other bound still holds; readPrunedPluginRootContext enumerates them.
+//
+// Both default to off, so every caller that does not opt in keeps the strict
+// behaviour. Each has exactly one opt-in caller —
 // readOrphanedProjectRootContext and readPrunedPluginRootContext — which
 // separately PROVES the path is absent and re-applies the shape half through
 // requireAbsentDirectoryPath. Waiving the check does not mean the field is
@@ -1424,7 +1444,9 @@ function readPrunedPluginRootContext(options) {
 }
 
 // ---------------------------------------------------------------------------
-// Adoption — serving an intact record from a declared-incompatible lineage.
+// Adoption — taking an intact record over when the executing runtime cannot SERVE
+// it: a declared-incompatible lineage, or a pruned minting installation. Say
+// "taking over", never "serving": a pruned record is adopted once and never served.
 // ---------------------------------------------------------------------------
 //
 // runtimeLineageCompatible decides who may serve a record from the DECLARED
@@ -1523,18 +1545,29 @@ function adoptableRecord(options) {
   try {
     executingPluginRoot = canonicalDirectory(options.executingPluginRoot, 'executing plugin root');
     pluginData = canonicalDirectory(options.pluginData, 'plugin data');
-    // Condition 1 — the record is still provably itself. readContext recomputes
-    // the runtime digest against the RECORDED root and re-reads that root's
-    // manifest, so a forged or hand-edited record cannot reach adoption; it also
-    // enforces the context schema and that the recorded project root exists.
+    // Condition 1 — the record is still provably itself. On the STRICT branch
+    // readContext recomputes the runtime digest against the RECORDED root and
+    // re-reads that root's manifest, so a forged or hand-edited record cannot
+    // reach adoption; it also enforces the context schema and that the recorded
+    // project root exists.
     //
     // A recorded installation the host PRUNED from its cache is the ONE
-    // disagreement admitted past the strict read, and only through that read
-    // failing first: readPrunedPluginRootContext waives the root's existence
-    // alone, proves the absence, and keeps every other check. Nothing can
-    // re-measure a tree that is gone, so the digest and the declared version
-    // are taken on the record's word there — the stated cost, and the reason
-    // such a record is adopted once rather than served.
+    // disagreement admitted past that strict read, and only through it failing
+    // first. Say what the relaxed branch gives up, because "the root's existence
+    // alone" is false: readPrunedPluginRootContext proves the absence and waives
+    // THREE checks — the root's existence, the digest re-measure and the
+    // manifest-version match — the last two because they read the tree that is
+    // gone. So the forgery sentence above does NOT carry over: here the digest
+    // and the declared version are taken on the record's word.
+    //
+    // What still bounds this branch, stated rather than left to be inferred: the
+    // session-id hash, the full schema and principal-profile validation,
+    // source_revision === runtime_digest, plugin_data equality, the sibling-root
+    // bound, ADOPTION_SAFE_VERSION_RE on both versions before either reaches a
+    // filename, the never-backwards comparison, and the PROVEN absence of the
+    // recorded root with its parent still present. The barrier was never the
+    // digest — it is the private records directory. That is the stated cost, and
+    // the reason such a record is adopted once rather than served.
     const readerOptions = {
       recordsDir: options.recordsDir,
       sessionId: options.sessionId,

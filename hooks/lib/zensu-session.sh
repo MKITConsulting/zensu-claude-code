@@ -385,8 +385,9 @@ zensu_doctor_allowed() {
   zensu_hook_is_main_principal "$payload" PreToolUse
 }
 
-# Four scopes, because the same emitter serves callers with very different
-# knowledge. A caller that already ruled out the RELAXABLE states may say so; a
+# Five scopes, because the same emitter serves callers with very different
+# knowledge. Keep this numeral in step with the list below it — it is what a
+# caller reads before adding a sixth. A caller that already ruled out the RELAXABLE states may say so; a
 # caller that denies on any bind failure must NOT, or it tells a user in a
 # relaxable state that /zensu:doctor is denied when it is exactly the command
 # that still works for them.

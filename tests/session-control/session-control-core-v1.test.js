@@ -4534,6 +4534,45 @@ test('existence is the only check the pruned-root reader waives', () => {
   );
 });
 
+// requireAbsentDirectoryPath is driven directly further down, but a direct driver
+// cannot observe the CALL being deleted. Every other pruned fixture supplies a
+// well-formed path, so without these two arms the guard could be dropped from
+// readPrunedPluginRootContext and the whole suite would stay green — while the
+// bytes of a hand-edited record reached stderr and the /zensu:doctor report,
+// which is the hazard the orphan reader's twin comment documents. Line coverage
+// cannot see it either: the line runs on every pruned read, so it reports covered.
+test('the pruned-root reader shape-checks the recorded plugin root at its call site', () => {
+  const controlByte = String.fromCharCode(7);
+  const unsafe = prunedReaderFixture();
+  fs.rmSync(unsafe.pluginRoot, { recursive: true, force: true });
+  rewriteJson(unsafe.recordFile, (record) => {
+    record.plugin_root = unsafe.pluginRoot + controlByte;
+    return record;
+  });
+  // Premise, asserted rather than assumed, and built through String.fromCharCode
+  // so the byte stays visible in source.
+  assert.ok(
+    Array.from(JSON.parse(fs.readFileSync(unsafe.recordFile, 'utf8')).plugin_root)
+      .some((character) => character.charCodeAt(0) < 32),
+  );
+  assert.throws(
+    () => core.readPrunedPluginRootContext(unsafe.readerOptions),
+    /context plugin root is unsafe/,
+  );
+  const unnormalized = prunedReaderFixture();
+  fs.rmSync(unnormalized.pluginRoot, { recursive: true, force: true });
+  const drifted = unnormalized.pluginRoot + path.sep + '..' + path.sep + 'probe';
+  assert.notEqual(path.resolve(drifted), drifted);
+  rewriteJson(unnormalized.recordFile, (record) => {
+    record.plugin_root = drifted;
+    return record;
+  });
+  assert.throws(
+    () => core.readPrunedPluginRootContext(unnormalized.readerOptions),
+    /context plugin root must be normalized/,
+  );
+});
+
 test('requireAbsentDirectoryPath accepts only an absolute, normalized, printable path', () => {
   const absent = path.resolve(os.tmpdir(), 'zensu-absent-probe');
   assert.equal(core.requireAbsentDirectoryPath(absent, 'probe'), absent);

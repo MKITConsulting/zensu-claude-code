@@ -194,7 +194,7 @@ fi
 # orphaned-project-root, which is the only one that has a path to report.
 ZDOC_BINDING_PROJECT_ROOT="${ZDOC_BINDING_PROJECT_ROOT:-}"
 # Same contract for the version pair: empty for every verdict except
-# incompatible-runtime, the only one that has two versions to name.
+# incompatible-runtime and pruned-plugin-root, the two that name a version pair.
 ZDOC_BINDING_RECORDED_VERSION="${ZDOC_BINDING_RECORDED_VERSION:-}"
 ZDOC_BINDING_EXECUTING_VERSION="${ZDOC_BINDING_EXECUTING_VERSION:-}"
 ZDOC_BINDING_VERSIONS=""
