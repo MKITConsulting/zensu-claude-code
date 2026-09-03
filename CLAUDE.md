@@ -3014,8 +3014,18 @@ the `Bash` `PreToolUse` matcher in `hooks/hooks.json`; the hook count in
 `configuration.md#hooks-N` cross-link in `docs/architecture.md`; `R19` and `R32` in
 `tests/structure/test-artifact-redaction.sh`, which now scan BOTH writers and the shared
 library respectively; the mechanism-2 consumer list in the header of
-`tests/structure/test-msys-special-plugin-module-boundaries.sh`; and `P3`'s roster in
-`tests/structure/test-bypass-ledger.sh`.
+`tests/structure/test-msys-special-plugin-module-boundaries.sh`; `P3`'s roster in
+`tests/structure/test-bypass-ledger.sh`; and `adopt_hook_expected` in
+`tests/structure/test-versioned-plugin-upgrade.sh`, which is the coupling that fired
+in the UNOBVIOUS direction and cost a red Windows shard. AC-C04 enumerates the Bash
+matcher from `hooks.json` and expects EVERY hook on it to deny the adoption command
+on win32, so registering an advisory hook there reported as `unexpected:
+pre-bash-witness.sh` in a suite named for plugin upgrades. The exception set now
+lives in one helper both AC-C04 loops call, and every member states why it cannot
+deny — a third entry needs its own sentence. Note the platform bound on verifying
+this: `ADOPT_EXPECTED` is `allow` on POSIX, so on macOS every hook expects `allow`
+and the regression is INVISIBLE; the helper's deny-default branch is driven
+directly rather than reached through the suite.
 
 **Operator-facing accounts that must move with it:** the `pre-bash-witness.sh` row, the
 `post-bash-witness.sh` row and the `ZENSU_TEST_WITNESS` row in `docs/configuration.md`;
