@@ -258,6 +258,40 @@ GREEN="$(ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FOR
 case "$GREEN" in *'all checks green'*) check "P1e summary reports all green when every block is green" PASS ;; *) check "P1e summary all green (got: $GREEN)" FAIL ;; esac
 case "$GREEN" in *'Playwright MCP: loaded and ready (/zensu:verify-feature and autopilot browser driver)'*) check "P1ea runtime-ready Playwright MCP renders green" PASS ;; *) check "P1ea runtime-ready Playwright MCP message (got: $GREEN)" FAIL ;; esac
 
+# --- verify-feature consent/policy row (renderer + wrapper source) --------
+verify_row() { # $1 ZDOC_VERIFY value or "" ; $2 reason
+  ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=ready \
+  ZDOC_VERIFY="$1" ZDOC_VERIFY_REASON="$2" \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
+    node "$REPORT" 2>/dev/null
+}
+VF_POLICY="$(verify_row policy "")"
+case "$VF_POLICY" in *'✅  verify-feature: environment policy active'*) check "P1va verify-feature policy state renders green" PASS ;; *) check "P1va verify-feature policy state renders green" FAIL ;; esac
+VF_CONSENT="$(verify_row consent "")"
+case "$VF_CONSENT" in *'✅  verify-feature: consent mode ready — no parent policy'*'all checks green'*) check "P1vb consent-with-recipe renders green and keeps the green summary" PASS ;; *) check "P1vb consent-with-recipe renders green and keeps the green summary" FAIL ;; esac
+VF_NORECIPE="$(verify_row consent-no-recipe "")"
+case "$VF_NORECIPE" in *'⚠️  verify-feature: consent mode ready, no runtime recipe'*'/zensu:verify-feature --setup'*'--attach=<loopback-origin>'*) check "P1vc consent-without-recipe warns and names setup and attach" PASS ;; *) check "P1vc consent-without-recipe warns and names setup and attach" FAIL ;; esac
+case "$VF_NORECIPE" in *'all checks green'*) check "P1vc1 the no-recipe warning withholds the green summary" FAIL ;; *) check "P1vc1 the no-recipe warning withholds the green summary" PASS ;; esac
+VF_UNAVAILABLE="$(verify_row unavailable "consent hook not registered on the navigation matcher")"
+case "$VF_UNAVAILABLE" in *'❌  verify-feature: cannot start (consent hook not registered on the navigation matcher)'*) check "P1vd unavailable renders red with the wrapper's reason" PASS ;; *) check "P1vd unavailable renders red with the wrapper's reason" FAIL ;; esac
+VF_ABSENT="$(verify_row "" "")"
+case "$VF_ABSENT" in *'verify-feature:'*) check "P1ve an absent ZDOC_VERIFY renders no verify-feature row" FAIL ;; *) check "P1ve an absent ZDOC_VERIFY renders no verify-feature row" PASS ;; esac
+if grep -qF 'ZDOC_VERIFY=policy' "$HELPER" && grep -qF 'ZDOC_VERIFY=consent-no-recipe' "$HELPER" \
+  && grep -qF 'ZDOC_VERIFY=unavailable' "$HELPER" && grep -qF 'consentHookRegistered' "$HELPER" \
+  && grep -qF 'ZENSU_VERIFY_NAVIGATION_POLICY_V1' "$HELPER" \
+  && grep -qF 'ZDOC_SESSION_PROJECT_ROOT ZDOC_VERIFY ZDOC_VERIFY_REASON' "$HELPER"; then
+  check "P1vf wrapper derives the verify state from the policy env, the registered hook and the recipe, and exports it" PASS
+else
+  check "P1vf wrapper derives the verify state from the policy env, the registered hook and the recipe, and exports it" FAIL
+fi
+VF_SKILL="$PLUGIN_DIR/skills/doctor/SKILL.md"
+VF_SKILL_MISS=""
+for phrase in "verify-feature: environment policy active" "verify-feature: consent mode ready" "consent mode ready, no runtime recipe" "verify-feature: cannot start"; do
+  grep -qF -- "$phrase" "$VF_SKILL" || VF_SKILL_MISS="$VF_SKILL_MISS [$phrase]"
+done
+[ -z "$VF_SKILL_MISS" ] && check "P1vg all four verify-feature rows are documented in skills/doctor/SKILL.md" PASS \
+  || check "P1vg verify-feature rows missing from skills/doctor/SKILL.md:$VF_SKILL_MISS" FAIL
+
 # --- wrapper Playwright MCP detection (offline; npm must never execute) -----
 MCP_PLUG="$SBOX/mcp-plug"
 FAKE_BIN="$SBOX/fake-bin"

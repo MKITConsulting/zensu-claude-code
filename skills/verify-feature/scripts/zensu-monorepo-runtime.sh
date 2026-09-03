@@ -148,7 +148,34 @@ terminate_supervisor_pid() {
   kill -9 "$pid" 2>/dev/null || true
 }
 
+PLANNED_ORIGIN_FILE="$RUN_DIR/zensu-planned-origin"
+FREE_PORT_HELPER="$PLUGIN_ROOT/scripts/verify-free-port.js"
+
+consent_origin() {
+  local origin port
+  if [ -e "$PLANNED_ORIGIN_FILE" ]; then
+    [ -f "$PLANNED_ORIGIN_FILE" ] && [ ! -L "$PLANNED_ORIGIN_FILE" ] || fail "planned origin record is unsafe"
+    origin="$(head -c 64 "$PLANNED_ORIGIN_FILE" | tr -d '\n')"
+    case "$origin" in
+      http://127.0.0.1:[0-9]*) printf '%s' "$origin"; return 0 ;;
+      *) fail "planned origin record is invalid" ;;
+    esac
+  fi
+  [ -f "$FREE_PORT_HELPER" ] && [ ! -L "$FREE_PORT_HELPER" ] || fail "free-port helper is unavailable"
+  port="$(node "$FREE_PORT_HELPER" --from 5173)" || fail "no free loopback port for the frontend"
+  case "$port" in
+    ''|*[!0-9]*) fail "free-port helper printed no port" ;;
+  esac
+  origin="http://127.0.0.1:${port}"
+  ( umask 077; printf '%s\n' "$origin" >"$PLANNED_ORIGIN_FILE" ) || fail "cannot record the planned origin"
+  printf '%s' "$origin"
+}
+
 parent_origin() {
+  if [ -z "${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" ]; then
+    consent_origin
+    return
+  fi
   env POLICY="${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" node -e '
     const value = JSON.parse(process.env.POLICY || "null");
     if (!value || value.version !== 1 || value.mode !== "local" || !Array.isArray(value.targets)

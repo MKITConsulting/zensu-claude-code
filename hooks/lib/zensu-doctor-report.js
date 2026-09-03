@@ -336,6 +336,13 @@ function toolBlock() {
   else if (p === 'declared') line(WARN, 'Playwright MCP: valid integrity-locked plugin config but npm is missing from PATH');
   else if (p === 'present') line(WARN, 'Playwright: PATH binary found, but /zensu:verify-feature requires loaded Playwright MCP tools');
   else line(WARN, 'Playwright MCP: valid plugin config not detected — /zensu:verify-feature cannot drive the UI and autopilot browser validation may skip');
+
+  var v = env.ZDOC_VERIFY || '';
+  var vr = env.ZDOC_VERIFY_REASON || '';
+  if (v === 'policy') line(OK, 'verify-feature: environment policy active — the parent-environment navigation policy governs every browser origin this session');
+  else if (v === 'consent') line(OK, 'verify-feature: consent mode ready — no parent policy; the browser asks you per origin through the permission prompt, and a runtime recipe is present');
+  else if (v === 'consent-no-recipe') line(WARN, 'verify-feature: consent mode ready, no runtime recipe — run /zensu:verify-feature --setup to write .zensu/runtime.yaml, or pass --attach=<loopback-origin> for an app you already run');
+  else if (v === 'unavailable') line(BAD, 'verify-feature: cannot start (' + (vr || 'reason unknown') + ') — the consent hook pair, its module and the broker must ship together; reinstall the plugin or launch Claude Code with the parent-environment policy');
 }
 
 function pluginBlock() {

@@ -376,6 +376,128 @@ test('JSON line transport terminates and releases its buffer after one oversized
   assert.equal(transport.buffer, '');
 });
 
+const PLUGIN_ROOT = path.resolve(__dirname, '../..');
+const {
+  CONSENT_REMOTE_REASON,
+  approveConsentOrigin,
+  consentHookRegistered,
+  resolveStartupPolicy,
+} = require('../../scripts/playwright-mcp-proxy.js');
+
+function syntheticRoot(withHook) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-consent-root-'));
+  fs.mkdirSync(path.join(root, 'hooks', 'lib'), { recursive: true });
+  fs.copyFileSync(path.join(PLUGIN_ROOT, 'hooks', 'lib', 'verify-consent-v1.js'), path.join(root, 'hooks', 'lib', 'verify-consent-v1.js'));
+  fs.copyFileSync(path.join(PLUGIN_ROOT, 'hooks', 'lib', 'verify-navigation-floor-v1.js'), path.join(root, 'hooks', 'lib', 'verify-navigation-floor-v1.js'));
+  const { CONSENT_MATCHER } = require(path.join(PLUGIN_ROOT, 'hooks', 'lib', 'verify-consent-v1.js'));
+  const registry = { hooks: { PreToolUse: [] } };
+  if (withHook) {
+    fs.writeFileSync(path.join(root, 'hooks', 'pre-browser-navigation-consent.sh'), '#!/bin/bash\nexit 0\n');
+    registry.hooks.PreToolUse.push({ matcher: CONSENT_MATCHER, hooks: [{ type: 'command', command: 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/pre-browser-navigation-consent.sh"' }] });
+  }
+  fs.writeFileSync(path.join(root, 'hooks', 'hooks.json'), JSON.stringify(registry));
+  return root;
+}
+
+test('without a policy the broker starts in consent mode only when the consent hook is registered', async () => {
+  assert.equal(consentHookRegistered(PLUGIN_ROOT), true);
+  assert.equal(consentHookRegistered(os.tmpdir()), false);
+  const registered = syntheticRoot(true);
+  const unregistered = syntheticRoot(false);
+  assert.equal(consentHookRegistered(registered), true);
+  assert.equal(consentHookRegistered(unregistered), false);
+  assert.equal((await resolveStartupPolicy('', { pluginRoot: registered })).mode, 'consent');
+  assert.equal((await resolveStartupPolicy('', { pluginRoot: unregistered })).mode, 'deny');
+  assert.equal((await resolveStartupPolicy(rawPolicy('local', 'http://127.0.0.1:5173'), { pluginRoot: registered })).mode, 'local');
+  fs.unlinkSync(path.join(registered, 'hooks', 'pre-browser-navigation-consent.sh'));
+  assert.equal(consentHookRegistered(registered), false);
+  const wrongMatcher = syntheticRoot(true);
+  const registry = JSON.parse(fs.readFileSync(path.join(wrongMatcher, 'hooks', 'hooks.json'), 'utf8'));
+  registry.hooks.PreToolUse[0].matcher = 'Bash';
+  fs.writeFileSync(path.join(wrongMatcher, 'hooks', 'hooks.json'), JSON.stringify(registry));
+  assert.equal(consentHookRegistered(wrongMatcher), false);
+});
+
+test('consent mode approves loopback navigations, keeps the floor, and refuses remote and unapproved origins', async () => {
+  const policy = await resolveStartupPolicy('', { pluginRoot: PLUGIN_ROOT });
+  assert.equal(policy.mode, 'consent');
+  assert.throws(() => assertAllowedUrl(policy, 'http://127.0.0.1:5173/inventory'), /origin is not approved/);
+  const approved = approveConsentOrigin(policy, 'http://127.0.0.1:5173/inventory');
+  assert.equal(approved.mode, 'local');
+  assert.equal(assertAllowedUrl(policy, 'http://127.0.0.1:5173/inventory').pathname, '/inventory');
+  assert.equal(assertAllowedUrl(policy, 'http://127.0.0.1:5173/other').pathname, '/other');
+  assert.equal(assertAllowedUrl(policy, 'http://127.0.0.1:5173/api/items?page=2', false).pathname, '/api/items');
+  assert.equal(assertAllowedUrl(policy, 'ws://127.0.0.1:5173/events', false).pathname, '/events');
+  assert.throws(() => assertAllowedUrl(policy, 'http://127.0.0.1:8090/', false), /origin is not approved/);
+  assert.throws(() => assertAllowedUrl(policy, 'https://app.example.com/', false), /origin is not approved/);
+  assert.throws(() => assertAllowedUrl(policy, 'http://127.0.0.1:5173/inventory?token=1'), /query or fragment/);
+  assert.throws(() => approveConsentOrigin(policy, 'https://app.example.com/'), new RegExp(CONSENT_REMOTE_REASON.slice(0, 30)));
+  assert.throws(() => approveConsentOrigin(policy, 'http://localhost:5173/'), /literal loopback-IP/);
+  assert.throws(() => approveConsentOrigin(policy, 'http://10.0.0.5/'), /non-loopback HTTPS/);
+  assert.throws(() => approveConsentOrigin(policy, 'http://user:pw@127.0.0.1:5173/'), /credentials/);
+  assert.equal(policy.approved.size, 1);
+  assert.equal(chromiumResolverRules(policy), null);
+  const local = await parsePolicy(rawPolicy('local', 'http://127.0.0.1:5173'));
+  assert.throws(() => approveConsentOrigin(local, 'http://127.0.0.1:5173/'), /requires consent mode/);
+});
+
+test('consent-mode call boundary approves on navigate and tabs-new and blocks everything else', async () => {
+  const policy = await resolveStartupPolicy('', { pluginRoot: PLUGIN_ROOT });
+  let upstreamCalls = 0;
+  let activeUrls = ['about:blank'];
+  const server = {
+    _requestHandlers: new Map([
+      ['tools/list', async () => ({ tools: ALLOWED_TOOLS.map((name) => ({ name })) })],
+      ['tools/call', async (request) => {
+        upstreamCalls += 1;
+        if (request.params.name === 'browser_navigate') activeUrls = [request.params.arguments.url];
+        return { content: [{ type: 'text', text: request.params.name }] };
+      }],
+    ]),
+  };
+  installCapabilityBoundary(server, policy, async () => {}, () => activeUrls);
+  const call = (name, args) => server._requestHandlers.get('tools/call')({ params: { name, arguments: args } });
+  const remote = await call('browser_navigate', { url: 'https://app.example.com/' });
+  assert.equal(remote.isError, true);
+  assert.match(remote.content[0].text, /consent mode admits literal loopback origins only/);
+  const hostname = await call('browser_navigate', { url: 'http://localhost:5173/' });
+  assert.equal(hostname.isError, true);
+  assert.equal(upstreamCalls, 0);
+  const first = await call('browser_navigate', { url: 'http://127.0.0.1:5173/inventory' });
+  assert.equal(first.isError, undefined);
+  assert.equal(upstreamCalls, 1);
+  assert.equal(policy.approved.has('http://127.0.0.1:5173'), true);
+  const second = await call('browser_tabs', { action: 'new', url: 'http://127.0.0.1:9000/' });
+  assert.equal(second.isError, undefined);
+  assert.equal(policy.approved.has('http://127.0.0.1:9000'), true);
+  activeUrls = ['http://127.0.0.1:5173/inventory'];
+  const snapshot = await call('browser_snapshot', {});
+  assert.equal(snapshot.isError, undefined);
+  activeUrls = ['http://127.0.0.1:5173/inventory', 'http://127.0.0.1:7777/popup'];
+  const leaked = await call('browser_snapshot', {});
+  assert.equal(leaked.isError, true);
+});
+
+test('check-policy reports consent mode for a loopback route and refuses remote without a policy', () => {
+  const env = { ...process.env };
+  delete env.ZENSU_VERIFY_NAVIGATION_POLICY_V1;
+  const proxy = path.join(PLUGIN_ROOT, 'scripts', 'playwright-mcp-proxy.js');
+  const ok = spawnSync(process.execPath, [proxy, '--check-policy', 'local', 'http://127.0.0.1:5173', '/inventory', 'declared-safe'], { env, encoding: 'utf8' });
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.equal(ok.stdout, 'consent\n');
+  const remote = spawnSync(process.execPath, [proxy, '--check-policy', 'remote', 'https://app.example.com', '/', 'declared-safe'], { env, encoding: 'utf8' });
+  assert.equal(remote.status, 1);
+  assert.match(remote.stderr, /consent mode admits literal loopback origins only/);
+  const hostname = spawnSync(process.execPath, [proxy, '--check-policy', 'local', 'http://localhost:5173', '/', 'declared-safe'], { env, encoding: 'utf8' });
+  assert.equal(hostname.status, 1);
+  assert.match(hostname.stderr, /literal loopback-IP/);
+  const withPolicy = spawnSync(process.execPath, [proxy, '--check-policy', 'local', 'http://127.0.0.1:5173', '/inventory', 'declared-safe'], {
+    env: { ...env, ZENSU_VERIFY_NAVIGATION_POLICY_V1: rawPolicy('local', 'http://127.0.0.1:5173') }, encoding: 'utf8',
+  });
+  assert.equal(withPolicy.status, 0, withPolicy.stderr);
+  assert.equal(withPolicy.stdout, '');
+});
+
 test('launcher check-policy subprocess pins parent mode, origin, route, and evidence mode', () => {
   const launcher = path.resolve(__dirname, '../../scripts/playwright-mcp.sh');
   const run = (raw, mode, origin, route = '/inventory', evidenceMode = 'declared-safe') => spawnSync('bash', [launcher, '--check-policy', mode, origin, route, evidenceMode], {
@@ -386,7 +508,11 @@ test('launcher check-policy subprocess pins parent mode, origin, route, and evid
     encoding: 'utf8',
   });
   assert.equal(run(rawPolicy('local', 'http://127.0.0.1:5173'), 'local', 'http://127.0.0.1:5173').status, 0);
-  assert.notEqual(run('', 'local', 'http://127.0.0.1:5173').status, 0);
+  const consent = run('', 'local', 'http://127.0.0.1:5173');
+  assert.equal(consent.status, 0, consent.stderr);
+  assert.equal(consent.stdout, 'consent\n');
+  assert.notEqual(run('', 'remote', 'https://app.example.com', '/').status, 0);
+  assert.notEqual(run('', 'local', 'http://localhost:5173').status, 0);
   assert.notEqual(run(rawPolicy('local', 'http://127.0.0.1:5173'), 'remote', 'http://127.0.0.1:5173').status, 0);
   assert.notEqual(run('{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:5173","evidenceMode":"declared-safe","routes":["/*"]}]}', 'local', 'http://127.0.0.1:5173').status, 0);
   assert.notEqual(run(rawPolicy('local', 'http://127.0.0.1:5173'), 'local', 'http://127.0.0.1:9999').status, 0);

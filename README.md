@@ -93,7 +93,7 @@ whether to run the guided workflow with its review chain.
 | `/zensu:autopilot` | Idea → validated pull request, unattended after one planning gate. Never merges or deploys |
 | `/zensu:pilot` | The guided counterpart to autopilot: probes a feature's real state and offers the next step |
 | `/zensu:cover` | Backfill durable tests at the right level (unit → integration → E2E) for existing code |
-| `/zensu:verify-feature` | Drive the real UI in a browser and report what actually happened. Report-only. [How to run it standalone](docs/verify-feature.md) |
+| `/zensu:verify-feature` | Drive the real UI in a browser and report what actually happened. Report-only. Without a launch-time policy it runs in consent mode: the first navigation to each loopback origin asks you through the permission prompt, and `--setup` writes the runtime recipe with you. [How to run it standalone](docs/verify-feature.md) |
 | `/zensu:plan-review` | Have a tailored reviewer team revalidate a plan *before* any code is written |
 | `/zensu:pr-team-review` | Multi-agent review of an existing GitHub or GitLab PR, published as one consolidated review |
 | `/zensu:pr-fix-findings` | Work through every unresolved review thread on a PR and resolve it |

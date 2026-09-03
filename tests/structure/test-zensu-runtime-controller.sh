@@ -170,6 +170,43 @@ else
   check "down is idempotent and removes exactly the lease-owned resources" FAIL
 fi
 
+CONSENT_RUN="$RUN_PARENT/run-consent"
+mkdir -p "$CONSENT_RUN"
+CONSENT_ENV=(PATH="$STUBS:$PATH" DOCKER_STATE="$DOCKER_STATE" EVENTS="$EVENTS")
+if [ "$LOOPBACK_AVAILABLE" != 1 ]; then
+  check "consent-mode planned origin skipped because the managed host forbids loopback listeners" PASS
+else
+  CONSENT_ORIGIN="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 "${CONSENT_ENV[@]}" bash "$CONTROLLER" planned-origin "$CONSENT_RUN" "$WORKTREE" 2>&1)"
+  CONSENT_AGAIN="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 "${CONSENT_ENV[@]}" bash "$CONTROLLER" planned-origin "$CONSENT_RUN" "$WORKTREE" 2>&1)"
+  CONSENT_MODE="$(stat -f '%Lp' "$CONSENT_RUN/zensu-planned-origin" 2>/dev/null || stat -c '%a' "$CONSENT_RUN/zensu-planned-origin" 2>/dev/null)"
+  if printf '%s' "$CONSENT_ORIGIN" | grep -qE '^http://127\.0\.0\.1:[0-9]+$' \
+    && [ "$CONSENT_ORIGIN" = "$CONSENT_AGAIN" ] \
+    && [ "$(cat "$CONSENT_RUN/zensu-planned-origin")" = "$CONSENT_ORIGIN" ] \
+    && [ "$CONSENT_MODE" = 600 ]; then
+    check "without a parent policy planned-origin picks a free loopback port once and persists it for the run" PASS
+  else
+    check "without a parent policy planned-origin picks a free loopback port once and persists it for the run (got '$CONSENT_ORIGIN' / '$CONSENT_AGAIN' / mode $CONSENT_MODE)" FAIL
+  fi
+  printf 'http://evil.example:80\n' >"$CONSENT_RUN/zensu-planned-origin"
+  if ! env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 "${CONSENT_ENV[@]}" bash "$CONTROLLER" planned-origin "$CONSENT_RUN" "$WORKTREE" >/dev/null 2>&1; then
+    check "a planted non-loopback planned-origin record is refused" PASS
+  else
+    check "a planted non-loopback planned-origin record is refused" FAIL
+  fi
+  rm -f "$CONSENT_RUN/zensu-planned-origin"
+  ln -s "$WORKTREE/frontend/package.json" "$CONSENT_RUN/zensu-planned-origin"
+  if ! env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 "${CONSENT_ENV[@]}" bash "$CONTROLLER" planned-origin "$CONSENT_RUN" "$WORKTREE" >/dev/null 2>&1; then
+    check "a symlinked planned-origin record is refused" PASS
+  else
+    check "a symlinked planned-origin record is refused" FAIL
+  fi
+  rm -f "$CONSENT_RUN/zensu-planned-origin"
+  POLICY_ORIGIN="$(env "${COMMON_ENV[@]}" bash "$CONTROLLER" planned-origin "$CONSENT_RUN" "$WORKTREE" 2>&1)"
+  [ "$POLICY_ORIGIN" = 'http://127.0.0.1:45173' ] && [ ! -e "$CONSENT_RUN/zensu-planned-origin" ] \
+    && check "with a parent policy present the policy origin still wins and nothing is persisted" PASS \
+    || check "with a parent policy present the policy origin still wins and nothing is persisted" FAIL
+fi
+
 MISSING_CONTAINER="$RUN_PARENT/run-missing-container"
 mkdir -p "$MISSING_CONTAINER"
 env "${COMMON_ENV[@]}" bash "$CONTROLLER" up "$MISSING_CONTAINER" "$WORKTREE" >/dev/null 2>&1

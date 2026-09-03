@@ -358,6 +358,20 @@ classifier will refuse a spawn, not only when the whole table is green.
   detected — add one, or export `ZENSU_VCS_PROVIDER=github|gitlab` for a
   self-hosted host).
 - **⚠️ zensu not authenticated** → `zensu auth login`.
+- **✅ verify-feature: environment policy active** → `ZENSU_VERIFY_NAVIGATION_POLICY_V1` was
+  set when Claude Code started, so the parent-environment policy governs every browser origin
+  and the consent prompt never fires this session. Nothing to do.
+- **✅ verify-feature: consent mode ready** → no parent policy is set, the consent hook pair is
+  registered on the broker's navigation tools, and a runtime recipe (`.zensu/runtime.yaml` or
+  `.zensu/autopilot.yaml`) is present. The first navigation to each loopback origin asks the
+  user through the permission prompt; remote targets still need the policy.
+- **⚠️ verify-feature: consent mode ready, no runtime recipe** → same as above, but
+  `/zensu:verify-feature` has nothing to boot. Run `/zensu:verify-feature --setup` to write the
+  recipe with the user, or `--attach=<loopback-origin>` for an application they already run.
+- **❌ verify-feature: cannot start (…)** → the consent hook pair, its decision module or the
+  broker script is missing, or `hooks/hooks.json` does not register the hook on the
+  navigation matcher. Reinstall the plugin, or launch Claude Code with the parent-environment
+  policy, which needs no hook. The parenthesis names which piece is missing.
 - **❌ binding: this session has no valid Session Control record** → the cause
   behind the `Blocked: the immutable Zensu session binding is unavailable or
   invalid` denial. Nothing in this session can be repaired in place; start a

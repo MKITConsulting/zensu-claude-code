@@ -129,6 +129,7 @@
     "test-vcs-publish.sh",
     "test-vcs-reconcile.sh",
     "test-vcs-review-marker-reconcile.sh",
+    "test-verify-consent.sh",
     "test-verify-feature-skill.sh",
     "test-version-sync.sh",
     "test-versioned-plugin-upgrade.sh",

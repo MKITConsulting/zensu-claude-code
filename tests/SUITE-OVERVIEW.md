@@ -13,9 +13,9 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (147 = 140 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 140 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 147). **§3 is NOT fully reconciled to it**, and the residual is stated rather than
+reconciled to that manifest (148 = 141 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 141 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 148). **§3 is NOT fully reconciled to it**, and the residual is stated rather than
 asserted away: its eleven CI group headers sum to 139 against 140 CI-classified suites, so one CI
 suite appears in no §3 group. `main` recorded that suite as `test-session-trail-lineage.sh`; this
 merge did not re-derive the NAME, because §3 lists suites in prose rather than by filename and a
@@ -161,9 +161,9 @@ generation- and ticket-bound termination, the single planning gate, review-budge
 rearm/retirement, the read-only SessionStart resume hook, and a composed full-lifecycle
 walk.
 
-### Bash gates, witness & secrets (9)
+### Bash gates, witness & secrets (10)
 `artifact-redaction` · `bash-source-write-gate` · `bash-zensu-gate` · `bypass-ledger` ·
-`plugin-data-guard` · `post-bash-witness` · `secret-scan-gate` · `skill-workflow-markers` ·
+`plugin-data-guard` · `verify-consent` · `post-bash-witness` · `secret-scan-gate` · `skill-workflow-markers` ·
 `witness-scenario-assertions`
 
 Covers the PreToolUse(Bash) source-write gate incl. rule (C) git-repo escape
@@ -286,7 +286,10 @@ that suite's failure.
 | `reviewer-spawn-denial-v1.test.js` | 29 | `test-stop-enforcer-self-review-routing.sh` | host-refused reviewer spawn: structural `tool_use_id` keying, the host error flag, the marker prefix, tail/line bounds, degrade-to-none |
 | `plan-payload-v1.test.js` | 20 | `test-plan-payload-fallback.sh` | plan-source precedence table, hardened plan-file reader refusals, O_NOFOLLOW-unavailable fallback |
 | `zensu-doctor-invocation.test.js` | 24 | `test-versioned-plugin-upgrade.sh` | `/zensu:doctor` invocation allowlist — driven from that suite, which binds it as `RECOGNIZER_UNIT` and grades it against a registered-case floor; it has no `run-all.sh` entry of its own, because discovery is `test-*.sh` only |
-| `playwright-mcp-proxy.test.js` | 16 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy |
+| `playwright-mcp-proxy.test.js` | 20 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy, including its three start modes (policy, consent, deny) and the consent-mode approval boundary |
+| `verify-consent-v1.test.js` | 12 | `test-verify-consent.sh` (V7) | browser consent decision: matcher and tool spellings, ask/allow/deny ladder, loopback-only bound, memory shape and containment refusals, recipe route extraction, pre/post CLI |
+| `verify-navigation-floor-v1.test.js` | 6 | `test-verify-consent.sh` (V6) | the one navigation floor the broker and the consent hook share: loopback and public-address classes, URL refusals, remote host resolution |
+| `verify-free-port.test.js` | 3 | `test-verify-consent.sh` (V7b) | free loopback port helper: argument parsing, occupied and excluded ports, CLI contract |
 | `release-run-step.test.js` | 9 | `test-immutable-marketplace-release.sh` | the release step's `run_step` wrapper, EXECUTED: the annotation on failure, the full stderr replay, exit-status propagation, the `--quiet` sink applying to the wrapped command and never to the annotation, the no-stderr fallback, `head -1` bounding the annotation to one line, and temp-file cleanup under `RUNNER_TEMP`. Driven first in that suite, because it is the wrapper's only executable coverage anywhere and the suite's other pins are source greps that stay green against a present-but-broken wrapper |
 | `zen-anchor-assertions.test.js` | 7 | `test-zen-mode.sh` (Z29) | zen-mode eval GRADERS: every javascript assertion body compiled, and a pinned pass/fail vector for the two anchor scenarios plus the safety carve-out |
 | `verify-feature-transcript-check.test.js` | 14 | `test-promptfoo-verify-feature.sh` | transcript assertion contract |

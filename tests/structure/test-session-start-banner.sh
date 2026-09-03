@@ -86,6 +86,16 @@ OUT_START="$(printf '%s' '{"source":"startup"}' | bash "$BANNER" 2>/dev/null)"
 
 OUT_RESUME="$(printf '%s' '{"source":"resume"}' | bash "$BANNER" 2>/dev/null)"
 [ -z "$OUT_RESUME" ] && check "B11 banner silent on source=resume" PASS || check "B11 banner silent on source=resume" FAIL
+OUT_CONSENT="$(printf '%s' '{"source":"startup"}' | env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 bash "$BANNER" 2>/dev/null)"
+case "$OUT_CONSENT" in
+  *'Browser verification'*'consent mode'*'remote targets still need the policy'*'/zensu:doctor'*) check "B11a banner names consent mode, its remote bound and /zensu:doctor when no policy is set" PASS ;;
+  *) check "B11a banner names consent mode, its remote bound and /zensu:doctor when no policy is set" FAIL ;;
+esac
+OUT_POLICY="$(printf '%s' '{"source":"startup"}' | ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1}' bash "$BANNER" 2>/dev/null)"
+case "$OUT_POLICY" in
+  *'consent mode'*) check "B11b banner drops the consent line when a parent policy is present" FAIL ;;
+  *) check "B11b banner drops the consent line when a parent policy is present" PASS ;;
+esac
 
 PRIMER_START="$(printf '%s' '{"hook_event_name":"SessionStart","source":"startup"}' | bash "$PRIMER" 2>/dev/null)"
 if printf '%s' "$PRIMER_START" | node -e '

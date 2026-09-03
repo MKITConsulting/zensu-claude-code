@@ -336,9 +336,37 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
   fi
 fi
 
+ZDOC_VERIFY_REASON="${ZDOC_VERIFY_REASON:-}"
+if [ -z "${ZDOC_VERIFY:-}" ]; then
+  ZDOC_VERIFY_REASON=""
+  ZDOC_VERIFY_RECIPE_ROOT="${ZDOC_SESSION_PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:-}}"
+  if [ -n "${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" ]; then
+    ZDOC_VERIFY=policy
+  elif [ ! -f "$ZDOC_ROOT/scripts/playwright-mcp-proxy.js" ] || [ -L "$ZDOC_ROOT/scripts/playwright-mcp-proxy.js" ]; then
+    ZDOC_VERIFY=unavailable
+    ZDOC_VERIFY_REASON="broker script missing"
+  elif [ ! -f "$ZDOC_ROOT/hooks/pre-browser-navigation-consent.sh" ] \
+    || [ ! -f "$ZDOC_ROOT/hooks/post-browser-navigation-consent.sh" ] \
+    || [ ! -f "$ZDOC_ROOT/hooks/lib/verify-consent-v1.js" ]; then
+    ZDOC_VERIFY=unavailable
+    ZDOC_VERIFY_REASON="consent hook pair or its module missing from the plugin"
+  elif ! (cd -P -- "$ZDOC_ROOT" && node -e '
+      const p = require("./scripts/playwright-mcp-proxy.js");
+      process.exit(p.consentHookRegistered(process.cwd()) ? 0 : 1);
+    ' >/dev/null 2>&1); then
+    ZDOC_VERIFY=unavailable
+    ZDOC_VERIFY_REASON="consent hook not registered on the navigation matcher"
+  elif [ -n "$ZDOC_VERIFY_RECIPE_ROOT" ] \
+    && { [ -f "$ZDOC_VERIFY_RECIPE_ROOT/.zensu/runtime.yaml" ] || [ -f "$ZDOC_VERIFY_RECIPE_ROOT/.zensu/autopilot.yaml" ]; }; then
+    ZDOC_VERIFY=consent
+  else
+    ZDOC_VERIFY=consent-no-recipe
+  fi
+fi
+
 export ZDOC_ZENSU ZDOC_NODE ZDOC_PLAYWRIGHT ZDOC_BINDING ZDOC_BINDING_PROJECT_ROOT \
   ZDOC_BINDING_RECORDED_VERSION ZDOC_BINDING_EXECUTING_VERSION \
-  ZDOC_SESSION_KEY ZDOC_SESSION_PROJECT_ROOT
+  ZDOC_SESSION_KEY ZDOC_SESSION_PROJECT_ROOT ZDOC_VERIFY ZDOC_VERIFY_REASON
 
 if ! command -v node >/dev/null 2>&1; then
   printf 'Zensu doctor — read-only setup diagnostics\n\n  %s  node: not found on PATH — cannot run the JSON/config/state checks\n' '⚠️'
