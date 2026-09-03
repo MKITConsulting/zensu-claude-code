@@ -50,9 +50,25 @@ scenario grades says the words around the anchor's marks follow the USER's own
 language, so a correct reply to a German-speaking user is German prose. An
 English-only alternation would report that correct reply as a violation, which
 `evals/zen-mode-reaction/README.md` names as the one outcome an eval must never
-produce. The FIXTURES are a different matter and carry no allowance: every
-canned reply in `tests/structure/zen-anchor-assertions.test.js` is English,
-because a fixture is authored text rather than a match literal. Extend this
+produce. The FIXTURES carry ONE narrow allowance and no more, and stating it
+as none was wrong: a canned reply that exists to EXERCISE a grader alternation
+this carve-out already admits may carry that alternation's own literal, because
+a fixture which cannot reach the arm it grades tests nothing. The one member is
+`tests/structure/zen-anchor-assertions.test.js`, and it carries the literal in TWO
+shapes, not one — an earlier wording named only the first, which would have made the
+second read as a violation. The first is the canned replies its anchor-prefix cases
+build from `Zensu:`, `Run:` and `Ablauf:` to drive `contract-compliance.yaml`'s
+`/^(Zensu|Run|Ablauf):/`. The second is a SELECTOR: the same file filters that
+scenario's assertion bodies on `.includes("Ablauf")` to find WHICH grader to bind,
+so the German literal is the key rather than the input. It is admitted on the same
+ground — a test that cannot locate the arm it grades tests nothing — and the
+distinction is worth keeping, because a selector is not prose in either direction:
+it is neither authored text nor a match against model output. A THIRD carrier sits
+outside this file and outside the allowance as stated: `tests/structure/test-zen-mode.sh`
+drives `Ablauf: ✓a` through the shell grammar as a NEGATIVE fixture, proving the
+reader refuses the very lead-in the eval admits. It qualifies for the same reason
+the canned replies do — check by grep before treating this list as closed. Every other canned reply there is English, because an
+ordinary fixture is authored text rather than a match literal. Extend this
 carve-out only for another grader in the same position — a pattern matched
 against text whose language the product does not control — and never for prose,
 a comment, or a fixture.
@@ -1999,9 +2015,12 @@ pattern can see and `C56d` requires an unwrapped `"$@"` to survive in the body �
 ARM POSITION, so do not restate them as pinning "the last arm". It LIVES in `hooks/lib/` because a third consumer already exists —
 `user-prompt-context-nudge.sh` reads a host-supplied transcript path with no watchdog at all —
 and a helper defined in a leaf hook cannot serve it. Three review rounds asked for that move
-before it was taken. **What is still owed at that third site is the WRAPPING**, one `source`
-line plus one call, left to its own review because it alters a second hook's behaviour and
-belongs to that hook's suite. Its exposure is also WIDER than the Stop hook's and the comment
+before it was taken. **`hooks/user-prompt-zen-mode.sh` now WRAPS its own child** — it
+sources the ladder and runs the prompt-and-anchor child through it, which is the criterion
+this paragraph states rather than an ordinal; the census sentence above is the one that
+counts. **What is still owed at the context-nudge site is the
+WRAPPING**, one `source` line plus one call, left to its own review because it alters a second
+hook's behaviour and belongs to that hook's suite. Its exposure is also WIDER than the Stop hook's and the comment
 there now says so: that reader opens with a plain `openSync` after a shell `[ -f ]` in another
 process, where the Stop-path reader hardens the open, so a FIFO in the TOCTOU window blocks it.
 Both the watchdog and the hardened open are owed there. Then `_zensu_config_bounded_int` in
@@ -5228,20 +5247,120 @@ plan names "missing node" among the faults that leave the mode active, which no 
 this plugin can satisfy; the carriers say "a `node` that runs and fails" instead.
 
 **The token is spliced into a JSON string, so its charset is load-bearing — and it is checked
-THREE times, by three readers that do not share a spelling.** The module's `anchorTokenSafe`
-is the first, and it is an output-SHAPE contract rather than an escaping rule: `none`, or
-`Zensu:` plus mark/step pairs, and nothing else. The hook's own node program re-checks
-against a grammar spelled in the HOOK, which is what a swapped module cannot change — the
-module blessing its own output is exactly the case the belt exists for, and it is the ONLY
-grammar reader on that path. The shell then applies a BYTE test: a quote breaks the JSON, a
+in THREE PROCESSES by FOUR readers that share no spelling.** Count processes and readers
+separately, because they do not agree and an earlier wording gave one number for both: the
+module, the hook-side node program and the shell are three processes, but the SHELL holds two
+readers of its own — `zen_anchor_grammar_ok` and `zen_anchor_bytes_ok` — composed by a third
+function, `zen_anchor_sanitized`, which is graded by `Z47` alone. Each owns a
+different property — an earlier wording called the node program "the ONLY grammar reader on
+that path" while the paragraph below already described a second, which is the kind of
+self-contradiction this section exists to prevent. The module's `anchorTokenSafe` owns the
+output SHAPE: `none`, or `Zensu:` plus mark/step pairs, and nothing else. The hook's node
+program re-checks against a grammar spelled in the HOOK, which is what a swapped module
+cannot change — the module blessing its own output is exactly the case that belt exists for.
+The shell then reads the grammar AGAIN over the bytes that ARRIVED, which is the only reader
+positioned to see a truncated write, plus the byte tests below. The shell then applies a BYTE test: a quote breaks the JSON, a
 backslash changes what an escape means, and any control byte — a CR or a TAB, not only LF —
 is invalid inside a JSON string and would lose the whole directive silently. Its `&`, `|`,
 `$` and backtick arms are RETAINED from the `sed` era rather than needed by the current
-expansion; they cost nothing, since no producible token carries them. **Say what the byte
-test does NOT do:** its prefix arm still accepts `Zensu: <arbitrary prose>`, deliberately,
-because the grammar belongs to the node program above it. A comment here once claimed that
-acceptance had been fixed, which would invite the next reader to relax the one grammar check
-on the path; what the earlier spelling really lacked was the control-byte arm. ALL THREE
+expansion; they cost nothing, since no producible token carries them. **The shell now reads BOTH the grammar and the bytes, and the reason is a case the node
+program structurally cannot see.** Its prefix arm accepted `Zensu: <arbitrary prose>`, and the
+argument for that — the grammar belongs to the reader above — held only against a SWAPPED
+module. It does not hold against a TRUNCATED WRITE: the child emits `anchor + "\n" + prompt`
+in one call, so a child killed mid-write puts a PREFIX of an already-validated token on the
+wire, after that reader has passed on the whole one. `zen_anchor_grammar_ok` is a pure-shell
+field walk beside the byte test, not instead of it — the two own different properties and
+neither subsumes the other. It matches the mark set as an ALTERNATION of whole strings, never
+a bracket expression, because the marks are multi-byte and a bracket class over them matches
+individual BYTES under a byte locale.
+
+**The locale is PINNED, and the step-name class is spelled letter by letter — and only ONE of
+the two is measured.** Say which: the collation defect below was REPRODUCED on this host, the
+control-byte one was NOT, and an earlier heading here claimed "both MEASURED" over a body that
+already recorded the second as unreproduced. `local LC_ALL=C` scopes the pin to the call, since bash applies an
+assignment to LC_ALL immediately without an export. Written as `[a-z]` the walk accepted
+`Zensu: ✓Implement`, because a `case` range follows the collation order, which interleaves the
+cases in this locale. `[[:cntrl:]]` has the mirror exposure — three of the four marks carry
+a byte in the C1 range 0x80-0x9F, which a single-byte ISO8859 locale classifies as a control
+character (0x9C in ✓ and ✗, 0x96 in ▶, none in ·; an earlier wording said all three carried
+0x9C, which is false) — but say what was and was not observed: `Z34a` did NOT reproduce that rejection under `en_SG.ISO8859-1`
+on macOS, so it is a POSITIVE CONTROL on the fix's direction and the SOURCE arm `Z34` is the
+only bite this half has.
+
+**The node program carries no literal non-ASCII in its argv.** The four marks sat there as
+literal UTF-8, so the grammar travelled through the argument vector as bytes above 0x7F; on a
+path that is not UTF-8 clean the anchor dies silently, and only on that host — the class this
+file already records for the MSYS argv namespace. `Z35` scans the WHOLE spawning function
+rather than the quoted program alone, a deliberate over-reach whose only extra cost is that
+comments inside that one function stay ASCII, and it has already caught em dashes later edits introduced
+(the count lives in the check's own comment, which is the one carrier that moves with
+them).
+
+**EVERY fault DISCLOSES on stderr under a named class**, because `none` is also what a session
+with no chain armed legitimately renders: without a line, a corrupt document, an unloadable
+module and a dead child were byte-identical to ordinary healthy output on every channel, and
+this repository's own rule is that a silent failure is a lie. An ABSENT document is
+deliberately NOT a fault — it is the ordinary state of every project that never armed a chain,
+and disclosing it would put a line on every prompt of every non-Zensu session. `Z36` is the
+bite and `Z36-control` is what keeps the line off the healthy path.
+
+**The DELIVERY of that channel is UNVERIFIED, and is recorded as such.** Nothing measured here
+establishes that a `UserPromptSubmit` hook's stderr on exit 0 reaches the user, which is the
+same standard §"Autopilot Run Scope" states for its own Stop-hook disclosure. If it does not,
+the disclosure has no observable and the argument above buys nothing. The durable answer is a
+`/zensu:doctor` row — the shape `ruleCarrierRows` already ships for the two marker-block
+carriers — and it is deliberately NOT taken here.
+
+**Two residuals travel with it, and the first was WORSE than this paragraph used to say.**
+NOTHING is latched — not the child's line and not the parent's. An earlier revision described
+a per-session band file latching the parent's two classes and excused the child's repetition
+against it; that latch was REMOVED rather than hardened, for the three reasons the hook states
+at the call site (a bare read of a session-writable path outside the watchdog, where `[ -L ]`
+does not exclude the FIFO class this very change closed at the shared reader; a truncating `>`
+that a hard link turns into a destroy; and a guessable value a co-tenant could pre-seed to
+suppress a first disclosure). So the repetition is accepted on BOTH sides: while a fault
+persists, its line prints once per prompt. Second, the child's fault classes cannot move into
+`zen-anchor-v1.js` as an exported set, which is the shape this file prescribes for reason
+vocabularies elsewhere — one of them exists precisely for the case where that module cannot
+be loaded, so the vocabulary has to survive its absence. `Z46` pins the set instead, derived
+from the assignment sites in the comment-stripped body and compared BOTH ways, so a class
+added to the child REDDENS Z46 until `Z46_DECLARED` is amended, rather than being pinned
+by nothing, and a class that survives only in a comment is caught. Say "reddens", never
+"covered without editing the check": an edit IS owed, and the value of the derivation is
+that it forces one instead of letting the class ship unpinned. The CARRIER set is derived
+too — a third `*Fault` variable folded into the emission enrols itself — so only the
+declared list is hand-maintained.
+
+**The child runs under the SHARED watchdog ladder**, `zensu_run_bounded`, and the PAYLOAD
+reaches it on STDIN. Three channels were tried for that one value and the first two were
+wrong in different ways. An assignment written after a command word is an ordinary ARGUMENT,
+so it put the verbatim user prompt into an argument vector, where `/proc/<pid>/cmdline` is
+world-readable on Linux and the watchdog holds the line for the child's whole life. Exporting
+fixed that and left a smaller exposure: an environment is captured by process-listing,
+crash-reporting and telemetry tooling that does not capture stdin, `execve` caps a single
+environment string so an oversized prompt makes the exec FAIL, and MSYS rewrites exported
+variables on the way into a native binary while stdin is the one channel it never touches.
+Piping is also what both sibling consumers of this same payload already do — see
+`zensu-agent-context.sh` and `zensu-session.sh` — so the hook stopped being the odd one out.
+The two remaining exports carry no user content: a project root and a session key. `Z41` pins
+the whole contract TOTALLY rather than per name: no `NAME=value` token on the spawn line at
+all, the payload piped, and every name the child reads derived from the program and required
+to be exported. State THREE bounds with it. The ladder falls through to an UNBOUNDED arm when neither
+`timeout` nor `gtimeout` exists, which is base macOS, so this is a deadline where the host
+supplies one and nothing where it does not. Its deadline is a FIXED 5 seconds with no
+parameter, and this hook is its first PER-PROMPT caller — the ladder was written for two
+Stop-path children, where a five-second stall is paid once at a turn end, and it is now paid
+on the way IN to every prompt of every zen-mode session. Five seconds is generous for the
+work this child does and the constant was left alone deliberately, but the next caller that
+needs a different one has to parameterize the ladder rather than copy it, and doing so
+reaches `hooks/stop-chain-enforcer.sh` through `C49`/`C56a`. And a kill costs this caller
+more than it costs those two: they lose a diagnostic, while this one loses the prompt. A killed child returns NOTHING, and what that costs is NARROWER than an earlier
+wording here claimed. It said the turn loses the whole directive; it does not. An empty
+capture yields an empty anchor, which the sanitizer answers `none` for, and the directive is
+injected exactly as it is for any session with no chain armed. What is lost is the anchor and
+the PROMPT, and the prompt is the expensive half: the off-phrase branch reads an empty string
+and cannot see `zen off`, so the one in-band escape from the mode is unavailable for that turn.
+Overstating it as the whole directive pointed a reader at the wrong failure. ALL THREE
 modules are `lstat`ed before ANY is required, so a symlink or a non-regular file in
 `hooks/lib` is refused rather than loaded — verifying and requiring one at a time did NOT
 hold that property, because `zen-anchor-v1.js` requires `chain-recovery-v1.js` at top level
@@ -5281,11 +5400,12 @@ is the drift the rule exists to prevent.
   `zen-anchor-v1.test.js`.
 - `tests/SUITE-OVERVIEW.md` carries a row per driven `node --test` file with its
   REGISTRATION count, so adding or removing a case in either zen unit file makes that
-  table stale — silently, since nothing compares them. It ALSO carries a section 1 total
-  for `tests/structure/*.test.js`, and that file names itself the single owner of that
-  figure, so adding a unit FILE — which this change did — makes a second, different entry
-  stale. The per-file obligation was stated here and the total was not, and the total is
-  exactly the one that went wrong.
+  table stale — silently, since nothing compares them. Its section 1 row for
+  `tests/structure/*.test.js` deliberately reads "(count deliberately omitted)", so adding a
+  unit FILE owes nothing there. An earlier wording here claimed that row carried a total and
+  that the file named itself its single owner; neither statement is in that file, and a
+  maintainer working from it would have gone looking for a figure that does not exist. The
+  per-file row is the whole obligation.
 - `tests/structure/test-best-solution-first.sh` B14/B14a/B14b pin THIS directive's SCOPE
   clause — its ranking obligation and the anti-inflation counterweight — so editing that
   clause reddens a suite named for the best-solution-first hook. Note the boundary: a
@@ -5299,19 +5419,70 @@ is the drift the rule exists to prevent.
 - Z29 drives `tests/structure/zen-anchor-assertions.test.js`, which derives its scenario
   roster from that same directory and pins each anchor scenario's grader COUNT and its
   pass/fail VECTOR. So adding, removing or reordering a grader inside a scenario reddens
-  this suite. TWO floors guard the unit file and they count different things — do not
-  conflate them. `Z29_FLOOR` lives in `test-zen-mode.sh` and counts `test()` REGISTRATIONS;
-  the per-table `floor:` values live in the unit file and count CASES. Both fire on REMOVAL
-  only, so raising the matching number in the same commit that adds one is a CONVENTION the
-  file states in its own comment, not an enforcement. **Both anchor tables were LOWERED**
-  (14 → 12 and 10 → 8) when the mark-derivation graders went: the cases that drove them
-  described a decision the reply no longer makes. That is a deliberate lowering with its
-  reason recorded at the constant, and lowering it again needs the same note.
+  this suite. TWO KINDS of floor guard the unit file and they count different
+  things — do not conflate them, and note that the two kinds do not move together.
+  `Z29_FLOOR` lives in `test-zen-mode.sh` and counts `test()` REGISTRATIONS in the whole
+  file; the per-table `floor:` values live in the unit file and count CASES inside one
+  scenario. So binding a further scenario raises the registration count and no case count,
+  while adding a grader to a scenario already bound does the reverse — which is why
+  "raise the matching number" needs the word MATCHING. Both kinds fire on REMOVAL only, so
+  raising either in the same commit that adds to it is a CONVENTION the file states in its
+  own comment, not an enforcement. **Both anchor tables were LOWERED** (14 → 12 and 10 → 8)
+  when the mark-derivation graders went: the cases that drove them described a decision the
+  reply no longer makes. That is a deliberate lowering with its reason recorded at the
+  constant, and lowering it again needs the same note. The per-table count is deliberately
+  not written out here — it grew by one when the third scenario was bound, and a numeral in
+  this file is exactly what nothing recomputes.
 - Z31 drives `tests/structure/zen-anchor-v1.test.js`, the anchor module's own unit
   contract, with the same registration floor. Z32 drives the hook end to end against a real
   Session Control record: `none` with no chain, the implementing position with one armed,
   and — the load-bearing arm — an unreadable workflow document costing the ANCHOR and never
   the MODE.
+
+**A THIRD fix round ran against this feature, and it changed the shape enough to be worth
+stating rather than folding in.** Five reviewer perspectives found seven defects in the round-2
+work itself, and four of them were in code round 2 had just written:
+
+- **A FIFO at the SESSION MARKER forced the mode ON and then wedged the way out of it.** The
+  resolution tested `[ -L ]` and `[ -f ]`, and a FIFO is neither, so control fell through to
+  the CONFIGURED DEFAULT — which ships TRUE — and unreadable state IMPOSED the mode, the exact
+  opposite of what this hook's header promises. The off-phrase write then opened that FIFO
+  BLOCKING, so the one in-band exit wedged the session. Same blocking class this feature closed
+  at the shared reader, one marker over, and it had been there all along: `[ -e ]` plus `[ ! -f ]`
+  is the arm that distinguishes a present non-regular file from an absent one.
+- **The off-phrase write is HARDENED, and the argument is this file's own.** A truncating `>` at
+  a session-writable path is a destroy primitive aimed at whatever a HARD LINK there points at,
+  which is one of the three reasons the band file was deleted 35 lines above it. It lands an
+  `O_EXCL` temp and renames now. Cost is one `node` spawn on the off-phrase path only.
+- **The state-directory symlink guard covers the `.zensu` component too.** Testing
+  `.zensu/state` alone resolves THROUGH a symlinked `.zensu`.
+- **The `workflow document` label was cleared too early**, so a stub module in `hooks/lib` whose
+  export is missing passed the `lstat` guard, threw at the call, and was disclosed as a CORRUPT
+  DOCUMENT — sending an operator to `.zensu/state/` for a fault in the plugin tree. `anchor
+  render` is the class for everything past the read.
+- **The disclosure is TWO lead-ins, not one.** `fault` costs the ANCHOR, a line of presentation.
+  `payloadFault` costs the PROMPT, and with it the only in-band way out of the mode. Announcing
+  the second as an unavailable anchor told the user the one thing that was still working. `Z49`
+  is the executed case, and it had none before: every fixture built a payload carrying `prompt`.
+- **A fault-path prompt recovery restores the escape.** Merging both jobs into one child put the
+  PROMPT behind a filesystem read it never needed, so a stall destroyed it along with the anchor
+  and `zen off` did nothing. A second child loads no module, opens no path and reads fd 0. It
+  runs only when the first already failed — and NOT when the first was killed by the watchdog,
+  because two 5 s ladders in series reach the registration's own 10 s, which kills the HOOK and
+  loses the whole directive: strictly worse than the anchor loss being repaired.
+- **The sanitizer's rejection discloses, and an EMPTY value is not a rejection.** The first
+  spelling reported every degraded path as `token rejected on arrival`, naming a cause that
+  never occurred and sending a maintainer to compare two grammars that never ran.
+
+Four suite checks were found unable to fail and were rewritten rather than trusted: `Z47`
+grepped a bare NAME, so a trailing comment satisfied it; nothing at all pinned that the hook
+still CALLS the sanitizer (`Z47a` now does — deleting the call site left four checks grading a
+function nothing invokes); `Z36` asserted the lead-in and not the CLASS, so the emitted line
+could drop `classes.join` entirely; and the hook's own document `lstat` was graded by nothing,
+because the shared reader's `O_NONBLOCK` produces the identical observable — `Z48` pins the
+ORDER instead, since the guard's second job is preventing a per-prompt `mkdir` of
+`.zensu/state`. `Z32e` was byte-identical to two fail-open checks and now requires SILENCE on
+stderr; `Z19b` discarded the regex FLAGS, so an added `i` widened the shipped reader invisibly.
 
 **Which ceiling pays for the two `node --test` drivers:** `test-zen-mode.sh` has NO
 `windows-ci.v1.json` entry — it is in that profile's sibling `windows-native-structure.v1.json`
@@ -5419,7 +5590,7 @@ it does not load at all. `stuckShapes` is exported for its TEST SEAM alone: its 
 always calls it with no argument. There is deliberately NO `reviewed` input of any kind —
 an earlier round carried one as a host obligation and then moved it into the module, and
 mapping `chain-closed` to `null` deleted it outright; a port that reintroduces one has
-reintroduced the false-completion class. The host half is FIVE obligations a port must
+reintroduced the false-completion class. The host half is SIX obligations a port must
 re-decide: WHICH document carries
 the chain and which identity names it; the MODULE TRANSPORT (this host runs `node` with its
 cwd inside `hooks/lib` — the first of the two mechanisms
@@ -5429,19 +5600,34 @@ the substitution into the directive AND its own independent re-check of the toke
 spells the grammar a second time inside its node program precisely so a swapped module
 cannot both produce a bad token and bless it); the charset belt appropriate to that host's
 transport — the module's predicate is an output-SHAPE contract, not a JSON escaping rule,
-and a port with a different transport still owes its own check; and the operator accounts.
+and a port with a different transport still owes its own check; the DISCLOSURE — the
+fault-class vocabulary, the channel it is written to, and the decision that an ABSENT
+document is not a fault, an obligation easy to miss because it lives in the host half
+entirely while reading like a property of the module, and a port that omits it ships the
+silence this feature exists to remove; and the operator accounts.
 The pre-open guard on the document is no longer among them in the same way: it still exists
 because this host's `readWorkflowState` CREATES the state directory, but the BLOCKING half
-moved into the shared reader, where a port inherits it from the core rather than owing it. A port that
+moved into the shared reader, where a port inherits it from the core rather than owing it.
+
+**The disclosure is spelled TWICE within this host, on opposite sides of a process
+boundary, and nothing holds the two together.** The child writes its own line from inside
+the node program; the parent writes a second one for the two outcomes the child cannot
+report, a watchdog kill and an unreachable `hooks/lib`. A shared constant cannot span that
+boundary — the child is a single-quoted argv program with no access to a shell variable —
+so the lead-in `zensu: zen-mode anchor unavailable (` exists in two languages in one file.
+`Z42` pins the parent arms and `Z46` pins the child vocabulary; NO check compares the two
+lead-ins, so reword one and reword both. A port that
 takes only the module gets a mapping with no reachable caller. `zensu-codex`, `zensu-kiro`
 and `zensu-antigravity` were NOT included in this change.
 
 **A NON-REGULAR document is refused before it is opened, and that guard is about blocking
 rather than tidiness.** `.zensu/state/` is writable from inside a session and no gate covers
 it while the chain is inactive, so a `mkfifo` at the workflow document's path is reachable
-from in-session. `readRegularFileSnapshot` opens `O_RDONLY|O_NOFOLLOW` and only THEN `fstat`s
-for `isFile()` — there is no `O_NONBLOCK` — so the open on a FIFO never returns, and this
-hook fires on EVERY prompt. That wedges the session with no escape from inside: the prompt
+from in-session. `readRegularFileSnapshot` THEN opened `O_RDONLY|O_NOFOLLOW` and only
+afterwards `fstat`ed for `isFile()`, with no `O_NONBLOCK`, so the open on a FIFO never
+returned — and this hook fires on EVERY prompt. Past tense throughout: the flag landed in
+that reader in this same change, as the paragraph below records, and stating the gap in the
+present here would assert the defect still exists. That wedges the session with no escape from inside: the prompt
 never reaches the model, so the off-phrase branch is never evaluated either. The hook
 therefore `lstat`s the document first, and builds its path from the OWNER's newly exported
 `WORKFLOW_STATE_SEGMENTS` / `WORKFLOW_STATE_PREFIX` rather than re-spelling the layout — the
@@ -5484,15 +5670,23 @@ level, so verifying and requiring one module at a time loaded and EXECUTED the s
 first `require` — before its own `lstat` could refuse it. A guard that runs after the file has
 executed is not a guard. Two independent reviewers reported this in the same round.
 
-**The substitution is parameter expansion, not `sed`.** The ACTIVE directive was the only one
-of the hook's three emissions that depended on an external command, and nothing examined that
-command's exit status: an absent or failing `sed` produced empty stdout, the model received no
-zen-mode context at all, and the unconditional `exit 0` made that indistinguishable from the
-hook not running. Every other fault in that file is routed to `none`; this one was routed to
-silence. The expansions need no process, and the placeholder is held in a variable so it stays
-a literal pattern rather than a glob.
+**The substitution is parameter expansion, not `sed` — and the `sed` spelling is a DRAFT OF
+THIS BRANCH, never shipped history.** Say so, because three code comments framed it as a
+predecessor and a reviewer correctly reported that `main` contains no `sed` and no `existsSync`
+in this hook at all: it carries no substitution, because it carries no anchor field. In that
+draft the ACTIVE directive was the only one of the hook's three emissions that depended on an
+external command, and nothing examined that command's exit status: an absent or failing `sed`
+produced empty stdout, the model received no zen-mode context at all, and the unconditional
+`exit 0` made that indistinguishable from the hook not running. Every other fault in that file
+is routed to `none`; that one was routed to silence. The expansions need no process, and the
+placeholder is held in a variable so it stays a literal pattern rather than a glob. The same
+correction applies to the `existsSync` guard the document-path paragraph above describes as one
+"this block used to carry" — it was carried by an earlier draft here, not by a release.
 
-**The three byte tests are a FUNCTION, `zen_anchor_sanitized`, for a coverage reason.** As
+**The byte tests are a FUNCTION, `zen_anchor_bytes_ok`, for a coverage reason.** Name that
+function and not `zen_anchor_sanitized`, which after the split contains no `case` block at
+all and is the COMPOSITION `Z47` grades — the same section states that correctly further up,
+and this sentence contradicted it. As
 inline `case` blocks they were unreachable from every fixture — by the time they run the value
 can only be `none`, a module-produced token, or empty — so all three could be deleted with the
 suite green. `Z33` extracts the function from the shipped hook and drives it, with the

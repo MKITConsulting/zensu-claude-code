@@ -74,11 +74,25 @@ if ! _zensu_sid="$(zensu_resolve_session_id)" || [ -z "$_zensu_sid" ]; then
 fi
 
 ZEN_STATE_DIR="$_zensu_pd/.zensu/state"
+ZEN_ZENSU_DIR="$_zensu_pd/.zensu"
 ZEN_MARKER="$ZEN_STATE_DIR/zen-mode-$_zensu_sid.json"
 unset _zensu_pd _zensu_sid
 
-if [ -L "$ZEN_STATE_DIR" ] || [ -L "$ZEN_MARKER" ]; then
+# THIS WRITER IS THE OUT-OF-BAND REMEDY, so it must be at least as hard as the
+# in-band one. `user-prompt-zen-mode.sh` names this script in the sentence it
+# prints when the in-band `zen off` escape is unavailable, so a hostile or
+# corrupt marker path that makes the hook decline must not then wedge or destroy
+# HERE. All three guards the hook carries are mirrored: the `.zensu` component
+# (testing `state` alone resolves THROUGH a symlinked parent), a present-but-not
+# regular marker (a FIFO is neither a symlink nor a regular file, and a shell
+# redirect opens one BLOCKING with no reader), and a landing that publishes by
+# rename rather than truncating a name a hard link may point elsewhere.
+if [ -L "$ZEN_ZENSU_DIR" ] || [ -L "$ZEN_STATE_DIR" ] || [ -L "$ZEN_MARKER" ]; then
   echo "zensu-zen-mode.sh: refusing to follow a symlinked state path — remove $ZEN_MARKER and its directory link by hand" >&2
+  exit 2
+fi
+if [ -e "$ZEN_MARKER" ] && [ ! -f "$ZEN_MARKER" ]; then
+  echo "zensu-zen-mode.sh: $ZEN_MARKER is not a regular file — remove it by hand" >&2
   exit 2
 fi
 
@@ -87,7 +101,23 @@ zen_write_marker() {
     echo "zensu-zen-mode.sh: cannot create state directory $ZEN_STATE_DIR" >&2
     exit 2
   }
-  printf '{"active":%s}\n' "$1" > "$ZEN_MARKER" || {
+  ZEN_MARKER="$ZEN_MARKER" ZEN_VALUE="$1" node -e '
+    const fs = require("fs");
+    const crypto = require("crypto");
+    const target = process.env.ZEN_MARKER;
+    let st = null;
+    try { st = fs.lstatSync(target); } catch (e) { if (e.code !== "ENOENT") process.exit(1); }
+    if (st && (!st.isFile() || st.nlink !== 1)) process.exit(1);
+    const tmp = target + ".tmp-" + crypto.randomBytes(6).toString("hex");
+    let fd;
+    try {
+      fd = fs.openSync(tmp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+      fs.writeSync(fd, "{\"active\":" + process.env.ZEN_VALUE + "}\n");
+      fs.fsyncSync(fd);
+    } catch (e) { try { if (fd !== undefined) fs.closeSync(fd); } catch (_) {} try { fs.unlinkSync(tmp); } catch (_) {} process.exit(1); }
+    try { fs.closeSync(fd); } catch (_) {}
+    try { fs.renameSync(tmp, target); } catch (e) { try { fs.unlinkSync(tmp); } catch (_) {} process.exit(1); }
+  ' || {
     echo "zensu-zen-mode.sh: cannot write $ZEN_MARKER" >&2
     exit 2
   }

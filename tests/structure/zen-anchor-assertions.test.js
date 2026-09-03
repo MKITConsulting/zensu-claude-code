@@ -236,7 +236,12 @@ test("every scenario in the directory exposes at least one executable grader", (
 // themselves were in.
 
 const EXTRACTOR_RE = /const prose = raw\.split[\s\S]*?\|\| raw;/g;
-const UNDECORATE_RE = /const undecorate = \(s\) =>.*$/gm;
+// BOUNDED BY ITS TERMINATOR, not by end-of-line. With `.` plus `m` this
+// captured only the first physical line, so two copies reformatted across
+// two lines with identical first lines and different second lines collapsed
+// to one entry and read as identical. Its sibling EXTRACTOR_RE was already
+// multi-line safe; the asymmetry was undeclared.
+const UNDECORATE_RE = /const undecorate = \(s\) =>[\s\S]*?;/g;
 
 function normalized(s) {
   return s.replace(/\s+/g, " ").trim();
@@ -323,6 +328,51 @@ function suppliedAnchor(file) {
 }
 
 const SUPPLIED = suppliedAnchor(ANCHOR_FILE);
+
+// EVERY scenario's supplied anchor is bound, not just the two that carry a line.
+//
+// `suppliedAnchor` was read for the anchor scenarios alone, so the three that
+// supply `none` were unbound: putting a real anchor into one of their spec
+// blocks would leave every check green while the live eval graded each
+// compliant reply — which renders no anchor, correctly — as a violation. That is
+// the one outcome the eval README says an eval must never produce.
+//
+// The roster is DERIVED from the directory, so a sixth scenario has to declare
+// its intent here rather than arriving unbound. The `none` set is named
+// explicitly because it is a CLAIM about those graders: they assume no anchor is
+// rendered, and a scenario that starts supplying one needs its graders rewritten
+// rather than this list extended.
+const NONE_SCENARIOS = [
+  "contract-compliance.yaml",
+  "precedence-over-compression.yaml",
+  "safety-carve-out.yaml",
+];
+test("every scenario supplies an anchor the module can produce", () => {
+  const mod = require(path.join(ROOT, "hooks", "lib", "zen-anchor-v1.js"));
+  const producible = new Set([mod.ANCHOR_NONE]);
+  for (const shape of Object.keys(mod.SHAPE_POSITION || {})) producible.add(mod.anchorToken(shape));
+  assert.ok(producible.size > 1, "the module produced no anchor at all");
+  for (const f of scenarios) {
+    const supplied = suppliedAnchor(path.join(SCENARIO_DIR, f));
+    assert.ok(
+      producible.has(supplied),
+      `${f}: supplies ${JSON.stringify(supplied)}, which zen-anchor-v1.js cannot produce`,
+    );
+    // BOTH directions. Asserting only that a listed scenario supplies `none` let a
+    // NEW scenario supplying `none` arrive unbound, which is the case the comment
+    // above claims is impossible — its graders would assume an anchor while the
+    // spec block renders none, and the live eval would grade every compliant reply
+    // a violation.
+    assert.strictEqual(
+      NONE_SCENARIOS.includes(f),
+      supplied === mod.ANCHOR_NONE,
+      `${f}: supplies ${JSON.stringify(supplied)} but is ${NONE_SCENARIOS.includes(f) ? "" : "not "}listed as a none-scenario — declare its intent or rewrite its graders`,
+    );
+  }
+  for (const f of NONE_SCENARIOS) {
+    assert.ok(scenarios.includes(f), `${f} is listed as a none-scenario but is not in the directory`);
+  }
+});
 
 const CASES = [
   {

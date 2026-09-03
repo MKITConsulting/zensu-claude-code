@@ -124,7 +124,40 @@ fire() {
     process.stdout.write(JSON.stringify(p));
   ' "$2" "$3" "${5:-}" \
     | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$1" \
-      ZENSU_CONFIG="${4:-$NO_CONFIG}" bash "$HOOK" 2>/dev/null
+      ZENSU_CONFIG="${4:-$NO_CONFIG}" bash "$HOOK" 2>"${ZEN_ERRFILE:-/dev/null}"
+}
+# The same invocation with the channels swapped: stdout dropped, stderr captured.
+# `fire` discards stderr, so nothing above can observe a disclosure line, which
+# is how a fault that degrades silently stays invisible to every check.
+fire_err() { # <project> <session> <prompt>  -> stderr only
+  node -e '
+    const p={hook_event_name:"UserPromptSubmit",session_id:process.argv[1],prompt:process.argv[2]};
+    process.stdout.write(JSON.stringify(p));
+  ' "$2" "$3" \
+    | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$1" \
+      ZENSU_CONFIG="${4:-$NO_CONFIG}" bash "$HOOK" 2>&1 >/dev/null
+}
+# A payload with NO `prompt` field, stderr captured. The two `payloadFault`
+# classes had no executed case anywhere: every fixture above builds a
+# well-formed payload carrying `prompt`, so the branches that cost the user the
+# in-band `zen off` escape were pinned only by a source-level vocabulary check.
+fire_noprompt_err() { # <project> <session> -> stderr only
+  node -e '
+    const p={hook_event_name:"UserPromptSubmit",session_id:process.argv[1]};
+    process.stdout.write(JSON.stringify(p));
+  ' "$2" \
+    | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$1" \
+      ZENSU_CONFIG="${3:-$NO_CONFIG}" bash "$HOOK" 2>&1 >/dev/null
+}
+# A payload with no `prompt` field, stdout captured, so the directive can be
+# checked as still injected with the mode ACTIVE.
+fire_noprompt() { # <project> <session> -> stdout only
+  node -e '
+    const p={hook_event_name:"UserPromptSubmit",session_id:process.argv[1]};
+    process.stdout.write(JSON.stringify(p));
+  ' "$2" \
+    | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$1" \
+      ZENSU_CONFIG="${3:-$NO_CONFIG}" bash "$HOOK" 2>/dev/null
 }
 # emits "EVENT|ON", "EVENT|OFF", "EMPTY" or "BADJSON"
 classify() {
@@ -467,13 +500,13 @@ if command -v node >/dev/null 2>&1; then
     let producible = [];
     try {
       const mod = require(path.join(process.env.PLUGIN_DIR, "hooks", "lib", "zen-anchor-v1.js"));
-      // BOTH readings of every shape: `chain-closed` renders a different line
-      // under `reviewed`, and the reviewed one is a token a carrier may
-      // legitimately use. Omitting it left the hook-grammar arm below never
-      // driving that token, and would have reported a correct carrier as
-      // carrying an anchor no hook can produce.
+      // ONE reading per shape. An earlier spelling asked for two, under a
+      // `reviewed` option that no longer exists: `anchorToken` takes a shape and
+      // nothing else, and `chain-closed` maps to null, so the second reading was
+      // the identical string. Keeping the call shape honest matters here because
+      // this derivation is the one that is supposed to track the owner.
       producible = [...new Set(Object.keys(mod.SHAPE_POSITION)
-        .flatMap((s) => [mod.anchorToken(s), mod.anchorToken(s, { reviewed: true })]))];
+        .map((s) => mod.anchorToken(s)))];
     } catch (_) { bad.push("anchor-module:unloadable"); }
     if (!producible.length) bad.push("anchor-module:no-producible-token");
     // The SKILL.md side is SLICED to rule 6. Comparing the whole file would let
@@ -681,9 +714,13 @@ if command -v node >/dev/null 2>&1; then
     if (!hookReRaw) {
       bad.push("hook:token-grammar-not-locatable");
     } else {
-      const lit = hookReRaw[0].slice(0, hookReRaw[0].lastIndexOf("/.test(token)") + 1);
+      // THE FLAGS ARE CAPTURED, not discarded. Slicing to the closing / threw
+      // them away, so adding `i` to the shipped literal widened the second
+      // reader while this check kept building a flagless copy and passing.
+      const hookFlags = (hookReRaw[0].match(/\/([a-z]*)\.test\(token\)$/) || [null, ""])[1];
+      const lit = hookReRaw[0].slice(0, hookReRaw[0].lastIndexOf("/" + hookFlags + ".test(token)") + 1);
       let re = null;
-      try { re = new RegExp(lit.slice(1, -1)); } catch (_) { bad.push("hook:token-grammar-not-a-regex"); }
+      try { re = new RegExp(lit.slice(1, -1), hookFlags); } catch (_) { bad.push("hook:token-grammar-not-a-regex"); }
       if (re) {
         for (const t of producible) {
           if (!re.test(t)) bad.push("hook:token-grammar-rejects<" + t + ">");
@@ -1246,10 +1283,8 @@ else
     try {
       const mod = require(path.join(process.env.PLUGIN_DIR, "hooks", "lib", "zen-anchor-v1.js"));
       for (const shape of Object.keys(mod.SHAPE_POSITION)) {
-        for (const opts of [undefined, { reviewed: true }]) {
-          const t = mod.anchorToken(shape, opts);
-          if (t.length > longest.length) longest = t;
-        }
+        const t = mod.anchorToken(shape);
+        if (t.length > longest.length) longest = t;
       }
     } catch (_) { process.stdout.write("NONE"); process.exit(0); }
     if (!longest) { process.stdout.write("NONE"); process.exit(0); }
@@ -1332,7 +1367,7 @@ else
   # admitted the deletion of every case that actually executes a grader — the
   # vector tests and the both-directions test — while staying green. Raise this
   # number in the same commit that adds a case.
-  Z29_FLOOR=10
+  Z29_FLOOR=11
   # ONE floor, over REGISTRATIONS. The pair `Z29_SEEN >= FLOOR && Z29_PASS_N >=
   # FLOOR` could never fail independently — skips are non-negative, so the first
   # conjunct held whenever the second did — and it defeated the stated intent:
@@ -1422,6 +1457,64 @@ else
   check "Z32b expected the implementing anchor, got '$A32_ARMED'" FAIL
 fi
 
+# Z36-control: a HEALTHY armed chain must disclose NOTHING. A disclosure that
+# fires on the ordinary path is noise on every prompt of every zen-mode session,
+# and it would satisfy Z36 below without proving anything about a fault.
+# BOTH channels from ONE run. Taking the absence of a disclosure from a second
+# invocation proved nothing: the control passes whenever the hook writes no
+# stderr, including when it exits ABOVE the anchor block entirely, and its
+# discriminator then lives in a different `fire`. One run has to show the armed
+# anchor on stdout AND the silence on stderr.
+Z36C_ERRFILE="$P32/.z36c-err"
+Z36C_OUT="$(ZEN_ERRFILE="$Z36C_ERRFILE" fire "$P32" "$S32" "where are we?")"
+Z36C_ANCHOR="$(printf '%s' "$Z36C_OUT" | anchor_of)"
+Z36C_ERR="$(cat "$Z36C_ERRFILE" 2>/dev/null)"
+if [ "$Z36C_ANCHOR" != "$A32_ARMED" ]; then
+  check "Z36-control the run did not reach the anchor at all (anchor='$Z36C_ANCHOR') — its silence proves nothing" FAIL
+else
+  case "$Z36C_ERR" in
+    *'zen-mode anchor unavailable'*)
+      check "Z36-control a healthy armed chain disclosed a fault it does not have — <$Z36C_ERR>" FAIL ;;
+    *)
+      check "Z36-control one run yields the armed anchor AND no fault disclosure" PASS ;;
+  esac
+fi
+
+# Z39 the two fields must both survive a MULTI-LINE prompt.
+#
+# One child produces the anchor and the prompt over one pipe, split on the first
+# newline. Every other fixture in this block sends a single-line prompt, so the
+# split has only ever been exercised where it cannot go wrong. Both halves need
+# their own observable: the anchor half is the token, and the prompt half is
+# only visible through the off-phrase branch, which reads the text AFTER the
+# first newline. A second session keeps the OFF write off $S32's marker.
+#
+# It gets its OWN project, not just its own session: the fail-open arms below
+# locate the workflow document with `find … | head -1`, so a second document in
+# $P32 would let them corrupt one session's state while firing another's — which
+# is exactly what happened, and it turned Z32c/Z32d/Z32e green-to-red for a
+# reason that had nothing to do with them.
+P39="$(mktemp -d -t zenmode-multiline-XXXXXX)"; S39="zen-multiline-$$"
+new_session "$P39" "$S39"
+arm_chain "$P39" "$S39"
+Z39_ON="$(fire "$P39" "$S39" "$(printf 'line one\nline two\nline three')")"
+Z39_ON_ANCHOR="$(printf '%s' "$Z39_ON" | anchor_of)"
+Z39_ON_KIND="$(printf '%s' "$Z39_ON" | classify)"
+case "$A32_ARMED" in 'Zensu: '*) Z39_BASE_OK=1 ;; *) Z39_BASE_OK=0 ;; esac
+if [ "$Z39_BASE_OK" -eq 0 ]; then
+  check "Z39 the armed baseline is '$A32_ARMED', not a real token, so the multi-line comparison would agree with a degenerate hook" FAIL
+elif [ "$Z39_ON_ANCHOR" = "$A32_ARMED" ] && [ "$Z39_ON_KIND" = "UserPromptSubmit|ON" ]; then
+  check "Z39 a multi-line prompt still yields the armed anchor on the first line" PASS
+else
+  check "Z39 multi-line split broke the anchor half (anchor='$Z39_ON_ANCHOR' kind='$Z39_ON_KIND', wanted '$A32_ARMED')" FAIL
+fi
+Z39_OFF_KIND="$(fire "$P39" "$S39" "$(printf 'please stop now\nzen off')" | classify)"
+if [ "$Z39_OFF_KIND" = "UserPromptSubmit|OFF" ]; then
+  check "Z39a the prompt half survives past the anchor line — an off phrase on line two is still seen" PASS
+else
+  check "Z39a the off phrase on line two was NOT seen (kind='$Z39_OFF_KIND') — the prompt half of the split is lost" FAIL
+fi
+
 # Z32e a CLOSED chain must render NO anchor through the real hook.
 #
 # This is the arm nothing had. The end-to-end coverage was `none` (no chain),
@@ -1450,7 +1543,18 @@ else
   Z32E_OUT="$(fire "$P32" "$S32" "where are we?")"
   Z32E_ANCHOR="$(printf '%s' "$Z32E_OUT" | anchor_of)"
   Z32E_KIND="$(printf '%s' "$Z32E_OUT" | classify)"
-  if [ "$Z32E_ANCHOR" = "none" ] && [ "$Z32E_KIND" = "UserPromptSubmit|ON" ]; then
+  # THE STDERR IS PART OF THE ASSERTION, because without it this check is
+  # byte-identical to Z32c's and Z32d's FAIL-OPEN assertions: all three require
+  # `none` plus an active mode, so nothing here could tell "the closed chain
+  # mapped to null" from "the rewritten document became a fault". Z36-control
+  # already owns this discriminator; it is reused rather than re-invented.
+  Z32E_ERRFILE="$P32/.z32e-err"
+  : > "$Z32E_ERRFILE"
+  ZEN_ERRFILE="$Z32E_ERRFILE" fire "$P32" "$S32" "where are we?" >/dev/null 2>/dev/null || true
+  Z32E_ERR="$(cat "$Z32E_ERRFILE" 2>/dev/null)"
+  if [ -n "$Z32E_ERR" ]; then
+    check "Z32e a closed chain disclosed a fault on stderr <$Z32E_ERR> — it must MAP to no anchor, not fail into one" FAIL
+  elif [ "$Z32E_ANCHOR" = "none" ] && [ "$Z32E_KIND" = "UserPromptSubmit|ON" ]; then
     check "Z32e a closed chain renders no anchor, and the mode stays active" PASS
   else
     check "Z32e a closed chain rendered '$Z32E_ANCHOR' (kind '$Z32E_KIND') — a terminated chain must carry no progress line" FAIL
@@ -1474,11 +1578,38 @@ else
     check "Z32c fail-open broke (anchor='$Z32C_ANCHOR' kind='$Z32C_KIND')" FAIL
   fi
 
+  # Z36 a fault must DISCLOSE, not just degrade.
+  #
+  # Every fault on this path answers `none`, and `none` is also what a session
+  # with no chain armed legitimately renders — so an absent document, a corrupt
+  # one, a module that will not load and a dead child were byte-identical to
+  # ordinary healthy output, on every channel. This repository's own rule is
+  # that a silent failure is a lie. The disclosure goes to stderr, the operator
+  # channel, and must never change the exit status or the injected directive.
+  #
+  # `fire` discards stderr, so this arm needs its own invocation — the same
+  # reason the Stop-enforcer suite captures its fence line separately.
+  Z36_ERR="$(fire_err "$P32" "$S32" "where are we?")"
+  # THE CLASS IS ASSERTED, not only the lead-in. AC-102 says the line NAMES the
+  # class; asserting the fixed prefix alone let the emitted line drop
+  # `classes.join(", ")` entirely, after which a corrupt document and an
+  # unloadable module read identically while Z36, Z42 and Z46 all stayed green.
+  # The fixture corrupts the workflow document, so `workflow document` is the
+  # class this path sets.
+  case "$Z36_ERR" in
+    *'zen-mode anchor unavailable (workflow document)'*)
+      check "Z36 an unreadable workflow document is disclosed on stderr" PASS ;;
+    *)
+      check "Z36 a fault degraded SILENTLY — stderr carried <$Z36_ERR>, so a corrupt document is indistinguishable from no chain" FAIL ;;
+  esac
+
   # Z32d a workflow document that is not a REGULAR file must not be opened at
   # all. `.zensu/state/` is writable from inside a session and no gate covers it
-  # while the chain is inactive, so a FIFO there is reachable; the shared reader
-  # opens O_RDONLY|O_NOFOLLOW with no O_NONBLOCK and only then fstats for
-  # isFile(), so the open never returns. On a hook that fires on EVERY prompt
+  # while the chain is inactive, so a FIFO there is reachable. The shared reader
+  # now opens O_RDONLY|O_NOFOLLOW|O_NONBLOCK and fstats for isFile(), so the open
+  # returns and the descriptor check rejects it; this arm predates that flag and
+  # is kept because the hook's own lstat is still the first refusal and because a
+  # regression in either place has the same observable. On a hook that fires on EVERY prompt
   # that wedges the session with no escape from inside — the prompt never
   # reaches the model and the off-phrase branch is never evaluated. The hook
   # therefore lstats the document before the reader can open it.
@@ -1534,9 +1665,18 @@ fi
 # They are hoisted into `zen_anchor_sanitized` so a check can reach them at all,
 # and the function is EXTRACTED from the shipped hook rather than copied here, so
 # this pins the text that actually runs.
-Z33_SRC="$(awk '/^zen_anchor_sanitized\(\) \{/,/^\}$/' "$HOOK")"
-if [ -z "$Z33_SRC" ]; then
+Z33_GRAMMAR="$(awk '/^zen_anchor_grammar_ok\(\) \{/,/^\}$/' "$HOOK")"
+Z33_BYTES="$(awk '/^zen_anchor_bytes_ok\(\) \{/,/^\}$/' "$HOOK")"
+Z33_SANITIZE="$(awk '/^zen_anchor_sanitized\(\) \{/,/^\}$/' "$HOOK")"
+Z33_SRC="$Z33_SANITIZE
+$Z33_GRAMMAR
+$Z33_BYTES"
+if [ -z "$(printf '%s' "$Z33_SRC" | tr -d '[:space:]')" ]; then
   check "Z33 the anchor sanitizer could not be extracted from the hook — the pin is not measuring anything" FAIL
+elif [ -z "$(printf '%s' "$Z33_GRAMMAR" | tr -d '[:space:]')" ]; then
+  check "Z33 the grammar reader could not be extracted from the hook — the pin is not measuring anything" FAIL
+elif [ -z "$(printf '%s' "$Z33_BYTES" | tr -d '[:space:]')" ]; then
+  check "Z33 the byte reader could not be extracted from the hook — the pin is not measuring anything" FAIL
 else
   Z33_BAD=""
   z33_expect() { # <input> <expected>
@@ -1565,13 +1705,696 @@ else
   # directive unparseable, which loses the mode silently rather than the anchor.
   z33_expect "$(printf 'Zensu: \342\234\223a\tb')" 'none'
   z33_expect "$(printf 'Zensu: \342\234\223a\rb')" 'none'
+  # The GRAMMAR test. The three cases below are what a prefix arm cannot see, and
+  # the middle one is not hypothetical: the child writes `anchor + "\n" + prompt`
+  # in one call, so a child killed mid-write puts a PREFIX of a valid token on the
+  # wire — after the node program's own grammar check has already passed on the
+  # whole one. That reader validated a string these bytes are only the start of,
+  # so this is the only reader left that can refuse them.
+  z33_expect 'Zensu: arbitrary prose with no mark' 'none'
+  z33_expect 'Zensu: ✓implement ▶' 'none'
+  z33_expect 'Zensu: ✓implement ▶review ·self-review trailing' 'none'
+  # A partial multi-byte mark — the other shape a truncated write produces.
+  z33_expect "$(printf 'Zensu: \342\234\223implement \342\226')" 'none'
+  # Separator shapes the grammar must also refuse, kept beside the truncation
+  # cases because a loop that peels fields is exactly where they go wrong.
+  z33_expect 'Zensu:  ✓implement' 'none'
+  z33_expect 'Zensu: ✓implement ' 'none'
+  z33_expect 'Zensu: ✓' 'none'
+  z33_expect 'Zensu: implement' 'none'
+  z33_expect 'Zensu: ✓Implement' 'none'
+  # Z33b drives the BYTE reader alone. Composed behind the grammar walk it is
+  # unreachable — measured: none of the eight inputs below survives the grammar,
+  # so before this split the byte `case` blocks could be deleted with the
+  # suite green, which is verbatim the defect Z33 exists to close.
+  Z33B_BAD=""
+  z33b_expect() { # <input> <expected>
+    Z33B_GOT="$(eval "$Z33_BYTES"; zen_anchor_bytes_ok "$1" && printf 'ok' || printf 'no')"
+    [ "$Z33B_GOT" = "$2" ] || Z33B_BAD="$Z33B_BAD in<$1>got<$Z33B_GOT>want<$2>"
+  }
+  z33b_expect 'none' 'ok'
+  z33b_expect 'Zensu: ✓implement ▶review ·self-review' 'ok'
+  z33b_expect 'Zensu: ✓a"b' 'no'
+  z33b_expect 'Zensu: ✓a\b' 'no'
+  z33b_expect 'Zensu: ✓a&b' 'no'
+  z33b_expect 'Zensu: ✓a|b' 'no'
+  z33b_expect 'Zensu: ✓a$b' 'no'
+  z33b_expect 'Zensu: ✓a`b' 'no'
+  z33b_expect "$(printf 'Zensu: \342\234\223a\tb')" 'no'
+  z33b_expect "$(printf 'Zensu: \342\234\223a\rb')" 'no'
+  if [ -z "$Z33B_BAD" ]; then
+    check "Z33b the byte reader accepts a producible token and refuses every byte the emission cannot carry" PASS
+  else
+    check "Z33b byte reader:$Z33B_BAD" FAIL
+  fi
+
   if [ -z "$Z33_BAD" ]; then
     check "Z33 the token sanitizer accepts the producible vocabulary and refuses every byte the emission cannot carry" PASS
   else
     check "Z33 token sanitizer:$Z33_BAD" FAIL
   fi
+
+  # Z34 the sanitizer must not depend on the CALLER's locale.
+  #
+  # `[[:cntrl:]]` is locale-dependent, and three of the four marks carry a byte in
+  # the C1 range 0x80-0x9F, which a single-byte ISO8859 locale classifies as a
+  # control character: 0x9C in ✓ and ✗, 0x96 in ▶, and none in ·. An earlier
+  # wording said all three carried 0x9C, which is false.
+  # Under such a locale the byte arm therefore rejects a token the module itself
+  # produced — the one reader on this path that can refuse a VALID anchor. The
+  # step-name class has the mirror exposure: a range collates case-insensitively
+  # in some locales, which is measured in Z33 above.
+  #
+  # Two arms, and ONLY the source arm is a bite — say so, because the obvious
+  # reading of the pair is wrong. MEASURED before the fix: the behavioural arm
+  # below did NOT reject the token under en_SG.ISO8859-1 on macOS, so it never
+  # reproduced the exposure it is named for. It is kept as a POSITIVE CONTROL on
+  # the fix's direction — pinning LC_ALL=C must not start refusing a producible
+  # token — and a host where the rejection does reproduce would make it a bite
+  # too. The source arm is what CI grades, since a single-byte locale is not
+  # generated on every host.
+  # PER SLICE, not over the concatenation: one match anywhere used to satisfy
+  # this, so deleting the pin from either reader alone left it green while
+  # reopening the exposure that reader is named for.
+  Z34_MISSING=""
+  printf '%s' "$Z33_GRAMMAR"  | grep -q 'LC_ALL=C' || Z34_MISSING="$Z34_MISSING zen_anchor_grammar_ok"
+  printf '%s' "$Z33_BYTES"    | grep -q 'LC_ALL=C' || Z34_MISSING="$Z34_MISSING zen_anchor_bytes_ok"
+  if [ -z "$Z34_MISSING" ]; then
+    check "Z34 every token reader pins the locale for its own classes" PASS
+  else
+    check "Z34 the locale is not pinned in:$Z34_MISSING — those classes follow the caller's locale" FAIL
+  fi
+
+  Z34_LOC="$(locale -a 2>/dev/null | grep -iE 'ISO8859-1$' | head -1)"
+  if [ -z "$Z34_LOC" ]; then
+    Z34A_SKIPPED=1
+    echo "  SKIP  Z34a no single-byte locale on this host — the locale-independence arm cannot run"
+  else
+    Z34_TOKEN='Zensu: ✓implement ▶review ·self-review'
+    Z34_GOT="$(LC_ALL="$Z34_LOC"; eval "$Z33_SRC"; zen_anchor_sanitized "$Z34_TOKEN")"
+    if [ "$Z34_GOT" = "$Z34_TOKEN" ]; then
+      check "Z34a a producible token survives a single-byte locale ($Z34_LOC)" PASS
+    else
+      check "Z34a a producible token was REJECTED under $Z34_LOC — got <$Z34_GOT>" FAIL
+    fi
+  fi
 fi
 
+# Z44 the module require CLOSURE must be complete, not hand-maintained.
+#
+# "Every module is verified before any is required" holds only while the hook
+# lists every module the three can pull in. The closure is exactly those three
+# today, but nothing said so: a sibling `require('./...')` added to any of them
+# drops silently out of the guard and makes the guarantee false.
+Z44_MISSING="$(PLUGIN_DIR="$PLUGIN_DIR" HOOK="$HOOK" node -e '
+  const fs = require("fs"), path = require("path");
+  const lib = path.join(process.env.PLUGIN_DIR, "hooks", "lib");
+  const hook = fs.readFileSync(process.env.HOOK, "utf8");
+  const listed = (hook.match(/"[a-z0-9-]+-v1\.js"/g) || []).map((q) => q.slice(1, -1));
+  const missing = [];
+  for (const name of listed) {
+    const file = path.join(lib, name);
+    if (!fs.existsSync(file)) continue;
+    for (const m of fs.readFileSync(file, "utf8").matchAll(/require\(["\x27]\.\/([^"\x27]+)["\x27]\)/g)) {
+      if (!listed.includes(m[1])) missing.push(name + " -> " + m[1]);
+    }
+  }
+  process.stdout.write(listed.length ? (missing.length ? missing.join(" ") : "OK") : "NO-LIST");
+' 2>/dev/null)"; Z44_RC=$?
+if [ "$Z44_RC" -ne 0 ] || [ -z "$Z44_MISSING" ]; then
+  check "Z44 the require-closure scan produced no verdict (rc=$Z44_RC) — a check that did not execute is not a pass" FAIL
+elif [ "$Z44_MISSING" = "NO-LIST" ]; then
+  check "Z44 the hook lists no modules to verify — the pin is not measuring anything" FAIL
+elif [ "$Z44_MISSING" != "OK" ]; then
+  check "Z44 a module the hook loads requires a sibling it never verifies:$Z44_MISSING" FAIL
+else
+  check "Z44 the verified module list is closed under the siblings those modules require" PASS
+fi
+
+# ---------------------------------------------------------------------------
+# The checks below read the hook SOURCE and hooks.json, not the extracted token
+# readers, and they used to sit inside the Z33 extraction `else`. A rename of
+# either reader, or a moved closing brace, took the FAIL arm there and silently
+# dropped all of them from the run — coverage loss with no record. They are
+# hoisted so an extraction failure costs the sanitizer arms and nothing else.
+# ---------------------------------------------------------------------------
+
+# The child-spawning function, extracted once for every source pin below.
+Z35_PROG="$(awk '/^zen_prompt_and_anchor\(\) \{/,/^\}$/' "$HOOK")"
+if [ -z "$Z35_PROG" ]; then
+  check "Z35/Z37/Z38 the child-spawning function could not be extracted from the hook — no source pin below is measuring anything" FAIL
+fi
+
+# Z38 the module guard, pinned at SOURCE — and the reason it cannot be
+# behavioural is worth stating, because the obvious fixture does not work.
+#
+# Making a module unloadable means editing the tree `CLAUDE_PLUGIN_ROOT` names,
+# which here is the live repository. A COPY does not help either: Session
+# Control binds the executing plugin root by runtime digest, so a copied or
+# modified root makes `zensu_bind_hook_session` refuse and the hook exits 0
+# before it reaches the anchor at all — the arm would then measure the binding,
+# not the guard. CLAUDE.md records the same conclusion for the requirements
+# gate's load-fault branch, and takes the same route.
+#
+# THE ORDER is the property, not the presence. Verifying and requiring one
+# module at a time was the first spelling and did not hold: `zen-anchor-v1.js`
+# requires `chain-recovery-v1.js` at top level, so the sibling was executed by
+# the FIRST require, before its own check could refuse it. A guard that runs
+# after the file has executed is not a guard.
+# TWO conditions, because the line-order arm alone passes the shape it exists
+# to forbid: verify-then-require inside ONE loop keeps the verification line
+# lexically first while iteration 1 executes a module before iteration 2 checks
+# it. So the loop BODY must also contain no require at all.
+Z38_LOOP="$(printf '%s' "$Z35_PROG" | sed -n '/resolved\.forEach(/,/^[[:space:]]*});$/p')"
+Z38_VERIFY="$(printf '%s' "$Z35_PROG" | grep -n 'lstatSync(p).isFile()' | head -1 | cut -d: -f1)"
+Z38_REQUIRE="$(printf '%s' "$Z35_PROG" | grep -n 'require(resolved\[' | head -1 | cut -d: -f1)"
+if [ -z "$Z38_LOOP" ]; then
+  check "Z38 the module verification loop could not be sliced — the pin is not measuring anything" FAIL
+elif printf '%s' "$Z38_LOOP" | grep -q 'require('; then
+  check "Z38 the verification loop REQUIRES a module inside its own body — a sibling executes before the next iteration checks it" FAIL
+elif [ -z "$Z38_VERIFY" ] || [ -z "$Z38_REQUIRE" ]; then
+  check "Z38 the verification or the require could not be located — the pin is not measuring anything" FAIL
+elif [ "$Z38_VERIFY" -lt "$Z38_REQUIRE" ]; then
+  check "Z38 every module is verified before ANY of them is required" PASS
+else
+  check "Z38 a module is required at line $Z38_REQUIRE before the check at line $Z38_VERIFY — the sibling executes before its own guard" FAIL
+fi
+if printf '%s' "$Z35_PROG" | grep -q 'fault = "modules"'; then
+  check "Z38a a module fault is disclosed under its own class" PASS
+else
+  check "Z38a a module fault carries no named class, so it is indistinguishable from a document fault" FAIL
+fi
+
+# Z43 every MARK the module declares must appear in both hook-side copies.
+#
+# The mark set exists in three places: `zen-anchor-v1.js` derives its own regex
+# from its constants, the `node -e` program hand-spells it as \uXXXX escapes,
+# and the shell grammar walk hand-spells it a third time. Only the module half
+# was ever pinned.
+#
+# IT COMPARES THE MARK SET, NOT A RENDERED TOKEN, and that distinction was
+# MEASURED. The first spelling rendered every producible token and required
+# both hook readers to accept it — and a probe that added a fifth mark to the
+# module left it GREEN, because `anchorTokenSafe` refuses a token carrying an
+# unknown mark and `anchorToken` therefore answers `none`, so no token bearing
+# the new mark ever reached the check. The module censors its own divergence;
+# only the declared constants expose it.
+Z43_REPORT="$(PLUGIN_DIR="$PLUGIN_DIR" \
+  Z43_NODE_CLASS="$(printf '%s' "$Z35_PROG" | grep -o '/\^(?:none.*\$/' | head -1)" \
+  Z43_SHELL_WALK="$Z33_GRAMMAR" \
+  node -e '
+  const mod = require(process.env.PLUGIN_DIR + "/hooks/lib/zen-anchor-v1.js");
+  // DERIVED, with a floor. A closed four-element hand list caught a DELETED
+  // constant and a hook copy carrying an undeclared mark, and was blind to the
+  // symmetric case: a mark ADDED to the module, admitted by `anchorTokenSafe`
+  // and accepted by neither hook-side reader, reported OK.
+  const names = Object.keys(mod).filter(function (k) { return /^MARK_/.test(k); }).sort();
+  if (names.length < 4) {
+    process.stdout.write("mark-export-surface-short<" + names.length + ">");
+    process.exit(0);
+  }
+  const bad = [];
+  const declared = [];
+  // ARITY IS CHECKED, never filtered. `filter(Boolean)` was the first spelling
+  // and it made a DELETED constant invisible: the surviving marks all matched,
+  // the loop ran fewer times, and the check reported green over a module that
+  // had lost a mark. A missing or non-string constant is the finding.
+  names.forEach(function (n) {
+    const v = mod[n];
+    if (typeof v !== "string" || v.length === 0) { bad.push("undeclared<" + n + ">"); return; }
+    const cp = v.codePointAt(0);
+    // NON-BMP IS REFUSED, not silently mis-checked. The node-side class spells a
+    // mark as a four-digit \\uXXXX, which cannot express a codepoint above
+    // U+FFFF at all — that needs a surrogate pair or a \\u{...}. Looking for a
+    // five-digit `uXXXXX` that no such class can contain would report a spurious
+    // absence; looking for its first four digits would report a spurious match.
+    if (cp > 0xFFFF) { bad.push("non-bmp<" + n + "/U+" + cp.toString(16).toUpperCase() + ">"); return; }
+    if (Array.from(v).length !== 1) { bad.push("not-one-char<" + n + ">"); return; }
+    declared.push({ name: n, mark: v, hex: cp.toString(16).toUpperCase().padStart(4, "0") });
+  });
+  const nodeClass = process.env.Z43_NODE_CLASS || "";
+  const shellWalk = process.env.Z43_SHELL_WALK || "";
+  if (!nodeClass) bad.push("node-grammar-unextractable");
+  if (!shellWalk) bad.push("shell-walk-unextractable");
+  if (declared.length && nodeClass && shellWalk) {
+    declared.forEach(function (d) {
+      if (nodeClass.toUpperCase().indexOf("U" + d.hex) === -1) {
+        bad.push("node-class-missing<" + d.name + "/U+" + d.hex + ">");
+      }
+      if (shellWalk.indexOf("\u0027" + d.mark + "\u0027") === -1) {
+        bad.push("shell-walk-missing<" + d.name + ">");
+      }
+    });
+    // THE REVERSE DIRECTION. The forward arm alone leaves a hook copy free to
+    // carry a mark the module never produces, which is a reader accepting a
+    // token no writer can mint — the same divergence, pointing the other way.
+    const declaredHex = declared.map(function (d) { return d.hex; });
+    const declaredMark = declared.map(function (d) { return d.mark; });
+    (nodeClass.toUpperCase().match(/\\U[0-9A-F]{4}/g) || []).forEach(function (esc) {
+      const hex = esc.slice(2);
+      if (declaredHex.indexOf(hex) === -1) bad.push("node-class-undeclared<U+" + hex + ">");
+    });
+    // ANCHORED ON THE MARK DISPATCH, not on any `\u0027X\u0027*)` in the walk:
+    // the field loop also opens with a leading-space guard of exactly that shape,
+    // and an unanchored scan reported the SPACE as an undeclared mark. Both the
+    // case pattern and the prefix the arm strips are captured, because an arm
+    // that matches one mark and strips another would pass a pattern-only scan
+    // while silently mangling every field it accepts.
+    const armRe = /\u0027(.)\u0027\*\)[ \t]*_zag_body="\$\{_zag_field#(.)\}"/g;
+    let arm;
+    let armCount = 0;
+    while ((arm = armRe.exec(shellWalk)) !== null) {
+      armCount += 1;
+      if (arm[1] !== arm[2]) { bad.push("shell-walk-arm-mismatch<" + arm[1] + "/" + arm[2] + ">"); continue; }
+      if (declaredMark.indexOf(arm[1]) === -1) bad.push("shell-walk-undeclared<" + arm[1] + ">");
+    }
+    if (armCount === 0) bad.push("shell-walk-no-mark-arms");
+  }
+  process.stdout.write(bad.length ? bad.join(" ") : "OK");
+' 2>&1)"
+if [ "$Z43_REPORT" = "OK" ]; then
+  check "Z43 the module mark set and both hook-side copies agree in both directions" PASS
+else
+  check "Z43 mark-set divergence or an unusable input: $Z43_REPORT" FAIL
+fi
+
+
+# Z48 the hook's own pre-open guard on the workflow document must survive.
+#
+# It does TWO jobs and only one of them is now belt. The shared reader's
+# `O_NONBLOCK` closed the blocking half for every caller, so deleting this guard
+# leaves every behavioural arm in this suite green — Z32a still yields `none`,
+# Z32b the implementing anchor, Z32c/Z32d/Z32e `none` plus an active mode. What
+# would go unnoticed is the OTHER job: `readWorkflowState` reaches
+# `ensureDescendantDirectory`, which CREATES the missing components, so an
+# unguarded read makes a per-prompt hook mkdir `<project>/.zensu/state` in every
+# project that has none. No observable in this suite distinguishes that, so the
+# pin is at source, and it pins the ORDER rather than mere presence.
+Z48_BODY="$(printf '%s' "$Z35_PROG" | grep -v '^[[:space:]]*//')"
+Z48_LSTAT="$(printf '%s' "$Z48_BODY" | grep -n 'fs\.lstatSync(doc)' | head -1 | cut -d: -f1)"
+Z48_READ="$(printf '%s' "$Z48_BODY" | grep -n 'readWorkflowState(' | head -1 | cut -d: -f1)"
+if [ -z "$Z48_LSTAT" ]; then
+  check "Z48 the document is read with no lstat pre-check - an unguarded read CREATES .zensu/state on every prompt" FAIL
+elif [ -z "$Z48_READ" ]; then
+  check "Z48 no readWorkflowState call was found - the pin is not measuring anything" FAIL
+elif [ "$Z48_LSTAT" -lt "$Z48_READ" ]; then
+  check "Z48 the document is lstat-ed before it is read" PASS
+else
+  check "Z48 the lstat does not precede the read, so the directory-creating path runs first" FAIL
+fi
+
+
+# Z50 the marker-resolution guards and the hardened marker write are pinned.
+#
+# FOUR of round 3`s production fixes shipped with no check of any kind, which is
+# the same class this suite exists to close. The round that found four defects
+# inside round 2`s own code shipped its own fixes with the same exposure.
+Z50_HOOK_SRC="$(grep -v '^[[:space:]]*#' "$HOOK")"
+Z50_OOB="$PLUGIN_DIR/hooks/lib/zensu-zen-mode.sh"
+Z50_BAD=""
+# (a) a present-but-not-regular marker resolves OFF. Without this arm a FIFO is
+#     neither a symlink nor a regular file, so resolution fell through to the
+#     configured default - which ships TRUE - and unreadable state IMPOSED the
+#     mode, then the off-phrase write opened that FIFO blocking.
+printf '%s' "$Z50_HOOK_SRC" | grep -qF '[ -e "$MARKER" ] && [ ! -f "$MARKER" ]' \
+  || Z50_BAD="$Z50_BAD hook:no-nonregular-marker-arm"
+# (b) the symlink guard covers the .zensu component, not only .zensu/state.
+printf '%s' "$Z50_HOOK_SRC" | grep -qF '[ -L "$ZEN_ROOT/.zensu" ]' \
+  || Z50_BAD="$Z50_BAD hook:no-zensu-component-guard"
+# (c) a non-traversable state directory does not fall through to the default.
+printf '%s' "$Z50_HOOK_SRC" | grep -qF '[ ! -x "$ZEN_STATE_DIR" ]' \
+  || Z50_BAD="$Z50_BAD hook:no-untraversable-dir-arm"
+# (d) the marker is PUBLISHED BY RENAME, never truncated in place.
+printf '%s' "$Z50_HOOK_SRC" | grep -q 'renameSync' \
+  || Z50_BAD="$Z50_BAD hook:marker-write-not-rename"
+printf '%s' "$Z50_HOOK_SRC" | grep -qE '^[[:space:]]*&&[[:space:]]*\{ printf .*> "\$MARKER"' \
+  && Z50_BAD="$Z50_BAD hook:truncating-redirect-returned"
+# (e) THE OUT-OF-BAND WRITER carries the same three guards. It is the remedy the
+#     hook NAMES when the in-band escape is unavailable, so hardening one of two
+#     writers to one file leaves the guarantee false.
+if [ ! -f "$Z50_OOB" ]; then
+  Z50_BAD="$Z50_BAD oob:missing"
+else
+  Z50_OOB_SRC="$(grep -v '^[[:space:]]*#' "$Z50_OOB")"
+  printf '%s' "$Z50_OOB_SRC" | grep -qF '[ -L "$ZEN_ZENSU_DIR" ]' \
+    || Z50_BAD="$Z50_BAD oob:no-zensu-component-guard"
+  printf '%s' "$Z50_OOB_SRC" | grep -qF '[ -e "$ZEN_MARKER" ] && [ ! -f "$ZEN_MARKER" ]' \
+    || Z50_BAD="$Z50_BAD oob:no-nonregular-marker-arm"
+  printf '%s' "$Z50_OOB_SRC" | grep -q 'renameSync' \
+    || Z50_BAD="$Z50_BAD oob:write-not-rename"
+fi
+if [ -z "$Z50_BAD" ]; then
+  check "Z50 both marker writers carry the component guard, the non-regular arm and a rename landing" PASS
+else
+  check "Z50 a marker guard is missing:$Z50_BAD" FAIL
+fi
+
+# Z51 the fault-path prompt recovery is pinned, including the branch that does
+# NOT run it. Two 5 s ladders in series reach the registration`s own 10 s, which
+# kills the HOOK and loses the whole directive - strictly worse than the anchor
+# loss the recovery repairs. Nothing graded any of it.
+Z51_BAD=""
+printf '%s' "$Z50_HOOK_SRC" | grep -qE '^[[:space:]]*124\|137\)' \
+  || Z51_BAD="$Z51_BAD no-watchdog-skip-arm"
+for Z51_W in 'recovery skipped' 'recovery failed' 'the recovery read no prompt'; do
+  printf '%s' "$Z50_HOOK_SRC" | grep -qF "$Z51_W" || Z51_BAD="$Z51_BAD <$Z51_W>"
+done
+printf '%s' "$Z50_HOOK_SRC" | grep -qE 'zen_prompt_only[^(]' \
+  || Z51_BAD="$Z51_BAD recovery-never-called"
+if [ -z "$Z51_BAD" ]; then
+  check "Z51 the recovery ladder keeps its watchdog-skip arm and all three distinct causes" PASS
+else
+  check "Z51 the recovery ladder lost a branch:$Z51_BAD" FAIL
+fi
+
+# Z52 EVERY node child in this hook is scanned, not only the one in
+# zen_prompt_and_anchor. Z35, Z41, Z46 and Z48 all derive from that one
+# function, and round 3 added two further `node -e` programs outside it - so
+# writing `PAYLOAD="$INPUT" node -e ...` in the recovery child would put the
+# verbatim user prompt back into /proc/<pid>/cmdline with Z41 green.
+Z52_SPAWNS="$(grep -c "node -e" "$HOOK")"
+Z52_ARGV="$(grep -E "^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)+(env[[:space:]]+)?node -e" "$HOOK" | head -3)"
+Z52_NONASCII="$(LC_ALL=C grep -nP '[^\x00-\x7F]' "$HOOK" | grep -vE '^[0-9]+:[[:space:]]*#' | head -3)"
+if [ "$Z52_SPAWNS" -lt 2 ]; then
+  check "Z52 fewer than two node children were found - the scan is not measuring what it claims" FAIL
+elif [ -n "$Z52_ARGV" ]; then
+  check "Z52 a node child carries a NAME=value prefix on its own command line: $Z52_ARGV" FAIL
+elif [ -n "$Z52_NONASCII" ]; then
+  check "Z52 non-ASCII outside a full-line comment reaches a node argv: $Z52_NONASCII" FAIL
+else
+  check "Z52 all $Z52_SPAWNS node children are free of argv-borne inputs and literal non-ASCII" PASS
+fi
+
+# Z49 the missing `prompt` field is disclosed under its OWN lead-in, and the
+# directive still ships.
+#
+# This is the one fault the hook says costs the user the in-band escape, and it
+# had no executed case: `fire` and `fire_err` both build a payload carrying
+# `prompt`, so the two `payloadFault` branches were never entered. It also pins
+# the SPLIT lead-in - announcing a lost prompt as an unavailable ANCHOR told the
+# user the one thing that was still working.
+Z49_ERR="$(fire_noprompt_err "$P32" "$S32")"
+Z49_OUT="$(fire_noprompt "$P32" "$S32")"
+Z49_KIND="$(printf '%s' "$Z49_OUT" | classify)"
+case "$Z49_ERR" in
+  *'zen-mode prompt unavailable (prompt field)'*)
+    if [ "$Z49_KIND" = "UserPromptSubmit|ON" ]; then
+      check "Z49 a payload with no prompt field discloses under its own lead-in and still injects the directive" PASS
+    else
+      check "Z49 a payload with no prompt field cost the whole directive (kind '$Z49_KIND')" FAIL
+    fi ;;
+  *'zen-mode anchor unavailable'*)
+    check "Z49 a lost PROMPT was announced as an unavailable ANCHOR - the wrong loss is named" FAIL ;;
+  *)
+    check "Z49 a payload with no prompt field degraded SILENTLY - stderr carried <$Z49_ERR>" FAIL ;;
+esac
+
+# Z47 the sanitizer must invoke BOTH readers, and the hook must still call it.
+#
+# `zen_anchor_grammar_ok` subsumes `zen_anchor_bytes_ok` on the language the
+# grammar ACCEPTS, so deleting the byte call leaves every behavioural table in
+# this suite green: Z33 and Z33b each drive their own reader directly, and the
+# composition itself was graded by nothing.
+#
+# ANCHORED ON A COMMAND POSITION, the way Z37 is, and for the same measured
+# reason: the comment strip removes only FULL-LINE comments, so a trailing
+# `# zen_anchor_bytes_ok retired` on a surviving line satisfied a bare name grep
+# while the call itself was gone.
+Z47_MISSING=""
+if [ -z "$(printf '%s' "$Z33_SANITIZE" | tr -d '[:space:]')" ]; then
+  check "Z47 the sanitizer body could not be extracted - the pin is not measuring anything" FAIL
+else
+  for Z47_F in zen_anchor_grammar_ok zen_anchor_bytes_ok; do
+    printf '%s' "$Z33_SANITIZE" | grep -v '^[[:space:]]*#' \
+      | grep -qE "^[[:space:]]*$Z47_F[[:space:]]" \
+      || Z47_MISSING="$Z47_MISSING <$Z47_F>"
+  done
+  if [ -z "$Z47_MISSING" ]; then
+    check "Z47 the sanitizer consults both the grammar reader and the byte reader" PASS
+  else
+    check "Z47 the sanitizer no longer consults a reader:$Z47_MISSING" FAIL
+  fi
+fi
+
+# Z47a THE HOOK MUST STILL CALL IT. Every check that grades this function - Z33,
+# Z33b, Z34, Z47 - extracts the text and drives it directly, so deleting the
+# single production call site left all four grading a function nothing invokes,
+# with every behavioural arm green because the child had already validated the
+# same token against its own grammar. That deletes exactly the reader positioned
+# to refuse a truncated mid-write token.
+Z47A_REST="$(awk '/^zen_anchor_sanitized\(\) \{/{skip=1} skip!=1{print} skip==1 && /^\}$/{skip=0}' "$HOOK")"
+if [ -z "$(printf '%s' "$Z47A_REST" | tr -d '[:space:]')" ]; then
+  check "Z47a the hook minus the sanitizer definition came back empty - the pin is not measuring anything" FAIL
+elif printf '%s' "$Z47A_REST" | grep -q 'zen_anchor_sanitized() {'; then
+  check "Z47a the definition survived the slice - the pin cannot tell a definition from a call" FAIL
+elif printf '%s' "$Z47A_REST" | grep -v '^[[:space:]]*#' \
+     | grep -qE 'ZEN_ANCHOR="\$\(zen_anchor_sanitized'; then
+  check "Z47a the hook still routes the arrived token through the sanitizer" PASS
+else
+  check "Z47a the sanitizer is defined and never called - the third reader is unwired" FAIL
+fi
+
+# Z41 NO child input may travel in an ARGUMENT VECTOR, and the payload may not
+# travel in the environment either.
+#
+# THREE corrections over the first spelling, and each closed a real hole. It
+# judged `PAYLOAD` alone, so the session key could have moved back onto the
+# command line with the check green. Its argv arm was POSITIONAL, so
+# `zensu_run_bounded env FOO=1 PAYLOAD="$INPUT" node ...` matched neither
+# pattern while the export was still present, and the verbatim prompt sat in
+# two argument vectors under a PASS. And its name list was hand-spelled, so a
+# fourth input added only on the command line was judged by nothing.
+#
+# What it pins now is TOTAL: the spawn lines carry no `NAME=value` token at all,
+# whatever the name; the payload is PIPED rather than exported, which is what
+# both sibling consumers of this payload already do; and every name the child
+# actually reads from the environment is one the spawn actually exports.
+Z41_CODE="$(printf '%s' "$Z35_PROG" | grep -v '^[[:space:]]*#')"
+Z41_SPAWN="$(printf '%s' "$Z41_CODE" | grep -nE 'zensu_run_bounded' | cut -d: -f1)"
+Z41_ARGV="$(printf '%s' "$Z41_CODE" \
+  | grep -E 'zensu_run_bounded' \
+  | grep -oE '[A-Za-z_][A-Za-z0-9_]*=' | sort -u | tr '\n' ' ')"
+# Every name the child READS, derived from the program rather than listed here.
+Z41_READS="$(printf '%s' "$Z41_CODE" | grep -oE 'process\.env\.[A-Za-z_][A-Za-z0-9_]*' \
+  | sed 's/process\.env\.//' | sort -u)"
+Z41_UNEXPORTED=""
+while IFS= read -r Z41_V; do
+  [ -n "$Z41_V" ] || continue
+  printf '%s' "$Z41_CODE" \
+    | grep -qE "export([[:space:]]+[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*)*[[:space:]]+$Z41_V=" \
+    || Z41_UNEXPORTED="$Z41_UNEXPORTED <$Z41_V>"
+done <<Z41EOF
+$Z41_READS
+Z41EOF
+if [ -z "$Z41_SPAWN" ]; then
+  check "Z41 no spawn line was found in the child-spawning function — the pin is not measuring anything" FAIL
+elif [ -z "$Z41_READS" ]; then
+  check "Z41 the child reads no environment name — the derivation found nothing and the pin is not measuring anything" FAIL
+elif [ -n "$Z41_ARGV" ]; then
+  check "Z41 a NAME=value token sits on the spawn command line — /proc/<pid>/cmdline is world-readable on Linux: $Z41_ARGV" FAIL
+elif printf '%s' "$Z41_CODE" | grep -qE '(export|env)[[:space:]][^|]*PAYLOAD='; then
+  check "Z41 the payload travels in the environment, which process listings and crash reporters capture and stdin is not" FAIL
+elif ! printf '%s' "$Z41_CODE" | grep -qE "printf '%s' \"\\\$INPUT\" \| zensu_run_bounded"; then
+  check "Z41 the payload is not piped to the bounded child — the stdin channel the sibling consumers use is not in force" FAIL
+elif [ -n "$Z41_UNEXPORTED" ]; then
+  check "Z41 the child reads an environment name the spawn never exports:$Z41_UNEXPORTED" FAIL
+else
+  check "Z41 no child input travels in an argv, the payload is piped, and every name the child reads is exported" PASS
+fi
+
+# Z42 a fault the CHILD cannot see must still be disclosed.
+#
+# The child owns the named fault classes `Z46_DECLARED` enumerates, but its writer runs inside the child:
+# a watchdog kill and a failed `cd -P` produce no line at all, which is exactly
+# the "dead child" case the disclosure was written for. The guarantee therefore
+# has to be stated at the layer that observes every outcome — the parent, on an
+# empty capture or a non-zero child status. Source pins, because neither outcome
+# is reachable from a fixture: the `cd` target is the live plugin tree that the
+# plugin-root identity check validates, and a watchdog kill needs a child that
+# hangs, which the O_NONBLOCK fix removed.
+if grep -q 'anchor unavailable (child failed or was bounded' "$HOOK" \
+   && grep -q 'anchor unavailable (child produced nothing)' "$HOOK" \
+   && grep -qE 'echo "zensu: zen-mode anchor unavailable \(child failed or was bounded[^"]*" >&2' "$HOOK" \
+   && grep -qE 'echo "zensu: zen-mode anchor unavailable \(child produced nothing\)" >&2' "$HOOK"; then
+  check "Z42 the parent discloses a child that produced nothing, on stderr" PASS
+else
+  check "Z42 a killed child or an unreachable hooks/lib is SILENT — the disclosure guarantee is not total" FAIL
+fi
+if printf '%s' "$Z35_PROG" | grep -q 'cd -P -- .* || exit 1'; then
+  check "Z42a an unreachable hooks/lib exits non-zero so the parent can see it" PASS
+else
+  check "Z42a the cd arm exits 0, so an unreachable hooks/lib is indistinguishable from success" FAIL
+fi
+
+# Z37 the child must run under the SHARED watchdog ladder.
+#
+# This hook spawns a `node` child on every prompt of every zen-mode session,
+# and that child reads outside the process — which is the criterion
+# `zensu_run_bounded` states for the two Stop-path children it already serves.
+# A hand-copied ladder is what this repository records as the defect that
+# created the shared one: the `gtimeout` arm reached one copy and not the
+# other. So the pin is the SYMBOL, not a spelling of `timeout`.
+#
+# NOT a bite for a hang: the ladder falls through to an UNBOUNDED arm when
+# neither `timeout` nor `gtimeout` exists, which is base macOS, so on this host
+# the wrapper changes nothing at run time. It is a source pin for that reason
+# and the limitation is stated at the call site rather than implied here.
+# Z40 the registration must carry a host-side deadline of its own.
+#
+# It is the OUTER bound: `zensu_run_bounded` above bounds the child, and on a
+# host with neither `timeout` nor `gtimeout` it bounds nothing, so this is what
+# remains. Nothing read it — `test-readme-hook-count-sync.sh` extracts hook
+# FILENAMES and never looks at the value, so it could be deleted with the whole
+# tree green. State its cost rather than only its presence: it kills the whole
+# hook, so a turn that hits it loses the entire directive, not just the anchor.
+Z40_T="$(node -e '
+  const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  let out = ""; let seen = 0;
+  for (const groups of Object.values(d.hooks || {})) {
+    for (const g of groups) {
+      for (const h of (g.hooks || [])) {
+        if (String(h.command || "").includes("user-prompt-zen-mode.sh")) {
+          seen += 1;
+          out = Number.isInteger(h.timeout) && h.timeout > 0 ? String(h.timeout) : "invalid";
+        }
+      }
+    }
+  }
+  process.stdout.write(seen > 1 ? "multiple" : (out || "unregistered"));
+' "$PLUGIN_DIR/hooks/hooks.json" 2>/dev/null)"
+case "$Z40_T" in
+  ''|unregistered) check "Z40 the zen-mode hook is not registered in hooks.json — the pin is not measuring anything" FAIL ;;
+  invalid)         check "Z40 the zen-mode registration carries no usable timeout — null, 0 and false all read as absent here" FAIL ;;
+  multiple)        check "Z40 the zen-mode hook is registered more than once — the last registration would silently decide" FAIL ;;
+  *)               check "Z40 the zen-mode registration carries a timeout ($Z40_T s)" PASS ;;
+esac
+
+# Over the STRIPPED body and anchored on a command position: the literal also
+# appears in the rationale comment above the call, so a whole-slice grep was
+# satisfied by prose and the wrapper could be deleted with this check green.
+# The command position now follows a PIPE, because the payload travels on stdin
+# rather than through the environment. Both forms are accepted; what stays
+# pinned is that the wrapper occupies a command position and is not merely named
+# in prose.
+if printf '%s' "$Z35_PROG" | grep -v '^[[:space:]]*#' \
+   | grep -qE '(^|\|)[[:space:]]*zensu_run_bounded([[:space:]]|\\|$)'; then
+  check "Z37 the prompt-and-anchor child runs under the shared watchdog ladder" PASS
+else
+  check "Z37 the child is spawned with no deadline — it reads outside the process and must go through zensu_run_bounded" FAIL
+fi
+if grep -q 'zensu-bounded-run.sh' "$HOOK"; then
+  check "Z37a the hook sources the ladder rather than hand-copying one" PASS
+else
+  check "Z37a zensu_run_bounded is named but hooks/lib/zensu-bounded-run.sh is never sourced" FAIL
+fi
+
+# Z35 the node program must carry no literal non-ASCII in its argv.
+#
+# The four marks sat in the `node -e` program text as literal UTF-8, so the
+# anchor grammar travelled through the argument vector as bytes above 0x7F. On
+# a path that is not UTF-8 clean those bytes are mangled, the grammar stops
+# matching its own vocabulary and the anchor dies SILENTLY — and only on that
+# host, which is the failure mode this repository already records for the MSYS
+# argv namespace. `\uXXXX` escapes carry the identical set with no such byte.
+#
+# It scans the WHOLE function rather than the `node -e` argument alone, which is
+# a deliberate over-reach: a shell comment never reaches argv, so the extra rule
+# this imposes is that comments inside this one function stay ASCII. That is
+# cheaper than a parse that has to find where the quoted program begins and
+# ends, and it has already caught two em dashes added by later edits.
+if ! printf '%s' "$Z35_PROG" | grep -q 'anchorToken'; then
+  check "Z35 the extracted slice does not contain the node program — a negative scan over it would pass vacuously" FAIL
+elif printf '%s' "$Z35_PROG" | LC_ALL=C grep -q '[^ -~	]'; then
+  check "Z35 the child-spawning function carries literal non-ASCII: inside the node program it reaches argv, and in a comment it fails this scan by the over-reach stated above" FAIL
+else
+  check "Z35 the child-spawning function carries no literal non-ASCII, so none can reach the node argv" PASS
+fi
+
+
+# Z45 the inner watchdog must be stricter than the outer registration timeout.
+#
+# The ladder bounds the child, the registration bounds the whole hook. If the
+# inner bound were the larger of the two, the hook would be killed first and the
+# child would never reach its own deadline, so the ladder would buy nothing. The
+# relation is correct today and was asserted nowhere.
+Z45_INNER="$(grep -oE '\b(g?timeout) [0-9]+' "$PLUGIN_DIR/hooks/lib/zensu-bounded-run.sh" | grep -oE '[0-9]+' | sort -n | tail -1)"
+Z45_OUTER="$Z40_T"
+case "${Z45_OUTER:-}" in ''|*[!0-9]*) Z45_OUTER="" ;; esac
+if [ -z "$Z45_INNER" ] || [ -z "$Z45_OUTER" ]; then
+  check "Z45 one of the two bounds could not be read — the pin is not measuring anything" FAIL
+elif [ "$Z45_INNER" -lt "$Z45_OUTER" ]; then
+  check "Z45 WHERE A WATCHDOG EXISTS the shared ladder ($Z45_INNER s) bounds the child inside the registration timeout ($Z45_OUTER s); with neither timeout nor gtimeout the ladder bounds nothing and the registration kills the whole hook" PASS
+else
+  check "Z45 the ladder ($Z45_INNER s) is not stricter than the registration timeout ($Z45_OUTER s), so the hook dies before the child does" FAIL
+fi
+
+# Z46 the fault-class vocabulary is pinned in BOTH directions.
+#
+# The classes cannot live in `zen-anchor-v1.js`, which a reviewer suggested:
+# one of them exists precisely for the case where that module cannot be loaded,
+# so the vocabulary has to survive its absence. Pinning the set here is the half
+# that is achievable.
+#
+# TWO CORRECTIONS over the first spelling, both of which made it weaker than it
+# read. It grepped the RAW slice, so a class name occurring only in a COMMENT
+# satisfied it — the body could stop emitting a class entirely and the check
+# stayed green. And it was a one-way hand list, so a class ADDED to the child
+# was pinned by nothing. The set is now derived from the assignment sites in the
+# comment-stripped body and compared against the declared list both ways.
+Z46_BODY="$(printf '%s' "$Z35_PROG" | sed 's,//.*,,')"
+# THE CARRIER SET IS DERIVED TOO. Hardcoding `payloadFault|fault` bounded the
+# derivation to two identifiers, so a third carrier — `let readFault = ""` folded
+# into the emission — would ship unpinned in both directions while this check
+# reported agreement. The identifiers come from the emission sites themselves:
+# every `process.stderr.write` argument in the child body, plus any `.filter(
+# Boolean)` array feeding one. A derivation that finds nothing FAILS.
+Z46_CARRIERS="$(printf '%s' "$Z46_BODY" \
+  | grep -oE '\b[a-zA-Z_][a-zA-Z0-9_]*Fault\b|\bfault\b' \
+  | sort -u | tr '\n' '|' | sed 's/|$//')"
+if [ -z "$Z46_CARRIERS" ]; then
+  Z46_CARRIERS='payloadFault|fault'
+  Z46_CARRIER_DERIVATION=fallback
+else
+  Z46_CARRIER_DERIVATION=derived
+fi
+Z46_EMITTED="$(printf '%s' "$Z46_BODY" \
+  | grep -oE "($Z46_CARRIERS) = \"[^\"]+\"" \
+  | sed 's/.*= "//; s/"$//' \
+  | sort -u)"
+Z46_DECLARED="$(printf '%s\n' 'no session anchor' 'modules' 'workflow document' \
+  'anchor render' 'token rejected' 'internal' 'prompt field' 'payload' | sort -u)"
+if [ -z "$Z46_EMITTED" ]; then
+  check "Z46 no fault-class assignment was found in the child body — the pin is not measuring anything" FAIL
+elif [ "$Z46_EMITTED" = "$Z46_DECLARED" ]; then
+  check "Z46 the child emits exactly the declared fault-class vocabulary" PASS
+else
+  Z46_MISSING=""
+  Z46_EXTRA=""
+  while IFS= read -r Z46_C; do
+    [ -n "$Z46_C" ] || continue
+    printf '%s\n' "$Z46_EMITTED" | grep -qxF "$Z46_C" || Z46_MISSING="$Z46_MISSING <$Z46_C>"
+  done <<Z46DECL
+$Z46_DECLARED
+Z46DECL
+  while IFS= read -r Z46_C; do
+    [ -n "$Z46_C" ] || continue
+    printf '%s\n' "$Z46_DECLARED" | grep -qxF "$Z46_C" || Z46_EXTRA="$Z46_EXTRA <$Z46_C>"
+  done <<Z46EMIT
+$Z46_EMITTED
+Z46EMIT
+  check "Z46 fault-class vocabulary diverges — declared-but-unemitted:[$Z46_MISSING] emitted-but-undeclared:[$Z46_EXTRA]" FAIL
+fi
+
+# The anchor fixtures are the only project directories this suite created and
+# never removed. Every other fixture above is torn down at its own site; these
+# two are torn down here because the fail-open arms need them alive until the
+# last check that reads them.
+rm -rf "$P32" "$P39"
+
 echo "----"
-echo "test-zen-mode: $PASS PASS / $FAIL FAIL"
+if [ "${Z34A_SKIPPED:-0}" -eq 1 ]; then
+  echo "test-zen-mode: $PASS PASS / $FAIL FAIL / 1 SKIP"
+else
+  echo "test-zen-mode: $PASS PASS / $FAIL FAIL"
+fi
 [ "$FAIL" -eq 0 ]

@@ -9,7 +9,7 @@
 # as "a THIRD child" and was already short by one on the day it landed, and the two the
 # lease adds carry no watchdog on ANY host and are named there as a known gap.
 #
-# The two it serves used to carry SEPARATE ladders, so the arm added to one was missing
+# The two Stop-path children it was created for used to carry SEPARATE ladders, so the arm added to one was missing
 # from the other — and the one left behind was the transcript read, whose own comment
 # records the larger exposure. `timeout` is absent on base macOS and some Git Bash
 # installs, and `gtimeout` is the name a Homebrew coreutils install puts there instead,

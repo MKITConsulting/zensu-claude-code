@@ -148,7 +148,7 @@ if command -v node >/dev/null 2>&1; then
       // test-zen-mode.sh: `chain-closed` renders a different line under
       // `reviewed`, and that token is one a scenario may legitimately carry.
       producible = [...new Set(Object.keys(mod.SHAPE_POSITION)
-        .flatMap((s) => [mod.anchorToken(s), mod.anchorToken(s, { reviewed: true })]))];
+        .map((s) => mod.anchorToken(s)))];
     } catch (_) { process.stdout.write("anchor-module-unloadable"); process.exit(0); }
     if (!producible.length) { process.stdout.write("anchor-module-produced-no-token"); process.exit(0); }
     const head = want.slice(0, want.indexOf(MARKER) + MARKER.length);
