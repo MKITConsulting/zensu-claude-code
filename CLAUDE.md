@@ -5509,7 +5509,17 @@ whole feature exists to close — the round that found four defects inside round
 repeated the pattern. `Z50` pins the marker guards on BOTH writers plus the rename landing,
 `Z51` pins the recovery ladder including its `124|137` watchdog-skip arm and all three distinct
 causes, and `Z52` scans EVERY `node` child rather than the one function `Z35`/`Z41`/`Z46`/`Z48`
-all derive from — round 3 added two further programs outside that slice, so writing
+all derive from. **`Z52`'s own first spelling was the same defect it exists to catch, and CI
+found it — not this suite.** It scanned the WHOLE FILE for non-ASCII, so it reported the em dash
+inside the OFF directive — ordinary prose that reaches no argv — as a leak; and it did that
+through `grep -nP`, a GNU extension, so the identical tree was GREEN on macOS and RED on
+ubuntu. Both halves are in `node` now, bounded to each child's PROGRAM TEXT. Its argv arm walks
+TOKENS and resets at every shell operator, because position is the whole property: a LEADING
+`NAME=v cmd` sets an environment and appears in no argv, while the same token after a command
+word is an ARGUMENT — which is the historical leak here, `zensu_run_bounded PAYLOAD="$INPUT"
+node -e …` making the ladder exec `timeout 5 PAYLOAD=… node …`. Line continuations are joined
+first, because the shipped spawn spans two physical lines and a per-line walk skipped the one
+carrying the assignment — round 3 added two further programs outside that slice, so writing
 `PAYLOAD="$INPUT" node -e ...` in the recovery child would have put the verbatim prompt back
 into an argv with `Z41` green.
 

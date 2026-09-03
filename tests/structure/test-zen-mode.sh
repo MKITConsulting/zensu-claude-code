@@ -2068,22 +2068,102 @@ else
 fi
 
 # Z52 EVERY node child in this hook is scanned, not only the one in
-# zen_prompt_and_anchor. Z35, Z41, Z46 and Z48 all derive from that one
-# function, and round 3 added two further `node -e` programs outside it - so
-# writing `PAYLOAD="$INPUT" node -e ...` in the recovery child would put the
-# verbatim user prompt back into /proc/<pid>/cmdline with Z41 green.
-Z52_SPAWNS="$(grep -c "node -e" "$HOOK")"
-Z52_ARGV="$(grep -E "^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)+(env[[:space:]]+)?node -e" "$HOOK" | head -3)"
-Z52_NONASCII="$(LC_ALL=C grep -nP '[^\x00-\x7F]' "$HOOK" | grep -vE '^[0-9]+:[[:space:]]*#' | head -3)"
-if [ "$Z52_SPAWNS" -lt 2 ]; then
-  check "Z52 fewer than two node children were found - the scan is not measuring what it claims" FAIL
-elif [ -n "$Z52_ARGV" ]; then
-  check "Z52 a node child carries a NAME=value prefix on its own command line: $Z52_ARGV" FAIL
-elif [ -n "$Z52_NONASCII" ]; then
-  check "Z52 non-ASCII outside a full-line comment reaches a node argv: $Z52_NONASCII" FAIL
-else
-  check "Z52 all $Z52_SPAWNS node children are free of argv-borne inputs and literal non-ASCII" PASS
-fi
+# zen_prompt_and_anchor.
+#
+# Z35, Z41, Z46 and Z48 all derive from that ONE function, and round 3 added two
+# further `node -e` programs outside it - so writing `PAYLOAD="$INPUT" node -e ...`
+# in the recovery child would put the verbatim user prompt back into
+# /proc/<pid>/cmdline with Z41 green.
+#
+# TWO CORRECTIONS over the first spelling, and CI found both because the check
+# itself could not fail here. It scanned the WHOLE FILE for non-ASCII, so it
+# reported the em dash inside the OFF directive - ordinary directive prose that
+# reaches no argv - as an argv leak. And it did that through `grep -nP`, which is
+# a GNU extension: the two hosts disagreed, so the same tree was green on macOS
+# and red on ubuntu. The scan is in `node` now, which has one answer everywhere,
+# and it is bounded to the PROGRAM TEXT of each child rather than the file.
+Z52_REPORT="$(HOOK="$HOOK" node -e '
+  const fs = require("fs");
+  const src = fs.readFileSync(process.env.HOOK, "utf8");
+  const bad = [];
+  // Each child is `node -e '"'"'` ... `'"'"'` - a single-quoted shell string, so the
+  // program ends at the next apostrophe and no apostrophe may appear inside it.
+  // That is the same property the hook states about itself.
+  const starts = [];
+  const marker = "node -e " + String.fromCharCode(39);
+  for (let i = src.indexOf(marker); i !== -1; i = src.indexOf(marker, i + 1)) starts.push(i);
+  if (starts.length < 2) {
+    process.stdout.write("too-few-children<" + starts.length + ">");
+    process.exit(0);
+  }
+  starts.forEach(function (at) {
+    const from = at + marker.length;
+    const to = src.indexOf(String.fromCharCode(39), from);
+    if (to === -1) { bad.push("unterminated-program"); return; }
+    const body = src.slice(from, to);
+    const line = src.slice(0, from).split("\n").length;
+    body.split("\n").forEach(function (l, k) {
+      if (/^\s*\/\//.test(l)) return;
+      for (const ch of l) {
+        if (ch.codePointAt(0) > 0x7F) {
+          bad.push("non-ascii<line " + (line + k) + "/" + JSON.stringify(ch) + ">");
+          return;
+        }
+      }
+    });
+  });
+  // NO ASSIGNMENT MAY FOLLOW A COMMAND WORD on a spawn line, and the position is
+  // the whole point. A LEADING `NAME=v cmd` sets NAME in that command`s
+  // environment and appears in no argv. The same token written AFTER a command
+  // word is an ordinary ARGUMENT to it - which is the historical leak here:
+  // `zensu_run_bounded PAYLOAD="$INPUT" node -e ...` made the ladder exec
+  // `timeout 5 PAYLOAD=... node -e ...`, putting the verbatim user prompt into
+  // timeout`s own argv for the child`s whole life. Matching `NAME= node -e`
+  // adjacently would miss exactly that shape, so the tokens are walked instead.
+  // CONTINUATIONS ARE JOINED FIRST. The shipped spawn spans two physical lines
+  // (`... zensu_run_bounded \\` then `node -e ...`), so a per-line walk skipped
+  // the very line carrying the assignment - the historical leak shape passed.
+  const joined = [];
+  src.split("\n").forEach(function (l, i) {
+    const prev = joined.length ? joined[joined.length - 1] : null;
+    if (prev && /\\$/.test(prev.text)) {
+      prev.text = prev.text.replace(/\\$/, " ") + l.trim();
+      return;
+    }
+    joined.push({ text: l, line: i + 1 });
+  });
+  joined.forEach(function (entry) {
+    const l = entry.text;
+    const i = entry.line - 1;
+    if (l.indexOf("node -e") === -1) return;
+    if (/^\s*#/.test(l)) return;
+    const tokens = l.replace(/^\s*[^|]*\|\s*/, "").trim().split(/\s+/);
+    let seenCommandWord = false;
+    for (const t of tokens) {
+      // AN OPERATOR RESETS the walk, it does not merely get skipped. A new
+      // command starts after `&&`, so an assignment there is LEADING again and
+      // sets an environment rather than passing an argument. Skipping without
+      // resetting reported the hook`s own `mkdir ... && ZEN_MARKER=... node`
+      // as a leak, because `mkdir` had already been seen on the same line.
+      // `if` resets for the same reason: it opens a command, it is not one.
+      if (/^(&&|\|\||;|\(|\)|\{|\}|!|\\|if|then|else|elif|do|while|until)$/.test(t)) {
+        seenCommandWord = false;
+        continue;
+      }
+      const assign = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(t);
+      if (assign) {
+        if (seenCommandWord) bad.push("argv-assignment<line " + (i + 1) + "/" + assign[1] + ">");
+        continue;
+      }
+      seenCommandWord = true;
+    }
+  });
+  process.stdout.write(bad.length ? bad.join(" ") : "OK n=" + starts.length);
+' 2>&1)"
+case "$Z52_REPORT" in
+  OK\ n=*) check "Z52 every node child is free of argv-borne inputs and literal non-ASCII (${Z52_REPORT#OK })" PASS ;;
+  *)       check "Z52 a node child carries an argv assignment or literal non-ASCII: $Z52_REPORT" FAIL ;;
+esac
 
 # Z49 the missing `prompt` field is disclosed under its OWN lead-in, and the
 # directive still ships.
