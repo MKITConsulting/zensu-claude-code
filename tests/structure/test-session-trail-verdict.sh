@@ -3787,7 +3787,18 @@ else
     [ -z "$WC18_BAD" ] \
       && check "WC18 a hostile branch name is reduced before it reaches a directory name and a new branch name" PASS \
       || check "WC18 hostile slug mishandled:$WC18_BAD (target=${WC18_TARGET:-<none>})" FAIL
-    git -C "$CONT_WT" checkout -q "$CONT_BRANCH" >/dev/null 2>&1
+    # The restore is GATED, because arms below this one pin the source branch by
+    # NAME — WC23's `ready` expectation carries `claude/cont-fixture-cont`, derived
+    # from this worktree still being on `$CONT_BRANCH`. A silently failed checkout
+    # would leave the fixture on the hostile branch and report as a defect in those
+    # arms rather than as the fixture fault it is.
+    #
+    # The failure is reported ONCE, here, and published as a flag rather than left
+    # to cascade: `WC23_PRE` reads it and SKIPS its cases, so a fixture fault costs
+    # one named failure instead of one named failure plus a misdirected payload
+    # report thirteen cases wide.
+    git -C "$CONT_WT" checkout -q "$CONT_BRANCH" >/dev/null 2>&1 \
+      || { WC18_RESTORE_OK=0; check "WC18-restore the source worktree was left on the hostile branch — arms below that pin a branch name are skipped" FAIL; }
   else
     check "WC18 the hostile-branch fixture could not be created, so the slug's bounding rule is unexercised" FAIL
   fi
@@ -3933,6 +3944,231 @@ else
     [ -z "$WC22_BAD" ] \
       && check "WC22 with no reason to report the unknown line names no cause of its own" PASS \
       || check "WC22 unknown fallback mishandled:$WC22_BAD" FAIL
+  fi
+
+  # WC23 — the `--json` carrier of the continuation contract, driven across every
+  # state this block can reach without a mutant.
+  #
+  # State the delta precisely, because a first wording of this comment overstated it
+  # and this file treats a stale in-file claim as a defect in its own right. WC11
+  # already pins `status` and `reasonCode` from a real run, and `target`/`branch` by
+  # TYPE — but only for the single `ready` case, and only on the `takeover --json`
+  # carrier. Its fifth token is `typeof j.skipped`, a TOP-LEVEL field and nothing
+  # inside `continuation`; that is worth naming, because a reader counting five
+  # tokens against four described fields infers it measures `lines.length` and
+  # concludes this comment overstates the delta. A reviewer did exactly that.
+  # Asserted by nothing anywhere: `continuation.source`, the exact VALUES of
+  # `target` and `branch`, the presence of `lines`, the KEY SET, and the whole
+  # payload on the `show --json` carrier for the twelve non-`ready` states. WC12
+  # grades the reason-code set by reading SOURCE and executes nothing. So a renderer
+  # that kept every rendered sentence and dropped, renamed or emptied a JSON field
+  # passed the entire block above.
+  #
+  # EXPECT NO COVERAGE DELTA, and do not delete this arm on the strength of one.
+  # Measured with `npm run session-trail:coverage` on both sides of the change that
+  # added it: 94.72 / 80.37 / 97.48 / 94.72, identical on every axis. Every line
+  # WC23 executes was already executed by the text-carrier arms above; what it buys
+  # is ASSERTION over already-executed code, which no line-coverage number can
+  # express. The evidence that it bites is mutation: `none()`'s `source: src || null`
+  # -> `source: null` failed this arm and nothing else in 146 checks, and narrowing
+  # the recognition guard to `w.reasonCode === 'no-channel'` failed 3 of its 13 cases.
+  #
+  # `.map` before `.join`, deliberately: Array.prototype.join renders null as the
+  # EMPTY STRING, so a plain join would make a withheld target indistinguishable from
+  # a dropped field — exactly the confusion this arm exists to remove. `lines` is
+  # reduced to a presence token rather than compared: the text arms already grade its
+  # content, and what is unasserted is that the JSON object carries it at all. The
+  # seventh column is the sorted KEY SET, pinned in BOTH directions for the reason
+  # `T26` pins the endpoint field set in the sibling suite — `target` and `source`
+  # carry absolute worktree paths, so a key added here is a privacy question and an
+  # over-list is as wrong as an under-list.
+  WC23_READ='let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const c=JSON.parse(s).continuation;process.stdout.write([c.status,c.reasonCode,c.target,c.branch,c.source,(Array.isArray(c.lines)&&c.lines.length>0)?"lines-present":"lines-missing",Object.keys(c).sort().join(",")].map(v=>v===null?"null":String(v)).join("|"))}catch{process.stdout.write("PARSE-FAIL")}})'
+  WC23_KEYS='branch,lines,reasonCode,source,status,target'
+  WC23_ERR="$FAKE/wc23-stderr.txt"
+  # ONE builder for both shapes. The environment prefix was hand-copied twice and the
+  # copies had to stay in lockstep by hand; this suite's own `trailrun` grew its
+  # `USERPROFILE` half after the fact, which is the precedent for a third variable
+  # arriving later and reaching only one copy.
+  #
+  # `--all --json` BEFORE the caller's tokens, unlike `cshow`. `parseArgs` is an
+  # order-independent loop and the session id reaches `_` from any position, so the
+  # verdicts are unchanged — but a case written with a trailing `--anchor` and no
+  # operand would otherwise bind the literal `--all` as the anchor, an
+  # absolute-looking value `writeAnchor` would accept, instead of failing loudly.
+  #
+  # `CLAUDE_CONFIG_DIR` and `ZENSU_CCD_STORE` are cleared because `$HOME` is only a
+  # FALLBACK for both, and with either exported `--all` would enumerate the
+  # developer's real store. Say it that way rather than citing the suite header as
+  # authority: the header's rule has TWO halves — unset the variable AND name the
+  # sandbox with `--config-dir` — and these invocations use only the first, resting
+  # on the fallback. Bounded and loud rather than silent (`show` reads, and a leak
+  # into a real store would mismatch every want), but it is a divergence from the
+  # header, so it is recorded here instead of implied.
+  cont_json_run() { # <env-name|""> <env-value> <sid> [args...]
+    local ename="$1" evalue="$2"; shift 2
+    local -a pre
+    pre=(env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR -u CLAUDE_CONFIG_DIR -u ZENSU_CCD_STORE)
+    [ -z "$ename" ] || pre=("${pre[@]}" "$ename=$evalue")
+    pre=("${pre[@]}" HOME="$CONT_HOME" USERPROFILE="$CONT_HOME")
+    "${pre[@]}" node "$TRAIL_MJS" show --all --json "$@" 2>"$WC23_ERR"
+  }
+  WC23_BAD=""; WC23_FIRST=""; WC23_N=0; WC23_CODES=""
+  wc23_record() { # <label> <want> <got>
+    WC23_N=$((WC23_N + 1))
+    # Recorded from the WANT, not from what the renderer produced, and the reason is
+    # separation: this list is the arm's DECLARED population, so a run in which
+    # trail.mjs crashes reports a payload failure without ALSO reporting a phantom
+    # coverage hole. It is sound only because no branch reports PASS while WC23_BAD
+    # is non-empty, so a case whose code never appeared also fails its payload check.
+    # That conjunction is load-bearing: an added `elif` that reordered the ladder
+    # below would break it silently.
+    WC23_CODES="$WC23_CODES
+$(printf '%s' "$2" | cut -d'|' -f2)"
+    [ "$3" = "$2" ] && return 0
+    # A crash in trail.mjs otherwise reaches the maintainer as a bare `PARSE-FAIL`:
+    # the producer's stderr became an empty stdin and JSON.parse threw. Carry its
+    # first line on the failure path only.
+    local why=""
+    case "$3" in PARSE-FAIL*) why=" stderr='$(head -1 "$WC23_ERR" 2>/dev/null | cut -c1-160)'" ;; esac
+    # ONE line. `check` echoes its label verbatim, and every consumer of this suite's
+    # output — including the runner that counts PASS/FAIL lines — reads it as one
+    # record per line, so an embedded newline would split a single failure into two.
+    [ -n "$WC23_FIRST" ] || WC23_FIRST="$1 want='$2' got='${3:-<empty>}'$why"
+    WC23_BAD="$WC23_BAD $1"
+  }
+  cont_json_case() { # <label> <want> <sid> [args...]
+    local label="$1" want="$2"; shift 2
+    wc23_record "$label" "$want" "$(cont_json_run "" "" "$@" | node -e "$WC23_READ" 2>/dev/null)"
+  }
+  # Three states need an environment `cont_json_run` deliberately clears. The
+  # assignment travels as a NAME and a VALUE rather than as an expanded prefix
+  # string: this block builds a fixture path containing a space, and an unquoted
+  # prefix would word-split it.
+  cont_json_env_case() { # <label> <want> <env-name> <env-value> <sid> [args...]
+    local label="$1" want="$2" ename="$3" evalue="$4"; shift 4
+    wc23_record "$label" "$want" "$(cont_json_run "$ename" "$evalue" "$@" | node -e "$WC23_READ" 2>/dev/null)"
+  }
+  # Three of the fixtures below are built as a SIDE EFFECT of earlier arms rather
+  # than by the shared fixture block — `$SID_F` by WC2a, `plaindir` by WC16c and
+  # `wt-eeeeeeee` by WC16d. Asserted here rather than assumed: deleting one of those
+  # arms would otherwise make the renderer answer a different, perfectly correct code
+  # and point the reader at `continuationPlan` instead of at the removed `mkdir`.
+  WC23_PRE=""
+  [ -n "${SID_F:-}" ] || WC23_PRE="$WC23_PRE SID_F(WC2a)"
+  [ -d "$CONT_HOME/plaindir" ] || WC23_PRE="$WC23_PRE plaindir(WC16c)"
+  [ -d "$CONT_HOME/work/wt-eeeeeeee" ] || WC23_PRE="$WC23_PRE wt-eeeeeeee(WC16d)"
+  # The MIRROR direction, which an existence-only guard cannot see. Two cases assert
+  # a code the renderer emits BECAUSE a path is absent; if an arm above ever creates
+  # one, the renderer answers a different and perfectly correct code and this arm
+  # points the reader at `continuationPlan` instead of at the `mkdir` that caused it.
+  [ ! -e "$CONT_HOME/work/wt-ffffffff" ] || WC23_PRE="$WC23_PRE wt-ffffffff-must-be-absent"
+  [ ! -e "$CONT_HOME/no/such/dir" ] || WC23_PRE="$WC23_PRE no-such-dir-must-be-absent"
+  # WC18 restores the source worktree to `$CONT_BRANCH`, and the `ready` want below
+  # pins `claude/cont-fixture-cont`, derived from that branch name. A failed restore
+  # is already reported by WC18 itself, so this arm SKIPS rather than stacking a
+  # second, misdirected failure on top of it.
+  [ "${WC18_RESTORE_OK:-1}" = 1 ] || WC23_PRE="$WC23_PRE WC18-restore-failed"
+  if [ -n "$WC23_PRE" ]; then
+    check "WC23-pre a fixture precondition does not hold, so the cases below would measure a different state:$WC23_PRE" FAIL
+  else
+    # The prescribing state carries all three path fields; every withholding one must
+    # carry target and branch as an explicit null rather than a plausible-looking path.
+    cont_json_case ready "ready|escapes-anchor|$CONT_ANCHOR/.claude/worktrees/cont-fixture-cont|claude/cont-fixture-cont|$CONT_WT|lines-present|$WC23_KEYS" "$SID_C" --anchor "$CONT_ANCHOR"
+    cont_json_case contained "not-needed|already-contained|null|null|$CONT_WT|lines-present|$WC23_KEYS" "$SID_C" --anchor "$CONT_HOME"
+    cont_json_case gone-directory "blocked|source-directory-missing|null|null|$CONT_HOME/work/wt-ffffffff|lines-present|$WC23_KEYS" "$SID_F" --anchor "$CONT_HOME"
+    cont_json_case anchor-absent "blocked|anchor-absent|null|null|$CONT_WT|lines-present|$WC23_KEYS" "$SID_C" --anchor "$CONT_HOME/no/such/dir"
+    cont_json_case source-not-a-repo "blocked|source-not-a-repository|null|null|$CONT_HOME/work/wt-eeeeeeee|lines-present|$WC23_KEYS" "$SID_E" --anchor "$CONT_ANCHOR"
+    cont_json_case anchor-not-a-repo "blocked|anchor-not-a-repository|null|null|$CONT_WT|lines-present|$WC23_KEYS" "$SID_C" --anchor "$CONT_HOME/plaindir"
+    cont_json_case cross-repository "blocked|cross-repository|null|null|$CONT_WT|lines-present|$WC23_KEYS" "$SID_C" --anchor "$CONT_FOREIGN"
+    cont_json_case branch-unresolved "blocked|branch-unresolved|null|null|$CONT_WT|lines-present|$WC23_KEYS" "$SID_C" --no-git --anchor "$CONT_ANCHOR"
+    # The four `unknown` codes reachable here. Driving only one of them was the arm's
+    # own blind spot: with `no-channel` alone exercised, narrowing the recognition
+    # guard to `w.reasonCode === 'no-channel'` collapses every other carried code to
+    # `unclassified` and this arm stays green.
+    cont_json_case no-channel "unknown|no-channel|null|null|$CONT_WT|lines-present|$WC23_KEYS" "$SID_C"
+    cont_json_case channel-not-absolute "unknown|channel-not-absolute|null|null|$CONT_WT|lines-present|$WC23_KEYS" "$SID_C" --anchor 'rel/ative'
+    cont_json_env_case weak-channel "unknown|weak-channel|null|null|$CONT_WT|lines-present|$WC23_KEYS" CLAUDE_PROJECT_DIR "$CONT_HOME" "$SID_C"
+    cont_json_env_case anchor-outside-record-root "unknown|anchor-outside-record-root|null|null|$CONT_WT|lines-present|$WC23_KEYS" ZENSU_PROJECT_ROOT "$CONT_REPO" "$SID_C" --anchor "$CONT_HOME"
+    # The weak channel measured against a root that does NOT contain the worktree — a
+    # sound deny, so a target could be built from it and is withheld anyway.
+    cont_json_env_case weak-channel-no-target "blocked|weak-channel-no-target|null|null|$CONT_WT|lines-present|$WC23_KEYS" CLAUDE_PROJECT_DIR "$CONT_ANCHOR" "$SID_C"
+
+    # The POPULATION, derived from the owner rather than counted by hand. WC12's own
+    # comment states the rule this follows: "a hand-listed expectation here could not
+    # detect its own omission". Every member of the documented union must be either
+    # driven above or named in the exclusion list, so a code added to the constant
+    # fails here until someone decides which it is.
+    #
+    # Full-line comments are dropped BEFORE the tokens are extracted, which is what
+    # lets the character class be wide. Narrow it to `[a-z][a-z-]+` and a code
+    # spelled with a digit, an underscore or a capital never enters the population at
+    # all — the vacuity this check exists to avoid — while widening it without the
+    # filter starts matching apostrophes in the prose beside the members.
+    #
+    # LC_ALL=C throughout, because `comm` applies its own byte comparison while
+    # `sort` follows the ambient locale, and the two disagree about `-` against a
+    # letter. No pair among today's codes distinguishes them, so this is latent.
+    wc23_members() { # <awk-program>
+      awk "$1" "$TRAIL_MJS" | grep -v '^[[:space:]]*//' | grep -oE "'[A-Za-z0-9_-]+'" | tr -d "'"
+    }
+    WC23_CONT_CODES="$(wc23_members '/^const CONTINUATION_REASONS = new Set\(\[/{f=1;next} f&&/^\]\);/{exit} f{print}' | LC_ALL=C sort -u)"
+    WC23_ANCH_CODES="$(wc23_members '/^const ANCHOR_REASONS = Object.freeze\(\[/{f=1;next} f&&/^\]\);/{exit} f{print}' | LC_ALL=C sort -u)"
+    WC23_ALL="$(printf '%s\n%s\n' "$WC23_CONT_CODES" "$WC23_ANCH_CODES" | grep -v '^$' | LC_ALL=C sort -u)"
+    # Not reachable from this block, each for a stated reason: three are driven only
+    # through a mutant plugin tree (W22, WC12c, WC21a), one needs a filesystem whose
+    # literal and resolved spellings disagree — which WC0 excludes as a precondition
+    # of this whole block — and two need a session record whose worktree field is
+    # absent or relative, which `mkfix.mjs` cannot produce.
+    WC23_EXCLUDED="$(printf '%s\n' gate-unavailable unclassified source-toplevel-unresolved ambiguous-spelling target-absent target-not-absolute | LC_ALL=C sort -u)"
+    # The three ids are asserted to still BE checks, because the exclusion rests on
+    # them: delete or rename WC12c and `unclassified` stays permanently out of the
+    # population with everything green. Anchored on `check "<id> ` rather than on the
+    # bare id, or this scan would match the comment that names them four lines up.
+    WC23_SELF="$PLUGIN_DIR/tests/structure/test-session-trail-verdict.sh"
+    WC23_MISSING=""
+    if [ -f "$WC23_SELF" ]; then
+      for wc23_id in W22 WC12c WC21a; do
+        grep -q "check \"$wc23_id " "$WC23_SELF" || WC23_MISSING="$WC23_MISSING $wc23_id"
+      done
+    else
+      WC23_MISSING=" (this suite could not locate itself at $WC23_SELF)"
+    fi
+    WC23_DRIVEN="$(printf '%s\n' "$WC23_CODES" | grep -v '^$' | LC_ALL=C sort -u)"
+    WC23_ACCOUNTED="$(printf '%s\n%s\n' "$WC23_DRIVEN" "$WC23_EXCLUDED" | LC_ALL=C sort -u)"
+    WC23_UNCOVERED="$(LC_ALL=C comm -23 <(printf '%s\n' "$WC23_ALL") <(printf '%s\n' "$WC23_ACCOUNTED") | tr '\n' ' ')"
+    # The OTHER direction, which `comm -23` alone cannot see. `comm -23` can only
+    # SHRINK when the population loses members, so a half-broken extraction — one of
+    # the two awk programs no longer matching — leaves every name accounted for and
+    # the arm green over a population missing eight codes. This arm also catches a
+    # renamed code and a typo'd exclusion.
+    WC23_ORPHANED="$(LC_ALL=C comm -13 <(printf '%s\n' "$WC23_ALL") <(printf '%s\n' "$WC23_ACCOUNTED") | tr '\n' ' ')"
+    # An exclusion that later becomes driven is dead weight that can hide a real gap.
+    WC23_BOTH="$(LC_ALL=C comm -12 <(printf '%s\n' "$WC23_DRIVEN") <(printf '%s\n' "$WC23_EXCLUDED") | tr '\n' ' ')"
+    # Distinct-vs-total, which the population check alone cannot see: a copy-pasted
+    # case that duplicates one reason code while displacing another keeps totals intact.
+    WC23_DISTINCT="$(printf '%s\n' "$WC23_DRIVEN" | grep -c .)"
+
+    if [ -n "$WC23_MISSING" ]; then
+      check "WC23-pre an arm the exclusion list rests on is gone, so its codes are silently unchecked:$WC23_MISSING" FAIL
+    elif [ -z "$WC23_CONT_CODES" ] || [ -z "$WC23_ANCH_CODES" ] || [ -z "$WC23_DRIVEN" ]; then
+      check "WC23-pre a derivation came back empty (continuation=$(printf '%s\n' "$WC23_CONT_CODES" | grep -c .) anchor=$(printf '%s\n' "$WC23_ANCH_CODES" | grep -c .) driven=$(printf '%s\n' "$WC23_DRIVEN" | grep -c .)) — the coverage check below is inert" FAIL
+    elif [ "$WC23_DISTINCT" != "$WC23_N" ]; then
+      check "WC23-pre $WC23_N cases assert only $WC23_DISTINCT distinct reason codes — a duplicated case is displacing another" FAIL
+    elif [ -n "${WC23_BOTH// /}" ]; then
+      check "WC23-pre a reason code is both driven and excluded, so its exclusion is dead:$WC23_BOTH" FAIL
+    elif [ -n "${WC23_UNCOVERED// /}" ]; then
+      check "WC23 a documented continuation reason code is neither driven nor excluded:$WC23_UNCOVERED" FAIL
+    elif [ -n "${WC23_ORPHANED// /}" ]; then
+      check "WC23 a driven or excluded code is no longer in the documented population — an extraction or a name moved:$WC23_ORPHANED" FAIL
+    elif [ -z "$WC23_BAD" ]; then
+      check "WC23 all $WC23_N reachable continuation states carry their documented --json payload, and the rest are excluded by name" PASS
+    else
+      # The FIRST failure in full, then the labels of the rest. A dropped field fails
+      # every case at once, and one fixture path is already ~230 characters per side —
+      # printing ten of them buries the one reading a maintainer needs.
+      WC23_HITS="$(printf '%s' "$WC23_BAD" | wc -w | tr -d ' ')"
+      check "WC23 continuation --json payload wrong in $WC23_HITS of $WC23_N cases; first: $WC23_FIRST | also:$WC23_BAD" FAIL
+    fi
   fi
 fi
 
