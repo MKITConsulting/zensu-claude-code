@@ -280,7 +280,7 @@ PREFLIGHT_CONTEXT="$(STATE_FILE="$NATIVE_TDD_STATE_FILE" SID="$SESSION_ID" node 
     }));
   } catch (_) { process.exit(3); }
 ' 2>/dev/null)" \
-  || decline "this session's own workflow document did not validate as a chain the reviewer completion could be recorded against"
+  || decline "this session's own workflow document did not validate as a chain the reviewer completion could be recorded against" runstate
 
 # WHETHER this chain is Autopilot-bound is decided by the DURABLE STATE above,
 # never by counting prefixes in the prompt. Deciding it from the prompt made a
@@ -436,7 +436,7 @@ elif [ "$PROMPT_AUTOPILOT_KIND" = bound ]; then
         process.exit(exact?0:3);
       } catch (_) { process.exit(3); }
     ' 2>/dev/null \
-    || decline "the prompt's Autopilot binding disagrees with this session's own durable run — read a fresh --autopilot-status and rebuild the envelope from it"
+    || decline "the prompt's Autopilot binding disagrees with this session's own durable run — resolve the run state first, because the gate above has already pinned the envelope to this chain's own record" runstate
 else
   exit 0
 fi

@@ -3,7 +3,7 @@
 # Control project root, never from the ambient CLAUDE_PROJECT_DIR:
 #   O0 no outer run, honest ambient dir      -> the review directive is emitted (control)
 #   O1 no outer run, decoy ambient dir       -> still emitted (regression pin)
-#   O2 nonterminal outer run                 -> unbound claim refused, ticket kept
+#   O2 nonterminal outer run                 -> refused WITH a disclosure, ticket kept
 #   O3 the hook reads no ambient project dir -> source guard against reintroduction
 # An ambient project dir outside the bound root does not bypass the ownership
 # check — the path hardening rejects it (rc=2) and the hook exits silently. That
@@ -136,8 +136,17 @@ OWNED_STATE="$(tdd_state_file "$ARMED_KEY")"
 autopilot_begin_run outer-owned-run "$ARMED_KEY" "$OWNED_PROJECT" >/dev/null 2>&1 \
   || { echo "O2 fixture: outer run could not be started" >&2; exit 1; }
 OUT2="$(run_hook "$OWNED_PROJECT" "$ARMED_TICKET")"
-if [ -z "$OUT2" ]; then
-  check "O2 nonterminal outer run refuses the unbound claim" PASS
+# The refusal stands, and it now DISCLOSES. This run is the session's OWN
+# durable generation, read owner-scoped, so it is not one of the two classes
+# that stay silent — only the owner-INDEPENDENT workspace-holder read is, and
+# O2b below is that case. The remedy must be the run-state one: a re-spawn
+# would reproduce this refusal byte for byte while rotating the ticket out from
+# under any spawn still in flight. The ticket never travels in either direction.
+if printf '%s' "$OUT2" | grep -qF -- "was NOT recorded against this session's review chain" \
+  && printf '%s' "$OUT2" | grep -qF -- "is still live" \
+  && printf '%s' "$OUT2" | grep -qF -- "Do NOT issue a fresh review ticket" \
+  && ! printf '%s' "$OUT2" | grep -qF -- "$ARMED_TICKET"; then
+  check "O2 nonterminal outer run refuses the unbound claim, discloses, and withholds the re-spawn remedy" PASS
 else
   check "O2 owned project (out='$OUT2')" FAIL
 fi

@@ -264,13 +264,6 @@
           "timeoutMs": 300000
         },
         {
-          "id": "post-review-self-review-handoff",
-          "runner": "bash",
-          "path": "tests/structure/test-post-review-self-review-handoff.sh",
-          "args": [],
-          "timeoutMs": 720000
-        },
-        {
           "id": "session-id-v1",
           "runner": "bash",
           "path": "tests/structure/test-session-id-v1.sh",
@@ -379,6 +372,13 @@
           "path": "tests/structure/test-session-trail-lineage.sh",
           "args": [],
           "timeoutMs": 600000
+        },
+        {
+          "id": "post-review-self-review-handoff",
+          "runner": "bash",
+          "path": "tests/structure/test-post-review-self-review-handoff.sh",
+          "args": [],
+          "timeoutMs": 1080000
         }
       ]
     }

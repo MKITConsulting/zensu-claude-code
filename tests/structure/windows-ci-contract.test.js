@@ -69,6 +69,22 @@ const expectedProfiles = [
   // The second suite arrived later: `review-worker-evidence-lease` was moved off
   // shard 7 (see the note above) because this shard had the headroom and that one had
   // none. 154673 + 137147 ms of measured work against an 1800000 ms envelope.
+  //
+  // A THIRD arrived the same way. `post-review-self-review-handoff` reported
+  // TIMED_OUT at 720126 ms against its 720000 ms cap on shard 5 (run 33804565979,
+  // job 100811827008), after this branch grew it by roughly 200 lines of new cases.
+  // The SHARD was not what bound — that job finished in 21m5s inside the 1800000 ms
+  // envelope — so the per-suite cap had to rise, and raising it in place would have
+  // left shard 5's worst case at about 27 of its 30 minutes. It moved here instead,
+  // where the two resident suites measure ~292 s together, and the cap is 1080000.
+  //
+  // State that number honestly: it is NOT a measurement. The suite has no green
+  // Windows wall clock at its current size — the only figure this branch has is the
+  // 720126 ms at which it was killed, which is a lower bound. 1080000 is 50% above
+  // that lower bound, chosen so the first green run has room to report a real number
+  // and so a genuine runaway still trips the cap rather than the profile. REPLACE it
+  // with the measurement from the first green run on this shard, exactly as the two
+  // notes above were replaced.
   'windows-shard-8',
 ];
 const expectedCommandCount = 43;
