@@ -1131,6 +1131,54 @@ else
   head -c 300 "$TMP/heal.err" 2>/dev/null
 fi
 
+# The PUSH half of the disclosure. `/zensu:doctor` renders the same finding, but that
+# is a PULL channel: it says nothing until somebody runs it, and the person who needs
+# to know did not ask. Without this the automatic heal is silent on the one path that
+# runs without the user asking for it — the exact gap the review finding named.
+#
+# Asserted on the emitted `additionalContext` rather than on stderr, deliberately: this
+# repository records that a hook's stderr visibility on a non-blocking exit is
+# UNVERIFIED on this host, while `additionalContext` demonstrably reaches the model.
+if node -e '
+  const out = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  const ctx = (out && out.hookSpecificOutput && out.hookSpecificOutput.additionalContext) || "";
+  process.exit(ctx.includes("rebuilt automatically at SessionStart")
+    && ctx.includes("loss, not a restore")
+    && ctx.includes("/zensu:tdd")
+    && ctx.includes("/zensu:doctor") ? 0 : 1);
+' "$TMP/heal.out"; then
+  check "the self-heal discloses the rebuild on the emitted SessionStart context" PASS
+else
+  check "the self-heal discloses the rebuild on the emitted SessionStart context" FAIL
+  head -c 400 "$TMP/heal.out" 2>/dev/null
+fi
+
+# The notice must NOT replace the principal's own context: that context is what binds
+# the session, so a notice that substituted it would trade the binding for a warning.
+if printf '%s' "$(cat "$TMP/heal.out")" | session_context_has_project "$PROJECT_A"; then
+  check "the rebuild notice is appended to the session context, never substituted for it" PASS
+else
+  check "the rebuild notice is appended to the session context, never substituted for it" FAIL
+fi
+
+# The POSITIVE CONTROL, and it is the whole reason the row above means anything: the
+# document is PRESENT now, so re-firing SessionStart must heal nothing and say nothing.
+# Without it the check passes in a tree where the notice is emitted unconditionally,
+# which would warn about a rebuild on every ordinary session start.
+QUIET_RC=0
+printf '%s' "$HEAL_PAYLOAD" | CLAUDE_PLUGIN_ROOT="$ROOT" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
+  CLAUDE_ENV_FILE="$ENV_FILE" bash "$HOOK" >"$TMP/heal-quiet.out" 2>"$TMP/heal-quiet.err" \
+  || QUIET_RC=$?
+if [ "$QUIET_RC" -eq 0 ] && node -e '
+  const out = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  const ctx = (out && out.hookSpecificOutput && out.hookSpecificOutput.additionalContext) || "";
+  process.exit(ctx.includes("rebuilt automatically at SessionStart") ? 1 : 0);
+' "$TMP/heal-quiet.out"; then
+  check "a SessionStart that heals nothing emits no rebuild notice" PASS
+else
+  check "a SessionStart that heals nothing emits no rebuild notice (rc=$QUIET_RC)" FAIL
+fi
+
 # The TAMPER row. It pins the end-to-end OUTCOME — a hard-linked document is
 # refused and its bytes are left alone — which is the property a user depends on.
 # It is deliberately NOT labelled a discriminator for the `=== MISSING` bound: as

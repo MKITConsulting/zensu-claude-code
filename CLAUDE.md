@@ -1259,8 +1259,18 @@ new one — the shape it refuses is byte-identical.
 - **The SessionStart self-heal is not user-confirmed.** A session could delete its own
   document and wait for an automatic compaction. The history entry makes that visible —
   and since the doctor row above it is visible to a USER rather than only to a guard
-  reader, which is what the disclosure argument always assumed and did not have. Nothing
-  prevents it. It matches the existing *no record* branch, which already
+  reader, which is what the disclosure argument always assumed and did not have. The
+  adapter also PUSHES it: `BASELINE_HEAL_NOTICE` in
+  `hooks/lib/claude-session-control-v1.js` rides the `additionalContext` the hook already
+  emits, so the first reply after an automatic heal can say what was lost rather than
+  waiting for someone to run the doctor. Two bounds travel with it and neither is
+  cosmetic: the notice is MODEL-facing, so nothing forces the model to relay it, and it is
+  APPENDED to the principal's rendered context rather than substituted for it, because that
+  context is what binds the session. Blocking at Stop was weighed and REJECTED — after a
+  rebuild the baseline reads "never active", so there is no armed chain left to enforce and
+  a block would obstruct the common blameless case, a deleted and re-created worktree, to
+  catch a rare one it cannot tell apart, the distinguishing state having been destroyed with
+  the document. Nothing prevents the deletion itself. It matches the existing *no record* branch, which already
   re-registers without consent for the same reason — but say "matches", never "is
   therefore safe".
 - **Windows is unverified for the in-session half — and scope that claim to the

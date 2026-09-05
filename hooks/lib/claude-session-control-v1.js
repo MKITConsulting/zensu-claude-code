@@ -132,6 +132,25 @@ function rejectSourceRevisionOverride() {
   }
 }
 
+// The PUSH half of the rebuild disclosure. `/zensu:doctor` renders the
+// BASELINE_REBUILT history entry, but that is a PULL channel: it says nothing until
+// somebody runs it, and the one person who needs to know did not ask. This notice
+// travels on the SessionStart `additionalContext` the model already receives, so the
+// very first reply after an automatic heal can say what was lost.
+//
+// It is model-facing, which is a real bound rather than a detail: nothing forces the
+// model to relay it, so this SUPPLEMENTS the doctor row and never replaces it. It is
+// deliberately not a Stop-hook block — after a rebuild the baseline reads "never
+// active", so there is no armed chain left to enforce and a block would obstruct the
+// common blameless case (a deleted and re-created worktree) to catch a rare one it
+// cannot tell apart, the distinguishing state having been destroyed with the document.
+const BASELINE_HEAL_NOTICE = 'Zensu: this session\'s workflow document was missing and was '
+  + 'rebuilt automatically at SessionStart. Rebuilding is a loss, not a restore: the '
+  + 'rebuilt baseline reads "never active", so a review chain that was live when the '
+  + 'document vanished is gone and the Stop guard will release this session without '
+  + 'asking for a reviewer. Tell the user this in your next reply, and offer /zensu:tdd '
+  + 'to re-arm if that work still needs a review. /zensu:doctor reports the same finding.';
+
 function main() {
   const payload = readPayload();
   // SessionStart also carries agent_type for top-level `claude --agent`
@@ -149,6 +168,7 @@ function main() {
   ensurePrivatePath(controlRoot, ['locks']);
 
   let context;
+  let baselineHealNotice = '';
   if (payload.hook_event_name === 'SessionStart') {
     const key = core.sessionKey(payload.session_id);
     const recordFile = path.join(recordsDir, `${key}.json`);
@@ -219,6 +239,11 @@ function main() {
             executingPluginRoot: pluginRoot,
             host: 'claude',
           });
+          // Set on BOTH outcomes. The rebuild is real whether or not its provenance
+          // entry landed, and the branch below reports the missing entry, never the
+          // missing rebuild — hanging the notice off `provenance` would withhold it
+          // in exactly the case with the least surviving evidence.
+          baselineHealNotice = BASELINE_HEAL_NOTICE;
           if (healed && healed.provenance !== 'recorded') {
             process.stderr.write(
               'zensu SessionStart: the workflow document was rebuilt but its '
@@ -308,7 +333,12 @@ function main() {
     : principal === principals.PRINCIPALS.MAIN
       ? core.renderMainContext(context)
       : core.renderHostContext(context);
-  process.stdout.write(`${JSON.stringify(hookOutput(payload.hook_event_name, additionalContext))}\n`);
+  // Appended rather than substituted: the principal's own context is what binds the
+  // session, and a notice that replaced it would trade a disclosure for the binding.
+  const emittedContext = baselineHealNotice === ''
+    ? additionalContext
+    : `${additionalContext}\n\n${baselineHealNotice}`;
+  process.stdout.write(`${JSON.stringify(hookOutput(payload.hook_event_name, emittedContext))}\n`);
 }
 
 try {

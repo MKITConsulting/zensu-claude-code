@@ -353,7 +353,10 @@ minting a new one.
   exist and never asked whether the bound session's own was among them, so a report came back
   fully green over a session in which every tool was being denied.
 - **`SessionStart` heals it on its own** at the next resume or compaction, on `ENOENT` only,
-  writing the same `BASELINE_REBUILT` provenance entry the confirmed repair writes.
+  writing the same `BASELINE_REBUILT` provenance entry the confirmed repair writes — and it
+  SAYS so, on the `additionalContext` it already emits, so the first reply after an automatic
+  heal can tell the user what was lost instead of waiting to be asked. That notice is
+  model-facing, so it supplements the doctor row below and never replaces it.
 - **`/zensu:doctor` renders that provenance entry afterwards.** Once the document is present
   again, nothing else in the report distinguishes a rebuilt one from a healthy one, so the
   own-document verdict carries a `⚠️ state: this session's workflow document was REBUILT` row
