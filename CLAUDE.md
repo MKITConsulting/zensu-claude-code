@@ -653,12 +653,24 @@ raising this number buys nothing while the shard is that close to its own ceilin
 
 The suite is spawn-dominated — nearly every check spawns a `bash` plus a `node`,
 it builds five fixture plugin trees, and it now also drives
-`tests/structure/rule-block-v1.test.js` as its B0 driver — and `windows-shard-4`
-also carries `plan-payload-path-transport`, which this file records at a measured
-714 s. Growth here therefore has to be paid for by moving a suite OFF that shard,
-not by raising a number. If the shard starts reporting an abort, the tail of
-whichever suite ran last went unverified regardless of how many checks passed
-before it.
+`tests/structure/rule-block-v1.test.js` as its B0 driver. Growth here therefore has
+to be paid for by moving a suite OFF that shard, not by raising a number. If the
+shard starts reporting an abort, the tail of whichever suite ran last went
+unverified regardless of how many checks passed before it.
+
+**`plan-payload-path-transport` is NO LONGER a neighbour, and the prediction above
+came true before it moved.** This paragraph used to name it as the second big suite
+on `windows-shard-4` at a measured 714 s. On run 33968034396 it measured **874281 ms**
+— a 22% swing over that figure — and the shard's first three suites summed to
+1718167 ms of the 1800000 ms envelope, so `tdd-state-junction-safety` received the
+remaining 81927 ms against its own 180000 ms cap and reported `TIMED_OUT`. The suite
+was not slow; it was not paid for. `plan-payload-path-transport` moved to
+`windows-shard-8`, which the contract test's own note measures at roughly 292 s of
+work; moving the 180000 ms suite instead would have left this shard at 1718167 ms,
+which is a budget set AT the measurement. Shard 4 now holds
+`best-solution-first`, `deferred-claim-adoption` and `tdd-state-junction-safety`, near
+1024 s. Re-measure both shards on the next green Windows run and replace these
+figures; the headroom sentence above still describes the shard as it was.
 
 The suite-level wall clock on Windows is still **unmeasured**; only the shard is.
 The note lives here because `tests/run-profile.js`'s `SUITE_KEYS` throws on any key
@@ -5489,13 +5501,19 @@ sentence names the origin and says the browser does not check routes again. The 
 already said "per origin", so the change removed an internal contradiction rather than choosing
 a wording.
 
-**A consent record carries the declared-route set it was granted against.** The recipe is a
-session-writable file re-read on every navigation, so deciding a silent allow against the LIVE
-recipe let routes be widened after the human approved the origin, with no re-prompt. Records
-carry `declaredRoutes` and the silent-allow arm tests the union over that origin's records. A
-record minted before this rule has none, so every non-remembered route asks — the safe
-direction. Consent is ADDITIVE per origin: an earlier consent keeps its own routes when the
-recipe changes, which is correct, because the human approved them.
+**CONSENT IS PER ORIGIN, in all three carriers, and the route-scoped design that preceded it is
+recorded here so it is not rebuilt.** The first attempt asked per route while the PROMPT told the
+human a Yes opened the whole origin and the BROKER checked only the origin (`assertAllowedUrl`
+tests `policy.approved.has(target.origin)` and returns before any route test). Three components,
+two contracts. The route half then carried its own defect: a record was stamped with a fresh read
+of the LIVE recipe on every write, INCLUDING writes for navigations that were never prompted, and
+the silent-allow arm tested the union of those sets — so a session could widen the recipe, drive
+one already-allowed route, and launder a new route into the silently-allowed set with no human in
+the loop. Binding the set to the prompt would have fixed that one defect and left the three
+carriers still disagreeing. Removing the route axis fixes both: a record is exactly
+`(origin, route, decidedBy, at)`, the route is an audit line, and the recipe's declared routes are
+prompt CONTEXT only. The cost is stated rather than hidden — there is no per-route control inside
+an approved loopback origin, which is what the prompt has always promised.
 
 **One resolver decides which recipe governs.** `resolveRecipeFile` prefers `.zensu/runtime.yaml`
 over `.zensu/autopilot.yaml` and skips a symlinked candidate. Both hooks and the `/zensu:doctor`
@@ -5524,9 +5542,17 @@ so that check proves internal consistency and says nothing about how the host re
 prefix; `RECIPE_NAMES` and `resolveRecipeFile` against the doctor's recipe probe;
 `FLOOR_REASONS`, `CONSENT_REMOTE_REASON` and `normalizeRoute` in the shared floor, which the
 broker and the decision module both consume rather than hand-copying — the remote sentence
-lived in two files with no check comparing them; the memory filename shape against the doctor's
-`Consent` block; the four doctor states against the rows documented in the doctor skill, which
-a suite check holds in step; and the operator accounts in `docs/gates.md`, `docs/configuration.md`
+lived in two files with no check comparing them; the memory filename shape against
+`skills/verify-feature/SKILL.md`, which both spells that path and owns the report's `Consent`
+block — the doctor renderer has no such block, and naming it there sent a maintainer to a file
+that does not carry it; every doctor STATE against the rows documented in the doctor skill, which
+a suite check holds in step — do not restate a COUNT here, because the next state added
+invalidates it, and this roster already shipped one that was stale on the day it was written;
+the doctor's THREE top-level policy guards against `parsePolicy`'s own three throw messages in
+`scripts/playwright-mcp-proxy.js`, a deliberate hand copy (calling the owner would put DNS in a
+read-only diagnostic) held by a suite pin rather than by a call;
+`consentHookRegistered` / `consentRecorderRegistered`, which share one lookup because their
+CONSUMERS differ — the broker asks only about the gate, the doctor about both; and the operator accounts in `docs/gates.md`, `docs/configuration.md`
 (both hook rows plus the hook count and its anchors), `docs/verify-feature.md`, the README
 docs-index rows, the suite manifest entry and the counts in `tests/SUITE-OVERVIEW.md`.
 

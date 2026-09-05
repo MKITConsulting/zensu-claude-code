@@ -69,6 +69,21 @@ const expectedProfiles = [
   // The second suite arrived later: `review-worker-evidence-lease` was moved off
   // shard 7 (see the note above) because this shard had the headroom and that one had
   // none. 154673 + 137147 ms of measured work against an 1800000 ms envelope.
+  //
+  // The THIRD arrived the same way, and it is the shard-3 lesson repeating on shard 4.
+  // Measured on run 33968034396, shard 4's first three suites reported 71814 +
+  // 772072 + 874281 ms = 1718167 ms of the 1800000 ms envelope, so
+  // `tdd-state-junction-safety` was granted the remaining 81927 ms against its own
+  // 180000 ms cap and reported TIMED_OUT. It was not slow; it was not paid for — the
+  // failure §Host-Refused Reviewer Spawn states as "read the shard's remaining budget,
+  // not the suite's timeoutMs".
+  //
+  // `plan-payload-path-transport` moved rather than the timed-out suite, and the
+  // arithmetic is why: moving the 180000 ms one would have left shard 4 at 1718167 ms,
+  // 82 s of headroom against a suite this repo records swinging from 714 s to 874 s
+  // between runs — a cap set AT the measurement again. Moving the 874281 ms one leaves
+  // shard 4 near 1024 s and brings this shard to roughly 1166 s, both inside 1800000 ms
+  // with real slack. Its 900000 ms cap travels unchanged; only the neighbour changed.
   'windows-shard-8',
 ];
 const expectedCommandCount = 43;
