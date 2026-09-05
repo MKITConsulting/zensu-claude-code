@@ -27,12 +27,12 @@ Code, the Playwright broker starts in consent mode, provided the plugin register
 hook pair on the broker's navigation tools (`/zensu:doctor` reports this as
 `verify-feature: consent mode ready`). Then:
 
-- The first `browser_navigate` to each new origin, and every route the runtime recipe does
-  not declare synthetic-safe, opens a permission prompt naming the origin, the route, the
-  declared routes and the consequence: answering Yes lets the model read that page's content,
-  screenshots included, for the rest of the session. The model cannot answer that prompt.
-- Approved `(origin, route)` pairs are remembered for the session in
-  `.zensu/state/verify-consent-<session-key>.json`; a declared route on an approved origin
+- The first `browser_navigate` to each new origin opens a permission prompt naming the origin,
+  the route it starts with, the routes the run declares synthetic-safe and the consequence:
+  answering Yes lets the model open and read any page on that origin, screenshots included,
+  for the rest of the session. The model cannot answer that prompt.
+- Approved origins are remembered for the session in
+  `.zensu/state/verify-consent-<session-key>.json`; every further route on an approved origin
   passes without a second prompt. The report's `Consent` block lists every record.
 - The broker keeps a hard floor whatever you answer: literal loopback origins only
   (`127.0.0.1`, `[::1]`; never `localhost`), no credentials, no query or fragment in a

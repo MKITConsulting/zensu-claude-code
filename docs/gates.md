@@ -341,10 +341,11 @@ change — and the desktop app has no shell prefix at all.
 (`scripts/playwright-mcp-proxy.js` checks its own `hooks/hooks.json` for this registration at
 start, and stays in the old deny-everything mode without it). The PreToolUse hook then returns
 `permissionDecision: "ask"` — the host's own prompt, which the model cannot answer — for the
-first navigation to each new origin and for every route the runtime recipe does not declare
-synthetic-safe; a navigation whose `(origin, route)` the session already approved, or a
-declared route on an approved origin, passes silently. The PostToolUse hook records an
-executed navigation as `(origin, route, decidedBy, at)` in
+first navigation to each new loopback origin. Consent is per ORIGIN: once an origin is
+approved, every route on it passes silently for the rest of the session, which is exactly what
+the broker enforces and what the prompt says. The runtime recipe's declared routes are prompt
+CONTEXT — they tell the human what the run intends to visit — and steer no decision. The
+PostToolUse hook records an executed navigation as `(origin, route, decidedBy, at)` in
 `<project>/.zensu/state/verify-consent-<session-key>.json`, written by `O_EXCL` temp plus
 rename, contained to that directory, and never through a symlink. The decision, the prompt
 text and the memory rules live in `hooks/lib/verify-consent-v1.js`; the address and URL
@@ -358,8 +359,8 @@ Consent mode admits **literal loopback origins only**. A remote target is refuse
 and by the broker with the same reason, because Chromium's DNS pins are passed at browser
 launch and an origin approved mid-session could not be pinned; remote verification keeps the
 parent policy. Sub-requests, WebSockets and redirects reach only origins the session already
-opened. In consent mode the broker does not enforce routes — the human consented per route
-at the hook — so a same-origin redirect to an undeclared route is not stopped by the broker.
+opened. In consent mode neither layer enforces routes — the human consented to the whole origin — so a
+same-origin redirect to an undeclared route is stopped by neither.
 
 **With a parent policy present the gate stays silent** and the broker enforces the policy
 exactly as before; the PostToolUse hook then records `decidedBy: policy`.

@@ -105,10 +105,16 @@ async function parsePolicy(raw, resolver = dns.promises.lookup) {
 }
 
 const CONSENT_HOOK_FILE = 'pre-browser-navigation-consent.sh';
+const CONSENT_RECORDER_FILE = 'post-browser-navigation-consent.sh';
 
-function consentHookRegistered(pluginRoot) {
+// ONE lookup for both halves of the pair, because the two questions have different consumers
+// and must not drift: the broker asks only about the GATE, since a missing recorder costs a
+// prompt per navigation and never widens what is allowed, while /zensu:doctor asks about both
+// — a green "consent mode ready" row over a missing recorder describes a session that prompts
+// forever and remembers nothing.
+function hookRegistered(pluginRoot, event, hookFile) {
   try {
-    const hookPath = path.join(pluginRoot, 'hooks', CONSENT_HOOK_FILE);
+    const hookPath = path.join(pluginRoot, 'hooks', hookFile);
     const hookInfo = fs.lstatSync(hookPath);
     if (!hookInfo.isFile() || hookInfo.isSymbolicLink()) return false;
     const modulePath = path.join(pluginRoot, 'hooks', 'lib', 'verify-consent-v1.js');
@@ -116,13 +122,21 @@ function consentHookRegistered(pluginRoot) {
     if (!moduleInfo.isFile() || moduleInfo.isSymbolicLink()) return false;
     const { CONSENT_MATCHER } = require(modulePath);
     const registry = JSON.parse(fs.readFileSync(path.join(pluginRoot, 'hooks', 'hooks.json'), 'utf8'));
-    const groups = (registry.hooks && registry.hooks.PreToolUse) || [];
+    const groups = (registry.hooks && registry.hooks[event]) || [];
     return groups.some((group) => group && group.matcher === CONSENT_MATCHER
       && Array.isArray(group.hooks)
-      && group.hooks.some((hook) => typeof hook.command === 'string' && hook.command.includes(`/hooks/${CONSENT_HOOK_FILE}`)));
+      && group.hooks.some((hook) => typeof hook.command === 'string' && hook.command.includes(`/hooks/${hookFile}`)));
   } catch (_error) {
     return false;
   }
+}
+
+function consentHookRegistered(pluginRoot) {
+  return hookRegistered(pluginRoot, 'PreToolUse', CONSENT_HOOK_FILE);
+}
+
+function consentRecorderRegistered(pluginRoot) {
+  return hookRegistered(pluginRoot, 'PostToolUse', CONSENT_RECORDER_FILE);
 }
 
 function consentPolicy() {
@@ -408,6 +422,7 @@ module.exports = {
   chromiumResolverRules,
   configureContext,
   consentHookRegistered,
+  consentRecorderRegistered,
   installCapabilityBoundary,
   isPublicAddress,
   JsonLineTransport,

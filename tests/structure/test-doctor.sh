@@ -320,12 +320,30 @@ else
   check "P1vf wrapper derives the verify state from the policy env, the registered hook and the recipe, and exports it" FAIL
 fi
 VF_SKILL="$PLUGIN_DIR/skills/doctor/SKILL.md"
+# The phrase set is DERIVED from the renderer's own arms, never hand-listed: a hand list
+# passes unchanged when a state is added, which is exactly how a shipped state reached the
+# report with no bullet documenting it. Each arm renders 'verify-feature: <claim> — <remedy>',
+# and the claim before the em dash is what the skill must carry.
+VF_PHRASES="$(grep -oE "'verify-feature: [^']*'" "$REPORT" \
+  | sed "s/^'//; s/'\$//" | sed 's/ \xe2\x80\x94 .*//; s/ ($//' | sort -u)"
+VF_PHRASE_COUNT="$(printf '%s\n' "$VF_PHRASES" | grep -c . || true)"
 VF_SKILL_MISS=""
-for phrase in "verify-feature: environment policy active" "verify-feature: consent mode ready" "consent mode ready, no runtime recipe" "verify-feature: cannot start" "the browser broker will refuse it"; do
+while IFS= read -r phrase; do
+  [ -n "$phrase" ] || continue
   grep -qF -- "$phrase" "$VF_SKILL" || VF_SKILL_MISS="$VF_SKILL_MISS [$phrase]"
-done
-[ -z "$VF_SKILL_MISS" ] && check "P1vg all four verify-feature rows are documented in skills/doctor/SKILL.md" PASS \
-  || check "P1vg verify-feature rows missing from skills/doctor/SKILL.md:$VF_SKILL_MISS" FAIL
+done <<VFEOF
+$VF_PHRASES
+VFEOF
+[ "${VF_PHRASE_COUNT:-0}" -ge 5 ] \
+  && check "P1vg-control the verify-feature row phrases derive from the renderer ($VF_PHRASE_COUNT found)" PASS \
+  || check "P1vg-control the verify-feature row phrases derive from the renderer (only ${VF_PHRASE_COUNT:-0} found)" FAIL
+# The count is CONJOINED: an empty derivation would otherwise report every row documented
+# while comparing nothing, which is the shape this check replaced.
+if [ "${VF_PHRASE_COUNT:-0}" -ge 5 ] && [ -z "$VF_SKILL_MISS" ]; then
+  check "P1vg every verify-feature row the renderer can emit is documented in skills/doctor/SKILL.md ($VF_PHRASE_COUNT rows)" PASS
+else
+  check "P1vg verify-feature rows missing from skills/doctor/SKILL.md:$VF_SKILL_MISS" FAIL
+fi
 
 # --- wrapper Playwright MCP detection (offline; npm must never execute) -----
 MCP_PLUG="$SBOX/mcp-plug"

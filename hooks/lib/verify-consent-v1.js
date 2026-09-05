@@ -15,17 +15,29 @@ const DECIDED_BY = Object.freeze(['prompt', 'memory', 'policy']);
 const REASONS = Object.freeze({
   NOT_A_NAVIGATION: 'not-a-navigation',
   POLICY_MODE: 'policy-mode',
-  MEMORY_HIT: 'origin-and-route-in-session-memory',
-  DECLARED_ROUTE: 'known-origin-declared-route',
+  MEMORY_HIT: 'origin-in-session-memory',
   NEW_ORIGIN: 'new-origin-needs-consent',
-  UNDECLARED_ROUTE: 'undeclared-route-needs-consent',
   REMOTE_NEEDS_POLICY: `remote-target-needs-parent-environment-policy: ${floor.CONSENT_REMOTE_REASON}`,
   PAYLOAD_UNREADABLE: 'hook-payload-unreadable',
   MEMORY_UNREADABLE: 'consent-memory-unreadable',
   MEMORY_PATH_REFUSED: 'consent-memory-path-refused',
 });
 
-const FOREIGN_SERVER_NOTE = 'This gate matches on the tool name alone, and the bare mcp__playwright__ spelling belongs to any MCP server keyed "playwright". If this navigation is not a /zensu:verify-feature run, the tool is served by a different server and this refusal is not about your request: ask the user to rename that server key, or to launch Claude Code with ZENSU_VERIFY_NAVIGATION_POLICY_V1 set in its environment. Never set that variable from a Bash call — it is read once when the browser broker starts.';
+// Attached only to the denies a foreign server can actually cause — the origin
+// classification and the remote refusal. A payload fault or a crashed hook is not
+// explained by this note, and a deny that guesses at its own cause sends the reader after
+// the wrong thing. The remedy is deliberately ONE: launching with a navigation policy
+// would turn this gate off for every target, including the remote ones the floor exists to
+// refuse, which under this note's own premise leaves nothing behind it.
+const FOREIGN_SERVER_NOTE = 'This gate matches on the tool name alone, and the bare mcp__playwright__ spelling belongs to any MCP server keyed "playwright". If this navigation is not a /zensu:verify-feature run, the tool is served by a different server and this refusal is not about your request: the remedy is to rename that server key, which is the user\'s own configuration to change — ask them, and never edit an MCP server configuration on their behalf to widen what this gate allows.';
+
+// Derived from the floor's own vocabulary rather than hand-listed, so a reason added there
+// carries the note without an edit here and a reason removed there cannot leave a dead arm.
+function foreignServerNoteApplies(reason) {
+  if (typeof reason !== 'string' || !reason) return false;
+  if (reason.startsWith('remote-target-needs-parent-environment-policy')) return true;
+  return Object.values(floor.FLOOR_REASONS).includes(reason);
+}
 
 function payloadFromRaw(raw, accumulationFailed) {
   if (accumulationFailed) return null;
@@ -57,9 +69,13 @@ function normalizeRoutes(declaredRoutes) {
 }
 
 // Date.parse accepts "July 4, 2026" and "2026-02-31T00:00:00.000Z", so validity is not the
-// same question as shape. Same predicate, and the same reason, as isIsoInstant in
+// same question as shape. Same SHAPE rule, and the same reason, as isIsoInstant in
 // skills/session-trail/scripts/session-lineage-v1.mjs: a stamp only orders correctly for the
-// fixed-width UTC spelling toISOString() produces, which is the only spelling this module writes.
+// fixed-width UTC spelling toISOString() produces, which is the only spelling this module
+// writes. Not the same PREDICATE — that owner additionally bounds the future against
+// MAX_FUTURE_SKEW_MS, which this copy deliberately omits because nothing here orders on the
+// stamp: records are appended and deduped on (origin, route), so a future stamp costs an
+// audit line its true time and changes no decision.
 const ISO_INSTANT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 function isIsoInstant(value) {
@@ -67,28 +83,19 @@ function isIsoInstant(value) {
     && new Date(value).toISOString() === value;
 }
 
-function validDeclaredRoutes(value) {
-  if (value === undefined) return true;
-  return Array.isArray(value) && value.length <= MAX_RECORDS
-    && value.every((route) => typeof route === 'string' && floor.normalizeRoute(route) === route);
-}
-
+// The record's route is deliberately judged more loosely than a DECLARED route, and the
+// two are not the same question. A declared route is recipe-authored and must be glob-free,
+// which is why floor.normalizeRoute refuses "*". A record's route is whatever the URL parser
+// produced for a navigation that already happened, so applying the stricter rule here would
+// refuse to record a real visit to a path containing "*" — and a route that cannot be
+// recorded asks again on every navigation. What the looser rule must never do is reach a
+// human unbounded, which is why promptRoute bounds it at the render.
 function validRecord(record) {
   return record && typeof record === 'object'
     && typeof record.origin === 'string' && record.origin.length > 0
     && typeof record.route === 'string' && record.route.startsWith('/')
     && DECIDED_BY.includes(record.decidedBy)
-    && isIsoInstant(record.at)
-    && validDeclaredRoutes(record.declaredRoutes);
-}
-
-function consentedRoutes(records, origin) {
-  const routes = [];
-  for (const entry of records) {
-    if (entry.origin !== origin || !Array.isArray(entry.declaredRoutes)) continue;
-    for (const route of entry.declaredRoutes) if (!routes.includes(route)) routes.push(route);
-  }
-  return routes;
+    && isIsoInstant(record.at);
 }
 
 function emptyMemory() {
@@ -152,9 +159,7 @@ function appendRecord(memoryPath, record, options = {}) {
     return { ok: true, records, duplicate: true };
   }
   if (records.length >= MAX_RECORDS) return { ok: false, reason: 'memory-full' };
-  const entry = { origin: record.origin, route: record.route, decidedBy: record.decidedBy, at: record.at };
-  if (Array.isArray(record.declaredRoutes)) entry.declaredRoutes = normalizeRoutes(record.declaredRoutes);
-  records.push(entry);
+  records.push({ origin: record.origin, route: record.route, decidedBy: record.decidedBy, at: record.at });
   const body = `${JSON.stringify({ version: MEMORY_VERSION, records })}\n`;
   const temp = path.join(allowed.stateDir, `.${path.basename(memoryPath)}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`);
   try {
@@ -173,18 +178,31 @@ function appendRecord(memoryPath, record, options = {}) {
   return { ok: true, records, duplicate: false };
 }
 
-function promptText({ kind, origin, route, mode, declaredRoutes }) {
+const MAX_PROMPT_ROUTE = 120;
+const MAX_PROMPT_ROUTES = 12;
+
+// The prompt is the human's only control, so nothing rendered into it may be unbounded or
+// carry a control byte: the route comes from a URL a caller supplied, and the declared list
+// is recipe-authored. Bounding happens at the render rather than at the validator, because a
+// route that fails validation is not recorded and then asks again on every navigation.
+function promptRoute(route) {
+  const clean = (typeof route === 'string' ? route : '').replace(/[\u0000-\u001f\u007f]/g, '');
+  return clean.length > MAX_PROMPT_ROUTE ? `${clean.slice(0, MAX_PROMPT_ROUTE)}…` : clean;
+}
+
+function promptRoutes(routes) {
+  if (routes.length <= MAX_PROMPT_ROUTES) return routes.join(', ');
+  const shown = routes.slice(0, MAX_PROMPT_ROUTES).join(', ');
+  return `${shown} (and ${routes.length - MAX_PROMPT_ROUTES} more)`;
+}
+
+function promptText({ origin, route, mode, declaredRoutes }) {
   const routes = normalizeRoutes(declaredRoutes);
   const modeWord = mode === 'remote' ? 'a deployed (remote) target' : 'a local loopback target';
   const lines = [];
-  if (kind === 'route') {
-    lines.push(`Zensu verify-feature wants to open the route ${route} on ${origin}, which the runtime recipe does not declare as synthetic-safe.`);
-  } else {
-    lines.push(`Zensu verify-feature wants to open the browser on ${origin} (${modeWord}), starting with the route ${route}.`);
-    if (routes.length > 0) lines.push(`Declared synthetic-safe routes for this run: ${routes.join(', ')}.`);
-    else lines.push('No runtime recipe declares synthetic-safe routes for this run; every further route will ask again.');
-  }
-  lines.push(`Answering Yes lets the model open and read any page on ${origin}, screenshots included, for the rest of this session: once an origin is approved the browser does not check routes again.`);
+  lines.push(`Zensu verify-feature wants to open the browser on ${origin} (${modeWord}), starting with the route ${promptRoute(route)}.`);
+  if (routes.length > 0) lines.push(`The run declares these routes as synthetic-safe: ${promptRoutes(routes)}.`);
+  lines.push(`Answering Yes approves this origin for the rest of the session: the model may then open and read any page on ${origin}, screenshots included, without asking again. Consent is per origin, never per route.`);
   lines.push('Answer No to keep the browser closed for this origin; the run then reports PARTIAL.');
   return lines.join(' ');
 }
@@ -201,20 +219,23 @@ function decide({ toolName, toolInput, records, declaredRoutes, policyPresent })
   if (mode !== 'local') {
     return { verdict: 'deny', reason: REASONS.REMOTE_NEEDS_POLICY, target, origin, route, mode };
   }
+  // Consent is per ORIGIN, and that is the whole rule. The prompt tells the human that a Yes
+  // opens every page on the origin, and the broker's own consent mode enforces exactly this
+  // (assertAllowedUrl tests policy.approved.has(target.origin) with no route check). A
+  // per-route re-prompt on top of that promised one thing and enforced another, and the route
+  // set it kept was re-read from the live recipe on every record — including records written
+  // for navigations that were never prompted — so a session could widen the recipe and launder
+  // a route into the silently-allowed set. Keeping one rule in all three carriers is what
+  // removes that class rather than patching it.
   const known = Array.isArray(records) ? records : [];
-  const originKnown = known.some((entry) => entry.origin === origin);
-  const routeKnown = known.some((entry) => entry.origin === origin && entry.route === route);
-  if (routeKnown) return { verdict: 'allow', reason: REASONS.MEMORY_HIT, target, origin, route, mode, decidedBy: 'memory' };
-  const routes = normalizeRoutes(declaredRoutes);
-  if (originKnown && consentedRoutes(known, origin).includes(route)) {
-    return { verdict: 'allow', reason: REASONS.DECLARED_ROUTE, target, origin, route, mode, decidedBy: 'memory' };
+  if (known.some((entry) => entry.origin === origin)) {
+    return { verdict: 'allow', reason: REASONS.MEMORY_HIT, target, origin, route, mode, decidedBy: 'memory' };
   }
-  const kind = originKnown ? 'route' : 'origin';
   return {
     verdict: 'ask',
-    reason: originKnown ? REASONS.UNDECLARED_ROUTE : REASONS.NEW_ORIGIN,
+    reason: REASONS.NEW_ORIGIN,
     target, origin, route, mode, decidedBy: 'prompt',
-    prompt: promptText({ kind, origin, route, mode, declaredRoutes: routes }),
+    prompt: promptText({ origin, route, mode, declaredRoutes }),
   };
 }
 
@@ -226,7 +247,7 @@ function preEnvelope(decision) {
       permissionDecision: decision.verdict,
       permissionDecisionReason: decision.verdict === 'ask'
         ? decision.prompt
-        : `Zensu browser consent gate denied the navigation: ${decision.reason} ${FOREIGN_SERVER_NOTE}`,
+        : `Zensu browser consent gate denied the navigation: ${decision.reason}${foreignServerNoteApplies(decision.reason) ? ` ${FOREIGN_SERVER_NOTE}` : ''}`,
     },
   };
 }
@@ -240,8 +261,17 @@ const RECIPE_NAMES = Object.freeze(['runtime.yaml', 'autopilot.yaml']);
 // doctor report a recipe the hooks never load.
 function resolveRecipeFile(projectRoot) {
   if (typeof projectRoot !== 'string' || !projectRoot) return '';
+  // The .zensu component is judged too, not only the leaf. lstat declines to follow the FINAL
+  // component alone, so a symlinked directory was traversed as an ordinary intermediate one and
+  // the declared-route set could be read from a file outside the project — the same rule
+  // memoryPathAllowed applies to the state directory it opens.
+  const zensuDir = path.join(projectRoot, '.zensu');
+  let dirInfo;
+  try { dirInfo = fs.lstatSync(zensuDir); }
+  catch (_error) { return ''; }
+  if (!dirInfo.isDirectory() || dirInfo.isSymbolicLink()) return '';
   for (const name of RECIPE_NAMES) {
-    const candidate = path.join(projectRoot, '.zensu', name);
+    const candidate = path.join(zensuDir, name);
     let info;
     try { info = fs.lstatSync(candidate); }
     catch (_error) { continue; }
@@ -324,16 +354,24 @@ function responseFailed(toolResponse) {
   return content.some((item) => item && typeof item.text === 'string' && item.text.startsWith('Zensu browser broker rejected the operation'));
 }
 
+// ONE read for both hooks, so a read and a write can never disagree about which file is this
+// session's memory. An UNSET path is "no memory configured", never a refusal: the pre hook
+// exports an empty value when no session is bound and prints its own accurate line there, and
+// reporting that as a refused path names a path nobody supplied.
+function readConsentMemory(memoryPath, projectRoot) {
+  if (typeof memoryPath !== 'string' || memoryPath === '') return { ok: true, records: [], absent: true };
+  const allowed = memoryPathAllowed(memoryPath, projectRoot);
+  if (!allowed.ok) return { ok: false, reason: allowed.reason, records: [] };
+  return readMemory(memoryPath);
+}
+
 function runPre(payload, env, out, err) {
   if (!payload || typeof payload !== 'object') {
     out.write(JSON.stringify(preEnvelope({ verdict: 'deny', reason: REASONS.PAYLOAD_UNREADABLE })));
     return;
   }
   const inputs = readInputs(env);
-  // The same containment the writer applies, so a read and a write can never disagree about
-  // which file is this session's memory.
-  const allowed = memoryPathAllowed(inputs.memoryPath, inputs.projectRoot);
-  const memory = allowed.ok ? readMemory(inputs.memoryPath) : { ok: false, reason: allowed.reason, records: [] };
+  const memory = readConsentMemory(inputs.memoryPath, inputs.projectRoot);
   if (!memory.ok) err.write(`zensu: verify consent memory ignored (${memory.reason}); the navigation will ask again\n`);
   const decision = decide({
     toolName: payload.tool_name,
@@ -350,7 +388,7 @@ function runPost(payload, env, err) {
   if (!payload || typeof payload !== 'object') return { ok: false, reason: REASONS.PAYLOAD_UNREADABLE };
   if (responseFailed(payload.tool_response)) return { ok: true, skipped: 'navigation-rejected-by-broker' };
   const inputs = readInputs(env);
-  const memory = readMemory(inputs.memoryPath);
+  const memory = readConsentMemory(inputs.memoryPath, inputs.projectRoot);
   const decision = decide({
     toolName: payload.tool_name,
     toolInput: payload.tool_input,
@@ -373,7 +411,7 @@ function runPost(payload, env, err) {
   }
   const result = appendRecord(
     inputs.memoryPath,
-    { origin, route, decidedBy, at: new Date().toISOString(), declaredRoutes: normalizeRoutes(inputs.declaredRoutes) },
+    { origin, route, decidedBy, at: new Date().toISOString() },
     { projectRoot: inputs.projectRoot },
   );
   if (!result.ok) err.write(`zensu: verify consent memory not written (${result.reason})\n`);
@@ -393,16 +431,18 @@ module.exports = {
   REASONS,
   RECIPE_NAMES,
   appendRecord,
-  consentedRoutes,
   decide,
   declaredRoutesFromRecipe,
   emptyMemory,
+  foreignServerNoteApplies,
   isIsoInstant,
   memoryPathAllowed,
   normalizeRoutes,
   payloadFromRaw,
   preEnvelope,
+  promptRoute,
   promptText,
+  readConsentMemory,
   readInputs,
   readMemory,
   readRecipeRoutes,

@@ -19,7 +19,7 @@ the source skill's dependency on a personal `/test-feature` command.
    In consent mode (the preflight printed `consent`) the same boundary holds with the user in
    the loop instead of the policy: the broker admits literal loopback origins only, and the
    consent hook opens the host's permission prompt on the first navigation to each origin and
-   on every route the recipe does not declare synthetic-safe. Wait for the user's answer; a
+   once per new loopback origin. Wait for the user's answer; a
    refused prompt makes that origin's rows PARTIAL. Never re-issue a refused navigation and
    never try another spelling of the same target to avoid the prompt.
 1. Navigate to the resolved base URL and route only after that declaration and policy preflight pass.

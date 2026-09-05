@@ -345,7 +345,11 @@ if [ -z "${ZDOC_VERIFY:-}" ]; then
     # serve when it does not satisfy the contract, so a doctor claiming an active policy
     # from the variable alone reports green for a session whose browser cannot start.
     # Only the three TOP-LEVEL guards parsePolicy applies first are repeated here; the
-    # per-target rules stay the broker's, and the reason says which check answered.
+    # per-target rules stay the broker's, and the reason says which check answered. Calling
+    # parsePolicy itself was weighed and declined: it is async and resolves DNS for a remote
+    # policy, which a read-only diagnostic must not do. The copy is therefore held against its
+    # owner by a suite pin rather than by a call, and the row it feeds says what it checked —
+    # a green row here means the top-level contract holds, never that the broker will serve.
     ZDOC_VERIFY_POLICY_FAULT="$(node -e '
       const raw = process.env.ZENSU_VERIFY_NAVIGATION_POLICY_V1 || "";
       let value;
@@ -381,7 +385,19 @@ if [ -z "${ZDOC_VERIFY:-}" ]; then
     ' >/dev/null 2>&1); then
     ZDOC_VERIFY=unavailable
     ZDOC_VERIFY_REASON="consent hook not registered on the navigation matcher"
-  elif [ -n "$ZDOC_VERIFY_RECIPE_ROOT" ] && (cd -P -- "$ZDOC_ROOT" && ZDOC_VERIFY_RECIPE_ROOT="$ZDOC_VERIFY_RECIPE_ROOT" node -e '
+  elif ! (cd -P -- "$ZDOC_ROOT" && node -e '
+      const p = require("./scripts/playwright-mcp-proxy.js");
+      process.exit(p.consentRecorderRegistered(process.cwd()) ? 0 : 1);
+    ' >/dev/null 2>&1); then
+    # The broker starts in consent mode on the GATE alone, so this half fails silently: every
+    # navigation would prompt and none would ever be remembered. Reported rather than absorbed.
+    ZDOC_VERIFY=unavailable
+    ZDOC_VERIFY_REASON="consent recorder not registered on the navigation matcher"
+  elif [ -z "$ZDOC_VERIFY_RECIPE_ROOT" ]; then
+    # No project root resolved, so no recipe was looked for. Saying "no runtime recipe" here
+    # would report a finding about a directory this run never opened.
+    ZDOC_VERIFY=consent-recipe-unchecked
+  elif (cd -P -- "$ZDOC_ROOT" && ZDOC_VERIFY_RECIPE_ROOT="$ZDOC_VERIFY_RECIPE_ROOT" node -e '
       const mod = require("./hooks/lib/verify-consent-v1.js");
       process.exit(mod.resolveRecipeFile(process.env.ZDOC_VERIFY_RECIPE_ROOT) ? 0 : 1);
     ' >/dev/null 2>&1); then

@@ -151,16 +151,17 @@ variable from a child Bash call in either mode — the broker reads it once at s
 **Consent mode (no parent policy).** When the preflight prints `consent` on stdout and exits
 `0`, no policy is present in the parent environment and the broker started in consent mode:
 the hook pair `pre-browser-navigation-consent.sh` / `post-browser-navigation-consent.sh` is
-registered on the broker's navigation tools, so the FIRST `browser_navigate` to each new origin,
-and every route the recipe does not declare synthetic-safe, opens the host's own permission
-prompt to the user. Answering that prompt is the user's action; never answer it on their behalf,
+registered on the broker's navigation tools, so the FIRST `browser_navigate` to each new origin
+opens the host's own permission prompt to the user. Consent is per ORIGIN: once the user
+approves an origin, every further route on it proceeds without a prompt. Answering that prompt is the user's action; never answer it on their behalf,
 never work around a refusal, and treat a refused prompt as PARTIAL for that origin. The broker
 keeps a hard floor in this mode: literal loopback origins only, no credentials, no query or
 fragment in a navigation, sub-requests and redirects only to origins the session already
 opened. A remote target is refused in consent mode by both the hook and the broker; remote
-verification keeps the parent policy. Consent mode remembers each approved `(origin, route)` for
-this session in `.zensu/state/verify-consent-<session-key>.json`, and the report lists every
-record in its `Consent` block.
+verification keeps the parent policy. Consent mode remembers each approved ORIGIN for
+this session in `.zensu/state/verify-consent-<session-key>.json` — a record names the route that
+was visited, but the route steers no later decision — and the report lists every record in its
+`Consent` block.
 
 ## Phase 1 — Build the evidence matrix (mandatory)
 

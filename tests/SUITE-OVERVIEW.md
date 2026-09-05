@@ -180,9 +180,9 @@ and no-escape assertions, a payload-declared non-main principal whose premise co
 `claude-principal-v1.js` itself, a second-path-field row, six faults covered — four asserting their own reason literal and two asserting the documented
 silence, the exit-2 plugin-root refusal, two source-absence checks with controls, and a
 two-group matcher shape compared against the module's exported tool set), the browser consent
-gate (71 checks: the hook pair driven against a real Session Control session, the shared
-navigation floor, the loopback bound, the session memory and its containment, the
-consented-route set a later recipe cannot widen, the one recipe resolver both hooks and the
+gate (79 checks: the hook pair driven against a real Session Control session, the shared
+navigation floor, the loopback bound, the session memory and its containment, the per-origin
+consent rule a later recipe cannot widen, the one recipe resolver both hooks and the
 doctor row consume, and the skill wording), and the writer-side
 redaction that keeps `.zensu/plans` and `.zensu/logs` artifacts free of
 absolute developer paths (~100 assertions).
@@ -291,7 +291,7 @@ that suite's failure.
 | `plan-payload-v1.test.js` | 20 | `test-plan-payload-fallback.sh` | plan-source precedence table, hardened plan-file reader refusals, O_NOFOLLOW-unavailable fallback |
 | `zensu-doctor-invocation.test.js` | 24 | `test-versioned-plugin-upgrade.sh` | `/zensu:doctor` invocation allowlist — driven from that suite, which binds it as `RECOGNIZER_UNIT` and grades it against a registered-case floor; it has no `run-all.sh` entry of its own, because discovery is `test-*.sh` only |
 | `playwright-mcp-proxy.test.js` | 20 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy, including its three start modes (policy, consent, deny) and the consent-mode approval boundary |
-| `verify-consent-v1.test.js` | 12 | `test-verify-consent.sh` (V7) | browser consent decision: matcher and tool spellings, ask/allow/deny ladder, loopback-only bound, memory shape and containment refusals, recipe route extraction, pre/post CLI |
+| `verify-consent-v1.test.js` | 16 | `test-verify-consent.sh` (V7) | browser consent decision: matcher and tool spellings, ask/allow/deny ladder, per-origin consent, loopback-only bound, memory shape and containment refusals, the foreign-server note's attachment rule, stamp validity independent of route, the shared memory read's containment rule and its not-configured case, recipe route extraction, pre/post CLI |
 | `verify-navigation-floor-v1.test.js` | 6 | `test-verify-consent.sh` (V6) | the one navigation floor the broker and the consent hook share: loopback and public-address classes, URL refusals, remote host resolution |
 | `verify-free-port.test.js` | 3 | `test-verify-consent.sh` (V7b) | free loopback port helper: argument parsing, occupied and excluded ports, CLI contract |
 | `release-run-step.test.js` | 9 | `test-immutable-marketplace-release.sh` | the release step's `run_step` wrapper, EXECUTED: the annotation on failure, the full stderr replay, exit-status propagation, the `--quiet` sink applying to the wrapped command and never to the annotation, the no-stderr fallback, `head -1` bounding the annotation to one line, and temp-file cleanup under `RUNNER_TEMP`. Driven first in that suite, because it is the wrapper's only executable coverage anywhere and the suite's other pins are source greps that stay green against a present-but-broken wrapper |

@@ -7,7 +7,10 @@ was replaced by AC-018 — consent mode admits literal-loopback origins only, be
 Chromium's DNS pins are passed at browser launch and a remote origin approved mid-session
 could not be pinned; FR-003 (moving the eval's port-reservation helper) was replaced by FR-005
 — a shipped `scripts/verify-free-port.js`, because the eval helper is a handoff proxy bound to
-that harness. §6.2's "local/remote lock" and §7 step 5 describe the original design; the
+that harness. A review round then made consent PER ORIGIN rather than per route, because the prompt, the
+hook and the broker had each been enforcing a different rule; the acceptance criteria below
+carry the implemented rule, not the original one. §6.2's "local/remote lock", §6.7's
+autopilot claim, §6.9's state table and §7 step 5 describe the original design; the
 implemented behaviour is in `docs/gates.md` § Browser Consent Gate and `docs/verify-feature.md`
 § 0.
 
@@ -185,8 +188,9 @@ policy is the supported alternative, exactly as today. `ESCAPE_STEMS` in
 
 `<project>/.zensu/state/verify-consent-<session-key>.json`, written only by the
 PostToolUse hook under the workflow document's external lease, one record per
-`(origin, route)`, plus `decidedBy: prompt | memory | policy` and the declared-route set the
-consent was granted against. The reader validates the shape before use, refuses symlinks, hard
+`(origin, route)`, plus `decidedBy: prompt | memory | policy`. A record carries no route set:
+consent is granted per origin, so a route the record names is an audit line rather than an
+input to any later decision. The reader validates the shape before use, refuses symlinks, hard
 links and non-files, and requires each `at` to be the fixed-width UTC instant `toISOString()`
 produces — a validity test would accept `"July 4, 2026"` and `"2026-02-31T00:00:00.000Z"`.
 **No age bound against the Session Control record is implemented, and none is needed:** the file
@@ -263,9 +267,10 @@ validate:
 ```
 
 `validate.navigationBroker` is no longer required for consent mode; when present it is
-honoured and the run reports `policy` as the decision source. Autopilot reads
-`runtime.yaml` first as well, so the two skills share one recipe; the autopilot-only keys
-(`vcs`, `auth.loginScript`, sinks) remain optional there.
+honoured and the run reports `policy` as the decision source. The autopilot-only keys (`vcs`, `auth.loginScript`, sinks) remain optional in the same file.
+**Unverified:** this section claimed Autopilot reads `runtime.yaml` first as well; a grep over
+`skills/autopilot` finds no reference to that filename, so the shared-recipe claim is withdrawn
+rather than restated.
 
 ### 6.8 Attach mode
 
@@ -361,8 +366,8 @@ session can write.
 | AC-001 | With `ZENSU_VERIFY_NAVIGATION_POLICY_V1` unset and the consent hook registered, the broker starts in `consent` mode and `browser_navigate` to `http://127.0.0.1:<port>/` succeeds after the PreToolUse hook returned `ask`. | spec §6.2 |
 | AC-002 | With the variable unset and the consent hook absent from `hooks/hooks.json`, the broker starts in `deny` mode and every navigation is refused exactly as today. | spec §6.2 |
 | AC-003 | In consent mode a navigation to a non-loopback `http` origin, a `localhost` hostname, a private-range `https` origin, or a target with userinfo, query or fragment is refused by both the hook (deny) and the broker (floor), independently. | spec §6.2, §6.3 |
-| AC-004 | The PreToolUse hook returns `ask` for the first navigation to a new origin and for a route not declared in the recipe's `evidenceSafety`, and `allow` for a navigation whose `(origin, route)` is in the session consent memory. | spec §6.3 |
-| AC-005 | The PostToolUse hook records `(origin, route, decidedBy, at)` after an executed navigation and refuses to write when the memory path is a symlink, a non-file, or outside the session's project state directory. | spec §6.4 |
+| AC-004 | The PreToolUse hook returns `ask` for the first navigation to each new loopback origin, and `allow` for every navigation to an origin the session consent memory already holds, whatever its route. | spec §6.3 |
+| AC-005 | The PostToolUse hook records exactly `(origin, route, decidedBy, at)` after an executed navigation — and no route set — and refuses to write when the memory path is a symlink, a non-file, or outside the session's project state directory. | spec §6.4 |
 | AC-006 | A sub-request or redirect to an origin outside the broker's approved set is blocked in consent mode. | spec §6.2 |
 | AC-007 | The first approved navigation locks the session to local or remote; a later navigation of the other class is refused with a reason naming the lock. | spec §6.2 |
 | AC-008 | `/zensu:verify-feature` with no recipe and no `--attach` offers setup instead of ending PARTIAL, and a declined offer ends PARTIAL with the same missing-facts list as today. | spec §6.6 |
@@ -370,7 +375,7 @@ session can write.
 | AC-010 | Phase 2 resolves `.zensu/runtime.yaml`, then `.zensu/autopilot.yaml`, then the monorepo adapter, in that order, and records which one was selected. | spec §6.7 |
 | AC-011 | `--attach=<loopback-origin>` boots no runtime, runs no `down` command, and the report states "worktree identity proven" only when the listening process's working directory equals the worktree. | spec §6.8 |
 | AC-012 | The report carries a `Consent` block listing every `(origin, route, decidedBy)` record of the run. | spec §6.4 |
-| AC-013 | `/zensu:doctor` renders exactly one verify-feature row and distinguishes the four states in §6.9. | spec §6.9 |
+| AC-013 | `/zensu:doctor` renders exactly one verify-feature row, and every state it can reach renders differently from the others — the shipped set is larger than §6.9's four. | spec §6.9 |
 | AC-014 | `--setup --print-policy` renders a policy JSON that `playwright-mcp.sh --check-policy` accepts with exit 0 for every declared route. | spec §6.10 |
 | AC-015 | The hook pair has no config off-switch; `ESCAPE_STEMS` and `ZENSU_BYPASS_GATE_ALLOWLIST` are unchanged. | spec §6.3 |
 | AC-016 | `docs/configuration.md` hook count, every `#hooks-N` anchor and the `docs/gates.md` gate count match the registered hooks. | spec §7 step 7 |

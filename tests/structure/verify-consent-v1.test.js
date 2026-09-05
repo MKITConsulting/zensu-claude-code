@@ -15,8 +15,10 @@ const {
   NAVIGATION_TOOL_RE,
   REASONS,
   appendRecord,
-  consentedRoutes,
   decide,
+  foreignServerNoteApplies,
+  isIsoInstant,
+  preEnvelope,
   memoryPathAllowed,
   readMemory,
   targetOf,
@@ -79,42 +81,66 @@ test('a navigation to a new origin asks, names the origin, the route and the con
   assert.equal(decision.mode, 'local');
   assert.match(decision.prompt, /http:\/\/127\.0\.0\.1:4200/);
   assert.match(decision.prompt, /\/login/);
-  assert.match(decision.prompt, /lets the model open and read any page on http:\/\/127\.0\.0\.1:4200/);
-  assert.match(decision.prompt, /does not check routes again/);
-  assert.match(decision.prompt, /Declared synthetic-safe routes for this run: \/, \/login\./);
+  assert.match(decision.prompt, /may then open and read any page on http:\/\/127\.0\.0\.1:4200/);
+  assert.match(decision.prompt, /without asking again/);
+  assert.match(decision.prompt, /The run declares these routes as synthetic-safe: \/, \/login\./);
+  assert.match(decision.prompt, /reports PARTIAL/);
 });
 
-test('a declared route passes only against the route set the consent itself carried', () => {
-  const records = [record('http://127.0.0.1:4200', '/', 'prompt', ['/', '/login'])];
-  const hit = decide({ toolName: NAV, toolInput: { url: 'http://127.0.0.1:4200/' }, records, declaredRoutes: [] });
-  assert.equal(hit.verdict, 'allow');
-  assert.equal(hit.reason, REASONS.MEMORY_HIT);
-  const declared = decide({ toolName: NAV, toolInput: { url: 'http://127.0.0.1:4200/login' }, records, declaredRoutes: [] });
-  assert.equal(declared.verdict, 'allow');
-  assert.equal(declared.reason, REASONS.DECLARED_ROUTE);
-  const widened = decide({ toolName: NAV, toolInput: { url: 'http://127.0.0.1:4200/admin' }, records, declaredRoutes: ['/', '/login', '/admin'] });
-  assert.equal(widened.verdict, 'ask');
-  assert.equal(widened.reason, REASONS.UNDECLARED_ROUTE);
-  assert.match(widened.prompt, /does not declare as synthetic-safe/);
-  const legacy = decide({ toolName: NAV, toolInput: { url: 'http://127.0.0.1:4200/login' }, records: [record('http://127.0.0.1:4200', '/')], declaredRoutes: ['/login'] });
-  assert.equal(legacy.verdict, 'ask');
-  assert.equal(legacy.reason, REASONS.UNDECLARED_ROUTE);
+test('consent is per origin: an approved origin admits every route and a new origin still asks', () => {
+  const records = [record('http://127.0.0.1:4200', '/login')];
+  const sameRoute = decide({ toolName: NAV, toolInput: { url: 'http://127.0.0.1:4200/login' }, records, declaredRoutes: [] });
+  assert.equal(sameRoute.verdict, 'allow');
+  assert.equal(sameRoute.reason, REASONS.MEMORY_HIT);
+  assert.equal(sameRoute.decidedBy, 'memory');
+  const otherRoute = decide({ toolName: NAV, toolInput: { url: 'http://127.0.0.1:4200/admin' }, records, declaredRoutes: [] });
+  assert.equal(otherRoute.verdict, 'allow');
+  assert.equal(otherRoute.reason, REASONS.MEMORY_HIT);
   const otherOrigin = decide({ toolName: NAV, toolInput: { url: 'http://127.0.0.1:4201/login' }, records, declaredRoutes: ['/login'] });
   assert.equal(otherOrigin.verdict, 'ask');
   assert.equal(otherOrigin.reason, REASONS.NEW_ORIGIN);
+  // The route set the recipe declares steers no decision at all: it is prompt context only.
+  // While it did, a session could widen the recipe and launder a route into the silent-allow
+  // set, because every record was stamped with a fresh read of the live file.
+  const widened = decide({ toolName: NAV, toolInput: { url: 'http://127.0.0.1:4202/admin' }, records, declaredRoutes: ['/admin'] });
+  assert.equal(widened.verdict, 'ask');
+  assert.equal(widened.reason, REASONS.NEW_ORIGIN);
+  const fresh = decide({ toolName: NAV, toolInput: { url: 'http://127.0.0.1:4200/' }, records: [], declaredRoutes: ['/', '/login'] });
+  assert.match(fresh.prompt, /Consent is per origin, never per route\./);
+  assert.match(fresh.prompt, /any page on http:\/\/127\.0\.0\.1:4200/);
+  assert.doesNotMatch(fresh.prompt, /does not declare as synthetic-safe/);
 });
 
-test('consentedRoutes unions only the matching origin and refuses a malformed route list', () => {
-  const records = [
-    record('http://127.0.0.1:4200', '/', 'prompt', ['/', '/login']),
-    record('http://127.0.0.1:4200', '/login', 'memory', ['/settings']),
-    record('http://127.0.0.1:4201', '/', 'prompt', ['/other']),
-  ];
-  assert.deepEqual(consentedRoutes(records, 'http://127.0.0.1:4200'), ['/', '/login', '/settings']);
-  assert.deepEqual(consentedRoutes(records, 'http://127.0.0.1:4202'), []);
-  assert.equal(validRecord({ ...record('http://127.0.0.1:4200', '/'), declaredRoutes: ['/a?b'] }), false);
-  assert.equal(validRecord({ ...record('http://127.0.0.1:4200', '/'), declaredRoutes: 'nope' }), false);
-  assert.equal(validRecord(record('http://127.0.0.1:4200', '/')), true);
+test('the foreign-server note rides only on denies a foreign server can cause, and names one remedy', () => {
+  for (const reason of Object.values(FLOOR_REASONS)) assert.equal(foreignServerNoteApplies(reason), true);
+  assert.equal(foreignServerNoteApplies(REASONS.REMOTE_NEEDS_POLICY), true);
+  assert.equal(foreignServerNoteApplies(REASONS.PAYLOAD_UNREADABLE), false);
+  assert.equal(foreignServerNoteApplies('hook-failed:EACCES'), false);
+  assert.equal(foreignServerNoteApplies(''), false);
+  assert.equal(foreignServerNoteApplies(undefined), false);
+  const floorDeny = preEnvelope({ verdict: 'deny', reason: FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK });
+  assert.ok(floorDeny.hookSpecificOutput.permissionDecisionReason.includes(consent.FOREIGN_SERVER_NOTE));
+  const faultDeny = preEnvelope({ verdict: 'deny', reason: REASONS.PAYLOAD_UNREADABLE });
+  assert.ok(!faultDeny.hookSpecificOutput.permissionDecisionReason.includes(consent.FOREIGN_SERVER_NOTE));
+  // A navigation policy would disarm the gate for every target, so it is not offered here.
+  assert.ok(!consent.FOREIGN_SERVER_NOTE.includes('ZENSU_VERIFY_NAVIGATION_POLICY_V1'));
+  assert.match(consent.FOREIGN_SERVER_NOTE, /rename that server key/);
+  assert.match(consent.FOREIGN_SERVER_NOTE, /never edit an MCP server configuration on their behalf/);
+});
+
+test('a record is judged on its stamp independently of its route', () => {
+  assert.equal(isIsoInstant('2026-09-02T20:00:00.000Z'), true);
+  assert.equal(isIsoInstant('July 4, 2026'), false);
+  assert.equal(isIsoInstant('9999'), false);
+  assert.equal(isIsoInstant('2026-02-31T00:00:00.000Z'), false);
+  assert.equal(isIsoInstant('2026-09-02T20:00:00Z'), false);
+  // The route is deliberately valid on every arm below, so the stamp is what decides.
+  assert.equal(validRecord({ origin: 'http://127.0.0.1:1', route: '/', decidedBy: 'prompt', at: 'now' }), false);
+  assert.equal(validRecord({ origin: 'http://127.0.0.1:1', route: '/', decidedBy: 'prompt', at: '2026-02-31T00:00:00.000Z' }), false);
+  assert.equal(validRecord({ origin: 'http://127.0.0.1:1', route: '/', decidedBy: 'prompt', at: '2026-09-02T20:00:00.000Z' }), true);
+  assert.equal(validRecord({ origin: '', route: '/', decidedBy: 'prompt', at: '2026-09-02T20:00:00.000Z' }), false);
+  assert.equal(validRecord({ origin: 'http://127.0.0.1:1', route: 'nope', decidedBy: 'prompt', at: '2026-09-02T20:00:00.000Z' }), false);
+  assert.equal(validRecord({ origin: 'http://127.0.0.1:1', route: '/', decidedBy: 'nobody', at: '2026-09-02T20:00:00.000Z' }), false);
 });
 
 test('the floor denies before any memory is consulted', () => {
@@ -167,7 +193,7 @@ test('memory reads refuse a symlink, a non-file, an oversized file and a malform
   assert.equal(readMemory(memory).ok, false);
   fs.writeFileSync(memory, JSON.stringify({ version: 2, records: [] }));
   assert.equal(readMemory(memory).reason, REASONS.MEMORY_UNREADABLE);
-  fs.writeFileSync(memory, JSON.stringify({ version: 1, records: [{ origin: 'x', route: 'nope', decidedBy: 'prompt', at: 'now' }] }));
+  fs.writeFileSync(memory, JSON.stringify({ version: 1, records: [{ origin: 'http://127.0.0.1:1', route: '/', decidedBy: 'prompt', at: 'now' }] }));
   assert.equal(readMemory(memory).ok, false);
   fs.writeFileSync(memory, JSON.stringify({ version: 1, records: [] }).padEnd(70000, ' '));
   assert.equal(readMemory(memory).ok, false);
@@ -203,7 +229,7 @@ test('memory writes are contained to the session state directory and land by O_E
   assert.equal(appendRecord(path.join(root, `verify-consent-${KEY}.json`), record('http://127.0.0.1:1', '/'), { projectRoot: root }).reason, REASONS.MEMORY_PATH_REFUSED);
   assert.equal(appendRecord(path.join(root, '.zensu', 'state', 'other.json'), record('http://127.0.0.1:1', '/'), { projectRoot: root }).reason, REASONS.MEMORY_PATH_REFUSED);
   assert.equal(appendRecord(memory, record('http://127.0.0.1:1', '/'), { projectRoot: '' }).reason, REASONS.MEMORY_PATH_REFUSED);
-  assert.equal(appendRecord(memory, { origin: 'http://127.0.0.1:1', route: 'x', decidedBy: 'prompt', at: 'now' }, { projectRoot: root }).reason, 'record-invalid');
+  assert.equal(appendRecord(memory, { origin: 'http://127.0.0.1:1', route: '/', decidedBy: 'prompt', at: 'not-an-instant' }, { projectRoot: root }).reason, 'record-invalid');
 
   const foreign = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'zensu-consent-foreign-'));
   fs.mkdirSync(path.join(foreign, 'state'));
@@ -339,4 +365,33 @@ test('the post CLI records an executed navigation, tags its decision source and 
   const refused = runCli('post', { tool_name: NAV, tool_input: { url: 'http://127.0.0.1:4200/x' } }, { ...env, ZENSU_VERIFY_PROJECT_ROOT: '' });
   assert.match(refused.stderr, /consent memory not written/);
   assert.equal(refused.status, 0);
+});
+
+test('the shared memory read applies the writer containment rule and keeps not-configured out of it', () => {
+  const { root, memory } = project();
+  // An UNSET path is not a refusal. The pre hook exports an empty value when no session is
+  // bound and prints its own accurate line there; reporting a refused path would name a path
+  // nobody supplied and would print two lines per navigation for an ordinary case.
+  const unset = consent.readConsentMemory('', root);
+  assert.equal(unset.ok, true);
+  assert.equal(unset.absent, true);
+  assert.equal(unset.reason, undefined);
+
+  // Containment is what makes a removed guard visible: without it these read as an ordinary
+  // absent memory rather than as a refusal, and a read and a write would disagree about which
+  // file is this session's memory.
+  assert.equal(consent.readConsentMemory(path.join(root, 'elsewhere.json'), root).reason, REASONS.MEMORY_PATH_REFUSED);
+  assert.equal(consent.readConsentMemory(path.join(root, '.zensu', 'state', 'other.json'), root).reason, REASONS.MEMORY_PATH_REFUSED);
+  assert.equal(consent.readConsentMemory(memory, '').reason, REASONS.MEMORY_PATH_REFUSED);
+  assert.equal(consent.readConsentMemory(path.basename(memory), root).reason, REASONS.MEMORY_PATH_REFUSED);
+
+  // A contained path that is simply not there yet is absent, never refused.
+  const fresh = consent.readConsentMemory(memory, root);
+  assert.equal(fresh.ok, true);
+  assert.equal(fresh.absent, true);
+
+  assert.equal(appendRecord(memory, record('http://127.0.0.1:4200', '/'), { projectRoot: root }).ok, true);
+  const filled = consent.readConsentMemory(memory, root);
+  assert.equal(filled.ok, true);
+  assert.equal(filled.records.length, 1);
 });

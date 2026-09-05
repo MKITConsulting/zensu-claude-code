@@ -236,10 +236,21 @@ case "$ACTION" in
     RUNTIME_LEASE="$(openssl rand -hex 32)"
     CONTAINER="$(expected_container "$RUN_ID")"
     LEASE_HASH="$(lease_hash)"
+    # The absence test for this path ran at the top of the case arm, and a port scan plus
+    # several node runs happen between there and here. A plain truncating > follows whatever
+    # it finds by then, so a symlink planted in that window would carry the database password,
+    # the JWT secret and the runtime lease out of the run directory — and a chmod afterwards
+    # would land on the link's target. O_EXCL refuses an existing name of any kind, and the
+    # mode is set at open rather than repaired after the bytes are already there. The values
+    # travel in the environment rather than in argv, which any user on the host can read.
     umask 077
-    printf 'DB_PASSWORD=%s\nJWT_SECRET=%s\nRUNTIME_LEASE=%s\n' \
-      "$DB_PASSWORD" "$JWT_SECRET" "$RUNTIME_LEASE" >"$SECRETS"
-    chmod 600 "$SECRETS"
+    DB_PASSWORD="$DB_PASSWORD" JWT_SECRET="$JWT_SECRET" RUNTIME_LEASE="$RUNTIME_LEASE" \
+      node -e '
+        const fs = require("node:fs");
+        const body = `DB_PASSWORD=${process.env.DB_PASSWORD}\nJWT_SECRET=${process.env.JWT_SECRET}\nRUNTIME_LEASE=${process.env.RUNTIME_LEASE}\n`;
+        const fd = fs.openSync(process.argv[1], fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+        try { fs.writeSync(fd, body); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+      ' "$SECRETS" || fail "the runtime secrets file could not be created exclusively"
 
     PG_STARTED=false
     BACKEND_SUPERVISOR_PID=""
