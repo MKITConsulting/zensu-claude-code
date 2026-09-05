@@ -197,11 +197,15 @@ function anchorTokenSafe(token) {
 // green. A guard added in response to a shipped defect deserves an executed case.
 function stuckShapes(owner) {
   const source = owner || chain;
-  const recoverable = source.RECOVERABLE_SHAPES;
-  const deadEnd = source.DEAD_END_SHAPES;
-  if (!Array.isArray(recoverable) || !recoverable.length) return null;
-  if (!Array.isArray(deadEnd) || !deadEnd.length) return null;
-  return recoverable.concat(deadEnd);
+  // THE COMPOSITION IS READ, not restated. The two subsets were read and then
+  // concatenated here, which re-derived a constant the owner already computes
+  // for its own `wedged` verdict. A third stuck subset added there would be
+  // folded into `STUCK_SHAPES` and silently omitted from this copy, so a chain
+  // the classifier calls wedged would render the running mark instead of the
+  // failed one, with both suites green. That is the `INERT_SHAPES` precedent.
+  const stuck = source.STUCK_SHAPES;
+  if (!Array.isArray(stuck) || !stuck.length) return null;
+  return stuck;
 }
 
 // shape -> the anchor line the model renders verbatim, or ANCHOR_NONE.

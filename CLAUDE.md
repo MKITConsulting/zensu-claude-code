@@ -5523,6 +5523,43 @@ carrying the assignment — round 3 added two further programs outside that slic
 `PAYLOAD="$INPUT" node -e ...` in the recovery child would have put the verbatim prompt back
 into an argv with `Z41` green.
 
+**A FOURTH round followed, and its three findings were ONE shape: round 3 fixed a leaf and
+left the component above it, the sibling writer, and the executed case behind.**
+
+- **The permission arm covered `.zensu/state` and not `.zensu`.** With the parent unsearchable
+  every test in the ladder fails for EACCES rather than for its own reason — including that
+  arm's own `[ -d "$ZEN_STATE_DIR" ]` — so control reached the configured default again and a
+  recorded `{"active":false}` was ignored. The symlink arm one line above already tested both
+  components and said so; the new arm did not. `Z54` drives BOTH levels and the `.zensu` level
+  is the one a leaf-only arm can never catch.
+- **`zensu-zen-mode.sh --status` had no equivalent arm at all**, so it reported the configured
+  default — `on` — for a session the hook resolves OFF and injects nothing into. Two readers of
+  one state disagreeing is the class this file forbids elsewhere, and `--status` is the surface
+  a user consults exactly when the mode misbehaves.
+- **Both resolution arms were source-pinned only**, in a suite that already plants a `mkfifo`
+  for `Z32d` — on the workflow document, never on the marker. `Z53` and `Z54` are the executed
+  cases; each was probed by deleting its arm.
+
+**`stuckShapes` now READS the composition instead of restating it.** `chain-recovery-v1.js`
+computes `STUCK_SHAPES` for its own `wedged` verdict and kept it private, so the consumer
+concatenated the two exported subsets a second time. A third stuck subset added to the owner
+would have been folded into `wedged` and silently omitted here, rendering a wedged chain's
+running mark instead of its failed one with both suites green. The constant is exported and
+consumed; verified identical to the previous concatenation before the swap.
+
+**The shell grammar reader's truncation justification was STRONGER than what it delivers**, and
+the comment now says so. Both grammars accept any number of complete mark/step pairs, so a
+truncation at a field boundary or inside a step name passes both; only a cut inside a mark or
+straight after one is refused. And a truncated write implies a non-zero child status, which the
+parent already answers by discarding the whole capture first. What that reader genuinely owns
+is the swapped-module case plus the prefix arm the byte test alone allowed.
+
+**`Z50`'s comment strip removed SHELL comments only, and that was measured rather than argued:**
+commenting out `fs.renameSync(...)` inside an embedded node program left the check green even
+after its needle was anchored on a call position. It strips `//` lines too now, and its
+negative arm matches ANY truncating redirect at the marker rather than one historical
+`&& { printf ... }` spelling.
+
 **Which ceiling pays for the two `node --test` drivers:** `test-zen-mode.sh` has NO
 `windows-ci.v1.json` entry — it is in that profile's sibling `windows-native-structure.v1.json`
 `excluded` list with a reason — so no per-suite Windows cap can be blown here, and the cost

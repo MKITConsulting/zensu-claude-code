@@ -2009,7 +2009,11 @@ fi
 # FOUR of round 3`s production fixes shipped with no check of any kind, which is
 # the same class this suite exists to close. The round that found four defects
 # inside round 2`s own code shipped its own fixes with the same exposure.
-Z50_HOOK_SRC="$(grep -v '^[[:space:]]*#' "$HOOK")"
+# BOTH comment syntaxes are stripped. `grep -v '^[[:space:]]*#'` removes full-line
+# SHELL comments only, so a `// fs.renameSync(...)` inside either embedded node
+# program survived it and satisfied even a call-anchored grep with the call gone -
+# measured, not argued: commenting the call out left this check green.
+Z50_HOOK_SRC="$(grep -vE '^[[:space:]]*(#|//)' "$HOOK")"
 Z50_OOB="$PLUGIN_DIR/hooks/lib/zensu-zen-mode.sh"
 Z50_BAD=""
 # (a) a present-but-not-regular marker resolves OFF. Without this arm a FIFO is
@@ -2025,9 +2029,17 @@ printf '%s' "$Z50_HOOK_SRC" | grep -qF '[ -L "$ZEN_ROOT/.zensu" ]' \
 printf '%s' "$Z50_HOOK_SRC" | grep -qF '[ ! -x "$ZEN_STATE_DIR" ]' \
   || Z50_BAD="$Z50_BAD hook:no-untraversable-dir-arm"
 # (d) the marker is PUBLISHED BY RENAME, never truncated in place.
-printf '%s' "$Z50_HOOK_SRC" | grep -q 'renameSync' \
+# ANCHORED ON A CALL POSITION. The comment strip removes full-line SHELL
+# comments only, so a `// renameSync` inside either embedded node program
+# survives it and satisfied a bare name grep with the call gone - the class
+# Z47 was rewritten to close.
+printf '%s' "$Z50_HOOK_SRC" | grep -qE '(^|[^A-Za-z_.])fs\.renameSync\(' \
   || Z50_BAD="$Z50_BAD hook:marker-write-not-rename"
-printf '%s' "$Z50_HOOK_SRC" | grep -qE '^[[:space:]]*&&[[:space:]]*\{ printf .*> "\$MARKER"' \
+# ANY truncating redirect at the marker, not one historical spelling. The
+# first arm matched only the `&& { printf ... }` lead-in, so the ordinary
+# regression shape - a plain `printf ... > "$MARKER"` on its own line -
+# matched nothing.
+printf '%s' "$Z50_HOOK_SRC" | grep -qE '>[[:space:]]*"\$(MARKER|ZEN_MARKER)"' \
   && Z50_BAD="$Z50_BAD hook:truncating-redirect-returned"
 # (e) THE OUT-OF-BAND WRITER carries the same three guards. It is the remedy the
 #     hook NAMES when the in-band escape is unavailable, so hardening one of two
@@ -2035,13 +2047,17 @@ printf '%s' "$Z50_HOOK_SRC" | grep -qE '^[[:space:]]*&&[[:space:]]*\{ printf .*>
 if [ ! -f "$Z50_OOB" ]; then
   Z50_BAD="$Z50_BAD oob:missing"
 else
-  Z50_OOB_SRC="$(grep -v '^[[:space:]]*#' "$Z50_OOB")"
+  Z50_OOB_SRC="$(grep -vE '^[[:space:]]*(#|//)' "$Z50_OOB")"
   printf '%s' "$Z50_OOB_SRC" | grep -qF '[ -L "$ZEN_ZENSU_DIR" ]' \
     || Z50_BAD="$Z50_BAD oob:no-zensu-component-guard"
   printf '%s' "$Z50_OOB_SRC" | grep -qF '[ -e "$ZEN_MARKER" ] && [ ! -f "$ZEN_MARKER" ]' \
     || Z50_BAD="$Z50_BAD oob:no-nonregular-marker-arm"
-  printf '%s' "$Z50_OOB_SRC" | grep -q 'renameSync' \
+  printf '%s' "$Z50_OOB_SRC" | grep -qE '(^|[^A-Za-z_.])fs\.renameSync\(' \
     || Z50_BAD="$Z50_BAD oob:write-not-rename"
+  printf '%s' "$Z50_OOB_SRC" | grep -qE '>[[:space:]]*"\$(MARKER|ZEN_MARKER)"' \
+    && Z50_BAD="$Z50_BAD oob:truncating-redirect-returned"
+  printf '%s' "$Z50_OOB_SRC" | grep -qF '[ ! -x "$ZEN_STATE_DIR" ]' \
+    || Z50_BAD="$Z50_BAD oob:no-untraversable-dir-arm"
 fi
 if [ -z "$Z50_BAD" ]; then
   check "Z50 both marker writers carry the component guard, the non-regular arm and a rename landing" PASS
@@ -2164,6 +2180,71 @@ case "$Z52_REPORT" in
   OK\ n=*) check "Z52 every node child is free of argv-borne inputs and literal non-ASCII (${Z52_REPORT#OK })" PASS ;;
   *)       check "Z52 a node child carries an argv assignment or literal non-ASCII: $Z52_REPORT" FAIL ;;
 esac
+
+
+# Z53 a non-regular MARKER resolves the mode OFF, driven end to end.
+#
+# Z50 pins the arm`s source literal and nothing pinned its BEHAVIOUR, in a suite
+# that already plants a FIFO for Z32d - on the workflow document, never on the
+# marker. Without this arm a FIFO here is neither a symlink nor a regular file,
+# so the ladder falls through to the configured default, which ships TRUE:
+# unreadable state IMPOSES the mode, and the off-phrase write then opens that
+# FIFO BLOCKING. The hook must inject NOTHING instead.
+P53="$(mktemp -d -t zenmode-fifo-XXXXXX)"; S53="z53-$$"
+new_session "$P53" "$S53"
+helper "$P53" "$S53" --on >/dev/null 2>&1
+MARKER53="$(find "$P53/.zensu/state" -maxdepth 1 -name 'zen-mode-*.json' | head -1)"
+if [ -z "$MARKER53" ]; then
+  check "Z53 no marker was produced - the fixture is not measuring anything" FAIL
+elif ! rm -f "$MARKER53" || ! mkfifo "$MARKER53" 2>/dev/null; then
+  check "Z53 SKIP mkfifo is unavailable on this host" PASS
+else
+  Z53_OUT="$(fire "$P53" "$S53" "where are we?" | classify)"
+  case "$Z53_OUT" in
+    *ON) check "Z53 a FIFO at the marker still resolved the mode ON - unreadable state imposed it" FAIL ;;
+    EMPTY) check "Z53 a FIFO at the marker resolves the mode OFF and the hook injects nothing" PASS ;;
+    *)     check "Z53 a FIFO at the marker produced an unexpected result <$Z53_OUT>" FAIL ;;
+  esac
+  rm -f "$MARKER53"
+fi
+rm -rf "$P53"
+
+# Z54 a NON-TRAVERSABLE state directory resolves the mode OFF, at BOTH components.
+#
+# Every test in the ladder fails with EACCES rather than for its own reason, so
+# before the arm the fall-through took the configured default and a recorded
+# `{"active":false}` was ignored on every prompt. The `.zensu` case is the one a
+# leaf-only arm could never catch: its own `[ -d "$ZEN_STATE_DIR" ]` cannot stat
+# through an unsearchable parent either.
+if [ "$(id -u)" = "0" ]; then
+  check "Z54 SKIP running as root, which bypasses the search-permission check" PASS
+else
+  Z54_BAD=""
+  for Z54_LEVEL in state zensu; do
+    P54="$(mktemp -d -t zenmode-eacces-XXXXXX)"; S54="z54-$$-$Z54_LEVEL"
+    new_session "$P54" "$S54"
+    helper "$P54" "$S54" --on >/dev/null 2>&1
+    case "$Z54_LEVEL" in
+      state) Z54_DIR="$P54/.zensu/state" ;;
+      zensu) Z54_DIR="$P54/.zensu" ;;
+    esac
+    if ! chmod 000 "$Z54_DIR" 2>/dev/null; then
+      Z54_BAD="$Z54_BAD chmod-failed<$Z54_LEVEL>"
+    else
+      Z54_OUT="$(fire "$P54" "$S54" "where are we?" | classify)"
+      case "$Z54_OUT" in
+        *ON) Z54_BAD="$Z54_BAD imposed-at<$Z54_LEVEL/$Z54_OUT>" ;;
+      esac
+      chmod 755 "$Z54_DIR" 2>/dev/null || true
+    fi
+    rm -rf "$P54"
+  done
+  if [ -z "$Z54_BAD" ]; then
+    check "Z54 an unsearchable state directory resolves OFF at both components" PASS
+  else
+    check "Z54 an unsearchable directory still imposed the mode:$Z54_BAD" FAIL
+  fi
+fi
 
 # Z49 the missing `prompt` field is disclosed under its OWN lead-in, and the
 # directive still ships.

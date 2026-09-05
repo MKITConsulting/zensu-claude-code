@@ -133,7 +133,15 @@ case "$ZEN_VERB" in
     echo "zen-mode: off"
     ;;
   --status)
-    if [ -f "$ZEN_MARKER" ]; then
+    # THE SAME PERMISSION ARM THE HOOK CARRIES. Without it `[ -f ]` fails with
+    # EACCES on an unsearchable state directory and this verb reported the
+    # configured default - `on` by default - for a session the hook resolves
+    # OFF and injects nothing into. Two readers of one state must not disagree,
+    # and this is the surface a user consults precisely when the mode misbehaves.
+    if { [ -d "$ZEN_ZENSU_DIR" ] && [ ! -x "$ZEN_ZENSU_DIR" ]; } \
+      || { [ -d "$ZEN_STATE_DIR" ] && [ ! -x "$ZEN_STATE_DIR" ]; }; then
+      echo "zen-mode: off (state directory is not searchable)"
+    elif [ -f "$ZEN_MARKER" ]; then
       # A marker that is unreadable or does not spell out an active mode counts
       # as off: an unparsable state file must never impose the mode on a user who
       # may have just left it.

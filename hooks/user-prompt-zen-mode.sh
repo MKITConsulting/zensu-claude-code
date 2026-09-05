@@ -314,9 +314,15 @@ elif [ -e "$MARKER" ] && [ ! -f "$MARKER" ]; then
   exit 0
 elif [ -f "$MARKER" ]; then
   grep -q '"active"[[:space:]]*:[[:space:]]*true' "$MARKER" 2>/dev/null || exit 0
-elif [ -d "$ZEN_STATE_DIR" ] && [ ! -x "$ZEN_STATE_DIR" ]; then
+elif { [ -d "$ZEN_ROOT/.zensu" ] && [ ! -x "$ZEN_ROOT/.zensu" ]; } \
+  || { [ -d "$ZEN_STATE_DIR" ] && [ ! -x "$ZEN_STATE_DIR" ]; }; then
   # A NON-TRAVERSABLE state directory is not an absent marker. Every test above
   # uses lstat or stat, all of them fail with EACCES, and the fall-through then
+  # BOTH COMPONENTS are tested, exactly as the symlink arm above tests both. The
+  # first spelling covered the leaf only, so an unsearchable `.zensu` made every
+  # test in the ladder - including this arm`s own `[ -d ]` - fail for EACCES, and
+  # control reached the default again. The leaf-only arm could not fire in the
+  # very case that reaches it from one component up.
   # took the configured default, which ships TRUE - so a marker recording
   # `{"active":false}` was ignored and the mode was re-imposed on every prompt.
   # The ladder already knows the right answer one arm up: an unreadable MARKER
@@ -516,12 +522,17 @@ fi
 #
 # THE GRAMMAR IS READ HERE TOO, and the reason is not redundancy with the node
 # program. That reader validates the token it is about to print; this one reads
-# the bytes that ARRIVED. The child writes `anchor + "\n" + prompt` in a single
-# call, so a child killed mid-write puts a PREFIX of an already-validated token
-# on the wire — `Zensu: ✓implement ▶`, or half of a multi-byte mark — and the
-# node program's own check has by then passed on a string these bytes are only
-# the start of. Nothing upstream can refuse them, which is why the prefix arm
-# alone was not enough: it accepted `Zensu: ` plus anything.
+# the bytes that ARRIVED, which is a WEAKER claim than an earlier wording made
+# and is worth stating exactly. That wording said this reader exists to catch a
+# child killed mid-write. It catches only PART of that class: both grammars
+# require one or more mark/step pairs and nothing more, so a truncation landing
+# at a field boundary, or inside a step name, passes both. Only a cut inside a
+# mark or straight after one is refused here. And a truncated write implies a
+# non-zero child status, which the parent already answers by discarding the
+# whole capture before this reader sees it. What this reader genuinely owns is
+# the SWAPPED-module case plus the prefix arm the byte test alone allowed:
+# `Zensu: ` followed by arbitrary prose. Do not read the truncation class as
+# closed by it.
 #
 # It is spelled as a pure-shell field walk rather than a `grep -qE`, because
 # this runs on every prompt of every zen-mode session and a subprocess here is
