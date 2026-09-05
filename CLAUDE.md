@@ -5390,14 +5390,19 @@ is the drift the rule exists to prevent.
   understated what a session receives.
 - `hooks/lib/chain-recovery-v1.js` now owes this feature TWO exports it did not have:
   `ALL_SHAPES` (the total set the anchor's key parity is pinned against, and which
-  `zen-anchor-v1.test.js` in turn pins against the literals in `chainShape`'s own source)
-  and `DEAD_END_SHAPES` (half of the stuck set the failed mark is read from). Removing
+  `zen-anchor-v1.test.js` in turn pins against the literals in `chainShape`'s own source),
+  `DEAD_END_SHAPES`, and `STUCK_SHAPES` — the composition the failed mark is now read from,
+  which the owner already computed for its own `wedged` verdict and kept private, so the
+  consumer concatenated the two subsets a second time. Removing
   either leaves the chain-recovery suite green while the zen suite goes red, but by
-  DIFFERENT mechanisms, and stating the outcome alone hid that: `stuckShapes` reads
-  `RECOVERABLE_SHAPES` and `DEAD_END_SHAPES` only, so removing `DEAD_END_SHAPES` makes
-  `anchorToken` answer `none` for every shape, while removing `ALL_SHAPES` leaves
-  `anchorToken` fully functional and reddens only the key-parity case in
-  `zen-anchor-v1.test.js`.
+  DIFFERENT mechanisms, and stating the outcome alone hid that. **The roster below is the
+  CORRECTED one; the previous wording was wrong twice after `stuckShapes` began reading the
+  owner`s composition.** The load-bearing export is now `STUCK_SHAPES`: removing it makes
+  `anchorToken` answer `none` for every shape. Removing `DEAD_END_SHAPES` does NOT — the owner
+  builds `STUCK_SHAPES` from its module-scope constants rather than from its own exports, so
+  `anchorToken` stays fully functional and the zen suite reddens at the key-parity case in
+  `zen-anchor-v1.test.js` instead. Removing `ALL_SHAPES` reddens only that same case. Three
+  exports, three different mechanisms, and only one of them silences the anchor.
 - `tests/SUITE-OVERVIEW.md` carries a row per driven `node --test` file with its
   REGISTRATION count, so adding or removing a case in either zen unit file makes that
   table stale — silently, since nothing compares them. Its section 1 row for

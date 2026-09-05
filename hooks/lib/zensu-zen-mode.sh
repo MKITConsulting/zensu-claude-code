@@ -73,6 +73,7 @@ if ! _zensu_sid="$(zensu_resolve_session_id)" || [ -z "$_zensu_sid" ]; then
   exit 2
 fi
 
+_zensu_status_root="$_zensu_pd"
 ZEN_STATE_DIR="$_zensu_pd/.zensu/state"
 ZEN_ZENSU_DIR="$_zensu_pd/.zensu"
 ZEN_MARKER="$ZEN_STATE_DIR/zen-mode-$_zensu_sid.json"
@@ -133,15 +134,18 @@ case "$ZEN_VERB" in
     echo "zen-mode: off"
     ;;
   --status)
-    # THE SAME PERMISSION ARM THE HOOK CARRIES. Without it `[ -f ]` fails with
-    # EACCES on an unsearchable state directory and this verb reported the
-    # configured default - `on` by default - for a session the hook resolves
-    # OFF and injects nothing into. Two readers of one state must not disagree,
-    # and this is the surface a user consults precisely when the mode misbehaves.
-    if { [ -d "$ZEN_ZENSU_DIR" ] && [ ! -x "$ZEN_ZENSU_DIR" ]; } \
-      || { [ -d "$ZEN_STATE_DIR" ] && [ ! -x "$ZEN_STATE_DIR" ]; }; then
-      echo "zen-mode: off (state directory is not searchable)"
-    elif [ -f "$ZEN_MARKER" ]; then
+    # THE SAME PERMISSION ARM THE HOOK CARRIES, through ONE shared predicate in
+    # `zensu-session.sh`. Without it `[ -f ]` fails with EACCES on an unsearchable
+    # ancestor and this verb reported the configured default - `on` by default -
+    # for a session the hook resolves OFF and injects nothing into. Two readers of
+    # one state must not disagree, and this is the surface a user consults exactly
+    # when the mode misbehaves.
+    #
+    # IT SITS AFTER THE MARKER ARMS, matching the hook`s own order. Testing it
+    # first diverged for a process that CAN traverse a mode-000 directory (root,
+    # CAP_DAC_OVERRIDE): the hook read and honoured the marker while this verb
+    # answered "not searchable" - the disagreement the arm exists to prevent.
+    if [ -f "$ZEN_MARKER" ]; then
       # A marker that is unreadable or does not spell out an active mode counts
       # as off: an unparsable state file must never impose the mode on a user who
       # may have just left it.
@@ -150,6 +154,12 @@ case "$ZEN_VERB" in
       else
         echo "off"
       fi
+    elif zen_path_untraversable "$ZEN_MARKER" "$_zensu_status_root"; then
+      # BARE `off` on stdout, reason on stderr. The verb`s contract is two words
+      # and a consumer may compare for equality, so a third stdout spelling would
+      # break it - and `skills/zen-mode/SKILL.md` states that contract.
+      echo "zensu-zen-mode.sh: the state directory is not searchable" >&2
+      echo "off"
     else
       source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
       if zensu_zen_mode_default_on; then echo "on"; else echo "off"; fi

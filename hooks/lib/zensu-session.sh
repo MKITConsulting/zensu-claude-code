@@ -461,3 +461,37 @@ export -f zensu_bind_hook_session zensu_bind_model_session zensu_emit_hook_sessi
   zensu_session_orphaned_project_root zensu_session_orphaned_project_root_model \
   zensu_session_incompatible_runtime zensu_session_incompatible_runtime_model \
   zensu_session_key zensu_resolve_session_id zensu_resolve_project_dir 2>/dev/null || true
+
+# WALKS THE COMPONENTS, because naming them has now been wrong TWICE - first
+# leaf-only, then leaf-plus-parent - and each time the arm could not fire in the
+# case that reaches it from one component further up. Every test in the
+# resolution ladder uses lstat or stat, so an unsearchable ancestor makes them
+# all fail for EACCES rather than for their own reason, and the fall-through
+# then takes the configured default, which ships TRUE: a recorded
+# `{"active":false}` is ignored and the mode is re-imposed on every prompt.
+#
+# It answers TRUE only for a component that EXISTS as a directory and cannot be
+# searched. An absent component is the ordinary first-run state and must stay
+# on the default path. The walk starts at the ceiling and descends, so the
+# outermost offender is the one that decides.
+zen_path_untraversable() {
+  _zpu_leaf="$1"
+  _zpu_ceiling="$2"
+  case "$_zpu_leaf" in
+    "$_zpu_ceiling"/*) _zpu_rest="${_zpu_leaf#"$_zpu_ceiling"/}" ;;
+    *) return 1 ;;
+  esac
+  _zpu_at="$_zpu_ceiling"
+  if [ -d "$_zpu_at" ] && [ ! -x "$_zpu_at" ]; then return 0; fi
+  while [ -n "$_zpu_rest" ]; do
+    case "$_zpu_rest" in
+      */*) _zpu_seg="${_zpu_rest%%/*}"; _zpu_rest="${_zpu_rest#*/}" ;;
+      *)   _zpu_seg="$_zpu_rest";      _zpu_rest="" ;;
+    esac
+    [ -n "$_zpu_seg" ] || continue
+    _zpu_at="$_zpu_at/$_zpu_seg"
+    [ -n "$_zpu_rest" ] || break
+    if [ -d "$_zpu_at" ] && [ ! -x "$_zpu_at" ]; then return 0; fi
+  done
+  return 1
+}

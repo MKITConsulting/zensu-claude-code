@@ -314,8 +314,7 @@ elif [ -e "$MARKER" ] && [ ! -f "$MARKER" ]; then
   exit 0
 elif [ -f "$MARKER" ]; then
   grep -q '"active"[[:space:]]*:[[:space:]]*true' "$MARKER" 2>/dev/null || exit 0
-elif { [ -d "$ZEN_ROOT/.zensu" ] && [ ! -x "$ZEN_ROOT/.zensu" ]; } \
-  || { [ -d "$ZEN_STATE_DIR" ] && [ ! -x "$ZEN_STATE_DIR" ]; }; then
+elif zen_path_untraversable "$MARKER" "$ZEN_ROOT"; then
   # A NON-TRAVERSABLE state directory is not an absent marker. Every test above
   # uses lstat or stat, all of them fail with EACCES, and the fall-through then
   # BOTH COMPONENTS are tested, exactly as the symlink arm above tests both. The

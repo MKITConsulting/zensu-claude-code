@@ -2026,8 +2026,16 @@ printf '%s' "$Z50_HOOK_SRC" | grep -qF '[ -e "$MARKER" ] && [ ! -f "$MARKER" ]' 
 printf '%s' "$Z50_HOOK_SRC" | grep -qF '[ -L "$ZEN_ROOT/.zensu" ]' \
   || Z50_BAD="$Z50_BAD hook:no-zensu-component-guard"
 # (c) a non-traversable state directory does not fall through to the default.
-printf '%s' "$Z50_HOOK_SRC" | grep -qF '[ ! -x "$ZEN_STATE_DIR" ]' \
-  || Z50_BAD="$Z50_BAD hook:no-untraversable-dir-arm"
+# THE WALK, not a named pair. Naming components has been wrong twice here, so
+# what is pinned is that the ladder consults a predicate which walks them.
+# THE PREDICATE IS SHARED, so it is asserted where it LIVES and consumed where
+# it is used. Both readers of the marker call one implementation in
+# `zensu-session.sh`; a private copy in either is the drift this replaces.
+Z50_SESSION_LIB="$PLUGIN_DIR/hooks/lib/zensu-session.sh"
+grep -qE '^zen_path_untraversable\(\) \{' "$Z50_SESSION_LIB" \
+  || Z50_BAD="$Z50_BAD lib:no-untraversable-predicate"
+printf '%s' "$Z50_HOOK_SRC" | grep -qE '^elif zen_path_untraversable ' \
+  || Z50_BAD="$Z50_BAD hook:untraversable-predicate-not-in-ladder"
 # (d) the marker is PUBLISHED BY RENAME, never truncated in place.
 # ANCHORED ON A CALL POSITION. The comment strip removes full-line SHELL
 # comments only, so a `// renameSync` inside either embedded node program
@@ -2056,8 +2064,8 @@ else
     || Z50_BAD="$Z50_BAD oob:write-not-rename"
   printf '%s' "$Z50_OOB_SRC" | grep -qE '>[[:space:]]*"\$(MARKER|ZEN_MARKER)"' \
     && Z50_BAD="$Z50_BAD oob:truncating-redirect-returned"
-  printf '%s' "$Z50_OOB_SRC" | grep -qF '[ ! -x "$ZEN_STATE_DIR" ]' \
-    || Z50_BAD="$Z50_BAD oob:no-untraversable-dir-arm"
+  printf '%s' "$Z50_OOB_SRC" | grep -qE 'zen_path_untraversable ' \
+    || Z50_BAD="$Z50_BAD oob:no-untraversable-arm"
 fi
 if [ -z "$Z50_BAD" ]; then
   check "Z50 both marker writers carry the component guard, the non-regular arm and a rename landing" PASS
@@ -2194,7 +2202,10 @@ P53="$(mktemp -d -t zenmode-fifo-XXXXXX)"; S53="z53-$$"
 new_session "$P53" "$S53"
 helper "$P53" "$S53" --on >/dev/null 2>&1
 MARKER53="$(find "$P53/.zensu/state" -maxdepth 1 -name 'zen-mode-*.json' | head -1)"
-if [ -z "$MARKER53" ]; then
+Z53_CONTROL="$(fire "$P53" "$S53" "control" | classify)"
+if [ "$Z53_CONTROL" != "UserPromptSubmit|ON" ]; then
+  check "Z53 the fixture does not reach ON before the FIFO - an EMPTY later would prove nothing" FAIL
+elif [ -z "$MARKER53" ]; then
   check "Z53 no marker was produced - the fixture is not measuring anything" FAIL
 elif ! rm -f "$MARKER53" || ! mkfifo "$MARKER53" 2>/dev/null; then
   check "Z53 SKIP mkfifo is unavailable on this host" PASS
@@ -2220,20 +2231,39 @@ if [ "$(id -u)" = "0" ]; then
   check "Z54 SKIP running as root, which bypasses the search-permission check" PASS
 else
   Z54_BAD=""
-  for Z54_LEVEL in state zensu; do
+  # THREE levels, and the third is why the pair was replaced by a walk: an
+  # unsearchable PROJECT ROOT also makes every test in the ladder fail for
+  # EACCES, and a hand-listed pair could never see it.
+  for Z54_LEVEL in state zensu root; do
     P54="$(mktemp -d -t zenmode-eacces-XXXXXX)"; S54="z54-$$-$Z54_LEVEL"
     new_session "$P54" "$S54"
     helper "$P54" "$S54" --on >/dev/null 2>&1
     case "$Z54_LEVEL" in
       state) Z54_DIR="$P54/.zensu/state" ;;
       zensu) Z54_DIR="$P54/.zensu" ;;
+      root)  Z54_DIR="$P54" ;;
     esac
+    # POSITIVE CONTROL. Both new checks accept "the hook emitted nothing", which
+    # any unrelated fixture fault also produces. Prove the fixture reaches ON
+    # BEFORE the directory is broken, so an EMPTY afterwards means the arm.
+    if [ "$(fire "$P54" "$S54" "control" | classify)" != "UserPromptSubmit|ON" ]; then
+      Z54_BAD="$Z54_BAD fixture-not-on<$Z54_LEVEL>"
+      rm -rf "$P54"; continue
+    fi
     if ! chmod 000 "$Z54_DIR" 2>/dev/null; then
       Z54_BAD="$Z54_BAD chmod-failed<$Z54_LEVEL>"
     else
       Z54_OUT="$(fire "$P54" "$S54" "where are we?" | classify)"
       case "$Z54_OUT" in
         *ON) Z54_BAD="$Z54_BAD imposed-at<$Z54_LEVEL/$Z54_OUT>" ;;
+      esac
+      # THE OUT-OF-BAND READER MUST AGREE. Its own `.zensu` half was pinned by
+      # nothing - the exact leaf-only defect this work fixed, surviving one file
+      # over - and `--status` is the surface a user consults when the mode
+      # misbehaves, so a confident wrong `on` there is the worst answer it has.
+      Z54_ST="$(helper "$P54" "$S54" --status 2>/dev/null)"
+      case "$Z54_ST" in
+        *on*) Z54_BAD="$Z54_BAD status-says-on-at<$Z54_LEVEL>" ;;
       esac
       chmod 755 "$Z54_DIR" 2>/dev/null || true
     fi

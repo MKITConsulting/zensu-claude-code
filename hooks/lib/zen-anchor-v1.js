@@ -16,7 +16,7 @@
 // turned out to be wrong in three ways. This module copies nothing: the caller
 // passes a shape that `chain-recovery-v1.js` PRODUCED, this file's own key set is
 // pinned against that module's exported `ALL_SHAPES`, and the BLOCKED set is
-// READ from its `RECOVERABLE_SHAPES` / `DEAD_END_SHAPES` rather than restated.
+// READ from its `STUCK_SHAPES` composition rather than restated.
 // An earlier revision did restate it, and was wrong the same way the `STAGES`
 // copy had been: it marked `ticket-spent` and `ticket-lost` as failures under a
 // comment claiming the owner treated them as wedged, while the owner's own

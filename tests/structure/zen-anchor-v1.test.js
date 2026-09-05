@@ -217,18 +217,31 @@ test('anchorToken takes no options, so a caller cannot influence a shape', () =>
 });
 
 test('a degraded owner renders no anchor rather than guessing', () => {
-  // The guard these two `return null` arms provide was added after a measured
+  // The guard these `return null` arms provide was added after a measured
   // defect: `DEAD_END_SHAPES` was not exported, the first spelling defaulted to
   // the running mark, and every dead-ended chain rendered as running with the
   // suite green. Until `stuckShapes` took an owner parameter the arms were
   // unreachable from any check, because the unit file always requires the real
-  // sibling — reverting to `(recoverable||[]).concat(deadEnd||[])` left every
-  // case passing. The parameter exists for this test and for nothing else.
-  assert.strictEqual(anchor.stuckShapes({ RECOVERABLE_SHAPES: ['a'] }), null);
-  assert.strictEqual(anchor.stuckShapes({ DEAD_END_SHAPES: ['b'] }), null);
-  assert.strictEqual(anchor.stuckShapes({ RECOVERABLE_SHAPES: [], DEAD_END_SHAPES: [] }), null);
-  assert.strictEqual(anchor.stuckShapes({ RECOVERABLE_SHAPES: 'a', DEAD_END_SHAPES: ['b'] }), null);
-  // The positive control: the real owner still yields a usable set, so the three
+  // sibling. The parameter exists for this test and for nothing else.
+  //
+  // THE STUBS FOLLOWED THE INPUT SHAPE. They supplied the two SUBSETS, which the
+  // consumer stopped reading when it began consuming the owner`s own
+  // `STUCK_SHAPES` composition — so every one of them landed on the same
+  // `!Array.isArray(undefined)` disjunct and the length and non-array arms had no
+  // executed case left. That is the "left the executed case behind" shape one
+  // file over from where it was being fixed.
+  assert.strictEqual(anchor.stuckShapes({ STUCK_SHAPES: [] }), null);
+  assert.strictEqual(anchor.stuckShapes({ STUCK_SHAPES: 'wedged-stale-rearm' }), null);
+  assert.strictEqual(anchor.stuckShapes({}), null);
+  // The subsets alone are no longer enough, which is the property the swap bought:
+  // a consumer that went back to concatenating them would answer non-null here.
+  assert.strictEqual(
+    anchor.stuckShapes({ RECOVERABLE_SHAPES: ['a'], DEAD_END_SHAPES: ['b'] }),
+    null,
+  );
+  // The seam control: the value comes FROM the owner rather than being rebuilt.
+  assert.deepStrictEqual(anchor.stuckShapes({ STUCK_SHAPES: ['x'] }), ['x']);
+  // The positive control: the real owner still yields a usable set, so the
   // refusals above cannot be satisfied by a function that answers null always.
   const real = anchor.stuckShapes();
   assert.ok(Array.isArray(real) && real.length >= 2);
