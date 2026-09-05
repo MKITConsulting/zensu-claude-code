@@ -3174,6 +3174,110 @@ case "$P6_PRESENT" in
   *) check "P6b a healthy own document renders no row" PASS ;;
 esac
 
+# P6r — the BASELINE_REBUILT provenance row. Both writers append that entry under a
+# reserved phase, three guard readers consult it, and until this row NOTHING rendered
+# it to a user — so the disclosure argument the automatic SessionStart heal rests on
+# had no channel behind it. The document is PRESENT and healthy-looking in this state,
+# which is why no other row in the block says anything at all.
+#
+# The fixture appends the entry to a REAL initialized document rather than writing one
+# by hand: the row reads the document back through the core's own validator, so a
+# hand-built file would be rejected for its shape and the check would pass for the
+# wrong reason.
+P6_REBUILT_RC=0
+CORE_PATH="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" P6P="$P6_PROJECT" P6K="$P6_KEY" \
+  node -e '
+    const fs = require("fs");
+    const core = require(process.env.CORE_PATH);
+    const file = core.adoptionWorkflowStatePath(process.env.P6P, process.env.P6K);
+    const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+    doc.history = (doc.history || []).concat([{
+      step: "",
+      phase: core.BASELINE_HISTORY_PHASE,
+      ts: "2026-09-05T00:00:00.000Z",
+      reason: "baseline-rebuilt: missing",
+    }]);
+    fs.writeFileSync(file, JSON.stringify(doc));
+  ' >/dev/null 2>&1 || P6_REBUILT_RC=$?
+P6_REBUILT="$(run_report_own bound "$P6_KEY")"
+case "$P6_REBUILT" in
+  *"⚠️  state: this session's workflow document was REBUILT"*)
+    # The remedy and its COST travel together here exactly as they do on the MISSING
+    # row: a reader who takes "rebuilt" for "restored" never goes looking for the
+    # chain that is gone.
+    case "$P6_REBUILT" in
+      *'loss, not a restore'*'/zensu:tdd'*)
+        check "P6r a rebuilt own document renders the provenance row with its cost and remedy" PASS ;;
+      *) check "P6r rebuilt row omits the cost or the remedy (got: $P6_REBUILT)" FAIL ;;
+    esac ;;
+  *) check "P6r rebuilt row missing (init_rc=$P6_REBUILT_RC got: $P6_REBUILT)" FAIL ;;
+esac
+case "$P6_REBUILT" in
+  *"2026-09-05T00:00:00.000Z"*"baseline-rebuilt: missing"*)
+    check "P6r1 the row names WHEN the rebuild happened and WHICH state was repaired" PASS ;;
+  *) check "P6r1 the row omits the entry's timestamp or reason (got: $P6_REBUILT)" FAIL ;;
+esac
+
+# P6r2 — the positive control, and it is a HISTORY control rather than an empty one.
+# A row keyed on "this document has history" instead of on the reserved phase would
+# fire on every chain that ever recorded a phase, which is every real session; an
+# empty-history control cannot tell the two apart.
+P6_HIST_RC=0
+CORE_PATH="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" P6P="$P6_PROJECT" P6K="$P6_KEY" \
+  node -e '
+    const fs = require("fs");
+    const core = require(process.env.CORE_PATH);
+    const file = core.adoptionWorkflowStatePath(process.env.P6P, process.env.P6K);
+    const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+    doc.history = [{ step: "1", phase: "RED_WRITE", ts: "2026-09-05T00:00:00.000Z", reason: "" }];
+    fs.writeFileSync(file, JSON.stringify(doc));
+  ' >/dev/null 2>&1 || P6_HIST_RC=$?
+P6_HIST="$(run_report_own bound "$P6_KEY")"
+case "$P6_HIST" in
+  *"was REBUILT"*)
+    check "P6r2 an ordinary history entry wrongly rendered the rebuild row (init_rc=$P6_HIST_RC)" FAIL ;;
+  *) check "P6r2 an ordinary history entry renders no rebuild row" PASS ;;
+esac
+
+# P6r3 — the phase token is read from the LOADED core, never from a literal copied
+# into the renderer. Nothing else in the tree compares the two spellings, so a rename
+# would SILENCE this row with every check still green. An absent export must therefore
+# report a missing check, which is the one verdict this file refuses to fake elsewhere.
+P6_NOPHASE="$SBOX/plug-nophase"
+rm -rf "$P6_NOPHASE"
+cp -R "$SBOX/plug" "$P6_NOPHASE"
+CORE_NP="$P6_NOPHASE/hooks/lib/session-control-core-v1.js"
+if [ -f "$CORE_NP" ]; then
+  perl -0pi -e 's/^\s*BASELINE_HISTORY_PHASE,\n//m' "$CORE_NP"
+fi
+CORE_PATH="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" P6P="$P6_PROJECT" P6K="$P6_KEY" \
+  node -e '
+    const fs = require("fs");
+    const core = require(process.env.CORE_PATH);
+    const file = core.adoptionWorkflowStatePath(process.env.P6P, process.env.P6K);
+    const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+    doc.history = (doc.history || []).concat([{
+      step: "", phase: core.BASELINE_HISTORY_PHASE, ts: "2026-09-05T00:00:00.000Z", reason: "x",
+    }]);
+    fs.writeFileSync(file, JSON.stringify(doc));
+  ' >/dev/null 2>&1
+P6_NOPHASE_OUT="$(ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_DOCTOR_PLUGIN_DIR="$P6_NOPHASE" CLAUDE_PROJECT_DIR="$P6_PROJECT" \
+  ZDOC_BINDING=bound ZDOC_SESSION_KEY="$P6_KEY" ZDOC_SESSION_PROJECT_ROOT="$P6_PROJECT" \
+  node "$REPORT" 2>/dev/null)"
+case "$P6_NOPHASE_OUT" in
+  *'not checked for rebuild provenance'*'missing check, not an all-clear'*)
+    check "P6r3 a core exporting no rebuild phase reports an unchecked row rather than silence" PASS ;;
+  *) check "P6r3 a core exporting no rebuild phase fell silent (got: $P6_NOPHASE_OUT)" FAIL ;;
+esac
+case "$P6_NOPHASE_OUT" in
+  *'was REBUILT'*)
+    check "P6r4 a renderer without the core token must claim no rebuild verdict" FAIL ;;
+  *) check "P6r4 a renderer without the core token claims no rebuild verdict" PASS ;;
+esac
+rm -rf "$P6_NOPHASE"
+
 # P6g — the UNSAFE arm. A hard link passes every test a plain regular file passes
 # except nlink, so it is the shape a presence test admits. The row must NOT offer
 # the rebuild: the repair refuses this by design, and promising it here is the

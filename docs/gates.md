@@ -354,6 +354,11 @@ minting a new one.
   fully green over a session in which every tool was being denied.
 - **`SessionStart` heals it on its own** at the next resume or compaction, on `ENOENT` only,
   writing the same `BASELINE_REBUILT` provenance entry the confirmed repair writes.
+- **`/zensu:doctor` renders that provenance entry afterwards.** Once the document is present
+  again, nothing else in the report distinguishes a rebuilt one from a healthy one, so the
+  own-document verdict carries a `⚠️ state: this session's workflow document was REBUILT` row
+  naming the entry count, its timestamp and the state that was repaired. Before that row the
+  entry was reserved and read by guards, but no runtime surface ever showed it to a user.
 
 Rebuilding is a **loss, not a restore**: a review chain that was live when the document
 vanished is gone, and the rebuilt baseline reads *never active*. That is why the report lists

@@ -1249,10 +1249,18 @@ new one — the shape it refuses is byte-identical.
   mitigations are disclosure only: the writer is unreachable without `--confirm`, the
   report lists the session-keyed evidence that survived (`pending-review.json`, its
   `.claim`, an Autopilot pointer, a reviewer-denial note) WITHOUT interpreting it, and
-  every carrier states the cost beside the command.
+  every carrier states the cost beside the command. Since `baselineRebuiltRow` in
+  `hooks/lib/zensu-doctor-report.js`, the provenance entry is also RENDERED — a `WARN`
+  row on the PRESENT arm of the own-document verdict, which is the only state a rebuilt
+  document can be in. It reads its phase token from the LOADED core rather than from a
+  literal, so a rename reports a missing check instead of silently deleting the row;
+  `P6r`-`P6r4` in `tests/structure/test-doctor.sh` pin the row, its cost-and-remedy
+  wording, the history control and both halves of that token rule.
 - **The SessionStart self-heal is not user-confirmed.** A session could delete its own
-  document and wait for an automatic compaction. The history entry makes that visible;
-  nothing prevents it. It matches the existing *no record* branch, which already
+  document and wait for an automatic compaction. The history entry makes that visible —
+  and since the doctor row above it is visible to a USER rather than only to a guard
+  reader, which is what the disclosure argument always assumed and did not have. Nothing
+  prevents it. It matches the existing *no record* branch, which already
   re-registers without consent for the same reason — but say "matches", never "is
   therefore safe".
 - **Windows is unverified for the in-session half — and scope that claim to the

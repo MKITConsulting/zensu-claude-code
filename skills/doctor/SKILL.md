@@ -11,7 +11,8 @@ description: >
   in ~/.claude/settings.json expose the zensu:code-reviewer spawn to a refusal
   before any chain has wedged), and session state (state dir writable, canonical
   CAS workflow documents valid, whether THIS session's own workflow document is
-  there and usable, each review chain's shape plus any wedged chain and
+  there and usable and whether it was rebuilt rather than restored, each review
+  chain's shape plus any wedged chain and
   its recovery command, any open chain not owned by this session, any chain this
   session owns that has ended many turns at implementing, any reviewer spawn
   the host permission layer refused, expired pending-review surfaced).
@@ -505,6 +506,18 @@ classifier will refuse a spawn, not only when the whole table is green.
   exist at all. Tell the user to run `/zensu:adopt-session` for the diagnosis, inspect
   what is there before doing anything else, and then start a fresh Claude Code session.
   Never relay the rebuild command for this row.
+- **⚠️ state: this session's workflow document was REBUILT** → the document is present
+  and healthy-looking, and its history carries the reserved `BASELINE_REBUILT` provenance
+  entry, so it was rebuilt by `/zensu:adopt-session --confirm` or by the SessionStart
+  self-heal. Relay it as a LOSS, never as a repair that succeeded: the rebuilt baseline
+  reads "never active", so a review chain that was live when the document vanished is
+  gone and the Stop guard now releases this session without asking for a reviewer. The
+  row names the entry count, the timestamp and which state was repaired. Offer
+  `/zensu:tdd` to re-arm if that work still needs a review.
+- **⚠️ state: this session's workflow document was not checked for rebuild provenance**
+  → either the core exported no rebuild phase token or the document did not read back,
+  so the check did NOT run. A missing check, never an all-clear, and never a claim that
+  the document was not rebuilt.
 - **⚠️ state: this session's own workflow document could not be classified** → the
   Session Control core did not load from the plugin directory the row names, so the check
   did NOT run. A missing check, never an all-clear.

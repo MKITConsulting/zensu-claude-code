@@ -2284,6 +2284,64 @@ function bindingLine() {
   }
 }
 
+// The BASELINE_REBUILT provenance row. Both writers — the confirmed repair and the
+// SessionStart self-heal — append that entry under a reserved phase `--phase` refuses
+// to mint, and three guard readers consult it, so the provenance was RESERVED. What
+// was missing is a runtime surface that renders it to a user: until this row nothing
+// did, and the disclosure argument the automatic heal rests on had no channel behind
+// it. It is deliberately rendered on the PRESENT arm and nowhere else, because that
+// is the only state in which a rebuilt document exists and reads back.
+//
+// A rebuild is a LOSS, not a restore. The baseline reads "never active", so a review
+// chain that was live when the document vanished is gone and no other row in this
+// report says so once the document is PRESENT again — which is exactly the shape a
+// green report used to hide.
+//
+// The phase token comes from the LOADED core, never from a literal copied here, for
+// the same reason `BASELINE_STATES` does in the caller: nothing in the tree compares
+// this renderer's spelling against the core's, so a rename would SILENCE the row with
+// every check still green. An absent export is therefore a missing check, not a pass.
+function baselineRebuiltRow(core, projectRoot, key) {
+  var phase = (core && typeof core.BASELINE_HISTORY_PHASE === 'string' && core.BASELINE_HISTORY_PHASE)
+    ? core.BASELINE_HISTORY_PHASE
+    : '';
+  if (phase === '') {
+    line(WARN, 'state: this session\'s workflow document was not checked for rebuild '
+      + 'provenance — the Session Control core in ' + pluginDir() + ' exports no rebuild '
+      + 'phase token. That is a missing check, not an all-clear.');
+    return;
+  }
+  var state;
+  try {
+    state = core.readWorkflowState({ projectRoot: projectRoot, sessionId: key });
+  } catch (e) {
+    // The document classified PRESENT and still did not read back. The invalid-document
+    // row further down names the FILE; this one names the CHECK that did not run. The
+    // two findings are different and neither substitutes for the other, so both render.
+    line(WARN, 'state: this session\'s workflow document was not checked for rebuild '
+      + 'provenance — it did not read back (' + ((e && e.code) || 'unreadable')
+      + '). That is a missing check, not an all-clear.');
+    return;
+  }
+  var history = (state && Array.isArray(state.history)) ? state.history : [];
+  var rebuilds = history.filter(function (entry) {
+    return entry && entry.phase === phase;
+  });
+  // Silence here is the ordinary case, not a withheld verdict: a document that was
+  // never rebuilt has no provenance to report, and a row on every healthy session is
+  // the noise this repository trains readers to ignore.
+  if (!rebuilds.length) return;
+  var last = rebuilds[rebuilds.length - 1];
+  var when = (last && typeof last.ts === 'string' && last.ts) ? last.ts : 'an unrecorded time';
+  var why = (last && typeof last.reason === 'string' && last.reason) ? ' [' + last.reason + ']' : '';
+  line(WARN, 'state: this session\'s workflow document was REBUILT — '
+    + rebuilds.length + (rebuilds.length === 1 ? ' entry' : ' entries')
+    + ', most recently at ' + when + why + '. Rebuilding is a loss, not a restore: the '
+    + 'baseline reads "never active", so a review chain that was live when the document '
+    + 'vanished is gone and the Stop guard releases this session without asking for a '
+    + 'reviewer. Re-arm with /zensu:tdd if that work still needs one.');
+}
+
 function stateBlock(nowMs) {
   block('Session state');
   bindingLine();
@@ -2356,7 +2414,12 @@ function stateBlock(nowMs) {
       var token = ownToken(name);
       return token !== null && ownState === token;
     }
-    if (ownIs('PRESENT')) return;
+    if (ownIs('PRESENT')) {
+      // PRESENT is not "nothing to say": a document that was REBUILT is present and
+      // healthy-looking, and its provenance is the one thing this block never rendered.
+      baselineRebuiltRow(ownCore, projectRoot, ownKey);
+      return;
+    }
     if (ownIs('UNSAFE') || ownIs('UNREADABLE')) {
       // The NAMER is in its own try, deliberately. Folding it into the block above
       // meant that a core which loaded but did not export it threw AFTER the
