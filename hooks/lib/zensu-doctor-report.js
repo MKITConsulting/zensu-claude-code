@@ -2297,8 +2297,29 @@ function bindingLine() {
         + ' — the record can no longer be re-verified, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether this session can be adopted in place, then /zensu:adopt-session --confirm');
     case 'unavailable':
       return line(BAD, 'binding: hooks/lib/zensu-session.sh is missing or symlinked — Session Control cannot bind');
-    default:
+    // The wrapper's OWN "could not resolve it" verdict, and the unset value the
+    // `default` arm below still lets through. Both stay silent on purpose, and
+    // neither is an UNCLASSIFIABLE verdict: the wrapper discloses that case in a
+    // row of its own, so a second row here would double-report it. Explicit
+    // rather than folded into `default`, because `default` now means something
+    // else — and P1af/P1ag pin both silences, so a reader who removes this case
+    // to "simplify" gets a failing suite rather than a scary row for a state the
+    // wrapper reports correctly.
+    case 'unknown':
       return undefined;
+    default:
+      // Silence is the one verdict a diagnostic must not give, and this enum has
+      // just gained a fifth member. ZDOC_BINDING is a documented environment
+      // contract — a caller may supply it and thereby skip the wrapper's whole
+      // resolution block — and a report module older than the wrapper feeding it
+      // meets a verdict it does not know. Rendering nothing there is
+      // indistinguishable from a session that binds cleanly, which is the exact
+      // reading this row exists to prevent. Adding a SIXTH member is now safe
+      // rather than merely documented.
+      if (!env.ZDOC_BINDING) return undefined;
+      return line(BAD, 'binding: this report cannot classify the binding verdict "' + env.ZDOC_BINDING
+        + '" reported for this session — it was produced by a different Zensu version than this report;'
+        + ' run /zensu:doctor from the executing installation');
   }
 }
 

@@ -1398,6 +1398,18 @@ OUT="$(run_report_binding unavailable)"
 case "$OUT" in *'zensu-session.sh is missing or symlinked'*) check "P1ae unavailable binder renders a ❌ binding row" PASS ;; *) check "P1ae unavailable binder binding row (got: $OUT)" FAIL ;; esac
 OUT="$(run_report_binding unknown)"
 case "$OUT" in *'binding:'*) check "P1af unknown binding stays silent instead of guessing" FAIL ;; *) check "P1af unknown binding stays silent instead of guessing" PASS ;; esac
+# `unknown` above and an unset value below are the wrapper's OWN verdicts and
+# stay silent — it discloses that case in its own row, so a second one here would
+# double-report it. A value that is NEITHER is a different thing: ZDOC_BINDING is
+# a documented environment contract a caller may supply, and the wrapper now emits
+# verdicts an older report module does not know. Silence is the one verdict a
+# diagnostic must not give, so the unclassifiable case states what it saw.
+OUT="$(run_report_binding pruned-plugin-roo)"
+case "$OUT" in
+  *'cannot classify the binding verdict "pruned-plugin-roo"'*)
+    check "P1af1 a binding verdict this report does not know renders a ❌ row instead of no row at all" PASS ;;
+  *) check "P1af1 unclassifiable binding verdict (got: $OUT)" FAIL ;;
+esac
 OUT="$(run_report "$SBOX/plug" - "$EMPTY_PROJECT")"
 case "$OUT" in *'binding:'*) check "P1ag an unset ZDOC_BINDING renders no binding row" FAIL ;; *) check "P1ag an unset ZDOC_BINDING renders no binding row" PASS ;; esac
 if grep -qF 'zensu_bind_model_session' "$HELPER" && grep -qF 'ZDOC_BINDING=unknown' "$HELPER" \

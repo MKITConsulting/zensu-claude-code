@@ -269,7 +269,23 @@ function resolvePrunedPluginRoot(payload, environment = process.env) {
     // The same sibling bound adoption applies: a pruned record of a FOREIGN
     // installation (a --plugin-dir checkout beside nothing) is a second
     // disagreement, not this state.
-    if (path.dirname(context.plugin_root) !== path.dirname(executedPluginRoot)) return null;
+    // Both sides canonical, so the comparison stays in ONE namespace. The right
+    // side already is — `executedPluginRoot` came from canonicalDirectory above,
+    // and the parent of a realpath is itself a realpath. The left side is a
+    // recorded STRING, and this is the one branch that can never re-canonicalize
+    // its own root, because that root is gone by construction. Any change to the
+    // symlink topology above the plugin cache AFTER minting — a dotfile manager
+    // turning ~/.claude into a symlink, or the reverse, or a move to another
+    // volume — would otherwise make the two disagree forever: the predicate
+    // answers null, the state is never named, and the session falls back to the
+    // generic deny and the unbounded Stop block this whole feature exists to
+    // remove. It fails CLOSED, which is why it was P3 rather than P1. The parent
+    // is proven to exist by readPrunedPluginRootContext, which canonicalDirectory's
+    // it before returning, so it always resolves on this branch; if it somehow
+    // does not, this throws into the catch below and answers null exactly as the
+    // string compare did.
+    if (canonicalDirectory(path.dirname(context.plugin_root), 'recorded plugin root parent')
+        !== path.dirname(executedPluginRoot)) return null;
     const executing = core.executingPluginVersion(executedPluginRoot, 'claude');
     if (typeof executing !== 'string' || executing === '') return null;
     // The recorded version is rendered into `recorded<TAB>executing`, which five

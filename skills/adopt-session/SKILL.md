@@ -173,7 +173,7 @@ render that verbatim too.
 | Reason | Meaning |
 |--------|---------|
 | `private-record-store-unsafe` | Entry-point refusal, raised before `adoptableRecord` runs: the private record store itself could not be opened safely — missing, aliased, or carrying unsafe permissions or ownership. |
-| `record-unreadable` | The record no longer re-verifies against the installation that minted it — altered, its recorded project root gone, or a real schema change. A minting installation merely pruned from the cache is NOT this refusal any more: that record is adoptable. |
+| `record-unreadable` | The record no longer re-verifies against the installation that minted it — altered, its recorded project root gone, or a real schema change. A minting installation merely pruned from the cache is adoptable ON ITS OWN and is no longer this refusal; it IS still this refusal when the recorded project root is ALSO gone, because the relaxed pruned reader does not waive that root and nothing is left to anchor the record to. |
 | `plugin-data-mismatch` | The record belongs to a different plugin-data store. Never relaxed. |
 | `already-served` | Nothing to RE-MINT. The record is correct, but the lease store may still be wedged: an adoption writes the record first and sweeps the store afterwards, so a run that died in between leaves exactly this state. Re-running with `--confirm` repeats the sweep idempotently and re-mints nothing. If tools still fail after that, run `/zensu:doctor`. |
 | `not-a-sibling-installation` | The executing tree is not an upgrade of the recorded one (for example a `--plugin-dir` checkout). |

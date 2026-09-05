@@ -350,3 +350,20 @@ test('F1 a busy lock is not reported as an unsafe records directory', () => {
   assert.equal(/not a plain directory you own/.test(locked), false,
     'it must not claim the two store-shape causes');
 });
+
+// The COMBINED state — recorded project root gone AND minting installation
+// pruned — still lands on record-unreadable: readPrunedPluginRootContext pins
+// allowMissingProjectRoot off, so validateContext throws on the vanished root
+// and the outer catch answers RECORD_UNREADABLE. The remedy has to name that
+// conjunction. Excluding pruning with a bare adverb sent exactly those users
+// looking for a disagreement that is not there, while pruning was half the cause.
+test('F2 the record-unreadable remedy names the pruned-AND-orphaned conjunction rather than excluding pruning outright', () => {
+  const core = require(path.join(LIB, 'session-control-core-v1.js'));
+  const { REMEDY } = report();
+  const text = REMEDY[core.ADOPTION_REFUSALS.RECORD_UNREADABLE];
+  assert.match(text, /pruned/i, 'the remedy still speaks to a pruned installation');
+  assert.match(text, /project root is (also|ALSO) gone/,
+    'it names the conjunction that still lands here');
+  assert.equal(/no longer one of these/.test(text), false,
+    'the bare exclusion is what made the remedy false in the combined state');
+});

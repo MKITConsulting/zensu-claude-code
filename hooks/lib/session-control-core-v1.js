@@ -1410,6 +1410,21 @@ function readOrphanedProjectRootContext(options) {
   // into a terminal and into the model's context — a record the strict
   // readContext fails closed on. Re-apply it, so EXISTENCE stays the only
   // waived check.
+  //
+  // NAMING THE TIGHTENING, because the extraction carried it in silently and the
+  // reworded sentence above absorbs it without saying so. The inline code this
+  // replaced applied TWO checks, UNSAFE_PATH_CHARACTERS and path.isAbsolute.
+  // requireAbsentDirectoryPath adds a THIRD — `path.resolve(value) !== value` — so
+  // a project_root that is absent, absolute and control-character free but NOT
+  // resolve-normalized used to classify as the relaxable orphan state, where Stop
+  // releases and the gates relax, and now fails closed into the generic deny. The
+  // tightening is INTENDED for this reader: the value reaches the same terminal and
+  // the same report the other two checks protect, and a non-normalized spelling is
+  // exactly the shape that makes a printed path mean something other than it reads.
+  // The practical blast radius is nil, because project_root is minted through
+  // canonicalDirectory and a realpathSync.native result is resolve-stable on POSIX
+  // and win32 alike — but that is an argument, not a test, so this arm has its own
+  // unit case rather than inheriting the pruned call site's.
   requireAbsentDirectoryPath(context.project_root, 'context project root');
   // lstat, never realpath: realpath follows a symlink and would report a
   // dangling link as absent, quietly turning a present-but-wrong root into the

@@ -4745,3 +4745,32 @@ test('the safe-version shape is exported and rejects a separator inside a versio
   assert.equal(core.ADOPTION_SAFE_VERSION_RE.test(''), false);
   assert.equal(core.ADOPTION_SAFE_VERSION_RE.test('.leading'), false);
 });
+
+// CHARACTERIZATION, and it grades the ORPHAN reader on purpose. The extraction
+// into requireAbsentDirectoryPath added a third check over the two the inline
+// code applied — `path.resolve(value) !== value` — and the cases added with it
+// drive that arm through the PRUNED call site only. A change to the shared helper
+// that relaxed normalization would therefore move the boundary of a relaxable
+// bind failure with every existing case green. This is the arm that notices.
+test('the orphan reader enforces normalization too, not only the pruned call site', () => {
+  const f = fixture('claude');
+  const context = register(f);
+  const recordFile = path.join(f.recordsDir, `${core.sessionKey(RAW_SESSION)}.json`);
+  const readerOptions = { recordsDir: f.recordsDir, sessionId: RAW_SESSION, expectedHost: 'claude' };
+  fs.rmSync(context.project_root, { recursive: true, force: true });
+  assert.equal(
+    core.readOrphanedProjectRootContext(readerOptions).project_root,
+    context.project_root,
+    'the relaxable orphan state is established before the tightening is probed',
+  );
+  const drifted = context.project_root + path.sep + '..' + path.sep + 'probe';
+  assert.notEqual(path.resolve(drifted), drifted, 'the probe path really is un-normalized');
+  rewriteJson(recordFile, (record) => {
+    record.project_root = drifted;
+    return record;
+  });
+  assert.throws(
+    () => core.readOrphanedProjectRootContext(readerOptions),
+    /context project root must be normalized/,
+  );
+});

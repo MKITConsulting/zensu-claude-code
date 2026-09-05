@@ -2564,8 +2564,16 @@ pruned_tamper() {
     fs.writeFileSync(process.env.RECORD, JSON.stringify(record, null, 2) + "\n");
   '
 }
+# Self-verifying on purpose. A silent `cp` failure leaves the TAMPERED record in
+# place, and a tampered record produces exactly the values the rows after a
+# tamper assert — `record-unreadable` from the adoption path and `mode=no` from
+# the binder — so every one of them would report PASS for the wrong reason. The
+# post-condition is what makes "the record reaching the next row is pristine" an
+# observation rather than an assumption.
 pruned_restore() {
-  cp "$PRUNED_RECORD_COPY" "$PRUNED_RECORD"
+  cp "$PRUNED_RECORD_COPY" "$PRUNED_RECORD" \
+    && cmp -s "$PRUNED_RECORD_COPY" "$PRUNED_RECORD" \
+    || check "Part D record restore failed — every later row grades a tampered record" FAIL
 }
 PRUNED_E64="$(node -e 'process.stdout.write("e".repeat(64))')"
 PRUNED_F64="$(node -e 'process.stdout.write("f".repeat(64))')"
@@ -2636,6 +2644,15 @@ if [ -n "$PRUNED_ROOT" ] && [ -n "$PRUNED_SUCCESSOR" ] && [ -n "$PRUNED_COMPATIB
 
   # AC-D04 — a root under a directory that never existed is not a PRUNED
   # installation; the reader requires the cache directory itself to survive.
+  # The pristine control first: without it the refusal below is only known to
+  # follow the tamper, not to be CAUSED by it — a record left tampered by an
+  # earlier row refuses identically.
+  PRUNED_PRISTINE="$(pruned_adoption_verdict "$PRUNED_SUCCESSOR")"
+  if [ "$PRUNED_PRISTINE" = 'ok pruned=true' ]; then
+    check "AC-D04 the record reaching this row is pristine, so the refusal below is caused by the tamper" PASS
+  else
+    check "AC-D04 pristine control before the tamper (verdict='$PRUNED_PRISTINE')" FAIL
+  fi
   pruned_tamper plugin_root "$TMP/never-existed/zensu/zensu/0.17.0"
   PRUNED_NO_PARENT="$(pruned_adoption_verdict "$PRUNED_SUCCESSOR")"
   PRUNED_NO_PARENT_MODE=no
@@ -2684,10 +2701,7 @@ if [ -n "$PRUNED_ROOT" ] && [ -n "$PRUNED_SUCCESSOR" ] && [ -n "$PRUNED_COMPATIB
   PRUNED_GATE_FAILURES=''
   while IFS= read -r hook_name; do
     [ -n "$hook_name" ] || continue
-    hook_expected="$PRUNED_EXPECTED"
-    if [ "$hook_name" = pre-bash-zensu-gate.sh ]; then
-      hook_expected=allow
-    fi
+    hook_expected="$(adopt_hook_expected "$hook_name" "$PRUNED_EXPECTED")"
     if [ "$(pruned_gate_decision "$hook_name" "$PRUNED_ADOPT_PAYLOAD")" != "$hook_expected" ]; then
       PRUNED_GATE_FAILURES="$PRUNED_GATE_FAILURES $hook_name"
     fi
@@ -2699,15 +2713,25 @@ EOF
   else
     check "AC-D07 every hook on the Bash matcher lets the adoption command through in the pruned state (unexpected:$PRUNED_GATE_FAILURES missing-from-enumeration:$PRUNED_ENUMERATION_MISSING)" FAIL
   fi
-  # The deny half, hook by hook: pre-bash-zensu-gate.sh exits before it binds for
-  # a command carrying no zensu verb, so it is not a denier here and is excluded.
+  # The deny half, hook by hook, and the two names absent from this list are the
+  # two `adopt_hook_expected` exempts above, for the same reasons stated there:
+  # pre-bash-zensu-gate.sh exits before it binds for a command carrying no zensu
+  # verb, and pre-bash-witness.sh is advisory and emits no permissionDecision at
+  # all. Neither is a denier here, so neither is graded as one.
   PRUNED_PLAIN_PAYLOAD="$(bash_payload "$PRUNED_SESSION" "echo probe")"
   PRUNED_DENY_FAILURES=''
   for hook_name in pre-bash-source-write-gate.sh pre-write-secret-scan.sh pre-reviewer-capability-gate.sh; do
+    # SLOT-ANCHORED, both halves. A bare '0.17.0' needle matches whichever slot
+    # happens to carry it, so transposing the two arguments at any of the four
+    # gate call sites — or degrading only the executing half to `(unreadable)` —
+    # left this row green while every user in this state was told the wrong
+    # installation minted the record. The executing half was asserted nowhere.
     if [ "$(pruned_gate_decision "$hook_name" "$PRUNED_PLAIN_PAYLOAD")" != deny ] \
         || ! grep -qF 'removed from the plugin cache' "$PRUNED_GATE_OUT" \
-        || ! grep -qF '0.17.0' "$PRUNED_GATE_OUT" \
-        || ! grep -qF '/zensu:adopt-session' "$PRUNED_GATE_OUT"; then
+        || ! grep -qF '(version 0.17.0)' "$PRUNED_GATE_OUT" \
+        || ! grep -qF '(0.18.0) cannot re-verify' "$PRUNED_GATE_OUT" \
+        || ! grep -qF '/zensu:adopt-session' "$PRUNED_GATE_OUT" \
+        || ! grep -qF 'executing-runtime-older' "$PRUNED_GATE_OUT"; then
       PRUNED_DENY_FAILURES="$PRUNED_DENY_FAILURES $hook_name"
     fi
   done
@@ -2724,10 +2748,17 @@ EOF
     | CLAUDE_PLUGIN_ROOT="$PRUNED_SUCCESSOR" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
       CLAUDE_PROJECT_DIR="$PROJECT" \
       bash "$PRUNED_SUCCESSOR/hooks/pre-reviewer-capability-gate.sh" >"$PRUNED_CAP_OUT" 2>/dev/null
+  # Slot-anchored for the same reason as the deny loop above, and it matters more
+  # here: this gate hand-authors its deny in JS instead of calling the shell
+  # emitter, so this is a SECOND, independent interpolation of the same pair —
+  # the copy most likely to drift. Unanchored, `${pruned.executing}` could render
+  # the recorded version, an empty string or `undefined` and this row still passed.
   if grep -qF '"permissionDecision":"deny"' "$PRUNED_CAP_OUT" \
       && grep -qF 'removed from the plugin cache' "$PRUNED_CAP_OUT" \
-      && grep -qF '0.17.0' "$PRUNED_CAP_OUT" \
+      && grep -qF '(version 0.17.0)' "$PRUNED_CAP_OUT" \
+      && grep -qF '(0.18.0) cannot re-verify' "$PRUNED_CAP_OUT" \
       && grep -qF '/zensu:adopt-session' "$PRUNED_CAP_OUT" \
+      && grep -qF 'executing-runtime-older' "$PRUNED_CAP_OUT" \
       && ! grep -qF 'immutable context revalidation failed' "$PRUNED_CAP_OUT"; then
     check "AC-D10 the capability gate denies a non-Bash tool with the pruned wording rather than the generic revalidation text" PASS
   else

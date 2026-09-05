@@ -238,7 +238,7 @@ const shouldRepairInPlace = (verdict, confirmed) =>
 // the misleading doctor row left them.
 const REMEDY = {
   [core.ADOPTION_REFUSALS.RECORD_UNREADABLE]:
-    "The record could not be re-verified against the installation that minted it. Its recorded project root may be gone, the record may have been altered, or a persisted schema really did change in this release. A minting installation that was merely pruned from the plugin cache is no longer one of these — that state is adoptable — so this refusal means something else disagrees. Adoption cannot tell the remaining causes apart, and in this state /zensu:doctor cannot name the directory either. Start a fresh Claude Code session.",
+    "The record could not be re-verified against the installation that minted it. Its recorded project root may be gone, the record may have been altered, or a persisted schema really did change in this release. A minting installation that was merely pruned from the plugin cache is adoptable ON ITS OWN and is no longer this refusal; it IS still this refusal when the recorded project root is also gone, because the relaxed pruned reader does not waive that root and nothing is left to anchor the record to. Adoption cannot tell the remaining causes apart, and in this state /zensu:doctor cannot name the directory either. Start a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.PLUGIN_DATA]:
     "The record belongs to a different plugin-data store — typically a development checkout against an installed plugin, or the reverse. That boundary is never relaxed. Start a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.ALREADY_SERVED]:

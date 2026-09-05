@@ -493,7 +493,7 @@ function main() {
     // the two is immaterial.
     const pruned = hookSession.resolvePrunedPluginRoot(payload);
     if (pruned) {
-      deny(`this session's Session Control record is intact, but the Zensu installation that minted it (version ${pruned.recorded}) has been removed from the plugin cache, so the running installation (${pruned.executing}) cannot re-verify the record. Run /zensu:adopt-session to check whether this installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state.`);
+      deny(`this session's Session Control record is intact, but the Zensu installation that minted it (version ${pruned.recorded}) has been removed from the plugin cache, so the running installation (${pruned.executing}) cannot re-verify the record. Run /zensu:adopt-session to check whether this installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If it refuses, the refusal names its own cause and remedy: this predicate is deliberately blind to lineage, so a DOWNGRADE reaches this state too, and there adoption refuses as executing-runtime-older and re-installing the newer version is the way back — a persisted shape that really did change is the case that needs a fresh Claude Code session.`);
       return;
     }
     deny(`immutable context revalidation failed: ${error.message}`);
