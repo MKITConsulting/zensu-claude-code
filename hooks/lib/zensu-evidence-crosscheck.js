@@ -27,6 +27,30 @@
 // witness entry failed. A command that failed, got fixed and re-ran green is a
 // normal cycle, not a false claim. The equality match is the gate.
 //
+// TWO WITNESS LINE KINDS, and the second exists to remove a one-sided blind
+// spot this check used to have. Claude Code does not fire PostToolUse for a
+// Bash call that did not complete successfully, so `hooks/post-bash-witness.sh`
+// never sees a failing command and the only verdict such a claim could reach
+// was `EVIDENCE GAP` — indistinguishable from a run that never happened. This
+// check could corroborate a PASS and structurally could not corroborate a
+// FAILURE. `hooks/pre-bash-witness.sh` records a `BASH-ATTEMPT cmd=` line from
+// PreToolUse, which the host does fire unconditionally, so an attempt with no
+// matching completed entry is POSITIVE evidence rather than an absence:
+//
+//   attempt + completed  -> judged on the completed entry's tail, as before
+//   attempt, no completed -> claimed green is a CONTRADICTION; a claimed
+//                            non-pass is corroborated
+//   neither               -> EVIDENCE GAP, unchanged
+//
+// A witness log written before that hook existed carries no attempt lines, so
+// every verdict over it is byte-identical to the previous behaviour.
+//
+// The attempt line proves the call reached the Bash tool, NOT that it exited
+// non-zero: PreToolUse hooks on a matcher run whatever any of them decides, so
+// a call another gate denies is recorded too. The contradiction wording says
+// "did not complete successfully" for that reason and must not be tightened
+// into a claim about the exit status.
+//
 // CLI:
 //   node zensu-evidence-crosscheck.js --log <run-log> --witness <witness-log>
 //                                     [--allow-missing-log]
@@ -42,6 +66,9 @@ const path = require('path');
 const CLAIM_MARKER = /(?:CHECKPOINT|AUDIT)\s*[-–—]+\s/;
 const LOG_WRITE_MARKER = /(?:CHECKPOINT|AUDIT)\s*[-–—]+\s*(?:cmd=|via=)|EVIDENCE (?:GAP|CONTRADICTION)/;
 const WITNESS_MARKER = 'BASH cmd=';
+// Deliberately not a prefix of WITNESS_MARKER, so neither indexOf can find the
+// other: an attempt line is `BASH-ATTEMPT cmd=`, a completed one `BASH cmd=`.
+const WITNESS_ATTEMPT_MARKER = 'BASH-ATTEMPT cmd=';
 const LOG_DIR_FRAGMENT = '.zensu/logs';
 
 function readJsonString(text, start) {
@@ -138,6 +165,21 @@ function parseWitness(witnessText, logPath) {
   const entries = [];
   const lines = witnessText.split('\n');
   for (const line of lines) {
+    // Attempt lines first: they carry no ` tail=`, so the completed-entry parse
+    // below would drop them on the floor rather than misread them.
+    const attemptAt = line.indexOf(WITNESS_ATTEMPT_MARKER);
+    if (attemptAt !== -1) {
+      const attemptRead = readJsonString(line, attemptAt + WITNESS_ATTEMPT_MARKER.length);
+      if (!attemptRead) continue;
+      entries.push({
+        kind: 'attempt',
+        cmd: attemptRead.value,
+        tail: '',
+        interrupted: false,
+        logWriting: isLogWritingCommand(attemptRead.value, logPath),
+      });
+      continue;
+    }
     const at = line.indexOf(WITNESS_MARKER);
     if (at === -1) continue;
     const cmdRead = readJsonString(line, at + WITNESS_MARKER.length);
@@ -148,6 +190,7 @@ function parseWitness(witnessText, logPath) {
     if (!tailRead) continue;
     const interrupted = /\binterrupted=true\b/.test(line.slice(tailRead.end));
     entries.push({
+      kind: 'result',
       cmd: cmdRead.value,
       tail: tailRead.value,
       interrupted,
@@ -181,14 +224,42 @@ function failureMarker(entry) {
   return null;
 }
 
+const ATTEMPT_ONLY_MARKER =
+  'the tool call never completed (non-zero exit, interruption or denial)';
+
 function crossCheck(claims, entries, witnessAvailable) {
-  const usable = entries.filter((e) => !e.logWriting);
+  // `kind` is absent on an entry parsed from a witness log written before the
+  // attempt half existed; those are completed entries, so the default is
+  // `result` and the predicate tests for the attempt kind rather than for it.
+  const usable = entries.filter((e) => !e.logWriting && e.kind !== 'attempt');
+  const attempted = entries.filter((e) => !e.logWriting && e.kind === 'attempt');
   return claims.map((claim) => {
     if (claim.kind === 'via') return { claim, verdict: 'via' };
     if (!witnessAvailable) return { claim, verdict: 'gap' };
     const wanted = claim.cmd.trim();
     const matches = usable.filter((e) => e.cmd.trim() === wanted);
-    if (matches.length === 0) return { claim, verdict: 'gap' };
+    if (matches.length === 0) {
+      const tries = attempted.filter((e) => e.cmd.trim() === wanted);
+      // No attempt either: the command is absent from the witness entirely, and
+      // the verdict is the unchanged gap.
+      if (tries.length === 0) return { claim, verdict: 'gap' };
+      // An attempt with no completed entry is the shape a failing run leaves.
+      // A claimed pass over it is contradicted; a claimed non-pass is what the
+      // record actually corroborates, which is the direction this check could
+      // not reach at all before the attempt half existed.
+      if (isGreen(claim.result)) {
+        return {
+          claim,
+          verdict: 'contradiction',
+          marker: ATTEMPT_ONLY_MARKER,
+          attemptOnly: true,
+        };
+      }
+      return { claim, verdict: 'verified', attemptOnly: true };
+    }
+    // At least one completed run exists. A command that failed, was fixed and
+    // re-ran green is a normal cycle, so the earlier attempt-only records for
+    // the same string are deliberately not consulted here.
     if (isGreen(claim.result)) {
       const markers = matches.map((e) => failureMarker(e));
       if (markers.every((m) => m !== null)) {
@@ -207,9 +278,17 @@ function render(results) {
         `via=${r.claim.tool} claim="${r.claim.claim}" (known limitation — no witness cross-check possible)`
       );
     } else if (r.verdict === 'verified') {
-      lines.push(`verified cmd="${r.claim.cmd}"`);
+      lines.push(
+        r.attemptOnly
+          ? `verified cmd="${r.claim.cmd}" (witness records the attempt and no completed run — the claim asserts no pass, so the record corroborates it)`
+          : `verified cmd="${r.claim.cmd}"`
+      );
     } else if (r.verdict === 'gap') {
       lines.push(`EVIDENCE GAP — cmd="${r.claim.cmd}" claimed but not in witness log`);
+    } else if (r.attemptOnly) {
+      lines.push(
+        `EVIDENCE CONTRADICTION — cmd="${r.claim.cmd}" claimed PASS but the witness records only an attempt: ${r.marker}`
+      );
     } else {
       lines.push(
         `EVIDENCE CONTRADICTION — cmd="${r.claim.cmd}" claimed PASS but witness tail shows ${r.marker}`
@@ -276,6 +355,12 @@ function run(argv) {
 }
 
 module.exports = {
+  // Exported so no consumer — the suite included — re-spells the witness
+  // format or the attempt-only wording. A hand copy of either would keep
+  // agreeing with itself while the writer moved underneath it.
+  WITNESS_MARKER,
+  WITNESS_ATTEMPT_MARKER,
+  ATTEMPT_ONLY_MARKER,
   parseClaims,
   parseWitness,
   isLogWritingCommand,
