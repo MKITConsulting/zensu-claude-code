@@ -1502,14 +1502,44 @@ stop "$CAP_FAIL_SID" >/dev/null
 printf '%s\n' '{malformed-cap-claim' > "$CASE_STATE/pending-review.json.claim"
 cp "$CASE_STATE/pending-review.json.claim" "$CASE_ROOT/cap-failure.before"
 CAP_FAIL_OUT="$(stop "$CAP_FAIL_SID")"; CAP_FAIL_RC=$?
+# Every condition is hoisted BEFORE the test so the FAIL branch can name what
+# actually happened. It carried no variable at all — the same blindness C7 had,
+# in the same file — so a failure said only that this case was not fail-closed,
+# without saying which of its five conditions gave way.
+#
+# The REASON is captured rather than reduced to a yes/no. The condition is a
+# `grep -q` for one phrase, and a bare "no match" tells a reader nothing about
+# what the hook actually said, which is the whole question when a fail-closed
+# path reports the wrong cause. Note the ORDER: the grep runs over the FULL
+# reason and the truncation is for DISPLAY only. Truncating first would silently
+# narrow the assertion, so a phrase past the cut would newly fail a check that
+# has nothing to do with this change. It is flattened to one line as well,
+# because `check` echoes its label verbatim and an embedded newline would split
+# one failure record into two.
+#
+# No owner diagnostic here, unlike C7 and C8: this case plants a DELIBERATELY
+# malformed claim, so parsing it could only ever report a parse error, and the
+# property under test is that the malformed file is preserved byte for byte.
+CAP_FAIL_DECISION="$(printf '%s' "$CAP_FAIL_OUT" | decision)"
+CAP_FAIL_REASON_FULL="$(printf '%s' "$CAP_FAIL_OUT" | reason)"
+CAP_FAIL_RECEIPT=false
+if printf '%s' "$CAP_FAIL_REASON_FULL" | grep -q "cancellation receipt"; then
+  CAP_FAIL_RECEIPT=true
+fi
+CAP_FAIL_REASON="$(printf '%s' "$CAP_FAIL_REASON_FULL" | tr '\n' ' ' | cut -c1-120)"
+CAP_FAIL_PRESERVED=false
+if cmp -s "$CASE_ROOT/cap-failure.before" "$CASE_STATE/pending-review.json.claim"; then
+  CAP_FAIL_PRESERVED=true
+fi
+CAP_FAIL_ACTIVE="$(state_flag "$CAP_FAIL_SID" active)"
 if [ "$CAP_FAIL_RC" -eq 0 ] \
-  && [ "$(printf '%s' "$CAP_FAIL_OUT" | decision)" = block ] \
-  && printf '%s' "$(printf '%s' "$CAP_FAIL_OUT" | reason)" | grep -q "cancellation receipt" \
-  && cmp -s "$CASE_ROOT/cap-failure.before" "$CASE_STATE/pending-review.json.claim" \
-  && [ "$(state_flag "$CAP_FAIL_SID" active)" = true ]; then
+  && [ "$CAP_FAIL_DECISION" = block ] \
+  && [ "$CAP_FAIL_RECEIPT" = true ] \
+  && [ "$CAP_FAIL_PRESERVED" = true ] \
+  && [ "$CAP_FAIL_ACTIVE" = true ]; then
   check "C6b cap cancellation failure blocks and preserves the claim" PASS
 else
-  check "C6b cap cancellation failure remains fail-closed" FAIL
+  check "C6b cap cancellation failure (rc=$CAP_FAIL_RC decision=$CAP_FAIL_DECISION receipt=$CAP_FAIL_RECEIPT preserved=$CAP_FAIL_PRESERVED active=$CAP_FAIL_ACTIVE reason='${CAP_FAIL_REASON:-<empty>}')" FAIL
 fi
 
 # Transferring an expired emitted claim renews its lease. The freshly informed
@@ -1538,17 +1568,51 @@ CLAIM_FILE="$LEASE_CLAIM" node -e '
   fs.writeFileSync(process.env.CLAIM_FILE, JSON.stringify(j, null, 2));
 '
 LEASE_C_EXPIRED="$(stop lease-c)"
-if [ "$(printf '%s' "$LEASE_A" | decision)" = block ] \
-  && [ "$(printf '%s' "$LEASE_B" | decision)" = block ] \
+# Every condition is hoisted into a variable BEFORE the test, so the FAIL branch can
+# name what actually happened. It used to print the PASS sentence verbatim with no
+# variable at all, which made a failure undiagnosable from a CI log — and this check
+# is Windows-intermittent, so its intermittency was learnable only by re-running it
+# rather than by reading it. The sibling C8 already carries this shape; C7 did not.
+#
+# The owner diagnostic mirrors C8's on purpose, because the two checks are the same
+# A/B/C scenario in two timestamp styles and share one gate: the transfer path tests
+# `deferredOwnerProcessIsAlive(claim)` as the FIRST disjunct, so a wrong "alive"
+# short-circuits the very lease this check is named for. `stored` is the claim's
+# recorded process start identity and `actual` the one derivable now; on win32
+# `processStartIdentity` has no branch and answers null, leaving ownership on bare
+# PID liveness. A `stored:null` beside `alive:true` on a supposedly dead owner is
+# what PID reuse looks like, and capturing that pair is why this message exists.
+LEASE_A_DECISION="$(printf '%s' "$LEASE_A" | decision)"
+LEASE_B_DECISION="$(printf '%s' "$LEASE_B" | decision)"
+LEASE_C_FRESH_DECISION="$(printf '%s' "$LEASE_C_FRESH" | decision)"
+LEASE_C_EXPIRED_DECISION="$(printf '%s' "$LEASE_C_EXPIRED" | decision)"
+LEASE_B_ACTIVE="$(state_flag lease-b active)"
+LEASE_C_ACTIVE="$(state_flag lease-c active)"
+LEASE_OWNER_DIAG="$(CONTROL_CORE="$CORE" CLAIM_FILE="$LEASE_CLAIM" node -e '
+  try {
+    const fs = require("fs");
+    const core = require(process.env.CONTROL_CORE);
+    const claim = JSON.parse(fs.readFileSync(process.env.CLAIM_FILE, "utf8"));
+    let alive = false;
+    try { process.kill(claim.ownerPid, 0); alive = true; }
+    catch (error) { alive = error.code === "EPERM"; }
+    const actual = core.processStartIdentityForPid(claim.ownerPid);
+    process.stdout.write(`pid:${claim.ownerPid},stored:${claim.ownerProcessStartIdentity || "null"},actual:${actual || "null"},alive:${alive}`);
+  } catch (error) {
+    process.stdout.write(`diagnostic-error:${error.message}`);
+  }
+')"
+if [ "$LEASE_A_DECISION" = block ] \
+  && [ "$LEASE_B_DECISION" = block ] \
   && [ -n "$LEASE_B_TS" ] && [ "$LEASE_B_TS" != "2020-01-01T00:00:00Z" ] \
   && [ "$LEASE_C_FRESH_RC" -eq 0 ] \
-  && [ "$(printf '%s' "$LEASE_C_FRESH" | decision)" = allow ] \
-  && [ "$(printf '%s' "$LEASE_C_EXPIRED" | decision)" = block ] \
-  && [ "$(state_flag lease-b active)" = false ] \
-  && [ "$(state_flag lease-c active)" = true ]; then
+  && [ "$LEASE_C_FRESH_DECISION" = allow ] \
+  && [ "$LEASE_C_EXPIRED_DECISION" = block ] \
+  && [ "$LEASE_B_ACTIVE" = false ] \
+  && [ "$LEASE_C_ACTIVE" = true ]; then
   check "C7 transferred claim renews timestamp lease before another session may adopt" PASS
 else
-  check "C7 transferred claim renews timestamp lease before another session may adopt" FAIL
+  check "C7 transferred claim lease renewal (a=$LEASE_A_DECISION b=$LEASE_B_DECISION b_ts=${LEASE_B_TS:-<empty>} fresh_rc=$LEASE_C_FRESH_RC fresh=$LEASE_C_FRESH_DECISION expired=$LEASE_C_EXPIRED_DECISION b_active=$LEASE_B_ACTIVE c_active=$LEASE_C_ACTIVE owner=$LEASE_OWNER_DIAG)" FAIL
 fi
 
 # timestampStyle:none deliberately persists no wall-clock timestamp. Assignment
