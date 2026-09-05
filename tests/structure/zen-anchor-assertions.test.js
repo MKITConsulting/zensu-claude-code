@@ -911,12 +911,18 @@ test("every grader compares against the anchor its own scenario supplies", () =>
 // vector for them is the standing fix; selecting the one grader BY CONTENT and
 // driving it in both directions is what this closes today. Selection is by a
 // distinguishing literal, never by index, so inserting a grader above it cannot
-// silently re-point this test.
+// silently re-point this test. The literal is ENGLISH on purpose: a selector
+// reaching into this repository's own scenario file falls outside both language
+// carve-outs CLAUDE.md states — the grader-alternation one is for a pattern matched
+// against text whose language the product does not control, and the mechanical `Z26`
+// allowance keys on a match sitting inside a `/.../` regex literal, which an argument
+// to `includes(...)` is not. It carries the start of the expression rather than the
+// bare declaration, because a name alone is one a later grader could reuse.
 
 const CONTRACT_FILE = path.join(SCENARIO_DIR, "contract-compliance.yaml");
 
 test("the supplied-none grader rejects an anchor and accepts its absence", () => {
-  const bodies = assertionBodies(CONTRACT_FILE).filter((b) => b.includes("Ablauf"));
+  const bodies = assertionBodies(CONTRACT_FILE).filter((b) => b.includes("const anchors = prose.split"));
   assert.strictEqual(bodies.length, 1, `expected exactly one anchor grader, found ${bodies.length}`);
   const grader = bodies[0];
   const clean = [

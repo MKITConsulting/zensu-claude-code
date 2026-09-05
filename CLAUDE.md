@@ -2007,14 +2007,20 @@ be rediscovered: read the existing note's `detectedAtMs` before the clear and ca
 a re-mint with an unchanged `kind`, so the TTL ages the REFUSAL rather than the turn.
 
 **Sites that move together:** `zensu_run_bounded` in `hooks/lib/zensu-bounded-run.sh`, the ONE
-watchdog ladder for the two Stop-path children that read outside the process — the `git status` this
-counter runs and the refused-spawn transcript read. They carried hand-copied ladders and the
+watchdog ladder for every child that reads outside the process. It was created for the two on the
+Stop path — the `git status` this counter runs and the refused-spawn transcript read — and it now
+also bounds callers that are not on that path at all, which is why the ladder's own header states
+the CRITERION rather than a count: raising the deadline stopped being a Stop-path-only decision.
+The two on the Stop path carried hand-copied ladders and the
 `gtimeout` arm reached only one of them; `C49` and `C56a` pin each call site by name, `C42`/`C42a`
 pin the ladder's own arms and their order, `C56` forbids a `return` in the arm positions its
 pattern can see and `C56d` requires an unwrapped `"$@"` to survive in the body — neither reads
-ARM POSITION, so do not restate them as pinning "the last arm". It LIVES in `hooks/lib/` because a third consumer already exists —
+ARM POSITION, so do not restate them as pinning "the last arm". It LIVES in `hooks/lib/` because a FURTHER consumer already exists —
 `user-prompt-context-nudge.sh` reads a host-supplied transcript path with no watchdog at all —
-and a helper defined in a leaf hook cannot serve it. Three review rounds asked for that move
+and a helper defined in a leaf hook cannot serve it. That one is a CANDIDATE, not a caller, and
+the ordinal here deliberately counts nothing: it used to read "a third consumer" while the call
+sites it would be counted against had already grown past three, which is the same drift the
+census sentence above now avoids by stating the criterion. Three review rounds asked for that move
 before it was taken. **`hooks/user-prompt-zen-mode.sh` now WRAPS its own child** — it
 sources the ladder and runs the prompt-and-anchor child through it, which is the criterion
 this paragraph states rather than an ordinal; the census sentence above is the one that
@@ -5671,17 +5677,25 @@ it does not load at all. `stuckShapes` is exported for its TEST SEAM alone: its 
 always calls it with no argument. There is deliberately NO `reviewed` input of any kind —
 an earlier round carried one as a host obligation and then moved it into the module, and
 mapping `chain-closed` to `null` deleted it outright; a port that reintroduces one has
-reintroduced the false-completion class. The host half is SIX obligations a port must
+reintroduced the false-completion class. The host half is EIGHT obligations a port must
 re-decide: WHICH document carries
 the chain and which identity names it; the MODULE TRANSPORT (this host runs `node` with its
 cwd inside `hooks/lib` — the first of the two mechanisms
 `test-msys-special-plugin-module-boundaries.sh` sanctions — because the second needs a
 `zensu-host-path.sh` render and that is a second process on the hottest path in the plugin);
-the substitution into the directive AND its own independent re-check of the token (this host
-spells the grammar a second time inside its node program precisely so a swapped module
-cannot both produce a bad token and bless it); the charset belt appropriate to that host's
-transport — the module's predicate is an output-SHAPE contract, not a JSON escaping rule,
-and a port with a different transport still owes its own check; the DISCLOSURE — the
+the substitution into the directive AND its own independent re-check of the token BEFORE it is
+written (this host spells the grammar a second time inside its node program precisely so a
+swapped module cannot both produce a bad token and bless it); the SECOND, shell-side re-check
+over the bytes that ARRIVED, which is a separate obligation and not a restatement of the one
+before it — the body above argues that neither subsumes the other, because only a reader
+positioned after the transport can see a TRUNCATED WRITE, and a port that folds the two into
+one line drops exactly the defense that argument exists for; the charset belt appropriate to
+that host's transport — the module's predicate is an output-SHAPE contract, not a JSON
+escaping rule, and a port with a different transport still owes its own check; the DEADLINE on
+the child, which this list omitted for a release even though the body above already said the
+child runs under the shared ladder — a port whose child reads a file on stalled storage and is
+never bounded hangs the prompt path itself, and the ladder's own header names that residual;
+the DISCLOSURE — the
 fault-class vocabulary, the channel it is written to, and the decision that an ABSENT
 document is not a fault, an obligation easy to miss because it lives in the host half
 entirely while reading like a property of the module, and a port that omits it ships the
@@ -5690,14 +5704,26 @@ The pre-open guard on the document is no longer among them in the same way: it s
 because this host's `readWorkflowState` CREATES the state directory, but the BLOCKING half
 moved into the shared reader, where a port inherits it from the core rather than owing it.
 
+**Operator-facing accounts that must move with it:** `skills/zen-mode/SKILL.md` rule 6, the
+`user-prompt-zen-mode.sh` hook row in `docs/configuration.md` (pinned by Z19d, so a reword
+there reddens this feature's suite), and the per-turn character and KiB totals in
+`docs/architecture.md`, which are hand-derived from the measured directive length and are the
+one account in this list that ages silently whenever the directive moves. They are named
+individually further up as well; this bullet exists so a maintainer finds all three in one
+place rather than by reading the whole section.
+
 **The disclosure is spelled TWICE within this host, on opposite sides of a process
-boundary, and nothing holds the two together.** The child writes its own line from inside
-the node program; the parent writes a second one for the two outcomes the child cannot
-report, a watchdog kill and an unreachable `hooks/lib`. A shared constant cannot span that
-boundary — the child is a single-quoted argv program with no access to a shell variable —
+boundary, and that is why the lead-in has a pin of its own.** The child writes its own line
+from inside the node program; the parent writes a second one for the two outcomes the child
+cannot report, a watchdog kill and an unreachable `hooks/lib`. A shared constant cannot span
+that boundary — the child is a single-quoted argv program with no access to a shell variable —
 so the lead-in `zensu: zen-mode anchor unavailable (` exists in two languages in one file.
-`Z42` pins the parent arms and `Z46` pins the child vocabulary; NO check compares the two
-lead-ins, so reword one and reword both. A port that
+`Z42` pins the parent arms and `Z46` pins the child vocabulary, and `Z42b` extracts the ANCHOR
+lead-in from BOTH sides of the shipped hook and requires them equal, so a reword on one side
+fails rather than splitting one diagnostic into two an operator would never grep for together.
+It filters each side to the anchor wording deliberately: the parent also owns a
+`zensu: zen-mode prompt unavailable (` lead-in, a different fault class that must not be forced
+to agree with this one. A port owes the same pin, or the same divergence. A port that
 takes only the module gets a mapping with no reachable caller. `zensu-codex`, `zensu-kiro`
 and `zensu-antigravity` were NOT included in this change.
 

@@ -2417,6 +2417,31 @@ else
   check "Z42a the cd arm exits 0, so an unreachable hooks/lib is indistinguishable from success" FAIL
 fi
 
+# Z42b the ANCHOR disclosure lead-in is one string on both sides of the process boundary.
+#
+# The child writes its line from inside the node program and the parent writes
+# its own arms from shell, so the sentence is HAND-COPIED across a process
+# boundary and CLAUDE.md records that nothing compared the copies. A reword on
+# one side leaves an operator grepping for a lead-in that half the faults no
+# longer carry, which splits one diagnostic into two nobody would find together.
+#
+# Both sides are filtered to the ANCHOR lead-in on purpose: the parent also owns
+# a `prompt unavailable (` lead-in, which is a different fault class and must not
+# be forced to agree with this one. Each side must then yield EXACTLY one
+# spelling, so a second anchor wording added on either side fails rather than
+# being silently picked over.
+Z42B_CHILD="$(printf '%s' "$Z35_PROG" | grep -o 'process\.stderr\.write("[^"]*(' | sed 's/^process\.stderr\.write("//' | grep 'anchor' | sort -u)"
+Z42B_PARENT="$(grep -o 'echo "zensu: [^"]*(' "$HOOK" | sed 's/^echo "//' | grep 'anchor' | sort -u)"
+if [ -z "$Z42B_CHILD" ] || [ -z "$Z42B_PARENT" ]; then
+  check "Z42b an anchor disclosure lead-in could not be extracted (child=<$Z42B_CHILD> parent=<$Z42B_PARENT>) — the pin is not measuring anything" FAIL
+elif [ "$(printf '%s\n' "$Z42B_CHILD" | wc -l | tr -d ' ')" -ne 1 ] || [ "$(printf '%s\n' "$Z42B_PARENT" | wc -l | tr -d ' ')" -ne 1 ]; then
+  check "Z42b more than one anchor lead-in spelling on one side: child=<$(printf '%s' "$Z42B_CHILD" | tr '\n' '|')> parent=<$(printf '%s' "$Z42B_PARENT" | tr '\n' '|')>" FAIL
+elif [ "$Z42B_CHILD" = "$Z42B_PARENT" ]; then
+  check "Z42b the child and the parent spell one anchor disclosure lead-in ($Z42B_CHILD)" PASS
+else
+  check "Z42b the anchor disclosure lead-in differs across the process boundary: child=<$Z42B_CHILD> parent=<$Z42B_PARENT>" FAIL
+fi
+
 # Z37 the child must run under the SHARED watchdog ladder.
 #
 # This hook spawns a `node` child on every prompt of every zen-mode session,

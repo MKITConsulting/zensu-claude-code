@@ -313,6 +313,15 @@ if [ -L "$ZEN_ROOT/.zensu" ] || [ -L "$ZEN_STATE_DIR" ] || [ -L "$MARKER" ]; the
 elif [ -e "$MARKER" ] && [ ! -f "$MARKER" ]; then
   exit 0
 elif [ -f "$MARKER" ]; then
+  # ACCEPTED RESIDUAL, named here because this is the higher-traffic of the two
+  # marker reads: it runs on every prompt while the mode is on, where the off-write
+  # read-back runs only on an off phrase. `[ -f ]` excludes a FIFO, so what remains
+  # is the window between this test and the `grep`'s own open — a co-tenant swapping
+  # the path there blocks the read until the hook's registration timeout, costing the
+  # directive for that turn. Deliberately not wrapped in `zensu_run_bounded`: this is
+  # the hottest path in the plugin, and the shared ladder's deadline plus the child
+  # would approach the registration timeout rather than stay under it. The durable fix
+  # is one hardened marker primitive shared with `hooks/lib/zensu-zen-mode.sh`.
   grep -q '"active"[[:space:]]*:[[:space:]]*true' "$MARKER" 2>/dev/null || exit 0
 elif zen_path_untraversable "$MARKER" "$ZEN_ROOT"; then
   # A NON-TRAVERSABLE state directory is not an absent marker. Every test above
@@ -485,7 +494,19 @@ if [ "$ZEN_OFF" -eq 1 ]; then
       try { fs.closeSync(fd); } catch (_) {}
       try { fs.renameSync(tmp, target); } catch (e) { try { fs.unlinkSync(tmp); } catch (_) {} process.exit(1); }
     ' 2>/dev/null; then
-    grep -q '"active"[[:space:]]*:[[:space:]]*true' "$MARKER" 2>/dev/null || ZEN_OFF_RECORDED=1
+    # TYPE-GUARDED, and the guard is not tidiness. `grep -q ... ||` on its own sets
+    # RECORDED=1 for a marker that is GONE or unreadable exactly as readily as for
+    # one that says false, so a marker removed in the window after the rename would
+    # be reported to the user as a successful deactivation while the mode stayed on
+    # — the one outcome the refusal message below exists to prevent. `[ -f ]` is what
+    # makes this read-back assert what it claims. What it does NOT close is the window
+    # between that test and the `grep`'s own open: that is the same accepted TOCTOU
+    # pair the mode resolution above carries, and it is named at both sites rather
+    # than at one, because the resolution read is the higher-traffic of the two.
+    if [ -f "$MARKER" ] \
+      && ! grep -q '"active"[[:space:]]*:[[:space:]]*true' "$MARKER" 2>/dev/null; then
+      ZEN_OFF_RECORDED=1
+    fi
   fi
   if [ "$ZEN_OFF_RECORDED" -eq 0 ]; then
     cat <<'JSON'
