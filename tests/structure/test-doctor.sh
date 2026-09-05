@@ -3262,7 +3262,6 @@ case "$P6_NOCORE_OUT" in
   *) check "P6h an unloadable core discloses a missing check (got: $P6_NOCORE_OUT)" FAIL ;;
 esac
 rm -f "$P6_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json"
-rm -f "$P6_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json"
 
 # Silence is the one verdict a diagnostic may not give: with no bound key the
 # check did not run, and the report has to say so rather than omit the row.

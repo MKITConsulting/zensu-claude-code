@@ -4838,8 +4838,13 @@ was not slow; it was not paid for. That is the failure §Host-Refused Reviewer S
 records verbatim ("read the shard's remaining budget", not the suite's `timeoutMs`),
 observed rather than predicted.
 
-**The suite therefore moved to `windows-shard-8`, alone.** Not to a different
-neighbour: the same run's job durations were shard-1 1630 s, shard-2 1187 s, shard-3
+**The suite therefore moved to `windows-shard-8`, alone AT THE TIME.** It no longer is:
+the `stop-enforcer-self-review-routing` rebalance recorded above later moved
+`review-worker-evidence-lease` onto this shard, so shard 8 now carries TWO suites whose
+run together came to roughly 265 s against the same 1800000 budget. Keep the "alone"
+qualified rather than deleting the sentence — the arithmetic below is what justified
+creating the shard, and it was taken when the suite really was the only member. Not to a
+different neighbour: the same run's job durations were shard-1 1630 s, shard-2 1187 s, shard-3
 1886 s, shard-4 1779 s, shard-5 1008 s, shard-6 1011 s, shard-7 1516 s, and 893 s does
 not fit inside any of them under a 1800 s envelope. Adding a shard is what the
 arithmetic left; rebalancing was not available. The move is three files in one commit —
@@ -4867,8 +4872,12 @@ lower bound on a distribution, never a bound on the next run. A ceiling set from
 projection is only as good as what the samples measured, and these measured a defect.
 And a ceiling set far ABOVE the measurement stops being a tripwire at all: 600000 is
 3.9x the real figure and deliberately BELOW the ~650 s a reintroduced probe stall would
-cost, so that regression trips the cap instead of merely making CI slow. Alone on shard
-8 the cap — not the shard — is what binds this suite.
+cost, so that regression trips the cap instead of merely making CI slow. The cap — not
+the shard — is still what binds this suite, and the reason is now arithmetic rather than
+solitude: shard 8 carries a second suite (`review-worker-evidence-lease`, measured
+113321 ms), and the two together came to roughly 265 s against the 1800000 profile
+budget, so the shard has room to spare while 600000 remains the tighter bound. Re-derive
+this if a third suite lands here; "alone" is no longer the premise.
 
 **That measurement is also why 600000 was REJECTED for this suite, not merely not
 adopted.** The parallel working copy lowered its own ceiling to 600000 on the strength

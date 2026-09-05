@@ -2404,8 +2404,18 @@ function validateWorkflowState(state, sessionId) {
 }
 
 function atomicWriteJson(file, value) {
-  if (fs.existsSync(file)) {
-    const existing = fs.lstatSync(file);
+  // lstat, never existsSync. existsSync FOLLOWS the link, so it answers false for a
+  // DANGLING symlink and skipped all three guards below for exactly the shape they
+  // exist to catch: the rename then replaced the link and reported a clean write,
+  // destroying the tamper artifact. Only a clean ENOENT is absence; any other errno
+  // means something is at that path that this function must not write over.
+  let existing = null;
+  try {
+    existing = fs.lstatSync(file);
+  } catch (error) {
+    if (!error || error.code !== 'ENOENT') fail(`unreadable state file rejected: ${file}`);
+  }
+  if (existing) {
     if (existing.isSymbolicLink()) fail('symlink state file rejected');
     if (!existing.isFile()) fail('non-regular state file rejected');
     if (existing.nlink > 1) fail('multi-linked state file rejected');
@@ -2574,7 +2584,26 @@ function initializeWorkflowStateDetailed(options) {
   const stateDirectory = workflowStateDirectory(options.projectRoot);
   const file = path.join(stateDirectory, `${WORKFLOW_STATE_PREFIX}${key}.json`);
   return withFileLock(stateDirectory, `state-${key}`, () => {
-    if (fs.existsSync(file)) {
+    // lstat, never existsSync, and for the same reason atomicWriteJson uses it: a
+    // DANGLING symlink is invisible to existsSync, so this re-check was STRICTLY
+    // WEAKER than the classifyWorkflowBaseline verdict it exists to confirm under
+    // the lock — it reported `created: true` for a shape the classifier calls
+    // UNSAFE. Any existing entry, whatever its kind, is NOT a creation.
+    let existing = null;
+    try {
+      existing = fs.lstatSync(file);
+    } catch (error) {
+      if (!error || error.code !== 'ENOENT') {
+        fail(`unreadable workflow state file rejected: ${file}`);
+      }
+    }
+    if (existing) {
+      if (existing.isSymbolicLink() || !existing.isFile() || existing.nlink !== 1) {
+        // Never read through it and never create over it: the outer classifier
+        // already refuses this shape, and rebuilding here would destroy the
+        // evidence the refusal exists to preserve.
+        fail(`unsafe workflow state file rejected: ${file}`);
+      }
       return { state: validateWorkflowState(readJson(file), key), created: false };
     }
     const initial = stampWorkflowState({

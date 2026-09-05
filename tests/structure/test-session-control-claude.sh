@@ -1100,10 +1100,17 @@ esac
 # The record-exists branch re-initializes a MISSING workflow document on a clean
 # ENOENT, and FAILS for anything else. Both arms were uncovered: no test in the
 # tree removed the document and re-fired SessionStart, and the fresh-creation row
-# far above asserts only that a NEW session gets one. That mattered because the
-# narrowing carries the whole safety argument — changing `=== MISSING` to
-# `!== PRESENT` would make an automatic, UNCONFIRMED rebuild run over a planted
-# symlink or hard link, and nothing in the tree would have gone red.
+# far above asserts only that a NEW session gets one.
+#
+# State the bound HONESTLY, because the earlier wording overclaimed and the check
+# below was labelled a discriminator it is not. The `=== MISSING` narrowing is
+# real and worth keeping, but the tamper row does NOT go red when it is widened to
+# `!== PRESENT`: `repairWorkflowBaseline` carries its own `!verdict.repairable`
+# refusal, so a planted hard link is still refused and its bytes still survive —
+# the SECOND layer holds while the first is gone. What the row below pins is the
+# OUTCOME (refused, bytes untouched), not which layer produced it. A check that
+# isolates the outer bound would have to neuter the inner guard as well, and that
+# is not what this fixture does.
 
 rm -f "$BASELINE_A"
 HEAL_PAYLOAD="$(payload SessionStart "$SID_A" "$PROJECT_A")"
@@ -1124,9 +1131,12 @@ else
   head -c 300 "$TMP/heal.err" 2>/dev/null
 fi
 
-# The DISCRIMINATOR. Without it the row above passes identically in a tree that
-# rebuilds anything it cannot read, which is the property the ENOENT-only bound
-# exists to hold.
+# The TAMPER row. It pins the end-to-end OUTCOME — a hard-linked document is
+# refused and its bytes are left alone — which is the property a user depends on.
+# It is deliberately NOT labelled a discriminator for the `=== MISSING` bound: as
+# the block above records, that bound can be widened and this row stays green,
+# because repairWorkflowBaseline refuses the same shape one layer down. Layered
+# defense is the intent; claiming this row isolates the outer layer was not true.
 HEAL_LINK_SRC="$TMP/heal-link-src.json"
 printf '%s' '{"planted":true}' >"$HEAL_LINK_SRC"
 rm -f "$BASELINE_A"

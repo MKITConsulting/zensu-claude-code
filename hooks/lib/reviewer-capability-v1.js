@@ -526,7 +526,11 @@ function main() {
     // and names no way out, in a state where this hook denies every tool and the
     // only reachable commands are the two the Bash recognizer admits.
     if (error && error.code === BASELINE_MISSING_CODE) {
-      deny("this session's Session Control record is intact and served by the running Zensu installation, but the workflow document it anchors is missing — a deleted and re-created worktree loses it, because .zensu/state/ is gitignored. It is NOT read as \"no chain was ever active\": that is why every tool is denied. Run /zensu:adopt-session to see the diagnosis, and /zensu:adopt-session --confirm to rebuild the document; both stay reachable in this state. Rebuilding is a loss, not a restore — a review chain that was live when the document vanished is gone.");
+      // The reachability clause is PLATFORM-QUALIFIED on purpose. zensu-doctor-invocation.js
+      // sets PLATFORM_SUPPORTED = process.platform !== "win32" and gates both recognizers on
+      // it, so on win32 the Bash recognizer admits NEITHER command and an unconditional
+      // "both stay reachable" is false in the one state where a wrong remedy has no fallback.
+      deny("this session's Session Control record is intact and served by the running Zensu installation, but the workflow document it anchors is missing — a deleted and re-created worktree loses it, because .zensu/state/ is gitignored. It is NOT read as \"no chain was ever active\": that is why every tool is denied. Run /zensu:adopt-session to see the diagnosis, and /zensu:adopt-session --confirm to rebuild the document. On macOS and Linux both stay reachable in this state; on Windows the Bash recognizer admits neither, so start a fresh Claude Code session instead. Rebuilding is a loss, not a restore — a review chain that was live when the document vanished is gone.");
       return;
     }
     deny(`immutable context revalidation failed: ${error.message}`);

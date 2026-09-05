@@ -4527,13 +4527,15 @@ test('WB1 the classification names all four shapes, and both tamper shapes are o
   assert.equal(classify(), core.BASELINE_STATES.UNSAFE, 'a symlink is unsafe, not readable');
 });
 
-test('WB1a an lstat error that is not ENOENT is UNSAFE, never missing', () => {
+test('WB1a a NON-DIRECTORY state component is UNSAFE, never missing', () => {
   const f = fixture('claude');
   register(f);
-  // A FILE where the state directory belongs. lstat then answers ENOTDIR on
-  // POSIX — an error, but not absence. Reporting it as missing would aim the
-  // repair at a path it cannot own, which is the same "ENOENT is not proof of
-  // absence" lesson the review-evidence sweep records in its own header.
+  // A FILE where the state directory belongs. State the MECHANISM correctly: the
+  // ladder's lstat on `.zensu/state` SUCCEEDS here — it is a regular file — and the
+  // verdict comes from the `!componentStat.isDirectory()` arm, NOT from a thrown
+  // ENOTDIR. The previous title and comment claimed the throw arm, which this
+  // fixture never reaches, so the case passed for a different reason than it named.
+  // The throw arm has its own case below.
   const zensuDir = path.join(f.projectRoot, '.zensu');
   fs.mkdirSync(zensuDir, { recursive: true });
   fs.writeFileSync(path.join(zensuDir, 'state'), 'not a directory');
@@ -4543,6 +4545,104 @@ test('WB1a an lstat error that is not ENOENT is UNSAFE, never missing', () => {
   );
   // And the verdict refuses to repair it, so the error can never be rebuilt over.
   assert.equal(core.workflowBaselineVerdict(baselineOptions(f)).repairable, false);
+});
+
+test('WB1b a LEAF lstat error that is not ENOENT is UNSAFE, never missing', (t) => {
+  if (process.platform === 'win32' || process.getuid?.() === 0) {
+    t.diagnostic('needs POSIX mode bits and a non-root uid to make lstat fail with EACCES');
+    return;
+  }
+  const f = fixture('claude');
+  register(f);
+  // The arm WB1a was titled for and never reached: a THROWN non-ENOENT errno. The
+  // components are all proper directories, so the ladder passes; the leaf lstat then
+  // fails with EACCES because its parent is unsearchable. ENOENT is the only errno
+  // that means absence — anything else must not be reported as a missing document,
+  // or the repair would build over a path it could not even read.
+  const stateDir = path.dirname(baselineFile(f));
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.chmodSync(stateDir, 0o000);
+  try {
+    assert.equal(
+      core.classifyWorkflowBaselineShape(baselineFile(f), baselineProject(f)),
+      core.BASELINE_STATES.UNSAFE,
+    );
+  } finally {
+    fs.chmodSync(stateDir, 0o700);
+  }
+});
+
+test('WB1c a DANGLING symlink is an existing entry to both write gates', (t) => {
+  if (WINDOWS_SYMLINK_SKIP) {
+    t.diagnostic(WINDOWS_SYMLINK_SKIP);
+    return;
+  }
+  const f = fixture('claude');
+  register(f);
+  // fs.existsSync FOLLOWS the link, so it answers false for a dangling one. Both
+  // write gates keyed their guards on it, so the shape the classifier calls UNSAFE
+  // was invisible to them: the rename replaced the link and reported a clean write,
+  // destroying the tamper artifact. lstat is what makes an existing entry visible.
+  const file = baselineFile(f);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.symlinkSync(path.join(f.projectRoot, 'no-such-target.json'), file);
+
+  assert.equal(
+    core.classifyWorkflowBaselineShape(file, baselineProject(f)),
+    core.BASELINE_STATES.UNSAFE,
+    'the classifier already sees it — the write gates must agree',
+  );
+  assert.throws(
+    () => core.atomicWriteJson(file, { any: 'value' }),
+    /symlink state file rejected/,
+  );
+  assert.throws(
+    () => core.initializeWorkflowState({
+      projectRoot: baselineProject(f),
+      sessionId: RAW_SESSION,
+    }),
+    /unsafe workflow state file rejected/,
+  );
+  // The artifact SURVIVES: destroying it is what made the old behaviour a loss of
+  // evidence rather than merely a wrong return value.
+  assert.equal(fs.lstatSync(file).isSymbolicLink(), true);
+});
+
+test('WB1d the locked re-check refuses a document that appeared after the verdict', () => {
+  const f = fixture('claude');
+  register(f);
+  initialize(f);
+  const file = baselineFile(f);
+  assert.equal(fs.existsSync(file), true, 'the document really is there');
+
+  // The arm this reaches had NO executed case anywhere: it is only reachable when
+  // the OUTER verdict says repairable and the LOCKED create then finds the document
+  // already present. WB6 refuses one ladder earlier, at !verdict.repairable, so no
+  // fixture ever constructed the window. Faking a single ENOENT on the leaf lstat
+  // makes the outer classification see MISSING while the locked check sees the real
+  // file — exactly the benign race a concurrent SessionStart produces.
+  const realLstat = fs.lstatSync;
+  let faked = false;
+  fs.lstatSync = function patchedLstat(target, ...rest) {
+    if (!faked && String(target) === file) {
+      faked = true;
+      const absent = new Error(`ENOENT: no such file or directory, lstat '${file}'`);
+      absent.code = 'ENOENT';
+      throw absent;
+    }
+    return realLstat.call(this, target, ...rest);
+  };
+  try {
+    assert.throws(
+      () => core.repairWorkflowBaseline(baselineOptions(f)),
+      (error) => core.isBaselineAlreadyPresent(error)
+        && error.baselineState === core.BASELINE_STATES.PRESENT,
+      'the benign race is typed apart from tamper, so both callers can branch on it',
+    );
+  } finally {
+    fs.lstatSync = realLstat;
+  }
+  assert.equal(faked, true, 'the fake must actually have been consumed');
 });
 
 test('WB2 the verdict refuses every bind it cannot establish, and names which', () => {

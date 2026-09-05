@@ -237,6 +237,15 @@ const isBaselineState = (value, name) => {
   const token = baselineState(name);
   return token !== null && value === token;
 };
+// Membership is read from the OWNER's exported vocabulary rather than a literal
+// list here, so a state added there is recognised without a second edit — and a
+// state this build has never heard of stays unrecognised, which is the case the
+// residual arms below exist for. An unreadable export makes NOTHING recognised,
+// which errs toward disclosing rather than toward a silent clean bill.
+const isRecognizedBaselineState = (value) => {
+  const states = (core && core.BASELINE_STATES) || {};
+  return Object.keys(states).some((name) => isBaselineState(value, name));
+};
 
 // The half is FAULTED, never merely "not done", when the document is present but
 // unsafe or unreadable: something is sitting at that path, and this command
@@ -249,6 +258,13 @@ const baselineFault = (baseline) => {
   if (isBaselineState(baseline.state, "UNSAFE")
     || isBaselineState(baseline.state, "UNREADABLE")) {
     return baseline.state;
+  }
+  // RESIDUAL ARM. A state this build does not recognise is a state this build
+  // cannot vouch for, so it counts as a fault and the exit code says so. Without
+  // it an unrecognised classification fell through every arm above, rendered as a
+  // clean bill of health and exited 0 — the one verdict a diagnostic may not give.
+  if (typeof baseline.state === "string" && baseline.state && !isRecognizedBaselineState(baseline.state)) {
+    return "unrecognized-state:" + baseline.state;
   }
   return "";
 };
@@ -467,6 +483,22 @@ function renderBaselineDiagnosis(baseline, sessionId) {
     w("truncated write. Once you know which, remove the file and start a fresh session.\n");
     return out.join("");
   }
+  // RESIDUAL ARM, paired with the one in baselineFault. Reaching here with a state
+  // no arm above claimed means this build does not recognise it — and returning
+  // the empty string then rendered an unknown classification as a clean bill of
+  // health while repairExitCode answered 0. Silence is the one verdict a
+  // diagnostic may not give.
+  if (baseline && typeof baseline.state === "string" && baseline.state
+    && !isRecognizedBaselineState(baseline.state)) {
+    w("\nThis session's workflow document reports a state this build does not recognise:\n");
+    w("  " + safe(baseline.state) + "\n");
+    w("  " + safe(baseline.path || "(path not reported)") + "\n");
+    w("\nThat is a missing check rather than an all-clear. This command will NOT rebuild or\n");
+    w("repair it, because it cannot tell what is at that path. Inspect it, then start a\n");
+    w("fresh Claude Code session, and report the state name above if it came from a\n");
+    w("Zensu release rather than from a hand-edited file.\n");
+    return out.join("");
+  }
   return "";
 }
 
@@ -494,6 +526,17 @@ function renderBaselineNotes(baseline, sessionId) {
     w("This session is able to run tools again. The rebuilt baseline reads \"never active\":\n");
     w("a review chain that was live when the document vanished is gone and is not recovered\n");
     w("by this repair.\n");
+    // The listing belongs HERE too, and this is the branch that needs it most: the
+    // report-only path prints it while the document is still missing, but the
+    // rebuild is the step that destroys the context those files describe. Omitting
+    // it left the user with a usable session and no pointer to what the lost
+    // document had been in the middle of. The sessionId is already threaded for it.
+    const rebuiltEvidence = survivingEvidence(baseline.projectRoot, sessionId);
+    if (rebuiltEvidence.length) {
+      w("\nThese session-state files survived the rebuild and may say what the lost document\n");
+      w("was in the middle of. This command does not interpret them:\n");
+      rebuiltEvidence.forEach((name) => w("  " + safe(name) + "\n"));
+    }
     if (baseline.provenance !== "recorded") {
       w("\nWARNING: the rebuild succeeded but its provenance entry could not be written (\""
         + safe(String(baseline.provenance)) + "\").\n");
@@ -675,9 +718,22 @@ function main() {
     process.stdout.write("record the takeover in — and while that is so the capability gate denies EVERY\n");
     process.stdout.write("tool in this session. The adoption above is real and is not enough on its own.\n");
     if (isBaselineState(adoptedShape, "UNSAFE")) {
+      // GUARDED like its sibling twelve lines above, and for a stronger reason: this
+      // runs on the POST-MUTATION path, after the record swap has already happened.
+      // An exception here would replace the whole closing report with a stack trace
+      // in the one function whose contract is never to throw — losing the warning
+      // above it and every lease result below it. The component NAME is a nicety;
+      // the warning is not, so a failure costs the name and keeps the sentence.
+      let unsafeComponent = null;
+      try {
+        unsafeComponent = core.baselineUnsafeComponent(
+          adopted.projectRoot,
+          core.adoptionWorkflowStatePath(adopted.projectRoot, request.sessionId),
+        );
+      } catch (_error) { unsafeComponent = null; }
       process.stdout.write("Something is SITTING at that path, so --confirm will REFUSE to rebuild it:\n");
-      process.stdout.write("  " + safe(core.baselineUnsafeComponent(adopted.projectRoot,
-        core.adoptionWorkflowStatePath(adopted.projectRoot, request.sessionId))) + "\n");
+      process.stdout.write("  " + safe(unsafeComponent
+        || "(the offending component could not be named — inspect .zensu/state/ by hand)") + "\n");
       process.stdout.write("Inspect that before doing anything else, then start a fresh session.\n");
     } else {
       process.stdout.write("Re-run this command with --confirm to rebuild the document, provided it is\n");
