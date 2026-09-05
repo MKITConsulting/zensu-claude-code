@@ -2741,6 +2741,51 @@ EOF
     check "AC-D07 an ordinary command is denied with the pruned wording (failed:$PRUNED_DENY_FAILURES)" FAIL
   fi
 
+  # AC-D11 — the Edit-matcher gate. It is registered on Edit|Write|MultiEdit, so
+  # no Bash-matcher row above can reach it and Part D built no Edit payload at
+  # all: its pruned capture and its pruned_plugin_root deny call had NO executed
+  # case anywhere. The shared-emitter argument bounds the WORDING, never the
+  # WIRING — a mis-spelled predicate name, or this branch placed after the generic
+  # zensu_emit_hook_session_deny six lines below it, would leave the Edit channel
+  # telling the user to start a fresh session while every other gate names the
+  # repair, with the whole suite green.
+  PRUNED_EDIT_PAYLOAD="$(EVENT=PreToolUse SESSION="$PRUNED_SESSION" CWD="$PROJECT" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: process.env.EVENT,
+      session_id: process.env.SESSION,
+      cwd: process.env.CWD,
+      tool_name: "Edit",
+      tool_input: {file_path: "README.md", old_string: "a", new_string: "b"},
+    }));
+  ')"
+  if [ "$(pruned_gate_decision pre-edit-tdd-reminder.sh "$PRUNED_EDIT_PAYLOAD")" = deny ] \
+      && grep -qF 'removed from the plugin cache' "$PRUNED_GATE_OUT" \
+      && grep -qF '(version 0.17.0)' "$PRUNED_GATE_OUT" \
+      && grep -qF '(0.18.0) cannot re-verify' "$PRUNED_GATE_OUT" \
+      && grep -qF '/zensu:adopt-session' "$PRUNED_GATE_OUT"; then
+    check "AC-D11 the Edit-matcher gate denies with the pruned wording and both version slots" PASS
+  else
+    check "AC-D11 the Edit-matcher gate denies with the pruned wording (got: $(head -c 240 "$PRUNED_GATE_OUT" 2>/dev/null))" FAIL
+  fi
+
+  # AC-D12 — pre-bash-zensu-gate.sh, reached for the first time. Every other row
+  # hands it a command with no `zensu <noun> <verb>` form, so it returns at its own
+  # `[ -z "$INVOCATIONS" ] && exit 0` nine lines above the bind and its pruned
+  # branch is never executed — the allow half above is satisfied identically in a
+  # tree with that branch deleted. A real read-classified CLI invocation is the
+  # only shape that gets past the early return, and the classification happens
+  # AFTER the bind, so the pruned deny is what comes back.
+  PRUNED_ZENSU_PAYLOAD="$(bash_payload "$PRUNED_SESSION" 'zensu features list')"
+  if [ "$(pruned_gate_decision pre-bash-zensu-gate.sh "$PRUNED_ZENSU_PAYLOAD")" = deny ] \
+      && grep -qF 'removed from the plugin cache' "$PRUNED_GATE_OUT" \
+      && grep -qF '(version 0.17.0)' "$PRUNED_GATE_OUT" \
+      && grep -qF '(0.18.0) cannot re-verify' "$PRUNED_GATE_OUT" \
+      && grep -qF '/zensu:adopt-session' "$PRUNED_GATE_OUT"; then
+    check "AC-D12 the zensu CLI gate reaches its bind for a real invocation and denies with the pruned wording" PASS
+  else
+    check "AC-D12 the zensu CLI gate reaches its bind for a real invocation (got: $(head -c 240 "$PRUNED_GATE_OUT" 2>/dev/null))" FAIL
+  fi
+
   # AC-D10 — the all-tool capability gate, for a NON-Bash tool: it spells its own
   # deny, so it is graded on its own text.
   PRUNED_CAP_OUT="$TMP/pruned-capability.out"
