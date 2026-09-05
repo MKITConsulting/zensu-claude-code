@@ -58,7 +58,7 @@ is ever measured for the suite.
 |---|---|---|
 | `tests/structure/test-*.sh` (deterministic shell) | **146** — 139 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
 | *(reconciliation)* | a `--ci` run reports **139 structure suites + 5 offline evals = 144 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 146 − 139 gap | — |
-| `tests/structure/*.test.js` (`node --test` units) | **28 files** | invoked *by* parent `.sh` suites |
+| `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
 | Windows contract profiles | **8** (`windows-shard-1`…`-8`, 43 suite entries) | `ci.yml` matrix, `run-profile.js` |
@@ -287,6 +287,7 @@ that suite's failure.
 | `plan-payload-v1.test.js` | 20 | `test-plan-payload-fallback.sh` | plan-source precedence table, hardened plan-file reader refusals, O_NOFOLLOW-unavailable fallback |
 | `zensu-doctor-invocation.test.js` | 24 | `test-versioned-plugin-upgrade.sh` | `/zensu:doctor` invocation allowlist — driven from that suite, which binds it as `RECOGNIZER_UNIT` and grades it against a registered-case floor; it has no `run-all.sh` entry of its own, because discovery is `test-*.sh` only |
 | `playwright-mcp-proxy.test.js` | 16 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy |
+| `release-run-step.test.js` | 9 | `test-immutable-marketplace-release.sh` | the release step's `run_step` wrapper, EXECUTED: the annotation on failure, the full stderr replay, exit-status propagation, the `--quiet` sink applying to the wrapped command and never to the annotation, the no-stderr fallback, `head -1` bounding the annotation to one line, and temp-file cleanup under `RUNNER_TEMP`. Driven first in that suite, because it is the wrapper's only executable coverage anywhere and the suite's other pins are source greps that stay green against a present-but-broken wrapper |
 | `zen-anchor-assertions.test.js` | 7 | `test-zen-mode.sh` (Z29) | zen-mode eval GRADERS: every javascript assertion body compiled, and a pinned pass/fail vector for the two anchor scenarios plus the safety carve-out |
 | `verify-feature-transcript-check.test.js` | 14 | `test-promptfoo-verify-feature.sh` | transcript assertion contract |
 | `fixture-mutation-watch.test.js` | 19 | `test-claude-promptfoo-wrapper.sh` | fixture-event classification: the gated classes (`.git`, the watch root's own name, run-owned ancestors) adjudicated by the manifest, ordinary paths by touch-after-start, and that both watch backends route through one decision spelled once |

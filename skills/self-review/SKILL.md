@@ -260,7 +260,11 @@ plus at most one line of text, never a paragraph — the sole exception is
 lines whenever the cross-check emitted any, and then ends with the bypass-ledger
 line followed, when it applies, by the
 converge offer. Keep it scannable — no restating, no narration of the process, no
-filler. Sections IN THIS ORDER, the TL;DR LAST (pull from your own context; do
+filler.
+
+Mark every status and verdict cell with a leading marker: 🟢 good (passed, clean, done, met), 🟡 attention (partial, advisory, skipped, not measured), 🔴 bad (failed, must-fix, dropped, contradicted, blocked, not landed, unverified, unresolved predicate, evidence gap, evidence contradiction, cross-check unavailable, verification degraded, a gate bypassed), ⚪ not applicable — admissible ONLY where the source of the value itself says the item does not apply, which today means exactly one case: a requirement row the plan already marks deprecated. An outcome that was merely not run is 🟡, never ⚪. The marker PREFIXES the cell value and NEVER replaces it: every verbatim literal keeps its own words unchanged after its marker, subject only to the pipe-escaping rule below, which the renderer undoes so the reader still sees the original text. A marker never stands alone and is never separated from the words it marks by a line break. The ## Open table has no status or verdict column and takes no marker.
+
+Sections IN THIS ORDER, the TL;DR LAST (pull from your own context; do
 NOT re-spawn any agent):
 
 ```
@@ -269,14 +273,36 @@ Exactly ONE sentence: the feature, bug, or need this session addressed.
 
 ## What I built
 Table, columns: # | Deliverable | Status | Link. One row per deliverable, max 15
-words per cell, Status is done / merged / built-tested, Link is a PR URL or `—`.
+words per cell, Status is 🟢 done / 🟢 merged / 🟢 built-tested / 🔴 blocked, Link
+is a PR URL or `—`.
 
 Then a second table, columns: Check | Verdict, with exactly these rows — Feature,
 Files modified, Tests created, Build, Coverage, Edit landing, Evidence cross-check,
-Plan, Log. Verdict cells are values, not sentences. Two rows carry text VERBATIM and
+Finding verification, Gates bypassed, Plan, Log. (The delegate renderer carries
+`Mtime audit` where this one carries `Evidence cross-check`; every other row and
+their order are shared.) Verdict cells are values, not
+sentences. Mark a cell when its value is a STATE; leave it unmarked when the value
+is a title, a path, or a bare count with no target — that is Feature, Files
+modified, Plan and Log, and every other row above is marked. A count measured
+AGAINST a target IS a state, so `{N}/{M} GREEN` and `{N}/{M} files >= {threshold}`
+take 🟢 when the target was met, 🔴 when it was not, 🟡 when the run was skipped.
+**Gates bypassed** takes 🟢 ONLY for the literal `none` read from a valid document
+and 🔴 for anything else, including a named escape, the `UNREADABLE — …` form and
+any wording this renderer does not recognize; it repeats the
+`## Open` bypass-ledger line rather than replacing it. Run the `--bypass-list`
+command from `## Open` ONCE before rendering this table and feed its output to
+both places — never substitute `none` for a value you did not read. **Finding verification**
+carries the `FINDING VERIFICATION — {n} verified, …` line and any
+`FINDING VERIFICATION DEGRADED — <reason>` line verbatim, 🔴 when a DEGRADED
+line is present or the unsupported or phantom count is non-zero (an
+off-changeset finding is not by itself a defect), 🟡 not run
+(hooks.findingVerification disabled) when the gate was skipped and emitted no
+line at all, and 🟢 only when the gate RAN and neither condition holds —
+never ⚪. Two further rows carry text VERBATIM and
 must never be dropped, paraphrased, or shortened: **Edit landing** takes the step 5b
 close marker plus any `EDIT NOT LANDED` line and the `UNVERIFIED (no claims logged)`
-or unresolved `PENDING PREDICATE` close (those are NOT clean states) — a claimed edit
+or unresolved `PENDING PREDICATE` close (those are NOT clean states, and both
+take 🔴, never 🟡) — a claimed edit
 that never produced a change must not vanish between the Phase 6 report and this
 summary; **Evidence cross-check** takes the Phase-4 step-2
 `EVIDENCE CROSS-CHECK SUMMARY` line plus every `EVIDENCE GAP` /
@@ -289,22 +315,33 @@ stated cause. Both verbatim cells follow the `## Open` escaping rule
 the renderer drops the cells past the last column.
 
 When the session plan carries a ## Requirements table, add a third table, columns:
-ID | Status, keyed by its stable IDs (AC-###/FR-###: met / partial / dropped). One
-row per requirement, no commentary.
+ID | Status, keyed by its stable IDs (AC-###/FR-###: 🟢 met / 🟡 partial /
+🔴 contradicted / 🔴 dropped / ⚪ deprecated). ⚪ is bound to PROVENANCE, never to
+judgement: use it only when that requirement row in the plan already carries
+that status. A requirement this session did not implement is 🔴 dropped even if it
+was retired mid-session. One row per requirement, no commentary. When the plan
+carries NO `## Requirements` table, omit the table and write the single line
+`🟡 Requirements: no ## Requirements table in the session plan — per-requirement
+status not tracked`, so an untracked chain never reads like a fully met one.
 
 ## How I built it
 Exactly ONE line: the TDD discipline followed, the final zensu:code-reviewer verdict
 (PASS / suggestions-only / max-rounds reached), findings by severity, files reviewed.
 
 Then a table, columns: Round | Findings | Fixed | Result. One row per code-review
-round 1..N including rounds that fixed nothing, whose Result cell reads
-`PASS — 0 findings, nothing to fix`. Always include the final clean verification
+round 1..N including rounds that fixed nothing; a round with ZERO findings reads
+🟢 `PASS — 0 findings, nothing to fix`, and a round that had findings never claims
+that literal. Mark each Result 🟢 for a clean round AND for
+an ordinary round whose findings were all fixed and re-verified, 🟡 for a max-rounds
+convergence that left findings open AND for a round whose findings were deliberately
+deferred as suggestions rather than fixed, 🔴 for a round whose fixes did not
+land. Always include the final clean verification
 round. Skip this section only if no review round ran at all.
 
 ## Self-Review Summary
 Table, columns: Dimension | Verdict | Note. One row per reviewed dimension
 (architecture, consistency, edge-cases, test coverage, security, simplification,
-conventions), Verdict is clean / advisory / must-fix, Note max 12 words. Close with
+conventions), Verdict is 🟢 clean / 🟡 advisory / 🔴 must-fix, Note max 12 words. Close with
 ONE line: whether the single fix round ran and what it changed.
 
 ## Open

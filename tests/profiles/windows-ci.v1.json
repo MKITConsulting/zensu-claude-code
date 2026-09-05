@@ -354,18 +354,11 @@
       "profileTimeoutMs": 1800000,
       "suites": [
         {
-          "id": "review-worker-evidence-lease",
-          "runner": "bash",
-          "path": "tests/structure/test-review-worker-evidence-lease.sh",
-          "args": [],
-          "timeoutMs": 300000
-        },
-        {
           "id": "stop-enforcer-self-review-routing",
           "runner": "bash",
           "path": "tests/structure/test-stop-enforcer-self-review-routing.sh",
           "args": [],
-          "timeoutMs": 1500000
+          "timeoutMs": 1700000
         }
       ]
     },
@@ -373,6 +366,13 @@
       "platform": "win32",
       "profileTimeoutMs": 1800000,
       "suites": [
+        {
+          "id": "review-worker-evidence-lease",
+          "runner": "bash",
+          "path": "tests/structure/test-review-worker-evidence-lease.sh",
+          "args": [],
+          "timeoutMs": 300000
+        },
         {
           "id": "session-trail-lineage",
           "runner": "bash",

@@ -1215,19 +1215,34 @@ for required in pre-bash-zensu-gate.sh pre-bash-source-write-gate.sh pre-write-s
     *) ADOPT_ENUMERATION_MISSING="$ADOPT_ENUMERATION_MISSING $required" ;;
   esac
 done
+# TWO hooks on this matcher allow on EVERY platform, and they do so for reasons
+# that have nothing to do with each other or with the MSYS spelling gap. One
+# decision site rather than the hand-copy this file used to carry in both loops
+# below: they graded the same question and a third exception added to one of them
+# would have left the other reporting a regression that is not one.
+#
+#   pre-bash-zensu-gate.sh   — exits 0 before it ever binds when the command
+#     carries no `zensu` CLI verb (`[ -z "$INVOCATIONS" ] && exit 0`), and the
+#     adoption command carries none.
+#   pre-bash-witness.sh      — ADVISORY by construction: it emits no
+#     `permissionDecision` in either direction and always exits 0, because on
+#     PreToolUse a non-zero exit blocks the call and a witness that failed closed
+#     would break every Bash call in the session. See CLAUDE.md §"Witness Attempt
+#     Half"; `P12-A5` in test-post-bash-witness.sh pins that contract directly.
+#
+# A THIRD entry needs its own sentence here. Do not add a name without one: the
+# value of this list is that every member states why it cannot deny.
+adopt_hook_expected() {
+  case "$1" in
+    pre-bash-zensu-gate.sh|pre-bash-witness.sh) printf 'allow\n' ;;
+    *) printf '%s\n' "$2" ;;
+  esac
+}
+
 ADOPT_GATE_FAILURES=''
 while IFS= read -r hook_name; do
   [ -n "$hook_name" ] || continue
-  # pre-bash-zensu-gate.sh is the ONE exception on win32, and not because of the
-  # recognizer: it exits 0 before it ever binds when the command carries no
-  # `zensu` CLI verb (`[ -z "$INVOCATIONS" ] && exit 0`), and the adoption command
-  # carries none. So it allows on EVERY platform, for a reason that has nothing to
-  # do with the MSYS spelling gap the other three are refused by. Expecting deny
-  # from it graded the early exit as a regression.
-  hook_expected="$ADOPT_EXPECTED"
-  if [ "$hook_name" = pre-bash-zensu-gate.sh ]; then
-    hook_expected=allow
-  fi
+  hook_expected="$(adopt_hook_expected "$hook_name" "$ADOPT_EXPECTED")"
   if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$hook_name" "$ADOPT_BASH_PAYLOAD")" != "$hook_expected" ]; then
     ADOPT_GATE_FAILURES="$ADOPT_GATE_FAILURES $hook_name"
   fi
@@ -1256,10 +1271,7 @@ ADOPT_LEGACY_PAYLOAD="$(bash_payload "$ADOPT_SESSION" "$ADOPT_LEGACY_CMD")"
 ADOPT_LEGACY_FAILURES=''
 while IFS= read -r hook_name; do
   [ -n "$hook_name" ] || continue
-  hook_expected="$ADOPT_EXPECTED"
-  if [ "$hook_name" = pre-bash-zensu-gate.sh ]; then
-    hook_expected=allow
-  fi
+  hook_expected="$(adopt_hook_expected "$hook_name" "$ADOPT_EXPECTED")"
   if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$hook_name" "$ADOPT_LEGACY_PAYLOAD")" != "$hook_expected" ]; then
     ADOPT_LEGACY_FAILURES="$ADOPT_LEGACY_FAILURES $hook_name"
   fi
