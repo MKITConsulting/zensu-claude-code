@@ -36,14 +36,9 @@ ZENSU_VERIFY_PROJECT_ROOT="$(zensu_resolve_project_dir 2>/dev/null || true)"
 [ ! -L "$ZENSU_VERIFY_PROJECT_ROOT/.zensu/state" ] || skip "symlinked state directory"
 mkdir -p "$ZENSU_VERIFY_PROJECT_ROOT/.zensu/state" 2>/dev/null || skip "state directory unavailable"
 ZENSU_VERIFY_CONSENT_MEMORY="$ZENSU_VERIFY_PROJECT_ROOT/.zensu/state/verify-consent-${ZENSU_SESSION_KEY}.json"
-ZENSU_VERIFY_RECIPE_FILE=""
-for _ZENSU_CONSENT_RECIPE in "$ZENSU_VERIFY_PROJECT_ROOT/.zensu/runtime.yaml" "$ZENSU_VERIFY_PROJECT_ROOT/.zensu/autopilot.yaml"; do
-  if [ -f "$_ZENSU_CONSENT_RECIPE" ] && [ ! -L "$_ZENSU_CONSENT_RECIPE" ]; then
-    ZENSU_VERIFY_RECIPE_FILE="$_ZENSU_CONSENT_RECIPE"
-    break
-  fi
-done
-export ZENSU_VERIFY_CONSENT_MEMORY ZENSU_VERIFY_PROJECT_ROOT ZENSU_VERIFY_RECIPE_FILE
+# Which recipe governs is resolved INSIDE the decision module from the project root, so
+# this hook, its PreToolUse sibling and the /zensu:doctor row cannot disagree about it.
+export ZENSU_VERIFY_CONSENT_MEMORY ZENSU_VERIFY_PROJECT_ROOT
 
 printf '%s' "$INPUT" | (
   cd -P -- "$CLAUDE_PLUGIN_ROOT/hooks/lib" && node ./verify-consent-v1.js post

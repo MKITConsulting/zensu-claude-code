@@ -16,7 +16,7 @@ including both release jobs, aborts rather than skipping one suite. §1 and §2 
 reconciled to that manifest (148 = 141 + 7, re-derived from the JSON rather than incremented:
 `ciStructureTests` holds 141 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
 returns 148). **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 139 against 140 CI-classified suites, so one CI
+asserted away: its eleven CI group headers sum to 140 against 141 CI-classified suites, so one CI
 suite appears in no §3 group. `main` recorded that suite as `test-session-trail-lineage.sh`; this
 merge did not re-derive the NAME, because §3 lists suites in prose rather than by filename and a
 wrong name in a group is worse than none. The gap predates both the plugin-data guard, filed under
@@ -163,8 +163,8 @@ walk.
 
 ### Bash gates, witness & secrets (10)
 `artifact-redaction` · `bash-source-write-gate` · `bash-zensu-gate` · `bypass-ledger` ·
-`plugin-data-guard` · `verify-consent` · `post-bash-witness` · `secret-scan-gate` · `skill-workflow-markers` ·
-`witness-scenario-assertions`
+`plugin-data-guard` · `post-bash-witness` · `secret-scan-gate` · `skill-workflow-markers` ·
+`verify-consent` · `witness-scenario-assertions`
 
 Covers the PreToolUse(Bash) source-write gate incl. rule (C) git-repo escape
 (183 probe cases + a 30-case pure unit suite), the `zensu <noun> <verb>` write gate,
@@ -179,7 +179,11 @@ control in the other direction — a case-variant store prefix, a two-hop symlin
 and no-escape assertions, a payload-declared non-main principal whose premise consults
 `claude-principal-v1.js` itself, a second-path-field row, six faults covered — four asserting their own reason literal and two asserting the documented
 silence, the exit-2 plugin-root refusal, two source-absence checks with controls, and a
-two-group matcher shape compared against the module's exported tool set), and the writer-side
+two-group matcher shape compared against the module's exported tool set), the browser consent
+gate (71 checks: the hook pair driven against a real Session Control session, the shared
+navigation floor, the loopback bound, the session memory and its containment, the
+consented-route set a later recipe cannot widen, the one recipe resolver both hooks and the
+doctor row consume, and the skill wording), and the writer-side
 redaction that keeps `.zensu/plans` and `.zensu/logs` artifacts free of
 absolute developer paths (~100 assertions).
 

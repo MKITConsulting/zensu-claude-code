@@ -96,6 +96,23 @@ case "$OUT_POLICY" in
   *'consent mode'*) check "B11b banner drops the consent line when a parent policy is present" FAIL ;;
   *) check "B11b banner drops the consent line when a parent policy is present" PASS ;;
 esac
+QUIET_CONFIG="$(mktemp "${TMPDIR:-/tmp}/zensu-banner-quiet.XXXXXX")" || exit 1
+printf '%s\n' '{"hooks":{"sessionBanner":false}}' >"$QUIET_CONFIG"
+OUT_QUIET="$(printf '%s' '{"source":"startup"}' | env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 ZENSU_CONFIG="$QUIET_CONFIG" bash "$BANNER" 2>/dev/null)"
+case "$OUT_QUIET" in
+  *'consent mode'*) check "B11c hooks.sessionBanner=false silences the consent line" FAIL ;;
+  *) check "B11c hooks.sessionBanner=false silences the consent line" PASS ;;
+esac
+case "$OUT_QUIET" in
+  *'Reviewer spawns'*) check "B11c-grant the reviewer-spawn grant line still survives the flag, as its own comment requires" PASS ;;
+  *) check "B11c-grant the reviewer-spawn grant line still survives the flag, as its own comment requires" FAIL ;;
+esac
+OUT_QUIET_CONTROL="$(printf '%s' '{"source":"startup"}' | env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 bash "$BANNER" 2>/dev/null)"
+case "$OUT_QUIET_CONTROL" in
+  *'consent mode'*) check "B11c-control the same invocation without the flag does emit the consent line" PASS ;;
+  *) check "B11c-control the same invocation without the flag does emit the consent line" FAIL ;;
+esac
+rm -f "$QUIET_CONFIG"
 
 PRIMER_START="$(printf '%s' '{"hook_event_name":"SessionStart","source":"startup"}' | bash "$PRIMER" 2>/dev/null)"
 if printf '%s' "$PRIMER_START" | node -e '

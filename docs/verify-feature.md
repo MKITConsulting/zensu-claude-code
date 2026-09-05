@@ -168,13 +168,24 @@ one is needed, happens by you typing into that window.
 For local mode the skill resolves the runtime in this order and stops with PARTIAL when
 nothing fits:
 
-1. `--config=<path>`, else `.zensu/autopilot.yaml`, inspected as a **candidate** against the
-   rules below;
+1. `--config=<path>`, else `.zensu/runtime.yaml`, else `.zensu/autopilot.yaml`, inspected as a
+   **candidate** against the rules below;
 2. the bundled Zensu monorepo adapter (`skills/verify-feature/rules/zensu-monorepo.md`), when
    the repository carries `backend/cmd/zensu`, `backend/Makefile`, `frontend/package.json`,
    and `frontend/pnpm-lock.yaml`; it needs macOS, Linux, or WSL;
-3. otherwise PARTIAL, listing the missing startup, readiness, base-URL, auth, fixture,
+3. in an interactive session, the guided setup: ONE `AskUserQuestion` offering to write
+   `.zensu/runtime.yaml` with the user, after which resolution restarts at step 1;
+4. otherwise PARTIAL, listing the missing startup, readiness, base-URL, auth, fixture,
    isolation, and teardown facts. The skill never invents commands.
+
+The design decisions behind consent mode, its residuals and the alternatives that were weighed
+are recorded in [verify-feature-consent-spec.md](verify-feature-consent-spec.md).
+
+Steps 1 and 2 read the recipe the CONSENT gate reads too, and the gate resolves it in exactly one
+place: `resolveRecipeFile` in `hooks/lib/verify-consent-v1.js`, which prefers `.zensu/runtime.yaml`
+over `.zensu/autopilot.yaml` and skips a symlinked candidate. `--config=<path>` steers the SKILL
+and is not consulted by the gate, so a recipe passed that way declares no synthetic-safe routes to
+the consent prompt.
 
 A candidate recipe is accepted only when all of this is explicit and consistent:
 

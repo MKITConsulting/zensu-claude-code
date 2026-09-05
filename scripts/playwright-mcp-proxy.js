@@ -31,11 +31,14 @@ const ALLOWED_TOOLS = Object.freeze([
 const ALLOWED_TOOL_SET = new Set(ALLOWED_TOOLS);
 
 const {
+  CONSENT_REMOTE_REASON,
+  FLOOR_REASONS,
   checkNavigationTarget,
   classifyOrigin,
   isLoopbackHost,
   isPublicAddress,
   normalizeHostname,
+  normalizeRoute,
   resolveRemoteHost,
 } = require(path.join(__dirname, '..', 'hooks', 'lib', 'verify-navigation-floor-v1.js'));
 
@@ -66,15 +69,14 @@ async function parsePolicy(raw, resolver = dns.promises.lookup) {
     }
     const routes = new Set();
     for (const route of rawTarget.routes) {
-      if (typeof route !== 'string' || !route.startsWith('/') || route.includes('?')
-          || route.includes('#') || route.includes('*')) {
+      const normalizedRoute = normalizeRoute(route);
+      if (normalizedRoute === null) {
         throw new Error('evidence route must be an absolute query-free pathname');
       }
-      const normalizedRoute = new URL(route, 'https://zensu.invalid').pathname;
-      if (normalizedRoute !== route || routes.has(route)) {
+      if (routes.has(normalizedRoute)) {
         throw new Error('evidence routes must be normalized and unique');
       }
-      routes.add(route);
+      routes.add(normalizedRoute);
     }
     const rawOrigin = rawTarget.origin;
     if (typeof rawOrigin !== 'string') throw new Error('navigation origin must be a string');
@@ -89,11 +91,11 @@ async function parsePolicy(raw, resolver = dns.promises.lookup) {
     if (value.mode === 'local') {
       if (!['http:', 'https:'].includes(parsed.protocol) || !net.isIP(hostname)
           || !isLoopbackHost(hostname)) {
-        throw new Error('local navigation policy accepts literal loopback-IP origins only');
+        throw new Error(FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK);
       }
     } else {
       if (parsed.protocol !== 'https:' || isLoopbackHost(hostname)) {
-        throw new Error('remote navigation policy requires non-loopback HTTPS origins');
+        throw new Error(FLOOR_REASONS.REMOTE_HTTPS);
       }
       pins.set(hostname, await resolveRemoteHost(hostname, resolver));
     }
@@ -103,7 +105,6 @@ async function parsePolicy(raw, resolver = dns.promises.lookup) {
 }
 
 const CONSENT_HOOK_FILE = 'pre-browser-navigation-consent.sh';
-const CONSENT_REMOTE_REASON = 'consent mode admits literal loopback origins only; a remote target needs the parent-environment navigation policy';
 
 function consentHookRegistered(pluginRoot) {
   try {
@@ -378,7 +379,10 @@ async function main() {
       if (evidenceMode !== 'declared-safe') throw new Error('navigation target contract is invalid; v1 supports declared-safe evidence only');
       const classified = classifyOrigin(new URL(route, `${origin}/`).href, true);
       if (!classified.ok) throw new Error(classified.reason);
-      if (classified.mode !== 'local' || classified.origin !== origin) throw new Error(CONSENT_REMOTE_REASON);
+      if (classified.mode !== 'local') throw new Error(CONSENT_REMOTE_REASON);
+      if (classified.origin !== origin) {
+        throw new Error('navigation origin does not match the route it was checked with');
+      }
       process.stdout.write('consent\n');
       return;
     }

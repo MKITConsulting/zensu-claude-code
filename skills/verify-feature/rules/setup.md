@@ -66,7 +66,6 @@ services:
     ready: "curl -fsS http://127.0.0.1:$ZENSU_VERIFY_PORT/"
 validate:
   driver: browser
-  portEnv: ZENSU_VERIFY_PORT
   evidenceSafety:
     contractVersion: 1
     mode: declared-safe
@@ -76,9 +75,10 @@ validate:
     containsSecrets: false
 ```
 
-`.zensu/autopilot.yaml` keeps working as an alias and is tried second; autopilot reads
-`runtime.yaml` first as well, so one recipe serves both skills. `validate.navigationBroker` is
-optional in consent mode and honoured when present.
+`.zensu/autopilot.yaml` keeps working as an alias and is tried second. `/zensu:autopilot`
+reads `.zensu/autopilot.yaml` only — it does NOT read `runtime.yaml` — so a project that wants one
+recipe to serve both skills writes `autopilot.yaml` rather than `runtime.yaml`.
+`validate.navigationBroker` is optional in consent mode and honoured when present.
 
 ## 5. `--print-policy`
 

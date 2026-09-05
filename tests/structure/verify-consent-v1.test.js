@@ -15,10 +15,12 @@ const {
   NAVIGATION_TOOL_RE,
   REASONS,
   appendRecord,
+  consentedRoutes,
   decide,
   memoryPathAllowed,
   readMemory,
   targetOf,
+  validRecord,
 } = consent;
 
 const MODULE = path.resolve(__dirname, '../../hooks/lib/verify-consent-v1.js');
@@ -32,8 +34,10 @@ function project() {
   return { root, memory: path.join(root, '.zensu', 'state', `verify-consent-${KEY}.json`) };
 }
 
-function record(origin, route, decidedBy = 'prompt') {
-  return { origin, route, decidedBy, at: '2026-09-02T20:00:00.000Z' };
+function record(origin, route, decidedBy = 'prompt', declaredRoutes) {
+  const entry = { origin, route, decidedBy, at: '2026-09-02T20:00:00.000Z' };
+  if (declaredRoutes !== undefined) entry.declaredRoutes = declaredRoutes;
+  return entry;
 }
 
 function runCli(mode, payload, env) {
@@ -75,25 +79,42 @@ test('a navigation to a new origin asks, names the origin, the route and the con
   assert.equal(decision.mode, 'local');
   assert.match(decision.prompt, /http:\/\/127\.0\.0\.1:4200/);
   assert.match(decision.prompt, /\/login/);
-  assert.match(decision.prompt, /lets the model read this page's content/);
+  assert.match(decision.prompt, /lets the model open and read any page on http:\/\/127\.0\.0\.1:4200/);
+  assert.match(decision.prompt, /does not check routes again/);
   assert.match(decision.prompt, /Declared synthetic-safe routes for this run: \/, \/login\./);
 });
 
-test('memory and declared routes decide silently; an undeclared route on a known origin asks again', () => {
-  const records = [record('http://127.0.0.1:4200', '/')];
+test('a declared route passes only against the route set the consent itself carried', () => {
+  const records = [record('http://127.0.0.1:4200', '/', 'prompt', ['/', '/login'])];
   const hit = decide({ toolName: NAV, toolInput: { url: 'http://127.0.0.1:4200/' }, records, declaredRoutes: [] });
   assert.equal(hit.verdict, 'allow');
   assert.equal(hit.reason, REASONS.MEMORY_HIT);
-  const declared = decide({ toolName: NAV, toolInput: { url: 'http://127.0.0.1:4200/login' }, records, declaredRoutes: ['/login'] });
+  const declared = decide({ toolName: NAV, toolInput: { url: 'http://127.0.0.1:4200/login' }, records, declaredRoutes: [] });
   assert.equal(declared.verdict, 'allow');
   assert.equal(declared.reason, REASONS.DECLARED_ROUTE);
-  const undeclared = decide({ toolName: NAV, toolInput: { url: 'http://127.0.0.1:4200/admin' }, records, declaredRoutes: ['/login'] });
-  assert.equal(undeclared.verdict, 'ask');
-  assert.equal(undeclared.reason, REASONS.UNDECLARED_ROUTE);
-  assert.match(undeclared.prompt, /does not declare as synthetic-safe/);
+  const widened = decide({ toolName: NAV, toolInput: { url: 'http://127.0.0.1:4200/admin' }, records, declaredRoutes: ['/', '/login', '/admin'] });
+  assert.equal(widened.verdict, 'ask');
+  assert.equal(widened.reason, REASONS.UNDECLARED_ROUTE);
+  assert.match(widened.prompt, /does not declare as synthetic-safe/);
+  const legacy = decide({ toolName: NAV, toolInput: { url: 'http://127.0.0.1:4200/login' }, records: [record('http://127.0.0.1:4200', '/')], declaredRoutes: ['/login'] });
+  assert.equal(legacy.verdict, 'ask');
+  assert.equal(legacy.reason, REASONS.UNDECLARED_ROUTE);
   const otherOrigin = decide({ toolName: NAV, toolInput: { url: 'http://127.0.0.1:4201/login' }, records, declaredRoutes: ['/login'] });
   assert.equal(otherOrigin.verdict, 'ask');
   assert.equal(otherOrigin.reason, REASONS.NEW_ORIGIN);
+});
+
+test('consentedRoutes unions only the matching origin and refuses a malformed route list', () => {
+  const records = [
+    record('http://127.0.0.1:4200', '/', 'prompt', ['/', '/login']),
+    record('http://127.0.0.1:4200', '/login', 'memory', ['/settings']),
+    record('http://127.0.0.1:4201', '/', 'prompt', ['/other']),
+  ];
+  assert.deepEqual(consentedRoutes(records, 'http://127.0.0.1:4200'), ['/', '/login', '/settings']);
+  assert.deepEqual(consentedRoutes(records, 'http://127.0.0.1:4202'), []);
+  assert.equal(validRecord({ ...record('http://127.0.0.1:4200', '/'), declaredRoutes: ['/a?b'] }), false);
+  assert.equal(validRecord({ ...record('http://127.0.0.1:4200', '/'), declaredRoutes: 'nope' }), false);
+  assert.equal(validRecord(record('http://127.0.0.1:4200', '/')), true);
 });
 
 test('the floor denies before any memory is consulted', () => {
@@ -198,9 +219,37 @@ test('memory writes are contained to the session state directory and land by O_E
   }
 });
 
+test('the write side refuses a leaf that is a symlink, a directory or a hard link', () => {
+  const { root, memory } = project();
+  const good = record('http://127.0.0.1:4200', '/');
+  const real = path.join(root, '.zensu', 'state', 'real-target.json');
+  fs.writeFileSync(real, '{}');
+
+  fs.mkdirSync(memory);
+  assert.equal(appendRecord(memory, good, { projectRoot: root }).reason, REASONS.MEMORY_PATH_REFUSED);
+  fs.rmdirSync(memory);
+
+  try {
+    fs.symlinkSync(real, memory);
+    assert.equal(appendRecord(memory, good, { projectRoot: root }).reason, REASONS.MEMORY_PATH_REFUSED);
+    fs.unlinkSync(memory);
+  } catch (error) {
+    if (!error || error.code !== 'EPERM') throw error;
+  }
+
+  fs.linkSync(real, memory);
+  assert.equal(fs.lstatSync(memory).nlink, 2);
+  assert.equal(appendRecord(memory, good, { projectRoot: root }).reason, REASONS.MEMORY_PATH_REFUSED);
+  fs.unlinkSync(memory);
+
+  assert.equal(appendRecord(memory, good, { projectRoot: root }).ok, true);
+});
+
 test('the pre CLI emits ask or deny envelopes and denies an unreadable payload', () => {
   const { root, memory } = project();
-  const env = { ZENSU_VERIFY_CONSENT_MEMORY: memory, ZENSU_VERIFY_PROJECT_ROOT: root, ZENSU_VERIFY_DECLARED_ROUTES: '["/"]' };
+  const recipe = path.join(root, '.zensu', 'runtime.yaml');
+  fs.writeFileSync(recipe, 'validate:\n  evidenceSafety:\n    routes: ["/"]\n');
+  const env = { ZENSU_VERIFY_CONSENT_MEMORY: memory, ZENSU_VERIFY_PROJECT_ROOT: root };
   const ask = runCli('pre', { tool_name: NAV, tool_input: { url: 'http://127.0.0.1:4200/' } }, env);
   assert.equal(ask.status, 0);
   assert.equal(ask.envelope.hookSpecificOutput.permissionDecision, 'ask');
@@ -251,9 +300,15 @@ test('declared routes are read from the recipe evidenceSafety block in flow and 
   } catch (error) {
     if (!error || error.code !== 'EPERM') throw error;
   }
-  const env = { ZENSU_VERIFY_RECIPE_FILE: recipe };
+  const inputRoot = path.dirname(path.dirname(recipe));
+  const env = { ZENSU_VERIFY_PROJECT_ROOT: inputRoot };
   assert.deepEqual(consent.readInputs(env).declaredRoutes, ['/', '/login']);
-  assert.deepEqual(consent.readInputs({ ...env, ZENSU_VERIFY_DECLARED_ROUTES: '["/x"]' }).declaredRoutes, ['/x']);
+  assert.deepEqual(consent.readInputs({ ...env, ZENSU_VERIFY_DECLARED_ROUTES: '["/x"]' }).declaredRoutes, ['/', '/login']);
+  assert.deepEqual(consent.readInputs({ ...env, ZENSU_VERIFY_RECIPE_FILE: '/nowhere.yaml' }).declaredRoutes, ['/', '/login']);
+  assert.deepEqual(consent.readInputs({}).declaredRoutes, []);
+  assert.equal(consent.resolveRecipeFile(inputRoot), recipe);
+  assert.equal(consent.resolveRecipeFile(''), '');
+  assert.deepEqual([...consent.RECIPE_NAMES], ['runtime.yaml', 'autopilot.yaml']);
 
   assert.equal(responseFailed({ isError: true }), true);
   assert.equal(responseFailed({ content: [{ type: 'text', text: 'Zensu browser broker rejected the operation: nope' }] }), true);
@@ -264,7 +319,9 @@ test('declared routes are read from the recipe evidenceSafety block in flow and 
 
 test('the post CLI records an executed navigation, tags its decision source and skips what the floor refuses', () => {
   const { root, memory } = project();
-  const env = { ZENSU_VERIFY_CONSENT_MEMORY: memory, ZENSU_VERIFY_PROJECT_ROOT: root, ZENSU_VERIFY_DECLARED_ROUTES: '["/login"]' };
+  const recipe = path.join(root, '.zensu', 'runtime.yaml');
+  fs.writeFileSync(recipe, 'validate:\n  evidenceSafety:\n    routes: ["/login"]\n');
+  const env = { ZENSU_VERIFY_CONSENT_MEMORY: memory, ZENSU_VERIFY_PROJECT_ROOT: root };
   runCli('post', { tool_name: NAV, tool_input: { url: 'http://127.0.0.1:4200/' } }, env);
   let stored = JSON.parse(fs.readFileSync(memory, 'utf8'));
   assert.deepEqual(stored.records.map((entry) => [entry.route, entry.decidedBy]), [['/', 'prompt']]);

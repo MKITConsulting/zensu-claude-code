@@ -11,6 +11,17 @@ const FLOOR_REASONS = Object.freeze({
   SCHEME: 'navigation target scheme is not http, https, ws, or wss',
 });
 
+const CONSENT_REMOTE_REASON = 'consent mode admits literal loopback origins only; a remote target needs the parent-environment navigation policy';
+
+function normalizeRoute(route) {
+  if (typeof route !== 'string' || !route.startsWith('/')
+      || route.includes('?') || route.includes('#') || route.includes('*')) return null;
+  let normalized;
+  try { normalized = new URL(route, 'https://zensu.invalid').pathname; }
+  catch (_error) { return null; }
+  return normalized === route ? route : null;
+}
+
 function normalizeHostname(hostname) {
   return String(hostname).toLowerCase().replace(/^\[|\]$/g, '');
 }
@@ -139,6 +150,7 @@ function classifyOrigin(rawUrl, navigation = true) {
 }
 
 module.exports = {
+  CONSENT_REMOTE_REASON,
   FLOOR_REASONS,
   checkNavigationTarget,
   classifyOrigin,
@@ -150,5 +162,6 @@ module.exports = {
   isPublicIpv4,
   isPublicIpv6,
   normalizeHostname,
+  normalizeRoute,
   resolveRemoteHost,
 };

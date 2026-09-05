@@ -32,24 +32,19 @@ MODULE="$CLAUDE_PLUGIN_ROOT/hooks/lib/verify-consent-v1.js"
 
 ZENSU_VERIFY_CONSENT_MEMORY=""
 ZENSU_VERIFY_PROJECT_ROOT=""
-ZENSU_VERIFY_RECIPE_FILE=""
 if source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh" 2>/dev/null \
   && zensu_bind_hook_session "$INPUT" >/dev/null 2>&1; then
   _ZENSU_CONSENT_ROOT="$(zensu_resolve_project_dir 2>/dev/null || true)"
   if [ -n "$_ZENSU_CONSENT_ROOT" ] && [ -n "${ZENSU_SESSION_KEY:-}" ]; then
     ZENSU_VERIFY_PROJECT_ROOT="$_ZENSU_CONSENT_ROOT"
     ZENSU_VERIFY_CONSENT_MEMORY="$_ZENSU_CONSENT_ROOT/.zensu/state/verify-consent-${ZENSU_SESSION_KEY}.json"
-    for _ZENSU_CONSENT_RECIPE in "$_ZENSU_CONSENT_ROOT/.zensu/runtime.yaml" "$_ZENSU_CONSENT_ROOT/.zensu/autopilot.yaml"; do
-      if [ -f "$_ZENSU_CONSENT_RECIPE" ] && [ ! -L "$_ZENSU_CONSENT_RECIPE" ]; then
-        ZENSU_VERIFY_RECIPE_FILE="$_ZENSU_CONSENT_RECIPE"
-        break
-      fi
-    done
   fi
 else
   echo "zensu: browser consent gate has no bound session — every navigation asks and nothing is remembered" >&2
 fi
-export ZENSU_VERIFY_CONSENT_MEMORY ZENSU_VERIFY_PROJECT_ROOT ZENSU_VERIFY_RECIPE_FILE
+# Which recipe governs is resolved INSIDE the decision module from the project root, so
+# this hook, its PostToolUse sibling and the /zensu:doctor row cannot disagree about it.
+export ZENSU_VERIFY_CONSENT_MEMORY ZENSU_VERIFY_PROJECT_ROOT
 
 DECISION="$(printf '%s' "$INPUT" | (
   cd -P -- "$CLAUDE_PLUGIN_ROOT/hooks/lib" && node ./verify-consent-v1.js pre

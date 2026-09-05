@@ -205,12 +205,12 @@ supported.
 |----------|---------------|
 | [Architecture](docs/architecture.md) | The three layers, the workflow diagram, evidence discipline, typical flows |
 | [Review chain](docs/review-chain.md) | The reviewer agents, custom repo personas, skill overlays, templates |
-| [Gates](docs/gates.md) | The write gates, the secret scan, the plugin-data containment guard, the TDD phase gate, and the completion-time requirements-table gate |
+| [Gates](docs/gates.md) | The write gates, the secret scan, the plugin-data containment guard, the browser consent gate, the TDD phase gate, and the completion-time requirements-table gate |
 | [Session control](docs/session-control.md) | Subagent safety, the security boundary, unbindable sessions |
 | [Configuration](docs/configuration.md) | Every hook, every flag, merge order, environment variables |
 | [Operations](docs/operations.md) | Upgrade path, platform support, troubleshooting |
 | [TDD workflow](docs/tdd-manager-workflow.md) | The full per-step reference for the implementation workflow |
-| [Verify a feature live](docs/verify-feature.md) | Running `/zensu:verify-feature` on its own: the launch-time navigation policy, the local-mode rules, a minimal runtime recipe, remote mode |
+| [Verify a feature live](docs/verify-feature.md) | Running `/zensu:verify-feature` on its own: consent mode with no setup at all, `--setup` and `--attach`, the runtime recipe, the launch-time navigation policy for remote mode |
 | [Evidence discipline](docs/evidence-discipline.md) | The one rule underneath everything else |
 | [Best solution first](docs/best-solution-first.md) | Why the best long-term option must be in every choice you are offered, and first |
 

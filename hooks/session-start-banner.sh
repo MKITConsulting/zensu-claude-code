@@ -56,6 +56,13 @@ if [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/pre-agent-reviewer-allow.sh" ] \
   echo "zensu: Reviewer spawns — this plugin is configured to admit its own read-only reviewer subagents (Read/Grep/Glob only) itself, so the host permission layer is not asked for them. This line checks the flag and the two files; /zensu:doctor is the authoritative check and additionally verifies the hook's registration and that its decision module loads. Turn off: hooks.reviewerSpawnAutoAllow=false in ~/.zensu/config.json."
 fi
 
+[ -n "$_ZENSU_BANNER_QUIET" ] && exit 0
+
+# Consent mode announces that a PROMPT will appear, never a capability the plugin
+# granted itself — so it sits BELOW the sessionBanner gate, unlike the reviewer-spawn
+# line above. Hiding it costs the user a usage hint; hiding the grant would have hidden
+# a capability a checked-out .zensu/config.json cannot grant but could conceal.
+# /zensu:doctor's verify-feature row is not silenceable and remains the authoritative check.
 if [ -z "${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" ] \
   && [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/pre-browser-navigation-consent.sh" ] \
   && [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/post-browser-navigation-consent.sh" ] \
@@ -63,7 +70,6 @@ if [ -z "${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" ] \
   echo "zensu: Browser verification — no parent-environment navigation policy is set, so /zensu:verify-feature runs in consent mode: the first navigation to each loopback origin asks you through the permission prompt, remote targets still need the policy. /zensu:doctor verifies the hook registration and the runtime recipe."
 fi
 
-[ -n "$_ZENSU_BANNER_QUIET" ] && exit 0
 
 VERSION="?"
 if command -v node >/dev/null 2>&1; then

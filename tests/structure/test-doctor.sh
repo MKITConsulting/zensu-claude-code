@@ -252,7 +252,7 @@ case "$OUT" in *'version sync: plugin.json and marketplace.json agree'*) check "
 case "$OUT" in *'hooks wiring: all 1 hooks'*) check "P1c wiring ✅ when consistent" PASS ;; *) check "P1c wiring ✅ when consistent" FAIL ;; esac
 case "$OUT" in *'no quoted-boolean traps'*) check "P1d config ✅ with real booleans (reviewJudge:true/secretScan:false)" PASS ;; *) check "P1d config ✅ with real booleans" FAIL ;; esac
 # all-green summary only when the tool block is green too (inject authed tools)
-GREEN="$(ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=ready \
+GREEN="$(ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=ready ZDOC_VERIFY=consent \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
   node "$REPORT" 2>/dev/null)"
 case "$GREEN" in *'all checks green'*) check "P1e summary reports all green when every block is green" PASS ;; *) check "P1e summary all green (got: $GREEN)" FAIL ;; esac
@@ -275,7 +275,42 @@ case "$VF_NORECIPE" in *'all checks green'*) check "P1vc1 the no-recipe warning 
 VF_UNAVAILABLE="$(verify_row unavailable "consent hook not registered on the navigation matcher")"
 case "$VF_UNAVAILABLE" in *'❌  verify-feature: cannot start (consent hook not registered on the navigation matcher)'*) check "P1vd unavailable renders red with the wrapper's reason" PASS ;; *) check "P1vd unavailable renders red with the wrapper's reason" FAIL ;; esac
 VF_ABSENT="$(verify_row "" "")"
-case "$VF_ABSENT" in *'verify-feature:'*) check "P1ve an absent ZDOC_VERIFY renders no verify-feature row" FAIL ;; *) check "P1ve an absent ZDOC_VERIFY renders no verify-feature row" PASS ;; esac
+case "$VF_ABSENT" in *'⚠️  verify-feature: not checked'*'missing check rather than an all-clear'*) check "P1ve an absent ZDOC_VERIFY says the check did not run rather than staying silent" PASS ;; *) check "P1ve an absent ZDOC_VERIFY says the check did not run rather than staying silent" FAIL ;; esac
+case "$VF_ABSENT" in *'all checks green'*) check "P1ve1 the did-not-check row withholds the green summary" FAIL ;; *) check "P1ve1 the did-not-check row withholds the green summary" PASS ;; esac
+VF_BADPOLICY="$(verify_row policy-invalid "policy is not valid JSON")"
+case "$VF_BADPOLICY" in *'❌'*'browser broker will refuse it'*'policy is not valid JSON'*'fall back to consent mode'*) check "P1vh a set-but-unusable policy renders red and names the fault" PASS ;; *) check "P1vh a set-but-unusable policy renders red and names the fault" FAIL ;; esac
+case "$VF_BADPOLICY" in *'all checks green'*) check "P1vh1 the invalid-policy row withholds the green summary" FAIL ;; *) check "P1vh1 the invalid-policy row withholds the green summary" PASS ;; esac
+
+# P1vi-P1vk drive the WRAPPER, so the derivation block itself executes. Every other
+# verify-feature check supplies ZDOC_VERIFY and therefore skips it entirely.
+VF_LIVE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-verify.XXXXXX")" || exit 1
+mkdir -p "$VF_LIVE_ROOT/.zensu"
+vf_live() { # $1 policy value (may be empty)
+  env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
+    ${1:+ZENSU_VERIFY_NAVIGATION_POLICY_V1="$1"} \
+    ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=ready \
+    ZENSU_DOCTOR_PLUGIN_DIR="$PLUGIN_DIR" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$HELPER" 2>/dev/null
+}
+case "$(vf_live '')" in
+  *'consent mode ready, no runtime recipe'*) check "P1vi the wrapper derives consent-no-recipe when no recipe is present" PASS ;;
+  *) check "P1vi the wrapper derives consent-no-recipe when no recipe is present" FAIL ;;
+esac
+printf 'version: 1\n' > "$VF_LIVE_ROOT/.zensu/runtime.yaml"
+case "$(vf_live '')" in
+  *'consent mode ready — no parent policy'*) check "P1vj the same wrapper run flips to consent once a runtime recipe exists" PASS ;;
+  *) check "P1vj the same wrapper run flips to consent once a runtime recipe exists" FAIL ;;
+esac
+case "$(vf_live '{"version":1}')" in
+  *'browser broker will refuse it'*'policy contains unknown or missing keys'*) check "P1vk the wrapper judges the policy value rather than its presence" PASS ;;
+  *) check "P1vk the wrapper judges the policy value rather than its presence" FAIL ;;
+esac
+case "$(vf_live '{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:5173","evidenceMode":"declared-safe","routes":["/"]}]}')" in
+  *'environment policy active'*) check "P1vk-control a policy that satisfies the contract still renders active" PASS ;;
+  *) check "P1vk-control a policy that satisfies the contract still renders active" FAIL ;;
+esac
+rm -rf "$VF_LIVE_ROOT"
+
 if grep -qF 'ZDOC_VERIFY=policy' "$HELPER" && grep -qF 'ZDOC_VERIFY=consent-no-recipe' "$HELPER" \
   && grep -qF 'ZDOC_VERIFY=unavailable' "$HELPER" && grep -qF 'consentHookRegistered' "$HELPER" \
   && grep -qF 'ZENSU_VERIFY_NAVIGATION_POLICY_V1' "$HELPER" \
@@ -286,7 +321,7 @@ else
 fi
 VF_SKILL="$PLUGIN_DIR/skills/doctor/SKILL.md"
 VF_SKILL_MISS=""
-for phrase in "verify-feature: environment policy active" "verify-feature: consent mode ready" "consent mode ready, no runtime recipe" "verify-feature: cannot start"; do
+for phrase in "verify-feature: environment policy active" "verify-feature: consent mode ready" "consent mode ready, no runtime recipe" "verify-feature: cannot start" "the browser broker will refuse it"; do
   grep -qF -- "$phrase" "$VF_SKILL" || VF_SKILL_MISS="$VF_SKILL_MISS [$phrase]"
 done
 [ -z "$VF_SKILL_MISS" ] && check "P1vg all four verify-feature rows are documented in skills/doctor/SKILL.md" PASS \

@@ -368,6 +368,12 @@ classifier will refuse a spawn, not only when the whole table is green.
 - **⚠️ verify-feature: consent mode ready, no runtime recipe** → same as above, but
   `/zensu:verify-feature` has nothing to boot. Run `/zensu:verify-feature --setup` to write the
   recipe with the user, or `--attach=<loopback-origin>` for an application they already run.
+- **❌ verify-feature: … the browser broker will refuse it (…)** → a parent-environment policy
+  IS set, but its value does not satisfy the contract the broker parses at start, so the
+  browser cannot open at all. Only the three top-level guards are repeated in this check —
+  the per-target rules stay the broker's — and the parenthesis names which one answered. The
+  user fixes that value in the environment that launches Claude Code, or unsets it to fall
+  back to consent mode. Never edit it from a Bash call: it is read once when the broker starts.
 - **❌ verify-feature: cannot start (…)** → the consent hook pair, its decision module or the
   broker script is missing, or `hooks/hooks.json` does not register the hook on the
   navigation matcher. Reinstall the plugin, or launch Claude Code with the parent-environment

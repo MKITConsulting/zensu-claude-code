@@ -19,11 +19,13 @@ const REASONS = Object.freeze({
   DECLARED_ROUTE: 'known-origin-declared-route',
   NEW_ORIGIN: 'new-origin-needs-consent',
   UNDECLARED_ROUTE: 'undeclared-route-needs-consent',
-  REMOTE_NEEDS_POLICY: 'remote-target-needs-parent-environment-policy: consent mode admits literal loopback origins only; a remote target needs the parent-environment navigation policy',
+  REMOTE_NEEDS_POLICY: `remote-target-needs-parent-environment-policy: ${floor.CONSENT_REMOTE_REASON}`,
   PAYLOAD_UNREADABLE: 'hook-payload-unreadable',
   MEMORY_UNREADABLE: 'consent-memory-unreadable',
   MEMORY_PATH_REFUSED: 'consent-memory-path-refused',
 });
+
+const FOREIGN_SERVER_NOTE = 'This gate matches on the tool name alone, and the bare mcp__playwright__ spelling belongs to any MCP server keyed "playwright". If this navigation is not a /zensu:verify-feature run, the tool is served by a different server and this refusal is not about your request: ask the user to rename that server key, or to launch Claude Code with ZENSU_VERIFY_NAVIGATION_POLICY_V1 set in its environment. Never set that variable from a Bash call — it is read once when the browser broker starts.';
 
 function payloadFromRaw(raw, accumulationFailed) {
   if (accumulationFailed) return null;
@@ -48,13 +50,27 @@ function normalizeRoutes(declaredRoutes) {
   if (!Array.isArray(declaredRoutes)) return [];
   const routes = [];
   for (const route of declaredRoutes) {
-    if (typeof route !== 'string' || !route.startsWith('/') || route.includes('?') || route.includes('#') || route.includes('*')) continue;
-    let normalized;
-    try { normalized = new URL(route, 'https://zensu.invalid').pathname; }
-    catch (_error) { continue; }
-    if (normalized === route && !routes.includes(route)) routes.push(route);
+    const normalized = floor.normalizeRoute(route);
+    if (normalized !== null && !routes.includes(normalized)) routes.push(normalized);
   }
   return routes;
+}
+
+// Date.parse accepts "July 4, 2026" and "2026-02-31T00:00:00.000Z", so validity is not the
+// same question as shape. Same predicate, and the same reason, as isIsoInstant in
+// skills/session-trail/scripts/session-lineage-v1.mjs: a stamp only orders correctly for the
+// fixed-width UTC spelling toISOString() produces, which is the only spelling this module writes.
+const ISO_INSTANT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+function isIsoInstant(value) {
+  return typeof value === 'string' && ISO_INSTANT_RE.test(value)
+    && new Date(value).toISOString() === value;
+}
+
+function validDeclaredRoutes(value) {
+  if (value === undefined) return true;
+  return Array.isArray(value) && value.length <= MAX_RECORDS
+    && value.every((route) => typeof route === 'string' && floor.normalizeRoute(route) === route);
 }
 
 function validRecord(record) {
@@ -62,7 +78,17 @@ function validRecord(record) {
     && typeof record.origin === 'string' && record.origin.length > 0
     && typeof record.route === 'string' && record.route.startsWith('/')
     && DECIDED_BY.includes(record.decidedBy)
-    && typeof record.at === 'string' && Number.isFinite(Date.parse(record.at));
+    && isIsoInstant(record.at)
+    && validDeclaredRoutes(record.declaredRoutes);
+}
+
+function consentedRoutes(records, origin) {
+  const routes = [];
+  for (const entry of records) {
+    if (entry.origin !== origin || !Array.isArray(entry.declaredRoutes)) continue;
+    for (const route of entry.declaredRoutes) if (!routes.includes(route)) routes.push(route);
+  }
+  return routes;
 }
 
 function emptyMemory() {
@@ -126,7 +152,9 @@ function appendRecord(memoryPath, record, options = {}) {
     return { ok: true, records, duplicate: true };
   }
   if (records.length >= MAX_RECORDS) return { ok: false, reason: 'memory-full' };
-  records.push({ origin: record.origin, route: record.route, decidedBy: record.decidedBy, at: record.at });
+  const entry = { origin: record.origin, route: record.route, decidedBy: record.decidedBy, at: record.at };
+  if (Array.isArray(record.declaredRoutes)) entry.declaredRoutes = normalizeRoutes(record.declaredRoutes);
+  records.push(entry);
   const body = `${JSON.stringify({ version: MEMORY_VERSION, records })}\n`;
   const temp = path.join(allowed.stateDir, `.${path.basename(memoryPath)}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`);
   try {
@@ -156,7 +184,7 @@ function promptText({ kind, origin, route, mode, declaredRoutes }) {
     if (routes.length > 0) lines.push(`Declared synthetic-safe routes for this run: ${routes.join(', ')}.`);
     else lines.push('No runtime recipe declares synthetic-safe routes for this run; every further route will ask again.');
   }
-  lines.push('Answering Yes lets the model read this page\'s content, screenshots included, for the rest of this session.');
+  lines.push(`Answering Yes lets the model open and read any page on ${origin}, screenshots included, for the rest of this session: once an origin is approved the browser does not check routes again.`);
   lines.push('Answer No to keep the browser closed for this origin; the run then reports PARTIAL.');
   return lines.join(' ');
 }
@@ -178,7 +206,7 @@ function decide({ toolName, toolInput, records, declaredRoutes, policyPresent })
   const routeKnown = known.some((entry) => entry.origin === origin && entry.route === route);
   if (routeKnown) return { verdict: 'allow', reason: REASONS.MEMORY_HIT, target, origin, route, mode, decidedBy: 'memory' };
   const routes = normalizeRoutes(declaredRoutes);
-  if (originKnown && routes.includes(route)) {
+  if (originKnown && consentedRoutes(known, origin).includes(route)) {
     return { verdict: 'allow', reason: REASONS.DECLARED_ROUTE, target, origin, route, mode, decidedBy: 'memory' };
   }
   const kind = originKnown ? 'route' : 'origin';
@@ -198,25 +226,45 @@ function preEnvelope(decision) {
       permissionDecision: decision.verdict,
       permissionDecisionReason: decision.verdict === 'ask'
         ? decision.prompt
-        : `Zensu browser consent gate denied the navigation: ${decision.reason}`,
+        : `Zensu browser consent gate denied the navigation: ${decision.reason} ${FOREIGN_SERVER_NOTE}`,
     },
   };
 }
 
-function parseDeclaredRoutes(raw) {
-  if (typeof raw !== 'string' || !raw) return [];
-  try {
-    return normalizeRoutes(JSON.parse(raw));
-  } catch (_error) {
-    return [];
-  }
-}
-
 const MAX_RECIPE_BYTES = 262144;
+const RECIPE_NAMES = Object.freeze(['runtime.yaml', 'autopilot.yaml']);
+
+// The ONE resolution of which recipe governs a project. Both hooks and the doctor row
+// used to spell this ladder themselves, so a one-sided edit could make the pre hook
+// decide against one file while the post hook recorded against another, or make the
+// doctor report a recipe the hooks never load.
+function resolveRecipeFile(projectRoot) {
+  if (typeof projectRoot !== 'string' || !projectRoot) return '';
+  for (const name of RECIPE_NAMES) {
+    const candidate = path.join(projectRoot, '.zensu', name);
+    let info;
+    try { info = fs.lstatSync(candidate); }
+    catch (_error) { continue; }
+    if (info.isFile() && !info.isSymbolicLink()) return candidate;
+  }
+  return '';
+}
 
 function declaredRoutesFromRecipe(text) {
   const lines = String(text).split(/\r?\n/);
-  const start = lines.findIndex((line) => /^\s*evidenceSafety:\s*$/.test(line));
+  // Anchored on the validate: parent and on depth, so one file cannot mean two things to this
+  // reader and to a YAML parser: a stray evidenceSafety: at another level is not this key.
+  const validateAt = lines.findIndex((line) => /^validate:\s*$/.test(line));
+  if (validateAt === -1) return [];
+  const validateIndent = 0;
+  let start = -1;
+  for (let index = validateAt + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line.trim()) continue;
+    const indent = (line.match(/^\s*/) || [''])[0].length;
+    if (indent <= validateIndent) break;
+    if (/^\s*evidenceSafety:\s*$/.test(line)) { start = index; break; }
+  }
   if (start === -1) return [];
   const blockIndent = (lines[start].match(/^\s*/) || [''])[0].length;
   for (let index = start + 1; index < lines.length; index += 1) {
@@ -254,13 +302,16 @@ function readRecipeRoutes(recipeFile) {
   }
 }
 
+// The declared routes come from the guarded recipe read and from nowhere else. An
+// environment override sat here and short-circuited the branch carrying the lstat,
+// symlink and size guards, with no production producer and no hook clearing it — an
+// inherited value from the launching shell would have widened the silent-allow set.
 function readInputs(env) {
-  const declared = env.ZENSU_VERIFY_DECLARED_ROUTES
-    ? parseDeclaredRoutes(env.ZENSU_VERIFY_DECLARED_ROUTES)
-    : readRecipeRoutes(env.ZENSU_VERIFY_RECIPE_FILE);
+  const projectRoot = env.ZENSU_VERIFY_PROJECT_ROOT || '';
+  const declared = readRecipeRoutes(resolveRecipeFile(projectRoot));
   return {
     memoryPath: env.ZENSU_VERIFY_CONSENT_MEMORY || '',
-    projectRoot: env.ZENSU_VERIFY_PROJECT_ROOT || '',
+    projectRoot,
     declaredRoutes: declared,
     policyPresent: Boolean(env.ZENSU_VERIFY_NAVIGATION_POLICY_V1),
   };
@@ -279,7 +330,10 @@ function runPre(payload, env, out, err) {
     return;
   }
   const inputs = readInputs(env);
-  const memory = readMemory(inputs.memoryPath);
+  // The same containment the writer applies, so a read and a write can never disagree about
+  // which file is this session's memory.
+  const allowed = memoryPathAllowed(inputs.memoryPath, inputs.projectRoot);
+  const memory = allowed.ok ? readMemory(inputs.memoryPath) : { ok: false, reason: allowed.reason, records: [] };
   if (!memory.ok) err.write(`zensu: verify consent memory ignored (${memory.reason}); the navigation will ask again\n`);
   const decision = decide({
     toolName: payload.tool_name,
@@ -317,7 +371,11 @@ function runPost(payload, env, err) {
     origin = classified.origin;
     route = classified.pathname;
   }
-  const result = appendRecord(inputs.memoryPath, { origin, route, decidedBy, at: new Date().toISOString() }, { projectRoot: inputs.projectRoot });
+  const result = appendRecord(
+    inputs.memoryPath,
+    { origin, route, decidedBy, at: new Date().toISOString(), declaredRoutes: normalizeRoutes(inputs.declaredRoutes) },
+    { projectRoot: inputs.projectRoot },
+  );
   if (!result.ok) err.write(`zensu: verify consent memory not written (${result.reason})\n`);
   return result;
 }
@@ -325,6 +383,7 @@ function runPost(payload, env, err) {
 module.exports = {
   CONSENT_MATCHER,
   DECIDED_BY,
+  FOREIGN_SERVER_NOTE,
   MAX_MEMORY_BYTES,
   MAX_RECIPE_BYTES,
   MAX_RECORDS,
@@ -332,19 +391,22 @@ module.exports = {
   MEMORY_VERSION,
   NAVIGATION_TOOL_RE,
   REASONS,
+  RECIPE_NAMES,
   appendRecord,
+  consentedRoutes,
   decide,
   declaredRoutesFromRecipe,
   emptyMemory,
+  isIsoInstant,
   memoryPathAllowed,
   normalizeRoutes,
-  parseDeclaredRoutes,
   payloadFromRaw,
   preEnvelope,
   promptText,
   readInputs,
   readMemory,
   readRecipeRoutes,
+  resolveRecipeFile,
   responseFailed,
   runPost,
   runPre,
@@ -375,7 +437,7 @@ if (require.main === module) {
         else runPost(payload, process.env, process.stderr);
       } catch (error) {
         if (mode === 'pre') {
-          process.stdout.write(JSON.stringify(preEnvelope({ verdict: 'deny', reason: `hook-failed:${error && error.message ? error.message : 'unknown'}` })));
+          process.stdout.write(JSON.stringify(preEnvelope({ verdict: 'deny', reason: `hook-failed:${error && error.code ? error.code : 'unknown'}` })));
         } else {
           process.stderr.write('zensu: verify consent memory not written (hook failed)\n');
         }

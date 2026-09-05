@@ -29,7 +29,7 @@ command -v node >/dev/null 2>&1 || { echo "SKIP: node unavailable"; exit 0; }
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 unset CLAUDE_AGENT_TYPE ZENSU_VERIFY_NAVIGATION_POLICY_V1 ZENSU_VERIFY_CONSENT_MEMORY \
-  ZENSU_VERIFY_PROJECT_ROOT ZENSU_VERIFY_RECIPE_FILE ZENSU_VERIFY_DECLARED_ROUTES 2>/dev/null || true
+  ZENSU_VERIFY_PROJECT_ROOT ZENSU_VERIFY_RECIPE_FILE 2>/dev/null || true
 
 for f in "$PRE_HOOK" "$POST_HOOK" "$MODULE" "$FLOOR" "$UNIT_CONSENT" "$UNIT_FLOOR" "$UNIT_PORT" "$FREE_PORT"; do
   [ -f "$f" ] && check "V0 file exists: ${f#"$PLUGIN_DIR"/}" PASS || check "V0 file exists: ${f#"$PLUGIN_DIR"/}" FAIL
@@ -81,16 +81,47 @@ grep -qF 'verify-navigation-floor-v1.js' "$PROXY" && ! grep -qE '^function isLoo
   && check "V8 broker and consent module share the one floor module" PASS \
   || check "V8 broker and consent module share the one floor module" FAIL
 
-if ! grep -qE 'zensu_hook_enabled|ZENSU_[A-Z_]+=.?off' "$PRE_HOOK" "$POST_HOOK" "$MODULE"; then
+if ! grep -qF 'ZENSU_VERIFY_DECLARED_ROUTES' "$MODULE"; then
+  check "V8b the decision module takes its declared routes only from the guarded recipe read" PASS
+else
+  check "V8b the decision module takes its declared routes only from the guarded recipe read" FAIL
+fi
+if grep -qF 'ZENSU_VERIFY_PROJECT_ROOT' "$MODULE" && grep -qF 'resolveRecipeFile' "$MODULE" \
+  && grep -qF "'runtime.yaml', 'autopilot.yaml'" "$MODULE"; then
+  check "V8b-control the module resolves the recipe itself from the project root, in one place" PASS
+else
+  check "V8b-control the module resolves the recipe itself from the project root, in one place" FAIL
+fi
+if ! grep -qF 'runtime.yaml' "$PRE_HOOK" && ! grep -qF 'runtime.yaml' "$POST_HOOK"; then
+  check "V8c neither hook spells the recipe ladder any more" PASS
+else
+  check "V8c neither hook spells the recipe ladder any more" FAIL
+fi
+FLAG_RE='zensu_hook_enabled|ZENSU_[A-Z_]+=.?off'
+CONTROL_FILE="$(mktemp "${TMPDIR:-/tmp}/zensu-vc-control.XXXXXX")" || exit 1
+printf 'ZENSU_BROWSER_CONSENT=off\nzensu_hook_enabled browserConsent\nBROWSER_CONSENT\nVERIFY_CONSENT\n' >"$CONTROL_FILE"
+if grep -qE "$FLAG_RE" "$CONTROL_FILE" && grep -qF 'BROWSER_CONSENT' "$CONTROL_FILE" \
+  && grep -qF 'VERIFY_CONSENT' "$CONTROL_FILE"; then
+  check "V8a positive control: the V9/V10 patterns match a file that carries them" PASS
+else
+  check "V8a positive control: the V9/V10 patterns match a file that carries them" FAIL
+fi
+V9_READABLE=1
+for _vc_file in "$PRE_HOOK" "$POST_HOOK" "$MODULE"; do
+  [ -r "$_vc_file" ] || V9_READABLE=0
+done
+if [ "$V9_READABLE" -eq 1 ] && ! grep -qE "$FLAG_RE" "$PRE_HOOK" "$POST_HOOK" "$MODULE"; then
   check "V9 the pair reads no config flag and teaches no gate-disable prefix" PASS
 else
   check "V9 the pair reads no config flag and teaches no gate-disable prefix" FAIL
 fi
-if ! grep -qF 'BROWSER_CONSENT' "$ESCAPE_STEMS_SUITE" && ! grep -qF 'VERIFY_CONSENT' "$TDD_PHASE_LIB"; then
+if [ -r "$ESCAPE_STEMS_SUITE" ] && [ -r "$TDD_PHASE_LIB" ] \
+  && ! grep -qF 'BROWSER_CONSENT' "$ESCAPE_STEMS_SUITE" && ! grep -qF 'VERIFY_CONSENT' "$TDD_PHASE_LIB"; then
   check "V10 ESCAPE_STEMS and the bypass allowlist carry no consent entry" PASS
 else
   check "V10 ESCAPE_STEMS and the bypass allowlist carry no consent entry" FAIL
 fi
+rm -f "$CONTROL_FILE"
 
 TMP_ROOTS=""
 cleanup() {
@@ -109,8 +140,12 @@ payload() { # $1 event  $2 tool  $3 url-or-empty  $4 session  $5 cwd  [$6 respon
     process.stdout.write(JSON.stringify(body));
   ' "$1" "$2" "$3" "$4" "$5" "${6:-}"
 }
-pre_verdict() { # tool url session cwd -> ALLOW | ASK | DENY
-  payload PreToolUse "$1" "$2" "$3" "$4" | bash "$PRE_HOOK" 2>/dev/null | node -e '
+pre_verdict() { # tool url session cwd -> ALLOW | ASK | DENY | ERROR
+  local hook_out hook_status
+  hook_out="$(payload PreToolUse "$1" "$2" "$3" "$4" | bash "$PRE_HOOK" 2>/dev/null)"
+  hook_status=$?
+  if [ "$hook_status" -ne 0 ]; then echo "ERROR"; return 0; fi
+  printf '%s' "$hook_out" | node -e '
     let s = "";
     process.stdin.on("data", (c) => { s += c; });
     process.stdin.on("end", () => {
@@ -143,8 +178,8 @@ MEMORY="$PROJ/.zensu/state/verify-consent-${ZENSU_SESSION_KEY}.json"
   || check "V12 first navigation to a new loopback origin asks" FAIL
 REASON="$(pre_reason "$NAV" "http://127.0.0.1:4200/login" "$SID" "$PROJ")"
 case "$REASON" in
-  *'http://127.0.0.1:4200'*'/login'*"lets the model read this page's content"*) check "V13 the prompt names origin, route and consequence" PASS ;;
-  *) check "V13 the prompt names origin, route and consequence" FAIL ;;
+  *'http://127.0.0.1:4200'*'/login'*'lets the model open and read any page on http://127.0.0.1:4200'*'does not check routes again'*) check "V13 the prompt names origin, route and the origin-wide consequence" PASS ;;
+  *) check "V13 the prompt names origin, route and the origin-wide consequence" FAIL ;;
 esac
 [ ! -e "$MEMORY" ] && check "V14 asking writes no memory" PASS || check "V14 asking writes no memory" FAIL
 
@@ -196,23 +231,48 @@ node -e 'process.exit(JSON.parse(require("fs").readFileSync(process.argv[1], "ut
   || check "V23 a floor-refused target is never remembered" FAIL
 
 printf '%s\n' 'version: 1' 'validate:' '  driver: browser' '  evidenceSafety:' '    contractVersion: 1' '    mode: declared-safe' '    routes: ["/", "/login", "/inventory"]' '    dataClassification: synthetic' '    containsPersonalData: false' '    containsSecrets: false' > "$PROJ/.zensu/autopilot.yaml"
-[ "$(pre_verdict "$NAV" "http://127.0.0.1:4200/inventory" "$SID" "$PROJ")" = "ALLOW" ] \
-  && check "V24 a route the recipe declares synthetic-safe passes on the known origin" PASS \
-  || check "V24 a route the recipe declares synthetic-safe passes on the known origin" FAIL
-[ "$(pre_verdict "$NAV" "http://127.0.0.1:4200/admin" "$SID" "$PROJ")" = "ASK" ] \
-  && check "V24-control an undeclared route still asks with the recipe present" PASS \
-  || check "V24-control an undeclared route still asks with the recipe present" FAIL
-printf '%s\n' 'version: 1' 'validate:' '  evidenceSafety:' '    routes: ["/settings"]' > "$PROJ/.zensu/runtime.yaml"
-[ "$(pre_verdict "$NAV" "http://127.0.0.1:4200/settings" "$SID" "$PROJ")" = "ALLOW" ] \
-  && check "V25 runtime.yaml outranks autopilot.yaml for the declared routes" PASS \
-  || check "V25 runtime.yaml outranks autopilot.yaml for the declared routes" FAIL
 [ "$(pre_verdict "$NAV" "http://127.0.0.1:4200/inventory" "$SID" "$PROJ")" = "ASK" ] \
-  && check "V25-control the autopilot routes no longer apply once runtime.yaml exists" PASS \
-  || check "V25-control the autopilot routes no longer apply once runtime.yaml exists" FAIL
+  && check "V24 a recipe written AFTER the consent does not widen it — the declared route still asks" PASS \
+  || check "V24 a recipe written AFTER the consent does not widen it — the declared route still asks" FAIL
+post_run "$NAV" "http://127.0.0.1:4200/inventory" "$SID" "$PROJ" >/dev/null
+node -e '
+  const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).records;
+  const last = r[r.length - 1];
+  process.exit(last.route === "/inventory" && Array.isArray(last.declaredRoutes)
+    && last.declaredRoutes.join(",") === "/,/login,/inventory" ? 0 : 1);
+' "$MEMORY" 2>/dev/null \
+  && check "V24a the recorded consent carries the route set the prompt showed" PASS \
+  || check "V24a the recorded consent carries the route set the prompt showed" FAIL
+[ "$(pre_verdict "$NAV" "http://127.0.0.1:4200/login" "$SID" "$PROJ")" = "ALLOW" ] \
+  && check "V24b a sibling route of the consented set now passes silently" PASS \
+  || check "V24b a sibling route of the consented set now passes silently" FAIL
+[ "$(pre_verdict "$NAV" "http://127.0.0.1:4200/admin" "$SID" "$PROJ")" = "ASK" ] \
+  && check "V24-control a route the consented set never carried still asks" PASS \
+  || check "V24-control a route the consented set never carried still asks" FAIL
+printf '%s\n' 'version: 1' 'validate:' '  evidenceSafety:' '    routes: ["/settings"]' > "$PROJ/.zensu/runtime.yaml"
+[ "$(pre_verdict "$NAV" "http://127.0.0.1:4200/settings" "$SID" "$PROJ")" = "ASK" ] \
+  && check "V25 a route added by a later recipe asks rather than inheriting the standing consent" PASS \
+  || check "V25 a route added by a later recipe asks rather than inheriting the standing consent" FAIL
 post_run "$NAV" "http://127.0.0.1:4200/settings" "$SID" "$PROJ" >/dev/null
 node -e '
   const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).records;
-  process.exit(r.length === 2 && r[1].route === "/settings" && r[1].decidedBy === "memory" ? 0 : 1);
+  const last = r[r.length - 1];
+  process.exit(last.route === "/settings" && last.decidedBy === "prompt"
+    && Array.isArray(last.declaredRoutes) && last.declaredRoutes.join(",") === "/settings" ? 0 : 1);
+' "$MEMORY" 2>/dev/null \
+  && check "V25a runtime.yaml outranks autopilot.yaml for the routes a new consent records" PASS \
+  || check "V25a runtime.yaml outranks autopilot.yaml for the routes a new consent records" FAIL
+[ "$(pre_verdict "$NAV" "http://127.0.0.1:4200/inventory" "$SID" "$PROJ")" = "ALLOW" ] \
+  && check "V25-control an earlier consent keeps its own routes after the recipe changes" PASS \
+  || check "V25-control an earlier consent keeps its own routes after the recipe changes" FAIL
+[ "$(pre_verdict "$NAV" "http://127.0.0.1:4200/" "$SID" "$PROJ")" = "ALLOW" ] \
+  && check "V26pre the root route is consented but not yet recorded, so it passes as a declared route" PASS \
+  || check "V26pre the root route is consented but not yet recorded, so it passes as a declared route" FAIL
+post_run "$NAV" "http://127.0.0.1:4200/" "$SID" "$PROJ" >/dev/null
+node -e '
+  const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).records;
+  const hit = r.filter((e) => e.origin === "http://127.0.0.1:4200" && e.route === "/");
+  process.exit(hit.length === 1 && hit[0].decidedBy === "memory" ? 0 : 1);
 ' "$MEMORY" 2>/dev/null \
   && check "V26 a declared-route navigation is recorded with decidedBy memory" PASS \
   || check "V26 a declared-route navigation is recorded with decidedBy memory" FAIL
@@ -226,6 +286,9 @@ payload PreToolUse "$NAV" "http://127.0.0.1:4200/" "$SID" "$PROJ" > "$PROJ/misma
 CLAUDE_PLUGIN_ROOT="$PROJ" bash "$PRE_HOOK" < "$PROJ/mismatch-payload.json" >/dev/null 2>&1 || ROOT_MISMATCH_RC=$?
 [ "$ROOT_MISMATCH_RC" -eq 2 ] && check "V28 an inherited plugin root that does not match refuses with exit 2" PASS \
   || check "V28 an inherited plugin root that does not match refuses with exit 2 (rc=$ROOT_MISMATCH_RC)" FAIL
+[ "$(CLAUDE_PLUGIN_ROOT="$PROJ" pre_verdict "$NAV" "http://127.0.0.1:4200/" "$SID" "$PROJ")" = "ERROR" ] \
+  && check "V28a the harness reports an aborted hook as ERROR rather than as a silent allow" PASS \
+  || check "V28a the harness reports an aborted hook as ERROR rather than as a silent allow" FAIL
 
 STDERR_UNBOUND="$(payload PreToolUse "$NAV" "http://127.0.0.1:4200/x" "no-such-session" "$PROJ" | bash "$PRE_HOOK" 2>&1 >/dev/null)"
 [ "$(pre_verdict "$NAV" "http://127.0.0.1:4200/x" "no-such-session" "$PROJ")" = "ASK" ] \
@@ -253,6 +316,20 @@ if grep -qF '**Consent mode (no parent policy).**' "$SKILL_MD" \
 else
   check "V31 SKILL.md states consent mode, its hook, its loopback bound and the user-owned prompt" FAIL
 fi
+if grep -qF 'In POLICY mode' "$SKILL_MD" && grep -qF 'In CONSENT mode** there is' "$SKILL_MD" \
+  && grep -qF 'a run-specific loopback port is the EXPECTED' "$SKILL_MD" \
+  && grep -qF 'ACCEPTED-CANDIDATE branch' "$SKILL_MD" && grep -qF 'MONOREPO-ADAPTER branch' "$SKILL_MD"; then
+  check "V31b SKILL.md scopes the policy requirement, the port criterion and the port source by mode" PASS
+else
+  check "V31b SKILL.md scopes the policy requirement, the port criterion and the port source by mode" FAIL
+fi
+if ! grep -qF 'with the current session and requires a discovery run' "$SKILL_MD" \
+  && ! grep -qF 'unapproved parent' "$SKILL_MD" \
+  && grep -qF 'incompatible with that session' "$SKILL_MD"; then
+  check "V31c the two unscoped sentences that terminated every consent-mode run are gone" PASS
+else
+  check "V31c the two unscoped sentences that terminated every consent-mode run are gone" FAIL
+fi
 if grep -qF -- '`--attach=<origin>`' "$SKILL_MD" && grep -qF -- '`--setup`' "$SKILL_MD" \
   && grep -qF -- '`--print-policy`' "$SKILL_MD" \
   && grep -qF 'else `.zensu/runtime.yaml`, else `.zensu/autopilot.yaml`' "$SKILL_MD" \
@@ -273,12 +350,44 @@ fi
 if [ -f "$SETUP_MD" ] && grep -qF '# Guided runtime setup' "$SETUP_MD" \
   && grep -qF 'git ls-files' "$SETUP_MD" && grep -qF 'from <repo-root-relative file>' "$SETUP_MD" \
   && grep -qF 'Ask exactly one `AskUserQuestion`' "$SETUP_MD" \
-  && grep -qF '.zensu/runtime.yaml' "$SETUP_MD" && grep -qF 'portEnv: ZENSU_VERIFY_PORT' "$SETUP_MD" \
+  && grep -qF '.zensu/runtime.yaml' "$SETUP_MD" \
   && grep -qF -- '--print-policy' "$SETUP_MD" && grep -qF 'never commit unasked' "$SETUP_MD" \
   && grep -qF 'project-level settings files are not the place' "$SETUP_MD"; then
   check "V34 rules/setup.md is evidence-driven, single-question, writes runtime.yaml and renders the policy" PASS
 else
   check "V34 rules/setup.md is evidence-driven, single-question, writes runtime.yaml and renders the policy" FAIL
+fi
+if ! grep -qF 'portEnv' "$SETUP_MD"; then
+  check "V34a the template carries no key the adapter and the autopilot contract never read" PASS
+else
+  check "V34a the template carries no key the adapter and the autopilot contract never read" FAIL
+fi
+# V34b executes the round trip V34 only greps: the policy template SHIPPED in rules/setup.md
+# is extracted, filled with a port and a route, and fed to the launcher's own --check-policy.
+POLICY_TEMPLATE="$(node -e '
+  const text = require("fs").readFileSync(process.argv[1], "utf8");
+  const m = text.match(/\{"version":1,"mode":"local","targets":\[[^\n]*?\}\]\}/);
+  process.stdout.write(m ? m[0] : "");
+' "$SETUP_MD" 2>/dev/null)"
+if [ -n "$POLICY_TEMPLATE" ]; then
+  check "V34b-control the policy template is extractable from rules/setup.md" PASS
+else
+  check "V34b-control the policy template is extractable from rules/setup.md" FAIL
+fi
+RENDERED_POLICY="$(printf '%s' "$POLICY_TEMPLATE" | sed -e 's|<port>|45173|' -e 's|\[<declared routes>\]|["/"]|')"
+case "$RENDERED_POLICY" in
+  *'<port>'*|*'<declared routes>'*|'') check "V34b-control2 every placeholder in the template was substituted" FAIL ;;
+  *) check "V34b-control2 every placeholder in the template was substituted" PASS ;;
+esac
+if [ -n "$RENDERED_POLICY" ] && ZENSU_VERIFY_NAVIGATION_POLICY_V1="$RENDERED_POLICY" node "$PROXY" --check-policy local 'http://127.0.0.1:45173' '/' declared-safe >/dev/null 2>&1; then
+  check "V34b the policy rules/setup.md renders is accepted by the launcher it tells the model to run" PASS
+else
+  check "V34b the policy rules/setup.md renders is accepted by the launcher it tells the model to run" FAIL
+fi
+if [ -z "$RENDERED_POLICY" ] || ZENSU_VERIFY_NAVIGATION_POLICY_V1="$RENDERED_POLICY" node "$PROXY" --check-policy local 'http://127.0.0.1:45173' '/admin' declared-safe >/dev/null 2>&1; then
+  check "V34b-neg an undeclared route is refused against that same rendered policy" FAIL
+else
+  check "V34b-neg an undeclared route is refused against that same rendered policy" PASS
 fi
 if grep -qF 'In consent mode (the preflight printed `consent`)' "$BROWSER_MD" \
   && grep -qF 'never try another spelling of the same target to avoid the prompt' "$BROWSER_MD" \

@@ -342,7 +342,9 @@ function toolBlock() {
   if (v === 'policy') line(OK, 'verify-feature: environment policy active — the parent-environment navigation policy governs every browser origin this session');
   else if (v === 'consent') line(OK, 'verify-feature: consent mode ready — no parent policy; the browser asks you per origin through the permission prompt, and a runtime recipe is present');
   else if (v === 'consent-no-recipe') line(WARN, 'verify-feature: consent mode ready, no runtime recipe — run /zensu:verify-feature --setup to write .zensu/runtime.yaml, or pass --attach=<loopback-origin> for an app you already run');
+  else if (v === 'policy-invalid') line(BAD, 'verify-feature: a parent-environment navigation policy is set but the browser broker will refuse it (' + (vr || 'reason unknown') + ') — only the top-level contract was checked here, so fix that value or unset it to fall back to consent mode');
   else if (v === 'unavailable') line(BAD, 'verify-feature: cannot start (' + (vr || 'reason unknown') + ') — the consent hook pair, its module and the broker must ship together; reinstall the plugin or launch Claude Code with the parent-environment policy');
+  else line(WARN, 'verify-feature: not checked — the wrapper reported no verify state, so this is a missing check rather than an all-clear; run /zensu:doctor from a session whose plugin root resolves');
 }
 
 function pluginBlock() {

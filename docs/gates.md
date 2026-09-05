@@ -368,15 +368,29 @@ exactly as before; the PostToolUse hook then records `decidedBy: policy`.
 absent or symlinked module, or a module failure denies the navigation with a stderr note. A
 session that cannot bind its Session Control record still gets the floor and a prompt for
 every navigation — nothing is remembered, and the hook says so on stderr. The PostToolUse hook
-never blocks: every fault is a stderr note and exit `0`, and a navigation the broker rejected
-(`isError`) is not recorded.
+never blocks: every fault is a stderr note and exit `0` — with the one exception every sibling
+hook shares, the plugin-root identity guard, which refuses with exit 2 before the hook body runs
+(self-resolution failure and inherited-root mismatch are two distinct messages). A navigation the
+broker rejected (`isError`) is not recorded.
 
 **No escape and no config flag**, deliberately — the same rule as §Plugin-Data Guard. A
 switch the session could flip would relax the hook while the broker, which reads the
 registration once at start, kept trusting the chain. The parent policy is the supported
 alternative, so nothing here lands a bypass-ledger entry.
 
-**Residuals, named rather than implied.** The consent memory is a file in a directory the
+**Residuals, named rather than implied.** The matcher reaches further than the skill: it is
+registered on the tool NAME, `mcp__(plugin_zensu_)?playwright__browser_(navigate|tabs)`, and the
+optional group means the bare `mcp__playwright__…` spelling matches too. That spelling is not
+hypothetical — this plugin declares its own broker through `.mcp.json` under the server key
+`playwright`, so the same file yields `mcp__plugin_zensu_playwright__…` when it is loaded as a
+plugin and `mcp__playwright__…` when the repository itself is opened as a project. A consuming
+project that runs its OWN MCP server under that key therefore has every non-loopback
+`browser_navigate` denied by this gate, in every session, with no skill running and no config
+flag to turn it off. The deny text names that possibility and its two remedies — rename the
+server key, or launch Claude Code with the parent-environment policy set. Narrowing the matcher
+to the plugin-scoped spelling would remove the gate wherever the bare spelling is the real one,
+so the matcher is left as it is until the prefix is measured across desktop and CLI, default and
+`--plugin-dir` installs. The consent memory is a file in a directory the
 session can write through a Bash redirect, so a forged record skips the prompt for that origin;
 the floor bounds the damage to other loopback services. The broker trusts that the host ran
 the hook: with hooks disabled host-side, consent mode accepts unconsented loopback navigations.

@@ -341,7 +341,32 @@ if [ -z "${ZDOC_VERIFY:-}" ]; then
   ZDOC_VERIFY_REASON=""
   ZDOC_VERIFY_RECIPE_ROOT="${ZDOC_SESSION_PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:-}}"
   if [ -n "${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" ]; then
-    ZDOC_VERIFY=policy
+    # Presence is not validity: the broker parses this value at start and REFUSES to
+    # serve when it does not satisfy the contract, so a doctor claiming an active policy
+    # from the variable alone reports green for a session whose browser cannot start.
+    # Only the three TOP-LEVEL guards parsePolicy applies first are repeated here; the
+    # per-target rules stay the broker's, and the reason says which check answered.
+    ZDOC_VERIFY_POLICY_FAULT="$(node -e '
+      const raw = process.env.ZENSU_VERIFY_NAVIGATION_POLICY_V1 || "";
+      let value;
+      try { value = JSON.parse(raw); }
+      catch (_error) { process.stdout.write("policy is not valid JSON"); process.exit(0); }
+      const keys = Object.keys(value || {}).sort();
+      if (JSON.stringify(keys) !== JSON.stringify(["mode", "targets", "version"])) {
+        process.stdout.write("policy contains unknown or missing keys"); process.exit(0);
+      }
+      if (value.version !== 1 || !["local", "remote"].includes(value.mode)
+          || !Array.isArray(value.targets) || value.targets.length < 1 || value.targets.length > 8) {
+        process.stdout.write("policy contract is invalid"); process.exit(0);
+      }
+      process.stdout.write("");
+    ' 2>/dev/null)" || ZDOC_VERIFY_POLICY_FAULT="policy could not be judged"
+    if [ -n "$ZDOC_VERIFY_POLICY_FAULT" ]; then
+      ZDOC_VERIFY=policy-invalid
+      ZDOC_VERIFY_REASON="$ZDOC_VERIFY_POLICY_FAULT"
+    else
+      ZDOC_VERIFY=policy
+    fi
   elif [ ! -f "$ZDOC_ROOT/scripts/playwright-mcp-proxy.js" ] || [ -L "$ZDOC_ROOT/scripts/playwright-mcp-proxy.js" ]; then
     ZDOC_VERIFY=unavailable
     ZDOC_VERIFY_REASON="broker script missing"
@@ -356,8 +381,10 @@ if [ -z "${ZDOC_VERIFY:-}" ]; then
     ' >/dev/null 2>&1); then
     ZDOC_VERIFY=unavailable
     ZDOC_VERIFY_REASON="consent hook not registered on the navigation matcher"
-  elif [ -n "$ZDOC_VERIFY_RECIPE_ROOT" ] \
-    && { [ -f "$ZDOC_VERIFY_RECIPE_ROOT/.zensu/runtime.yaml" ] || [ -f "$ZDOC_VERIFY_RECIPE_ROOT/.zensu/autopilot.yaml" ]; }; then
+  elif [ -n "$ZDOC_VERIFY_RECIPE_ROOT" ] && (cd -P -- "$ZDOC_ROOT" && ZDOC_VERIFY_RECIPE_ROOT="$ZDOC_VERIFY_RECIPE_ROOT" node -e '
+      const mod = require("./hooks/lib/verify-consent-v1.js");
+      process.exit(mod.resolveRecipeFile(process.env.ZDOC_VERIFY_RECIPE_ROOT) ? 0 : 1);
+    ' >/dev/null 2>&1); then
     ZDOC_VERIFY=consent
   else
     ZDOC_VERIFY=consent-no-recipe

@@ -178,7 +178,9 @@ if [ "$LOOPBACK_AVAILABLE" != 1 ]; then
 else
   CONSENT_ORIGIN="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 "${CONSENT_ENV[@]}" bash "$CONTROLLER" planned-origin "$CONSENT_RUN" "$WORKTREE" 2>&1)"
   CONSENT_AGAIN="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 "${CONSENT_ENV[@]}" bash "$CONTROLLER" planned-origin "$CONSENT_RUN" "$WORKTREE" 2>&1)"
-  CONSENT_MODE="$(stat -f '%Lp' "$CONSENT_RUN/zensu-planned-origin" 2>/dev/null || stat -c '%a' "$CONSENT_RUN/zensu-planned-origin" 2>/dev/null)"
+  # GNU first: BSD stat rejects -c, but GNU stat -f SUCCEEDS with a filesystem
+  # dump, so a BSD-first order never reaches the fallback on Linux.
+  CONSENT_MODE="$(stat -c '%a' "$CONSENT_RUN/zensu-planned-origin" 2>/dev/null || stat -f '%Lp' "$CONSENT_RUN/zensu-planned-origin" 2>/dev/null)"
   if printf '%s' "$CONSENT_ORIGIN" | grep -qE '^http://127\.0\.0\.1:[0-9]+$' \
     && [ "$CONSENT_ORIGIN" = "$CONSENT_AGAIN" ] \
     && [ "$(cat "$CONSENT_RUN/zensu-planned-origin")" = "$CONSENT_ORIGIN" ] \
@@ -194,13 +196,37 @@ else
     check "a planted non-loopback planned-origin record is refused" FAIL
   fi
   rm -f "$CONSENT_RUN/zensu-planned-origin"
-  ln -s "$WORKTREE/frontend/package.json" "$CONSENT_RUN/zensu-planned-origin"
+  printf 'http://127.0.0.1:45173@evil.example\n' >"$CONSENT_RUN/zensu-planned-origin"
   if ! env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 "${CONSENT_ENV[@]}" bash "$CONTROLLER" planned-origin "$CONSENT_RUN" "$WORKTREE" >/dev/null 2>&1; then
-    check "a symlinked planned-origin record is refused" PASS
+    check "a planned-origin record with a trailing suffix after the port is refused" PASS
   else
-    check "a symlinked planned-origin record is refused" FAIL
+    check "a planned-origin record with a trailing suffix after the port is refused" FAIL
   fi
   rm -f "$CONSENT_RUN/zensu-planned-origin"
+  printf 'http://127.0.0.1:45173\n' >"$CONSENT_RUN/valid-origin-target"
+  ln -s "$CONSENT_RUN/valid-origin-target" "$CONSENT_RUN/zensu-planned-origin"
+  SYMLINK_ERR="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 "${CONSENT_ENV[@]}" bash "$CONTROLLER" planned-origin "$CONSENT_RUN" "$WORKTREE" 2>&1 >/dev/null)"
+  SYMLINK_STATUS=$?
+  case "$SYMLINK_STATUS:$SYMLINK_ERR" in
+    0:*) check "a symlinked planned-origin record is refused even when its target is a valid origin" FAIL ;;
+    *'planned origin record is unsafe'*) check "a symlinked planned-origin record is refused even when its target is a valid origin" PASS ;;
+    *) check "a symlinked planned-origin record is refused even when its target is a valid origin" FAIL ;;
+  esac
+  rm -f "$CONSENT_RUN/zensu-planned-origin" "$CONSENT_RUN/valid-origin-target"
+  ln -s "$CONSENT_RUN/no-such-planned-origin-target" "$CONSENT_RUN/zensu-planned-origin"
+  DANGLING_ERR="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 "${CONSENT_ENV[@]}" bash "$CONTROLLER" planned-origin "$CONSENT_RUN" "$WORKTREE" 2>&1 >/dev/null)"
+  DANGLING_STATUS=$?
+  case "$DANGLING_STATUS:$DANGLING_ERR" in
+    0:*) check "a dangling planned-origin symlink is refused rather than written through" FAIL ;;
+    *'planned origin record is unsafe'*) check "a dangling planned-origin symlink is refused rather than written through" PASS ;;
+    *) check "a dangling planned-origin symlink is refused rather than written through" FAIL ;;
+  esac
+  if [ ! -e "$CONSENT_RUN/no-such-planned-origin-target" ]; then
+    check "the refused dangling symlink left no file at its target" PASS
+  else
+    check "the refused dangling symlink left no file at its target" FAIL
+  fi
+  rm -f "$CONSENT_RUN/zensu-planned-origin" "$CONSENT_RUN/no-such-planned-origin-target"
   POLICY_ORIGIN="$(env "${COMMON_ENV[@]}" bash "$CONTROLLER" planned-origin "$CONSENT_RUN" "$WORKTREE" 2>&1)"
   [ "$POLICY_ORIGIN" = 'http://127.0.0.1:45173' ] && [ ! -e "$CONSENT_RUN/zensu-planned-origin" ] \
     && check "with a parent policy present the policy origin still wins and nothing is persisted" PASS \

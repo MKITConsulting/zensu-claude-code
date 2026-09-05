@@ -125,9 +125,12 @@ For a `remote` URL that passed validation, print this warning before any subsequ
 Do not imply that a remote PASS proves the worktree diff unless the deployment identity is
 confirmed.
 
-Before any browser call, require the plugin's version-1 navigation broker declared by
-`validate.navigationBroker` and configured in Claude's parent environment as
-`ZENSU_VERIFY_NAVIGATION_POLICY_V1`. Run
+Before any browser call, resolve which of the two modes this session is in, and require the
+plugin's version-1 navigation broker in both. **Policy mode** is a
+`ZENSU_VERIFY_NAVIGATION_POLICY_V1` configured in Claude's parent environment, declared by
+`validate.navigationBroker`. **Consent mode** is the absence of that variable, and it is the
+ordinary case for a user who has not configured anything; the preflight below prints which one
+applies. Run
 `bash "${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh" --check-policy <local|remote> "<validated-origin>" "<exact-page-route>" declared-safe`
 as a standalone preflight for every route. The parent JSON must bind each exact page route to
 its validated origin with the `declared-safe` mode described in the config contract. Contract
@@ -139,8 +142,11 @@ only non-loopback HTTPS, rejects RFC1918, CGNAT, link-local/metadata, loopback, 
 multicast/reserved, IPv4-mapped IPv6, ULA, and non-global IPv6 addresses, rejects mixed public
 and non-public DNS answers, and pins each hostname to an approved public address in Chromium to
 prevent DNS rebinding. Local mode accepts literal loopback-IP origins only. Raw Playwright navigation
-followed by a final-URL check is too late. A missing, invalid, mismatched, or unapproved parent
-policy stops before browser use with PARTIAL; never try to configure it from a child Bash call.
+followed by a final-URL check is too late. **In POLICY mode** a policy that is invalid, mismatched
+or does not approve the target stops before browser use with PARTIAL. **In CONSENT mode** there is
+no policy to be missing and the run continues under the paragraph below; only a REMOTE target
+stops with PARTIAL there, because remote verification keeps the policy. Never try to configure the
+variable from a child Bash call in either mode — the broker reads it once at start.
 
 **Consent mode (no parent policy).** When the preflight prints `consent` on stdout and exits
 `0`, no policy is present in the parent environment and the broker started in consent mode:
@@ -220,10 +226,13 @@ Claude's native placeholder substitution.
    - application and authentication base URLs, fixture setup, and cleanup refer to the same
      run-specific runtime;
    - the browser base URL is either a run-specific literal or comes from a checked-in
-     `validate.baseUrlCommand` executed only after readiness; its output must exactly match an
-     origin already authorized in the immutable parent broker policy. Validate it again before
-     navigating. A command that dynamically selects a previously unknown port is incompatible
-     with the current session and requires a discovery run followed by a policy-configured restart;
+     `validate.baseUrlCommand` executed only after readiness. Validate it again before
+     navigating. **In POLICY mode** its output must exactly match an origin already authorized in
+     the immutable parent broker policy, and a command that dynamically selects a previously
+     unknown port is incompatible with that session: it requires a discovery run followed by a
+     policy-configured restart. **In CONSENT mode** a run-specific loopback port is the EXPECTED
+     shape rather than a defect — nothing is pre-authorized, and the first navigation to it asks
+     the user through the permission prompt;
    Reject fixed-port Compose stacks, shared resource names, daemonized services without
    ownership, or recipes whose teardown scope is ambiguous. Record why the candidate was
    rejected; do not execute any part of it.
@@ -236,10 +245,15 @@ Claude's native placeholder substitution.
      step 1 with the recipe it wrote. On no, or when no human can answer, stop with PARTIAL and
      list the missing startup, readiness, base URL, auth, fixture, isolation, and teardown
      facts. Never invent commands.
-   In consent mode the run-specific port comes from
+   In consent mode the ACCEPTED-CANDIDATE branch takes its run-specific port from
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-free-port.js" --from 5173`, exported to the
    recipe's commands as `ZENSU_VERIFY_PORT`; the browser base URL is then
-   `http://127.0.0.1:$ZENSU_VERIFY_PORT`, and the first navigation to it asks the user.
+   `http://127.0.0.1:$ZENSU_VERIFY_PORT`, and the first navigation to it asks the user. The
+   MONOREPO-ADAPTER branch does not repeat that selection: it takes its origin from
+   `bash "$ZENSU_RUNTIME_CONTROLLER" planned-origin …`, which picks the port once and persists it
+   for the run, so a reused run directory keeps the port it already recorded. Never derive the
+   adapter's origin from a second free-port call — the two would diverge on a reused run
+   directory and on two concurrent runs.
 3. Before starting a service, register its scoped cleanup. A daemonized or shared service
    without scoped teardown is a blocker.
    Record each configured `down` command verbatim. Execute that command later as its own

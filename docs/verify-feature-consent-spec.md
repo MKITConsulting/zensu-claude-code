@@ -157,8 +157,9 @@ Two hooks, both on the matcher
   the session consent memory (§6.4) and the declared route set of the selected recipe:
   a known origin with a declared route is ALLOWED silently; a new origin, or a route not
   declared synthetic-safe, returns `ask` with a reason that names the origin, the route,
-  the mode (local/remote), and the sentence "answering Yes lets the model read this
-  page's content". It never emits `allow` for a target the floor rejects, and every load
+  the mode (local/remote), and a sentence stating the grant the broker actually makes — the
+  whole ORIGIN for the rest of the session, not the one page, because the broker stores
+  `classified.origin` and checks no route afterwards. It never emits `allow` for a target the floor rejects, and every load
   fault DENIES: this is a gate, so the fail-closed direction is the sibling gates'
   direction, not the grant hook's.
 - **PostToolUse `post-browser-navigation-consent.sh`.** Fires after a navigation the
@@ -184,10 +185,15 @@ policy is the supported alternative, exactly as today. `ESCAPE_STEMS` in
 
 `<project>/.zensu/state/verify-consent-<session-key>.json`, written only by the
 PostToolUse hook under the workflow document's external lease, one record per
-`(origin, route)`, plus `decidedBy: prompt | memory | policy`. The reader validates the
-shape before use, refuses symlinks and non-files, and ignores records older than the
-session's own Session Control record. It is per session by design: a new session asks
-again, once per origin.
+`(origin, route)`, plus `decidedBy: prompt | memory | policy` and the declared-route set the
+consent was granted against. The reader validates the shape before use, refuses symlinks, hard
+links and non-files, and requires each `at` to be the fixed-width UTC instant `toISOString()`
+produces — a validity test would accept `"July 4, 2026"` and `"2026-02-31T00:00:00.000Z"`.
+**No age bound against the Session Control record is implemented, and none is needed:** the file
+NAME carries the session key, so a record predating this session cannot appear in it except by
+being planted, and planting is already the residual §6.5 names. An earlier revision of this
+paragraph asserted such a bound; nothing implemented it. It is per session by design: a new
+session asks again, once per origin.
 
 The report's `Consent` block renders these records verbatim, so a human reviewing the
 report sees which prompts were answered.
@@ -247,7 +253,6 @@ services:
     down:  "scoped — the supervisor stops the process group it started"
 validate:
   driver: browser
-  portEnv: ZENSU_VERIFY_PORT
   evidenceSafety:
     contractVersion: 1
     mode: declared-safe
@@ -382,6 +387,13 @@ session can write.
 - Whether a permission rule allowing the tool suppresses a hook `ask`; the docs say the
   hook's `ask` wins, and the suite should pin the observed answer.
 - The exact desktop-app spelling of the tool name (`mcp__plugin_zensu_playwright__…`) is
-  confirmed by this session's tool list; the CLI spelling `mcp__playwright__…` is the
-  skill's documented alternative and stays in the matcher.
+  confirmed by this session's tool list. The bare `mcp__playwright__…` spelling is NOT a
+  CLI-versus-desktop distinction, which an earlier revision of this line claimed: measured
+  2026-09-04, `.claude-plugin/plugin.json` declares `mcpServers: "./.mcp.json"` and that file
+  names the server `playwright`, so the SAME file yields the plugin-scoped spelling when the
+  plugin is loaded and the bare one when this repository is opened as a project. Both spellings
+  stay in the matcher, and the bare arm's reach into a foreign server of the same key is
+  recorded as a residual in `docs/gates.md` § Browser Consent Gate. What is still unmeasured is
+  the prefix a RENAMED or `--plugin-dir` install produces; until that is taken, neither
+  narrowing nor widening the matcher is supported by evidence.
 - Windows wall clock for the new suite (unmeasured until a weekly Windows Safety run).
