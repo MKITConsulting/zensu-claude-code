@@ -197,9 +197,26 @@ if ! zensu_bind_hook_session "$INPUT"; then
   # registered on the Edit and Notebook matchers and covers the data store, not
   # the plugin root. So a session can convert its own blocking Stop into a
   # release by deleting a directory it does not execute from, and the release is
-  # unledgered for the same reason the other three are. Accepted on the same
-  # terms as the orphan arm's `mv` channel: the alternative wedges every
-  # genuinely pruned session forever with no in-session escape.
+  # unledgered for the same reason the other three are.
+  #
+  # This is NOT parity with the orphan arm's `mv` channel, and saying so was
+  # wrong. That one requires renaming the user's OWN project root, which is
+  # self-announcing — the work is in that directory and no plausible cover story
+  # exists. This one requires deleting a stale plugin-cache version directory the
+  # session does not execute from: invisible, breaking nothing the user can see,
+  # and "cleaning up old plugin versions" is a sentence a model can write in good
+  # faith. The state it converts FROM differs too. Before this arm, deleting that
+  # directory produced a fully wedged session — every gate denied AND Stop blocked
+  # — so there was no incentive; after it, the same delete converts a healthy,
+  # chain-armed, compatible-lineage session into one whose Stop releases. That is
+  # a new capability, not a re-labelling, and it lands inside the detection gap
+  # CLAUDE.md already records as open for the sibling channel.
+  #
+  # A THIRD cause reaches this arm with nobody deleting anything: a host update
+  # in flight. An installer that unlinks the version directory before extracting
+  # the new bytes leaves the recorded root answering ENOENT for that window, and
+  # the absence proof is a single lstat. Accepted because the alternative wedges
+  # every genuinely pruned session forever with no in-session escape.
   if PRUNED_RUNTIME="$(zensu_session_pruned_plugin_root "$INPUT")" \
     && [ -n "$PRUNED_RUNTIME" ]; then
     RECORDED_VERSION="${PRUNED_RUNTIME%%$'\t'*}"
@@ -209,7 +226,7 @@ if ! zensu_bind_hook_session "$INPUT"; then
       RECORDED_VERSION="(unreadable)"
       EXECUTING_VERSION="(unreadable)"
     fi
-    echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is intact, but the installation that minted it (version ${RECORDED_VERSION}) has been removed from the plugin cache, so the running installation (${EXECUTING_VERSION}) cannot re-verify the record and no installation can serve it. The binding that resolves the project root is what failed, so no review-chain or Autopilot state could be read from here: no completion was proven, only an unprovable guard released. The workflow document itself SURVIVES and is unchanged. Run /zensu:adopt-session to find out whether the running installation may take the record over; if it can, /zensu:adopt-session --confirm re-binds the session and the very next Stop enforces the chain again. Blocking instead would loop a session whose Edit and Bash channels are already denied, so the remedy would never reach you." >&2
+    echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is intact, but the installation that minted it (version ${RECORDED_VERSION}) has been removed from the plugin cache, so the running installation (${EXECUTING_VERSION}) cannot re-verify the record and no installation can serve it. Unlike the other three released bind failures, its recorded project root is intact — the relaxed reader still proves that root exists — so the workflow document is READABLE here; what failed is the session binding, and this hook declines to read a chain it cannot bind. The guarantee is therefore DEFERRED, not unavailable: no completion was proven, and the workflow document SURVIVES unchanged. Run /zensu:adopt-session to find out whether the running installation may take the record over; if it can, /zensu:adopt-session --confirm re-binds the session and the very next Stop enforces the chain again. Blocking instead would loop a session whose Edit and Bash channels are already denied, so the remedy would never reach you." >&2
     exit 0
   fi
   if ! zensu_stop_guard_opted_out; then

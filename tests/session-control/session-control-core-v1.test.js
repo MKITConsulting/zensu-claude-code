@@ -4576,8 +4576,15 @@ test('the pruned-root reader shape-checks the recorded plugin root at its call s
 test('requireAbsentDirectoryPath accepts only an absolute, normalized, printable path', () => {
   const absent = path.resolve(os.tmpdir(), 'zensu-absent-probe');
   assert.equal(core.requireAbsentDirectoryPath(absent, 'probe'), absent);
+  // Build the control byte visibly and assert the premise before asserting the
+  // refusal. The previous spelling embedded a literal C0 byte in the source, which
+  // rendered identically to the accepted value on the line above, so a reader could
+  // not see what the case tested and anyone tidying the redundant-looking literal
+  // would have deleted the only coverage of the character class.
+  const unsafe = `${absent}${String.fromCharCode(7)}`;
+  assert.ok(Array.from(unsafe).some((character) => character.charCodeAt(0) < 32));
   assert.throws(
-    () => core.requireAbsentDirectoryPath(`${absent}`, 'probe'),
+    () => core.requireAbsentDirectoryPath(unsafe, 'probe'),
     /^Error: session-control-v1: probe is unsafe$/,
   );
   assert.throws(
@@ -4674,4 +4681,67 @@ test('the pruned-root admission relaxes nothing else about adoption', () => {
     core.adoptableRecord(adoptionOptions(unrooted, parked)).reason,
     'record-unreadable',
   );
+});
+
+// Exported surface is a one-way door: adding an export later is free, removing one
+// later is the break, and the port obligations invite a second host to implement
+// whatever this module exports. `prunedPluginRootSession` was added for symmetry
+// with a sibling that is itself unused, and nothing under hooks/ ever called it —
+// every real consumer needs the version pair, not a boolean. The sibling is left
+// alone deliberately: it predates this change and removing it belongs to its own.
+test('the pruned binder module exports no predicate without a consumer', () => {
+  const hookModule = require(path.join(
+    path.dirname(process.env.SESSION_CONTROL_CORE),
+    'claude-hook-session-v1.js',
+  ));
+  assert.equal(typeof hookModule.resolvePrunedPluginRoot, 'function');
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(hookModule, 'prunedPluginRootSession'),
+    false,
+  );
+});
+
+// Each relaxed reader waives ONE recorded root and must refuse to waive the other,
+// whatever its caller passes. Both of them spread the caller's options, so before
+// this pin the combined state — project root gone AND installation pruned — refused
+// only because no caller happened to set the sibling flag. Both readers are exported
+// and the port obligations invite a second host to call them, so the guarantee has
+// to live in the reader rather than in a convention.
+test('a relaxed reader refuses to waive its sibling root as well', () => {
+  const pruned = prunedReaderFixture();
+  fs.rmSync(pruned.pluginRoot, { recursive: true, force: true });
+  fs.rmSync(pruned.currentContext.project_root, { recursive: true, force: true });
+  assert.throws(
+    () => core.readPrunedPluginRootContext({
+      ...pruned.readerOptions,
+      allowMissingProjectRoot: true,
+    }),
+    /context project root does not exist/,
+  );
+
+  const orphan = prunedReaderFixture();
+  fs.rmSync(orphan.pluginRoot, { recursive: true, force: true });
+  fs.rmSync(orphan.currentContext.project_root, { recursive: true, force: true });
+  assert.throws(
+    () => core.readOrphanedProjectRootContext({
+      ...orphan.readerOptions,
+      allowMissingPluginRoot: true,
+    }),
+    /context plugin root does not exist/,
+  );
+});
+
+// The safe-version shape is exported so every producer that renders a recorded
+// version applies ONE rule. It was module-private while the adoption path was its
+// only consumer; the pruned binder mode is a second consumer, and on that path the
+// manifest cross-check that used to bound `plugin_version` is exactly what the
+// waiver drops — so a hand-copied alternation there would be the fourth copy of a
+// rule whose whole job is to be single.
+test('the safe-version shape is exported and rejects a separator inside a version', () => {
+  assert.ok(core.ADOPTION_SAFE_VERSION_RE instanceof RegExp);
+  assert.ok(core.ADOPTION_SAFE_VERSION_RE.test('0.19.0'));
+  assert.ok(core.ADOPTION_SAFE_VERSION_RE.test('1.0.0-rc.1+build'));
+  assert.equal(core.ADOPTION_SAFE_VERSION_RE.test(`0.19.0${String.fromCharCode(9)}9.9.9`), false);
+  assert.equal(core.ADOPTION_SAFE_VERSION_RE.test(''), false);
+  assert.equal(core.ADOPTION_SAFE_VERSION_RE.test('.leading'), false);
 });

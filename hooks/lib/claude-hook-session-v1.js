@@ -272,14 +272,22 @@ function resolvePrunedPluginRoot(payload, environment = process.env) {
     if (path.dirname(context.plugin_root) !== path.dirname(executedPluginRoot)) return null;
     const executing = core.executingPluginVersion(executedPluginRoot, 'claude');
     if (typeof executing !== 'string' || executing === '') return null;
+    // The recorded version is rendered into `recorded<TAB>executing`, which five
+    // parsers split with ${V%%$'\t'*} and ${V##*$'\t'} — first field and LAST. On
+    // the lineage path readContextInternal proves manifest.version equals this
+    // field, and that comparison is what has kept it separator-free; the pruned
+    // waiver drops exactly that comparison, so this is the first producer without
+    // it and the bound has to be applied here. validateContext only requireText's
+    // the field, and requireText admits a tab: a recorded `0.19.0<TAB>9.9.9` would
+    // put THREE fields on the wire, both halves would pass the consumers' own
+    // shape guard, the middle one would vanish, and every surface would name a
+    // version pair the record does not hold. One rule, from the module that owns
+    // it — never a hand-copied alternation.
+    if (!core.ADOPTION_SAFE_VERSION_RE.test(context.plugin_version)) return null;
     return { recorded: context.plugin_version, executing };
   } catch {
     return null;
   }
-}
-
-function prunedPluginRootSession(payload, environment = process.env) {
-  return resolvePrunedPluginRoot(payload, environment) !== null;
 }
 
 function validateSessionId(sessionId) {
@@ -507,7 +515,6 @@ module.exports = {
   incompatibleRuntimeSession,
   privateRecordsDirectory,
   orphanedProjectRootSession,
-  prunedPluginRootSession,
   resolveFreshHookProject,
   resolveHookSession,
   resolveIncompatibleRuntime,

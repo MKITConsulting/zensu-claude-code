@@ -1392,7 +1392,15 @@ function readContext(options) {
 // the first. Throws on every one of them; returns the context only for the
 // exact state described above.
 function readOrphanedProjectRootContext(options) {
-  const context = readContextInternal({ ...options, allowMissingProjectRoot: true });
+  // Both waivers are pinned, not just this reader's own: the spread carries the
+  // caller's options, and the COMBINED state — project root gone AND installation
+  // pruned — must refuse because the reader forbids it, never because no caller
+  // happened to pass the other flag. readContext pins both for the same reason.
+  const context = readContextInternal({
+    ...options,
+    allowMissingProjectRoot: true,
+    allowMissingPluginRoot: false,
+  });
   // Waiving canonicalDirectory waives its EXISTENCE check, which is the point —
   // but it would also waive that function's shape validation, and this value is
   // not inert: callers print it to stderr and into the /zensu:doctor report,
@@ -1431,7 +1439,12 @@ function readOrphanedProjectRootContext(options) {
 // both cases the record cannot be served; the callers decide what the absence
 // means, and adoption is the one exit.
 function readPrunedPluginRootContext(options) {
-  const context = readContextInternal({ ...options, allowMissingPluginRoot: true });
+  // Sibling waiver pinned off — see readOrphanedProjectRootContext above.
+  const context = readContextInternal({
+    ...options,
+    allowMissingPluginRoot: true,
+    allowMissingProjectRoot: false,
+  });
   requireAbsentDirectoryPath(context.plugin_root, 'context plugin root');
   canonicalDirectory(path.dirname(context.plugin_root), 'context plugin root parent');
   try {
@@ -4043,6 +4056,7 @@ module.exports = {
   readOrphanedProjectRootContext,
   readPrunedPluginRootContext,
   requireAbsentDirectoryPath,
+  ADOPTION_SAFE_VERSION_RE,
   ADOPTION_REFUSALS,
   ADOPTION_HISTORY_PHASE,
   ADOPTION_HISTORY_REASON_PREFIX,

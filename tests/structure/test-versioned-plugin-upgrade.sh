@@ -2746,6 +2746,8 @@ EOF
       && grep -qF 'removed from the plugin cache' "$PRUNED_STOP_ERR" \
       && grep -qF 'version 0.17.0' "$PRUNED_STOP_ERR" \
       && grep -qF '/zensu:adopt-session --confirm' "$PRUNED_STOP_ERR" \
+      && grep -qF 'its recorded project root is intact' "$PRUNED_STOP_ERR" \
+      && ! grep -qF 'The binding that resolves the project root is what failed' "$PRUNED_STOP_ERR" \
       && grep -qF '"decision":"block"' "$PRUNED_STOP_CONTROL"; then
     check "AC-D08 Stop releases in the pruned state naming both versions and the remedy, and still blocks a pruned-and-tampered record" PASS
   else
