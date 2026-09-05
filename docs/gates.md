@@ -124,6 +124,24 @@ contains that worktree — `cd -- <cwd> && claude --resume <id>` as `show` print
 brief opened by an instance already running there — not the escape prefix above: the host's
 permission layer commonly refuses an inline `ZENSU_BASH_WRITE_GATE=off` as well.
 
+**A third route needs no other session, and it works BECAUSE containment is the test.** Since a
+worktree nested inside the anchor is writable, the taking session can create its continuation there
+instead of writing into the escaping one: `show --anchor <your project root>` (and `takeover --json`)
+renders the whole block under a `CONTINUE` head — `git -C <anchor> worktree add -b claude/<slug>-cont
+-- <anchor>/.claude/worktrees/<slug>-cont refs/heads/<source branch>`, plus the transfer of the
+uncommitted work the branch alone leaves behind. It serves the two SAME-REPOSITORY shapes above; a
+source in **another repository** is refused as `status: blocked` with `reasonCode: cross-repository` (the rendered head is prose, not the code), because the base
+ref is measured there and would resolve against your history instead. The plan is rendered and never
+executed so a human sees and approves it before anything runs — not because these rules cover it. Be
+precise about that, since the block invites the reader to substitute their own target: of its four
+writing commands only `git apply` and the patch redirect are judged here. `git worktree add` is
+**not** — `worktree` is gated for `remove`/`move` only, as the table above says — and the `tar`
+extraction carries none of the channels rule (A)/(B) recognize. The renderer's own guards (same
+repository, existing anchor, resolved branch) are what stand in for that. A worktree the script
+created inside its own node process would not be seen either, which is why it renders instead.
+`/zensu:session-trail` flow 3 owns the routing rule and the nine `CONTINUE` states; this section
+names only the one refusal that bounds the offer above.
+
 A plain `--resume` **re-anchors nothing**, and that is why the route works rather than a caveat
 against it: `FRESH_SESSION_SOURCES` in `hooks/lib/claude-session-control-v1.js` is
 `{startup, clear, fork}`, so a `resume` reuses the immutable record the target session was minted

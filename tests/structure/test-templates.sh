@@ -83,6 +83,16 @@ if grep -qF '| AC | Criterion | Status | Evidence |' "$TPL_PR" && grep -qiF 'dep
 else
   check "P2c pr-body template carries the per-AC table + deprecated note" FAIL
 fi
+# P2c2 — the Status PLACEHOLDER itself, not just the header row. P2c's
+# `deprecated` needle is file-wide and is already satisfied by the prose above
+# the table, so it would still pass if the placeholder lost the word entirely.
+# This pins the exact marked vocabulary, in legend order, on the one line the
+# renderer copies.
+if grep -qF '{🟢 pass / 🟡 partial / 🟡 unvalidated / 🔴 fail / ⚪ deprecated}' "$TPL_PR"; then
+  check "P2c2 autopilot pr-body Status placeholder carries the marked vocabulary" PASS
+else
+  check "P2c2 autopilot pr-body Status placeholder carries the marked vocabulary" FAIL
+fi
 if grep -qF 'Gates bypassed during build:' "$TPL_PR"; then
   check "P2d pr-body template carries the bypass audit line" PASS
 else
@@ -139,6 +149,42 @@ if [ -f "$TPL_PRBODY" ] && grep -qxF '## Acceptance criteria' "$TPL_PRBODY" && g
   check "P5a shared pr-body.md exists with the per-AC table" PASS
 else
   check "P5a shared pr-body.md exists with the per-AC table" FAIL
+fi
+# P5a2 — same reason as P2c2: pin the Status placeholder itself. P5a pins the
+# header row only and never pins `deprecated` for this template at all.
+if grep -qF '{🟢 pass / 🟡 partial / 🟡 unvalidated / 🔴 fail / ⚪ deprecated}' "$TPL_PRBODY"; then
+  check "P5a2 shared pr-body Status placeholder carries the marked vocabulary" PASS
+else
+  check "P5a2 shared pr-body Status placeholder carries the marked vocabulary" FAIL
+fi
+# P5a3 — the marker rule must survive a repo override, so it is a MANDATORY
+# section for both PR-body templates in docs/review-chain.md. Anchored PER ROW:
+# the phrase occurs on both rows, so a file-wide needle would stay green after a
+# one-sided deletion — the same weakness P2c2 exists to correct.
+_p5a3_row() { grep -E "^\| \`$1\`.*🟢/🟡/🔴/⚪ marker prefix" "$REVIEW_DOC" >/dev/null 2>&1; }
+if _p5a3_row 'autopilot-pr-body\.md' && _p5a3_row 'pr-body\.md'; then
+  check "P5a3 the marker rule is a mandatory section on BOTH PR-body rows" PASS
+else
+  check "P5a3 the marker rule is a mandatory section on BOTH PR-body rows" FAIL
+fi
+# P5a4 — the templates' PROSE rule, which is the only thing telling an override
+# author the rule exists; P2c2/P5a2 pin the placeholder line alone.
+_p5a4_ok=1
+for _tpl in "$TPL_PR" "$TPL_PRBODY"; do
+  grep -qF 'prefixes the word and never replaces it' "$_tpl" || _p5a4_ok=0
+  grep -qF 'bound to provenance' "$_tpl" || _p5a4_ok=0
+done
+if [ "$_p5a4_ok" -eq 1 ]; then
+  check "P5a4 both PR-body templates state the prefix rule and the provenance bound" PASS
+else
+  check "P5a4 both PR-body templates state the prefix rule and the provenance bound" FAIL
+fi
+# P5a5 — the autopilot producer restates the vocabulary, so it is a carrier too.
+if grep -qF 'prefixing the word rather than replacing it' "$PLUGIN_DIR/skills/autopilot/SKILL.md" \
+  && ! grep -qF 'status `deprecated`' "$PLUGIN_DIR/skills/autopilot/SKILL.md"; then
+  check "P5a5 autopilot states the marker rule and carries no bare deprecated spelling" PASS
+else
+  check "P5a5 autopilot states the marker rule and carries no bare deprecated spelling" FAIL
 fi
 if grep -qF 'rev-parse --show-toplevel)/.zensu/templates/pr-body.md' "$PILOT_MD" \
   && grep -qF '${CLAUDE_PLUGIN_ROOT}/templates/pr-body.md' "$PILOT_MD" \

@@ -358,7 +358,7 @@
           "runner": "bash",
           "path": "tests/structure/test-stop-enforcer-self-review-routing.sh",
           "args": [],
-          "timeoutMs": 1740000
+          "timeoutMs": 1700000
         }
       ]
     },

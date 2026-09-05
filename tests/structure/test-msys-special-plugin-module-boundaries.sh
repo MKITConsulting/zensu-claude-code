@@ -12,7 +12,9 @@
 #      the file name, and transport the result in an environment variable
 #      (hooks/lib/zensu-tdd-phase.sh, hooks/plan-approved-delegate.sh, the
 #      `append` verb in hooks/lib/zensu-log.sh, hooks/post-artifact-redact.sh
-#      and hooks/post-bash-witness.sh). The last three carry
+#      and hooks/lib/zensu-witness.sh, which both witness writers
+#      -- hooks/pre-bash-witness.sh and hooks/post-bash-witness.sh -- source
+#      rather than each rendering the path themselves). The last three carry
 #      zensu-artifact-redact-v1.js, which is probed alongside the plan lib below.
 #
 # The shim cannot police mechanism 2 by scanning argv, and widening it to reject

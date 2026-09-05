@@ -127,9 +127,13 @@ The divergence is deliberate: `zensu_hook_enabled` spawns `node` per call and
 spawn on the hottest path in the workflow. Recorded rather than left for someone to
 discover from a refusal naming a variable the config row never mentions.
 
-**THREE WRITERS apply it, and the third exists because the first two cannot be
-enough:** `zensu-log.sh append` (the narrative log, at write time),
-`hooks/post-bash-witness.sh` (the witness `cmd` — see the symmetry rule below), and
+**FOUR WRITERS apply it, and the last exists because the first two cannot be
+enough:** `zensu-log.sh append` (the narrative log, at write time), BOTH witness
+writers — `hooks/pre-bash-witness.sh` for the `BASH-ATTEMPT cmd` field and
+`hooks/post-bash-witness.sh` for the `BASH cmd` one, which share the single
+extraction in `hooks/lib/zensu-witness.sh` precisely so their substitution cannot
+diverge (see the symmetry rule below, and §"Witness Attempt Half" for why there are
+two of them at all), and
 `hooks/post-artifact-redact.sh` (a bounded sweep on BOTH registered matchers,
 plus the named `file_path` on the write matchers). Both artifacts are
 MODEL-authored, so a guarantee that holds only while the model follows a recipe is
@@ -2619,10 +2623,14 @@ The authoritative per-gate roster is the "Unbindable sessions" table in
 carries one column per state; keep exactly one roster and do not duplicate it here. Two
 properties are easy to get wrong and cost the whole feature:
 
-- **A deny from ANY hook on a matcher wins.** `hooks.json` registers three PreToolUse
-  hooks on the `Bash` matcher (`pre-bash-zensu-gate.sh`, `pre-bash-source-write-gate.sh`,
-  `pre-write-secret-scan.sh`) and one on `.*` (`pre-reviewer-capability-gate.sh` via
-  `reviewer-capability-v1.js`). `/zensu:doctor` runs through Bash, so it is reachable only
+- **A deny from ANY hook on a matcher wins.** `hooks.json` registers four PreToolUse
+  hooks on the `Bash` matcher (`pre-bash-witness.sh`, `pre-bash-zensu-gate.sh`,
+  `pre-bash-source-write-gate.sh`, `pre-write-secret-scan.sh`) and one on `.*`
+  (`pre-reviewer-capability-gate.sh` via `reviewer-capability-v1.js`). Only four of the
+  five can deny: `pre-bash-witness.sh` is advisory by construction and always exits 0
+  (§"Witness Attempt Half"), which is exactly why it may sit on this matcher at all — but
+  it is counted here rather than left out, because O21a enumerates the matcher and would
+  have to be re-derived by anyone who trusted a roster that omitted it. `/zensu:doctor` runs through Bash, so it is reachable only
   if EVERY one of them allows. Both the `.*` gate and the secret-scan gate were missed in
   turn while the single-gate test stayed green and the feature silently did not work.
   `tests/structure/test-orphaned-project-root.sh` O21a therefore enumerates the Bash
@@ -2735,13 +2743,55 @@ pinned. THREE needles in `docs/gates.md` §"Source-Write Gate" ARE pinned, by T2
 containment claim, so rewording it fails the suite. That file is no longer wholly
 unpinned; see the section below.
 
-**The gate's ANCHOR contract is restated in SIX carriers outside the parser, and
+**The gate's ANCHOR contract is restated in NINE carriers outside the parser, and
 nothing pins them against it.** `writeAnchor` / `writesLines` / `writeAnchorCaution`
-in `skills/session-trail/scripts/trail.mjs`, flow 3 and the Limits bullet in
-`skills/session-trail/SKILL.md`, and the cross-worktree paragraph in
-`docs/gates.md` §"Source-Write Gate". They do NOT carry the same content, and the
-difference is what decides where an edit is owed. All of them state the CONTAINMENT
-rule.
+/ `continuationPlan` in `skills/session-trail/scripts/trail.mjs`, flow 3, the step-4
+placement paragraph and the Limits bullet in `skills/session-trail/SKILL.md`, and
+BOTH paragraphs of `docs/gates.md` §"Source-Write Gate" — the cross-worktree one and
+the continuation one beside it, which states the rule again in its own words. They do NOT carry
+the same content, and the difference is what decides where an edit is owed. All of
+them state the CONTAINMENT rule.
+
+**`continuationPlan` is the one carrier that ACTS on the rule instead of only
+restating it**, and its three narrowings are the reason it may. It renders and never
+executes, and the reason is APPROVAL rather than gate coverage — a first wording claimed
+the latter and was wrong about the two commands that matter. This script's writes happen
+inside node where no PreToolUse gate can see them, so a worktree it created would be
+unseen; but so are two of the four it RENDERS. Only `git apply` and the patch redirect
+are judged: `bash-source-write-parse.js` gates `worktree` for `remove`/`move` only and
+says `add` "stays ungated", and `detectChannels` recognizes no `tar -xf -`. What stands
+in for the gate there is the renderer's own refusals — same repository, existing anchor,
+resolved branch — which is why they are load-bearing rather than cosmetic. Four carriers
+state this and all four must say it the same way. It prescribes a target path only off a TRUSTED channel: `covered ===
+false` measured through `CLAUDE_PROJECT_DIR` is a sound DENY but its `callerRoot` is
+the wider root, so a path derived from it can land outside the immutable one, and the
+finding is reported with the path withheld (`weak-channel-no-target`). And its base
+branch comes only from a LIVE read of the source worktree, never from the session
+record's `branch` field — measured 2026-08-27, that field answered `main` for a
+worktree actually on `claude/plugin-auto-mode-permissions-665942`, so the rendered
+`git worktree add … -b` would have branched the continuation off `main` and left every
+commit behind; with no live read it answers `branch-unresolved` rather than guessing.
+Its `CONTINUATION_REASONS` set is closed and CARRIES `writeAnchor`'s own reason codes
+verbatim, so renaming one there silently degrades every null cause here to
+`unclassified` — the two sets move together, and `unclassified` is deliberately NOT
+`no-channel`, whose own sentence asserts that neither environment variable was set. The `takeover` MARKDOWN brief deliberately
+carries none of it, on the same terms as `writes`: a brief is read by a different
+session than the one measured, where a rendered target path is a confident instruction
+into the wrong tree.
+
+**Windows is UNMEASURED here, not unreachable, and the distinction was got wrong
+once.** `tests/structure/test-session-trail-verdict.sh` is in the `excluded` list of
+`tests/profiles/windows-native-structure.v1.json` and absent from
+`tests/profiles/windows-ci.v1.json`, so the BLOCKING PR shards skip it — but it IS in
+`ciStructureTests` in `tests/profiles/promptfoo-local-only.v1.json`, so the weekly
+windows-safety run executes it. The WC block will therefore run on Windows; it simply
+never has yet. It is also the first case in that suite to create a real git repository
+and worktree, which is new platform surface AND new wall clock for a suite whose
+Windows runtime nobody has measured — take the figure from the first weekly run after
+this lands. Both of its preconditions SKIP rather than fail, deliberately: a git that
+cannot build the fixture, and a filesystem whose canonical spelling differs from the
+literal one, are environment properties, and failing on either would redden a weekly
+run for a reason unrelated to this feature.
 
 **The two env channels are NOT equally authoritative, and only one direction of the
 weaker one is sound.** `claude-hook-session-v1.js` reads `CLAUDE_PROJECT_DIR` solely
@@ -2761,7 +2811,8 @@ VERBATIM (`.trim()` decides presence only; a trailing space is legal in a POSIX
 directory name and the gate receives the untrimmed value). `W10`/`W11` pin all
 four. The environment variables are named by `writeAnchor`'s header,
 `writesLines`'
-emitted text and SKILL.md flow 3. The rule letters are named by `writeAnchor`'s
+emitted text, `continuationPlan`'s own `weak-channel-no-target` line (which spells
+`CLAUDE_PROJECT_DIR` to a user) and SKILL.md flow 3. The rule letters are named by `writeAnchor`'s
 header (A, B and C), `writesLines` (A, B and C), flow 3 (A, B and C) and `docs/gates.md`
 (C only). `writeAnchorCaution` names neither — deliberately, because it is persisted
 into a brief a stranger reads. The Limits bullet withholds only those two things: it
@@ -2771,8 +2822,8 @@ then points at flow 3 for the routing rule. Do not describe it as an index entry
 an earlier wording here did, and `T30` in `test-session-trail-skill.sh` now fails on
 that claim for as long as the bullet really carries the hook roster. A change to
 `within()`, to how `project_root` is minted (`claude-session-control-v1.js`
-`projectRoot: eventCwd`), or to which hook exports `ZENSU_PROJECT_ROOT` leaves all
-six wrong with both session-trail suites green — they drive `trail.mjs` against its
+`projectRoot: eventCwd`), or to which hook exports `ZENSU_PROJECT_ROOT` leaves every
+carrier enumerated above wrong with both session-trail suites green — they drive `trail.mjs` against its
 own definition and grep the prose for literals. `writeAnchor` no longer holds a hand-copy of
 `within`: the parser now defines it at MODULE scope and EXPORTS it, and
 `trail.mjs` requires the parser and CALLS it, so the containment rule has one
@@ -2806,8 +2857,10 @@ source — which is exactly where this answers `allowed`, and the third realpath
 sides while the gate realpaths only its roots and resolves a `cd` operand
 lexically. That asymmetry is the property to re-check before letting the
 hand-copy
-drift. `writeAnchor`'s measured verdict never leaves `show`'s stdout and
-`show --json`; what reaches a `~/.claude/handoffs/` brief is `writeAnchorCaution`'s
+drift. `writeAnchor`'s measured verdict reaches THREE carriers — `show`'s stdout,
+`show --json` and `takeover --json` — and the third was already true before the
+continuation work; an earlier wording here named only the first two and was wrong.
+What reaches a `~/.claude/handoffs/` brief is `writeAnchorCaution`'s
 STATIC containment sentence, deliberately unmeasured because a brief is read by a
 session it was not measured against. A correction to that WORDING does not reach
 files already written.
@@ -3141,6 +3194,159 @@ the host half and passed as options, so a port re-decides those reads without to
 decision. `zensu-codex`,
 `zensu-kiro` and `zensu-antigravity` were NOT included in this change.
 
+## Witness Attempt Half (`hooks/pre-bash-witness.sh` + `hooks/lib/zensu-witness.sh`)
+
+The Phase 6 witness cross-check could corroborate a PASS and **structurally could not
+corroborate a FAILURE**, and the cause is the host rather than any code in this repo.
+Claude Code does not deliver `PostToolUse` for a Bash call that did not complete
+successfully, so `hooks/post-bash-witness.sh` never ran for a failing command and the
+witness log carried no record of it at all. Since
+`hooks/lib/zensu-evidence-crosscheck.js` matches a CHECKPOINT/AUDIT claim against a
+witness entry by EQUALITY, every claim naming a failing command could only ever reach
+`EVIDENCE GAP` — the same verdict as a command that was never run. The evidence channel
+was one-sided in exactly the direction evidence discipline cares about most.
+
+**MEASURED, in both halves, and the two halves answer different questions.** Live, with
+a chain armed: `bash -c 'echo …; exit 3'` produced zero matching witness lines while the
+same command exiting 0 produced exactly one; in the wild, a structure suite exiting 1
+produced no entry while four sibling suites exiting 0 immediately around it all did.
+Against a fixture, the RESULT hook was fed five payload dialects — `exit_code: 3`,
+`exit_code: 0`, a bare-string `tool_response`, no `tool_response` at all, and
+`is_error: true` — and wrote a line for every one of them. So the hook has no branch on
+the exit status and cannot be the cause; the missing line is the event never arriving.
+Do not re-diagnose this as an early return in the writer. `P12-A0` in
+`tests/structure/test-post-bash-witness.sh` keeps that control executed, precisely so the
+next reader does not have to re-derive it.
+
+**The fix is a SECOND writer on the one channel the host fires unconditionally.**
+`hooks/pre-bash-witness.sh` runs on `PreToolUse` `Bash` and records
+`BASH-ATTEMPT cmd="…"` before the command runs. An attempt with no matching completed
+entry is then POSITIVE evidence rather than an absence, and the cross-check consumes it
+as such:
+
+| witness | claimed green | claimed non-pass |
+|---------|---------------|------------------|
+| attempt + completed | judged on the completed entry's `tail=`, unchanged | unchanged |
+| attempt, no completed | `EVIDENCE CONTRADICTION` | **verified** — the direction that was unreachable |
+| neither | `EVIDENCE GAP`, unchanged | `EVIDENCE GAP`, unchanged |
+
+**Nothing about corroboration was widened to get there, and the check that proves it is
+the one to keep.** A claim matching neither kind is still a gap; a log-writing command's
+ATTEMPT is excluded exactly as its completed entry always was; and a witness log written
+before this hook existed carries no attempt lines, so every verdict over it is
+byte-identical to the previous behaviour. `P6d`, `P6f` and `P6g` in
+`tests/structure/test-evidence-crosscheck.sh` are those three.
+
+**The attempt line proves the call REACHED the Bash tool, never that it exited
+non-zero**, and the wording must not be tightened. Every `PreToolUse` hook on a matcher
+runs whatever any of them decides, so an attempt is recorded for a call another gate then
+DENIES — and for one the user aborts. `ATTEMPT_ONLY_MARKER` therefore reads "the tool
+call never completed (non-zero exit, interruption or denial)", and it is EXPORTED so no
+consumer re-spells it.
+
+**The fail-then-fix cycle is why the attempt records are not consulted once a completed
+entry exists.** A command that failed, was fixed and re-ran green leaves two attempts and
+one completed entry; treating the surplus attempts as evidence would report a false
+contradiction on every normal red-to-green cycle. `P6e` is the pin.
+
+**ADVISORY, and that is load-bearing rather than stylistic.** The hook writes nothing to
+stdout, returns no `permissionDecision` of any kind, and always exits 0 — including on
+the inherited-plugin-root mismatch every sibling answers with `exit 2`. On `PreToolUse`,
+stdout is the decision channel and a non-zero exit BLOCKS the call, so a witness that
+failed closed would break every Bash call in the session, starting with the ones it
+exists to record.
+
+**ONE extraction, called twice.** `hooks/lib/zensu-witness.sh` owns the redact-module
+resolution and the payload decode; both hooks source it. The two writers must redact
+`cmd` identically or the attempt matches neither its own completed entry nor the claim,
+so this is the one place in the feature where a hand copy would lose evidence silently
+rather than loudly. What each hook deliberately KEEPS is the house pattern the existing
+pins scan per file: the plugin-root guard, the principal check, the session bind, the
+bypass-ledger block and the log-path spelling.
+
+**`ZENSU_TEST_WITNESS=off` governs BOTH halves**, and both record the ledger entry. The
+recorder dedups per gate, so a session still lands exactly one — and recording it in the
+attempt half is what keeps the ledger honest for a session in which the escape is set and
+every Bash call fails, where the result half never runs at all. No new stem enters
+`ESCAPE_STEMS`; the spelling already existed.
+
+**The attempt half is scoped exactly like the result half** — main principal, bound
+session, chain-state `active`. Recording attempts for an unarmed session would put lines
+in a log the result half never writes to, and the cross-check would read every one of
+them as a run that did not finish.
+
+**Version: `patch`.** Walked against §"Runtime Lineage (`version_type` is load-bearing)"
+entry by entry: no context-record or workflow-state schema field, no strict key set, no
+hook removed or renamed and no matcher changed, no new config key, no attestation change.
+Adding a hook is a `patch` UNLESS it can return a `permissionDecision`, which this one
+cannot in either direction — it is the ADVISORY shape that exemption names. The witness
+log gains a line KIND, but it is an ephemeral per-session artifact read only by the
+cross-check in the same tree, never a persisted shape two runtimes must agree on, and the
+parser accepts a log with no attempt lines unchanged.
+
+**Coupled sites that move together:** `WITNESS_ATTEMPT_MARKER` / `WITNESS_MARKER` /
+`ATTEMPT_ONLY_MARKER` in `hooks/lib/zensu-evidence-crosscheck.js` (all three EXPORTED so
+the suite builds its fixtures from the producer rather than re-spelling the format); the
+`kind` field `parseWitness` now stamps on every entry, whose ABSENCE means a completed
+entry — a legacy log parses with no `kind` at all, so the predicate tests for `attempt`
+and never for `result`, and inverting it would silently discard every pre-upgrade entry;
+the `Bash` `PreToolUse` matcher in `hooks/hooks.json`; the hook count in
+`docs/configuration.md` (header, prose and the `#hooks-N` anchor) plus the
+`configuration.md#hooks-N` cross-link in `docs/architecture.md`; `R19` and `R32` in
+`tests/structure/test-artifact-redaction.sh`, which now scan BOTH writers and the shared
+library respectively; the mechanism-2 consumer list in the header of
+`tests/structure/test-msys-special-plugin-module-boundaries.sh`; `P3`'s roster in
+`tests/structure/test-bypass-ledger.sh`; and `adopt_hook_expected` in
+`tests/structure/test-versioned-plugin-upgrade.sh`, which is the coupling that fired
+in the UNOBVIOUS direction and cost a red Windows shard. AC-C04 enumerates the Bash
+matcher from `hooks.json` and expects EVERY hook on it to deny the adoption command
+on win32, so registering an advisory hook there reported as `unexpected:
+pre-bash-witness.sh` in a suite named for plugin upgrades. The exception set now
+lives in one helper both AC-C04 loops call, and every member states why it cannot
+deny — a third entry needs its own sentence. Note the platform bound on verifying
+this: `ADOPT_EXPECTED` is `allow` on POSIX, so on macOS every hook expects `allow`
+and the regression is INVISIBLE; the helper's deny-default branch is driven
+directly rather than reached through the suite.
+
+**Operator-facing accounts that must move with it:** the `pre-bash-witness.sh` row, the
+`post-bash-witness.sh` row and the `ZENSU_TEST_WITNESS` row in `docs/configuration.md`;
+the four-channel table, the redaction-writer table and §"Witness channel" in
+`docs/tdd-manager-workflow.md`; and `skills/tdd/SKILL.md` Phase 6 step 1 together with
+the claim-format note beside it that states the witness `exit=` is always `?` — the two
+sit in different steps and a reader who finds one must be told about the other.
+
+**Known gaps, accepted and named:**
+
+- **A denied or aborted call is indistinguishable from a failed one.** All three leave
+  the same attempt-only shape, and the contradiction text says so rather than guessing.
+  Narrowing it would need the host to report the outcome, which is the thing it does not
+  do.
+- **The doubled hook cost is real, and it is NOT confined to armed chains** — an earlier
+  wording of this bullet said an unarmed session pays nothing, and that is false by simple
+  reading. Both writers run the payload extraction BEFORE the activation check, because the
+  session id they check activation for comes out of that extraction, so every Bash call in
+  every session with a readable Session Control record now spawns one extra `bash`
+  (`zensu-host-path.sh`) and one extra `node` (the extractor) whether or not a chain is
+  armed. That ordering is pre-existing in the result half; the attempt half doubles it. The
+  cheap fix is available and NOT taken here: `zensu_bind_hook_session` exports
+  `ZENSU_SESSION_KEY`, so the attempt half could test activation off that value first and
+  return before spawning anything — left alone because the final check is the authoritative
+  one and reordering it is a behaviour change to a path every Bash call travels, which
+  belongs in its own review. Say "unmeasured", never "free".
+- **Windows is UNVERIFIED.** `test-post-bash-witness.sh` and `test-evidence-crosscheck.sh`
+  are absent from `tests/profiles/windows-ci.v1.json`, whose shards this file records as
+  already close to their `profileTimeoutMs`, so the new checks never run on the blocking
+  Windows PR shard. Say "unverified", never "covered".
+- **No `/zensu:doctor` row.** A session in which the attempt half stopped recording — an
+  unregistered hook, a `hooks.json` edit — is visible only as cross-check verdicts
+  reverting to `EVIDENCE GAP`, which is exactly the pre-change behaviour and therefore
+  silent. `P12-A1` pins the registration at build time; nothing checks an installed tree.
+- **No ports.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were NOT included.
+  The premise is host-coupled in both directions: a port must re-measure whether its own
+  harness fires the post-tool event for a failing command, and whether its pre-tool event
+  fires unconditionally. A port that copies the hook without taking that measurement
+  ships a second writer for a gap it may not have.
+
 ## Bypass Ledger Read Contract (`tdd_bypasses`)
 
 `tdd_bypasses` is the ONE member of the `_tdd_read_validated_state` reader family
@@ -3196,6 +3402,168 @@ P5y case performs exactly that read-modify-write and expects a valid result. Clo
 needs a persisted authenticity signal, which is a workflow-state schema field and
 therefore a breaking minor under the Runtime Lineage rule; it is deliberately not
 paid for. Say "what a readable document recorded", never "no gate was escaped".
+
+## Status-Marker Legend (CHAIN-END SUMMARY + PR bodies)
+
+Every status and verdict cell of the chain-end report and of the plugin-opened PR body
+carries a leading marker — 🟢 good, 🟡 attention, 🔴 bad, ⚪ not applicable. **The marker
+PREFIXES the value and never replaces it**, which is the whole safety property: a
+verbatim-carry literal (`EDIT NOT LANDED`, `UNVERIFIED (no claims logged)`, an unresolved
+`PENDING PREDICATE`, `EVIDENCE GAP`, `EVIDENCE CONTRADICTION`,
+`EVIDENCE CROSS-CHECK UNAVAILABLE`, `FINDING VERIFICATION DEGRADED`, the bypass ledger's
+`UNREADABLE — …`) keeps its own words after its marker. Reducing one to a bare coloured
+dot deletes the disclosure while keeping the colour, which is worse than having no colour
+at all.
+
+**"Keeps its own words" is NOT "byte for byte", and the difference was a real
+contradiction before it was written down.** The same cells are subject to the pipe-escaping
+rule — first every backslash doubled, then every pipe as a backslash-pipe — and an escaped
+cell is by construction not byte-identical to its source. The two rules were both stated as
+absolutes over one cell, and a model resolving that in favour of byte-identity emits an
+unescaped `|`, which splits the table row and drops exactly the verdict clause the row
+exists to surface. The legend now subordinates one to the other explicitly.
+
+**⚪ is bound to PROVENANCE, never to judgement**, and it has exactly ONE admissible case:
+a requirement row the plan already marks deprecated. An earlier spelling added "or a step
+this project has no equivalent of", which cites no source at all and let a skipped build or
+a disabled gate be spelled ⚪ — benign-looking — where the next sentence demands 🟡. The
+bound matters because `skills/autopilot/SKILL.md` states that a dropped criterion "keeps its
+ID and is marked deprecated", so *dropped* and *deprecated* name one observable state
+through two vocabularies whose markers are opposite. An outcome merely not run is 🟡; a
+requirement this session did not implement is 🔴 dropped even if it was retired mid-session.
+
+**The `Check | Verdict` marking rule is a VALUE-SHAPE rule, not an enumeration**, and the
+difference is what keeps it total. An earlier spelling listed the OUTCOME rows by name, so
+a row added later stayed unclassified and unmarked with every check green — and the FACT
+rationale it carried ("a title, a count and a path are not verdicts") contradicted its own
+membership, because `Tests created` and `Coverage` render as counts and were nonetheless
+listed as OUTCOME rows. The rule now names only the four unmarked rows — Feature, Files
+modified, Plan, Log — marks everything else, and states that a count measured AGAINST a
+target is a state. Two rows were added at the same time, and their extra arms are of DIFFERENT kinds:
+`Finding verification` carries a NOT-RUN arm (🟡, because the gate is config-gated and a
+disabled gate must never render like a clean one — the rule this repo already applies to
+`reviewerSpawnPermissionCheck`), while `Gates bypassed` carries a NOT-READABLE arm, since
+its value is always read and the failure mode is an unreadable ledger rather than an absent
+one. Its 🟢 is bound to the literal `none` and everything else is 🔴, so a reworded ledger
+constant cannot render clean.
+
+**EIGHT CARRIERS, and a census in prose goes stale the next time one is added — so this is
+a GREP, not a list: before rewording the legend or the vocabulary, run
+`grep -rlE '🟢|🟡|🔴|⚪' hooks skills templates docs agents` and judge every hit.** Use `-E`;
+an earlier spelling of this instruction used a BRE alternation over `🟡 unvalidated` and
+`🟡 partial`, which matched NOTHING under `docs` — the operator carrier spells the set as
+`🟡 attention (partial, …)` — so the one root added to reach that carrier reached nothing,
+reintroducing under the fix the exact census failure this file records for the
+`zensu:code-reviewer` and `scv1_` identities. The eight as of this writing:
+
+1. `hooks/post-review-tdd-delegate.sh` — the `COMBINED_SUMMARY_DIRECTIVE` string.
+2. `skills/self-review/SKILL.md` §"### Final report" — the second renderer.
+3. `docs/tdd-manager-workflow.md` §"Chain-end combined summary" — the operator account.
+4. `templates/pr-body.md` — the AC `Status` column.
+5. `templates/autopilot-pr-body.md` — the same column, autopilot's variant.
+6. `skills/autopilot/SKILL.md` — the step-3 PR-body renderer, which restates the whole
+   vocabulary, AND the Phase 2 delivery invariant, which restates the `deprecated` cell. The
+   invariant was missed on the first pass and shipped the unmarked spelling for a round.
+7. `skills/cover/rules/drivers.md` — the one behavioural CONSUMER, which resolves ACs from
+   the PR body and must match the status WORD inside the cell rather than compare the cell
+   to a bare literal.
+8. `docs/review-chain.md` — the OVERRIDE contract, whose mandatory-section rows for both
+   PR-body templates name the marker prefix. It is what keeps a repo override from deleting
+   the rule silently, so the argument two paragraphs down depends on it; it was omitted from
+   the roster while both a pin and that argument already pointed at it.
+
+Carriers 1 and 2 must carry the legend SENTENCE byte-identically;
+`evals/config-gate/test-post-review-combined-summary.sh` extracts it from the hook's
+DECODED `additionalContext` and from the skill and compares, with a non-empty control on
+each extraction. That pin was bite-tested: a one-word reword of the skill legend turns it
+red. **That pin covers the legend SENTENCE and NOTHING BELOW IT**, because `LEGEND_RE`
+terminates at `takes no marker.` — so every marker-bearing rule the two carriers share
+sits after it. A separate SHARED-VOCABULARY arm closes that: it asserts the deliverable
+`Status` vocabulary, the `ID | Status` vocabulary and the delimited no-Requirements
+fallback line in BOTH schemas, each with a non-empty control. Two properties are
+load-bearing. Both schemas are whitespace-FLATTENED first, because the skill wraps the
+`ID | Status` vocabulary across two physical lines while the hook carries it on one, so
+an unflattened needle would fail on the skill for a reason unrelated to drift. And the
+fallback needle carries its BACKTICK DELIMITERS: both carriers delimit that literal so
+the model knows where the emitted line ends, the hook's copy sits inside a `$'...'`
+segment where a backtick is literal, and asserting the delimited form over the RENDERED
+directive therefore proves in one check that the delimiter is present AND that it was
+not eaten by command substitution. Bite-tested the same way: a one-word reword on the
+SKILL side alone reports 50 PASS / 1 FAIL and restoring returns it green.
+**The verbatim-literal pins are PER CARRIER and the two lists legitimately differ** —
+the delegate renderer has a `Mtime audit` row where the self-review renderer has
+`Evidence cross-check`, so the evidence literals live only in the latter. Both loops are
+SCOPED to the summary schema, because a file-wide presence grep is satisfied by occurrences
+elsewhere in the same file and cannot fail for the reason it is written for. The
+orphaned-marker predicate runs over the RENDERED directive, never the hook source: the whole
+directive is one physical source line whose breaks are `\n` escapes, so a source-side scan
+was structurally inert for that carrier. It prints a sentinel on a clean scan, so a throw is
+distinguishable from "no orphans found".
+
+Carrier 3 is pinned by `R17-P2b` in `tests/structure/test-tdd-manager-patches.sh`; carrier 4
+by `P5a2` and carrier 5 by `P2c2` in `tests/structure/test-templates.sh` (that suite binds
+`TPL_PR` to the AUTOPILOT template and `TPL_PRBODY` to the shared one — easy to invert, and
+this paragraph did invert it once); `P5a4` pins both templates' PROSE rule, which is the only
+thing an override author reads; `P5a5` pins carrier 6 and forbids the exact spelling
+``status `deprecated` `` anywhere in it — that literal is the WHOLE needle, so an unmarked
+`status: deprecated` written without backticks is NOT caught, and the claim must not be
+widened past it; `P8c` in `tests/structure/test-plan-requirement-ids.sh` pins
+carrier 7. `P5a3` pins the override mandatory-section rows and is anchored PER ROW, because
+the phrase occurs on both and a file-wide needle stays green after a one-sided deletion.
+
+**The legend equality is asserted on carrier 1's RENDERED form**, never on its source: the
+eval extracts it from the decoded `additionalContext`, so a `\'` inside the `$'…'` string
+renders as `'` and compares equal to the skill's plain apostrophe. Two constraints were
+claimed here and BOTH were retired for the same reason — no mechanism observes them: a
+backtick is literal inside `$'…'` and inside the double-quoted re-expansion, and an
+apostrophe survives the render. Keep the sentence readable in both syntaxes by convention
+if you like; do not state it here as a rule the pin enforces.
+
+**A repo override can delete the rule from carriers 4 and 5**, because
+`docs/review-chain.md` states an override REPLACES a template wholesale. The marker prefix
+is therefore listed among both templates' MANDATORY SECTIONS there. Do not restate the
+operator doc's claim as covering override repos without it.
+
+**Two neighbouring vocabularies are deliberately NOT reconciled.**
+`hooks/lib/zensu-doctor-report.js` declares `OK = '✅'; WARN = '⚠️'; BAD = '❌'` for the same
+good/attention/bad axis. They stay separate because this set has a fourth state the doctor
+has no counterpart for, and because `⚠️` is an emoji-presentation sequence whose width
+misaligns a table column. A later reader should not "reconcile" the two sets.
+
+**Known gaps, accepted and named:**
+
+- The `## Open` table carries the same evidence literals UNMARKED while the
+  `Check | Verdict` cell marks them — deliberate, because every row in `## Open` is by
+  definition open, and both renderers now state that exemption so it does not live only in
+  the operator doc.
+- The unmarked-rows rule is pinned at the INSTRUCTION level only. Whether a model actually
+  renders it is model behaviour that only a live-model eval could observe, so do not claim
+  the invariant is enforced.
+- **Two per-requirement vocabularies exist over the same `AC-###` ids and are NOT
+  reconciled:** the chain-end `ID | Status` table uses met / partial / contradicted /
+  dropped / deprecated, while the PR body uses pass / partial / unvalidated / fail /
+  deprecated. They answer different questions — one is plan coverage, the other is
+  validation outcome — but nothing states the mapping, and `skills/converge/SKILL.md`
+  carries a THIRD (met / partial / missing / contradicted, plus `deprecated — skipped`)
+  with no markers at all, offered from inside the very `## Open` section this feature
+  colours. Colouring converge was considered and deliberately not done here.
+- The `Gates bypassed` row names the ledger's `UNREADABLE — …` prefix, whose owning
+  constants are named in §"Bypass Ledger Read Contract". The row is keyed so that 🟢 is
+  exclusive to the literal `none` and EVERYTHING else is 🔴, which is what makes a reworded
+  constant safe — an earlier wording here claimed it "still falls to 🔴 for any named
+  escape", which was false, because a reworded unreadable line is neither `none` nor a
+  named escape and matched no arm at all. Recorded here rather than in that section's
+  roster.
+
+**Version: `patch`.** Walked against §"Runtime Lineage" entry by entry: no context-record or
+workflow-state schema field, no strict key set, no hook added, removed or renamed and no
+matcher changed, no new config key, no attestation change, and no `permissionDecision` in
+either direction — the change is directive text plus template and doc prose, which that
+section classifies explicitly as a `patch`.
+
+**Port-relevant.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were NOT included.
+A port owns its own renderers and its own PR-body template, so it re-decides the vocabulary
+and the pins; the marker set and the provenance bound are the portable half.
 
 ## Chain Shape & Rearm Receipt (`hooks/lib/chain-recovery-v1.js`)
 
@@ -3723,10 +4091,28 @@ added a session and a Stop after the range was taken, and the T38-T59 scope-sent
 added a second post-range increment on top of that — one further session and two further
 `bash "$STOP"` invocations in T59, plus roughly twenty source and behavioural checks. The
 ceiling was NOT raised for either: 85% of cap was already the slow sample's share, and this
-file's own rule is that a ceiling comes from a green wall clock and never from an estimate. Treat the remaining headroom as
-UNMEASURED until a green Windows run reports a new figure; if the shard starts reporting
-`TIMED_OUT`, this is the first thing to re-measure, and note that the 1800000 ms shard
-budget below would surface such a run as a profile abort rather than a suite timeout.
+file's own rule is that a ceiling comes from a green wall clock and never from an estimate.
+
+**IT WAS RE-MEASURED, AND IT HAD ALREADY GONE RED — the ceiling HAS since been raised, so
+the paragraph above is history rather than current state.** It said to re-measure if the
+shard ever reported `TIMED_OUT`; it did, on more than one branch. The cap sat AT the
+measurement — the error the shard-8 note in `windows-ci-contract.test.js` ends by naming —
+so `main` itself was a coin flip on every run rather than a suite under test being at
+fault. Two things changed together: `review-worker-evidence-lease` MOVED to
+`windows-shard-8`, leaving this suite ALONE on shard 7 with the shard's whole envelope, and
+the cap rose. **The NUMBERS live in that contract-test note and are deliberately not copied
+here**, for the reason this file gives about `MAX_BLOCK` and about the architecture doc's
+KB totals: a prose copy of a measurement goes stale silently, and the note carries the run
+ids, the measured wall clocks and the arithmetic together.
+
+**KNOWN RESIDUAL, and it is the reason this is a mitigation rather than a fix:** the raise
+does not absorb the 29% spread recorded above, and at this suite's current size no cap
+inside the shard envelope can — the envelope itself is smaller than the spread's upper end.
+The raise cannot go further without moving `timeout-minutes` and every profile's
+`profileTimeoutMs` together. The durable answer is to find why this suite needs 25 minutes
+on Windows, and until then, treat a `TIMED_OUT` here as the suite outgrowing its shard
+rather than as a defect in whatever change happened to be under test — and expect the cap
+to bind again.
 
 **IT DID REPORT `TIMED_OUT`, and the prediction above held exactly.** On the PR carrying
 the workflow-baseline repair, `windows-shard-7` reported
@@ -4612,7 +4998,7 @@ rather than defaulting to `[]`. The unknown-command refusal stays FIRST, so a ty
 reported as a typo. Two entries are DELIBERATE accept-and-ignore, not oversights:
 `--force` on `list` and `limited`, which SKILL.md documents as a survey rule —
 `instances` emits no verdict and so refuses it. `L56h` derives both key sets from
-source and compares them, so a tenth command cannot be added to one alone;
+source and compares them, so an eleventh command cannot be added to one alone;
 `test-session-trail-skill.sh`'s `T16` and its `json-mode-order` guard read `COMMANDS`
 and `handler(opts)` and BOTH went red when the if/else chain was replaced — they are
 part of this coupling, not collateral.
@@ -4957,8 +5343,12 @@ subject:
   comparisons already used.
 
 **The suite isolates by `--config-dir` and `$ZENSU_CCD_STORE`, deliberately not by
-`$HOME`.** Its sibling `test-session-trail-verdict.sh` redirects HOME and therefore
-skips itself whole on Windows, where `os.homedir()` reads `USERPROFILE`. Both suites
+`$HOME`.** Its sibling `test-session-trail-verdict.sh` redirects the home directory
+instead — and it does NOT skip itself on Windows, which an earlier revision of this
+paragraph claimed: `trailrun` sets `USERPROFILE` alongside `HOME` and that suite's own
+V0 probe measures the PAIR, so the redirection succeeds where `os.homedir()` reads
+`USERPROFILE`. §"Git Mutation Tables" says the WC block "will therefore run on
+Windows", and the two paragraphs now agree. Both suites
 also unset `CLAUDE_CONFIG_DIR`, because `trail.mjs` honours it and `$HOME` is only a
 fallback — with it exported, a fixture read would resolve against the developer's
 real config root and a `takeover` would write a real edge there. In the lineage suite

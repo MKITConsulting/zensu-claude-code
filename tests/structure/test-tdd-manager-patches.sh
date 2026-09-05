@@ -200,6 +200,23 @@ else
   check "R17-P2 Phase 6 step 1 states the mandatory full-suite run and the re-citation bound" FAIL
 fi
 
+# R17-P2b — the operator account of the status-marker legend. The two renderers are
+# pinned against each other by evals/config-gate/test-post-review-combined-summary.sh;
+# this is the third carrier, which nothing else reads, and its three load-bearing
+# claims are the prefix rule, the provenance bound on the neutral marker, and the
+# `## Open` exemption. A `\|` inside a code span is asserted ABSENT because that escape
+# is only meaningful inside a GFM table row — in a paragraph the backslash renders.
+if grep -qF -- 'The marker **prefixes** the cell value and never replaces it' "$WORKFLOW_DOC" 2>/dev/null \
+  && grep -qF -- '⚪ is bound to provenance, never to judgement' "$WORKFLOW_DOC" 2>/dev/null \
+  && grep -qF -- 'carries no marker column at all' "$WORKFLOW_DOC" 2>/dev/null \
+  && grep -qF -- 'subject only to the pipe-escaping rule' "$WORKFLOW_DOC" 2>/dev/null \
+  && ! grep -qF -- 'survives byte-for-byte' "$WORKFLOW_DOC" 2>/dev/null \
+  && ! grep -qF -- '`Check \| Verdict` cell' "$WORKFLOW_DOC" 2>/dev/null; then
+  check "R17-P2b workflow doc states the marker prefix rule, the provenance bound and the Open exemption" PASS
+else
+  check "R17-P2b workflow doc states the marker prefix rule, the provenance bound and the Open exemption" FAIL
+fi
+
 # Both needles carry their CONTAINING structure. A bare phrase would stay green if the
 # mermaid node or the table row were deleted and the words survived in prose, under a
 # label still claiming the node and the row are there.
