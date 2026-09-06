@@ -242,20 +242,41 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
   # the authority every writer resolves through: it fails such a root outright, so
   # accepting one here would report on a tree no writer can reach.
   #
-  # Apostrophes may NOT appear in a comment inside the substitution below. macOS
-  # ships bash 3.2, whose parser mis-handles one there, and the file then fails
-  # to parse entirely rather than at that line. Ordinary comments are fine, which
-  # is why the shellcheck directive can stay.
+  # TWO bash 3.2 traps apply INSIDE the substitution below, and they are ONE
+  # defect seen twice: that release extracts a $( ) body with a naive scanner
+  # that tracks quotes and parens instead of parsing it, so any token the scanner
+  # miscounts ends the substitution early. macOS ships 3.2 as /bin/bash, so this
+  # is the default shell here rather than an edge case.
+  #
+  # 1. An apostrophe in a comment opens a quote state the scanner never closes,
+  #    and the file then fails to parse entirely rather than at that line.
+  #    Ordinary comments are fine, which is why the shellcheck directive stays.
+  # 2. A case arm in the bare `pattern)` form supplies an unbalanced `)` that
+  #    CLOSES the substitution at that character. Write every case pattern in
+  #    here with the POSIX-optional leading paren — `(pattern)` — which balances
+  #    the scanner and parses identically on bash 5.
+  #
+  # Trap 2 shipped in 0.20.0 and its cost was the whole binding verdict, not a
+  # cosmetic one. Measured on 3.2.57 against a genuinely bound session: the body
+  # truncates mid-`case`, the subshell dies of a syntax error, the assignment
+  # returns 1, this elif falls to the else branch, neither follow-up question
+  # matches, and the report renders `unbound` — telling the user to start a fresh
+  # session over a record that is present, readable and already bound. Note the
+  # ORDER that hid it: 3.2 executes the body command by command, so the bind runs
+  # and SUCCEEDS before the malformed `case` is ever reached. The record was never
+  # the problem, only the reporting of it, which is why every other component
+  # disagreed with this row. tests/structure/test-bash32-portability.sh pins the
+  # rule tree-wide.
   elif ZDOC_SESSION_PAIR="$(
     # shellcheck disable=SC1090
-    # no apostrophes in comments here: bash 3.2 parse bug, see above
+    # no apostrophes in comments, no bare case pattern: bash 3.2, see above
     source "$DIR/zensu-session.sh" >/dev/null 2>&1 || exit 1
     zensu_bind_model_session >/dev/null 2>&1 || exit 1
     [[ "${ZENSU_SESSION_KEY:-}" =~ ^scv1_[a-f0-9]{64}$ ]] || exit 0
     [ -n "${ZENSU_PROJECT_ROOT:-}" ] || exit 0
     [ ! -L "${ZENSU_PROJECT_ROOT:-}" ] || exit 0
     [ -d "${ZENSU_PROJECT_ROOT:-}" ] || exit 0
-    case "${ZENSU_PROJECT_ROOT:-}" in *[[:cntrl:]]*) exit 0 ;; esac
+    case "${ZENSU_PROJECT_ROOT:-}" in (*[[:cntrl:]]*) exit 0 ;; esac
     printf '%s\t%s' "${ZENSU_SESSION_KEY:-}" "${ZENSU_PROJECT_ROOT:-}"
   )"; then
     ZDOC_BINDING=bound
