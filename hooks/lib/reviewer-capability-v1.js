@@ -10,6 +10,17 @@ const hookSession = require('./claude-hook-session-v1.js');
 const evidenceLeases = require('./review-evidence-lease-v1.js');
 const doctorInvocation = require('./zensu-doctor-invocation.js');
 
+// The FOURTH consumer of the `recorded`/`executing` pair, and the one outside the
+// shell family that shares a degradation policy. `zensu_emit_hook_session_deny`,
+// stop-chain-enforcer.sh and zensu-doctor.sh all hold the pair to a shape before
+// printing it, because a plugin_version is only requireText-validated: a newline
+// in it splits one deny reason into several that read as separate hook messages.
+// The same alternation, the same `(unreadable)` substitution.
+const SAFE_VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/;
+const safeVersion = (value) => (
+  typeof value === 'string' && SAFE_VERSION.test(value) ? value : '(unreadable)'
+);
+
 const MAX_PAYLOAD_BYTES = 1024 * 1024;
 const REVIEWER_READ_TOOLS = new Set(['Read', 'Grep', 'Glob']);
 const COMMAND_TOOLS = new Set(['Bash', 'shell', 'exec', 'exec_command', 'terminal', 'command']);
@@ -509,10 +520,39 @@ function main() {
     // here while the Edit gate said the session could be repaired in place. Two
     // denies contradicting each other about the one bind failure that HAS an
     // in-place remedy is exactly what CLAUDE.md forbids, so this branch names the
-    // same cause and remedy the four emitting gates do.
+    // same cause and remedy the four gates emitting the shell scope do.
+    //
+    // The predicate matches TWO states — with and without a vanished recorded
+    // project root — and this gate is on the `.*` matcher, so an Edit lands here:
+    // precisely the tool that stays denied after the adoption. The limit is
+    // therefore stated the same way the shell scope states it, as a conditional
+    // clause true in both halves. Offering the repair without it is the defect,
+    // not the nicety; this branch shipped without it for one round.
+    // The CAUSE is for everyone; only the REMEDY is MAIN-only. Two separate
+    // decisions, and collapsing them was a real regression this branch shipped for
+    // one review round.
+    //
+    // The remedy half: `/zensu:adopt-session --confirm` WRITES the immutable record,
+    // and `zensu_doctor_allowed` conjoins `zensu_hook_is_main_principal` — so a
+    // reviewer, an evidence worker or any neutral child that reached this catch
+    // would be handed a command every gate refuses it. Deny text is model-read
+    // content: pointing a read-only principal at a privileged write is the shape
+    // this repo treats as a defect, not a nicety.
+    //
+    // The cause half: withholding the diagnosis TOO dropped a non-main principal
+    // back to `immutable context revalidation failed`, which names neither the
+    // lineage break nor either version — a cause-free deny in the one bind failure
+    // that has a name and an in-place repair. `safeVersion` already renders the
+    // pair safely for any principal, so there was never a reason to hide it. A
+    // constrained child is told what happened and who can fix it.
     const lineage = hookSession.resolveIncompatibleRuntime(payload);
     if (lineage) {
-      deny(`this session's Session Control record is intact, but the running Zensu installation declares an incompatible lineage — the record was minted by ${lineage.recorded} and ${lineage.executing} is executing. Run /zensu:adopt-session to check whether this installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state.`);
+      const cause = `this session's Session Control record is readable, and the running Zensu installation declares an incompatible lineage — the record was minted by ${safeVersion(lineage.recorded)} and ${safeVersion(lineage.executing)} is executing.`;
+      if (principals.classifyPreToolPayload(payload) === principals.PRINCIPALS.MAIN) {
+        deny(`${cause} Run /zensu:adopt-session to check whether this installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — the adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created; /zensu:doctor names the path when that is the case.`);
+        return;
+      }
+      deny(`${cause} The repair writes the immutable record and is reserved for the main thread, so it is not available here — report this to the main thread rather than retrying.`);
       return;
     }
     // The SECOND named cause, and the second one with an in-place remedy. It sits

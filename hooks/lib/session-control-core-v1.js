@@ -99,6 +99,39 @@ function canonicalDirectory(input, label) {
   return canonical;
 }
 
+// Control characters and DEL. canonicalDirectory rejects a SUBSET of these
+// (`[\0\r\n]`) on the strict path; the two callers below need the wider class,
+// because their value never passes through realpath and reaches a terminal and
+// the model's context as-is.
+const UNSAFE_PATH_CHARACTERS = new RegExp('[\\u0000-\\u001f\\u007f]');
+
+// The shape half of canonicalDirectory's job, for the two callers that must NOT
+// require the directory to exist: the orphan reader below returns a path whose
+// whole point is that it is gone, and buildContext re-mints a record around that
+// same value during adoption.
+//
+// It is NOT a strict subset of canonicalDirectory, and saying so would mislead:
+// it rejects a WIDER control-character class, and it adds an absoluteness and a
+// normalization check that the canonicalizing path gets for free from realpath.
+// Those two are what keep the waived branch from admitting a spelling no
+// canonical comparison will ever match — `/a/b/../c` passes `isAbsolute` alone.
+// Kept as one function rather than inline copies because a shape check guarding
+// a value printed into a terminal is exactly the rule that rots when written
+// twice.
+function requireAbsentDirectoryPath(value, label) {
+  requireText(value, label);
+  if (UNSAFE_PATH_CHARACTERS.test(value)) {
+    fail(`${label} is unsafe`);
+  }
+  if (!path.isAbsolute(value)) {
+    fail(`${label} must be absolute`);
+  }
+  if (path.resolve(value) !== value) {
+    fail(`${label} must be normalized`);
+  }
+  return value;
+}
+
 function isInside(base, candidate) {
   const relative = path.relative(base, candidate);
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
@@ -499,9 +532,27 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function buildContext(options) {
+// The existence waiver is a SECOND PARAMETER, never a key of `options`, and that
+// is load-bearing rather than stylistic: `registerContext` forwards its caller's
+// whole options object into this function (`buildContext({ ...options, … })`),
+// so a waiver carried inside it could ride that spread into a FRESH record mint
+// — a path with no absence proof at all. Exactly the shape validateContext
+// already uses for its namesake, and for the same reason.
+//
+// It waives the SAME single check validateContext waives — whether the project
+// root still exists — and re-applies that function's shape half in its place, so
+// the only difference between the two paths is the existence test. It exists for
+// ONE caller, adoptContext, re-minting a record whose recorded worktree was
+// deleted: there is nothing to realpath, and refusing would leave that session
+// wedged with no write channel to repair itself. The emitted record shape is
+// unchanged — the value carried through is the one the previous record already
+// held, which was canonicalized when that record was minted.
+function buildContext(options, buildOptions) {
   const host = requireHost(options.host);
-  const projectRoot = canonicalDirectory(options.projectRoot, 'project root');
+  const allowMissingProjectRoot = Boolean(buildOptions && buildOptions.allowMissingProjectRoot);
+  const projectRoot = allowMissingProjectRoot
+    ? requireAbsentDirectoryPath(options.projectRoot, 'project root')
+    : canonicalDirectory(options.projectRoot, 'project root');
   const { pluginRoot, manifest } = pluginMetadata(options.pluginRoot, host);
   const pluginData = canonicalDirectory(options.pluginData, 'plugin data');
   const createdAt = options.createdAt || nowIso();
@@ -543,6 +594,8 @@ function buildContext(options) {
 // caller is readOrphanedProjectRootContext, which separately PROVES the path is
 // absent — waiving the check does not mean the field is unvalidated, because
 // the requireText loop below still rejects a missing, blank, or unsafe value.
+// buildContext takes a waiver of the SAME NAME for the adoption re-mint, also as
+// a separate parameter and for the same reason; the two never reach each other.
 function validateContext(context, expectedHost, options) {
   const allowMissingProjectRoot = Boolean(options && options.allowMissingProjectRoot);
   if (!context || typeof context !== 'object' || Array.isArray(context)) {
@@ -1318,7 +1371,7 @@ function readContext(options) {
 // reader): every part of the record validates exactly as readContext demands,
 // and its recorded project root is simply gone — the harness recycled or the user deleted that
 // worktree. The workflow document lives at <project_root>/.zensu/state/, so it
-// died with the directory: no review chain and no Autopilot run remain
+// is not reachable from this record: no review chain and no Autopilot run remain
 // reachable, which is the same argument that already releases a session with no
 // record at all.
 //
@@ -1330,11 +1383,6 @@ function readContext(options) {
 // not a vanished worktree, and a second disagreement is never relaxed alongside
 // the first. Throws on every one of them; returns the context only for the
 // exact state described above.
-// Control characters and DEL. canonicalDirectory rejects a subset of these on
-// the strict path; the orphan reader skips that function for its EXISTENCE
-// check and must not lose its shape check with it.
-const UNSAFE_PATH_CHARACTERS = new RegExp('[\\u0000-\\u001f\\u007f]');
-
 function readOrphanedProjectRootContext(options) {
   const context = readContextInternal({ ...options, allowMissingProjectRoot: true });
   // Waiving canonicalDirectory waives its EXISTENCE check, which is the point —
@@ -1344,14 +1392,26 @@ function readOrphanedProjectRootContext(options) {
   // whose project_root alone was edited to an absent path carrying newlines or
   // ANSI escapes would classify as the relaxable state and get its bytes echoed
   // into a terminal and into the model's context — a record the strict
-  // readContext fails closed on. Re-apply the shape half, so EXISTENCE stays
-  // the only waived check.
-  if (UNSAFE_PATH_CHARACTERS.test(context.project_root)) {
-    fail('context project root is unsafe');
-  }
-  if (!path.isAbsolute(context.project_root)) {
-    fail('context project root must be absolute');
-  }
+  // readContext fails closed on.
+  //
+  // Do NOT read this as "EXISTENCE is the only waived check" — that is what this
+  // comment used to say, and three review seats independently caught it. The two
+  // rules this call replaced were the unsafe-character test and `path.isAbsolute`.
+  // requireAbsentDirectoryPath applies a THIRD, `path.resolve(value) !== value`,
+  // so this reader is STRICTER than the code it replaced, not merely relocated.
+  // The rule is kept here deliberately: applying it only where the value is
+  // WRITTEN would move the refusal out of adoptableRecord into a throw inside
+  // adoptContext, and would break the AC-C14b row that pins an absolute-but-
+  // unnormalized project_root as `record-unreadable`.
+  //
+  // The accepted residual, stated because this reader is what un-wedges a
+  // session: a recorded project_root that is not a `path.resolve` fixed point
+  // now loses the relaxation entirely. Every root is minted through
+  // realpathSync.native, whose POSIX output is normalized, so the exposure is a
+  // win32 UNC share root, where path.win32.resolve appends a separator
+  // realpathSync.native does not. That spelling is UNVERIFIED in both
+  // directions — no suite exercises it.
+  requireAbsentDirectoryPath(context.project_root, 'context project root');
   // lstat, never realpath: realpath follows a symlink and would report a
   // dangling link as absent, quietly turning a present-but-wrong root into the
   // relaxable state.
@@ -1463,18 +1523,42 @@ function adoptableRecord(options) {
   let executingPluginRoot;
   let pluginData;
   let context;
+  let orphanedProjectRoot = false;
   try {
     executingPluginRoot = canonicalDirectory(options.executingPluginRoot, 'executing plugin root');
     pluginData = canonicalDirectory(options.pluginData, 'plugin data');
     // Condition 1 — the record is still provably itself. readContext recomputes
     // the runtime digest against the RECORDED root and re-reads that root's
     // manifest, so a forged or hand-edited record cannot reach adoption; it also
-    // enforces the context schema and that the recorded project root exists.
-    context = readContext({
+    // enforces the context schema.
+    //
+    // A recorded project root that is GONE is the ONE disagreement admitted
+    // alongside the lineage break, and only through the strict read failing
+    // first. It has to be: `git worktree remove` on a live session is an
+    // ordinary, documented cleanup, and combined with a mid-session plugin
+    // update it wedged the session permanently — every write channel denied,
+    // /zensu:doctor reporting "no valid record" for a record sitting intact in
+    // plugin data. Nothing is waived by admitting it: the workflow document
+    // lived under that root and is not reachable from this record, so there is no persisted shape
+    // left for the two runtimes to disagree about, which is the same argument
+    // that already relaxes this state for a COMPATIBLE upgrade.
+    //
+    // The fallback cannot widen to anything else. readOrphanedProjectRootContext
+    // waives exactly one check and REFUSES a root that still exists, so every
+    // other disagreement — digest, plugin version, session hash, schema,
+    // principal profiles, plugin root — throws in both readers and still lands
+    // on `record-unreadable` below.
+    const readerOptions = {
       recordsDir: options.recordsDir,
       sessionId: options.sessionId,
       expectedHost: options.host,
-    });
+    };
+    try {
+      context = readContext(readerOptions);
+    } catch {
+      context = readOrphanedProjectRootContext(readerOptions);
+      orphanedProjectRoot = true;
+    }
   } catch {
     return adoptionRefusal(ADOPTION_REFUSALS.RECORD_UNREADABLE);
   }
@@ -1487,8 +1571,9 @@ function adoptableRecord(options) {
   // the mutable payload cwd is never a project authority. It also made this repair
   // unreachable in the state it exists for: a fork whose cwd was a worktree records
   // that worktree while the harness still reports the origin repo. The full account,
-  // including why a record whose project root is GONE is still refused as
-  // `record-unreadable`, is in `docs/session-control.md` under "Unbindable
+  // including why a record whose project root is GONE is ADMITTED at condition 1
+  // above while every other disagreement still refuses as `record-unreadable`,
+  // is in `docs/session-control.md` under "Unbindable
   // sessions".
   //
   // Condition 3 — nothing to adopt when this runtime already serves the record.
@@ -1549,6 +1634,11 @@ function adoptableRecord(options) {
     context,
     recorded: context.plugin_version,
     executing: executingVersion,
+    // Which of the two readers answered, carried rather than re-derived: the
+    // caller must re-mint the record around the SAME value, and asking the
+    // filesystem a second time would let a directory re-created between the two
+    // reads turn a waived check into a canonicalized one.
+    orphanedProjectRoot,
   };
 }
 
@@ -1580,6 +1670,21 @@ function adoptContext(options) {
       pluginRoot: executingPluginRoot,
       pluginData,
       createdAt: verdict.context.created_at,
+    }, {
+      // Taken from the verdict, never re-derived from the filesystem. When it is
+      // set the anchor is a directory that no longer exists, so buildContext
+      // waives the existence check and keeps the recorded spelling; the new
+      // record then lands the session in the ordinary orphaned-project-root
+      // state, where reads and this repair's own diagnostics work and writes stay
+      // denied. Nothing recreates the deleted directory: the provenance write
+      // below is guarded by the workflow document's own existsSync, which is
+      // false for a root that is gone, so mutateWorkflowState — which mkdirs
+      // every missing component — is never reached.
+      //
+      // The SECOND argument, never a key of the object above: that object is the
+      // shape registerContext spreads a caller's options into, and this waiver
+      // must not be reachable from there.
+      allowMissingProjectRoot: verdict.orphanedProjectRoot,
     });
     // Set aside, never overwrite. "The record is immutable" stays literally true:
     // no record is ever rewritten, a second one is minted beside it, and the
@@ -1646,6 +1751,11 @@ function adoptContext(options) {
       recorded: verdict.recorded,
       executing: verdict.executing,
       projectRoot: verdict.context.project_root,
+      // Reported so the caller can say what the session is bound to NOW: an
+      // anchor that no longer exists, which leaves writes denied after a
+      // successful adoption. Announcing an unqualified success there would send
+      // the user straight into a deny they were just told was repaired.
+      orphanedProjectRoot: verdict.orphanedProjectRoot,
     };
   });
 
@@ -4337,6 +4447,13 @@ module.exports = {
   registerContext,
   readContext,
   readOrphanedProjectRootContext,
+  // Exported for the unit layer alone — no production caller requires it; both
+  // of its call sites are in this file. Without a direct handle its three rules
+  // (the UNSAFE_PATH_CHARACTERS class, path.isAbsolute, and the
+  // path.resolve(value) !== value normalization test) are reachable only through
+  // a full synthetic record fixture, and CLAUDE.md already names it a core-half
+  // port obligation, so a port has to be able to pin it cheaply.
+  requireAbsentDirectoryPath,
   ADOPTION_REFUSALS,
   ADOPTION_HISTORY_PHASE,
   ADOPTION_HISTORY_REASON_PREFIX,

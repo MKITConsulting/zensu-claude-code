@@ -169,8 +169,12 @@ zensu_session_orphaned_project_root() {
 }
 
 # The model-side twin of the predicate above, for /zensu:doctor: same question
-# and same printed path, but no hook payload exists there, so the session id
-# comes from CLAUDE_CODE_SESSION_ID.
+# and same printed path — TWO statuses, 0 with the path and 1 for everything
+# else, exactly as its hook-payload sibling — but no hook payload exists there,
+# so the session id comes from CLAUDE_CODE_SESSION_ID. Do not give this pair a
+# third status by copying the incompatible-orphaned pair's contract onto it: they
+# back different argv modes, and a consumer that branched on `-ne 3` here would
+# read every unavailable answer as a live recorded root.
 zensu_session_orphaned_project_root_model() {
   local lib_dir binder plugin_root native_plugin_root native_plugin_data
   local msys_env_exclusions
@@ -193,14 +197,20 @@ zensu_session_orphaned_project_root_model() {
   ) 2>/dev/null
 }
 
-# Returns 0 ONLY when a Session Control record is intact in every respect and the
-# SOLE disagreement is that the executing runtime declares an incompatible
-# lineage — what a plugin update landing mid-session produces. It is NOT a
-# relaxable state and does not belong to the pair above: a workflow document is
-# still reachable here, so relaxing a write gate for it would waive a live
-# guarantee rather than a dead one. It exists so the doctor row, the Stop release
-# and the deny text can NAME the cause instead of falling through to "no record",
-# which is false and sends the user hunting for a record that is sitting intact.
+# Returns 0 when a Session Control record READS and the disagreement is that the
+# executing runtime declares an incompatible lineage — what a plugin update
+# landing mid-session produces — with or WITHOUT a vanished project root. It is
+# NOT a relaxable state in either half, and does not belong to the pair above,
+# but the two halves are unrelaxed for different reasons: with the recorded root
+# still present a workflow document is reachable, so relaxing a write gate would
+# waive a live guarantee rather than a dead one; with that root gone the document
+# is not reachable from this record, and what stands in for the guarantee is that the state has a real
+# in-place repair (adoption) rather than a silent waiver. A caller that says
+# anything about the workflow document must ask the third fact separately —
+# zensu_session_incompatible_orphaned_root below — and branch on it. It exists so
+# the doctor row, the Stop release and the deny text can NAME the cause instead
+# of falling through to "no record", which is false and sends the user hunting
+# for a record that is sitting intact.
 # The decision lives in claude-hook-session-v1.js so every caller shares exactly
 # one implementation.
 #
@@ -253,6 +263,114 @@ zensu_session_incompatible_runtime_model() {
     MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
       CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
       node ./claude-hook-session-v1.js model-incompatible-runtime
+  ) 2>/dev/null
+}
+
+# THE THREE-WAY STATUS HAS A NAME, and this is it. The trichotomy below is a good
+# design and it was spelled as a bare `3` in two hooks plus a structure pin, with the
+# vocabulary living only in the prose of this comment — so a reader of either call site
+# saw a magic number and could not tell `3` (a POSITIVE negative: the root is there)
+# from the failure status it sits next to. That is exactly the collapse the paragraph
+# below warns about, one level up: not a caller reading truthiness, but a maintainer
+# reading a literal.
+#
+# Both consumers reach the trichotomy through these names, but NOT by the same route,
+# and the difference is worth stating because an earlier wording here flattened it into
+# "both compare against these names" and was wrong about one of them.
+# hooks/stop-chain-enforcer.sh sources this file in its PARENT shell, so it compares
+# against ZENSU_ROOT_STATE_* directly. hooks/lib/zensu-doctor.sh sources it only inside
+# command substitutions, where the name is out of scope and reading it under `set -u`
+# aborted the whole diagnostic; it copies the VALUES out in one subshell and compares
+# against its own ZDOC_ROOT_STATE_* instead. Still one definition, still no literal —
+# but the doctor is held to a DERIVED name, not to this one.
+#
+# Keep them in step — AC-C19 in tests/structure/test-versioned-plugin-upgrade.sh greps
+# for both members in both files, in the spelling each consumer actually uses, so a
+# silent revert to a literal fails rather than passing. That claim was false for one
+# round: only the PRESENT member was pinned, nothing named _GONE at all, and the doctor
+# had meanwhile reintroduced the literal through a `:-0` default on exactly the member
+# no needle covered. Do not write "both files" here without checking that both MEMBERS
+# are pinned too.
+#
+# Deliberately values, not a wrapper function: the two consumers reach the trichotomy
+# through DIFFERENT probes — the payload flavour and the `_model` twin — and in
+# opposite directions, so a single accessor would have to take a flavour argument and
+# would buy nothing the names do not already buy.
+# TWO names, not three, and the missing one is deliberate. The third state —
+# "the question could not be answered" — is the RESIDUAL: it is every status that is
+# neither of these two, so no site ever compares against it and a constant for it would
+# be a name nothing consumes. This file's own neighbourhood states the rule that made
+# that decision: an exported rule with no consumer, reachable by a future caller who
+# mistakes it for the real one, is worse than no export at all
+# (hooks/lib/zensu-safe-display-v1.js, on the retired foldDisplayHiders).
+#
+# A first version of this block did declare a third, `ZENSU_ROOT_STATE_UNKNOWN=1`, and a
+# review seat caught that it had no consumer anywhere while the literals it was meant to
+# replace were still spelled at four sites. Both of the names below are consumed.
+ZENSU_ROOT_STATE_GONE=0
+ZENSU_ROOT_STATE_PRESENT=3
+
+# The THIRD fact of the incompatible-lineage state, asked separately so the
+# version pair above stays two TAB-separated fields — five callers read the
+# executing half as `${V##*$'\t'}`, so a third field there would silently
+# redirect all five. Returns 0 and PRINTS the recorded project root only when the
+# lineage is incompatible AND that root is gone; **3** for a plain incompatible
+# lineage whose recorded root still exists; and 1 only when the question could not
+# be answered at all. THREE statuses, never two — a caller that reads only
+# truthiness collapses the last two, and that collapse is what makes a consumer
+# assert a workflow document that is gone.
+#
+# The same stdout warning the two wrappers above carry applies here: inside a
+# PreToolUse gate stdout is the hook's JSON decision channel, so a caller that
+# wants the predicate alone MUST discard stdout explicitly.
+zensu_session_incompatible_orphaned_root() {
+  local payload="${1:-}"
+  local lib_dir binder plugin_root native_plugin_root native_plugin_data
+  local msys_env_exclusions
+  [ -n "$payload" ] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  plugin_root="$(cd "$lib_dir/../.." && pwd -P)" || return 1
+  binder="$lib_dir/claude-hook-session-v1.js"
+  [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
+  native_plugin_root="$(bash "$lib_dir/zensu-host-path.sh" "$plugin_root")" || return 1
+  native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}")" || return 1
+  msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
+    || return 1
+  (
+    cd -P -- "$lib_dir" || exit 1
+    printf '%s' "$payload" \
+      | MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
+        CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
+        node ./claude-hook-session-v1.js orphaned-incompatible-root
+  ) 2>/dev/null
+}
+
+# The model-side twin of the predicate above, for /zensu:doctor: same question,
+# same printed path and the SAME THREE statuses — 0 with the dead path, 3 for a
+# recorded root that positively still exists, 1 for an unavailable answer — but no
+# hook payload exists there, so the session id comes from CLAUDE_CODE_SESSION_ID.
+# The third status is what lets /zensu:doctor tell a negative from a failure; the
+# plain orphan pair above has only two and must not be branched on the same way.
+zensu_session_incompatible_orphaned_root_model() {
+  local lib_dir binder plugin_root native_plugin_root native_plugin_data
+  local msys_env_exclusions
+  [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] || return 1
+  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  plugin_root="$(cd "$lib_dir/../.." && pwd -P)" || return 1
+  binder="$lib_dir/claude-hook-session-v1.js"
+  [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
+  native_plugin_root="$(bash "$lib_dir/zensu-host-path.sh" "$plugin_root")" || return 1
+  native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "$CLAUDE_PLUGIN_DATA")" || return 1
+  msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
+    || return 1
+  (
+    cd -P -- "$lib_dir" || exit 1
+    MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
+      CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
+      node ./claude-hook-session-v1.js model-orphaned-incompatible-root
   ) 2>/dev/null
 }
 
@@ -367,7 +485,7 @@ zensu_emit_hook_session_deny() {
     # session — the contradiction this scope exists to remove.
     [[ "$recorded" =~ $ZENSU_SAFE_VERSION_RE ]] || recorded="(unreadable)"
     [[ "$executing" =~ $ZENSU_SAFE_VERSION_RE ]] || executing="(unreadable)"
-    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is intact, and the only disagreement is that the running Zensu installation declares an incompatible lineage — the record was minted by %s and %s is executing. While the plugin is at major 0 the minor is the breaking axis, so a plugin update that landed mid-session stops serving the record and every stateful tool fails closed. The record is NOT damaged and NOT missing. Run /zensu:adopt-session to check whether this session can be adopted by the running installation in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If it refuses, the persisted shapes really did change and a fresh Claude Code session is the only way forward."}}\n' \
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is readable, and the disagreement is that the running Zensu installation declares an incompatible lineage — the record was minted by %s and %s is executing. While the plugin is at major 0 the minor is the breaking axis, so a plugin update that landed mid-session stops serving the record and every stateful tool fails closed. The record is NOT damaged and NOT missing. Run /zensu:adopt-session to check whether this session can be adopted by the running installation in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — the adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created; /zensu:doctor names the path when that is the case. If it refuses, the persisted shapes really did change and a fresh Claude Code session is the only way forward."}}\n' \
       "$recorded" "$executing"
     return
   fi
@@ -460,4 +578,5 @@ export -f zensu_bind_hook_session zensu_bind_model_session zensu_emit_hook_sessi
   zensu_session_unregistered \
   zensu_session_orphaned_project_root zensu_session_orphaned_project_root_model \
   zensu_session_incompatible_runtime zensu_session_incompatible_runtime_model \
+  zensu_session_incompatible_orphaned_root zensu_session_incompatible_orphaned_root_model \
   zensu_session_key zensu_resolve_session_id zensu_resolve_project_dir 2>/dev/null || true

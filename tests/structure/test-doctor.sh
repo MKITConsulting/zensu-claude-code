@@ -403,6 +403,95 @@ case "$OUT_NOMOD" in
   *)
     check "P1mf a missing chain module degrades to a warning (got: $OUT_NOMOD)" FAIL ;;
 esac
+# P1mf1 — the SAME minimal root, now driven with a binding value, which is the only
+# way to reach the display fold's load-failure branch. $NOCHAIN carries the core and
+# the renderer but not zensu-safe-display-v1.js, so foldSlot's guarded require
+# throws. For a NON-EMPTY value — which is what this row drives — it then returns its
+# stated REASON — supplied by parentheticalWriter from FOLD_UNAVAILABLE, never by foldSlot,
+# whose throw path returns {text:'', present:true, ok:false} with an EMPTY text in both
+# branches; the empty string is returned only when the value
+# was empty to begin with. The contract that branch states is therefore "replace the
+# value, keep the row, and say why": the row must still name the state, must NOT print
+# the path, and must carry the reason exactly once. Two earlier versions of this comment
+# claimed the opposite ("the whole parenthetical disappears") while the assertion below
+# required the placeholder — three review seats caught the contradiction, which is the
+# third time a stale needle or claim has been found in this block — and this sentence is
+# the FOURTH: it used to describe an "empty-value half of that ternary" with no executed
+# case, and foldSlot has no ternary. An empty value returns {text:'', present:false,
+# ok:true} BEFORE the guarded require, and parentheticalWriter drops the parenthetical on
+# !present — so that path is module-INDEPENDENT and P1ad2 already drives it. What has no
+# case is "empty value AND unloadable module", which is behaviourally identical to the
+# loadable one precisely because the early return precedes the try. P1mf above proves the
+# renderer still LOADS without its sibling; it sets no ZDOC_BINDING, so bindingLine()
+# returns undefined and the fold is never called. Without this row the branch has no
+# executed case anywhere.
+OUT_NOFOLD="$(ZENSU_DOCTOR_PLUGIN_DIR="$NOCHAIN" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$CAS_PROJECT" \
+  ZDOC_BINDING=orphaned-project-root ZDOC_BINDING_PROJECT_ROOT=/tmp/zensu-nofold-probe \
+  node "$NOCHAIN/hooks/lib/zensu-doctor-report.js" 2>&1)"
+NOFOLD_RC=$?
+NOFOLD_ROW="$(printf '%s' "$OUT_NOFOLD" | grep -F 'binding:' || true)"
+# Pinned POSITIVELY on the text that actually ships, plus a negative on the DOUBLED
+# parenthesis. Both earlier negatives went dead the moment the contract they described
+# changed: '()' cannot appear because the ternary tests the folded value, and
+# 'unrenderable' was retired two rounds ago — so the row passed while the property it
+# names had stopped holding. The doubled-paren negative is the one that matters: the
+# fallback string must carry NO parentheses of its own, because the call site adds a
+# pair, and that exact mistake shipped twice in successive fixes for it.
+if printf '%s' "$NOFOLD_ROW" | grep -qF 'project root recorded for this session' \
+    && ! printf '%s' "$NOFOLD_ROW" | grep -qF '/tmp/zensu-nofold-probe' \
+    && printf '%s' "$NOFOLD_ROW" | grep -qF '(not rendered — the display-safety module could not be loaded)' \
+    && ! printf '%s' "$NOFOLD_ROW" | grep -qF '((' \
+    && [ "$NOFOLD_RC" -eq 0 ]; then
+  check "P1mf1 an unloadable display-fold module replaces the value with its reason and keeps the row" PASS
+else
+  check "P1mf1 an unloadable display-fold module replaces the value with its reason and keeps the row (rc=$NOFOLD_RC)" FAIL
+  printf '%s' "$NOFOLD_ROW" | head -c 300
+fi
+
+# P1mf2 — the MULTI-VALUE row, which P1mf1 above cannot reach. P1mf1 drives
+# orphaned-project-root, a ONE-slot row, so it could not observe what happened when a
+# row had two: the fold was called per slot and its load-failure sentence was
+# substituted into each, rendering
+#   (record minted by <sentence>, executing <sentence>)
+# — the reason repeated, the fact that BOTH values are missing buried, and the sentence
+# reading as though it were a version. The combined row has three slots and said it
+# three times. The fold is one `require`, so a failure is a property of the ROW.
+#
+# Pinned as a COUNT rather than as a shape: the wording is already pinned by P1mf1 and
+# by CLAUDE.md, and what this row is about is how MANY times it appears. Both remaining
+# multi-slot bindings are driven, because they compose their parentheticals differently
+# — the combined one interleaves a path slot between two version slots.
+#
+# WHICH ARM CARRIES THE PIN, stated because the loop reads as though both do.
+# parentheticalWriter returns on the FIRST failing slot, so a row already emits one
+# sentence without the `stated` flag whenever it composes ONE parenthetical.
+# `incompatible-runtime` calls paren() exactly once and is therefore 1 either way: it is
+# a control, not a bite. Only `orphaned-project-root+incompatible-runtime`, with two
+# paren() calls, goes to 2 when `stated` is removed. Delete the flag and this loop fails
+# on its second iteration alone.
+#
+# And a bound on what the count can prove at all: `stated` is scoped to one bindingLine()
+# call, but bindingLine() has a single call site and the module ends in process.exit, so
+# ONE process renders ONE row. Widening that scope to the module is therefore
+# UNOBSERVABLE here, and no check in this suite can catch it. The production comment says
+# the scope is per-call; this pin covers the per-slot half of that claim, not the
+# per-row-versus-per-process half.
+for NOFOLD_CASE in 'incompatible-runtime' 'orphaned-project-root+incompatible-runtime'; do
+  NOFOLD_MULTI="$(ZENSU_DOCTOR_PLUGIN_DIR="$NOCHAIN" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$CAS_PROJECT" \
+    ZDOC_BINDING="$NOFOLD_CASE" ZDOC_BINDING_PROJECT_ROOT=/tmp/zensu-nofold-probe \
+    ZDOC_BINDING_RECORDED_VERSION=0.17.0 ZDOC_BINDING_EXECUTING_VERSION=0.18.0 \
+    node "$NOCHAIN/hooks/lib/zensu-doctor-report.js" 2>&1 | grep -F 'binding:' || true)"
+  NOFOLD_N="$(printf '%s' "$NOFOLD_MULTI" | grep -oF 'not rendered — the display-safety module could not be loaded' | wc -l | tr -d ' ')"
+  if [ "$NOFOLD_N" = 1 ] \
+      && ! printf '%s' "$NOFOLD_MULTI" | grep -qF '/tmp/zensu-nofold-probe' \
+      && ! printf '%s' "$NOFOLD_MULTI" | grep -qF '((' \
+      && ! printf '%s' "$NOFOLD_MULTI" | grep -qF 'minted by not rendered'; then
+    check "P1mf2 a multi-value row states the fold failure once, not once per slot ($NOFOLD_CASE)" PASS
+  else
+    check "P1mf2 a multi-value row states the fold failure once, not once per slot ($NOFOLD_CASE, saw $NOFOLD_N)" FAIL
+    printf '%s' "$NOFOLD_MULTI" | head -c 300
+  fi
+done
 
 # --- open chain not owned by this session ----------------------------------
 # A forked or re-initialized Claude Code session receives a NEW session id while

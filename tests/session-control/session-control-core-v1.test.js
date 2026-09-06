@@ -4449,6 +4449,47 @@ test('external process lease reclaims a live PID with a mismatched start identit
   });
 });
 
+// requireAbsentDirectoryPath was exported "for the unit layer alone" and had no unit
+// consumer at all — the same dead-export class this PR removes one file over. These four
+// cases are what make the export honest, and the predicate backs
+// orphanedProjectRootSession, so its rules are load-bearing rather than cosmetic.
+//
+// Written platform-neutrally ON PURPOSE: this suite runs on the Windows shard, where a
+// POSIX literal such as '/a/b' IS absolute but is NOT a path.resolve fixed point, so a
+// hardcoded POSIX path would trip the normalization rule for a reason unrelated to the
+// property under test. Every value is therefore built from path.resolve and path.sep.
+// The non-normalized case asserts its own premise first: without that line a change to
+// path.resolve would leave the case vacuous rather than red.
+const ABSENT_PROBE = path.resolve(os.tmpdir(), 'zensu-absent-probe');
+
+test('requireAbsentDirectoryPath accepts an absolute, normalized path', () => {
+  assert.equal(core.requireAbsentDirectoryPath(ABSENT_PROBE, 'probe'), ABSENT_PROBE);
+});
+
+test('requireAbsentDirectoryPath rejects a control character', () => {
+  const value = ABSENT_PROBE + String.fromCharCode(7);
+  assert.throws(
+    () => core.requireAbsentDirectoryPath(value, 'probe'),
+    /^Error: session-control-v1: probe is unsafe$/,
+  );
+});
+
+test('requireAbsentDirectoryPath rejects a relative path', () => {
+  assert.throws(
+    () => core.requireAbsentDirectoryPath(path.join('relative', 'probe'), 'probe'),
+    /^Error: session-control-v1: probe must be absolute$/,
+  );
+});
+
+test('requireAbsentDirectoryPath rejects an absolute path that is not normalized', () => {
+  const value = ['a', '..', 'b'].reduce((acc, segment) => acc + path.sep + segment, ABSENT_PROBE);
+  assert.notEqual(path.resolve(value), value);
+  assert.throws(
+    () => core.requireAbsentDirectoryPath(value, 'probe'),
+    /^Error: session-control-v1: probe must be normalized$/,
+  );
+});
+
 // ── Workflow-baseline repair ────────────────────────────────────────────────
 //
 // A DIFFERENT wedge from the one adoption exits, and the distinction is the whole

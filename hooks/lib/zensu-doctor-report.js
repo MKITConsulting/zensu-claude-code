@@ -35,9 +35,28 @@
 //   ZDOC_NOW_MS              clock override for deterministic tests
 //   ZDOC_BINDING             the wrapper's binding verdict (bound / unbound /
 //                            orphaned-project-root / incompatible-runtime /
-//                            unavailable / unknown). Read by bindingLine for its
-//                            own row AND by currentSessionKey, which refuses a
-//                            session key that arrives under any other verdict.
+//                            orphaned-project-root+incompatible-runtime /
+//                            unavailable / unknown). The COMBINED verdict is a
+//                            real value the wrapper sets, not a description of
+//                            two: it is the state where the lineage broke AND the
+//                            recorded project root is gone, and bindingLine
+//                            switches on it for its own three-slot row. It was
+//                            missing from this roster while that row was being
+//                            rewritten. Read by bindingLine for its own row AND by
+//                            currentSessionKey, which refuses a session key that
+//                            arrives under any other verdict.
+//   ZDOC_BINDING_PROJECT_ROOT        the recorded project root, non-empty under
+//                            orphaned-project-root and under the combined verdict.
+//                            Folded before rendering — it is a directory name the
+//                            session's own starter chose.
+//   ZDOC_BINDING_RECORDED_VERSION    the version that minted the record, and
+//   ZDOC_BINDING_EXECUTING_VERSION   the version now executing; both non-empty
+//                            under incompatible-runtime and under the combined
+//                            verdict, both folded, both shape-screened upstream.
+//   ZDOC_BINDING_ROOT_UNKNOWN        set when the orphan probe could not answer,
+//                            which is what makes the plain lineage row state its
+//                            Edit/Write clause CONDITIONALLY instead of asserting
+//                            a workflow document it has not established.
 //   ZDOC_SESSION_KEY         this session's own Session Control key, non-empty
 //                            only when the wrapper's binding verdict is bound.
 //                            The ONLY thing that tells a chain this session owns
@@ -1470,7 +1489,7 @@ function configBlock() {
         // file, so it cannot say the loader applies it — an oversized MALFORMED config still
         // makes rd() return {}. What IS knowable: the loader has no size limit, so the file
         // is not skipped for its SIZE. Whether it parses is outside what this check saw.
-        line(WARN, 'config: ' + f + ' is ' + r.err + ' — this check declined to read it and '
+        line(WARN, 'config: ' + foldPath(f, ' is ') + ' is ' + r.err + ' — this check declined to read it and '
           + 'cannot judge it; the config loader has no size limit, so the file is not skipped '
           + 'for its size, but whether it parses is unknown to this check');
       } else {
@@ -1491,7 +1510,7 @@ function configBlock() {
               ? ' (the whole file is ignored, defaults apply)'
               : ' (the whole file is ignored; the other config source still applies)'));
         } else {
-          line(BAD, 'config: ' + f + ' is ' + r.err + ' — this check could not read it and '
+          line(BAD, 'config: ' + foldPath(f, ' is ') + ' is ' + r.err + ' — this check could not read it and '
             + 'cannot say what the config loader gets from it');
         }
       }
@@ -1500,7 +1519,7 @@ function configBlock() {
     var hits = [];
     walkQuotedBooleans(r.data, '', hits);
     if (hits.length) {
-      line(WARN, 'config: quoted boolean(s) in ' + f + ' are ignored by strict `===` checks — ' + hits.join('; ') + ' (drop the quotes)');
+      line(WARN, 'config: quoted boolean(s) in ' + foldPath(f, ' are ') + ' are ignored by strict `===` checks — ' + hits.join('; ') + ' (drop the quotes)');
     } else {
       line(OK, 'config: valid JSON, no quoted-boolean traps in ' + f);
     }
@@ -1623,6 +1642,44 @@ function currentSessionKey() {
 // here because `stateProjectRoot` below is the first consumer.
 var CONTROL_BYTE_RE = /[\u0000-\u001f\u007f]/;
 
+
+// The ROW-FORGERY half of the display fold, without its character allowlist.
+//
+// `deletableTarget` cannot use the fold itself: the skill copies its bytes into an `rm`,
+// so a folded path names a file that does not exist. But it cannot skip the question
+// either — `current` derives from the recorded project root, screened for NUL/CR/LF
+// only, so a directory named `/home/u/x provenance : recorded` renders a forged
+// `label : value` pair inside the one line the skill is told it may use verbatim.
+//
+// Applying `safeDisplayValue` here was tried first and was WRONG in the other direction:
+// its allowlist rejects every shell-active character, so an ordinary `~/My $tuff/repo`
+// was withheld as unrenderable when `shellQuotePath` handles exactly that — P1o4/P1o4a
+// caught it. The allowlist protects a value being READ; these four rules protect the
+// ROW's structure, and only the second question applies to a path that will be quoted.
+//
+// The rules are IMPORTED, never re-spelled: that module owns them, and a second copy
+// here is the two-implementation class the extraction removed. A load failure answers
+// TRUE — withholding a copyable path costs one convenience, emitting an unchecked one is
+// the defect this exists to prevent.
+function forgesReportRow(value) {
+  try {
+    var rules = require('./zensu-safe-display-v1.js');
+    return rules.PAIR_SEPARATOR.test(value)
+      || rules.DOUBLE_SPACE.test(value)
+      || rules.SEPARATOR_ADJACENT_MODIFIER_LETTER.test(value)
+      || rules.INVISIBLE.test(value)
+      // ORPHAN_MARK arrived with the merge, from the branch that closed the same
+      // forgery class in the report. It belongs here for the same reason as its four
+      // siblings: a combining mark on a space paints ON that space, which is a ROW
+      // STRUCTURE forgery rather than an unreadable character. Omitting it would make
+      // this predicate a stale subset of the rule set it claims to consult — the
+      // divergence a shared owner exists to prevent.
+      || rules.ORPHAN_MARK.test(value);
+  } catch (e) {
+    return true;
+  }
+}
+
 // The reader re-enforces the ONE invariant of its producer that has a consequence
 // here, which is the rule `currentSessionKey` states one function up: a caller
 // supplying `ZDOC_BINDING` skips the wrapper's whole resolution block, so a guard
@@ -1701,6 +1758,17 @@ function deletableTarget(file, root) {
       }
     }
     if (CONTROL_BYTE_RE.test(current)) return { path: '', reason: 'its path carries a control character' };
+    // The FOURTH row carrying this project-root-derived path, and the one the fold
+    // cannot be applied to: the skill copies these bytes into an `rm`, so folding here
+    // would hand it a path that does not exist. Withhold instead. `current` comes from
+    // the same recorded root the three folded `state:` rows use — screened for NUL, CR
+    // and LF only — so without this a root named `/home/u/x provenance : recorded`
+    // reaches the row as a forged `label : value` pair inside the one line the file's
+    // own comment says the skill may use verbatim. Dropping only the copyable literal
+    // keeps the verdict and its reason, which is the shape every other refusal here uses.
+    if (forgesReportRow(current)) {
+      return { path: '', reason: 'its path would read as a second report row' };
+    }
     return { path: shellQuotePath(current), reason: '' };
   } catch (e) {
     return { path: '', reason: 'it could not be examined (' + (e && e.code ? e.code : 'unknown error') + ')' };
@@ -2250,7 +2318,157 @@ function truncatedList(rows) {
   return listed.join('; ') + (overflow ? '; +' + overflow + ' more' : '');
 }
 
+// The recorded project root is a real directory name minted from the SessionStart
+// cwd, and both binding rows below render it verbatim into a terminal and into the
+// model's context. `readOrphanedProjectRootContext` rejects only control characters
+// and a non-absolute value, so bidi overrides and U+2028/U+2029 survive it — which
+// is precisely why session-adopt-report-v1.js folds the same class of value before
+// printing it. Consume THAT fold rather than writing a second one: two allowlists
+// for one hazard is the drift this file already tracks elsewhere.
+//
+// Required LAZILY and guarded, exactly as reviewerDenialRows and ruleCarrierRows
+// require theirs: a load fault must cost this row's polish, never the whole report.
+// A guarded LAZY require, and the fallback REPLACES the value with a stated reason
+// rather than folding it with a second copy of the rule. Three decisions, each of
+// which was made the other way first.
+//
+// WHERE the rule lives: `hooks/lib/zensu-safe-display-v1.js`, a leaf that requires
+// nothing at all. It used to live in `session-adopt-report-v1.js` — a feature
+// command's report module carrying five module-scope requires of its own — so this
+// renderer reached one string fold through a four-file load chain, inside the one
+// tool whose entire job is to still speak when the installation is damaged.
+//
+// WHY it stays LAZY and GUARDED rather than a top-level require: this module had NO
+// hard sibling require, and that is a property, not an accident. `test-doctor.sh`
+// P1mf builds a plugin root carrying exactly the core and this file, to prove a
+// missing `chain-recovery-v1.js` degrades to a warning instead of killing the
+// report — a top-level require made this file unloadable in that tree and turned
+// one degraded row into no report at all. Same reasoning as `ruleCarrierRows` and
+// `reviewerDenialRows` two blocks down.
+//
+// WHY the fallback NAMES ITS REASON instead of dropping the value silently: the
+// previous guard fell back to a SECOND, narrower spelling of the fold, so one rule
+// had two implementations with nothing comparing them. Re-authoring it here is what
+// the extraction exists to stop. But dropping the value outright is not free either:
+// `stop-chain-enforcer.sh` and the shell deny scope both tell the user
+// "/zensu:doctor names the directory", unconditionally, so a silent omission leaves
+// those two surfaces asserting something this row stopped delivering.
+//
+// The returned string carries NO parentheses of its own. Two earlier spellings got
+// this wrong in the same way: `(unrenderable)` and then
+// `(not rendered — …)` were both wrapped AGAIN by the call site's `' (' + … + ')'`,
+// rendering `... no longer exists ((not rendered — …)) — ...`. Every call site tests
+// the FOLDED result, so an empty fold still omits the whole parenthetical; a non-empty
+// one must supply only its TEXT.
+//
+// The FULL rule, not a narrow fold. The binding line is prose, but it sits in a
+// report built out of `label : value` rows that the doctor skill tells the model to
+// print verbatim, so the pair-forgery guard is exactly as load-bearing here as in
+// the adoption report.
+var FOLD_UNAVAILABLE = 'not rendered — the display-safety module could not be loaded';
+
+// One slot, folded ONCE. The three fields are separate: `present` is about the input
+// (an empty value has never produced a parenthetical), `ok` is about the fold. Keeping
+// them apart is what lets the caller distinguish "there was nothing to say" from
+// "there was something and it could not be rendered" — the previous shape returned a
+// single string and conflated the two, so every call site had to fold twice to ask
+// both questions, and the load-failure SENTENCE became the value.
+function foldSlot(value, followedBy) {
+  var text = String(value == null ? '' : value);
+  if (text === '') return { text: '', present: false, ok: true };
+  try {
+    return {
+      text: require('./zensu-safe-display-v1.js').safeDisplayValue(text, followedBy || ''),
+      present: true,
+      ok: true,
+    };
+  } catch (e) {
+    // NOT the empty string, and not the raw value either. Empty made the ternaries
+    // drop the parenthetical silently — but `stop-chain-enforcer.sh` and the shell
+    // deny scope both tell the user "/zensu:doctor names the directory", and neither
+    // is conditional on this module loading. Silently omitting it leaves those two
+    // surfaces asserting something this row stopped delivering. Say why instead.
+    return { text: '', present: true, ok: false };
+  }
+}
+
+// The same fold for a path embedded in PROSE rather than in a `label : value` slot.
+// stateBlock's three rows interpolated their directory raw while the binding row beside
+// them folded, so `/tmp/a : b` — a directory name anyone who starts a session controls,
+// screened for control bytes only — rendered unfolded in a report the doctor skill tells
+// the model to print verbatim. The fold was a four-file load chain when those rows were
+// written; it is a dependency-free leaf now, so applying it is one call and the reason
+// for the exemption is gone.
+//
+// Returns a STRING because a prose row has no parenthetical to attach a record to, and
+// it borrows bindingLine's fallback sentence rather than dropping the value: two other
+// surfaces tell the user the doctor names this directory.
+// It CONSUMES FOLD_UNAVAILABLE rather than re-authoring it. The first version of this
+// function spelled the sentence out while this comment claimed it borrowed one — a
+// shared constant with an unconsumed copy beside it, which this repository records as
+// worse than either honest duplication or one source, because it advertises a single
+// source that does not exist.
+//
+// It DOES return a pre-parenthesized string, and that is the one deliberate departure
+// from the slot fold's contract: a prose row supplies no call-site parentheses, so
+// there is nothing here to double them against. `foldSlot` must keep returning bare
+// text for exactly the opposite reason.
+//
+// `followedBy` is threaded through for the same reason the leaf takes it: all three
+// call sites append prose beginning with a space. It is not needed TODAY — `dir` is
+// always `<root>/.zensu/state`, so the folded value ends in the literal `state` and
+// neither a trailing colon nor a trailing modifier letter is reachable — but that is a
+// property of the argument, not of this helper, and a fourth caller would reopen the
+// seam with no signal.
+function foldPath(value, followedBy) {
+  var slot = foldSlot(value, followedBy);
+  if (!slot.present) return '';
+  return slot.ok ? slot.text : '(' + FOLD_UNAVAILABLE + ')';
+}
+
+// A parenthetical is stated ONCE PER ROW, not once per slot. Under a missing fold
+// module the two-version row rendered
+//   (record minted by <sentence>, executing <sentence>)
+// which repeats the reason, buries the fact that BOTH values are missing, and reads as
+// if the sentence were a version. The combined row has three slots and would have said
+// it three times. The fold is one `require`, so a failure is a property of the ROW, not
+// of a slot: `stated` closes over one bindingLine() call and the second group that
+// would repeat it renders nothing instead.
+//
+// The SINGLE-slot rendering is deliberately byte-identical to what shipped —
+// ' (not rendered — …)' — because test-doctor.sh P1mf1 and the CLAUDE.md account of
+// this fallback both pin that exact string, including that the call site's own
+// parentheses are the only ones (the doubled-paren defect this file already fixed
+// twice).
+function parentheticalWriter() {
+  var stated = false;
+  return function (slots, render) {
+    for (var i = 0; i < slots.length; i += 1) {
+      if (!slots[i].present) return '';
+    }
+    for (var j = 0; j < slots.length; j += 1) {
+      if (!slots[j].ok) {
+        if (stated) return '';
+        stated = true;
+        return ' (' + FOLD_UNAVAILABLE + ')';
+      }
+    }
+    return ' (' + render(slots.map(function (slot) { return slot.text; })) + ')';
+  };
+}
+
 function bindingLine() {
+  // One writer per CALL, so `stated` scopes to the row this invocation renders.
+  var paren = parentheticalWriter();
+  var one = function (value) {
+    return paren([foldSlot(value)], function (v) { return v[0]; });
+  };
+  var versions = function () {
+    return paren(
+      [foldSlot(env.ZDOC_BINDING_RECORDED_VERSION), foldSlot(env.ZDOC_BINDING_EXECUTING_VERSION)],
+      function (v) { return 'record minted by ' + v[0] + ', executing ' + v[1]; },
+    );
+  };
   switch (env.ZDOC_BINDING) {
     case 'bound':
       return line(OK, 'binding: this session has a valid Session Control record — stateful tools can run');
@@ -2262,8 +2480,8 @@ function bindingLine() {
     // line above would send them looking for a record that is right there.
     case 'orphaned-project-root':
       return line(BAD, 'binding: the project root recorded for this session no longer exists'
-        + (env.ZDOC_BINDING_PROJECT_ROOT ? ' (' + env.ZDOC_BINDING_PROJECT_ROOT + ')' : '')
-        + ' — a deleted or recycled worktree took the workflow state with it, so stateful Zensu tools fail closed while this read-only diagnostic still runs; re-create exactly that directory to resume, or start a fresh Claude Code session');
+        + one(env.ZDOC_BINDING_PROJECT_ROOT)
+        + ' — a deleted or recycled worktree left the workflow state unreachable from this record, so stateful Zensu tools fail closed while this read-only diagnostic still runs; re-create exactly that directory to resume, or start a fresh Claude Code session. If it was moved rather than deleted, its state still exists there');
     // The record is INTACT and only the runtime serving it declares an
     // incompatible lineage — a plugin update that landed mid-session. Before this
     // row existed the state fell through to `unbound` above, whose line asserts
@@ -2273,10 +2491,42 @@ function bindingLine() {
     // this is the only binding row whose remedy repairs the session in place.
     case 'incompatible-runtime':
       return line(BAD, 'binding: this session\'s Session Control record is intact, but the running Zensu installation declares an incompatible lineage'
-        + (env.ZDOC_BINDING_RECORDED_VERSION && env.ZDOC_BINDING_EXECUTING_VERSION
-          ? ' (record minted by ' + env.ZDOC_BINDING_RECORDED_VERSION + ', executing ' + env.ZDOC_BINDING_EXECUTING_VERSION + ')'
-          : '')
-        + ' — while the plugin is at major 0 the minor is the breaking axis, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether this session can be adopted in place, then /zensu:adopt-session --confirm');
+        + versions()
+        + ' — while the plugin is at major 0 the minor is the breaking axis, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether this session can be adopted in place, then /zensu:adopt-session --confirm'
+        // The limit belongs on THIS row too, not only on the combined one. The row
+        // is reachable for a session whose recorded project root is also gone —
+        // the doctor falls back to it whenever the third-fact probe cannot answer
+        // — and offering the repair without saying what it does not buy is what
+        // this change's own rule calls a defect. Worded conditionally so it stays
+        // true in the ordinary case, where the root really is still there.
+        // Compared against the ONE value the producer writes, never by JS
+        // truthiness. ZDOC_* is an injectable channel by design (the whole probe
+        // block is skipped when ZDOC_BINDING is set), so "0", "false" and "no"
+        // would all enable the clause under a bare test. The failure direction is
+        // safe either way — an extra hedge, never a dropped one — but this repo
+        // already pins the quoted-"false" hazard for a config flag, and a channel
+        // with a two-value producer deserves a two-value reader.
+        + (env.ZDOC_BINDING_ROOT_UNKNOWN === '1'
+          ? '. Whether the recorded project root still exists could not be determined here; if it is gone, the adoption clears the lineage break while Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created'
+          : ''));
+    // BOTH disagreements at once, and the row exists because each of the two
+    // above answers "not me" for it: the orphan probe re-applies
+    // servesRecordedRuntime, which an incompatible lineage fails, and the lineage
+    // probe used to read strictly and throw on the absent root. The combination
+    // therefore fell through to `unbound`, whose line is false here in the same
+    // way it is false one row up. It is adoptable — the workflow document is not
+    // reachable from this record, so there is no persisted shape left to disagree about —
+    // but adoption leaves the session ORPHANED rather than fully bound, so the
+    // row states that limit instead of promising a full rescue.
+    case 'orphaned-project-root+incompatible-runtime':
+      return line(BAD, 'binding: this session\'s Session Control record is readable, but BOTH the recorded project root'
+        + one(env.ZDOC_BINDING_PROJECT_ROOT)
+        + ' is gone and the running Zensu installation declares an incompatible lineage'
+        + versions()
+        // OFFERED, never promised — the same hedge the row above carries and for
+        // the same reason: this state is reachable on a DOWNGRADE, which adoption
+        // refuses outright as executing-runtime-older.
+        + ' — a deleted or recycled worktree left the workflow state unreachable from this record while a plugin update landed, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether the running installation may take the record over, then /zensu:adopt-session --confirm. That unblocks READ-ONLY Bash and this diagnostic, but Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write, because the recorded project root is still gone — a write cannot be attributed to a project that is not there — re-create exactly that directory, or start a fresh Claude Code session, to write again. If it was moved rather than deleted, its state still exists there');
     case 'unavailable':
       return line(BAD, 'binding: hooks/lib/zensu-session.sh is missing or symlinked — Session Control cannot bind');
     default:
@@ -2476,13 +2726,13 @@ function stateBlock(nowMs) {
     entries = fs.readdirSync(dir);
   } catch (e) {
     if (e && e.code === 'ENOENT') {
-      line(OK, 'state: ' + dir + ' does not exist yet — nothing to clean');
+      line(OK, 'state: ' + foldPath(dir, ' does not exist yet') + ' does not exist yet — nothing to clean');
       ownDocumentVerdict(false);
     } else {
       // Every other errno is a check that did NOT run. Rendering it green hid the
       // whole Session state block behind an all-clear, which is the one verdict
       // this file refuses to fake anywhere else.
-      line(WARN, 'state: ' + dir + ' could not be read (' + ((e && e.code) || 'unknown')
+      line(WARN, 'state: ' + foldPath(dir, ' could not be read') + ' could not be read (' + ((e && e.code) || 'unknown')
         + ') — the session-state checks did not run. That is a missing check, not an all-clear.');
     }
     return;
@@ -2490,7 +2740,7 @@ function stateBlock(nowMs) {
   try {
     fs.accessSync(dir, fs.constants.W_OK);
   } catch (e) {
-    line(BAD, 'state: ' + dir + ' is not writable — chain markers cannot be recorded');
+    line(BAD, 'state: ' + foldPath(dir, ' is not writable') + ' is not writable — chain markers cannot be recorded');
   }
   var workflowDocs = entries.filter(function (f) {
     return /^tdd-phase-scv1_[a-f0-9]{64}\.json$/.test(f);

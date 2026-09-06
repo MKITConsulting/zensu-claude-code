@@ -17,6 +17,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const safeDisplay = require("./zensu-safe-display-v1.js");
 const core = require("./session-control-core-v1.js");
 // The superseded-lease sweep. It is NOT part of adoptContext any more: requiring the
 // lease owner from the core is a require cycle, so the sweep moved into its own
@@ -41,8 +42,18 @@ const sweepLeases = require("./review-evidence-sweep-v1.js");
 // denied, and where those conditions are exactly the diagnosis the user needs
 // stated plainly.
 const privateRecordsDirectory = require("./claude-hook-session-v1.js").privateRecordsDirectory;
+// The SAME rule every argv mode in the binder applies to a host session id, applied
+// here because this was the one entry point that did not. `zensu-session-adopt.sh`
+// forwards `CLAUDE_CODE_SESSION_ID` verbatim, and `core.sessionKey` returns an
+// `scv1_<64hex>` value UNCHANGED — that spelling is the name of a record file in the
+// store, so without this check the store's own directory listing was a list of
+// accepted identities. Called in main() FIRST, with its own
+// headline and remedy, and again inside buildRequest so the invariant stays local to
+// the function that builds the request and a second caller cannot skip it.
+const validateSessionId = require("./claude-hook-session-v1.js").validateSessionId;
 const buildRequest = () => {
   const pluginData = process.env.ZADOPT_PLUGIN_DATA;
+  validateSessionId(process.env.ZADOPT_SESSION_ID);
   return {
     recordsDir: privateRecordsDirectory(pluginData),
     sessionId: process.env.ZADOPT_SESSION_ID,
@@ -83,70 +94,18 @@ const buildRequest = () => {
 // Every named threat still folds, because none of them is a letter, a number or a
 // combining mark: the bidi overrides are \p{Cf}, U+2028/2029 are \p{Zl}/\p{Zp}, and
 // U+007F is \p{Cc}.
-const SAFE_DISPLAY = /^[\p{L}\p{N}\p{M} _.,:;/\\@+~()=-]*$/u;
-const DOUBLE_SPACE = / {2}/;
-// The class admits a space AND a colon, and DOUBLE_SPACE only rejects two ADJACENT
-// spaces — so a value with single spaces and colons passed through raw and could
-// forge a further `label : value` pair after the line it sits on. That needs no local
-// privilege: context.project_root is minted from the SessionStart cwd and
-// validateContext rejects only NUL, CR and LF in it, so anyone who supplies the
-// directory name the user opens Claude Code in controls this substring. A real path
-// containing " : " now renders JSON-quoted, which is still readable.
-// It guards `: ` and ` :`, not only ` : `. This report emits THREE separator
-// spellings and this guard covered one: `  ` (the padding), ` : ` (the aligned pair),
-// and `: ` in `WARNING: `, `NOTE: `, `  superseded record: ` and
-// ` could NOT be set aside: `. A project directory named `repo WARNING: inspect
-// /tmp/x` carries only allowlisted characters, no double space and no ` : `, so it
-// printed VERBATIM and forged a whole warning line — the lines skills/adopt-session
-// tells the model to relay word for word.
-//
-// MEASURED against this allowlist, not assumed: of the known colon confusables,
-// exactly three pass SAFE_DISPLAY — U+003A itself, U+02D0 MODIFIER LETTER TRIANGULAR
-// COLON (\p{Lm}) and U+A4FD LISU LETTER TONE MYA JEU (\p{Lo}). Every other one, and
-// every non-ASCII space, is already rejected by the positive class.
-const COLON_LIKE = "\\u003a\\u02d0\\ua4fd";
-const PAIR_SEPARATOR = new RegExp("[" + COLON_LIKE + "] | [" + COLON_LIKE + "]", "u");
-// Renders as nothing while counting as a letter or a mark, which is how an invisible
-// character splits the two literal guards above. MEASURED: nine default-ignorable
-// code points pass SAFE_DISPLAY — U+034F, U+115F, U+1160, U+17B4, U+17B5, U+180B,
-// U+3164, U+FE00, U+FFA0 — and each one turns `repo X: recorded` back into a value
-// that prints verbatim while still reading as a label.
-const INVISIBLE = /\p{Default_Ignorable_Code_Point}/u;
-// A combining mark with no base of its own attaches to the PRECEDING space and paints
-// on it. MEASURED: U+0301 and the spacing visargas U+0903 and U+0F7F all printed as
-// themselves, because \p{M} is inside the allowlist and neither literal guard carries
-// a mark. The rule is the mark's BASE, so a decomposed accent on a letter — the case
-// the allowlist was widened for — still prints as itself.
-const ORPHAN_MARK = /(?:^|[ ])\p{M}/u;
-const NON_ASCII = /[\u007f-\uffff]/g;
-const SPACE_RUN = / {2,}/g;
-// Applied AFTER NON_ASCII has folded U+02D0 and U+A4FD to escapes, so only the ASCII
-// colon can still sit beside a space here.
-const COLON_SPACE_GLOBAL = /:[ ]/g;
-const SPACE_COLON_GLOBAL = /[ ]:/g;
-const safe = (value) => {
-  const text = String(value);
-  if (SAFE_DISPLAY.test(text)
-    && !DOUBLE_SPACE.test(text)
-    && !PAIR_SEPARATOR.test(text)
-    && !INVISIBLE.test(text)
-    && !ORPHAN_MARK.test(text)) {
-    return text;
-  }
-  return JSON.stringify(text)
-    .replace(NON_ASCII, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"))
-    // The DOUBLE_SPACE invariant applies to BOTH branches. It used to guard only the
-    // fast path, so `/tmp/a"b  project : x` was rendered through JSON.stringify with
-    // the two-space run and the colon intact — the exact forgery the fast-path guard
-    // exists to stop, arriving through the branch meant to be the safer one. Single
-    // spaces survive, so an ordinary quoted path stays readable.
-    .replace(SPACE_RUN, (run) => "\\u0020".repeat(run.length))
-    // Same reasoning as the double-space fold above, for the separator the fast path
-    // now also guards: a value that reached this branch for an unrelated reason must
-    // not keep a usable `: ` intact.
-    .replace(COLON_SPACE_GLOBAL, ":\\u0020")
-    .replace(SPACE_COLON_GLOBAL, "\\u0020:");
-};
+// The rule itself now lives in the dependency-free leaf module beside this one.
+// It was defined HERE first, and the doctor renderer then reached for it with a
+// guarded lazy require plus its own narrower fallback copy — a display rule in two
+// implementations, owned by a feature command that drags four further modules in
+// behind it. `safe` is kept as this file's spelling because the report and its unit
+// suite are written against that name.
+const safe = safeDisplay.safeDisplayValue;
+// Re-exported unchanged so the unit suite keeps pinning the rule through the
+// consumer that renders it, rather than having to know where it now lives.
+const {
+  SAFE_DISPLAY, DOUBLE_SPACE, NON_ASCII, INVISIBLE, PAIR_SEPARATOR, ORPHAN_MARK,
+} = safeDisplay;
 
 // WHICH directory the sweep refused, empty when it refused nothing.
 //
@@ -571,7 +530,7 @@ function renderBaselineNotes(baseline, sessionId) {
 // the misleading doctor row left them.
 const REMEDY = {
   [core.ADOPTION_REFUSALS.RECORD_UNREADABLE]:
-    "The record could not be re-verified against the installation that minted it. Its recorded project root may be gone, that installation may have been pruned from the plugin cache, the record may have been altered, or a persisted schema really did change in this release. Adoption cannot tell these apart, and in this state /zensu:doctor cannot name the directory either. Start a fresh Claude Code session.",
+    "The record could not be re-verified against the installation that minted it. That installation may have been pruned from the plugin cache, the record may have been altered, or a persisted schema really did change in this release. A recorded project root that is merely GONE is no longer one of these — that state is adoptable — so the disagreement here is one of the others — or there is no record for this session at all, which lands on this same reason. Adoption cannot tell them apart, and in this state /zensu:doctor cannot name the cause either. Start a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.PLUGIN_DATA]:
     "The record belongs to a different plugin-data store — typically a development checkout against an installed plugin, or the reverse. That boundary is never relaxed. Start a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.ALREADY_SERVED]:
@@ -591,6 +550,25 @@ const REMEDY = {
 // crashed helper rather than as the refusal it was meant to print.
 function main() {
   let request;
+  // TWO refusal classes, two headlines. `buildRequest` performs two independent
+  // checks — the session identity and the private record store — and routing both
+  // into one `catch` printed `private-record-store-unsafe` for a malformed or
+  // DERIVED session id, telling the user to repair a store that was never reached.
+  // That contradicted this file's own contract that every refusal names the
+  // condition it failed; three review seats found it independently. Each class
+  // keeps its own cause and its own remedy now.
+  try {
+    validateSessionId(process.env.ZADOPT_SESSION_ID);
+  } catch (error) {
+    process.stdout.write("Zensu session adoption — NOT adoptable (session-id-unusable)\n\n");
+    process.stdout.write("The session identity this command was given cannot be used: "
+      + safe(error && error.message ? error.message : "unknown") + "\n");
+    process.stdout.write("It is empty, malformed, or a DERIVED Session Control identifier rather than the\n");
+    process.stdout.write("raw host session id. Nothing was read and nothing was changed. Start a fresh\n");
+    process.stdout.write("Claude Code session; the record store is not implicated.\n");
+    process.exitCode = 1;
+    return;
+  }
   try {
     request = buildRequest();
   } catch (error) {
@@ -665,8 +643,45 @@ function main() {
     process.stdout.write("Zensu session adoption — ADOPTABLE\n\n");
     process.stdout.write("  record minted by : " + safe(verdict.recorded) + "\n");
     process.stdout.write("  executing        : " + safe(verdict.executing) + "\n");
-    process.stdout.write("  project          : " + safe(verdict.context.project_root) + "\n\n");
-    process.stdout.write("The record is intact and this installation can take it over in place.\n");
+    // Same seam as the adopted row below: the marker is handed to safe() so a value
+    // ending in a separator-shaped character is folded before the marker completes it.
+    process.stdout.write("  project          : "
+      + safe(verdict.context.project_root, verdict.orphanedProjectRoot ? " (GONE)" : "")
+      + (verdict.orphanedProjectRoot ? " (GONE)" : "") + "\n\n");
+    // The unqualified sentence is only earned when a workflow document was
+    // actually readable. In the orphaned branch condition 6 never ran, so
+    // claiming the record is "intact" at the same strength as on the ordinary
+    // path overstates what was checked — see the qualified line below.
+    if (!verdict.orphanedProjectRoot) {
+      process.stdout.write("The record is intact and this installation can take it over in place.\n");
+    }
+    // Stated BEFORE the user confirms, not only after: an adoption that leaves
+    // Edit, Write and every WRITING Bash command denied is not the rescue an
+    // unqualified "adoptable" implies,
+    // and finding that out afterwards reads as a failed repair.
+    if (verdict.orphanedProjectRoot) {
+      process.stdout.write("The record itself is readable and this installation can take it over in place.\n");
+      process.stdout.write("\nThe recorded project root no longer exists — a deleted or recycled worktree left\n");
+      process.stdout.write("the workflow state unreachable from this record. Adoption still applies and is\n");
+      process.stdout.write("worth doing: it clears the lineage break, so READ-ONLY Bash and the read-only\n");
+      process.stdout.write("diagnostics work again. It does NOT restore writes — Edit, Write and MultiEdit\n");
+      process.stdout.write("stay denied, and so does any Bash command the source-write gate can attribute\n");
+      process.stdout.write("as a write, because a write cannot be attributed to a project that is not\n");
+      process.stdout.write("there. NotebookEdit is the one mutation that still passes, in a healthy\n");
+      process.stdout.write("session too. To write again, re-create exactly that directory or start a\n");
+      process.stdout.write("fresh Claude Code session. If it was moved rather than deleted, its state\n");
+      process.stdout.write("still exists there.\n");
+      // The schema-equality check that authorises an ordinary takeover did NOT
+      // run here, and a report that stays silent about it lets the user read a
+      // weaker check as the stronger one. Condition 6 is guarded by an
+      // existsSync on the workflow document, which is false for an absent root.
+      process.stdout.write("\nNOT CHECKED: with no readable workflow document, the schema-equality check that\n");
+      process.stdout.write("normally authorises a takeover was not performed, and a document restored later\n");
+      process.stdout.write("is checked only when it is first read, not here. Re-creating the directory\n");
+      process.stdout.write("BEFORE adopting is the better order: the check then names its own refusal\n");
+      process.stdout.write("(workflow-schema-mismatch, with a remedy) instead of an anonymous fail-closed\n");
+      process.stdout.write("deny at the first read after the repair.\n");
+    }
     process.stdout.write("Nothing has been changed. Run the same command with --confirm to adopt.\n");
     return;
   }
@@ -687,63 +702,109 @@ function main() {
   // The anchor the session is bound to from here on. It is carried from the
   // record, never from where this command was invoked, and naming it is the one
   // place the user learns which project that actually is.
-  process.stdout.write("  project          : " + safe(adopted.projectRoot) + "\n");
+  // The marker is passed to safe() as well as appended. A root ending in a colon, or in
+  // a colon-confusable modifier letter, is harmless until this marker lands after it and
+  // completes a separator — so the fold has to see what will follow. One space, not two:
+  // two would trip the double-space rule on every appended render.
+  process.stdout.write("  project          : "
+    + safe(adopted.projectRoot, adopted.orphanedProjectRoot ? " (GONE)" : "")
+    + (adopted.orphanedProjectRoot ? " (GONE)" : "") + "\n");
   process.stdout.write("  superseded record: " + safe(adopted.supersededFile) + "\n");
   process.stdout.write("  provenance       : " + safe(adopted.provenance) + "\n");
   process.stdout.write("  leases set aside : " + leases.discarded + "\n");
   process.stdout.write("  leases stuck     : " + leases.failed.length + "\n\n");
-  process.stdout.write("This session is bound again from the next tool call onward — no restart is needed.\n");
+  if (adopted.orphanedProjectRoot) {
+    // Never the unqualified "bound again" line for this shape. The lineage break
+    // is gone, but the anchor is still a directory that does not exist, which is
+    // the ordinary orphaned-project-root state: reads and diagnostics run, writes
+    // do not. Saying otherwise would send the user straight into a deny.
+    process.stdout.write("This session's lineage break is repaired from the next tool call onward — no restart\n");
+    process.stdout.write("is needed. The recorded project root is still gone, so the session is now in the\n");
+    process.stdout.write("orphaned-project-root state: READ-ONLY Bash and the read-only diagnostics work,\n");
+    process.stdout.write("while Edit, Write and MultiEdit stay denied, and so does any Bash command\n");
+    process.stdout.write("the source-write gate can attribute as a write — a write cannot be attributed\n");
+    process.stdout.write("to a project that is not there. NotebookEdit is the one mutation that still\n");
+    process.stdout.write("passes, in a healthy session too. Re-create exactly that directory, or start a\n");
+    process.stdout.write("fresh Claude Code session, to write again.\n");
+  } else {
+    process.stdout.write("This session is bound again from the next tool call onward — no restart is needed.\n");
+  }
   if (adopted.provenance === "no-workflow-document") {
-    // NOT "a normal state, not a fault" — that wording predates the
-    // workflow-baseline repair and is now false in the composed state it names.
-    // adoptableRecord condition 6 tolerates a missing document, so a lineage
-    // break PLUS a missing baseline lands here: the record is re-minted, the
-    // report reads fully successful, and the capability gate then denies every
-    // later tool call for the one reason this report did not mention.
-    // CLASSIFY before promising. `adoptContext` decides this provenance with
-    // `fs.existsSync`, which FOLLOWS symlinks and returns false on any error — so
-    // a dangling symlink or an EACCES at the leaf lands here too, and an
-    // unconditional "re-run with --confirm to rebuild" then points at a repair
-    // that refuses by design. That is the same `test -e` hazard the Stop arm was
-    // qualified for and the doctor row was moved off, left standing on this one
-    // carrier.
-    let adoptedShape = null;
-    try {
-      adoptedShape = core.classifyWorkflowBaselineShape(
-        core.adoptionWorkflowStatePath(adopted.projectRoot, request.sessionId),
-        adopted.projectRoot,
-      );
-    } catch (_error) { adoptedShape = null; }
-    process.stdout.write("\nWARNING: this session has no usable workflow document, so there was nothing to\n");
-    process.stdout.write("record the takeover in — and while that is so the capability gate denies EVERY\n");
-    process.stdout.write("tool in this session. The adoption above is real and is not enough on its own.\n");
-    if (isBaselineState(adoptedShape, "UNSAFE")) {
-      // GUARDED like its sibling twelve lines above, and for a stronger reason: this
-      // runs on the POST-MUTATION path, after the record swap has already happened.
-      // An exception here would replace the whole closing report with a stack trace
-      // in the one function whose contract is never to throw — losing the warning
-      // above it and every lease result below it. The component NAME is a nicety;
-      // the warning is not, so a failure costs the name and keeps the sentence.
-      let unsafeComponent = null;
-      try {
-        unsafeComponent = core.baselineUnsafeComponent(
-          adopted.projectRoot,
-          core.adoptionWorkflowStatePath(adopted.projectRoot, request.sessionId),
-        );
-      } catch (_error) { unsafeComponent = null; }
-      process.stdout.write("Something is SITTING at that path, so --confirm will REFUSE to rebuild it:\n");
-      process.stdout.write("  " + safe(unsafeComponent
-        || "(the offending component could not be named — inspect .zensu/state/ by hand)") + "\n");
-      process.stdout.write("Inspect that before doing anything else, then start a fresh session.\n");
+    // TWO shapes for one provenance value, because that value means two different
+    // things and only ONE of them has a repair. The guard behind it is an existsSync
+    // UNDER adopted.projectRoot, and in the ORPHANED case that directory is the
+    // absent one — so `no-workflow-document` is returned unconditionally there,
+    // whether or not the session ever had a document. Classifying the baseline is
+    // meaningless in that state and "re-run with --confirm to rebuild" is wrong
+    // advice there: the root itself is gone, so there is nowhere to rebuild into.
+    // Held to the same evidentiary standard the Stop releases use — "not reachable",
+    // never "gone" — since one ENOENT cannot tell a delete from a move.
+    if (adopted.orphanedProjectRoot) {
+      process.stdout.write("\nNOTE: the recorded project root is gone, so any workflow document it held is not\n");
+      process.stdout.write("reachable from this record and the takeover could not be written into one. If that\n");
+      process.stdout.write("directory was moved rather than deleted, its state still exists there.\n");
     } else {
-      process.stdout.write("Re-run this command with --confirm to rebuild the document, provided it is\n");
-      process.stdout.write("genuinely absent rather than replaced; rebuilding is a loss, not a restore — a\n");
-      process.stdout.write("review chain that was live when it vanished is gone.\n");
+      // NOT "a normal state, not a fault" — that wording predates the
+      // workflow-baseline repair and is now false in the composed state it names.
+      // adoptableRecord condition 6 tolerates a missing document, so a lineage
+      // break PLUS a missing baseline lands here: the record is re-minted, the
+      // report reads fully successful, and the capability gate then denies every
+      // later tool call for the one reason this report did not mention.
+      // CLASSIFY before promising. `adoptContext` decides this provenance with
+      // `fs.existsSync`, which FOLLOWS symlinks and returns false on any error — so
+      // a dangling symlink or an EACCES at the leaf lands here too, and an
+      // unconditional "re-run with --confirm to rebuild" then points at a repair
+      // that refuses by design. That is the same `test -e` hazard the Stop arm was
+      // qualified for and the doctor row was moved off, left standing on this one
+      // carrier.
+      let adoptedShape = null;
+      try {
+        adoptedShape = core.classifyWorkflowBaselineShape(
+          core.adoptionWorkflowStatePath(adopted.projectRoot, request.sessionId),
+          adopted.projectRoot,
+        );
+      } catch (_error) { adoptedShape = null; }
+      process.stdout.write("\nWARNING: this session has no usable workflow document, so there was nothing to\n");
+      process.stdout.write("record the takeover in — and while that is so the capability gate denies EVERY\n");
+      process.stdout.write("tool in this session. The adoption above is real and is not enough on its own.\n");
+      if (isBaselineState(adoptedShape, "UNSAFE")) {
+        // GUARDED like its sibling twelve lines above, and for a stronger reason: this
+        // runs on the POST-MUTATION path, after the record swap has already happened.
+        // An exception here would replace the whole closing report with a stack trace
+        // in the one function whose contract is never to throw — losing the warning
+        // above it and every lease result below it. The component NAME is a nicety;
+        // the warning is not, so a failure costs the name and keeps the sentence.
+        let unsafeComponent = null;
+        try {
+          unsafeComponent = core.baselineUnsafeComponent(
+            adopted.projectRoot,
+            core.adoptionWorkflowStatePath(adopted.projectRoot, request.sessionId),
+          );
+        } catch (_error) { unsafeComponent = null; }
+        process.stdout.write("Something is SITTING at that path, so --confirm will REFUSE to rebuild it:\n");
+        process.stdout.write("  " + safe(unsafeComponent
+          || "(the offending component could not be named — inspect .zensu/state/ by hand)") + "\n");
+        process.stdout.write("Inspect that before doing anything else, then start a fresh session.\n");
+      } else {
+        process.stdout.write("Re-run this command with --confirm to rebuild the document, provided it is\n");
+        process.stdout.write("genuinely absent rather than replaced; rebuilding is a loss, not a restore — a\n");
+        process.stdout.write("review chain that was live when it vanished is gone.\n");
+      }
     }
   } else if (adopted.provenance !== "recorded") {
     process.stdout.write("\nWARNING: the adoption succeeded but its provenance entry could not be written.\n");
     process.stdout.write("The takeover is real and unrecorded in the workflow history; report this rather than repeating it.\n");
   }
+  // DELIBERATELY no `process.exitCode` here, and the asymmetry with the repair branch
+  // is the point rather than an oversight. There the sweep IS the whole operation, so
+  // a refused or partial sweep is the operation failing and exit 1 says so. Here the
+  // record was re-minted successfully and the sweep is secondary: exiting non-zero
+  // would tell a caller the ADOPTION failed, which is false and is the more damaging
+  // wrong answer of the two. The warnings below carry the sweep's verdict in full.
+  //
+  // Recorded because a review round proposed unifying the two, the unified version was
+  // written, and AC-C12 caught it: that row requires this command to exit 0 while its
+  // destination refusal is named — it is the pin that encodes this distinction.
   reportLeaseWarnings(leases);
 }
 
@@ -809,7 +870,16 @@ function renderLeaseWarnings(leases) {
     }
   }
   if (leases.failed.length > 0) {
-    w("\nWARNING: " + leases.failed.length + " review-evidence lease(s) could NOT be set aside: " + leases.failed.map(safe).join(", ") + "\n");
+    // NOT `.map(safe)`. Array.prototype.map calls its callback as (element, index,
+    // array), so the point-free form fed the ARRAY INDEX into safe()'s `followedBy`
+    // parameter — telling the guard something false at the one site where the
+    // parameter's contract is definitely violated. Inert (a digit forms no separator,
+    // and extra context can only ADD matches), but a guard fed a lie is a guard nobody
+    // can reason about. Each name is also bracketed, because these are raw readdir
+    // entries folded in ISOLATION: an entry beginning with a colon would otherwise abut
+    // the join's separator and put a ` :` into the rendered line that no fold ever saw.
+    w("\nWARNING: " + leases.failed.length + " review-evidence lease(s) could NOT be set aside: "
+      + leases.failed.map(function (n) { return "[" + safe(n) + "]"; }).join(" ") + "\n");
     // Do NOT assert which of the several possible causes applies. An entry lands here
     // when the move collided with a file already set aside, when the link or the
     // unlink half failed, or on an ordinary I/O error — naming only "they still name
@@ -829,6 +899,13 @@ function reportLeaseWarnings(leases) {
   process.stdout.write(renderLeaseWarnings(leases));
 }
 
+// THIS IS A RE-EXPORT SURFACE, NOT THE RULE'S HOME, and it deliberately names fewer
+// rules than `safe` applies — `safe` also folds invisible letters, colon-confusable
+// modifier letters and the pair separator. Read hooks/lib/zensu-safe-display-v1.js for
+// the complete set; its export block carries every guard the fold applies and a test
+// derives that list from the function itself. The three names below are kept only
+// because this surface carried them before the rule moved to the leaf, so removing
+// them would be an unrelated break. Do not infer the fold from this list.
 module.exports = {
   DOUBLE_SPACE,
   INVISIBLE,

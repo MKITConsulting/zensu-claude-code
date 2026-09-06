@@ -825,8 +825,8 @@ included this comparison. It also put the module back in step with itself:
 `resolveHookSession` answers `projectRoot: context.project_root` under "The mutable
 payload cwd is never a project authority", and this was the one place a
 caller-supplied directory outranked the record. A record whose project root is GONE
-is still refused, as `record-unreadable` — `validateContext` canonicalizes it at
-condition 1. Consequently `zensu-session-adopt.sh` no longer requires
+is ADMITTED at condition 1 — see the paragraph below, which states that rule and its
+bound once. Consequently `zensu-session-adopt.sh` no longer requires
 `CLAUDE_PROJECT_DIR`; it used to render it through `zensu-host-path.sh`, which
 rejects a non-directory, so an unset or deleted value exited before printing any
 report. The recognizer still ACCEPTS the assignment — the diagnostic reads it and the
@@ -872,36 +872,183 @@ the misleading wording exactly when the repair is impossible. Do not describe th
 lineage row as covering every mid-session upgrade; it covers the ones whose
 previous version was not pruned.
 
-**A vanished recorded PROJECT root is an OPEN gap, not a settled distinction.**
-Removing the caller's project-root condition closed one of the two ways the two
-sources of truth diverge in worktree workflows — a cwd that was a worktree while the
-harness reported elsewhere. The other is still a permanent wedge: a worktree later
+**A vanished recorded PROJECT root is ADMITTED at condition 1, and it is the only
+disagreement that is.** Both ways the two sources of truth diverge in worktree
+workflows are closed now: removing the caller's project-root condition handled a cwd
+that was a worktree while the harness reported elsewhere, and condition 1 reads
+strictly first and falls back to `readOrphanedProjectRootContext` for a worktree later
 REMOVED (`git worktree remove`, the documented cleanup in `skills/pr-team-review`
-Phase E) makes `readContext` throw at condition 1, so adoption answers
-`record-unreadable` whose remedy says to start a fresh session. Combined with an
-incompatible lineage, `orphanedProjectRootSession` does not fire either, and
-`/zensu:doctor` falls back to the same `unbound` row. `readOrphanedProjectRootContext`
-ALREADY distinguishes *record intact, project root absent* from *record altered or
-pruned*, and the gates already consume it — adoption does not. Widening it is a
-separate and larger decision, because adoption would then have to succeed with an
-anchor that does not exist. Word it as open here and in `skills/adopt-session/SKILL.md`,
-so the next reader does not take "that one still refuses" for "and should".
+Phase E), which used to make `readContext` throw and answer `record-unreadable` while
+`/zensu:doctor` fell back to the `unbound` row. The fallback cannot widen: the orphan
+reader waives exactly one check and REFUSES a root that still exists, so every other
+disagreement throws in BOTH readers and still lands on `record-unreadable`. Nothing is
+waived by admitting it — the workflow document lived under that root and is not reachable from this record,
+the same argument that already relaxes a vanished root for a COMPATIBLE upgrade.
 
-**Three re-encodings move with this.** Their coverage is stated once, in the
-store-layout bullet below, and nowhere else — a ledger that contradicts itself about
-its own pins is the failure mode it exists to prevent. The wire format and the
-version-shape rule are unchecked:
+**That "nothing is waived" sentence is TRUE ONLY WHILE THE ROOT STAYS GONE, and the
+gap is named here rather than left for the next reader to find.** The authorising axis
+of adoption is SCHEMA equality, and `CLAUDE.md` calls that gate self-closing — a release
+that moves a persisted shape makes the document unreadable and adoption declines with no
+new check to remember. In THIS state it does not close: condition 6 is guarded by
+`fs.existsSync(workflowFile)`, which is false for an absent root, so `readWorkflowState`
+never runs and `workflow-schema-mismatch` is unreachable. The same predicate later in
+`adoptContext` skips the `RUNTIME_ADOPTED` history entry, which invariant 1 names as the
+design's ONLY provenance mechanism while invariant 2 forbids a bypass-ledger entry — so
+an adoption here leaves the superseded record's filename as its only durable evidence.
+Neither is a defect in the mechanism and neither is worth a control-flow change: what was
+wrong was the CLAIM. The adoption report now discloses in this branch that no workflow
+document could be read, so the schema check was not performed and a document restored
+later is not verified. Say "not evaluated", never "verified", and note the ORDER:
+re-creating the directory BEFORE adopting is what lets condition 6 run at all.
 
+**`readOrphanedProjectRootContext` is STRICTER than the code it replaced, which is not
+obvious from a diff that reads as an extraction.** The two inline rules it dropped were
+the unsafe-character test and `path.isAbsolute`; `requireAbsentDirectoryPath` applies a
+THIRD, `path.resolve(value) !== value`. That reader backs `orphanedProjectRootSession`,
+so a recorded `project_root` which is not a `path.resolve` fixed point now loses the
+relaxation entirely — the wedge this feature family exists to remove, restored for that
+one value class. The rule is kept on the read path deliberately: applying it only where
+the value is written would move the refusal out of `adoptableRecord` into a throw inside
+`adoptContext` and would break the AC-C14b row. Exposure is narrow because every root is
+minted through `realpathSync.native`, whose POSIX output is normalized; the residual is a
+win32 UNC share root, where `path.win32.resolve` appends a separator `realpathSync.native`
+does not. That spelling is UNVERIFIED in both directions — no suite exercises it, so do
+not record it as covered.
+
+**Removed with this feature, and named here because the roster is what a port works
+from:** `incompatibleRuntimeSession` is gone from `hooks/lib/claude-hook-session-v1.js`'s
+exports along with its definition. Every ADDITION in that change was added to the roster
+above; the removal was not, and a port that keeps its own equivalent keeps a predicate
+nothing calls.
+
+`buildContext` gained `allowMissingProjectRoot` for the re-mint. It waives exactly the
+existence check `validateContext` waives and re-applies that function's shape half
+through a SHARED `requireAbsentDirectoryPath` — the orphan reader calls it too, so the
+split rule has one implementation rather than two copies. No record field moves, so
+invariant 1 above still holds and this stays a `patch`.
+
+**Three things are load-bearing and easy to undo by accident.** First, the verdict
+carries `orphanedProjectRoot` and `adoptContext` passes it through rather than
+re-deriving it: asking the filesystem a second time would let a directory re-created
+between the two reads turn a waived check into a canonicalized one. Second, the deleted
+root must NOT be recreated — the provenance write is guarded by the workflow document's
+own `existsSync`, so `mutateWorkflowState`, which mkdirs every missing component of
+`<project>/.zensu/state`, is never reached; AC-C16 pins it. Third, the repair fixes the
+LINEAGE and not the anchor: the adopted session lands in the ordinary
+orphaned-project-root state, where `Edit`, `Write`, `MultiEdit` and any WRITING Bash command still deny. The report says so before
+and after `--confirm` and the doctor row says so too, because announcing an unqualified
+success there sends the user into a deny they were just told was repaired.
+
+**The DIAGNOSIS moved with it, and deliberately not into a fourth predicate.**
+`resolveIncompatibleRuntime` takes the same strict-then-orphan fallback, so the combined
+state is reported by the predicate every deny site already consults — which is what gives
+all five the `incompatible-runtime` scope, whose text names `/zensu:adopt-session`,
+instead of the generic "start a fresh session" that would now contradict the doctor. Its
+`recorded<TAB>executing` line stays TWO fields for the reason the wire-format bullet below
+gives; the third fact travels on its own mode pair, `orphaned-incompatible-root` and
+`model-orphaned-incompatible-root`. Do NOT relax `resolveOrphanedProjectRoot` to accept
+an incompatible lineage instead: that would let an incompatible runtime SERVE a session
+with no user decision and no provenance, which is what the lineage rule exists to prevent.
+Re-anchoring the record to a live directory was also considered and refused — a session
+may delete its own root, so a caller-named anchor would become a cross-project write
+escape.
+
+**Widening that predicate changed what the message surfaces enumerated below mean — FIVE entries, six if both doctor rows are counted separately, and that is the part
+to re-check on every later edit.** `zensu_session_incompatible_runtime` is now true for
+two states that disagree about the one fact those surfaces assert: whether the workflow
+document still exists. Anything that speaks about it must ask the third fact and branch —
+`hooks/stop-chain-enforcer.sh` does, and its THREE releases say different things on purpose:
+a deferral when the root is present, "not reachable from this record, and no later Stop can
+enforce this chain while that directory is missing" when it is not, and a state-neutral one
+claiming NEITHER when the probe could not answer. **The wording of that middle arm is
+itself a rule, not a phrasing choice.** Its whole evidence base is one `ENOENT`, which a
+MOVED or renamed root and an unmounted volume produce identically — so it is held to the
+same standard the sibling orphan release 60 lines above it sets, and which that release's
+own comment states: "not reachable", never "gone". It shipped once as "is GONE with it" and
+"no later Stop will enforce this chain", both unprovable from that one fact, in a sentence
+that then closed by admitting a move leaves the state intact. The enforcement half must
+also stay BOUNDED to while the directory is missing, which is what makes it true: re-create
+the root and a later bind takes the deferral arm instead. The same standard governs every
+mirror of it — `docs/session-control.md`, both doctor rows, the adoption report's
+pre-confirm paragraph and its no-workflow-document NOTE, the two SKILL files
+(`skills/doctor/SKILL.md`, `skills/adopt-session/SKILL.md`), and the two operator docs
+(`docs/tdd-manager-workflow.md` §"When the session binding itself cannot be resolved",
+`docs/operations.md`'s combined-state troubleshooting row). The roster has now been
+wrong TWICE in the same way — each time it was extended, the newly named members
+turned out to be carrying the forbidden spelling already, and the members added the
+round after that were carrying it too. Treat an unlisted surface that says anything
+about the workflow document as unchecked, not as compliant. The skills were left off
+this list when it was first written and both promptly shipped the forbidden spelling,
+which is the whole argument for naming them here rather than trusting a sweep. **It
+governs the POSITIVE half too**, and that was missed the same way: the deferral arm
+claimed the workflow document "SURVIVES and is unchanged" on a probe that established
+only that the anchor RESOLVED — nothing on that path opens the document — so it is
+now worded as reachability, not as contents. That third arm exists because the channel answers on three statuses — 0 with the
+path, 3 for a live recorded root, 1 for an unavailable answer — and a caller that reads only
+truthiness collapses the last two, which is precisely how a surface comes to assert a
+workflow document that is gone. The first attempt at this fix contained that collapse. The others carry an unconditional clause instead, which is true in
+both halves: the deny scope in `zensu-session.sh`, the `.*` capability gate's own JS deny in
+`reviewer-capability-v1.js`, the COMBINED doctor row, and `skills/adopt-session/SKILL.md`.
+The plain lineage row is the one exception and states its clause CONDITIONALLY, on
+`ZDOC_BINDING_ROOT_UNKNOWN` — it is unconditionally true only that the row must not promise
+more than the probe established. The doctor is therefore in BOTH lists deliberately: it
+branches to pick a row, and the row it falls back to still carries the clause whenever the
+probe could not answer, because the probe can fail. The rule this feature states about itself — what the
+repair does not buy is stated wherever it is offered — is what those clauses satisfy; a
+surface that offers `/zensu:adopt-session` without them is a defect, not a nicety. The
+first draft of this change shipped all of the four that then existed speaking the pre-change contract and the
+review caught it.
+
+**FOUR re-encodings move with this**, and they do NOT share one coverage statement any
+more. The root-status pair states its own, because it is the only member with a real pin;
+the store layout states its own, in its bullet below; the wire format and the
+version-shape rule are UNCHECKED and say so. Read each bullet's own coverage sentence —
+an earlier lead-in here said coverage was stated "once … and nowhere else" while listing
+three bullets over four, and the version-shape bullet twelve lines down records that
+exact drift in its own words ("state the base or the count means nothing"):
+
+- the root-status pair `ZENSU_ROOT_STATE_GONE` / `ZENSU_ROOT_STATE_PRESENT`. The shell
+  constants live in `hooks/lib/zensu-session.sh`, but that file is a MIRROR, not the
+  definition: the values are exit statuses produced by `hooks/lib/claude-hook-session-v1.js`,
+  which sets `process.exitCode = 3` as a bare literal, and nothing compares the two sides.
+  Say "mirror", or a maintainer following this entry to "change the trichotomy" edits the
+  shell constant and silently degrades both consumers to their hedged arms while AC-C19
+  stays green — that pin covers the CONSUMERS' spellings only, and the producer is pinned
+  separately by AC-C15f with its own bare `3`. TWO consumers reach the pair by DIFFERENT routes —
+  and the route is the part a reader gets wrong. `stop-chain-enforcer.sh` sources the
+  owner in its PARENT shell and compares against those names directly;
+  `zensu-doctor.sh` sources it only inside command substitutions, where the name is out
+  of scope and reading it under `set -u` aborted the whole diagnostic, so it copies the
+  VALUES out in one subshell and compares against its own `ZDOC_ROOT_STATE_*`. One
+  definition, two spellings, on purpose. There is deliberately no `_UNKNOWN` member: it
+  is the residual, so nothing compares against it. AC-C19 in
+  `tests/structure/test-versioned-plugin-upgrade.sh` pins both MEMBERS in both files, in
+  each consumer's own spelling, plus a negative needle forbidding the defaulted
+  `${ZDOC_ROOT_STATE_GONE:-0}` form. That negative needle is not decoration: the pair
+  shipped with only `_PRESENT` pinned, and the doctor had meanwhile put the literal back
+  through exactly such a default, on the member no needle covered — a half-pinned pair
+  reads greener than an unpinned one. When adding a member, pin it in both files before
+  writing any comment that says both are covered.
 - the `recorded<TAB>executing` wire format — one producer
   (`claude-hook-session-v1.js`) and five parsers (`zensu-doctor.sh`,
   `stop-chain-enforcer.sh`, `pre-bash-zensu-gate.sh`, `pre-edit-tdd-reminder.sh`,
   `pre-bash-source-write-gate.sh` / `pre-write-secret-scan.sh` share one spelling).
   Every parser reads `${V##*$'\t'}` for the executing half, which takes the LAST
   field: adding a third field silently redirects all five rather than failing.
-- the version-shape rule, spelled twice for two different hazards —
-  `ADOPTION_SAFE_VERSION_RE` (a version reaches a FILENAME) and
-  `ZENSU_SAFE_VERSION_RE` (a version reaches a JSON string, and now also the
-  doctor report). Identical alternation, deliberate hand-copy; keep them in step.
+- the version-shape rule, spelled THREE times for three different hazards —
+  `ADOPTION_SAFE_VERSION_RE` in `session-control-core-v1.js` (a version reaches a
+  FILENAME), `ZENSU_SAFE_VERSION_RE` in `zensu-session.sh` (a version reaches a
+  JSON string, and now also the doctor report), and `SAFE_VERSION` / `safeVersion`
+  in `reviewer-capability-v1.js` (a version reaches the `.*` gate's own JSON deny
+  reason, which that gate spells itself rather than through
+  `zensu_emit_hook_session_deny`). Identical ALTERNATION in all three, deliberate hand-copy;
+  keep them in step. The CONSEQUENCE deliberately differs and an earlier wording
+  claimed it did not: `ADOPTION_SAFE_VERSION_RE` performs no substitution at all —
+  a failing version REFUSES the adoption (`EXECUTING_UNIDENTIFIED`) — while the
+  other two substitute `(unreadable)` and keep rendering. Same rule, three members,
+  two outcomes. The count was raised
+  to three while the enumeration still named two, which is the drift this bullet
+  exists to prevent — state the base or the count means nothing.
 - the review-evidence store layout, hardcoded in `discardSupersededLeases` as
   `review-evidence/v1/{records,superseded}/<key>` and re-implementing the
   ownership predicate that `review-evidence-lease-v1.js` owns, plus — since the
@@ -933,7 +1080,7 @@ version-shape rule are unchecked:
   — the adoption ENTRY POINT calls it after the record swap — so a port that takes
   only the core delta gets an adoption that never sweeps and leaves every superseded
   lease wedging the store. What the move bought: the function is exported and driven
-  by `tests/structure/session-control-lease-sweep.test.js`, so its refusal arms cost
+  by `tests/structure/review-evidence-sweep-v1.test.js`, so its refusal arms cost
   a temp directory each instead of a full synthetic install plus a session
   lifecycle, and three return shapes the shell layer could not reach are ordinary
   cases.
@@ -945,7 +1092,67 @@ version-shape rule are unchecked:
 
 **Port-relevant.** The core half is `adoptableRecord` / `adoptContext` /
 `executingPluginVersion` / `adoptionWorkflowStatePath` plus `ADOPTION_REFUSALS`, in
-the cross-host `session-control-core-v1.js`. `discardSupersededLeases` is NO LONGER
+the cross-host `session-control-core-v1.js` — and, since the vanished-root work, also
+condition 1's strict-then-orphan fallback, `requireAbsentDirectoryPath`, and
+`buildContext`'s SECOND parameter. That last one is the trap: a port that takes only the
+enumerated core half has `adoptContext` passing a second argument to a `buildContext` that
+ignores it, so `canonicalDirectory` runs on an absent path and adoption THROWS in exactly
+the state the feature was written for. **`hooks/lib/zensu-safe-display-v1.js` joins
+the core half**, and it is the one entry a port is likeliest to skip because it looks
+cosmetic: it owns `safeDisplayValue(value, followedBy)` — the `label : value` pair-forgery
+guard plus the positive letter/number/mark allowlist — it requires NOTHING, not even a node
+builtin, and both report renderers consume it. **The SECOND parameter is part of the
+obligation and is the easiest half to drop.** It carries what the caller will render
+immediately after the value; only the POSITIONAL rules see the join, because the allowlist
+judges which characters the VALUE may contain and the caller's marker is not the value's
+business; and a caller's appended marker must carry ONE space, or the double-space rule
+fires on every appended render and folds the disclosure exactly when it is being disclosed.
+A port that implements the one-argument description gets a function that silently ignores
+its second argument — unlike the `buildContext` second-parameter trap this roster already
+names, which at least throws. The doctor renderer's `foldPath` is a THIRD member beside
+`foldSlot` and `parentheticalWriter`: it carries the fold to the prose rows, and a port that
+copies the other two re-ships the raw-interpolation defect. It is also the one deliberate
+exception to the no-parentheses rule below — a prose row supplies no call-site parentheses,
+so `foldPath` returns a pre-parenthesized string while `foldSlot` must not. **ONE rule, deliberately.** A second, narrower
+`foldDisplayHiders` shipped here for one review round: it was written for the doctor's
+load-failure fallback, that fallback was then changed to DROP the value instead of
+folding it, and the export survived with no consumer and no executed case while this
+paragraph named the file a port obligation. Four review seats found it independently.
+A port that re-adds a weaker sibling rule re-creates exactly the two-implementation
+class the extraction removed. The rule
+lived inside `session-adopt-report-v1.js`, a feature command's module with five
+requires of its own, and the doctor reached for it through a guarded lazy require
+with a second, narrower spelling behind the guard: a display rule in two
+implementations, with a four-file load chain behind it, inside the one tool whose job
+is to speak in a damaged installation. **The two consumers require it DIFFERENTLY,
+and that asymmetry is load-bearing.** The adoption report takes it at top level; the
+doctor renderer keeps its require LAZY and GUARDED, because that file deliberately
+has no hard sibling require — `test-doctor.sh` P1mf builds a plugin root carrying
+exactly the core and that renderer, to prove a missing `chain-recovery-v1.js`
+degrades to one warning row rather than killing the report, and a top-level require
+made the renderer unloadable in that tree. Its fallback NAMES ITS REASON — the row prints
+`(not rendered — the display-safety module could not be loaded)` — rather than
+re-authoring the fold or dropping the value silently, because two other surfaces tell
+the user "/zensu:doctor names the directory" unconditionally. **The fold returns a
+RECORD, not a string** — `foldSlot` answers `{text, present, ok}`, where `present` is
+about the INPUT (an empty value has never produced a parenthetical) and `ok` is about
+the fold. The two were once conflated in one returned string, which forced every call
+site to fold TWICE to ask both questions and made the load-failure SENTENCE the value.
+**A fold failure is stated once per ROW, never once per slot.** `parentheticalWriter`
+owns that: one writer per `bindingLine()` call, with a `stated` flag closed over it. It
+is not cosmetic — with the sentence substituted per slot, the two-version row rendered
+`(record minted by <sentence>, executing <sentence>)`, which repeats the reason, buries
+the fact that BOTH values are missing, and reads as though the sentence were a version;
+the combined row has three slots and said it three times. `P1mf2` in `test-doctor.sh`
+pins the COUNT, on both remaining multi-slot bindings; `P1mf1` pins that the SINGLE-slot
+rendering is unchanged. **The returned string must carry no parentheses of its own**,
+and that is the part to keep: the fallback shipped as `(unrenderable)` in one round and
+as `(not rendered — …)` in the next, and BOTH were wrapped again by the call site's
+`' (' + … + ')'`, rendering `… no longer exists ((not rendered — …)) — …`. The same
+defect, twice, in successive fixes for it. A port that re-authors the fold, collapses
+`present` and `ok` back into one value, states the reason per slot, or returns a
+pre-parenthesized string gets one of those defects back.
+`discardSupersededLeases` is NO LONGER
 among them — it moved to `hooks/lib/review-evidence-sweep-v1.js` and is the EIGHTH
 host obligation enumerated below. Note that
 `adoptableRecord`'s `options.projectRoot` is now INERT — accepted and never read —
@@ -953,18 +1160,30 @@ so a port that takes only the core delta (the condition gone) while its own entr
 script still requires and host-path-renders a project-dir variable still exits
 before printing any report, which is the same wedge in a different place. The two
 halves move together. The host
-half is EIGHT separate obligations, and a port that takes only the core delta gets
+half is NINE separate obligations, and a port that takes only the core delta gets
 `adoptContext` with no reachable caller and keeps the wedge: the entry script, the
 recognizer's `RECOGNIZED` entry, the doctor branch and row, the Stop release, the
 deny scope at every gate that denies in this state, the skill, — easy to miss
 — a binder exporting a `privateRecordsDirectory` equivalent that applies the
 symlink/alias/permission/ownership checks, because the entry script resolves the
-records directory through it and never by hand-joining, and EIGHTH the sweep itself
+records directory through it and never by hand-joining, **and a `validateSessionId`
+equivalent**, which the report module now imports from the same binder and calls
+before anything derived from that id locates a file — a port that takes the entry
+script and the report against a binder without it gets a TypeError inside
+`buildRequest`, which is literally the failure this roster's closing sentence names, EIGHTH the sweep itself
 (`hooks/lib/review-evidence-sweep-v1.js`, plus the owner exports it consumes and the
 entry point's call to it) — a port that skips it re-mints the record and leaves every
-superseded lease wedging the store. A port that copies only
-the script gets a TypeError rendered as the wrong refusal. `zensu-codex`,
-`zensu-kiro` and `zensu-antigravity` were NOT included in this change.
+superseded lease wedging the store — and NINTH the third-fact channel: the
+`orphaned-incompatible-root` / `model-orphaned-incompatible-root` argv pair, both
+shell wrappers, and the THREE-way exit status those wrappers carry, without which a
+port gets a Stop hook telling a user whose worktree is gone that their chain state
+survived. That ninth entry sat in the prose ABOVE this enumeration for one review
+round on this branch while the count still read EIGHT — it was never released that
+way, and saying otherwise would overstate the history — which is the failure this
+file records elsewhere about its own rosters: a port works from the list, not from the paragraph, so an
+obligation named only in prose is an obligation that gets skipped. A port that
+copies only the script gets a TypeError rendered as the wrong refusal.
+`zensu-codex`, `zensu-kiro` and `zensu-antigravity` were NOT included in this change.
 
 **Two spellings of one root, and only Windows can tell them apart.** The sweep decides
 ownership with `record.plugin_root === executingPluginRoot`, a STRING compare. Leases carry
@@ -1009,20 +1228,51 @@ themselves deleted when the seam was taken. Getting that set wrong is its own ha
 opposite direction: a reader who believes an uncommitted constant is invisible will
 misread a pin that in fact grades it immediately. Commit first, then measure.
 
-**The Windows timeout for `test-versioned-plugin-upgrade.sh` is MEASURED, and the
-measurement is one sample.** `windows-shard-2` logged
-`PASSED versioned-plugin-upgrade (107613ms)` against the 900000 ms ceiling — roughly
-12%, so about seven eighths of the budget is unused. Taken at the head that carried
-Part C plus the AC-C11/AC-C11b/AC-C12 family.
+**The Windows timeout for `test-versioned-plugin-upgrade.sh` has ONE recorded
+sample, taken on the head that carries Part C2.** `windows-shard-2` logged
+`PASSED versioned-plugin-upgrade (152553ms)` against the 900000 ms ceiling — roughly
+17% — on the green run of commit `22dd388`. It is the first Windows wall clock taken
+after the seam work added two `node --test` drivers and the vanished-project-root
+work added Part C2: further armed sessions, a Stop invocation, capability-gate
+drives and tampered record copies, each spawning `node` or `bash`. It SUPERSEDES the
+previous sample of 107613 ms, which was taken at the head carrying Part C plus the
+AC-C11/AC-C11b/AC-C12 family; the two are 42% apart on content that grew, which is
+the growth this figure now prices in and the caveat below refuses to treat as a
+bound. Re-measure on the next green Windows run after a change that adds process
+runs, and replace the number and this provenance sentence together. Deliberately
+no row count here: this file's own rule two paragraphs up is that a hand-maintained
+number is what a driven loop cannot catch, and the count written into an earlier
+version of this paragraph had already drifted from the suite's own reported total
+before it was read a second time.
 
-**That sample is now STALE, and saying so is the point of recording it.** The work
-that took the seam added two further `node --test` drivers to this suite plus roughly
-450 lines of rows, and no Windows wall clock was taken afterwards. The 107613 ms
-figure describes a head that no longer exists. Do not budget against it; re-measure
-on the next green Windows run and replace the number and its provenance sentence
-together.
+**THAT SAMPLE NO LONGER COVERS THE FILE, and the headroom is UNMEASURED until a green
+Windows run replaces it.** The PR #272 review round added five checks to this suite —
+including one that COPIES the whole lib directory and executes the adoption entry point
+twice — and rewrote a case in `tests/structure/session-adopt-report-v1.test.js`, which
+this suite drives from the WORKING TREE, into a walk over the entire Unicode code space
+(`for (let cp = 0; cp <= 0x10ffff; cp += 1)`, three property regexes per code point).
+The 152553 ms figure predates all of it. `tests/session-control/run.sh` sits on the same
+`windows-shard-2` and grew too. The ceiling was deliberately NOT raised: raising it
+without a measurement trades a visible `TIMED_OUT` for a silently truncated tail, which
+is the failure this file records for two sibling suites. Say "unmeasured", not "17% of
+cap" — the percentage is arithmetic over a stale numerator. Same reason as ever, the
+caveat cannot live in the manifest: `tests/run-profile.js`'s `SUITE_KEYS` throws on any
+key outside `{id, runner, path, args, timeoutMs}` and aborts every Windows shard at
+manifest load.
 
-Read the original sample as ONE sample, not as a bound. The sibling
+**And the SUITE cap is the wrong ceiling to reason about alone — the SHARD envelope binds
+first.** `windows-shard-2` carries `profileTimeoutMs: 1800000` across eight entries, and
+`versioned-plugin-upgrade` is the LAST object in that array. `tests/run-profile.js`
+computes `effectiveTimeoutMs: Math.min(suite.timeoutMs, remaining)` where `remaining` is
+the shard budget minus everything already spent, so this suite receives the REMAINDER, not
+its own 900000. That is not hypothetical: this file records shard-3's eight suites summing
+to 1800072 ms, with its last entry granted 139971 ms of a 420000 ms cap and reporting
+`TIMED_OUT` — "It was not slow; it was not paid for." Shard-2's job duration is UNMEASURED
+here too, so a genuine overrun in this suite may surface as a profile abort rather than the
+suite `TIMED_OUT` its ceiling exists to make visible. Record both figures when the next
+green Windows run supplies them.
+
+Read this sample as ONE sample, not as a bound. The sibling
 `stop-enforcer-self-review-routing` note in this file records a 29% spread across
 two green runs of byte-identical content on the same runner class, so a single
 figure says nothing about the worst case — it says only that the suite is not
@@ -2670,17 +2920,27 @@ properties are easy to get wrong and cost the whole feature:
 
 Shell wrappers live in `hooks/lib/zensu-session.sh` (`zensu_session_unregistered`,
 `zensu_session_orphaned_project_root`, `..._model`, plus
-`zensu_session_incompatible_runtime` / `..._model`). The orphaned wrapper **prints the
-dead path on stdout** and the incompatible-runtime pair prints `recorded<TAB>executing`;
+`zensu_session_incompatible_runtime` / `..._model` and
+`zensu_session_incompatible_orphaned_root` / `..._model`). The orphaned wrapper **prints the
+dead path on stdout**, the incompatible-runtime pair prints `recorded<TAB>executing`, and the
+orphaned-root pair prints **the dead path** too;
 inside a PreToolUse gate stdout is the JSON decision channel, so a caller wanting the
 predicate alone must discard it explicitly, and a caller wanting the value must capture
-it into a variable before emitting anything.
+it into a variable before emitting anything. The orphaned-root pair additionally answers on
+THREE statuses — 0 with a path, **3** for a positive negative, 1 for an unavailable answer —
+because a caller that cannot tell the last two apart has to guess, and guessing wrong makes it
+assert a workflow document that is gone.
 
 **The third predicate is a DIAGNOSIS, never a third relaxation.** `zensu_session_incompatible_runtime`
 belongs to this roster only because every gate that consults the two above must decide what
-to do about it too — and the answer is the same everywhere: keep denying. A workflow document
-is still reachable in that state, so relaxing would waive a live guarantee rather than a dead
-one. What it changes is the MESSAGE: `zensu_emit_hook_session_deny` gained a fourth scope,
+to do about it too — and the answer is the same everywhere: keep denying. It matches TWO
+states, and they are unrelaxed for DIFFERENT reasons: with the recorded project root still
+present a workflow document is reachable, so relaxing would waive a live guarantee rather
+than a dead one; with that root gone the document is not reachable from this record, and what stands in for the
+guarantee is that the state has a real in-place repair — adoption, a user action leaving
+provenance — rather than a silent waiver. A consumer that says anything about the workflow
+document must ask `zensu_session_incompatible_orphaned_root` and branch. TWO do: the Stop hook, and
+`zensu-doctor.sh`, which asks the model twin and selects its fourth binding row from it. What the predicate changes is the MESSAGE: `zensu_emit_hook_session_deny` gained a fourth scope,
 `incompatible-runtime`, taking the two versions as positional arguments. FIVE gates can deny
 in that state: the four shell gates emit that scope, and `pre-reviewer-capability-gate.sh` —
 the `.*` matcher, where `isRecognizedInvocation` is false for every non-Bash tool — spells the
@@ -2707,7 +2967,9 @@ bypass entry would live in is the one that became unreachable — so a detection
 sidecar beside the immutable record, surfaced by `/zensu:doctor`) is still missing.
 
 **Port-relevant.** The core half (`validateContext`'s `allowMissingProjectRoot`,
-`readContextInternal`/`readOrphanedProjectRootContext`) lives in the cross-host
+`readContextInternal`/`readOrphanedProjectRootContext`, and `requireAbsentDirectoryPath`,
+which is the shape-without-existence rule both that reader and `buildContext`'s waived
+branch share) lives in the cross-host
 `session-control-core-v1.js`; the host half (binder mode, shell predicate, gate
 re-decisions, doctor row) is per host. A port that takes only the core delta keeps the
 worktree-deletion wedge; a port that takes neither drifts from this core.

@@ -17,13 +17,25 @@
 // name it; `model-orphaned-project-root` is the same question asked from
 // CLAUDE_CODE_SESSION_ID, for the model-side /zensu:doctor;
 // `incompatible-runtime` and its `model-` twin answer by exit status — 0 when
-// the record is intact and the SOLE disagreement is a declared-incompatible
-// executing lineage — and on a match print `recorded<TAB>executing`. None of the
-// five prints bindings: a session in any of those states must stay unbound. The
-// first three exist so the gates can tell the two RELAXABLE bind failures apart
-// from each other and from all the rest; the last two name a state that is NOT
-// relaxable — a workflow document is still reachable there — and exist so the
-// diagnosis stops being reported as "no record", which is false.
+// the record reads and the disagreement is a declared-incompatible executing
+// lineage, with or without a vanished project root — and on a match print
+// `recorded<TAB>executing`, two fields and never three;
+// `orphaned-incompatible-root` and its `model-` twin answer the third fact of
+// that state separately — 0 and the dead path when the lineage is incompatible
+// AND the recorded root is gone, **3** when it positively is not, and 1 for
+// every unavailable answer — so the two-field format above can stay exactly as
+// its five parsers read it. That three-way status is not decoration: a caller
+// that cannot tell a negative from an unavailable answer must guess, and the
+// wrong guess makes it assert the workflow document survived. None of the seven prints bindings: a
+// session in any of those states must stay unbound. The first three exist so the
+// gates can tell the two RELAXABLE bind failures apart from each other and from
+// all the rest; the last four name a state that is NOT relaxable — for a live
+// project root a workflow document is still reachable, and for a vanished one
+// the repair is adoption rather than a waiver — and exist so the diagnosis stops
+// being reported as "no record", which is false. The two halves of that state
+// carry DIFFERENT truths about the workflow document, which is why the third
+// fact has a hook-payload spelling and not only a model-side one: the Stop hook
+// must not tell a user whose worktree is gone that their chain state survived.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -177,22 +189,45 @@ function orphanedProjectRootSession(payload, environment = process.env) {
 // it was minted under, and runtimeLineageCompatible refuses because at major 0
 // the minor is the breaking axis.
 //
-// It is NOT a relaxable state. A workflow document IS reachable here, so
+// It is NOT a relaxable state, in EITHER of its two halves, but they are not
+// relaxed for the same reason and a consumer must not treat them as one. When
+// the recorded project root still exists a workflow document IS reachable, so
 // relaxing a write gate would waive a live guarantee — unlike the two states
-// above, where nothing is left to waive. What it buys is a NAME: the doctor row,
-// the Stop release and the deny text can state the real cause and both versions
-// instead of falling through to "no valid record", which is false and sends the
-// user hunting for a record that is sitting intact in plugin data.
+// above, where nothing is left to waive. When that root is GONE the document
+// is not reachable from this record, and what keeps the state unrelaxed is instead that it has a real
+// in-place repair: adoption, a deliberate user action that leaves provenance,
+// rather than a silent waiver. Any caller that says something about the
+// workflow document must read `orphanedProjectRoot` and branch; the Stop hook
+// does. What the predicate buys is a NAME: the doctor row, the Stop release and
+// the deny text can state the real cause and both versions instead of falling
+// through to "no valid record", which is false and sends the user hunting for a
+// record that is sitting intact in plugin data.
 //
-// Uses the STRICT reader on purpose. Every other check must pass, including the
-// recorded project root still existing — a vanished root is the OTHER diagnosis
-// and has its own predicate. Two disagreements are never one diagnosis, so a
-// record that is both orphaned and lineage-incompatible answers null here and is
-// classified by the orphan predicate, which is the heavier remedy.
+// It reads STRICTLY FIRST and falls back to the orphan reader only when the
+// strict read throws. The fallback cannot widen the diagnosis, because
+// readOrphanedProjectRootContext waives exactly one check and REFUSES a root
+// that still exists: a record it returns disagrees about the project root and
+// nothing else. Every other disagreement still throws in both readers and still
+// answers null here.
 //
-// Returns { recorded, executing } — both declared versions — or null when this
-// is not that state. Any additional disagreement, any unreadable or ambiguous
-// state, and any exception answers null, so the caller keeps failing closed.
+// The combined state — vanished project root AND incompatible lineage — is
+// therefore reported HERE rather than by the orphan predicate, which answers
+// null for it because it re-applies servesRecordedRuntime. Before that fallback
+// existed the combination fell through to "no valid record", which is false and
+// is exactly the wording this diagnosis exists to remove; the state is also
+// adoptable, so a deny that told the user to start a fresh session contradicted
+// the repair /zensu:adopt-session offers. Reporting it here is what gives all
+// five deny sites the in-place remedy without a sixth predicate.
+//
+// This does NOT relax anything: the state stays unbound and every gate keeps
+// denying. RELAXING a gate for a vanished root is still the orphan predicate's
+// job alone, and it still requires a compatible lineage.
+//
+// Returns { recorded, executing, orphanedProjectRoot } — both declared versions
+// plus the dead project root, or null for that third field when the recorded
+// root still exists — or null when this is not that state. Any additional
+// disagreement, any unreadable or ambiguous state, and any exception answers
+// null, so the caller keeps failing closed.
 function resolveIncompatibleRuntime(payload, environment = process.env) {
   try {
     validateSessionId(payload.session_id);
@@ -203,11 +238,22 @@ function resolveIncompatibleRuntime(payload, environment = process.env) {
     const pluginData = canonicalDirectory(environment.CLAUDE_PLUGIN_DATA, 'CLAUDE_PLUGIN_DATA', true);
     const recordsDir = privateRecordsDirectory(pluginData, true);
     if (recordsDir === null) return null;
-    const context = core.readContext({
+    const readerOptions = {
       recordsDir,
       sessionId: payload.session_id,
       expectedHost: 'claude',
-    });
+    };
+    let context;
+    let orphanedProjectRoot = null;
+    try {
+      context = core.readContext(readerOptions);
+    } catch {
+      // Only reached when the strict read failed. If THIS read also throws the
+      // whole function answers null through the outer catch, so a record that
+      // disagrees about anything else is never reclassified as this state.
+      context = core.readOrphanedProjectRootContext(readerOptions);
+      orphanedProjectRoot = context.project_root;
+    }
     if (context.plugin_data !== pluginData) return null;
     // The disagreement must be the lineage and nothing else: if this root DOES
     // serve the record, the bind failed for some other reason and naming the
@@ -217,15 +263,12 @@ function resolveIncompatibleRuntime(payload, environment = process.env) {
     // A root that declares nothing readable is not a lineage claim — it is a
     // root that cannot be identified — so it is not this state either.
     if (typeof executing !== 'string' || executing === '') return null;
-    return { recorded: context.plugin_version, executing };
+    return { recorded: context.plugin_version, executing, orphanedProjectRoot };
   } catch {
     return null;
   }
 }
 
-function incompatibleRuntimeSession(payload, environment = process.env) {
-  return resolveIncompatibleRuntime(payload, environment) !== null;
-}
 
 function validateSessionId(sessionId) {
   if (
@@ -366,9 +409,10 @@ function main() {
     return;
   }
   if (process.argv[2] === 'incompatible-runtime' || process.argv[2] === 'model-incompatible-runtime') {
-    // Exit 0 only when the record is intact and the SOLE disagreement is that
-    // the executing runtime declares an incompatible lineage, and on a match
-    // print `recorded<TAB>executing` so the caller can name both versions
+    // Exit 0 when the record READS and the disagreement is that the executing
+    // runtime declares an incompatible lineage — with or WITHOUT a vanished
+    // project root, which is the third fact the mode below answers — and on a
+    // match print `recorded<TAB>executing` so the caller can name both versions
     // instead of reporting an anonymous mismatch. The two spellings differ only
     // in where the session id comes from, exactly as the orphan pair does.
     // Never any bindings: this state stays unbound until it is adopted.
@@ -387,7 +431,73 @@ function main() {
       process.exitCode = 1;
       return;
     }
+    // TWO fields, never three. Five shell parsers read the executing half as
+    // `${V##*$'\t'}`, which takes the LAST field, so appending anything here
+    // would silently redirect all five rather than fail. The dead project root
+    // that resolveIncompatibleRuntime now also reports travels on its own mode
+    // below instead.
     process.stdout.write(`${versions.recorded}\t${versions.executing}\n`);
+    return;
+  }
+  if (process.argv[2] === 'orphaned-incompatible-root' || process.argv[2] === 'model-orphaned-incompatible-root') {
+    // The third fact of the combined state, asked separately so the two-field
+    // wire format above can stay exactly as its five parsers read it. Exit 0 and
+    // print the dead project root only when the record is lineage-incompatible
+    // AND its recorded project root is gone; exit **3** for a plain incompatible
+    // lineage whose root still exists, and 1 only when the question could not be
+    // answered at all. Three statuses, never two: see the split below.
+    //
+    // BOTH spellings exist, and the hook-payload one is not decoration. The Stop
+    // hook is a real consumer: its incompatible-lineage release tells the user
+    // the workflow document survives and that the next Stop enforces the chain
+    // again, and both are FALSE once the recorded root is gone — the document
+    // is not reachable from this record, and the adoption re-mints around the same absent anchor, so
+    // every later Stop takes the orphan release instead. It has to be able to
+    // tell the two apart. The two spellings differ only in where the session id
+    // comes from, exactly as the orphan and lineage pairs above do.
+    const mode = process.argv[2];
+    if (process.argv.length !== 3) fail(`${mode} does not accept arguments`);
+    let sessionPayload;
+    if (mode === 'model-orphaned-incompatible-root') {
+      const hostSessionId = process.env.CLAUDE_CODE_SESSION_ID;
+      validateSessionId(hostSessionId);
+      sessionPayload = { session_id: hostSessionId };
+    } else {
+      sessionPayload = readPayload();
+    }
+    const state = resolveIncompatibleRuntime(sessionPayload);
+    if (state === null) {
+      // UNAVAILABLE, not a negative. The property that licenses this arm is
+      // STRUCTURAL, not a census: NO `return null` in
+      // `resolveIncompatibleRuntime` establishes that the recorded project root
+      // still exists — not the plugin-root mismatch, the absent records
+      // directory, the plugin_data mismatch, the `servesRecordedRuntime` arm
+      // (a plain orphan whose lineage is compatible), the unidentifiable
+      // executing version, nor the outer catch that swallows every fail()
+      // including an unreadable record. Stated as the property rather than as a
+      // count because a hand-maintained count is what goes stale: an earlier
+      // wording said "five sites" while listing five of the six, and the omitted
+      // one was the arm a future editor is most likely to reach for. So none
+      // of them may claim the positive negative. Folding this into the arm below
+      // is exactly what this channel exists to prevent, and it is the shape the
+      // first attempt shipped: the Stop hook then reads 3, takes the deferral
+      // message, and tells the user their workflow document survived on nothing
+      // but a probe that failed.
+      process.exitCode = 1;
+      return;
+    }
+    if (state.orphanedProjectRoot === null) {
+      // THREE, not 1, and the distinction is load-bearing for the Stop hook. A
+      // caller that cannot tell "the recorded root is still there" from "the
+      // probe could not answer" has to pick one of them, and picking the first
+      // makes it assert the workflow document survives on nothing but an
+      // inferred negative. `fail()` and every other error path exit 1, so 3 is a
+      // POSITIVE answer — the record read, the lineage is incompatible, and the
+      // recorded root is still on disk — and 1 is an unavailable one.
+      process.exitCode = 3;
+      return;
+    }
+    process.stdout.write(`${state.orphanedProjectRoot}\n`);
     return;
   }
   if (process.argv[2] === 'model-bind') {
@@ -423,8 +533,13 @@ if (require.main === module) {
 }
 
 module.exports = {
-  incompatibleRuntimeSession,
   privateRecordsDirectory,
+  // Exported so the ADOPTION path can apply the same rule every argv mode in this
+  // file already applies. It was the one entry point that accepted a session id
+  // straight from the environment without it, which made a DERIVED identifier — an
+  // `scv1_<64hex>`, i.e. the name of a record file in the store — an accepted
+  // identity there while the sibling modes refuse exactly that shape.
+  validateSessionId,
   orphanedProjectRootSession,
   resolveFreshHookProject,
   resolveHookSession,
