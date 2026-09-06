@@ -2,18 +2,66 @@
 
 `/zensu:verify-feature` proves an already-built feature in a real browser and reports what
 it observed. Under `/zensu:autopilot` its preconditions are prepared for you. Run on its own,
-the skill fails closed with `VERIFY-FEATURE-VERDICT: PARTIAL` until two things exist
-**before the session starts**:
+it has two ways to authorize the browser:
 
-1. a **navigation policy** in the environment that launches Claude Code, and
-2. in local mode, a **runtime recipe** the skill can accept, or a repository the bundled
-   Zensu monorepo adapter recognizes.
+- **Consent mode** (the default when nothing is configured): the first navigation to each
+  loopback origin asks you through Claude Code's own permission prompt, in the CLI and in the
+  desktop app alike, with no environment variable and no restart. It covers local targets
+  only. Section 0 describes it.
+- **Policy mode**: a **navigation policy** exported by the environment that launches Claude
+  Code. It is the only channel a model cannot write, it is required for remote targets and
+  for unattended runs, and it was the only way to run the skill before consent mode existed.
+  Sections 1 to 4 describe it.
 
-Neither can be created from inside the session. This page shows the launch command, the
-local-mode rules, a minimal recipe for an ordinary project, and the remote-mode path. The
-authoritative contracts stay in `skills/verify-feature/SKILL.md` and in
-`skills/autopilot/rules/config.md` § `validate.navigationBroker`; this page does not replace
-them.
+In local mode the skill also needs a **runtime recipe** it can accept, or a repository the
+bundled Zensu monorepo adapter recognizes, or an application you already run
+(`--attach`). `/zensu:verify-feature --setup` writes the recipe with you. The authoritative
+contracts stay in `skills/verify-feature/SKILL.md`, `skills/verify-feature/rules/setup.md`
+and `skills/autopilot/rules/config.md` § `validate.navigationBroker`; this page does not
+replace them.
+
+## 0. Consent mode
+
+When `ZENSU_VERIFY_NAVIGATION_POLICY_V1` is absent from the environment that launched Claude
+Code, the Playwright broker starts in consent mode, provided the plugin registers the consent
+hook pair on the broker's navigation tools (`/zensu:doctor` reports this as
+`verify-feature: consent mode ready`). Then:
+
+- The first `browser_navigate` to each new origin opens a permission prompt naming the origin,
+  the route it starts with, the routes the run declares synthetic-safe and the consequence:
+  answering Yes lets the model open and read any page on that origin, screenshots included,
+  for the rest of the session. The model cannot answer that prompt.
+- Approved origins are remembered for the session in
+  `.zensu/state/verify-consent-<session-key>.json`; every further route on an approved origin
+  passes without a second prompt. The report's `Consent` block lists every record.
+- The broker keeps a hard floor whatever you answer: literal loopback origins only
+  (`127.0.0.1`, `[::1]`; never `localhost`), no credentials, no query or fragment in a
+  navigation, and sub-requests, WebSockets and redirects only to origins the session already
+  opened.
+- A remote target is refused in consent mode, by the hook and by the broker, because the
+  browser's DNS pins are fixed at launch. Remote verification needs the policy of section 4.
+- The port no longer has to be known before launch: the run reserves a free loopback port
+  through `scripts/verify-free-port.js`, hands it to the recipe as `ZENSU_VERIFY_PORT`, and
+  the prompt shows the resulting origin.
+
+What consent mode does not do: the consent memory is a file the session can write, so it is
+a control, not a proof — the floor bounds what a forged record could reach to other loopback
+services. With the policy present the hook stays silent and the broker enforces the policy
+exactly as in the sections below.
+
+### Guided setup and attach mode
+
+`/zensu:verify-feature --setup` detects the stack from tracked files, proposes `up`,
+`ready`, a port variable and the synthetic-safe routes with the evidence file for each
+proposal, asks one confirmation question, and writes `.zensu/runtime.yaml`
+(`.zensu/autopilot.yaml` keeps working as an alias and is tried second). It never invents a
+value it has no evidence for, never edits other project files, and never commits unasked.
+Add `--print-policy` to render the policy JSON for the recipe's origin and routes, for CI or
+for a host that keeps the policy in its launch environment.
+
+`--attach=http://127.0.0.1:<port>` verifies an application you already run: nothing is
+booted or torn down, and the report says whether the listening process could be proven to
+serve this worktree (its working directory equals the worktree root) or not.
 
 ## 1. The navigation policy is read when Claude Code starts
 
@@ -120,13 +168,24 @@ one is needed, happens by you typing into that window.
 For local mode the skill resolves the runtime in this order and stops with PARTIAL when
 nothing fits:
 
-1. `--config=<path>`, else `.zensu/autopilot.yaml`, inspected as a **candidate** against the
-   rules below;
+1. `--config=<path>`, else `.zensu/runtime.yaml`, else `.zensu/autopilot.yaml`, inspected as a
+   **candidate** against the rules below;
 2. the bundled Zensu monorepo adapter (`skills/verify-feature/rules/zensu-monorepo.md`), when
    the repository carries `backend/cmd/zensu`, `backend/Makefile`, `frontend/package.json`,
    and `frontend/pnpm-lock.yaml`; it needs macOS, Linux, or WSL;
-3. otherwise PARTIAL, listing the missing startup, readiness, base-URL, auth, fixture,
+3. in an interactive session, the guided setup: ONE `AskUserQuestion` offering to write
+   `.zensu/runtime.yaml` with the user, after which resolution restarts at step 1;
+4. otherwise PARTIAL, listing the missing startup, readiness, base-URL, auth, fixture,
    isolation, and teardown facts. The skill never invents commands.
+
+The design decisions behind consent mode, its residuals and the alternatives that were weighed
+are recorded in [verify-feature-consent-spec.md](verify-feature-consent-spec.md).
+
+Steps 1 and 2 read the recipe the CONSENT gate reads too, and the gate resolves it in exactly one
+place: `resolveRecipeFile` in `hooks/lib/verify-consent-v1.js`, which prefers `.zensu/runtime.yaml`
+over `.zensu/autopilot.yaml` and skips a symlinked candidate. `--config=<path>` steers the SKILL
+and is not consulted by the gate, so a recipe passed that way declares no synthetic-safe routes to
+the consent prompt.
 
 A candidate recipe is accepted only when all of this is explicit and consistent:
 
@@ -234,7 +293,10 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| PARTIAL before any browser call; reason `navigation policy mode does not match` | policy not exported by the launching shell, or its `mode` disagrees with `--mode` | exit Claude Code and launch it with the policy |
+| PARTIAL before any browser call; reason `navigation policy mode does not match` | a policy is exported but its `mode` disagrees with `--mode`, or the consent hook is not registered so an absent policy still means deny-everything (`/zensu:doctor` shows `verify-feature: cannot start`) | fix the policy's mode, or reinstall the plugin so consent mode is available |
+| PARTIAL; reason `consent mode admits literal loopback origins only` | `--mode=remote` or a remote base URL without a launch-time policy | launch Claude Code with the remote policy of section 4 |
+| the permission prompt was answered No | you declined the origin | re-run and answer Yes. Declaring routes in the recipe does NOT help: consent is per origin, and the recipe's declared routes are prompt context only |
+| PARTIAL; `consent mode ready, no runtime recipe` in `/zensu:doctor` | nothing tells the skill how to start the app | run `/zensu:verify-feature --setup`, or pass `--attach=<loopback-origin>` |
 | PARTIAL; reason names `loopback-IP origins only` | local origin spelled with `localhost` | use `127.0.0.1` in the policy, the recipe, and the `baseUrlCommand` output |
 | PARTIAL; the `baseUrlCommand` output differs from the policy origin | the app bound another port, or the printed URL carries a trailing slash or a path | bind the port strictly; print the bare origin |
 | PARTIAL; the recipe was rejected | one of the acceptance rules above is not met | the report names the missing fact; fix the recipe |

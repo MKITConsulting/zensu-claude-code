@@ -13,10 +13,10 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (147 = 140 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 140 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 147). **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 139 against 140 CI-classified suites, so one CI
+reconciled to that manifest (148 = 141 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 141 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 148). **§3 is NOT fully reconciled to it**, and the residual is stated rather than
+asserted away: its eleven CI group headers sum to 140 against 141 CI-classified suites, so one CI
 suite appears in no §3 group. `main` recorded that suite as `test-session-trail-lineage.sh`; this
 merge did not re-derive the NAME, because §3 lists suites in prose rather than by filename and a
 wrong name in a group is worse than none. The gap predates both the plugin-data guard, filed under
@@ -161,10 +161,10 @@ generation- and ticket-bound termination, the single planning gate, review-budge
 rearm/retirement, the read-only SessionStart resume hook, and a composed full-lifecycle
 walk.
 
-### Bash gates, witness & secrets (9)
+### Bash gates, witness & secrets (10)
 `artifact-redaction` · `bash-source-write-gate` · `bash-zensu-gate` · `bypass-ledger` ·
 `plugin-data-guard` · `post-bash-witness` · `secret-scan-gate` · `skill-workflow-markers` ·
-`witness-scenario-assertions`
+`verify-consent` · `witness-scenario-assertions`
 
 Covers the PreToolUse(Bash) source-write gate incl. rule (C) git-repo escape
 (183 probe cases + a 30-case pure unit suite), the `zensu <noun> <verb>` write gate,
@@ -179,7 +179,11 @@ control in the other direction — a case-variant store prefix, a two-hop symlin
 and no-escape assertions, a payload-declared non-main principal whose premise consults
 `claude-principal-v1.js` itself, a second-path-field row, six faults covered — four asserting their own reason literal and two asserting the documented
 silence, the exit-2 plugin-root refusal, two source-absence checks with controls, and a
-two-group matcher shape compared against the module's exported tool set), and the writer-side
+two-group matcher shape compared against the module's exported tool set), the browser consent
+gate (79 checks: the hook pair driven against a real Session Control session, the shared
+navigation floor, the loopback bound, the session memory and its containment, the per-origin
+consent rule a later recipe cannot widen, the one recipe resolver both hooks and the
+doctor row consume, and the skill wording), and the writer-side
 redaction that keeps `.zensu/plans` and `.zensu/logs` artifacts free of
 absolute developer paths (~100 assertions).
 
@@ -286,7 +290,10 @@ that suite's failure.
 | `reviewer-spawn-denial-v1.test.js` | 29 | `test-stop-enforcer-self-review-routing.sh` | host-refused reviewer spawn: structural `tool_use_id` keying, the host error flag, the marker prefix, tail/line bounds, degrade-to-none |
 | `plan-payload-v1.test.js` | 20 | `test-plan-payload-fallback.sh` | plan-source precedence table, hardened plan-file reader refusals, O_NOFOLLOW-unavailable fallback |
 | `zensu-doctor-invocation.test.js` | 24 | `test-versioned-plugin-upgrade.sh` | `/zensu:doctor` invocation allowlist — driven from that suite, which binds it as `RECOGNIZER_UNIT` and grades it against a registered-case floor; it has no `run-all.sh` entry of its own, because discovery is `test-*.sh` only |
-| `playwright-mcp-proxy.test.js` | 16 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy |
+| `playwright-mcp-proxy.test.js` | 20 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy, including its three start modes (policy, consent, deny) and the consent-mode approval boundary |
+| `verify-consent-v1.test.js` | 16 | `test-verify-consent.sh` (V7) | browser consent decision: matcher and tool spellings, ask/allow/deny ladder, per-origin consent, loopback-only bound, memory shape and containment refusals, the foreign-server note's attachment rule, stamp validity independent of route, the shared memory read's containment rule and its not-configured case, recipe route extraction, pre/post CLI |
+| `verify-navigation-floor-v1.test.js` | 6 | `test-verify-consent.sh` (V6) | the one navigation floor the broker and the consent hook share: loopback and public-address classes, URL refusals, remote host resolution |
+| `verify-free-port.test.js` | 3 | `test-verify-consent.sh` (V7b) | free loopback port helper: argument parsing, occupied and excluded ports, CLI contract |
 | `release-run-step.test.js` | 9 | `test-immutable-marketplace-release.sh` | the release step's `run_step` wrapper, EXECUTED: the annotation on failure, the full stderr replay, exit-status propagation, the `--quiet` sink applying to the wrapped command and never to the annotation, the no-stderr fallback, `head -1` bounding the annotation to one line, and temp-file cleanup under `RUNNER_TEMP`. Driven first in that suite, because it is the wrapper's only executable coverage anywhere and the suite's other pins are source greps that stay green against a present-but-broken wrapper |
 | `zen-anchor-assertions.test.js` | 7 | `test-zen-mode.sh` (Z29) | zen-mode eval GRADERS: every javascript assertion body compiled, and a pinned pass/fail vector for the two anchor scenarios plus the safety carve-out |
 | `verify-feature-transcript-check.test.js` | 14 | `test-promptfoo-verify-feature.sh` | transcript assertion contract |

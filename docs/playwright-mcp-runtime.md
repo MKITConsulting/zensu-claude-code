@@ -37,12 +37,21 @@ require network access.
 ## Command modes
 
 - The normal MCP server start materializes a private generation and runs the
-  checked-in capability/navigation broker against it.
+  checked-in capability/navigation broker against it. The broker starts in one of
+  three modes, decided once at that moment: `policy` when
+  `ZENSU_VERIFY_NAVIGATION_POLICY_V1` parses, `consent` when it is absent and the
+  broker's own `hooks/hooks.json` registers `pre-browser-navigation-consent.sh` on the
+  navigation matcher (loopback origins only, each approved by the user through the
+  host's permission prompt — see [Browser Consent Gate](gates.md#browser-consent-gate)),
+  and `deny` otherwise.
 - `install-browser` uses the same isolated generation before delegating to the
   pinned CLI. Browser installation remains an explicit, approved operation;
   npm package scripts stay disabled.
 - `--check-policy` executes only the checked-in broker's policy parser. It never
-  loads the upstream npm graph and therefore needs no runtime generation.
+  loads the upstream npm graph and therefore needs no runtime generation. In
+  consent mode it prints `consent` on stdout and exits `0` for a literal-loopback
+  origin and route, and refuses a remote target with the reason that names the
+  parent-environment policy.
 
 The production launcher has no runtime-directory override or test passthrough.
 Tests exercise an exact copied launcher inside a disposable fixture rather than

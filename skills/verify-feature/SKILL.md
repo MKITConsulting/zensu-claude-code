@@ -38,7 +38,10 @@ Slash form: `/zensu:verify-feature [<feature>] [--flag=value ...]`.
 | `--route=<path>` | no | derive | Initial route. Derive only when the changed router or supplied criteria make it unambiguous. |
 | `--base-url=<url>` | remote only | config | Preview/staging URL. Never silently default to production. |
 | `--base=<branch>` | no | repository default branch | Base used to ground the scenario matrix in the change. |
-| `--config=<path>` | no | `.zensu/autopilot.yaml` | Reuse the project runtime/auth recipe when present. |
+| `--config=<path>` | no | `.zensu/runtime.yaml`, else `.zensu/autopilot.yaml` | Reuse the project runtime/auth recipe when present. |
+| `--attach=<origin>` | local only | none | Verify an app the user already runs on a literal loopback origin. Boots nothing, tears nothing down, and reports whether that process could be proven to serve this worktree. |
+| `--setup` | no | off | Run the guided setup from `rules/setup.md` and write `.zensu/runtime.yaml`, then stop. Offered automatically when no recipe resolves. |
+| `--print-policy` | with `--setup` | off | Render the parent-environment policy JSON for the recipe's origin and routes, for unattended runs and for hosts that keep the policy in their launch environment. |
 
 Ask one batched question for missing information that cannot be derived safely. In
 particular, ask for the remote base URL and for genuinely ambiguous acceptance criteria.
@@ -122,9 +125,12 @@ For a `remote` URL that passed validation, print this warning before any subsequ
 Do not imply that a remote PASS proves the worktree diff unless the deployment identity is
 confirmed.
 
-Before any browser call, require the plugin's version-1 navigation broker declared by
-`validate.navigationBroker` and configured in Claude's parent environment as
-`ZENSU_VERIFY_NAVIGATION_POLICY_V1`. Run
+Before any browser call, resolve which of the two modes this session is in, and require the
+plugin's version-1 navigation broker in both. **Policy mode** is a
+`ZENSU_VERIFY_NAVIGATION_POLICY_V1` configured in Claude's parent environment, declared by
+`validate.navigationBroker`. **Consent mode** is the absence of that variable, and it is the
+ordinary case for a user who has not configured anything; the preflight below prints which one
+applies. Run
 `bash "${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh" --check-policy <local|remote> "<validated-origin>" "<exact-page-route>" declared-safe`
 as a standalone preflight for every route. The parent JSON must bind each exact page route to
 its validated origin with the `declared-safe` mode described in the config contract. Contract
@@ -136,8 +142,28 @@ only non-loopback HTTPS, rejects RFC1918, CGNAT, link-local/metadata, loopback, 
 multicast/reserved, IPv4-mapped IPv6, ULA, and non-global IPv6 addresses, rejects mixed public
 and non-public DNS answers, and pins each hostname to an approved public address in Chromium to
 prevent DNS rebinding. Local mode accepts literal loopback-IP origins only. Raw Playwright navigation
-followed by a final-URL check is too late. A missing, invalid, mismatched, or unapproved parent
-policy stops before browser use with PARTIAL; never try to configure it from a child Bash call.
+followed by a final-URL check is too late. **In POLICY mode** a policy that is invalid, mismatched
+or does not approve the target stops before browser use with PARTIAL. **In CONSENT mode** there is
+no policy to be missing and the run continues under the paragraph below; only a REMOTE target
+stops with PARTIAL there, because remote verification keeps the policy. Never try to configure the
+variable from a child Bash call in either mode — the broker reads it once at start.
+
+**Consent mode (no parent policy).** When the preflight prints `consent` on stdout and exits
+`0`, no policy is present in the parent environment and the broker started in consent mode:
+the hook pair `pre-browser-navigation-consent.sh` / `post-browser-navigation-consent.sh` is
+registered on the broker's navigation tools, so the FIRST `browser_navigate` to each new origin
+opens the host's own permission prompt to the user. Consent is per ORIGIN: once the user
+approves an origin, every further route on it proceeds without a prompt. Answering that prompt is the user's action; never answer it on their behalf,
+never work around a refusal, and treat a refused prompt as PARTIAL for that origin. The broker
+keeps a hard floor in this mode: literal loopback origins only, no credentials, no query or
+fragment in a navigation, sub-requests and redirects only to origins the session already
+opened. A remote target is refused in consent mode by both the hook and the broker; remote
+verification keeps the parent policy. Consent mode remembers each approved ORIGIN for
+this session in `.zensu/state/verify-consent-<session-key>.json` — a record names the route that
+was visited, but the route steers no later decision — and the report lists every record in its
+`Consent` block. **Read that file for the report and never write, edit or delete it.** A record
+placed there skips the human's permission prompt for that origin, so writing one grants yourself
+the consent this gate exists to ask for. Only the PostToolUse hook writes it.
 
 ## Phase 1 — Build the evidence matrix (mandatory)
 
@@ -187,9 +213,13 @@ Set `ROOT="${CLAUDE_PLUGIN_ROOT}"` once before loading a bundled rule. Whenever
 concrete absolute `ROOT`; supporting files loaded through `Read` do not receive
 Claude's native placeholder substitution.
 
-1. Inspect the explicit `--config` path or `.zensu/autopilot.yaml` as a **candidate**, using
-   `../autopilot/rules/config.md`. An autopilot recipe is not automatically safe for live
-   verification. Accept it only when all of these facts are explicit and internally
+0. When `--attach=<origin>` was given, skip runtime preparation entirely: see "Attach mode"
+   below. When `--setup` was given, run `rules/setup.md` and stop after the recipe is written.
+1. Inspect the explicit `--config` path, else `.zensu/runtime.yaml`, else `.zensu/autopilot.yaml`,
+   as a **candidate**, using `../autopilot/rules/config.md` (the two file names share one
+   schema; `runtime.yaml` is the verify-owned spelling that setup writes, and it is tried first).
+   Record which file was selected in the report. An autopilot recipe is not automatically safe
+   for live verification. Accept it only when all of these facts are explicit and internally
    consistent:
    - every service has startup and readiness commands;
    - every started resource has an explicit scoped `down` command, or remains a foreground
@@ -199,10 +229,13 @@ Claude's native placeholder substitution.
    - application and authentication base URLs, fixture setup, and cleanup refer to the same
      run-specific runtime;
    - the browser base URL is either a run-specific literal or comes from a checked-in
-     `validate.baseUrlCommand` executed only after readiness; its output must exactly match an
-     origin already authorized in the immutable parent broker policy. Validate it again before
-     navigating. A command that dynamically selects a previously unknown port is incompatible
-     with the current session and requires a discovery run followed by a policy-configured restart;
+     `validate.baseUrlCommand` executed only after readiness. Validate it again before
+     navigating. **In POLICY mode** its output must exactly match an origin already authorized in
+     the immutable parent broker policy, and a command that dynamically selects a previously
+     unknown port is incompatible with that session: it requires a discovery run followed by a
+     policy-configured restart. **In CONSENT mode** a run-specific loopback port is the EXPECTED
+     shape rather than a defect — nothing is pre-authorized, and the first navigation to it asks
+     the user through the permission prompt;
    Reject fixed-port Compose stacks, shared resource names, daemonized services without
    ownership, or recipes whose teardown scope is ambiguous. Record why the candidate was
    rejected; do not execute any part of it.
@@ -210,8 +243,20 @@ Claude's native placeholder substitution.
    - the accepted candidate recipe;
    - when the repository matches the Zensu monorepo markers, the bundled
      `rules/zensu-monorepo.md` adapter (including when an autopilot candidate was rejected);
-   - otherwise stop with PARTIAL and list the missing startup, readiness, base URL, auth,
-     fixture, isolation, and teardown facts. Never invent commands.
+   - otherwise, in an interactive session, offer the guided setup with ONE `AskUserQuestion`
+     ("No runtime recipe found. Set one up now?"); on yes run `rules/setup.md`, then resume at
+     step 1 with the recipe it wrote. On no, or when no human can answer, stop with PARTIAL and
+     list the missing startup, readiness, base URL, auth, fixture, isolation, and teardown
+     facts. Never invent commands.
+   In consent mode the ACCEPTED-CANDIDATE branch takes its run-specific port from
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-free-port.js" --from 5173`, exported to the
+   recipe's commands as `ZENSU_VERIFY_PORT`; the browser base URL is then
+   `http://127.0.0.1:$ZENSU_VERIFY_PORT`, and the first navigation to it asks the user. The
+   MONOREPO-ADAPTER branch does not repeat that selection: it takes its origin from
+   `bash "$ZENSU_RUNTIME_CONTROLLER" planned-origin …`, which picks the port once and persists it
+   for the run, so a reused run directory keeps the port it already recorded. Never derive the
+   adapter's origin from a second free-port call — the two would diverge on a reused run
+   directory and on two concurrent runs.
 3. Before starting a service, register its scoped cleanup. A daemonized or shared service
    without scoped teardown is a blocker.
    Record each configured `down` command verbatim. Execute that command later as its own
@@ -221,6 +266,20 @@ Claude's native placeholder substitution.
    readiness evidence.
 5. Seed only data required by the matrix, through repository-owned fixtures, typed tools, or
    the UI. Never use a hand-written raw API payload when the repository has a typed path.
+
+### Attach mode
+
+`--attach=<origin>` verifies an application the user already runs. The origin must pass the
+same literal-loopback rule as local mode (`http://127.0.0.1:<port>` or another loopback IP;
+never `localhost`). Boot nothing, seed nothing through the runtime, register no `down`
+command, and never stop, signal, or restart the attached process. Establish identity before
+the matrix: resolve the listening process with
+`lsof -nP -iTCP:<port> -sTCP:LISTEN -t` where `lsof` exists, read its working directory with
+`lsof -a -p <pid> -d cwd -Fn`, and compare it with the physical worktree root. Report
+"worktree identity proven" only on an exact match; report "attached runtime, identity unproven"
+otherwise, which caps the verdict at PARTIAL because the worktree claim of local mode is then
+unestablished. Consent applies unchanged: the first navigation to the attached origin asks the
+user.
 
 ### Remote mode
 
@@ -308,6 +367,11 @@ Use this format:
 - **Visual:** what each screenshot actually showed about layout, clipping, overlap,
   responsiveness, styling, and legibility. “Screenshot taken” is not an observation.
 - **Reproduction:** exact steps and captured signal for each failure.
+- **Consent:** one line per `(origin, route, decidedBy)` record the session's consent memory
+  holds after the run, where `decidedBy` is `prompt` (the user answered the host's prompt),
+  `memory` (any route on an origin the user had already approved — the route is never tested),
+  or `policy` (a parent-environment policy authorized it). In consent mode also name the recipe
+  that supplied the declared routes shown IN the prompt, and every prompt the user refused.
 - **Limitations:** environment, fixture, auth, or deployment-identity gaps.
 
 Verdict rules:

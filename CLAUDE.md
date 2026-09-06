@@ -653,12 +653,24 @@ raising this number buys nothing while the shard is that close to its own ceilin
 
 The suite is spawn-dominated — nearly every check spawns a `bash` plus a `node`,
 it builds five fixture plugin trees, and it now also drives
-`tests/structure/rule-block-v1.test.js` as its B0 driver — and `windows-shard-4`
-also carries `plan-payload-path-transport`, which this file records at a measured
-714 s. Growth here therefore has to be paid for by moving a suite OFF that shard,
-not by raising a number. If the shard starts reporting an abort, the tail of
-whichever suite ran last went unverified regardless of how many checks passed
-before it.
+`tests/structure/rule-block-v1.test.js` as its B0 driver. Growth here therefore has
+to be paid for by moving a suite OFF that shard, not by raising a number. If the
+shard starts reporting an abort, the tail of whichever suite ran last went
+unverified regardless of how many checks passed before it.
+
+**`plan-payload-path-transport` is NO LONGER a neighbour, and the prediction above
+came true before it moved.** This paragraph used to name it as the second big suite
+on `windows-shard-4` at a measured 714 s. On run 33968034396 it measured **874281 ms**
+— a 22% swing over that figure — and the shard's first three suites summed to
+1718167 ms of the 1800000 ms envelope, so `tdd-state-junction-safety` received the
+remaining 81927 ms against its own 180000 ms cap and reported `TIMED_OUT`. The suite
+was not slow; it was not paid for. `plan-payload-path-transport` moved to
+`windows-shard-8`, which the contract test's own note measures at roughly 292 s of
+work; moving the 180000 ms suite instead would have left this shard at 1718167 ms,
+which is a budget set AT the measurement. Shard 4 now holds
+`best-solution-first`, `deferred-claim-adoption` and `tdd-state-junction-safety`, near
+1024 s. Re-measure both shards on the next green Windows run and replace these
+figures; the headroom sentence above still describes the shard as it was.
 
 The suite-level wall clock on Windows is still **unmeasured**; only the shard is.
 The note lives here because `tests/run-profile.js`'s `SUITE_KEYS` throws on any key
@@ -5791,3 +5803,135 @@ A `gh pr list --head <branch>` check is not sufficient — it does not distingui
 This applies to AI agents and humans alike. The `/create-pr` slash command's "PR already exists for this branch" guard does NOT cover the merged-branch case. "I just rebased ten minutes ago" is not a substitute for the check — re-run it every push.
 
 **Every plugin-opened PR body carries an Acceptance Criteria table.** The shared, repo-overridable template is `templates/pr-body.md` (resolution: `.zensu/templates/pr-body.md` at the working-tree toplevel, else `${CLAUDE_PLUGIN_ROOT}/templates/pr-body.md`). Its `## Acceptance criteria` table takes one row per stable `AC-###`/`FR-###` id read from the feature's TDD plan `## Requirements` table via `hooks/lib/zensu-plan-requirements.sh` (exit 0 = usable); when no usable table exists the template's single stub row stays in place — never ship an empty table. Both PR openers honor this: `/zensu:pilot` renders `pr-body.md`, and `/zensu:autopilot` uses its richer `autopilot-pr-body.md` variant (the same table plus the build-time bypass-ledger audit line).
+
+## Browser Consent Gate (`hooks/lib/verify-consent-v1.js` + the two consent hooks)
+
+`/zensu:verify-feature` used to require a launch-time `ZENSU_VERIFY_NAVIGATION_POLICY_V1`
+before any browser call, which no end user can supply: the broker reads it once when the MCP
+server starts, so no in-session Bash call can configure it, and the desktop app has no shell
+prefix at all. The gate replaces that precondition for LOOPBACK targets with a host-rendered
+permission prompt the model cannot answer. Remote targets still need the policy, and that is
+not a limitation to engineer away: Chromium's DNS pins are passed at browser launch, so an
+origin approved mid-session could not be pinned.
+
+**A PreToolUse hook was chosen over MCP elicitation because the desktop app has no elicitation
+channel** (CLI-only since 2.1.76). The decision module is shaped so elicitation can replace the
+prompt later without changing the memory or the wording.
+
+**The matcher reaches further than the skill, and that is a residual rather than a defect to
+narrow blindly.** It is registered on the tool NAME, and the optional plugin-scope group means
+the bare `mcp__playwright__…` spelling matches too. That spelling is real in this very
+repository: the plugin manifest declares `mcpServers: "./.mcp.json"` and that file names the
+server `playwright`, so ONE file yields the plugin-scoped spelling when loaded as a plugin and
+the bare one when the repository is opened as a project — measured, not inferred, and the
+earlier "CLI versus desktop" reading in the spec was wrong. A consuming project running its own
+MCP server under that key therefore has every non-loopback `browser_navigate` denied, in every
+session, with no skill running. **Do not "fix" this by narrowing the matcher**: where the bare
+spelling is the real one, narrowing removes the gate while the broker still starts in consent
+mode and self-approves. The deny text names the foreign-server possibility and its ONE remedy
+instead — renaming the server key. The second remedy this paragraph used to claim, launching with
+a navigation policy, was retired: it turns the gate off for every target including the remote ones
+the floor exists to refuse, so under the note's own premise it leaves nothing behind it.
+`tests/structure/verify-consent-v1.test.js` machine-forbids the retired spelling, so a carrier
+still naming two remedies asserts something a test refuses. Closing it properly needs the prefix MEASURED across desktop and CLI, default and
+`--plugin-dir` installs; until then neither direction is supported by evidence.
+
+**The prompt must describe the grant the BROKER makes, not the one the hook asks about.** This is
+stated as a RULE, not as a live divergence — both now ask per origin, and the paragraph below
+records why. It is kept because the divergence is the easy one to reintroduce: the broker stores
+the classified ORIGIN and checks no route afterwards, so any future prompt promising a narrower
+grant than that would have the human decide on a false description. The sentence names the origin
+and says the browser does not check routes again.
+
+**CONSENT IS PER ORIGIN, in all three carriers, and the route-scoped design that preceded it is
+recorded here so it is not rebuilt.** The first attempt asked per route while the PROMPT told the
+human a Yes opened the whole origin and the BROKER checked only the origin (`assertAllowedUrl`
+tests `policy.approved.has(target.origin)` and returns before any route test). Three components,
+two contracts. The route half then carried its own defect: a record was stamped with a fresh read
+of the LIVE recipe on every write, INCLUDING writes for navigations that were never prompted, and
+the silent-allow arm tested the union of those sets — so a session could widen the recipe, drive
+one already-allowed route, and launder a new route into the silently-allowed set with no human in
+the loop. Binding the set to the prompt would have fixed that one defect and left the three
+carriers still disagreeing. Removing the route axis fixes both: a record is exactly
+`(origin, route, decidedBy, at)`, the route is an audit line, and the recipe's declared routes are
+prompt CONTEXT only. The cost is stated rather than hidden — there is no per-route control inside
+an approved loopback origin, which is what the prompt has always promised.
+
+**`isSymbolicLink()` beside an `lstat` verdict is DEAD, and this is a SHAPE, not a census.**
+`fs.lstatSync` does not follow the final component, so it never reports a symlink as a file or a
+directory: wherever this feature writes `!info.isFile() || info.isSymbolicLink()` or
+`!info.isDirectory() || info.isSymbolicLink()`, the first half already decides and the second is
+unreachable. It also protects nothing against the edit it looks like a belt against — an
+`lstatSync` → `statSync` "simplification" makes `isFile()`/`isDirectory()` true for a symlink AND
+`isSymbolicLink()` false, so the conjunct dies with the guard it appears to back up. The conjuncts
+are left in place; what must not happen is a reader treating one as load-bearing. Do NOT enumerate
+the sites here — a first attempt named one and a reviewer found eight, which is exactly how a prose
+census goes stale. Grep `isSymbolicLink()` across `hooks/lib/verify-consent-v1.js` and
+`scripts/playwright-mcp-proxy.js` before relying on any of them.
+
+**One resolver decides which recipe governs.** `resolveRecipeFile` prefers `.zensu/runtime.yaml`
+over `.zensu/autopilot.yaml` and skips a symlinked candidate. Both hooks and the `/zensu:doctor`
+row consume it; the ladder used to be spelled three times, where a one-sided edit made the pre
+hook decide against one file while the post hook recorded against another. **The two anchors
+still differ and that is a stated bound, not an oversight:** the hooks resolve the project root
+from the immutable record, the doctor from the session root or the harness value.
+
+**`--config=<path>` steers the SKILL and is invisible to the gate**, so a recipe passed that way
+declares no synthetic-safe routes to the prompt. Stated in the operator doc rather than closed.
+
+**The declared routes come from the guarded recipe read and from nowhere else.** An environment
+override sat in `readInputs` and short-circuited the branch carrying the lstat, symlink and size
+guards, with no production producer and neither hook clearing it. It is deleted; a test that
+needs routes writes a real recipe.
+
+**The consent line sits BELOW the sessionBanner gate**, unlike the reviewer-spawn grant line
+above it. The distinction is what the line reports: the grant announces a capability the plugin
+hands itself, which a checked-out config must not be able to hide; consent announces that a
+PROMPT will appear, which is a usage hint. Hiding it costs the user a hint and hides nothing.
+
+**Coupled sites that move together:** `CONSENT_MATCHER` / `NAVIGATION_TOOL_RE` in the decision
+module against both matcher registrations in the hook manifest and against the broker's own
+`consentHookRegistered`, which reads the module's constant and compares it to the manifest —
+so that check proves internal consistency and says nothing about how the host renders the
+prefix; `RECIPE_NAMES` and `resolveRecipeFile` against the doctor's recipe probe;
+`FLOOR_REASONS`, `CONSENT_REMOTE_REASON` and `normalizeRoute` in the shared floor, which the
+broker and the decision module both consume rather than hand-copying — the remote sentence
+lived in two files with no check comparing them; the memory filename shape against
+`skills/verify-feature/SKILL.md`, which both spells that path and owns the report's `Consent`
+block — the doctor renderer has no such block, and naming it there sent a maintainer to a file
+that does not carry it; every doctor STATE against the rows documented in the doctor skill, which
+a suite check holds in step — do not restate a COUNT here, because the next state added
+invalidates it, and this roster already shipped one that was stale on the day it was written;
+the doctor's THREE top-level policy guards against `parsePolicy`'s own three throw messages in
+`scripts/playwright-mcp-proxy.js`, a deliberate hand copy that **NOTHING PINS** — no test compares
+it to its owner, so a change there leaves the copy silently stale. State the reason for the copy
+correctly too: it is NOT that calling the owner would put DNS in a read-only diagnostic, since
+`parsePolicy(raw, resolver)` takes its resolver as a parameter and reaches DNS only for
+`mode: "remote"`. It is that a stubbed refusing resolver would report a VALID remote policy as
+invalid, which is the one verdict a diagnostic must never invent;
+`consentHookRegistered` / `consentRecorderRegistered`, which share one lookup because their
+CONSUMERS differ — the broker asks only about the gate, the doctor about both; and the operator accounts in `docs/gates.md`, `docs/configuration.md`
+(both hook rows plus the hook count and its anchors), `docs/verify-feature.md`, the README
+docs-index rows, the suite manifest entry and the counts in `tests/SUITE-OVERVIEW.md`.
+
+**Version: `minor`.** Walked against §"Runtime Lineage": adding a hook is a `patch` UNLESS it
+can DENY or ASK, and this one does both. It changes the capability set of every session an older
+runtime is still serving, which is the disqualifier that bullet spells out.
+
+**Known gaps, accepted and named:**
+
+- **The decision module reads host variable NAMES itself**, which the sibling plugin-data guard's
+  port contract forbids: that module takes every anchor as an option and names no variable. Four
+  remain here. A port therefore inherits this host's spellings. Not taken in the round that found
+  it, because it is a signature change across both hooks and the unit suite.
+- **The gate count in the `docs/gates.md` intro is checked by nothing**, and this feature moved
+  it. The same gap the plugin-data guard records for its own row.
+- **The Windows half is unverified.** The suite is in the CI structure inventory the weekly
+  Windows Safety shard builds, and NOT in the blocking Windows PR profile, so the Windows half
+  stays unverified until that weekly run reports green. Say "unverified", never "never runs".
+- **No ports.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were not included. A port
+  owns both halves, and the host half includes a measurement rather than an assumption: whether
+  its harness renders a PreToolUse `ask` as a prompt the model cannot answer.
+- **The residual class the gate cannot close** is the one every PreToolUse gate carries: the
+  broker trusts that the host ran the hook. With hooks disabled host-side, consent mode accepts
+  unconsented loopback navigations, and the doctor reports registration rather than execution.

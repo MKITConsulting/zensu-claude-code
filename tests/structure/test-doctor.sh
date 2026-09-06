@@ -260,11 +260,98 @@ case "$OUT" in *'version sync: plugin.json and marketplace.json agree'*) check "
 case "$OUT" in *'hooks wiring: all 1 hooks'*) check "P1c wiring ✅ when consistent" PASS ;; *) check "P1c wiring ✅ when consistent" FAIL ;; esac
 case "$OUT" in *'no quoted-boolean traps'*) check "P1d config ✅ with real booleans (reviewJudge:true/secretScan:false)" PASS ;; *) check "P1d config ✅ with real booleans" FAIL ;; esac
 # all-green summary only when the tool block is green too (inject authed tools)
-GREEN="$(ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=ready \
+GREEN="$(ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=ready ZDOC_VERIFY=consent \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
   node "$REPORT" 2>/dev/null)"
 case "$GREEN" in *'all checks green'*) check "P1e summary reports all green when every block is green" PASS ;; *) check "P1e summary all green (got: $GREEN)" FAIL ;; esac
 case "$GREEN" in *'Playwright MCP: loaded and ready (/zensu:verify-feature and autopilot browser driver)'*) check "P1ea runtime-ready Playwright MCP renders green" PASS ;; *) check "P1ea runtime-ready Playwright MCP message (got: $GREEN)" FAIL ;; esac
+
+# --- verify-feature consent/policy row (renderer + wrapper source) --------
+verify_row() { # $1 ZDOC_VERIFY value or "" ; $2 reason
+  ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=ready \
+  ZDOC_VERIFY="$1" ZDOC_VERIFY_REASON="$2" \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
+    node "$REPORT" 2>/dev/null
+}
+VF_POLICY="$(verify_row policy "")"
+case "$VF_POLICY" in *'✅  verify-feature: environment policy active'*) check "P1va verify-feature policy state renders green" PASS ;; *) check "P1va verify-feature policy state renders green" FAIL ;; esac
+VF_CONSENT="$(verify_row consent "")"
+case "$VF_CONSENT" in *'✅  verify-feature: consent mode ready — no parent policy'*'all checks green'*) check "P1vb consent-with-recipe renders green and keeps the green summary" PASS ;; *) check "P1vb consent-with-recipe renders green and keeps the green summary" FAIL ;; esac
+VF_NORECIPE="$(verify_row consent-no-recipe "")"
+case "$VF_NORECIPE" in *'⚠️  verify-feature: consent mode ready, no runtime recipe'*'/zensu:verify-feature --setup'*'--attach=<loopback-origin>'*) check "P1vc consent-without-recipe warns and names setup and attach" PASS ;; *) check "P1vc consent-without-recipe warns and names setup and attach" FAIL ;; esac
+case "$VF_NORECIPE" in *'all checks green'*) check "P1vc1 the no-recipe warning withholds the green summary" FAIL ;; *) check "P1vc1 the no-recipe warning withholds the green summary" PASS ;; esac
+VF_UNAVAILABLE="$(verify_row unavailable "consent hook not registered on the navigation matcher")"
+case "$VF_UNAVAILABLE" in *'❌  verify-feature: cannot start (consent hook not registered on the navigation matcher)'*) check "P1vd unavailable renders red with the wrapper's reason" PASS ;; *) check "P1vd unavailable renders red with the wrapper's reason" FAIL ;; esac
+VF_ABSENT="$(verify_row "" "")"
+case "$VF_ABSENT" in *'⚠️  verify-feature: not checked'*'missing check rather than an all-clear'*) check "P1ve an absent ZDOC_VERIFY says the check did not run rather than staying silent" PASS ;; *) check "P1ve an absent ZDOC_VERIFY says the check did not run rather than staying silent" FAIL ;; esac
+case "$VF_ABSENT" in *'all checks green'*) check "P1ve1 the did-not-check row withholds the green summary" FAIL ;; *) check "P1ve1 the did-not-check row withholds the green summary" PASS ;; esac
+VF_BADPOLICY="$(verify_row policy-invalid "policy is not valid JSON")"
+case "$VF_BADPOLICY" in *'❌'*'browser broker will refuse it'*'policy is not valid JSON'*'fall back to consent mode'*) check "P1vh a set-but-unusable policy renders red and names the fault" PASS ;; *) check "P1vh a set-but-unusable policy renders red and names the fault" FAIL ;; esac
+case "$VF_BADPOLICY" in *'all checks green'*) check "P1vh1 the invalid-policy row withholds the green summary" FAIL ;; *) check "P1vh1 the invalid-policy row withholds the green summary" PASS ;; esac
+
+# P1vi-P1vk drive the WRAPPER, so the derivation block itself executes. Every other
+# verify-feature check supplies ZDOC_VERIFY and therefore skips it entirely.
+VF_LIVE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-verify.XXXXXX")" || exit 1
+mkdir -p "$VF_LIVE_ROOT/.zensu"
+vf_live() { # $1 policy value (may be empty)
+  env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
+    ${1:+ZENSU_VERIFY_NAVIGATION_POLICY_V1="$1"} \
+    ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=ready \
+    ZENSU_DOCTOR_PLUGIN_DIR="$PLUGIN_DIR" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$HELPER" 2>/dev/null
+}
+case "$(vf_live '')" in
+  *'consent mode ready, no runtime recipe'*) check "P1vi the wrapper derives consent-no-recipe when no recipe is present" PASS ;;
+  *) check "P1vi the wrapper derives consent-no-recipe when no recipe is present" FAIL ;;
+esac
+printf 'version: 1\n' > "$VF_LIVE_ROOT/.zensu/runtime.yaml"
+case "$(vf_live '')" in
+  *'consent mode ready — no parent policy'*) check "P1vj the same wrapper run flips to consent once a runtime recipe exists" PASS ;;
+  *) check "P1vj the same wrapper run flips to consent once a runtime recipe exists" FAIL ;;
+esac
+case "$(vf_live '{"version":1}')" in
+  *'browser broker will refuse it'*'policy contains unknown or missing keys'*) check "P1vk the wrapper judges the policy value rather than its presence" PASS ;;
+  *) check "P1vk the wrapper judges the policy value rather than its presence" FAIL ;;
+esac
+case "$(vf_live '{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:5173","evidenceMode":"declared-safe","routes":["/"]}]}')" in
+  *'environment policy active'*) check "P1vk-control a policy that satisfies the contract still renders active" PASS ;;
+  *) check "P1vk-control a policy that satisfies the contract still renders active" FAIL ;;
+esac
+rm -rf "$VF_LIVE_ROOT"
+
+if grep -qF 'ZDOC_VERIFY=policy' "$HELPER" && grep -qF 'ZDOC_VERIFY=consent-no-recipe' "$HELPER" \
+  && grep -qF 'ZDOC_VERIFY=unavailable' "$HELPER" && grep -qF 'consentHookRegistered' "$HELPER" \
+  && grep -qF 'ZENSU_VERIFY_NAVIGATION_POLICY_V1' "$HELPER" \
+  && grep -qF 'ZDOC_SESSION_PROJECT_ROOT ZDOC_VERIFY ZDOC_VERIFY_REASON' "$HELPER"; then
+  check "P1vf wrapper derives the verify state from the policy env, the registered hook and the recipe, and exports it" PASS
+else
+  check "P1vf wrapper derives the verify state from the policy env, the registered hook and the recipe, and exports it" FAIL
+fi
+VF_SKILL="$PLUGIN_DIR/skills/doctor/SKILL.md"
+# The phrase set is DERIVED from the renderer's own arms, never hand-listed: a hand list
+# passes unchanged when a state is added, which is exactly how a shipped state reached the
+# report with no bullet documenting it. Each arm renders 'verify-feature: <claim> — <remedy>',
+# and the claim before the em dash is what the skill must carry.
+VF_PHRASES="$(grep -oE "'verify-feature: [^']*'" "$REPORT" \
+  | sed "s/^'//; s/'\$//" | sed 's/ \xe2\x80\x94 .*//; s/ ($//' | sort -u)"
+VF_PHRASE_COUNT="$(printf '%s\n' "$VF_PHRASES" | grep -c . || true)"
+VF_SKILL_MISS=""
+while IFS= read -r phrase; do
+  [ -n "$phrase" ] || continue
+  grep -qF -- "$phrase" "$VF_SKILL" || VF_SKILL_MISS="$VF_SKILL_MISS [$phrase]"
+done <<VFEOF
+$VF_PHRASES
+VFEOF
+[ "${VF_PHRASE_COUNT:-0}" -ge 5 ] \
+  && check "P1vg-control the verify-feature row phrases derive from the renderer ($VF_PHRASE_COUNT found)" PASS \
+  || check "P1vg-control the verify-feature row phrases derive from the renderer (only ${VF_PHRASE_COUNT:-0} found)" FAIL
+# The count is CONJOINED: an empty derivation would otherwise report every row documented
+# while comparing nothing, which is the shape this check replaced.
+if [ "${VF_PHRASE_COUNT:-0}" -ge 5 ] && [ -z "$VF_SKILL_MISS" ]; then
+  check "P1vg every verify-feature row the renderer can emit is documented in skills/doctor/SKILL.md ($VF_PHRASE_COUNT rows)" PASS
+else
+  check "P1vg verify-feature rows missing from skills/doctor/SKILL.md:$VF_SKILL_MISS" FAIL
+fi
 
 # --- wrapper Playwright MCP detection (offline; npm must never execute) -----
 MCP_PLUG="$SBOX/mcp-plug"

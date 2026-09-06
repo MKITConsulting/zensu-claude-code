@@ -336,9 +336,83 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
   fi
 fi
 
+ZDOC_VERIFY_REASON="${ZDOC_VERIFY_REASON:-}"
+if [ -z "${ZDOC_VERIFY:-}" ]; then
+  ZDOC_VERIFY_REASON=""
+  ZDOC_VERIFY_RECIPE_ROOT="${ZDOC_SESSION_PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:-}}"
+  if [ -n "${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" ]; then
+    # Presence is not validity: the broker parses this value at start and REFUSES to
+    # serve when it does not satisfy the contract, so a doctor claiming an active policy
+    # from the variable alone reports green for a session whose browser cannot start.
+    # Only the three TOP-LEVEL guards parsePolicy applies first are repeated here; the
+    # per-target rules stay the broker's, and the reason says which check answered. Calling
+    # parsePolicy itself was weighed and declined, and the DNS argument is NOT the reason: that
+    # function takes its resolver as a parameter and reaches DNS only for mode "remote". The real
+    # reason is that a stubbed refusing resolver would report a VALID remote policy as invalid,
+    # which is the one verdict a diagnostic must never invent. NOTHING PINS THIS COPY against its
+    # owner — no test compares it to parsePolicy — so a change there leaves this silently stale.
+    # The row it feeds says what it checked: a green row here means the top-level contract holds,
+    # never that the broker will serve.
+    ZDOC_VERIFY_POLICY_FAULT="$(node -e '
+      const raw = process.env.ZENSU_VERIFY_NAVIGATION_POLICY_V1 || "";
+      let value;
+      try { value = JSON.parse(raw); }
+      catch (_error) { process.stdout.write("policy is not valid JSON"); process.exit(0); }
+      const keys = Object.keys(value || {}).sort();
+      if (JSON.stringify(keys) !== JSON.stringify(["mode", "targets", "version"])) {
+        process.stdout.write("policy contains unknown or missing keys"); process.exit(0);
+      }
+      if (value.version !== 1 || !["local", "remote"].includes(value.mode)
+          || !Array.isArray(value.targets) || value.targets.length < 1 || value.targets.length > 8) {
+        process.stdout.write("policy contract is invalid"); process.exit(0);
+      }
+      process.stdout.write("");
+    ' 2>/dev/null)" || ZDOC_VERIFY_POLICY_FAULT="policy could not be judged"
+    if [ -n "$ZDOC_VERIFY_POLICY_FAULT" ]; then
+      ZDOC_VERIFY=policy-invalid
+      ZDOC_VERIFY_REASON="$ZDOC_VERIFY_POLICY_FAULT"
+    else
+      ZDOC_VERIFY=policy
+    fi
+  elif [ ! -f "$ZDOC_ROOT/scripts/playwright-mcp-proxy.js" ] || [ -L "$ZDOC_ROOT/scripts/playwright-mcp-proxy.js" ]; then
+    ZDOC_VERIFY=unavailable
+    ZDOC_VERIFY_REASON="broker script missing"
+  elif [ ! -f "$ZDOC_ROOT/hooks/pre-browser-navigation-consent.sh" ] \
+    || [ ! -f "$ZDOC_ROOT/hooks/post-browser-navigation-consent.sh" ] \
+    || [ ! -f "$ZDOC_ROOT/hooks/lib/verify-consent-v1.js" ]; then
+    ZDOC_VERIFY=unavailable
+    ZDOC_VERIFY_REASON="consent hook pair or its module missing from the plugin"
+  elif ! (cd -P -- "$ZDOC_ROOT" && node -e '
+      const p = require("./scripts/playwright-mcp-proxy.js");
+      process.exit(p.consentHookRegistered(process.cwd()) ? 0 : 1);
+    ' >/dev/null 2>&1); then
+    ZDOC_VERIFY=unavailable
+    ZDOC_VERIFY_REASON="consent hook not registered on the navigation matcher"
+  elif ! (cd -P -- "$ZDOC_ROOT" && node -e '
+      const p = require("./scripts/playwright-mcp-proxy.js");
+      process.exit(p.consentRecorderRegistered(process.cwd()) ? 0 : 1);
+    ' >/dev/null 2>&1); then
+    # The broker starts in consent mode on the GATE alone, so this half fails silently: every
+    # navigation would prompt and none would ever be remembered. Reported rather than absorbed.
+    ZDOC_VERIFY=unavailable
+    ZDOC_VERIFY_REASON="consent recorder not registered on the navigation matcher"
+  elif [ -z "$ZDOC_VERIFY_RECIPE_ROOT" ]; then
+    # No project root resolved, so no recipe was looked for. Saying "no runtime recipe" here
+    # would report a finding about a directory this run never opened.
+    ZDOC_VERIFY=consent-recipe-unchecked
+  elif (cd -P -- "$ZDOC_ROOT" && ZDOC_VERIFY_RECIPE_ROOT="$ZDOC_VERIFY_RECIPE_ROOT" node -e '
+      const mod = require("./hooks/lib/verify-consent-v1.js");
+      process.exit(mod.resolveRecipeFile(process.env.ZDOC_VERIFY_RECIPE_ROOT) ? 0 : 1);
+    ' >/dev/null 2>&1); then
+    ZDOC_VERIFY=consent
+  else
+    ZDOC_VERIFY=consent-no-recipe
+  fi
+fi
+
 export ZDOC_ZENSU ZDOC_NODE ZDOC_PLAYWRIGHT ZDOC_BINDING ZDOC_BINDING_PROJECT_ROOT \
   ZDOC_BINDING_RECORDED_VERSION ZDOC_BINDING_EXECUTING_VERSION \
-  ZDOC_SESSION_KEY ZDOC_SESSION_PROJECT_ROOT
+  ZDOC_SESSION_KEY ZDOC_SESSION_PROJECT_ROOT ZDOC_VERIFY ZDOC_VERIFY_REASON
 
 if ! command -v node >/dev/null 2>&1; then
   printf 'Zensu doctor — read-only setup diagnostics\n\n  %s  node: not found on PATH — cannot run the JSON/config/state checks\n' '⚠️'

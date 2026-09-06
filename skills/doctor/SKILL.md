@@ -360,6 +360,36 @@ classifier will refuse a spawn, not only when the whole table is green.
   detected — add one, or export `ZENSU_VCS_PROVIDER=github|gitlab` for a
   self-hosted host).
 - **⚠️ zensu not authenticated** → `zensu auth login`.
+- **✅ verify-feature: environment policy active** → `ZENSU_VERIFY_NAVIGATION_POLICY_V1` was
+  set when Claude Code started, so the parent-environment policy governs every browser origin
+  and the consent prompt never fires this session. Only its top-level contract is checked
+  here; the broker judges each target when it starts. Nothing to do.
+- **✅ verify-feature: consent mode ready** → no parent policy is set, the consent hook pair is
+  registered on the broker's navigation tools, and a runtime recipe (`.zensu/runtime.yaml` or
+  `.zensu/autopilot.yaml`) is present. The first navigation to each loopback origin asks the
+  user through the permission prompt, and every further route on an approved origin then
+  proceeds without one; remote targets still need the policy.
+- **⚠️ verify-feature: consent mode ready, no runtime recipe** → same as above, but
+  `/zensu:verify-feature` has nothing to boot. Run `/zensu:verify-feature --setup` to write the
+  recipe with the user, or `--attach=<loopback-origin>` for an application they already run.
+- **❌ verify-feature: a parent-environment navigation policy is set but the browser broker will refuse it (…)** → a parent-environment policy
+  IS set, but its value does not satisfy the contract the broker parses at start, so the
+  browser cannot open at all. Only the three top-level guards are repeated in this check —
+  the per-target rules stay the broker's — and the parenthesis names which one answered. The
+  user fixes that value in the environment that launches Claude Code, or unsets it to fall
+  back to consent mode. Never edit it from a Bash call: it is read once when the broker starts.
+- **⚠️ verify-feature: consent mode ready, recipe not checked** → the report resolved no
+  project root, so it looked for no recipe at all. This is a missing check rather than a
+  missing recipe; run `/zensu:doctor` from a session whose project root resolves.
+- **❌ verify-feature: cannot start (…)** → the consent hook pair, its decision module or the
+  broker script is missing, or `hooks/hooks.json` does not register the GATE on the
+  navigation matcher, or it does not register the RECORDER — the broker starts in consent mode
+  on the gate alone, so a missing recorder would prompt on every navigation and remember
+  nothing. Reinstall the plugin, or launch Claude Code with the parent-environment
+  policy, which needs no hook. The parenthesis names which piece is missing.
+- **⚠️ verify-feature: not checked** → the wrapper reported no verify state at all, so the
+  report says nothing about the browser path. This is a missing check rather than an
+  all-clear; run `/zensu:doctor` from a session whose plugin root resolves.
 - **❌ binding: this session has no valid Session Control record** → the cause
   behind the `Blocked: the immutable Zensu session binding is unavailable or
   invalid` denial. Nothing in this session can be repaired in place; start a

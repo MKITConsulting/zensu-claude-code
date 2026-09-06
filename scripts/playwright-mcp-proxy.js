@@ -30,96 +30,17 @@ const ALLOWED_TOOLS = Object.freeze([
 ]);
 const ALLOWED_TOOL_SET = new Set(ALLOWED_TOOLS);
 
-function normalizeHostname(hostname) {
-  return String(hostname).toLowerCase().replace(/^\[|\]$/g, '');
-}
-
-function ipv4Number(address) {
-  const parts = address.split('.').map(Number);
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return null;
-  return parts.reduce((value, part) => ((value << 8) | part) >>> 0, 0);
-}
-
-function inIpv4Range(value, base, bits) {
-  const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
-  return (value & mask) === (ipv4Number(base) & mask);
-}
-
-function isPublicIpv4(address) {
-  const value = ipv4Number(address);
-  if (value === null) return false;
-  const denied = [
-    ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8],
-    ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.0.2.0', 24],
-    ['192.88.99.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15], ['198.51.100.0', 24],
-    ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4],
-  ];
-  return !denied.some(([base, bits]) => inIpv4Range(value, base, bits));
-}
-
-function expandIpv6(address) {
-  const zoneFree = address.toLowerCase().split('%')[0];
-  if (zoneFree.includes('.')) return null;
-  const halves = zoneFree.split('::');
-  if (halves.length > 2) return null;
-  const left = halves[0] ? halves[0].split(':') : [];
-  const right = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
-  const missing = 8 - left.length - right.length;
-  if (missing < 0 || (halves.length === 1 && missing !== 0)) return null;
-  const groups = [...left, ...Array(missing).fill('0'), ...right];
-  if (groups.length !== 8 || groups.some((group) => !/^[0-9a-f]{1,4}$/.test(group))) return null;
-  return groups.map((group) => Number.parseInt(group, 16));
-}
-
-function isPublicIpv6(address) {
-  const groups = expandIpv6(address);
-  if (!groups) return false;
-  const value = groups.reduce((result, group) => (result << 16n) | BigInt(group), 0n);
-  const inRange = (base, bits) => {
-    const baseGroups = expandIpv6(base);
-    const baseValue = baseGroups.reduce((result, group) => (result << 16n) | BigInt(group), 0n);
-    const shift = 128n - BigInt(bits);
-    return (value >> shift) === (baseValue >> shift);
-  };
-  if (!inRange('2000::', 3)) return false;
-  const specialPurpose = [
-    ['2001::', 32],       // Teredo and IETF protocol assignments
-    ['2001:1::', 32],    // protocol anycast assignments
-    ['2001:2::', 48],    // benchmarking
-    ['2001:10::', 28],   // ORCHID
-    ['2001:20::', 28],   // ORCHIDv2 and adjacent special assignments
-    ['2001:db8::', 32],  // documentation
-    ['2002::', 16],      // deprecated 6to4
-    ['3fff::', 20],      // documentation
-  ];
-  return !specialPurpose.some(([base, bits]) => inRange(base, bits));
-}
-
-function isPublicAddress(address) {
-  const family = net.isIP(address);
-  return family === 4 ? isPublicIpv4(address) : family === 6 ? isPublicIpv6(address) : false;
-}
-
-function isLoopbackHost(hostname) {
-  const normalized = normalizeHostname(hostname);
-  if (normalized === '::1') return true;
-  const value = ipv4Number(normalized);
-  return value !== null && inIpv4Range(value, '127.0.0.0', 8);
-}
-
-async function resolveRemoteHost(hostname, resolver) {
-  const normalized = normalizeHostname(hostname);
-  if (net.isIP(normalized)) {
-    if (!isPublicAddress(normalized)) throw new Error('remote address is not globally routable');
-    return [normalized];
-  }
-  const records = await resolver(normalized, { all: true, verbatim: true });
-  const addresses = [...new Set(records.map((record) => record.address))];
-  if (addresses.length === 0 || addresses.some((address) => !isPublicAddress(address))) {
-    throw new Error('remote DNS includes a non-public or unresolved address');
-  }
-  return addresses;
-}
+const {
+  CONSENT_REMOTE_REASON,
+  FLOOR_REASONS,
+  checkNavigationTarget,
+  classifyOrigin,
+  isLoopbackHost,
+  isPublicAddress,
+  normalizeHostname,
+  normalizeRoute,
+  resolveRemoteHost,
+} = require(path.join(__dirname, '..', 'hooks', 'lib', 'verify-navigation-floor-v1.js'));
 
 async function parsePolicy(raw, resolver = dns.promises.lookup) {
   if (!raw) return {
@@ -148,15 +69,14 @@ async function parsePolicy(raw, resolver = dns.promises.lookup) {
     }
     const routes = new Set();
     for (const route of rawTarget.routes) {
-      if (typeof route !== 'string' || !route.startsWith('/') || route.includes('?')
-          || route.includes('#') || route.includes('*')) {
+      const normalizedRoute = normalizeRoute(route);
+      if (normalizedRoute === null) {
         throw new Error('evidence route must be an absolute query-free pathname');
       }
-      const normalizedRoute = new URL(route, 'https://zensu.invalid').pathname;
-      if (normalizedRoute !== route || routes.has(route)) {
+      if (routes.has(normalizedRoute)) {
         throw new Error('evidence routes must be normalized and unique');
       }
-      routes.add(route);
+      routes.add(normalizedRoute);
     }
     const rawOrigin = rawTarget.origin;
     if (typeof rawOrigin !== 'string') throw new Error('navigation origin must be a string');
@@ -171,11 +91,11 @@ async function parsePolicy(raw, resolver = dns.promises.lookup) {
     if (value.mode === 'local') {
       if (!['http:', 'https:'].includes(parsed.protocol) || !net.isIP(hostname)
           || !isLoopbackHost(hostname)) {
-        throw new Error('local navigation policy accepts literal loopback-IP origins only');
+        throw new Error(FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK);
       }
     } else {
       if (parsed.protocol !== 'https:' || isLoopbackHost(hostname)) {
-        throw new Error('remote navigation policy requires non-loopback HTTPS origins');
+        throw new Error(FLOOR_REASONS.REMOTE_HTTPS);
       }
       pins.set(hostname, await resolveRemoteHost(hostname, resolver));
     }
@@ -184,22 +104,77 @@ async function parsePolicy(raw, resolver = dns.promises.lookup) {
   return { version: 1, mode: value.mode, targets, pins };
 }
 
+const CONSENT_HOOK_FILE = 'pre-browser-navigation-consent.sh';
+const CONSENT_RECORDER_FILE = 'post-browser-navigation-consent.sh';
+
+// ONE lookup for both halves of the pair, because the two questions have different consumers
+// and must not drift: the broker asks only about the GATE, since a missing recorder costs a
+// prompt per navigation and never widens what is allowed, while /zensu:doctor asks about both
+// — a green "consent mode ready" row over a missing recorder describes a session that prompts
+// forever and remembers nothing.
+function hookRegistered(pluginRoot, event, hookFile) {
+  try {
+    const hookPath = path.join(pluginRoot, 'hooks', hookFile);
+    const hookInfo = fs.lstatSync(hookPath);
+    if (!hookInfo.isFile() || hookInfo.isSymbolicLink()) return false;
+    const modulePath = path.join(pluginRoot, 'hooks', 'lib', 'verify-consent-v1.js');
+    const moduleInfo = fs.lstatSync(modulePath);
+    if (!moduleInfo.isFile() || moduleInfo.isSymbolicLink()) return false;
+    const { CONSENT_MATCHER } = require(modulePath);
+    const registry = JSON.parse(fs.readFileSync(path.join(pluginRoot, 'hooks', 'hooks.json'), 'utf8'));
+    const groups = (registry.hooks && registry.hooks[event]) || [];
+    return groups.some((group) => group && group.matcher === CONSENT_MATCHER
+      && Array.isArray(group.hooks)
+      && group.hooks.some((hook) => typeof hook.command === 'string' && hook.command.includes(`/hooks/${hookFile}`)));
+  } catch (_error) {
+    return false;
+  }
+}
+
+function consentHookRegistered(pluginRoot) {
+  return hookRegistered(pluginRoot, 'PreToolUse', CONSENT_HOOK_FILE);
+}
+
+function consentRecorderRegistered(pluginRoot) {
+  return hookRegistered(pluginRoot, 'PostToolUse', CONSENT_RECORDER_FILE);
+}
+
+function consentPolicy() {
+  return { version: 1, mode: 'consent', targets: new Map(), pins: new Map(), approved: new Map() };
+}
+
+async function resolveStartupPolicy(raw, options = {}) {
+  if (raw) return parsePolicy(raw, options.resolver);
+  const pluginRoot = options.pluginRoot || path.join(__dirname, '..');
+  if (consentHookRegistered(pluginRoot)) return consentPolicy();
+  return parsePolicy('', options.resolver);
+}
+
+function approveConsentOrigin(policy, rawUrl) {
+  if (policy.mode !== 'consent') throw new Error('consent approval requires consent mode');
+  const classified = classifyOrigin(rawUrl, true);
+  if (!classified.ok) throw new Error(classified.reason);
+  if (classified.mode !== 'local') throw new Error(CONSENT_REMOTE_REASON);
+  if (!policy.approved.has(classified.origin)) {
+    policy.approved.set(classified.origin, { origin: classified.origin, approvedAt: new Date().toISOString() });
+  }
+  return classified;
+}
+
 function assertAllowedUrl(policy, rawUrl, navigation = true) {
   if (policy.mode === 'deny') throw new Error('navigation policy is not configured');
-  let parsed;
-  try { parsed = new URL(rawUrl); }
-  catch (_error) { throw new Error('navigation target is invalid'); }
-  if (parsed.username || parsed.password) throw new Error('navigation target contains credentials');
-  if (navigation && (parsed.search || parsed.hash)) throw new Error('navigation target contains query or fragment');
-  const comparisonOrigin = parsed.protocol === 'ws:'
-    ? `http://${parsed.host}`
-    : parsed.protocol === 'wss:' ? `https://${parsed.host}` : parsed.origin;
-  const target = policy.targets.get(comparisonOrigin);
-  if (!target) throw new Error('navigation target origin is not approved');
-  if (navigation && !target.routes.has(parsed.pathname)) {
+  const target = checkNavigationTarget(rawUrl, navigation);
+  if (!target.ok) throw new Error(target.reason);
+  if (policy.mode === 'consent') {
+    if (!policy.approved.has(target.origin)) throw new Error('navigation target origin is not approved');
+    return target.parsed;
+  }
+  const known = policy.targets.get(target.origin);
+  if (!known) throw new Error('navigation target origin is not approved');
+  if (navigation && !known.routes.has(target.parsed.pathname)) {
     throw new Error('navigation target route is not approved for evidence');
   }
-  return parsed;
+  return target.parsed;
 }
 
 function chromiumResolverRules(policy) {
@@ -248,9 +223,19 @@ function installCapabilityBoundary(server, policy, closeOwned = async () => {}, 
       if (name !== 'browser_close') {
         assertActiveUrls(policy, await currentUrls(), name === 'browser_navigate');
       }
-      if (name === 'browser_navigate') assertAllowedUrl(policy, request.params.arguments?.url, true);
-      if (name === 'browser_tabs' && request.params.arguments?.action === 'new' && request.params.arguments?.url) {
-        assertAllowedUrl(policy, request.params.arguments.url, true);
+      const opensUrl = name === 'browser_navigate'
+        || (name === 'browser_tabs' && request.params.arguments?.action === 'new' && request.params.arguments?.url);
+      if (opensUrl) {
+        const url = request.params.arguments?.url;
+        // The refusal sits INSIDE the block on purpose. Moving this test into opensUrl
+        // would drop control to callHandler with nothing judged, turning today's deny
+        // for a non-loopback coercion into a silent pass. Since checkNavigationTarget
+        // refuses a non-string itself, this line changes no verdict today except the deny
+        // REASON in deny mode; it is the belt against a floor regression at the one site
+        // whose consequence is a write to policy.approved. No test can bite it.
+        if (typeof url !== 'string') throw new Error(FLOOR_REASONS.INVALID);
+        if (policy.mode === 'consent') approveConsentOrigin(policy, url);
+        assertAllowedUrl(policy, url, true);
       }
       if (name === 'browser_take_screenshot'
           && Object.prototype.hasOwnProperty.call(request.params.arguments || {}, 'filename')) {
@@ -353,7 +338,7 @@ class JsonLineTransport {
 }
 
 async function run(runtimeDir, dependencies = {}) {
-  const policy = await parsePolicy(process.env[POLICY_ENV]);
+  const policy = await resolveStartupPolicy(process.env[POLICY_ENV], { pluginRoot: dependencies.pluginRoot });
   const chromium = dependencies.chromium
     || require(path.join(runtimeDir, 'node_modules/playwright')).chromium;
   const createConnection = dependencies.createConnection
@@ -405,10 +390,22 @@ async function main() {
   }
   const checkIndex = args.indexOf('--check-policy');
   if (checkIndex !== -1) {
-    const policy = await parsePolicy(process.env[POLICY_ENV]);
+    const policy = await resolveStartupPolicy(process.env[POLICY_ENV]);
     const [mode, origin, route, evidenceMode] = args.slice(checkIndex + 1, checkIndex + 5);
     if (!mode || !origin || !route || !evidenceMode || args.length !== checkIndex + 5) {
       throw new Error('usage: --check-policy <local|remote> <origin> <route> declared-safe');
+    }
+    if (policy.mode === 'consent') {
+      if (mode !== 'local') throw new Error(CONSENT_REMOTE_REASON);
+      if (evidenceMode !== 'declared-safe') throw new Error('navigation target contract is invalid; v1 supports declared-safe evidence only');
+      const classified = classifyOrigin(new URL(route, `${origin}/`).href, true);
+      if (!classified.ok) throw new Error(classified.reason);
+      if (classified.mode !== 'local') throw new Error(CONSENT_REMOTE_REASON);
+      if (classified.origin !== origin) {
+        throw new Error('navigation origin does not match the route it was checked with');
+      }
+      process.stdout.write('consent\n');
+      return;
     }
     if (policy.mode !== mode) throw new Error('navigation policy mode does not match');
     const target = policy.targets.get(new URL(origin).origin);
@@ -425,15 +422,20 @@ async function main() {
 
 module.exports = {
   ALLOWED_TOOLS,
+  CONSENT_REMOTE_REASON,
+  approveConsentOrigin,
   assertActiveUrls,
   assertAllowedUrl,
   chromiumResolverRules,
   configureContext,
+  consentHookRegistered,
+  consentRecorderRegistered,
   installCapabilityBoundary,
   isPublicAddress,
   JsonLineTransport,
   openOwnedContext,
   parsePolicy,
+  resolveStartupPolicy,
   run,
 };
 

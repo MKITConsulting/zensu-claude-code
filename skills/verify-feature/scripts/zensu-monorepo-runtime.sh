@@ -148,7 +148,48 @@ terminate_supervisor_pid() {
   kill -9 "$pid" 2>/dev/null || true
 }
 
+PLANNED_ORIGIN_FILE="$RUN_DIR/zensu-planned-origin"
+FREE_PORT_HELPER="$PLUGIN_ROOT/scripts/verify-free-port.js"
+
+consent_origin() {
+  local origin port rest
+  if [ -e "$PLANNED_ORIGIN_FILE" ] || [ -L "$PLANNED_ORIGIN_FILE" ]; then
+    [ -f "$PLANNED_ORIGIN_FILE" ] && [ ! -L "$PLANNED_ORIGIN_FILE" ] || fail "planned origin record is unsafe"
+    origin="$(head -c 64 "$PLANNED_ORIGIN_FILE" | tr -d '\n')"
+    case "$origin" in
+      http://127.0.0.1:*) ;;
+      *) fail "planned origin record is invalid" ;;
+    esac
+    rest="${origin#http://127.0.0.1:}"
+    case "$rest" in
+      ''|*[!0-9]*) fail "planned origin record is invalid" ;;
+    esac
+    printf '%s' "$origin"
+    return 0
+  fi
+  [ -f "$FREE_PORT_HELPER" ] && [ ! -L "$FREE_PORT_HELPER" ] || fail "free-port helper is unavailable"
+  port="$(node "$FREE_PORT_HELPER" --from 5173)" || fail "no free loopback port for the frontend"
+  case "$port" in
+    ''|*[!0-9]*) fail "free-port helper printed no port" ;;
+  esac
+  origin="http://127.0.0.1:${port}"
+  # The absence test for this path ran at the top of this function, and a free-port scan
+  # plus a node run happen between there and here. A truncating > follows whatever it finds
+  # by then, so a symlink planted in that window is followed and its target destroyed.
+  # O_EXCL refuses an existing name of any kind. Same rule as the secrets write below.
+  ORIGIN="$origin" node -e '
+    const fs = require("node:fs");
+    const fd = fs.openSync(process.argv[1], fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+    try { fs.writeFileSync(fd, `${process.env.ORIGIN}\n`); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+  ' "$PLANNED_ORIGIN_FILE" || fail "cannot record the planned origin"
+  printf '%s' "$origin"
+}
+
 parent_origin() {
+  if [ -z "${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" ]; then
+    consent_origin
+    return
+  fi
   env POLICY="${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" node -e '
     const value = JSON.parse(process.env.POLICY || "null");
     if (!value || value.version !== 1 || value.mode !== "local" || !Array.isArray(value.targets)
@@ -203,10 +244,21 @@ case "$ACTION" in
     RUNTIME_LEASE="$(openssl rand -hex 32)"
     CONTAINER="$(expected_container "$RUN_ID")"
     LEASE_HASH="$(lease_hash)"
+    # The absence test for this path ran at the top of the case arm, and a port scan plus
+    # several node runs happen between there and here. A plain truncating > follows whatever
+    # it finds by then, so a symlink planted in that window would carry the database password,
+    # the JWT secret and the runtime lease out of the run directory — and a chmod afterwards
+    # would land on the link's target. O_EXCL refuses an existing name of any kind, and the
+    # mode is set at open rather than repaired after the bytes are already there. The values
+    # travel in the environment rather than in argv, which any user on the host can read.
     umask 077
-    printf 'DB_PASSWORD=%s\nJWT_SECRET=%s\nRUNTIME_LEASE=%s\n' \
-      "$DB_PASSWORD" "$JWT_SECRET" "$RUNTIME_LEASE" >"$SECRETS"
-    chmod 600 "$SECRETS"
+    DB_PASSWORD="$DB_PASSWORD" JWT_SECRET="$JWT_SECRET" RUNTIME_LEASE="$RUNTIME_LEASE" \
+      node -e '
+        const fs = require("node:fs");
+        const body = `DB_PASSWORD=${process.env.DB_PASSWORD}\nJWT_SECRET=${process.env.JWT_SECRET}\nRUNTIME_LEASE=${process.env.RUNTIME_LEASE}\n`;
+        const fd = fs.openSync(process.argv[1], fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+        try { fs.writeFileSync(fd, body); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+      ' "$SECRETS" || fail "the runtime secrets file could not be created exclusively"
 
     PG_STARTED=false
     BACKEND_SUPERVISOR_PID=""

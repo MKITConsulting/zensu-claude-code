@@ -1,14 +1,16 @@
 # Gates
 
-Five PreToolUse gates keep an agent inside the workflow conventions, plus TWO
+Six PreToolUse gates keep an agent inside the workflow conventions, plus TWO
 completion-time `--tdd-complete` refusals of the same class: the edit-landing
 receipt (discipline patch 10 in [tdd-manager-workflow.md](tdd-manager-workflow.md))
 and §Requirements-Table Gate below, which has its own section here. Six of the
-seven are convention-nudges with a documented escape hatch, not security
+eight are convention-nudges with a documented escape hatch, not security
 boundaries — see [Session Control](session-control.md) for the part that is. The
-exception, §Plugin-Data Guard, deliberately has no escape hatch, and it is still not
-a security boundary: it closes one channel to one directory and names the ones it
-leaves open.
+two exceptions, §Plugin-Data Guard and §Browser Consent Gate, deliberately have no
+escape hatch, and neither is a security boundary on its own: the first closes one
+channel to one directory and names the ones it leaves open; the second puts a human
+prompt in front of a browser origin and states in its own section what a session can
+still do around it.
 
 **Two commands stay reachable when the Session Control bind fails**, in every
 bind failure including a record that exists and disagrees, and they are
@@ -326,6 +328,85 @@ is not a regression, because the total disarm this replaced allowed the whole st
 configuration.
 `tests/structure/test-plugin-data-guard.sh` pins the behavior, both directions, in all three
 chain states.
+
+## Browser Consent Gate
+
+A PreToolUse gate (`pre-browser-navigation-consent.sh`) and its PostToolUse companion
+(`post-browser-navigation-consent.sh`), both registered on the Playwright broker's navigating
+tools — `browser_navigate` and `browser_tabs` in either plugin spelling
+(`mcp__plugin_zensu_playwright__…` / `mcp__playwright__…`). The pair exists so that
+`/zensu:verify-feature` can run without `ZENSU_VERIFY_NAVIGATION_POLICY_V1` in the
+environment that launched Claude Code: that variable was the only channel a model cannot
+write, and it cost every user a shell prefix, a port fixed before launch, and a restart per
+change — and the desktop app has no shell prefix at all.
+
+**What it does.** When no parent policy is present, the broker starts in *consent mode*
+(`scripts/playwright-mcp-proxy.js` checks its own `hooks/hooks.json` for this registration at
+start, and stays in the old deny-everything mode without it). The PreToolUse hook then returns
+`permissionDecision: "ask"` — the host's own prompt, which the model cannot answer — for the
+first navigation to each new loopback origin. Consent is per ORIGIN: once an origin is
+approved, every route on it passes silently for the rest of the session, which is exactly what
+the broker enforces and what the prompt says. The runtime recipe's declared routes are prompt
+CONTEXT — they tell the human what the run intends to visit — and steer no decision. The
+PostToolUse hook records an executed navigation as `(origin, route, decidedBy, at)` in
+`<project>/.zensu/state/verify-consent-<session-key>.json`, written by `O_EXCL` temp plus
+rename, contained to that directory, and never through a symlink. The decision, the prompt
+text and the memory rules live in `hooks/lib/verify-consent-v1.js`; the address and URL
+predicates both the hook and the broker apply live in `hooks/lib/verify-navigation-floor-v1.js`,
+so there is one floor, not two.
+
+**The floor holds regardless of consent.** Both layers refuse, independently: a `localhost`
+or any other hostname, a non-loopback `http` origin, a private, link-local, loopback-mapped
+or documentation address, credentials in the URL, and a query or fragment in a navigation.
+Consent mode admits **literal loopback origins only**. A remote target is refused by the hook
+and by the broker with the same reason, because Chromium's DNS pins are passed at browser
+launch and an origin approved mid-session could not be pinned; remote verification keeps the
+parent policy. Sub-requests, WebSockets and redirects reach only origins the session already
+opened. In consent mode neither layer enforces routes — the human consented to the whole origin — so a
+same-origin redirect to an undeclared route is stopped by neither.
+
+**With a parent policy present the gate stays silent** and the broker enforces the policy
+exactly as before; the PostToolUse hook then records `decidedBy: policy`.
+
+**Fault direction.** The PreToolUse hook is a gate and fails closed: a missing `node`, an
+absent or symlinked module, or a module failure denies the navigation with a stderr note. A
+session that cannot bind its Session Control record still gets the floor and a prompt for
+every navigation — nothing is remembered, and the hook says so on stderr. The PostToolUse hook
+never blocks: every fault is a stderr note and exit `0` — with the one exception every sibling
+hook shares, the plugin-root identity guard, which refuses with exit 2 before the hook body runs
+(self-resolution failure and inherited-root mismatch are two distinct messages). A navigation the
+broker rejected (`isError`) is not recorded.
+
+**No escape and no config flag**, deliberately — the same rule as §Plugin-Data Guard. A
+switch the session could flip would relax the hook while the broker, which reads the
+registration once at start, kept trusting the chain. The parent policy is the supported
+alternative, so nothing here lands a bypass-ledger entry.
+
+**Residuals, named rather than implied.** The matcher reaches further than the skill: it is
+registered on the tool NAME, `mcp__(plugin_zensu_)?playwright__browser_(navigate|tabs)`, and the
+optional group means the bare `mcp__playwright__…` spelling matches too. That spelling is not
+hypothetical — this plugin declares its own broker through `.mcp.json` under the server key
+`playwright`, so the same file yields `mcp__plugin_zensu_playwright__…` when it is loaded as a
+plugin and `mcp__playwright__…` when the repository itself is opened as a project. A consuming
+project that runs its OWN MCP server under that key therefore has every non-loopback
+`browser_navigate` denied by this gate, in every session, with no skill running and no config
+flag to turn it off. The deny text names that possibility and its one remedy — rename the server
+key. Launching with the parent-environment policy is deliberately NOT offered: it turns this gate
+off for every target, including the remote ones the floor exists to refuse. Narrowing the matcher
+to the plugin-scoped spelling would remove the gate wherever the bare spelling is the real one,
+so the matcher is left as it is until the prefix is measured across desktop and CLI, default and
+`--plugin-dir` installs. The consent memory is a file in a directory the
+session can write through a Bash redirect, so a forged record skips the prompt for that origin;
+the floor bounds the damage to other loopback services. The broker trusts that the host ran
+the hook: with hooks disabled host-side, consent mode accepts unconsented loopback navigations.
+`/zensu:doctor` reports registration, not host-side execution. MCP elicitation would remove
+both residuals in the CLI; it is not the shipped channel because the desktop app lacks it, and
+the decision module is shaped so elicitation can replace the prompt without changing the
+memory or the wording.
+
+`tests/structure/test-verify-consent.sh` drives the pair against a real Session Control
+session and pins the matcher, the memory, the floor, the loopback bound and the skill wording;
+`tests/structure/playwright-mcp-proxy.test.js` pins the broker's three start modes.
 
 ## Missing Workflow Baseline
 
