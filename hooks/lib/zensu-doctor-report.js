@@ -35,9 +35,14 @@
 //   ZDOC_NOW_MS              clock override for deterministic tests
 //   ZDOC_BINDING             the wrapper's binding verdict (bound / unbound /
 //                            orphaned-project-root / incompatible-runtime /
-//                            unavailable / unknown). Read by bindingLine for its
-//                            own row AND by currentSessionKey, which refuses a
-//                            session key that arrives under any other verdict.
+//                            pruned-plugin-root / unavailable / unknown). Read by
+//                            bindingLine for its own row AND by currentSessionKey,
+//                            which refuses a session key that arrives under any
+//                            other verdict. Keep this enumeration complete: a
+//                            verdict the wrapper emits and bindingLine's switch
+//                            does not know falls to its `default`, and a port
+//                            implementing only what is listed here would render
+//                            no binding row at all in that state.
 //   ZDOC_SESSION_KEY         this session's own Session Control key, non-empty
 //                            only when the wrapper's binding verdict is bound.
 //                            The ONLY thing that tells a chain this session owns
@@ -2277,10 +2282,44 @@ function bindingLine() {
           ? ' (record minted by ' + env.ZDOC_BINDING_RECORDED_VERSION + ', executing ' + env.ZDOC_BINDING_EXECUTING_VERSION + ')'
           : '')
         + ' — while the plugin is at major 0 the minor is the breaking axis, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether this session can be adopted in place, then /zensu:adopt-session --confirm');
+    // The record is INTACT and the installation that minted it has been pruned
+    // from the plugin cache — the host keeps only a few versions, and a session
+    // that outlives them lands here. Nothing can re-verify the record any more,
+    // so no installation serves it; before this row existed the state fell
+    // through to `unbound` above, which asserts "no valid record" — false — and
+    // the Stop hook looped on it. Same in-place remedy as the lineage row, a
+    // different cause, so it is named separately.
+    case 'pruned-plugin-root':
+      return line(BAD, 'binding: this session\'s Session Control record is intact, but the installation that minted it has been removed from the plugin cache'
+        + (env.ZDOC_BINDING_RECORDED_VERSION && env.ZDOC_BINDING_EXECUTING_VERSION
+          ? ' (record minted by ' + env.ZDOC_BINDING_RECORDED_VERSION + ', executing ' + env.ZDOC_BINDING_EXECUTING_VERSION + ')'
+          : '')
+        + ' — the record can no longer be re-verified, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether this session can be adopted in place, then /zensu:adopt-session --confirm');
     case 'unavailable':
       return line(BAD, 'binding: hooks/lib/zensu-session.sh is missing or symlinked — Session Control cannot bind');
-    default:
+    // The wrapper's OWN "could not resolve it" verdict, and the unset value the
+    // `default` arm below still lets through. Both stay silent on purpose, and
+    // neither is an UNCLASSIFIABLE verdict: the wrapper discloses that case in a
+    // row of its own, so a second row here would double-report it. Explicit
+    // rather than folded into `default`, because `default` now means something
+    // else — and P1af/P1ag pin both silences, so a reader who removes this case
+    // to "simplify" gets a failing suite rather than a scary row for a state the
+    // wrapper reports correctly.
+    case 'unknown':
       return undefined;
+    default:
+      // Silence is the one verdict a diagnostic must not give, and this enum has
+      // just gained a fifth member. ZDOC_BINDING is a documented environment
+      // contract — a caller may supply it and thereby skip the wrapper's whole
+      // resolution block — and a report module older than the wrapper feeding it
+      // meets a verdict it does not know. Rendering nothing there is
+      // indistinguishable from a session that binds cleanly, which is the exact
+      // reading this row exists to prevent. Adding a SIXTH member is now safe
+      // rather than merely documented.
+      if (!env.ZDOC_BINDING) return undefined;
+      return line(BAD, 'binding: this report cannot classify the binding verdict "' + env.ZDOC_BINDING
+        + '" reported for this session — it was produced by a different Zensu version than this report;'
+        + ' run /zensu:doctor from the executing installation');
   }
 }
 

@@ -1,6 +1,9 @@
 #!/bin/bash
 # zensu-session-adopt.sh — report on, and optionally perform, the adoption of an
-# intact Session Control record by a declared-incompatible executing runtime.
+# intact Session Control record by a runtime that cannot SERVE it: either a
+# declared-incompatible lineage, or a minting installation the host pruned from
+# its plugin cache. The second is reachable under a COMPATIBLE lineage too, so do
+# not narrow this line back to the incompatible case.
 #
 # This is the SECOND script the PreToolUse Bash gates recognize in a bind
 # failure, and it differs from the first in the one way that matters: the
@@ -36,14 +39,26 @@
 #     <plugin_data>/{session-control,review-evidence} and the recorded project.
 #   - What BOUNDS that write is not derivation — CLAUDE_PLUGIN_DATA is a
 #     caller-supplied literal, exactly as it is for the diagnostic — it is
-#     readContext: the session-hash must match, the
-#     runtime digest is recomputed against the RECORDED root, and that root's
-#     manifest must still declare the recorded version. Add the sibling-root
-#     bound and the plugin_data equality check, and a record the caller authored
-#     under a directory it controls cannot reach the write for a session it does
-#     not already own. State it this way and not as "every location is derived
-#     from the record": that is the stronger claim, and it is not what the code
-#     enforces.
+#     adoptableRecord's condition-1 LADDER. Naming only its first rung, as this
+#     header once did, states a check the code does not always perform:
+#       * the strict readContext: the session-hash must match, the runtime digest
+#         is recomputed against the RECORDED root, and that root's manifest must
+#         still declare the recorded version;
+#       * else, when that root was PRUNED from the cache,
+#         readPrunedPluginRootContext, which re-measures NEITHER the digest nor the
+#         declared version — nothing can read a tree that is gone — and instead
+#         PROVES the root absent with its parent still present.
+#     On BOTH rungs: the session-hash match, the full schema and principal-profile
+#     validation, source_revision === runtime_digest, the sibling-root bound, the
+#     plugin_data equality check, and ADOPTION_SAFE_VERSION_RE on both versions
+#     before either reaches a filename. So a record the caller authored under a
+#     directory it controls still cannot reach the write for a session it does not
+#     already own. What the pruned rung drops is a CONSISTENCY check, not a
+#     barrier: runtime_digest is a content hash of a readable tree computed by an
+#     exported pure function, never a secret, so write access to the private
+#     records directory could always produce a matching one. That directory is the
+#     barrier. State it this way and not as "every location is derived from the
+#     record": that is the stronger claim, and it is not what the code enforces.
 #   - The record and history writes require every adoptableRecord condition to
 #     hold. There are exactly TWO bounded exceptions, and they are stated here
 #     because this header is what the recognizer's admission rests on. Both are

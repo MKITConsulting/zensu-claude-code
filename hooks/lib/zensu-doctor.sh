@@ -194,7 +194,7 @@ fi
 # orphaned-project-root, which is the only one that has a path to report.
 ZDOC_BINDING_PROJECT_ROOT="${ZDOC_BINDING_PROJECT_ROOT:-}"
 # Same contract for the version pair: empty for every verdict except
-# incompatible-runtime, the only one that has two versions to name.
+# incompatible-runtime and pruned-plugin-root, the two that name a version pair.
 ZDOC_BINDING_RECORDED_VERSION="${ZDOC_BINDING_RECORDED_VERSION:-}"
 ZDOC_BINDING_EXECUTING_VERSION="${ZDOC_BINDING_EXECUTING_VERSION:-}"
 ZDOC_BINDING_VERSIONS=""
@@ -330,7 +330,35 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
         ZDOC_BINDING_RECORDED_VERSION="${ZDOC_BINDING_VERSIONS%%$'\t'*}"
         ZDOC_BINDING_EXECUTING_VERSION="${ZDOC_BINDING_VERSIONS##*$'\t'}"
       else
-        ZDOC_BINDING=unbound
+        # The THIRD narrow follow-up: is the record intact and only the
+        # installation that minted it gone from the plugin cache? Disjoint from
+        # the lineage question — that predicate needs the strict read to succeed,
+        # this one needs it to fail at the plugin root — so the order between
+        # the two is immaterial; it sits after the orphan question for the same
+        # reason the lineage one does. Same subshell shape, same shape guard,
+        # same pair rendered into the same two variables, because the row that
+        # consumes them is the same shape with a different cause.
+        ZDOC_PRUNED_VERSIONS="$(
+          # shellcheck disable=SC1090
+          source "$DIR/zensu-session.sh" >/dev/null 2>&1 || exit 1
+          zdoc_pair="$(zensu_session_pruned_plugin_root_model)" || exit 1
+          [ -n "$zdoc_pair" ] || exit 1
+          zdoc_recorded="${zdoc_pair%%$'\t'*}"
+          zdoc_executing="${zdoc_pair##*$'\t'}"
+          if [[ "$zdoc_recorded" =~ $ZENSU_SAFE_VERSION_RE ]] \
+            && [[ "$zdoc_executing" =~ $ZENSU_SAFE_VERSION_RE ]]; then
+            printf '%s\t%s' "$zdoc_recorded" "$zdoc_executing"
+          else
+            printf '\t'
+          fi
+        )" || ZDOC_PRUNED_VERSIONS=""
+        if [ -n "$ZDOC_PRUNED_VERSIONS" ]; then
+          ZDOC_BINDING=pruned-plugin-root
+          ZDOC_BINDING_RECORDED_VERSION="${ZDOC_PRUNED_VERSIONS%%$'\t'*}"
+          ZDOC_BINDING_EXECUTING_VERSION="${ZDOC_PRUNED_VERSIONS##*$'\t'}"
+        else
+          ZDOC_BINDING=unbound
+        fi
       fi
     fi
   fi

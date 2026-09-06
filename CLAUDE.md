@@ -862,15 +862,86 @@ Moving together: `RECOGNIZED` in the recognizer, `isRecognizedInvocation` (the
 module main and `reviewer-capability-v1.js` both call it; `isDoctorInvocation`
 stays the doctor-only predicate), and `zensu_doctor_allowed`'s contract comment.
 
-**The whole feature needs the SUPERSEDED installation to still be on disk.**
-`validateContext` canonicalizes `context.plugin_root` and `readContextInternal`
-recomputes the digest against it, so an absent recorded root makes `readContext`
-throw — and then `resolveIncompatibleRuntime` answers null, the doctor falls back
-to the `unbound` row whose "no valid record" wording this work exists to remove,
-and `adoptableRecord` refuses as `record-unreadable`. The diagnosis degrades to
-the misleading wording exactly when the repair is impossible. Do not describe the
-lineage row as covering every mid-session upgrade; it covers the ones whose
-previous version was not pruned.
+**A SUPERSEDED installation that has been PRUNED from the plugin cache is its own
+named state, `pruned-plugin-root`, and it is adoptable.** It used to be the wedge
+this section warned about: `validateContext` canonicalized `context.plugin_root`
+unconditionally, so an absent recorded root made `readContext` throw,
+`resolveIncompatibleRuntime` answered null, every gate denied with the generic
+revalidation text, the doctor fell back to the `unbound` row whose "no valid
+record" wording is false, `adoptableRecord` refused `record-unreadable` — and the
+Stop hook fell through to its unbounded block and LOOPED, in a session whose every
+other channel was already denied. Measured on the maintainer's machine before the
+fix: the cache held three versions, 4101 of 7913 records named a pruned root, one
+live session was wedged this way and twenty-two more were recorded on the next
+two versions to be pruned.
+
+**The reader is `readPrunedPluginRootContext`, and existence is the ONE waived
+check — proven, never assumed.** `validateContext` and `readContextInternal` take
+an `allowMissingPluginRoot` waiver (the twin of `allowMissingProjectRoot`; each has
+exactly one opt-in caller) under which the digest re-measure and the manifest
+re-read are SKIPPED — there is nothing left to measure. The reader re-applies the
+shape half through `requireAbsentDirectoryPath` (control characters, absoluteness,
+normalization — spelled as PR #272 spells it, so a merge keeps one copy), requires
+the root's PARENT to be a real directory (a pruned installation leaves its cache
+directory behind; a record naming a root under a directory that never existed is
+not this state), and returns only on a clean `lstat` ENOENT — a present root fails
+`still exists`. **The cost, stated:** with the minting tree gone, `runtime_digest`
+and `plugin_version` are shape-checked only and taken on the record's word. What
+still binds the record: session hash, schema, principal profiles, `plugin_data`
+equality, the recorded project root existing, the sibling cache directory, and the
+workflow document's schema. That is why such a record is **adopted once, with
+`--confirm`, and never served** — serving stays strict at every strict read site
+(`resolveHookSession`, `currentClaudeSessionContext`, `zensu_resolve_project_dir`,
+SessionStart resume/compact, SubagentStart), and the re-minted record is
+re-verifiable again.
+
+**Disjoint from `incompatible-runtime` by construction, and blind to lineage on
+purpose.** `resolvePrunedPluginRoot` requires the STRICT read to fail and the
+relaxed read to succeed; the lineage predicate requires the strict read to succeed.
+No consumer has to order the two, and the state is reachable under a compatible
+lineage as well (three patch releases inside one minor while a session lives),
+where the remedy is the same. The binder modes `pruned-plugin-root` /
+`model-pruned-plugin-root` print the same two-field `recorded<TAB>executing` pair,
+so the five parsers of that pair read it unchanged. **Sites that move together:**
+the reader, the waiver and the helper in the core plus its exports;
+`resolvePrunedPluginRoot` / `prunedPluginRootSession` and the mode pair in the
+binder; `zensu_session_pruned_plugin_root` / `_model` and the `pruned-plugin-root`
+scope of `zensu_emit_hook_session_deny` in `zensu-session.sh`, which now spells
+FIVE scopes; the pruned branch beside the lineage branch in all four binding gates
+(`pre-bash-zensu-gate.sh`, `pre-bash-source-write-gate.sh`,
+`pre-write-secret-scan.sh`, `pre-edit-tdd-reminder.sh`) and the self-worded FIFTH
+denier in `reviewer-capability-v1.js` — five deniers, the same set as the lineage
+state, which that file's own neighbouring comments already count as five; the FOURTH release arm in
+`stop-chain-enforcer.sh` plus its block reason and final stderr, which count four
+released states; the third probe in `zensu-doctor.sh` and the `pruned-plugin-root`
+case of `bindingLine()`; `adoptableRecord`'s condition-1 ladder (strict → pruned),
+its condition-3 skip, and the `prunedPluginRoot` field on the verdict and on the
+`adoptContext` result; `PRUNED_NOTE` / `PRUNED_EXPLANATION` and the reworded
+`record-unreadable` remedy in `session-adopt-report-v1.js`; and the operator
+accounts in `docs/session-control.md` §"Unbindable sessions",
+`docs/tdd-manager-workflow.md`'s Stop-binding paragraphs, `skills/doctor/SKILL.md`,
+`skills/adopt-session/SKILL.md` — and the `stop-chain-enforcer.sh` row in
+`docs/configuration.md`, which states the COUNT of released bind failures and is the
+one carrier this change originally left behind, saying three where the hook's own
+fallback already said four. `ADOPTION_REFUSALS` is unchanged — seven
+values, so CONV-1 is untouched — and no persisted shape moved.
+
+**Pins, and one thing Part D learned.** Part D (AC-D01…AC-D10) in
+`tests/structure/test-versioned-plugin-upgrade.sh` replaced JUDGE-3, which pinned
+the old boundary — do not restore it; the unit cases beside the lease-lock cases in
+`tests/session-control/session-control-core-v1.test.js` drive the reader, the
+helper and the ladder; `P1ad3`/`P1ad4` in `tests/structure/test-doctor.sh` pin the
+row. In this state the bind fails inside the CORE, so the authoritative stderr
+diagnostic is the raw `session-control-v1: context plugin root does not exist`
+line rather than a binder-prefixed one, and Part D's gate helper tolerates exactly
+that line where AC-C04's tolerates only the prefix. **Composition with PR #272:**
+condition 1 becomes `strict → orphaned-project-root → pruned-plugin-root` when
+that PR lands; the COMBINED state — project root gone AND installation pruned —
+still refuses `record-unreadable`, and is the recorded gap. **Version: `patch`** —
+no record or workflow field, no strict key set, no hook added, removed or renamed,
+no matcher change, no config key, no attestation change; every change relaxes a
+deny or names a state, and the new argv modes are a call convention inside one
+installation.
 
 **A vanished recorded PROJECT root is an OPEN gap, not a settled distinction.**
 Removing the caller's project-root condition closed one of the two ways the two
@@ -945,7 +1016,11 @@ version-shape rule are unchecked:
 
 **Port-relevant.** The core half is `adoptableRecord` / `adoptContext` /
 `executingPluginVersion` / `adoptionWorkflowStatePath` plus `ADOPTION_REFUSALS`, in
-the cross-host `session-control-core-v1.js`. `discardSupersededLeases` is NO LONGER
+the cross-host `session-control-core-v1.js` — and, since the pruned-installation
+state landed, `readPrunedPluginRootContext`, `requireAbsentDirectoryPath` and the
+`allowMissingPluginRoot` waiver beside them, while the host half gains a NINTH
+obligation, enumerated with the other eight below rather than counted twice here.
+`discardSupersededLeases` is NO LONGER
 among them — it moved to `hooks/lib/review-evidence-sweep-v1.js` and is the EIGHTH
 host obligation enumerated below. Note that
 `adoptableRecord`'s `options.projectRoot` is now INERT — accepted and never read —
@@ -953,16 +1028,19 @@ so a port that takes only the core delta (the condition gone) while its own entr
 script still requires and host-path-renders a project-dir variable still exits
 before printing any report, which is the same wedge in a different place. The two
 halves move together. The host
-half is EIGHT separate obligations, and a port that takes only the core delta gets
+half is NINE separate obligations, and a port that takes only the core delta gets
 `adoptContext` with no reachable caller and keeps the wedge: the entry script, the
 recognizer's `RECOGNIZED` entry, the doctor branch and row, the Stop release, the
 deny scope at every gate that denies in this state, the skill, — easy to miss
 — a binder exporting a `privateRecordsDirectory` equivalent that applies the
 symlink/alias/permission/ownership checks, because the entry script resolves the
-records directory through it and never by hand-joining, and EIGHTH the sweep itself
+records directory through it and never by hand-joining, EIGHTH the sweep itself
 (`hooks/lib/review-evidence-sweep-v1.js`, plus the owner exports it consumes and the
 entry point's call to it) — a port that skips it re-mints the record and leaves every
-superseded lease wedging the store. A port that copies only
+superseded lease wedging the store — and NINTH the pruned-installation surface set: the
+binder mode pair, the shell wrapper pair, the deny scope, the gate branches, the Stop arm
+and the doctor probe, because a port that takes the reader alone gets a record it can
+adopt and no surface that tells the user so. A port that copies only
 the script gets a TypeError rendered as the wrong refusal. `zensu-codex`,
 `zensu-kiro` and `zensu-antigravity` were NOT included in this change.
 
@@ -1020,7 +1098,9 @@ that took the seam added two further `node --test` drivers to this suite plus ro
 450 lines of rows, and no Windows wall clock was taken afterwards. The 107613 ms
 figure describes a head that no longer exists. Do not budget against it; re-measure
 on the next green Windows run and replace the number and its provenance sentence
-together.
+together. Part D of the same suite — the pruned-installation rows, three further
+synthetic installs — landed after that note without a Windows sample either, so
+the same instruction applies twice over.
 
 Read the original sample as ONE sample, not as a bound. The sibling
 `stop-enforcer-self-review-routing` note in this file records a 29% spread across
@@ -2670,25 +2750,28 @@ properties are easy to get wrong and cost the whole feature:
 
 Shell wrappers live in `hooks/lib/zensu-session.sh` (`zensu_session_unregistered`,
 `zensu_session_orphaned_project_root`, `..._model`, plus
-`zensu_session_incompatible_runtime` / `..._model`). The orphaned wrapper **prints the
-dead path on stdout** and the incompatible-runtime pair prints `recorded<TAB>executing`;
+`zensu_session_incompatible_runtime` / `..._model` and
+`zensu_session_pruned_plugin_root` / `..._model`). The orphaned wrapper **prints the
+dead path on stdout** and BOTH version-pair predicates print `recorded<TAB>executing`;
 inside a PreToolUse gate stdout is the JSON decision channel, so a caller wanting the
 predicate alone must discard it explicitly, and a caller wanting the value must capture
 it into a variable before emitting anything.
 
-**The third predicate is a DIAGNOSIS, never a third relaxation.** `zensu_session_incompatible_runtime`
-belongs to this roster only because every gate that consults the two above must decide what
-to do about it too — and the answer is the same everywhere: keep denying. A workflow document
-is still reachable in that state, so relaxing would waive a live guarantee rather than a dead
-one. What it changes is the MESSAGE: `zensu_emit_hook_session_deny` gained a fourth scope,
-`incompatible-runtime`, taking the two versions as positional arguments. FIVE gates can deny
-in that state: the four shell gates emit that scope, and `pre-reviewer-capability-gate.sh` —
+**The third and fourth predicates are DIAGNOSES, never further relaxations.**
+`zensu_session_incompatible_runtime` and `zensu_session_pruned_plugin_root`
+belong to this roster only because every gate that consults the two above must decide what
+to do about them too — and the answer is the same everywhere: keep denying. A workflow document
+is still reachable in either state, so relaxing would waive a live guarantee rather than a dead
+one. What they change is the MESSAGE: `zensu_emit_hook_session_deny` now spells FIVE scopes,
+two of which — `incompatible-runtime` and `pruned-plugin-root` — take the two versions as
+positional arguments. FIVE gates can deny
+in either state: the four shell gates emit the matching scope, and `pre-reviewer-capability-gate.sh` —
 the `.*` matcher, where `isRecognizedInvocation` is false for every non-Bash tool — spells the
 same cause and remedy itself in JS, because the shell emitter is not reachable from it. A gate
 left on the generic text tells the user to start a fresh session while its sibling says the session can
-be repaired in place — two denies contradicting each other about the one bind failure that
-has an in-place remedy. The Stop hook is the single exception and RELEASES, because it cannot
-read the chain from an unbound session at all.
+be repaired in place — two denies contradicting each other about the two bind failures that
+have an in-place remedy. The Stop hook is the single exception and RELEASES for both, because
+it cannot read the chain from an unbound session at all.
 
 `zensu_emit_hook_session_deny` must never assert "no record" as the cause: naming the
 wrong relaxable state sends a user whose worktree was deleted hunting for a record that is

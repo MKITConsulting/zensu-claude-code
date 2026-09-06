@@ -2487,13 +2487,25 @@ else
   head -c 400 "$INERT_CONFIRM_OUT" 2>/dev/null
 fi
 
-# JUDGE-3 — the whole feature needs the SUPERSEDED installation to still exist.
-# Remove the recorded root and the diagnosis degrades to the `unbound` row whose
-# wording this work exists to remove. Pinned so the boundary is a stated contract
-# rather than an unnoticed fallback.
+# ---------------------------------------------------------------------------
+# Part D — the pruned recorded installation.
+#
+# JUDGE-3 stood here and pinned the OPPOSITE contract: a record whose minting
+# installation was pruned from the plugin cache was "neither named nor adoptable
+# (documented boundary)". That boundary is closed. The state has its own binder
+# mode, its own deny scope, a Stop release, a doctor row and an adoption path
+# through readPrunedPluginRootContext — the existence of the recorded root is the
+# ONE waived check, proven rather than assumed. Ids are namespaced AC-D## for the
+# same reason Part C's are AC-C##: this repo never recycles an id.
+#
+# ORDER IS LOAD-BEARING inside this part. Every row up to AC-D09 grades the
+# session in its wedged state, and AC-D06 — the adoption — ENDS that state, so it
+# runs last. The three tamper rows restore the record from a copy kept OUTSIDE
+# the store, because a stray file inside it is a different failure.
 PRUNED_CACHE_PARENT="$TMP/pruned/zensu/zensu"
 PRUNED_ROOT="$(node "$INSTALL_FIXTURE" "$ROOT" "$PRUNED_CACHE_PARENT" 0.17.0 "$ROOT_REVISION" 2>/dev/null)"
 PRUNED_SUCCESSOR="$(node "$INSTALL_FIXTURE" "$ROOT" "$PRUNED_CACHE_PARENT" 0.18.0 "$ROOT_REVISION" 2>/dev/null)"
+PRUNED_COMPATIBLE="$(node "$INSTALL_FIXTURE" "$ROOT" "$PRUNED_CACHE_PARENT" 0.17.1 "$ROOT_REVISION" 2>/dev/null)"
 PRUNED_DATA="$TMP/pruned-data"
 mkdir -p "$PRUNED_DATA" && chmod 700 "$PRUNED_DATA"
 PRUNED_SESSION='versioned-upgrade-pruned-root'
@@ -2505,42 +2517,409 @@ PRUNED_START="$(EVENT=SessionStart SESSION="$PRUNED_SESSION" CWD="$PROJECT" node
     cwd: process.env.CWD,
   }));
 ')"
-if [ -n "$PRUNED_ROOT" ] && [ -n "$PRUNED_SUCCESSOR" ] \
+PRUNED_TOOL_PAYLOAD="$(EVENT=PreToolUse SESSION="$PRUNED_SESSION" CWD="$PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: process.env.EVENT,
+    session_id: process.env.SESSION,
+    cwd: process.env.CWD,
+    tool_name: "Read",
+    tool_input: {file_path: "README.md"},
+  }));
+')"
+PRUNED_RECORD=''
+PRUNED_RECORD_COPY="$TMP/pruned-record.copy"
+# Drives one binder mode from one root: the exit status is the answer, stdout the
+# printed pair when there is one.
+pruned_mode() {
+  printf '%s' "$PRUNED_TOOL_PAYLOAD" \
+    | CLAUDE_PLUGIN_ROOT="$2" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
+      node "$2/hooks/lib/claude-hook-session-v1.js" "$1" 2>/dev/null
+}
+# adoption_reason with the verdict's pruned flag exposed, so a row can tell an
+# ordinary lineage adoption from the admission this part exists for.
+pruned_adoption_verdict() {
+  RECORDS="$PRUNED_DATA/session-control/v1/records" SID="$PRUNED_SESSION" DATA="$PRUNED_DATA" EXEC_ROOT="$1" node -e '
+    const core = require(process.env.EXEC_ROOT + "/hooks/lib/session-control-core-v1.js");
+    const verdict = core.adoptableRecord({
+      recordsDir: process.env.RECORDS, sessionId: process.env.SID, host: "claude",
+      pluginData: process.env.DATA, executingPluginRoot: process.env.EXEC_ROOT,
+    });
+    process.stdout.write(verdict.ok ? "ok pruned=" + verdict.prunedPluginRoot : verdict.reason);
+  ' 2>/dev/null || printf 'threw'
+}
+# gate_decision_from against the pruned store; the decision file is kept so a row
+# can also grep the reason the gate rendered.
+PRUNED_GATE_OUT="$TMP/pruned-gate.out"
+pruned_gate_decision() {
+  local hook="$1" payload="$2" err="$TMP/pruned-gate.err"
+  if printf '%s' "$payload" \
+      | CLAUDE_PLUGIN_ROOT="$PRUNED_SUCCESSOR" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
+        CLAUDE_PROJECT_DIR="$PROJECT" \
+        bash "$PRUNED_SUCCESSOR/hooks/$hook" >"$PRUNED_GATE_OUT" 2>"$err"; then
+    :
+  else
+    printf 'hook-exit-nonzero\n'
+    return
+  fi
+  # In THIS state the bind fails inside the core, not inside the binder, so the
+  # authoritative diagnostic on stderr is the raw core line rather than the
+  # binder-prefixed one gate_decision_from tolerates. It is exactly the line the
+  # Stop hook tells the user to read, so it is expected here — and only it.
+  if [ -s "$err" ] \
+      && grep -qv -e '^claude hook session binder: ' \
+        -e '^session-control-v1: context plugin root does not exist$' "$err"; then
+    printf 'hook-stderr\n'
+    return
+  fi
+  OUT_FILE="$PRUNED_GATE_OUT" node -e '
+    const fs = require("node:fs");
+    const raw = fs.readFileSync(process.env.OUT_FILE, "utf8").trim();
+    if (raw === "") { process.stdout.write("allow\n"); process.exit(0); }
+    try {
+      process.stdout.write(`${JSON.parse(raw).hookSpecificOutput?.permissionDecision || "allow"}\n`);
+    } catch (_error) { process.stdout.write("unparseable\n"); }
+  '
+}
+pruned_tamper() {
+  RECORD="$PRUNED_RECORD" FIELD="$1" VALUE="$2" node -e '
+    const fs = require("node:fs");
+    const record = JSON.parse(fs.readFileSync(process.env.RECORD, "utf8"));
+    record[process.env.FIELD] = process.env.VALUE;
+    fs.writeFileSync(process.env.RECORD, JSON.stringify(record, null, 2) + "\n");
+  '
+}
+# Self-verifying on purpose. A silent `cp` failure leaves the TAMPERED record in
+# place, and a tampered record produces exactly the values the rows after a
+# tamper assert — `record-unreadable` from the adoption path and `mode=no` from
+# the binder — so every one of them would report PASS for the wrong reason. The
+# post-condition is what makes "the record reaching the next row is pristine" an
+# observation rather than an assumption.
+pruned_restore() {
+  cp "$PRUNED_RECORD_COPY" "$PRUNED_RECORD" \
+    && cmp -s "$PRUNED_RECORD_COPY" "$PRUNED_RECORD" \
+    || check "Part D record restore failed — every later row grades a tampered record" FAIL
+}
+PRUNED_E64="$(node -e 'process.stdout.write("e".repeat(64))')"
+PRUNED_F64="$(node -e 'process.stdout.write("f".repeat(64))')"
+if [ -n "$PRUNED_ROOT" ] && [ -n "$PRUNED_SUCCESSOR" ] && [ -n "$PRUNED_COMPATIBLE" ] \
     && printf '%s' "$PRUNED_START" \
       | CLAUDE_PLUGIN_ROOT="$PRUNED_ROOT" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
         CLAUDE_PROJECT_DIR="$PROJECT" \
         bash "$PRUNED_ROOT/hooks/session-start-session-control.sh" >/dev/null 2>&1; then
-  # Positive control FIRST: without it both assertions below are absences that a
-  # fixture which never worked would satisfy just as well.
   PRUNED_KEY="$(node "$PRUNED_SUCCESSOR/hooks/lib/session-control-core-v1.js" session-key "$PRUNED_SESSION")"
-  PRUNED_BEFORE="$(adoption_reason "$PRUNED_DATA/session-control/v1/records" "$PRUNED_SESSION" "$PRUNED_DATA" "$PROJECT" "$PRUNED_SUCCESSOR")"
-  PRUNED_CONTROL=no
-  [ -f "$PRUNED_DATA/session-control/v1/records/$PRUNED_KEY.json" ] \
-    && [ "$PRUNED_BEFORE" = ok ] && PRUNED_CONTROL=yes
+  PRUNED_RECORD="$PRUNED_DATA/session-control/v1/records/$PRUNED_KEY.json"
+  cp "$PRUNED_RECORD" "$PRUNED_RECORD_COPY"
+  # Positive controls FIRST, while the recorded root still exists: the breaking
+  # successor adopts it as an ordinary lineage break, the pruned mode answers "not
+  # this state", and the lineage mode names it. Without them every absence below
+  # would be satisfied by a fixture that never worked.
+  PRUNED_BEFORE="$(pruned_adoption_verdict "$PRUNED_SUCCESSOR")"
+  PRUNED_MODE_BEFORE=no
+  pruned_mode pruned-plugin-root "$PRUNED_SUCCESSOR" >/dev/null && PRUNED_MODE_BEFORE=yes
+  PRUNED_LINEAGE_BEFORE=no
+  pruned_mode incompatible-runtime "$PRUNED_SUCCESSOR" >/dev/null && PRUNED_LINEAGE_BEFORE=yes
   rm -rf "$PRUNED_ROOT"
-  PRUNED_VERDICT="$(adoption_reason "$PRUNED_DATA/session-control/v1/records" "$PRUNED_SESSION" "$PRUNED_DATA" "$PROJECT" "$PRUNED_SUCCESSOR")"
-  PRUNED_TOOL_PAYLOAD="$(EVENT=PreToolUse SESSION="$PRUNED_SESSION" CWD="$PROJECT" node -e '
+
+  # AC-D01 — the predicate: named only once the root is gone, disjoint from the
+  # lineage predicate, and false for both relaxable states.
+  PRUNED_MODE_AFTER=no
+  PRUNED_PAIR="$(pruned_mode pruned-plugin-root "$PRUNED_SUCCESSOR")" && PRUNED_MODE_AFTER=yes
+  PRUNED_LINEAGE_AFTER=no
+  pruned_mode incompatible-runtime "$PRUNED_SUCCESSOR" >/dev/null && PRUNED_LINEAGE_AFTER=yes
+  PRUNED_UNREGISTERED=no
+  pruned_mode unregistered "$PRUNED_SUCCESSOR" >/dev/null && PRUNED_UNREGISTERED=yes
+  PRUNED_ORPHANED=no
+  pruned_mode orphaned-project-root "$PRUNED_SUCCESSOR" >/dev/null && PRUNED_ORPHANED=yes
+  if [ "$PRUNED_BEFORE" = 'ok pruned=false' ] && [ "$PRUNED_MODE_BEFORE" = no ] \
+      && [ "$PRUNED_LINEAGE_BEFORE" = yes ] && [ "$PRUNED_MODE_AFTER" = yes ] \
+      && [ "$PRUNED_PAIR" = "$(printf '0.17.0\t0.18.0')" ] && [ "$PRUNED_LINEAGE_AFTER" = no ] \
+      && [ "$PRUNED_UNREGISTERED" = no ] && [ "$PRUNED_ORPHANED" = no ]; then
+    check "AC-D01 the pruned-plugin-root mode names both versions once the root is gone, and only then; the lineage and relaxable predicates stay false" PASS
+  else
+    check "AC-D01 the pruned-plugin-root mode (before='$PRUNED_BEFORE' mode-before=$PRUNED_MODE_BEFORE lineage-before=$PRUNED_LINEAGE_BEFORE mode-after=$PRUNED_MODE_AFTER pair='$PRUNED_PAIR' lineage-after=$PRUNED_LINEAGE_AFTER unregistered=$PRUNED_UNREGISTERED orphaned=$PRUNED_ORPHANED)" FAIL
+  fi
+
+  # AC-D02 — adoptable, and the verdict says WHY it was admitted.
+  PRUNED_VERDICT="$(pruned_adoption_verdict "$PRUNED_SUCCESSOR")"
+  if [ "$PRUNED_VERDICT" = 'ok pruned=true' ]; then
+    check "AC-D02 a pruned recorded installation is adoptable and the verdict carries prunedPluginRoot" PASS
+  else
+    check "AC-D02 a pruned recorded installation is adoptable (got '$PRUNED_VERDICT')" FAIL
+  fi
+
+  # AC-D03 — existence is the ONLY waiver. A record that ALSO disagrees about its
+  # own content stays refused and unnamed, with the root gone.
+  pruned_tamper source_revision "sha256:$PRUNED_E64"
+  PRUNED_TAMPER_A="$(pruned_adoption_verdict "$PRUNED_SUCCESSOR")"
+  PRUNED_TAMPER_A_MODE=no
+  pruned_mode pruned-plugin-root "$PRUNED_SUCCESSOR" >/dev/null && PRUNED_TAMPER_A_MODE=yes
+  pruned_restore
+  pruned_tamper session_id_hash "sha256:$PRUNED_F64"
+  PRUNED_TAMPER_B="$(pruned_adoption_verdict "$PRUNED_SUCCESSOR")"
+  PRUNED_TAMPER_B_MODE=no
+  pruned_mode pruned-plugin-root "$PRUNED_SUCCESSOR" >/dev/null && PRUNED_TAMPER_B_MODE=yes
+  pruned_restore
+  if [ "$PRUNED_TAMPER_A" = record-unreadable ] && [ "$PRUNED_TAMPER_A_MODE" = no ] \
+      && [ "$PRUNED_TAMPER_B" = record-unreadable ] && [ "$PRUNED_TAMPER_B_MODE" = no ]; then
+    check "AC-D03 a pruned root combined with a drifted source revision or an altered session hash stays record-unreadable and unnamed" PASS
+  else
+    check "AC-D03 existence is the only waiver (source-revision='$PRUNED_TAMPER_A'/$PRUNED_TAMPER_A_MODE session-hash='$PRUNED_TAMPER_B'/$PRUNED_TAMPER_B_MODE)" FAIL
+  fi
+
+  # AC-D04 — a root under a directory that never existed is not a PRUNED
+  # installation; the reader requires the cache directory itself to survive.
+  # The pristine control first: without it the refusal below is only known to
+  # follow the tamper, not to be CAUSED by it — a record left tampered by an
+  # earlier row refuses identically.
+  PRUNED_PRISTINE="$(pruned_adoption_verdict "$PRUNED_SUCCESSOR")"
+  if [ "$PRUNED_PRISTINE" = 'ok pruned=true' ]; then
+    check "AC-D04 the record reaching this row is pristine, so the refusal below is caused by the tamper" PASS
+  else
+    check "AC-D04 pristine control before the tamper (verdict='$PRUNED_PRISTINE')" FAIL
+  fi
+  pruned_tamper plugin_root "$TMP/never-existed/zensu/zensu/0.17.0"
+  PRUNED_NO_PARENT="$(pruned_adoption_verdict "$PRUNED_SUCCESSOR")"
+  PRUNED_NO_PARENT_MODE=no
+  pruned_mode pruned-plugin-root "$PRUNED_SUCCESSOR" >/dev/null && PRUNED_NO_PARENT_MODE=yes
+  pruned_restore
+  if [ "$PRUNED_NO_PARENT" = record-unreadable ] && [ "$PRUNED_NO_PARENT_MODE" = no ]; then
+    check "AC-D04 a recorded root whose cache directory never existed is refused and unnamed" PASS
+  else
+    check "AC-D04 a recorded root whose cache directory never existed (verdict='$PRUNED_NO_PARENT' mode=$PRUNED_NO_PARENT_MODE)" FAIL
+  fi
+
+  # AC-D05 — the compatible-but-pruned sub-case. A 0.17.1 sibling would have
+  # SERVED the 0.17.0 record while its root existed; with the root gone it can
+  # serve nothing, so adoption must admit it rather than refuse `already-served`,
+  # and the predicate must name it whatever the lineage says.
+  PRUNED_COMPAT_VERDICT="$(pruned_adoption_verdict "$PRUNED_COMPATIBLE")"
+  PRUNED_COMPAT_MODE=no
+  PRUNED_COMPAT_PAIR="$(pruned_mode pruned-plugin-root "$PRUNED_COMPATIBLE")" && PRUNED_COMPAT_MODE=yes
+  PRUNED_COMPAT_LINEAGE=no
+  pruned_mode incompatible-runtime "$PRUNED_COMPATIBLE" >/dev/null && PRUNED_COMPAT_LINEAGE=yes
+  if [ "$PRUNED_COMPAT_VERDICT" = 'ok pruned=true' ] && [ "$PRUNED_COMPAT_MODE" = yes ] \
+      && [ "$PRUNED_COMPAT_PAIR" = "$(printf '0.17.0\t0.17.1')" ] && [ "$PRUNED_COMPAT_LINEAGE" = no ]; then
+    check "AC-D05 a compatible-but-pruned record is adoptable and named, never refused as already-served" PASS
+  else
+    check "AC-D05 compatible-but-pruned (verdict='$PRUNED_COMPAT_VERDICT' mode=$PRUNED_COMPAT_MODE pair='$PRUNED_COMPAT_PAIR' lineage=$PRUNED_COMPAT_LINEAGE)" FAIL
+  fi
+
+  # AC-D07 — every hook on the Bash matcher lets the adoption command through in
+  # the pruned state, and an ordinary command is denied with the pruned wording.
+  # The SAME enumerator Parts B and C use, and the same per-hook and per-platform
+  # expectations AC-C04 records.
+  PRUNED_ADOPT_CMD="CLAUDE_PLUGIN_DATA=$PRUNED_DATA bash $PRUNED_SUCCESSOR/hooks/lib/zensu-session-adopt.sh --confirm"
+  PRUNED_ADOPT_PAYLOAD="$(bash_payload "$PRUNED_SESSION" "$PRUNED_ADOPT_CMD")"
+  PRUNED_MATCHER_HOOKS="$(bash_matcher_hooks "$PRUNED_SUCCESSOR/hooks/hooks.json")"
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) PRUNED_EXPECTED=deny ;;
+    *) PRUNED_EXPECTED=allow ;;
+  esac
+  PRUNED_ENUMERATION_MISSING=''
+  for required in pre-bash-zensu-gate.sh pre-bash-source-write-gate.sh pre-write-secret-scan.sh pre-reviewer-capability-gate.sh; do
+    case "$PRUNED_MATCHER_HOOKS" in
+      *"$required"*) ;;
+      *) PRUNED_ENUMERATION_MISSING="$PRUNED_ENUMERATION_MISSING $required" ;;
+    esac
+  done
+  PRUNED_GATE_FAILURES=''
+  while IFS= read -r hook_name; do
+    [ -n "$hook_name" ] || continue
+    hook_expected="$(adopt_hook_expected "$hook_name" "$PRUNED_EXPECTED")"
+    if [ "$(pruned_gate_decision "$hook_name" "$PRUNED_ADOPT_PAYLOAD")" != "$hook_expected" ]; then
+      PRUNED_GATE_FAILURES="$PRUNED_GATE_FAILURES $hook_name"
+    fi
+  done <<EOF
+$PRUNED_MATCHER_HOOKS
+EOF
+  if [ -n "$PRUNED_MATCHER_HOOKS" ] && [ -z "$PRUNED_ENUMERATION_MISSING" ] && [ -z "$PRUNED_GATE_FAILURES" ]; then
+    check "AC-D07 every hook on the Bash matcher lets the adoption command through in the pruned state" PASS
+  else
+    check "AC-D07 every hook on the Bash matcher lets the adoption command through in the pruned state (unexpected:$PRUNED_GATE_FAILURES missing-from-enumeration:$PRUNED_ENUMERATION_MISSING)" FAIL
+  fi
+  # The deny half, hook by hook, and the two names absent from this list are the
+  # two `adopt_hook_expected` exempts above, for the same reasons stated there:
+  # pre-bash-zensu-gate.sh exits before it binds for a command carrying no zensu
+  # verb, and pre-bash-witness.sh is advisory and emits no permissionDecision at
+  # all. Neither is a denier here, so neither is graded as one.
+  PRUNED_PLAIN_PAYLOAD="$(bash_payload "$PRUNED_SESSION" "echo probe")"
+  PRUNED_DENY_FAILURES=''
+  for hook_name in pre-bash-source-write-gate.sh pre-write-secret-scan.sh pre-reviewer-capability-gate.sh; do
+    # SLOT-ANCHORED, both halves. A bare '0.17.0' needle matches whichever slot
+    # happens to carry it, so transposing the two arguments at any of the four
+    # gate call sites — or degrading only the executing half to `(unreadable)` —
+    # left this row green while every user in this state was told the wrong
+    # installation minted the record. The executing half was asserted nowhere.
+    if [ "$(pruned_gate_decision "$hook_name" "$PRUNED_PLAIN_PAYLOAD")" != deny ] \
+        || ! grep -qF 'removed from the plugin cache' "$PRUNED_GATE_OUT" \
+        || ! grep -qF '(version 0.17.0)' "$PRUNED_GATE_OUT" \
+        || ! grep -qF '(0.18.0) cannot re-verify' "$PRUNED_GATE_OUT" \
+        || ! grep -qF '/zensu:adopt-session' "$PRUNED_GATE_OUT" \
+        || ! grep -qF 'executing-runtime-older' "$PRUNED_GATE_OUT"; then
+      PRUNED_DENY_FAILURES="$PRUNED_DENY_FAILURES $hook_name"
+    fi
+  done
+  if [ -z "$PRUNED_DENY_FAILURES" ]; then
+    check "AC-D07 an ordinary command is denied by every binding Bash gate with the pruned wording, both versions and the adopt remedy" PASS
+  else
+    check "AC-D07 an ordinary command is denied with the pruned wording (failed:$PRUNED_DENY_FAILURES)" FAIL
+  fi
+
+  # AC-D11 — the Edit-matcher gate. It is registered on Edit|Write|MultiEdit, so
+  # no Bash-matcher row above can reach it and Part D built no Edit payload at
+  # all: its pruned capture and its pruned_plugin_root deny call had NO executed
+  # case anywhere. The shared-emitter argument bounds the WORDING, never the
+  # WIRING — a mis-spelled predicate name, or this branch placed after the generic
+  # zensu_emit_hook_session_deny six lines below it, would leave the Edit channel
+  # telling the user to start a fresh session while every other gate names the
+  # repair, with the whole suite green.
+  PRUNED_EDIT_PAYLOAD="$(EVENT=PreToolUse SESSION="$PRUNED_SESSION" CWD="$PROJECT" node -e '
     process.stdout.write(JSON.stringify({
       hook_event_name: process.env.EVENT,
       session_id: process.env.SESSION,
       cwd: process.env.CWD,
-      tool_name: "Read",
-      tool_input: {file_path: "README.md"},
+      tool_name: "Edit",
+      tool_input: {file_path: "README.md", old_string: "a", new_string: "b"},
     }));
   ')"
-  PRUNED_NAMED=no
+  if [ "$(pruned_gate_decision pre-edit-tdd-reminder.sh "$PRUNED_EDIT_PAYLOAD")" = deny ] \
+      && grep -qF 'removed from the plugin cache' "$PRUNED_GATE_OUT" \
+      && grep -qF '(version 0.17.0)' "$PRUNED_GATE_OUT" \
+      && grep -qF '(0.18.0) cannot re-verify' "$PRUNED_GATE_OUT" \
+      && grep -qF '/zensu:adopt-session' "$PRUNED_GATE_OUT"; then
+    check "AC-D11 the Edit-matcher gate denies with the pruned wording and both version slots" PASS
+  else
+    check "AC-D11 the Edit-matcher gate denies with the pruned wording (got: $(head -c 240 "$PRUNED_GATE_OUT" 2>/dev/null))" FAIL
+  fi
+
+  # AC-D12 — pre-bash-zensu-gate.sh, reached for the first time. Every other row
+  # hands it a command with no `zensu <noun> <verb>` form, so it returns at its own
+  # `[ -z "$INVOCATIONS" ] && exit 0` nine lines above the bind and its pruned
+  # branch is never executed — the allow half above is satisfied identically in a
+  # tree with that branch deleted. A real read-classified CLI invocation is the
+  # only shape that gets past the early return, and the classification happens
+  # AFTER the bind, so the pruned deny is what comes back.
+  PRUNED_ZENSU_PAYLOAD="$(bash_payload "$PRUNED_SESSION" 'zensu features list')"
+  if [ "$(pruned_gate_decision pre-bash-zensu-gate.sh "$PRUNED_ZENSU_PAYLOAD")" = deny ] \
+      && grep -qF 'removed from the plugin cache' "$PRUNED_GATE_OUT" \
+      && grep -qF '(version 0.17.0)' "$PRUNED_GATE_OUT" \
+      && grep -qF '(0.18.0) cannot re-verify' "$PRUNED_GATE_OUT" \
+      && grep -qF '/zensu:adopt-session' "$PRUNED_GATE_OUT"; then
+    check "AC-D12 the zensu CLI gate reaches its bind for a real invocation and denies with the pruned wording" PASS
+  else
+    check "AC-D12 the zensu CLI gate reaches its bind for a real invocation (got: $(head -c 240 "$PRUNED_GATE_OUT" 2>/dev/null))" FAIL
+  fi
+
+  # AC-D10 — the all-tool capability gate, for a NON-Bash tool: it spells its own
+  # deny, so it is graded on its own text.
+  PRUNED_CAP_OUT="$TMP/pruned-capability.out"
+  printf '%s' "$PRUNED_TOOL_PAYLOAD" \
+    | CLAUDE_PLUGIN_ROOT="$PRUNED_SUCCESSOR" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
+      CLAUDE_PROJECT_DIR="$PROJECT" \
+      bash "$PRUNED_SUCCESSOR/hooks/pre-reviewer-capability-gate.sh" >"$PRUNED_CAP_OUT" 2>/dev/null
+  # Slot-anchored for the same reason as the deny loop above, and it matters more
+  # here: this gate hand-authors its deny in JS instead of calling the shell
+  # emitter, so this is a SECOND, independent interpolation of the same pair —
+  # the copy most likely to drift. Unanchored, `${pruned.executing}` could render
+  # the recorded version, an empty string or `undefined` and this row still passed.
+  if grep -qF '"permissionDecision":"deny"' "$PRUNED_CAP_OUT" \
+      && grep -qF 'removed from the plugin cache' "$PRUNED_CAP_OUT" \
+      && grep -qF '(version 0.17.0)' "$PRUNED_CAP_OUT" \
+      && grep -qF '(0.18.0) cannot re-verify' "$PRUNED_CAP_OUT" \
+      && grep -qF '/zensu:adopt-session' "$PRUNED_CAP_OUT" \
+      && grep -qF 'executing-runtime-older' "$PRUNED_CAP_OUT" \
+      && ! grep -qF 'immutable context revalidation failed' "$PRUNED_CAP_OUT"; then
+    check "AC-D10 the capability gate denies a non-Bash tool with the pruned wording rather than the generic revalidation text" PASS
+  else
+    check "AC-D10 the capability gate denies a non-Bash tool with the pruned wording (got: $(head -c 300 "$PRUNED_CAP_OUT" 2>/dev/null))" FAIL
+  fi
+
+  # AC-D08 — the Stop hook RELEASES: exit 0, nothing on stdout, and stderr names
+  # both versions and the remedy. The control tampers the record — a pruned root
+  # combined with a second disagreement is still the blocking state.
+  PRUNED_STOP_PAYLOAD="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' "$PRUNED_SESSION")"
+  PRUNED_STOP_OUT="$TMP/pruned-stop.out"
+  PRUNED_STOP_ERR="$TMP/pruned-stop.err"
+  PRUNED_STOP_HOME="$TMP/pruned-stop-home"; mkdir -p "$PRUNED_STOP_HOME"
+  PRUNED_STOP_RC=0
+  printf '%s' "$PRUNED_STOP_PAYLOAD" \
+    | env -u ZENSU_CHAIN CLAUDE_PLUGIN_ROOT="$PRUNED_SUCCESSOR" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
+      CLAUDE_PROJECT_DIR="$PROJECT" HOME="$PRUNED_STOP_HOME" ZENSU_CONFIG="$TMP/no-such-config.json" \
+      bash "$PRUNED_SUCCESSOR/hooks/stop-chain-enforcer.sh" >"$PRUNED_STOP_OUT" 2>"$PRUNED_STOP_ERR" \
+    || PRUNED_STOP_RC=$?
+  pruned_tamper source_revision "sha256:$PRUNED_E64"
+  PRUNED_STOP_CONTROL="$TMP/pruned-stop-control.out"
+  printf '%s' "$PRUNED_STOP_PAYLOAD" \
+    | env -u ZENSU_CHAIN CLAUDE_PLUGIN_ROOT="$PRUNED_SUCCESSOR" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
+      CLAUDE_PROJECT_DIR="$PROJECT" HOME="$PRUNED_STOP_HOME" ZENSU_CONFIG="$TMP/no-such-config.json" \
+      bash "$PRUNED_SUCCESSOR/hooks/stop-chain-enforcer.sh" >"$PRUNED_STOP_CONTROL" 2>/dev/null || true
+  pruned_restore
+  if [ "$PRUNED_STOP_RC" = 0 ] && [ ! -s "$PRUNED_STOP_OUT" ] \
+      && grep -qF 'removed from the plugin cache' "$PRUNED_STOP_ERR" \
+      && grep -qF 'version 0.17.0' "$PRUNED_STOP_ERR" \
+      && grep -qF '/zensu:adopt-session --confirm' "$PRUNED_STOP_ERR" \
+      && grep -qF 'its recorded project root is intact' "$PRUNED_STOP_ERR" \
+      && ! grep -qF 'The binding that resolves the project root is what failed' "$PRUNED_STOP_ERR" \
+      && grep -qF '"decision":"block"' "$PRUNED_STOP_CONTROL"; then
+    check "AC-D08 Stop releases in the pruned state naming both versions and the remedy, and still blocks a pruned-and-tampered record" PASS
+  else
+    check "AC-D08 Stop releases in the pruned state (rc=$PRUNED_STOP_RC stdout-bytes=$(wc -c <"$PRUNED_STOP_OUT" | tr -d ' ') stderr: $(head -c 200 "$PRUNED_STOP_ERR" 2>/dev/null) control: $(head -c 80 "$PRUNED_STOP_CONTROL" 2>/dev/null))" FAIL
+  fi
+
+  # AC-D09 — the doctor row. The bite is again the ABSENCE of the old wording:
+  # before the third probe existed this state fell through to the line asserting
+  # the session has no record. Same HOME sandbox AC-C02 applies.
+  PRUNED_DOCTOR_OUT="$TMP/pruned-doctor.out"
+  PRUNED_DOCTOR_HOME="$TMP/pruned-doctor-home"; mkdir -p "$PRUNED_DOCTOR_HOME"
+  CLAUDE_CODE_SESSION_ID="$PRUNED_SESSION" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" HOME="$PRUNED_DOCTOR_HOME" \
+    bash "$PRUNED_SUCCESSOR/hooks/lib/zensu-doctor.sh" >"$PRUNED_DOCTOR_OUT" 2>/dev/null
+  if grep -qF 'removed from the plugin cache' "$PRUNED_DOCTOR_OUT" \
+      && grep -qF 'record minted by 0.17.0, executing 0.18.0' "$PRUNED_DOCTOR_OUT" \
+      && ! grep -qF 'no valid Session Control record' "$PRUNED_DOCTOR_OUT" \
+      && ! grep -qF 'declares an incompatible lineage' "$PRUNED_DOCTOR_OUT"; then
+    check "AC-D09 the doctor renders the pruned row with both versions and never claims 'no valid record' or a lineage break" PASS
+  else
+    check "AC-D09 the doctor renders the pruned row with both versions" FAIL
+    grep -F 'binding:' "$PRUNED_DOCTOR_OUT" 2>/dev/null
+  fi
+
+  # AC-D06 — the repair, end to end, and therefore LAST: report, confirm, and the
+  # very next bind from the successor succeeds.
+  PRUNED_REPORT_OUT="$TMP/pruned-adopt-report.out"
+  CLAUDE_CODE_SESSION_ID="$PRUNED_SESSION" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
+    bash "$PRUNED_SUCCESSOR/hooks/lib/zensu-session-adopt.sh" >"$PRUNED_REPORT_OUT" 2>&1 || true
+  PRUNED_CONFIRM_OUT="$TMP/pruned-adopt-confirm.out"
+  CLAUDE_CODE_SESSION_ID="$PRUNED_SESSION" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
+    bash "$PRUNED_SUCCESSOR/hooks/lib/zensu-session-adopt.sh" --confirm >"$PRUNED_CONFIRM_OUT" 2>&1 || true
+  PRUNED_BOUND=no
+  PRUNED_BIND_OUT="$TMP/pruned-bind.out"
   if printf '%s' "$PRUNED_TOOL_PAYLOAD" \
       | CLAUDE_PLUGIN_ROOT="$PRUNED_SUCCESSOR" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
-        node "$PRUNED_SUCCESSOR/hooks/lib/claude-hook-session-v1.js" incompatible-runtime >/dev/null 2>&1; then
-    PRUNED_NAMED=yes
+        node "$PRUNED_SUCCESSOR/hooks/lib/claude-hook-session-v1.js" >"$PRUNED_BIND_OUT" 2>/dev/null \
+      && grep -qF 'export ZENSU_SESSION_KEY=' "$PRUNED_BIND_OUT"; then
+    PRUNED_BOUND=yes
   fi
-  if [ "$PRUNED_CONTROL" = yes ] && [ "$PRUNED_VERDICT" = record-unreadable ] && [ "$PRUNED_NAMED" = no ]; then
-    check "JUDGE-3 a pruned recorded installation is neither named nor adoptable (documented boundary)" PASS
+  PRUNED_MODE_AFTER_ADOPTION=no
+  pruned_mode pruned-plugin-root "$PRUNED_SUCCESSOR" >/dev/null && PRUNED_MODE_AFTER_ADOPTION=yes
+  if grep -qF 'ADOPTABLE' "$PRUNED_REPORT_OUT" \
+      && grep -qF 'installation no longer on disk' "$PRUNED_REPORT_OUT" \
+      && grep -qF 'ADOPTED' "$PRUNED_CONFIRM_OUT" \
+      && grep -qF 'installation no longer on disk' "$PRUNED_CONFIRM_OUT" \
+      && grep -qF 'could not be re-measured' "$PRUNED_REPORT_OUT" \
+      && grep -qF 'could not be re-measured' "$PRUNED_CONFIRM_OUT" \
+      && grep -qF 'record minted by : 0.17.0' "$PRUNED_CONFIRM_OUT" \
+      && grep -qF 'now served by    : 0.18.0' "$PRUNED_CONFIRM_OUT" \
+      && [ -f "$PRUNED_DATA/session-control/v1/records/$PRUNED_KEY.superseded-0.17.0.json" ] \
+      && [ "$PRUNED_BOUND" = yes ] && [ "$PRUNED_MODE_AFTER_ADOPTION" = no ]; then
+    check "AC-D06 the pruned record adopts end to end, says the installation is gone, keeps the superseded copy, and binds from the successor afterwards" PASS
   else
-    check "JUDGE-3 a pruned recorded installation is neither named nor adoptable (control=$PRUNED_CONTROL before='$PRUNED_BEFORE' verdict='$PRUNED_VERDICT' named=$PRUNED_NAMED)" FAIL
+    check "AC-D06 the pruned record adopts end to end (bound=$PRUNED_BOUND mode-after=$PRUNED_MODE_AFTER_ADOPTION)" FAIL
+    head -c 400 "$PRUNED_REPORT_OUT" 2>/dev/null
+    head -c 400 "$PRUNED_CONFIRM_OUT" 2>/dev/null
   fi
 else
-  check "JUDGE-3 a pruned recorded installation is neither named nor adoptable (fixture unavailable)" FAIL
+  check "Part D fixture unavailable: the pruned-installation rows could not be armed" FAIL
 fi
 
 # CONV-1 — the skill's refusal table is the one independent re-encoding of

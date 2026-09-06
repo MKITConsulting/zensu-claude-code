@@ -95,6 +95,15 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
         "${ZENSU_LINEAGE%%$'\t'*}" "${ZENSU_LINEAGE##*$'\t'}"
       exit 0
     fi
+    # The other named state with the same in-place remedy: the installation that
+    # minted the record was pruned from the plugin cache. Disjoint from the
+    # lineage question above, so the order of the two is immaterial.
+    if ZENSU_PRUNED="$(zensu_session_pruned_plugin_root "$INPUT")" \
+      && [ -n "$ZENSU_PRUNED" ]; then
+      zensu_emit_hook_session_deny pruned-plugin-root \
+        "${ZENSU_PRUNED%%$'\t'*}" "${ZENSU_PRUNED##*$'\t'}"
+      exit 0
+    fi
     zensu_emit_hook_session_deny narrowed
     exit 0
   fi

@@ -2,8 +2,10 @@
 name: adopt-session
 description: >
   [Zensu] Rescue the CURRENT session when a Zensu plugin update landed while it was
-  running. Its Session Control record is then intact but the executing installation
-  declares an incompatible lineage, so every stateful tool fails closed: Edit and Write
+  running, or when the installation that minted its record was pruned from the plugin
+  cache. Its Session Control record is then intact but the executing installation
+  either declares an incompatible lineage or cannot re-verify the record, so every
+  stateful tool fails closed: Edit and Write
   deny, Bash denies everything but the two recognized commands, subagents cannot start,
   and Stop cannot prove completion. This skill reports whether the running installation
   may take the record over in place, and with `--confirm` performs that adoption: it
@@ -43,6 +45,19 @@ binding: this session's Session Control record is intact, but the running Zensu
 installation declares an incompatible lineage (record minted by X, executing Y)
 ```
 
+The other row this skill answers, with the same remedy:
+
+```
+binding: this session's Session Control record is intact, but the installation
+that minted it has been removed from the plugin cache (record minted by X, executing Y)
+```
+
+That is the pruned-installation state: the host keeps only a few plugin versions
+in its cache, so a session that outlives them lands here whatever its lineage.
+Nothing can re-verify the record any more and no installation serves it; adoption
+re-mints it under the running installation, and the report marks the minting
+version `(installation no longer on disk)`.
+
 If the doctor row instead says the session has **no** record, or that the
 recorded **project root** no longer exists, this skill does not apply — those are
 different states with different remedies, and it will refuse.
@@ -61,8 +76,9 @@ different states with different remedies, and it will refuse.
   For any other failure, that is `/zensu:doctor`.
 - Clearing a review chain or granting a budget. The chain state survives adoption
   untouched and is enforced again on the very next Stop.
-- Any bind failure other than the declared-incompatible lineage — the refusal
-  table in Phase 1 below names each one and its own remedy.
+- Any bind failure other than the declared-incompatible lineage and the pruned
+  minting installation — the refusal table in Phase 1 below names each one and its
+  own remedy.
 
 ## What This Skill Does
 
@@ -146,6 +162,15 @@ so the distinction exists; adoption simply does not consume it yet. Widening it 
 separate, larger decision, because adoption would have to succeed with an anchor
 that does not exist. Do not read "that one still refuses" as "and should".
 
+**The OTHER recorded root is closed.** A minting installation pruned from the
+plugin cache is admitted at condition 1 through `readPrunedPluginRootContext`,
+which waives that root's existence alone and proves the absence; the strict read
+must fail first, so it never reaches a record any installation could still serve.
+Nothing can re-measure a tree that is gone, so the runtime digest and the declared
+version are taken on the record's word there — the stated cost, and the reason such
+a record is adopted once rather than served. The COMBINED state — project root gone
+AND installation pruned — still refuses `record-unreadable`.
+
 Main thread only: a reviewer or neutral child is refused by every gate.
 
 ## Phase 1: Report, confirm, adopt
@@ -177,7 +202,7 @@ render that verbatim too.
 | Reason | Meaning |
 |--------|---------|
 | `private-record-store-unsafe` | Entry-point refusal, raised before `adoptableRecord` runs: the private record store itself could not be opened safely — missing, aliased, or carrying unsafe permissions or ownership. |
-| `record-unreadable` | The record no longer re-verifies against the installation that minted it — pruned from the cache, altered, or a real schema change. |
+| `record-unreadable` | The record no longer re-verifies against the installation that minted it — altered, its recorded project root gone, or a real schema change. A minting installation merely pruned from the cache is adoptable ON ITS OWN and is no longer this refusal; it IS still this refusal when the recorded project root is ALSO gone, because the relaxed pruned reader does not waive that root and nothing is left to anchor the record to. |
 | `plugin-data-mismatch` | The record belongs to a different plugin-data store. Never relaxed. |
 | `already-served` | Nothing to RE-MINT, and TWO things beside the record can still be wedged. **The workflow document** this session is anchored to may be gone — a deleted and re-created worktree loses it, because `.zensu/state/` is gitignored — and while it is, the capability gate denies every tool in the session. **The lease store** is the second: an adoption writes the record first and sweeps the store afterwards, so a run that died in between leaves exactly that state. The report below the remedy says which of the two applies. Re-running with `--confirm` repairs both, idempotently, and re-mints nothing. If tools still fail after that, run `/zensu:doctor`. |
 | `not-a-sibling-installation` | The executing tree is not an upgrade of the recorded one (for example a `--plugin-dir` checkout). |
