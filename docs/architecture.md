@@ -113,7 +113,7 @@ Moving it into a library fixes that and adds what the prose never had: a witness
 ## Best Solution First
 
 A second normative rule ships the same way, and the pair is now a **pattern worth naming**: a rule block lives under `docs/` between HTML markers, and a hook reads it out of that file *at run time* and injects it as `additionalContext`. The canonical file is the only copy; the carrier cannot drift from it; and `docs/` sits inside the Session Control runtime digest, so the declared source of truth is tamper-evident within a session — while the executing plugin root is the recorded one. `servesRecordedRuntime` lets a compatible sibling install serve a record it did not mint, and both carriers read from the *executing* root, so across a mid-session upgrade the injected bytes come from a tree no in-session digest measured; each rule's own build-time pins are what bind the text there. A third such rule belongs here too — and one already exists without following it:
-`hooks/user-prompt-zen-mode.sh` injects a ~4.7 KB always-on contract on the same
+`hooks/user-prompt-zen-mode.sh` injects a ~4.2 KB always-on contract on the same
 `UserPromptSubmit` channel, hardcoded as a shell heredoc rather than read from a marker
 block. It is named here so the next reader does not conclude it was overlooked.
 
@@ -158,15 +158,15 @@ enforced.** `C6` in `tests/structure/test-evidence-discipline.sh` derives an emi
 from a hook and greps this paragraph for it. Name the figure, because the referent is easy to
 get backwards: what `C6` pins is the **939-character** figure stated below for
 `session-start-evidence-discipline.sh`, not the 1756/1764 headline for this hook — a grep of
-`tests/` for either of those two numbers returns nothing, and the 6.3 KB per-turn total derived
-from 1764 is unpinned with them. Every OTHER number here — the sibling's emitted length, the
+`tests/` for either of those two numbers returns nothing, and the per-turn total derived from
+the 1756-character half is unpinned with them. Every OTHER number here — the sibling's emitted length, the
 KB estimates and the per-turn totals — is hand-computed and illustrative: they were correct
 when written, nothing re-derives them, and a change to any input silently ages them. Read them
 as an order of magnitude, not as a measurement, and do not add a new figure here expecting the
 suite to keep it honest. Driving the hook directly, each injection
 is **1756 characters / 1764 bytes** of `additionalContext`, identical on both legs. For scale,
 `session-start-evidence-discipline.sh` emits 939 characters, and `hooks/user-prompt-zen-mode.sh`
-injects roughly 4.7 KB on the same prompt channel. The DIRECTIVE behind that figure is bounded
+injects roughly 4.2 KB on the same prompt channel. The DIRECTIVE behind that figure is bounded
 since the chain-progress anchor landed — `Z30` in `tests/structure/test-zen-mode.sh` holds it
 under a declared ceiling — but `Z30` reads the hook and never opens this document, so the number
 written here is hand-derived like every other one below, and ages the same way. `C6` above stays
@@ -175,8 +175,11 @@ the only figure a check reads out of this paragraph. A `/zensu:tdd` review round
 **at least** 12 KB across one fan-out — more with repo-custom personas, and again per auto-fix
 round. The dominant term, though, is the other leg, and it is the one the design deliberately
 leaves unbounded: `UserPromptSubmit` fires every prompt with no de-bounce, so with zen-mode active
-— the shipped default — the standing per-prompt injection is 4664 + 1764 = about **6.3 KB every
-turn**, roughly 126 KiB over 20 turns and 377 KiB over 60. That is the real price of "resident
+— the shipped default — the standing per-prompt injection is 4224 + 1756 = about **5980
+characters every turn**, roughly 117 KiB over 20 turns and 351 KiB over 60. The two operands are
+stated in the SAME unit on purpose: 4224 is a character count and the sibling's headline carries
+both a character and a byte figure, so an earlier wording summed 4224 characters with 1764 bytes
+and called the result KB. That is the real price of "resident
 rather than periodic", and it should be argued on those numbers rather than on the fan-out figure.
 The subagent leg deliberately has no per-`agent_type` filter — the requirement
 was that the rule reach subagents, and the block's own precedence clause tells a confined reviewer

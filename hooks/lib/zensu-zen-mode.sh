@@ -73,12 +73,27 @@ if ! _zensu_sid="$(zensu_resolve_session_id)" || [ -z "$_zensu_sid" ]; then
   exit 2
 fi
 
+_zensu_status_root="$_zensu_pd"
 ZEN_STATE_DIR="$_zensu_pd/.zensu/state"
+ZEN_ZENSU_DIR="$_zensu_pd/.zensu"
 ZEN_MARKER="$ZEN_STATE_DIR/zen-mode-$_zensu_sid.json"
 unset _zensu_pd _zensu_sid
 
-if [ -L "$ZEN_STATE_DIR" ] || [ -L "$ZEN_MARKER" ]; then
+# THIS WRITER IS THE OUT-OF-BAND REMEDY, so it must be at least as hard as the
+# in-band one. `user-prompt-zen-mode.sh` names this script in the sentence it
+# prints when the in-band `zen off` escape is unavailable, so a hostile or
+# corrupt marker path that makes the hook decline must not then wedge or destroy
+# HERE. All three guards the hook carries are mirrored: the `.zensu` component
+# (testing `state` alone resolves THROUGH a symlinked parent), a present-but-not
+# regular marker (a FIFO is neither a symlink nor a regular file, and a shell
+# redirect opens one BLOCKING with no reader), and a landing that publishes by
+# rename rather than truncating a name a hard link may point elsewhere.
+if [ -L "$ZEN_ZENSU_DIR" ] || [ -L "$ZEN_STATE_DIR" ] || [ -L "$ZEN_MARKER" ]; then
   echo "zensu-zen-mode.sh: refusing to follow a symlinked state path — remove $ZEN_MARKER and its directory link by hand" >&2
+  exit 2
+fi
+if [ -e "$ZEN_MARKER" ] && [ ! -f "$ZEN_MARKER" ]; then
+  echo "zensu-zen-mode.sh: $ZEN_MARKER is not a regular file — remove it by hand" >&2
   exit 2
 fi
 
@@ -87,7 +102,23 @@ zen_write_marker() {
     echo "zensu-zen-mode.sh: cannot create state directory $ZEN_STATE_DIR" >&2
     exit 2
   }
-  printf '{"active":%s}\n' "$1" > "$ZEN_MARKER" || {
+  ZEN_MARKER="$ZEN_MARKER" ZEN_VALUE="$1" node -e '
+    const fs = require("fs");
+    const crypto = require("crypto");
+    const target = process.env.ZEN_MARKER;
+    let st = null;
+    try { st = fs.lstatSync(target); } catch (e) { if (e.code !== "ENOENT") process.exit(1); }
+    if (st && (!st.isFile() || st.nlink !== 1)) process.exit(1);
+    const tmp = target + ".tmp-" + crypto.randomBytes(6).toString("hex");
+    let fd;
+    try {
+      fd = fs.openSync(tmp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+      fs.writeSync(fd, "{\"active\":" + process.env.ZEN_VALUE + "}\n");
+      fs.fsyncSync(fd);
+    } catch (e) { try { if (fd !== undefined) fs.closeSync(fd); } catch (_) {} try { fs.unlinkSync(tmp); } catch (_) {} process.exit(1); }
+    try { fs.closeSync(fd); } catch (_) {}
+    try { fs.renameSync(tmp, target); } catch (e) { try { fs.unlinkSync(tmp); } catch (_) {} process.exit(1); }
+  ' || {
     echo "zensu-zen-mode.sh: cannot write $ZEN_MARKER" >&2
     exit 2
   }
@@ -103,6 +134,17 @@ case "$ZEN_VERB" in
     echo "zen-mode: off"
     ;;
   --status)
+    # THE SAME PERMISSION ARM THE HOOK CARRIES, through ONE shared predicate in
+    # `zensu-session.sh`. Without it `[ -f ]` fails with EACCES on an unsearchable
+    # ancestor and this verb reported the configured default - `on` by default -
+    # for a session the hook resolves OFF and injects nothing into. Two readers of
+    # one state must not disagree, and this is the surface a user consults exactly
+    # when the mode misbehaves.
+    #
+    # IT SITS AFTER THE MARKER ARMS, matching the hook`s own order. Testing it
+    # first diverged for a process that CAN traverse a mode-000 directory (root,
+    # CAP_DAC_OVERRIDE): the hook read and honoured the marker while this verb
+    # answered "not searchable" - the disagreement the arm exists to prevent.
     if [ -f "$ZEN_MARKER" ]; then
       # A marker that is unreadable or does not spell out an active mode counts
       # as off: an unparsable state file must never impose the mode on a user who
@@ -112,6 +154,12 @@ case "$ZEN_VERB" in
       else
         echo "off"
       fi
+    elif zen_path_untraversable "$ZEN_MARKER" "$_zensu_status_root"; then
+      # BARE `off` on stdout, reason on stderr. The verb`s contract is two words
+      # and a consumer may compare for equality, so a third stdout spelling would
+      # break it - and `skills/zen-mode/SKILL.md` states that contract.
+      echo "zensu-zen-mode.sh: the state directory is not searchable" >&2
+      echo "off"
     else
       source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
       if zensu_zen_mode_default_on; then echo "on"; else echo "off"; fi

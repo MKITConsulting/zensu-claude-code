@@ -154,6 +154,23 @@ function readRegularFileSnapshot(
 ) {
   const noFollow = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)
     ? fs.constants.O_NOFOLLOW : 0;
+  // O_NONBLOCK is what keeps this reader from BLOCKING, which is a different
+  // hazard from the symlink one O_NOFOLLOW covers. `open(2)` on a FIFO with no
+  // writer waits forever, and the `isFile()` rejection below cannot help: it runs
+  // on the DESCRIPTOR, so it is reached only once the open has already returned.
+  // Every caller reads a path under `<project>/.zensu/state/`, which is writable
+  // from inside a session and covered by no gate while a chain is inactive, so a
+  // planted FIFO is reachable — and one caller, the zen-mode UserPromptSubmit
+  // hook, reads on EVERY prompt, which turns a blocked open into a session with
+  // no way out: the prompt never reaches the model, so the off-phrase escape is
+  // never evaluated either.
+  //
+  // POSIX specifies the flag has no effect on the open of a REGULAR file, so no
+  // legitimate caller changes behaviour; on a FIFO or device the open returns
+  // immediately and the existing `fstat` `isFile()` check rejects it. Guarded the
+  // same way as O_NOFOLLOW because the constant is not defined on every build.
+  const nonBlock = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NONBLOCK)
+    ? fs.constants.O_NONBLOCK : 0;
   let descriptor;
   let pathBefore = null;
   const parent = path.dirname(file);
@@ -176,7 +193,7 @@ function readRegularFileSnapshot(
       if (pathBefore.isSymbolicLink()) fail(`symlink file rejected: ${file}`);
     }
     try {
-      descriptor = fs.openSync(file, fs.constants.O_RDONLY | noFollow);
+      descriptor = fs.openSync(file, fs.constants.O_RDONLY | noFollow | nonBlock);
     } catch (error) {
       if (missingAllowed && error.code === 'ENOENT') return null;
       if (error.code === 'ELOOP' || error.code === 'EMLINK') {
@@ -1406,7 +1423,9 @@ function readOrphanedProjectRootContext(options) {
 // composes it with the creating helpers; adoptionWorkflowStatePath composes it
 // without them. Both must agree, or the read-only probe and the read it guards
 // resolve to different files.
-const WORKFLOW_STATE_SEGMENTS = ['.zensu', 'state'];
+// Frozen because it is EXPORTED: an external consumer that pushed a segment
+// would move where this module itself resolves every workflow document.
+const WORKFLOW_STATE_SEGMENTS = Object.freeze(['.zensu', 'state']);
 const WORKFLOW_STATE_PREFIX = 'tdd-phase-';
 
 const ADOPTION_REFUSALS = {
@@ -4327,6 +4346,13 @@ module.exports = {
   SCHEMA_VERSION,
   WORKFLOW_SCHEMA,
   ATTESTATION_SCHEMA,
+  // The workflow-document LAYOUT, exported so a caller that must judge the file
+  // before this module opens it does not re-spell the path. `workflowStateFile`
+  // is deliberately NOT the export for that job: it reaches
+  // `ensureDescendantDirectory`, so merely asking it for the path CREATES the
+  // directory, which is the opposite of what a read-only pre-check wants.
+  WORKFLOW_STATE_SEGMENTS,
+  WORKFLOW_STATE_PREFIX,
   sessionIdHash,
   sessionKey,
   computeRuntimeDigest,

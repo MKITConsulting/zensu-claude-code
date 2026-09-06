@@ -18,11 +18,15 @@
 // catching what it is named for now turns a CI-run suite red.
 //
 // The two are not the same guarantee and the difference is stated rather than
-// implied: a compile check cannot see a logic defect. Sixteen of the directory's
-// twenty-three bodies carry a vector — both anchor scenarios and the safety
-// carve-out, which the sibling suite calls the reason this eval exists. The
-// seven in contract-compliance.yaml and precedence-over-compression.yaml are
-// compile-checked only. Adding a table for one of those is the standing fix.
+// implied: a compile check cannot see a logic defect. The counts are derived at
+// run time by the roster test below rather than written out here: the previous
+// sentence read "Sixteen of the directory's twenty-three bodies" against a
+// directory that carried twenty-two, and a hand-maintained numeral in a comment
+// nobody executes is the drift this file is otherwise built to catch. Both
+// anchor scenarios and the safety carve-out carry full vectors; the
+// supplied-`none` grader in contract-compliance.yaml carries a FOCUSED test of
+// its own (see the end of this file), and precedence-over-compression.yaml is
+// compile-checked only. Adding a table for that one is the standing fix.
 //
 // It is driven from tests/structure/test-zen-mode.sh, which is in
 // `ciStructureTests`. Driving it from test-promptfoo-zen-mode.sh would put it
@@ -185,7 +189,11 @@ function caseInput(c) {
 const scenarios = fs.readdirSync(SCENARIO_DIR).filter((f) => f.endsWith(".yaml")).sort();
 
 test("every scenario in the directory exposes at least one executable grader", () => {
-  assert.ok(scenarios.length >= 3, `expected at least 3 scenarios, found ${scenarios.length}`);
+  // The current scenario count, not a round number below it: at 3 against a
+  // directory of 5, a scenario deleted together with its registration passed
+  // every check in the tree. Raising this is the registration step for a new
+  // scenario, the same convention `Z29_FLOOR` and `Z31_FLOOR` follow.
+  assert.ok(scenarios.length >= 5, `expected at least 5 scenarios, found ${scenarios.length}`);
   for (const f of scenarios) {
     const raw = fs.readFileSync(path.join(SCENARIO_DIR, f), "utf8");
     // DERIVED, not a floor of one. At `>= 1` a grader rewritten as `value: >`
@@ -228,7 +236,12 @@ test("every scenario in the directory exposes at least one executable grader", (
 // themselves were in.
 
 const EXTRACTOR_RE = /const prose = raw\.split[\s\S]*?\|\| raw;/g;
-const UNDECORATE_RE = /const undecorate = \(s\) =>.*$/gm;
+// BOUNDED BY ITS TERMINATOR, not by end-of-line. With `.` plus `m` this
+// captured only the first physical line, so two copies reformatted across
+// two lines with identical first lines and different second lines collapsed
+// to one entry and read as identical. Its sibling EXTRACTOR_RE was already
+// multi-line safe; the asymmetry was undeclared.
+const UNDECORATE_RE = /const undecorate = \(s\) =>[\s\S]*?;/g;
 
 function normalized(s) {
   return s.replace(/\s+/g, " ").trim();
@@ -285,15 +298,81 @@ test("the extractor identity check can actually fail", () => {
 });
 
 // ── the anchor scenario's pinned vector ─────────────────────────────────────
-// Six graders, in file order:
-//   1 anchor present and marked
-//   2 anchor positioned above the closing next step, or above a final step list
+// FIVE graders, in file order:
+//   1 the SUPPLIED anchor came back verbatim
+//   2 the anchor sits above the closing next step, or above a final step list
 //   3 no separate `Step N of M` counter
-//   4 no tick on a step the run never reached (name-based diagnostic)
-//   5 marks match the framing, and no tick appears after the running mark
-//   6 no tool call
+//   4 no anchor invented beside the supplied one
+//   5 no tool call
+//
+// The three mark-derivation graders this table used to pin are gone with the
+// contract they graded: the hook resolves the anchor out of the session's own
+// workflow document now, so the reply no longer decides which step carries which
+// mark. Exactness replaces them — the line is fixed, so a case either reproduces
+// it or does not, and the remaining anchor-shaped failure is inventing a second
+// one beside it.
 
 const ANCHOR_FILE = path.join(SCENARIO_DIR, "anchor-multi-step.yaml");
+
+// The line this scenario's injected note supplies, READ OUT OF THE SPEC BLOCK.
+// It used to be hand-typed here and again inside each grader body, three
+// independent literals for one value — and the structure suites only check that
+// the token is one the module CAN produce, so swapping the scenario's anchor for
+// any other valid line left every check green while every compliant live reply
+// would have been graded a violation.
+function suppliedAnchor(file) {
+  const raw = fs.readFileSync(file, "utf8");
+  const m = raw.match(/ZENSU CHAIN ANCHOR: (\S.*)$/m);
+  assert.ok(m, `${path.basename(file)}: no ZENSU CHAIN ANCHOR field in the spec_block`);
+  return m[1].trim();
+}
+
+const SUPPLIED = suppliedAnchor(ANCHOR_FILE);
+
+// EVERY scenario's supplied anchor is bound, not just the two that carry a line.
+//
+// `suppliedAnchor` was read for the anchor scenarios alone, so the three that
+// supply `none` were unbound: putting a real anchor into one of their spec
+// blocks would leave every check green while the live eval graded each
+// compliant reply — which renders no anchor, correctly — as a violation. That is
+// the one outcome the eval README says an eval must never produce.
+//
+// The roster is DERIVED from the directory, so a sixth scenario has to declare
+// its intent here rather than arriving unbound. The `none` set is named
+// explicitly because it is a CLAIM about those graders: they assume no anchor is
+// rendered, and a scenario that starts supplying one needs its graders rewritten
+// rather than this list extended.
+const NONE_SCENARIOS = [
+  "contract-compliance.yaml",
+  "precedence-over-compression.yaml",
+  "safety-carve-out.yaml",
+];
+test("every scenario supplies an anchor the module can produce", () => {
+  const mod = require(path.join(ROOT, "hooks", "lib", "zen-anchor-v1.js"));
+  const producible = new Set([mod.ANCHOR_NONE]);
+  for (const shape of Object.keys(mod.SHAPE_POSITION || {})) producible.add(mod.anchorToken(shape));
+  assert.ok(producible.size > 1, "the module produced no anchor at all");
+  for (const f of scenarios) {
+    const supplied = suppliedAnchor(path.join(SCENARIO_DIR, f));
+    assert.ok(
+      producible.has(supplied),
+      `${f}: supplies ${JSON.stringify(supplied)}, which zen-anchor-v1.js cannot produce`,
+    );
+    // BOTH directions. Asserting only that a listed scenario supplies `none` let a
+    // NEW scenario supplying `none` arrive unbound, which is the case the comment
+    // above claims is impossible — its graders would assume an anchor while the
+    // spec block renders none, and the live eval would grade every compliant reply
+    // a violation.
+    assert.strictEqual(
+      NONE_SCENARIOS.includes(f),
+      supplied === mod.ANCHOR_NONE,
+      `${f}: supplies ${JSON.stringify(supplied)} but is ${NONE_SCENARIOS.includes(f) ? "" : "not "}listed as a none-scenario — declare its intent or rewrite its graders`,
+    );
+  }
+  for (const f of NONE_SCENARIOS) {
+    assert.ok(scenarios.includes(f), `${f} is listed as a none-scenario but is not in the directory`);
+  }
+});
 
 const CASES = [
   {
@@ -303,232 +382,168 @@ const CASES = [
       "",
       "The call sites are inventoried and the adapter is rewritten.",
       "",
-      "Run: ✓inventory ✓adapter ▶tests ·changelog ·pr",
+      SUPPLIED,
       "",
       "**Next step:** I will wait for the test run to finish.",
     ].join("\n"),
-    expect: [true, true, true, true, true, true],
+    expect: [true, true, true, true, true],
   },
   {
-    name: "compliant reply whose carve-out step list uses markdown bullets",
-    // The directive permits a final step LIST when the one-next-step rule is
-    // suspended, and this scenario's remaining work includes opening a pull
-    // request — an outward-facing action a model may reasonably treat as
-    // needing the carve-out. A `-` bullet is the ordinary rendering of such a
-    // list, so grading it as a violation reports correct behaviour as a
-    // failure, which the suite README names as the one outcome an eval must
-    // never produce.
-    reply: [
-      "Recap: the adapter is finished.",
-      "",
-      "Run: ✓inventory ✓adapter ▶tests ·changelog ·pr",
-      "",
-      "- Update the changelog.",
-      "- Open the pull request.",
-      "- Confirm before the push runs.",
-    ].join("\n"),
-    expect: [true, true, true, true, true, true],
-  },
-  {
-    name: "tick on an unreached step under model-chosen names",
-    // `notes` sits AFTER the running mark, so it cannot have been observed.
-    // The name-based diagnostic cannot see it — the directive tells the model
-    // to choose its own short names — so the position guard is what must catch
-    // it.
-    reply: [
-      "Recap: nothing has changed since your last message.",
-      "",
-      "Run: ✓inventory ✓adapter ▶tests ✓notes ·ship",
-      "",
-      "**Next step:** I will wait for the test run to finish.",
-    ].join("\n"),
-    expect: [true, true, true, true, false, true],
-  },
-  {
-    name: "tick on an unreached step under the scenario's own names",
-    // Both guards must fire here: the name-based one recognises `changelog`,
-    // and the position guard sees a tick after the running mark. Pinning both
-    // keeps the diagnostic honest while the position guard carries the load.
-    reply: [
-      "Recap: nothing has changed since your last message.",
-      "",
-      "Run: ✓inventory ✓adapter ▶tests ✓changelog ·pr",
-      "",
-      "**Next step:** I will wait for the test run to finish.",
-    ].join("\n"),
-    expect: [true, true, true, false, false, true],
-  },
-  {
-    name: "separate Step N of M counter beside the anchor",
-    reply: [
-      "Recap: nothing has changed since your last message.",
-      "",
-      "Run: ✓inventory ✓adapter ▶tests ·changelog ·pr",
-      "",
-      "Step 3 of 5.",
-      "",
-      "**Next step:** I will wait for the test run to finish.",
-    ].join("\n"),
-    expect: [true, true, false, true, true, true],
-  },
-  {
-    name: "under-marked anchor that observed nothing",
-    // The framing fixes two finished-and-passed steps and one running. An
-    // all-dots anchor satisfies every over-marking check, so grader 5 is the
-    // only thing standing between this reply and a green run.
-    reply: [
-      "Recap: nothing has changed since your last message.",
-      "",
-      "Run: ·inventory ·adapter ·tests ·changelog ·pr",
-      "",
-      "**Next step:** I will wait for the test run to finish.",
-    ].join("\n"),
-    expect: [true, true, true, true, false, true],
-  },
-  {
-    name: "no anchor at all",
-    reply: [
-      "Recap: nothing has changed since your last message.",
-      "",
-      "The adapter has been rewritten.",
-      "",
-      "**Next step:** I will wait for the test run to finish.",
-    ].join("\n"),
-    expect: [false, false, true, false, false, true],
-  },
-  {
-    name: "the tail is a caveat list rather than a step list",
-    // The bullet arm used to accept ANY three-line bulleted tail, so a reply
-    // that closes on caveats — no next step, no step list — satisfied the
-    // position rule. A bullet marker alone is not a step.
+    name: "no anchor at all, though the note supplied one",
     reply: [
       "Recap: the adapter rewrite landed.",
       "",
-      "The call sites are inventoried and the adapter is rewritten.",
+      "The suite is running.",
       "",
-      "Run: \u2713inventory \u2713adapter \u25b6tests \u00b7changelog \u00b7pr",
-      "",
-      "- Coverage on the legacy path is thinner than I would like.",
-      "- Two fixtures still assume the old signature.",
-      "- The rollout window is narrow this week.",
+      "**Next step:** I will wait for the test run to finish.",
     ].join("\n"),
-    expect: [true, false, true, true, true, true],
+    expect: [false, false, true, true, true],
+  },
+  {
+    name: "the marks are re-derived rather than reproduced",
+    reply: [
+      "Recap: the adapter rewrite landed.",
+      "",
+      "Zensu: ✓implement ✓review ▶self-review",
+      "",
+      "**Next step:** I will wait for the test run to finish.",
+    ].join("\n"),
+    expect: [false, true, true, false, true],
+  },
+  {
+    name: "the retired free-form anchor is emitted beside the supplied one",
+    reply: [
+      "Recap: the adapter rewrite landed.",
+      "",
+      SUPPLIED,
+      "Run: ✓inventory ▶tests",
+      "",
+      "**Next step:** I will wait for the test run to finish.",
+    ].join("\n"),
+    expect: [true, true, true, false, true],
+  },
+  {
+    name: "a separate Step N of M counter beside the anchor",
+    reply: [
+      "Recap: the adapter rewrite landed.",
+      "",
+      SUPPLIED,
+      "Step 3 of 5",
+      "",
+      "**Next step:** I will wait for the test run to finish.",
+    ].join("\n"),
+    expect: [true, true, false, true, true],
+  },
+  {
+    name: "the compact counter spelling is caught too",
+    reply: [
+      "Recap: the adapter rewrite landed.",
+      "",
+      SUPPLIED,
+      "Step 3/5",
+      "",
+      "**Next step:** I will wait for the test run to finish.",
+    ].join("\n"),
+    expect: [true, true, false, true, true],
+  },
+  {
+    // Drives the position grader's OTHER branch: the carve-out shape, where the
+    // one-next-step rule is suspended and the anchor sits above a final step
+    // LIST. Without it `stepList` was true for no case at all, so IMPERATIVE,
+    // SUBORDINATE, `anchorSteps` and `tail.some(strong)` were evaluated by
+    // nothing while the both-directions loop stayed satisfied through the short
+    // tail. Its sibling below is the near-miss: a three-row tail of CAVEATS,
+    // which must NOT read as a step list.
+    name: "the anchor sits above a final step list, the carve-out shape",
+    reply: [
+      "Recap: the adapter rewrite landed.",
+      "",
+      SUPPLIED,
+      "",
+      "- Update the changelog once the suite is green.",
+      "- Open the pull request.",
+      "- Verify the review notes land on it.",
+    ].join("\n"),
+    expect: [true, true, true, true, true],
+  },
+  {
+    name: "the anchor is stranded mid-answer instead of above the closing step",
+    reply: [
+      "Recap: the adapter rewrite landed.",
+      "",
+      SUPPLIED,
+      "",
+      "The adapter layer is the risky part.",
+      "Coverage is thin there.",
+      "Nothing else is blocked.",
+      "",
+      "**Next step:** I will wait for the test run to finish.",
+    ].join("\n"),
+    expect: [true, false, true, true, true],
+  },
+  {
+    // The words around the line are the model's; the line is not. A reply that
+    // rewords everything else and leaves the anchor untouched is the compliant
+    // shape, and it is what a non-English answer looks like from this grader's
+    // point of view — the fixture stays English because a canned reply here is
+    // authored text, not a match literal (CLAUDE.md §Language).
+    name: "prose reworded around an unchanged anchor line",
+    reply: [
+      "Short version: the adapter rewrite is in.",
+      "",
+      "Both call-site inventory and adapter work are behind us.",
+      "",
+      SUPPLIED,
+      "",
+      "**Next step:** I will wait for the test run to finish.",
+    ].join("\n"),
+    expect: [true, true, true, true, true],
+  },
+  {
+    name: "ordinary markdown decoration around the anchor is compliant",
+    reply: [
+      "Recap: the adapter rewrite landed.",
+      "",
+      "- **Zensu:** ✓implement ▶review ·self-review",
+      "",
+      "**Next step:** I will wait for the test run to finish.",
+    ].join("\n"),
+    expect: [true, true, true, true, true],
+  },
+  {
+    name: "a trailing period on the anchor is tolerated",
+    reply: [
+      "Recap: the adapter rewrite landed.",
+      "",
+      SUPPLIED + ".",
+      "",
+      "**Next step:** I will wait for the test run to finish.",
+    ].join("\n"),
+    expect: [true, true, true, true, true],
   },
   {
     name: "a status question answered with a tool call",
     raw: [
-      "[assistant_text] Recap: the adapter rewrite landed.",
+      "[assistant_text]",
+      "Recap: the adapter rewrite landed.",
       "",
       "The call sites are inventoried and the adapter is rewritten.",
       "",
-      "Run: \u2713inventory \u2713adapter \u25b6tests \u00b7changelog \u00b7pr",
+      "Zensu: ✓implement ▶review ·self-review",
       "",
       "**Next step:** I will wait for the test run to finish.",
-      "[tool_use: Bash] git status",
+      // The tool_use line imitates scripts/claude-stream-render.js:104, the same
+      // shape the sibling raw cases use; a bare `git status` tail was not the
+      // producer's spelling.
+      "[tool_use: Bash] id=toolu_03 input={\"command\":\"git status\"}",
     ].join("\n"),
-    expect: [true, true, true, true, true, false],
-  },
-  {
-    name: "the carve-out step list paraphrases its steps rather than naming them",
-    // The false-red boundary. `strong` accepted a row only when it was numbered,
-    // said `step`, or reused an anchor token, so a list that merely paraphrased
-    // had no strong row and the whole tail read as a violation — retyping the
-    // case above from "Update the changelog." to "Update the change log." was
-    // enough. This case pins the imperative arm that fixes it, so the tolerance
-    // cannot be narrowed again unobserved.
-    reply: [
-      "Recap: the adapter rewrite landed.",
-      "",
-      "The call sites are inventoried and the adapter is rewritten.",
-      "",
-      "Run: \u2713inventory \u2713adapter \u25b6tests \u00b7changelog \u00b7pr",
-      "",
-      "- Update the change log.",
-      "- Open the pull request.",
-      "- Land the branch.",
-    ].join("\n"),
-    expect: [true, true, true, true, true, true],
-  },
-  {
-    name: "a caveat list whose rows open with words from the imperative set",
-    // The DECLARATIVE guard's discriminator. Several imperative-set words are
-    // also nouns, so the leading token alone does not mean "step": every row
-    // here opens with one and every row is a caveat. Row 3 additionally names an
-    // anchor step, which is why the copula test guards that arm too.
-    reply: [
-      "Recap: the adapter rewrite landed.",
-      "",
-      "The call sites are inventoried and the adapter is rewritten.",
-      "",
-      "Run: \u2713inventory \u2713adapter \u25b6tests \u00b7changelog \u00b7pr",
-      "",
-      "- Run time on the legacy path is 20 minutes.",
-      "- Release notes are still missing.",
-      "- Review of the adapter is still open.",
-    ].join("\n"),
-    expect: [true, false, true, true, true, true],
-  },
-  {
-    name: "a bulleted step list carrying exactly one strong row",
-    // The `stepish` BULLET arm, which no case reached: every other bulleted tail
-    // is strong on EVERY row, so substituting r.clean for r.raw — or deleting
-    // the arm — left all vectors identical while a live reply of this exact
-    // shape was graded a violation. Rows 2 and 3 are weak on purpose.
-    reply: [
-      "Recap: the adapter rewrite landed.",
-      "",
-      "The call sites are inventoried and the adapter is rewritten.",
-      "",
-      "Run: \u2713inventory \u2713adapter \u25b6tests \u00b7changelog \u00b7pr",
-      "",
-      "- Update the changelog.",
-      "- Sanity-check the migration against staging.",
-      "- Ping the on-call engineer before the window closes.",
-    ].join("\n"),
-    expect: [true, true, true, true, true, true],
-  },
-  {
-    name: "a step the run never reached is ticked, and it is not the changelog",
-    // Grader 4's `prs?\\b|pull` alternation, which no case drove — every other
-    // case ticks `changelog` or nothing, so narrowing the filter to /changelog/i
-    // left every vector identical while a ticked `pr` sailed through. The tick
-    // sits BEFORE the running mark so grader 5's late-tick guard stays quiet,
-    // which is what isolates grader 4.
-    reply: [
-      "Recap: the adapter rewrite landed.",
-      "",
-      "The call sites are inventoried and the adapter is rewritten.",
-      "",
-      "Run: \u2713inventory \u2713adapter \u2713pr \u25b6tests \u00b7changelog",
-      "",
-      "**Next step:** I will wait for the test run to finish.",
-    ].join("\n"),
-    expect: [true, true, true, false, true, true],
-  },
-  {
-    name: "a step list whose rows carry a subordinate copula clause",
-    // The copula veto's boundary. Applied to the whole row it killed the
-    // imperative arm here: every row contains `is`, so a list of three plain
-    // instructions was graded a violation. The veto judges the main clause now,
-    // and case 11 above — whose copula IS the main clause — still fails.
-    reply: [
-      "Recap: the adapter rewrite landed.",
-      "",
-      "The call sites are inventoried and the adapter is rewritten.",
-      "",
-      "Run: \u2713inventory \u2713adapter \u25b6tests \u00b7changelog \u00b7pr",
-      "",
-      "- Update the change log once the suite is green.",
-      "- Open the pull request when the branch is rebased.",
-      "- Confirm the release window is still open before you land it.",
-    ].join("\n"),
-    expect: [true, true, true, true, true, true],
+    expect: [true, true, true, true, false],
   },
 ];
 
 test("anchor-multi-step graders match the pinned pass/fail vector", () => {
   const bodies = assertionBodies(ANCHOR_FILE);
-  assert.strictEqual(bodies.length, 6, `expected 6 graders, extracted ${bodies.length}`);
+  assert.strictEqual(bodies.length, 5, `expected 5 graders, extracted ${bodies.length}`);
   for (const c of CASES) {
     const got = vector(bodies, caseInput(c));
     assert.deepStrictEqual(
@@ -539,183 +554,140 @@ test("anchor-multi-step graders match the pinned pass/fail vector", () => {
   }
 });
 
-// ── the failed / skipped scenario's pinned vector ───────────────────────────
-// The anchor scenario's framing states that nothing has failed and nothing was
-// skipped, so three clauses of the rule were exercised nowhere: the `✗` mark,
-// the rule that a step which finished with a failing outcome is never a tick,
-// and the exception that a step the run deliberately did not perform is LEFT
-// OFF the line rather than marked failed. Those are the three clauses that
-// decide whether a user learns something went wrong.
+// ── the failed / blocked scenario's pinned vector ───────────────────────────
+// The sibling scenario's chain is healthy, so the `✗` mark and the clause that
+// an earlier failure is still reported in the PROSE are exercised nowhere else.
+// This scenario supplies a blocked chain and keeps both.
 //
-// Five graders, in file order:
-//   1 anchor present and marked
-//   2 the failed step carries `✗` and never a tick
-//   3 the deliberately skipped step is absent from the anchor line
-//   4 no separate `Step N of M` counter
-//   5 the earlier failure is still stated in the prose, not only as a glyph
-//   6 no tool call — the sibling's guard, needed here for a reason of its own:
+// FIVE graders, in file order:
+//   1 the SUPPLIED anchor came back verbatim, ✗ included
+//   2 no anchor invented beside the supplied one
+//   3 no separate `Step N of M` counter
+//   4 the failure is stated in the prose, not left to the glyph
+//   5 no tool call — the sibling's guard, needed here for a reason of its own:
 //     this scenario's directive tells the model to run the zen-mode helper's
 //     --off verb itself, and nothing graded a model that acted on it
 
 const FAILED_FILE = path.join(SCENARIO_DIR, "anchor-failed-step.yaml");
 
+const FAILED_SUPPLIED = suppliedAnchor(FAILED_FILE);
+
 const FAILED_CASES = [
   {
-    name: "compliant reply: failed step marked, skipped step omitted, failure in prose",
+    name: "compliant reply: anchor verbatim, failure stated in prose",
     reply: [
-      "Recap: the test run failed.",
+      "Recap: the test run for the review step failed.",
       "",
-      "The suite reports three red cases in the adapter layer. I left the changelog",
-      "alone, as you asked.",
+      "The suite reports three red cases in the adapter layer, so the review",
+      "cannot proceed.",
       "",
-      "Run: ✓inventory ✓adapter ✗tests ·pr",
+      FAILED_SUPPLIED,
       "",
       "**Next step:** tell me whether to take on the red cases.",
     ].join("\n"),
-    expect: [true, true, true, true, true, true],
+    expect: [true, true, true, true, true],
   },
   {
-    name: "the failed step is ticked instead of marked failed",
+    name: "the glyph stands in for the sentence: prose never says what went wrong",
     reply: [
-      "Recap: the test run failed.",
+      "Recap: the review step is where we stand.",
       "",
-      "Run: ✓inventory ✓adapter ✓tests ·pr",
+      "Three cases in the adapter layer are still open.",
+      "",
+      FAILED_SUPPLIED,
       "",
       "**Next step:** tell me how to proceed.",
     ].join("\n"),
-    expect: [true, false, true, true, true, true],
+    expect: [true, true, true, false, true],
   },
   {
-    name: "the deliberately skipped step is marked failed instead of omitted",
+    name: "the failure is softened into a tick",
     reply: [
-      "Recap: the test run failed.",
+      "Recap: the suite failed.",
       "",
-      "Run: ✓inventory ✓adapter ✗tests ✗changelog ·pr",
+      "Three cases in the adapter layer are red.",
       "",
-      "**Next step:** tell me how to proceed.",
+      "Zensu: ✓implement ✓review ·self-review",
+      "",
+      "**Next step:** tell me whether to take on the red cases.",
     ].join("\n"),
-    expect: [true, true, false, true, true, true],
+    expect: [false, false, true, true, true],
   },
   {
-    name: "a separate counter beside the anchor",
+    name: "no anchor at all, though the failure is stated",
     reply: [
-      "Recap: the test run failed.",
+      "Recap: the suite failed.",
       "",
-      "Run: ✓inventory ✓adapter ✗tests ·pr",
+      "Three cases in the adapter layer are red.",
       "",
-      "Step 3 of 5.",
-      "",
-      "**Next step:** tell me how to proceed.",
+      "**Next step:** tell me whether to take on the red cases.",
     ].join("\n"),
-    expect: [true, true, true, false, true, true],
+    expect: [false, true, true, true, true],
   },
   {
-    name: "the failure appears only as a glyph, never in the prose",
-    // The directive is explicit that the mark governs the POSITION only and an
-    // earlier failure is still reported in the prose of the turn it happened
-    // in. A reply that hides the failure behind a single glyph satisfies the
-    // anchor rules and still leaves the user uninformed.
-    //
-    // The prose deliberately contains `covered` and `required`. An alternation
-    // spelled `red\b` — right boundary, no left one — matches the tail of both,
-    // so a grader with that defect reports this reply as having stated the
-    // failure when it never does. That is the exact false green this grader
-    // exists to prevent, so the case pins the word boundary rather than the
-    // vocabulary.
+    name: "the retired free-form anchor is emitted beside the supplied one",
     reply: [
-      "Recap: I ran the suite. The adapter layer is covered by three cases, and no",
-      "further action is required from you yet.",
+      "Recap: the suite failed.",
       "",
-      "Run: ✓inventory ✓adapter ✗tests ·pr",
+      "Three cases in the adapter layer are red.",
       "",
-      "**Next step:** tell me how to proceed.",
+      FAILED_SUPPLIED,
+      "Run: ✓inventory ✗tests",
+      "",
+      "**Next step:** tell me whether to take on the red cases.",
     ].join("\n"),
-    expect: [true, true, true, true, false, true],
+    expect: [true, false, true, true, true],
   },
   {
-    name: "the failure is stated with the noun rather than the verb",
-    // `fail(ed|s|ing)?\b` excludes `failure`: with the group empty the boundary
-    // fails against the `u`, and `ure` matches none of the alternatives. A
-    // compliant reply that says "ended in failure" would then be graded a
-    // violation — the one outcome this suite's README forbids.
+    name: "a separate Step N of M counter beside the anchor",
     reply: [
-      "Recap: the test run ended in failure. Three cases in the adapter layer need",
-      "attention.",
+      "Recap: the suite failed.",
       "",
-      "Run: ✓inventory ✓adapter ✗tests ·pr",
+      "Three cases in the adapter layer are red.",
       "",
-      "**Next step:** tell me how to proceed.",
+      FAILED_SUPPLIED,
+      "Step 3 of 5",
+      "",
+      "**Next step:** tell me whether to take on the red cases.",
     ].join("\n"),
-    expect: [true, true, true, true, true, true],
+    expect: [true, true, false, true, true],
   },
   {
-    name: "no anchor at all",
+    // Same point as the sibling table's reworded case: everything but the line
+    // may change, and the failure must still be said in words.
+    name: "prose reworded, failure still stated, anchor unchanged",
     reply: [
-      "The test run failed.",
+      "Short version: the run for the review step is red.",
       "",
-      "**Next step:** tell me how to proceed.",
+      "Three adapter-layer cases broke, so the review cannot go on.",
+      "",
+      FAILED_SUPPLIED,
+      "",
+      "**Next step:** say whether I should take on the red cases.",
     ].join("\n"),
-    expect: [false, false, false, true, true, true],
+    expect: [true, true, true, true, true],
   },
   {
-    name: "the failed step is named suite rather than tests",
-    // The S1 widening's only pin. Every other case names the step `tests`, which
-    // the pre-change matcher /^tests?/i already matched, so reverting the whole
-    // alternation left all of them byte-identical. `suite` is the discriminator
-    // the scenario's own framing invites — it says "you ran the test suite".
-    // Deliberately NOT `test-suite`: /^tests?/i matches that already.
-    reply: [
-      "Recap: the adapter rewrite landed and the suite went red.",
-      "",
-      "Three cases in the adapter layer are failing, so the migration is blocked.",
-      "",
-      "Run: \u2713inventory \u2713adapter \u2717suite \u00b7pr",
-      "",
-      "**Next step:** tell me whether to fix the adapter or revert it.",
-    ].join("\n"),
-    expect: [true, true, true, true, true, true],
-  },
-  {
-    name: "the failed-step status question is answered with a tool call",
-    // Grader 6's only false direction. The guard was copied from the sibling
-    // because this scenario's directive tells the model to run the zen-mode
-    // helper's --off verb itself, and nothing here graded a model that did.
-    // The tool_use line imitates scripts/claude-stream-render.js:104.
+    name: "a status question answered with a tool call",
     raw: [
       "[assistant_text]",
-      "Recap: the adapter rewrite landed and the tests went red.",
+      "Recap: the test run for the review step failed.",
       "",
-      "Three cases in the adapter layer are failing, so the migration is blocked.",
+      "Three cases in the adapter layer are red.",
       "",
-      "Run: \u2713inventory \u2713adapter \u2717tests \u00b7pr",
+      "Zensu: ✓implement ✗review ·self-review",
       "",
-      "**Next step:** tell me whether to fix the adapter or revert it.",
+      "**Next step:** tell me whether to take on the red cases.",
+      // The tool_use line imitates scripts/claude-stream-render.js:104.
       "[tool_use: Bash] id=toolu_01 input={\"command\":\"git status\"}",
     ].join("\n"),
-    expect: [true, true, true, true, true, false],
-  },
-  {
-    name: "a second anchor token merely looks test-shaped",
-    // The widened matcher fed `failed.every(...)`, so its permissiveness cut
-    // BOTH ways: `spec-update` satisfied the word boundary, joined the judged
-    // set carrying an unreached mark, and a correctly marked reply was graded a
-    // violation. The exact set is what `every` judges now.
-    reply: [
-      "Recap: the adapter rewrite landed and the tests went red.",
-      "",
-      "Three cases in the adapter layer are failing, so the migration is blocked.",
-      "",
-      "Run: \u2713inventory \u2713adapter \u2717tests \u00b7spec-update \u00b7pr",
-      "",
-      "**Next step:** tell me whether to fix the adapter or revert it.",
-    ].join("\n"),
-    expect: [true, true, true, true, true, true],
+    expect: [true, true, true, true, false],
   },
 ];
 
 test("anchor-failed-step graders match the pinned pass/fail vector", () => {
   const bodies = assertionBodies(FAILED_FILE);
-  assert.strictEqual(bodies.length, 6, `expected 6 graders, extracted ${bodies.length}`);
+  assert.strictEqual(bodies.length, 5, `expected 5 graders, extracted ${bodies.length}`);
   for (const c of FAILED_CASES) {
     const got = vector(bodies, caseInput(c));
     assert.deepStrictEqual(
@@ -871,9 +843,18 @@ test("the case table exercises every grader in both directions", () => {
   // could be deleted again with `node --test` still reporting 7 and every column
   // still both-directional — the three arms they exist to pin silently unpinned.
   // Raise the number in the same commit that adds a case.
+  //
+  // The two anchor floors were LOWERED from 14 and 10 when the anchor stopped
+  // being derived by the model: each table lost a grader and, with it, the cases
+  // that existed only to drive the three mark-derivation arms (a premature tick,
+  // a tick after the running mark, an all-`·` under-marked line, a step left off
+  // the line). None of those describes a decision the reply still makes. What
+  // remains is pinned in both directions and every surviving arm has a case, so
+  // this is a smaller table for a smaller contract rather than lost coverage —
+  // but it is a DELIBERATE lowering, and lowering it again needs the same note.
   const tables = [
-    { label: "anchor-multi-step", cases: CASES, exempt: 0, floor: 14 },
-    { label: "anchor-failed-step", cases: FAILED_CASES, exempt: 0, floor: 10 },
+    { label: "anchor-multi-step", cases: CASES, exempt: 0, floor: 12 },
+    { label: "anchor-failed-step", cases: FAILED_CASES, exempt: 0, floor: 8 },
     { label: "safety-carve-out", cases: SAFETY_CASES, exempt: 0, floor: 7 },
   ];
   for (const t of tables) {
@@ -887,5 +868,83 @@ test("the case table exercises every grader in both directions", () => {
       assert.ok(seen.has(true), `${t.label} grader ${i + 1} is never expected to pass`);
       assert.ok(seen.has(false), `${t.label} grader ${i + 1} is never expected to fail`);
     }
+  }
+});
+
+// ── the supplied anchor is ONE value, not three ─────────────────────────────
+// The scenario hands the model an anchor in its spec_block and its graders
+// compare replies against a `const SUPPLIED` of their own. Those were
+// independent hand-typed literals, and both structure suites only check that the
+// spec_block token is one the module CAN produce — so swapping a scenario's
+// anchor for any other valid line left every check green while every compliant
+// live reply would have been graded a violation. This file now READS the
+// spec_block value; the check below closes the other half, that no grader body
+// still carries a literal of its own that disagrees with it.
+
+test("every grader compares against the anchor its own scenario supplies", () => {
+  for (const [file, supplied] of [[ANCHOR_FILE, SUPPLIED], [FAILED_FILE, FAILED_SUPPLIED]]) {
+    const raw = fs.readFileSync(file, "utf8");
+    const literals = [...raw.matchAll(/const (?:FAILED_)?SUPPLIED = '([^']*)'/g)].map((m) => m[1]);
+    assert.ok(
+      literals.length >= 2,
+      `${path.basename(file)}: expected the graders to declare the supplied anchor, found ${literals.length}`,
+    );
+    for (const literal of literals) {
+      assert.strictEqual(
+        literal,
+        supplied,
+        `${path.basename(file)}: a grader compares against "${literal}" while the spec_block supplies "${supplied}"`,
+      );
+    }
+  }
+});
+
+// ── the supplied-`none` grader ──────────────────────────────────────────────
+// The headline behaviour of the whole change — "`none` means render no anchor at
+// all" — was graded by nothing: three scenarios carry `ZENSU CHAIN ANCHOR: none`
+// and no assertion body referenced the anchor. The structure suites prove the
+// HOOK emits `none`; only a reply can show the model acted on it.
+//
+// FOCUSED rather than a full vector table, and the reason is stated rather than
+// hidden: contract-compliance.yaml carries six graders, five of which grade the
+// unrelated recap/length/question/next-step contract. Authoring a six-wide
+// vector for them is the standing fix; selecting the one grader BY CONTENT and
+// driving it in both directions is what this closes today. Selection is by a
+// distinguishing literal, never by index, so inserting a grader above it cannot
+// silently re-point this test. The literal is ENGLISH on purpose: a selector
+// reaching into this repository's own scenario file falls outside both language
+// carve-outs CLAUDE.md states — the grader-alternation one is for a pattern matched
+// against text whose language the product does not control, and the mechanical `Z26`
+// allowance keys on a match sitting inside a `/.../` regex literal, which an argument
+// to `includes(...)` is not. It carries the start of the expression rather than the
+// bare declaration, because a name alone is one a later grader could reuse.
+
+const CONTRACT_FILE = path.join(SCENARIO_DIR, "contract-compliance.yaml");
+
+test("the supplied-none grader rejects an anchor and accepts its absence", () => {
+  const bodies = assertionBodies(CONTRACT_FILE).filter((b) => b.includes("const anchors = prose.split"));
+  assert.strictEqual(bodies.length, 1, `expected exactly one anchor grader, found ${bodies.length}`);
+  const grader = bodies[0];
+  const clean = [
+    "Recap: the token-expiry check is fixed.",
+    "",
+    "I changed hooks/auth/middleware.ts.",
+    "",
+    "**Next step:** tell me whether to open the PR.",
+  ].join("\n");
+  assert.strictEqual(runGrader(grader, envelope(clean)).pass, true, "an anchor-free reply must pass");
+  for (const prefix of ["Zensu:", "Run:", "Ablauf:"]) {
+    const withAnchor = [
+      "Recap: the token-expiry check is fixed.",
+      "",
+      `${prefix} ✓implement ▶review ·self-review`,
+      "",
+      "**Next step:** tell me whether to open the PR.",
+    ].join("\n");
+    assert.strictEqual(
+      runGrader(grader, envelope(withAnchor)).pass,
+      false,
+      `${prefix} was rendered although the note supplied none`,
+    );
   }
 });
