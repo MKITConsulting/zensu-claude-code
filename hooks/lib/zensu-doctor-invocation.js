@@ -67,7 +67,13 @@ const DOCTOR_SEGMENTS = ["hooks", "lib", "zensu-doctor.sh"];
 // and is NOT restated here — a second copy is a second thing to go stale, and
 // this comment is where a future reviewer decides whether the list stays at two.
 // In one line: it writes one record for the calling session, one workflow
-// history entry, and moves that session's stale review-evidence leases aside;
+// history entry, moves that session's stale review-evidence leases aside, and —
+// on an `already-served` refusal with `--confirm` only — recreates that session's
+// own MISSING workflow document and its `.zensu` ancestors under the RECORDED
+// project root. That and the workflow history entry above are the TWO write
+// classes that leave the plugin-data store, and the history entry is written on
+// the ordinary `--confirm` adoption as well, with no `already-served` qualifier —
+// calling the document write "the one" was false and understated the admission;
 // what BOUNDS those writes is readContext (session
 // hash, digest recomputed against the RECORDED root, that root's declared
 // version) plus the sibling-root and plugin_data checks — NOT derivation, since

@@ -383,8 +383,8 @@ on its own:
 | `windows-shard-4` | 4 | best-solution-first, deferred-claim-adoption, plan-payload-path-transport, tdd-state-junction-safety |
 | `windows-shard-5` | 7 | autopilot-plan-delegate, coverage-report-windows-paths, post-review-self-review-handoff, session-id-v1, session-safe-file-read, upgrade-provider-zero-launch, windows-portability-guards |
 | `windows-shard-6` | 5 | bash-source-write-gate, deferred-transfer-reset, marketplace-fixture, session-control-claude, upgrade-process-windows-boundaries |
-| `windows-shard-7` | 2 | review-worker-evidence-lease, stop-enforcer-self-review-routing |
-| `windows-shard-8` | 1 | session-trail-lineage |
+| `windows-shard-7` | 1 | stop-enforcer-self-review-routing |
+| `windows-shard-8` | 2 | session-trail-lineage, review-worker-evidence-lease |
 
 Runner guarantees: full manifest + audited command catalog validated before any child
 starts; every suite bound to a validated content digest; per-suite **and** 30-minute

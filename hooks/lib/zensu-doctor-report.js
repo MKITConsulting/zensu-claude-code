@@ -2294,17 +2294,200 @@ function bindingLine() {
   }
 }
 
+// The BASELINE_REBUILT provenance row. Both writers — the confirmed repair and the
+// SessionStart self-heal — append that entry under a reserved phase `--phase` refuses
+// to mint, and three guard readers consult it, so the provenance was RESERVED. What
+// was missing is a runtime surface that renders it to a user: until this row nothing
+// did, and the disclosure argument the automatic heal rests on had no channel behind
+// it. It is deliberately rendered on the PRESENT arm and nowhere else, because that
+// is the only state in which a rebuilt document exists and reads back.
+//
+// A rebuild is a LOSS, not a restore. The baseline reads "never active", so a review
+// chain that was live when the document vanished is gone and no other row in this
+// report says so once the document is PRESENT again — which is exactly the shape a
+// green report used to hide.
+//
+// The phase token comes from the LOADED core, never from a literal copied here, for
+// the same reason `BASELINE_STATES` does in the caller: nothing in the tree compares
+// this renderer's spelling against the core's, so a rename would SILENCE the row with
+// every check still green. An absent export is therefore a missing check, not a pass.
+function baselineRebuiltRow(core, projectRoot, key) {
+  var phase = (core && typeof core.BASELINE_HISTORY_PHASE === 'string' && core.BASELINE_HISTORY_PHASE)
+    ? core.BASELINE_HISTORY_PHASE
+    : '';
+  if (phase === '') {
+    line(WARN, 'state: this session\'s workflow document was not checked for rebuild '
+      + 'provenance — the Session Control core in ' + pluginDir() + ' exports no rebuild '
+      + 'phase token. That is a missing check, not an all-clear.');
+    return;
+  }
+  var state;
+  try {
+    state = core.readWorkflowState({ projectRoot: projectRoot, sessionId: key });
+  } catch (e) {
+    // The document classified PRESENT and still did not read back. The invalid-document
+    // row further down names the FILE; this one names the CHECK that did not run. The
+    // two findings are different and neither substitutes for the other, so both render.
+    line(WARN, 'state: this session\'s workflow document was not checked for rebuild '
+      + 'provenance — it did not read back (' + ((e && e.code) || 'unreadable')
+      + '). That is a missing check, not an all-clear.');
+    return;
+  }
+  var history = (state && Array.isArray(state.history)) ? state.history : [];
+  var rebuilds = history.filter(function (entry) {
+    return entry && entry.phase === phase;
+  });
+  // Silence here is the ordinary case, not a withheld verdict: a document that was
+  // never rebuilt has no provenance to report, and a row on every healthy session is
+  // the noise this repository trains readers to ignore.
+  if (!rebuilds.length) return;
+  var last = rebuilds[rebuilds.length - 1];
+  var when = (last && typeof last.ts === 'string' && last.ts) ? last.ts : 'an unrecorded time';
+  var why = (last && typeof last.reason === 'string' && last.reason) ? ' [' + last.reason + ']' : '';
+  line(WARN, 'state: this session\'s workflow document was REBUILT — '
+    + rebuilds.length + (rebuilds.length === 1 ? ' entry' : ' entries')
+    + ', most recently at ' + when + why + '. Rebuilding is a loss, not a restore: the '
+    + 'baseline reads "never active", so a review chain that was live when the document '
+    + 'vanished is gone and the Stop guard releases this session without asking for a '
+    + 'reviewer. Re-arm with /zensu:tdd if that work still needs one.');
+}
+
 function stateBlock(nowMs) {
   block('Session state');
   bindingLine();
   var projectRoot = stateProjectRoot();
   var dir = path.join(projectRoot, '.zensu', 'state');
+  // ONE renderer for the own-document verdict, called from BOTH the ENOENT branch
+  // below and the populated-directory path further down. It was a hand-written row
+  // in the second place only, and that made the row unreachable in the very shape
+  // this check exists for: `.zensu/state/` is gitignored, so a deleted and
+  // re-created worktree loses the whole DIRECTORY, not just the file — the ENOENT
+  // branch rendered an all-clear and returned above the row. An ENOENT here is
+  // positive proof the bound session's own document is gone, which is the strongest
+  // form of the finding, not a reason to withhold it.
+  function ownDocumentVerdict(discloseWithoutKey) {
+    var ownKey = currentSessionKey();
+    if (ownKey === '') {
+      // NARROWED on the directory-absent path, and the narrowing is deliberate.
+      // A project with no `.zensu/state` at all and no bound session is a fresh
+      // install: warning there fires on every ordinary run and is trained away
+      // within a day, which is the failure mode this repository records for the
+      // implementing-turns row. The defect this check exists for — a green report
+      // over a session whose capability gate is denying every tool — requires a
+      // BOUND session, and that is exactly the case where the key is available.
+      // On the POPULATED path the disclosure still fires: there are documents
+      // here and this one could not be checked against them.
+      if (discloseWithoutKey) {
+        line(WARN, 'state: this session\'s own workflow document was not checked — no bound '
+          + 'session key is available here. That is a missing check, not an all-clear.');
+      }
+      return;
+    }
+    // The FOUR-state classifier decides, not a filename-presence test, and not a
+    // shape-only approximation of it either. `readdirSync` follows symlinks, so a
+    // dangling `.zensu/state` yielded ENOENT and the row promised a rebuild the
+    // repair refuses by design — the same contradiction the Stop arm and the
+    // capability gate were corrected for. The mirror case was worse because it was
+    // silent: a `.zensu/state` symlinked to a real directory holding the document
+    // made `present` true and rendered NOTHING while the gate denied every tool.
+    //
+    // The FULL classifier is reachable from here, and an earlier revision claimed
+    // it was not. `core.sessionKey` is idempotent — it accepts an `scv1_<64 hex>`
+    // key and returns it unchanged — which `stateBlock` already relies on further
+    // down, where it passes a matched key straight to `core.readWorkflowState`. So
+    // the shape-only detour cost the row its `unreadable` arm for no reason: a
+    // present-but-unreadable own document is exactly a wedged session, and it was
+    // being left to the anonymous population row that names neither this session
+    // nor a remedy.
+    var ownCore = null;
+    var ownState = null;
+    var ownFile = null;
+    try {
+      ownCore = require(path.join(pluginDir(), 'hooks', 'lib', 'session-control-core-v1.js'));
+      ownFile = ownCore.adoptionWorkflowStatePath(projectRoot, ownKey);
+      ownState = ownCore.classifyWorkflowBaseline(ownFile, projectRoot, ownKey);
+    } catch (e) { ownState = null; }
+    if (ownFile === null) ownFile = path.join(dir, 'tdd-phase-' + ownKey + '.json');
+    // The state tokens come from the LOADED core, never from literals copied into
+    // this renderer. The ladder's residual arm is the MISSING row, so a value this
+    // renderer failed to recognise was rendered as "your own document is MISSING —
+    // run --confirm to rebuild it" for a perfectly healthy session, taking the
+    // summary red with it. Reading the vocabulary from the same module that
+    // produced the verdict turns a renamed or added state into the MISSING-CHECK
+    // disclosure below instead of a false finding, and nothing in the tree
+    // compares this renderer's spelling against the core's.
+    var ownStates = (ownCore && ownCore.BASELINE_STATES) || {};
+    function ownToken(name) {
+      return typeof ownStates[name] === 'string' && ownStates[name] ? ownStates[name] : null;
+    }
+    function ownIs(name) {
+      var token = ownToken(name);
+      return token !== null && ownState === token;
+    }
+    if (ownIs('PRESENT')) {
+      // PRESENT is not "nothing to say": a document that was REBUILT is present and
+      // healthy-looking, and its provenance is the one thing this block never rendered.
+      baselineRebuiltRow(ownCore, projectRoot, ownKey);
+      return;
+    }
+    if (ownIs('UNSAFE') || ownIs('UNREADABLE')) {
+      // The NAMER is in its own try, deliberately. Folding it into the block above
+      // meant that a core which loaded but did not export it threw AFTER the
+      // verdict was computed, the catch reset the verdict to null, and a correct
+      // BAD tamper row degraded to SILENCE — the one verdict this file refuses to
+      // fake anywhere else. A namer failure may cost the component name; it may
+      // never cost the finding.
+      var ownAt = ownFile;
+      if (ownIs('UNSAFE')) {
+        try { ownAt = ownCore.baselineUnsafeComponent(projectRoot, ownFile) || ownFile; }
+        catch (e2) { ownAt = ownFile; }
+      }
+      line(BAD, 'state: this session\'s own workflow document is ' + ownState.toUpperCase()
+        + ' (' + ownAt + ') — the capability gate denies every tool in this session, and this '
+        + 'is NOT a missing document, so /zensu:adopt-session --confirm will REFUSE to '
+        + 'rebuild it: something is sitting at that path. Run /zensu:adopt-session for the '
+        + 'diagnosis, inspect what is there before doing anything else, then start a fresh '
+        + 'session.');
+      return;
+    }
+    if (ownState === null) {
+      // The check did NOT run. Returning on the legacy presence test here would
+      // render an all-clear for a verdict this renderer never reached.
+      line(WARN, 'state: this session\'s own workflow document could not be classified — the '
+        + 'Session Control core did not load from ' + pluginDir() + '. That is a missing '
+        + 'check, not an all-clear.');
+      return;
+    }
+    // An unrecognized verdict is a MISSING CHECK, never the MISSING row. The row
+    // below carries a rebuild recommendation, and handing that to a session whose
+    // document is fine is the opposite of the finding this block exists to make.
+    if (!ownIs('MISSING')) {
+      line(WARN, 'state: this session\'s own workflow document came back with a '
+        + 'classification this build does not recognize (' + String(ownState) + ') from the '
+        + 'Session Control core in ' + pluginDir() + '. That is a missing check, not an '
+        + 'all-clear.');
+      return;
+    }
+    // The full filename, as the invalid-document row prints full filenames: a
+    // reader sent to repair a specific path needs its name. The 13-character
+    // truncation belongs to the foreign-chain row, whose subject is somebody
+    // else's session.
+    line(BAD, 'state: this session\'s own workflow document is MISSING ('
+      + ownFile
+      + ') — while it is gone the capability gate denies every tool in this session, '
+      + 'because a deleted document must never be read as "no chain was ever active". '
+      + 'A deleted and re-created worktree loses it, since .zensu/state/ is gitignored. '
+      + 'If the record is intact and served, run /zensu:adopt-session for the diagnosis '
+      + 'and /zensu:adopt-session --confirm to rebuild it; rebuilding is a loss, not a '
+      + 'restore — a review chain that was live when it vanished is gone.');
+  }
   var entries;
   try {
     entries = fs.readdirSync(dir);
   } catch (e) {
     if (e && e.code === 'ENOENT') {
       line(OK, 'state: ' + dir + ' does not exist yet — nothing to clean');
+      ownDocumentVerdict(false);
     } else {
       // Every other errno is a check that did NOT run. Rendering it green hid the
       // whole Session state block behind an all-clear, which is the one verdict
@@ -2322,6 +2505,18 @@ function stateBlock(nowMs) {
   var workflowDocs = entries.filter(function (f) {
     return /^tdd-phase-scv1_[a-f0-9]{64}\.json$/.test(f);
   }).sort();
+  // The bound session's OWN document. Every row below judges the documents that
+  // EXIST; not one of them asks whether this session's is among them — which is
+  // how a report came back fully green over a session whose capability gate was
+  // denying every tool. It sits ABOVE the count rows on purpose: those describe a
+  // population, and a population can look healthy while the caller's own member of
+  // it is gone.
+  //
+  // Armed on the session key alone, the way the foreign-chain row's own disclosure
+  // is: the key is what makes the question answerable at all, and a missing key is
+  // a missing check rather than a pass. Deliberately NOT gated on the document
+  // count — the finding is the same whether the directory holds none or a hundred.
+  ownDocumentVerdict(true);
   if (!workflowDocs.length) {
     line(OK, 'state: no CAS workflow documents yet');
   } else {
