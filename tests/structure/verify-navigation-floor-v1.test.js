@@ -81,3 +81,15 @@ test('remote host resolution pins only globally routable answers', async () => {
   await assert.rejects(resolveRemoteHost('app.example.com', mixed), /non-public or unresolved/);
   await assert.rejects(resolveRemoteHost('app.example.com', async () => []), /non-public or unresolved/);
 });
+
+// A non-string target is refused rather than coerced. String(["http://127.0.0.1:9999"]) is the
+// bare URL, so coercion classified an array argument as loopback and let it reach the consent
+// broker's approved map without a prompt.
+test('the navigation target refuses a non-string target instead of coercing it', () => {
+  for (const value of [['http://127.0.0.1:9999/'], undefined, null, 42, { toString: () => 'http://127.0.0.1:9999/' }]) {
+    assert.equal(checkNavigationTarget(value).reason, FLOOR_REASONS.INVALID);
+    assert.equal(classifyOrigin(value).ok, false);
+    assert.equal(classifyOrigin(value).mode, undefined);
+  }
+  assert.equal(classifyOrigin('http://127.0.0.1:9999/').mode, 'local');
+});

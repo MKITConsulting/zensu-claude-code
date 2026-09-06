@@ -42,6 +42,7 @@ RESET_SNAPSHOT="$ROOT/evals/reset-review-limit/lib/state-snapshot.js"
 AUTOPILOT_FULL="$ROOT/tests/structure/test-autopilot-full-cycle.sh"
 ENRICHMENT="$ROOT/scripts/claude-enrichment-render.js"
 PROMPTFOO_WRAPPER="$ROOT/scripts/claude-promptfoo-wrapper.sh"
+VERIFY_RUNTIME="$ROOT/skills/verify-feature/scripts/zensu-monorepo-runtime.sh"
 PLAYWRIGHT_MCP="$ROOT/scripts/playwright-mcp.sh"
 PLAYWRIGHT_MCP_TEST="$ROOT/tests/structure/playwright-mcp-proxy.test.js"
 CORE_SNAPSHOT_BLOCK="$(awk '
@@ -735,6 +736,25 @@ if grep -qF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOF
   check "the lease sweep resolves O_NOFOLLOW by platform and takes a mode, not a mask" PASS
 else
   check "the lease sweep resolves O_NOFOLLOW by platform and takes a mode, not a mask" FAIL
+fi
+
+# Both openSync writes in the verify-feature runtime script land through an exclusive create
+# rather than a truncating redirect; the script's third write lands through flag: "wx", which is
+# the same exclusive create and is not counted here. Each tests the path's absence at the top of its case arm and
+# then runs a port scan or several node processes before writing, so a plain > follows a
+# symlink planted in that window — one of them carries the database password, the JWT secret
+# and the runtime lease. Neither is discriminated by any behavioural check: the suite's mode
+# assertions pass for the old `( umask 077; printf > )` too, and its symlink cases are decided
+# by the guard that fires BEFORE the write. This inventory is the only thing that sees a
+# revert. writeFileSync rather than writeSync, because writeSync can short-write and its
+# return value is discarded at both sites.
+if [ "$(grep -cF 'fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600' "$VERIFY_RUNTIME")" -eq 2 ] \
+  && [ "$(grep -cF 'fs.writeFileSync(fd, ' "$VERIFY_RUNTIME")" -eq 2 ] \
+  && ! grep -qF '>"$SECRETS"' "$VERIFY_RUNTIME" \
+  && ! grep -qF '>"$PLANNED_ORIGIN_FILE"' "$VERIFY_RUNTIME"; then
+  check "the verify-feature runtime script creates both records exclusively, never by truncating redirect" PASS
+else
+  check "the verify-feature runtime script creates both records exclusively, never by truncating redirect" FAIL
 fi
 
 printf '%s\n' '----' "test-windows-portability-guards: $PASS PASS / $FAIL FAIL"

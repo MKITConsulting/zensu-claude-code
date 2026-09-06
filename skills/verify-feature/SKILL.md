@@ -161,7 +161,9 @@ opened. A remote target is refused in consent mode by both the hook and the brok
 verification keeps the parent policy. Consent mode remembers each approved ORIGIN for
 this session in `.zensu/state/verify-consent-<session-key>.json` — a record names the route that
 was visited, but the route steers no later decision — and the report lists every record in its
-`Consent` block.
+`Consent` block. **Read that file for the report and never write, edit or delete it.** A record
+placed there skips the human's permission prompt for that origin, so writing one grants yourself
+the consent this gate exists to ask for. Only the PostToolUse hook writes it.
 
 ## Phase 1 — Build the evidence matrix (mandatory)
 
@@ -367,9 +369,9 @@ Use this format:
 - **Reproduction:** exact steps and captured signal for each failure.
 - **Consent:** one line per `(origin, route, decidedBy)` record the session's consent memory
   holds after the run, where `decidedBy` is `prompt` (the user answered the host's prompt),
-  `memory` (a declared route on an origin the user had already approved), or `policy` (a
-  parent-environment policy authorized it). In consent mode also name the recipe that supplied
-  the declared routes, and every prompt the user refused.
+  `memory` (any route on an origin the user had already approved — the route is never tested),
+  or `policy` (a parent-environment policy authorized it). In consent mode also name the recipe
+  that supplied the declared routes shown IN the prompt, and every prompt the user refused.
 - **Limitations:** environment, fixture, auth, or deployment-identity gaps.
 
 Verdict rules:

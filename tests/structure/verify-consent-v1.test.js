@@ -395,3 +395,135 @@ test('the shared memory read applies the writer containment rule and keeps not-c
   assert.equal(filled.ok, true);
   assert.equal(filled.records.length, 1);
 });
+
+// The likeliest payload fault is an empty read, not an empty object: the hook wrapper's
+// "$(cat 2>/dev/null || true)" turns a stdin failure into "". Parsing that as {} produced a
+// payload with no tool_name that the decider allowed silently, so the module's own
+// PAYLOAD_UNREADABLE branch never fired for the one fault it exists to catch.
+test('an empty read is unreadable, not an empty payload', () => {
+  for (const raw of ['', '   ', '\n\t ', undefined, null]) {
+    assert.equal(consent.payloadFromRaw(raw, false), null);
+  }
+  assert.deepEqual(consent.payloadFromRaw('{"tool_name":"x"}', false), { tool_name: 'x' });
+  assert.equal(consent.payloadFromRaw('{"tool_name":"x"}', true), null);
+
+  const seen = [];
+  const out = { write: (s) => seen.push(s) };
+  const err = { write: () => {} };
+  consent.runPre({}, {}, out, err);
+  assert.equal(JSON.parse(seen[0]).hookSpecificOutput.permissionDecisionReason.includes(REASONS.PAYLOAD_UNREADABLE), true);
+  assert.equal(consent.runPost({ tool_name: 7 }, {}, err).reason, REASONS.PAYLOAD_UNREADABLE);
+});
+
+// Rebuilding from empty renamed over the file and discarded every approved origin with no
+// signal: the result was ok, so runPost's stderr disclosure never fired. An absent file is the
+// ordinary first write and stays the only case that starts from zero.
+test('an empty stdin read reaches the CLI as a refusal on both entry points', () => {
+  const { root, memory } = project();
+  const env = { ZENSU_VERIFY_PROJECT_ROOT: root, ZENSU_VERIFY_CONSENT_MEMORY: memory };
+  const pre = runCli('pre', '', env);
+  assert.equal(pre.envelope.hookSpecificOutput.permissionDecision, 'deny');
+  assert.equal(pre.envelope.hookSpecificOutput.permissionDecisionReason.includes(REASONS.PAYLOAD_UNREADABLE), true);
+  const post = runCli('post', '', env);
+  assert.equal(post.stderr.includes(REASONS.PAYLOAD_UNREADABLE), true);
+  assert.equal(fs.existsSync(memory), false);
+});
+
+test('an unreadable memory is refused, never silently rebuilt from empty', () => {
+  const { root, memory } = project();
+  fs.writeFileSync(memory, 'this is not json\n');
+  const before = fs.readFileSync(memory, 'utf8');
+  const result = appendRecord(memory, record('http://127.0.0.1:5173', '/a'), { projectRoot: root });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, REASONS.MEMORY_UNREADABLE);
+  assert.equal(fs.readFileSync(memory, 'utf8'), before);
+  assert.equal(fs.readdirSync(path.dirname(memory)).filter((n) => n.endsWith('.tmp')).length, 0);
+
+  fs.rmSync(memory);
+  assert.equal(appendRecord(memory, record('http://127.0.0.1:5173', '/a'), { projectRoot: root }).ok, true);
+});
+
+// The writer must never produce a file its own reader refuses: validRecord bounds no route
+// length, so one long route would exceed MAX_MEMORY_BYTES and make every later read fail,
+// leaving an approved origin asking on every navigation with nothing to repair it.
+test('a write that would exceed the read cap is refused, so the reader can always read it back', () => {
+  const { root, memory } = project();
+  const huge = '/' + 'a'.repeat(consent.MAX_MEMORY_BYTES);
+  const result = appendRecord(memory, record('http://127.0.0.1:5173', huge), { projectRoot: root });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'memory-would-exceed-read-cap');
+  assert.equal(fs.existsSync(memory), false);
+
+  assert.equal(appendRecord(memory, record('http://127.0.0.1:5173', '/ok'), { projectRoot: root }).ok, true);
+  assert.equal(readMemory(memory).ok, true);
+});
+
+// The guard is on the .zensu component itself, which the leaf checks cannot see: a symlinked
+// .zensu resolves a recipe out of a directory the session does not own.
+test('the recipe resolver refuses a symlinked .zensu component, not only a symlinked leaf', () => {
+  const root = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'zensu-recipe-'));
+  const elsewhere = path.join(root, 'elsewhere');
+  fs.mkdirSync(elsewhere, { recursive: true });
+  fs.writeFileSync(path.join(elsewhere, 'runtime.yaml'), 'evidenceSafety:\n  routes: []\n');
+
+  const real = path.join(root, '.zensu');
+  fs.mkdirSync(real, { recursive: true });
+  fs.writeFileSync(path.join(real, 'runtime.yaml'), 'evidenceSafety:\n  routes: []\n');
+  assert.equal(consent.resolveRecipeFile(root), path.join(real, 'runtime.yaml'));
+
+  fs.rmSync(real, { recursive: true });
+  let linked = true;
+  try { fs.symlinkSync(elsewhere, real, 'dir'); }
+  catch (error) {
+    if (!error || error.code !== 'EPERM') throw error;
+    linked = false;
+  }
+  if (linked) assert.equal(consent.resolveRecipeFile(root), '');
+});
+
+// The prompt is the human's only control. The route comes from a URL a caller supplied, so a
+// long or control-byte-carrying route reaching it unbounded is the defect this bounds.
+test('the prompt route is bounded and stripped of control bytes', () => {
+  const long = '/' + 'a'.repeat(consent.MAX_PROMPT_ROUTE + 200);
+  const bounded = consent.promptRoute(long);
+  assert.equal(bounded.length, consent.MAX_PROMPT_ROUTE + 1);
+  assert.equal(bounded.endsWith('…'), true);
+  assert.equal(consent.promptRoute('/a\u0000b\u001fc\u007fd'), '/abcd');
+  assert.equal(consent.promptRoute('/plain'), '/plain');
+  assert.equal(consent.promptRoute(undefined), '');
+
+  const longRoute = '/' + 'a'.repeat(consent.MAX_PROMPT_ROUTE + 50);
+  const rendered = decide({
+    toolName: NAV,
+    toolInput: { url: 'http://127.0.0.1:4200' + longRoute },
+    records: [],
+    declaredRoutes: [],
+  });
+  assert.equal(rendered.verdict, 'ask');
+  assert.equal(rendered.prompt.includes(longRoute), false);
+  assert.equal(rendered.prompt.includes('…'), true);
+
+  const declared = decide({
+    toolName: NAV,
+    toolInput: { url: 'http://127.0.0.1:4200/' },
+    records: [],
+    declaredRoutes: ['/short', longRoute],
+  });
+  assert.equal(declared.verdict, 'ask');
+  assert.equal(declared.prompt.includes(longRoute), false);
+  assert.equal(declared.prompt.includes('/short'), true);
+
+  const many = [];
+  for (let i = 0; i < consent.MAX_PROMPT_ROUTES; i += 1) many.push('/r' + i);
+  many.splice(1, 0, longRoute);
+  const overflow = decide({
+    toolName: NAV,
+    toolInput: { url: 'http://127.0.0.1:4200/' },
+    records: [],
+    declaredRoutes: many,
+  });
+  assert.equal(overflow.verdict, 'ask');
+  assert.equal(overflow.prompt.includes(longRoute), false);
+  assert.equal(overflow.prompt.includes('…'), true);
+  assert.equal(overflow.prompt.includes('(and 1 more)'), true);
+});

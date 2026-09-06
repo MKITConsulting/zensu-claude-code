@@ -346,10 +346,13 @@ if [ -z "${ZDOC_VERIFY:-}" ]; then
     # from the variable alone reports green for a session whose browser cannot start.
     # Only the three TOP-LEVEL guards parsePolicy applies first are repeated here; the
     # per-target rules stay the broker's, and the reason says which check answered. Calling
-    # parsePolicy itself was weighed and declined: it is async and resolves DNS for a remote
-    # policy, which a read-only diagnostic must not do. The copy is therefore held against its
-    # owner by a suite pin rather than by a call, and the row it feeds says what it checked —
-    # a green row here means the top-level contract holds, never that the broker will serve.
+    # parsePolicy itself was weighed and declined, and the DNS argument is NOT the reason: that
+    # function takes its resolver as a parameter and reaches DNS only for mode "remote". The real
+    # reason is that a stubbed refusing resolver would report a VALID remote policy as invalid,
+    # which is the one verdict a diagnostic must never invent. NOTHING PINS THIS COPY against its
+    # owner — no test compares it to parsePolicy — so a change there leaves this silently stale.
+    # The row it feeds says what it checked: a green row here means the top-level contract holds,
+    # never that the broker will serve.
     ZDOC_VERIFY_POLICY_FAULT="$(node -e '
       const raw = process.env.ZENSU_VERIFY_NAVIGATION_POLICY_V1 || "";
       let value;
