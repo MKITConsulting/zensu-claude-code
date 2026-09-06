@@ -151,26 +151,10 @@ if ! zensu_bind_hook_session "$INPUT"; then
   if zensu_doctor_allowed "$INPUT"; then
     exit 0
   fi
-  # A deny still has to say WHY. The lineage state is the one bind failure with a
-  # remedy that works in place, so it gets its own reason naming both versions
-  # instead of the generic "start a fresh session". stdout is the decision
-  # channel here, so the predicate's own output is captured, never leaked.
-  if ZENSU_LINEAGE="$(zensu_session_incompatible_runtime "$INPUT")" \
-    && [ -n "$ZENSU_LINEAGE" ]; then
-    zensu_emit_hook_session_deny incompatible-runtime \
-      "${ZENSU_LINEAGE%%$'\t'*}" "${ZENSU_LINEAGE##*$'\t'}"
-    exit 0
-  fi
-  # The other named state with the same in-place remedy: the installation that
-  # minted the record was pruned from the plugin cache. Disjoint from the lineage
-  # question above, so the order of the two is immaterial.
-  if ZENSU_PRUNED="$(zensu_session_pruned_plugin_root "$INPUT")" \
-    && [ -n "$ZENSU_PRUNED" ]; then
-    zensu_emit_hook_session_deny pruned-plugin-root \
-      "${ZENSU_PRUNED%%$'\t'*}" "${ZENSU_PRUNED##*$'\t'}"
-    exit 0
-  fi
-  zensu_emit_hook_session_deny
+  # A deny still has to say WHY. The named-state ladder and its rationale live in
+  # zensu_emit_named_bind_deny (hooks/lib/zensu-session.sh). This gate names no
+  # fallback scope, so an unnamed state gets the generic deny.
+  zensu_emit_named_bind_deny "$INPUT"
   exit 0
 fi
 

@@ -198,6 +198,38 @@ ZDOC_BINDING_PROJECT_ROOT="${ZDOC_BINDING_PROJECT_ROOT:-}"
 ZDOC_BINDING_RECORDED_VERSION="${ZDOC_BINDING_RECORDED_VERSION:-}"
 ZDOC_BINDING_EXECUTING_VERSION="${ZDOC_BINDING_EXECUTING_VERSION:-}"
 ZDOC_BINDING_VERSIONS=""
+# ONE implementation of the version-pair probe the binding ladder below runs for
+# each named state. The two copies were identical but for the predicate name —
+# same subshell, same source guard, same shape guard, same `printf '\t'`
+# degradation — roughly fourteen duplicated lines that also added a fifth level of
+# `else` nesting. Taking the predicate as an argument lets the ladder be a flat
+# loop, which puts the "the order between the two is immaterial" claim into the
+# code instead of leaving it in a comment.
+#
+# The shape guard MUST stay INSIDE this subshell, where the library that owns
+# ZENSU_SAFE_VERSION_RE is sourced. The doctor's own shell never sees that
+# variable, and under `set -u` referencing it out here aborts the branch and
+# silently falls back to the wrong row — the one part of the duplicated block that
+# was subtle, and the one an extraction must not lose. A pair failing the shape is
+# DROPPED rather than printed: it prints a lone separator, so the caller still
+# names the state and the renderer simply omits the two numbers. Losing two
+# numbers is a worse message, never a wrong one.
+zdoc_version_pair() {  # $1 = model predicate function name
+  (
+    # shellcheck disable=SC1090
+    source "$DIR/zensu-session.sh" >/dev/null 2>&1 || exit 1
+    zdoc_pair="$("$1")" || exit 1
+    [ -n "$zdoc_pair" ] || exit 1
+    zdoc_recorded="${zdoc_pair%%$'\t'*}"
+    zdoc_executing="${zdoc_pair##*$'\t'}"
+    if [[ "$zdoc_recorded" =~ $ZENSU_SAFE_VERSION_RE ]] \
+      && [[ "$zdoc_executing" =~ $ZENSU_SAFE_VERSION_RE ]]; then
+      printf '%s\t%s' "$zdoc_recorded" "$zdoc_executing"
+    else
+      printf '\t'
+    fi
+  )
+}
 # The session's own key and the RECORD's own project anchor, so the renderer can
 # tell a chain THIS session owns from one it does not, and can refuse the
 # comparison when the record and the caller disagree about which project it is.
@@ -297,69 +329,31 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
     if [ -n "$ZDOC_BINDING_PROJECT_ROOT" ]; then
       ZDOC_BINDING=orphaned-project-root
     else
-      # The SECOND narrow follow-up, asked only after the orphan question and
-      # never before it. A record can be both orphaned and lineage-incompatible;
-      # the vanished root is the heavier diagnosis and the one whose remedy is
-      # different, so it wins. Asking in the other order would report a repairable
-      # lineage state for a session whose workflow document is already gone.
-      # The shape guard runs INSIDE this subshell, where the library that owns
-      # ZENSU_SAFE_VERSION_RE is sourced — the doctor's own shell never sees that
-      # variable, and under `set -u` referencing it out here aborts the branch and
-      # silently falls back to the wrong row. Same guard the deny path applies,
-      # and for the same reason: a manifest version is validated only by
-      # requireText, and this pair is rendered verbatim into the terminal and into
-      # the model's context by the doctor skill. A pair that fails the shape is
-      # dropped, not printed — losing two numbers is a worse message, never a
-      # wrong one, and the row still names the state.
-      ZDOC_BINDING_VERSIONS="$(
-        # shellcheck disable=SC1090
-        source "$DIR/zensu-session.sh" >/dev/null 2>&1 || exit 1
-        zdoc_pair="$(zensu_session_incompatible_runtime_model)" || exit 1
-        [ -n "$zdoc_pair" ] || exit 1
-        zdoc_recorded="${zdoc_pair%%$'\t'*}"
-        zdoc_executing="${zdoc_pair##*$'\t'}"
-        if [[ "$zdoc_recorded" =~ $ZENSU_SAFE_VERSION_RE ]] \
-          && [[ "$zdoc_executing" =~ $ZENSU_SAFE_VERSION_RE ]]; then
-          printf '%s\t%s' "$zdoc_recorded" "$zdoc_executing"
-        else
-          printf '\t'
-        fi
-      )" || ZDOC_BINDING_VERSIONS=""
-      if [ -n "$ZDOC_BINDING_VERSIONS" ]; then
-        ZDOC_BINDING=incompatible-runtime
+      # The two narrow follow-ups, asked only AFTER the orphan question and never
+      # before it. A record can be both orphaned and lineage-incompatible; the
+      # vanished root is the heavier diagnosis and the one whose remedy differs,
+      # so it wins. Asking in the other order would report a repairable lineage
+      # state for a session whose workflow document is already gone.
+      #
+      # Between THESE two the order is immaterial, and the loop is what says so:
+      # the predicates are disjoint by construction — the lineage one needs the
+      # strict read to succeed, the pruned one needs it to fail at the plugin root
+      # — so at most one can answer. Both render the same pair into the same two
+      # variables, because the row that consumes them is one shape with two
+      # causes. `unbound` is the default rather than a trailing `else`, so a third
+      # named state is one row in this list.
+      ZDOC_BINDING=unbound
+      for zdoc_named in \
+        'incompatible-runtime:zensu_session_incompatible_runtime_model' \
+        'pruned-plugin-root:zensu_session_pruned_plugin_root_model'; do
+        ZDOC_BINDING_VERSIONS="$(zdoc_version_pair "${zdoc_named#*:}")" \
+          || ZDOC_BINDING_VERSIONS=""
+        [ -n "$ZDOC_BINDING_VERSIONS" ] || continue
+        ZDOC_BINDING="${zdoc_named%%:*}"
         ZDOC_BINDING_RECORDED_VERSION="${ZDOC_BINDING_VERSIONS%%$'\t'*}"
         ZDOC_BINDING_EXECUTING_VERSION="${ZDOC_BINDING_VERSIONS##*$'\t'}"
-      else
-        # The THIRD narrow follow-up: is the record intact and only the
-        # installation that minted it gone from the plugin cache? Disjoint from
-        # the lineage question — that predicate needs the strict read to succeed,
-        # this one needs it to fail at the plugin root — so the order between
-        # the two is immaterial; it sits after the orphan question for the same
-        # reason the lineage one does. Same subshell shape, same shape guard,
-        # same pair rendered into the same two variables, because the row that
-        # consumes them is the same shape with a different cause.
-        ZDOC_PRUNED_VERSIONS="$(
-          # shellcheck disable=SC1090
-          source "$DIR/zensu-session.sh" >/dev/null 2>&1 || exit 1
-          zdoc_pair="$(zensu_session_pruned_plugin_root_model)" || exit 1
-          [ -n "$zdoc_pair" ] || exit 1
-          zdoc_recorded="${zdoc_pair%%$'\t'*}"
-          zdoc_executing="${zdoc_pair##*$'\t'}"
-          if [[ "$zdoc_recorded" =~ $ZENSU_SAFE_VERSION_RE ]] \
-            && [[ "$zdoc_executing" =~ $ZENSU_SAFE_VERSION_RE ]]; then
-            printf '%s\t%s' "$zdoc_recorded" "$zdoc_executing"
-          else
-            printf '\t'
-          fi
-        )" || ZDOC_PRUNED_VERSIONS=""
-        if [ -n "$ZDOC_PRUNED_VERSIONS" ]; then
-          ZDOC_BINDING=pruned-plugin-root
-          ZDOC_BINDING_RECORDED_VERSION="${ZDOC_PRUNED_VERSIONS%%$'\t'*}"
-          ZDOC_BINDING_EXECUTING_VERSION="${ZDOC_PRUNED_VERSIONS##*$'\t'}"
-        else
-          ZDOC_BINDING=unbound
-        fi
-      fi
+        break
+      done
     fi
   fi
 fi

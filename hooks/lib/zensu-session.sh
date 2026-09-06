@@ -193,6 +193,69 @@ zensu_session_orphaned_project_root_model() {
   ) 2>/dev/null
 }
 
+# ONE implementation behind the four binder-mode wrappers below. They were four
+# copies of the same body — the node probe, the lib_dir/plugin_root resolution,
+# the binder `[ -f ] && [ ! -L ]` guard, both zensu-host-path.sh renders,
+# zensu_msys_env_exclusions and the `cd -P` subshell — differing only in the argv
+# mode and the `model-` prefix. The cost was never the lines: it was that a change
+# to the MSYS preamble or to the symlink guard had to land in all four by hand,
+# with nothing failing when one was missed.
+#
+# The MODE selects the calling convention, not the argument count. A `model-` mode
+# takes its session id from CLAUDE_CODE_SESSION_ID and writes no stdin; every
+# other mode requires a payload and pipes it in. Keying on the mode rather than on
+# "was the payload empty" keeps a payload mode called with an empty payload a
+# REFUSAL, instead of silently falling through to the model convention and
+# answering about a different session than the caller asked about.
+#
+# CLAUDE_PLUGIN_DATA is read as `${CLAUDE_PLUGIN_DATA:-}` on both paths. The model
+# wrappers used the bare `$CLAUDE_PLUGIN_DATA`, which was safe only because the
+# emptiness check two lines above it happened to run first; the guarded spelling
+# does not depend on that ordering surviving an edit.
+_zensu_session_binder_mode() {
+  local mode="${1:-}" payload="${2:-}"
+  local lib_dir binder plugin_root native_plugin_root native_plugin_data
+  local msys_env_exclusions
+  [ -n "$mode" ] || return 1
+  case "$mode" in
+    model-*)
+      [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] || return 1
+      [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
+      ;;
+    *)
+      [ -n "$payload" ] || return 1
+      ;;
+  esac
+  command -v node >/dev/null 2>&1 || return 1
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  plugin_root="$(cd "$lib_dir/../.." && pwd -P)" || return 1
+  binder="$lib_dir/claude-hook-session-v1.js"
+  [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
+  native_plugin_root="$(bash "$lib_dir/zensu-host-path.sh" "$plugin_root")" || return 1
+  native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}")" || return 1
+  msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
+    || return 1
+  case "$mode" in
+    model-*)
+      (
+        cd -P -- "$lib_dir" || exit 1
+        MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
+          CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
+          node ./claude-hook-session-v1.js "$mode"
+      ) 2>/dev/null
+      ;;
+    *)
+      (
+        cd -P -- "$lib_dir" || exit 1
+        printf '%s' "$payload" \
+          | MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
+            CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
+            node ./claude-hook-session-v1.js "$mode"
+      ) 2>/dev/null
+      ;;
+  esac
+}
+
 # Returns 0 ONLY when a Session Control record is intact in every respect and the
 # SOLE disagreement is that the executing runtime declares an incompatible
 # lineage — what a plugin update landing mid-session produces. It is NOT a
@@ -209,51 +272,14 @@ zensu_session_orphaned_project_root_model() {
 # stdout is the hook's JSON decision channel, so a caller that wants the
 # predicate alone MUST discard stdout explicitly (`>/dev/null`).
 zensu_session_incompatible_runtime() {
-  local payload="${1:-}"
-  local lib_dir binder plugin_root native_plugin_root native_plugin_data
-  local msys_env_exclusions
-  [ -n "$payload" ] || return 1
-  command -v node >/dev/null 2>&1 || return 1
-  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
-  plugin_root="$(cd "$lib_dir/../.." && pwd -P)" || return 1
-  binder="$lib_dir/claude-hook-session-v1.js"
-  [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
-  native_plugin_root="$(bash "$lib_dir/zensu-host-path.sh" "$plugin_root")" || return 1
-  native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}")" || return 1
-  msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
-    || return 1
-  (
-    cd -P -- "$lib_dir" || exit 1
-    printf '%s' "$payload" \
-      | MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
-        CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
-        node ./claude-hook-session-v1.js incompatible-runtime
-  ) 2>/dev/null
+  _zensu_session_binder_mode incompatible-runtime "${1:-}"
 }
 
 # The model-side twin of the predicate above, for /zensu:doctor: same question
 # and same printed version pair, but no hook payload exists there, so the session
 # id comes from CLAUDE_CODE_SESSION_ID.
 zensu_session_incompatible_runtime_model() {
-  local lib_dir binder plugin_root native_plugin_root native_plugin_data
-  local msys_env_exclusions
-  [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] || return 1
-  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
-  command -v node >/dev/null 2>&1 || return 1
-  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
-  plugin_root="$(cd "$lib_dir/../.." && pwd -P)" || return 1
-  binder="$lib_dir/claude-hook-session-v1.js"
-  [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
-  native_plugin_root="$(bash "$lib_dir/zensu-host-path.sh" "$plugin_root")" || return 1
-  native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "$CLAUDE_PLUGIN_DATA")" || return 1
-  msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
-    || return 1
-  (
-    cd -P -- "$lib_dir" || exit 1
-    MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
-      CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
-      node ./claude-hook-session-v1.js model-incompatible-runtime
-  ) 2>/dev/null
+  _zensu_session_binder_mode model-incompatible-runtime
 }
 
 # Returns 0 ONLY when a Session Control record is intact in every respect and the
@@ -271,50 +297,46 @@ zensu_session_incompatible_runtime_model() {
 # same stdout warning applies: a caller wanting the predicate alone MUST discard
 # stdout explicitly (`>/dev/null`).
 zensu_session_pruned_plugin_root() {
-  local payload="${1:-}"
-  local lib_dir binder plugin_root native_plugin_root native_plugin_data
-  local msys_env_exclusions
-  [ -n "$payload" ] || return 1
-  command -v node >/dev/null 2>&1 || return 1
-  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
-  plugin_root="$(cd "$lib_dir/../.." && pwd -P)" || return 1
-  binder="$lib_dir/claude-hook-session-v1.js"
-  [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
-  native_plugin_root="$(bash "$lib_dir/zensu-host-path.sh" "$plugin_root")" || return 1
-  native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}")" || return 1
-  msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
-    || return 1
-  (
-    cd -P -- "$lib_dir" || exit 1
-    printf '%s' "$payload" \
-      | MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
-        CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
-        node ./claude-hook-session-v1.js pruned-plugin-root
-  ) 2>/dev/null
+  _zensu_session_binder_mode pruned-plugin-root "${1:-}"
 }
 
 # The model-side twin, for /zensu:doctor: same question, same printed pair, the
 # session id from CLAUDE_CODE_SESSION_ID.
 zensu_session_pruned_plugin_root_model() {
-  local lib_dir binder plugin_root native_plugin_root native_plugin_data
-  local msys_env_exclusions
-  [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] || return 1
-  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
-  command -v node >/dev/null 2>&1 || return 1
-  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
-  plugin_root="$(cd "$lib_dir/../.." && pwd -P)" || return 1
-  binder="$lib_dir/claude-hook-session-v1.js"
-  [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
-  native_plugin_root="$(bash "$lib_dir/zensu-host-path.sh" "$plugin_root")" || return 1
-  native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "$CLAUDE_PLUGIN_DATA")" || return 1
-  msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
-    || return 1
-  (
-    cd -P -- "$lib_dir" || exit 1
-    MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
-      CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
-      node ./claude-hook-session-v1.js model-pruned-plugin-root
-  ) 2>/dev/null
+  _zensu_session_binder_mode model-pruned-plugin-root
+}
+
+# The per-gate bind-failure ladder, in ONE place. Four gates carried the same nine
+# lines plus the same three-line comment, differing only in the payload variable
+# and in the fallback scope — so adding a fifth named state meant eight edits with
+# nothing that fails when one is missed, and the only control was a hand-maintained
+# roster in CLAUDE.md. The fallback scope is the one thing that legitimately
+# differs between the gates, so it stays the argument.
+#
+# The rationale the copies carried, kept here because it is the reason the ladder
+# exists at all: before it, a gate in a named state printed "start a fresh Claude
+# Code session" while its siblings said the session could be adopted — two denies
+# contradicting each other about the one bind failure that has an in-place remedy.
+#
+# Both predicates PRINT `recorded<TAB>executing` on stdout, and inside a PreToolUse
+# gate stdout is the JSON decision channel, so each is captured into a variable and
+# never leaked. The two are disjoint by construction — the lineage one needs the
+# strict read to succeed, the pruned one needs it to fail — so their order is
+# immaterial. A caller that passes no fallback scope gets the generic deny.
+zensu_emit_named_bind_deny() {
+  local payload="${1:-}" fallback="${2:-}"
+  local pair
+  if pair="$(zensu_session_incompatible_runtime "$payload")" && [ -n "$pair" ]; then
+    zensu_emit_hook_session_deny incompatible-runtime \
+      "${pair%%$'\t'*}" "${pair##*$'\t'}"
+    return
+  fi
+  if pair="$(zensu_session_pruned_plugin_root "$payload")" && [ -n "$pair" ]; then
+    zensu_emit_hook_session_deny pruned-plugin-root \
+      "${pair%%$'\t'*}" "${pair##*$'\t'}"
+    return
+  fi
+  zensu_emit_hook_session_deny ${fallback:+"$fallback"}
 }
 
 # Returns 0 ONLY when this PreToolUse payload is one of the two recognized Bash
@@ -532,6 +554,7 @@ zensu_resolve_project_dir() {
 }
 
 export -f zensu_bind_hook_session zensu_bind_model_session zensu_emit_hook_session_deny \
+  _zensu_session_binder_mode zensu_emit_named_bind_deny \
   zensu_session_unregistered \
   zensu_session_orphaned_project_root zensu_session_orphaned_project_root_model \
   zensu_session_incompatible_runtime zensu_session_incompatible_runtime_model \
