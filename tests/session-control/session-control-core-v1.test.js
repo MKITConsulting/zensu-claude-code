@@ -4448,3 +4448,420 @@ test('external process lease reclaims a live PID with a mismatched start identit
     token: acquired.token,
   });
 });
+
+// ── Workflow-baseline repair ────────────────────────────────────────────────
+//
+// A DIFFERENT wedge from the one adoption exits, and the distinction is the whole
+// point: the record is intact and SERVED by the executing runtime, and the
+// workflow document the record anchors is gone. While it is, the capability gate
+// denies every tool in the session. See §"Workflow-Baseline Repair" in CLAUDE.md.
+
+function baselineOptions(f, overrides = {}) {
+  return {
+    recordsDir: f.recordsDir,
+    sessionId: RAW_SESSION,
+    pluginData: f.pluginData,
+    executingPluginRoot: f.pluginRoot,
+    host: f.host,
+    ...overrides,
+  };
+}
+
+// The CANONICAL project root, and the reason it is a helper rather than
+// f.projectRoot inline: readContext canonicalizes the recorded root, so on macOS
+// the verdict answers /private/var/... while the fixture's own spelling is
+// /var/... . A raw compare here fails against perfectly correct code, which is
+// exactly what it did on the first run of these tests.
+function baselineProject(f) {
+  return fs.realpathSync.native(f.projectRoot);
+}
+
+function baselineFile(f) {
+  return core.adoptionWorkflowStatePath(baselineProject(f), RAW_SESSION);
+}
+
+// A real SIBLING of the recorded root, because servesRecordedRuntime requires one
+// whatever the declared version says. Local rather than reusing siblingPluginRoot,
+// which reads f.currentContext — a field only the deferred-review fixtures set.
+function baselineSibling(f, version) {
+  const root = fs.mkdtempSync(path.join(path.dirname(f.pluginRoot), 'zensu-baseline-sibling-'));
+  const manifestDir = f.host === 'codex' ? '.codex-plugin' : '.claude-plugin';
+  fs.mkdirSync(path.join(root, manifestDir), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, manifestDir, 'plugin.json'),
+    JSON.stringify({ name: 'zensu', version }),
+  );
+  return fs.realpathSync.native(root);
+}
+
+test('WB1 the classification names all four shapes, and both tamper shapes are one verdict', (t) => {
+  const f = fixture('claude');
+  register(f);
+  const file = core.adoptionWorkflowStatePath(f.projectRoot, RAW_SESSION);
+  const classify = () => core.classifyWorkflowBaseline(file, f.projectRoot, RAW_SESSION);
+
+  assert.equal(classify(), core.BASELINE_STATES.MISSING);
+  initialize(f);
+  assert.equal(classify(), core.BASELINE_STATES.PRESENT);
+
+  // Present and does not validate is UNREADABLE, never missing: something is
+  // there, and calling it absent would aim the repair at a path it cannot own.
+  fs.writeFileSync(file, '{not json');
+  assert.equal(classify(), core.BASELINE_STATES.UNREADABLE);
+
+  // A hard link is a second directory entry for a real file, so it passes every
+  // test a plain regular file passes except nlink. It is the shape an isFile or
+  // size test alone would admit.
+  fs.unlinkSync(file);
+  const elsewhere = path.join(f.projectRoot, 'elsewhere.json');
+  fs.writeFileSync(elsewhere, '{}');
+  fs.linkSync(elsewhere, file);
+  assert.equal(classify(), core.BASELINE_STATES.UNSAFE, 'a hard link is unsafe, not readable');
+
+  if (WINDOWS_SYMLINK_SKIP) {
+    t.diagnostic(WINDOWS_SYMLINK_SKIP);
+    return;
+  }
+  fs.unlinkSync(file);
+  fs.symlinkSync(elsewhere, file);
+  assert.equal(classify(), core.BASELINE_STATES.UNSAFE, 'a symlink is unsafe, not readable');
+});
+
+test('WB1a a NON-DIRECTORY state component is UNSAFE, never missing', () => {
+  const f = fixture('claude');
+  register(f);
+  // A FILE where the state directory belongs. State the MECHANISM correctly: the
+  // ladder's lstat on `.zensu/state` SUCCEEDS here — it is a regular file — and the
+  // verdict comes from the `!componentStat.isDirectory()` arm, NOT from a thrown
+  // ENOTDIR. The previous title and comment claimed the throw arm, which this
+  // fixture never reaches, so the case passed for a different reason than it named.
+  // The throw arm has its own case below.
+  const zensuDir = path.join(f.projectRoot, '.zensu');
+  fs.mkdirSync(zensuDir, { recursive: true });
+  fs.writeFileSync(path.join(zensuDir, 'state'), 'not a directory');
+  assert.equal(
+    core.classifyWorkflowBaseline(baselineFile(f), baselineProject(f), RAW_SESSION),
+    core.BASELINE_STATES.UNSAFE,
+  );
+  // And the verdict refuses to repair it, so the error can never be rebuilt over.
+  assert.equal(core.workflowBaselineVerdict(baselineOptions(f)).repairable, false);
+});
+
+test('WB1b a LEAF lstat error that is not ENOENT is UNSAFE, never missing', (t) => {
+  if (process.platform === 'win32' || process.getuid?.() === 0) {
+    t.diagnostic('needs POSIX mode bits and a non-root uid to make lstat fail with EACCES');
+    return;
+  }
+  const f = fixture('claude');
+  register(f);
+  // The arm WB1a was titled for and never reached: a THROWN non-ENOENT errno. The
+  // components are all proper directories, so the ladder passes; the leaf lstat then
+  // fails with EACCES because its parent is unsearchable. ENOENT is the only errno
+  // that means absence — anything else must not be reported as a missing document,
+  // or the repair would build over a path it could not even read.
+  const stateDir = path.dirname(baselineFile(f));
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.chmodSync(stateDir, 0o000);
+  try {
+    assert.equal(
+      core.classifyWorkflowBaselineShape(baselineFile(f), baselineProject(f)),
+      core.BASELINE_STATES.UNSAFE,
+    );
+  } finally {
+    fs.chmodSync(stateDir, 0o700);
+  }
+});
+
+test('WB1c a DANGLING symlink is an existing entry to both write gates', (t) => {
+  if (WINDOWS_SYMLINK_SKIP) {
+    t.diagnostic(WINDOWS_SYMLINK_SKIP);
+    return;
+  }
+  const f = fixture('claude');
+  register(f);
+  // fs.existsSync FOLLOWS the link, so it answers false for a dangling one. Both
+  // write gates keyed their guards on it, so the shape the classifier calls UNSAFE
+  // was invisible to them: the rename replaced the link and reported a clean write,
+  // destroying the tamper artifact. lstat is what makes an existing entry visible.
+  const file = baselineFile(f);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.symlinkSync(path.join(f.projectRoot, 'no-such-target.json'), file);
+
+  assert.equal(
+    core.classifyWorkflowBaselineShape(file, baselineProject(f)),
+    core.BASELINE_STATES.UNSAFE,
+    'the classifier already sees it — the write gates must agree',
+  );
+  assert.throws(
+    () => core.atomicWriteJson(file, { any: 'value' }),
+    /symlink state file rejected/,
+  );
+  assert.throws(
+    () => core.initializeWorkflowState({
+      projectRoot: baselineProject(f),
+      sessionId: RAW_SESSION,
+    }),
+    /unsafe workflow state file rejected/,
+  );
+  // The artifact SURVIVES: destroying it is what made the old behaviour a loss of
+  // evidence rather than merely a wrong return value.
+  assert.equal(fs.lstatSync(file).isSymbolicLink(), true);
+});
+
+test('WB1d the locked re-check refuses a document that appeared after the verdict', () => {
+  const f = fixture('claude');
+  register(f);
+  initialize(f);
+  const file = baselineFile(f);
+  assert.equal(fs.existsSync(file), true, 'the document really is there');
+
+  // The arm this reaches had NO executed case anywhere: it is only reachable when
+  // the OUTER verdict says repairable and the LOCKED create then finds the document
+  // already present. WB6 refuses one ladder earlier, at !verdict.repairable, so no
+  // fixture ever constructed the window. Faking a single ENOENT on the leaf lstat
+  // makes the outer classification see MISSING while the locked check sees the real
+  // file — exactly the benign race a concurrent SessionStart produces.
+  const realLstat = fs.lstatSync;
+  let faked = false;
+  fs.lstatSync = function patchedLstat(target, ...rest) {
+    if (!faked && String(target) === file) {
+      faked = true;
+      const absent = new Error(`ENOENT: no such file or directory, lstat '${file}'`);
+      absent.code = 'ENOENT';
+      throw absent;
+    }
+    return realLstat.call(this, target, ...rest);
+  };
+  try {
+    assert.throws(
+      () => core.repairWorkflowBaseline(baselineOptions(f)),
+      (error) => core.isBaselineAlreadyPresent(error)
+        && error.baselineState === core.BASELINE_STATES.PRESENT,
+      'the benign race is typed apart from tamper, so both callers can branch on it',
+    );
+  } finally {
+    fs.lstatSync = realLstat;
+  }
+  assert.equal(faked, true, 'the fake must actually have been consumed');
+});
+
+test('WB2 the verdict refuses every bind it cannot establish, and names which', () => {
+  const f = fixture('claude');
+
+  // No record at all — the read fails, and the refusal says so rather than
+  // reporting a verdict about a document nothing anchors.
+  assert.deepEqual(
+    core.workflowBaselineVerdict(baselineOptions(f)),
+    { ok: false, reason: core.BASELINE_REFUSALS.RECORD_UNREADABLE },
+  );
+
+  register(f);
+
+  const otherData = fs.mkdtempSync(path.join(f.root, 'other-plugin-data-'));
+  assert.deepEqual(
+    core.workflowBaselineVerdict(baselineOptions(f, { pluginData: otherData })),
+    { ok: false, reason: core.BASELINE_REFUSALS.PLUGIN_DATA },
+    'the plugin-data boundary is never relaxed here either',
+  );
+
+  // The INVERSE of adoption's condition 3: this repair REQUIRES the executing
+  // runtime to serve the record. A lineage break has its own exit, and rebuilding
+  // a document under a runtime not allowed to read the record anchoring it would
+  // be the wrong repair for the wrong cause. The fixture declares 9.8.7, so a
+  // major step is what breaks the lineage.
+  const foreign = baselineSibling(f, '10.0.0');
+  assert.deepEqual(
+    core.workflowBaselineVerdict(baselineOptions(f, { executingPluginRoot: foreign })),
+    { ok: false, reason: core.BASELINE_REFUSALS.NOT_SERVED },
+  );
+});
+
+test('WB3 only a missing document is repairable', () => {
+  const f = fixture('claude');
+  register(f);
+
+  const missing = core.workflowBaselineVerdict(baselineOptions(f));
+  assert.equal(missing.ok, true);
+  assert.equal(missing.state, core.BASELINE_STATES.MISSING);
+  assert.equal(missing.repairable, true);
+  assert.equal(missing.projectRoot, baselineProject(f));
+  assert.equal(missing.path, baselineFile(f));
+
+  initialize(f);
+  const present = core.workflowBaselineVerdict(baselineOptions(f));
+  assert.equal(present.state, core.BASELINE_STATES.PRESENT);
+  assert.equal(present.repairable, false, 'a healthy document is never rebuilt over');
+
+  fs.writeFileSync(present.path, '{not json');
+  const unreadable = core.workflowBaselineVerdict(baselineOptions(f));
+  assert.equal(unreadable.state, core.BASELINE_STATES.UNREADABLE);
+  assert.equal(unreadable.repairable, false, 'tamper is never repaired away');
+});
+
+test('WB4 the repair rebuilds the document, records BASELINE_REBUILT once, and ledgers nothing', () => {
+  const f = fixture('claude');
+  register(f);
+  const file = baselineFile(f);
+  assert.equal(fs.existsSync(file), false, 'precondition: the document is genuinely absent');
+
+  const repaired = core.repairWorkflowBaseline(baselineOptions(f));
+  assert.equal(repaired.path, file);
+  assert.equal(repaired.projectRoot, baselineProject(f));
+  assert.equal(repaired.provenance, 'recorded');
+  assert.equal(fs.existsSync(file), true);
+
+  const state = core.readWorkflowState({ projectRoot: f.projectRoot, sessionId: RAW_SESSION });
+  const rebuilt = state.history.filter((entry) => entry.phase === core.BASELINE_HISTORY_PHASE);
+  assert.equal(rebuilt.length, 1, 'exactly one provenance entry, never a second on the same repair');
+  assert.equal(rebuilt[0].reason, core.BASELINE_HISTORY_REASON_PREFIX + core.BASELINE_STATES.MISSING);
+  // `ts`, never `timestamp`: the key every other history writer sets and the one
+  // validateWorkflowExtensions validates.
+  assert.ok(typeof rebuilt[0].ts === 'string' && rebuilt[0].ts.length > 0);
+
+  // The bypass ledger records gate ESCAPES so that everything rendered under
+  // "Gates bypassed" is true. This escaped no gate — the document a gate would
+  // have read was already gone — so an entry here would make that line false.
+  assert.deepEqual(state.bypasses, [], 'the repair is never a bypass-ledger entry');
+});
+
+test('WB5 the repair refuses a document that is present but unsafe or unreadable', (t) => {
+  const f = fixture('claude');
+  register(f);
+  const file = core.adoptionWorkflowStatePath(f.projectRoot, RAW_SESSION);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+
+  fs.writeFileSync(file, '{not json');
+  // The CODE, not only the message. The message is what the core's own comment
+  // tells callers never to match on, and both shipped consumers branch on
+  // `error.code` alone — so a swapped ternary would report a real tamper refusal
+  // as the benign race ("nothing to repair", exit 0) with every message assertion
+  // still green.
+  assert.throws(
+    () => core.repairWorkflowBaseline(baselineOptions(f)),
+    (error) => /workflow-document-unreadable/.test(error.message)
+      && error.code === core.BASELINE_NOT_REPAIRABLE_CODE
+      && core.isBaselineAlreadyPresent(error) === false,
+  );
+  // The refusal leaves the bytes alone: rebuilding over them would destroy the
+  // one thing a reader needs to tell tamper from a truncated write.
+  assert.equal(fs.readFileSync(file, 'utf8'), '{not json');
+
+  fs.unlinkSync(file);
+  const elsewhere = path.join(f.projectRoot, 'elsewhere.json');
+  fs.writeFileSync(elsewhere, '{}');
+  fs.linkSync(elsewhere, file);
+  assert.throws(
+    () => core.repairWorkflowBaseline(baselineOptions(f)),
+    (error) => /workflow-document-unsafe/.test(error.message)
+      && error.code === core.BASELINE_NOT_REPAIRABLE_CODE,
+  );
+  // The LEAF-level control for WB5a's ancestor case. `baselineUnsafeComponent`
+  // could return the leaf unconditionally and WB5a alone would not see it — the
+  // two together are what make the namer's answer discriminating.
+  // CANONICAL on both sides. The ladder anchors on the resolved project root, and
+  // on macOS a temp root is spelled `/var/...` by the caller and `/private/var/...`
+  // by the kernel — the same trap the classifier's own comment records.
+  assert.equal(
+    core.workflowBaselineVerdict(baselineOptions(f)).unsafeAt,
+    path.join(fs.realpathSync.native(path.dirname(file)), path.basename(file)),
+    'a bad LEAF names the leaf',
+  );
+  // The tamper arm asserts the SAME property the unreadable arm above does, and
+  // it did not: a refusal that first unlinked or truncated the link would throw
+  // the identical message and pass. The link, its target's bytes and the link
+  // count are all part of the evidence the refusal exists to preserve.
+  assert.equal(fs.readFileSync(elsewhere, 'utf8'), '{}', 'the link target is untouched');
+  assert.equal(fs.lstatSync(file).nlink, 2, 'the hard link still has two entries');
+  assert.ok(fs.existsSync(file), 'the refusal did not unlink the document path');
+
+  if (WINDOWS_SYMLINK_SKIP) {
+    t.diagnostic(WINDOWS_SYMLINK_SKIP);
+    return;
+  }
+  // A SYMLINK driven through the REPAIR had no case anywhere — WB1 exercises that
+  // shape through the classifier only, so the writer's own refusal of it was
+  // unverified in both directions.
+  fs.unlinkSync(file);
+  const outside = path.join(f.projectRoot, 'outside.json');
+  fs.writeFileSync(outside, '{"kept":true}');
+  fs.symlinkSync(outside, file);
+  assert.throws(
+    () => core.repairWorkflowBaseline(baselineOptions(f)),
+    /workflow-document-unsafe/,
+  );
+  assert.equal(fs.readFileSync(outside, 'utf8'), '{"kept":true}', 'the symlink target is untouched');
+  assert.ok(fs.lstatSync(file).isSymbolicLink(), 'the symlink itself survived the refusal');
+});
+
+test('WB5a a symlinked .zensu/state component is UNSAFE, never a repairable absence', (t) => {
+  const f = fixture('claude');
+  register(f);
+  if (WINDOWS_SYMLINK_SKIP) {
+    t.diagnostic(WINDOWS_SYMLINK_SKIP);
+    return;
+  }
+  const file = core.adoptionWorkflowStatePath(f.projectRoot, RAW_SESSION);
+  const stateDir = path.dirname(file);
+  fs.mkdirSync(path.dirname(stateDir), { recursive: true });
+  // An EMPTY real directory somewhere else, reached through a symlink at the
+  // `.zensu/state` position. `lstat` resolves every component EXCEPT the last, so
+  // before the directory ladder existed this answered ENOENT on the leaf and
+  // classified MISSING/repairable — a tamper shape offered as rebuildable, whose
+  // write then failed at ensureDescendantDirectory and whose report told the user
+  // to retry the repair that cannot succeed.
+  const decoy = path.join(f.projectRoot, 'decoy-state');
+  fs.mkdirSync(decoy, { recursive: true });
+  fs.symlinkSync(decoy, stateDir);
+  assert.equal(
+    core.classifyWorkflowBaseline(file, f.projectRoot, RAW_SESSION),
+    core.BASELINE_STATES.UNSAFE,
+    'a symlinked state directory is tamper, not absence',
+  );
+  const verdict = core.workflowBaselineVerdict(baselineOptions(f));
+  assert.equal(verdict.ok, true);
+  assert.equal(verdict.repairable, false, 'and it is therefore not repairable');
+  // WHICH component, not just that one is unsafe. With `.zensu/state` symlinked
+  // the leaf need not exist at all, so naming it sent the operator to a path they
+  // could not inspect — the defect `baselineUnsafeComponent` was written to fix,
+  // and nothing asserted its answer until here. WB5's leaf case is the control.
+  const realStateDir = path.join(fs.realpathSync.native(f.projectRoot), '.zensu', 'state');
+  assert.equal(verdict.unsafeAt, realStateDir, 'the ANCESTOR is named, not the leaf');
+  assert.notEqual(verdict.unsafeAt, file, 'and the leaf is not what is reported');
+  assert.throws(
+    () => core.repairWorkflowBaseline(baselineOptions(f)),
+    (error) => /workflow-document-unsafe/.test(error.message)
+      && error.code === core.BASELINE_NOT_REPAIRABLE_CODE,
+  );
+  assert.ok(fs.lstatSync(stateDir).isSymbolicLink(), 'the refusal left the component alone');
+});
+
+test('WB6 a second repair refuses instead of rebuilding over the first', () => {
+  const f = fixture('claude');
+  register(f);
+  core.repairWorkflowBaseline(baselineOptions(f));
+  const file = core.adoptionWorkflowStatePath(f.projectRoot, RAW_SESSION);
+  const before = fs.readFileSync(file, 'utf8');
+  assert.throws(
+    () => core.repairWorkflowBaseline(baselineOptions(f)),
+    (error) => /workflow-document-present/.test(error.message)
+      && error.code === core.BASELINE_ALREADY_PRESENT_CODE
+      && core.isBaselineAlreadyPresent(error) === true,
+    'the second call sees a present document and refuses it as the benign race',
+  );
+  assert.equal(fs.readFileSync(file, 'utf8'), before, 'a refused repair changes nothing');
+});
+
+test('WB7 a bind the repair cannot establish refuses before any write', () => {
+  const f = fixture('claude');
+  register(f);
+  const foreign = baselineSibling(f, '10.0.0');
+  assert.throws(
+    () => core.repairWorkflowBaseline(baselineOptions(f, { executingPluginRoot: foreign })),
+    /not-served-by-executing-runtime/,
+  );
+  assert.equal(
+    fs.existsSync(core.adoptionWorkflowStatePath(f.projectRoot, RAW_SESSION)),
+    false,
+    'a refused bind never creates the document it declined to judge',
+  );
+});
