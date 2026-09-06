@@ -14,7 +14,10 @@ description: >
   directory is re-created. Adoption is authorised by
   SCHEMA equality, not by the version numbers, so a release that really changed a
   persisted shape is refused. Use when /zensu:doctor reports an incompatible lineage,
-  when tools started failing closed right after a plugin update, or via
+  when tools started failing closed right after a plugin update, when this session's own
+  workflow document is gone and every tool denies with `activated workflow CAS state is
+  missing` — a served record whose baseline a deleted and re-created worktree took with
+  it, which is NOT a plugin update and which `--confirm` rebuilds in place — or via
   /zensu:adopt-session. No network or API key. It never edits code, never touches the
   workflow document's decision fields, and never bypasses a review.
 ---
@@ -62,12 +65,18 @@ all" would be wrong about the lease store.
 
 ## Do NOT Use For
 
-- A session that is binding normally — with ONE exception, which is the whole
-  reason the repair branch exists: if review-evidence operations started failing
-  after a plugin update, the record is fine and the LEASE STORE is wedged. That
-  session binds normally and is still the right caller; run the `--confirm` form and
-  it re-runs the sweep as an idempotent repair. For any other failure, that is
-  `/zensu:doctor`.
+- A session that is binding normally — with TWO exceptions, which are the whole
+  reason the repair branch exists. Both bind normally and are still the right
+  caller, and both are served by the `--confirm` form as an idempotent repair:
+  - **the LEASE STORE is wedged** — review-evidence operations started failing
+    after a plugin update. `--confirm` re-runs the sweep.
+  - **this session's WORKFLOW DOCUMENT is gone** — every tool denies with
+    `activated workflow CAS state is missing`, which is what the capability gate's
+    own deny now tells you to run this command for. `--confirm` rebuilds it.
+    `/zensu:doctor` is read-only and CANNOT rebuild it, so do not route here.
+    This rebuild needs the recorded project root to still EXIST; when it is gone
+    the bullet below applies instead and there is nothing to rebuild into.
+  For any other failure, that is `/zensu:doctor`.
 - Clearing a review chain or granting a budget. While the recorded project root
   still exists the chain state stays reachable across adoption and is enforced
   again on the very next Stop. When that root is GONE the workflow document lived
@@ -106,6 +115,28 @@ plugin root strictly and one stale lease would fail every later lease operation.
 It does NOT relax the lineage rule for anything else, rewrite any record, touch
 the workflow document's decision fields, relax the plugin-data boundary, grant a
 review round, set a terminal flag, or edit code.
+
+**A SECOND repair rides on the `already-served` refusal, and it is a different
+wedge from the one above.** There the executing runtime may not SERVE the record;
+here it serves it perfectly well and the workflow document the record anchors is
+GONE. A worktree deleted and re-created loses it, because `.zensu/state/` is
+gitignored, and a compaction that continues the SAME session never mints a new
+one. While it is gone the capability gate denies every tool in the session — which
+is deliberate and unchanged: a deleted document must never be read as "no chain
+was ever active".
+
+The read-only run names it; `--confirm` rebuilds it and appends one
+`BASELINE_REBUILT` history entry. Only a MISSING document is rebuilt. A document
+that is present but unreadable, a symlink, a hard link, a non-file or an
+oversized one is REFUSED and its bytes are left alone — something is at that
+path, and rebuilding over it would destroy the evidence.
+
+**Rebuilding is a loss, not a restore, and the user has to hear that before
+confirming.** A review chain that was live when the document vanished is gone;
+the rebuilt baseline reads "never active", because that is all a fresh baseline
+can say. The report lists the session-state files that survived — a pending
+review, its claim, an Autopilot pointer, a reviewer-denial note — without
+interpreting them, so the user can judge what was lost.
 
 The cost is real and stated plainly: the pin weakens from "the measured code is
 the enforcing code" to "the enforcing code shares the persisted shapes of the
@@ -175,7 +206,7 @@ render that verbatim too.
 | `private-record-store-unsafe` | Entry-point refusal, raised before `adoptableRecord` runs: the private record store itself could not be opened safely — missing, aliased, or carrying unsafe permissions or ownership. |
 | `record-unreadable` | The record no longer re-verifies against the installation that minted it — pruned from the cache, altered, or a real schema change. A recorded project root that is merely GONE is no longer one of these: that state is adoptable, so the disagreement here is one of the others. |
 | `plugin-data-mismatch` | The record belongs to a different plugin-data store. Never relaxed. |
-| `already-served` | Nothing to RE-MINT. The record is correct, but the lease store may still be wedged: an adoption writes the record first and sweeps the store afterwards, so a run that died in between leaves exactly this state. Re-running with `--confirm` repeats the sweep idempotently and re-mints nothing. If tools still fail after that, run `/zensu:doctor`. |
+| `already-served` | Nothing to RE-MINT, and TWO things beside the record can still be wedged. **The workflow document** this session is anchored to may be gone — a deleted and re-created worktree loses it, because `.zensu/state/` is gitignored — and while it is, the capability gate denies every tool in the session. **The lease store** is the second: an adoption writes the record first and sweeps the store afterwards, so a run that died in between leaves exactly that state. The report below the remedy says which of the two applies. Re-running with `--confirm` repairs both, idempotently, and re-mints nothing. If tools still fail after that, run `/zensu:doctor`. |
 | `not-a-sibling-installation` | The executing tree is not an upgrade of the recorded one (for example a `--plugin-dir` checkout). |
 | `executing-runtime-unidentified` | The executing installation declares no usable version. |
 | `executing-runtime-older` | The executing installation is OLDER. Only forwards is ever allowed. |
@@ -192,11 +223,18 @@ the update has to be re-gathered.
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh" --confirm
 ```
 
-Render the output verbatim. Four things are NOT clean states and must be
+Render the output verbatim. FIVE things are NOT clean states and must be
 surfaced rather than summarized away:
 
-- a `provenance` other than `recorded` or `no-workflow-document` means the
-  takeover happened but was not written into the history;
+- a `workflow baseline` value other than `present` or `rebuilt` — and any
+  `WARNING:` line about the workflow document. `rebuilt` is a real repair and
+  still carries a cost the user has to hear: the chain that was live when the
+  document vanished is gone. Anything else means the document was NOT repaired,
+  and the cause named in the report has to be cleared before re-running;
+- a `provenance` of anything but `recorded` means the takeover happened but was
+  not written into the history. `no-workflow-document` is NOT a clean value: it
+  means the session has no workflow document at all, so the capability gate keeps
+  denying every tool until a `--confirm` run rebuilds it;
 - a non-zero `leases set aside` means evidence reservations were dropped and
   have to be gathered again;
 - a non-zero `leases stuck` is the serious one — those entries could NOT be moved
@@ -213,11 +251,13 @@ surfaced rather than summarized away:
   tamper signal, and by an ordinary I/O failure such as a full or read-only store.
   The command cannot tell those apart, so neither can you.
 
-Exit codes: `0` on a successful report, adoption, or in-place lease repair — the
-repair is a third exit-0 shape and prints `ALREADY SERVED (...)` rather than
-`ADOPTED`; a repair whose sweep was refused or left leases stuck exits `1`. `1` on a refusal or a
-precondition failure, `2` on a bad argument. A non-zero exit is not a broken
-command — read the message.
+Exit codes: `0` on a successful report, adoption, or in-place repair — the
+in-place repair is a third exit-0 shape and prints `ALREADY SERVED (...)` rather
+than `ADOPTED`. It has TWO halves and EITHER one failing exits `1`: a workflow
+baseline that could not be judged or rebuilt, or a sweep that was refused or left
+leases stuck. A rebuilt baseline does not launder a stuck lease, and a clean sweep
+does not launder a refused rebuild. `1` on a refusal or a precondition failure,
+`2` on a bad argument. A non-zero exit is not a broken command — read the message.
 
 **Step 4 of 4 — confirm the repair.** Re-run `/zensu:doctor` and report the binding
 row, and read it before you describe the outcome. When the recorded project root still
@@ -242,6 +282,16 @@ anything onto it.
 ## Response Style
 
 Render both command outputs verbatim; they are already formatted. Name both
-versions. Never summarize away a `provenance` other than `recorded`/
-`no-workflow-document`, a non-zero `leases set aside`, a non-zero
-`leases stuck`, or any `WARNING:` line about the lease store. After a successful adoption, do not tell the user to restart — and when the recorded project root was gone, say that Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write, until it is re-created — read-only Bash and the diagnostics do run — rather than reporting an unqualified success.
+versions. Never summarize away a `workflow baseline` value other than `present`,
+a `provenance` other than `recorded`, a non-zero `leases set aside`, a non-zero
+`leases stuck`, or any `WARNING:` line the command prints — about the workflow
+document or about the lease store. The ONE provenance value that is not a finding
+on its own is `no-workflow-document` in the orphaned-project-root case: there the
+command prints a NOTE rather than a WARNING, because the document lived under a
+directory that is gone and there is nothing to rebuild into. Report that NOTE;
+do not upgrade it to the rebuild recommendation, which is for the other shape.
+After a successful adoption, do not tell the user to restart — and when the
+recorded project root was gone, say that Edit, Write and MultiEdit stay denied,
+and so does any Bash command the source-write gate can attribute as a write,
+until it is re-created — read-only Bash and the diagnostics do run — rather than
+reporting an unqualified success.

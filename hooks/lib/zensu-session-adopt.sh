@@ -8,11 +8,21 @@
 # inherit /zensu:doctor's justification and needs its own, stated here because
 # hooks/lib/zensu-doctor-invocation.js points at this header:
 #
-#   - THREE write classes, all confined: one record for THIS session in the
-#     private plugin-data store; one workflow history entry in the recorded
-#     project; and any review-evidence lease naming the previous installation,
+#   - FOUR write classes, all confined, and the ORDER here is their NUMBERING:
+#     the bounded-exception paragraph below labels the lease sweep "write class 3"
+#     and the workflow-baseline repair "write class 4", as do all four sibling
+#     carriers, while this list used to present them the other way round one screen
+#     above. (1) one record for THIS session in the
+#     private plugin-data store; (2) one workflow history entry in the recorded
+#     project; (3) any review-evidence lease naming the previous installation,
 #     MOVED (never deleted) out of that session's own lease records directory
-#     into a sibling `superseded/` one. The selector is broader than "names the
+#     into a sibling `superseded/` one; and (4) this session's own workflow document
+#     plus its `.zensu` ancestors under the recorded project root, created with mode
+#     0o700 and reachable ONLY on an `already-served` refusal with `--confirm` (see
+#     the bounded-exception paragraph below) — stated as `.zensu` and not
+#     `.zensu/state`, because the mkdir creates BOTH components and `.zensu` is not
+#     inside `.zensu/state`, which is the argument that paragraph already makes and
+#     which this bullet contradicted. The lease selector is broader than "names the
 #     previous installation" and narrower than "everything listRecords rejects":
 #     the keep-predicate is a SUPERSET of that reader's accept set, mirroring three
 #     of its conjuncts, so a stale lease, one whose id disagrees with its filename,
@@ -35,12 +45,27 @@
 #     from the record": that is the stronger claim, and it is not what the code
 #     enforces.
 #   - The record and history writes require every adoptableRecord condition to
-#     hold. There is exactly ONE bounded exception, and it is stated here because
-#     this header is what the recognizer's admission rests on: with `--confirm`, an
-#     `already-served` refusal re-runs write class 3 — the lease sweep — as an
-#     idempotent repair. It re-mints nothing and touches nothing outside
-#     <plugin_data>/review-evidence/v1/{records,superseded}/<session key>. Without
-#     `--confirm` that refusal is read-only like every other.
+#     hold. There are exactly TWO bounded exceptions, and they are stated here
+#     because this header is what the recognizer's admission rests on. Both are
+#     reached the same way — an `already-served` refusal WITH `--confirm` — and
+#     both are idempotent repairs that re-mint no record:
+#       (a) write class 4, the workflow-baseline repair: when this session's own
+#           workflow document is MISSING it is recreated through
+#           initializeWorkflowState, which mkdirs `<recorded project>/.zensu` and
+#           `.zensu/state` at mode 0o700 when absent and atomically writes one new
+#           document, plus one BASELINE_REBUILT history entry. It refuses a
+#           document that is present-but-unreadable, a symlink, a hard link, a
+#           non-file or an oversized one, leaving those bytes alone. It touches
+#           nothing outside <recorded project>/.zensu — stated as `.zensu` and not
+#           `.zensu/state`, because the mkdir above creates BOTH components and
+#           `.zensu` is not inside `.zensu/state`.
+#       (b) write class 3, the lease sweep, re-run over the same session key. It
+#           touches nothing outside
+#           <plugin_data>/review-evidence/v1/{records,superseded}/<session key>.
+#     Without `--confirm` that refusal is read-only like every other. Counting (a)
+#     as part of the sweep is what this header said for one release, and it
+#     understated the admission the recognizer grants: the sweep never leaves the
+#     plugin-data store, while (a) writes into the user's project tree.
 #   - It cannot reach project source files, cannot run a build or a test, and
 #     takes no argument other than the single literal `--confirm`.
 #   - Without `--confirm` it is strictly read-only and answers the same question

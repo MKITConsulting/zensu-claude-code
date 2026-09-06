@@ -111,6 +111,22 @@ function canonicalDirectory(value, label, rejectAlias = false) {
   return canonical;
 }
 
+// The ONE cause in this file that has an in-place remedy, tagged rather than
+// matched by message text. A deny that names a remedy is worth having only if it
+// names it for the right cause, and a substring test against prose is how that
+// claim goes quietly wrong on the next reword.
+//
+// Tagged ONLY for a clean ENOENT. `is unsafe` and `is not canonical` are tamper
+// shapes and stay on the generic wording: something is sitting at that path, and
+// offering a rebuild there would tell the user to build over the evidence.
+const BASELINE_MISSING_CODE = 'ZENSU_WORKFLOW_BASELINE_MISSING';
+
+function baselineMissing(message) {
+  const error = new Error(message);
+  error.code = BASELINE_MISSING_CODE;
+  return error;
+}
+
 function revalidateWorkflowState(options) {
   // SessionStart always creates one project-bound baseline CAS record. Validate
   // its existing path before calling the core reader so deletion can never
@@ -124,7 +140,11 @@ function revalidateWorkflowState(options) {
     let stat;
     try {
       stat = fs.lstatSync(candidate);
-    } catch {
+    } catch (error) {
+      // A clean ENOENT is the repairable shape: the repair's own
+      // initializeWorkflowState creates these components. Every other errno is
+      // NOT absence and keeps the generic wording.
+      if (error && error.code === 'ENOENT') throw baselineMissing(`${label} is missing`);
       throw new Error(`${label} is missing`);
     }
     if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`${label} is unsafe`);
@@ -137,7 +157,10 @@ function revalidateWorkflowState(options) {
   let stateStat;
   try {
     stateStat = fs.lstatSync(stateFile);
-  } catch {
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      throw baselineMissing('activated workflow CAS state is missing');
+    }
     throw new Error('activated workflow CAS state is missing');
   }
   if (
@@ -472,8 +495,14 @@ function main() {
     // here is reached before the Bash gates ever run. It admits exactly two
     // recognized commands for the main thread: hooks/lib/zensu-doctor.sh, which
     // writes nothing, and hooks/lib/zensu-session-adopt.sh, which writes its own
-    // session's record, one workflow history entry and a move of its own stale
-    // review-evidence leases, and carries its own justification in its header. A
+    // session's record, one workflow history entry, a move of its own stale
+    // review-evidence leases, and — with --confirm on an already-served refusal
+    // only — its own missing workflow document plus that document's .zensu
+    // ancestors in the recorded project (`.zensu` and not `.zensu/state`: the mkdir
+    // creates BOTH components, and `.zensu` is not inside `.zensu/state` — the adopt
+    // header makes that argument and two carriers still spelled the narrower one),
+    // and carries its own justification in its
+    // header. A
     // remedy the user cannot invoke is not a remedy.
     //
     // This gate is the FIFTH denier in the incompatible-runtime state, and the
@@ -524,6 +553,24 @@ function main() {
         return;
       }
       deny(`${cause} The repair writes the immutable record and is reserved for the main thread, so it is not available here — report this to the main thread rather than retrying.`);
+      return;
+    }
+    // The SECOND named cause, and the second one with an in-place remedy. It sits
+    // below the lineage branch deliberately: the two are mutually exclusive in
+    // practice — a lineage break throws inside resolveHookSession, before this
+    // file ever reaches the workflow document — and where they are not, adoption
+    // is the correct remedy, because the repair below requires a SERVED record.
+    //
+    // The generic wording is what this branch removes. "immutable context
+    // revalidation failed: activated workflow CAS state is missing" is accurate
+    // and names no way out, in a state where this hook denies every tool and the
+    // only reachable commands are the two the Bash recognizer admits.
+    if (error && error.code === BASELINE_MISSING_CODE) {
+      // The reachability clause is PLATFORM-QUALIFIED on purpose. zensu-doctor-invocation.js
+      // sets PLATFORM_SUPPORTED = process.platform !== "win32" and gates both recognizers on
+      // it, so on win32 the Bash recognizer admits NEITHER command and an unconditional
+      // "both stay reachable" is false in the one state where a wrong remedy has no fallback.
+      deny("this session's Session Control record is intact and served by the running Zensu installation, but the workflow document it anchors is missing — a deleted and re-created worktree loses it, because .zensu/state/ is gitignored. It is NOT read as \"no chain was ever active\": that is why every tool is denied. Run /zensu:adopt-session to see the diagnosis, and /zensu:adopt-session --confirm to rebuild the document. On macOS and Linux both stay reachable in this state; on Windows the Bash recognizer admits neither, so start a fresh Claude Code session instead. Rebuilding is a loss, not a restore — a review chain that was live when the document vanished is gone.");
       return;
     }
     deny(`immutable context revalidation failed: ${error.message}`);

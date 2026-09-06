@@ -35,7 +35,24 @@ fi
 # The floor is spelled here rather than derived from the suite's own output, for the
 # reason this tree states about every hand-maintained count: a number derived from what
 # it is checking agrees with whatever it finds. Raise it deliberately when cases land.
-SC_FLOOR=141
+#
+# What it is guarding is now two families rather than one, because two branches added
+# cases to the same file: the orphaned-project-root cases, and the workflow-baseline
+# cases (WB1-WB7 plus WB1a and WB5a), which are the only UNIT-level coverage of the
+# classification truth table, the refusal vocabulary and the component the UNSAFE
+# verdict names. Say unit-level: the REPAIR itself is additionally driven end to end by
+# test-versioned-plugin-upgrade.sh Part D and by the SessionStart heal in
+# test-session-control-claude.sh, so an unqualified "the only coverage anywhere" would
+# overreach. The floor fires on REMOVAL only, so adding a case can never turn it red on
+# its own — raise it in the same commit that adds one.
+#
+# ONE run of the suite, not two. The other branch put a second `bash "$SUITE"` plus an
+# inline floor here while this file already runs it below; keeping both would have
+# doubled the suite's wall clock. The block at the bottom is the one that survives
+# because it fails CLOSED: it sources the summary helper unconditionally and exits 1
+# when the helper is unavailable, where the inline form would have left the floor
+# silently unchecked.
+SC_FLOOR=153
 
 OUT="$(mktemp "${TMPDIR:-/tmp}/zensu-session-control-core-XXXXXX")" \
   || { printf '%s\n' 'test-session-control-core: cannot create temp file' >&2; exit 1; }
