@@ -120,8 +120,12 @@ function comparisonOrigin(parsed) {
 }
 
 function checkNavigationTarget(rawUrl, navigation = true) {
+  // A non-string target is refused, never coerced. String(["http://127.0.0.1:9999"])
+  // is the bare URL, so coercion let an array argument classify as loopback and reach
+  // the consent broker's approved map without a prompt.
+  if (typeof rawUrl !== 'string') return { ok: false, reason: FLOOR_REASONS.INVALID };
   let parsed;
-  try { parsed = new URL(String(rawUrl)); }
+  try { parsed = new URL(rawUrl); }
   catch (_error) { return { ok: false, reason: FLOOR_REASONS.INVALID }; }
   if (!['http:', 'https:', 'ws:', 'wss:'].includes(parsed.protocol)) {
     return { ok: false, reason: FLOOR_REASONS.SCHEME };

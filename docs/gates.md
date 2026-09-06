@@ -390,8 +390,9 @@ hypothetical — this plugin declares its own broker through `.mcp.json` under t
 plugin and `mcp__playwright__…` when the repository itself is opened as a project. A consuming
 project that runs its OWN MCP server under that key therefore has every non-loopback
 `browser_navigate` denied by this gate, in every session, with no skill running and no config
-flag to turn it off. The deny text names that possibility and its two remedies — rename the
-server key, or launch Claude Code with the parent-environment policy set. Narrowing the matcher
+flag to turn it off. The deny text names that possibility and its one remedy — rename the server
+key. Launching with the parent-environment policy is deliberately NOT offered: it turns this gate
+off for every target, including the remote ones the floor exists to refuse. Narrowing the matcher
 to the plugin-scoped spelling would remove the gate wherever the bare spelling is the real one,
 so the matcher is left as it is until the prefix is measured across desktop and CLI, default and
 `--plugin-dir` installs. The consent memory is a file in a directory the

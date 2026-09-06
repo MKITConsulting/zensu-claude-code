@@ -173,7 +173,15 @@ consent_origin() {
     ''|*[!0-9]*) fail "free-port helper printed no port" ;;
   esac
   origin="http://127.0.0.1:${port}"
-  ( umask 077; printf '%s\n' "$origin" >"$PLANNED_ORIGIN_FILE" ) || fail "cannot record the planned origin"
+  # The absence test for this path ran at the top of this function, and a free-port scan
+  # plus a node run happen between there and here. A truncating > follows whatever it finds
+  # by then, so a symlink planted in that window is followed and its target destroyed.
+  # O_EXCL refuses an existing name of any kind. Same rule as the secrets write below.
+  ORIGIN="$origin" node -e '
+    const fs = require("node:fs");
+    const fd = fs.openSync(process.argv[1], fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+    try { fs.writeFileSync(fd, `${process.env.ORIGIN}\n`); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+  ' "$PLANNED_ORIGIN_FILE" || fail "cannot record the planned origin"
   printf '%s' "$origin"
 }
 
@@ -249,7 +257,7 @@ case "$ACTION" in
         const fs = require("node:fs");
         const body = `DB_PASSWORD=${process.env.DB_PASSWORD}\nJWT_SECRET=${process.env.JWT_SECRET}\nRUNTIME_LEASE=${process.env.RUNTIME_LEASE}\n`;
         const fd = fs.openSync(process.argv[1], fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
-        try { fs.writeSync(fd, body); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+        try { fs.writeFileSync(fd, body); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
       ' "$SECRETS" || fail "the runtime secrets file could not be created exclusively"
 
     PG_STARTED=false

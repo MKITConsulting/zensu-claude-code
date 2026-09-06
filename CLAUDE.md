@@ -5828,16 +5828,20 @@ earlier "CLI versus desktop" reading in the spec was wrong. A consuming project 
 MCP server under that key therefore has every non-loopback `browser_navigate` denied, in every
 session, with no skill running. **Do not "fix" this by narrowing the matcher**: where the bare
 spelling is the real one, narrowing removes the gate while the broker still starts in consent
-mode and self-approves. The deny text names the foreign-server possibility and its two remedies
-instead. Closing it properly needs the prefix MEASURED across desktop and CLI, default and
+mode and self-approves. The deny text names the foreign-server possibility and its ONE remedy
+instead — renaming the server key. The second remedy this paragraph used to claim, launching with
+a navigation policy, was retired: it turns the gate off for every target including the remote ones
+the floor exists to refuse, so under the note's own premise it leaves nothing behind it.
+`tests/structure/verify-consent-v1.test.js` machine-forbids the retired spelling, so a carrier
+still naming two remedies asserts something a test refuses. Closing it properly needs the prefix MEASURED across desktop and CLI, default and
 `--plugin-dir` installs; until then neither direction is supported by evidence.
 
-**The prompt must describe the grant the BROKER makes, not the one the hook asks about.** The
-hook asks per route; the broker stores the classified ORIGIN and checks no route afterwards. A
-prompt saying "this page's content" therefore had the human decide on a false description. The
-sentence names the origin and says the browser does not check routes again. The doctor row
-already said "per origin", so the change removed an internal contradiction rather than choosing
-a wording.
+**The prompt must describe the grant the BROKER makes, not the one the hook asks about.** This is
+stated as a RULE, not as a live divergence — both now ask per origin, and the paragraph below
+records why. It is kept because the divergence is the easy one to reintroduce: the broker stores
+the classified ORIGIN and checks no route afterwards, so any future prompt promising a narrower
+grant than that would have the human decide on a false description. The sentence names the origin
+and says the browser does not check routes again.
 
 **CONSENT IS PER ORIGIN, in all three carriers, and the route-scoped design that preceded it is
 recorded here so it is not rebuilt.** The first attempt asked per route while the PROMPT told the
@@ -5852,6 +5856,18 @@ carriers still disagreeing. Removing the route axis fixes both: a record is exac
 `(origin, route, decidedBy, at)`, the route is an audit line, and the recipe's declared routes are
 prompt CONTEXT only. The cost is stated rather than hidden — there is no per-route control inside
 an approved loopback origin, which is what the prompt has always promised.
+
+**`isSymbolicLink()` beside an `lstat` verdict is DEAD, and this is a SHAPE, not a census.**
+`fs.lstatSync` does not follow the final component, so it never reports a symlink as a file or a
+directory: wherever this feature writes `!info.isFile() || info.isSymbolicLink()` or
+`!info.isDirectory() || info.isSymbolicLink()`, the first half already decides and the second is
+unreachable. It also protects nothing against the edit it looks like a belt against — an
+`lstatSync` → `statSync` "simplification" makes `isFile()`/`isDirectory()` true for a symlink AND
+`isSymbolicLink()` false, so the conjunct dies with the guard it appears to back up. The conjuncts
+are left in place; what must not happen is a reader treating one as load-bearing. Do NOT enumerate
+the sites here — a first attempt named one and a reviewer found eight, which is exactly how a prose
+census goes stale. Grep `isSymbolicLink()` across `hooks/lib/verify-consent-v1.js` and
+`scripts/playwright-mcp-proxy.js` before relying on any of them.
 
 **One resolver decides which recipe governs.** `resolveRecipeFile` prefers `.zensu/runtime.yaml`
 over `.zensu/autopilot.yaml` and skips a symlinked candidate. Both hooks and the `/zensu:doctor`
@@ -5887,8 +5903,12 @@ that does not carry it; every doctor STATE against the rows documented in the do
 a suite check holds in step — do not restate a COUNT here, because the next state added
 invalidates it, and this roster already shipped one that was stale on the day it was written;
 the doctor's THREE top-level policy guards against `parsePolicy`'s own three throw messages in
-`scripts/playwright-mcp-proxy.js`, a deliberate hand copy (calling the owner would put DNS in a
-read-only diagnostic) held by a suite pin rather than by a call;
+`scripts/playwright-mcp-proxy.js`, a deliberate hand copy that **NOTHING PINS** — no test compares
+it to its owner, so a change there leaves the copy silently stale. State the reason for the copy
+correctly too: it is NOT that calling the owner would put DNS in a read-only diagnostic, since
+`parsePolicy(raw, resolver)` takes its resolver as a parameter and reaches DNS only for
+`mode: "remote"`. It is that a stubbed refusing resolver would report a VALID remote policy as
+invalid, which is the one verdict a diagnostic must never invent;
 `consentHookRegistered` / `consentRecorderRegistered`, which share one lookup because their
 CONSUMERS differ — the broker asks only about the gate, the doctor about both; and the operator accounts in `docs/gates.md`, `docs/configuration.md`
 (both hook rows plus the hook count and its anchors), `docs/verify-feature.md`, the README

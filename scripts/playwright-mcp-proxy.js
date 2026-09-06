@@ -227,6 +227,13 @@ function installCapabilityBoundary(server, policy, closeOwned = async () => {}, 
         || (name === 'browser_tabs' && request.params.arguments?.action === 'new' && request.params.arguments?.url);
       if (opensUrl) {
         const url = request.params.arguments?.url;
+        // The refusal sits INSIDE the block on purpose. Moving this test into opensUrl
+        // would drop control to callHandler with nothing judged, turning today's deny
+        // for a non-loopback coercion into a silent pass. Since checkNavigationTarget
+        // refuses a non-string itself, this line changes no verdict today except the deny
+        // REASON in deny mode; it is the belt against a floor regression at the one site
+        // whose consequence is a write to policy.approved. No test can bite it.
+        if (typeof url !== 'string') throw new Error(FLOOR_REASONS.INVALID);
         if (policy.mode === 'consent') approveConsentOrigin(policy, url);
         assertAllowedUrl(policy, url, true);
       }

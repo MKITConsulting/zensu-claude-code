@@ -435,6 +435,13 @@ test('consent mode approves loopback navigations, keeps the floor, and refuses r
   assert.throws(() => approveConsentOrigin(policy, 'http://localhost:5173/'), /literal loopback-IP/);
   assert.throws(() => approveConsentOrigin(policy, 'http://10.0.0.5/'), /non-loopback HTTPS/);
   assert.throws(() => approveConsentOrigin(policy, 'http://user:pw@127.0.0.1:5173/'), /credentials/);
+  // A non-string target must never enter the approved map. The hook's own targetOf requires a
+  // string, so it answers "not a navigation" and asks nothing; coercing here classified
+  // ["http://127.0.0.1:9999/"] as loopback and approved an origin no human was shown.
+  for (const value of [['http://127.0.0.1:9999/'], undefined, null, 42, { toString: () => 'http://127.0.0.1:9999/' }]) {
+    assert.throws(() => approveConsentOrigin(policy, value), /navigation target is invalid/);
+  }
+  assert.equal(policy.approved.has('http://127.0.0.1:9999'), false);
   assert.equal(policy.approved.size, 1);
   assert.equal(chromiumResolverRules(policy), null);
   const local = await parsePolicy(rawPolicy('local', 'http://127.0.0.1:5173'));

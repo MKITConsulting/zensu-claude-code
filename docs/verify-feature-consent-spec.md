@@ -55,8 +55,9 @@ CLI and in the desktop app, without an environment variable and without a restar
 - **Consent mode.** When no parent policy is present, the browser broker starts in a
   bounded consent mode instead of refusing everything. A PreToolUse hook on the broker's
   navigation tools asks the human, through the host's own permission prompt, before the
-  browser opens a new origin or an undeclared route. The broker keeps a hard floor that
-  no prompt can widen.
+  browser opens a new ORIGIN. Consent is per origin: once an origin is approved, every route
+  on it is admitted without a further prompt. The broker keeps a hard floor that no prompt
+  can widen.
 - **Guided setup.** When no runtime recipe exists, the skill offers to create one with the
   user instead of stopping. Setup detects the stack, proposes start, readiness, per-run
   port and teardown, confirms every value through `AskUserQuestion`, and writes the
@@ -171,8 +172,10 @@ Two hooks, both on the matcher
   a human answered `ask` with yes.
 
 The prompt text and the decision logic live in `hooks/lib/verify-consent-v1.js`, a
-host-neutral module with a `decide(input, memory, recipe, options)` export and a
-`node --test` driver, so the broker can call the same decision from elicitation later.
+host-neutral module whose decision export is
+`decide({ toolName, toolInput, records, declaredRoutes, policyPresent })` — one options object,
+never a positional recipe — with a `node --test` driver, so the broker can call the same decision
+from elicitation later.
 
 Main-principal scoping: the pair runs for every principal. A reviewer subagent never
 holds the browser tools (their `tools:` frontmatter is Read/Grep/Glob), so no exemption
@@ -187,7 +190,8 @@ policy is the supported alternative, exactly as today. `ESCAPE_STEMS` in
 ### 6.4 Consent memory
 
 `<project>/.zensu/state/verify-consent-<session-key>.json`, written only by the
-PostToolUse hook under the workflow document's external lease, one record per
+PostToolUse hook. It takes NO lease and no lock — the guarantee it provides is atomic
+REPLACEMENT, through an `O_EXCL` temp file plus a rename, one record per
 `(origin, route)`, plus `decidedBy: prompt | memory | policy`. A record carries no route set:
 consent is granted per origin, so a route the record names is an audit line rather than an
 input to any later decision. The reader validates the shape before use, refuses symlinks, hard
@@ -231,8 +235,7 @@ Steps:
 2. Propose per service: `up`, `ready` (an HTTP probe on a path the code exposes, or a log
    line), `down` (scoped, verbatim, standalone), and the port variable the `up` command
    must honour. Per-run ports are reserved through the shipped
-   `scripts/verify-port-reservation.js` (moved from `evals/verify-feature/`, behaviour
-   unchanged) and passed as `ZENSU_VERIFY_PORT`. A command that cannot take a port
+   `scripts/verify-free-port.js` and passed as `ZENSU_VERIFY_PORT`. A command that cannot take a port
    variable is reported as "fixed port, shared resource" and the user decides whether to
    parameterize it; setup never rewrites project files.
 3. Propose the evidence declaration: the page routes the changed code exposes, and the
@@ -330,7 +333,7 @@ session can write.
    carries the setup conversation. Default: the monorepo adapter stays and is tried after
    the recipe files.
 5. **Port reservation helper.** Move `evals/verify-feature/port-reservation.js` to
-   `scripts/verify-port-reservation.js`; the eval imports it from there.
+   `scripts/verify-free-port.js`; the eval imports it from there.
 6. **Doctor and banner.** Wrapper exports the four states; renderer adds the row; skill
    doc adds the bullets; `P1`-style pins in `tests/structure/test-doctor.sh`.
 7. **Docs.** `docs/verify-feature.md` (operator how-to: consent flow, setup, attach,
@@ -369,7 +372,7 @@ session can write.
 | AC-004 | The PreToolUse hook returns `ask` for the first navigation to each new loopback origin, and `allow` for every navigation to an origin the session consent memory already holds, whatever its route. | spec §6.3 |
 | AC-005 | The PostToolUse hook records exactly `(origin, route, decidedBy, at)` after an executed navigation — and no route set — and refuses to write when the memory path is a symlink, a non-file, or outside the session's project state directory. | spec §6.4 |
 | AC-006 | A sub-request or redirect to an origin outside the broker's approved set is blocked in consent mode. | spec §6.2 |
-| AC-007 | The first approved navigation locks the session to local or remote; a later navigation of the other class is refused with a reason naming the lock. | spec §6.2 |
+| AC-007 | **deprecated** — replaced by AC-018. The first approved navigation locks the session to local or remote; a later navigation of the other class is refused with a reason naming the lock. | spec §6.2 |
 | AC-008 | `/zensu:verify-feature` with no recipe and no `--attach` offers setup instead of ending PARTIAL, and a declined offer ends PARTIAL with the same missing-facts list as today. | spec §6.6 |
 | AC-009 | Setup writes `.zensu/runtime.yaml` only after one `AskUserQuestion` round, every proposed value names its evidence file, and a value setup could not derive is left empty and reported rather than invented. | spec §6.6 |
 | AC-010 | Phase 2 resolves `.zensu/runtime.yaml`, then `.zensu/autopilot.yaml`, then the monorepo adapter, in that order, and records which one was selected. | spec §6.7 |
@@ -379,10 +382,13 @@ session can write.
 | AC-014 | `--setup --print-policy` renders a policy JSON that `playwright-mcp.sh --check-policy` accepts with exit 0 for every declared route. | spec §6.10 |
 | AC-015 | The hook pair has no config off-switch; `ESCAPE_STEMS` and `ZENSU_BYPASS_GATE_ALLOWLIST` are unchanged. | spec §6.3 |
 | AC-016 | `docs/configuration.md` hook count, every `#hooks-N` anchor and the `docs/gates.md` gate count match the registered hooks. | spec §7 step 7 |
+| AC-017 | The SessionStart banner prints one consent-mode line when no policy is present in the environment AND the hook pair plus the decision module are present in the plugin root — it does NOT read `hooks.json`, and its own text points at `/zensu:doctor` for the registration. Silenceable by `hooks.sessionBanner` like its siblings. | spec §6.9 |
+| AC-018 | Consent mode admits literal-loopback origins only; a remote target is refused by both the hook and the broker, because Chromium's DNS pins are passed at browser launch and an origin approved mid-session cannot be pinned. Replaces AC-007. | spec §6.2 |
 | FR-001 | The floor predicates exist in exactly one module required by both the broker and the hook. | spec §7 step 1 |
 | FR-002 | The consent decision and prompt text exist in exactly one module with a `node --test` driver. | spec §6.3 |
-| FR-003 | The port reservation helper ships under `scripts/` and the eval imports it from there. | spec §7 step 5 |
+| FR-003 | **deprecated** — replaced by FR-005. The port reservation helper ships under `scripts/` and the eval imports it from there. | spec §7 step 5 |
 | FR-004 | The release that ships the hook pair is a `minor`. | spec §7 step 9 |
+| FR-005 | A `scripts/verify-free-port.js` ships and the runtime script calls it; the eval helper is NOT moved, because it is a handoff proxy bound to that harness. Replaces FR-003. | spec §7 step 5 |
 
 ## 10. Open items to verify before or during the build
 

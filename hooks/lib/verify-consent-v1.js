@@ -41,8 +41,12 @@ function foreignServerNoteApplies(reason) {
 
 function payloadFromRaw(raw, accumulationFailed) {
   if (accumulationFailed) return null;
+  // An empty read is the likeliest fault, not an empty object: the wrapper's
+  // "$(cat 2>/dev/null || true)" turns a stdin failure into "". Parsing that as {}
+  // produced a payload with no tool_name, which the decider allowed silently.
+  if (typeof raw !== 'string' || raw.trim() === '') return null;
   try {
-    return JSON.parse(raw || '{}');
+    return JSON.parse(raw);
   } catch (_error) {
     return null;
   }
@@ -154,13 +158,24 @@ function appendRecord(memoryPath, record, options = {}) {
   const allowed = memoryPathAllowed(memoryPath, options.projectRoot);
   if (!allowed.ok) return allowed;
   const current = readMemory(memoryPath);
-  const records = current.ok ? current.records.slice() : [];
+  // An unreadable memory is refused, never rebuilt from empty. Rebuilding renamed over the
+  // file and discarded every previously approved origin with no signal at all: the result
+  // was ok, so runPost's stderr disclosure never fired and the user was asked again for
+  // origins they had already approved. An absent file is the ordinary first write and is
+  // the only case that legitimately starts from zero.
+  if (!current.ok) return { ok: false, reason: current.reason || REASONS.MEMORY_UNREADABLE };
+  const records = current.records.slice();
   if (records.some((entry) => entry.origin === record.origin && entry.route === record.route)) {
     return { ok: true, records, duplicate: true };
   }
   if (records.length >= MAX_RECORDS) return { ok: false, reason: 'memory-full' };
   records.push({ origin: record.origin, route: record.route, decidedBy: record.decidedBy, at: record.at });
   const body = `${JSON.stringify({ version: MEMORY_VERSION, records })}\n`;
+  // The writer must never produce a file its own reader refuses. validRecord bounds no route
+  // length and MAX_RECORDS bounds only the count, so 512 ordinary records — or one navigation
+  // to a route longer than the cap — would exceed MAX_MEMORY_BYTES and make every later read
+  // fail, leaving an approved origin asking on every navigation with nothing to repair it.
+  if (Buffer.byteLength(body) > MAX_MEMORY_BYTES) return { ok: false, reason: 'memory-would-exceed-read-cap' };
   const temp = path.join(allowed.stateDir, `.${path.basename(memoryPath)}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`);
   try {
     const fd = fs.openSync(temp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
@@ -191,13 +206,16 @@ function promptRoute(route) {
 }
 
 function promptRoutes(routes) {
-  if (routes.length <= MAX_PROMPT_ROUTES) return routes.join(', ');
-  const shown = routes.slice(0, MAX_PROMPT_ROUTES).join(', ');
+  if (routes.length <= MAX_PROMPT_ROUTES) return routes.map(promptRoute).join(', ');
+  const shown = routes.slice(0, MAX_PROMPT_ROUTES).map(promptRoute).join(', ');
   return `${shown} (and ${routes.length - MAX_PROMPT_ROUTES} more)`;
 }
 
 function promptText({ origin, route, mode, declaredRoutes }) {
   const routes = normalizeRoutes(declaredRoutes);
+  // The remote arm is unreachable today: decide denies every non-local mode before the only
+  // call site, and AC-018 admits literal-loopback origins only. It is kept for a future
+  // elicitation channel, so a reader does not conclude consent mode prompts for remote targets.
   const modeWord = mode === 'remote' ? 'a deployed (remote) target' : 'a local loopback target';
   const lines = [];
   lines.push(`Zensu verify-feature wants to open the browser on ${origin} (${modeWord}), starting with the route ${promptRoute(route)}.`);
@@ -366,7 +384,7 @@ function readConsentMemory(memoryPath, projectRoot) {
 }
 
 function runPre(payload, env, out, err) {
-  if (!payload || typeof payload !== 'object') {
+  if (!payload || typeof payload !== 'object' || typeof payload.tool_name !== 'string') {
     out.write(JSON.stringify(preEnvelope({ verdict: 'deny', reason: REASONS.PAYLOAD_UNREADABLE })));
     return;
   }
@@ -385,7 +403,15 @@ function runPre(payload, env, out, err) {
 }
 
 function runPost(payload, env, err) {
-  if (!payload || typeof payload !== 'object') return { ok: false, reason: REASONS.PAYLOAD_UNREADABLE };
+  // Same test as runPre: a payload with no readable tool name is unreadable, not a
+  // navigation that happened to be skipped. It DISCLOSES, because the CLI entry point
+  // discards this return value and sets no exit code — without the write the fault is
+  // observationally identical to the silent skip it replaced, and the module's two other
+  // memory faults both report on this same channel.
+  if (!payload || typeof payload !== 'object' || typeof payload.tool_name !== 'string') {
+    err.write(`zensu: verify consent memory not written (${REASONS.PAYLOAD_UNREADABLE})\n`);
+    return { ok: false, reason: REASONS.PAYLOAD_UNREADABLE };
+  }
   if (responseFailed(payload.tool_response)) return { ok: true, skipped: 'navigation-rejected-by-broker' };
   const inputs = readInputs(env);
   const memory = readConsentMemory(inputs.memoryPath, inputs.projectRoot);
@@ -423,6 +449,8 @@ module.exports = {
   DECIDED_BY,
   FOREIGN_SERVER_NOTE,
   MAX_MEMORY_BYTES,
+  MAX_PROMPT_ROUTE,
+  MAX_PROMPT_ROUTES,
   MAX_RECIPE_BYTES,
   MAX_RECORDS,
   MEMORY_NAME_RE,
