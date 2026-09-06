@@ -777,7 +777,9 @@ account, including the pin this weakens and the two attestation fields that
 state the executing runtime. `tests/session-control/session-control-core-v1.test.js`
 pins the axis and the sibling rule;
 `tests/structure/test-versioned-plugin-upgrade.sh` pins the end-to-end verdicts
-across synthetic installs, including that serving a record never rewrites it.
+across synthetic installs, including that serving a record never rewrites it and
+that a capability gate DENYING on an incompatible lineage leaves every record in
+the shared store byte-identical.
 
 ## Adopting a Record Across a Lineage Break (`adoptableRecord` / `adoptContext`)
 
@@ -1038,13 +1040,105 @@ exact drift in its own words ("state the base or the count means nothing"):
   in `reviewer-capability-v1.js` (a version reaches the `.*` gate's own JSON deny
   reason, which that gate spells itself rather than through
   `zensu_emit_hook_session_deny`). Identical ALTERNATION in all three, deliberate hand-copy;
-  keep them in step. The CONSEQUENCE deliberately differs and an earlier wording
+  keep them in step. A FOURTH spelling of the same alternation lives OUTSIDE production,
+  in `tests/structure/test-versioned-plugin-upgrade.sh`'s `AC-C20b` precondition, which
+  re-spells it to decide whether its shared fixture still fails the shape. It holds
+  nothing in lockstep and is not a member of the three — but a widening that leaves it
+  behind makes that row refuse its own fixture, so it belongs on this roster and is named
+  here rather than left for a grep to turn up. The CONSEQUENCE deliberately differs and an earlier wording
   claimed it did not: `ADOPTION_SAFE_VERSION_RE` performs no substitution at all —
   a failing version REFUSES the adoption (`EXECUTING_UNIDENTIFIED`) — while the
   other two substitute `(unreadable)` and keep rendering. Same rule, three members,
   two outcomes. The count was raised
   to three while the enumeration still named two, which is the drift this bullet
   exists to prevent — state the base or the count means nothing.
+
+  **Coverage, per member and NOT to be confused with the `UNCHECKED` above.** TWO of the
+  three members have an executed BEHAVIOURAL case in
+  `tests/structure/test-versioned-plugin-upgrade.sh`: `AC-C19b` drives
+  `ZENSU_SAFE_VERSION_RE` in both slots, and `AC-C20b` drives `SAFE_VERSION`/`safeVersion`
+  through `pre-reviewer-capability-gate.sh`.
+
+  **`ADOPTION_SAFE_VERSION_RE` is the exception, and an earlier revision of this paragraph
+  asserted the opposite — that `AC-C09` "drives its REFUSAL".** It does not, and cannot.
+  What `AC-C09` establishes is that an installation declaring no usable version is
+  refused, and it would establish exactly that with this member deleted:
+  `parseRuntimeVersion` re-tests BOTH versions in the very next statement — the shape
+  guard sits immediately above the `// Condition 5` comment and the two calls are that
+  condition's first statements, so state the ADJACENCY and never an ordinal — and returns
+  the
+  IDENTICAL `ADOPTION_REFUSALS.EXECUTING_UNIDENTIFIED`, while `RUNTIME_VERSION_RE` is a
+  strict SUBSET of the shape guard — an `N.N.N` whose parts are at most nine digits each
+  is at most 29 characters of digits and dots and always satisfies it — so everything the
+  guard refuses the parse refuses anyway. The non-string arm is covered too, and NOT by
+  the mechanism an earlier revision named: it said `exec` "coerces a non-string to text
+  and returns no match rather than throwing", which is false twice — `parseRuntimeVersion`
+  opens with `typeof value !== 'string'` and returns `null` on the line BEFORE `exec`, so
+  `exec` is never reached with a non-string at all, and coercion does not imply no match
+  (`RUNTIME_VERSION_RE.exec(['0.19.0'])` coerces and DOES match). That `typeof` line is
+  the only guard on the recorded version at that point, so a maintainer trusting the old
+  sentence could delete it. MEASURED, not
+  argued: with the whole `ADOPTION_SAFE_VERSION_RE` condition removed from
+  `adoptableRecord` and committed, every `AC-C09` row still passed and the suite stayed
+  green.
+
+  **Redundant, and RETAINED — say both, because the first draft of this correction said
+  only the first half and the second draft only the second.** The redundancy is
+  CONTINGENT: `verdict.recorded` is `context.plugin_version`, condition 5's parse ran on
+  that same value above the single `ok: true` return, and a successful parse means the
+  string IS `N.N.N`. So while that ordering holds, the value that reaches
+  `<key>.superseded-<recorded-version>.json` is digits and dots, and the guard is defence
+  in depth rather than the thing keeping a traversal sequence out of that filename — a
+  claim this entry made unqualified for one round. Move the parse below the return, or
+  put a value there that the parse never saw, and the guard becomes load-bearing again
+  with nothing announcing it. **The redundancy does NOT transfer to the two twins.**
+  `ZENSU_SAFE_VERSION_RE` and `SAFE_VERSION` have no parser above them at all; they
+  substitute rather than refuse, and deleting either lets a malformed version reach a
+  rendered string directly. Treat this member as SOURCE-PINNABLE ONLY until a case exists
+  that fails without it,
+  and do not restore the old claim from a green suite — a green suite is exactly what it
+  produces.
+
+  That is per-member coverage only — the lead-in's
+  `UNCHECKED` is about the CROSS-COPY lockstep pin, which still does not exist: NO check
+  compares the three alternations against each other, so a one-sided widening still
+  ships silently. **State that as the property and NEVER as a grep result.** An earlier
+  revision of this paragraph offered "a `grep -rl` over `tests/` returns ZERO files
+  naming any of the three constants" as its proof, and the very commit that wrote that
+  sentence falsified it by adding the census comments this paragraph points at: the
+  constant NAMES now occur under `tests/`, as prose, which is not a comparison — so the
+  verdict stood while its stated evidence did not. Do NOT amend that word on the
+  strength of this paragraph; the two
+  claims are about different things, and conflating them would assert a pin the tree
+  does not have. TWO further `(unreadable)` substitution SITES sit outside this
+  three-member rule census and are uncovered: `hooks/stop-chain-enforcer.sh`, which
+  sets BOTH slots when EITHER fails — a blanket rule, unlike the per-slot members
+  above — and `safeVersion(lineage.recorded)` in `reviewer-capability-v1.js`, whose
+  refusing direction needs an install tampered BEFORE the record is minted.
+  `zensu-doctor.sh` is NOT among them: it consumes `ZENSU_SAFE_VERSION_RE` from the
+  sourced owner and DROPS the pair rather than substituting, and `AC-C02` already
+  covers its accepting direction.
+
+  **A THIRD KIND of site is outside that count entirely, and it is the one the census
+  shape cannot see: a branch that applies NO bound of its own.** `reviewer-capability-v1.js`
+  emits `immutable context revalidation failed: ${error.message}` unfiltered, so an
+  UNBOUNDED manifest-controlled value can reach a user-facing deny reason through a
+  sibling branch that never consults the rule. It is not a substitution site, which is
+  why counting substitutions misses it — and it is a different value CLASS from the three
+  members, which hold VERSION strings: name it as manifest-controlled, never as "a value
+  the three-member rule exists to hold to a shape".
+
+  **State the bound on the message this can carry, because the first draft of this
+  paragraph did not and read as a wider hole than it is.** The thrower is
+  `localManifestEntry` — in `session-control-core-v1.js`, NOT in the gate file above it —
+  and its two messages differ: `${label} escapes plugin root` carries no path at all, and
+  `${label} is missing: ${candidate}` carries one only AFTER `isInside(pluginRoot,
+  candidate)` has passed, so that path is already proven to be under the plugin root.
+  What is genuinely unbounded is the CATCH: nothing filters `error.message`, so any other
+  throw on that path renders whole. Whether the catch is reachable from this thrower was
+  NOT traced — say unverified, not unreachable. Named in a comment beside `AC-C20b` in
+  `tests/structure/test-versioned-plugin-upgrade.sh` and, until this entry, nowhere
+  durable.
 - the review-evidence store layout, hardcoded in `discardSupersededLeases` as
   `review-evidence/v1/{records,superseded}/<key>` and re-implementing the
   ownership predicate that `review-evidence-lease-v1.js` owns, plus — since the
@@ -1242,9 +1336,15 @@ version of this paragraph had already drifted from the suite's own reported tota
 before it was read a second time.
 
 **THAT SAMPLE NO LONGER COVERS THE FILE, and the headroom is UNMEASURED until a green
-Windows run replaces it.** The PR #272 review round added five checks to this suite —
+Windows run replaces it.** The PR #272 review round added checks to this suite —
+deliberately not counted here, for the reason the paragraph above gives: the count in
+that paragraph's own earlier wording had already drifted, and so had this one, which
+read `five` while the round stood at six. What prices the round is the WORK, not a
+numeral —
 including one that COPIES the whole lib directory and executes the adoption entry point
-twice — and rewrote a case in `tests/structure/session-adopt-report-v1.test.js`, which
+twice, and `AC-C20b`, which drives the capability gate a third time but deliberately
+adds NO install, reusing `AC-C09`'s already-tampered sibling root instead — and rewrote
+a case in `tests/structure/session-adopt-report-v1.test.js`, which
 this suite drives from the WORKING TREE, into a walk over the entire Unicode code space
 (`for (let cp = 0; cp <= 0x10ffff; cp += 1)`, three property regexes per code point).
 The 152553 ms figure predates all of it. `tests/session-control/run.sh` sits on the same
@@ -1289,7 +1389,8 @@ Operator-facing accounts that must move with it: `docs/session-control.md`
 `skills/adopt-session/SKILL.md`. `tests/structure/test-versioned-plugin-upgrade.sh`
 Part C pins the named state, the doctor row, the Stop release, the Bash-matcher
 allowance with its ordinary-command discrimination, the refusal truth table, the
-end-to-end repair, and that the reserved phase cannot be minted through `--phase`.
+end-to-end repair, that the reserved phase cannot be minted through `--phase`, and
+that the gate's deny leaves every Session Control record byte-identical.
 
 ## Autopilot Run Scope (`hooks/lib/zensu-autopilot-state.sh`)
 

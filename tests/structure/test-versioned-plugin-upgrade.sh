@@ -666,7 +666,21 @@ bash_payload() {
 # share this one implementation so the stderr and decision handling cannot drift
 # apart between them.
 gate_decision_from() {
-  local root="$1" hook="$2" payload="$3" out="$TMP/doctor-gate.out" err="$TMP/doctor-gate.err"
+  # $4/$5 are OPTIONAL row-scoped capture paths. Every other caller takes the
+  # shared default and overwrites it in turn, which is harmless while nothing
+  # reads either file after the call returns. A row that DOES read them back —
+  # to dump a failure, or to extract the reason out of the same run that produced
+  # the decision — must name its own pair, or it reports a neighbour's bytes. The
+  # alternative, re-spelling these paths at the call site, put a copy of a local
+  # three thousand lines from its declaration.
+  #
+  # `${4-…}`, NOT `${4:-…}`: only an UNSET parameter takes the default. `:-`
+  # substitutes for an empty string too, so a caller whose path variable failed to
+  # expand would silently write into the shared pair and read a neighbour's bytes
+  # back — the exact confusion the row-scoped paths exist to remove, restored by
+  # the one caller least able to notice it.
+  local root="$1" hook="$2" payload="$3"
+  local out="${4-$TMP/doctor-gate.out}" err="${5-$TMP/doctor-gate.err}"
   if printf '%s' "$payload" \
       | CLAUDE_PLUGIN_ROOT="$root" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
         CLAUDE_PROJECT_DIR="$PROJECT" \
@@ -2536,15 +2550,42 @@ fi
 # A sibling root whose manifest declares no usable version is not a lineage claim
 # at all — it is a root that cannot be identified, and it must refuse under its
 # own reason rather than being compared as if it had one.
+#
+# SHARED WITH AC-C20b, which drives this same root through the capability gate to
+# exercise reviewer-capability-v1.js's `(unreadable)` substitution. That is why the
+# value is spelled to LOOK like a version and to be hostile, rather than the plain
+# `not a version` it carried before: AC-C20b needs a double quote (the value lands
+# in a JSON string) and a newline (a split deny reason is the model-context defect
+# it pins), while this row needs only that the value fail ADOPTION_SAFE_VERSION_RE.
+# Both hold. The two rows sit ~1000 lines apart, so neither can see the other's use
+# from its own site — change this literal and BOTH must be re-read. Prose is not what
+# makes that safe, and for one review round it was all there was: THIS row asserts the
+# exact reason string, so a value that stops failing the SHAPE turns it RED — but the
+# quote and the newline are consumed only by AC-C20b, and reducing this literal to a
+# single-line `not a version` left both rows green while the conjuncts that look for
+# `evil`, for `SECOND LINE` and for zero newlines silently stopped asserting anything.
+# Named rather than counted: an earlier wording put a denominator on them ("three of
+# that row's six") which was already wrong when written and moved again when the record
+# property was split out into AC-C20c.
+#
+# AC-C20b's precondition judges the CONTENT, and states exactly which content: the shape
+# failure, the quote, the newline AND both substrings. Requiring the two CHARACTERS
+# alone was the first repair and covered only the newline conjunct — re-spelling this
+# literal to `0.19.0"harmless / OTHER TEXT` kept that guard true while both substring
+# conjuncts went back to matching a value carrying neither. A re-spelling that drops any
+# of the four now fails THERE, by name.
+UNIDENTIFIED_VERSION='0.19.0"evil
+SECOND LINE'
 UNIDENTIFIED_ROOT="$(
   node "$INSTALL_FIXTURE" "$ROOT" "$SYNTHETIC_CACHE_PARENT" 0.19.0 "$ROOT_REVISION" 2>/dev/null
 )"
 if [ -n "$UNIDENTIFIED_ROOT" ] && [ -d "$UNIDENTIFIED_ROOT" ] \
-    && MANIFEST="$UNIDENTIFIED_ROOT/.claude-plugin/plugin.json" node -e '
+    && MANIFEST="$UNIDENTIFIED_ROOT/.claude-plugin/plugin.json" \
+       VERSION_IN="$UNIDENTIFIED_VERSION" node -e '
       const fs = require("node:fs");
       const file = process.env.MANIFEST;
       const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
-      manifest.version = "not a version";
+      manifest.version = process.env.VERSION_IN;
       fs.writeFileSync(file, JSON.stringify(manifest, null, 2) + "\n");
     '; then
   REASON_UNIDENTIFIED="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$PROJECT" "$UNIDENTIFIED_ROOT")"
@@ -3316,22 +3357,62 @@ fi
 # AC-C19b — the `(unreadable)` substitution, EXECUTED. CLAUDE.md names three copies of
 # the version-shape rule and this file disclosed that only the non-main arm shipped a
 # case; the truth was wider — a grep of tests/ found the substitution driven NOWHERE, in
-# any of the three. Two of them genuinely have no seam: reviewer-capability-v1.js exports
-# nothing, and the doctor's screen sits mid-script. This one is an ordinary function in a
-# sourceable library, so the gap here was reach, not testability.
+# any of the three. This one is an ordinary function in a sourceable library, so the gap
+# here was reach, not testability.
 #
-# Three properties, because substituting is only the first of them: the placeholder
+# The claim that the other two "genuinely have no seam" was true of a UNIT seam only, and
+# it is now false for one of them: reviewer-capability-v1.js exports nothing, but its copy
+# is reachable BEHAVIOURALLY through pre-reviewer-capability-gate.sh, and AC-C20b below
+# drives it that way. What that earlier wording got wrong beyond the seam is the CENSUS
+# itself, so state it here once and let AC-C20b point at this. CLAUDE.md names three
+# copies of the version-shape RULE with TWO outcomes, not three substitutions:
+# ADOPTION_SAFE_VERSION_RE REFUSES instead, while this one and
+# reviewer-capability-v1.js substitute. That refusal is NOT covered by AC-C09, and this
+# comment said it was for one review round. AC-C09 establishes that an installation
+# declaring no usable version is refused; it would establish that with the guard
+# DELETED, because parseRuntimeVersion re-tests both versions in the very next statement
+# of the SAME condition and returns the identical EXECUTING_UNIDENTIFIED, and
+# RUNTIME_VERSION_RE is a strict subset
+# of the shape guard. Measured: with that condition removed from adoptableRecord and
+# committed, every AC-C09 row still passed and the suite stayed green. It is the
+# member whose value reaches a FILENAME, so treat it as SOURCE-PINNABLE ONLY — see
+# CLAUDE.md's version-shape roster, which carries the same correction. `zensu-doctor.sh` is a CONSUMER of the constant
+# this row drives, not a further copy — it sources the owner, and it DROPS the pair
+# rather than substituting; AC-C02 already covers its accepting direction. TWO
+# substitution sites are uncovered, not one — an earlier wording here said one and
+# contradicted a paragraph in AC-C20b as well as CLAUDE.md: `hooks/stop-chain-enforcer.sh`,
+# which sets BOTH slots when EITHER fails (a BLANKET rule, unlike the per-slot members
+# named above), and `safeVersion(lineage.recorded)` in reviewer-capability-v1.js, whose
+# refusing direction needs an install tampered BEFORE the record is minted — see the
+# tamper-channel paragraph at AC-C20b. Covering the blanket rule belongs beside
+# AC-C03/AC-C19, which already drive that hook in this lineage state.
+#
+# WORKING TREE, not HEAD: this row sources $ROOT/hooks/lib/zensu-session.sh directly,
+# unlike the synthetic-root rows around it, so its verdict grades the tree on disk.
+# AC-C20b grades $ROOT_REVISION instead — see its own header. The committed-tree guard
+# near the top of this file is what keeps the two from disagreeing silently.
+#
+# FOUR properties, because substituting is only the first of them: the placeholder
 # appears, the lineage wording and the in-place remedy SURVIVE the substitution (the
 # defect this policy replaced dropped to a different scope and told the user to start a
-# fresh session), and the injected quote does not reach the JSON. The input carries a
-# double quote precisely because this value lands in a JSON string.
+# fresh session), the injected quote does not reach the JSON, and — the one an earlier
+# count of three left out — the UNTOUCHED slot still renders its real version. That
+# fourth is the per-slot discriminator: without it the rule could substitute BOTH slots
+# and every other conjunct here would still hold. It is asserted once per direction
+# below (`0.18.0` beside a malformed recorded value, `0.17.0` beside a malformed
+# executing one), so a reader treating the list as complete could delete either.
+# The input carries a double quote precisely because this value lands in a JSON string.
 SAFE_VER_OUT="$(bash -c '
   . "$1/hooks/lib/zensu-session.sh" 2>/dev/null || exit 9
   zensu_emit_hook_session_deny incompatible-runtime "0.17.0\"evil" "0.18.0"
 ' _ "$ROOT" 2>/dev/null || true)"
 # BOTH slots are driven. The first version passed a malformed RECORDED version and a
-# valid executing one, so deleting line 487's executing substitution changed nothing any
-# assertion observed — one rule applied twice, with a case for one application.
+# valid executing one, so deleting the SECOND of the two `ZENSU_SAFE_VERSION_RE` guards
+# in zensu_emit_hook_session_deny — the one applied to the executing slot — changed
+# nothing any assertion observed: one rule applied twice, with a case for one
+# application. Anchored by symbol rather than by line number, because a bare
+# `<file>:<line>` in prose is a claim nothing recomputes and no reader can tell a
+# correct one from a drifted one without opening the file.
 SAFE_VER_OUT2="$(bash -c '
   . "$1/hooks/lib/zensu-session.sh" 2>/dev/null || exit 9
   zensu_emit_hook_session_deny incompatible-runtime "0.17.0" "0.18.0 evil"
@@ -3487,12 +3568,15 @@ CAPABILITY_EDIT_PAYLOAD="$(EVENT=PreToolUse SESSION="$LIVE_ROOT_SESSION" CWD="$P
     tool_input: {file_path: "README.md", old_string: "a", new_string: "b"},
   }));
 ')"
+# ONE invocation, through the shared helper, with row-scoped capture paths — the same
+# collapse AC-C20b took. Driving the gate twice measured the decision and the reason in
+# two different executions, and threw the second run's stderr away, so a `hook-stderr`
+# decision was graded against a reason no graded run had produced.
 CAPABILITY_OUT="$TMP/adopt-capability-clause.out"
-printf '%s' "$CAPABILITY_EDIT_PAYLOAD" \
-  | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
-    CLAUDE_PROJECT_DIR="$PROJECT" \
-    bash "$SYNTHETIC_BREAKING_ROOT/hooks/pre-reviewer-capability-gate.sh" \
-    >"$CAPABILITY_OUT" 2>/dev/null
+CAPABILITY_ERR="$TMP/adopt-capability-clause.err"
+CAPABILITY_DECISION="$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" \
+  pre-reviewer-capability-gate.sh "$CAPABILITY_EDIT_PAYLOAD" \
+  "$CAPABILITY_OUT" "$CAPABILITY_ERR")"
 CAPABILITY_REASON="$(OUT_FILE="$CAPABILITY_OUT" node -e '
   const fs = require("node:fs");
   const raw = fs.readFileSync(process.env.OUT_FILE, "utf8").trim();
@@ -3501,7 +3585,6 @@ CAPABILITY_REASON="$(OUT_FILE="$CAPABILITY_OUT" node -e '
     process.stdout.write(JSON.parse(raw).hookSpecificOutput?.permissionDecisionReason || "");
   } catch (_e) { process.stdout.write(""); }
 ' 2>/dev/null)" || CAPABILITY_REASON=""
-CAPABILITY_DECISION="$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh "$CAPABILITY_EDIT_PAYLOAD")"
 # The ANTECEDENT is pinned alongside the consequent, and it has to be: this row
 # drives a session whose project root is LIVE, so deleting the guard clause would
 # turn a true conditional into a false unconditional claim in exactly the state
@@ -3515,6 +3598,7 @@ if [ "$CAPABILITY_DECISION" = deny ] \
 else
   check "AC-C20 the capability gate DENIES and names the Edit/Write limit alongside the repair (decision=${CAPABILITY_DECISION:-unset})" FAIL
   printf '%s' "$CAPABILITY_REASON" | head -c 300
+  printf '\n  stderr: '; head -c 300 "$CAPABILITY_ERR" 2>/dev/null; printf '\n'
 fi
 
 # AC-C20a — the OTHER arm of the same branch, which AC-C20 above cannot reach. The
@@ -3544,12 +3628,12 @@ CAPABILITY_SUB_PAYLOAD="$(EVENT=PreToolUse SESSION="$LIVE_ROOT_SESSION" CWD="$PR
     tool_input: {file_path: "README.md", old_string: "a", new_string: "b"},
   }));
 ')"
+# ONE invocation, for the reason given at AC-C20 above.
 CAPABILITY_SUB_OUT="$TMP/adopt-capability-subagent.out"
-printf '%s' "$CAPABILITY_SUB_PAYLOAD" \
-  | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
-    CLAUDE_PROJECT_DIR="$PROJECT" \
-    bash "$SYNTHETIC_BREAKING_ROOT/hooks/pre-reviewer-capability-gate.sh" \
-    >"$CAPABILITY_SUB_OUT" 2>/dev/null
+CAPABILITY_SUB_ERR="$TMP/adopt-capability-subagent.err"
+CAPABILITY_SUB_DECISION="$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" \
+  pre-reviewer-capability-gate.sh "$CAPABILITY_SUB_PAYLOAD" \
+  "$CAPABILITY_SUB_OUT" "$CAPABILITY_SUB_ERR")"
 CAPABILITY_SUB_REASON="$(OUT_FILE="$CAPABILITY_SUB_OUT" node -e '
   const fs = require("node:fs");
   const raw = fs.readFileSync(process.env.OUT_FILE, "utf8").trim();
@@ -3558,7 +3642,6 @@ CAPABILITY_SUB_REASON="$(OUT_FILE="$CAPABILITY_SUB_OUT" node -e '
     process.stdout.write(JSON.parse(raw).hookSpecificOutput?.permissionDecisionReason || "");
   } catch (_e) { process.stdout.write(""); }
 ' 2>/dev/null)" || CAPABILITY_SUB_REASON=""
-CAPABILITY_SUB_DECISION="$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh "$CAPABILITY_SUB_PAYLOAD")"
 if [ "$CAPABILITY_SUB_DECISION" = deny ] \
     && printf '%s' "$CAPABILITY_SUB_REASON" | grep -qF 'declares an incompatible lineage' \
     && printf '%s' "$CAPABILITY_SUB_REASON" | grep -qF 'minted by 0.17.0' \
@@ -3569,6 +3652,366 @@ if [ "$CAPABILITY_SUB_DECISION" = deny ] \
 else
   check "AC-C20a a subagent gets the cause and both versions, and is NOT handed the repair command (decision=${CAPABILITY_SUB_DECISION:-unset})" FAIL
   printf '%s' "$CAPABILITY_SUB_REASON" | head -c 300
+  printf '\n  stderr: '; head -c 300 "$CAPABILITY_SUB_ERR" 2>/dev/null; printf '\n'
+fi
+
+# AC-C20b — `reviewer-capability-v1.js`'s OWN copy of the version-shape rule,
+# EXECUTED. AC-C19b above drives the copy in `zensu-session.sh`; this row drives the
+# one that file spells itself, because AC-C20 and AC-C20a already reach
+# pre-reviewer-capability-gate.sh end to end and both feed it well-formed versions
+# (0.17.0 / 0.18.0), so its `safeVersion` was never exercised in its REFUSING
+# direction. Neutering it to the identity left the whole tree green — measured
+# against a COMMITTED neuter, which is the only kind this row can observe: the
+# synthetic roots are materialized from $ROOT_REVISION, so a working-tree edit under
+# hooks/ is invisible here.
+#
+# The PAIR does not grade one tree, and reading the sentence above as if it did is the
+# mistake to avoid: AC-C19b sources $ROOT — the WORKING TREE — while this row grades
+# $ROOT_REVISION, the last commit. They are two verdicts of different provenance, not
+# one census taken twice. The committed-tree guard near the top of this file fails
+# loudly on any uncommitted change under hooks/, so the two cannot silently disagree;
+# what they can do is mislead a reader who assumes a shared subject.
+#
+# WHICH SLOT can carry a malformed value, stated no wider than what this row proves.
+# A tampered RECORD cannot: readContextInternal fails the read with `context plugin
+# version mismatch` unless context.plugin_version equals the RECORDED root's own
+# manifest version, and readOrphanedProjectRootContext waives only the project-root
+# checks — a first version of this row tampered the record and denied as `immutable
+# context revalidation failed`, never reaching the lineage branch. That is a claim
+# about the TAMPER CHANNEL and not about the slot: a recorded INSTALLATION whose own
+# plugin.json declares a hostile version mints a self-consistent record, because
+# buildContext copies manifest.version verbatim and readContextInternal compares the
+# two for EQUALITY rather than for shape. So `safeVersion(lineage.recorded)` IS
+# reachable and its refusing direction is a NAMED UNCOVERED GAP, not an impossibility
+# — do not delete that call on the strength of this paragraph. Covering it needs an
+# install tampered BEFORE the record is minted plus a SessionStart to mint against
+# it, a fixture lifecycle more expensive than this whole row.
+#
+# The EXECUTING slot has no such tie: resolveIncompatibleRuntime returns
+# executingPluginVersion() verbatim after a non-empty-string test, and that value
+# comes straight out of the executing root's manifest. So the realistic threat this
+# row builds is an INSTALLATION whose plugin.json declares a hostile version.
+#
+# THE CENSUS IN THIS FILE LIVES AT AC-C19b — read it there. It is not the only copy and
+# does not claim to be: CLAUDE.md's version-shape roster carries the other, and the two
+# move together. What this block must not do is hold a THIRD, which it did for one review
+# round — and that copy had already drifted from both before anyone read it twice, saying
+# ONE substitution site was uncovered where the other two say TWO. Two copies that move
+# together is the standing state; a third is a census that will be wrong in one of them.
+#
+# What is LOCAL to this row is the per-slot discriminator, and it is worth stating
+# because it is what the `minted by 0.17.0` conjunct below is for. This gate substitutes
+# PER SLOT: the RECORDED version must still render while the EXECUTING one is replaced.
+# The BLANKET rule is `hooks/stop-chain-enforcer.sh`, which sets BOTH slots when EITHER
+# fails — an uncovered site AC-C19b names, and covering it belongs beside AC-C03/AC-C19,
+# not here. No count of those sites is restated here; AC-C19b owns it.
+#
+# The properties this row asserts, NAMED rather than counted, because the count moved
+# once already when the record property was split out into AC-C20c: the placeholder
+# appears; the lineage remedy SURVIVES the substitution (a deny that drops to a different
+# scope tells the user to start a fresh session instead); the RECORDED version still
+# renders, which is the per-slot discriminator above; the tampered value does not reach
+# the reason; and the reason stays ONE line, because a newline inside a deny reason
+# splits one hook message into several that a model reads as separate messages. That last
+# one is a model-context integrity property, not cosmetics, which is why the newline is
+# injected at all — and it is what the threat is actually about.
+#
+# Scope of that last claim: `safeVersion` is what holds THIS VALUE to a shape, and no
+# more. A sibling branch of the same function emits `immutable context revalidation
+# failed: ${error.message}` unfiltered, and that message can carry a manifest-controlled
+# path through localManifestEntry's throw — a separate residual this row does not close.
+#
+# It costs NO install: $UNIDENTIFIED_ROOT is the sibling root AC-C09 already built and
+# already tampered, and nothing between that row and this one reads or removes it. See
+# the note at that fixture for the shared-literal obligation. The precondition is
+# re-checked here rather than inherited silently, so a fixture that failed up there
+# reports its own cause instead of surfacing as a missing `(unreadable)` — and that
+# promise is only kept because the check below separates "judged and no longer
+# hostile" from "could not be read at all". Two causes rendered as one is the same
+# defect as no cause.
+CAPABILITY_BADVER_MANIFEST="$UNIDENTIFIED_ROOT/.claude-plugin/plugin.json"
+CAPABILITY_BADVER_READY=no
+CAPABILITY_BADVER_WHY=shared-fixture-root-missing
+if [ -n "$UNIDENTIFIED_ROOT" ] && [ -d "$UNIDENTIFIED_ROOT" ] \
+    && [ -f "$CAPABILITY_BADVER_MANIFEST" ]; then
+  # It judges CONTENT, not only SHAPE, and the difference is the whole guard. An
+  # earlier version tested the alternation alone, which was VACUOUS: the three
+  # conjuncts below that look for `evil`, for `SECOND LINE` and for zero newlines are
+  # all satisfied by any value carrying none of them. Measured, not argued — reducing
+  # the shared literal to a single-line `not a version` left AC-C09 green, left this
+  # guard true, and left this row reporting PASS with half its assertions asserting
+  # nothing, with the whole suite green. No tally is quoted for either measurement: the
+  # absolute number changes the moment a row is added, and it already did when AC-C20c
+  # was split out. The literal is owned by `$UNIDENTIFIED_VERSION` and AC-C09's own
+  # assertion needs shape failure alone, so nothing on that side would have noticed.
+  # Anchored by SYMBOL rather than by a distance: a line count in prose recomputes no
+  # better than an absolute line number, which is the rot this round removed elsewhere.
+  #
+  # The FIRST repair of that was itself half a repair, and the residue is why the two
+  # SUBSTRINGS are named here rather than only the two character classes. Requiring a
+  # newline and a quote covers the `newlines=0` conjunct and NOTHING else: re-spelling
+  # the literal to `0.19.0"harmless\nOTHER TEXT` keeps both classes, so the guard stayed
+  # true while `grep -qF evil` and `grep -qF SECOND LINE` went back to matching a value
+  # that never carried either. Measured the same way, with the whole suite green. Every
+  # negative conjunct below needs its needle asserted PRESENT in the source value here,
+  # or it is a test of nothing.
+  #
+  # The verdict travels on STDOUT, not in the exit status. A three-way exit split reads
+  # cleanly and is wrong at one value: node exits 1 for an uncaught error of its own, so
+  # a typo in this program, a missing module or a `-e` syntax error all arrived as a
+  # fixture verdict — a confident answer about a manifest the program never
+  # judged. That is the rule CLAUDE.md states for the requirements gate one layer down,
+  # that a load fault must never be reported as a judged payload. Tokens separate the
+  # judged outcomes and leave every non-zero exit in the residual arm, where it names
+  # itself. `not-a-string` is split out for the same reason in the other direction: the
+  # parse SUCCEEDED there, so reporting it as `manifest-unreadable` sends the next
+  # reader to a file that reads perfectly well.
+  CAPABILITY_BADVER_VERDICT="$(MANIFEST_IN="$CAPABILITY_BADVER_MANIFEST" node -e '
+    const fs = require("node:fs");
+    let v;
+    try {
+      v = JSON.parse(fs.readFileSync(process.env.MANIFEST_IN, "utf8")).version;
+    } catch (_e) { process.stdout.write("unreadable"); process.exit(0); }
+    if (typeof v !== "string") { process.stdout.write("not-a-string"); process.exit(0); }
+    // The same alternation reviewer-capability-v1.js applies, plus the two injected
+    // characters AND the two injected substrings this row consumes. CLAUDE.md
+    // version-shape roster names THIS spelling as the fourth, test-side copy; it holds
+    // nothing in lockstep.
+    //
+    // TWO tokens, not one, for the two ways the fixture regresses. They send the
+    // reader to different places: `shape-ok` means the alternation stopped refusing
+    // the value, `needles-missing` means the injected substrings the negative
+    // conjuncts consume are gone while the shape is still hostile. Merging them into
+    // one verdict pointed at a shape problem when the needles were what went missing
+    // — the same reason `not-a-string` is split from `unreadable` above.
+    const failsShape = !/^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/.test(v);
+    const carriesNeedles = v.includes("\n") && v.includes("\"")
+      && v.includes("evil") && v.includes("SECOND LINE");
+    if (!failsShape) { process.stdout.write("shape-ok"); process.exit(0); }
+    process.stdout.write(carriesNeedles ? "hostile" : "needles-missing");
+  ' 2>/dev/null)" || CAPABILITY_BADVER_VERDICT=probe-failed
+  case "$CAPABILITY_BADVER_VERDICT" in
+    hostile) CAPABILITY_BADVER_READY=yes ;;
+    shape-ok) CAPABILITY_BADVER_WHY=shared-fixture-version-passes-the-shape-rule ;;
+    needles-missing) CAPABILITY_BADVER_WHY=shared-fixture-version-lost-its-injected-substrings ;;
+    unreadable) CAPABILITY_BADVER_WHY=shared-fixture-manifest-unreadable ;;
+    not-a-string) CAPABILITY_BADVER_WHY=shared-fixture-version-not-a-string ;;
+    *) CAPABILITY_BADVER_WHY="shared-fixture-probe-failed(${CAPABILITY_BADVER_VERDICT:-empty})" ;;
+  esac
+fi
+# AC-006's snapshot. Taken UNCONDITIONALLY and OUTSIDE the AC-C20b readiness branch,
+# because AC-006 is a property of the GATE, not of the version fixture: nesting it made
+# the store check disappear silently whenever the shared AC-C09 manifest precondition
+# was unmet, which is the one state where a fixture is already known to be off.
+#
+# WHOLE STORE, not one record. The earlier form snapshotted
+# `records/${LIVE_ROOT_KEY}.json` alone, so an added, removed or rewritten SIBLING
+# record — the shape a gate that re-mints under a different key would produce — passed
+# unobserved. Sorted `name<TAB>sha256` lines, so a rename is a diff and an unreadable
+# entry names itself rather than vanishing.
+#
+# Captured to a FILE and compared with `cmp`, never through `$(...)`: command
+# substitution strips TRAILING newlines from both sides, so a rewrite differing only
+# there compared equal — the same trap the newline counter above already documents,
+# and the reason the old "whole-file BYTES" claim overstated what it measured.
+record_store_digest() {
+  STORE_IN="$1" node -e '
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const crypto = require("node:crypto");
+    let names;
+    try {
+      names = fs.readdirSync(process.env.STORE_IN).filter((n) => n.endsWith(".json")).sort();
+    } catch (_e) { process.stdout.write("no-store\n"); process.exit(0); }
+    if (names.length === 0) { process.stdout.write("empty-store\n"); process.exit(0); }
+    let out = "";
+    for (const n of names) {
+      try {
+        const bytes = fs.readFileSync(path.join(process.env.STORE_IN, n));
+        out += n + "\t" + crypto.createHash("sha256").update(bytes).digest("hex") + "\n";
+      } catch (_e) {
+        // A bare `unreadable` sentinel is NAME-ONLY, so a record whose bytes change
+        // while it stays unreadable compares equal across the two snapshots. Carry
+        // whatever lstat can still answer beside it; a second failure degrades to the
+        // bare sentinel rather than aborting the whole digest.
+        let meta = "";
+        try {
+          const st = fs.lstatSync(path.join(process.env.STORE_IN, n));
+          meta = ":" + st.size + ":" + st.mtimeMs + ":" + st.ino + ":" + st.mode;
+        } catch (_e2) { meta = ":no-lstat"; }
+        out += n + "\tunreadable" + meta + "\n";
+      }
+    }
+    process.stdout.write(out);
+  ' 2>/dev/null || printf 'digest-failed\n'
+}
+# The records directory has ONE spelling in this file. It was hoisted at AC-C13 and
+# re-spelling it here made a fourteenth copy of the same literal, which is how the two
+# halves of a snapshot come to measure different directories.
+CAPABILITY_STORE_DIR="$ADOPT_RECORDS_DIR"
+CAPABILITY_STORE_BEFORE="$TMP/adopt-store-before.digest"
+CAPABILITY_STORE_AFTER="$TMP/adopt-store-after.digest"
+# The record the gate BINDS to must be inside what the digest covers, or the row can
+# pass while covering only records the gate never touches. `$CAPABILITY_EDIT_PAYLOAD`
+# carries `session_id: $LIVE_ROOT_SESSION`, and `$LIVE_ROOT_KEY` is that session's key
+# — so this file is the one the claim is about. The retired one-record conjunct keyed
+# on it directly; widening to the whole store lost that binding, and with
+# `LIVE_ROOT_REGISTERED=no` plus any sibling record present the digest is valid,
+# identical on both sides, and about nothing. `${LIVE_ROOT_KEY:-}` because that
+# variable is assigned inside a conditional far above and `set -u` is on.
+CAPABILITY_STORE_TARGET=no
+if [ -n "${LIVE_ROOT_KEY:-}" ] && [ -f "$CAPABILITY_STORE_DIR/$LIVE_ROOT_KEY.json" ]; then
+  CAPABILITY_STORE_TARGET=yes
+fi
+record_store_digest "$CAPABILITY_STORE_DIR" >"$CAPABILITY_STORE_BEFORE" 2>/dev/null \
+  || printf 'digest-failed\n' >"$CAPABILITY_STORE_BEFORE"
+
+# MEASUREMENT WINDOW. Everything between this snapshot and the AFTER one below is what
+# AC-C20c attributes to the capability gate, and the boundary is POSITIONAL while the
+# row's label names the gate. This region must therefore contain only the AC-C20b gate
+# drive and the extractions that read its output back; a new row inserted here widens
+# the claim silently. A row that needs to run near these belongs ABOVE this snapshot or
+# BELOW the AC-C20c block.
+
+if [ "$CAPABILITY_BADVER_READY" = yes ]; then
+  CAPABILITY_BADVER_OUT="$TMP/adopt-capability-badversion.out"
+  CAPABILITY_BADVER_ERR="$TMP/adopt-capability-badversion.err"
+  # ONE invocation, through the shared helper, with ROW-SCOPED capture paths. This
+  # row used to drive the gate TWICE — a direct invocation for the reason and the
+  # newline count, the helper for the decision — so the three properties below were
+  # measured across two executions: a `decision=hook-stderr` failure dumped a `raw:`
+  # body the graded run never produced, and the reason came from a run whose decision
+  # nothing graded. Passing $4/$5 collapses both into one child.
+  #
+  # Its stderr is GRADED rather than discarded, which is what the direct invocation
+  # threw away. The helper's `hook-stderr` guard is per-line and ^-anchored, and this
+  # row is the first to drive it from a root whose manifest version carries a literal
+  # newline, so the row is sound only while the binder's own stderr stays version-free.
+  # It does today: the binder emits one fixed sentence naming neither version. If that
+  # ever changes, this row fails as decision=hook-stderr, and the manifest value is the
+  # place to look, not the gate.
+  CAPABILITY_BADVER_DECISION="$(gate_decision_from "$UNIDENTIFIED_ROOT" \
+    pre-reviewer-capability-gate.sh "$CAPABILITY_EDIT_PAYLOAD" \
+    "$CAPABILITY_BADVER_OUT" "$CAPABILITY_BADVER_ERR")"
+  CAPABILITY_BADVER_REASON="$(OUT_FILE="$CAPABILITY_BADVER_OUT" node -e '
+    const fs = require("node:fs");
+    const raw = fs.readFileSync(process.env.OUT_FILE, "utf8").trim();
+    if (raw === "") { process.stdout.write(""); process.exit(0); }
+    try {
+      process.stdout.write(JSON.parse(raw).hookSpecificOutput?.permissionDecisionReason || "");
+    } catch (_e) { process.stdout.write(""); }
+  ' 2>/dev/null)" || CAPABILITY_BADVER_REASON=""
+  # Counted in node, not from the captured shell value: command substitution strips
+  # TRAILING newlines, so a shell-side count would under-report the one shape this
+  # property is about.
+  CAPABILITY_BADVER_NEWLINES="$(OUT_FILE="$CAPABILITY_BADVER_OUT" node -e '
+    const fs = require("node:fs");
+    const raw = fs.readFileSync(process.env.OUT_FILE, "utf8").trim();
+    let reason = "";
+    try { reason = JSON.parse(raw).hookSpecificOutput?.permissionDecisionReason || ""; } catch (_e) { reason = ""; }
+    process.stdout.write(String((reason.match(/\n/g) || []).length));
+  ' 2>/dev/null)" || CAPABILITY_BADVER_NEWLINES=unset
+  # The negative needles are SUBSTRINGS of the injected value, deliberately, and must
+  # not be derived from $UNIDENTIFIED_VERSION. A substitution replaced by a
+  # strip-to-shape rule would emit `0.19.0evil`, which `evil` catches and a whole-value
+  # needle would not; and `grep -F` reads a pattern containing a newline as a LIST of
+  # patterns, so the derived form would preserve the conjunction only by that
+  # non-obvious rule and would pin the negative into a permanent FAIL the moment the
+  # literal grew a blank line. The precondition above is what holds the literal in
+  # place instead.
+  if [ "$CAPABILITY_BADVER_DECISION" = deny ] \
+      && printf '%s' "$CAPABILITY_BADVER_REASON" | grep -qF '(unreadable) is executing' \
+      && printf '%s' "$CAPABILITY_BADVER_REASON" | grep -qF '/zensu:adopt-session' \
+      && printf '%s' "$CAPABILITY_BADVER_REASON" | grep -qF 'minted by 0.17.0' \
+      && ! printf '%s' "$CAPABILITY_BADVER_REASON" | grep -qF 'evil' \
+      && ! printf '%s' "$CAPABILITY_BADVER_REASON" | grep -qF 'SECOND LINE' \
+      && [ "$CAPABILITY_BADVER_NEWLINES" = 0 ]; then
+    check "AC-C20b the capability gate denies, substitutes (unreadable) for a malformed executing version, keeps the lineage remedy and the recorded version, and stays one reason line" PASS
+  else
+    check "AC-C20b the capability gate denies, substitutes (unreadable) for a malformed executing version, keeps the lineage remedy and the recorded version, and stays one reason line (decision=${CAPABILITY_BADVER_DECISION:-unset} newlines=${CAPABILITY_BADVER_NEWLINES:-unset})" FAIL
+    # The extracted reason is EMPTY for every decision that is not a parsed deny, and
+    # the newline counter's own catch yields "0" in the same cases — so printing the
+    # reason alone reports `newlines=0` for a run where nothing was measured. Dump the
+    # raw hook output and the row-scoped stderr copy, which is where a hook-stderr,
+    # unparseable or hook-exit-nonzero decision actually explains itself.
+    printf '  reason: '; printf '%s' "$CAPABILITY_BADVER_REASON" | head -c 300; printf '\n'
+    printf '  raw: '; head -c 400 "$CAPABILITY_BADVER_OUT" 2>/dev/null; printf '\n'
+    printf '  stderr: '; head -c 400 "$CAPABILITY_BADVER_ERR" 2>/dev/null; printf '\n'
+  fi
+else
+  check "AC-C20b the capability gate denies, substitutes (unreadable) for a malformed executing version, keeps the lineage remedy and the recorded version, and stays one reason line (precondition: $CAPABILITY_BADVER_WHY)" FAIL
+fi
+
+# AC-006 — its OWN row, and the three things that buys are why it is not conjuncts 8-9
+# of AC-C20b any more. It was never named in the tally, so the property could not be
+# seen to have run; it was skipped WHOLESALE whenever AC-C20b's version precondition
+# was unmet; and a fixture fault on the record half rendered as `record=no` inside a
+# verdict about safeVersion, which is a wrong diagnosis rather than a missing one. The
+# manifest half already routed its faults through a named `(precondition: …)`; this half
+# now does the same.
+#
+# The rationale it replaces was also FALSE where it mattered. It argued that a mutation
+# here "is observed by nothing downstream" because this is the last gate_decision_from
+# caller. The RUNTIME_ADOPTED forge row at the end of this file runs zensu-log.sh
+# against $SHARED_DATA and binds through the very record this gate touches — its own
+# comment says so. A mutation IS observed downstream; what it is not is DIAGNOSED there,
+# because it would surface as a binding failure in an unrelated check. That is the
+# argument for a row of its own, and it is a different argument from the one that was
+# written down.
+#
+# The gate must actually have RUN for the claim to mean anything, so "the store is
+# unchanged because nothing executed" is reported as a precondition rather than as a
+# pass.
+record_store_digest "$CAPABILITY_STORE_DIR" >"$CAPABILITY_STORE_AFTER" 2>/dev/null \
+  || printf 'digest-failed\n' >"$CAPABILITY_STORE_AFTER"
+# The ladder classifies BOTH snapshots and BOTH halves of the gate drive, in that
+# order: a fixture fault, then a gate that did not run, then a gate that ran without
+# denying. The last arm is the one this row exists for and the one the first spelling
+# omitted — it consulted only $CAPABILITY_BADVER_READY, a property of the version
+# FIXTURE, so on `allow`, `hook-exit-nonzero`, `hook-stderr` or an unparseable decision
+# AC-C20b failed while this row compared two identical digests and asserted a property
+# of a denial that never happened. `${CAPABILITY_BADVER_DECISION:-unset}` because that
+# variable is assigned inside the readiness branch and `set -u` is on.
+#
+# An EMPTY digest file is a fault, not a clean store: `record_store_digest` emits a
+# sentinel for every state it can name, so nothing legitimately produces zero bytes,
+# and two empty files compare equal under `cmp -s`.
+CAPABILITY_STORE_WHY=""
+case "$(head -n 1 "$CAPABILITY_STORE_BEFORE" 2>/dev/null)" in
+  no-store) CAPABILITY_STORE_WHY=shared-record-store-absent ;;
+  empty-store) CAPABILITY_STORE_WHY=shared-record-store-empty ;;
+  digest-failed) CAPABILITY_STORE_WHY=before-snapshot-probe-failed ;;
+  "") CAPABILITY_STORE_WHY=before-snapshot-empty ;;
+esac
+# The AFTER head is classified too, and only for the two shapes that are a PROBE
+# fault. `no-store` and `empty-store` on this side are deliberately left to `cmp`,
+# because a store that vanished during the gate drive IS the mutation this row
+# grades. `digest-failed` and an empty file are not: they render as `(digest differs)`
+# — a store mutation that did not happen, which is the wrong-diagnosis class this
+# block argues against one paragraph up.
+if [ -z "$CAPABILITY_STORE_WHY" ]; then
+  case "$(head -n 1 "$CAPABILITY_STORE_AFTER" 2>/dev/null)" in
+    digest-failed) CAPABILITY_STORE_WHY=after-snapshot-probe-failed ;;
+    "") CAPABILITY_STORE_WHY=after-snapshot-empty ;;
+  esac
+fi
+if [ -z "$CAPABILITY_STORE_WHY" ] && [ "$CAPABILITY_STORE_TARGET" != yes ]; then
+  CAPABILITY_STORE_WHY="target-record-absent(${LIVE_ROOT_KEY:-unset})"
+fi
+if [ -z "$CAPABILITY_STORE_WHY" ] && [ "$CAPABILITY_BADVER_READY" != yes ]; then
+  CAPABILITY_STORE_WHY="gate-did-not-run($CAPABILITY_BADVER_WHY)"
+fi
+if [ -z "$CAPABILITY_STORE_WHY" ] && [ "${CAPABILITY_BADVER_DECISION:-unset}" != deny ]; then
+  CAPABILITY_STORE_WHY="gate-did-not-deny(${CAPABILITY_BADVER_DECISION:-unset})"
+fi
+if [ -n "$CAPABILITY_STORE_WHY" ]; then
+  check "AC-C20c/AC-006 the denying capability gate leaves every Session Control record in the shared store byte-identical (precondition: $CAPABILITY_STORE_WHY)" FAIL
+elif cmp -s "$CAPABILITY_STORE_BEFORE" "$CAPABILITY_STORE_AFTER"; then
+  check "AC-C20c/AC-006 the denying capability gate leaves every Session Control record in the shared store byte-identical" PASS
+else
+  check "AC-C20c/AC-006 the denying capability gate leaves every Session Control record in the shared store byte-identical (digest differs)" FAIL
+  printf '  before: '; head -c 300 "$CAPABILITY_STORE_BEFORE" 2>/dev/null; printf '\n'
+  printf '  after:  '; head -c 300 "$CAPABILITY_STORE_AFTER" 2>/dev/null; printf '\n'
 fi
 
 # CONV-1 — the skill's refusal table is the one independent re-encoding of
