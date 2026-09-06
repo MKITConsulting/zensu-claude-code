@@ -66,4 +66,14 @@ has "$TDD" '--chain-id "$CHAIN_ID" --outcome no-changes' \
   && check "D11 bound zero-change path records no-changes explicitly" PASS \
   || check "D11 exact bound zero-change outcome" FAIL
 
+# D12 the marker-stripping instruction survives. It is the mitigation for a dead
+# end the plan-approval route change creates: the gate now offers this route for
+# an ordinary approved plan, and a plan whose earlier run is already DONE or
+# CANCELLED still carries that run's marker, so appending a second one makes the
+# gate refuse. Nothing asserted the instruction until this check, which is the
+# same gap class as an unpinned remedy anywhere else in this tree.
+has "$AUTO" 'Strip any pre-existing `<!-- zensu-autopilot:... -->` line out of the incoming' \
+  && check "D12 the incoming feature description is stripped of a stale run marker" PASS \
+  || check "D12 marker-stripping instruction" FAIL
+
 echo "----"; echo "test-autopilot-durable-skill: $PASS PASS / $FAIL FAIL"; [ "$FAIL" -eq 0 ]

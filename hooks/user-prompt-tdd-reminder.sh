@@ -7,9 +7,15 @@
 # the convention every turn — with NO prompt regex — and lets the (multilingual)
 # model decide whether the request is a code change and ask about TDD
 # accordingly. It mirrors plan-approved-delegate.sh's decision logic + fast-paths
-# so the direct path and the Plan-mode path stay behaviorally identical (the
-# fast-path phrase lists are intentionally hook-specific supersets — the plan
-# hook also matches approval-message phrasings like 'no tdd-manager').
+# so the direct path and the Plan-mode path stay behaviorally identical IN THEIR
+# PHRASE LISTS (neither list is a superset of the other:
+# each is the shared core plus its own extras — the plan hook carries
+# 'no tdd-manager', this one carries 'ohne tdd'). They are NOT
+# identical in PRECEDENCE, and the difference is deliberate: the plan hook
+# carries route arms this hook has none of, and its /zensu:tdd refusal is
+# decisive only when no other route was affirmed, so a mixed utterance like
+# a mixed utterance that refuses TDD while naming another route is answered
+# differently there.
 #
 # Silent when: the tddReminder flag is off, the payload has no prompt, or a TDD
 # session is already active for this session (the Plan-mode/TDD flows own the

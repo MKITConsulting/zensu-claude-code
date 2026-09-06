@@ -440,7 +440,13 @@ ENVELOPE_E="${CALLER_E}"$'\n'"${BINDING_E}"$'\n'"${STAGE_E}"
 
 BOUND_REJECTIONS=true
 PARTIAL_E="$CALLER_E"
-DUPLICATE_E="${ENVELOPE_E}"$'\n'"${BINDING_E}"
+# A BYTE-IDENTICAL repeat is no longer in this refusal set — see P13e, which
+# asserts it is accepted. What stays refused is a repeat that DIFFERS, because
+# two differing lines assert two different bindings and the hook may not pick
+# one. The distinction is the whole point: a REVIEW PACKET quoting this
+# repository's own skill files puts these literals at column 0, and refusing
+# that is the same defect the standalone branch was relaxed for.
+DUPLICATE_E="${ENVELOPE_E}"$'\n'"AUTOPILOT-BINDING: run=${RUN_E} attempt=3 chain=${CHAIN_E}"
 CONFLICT_E="${CALLER_E}"$'\n'"AUTOPILOT-BINDING: run=${RUN_E} attempt=2 chain=${CHAIN_E}"$'\n'"${STAGE_E}"
 MALFORMED_E="${CALLER_E}"$'\n'"AUTOPILOT-BINDING: run=${RUN_E} attempt=x chain=${CHAIN_E}"$'\n'"${STAGE_E}"
 TEAM_ONLY_EXTRA_E="${ENVELOPE_E}"$'\n'"AUTOPILOT-REVIEW-OP: key=team-review:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa head=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -492,6 +498,26 @@ if [ "$BOUND_DISCLOSURES" = true ]; then
 else
   check "P13a a content-rejected envelope discloses instead of exiting silently" FAIL
 fi
+
+# --- P13f the two standalone run-state causes are distinguishable ---
+# The standalone preflight refuses on two DIFFERENT things and used to say the
+# same sentence for both: the run record came back but does not PARSE, and the
+# owner-scoped READ itself failed. Only the second is reachable from a fixture —
+# `autopilot_read_active` emits JSON or fails, so a successful read that will not
+# parse has no executed case anywhere — which is why this is a SOURCE pin. The
+# control keeps it from going vacuous if the shared tail is reworded: the
+# sentence must still occur, just not twice.
+P13F_SHARED="$(grep -c 'a durable Autopilot run record in this project could not be read, so a standalone claim cannot be judged against it' "$POSTREV" || true)"
+# The needle deliberately starts AFTER the possessive: an apostrophe inside a
+# single-quoted shell string terminates it, and doing that here mis-parsed the
+# rest of the file rather than failing this one check.
+P13F_PARSE="$(grep -c 'durable Autopilot run record did not parse, so a standalone claim cannot be judged against it' "$POSTREV" || true)"
+if [ "$P13F_SHARED" -eq 1 ] && [ "$P13F_PARSE" -eq 1 ]; then
+  check "P13f the unparseable-payload and unreadable-record causes are distinct" PASS
+else
+  check "P13f the unparseable-payload and unreadable-record causes are distinct (shared=$P13F_SHARED parse=$P13F_PARSE)" FAIL
+fi
+
 
 CTX_E="$(postrev_with_ticket "$SID_E" "$TICKET_E" "$ENVELOPE_E")"
 if [ "$(exact_line_count "$CTX_E" "$CALLER_E")" = 1 ] \
@@ -629,8 +655,12 @@ for outer_case in same-owner foreign-owner corrupt-pointer corrupt-run; do
   # decided by which gate refused, and a uniform expectation could not tell the
   # two decline texts apart — which is how three of these four fixtures were
   # duplicates of one another without the suite noticing.
-  #   same-owner      -> the owner-scoped read returns this session's own live
-  #                      run: discloses "is still live".
+  #   same-owner      -> the owner-scoped read returns this session's own
+  #                      non-terminal run: discloses the stage it observed. The
+  #                      needle is deliberately NOT "is still live": that arm
+  #                      fires for every stage outside {DONE, CANCELLED}, and
+  #                      `BLOCKED` is one of them, so asserting liveness there
+  #                      pinned a cause that is false for a blocked run.
   #   foreign-owner   -> the owner-scoped read is BLIND to it (rc 1), so the
   #                      owner-INDEPENDENT workspace-holder read refuses instead,
   #                      and that arm is SILENT. This is the only executed case
@@ -652,7 +682,7 @@ for outer_case in same-owner foreign-owner corrupt-pointer corrupt-run; do
         | grep -qF -- "was NOT recorded against this session's review chain" \
         || OUTER_PREFLIGHT_OK=false
       case "$outer_case" in
-        same-owner) CASE_NEEDLE="is still live" ;;
+        same-owner) CASE_NEEDLE="has not reached a terminal stage" ;;
         *) CASE_NEEDLE="could not be read" ;;
       esac
       printf '%s' "$CASE_CONTEXT" | grep -qF -- "$CASE_NEEDLE" \
@@ -699,6 +729,58 @@ if echo "$TERMINAL_CONTEXT" | grep -q -- '--code-review-done'; then
   check "P16 terminal Outer state preserves standalone review completion" PASS
 else
   check "P16 terminal Outer remains standalone-compatible" FAIL
+fi
+
+# --- P13e a byte-identical repeat of an envelope line is ACCEPTED ---
+# POSITION, and it is a measured trade rather than an oversight. This block
+# calls start_session, which re-sources the Session Control baseline and
+# re-points CLAUDE_PROJECT_DIR; placed mid-file it reset the chain for every
+# later case and turned 23 of them red in one run. It therefore sits at the
+# tail, where nothing follows it. The cost is real and is stated rather than
+# hidden: on windows-shard-8 a suite TIMED_OUT truncates the tail first, so
+# this is the check most likely to go unverified there. Closing that needs the
+# fixture to stop calling start_session, not a move.
+# The exactly-one rule counts DISTINCT lines. A repeat that is byte-identical
+# asserts the same binding twice and adds no authority, while a REVIEW PACKET
+# quoting this repository's own skill files reproduces these literals at column
+# 0 — the same quotation the standalone branch was relaxed for. Two DIFFERING
+# lines still refuse; that is `DUPLICATE_E` above, and `CONFLICT_E` beside it.
+# It runs on its OWN bound session because acceptance CONSUMES the ticket, and
+# every later case in this file depends on session E keeping its own.
+# Its OWN project root as well as its own session: `autopilot_begin_run` refuses
+# while any nonterminal run holds the same working tree, and session E's run is
+# still live in $PROJ. Sharing it left this chain unarmed, which `decline` reads
+# as "no outstanding ticket" and answers with silence — a fixture failing for a
+# reason unrelated to what it is named for.
+PROJ_E3="$PROJ/bound-envelope-repeat"
+mkdir -p "$PROJ_E3"
+PROJ_E3="$(cd "$PROJ_E3" && pwd -P)"
+SID_E3_RAW="postrev-bound-envelope-repeat"
+start_session "$SID_E3_RAW" "$PROJ_E3"
+SID_E3="$STARTED_SESSION_KEY"
+RUN_E3="run_postrev_bound_envelope_repeat"
+CHAIN_E3="chain-postrev-bound-envelope-repeat"
+autopilot_begin_run "$RUN_E3" "$SID_E3" "$PROJ_E3" >/dev/null
+autopilot_apply_event "$RUN_E3" postrev-repeat-plan PLAN_APPROVED \
+  "{\"approvedPlanSha256\":\"$PLAN_SHA_E\"}" "$PROJ_E3" >/dev/null
+bash "$LOG" --tdd-begin --session "$SID_E3" --autopilot-run "$RUN_E3" \
+  --autopilot-attempt 1 --autopilot-return-stage GATES --chain-id "$CHAIN_E3" >/dev/null
+bash "$LOG" --tdd-complete --session "$SID_E3" --autopilot-run "$RUN_E3" \
+  --autopilot-attempt 1 --chain-id "$CHAIN_E3" >/dev/null
+TICKET_E3="$(bash "$LOG" --review-ticket --session "$SID_E3" 2>/dev/null)"
+STATE_E3="$(tdd_state_file "$SID_E3")"
+CALLER_E3='ZENSU-DELEGATED-CALLER: autopilot'
+BINDING_E3="AUTOPILOT-BINDING: run=${RUN_E3} attempt=1 chain=${CHAIN_E3}"
+STAGE_E3='AUTOPILOT-STAGE: GATES'
+REPEAT_E3="${CALLER_E3}"$'\n'"${BINDING_E3}"$'\n'"${STAGE_E3}"$'\n'"${CALLER_E3}"
+CTX_E3="$(postrev_with_ticket "$SID_E3" "$TICKET_E3" "$REPEAT_E3" "$PROJ_E3")"
+if [ -n "$TICKET_E3" ] \
+  && [ "$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).reviewTicketConsumed))' "$STATE_E3")" = "true" ] \
+  && ! printf '%s' "$CTX_E3" | grep -qF -- "was NOT recorded against this session's review chain" \
+  && printf '%s' "$CTX_E3" | grep -qF -- "$BINDING_E3"; then
+  check "P13e a byte-identical repeat of an envelope line still consumes on a bound chain" PASS
+else
+  check "P13e a byte-identical repeat of an envelope line still consumes on a bound chain (ctx='$CTX_E3')" FAIL
 fi
 
 echo "----"

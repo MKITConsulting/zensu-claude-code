@@ -227,7 +227,7 @@ decline() {
   if [ "${2:-respawn}" = runstate ]; then
     remedy="Do NOT issue a fresh review ticket and do NOT re-spawn: the prompt is not what was refused, so a re-spawn reproduces this decline exactly while rotating the ticket out from under any spawn still in flight. Resolve the durable run state first — read a fresh ${LOG_COMMAND} --autopilot-status, then finish or release that run, or repair the unreadable record under .zensu/state/ — and only then re-spawn with the ticket the chain already holds."
   else
-    remedy="Re-spawn zensu:code-reviewer with a prompt whose FIRST line is exactly 'PRE-MERGED FINDINGS (fan-out)' and whose SECOND line is exactly 'REVIEW-TICKET: <the current ticket>'. Both lines, in that order: the reviewer agent enters consume mode only on that pair, and a prompt that satisfies this hook but not the agent still records the round while throwing the whole fan-out away, because the reviewer then re-reviews from scratch instead of consuming the merged findings. Mint a replacement by running: ${LOG_COMMAND} --review-ticket — that verb ISSUES a new ticket and ROTATES the outstanding one, it does not read the current value back, so run it only when no zensu:code-reviewer spawn is still in flight: a spawn already running carries the old value and can never be recorded afterwards. An Autopilot-bound chain must additionally carry exactly one each of ZENSU-DELEGATED-CALLER, AUTOPILOT-BINDING and AUTOPILOT-STAGE, unchanged; a STANDALONE chain must carry none of those three, not even quoted at the start of a line."
+    remedy="Re-spawn zensu:code-reviewer with a prompt whose FIRST line is exactly 'PRE-MERGED FINDINGS (fan-out)' and whose SECOND line is exactly 'REVIEW-TICKET: <the current ticket>'. Both lines, in that order: the reviewer agent enters consume mode only on that pair, and a prompt that satisfies this hook but not the agent still records the round while throwing the whole fan-out away, because the reviewer then re-reviews from scratch instead of consuming the merged findings. Mint a replacement by running: ${LOG_COMMAND} --review-ticket — that verb ISSUES a new ticket and ROTATES the outstanding one, it does not read the current value back, so run it only when no zensu:code-reviewer spawn is still in flight: a spawn already running carries the old value and can never be recorded afterwards. An Autopilot-bound chain must additionally carry exactly one DISTINCT value each of ZENSU-DELEGATED-CALLER, AUTOPILOT-BINDING and AUTOPILOT-STAGE, unchanged — a byte-identical repeat is fine, two lines that differ are not. A STANDALONE chain must not carry a COMPLETE, well-formed set of those three; an incomplete set is ignored, so quoting one of them is harmless."
   fi
   printf '%s' "The zensu:code-reviewer subagent above finished, but its completion was NOT recorded against this session's review chain: ${1}. The chain still holds an unclaimed review ticket, so the Stop backstop will keep asking for a review and the chain cannot converge. ${remedy} Do NOT arm a new chain to work around this — that would grant a new review budget." | emit_post_context
   exit 0
@@ -262,7 +262,7 @@ PREFLIGHT_CONTEXT="$(STATE_FILE="$NATIVE_TDD_STATE_FILE" SID="$SESSION_ID" node 
     const fs=require("fs"),s=JSON.parse(fs.readFileSync(process.env.STATE_FILE,"utf8"));
     const keys=["autopilotRunId","autopilotAttempt","autopilotReturnStage","chainId","chainOutcome"];
     const count=keys.filter(key => Object.prototype.hasOwnProperty.call(s,key)).length;
-    if(count===0){process.stdout.write("{}");process.exit(0);}
+    if(count===0){process.stdout.write("{}");process.exitCode=0;}else{
     const id=value => typeof value==="string" && value.length>=3 && value.length<=128
       && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(value);
     const valid=count===keys.length
@@ -278,6 +278,7 @@ PREFLIGHT_CONTEXT="$(STATE_FILE="$NATIVE_TDD_STATE_FILE" SID="$SESSION_ID" node 
       runId:s.autopilotRunId,attempt:s.autopilotAttempt,
       returnStage:s.autopilotReturnStage,chainId:s.chainId,outcome:s.chainOutcome
     }));
+    }
   } catch (_) { process.exit(3); }
 ' 2>/dev/null)" \
   || decline "this session's own workflow document did not validate as a chain the reviewer completion could be recorded against" runstate
@@ -304,7 +305,19 @@ PROMPT_ENVELOPE_FIELDS="$(EXPECT_BOUND="$EXPECT_BOUND" node -e '
       const prompt = input.tool_input && input.tool_input.prompt;
       if (typeof prompt !== "string") process.exit(3);
       const lines = prompt.split(/\r?\n/);
+      // DISTINCT lines, not occurrences. A byte-identical repeat asserts the
+      // same binding twice and adds no authority, while the skill files in this
+      // repository carry these literals at column 0 — so a REVIEW PACKET
+      // quoting them while a bound chain runs reproduced one and the whole
+      // envelope was refused, which is the same defect the standalone branch
+      // was relaxed for. Two lines that DIFFER still leave the set larger than
+      // one and are still refused: the hook may not pick between two bindings.
+      // NOTE: no apostrophe may appear anywhere in this program. It lives in a
+      // bash single-quoted string, so one truncates the whole thing — which is
+      // exactly what happened while this comment was first written, and what
+      // S18 in tests/structure/test-post-review-tdd-scope.sh scans for.
       const collect = prefix => lines.filter(line => line.startsWith(prefix));
+      const distinct = list => [...new Set(list)];
       const callers = collect("ZENSU-DELEGATED-CALLER:");
       const bindings = collect("AUTOPILOT-BINDING:");
       const stages = collect("AUTOPILOT-STAGE:");
@@ -318,9 +331,31 @@ PROMPT_ENVELOPE_FIELDS="$(EXPECT_BOUND="$EXPECT_BOUND" node -e '
       // AUTOPILOT-REVIEW-OP line flip a complete, regex-valid spoof back to
       // "standalone" — the refusal the comment above promises, bypassed by
       // adding a header rather than by removing one.
+      // RAW counts here. This predicate is ALSO the standalone spoof test, and
+      // collapsing repeats on that arm moved a doubled quotation from ignored
+      // to refused-as-a-spoof — a decline whose remedy rotates a live ticket.
       const completeTriple = callers.length === 1
         && callers[0] === "ZENSU-DELEGATED-CALLER: autopilot"
         && !!binding && !!stage && Number(binding[2]) <= 999;
+      // DISTINCT counts, bound branch only: a byte-identical repeat asserts the
+      // same binding twice and adds no authority, and the skill files in this
+      // repository carry these literals at column 0, so a REVIEW PACKET quoting
+      // one refused a bound chain outright. Two lines that DIFFER still leave a
+      // set larger than one and are still refused.
+      // Shape-filter BEFORE collapsing, the same discipline realReviewOps gets:
+      // the skill files carry placeholder binding and stage lines at column 0 that
+      // do NOT collapse against a real rendered line, so a quotation reached size 2
+      // and vetoed a live bound envelope. `callers` deliberately keeps its exact
+      // literal test: shape-filtering there would IGNORE a foreign caller value
+      // that must still refuse.
+      const dCallers = distinct(callers);
+      const dBindings = distinct(bindings.filter(line => BINDING_RE.test(line)));
+      const dStages = distinct(stages.filter(line => STAGE_RE.test(line)));
+      const dBinding = dBindings.length === 1 ? BINDING_RE.exec(dBindings[0]) : null;
+      const dStage = dStages.length === 1 ? STAGE_RE.exec(dStages[0]) : null;
+      const boundTriple = dCallers.length === 1
+        && dCallers[0] === "ZENSU-DELEGATED-CALLER: autopilot"
+        && !!dBinding && !!dStage && Number(dBinding[2]) <= 999;
       if (process.env.EXPECT_BOUND !== "yes") {
         if (completeTriple) process.exit(3);
         process.stdout.write(["standalone", "-", "0", "-", "-"].join("\t"));
@@ -328,12 +363,17 @@ PROMPT_ENVELOPE_FIELDS="$(EXPECT_BOUND="$EXPECT_BOUND" node -e '
       }
       // A bound chain additionally refuses a team-review header. That conjunct
       // belongs HERE and not in `completeTriple`, which is also the spoof test.
-      if (!completeTriple || reviewOps.length !== 0) process.exit(3);
-      process.stdout.write(["bound", binding[1], binding[2], binding[3], stage[1]].join("\t"));
+      // reviewOps needs the same shape discipline as its siblings: judged by
+      // PREFIX alone, any quoted placeholder starting with the literal vetoed the
+      // whole envelope, and the skill files carry exactly such placeholders.
+      const REVIEW_OP_RE = /^AUTOPILOT-REVIEW-OP: key=[A-Za-z0-9][A-Za-z0-9_.:-]{2,191} head=[a-fA-F0-9]{7,64}$/;
+      const realReviewOps = distinct(reviewOps).filter(line => REVIEW_OP_RE.test(line));
+      if (!boundTriple || realReviewOps.length !== 0) process.exit(3);
+      process.stdout.write(["bound", dBinding[1], dBinding[2], dBinding[3], dStage[1]].join("\t"));
     } catch (_) { process.exit(3); }
   });
 ' <<<"$INPUT" 2>/dev/null)" \
-  || decline "the Autopilot envelope in the prompt did not match this chain: a bound chain needs exactly one each of ZENSU-DELEGATED-CALLER / AUTOPILOT-BINDING / AUTOPILOT-STAGE and no team-review header, and a standalone chain must carry no complete envelope at all"
+  || decline "the Autopilot envelope in the prompt did not match this chain: a bound chain needs exactly one DISTINCT line each of ZENSU-DELEGATED-CALLER / AUTOPILOT-BINDING / AUTOPILOT-STAGE and no team-review header, and a standalone chain must carry no complete envelope at all"
 IFS=$'\t' read -r PROMPT_AUTOPILOT_KIND PROMPT_AUTOPILOT_RUN \
   PROMPT_AUTOPILOT_ATTEMPT PROMPT_AUTOPILOT_CHAIN PROMPT_AUTOPILOT_STAGE \
   <<<"$PROMPT_ENVELOPE_FIELDS"
@@ -365,16 +405,43 @@ if [ "$PROMPT_AUTOPILOT_KIND" = standalone ]; then
       # run for it. It does not: that case fails the worker check, arrives as
       # rc 2, and is refused by the outer unreadable arm, whose wording
       # deliberately names no owner.
-      OUTER="$PREFLIGHT_OUTER" node -e '
+      # The terminal pair MIRRORS `TERMINAL` in `hooks/lib/zensu-autopilot-state.sh`
+      # and deliberately NOT its `STOP_TERMINAL` sibling, which also holds
+      # `BLOCKED`: a blocked run must still refuse an unbound claim, because the
+      # generation exists and has not been released. What the mirror must never do
+      # is call such a run LIVE — it is not — so the stage travels back and the
+      # cause names what was actually observed. The record is session-writable, so
+      # only a `^[A-Z_]{1,32}$` spelling is echoed; anything else degrades to a
+      # fixed word rather than putting untrusted bytes in front of the model.
+      OUTER_STAGE="$(OUTER="$PREFLIGHT_OUTER" node -e '
       try {
         const s=JSON.parse(process.env.OUTER);
-        process.exit(["DONE", "CANCELLED"].includes(s.stage) ? 0 : 1);
+        const stage = typeof s.stage === "string" ? s.stage : "";
+        // Membership in the CLOSED set the state library declares, never a bare
+        // shape rule: the record is session-writable, and hooks/lib/zensu-autopilot-state.sh
+        // rejects a shape rule for exactly this reason where it renders a stage.
+        const RENDERABLE = ["PLANNING","AWAIT_TDD","TDD_RUNNING","GATES","TEAM_REVIEW",
+          "CONVERGE","FIX_FINDINGS","VALIDATE","COVER","DELIVER","OPEN_PR","BLOCKED","DONE","CANCELLED"];
+        process.stdout.write(RENDERABLE.includes(stage) ? stage : "");
+        // NOT process.exit(): the write above goes to a command-substitution
+        // pipe and may still be queued, and exit() discards it — which would
+        // drop the stage and render the cause as "observed: unreported" while
+        // the exit code still arrived. Set the code and let node drain, the
+        // rule hooks/plan-approved-delegate.sh states for the same seam.
+        process.exitCode = ["DONE", "CANCELLED"].includes(s.stage) ? 0 : 1;
       } catch (_) { process.exit(2); }
-      ' 2>/dev/null
+      ' 2>/dev/null)"
       case "$?" in
         0) ;;
-        1) decline "this session's own durable Autopilot run is still live, so a standalone claim cannot be recorded against it" runstate ;;
-        *) decline "a durable Autopilot run record in this project could not be read, so a standalone claim cannot be judged against it" runstate ;;
+        1) decline "this session's own durable Autopilot run has not reached a terminal stage (observed: ${OUTER_STAGE:-unreported}), so a standalone claim cannot be recorded against it" runstate ;;
+        # This arm is the READ succeeding and its payload not PARSING, which is
+        # a different fault from the read failing below — the two said the same
+        # sentence, so the ledger could not tell them apart and neither could
+        # anyone reading a chain that stranded here. It has no executed fixture:
+        # `autopilot_read_active` emits JSON or fails, so a successful read that
+        # will not parse is unreachable from a test, which is why the pin for
+        # this distinction is a source pin (P13f).
+        *) decline "this session's own durable Autopilot run record did not parse, so a standalone claim cannot be judged against it" runstate ;;
       esac
       ;;
     1) ;;
@@ -402,8 +469,14 @@ if [ "$PROMPT_AUTOPILOT_KIND" = standalone ]; then
       || decline "whether a durable Autopilot run holds this working tree could not be read, so a standalone claim cannot be judged against it" runstate
   fi
 elif [ "$PROMPT_AUTOPILOT_KIND" = bound ]; then
-  [ "$PREFLIGHT_CONTEXT" != '{}' ] \
-    || decline "the prompt carried a complete Autopilot envelope, but this session owns no active durable run to bind it to — drop the envelope for a standalone chain, or read a fresh --autopilot-status and rebuild it from a run this session owns"
+  # There is deliberately NO guard here on `PREFLIGHT_CONTEXT` being the empty
+  # object. `EXPECT_BOUND` is derived from exactly that comparison one gate
+  # above, and the classifier emits kind `bound` only when `EXPECT_BOUND` is
+  # `yes`, so reaching this branch already proves the context is non-empty. One
+  # stood here and could never be false; the cost was not the dead code but that
+  # two operator accounts enumerated its decline as a live diagnosis, so the
+  # contract advertised a refusal nothing could produce. Do not reintroduce it —
+  # if this ever has to be decidable, make the classifier decide it.
   AUTOPILOT_CTX="$PREFLIGHT_CONTEXT" RUN_ID="$PROMPT_AUTOPILOT_RUN" \
     ATTEMPT="$PROMPT_AUTOPILOT_ATTEMPT" CHAIN_ID="$PROMPT_AUTOPILOT_CHAIN" \
     RETURN_STAGE="$PROMPT_AUTOPILOT_STAGE" node -e '
@@ -421,8 +494,18 @@ elif [ "$PROMPT_AUTOPILOT_KIND" = bound ]; then
   # `autopilot_read_active` is OWNER-SCOPED, so this is the caller's OWN durable
   # run record — not another session's. It therefore discloses like every other
   # own-artifact decline; only the owner-INDEPENDENT workspace read stays silent.
-  PREFLIGHT_OUTER="$(autopilot_read_active "$PROJECT_ROOT" "$SESSION_ID" 2>/dev/null)" \
-    || decline "a durable Autopilot run record in this project could not be read, so the bound claim cannot be judged against it" runstate
+  if PREFLIGHT_OUTER="$(autopilot_read_active "$PROJECT_ROOT" "$SESSION_ID" 2>/dev/null)"; then
+    :
+  else
+    # rc 1 is "no active run", not a fault: the run was released or completed and
+    # the pointer is gone. Reporting it as unreadable sent the model to repair a
+    # record that is simply absent — the same conflation the standalone branch
+    # above no longer makes.
+    case "$?" in
+      1) decline "this session owns no active durable Autopilot run any more, so the bound claim has nothing to be judged against — the run was released or completed" runstate ;;
+      *) decline "a durable Autopilot run record in this project could not be read, so the bound claim cannot be judged against it" runstate ;;
+    esac
+  fi
   OUTER="$PREFLIGHT_OUTER" SID="$SESSION_ID" RUN_ID="$PROMPT_AUTOPILOT_RUN" \
     ATTEMPT="$PROMPT_AUTOPILOT_ATTEMPT" CHAIN_ID="$PROMPT_AUTOPILOT_CHAIN" \
     RETURN_STAGE="$PROMPT_AUTOPILOT_STAGE" node -e '

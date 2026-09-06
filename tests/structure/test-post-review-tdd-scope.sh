@@ -756,6 +756,61 @@ else
   check "S18 every node -e program under hooks/ is valid JS — an apostrophe truncates the bash single-quoted string (scanned: $S18_SCANNED, broken: ${S18_BROKEN:-none})" FAIL
 fi
 
+# S19 — the bound branch used to open with a guard testing `PREFLIGHT_CONTEXT`
+# against the empty object, and that guard was unreachable by construction:
+# `EXPECT_BOUND` is derived from the SAME comparison one gate above, and the
+# envelope classifier emits kind `bound` only when `EXPECT_BOUND` is `yes`, so
+# the guard could never be false. The cost was never dead code on its own — it
+# was that two operator accounts enumerated its decline as a live diagnosis, so
+# the contract advertised a refusal nothing could produce. The derivation is
+# asserted as a CONTROL: without it a rename of the variable would satisfy the
+# absence test while leaving the guard in place under another name.
+# The doc needles match the ENUMERATION, never the phrase: a correct account has
+# to name the case in order to say it is unreachable, so forbidding the words
+# outright is a predicate no correct fix can satisfy. Each file is also required
+# to keep DISCUSSING it, so deleting the passage wholesale does not pass either.
+S19_GUARD="$(grep -c 'PREFLIGHT_CONTEXT" != ' "$HOOK" || true)"
+S19_DERIV="$(grep -c 'PREFLIGHT_CONTEXT" = ' "$HOOK" || true)"
+S19_WF="$(tr '\n' ' ' < "$PLUGIN_DIR/docs/tdd-manager-workflow.md" | tr -s ' ' | grep -c 'discloses — including a bound prompt' || true)"
+# CLAUDE.md is hard-wrapped, so the enumeration can straddle a line break: a
+# line-local needle would pass on a re-added claim that happens to wrap.
+S19_CM="$(tr '\n' ' ' < "$PLUGIN_DIR/CLAUDE.md" | tr -s ' ' | grep -c 'comparison, a bound prompt' || true)"
+S19_WF_KEPT="$(grep -c 'bound prompt' "$PLUGIN_DIR/docs/tdd-manager-workflow.md" || true)"
+S19_CM_KEPT="$(grep -c 'bound prompt' "$PLUGIN_DIR/CLAUDE.md" || true)"
+if [ "$S19_GUARD" -eq 0 ] && [ "$S19_DERIV" -ge 1 ] \
+  && [ "$S19_WF" -eq 0 ] && [ "$S19_CM" -eq 0 ] \
+  && [ "$S19_WF_KEPT" -ge 1 ] && [ "$S19_CM_KEPT" -ge 1 ]; then
+  check "S19 the unreachable bound-branch guard is gone and no operator account enumerates its decline" PASS
+else
+  check "S19 the unreachable bound-branch guard is gone and no operator account enumerates its decline (guard=$S19_GUARD deriv=$S19_DERIV workflow-doc=$S19_WF claude-md=$S19_CM)" FAIL
+fi
+
+# S20 — consume intent has TWO disjuncts, and until this case every fixture that
+# reached a decline carried the fan-out marker on line 1, so the SECOND one — a
+# `REVIEW-TICKET:` line whose value already MATCHED the outstanding ticket —
+# could be deleted with the whole suite green. This prompt does NOT open with the
+# marker, so only the matched ticket can arm the disclosure. The refusal itself
+# is the standalone deliberate-spoof arm: a complete, regex-valid envelope triple
+# on a chain the durable state says is standalone.
+start_session ticket-only-intent
+S20="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S20"
+log --tdd-complete --session "$S20"
+S20_TICKET="$(issue_ticket "$S20")"
+S20_STATE="$(state "$S20")"
+S20_BEFORE="$(digest "$S20_STATE")"
+OUT="$(run_hook "$S20" zensu:code-reviewer "REVIEW-TICKET: $S20_TICKET
+ZENSU-DELEGATED-CALLER: autopilot
+AUTOPILOT-BINDING: run=run-fixture attempt=1 chain=chain-fixture
+AUTOPILOT-STAGE: GATES")"
+S20_AFTER="$(digest "$S20_STATE")"
+[ -n "$S20_TICKET" ] && [ "$S20_AFTER" = "$S20_BEFORE" ] \
+  && [ "$(ticket_consumed "$S20")" = "false" ] \
+  && printf '%s' "$OUT" | grep -qF -- "was NOT recorded against this session's review chain" \
+  && ! printf '%s' "$OUT" | grep -qF -- "$S20_TICKET" \
+  && check "S20 a matched ticket alone arms the disclosure when the prompt does not open with the marker" PASS \
+  || check "S20 a matched ticket alone arms the disclosure when the prompt does not open with the marker" FAIL
+
 echo "----"
 echo "test-post-review-tdd-scope: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

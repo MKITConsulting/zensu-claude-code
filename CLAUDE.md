@@ -3554,6 +3554,21 @@ emptiness control. **State the residual rather than the count:** no conjunct bin
 forbids a DIFFERENT one still passes. An earlier form rejected two hand-picked spellings and
 would have passed `"default to running /zensu:autopilot"`.
 
+**A SECOND ordering rule lives in the same directive, and it is load-bearing for a
+different reason.** Clause (B) opens by stating that a refusal is never terminal for the
+other routes, and a `/zensu:tdd` refusal used to contradict that by routing straight to
+implement-directly ABOVE the autopilot and pilot arms — so an approval that refused TDD while naming the
+autopilot route dropped the route the user named. The refusal arm is now tested LAST and is
+decisive only when no other route was affirmed, and clause (C) additionally names
+`/zensu:pilot` beside `/zensu:autopilot`, because that route also commits and opens a PR.
+`P20` in `tests/structure/test-autopilot-plan-delegate.sh` pins the ordering by byte
+offset over BOTH heredocs; its anchors must stay the route-arm spellings, since the bare
+verb also occurs inside the refusal EXAMPLES that precede the arm. **Coupled, and it
+bites from the other side:** `D13` in `tests/structure/test-plan-approved-delegate.sh`
+counts `non-interactiv` mentions in the dispatch tail and requires exactly one, so the
+symmetric parenthetical for the pilot route cannot be added there without relaxing that
+count first. The prohibition therefore lives inside clause (C) rather than in the tail.
+
 **The fast-path literal order is load-bearing.** `pilot` is a SUBSTRING of `autopilot`, so the
 longer literal is tested first; testing the shorter one first routes an autopilot request to
 the wrong skill. The directive states the order and the reason, because the matching is done by
@@ -3646,7 +3661,7 @@ nothing else is.** The prompt must carry the chain's OUTSTANDING ticket on a lin
 spelled `REVIEW-TICKET: <ticket>`; it may sit anywhere, and further `REVIEW-TICKET:` lines are
 ignored. `PRE-MERGED FINDINGS (fan-out)` is still instructed by every producer and is NOT what
 the hook decides on. The Autopilot envelope is matched the same way — by CONTENT (exactly one
-each of `ZENSU-DELEGATED-CALLER` / `AUTOPILOT-BINDING` / `AUTOPILOT-STAGE`, no
+DISTINCT LINE each of `ZENSU-DELEGATED-CALLER` / `AUTOPILOT-BINDING` / `AUTOPILOT-STAGE`, no
 `AUTOPILOT-REVIEW-OP`, the caller value exact, both regexes, then every field compared against
 the durable run) — never by the lines it occupies.
 
@@ -3693,8 +3708,11 @@ disclosure would hijack them with a re-spawn instruction for a chain they were n
 for as long as the ticket stayed outstanding.
 
 It fires at the ticket match, the envelope parse, the run-state read, the bound-envelope field
-comparison, a bound prompt this session has NO active durable run to bind to, and a failed
-workspace read. **The unreadable-record arms deliberately name NO owner** — `autopilot_read_active`
+comparison, and a failed workspace read. It deliberately does NOT fire for a bound prompt this
+session has no active durable run to bind to, because that state is UNREACHABLE: `EXPECT_BOUND`
+is derived from `PREFLIGHT_CONTEXT` and the classifier emits kind `bound` only when it is `yes`.
+An arm for it stood in the bound branch and could never be false, and this enumeration named it
+as live for as long as it stood — which is the cost that removed it, not the dead code itself. **The unreadable-record arms deliberately name NO owner** — `autopilot_read_active`
 fails closed on an UNATTRIBUTABLE record too (`rawOwnerOf` returns null for an unsafe or
 unparseable file, so it is validated rather than skipped), and `.zensu/state/` is writable from
 inside any session in the project, so a co-tenant's corrupt run record reaches that arm. Wording
@@ -3818,11 +3836,20 @@ shipping a directive that still teaches the retired positional rule.
 record's own vocabulary, parsed inline in `node -e`. `["DONE", "CANCELLED"]` is a copy of
 `TERMINAL` in `hooks/lib/zensu-autopilot-state.sh`, which sits beside a SECOND set,
 `STOP_TERMINAL`, that also holds `BLOCKED` — so the copy silently picks one of two, and a
-`BLOCKED` outer run currently receives the still-live remedy. `ownerSessionId` and `stage` are
+`BLOCKED` outer run is therefore still classified non-terminal and refused; what changed is the CAUSE, which now names the observed stage instead of asserting the run is live. `ownerSessionId` and `stage` are
 read by name here too. The durable end state is for the library to answer "is this run terminal
 for an unbound claim" rather than have the consumer re-decide it. This hook also adds two
 carriers to the `scv1_` grep family §"Foreign-Chain Row" governs, both spelled
 `SID.slice("scv1_".length)`.
+
+
+**That family has a SECOND member and the roster must name both:** the run-stage vocabulary,
+copied inline as `RENDERABLE` in the standalone preflight of `hooks/post-review-tdd-delegate.sh`.
+Its owner is `STAGES` in `hooks/lib/zensu-autopilot-state.sh`, which carries a second copy of its
+own, `RENDERABLE_STAGES`; `S7u` in `tests/structure/test-autopilot-stop-enforcer.sh` compares
+those two and is bound to that FILE, so it cannot see this third copy. Nothing pins it. A stage
+added to `STAGES` alone makes the arm render `observed: unreported` for a stage the record
+actually named — not hypothetical: the copy shipped one review round missing `CONVERGE`.
 
 Operator-facing accounts: the `post-review-tdd-delegate.sh` row in `docs/configuration.md`,
 §"What binds a reviewer completion to the chain" in `docs/tdd-manager-workflow.md`,
