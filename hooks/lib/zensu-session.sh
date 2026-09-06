@@ -235,25 +235,28 @@ _zensu_session_binder_mode() {
   native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}")" || return 1
   msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
     || return 1
-  case "$mode" in
-    model-*)
-      (
-        cd -P -- "$lib_dir" || exit 1
-        MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
-          CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
-          node ./claude-hook-session-v1.js "$mode"
-      ) 2>/dev/null
-      ;;
-    *)
-      (
-        cd -P -- "$lib_dir" || exit 1
-        printf '%s' "$payload" \
-          | MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
-            CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
-            node ./claude-hook-session-v1.js "$mode"
-      ) 2>/dev/null
-      ;;
-  esac
+  # ONE invocation, with the MODE choosing what stands on stdin. Two subshells —
+  # one piped, one not — would double the `node ./claude-hook-session-v1.js` count
+  # while the MSYS exclusion is still computed once, and that pair is a shipped
+  # invariant: test-msys-runtime-boundaries asserts that every relative binder
+  # invocation in this file is covered by its own
+  # `zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA`.
+  #
+  # Piping an EMPTY stdin for a model mode is not a behaviour change: the binder
+  # reads the payload only on the non-model branches, taking the session id from
+  # CLAUDE_CODE_SESSION_ID otherwise, so those invocations never touched stdin.
+  # The closed pipe is the safer of the two anyway — the previous spelling let
+  # them inherit whatever descriptor the caller happened to hold.
+  (
+    cd -P -- "$lib_dir" || exit 1
+    case "$mode" in
+      model-*) : ;;
+      *) printf '%s' "$payload" ;;
+    esac \
+      | MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
+        CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
+        node ./claude-hook-session-v1.js "$mode"
+  ) 2>/dev/null
 }
 
 # Returns 0 ONLY when a Session Control record is intact in every respect and the
