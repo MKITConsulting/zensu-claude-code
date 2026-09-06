@@ -1572,14 +1572,14 @@ INNER_BOUND_ARGS=""
 INNER_ZERO_CHANGE_ARGS=""
 INNER_ZERO_CHANGE_NOTE=" That terminus verifies the claim before it closes anything: it refuses while 'git diff --name-only HEAD' or an untracked non-ignored file still reports a changed file, so it can never stand in for a review of real changes."
 INNER_SELF_REVIEW_ENVELOPE=" "
-INNER_REVIEW_HEADERS="whose prompt starts with exactly two header lines — first 'PRE-MERGED FINDINGS (fan-out)', second 'REVIEW-TICKET: <ticket>'"
+INNER_REVIEW_HEADERS="whose prompt starts with exactly two header lines — first 'PRE-MERGED FINDINGS (fan-out)', second 'REVIEW-TICKET: <ticket>' (the ticket line is what binds the completion to this chain; the hook matches it by content anywhere in the prompt, so a formatting slip no longer strands the chain)"
 INNER_REVIEW_SUFFIX=", followed by"
 if [ -n "$INNER_BOUND_RUN" ]; then
   INNER_BOUND_ARGS="$(zensu_autopilot_link_args "$INNER_BOUND_RUN" "$INNER_BOUND_ATTEMPT" "$INNER_BOUND_CHAIN")"
   INNER_ZERO_CHANGE_ARGS="${INNER_BOUND_ARGS} --outcome no-changes"
   INNER_ZERO_CHANGE_NOTE=" That terminus records 'no-changes' as this attempt's audited Autopilot outcome, so the durable run keeps a receipt that distinguishes it from a reviewed close."
   INNER_SELF_REVIEW_ENVELOPE=$' Carry this exact official three-line Autopilot envelope into the skill unchanged and exactly once:\n'"ZENSU-DELEGATED-CALLER: autopilot"$'\n'"AUTOPILOT-BINDING: run=${INNER_BOUND_RUN} attempt=${INNER_BOUND_ATTEMPT} chain=${INNER_BOUND_CHAIN}"$'\n'"AUTOPILOT-STAGE: ${INNER_BOUND_RETURN_STAGE}"$'\n'
-  INNER_REVIEW_HEADERS=$'whose prompt starts with exactly these five header lines:\nPRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: <ticket>\n'"ZENSU-DELEGATED-CALLER: autopilot"$'\n'"AUTOPILOT-BINDING: run=${INNER_BOUND_RUN} attempt=${INNER_BOUND_ATTEMPT} chain=${INNER_BOUND_CHAIN}"$'\n'"AUTOPILOT-STAGE: ${INNER_BOUND_RETURN_STAGE}"$'\n'
+  INNER_REVIEW_HEADERS=$'whose prompt starts with exactly these five header lines (the ticket line is what binds the completion to this chain; the hook matches it by content anywhere in the prompt, so a formatting slip no longer strands the chain):\nPRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: <ticket>\n'"ZENSU-DELEGATED-CALLER: autopilot"$'\n'"AUTOPILOT-BINDING: run=${INNER_BOUND_RUN} attempt=${INNER_BOUND_ATTEMPT} chain=${INNER_BOUND_CHAIN}"$'\n'"AUTOPILOT-STAGE: ${INNER_BOUND_RETURN_STAGE}"$'\n'
   INNER_REVIEW_SUFFIX="followed by"
 fi
 if [ "$CODE_REVIEW_DONE" = "true" ]; then

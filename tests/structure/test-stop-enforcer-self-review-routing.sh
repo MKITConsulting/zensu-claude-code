@@ -1017,6 +1017,24 @@ else
   check "T47 the CLAUDE.md carrier census matches the tree ($CENSUS_FILES files, $CENSUS_LINES lines, unpinned=$CENSUS_UNPINNED)" FAIL
 fi
 
+# T60: the two INNER_REVIEW_HEADERS variants are HAND-PARALLEL and were pinned by
+# nothing, so the content-matching clause landed on the standalone arm alone for a
+# round. The bound arm is the one carrying three extra model-authored header lines,
+# i.e. the highest formatting-slip exposure, so it is the arm that most needs it.
+HEADER_CLAUSE="the ticket line is what binds the completion to this chain; the hook matches it by content anywhere in the prompt, so a formatting slip no longer strands the chain"
+HEADER_VARIANTS="$(grep -c 'INNER_REVIEW_HEADERS=' "$STOP" || true)"
+# CO-LOCATED, not merely co-resident. Counting the clause file-wide let any
+# second occurrence on a NON-assignment line — a comment restating the contract,
+# which is this file's house style — offset a variant that had lost it, so the
+# one-sided placement T60 exists to catch would have passed. Both clauses sit on
+# their assignment lines today, so the tightening is behaviour-preserving.
+HEADER_CLAUSED="$(grep 'INNER_REVIEW_HEADERS=' "$STOP" | grep -cF -- "$HEADER_CLAUSE" || true)"
+if [ "$HEADER_VARIANTS" -ge 2 ] && [ "$HEADER_CLAUSED" = "$HEADER_VARIANTS" ]; then
+  check "T60 every INNER_REVIEW_HEADERS variant carries the content-matching clause ($HEADER_VARIANTS/$HEADER_VARIANTS)" PASS
+else
+  check "T60 every INNER_REVIEW_HEADERS variant carries the content-matching clause (variants=$HEADER_VARIANTS claused=$HEADER_CLAUSED)" FAIL
+fi
+
 # The three KNOWN BOUND notes. BOUND 2's remedy named a shared JS module, which is
 # exactly as unreachable from the three POSIX-shell render sites as the shell
 # constant is from JS. BOUND 3 shipped a hand-maintained roster of three files while

@@ -70,10 +70,10 @@ fi
 echo "zensu: Zensu PLM v${VERSION} active — features as first-class citizens."
 if zensu_tdd_strict_enabled; then
   echo "zensu: Flow — track features → implement (strict RED→GREEN TDD) → review chain → dashboard."
-  echo "zensu: Tip — use Claude Code Plan mode for code changes; on approval Zensu asks whether to run the /zensu:tdd workflow (RED→GREEN + review chain). Run it and edits are TDD-gate-enforced; decline and you implement directly."
+  echo "zensu: Tip — use Claude Code Plan mode for code changes; on approval Zensu asks which delivery route to take: /zensu:autopilot (unattended to a reviewed, validated PR), /zensu:tdd (this plan now, RED→GREEN + review chain, edits TDD-gate-enforced), /zensu:pilot (guided pipeline for a feature already tracked in Zensu), or implementing it directly."
 else
   echo "zensu: Flow — track features → implement (vanilla mode, TDD discipline off via hooks.tddImplementation=false) → review chain → dashboard."
-  echo "zensu: Tip — use Claude Code Plan mode for code changes; on approval Zensu asks whether to run the /zensu:tdd workflow (vanilla implementation + review chain). Run it and the evidence audits + review chain are enforced; decline and you implement directly."
+  echo "zensu: Tip — use Claude Code Plan mode for code changes; on approval Zensu asks which delivery route to take: /zensu:autopilot (unattended to a reviewed, validated PR), /zensu:tdd (this plan now, vanilla implementation with the evidence audits + review chain enforced), /zensu:pilot (guided pipeline for a feature already tracked in Zensu), or implementing it directly."
 fi
 echo "zensu: Skills — /zensu:bootstrap · /zensu:ghost-scan · /zensu:pilot · /zensu:implement · /zensu:tdd · /zensu:security-review · /zensu:pulse · /zensu:zensu-help (Q&A)."
 if command -v zensu >/dev/null 2>&1; then

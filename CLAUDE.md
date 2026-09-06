@@ -21,7 +21,8 @@ artifact the plugin emits.
 — and verbatim citations of those literals in structure-test pins, in
 README/CHANGELOG feature descriptions, and in this carve-out — may contain
 non-English phrases ONLY as match literals for real user input:
-the TDD preference fast-paths (e.g. `'kein tdd'`, `'mit tdd'`, `'tdd bitte'`)
+the TDD-preference AND delivery-route fast-paths (e.g. `'kein tdd'`, `'mit tdd'`,
+`'tdd bitte'`, `'mit autopilot'`, `'mit pilot'`)
 and the generic-action literals that are explicitly NOT a preference
 (e.g. `'mach mal'`, `'los gehts'`, `'jetzt umsetzen'`) in
 `plan-approved-delegate.sh` / `user-prompt-tdd-reminder.sh`. They exist to
@@ -1807,7 +1808,8 @@ hand; the release pipeline owns it.
   it used to refuse falls through to the standalone policy instead.** A foreign session that
   approves a plan carrying another run's `<!-- zensu-autopilot:<run> -->` marker no longer
   reaches the owner comparison, because the run is invisible to its owner-scoped read; it is
-  asked the ordinary "run /zensu:tdd?" question. Nothing is mutated — the foreign run is not
+  asked the four-route delivery question, which now carries `/zensu:autopilot` and `/zensu:pilot`
+  beside it (see §"Plan-Approval Delivery Route"). Nothing is mutated — the foreign run is not
   touched and no binding is created — so this is a lost DIAGNOSTIC, not a lost guarantee.
   Restoring it needs the marker before the read, and the marker is only resolved inside the
   payload evaluator (see "Plan-Gate Payload Sources"), which reads fields by name and must
@@ -3803,6 +3805,386 @@ marker, run-id equality, the owner and stage checks that precede every read, and
 A port that takes only the module gets the field decision; it still owns its own emission and
 its own exit ladder, which stay in `hooks/plan-approved-delegate.sh`.
 
+## Plan-Approval Delivery Route (`hooks/plan-approved-delegate.sh`, standalone branch)
+
+The STANDALONE branch of the plan gate asks ONE `AskUserQuestion` naming four mutually
+exclusive delivery routes — `/zensu:autopilot`, `/zensu:tdd`, `/zensu:pilot`, and implementing
+directly. It replaced a yes/no question about `/zensu:tdd` alone, which left the plugin's other
+two delivery routes invisible at the one moment they are relevant.
+
+**The DURABLE branch is untouched and must stay that way.** A plan carrying a validated
+`<!-- zensu-autopilot:<run> -->` marker still emits `PLAN_APPROVED` with "Do not ask another
+TDD/workflow question": Autopilot has spent its single planning gate by then, and a second
+question there would break that contract.
+
+**Two prerequisites are stated INSIDE the options rather than gating them, and the reason is
+that a hook cannot check either cheaply.** `/zensu:autopilot` owns its own Phase 0, which ends
+in its own `ExitPlanMode`, so choosing it after an approval costs a SECOND approval round for
+the spec, the `AC-###` list and the probed recipe — and it needs an authenticated forge CLI.
+`/zensu:pilot` needs an authenticated `zensu` CLI plus a feature ALREADY tracked in Zensu; its
+own skill sends ad-hoc work to `/zensu:tdd` instead. Both options are offered unconditionally
+and carry their cost in their own description. The ground is NOT that probing is expensive —
+`hooks/session-start-banner.sh` already runs `command -v zensu`, so the PRESENCE half is cheap.
+It is that a conditional option set would make the gate's own "exactly these four mutually
+exclusive options and no others" contract environment-dependent and therefore unpinnable, and
+that the half that actually matters — whether the CLI is AUTHENTICATED and the feature already
+tracked — needs a network call this hook must not make.
+
+**Auto Mode must NEVER select `/zensu:autopilot`, and this is the one safety property in the
+section.** That route pushes a branch and opens a pull request. TWO clauses choose a route
+without asking, and saying "the non-interactive one is the only place" was the overstatement
+review caught: fast-path (B) also selects without asking and carries no interactivity scope of
+its own, so an earlier wording in which (C) forbade only a *default* left a headless run whose
+driving prompt named the route reaching it through (B). (C) therefore OVERRIDES (B) in as many
+words, and forbids selection "not as a default, not by an explicit literal, and not by any
+other clause". Two further guards sit in (B) for the same reason and are not cosmetic: a route
+name carrying a negation REFUSES that route rather than selecting it — the bare literal
+`'autopilot'` meant `"no autopilot"` contained the token tested first — and only multi-word
+forms count, because in THIS repository `"fix the autopilot state machine"` is an ordinary
+sentence. `D13` in `tests/structure/test-plan-approved-delegate.sh` is the pin, and it grades a
+PROPERTY rather than a spelling list: it slices BOTH the (B) and the (C) clause, requires (C) to carry
+EXACTLY ONE `/zensu:autopilot` mention, the prohibition and override clauses, and no dispatch
+spelling; requires (B) to carry the refusal guard, the open-set marker and the multi-word rule,
+AND to state the refusal BEFORE the preference arms (an offset comparison, not a presence one —
+without it, moving the refusal below the autopilot arm passes every check); and requires the
+remainder after both clauses to tie no non-interactive run to a route. Each slice has its own
+emptiness control. **State the residual rather than the count:** no conjunct binds the counted
+(C) occurrence TO the prohibition sentence, so a (C) clause that both defaults to the route and
+forbids a DIFFERENT one still passes. An earlier form rejected two hand-picked spellings and
+would have passed `"default to running /zensu:autopilot"`.
+
+**The fast-path literal order is load-bearing.** `pilot` is a SUBSTRING of `autopilot`, so the
+longer literal is tested first; testing the shorter one first routes an autopilot request to
+the wrong skill. The directive states the order and the reason, because the matching is done by
+a model reading prose and not by a regex anyone can order.
+
+**The ORDERING rule is encoded as a judgement, not as a fixed winner**, because which route is
+best depends on the plan: Autopilot leads for a whole user-visible feature meant to reach a pull
+request, Pilot for work belonging to an already-tracked feature, otherwise the Zensu workflow —
+and "implement directly" is never first. That last clause is what keeps the do-nothing option
+out of the recommended slot, which the repository's own best-solution-first rule forbids.
+
+**Coupled sites that move together:** both heredocs in `hooks/plan-approved-delegate.sh` — never
+one alone, and the file must keep exactly TWO `cat <<'JSON'` blocks, because the parity helper in
+`tests/structure/test-tdd-vanilla-mode.sh` refuses a third; that helper's `P1` needle list, which
+now carries the route literals and is what makes a one-sided edit fail, plus `P1b`/`P1b2`, which
+compare the mode-INDEPENDENT option spans byte-for-byte because presence alone cannot see an
+option ADDED to one branch; `D9pre` and `D9`-`D16` in
+`tests/structure/test-plan-approved-delegate.sh`, which force the strict branch as well because
+the default config resolves to the vanilla one and a single capture would grade only one heredoc;
+and `BNR4` in the vanilla-mode suite, which is the ONLY check that reaches the banner tips —
+`P8c` greps the whole banner file and is satisfied by its pre-existing Skills line.
+
+**UNPINNED, named rather than left to be discovered:** the Phase 0.D ordering this roster promotes
+to a loop-prevention contract is enforced by nothing. `tests/structure/test-autopilot-durable-skill.sh`
+greps the `--autopilot-begin` literal, which cannot see position, so reversing the order relative to
+`ExitPlanMode` passes every check. Check it by hand until an offset comparison lands.
+`skills/autopilot/SKILL.md` Phase 0.D is on this roster for a reason that is easy to miss: it
+requires `--autopilot-begin` to run IMMEDIATELY BEFORE `ExitPlanMode`, and that ordering is the
+only thing putting the durable run at `PLANNING` in time for Autopilot's OWN approval to land on
+the durable branch. Reverse it — a plausible refactor, "do not mint a run the user may reject" —
+and Autopilot's planning gate falls through to the standalone directive, which now re-asks the
+four-route question with `/zensu:autopilot` still on it. That approval loop did not exist before
+this change made the route reachable from this gate. `tests/structure/test-pilot-skill.sh` is on
+it for a blunter reason: its `P8d` graded a WHOLE-FILE `/zensu:pilot` count against a literal,
+so the primer edit turned a CI-run suite red; it is a per-heredoc presence assertion now, because
+bumping the literal would only re-arm the same trap on the next primer edit.
+
+Operator-facing accounts, and the list is longer than the obvious two because every surface that
+described the old yes/no question became false at once: the `plan-approved-delegate.sh`,
+`autoTdd`, `session-start-banner.sh`, `session-start-primer.sh` and `user-prompt-tdd-reminder.sh`
+rows in `docs/configuration.md`; BOTH branches of `hooks/session-start-primer.sh` (whose own `P3`
+parity needles now carry the route literals) and BOTH tips in `hooks/session-start-banner.sh`,
+which is the ONLY user-visible surface and was the one the whole review panel missed; the "When
+to Use" bullet in `skills/tdd/SKILL.md`; the two interception paragraphs in
+`skills/gauntlet-loop/SKILL.md`; the Layer 2 Mermaid edge in `docs/architecture.md`; the "Just
+this change" paragraph in `README.md` — BOTH the "Just this change" paragraph and the "A plan you approve
+first" bullet; `evals/plan-approval-hook/` — whose expect script must
+select the Zensu-workflow option BY LABEL, never by the ordinal `1`, since the ordering rule can
+put the branch-pushing route in slot 1 and a blind ordinal would take it unattended; and THIS
+file's own §"Autopilot Run Scope" `OWNER_SESSION_MISMATCH` bullet, which describes what a foreign
+caller is asked when it falls through to the standalone policy.
+
+**Deliberately NOT changed:** `hooks/user-prompt-tdd-reminder.sh`, the non-plan-mode path, keeps
+its yes/no question. The route choice belongs to the moment a plan is approved; re-asking it on
+every prompt while no chain is active would be four options of noise.
+
+**Port-relevant.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` carry the same plan gate
+against different harnesses and were NOT included in this change. A port owns more here than a
+reworded directive: its own ROUTE VOCABULARY, because `/zensu:autopilot` and `/zensu:pilot` are
+skills a port may not ship at all, so copying the four-option text there would offer routes that
+do not exist; whether its harness has an `AskUserQuestion` equivalent that can carry four options;
+and — the one a literal-renaming port misses — whether a route can be selected NON-INTERACTIVELY
+on that host, which is the premise the whole (C)-overrides-(B) safety property rests on.
+
+**Version: `patch`.** Walked against §"Runtime Lineage" entry by entry: no context-record or
+workflow-state schema field, no strict key set, no hook added, removed or renamed and no matcher
+changed, no new config key (`autoTdd` is reused), no attestation change. The hook's only output is
+`additionalContext` — the ADVISORY shape the hook-inventory exemption names — and it returns no
+`permissionDecision` in either direction.
+
+**Why (C) names only `/zensu:autopilot`, stated so a later reader can widen or narrow it on the
+criterion rather than on a route name:** `skills/autopilot/SKILL.md` declares its Phase 1
+"autonomous, ZERO questions", so once its plan is approved the branch push is unattended, while
+`skills/pilot/SKILL.md` requires an explicit confirm per transition — Pilot has no unattended
+outward-facing step to guard.
+
+**Known gaps, accepted and named:** the four routes are prose the model follows, not a gate, so
+nothing enforces that the question is asked or that the ordering rule is honoured. The SEAM is
+the same one the yes/no question always had; the BLAST RADIUS is not — the old option set could
+only implement locally, while the new one adds a route that pushes a branch and opens a pull
+request and one that mutates external Zensu state. Neither prerequisite is verified before its option
+is shown, so a user without a tracked feature can still pick Pilot and learn the answer from that
+skill's own Phase 0. And `/zensu:doctor` carries no row for this question, so a project that set
+`autoTdd:false` sees no signal that the route choice is switched off.
+
+## Ticket-Keyed Review Consumption (`hooks/post-review-tdd-delegate.sh`)
+
+**The one-shot review ticket is what binds a `zensu:code-reviewer` completion to a chain, and
+nothing else is.** The prompt must carry the chain's OUTSTANDING ticket on a line of its own,
+spelled `REVIEW-TICKET: <ticket>`; it may sit anywhere, and further `REVIEW-TICKET:` lines are
+ignored. `PRE-MERGED FINDINGS (fan-out)` is still instructed by every producer and is NOT what
+the hook decides on. The Autopilot envelope is matched the same way — by CONTENT (exactly one
+each of `ZENSU-DELEGATED-CALLER` / `AUTOPILOT-BINDING` / `AUTOPILOT-STAGE`, no
+`AUTOPILOT-REVIEW-OP`, the caller value exact, both regexes, then every field compared against
+the durable run) — never by the lines it occupies.
+
+**The consumer is a PostToolUse hook on the `Agent` matcher.** `SubagentStop` carries only
+`hooks/review-evidence-subagent-stop.sh`, the pr-team-review evidence lease. A diagnosis that
+blames `SubagentStop` for an unrecorded review round is looking at the wrong hook; this
+paragraph exists because that mistake was made in a real session.
+
+**What the positional contract cost, measured rather than argued.** Marker on line 1, ticket
+on line 2, envelope on lines 3/4/5 — all MODEL-authored, and every deviation was a bare
+`exit 0`. Because `_tdd_issue_review_ticket_critical` does NOT require the previous ticket to
+be consumed, the chain then minted another ticket into the same mismatch. The observable was a
+chain parked at `chainShape` `ticket-unclaimed` with the reviewer having run and reported,
+`recoverable: false`, `stopBlockCount: 11`, and no cause on any channel. The positions bought
+nothing the ticket does not already buy: the claim transaction compares
+`s.reviewTicket === TICKET` under lock, so a reviewer spawned by another flow — `/zensu:cover`
+spawns `zensu:code-reviewer` without arming a chain — carries no ticket line and still cannot
+consume.
+
+**The uniqueness rule was REJECTED, and the reason is not hypothetical.** An earlier spelling
+required exactly one `REVIEW-TICKET:` line. The REVIEW PACKET quotes that literal at column 0
+whenever the reviewer is reviewing THIS repository, so the rule would have refused a correct
+consume in exactly the case this feature was built in. Matching against the outstanding ticket
+is strictly stronger and immune to quoting.
+
+**A decline decided by THIS session's own artifacts DISCLOSES; the silent set is narrower than
+a first draft claimed, and getting that boundary wrong is what left the largest strand
+open.** `decline()` emits one `additionalContext` line naming the gate when — and only when —
+the document is this session's (`session_id_hash` checked exactly as the claim checks it), the
+chain is live with an unclaimed ticket, AND the prompt showed CONSUME INTENT: the fan-out marker
+as the prompt's FIRST line, or a `REVIEW-TICKET:` line whose value already MATCHED the
+outstanding ticket. **Never spell that second signal as "carries a `REVIEW-TICKET:` line"** — a
+prompt merely QUOTING the literal satisfies it, column-0 examples live in this repository's own
+test files, and the remedy the disclosure then hands a chainless reviewer ROTATES this chain's
+outstanding ticket. Only the MATCHED ticket is unforgeable; the marker is ordinary text, and
+this repository itself renders it at column 0 inside the Stop block reason a model reads back,
+so an ANY-LINE marker test would arm the disclosure from quoted text. Requiring index 0 is what
+makes the quoted copy have to be the prompt's opening line, which no chainless flow produces.
+**Do not restate that as "neither signal can be supplied by a chainless flow"** — that was
+asserted here and is false. That conjunct is not decoration. `/zensu:cover`,
+`/zensu:wargame`, `/zensu:gauntlet-loop` and `/zensu:implement` all spawn `zensu:code-reviewer`
+without arming a chain; those completions already could not consume, and without the gate the
+disclosure would hijack them with a re-spawn instruction for a chain they were never part of,
+for as long as the ticket stayed outstanding.
+
+It fires at the ticket match, the envelope parse, the run-state read, the bound-envelope field
+comparison, a bound prompt this session has NO active durable run to bind to, and a failed
+workspace read. **The unreadable-record arms deliberately name NO owner** — `autopilot_read_active`
+fails closed on an UNATTRIBUTABLE record too (`rawOwnerOf` returns null for an unsafe or
+unparseable file, so it is validated rather than skipped), and `.zensu/state/` is writable from
+inside any session in the project, so a co-tenant's corrupt run record reaches that arm. Wording
+it as "this session's own record" asserted an ownership the read has not established. Same for
+the workspace-read FAILURE arm: it discloses because the chain would otherwise strand, NOT
+because it "confirms nothing about anyone else" — that read is owner-INDEPENDENT and fails on any
+invalid record in the shared directory, so the residual is that a foreign record which does not
+validate is observable through it. **Say "the workspace-holder read", never "another session's state" as a
+class** — the first spelling of this paragraph named the state-readability, outer-run-ownership
+and linkage preflights as foreign-decided, and that was FALSE: all of them read
+`NATIVE_TDD_STATE_FILE` under this session's own `SID`. Only `autopilot_read_workspace` is
+owner-independent, because a disclosure there would answer "is a
+foreign run holding this tree?" — the existence-oracle property
+`tests/structure/test-plan-payload-fallback.sh` F20/F32/F45c pin for the sibling plan gate. The
+mislabel cost a real gap: a bound chain whose model drifted its envelope against its own record
+exited silently with the ticket unclaimed, which is exactly the `ticket-unclaimed` strand this
+feature exists to end.
+
+**Say "the workspace-holder read ANSWERING rc 0", not "that read", and state BOTH silent
+classes plus the one arm outside both — a partition that omits a member reads as a guarantee and
+is not one.** A second draft of this section said the workspace read "alone stays silent" while
+three own-decided exits below it still exited bare, which is the same overstatement one clause
+narrower. The silent set is exactly TWO: (1) `autopilot_read_workspace` answering rc 0, the
+foreign-state question — its FAILURE arm is NOT in the class and discloses, so that the chain
+does not strand; and (2) the ticket claim and every exit below it. **A THIRD bare `exit 0`
+exists and belongs to neither class**: the `else` arm of the standalone/bound split, for a
+`PROMPT_AUTOPILOT_KIND` the parse above cannot emit. It is unreachable by construction and is
+named in the hook's own comment rather than omitted, because a reader counting `exit 0` finds it.
+
+**TWO remedies, selected by the caller, and one for every cause is worse than none.** The
+re-spawn recipe is correct only where the PROMPT was refused. Five gates refuse on DURABLE RUN
+STATE, and there a fresh ticket plus a re-spawn reproduces byte-identical inputs to the same
+gate — an UNBOUNDED loop, because this hook never blocks and the Stop cap therefore never
+arbitrates it, while the rotation strands any spawn still in flight. Those five pass `runstate`
+and receive a remedy that forbids both actions and points at `--autopilot-status`. The re-spawn
+remedy also states the reviewer AGENT's rule, not this hook's: first line the marker, SECOND
+line the ticket. Under-specifying there is worst at exactly this surface, whose audience has
+just produced a malformed header — a prompt that satisfies the hook but not the agent records
+the round and throws the fan-out away.
+
+The ticket claim is the second, and its justification is WEAKER than the silence — record
+it that way. The common cause is a concurrent delivery that already recorded the round, and
+`S13` in `tests/structure/test-post-review-tdd-scope.sh` counts routed outputs across 20
+parallel deliveries and requires exactly one winner, so disclosing there would make every loser
+look like a winner. But `tdd_consume_review_ticket_context` also returns 1 on a ticket-shape
+refusal, a missing `node`, and any `_tdd_locked_run` failure; those leave the chain stranded
+with nothing reported. That is a KNOWN GAP, not a proof — closing it needs the claim to
+distinguish "someone else took it" from "it could not be taken". Below the claim the ticket is
+already CONSUMED, so a silent exit there does not leave the chain in the `ticket-unclaimed`
+state this seam is about — which is why the class ends at the claim rather than at the file.
+**The ticket value is never echoed** — it is a capability token.
+
+**NO APOSTROPHE MAY APPEAR INSIDE A `node -e '...'` PROGRAM, and this file's own history is the
+argument.** A bash single-quoted string ends at the FIRST apostrophe, so one inside the JS —
+including inside a `//` comment, which is exactly where nobody looks — truncates the program.
+`bash -n` still passes, because the remainder re-quotes into valid shell; the assignment lands
+EMPTY and the feature is silently gone. A comment reading `this repo's own test files` disabled
+the consume-intent probe of this hook OUTRIGHT for a full review round, through five reviewers
+and a green `bash -n`; only a behavioural case caught it, and only because the probe's absence
+changed a decline. `S18` in `tests/structure/test-post-review-tdd-scope.sh` guards every such program under
+`hooks/` with THREE tests, and a parse check alone would not have been enough: a truncation
+whose prefix happens to be complete JavaScript compiles clean and ships dead, which the
+historical instance avoided only because its apostrophe sat inside two unclosed blocks. So it
+(a) compiles the slice with `new vm.Script`, (b) refuses a WORD CHARACTER immediately after the
+closing quote — after a real closing quote the shell continues with a redirect, a pipe, a paren,
+an operator or a newline — and (c) refuses a slice whose last line is a `//` comment, the shape
+the observed defect had. Its floor is close to the measured population rather than a round
+number well below it, because a regression that stopped descending into `hooks/lib/` would
+otherwise still report a clean scan over a fraction of the tree. Scope bound, stated rather than
+implied: it walks `hooks/**/*.sh` only, so `skills/*/scripts/` and `tests/` carriers are outside
+it. It is deliberately TREE-WIDE: a failure there can name a file that suite
+is not otherwise about, and the remedy is the apostrophe in the file the message names, never
+this suite. It carries a scanned-count floor, because a scanner that finds nothing and a
+scanner that ran over nothing report identically.
+
+**`emit_post_context` is defined at the TOP of the file on purpose.** It used to sit beside its
+three other call sites near the end; `decline` runs long before them, and a bash function must
+be defined before the CALL, not before another function that names it. Moving it back down
+makes every disclosure a silent no-op with every check green.
+
+**Coupled sites that move together.** The `REVIEW-TICKET: ` prefix literal is a GREP, not a
+list — an enumeration here was written once and undercounted its test carriers roughly
+threefold on the day it landed, which is the same failure this file records for
+`zensu:code-reviewer` and `scv1_`. **Before changing that literal, run
+`grep -rn 'REVIEW-TICKET: ' hooks/ skills/ agents/ docs/ tests/ evals/ CLAUDE.md` and change
+every site.** `CLAUDE.md` is on that list because it is itself a carrier — the instruction you
+are reading is one of the matches, exactly as §"Gate-Disable Prefixes" and §"Host-Refused
+Reviewer Spawn" record for their own literals.
+`evals/` is in that list because it carries the literal in ten files and an earlier spelling of
+this instruction omitted it — an eval that embeds a retired spelling grades a directive no
+session receives, exactly as `Z19b` records for the zen-mode carriers. Two
+facts a grep cannot supply: `agents/code-reviewer.md` selects its consume MODE on that literal
+plus the fan-out marker, and `docs/session-control.md` carries it inside a Workflow example.
+Then: the envelope's three line prefixes and their two regexes, plus the rule that
+bound-vs-standalone is decided by the DURABLE STATE and never by counting those prefixes in the
+prompt — deciding it from the prompt is what let one quoted literal refuse a standalone chain.
+
+**The arming predicate is not a duplicate of the claim's validator, and calling it one gets the
+failure direction backwards.** It MIRRORS the conjuncts `_tdd_consume_review_ticket_critical`
+and `_tdd_review_ticket_shape_ok` apply, and it must keep mirroring them: a predicate WEAKER
+than the claim arms a disclosure whose remedy the claim then refuses, so the model re-spawns
+correctly and is stranded anyway. **The requirement is UNPINNED, and calling `S11a` its bite was
+wrong.** That case (in `tests/structure/test-post-review-tdd-scope.sh` — name the suite, the id is
+not unique across this tree) deletes `vanilla` and asserts silence, but with the
+`typeof s.vanilla === "boolean"` conjunct removed from the pre-read the ticket still matches, no
+gate declines, and the only refusal is the CLAIM — which is in the silent class, so the case stays
+green. It is an instance of the shape, not a check that bites. The four `S7g`-`S7j` cases DO bite
+now, each with a same-fixture positive control that the intact document discloses for the identical
+prompt; without that control an absence proved nothing, because `break_state_field` rewrites the
+whole document and a hook that never disclosed at all would have satisfied every one of them. The
+quiet direction is still the OTHER one, and it is not the one to guard against.
+
+**Both `INNER_REVIEW_HEADERS` variants in `hooks/stop-chain-enforcer.sh` restate this contract
+to the model** — the standalone and the bound spelling — and they must move in lockstep, the
+same rule that file's own section states for every paired directive. `T60` in
+`tests/structure/test-stop-enforcer-self-review-routing.sh` derives the variant count from the
+source and requires the clause on every one, so adding a third variant fails there rather than
+shipping a directive that still teaches the retired positional rule.
+
+**A THIRD hand-copy family lives in this hook and neither roster named it:** the durable run
+record's own vocabulary, parsed inline in `node -e`. `["DONE", "CANCELLED"]` is a copy of
+`TERMINAL` in `hooks/lib/zensu-autopilot-state.sh`, which sits beside a SECOND set,
+`STOP_TERMINAL`, that also holds `BLOCKED` — so the copy silently picks one of two, and a
+`BLOCKED` outer run currently receives the still-live remedy. `ownerSessionId` and `stage` are
+read by name here too. The durable end state is for the library to answer "is this run terminal
+for an unbound claim" rather than have the consumer re-decide it. This hook also adds two
+carriers to the `scv1_` grep family §"Foreign-Chain Row" governs, both spelled
+`SID.slice("scv1_".length)`.
+
+Operator-facing accounts: the `post-review-tdd-delegate.sh` row in `docs/configuration.md`,
+§"What binds a reviewer completion to the chain" in `docs/tdd-manager-workflow.md`,
+`agents/code-reviewer.md`'s own consume-mode paragraph, and `skills/tdd/SKILL.md` Phase 6 step 5
+— whose content-matching clause is UNPINNED: the only check over that file
+(`tests/structure/test-tdd-skill-review-fanout.sh` F10a) greps the header SPELLING, not the
+clause. That step deliberately states the header slip as a COST rather than a convention,
+because `agents/code-reviewer.md` selects consume mode positionally and stays stricter than this
+hook: a slip no longer strands the chain, but the reviewer then re-reviews from scratch and the
+round's whole fan-out is thrown away.
+`tests/structure/test-post-review-tdd-scope.sh` pins the ticket match, the disclosure and every
+byte-stable no-op; `tests/structure/test-post-review-self-review-handoff.sh` pins the envelope
+rules and the position-free acceptance; `tests/structure/test-tdd-skill-review-fanout.sh` F10a
+pins the reviewer agent's own consume-mode contract;
+`tests/structure/test-stop-enforcer-self-review-routing.sh` `T60` pins the Stop directive.
+
+**Version: `patch`.** Walked against §"Runtime Lineage" entry by entry: no context-record or
+workflow-state schema field, no strict key set, no hook added, removed or renamed and no
+matcher changed, no new config key, no attestation change. The hook's only output is
+`additionalContext` — the ADVISORY shape the hook-inventory exemption names — and it returns
+no `permissionDecision` in either direction.
+
+**An ownership comparison in the standalone outer-run arm was ADDED and then DELETED, and the
+retraction is recorded because the reasoning that produced it was wrong twice.** `rc 0` from
+`autopilot_read_active` ALREADY proves ownership: the `read-active` worker in
+`hooks/lib/zensu-autopilot-state.sh` runs `if (state.ownerSessionId !== expectedOwnerSessionId)
+fail(2, ...)` before its only `process.exit(0)`, and `readRunInventory` additionally skips
+records it can prove belong to another owner. A comparison in the consumer was therefore dead
+code whose only reachable effect would have been a THIRD silent class on a branch the producer
+cannot reach. The measurement that seemed to contradict this was a FIXTURE defect, not a
+product one: `test-post-review-self-review-handoff.sh` P15 derived its "foreign" owner key from
+the SAME raw session id the case binds, and `sessionKey` is a pure function of that string, so
+the case was a byte-for-byte duplicate of the own-owner one. Its sibling `corrupt-pointer`
+corrupted `autopilot-active.json`, the LEGACY pointer that is read only when the owner-keyed one
+is absent — which `begin` had just written — so it duplicated the same case again. Both are
+fixed, and P15 now asserts per-case texts. Do not reintroduce the comparison from an older
+reading of this paragraph.
+
+**Known gap, NARROWED DELIBERATELY and named rather than hidden: a prompt that misses BOTH
+signals declines silently.** Marker not on line 1 AND a ticket that is not the outstanding one
+leaves the chain exactly where this feature found it — unclaimed ticket, nothing on any channel.
+It is a real hole in AC-006, and it is the price of closing the security one: an any-line marker
+test arms the disclosure from quoted text, and dropping the intent gate entirely lets any
+chainless `zensu:code-reviewer` completion be handed a remedy that rotates a live ticket. The
+direction was chosen deliberately — a lost diagnostic beats a rotated ticket — and the shape
+that would close both needs a signal a quotation cannot forge which also survives a decorated
+marker, which the workflow document does not currently carry.
+
+**Known gaps, accepted and named:** the hook now reads the workflow document one step earlier
+than it used to, so a completion that previously exited at a prompt gate now performs one
+extra read — no mutation, and `S1` still proves no state file is created for an unrelated
+agent, but a port should not assume the old ordering. The disclosure is UNRATED and repeats on
+every qualifying delivery; nothing latches it, the same cost §"Implementing-Phase Turn Counter"
+records for its own stderr notice. And `/zensu:doctor` still reports `ticket-unclaimed` only as
+a chain shape with its `NEXT_COMMAND`; it carries no row saying a completion was declined, so
+the disclosure is visible to the MODEL and not to the operator.
+
+**Port-relevant.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` carry the same delegate
+against different harnesses and were NOT included in this change. A port owns the host half —
+which payload field carries the prompt and the session id, and whether its harness even fires a
+PostToolUse for an agent completion — plus the decision to disclose at all, which is only sound
+on a host whose `additionalContext` reaches the model that must retry.
+
 ## Host-Refused Reviewer Spawn (`hooks/lib/reviewer-spawn-denial-v1.js`)
 
 The Stop chain-enforcer demands a `zensu:code-reviewer` spawn. When the HOST
@@ -3870,15 +4252,28 @@ Ten things are coupled and must move together:
   degrades one row, while a top-level require would take the whole report down.
   `DENIAL_RULE` in `stop-chain-enforcer.sh` carries the same identity again — and so
   do seven further files. **Do not treat any enumeration of them as complete.** The
-  literal lives in TEN files under `hooks/` (34 matching lines, re-measured 2026-08-31
-  after this branch merged `main`, which is exactly the occasion the note below warns about
-  — the two branches carried different counts and the merged tree has neither; `grep -rc … | awk` summed — and the grep instruction below is itself one of them,
-  which is why the number moves when this very paragraph is edited),
+  literal lives in TEN files under `hooks/` (37 matching lines, `grep -rc … | awk` summed,
+  re-measured 2026-09-02 after §"Ticket-Keyed Review Consumption" added the decline
+  disclosure, then its fix round added the consume-intent probe, then its THIRD round split
+  the one remedy into two — each of the three named the agent in its own text, the same
+  unobvious direction this paragraph warns about, and T47 caught every one of them rather
+  than anything in the edited file. The third is worth naming precisely, because the LINE
+  count moved without the agent being mentioned once more: the single remedy string held the
+  literal twice on ONE line, and splitting it into two `remedy=` branches put the same two
+  mentions on two lines. It was 36 earlier that day, 35 before that and 34 on
+  2026-08-31, re-measured after this branch merged `main`, which is exactly the occasion
+  the note below warns about: the two branches carried different counts and the merged tree
+  had neither. The grep instruction below is itself one of the matches, which is why the
+  number moves when this very paragraph is edited),
   including two functional comparisons a rename breaks silently:
   `post-review-tdd-delegate.sh`'s `SUBAGENT_TYPE` test and `claude-principal-v1.js`'s
   list entry. A census in prose goes stale the next time a site is added, which is why
   the instruction is a GREP and not a list: **before renaming this identity, run
-  `grep -rn 'zensu:code-reviewer' hooks/` and change every site.** ONE pair is
+  `grep -rn 'zensu:code-reviewer' hooks/ skills/ agents/ docs/ evals/ templates/` and change
+  every site.** The CENSUS below is scoped to `hooks/` and stays that way — it is what T47's
+  arithmetic measures — but the RENAME is not: the literal lives in a further eleven files under
+  `skills/`, four under `docs/` and twenty-odd under `evals/`, and an instruction scoped to
+  `hooks/` while saying "every site" sends a maintainer past all of them. ONE pair is
   machine-checked — `test-doctor.sh` P1by pins `REVIEWER_AGENT` against the exporting
   `REVIEWER_SUBAGENT_TYPE`, the pair most likely to diverge because the require is lazy
   and nothing at load time compares them. A SECOND carrier is pinned, and the count

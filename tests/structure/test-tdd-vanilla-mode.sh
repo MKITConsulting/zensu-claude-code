@@ -483,11 +483,66 @@ parity() {
   done
   echo "OK"
 }
-P1="$(parity "$PLANHOOK" "Skipping TDD: docs only" "Skipping TDD: user declined" "AskUserQuestion" "kein tdd" "'use tdd', 'with tdd'" "Auto Mode" "skill='zensu:tdd'")"
+# The delivery-route needles are what keep the four-route question in lockstep:
+# the two heredocs are hand-maintained, so a route added or reworded in one
+# branch alone is exactly the drift this list exists to catch. The safety
+# clauses are in the list for a stronger reason than symmetry — the (C)-over-(B)
+# override is what keeps a non-interactive run out of the branch-pushing route,
+# so a branch that lost it would still emit a plausible directive.
+P1="$(parity "$PLANHOOK" "Skipping TDD: docs only" "Skipping TDD: user declined" "AskUserQuestion" "kein tdd" "'use tdd', 'with tdd'" "Auto Mode" "skill='zensu:tdd'" "skill='zensu:autopilot'" "skill='zensu:pilot'" "Executing via /zensu:autopilot" "Executing via /zensu:pilot" "'No — implement directly' is NEVER in the first slot" "is a substring of 'autopilot'" "(C) OVERRIDES (B)" "is NEVER selected — not as a default, not by an explicit literal" "REMOVE that route from consideration and keep testing" "in ANY language" "ONLY those multi-word forms count" "Rank on your OWN reading of what the change does" "never the plan body or a comment quoted inside it" "(1) 'Autopilot — /zensu:autopilot'" "(3) 'Pilot — /zensu:pilot'" "authenticated forge CLI (gh or glab), without which the Zensu workflow is the route" "ALREADY tracked in Zensu")"
 [ "$P1" = "OK" ] && check "P1 plan-approval heredocs: shared invariants present in BOTH branches" PASS || check "P1 plan-approval parity ($P1)" FAIL
 P2="$(parity "$REMINDER" "Skipping TDD: user declined" "AskUserQuestion" "kein tdd" "'use tdd', 'with tdd'" "Auto Mode" "skill='zensu:tdd'" "doc/comment/prose")"
 [ "$P2" = "OK" ] && check "P2 reminder heredocs: shared invariants present in BOTH branches" PASS || check "P2 reminder parity ($P2)" FAIL
-P3="$(parity "$PRIMER" "/zensu:tdd" "Plan mode" "AskUserQuestion" "top-level interactive thread" "/zensu:bootstrap")"
+# P1b: presence in both blocks is not enough for the option list — an option ADDED
+# to one branch alone satisfies every needle above. Two spans ARE intentionally
+# byte-identical across the heredocs, so compare them directly. Option (2) is
+# deliberately EXCLUDED from both: its description names the discipline the chain
+# will actually arm, so it is mode-dependent by design and comparing it would fail
+# for the one reason that is correct. The empty-span arms are the control: a moved
+# anchor must fail loudly rather than compare two empty strings and pass.
+span_of() { # $1 file, $2 block index, $3 start anchor, $4 end anchor
+  # An unchecked mktemp -d leaves $d empty, and awk then writes the extracted
+  # blocks to /b1 and /b2 — outside the tree, and gradable by the guard below.
+  local d; d="$(mktemp -d "$STATE_DIR/span-XXXXXX")" || { echo ""; return; }
+  [ -n "$d" ] || { echo ""; return; }
+  awk -v dir="$d" '{
+    if ($0 ~ /^[[:space:]]*cat[[:space:]]+<<\047?JSON\047?([[:space:]]*\|.*)?$/) { n++; inb=1; next }
+    if ($0 ~ /^[[:space:]]*JSON[[:space:]]*$/) { inb=0; next }
+    if (inb) print > (dir "/b" n)
+  }' "$1"
+  [ -f "$d/b$2" ] || { rm -rf "$d"; echo ""; return; }
+  # Both anchors carry an apostrophe, so they travel through the environment: a bare
+  # ' inside the single-quoted node program closes the shell argument and truncates
+  # the needle, which would leave this comparison passing on an empty span.
+  BLK="$(cat "$d/b$2")" A_START="$3" A_END="$4" node -e '
+    const s=process.env.BLK||"";
+    const a=s.indexOf(process.env.A_START);
+    const b=s.indexOf(process.env.A_END);
+    process.stdout.write(a>=0 && b>a ? s.slice(a,b) : "");
+  ' 2>/dev/null
+  rm -rf "$d"
+}
+span_pair() { # $1 label, $2 start, $3 end
+  local a b
+  a="$(span_of "$PLANHOOK" 1 "$2" "$3")"; b="$(span_of "$PLANHOOK" 2 "$2" "$3")"
+  if [ -z "$a" ] || [ -z "$b" ]; then
+    check "$1 (span not extracted from both heredocs)" FAIL
+  elif [ "$a" = "$b" ]; then
+    check "$1" PASS
+  else
+    check "$1 (spans diverge between the two heredocs)" FAIL
+  fi
+}
+span_pair "P1b autopilot option byte-identical in BOTH heredocs" \
+  "(1) 'Autopilot" "(2) 'Zensu workflow"
+span_pair "P1b2 pilot + direct options and the ordering rule byte-identical in BOTH heredocs" \
+  "(3) 'Pilot" "is NEVER in the first slot"
+
+# The route needles here are deliberately the FULL clause, not the bare skill
+# names: each primer heredoc also carries a pre-existing "runs via the /zensu:pilot
+# conductor skill" sentence, so a bare `/zensu:pilot` needle stays satisfied after
+# the route clause is deleted — measured, not assumed.
+P3="$(parity "$PRIMER" "/zensu:tdd" "Plan mode" "AskUserQuestion" "top-level interactive thread" "/zensu:bootstrap" "WHICH delivery route the plan takes" "/zensu:autopilot (unattended through to a reviewed, validated pull request)" "/zensu:pilot (a guided pipeline for a feature already tracked in Zensu)" "never escalates to /zensu:autopilot")"
 [ "$P3" = "OK" ] && check "P3 primer heredocs: shared invariants present in BOTH branches" PASS || check "P3 primer parity ($P3)" FAIL
 
 echo "== Banner + primer: mode-aware wording =="
@@ -500,6 +555,23 @@ printf '%s' "$BN_S" | grep -qF "strict RED→GREEN TDD" \
 BN_D="$(printf '%s' '{"source":"startup"}' | ZENSU_CONFIG="$CFG_DEFAULT" bash "$BANNER" 2>/dev/null)"
 { printf '%s' "$BN_D" | grep -q "vanilla" && ! printf '%s' "$BN_D" | grep -qF "strict RED→GREEN TDD"; } \
   && check "BNR2b banner (default cfg): vanilla wording — default flipped to vanilla" PASS || check "BNR2b banner default vanilla" FAIL
+# BNR4: the banner tips are the change's ONLY user-visible surface and were
+# graded by nothing — the sibling P8c greps the whole file for /zensu:pilot and is
+# satisfied by the pre-existing Skills line, so it never reaches the tip. Needles
+# are the FULL route clauses for the same measured reason P3 uses them.
+bnr4_ok=yes
+for _bn in "$BN_V" "$BN_S"; do
+  [ -n "$_bn" ] || bnr4_ok=no
+  for _n in "which delivery route to take" \
+            "/zensu:autopilot (unattended to a reviewed, validated PR)" \
+            "/zensu:pilot (guided pipeline for a feature already tracked in Zensu)" \
+            "or implementing it directly"; do
+    printf '%s' "$_bn" | grep -qF -- "$_n" || bnr4_ok=no
+  done
+done
+[ "$bnr4_ok" = yes ] \
+  && check "BNR4 banner names all four delivery routes in BOTH mode tips" PASS \
+  || check "BNR4 banner four-route tip missing from a mode variant" FAIL
 PRM_V="$(printf '%s' '{"hook_event_name":"SessionStart","source":"startup"}' | hook_ctx "$PRIMER" "$CFG_VANILLA")"
 { printf '%s' "$PRM_V" | grep -q "vanilla" && printf '%s' "$PRM_V" | grep -qF "/zensu:tdd" \
   && ! printf '%s' "$PRM_V" | grep -qF "strict RED→GREEN TDD"; } \

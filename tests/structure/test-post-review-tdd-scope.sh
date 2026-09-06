@@ -196,7 +196,9 @@ AFTER="$(digest "$S5_STATE")"
   && check "S5 codeReviewDone reviewer completion is a byte-stable no-op" PASS \
   || check "S5 codeReviewDone reviewer completion is a byte-stable no-op" FAIL
 
-# A live chain still requires the exact consume-mode marker on the first line.
+# What binds a completion is the chain's OUTSTANDING TICKET, not a line
+# position. These two chains never issued one, so no prompt can claim them and
+# there is nothing to disclose either — the byte-stable no-op is unchanged.
 start_session no-marker
 S6="$STARTED_SESSION_KEY"
 log --tdd-begin --session "$S6"
@@ -222,9 +224,12 @@ AFTER="$(digest "$S7_STATE")"
   && check "S7 marker appearing after the first line is rejected byte-stably" PASS \
   || check "S7 marker appearing after the first line is rejected byte-stably" FAIL
 
-# Both header lines are positional contracts. An otherwise armed ticket stays
-# unconsumed when the second line is absent, displaced, malformed, or the first
-# line contains even a small decoration.
+# A prompt that names no outstanding ticket still cannot claim the chain — but
+# the decline is no longer SILENT. The reviewer ran and the round was never
+# recorded, which is exactly the state that used to strand a chain at shape
+# `ticket-unclaimed` with no cause reported anywhere, so the hook discloses it
+# on the model-facing channel. The ticket value is a capability token and must
+# never appear in that text.
 start_session missing-ticket
 S7A="$STARTED_SESSION_KEY"
 log --tdd-begin --session "$S7A"
@@ -234,42 +239,66 @@ S7A_STATE="$(state "$S7A")"
 BEFORE="$(digest "$S7A_STATE")"
 OUT="$(run_hook "$S7A" zensu:code-reviewer "$MARKER")"
 AFTER="$(digest "$S7A_STATE")"
-[ -n "$MISSING_TICKET" ] && [ -z "$OUT" ] && [ "$AFTER" = "$BEFORE" ] \
+# The TEXT is asserted, not merely the envelope: `emit_post_context` always
+# emits the `hookSpecificOutput` key, so a grep for that alone passes over an
+# EMPTY message and pins nothing about the remedy the model actually reads.
+[ -n "$MISSING_TICKET" ] && [ "$AFTER" = "$BEFORE" ] \
   && [ "$(ticket_consumed "$S7A")" = "false" ] \
-  && check "S7a exact first line without the required second line is rejected" PASS \
-  || check "S7a exact first line without the required second line is rejected" FAIL
+  && printf '%s' "$OUT" | grep -q 'hookSpecificOutput' \
+  && printf '%s' "$OUT" | grep -qF -- "was NOT recorded against this session's review chain" \
+  && printf '%s' "$OUT" | grep -qF -- "naming this chain's outstanding ticket" \
+  && check "S7a a prompt naming no outstanding ticket is refused, and discloses" PASS \
+  || check "S7a a prompt naming no outstanding ticket is refused, and discloses" FAIL
 
+# The remedy must be RUNNABLE and must name the marker the reviewer agent keys
+# its own consume mode on. A bare `zensu-log.sh` is a name the model resolves
+# against whatever repository it is standing in.
+printf '%s' "$OUT" | grep -qF -- "bash " \
+  && printf '%s' "$OUT" | grep -qF -- "zensu-log.sh --review-ticket" \
+  && printf '%s' "$OUT" | grep -qF -- "PRE-MERGED FINDINGS (fan-out)" \
+  && check "S7a2 the disclosure carries a runnable ticket command and names the marker" PASS \
+  || check "S7a2 the disclosure carries a runnable ticket command and names the marker" FAIL
+
+# Conjoined with a POSITIVE anchor on the same capture: a bare `!` over an empty
+# string reports PASS while testing nothing, so this would go green precisely
+# when the disclosure regressed to silence.
+printf '%s' "$OUT" | grep -q 'hookSpecificOutput' \
+  && ! printf '%s' "$OUT" | grep -qF -- "$MISSING_TICKET" \
+  && check "S7a1 the disclosure never echoes the ticket value" PASS \
+  || check "S7a1 the disclosure never echoes the ticket value" FAIL
+
+# The ticket binds by CONTENT, so its line position is irrelevant. Both of the
+# next two prompts were refused by the previous positional contract and now
+# consume: the ticket on the third line, and a decorated first-line marker.
 start_session late-ticket
 S7B="$STARTED_SESSION_KEY"
 log --tdd-begin --session "$S7B"
 log --tdd-complete --session "$S7B"
 LATE_TICKET="$(issue_ticket "$S7B")"
-S7B_STATE="$(state "$S7B")"
-BEFORE="$(digest "$S7B_STATE")"
 OUT="$(run_hook "$S7B" zensu:code-reviewer "$MARKER
 merged findings
 REVIEW-TICKET: $LATE_TICKET")"
-AFTER="$(digest "$S7B_STATE")"
-[ -n "$LATE_TICKET" ] && [ -z "$OUT" ] && [ "$AFTER" = "$BEFORE" ] \
-  && [ "$(ticket_consumed "$S7B")" = "false" ] \
-  && check "S7b review ticket on the third line is rejected" PASS \
-  || check "S7b review ticket on the third line is rejected" FAIL
+[ -n "$LATE_TICKET" ] && printf '%s' "$OUT" | grep -q 'hookSpecificOutput' \
+  && [ "$(review_round "$S7B")" = "1" ] \
+  && [ "$(ticket_consumed "$S7B")" = "true" ] \
+  && check "S7b review ticket below the header block still consumes" PASS \
+  || check "S7b review ticket below the header block still consumes" FAIL
 
 start_session decorated-marker
 S7C="$STARTED_SESSION_KEY"
 log --tdd-begin --session "$S7C"
 log --tdd-complete --session "$S7C"
 DECORATED_TICKET="$(issue_ticket "$S7C")"
-S7C_STATE="$(state "$S7C")"
-BEFORE="$(digest "$S7C_STATE")"
 OUT="$(run_hook "$S7C" zensu:code-reviewer "$MARKER extra
 REVIEW-TICKET: $DECORATED_TICKET")"
-AFTER="$(digest "$S7C_STATE")"
-[ -n "$DECORATED_TICKET" ] && [ -z "$OUT" ] && [ "$AFTER" = "$BEFORE" ] \
-  && [ "$(ticket_consumed "$S7C")" = "false" ] \
-  && check "S7c decorated first-line marker is rejected" PASS \
-  || check "S7c decorated first-line marker is rejected" FAIL
+[ -n "$DECORATED_TICKET" ] && printf '%s' "$OUT" | grep -q 'hookSpecificOutput' \
+  && [ "$(review_round "$S7C")" = "1" ] \
+  && [ "$(ticket_consumed "$S7C")" = "true" ] \
+  && check "S7c a decorated fan-out marker no longer blocks the consume" PASS \
+  || check "S7c a decorated fan-out marker no longer blocks the consume" FAIL
 
+# A ticket line whose VALUE is not the outstanding ticket is still refused, and
+# discloses: only the exact one-shot ticket can ever claim the chain.
 start_session malformed-ticket
 S7D="$STARTED_SESSION_KEY"
 log --tdd-begin --session "$S7D"
@@ -280,10 +309,134 @@ BEFORE="$(digest "$S7D_STATE")"
 OUT="$(run_hook "$S7D" zensu:code-reviewer "$MARKER
 REVIEW-TICKET: $MALFORMED_TICKET extra")"
 AFTER="$(digest "$S7D_STATE")"
-[ -n "$MALFORMED_TICKET" ] && [ -z "$OUT" ] && [ "$AFTER" = "$BEFORE" ] \
+[ -n "$MALFORMED_TICKET" ] && [ "$AFTER" = "$BEFORE" ] \
   && [ "$(ticket_consumed "$S7D")" = "false" ] \
-  && check "S7d malformed second-line ticket is rejected" PASS \
-  || check "S7d malformed second-line ticket is rejected" FAIL
+  && printf '%s' "$OUT" | grep -qF -- "was NOT recorded against this session's review chain" \
+  && check "S7d a ticket value that is not the outstanding one is refused, and discloses" PASS \
+  || check "S7d a ticket value that is not the outstanding one is refused, and discloses" FAIL
+
+# The REVIEW PACKET legitimately quotes the `REVIEW-TICKET: ` literal whenever
+# the reviewer is reviewing this repository, so a uniqueness rule would refuse a
+# correct consume. A second, stale ticket line must not block the claim.
+start_session quoted-ticket
+S7E="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S7E"
+log --tdd-complete --session "$S7E"
+QUOTED_TICKET="$(issue_ticket "$S7E")"
+OUT="$(run_hook "$S7E" zensu:code-reviewer "$MARKER
+REVIEW-TICKET: $QUOTED_TICKET
+merged findings
+REVIEW-TICKET: rt_quoted_from_a_diff_hunk")"
+[ -n "$QUOTED_TICKET" ] && printf '%s' "$OUT" | grep -q 'hookSpecificOutput' \
+  && [ "$(review_round "$S7E")" = "1" ] \
+  && [ "$(ticket_consumed "$S7E")" = "true" ] \
+  && check "S7e a quoted second ticket line does not block the real consume" PASS \
+  || check "S7e a quoted second ticket line does not block the real consume" FAIL
+
+# A well-formed line carrying a ticket this chain never issued is refused.
+start_session foreign-ticket
+S7F="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S7F"
+log --tdd-complete --session "$S7F"
+FOREIGN_OUTSTANDING="$(issue_ticket "$S7F")"
+S7F_STATE="$(state "$S7F")"
+BEFORE="$(digest "$S7F_STATE")"
+OUT="$(run_hook "$S7F" zensu:code-reviewer "$MARKER
+REVIEW-TICKET: rt_a_ticket_this_chain_never_issued")"
+AFTER="$(digest "$S7F_STATE")"
+[ -n "$FOREIGN_OUTSTANDING" ] && [ "$AFTER" = "$BEFORE" ] \
+  && [ "$(ticket_consumed "$S7F")" = "false" ] \
+  && printf '%s' "$OUT" | grep -qF -- "was NOT recorded against this session's review chain" \
+  && check "S7f a ticket this chain never issued is refused, and discloses" PASS \
+  || check "S7f a ticket this chain never issued is refused, and discloses" FAIL
+
+# --- the DISCLOSURE's arming predicate, conjunct by conjunct ---
+# Every case above pairs a wrong/absent ticket with a chain that is otherwise
+# live, so only `reviewTicket !== ""` was ever discriminated: the other
+# conjuncts could all be deleted with the suite green. Each case below breaks
+# exactly ONE of them and delivers a ticket the prompt cannot match, so a
+# disclosure would prove the conjunct is gone.
+# Each arming case below asserts an ABSENCE, and an absence proves nothing on its
+# own: a hook that never disclosed at all would satisfy every one of them, and
+# `break_state_field` rewrites the whole document, so silence was explained by
+# (broken conjunct OR rewrite) with nothing separating the two. This runs the
+# IDENTICAL non-matching prompt against the intact document first and requires a
+# disclosure, so the case measures the conjunct rather than the rewrite. A
+# decline consumes nothing, so the post-mutation delivery is unaffected.
+arming_control() {
+  local sid="$1"
+  printf '%s' "$(run_hook "$sid" zensu:code-reviewer "$MARKER
+REVIEW-TICKET: rt_not_the_outstanding_one")" | grep -qF -- "was NOT recorded against this session's review chain"
+}
+
+break_state_field() {
+  FILE="$(state "$1")" FIELD="$2" VALUE="$3" node -e '
+    const fs = require("fs");
+    const s = JSON.parse(fs.readFileSync(process.env.FILE, "utf8"));
+    s[process.env.FIELD] = JSON.parse(process.env.VALUE);
+    fs.writeFileSync(process.env.FILE, JSON.stringify(s, null, 2));
+  '
+}
+
+start_session arming-chaindone
+S7G="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S7G"
+log --tdd-complete --session "$S7G"
+S7G_TICKET="$(issue_ticket "$S7G")"
+arming_control "${S7G}" && S7G_CONTROL=yes || S7G_CONTROL=no
+break_state_field "$S7G" chainDone true
+OUT="$(run_hook "$S7G" zensu:code-reviewer "$MARKER
+REVIEW-TICKET: rt_not_the_outstanding_one")"
+[ -n "$S7G_TICKET" ] && [ "$S7G_CONTROL" = yes ] && [ -z "$OUT" ] \
+  && check "S7g chainDone true disarms the disclosure (control: intact document discloses)" PASS \
+  || check "S7g chainDone true disarms the disclosure (control=$S7G_CONTROL)" FAIL
+
+start_session arming-reviewdone
+S7H="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S7H"
+log --tdd-complete --session "$S7H"
+S7H_TICKET="$(issue_ticket "$S7H")"
+arming_control "${S7H}" && S7H_CONTROL=yes || S7H_CONTROL=no
+break_state_field "$S7H" codeReviewDone true
+OUT="$(run_hook "$S7H" zensu:code-reviewer "$MARKER
+REVIEW-TICKET: rt_not_the_outstanding_one")"
+[ -n "$S7H_TICKET" ] && [ "$S7H_CONTROL" = yes ] && [ -z "$OUT" ] \
+  && check "S7h codeReviewDone true disarms the disclosure (control: intact document discloses)" PASS \
+  || check "S7h codeReviewDone true disarms the disclosure (control=$S7H_CONTROL)" FAIL
+
+# The pre-read mirrors the claim's own conjuncts. A document the claim would
+# refuse must not arm a disclosure whose remedy the claim then refuses too.
+start_session arming-vanilla
+S7I="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S7I"
+log --tdd-complete --session "$S7I"
+S7I_TICKET="$(issue_ticket "$S7I")"
+arming_control "$S7I" && S7I_CONTROL=yes || S7I_CONTROL=no
+FILE="$(state "$S7I")" node -e '
+  const fs = require("fs");
+  const s = JSON.parse(fs.readFileSync(process.env.FILE, "utf8"));
+  delete s.vanilla;
+  fs.writeFileSync(process.env.FILE, JSON.stringify(s, null, 2));
+'
+OUT="$(run_hook "$S7I" zensu:code-reviewer "$MARKER
+REVIEW-TICKET: rt_not_the_outstanding_one")"
+[ -n "$S7I_TICKET" ] && [ "$S7I_CONTROL" = yes ] && [ -z "$OUT" ] \
+  && check "S7i a document the claim would refuse disarms the disclosure (control: intact document discloses)" PASS \
+  || check "S7i a document the claim would refuse disarms the disclosure (control=$S7I_CONTROL)" FAIL
+
+# A reviewer from a chainless flow carries neither the marker nor a ticket line.
+# It already could not consume; it must not be hijacked with a re-spawn remedy.
+start_session arming-nointent
+S7J="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S7J"
+log --tdd-complete --session "$S7J"
+S7J_TICKET="$(issue_ticket "$S7J")"
+arming_control "$S7J" && S7J_CONTROL=yes || S7J_CONTROL=no
+OUT="$(run_hook "$S7J" zensu:code-reviewer 'Review the diff for the /zensu:cover flow.')"
+[ -n "$S7J_TICKET" ] && [ "$S7J_CONTROL" = yes ] && [ -z "$OUT" ] \
+  && [ "$(ticket_consumed "$S7J")" = "false" ] \
+  && check "S7j a reviewer with no consume intent is not hijacked by the disclosure (control: the same chain discloses for an intent-bearing prompt)" PASS \
+  || check "S7j a reviewer with no consume intent is not hijacked by the disclosure (control=$S7J_CONTROL)" FAIL
 
 # Fully armed and correctly marked is the only routed path.
 start_session valid
@@ -309,15 +462,23 @@ AFTER="$(digest "$S8_STATE")"
   || check "S8a duplicate completion is a byte-stable no-op" FAIL
 
 # Re-arming the same Claude session invalidates every ticket from the old chain.
+# The stale delivery is still refused; it now discloses, because the re-armed
+# chain does hold an unclaimed ticket and the model has to be told which one.
 log --tdd-begin --session "$S8"
 log --tdd-complete --session "$S8"
 NEW_VALID_TICKET="$(issue_ticket "$S8")"
+S8B_STATE="$(state "$S8")"
+BEFORE="$(digest "$S8B_STATE")"
 OUT_OLD="$(run_hook "$S8" zensu:code-reviewer "$VALID_PROMPT")"
+AFTER="$(digest "$S8B_STATE")"
 OUT_NEW="$(run_hook "$S8" zensu:code-reviewer "$(review_prompt "$NEW_VALID_TICKET" 'new chain')")"
-[ -z "$OUT_OLD" ] && printf '%s' "$OUT_NEW" | grep -q 'hookSpecificOutput' \
+[ "$AFTER" = "$BEFORE" ] \
+  && printf '%s' "$OUT_OLD" | grep -qF -- "was NOT recorded against this session's review chain" \
+  && ! printf '%s' "$OUT_OLD" | grep -qF -- "$NEW_VALID_TICKET" \
+  && printf '%s' "$OUT_NEW" | grep -q 'hookSpecificOutput' \
   && [ "$(review_round "$S8")" = "1" ] \
-  && check "S8b late completion from a prior chain cannot mutate the re-armed chain" PASS \
-  || check "S8b late completion from a prior chain cannot mutate the re-armed chain" FAIL
+  && check "S8b a prior chain's ticket cannot mutate the re-armed chain, and discloses" PASS \
+  || check "S8b a prior chain's ticket cannot mutate the re-armed chain, and discloses" FAIL
 
 # State remains session-local even when another canonical baseline becomes current.
 start_session session-a
@@ -518,6 +679,81 @@ if [ "$CLOSE_PASS_HITS" -eq 2 ] \
   check "S17 both CLOSE_PASS arms carry the convergence full-suite instruction" PASS
 else
   check "S17 both CLOSE_PASS arms carry the convergence full-suite instruction (hits: $CLOSE_PASS_HITS)" FAIL
+fi
+
+# S18 — every `node -e '...'` program under `hooks/` must be valid JavaScript.
+# A bash single-quoted string ends at the FIRST apostrophe, so one inside the JS —
+# including inside a `//` comment, which is where it is invisible — silently
+# truncates the program. `bash -n` still passes, because the remainder re-quotes
+# into valid shell, and the assignment lands EMPTY. That shipped in THIS hook: a
+# comment reading "this repo's own test files" disabled the consume-intent probe
+# outright, and only a behavioural case caught it. The scan is TREE-WIDE on
+# purpose — the defect class is, and 190 programs were otherwise unguarded — so a
+# failure here can name a file this suite is not otherwise about: fix the
+# apostrophe in the file the message names, not this suite.
+S18_OUT="$(SCAN_ROOT="$PLUGIN_DIR" node -e '
+const fs = require("node:fs");
+const path = require("node:path");
+const vm = require("node:vm");
+const root = path.join(process.env.SCAN_ROOT, "hooks");
+const files = [];
+(function walk(d) {
+  for (const e of fs.readdirSync(d, {withFileTypes: true})) {
+    const p = path.join(d, e.name);
+    if (e.isDirectory()) walk(p);
+    else if (e.isFile() && e.name.endsWith(".sh")) files.push(p);
+  }
+})(root);
+const NEEDLE = "node -e " + String.fromCharCode(39);
+let scanned = 0;
+const broken = [];
+for (const f of files) {
+  const src = fs.readFileSync(f, "utf8");
+  let i = 0;
+  while ((i = src.indexOf(NEEDLE, i)) !== -1) {
+    const start = i + NEEDLE.length;
+    const end = src.indexOf(String.fromCharCode(39), start);
+    if (end === -1) break;
+    scanned++;
+    const line = src.slice(0, start).split("\n").length;
+    const rel = path.relative(process.env.SCAN_ROOT, f) + ":" + line;
+    // TWO tests, because a parse check alone is not enough: a truncation whose
+    // prefix happens to be complete JavaScript compiles clean and ships dead.
+    // The structural half is what covers that — after a real closing quote the
+    // shell continues with a redirect, a pipe, a paren, an operator or a
+    // newline, never with a word character, which is exactly what an apostrophe
+    // inside prose leaves behind (`repo` + `s own test files`).
+    try { new vm.Script(src.slice(start, end)); }
+    catch (e) { broken.push(rel + " (does not parse)"); }
+    if (/[A-Za-z0-9_]/.test(src.charAt(end + 1))) {
+      broken.push(rel + " (word character after the closing quote)");
+    }
+    // THIRD test, and the one that targets the observed shape most directly: a
+    // program whose last line is a `//` comment ended inside that comment. A
+    // truncation there is complete JavaScript whenever the apostrophe happens to
+    // sit at brace depth 0, so neither of the two tests above sees it.
+    const lastLine = src.slice(start, end).split("\n").pop().trim();
+    if (lastLine.startsWith("//")) {
+      broken.push(rel + " (program ends inside a line comment)");
+    }
+    i = end + 1;
+  }
+}
+process.stdout.write(scanned + " " + broken.join(","));
+' 2>/dev/null)"
+S18_SCANNED="${S18_OUT%% *}"
+S18_BROKEN="${S18_OUT#* }"
+# A scanner that finds nothing is indistinguishable from a scanner that ran over
+# nothing, so the count is a floor as well as a report.
+case "$S18_SCANNED" in ''|*[!0-9]*) S18_SCANNED=0 ;; esac
+# The floor is close to the measured population (190 on 2026-09-02), not a round
+# number well below it: at 100 a regression that stopped descending into
+# `hooks/lib/` — which holds the large majority of these programs — would still
+# clear the guard and report a clean scan over a fraction of the tree.
+if [ "$S18_SCANNED" -ge 180 ] && [ -z "$S18_BROKEN" ]; then
+  check "S18 every node -e program under hooks/ is valid JS (scanned: $S18_SCANNED)" PASS
+else
+  check "S18 every node -e program under hooks/ is valid JS — an apostrophe truncates the bash single-quoted string (scanned: $S18_SCANNED, broken: ${S18_BROKEN:-none})" FAIL
 fi
 
 echo "----"
