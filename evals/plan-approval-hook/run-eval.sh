@@ -61,7 +61,7 @@ check "T1.3 ExitPlanMode tool succeeded"      "$(contains "$DOC_LOG" "tool=ExitP
 check "T1.4 Escape-hatch path indicated"      "$(contains "$DOC_LOG" "Skipping TDD|escape.?hatch|doc.only|README|CHANGELOG|markdown only|non-executable")"
 check "T1.5 No tdd-manager Agent dispatch"    "$(not_contains "$DOC_LOG" "source=agent:custom:zensu:tdd-manager")"
 
-# ─── Test 2: Code-change plan → ask, then /zensu:tdd on Yes ─────
+# ─── Test 2: Code-change plan → ask the route, then /zensu:tdd on that label ─────
 echo "" | tee -a "$REPORT"
 echo "▸ Test 2: Code-change plan (delegation path)" | tee -a "$REPORT"
 CODE_OUT="$RESULTS_DIR/code-${TIMESTAMP}.out"
@@ -74,6 +74,11 @@ check "T2.1 Plugin loaded hooks.json"        "$(contains "$CODE_LOG" "Loaded hoo
 check "T2.2 Hook fired on approval"           "$(contains "$CODE_LOG" "Hook PostToolUse:ExitPlanMode|provided additionalContext")"
 check "T2.3 ExitPlanMode tool succeeded"      "$(contains "$CODE_LOG" "tool=ExitPlanMode.*outcome=ok")"
 check "T2.4 /zensu:tdd skill execution indicated" "$(contains "$CODE_OUT" "Executing via /zensu:tdd")"
+# Graded on a label the expect script never types, so this measures the rendered
+# question rather than the harness's own send_user trace.
+check "T2.6 the four-route question was actually asked" "$(contains "$CODE_OUT" "implement directly")"
+check "T2.7 no outward-facing route taken" "$(not_contains "$CODE_OUT" "Executing via /zensu:autopilot")"
+check "T2.8 no pilot route taken" "$(not_contains "$CODE_OUT" "Executing via /zensu:pilot")"
 check "T2.5 No doc-only escape-hatch"         "$(grep -v 'additionalContext' "$CODE_LOG" | grep -qiE 'Skipping TDD' && echo FAIL || echo PASS)"
 
 # Reset fixtures + README marker so repeat runs are deterministic.

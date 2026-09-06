@@ -120,7 +120,9 @@ user's call: report the refusal and use `/zensu:autopilot-release`, the guided f
 reports the holding run first and mutates nothing without an explicit yes. Never run the raw
 verb unasked.
 
-This must succeed before `ExitPlanMode`. Append exactly one invisible binding line to the
+This must succeed before `ExitPlanMode`. Strip any pre-existing `<!-- zensu-autopilot:... -->`
+comment out of the incoming description FIRST (see Phase 0.D — appending a second marker makes
+the plan gate refuse the approval as ambiguous), then append exactly one invisible binding line to the
 plan CONTENT you pass to `ExitPlanMode` — the gate matches the marker in the bytes the
 harness hands back (`tool_response.plan`, saved at `tool_response.filePath`), never in a
 file it was not given, so the marker has to travel inside the plan itself:
@@ -309,7 +311,14 @@ exists, else `$ROOT/templates/autopilot-spec.md` under the validated session plu
 gates / validate commands the probe chose, so the user sees exactly what will run) via
 **ExitPlanMode**, and wait for approval. If the probe wrote or would write
 `.zensu/autopilot.yaml`, propose committing it (secret-free, shared) — but **never commit
-without the user's explicit OK**. Immediately before `ExitPlanMode`, create the durable run
+without the user's explicit OK**. **Remove every pre-existing `<!-- zensu-autopilot:... -->` COMMENT from the incoming
+feature description — leaving the rest of each line intact — before appending this run's
+marker.** Strip the comment, never the whole line: the gate's matcher is unanchored, so a
+marker can share a line with real requirement text that must survive. The plan-approval gate now
+offers this route for an ordinary approved plan, and a plan whose earlier run is DONE or
+CANCELLED still carries that run's marker; appending a second one makes the gate refuse
+the approval as `PLAN_MARKER_MISSING_OR_AMBIGUOUS`, which is the single planning gate this
+run cannot get past. Immediately before `ExitPlanMode`, create the durable run
 with `--autopilot-begin` and include its exact `<!-- zensu-autopilot:<RUN_ID> -->` marker in
 the plan content you pass to `ExitPlanMode`. Do not proceed if either operation fails.
 

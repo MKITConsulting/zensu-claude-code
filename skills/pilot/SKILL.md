@@ -65,7 +65,9 @@ Slash form: `/zensu:pilot [<feature>]`.
   then zero questions). Pilot is the opposite trade: a question at every seam.
 - Product planning, bootstrap, or scans — return to the interactive main thread
   and invoke `/zensu:bootstrap` or `/zensu:ghost-scan` there.
-- Ad-hoc coding without a tracked feature — use `/zensu:tdd` directly.
+- Ad-hoc coding without a tracked feature — use `/zensu:tdd` directly. The
+  plan-approval delivery-route question states this prerequisite verbatim in its own
+  option text (`hooks/plan-approved-delegate.sh`, BOTH heredocs); change both together.
 
 ## The loop contract
 

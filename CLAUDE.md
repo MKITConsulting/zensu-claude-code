@@ -21,11 +21,15 @@ artifact the plugin emits.
 — and verbatim citations of those literals in structure-test pins, in
 README/CHANGELOG feature descriptions, and in this carve-out — may contain
 non-English phrases ONLY as match literals for real user input:
-the TDD preference fast-paths (e.g. `'kein tdd'`, `'mit tdd'`, `'tdd bitte'`)
+the TDD-preference AND delivery-route fast-paths (e.g. `'kein tdd'`, `'mit tdd'`,
+`'tdd bitte'`, `'mit autopilot'`, `'mit pilot'`)
 and the generic-action literals that are explicitly NOT a preference
 (e.g. `'mach mal'`, `'los gehts'`, `'jetzt umsetzen'`) in
 `plan-approved-delegate.sh` / `user-prompt-tdd-reminder.sh`. They exist to
-recognize what multilingual users actually type, never as prose. Keep these
+recognize what multilingual users actually type, never as prose. Since the delivery-route and TDD
+arms became INTENT-judged, they now ship as EXAMPLES of real user utterances inside an intent rule
+rather than as a closed match set; the permission and the bound are unchanged — they stay quoted
+specimens, never directive prose. Keep these
 phrase lists in lockstep across every directive variant (strict and vanilla)
 — never edit one variant alone.
 
@@ -1807,7 +1811,8 @@ hand; the release pipeline owns it.
   it used to refuse falls through to the standalone policy instead.** A foreign session that
   approves a plan carrying another run's `<!-- zensu-autopilot:<run> -->` marker no longer
   reaches the owner comparison, because the run is invisible to its owner-scoped read; it is
-  asked the ordinary "run /zensu:tdd?" question. Nothing is mutated — the foreign run is not
+  asked the four-route delivery question, which now carries `/zensu:autopilot` and `/zensu:pilot`
+  beside it (see §"Plan-Approval Delivery Route"). Nothing is mutated — the foreign run is not
   touched and no binding is created — so this is a lost DIAGNOSTIC, not a lost guarantee.
   Restoring it needs the marker before the read, and the marker is only resolved inside the
   payload evaluator (see "Plan-Gate Payload Sources"), which reads fields by name and must
@@ -3802,6 +3807,174 @@ host-neutral half is everything below the resolution: the single `<!-- zensu-aut
 marker, run-id equality, the owner and stage checks that precede every read, and the digest.
 A port that takes only the module gets the field decision; it still owns its own emission and
 its own exit ladder, which stay in `hooks/plan-approved-delegate.sh`.
+
+## Plan-Approval Delivery Route (`hooks/plan-approved-delegate.sh`, standalone branch)
+
+The STANDALONE branch of the plan gate asks ONE `AskUserQuestion` naming four mutually
+exclusive delivery routes — `/zensu:autopilot`, `/zensu:tdd`, `/zensu:pilot`, and implementing
+directly. It replaced a yes/no question about `/zensu:tdd` alone, which left the plugin's other
+two delivery routes invisible at the one moment they are relevant.
+
+**The DURABLE branch is untouched and must stay that way.** A plan carrying a validated
+`<!-- zensu-autopilot:<run> -->` marker still emits `PLAN_APPROVED` with "Do not ask another
+TDD/workflow question": Autopilot has spent its single planning gate by then, and a second
+question there would break that contract.
+
+**Two prerequisites are stated INSIDE the options rather than gating them, and the reason is
+that a hook cannot check either cheaply.** `/zensu:autopilot` owns its own Phase 0, which ends
+in its own `ExitPlanMode`, so choosing it after an approval costs a SECOND approval round for
+the spec, the `AC-###` list and the probed recipe — and it needs an authenticated forge CLI.
+`/zensu:pilot` needs an authenticated `zensu` CLI plus a feature ALREADY tracked in Zensu; its
+own skill sends ad-hoc work to `/zensu:tdd` instead. Both options are offered unconditionally
+and carry their cost in their own description. The ground is NOT that probing is expensive —
+`hooks/session-start-banner.sh` already runs `command -v zensu`, so the PRESENCE half is cheap.
+It is that a conditional option set would make the gate's own "exactly these four mutually
+exclusive options and no others" contract environment-dependent and therefore unpinnable, and
+that the half that actually matters — whether the CLI is AUTHENTICATED and the feature already
+tracked — needs a network call this hook must not make.
+
+**Auto Mode must NEVER select `/zensu:autopilot` OR `/zensu:pilot`, and this is the one safety
+property in the section.** Autopilot pushes a branch and opens a pull request; pilot commits,
+opens a pull request and mutates tracked feature state behind a per-transition confirm. TWO clauses choose a route
+without asking, and saying "the non-interactive one is the only place" was the overstatement
+review caught: fast-path (B) also selects without asking and carries no interactivity scope of
+its own, so an earlier wording in which (C) forbade only a *default* left a headless run whose
+driving prompt named the route reaching it through (B). (C) therefore OVERRIDES (B) in as many
+words, and forbids selection "not as a default, not by an explicit literal, and not by any
+other clause". Two further guards sit in (B) for the same reason and are not cosmetic: a route
+name carrying a negation REFUSES that route rather than selecting it — the bare literal
+`'autopilot'` meant `"no autopilot"` contained the token tested first — and only multi-word
+forms count, because in THIS repository `"fix the autopilot state machine"` is an ordinary
+sentence. `D13` in `tests/structure/test-plan-approved-delegate.sh` is the pin, and it grades a
+PROPERTY rather than a spelling list: it slices BOTH the (B) and the (C) clause, requires (C) to carry
+EXACTLY ONE `/zensu:autopilot` mention, the prohibition and override clauses, and no dispatch
+spelling; requires (C) to carry pilot's own rationale, which the never-clause needle cannot see;
+requires (B) to carry the refusal guard, the open-set marker and the multi-word rule,
+AND to state the refusal BEFORE the preference arms (an offset comparison, not a presence one —
+without it, moving the refusal below the autopilot arm passes every check); and requires the
+remainder after both clauses to tie no non-interactive run to a route. NO slice carries an emptiness arm: the composite index guard at the top makes all three
+non-empty by construction and reports `SLICE_FAILED` when it cannot. **State the residual rather than the count:** no conjunct binds the counted
+(C) occurrence TO the prohibition sentence, so a (C) clause that both defaults to the route and
+forbids a DIFFERENT one still passes. An earlier form rejected two hand-picked spellings and
+would have passed `"default to running /zensu:autopilot"`.
+
+**The fast-path literal order is load-bearing.** `pilot` is a SUBSTRING of `autopilot`, so the
+longer literal is tested first; testing the shorter one first routes an autopilot request to
+the wrong skill. The directive states the order and the reason, because the matching is done by
+a model reading prose and not by a regex anyone can order.
+
+**The ORDERING rule is encoded as a judgement, not as a fixed winner**, because which route is
+best depends on the plan: Autopilot leads for a whole user-visible feature meant to reach a pull
+request, Pilot for work belonging to an already-tracked feature, otherwise the Zensu workflow —
+and "implement directly" is never first. That last clause is what keeps the do-nothing option
+out of the recommended slot, which the repository's own best-solution-first rule forbids.
+
+**Coupled sites that move together:** both heredocs in `hooks/plan-approved-delegate.sh` — never
+one alone, and the file must keep exactly TWO `cat <<'JSON'` blocks, because the parity helper in
+`tests/structure/test-tdd-vanilla-mode.sh` refuses a third; that helper's `P1` needle list, which
+now carries the route literals and is what makes a one-sided edit fail, plus `P1b`/`P1b2`, which
+compare the mode-INDEPENDENT option spans byte-for-byte because presence alone cannot see an
+option ADDED to one branch; `D9pre` and `D9`-`D16` in
+`tests/structure/test-plan-approved-delegate.sh`, which force the strict branch as well because
+the default config resolves to the vanilla one and a single capture would grade only one heredoc;
+and `BNR2c` in the vanilla-mode suite, which is the ONLY check that reaches the banner tips —
+`P8c` greps the whole banner file and is satisfied by its pre-existing Skills line; and
+`hooks/user-prompt-tdd-reminder.sh` — BOTH heredocs, TDD arms only — together with `P2`, because
+§Language requires these phrase lists in lockstep and this chain edited that hook's arms; that hook
+is under the SAME two-heredoc constraint, since `P2` calls the same helper. Two further carriers
+this chain created: `skills/pilot/SKILL.md`'s "Do NOT Use For" bullet, which PARAPHRASES option (3)'s
+prerequisite and points at both heredocs as its verbatim carrier, saying to change both together —
+the direction matters, because a maintainer who greps that skill for the option text finds nothing
+and could "repair" it by pasting in a third copy, and the marker instruction in
+`skills/autopilot/SKILL.md`, which is a hand-copied PAIR (Phase 0.C and Phase 0.D) that must move
+together and is pinned against nothing.
+
+**UNPINNED, named rather than left to be discovered — this paragraph covers the Phase 0.D ORDERING
+alone. The two entries that follow it are notes ABOUT roster members, not roster members
+themselves — `test-autopilot-durable-skill.sh` greps the `--autopilot-begin` PRESENCE but not its
+position, and `test-pilot-skill.sh` is a pin rather than a pinned carrier.**
+The Phase 0.D ordering this roster promotes to a loop-prevention contract is enforced by nothing. `tests/structure/test-autopilot-durable-skill.sh`
+greps the `--autopilot-begin` literal, which cannot see position, so reversing the order relative to
+`ExitPlanMode` passes every check. Check it by hand until an offset comparison lands.
+`skills/autopilot/SKILL.md` Phase 0.D is on this roster for a reason that is easy to miss: it
+requires `--autopilot-begin` to run IMMEDIATELY BEFORE `ExitPlanMode`, and that ordering is the
+only thing putting the durable run at `PLANNING` in time for Autopilot's OWN approval to land on
+the durable branch. Reverse it — a plausible refactor, "do not mint a run the user may reject" —
+and Autopilot's planning gate falls through to the standalone directive, which now re-asks the
+four-route question with `/zensu:autopilot` still on it. That approval loop did not exist before
+this change made the route reachable from this gate. `tests/structure/test-pilot-skill.sh` is on
+it for a blunter reason: its `P8d` graded a WHOLE-FILE `/zensu:pilot` count against a literal,
+so the primer edit turned a CI-run suite red; it is a per-heredoc presence assertion now, because
+bumping the literal would only re-arm the same trap on the next primer edit.
+
+Operator-facing accounts, and the list is longer than the obvious two because every surface that
+described the old yes/no question became false at once: the `plan-approved-delegate.sh`,
+`autoTdd`, `tddImplementation`, `session-start-banner.sh`, `session-start-primer.sh` and
+`user-prompt-tdd-reminder.sh` rows in `docs/configuration.md` — the `tddImplementation` row is the
+one recording that the two ask-hooks no longer share one wording; BOTH branches of `hooks/session-start-primer.sh` (whose own `P3`
+parity needles now carry the route literals) and BOTH tips in `hooks/session-start-banner.sh`,
+which is the ONLY user-visible surface and was the one the whole review panel missed; the "When
+to Use" bullet in `skills/tdd/SKILL.md`; the two interception paragraphs in
+`skills/gauntlet-loop/SKILL.md`; the Layer 2 Mermaid edge in `docs/architecture.md`; the "Just
+this change" paragraph in `README.md` — BOTH the "Just this change" paragraph and the "A plan you approve
+first" bullet; `evals/plan-approval-hook/` — whose expect script must
+select the Zensu-workflow option BY LABEL, never by the ordinal `1`, since the ordering rule can
+put the branch-pushing route in slot 1 and a blind ordinal would take it unattended; and THIS
+file's own §"Autopilot Run Scope" `OWNER_SESSION_MISMATCH` bullet, which describes what a foreign
+caller is asked when it falls through to the standalone policy.
+
+**NAMED FOLLOW-UP, not done here: the two heredocs carry the route text VERBATIM TWICE.** That
+duplication is why `P1b`/`P1b2` must compare mode-independent spans byte-for-byte at all, and three
+consecutive fix rounds each introduced a fresh defect in that duplicated clause. This file already
+ships the shape that removes the class — `emit_autopilot_context` composes the durable branch's
+directive from ONE string through node — so building the mode-independent span once and
+interpolating the two mode-specific fragments would make a one-sided edit structurally impossible
+rather than test-detected. Not done here because it re-authors `P1`/`P1b`/`P1b2` and the
+"exactly TWO `cat <<'JSON'` blocks" contract and turns the byte-for-byte pins tautological — a real
+control traded for a structural guarantee, which is a decision to take deliberately rather than
+mid-chain. **The pin-coverage claim above is SCOPED, because an earlier revision overstated it:**
+the span comparisons reach the option list and, since round 4, the two dispatch arms — everything
+else in a multi-kilobyte directive is covered by presence needles plus `D13`, so the pins are far
+from tautological today. **TRIGGER:** take the seam at the next round that has to re-author
+`P1`/`P1b`/`P1b2` anyway, or at a fourth one-sided defect in the duplicated span.
+
+**Deliberately NOT changed — the QUESTION SHAPE, not the file:** `hooks/user-prompt-tdd-reminder.sh`
+keeps its yes/no question. Its TDD arms WERE edited by this chain (intent-judging, arm order, the
+untrusted-input scoping), which is why it is on the coupled-sites roster above. The route choice belongs to the moment a plan is approved; re-asking it on
+every prompt while no chain is active would be four options of noise.
+
+**Port-relevant.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` carry the same plan gate
+against different harnesses and were NOT included in this change. A port owns more here than a
+reworded directive: its own ROUTE VOCABULARY, because `/zensu:autopilot` and `/zensu:pilot` are
+skills a port may not ship at all, so copying the four-option text there would offer routes that
+do not exist; whether its harness has an `AskUserQuestion` equivalent that can carry four options;
+and — the one a literal-renaming port misses — whether a route can be selected NON-INTERACTIVELY
+on that host, which is the premise the whole (C)-overrides-(B) safety property rests on.
+
+**Version: `patch`.** Walked against §"Runtime Lineage" entry by entry: no context-record or
+workflow-state schema field, no strict key set, no hook added, removed or renamed and no matcher
+changed, no new config key (`autoTdd` is reused), no attestation change. The hook's only output is
+`additionalContext` — the ADVISORY shape the hook-inventory exemption names — and it returns no
+`permissionDecision` in either direction.
+
+**Why (C) names BOTH outward-facing routes, stated as a CRITERION so a later reader can widen or
+narrow it on the test rather than on a route name:** a route is barred non-interactively when it
+takes an outward-facing or externally-mutating step whose only guard is a human answer. Autopilot
+meets it because `skills/autopilot/SKILL.md` declares its Phase 1 "autonomous, ZERO questions", so
+the branch push is unattended once the plan is approved. Pilot meets it too, and an earlier
+revision of this paragraph said the opposite — that Pilot "has no unattended outward-facing step
+to guard" — which is false: it offers a commit and a pull request and it mutates tracked feature
+state, and the confirm that guards each transition IS an `AskUserQuestion` answer, exactly the
+control a headless run cannot supply. `/zensu:tdd` meets neither half and stays selectable.
+
+**Known gaps, accepted and named:** the four routes are prose the model follows, not a gate, so
+nothing enforces that the question is asked or that the ordering rule is honoured. The SEAM is
+the same one the yes/no question always had; the BLAST RADIUS is not — the old option set could
+only implement locally, while the new one adds a route that pushes a branch and opens a pull
+request and one that mutates external Zensu state. Neither prerequisite is verified before its option
+is shown, so a user without a tracked feature can still pick Pilot and learn the answer from that
+skill's own Phase 0. And `/zensu:doctor` carries no row for this question, so a project that set
+`autoTdd:false` sees no signal that the route choice is switched off.
 
 ## Host-Refused Reviewer Spawn (`hooks/lib/reviewer-spawn-denial-v1.js`)
 
