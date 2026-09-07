@@ -243,6 +243,14 @@ printf '{"hooks":{"reviewJudge":true,"secretScan":false}}\n' > "$SBOX/good-cfg.j
 # .js, so the wiring row — which reads hooks/*.sh — does not see it as unwired.
 mkdir -p "$SBOX/plug/hooks/lib" "$SBOX/plug/docs"
 cp "$PLUGIN_DIR/hooks/lib/rule-block-v1.js" "$SBOX/plug/hooks/lib/rule-block-v1.js"
+# The Session Control core, for the SAME reason and with a sharper consequence.
+# `ownDocumentVerdict` requires it out of `pluginDir()` to classify this session's
+# own workflow document; without it every P6 arm took the load-failure path and
+# the four-state classification — including the whole UNSAFE row — was unexecuted
+# and deletable with this suite green. Copied rather than stubbed: a stub would
+# let the row go green against a classifier nothing ships.
+cp "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" "$SBOX/plug/hooks/lib/session-control-core-v1.js"
+cp "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" "$SBOX/plug/hooks/lib/claude-path-v1.js" 2>/dev/null || true
 cp "$PLUGIN_DIR/docs/best-solution-first.md" "$SBOX/plug/docs/best-solution-first.md"
 cp "$PLUGIN_DIR/docs/evidence-discipline.md" "$SBOX/plug/docs/evidence-discipline.md"
 
@@ -657,6 +665,26 @@ if [ -n "$STRAND_BEFORE" ] && [ "$STRAND_BEFORE" = "$STRAND_AFTER" ]; then
 else
   check "P1mr a report run leaves every workflow document byte- and mtime-identical" FAIL
 fi
+# P1mp2 — the ONE executed test of the branch that decides ZDOC_BINDING for every
+# session. It must run HERE, while `strand-open` is still the bound session: the
+# three restores below hand the environment back and there is no bound fixture after
+# them. The toolchain verdicts are injected so this costs a bind and a render rather
+# than a CLI probe sweep; ZDOC_BINDING is deliberately NOT injected, because it is
+# the value under test.
+STRAND_E2E="$(ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github \
+  ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_CONFIG="" bash "$HELPER" 2>/dev/null)"
+case "$STRAND_E2E" in
+  *'binding: '*) ;;
+  *) check "P1mp2 — VACUOUS: the wrapper produced no binding row at all" FAIL ;;
+esac
+case "$STRAND_E2E" in
+  *'binding: this session has a valid Session Control record'*)
+    check "P1mp2 the real wrapper binds this fixture end to end" PASS ;;
+  *)
+    check "P1mp2 the real wrapper binds this fixture end to end (got: $(printf '%s' "$STRAND_E2E" | grep -i 'binding:' | head -1))" FAIL ;;
+esac
+
 export CLAUDE_PROJECT_DIR="$STRAND_SAVED_PROJECT"
 export CLAUDE_PLUGIN_DATA="$STRAND_SAVED_DATA"
 export CLAUDE_CODE_SESSION_ID="$STRAND_SAVED_SESSION"
@@ -674,25 +702,33 @@ unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
 # body — source, bind, four shape guards, tab-joined printf — reproduces that with
 # rc=0 and a correct pair when run inline.
 #
-# What could NOT be made to work is the wrapper END TO END: `bash "$HELPER"` with
-# that same environment still reports `binding: this session has no valid Session
-# Control record`. The cause is NOT the comment inside the substitution (removing it
+# What could not be made to work, for a while, was the wrapper END TO END: `bash
+# "$HELPER"` against that same environment reported `binding: this session has no
+# valid Session Control record`. Two candidate causes were ruled out here and both
+# rulings still stand — it is NOT the comment inside the substitution (removing it
 # changes nothing, measured) and NOT the shape guards (each exits 0, which would
-# still yield `bound`). It was not established, so the end-to-end check was removed
-# rather than left failing or weakened until it passed.
+# still yield `bound`). The cause was recorded as unestablished and the end-to-end
+# check was removed rather than weakened until it passed.
 #
-# CONSEQUENCE, stated so nobody reads the greps as more than they are: the branch
-# that PRODUCES the pair, and that decides ZDOC_BINDING for EVERY session, has no
-# executed coverage. A grep sees the `|| exit 0` literal; it cannot see the
-# composite exit status, the TAB split, or the pair reaching the renderer.
-# The structural pin must therefore cover the shape-failure DIRECTION, not only the
-# shape — flipping `|| exit 0` to `|| exit 1` makes the elif fail, so a genuinely
-# bound session is reported `unbound`, and a pattern that stopped at the regex would
-# still match.
+# IT IS ESTABLISHED NOW, and the end-to-end check below is restored because the
+# defect it kept failing on is fixed. The wrapper carried its control-byte case arm
+# in the bare `pattern)` form, and bash 3.2 — which macOS ships as /bin/bash — reads
+# that `)` as the end of the enclosing `$( )`. The body truncated mid-`case`, the
+# subshell died of a syntax error, the assignment returned 1, and this elif took its
+# else. That also explains why the inline reproduction disagreed: run inline there is
+# no substitution to truncate. The fix is the POSIX-optional leading paren; see
+# CLAUDE.md "bash 3.2 Command-Substitution Truncation" and
+# tests/structure/test-bash32-portability.sh, which guards the shape tree-wide.
+#
+# The greps below are still worth their lines, and one property is theirs alone: the
+# shape-failure DIRECTION. Flipping `|| exit 0` to `|| exit 1` makes the elif fail, so
+# a genuinely bound session is reported `unbound`, and a pattern that stopped at the
+# regex would still match. P1mp2 covers the composite exit status, the TAB split and
+# the pair reaching the renderer, which no grep can see.
 if grep -qF 'elif ZDOC_SESSION_PAIR="$(' "$HELPER" \
   && grep -qE 'ZENSU_SESSION_KEY:-\}" =~ \^scv1_\[a-f0-9\]\{64\}\$ \]\] \|\| exit 0' "$HELPER" \
   && grep -qE '\[ -d "\$\{ZENSU_PROJECT_ROOT:-\}" \] \|\| exit 0' "$HELPER" \
-  && grep -qF 'case "${ZENSU_PROJECT_ROOT:-}" in *[[:cntrl:]]*) exit 0' "$HELPER" \
+  && grep -qF 'case "${ZENSU_PROJECT_ROOT:-}" in (*[[:cntrl:]]*) exit 0' "$HELPER" \
   && grep -qE '^export ZDOC_ZENSU' "$HELPER" \
   && grep -qF 'ZDOC_SESSION_KEY ZDOC_SESSION_PROJECT_ROOT' "$HELPER"; then
   check "P1mp the wrapper shape-guards the bound pair, drops on failure, and exports it" PASS
@@ -3280,14 +3316,19 @@ else
 fi
 
 # P1nc — a FOREIGN nonterminal run is reported, names the run, and prescribes the
-# GUIDED release form. `--confirm` must be absent: this row is read by the model,
-# and a complete invocation there routes around the only place consent lives.
+# GUIDED release form. `--confirm` must be absent FROM THE AUTOPILOT ROW: that row
+# is read by the model, and a complete invocation there routes around the only
+# place consent lives. The negative is SCOPED to the row rather than to the whole
+# report, because other rows legitimately carry their own `--confirm` remedy — the
+# workflow-document rows name `/zensu:adopt-session --confirm` — and a report-wide
+# negative made this check fail the moment an unrelated row appeared beside it.
 ap_run run_foreign_a BLOCKED "$AP_FOREIGN" "/w/held-tree"
 AP_FOREIGN_OUT="$(ap_report bound "$AP_OWN")"
 if printf '%s' "$AP_FOREIGN_OUT" | grep -qF 'autopilot: nonterminal durable run run_foreign_a at stage BLOCKED' \
   && printf '%s' "$AP_FOREIGN_OUT" | grep -qF 'owned by another session' \
   && printf '%s' "$AP_FOREIGN_OUT" | grep -qF '/zensu:autopilot-release' \
-  && ! printf '%s' "$AP_FOREIGN_OUT" | grep -qF -- '--confirm'; then
+  && ! printf '%s' "$AP_FOREIGN_OUT" | grep -F 'autopilot: nonterminal durable run' \
+    | grep -qF -- '--confirm'; then
   check "P1nc a foreign nonterminal run is named with the guided release form and no --confirm" PASS
 else
   check "P1nc foreign run row (got: $AP_FOREIGN_OUT)" FAIL
@@ -4121,6 +4162,310 @@ else
 fi
 rm -f "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
 rm -f "$AP_STATE"/autopilot-run-*.json
+# ── P6 the bound session's OWN workflow document ────────────────────────────
+#
+# Every other state row judges the documents that EXIST; not one asked whether
+# this session's is among them. That is how a report came back fully green over a
+# session whose capability gate was denying every tool — the state the
+# workflow-baseline repair exists for (CLAUDE.md §"Workflow-Baseline Repair").
+#
+# Driven HERE rather than in test-versioned-plugin-upgrade.sh because the ❌ arm
+# needs a `bound` verdict with a session key, and that suite's synthetic installs
+# cannot produce one — the same limitation CLAUDE.md records for the sibling
+# foreign-chain row. There the DISCLOSURE arm is pinned instead.
+P6_PROJECT="$SBOX/p6-project"
+P6_KEY="scv1_$(node -e 'process.stdout.write("a".repeat(64))')"
+mkdir -p "$P6_PROJECT/.zensu/state"
+run_report_own() { # run_report_own <binding> <session-key>
+  ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" CLAUDE_PROJECT_DIR="$P6_PROJECT" \
+  ZDOC_BINDING="$1" ZDOC_SESSION_KEY="$2" ZDOC_SESSION_PROJECT_ROOT="$P6_PROJECT" \
+    node "$REPORT" 2>/dev/null
+}
+
+# The GLYPH is part of the contract, not decoration — the same rule this file
+# states for the strand rows. `line()` counts ❌ into badCount and the summary
+# gates "all checks green" on it, so a row silently demoted to OK would leave
+# every prose assertion below green while /zensu:doctor printed this finding
+# beside an all-clear. No P6 arm read the glyph until this was added.
+P6_OUT="$(run_report_own bound "$P6_KEY")"
+case "$P6_OUT" in
+  *"❌  state: this session's own workflow document is MISSING"*)
+    # The remedy and its COST travel together. A user who reads "rebuild" as
+    # "restore" will not go looking for the chain that is gone.
+    case "$P6_OUT" in
+      *'/zensu:adopt-session --confirm'*)
+        case "$P6_OUT" in
+          *'loss, not a'*) check "P6a a bound session's absent own document is a ❌ row naming the remedy and its cost" PASS ;;
+          *) check "P6a own-document row omits the cost (got: $P6_OUT)" FAIL ;;
+        esac ;;
+      *) check "P6a own-document row omits the remedy (got: $P6_OUT)" FAIL ;;
+    esac ;;
+  *) check "P6a own-document row missing (got: $P6_OUT)" FAIL ;;
+esac
+
+# The positive control. Without it the row above passes in a tree where it fires
+# unconditionally, which would warn on every healthy session. It uses a REAL
+# document rather than an empty file: the row consults the four-state classifier,
+# for which an empty file is UNREADABLE — so an empty-file control would exclude
+# only the MISSING wording and pass while the UNREADABLE row fired, which is the
+# presence-only semantics this control exists to rule out.
+P6_INIT_RC=0
+CORE_PATH="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" P6P="$P6_PROJECT" P6K="$P6_KEY" \
+  node -e '
+    const core = require(process.env.CORE_PATH);
+    core.initializeWorkflowState({ projectRoot: process.env.P6P, sessionId: process.env.P6K });
+  ' >/dev/null 2>&1 || P6_INIT_RC=$?
+P6_PRESENT="$(run_report_own bound "$P6_KEY")"
+case "$P6_PRESENT" in
+  *"own workflow document is"*)
+    check "P6b a healthy own document renders no row (init_rc=$P6_INIT_RC)" FAIL ;;
+  *) check "P6b a healthy own document renders no row" PASS ;;
+esac
+
+# P6r — the BASELINE_REBUILT provenance row. Both writers append that entry under a
+# reserved phase, three guard readers consult it, and until this row NOTHING rendered
+# it to a user — so the disclosure argument the automatic SessionStart heal rests on
+# had no channel behind it. The document is PRESENT and healthy-looking in this state,
+# which is why no other row in the block says anything at all.
+#
+# The fixture appends the entry to a REAL initialized document rather than writing one
+# by hand: the row reads the document back through the core's own validator, so a
+# hand-built file would be rejected for its shape and the check would pass for the
+# wrong reason.
+P6_REBUILT_RC=0
+CORE_PATH="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" P6P="$P6_PROJECT" P6K="$P6_KEY" \
+  node -e '
+    const fs = require("fs");
+    const core = require(process.env.CORE_PATH);
+    const file = core.adoptionWorkflowStatePath(process.env.P6P, process.env.P6K);
+    const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+    doc.history = (doc.history || []).concat([{
+      step: "",
+      phase: core.BASELINE_HISTORY_PHASE,
+      ts: "2026-09-05T00:00:00.000Z",
+      reason: "baseline-rebuilt: missing",
+    }]);
+    fs.writeFileSync(file, JSON.stringify(doc));
+  ' >/dev/null 2>&1 || P6_REBUILT_RC=$?
+P6_REBUILT="$(run_report_own bound "$P6_KEY")"
+case "$P6_REBUILT" in
+  *"⚠️  state: this session's workflow document was REBUILT"*)
+    # The remedy and its COST travel together here exactly as they do on the MISSING
+    # row: a reader who takes "rebuilt" for "restored" never goes looking for the
+    # chain that is gone.
+    case "$P6_REBUILT" in
+      *'loss, not a restore'*'/zensu:tdd'*)
+        check "P6r a rebuilt own document renders the provenance row with its cost and remedy" PASS ;;
+      *) check "P6r rebuilt row omits the cost or the remedy (got: $P6_REBUILT)" FAIL ;;
+    esac ;;
+  *) check "P6r rebuilt row missing (init_rc=$P6_REBUILT_RC got: $P6_REBUILT)" FAIL ;;
+esac
+case "$P6_REBUILT" in
+  *"2026-09-05T00:00:00.000Z"*"baseline-rebuilt: missing"*)
+    check "P6r1 the row names WHEN the rebuild happened and WHICH state was repaired" PASS ;;
+  *) check "P6r1 the row omits the entry's timestamp or reason (got: $P6_REBUILT)" FAIL ;;
+esac
+
+# P6r2 — the positive control, and it is a HISTORY control rather than an empty one.
+# A row keyed on "this document has history" instead of on the reserved phase would
+# fire on every chain that ever recorded a phase, which is every real session; an
+# empty-history control cannot tell the two apart.
+P6_HIST_RC=0
+CORE_PATH="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" P6P="$P6_PROJECT" P6K="$P6_KEY" \
+  node -e '
+    const fs = require("fs");
+    const core = require(process.env.CORE_PATH);
+    const file = core.adoptionWorkflowStatePath(process.env.P6P, process.env.P6K);
+    const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+    doc.history = [{ step: "1", phase: "RED_WRITE", ts: "2026-09-05T00:00:00.000Z", reason: "" }];
+    fs.writeFileSync(file, JSON.stringify(doc));
+  ' >/dev/null 2>&1 || P6_HIST_RC=$?
+P6_HIST="$(run_report_own bound "$P6_KEY")"
+case "$P6_HIST" in
+  *"was REBUILT"*)
+    check "P6r2 an ordinary history entry wrongly rendered the rebuild row (init_rc=$P6_HIST_RC)" FAIL ;;
+  *) check "P6r2 an ordinary history entry renders no rebuild row" PASS ;;
+esac
+
+# P6r3 — the phase token is read from the LOADED core, never from a literal copied
+# into the renderer. Nothing else in the tree compares the two spellings, so a rename
+# would SILENCE this row with every check still green. An absent export must therefore
+# report a missing check, which is the one verdict this file refuses to fake elsewhere.
+P6_NOPHASE="$SBOX/plug-nophase"
+rm -rf "$P6_NOPHASE"
+cp -R "$SBOX/plug" "$P6_NOPHASE"
+CORE_NP="$P6_NOPHASE/hooks/lib/session-control-core-v1.js"
+if [ -f "$CORE_NP" ]; then
+  perl -0pi -e 's/^\s*BASELINE_HISTORY_PHASE,\n//m' "$CORE_NP"
+fi
+CORE_PATH="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" P6P="$P6_PROJECT" P6K="$P6_KEY" \
+  node -e '
+    const fs = require("fs");
+    const core = require(process.env.CORE_PATH);
+    const file = core.adoptionWorkflowStatePath(process.env.P6P, process.env.P6K);
+    const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+    doc.history = (doc.history || []).concat([{
+      step: "", phase: core.BASELINE_HISTORY_PHASE, ts: "2026-09-05T00:00:00.000Z", reason: "x",
+    }]);
+    fs.writeFileSync(file, JSON.stringify(doc));
+  ' >/dev/null 2>&1
+P6_NOPHASE_OUT="$(ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_DOCTOR_PLUGIN_DIR="$P6_NOPHASE" CLAUDE_PROJECT_DIR="$P6_PROJECT" \
+  ZDOC_BINDING=bound ZDOC_SESSION_KEY="$P6_KEY" ZDOC_SESSION_PROJECT_ROOT="$P6_PROJECT" \
+  node "$REPORT" 2>/dev/null)"
+case "$P6_NOPHASE_OUT" in
+  *'not checked for rebuild provenance'*'missing check, not an all-clear'*)
+    check "P6r3 a core exporting no rebuild phase reports an unchecked row rather than silence" PASS ;;
+  *) check "P6r3 a core exporting no rebuild phase fell silent (got: $P6_NOPHASE_OUT)" FAIL ;;
+esac
+case "$P6_NOPHASE_OUT" in
+  *'was REBUILT'*)
+    check "P6r4 a renderer without the core token must claim no rebuild verdict" FAIL ;;
+  *) check "P6r4 a renderer without the core token claims no rebuild verdict" PASS ;;
+esac
+rm -rf "$P6_NOPHASE"
+
+# P6g — the UNSAFE arm. A hard link passes every test a plain regular file passes
+# except nlink, so it is the shape a presence test admits. The row must NOT offer
+# the rebuild: the repair refuses this by design, and promising it here is the
+# contradiction the Stop arm and the capability gate were corrected for.
+P6_LINK_SRC="$SBOX/p6-link-src.json"
+printf '%s' '{}' >"$P6_LINK_SRC"
+rm -f "$P6_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json"
+ln "$P6_LINK_SRC" "$P6_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json"
+P6_UNSAFE="$(run_report_own bound "$P6_KEY")"
+case "$P6_UNSAFE" in
+  *"❌  state: this session's own workflow document is UNSAFE"*"will REFUSE"*)
+    check "P6g a hard-linked own document is UNSAFE and is offered no rebuild" PASS ;;
+  *) check "P6g a hard-linked own document is UNSAFE and is offered no rebuild (got: $P6_UNSAFE)" FAIL ;;
+esac
+case "$P6_UNSAFE" in
+  *"own workflow document is MISSING"*)
+    check "P6g2 the UNSAFE arm must not also render the MISSING remedy" FAIL ;;
+  *) check "P6g2 the UNSAFE arm renders no MISSING remedy" PASS ;;
+esac
+rm -f "$P6_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json" "$P6_LINK_SRC"
+
+# P6i — the UNREADABLE arm, which had no fixture anywhere. It shares the UNSAFE
+# row with the tamper shapes, and that sharing is exactly what makes it worth a
+# check of its own: narrowing the row's condition to `unsafe` alone leaves
+# `unreadable` falling through to the MISSING row, which offers a rebuild that
+# `repairBaseline` refuses by design. The mutation is one word and no suite saw it.
+printf '%s' '{not json' >"$P6_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json"
+P6_UNREADABLE="$(run_report_own bound "$P6_KEY")"
+case "$P6_UNREADABLE" in
+  *"❌  state: this session's own workflow document is UNREADABLE"*"will REFUSE"*)
+    check "P6i a present-but-unparseable own document is UNREADABLE and is offered no rebuild" PASS ;;
+  *) check "P6i a present-but-unparseable own document is UNREADABLE (got: $P6_UNREADABLE)" FAIL ;;
+esac
+case "$P6_UNREADABLE" in
+  *"own workflow document is MISSING"*)
+    check "P6i2 the UNREADABLE arm must not also render the MISSING remedy" FAIL ;;
+  *) check "P6i2 the UNREADABLE arm renders no MISSING remedy" PASS ;;
+esac
+rm -f "$P6_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json"
+
+# P6j — a classification this renderer does not recognize. The ladder's residual
+# arm used to be the MISSING row, so a state added or renamed in the core made
+# every healthy session read "your own document is MISSING — run --confirm to
+# rebuild it". The core is stubbed rather than edited, because the point is a
+# renderer that outlives a core it no longer agrees with.
+P6_BADSTATE="$SBOX/p6-badstate"
+mkdir -p "$P6_BADSTATE/hooks/lib"
+cp "$PLUGIN_DIR/hooks/lib/rule-block-v1.js" "$P6_BADSTATE/hooks/lib/rule-block-v1.js"
+cat >"$P6_BADSTATE/hooks/lib/session-control-core-v1.js" <<'STUBCORE'
+const path = require("node:path");
+module.exports = {
+  BASELINE_STATES: {
+    PRESENT: "present", MISSING: "missing", UNSAFE: "unsafe", UNREADABLE: "unreadable",
+  },
+  adoptionWorkflowStatePath: (root, key) => path.join(root, ".zensu", "state", "tdd-phase-" + key + ".json"),
+  classifyWorkflowBaseline: () => "quarantined",
+};
+STUBCORE
+P6_BADSTATE_OUT="$(ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh   ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent   ZENSU_DOCTOR_PLUGIN_DIR="$P6_BADSTATE" CLAUDE_PROJECT_DIR="$P6_PROJECT"   ZDOC_BINDING=bound ZDOC_SESSION_KEY="$P6_KEY" ZDOC_SESSION_PROJECT_ROOT="$P6_PROJECT"   node "$REPORT" 2>/dev/null)"
+case "$P6_BADSTATE_OUT" in
+  *"⚠️  state: this session's own workflow document came back with a classification this build does not recognize"*)
+    check "P6j an unrecognized classification is a missing check, not the MISSING row" PASS ;;
+  *) check "P6j an unrecognized classification must not render the MISSING row (got: $P6_BADSTATE_OUT)" FAIL ;;
+esac
+case "$P6_BADSTATE_OUT" in
+  *"own workflow document is MISSING"*)
+    check "P6j2 an unrecognized classification wrongly rendered the rebuild recommendation" FAIL ;;
+  *) check "P6j2 an unrecognized classification renders no rebuild recommendation" PASS ;;
+esac
+
+# P6h — the load-failure path DISCLOSES rather than returning silently. Round 3
+# found a shape where a partially loadable core discarded a correct verdict and
+# rendered nothing; a check that cannot run must say so.
+P6_NOCORE="$SBOX/p6-nocore"
+mkdir -p "$P6_NOCORE/hooks/lib"
+cp "$PLUGIN_DIR/hooks/lib/rule-block-v1.js" "$P6_NOCORE/hooks/lib/rule-block-v1.js"
+: > "$P6_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json"
+P6_NOCORE_OUT="$(ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_DOCTOR_PLUGIN_DIR="$P6_NOCORE" CLAUDE_PROJECT_DIR="$P6_PROJECT" \
+  ZDOC_BINDING=bound ZDOC_SESSION_KEY="$P6_KEY" ZDOC_SESSION_PROJECT_ROOT="$P6_PROJECT" \
+  node "$REPORT" 2>/dev/null)"
+case "$P6_NOCORE_OUT" in
+  *"⚠️  state: this session's own workflow document could not be classified"*"missing check, not an all-clear"*)
+    check "P6h an unloadable core discloses a missing check rather than staying silent" PASS ;;
+  *) check "P6h an unloadable core discloses a missing check (got: $P6_NOCORE_OUT)" FAIL ;;
+esac
+rm -f "$P6_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json"
+
+# Silence is the one verdict a diagnostic may not give: with no bound key the
+# check did not run, and the report has to say so rather than omit the row.
+P6_UNBOUND="$(run_report_own unbound '')"
+case "$P6_UNBOUND" in
+  *"⚠️  state: this session's own workflow document was not checked"*"missing check, not an all-clear"*)
+    check "P6c an unavailable session key discloses a missing check rather than staying silent" PASS ;;
+  *) check "P6c unbound own-document disclosure (got: $P6_UNBOUND)" FAIL ;;
+esac
+
+# A session key supplied under a NON-bound verdict must not arm the row: the
+# renderer would otherwise print a finding keyed on an identity it had just said
+# does not exist. Same invariant currentSessionKey enforces for the chain rows.
+P6_MISMATCH="$(run_report_own unbound "$P6_KEY")"
+case "$P6_MISMATCH" in
+  *"own workflow document is MISSING"*)
+    check "P6d a session key under a non-bound verdict wrongly armed the row" FAIL ;;
+  *) check "P6d a session key is ignored unless the binding verdict is bound" PASS ;;
+esac
+
+# P6e — the shape the whole feature targets, and the one the row could not see.
+# `.zensu/state/` is gitignored, so a deleted and re-created worktree loses the
+# WHOLE DIRECTORY, not just the file. stateBlock's readdirSync then took its
+# ENOENT branch, printed "does not exist yet — nothing to clean" as an OK row and
+# RETURNED above the own-document row — so the doctor reported green over exactly
+# the session whose capability gate was denying every tool. Every other P6 arm
+# runs under `mkdir -p "$P6_PROJECT/.zensu/state"`, which is why none of them
+# reached it. An ENOENT here is positive proof the document is gone, which is the
+# strongest form of the finding, not a reason to withhold it.
+rm -rf "$P6_PROJECT/.zensu/state"
+P6_NODIR="$(run_report_own bound "$P6_KEY")"
+case "$P6_NODIR" in
+  *"❌  state: this session's own workflow document is MISSING"*"/zensu:adopt-session --confirm"*)
+    check "P6e an absent .zensu/state still reports the bound session's own missing document" PASS ;;
+  *) check "P6e an absent .zensu/state must not read as an all-clear (got: $P6_NODIR)" FAIL ;;
+esac
+# The DELIBERATE NARROWING, pinned so it stays a decision rather than drift. With
+# an absent directory AND no bound key the row is WITHHELD: a project with no
+# .zensu/state at all and no bound session is a fresh install, and warning there
+# fires on every ordinary run — the "trained away within a day" failure this
+# repository records for the implementing-turns row. P6c above pins that the
+# POPULATED path still discloses, so the narrowing is scoped to the one case where
+# no claim about a session's own document is being made at all.
+P6_NODIR_UNBOUND="$(run_report_own unbound '')"
+case "$P6_NODIR_UNBOUND" in
+  *"own workflow document"*)
+    check "P6f an absent .zensu/state with no bound key wrongly rendered an own-document row" FAIL ;;
+  *) check "P6f an absent .zensu/state with no bound key withholds the row (narrowed on purpose)" PASS ;;
+esac
+mkdir -p "$P6_PROJECT/.zensu/state"
 
 rm -rf "$SBOX"
 echo "----"

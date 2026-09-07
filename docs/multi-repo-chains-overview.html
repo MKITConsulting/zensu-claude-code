@@ -283,7 +283,7 @@
       <p>The audit writes to <code>&lt;--project&gt;/.zensu/state/</code> while the terminus looks in
       the anchor's state directory. Two runs therefore leave two receipts nobody reads — and each run
       reports the other repository's claims as not landed.</p>
-      <p class="src">zensu-edit-landing.sh:292 · zensu-log.sh:696</p>
+      <p class="src">zensu-edit-landing.sh:292 · zensu-log.sh:704</p>
     </div>
     <div class="card">
       <span class="tag warn">Asymmetry</span>
@@ -299,7 +299,7 @@
       <p>The receipt gate fires only when <code>git -C "$CLAUDE_PROJECT_DIR"</code> counts changes.
       With a clean orchestrator the count is zero, the receipt is skipped, and the chain closes — with
       a reviewer that saw nothing either.</p>
-      <p class="src">zensu-log.sh:756-758</p>
+      <p class="src">zensu-log.sh:764-766</p>
     </div>
   </div>
 </section>
@@ -427,7 +427,7 @@
           <th scope="row"><strong>Terminus</strong><span class="tag flat inline">stage 2</span></th>
           <td>The zero-change scoping of <code>--tdd-complete</code> and <code>--chain-done</code>
           counts the union. Otherwise a clean anchor still closes an empty chain.</td>
-          <td class="where mono">zensu-log.sh:756-758</td>
+          <td class="where mono">zensu-log.sh:764-766</td>
         </tr>
         <tr>
           <th scope="row"><strong>Capability confinement</strong><span class="tag flat inline">stage 3</span></th>
@@ -435,7 +435,7 @@
           inside the immutable project root” — and forbids absolute Grep patterns and
           <code>..</code>. Without an exception no reviewer can read the satellites even when the
           packet names them.</td>
-          <td class="where mono">reviewer-capability-v1.js:319<br>reviewer-capability-v1.js:285-291</td>
+          <td class="where mono">reviewer-capability-v1.js:320<br>reviewer-capability-v1.js:285-291</td>
         </tr>
       </tbody>
     </table>

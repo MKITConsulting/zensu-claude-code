@@ -5,6 +5,7 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 HOOK="$PLUGIN_DIR/hooks/post-bash-witness.sh"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 SESSION_CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
+XCHK="$PLUGIN_DIR/hooks/lib/zensu-evidence-crosscheck.js"; export XCHK
 
 ZENSU_CONFIG="$PLUGIN_DIR/.no-such-config-$$.json"; export ZENSU_CONFIG
 
@@ -385,6 +386,214 @@ else
   check "P12-H16 non-main principals are a byte-stable witness no-op" FAIL
 fi
 rm -rf "$PROJECT_TMP_H16"
+
+# ── P12-A: the ATTEMPT half ─────────────────────────────────────────────────
+#
+# Claude Code fires no PostToolUse for a Bash call that did not complete
+# successfully, so `post-bash-witness.sh` never runs for a failing command and
+# the log carried no record of it at all. That is the HOST's behaviour, not this
+# hook's: the checks above feed it `exit_code: 3` and it writes a line like any
+# other, and P12-A0 re-states that as an executed control so nobody re-diagnoses
+# the missing line as an early return here. `pre-bash-witness.sh` records the
+# attempt from PreToolUse, which the host does fire unconditionally.
+#
+# Every check below carries its zero-exit control beside it, because the whole
+# claim is a DIFFERENCE between two shapes: a command that completed leaves both
+# lines, one that did not leaves only the attempt. A check that only asserted
+# the attempt line exists would pass just as well if the result half had silently
+# stopped writing, which is the failure it exists to detect.
+PRE_HOOK="$PLUGIN_DIR/hooks/pre-bash-witness.sh"
+
+if [ -f "$PRE_HOOK" ]; then
+  check "P12-A0a hooks/pre-bash-witness.sh exists" PASS
+else
+  check "P12-A0a hooks/pre-bash-witness.sh exists" FAIL
+fi
+if bash -n "$PRE_HOOK" 2>/dev/null; then
+  check "P12-A0b pre-bash-witness.sh bash -n syntax check passes" PASS
+else
+  check "P12-A0b pre-bash-witness.sh bash -n syntax check passes" FAIL
+fi
+
+# The registration is half the feature: an unregistered hook records nothing and
+# every check below would still pass, because they invoke the file directly.
+REG_PRE="$(node -e '
+  const fs = require("fs");
+  const j = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const pre = (j.hooks && j.hooks.PreToolUse) || [];
+  const bash = pre.filter((m) => m.matcher === "Bash");
+  const names = bash.flatMap((m) => (m.hooks || []).map((h) => h.command || ""));
+  process.stdout.write(String(names.filter((c) => c.includes("pre-bash-witness.sh")).length));
+' "$PLUGIN_DIR/hooks/hooks.json" 2>/dev/null)"
+if [ "$REG_PRE" = "1" ]; then
+  check "P12-A1 pre-bash-witness.sh is registered exactly once on the PreToolUse Bash matcher" PASS
+else
+  check "P12-A1 pre-bash-witness.sh registered on PreToolUse Bash (found: $REG_PRE)" FAIL
+fi
+
+# count_lines <fixed-pattern> <file> -> a single-line count, 0 when absent.
+# `grep -c` prints 0 and exits 1 on no match, so the `|| echo 0` idiom used by
+# the checks above yields the two-line value "0\n0"; those checks only ever
+# expect 1, so it never bit them. Every check below compares against 0.
+count_lines() {
+  local n
+  n="$(grep -cF "$1" "$2" 2>/dev/null | head -n1)"
+  [ -n "$n" ] || n=0
+  printf '%s' "$n"
+}
+
+# make_pre_payload <cmd> <session> -> the PreToolUse dialect: no tool_response.
+make_pre_payload() {
+  local cmd="$1" session_id="$2" cmd_json session_json
+  cmd_json="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$cmd")"
+  session_json="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$session_id")"
+  printf '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":%s},"session_id":%s}' \
+    "$cmd_json" "$session_json"
+}
+
+# P12-A0: the CONTROL for the whole diagnosis — the result hook has no branch on
+# the exit status. Feeding it a non-zero `exit_code` still writes its line, so a
+# missing line in a live session is the host declining to fire the event.
+PROJECT_TMP_A0="$(mktemp -d -t "witness-proj-XXXXXX")"
+SESSION_A0="sess-a0-$$"
+activate "$PROJECT_TMP_A0" "$SESSION_A0"
+echo "$(make_payload "probe-rc3" 3 "boom" "$SESSION_A0")" \
+  | env CLAUDE_PROJECT_DIR="$PROJECT_TMP_A0" bash "$HOOK" >/dev/null 2>&1
+echo "$(make_payload "probe-rc0" 0 "ok" "$SESSION_A0")" \
+  | env CLAUDE_PROJECT_DIR="$PROJECT_TMP_A0" bash "$HOOK" >/dev/null 2>&1
+W_A0="$(witness_file "$PROJECT_TMP_A0" "$SESSION_A0")"
+A0_RC3="$(count_lines 'BASH cmd="probe-rc3" exit=3' "$W_A0")"
+A0_RC0="$(count_lines 'BASH cmd="probe-rc0" exit=0' "$W_A0")"
+if [ "$A0_RC3" = "1" ] && [ "$A0_RC0" = "1" ]; then
+  check "P12-A0 the result hook records a non-zero exit exactly as it records a zero one (the gap is the host's)" PASS
+else
+  check "P12-A0 result hook exit-code neutrality (rc3=$A0_RC3 rc0=$A0_RC0)" FAIL
+fi
+rm -rf "$PROJECT_TMP_A0"
+
+# P12-A2/A3: the matched pair. A completed call leaves an attempt AND a result
+# line; a call the host never reports back leaves the attempt alone. Both run in
+# one fixture so the difference is the only variable.
+PROJECT_TMP_A2="$(mktemp -d -t "witness-proj-XXXXXX")"
+SESSION_A2="sess-a2-$$"
+activate "$PROJECT_TMP_A2" "$SESSION_A2"
+echo "$(make_pre_payload "green-suite" "$SESSION_A2")" \
+  | env CLAUDE_PROJECT_DIR="$PROJECT_TMP_A2" bash "$PRE_HOOK" >/dev/null 2>&1
+echo "$(make_payload "green-suite" 0 "1 passed" "$SESSION_A2")" \
+  | env CLAUDE_PROJECT_DIR="$PROJECT_TMP_A2" bash "$HOOK" >/dev/null 2>&1
+echo "$(make_pre_payload "red-suite" "$SESSION_A2")" \
+  | env CLAUDE_PROJECT_DIR="$PROJECT_TMP_A2" bash "$PRE_HOOK" >/dev/null 2>&1
+W_A2="$(witness_file "$PROJECT_TMP_A2" "$SESSION_A2")"
+A2_GREEN_ATTEMPT="$(count_lines 'BASH-ATTEMPT cmd="green-suite"' "$W_A2")"
+A2_GREEN_RESULT="$(count_lines 'BASH cmd="green-suite"' "$W_A2")"
+A2_RED_ATTEMPT="$(count_lines 'BASH-ATTEMPT cmd="red-suite"' "$W_A2")"
+A2_RED_RESULT="$(count_lines 'BASH cmd="red-suite"' "$W_A2")"
+if [ "$A2_GREEN_ATTEMPT" = "1" ] && [ "$A2_GREEN_RESULT" = "1" ]; then
+  check "P12-A2 zero-exit control: a completed call leaves BOTH an attempt and a result line" PASS
+else
+  check "P12-A2 completed call leaves both lines (attempt=$A2_GREEN_ATTEMPT result=$A2_GREEN_RESULT)" FAIL
+fi
+if [ "$A2_RED_ATTEMPT" = "1" ] && [ "$A2_RED_RESULT" = "0" ]; then
+  check "P12-A3 a call the host never reports back is still witnessed, as an attempt with no result" PASS
+else
+  check "P12-A3 attempt-only shape (attempt=$A2_RED_ATTEMPT result=$A2_RED_RESULT)" FAIL
+fi
+# The two markers must not match each other, or the completed count above is a
+# lie: `grep -F 'BASH cmd='` must never find a `BASH-ATTEMPT cmd=` line.
+if [ "$A2_RED_RESULT" = "0" ] && [ "$A2_RED_ATTEMPT" = "1" ] \
+  && ! grep -qF 'BASH cmd="red-suite"' "$W_A2" 2>/dev/null; then
+  check "P12-A4 the attempt marker is not a substring match for the result marker" PASS
+else
+  check "P12-A4 attempt and result markers are distinguishable" FAIL
+fi
+rm -rf "$PROJECT_TMP_A2"
+
+# P12-A5: ADVISORY. stdout is the PreToolUse decision channel and a non-zero exit
+# blocks the call, so a witness that emitted either would break every Bash call
+# in the session. Checked on the activated path, where the hook does the most.
+PROJECT_TMP_A5="$(mktemp -d -t "witness-proj-XXXXXX")"
+SESSION_A5="sess-a5-$$"
+activate "$PROJECT_TMP_A5" "$SESSION_A5"
+A5_OUT="$(echo "$(make_pre_payload "advisory-probe" "$SESSION_A5")" \
+  | env CLAUDE_PROJECT_DIR="$PROJECT_TMP_A5" bash "$PRE_HOOK" 2>/dev/null)"
+A5_RC=$?
+if [ -z "$A5_OUT" ] && [ "$A5_RC" = "0" ] \
+  && grep -qF 'BASH-ATTEMPT cmd="advisory-probe"' "$(witness_file "$PROJECT_TMP_A5" "$SESSION_A5")" 2>/dev/null; then
+  check "P12-A5 the attempt hook writes no stdout and exits 0 while still recording (advisory)" PASS
+else
+  check "P12-A5 attempt hook is advisory (out='$A5_OUT' rc=$A5_RC)" FAIL
+fi
+rm -rf "$PROJECT_TMP_A5"
+
+# P12-A6/A7: the attempt half is scoped exactly like the result half. Recording
+# attempts for an unarmed session would put lines in a log the result half never
+# writes to, and every one would read as a run that did not finish.
+PROJECT_TMP_A6="$(mktemp -d -t "witness-proj-XXXXXX")"
+SESSION_A6="sess-a6-$$"
+baseline "$PROJECT_TMP_A6" "$SESSION_A6"
+echo "$(make_pre_payload "unarmed" "$SESSION_A6")" \
+  | env CLAUDE_PROJECT_DIR="$PROJECT_TMP_A6" bash "$PRE_HOOK" >/dev/null 2>&1
+if [ ! -f "$(witness_file "$PROJECT_TMP_A6" "$SESSION_A6")" ]; then
+  check "P12-A6 session not activated -> the attempt hook writes no witness log" PASS
+else
+  check "P12-A6 session not activated -> attempt hook leaked a witness log" FAIL
+fi
+rm -rf "$PROJECT_TMP_A6"
+
+PROJECT_TMP_A7="$(mktemp -d -t "witness-proj-XXXXXX")"
+SESSION_A7="sess-a7-$$"
+activate "$PROJECT_TMP_A7" "$SESSION_A7"
+echo "$(make_pre_payload "opted-out" "$SESSION_A7")" \
+  | env ZENSU_TEST_WITNESS=off CLAUDE_PROJECT_DIR="$PROJECT_TMP_A7" bash "$PRE_HOOK" >/dev/null 2>&1
+if [ ! -f "$(witness_file "$PROJECT_TMP_A7" "$SESSION_A7")" ]; then
+  check "P12-A7 ZENSU_TEST_WITNESS=off silences the attempt half too" PASS
+else
+  check "P12-A7 ZENSU_TEST_WITNESS=off left the attempt half writing" FAIL
+fi
+# Positive control for A7: without the switch the same fixture DOES record, so
+# A7 cannot pass because the hook is broken.
+echo "$(make_pre_payload "opted-out" "$SESSION_A7")" \
+  | env CLAUDE_PROJECT_DIR="$PROJECT_TMP_A7" bash "$PRE_HOOK" >/dev/null 2>&1
+if grep -qF 'BASH-ATTEMPT cmd="opted-out"' "$(witness_file "$PROJECT_TMP_A7" "$SESSION_A7")" 2>/dev/null; then
+  check "P12-A7-control the same fixture records once the opt-out is removed" PASS
+else
+  check "P12-A7-control the same fixture records once the opt-out is removed" FAIL
+fi
+rm -rf "$PROJECT_TMP_A7"
+
+# P12-A8: both writers redact `cmd` through the SAME function, so an attempt and
+# its result agree byte-for-byte on a command naming an absolute path. They are
+# matched by equality downstream; a divergence here is silent evidence loss.
+PROJECT_TMP_A8="$(mktemp -d -t "witness-proj-XXXXXX")"
+SESSION_A8="sess-a8-$$"
+activate "$PROJECT_TMP_A8" "$SESSION_A8"
+A8_CMD="bash $PROJECT_TMP_A8/tests/run.sh"
+echo "$(make_pre_payload "$A8_CMD" "$SESSION_A8")" \
+  | env CLAUDE_PROJECT_DIR="$PROJECT_TMP_A8" bash "$PRE_HOOK" >/dev/null 2>&1
+echo "$(make_payload "$A8_CMD" 0 "ok" "$SESSION_A8")" \
+  | env CLAUDE_PROJECT_DIR="$PROJECT_TMP_A8" bash "$HOOK" >/dev/null 2>&1
+W_A8="$(witness_file "$PROJECT_TMP_A8" "$SESSION_A8")"
+A8_ATTEMPT_CMD="$(WFILE="$W_A8" node -e '
+  const fs = require("fs");
+  const x = require(process.env.XCHK);
+  const entries = x.parseWitness(fs.readFileSync(process.env.WFILE, "utf8"), "/nope/run.log");
+  const a = entries.find((e) => e.kind === "attempt");
+  process.stdout.write(a ? a.cmd : "");
+' 2>/dev/null)"
+A8_RESULT_CMD="$(WFILE="$W_A8" node -e '
+  const fs = require("fs");
+  const x = require(process.env.XCHK);
+  const entries = x.parseWitness(fs.readFileSync(process.env.WFILE, "utf8"), "/nope/run.log");
+  const r = entries.find((e) => e.kind === "result");
+  process.stdout.write(r ? r.cmd : "");
+' 2>/dev/null)"
+if [ -n "$A8_ATTEMPT_CMD" ] && [ "$A8_ATTEMPT_CMD" = "$A8_RESULT_CMD" ] \
+  && [ "$A8_ATTEMPT_CMD" != "$A8_CMD" ]; then
+  check "P12-A8 both writers redact cmd identically (attempt == result, and both were redacted)" PASS
+else
+  check "P12-A8 redaction symmetry (attempt='$A8_ATTEMPT_CMD' result='$A8_RESULT_CMD')" FAIL
+fi
+rm -rf "$PROJECT_TMP_A8"
 
 echo "----"
 echo "test-post-bash-witness: $PASS PASS / $FAIL FAIL"

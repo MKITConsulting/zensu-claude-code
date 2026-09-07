@@ -1095,5 +1095,113 @@ case "$(uname -s)" in
     ;;
 esac
 
+# --------------------------------------------------------- SessionStart baseline self-heal
+#
+# The record-exists branch re-initializes a MISSING workflow document on a clean
+# ENOENT, and FAILS for anything else. Both arms were uncovered: no test in the
+# tree removed the document and re-fired SessionStart, and the fresh-creation row
+# far above asserts only that a NEW session gets one.
+#
+# State the bound HONESTLY, because the earlier wording overclaimed and the check
+# below was labelled a discriminator it is not. The `=== MISSING` narrowing is
+# real and worth keeping, but the tamper row does NOT go red when it is widened to
+# `!== PRESENT`: `repairWorkflowBaseline` carries its own `!verdict.repairable`
+# refusal, so a planted hard link is still refused and its bytes still survive —
+# the SECOND layer holds while the first is gone. What the row below pins is the
+# OUTCOME (refused, bytes untouched), not which layer produced it. A check that
+# isolates the outer bound would have to neuter the inner guard as well, and that
+# is not what this fixture does.
+
+rm -f "$BASELINE_A"
+HEAL_PAYLOAD="$(payload SessionStart "$SID_A" "$PROJECT_A")"
+HEAL_RC=0
+printf '%s' "$HEAL_PAYLOAD" | CLAUDE_PLUGIN_ROOT="$ROOT" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
+  CLAUDE_ENV_FILE="$ENV_FILE" bash "$HOOK" >"$TMP/heal.out" 2>"$TMP/heal.err" || HEAL_RC=$?
+if [ "$HEAL_RC" -eq 0 ] && [ -f "$BASELINE_A" ] && node -e '
+  const core = require(process.argv[1]);
+  const state = core.readWorkflowState({projectRoot: process.argv[2], sessionId: process.argv[3]});
+  const h = Array.isArray(state.history) ? state.history : [];
+  const rebuilt = h.filter((e) => e && e.phase === "BASELINE_REBUILT");
+  process.exit(rebuilt.length === 1 && typeof rebuilt[0].ts === "string" && rebuilt[0].ts !== ""
+    && Array.isArray(state.bypasses) && state.bypasses.length === 0 ? 0 : 1);
+' "$CORE" "$PROJECT_A" "$SID_A"; then
+  check "SessionStart heals a MISSING workflow document and records exactly one BASELINE_REBUILT entry" PASS
+else
+  check "SessionStart heals a MISSING workflow document and records exactly one BASELINE_REBUILT entry (rc=$HEAL_RC)" FAIL
+  head -c 300 "$TMP/heal.err" 2>/dev/null
+fi
+
+# The PUSH half of the disclosure. `/zensu:doctor` renders the same finding, but that
+# is a PULL channel: it says nothing until somebody runs it, and the person who needs
+# to know did not ask. Without this the automatic heal is silent on the one path that
+# runs without the user asking for it — the exact gap the review finding named.
+#
+# Asserted on the emitted `additionalContext` rather than on stderr, deliberately: this
+# repository records that a hook's stderr visibility on a non-blocking exit is
+# UNVERIFIED on this host, while `additionalContext` demonstrably reaches the model.
+if node -e '
+  const out = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  const ctx = (out && out.hookSpecificOutput && out.hookSpecificOutput.additionalContext) || "";
+  process.exit(ctx.includes("rebuilt automatically at SessionStart")
+    && ctx.includes("loss, not a restore")
+    && ctx.includes("/zensu:tdd")
+    && ctx.includes("/zensu:doctor") ? 0 : 1);
+' "$TMP/heal.out"; then
+  check "the self-heal discloses the rebuild on the emitted SessionStart context" PASS
+else
+  check "the self-heal discloses the rebuild on the emitted SessionStart context" FAIL
+  head -c 400 "$TMP/heal.out" 2>/dev/null
+fi
+
+# The notice must NOT replace the principal's own context: that context is what binds
+# the session, so a notice that substituted it would trade the binding for a warning.
+if printf '%s' "$(cat "$TMP/heal.out")" | session_context_has_project "$PROJECT_A"; then
+  check "the rebuild notice is appended to the session context, never substituted for it" PASS
+else
+  check "the rebuild notice is appended to the session context, never substituted for it" FAIL
+fi
+
+# The POSITIVE CONTROL, and it is the whole reason the row above means anything: the
+# document is PRESENT now, so re-firing SessionStart must heal nothing and say nothing.
+# Without it the check passes in a tree where the notice is emitted unconditionally,
+# which would warn about a rebuild on every ordinary session start.
+QUIET_RC=0
+printf '%s' "$HEAL_PAYLOAD" | CLAUDE_PLUGIN_ROOT="$ROOT" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
+  CLAUDE_ENV_FILE="$ENV_FILE" bash "$HOOK" >"$TMP/heal-quiet.out" 2>"$TMP/heal-quiet.err" \
+  || QUIET_RC=$?
+if [ "$QUIET_RC" -eq 0 ] && node -e '
+  const out = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  const ctx = (out && out.hookSpecificOutput && out.hookSpecificOutput.additionalContext) || "";
+  process.exit(ctx.includes("rebuilt automatically at SessionStart") ? 1 : 0);
+' "$TMP/heal-quiet.out"; then
+  check "a SessionStart that heals nothing emits no rebuild notice" PASS
+else
+  check "a SessionStart that heals nothing emits no rebuild notice (rc=$QUIET_RC)" FAIL
+fi
+
+# The TAMPER row. It pins the end-to-end OUTCOME — a hard-linked document is
+# refused and its bytes are left alone — which is the property a user depends on.
+# It is deliberately NOT labelled a discriminator for the `=== MISSING` bound: as
+# the block above records, that bound can be widened and this row stays green,
+# because repairWorkflowBaseline refuses the same shape one layer down. Layered
+# defense is the intent; claiming this row isolates the outer layer was not true.
+HEAL_LINK_SRC="$TMP/heal-link-src.json"
+printf '%s' '{"planted":true}' >"$HEAL_LINK_SRC"
+rm -f "$BASELINE_A"
+ln "$HEAL_LINK_SRC" "$BASELINE_A"
+TAMPER_RC=0
+printf '%s' "$HEAL_PAYLOAD" | CLAUDE_PLUGIN_ROOT="$ROOT" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
+  CLAUDE_ENV_FILE="$ENV_FILE" bash "$HOOK" >"$TMP/heal-tamper.out" 2>"$TMP/heal-tamper.err" \
+  || TAMPER_RC=$?
+if [ "$TAMPER_RC" -ne 0 ] \
+    && [ "$(cat "$BASELINE_A" 2>/dev/null)" = '{"planted":true}' ] \
+    && [ "$(cat "$HEAL_LINK_SRC" 2>/dev/null)" = '{"planted":true}' ]; then
+  check "SessionStart refuses a hard-linked workflow document and leaves its bytes alone" PASS
+else
+  check "SessionStart refuses a hard-linked workflow document and leaves its bytes alone (rc=$TAMPER_RC)" FAIL
+  head -c 300 "$TMP/heal-tamper.err" 2>/dev/null
+fi
+rm -f "$BASELINE_A"
+
 printf '%s\n' "----" "test-session-control-claude: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

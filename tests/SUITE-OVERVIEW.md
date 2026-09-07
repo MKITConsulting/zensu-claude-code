@@ -56,8 +56,8 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **146** — 139 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **139 structure suites + 5 offline evals = 144 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 146 − 139 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **148** — 141 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **141 structure suites + 5 offline evals = 146 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 148 − 141 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -69,8 +69,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 146 structure suites + 5 offline evals | none |
-| `--ci` | 139 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 148 structure suites + 5 offline evals | none |
+| `--ci` | 141 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -229,9 +229,25 @@ invariant, the immutable-tag release rule, CHANGELOG coverage, that Promptfoo co
 only reference existing files, that Promptfoo stays local-only, and the runner's own
 contract.
 
-### Windows & portability (4)
-`msys-runtime-boundaries` · `msys-special-plugin-module-boundaries` ·
-`windows-ci-contract` · `windows-portability-guards`
+### Windows & portability (5)
+`bash32-portability` · `msys-runtime-boundaries` ·
+`msys-special-plugin-module-boundaries` · `windows-ci-contract` ·
+`windows-portability-guards`
+
+`test-bash32-portability.sh` is the odd one out here: its platform is macOS, not
+Windows. It is grouped with these because it guards the same KIND of defect — a
+host shell that reads a source file differently from the one the author had. macOS
+ships GNU bash 3.2.57 as `/bin/bash`, and that release extracts a `$( ... )` body
+with a naive paren scanner, so a `case` arm in the bare `pattern)` form closes the
+substitution at its own `)`. The suite drives
+`tests/structure/bash32-substitution-scan.js` over every `*.sh` in the tree and
+takes bash's own verdict on the body the naive scanner would have handed the
+parser, so it reports identically on a 3.2 host and on a 5.x runner. It is NOT in
+`windows-ci.v1.json`, deliberately: every shard there is already close to its
+`profileTimeoutMs`, and the check has no Windows dimension to justify paying for
+one. The coupling runs in the UNOBVIOUS direction that CLAUDE.md records for G12 —
+an ordinary edit to any shell file in the tree can turn this suite red, and the
+remedy is in the file that changed.
 
 Git-Bash/MSYS path translation boundaries, native-Node module loading from a plugin
 root containing whitespace and an apostrophe, the Windows CI manifest contract, and — in
@@ -288,7 +304,8 @@ that suite's failure.
 | `zensu-doctor-invocation.test.js` | 24 | `test-versioned-plugin-upgrade.sh` | `/zensu:doctor` invocation allowlist — driven from that suite, which binds it as `RECOGNIZER_UNIT` and grades it against a registered-case floor; it has no `run-all.sh` entry of its own, because discovery is `test-*.sh` only |
 | `playwright-mcp-proxy.test.js` | 16 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy |
 | `release-run-step.test.js` | 9 | `test-immutable-marketplace-release.sh` | the release step's `run_step` wrapper, EXECUTED: the annotation on failure, the full stderr replay, exit-status propagation, the `--quiet` sink applying to the wrapped command and never to the annotation, the no-stderr fallback, `head -1` bounding the annotation to one line, and temp-file cleanup under `RUNNER_TEMP`. Driven first in that suite, because it is the wrapper's only executable coverage anywhere and the suite's other pins are source greps that stay green against a present-but-broken wrapper |
-| `zen-anchor-assertions.test.js` | 7 | `test-zen-mode.sh` (Z29) | zen-mode eval GRADERS: every javascript assertion body compiled, and a pinned pass/fail vector for the two anchor scenarios plus the safety carve-out |
+| `zen-anchor-assertions.test.js` | 11 | `test-zen-mode.sh` (Z29) | zen-mode eval GRADERS: every javascript assertion body compiled, a pinned pass/fail vector for the two anchor scenarios plus the safety carve-out, and every scenario bound to an anchor the module can produce |
+| `zen-anchor-v1.test.js` | 25 | `test-zen-mode.sh` (Z31) | zen-mode chain anchor: the shape -> line mapping against the classifier's own total set, the failed mark read from the owner rather than restated, the closed chain rendering no anchor at all, that no shape renders a whole-chain completion claim, that the token takes no second argument and that the classifier-report input is monotone, the bound max-rounds outcome rendering the blocked mark, that the outcome arm is a positive allowlist so an unrecognised member renders nothing, that the two blocked-mark authorities are OR-ed, that anchorNoneIsExpected splits a legitimate `none` from a degraded one for every shape, that the outcome allowlist is keyed on the owner's exported CHAIN_OUTCOMES and its rows are frozen, the degraded-owner fallback, and the token predicate |
 | `verify-feature-transcript-check.test.js` | 14 | `test-promptfoo-verify-feature.sh` | transcript assertion contract |
 | `fixture-mutation-watch.test.js` | 19 | `test-claude-promptfoo-wrapper.sh` | fixture-event classification: the gated classes (`.git`, the watch root's own name, run-owned ancestors) adjudicated by the manifest, ordinary paths by touch-after-start, and that both watch backends route through one decision spelled once |
 | `session-control-lineage.test.js` | 13 | `test-versioned-plugin-upgrade.sh` | runtime-lineage axis: same-major (same-minor while major is `0`), never-backwards, sibling plugin root |
@@ -376,8 +393,8 @@ on its own:
 | `windows-shard-4` | 4 | best-solution-first, deferred-claim-adoption, plan-payload-path-transport, tdd-state-junction-safety |
 | `windows-shard-5` | 7 | autopilot-plan-delegate, coverage-report-windows-paths, post-review-self-review-handoff, session-id-v1, session-safe-file-read, upgrade-provider-zero-launch, windows-portability-guards |
 | `windows-shard-6` | 5 | bash-source-write-gate, deferred-transfer-reset, marketplace-fixture, session-control-claude, upgrade-process-windows-boundaries |
-| `windows-shard-7` | 2 | review-worker-evidence-lease, stop-enforcer-self-review-routing |
-| `windows-shard-8` | 1 | session-trail-lineage |
+| `windows-shard-7` | 1 | stop-enforcer-self-review-routing |
+| `windows-shard-8` | 2 | session-trail-lineage, review-worker-evidence-lease |
 
 Runner guarantees: full manifest + audited command catalog validated before any child
 starts; every suite bound to a validated content digest; per-suite **and** 30-minute
