@@ -233,8 +233,13 @@ mkdir -p "$PROVENANCE_SOURCE/.claude-plugin" "$PROVENANCE_SOURCE/hooks"
 git -C "$PROVENANCE_SOURCE" init -q
 git -C "$PROVENANCE_SOURCE" config user.name 'Versioned Upgrade Test'
 git -C "$PROVENANCE_SOURCE" config user.email 'versioned-upgrade@zensu.invalid'
+# The case patterns carry a LEADING paren. Inside a $( ) substitution bash 3.2 ends the
+# substitution at the first `)` it meets, so the bare `MINGW*|MSYS*|CYGWIN*)` form truncates
+# the command and this config value silently becomes empty on the repo's oldest supported
+# shell. `(PATTERN)` balances the paren and parses identically on every later bash;
+# tests/structure/test-bash32-portability.sh B1 is what scans for the unbalanced spelling.
 git -C "$PROVENANCE_SOURCE" config core.hooksPath \
-  "$(case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*|CYGWIN*) printf NUL ;; *) printf /dev/null ;; esac)"
+  "$(case "$(uname -s 2>/dev/null)" in (MINGW*|MSYS*|CYGWIN*) printf NUL ;; (*) printf /dev/null ;; esac)"
 printf '%s\n' '{"name":"zensu","version":"0.16.1"}' \
   > "$PROVENANCE_SOURCE/.claude-plugin/plugin.json"
 printf '%s\n' '{"name":"zensu","plugins":[{"name":"zensu","source":{"source":"github","repo":"MKITConsulting/zensu-claude-code","ref":"v0.16.1"},"version":"0.16.1"}]}' \
@@ -283,8 +288,9 @@ mkdir -p "$SYMLINK_SOURCE/.claude-plugin" "$SYMLINK_SOURCE/hooks"
 git -C "$SYMLINK_SOURCE" init -q
 git -C "$SYMLINK_SOURCE" config user.name 'Versioned Upgrade Test'
 git -C "$SYMLINK_SOURCE" config user.email 'versioned-upgrade@zensu.invalid'
+# Leading parens for the same bash 3.2 reason as the PROVENANCE_SOURCE site above.
 git -C "$SYMLINK_SOURCE" config core.hooksPath \
-  "$(case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*|CYGWIN*) printf NUL ;; *) printf /dev/null ;; esac)"
+  "$(case "$(uname -s 2>/dev/null)" in (MINGW*|MSYS*|CYGWIN*) printf NUL ;; (*) printf /dev/null ;; esac)"
 printf '%s\n' '{"name":"zensu","version":"0.16.1"}' \
   > "$SYMLINK_SOURCE/.claude-plugin/plugin.json"
 printf '%s\n' '#!/bin/bash' 'exit 0' > "$SYMLINK_SOURCE/hooks/example.sh"
