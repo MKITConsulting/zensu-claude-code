@@ -540,10 +540,10 @@ executing runtime, never of the list. Candidate 1 satisfies requirement 1 only i
 combination with the containment gate of §6.1.2, and its security rests entirely
 on the records directory being unwritable by the session. Two obligations travel
 with it: `adoptContext` re-mints through `buildContext`
-(`hooks/lib/session-control-core-v1.js:1576`), so a new field
+(`hooks/lib/session-control-core-v1.js:1652`), so a new field
 must be threaded there or it is silently dropped at every adoption; and a
 `SCHEMA_VERSION` bump makes `readContext` throw, so adoption refuses across that
-one release boundary as `record-unreadable` (`:1389`).
+one release boundary as `record-unreadable` (`:1386`).
 
 The existing inline escapes (`ZENSU_BASH_WRITE_GATE=off`,
 `ZENSU_EDIT_LANDING_GATE=off`) are unchanged and keep landing their bypass-ledger
