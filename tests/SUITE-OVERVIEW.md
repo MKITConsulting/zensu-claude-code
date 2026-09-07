@@ -56,8 +56,8 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **146** — 139 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **139 structure suites + 5 offline evals = 144 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 146 − 139 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **148** — 141 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **141 structure suites + 5 offline evals = 146 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 148 − 141 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -69,8 +69,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 146 structure suites + 5 offline evals | none |
-| `--ci` | 139 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 148 structure suites + 5 offline evals | none |
+| `--ci` | 141 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -229,9 +229,25 @@ invariant, the immutable-tag release rule, CHANGELOG coverage, that Promptfoo co
 only reference existing files, that Promptfoo stays local-only, and the runner's own
 contract.
 
-### Windows & portability (4)
-`msys-runtime-boundaries` · `msys-special-plugin-module-boundaries` ·
-`windows-ci-contract` · `windows-portability-guards`
+### Windows & portability (5)
+`bash32-portability` · `msys-runtime-boundaries` ·
+`msys-special-plugin-module-boundaries` · `windows-ci-contract` ·
+`windows-portability-guards`
+
+`test-bash32-portability.sh` is the odd one out here: its platform is macOS, not
+Windows. It is grouped with these because it guards the same KIND of defect — a
+host shell that reads a source file differently from the one the author had. macOS
+ships GNU bash 3.2.57 as `/bin/bash`, and that release extracts a `$( ... )` body
+with a naive paren scanner, so a `case` arm in the bare `pattern)` form closes the
+substitution at its own `)`. The suite drives
+`tests/structure/bash32-substitution-scan.js` over every `*.sh` in the tree and
+takes bash's own verdict on the body the naive scanner would have handed the
+parser, so it reports identically on a 3.2 host and on a 5.x runner. It is NOT in
+`windows-ci.v1.json`, deliberately: every shard there is already close to its
+`profileTimeoutMs`, and the check has no Windows dimension to justify paying for
+one. The coupling runs in the UNOBVIOUS direction that CLAUDE.md records for G12 —
+an ordinary edit to any shell file in the tree can turn this suite red, and the
+remedy is in the file that changed.
 
 Git-Bash/MSYS path translation boundaries, native-Node module loading from a plugin
 root containing whitespace and an apostrophe, the Windows CI manifest contract, and — in
@@ -377,8 +393,8 @@ on its own:
 | `windows-shard-4` | 4 | best-solution-first, deferred-claim-adoption, plan-payload-path-transport, tdd-state-junction-safety |
 | `windows-shard-5` | 7 | autopilot-plan-delegate, coverage-report-windows-paths, post-review-self-review-handoff, session-id-v1, session-safe-file-read, upgrade-provider-zero-launch, windows-portability-guards |
 | `windows-shard-6` | 5 | bash-source-write-gate, deferred-transfer-reset, marketplace-fixture, session-control-claude, upgrade-process-windows-boundaries |
-| `windows-shard-7` | 2 | review-worker-evidence-lease, stop-enforcer-self-review-routing |
-| `windows-shard-8` | 1 | session-trail-lineage |
+| `windows-shard-7` | 1 | stop-enforcer-self-review-routing |
+| `windows-shard-8` | 2 | session-trail-lineage, review-worker-evidence-lease |
 
 Runner guarantees: full manifest + audited command catalog validated before any child
 starts; every suite bound to a validated content digest; per-suite **and** 30-minute

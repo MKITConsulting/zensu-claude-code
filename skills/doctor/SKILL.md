@@ -10,7 +10,9 @@ description: >
   string is silently ignored by strict === checks, and whether the permission rules
   in ~/.claude/settings.json expose the zensu:code-reviewer spawn to a refusal
   before any chain has wedged), and session state (state dir writable, canonical
-  CAS workflow documents valid, each review chain's shape plus any wedged chain and
+  CAS workflow documents valid, whether THIS session's own workflow document is
+  there and usable and whether it was rebuilt rather than restored, each review
+  chain's shape plus any wedged chain and
   its recovery command, any open chain not owned by this session, any chain this
   session owns that has ended many turns at implementing, any reviewer spawn
   the host permission layer refused, expired pending-review surfaced).
@@ -487,6 +489,45 @@ classifier will refuse a spawn, not only when the whole table is green.
   the caveat to shorten the row, and do not read its ABSENCE as proof no refusal is
   outstanding — the note is cleared on every Stop and re-minted only by one that reaches
   the notice, so a clean-tree turn leaves the caveat off while the refusal stands.
+- **❌ state: this session's own workflow document is MISSING** → the record is
+  intact and the document it anchors is gone, so the capability gate is denying
+  every tool in this session. A deleted and re-created worktree causes it, because
+  `.zensu/state/` is gitignored. Relay the path the row prints, and both halves of
+  the remedy: `/zensu:adopt-session` for the diagnosis, `/zensu:adopt-session
+  --confirm` to rebuild — AND that rebuilding is a loss rather than a restore, so a
+  review chain that was live when the document vanished is gone. Never relay the
+  command without the cost.
+- **❌ state: this session's own workflow document is UNSAFE / UNREADABLE** → the
+  opposite instruction from the row above, and the reason this bullet exists: something
+  IS sitting at that path — a symlink, a hard link, a non-file, an oversized file, or a
+  present document that does not validate — so `/zensu:adopt-session --confirm` will
+  REFUSE to rebuild it, by design. Relay the component the row prints, which is not
+  always the document itself: with `.zensu` or `.zensu/state` replaced, the leaf need not
+  exist at all. Tell the user to run `/zensu:adopt-session` for the diagnosis, inspect
+  what is there before doing anything else, and then start a fresh Claude Code session.
+  Never relay the rebuild command for this row.
+- **⚠️ state: this session's workflow document was REBUILT** → the document is present
+  and healthy-looking, and its history carries the reserved `BASELINE_REBUILT` provenance
+  entry, so it was rebuilt by `/zensu:adopt-session --confirm` or by the SessionStart
+  self-heal. Relay it as a LOSS, never as a repair that succeeded: the rebuilt baseline
+  reads "never active", so a review chain that was live when the document vanished is
+  gone and the Stop guard now releases this session without asking for a reviewer. The
+  row names the entry count, the timestamp and which state was repaired. Offer
+  `/zensu:tdd` to re-arm if that work still needs a review.
+- **⚠️ state: this session's workflow document was not checked for rebuild provenance**
+  → either the core exported no rebuild phase token or the document did not read back,
+  so the check did NOT run. A missing check, never an all-clear, and never a claim that
+  the document was not rebuilt.
+- **⚠️ state: this session's own workflow document could not be classified** → the
+  Session Control core did not load from the plugin directory the row names, so the check
+  did NOT run. A missing check, never an all-clear.
+- **⚠️ state: this session's own workflow document came back with a classification this
+  build does not recognize** → the core answered with a state this report does not know,
+  which means the two are from different builds. A missing check, never an all-clear, and
+  never a reason to relay a rebuild.
+- **⚠️ state: this session's own workflow document was not checked** → no bound
+  session key was available, so the check above did not run. A missing check, never
+  an all-clear.
 - **⚠️ state: `<dir>` could not be read (`<errno>`)** → the session-state checks did
   NOT run. Relay it as a missing check, never as an all-clear: no chain shape, no
   wedged or foreign-chain row and no pending-review verdict was computed, so their

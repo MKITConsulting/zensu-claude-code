@@ -21,6 +21,7 @@
     "test-autopilot-stop-enforcer.sh",
     "test-bash-source-write-gate.sh",
     "test-bash-zensu-gate.sh",
+    "test-bash32-portability.sh",
     "test-best-solution-first.sh",
     "test-bypass-ledger.sh",
     "test-chain-recover.sh",

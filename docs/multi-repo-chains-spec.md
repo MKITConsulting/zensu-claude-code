@@ -34,7 +34,7 @@ therefore a trusted value derived from the immutable Session Control record.
 Nothing in this proposal weakens that.
 
 Two of the consumers named in §6.3 do NOT sit on that binding: the terminus
-count reads `git -C "${CLAUDE_PROJECT_DIR:-.}"` (`hooks/lib/zensu-log.sh:1270`) and
+count reads `git -C "${CLAUDE_PROJECT_DIR:-.}"` (`hooks/lib/zensu-log.sh:1278`) and
 the audit's default `--project` is `${CLAUDE_PROJECT_DIR:-.}`
 (`hooks/lib/zensu-edit-landing.sh:41`) — both ambient, both with a `.` fallback.
 Which root that variable names in a multi-root topology, and what the fallback
@@ -45,16 +45,16 @@ means when it is unset, is an open question (§11).
 enumerates the change set with `git -C "$REPO_ROOT"` (`:83-105`). But its receipt
 lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:292`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
-(`hooks/lib/zensu-log.sh:696`). Running the audit once per repository therefore
+(`hooks/lib/zensu-log.sh:704`). Running the audit once per repository therefore
 writes receipts nothing reads, and each run reports the other repository's claims
 as not landed, so no run can exit 0.
 
 **The receipt gate is scoped by the anchor's change count.**
-`hooks/lib/zensu-log.sh:756-758` counts `git diff --name-only HEAD` plus untracked
-files under a root resolved by `zensu_resolve_project_dir()` (`:703`) — not the
+`hooks/lib/zensu-log.sh:764-766` counts `git diff --name-only HEAD` plus untracked
+files under a root resolved by `zensu_resolve_project_dir()` (`:711`) — not the
 ambient variable, and with the git environment scrubbed — and skips the receipt
 requirement entirely at zero. A clean orchestrator therefore closes the chain with
-no receipt at all. The comment at `:673` states this mirrors the `--chain-done`
+no receipt at all. The comment at `:681` states this mirrors the `--chain-done`
 dirty-tree refusal; the `--chain-done` site itself was not read for this document.
 
 **The write gate confines Bash writes, the edit gate does not confine paths.**
@@ -71,7 +71,7 @@ at all, and `pre-write-secret-scan.sh:84` references one only through the
 orphaned-root bind predicate, never as a path check.
 
 **The reviewer is confined to the project root.**
-`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:319` refuses any
+`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:320` refuses any
 reviewer path input outside the root with `file access must remain inside the
 immutable project root`, and `:285-291` rejects an absolute Grep/Glob pattern, a
 `..` segment, and a `.zensu` segment. A reviewer cannot read a sibling repository
@@ -335,8 +335,8 @@ dropped: a dropped root is a root nothing audits.
 | Edit-landing | Enumerate the union; resolve each claim through its label; write ONE merged receipt beside the anchor's workflow document, carrying a per-root verdict. | `hooks/lib/zensu-edit-landing.sh`, receipt path `:292` |
 | Review packet | Enumerate `changed_files` per root and emit them label-prefixed. | `skills/tdd/SKILL.md` step 10.2 |
 | Write gate | Rules (B) and (C) accept a path inside ANY union member. | `hooks/lib/bash-source-write-parse.js:817`, `:863` |
-| Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:756-758` |
-| Capability confinement (stage 3) | The reviewer's root check and its protected-root set both take the union. | `hooks/lib/reviewer-capability-v1.js:319`, `:300` |
+| Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:764-766` |
+| Capability confinement (stage 3) | The reviewer's root check and its protected-root set both take the union. | `hooks/lib/reviewer-capability-v1.js:320`, `:300` |
 
 The write gate receives the union the same way it receives the anchor today —
 from the hook, which reads it from the trusted record and the workflow document,
@@ -675,7 +675,7 @@ re-verify.
 ### Citations to re-verify
 
 - The `--chain-done` dirty-tree refusal was inferred from the comment at
-  `hooks/lib/zensu-log.sh:673`; its own implementation must be read before §6.3's
+  `hooks/lib/zensu-log.sh:681`; its own implementation must be read before §6.3's
   terminus row is implemented.
 - `classifyChain()` was not read; the consumer roster in §7.3 comes from the
   conventions document and must be re-derived from the code.

@@ -15,8 +15,11 @@ bind failure including a record that exists and disagrees, and they are
 recognized by `hooks/lib/zensu-doctor-invocation.js` rather than by any
 individual gate: `/zensu:doctor`, which writes nothing, and
 `/zensu:adopt-session`, whose writes are confined to the calling session's own
-record, one workflow history entry, and a move of that session's stale
-review-evidence leases; it carries its own justification in the header of
+record, one workflow history entry, a move of that session's stale
+review-evidence leases, and — on an `already-served` refusal with `--confirm`
+only — that session's own missing workflow document plus its `.zensu` ancestors
+under the recorded project root; it carries its own justification, and the
+authoritative four-class enumeration, in the header of
 `hooks/lib/zensu-session-adopt.sh`. Both are matched as exact whitelisted shapes
 — a closed set of assignments, one `bash <script in the executing installation>`,
 and for the adoption at most the literal `--confirm`. Every hook on the `Bash`
@@ -323,6 +326,55 @@ is not a regression, because the total disarm this replaced allowed the whole st
 configuration.
 `tests/structure/test-plugin-data-guard.sh` pins the behavior, both directions, in all three
 chain states.
+
+## Missing Workflow Baseline
+
+The `.*` capability gate (`hooks/pre-reviewer-capability-gate.sh`) revalidates the session's
+workflow document before any capability decision, and denies when it is gone. That is
+deliberate and unchanged: a deleted document must never be read as *no chain was ever
+active*, or deleting one file would release an armed review chain. Because the hook matches
+every tool, the deny costs the session everything — Edit, Write, Bash, subagents.
+
+What changed is that the state is **named and repairable** instead of a permanent wedge. The
+cause is ordinary: a git worktree deleted and re-created loses the document, because
+`.zensu/state/` is gitignored, and a compaction continues the SAME session rather than
+minting a new one.
+
+- **The deny names the cause and the command** — `/zensu:adopt-session` for the diagnosis and
+  `/zensu:adopt-session --confirm` to rebuild — instead of the generic `immutable context
+  revalidation failed`, which is accurate and names no way out. Both commands stay reachable,
+  because the Bash recognizer admits them in every bind failure.
+- **Only a clean `ENOENT` is named that way.** A document that is present but unsafe or
+  unreadable keeps the generic wording: something is at that path, and offering a rebuild
+  there would tell the user to build over the evidence.
+- **The Stop hook still BLOCKS** and names the same command. It does not release: nothing
+  proves completion, and the release would be a claim the plugin cannot make.
+- **`/zensu:doctor` reports it.** Before this, `stateBlock` only judged the documents that
+  exist and never asked whether the bound session's own was among them, so a report came back
+  fully green over a session in which every tool was being denied.
+- **`SessionStart` heals it on its own** at the next resume or compaction, on `ENOENT` only,
+  writing the same `BASELINE_REBUILT` provenance entry the confirmed repair writes — and it
+  SAYS so, on the `additionalContext` it already emits, so the first reply after an automatic
+  heal can tell the user what was lost instead of waiting to be asked. That notice is
+  model-facing, so it supplements the doctor row below and never replaces it.
+- **`/zensu:doctor` renders that provenance entry afterwards.** Once the document is present
+  again, nothing else in the report distinguishes a rebuilt one from a healthy one, so the
+  own-document verdict carries a `⚠️ state: this session's workflow document was REBUILT` row
+  naming the entry count, its timestamp and the state that was repaired. Before that row the
+  entry was reserved and read by guards, but no runtime surface ever showed it to a user.
+
+Rebuilding is a **loss, not a restore**: a review chain that was live when the document
+vanished is gone, and the rebuilt baseline reads *never active*. That is why the report lists
+the session-state files that survived, and why it records **no** bypass-ledger entry — it
+escaped no gate, because the document a gate would have read was already gone. See
+[Session Control](session-control.md#unbindable-sessions) for the full account.
+
+**Neither writer path is user-consented, and this document said otherwise for one release.**
+The adopt path requires the literal `--confirm` in argv, which is a token the model supplies
+to itself — prose-backed, not consent-backed, exactly as `--autopilot-release`'s flag is; the
+"wait for the user to say yes" rule lives in `skills/adopt-session/SKILL.md`. The
+`SessionStart` self-heal above requires no token at all. Do not restate the writer as
+gated on `--confirm`: that sentence contradicted the `SessionStart` bullet four lines above it.
 
 ## TDD Phase Gate
 

@@ -113,6 +113,10 @@ case "${1:-}" in
       echo "zensu-log.sh --phase: RUNTIME_ADOPTED is written only by the session adoption; it is the provenance record of a runtime takeover and cannot be minted by a caller" >&2
       exit 2
     fi
+    if [ "$phase_val" = BASELINE_REBUILT ]; then
+      echo "zensu-log.sh --phase: BASELINE_REBUILT is written only by the workflow-baseline repair; it is the provenance record of a rebuilt baseline and cannot be minted by a caller" >&2
+      exit 2
+    fi
     case "$reason_val" in
       "chain-recovered: "*)
         echo "zensu-log.sh --phase: a 'chain-recovered: ' reason is reserved for --chain-recover" >&2
@@ -120,6 +124,10 @@ case "${1:-}" in
         ;;
       "runtime-adopted: "*)
         echo "zensu-log.sh --phase: a 'runtime-adopted: ' reason is reserved for the session adoption" >&2
+        exit 2
+        ;;
+      "baseline-rebuilt: "*)
+        echo "zensu-log.sh --phase: a 'baseline-rebuilt: ' reason is reserved for the workflow-baseline repair" >&2
         exit 2
         ;;
     esac

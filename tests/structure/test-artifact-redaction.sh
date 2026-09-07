@@ -31,6 +31,12 @@ LOG_HELPER="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 REDACT="$PLUGIN_DIR/hooks/lib/zensu-artifact-redact-v1.js"
 ARTIFACT_HOOK="$PLUGIN_DIR/hooks/post-artifact-redact.sh"
 WITNESS_HOOK="$PLUGIN_DIR/hooks/post-bash-witness.sh"
+# The ATTEMPT half of the witness, and the extraction both halves share. The
+# redaction lives in the library exactly once: two copies could diverge, and the
+# cross-check matches an attempt line against a completed line and against a
+# claim by EQUALITY, so a divergence there is silent evidence loss.
+WITNESS_PRE_HOOK="$PLUGIN_DIR/hooks/pre-bash-witness.sh"
+WITNESS_LIB="$PLUGIN_DIR/hooks/lib/zensu-witness.sh"
 CROSSCHECK="$PLUGIN_DIR/hooks/lib/zensu-evidence-crosscheck.js"
 SESSION_CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
@@ -566,11 +572,17 @@ fi
 # ── R19: the witness prefix the sweep excludes is the one it writes ──
 WITNESS_PREFIX_MOD="$(node -e '
   process.stdout.write(require(process.argv[1]).WITNESS_PREFIX);' "$REDACT" 2>/dev/null)"
+# BOTH writers spell the log path, so both are checked: an attempt line landing
+# in a different file than the completed line would make every claim over a
+# failing command read as a gap again, which is the defect the second writer
+# exists to remove.
+R19_SPELLING="WITNESS_LOG=\"\$WITNESS_DIR/${WITNESS_PREFIX_MOD}\${SANITIZED_SESSION}.log\""
 if [ -n "$WITNESS_PREFIX_MOD" ] \
-  && grep -qF "WITNESS_LOG=\"\$WITNESS_DIR/${WITNESS_PREFIX_MOD}\${SANITIZED_SESSION}.log\"" "$WITNESS_HOOK"; then
-  check "R19 the module's WITNESS_PREFIX matches post-bash-witness.sh's own spelling" PASS
+  && grep -qF "$R19_SPELLING" "$WITNESS_HOOK" \
+  && grep -qF "$R19_SPELLING" "$WITNESS_PRE_HOOK"; then
+  check "R19 the module's WITNESS_PREFIX matches BOTH witness writers' own spelling" PASS
 else
-  check "R19 the module's WITNESS_PREFIX matches post-bash-witness.sh's own spelling (got: $WITNESS_PREFIX_MOD)" FAIL
+  check "R19 the module's WITNESS_PREFIX matches BOTH witness writers' own spelling (got: $WITNESS_PREFIX_MOD)" FAIL
 fi
 
 # ── R20: the hook consumes the module's layout, never its own copy ───
@@ -1404,13 +1416,14 @@ else
 fi
 
 # ── R32: a throwing redact degrades to identity, never a lost entry ──
-# The hook installs its fallback around the CALL, not just the module load: a
+# The shared extractor installs its fallback around the CALL, not just the module
+# load: a
 # throw from redact would otherwise reach the outer handler, which emits an empty
 # session field and drops the whole witness ENTRY — fail-CLOSED, the opposite of
-# what the hook promises. The closure is extracted from the hook and evaluated
+# what the hook promises. The closure is extracted from the library and evaluated
 # against a throwing stub, so the pin is the real expression rather than a
 # paraphrase of it.
-R32_CLOSURE="$(grep -F 'redact = (v) => { try { return mod.redact(v, opts); } catch (_) { return v; } };' "$WITNESS_HOOK")"
+R32_CLOSURE="$(grep -F 'redact = (v) => { try { return mod.redact(v, opts); } catch (_) { return v; } };' "$WITNESS_LIB")"
 if [ -n "$R32_CLOSURE" ]; then
   OUT32="$(node -e '
     const mod = { redact() { throw new Error("boom"); } };
@@ -1422,9 +1435,9 @@ if [ -n "$R32_CLOSURE" ]; then
   # Binding the closure to its CALL SITE is the other half: without it the
   # wrapper can be bypassed (`mod.redact(...)` called directly) with the extracted
   # literal still intact and this check still green.
-  R32_CALLS="$(grep -cF 'mod.redact(' "$WITNESS_HOOK")"
+  R32_CALLS="$(grep -cF 'mod.redact(' "$WITNESS_LIB")"
   if [ "$OUT32" = "cd /Users/x && npm test" ] \
-    && grep -qF 'redact(j.tool_input.command)' "$WITNESS_HOOK" \
+    && grep -qF 'redact(j.tool_input.command)' "$WITNESS_LIB" \
     && [ "$R32_CALLS" -eq 1 ]; then
     check "R32 a throwing redact degrades to identity, and the wrapper is the only caller" PASS
   else
@@ -1768,8 +1781,12 @@ claim_absent() {
   fi
 }
 
-claim_absent "R56 the witness writer no longer claims the witness is never committed" \
+claim_absent "R56 the witness result writer no longer claims the witness is never committed" \
   "$WITNESS_HOOK" "never committed"
+claim_absent "R56a the witness attempt writer no longer claims the witness is never committed" \
+  "$WITNESS_PRE_HOOK" "never committed"
+claim_absent "R56b the shared witness extractor no longer claims the witness is never committed" \
+  "$WITNESS_LIB" "never committed"
 
 claim_absent "R57a docs/configuration.md no longer spells the sweep exclusion as a .log-only glob" \
   "$PLUGIN_DIR/docs/configuration.md" "witness-\\*\\.log\` is excluded"
