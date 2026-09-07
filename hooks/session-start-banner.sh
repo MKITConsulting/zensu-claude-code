@@ -56,6 +56,36 @@ if [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/pre-agent-reviewer-allow.sh" ] \
   echo "zensu: Reviewer spawns — this plugin is configured to admit its own read-only reviewer subagents (Read/Grep/Glob only) itself, so the host permission layer is not asked for them. This line checks the flag and the two files; /zensu:doctor is the authoritative check and additionally verifies the hook's registration and that its decision module loads. Turn off: hooks.reviewerSpawnAutoAllow=false in ~/.zensu/config.json."
 fi
 
+# Whether the delivery-route question can actually be asked. Three conditions, all
+# required: the flag, node, and the hook file — plan-approved-delegate.sh exits 0
+# silently without node or without its own libraries, and zensu_hook_enabled reports
+# ENABLED when node is missing, so the flag alone would promise a question that
+# cannot fire. Same reasoning, and same shape, as the reviewer-spawn guard above.
+# GRADED ELSEWHERE: this guard's three arms are pinned by D26 (the autoTdd flag),
+# D29 (node) and D30 (the delegate hook file), and the off-state disclosure below
+# by D27 — all in
+# tests/structure/test-plan-approved-delegate.sh, not by this hook's own suite.
+# The split is deliberate — that suite is absent from the blocking Windows PR
+# shard, where D29's stub-PATH fixture would cost budget and is unverified — so
+# editing the tip literals below reddens a suite named for a different file.
+_ZENSU_ROUTE_QUESTION_LIVE=yes
+zensu_hook_enabled autoTdd || _ZENSU_ROUTE_QUESTION_LIVE=no
+command -v node >/dev/null 2>&1 || _ZENSU_ROUTE_QUESTION_LIVE=no
+[ -f "${CLAUDE_PLUGIN_ROOT}/hooks/plan-approved-delegate.sh" ] || _ZENSU_ROUTE_QUESTION_LIVE=no
+
+# The DISCLOSURE that the consent question is switched off sits ABOVE the
+# sessionBanner gate, for the reason the reviewer-spawn line above gives: that flag
+# is a NOISE control read PERMISSIVELY, and a .zensu/config.json travels inside a
+# checked-out repository — so below the gate, ONE committed file could both switch
+# the delivery-route question off and hide that it did. Reporting an absent consent
+# gate is a permission fact, not a usage hint. It keys on the FLAG alone: a missing
+# node is a broken installation rather than a configured choice, and naming the flag
+# there would be false. The enabled-state tip below is an ordinary usage hint and
+# stays under the gate.
+if ! zensu_hook_enabled autoTdd; then
+  echo "zensu: Tip — use Claude Code Plan mode for code changes. The delivery-route question is off (hooks.autoTdd=false), so an approved plan is implemented directly; invoke /zensu:tdd, /zensu:autopilot or /zensu:pilot yourself to pick a route."
+fi
+
 [ -n "$_ZENSU_BANNER_QUIET" ] && exit 0
 
 VERSION="?"
@@ -68,14 +98,25 @@ if command -v node >/dev/null 2>&1; then
 fi
 
 echo "zensu: Zensu PLM v${VERSION} active — features as first-class citizens."
+# The route tip is emitted only when the question can actually be asked
+# (_ZENSU_ROUTE_QUESTION_LIVE above). The off-state DISCLOSURE is not here — it sits
+# above the sessionBanner gate, where a noise flag cannot suppress it.
 if zensu_tdd_strict_enabled; then
   echo "zensu: Flow — track features → implement (strict RED→GREEN TDD) → review chain → dashboard."
-  echo "zensu: Tip — use Claude Code Plan mode for code changes; on approval Zensu asks whether to run the /zensu:tdd workflow (RED→GREEN + review chain). Run it and edits are TDD-gate-enforced; decline and you implement directly."
+  if [ "$_ZENSU_ROUTE_QUESTION_LIVE" = yes ]; then
+    echo "zensu: Tip — use Claude Code Plan mode for code changes; on approval Zensu asks which delivery route to take: /zensu:autopilot (unattended to a reviewed, validated PR), /zensu:tdd (this plan now, RED→GREEN + review chain, edits TDD-gate-enforced), /zensu:pilot (guided pipeline for a feature already tracked in Zensu), or implementing it directly."
+  else
+    echo "zensu: Tip — use Claude Code Plan mode for code changes."
+  fi
 else
   echo "zensu: Flow — track features → implement (vanilla mode, TDD discipline off via hooks.tddImplementation=false) → review chain → dashboard."
-  echo "zensu: Tip — use Claude Code Plan mode for code changes; on approval Zensu asks whether to run the /zensu:tdd workflow (vanilla implementation + review chain). Run it and the evidence audits + review chain are enforced; decline and you implement directly."
+  if [ "$_ZENSU_ROUTE_QUESTION_LIVE" = yes ]; then
+    echo "zensu: Tip — use Claude Code Plan mode for code changes; on approval Zensu asks which delivery route to take: /zensu:autopilot (unattended to a reviewed, validated PR), /zensu:tdd (this plan now, vanilla implementation with the evidence audits + review chain enforced), /zensu:pilot (guided pipeline for a feature already tracked in Zensu), or implementing it directly."
+  else
+    echo "zensu: Tip — use Claude Code Plan mode for code changes."
+  fi
 fi
-echo "zensu: Skills — /zensu:bootstrap · /zensu:ghost-scan · /zensu:pilot · /zensu:implement · /zensu:tdd · /zensu:security-review · /zensu:pulse · /zensu:zensu-help (Q&A)."
+echo "zensu: Skills — /zensu:bootstrap · /zensu:ghost-scan · /zensu:autopilot · /zensu:pilot · /zensu:implement · /zensu:tdd · /zensu:security-review · /zensu:pulse · /zensu:zensu-help (Q&A)."
 if command -v zensu >/dev/null 2>&1; then
   echo "zensu: CLI ready ($(command -v zensu)) — Zensu skills drive it. On an auth error run: zensu auth login."
 else

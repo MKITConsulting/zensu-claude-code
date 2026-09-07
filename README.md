@@ -18,8 +18,8 @@ Any language, any stack. Nothing to configure, and no account needed to start.
 
 ## What you get
 
-- **A plan you approve first.** Claude Code plans; Zensu asks once whether to
-  run the guided workflow. You stay in the loop exactly once, not every turn.
+- **A plan you approve first.** Claude Code plans; Zensu asks once which delivery
+  route to take. You stay in the loop exactly once, not every turn.
 - **A review that cannot be skipped.** Five specialist reviewers run in
   parallel, an independent judge checks their blind spots, and a Stop hook makes
   sure the chain actually finished before the turn ends.
@@ -75,7 +75,8 @@ validated pull request: one planning gate, then plan → build → review → fi
 verify, unattended. It stops at a ready PR and never merges.
 
 **Just this change** — describe what you want and approve the plan. Zensu asks
-whether to run the guided workflow with its review chain.
+which delivery route to take: autopilot to a reviewed PR, the guided workflow
+with its review chain, the step-by-step pilot, or implementing it directly.
 
 ## What's included
 
