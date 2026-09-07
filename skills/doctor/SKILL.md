@@ -416,6 +416,17 @@ classifier will refuse a spawn, not only when the whole table is green.
   `/zensu:adopt-session --confirm`: on an `already-served` record that re-runs the
   lease sweep as an idempotent in-place repair and re-mints nothing. A fresh session
   is the fallback, for the refusals that have no in-place exit.
+- **❌ binding: this session's Session Control record is intact, but the
+  installation that minted it has been removed from the plugin cache** → the
+  fourth named bind failure, with its own row naming both versions (`record
+  minted by X, executing Y`). The host keeps only a few plugin versions in its
+  cache, so a session that outlives them lands here whatever its lineage: nothing
+  can re-verify the record any more and no installation serves it. Never report
+  it as a missing record. The remedy is the same in-place adoption as the lineage
+  row — `/zensu:adopt-session`, then `/zensu:adopt-session --confirm` — and the
+  adoption report marks the minting version `(installation no longer on disk)`.
+  Both commands and this diagnostic stay reachable, and `Stop` is released rather
+  than wedged. Do NOT tell the user to restart after a successful adoption.
 - **⚠️ chain: wedged chain(s)** → a review chain reached a shape no supported
   command can advance. Report it and name `/zensu:recover-chain`, which must be
   run **from the session that owns that chain** (the row prints its truncated

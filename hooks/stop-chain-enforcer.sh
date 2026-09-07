@@ -39,7 +39,7 @@ emit_session_runtime_missing_block() {
 }
 
 emit_session_bind_failed_block() {
-  printf '%s\n' '{"decision":"block","reason":"Zensu Stop denied: this Stop event cannot be bound to the immutable Session Control record of its session, so review-chain and Autopilot completion cannot be proven. Three bind failures are released before this point — a session with NO record at all, a record whose recorded project root no longer exists (a deleted or recycled worktree), and an intact record served by a declared-incompatible plugin lineage (adoptable via /zensu:adopt-session) — so this is none of them: most often a record exists here and disagrees about something else, such as a record minted against a different plugin installation, a runtime digest that drifted, or a root that still exists but no longer matches. Any release check can also simply fail to evaluate, in which case no record was consulted at all. The Session Control binder usually printed the exact cause on stderr; when it did, that line is authoritative. Do not guess between these states and do not treat this as completion: report the block and ask the user to read the stderr output. /zensu:doctor stays reachable in every bind failure and names the disagreement; where a record does disagree for any other reason, only a fresh Claude Code session helps."}'
+  printf '%s\n' '{"decision":"block","reason":"Zensu Stop denied: this Stop event cannot be bound to the immutable Session Control record of its session, so review-chain and Autopilot completion cannot be proven. Four bind failures are released before this point — a session with NO record at all, a record whose recorded project root no longer exists (a deleted or recycled worktree), an intact record served by a declared-incompatible plugin lineage, and an intact record whose minting installation was pruned from the plugin cache (both adoptable via /zensu:adopt-session) — so this is none of them: most often a record exists here and disagrees about something else, such as a record minted against a different plugin installation, a runtime digest that drifted, or a root that still exists but no longer matches. Any release check can also simply fail to evaluate, in which case no record was consulted at all. The Session Control binder usually printed the exact cause on stderr; when it did, that line is authoritative. Do not guess between these states and do not treat this as completion: report the block and ask the user to read the stderr output. /zensu:doctor stays reachable in every bind failure and names the disagreement; where a record does disagree for any other reason, only a fresh Claude Code session helps."}'
 }
 
 emit_session_record_unusable_block() {
@@ -174,8 +174,63 @@ if ! zensu_bind_hook_session "$INPUT"; then
     echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is intact and the only disagreement is that the running installation declares an incompatible lineage (record minted by ${RECORDED_VERSION}, executing ${EXECUTING_VERSION}). The binding that resolves the project root is what failed, so no review-chain or Autopilot state could be read from here: no completion was proven, only an unprovable guard released. The workflow document itself SURVIVES and is unchanged. Run /zensu:adopt-session to find out whether this installation may take the record over; if it can, /zensu:adopt-session --confirm re-binds the session and the very next Stop enforces the chain again. If the executing version is OLDER than the recorded one, adoption refuses and re-installing the newer version is the only way back — the guard stays released until then. Blocking instead would loop a session whose Edit and Bash channels are already denied, so the remedy would never reach you." >&2
     exit 0
   fi
+  # The FOURTH release, for the other named state with the same in-place remedy:
+  # the installation that minted the record has been pruned from the plugin
+  # cache, so no installation can serve the record and nothing can re-verify it.
+  # FOUR of the lineage release's statements carry over verbatim — the binding
+  # failed, the chain cannot be read from here, the document survives, adoption
+  # re-binds — and it was the state this hook still looped on: it fell
+  # through to the block below, unbounded, in a session whose every other
+  # channel was already denied. Disjoint from the lineage arm by construction
+  # (that predicate needs the strict read to succeed, this one needs it to
+  # fail), so the order of the two arms is immaterial. The version pair is
+  # captured for the message and never leaked to stdout.
+  #
+  # INDUCIBILITY — stated here because both sibling arms state their own, and
+  # this arm's channel is NEITHER of theirs. The lineage arm fires when the
+  # EXECUTING version changes; this one fires when the RECORDED directory
+  # disappears. Removing that directory is reachable from inside a healthy,
+  # chain-armed session on a COMPATIBLE lineage: the recorded root is not the
+  # root the session is running from, so deleting it breaks nothing underneath
+  # the session. Nothing gates it either — bash-source-write-parse.js carries
+  # `rm` only as a git subcommand, and pre-write-plugin-data-guard.sh is
+  # registered on the Edit and Notebook matchers and covers the data store, not
+  # the plugin root. So a session can convert its own blocking Stop into a
+  # release by deleting a directory it does not execute from, and the release is
+  # unledgered for the same reason the other three are.
+  #
+  # This is NOT parity with the orphan arm's `mv` channel, and saying so was
+  # wrong. That one requires renaming the user's OWN project root, which is
+  # self-announcing — the work is in that directory and no plausible cover story
+  # exists. This one requires deleting a stale plugin-cache version directory the
+  # session does not execute from: invisible, breaking nothing the user can see,
+  # and "cleaning up old plugin versions" is a sentence a model can write in good
+  # faith. The state it converts FROM differs too. Before this arm, deleting that
+  # directory produced a fully wedged session — every gate denied AND Stop blocked
+  # — so there was no incentive; after it, the same delete converts a healthy,
+  # chain-armed, compatible-lineage session into one whose Stop releases. That is
+  # a new capability, not a re-labelling, and it lands inside the detection gap
+  # CLAUDE.md already records as open for the sibling channel.
+  #
+  # A THIRD cause reaches this arm with nobody deleting anything: a host update
+  # in flight. An installer that unlinks the version directory before extracting
+  # the new bytes leaves the recorded root answering ENOENT for that window, and
+  # the absence proof is a single lstat. Accepted because the alternative wedges
+  # every genuinely pruned session forever with no in-session escape.
+  if PRUNED_RUNTIME="$(zensu_session_pruned_plugin_root "$INPUT")" \
+    && [ -n "$PRUNED_RUNTIME" ]; then
+    RECORDED_VERSION="${PRUNED_RUNTIME%%$'\t'*}"
+    EXECUTING_VERSION="${PRUNED_RUNTIME##*$'\t'}"
+    if ! [[ "$RECORDED_VERSION" =~ $ZENSU_SAFE_VERSION_RE ]] \
+      || ! [[ "$EXECUTING_VERSION" =~ $ZENSU_SAFE_VERSION_RE ]]; then
+      RECORDED_VERSION="(unreadable)"
+      EXECUTING_VERSION="(unreadable)"
+    fi
+    echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is intact, but the installation that minted it (version ${RECORDED_VERSION}) has been removed from the plugin cache, so the running installation (${EXECUTING_VERSION}) cannot re-verify the record and no installation can serve it. Unlike the other three released bind failures, its recorded project root is intact — the relaxed reader still proves that root exists — so the workflow document is READABLE here; what failed is the session binding, and this hook declines to read a chain it cannot bind. The guarantee is therefore DEFERRED, not unavailable: no completion was proven, and the workflow document SURVIVES unchanged. Run /zensu:adopt-session to find out whether the running installation may take the record over; if it can, /zensu:adopt-session --confirm re-binds the session and the very next Stop enforces the chain again. Blocking instead would loop a session whose Edit and Bash channels are already denied, so the remedy would never reach you." >&2
+    exit 0
+  fi
   if ! zensu_stop_guard_opted_out; then
-    echo "zensu chain-enforcer: this Stop cannot be bound to the Session Control record of this session. Three bind failures are released before this point — a session with no record at all, a record whose recorded project root no longer exists, and a record that is intact but served by a declared-incompatible lineage — so this is none of them: most often a record exists here and disagrees about something else (a foreign plugin installation, a runtime digest that drifted, a root that still exists but no longer matches, a tampered or unreadable record), though any release check can also fail to evaluate, in which case no record was consulted. Read the session-control-v1 line above when there is one — it states the exact cause, and it is authoritative over any inference. The record is immutable, so no Stop can ever prove completion from a record that disagrees: start a new session for further work. /zensu:doctor stays reachable in every bind failure and names the disagreement. ZENSU_CHAIN=off or hooks.chainEnforcer=false releases this guard explicitly." >&2
+    echo "zensu chain-enforcer: this Stop cannot be bound to the Session Control record of this session. Four bind failures are released before this point — a session with no record at all, a record whose recorded project root no longer exists, a record that is intact but served by a declared-incompatible lineage, and a record whose minting installation was pruned from the plugin cache — so this is none of them: most often a record exists here and disagrees about something else (a foreign plugin installation, a runtime digest that drifted, a root that still exists but no longer matches, a tampered or unreadable record), though any release check can also fail to evaluate, in which case no record was consulted. Read the session-control-v1 line above when there is one — it states the exact cause, and it is authoritative over any inference. The record is immutable, so no Stop can ever prove completion from a record that disagrees: start a new session for further work. /zensu:doctor stays reachable in every bind failure and names the disagreement. ZENSU_CHAIN=off or hooks.chainEnforcer=false releases this guard explicitly." >&2
     emit_session_bind_failed_block
   fi
   exit 0
