@@ -3,13 +3,22 @@
 # Shared watchdog ladder for hook-path child processes.
 #
 # THE one watchdog ladder. It serves the children that read OUTSIDE
-# this process — the `git status` the turn counter runs and the transcript read the
-# refused-spawn probe runs — which is the criterion, not a count. State it that way:
+# this process — the `git status` the turn counter runs, the transcript read the
+# refused-spawn probe runs, and the children `hooks/user-prompt-zen-mode.sh` spawns
+# — which is the criterion, not a count. State it that way:
 # CLAUDE.md records that an enumeration of the `node` children on this path was written
 # as "a THIRD child" and was already short by one on the day it landed, and the two the
 # lease adds carry no watchdog on ANY host and are named there as a known gap.
 #
-# The two it serves used to carry SEPARATE ladders, so the arm added to one was missing
+# NOT EVERY CALLER IS ON THE STOP PATH, and that is worth naming rather than folding
+# into the list above, because it changes what the deadline below is. The zen-mode
+# children fire on EVERY prompt of a zen-mode session, so this constant bounds a
+# per-prompt caller as well as the two end-of-turn ones — one deadline across all of
+# them, and `Z45` in `tests/structure/test-zen-mode.sh` is what holds it under that
+# hook's own registration timeout. Raising it is therefore no longer a Stop-path-only
+# decision.
+#
+# The two Stop-path children it was created for used to carry SEPARATE ladders, so the arm added to one was missing
 # from the other — and the one left behind was the transcript read, whose own comment
 # records the larger exposure. `timeout` is absent on base macOS and some Git Bash
 # installs, and `gtimeout` is the name a Homebrew coreutils install puts there instead,
@@ -35,15 +44,24 @@
 # byte, `lstat`s and requires a regular file BEFORE opening, opens `O_NOFOLLOW|O_NONBLOCK`
 # and re-checks by `fstat` — so a FIFO, device or symlink at that path cannot block. What
 # the unbounded arm actually leaves is a REGULAR FILE ON STALLED STORAGE, and a git status
-# that hangs. Availability only, no adversary in the loop. Worth knowing beside it: the
-# Stop hook's own registration in `hooks.json` carries no `timeout` key, unlike several
-# sibling entries, so nothing in this repository bounds the hook either and whether the
-# host applies a default is unverified.
+# that hangs. Availability only, no adversary in the loop.
+#
+# WHAT THE UNBOUNDED ARM COSTS DIFFERS PER CALLER, and stating only the Stop-path answer
+# understated it. On the Stop path it costs a DIAGNOSTIC: the Stop hook's own registration
+# in `hooks.json` carries no `timeout` key, unlike several sibling entries, so nothing in
+# this repository bounds that hook either and whether the host applies a default is
+# unverified. On the zen-mode path the registration DOES carry a bound — `"timeout": 20` —
+# so the host kills the whole hook instead, and that turn loses the entire injected
+# directive: the mode contract, the anchor AND the in-band `zen off` escape, which is the
+# only way out of the mode. Same arm, two very different prices.
 zensu_run_bounded() {
   # `"$@"` with zero positional parameters aborts under `set -u` on bash 3.2, which is
   # macOS's /bin/bash and this script's interpreter — so a future argument-less call would
-  # kill the Stop hook rather than no-op. Latent today (both call sites pass a command),
-  # guarded so the property does not depend on every later caller remembering.
+  # kill the hook rather than no-op. Latent today — every live call site passes a command —
+  # and guarded so the property does not depend on every later caller remembering. Do not
+  # restate that parenthetical as "both call sites": there are SIX, in THREE files, and the
+  # ladder's own header says the census is a criterion rather than a count for exactly this
+  # reason. Say "every live call site", which stays true as callers are added.
   # NON-ZERO, not 0. Returning success with no output would leave the transcript caller's
   # `probe` empty, which its `case` classifies as `unparseable` — a verdict the scope-sentence
   # allowlist WITHHOLDS on — where a failure leaves the initializer's `unprobed`, which is the

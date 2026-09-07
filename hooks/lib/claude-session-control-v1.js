@@ -132,6 +132,25 @@ function rejectSourceRevisionOverride() {
   }
 }
 
+// The PUSH half of the rebuild disclosure. `/zensu:doctor` renders the
+// BASELINE_REBUILT history entry, but that is a PULL channel: it says nothing until
+// somebody runs it, and the one person who needs to know did not ask. This notice
+// travels on the SessionStart `additionalContext` the model already receives, so the
+// very first reply after an automatic heal can say what was lost.
+//
+// It is model-facing, which is a real bound rather than a detail: nothing forces the
+// model to relay it, so this SUPPLEMENTS the doctor row and never replaces it. It is
+// deliberately not a Stop-hook block — after a rebuild the baseline reads "never
+// active", so there is no armed chain left to enforce and a block would obstruct the
+// common blameless case (a deleted and re-created worktree) to catch a rare one it
+// cannot tell apart, the distinguishing state having been destroyed with the document.
+const BASELINE_HEAL_NOTICE = 'Zensu: this session\'s workflow document was missing and was '
+  + 'rebuilt automatically at SessionStart. Rebuilding is a loss, not a restore: the '
+  + 'rebuilt baseline reads "never active", so a review chain that was live when the '
+  + 'document vanished is gone and the Stop guard will release this session without '
+  + 'asking for a reviewer. Tell the user this in your next reply, and offer /zensu:tdd '
+  + 'to re-arm if that work still needs a review. /zensu:doctor reports the same finding.';
+
 function main() {
   const payload = readPayload();
   // SessionStart also carries agent_type for top-level `claude --agent`
@@ -149,6 +168,7 @@ function main() {
   ensurePrivatePath(controlRoot, ['locks']);
 
   let context;
+  let baselineHealNotice = '';
   if (payload.hook_event_name === 'SessionStart') {
     const key = core.sessionKey(payload.session_id);
     const recordFile = path.join(recordsDir, `${key}.json`);
@@ -178,10 +198,87 @@ function main() {
       if (isFresh && eventCwd !== context.project_root) {
         fail('fresh SessionStart cwd does not match the existing session project');
       }
-      core.readWorkflowState({
-        projectRoot: context.project_root,
-        sessionId: payload.session_id,
-      });
+      // The record exists and this runtime serves it, so the ONE thing that can
+      // still be gone is the workflow document the record anchors. A bare
+      // readWorkflowState failed the hook there, which repaired nothing and left
+      // the session wedged: the capability gate denies every tool while the
+      // document is absent, and no later SessionStart could help either, because
+      // this same branch would fail again.
+      //
+      // The argument for healing it is the one the sibling *no record* branch
+      // already makes below in its own words — refusing creates no document, and
+      // no document fails every stateful hook closed for the rest of the session.
+      // It grants nothing a fresh session would not have: a baseline reading
+      // "never active", which is all a rebuilt one can say.
+      //
+      // ENOENT ONLY. `unsafe` (a symlink, a hard link, a non-file, an oversized
+      // file) and `unreadable` (present, does not validate) still fail here:
+      // something IS at that path, and rebuilding over it would destroy the
+      // evidence. classifyWorkflowBaseline performs the PRESENT read itself, so
+      // this replaces the previous readWorkflowState rather than adding a second.
+      const baselineFile = core.adoptionWorkflowStatePath(context.project_root, payload.session_id);
+      const baselineState = core.classifyWorkflowBaseline(
+        baselineFile,
+        context.project_root,
+        payload.session_id,
+      );
+      if (baselineState === core.BASELINE_STATES.MISSING) {
+        try {
+          // Records its own BASELINE_REBUILT history entry, so an automatic heal is
+          // never silent — the same provenance the confirmed repair leaves. The
+          // RESULT is read rather than discarded: repairWorkflowBaseline catches a
+          // failed mutateWorkflowState internally and returns
+          // `provenance: "unavailable: ..."` instead of throwing, so an
+          // unrecorded rebuild would otherwise leave no trace on the ONE path that
+          // runs without the user asking for it. The confirmed path already
+          // surfaces this; this one said nothing.
+          const healed = core.repairWorkflowBaseline({
+            recordsDir,
+            sessionId: payload.session_id,
+            pluginData,
+            executingPluginRoot: pluginRoot,
+            host: 'claude',
+          });
+          // Set on BOTH outcomes. The rebuild is real whether or not its provenance
+          // entry landed, and the branch below reports the missing entry, never the
+          // missing rebuild — hanging the notice off `provenance` would withhold it
+          // in exactly the case with the least surviving evidence.
+          baselineHealNotice = BASELINE_HEAL_NOTICE;
+          if (healed && healed.provenance !== 'recorded') {
+            process.stderr.write(
+              'zensu SessionStart: the workflow document was rebuilt but its '
+              + 'BASELINE_REBUILT provenance entry could not be written ('
+              + String(healed.provenance) + '). The rebuild is real and '
+              + 'unrecorded in the workflow history; report this rather than '
+              + 'repeating it.\n',
+            );
+          }
+        } catch (error) {
+          // repairWorkflowBaseline re-evaluates the verdict and refuses anything
+          // that is no longer `missing`. Between the classify above and its own
+          // read, a concurrent writer can legitimately have created the document —
+          // and this adapter has NO local catch, so that benign race exited the
+          // whole SessionStart hook non-zero and left the session with no baseline
+          // for the rest of its life: the exact class of wedge this branch exists
+          // to remove.
+          //
+          // The CODE decides, not a second classification and not the message.
+          // Re-classifying here worked but put the decision in the host adapter,
+          // where the sibling caller made the opposite one; the core now types the
+          // two cases apart so both hosts branch on one judgement.
+          // The PREDICATE, never the raw constant: `undefined === undefined` reads
+          // as a match, so a tree where the export is missing would report every
+          // refusal — tamper included — as the benign race.
+          if (typeof core.isBaselineAlreadyPresent === 'function'
+            && core.isBaselineAlreadyPresent(error)) {
+            // Someone else healed it. That is the outcome this branch wanted.
+          } else {
+            throw error;
+          }
+        }
+      } else if (baselineState !== core.BASELINE_STATES.PRESENT) {
+        fail(`SessionStart workflow document is ${baselineState}: ${baselineFile}`);
+      }
     } else {
       // No record for this session id, whatever the source claims: a fork, a
       // resume whose private record was pruned, or a continuation across a
@@ -236,7 +333,12 @@ function main() {
     : principal === principals.PRINCIPALS.MAIN
       ? core.renderMainContext(context)
       : core.renderHostContext(context);
-  process.stdout.write(`${JSON.stringify(hookOutput(payload.hook_event_name, additionalContext))}\n`);
+  // Appended rather than substituted: the principal's own context is what binds the
+  // session, and a notice that replaced it would trade a disclosure for the binding.
+  const emittedContext = baselineHealNotice === ''
+    ? additionalContext
+    : `${additionalContext}\n\n${baselineHealNotice}`;
+  process.stdout.write(`${JSON.stringify(hookOutput(payload.hook_event_name, emittedContext))}\n`);
 }
 
 try {
