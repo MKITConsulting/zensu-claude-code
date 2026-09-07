@@ -1621,7 +1621,10 @@ function currentSessionKey() {
 // fallback, and only because a session with no bound record has nothing better.
 // Control bytes, refused wherever a value reaches the report or a shell. Declared
 // here because `stateProjectRoot` below is the first consumer.
-var CONTROL_BYTE_RE = /[\u0000-\u001f\u007f]/;
+// C0, DEL, C1, and the Unicode line/paragraph separators. The last two are the ones a
+// forged report line would use, and this file's own threat model for the sibling value
+// is exactly line forging.
+var CONTROL_BYTE_RE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
 
 // The reader re-enforces the ONE invariant of its producer that has a consequence
 // here, which is the rule `currentSessionKey` states one function up: a caller
@@ -2250,6 +2253,579 @@ function truncatedList(rows) {
   return listed.join('; ') + (overflow ? '; +' + overflow + ' more' : '');
 }
 
+// --- durable Autopilot runs ------------------------------------------------
+//
+// Until this row existed /zensu:doctor carried NO Autopilot row of any kind, and
+// a nonterminal run holding the working tree was visible only in the refusal that
+// happened to name it: the --autopilot-begin refusal, the standalone /zensu:tdd
+// begin refusal, the deferred-review Stop refusal, and the stderr line the fence
+// prints when it stands down. Every one of those requires you to have TRIED the
+// thing the run blocks. Nothing answered "is a run holding this tree, and where
+// is it tracked" up front, so two wrong inferences were routine: that the hash in
+// the pointer filename identifies the PROJECT (it is sha256 of the OWNER SESSION
+// id, `_autopilot_owner_key`), and that the hold comes from a shared git
+// directory (it comes from path containment between two worktrees, decided by
+// `mayHoldWorkspace`, which tests BOTH directions).
+//
+// EVERY shape rule below mirrors `zensu-autopilot-state.sh`, and the direction of
+// the mirror is the contract: this reader must never be WIDER than the module
+// that owns those records. A wider reader renders as an ordinary run something
+// the product itself refuses, and then prints a remedy that cannot execute — the
+// exact "confidently states something untrue" failure this row exists to remove.
+// The vocabulary is a HAND COPY, and the honest reason is PACKAGING, not reach:
+// the run-record vocabulary lives inside a bash HEREDOC, so there is no module to
+// require — this tree already loads modules by an env-supplied path in about thirty
+// places (`require(process.env.CONTROL_CORE)` and friends), so "no `require` can
+// reach a bash file" was a scheduling decision dressed as a structural bound, which
+// is how a gap stops being revisited. That is the `REVIEWER_AGENT` position and it
+// takes the same interim remedy, a machine pin against the owner (P1na). THE
+// TRIGGER for extracting the vocabulary into a host-neutral module required from
+// both sides: the next change that adds or removes a member of `STAGES`,
+// `TERMINAL` or `STATE_KEYS` — that edit already touches both sides and pays most
+// of the cost — or a second read-side consumer, whichever comes first.
+// The owner's `NEXT_ACTION`, mirrored. It exists here for ONE purpose: to keep the
+// OK glyph off a record the owner refuses. The row itself may render on the loose
+// shape below — a held tree is held either way, and withholding the row would be
+// worse than an imprecise one — but `ordinary` decides a GREEN row AND, through
+// `warnCount`, the report's "all checks green" summary, so that arm must be at
+// least as strict as `stateValid`. Mirroring the map is what makes the check
+// possible at all; P1na's technique pins it against the owner.
+var AUTOPILOT_NEXT_ACTION = {
+  PLANNING: 'AWAIT_PLAN_APPROVAL',
+  AWAIT_TDD: 'START_TDD',
+  TDD_RUNNING: 'AWAIT_TDD_CHAIN',
+  GATES: 'RUN_GATES',
+  CONVERGE: 'RUN_CONVERGENCE',
+  OPEN_PR: 'RECONCILE_PR',
+  TEAM_REVIEW: 'RECONCILE_TEAM_REVIEW',
+  FIX_FINDINGS: 'FIX_REVIEW_FINDINGS',
+  VALIDATE: 'VALIDATE_FEATURE',
+  COVER: 'RUN_COVERAGE',
+  DELIVER: 'DELIVER_PR',
+  BLOCKED: 'AWAIT_RESUME',
+  DONE: 'NONE',
+  CANCELLED: 'NONE',
+};
+// The nested objects `stateValid` accepts by EXACT key set. Checking the key sets
+// (not every value) is the cheapest thing that separates a record the owner reads
+// from one it refuses, and it is what the suite's own fixtures fail.
+var AUTOPILOT_NESTED_KEYS = {
+  options: ['cover', 'validate'],
+  tdd: ['attempt', 'chainId', 'sessionId', 'returnStage', 'outcome', 'headUpdateRequired'],
+  effects: ['prOpen', 'teamReview'],
+  blocked: ['from', 'code'],
+  stopBudget: ['stage', 'count'],
+};
+var AUTOPILOT_RUN_RE = /^autopilot-run-(.*)\.json$/;
+var AUTOPILOT_STAGES = ['PLANNING', 'AWAIT_TDD', 'TDD_RUNNING', 'GATES', 'CONVERGE',
+  'OPEN_PR', 'TEAM_REVIEW', 'FIX_FINDINGS', 'VALIDATE', 'COVER', 'DELIVER', 'BLOCKED',
+  'DONE', 'CANCELLED'];
+var AUTOPILOT_TERMINAL = ['DONE', 'CANCELLED'];
+// `identifier` in the owning module is `length >= 3 && length <= 128` over
+// `^[A-Za-z0-9][A-Za-z0-9_.:-]*$`. The `{2,127}` quantifier reproduces that
+// bound exactly. An earlier `{0,127}` admitted one- and two-character ids the
+// owner refuses, so a record that aborts `readRunInventory` for the whole project
+// rendered here as an ordinary run.
+var AUTOPILOT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{2,127}$/;
+var AUTOPILOT_OWNER_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{2,127}$/;
+// `nonEmpty(value, 4096)` in the owner. Without it the only cap on a value the
+// report prints verbatim was the config reader's 1 MiB, and `.zensu/state/` is
+// writable from inside any session in the project.
+var AUTOPILOT_FIELD_MAX = 4096;
+// The owner's own `MAX_BYTES` for a run record. Larger than NOTE_MAX_BYTES
+// because a run carries an event ledger.
+var AUTOPILOT_RUN_MAX_BYTES = 1024 * 1024;
+// How many candidate documents are opened at all. A small multiple of the row
+// budget: enough that the rows the report can print are always drawn from a
+// complete read, bounded so the scan cost is a constant rather than a property of
+// a directory anyone in the project can fill.
+var AUTOPILOT_SCAN_MAX = 64;
+// The rendered bound for a co-tenant-writable free-text field. Shorter than the
+// accepted bound on purpose: acceptance decides whether the record is readable,
+// rendering decides how much of it a model is asked to relay.
+var AUTOPILOT_RENDER_MAX = 200;
+// `STATE_KEYS` / `STATE_KEYS_WORKSPACE` in the owner, which `stateValid` accepts
+// as an EXACT key set in either shape. Checking it here is what keeps this reader
+// from describing a record every Autopilot verb refuses.
+var AUTOPILOT_STATE_KEYS = ['schemaVersion', 'runId', 'projectRoot', 'ownerSessionId',
+  'stage', 'nextActionCode', 'approvedPlanSha256', 'options', 'tdd', 'effects',
+  'evidence', 'blocked', 'bypasses', 'stopBudget', 'events'];
+
+// Reads one file out of the session-writable state directory. Deliberately NOT
+// `readJson`, which is the CONFIG reader: that one declines O_NOFOLLOW on purpose,
+// because a dotfile manager symlinks a config routinely, and it makes no nlink
+// check. Neither justification transfers to `.zensu/state/`, and the sibling
+// `readNoteJson` — which reads a different file in this same directory — hardens
+// both. Same guards, larger cap.
+function readAutopilotJson(file) {
+  var fd;
+  try {
+    var pre = fs.lstatSync(file);
+    if (!pre.isFile() || pre.nlink !== 1 || pre.size > AUTOPILOT_RUN_MAX_BYTES) return null;
+    var noFollow = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)
+      ? fs.constants.O_NOFOLLOW : 0;
+    var nonBlock = Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;
+    fd = fs.openSync(file, fs.constants.O_RDONLY | noFollow | nonBlock);
+    var st = fs.fstatSync(fd);
+    if (!st.isFile() || st.nlink !== 1 || st.size > AUTOPILOT_RUN_MAX_BYTES) return null;
+    // Zero-filled deliberately. `readNoteJson` is the file's ONE sanctioned
+    // `allocUnsafe` and P1br1 pins that; an uninitialised buffer here would also
+    // expose whatever the short-read guard below is there to refuse.
+    var buf = Buffer.alloc(st.size);
+    var read = 0;
+    while (read < st.size) {
+      var n = fs.readSync(fd, buf, read, st.size - read, read);
+      if (n <= 0) break;
+      read += n;
+    }
+    // A short read would truncate the JSON and land this plugin's own record in
+    // the "could not be read" row, which is a claim about the file rather than
+    // about the read. Refuse instead.
+    if (read !== st.size) return null;
+    return JSON.parse(buf.toString('utf8').replace(/^﻿/, ''));
+  } catch (e) {
+    return null;
+  } finally {
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch (e2) { /* ignore */ } }
+  }
+}
+
+// Canonicalizes a directory the way the owning module stores it, falling back to the
+// lexical spelling when the path does not exist — a record naming a deleted root must
+// still compare, and a throw here would take the whole row down.
+function autopilotCanonical(value) {
+  try { return fs.realpathSync.native(path.resolve(value)); }
+  catch (e) { return path.resolve(value); }
+}
+
+// Reads ONE run document. `stem` is the filename's own capture group, and the
+// record's `runId` must EQUAL it — the same identity check `readRunInventory`
+// makes at its own read (`state.runId !== match[1]` -> fail 2). Without it the
+// row printed a "Tracked in" path rebuilt from the FIELD, which can name a file
+// that does not exist.
+//
+// Returns a shaped object, or null when the file is not a run this renderer can
+// describe. The distinction matters: `null` here NEVER means "no run", it means
+// "a run document that could not be read", and the caller renders that as its own
+// finding. Reporting an unreadable document as an absent one is exactly the
+// silence this whole row exists to remove.
+function autopilotRun(file, stem, projectRoot) {
+  var parsed = readAutopilotJson(file);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  var keys = Object.keys(parsed).sort();
+  var expected = AUTOPILOT_STATE_KEYS.slice().sort();
+  var expectedWs = AUTOPILOT_STATE_KEYS.concat(['workspaceRoot']).sort();
+  var keyString = keys.join(',');
+  if (keyString !== expected.join(',') && keyString !== expectedWs.join(',')) return null;
+  // The owner refuses on the VALUE too, and a record it refuses fails the whole
+  // project's inventory closed — so describing it here as an ordinary run would
+  // pair a description with a remedy that cannot execute.
+  if (parsed.schemaVersion !== 1) return null;
+  var runId = typeof parsed.runId === 'string' ? parsed.runId : '';
+  var stage = typeof parsed.stage === 'string' ? parsed.stage : '';
+  var owner = typeof parsed.ownerSessionId === 'string' ? parsed.ownerSessionId : '';
+  if (!AUTOPILOT_ID_RE.test(runId) || runId !== stem) return null;
+  if (!AUTOPILOT_OWNER_RE.test(owner)) return null;
+  if (AUTOPILOT_STAGES.indexOf(stage) === -1) return null;
+  // The owner refuses a record whose `projectRoot` disagrees with the tree it was
+  // found in, and every Autopilot verb then fails closed for the whole project.
+  // CANONICAL on both sides. The record's value is a realpath — `_autopilot_project_root`
+  // ends in `cd -P … && pwd -P` — while the caller's is `path.resolve` of either the
+  // record's own root (bound) or the raw harness value (every other verdict), and
+  // `path.resolve` resolves no symlink. Comparing the two lexically rejected every valid
+  // run in a non-bound session whose project path traverses a link, and rendered the
+  // rejection as "could not be read", which is not what happened.
+  if (typeof parsed.projectRoot !== 'string') return null;
+  // ONE side is canonicalized, and it is the CALLER's — exactly as the owner does
+  // it. The worker replaces its own project-root argument with
+  // `realpathSync.native(path.resolve(...))` and then compares the RECORD's field
+  // VERBATIM (`state.projectRoot !== expectedProjectRoot`). Canonicalizing both
+  // sides here made this reader wider than the owner in a way the earlier comment
+  // did not notice: a record whose stored `projectRoot` is any non-canonical
+  // spelling of the same directory rendered as an ordinary run while every
+  // Autopilot verb failed the whole project closed on it. The macOS `/var` vs
+  // `/private/var` case the canonicalization was added for is still fixed, because
+  // the mismatch was always on the caller's side — `stateProjectRoot()` returns a
+  // `path.resolve`, not a realpath.
+  if (parsed.projectRoot !== autopilotCanonical(projectRoot)) return null;
+  // ABSENT and PRESENT-BUT-UNUSABLE are different answers and the row says so.
+  // A record minted before workspace scoping carries no `workspaceRoot` at all,
+  // and `mayHoldWorkspace` short-circuits on that: it then holds EVERY tree in
+  // its project. Rendering that as an unknown workspace would understate it.
+  var workspace = null;
+  if (Object.prototype.hasOwnProperty.call(parsed, 'workspaceRoot')) {
+    workspace = typeof parsed.workspaceRoot === 'string' && parsed.workspaceRoot !== ''
+      && parsed.workspaceRoot.length <= AUTOPILOT_FIELD_MAX
+      && !CONTROL_BYTE_RE.test(parsed.workspaceRoot)
+      // A legitimate value is a git toplevel, which is always absolute. Requiring
+      // it keeps arbitrary prose out of a row the model is told to relay, and the
+      // rejected value still renders — as "a working tree this report cannot read"
+      // rather than as its own text.
+      && (path.isAbsolute(parsed.workspaceRoot) || /^[A-Za-z]:[\\/]/.test(parsed.workspaceRoot))
+      // A BACKTICK is refused outright, not delimited. The render below wraps this
+      // value in a code span, and a delimiter that the value can itself contain is
+      // not an escape: ~200 chosen characters would land outside the span,
+      // mid-sentence, immediately before this row's own `/zensu:autopilot-release`
+      // clause, in a row the doctor skill tells the model to relay verbatim.
+      // Rejection has NO legitimate cost — a git toplevel cannot contain a
+      // backtick — and the value still renders, as the "does not render" arm.
+      && parsed.workspaceRoot.indexOf('`') === -1
+      ? parsed.workspaceRoot : '';
+  }
+  // The STRICTER verdict, carried beside the loose one. It mirrors the parts of
+  // `stateValid` a read-side copy can hold cheaply: the stage-to-next-action map,
+  // the exact key sets of the five nested objects, and a non-empty event ledger.
+  // It is NOT a second copy of `stateValid` and does not claim to be — it is the
+  // floor below which the OK glyph may not be handed out. Everything it misses
+  // costs a WARN row that could have been green; everything it catches would
+  // otherwise have been a green row and an "all checks green" summary for a
+  // project every Autopilot verb fails closed on.
+  var ownerWouldAccept = parsed.nextActionCode === AUTOPILOT_NEXT_ACTION[stage]
+    && Array.isArray(parsed.events) && parsed.events.length > 0;
+  if (ownerWouldAccept) {
+    ownerWouldAccept = Object.keys(AUTOPILOT_NESTED_KEYS).every(function (field) {
+      var value = parsed[field];
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+      var want = AUTOPILOT_NESTED_KEYS[field].slice().sort().join(',');
+      return Object.keys(value).sort().join(',') === want;
+    });
+  }
+  return {
+    runId: runId, stage: stage, owner: owner, workspace: workspace,
+    ownerWouldAccept: ownerWouldAccept,
+  };
+}
+
+// How long the owning session has been silent. The signal is the owner's own
+// workflow document mtime, which is what `autopilot_release_run` ages for its
+// exit 7 refusal. Read it the way that verb reads it — `regularFile` there is
+// lstat plus isFile plus nlink === 1 — because a symlinked or hard-linked beacon
+// makes the release abort with "unsafe state file" while a following `statSync`
+// here would render a confident age and a remedy that cannot execute.
+//
+// Returns `{ kind, ageMs }`. `kind` is 'aged' with a measured age, 'absent' when
+// the file genuinely is not there, or 'unreadable' for anything else — because
+// "could not look" and "nothing was there" are the two answers this whole feature
+// exists to stop conflating.
+function autopilotOwnerSilence(dir, owner, nowMs) {
+  var st;
+  try {
+    st = fs.lstatSync(path.join(dir, 'tdd-phase-' + owner + '.json'));
+  } catch (e) {
+    return (e && e.code === 'ENOENT') ? { kind: 'absent' }
+      : { kind: 'unreadable', code: (e && e.code) || 'unknown' };
+  }
+  if (!st.isFile() || st.nlink !== 1) return { kind: 'unreadable', code: 'not a plain file' };
+  var ageMs = nowMs - st.mtimeMs;
+  // Bounded in BOTH directions, matching the release verb: a future mtime is
+  // operator-settable and would otherwise render as a negative age.
+  return ageMs >= 0 ? { kind: 'aged', ageMs: ageMs } : { kind: 'unreadable', code: 'future timestamp' };
+}
+
+// Does this owner's active pointer still designate this run? The own-run remedy
+// text was written for the state where it does NOT — a torn `begin`, which is the
+// only state `_autopilot_workspace_refusal`'s own-run branch is reachable in. For
+// an ordinary in-progress run the same wording tells a user to "repair" work that
+// is proceeding normally, and the row's WARN then suppresses the green summary
+// for the whole time a legitimate run is live.
+//
+// Returns true, false, or null when the answer could not be established — which
+// is treated as the cautious case rather than as either verdict.
+function autopilotPointerDesignates(dir, owner, runId) {
+  var digest;
+  try {
+    digest = require('crypto').createHash('sha256').update(String(owner)).digest('hex');
+  } catch (e) { return null; }
+  // The owner's `pointerValid` is `exact(pointer, ["schemaVersion","runId"]) &&
+  // schemaVersion === 1 && identifier(runId)`, and `readPointer` FAILS the whole
+  // read on anything else. A weaker rule here would let a pointer the product
+  // refuses answer `true` and flip an own run from WARN to OK — deleting the
+  // finding rather than reporting it, which is the one direction this reader must
+  // never take.
+  function verdict(file) {
+    var parsed = readAutopilotJson(file);
+    if (parsed === null) {
+      try { fs.lstatSync(file); return null; } catch (e) {
+        return (e && e.code === 'ENOENT') ? 'absent' : null;
+      }
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    var keys = Object.keys(parsed).sort().join(',');
+    if (keys !== 'runId,schemaVersion') return null;
+    if (parsed.schemaVersion !== 1) return null;
+    if (typeof parsed.runId !== 'string' || !AUTOPILOT_ID_RE.test(parsed.runId)) return null;
+    return parsed.runId === runId;
+  }
+  var owned = verdict(path.join(dir, 'autopilot-active-' + digest + '.json'));
+  if (owned === true || owned === false) return owned;
+  if (owned === null) return null;
+  // `owned === 'absent'`. The owner does not stop there: `activePointerFor` falls
+  // back to the pre-scoping `autopilot-active.json` and honours it when the run it
+  // names belongs to THIS caller. Answering `false` without that read would call a
+  // run the product considers active "the torn-begin shape".
+  var legacy = verdict(path.join(dir, 'autopilot-active.json'));
+  if (legacy === true) return true;
+  if (legacy === 'absent') return false;
+  // A legacy pointer that is present but names another run, or cannot be read,
+  // settles nothing: the owner-keyed pointer was absent and this one does not
+  // designate the run, but neither is evidence about a torn `begin`.
+  return legacy === false ? false : null;
+}
+
+// One row per NONTERMINAL run. Silent when the project has no run document at
+// all — the same rule the pending-review row follows, and for the same reason:
+// Autopilot is not wired in most projects, so a permanent "no run" row would
+// print in every report and train the reader to skip this block. The row exists
+// to surface a HOLD; absence of any run is not a finding.
+//
+// READ-ONLY, like every other row here: it opens run documents and never writes,
+// renames or deletes one. The confirmed `pending-review.json` cleanup in the
+// skill's Phase 3 remains the report's only write, and it does not reach these
+// files.
+function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
+  var candidates = [];
+  entries.forEach(function (f) {
+    var m = AUTOPILOT_RUN_RE.exec(f);
+    if (m) candidates.push({ name: f, stem: m[1] });
+  });
+  if (!candidates.length) return;
+  candidates.sort(function (a, b) { return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0); });
+  // The number of documents OPENED is bounded too, not only the rows rendered.
+  // Every candidate is a file in a session-writable directory and each may be up
+  // to AUTOPILOT_RUN_MAX_BYTES, so scanning the directory without a bound makes a
+  // renderer whose contract is to always exit 0 do work proportional to whatever a
+  // co-tenant put there.
+  var scanned = candidates.slice(0, AUTOPILOT_SCAN_MAX);
+  var unscanned = candidates.length - scanned.length;
+  var unreadable = [];
+  var rows = [];
+  var ttl = ttlHours();
+  scanned.forEach(function (c) {
+    var run = autopilotRun(path.join(dir, c.name), c.stem, projectRoot);
+    if (!run) { unreadable.push(c.name); return; }
+    if (AUTOPILOT_TERMINAL.indexOf(run.stage) !== -1) return;
+    // THREE cases, never two. `ownKey` is empty for every binding verdict but
+    // `bound`, so an unbound report cannot tell own from foreign, and folding
+    // that into either branch states something it has not established. The
+    // remedy split is `_autopilot_workspace_refusal`'s and is restated for its
+    // reason: a release cancels the run, so offering one against a run this
+    // session owns would end its own live generation. The unknown case therefore
+    // gets NO release command either — the same direction the refusal renderer
+    // takes when it cannot read the holder.
+    var own = ownKey !== '' && run.owner === ownKey;
+    var ownership;
+    var remedy;
+    if (ownKey === '') {
+      ownership = 'owner not established, because the session key did not reach this report';
+      remedy = 'no release command is named here: with the owner unknown, releasing could cancel'
+        + ' this session\'s own live generation. Establish the owner first — the run document'
+        + ' names it in ownerSessionId';
+    } else if (own) {
+      ownership = 'owned by THIS session';
+      remedy = 'finish or repair that run rather than releasing it — releasing a run this session'
+        + ' owns would cancel its own live generation';
+    } else {
+      ownership = 'owned by another session';
+      // The release verb is SCOPED to the caller's own tree: it refuses with exit 6
+      // unless the run's tree contains the caller's or the caller's contains it.
+      // Sibling worktrees under one project root share this state directory, so a
+      // bare release instruction here would name a command that refuses. The row
+      // cannot resolve the caller's tree (this renderer takes no git dependency),
+      // so it says where the command has to be issued from rather than implying
+      // anywhere will do. Both directions are named: `mayHoldWorkspace` ORs
+      // `contains(held, caller)` with `contains(caller, held)`, so a worktree
+      // NESTED inside the held tree is a valid caller too. Naming only the
+      // containing direction contradicted the occupancy sentence this same row
+      // prints two clauses later, and sent a reader out of a tree that works.
+      remedy = 'if that session is gone for good, report it and run /zensu:autopilot-release'
+        + ' after the user says yes — from the working tree that run holds, or one that'
+        + ' contains it or sits inside it, because only a sibling worktree is refused';
+    }
+    // An OWN run whose pointer still designates it is an ordinary run in
+    // progress, not a finding: it renders OK, so a live Autopilot run does not
+    // suppress the green summary for its own owner. Every other case keeps WARN,
+    // including the own run whose pointer does NOT designate it — the torn
+    // `begin` the remedy wording above was written for.
+    var designates = own ? autopilotPointerDesignates(dir, run.owner, run.runId) : null;
+    // BLOCKED is NOT terminal — the same line says so — and the owner's
+    // `read-workspace` filters only on TERMINAL, so a BLOCKED run still refuses a
+    // second begin and a standalone /zensu:tdd. Rendering it green would print
+    // "all checks green" beside a tree that refuses /zensu:tdd.
+    // `ownerWouldAccept` is a REQUIRED conjunct of the green arm and of nothing
+    // else. Without it `ordinary` rested on `autopilotRun`'s six shape gates alone,
+    // so a record the owner refuses — which fails `readRunInventory` for the WHOLE
+    // project — could render OK and let the report print "all checks green" beside
+    // a tree on which nothing can run. WARN may stand on the loose shape; OK may
+    // not.
+    var ordinary = own && designates === true && run.stage !== 'BLOCKED'
+      && run.ownerWouldAccept === true;
+    var glyph = ordinary ? OK : WARN;
+    if (own) {
+      // FOUR own-run states, and each says only what it established. `ordinary` is
+      // the ONLY one that is not a finding; every other keeps WARN. A BLOCKED run
+      // with a live pointer is deliberately its own arm rather than falling through
+      // to the unreadable-pointer wording, because the pointer WAS read there — the
+      // stage is what makes the run a finding.
+      if (ordinary) {
+        remedy = 'this session\'s active pointer still designates it, so it is an ordinary run in'
+          + ' progress — carry it to its terminus rather than releasing it, which would cancel'
+          + ' this session\'s own live generation';
+      } else if (designates === true) {
+        remedy = 'this session\'s active pointer still designates it, but the run is BLOCKED, which'
+          + ' is NOT terminal, so it still holds this tree: resume or cancel it from this session'
+          + ' rather than releasing it';
+      } else if (designates === false) {
+        remedy = 'no active pointer designates it — a torn begin is one cause and a pointer naming'
+          + ' another run is another: finish or repair that run rather than releasing it';
+      } else {
+        remedy = 'this session\'s active pointer could not be read, so whether the run is ordinary'
+          + ' or torn was NOT established — a missing check, not a verdict: finish or repair that'
+          + ' run rather than releasing it';
+      }
+    }
+    var held = run.workspace === null
+      ? 'holds EVERY working tree in this project (the record predates workspace scoping and names none)'
+      // "does not render", not "cannot read": the value WAS read, and the two
+      // reasons it is withheld are different from each other and from a read
+      // failure. The owner's `nonEmpty` rejects C0 bytes only, while this report's
+      // `CONTROL_BYTE_RE` also covers C1, DEL and the Unicode line separators —
+      // so a value the owner ACCEPTED can be withheld here, and saying "cannot
+      // read" would blame the file for a decision this renderer took.
+      : (run.workspace === '' ? 'names a working tree this report does not render'
+        + ' (it is not an absolute path, or it carries a control character this'
+        + ' report refuses to echo even though the owner accepts it)'
+        // Bounded at the point of RENDER as well as at the point of read. The field
+        // is co-tenant-writable free text and the doctor skill tells the model to
+        // relay this row, so 4096 accepted characters must not become 4096 rendered
+        // ones sitting next to a release instruction.
+        // DELIMITED as well as bounded. The value is co-tenant-writable free text
+        // and it is rendered mid-sentence, immediately before this row's own
+        // clauses, so an absolute path chosen to read like report prose — ", owned
+        // by THIS session — it holds …" — otherwise continues the sentence it sits
+        // in. Backticks keep the row readable where `JSON.stringify` would double
+        // every separator in a Windows path. RESIDUAL, stated rather than implied:
+        // a value containing a backtick is not escaped, so this makes the text
+        // unambiguous at a glance, not unforgeable.
+        : 'holds the working tree `' + (run.workspace.length > AUTOPILOT_RENDER_MAX
+          ? run.workspace.slice(0, AUTOPILOT_RENDER_MAX) + '… (elided)'
+          : run.workspace) + '`');
+    var silenceVerdict = autopilotOwnerSilence(dir, run.owner, nowMs);
+    var silence;
+    if (silenceVerdict.kind === 'aged') {
+      silence = 'The owning session last wrote its workflow document '
+        + Math.floor(silenceVerdict.ageMs / 3600000) + 'h ago'
+        // The TTL clause states the RELEASE verb's exit-7 refusal, which sits inside
+        // that verb's FOREIGN-caller branch only. Printing it beside a run this
+        // session owns would state a rule that does not apply there — and `!own`
+        // ALONE is not the foreign case: `own` is false whenever `ownKey` is empty,
+        // which is every binding verdict but `bound`, so testing it alone folds
+        // ownership-not-established into foreign and asserts a branch this report
+        // never established applies. The row says the owner is not established two
+        // clauses down; it must not contradict itself here.
+        + ((ownKey !== '' && !own && ttl > 0)
+          ? ' (a release refuses while that is under ' + ttl + 'h)' : '');
+    } else if (silenceVerdict.kind === 'absent') {
+      silence = 'The owning session has left no workflow document, so its liveness is unknown';
+    } else {
+      silence = 'The owning session\'s workflow document could not be read ('
+        + silenceVerdict.code + '), so its liveness was NOT measured — that is a missing check,'
+        + ' not evidence the session is gone';
+    }
+    // The containment sentence is CONDITIONAL, because for a record carrying no
+    // `workspaceRoot` containment is not what decides: `mayHoldWorkspace`
+    // short-circuits on the absent field before comparing anything. Printing it
+    // there would explain the hold by a mechanism that did not produce it, which
+    // is the same class of wrong explanation this row exists to remove.
+    // `!== null`, NOT truthiness. `null` means the field is ABSENT, and there
+    // `mayHoldWorkspace` short-circuits before comparing anything, so containment
+    // really is not what decides. `''` is the field PRESENT but unrenderable, and
+    // there containment is exactly what decides — dropping the sentence for that
+    // case removed the explanation from the one arm whose remedy still says to act
+    // "from the working tree that run holds", a tree this arm has just declined to
+    // name.
+    var occupancy = run.workspace !== null ? ' Occupancy is decided by path containment in BOTH'
+      + ' directions, not by a shared git directory, so a containing or contained tree is'
+      + ' held too and only a sibling worktree is free.'
+      + (run.workspace === '' ? ' That rule applies to a tree this row cannot print,'
+        + ' so resolve it from the run document named below.' : '') : '';
+    rows.push({
+      glyph: glyph,
+      // The tracked path is the file that was actually OPENED, never a name
+      // rebuilt from a field. `autopilotRun` already refuses a record whose
+      // `runId` disagrees with this stem, so the two cannot diverge — but
+      // rendering the opened name is what makes that true rather than argued.
+      text: 'autopilot: nonterminal durable run ' + run.runId + ' at stage ' + run.stage
+        + ', ' + ownership + ' — it ' + held + ', so no second Autopilot run and no standalone'
+        + ' /zensu:tdd chain may arm there.' + occupancy + ' Tracked in ' + path.join(dir, c.name)
+        + ', with the active pointer named for sha256 of the OWNING SESSION id, never of the'
+        + ' project path. ' + silence + '. Only DONE and CANCELLED are terminal — BLOCKED is'
+        + ' not — and ' + remedy + '.'
+        // In the ROW TEXT, not in one remedy string. `remedy` is reassigned wholesale
+        // inside the own-run branch and set separately for the unbound case, so a
+        // qualification attached to the foreign branch reached one reader in six —
+        // and which one was decided by OWNERSHIP rather than by the record's shape,
+        // which is the opposite of what the sentence is about. It is emitted only
+        // when the stricter check actually failed, so an ordinary row is not padded
+        // with a caveat that does not apply to it.
+        + (run.ownerWouldAccept === true ? ''
+          : ' This row accepted the record on its SHAPE and the owner validates more'
+            + ' than that: this one does not satisfy the stricter check, so every'
+            + ' Autopilot verb may fail closed for this project until the document is'
+            + ' repaired — which makes the document itself the finding.'),
+    });
+  });
+  // Bounded like every other list in this block. An unbounded per-run loop floods
+  // a report the skill tells the model to read back verbatim.
+  rows.slice(0, CHAIN_ROW_LIMIT).forEach(function (r) { line(r.glyph, r.text); });
+  if (rows.length > CHAIN_ROW_LIMIT || unscanned > 0) {
+    line(WARN, 'autopilot: '
+      + (rows.length > CHAIN_ROW_LIMIT
+        ? '+' + (rows.length - CHAIN_ROW_LIMIT) + ' further nonterminal run(s) not listed above'
+        : 'the run listing is incomplete')
+      + (unscanned > 0
+        ? ', and ' + unscanned + ' further run document(s) were not opened at all because the'
+          + ' scan is bounded at ' + AUTOPILOT_SCAN_MAX + ' — so this block is NOT a complete'
+          + ' account of what holds this project'
+        : '')
+      + ' — inspect ' + dir + ' directly.');
+  }
+  if (unreadable.length) {
+    // The NAMES come from a session-writable directory and `(.*)` admits every
+    // control byte but a line terminator, so ESC and DEL reach a report the skill
+    // prints verbatim. Withhold those names rather than the count: the count is
+    // the finding.
+    // Bounded per NAME, not only per count. `AUTOPILOT_RUN_RE`'s `(.*)` accepts any
+    // non-line-terminator text, so a filename is a co-tenant-writable free-text channel
+    // into a row the doctor skill tells the model to relay — the same reason
+    // `workspaceRoot` is render-bounded above, and cheaper to reach, since an empty file
+    // with a chosen name is enough.
+    // DELIMITED for the same reason the workspace path above is: `(.*)` accepts
+    // any printable text, so a chosen filename rendered bare continues the row's
+    // own sentence. Same residual: a name containing a backtick is not escaped.
+    // The BACKTICK is refused here for the same reason as `workspaceRoot`, and this
+    // channel is the cheaper and larger of the two: `(.*)` accepts any stem, an
+    // EMPTY file with a chosen name is enough (no valid JSON needed), and up to
+    // CHAIN_ROW_LIMIT names are joined into one row that also names the release
+    // command. A legitimate run filename cannot carry one — the owner's
+    // `identifier` forbids it — so rejection costs nothing real.
+    var safe = unreadable.filter(function (n) {
+      return !CONTROL_BYTE_RE.test(n) && n.indexOf('`') === -1;
+    })
+      .map(function (n) {
+        return '`' + (n.length > AUTOPILOT_RENDER_MAX
+          ? n.slice(0, AUTOPILOT_RENDER_MAX) + '… (elided)' : n) + '`';
+      });
+    var withheld = unreadable.length - safe.length;
+    line(WARN, 'autopilot: ' + unreadable.length + ' durable run document(s) that could not be read'
+      + ' (unparseable, a shape this report does not accept, or a run id that disagrees with the'
+      + ' filename) — this is NOT the same as no run: such a record still holds its working tree,'
+      + ' and /zensu:autopilot-release needs a run id it cannot supply.'
+      + (safe.length ? ' Inspect ' + truncatedList(safe) + ' in ' + dir + '.' : '')
+      + (withheld ? ' ' + withheld + ' further name(s) are withheld because they carry a'
+        + ' character this report will not echo; list ' + dir + ' directly.' : ''));
+  }
+}
+
 function bindingLine() {
   switch (env.ZDOC_BINDING) {
     case 'bound':
@@ -2350,6 +2926,12 @@ function stateBlock(nowMs) {
     chainRows(states, nowMs, entries, dir);
   }
   reviewerDenialRows(entries, dir, nowMs);
+  // Same two arguments `chainRows` already takes, plus the clock and this
+  // session's key. It sits OUTSIDE the workflow-document branch above on
+  // purpose: an Autopilot run holding the tree is a finding whether or not this
+  // project has a single CAS workflow document, and nesting it there would hide
+  // the hold in exactly the fresh session most likely to walk into it.
+  autopilotRows(entries, dir, nowMs, currentSessionKey(), projectRoot);
   var pr = path.join(dir, 'pending-review.json');
   try {
     var st = fs.statSync(pr);

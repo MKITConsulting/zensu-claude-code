@@ -752,6 +752,18 @@ just a number. Choosing `patch` for a change in that list ships a compatibility
 claim the code cannot honour. The predicate encodes what the numbers *mean*; it
 cannot verify that this policy was followed.
 
+**Practical consequence for anyone RUNNING a suite: never edit the plugin tree while
+one is in flight.** `manifestRuntimeEntries` folds `hooks`, `agents`, `skills`, `docs` and
+`templates` in wholesale, so a suite that mints a Session Control record and then invokes a
+stateful verb measures the digest TWICE — and an edit to any file under those five directories
+between the two measurements makes the second disagree with the first. The verb then refuses
+the binding, and the failure surfaces far from its cause: measured here, a one-paragraph edit to
+`skills/doctor/SKILL.md` during a `test-doctor.sh` run made `--tdd-begin` fail to arm, so the
+chain rendered `no-session` and `P1mc` failed while every check around it stayed green. Nothing
+in the failure text names the digest. `CLAUDE.md` itself is NOT in that set and is safe to edit
+mid-run; the five directories are not. When a suite must run while you keep working, run it from
+a detached `git worktree` instead.
+
 **The release that introduces this policy is itself a `minor`**, because it adds
 `executing_plugin_root` and `executing_runtime_digest` to the attestation. It is
 the last release before the policy binds, so nothing is served across it.
@@ -1066,7 +1078,8 @@ three `stop-chain-enforcer.sh` sites, both `post-review-tdd-delegate.sh` sites, 
 `--autopilot-status`. "Does ANY session hold this working tree" is owner-INDEPENDENT and
 must stay so: `_autopilot_begin_standalone_tdd_critical`,
 `_autopilot_adopt_pending_review_critical`, and both fences in
-`_autopilot_deferred_contention_result`. All four call
+`_autopilot_deferred_contention_result`, plus `_autopilot_hold_probe`, the callback
+`autopilot_workspace_hold_report` runs under its OWN `_autopilot_locked_run`. All five call
 `_autopilot_read_workspace_critical` DIRECTLY, and the reason DIFFERS per group —
 saying "each is already inside the project lease" is false for half of them. The
 two locked fences are inside it. The two contention fences deliberately read
@@ -1075,7 +1088,11 @@ acquired; their own header calls that a read-only proof. What holds for all four
 is that none of them may take a SECOND lease acquisition. The public
 `autopilot_read_workspace` is the wrapper for callers
 OUTSIDE it — it takes the lease itself — and it has exactly ONE: the
-`post-review-tdd-delegate.sh` preflight, which passes a single argument. The Stop hook's rc=4
+`post-review-tdd-delegate.sh` preflight, which passes a single argument. **A SECOND
+lease-taking public reader of the owner-independent question now exists and deliberately does
+NOT route through that wrapper**: `autopilot_workspace_hold_report` needs the worker's own rc
+AND the holder record, and the wrapper collapses both into one status — the exact conflation
+that verb was built to remove. Say "two public readers", never "one wrapper". The Stop hook's rc=4
 read was deleted when the fence began publishing its sentence, so the wrapper's preference
 parameter currently has no production caller at all — S7h2 guards it for the next one. The symbol to look for is `autopilot_read_workspace`'s third
 parameter, not a line number. Do NOT restate this as "there is deliberately no public
@@ -1239,8 +1256,12 @@ implying both.
 `_autopilot_publish_workspace_refusal` sets `ZENSU_AUTOPILOT_WORKSPACE_HOLD_TEXT` beside every
 rc=4 render, and BOTH public entry points — `autopilot_adopt_pending_review` and
 `autopilot_begin_standalone_tdd` — clear it first, so a stale sentence can never be reused.
-(The name carries the library prefix on purpose: it is the only module-scope assignment in this
-file, and the house precedent for a sourced-library global the Stop hook reads by name is
+(The name carries the library prefix on purpose: it was the only module-scope assignment in this
+file until the hold-report verb added two more, `_ZENSU_AP_HOLD_RECORD` and
+`_ZENSU_AP_HOLD_WORKER_RC`. Those two carry the underscore-private prefix deliberately: they are
+an intra-file callback channel read only by `_autopilot_hold_probe` and
+`autopilot_workspace_hold_report`, never across a file boundary — which is exactly what the
+unprefixed name above is NOT, and the house precedent for a sourced-library global the Stop hook reads by name is
 `ZENSU_SAFE_VERSION_RE`.) **TWO forms are rendered from one holder.** The OPERATOR form goes to
 stderr and quotes the audited `zensu-log.sh --autopilot-release --run <id> --confirm`, because a
 human reads it. The MODEL form is what the block reason carries and names `/zensu:autopilot-release`
@@ -1334,11 +1355,13 @@ is a call convention inside one installation and never a persisted shape — an 
 passing three args gets its previous answer. The Stop hook denies strictly LESS than before,
 which cannot make state written by one runtime unreadable to the other; the capability rule
 in that section is about ADDING a hook that can deny, and relaxing an existing hook's deny is
-not in the list. Recorded here because the section's other `**Version.**` paragraph reads
-`minor` and describes the ORIGINAL pointer/schema change, not this delta.
+not in the list. Recorded here because this section carries THREE `**Version.**` paragraphs: the `minor` one
+describes the ORIGINAL pointer/schema change, this one the run-scope delta, and a third the
+run-visibility delta. A releaser matching on the wrong one gets the wrong answer.
 
-**The audience is a property of the CHANNEL, and all three model-read channels were routed to
-the guided form.** The two that a first pass left behind were `_autopilot_begin_standalone_tdd_critical`'s
+**The audience is a property of the CHANNEL, and all FOUR model-read channels are routed to
+the guided form.** The fourth arrived with the `--autopilot-status` stderr disclosure; the three
+original ones are named below. The two that a first pass left behind were `_autopilot_begin_standalone_tdd_critical`'s
 stderr — the tool RESULT of a `zensu-log.sh --tdd-begin` a model runs — and the `begin` worker's
 own `fail(4, …)` twin, surfaced by `zensu-log.sh` the same way. Both now emit
 `/zensu:autopilot-release` rather than a runnable `--confirm` invocation, which cost W3 and W13
@@ -1517,14 +1540,29 @@ hand; the release pipeline owns it.
   `tests/structure/test-autopilot-plan-delegate.sh`. Those five cases were written against
   the refusal receipt and now assert the silence instead; F45c in particular no longer pins
   an ORDERING between the ownership and origin refusals, because neither is reachable.
-- `/zensu:doctor` still carries NO Autopilot row of any kind. A held workspace is visible in
-  the `--autopilot-begin` refusal, in the standalone-TDD begin refusal, in the deferred-review
-  Stop refusal (which names the holding run whenever it can be read — including when it
-  belongs to this session, where only the release COMMAND is withheld — and names no run at
-  all when the read failed), in the
-  stderr line the fence prints when it stands down, and in `/zensu:autopilot-release`. Do not
-  claim doctor visibility until that row exists — and keep this enumeration in step with the
-  rc=4 account above, which is where those refusals are specified.
+- **RESOLVED — `/zensu:doctor` now carries an `autopilot:` row, and the bound is what to keep in
+  view.** `autopilotRows` in `hooks/lib/zensu-doctor-report.js` renders one row per nonterminal
+  run found in the record-anchored state directory — WARN, except an own run whose active pointer
+  still designates it AND whose stage is not `BLOCKED`, which renders OK because it is an ordinary
+  run in progress rather than a finding, naming the run id, the stage, own-vs-foreign,
+  the held tree, the run document's path and the owner's silence, plus a second row counting run
+  documents it could not read. Every OTHER surface stays as enumerated: the `--autopilot-begin`
+  refusal, the standalone-TDD begin refusal, the deferred-review Stop refusal (which names the
+  holding run whenever it can be read — including when it belongs to this session, where only the
+  release COMMAND is withheld — and names no run at all when the read failed), the stderr line the
+  fence prints when it stands down, and `/zensu:autopilot-release`. Keep this in step with the
+  rc=4 account above, which is where those refusals are specified. **THREE bounds ship with the
+  row and none of them is cosmetic.** It is SILENT when the project holds no run document at all,
+  matching the `pending-review.json` row, so absence of the row is not evidence the tree is free —
+  it is evidence no run document exists in the directory the report scanned. Its `ownKey` comes
+  from `currentSessionKey()`, which is empty for every binding verdict but `bound`, and the row
+  then reports the owner as not established and names NO release command — the same direction the
+  refusal renderer takes when it cannot read a holder. And its stage vocabulary
+  (`AUTOPILOT_STAGES` / `AUTOPILOT_TERMINAL`) is a HAND COPY of `zensu-autopilot-state.sh`'s
+  `STAGES` / `TERMINAL`, which no `require` can reach because the owner is a bash file; P1na in
+  `tests/structure/test-doctor.sh` is what holds the copy against its owner, and without it a
+  stage added upstream would silently render every run carrying it as unreadable.
+
 - The `SESSION_CONTEXT_UNAVAILABLE` arm in `plan-approved-delegate.sh` is defense in depth, not
   the live path: `zensu_bind_hook_session` refuses an unresolvable session earlier, so the receipt
   a caller actually sees in that state is `RUNTIME_UNAVAILABLE`. Measured by P8a-P8c in
@@ -1534,9 +1572,114 @@ hand; the release pipeline owns it.
   checked at `_autopilot_begin_critical`, the only site that writes it. Reads are protected
   by `regularFile`, which rejects symlinks and hard links.
 
+**Known gaps of the run-visibility delta, accepted and named:**
+
+- **The renderer is a READ-side mirror of the run schema, not a consumer of it.** A whole family is
+  hand-copied from `zensu-autopilot-state.sh` — the stage set, the terminal set, the run-record key
+  set, the id class, the owner-silence policy, the run-filename envelope, the field and record size
+  bounds, `pointerValid`'s exact pointer shape and `_autopilot_owner_key`'s sha256 rule. An
+  enumeration here went stale within one review round, so this is a GREP and not a list: before
+  changing any of them run
+  `grep -nE 'AUTOPILOT_|autopilotOwnerSilence|autopilotPointerDesignates|createHash' hooks/lib/zensu-doctor-report.js`
+  and check each hit against its owner. The needle is deliberately wider than a constant-name
+  prefix: three of the copies carry no `AUTOPILOT_` token at all — the beacon filename and its
+  `isFile`/`nlink` rule live inside `autopilotOwnerSilence`, the exact pointer shape inside
+  `autopilotPointerDesignates`, and the owner-key rule in a bare `createHash` call. Several
+  are pinned — P1na, P1nm and P1nn in `tests/structure/test-doctor.sh` — and the pins compare
+  spellings, not behaviour, so a semantic change that keeps the spelling passes. The durable fix
+  is to extract the run-record vocabulary into a host-neutral module and require it from BOTH
+  sides; inline `node` programs in this tree already load modules by an env-supplied path, so
+  "no `require` can reach a bash file" is a property of the packaging rather than a bound. It was
+  not taken here because rewiring the worker's heredoc program is a change to the most heavily
+  pinned code in that module and belongs in its own review.
+- **The Windows wall clock for both grown suites is UNMEASURED.** `test-autopilot-state-machine.sh`
+  runs on a blocking Windows PR shard and this change adds two git worktrees plus the `W16a`/`W16b`,
+  `W31a`-`W31k` and `W32`/`W32a`-`W32d`/`W32z` families, four of which bind a Session Control record
+  and invoke `zensu-log.sh`. `test-doctor.sh` is not on that shard at all but does run in the weekly
+  Windows Safety structure inventory, and it gained the whole `P1na`-`P1nz` family together with
+  the `P1nm1` and `P1nz1`-`P1nz4` checks added in the round that followed. **Named as ID
+  RANGES rather than as numerals, deliberately** — this file's own rule about hand-maintained
+  censuses applies to its own gap list, and it did not hold here: both numerals were written once
+  and were wrong within the same change, reading "ten" and "eighteen" against a tree that carried 19
+  and 43. A range is cheaper to keep true than a numeral, but it is NOT self-maintaining: it also
+  goes stale when a check is APPENDED past its endpoint, which is exactly what happened next — the
+  bullet read `P1na`-`P1ny` while `P1nz` already existed, with no rename involved. Re-grep the
+  family before trusting either form.
+  This repository's rule is that a ceiling comes from a green shard measurement
+  and never from an estimate, so no ceiling was raised: take both figures from the next green
+  Windows run and record them before adding further fixtures to either file.
+- **A foreign nonterminal run permanently withholds the green summary.** The row is `WARN` and
+  `line()` counts WARN toward `warnCount`, which `main()` gates "all checks green" on — so while
+  any other session in this project holds a nonterminal run, `/zensu:doctor` cannot print a clean
+  summary. A hold is a steady STATE, not an event, so this does not self-clear. Accepted on the
+  same ground the sibling rows accept it: a held tree is real state the user should clear, and a
+  row that can never affect the summary is a row people stop reading. Named here because
+  §"Foreign-Chain Row" and §"Implementing-Phase Turn Counter" both record the identical cost for
+  their own rows while this section said nothing, leaving the next reader to rediscover it as a
+  defect. The green form of the OWN-run row exists precisely so a session's own live run does not
+  pay this price.
+- **The doctor row reads the owner-keyed pointer to tell an ordinary in-progress own run from the
+  torn-`begin` shape.** That is a THIRD file the row opens, and its absence is treated as "no
+  pointer designates this run" while an unreadable one is treated as "not established" — the row
+  then keeps its WARN. The pointer digest is computed here rather than obtained from the owner, so
+  `_autopilot_owner_key`'s rule is a sixth hand-copy; it is exercised behaviourally by P1ne2 and
+  pinned by nothing.
+
+**Version for the run-visibility delta: `patch`.** This section now carries THREE
+`**Version.**` statements and a releaser matching on the wrong one gets the wrong answer, so
+this one names its own scope: the `/zensu:doctor` `autopilot:` row, the public
+`autopilot_workspace_hold_report` verb with the `--autopilot-status` disclosure that consumes it,
+and the exit-6 wording. Walked against §"Runtime Lineage" entry by entry: no context-record or
+workflow-state schema field (the row READS `autopilot-run-*.json` and the owner-keyed pointer and
+writes nothing); no strict key set — `AUTOPILOT_STATE_KEYS` in the renderer is a READ-side mirror
+of `STATE_KEYS`, pinned by P1nm, and rejecting a record there costs one row, never a document;
+no hook added, removed or renamed and no matcher changed; no new config key (the row reuses
+`zensu_pending_review_ttl_hours` through the already-exported `ZDOC_TTL_HOURS`); no attestation
+change; and no `permissionDecision` in either direction, the doctor being advisory. The new
+shell verb is a call convention inside one installation — an older runtime does not have it
+and nothing writes it anywhere — and it ships in the same tree as its only caller, so no
+cross-version mixing arises.
+
+- **`--autopilot-status` discloses the hold on stderr**, keeping its exit 1 and its stdout
+  unchanged because SEVEN skills run this verb and parse that stdout as JSON —
+  `autopilot`, `autopilot-release`, `tdd`, `pr-team-review`, `pr-fix-findings`, `self-review` and
+  `reset-review-limit` — several of them failing closed on a mismatch. An earlier wording named
+  `session-start-autopilot-resume.sh` here, which calls the LIBRARY's `autopilot_read_active`
+  directly and never runs this CLI verb, so the rule was right and its stated cause was not. It renders through the PUBLIC
+  `autopilot_workspace_hold_report`, which takes ONE leased read and prints
+  `<own|foreign|unknown><TAB><sentence>` — the sentence from `_autopilot_workspace_refusal` with
+  audience `model` and the ownership from the SAME record, so a lead-in can never contradict the
+  sentence it introduces. Its STATUS vocabulary is the load-bearing half: 0 rendered, 1 the tree
+  is PROVEN free, 5 the question could not be answered, 3 a REFUSED CALL — a bad arity, an
+  unrecognized audience, or a caller-session argument that is not a session id — and ONLY the
+  worker's own verdict reaches 1, so an all-clear can never be printed for a check that did not
+  run. That is why the probe it runs under the lease always returns 0, and why a failed render is
+  remapped to 5 rather than inheriting the renderer's own 1
+  — so the own-vs-foreign choice stays in the one renderer that owns it, no file
+  outside the module calls an `_autopilot_*` helper, and no `--confirm` invocation reaches a
+  model-read channel. That verb is the FIFTH caller of the renderer and the first that is not a
+  fence; a sixth needs its audience chosen deliberately, since the argument is positionally
+  required and a two-argument call refuses rather than defaulting.
+
 Moving together with the scope: `_autopilot_owner_key`, `_autopilot_active_path`,
 `_autopilot_legacy_active_path`, `autopilot_workspace_root`, `_autopilot_session_workspace`,
-`_autopilot_read_workspace_critical`, `autopilot_read_workspace` and
+`_autopilot_read_workspace_critical`, `autopilot_read_workspace`,
+`autopilot_workspace_hold_report` — the PUBLIC verb `hooks/lib/zensu-log.sh`'s
+`--autopilot-status` branch calls by name, together with its `<kind><TAB><sentence>` wire format
+and its 0/1/5/3 status vocabulary, both of which that branch parses. **TWO thin derivations were
+DELETED rather than kept, and the reason generalizes:** `autopilot_workspace_hold_sentence` and
+`autopilot_workspace_hold_is_own` had NO production caller anywhere in the tree, each took a
+second leased read of its own, and this roster's own previous wording warned that they must never
+be composed with each other because two reads can name different holders. A public verb with no
+consumers, carrying a composition hazard, is a liability rather than an API — the ownership fact
+lives in the report line's `<kind>` field, which is the same answer from the same read. Their
+coverage moved with them: `W31a`-`W31e` now drive the report verb directly and `W31i` reads that
+field, so nothing was lost. Do not reintroduce either as a convenience wrapper.
+Renaming the report verb
+is a cross-file edit whose failure mode is SILENT and wrong in the dangerous direction: the
+caller captures the sentence in a command substitution and reads the status, so a missing
+function yields 127, which the branch reports as "could not be determined" — correct only by
+accident — and
 `_autopilot_workspace_refusal` — which `stop-chain-enforcer.sh`'s rc=4 arm NO LONGER resolves at
 all: it once resolved three names there by `declare -F`, and all three are gone (the ownership
 read moved into the renderer, and the re-read fallback was deleted). What the arm now depends on
@@ -1715,10 +1858,11 @@ is `0`, which passed the `>= 0` bound, so a wrapper fault that exported an empty
 switched the window off silently — and `zensu-doctor.sh` exports the variable unconditionally
 after a conditional resolve, which makes blank reachable. `ttlHours` and `implStopThreshold`
 read through one `boundedEnvInt`, so absent and blank take the fallback and only an in-range
-integer wins. `ttlHours()` has THREE call sites — this row, the pending-review verdict and
-`reviewerDenialRows` — and a FOURTH consumer of the resolved value, `ownRefusalNoteLive`,
+integer wins. `ttlHours()` has FOUR call sites — this row, the pending-review verdict,
+`reviewerDenialRows` and `autopilotRows` (which quotes it in the holding run's owner-silence
+clause) — and a FIFTH consumer of the resolved value, `ownRefusalNoteLive`,
 which takes it as a parameter rather than re-reading it. Word it that way: counting it as a
-fourth CALL SITE double-counts the read this row already performs. That fourth consumer is
+fifth CALL SITE double-counts the read this row already performs. That fifth consumer is
 what decides whether the implementing-turns row carries its refusal caveat. That last one
 carries a consequence the discussion above does not otherwise cover: at the documented `0`,
 `classifyDenialNote` never returns `stale`, so a note of any age keeps qualifying that row.

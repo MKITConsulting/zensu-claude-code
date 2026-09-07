@@ -1789,6 +1789,14 @@ if [ "$REL_READY" = true ]; then
   git -C "$REL_P" worktree add -q "$REL_P/.claude/worktrees/rs" -b rel-s >/dev/null 2>&1 || REL_READY=false
   git -C "$REL_P" worktree add -q "$REL_P/.claude/worktrees/rt" -b rel-t >/dev/null 2>&1 || REL_READY=false
   git -C "$REL_P" worktree add -q "$REL_P/.claude/worktrees/rp" -b rel-p >/dev/null 2>&1 || REL_READY=false
+  # DEDICATED to the W18x hold-sentence block. It needs a tree it can leave HELD
+  # for the rest of the file — the whole point of the verb is to describe a live
+  # hold — and a second tree that stays free. Reusing a neighbour's tree is not a
+  # style problem: it silently steals the `begin` a later check depends on, which
+  # is exactly how the first version of that block broke W23 while every one of
+  # its own assertions passed.
+  git -C "$REL_P" worktree add -q "$REL_P/.claude/worktrees/rh" -b rel-h >/dev/null 2>&1 || REL_READY=false
+  git -C "$REL_P" worktree add -q "$REL_P/.claude/worktrees/rf" -b rel-f >/dev/null 2>&1 || REL_READY=false
 fi
 
 # S6 — a run left pointerless by a torn begin: `apply` refuses it (no pointer
@@ -1832,6 +1840,406 @@ if [ "$REL_READY" = true ] && [ "$REL_SCOPE_RC" -eq 6 ] \
   check "W16 a release is refused for a run outside the caller's own working tree" PASS
 else
   check "W16 release must be scoped to the caller's tree (rc=$REL_SCOPE_RC, want 6 + named cause)" FAIL
+fi
+
+# W16a — the refusal NAMES BOTH TREES. The bare sentence told the caller they were
+# in the wrong tree without saying which tree they were in or which one to move to,
+# so the only way to act on it was to go and read the run document — the same
+# go-and-find-out-yourself this refusal exists to replace. Both literals are
+# asserted, so naming one and forgetting the other fails.
+if [ "$REL_READY" = true ] \
+  && grep -qF "$REL_P/.claude/worktrees/rb" "$REL_SCOPE_ERR" \
+  && grep -qF "$REL_P/.claude/worktrees/ra" "$REL_SCOPE_ERR"; then
+  check "W16a the exit-6 refusal names the caller's tree and the tree the run holds" PASS
+else
+  check "W16a exit-6 must name both trees (got: $(cat "$REL_SCOPE_ERR" 2>/dev/null))" FAIL
+fi
+
+# W16b — and it states the containment rule, because "release it from the tree it
+# holds" alone reads as EQUALITY. Occupancy is containment in either direction, so a
+# containing or contained tree works too and only a sibling worktree is refused;
+# skills/autopilot-release/SKILL.md carried the narrower rule until this landed.
+if [ "$REL_READY" = true ] && grep -qF 'containment in either direction' "$REL_SCOPE_ERR"; then
+  check "W16b the exit-6 refusal states occupancy as containment, not equality" PASS
+else
+  check "W16b exit-6 must state the containment rule (got: $(cat "$REL_SCOPE_ERR" 2>/dev/null))" FAIL
+fi
+
+# --- W31x: the public hold-sentence verb -----------------------------------
+# `--autopilot-status` is owner-scoped, so it answers `state file absent` whether the
+# tree is free or a foreign run is holding it. This verb is what lets that verb tell
+# the two apart. It is PUBLIC on purpose: the own-vs-foreign choice belongs to
+# `_autopilot_workspace_refusal`, and an earlier spelling of that decision in a caller
+# failed OPEN — an unresolvable owner compared unequal to the session id and selected
+# the FOREIGN text, offering a release against the caller's own live generation.
+HOLD_OWN=""
+HOLD_FOREIGN=""
+HOLD_FREE_RC=0
+HOLD_OPERATOR=""
+HOLD_AUDIENCE_RC=0
+HOLD_ARITY_RC=0
+if [ "$REL_READY" = true ]; then
+  ( cd "$REL_P/.claude/worktrees/rh" && autopilot_begin_run run_hold_s session_hold_s "$REL_P" false true "" ) >/dev/null 2>&1
+  HOLD_OWN="$( cd "$REL_P/.claude/worktrees/rh" && autopilot_workspace_hold_report "$REL_P" session_hold_s model 2>/dev/null )"
+  HOLD_FOREIGN="$( cd "$REL_P/.claude/worktrees/rh" && autopilot_workspace_hold_report "$REL_P" session_hold_other model 2>/dev/null )"
+  ( cd "$REL_P/.claude/worktrees/rf" && autopilot_workspace_hold_report "$REL_P" session_hold_other model ) >/dev/null 2>&1
+  HOLD_FREE_RC=$?
+  HOLD_OPERATOR="$( cd "$REL_P/.claude/worktrees/rh" && autopilot_workspace_hold_report "$REL_P" session_hold_other operator 2>/dev/null )"
+  ( cd "$REL_P/.claude/worktrees/rh" && autopilot_workspace_hold_report "$REL_P" session_hold_other bogus ) >/dev/null 2>&1
+  HOLD_AUDIENCE_RC=$?
+  ( cd "$REL_P/.claude/worktrees/rh" && autopilot_workspace_hold_report "$REL_P" session_hold_other ) >/dev/null 2>&1
+  HOLD_ARITY_RC=$?
+fi
+# The OWN case must carry the own-run clause and NO release command of any spelling.
+case "$HOLD_OWN" in
+  *'run_hold_s'*'which belongs to this session'*'finish or repair that run'*)
+    case "$HOLD_OWN" in
+      *'/zensu:autopilot-release'*|*'--confirm'*)
+        check "W31a own-run hold sentence must name no release command (got: $HOLD_OWN)" FAIL ;;
+      *) check "W31a the own-run hold sentence names the run and no release command" PASS ;;
+    esac ;;
+  *) check "W31a own-run hold sentence (got: $HOLD_OWN)" FAIL ;;
+esac
+# The FOREIGN + model case names ONLY the guided skill: `--confirm` is the consent
+# control, so a complete invocation in a model-read channel routes around it.
+case "$HOLD_FOREIGN" in
+  *'run_hold_s'*'/zensu:autopilot-release'*)
+    case "$HOLD_FOREIGN" in
+      *'--confirm'*) check "W31b the model audience must not quote --confirm (got: $HOLD_FOREIGN)" FAIL ;;
+      *) check "W31b the foreign model sentence names the run and only the guided form" PASS ;;
+    esac ;;
+  *) check "W31b foreign model hold sentence (got: $HOLD_FOREIGN)" FAIL ;;
+esac
+# The OPERATOR audience is the one channel that keeps the audited command, because a
+# human reads it. Asserting this is what keeps W31b from passing for the wrong reason
+# — a renderer that dropped the command everywhere would satisfy W31b alone.
+case "$HOLD_OPERATOR" in
+  *'--autopilot-release --run run_hold_s --confirm'*)
+    check "W31c the operator audience still quotes the audited release command" PASS ;;
+  *) check "W31c operator hold sentence (got: $HOLD_OPERATOR)" FAIL ;;
+esac
+# rc 1 SPECIFICALLY. `autopilot_workspace_hold_report`'s status
+# vocabulary is 0 rendered, 1 the tree is PROVEN free, 5 the question could not be
+# answered, 3 a bad arity or audience. 5 is the one that must never be confused with
+# 1 — that separation is the whole point of the report verb. A bare
+# non-zero assertion passes on any of those, which is the standard this file
+# states for itself sixty lines above at W16, and it is exactly the conflation the
+# `--autopilot-status` caller was rebuilt to stop making.
+if [ "$REL_READY" = true ] && [ "$HOLD_FREE_RC" -eq 1 ]; then
+  check "W31d a tree no nonterminal run holds yields rc 1 specifically" PASS
+else
+  check "W31d a free tree must yield rc 1 (rc=$HOLD_FREE_RC, want 1)" FAIL
+fi
+# The audience is positionally REQUIRED, so a new consumer cannot silently inherit
+# the operator form — which is the permissive one.
+if [ "$REL_READY" = true ] && [ "$HOLD_AUDIENCE_RC" -eq 3 ] && [ "$HOLD_ARITY_RC" -eq 3 ]; then
+  check "W31e an unknown audience and a missing audience are both refused" PASS
+else
+  check "W31e audience must be required and validated (bogus=$HOLD_AUDIENCE_RC arity=$HOLD_ARITY_RC, want 3/3)" FAIL
+fi
+
+# W31f — the REPORT verb: one read, and a status vocabulary that separates a proven
+# free tree from a question that could not be answered. `_tdd_locked_run` returns 1
+# for a lock failure and the worker's own "no run holds this tree" is also 1, so
+# composing on the public read alone made a could-not-look indistinguishable from an
+# all-clear. The probe always returns 0, so a non-zero from the lock layer is
+# unambiguously the LOCK's.
+HOLD_REPORT_OWN=""
+HOLD_REPORT_FOREIGN=""
+HOLD_REPORT_FREE_RC=0
+HOLD_KIND_OWN=""
+HOLD_KIND_FOREIGN=""
+HOLD_TRANSPOSED_RC=9
+if [ "$REL_READY" = true ]; then
+  HOLD_REPORT_OWN="$( cd "$REL_P/.claude/worktrees/rh" && autopilot_workspace_hold_report "$REL_P" session_hold_s model 2>/dev/null )"
+  HOLD_REPORT_FOREIGN="$( cd "$REL_P/.claude/worktrees/rh" && autopilot_workspace_hold_report "$REL_P" session_hold_other model 2>/dev/null )"
+  ( cd "$REL_P/.claude/worktrees/rf" && autopilot_workspace_hold_report "$REL_P" session_hold_other model ) >/dev/null 2>&1
+  HOLD_REPORT_FREE_RC=$?
+  # The ownership fact is the report line's own `<kind>` field. It used to be a
+  # separate `autopilot_workspace_hold_is_own` verb, which was DELETED: it had no
+  # production caller anywhere in the tree, it took a second leased read of its
+  # own, and its own documentation warned that composing it with the sentence verb
+  # could name two different holders. A public verb with no consumers and a
+  # composition hazard attached is a liability, not an API — the field the report
+  # already carries is the durable answer.
+  HOLD_KIND_OWN="${HOLD_REPORT_OWN%%	*}"
+  HOLD_KIND_FOREIGN="${HOLD_REPORT_FOREIGN%%	*}"
+  # A caller-session preference that is not a session id must REFUSE rather than
+  # degrade to `unknown`: `$2` is a workspace path in `autopilot_read_workspace`
+  # and a session id here, so a transposed call would otherwise report a confident
+  # "owner not established" instead of an error.
+  ( cd "$REL_P/.claude/worktrees/rh" \
+    && autopilot_workspace_hold_report "$REL_P" "$REL_P/.claude/worktrees/rh" model ) >/dev/null 2>&1
+  HOLD_TRANSPOSED_RC=$?
+fi
+# The report line is `<kind><TAB><sentence>`, and the KIND must agree with the
+# sentence it introduces — that agreement is the whole reason both come out of one
+# read.
+case "$HOLD_REPORT_OWN" in
+  own*'which belongs to this session'*)
+    check "W31f the report verb labels an own holder 'own' and renders the matching sentence" PASS ;;
+  *) check "W31f own report line (got: $HOLD_REPORT_OWN)" FAIL ;;
+esac
+case "$HOLD_REPORT_FOREIGN" in
+  foreign*'/zensu:autopilot-release'*)
+    check "W31g the report verb labels a foreign holder 'foreign' and renders the guided form" PASS ;;
+  *) check "W31g foreign report line (got: $HOLD_REPORT_FOREIGN)" FAIL ;;
+esac
+# rc 1 is reserved for the PROVEN-free verdict.
+if [ "$REL_READY" = true ] && [ "$HOLD_REPORT_FREE_RC" -eq 1 ]; then
+  check "W31h the report verb reserves rc 1 for a proven-free tree" PASS
+else
+  check "W31h report free verdict (rc=$HOLD_REPORT_FREE_RC, want 1)" FAIL
+fi
+# The KIND field is THREE-valued and a caller must not fold `unknown` into either
+# other answer: the own sentence says "which belongs to this session", so a lead-in
+# asserting the caller owns no run would contradict the sentence it introduces.
+if [ "$REL_READY" = true ] && [ "$HOLD_KIND_OWN" = own ] && [ "$HOLD_KIND_FOREIGN" = foreign ]; then
+  check "W31i the report line's kind field answers own and foreign from the judged record" PASS
+else
+  check "W31i kind field (own=$HOLD_KIND_OWN foreign=$HOLD_KIND_FOREIGN, want own/foreign)" FAIL
+fi
+# W31i1 — a transposed caller-session argument REFUSES. `$2` means a workspace path
+# in `autopilot_read_workspace` and a session id here, and a path fails the session
+# predicate on its separators, so the old silent drop turned a caller's mistake into
+# a confident false statement about ownership.
+if [ "$REL_READY" = true ] && [ "$HOLD_TRANSPOSED_RC" -eq 3 ]; then
+  check "W31i1 a caller-session argument that is not a session id is refused, not dropped" PASS
+else
+  check "W31i1 transposed caller session (rc=$HOLD_TRANSPOSED_RC, want 3)" FAIL
+fi
+
+# W31j — status 5 must be REACHABLE, and nothing above asserts it: every check so far
+# reads 0, 1 or 3, so rewriting every `return 5` in the verb to `return 1` left the
+# whole block green. The discriminating case is an inventory the worker cannot read.
+# Node exits 1 on an uncaught exception and 1 is ALSO this worker's "no nonterminal
+# run holds this workspace", so before the worker gained an `uncaughtException`
+# handler a single non-object run document made the report verb answer PROVEN FREE
+# for a project it never managed to inspect — and the four occupancy fences, which
+# all propagate a non-1 code and fall through on 1, relaxed on the same fault.
+# The run id is deliberately VALID: an invalid one is refused by the inventory
+# envelope before `readState` runs, which would reach rc 5 without ever exercising
+# the record-shape guard this case exists for.
+HOLD_REPORT_FAULT_RC=0
+HOLD_WORKER_FAULT_RC=0
+HOLD_WORKER_FAULT_ERR=""
+HOLD_FAULT_FILE="$REL_P/.zensu/state/autopilot-run-w31jcorrupt00.json"
+if [ "$REL_READY" = true ]; then
+  printf 'null' > "$HOLD_FAULT_FILE"
+  ( cd "$REL_P/.claude/worktrees/rf" \
+    && autopilot_workspace_hold_report "$REL_P" session_hold_other model ) >/dev/null 2>&1
+  HOLD_REPORT_FAULT_RC=$?
+  # The message is asserted one layer DOWN, at the worker that produces it: the
+  # public verb's own probe discards the worker's stderr (`2>/dev/null`) so a lease
+  # diagnostic cannot reach a caller that is capturing stdout, so capturing it from
+  # the verb yields an empty string no matter what the worker said.
+  HOLD_WORKER_FAULT_ERR="$( _autopilot_node read-workspace "$REL_P/.zensu/state" "$REL_P" \
+    "$REL_P/.claude/worktrees/rf" 2>&1 >/dev/null )"
+  _autopilot_node read-workspace "$REL_P/.zensu/state" "$REL_P" \
+    "$REL_P/.claude/worktrees/rf" >/dev/null 2>&1
+  HOLD_WORKER_FAULT_RC=$?
+  rm -f "$HOLD_FAULT_FILE"
+fi
+if [ "$REL_READY" = true ] && [ "$HOLD_REPORT_FAULT_RC" -eq 5 ]; then
+  check "W31j an unreadable run inventory yields rc 5, never the proven-free rc 1" PASS
+else
+  check "W31j unreadable inventory verdict (rc=$HOLD_REPORT_FAULT_RC, want 5)" FAIL
+fi
+# W31k — and the fault is a TYPED refusal, not a crash. `readState` guards the record
+# SHAPE before the review-evidence normalizers index it, so a `null` document is
+# refused with the same message the exact-schema check emits rather than throwing a
+# TypeError. Both halves matter and neither alone is enough: exit 2 without the
+# message would also be produced by the `uncaughtException` handler catching a real
+# crash, and the message without exit 2 would not prove the inventory failed closed.
+if [ "$REL_READY" != true ]; then
+  check "W31k fixture unavailable" FAIL
+elif [ "$HOLD_WORKER_FAULT_RC" -eq 2 ] \
+  && printf '%s' "$HOLD_WORKER_FAULT_ERR" \
+    | grep -qF 'state schema invalid: autopilot-run-w31jcorrupt00.json' \
+  && ! printf '%s' "$HOLD_WORKER_FAULT_ERR" | grep -qF 'TypeError'; then
+  check "W31k a non-object run document is refused as a schema fault, not a crash" PASS
+else
+  check "W31k non-object refusal (rc=$HOLD_WORKER_FAULT_RC, err=$HOLD_WORKER_FAULT_ERR)" FAIL
+fi
+
+# W31L — the `uncaughtException` handler, pinned at SOURCE. It has no executed case
+# and cannot easily get one: W31j/W31k's `null` fixture is refused by `readState`'s
+# `isObject` guard BEFORE any normalizer indexes it, and W31k asserts the absence of
+# a `TypeError` — i.e. asserts the handler was NOT used. So removing the handler
+# alone changes no observed status in either suite (removing BOTH guards does fail
+# W31j). That makes this the same case as W18/W19/W32z: a source pin is weaker than
+# an executed case and is recorded as such, but without it the handler can be
+# deleted with every check green — and its absence would put node's default exit 1
+# back into a space where 1 already means "no run holds this tree", which every
+# occupancy fence reads as a licence to RELAX.
+W31L_LIB="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
+W31L_SLICE="$ROOT/w31l-slice.txt"
+awk '/^process\.on\("uncaughtException"/ {inside=1} inside {print} inside && /^\}\);$/ {exit}' \
+  "$W31L_LIB" > "$W31L_SLICE" 2>/dev/null || : > "$W31L_SLICE"
+if [ -s "$W31L_SLICE" ]; then
+  check "W31L-control the uncaughtException handler body was extracted" PASS
+else
+  check "W31L-control could not extract the uncaughtException handler" FAIL
+fi
+if [ -s "$W31L_SLICE" ] && grep -qF 'fail(2,' "$W31L_SLICE" \
+  && grep -qF 'worker fault:' "$W31L_SLICE"; then
+  check "W31L a worker crash is mapped to the could-not-judge code, not to node's default 1" PASS
+else
+  check "W31L the uncaughtException handler must map a crash to fail(2, 'worker fault: …')" FAIL
+fi
+
+# W31m — no NON-worker fault path in the report verb may return 1. W31j proves the
+# worker-rc arm, but the verb has six `return 5` sites and the one its own comment
+# calls load-bearing is the LEASE failure: `_tdd_locked_run` answers 1 for a failed
+# acquisition, so rewriting `|| return 5` to `|| return 1` there would report a tree
+# as PROVEN FREE because the lease could not be taken — the exact conflation this
+# verb exists to remove — with every behavioural check still green. The lease cannot
+# be made to fail deterministically here, so the shape is pinned instead: inside this
+# function, `return 1` may appear only in the two arms that carry a worker or storage
+# VERDICT, never on a fault path.
+W31M_SLICE="$ROOT/w31m-slice.txt"
+awk '/^autopilot_workspace_hold_report\(\) \{/ {inside=1} inside {print} inside && /^\}$/ && NR>1 {exit}' \
+  "$W31L_LIB" > "$W31M_SLICE" 2>/dev/null || : > "$W31M_SLICE"
+# `grep -c` EXITS 1 on zero matches, so a `|| echo 0` fallback appends a SECOND line
+# and the comparison then fails for a reason unrelated to the contract. Count with
+# `grep -c … || true` and strip, so an empty result really is the string 0.
+W31M_FAULT_ONES="$(grep -cE '(_autopilot_locked_run|_autopilot_project_root|_autopilot_session_workspace|_autopilot_workspace_refusal|HOLD_RECORD).*\|\| return 1' "$W31M_SLICE" 2>/dev/null | head -1 | tr -d '[:space:]')"
+[ -n "$W31M_FAULT_ONES" ] || W31M_FAULT_ONES=0
+if [ -s "$W31M_SLICE" ] && [ "$W31M_FAULT_ONES" = "0" ]; then
+  check "W31m no fault path in the report verb returns the proven-free code 1" PASS
+else
+  check "W31m a fault path returns 1 (count=$W31M_FAULT_ONES) — a failed check would read as an all-clear" FAIL
+fi
+
+# W32z — a SOURCE pin over ALL FIVE `--autopilot-status` disclosure arms, SLICED to
+# the verb's own case body. State both numbers, because an earlier comment here said
+# "the three arms no fixture reaches" above a loop that pinned four needles under a
+# label reading "all four", and none of the three figures described the file: FIVE
+# arms are emitted — foreign, own, owner-not-established, proven-free, and
+# could-not-determine — and THREE of them no fixture in this suite can reach.
+# The SLICE is what makes this a pin rather than a presence grep: a whole-file
+# `grep` stays green when a needle migrates into a comment, into a dead branch, or
+# out of the `--autopilot-status)` case entirely, which is exactly the drift a
+# source pin exists to catch. The control asserts the slice is non-empty, because a
+# slice that came back empty would make every needle "absent" and the check would
+# fail for the wrong reason.
+W32Z_LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
+W32Z_SLICE="$ROOT/w32z-slice.txt"
+awk '/^  --autopilot-status\)/ {inside=1} inside {print} inside && /^    ;;$/ {exit}' \
+  "$W32Z_LOG" > "$W32Z_SLICE" 2>/dev/null || : > "$W32Z_SLICE"
+if [ -s "$W32Z_SLICE" ]; then
+  check "W32z-control the --autopilot-status case body was extracted" PASS
+else
+  check "W32z-control could not extract the --autopilot-status case body" FAIL
+fi
+W32Z_OK=true
+for W32Z_NEEDLE in \
+  'a run this session OWNS holds the working tree' \
+  'whose OWNER could not be established' \
+  'could NOT be determined (status %s)' \
+  'no nonterminal run holds this working tree' \
+  'but the working tree is not free'
+do
+  grep -qF "$W32Z_NEEDLE" "$W32Z_SLICE" || W32Z_OK=false
+done
+# The own arm must NOT claim a torn begin: the worker reports an own nonterminal run
+# with `fail(2)` BEFORE it reports an absent pointer with `fail(1)`, so this rc-1
+# arm cannot be reached in that state at all.
+if grep -qF 'the torn-begin shape' "$W32Z_SLICE"; then W32Z_OK=false; fi
+if [ "$W32Z_OK" = true ]; then
+  check "W32z all five --autopilot-status disclosure arms are emitted from the verb's own case" PASS
+else
+  check "W32z a --autopilot-status disclosure arm was removed, moved, or over-claims" FAIL
+fi
+
+# --- W32: the --autopilot-status stderr disclosure, end to end -------------
+# The disclosure is the primary user-facing surface of this feature and had NO
+# executed case anywhere: neither branch of the caller was driven, and the
+# invariant its own comment declares — stdout and the exit code unchanged, because
+# the Autopilot skill parses that stdout as JSON and session-start-autopilot-resume.sh
+# treats rc 1 as the ordinary no-run case — was asserted by nothing. It is also the
+# case that would have caught the conflation W31d now pins at the library level.
+W32_READY=false
+W32_HELD_OUT="$ROOT/w32-held.out"; W32_HELD_ERR="$ROOT/w32-held.err"
+W32_FREE_OUT="$ROOT/w32-free.out"; W32_FREE_ERR="$ROOT/w32-free.err"
+W32_HELD_RCF="$ROOT/w32-held.rc"; W32_FREE_RCF="$ROOT/w32-free.rc"
+W32_READYF="$ROOT/w32.ready"
+: > "$W32_READYF"
+# EVERYTHING that mutates the environment runs inside a SUBSHELL, and the results
+# travel out through files. `initialize-baseline.sh` exports a whole session
+# binding, and an earlier spelling of this block saved and restored only the three
+# CLAUDE_* variables that test-doctor.sh saves — which left the rest exported and
+# broke W27, a concurrency check two hundred lines below, in a way none of this
+# block's own assertions could see. That is the same class of leak as reusing a
+# neighbour's worktree, and a subshell is the only containment that is total.
+#
+# The `check` calls stay OUTSIDE it, because `check` increments its tallies in the
+# shell that runs it: a subshell would PRINT a FAIL and let the suite still exit 0,
+# which test-doctor.sh records having done exactly once.
+if [ "$REL_READY" = true ] && [ -r "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" ]; then
+  (
+    export CLAUDE_PROJECT_DIR="$REL_P"
+    # shellcheck disable=SC1091
+    source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" w32-observer >/dev/null 2>&1 || exit 1
+    cd "$REL_P/.claude/worktrees/rh" || exit 1
+    bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --autopilot-status >"$W32_HELD_OUT" 2>"$W32_HELD_ERR"
+    printf '%s' "$?" > "$W32_HELD_RCF"
+    cd "$REL_P/.claude/worktrees/rf" || exit 1
+    bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --autopilot-status >"$W32_FREE_OUT" 2>"$W32_FREE_ERR"
+    printf '%s' "$?" > "$W32_FREE_RCF"
+    printf 'yes' > "$W32_READYF"
+  )
+fi
+[ "$(cat "$W32_READYF" 2>/dev/null)" = "yes" ] && W32_READY=true
+W32_HELD_RC="$(cat "$W32_HELD_RCF" 2>/dev/null || echo 99)"
+W32_FREE_RC="$(cat "$W32_FREE_RCF" 2>/dev/null || echo 99)"
+if [ "$W32_READY" != true ]; then
+  # NOT a cause claim. `W32_READY` is set only by the final marker, so any earlier
+  # exit collapses here; asserting the bind specifically would name a cause this
+  # block did not establish. It is a PASS rather than a FAIL because the fixture
+  # depends on a host being able to mint a Session Control record at all.
+  check "W32 skipped: the status-verb fixture did not complete (cause not established)" PASS
+else
+  # The INVARIANT first: both calls keep rc 1 and produce byte-identical stdout.
+  # A disclosure that landed on stdout would break a real consumer with every
+  # other check in this file still green.
+  # What is pinned: on rc 1 the verb emits NOTHING on stdout, so the disclosure
+  # provably did not land on the channel the Autopilot skill parses. `cmp -s` alone
+  # would be satisfied by two empty files without establishing that emptiness is the
+  # contract, which is why the emptiness is asserted explicitly rather than inferred.
+  # If a later change puts JSON on stdout for rc 1, this conjunct is the thing to
+  # re-decide — do not simply delete it.
+  if [ "$W32_HELD_RC" -eq 1 ] && [ "$W32_FREE_RC" -eq 1 ] \
+    && cmp -s "$W32_HELD_OUT" "$W32_FREE_OUT" \
+    && [ ! -s "$W32_HELD_OUT" ]; then
+    check "W32a the disclosure leaves rc 1 and stdout byte-identical and empty in both branches" PASS
+  else
+    check "W32a status stdout/rc invariant (held=$W32_HELD_RC free=$W32_FREE_RC held-bytes=$(wc -c <"$W32_HELD_OUT" 2>/dev/null))" FAIL
+  fi
+  # The HELD branch names the holding run and routes to the guided form only.
+  if grep -qF 'the working tree is not free' "$W32_HELD_ERR" \
+    && grep -qF 'run_hold_s' "$W32_HELD_ERR" \
+    && grep -qF '/zensu:autopilot-release' "$W32_HELD_ERR" \
+    && ! grep -qF -- '--confirm' "$W32_HELD_ERR"; then
+    check "W32b a held tree is disclosed on stderr, naming the run and only the guided form" PASS
+  else
+    check "W32b held-tree disclosure (got: $(cat "$W32_HELD_ERR"))" FAIL
+  fi
+  # The FREE branch makes the positive claim, and must NOT name a holder.
+  if grep -qF 'no nonterminal run holds this working tree' "$W32_FREE_ERR" \
+    && grep -qF 'IS reported by /zensu:doctor' "$W32_FREE_ERR" \
+    && ! grep -qF 'run_hold_s' "$W32_FREE_ERR"; then
+    check "W32c a free tree is disclosed as free, naming no holder" PASS
+  else
+    check "W32c free-tree disclosure (got: $(cat "$W32_FREE_ERR"))" FAIL
+  fi
+  # The two branches must be DISTINGUISHABLE. Without this a renderer that emitted
+  # one sentence for both would satisfy W32b and W32c through their shared words.
+  if ! cmp -s "$W32_HELD_ERR" "$W32_FREE_ERR"; then
+    check "W32d the held and free disclosures are different sentences" PASS
+  else
+    check "W32d held and free disclosures must differ" FAIL
+  fi
 fi
 
 # S5b — liveness. The owner's workflow document is the staleness signal this
@@ -2007,19 +2415,36 @@ RACE_REFUSALS=0
 for RACE_RC in "$RACE_A_RC" "$RACE_B_RC"; do
   case "$RACE_RC" in
     0) RACE_WINNERS=$((RACE_WINNERS + 1)) ;;
-    4) RACE_REFUSALS=$((RACE_REFUSALS + 1)) ;;
+    # TWO loser codes, and admitting only one made this check flaky rather than
+    # strict. 4 is the occupancy fence refusing a tree the winner already holds —
+    # the outcome when the loser got the lease second. 1 is `_tdd_locked_run`
+    # failing to ACQUIRE it at all, which is the outcome when it never got the
+    # lease, and under load that is the one that happens. Both are a loser that
+    # did not begin a run, which is the property this check is named for.
+    # Everything else still fails: a crash is 2 under the worker's
+    # `uncaughtException` handler, so widening to "any non-zero" would have
+    # admitted exactly the fault that handler exists to make visible.
+    1|4) RACE_REFUSALS=$((RACE_REFUSALS + 1)) ;;
   esac
 done
 # Every other occupancy check in this suite drives a holder that was already
 # committed before the second call started, which proves the READ and not the
 # lock. Two begins launched together in one tree are the case the changeset is
 # named after: the project lease must order them, so exactly one may win.
+# The record COUNT is asserted beside the exit codes, and it is what compensates
+# for admitting two loser codes above: exit codes alone cannot tell a loser that
+# was refused from one that wrote a second run document and then reported a
+# failure. Exactly one run record must exist in that tree afterwards.
+RACE_RECORDS=0
+if [ "$RACE_READY" = true ]; then
+  RACE_RECORDS="$(find "$RACE_P/.zensu/state" -maxdepth 1 -name 'autopilot-run-*.json' 2>/dev/null | wc -l | tr -d ' ')"
+fi
 if [ "$RACE_READY" != true ]; then
   check "W27 concurrency fixture unavailable" FAIL
-elif [ "$RACE_WINNERS" -eq 1 ] && [ "$RACE_REFUSALS" -eq 1 ]; then
-  check "W27 two begins racing for one working tree yield exactly one winner" PASS
+elif [ "$RACE_WINNERS" -eq 1 ] && [ "$RACE_REFUSALS" -eq 1 ] && [ "$RACE_RECORDS" -eq 1 ]; then
+  check "W27 two begins racing for one working tree yield exactly one winner and one record" PASS
 else
-  check "W27 concurrent begins must yield one winner and one refusal (a=$RACE_A_RC b=$RACE_B_RC)" FAIL
+  check "W27 concurrent begins must yield one winner and one refusal (a=$RACE_A_RC b=$RACE_B_RC records=$RACE_RECORDS)" FAIL
 fi
 
 # --- R1: the containment predicate must be separator-correct and total ---

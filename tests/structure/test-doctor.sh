@@ -3104,6 +3104,1024 @@ case "$RC_NOMOD_OUT" in *'block is intact'*)
   check "P5h a missing module wrongly still claimed a carrier was intact" FAIL ;;
   *) check "P5h a missing module claims nothing about carrier health" PASS ;; esac
 
+# --- P1n: durable Autopilot run rows ---------------------------------------
+# Until this row existed the report carried NO Autopilot row of any kind, so a
+# nonterminal run holding a working tree was visible only to someone who had
+# already been refused a begin. The fixtures below are hand-written run documents
+# rather than products of `autopilot_begin_run`: the renderer reads the file, and
+# building a real durable run needs a git repository plus worktrees, which this
+# suite does not otherwise construct. The behaviour under test is the RENDERER's.
+
+AP_P="$SBOX/autopilot-project"
+AP_STATE="$AP_P/.zensu/state"
+mkdir -p "$AP_STATE"
+AP_OWN="scv1_$(printf 'a%.0s' $(seq 64))"
+AP_FOREIGN="scv1_$(printf 'c%.0s' $(seq 64))"
+
+# The record satisfies the exact KEY SET the owning module's `stateValid` accepts
+# (`STATE_KEYS` / `STATE_KEYS_WORKSPACE`), and its `runId` equals the filename stem,
+# because the renderer enforces both. The filename is DERIVED from the run id here
+# for that reason; the previous helper took them as separate arguments, and that
+# divergence is exactly what let the old row print a "Tracked in" path that did not
+# exist while the suite stayed green.
+#
+# STATE THE BOUND, because an earlier wording of this comment claimed the fixture
+# satisfied `stateValid` and it does NOT: the key set matches while nearly every
+# VALUE is one the owner refuses — `options`, `tdd`, `effects` and `stopBudget` are
+# `{}` against exact key sets, `blocked` is `null` against `["from","code"]`,
+# `events` is empty against a `length >= 1` bound, and `nextActionCode` is a
+# constant that does not equal `NEXT_ACTION[stage]`. So every check driven from
+# this helper measures the RENDERER against a record the product would refuse, and
+# none of them says anything about the two agreeing. That is deliberate — a record
+# `stateValid` accepts needs canonical per-event payload digests, and hand-rolling
+# those here would be a second copy of the canonicalization rule — but it leaves
+# one hole the helper cannot close: nothing here proves the reader accepts a record
+# the product actually WRITES. P1nw below closes exactly that, with a real one.
+ap_run() { # ap_run <runId> <stage> <owner> [workspaceRoot|-] [projectRoot]
+  RUN_ID="$1" RUN_STAGE="$2" RUN_OWNER="$3" RUN_WS="${4:--}" RUN_ROOT="${5:-$AP_P}" \
+  node -e '
+    var fs = require("fs");
+    var ws = process.env.RUN_WS;
+    // CANONICAL, because that is what the product stores: the worker replaces its
+    // own project-root argument with `realpathSync.native(path.resolve(...))` before
+    // any mode runs, so every record `begin` mints carries the canonical spelling.
+    // The reader compares this field VERBATIM against the canonicalized caller root,
+    // exactly as `readRunInventory` does — writing a raw path here would make the
+    // fixture disagree with the product on macOS, where a temp root is spelled
+    // `/var/…` by the caller and `/private/var/…` by the kernel.
+    var root = process.env.RUN_ROOT;
+    try { root = fs.realpathSync.native(root); } catch (e) {}
+    var rec = {
+      schemaVersion: 1,
+      runId: process.env.RUN_ID,
+      projectRoot: root,
+      ownerSessionId: process.env.RUN_OWNER,
+      stage: process.env.RUN_STAGE,
+      nextActionCode: "AWAIT_RESUME",
+      approvedPlanSha256: null,
+      options: {},
+      tdd: {},
+      effects: {},
+      evidence: {},
+      blocked: null,
+      bypasses: [],
+      stopBudget: {},
+      events: [],
+    };
+    if (ws !== "-") rec.workspaceRoot = ws;
+    // The SIXTH argument opts into the shape the OWNER accepts. It exists because
+    // the OK glyph is now gated on a check stricter than the row itself, so a
+    // fixture whose subject is the green arm must carry a record the owner would
+    // read — otherwise the check measures the gate rather than the arm it is named
+    // for. Every OTHER fixture deliberately keeps the loose shape: the row must
+    // still render for a record the owner refuses, and that is what those pin.
+    // NO APOSTROPHE may appear anywhere in this program: it is delimited by single
+    // quotes in the shell, so one would close the string mid-comment.
+    if (process.env.RUN_VALID === "true") {
+      var NEXT = {
+        PLANNING: "AWAIT_PLAN_APPROVAL", AWAIT_TDD: "START_TDD",
+        TDD_RUNNING: "AWAIT_TDD_CHAIN", GATES: "RUN_GATES", CONVERGE: "RUN_CONVERGENCE",
+        OPEN_PR: "RECONCILE_PR", TEAM_REVIEW: "RECONCILE_TEAM_REVIEW",
+        FIX_FINDINGS: "FIX_REVIEW_FINDINGS", VALIDATE: "VALIDATE_FEATURE",
+        COVER: "RUN_COVERAGE", DELIVER: "DELIVER_PR", BLOCKED: "AWAIT_RESUME",
+        DONE: "NONE", CANCELLED: "NONE",
+      };
+      rec.nextActionCode = NEXT[rec.stage];
+      rec.options = { cover: false, validate: true };
+      rec.tdd = { attempt: 1, chainId: null, sessionId: null, returnStage: null,
+        outcome: null, headUpdateRequired: false };
+      rec.effects = { prOpen: {}, teamReview: {} };
+      rec.blocked = { from: null, code: null };
+      rec.stopBudget = { stage: rec.stage, count: 0 };
+      rec.events = [{ eventId: "e1", eventType: "START", payloadDigest: "", payload: {},
+        fromStage: null, toStage: "PLANNING" }];
+    }
+    process.stdout.write(JSON.stringify(rec));
+  ' > "$AP_STATE/autopilot-run-$1.json"
+}
+ap_run_valid() { RUN_VALID=true ap_run "$@"; }
+# The owner-keyed active pointer, whose name is sha256 of the OWNER SESSION id.
+# The renderer reads it to tell an ordinary in-progress own run from the torn-begin
+# shape whose "repair it" wording it would otherwise print for both.
+ap_pointer() { # ap_pointer <owner> <runId>
+  AP_OWNER="$1" AP_RUN="$2" AP_DIR="$AP_STATE" node -e '
+    var crypto = require("crypto"), fs = require("fs"), path = require("path");
+    var d = crypto.createHash("sha256").update(process.env.AP_OWNER).digest("hex");
+    fs.writeFileSync(path.join(process.env.AP_DIR, "autopilot-active-" + d + ".json"),
+      JSON.stringify({ schemaVersion: 1, runId: process.env.AP_RUN }));
+  '
+}
+ap_report() { # ap_report <binding> <session-key>
+  ZDOC_BINDING="$1" ZDOC_SESSION_KEY="$2" \
+  ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$AP_P" \
+    node "$REPORT" 2>/dev/null
+}
+
+# P1na — the stage vocabulary is a HAND COPY of zensu-autopilot-state.sh, which owns
+# it inside a bash file no `require` can reach. This is the REVIEWER_AGENT/P1by
+# position and it takes the same remedy: compare the copy against its owner. Without
+# this, a stage added upstream would make the renderer report every run carrying it
+# as unreadable, and a terminal stage added upstream would make the row shout about a
+# finished run forever — both silently.
+AP_OWNER_SRC="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
+AP_STAGES_OWNER="$(node -e '
+  var fs = require("fs");
+  var src = fs.readFileSync(process.argv[1], "utf8");
+  var m = /const STAGES = new Set\(\[([\s\S]*?)\]\);/.exec(src);
+  if (!m) { process.stdout.write("UNDERIVABLE"); process.exit(0); }
+  var v = m[1].match(/"[A-Z_]+"/g) || [];
+  process.stdout.write(v.map(function (s) { return s.slice(1, -1); }).sort().join(","));
+' "$AP_OWNER_SRC")"
+AP_STAGES_COPY="$(node -e '
+  var fs = require("fs");
+  var src = fs.readFileSync(process.argv[1], "utf8");
+  var m = /var AUTOPILOT_STAGES = \[([\s\S]*?)\];/.exec(src);
+  if (!m) { process.stdout.write("UNDERIVABLE"); process.exit(0); }
+  var v = m[1].match(/'"'"'[A-Z_]+'"'"'/g) || [];
+  process.stdout.write(v.map(function (s) { return s.slice(1, -1); }).sort().join(","));
+' "$REPORT")"
+AP_TERM_OWNER="$(node -e '
+  var fs = require("fs");
+  var m = /const TERMINAL = new Set\(\[([\s\S]*?)\]\);/.exec(fs.readFileSync(process.argv[1], "utf8"));
+  if (!m) { process.stdout.write("UNDERIVABLE"); process.exit(0); }
+  var v = m[1].match(/"[A-Z_]+"/g) || [];
+  process.stdout.write(v.map(function (s) { return s.slice(1, -1); }).sort().join(","));
+' "$AP_OWNER_SRC")"
+AP_TERM_COPY="$(node -e '
+  var fs = require("fs");
+  var m = /var AUTOPILOT_TERMINAL = \[([\s\S]*?)\];/.exec(fs.readFileSync(process.argv[1], "utf8"));
+  if (!m) { process.stdout.write("UNDERIVABLE"); process.exit(0); }
+  var v = m[1].match(/'"'"'[A-Z_]+'"'"'/g) || [];
+  process.stdout.write(v.map(function (s) { return s.slice(1, -1); }).sort().join(","));
+' "$REPORT")"
+# An UNDERIVABLE side is a FAIL, never a skip: a renamed constant on either side
+# would otherwise make this check compare two empty strings and pass vacuously,
+# which is the exact failure mode the pin exists to prevent.
+if [ "$AP_STAGES_OWNER" != "UNDERIVABLE" ] && [ "$AP_TERM_OWNER" != "UNDERIVABLE" ] \
+  && [ "$AP_STAGES_OWNER" = "$AP_STAGES_COPY" ] && [ "$AP_TERM_OWNER" = "$AP_TERM_COPY" ]; then
+  check "P1na the renderer's Autopilot stage/terminal copy matches zensu-autopilot-state.sh" PASS
+else
+  check "P1na Autopilot stage vocabulary drifted (stages owner=$AP_STAGES_OWNER copy=$AP_STAGES_COPY; terminal owner=$AP_TERM_OWNER copy=$AP_TERM_COPY)" FAIL
+fi
+
+# P1nb — nothing to report is SILENT, matching the pending-review row. A permanent
+# "no Autopilot run" row would print in every project that never uses Autopilot.
+AP_EMPTY_OUT="$(ap_report bound "$AP_OWN")"
+# The negative needs a positive witness, or a renderer that threw before reaching
+# `autopilotRows` would satisfy it with empty output. `bindingLine()` emits a
+# `binding:` row under every verdict this helper passes.
+if printf '%s' "$AP_EMPTY_OUT" | grep -qF 'binding:' \
+  && ! printf '%s' "$AP_EMPTY_OUT" | grep -qF 'autopilot:'; then
+  check "P1nb a project with no run document renders no autopilot row" PASS
+else
+  check "P1nb no-run-document row (report ran: $(printf '%s' "$AP_EMPTY_OUT" | grep -c 'binding:'))" FAIL
+fi
+
+# P1nc — a FOREIGN nonterminal run is reported, names the run, and prescribes the
+# GUIDED release form. `--confirm` must be absent: this row is read by the model,
+# and a complete invocation there routes around the only place consent lives.
+ap_run run_foreign_a BLOCKED "$AP_FOREIGN" "/w/held-tree"
+AP_FOREIGN_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_FOREIGN_OUT" | grep -qF 'autopilot: nonterminal durable run run_foreign_a at stage BLOCKED' \
+  && printf '%s' "$AP_FOREIGN_OUT" | grep -qF 'owned by another session' \
+  && printf '%s' "$AP_FOREIGN_OUT" | grep -qF '/zensu:autopilot-release' \
+  && ! printf '%s' "$AP_FOREIGN_OUT" | grep -qF -- '--confirm'; then
+  check "P1nc a foreign nonterminal run is named with the guided release form and no --confirm" PASS
+else
+  check "P1nc foreign run row (got: $AP_FOREIGN_OUT)" FAIL
+fi
+# The tree and the two facts the row exists to correct.
+if printf '%s' "$AP_FOREIGN_OUT" | grep -qF '/w/held-tree' \
+  && printf '%s' "$AP_FOREIGN_OUT" | grep -qF 'sha256 of the OWNING SESSION id' \
+  && printf '%s' "$AP_FOREIGN_OUT" | grep -qF 'containment in BOTH'; then
+  check "P1nd the row names the held tree, the owner-session hash and the containment rule" PASS
+else
+  check "P1nd row content (got: $AP_FOREIGN_OUT)" FAIL
+fi
+# P1nd1 — the TRACKED path must RESOLVE. Named for what it measures: the causal
+# story it used to carry (a renderer rebuilding the path from `runId` would print a
+# path that does not exist) is no longer a mutation this check can catch, because
+# `autopilotRun` now refuses `runId !== stem` — P1nd2 below pins that — so both
+# spellings produce the same bytes. What survives is the weaker but real property
+# that the row does not name a file nobody can open.
+AP_TRACKED="$(printf '%s' "$AP_FOREIGN_OUT" | sed -n 's/.*Tracked in \([^,]*\.json\),.*/\1/p' | head -1)"
+if [ -n "$AP_TRACKED" ] && [ -f "$AP_TRACKED" ]; then
+  check "P1nd1 the tracked path names a file that exists" PASS
+else
+  check "P1nd1 tracked path must resolve (got: '$AP_TRACKED')" FAIL
+fi
+# P1nd2 — a record whose `runId` disagrees with its filename stem is REFUSED, the
+# way `readRunInventory` refuses it, rather than rendered as an ordinary run.
+printf '%s' "$(RUN_ID=run_other RUN_ROOT="$AP_P" RUN_OWNER="$AP_FOREIGN" node -e '
+  process.stdout.write(JSON.stringify({schemaVersion:1,runId:process.env.RUN_ID,
+    projectRoot:process.env.RUN_ROOT,ownerSessionId:process.env.RUN_OWNER,stage:"GATES",
+    nextActionCode:"RUN_GATES",approvedPlanSha256:null,options:{},tdd:{},effects:{},
+    evidence:{},blocked:null,bypasses:[],stopBudget:{},events:[]}));')" \
+  > "$AP_STATE/autopilot-run-run_mismatch.json"
+AP_MISMATCH_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_MISMATCH_OUT" | grep -qF 'a run id that disagrees with the filename' \
+  && ! printf '%s' "$AP_MISMATCH_OUT" | grep -qF 'run_other at stage'; then
+  check "P1nd2 a runId that disagrees with the filename stem is refused, not rendered" PASS
+else
+  check "P1nd2 runId/filename binding (got: $AP_MISMATCH_OUT)" FAIL
+fi
+rm -f "$AP_STATE/autopilot-run-run_mismatch.json"
+
+# P1ne — an OWN run whose pointer does NOT designate it is the torn-begin shape:
+# WARN, named, and carrying no release command. Releasing a run this session owns
+# cancels its own live generation, which is why the refusal renderer withholds the
+# command in the same case.
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+ap_run run_own_a TDD_RUNNING "$AP_OWN" "/w/own-tree"
+AP_OWN_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_OWN_OUT" | grep -qF 'autopilot: nonterminal durable run run_own_a' \
+  && printf '%s' "$AP_OWN_OUT" | grep -qF 'owned by THIS session' \
+  && printf '%s' "$AP_OWN_OUT" | grep -qF 'no active pointer designates it' \
+  && ! printf '%s' "$AP_OWN_OUT" | grep -qF '/zensu:autopilot-release'; then
+  check "P1ne an own run with no pointer is the torn-begin shape and carries no release command" PASS
+else
+  check "P1ne own run row (got: $AP_OWN_OUT)" FAIL
+fi
+# P1ne1 — and it is a WARNING, because a torn begin is real state to repair.
+if printf '%s' "$AP_OWN_OUT" | grep -F 'autopilot: nonterminal durable run run_own_a' | grep -qF '⚠️'; then
+  check "P1ne1 a torn-begin own run warns" PASS
+else
+  check "P1ne1 a torn-begin own run must warn" FAIL
+fi
+# P1ne2 — an own run whose pointer DOES designate it is an ordinary run in
+# progress. It renders OK, so a live Autopilot run does not suppress the green
+# summary for its own owner. A blanket demotion of the own arm would have silenced
+# the torn-begin case above; this is the discriminator, not a demotion.
+# The record is minted through `ap_run_valid`, because the OK arm is gated on a
+# check stricter than the row's: a record the OWNER would refuse may never be
+# green, so a loose fixture here would measure that gate instead of this arm.
+rm -f "$AP_STATE"/autopilot-run-*.json
+ap_run_valid run_own_a GATES "$AP_OWN" "/w/t"
+ap_pointer "$AP_OWN" run_own_a
+AP_OWN_LIVE_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_OWN_LIVE_OUT" | grep -F 'autopilot: nonterminal durable run run_own_a' | grep -qF '✅' \
+  && printf '%s' "$AP_OWN_LIVE_OUT" | grep -qF 'still designates it' \
+  && ! printf '%s' "$AP_OWN_LIVE_OUT" | grep -qF '/zensu:autopilot-release'; then
+  check "P1ne2 an own run whose pointer designates it renders OK, not a warning" PASS
+else
+  check "P1ne2 ordinary own run row (got: $AP_OWN_LIVE_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-active-*.json
+
+# P1nf — with no session key the owner cannot be established, and the row says so
+# rather than guessing. Folding this into the foreign branch would prescribe a
+# release against what may be this session's own live generation.
+AP_UNBOUND_OUT="$(ap_report unbound '')"
+if printf '%s' "$AP_UNBOUND_OUT" | grep -qF 'owner not established' \
+  && ! printf '%s' "$AP_UNBOUND_OUT" | grep -qF '/zensu:autopilot-release'; then
+  check "P1nf an unbound report states the owner is not established and names no release" PASS
+else
+  check "P1nf unbound ownership row (got: $AP_UNBOUND_OUT)" FAIL
+fi
+
+# P1ng — a record carrying no workspaceRoot holds EVERY tree in its project, because
+# mayHoldWorkspace short-circuits on the absent field. The row must say that, and it
+# must NOT explain the hold by containment, which is not what decided it there.
+rm -f "$AP_STATE"/autopilot-run-*.json
+ap_run run_legacy_a GATES "$AP_OWN" -
+AP_LEGACY_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_LEGACY_OUT" | grep -qF 'holds EVERY working tree in this project' \
+  && ! printf '%s' "$AP_LEGACY_OUT" | grep -qF 'Occupancy is decided'; then
+  check "P1ng a record with no workspaceRoot holds every tree and skips the containment clause" PASS
+else
+  check "P1ng legacy record row (got: $AP_LEGACY_OUT)" FAIL
+fi
+# P1ng1 — a workspaceRoot that is present but unusable is a THIRD answer, distinct
+# from both an absent one and a readable one. An over-long value takes it: the owner
+# bounds the field at 4096 and this reader must not be wider.
+rm -f "$AP_STATE"/autopilot-run-*.json
+AP_LONG_WS="$(node -e 'process.stdout.write("/w/" + "x".repeat(5000))')"
+ap_run run_longws_a GATES "$AP_OWN" "$AP_LONG_WS"
+AP_LONGWS_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_LONGWS_OUT" | grep -qF 'names a working tree this report does not render' \
+  && ! printf '%s' "$AP_LONGWS_OUT" | grep -qF 'xxxxxxxxxxxxxxxxxxxx'; then
+  check "P1ng1 an over-long workspaceRoot is refused and never echoed into the report" PASS
+else
+  check "P1ng1 over-long workspaceRoot must not reach the report" FAIL
+fi
+
+# P1nh — a TERMINAL run produces no row. DONE and CANCELLED are the only terminal
+# stages; BLOCKED is deliberately not among them and P1nc above covers that. The
+# negative control matters: if the fixtures stopped satisfying the shape gates they
+# would land in `unreadable` and this check would pass for the wrong reason.
+rm -f "$AP_STATE"/autopilot-run-*.json
+ap_run run_done_a DONE "$AP_OWN" "/w/t"
+ap_run run_cancelled_a CANCELLED "$AP_FOREIGN" "/w/t"
+AP_TERM_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_TERM_OUT" | grep -qF 'binding:' \
+  && ! printf '%s' "$AP_TERM_OUT" | grep -qF 'autopilot: nonterminal' \
+  && ! printf '%s' "$AP_TERM_OUT" | grep -qF 'could not be read'; then
+  check "P1nh terminal runs render no row, and were read as runs rather than rejected" PASS
+else
+  check "P1nh terminal runs render no row (got: $AP_TERM_OUT)" FAIL
+fi
+
+# P1ni — an unreadable run document is its OWN finding, never silence. Such a record
+# still holds its tree while /zensu:autopilot-release needs a run id it cannot supply,
+# so reporting it as "no run" is the failure this whole row exists to remove. The
+# COUNT is asserted, so a regression in one shape gate cannot hide behind the other.
+rm -f "$AP_STATE"/autopilot-run-*.json
+printf 'not json at all' > "$AP_STATE/autopilot-run-run_broken_a.json"
+ap_run run_shapeless_a NOT_A_STAGE "$AP_OWN" "/w/t"
+AP_BROKEN_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_BROKEN_OUT" | grep -qF '2 durable run document(s) that could not be read' \
+  && printf '%s' "$AP_BROKEN_OUT" | grep -qF 'this is NOT' \
+  && ! printf '%s' "$AP_BROKEN_OUT" | grep -qF 'autopilot: nonterminal'; then
+  check "P1ni unreadable and shape-invalid run documents are both counted, not silently dropped" PASS
+else
+  check "P1ni unreadable run document row (got: $AP_BROKEN_OUT)" FAIL
+fi
+# P1ni1 — a run id below the owner's own minimum length is refused. `identifier`
+# requires three characters; a wider reader here renders as an ordinary run the one
+# record shape that aborts readRunInventory for the whole project.
+rm -f "$AP_STATE"/autopilot-run-*.json
+ap_run ab GATES "$AP_OWN" "/w/t"
+AP_SHORTID_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_SHORTID_OUT" | grep -qF 'could not be read' \
+  && ! printf '%s' "$AP_SHORTID_OUT" | grep -qF 'run ab at stage'; then
+  check "P1ni1 a run id shorter than the owner's minimum is refused, not rendered" PASS
+else
+  check "P1ni1 short run id must be refused (got: $AP_SHORTID_OUT)" FAIL
+fi
+# P1ni2 — a filename carrying a control byte is COUNTED but its name is withheld,
+# because the report is printed verbatim by the model.
+rm -f "$AP_STATE"/autopilot-run-*.json
+AP_ESC_NAME="$(printf 'autopilot-run-a\033b.json')"
+printf 'not json' > "$AP_STATE/$AP_ESC_NAME" 2>/dev/null || AP_ESC_NAME=""
+if [ -n "$AP_ESC_NAME" ] && [ -f "$AP_STATE/$AP_ESC_NAME" ]; then
+  AP_ESC_OUT="$(ap_report bound "$AP_OWN")"
+  if printf '%s' "$AP_ESC_OUT" | grep -qF 'withheld because they carry a' \
+    && ! printf '%s' "$AP_ESC_OUT" | grep -q "$(printf 'a\033b')"; then
+    check "P1ni2 a run filename carrying a control byte is counted but withheld" PASS
+  else
+    check "P1ni2 control-byte filename must be withheld (got: $AP_ESC_OUT)" FAIL
+  fi
+  rm -f "$AP_STATE/$AP_ESC_NAME"
+else
+  check "P1ni2 skipped: this filesystem rejects a control byte in a filename" PASS
+fi
+
+# P1nj — read-only. The report must not create, rewrite or remove a run document.
+rm -f "$AP_STATE"/autopilot-run-*.json
+ap_run run_ro_a GATES "$AP_FOREIGN" "/w/t"
+AP_BEFORE="$(ls "$AP_STATE" | sort | tr '\n' ' ')"
+AP_SUM_BEFORE="$(cat "$AP_STATE"/autopilot-run-*.json | cksum)"
+ap_report bound "$AP_OWN" >/dev/null
+AP_AFTER="$(ls "$AP_STATE" | sort | tr '\n' ' ')"
+AP_SUM_AFTER="$(cat "$AP_STATE"/autopilot-run-*.json | cksum)"
+if [ "$AP_BEFORE" = "$AP_AFTER" ] && [ "$AP_SUM_BEFORE" = "$AP_SUM_AFTER" ]; then
+  check "P1nj rendering the autopilot rows mutates no run document" PASS
+else
+  check "P1nj the report mutated the state directory (before=$AP_BEFORE after=$AP_AFTER)" FAIL
+fi
+
+# P1nk — the owner-silence branch. Every earlier fixture leaves no workflow document,
+# so the populated arm and its TTL clause had no executed case at all.
+rm -f "$AP_STATE"/autopilot-run-*.json
+ap_run run_silence_a GATES "$AP_FOREIGN" "/w/t"
+printf '{}' > "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+touch -t 200001010000 "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null
+AP_SILENCE_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_SILENCE_OUT" | grep -qF 'last wrote its workflow document' \
+  && printf '%s' "$AP_SILENCE_OUT" | grep -qF 'h ago (a release refuses while that is under'; then
+  check "P1nk a foreign run with a workflow document renders the measured silence and its TTL clause" PASS
+else
+  check "P1nk owner-silence branch (got: $AP_SILENCE_OUT)" FAIL
+fi
+# P1nk1 — an unreadable beacon is a MISSING CHECK, never the positive claim that the
+# session left no workflow document. The release verb refuses such a beacon outright,
+# so a confident age here would pair a measurement with an unexecutable remedy.
+rm -f "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+mkdir -p "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+AP_BADBEACON_OUT="$(ap_report bound "$AP_OWN")"
+rmdir "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null
+if printf '%s' "$AP_BADBEACON_OUT" | grep -qF 'could not be read' \
+  && printf '%s' "$AP_BADBEACON_OUT" | grep -qF 'was NOT measured'; then
+  check "P1nk1 an unreadable liveness beacon is reported as a missing check, not as absence" PASS
+else
+  check "P1nk1 unreadable beacon must not read as absence (got: $AP_BADBEACON_OUT)" FAIL
+fi
+# P1nk2 — the TTL clause states the RELEASE verb's exit-7 refusal, which lives inside
+# that verb's foreign-caller branch only. It must not appear beside an own run.
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/tdd-phase-*.json
+ap_run run_ownttl_a GATES "$AP_OWN" "/w/t"
+printf '{}' > "$AP_STATE/tdd-phase-$AP_OWN.json"
+AP_OWNTTL_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_OWNTTL_OUT" | grep -qF 'last wrote its workflow document' \
+  && ! printf '%s' "$AP_OWNTTL_OUT" | grep -qF 'a release refuses while that is under'; then
+  check "P1nk2 the release-TTL clause is withheld for a run this session owns" PASS
+else
+  check "P1nk2 own-run TTL clause (got: $AP_OWNTTL_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/tdd-phase-*.json
+
+# P1nl — the row roster is held against skills/doctor/SKILL.md, the same drift pin
+# P1qr applies to the reviewer-denial rows. Without it the renderer can be reworded
+# while the skill keeps telling the model to report the old wording.
+rm -f "$AP_STATE"/autopilot-run-*.json
+ap_run run_drift_a BLOCKED "$AP_FOREIGN" "/w/t"
+AP_DRIFT_OUT="$(ap_report bound "$AP_OWN")"
+AP_DRIFT_OK=true
+for AP_PHRASE in \
+  'autopilot: nonterminal durable run' \
+  'durable run document(s) that could not be read' \
+  '/zensu:autopilot-release' \
+  'owned by THIS session' \
+  'ordinary run in progress' \
+  'the run is BLOCKED, which is NOT terminal' \
+  'no active pointer designates it' \
+  'could not be read, so whether the run is ordinary' \
+  'NOT a complete'
+do
+  printf '%s' "$AP_DRIFT_OUT" | grep -qF "$AP_PHRASE" || {
+    # Phrases this ONE fixture cannot emit are still required on the skill side; the
+    # renderer side of each is covered by its own executed check above (P1ni, P1ne,
+    # P1ne2, P1nq1, P1nq3), so requiring them here as well would only re-test those.
+    case "$AP_PHRASE" in
+      'durable run document(s) that could not be read'|'owned by THIS session'|'ordinary run in progress'|'the run is BLOCKED, which is NOT terminal'|'no active pointer designates it'|'could not be read, so whether the run is ordinary'|'NOT a complete') ;;
+      *) AP_DRIFT_OK=false ;;
+    esac
+  }
+  grep -qF "$AP_PHRASE" "$SKILL_MD" || AP_DRIFT_OK=false
+done
+if [ "$AP_DRIFT_OK" = true ]; then
+  check "P1nl every autopilot row phrase the renderer emits is documented in the doctor skill" PASS
+else
+  check "P1nl renderer and doctor skill drifted on the autopilot rows" FAIL
+fi
+
+# P1nm — the run-record KEY SET is a hand copy, and this check is what holds it
+# against `STATE_KEYS`. Name only what is actually compared: P1na covers the stage
+# and terminal vocabularies, this check covers the key set, and the ID CLASS
+# (`AUTOPILOT_ID_RE` / `AUTOPILOT_OWNER_RE`) is pinned by P1nm1 below. An earlier
+# comment here claimed "all four are pinned … by P1na above and by this check",
+# which was false for the id class and contradicted CLAUDE.md's own honest list —
+# and that constant had already drifted once, when `{0,127}` admitted ids the owner
+# refuses.
+AP_KEYS_OWNER="$(node -e '
+  var fs = require("fs");
+  var m = /const STATE_KEYS = \[([\s\S]*?)\];/.exec(fs.readFileSync(process.argv[1], "utf8"));
+  if (!m) { process.stdout.write("UNDERIVABLE"); process.exit(0); }
+  var v = m[1].match(/"[A-Za-z0-9_]+"/g) || [];
+  process.stdout.write(v.map(function (s) { return s.slice(1, -1); }).sort().join(","));
+' "$AP_OWNER_SRC")"
+AP_KEYS_COPY="$(node -e '
+  var fs = require("fs");
+  var m = /var AUTOPILOT_STATE_KEYS = \[([\s\S]*?)\];/.exec(fs.readFileSync(process.argv[1], "utf8"));
+  if (!m) { process.stdout.write("UNDERIVABLE"); process.exit(0); }
+  var v = m[1].match(/'"'"'[A-Za-z0-9_]+'"'"'/g) || [];
+  process.stdout.write(v.map(function (s) { return s.slice(1, -1); }).sort().join(","));
+' "$REPORT")"
+if [ "$AP_KEYS_OWNER" != "UNDERIVABLE" ] && [ "$AP_KEYS_OWNER" = "$AP_KEYS_COPY" ]; then
+  check "P1nm the renderer's run-record key set matches STATE_KEYS in zensu-autopilot-state.sh" PASS
+else
+  check "P1nm run-record key set drifted (owner=$AP_KEYS_OWNER copy=$AP_KEYS_COPY)" FAIL
+fi
+
+# P1nn — the row states the RELEASE verb's exit-7 refusal ("a release refuses while
+# that is under Nh"), and it reconstructs all three ingredients of that policy
+# independently: the beacon filename, the mtime signal, and the TTL. Nothing
+# compared the reconstruction with its owner, so a change to the release verb's
+# signal or filename would leave the doctor asserting a false sentence with every
+# behavioural check green. This pins the two spellings that can silently diverge.
+AP_BEACON_OWNER=$(grep -cF 'regularFile(path.join(stateDir, `tdd-phase-${state.ownerSessionId}.json`))' "$AP_OWNER_SRC")
+AP_BEACON_COPY=$(grep -cF "path.join(dir, 'tdd-phase-' + owner + '.json')" "$REPORT")
+AP_MTIME_OWNER=$(grep -cF 'ownerActivity.mtimeMs' "$AP_OWNER_SRC")
+AP_MTIME_COPY=$(grep -cF 'nowMs - st.mtimeMs' "$REPORT")
+# The renderer must read the beacon the way the release verb reads it. `regularFile`
+# there is lstat plus isFile plus nlink === 1; a following `statSync` here would
+# render a confident age for a symlinked or hard-linked beacon that the release
+# refuses outright, pairing a measurement with an unexecutable remedy.
+AP_LSTAT_COPY=$(grep -cF "fs.lstatSync(path.join(dir, 'tdd-phase-' + owner + '.json'))" "$REPORT")
+AP_STATSYNC_COPY=$(grep -cF "fs.statSync(path.join(dir, 'tdd-phase-' + owner + '.json'))" "$REPORT")
+if [ "$AP_BEACON_OWNER" -ge 1 ] && [ "$AP_BEACON_COPY" -ge 1 ] \
+  && [ "$AP_MTIME_OWNER" -ge 1 ] && [ "$AP_MTIME_COPY" -ge 1 ] \
+  && [ "$AP_LSTAT_COPY" -ge 1 ] && [ "$AP_STATSYNC_COPY" -eq 0 ]; then
+  check "P1nn the owner-silence reconstruction still matches the release verb it quotes" PASS
+else
+  check "P1nn silence reconstruction drifted (beacon owner=$AP_BEACON_OWNER copy=$AP_BEACON_COPY; mtime owner=$AP_MTIME_OWNER copy=$AP_MTIME_COPY; lstat=$AP_LSTAT_COPY statSync=$AP_STATSYNC_COPY)" FAIL
+fi
+
+# P1no — the run documents in the session-writable state directory are read with the
+# HARDENED reader. The first spelling of this pin was VACUOUS: its openSync literal
+# also occurs inside the sibling `readNoteJson`, and its negative conjunct named a
+# spelling that existed nowhere, so replacing readAutopilotJson's body with
+# `return readJson(file);` left it green. It is SLICED to the function under test now,
+# with a control that the slice is non-empty — the same technique the repo uses for
+# the marker-block carriers.
+AP_READER_SLICE="$(node -e '
+  var fs = require("fs");
+  var src = fs.readFileSync(process.argv[1], "utf8");
+  var i = src.indexOf("function readAutopilotJson(file) {");
+  if (i < 0) { process.stdout.write(""); process.exit(0); }
+  var j = src.indexOf("\nfunction autopilotRun(", i);
+  process.stdout.write(j < 0 ? "" : src.slice(i, j));
+' "$REPORT")"
+AP_READER_OK=true
+[ -n "$AP_READER_SLICE" ] || AP_READER_OK=false
+for AP_GUARD in \
+  'fs.lstatSync(file)' \
+  'pre.nlink !== 1' \
+  'pre.size > AUTOPILOT_RUN_MAX_BYTES' \
+  'O_NOFOLLOW' \
+  'st.nlink !== 1' \
+  'if (read !== st.size) return null;'
+do
+  printf '%s' "$AP_READER_SLICE" | grep -qF "$AP_GUARD" || AP_READER_OK=false
+done
+# And the reader must not delegate back to the config reader, which declines
+# O_NOFOLLOW on purpose and makes no nlink check.
+printf '%s' "$AP_READER_SLICE" | grep -qF 'readJson(' && AP_READER_OK=false
+if [ "$AP_READER_OK" = true ]; then
+  check "P1no the run-document reader carries every hardening guard, inside its own body" PASS
+else
+  check "P1no hardened reader guards missing or slice empty (len=${#AP_READER_SLICE})" FAIL
+fi
+# P1no-control — the slice technique must actually be able to fail. A guard that is
+# not in the slice must be absent from it even though it exists elsewhere in the file.
+if [ -n "$AP_READER_SLICE" ] && ! printf '%s' "$AP_READER_SLICE" | grep -qF 'NOTE_MAX_BYTES'; then
+  check "P1no-control the slice is scoped to the reader and not to the whole file" PASS
+else
+  check "P1no-control the slice is not scoped (it sees NOTE_MAX_BYTES)" FAIL
+fi
+# P1no1 — a SYMLINKED run document is refused rather than followed. The first
+# spelling was NON-DISCRIMINATING: it linked at a record whose runId differed from
+# the link's stem, so `autopilotRun` refused it on the stem binding whether or not
+# the link was followed, and deleting O_NOFOLLOW left the check green. The target
+# now carries the LINK's stem and sits outside the glob, so a followed link renders
+# an ordinary row — and the negative assertion is what bites.
+rm -f "$AP_STATE"/autopilot-run-*.json
+RUN_ID=run_link_a RUN_ROOT="$AP_P" RUN_OWNER="$AP_FOREIGN" node -e '
+  process.stdout.write(JSON.stringify({schemaVersion:1,runId:process.env.RUN_ID,
+    projectRoot:process.env.RUN_ROOT,ownerSessionId:process.env.RUN_OWNER,stage:"GATES",
+    nextActionCode:"RUN_GATES",approvedPlanSha256:null,options:{},tdd:{},effects:{},
+    evidence:{},blocked:null,bypasses:[],stopBudget:{},events:[],workspaceRoot:"/w/t"}));' \
+  > "$AP_STATE/link-target.json.hidden"
+if ln -sfn "$AP_STATE/link-target.json.hidden" "$AP_STATE/autopilot-run-run_link_a.json" 2>/dev/null \
+  && [ -L "$AP_STATE/autopilot-run-run_link_a.json" ]; then
+  AP_LINK_OUT="$(ap_report bound "$AP_OWN")"
+  if printf '%s' "$AP_LINK_OUT" | grep -qF '1 durable run document(s) that could not be read' \
+    && ! printf '%s' "$AP_LINK_OUT" | grep -qF 'run_link_a at stage'; then
+    check "P1no1 a symlinked run document is refused, not followed" PASS
+  else
+    check "P1no1 symlinked run document must be refused (got: $AP_LINK_OUT)" FAIL
+  fi
+  rm -f "$AP_STATE/autopilot-run-run_link_a.json"
+else
+  check "P1no1 skipped: this filesystem cannot create a symlink" PASS
+fi
+rm -f "$AP_STATE/link-target.json.hidden"
+# P1no2 — an OVER-CAP run document is refused. Also non-discriminating at first: the
+# padded object failed the key-set test anyway. The record is VALID now and padded
+# through `events`, which `autopilotRun` never type-checks, so dropping the cap makes
+# it render an ordinary row.
+rm -f "$AP_STATE"/autopilot-run-*.json
+RUN_ID=run_big_a RUN_ROOT="$AP_P" RUN_OWNER="$AP_FOREIGN" node -e '
+  var pad = [];
+  for (var i = 0; i < 4200; i++) { pad.push("y".repeat(256)); }
+  process.stdout.write(JSON.stringify({schemaVersion:1,runId:process.env.RUN_ID,
+    projectRoot:process.env.RUN_ROOT,ownerSessionId:process.env.RUN_OWNER,stage:"GATES",
+    nextActionCode:"RUN_GATES",approvedPlanSha256:null,options:{},tdd:{},effects:{},
+    evidence:{},blocked:null,bypasses:[],stopBudget:{},events:pad,workspaceRoot:"/w/t"}));' \
+  > "$AP_STATE/autopilot-run-run_big_a.json"
+AP_BIG_BYTES="$(wc -c < "$AP_STATE/autopilot-run-run_big_a.json" | tr -d ' ')"
+AP_BIG_OUT="$(ap_report bound "$AP_OWN")"
+if [ "$AP_BIG_BYTES" -gt 1048576 ] \
+  && printf '%s' "$AP_BIG_OUT" | grep -qF '1 durable run document(s) that could not be read' \
+  && ! printf '%s' "$AP_BIG_OUT" | grep -qF 'run_big_a at stage'; then
+  check "P1no2 an otherwise-valid run document past the size cap is refused" PASS
+else
+  check "P1no2 over-cap run document must be refused (bytes=$AP_BIG_BYTES)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json
+
+# P1np — the renderer's own `schemaVersion !== 1` guard. Named for what it MEASURES:
+# every `ap_run` record is one the owner refuses (see the helper's bound above), so
+# "a record the owner refuses must not render" is trivially true of the whole block
+# and says nothing about this check. What this one discriminates is the renderer's
+# schemaVersion gate, and it does that correctly — a failed mutation leaves a valid
+# record that renders, so the check fails rather than passing vacuously. The
+# owner-acceptance claim belongs to P1nw, which certifies its fixture through the
+# owner's own reader. The
+# renderer checks the schemaVersion VALUE now, not merely the key's presence.
+rm -f "$AP_STATE"/autopilot-run-*.json
+node -e '
+  var fs = require("fs");
+  var rec = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  rec.schemaVersion = 2;
+  fs.writeFileSync(process.argv[1], JSON.stringify(rec));
+' /dev/null 2>/dev/null || true
+ap_run run_schema_a GATES "$AP_FOREIGN" "/w/t"
+node -e '
+  var fs = require("fs");
+  var p = process.argv[1];
+  var rec = JSON.parse(fs.readFileSync(p, "utf8"));
+  rec.schemaVersion = 2;
+  fs.writeFileSync(p, JSON.stringify(rec));
+' "$AP_STATE/autopilot-run-run_schema_a.json"
+AP_SCHEMA_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_SCHEMA_OUT" | grep -qF 'could not be read' \
+  && ! printf '%s' "$AP_SCHEMA_OUT" | grep -qF 'run_schema_a at stage'; then
+  check "P1np a record whose schemaVersion the owner refuses is not rendered as a run" PASS
+else
+  check "P1np schemaVersion value check (got: $AP_SCHEMA_OUT)" FAIL
+fi
+# P1np1 — the same for a foreign projectRoot, the fifth ap_run parameter that had no
+# call site at all.
+rm -f "$AP_STATE"/autopilot-run-*.json
+ap_run run_root_a GATES "$AP_FOREIGN" "/w/t" "/elsewhere"
+AP_ROOT_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_ROOT_OUT" | grep -qF 'could not be read' \
+  && ! printf '%s' "$AP_ROOT_OUT" | grep -qF 'run_root_a at stage'; then
+  check "P1np1 a record naming a foreign projectRoot is not rendered as a run" PASS
+else
+  check "P1np1 projectRoot check (got: $AP_ROOT_OUT)" FAIL
+fi
+
+# P1nq — the pointer is validated to the OWNER's rule. A pointer the product refuses
+# must not flip an own run from WARN to OK, which would delete the finding.
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+ap_run run_ptr_a TDD_RUNNING "$AP_OWN" "/w/t"
+ap_pointer "$AP_OWN" run_ptr_a
+AP_PTR_DIGEST="$(AP_O="$AP_OWN" node -e 'process.stdout.write(require("crypto").createHash("sha256").update(process.env.AP_O).digest("hex"))')"
+# Strip schemaVersion: `pointerValid` requires the exact pair, so the owner refuses it.
+printf '{"runId":"run_ptr_a"}' > "$AP_STATE/autopilot-active-$AP_PTR_DIGEST.json"
+AP_PTR_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_PTR_OUT" | grep -F 'autopilot: nonterminal durable run run_ptr_a' | grep -qF '⚠️' \
+  && ! printf '%s' "$AP_PTR_OUT" | grep -qF 'still designates it'; then
+  check "P1nq a pointer the owner refuses cannot flip an own run to OK" PASS
+else
+  check "P1nq pointer validation (got: $AP_PTR_OUT)" FAIL
+fi
+# P1nq1 — an UNREADABLE pointer is a missing check, not a verdict.
+printf 'not json' > "$AP_STATE/autopilot-active-$AP_PTR_DIGEST.json"
+AP_PTR2_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_PTR2_OUT" | grep -qF 'could not be read, so whether the run is ordinary or' \
+  && printf '%s' "$AP_PTR2_OUT" | grep -qF 'a missing check, not a verdict'; then
+  check "P1nq1 an unreadable active pointer is reported as a missing check" PASS
+else
+  check "P1nq1 unreadable pointer verdict (got: $AP_PTR2_OUT)" FAIL
+fi
+# P1nq2 — the LEGACY pre-scoping pointer is honoured, as the owner honours it. Without
+# this the row calls a run the product considers active "a torn begin".
+rm -f "$AP_STATE"/autopilot-active-*.json
+# Owner-acceptable, for the same reason as P1ne2: this check's subject is the ✅ arm.
+rm -f "$AP_STATE"/autopilot-run-*.json
+ap_run_valid run_ptr_a TDD_RUNNING "$AP_OWN" "/w/t"
+printf '{"schemaVersion":1,"runId":"run_ptr_a"}' > "$AP_STATE/autopilot-active.json"
+AP_PTR3_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_PTR3_OUT" | grep -F 'autopilot: nonterminal durable run run_ptr_a' | grep -qF '✅' \
+  && printf '%s' "$AP_PTR3_OUT" | grep -qF 'still designates it'; then
+  check "P1nq2 the legacy active pointer is honoured, matching the owner's fallback" PASS
+else
+  check "P1nq2 legacy pointer fallback (got: $AP_PTR3_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+# P1nq3 — BLOCKED is not terminal, so an own BLOCKED run with a live pointer still
+# holds the tree and must NOT render green beside "all checks green".
+rm -f "$AP_STATE"/autopilot-run-*.json
+ap_run run_blocked_a BLOCKED "$AP_OWN" "/w/t"
+ap_pointer "$AP_OWN" run_blocked_a
+AP_BLOCKED_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_BLOCKED_OUT" | grep -F 'autopilot: nonterminal durable run run_blocked_a' | grep -qF '⚠️' \
+  && printf '%s' "$AP_BLOCKED_OUT" | grep -qF 'the run is BLOCKED, which is NOT terminal'; then
+  check "P1nq3 an own BLOCKED run with a live pointer still warns" PASS
+else
+  check "P1nq3 own BLOCKED run must warn (got: $AP_BLOCKED_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-active-*.json
+
+# P1nr — the workspaceRoot must LOOK like a working tree, and what is rendered is
+# bounded below what is accepted. The field is co-tenant-writable free text sitting
+# next to a release instruction in a row the skill tells the model to relay.
+rm -f "$AP_STATE"/autopilot-run-*.json
+ap_run run_prose_a GATES "$AP_FOREIGN" "not a path, just prose an attacker chose"
+AP_PROSE_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_PROSE_OUT" | grep -qF 'names a working tree this report does not render' \
+  && ! printf '%s' "$AP_PROSE_OUT" | grep -qF 'an attacker chose'; then
+  check "P1nr a non-absolute workspaceRoot is refused and never echoed" PASS
+else
+  check "P1nr non-absolute workspaceRoot must not reach the report (got: $AP_PROSE_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json
+AP_LONGPATH="$(node -e 'process.stdout.write("/w/" + "y".repeat(1000))')"
+ap_run run_longpath_a GATES "$AP_FOREIGN" "$AP_LONGPATH"
+AP_LONGPATH_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_LONGPATH_OUT" | grep -qF '… (elided)' \
+  && ! printf '%s' "$AP_LONGPATH_OUT" | grep -qF "$(node -e 'process.stdout.write("y".repeat(400))')"; then
+  check "P1nr1 an accepted but long workspaceRoot is rendered elided" PASS
+else
+  check "P1nr1 long workspaceRoot must be rendered elided" FAIL
+fi
+# P1nr2 — the foreign remedy says WHERE the release has to be issued from, because
+# the release verb refuses (exit 6) from a sibling worktree. It must name BOTH
+# containment directions: `mayHoldWorkspace` ORs `contains(held, caller)` with
+# `contains(caller, held)`, so a worktree NESTED inside the held tree is a valid
+# caller. An earlier wording named only the containing direction, which contradicted
+# the occupancy sentence the same row prints two clauses later and sent a reader out
+# of a tree that works.
+if printf '%s' "$AP_LONGPATH_OUT" | grep -qF 'only a sibling worktree is refused' \
+  && printf '%s' "$AP_LONGPATH_OUT" | grep -qF 'contains it or sits inside it'; then
+  check "P1nr2 the foreign remedy scopes the release and names both containment directions" PASS
+else
+  check "P1nr2 foreign remedy must scope the release in both directions (got: $AP_LONGPATH_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json
+
+# P1ns — the overflow and scan-bound row. It is the ONE row that stops a truncated
+# listing from reading as a complete account, which is the silence this whole feature
+# exists to remove, and nothing exercised it.
+rm -f "$AP_STATE"/autopilot-run-*.json
+AP_N=0
+while [ "$AP_N" -lt 9 ]; do ap_run "run_many_$AP_N" GATES "$AP_FOREIGN" "/w/t"; AP_N=$((AP_N+1)); done
+AP_MANY_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_MANY_OUT" | grep -qF 'further nonterminal run(s) not listed above'; then
+  check "P1ns more runs than the row budget are disclosed as an incomplete listing" PASS
+else
+  check "P1ns row-overflow disclosure missing" FAIL
+fi
+# P1ns1 — past the SCAN bound the row must say the block is not a complete account,
+# because documents beyond it were never opened at all.
+AP_N=0
+while [ "$AP_N" -lt 70 ]; do ap_run "run_scan_$AP_N" GATES "$AP_FOREIGN" "/w/t"; AP_N=$((AP_N+1)); done
+AP_SCAN_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_SCAN_OUT" | grep -qF 'not opened at all because the' \
+  && printf '%s' "$AP_SCAN_OUT" | grep -qF 'NOT a complete'; then
+  check "P1ns1 past the scan bound the row states the block is not a complete account" PASS
+else
+  check "P1ns1 scan-bound disclosure missing" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json
+
+# P1nt — a co-tenant-chosen FILENAME is bounded at render, the way workspaceRoot is.
+# An empty file with a chosen name is the cheapest channel into this report.
+rm -f "$AP_STATE"/autopilot-run-*.json
+# 236, not 400. `autopilot-run-` + 400 + `.json` is 419 bytes and NAME_MAX is 255
+# on every filesystem this suite runs on, so the create ALWAYS failed and the check
+# ALWAYS took its skip branch — reporting PASS for an assertion that never ran even
+# once. 236 gives a 255-byte name, the largest that fits, and it still exceeds
+# AUTOPILOT_RENDER_MAX (200), which is what the elision is measured against.
+AP_LONGNAME="autopilot-run-$(node -e 'process.stdout.write("z".repeat(236))').json"
+if : > "$AP_STATE/$AP_LONGNAME" 2>/dev/null && [ -f "$AP_STATE/$AP_LONGNAME" ]; then
+  AP_LONGNAME_OUT="$(ap_report bound "$AP_OWN")"
+  if printf '%s' "$AP_LONGNAME_OUT" | grep -qF '… (elided)' \
+    && ! printf '%s' "$AP_LONGNAME_OUT" | grep -qF "$(node -e 'process.stdout.write("z".repeat(210))')"; then
+    check "P1nt a long run filename is counted but rendered elided" PASS
+  else
+    check "P1nt long filename must be rendered elided" FAIL
+  fi
+  rm -f "$AP_STATE/$AP_LONGNAME"
+else
+  check "P1nt skipped: this filesystem rejects a 255-byte filename" PASS
+fi
+
+# P1nu — a Windows-minted workspaceRoot is readable from a POSIX report. The
+# drive-letter arm of the acceptance test is the only thing keeping it so, and
+# deleting it leaves every other check green.
+rm -f "$AP_STATE"/autopilot-run-*.json
+ap_run run_win_a GATES "$AP_FOREIGN" 'C:\w\t'
+AP_WIN_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_WIN_OUT" | grep -qF 'holds the working tree `C:\w\t`'; then
+  check "P1nu a Windows drive-letter workspaceRoot is accepted, not rejected as unreadable" PASS
+else
+  check "P1nu Windows workspaceRoot arm (got: $AP_WIN_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json
+
+# P1nv — the project-root comparison is CANONICAL on both sides. A record minted
+# through a symlinked root must still be readable when the report resolves the
+# lexical spelling, which is the ordinary non-bound case.
+if ln -sfn "$AP_P" "$SBOX/ap-link" 2>/dev/null && [ -L "$SBOX/ap-link" ]; then
+  rm -f "$AP_STATE"/autopilot-run-*.json
+  ap_run run_canon_a GATES "$AP_FOREIGN" "/w/t" "$AP_P"
+  AP_CANON_OUT="$(ZDOC_BINDING=unbound ZDOC_SESSION_KEY='' \
+    ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+    ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+    ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" \
+    CLAUDE_PROJECT_DIR="$SBOX/ap-link" node "$REPORT" 2>/dev/null)"
+  if printf '%s' "$AP_CANON_OUT" | grep -qF 'run_canon_a at stage GATES' \
+    && ! printf '%s' "$AP_CANON_OUT" | grep -qF 'could not be read'; then
+    check "P1nv a run reached through a symlinked project root is still readable" PASS
+  else
+    check "P1nv symlinked project root must not reject every run (got: $AP_CANON_OUT)" FAIL
+  fi
+  rm -f "$SBOX/ap-link"
+else
+  check "P1nv skipped: this filesystem cannot create a symlink" PASS
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json
+
+# P1nw — the one check in this block driven by a record the PRODUCT wrote. Every
+# other fixture comes from `ap_run`, which matches the owner's key set and none of
+# its values, so the whole block could pass against a reader that rejects every
+# real run — the row would then be permanently dead and nothing here would notice.
+# `autopilot_begin_run` mints a record `stateValid` accepts (it is round-tripped
+# through the owner's own `read-run` below, which is the proof, not an assumption),
+# and the row must render it. Everything runs in a SUBSHELL: sourcing the two
+# libraries exports session and lock state that broke a check two hundred lines
+# below in this suite's own history.
+AP_REAL="$SBOX/ap-real"
+AP_REAL_OWNER="scv1_$(printf 'b%.0s' $(seq 64))"
+AP_REAL_READY=false
+mkdir -p "$AP_REAL"
+if (
+  set +u
+  # shellcheck source=/dev/null
+  . "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh" 2>/dev/null
+  # shellcheck source=/dev/null
+  . "$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh" 2>/dev/null || exit 1
+  autopilot_begin_run run_real_a "$AP_REAL_OWNER" "$AP_REAL" false true "" >/dev/null 2>&1 || exit 1
+  # The owner's own reader is what certifies the fixture. Without this the check
+  # would only prove the two agree on a record NEITHER of them validated.
+  _autopilot_node read-run "$AP_REAL/.zensu/state/autopilot-run-run_real_a.json" \
+    run_real_a "$AP_REAL" >/dev/null 2>&1 || exit 1
+) >/dev/null 2>&1; then AP_REAL_READY=true; fi
+if [ "$AP_REAL_READY" != true ]; then
+  check "P1nw real-record fixture unavailable (autopilot_begin_run or its own reader refused)" FAIL
+else
+  AP_REAL_OUT="$(ZDOC_BINDING=bound ZDOC_SESSION_KEY="$AP_REAL_OWNER" \
+    ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+    ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+    ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" \
+    CLAUDE_PROJECT_DIR="$AP_REAL" node "$REPORT" 2>/dev/null)"
+  if printf '%s' "$AP_REAL_OUT" | grep -qF 'autopilot: nonterminal durable run run_real_a' \
+    && ! printf '%s' "$AP_REAL_OUT" | grep -qF 'could not be read'; then
+    check "P1nw a record the product actually wrote renders as a run, not as unreadable" PASS
+  else
+    check "P1nw real minted record must render (got: $AP_REAL_OUT)" FAIL
+  fi
+fi
+rm -rf "$AP_REAL"
+
+# P1nx — the control-byte arm of the workspaceRoot guard, which nothing reached.
+# It is the one place this reader is deliberately STRICTER than its owner: the
+# owner's `nonEmpty` rejects C0 only (the `\u0000-\u001f` range) while `CONTROL_BYTE_RE`
+# here also covers C1, DEL and U+2028/U+2029. So U+2028 is a value the owner
+# ACCEPTS and this report withholds — which is why the row may not blame the file
+# for it, and why "cannot read" was the wrong wording.
+rm -f "$AP_STATE"/autopilot-run-*.json
+AP_C1_WS="$(node -e 'process.stdout.write("/w/a\u2028b")')"
+ap_run run_c1_a GATES "$AP_FOREIGN" "$AP_C1_WS"
+AP_C1_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_C1_OUT" | grep -qF 'does not render' \
+  && printf '%s' "$AP_C1_OUT" | grep -qF 'even though the owner accepts it' \
+  && ! printf '%s' "$AP_C1_OUT" | grep -qF "$AP_C1_WS"; then
+  check "P1nx a U+2028 workspaceRoot the owner accepts is withheld, and the row says who refused" PASS
+else
+  check "P1nx control-character workspaceRoot arm (got: $AP_C1_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json
+
+# P1ny — `AUTOPILOT_OWNER_RE` had no executed case either, and the owner value is
+# not inert: it is concatenated into `tdd-phase-<owner>.json` and handed to
+# `path.join` by the silence probe. A refused owner must reach the unreadable
+# bucket rather than that join.
+ap_run run_badowner_a GATES "../../etc/passwd" "/w/t"
+AP_BADOWNER_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_BADOWNER_OUT" | grep -qF 'could not be read' \
+  && ! printf '%s' "$AP_BADOWNER_OUT" | grep -qF 'nonterminal durable run run_badowner_a'; then
+  check "P1ny an ownerSessionId the reader refuses never reaches the silence probe's path.join" PASS
+else
+  check "P1ny bad-owner arm (got: $AP_BADOWNER_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json
+
+# P1nz — the FUTURE-timestamp arm of the owner-silence probe, which nothing drove.
+# The mtime is operator-settable, so an unbounded subtraction renders a negative
+# age; the probe answers `unreadable` with the code `future timestamp` instead, and
+# the row must then say the liveness was NOT measured rather than printing a
+# confident number. Both halves are asserted, because the row printing "0h ago"
+# would also satisfy a bare absence-of-minus-sign check.
+ap_run run_future_a GATES "$AP_OWN" "/w/t"
+: > "$AP_STATE/tdd-phase-$AP_OWN.json"
+if touch -t 209901010000 "$AP_STATE/tdd-phase-$AP_OWN.json" 2>/dev/null; then
+  AP_FUTURE_OUT="$(ap_report bound "$AP_OWN")"
+  if printf '%s' "$AP_FUTURE_OUT" | grep -qF 'future timestamp' \
+    && printf '%s' "$AP_FUTURE_OUT" | grep -qF 'was NOT measured' \
+    && ! printf '%s' "$AP_FUTURE_OUT" | grep -qE 'last wrote its workflow document -?[0-9]+h ago'; then
+    check "P1nz a future-dated owner document is reported as not measured, never as an age" PASS
+  else
+    check "P1nz future-timestamp arm (got: $AP_FUTURE_OUT)" FAIL
+  fi
+else
+  check "P1nz skipped: this platform's touch rejects a year-2099 timestamp" PASS
+fi
+rm -f "$AP_STATE/tdd-phase-$AP_OWN.json"
+rm -f "$AP_STATE"/autopilot-run-*.json
+
+# P1nz2 — the OK glyph requires MORE than the row does. `ordinary` used to rest on
+# `autopilotRun`'s shape gates alone, so a record the owner refuses — one that fails
+# `readRunInventory` for the WHOLE project — could render ✅ and let the report print
+# "all checks green" beside a tree on which no Autopilot verb can run. The row itself
+# may still render on the loose shape; only the green arm is gated. `ap_run` writes a
+# fixed `nextActionCode` that disagrees with every stage but BLOCKED, so an own run
+# with a live pointer at GATES is exactly the discriminating case.
+rm -f "$AP_STATE"/autopilot-run-*.json
+ap_run run_okgate_a GATES "$AP_OWN" "/w/t"
+ap_pointer "$AP_OWN" run_okgate_a
+AP_OKGATE_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_OKGATE_OUT" | grep -qE '⚠️ +autopilot: nonterminal durable run run_okgate_a' \
+  && printf '%s' "$AP_OKGATE_OUT" | grep -qF 'accepted the record on its SHAPE' \
+  && ! printf '%s' "$AP_OKGATE_OUT" | grep -qE '✅ +autopilot: nonterminal durable run run_okgate_a'; then
+  check "P1nz2 a record the owner would refuse never carries the OK glyph" PASS
+else
+  check "P1nz2 OK-glyph gate (got: $AP_OKGATE_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-active-*.json
+rm -f "$AP_STATE"/autopilot-run-*.json
+
+# P1nz3 — the SHAPE-check qualification, which reached the report through exactly one
+# of six remedy strings and was pinned by nothing: a grep for its distinguishing
+# phrase returned zero. It now lives in the row TEXT, so every branch carries it, and
+# it is emitted only when the stricter check actually failed.
+ap_run run_shapeq_a GATES "$AP_FOREIGN" "/w/t"
+AP_SHAPEQ_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_SHAPEQ_OUT" | grep -qF 'the owner validates more' \
+  && printf '%s' "$AP_SHAPEQ_OUT" | grep -qF 'makes the document itself the finding'; then
+  check "P1nz3 a record failing the stricter check says so in the row, on every branch" PASS
+else
+  check "P1nz3 shape qualification (got: $AP_SHAPEQ_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json
+
+# P1nz4 — a BACKTICK is REFUSED, not delimited, on both co-tenant-writable channels.
+# A delimiter the value can itself contain is not an escape: the value would close
+# the code span and land mid-sentence, immediately before this row's own release
+# clause, in a row the doctor skill tells the model to relay verbatim. Rejection has
+# no legitimate cost — neither a git toplevel nor a valid run filename can carry one.
+ap_run run_tick_a GATES "$AP_FOREIGN" '/w/a`b'
+: > "$AP_STATE/autopilot-run-tick"'`'"name.json" 2>/dev/null || true
+AP_TICK_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_TICK_OUT" | grep -qF 'does not render' \
+  && ! printf '%s' "$AP_TICK_OUT" | grep -qF '/w/a`b' \
+  && ! printf '%s' "$AP_TICK_OUT" | grep -qF 'tick`name'; then
+  check "P1nz4 a backtick in a workspaceRoot or a run filename is withheld, never delimited" PASS
+else
+  check "P1nz4 backtick rejection (got: $AP_TICK_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json
+
+# P1nm1 — the ID CLASS, pinned against its owner. `AUTOPILOT_ID_RE` and
+# `AUTOPILOT_OWNER_RE` mirror the owner's `identifier`, and nothing compared them:
+# P1ni1 is a behavioural fixture with a hardcoded two-character id, so widening
+# `identifier` upstream left it green while the copy diverged. The constant already
+# drifted once — `{0,127}` admitted one- and two-character ids the owner refuses.
+AP_ID_OWNER="$(node -e '
+  var fs = require("fs");
+  var src = fs.readFileSync(process.argv[1], "utf8");
+  var m = src.match(/const identifier = value => typeof value === "string"\s*\n\s*&& value\.length >= (\d+) && value\.length <= (\d+) && \/\^(\[[^\]]*\])(\[[^\]]*\])\*\$\/\.test\(value\)/);
+  process.stdout.write(m ? m[1] + "|" + m[2] + "|" + m[3] + "|" + m[4] : "");
+' "$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh")"
+AP_ID_READER="$(node -e '
+  var fs = require("fs");
+  var src = fs.readFileSync(process.argv[1], "utf8");
+  var m = src.match(/var AUTOPILOT_ID_RE = \/\^(\[[^\]]*\])(\[[^\]]*\])\{(\d+),(\d+)\}\$\//);
+  var o = src.match(/var AUTOPILOT_OWNER_RE = \/\^(\[[^\]]*\])(\[[^\]]*\])\{(\d+),(\d+)\}\$\//);
+  if (!m || !o) { process.stdout.write(""); }
+  else if (m[0].slice(m[0].indexOf("/")) !== o[0].slice(o[0].indexOf("/"))) { process.stdout.write("DIVERGED"); }
+  else { process.stdout.write((Number(m[3]) + 1) + "|" + (Number(m[4]) + 1) + "|" + m[1] + "|" + m[2]); }
+' "$REPORT")"
+if [ -z "$AP_ID_OWNER" ]; then
+  check "P1nm1-control could not derive identifier from zensu-autopilot-state.sh" FAIL
+elif [ -z "$AP_ID_READER" ]; then
+  check "P1nm1-control could not derive AUTOPILOT_ID_RE / AUTOPILOT_OWNER_RE" FAIL
+elif [ "$AP_ID_READER" = "DIVERGED" ]; then
+  check "P1nm1 AUTOPILOT_ID_RE and AUTOPILOT_OWNER_RE must stay identical" FAIL
+elif [ "$AP_ID_OWNER" = "$AP_ID_READER" ]; then
+  check "P1nm1 the renderer's id class reproduces the owner's identifier bounds exactly" PASS
+else
+  check "P1nm1 id class drift (owner=$AP_ID_OWNER reader=$AP_ID_READER)" FAIL
+fi
+
+# P1nz1 — the `ownKey !== ''` conjunct on the release-TTL clause, which had NO
+# executed case: the only empty-ownKey invocations reaching autopilotRows had no
+# `tdd-phase-*.json` beacon, so the silence probe answered `absent` rather than
+# `aged` and the conjunct was never evaluated. Deleting it left both suites green.
+# The TTL clause states the RELEASE verb's exit-7 refusal, which lives in that
+# verb's FOREIGN-caller branch only, so printing it where ownership was never
+# established asserts a branch this report cannot reach.
+rm -f "$AP_STATE"/autopilot-run-*.json
+ap_run run_ttlunbound_a GATES "$AP_FOREIGN" "/w/t"
+: > "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+touch -t 202001010000 "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null || true
+AP_TTL_UNBOUND_OUT="$(ap_report unbound '')"
+if printf '%s' "$AP_TTL_UNBOUND_OUT" | grep -qF 'owner not established' \
+  && printf '%s' "$AP_TTL_UNBOUND_OUT" | grep -qF 'last wrote its workflow document' \
+  && ! printf '%s' "$AP_TTL_UNBOUND_OUT" | grep -qF 'a release refuses while that is under'; then
+  check "P1nz1 with ownership not established the row ages the owner but claims no release refusal" PASS
+else
+  check "P1nz1 unbound TTL clause (got: $AP_TTL_UNBOUND_OUT)" FAIL
+fi
+rm -f "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+rm -f "$AP_STATE"/autopilot-run-*.json
+
 rm -rf "$SBOX"
 echo "----"
 echo "test-doctor: $PASS PASS / $FAIL FAIL"
