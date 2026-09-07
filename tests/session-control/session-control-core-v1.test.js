@@ -4449,6 +4449,123 @@ test('external process lease reclaims a live PID with a mismatched start identit
   });
 });
 
+// --- Non-blocking open of the workflow document (PR #285 review finding) ---
+//
+// `readRegularFileSnapshot` opens with `O_NOFOLLOW | O_NONBLOCK`. The symlink
+// half has cases; the non-blocking half had none, because the only FIFO fixture
+// in the tree sits behind the zen-mode hook's own `lstat`, which rejects a
+// non-regular document before this reader is ever called. Deleting `| nonBlock`
+// therefore left every suite green. This case reaches the open directly through
+// `readWorkflowState`, with no `lstat` in front of it.
+//
+// The assertion is a DEADLINE, not a return value: `open(2)` on a FIFO with no
+// writer blocks forever, so the discriminating observation is that the process
+// finishes at all. It runs in a child for that reason — a blocking read in this
+// process would hang the whole suite instead of failing one case.
+const MKFIFO_AVAILABLE = (() => {
+  if (WINDOWS) return false;
+  const probe = require('node:child_process').spawnSync('sh', ['-c', 'command -v mkfifo']);
+  return probe.status === 0;
+})();
+
+test('the workflow-document read does not block on a FIFO', { skip: MKFIFO_AVAILABLE ? false : 'mkfifo is unavailable on this host' }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-nonblock-'));
+  try {
+    const projectRoot = path.join(root, 'project');
+    const stateDir = path.join(projectRoot, ...core.WORKFLOW_STATE_SEGMENTS);
+    fs.mkdirSync(stateDir, { recursive: true });
+    const key = core.sessionKey(RAW_SESSION);
+    const target = path.join(stateDir, `${core.WORKFLOW_STATE_PREFIX}${key}.json`);
+    const made = require('node:child_process').spawnSync('mkfifo', [target]);
+    assert.equal(made.status, 0, 'the fixture could not create a FIFO');
+    assert.ok(fs.lstatSync(target).isFIFO(), 'the fixture is not a FIFO');
+
+    const program = `
+      const core = require(${JSON.stringify(path.resolve(corePath))});
+      try { core.readWorkflowState({ projectRoot: ${JSON.stringify(projectRoot)}, sessionId: ${JSON.stringify(RAW_SESSION)} }); }
+      catch (error) { process.stdout.write('threw: ' + String(error && error.message)); }
+      process.exit(0);
+    `;
+    // STDOUT IS READ, not only the exit. The module's argument has TWO halves -
+    // the open returns immediately BECAUSE of O_NONBLOCK, and the descriptor
+    // check then rejects it - and asserting only that the child exited measures
+    // the first while leaving the second free to change. A reader that returned
+    // before the guarded open would keep this case green while exercising
+    // nothing.
+    const seen = await new Promise((resolve) => {
+      const child = spawn(process.execPath, ['-e', program], { stdio: ['ignore', 'pipe', 'pipe'] });
+      let out = '';
+      child.stdout.on('data', (chunk) => { out += String(chunk); });
+      const timer = setTimeout(() => { child.kill('SIGKILL'); resolve(null); }, 10000);
+      child.on('exit', () => { clearTimeout(timer); resolve(out); });
+    });
+    assert.ok(seen !== null, 'the read blocked on a FIFO with no writer');
+    assert.match(
+      seen,
+      /threw: .*not a regular file/i,
+      `the FIFO must be refused by the descriptor check, got: ${JSON.stringify(seen)}`,
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('the exported workflow-document layout is frozen', () => {
+  // The other new export of this change. `zen-anchor-v1.test.js` pins its own
+  // constants the same way; without this the layout could be mutated by any
+  // consumer that requires this module.
+  assert.ok(Object.isFrozen(core.WORKFLOW_STATE_SEGMENTS));
+  assert.deepEqual([...core.WORKFLOW_STATE_SEGMENTS], ['.zensu', 'state']);
+  assert.equal(core.WORKFLOW_STATE_PREFIX, 'tdd-phase-');
+});
+
+test('the EAGAIN retry arm is present, bounded and paced', () => {
+  // BEHAVIOURALLY UNREACHABLE on every host this ships to: the descriptor is
+  // gated behind `isFile()`, so a FIFO or device never reaches the read loop and
+  // `EAGAIN` cannot be raised from a regular file on Linux or macOS. A source pin
+  // is therefore the only available control - the standard this repo already
+  // applies to its other unreachable branches - and without one the arm had no
+  // pin of any kind: a grep for EAGAIN across tests/ returned nothing.
+  const src = fs.readFileSync(path.resolve(corePath), 'utf8');
+  const loop = src.slice(src.indexOf('let againBudget'), src.indexOf('const after = fs.fstatSync(descriptor)'));
+  assert.ok(loop.length > 0, 'the read loop could not be sliced out of the module');
+  assert.match(loop, /EAGAIN/, 'the EAGAIN arm is gone');
+  assert.match(loop, /EWOULDBLOCK/, 'the EWOULDBLOCK spelling is gone');
+  assert.match(loop, /againBudget\s*-=\s*1/, 'the retry budget is no longer decremented');
+  assert.match(loop, /againBudget\s*>\s*0/, 'the retry is no longer bounded');
+  // PACED. All 64 retries burned in microseconds and could not outlast any of the
+  // conditions the comment beside them names, so the bound was a spin rather than
+  // a wait. A blocking pause with no event loop is what a synchronous reader can
+  // do here.
+  assert.match(loop, /sleep\(/, 'the retry has no pause, so the budget is spent in microseconds');
+});
+
+test('the module has ONE pause primitive, and its fault contract is explicit per call site', () => {
+  // Two pause functions performing the identical `Atomics.wait` shipped side by
+  // side with OPPOSITE fault contracts: the new reader swallowed a throw, the
+  // pre-existing lock poll did not. One of the two had to be wrong on any host
+  // where the throw is real, and nothing in the tree said which. The contract is
+  // now a PARAMETER, so each call site states what it wants rather than picking a
+  // function whose name does not say.
+  const src = fs.readFileSync(path.resolve(corePath), 'utf8');
+  const defs = src.match(/^function sleep[A-Za-z]*\(/gm) || [];
+  assert.deepStrictEqual(
+    defs,
+    ['function sleep('],
+    `exactly one pause primitive, got ${JSON.stringify(defs)}`,
+  );
+  assert.match(src, /function sleep\(milliseconds, options\)/, 'the contract is not a parameter');
+  // The EAGAIN retry asks for the best-effort contract explicitly.
+  const loop = src.slice(src.indexOf('let againBudget'), src.indexOf('const after = fs.fstatSync(descriptor)'));
+  assert.match(loop, /sleep\(1, \{ bestEffort: true \}\)/, 'the retry does not state its contract');
+  // The lock poll keeps the strict one, which is the default.
+  assert.doesNotMatch(
+    src.slice(src.indexOf('function sleep(')),
+    /sleep\([^)]*bestEffort[^)]*\)[\s\S]*acquireExternalLock/,
+    'the lock poll must not silently adopt the best-effort contract',
+  );
+});
+
 // ── Workflow-baseline repair ────────────────────────────────────────────────
 //
 // A DIFFERENT wedge from the one adoption exits, and the distinction is the whole
