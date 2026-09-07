@@ -124,8 +124,9 @@ the rules are recorded in English, the answer follows the user.
    `Zensu:` is a fixed English prefix and not a mark, and you translate only the
    words around the line into the user's language.
 
-   When it reads `none`, no Zensu chain is armed in this session, so render no
-   chain-progress anchor at all: never invent steps, never copy a canonical
+   When it reads `none`, no anchor can be justified this turn — no chain is
+   armed, or its position is unknown — so render no chain-progress anchor at
+   all: never invent steps, never copy a canonical
    pipeline out of another component, and never carry an anchor over from an
    earlier turn. **This anchor only means anything inside a Zensu-driven
    development process.** Outside one it was decoration that read like evidence —

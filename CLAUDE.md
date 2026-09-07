@@ -80,7 +80,7 @@ literal in ANY carrier it scans, which is precisely what keeps prose, comments a
 fixtures violations everywhere. So the load-bearing half is enforced and the
 ENUMERATION is not — a German arm added to a grader in `safety-carve-out.yaml` would
 pass the guard with this paragraph unamended, and so would a further arm in an existing
-one. The SHAPE is what governs; the two members named above are a census taken at one
+one. The SHAPE is what governs; the members named above are a census taken at one
 moment, not a bound the suite holds. Check by grep before relying on it, and never
 strip a German arm because this paragraph did not list its grader.
 
@@ -2006,7 +2006,17 @@ and the cheap fix is on record rather than left to
 be rediscovered: read the existing note's `detectedAtMs` before the clear and carry it forward on
 a re-mint with an unchanged `kind`, so the TTL ages the REFUSAL rather than the turn.
 
-**Sites that move together:** `zensu_run_bounded` in `hooks/lib/zensu-bounded-run.sh`, the ONE
+**Sites that move together:** `zensu_run_bounded` in `hooks/lib/zensu-bounded-run.sh`. Its
+live call sites outside the Stop hook are FOUR, in TWO files, and both this roster and the
+ladder's own header enumerated fewer: `hooks/user-prompt-zen-mode.sh` holds the merged
+prompt-and-anchor child, the prompt-only recovery child and the off-phrase marker write,
+and `hooks/lib/zensu-zen-mode.sh` holds the out-of-band writer, which sources the ladder
+itself. Named that way rather than with a colon after the file name: `C41` forbids the
+`<file>` plus line-number anchor form, and a backtick-closed `path.sh` plus colon sits ONE
+CHARACTER from it - close enough that the next reader copies the shape and the pin then
+fires on their edit instead of on the one that introduced it.
+The deadline is a fixed, unparameterized 5 s, so the next caller needing a different one has
+to find every site — which is what this roster is for. Then the ONE
 watchdog ladder for the two Stop-path children that read outside the process — the `git status` this
 counter runs and the refused-spawn transcript read. They carried hand-copied ladders and the
 `gtimeout` arm reached only one of them; `C49` and `C56a` pin each call site by name, `C42`/`C42a`
@@ -3171,7 +3181,20 @@ one direction that matters: it compared against the `NEXT_COMMAND` lookup table,
 literal `chainShape` RETURNS while leaving the table key in place kept the copy agreeing while a
 genuinely closed foreign chain rendered as open. A consumer cannot check a producer it does not
 own, which is why the set moved here; `test-doctor.sh` P1ms pins the export and its contents, P1ms1 that the
-renderer keeps no private copy), the ticket issuer, and the rearm writer
+renderer keeps no private copy), the ticket issuer, `hooks/lib/zen-anchor-v1.js` (a FIELD-NAME, VALUE-DOMAIN and EXPORT consumer since
+the zen-mode chain anchor landed: it reads `report.shape`, `report.linkage` and
+`report.autopilot.outcome`, and it consumes `STUCK_SHAPES` — the module body reads that
+export and no other, it is that export's only consumer under `hooks/`, and removing or
+renaming it makes `anchorToken` THROW for every shape that HAS a position, disabling the
+anchor on every prompt of every zen-mode session, with the disclosure landing on a channel
+this file records as unverified for delivery. Say "that has a position", not "every shape":
+the two inert shapes return `none` before the read is reached. `ALL_SHAPES` is
+consumed by that module's UNIT CONTRACT and never by the module — its only appearance
+under `hooks/` outside the owner is a comment — so removing it reddens the key-parity
+cases alone. Stated the way the doctor's `INERT_SHAPES` clause six lines above is, and its `OUTCOME_POSITION` allowlist is keyed on `CHAIN_OUTCOMES`
+members — a fifth member added there renders no anchor rather than inheriting a mark, which is
+the fail-open direction, but it does mean a new outcome reaches that module silently and needs
+a row there), and the rearm writer
 (`_tdd_rearm_autopilot_review_critical`, which takes `isLinkId`, `RETURN_STAGES` and
 `REARM_MARKER_KEYS` from here) — adding a receipt field or a return stage in the writer
 alone would make every receipt it mints classify as stale and wedge the chain permanently.
@@ -5197,8 +5220,11 @@ went silently wrong and the classifier-driven form caught it. `hooks/lib/zen-anc
 therefore maps a shape the classifier PRODUCED, holds no second copy of anything, and
 answers `none` for any shape it does not map, so a shape added to `chainShape` costs an
 anchor rather than producing a wrong one. **Two of its three inputs are READ from the
-owner rather than restated**, and both were restated first: the FAILED mark comes from
-`RECOVERABLE_SHAPES` / `DEAD_END_SHAPES` (a hand-written `blocked` set had marked
+owner rather than restated**, and both were restated first: the FAILED mark is read from
+the owner's own composed `STUCK_SHAPES` (it WAS a hand-concatenation of
+`RECOVERABLE_SHAPES` / `DEAD_END_SHAPES`, which is the restated version that was replaced —
+see the corrected roster bullet below, and note that a failed read now THROWS rather than
+rendering `none`) (a hand-written `blocked` set had marked
 `ticket-spent` and `ticket-lost` as failures under a comment claiming the owner treated
 them as wedged — the owner calls neither wedged, and its own remedy for both is an
 ordinary advance instruction), and the TOTAL shape set comes from the new `ALL_SHAPES`
@@ -5207,7 +5233,7 @@ invariant that module never enforced). Both exports were added to `chain-recover
 by this change; a missing one makes the module render NO anchor rather than guess through
 it. Do NOT read this as licence to copy a stage table:
 `zensu-autopilot-state.sh`'s `STAGES` stays out of scope, for the cyclic-versus-linear reason
-above. The worked EXAMPLE in both carriers is now the real vocabulary rather than a
+above. The worked EXAMPLE is now the real vocabulary rather than a
 placeholder, which is what removes the old hazard that a model copied the example before it
 obeyed the prohibition beside it. It lives in the SKILL carrier alone — the hook derives
 its own at runtime and carries no example — and `Z19b` requires that line to be a token
@@ -5247,9 +5273,12 @@ plan names "missing node" among the faults that leave the mode active, which no 
 this plugin can satisfy; the carriers say "a `node` that runs and fails" instead.
 
 **The token is spliced into a JSON string, so its charset is load-bearing — and it is checked
-in THREE PROCESSES by FOUR readers that share no spelling.** Count processes and readers
-separately, because they do not agree and an earlier wording gave one number for both: the
-module, the hook-side node program and the shell are three processes, but the SHELL holds two
+in TWO PROCESSES by FOUR readers that share no spelling.** Count processes and readers
+separately, because they do not agree and an earlier wording gave one number for both -
+and a later one then contradicted the bold lead in the very next sentence by counting three
+processes. The module and the hook-side node program are ONE process: the hook `require`s
+the module INSIDE its node child, so `anchorTokenSafe` and the hook's own regex run there
+together and hold one reader each. The shell is the SECOND process, and it holds two
 readers of its own — `zen_anchor_grammar_ok` and `zen_anchor_bytes_ok` — composed by a third
 function, `zen_anchor_sanitized`, which is graded by `Z47` alone. Each owns a
 different property — an earlier wording called the node program "the ONLY grammar reader on
@@ -5388,21 +5417,36 @@ is the drift the rule exists to prevent.
   for the same reason — it substitutes the LONGEST producible token into the template before
   measuring, because the source literal still holds the placeholder and measuring that
   understated what a session receives.
-- `hooks/lib/chain-recovery-v1.js` now owes this feature TWO exports it did not have:
+- `hooks/lib/chain-recovery-v1.js` now owes this feature FOUR exports it did not have:
   `ALL_SHAPES` (the total set the anchor's key parity is pinned against, and which
   `zen-anchor-v1.test.js` in turn pins against the literals in `chainShape`'s own source),
   `DEAD_END_SHAPES`, and `STUCK_SHAPES` — the composition the failed mark is now read from,
   which the owner already computed for its own `wedged` verdict and kept private, so the
-  consumer concatenated the two subsets a second time. Removing
-  either leaves the chain-recovery suite green while the zen suite goes red, but by
+  consumer concatenated the two subsets a second time. Removing ANY ONE of the three
+  leaves the chain-recovery suite green while the zen suite goes red, but by
   DIFFERENT mechanisms, and stating the outcome alone hid that. **The roster below is the
   CORRECTED one; the previous wording was wrong twice after `stuckShapes` began reading the
-  owner`s composition.** The load-bearing export is now `STUCK_SHAPES`: removing it makes
-  `anchorToken` answer `none` for every shape. Removing `DEAD_END_SHAPES` does NOT — the owner
+  owner`s composition, and the correction below was itself wrong once more after that.**
+  The load-bearing export is now `STUCK_SHAPES`, and removing it makes `anchorToken` THROW -
+  `chain-recovery-v1.js: STUCK_SHAPES unavailable, refusing to guess the anchor` - for every
+  shape that HAS a position. It does NOT answer `none`, which is the opposite mechanism and
+  the opposite failure direction: a throw is caught by the hook and disclosed, while a
+  `none` renders as an ordinary "no anchor can be justified this turn". The two inert
+  shapes still answer `none`, because their falsy `SHAPE_POSITION` entry returns before the
+  read is reached. Removing `DEAD_END_SHAPES` does NOT — the owner
   builds `STUCK_SHAPES` from its module-scope constants rather than from its own exports, so
-  `anchorToken` stays fully functional and the zen suite reddens at the key-parity case in
-  `zen-anchor-v1.test.js` instead. Removing `ALL_SHAPES` reddens only that same case. Three
-  exports, three different mechanisms, and only one of them silences the anchor.
+  `anchorToken` stays fully functional and the zen suite reddens instead at the case named
+  'the failed mark is READ from the owner', which is that export's ONLY use in the unit
+  file. Removing `ALL_SHAPES` reddens the key-parity case AND the second case that asserts
+  the same set — two cases, not one. (Both attributions were wrong here for a round, which
+  matters in a roster whose whole purpose is to say what will catch the mistake.) The
+  FOURTH is `CHAIN_OUTCOMES`, which this roster omitted for a round while the Version
+  paragraph in this same section already named it as part of the change - so a maintainer
+  renaming it read here that zen-mode does not depend on it. It does: `OUTCOME_POSITION` is
+  DERIVED by reducing over it and THROWS AT LOAD if a row names an outcome the owner does
+  not declare, and its mechanism is the fourth distinct one - the anchor keeps rendering and
+  the allowlist-membership case in `zen-anchor-v1.test.js` is what reddens. Four exports,
+  four different mechanisms, and only one of them silences the anchor.
 - `tests/SUITE-OVERVIEW.md` carries a row per driven `node --test` file with its
   REGISTRATION count, so adding or removing a case in either zen unit file makes that
   table stale — silently, since nothing compares them. Its section 1 row for
@@ -5473,8 +5517,11 @@ work itself, and four of them were in code round 2 had just written:
   PROMPT behind a filesystem read it never needed, so a stall destroyed it along with the anchor
   and `zen off` did nothing. A second child loads no module, opens no path and reads fd 0. It
   runs only when the first already failed — and NOT when the first was killed by the watchdog,
-  because two 5 s ladders in series reach the registration's own 10 s, which kills the HOOK and
-  loses the whole directive: strictly worse than the anchor loss being repaired.
+  because three 5 s ladders are reachable in series against a 20 s registration and the
+  elapsed < 3 s gate is what holds the worst case at the header's 3 + 5 + 5 = 13 s: letting the
+  recovery run after the first ladder already spent its full 5 s is what threatens the deadline,
+  and a killed HOOK loses the whole directive, which is strictly worse than the anchor loss being
+  repaired.
 - **The sanitizer's rejection discloses, and an EMPTY value is not a rejection.** The first
   spelling reported every degraded path as `token rejected on arrival`, naming a cause that
   never occurred and sending a maintainer to compare two grammars that never ran.
@@ -5498,8 +5545,12 @@ hangs a plain redirect with no reader), and a truncating `>`. Both writers now c
 three guards and both publish by `O_EXCL` temp plus rename. **State the rename's effect
 precisely**, because the `nlink !== 1` test does not do what a first comment credited it with:
 `rename(2)` repoints a NAME and never truncates the linked inode, so the hard-link destroy
-primitive is defused by the rename itself; the `nlink` check makes the writer REFUSE rather
-than write on a hard-linked marker, which is a defensible signal and not the defence. The temp
+primitive is defused by the rename itself. **The `nlink !== 1` conjunct is GONE from BOTH
+writers**, and its removal is the point rather than a detail: refusing on it defended nothing the
+rename had not already closed, while one `ln` in a session-writable directory made every later
+off-attempt fail, in-band and out-of-band alike — an availability regression on the only escape
+from the mode, against the truncating write it replaced. Do not restore it as a "defensible
+signal". The temp
 suffix is random rather than the pid, because nothing reaps a temp left by a killed write and a
 later invocation landing on the same pid would then fail the `O_EXCL` open and report only
 `COULD NOT BE DEACTIVATED` — a one-off crash turned into a permanent refusal of the in-band exit.
@@ -5512,8 +5563,11 @@ unreadable MARKER resolves OFF one arm up; only the unreadable DIRECTORY fell th
 **Round 3 shipped four of its seven fixes with no check at all**, which is the same class this
 whole feature exists to close — the round that found four defects inside round 2's own code
 repeated the pattern. `Z50` pins the marker guards on BOTH writers plus the rename landing,
-`Z51` pins the recovery ladder including its `124|137` watchdog-skip arm and all three distinct
-causes, and `Z52` scans EVERY `node` child rather than the one function `Z35`/`Z41`/`Z46`/`Z48`
+`Z51` pins the recovery ladder and all three distinct causes, and its `124|137` arm is a
+NEGATIVE one — it sets `Z51_BAD` when that literal watchdog-skip case arm is PRESENT and requires
+the `-ge 124` comparison instead, because a two-value case arm names two exit codes where the
+property is "the watchdog killed it". A maintainer reading this sentence as "Z51 pins the arm"
+restores exactly what Z51 forbids, and `Z52` scans EVERY `node` child rather than the one function `Z35`/`Z41`/`Z46`/`Z48`
 all derive from. **`Z52`'s own first spelling was the same defect it exists to catch, and CI
 found it — not this suite.** It scanned the WHOLE FILE for non-ASCII, so it reported the em dash
 inside the OFF directive — ordinary prose that reaches no argv — as a leak; and it did that
@@ -5649,7 +5703,11 @@ Rendering on the CLOSING turn alone would be defensible and the shape cannot exp
 `chain-closed` cannot distinguish "just closed" from "closed two hours ago". That needs a
 recency signal the classifier does not supply. Mapping to `null` removed the
 `unreviewedDone` rung, the `options.reviewed` parameter and the whole `reviewedFromReport`
-derivation with it, so `anchorToken` now takes a shape and nothing else.
+derivation with it. `anchorToken` then took a shape and nothing else — and that contract was
+RETIRED again by the outcome read below: it now accepts a shape OR the classifier report, and
+`outcomePosition` reads `report.linkage` and `report.autopilot.outcome` off the latter. The
+report input is deliberately MONOTONE (it can only refine a position the shape alone leaves
+unmapped, never override one), which is the bound that replaced the old contract.
 
 **KNOWN RESIDUAL of the same class, one shape over, and it is NOT fixed here.**
 `awaiting-self-review` and `self-review-unbindable` are both reached from
@@ -5658,21 +5716,36 @@ outcome `max-rounds` WITH `codeReviewDone` true. So a review that exhausted its 
 without converging still renders a ticked `review` step. Every in-vocabulary answer is worse
 or larger: the pending mark would claim a review still ahead of one that is over, and the
 honest mark is the failed one, which this module renders only for shapes the owner's own
-stuck sets name. The real fix is to surface `chainOutcome` on the classifier report —
-additively — and render the failed mark for `max-rounds`; that is a change to the report
-shape and belongs in its own commit.
+stuck sets name. **This is now IMPLEMENTED for a BOUND chain and only for one**:
+`outcomePosition` reads `report.autopilot.outcome` and renders the blocked mark for
+`max-rounds`, taking the value off the classifier's own `autopilotLinkage` rather than adding a
+field to its report. What is still open is the STANDALONE case, which carries no
+`chainOutcome` anywhere the anchor can reach, so a standalone chain that exhausted its budget
+still renders a ticked `review` step. Closing that needs the outcome surfaced for a standalone
+chain, which is a change to the report shape and belongs in its own commit.
 
 **Port-relevant.** The core half is `anchorToken` / `anchorTokenSafe` / `SHAPE_POSITION` /
 `ANCHOR_STEPS` / `ANCHOR_NONE` / `ANCHOR_PREFIX` / the four marks / `ANCHOR_TOKEN_RE` /
-`stuckShapes`, in `hooks/lib/zen-anchor-v1.js`, together with its ONE sibling
-require — the classifier whose shapes it maps and whose stuck sets it reads, without which
-it does not load at all. `stuckShapes` is exported for its TEST SEAM alone: its optional
-`owner` parameter is what makes the two `return null` guards reachable, and production
-always calls it with no argument. There is deliberately NO `reviewed` input of any kind —
+`stuckShapes` / `anchorNoneIsExpected` / `producibleTokens` / `OUTCOME_DEPENDENT_SHAPES` /
+`OUTCOME_POSITION` / `outcomePosition`, in `hooks/lib/zen-anchor-v1.js`, together with its ONE sibling
+require — the classifier whose shapes it maps and whose composed `STUCK_SHAPES` it reads, without which
+it does not load at all. `stuckShapes` is exported for its TEST SEAM alone: its optional `owner` parameter reaches
+the non-array and absent-export guards AND proves the module does not fall back to
+re-concatenating the two subsets, which is the property the `STUCK_SHAPES` swap turns on.
+Say it that way rather than "what makes the two `return null` guards reachable" — the
+EMPTY-array guard is also reached without the parameter, through a copied module beside a
+stub. Production always calls it with no argument. There is deliberately NO `reviewed` input of any kind —
 an earlier round carried one as a host obligation and then moved it into the module, and
 mapping `chain-closed` to `null` deleted it outright; a port that reintroduces one has
-reintroduced the false-completion class. The host half is SIX obligations a port must
-re-decide: WHICH document carries
+reintroduced the false-completion class. The host half is SEVEN obligations a port must
+re-decide, and the seventh is the one a port satisfying the other six still gets wrong: the
+CALL SHAPE. `anchorToken` accepts either a bare shape string or the whole classifier REPORT,
+and only the report carries the linkage and the outcome the two `OUTCOME_DEPENDENT_SHAPES`
+need. A port that passes `report.shape` - the spelling the module's name and its
+`SHAPE_POSITION` export both invite - gets `ANCHOR_NONE` for those two, so a bound chain's
+self-review position never renders, and `anchorNoneIsExpected` then answers true so the
+port's own disclosure stays silent as well. Classify with the owner and pass the WHOLE
+report. Then: WHICH document carries
 the chain and which identity names it; the MODULE TRANSPORT (this host runs `node` with its
 cwd inside `hooks/lib` — the first of the two mechanisms
 `test-msys-special-plugin-module-boundaries.sh` sanctions — because the second needs a
@@ -5717,10 +5790,15 @@ the path CREATES the directory.
 
 **THE UNCOMPROMISED FIX WAS TAKEN, and the hook-side guard is now belt rather than the
 boundary.** `readRegularFileSnapshot` adds `O_NONBLOCK` to its open, guarded exactly as
-`O_NOFOLLOW` already is because the constant is not defined on every build. POSIX specifies
-the flag has no effect on the open of a REGULAR file, so no legitimate caller changes
-behaviour, and on a FIFO or device the open returns immediately and the existing descriptor
-`isFile()` check rejects it. That closes the class for EVERY caller of that reader rather
+`O_NOFOLLOW` already is because the constant is not defined on every build. **POSIX LEAVES
+the flag UNSPECIFIED for a regular file rather than giving it no effect** — the stronger
+wording stood here as the reason this was safe for that reader's other callers, and the
+module retracted it in the same change. What the safety rests on is that Linux and macOS
+ignore it there, plus the bounded `EAGAIN`/`EWOULDBLOCK` retry arm the read loop now
+carries: 64 iterations, each pausing through the module's ONE `sleep` primitive under its
+best-effort contract, so a host where the unspecified behaviour does bite degrades in
+latency instead of surfacing as a corrupt-document failure. On a FIFO or device the open
+returns immediately and the existing descriptor `isFile()` check rejects it. That closes the class for EVERY caller of that reader rather
 than narrowing it for one — `readWorkflowStateSnapshot` and every gate that reads a workflow
 document inherit it.
 
@@ -5809,7 +5887,16 @@ verdict: a `timeout` key on the existing `hooks.json` registration is not a hook
 removed or renamed and not a matcher change, and the two new exports on
 `session-control-core-v1.js` (`WORKFLOW_STATE_SEGMENTS`, `WORKFLOW_STATE_PREFIX`) are
 additive — an older runtime that does not read them is unaffected, and no validator gains a
-key. Two things read like a breaking change here and are not, which is why
+key. A THIRD group was walked the same way after the review rounds and is named here so the
+verdict can be re-derived from what this paragraph lists rather than from memory: the
+`O_NONBLOCK` open flag and the paced `EAGAIN` retry in `session-control-core-v1.js`, a module
+every gate loads, together with its collapse to ONE `sleep` primitive taking its fault
+contract as a parameter; and the four further exports on `hooks/lib/zen-anchor-v1.js`
+(`anchorNoneIsExpected`, `producibleTokens`, and the outcome allowlist behind them) plus
+`CHAIN_OUTCOMES` becoming frozen and exported on `chain-recovery-v1.js`. None is a listed
+breaking entry — no persisted shape moves, no validator gains a key, no matcher changes and
+nothing returns a `permissionDecision` — so the `patch` verdict is unchanged; only the
+enumeration was short. Two things read like a breaking change here and are not, which is why
 the walk is written down rather than left to be re-derived: the runtime digest DOES move,
 because `manifestRuntimeEntries` folds `hooks` and `docs` in wholesale — but
 `readContextInternal` measures the RECORDED root — and the directive is re-emitted from the

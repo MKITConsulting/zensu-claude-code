@@ -165,10 +165,18 @@ function readRegularFileSnapshot(
   // no way out: the prompt never reaches the model, so the off-phrase escape is
   // never evaluated either.
   //
-  // POSIX specifies the flag has no effect on the open of a REGULAR file, so no
-  // legitimate caller changes behaviour; on a FIFO or device the open returns
-  // immediately and the existing `fstat` `isFile()` check rejects it. Guarded the
-  // same way as O_NOFOLLOW because the constant is not defined on every build.
+  // POSIX LEAVES the flag UNSPECIFIED for a regular file — it specifies
+  // `O_NONBLOCK` for FIFOs and for block and character special files, and says
+  // nothing about the rest. "Unspecified" is not "no effect", and the stronger
+  // wording stood here as the reason this change was safe for the shared
+  // reader's other callers. What is true, and what the safety actually rests on:
+  // Linux and macOS ignore it on a regular file, so no legitimate caller changes
+  // behaviour on the supported hosts; on a FIFO or device the open returns
+  // immediately and the existing `fstat` `isFile()` check rejects it. The read
+  // loop below carries an `EAGAIN` arm so the residual — a filesystem where the
+  // unspecified behaviour does bite — is handled rather than assumed away.
+  // Guarded the same way as O_NOFOLLOW because the constant is not defined on
+  // every build; where it is absent `nonBlock` is 0 and this class stays open.
   const nonBlock = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NONBLOCK)
     ? fs.constants.O_NONBLOCK : 0;
   let descriptor;
@@ -213,8 +221,39 @@ function readRegularFileSnapshot(
 
     const data = Buffer.alloc(before.size);
     let offset = 0;
+    // AN EAGAIN ARM, so the non-blocking open's guarantee is true by
+    // construction rather than by platform behaviour. The descriptor is already
+    // gated behind the `isFile()` check above, so a FIFO or device never reaches
+    // this loop and `EAGAIN` is unreachable on the hosts this ships to. It is
+    // still handled, because the flag is what makes that true: on a filesystem
+    // where the unspecified regular-file behaviour does bite — historically
+    // Linux mandatory locking, some network and FUSE mounts — `readSync` throws
+    // rather than returning a short count, and an unhandled throw here would
+    // surface as a corrupt-document failure. The retry budget is bounded so a
+    // descriptor that never becomes readable fails loudly instead of spinning.
+    // PACED, not spun. A bare `continue` spent all 64 retries in microseconds, so
+    // the budget bounded the LOOP without ever waiting for the condition it
+    // exists to outlast — a descriptor that is momentarily unreadable is
+    // unreadable for milliseconds, not nanoseconds. `sleep` is this module's ONE
+    // blocking pause - `setTimeout` needs an event loop this synchronous call
+    // never returns to - and it is asked for the BEST-EFFORT contract here: the
+    // retry budget terminates without the pause, so a host that cannot wait costs
+    // latency and nothing else, whereas the lock poll sharing that primitive must
+    // actually wait and keeps the strict default. The worst case is bounded at
+    // 64 ms of wall clock, paid only on a host where the arm is reachable at all.
+    let againBudget = 64;
     while (offset < data.length) {
-      const read = fs.readSync(descriptor, data, offset, data.length - offset, null);
+      let read;
+      try {
+        read = fs.readSync(descriptor, data, offset, data.length - offset, null);
+      } catch (error) {
+        if ((error.code === 'EAGAIN' || error.code === 'EWOULDBLOCK') && againBudget > 0) {
+          againBudget -= 1;
+          sleep(1, { bestEffort: true });
+          continue;
+        }
+        throw error;
+      }
       if (read === 0) fail(`file changed while reading: ${file}`);
       offset += read;
     }
@@ -605,9 +644,27 @@ function contextRecordFile(recordsDir, sessionId) {
   return path.join(recordsDir, `${sessionKey(sessionId)}.json`);
 }
 
-function sleep(milliseconds) {
-  const buffer = new SharedArrayBuffer(4);
-  Atomics.wait(new Int32Array(buffer), 0, 0, milliseconds);
+// THE ONE PAUSE PRIMITIVE, and the fault contract is the CALLER'S to state. A
+// second copy of this function shipped beside it for one release, performing the
+// identical `Atomics.wait` while SWALLOWING a throw — so the module held two
+// opposite contracts for one mechanism and nothing said which was right. On a
+// build without `SharedArrayBuffer`, or one that refuses `Atomics.wait` on the
+// main thread, the two would have diverged exactly where it matters: the lock
+// poll would throw while the reader spun.
+//
+// The DEFAULT is strict, because that is what a poll that must actually wait
+// needs — silently not waiting there would burn the CPU and break the lock's own
+// timing, which is worse than a loud failure. `bestEffort` is opt-in for a caller
+// whose bound terminates without the pause: the EAGAIN retry is bounded at 64
+// iterations either way, so for it a missing pause costs latency and nothing else.
+function sleep(milliseconds, options) {
+  const bestEffort = !!(options && options.bestEffort);
+  try {
+    const buffer = new SharedArrayBuffer(4);
+    Atomics.wait(new Int32Array(buffer), 0, 0, milliseconds);
+  } catch (error) {
+    if (!bestEffort) throw error;
+  }
 }
 
 function processStartIdentity(pid) {

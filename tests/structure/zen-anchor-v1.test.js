@@ -128,13 +128,32 @@ test('an inert, unknown or non-string shape renders no anchor', () => {
   assert.strictEqual(anchor.anchorToken(null), anchor.ANCHOR_NONE);
   assert.strictEqual(anchor.anchorToken(undefined), anchor.ANCHOR_NONE);
   assert.strictEqual(anchor.anchorToken(42), anchor.ANCHOR_NONE);
-  assert.strictEqual(anchor.anchorToken({ shape: 'implementing' }), anchor.ANCHOR_NONE);
+  // A REPORT OBJECT IS NOW A SUPPORTED INPUT, so the old assertion that any
+  // object renders nothing was replaced rather than retrofitted: what is still
+  // `none` is a report whose `shape` is absent, non-string, unmapped or inert.
+  assert.strictEqual(anchor.anchorToken({}), anchor.ANCHOR_NONE);
+  assert.strictEqual(anchor.anchorToken({ shape: 42 }), anchor.ANCHOR_NONE);
+  assert.strictEqual(anchor.anchorToken({ shape: 'a-shape-nobody-defined' }), anchor.ANCHOR_NONE);
+  assert.strictEqual(anchor.anchorToken({ shape: 'no-session' }), anchor.ANCHOR_NONE);
+  assert.strictEqual(
+    anchor.anchorToken({ shape: 'implementing' }),
+    'Zensu: ▶implement ·review ·self-review'
+  );
 });
 
 test('the marks follow rule 6: done before, current at, pending after', () => {
   assert.strictEqual(anchor.anchorToken('implementing'), 'Zensu: ▶implement ·review ·self-review');
   assert.strictEqual(anchor.anchorToken('ready-for-review'), 'Zensu: ✓implement ▶review ·self-review');
-  assert.strictEqual(anchor.anchorToken('awaiting-self-review'), 'Zensu: ✓implement ✓review ▶self-review');
+  // The self-review stage is outcome-dependent, so the string form alone can no
+  // longer reach it — the outcome-aware cases at the end of this file own it.
+  assert.strictEqual(
+    anchor.anchorToken({
+      shape: 'awaiting-self-review',
+      linkage: 'bound',
+      autopilot: { outcome: '' },
+    }),
+    'Zensu: ✓implement ✓review ▶self-review'
+  );
 });
 
 test('the failed mark is READ from the owner, never restated here', () => {
@@ -155,8 +174,16 @@ test('the failed mark is READ from the owner, never restated here', () => {
   assert.strictEqual(anchor.anchorToken('ticket-spent'), 'Zensu: ✓implement ▶review ·self-review');
   assert.strictEqual(anchor.anchorToken('ticket-lost'), 'Zensu: ✓implement ▶review ·self-review');
   assert.strictEqual(anchor.anchorToken('wedged-stale-rearm'), 'Zensu: ✓implement ✗review ·self-review');
+  // `self-review-unbindable` is outcome-dependent, so it needs a report to render
+  // at all. The owner-derived blocked mark still decides the CURRENT step: with a
+  // converged outcome the position is `done: 2` and the owner's stuck set is what
+  // puts ✗ on `self-review`, exactly as before.
   assert.strictEqual(
-    anchor.anchorToken('self-review-unbindable'),
+    anchor.anchorToken({
+      shape: 'self-review-unbindable',
+      linkage: 'bound',
+      autopilot: { outcome: '' },
+    }),
     'Zensu: ✓implement ✓review ✗self-review'
   );
 });
@@ -200,11 +227,14 @@ test('no shape renders a completion claim for the whole chain', () => {
   }
 });
 
-test('anchorToken takes no options, so a caller cannot influence a shape', () => {
+test('anchorToken takes no SECOND argument, so no options object can influence a position', () => {
   // The signature was `(shape, options)` while `chain-closed` consulted a
-  // `reviewed` flag the hook derived. That flag was the false-completion input;
-  // with it gone, every position follows from the shape alone. Passing junk as a
-  // second argument must therefore change nothing.
+  // `reviewed` flag the hook derived. That flag was the false-completion input,
+  // and it is gone. What replaced it is NOT "the shape alone": the FIRST argument
+  // may now be the classifier report, and `outcomePosition` reads
+  // `report.autopilot.outcome` off it. That input is bounded MONOTONE elsewhere
+  // in this file — it can only refine a position the shape leaves unmapped. This
+  // case owns the second-argument half: passing junk there must change nothing.
   assert.strictEqual(anchor.anchorToken.length, 1);
   for (const junk of [undefined, null, {}, { reviewed: true }, { reviewed: 'yes' }, 42]) {
     assert.strictEqual(
@@ -275,4 +305,349 @@ test('the exported vocabulary is frozen so no consumer can mutate it', () => {
   assert.ok(Object.isFrozen(anchor.ANCHOR_STEPS));
   assert.ok(Object.isFrozen(anchor.SHAPE_POSITION));
   assert.strictEqual(anchor.ANCHOR_STEPS.length, 3);
+});
+
+// --- Outcome-aware review mark (PR #285 review finding, zen-anchor-v1.js:108) ---
+//
+// `awaiting-self-review` and `self-review-unbindable` are both reached from
+// `codeReviewDone === true`, and that flag does NOT mean the review passed: the
+// bound max-round handoff sets it with `outcome=max-rounds`. Rendering `✓review`
+// there publishes "finished and passed" for a review that ran out of budget.
+//
+// The evidence for the outcome already exists on the classifier's report, but
+// ONLY under bound linkage: `chainOutcome` is one of the five Autopilot link
+// fields, deleted from a standalone document at begin. So the honest answer
+// splits by linkage — render the failed mark when the outcome proves it, render
+// the passed mark when a bound report proves the review ended without that
+// stamp, and render NOTHING when no outcome signal exists at all.
+
+function boundReport(over) {
+  return Object.assign({
+    shape: 'awaiting-self-review',
+    linkage: 'bound',
+    autopilot: {
+      runId: 'run-1',
+      attempt: 1,
+      returnStage: 'GATES',
+      chainId: 'chain-1',
+      outcome: '',
+    },
+  }, over);
+}
+
+test('a review that ran out of budget renders as failed, never as passed', () => {
+  for (const shape of ['awaiting-self-review', 'self-review-unbindable']) {
+    const report = boundReport({ shape });
+    report.autopilot = Object.assign({}, report.autopilot, { outcome: 'max-rounds' });
+    assert.strictEqual(
+      anchor.anchorToken(report),
+      'Zensu: ✓implement ✗review ·self-review',
+      shape
+    );
+  }
+});
+
+test('a bound review that ended without the max-rounds stamp renders as passed', () => {
+  // The two ways to reach `codeReviewDone === true` are convergence and the
+  // max-round handoff, and only the second stamps the outcome. So an absent
+  // stamp on a BOUND report is evidence of convergence — which is exactly the
+  // evidence a standalone document cannot supply.
+  for (const outcome of ['', 'pass']) {
+    const report = boundReport({});
+    report.autopilot = Object.assign({}, report.autopilot, { outcome });
+    assert.strictEqual(
+      anchor.anchorToken(report),
+      'Zensu: ✓implement ✓review ▶self-review',
+      JSON.stringify(outcome)
+    );
+  }
+});
+
+test('with no outcome signal the self-review stage renders no anchor', () => {
+  // A standalone chain carries no `chainOutcome` at all, so neither mark can be
+  // justified: `✓review` claims a pass this module cannot see, and `▶review`
+  // claims a review that is over is still running. The sibling `chain-closed`
+  // entry already answers `null` under the identical evidence gap.
+  for (const shape of ['awaiting-self-review', 'self-review-unbindable']) {
+    assert.strictEqual(anchor.anchorToken(shape), anchor.ANCHOR_NONE, shape);
+    assert.strictEqual(
+      anchor.anchorToken({ shape, linkage: 'standalone', autopilot: null }),
+      anchor.ANCHOR_NONE,
+      shape
+    );
+    assert.strictEqual(
+      anchor.anchorToken({ shape, linkage: 'partial', autopilot: null }),
+      anchor.ANCHOR_NONE,
+      shape
+    );
+  }
+});
+
+test('a report form cannot promote a shape the table renders without an outcome', () => {
+  // The report input is MONOTONE by construction: it is consulted only for the
+  // two shapes reached from `codeReviewDone === true`. Every other shape follows
+  // from the shape alone, so a forged `autopilot.outcome` changes nothing.
+  for (const outcome of ['max-rounds', 'pass', 'no-changes', '']) {
+    assert.strictEqual(
+      anchor.anchorToken({ shape: 'implementing', linkage: 'bound', autopilot: { outcome } }),
+      'Zensu: ▶implement ·review ·self-review',
+      outcome
+    );
+    assert.strictEqual(
+      anchor.anchorToken({ shape: 'chain-closed', linkage: 'bound', autopilot: { outcome } }),
+      anchor.ANCHOR_NONE,
+      outcome
+    );
+  }
+});
+
+test('a degraded owner throws so the hook classifies it instead of reading health', () => {
+  // `stuckShapes` returning null used to become ANCHOR_NONE, which the hook
+  // accepts as a healthy token — so an owner whose STUCK_SHAPES export is
+  // removed, renamed or emptied silently disabled the anchor for EVERY shape.
+  // The hook already classifies a throw as `anchor render`; the outcome is still
+  // no anchor, and the difference is that it is disclosed.
+  const os = require('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zen-anchor-degraded-'));
+  try {
+    fs.copyFileSync(path.join(LIB, 'zen-anchor-v1.js'), path.join(dir, 'zen-anchor-v1.js'));
+    fs.writeFileSync(
+      path.join(dir, 'chain-recovery-v1.js'),
+      'module.exports = { STUCK_SHAPES: [], RECOVERABLE_SHAPES: [], DEAD_END_SHAPES: [] };\n'
+    );
+    const degraded = require(path.join(dir, 'zen-anchor-v1.js'));
+    assert.strictEqual(degraded.stuckShapes(), null);
+    assert.throws(
+      () => degraded.anchorToken('implementing'),
+      /STUCK_SHAPES/,
+      'a degraded owner must throw rather than answer none'
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the outcome the anchor reads is the one the real classifier emits', () => {
+  // THE SEAM, not a hand-built stand-in. Every case above supplies its own report
+  // object, which certifies the mapping and NOT the contract that
+  // `classifyChain` actually puts the outcome where `anchorToken` looks for it -
+  // exactly the caller-mock gap a cross-layer pairing exists to close. This runs
+  // the owner over a real bound document and feeds its output straight in.
+  const bound = {
+    active: true,
+    implComplete: true,
+    chainDone: false,
+    codeReviewDone: true,
+    selfReviewFixed: false,
+    vanilla: false,
+    reviewTicket: 't1',
+    reviewTicketConsumed: true,
+    reviewRound: 1,
+    phase: 'IMPL',
+    history: [],
+    bypasses: [],
+    deferredReviewClaim: '',
+    autopilotRunId: 'run-seam',
+    autopilotAttempt: 1,
+    autopilotReturnStage: 'GATES',
+    chainId: 'chain-seam',
+    chainOutcome: 'max-rounds',
+  };
+  const report = chain.classifyChain(bound);
+  assert.strictEqual(report.shape, 'awaiting-self-review');
+  assert.strictEqual(report.linkage, 'bound');
+  assert.strictEqual(report.autopilot.outcome, 'max-rounds');
+  assert.strictEqual(anchor.anchorToken(report), 'Zensu: ✓implement ✗review ·self-review');
+
+  const converged = chain.classifyChain(Object.assign({}, bound, { chainOutcome: '' }));
+  assert.strictEqual(converged.autopilot.outcome, '');
+  assert.strictEqual(anchor.anchorToken(converged), 'Zensu: ✓implement ✓review ▶self-review');
+});
+
+test('a row naming an outcome the owner does not declare THROWS at load', () => {
+  // THE MUTATION THIS FILE EXISTS TO KILL. The allowlist used to be a hand copy,
+  // so `max-round` for `max-rounds` dropped the ✗review mark for a
+  // budget-exhausted bound review while every check stayed green - the totality
+  // loop accepts `none` as a non-empty string, and `anchorNoneIsExpected` then
+  // answered true so the hook`s disclosure stayed quiet as well.
+  //
+  // Applied to a COPY, against a stub owner that still declares a domain: that is
+  // what separates a stale row here from a DEGRADED owner, which must stay
+  // loadable so `stuckShapes` can raise its own error instead.
+  const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'zen-anchor-stale-'));
+  const src = fs.readFileSync(path.join(LIB, 'zen-anchor-v1.js'), 'utf8');
+  assert.ok(src.includes("'max-rounds': Object.freeze("), 'the row to mutate is not locatable');
+  fs.writeFileSync(
+    path.join(dir, 'zen-anchor-v1.js'),
+    src.replace("'max-rounds': Object.freeze(", "'max-round': Object.freeze("),
+  );
+  fs.writeFileSync(
+    path.join(dir, 'chain-recovery-v1.js'),
+    'module.exports = { CHAIN_OUTCOMES: Object.freeze([\'\', \'pass\', \'no-changes\', \'max-rounds\']),'
+    + ' STUCK_SHAPES: Object.freeze([\'wedged-stale-rearm\']), ALL_SHAPES: Object.freeze([]) };',
+  );
+  assert.throws(
+    () => require(path.join(dir, 'zen-anchor-v1.js')),
+    /max-round/,
+    'a stale outcome row loaded silently - the mark would vanish with every check green',
+  );
+});
+
+test('outcomePosition is a positive allowlist: an unrecognised outcome renders nothing', () => {
+  // FORWARD COUPLING, and the reason this places a SUBSET rather than running a
+  // ternary. `chain-recovery-v1.js` exports and freezes `CHAIN_OUTCOMES`, and
+  // `linkage: 'bound'` is granted only for a member of it - so today the
+  // else-branch is reachable for `''`, `pass` and `no-changes` only. A FIFTH
+  // member added there reaches this function with no edit here and, under a
+  // ternary, inherits the PASSED mark silently. Placing a subset makes that case
+  // render nothing instead, which is this module's stated fail-open direction.
+  //
+  // This comment used to say the constant was NOT exported - a premise the same
+  // changeset had already made false, and which this file then contradicted 108
+  // lines further down. The table is derived from that export now, so a stale row
+  // throws at load rather than silently dropping a mark.
+  for (const shape of ['awaiting-self-review', 'self-review-unbindable']) {
+    for (const outcome of ['', 'pass']) {
+      const t = anchor.anchorToken({ shape, linkage: 'bound', autopilot: { outcome } });
+      assert.match(t, /✓review/, `${shape}/${JSON.stringify(outcome)} must render the passed mark`);
+    }
+    assert.match(
+      anchor.anchorToken({ shape, linkage: 'bound', autopilot: { outcome: 'max-rounds' } }),
+      /✗review/,
+      `${shape}/max-rounds must render the failed mark`,
+    );
+    for (const outcome of ['no-changes', 'cancelled', 'PASS', 'passed', 'unknown-future-member']) {
+      assert.strictEqual(
+        anchor.anchorToken({ shape, linkage: 'bound', autopilot: { outcome } }),
+        anchor.ANCHOR_NONE,
+        `${shape}/${outcome} must render no anchor rather than inherit a mark`,
+      );
+    }
+  }
+});
+
+test('the two blocked-mark authorities are OR-ed, so an outcome can never clear one the owner asserts', () => {
+  // `stuckShapes` reads the owner's own STUCK_SHAPES and is the authority for a
+  // shape the classifier calls stuck. `position.blocked` is NOT a second copy of
+  // that set - it is a per-POSITION verdict for the two shapes whose MARK the
+  // shape alone cannot settle. MEASURED: `self-review-unbindable` IS in the
+  // owner's stuck set and `awaiting-self-review` is not, so the two overlap on
+  // exactly one of them, and the contract that keeps that safe is the OR: an
+  // outcome may ADD the failed mark, never clear one the owner asserts. A ternary
+  // that returned `blocked: false` into an AND would silently promote a wedged
+  // chain to running.
+  const stuck = anchor.stuckShapes();
+  assert.ok(Array.isArray(stuck) && stuck.length, 'the owner must expose a stuck set');
+  for (const shape of ['awaiting-self-review', 'self-review-unbindable']) {
+    if (stuck.indexOf(shape) < 0) continue;
+    for (const outcome of ['', 'pass', 'max-rounds']) {
+      // The mark lands on whichever step is CURRENT for that position, so the
+      // property is that a failed mark is present at all - not which step wears it.
+      assert.match(
+        anchor.anchorToken({ shape, linkage: 'bound', autopilot: { outcome } }),
+        /✗/,
+        `${shape} is stuck per the owner, so ${JSON.stringify(outcome)} must not clear the failed mark`,
+      );
+    }
+  }
+  // And the failed-mark case elsewhere in this file iterates the STRING input, so
+  // neither of these two shapes is reached there at all.
+  assert.strictEqual(anchor.anchorToken('awaiting-self-review'), anchor.ANCHOR_NONE);
+  assert.strictEqual(anchor.anchorToken('self-review-unbindable'), anchor.ANCHOR_NONE);
+});
+
+test('anchorNoneIsExpected answers for every shape, so the hook keeps no copy of the rule', () => {
+  // The hook has to tell a LEGITIMATE `none` from a degraded module answering
+  // `none`, and it derived that from `SHAPE_POSITION[shape]` being truthy. That
+  // went silent the moment two shapes mapped to null while still being
+  // producible through a report: `mapped` is true and the entry is null, so the
+  // gate was false and a degraded module disclosed nothing at exactly the two
+  // shapes this feature added. The rule belongs to the module that owns the
+  // mapping; a consumer cannot check a producer it does not own.
+  assert.strictEqual(typeof anchor.anchorNoneIsExpected, 'function');
+
+  // Inert shapes: `none` is the correct answer and no fault.
+  for (const shape of ['no-session', 'chain-closed']) {
+    assert.strictEqual(anchor.anchorNoneIsExpected({ shape }), true, shape);
+  }
+  // A shape with a real position: `none` is never legitimate there.
+  assert.strictEqual(anchor.anchorNoneIsExpected({ shape: 'implementing' }), false);
+  // An unknown shape has no row at all, so `none` is a fault the hook must name.
+  assert.strictEqual(anchor.anchorNoneIsExpected({ shape: 'not-a-shape' }), false);
+  assert.strictEqual(anchor.anchorNoneIsExpected(null), false);
+
+  // The two outcome-dependent shapes: legitimate without a placeable outcome,
+  // a fault with one.
+  for (const shape of ['awaiting-self-review', 'self-review-unbindable']) {
+    assert.strictEqual(anchor.anchorNoneIsExpected({ shape }), true, `${shape}/standalone`);
+    assert.strictEqual(
+      anchor.anchorNoneIsExpected({ shape, linkage: 'partial', autopilot: null }),
+      true,
+      `${shape}/partial`,
+    );
+    assert.strictEqual(
+      anchor.anchorNoneIsExpected({ shape, linkage: 'bound', autopilot: { outcome: 'no-changes' } }),
+      true,
+      `${shape}/unplaceable-outcome`,
+    );
+    for (const outcome of ['', 'pass', 'max-rounds']) {
+      assert.strictEqual(
+        anchor.anchorNoneIsExpected({ shape, linkage: 'bound', autopilot: { outcome } }),
+        false,
+        `${shape}/${JSON.stringify(outcome)} is placeable, so none is a fault`,
+      );
+    }
+  }
+});
+
+test('the outcome allowlist is keyed on the owner exported value domain, and its rows are frozen', () => {
+  // The allowlist RE-SPELLS a value domain `chain-recovery-v1.js` owned but
+  // neither froze nor exported, so a renamed member left a dead key here and in
+  // this file's own literals. Reading the owner's array closes the addition
+  // direction the roster note already covers AND the rename direction it does
+  // not. The rows are frozen to match `SHAPE_POSITION`, whose every entry is:
+  // `outcomePosition` hands a row out by reference, so an unfrozen row is a
+  // shared object a future in-module caller could mutate for every later render.
+  assert.ok(Array.isArray(chain.CHAIN_OUTCOMES), 'the owner must export CHAIN_OUTCOMES');
+  assert.ok(Object.isFrozen(chain.CHAIN_OUTCOMES), 'CHAIN_OUTCOMES must be frozen like its sibling tables');
+  for (const shape of ['awaiting-self-review', 'self-review-unbindable']) {
+    for (const outcome of chain.CHAIN_OUTCOMES) {
+      const token = anchor.anchorToken({ shape, linkage: 'bound', autopilot: { outcome } });
+      assert.ok(
+        typeof token === 'string' && token.length > 0,
+        `${shape}/${outcome} must render a decided value, never undefined`,
+      );
+    }
+  }
+  // Every key the allowlist places must be a member the owner still declares.
+  //
+  // READ FROM THE PRODUCER, never re-spelled here. This list used to be a THIRD
+  // hand copy of the same three strings, so it bound a copy to the owner rather
+  // than binding the MODULE to the owner: a typo in the module - `max-round` for
+  // `max-rounds` - left this literal listing three valid members, left the
+  // totality loop above green because `none` is a non-empty string, and silently
+  // dropped the ✗review mark for a budget-exhausted bound review, with
+  // `anchorNoneIsExpected` then answering true so the hook`s own disclosure
+  // stayed quiet too.
+  const placed = anchor.placedOutcomes();
+  assert.ok(Array.isArray(placed) && placed.length > 0, 'the module must expose the outcomes it places');
+  for (const key of placed) {
+    assert.ok(
+      chain.CHAIN_OUTCOMES.indexOf(key) >= 0,
+      `the allowlist places ${JSON.stringify(key)}, which the owner no longer declares`,
+    );
+  }
+  // The rows themselves are frozen.
+  const row = anchor.anchorToken({ shape: 'awaiting-self-review', linkage: 'bound', autopilot: { outcome: 'pass' } });
+  assert.match(row, /✓review/);
+  const src = fs.readFileSync(path.join(__dirname, '..', '..', 'hooks', 'lib', 'zen-anchor-v1.js'), 'utf8');
+  const table = src.slice(src.indexOf('const OUTCOME_POSITION'), src.indexOf('function outcomePosition'));
+  assert.ok(table.length > 0, 'the outcome table could not be sliced');
+  const rows = table.match(/\{ done:/g) || [];
+  const frozenRows = table.match(/Object\.freeze\(\{ done:/g) || [];
+  assert.strictEqual(
+    frozenRows.length,
+    rows.length,
+    `every outcome row must be frozen like SHAPE_POSITION's, got ${frozenRows.length} of ${rows.length}`,
+  );
 });

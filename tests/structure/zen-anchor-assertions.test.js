@@ -350,7 +350,7 @@ const NONE_SCENARIOS = [
 test("every scenario supplies an anchor the module can produce", () => {
   const mod = require(path.join(ROOT, "hooks", "lib", "zen-anchor-v1.js"));
   const producible = new Set([mod.ANCHOR_NONE]);
-  for (const shape of Object.keys(mod.SHAPE_POSITION || {})) producible.add(mod.anchorToken(shape));
+  for (const t of mod.producibleTokens()) producible.add(t);
   assert.ok(producible.size > 1, "the module produced no anchor at all");
   for (const f of scenarios) {
     const supplied = suppliedAnchor(path.join(SCENARIO_DIR, f));

@@ -144,11 +144,11 @@ if command -v node >/dev/null 2>&1; then
     let producible = [];
     try {
       const mod = require(path.join(process.env.PLUGIN_DIR, "hooks", "lib", "zen-anchor-v1.js"));
-      // BOTH readings of every shape — see the identical derivation in
-      // test-zen-mode.sh: `chain-closed` renders a different line under
-      // `reviewed`, and that token is one a scenario may legitimately carry.
-      producible = [...new Set(Object.keys(mod.SHAPE_POSITION)
-        .map((s) => mod.anchorToken(s)))];
+      // READ FROM THE MODULE, never re-derived here. Mapping over
+      // `SHAPE_POSITION` was complete until the classifier report became a legal
+      // first argument; after that it omitted both report-only tokens, so a
+      // scenario legitimately carrying one was reported as not producible.
+      producible = mod.producibleTokens();
     } catch (_) { process.stdout.write("anchor-module-unloadable"); process.exit(0); }
     if (!producible.length) { process.stdout.write("anchor-module-produced-no-token"); process.exit(0); }
     const head = want.slice(0, want.indexOf(MARKER) + MARKER.length);

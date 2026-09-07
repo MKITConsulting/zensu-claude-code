@@ -209,7 +209,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-zen-mode.sh\"",
-            "timeout": 10
+            "timeout": 20
           },
           {
             "type": "command",
