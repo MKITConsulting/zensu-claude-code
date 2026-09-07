@@ -1540,6 +1540,15 @@ hand; the release pipeline owns it.
   checked at `_autopilot_begin_critical`, the only site that writes it. Reads are protected
   by `regularFile`, which rejects symlinks and hard links.
 
+**THREE checks OUTSIDE this section's own suites now read this library by source, and the
+remedy for each lives in a suite whose name gives no hint of it:** `S24` reads the verbatim
+declaration `const STAGES = new Set([`, `S25` reads the `team-review:v1:${digest(` spelling,
+and `S26` reads `const RETURN_STAGES = new Set([`. All three are in
+`tests/structure/test-post-review-tdd-scope.sh`, and they exist because the delegate hook
+hand-copies those vocabularies. Reformatting any of the three declarations — or renaming
+`digest` — reddens that suite. §"Ticket-Keyed Review Consumption" carries the consumer-side
+account.
+
 Moving together with the scope: `_autopilot_owner_key`, `_autopilot_active_path`,
 `_autopilot_legacy_active_path`, `autopilot_workspace_root`, `_autopilot_session_workspace`,
 `_autopilot_read_workspace_critical`, `autopilot_read_workspace` and
@@ -3661,9 +3670,12 @@ nothing else is.** The prompt must carry the chain's OUTSTANDING ticket on a lin
 spelled `REVIEW-TICKET: <ticket>`; it may sit anywhere, and further `REVIEW-TICKET:` lines are
 ignored. `PRE-MERGED FINDINGS (fan-out)` is still instructed by every producer and is NOT what
 the hook decides on. The Autopilot envelope is matched the same way — by CONTENT (exactly one
-DISTINCT LINE each of `ZENSU-DELEGATED-CALLER` / `AUTOPILOT-BINDING` / `AUTOPILOT-STAGE`, no
-`AUTOPILOT-REVIEW-OP`, the caller value exact, both regexes, then every field compared against
-the durable run) — never by the lines it occupies.
+DISTINCT REGEX-VALID line each of `ZENSU-DELEGATED-CALLER` / `AUTOPILOT-BINDING` /
+`AUTOPILOT-STAGE` — a byte-identical repeat is accepted, two DIFFERENT regex-valid lines are
+refused, and a binding or stage line failing its regex is dropped before the collapse rather
+than counted, so a quoted column-0 placeholder beside a real rendered line is accepted, while
+the caller line keeps the exact-literal test and has no such filter — no `AUTOPILOT-REVIEW-OP`,
+the caller value exact, both regexes, then every field compared against the durable run) — never by the lines it occupies.
 
 **The consumer is a PostToolUse hook on the `Agent` matcher.** `SubagentStop` carries only
 `hooks/review-evidence-subagent-stop.sh`, the pr-team-review evidence lease. A diagnosis that
@@ -3847,7 +3859,9 @@ carriers to the `scv1_` grep family §"Foreign-Chain Row" governs, both spelled
 copied inline as `RENDERABLE` in the standalone preflight of `hooks/post-review-tdd-delegate.sh`.
 Its owner is `STAGES` in `hooks/lib/zensu-autopilot-state.sh`, which carries a second copy of its
 own, `RENDERABLE_STAGES`; `S7u` in `tests/structure/test-autopilot-stop-enforcer.sh` compares
-those two and is bound to that FILE, so it cannot see this third copy. Nothing pins it. A stage
+those two and is bound to that FILE, so it cannot see this third copy. `S24` in
+`tests/structure/test-post-review-tdd-scope.sh` is what pins it — see the roster paragraph
+below. A stage
 added to `STAGES` alone makes the arm render `observed: unreported` for a stage the record
 actually named — not hypothetical: the copy shipped one review round missing `CONVERGE`.
 
@@ -3865,6 +3879,49 @@ byte-stable no-op; `tests/structure/test-post-review-self-review-handoff.sh` pin
 rules and the position-free acceptance; `tests/structure/test-tdd-skill-review-fanout.sh` F10a
 pins the reviewer agent's own consume-mode contract;
 `tests/structure/test-stop-enforcer-self-review-routing.sh` `T60` pins the Stop directive.
+
+**SIX checks in that first suite read files OTHER than the hook, and every one of them fires
+in the UNOBVIOUS direction. State the base or the count means nothing: THREE grade PROSE —
+`S19`, `S22`, `S23` — and THREE compare SOURCE across files: `S24`, `S25` and `S26`, all of
+which read `hooks/lib/zensu-autopilot-state.sh`. For the first three the trigger is a PROSE edit — two of them in
+`docs/`, the third in a hook HEADER COMMENT; for the last three it is an edit to that library.** The coupling fires in the direction this
+file records for `G12` under §"Gate-Disable
+Prefixes" and for `C39`/`C41`/`C42b`/`C51`/`C52`/`C53`/`C59` under §"Implementing-Phase Turn Counter". An ordinary
+documentation edit reddens a suite named for the delegate's TDD scope, and nothing points at the
+remedy from the side that changes. `S19` reads THIS file and `docs/tdd-manager-workflow.md`. It
+forbids one historical spelling of the live-diagnosis enumeration in each — do not look them up
+here, because quoting either literal in this paragraph is itself what turns the check red, which
+is how this sentence was first written and how it failed. Read them out of the suite. It also
+requires each file to keep DISCUSSING the case, and — since the round that widened it — requires
+every mention of that case in either carrier to sit within reach of an unreachability marker
+(`UNREACHABLE` or `does NOT fire`), which is the class-wide half a two-spelling blacklist could
+not give; that clause is the second reason this paragraph must describe rather than quote. It
+also pins the guard derivation at EXACTLY one occurrence, because a guard reintroduced with `=`
+rather than `!=` raises that count where a `-ge 1` bound would not see it. `S23` grades the
+`## Autopilot envelope` collapse clause in `docs/configuration.md` and
+`docs/tdd-manager-workflow.md` and requires the QUALIFIED wording — the unqualified "two lines
+that differ are refused" is false for a shape-invalid line, which the bound branch drops before
+collapsing. `S22` grades `hooks/user-prompt-tdd-reminder.sh`'s header. `S24` compares the
+delegate's `RENDERABLE` stage array against `const STAGES` in `hooks/lib/zensu-autopilot-state.sh`
+by MEMBER SET: `S7u` pins the library's two copies against each other but reads only that one
+file, so it is structurally blind to this third one, and a stage added there and not here makes
+the standalone decline render `observed: unreported` for a stage the record named. `S25` pins the
+`REVIEW_OP_RE` recognizer against the shape `teamReviewOperationKey` actually mints, because that
+divergence is fail-OPEN: a real header the pattern stops matching is read as absent and the bound
+envelope is accepted. `S26` compares the delegate's THREE return-stage copies — `STAGE_RE`'s alternation, the
+`PREFLIGHT_CONTEXT` validator over `s.autopilotReturnStage`, and the claim validator over
+`binding.returnStage` — against `RETURN_STAGES` in that same library.
+An end-to-end `CONVERGE` fixture was tried instead and REMOVED: `PLAN_APPROVED` sets
+`tdd.returnStage` to `GATES` unconditionally and `TDD_STARTED` only CHECKS the field rather than
+assigning from the payload, so a `--tdd-begin` naming `CONVERGE` is refused before any chain is
+armed. Before changing the terminal-stage pair the delegate hardcodes, run
+`grep -rnE '"DONE", *"CANCELLED"|DONE\|CANCELLED\)' hooks/` — an alternation, because the pair
+is spelled BOTH ways: the quoted JS form and, in `hooks/plan-approved-delegate.sh`, a bash `case`
+arm the JS pattern alone cannot see. Judge every hit; some are incidental array tails rather than
+the terminal pair. No numeral is written here on purpose — a hand-maintained count of a grep
+result is exactly what this file forbids for the `zensu:code-reviewer` and `scv1_` identities.
+`S24` incidentally compares ONE of those sites against its owner, as stage-array members; nothing
+compares the rest.
 
 **Version: `patch`.** Walked against §"Runtime Lineage" entry by entry: no context-record or
 workflow-state schema field, no strict key set, no hook added, removed or renamed and no

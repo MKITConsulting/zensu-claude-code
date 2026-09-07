@@ -227,7 +227,7 @@ decline() {
   if [ "${2:-respawn}" = runstate ]; then
     remedy="Do NOT issue a fresh review ticket and do NOT re-spawn: the prompt is not what was refused, so a re-spawn reproduces this decline exactly while rotating the ticket out from under any spawn still in flight. Resolve the durable run state first — read a fresh ${LOG_COMMAND} --autopilot-status, then finish or release that run, or repair the unreadable record under .zensu/state/ — and only then re-spawn with the ticket the chain already holds."
   else
-    remedy="Re-spawn zensu:code-reviewer with a prompt whose FIRST line is exactly 'PRE-MERGED FINDINGS (fan-out)' and whose SECOND line is exactly 'REVIEW-TICKET: <the current ticket>'. Both lines, in that order: the reviewer agent enters consume mode only on that pair, and a prompt that satisfies this hook but not the agent still records the round while throwing the whole fan-out away, because the reviewer then re-reviews from scratch instead of consuming the merged findings. Mint a replacement by running: ${LOG_COMMAND} --review-ticket — that verb ISSUES a new ticket and ROTATES the outstanding one, it does not read the current value back, so run it only when no zensu:code-reviewer spawn is still in flight: a spawn already running carries the old value and can never be recorded afterwards. An Autopilot-bound chain must additionally carry exactly one DISTINCT value each of ZENSU-DELEGATED-CALLER, AUTOPILOT-BINDING and AUTOPILOT-STAGE, unchanged — a byte-identical repeat is fine, two lines that differ are not. A STANDALONE chain must not carry a COMPLETE, well-formed set of those three; an incomplete set is ignored, so quoting one of them is harmless."
+    remedy="Re-spawn zensu:code-reviewer with a prompt whose FIRST line is exactly 'PRE-MERGED FINDINGS (fan-out)' and whose SECOND line is exactly 'REVIEW-TICKET: <the current ticket>'. Both lines, in that order: the reviewer agent enters consume mode only on that pair, and a prompt that satisfies this hook but not the agent still records the round while throwing the whole fan-out away, because the reviewer then re-reviews from scratch instead of consuming the merged findings. Mint a replacement by running: ${LOG_COMMAND} --review-ticket — that verb ISSUES a new ticket and ROTATES the outstanding one, it does not read the current value back, so run it only when no zensu:code-reviewer spawn is still in flight: a spawn already running carries the old value and can never be recorded afterwards. An Autopilot-bound chain must additionally carry exactly one DISTINCT value each of ZENSU-DELEGATED-CALLER, AUTOPILOT-BINDING and AUTOPILOT-STAGE, unchanged — a byte-identical repeat is fine, two regex-valid lines that differ are not, and a binding or stage line failing its regex is dropped before the collapse rather than counted; the caller line keeps its exact-literal test and has no such filter. A STANDALONE chain must not carry a COMPLETE, well-formed set of those three; an incomplete set is ignored, so quoting one of them is harmless."
   fi
   printf '%s' "The zensu:code-reviewer subagent above finished, but its completion was NOT recorded against this session's review chain: ${1}. The chain still holds an unclaimed review ticket, so the Stop backstop will keep asking for a review and the chain cannot converge. ${remedy} Do NOT arm a new chain to work around this — that would grant a new review budget." | emit_post_context
   exit 0
@@ -305,13 +305,18 @@ PROMPT_ENVELOPE_FIELDS="$(EXPECT_BOUND="$EXPECT_BOUND" node -e '
       const prompt = input.tool_input && input.tool_input.prompt;
       if (typeof prompt !== "string") process.exit(3);
       const lines = prompt.split(/\r?\n/);
-      // DISTINCT lines, not occurrences. A byte-identical repeat asserts the
-      // same binding twice and adds no authority, while the skill files in this
-      // repository carry these literals at column 0 — so a REVIEW PACKET
-      // quoting them while a bound chain runs reproduced one and the whole
-      // envelope was refused, which is the same defect the standalone branch
-      // was relaxed for. Two lines that DIFFER still leave the set larger than
-      // one and are still refused: the hook may not pick between two bindings.
+      // The bound branch counts DISTINCT REGEX-VALID lines, and the collapse
+      // happens further down, on that branch alone: `collect` here returns raw
+      // occurrences. A byte-identical repeat asserts the same binding twice and
+      // adds no authority, while the skill files in this repository carry these
+      // literals at column 0 — so a REVIEW PACKET quoting them while a bound
+      // chain runs reproduced one and the whole envelope was refused, which is
+      // the same defect the standalone branch was relaxed for. Two DIFFERENT
+      // regex-valid lines are still refused: the hook may not pick between two
+      // bindings. A shape-invalid line is dropped ahead of the collapse, so it
+      // neither refuses nor authorizes; `callers` keeps its exact-literal test
+      // and carries no such filter, so two differing caller lines are refused
+      // whatever their shape.
       // NOTE: no apostrophe may appear anywhere in this program. It lives in a
       // bash single-quoted string, so one truncates the whole thing — which is
       // exactly what happened while this comment was first written, and what
@@ -331,17 +336,35 @@ PROMPT_ENVELOPE_FIELDS="$(EXPECT_BOUND="$EXPECT_BOUND" node -e '
       // AUTOPILOT-REVIEW-OP line flip a complete, regex-valid spoof back to
       // "standalone" — the refusal the comment above promises, bypassed by
       // adding a header rather than by removing one.
+      // State what that buys, precisely: the spoof refusal is BEST-EFFORT and is
+      // add-a-line evadable by construction, because the raw counting above makes
+      // a second differing AUTOPILOT-BINDING line yield bindings.length === 2 and
+      // therefore a null binding, so the triple is false and the claim proceeds.
+      // Keeping the review-op conjunct out of it removes one such spelling, not the
+      // class. What actually prevents a FORGED binding is that AUTOPILOT_KIND is
+      // derived from the durable claim context further down and the standalone path
+      // requires it to be standalone — never this arm.
       // RAW counts here. This predicate is ALSO the standalone spoof test, and
       // collapsing repeats on that arm moved a doubled quotation from ignored
       // to refused-as-a-spoof — a decline whose remedy rotates a live ticket.
-      const completeTriple = callers.length === 1
-        && callers[0] === "ZENSU-DELEGATED-CALLER: autopilot"
-        && !!binding && !!stage && Number(binding[2]) <= 999;
+      // ONE predicate over the CALLER list and the two already-reduced operands.
+      // Written twice, a conjunct added to one and not the other was a divergence
+      // no fixture could see, because each arm is driven only by its own cases.
+      // State the bound precisely: the helper covers the caller test and the attempt
+      // ceiling, and the binding and stage REDUCTIONS above and below it are still
+      // two hand-written sites that differ on a SECOND axis besides raw-versus-
+      // distinct — the bound one shape-filters before counting cardinality, the
+      // standalone one counts unfiltered lines. Re-check those two by hand.
+      const CALLER_LITERAL = "ZENSU-DELEGATED-CALLER: autopilot";
+      const triple = (c, b, st) => c.length === 1 && c[0] === CALLER_LITERAL
+        && !!b && !!st && Number(b[2]) <= 999;
+      const completeTriple = triple(callers, binding, stage);
       // DISTINCT counts, bound branch only: a byte-identical repeat asserts the
       // same binding twice and adds no authority, and the skill files in this
       // repository carry these literals at column 0, so a REVIEW PACKET quoting
-      // one refused a bound chain outright. Two lines that DIFFER still leave a
-      // set larger than one and are still refused.
+      // one refused a bound chain outright. Two DIFFERENT regex-valid lines are
+      // still refused; a shape-invalid line is dropped by the filter below and
+      // is therefore neither a refusal nor an authorization.
       // Shape-filter BEFORE collapsing, the same discipline realReviewOps gets:
       // the skill files carry placeholder binding and stage lines at column 0 that
       // do NOT collapse against a real rendered line, so a quotation reached size 2
@@ -353,9 +376,7 @@ PROMPT_ENVELOPE_FIELDS="$(EXPECT_BOUND="$EXPECT_BOUND" node -e '
       const dStages = distinct(stages.filter(line => STAGE_RE.test(line)));
       const dBinding = dBindings.length === 1 ? BINDING_RE.exec(dBindings[0]) : null;
       const dStage = dStages.length === 1 ? STAGE_RE.exec(dStages[0]) : null;
-      const boundTriple = dCallers.length === 1
-        && dCallers[0] === "ZENSU-DELEGATED-CALLER: autopilot"
-        && !!dBinding && !!dStage && Number(dBinding[2]) <= 999;
+      const boundTriple = triple(dCallers, dBinding, dStage);
       if (process.env.EXPECT_BOUND !== "yes") {
         if (completeTriple) process.exit(3);
         process.stdout.write(["standalone", "-", "0", "-", "-"].join("\t"));
@@ -411,11 +432,20 @@ if [ "$PROMPT_AUTOPILOT_KIND" = standalone ]; then
       # generation exists and has not been released. What the mirror must never do
       # is call such a run LIVE — it is not — so the stage travels back and the
       # cause names what was actually observed. The record is session-writable, so
-      # only a `^[A-Z_]{1,32}$` spelling is echoed; anything else degrades to a
-      # fixed word rather than putting untrusted bytes in front of the model.
-      OUTER_STAGE="$(OUTER="$PREFLIGHT_OUTER" node -e '
+      # only a member of the CLOSED stage set below is echoed; anything else makes
+      # the probe emit the empty string and the shell default renders the cause as
+      # `unreported`, rather than putting untrusted bytes in front of the model.
+      # PIPED, never exported: stateValid accepts up to 512 events and the record
+      # is pretty-printed, so a long ledger passes a single environment string on
+      # Linux and the whole environment block under the Windows process creation
+      # Git Bash uses. An E2BIG spawn failure would land in the catch-all arm and
+      # blame the record for not parsing. hooks/lib/zensu-autopilot-state.sh states
+      # the rule and hooks/stop-chain-enforcer.sh pipes the same payload.
+      OUTER_STAGE="$(printf '%s' "$PREFLIGHT_OUTER" | node -e '
+      let raw;
+      try { raw = require("fs").readFileSync(0, "utf8"); } catch (_) { process.exit(4); }
       try {
-        const s=JSON.parse(process.env.OUTER);
+        const s=JSON.parse(raw);
         const stage = typeof s.stage === "string" ? s.stage : "";
         // Membership in the CLOSED set the state library declares, never a bare
         // shape rule: the record is session-writable, and hooks/lib/zensu-autopilot-state.sh
@@ -434,10 +464,16 @@ if [ "$PROMPT_AUTOPILOT_KIND" = standalone ]; then
       case "$?" in
         0) ;;
         1) decline "this session's own durable Autopilot run has not reached a terminal stage (observed: ${OUTER_STAGE:-unreported}), so a standalone claim cannot be recorded against it" runstate ;;
-        # This arm is the READ succeeding and its payload not PARSING, which is
-        # a different fault from the read failing below — the two said the same
-        # sentence, so the ledger could not tell them apart and neither could
-        # anyone reading a chain that stranded here. It has no executed fixture:
+        4) decline "this session's own durable Autopilot run record could not be read from the pipe, so a standalone claim cannot be judged against it" runstate ;;
+        # This arm is the payload not PARSING, or node itself not running — a missing
+        # interpreter exits 127 and lands here too, so the wording stays broad. The record
+        # travels over stdin rather than the environment, so a read fault is a real
+        # second cause — it exits 4 and gets its own arm rather than being folded in
+        # here, because a fault must never be reported as a judged payload. That is
+        # a different fault from the read failing, which the exit-4 arm above names
+        # in its own words: the two once shared one sentence, so the ledger could
+        # not tell them apart and neither could anyone reading a chain that
+        # stranded here. This arm has no executed fixture:
         # `autopilot_read_active` emits JSON or fails, so a successful read that
         # will not parse is unreachable from a test, which is why the pin for
         # this distinction is a source pin (P13f).
@@ -506,11 +542,15 @@ elif [ "$PROMPT_AUTOPILOT_KIND" = bound ]; then
       *) decline "a durable Autopilot run record in this project could not be read, so the bound claim cannot be judged against it" runstate ;;
     esac
   fi
-  OUTER="$PREFLIGHT_OUTER" SID="$SESSION_ID" RUN_ID="$PROMPT_AUTOPILOT_RUN" \
+  # The record is PIPED for the reason stated at the stage probe above; the small
+  # scalars stay in the environment, where no size bound is in play.
+  printf '%s' "$PREFLIGHT_OUTER" | SID="$SESSION_ID" RUN_ID="$PROMPT_AUTOPILOT_RUN" \
     ATTEMPT="$PROMPT_AUTOPILOT_ATTEMPT" CHAIN_ID="$PROMPT_AUTOPILOT_CHAIN" \
     RETURN_STAGE="$PROMPT_AUTOPILOT_STAGE" node -e '
+      let raw;
+      try { raw = require("fs").readFileSync(0, "utf8"); } catch (_) { process.exit(4); }
       try {
-        const s=JSON.parse(process.env.OUTER),t=s.tdd;
+        const s=JSON.parse(raw),t=s.tdd;
         const exact=s.runId===process.env.RUN_ID && s.ownerSessionId===process.env.SID
           && s.stage==="TDD_RUNNING" && s.nextActionCode==="AWAIT_TDD_CHAIN" && t
           && t.sessionId===process.env.SID && String(t.attempt)===process.env.ATTEMPT
@@ -518,8 +558,16 @@ elif [ "$PROMPT_AUTOPILOT_KIND" = bound ]; then
           && t.outcome===null;
         process.exit(exact?0:3);
       } catch (_) { process.exit(3); }
-    ' 2>/dev/null \
-    || decline "the prompt's Autopilot binding disagrees with this session's own durable run — resolve the run state first, because the gate above has already pinned the envelope to this chain's own record" runstate
+    ' 2>/dev/null
+  # A READ fault is not a disagreement. The record travels over stdin here too, so
+  # exit 4 is split off and declines in its own words rather than telling the model
+  # its binding conflicts with a record nothing managed to read — the same rule the
+  # stage probe above states, applied to the second pipe.
+  case "$?" in
+    0) ;;
+    4) decline "this session's own durable Autopilot run record could not be read from the pipe, so the prompt's Autopilot binding cannot be compared against it" runstate ;;
+    *) decline "the prompt's Autopilot binding disagrees with this session's own durable run — resolve the run state first, because the gate above has already pinned the envelope to this chain's own record" runstate ;;
+  esac
 else
   exit 0
 fi
@@ -537,27 +585,33 @@ CLAIM_FIELDS="$(CLAIM_CONTEXT="$CLAIM_CONTEXT" node -e '
     if (topKeys !== "autopilot,next" || !Number.isSafeInteger(value.next) || value.next < 1) {
       process.exit(3);
     }
+    // NOT process.exit() on the standalone arm: the write goes to a command
+    // substitution pipe and may still be queued, and exit() discards it — the
+    // rule this file states above the stage probe and hooks/plan-approved-delegate.sh
+    // states for the same seam. The ticket is already consumed by this point, so a
+    // dropped write costs the round its directive with no way to reissue. Fall off
+    // the end of the program instead and let node drain.
     if (value.autopilot === null) {
       process.stdout.write([value.next, "standalone", "-", 0, "-", "-"].join("\t"));
-      process.exit(0);
+    } else {
+      const binding = value.autopilot;
+      const bindingKeys = binding && typeof binding === "object" && !Array.isArray(binding)
+        ? Object.keys(binding).sort().join(",") : "";
+      const linkId = candidate => typeof candidate === "string"
+        && candidate.length > 0 && candidate.length <= 128
+        && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(candidate);
+      const valid = bindingKeys === "attempt,chainId,outcome,returnStage,runId"
+        && linkId(binding.runId)
+        && Number.isInteger(binding.attempt) && binding.attempt >= 1 && binding.attempt <= 999
+        && ["GATES", "CONVERGE", "FIX_FINDINGS", "VALIDATE", "COVER"]
+          .includes(binding.returnStage)
+        && linkId(binding.chainId)
+        && binding.outcome === "";
+      if (!valid) process.exit(3);
+      process.stdout.write([
+        value.next, "bound", binding.runId, binding.attempt, binding.returnStage, binding.chainId
+      ].join("\t"));
     }
-    const binding = value.autopilot;
-    const bindingKeys = binding && typeof binding === "object" && !Array.isArray(binding)
-      ? Object.keys(binding).sort().join(",") : "";
-    const linkId = candidate => typeof candidate === "string"
-      && candidate.length > 0 && candidate.length <= 128
-      && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(candidate);
-    const valid = bindingKeys === "attempt,chainId,outcome,returnStage,runId"
-      && linkId(binding.runId)
-      && Number.isInteger(binding.attempt) && binding.attempt >= 1 && binding.attempt <= 999
-      && ["GATES", "CONVERGE", "FIX_FINDINGS", "VALIDATE", "COVER"]
-        .includes(binding.returnStage)
-      && linkId(binding.chainId)
-      && binding.outcome === "";
-    if (!valid) process.exit(3);
-    process.stdout.write([
-      value.next, "bound", binding.runId, binding.attempt, binding.returnStage, binding.chainId
-    ].join("\t"));
   } catch (_) { process.exit(3); }
 ' 2>/dev/null)" || exit 0
 IFS=$'\t' read -r NEXT AUTOPILOT_KIND AUTOPILOT_RUN AUTOPILOT_ATTEMPT \

@@ -783,6 +783,35 @@ else
   check "P13e a byte-identical repeat of an envelope line still consumes on a bound chain (ctx='$CTX_E3')" FAIL
 fi
 
+# P13g — the SHAPE FILTER, which had no executed case at all. The bound branch
+# drops a binding or stage line failing its regex BEFORE collapsing to distinct
+# lines, because this repository's own skill files carry those literals at column 0
+# with angle-bracket placeholders: a REVIEW PACKET quoting `skills/autopilot/SKILL.md`
+# reproduced one, the distinct set reached size 2, and a live bound envelope was
+# vetoed. Every other bound fixture carries each line exactly once or carries two
+# REGEX-VALID lines, so deleting both filters changed no verdict anywhere and the
+# round-3 fix was silently deletable. This case is the bite: without the filter the
+# placeholder survives the collapse, `dBindings` has two members, `dBinding` is null
+# and the envelope refuses. Session E3 already consumed its ticket above, so this
+# takes a fresh one on the same bound chain rather than arming another.
+TICKET_E3B="$(bash "$LOG" --review-ticket --session "$SID_E3" 2>/dev/null)"
+PLACEHOLDER_E3='AUTOPILOT-BINDING: run=<runId> attempt=<attempt> chain=<chainId>'
+PLACEHOLDER_STAGE_E3='AUTOPILOT-STAGE: <outer-stage>'
+# The review-op placeholder belongs here too: it is the THIRD shape-filtered
+# collection, and without it the realReviewOps filter is deletable with every suite
+# green — the only other fixture carrying that prefix uses a real-shaped key, which
+# vetoes with or without the filter. This line must be DROPPED, so acceptance holds.
+PLACEHOLDER_OP_E3='AUTOPILOT-REVIEW-OP: key=<operationKey> head=<headSha>'
+QUOTED_E3="${CALLER_E3}"$'\n'"${BINDING_E3}"$'\n'"${STAGE_E3}"$'\n'"${PLACEHOLDER_E3}"$'\n'"${PLACEHOLDER_STAGE_E3}"$'\n'"${PLACEHOLDER_OP_E3}"
+CTX_E3B="$(postrev_with_ticket "$SID_E3" "$TICKET_E3B" "$QUOTED_E3" "$PROJ_E3")"
+if [ -n "$TICKET_E3B" ] \
+  && ! printf '%s' "$CTX_E3B" | grep -qF -- "was NOT recorded against this session's review chain" \
+  && printf '%s' "$CTX_E3B" | grep -qF -- "$BINDING_E3"; then
+  check "P13g a quoted column-0 placeholder beside a real envelope line is dropped before the collapse" PASS
+else
+  check "P13g a quoted column-0 placeholder beside a real envelope line is dropped before the collapse (ctx='$CTX_E3B')" FAIL
+fi
+
 echo "----"
 echo "test-post-review-self-review-handoff: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

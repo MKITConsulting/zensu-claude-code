@@ -695,6 +695,15 @@ S18_OUT="$(SCAN_ROOT="$PLUGIN_DIR" node -e '
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+// hooks/ ONLY, and that bound is MEASURED rather than conservative. Widening the
+// walk to tests/structure/ was tried and reverted: it scanned 1001 candidates and
+// reported five that do not parse, all of them extraction artifacts rather than
+// defects — a prose COMMENT quoting the literal, the nested `node -e ` + backslash
+// quoting the suites use inside command substitutions, and a program whose closing
+// delimiter the extractor mis-locates. The extractor assumes the plain opening and
+// closing convention hooks/ follows; the suites do not follow it, so a scan there
+// reports false positives, which is worse than no scan. Widening this needs an
+// extractor that understands the other quoting shapes, not a second root.
 const root = path.join(process.env.SCAN_ROOT, "hooks");
 const files = [];
 (function walk(d) {
@@ -777,12 +786,33 @@ S19_WF="$(tr '\n' ' ' < "$PLUGIN_DIR/docs/tdd-manager-workflow.md" | tr -s ' ' |
 S19_CM="$(tr '\n' ' ' < "$PLUGIN_DIR/CLAUDE.md" | tr -s ' ' | grep -c 'comparison, a bound prompt' || true)"
 S19_WF_KEPT="$(grep -c 'bound prompt' "$PLUGIN_DIR/docs/tdd-manager-workflow.md" || true)"
 S19_CM_KEPT="$(grep -c 'bound prompt' "$PLUGIN_DIR/CLAUDE.md" || true)"
-if [ "$S19_GUARD" -eq 0 ] && [ "$S19_DERIV" -ge 1 ] \
+# The two needles above forbid the two spellings this claim historically had, which
+# a reworded re-addition escapes. So the doc half is ALSO positive and class-wide:
+# every `bound prompt` mention in either carrier must sit within reach of an
+# unreachability marker, which no live-diagnosis enumeration can satisfy however
+# it is worded. Both files are hard-wrapped, so flatten first, then start a line at
+# each mention and judge the window that follows it.
+# The window is SYMMETRIC. Starting a line AT each mention judges only what follows
+# it, and in both carriers today one marker sits BEFORE the mention — so a correct
+# reword that moves the other marker ahead of it would be reported unmarked. Emit
+# the tail of the preceding fragment together with the head of the mention line.
+s19_unmarked() {
+  tr '\n' ' ' < "$1" | tr -s ' ' | sed 's/bound prompt/\
+&/g' | awk 'NR>1 { print substr(prev, length(prev)-180) " " substr($0,1,260) } { prev=$0 }' \
+    | grep -cv 'UNREACHABLE\|does NOT fire' || true
+}
+S19_WF_UNMARKED="$(s19_unmarked "$PLUGIN_DIR/docs/tdd-manager-workflow.md")"
+S19_CM_UNMARKED="$(s19_unmarked "$PLUGIN_DIR/CLAUDE.md")"
+# EXACTLY one derivation, and it must be the EXPECT_BOUND line: a guard reintroduced
+# with `=` instead of `!=` raises this count, where a `-ge 1` bound would not see it.
+S19_DERIV_LINE="$(grep -cF -- "PREFLIGHT_CONTEXT\" = '{}' ]; then EXPECT_BOUND=" "$HOOK" || true)"
+if [ "$S19_GUARD" -eq 0 ] && [ "$S19_DERIV" -eq 1 ] && [ "$S19_DERIV_LINE" -eq 1 ] \
   && [ "$S19_WF" -eq 0 ] && [ "$S19_CM" -eq 0 ] \
+  && [ "$S19_WF_UNMARKED" -eq 0 ] && [ "$S19_CM_UNMARKED" -eq 0 ] \
   && [ "$S19_WF_KEPT" -ge 1 ] && [ "$S19_CM_KEPT" -ge 1 ]; then
-  check "S19 the unreachable bound-branch guard is gone and no operator account enumerates its decline" PASS
+  check "S19 the unreachable bound-branch guard is gone and every operator account marks the case unreachable" PASS
 else
-  check "S19 the unreachable bound-branch guard is gone and no operator account enumerates its decline (guard=$S19_GUARD deriv=$S19_DERIV workflow-doc=$S19_WF claude-md=$S19_CM)" FAIL
+  check "S19 the unreachable bound-branch guard is gone and every operator account marks the case unreachable (guard=$S19_GUARD deriv=$S19_DERIV deriv-line=$S19_DERIV_LINE workflow-doc=$S19_WF claude-md=$S19_CM wf-unmarked=$S19_WF_UNMARKED cm-unmarked=$S19_CM_UNMARKED)" FAIL
 fi
 
 # S20 — consume intent has TWO disjuncts, and until this case every fixture that
@@ -810,6 +840,177 @@ S20_AFTER="$(digest "$S20_STATE")"
   && ! printf '%s' "$OUT" | grep -qF -- "$S20_TICKET" \
   && check "S20 a matched ticket alone arms the disclosure when the prompt does not open with the marker" PASS \
   || check "S20 a matched ticket alone arms the disclosure when the prompt does not open with the marker" FAIL
+
+# S22 — AC-005. The reminder header claims the phrase lists are mirrored with
+# plan-approved-delegate.sh while the PRECEDENCE is not, and nothing pinned either
+# half: a grep over tests/ for its distinguishing literals returned nothing, so the
+# qualification could be deleted or re-broken with every suite green. It was in fact
+# shipped garbled once, as a duplicated noun phrase left by a substitution.
+S22_HOOK="$PLUGIN_DIR/hooks/user-prompt-tdd-reminder.sh"
+# Strip the comment marker from each line BEFORE flattening. A needle spanning a
+# line break otherwise carries the NEXT line's `#`, which couples it to the physical
+# wrap: a benign reflow of this comment turns the check red, and a re-garble wrapped
+# one word earlier escapes it entirely. Count OCCURRENCES with grep -o, not lines:
+# after flattening the stream is one line, so grep -c can only ever answer 0 or 1.
+s22_flat() { sed 's/^[[:space:]]*#[[:space:]]\{0,1\}//' "$1" | tr '\n' ' ' | tr -s ' '; }
+S22_LISTS="$(s22_flat "$S22_HOOK" | grep -o 'IN THEIR PHRASE LISTS' | wc -l | tr -d ' ')"
+S22_PREC="$(s22_flat "$S22_HOOK" | grep -o 'NOT identical in PRECEDENCE' | wc -l | tr -d ' ')"
+S22_DUP="$(s22_flat "$S22_HOOK" | grep -o 'utterance like a mixed utterance' | wc -l | tr -d ' ')"
+if [ "$S22_LISTS" -ge 1 ] && [ "$S22_PREC" -eq 1 ] && [ "$S22_DUP" -eq 0 ]; then
+  check "S22 the reminder header claims mirrored phrase lists without claiming mirrored precedence, ungarbled" PASS
+else
+  check "S22 the reminder header claims mirrored phrase lists without claiming mirrored precedence, ungarbled (lists=$S22_LISTS precedence=$S22_PREC duplicate=$S22_DUP)" FAIL
+fi
+
+# S23 — AC-006. Both operator carriers state the envelope collapse rule, and the
+# rule they state must be the QUALIFIED one: the bound branch shape-filters binding
+# and stage lines before collapsing, so an unqualified "two lines that differ are
+# refused" is false for exactly the case the filter exists for. Nothing under tests/
+# carried this literal before, in either direction.
+S23_BAD=0
+S23_OK=0
+for S23_F in "$PLUGIN_DIR/docs/configuration.md" "$PLUGIN_DIR/docs/tdd-manager-workflow.md"; do
+  S23_HAS="$(grep -c 'DISTINCT line each' "$S23_F" || true)"
+  S23_QUAL="$(grep -c 'two DIFFERENT regex-valid lines' "$S23_F" || true)"
+  S23_STALE="$(grep -c 'accepted, two lines that differ are refused' "$S23_F" || true)"
+  if [ "$S23_HAS" -ge 1 ] && [ "$S23_QUAL" -ge 1 ] && [ "$S23_STALE" -eq 0 ]; then
+    S23_OK=$((S23_OK + 1))
+  else
+    S23_BAD=$((S23_BAD + 1))
+  fi
+done
+if [ "$S23_OK" -eq 2 ] && [ "$S23_BAD" -eq 0 ]; then
+  check "S23 both operator carriers state the QUALIFIED envelope collapse rule" PASS
+else
+  check "S23 both operator carriers state the QUALIFIED envelope collapse rule (ok=$S23_OK bad=$S23_BAD)" FAIL
+fi
+
+# S24 — the stage allowlist in the delegate is a hand-copy of the set the state
+# library owns. S7u pins the library against itself and reads only that file, so it
+# is structurally blind to this third copy: a stage added there and not here makes
+# the standalone decline render `observed: unreported` for a stage the record named,
+# which is the exact defect the observed-stage disclosure was written to remove.
+S24_OUT="$(HOOK_FILE="$HOOK" LIB_FILE="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh" node -e '
+const fs = require("node:fs");
+const grab = (src, re) => { const m = src.match(re); return m ? m[1] : null; };
+const members = raw => raw === null ? null
+  : raw.split(",").map(x => x.trim()).filter(Boolean)
+      .map(x => x.replace(/^["]|["]$/g, "")).sort().join(",");
+const hook = fs.readFileSync(process.env.HOOK_FILE, "utf8");
+const lib = fs.readFileSync(process.env.LIB_FILE, "utf8");
+const a = members(grab(hook, /const RENDERABLE = \[([^\]]*)\]/));
+const b = members(grab(lib, /^const STAGES = new Set\(\[([^\]]*)\]\)/m));
+if (a === null || b === null) { process.stdout.write("unextractable"); }
+else if (a !== b) { process.stdout.write("differ"); }
+else { process.stdout.write("equal " + a.split(",").length); }
+' 2>/dev/null)"
+case "$S24_OUT" in
+  equal\ *) check "S24 the delegate stage allowlist matches the set the state library owns ($S24_OUT)" PASS ;;
+  *) check "S24 the delegate stage allowlist matches the set the state library owns (out=${S24_OUT:-none})" FAIL ;;
+esac
+
+# S25 — the team-review operation-key recognizer is a hand-copy of a shape the state
+# library mints, and the divergence direction is fail-OPEN: a real header the pattern
+# stops matching is treated as absent, so the bound envelope is accepted. Pin the
+# recognizer against the producer rather than against a fixture that hardcodes the
+# current spelling.
+S25_OUT="$(HOOK_FILE="$HOOK" LIB_FILE="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh" node -e '
+const fs = require("node:fs");
+const crypto = require("node:crypto");
+const hook = fs.readFileSync(process.env.HOOK_FILE, "utf8");
+const lib = fs.readFileSync(process.env.LIB_FILE, "utf8");
+const m = hook.match(/const REVIEW_OP_RE = (\/\^AUTOPILOT-REVIEW-OP:[^\n]*?\/);/);
+if (!m) { process.stdout.write("no-recognizer"); }
+else if (!/team-review:v1:\$\{digest\(/.test(lib)) { process.stdout.write("no-producer"); }
+else {
+  // new RegExp, never eval: the capture is source text, and a constructor can only
+  // ever build a pattern where eval could call a function spliced into the literal.
+  const re = new RegExp(m[1].slice(1, -1));
+  const sha = crypto.createHash("sha256").update("x").digest("hex");
+  const key = "team-review:v1:" + sha;
+  const line = "AUTOPILOT-REVIEW-OP: key=" + key + " head=" + sha;
+  // The NEGATIVE arm is what a prefix regression needs: a pattern relaxed back to
+  // a bare prefix accepts a quoted column-0 placeholder and vetoes a live envelope,
+  // which is the defect the recognizer shape exists to prevent.
+  const placeholder = "AUTOPILOT-REVIEW-OP: key=<operationKey> head=<headSha>";
+  if (!re.test(line)) { process.stdout.write("rejects-a-real-key"); }
+  else if (re.test(placeholder)) { process.stdout.write("accepts-a-placeholder"); }
+  else { process.stdout.write("matches"); }
+}
+' 2>/dev/null)"
+if [ "$S25_OUT" = matches ]; then
+  check "S25 the review-op recognizer accepts a key of the shape the state library actually mints" PASS
+else
+  check "S25 the review-op recognizer accepts a key of the shape the state library actually mints (out=${S25_OUT:-none})" FAIL
+fi
+
+# S26 — the delegate re-spells the RETURN STAGE vocabulary THREE times: in STAGE_RE,
+# in the PREFLIGHT_CONTEXT validator over s.autopilotReturnStage, and in the claim
+# validator over binding.returnStage. The state library
+# owns it as RETURN_STAGES. CONVERGE was dropped from one of those copies once and
+# restored; nothing compared them. An end-to-end CONVERGE fixture was tried first
+# and REMOVED: the run record cannot reach that return stage the short way, because
+# PLAN_APPROVED sets tdd.returnStage to GATES unconditionally and TDD_STARTED only
+# CHECKS the field rather than assigning from the payload, so a --tdd-begin naming
+# CONVERGE is refused before any chain is armed. Driving the machine honestly needs
+# a full GATES pass plus CONVERGENCE_FAILED, which belongs in the state-machine
+# suite and not in the tail of the suite this repository already records as the
+# first thing a Windows timeout truncates. The set comparison catches the same
+# regression — a member silently dropped from either delegate copy.
+S26_OUT="$(HOOK_FILE="$HOOK" LIB_FILE="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh" node -e '
+const fs = require("node:fs");
+const hook = fs.readFileSync(process.env.HOOK_FILE, "utf8");
+const lib = fs.readFileSync(process.env.LIB_FILE, "utf8");
+const sorted = list => list.slice().sort().join(",");
+const owner = lib.match(/^const RETURN_STAGES = new Set\(\[([^\]]*)\]\)/m);
+const reAlt = hook.match(/const STAGE_RE = \/\^AUTOPILOT-STAGE: \(([^)]*)\)\$\//);
+const listing = hook.match(/\[("GATES"[^\]]*)\]\s*\n?\s*\.includes\(binding\.returnStage\)/);
+const preflight = hook.match(/\[("GATES"[^\]]*)\]\s*\n?\s*\.includes\(s\.autopilotReturnStage\)/);
+if (!owner || !reAlt || !listing || !preflight) { process.stdout.write("unextractable"); }
+else {
+  const strip = raw => raw.split(",").map(x => x.trim()).filter(Boolean)
+    .map(x => x.replace(/^["]|["]$/g, ""));
+  const a = sorted(strip(owner[1]));
+  const b = sorted(reAlt[1].split("|").map(x => x.trim()).filter(Boolean));
+  const c = sorted(strip(listing[1]));
+  const d = sorted(strip(preflight[1]));
+  if (a !== b) { process.stdout.write("stage-re-differs"); }
+  else if (a !== c) { process.stdout.write("claim-list-differs"); }
+  else if (a !== d) { process.stdout.write("preflight-list-differs"); }
+  else { process.stdout.write("equal " + a.split(",").length); }
+}
+' 2>/dev/null)"
+case "$S26_OUT" in
+  equal\ *) check "S26 all three delegate return-stage copies match RETURN_STAGES in the state library ($S26_OUT)" PASS ;;
+  *) check "S26 all three delegate return-stage copies match RETURN_STAGES in the state library (out=${S26_OUT:-none})" FAIL ;;
+esac
+
+# S21 pins the RAW half of the raw-versus-distinct split, which nothing asserted:
+# the standalone spoof arm counts OCCURRENCES so that a doubled quotation stays
+# ignored, while the bound arm collapses to distinct lines. Every other envelope
+# fixture in the tree carries each line exactly once, so rewriting completeTriple
+# onto the distinct lists kept every suite green while reintroducing the defect —
+# a doubled caller line would move from ignored to refused-as-a-spoof, and that
+# decline rotates a live ticket. The prompt below repeats ONE caller line and is
+# otherwise a complete regex-valid triple: under raw counting callers.length is 2,
+# completeTriple is false, and the claim proceeds; under distinct counting it is 1
+# and the hook would refuse. This check is placed LAST because it arms a session.
+start_session doubled-caller-standalone
+S21="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S21"
+log --tdd-complete --session "$S21"
+S21_TICKET="$(issue_ticket "$S21")"
+OUT="$(run_hook "$S21" zensu:code-reviewer "PRE-MERGED FINDINGS (fan-out)
+REVIEW-TICKET: $S21_TICKET
+ZENSU-DELEGATED-CALLER: autopilot
+ZENSU-DELEGATED-CALLER: autopilot
+AUTOPILOT-BINDING: run=run-fixture attempt=1 chain=chain-fixture
+AUTOPILOT-STAGE: GATES")"
+[ -n "$S21_TICKET" ] \
+  && [ "$(ticket_consumed "$S21")" = "true" ] \
+  && ! printf '%s' "$OUT" | grep -qF -- "was NOT recorded against this session's review chain" \
+  && check "S21 a doubled caller line on a standalone chain is ignored, not read as a second caller" PASS \
+  || check "S21 a doubled caller line on a standalone chain is ignored, not read as a second caller" FAIL
 
 echo "----"
 echo "test-post-review-tdd-scope: $PASS PASS / $FAIL FAIL"

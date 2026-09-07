@@ -225,7 +225,7 @@ fi
 if [ "$SIBLING_READY" != true ]; then
   check "O2c sibling-worktree fixture unavailable" FAIL
 elif printf '%s' "$OUT2C" | grep -qF -- '--code-review-done' \
-  && ! printf '%s' "$OUT2C" | grep -qF 'ZENSU_AUTOPILOT'; then
+  && ! printf '%s' "$OUT2C" | grep -qF 'ZENSU-DELEGATED-CALLER:'; then
   check "O2c a foreign run holding a sibling tree leaves this chain unbound and permits the claim" PASS
 else
   check "O2c sibling-tree claim must proceed (out='$OUT2C')" FAIL
