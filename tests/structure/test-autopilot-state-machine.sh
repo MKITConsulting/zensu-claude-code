@@ -1847,9 +1847,17 @@ fi
 # so the only way to act on it was to go and read the run document — the same
 # go-and-find-out-yourself this refusal exists to replace. Both literals are
 # asserted, so naming one and forgetting the other fails.
+# The needles are rendered NATIVELY. The worker canonicalizes every path argument with
+# `realpathSync.native` before it builds this message, so on win32 the refusal carries
+# `C:\Users\...\worktrees\rb` while a bare `$REL_P/...` is the Git-Bash spelling — the
+# grep then never matches and the check fails against a message that is already correct.
+# That is the MSYS/native split this repository documents for the source-write gate,
+# reached here through a fixture rather than through the product.
+W16A_RB="$(native_directory "$REL_P/.claude/worktrees/rb" 2>/dev/null || printf '%s' "$REL_P/.claude/worktrees/rb")"
+W16A_RA="$(native_directory "$REL_P/.claude/worktrees/ra" 2>/dev/null || printf '%s' "$REL_P/.claude/worktrees/ra")"
 if [ "$REL_READY" = true ] \
-  && grep -qF "$REL_P/.claude/worktrees/rb" "$REL_SCOPE_ERR" \
-  && grep -qF "$REL_P/.claude/worktrees/ra" "$REL_SCOPE_ERR"; then
+  && grep -qF "$W16A_RB" "$REL_SCOPE_ERR" \
+  && grep -qF "$W16A_RA" "$REL_SCOPE_ERR"; then
   check "W16a the exit-6 refusal names the caller's tree and the tree the run holds" PASS
 else
   check "W16a exit-6 must name both trees (got: $(cat "$REL_SCOPE_ERR" 2>/dev/null))" FAIL
@@ -2033,10 +2041,18 @@ if [ "$REL_READY" = true ]; then
   # public verb's own probe discards the worker's stderr (`2>/dev/null`) so a lease
   # diagnostic cannot reach a caller that is capturing stdout, so capturing it from
   # the verb yields an empty string no matter what the worker said.
-  HOLD_WORKER_FAULT_ERR="$( _autopilot_node read-workspace "$REL_P/.zensu/state" "$REL_P" \
-    "$REL_P/.claude/worktrees/rf" 2>&1 >/dev/null )"
-  _autopilot_node read-workspace "$REL_P/.zensu/state" "$REL_P" \
-    "$REL_P/.claude/worktrees/rf" >/dev/null 2>&1
+  # NATIVE spellings. `_autopilot_node` converts the operands its `path_indexes` list
+  # names, but the WORKSPACE root is deliberately not among them (a worktree may live
+  # outside the project), so the shell wrappers render it themselves — and a direct
+  # worker call like this one must do the same. Passing the Git-Bash spelling made the
+  # worker refuse with `workspace root is unavailable` on win32, long before it reached
+  # the record-shape guard this check is about.
+  W31K_STATE="$(native_directory "$REL_P/.zensu/state" 2>/dev/null || printf '%s' "$REL_P/.zensu/state")"
+  W31K_ROOT="$(native_directory "$REL_P" 2>/dev/null || printf '%s' "$REL_P")"
+  W31K_WS="$(native_directory "$REL_P/.claude/worktrees/rf" 2>/dev/null || printf '%s' "$REL_P/.claude/worktrees/rf")"
+  HOLD_WORKER_FAULT_ERR="$( _autopilot_node read-workspace "$W31K_STATE" "$W31K_ROOT" \
+    "$W31K_WS" 2>&1 >/dev/null )"
+  _autopilot_node read-workspace "$W31K_STATE" "$W31K_ROOT" "$W31K_WS" >/dev/null 2>&1
   HOLD_WORKER_FAULT_RC=$?
   rm -f "$HOLD_FAULT_FILE"
 fi
