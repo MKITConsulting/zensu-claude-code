@@ -44,15 +44,24 @@
 # byte, `lstat`s and requires a regular file BEFORE opening, opens `O_NOFOLLOW|O_NONBLOCK`
 # and re-checks by `fstat` — so a FIFO, device or symlink at that path cannot block. What
 # the unbounded arm actually leaves is a REGULAR FILE ON STALLED STORAGE, and a git status
-# that hangs. Availability only, no adversary in the loop. Worth knowing beside it: the
-# Stop hook's own registration in `hooks.json` carries no `timeout` key, unlike several
-# sibling entries, so nothing in this repository bounds the hook either and whether the
-# host applies a default is unverified.
+# that hangs. Availability only, no adversary in the loop.
+#
+# WHAT THE UNBOUNDED ARM COSTS DIFFERS PER CALLER, and stating only the Stop-path answer
+# understated it. On the Stop path it costs a DIAGNOSTIC: the Stop hook's own registration
+# in `hooks.json` carries no `timeout` key, unlike several sibling entries, so nothing in
+# this repository bounds that hook either and whether the host applies a default is
+# unverified. On the zen-mode path the registration DOES carry a bound — `"timeout": 20` —
+# so the host kills the whole hook instead, and that turn loses the entire injected
+# directive: the mode contract, the anchor AND the in-band `zen off` escape, which is the
+# only way out of the mode. Same arm, two very different prices.
 zensu_run_bounded() {
   # `"$@"` with zero positional parameters aborts under `set -u` on bash 3.2, which is
   # macOS's /bin/bash and this script's interpreter — so a future argument-less call would
-  # kill the Stop hook rather than no-op. Latent today (both call sites pass a command),
-  # guarded so the property does not depend on every later caller remembering.
+  # kill the hook rather than no-op. Latent today — every live call site passes a command —
+  # and guarded so the property does not depend on every later caller remembering. Do not
+  # restate that parenthetical as "both call sites": there are SIX, in THREE files, and the
+  # ladder's own header says the census is a criterion rather than a count for exactly this
+  # reason. Say "every live call site", which stays true as callers are added.
   # NON-ZERO, not 0. Returning success with no output would leave the transcript caller's
   # `probe` empty, which its `case` classifies as `unparseable` — a verdict the scope-sentence
   # allowlist WITHHOLDS on — where a failure leaves the initializer's `unprobed`, which is the
