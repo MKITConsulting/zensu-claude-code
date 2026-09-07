@@ -3573,12 +3573,21 @@ out of the recommended slot, which the repository's own best-solution-first rule
 **Coupled sites that move together:** both heredocs in `hooks/plan-approved-delegate.sh` — never
 one alone, and the file must keep exactly TWO `cat <<'JSON'` blocks, because the parity helper in
 `tests/structure/test-tdd-vanilla-mode.sh` refuses a third; that helper's `P1` needle list, which
-now carries the route literals and is what makes a one-sided edit fail, plus `P1b`/`P1b2`, which
-compare the mode-INDEPENDENT option spans byte-for-byte because presence alone cannot see an
-option ADDED to one branch; `D9pre` and `D9`-`D16` in
+now carries the route literals and is what makes a one-sided edit fail, plus `P1b`-`P1b7`, which
+compare mode-INDEPENDENT spans byte-for-byte because presence alone cannot see an
+option ADDED to one branch — `P1b`/`P1b2` the option list, `P1b3`/`P1b4` the two dispatch arms, and
+`P1b5`/`P1b6`/`P1b7` the SAFETY clauses (the `(C) OVERRIDES (B)` sentence, the refusal-first block,
+and the `(B)`-internal non-interactive removal guard). The safety half was unpinned until a
+mutation probe measured it: on a ONE-SIDED reword of heredoc 1, `P1b` through `P1b4` all reported
+PASS while `P1b5` and `P1b7` failed, and a separate reword of the refusal block failed `P1b6`.
+Then `D9pre` and `D9`-`D26` in
 `tests/structure/test-plan-approved-delegate.sh`, which force the strict branch as well because
 the default config resolves to the vanilla one and a single capture would grade only one heredoc;
-and `BNR2c` in the vanilla-mode suite, which is the ONLY check that reaches the banner tips —
+that suite now also grades three carriers OUTSIDE the hook — `D18`-`D20` the local-only eval in
+`evals/plan-approval-hook/` (which nothing graded before, so its two ABSENCE assertions reported the
+outward-facing safety property green whenever the driven session died), and `D26` the SessionStart
+banner's route tip against `autoTdd`; and `BNR2c` in the vanilla-mode suite, which is the ONLY check
+that reaches the banner tips —
 `P8c` greps the whole banner file and is satisfied by its pre-existing Skills line; and
 `hooks/user-prompt-tdd-reminder.sh` — BOTH heredocs, TDD arms only — together with `P2`, because
 §Language requires these phrase lists in lockstep and this chain edited that hook's arms; that hook
@@ -3587,16 +3596,20 @@ this chain created: `skills/pilot/SKILL.md`'s "Do NOT Use For" bullet, which PAR
 prerequisite and points at both heredocs as its verbatim carrier, saying to change both together —
 the direction matters, because a maintainer who greps that skill for the option text finds nothing
 and could "repair" it by pasting in a third copy, and the marker instruction in
-`skills/autopilot/SKILL.md`, which is a hand-copied PAIR (Phase 0.C and Phase 0.D) that must move
-together and is pinned against nothing.
+`skills/autopilot/SKILL.md`, which USED to be a hand-copied PAIR (the durable-begin site and Phase
+0.D). It is no longer a pair: the durable-begin site is a pure pointer plus a pre-begin
+single-marker precondition, Phase 0.D holds the one authoritative statement, and `D12`-`D15` in
+`tests/structure/test-autopilot-durable-skill.sh` pin exactly that — so "pinned against nothing" no
+longer holds for it.
 
-**UNPINNED, named rather than left to be discovered — this paragraph covers the Phase 0.D ORDERING
-alone. The two entries that follow it are notes ABOUT roster members, not roster members
-themselves — `test-autopilot-durable-skill.sh` greps the `--autopilot-begin` PRESENCE but not its
-position, and `test-pilot-skill.sh` is a pin rather than a pinned carrier.**
-The Phase 0.D ordering this roster promotes to a loop-prevention contract is enforced by nothing. `tests/structure/test-autopilot-durable-skill.sh`
-greps the `--autopilot-begin` literal, which cannot see position, so reversing the order relative to
-`ExitPlanMode` passes every check. Check it by hand until an offset comparison lands.
+**The Phase 0.D ORDERING is now PINNED, and the two entries that follow are notes ABOUT roster
+members rather than roster members themselves.** `D14` in
+`tests/structure/test-autopilot-durable-skill.sh` compares LINE NUMBERS: the single-marker
+precondition must appear before the `--autopilot-begin --run "$RUN_ID"` command, so reversing the
+two now fails rather than passing every check. The paragraph this replaces said the ordering was
+"enforced by nothing" and told the reader to check it by hand; that was true until the offset
+comparison landed. What `D14` does NOT see is the ordering relative to `ExitPlanMode` itself —
+that half is still by hand.
 `skills/autopilot/SKILL.md` Phase 0.D is on this roster for a reason that is easy to miss: it
 requires `--autopilot-begin` to run IMMEDIATELY BEFORE `ExitPlanMode`, and that ordering is the
 only thing putting the durable run at `PLANNING` in time for Autopilot's OWN approval to land on
@@ -3605,8 +3618,18 @@ and Autopilot's planning gate falls through to the standalone directive, which n
 four-route question with `/zensu:autopilot` still on it. That approval loop did not exist before
 this change made the route reachable from this gate. `tests/structure/test-pilot-skill.sh` is on
 it for a blunter reason: its `P8d` graded a WHOLE-FILE `/zensu:pilot` count against a literal,
-so the primer edit turned a CI-run suite red; it is a per-heredoc presence assertion now, because
-bumping the literal would only re-arm the same trap on the next primer edit.
+so the primer edit turned a CI-run suite red. It is a per-heredoc assertion now, and the needle is
+the FULL route clause (`PILOT_ROUTE_CLAUSE`) rather than the bare skill name: both primer heredocs
+carry a pre-existing "runs via the `/zensu:pilot` conductor skill" sentence, so a bare needle stayed
+satisfied after the four-route clause was deleted from BOTH heredocs — measured on a mutant, where
+the bare needle reported PASS and the clause needle FAILED.
+
+**The strip rule and its target document are pinned too, by `D12`/`D13` in that same suite.** `D12`
+requires exactly one authoritative statement (`Strip the comment, never the whole line`) and zero
+restatements, so the hand-copied PAIR this section used to name cannot come back; `D13` requires the
+rule to name the plan CONTENT and forbids the retired `COMMENT from the incoming` spelling, which
+targeted a document the gate never reads. `D15` requires the minted-then-refused wedge to name
+`/zensu:autopilot-release` beside it.
 
 Operator-facing accounts, and the list is longer than the obvious two because every surface that
 described the old yes/no question became false at once: the `plan-approved-delegate.sh`,
@@ -3620,7 +3643,25 @@ to Use" bullet in `skills/tdd/SKILL.md`; the two interception paragraphs in
 this change" paragraph in `README.md` — BOTH the "Just this change" paragraph and the "A plan you approve
 first" bullet; `evals/plan-approval-hook/` — whose expect script must
 select the Zensu-workflow option BY LABEL, never by the ordinal `1`, since the ordering rule can
-put the branch-pushing route in slot 1 and a blind ordinal would take it unattended; and THIS
+put the branch-pushing route in slot 1 and a blind ordinal would take it unattended, and whose
+RUNNER must keep three properties the PR #295 review round added: every ABSENCE assertion is gated
+on a positive one (`T1.5` on `T1.0`, `T2.5` on `T2.0`, `T2.7`/`T2.8` on `T2.4`) because an empty
+transcript satisfies an absence — and note that `T2.5` inlines its own `grep` instead of calling
+`not_contains`, which is exactly how it escaped the first sweep, so the rule is "every absence
+assertion", never "every `not_contains` call"; the subprocess watchdog is a `timeout` -> `gtimeout`
+-> unwrapped ladder that ANNOUNCES the unwrapped case AFTER the header write, because that write is
+a truncating `tee` and a NOTE emitted above it is erased on exactly the host the fallback exists
+for — base macOS ships neither binary, the runner required neither, so both `timeout N …`
+invocations exited 127, `|| true` swallowed it, and the checks
+that read as the outward-facing safety evidence went green over a session that never started; and
+`T2.6` grades two rendered option LABELS rather than the bare phrase `implement directly`, which a
+model narrating its intent also emits. That eval is local-only and never runs in CI, which is why
+`D18`-`D20` and `D28` in `tests/structure/test-plan-approved-delegate.sh` grade the runner and its
+README from a suite that does — and `D18` binds the ` FAIL` VERDICT token on each not-graded arm,
+because a pin on the label alone let the arms be rewritten to `PASS` with the check still green.
+Every needle into that README must be LINE-LOCAL: the file wraps, and a `grep -qF` over a phrase
+that crosses a break can never match, which turned `D20` red for a claim that was in fact present;
+and THIS
 file's own §"Autopilot Run Scope" `OWNER_SESSION_MISMATCH` bullet, which describes what a foreign
 caller is asked when it falls through to the standalone policy.
 
@@ -3634,10 +3675,18 @@ rather than test-detected. Not done here because it re-authors `P1`/`P1b`/`P1b2`
 "exactly TWO `cat <<'JSON'` blocks" contract and turns the byte-for-byte pins tautological — a real
 control traded for a structural guarantee, which is a decision to take deliberately rather than
 mid-chain. **The pin-coverage claim above is SCOPED, because an earlier revision overstated it:**
-the span comparisons reach the option list and, since round 4, the two dispatch arms — everything
+the span comparisons reach the option list, the two dispatch arms and — since the PR #295 review
+round — the three safety clauses (`P1b5`-`P1b7`); everything
 else in a multi-kilobyte directive is covered by presence needles plus `D13`, so the pins are far
 from tautological today. **TRIGGER:** take the seam at the next round that has to re-author
 `P1`/`P1b`/`P1b2` anyway, or at a fourth one-sided defect in the duplicated span.
+
+**The TRIGGER was evaluated in the PR #295 review round and deliberately NOT fired.** That round
+ADDED to `P1`'s needle list and added `P1b5`-`P1b7`; it re-authored neither `P1b` nor `P1b2`, and it
+introduced no one-sided defect in the duplicated span — every directive edit landed through a
+`replace_all` over an anchor verified to occur exactly twice, or as an explicit pair for the one
+mode-DEPENDENT clause (`run TDD instead` / `run the workflow instead`). Recorded so the next reader
+does not have to re-derive whether the condition was met: it was checked, and it was not.
 
 **Deliberately NOT changed — the QUESTION SHAPE, not the file:** `hooks/user-prompt-tdd-reminder.sh`
 keeps its yes/no question. Its TDD arms WERE edited by this chain (intent-judging, arm order, the
@@ -3675,7 +3724,20 @@ only implement locally, while the new one adds a route that pushes a branch and 
 request and one that mutates external Zensu state. Neither prerequisite is verified before its option
 is shown, so a user without a tracked feature can still pick Pilot and learn the answer from that
 skill's own Phase 0. And `/zensu:doctor` carries no row for this question, so a project that set
-`autoTdd:false` sees no signal that the route choice is switched off.
+`autoTdd:false` still sees no doctor signal that the route choice is switched off — the
+SessionStart banner now says so, which is a user-visible surface rather than a diagnostic row, and
+the review round that added it did not close the doctor half.
+
+**The (C) safety property has NO behavioural coverage, and this is the largest named gap.** Both
+cases in `evals/plan-approval-hook/` drive an INTERACTIVE session via expect, while clause (C)
+governs a run with no human to answer — so the feature's only behavioural surface does not touch
+the half of its own contract that keeps an unattended run out of a branch-pushing route. A headless
+`claude -p` case is the obvious addition and was NOT implemented: the hook fires only on
+ExitPlanMode SUCCESS, that README already records `claude -p --permission-mode plan` auto-denying
+and firing no hook, and whether any other headless permission mode can produce an APPROVED
+ExitPlanMode was not established. Until it is, clause (C) is covered by `D13` alone, which grades
+the emitted directive rather than a model's behaviour — and `D13`'s own detection of an unattended
+escalation is a spelling list, not a property, in BOTH the `(B)` and the tail slice.
 
 ## Host-Refused Reviewer Spawn (`hooks/lib/reviewer-spawn-denial-v1.js`)
 

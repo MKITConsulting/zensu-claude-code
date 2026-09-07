@@ -155,6 +155,7 @@ fi
 # primer edit. Extract the two heredocs and require the name in each.
 # An unchecked mktemp -d leaves the variable empty and awk then writes the blocks
 # to /b1 and /b2, which the guard below would grade as if they were the primer.
+PILOT_ROUTE_CLAUSE='/zensu:pilot (a guided pipeline for a feature already tracked in Zensu)'
 PRIMER_BLOCK_DIR="$(mktemp -d)" || PRIMER_BLOCK_DIR=""
 if [ -z "$PRIMER_BLOCK_DIR" ]; then
   check "P8d primer heredoc extraction (mktemp -d failed)" FAIL
@@ -166,10 +167,17 @@ awk -v dir="$PRIMER_BLOCK_DIR" '{
 }' "$PLUGIN_DIR/hooks/session-start-primer.sh" 2>/dev/null
 if [ ! -f "$PRIMER_BLOCK_DIR/b1" ] || [ ! -f "$PRIMER_BLOCK_DIR/b2" ] || [ -f "$PRIMER_BLOCK_DIR/b3" ]; then
   check "P8d primer heredoc extraction found the expected two mode variants" FAIL
-elif grep -qF '/zensu:pilot' "$PRIMER_BLOCK_DIR/b1" && grep -qF '/zensu:pilot' "$PRIMER_BLOCK_DIR/b2"; then
-  check "P8d primer mentions /zensu:pilot in BOTH mode variants (strict + vanilla)" PASS
+# The needle is the FULL route clause, never the bare skill name: both primer
+# heredocs also carry a pre-existing "runs via the /zensu:pilot conductor skill"
+# sentence, so a bare `/zensu:pilot` needle stays satisfied after the four-route
+# clause is deleted from BOTH heredocs. Measured against this tree with the clause
+# stripped: the bare needle reports PASS, the clause needle FAILS. The sibling
+# suite tests/structure/test-tdd-vanilla-mode.sh (P3, BNR2c) uses full clauses for
+# the same measured reason; a bare needle here would encode the opposite guidance.
+elif grep -qF "$PILOT_ROUTE_CLAUSE" "$PRIMER_BLOCK_DIR/b1" && grep -qF "$PILOT_ROUTE_CLAUSE" "$PRIMER_BLOCK_DIR/b2"; then
+  check "P8d primer carries the full /zensu:pilot route clause in BOTH mode variants (strict + vanilla)" PASS
 else
-  check "P8d primer /zensu:pilot missing from a mode variant" FAIL
+  check "P8d primer /zensu:pilot route clause missing from a mode variant" FAIL
 fi
 rm -rf "$PRIMER_BLOCK_DIR"
 fi

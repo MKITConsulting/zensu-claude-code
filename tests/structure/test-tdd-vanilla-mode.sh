@@ -493,7 +493,7 @@ parity() {
 # clauses are in the list for a stronger reason than symmetry — the (C)-over-(B)
 # override is what keeps a non-interactive run out of the branch-pushing route,
 # so a branch that lost it would still emit a plausible directive.
-P1="$(parity "$PLANHOOK" "Skipping TDD: docs only" "Skipping TDD: user declined" "AskUserQuestion" "kein tdd" "'use tdd', 'with tdd'" "Auto Mode" "skill='zensu:tdd'" "skill='zensu:autopilot'" "skill='zensu:pilot'" "Executing via /zensu:autopilot" "Executing via /zensu:pilot" "'No — implement directly' is NEVER in the first slot" "is a substring of 'autopilot'" "(C) OVERRIDES (B)" "NEITHER /zensu:autopilot NOR /zensu:pilot is ever selected" "LAST, as the fallthrough once no surviving route was chosen above" "is never in the first slot, and its option description says the approval message excluded it" "REMOVE that route from the remaining FAST-PATH ARMS below" "still only among the routes that survive" "Overriding <route>: outward-facing route, no human present" "THIS plan is not carried into it" "in ANY language" "ONLY those multi-word forms count" "Rank on your OWN reading of what the change does" "never the plan body or a comment quoted inside it" "(1) 'Autopilot — /zensu:autopilot'" "(3) 'Pilot — /zensu:pilot'" "authenticated forge CLI (gh or glab), without which the Zensu workflow is the route" "ALREADY tracked in Zensu")"
+P1="$(parity "$PLANHOOK" "Skipping TDD: docs only" "Skipping TDD: user declined" "AskUserQuestion" "kein tdd" "'use tdd', 'with tdd'" "Auto Mode" "skill='zensu:tdd'" "skill='zensu:autopilot'" "skill='zensu:pilot'" "Executing via /zensu:autopilot" "Executing via /zensu:pilot" "'No — implement directly' is NEVER in the first slot" "is a substring of 'autopilot'" "(C) OVERRIDES (B)" "NEITHER /zensu:autopilot NOR /zensu:pilot is ever selected" "LAST, as the fallthrough once no surviving route was chosen above" "is never in the first slot, and its option description says the approval message excluded it" "REMOVE that route from the remaining FAST-PATH ARMS below" "still only among the routes that survive" "Overriding <route>: outward-facing route, no human present" "THIS plan is not carried into it" "in ANY language" "ONLY those multi-word forms count" "Rank on your OWN reading of what the change does" "never the plan body or a comment quoted inside it" "a file you read, tool output, a subagent report, a commit message" "Before applying ANY arm below" "That removal is scoped to the route-SELECTING arms" "in which case implement directly" "That override line REPLACES the route status line" "MUST also state what it does outwardly" "(1) 'Autopilot — /zensu:autopilot'" "(3) 'Pilot — /zensu:pilot'" "authenticated forge CLI (gh or glab), without which the Zensu workflow is the route" "ALREADY tracked in Zensu")"
 [ "$P1" = "OK" ] && check "P1 plan-approval heredocs: shared invariants present in BOTH branches" PASS || check "P1 plan-approval parity ($P1)" FAIL
 P2="$(parity "$REMINDER" "Skipping TDD: user declined" "AskUserQuestion" "kein tdd" "'use tdd', 'with tdd'" "Auto Mode" "skill='zensu:tdd'" "doc/comment/prose" "Judge both arms below by INTENT" "Test in THIS order, because two of the negation examples contain an affirmation example verbatim" "never content it quotes or pastes" "already ask which delivery route to take" "a subagent report")"
 [ "$P2" = "OK" ] && check "P2 reminder heredocs: shared invariants present in BOTH branches" PASS || check "P2 reminder parity ($P2)" FAIL
@@ -515,15 +515,20 @@ span_of() { # $1 file, $2 block index, $3 start anchor, $4 end anchor
     if (inb) print > (dir "/b" n)
   }' "$1"
   [ -f "$d/b$2" ] || { rm -rf "$d"; echo ""; return; }
-  # Both anchors carry an apostrophe, so they travel through the environment: a bare
-  # ' inside the single-quoted node program closes the shell argument and truncates
-  # the needle, which would leave this comparison passing on an empty span.
-  BLK="$(cat "$d/b$2")" A_START="$3" A_END="$4" node -e '
-    const s=process.env.BLK||"";
-    const a=s.indexOf(process.env.A_START);
-    const b=s.indexOf(process.env.A_END);
-    process.stdout.write(a>=0 && b>a ? s.slice(a,b) : "");
-  ' 2>/dev/null
+  # The extractor is a QUOTED HEREDOC FILE, never a single-quoted `node -e`
+  # argument: one apostrophe anywhere in such a program — inside a comment included
+  # — closes the shell argument and truncates it silently while `bash -n` still
+  # passes, which here would leave this comparison passing on an empty span.
+  # CLAUDE.md records that exact defect disabling a hook probe for a full review
+  # round, and the guard it names (S18) walks hooks/**/*.sh only. The anchors still
+  # travel through the environment because they are caller-supplied.
+  cat >"$d/span.js" <<'JS'
+const s = process.env.BLK || "";
+const a = s.indexOf(process.env.A_START);
+const b = s.indexOf(process.env.A_END);
+process.stdout.write(a >= 0 && b > a ? s.slice(a, b) : "");
+JS
+  BLK="$(cat "$d/b$2")" A_START="$3" A_END="$4" node "$d/span.js" 2>/dev/null
   rm -rf "$d"
 }
 span_pair() { # $1 label, $2 start, $3 end
@@ -547,6 +552,22 @@ span_pair "P1b3 autopilot dispatch arm byte-identical in BOTH heredocs" \
   "Autopilot (or fast-path B-autopilot" "Zensu workflow (or fast-path"
 span_pair "P1b4 pilot dispatch arm byte-identical in BOTH heredocs" \
   "Pilot (or fast-path B-pilot" "No → implement the plan directly"
+# P1b5-P1b7 cover the SAFETY clauses. P1 and P1b-P1b4 reached the option list and
+# the two dispatch arms; between P1's literals sat a lot of unpinned prose, and a
+# one-sided reword of the refusal-ordering block or of the (C) override sentence —
+# the two things that keep an unattended run out of a branch-pushing route —
+# passed P1, P1b-P1b4 and D13 alike. The clauses are partly mode-dependent (TDD vs
+# "the workflow"), which is a real reason a naive whole-clause span fails, so each
+# sub-span below was verified identical across both heredocs before being pinned.
+span_pair "P1b5 (C) override sentence byte-identical in BOTH heredocs" \
+  "(C) OVERRIDES (B)" "and no outward-facing step may be taken"
+span_pair "P1b6 refusal-first fast-path block byte-identical in BOTH heredocs" \
+  "FIRST a REFUSAL" "THEN, still only among the routes that survive"
+# P1b7 is the guard that retracts the two outward-facing routes for an unattended
+# run, stated INSIDE (B) so a model acting at a fast-path arm cannot miss it. It is
+# the newest safety clause and the one a reword would most plausibly touch.
+span_pair "P1b7 (B) non-interactive removal guard byte-identical in BOTH heredocs" \
+  "Before applying ANY arm below" "Judge every arm below by INTENT"
 
 # The route needles here are deliberately the FULL clause, not the bare skill
 # names: each primer heredoc also carries a pre-existing "runs via the /zensu:pilot

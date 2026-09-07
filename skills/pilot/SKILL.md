@@ -67,7 +67,11 @@ Slash form: `/zensu:pilot [<feature>]`.
   and invoke `/zensu:bootstrap` or `/zensu:ghost-scan` there.
 - Ad-hoc coding without a tracked feature — use `/zensu:tdd` directly. The
   plan-approval delivery-route question states this prerequisite verbatim in its own
-  option text (`hooks/plan-approved-delegate.sh`, BOTH heredocs); change both together.
+  option text, alongside a disclosure of what this skill does outwardly — it commits,
+  opens a pull request and mutates tracked feature state in Zensu, each behind a
+  confirmation (`hooks/plan-approved-delegate.sh`, BOTH heredocs); change all of it
+  together. That disclosure is the consent half of the same fact the plan gate's
+  clause (C) cites when it bars this route from an unattended run.
 
 ## The loop contract
 
