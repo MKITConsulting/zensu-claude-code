@@ -563,3 +563,11 @@ export -f zensu_bind_hook_session zensu_bind_model_session zensu_emit_hook_sessi
   zensu_session_incompatible_runtime zensu_session_incompatible_runtime_model \
   zensu_session_pruned_plugin_root zensu_session_pruned_plugin_root_model \
   zensu_session_key zensu_resolve_session_id zensu_resolve_project_dir 2>/dev/null || true
+
+# THE ZEN-MODE STATE PREDICATES MOVED OUT, to `hooks/lib/zensu-zen-shared.sh`.
+# `zen_marker_active`, `zen_marker_shape_fault` and `zen_path_untraversable` have
+# exactly two callers, both zen-mode, while THIS file is the Session Control
+# binding library that every stateful gate sources — so a syntax fault introduced
+# here while editing a presentation feature failed every PreToolUse Bash gate
+# CLOSED. Blast radius is the whole argument; the reasoning that used to sit here
+# travelled with the code.

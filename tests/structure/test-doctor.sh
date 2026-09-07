@@ -665,6 +665,26 @@ if [ -n "$STRAND_BEFORE" ] && [ "$STRAND_BEFORE" = "$STRAND_AFTER" ]; then
 else
   check "P1mr a report run leaves every workflow document byte- and mtime-identical" FAIL
 fi
+# P1mp2 — the ONE executed test of the branch that decides ZDOC_BINDING for every
+# session. It must run HERE, while `strand-open` is still the bound session: the
+# three restores below hand the environment back and there is no bound fixture after
+# them. The toolchain verdicts are injected so this costs a bind and a render rather
+# than a CLI probe sweep; ZDOC_BINDING is deliberately NOT injected, because it is
+# the value under test.
+STRAND_E2E="$(ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github \
+  ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_CONFIG="" bash "$HELPER" 2>/dev/null)"
+case "$STRAND_E2E" in
+  *'binding: '*) ;;
+  *) check "P1mp2 — VACUOUS: the wrapper produced no binding row at all" FAIL ;;
+esac
+case "$STRAND_E2E" in
+  *'binding: this session has a valid Session Control record'*)
+    check "P1mp2 the real wrapper binds this fixture end to end" PASS ;;
+  *)
+    check "P1mp2 the real wrapper binds this fixture end to end (got: $(printf '%s' "$STRAND_E2E" | grep -i 'binding:' | head -1))" FAIL ;;
+esac
+
 export CLAUDE_PROJECT_DIR="$STRAND_SAVED_PROJECT"
 export CLAUDE_PLUGIN_DATA="$STRAND_SAVED_DATA"
 export CLAUDE_CODE_SESSION_ID="$STRAND_SAVED_SESSION"
@@ -682,25 +702,33 @@ unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
 # body — source, bind, four shape guards, tab-joined printf — reproduces that with
 # rc=0 and a correct pair when run inline.
 #
-# What could NOT be made to work is the wrapper END TO END: `bash "$HELPER"` with
-# that same environment still reports `binding: this session has no valid Session
-# Control record`. The cause is NOT the comment inside the substitution (removing it
+# What could not be made to work, for a while, was the wrapper END TO END: `bash
+# "$HELPER"` against that same environment reported `binding: this session has no
+# valid Session Control record`. Two candidate causes were ruled out here and both
+# rulings still stand — it is NOT the comment inside the substitution (removing it
 # changes nothing, measured) and NOT the shape guards (each exits 0, which would
-# still yield `bound`). It was not established, so the end-to-end check was removed
-# rather than left failing or weakened until it passed.
+# still yield `bound`). The cause was recorded as unestablished and the end-to-end
+# check was removed rather than weakened until it passed.
 #
-# CONSEQUENCE, stated so nobody reads the greps as more than they are: the branch
-# that PRODUCES the pair, and that decides ZDOC_BINDING for EVERY session, has no
-# executed coverage. A grep sees the `|| exit 0` literal; it cannot see the
-# composite exit status, the TAB split, or the pair reaching the renderer.
-# The structural pin must therefore cover the shape-failure DIRECTION, not only the
-# shape — flipping `|| exit 0` to `|| exit 1` makes the elif fail, so a genuinely
-# bound session is reported `unbound`, and a pattern that stopped at the regex would
-# still match.
+# IT IS ESTABLISHED NOW, and the end-to-end check below is restored because the
+# defect it kept failing on is fixed. The wrapper carried its control-byte case arm
+# in the bare `pattern)` form, and bash 3.2 — which macOS ships as /bin/bash — reads
+# that `)` as the end of the enclosing `$( )`. The body truncated mid-`case`, the
+# subshell died of a syntax error, the assignment returned 1, and this elif took its
+# else. That also explains why the inline reproduction disagreed: run inline there is
+# no substitution to truncate. The fix is the POSIX-optional leading paren; see
+# CLAUDE.md "bash 3.2 Command-Substitution Truncation" and
+# tests/structure/test-bash32-portability.sh, which guards the shape tree-wide.
+#
+# The greps below are still worth their lines, and one property is theirs alone: the
+# shape-failure DIRECTION. Flipping `|| exit 0` to `|| exit 1` makes the elif fail, so
+# a genuinely bound session is reported `unbound`, and a pattern that stopped at the
+# regex would still match. P1mp2 covers the composite exit status, the TAB split and
+# the pair reaching the renderer, which no grep can see.
 if grep -qF 'elif ZDOC_SESSION_PAIR="$(' "$HELPER" \
   && grep -qE 'ZENSU_SESSION_KEY:-\}" =~ \^scv1_\[a-f0-9\]\{64\}\$ \]\] \|\| exit 0' "$HELPER" \
   && grep -qE '\[ -d "\$\{ZENSU_PROJECT_ROOT:-\}" \] \|\| exit 0' "$HELPER" \
-  && grep -qF 'case "${ZENSU_PROJECT_ROOT:-}" in *[[:cntrl:]]*) exit 0' "$HELPER" \
+  && grep -qF 'case "${ZENSU_PROJECT_ROOT:-}" in (*[[:cntrl:]]*) exit 0' "$HELPER" \
   && grep -qE '^export ZDOC_ZENSU' "$HELPER" \
   && grep -qF 'ZDOC_SESSION_KEY ZDOC_SESSION_PROJECT_ROOT' "$HELPER"; then
   check "P1mp the wrapper shape-guards the bound pair, drops on failure, and exports it" PASS
