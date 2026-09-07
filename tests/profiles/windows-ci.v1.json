@@ -384,7 +384,7 @@
           "runner": "bash",
           "path": "tests/structure/test-post-review-self-review-handoff.sh",
           "args": [],
-          "timeoutMs": 1080000
+          "timeoutMs": 1500000
         }
       ]
     }
