@@ -251,7 +251,7 @@ if [ "${1:-}" = api ]; then
           fs.writeFileSync(fd,JSON.stringify(value));fs.fsyncSync(fd);fs.closeSync(fd);fd=undefined;
           fs.renameSync(tmp,process.env.REPLY_FILE);
         }catch(_){if(fd!==undefined){try{fs.closeSync(fd);}catch(__){}}try{fs.unlinkSync(tmp);}catch(__){}fail();}
-        process.stdout.write('{"id":778}');
+        process.stdout.write(JSON.stringify({id:778}));
       '
       exit 0
       ;;

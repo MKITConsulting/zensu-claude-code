@@ -1,5 +1,25 @@
 #!/bin/bash
 # The code-reviewer completion hook is scoped to one live TDD review chain.
+#
+# WINDOWS POSITION, stated because a reviewer read the absence of a
+# `windows-ci.v1.json` entry as "never runs on Windows", which is false in one
+# direction and true in the other. This suite IS in `ciStructureTests`
+# (`tests/profiles/promptfoo-local-only.v1.json`), which is the inventory
+# `tests/run-windows-safety-shard.js` builds the weekly `Windows full safety
+# suite` run from, so every check here does execute on windows-latest once a
+# week. It is NOT in `tests/profiles/windows-ci.v1.json`, so none of them can
+# block a pull request: a Windows-only regression surfaces at the next weekly
+# run rather than on the PR that caused it. That omission is the house rule
+# rather than an oversight — every shard in that profile carries a
+# `profileTimeoutMs` of 1800000 and several already report job durations at or
+# above it, so an entry has to be paid for by moving another suite off, and this
+# suite is one of the expensive ones (283 s and 410 s across two macOS runs on
+# 2026-09-07, both on a loaded machine, so read the pair as a range rather than a
+# figure, and
+# the one recorded macOS-to-Windows ratio in this tree is about 9x). Say "runs
+# weekly, does not block a PR"; never say "covered" and never say "never runs on
+# Windows". Closing it properly means a shard of its own, on a MEASURED cap from
+# a green weekly run — not an estimate, and not a suite displaced to make room.
 set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd -P)"
@@ -681,88 +701,139 @@ else
   check "S17 both CLOSE_PASS arms carry the convergence full-suite instruction (hits: $CLOSE_PASS_HITS)" FAIL
 fi
 
-# S18 — every `node -e '...'` program under `hooks/` must be valid JavaScript.
+# S18 — every `node -e '...'` program under `hooks/` and `tests/structure/` must
+# be valid JavaScript.
 # A bash single-quoted string ends at the FIRST apostrophe, so one inside the JS —
 # including inside a `//` comment, which is where it is invisible — silently
 # truncates the program. `bash -n` still passes, because the remainder re-quotes
 # into valid shell, and the assignment lands EMPTY. That shipped in THIS hook: a
 # comment reading "this repo's own test files" disabled the consume-intent probe
 # outright, and only a behavioural case caught it. The scan is TREE-WIDE on
-# purpose — the defect class is, and 190 programs were otherwise unguarded — so a
-# failure here can name a file this suite is not otherwise about: fix the
-# apostrophe in the file the message names, not this suite.
+# purpose — the defect class is — so a failure here can name a file this suite is
+# not otherwise about: fix the apostrophe in the file the message names, not this
+# suite.
+#
+# `tests/structure/` was OUT of scope for one release on a measurement that read
+# five reports there as extraction artifacts. FOUR of them were: a needle quoted
+# inside a shell `#` comment, two programs opened in the nested
+# backslash-apostrophe spelling, and one whose closing delimiter is the middle
+# apostrophe of the quote-doublequote idiom sitting inside a JS comment. The
+# FIFTH was a real shipped defect this scan then caught —
+# `tests/structure/test-autopilot-full-cycle.sh` handed `process.stdout.write` an
+# object literal rather than a string, so its `gh api ... /replies` stub threw
+# `ERR_INVALID_ARG_TYPE` and never reached the `exit 0` below it. So the revert
+# was justified by a measurement that mis-classified a defect as noise. The
+# extractor below understands all three spellings, which is what the reverted
+# widening lacked.
 S18_OUT="$(SCAN_ROOT="$PLUGIN_DIR" node -e '
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
-// hooks/ ONLY, and that bound is MEASURED rather than conservative. Widening the
-// walk to tests/structure/ was tried and reverted: it scanned 1001 candidates and
-// reported five that do not parse, all of them extraction artifacts rather than
-// defects — a prose COMMENT quoting the literal, the nested `node -e ` + backslash
-// quoting the suites use inside command substitutions, and a program whose closing
-// delimiter the extractor mis-locates. The extractor assumes the plain opening and
-// closing convention hooks/ follows; the suites do not follow it, so a scan there
-// reports false positives, which is worse than no scan. Widening this needs an
-// extractor that understands the other quoting shapes, not a second root.
-const root = path.join(process.env.SCAN_ROOT, "hooks");
-const files = [];
-(function walk(d) {
-  for (const e of fs.readdirSync(d, {withFileTypes: true})) {
-    const p = path.join(d, e.name);
-    if (e.isDirectory()) walk(p);
-    else if (e.isFile() && e.name.endsWith(".sh")) files.push(p);
-  }
-})(root);
-const NEEDLE = "node -e " + String.fromCharCode(39);
-let scanned = 0;
+const Q = String.fromCharCode(39);
+const DQ = String.fromCharCode(34);
+const NEEDLE = "node -e " + Q;
+// Two shell spellings escape an apostrophe inside a single-quoted string:
+// backslash-quote, and the quote-doublequote concatenation. Both are built out
+// of Q so that this program itself stays apostrophe-free and cannot be the
+// defect it looks for.
+const OPEN_NESTED = "\\" + Q + Q;
+const ESC_BACKSLASH = Q + "\\" + Q + Q;
+const ESC_CONCAT = Q + DQ + Q + DQ + Q;
+const ROOTS = ["hooks", "tests/structure"];
+const counts = [];
 const broken = [];
-for (const f of files) {
-  const src = fs.readFileSync(f, "utf8");
-  let i = 0;
-  while ((i = src.indexOf(NEEDLE, i)) !== -1) {
-    const start = i + NEEDLE.length;
-    const end = src.indexOf(String.fromCharCode(39), start);
-    if (end === -1) break;
-    scanned++;
-    const line = src.slice(0, start).split("\n").length;
-    const rel = path.relative(process.env.SCAN_ROOT, f) + ":" + line;
-    // TWO tests, because a parse check alone is not enough: a truncation whose
-    // prefix happens to be complete JavaScript compiles clean and ships dead.
-    // The structural half is what covers that — after a real closing quote the
-    // shell continues with a redirect, a pipe, a paren, an operator or a
-    // newline, never with a word character, which is exactly what an apostrophe
-    // inside prose leaves behind (`repo` + `s own test files`).
-    try { new vm.Script(src.slice(start, end)); }
-    catch (e) { broken.push(rel + " (does not parse)"); }
-    if (/[A-Za-z0-9_]/.test(src.charAt(end + 1))) {
-      broken.push(rel + " (word character after the closing quote)");
+for (const relRoot of ROOTS) {
+  const files = [];
+  (function walk(d) {
+    for (const e of fs.readdirSync(d, {withFileTypes: true})) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.isFile() && e.name.endsWith(".sh")) files.push(p);
     }
-    // THIRD test, and the one that targets the observed shape most directly: a
-    // program whose last line is a `//` comment ended inside that comment. A
-    // truncation there is complete JavaScript whenever the apostrophe happens to
-    // sit at brace depth 0, so neither of the two tests above sees it.
-    const lastLine = src.slice(start, end).split("\n").pop().trim();
-    if (lastLine.startsWith("//")) {
-      broken.push(rel + " (program ends inside a line comment)");
+  })(path.join(process.env.SCAN_ROOT, relRoot));
+  let scanned = 0;
+  for (const f of files) {
+    const src = fs.readFileSync(f, "utf8");
+    let i = 0;
+    while ((i = src.indexOf(NEEDLE, i)) !== -1) {
+      let start = i + NEEDLE.length;
+      // A needle on a shell comment line is prose about a program, never one.
+      const lineStart = src.lastIndexOf("\n", i) + 1;
+      if (/^\s*#/.test(src.slice(lineStart, i))) { i = start; continue; }
+      let closer = Q;
+      if (src.startsWith(OPEN_NESTED, start)) {
+        start += OPEN_NESTED.length;
+        closer = ESC_BACKSLASH;
+      }
+      let out = "";
+      let p = start;
+      let end = -1;
+      for (;;) {
+        const q = src.indexOf(closer, p);
+        if (q === -1) break;
+        // An escaped apostrophe is NOT the end of the program: it closes the
+        // shell string, emits one apostrophe and reopens, so the JS receives a
+        // literal Q and the scan must continue past it.
+        if (closer === Q && src.startsWith(ESC_CONCAT, q)) {
+          out += src.slice(p, q) + Q;
+          p = q + ESC_CONCAT.length;
+          continue;
+        }
+        if (closer === Q && src.startsWith(ESC_BACKSLASH, q)) {
+          out += src.slice(p, q) + Q;
+          p = q + ESC_BACKSLASH.length;
+          continue;
+        }
+        out += src.slice(p, q);
+        end = q;
+        break;
+      }
+      if (end === -1) break;
+      scanned++;
+      const line = src.slice(0, start).split("\n").length;
+      const name = path.relative(process.env.SCAN_ROOT, f) + ":" + line;
+      // THREE tests, because a parse check alone is not enough: a truncation
+      // whose prefix happens to be complete JavaScript compiles clean and ships
+      // dead. The structural half covers that — after a real closing quote the
+      // shell continues with a redirect, a pipe, a paren, an operator or a
+      // newline, never with a word character, which is exactly what an
+      // apostrophe inside prose leaves behind. The third targets the observed
+      // shape most directly: a program whose last line is a line comment ended
+      // inside that comment, which is complete JavaScript whenever the
+      // apostrophe happens to sit at brace depth 0.
+      try { new vm.Script(out); }
+      catch (e) { broken.push(name + " (does not parse)"); }
+      if (/[A-Za-z0-9_]/.test(src.charAt(end + closer.length))) {
+        broken.push(name + " (word character after the closing quote)");
+      }
+      const lastLine = out.split("\n").pop().trim();
+      if (lastLine.startsWith("//")) {
+        broken.push(name + " (program ends inside a line comment)");
+      }
+      i = end + closer.length;
     }
-    i = end + 1;
   }
+  counts.push(scanned);
 }
-process.stdout.write(scanned + " " + broken.join(","));
+process.stdout.write(counts[0] + " " + counts[1] + " " + broken.join(","));
 ' 2>/dev/null)"
-S18_SCANNED="${S18_OUT%% *}"
-S18_BROKEN="${S18_OUT#* }"
+S18_HOOKS="${S18_OUT%% *}"
+S18_REST="${S18_OUT#* }"
+S18_TESTS="${S18_REST%% *}"
+S18_BROKEN="${S18_REST#* }"
 # A scanner that finds nothing is indistinguishable from a scanner that ran over
-# nothing, so the count is a floor as well as a report.
-case "$S18_SCANNED" in ''|*[!0-9]*) S18_SCANNED=0 ;; esac
-# The floor is close to the measured population (190 on 2026-09-02), not a round
-# number well below it: at 100 a regression that stopped descending into
-# `hooks/lib/` — which holds the large majority of these programs — would still
-# clear the guard and report a clean scan over a fraction of the tree.
-if [ "$S18_SCANNED" -ge 180 ] && [ -z "$S18_BROKEN" ]; then
-  check "S18 every node -e program under hooks/ is valid JS (scanned: $S18_SCANNED)" PASS
+# nothing, so each count is a floor as well as a report. The floors are PER ROOT
+# rather than one sum: `tests/structure/` outnumbers `hooks/` more than four to
+# one, so a single combined floor would still be cleared by a regression that
+# stopped descending into `hooks/lib/` entirely. Each floor sits close to its
+# measured population (193 and 839 on 2026-09-07), not at a round number well
+# below it.
+case "$S18_HOOKS" in ''|*[!0-9]*) S18_HOOKS=0 ;; esac
+case "$S18_TESTS" in ''|*[!0-9]*) S18_TESTS=0 ;; esac
+if [ "$S18_HOOKS" -ge 180 ] && [ "$S18_TESTS" -ge 800 ] && [ -z "$S18_BROKEN" ]; then
+  check "S18 every node -e program under hooks/ and tests/structure/ is valid JS (scanned: $S18_HOOKS + $S18_TESTS)" PASS
 else
-  check "S18 every node -e program under hooks/ is valid JS — an apostrophe truncates the bash single-quoted string (scanned: $S18_SCANNED, broken: ${S18_BROKEN:-none})" FAIL
+  check "S18 every node -e program under hooks/ and tests/structure/ is valid JS — an apostrophe truncates the bash single-quoted string (scanned: $S18_HOOKS + $S18_TESTS, broken: ${S18_BROKEN:-none})" FAIL
 fi
 
 # S19 — the bound branch used to open with a guard testing `PREFLIGHT_CONTEXT`
@@ -911,37 +982,65 @@ esac
 
 # S25 — the team-review operation-key recognizer is a hand-copy of a shape the state
 # library mints, and the divergence direction is fail-OPEN: a real header the pattern
-# stops matching is treated as absent, so the bound envelope is accepted. Pin the
-# recognizer against the producer rather than against a fixture that hardcodes the
-# current spelling.
-S25_OUT="$(HOOK_FILE="$HOOK" LIB_FILE="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh" node -e '
+# stops matching is treated as absent, so the bound envelope is accepted. This pin
+# EXECUTES the producer rather than comparing spellings: it sources
+# `autopilot_team_review_operation_key` out of the state library, mints a real key,
+# and requires the recognizer to accept the header built from it. A source needle
+# alone was the weaker form and was the finding that put this here — it anchored on
+# the module-scope JS template and never named the shell verb the delegate is
+# actually downstream of, so a rename there would have passed.
+#
+# The recognizer is the EXACT producer shape now, not a character class. It used to
+# read `key=[A-Za-z0-9][A-Za-z0-9_.:-]{2,191}`, which is wider than anything either
+# producer can mint and narrower than the `nonEmpty(payload.operationKey, 256)` the
+# worker validator accepts — a domain no side owned. Both exact-shape checks the
+# library already carries spell it `^team-review:v1:[a-f0-9]{64}$`, so this is the
+# third copy of one shape rather than a fourth domain, and the arm below rejects a
+# key no producer can mint.
+S25_KEY="$(CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" bash -c '
+  set -eu
+  . "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-autopilot-state.sh"
+  autopilot_team_review_operation_key "s25-run" "0123456789abcdef0123456789abcdef01234567"
+' 2>/dev/null)" || S25_KEY=""
+S25_OUT="$(HOOK_FILE="$HOOK" LIB_FILE="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh" \
+  PRODUCED_KEY="$S25_KEY" node -e '
 const fs = require("node:fs");
-const crypto = require("node:crypto");
 const hook = fs.readFileSync(process.env.HOOK_FILE, "utf8");
 const lib = fs.readFileSync(process.env.LIB_FILE, "utf8");
+const key = process.env.PRODUCED_KEY;
 const m = hook.match(/const REVIEW_OP_RE = (\/\^AUTOPILOT-REVIEW-OP:[^\n]*?\/);/);
-if (!m) { process.stdout.write("no-recognizer"); }
-else if (!/team-review:v1:\$\{digest\(/.test(lib)) { process.stdout.write("no-producer"); }
+if (!key) { process.stdout.write("no-produced-key"); }
+else if (!m) { process.stdout.write("no-recognizer"); }
+// BOTH producers must still be named. The key above came from the shell verb, so
+// that half is proven by construction; the JS template is the one a run under the
+// worker mints from, and anchoring on either alone lets a rename of the other pass.
+else if (lib.indexOf("autopilot_team_review_operation_key()") < 0) {
+  process.stdout.write("no-shell-producer");
+}
+else if (!/team-review:v1:\$\{digest\(/.test(lib)) { process.stdout.write("no-js-producer"); }
 else {
   // new RegExp, never eval: the capture is source text, and a constructor can only
   // ever build a pattern where eval could call a function spliced into the literal.
   const re = new RegExp(m[1].slice(1, -1));
-  const sha = crypto.createHash("sha256").update("x").digest("hex");
-  const key = "team-review:v1:" + sha;
+  const sha = "0123456789abcdef0123456789abcdef01234567";
   const line = "AUTOPILOT-REVIEW-OP: key=" + key + " head=" + sha;
-  // The NEGATIVE arm is what a prefix regression needs: a pattern relaxed back to
+  // The NEGATIVE arms are what a prefix regression needs. A pattern relaxed back to
   // a bare prefix accepts a quoted column-0 placeholder and vetoes a live envelope,
-  // which is the defect the recognizer shape exists to prevent.
+  // which is the defect the recognizer shape exists to prevent; a pattern relaxed
+  // back to a character class accepts a key neither producer can mint, which is the
+  // domain the tightening removed.
   const placeholder = "AUTOPILOT-REVIEW-OP: key=<operationKey> head=<headSha>";
+  const unmintable = "AUTOPILOT-REVIEW-OP: key=" + "z".repeat(79) + " head=" + sha;
   if (!re.test(line)) { process.stdout.write("rejects-a-real-key"); }
   else if (re.test(placeholder)) { process.stdout.write("accepts-a-placeholder"); }
+  else if (re.test(unmintable)) { process.stdout.write("accepts-an-unmintable-key"); }
   else { process.stdout.write("matches"); }
 }
 ' 2>/dev/null)"
 if [ "$S25_OUT" = matches ]; then
-  check "S25 the review-op recognizer accepts a key of the shape the state library actually mints" PASS
+  check "S25 the review-op recognizer accepts a key the state library actually minted, and only that shape" PASS
 else
-  check "S25 the review-op recognizer accepts a key of the shape the state library actually mints (out=${S25_OUT:-none})" FAIL
+  check "S25 the review-op recognizer accepts a key the state library actually minted, and only that shape (out=${S25_OUT:-none})" FAIL
 fi
 
 # S26 — the delegate re-spells the RETURN STAGE vocabulary THREE times: in STAGE_RE,

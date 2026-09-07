@@ -1866,7 +1866,10 @@ declaration `const STAGES = new Set([`, `S25` reads the `team-review:v1:${digest
 and `S26` reads `const RETURN_STAGES = new Set([`. All three are in
 `tests/structure/test-post-review-tdd-scope.sh`, and they exist because the delegate hook
 hand-copies those vocabularies. Reformatting any of the three declarations — or renaming
-`digest` — reddens that suite. §"Ticket-Keyed Review Consumption" carries the consumer-side
+`digest` — reddens that suite. `S25` additionally SOURCES this library and CALLS
+`autopilot_team_review_operation_key`, so it is the one of the three that stops being a source
+scan: renaming that verb, or making the library unsourceable from a bare `bash -c`, reddens it
+too, and its `no-shell-producer` / `no-produced-key` arms are what name which half broke. §"Ticket-Keyed Review Consumption" carries the consumer-side
 account.
 
 Moving together with the scope: `_autopilot_owner_key`, `_autopilot_active_path`,
@@ -4138,7 +4141,7 @@ EMPTY and the feature is silently gone. A comment reading `this repo's own test 
 the consume-intent probe of this hook OUTRIGHT for a full review round, through five reviewers
 and a green `bash -n`; only a behavioural case caught it, and only because the probe's absence
 changed a decline. `S18` in `tests/structure/test-post-review-tdd-scope.sh` guards every such program under
-`hooks/` with THREE tests, and a parse check alone would not have been enough: a truncation
+`hooks/` AND `tests/structure/` with THREE tests, and a parse check alone would not have been enough: a truncation
 whose prefix happens to be complete JavaScript compiles clean and ships dead, which the
 historical instance avoided only because its apostrophe sat inside two unclosed blocks. So it
 (a) compiles the slice with `new vm.Script`, (b) refuses a WORD CHARACTER immediately after the
@@ -4259,9 +4262,14 @@ delegate's `RENDERABLE` stage array against `const STAGES` in `hooks/lib/zensu-a
 by MEMBER SET: `S7u` pins the library's two copies against each other but reads only that one
 file, so it is structurally blind to this third one, and a stage added there and not here makes
 the standalone decline render `observed: unreported` for a stage the record named. `S25` pins the
-`REVIEW_OP_RE` recognizer against the shape `teamReviewOperationKey` actually mints, because that
-divergence is fail-OPEN: a real header the pattern stops matching is read as absent and the bound
-envelope is accepted. `S26` compares the delegate's THREE return-stage copies — `STAGE_RE`'s alternation, the
+`REVIEW_OP_RE` recognizer against a key the state library REALLY MINTED — it sources
+`autopilot_team_review_operation_key` and feeds its output to the captured pattern, rather than
+comparing spellings — because that divergence is fail-OPEN: a real header the pattern stops
+matching is read as absent and the bound envelope is accepted. The recognizer is the EXACT
+producer shape now (`key=team-review:v1:[a-f0-9]{64}`), which is the third copy of a shape the
+library already spells twice itself; the character class it replaced owned a domain neither side
+did, wider than anything either producer mints and narrower than the `nonEmpty(operationKey, 256)`
+the worker validator takes. `S26` compares the delegate's THREE return-stage copies — `STAGE_RE`'s alternation, the
 `PREFLIGHT_CONTEXT` validator over `s.autopilotReturnStage`, and the claim validator over
 `binding.returnStage` — against `RETURN_STAGES` in that same library.
 An end-to-end `CONVERGE` fixture was tried instead and REMOVED: `PLAN_APPROVED` sets

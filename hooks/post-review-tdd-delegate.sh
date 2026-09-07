@@ -387,7 +387,13 @@ PROMPT_ENVELOPE_FIELDS="$(EXPECT_BOUND="$EXPECT_BOUND" node -e '
       // reviewOps needs the same shape discipline as its siblings: judged by
       // PREFIX alone, any quoted placeholder starting with the literal vetoed the
       // whole envelope, and the skill files carry exactly such placeholders.
-      const REVIEW_OP_RE = /^AUTOPILOT-REVIEW-OP: key=[A-Za-z0-9][A-Za-z0-9_.:-]{2,191} head=[a-fA-F0-9]{7,64}$/;
+      // The pattern is the EXACT producer shape rather than a permissive class.
+      // Both producers mint `team-review:v1:` plus 64 lowercase hex, and the state
+      // library already spells that shape twice itself; the character class this
+      // replaced accepted a domain no producer can reach, sitting between the two
+      // producers and the still wider `nonEmpty(operationKey, 256)` the worker
+      // validator takes. S25 pins it against a key the shell producer really minted.
+      const REVIEW_OP_RE = /^AUTOPILOT-REVIEW-OP: key=team-review:v1:[a-f0-9]{64} head=[a-fA-F0-9]{7,64}$/;
       const realReviewOps = distinct(reviewOps).filter(line => REVIEW_OP_RE.test(line));
       if (!boundTriple || realReviewOps.length !== 0) process.exit(3);
       process.stdout.write(["bound", dBinding[1], dBinding[2], dBinding[3], dStage[1]].join("\t"));

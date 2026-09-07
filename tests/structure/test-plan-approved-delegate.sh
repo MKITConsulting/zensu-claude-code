@@ -263,6 +263,47 @@ else
   check "D13 route-clause property ($D13V)" FAIL
 fi
 
+# D17 — placed with D13 because it grades the same clause; the number is the next
+# free one. Clause (C) WITHDRAWS a route the user named, and the status line it
+# prescribes has to record that. The LAST arm of (B) prescribes the plain
+# `Skipping TDD: user opted out`, which reports the TDD refusal and nothing else,
+# so a transcript carrying only that cannot distinguish a user who declined TDD
+# from one whose named route this hook removed for being non-interactive. The two
+# lines must therefore both exist and differ, and the qualified one must sit
+# INSIDE clause (C) rather than replacing the plain one everywhere.
+withdrawal_verdict() {
+  printf '%s' "$1" | N_PLAIN="Skipping TDD: user opted out" \
+    N_QUALIFIED="Skipping TDD: user opted out; route withdrawn for a non-interactive run" node -e '
+    let s=""; process.stdin.on("data",c=>s+=c);
+    process.stdin.on("end",()=>{
+      const ic=s.indexOf("(C) you are running non-interactively");
+      const ie=s.indexOf("In EVERY OTHER case");
+      if(ic<0||ie<=ic){ process.stdout.write("SLICE_FAILED"); return; }
+      const c=s.slice(ic,ie);
+      const plain=process.env.N_PLAIN, qualified=process.env.N_QUALIFIED;
+      const countOf=(hay,needle)=>hay.split(needle).length-1;
+      const bad=[];
+      // The plain literal is a PREFIX of the qualified one, so its count covers both
+      // sites: one in the LAST arm of (B), one inside clause (C). NOTE: no apostrophe
+      // may appear anywhere in this program, comments included — a bare one closes the
+      // surrounding single-quoted shell argument and truncates it.
+      const np=countOf(s,plain), nq=countOf(s,qualified);
+      if(np!==2) bad.push("plain-sites="+np);
+      if(nq!==1) bad.push("qualified-sites="+nq);
+      if(countOf(c,qualified)!==1) bad.push("qualified-not-in-clause-c");
+      if(countOf(c,plain)!==1) bad.push("clause-c-plain-sites="+countOf(c,plain));
+      process.stdout.write(bad.length?bad.join(","):"OK");
+    });' 2>/dev/null
+}
+D17V="$(withdrawal_verdict "$OUT")/$(withdrawal_verdict "$OUT_STRICT")"
+if [ "$BRANCHES_DISTINCT" != yes ]; then
+  check "D17 (not graded: D9pre failed, the two branches are not distinct)" FAIL
+elif [ "$D17V" = "OK/OK" ]; then
+  check "D17 clause (C) records the withdrawal in its own status line, distinct from the plain opt-out" PASS
+else
+  check "D17 clause (C) withdrawal status line ($D17V)" FAIL
+fi
+
 # D14/D15 the two prerequisite disclosures (AC-004, AC-005). A route offered
 # without its cost is a dead end the user only discovers inside the skill.
 both_have "D14 autopilot option states its planning gate and forge-CLI cost" \
