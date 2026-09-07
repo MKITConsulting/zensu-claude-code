@@ -3,11 +3,20 @@
 # Shared watchdog ladder for hook-path child processes.
 #
 # THE one watchdog ladder. It serves the children that read OUTSIDE
-# this process — the `git status` the turn counter runs and the transcript read the
-# refused-spawn probe runs — which is the criterion, not a count. State it that way:
+# this process — the `git status` the turn counter runs, the transcript read the
+# refused-spawn probe runs, and the children `hooks/user-prompt-zen-mode.sh` spawns
+# — which is the criterion, not a count. State it that way:
 # CLAUDE.md records that an enumeration of the `node` children on this path was written
 # as "a THIRD child" and was already short by one on the day it landed, and the two the
 # lease adds carry no watchdog on ANY host and are named there as a known gap.
+#
+# NOT EVERY CALLER IS ON THE STOP PATH, and that is worth naming rather than folding
+# into the list above, because it changes what the deadline below is. The zen-mode
+# children fire on EVERY prompt of a zen-mode session, so this constant bounds a
+# per-prompt caller as well as the two end-of-turn ones — one deadline across all of
+# them, and `Z45` in `tests/structure/test-zen-mode.sh` is what holds it under that
+# hook's own registration timeout. Raising it is therefore no longer a Stop-path-only
+# decision.
 #
 # The two Stop-path children it was created for used to carry SEPARATE ladders, so the arm added to one was missing
 # from the other — and the one left behind was the transcript read, whose own comment

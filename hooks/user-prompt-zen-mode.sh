@@ -442,20 +442,28 @@ if ZEN_SHAPE_WHY="$(zen_marker_shape_fault "$ZEN_ROOT/.zensu" "$ZEN_STATE_DIR" "
   echo "zensu: zen-mode resolved OFF ($ZEN_SHAPE_WHY)" >&2
   exit 0
 elif [ -f "$MARKER" ]; then
-  # ACCEPTED RESIDUAL, stated here rather than left to be rediscovered: this
-  # `grep` RE-RESOLVES the path after the three type tests above, follows a
-  # symlink, and opens a FIFO BLOCKING. The persistent plant is closed by the
-  # arms above; the RACED one is not - anything with write access to
+  # ACCEPTED RESIDUAL, stated here rather than left to be rediscovered, and named
+  # at the HIGHER-TRAFFIC of the two marker reads: this one runs on every prompt
+  # while the mode is on, where the off-write read-back runs only on an off phrase.
+  # `zen_marker_active` RE-RESOLVES the path after the three type tests above,
+  # follows a symlink, and opens a FIFO BLOCKING. The persistent plant is closed by
+  # the arms above; the RACED one is not - anything with write access to
   # `.zensu/state/`, which is in-session by construction, can rename a FIFO or a
   # symlink into place between the tests and this read. What bounds it is the
   # `"timeout": 20` on the registration, and losing that turn loses the whole
-  # directive. The strongest fix is a single bounded child that opens with
-  # `O_NOFOLLOW|O_NONBLOCK` and reads from that descriptor, which is what
-  # `readRegularFileSnapshot` already does one directory over - deliberately NOT
-  # taken, because it puts a `node` spawn on the hottest path in the plugin, on
-  # every prompt of every zen-mode session, which is the cost the state-directory
-  # probe above exists to remove. The symlink variant leaks a read rather than a
-  # write: the off-phrase writer re-`lstat`s and refuses a non-regular target.
+  # directive. DELIBERATELY NOT wrapped in `zensu_run_bounded` either: this is the
+  # hottest path in the plugin, and the shared ladder's own deadline plus the child
+  # would approach the registration timeout rather than stay under it. The strongest
+  # fix is a single bounded child that opens with `O_NOFOLLOW|O_NONBLOCK` and reads
+  # from that descriptor, which is what `readRegularFileSnapshot` already does one
+  # directory over - deliberately NOT taken, because it puts a `node` spawn on that
+  # same hottest path, on every prompt of every zen-mode session, which is the cost
+  # the state-directory probe above exists to remove. What HAS been taken is the
+  # other half: the marker primitive is now shared with
+  # `hooks/lib/zensu-zen-mode.sh` through `hooks/lib/zensu-zen-shared.sh`, so the
+  # two readers can no longer disagree about what an active marker is. The symlink
+  # variant leaks a read rather than a write: the off-phrase writer re-`lstat`s and
+  # refuses a non-regular target.
   zen_marker_active "$MARKER" || exit 0
 elif zen_path_untraversable "$MARKER" "$ZEN_ROOT"; then
   # A NON-TRAVERSABLE state directory is not an absent marker. Every test above
