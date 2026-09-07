@@ -194,8 +194,8 @@ fi
 # that have a path to report: orphaned-project-root and
 # orphaned-project-root+incompatible-runtime.
 ZDOC_BINDING_PROJECT_ROOT="${ZDOC_BINDING_PROJECT_ROOT:-}"
-# Same contract for the version pair: empty for every verdict except the two that
-# have versions to name — incompatible-runtime and
+# Same contract for the version pair: empty for every verdict except the three
+# that have versions to name — incompatible-runtime, pruned-plugin-root and
 # orphaned-project-root+incompatible-runtime.
 ZDOC_BINDING_RECORDED_VERSION="${ZDOC_BINDING_RECORDED_VERSION:-}"
 ZDOC_BINDING_EXECUTING_VERSION="${ZDOC_BINDING_EXECUTING_VERSION:-}"
@@ -204,6 +204,38 @@ ZDOC_BINDING_EXECUTING_VERSION="${ZDOC_BINDING_EXECUTING_VERSION:-}"
 # is still there" and "nobody could tell", which the row must not blur.
 ZDOC_BINDING_ROOT_UNKNOWN="${ZDOC_BINDING_ROOT_UNKNOWN:-}"
 ZDOC_BINDING_VERSIONS=""
+# ONE implementation of the version-pair probe the binding ladder below runs for
+# each named state. The two copies were identical but for the predicate name —
+# same subshell, same source guard, same shape guard, same `printf '\t'`
+# degradation — roughly fourteen duplicated lines that also added a fifth level of
+# `else` nesting. Taking the predicate as an argument lets the ladder be a flat
+# loop, which puts the "the order between the two is immaterial" claim into the
+# code instead of leaving it in a comment.
+#
+# The shape guard MUST stay INSIDE this subshell, where the library that owns
+# ZENSU_SAFE_VERSION_RE is sourced. The doctor's own shell never sees that
+# variable, and under `set -u` referencing it out here aborts the branch and
+# silently falls back to the wrong row — the one part of the duplicated block that
+# was subtle, and the one an extraction must not lose. A pair failing the shape is
+# DROPPED rather than printed: it prints a lone separator, so the caller still
+# names the state and the renderer simply omits the two numbers. Losing two
+# numbers is a worse message, never a wrong one.
+zdoc_version_pair() {  # $1 = model predicate function name
+  (
+    # shellcheck disable=SC1090
+    source "$DIR/zensu-session.sh" >/dev/null 2>&1 || exit 1
+    zdoc_pair="$("$1")" || exit 1
+    [ -n "$zdoc_pair" ] || exit 1
+    zdoc_recorded="${zdoc_pair%%$'\t'*}"
+    zdoc_executing="${zdoc_pair##*$'\t'}"
+    if [[ "$zdoc_recorded" =~ $ZENSU_SAFE_VERSION_RE ]] \
+      && [[ "$zdoc_executing" =~ $ZENSU_SAFE_VERSION_RE ]]; then
+      printf '%s\t%s' "$zdoc_recorded" "$zdoc_executing"
+    else
+      printf '\t'
+    fi
+  )
+}
 # The session's own key and the RECORD's own project anchor, so the renderer can
 # tell a chain THIS session owns from one it does not, and can refuse the
 # comparison when the record and the caller disagree about which project it is.
@@ -324,42 +356,36 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
     if [ -n "$ZDOC_BINDING_PROJECT_ROOT" ]; then
       ZDOC_BINDING=orphaned-project-root
     else
-      # The SECOND narrow follow-up, asked only after the orphan question and
-      # never before it — for ORDERING, not for coverage. The orphan probe answers
-      # only for a COMPATIBLE lineage: it re-applies servesRecordedRuntime, which
-      # an incompatible lineage fails, so it CANNOT produce the combined verdict
-      # and a record that is both orphaned and lineage-incompatible falls through
-      # to here. The third probe below is what recovers that case. An earlier
-      # wording said the vanished root "wins" over the lineage question, which
-      # reads as though probe 1 already covered the combination — a maintainer
-      # trusting it could drop probe 3 and silently lose the whole diagnosis.
-      # The shape guard runs INSIDE this subshell, where the library that owns
-      # ZENSU_SAFE_VERSION_RE is sourced — the doctor's own shell never sees that
-      # variable, and under `set -u` referencing it out here aborts the branch and
-      # silently falls back to the wrong row. Same guard the deny path applies,
-      # and for the same reason: a manifest version is validated only by
-      # requireText, and this pair is rendered verbatim into the terminal and into
-      # the model's context by the doctor skill. A pair that fails the shape is
-      # dropped, not printed — losing two numbers is a worse message, never a
-      # wrong one, and the row still names the state.
-      ZDOC_BINDING_VERSIONS="$(
-        # shellcheck disable=SC1090
-        source "$DIR/zensu-session.sh" >/dev/null 2>&1 || exit 1
-        zdoc_pair="$(zensu_session_incompatible_runtime_model)" || exit 1
-        [ -n "$zdoc_pair" ] || exit 1
-        zdoc_recorded="${zdoc_pair%%$'\t'*}"
-        zdoc_executing="${zdoc_pair##*$'\t'}"
-        if [[ "$zdoc_recorded" =~ $ZENSU_SAFE_VERSION_RE ]] \
-          && [[ "$zdoc_executing" =~ $ZENSU_SAFE_VERSION_RE ]]; then
-          printf '%s\t%s' "$zdoc_recorded" "$zdoc_executing"
-        else
-          printf '\t'
-        fi
-      )" || ZDOC_BINDING_VERSIONS=""
-      if [ -n "$ZDOC_BINDING_VERSIONS" ]; then
-        ZDOC_BINDING=incompatible-runtime
+      # The two narrow follow-ups, asked only AFTER the orphan question and never
+      # before it. A record can be both orphaned and lineage-incompatible; the
+      # vanished root is the heavier diagnosis and the one whose remedy differs,
+      # so it wins. Asking in the other order would report a repairable lineage
+      # state for a session whose workflow document is already gone.
+      #
+      # Between THESE two the order is immaterial, and the loop is what says so:
+      # the predicates are disjoint by construction — the lineage one needs the
+      # strict read to succeed, the pruned one needs it to fail at the plugin root
+      # — so at most one can answer. Both render the same pair into the same two
+      # variables, because the row that consumes them is one shape with two
+      # causes. `unbound` is the default rather than a trailing `else`, so a third
+      # named state is one row in this list.
+      ZDOC_BINDING=unbound
+      for zdoc_named in \
+        'incompatible-runtime:zensu_session_incompatible_runtime_model' \
+        'pruned-plugin-root:zensu_session_pruned_plugin_root_model'; do
+        ZDOC_BINDING_VERSIONS="$(zdoc_version_pair "${zdoc_named#*:}")" \
+          || ZDOC_BINDING_VERSIONS=""
+        [ -n "$ZDOC_BINDING_VERSIONS" ] || continue
+        ZDOC_BINDING="${zdoc_named%%:*}"
         ZDOC_BINDING_RECORDED_VERSION="${ZDOC_BINDING_VERSIONS%%$'\t'*}"
         ZDOC_BINDING_EXECUTING_VERSION="${ZDOC_BINDING_VERSIONS##*$'\t'}"
+        break
+      done
+      # The THIRD probe, layered on top of the loop above rather than folded into
+      # it. The loop's two predicates are disjoint and interchangeable; this one is
+      # NOT — it refines a verdict the loop has already reached, so it runs only
+      # once that verdict is the lineage break, and never on its own.
+      if [ "$ZDOC_BINDING" = incompatible-runtime ]; then
         # THIRD narrow question, asked ONLY once the lineage break is
         # established, and never on its own. The orphan question above already
         # answered no for this session — it re-applies servesRecordedRuntime,
@@ -423,16 +449,16 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
         # the hedged row and sets the unknown flag. That is the fail-safe direction: a
         # missing constant must cost a definite claim, never manufacture one.
         if [ -n "$ZDOC_ROOT_STATE_GONE" ] \
-          && [ "$ZDOC_ORPHAN_ROOT_STATUS" -eq "$ZDOC_ROOT_STATE_GONE" ] \
-          && [ -n "$ZDOC_BINDING_PROJECT_ROOT" ]; then
-          ZDOC_BINDING=orphaned-project-root+incompatible-runtime
-          # The probe POSITIVELY answered here, so the unknown flag must not be
-          # set: the gone status is not the present one, and an unguarded test would
-          # export "unknown"
-          # for the one state where the answer is certain. Placing the flag
-          # outside this branch is exactly the trap the block below claims to
-          # close.
-          ZDOC_BINDING_ROOT_UNKNOWN=""
+        && [ "$ZDOC_ORPHAN_ROOT_STATUS" -eq "$ZDOC_ROOT_STATE_GONE" ] \
+        && [ -n "$ZDOC_BINDING_PROJECT_ROOT" ]; then
+        ZDOC_BINDING=orphaned-project-root+incompatible-runtime
+        # The probe POSITIVELY answered here, so the unknown flag must not be
+        # set: the gone status is not the present one, and an unguarded test would
+        # export "unknown"
+        # for the one state where the answer is certain. Placing the flag
+        # outside this branch is exactly the trap the block below claims to
+        # close.
+        ZDOC_BINDING_ROOT_UNKNOWN=""
         else
         # WHY the status is captured at all, given both remaining arms render the
         # same verdict: it is what makes the claim CHECKABLE. The PRESENT status positively
@@ -459,13 +485,11 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
         # assignments above reaches it — deleting it once left the clause permanently
         # unreachable with every row still green. An `if` block reads more plainly and
         # was tried; it makes that pin count zero, which is the wrong trade.
-          ZDOC_BINDING_ROOT_UNKNOWN=""
-          [ -n "$ZDOC_ROOT_STATE_PRESENT" ] \
-            && [ "$ZDOC_ORPHAN_ROOT_STATUS" -eq "$ZDOC_ROOT_STATE_PRESENT" ] \
-            || ZDOC_BINDING_ROOT_UNKNOWN=1
+        ZDOC_BINDING_ROOT_UNKNOWN=""
+        [ -n "$ZDOC_ROOT_STATE_PRESENT" ] \
+          && [ "$ZDOC_ORPHAN_ROOT_STATUS" -eq "$ZDOC_ROOT_STATE_PRESENT" ] \
+          || ZDOC_BINDING_ROOT_UNKNOWN=1
         fi
-      else
-        ZDOC_BINDING=unbound
       fi
     fi
   fi

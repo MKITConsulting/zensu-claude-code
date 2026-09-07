@@ -530,7 +530,7 @@ function renderBaselineNotes(baseline, sessionId) {
 // the misleading doctor row left them.
 const REMEDY = {
   [core.ADOPTION_REFUSALS.RECORD_UNREADABLE]:
-    "The record could not be re-verified against the installation that minted it. That installation may have been pruned from the plugin cache, the record may have been altered, or a persisted schema really did change in this release. A recorded project root that is merely GONE is no longer one of these — that state is adoptable — so the disagreement here is one of the others — or there is no record for this session at all, which lands on this same reason. Adoption cannot tell them apart, and in this state /zensu:doctor cannot name the cause either. Start a fresh Claude Code session.",
+    "The record could not be re-verified against the installation that minted it. The record may have been altered, or a persisted schema really did change in this release. Two states that used to land here no longer do on their own: a recorded project root that is merely GONE is adoptable, and so is a minting installation that was merely pruned from the plugin cache. A pruned installation IS still this refusal when the recorded project root is ALSO gone, and so is a vanished project root when the minting installation is also pruned — each relaxed reader pins the other's waiver off, so nothing is left to anchor the record to — and so is having no record for this session at all. Adoption cannot tell the remaining causes apart, and in this state /zensu:doctor cannot name the cause either. Start a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.PLUGIN_DATA]:
     "The record belongs to a different plugin-data store — typically a development checkout against an installed plugin, or the reverse. That boundary is never relaxed. Start a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.ALREADY_SERVED]:
@@ -544,6 +544,15 @@ const REMEDY = {
   [core.ADOPTION_REFUSALS.WORKFLOW_SCHEMA]:
     "The workflow document of this session cannot be read by the executing runtime, which means a persisted shape really did change. This is the case adoption must refuse. Start a fresh Claude Code session.",
 };
+
+// The one adoptable state in which the record could NOT be re-measured: the
+// installation that minted it is gone from the plugin cache. Said on the row
+// that names the minting version, so the user learns why the strict read failed
+// without a detour through /zensu:doctor, and repeated as one sentence because
+// a parenthetical alone does not say what adoption will do about it.
+const PRUNED_NOTE = " (installation no longer on disk)";
+const PRUNED_EXPLANATION = "The installation that minted the record has been pruned from the plugin cache, so the\nrecord could not be re-measured; adoption re-mints it under the running installation.\n";
+const prunedNote = (pruned) => (pruned ? PRUNED_NOTE : "");
 
 // Wrapped in a function because `node -e` evaluates at module top level, where a
 // bare `return` is a syntax error — and a syntax error here would surface as a
@@ -641,7 +650,7 @@ function main() {
 
   if (process.env.ZADOPT_CONFIRM !== "1") {
     process.stdout.write("Zensu session adoption — ADOPTABLE\n\n");
-    process.stdout.write("  record minted by : " + safe(verdict.recorded) + "\n");
+    process.stdout.write("  record minted by : " + safe(verdict.recorded) + prunedNote(verdict.prunedPluginRoot) + "\n");
     process.stdout.write("  executing        : " + safe(verdict.executing) + "\n");
     // Same seam as the adopted row below: the marker is handed to safe() so a value
     // ending in a separator-shaped character is folded before the marker completes it.
@@ -654,6 +663,12 @@ function main() {
     // path overstates what was checked — see the qualified line below.
     if (!verdict.orphanedProjectRoot) {
       process.stdout.write("The record is intact and this installation can take it over in place.\n");
+    }
+    // The pruned branch keeps the unqualified sentence above: its project root is
+    // present, so condition 6 DID run. What it adds is why the record could not be
+    // re-measured in the first place.
+    if (verdict.prunedPluginRoot) {
+      process.stdout.write(PRUNED_EXPLANATION);
     }
     // Stated BEFORE the user confirms, not only after: an adoption that leaves
     // Edit, Write and every WRITING Bash command denied is not the rescue an
@@ -697,7 +712,7 @@ function main() {
     adopted.context.plugin_root,
   );
   process.stdout.write("Zensu session adoption — ADOPTED\n\n");
-  process.stdout.write("  record minted by : " + safe(adopted.recorded) + "\n");
+  process.stdout.write("  record minted by : " + safe(adopted.recorded) + prunedNote(adopted.prunedPluginRoot) + "\n");
   process.stdout.write("  now served by    : " + safe(adopted.executing) + "\n");
   // The anchor the session is bound to from here on. It is carried from the
   // record, never from where this command was invoked, and naming it is the one
@@ -728,6 +743,9 @@ function main() {
     process.stdout.write("fresh Claude Code session, to write again.\n");
   } else {
     process.stdout.write("This session is bound again from the next tool call onward — no restart is needed.\n");
+    if (adopted.prunedPluginRoot) {
+      process.stdout.write(PRUNED_EXPLANATION);
+    }
   }
   if (adopted.provenance === "no-workflow-document") {
     // TWO shapes for one provenance value, because that value means two different

@@ -82,20 +82,10 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
   fi
   if ! zensu_session_unregistered "$INPUT" \
     && ! zensu_session_orphaned_project_root "$INPUT" >/dev/null; then
-    # Neither relaxable state. Before falling back to the generic wording, ask the
-    # one remaining question that has a remedy working IN PLACE: is this the
-    # declared-incompatible lineage? Without this the user reads "start a fresh
-    # Claude Code session" from this gate while the Bash and Edit gates say the
-    # session can be adopted — two denies contradicting each other on the remedy,
-    # for the exact state this feature exists to repair. stdout is the JSON
-    # decision channel, so the predicate output is captured, never leaked.
-    if ZENSU_LINEAGE="$(zensu_session_incompatible_runtime "$INPUT")" \
-      && [ -n "$ZENSU_LINEAGE" ]; then
-      zensu_emit_hook_session_deny incompatible-runtime \
-        "${ZENSU_LINEAGE%%$'\t'*}" "${ZENSU_LINEAGE##*$'\t'}"
-      exit 0
-    fi
-    zensu_emit_hook_session_deny narrowed
+    # Neither relaxable state. The named-state ladder and its rationale live in
+    # zensu_emit_named_bind_deny (hooks/lib/zensu-session.sh); this gate supplies
+    # only the payload and its own fallback scope.
+    zensu_emit_named_bind_deny "$INPUT" narrowed
     exit 0
   fi
   # The relaxation is for the interactive thread only. The all-tool capability

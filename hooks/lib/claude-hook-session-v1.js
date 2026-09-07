@@ -19,23 +19,29 @@
 // `incompatible-runtime` and its `model-` twin answer by exit status — 0 when
 // the record reads and the disagreement is a declared-incompatible executing
 // lineage, with or without a vanished project root — and on a match print
-// `recorded<TAB>executing`, two fields and never three;
-// `orphaned-incompatible-root` and its `model-` twin answer the third fact of
-// that state separately — 0 and the dead path when the lineage is incompatible
-// AND the recorded root is gone, **3** when it positively is not, and 1 for
-// every unavailable answer — so the two-field format above can stay exactly as
-// its five parsers read it. That three-way status is not decoration: a caller
-// that cannot tell a negative from an unavailable answer must guess, and the
-// wrong guess makes it assert the workflow document survived. None of the seven prints bindings: a
-// session in any of those states must stay unbound. The first three exist so the
-// gates can tell the two RELAXABLE bind failures apart from each other and from
-// all the rest; the last four name a state that is NOT relaxable — for a live
-// project root a workflow document is still reachable, and for a vanished one
-// the repair is adoption rather than a waiver — and exist so the diagnosis stops
-// being reported as "no record", which is false. The two halves of that state
-// carry DIFFERENT truths about the workflow document, which is why the third
-// fact has a hook-payload spelling and not only a model-side one: the Stop hook
-// must not tell a user whose worktree is gone that their chain state survived.
+// `recorded<TAB>executing`, two fields and never three; `pruned-plugin-root`
+// and its `model-` twin answer the same way — 0 when the record is intact and
+// the SOLE disagreement is that the installation which minted it no longer
+// exists on disk — and print the same two-field pair, so every parser of that
+// pair reads it unchanged; `orphaned-incompatible-root` and its `model-` twin
+// answer the third fact of the lineage state separately — 0 and the dead path
+// when the lineage is incompatible AND the recorded root is gone, **3** when it
+// positively is not, and 1 for every unavailable answer — so the two-field
+// format above can stay exactly as its five parsers read it. That three-way
+// status is not decoration: a caller that cannot tell a negative from an
+// unavailable answer must guess, and the wrong guess makes it assert the
+// workflow document survived. None of these prints bindings: a session in any of
+// those states must stay unbound. The first three exist so the gates can tell
+// the two RELAXABLE bind failures apart from each other and from all the rest;
+// the rest name states that are NOT relaxable — for a live project root a
+// workflow document is still reachable, and for a vanished root or a pruned
+// installation the repair is adoption rather than a waiver — and exist so the
+// diagnosis stops being reported as "no record", which is false, and so the one
+// in-place remedy, /zensu:adopt-session, can be named. The two halves of the
+// lineage state carry DIFFERENT truths about the workflow document, which is why
+// that third fact has a hook-payload spelling and not only a model-side one: the
+// Stop hook must not tell a user whose worktree is gone that their chain state
+// survived.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -270,6 +276,81 @@ function resolveIncompatibleRuntime(payload, environment = process.env) {
 }
 
 
+// The FOURTH named bind failure: the record is intact and the SOLE disagreement
+// is that the installation which minted it has been pruned from the plugin
+// cache, so nothing can re-verify the record and no installation can serve it.
+// Disjoint from the lineage predicate above by construction — that one needs
+// the strict read to succeed, this one needs it to fail — and deliberately
+// blind to lineage: the state is reachable under a compatible lineage too, and
+// the remedy is the same either way. Adoption is the one exit, so like the
+// lineage state this is named, never relaxed.
+//
+// Returns { recorded, executing } — both declared versions — or null when this
+// is not that state. Any additional disagreement, any unreadable or ambiguous
+// state, and any exception answers null, so the caller keeps failing closed.
+function resolvePrunedPluginRoot(payload, environment = process.env) {
+  try {
+    validateSessionId(payload.session_id);
+    const executedPluginRoot = canonicalDirectory(path.resolve(__dirname, '..', '..'), 'executed plugin root');
+    if (canonicalDirectory(environment.CLAUDE_PLUGIN_ROOT, 'CLAUDE_PLUGIN_ROOT') !== executedPluginRoot) {
+      return null;
+    }
+    const pluginData = canonicalDirectory(environment.CLAUDE_PLUGIN_DATA, 'CLAUDE_PLUGIN_DATA', true);
+    const recordsDir = privateRecordsDirectory(pluginData, true);
+    if (recordsDir === null) return null;
+    const readerOptions = { recordsDir, sessionId: payload.session_id, expectedHost: 'claude' };
+    // The strict read must FAIL: a record it accepts is either served or a
+    // lineage question, and naming a pruned installation there would be a wrong
+    // diagnosis. The relaxed read must then SUCCEED, which proves the absence of
+    // the recorded root is the only thing the strict read tripped on.
+    try {
+      core.readContext(readerOptions);
+      return null;
+    } catch {
+      // fall through to the relaxed read
+    }
+    const context = core.readPrunedPluginRootContext(readerOptions);
+    if (context.plugin_data !== pluginData) return null;
+    // The same sibling bound adoption applies: a pruned record of a FOREIGN
+    // installation (a --plugin-dir checkout beside nothing) is a second
+    // disagreement, not this state.
+    // Both sides canonical, so the comparison stays in ONE namespace. The right
+    // side already is — `executedPluginRoot` came from canonicalDirectory above,
+    // and the parent of a realpath is itself a realpath. The left side is a
+    // recorded STRING, and this is the one branch that can never re-canonicalize
+    // its own root, because that root is gone by construction. Any change to the
+    // symlink topology above the plugin cache AFTER minting — a dotfile manager
+    // turning ~/.claude into a symlink, or the reverse, or a move to another
+    // volume — would otherwise make the two disagree forever: the predicate
+    // answers null, the state is never named, and the session falls back to the
+    // generic deny and the unbounded Stop block this whole feature exists to
+    // remove. It fails CLOSED, which is why it was P3 rather than P1. The parent
+    // is proven to exist by readPrunedPluginRootContext, which canonicalDirectory's
+    // it before returning, so it always resolves on this branch; if it somehow
+    // does not, this throws into the catch below and answers null exactly as the
+    // string compare did.
+    if (canonicalDirectory(path.dirname(context.plugin_root), 'recorded plugin root parent')
+        !== path.dirname(executedPluginRoot)) return null;
+    const executing = core.executingPluginVersion(executedPluginRoot, 'claude');
+    if (typeof executing !== 'string' || executing === '') return null;
+    // The recorded version is rendered into `recorded<TAB>executing`, which five
+    // parsers split with ${V%%$'\t'*} and ${V##*$'\t'} — first field and LAST. On
+    // the lineage path readContextInternal proves manifest.version equals this
+    // field, and that comparison is what has kept it separator-free; the pruned
+    // waiver drops exactly that comparison, so this is the first producer without
+    // it and the bound has to be applied here. validateContext only requireText's
+    // the field, and requireText admits a tab: a recorded `0.19.0<TAB>9.9.9` would
+    // put THREE fields on the wire, both halves would pass the consumers' own
+    // shape guard, the middle one would vanish, and every surface would name a
+    // version pair the record does not hold. One rule, from the module that owns
+    // it — never a hand-copied alternation.
+    if (!core.ADOPTION_SAFE_VERSION_RE.test(context.plugin_version)) return null;
+    return { recorded: context.plugin_version, executing };
+  } catch {
+    return null;
+  }
+}
+
 function validateSessionId(sessionId) {
   if (
     typeof sessionId !== 'string'
@@ -439,6 +520,32 @@ function main() {
     process.stdout.write(`${versions.recorded}\t${versions.executing}\n`);
     return;
   }
+  if (process.argv[2] === 'pruned-plugin-root' || process.argv[2] === 'model-pruned-plugin-root') {
+    // Exit 0 only when the record is intact and the SOLE disagreement is that
+    // the installation which minted it no longer exists, and on a match print
+    // `recorded<TAB>executing` — the same two-field pair the lineage mode
+    // prints, so every parser of that pair reads this one unchanged. The two
+    // spellings differ only in where the session id comes from, exactly as the
+    // other pairs do. Never any bindings: this state stays unbound until it is
+    // adopted.
+    const mode = process.argv[2];
+    if (process.argv.length !== 3) fail(`${mode} does not accept arguments`);
+    let sessionPayload;
+    if (mode === 'model-pruned-plugin-root') {
+      const hostSessionId = process.env.CLAUDE_CODE_SESSION_ID;
+      validateSessionId(hostSessionId);
+      sessionPayload = { session_id: hostSessionId };
+    } else {
+      sessionPayload = readPayload();
+    }
+    const versions = resolvePrunedPluginRoot(sessionPayload);
+    if (versions === null) {
+      process.exitCode = 1;
+      return;
+    }
+    process.stdout.write(`${versions.recorded}\t${versions.executing}\n`);
+    return;
+  }
   if (process.argv[2] === 'orphaned-incompatible-root' || process.argv[2] === 'model-orphaned-incompatible-root') {
     // The third fact of the combined state, asked separately so the two-field
     // wire format above can stay exactly as its five parsers read it. Exit 0 and
@@ -545,5 +652,6 @@ module.exports = {
   resolveHookSession,
   resolveIncompatibleRuntime,
   resolveOrphanedProjectRoot,
+  resolvePrunedPluginRoot,
   unregisteredSession,
 };

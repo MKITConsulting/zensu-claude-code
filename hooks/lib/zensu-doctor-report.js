@@ -36,14 +36,18 @@
 //   ZDOC_BINDING             the wrapper's binding verdict (bound / unbound /
 //                            orphaned-project-root / incompatible-runtime /
 //                            orphaned-project-root+incompatible-runtime /
-//                            unavailable / unknown). The COMBINED verdict is a
-//                            real value the wrapper sets, not a description of
-//                            two: it is the state where the lineage broke AND the
-//                            recorded project root is gone, and bindingLine
-//                            switches on it for its own three-slot row. It was
-//                            missing from this roster while that row was being
-//                            rewritten. Read by bindingLine for its own row AND by
-//                            currentSessionKey, which refuses a session key that
+//                            pruned-plugin-root / unavailable / unknown). Keep this
+//                            enumeration complete: a verdict the wrapper emits and
+//                            bindingLine's switch does not know falls to its
+//                            `default`, and a port implementing only what is listed
+//                            here would render no binding row at all in that state.
+//                            The COMBINED verdict is a real value the wrapper sets,
+//                            not a description of two: it is the state where the
+//                            lineage broke AND the recorded project root is gone,
+//                            and bindingLine switches on it for its own three-slot
+//                            row. It was missing from this roster while that row was
+//                            being rewritten. Read by bindingLine for its own row AND
+//                            by currentSessionKey, which refuses a session key that
 //                            arrives under any other verdict.
 //   ZDOC_BINDING_PROJECT_ROOT        the recorded project root, non-empty under
 //                            orphaned-project-root and under the combined verdict.
@@ -51,8 +55,9 @@
 //                            session's own starter chose.
 //   ZDOC_BINDING_RECORDED_VERSION    the version that minted the record, and
 //   ZDOC_BINDING_EXECUTING_VERSION   the version now executing; both non-empty
-//                            under incompatible-runtime and under the combined
-//                            verdict, both folded, both shape-screened upstream.
+//                            under incompatible-runtime, under pruned-plugin-root
+//                            and under the combined verdict, all folded, all
+//                            shape-screened upstream.
 //   ZDOC_BINDING_ROOT_UNKNOWN        set when the orphan probe could not answer,
 //                            which is what makes the plain lineage row state its
 //                            Edit/Write clause CONDITIONALLY instead of asserting
@@ -2509,6 +2514,19 @@ function bindingLine() {
         + (env.ZDOC_BINDING_ROOT_UNKNOWN === '1'
           ? '. Whether the recorded project root still exists could not be determined here; if it is gone, the adoption clears the lineage break while Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created'
           : ''));
+    // The record is INTACT and the installation that minted it has been pruned
+    // from the plugin cache — the host keeps only a few versions, and a session
+    // that outlives them lands here. Nothing can re-verify the record any more,
+    // so no installation serves it; before this row existed the state fell
+    // through to `unbound` above, which asserts "no valid record" — false — and
+    // the Stop hook looped on it. Same in-place remedy as the lineage row, a
+    // different cause, so it is named separately. It renders through versions()
+    // rather than reading the two variables inline, so the fold every other row
+    // applies is applied here too.
+    case 'pruned-plugin-root':
+      return line(BAD, 'binding: this session\'s Session Control record is intact, but the installation that minted it has been removed from the plugin cache'
+        + versions()
+        + ' — the record can no longer be re-verified, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether this session can be adopted in place, then /zensu:adopt-session --confirm');
     // BOTH disagreements at once, and the row exists because each of the two
     // above answers "not me" for it: the orphan probe re-applies
     // servesRecordedRuntime, which an incompatible lineage fails, and the lineage
@@ -2529,8 +2547,29 @@ function bindingLine() {
         + ' — a deleted or recycled worktree left the workflow state unreachable from this record while a plugin update landed, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether the running installation may take the record over, then /zensu:adopt-session --confirm. That unblocks READ-ONLY Bash and this diagnostic, but Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write, because the recorded project root is still gone — a write cannot be attributed to a project that is not there — re-create exactly that directory, or start a fresh Claude Code session, to write again. If it was moved rather than deleted, its state still exists there');
     case 'unavailable':
       return line(BAD, 'binding: hooks/lib/zensu-session.sh is missing or symlinked — Session Control cannot bind');
-    default:
+    // The wrapper's OWN "could not resolve it" verdict, and the unset value the
+    // `default` arm below still lets through. Both stay silent on purpose, and
+    // neither is an UNCLASSIFIABLE verdict: the wrapper discloses that case in a
+    // row of its own, so a second row here would double-report it. Explicit
+    // rather than folded into `default`, because `default` now means something
+    // else — and P1af/P1ag pin both silences, so a reader who removes this case
+    // to "simplify" gets a failing suite rather than a scary row for a state the
+    // wrapper reports correctly.
+    case 'unknown':
       return undefined;
+    default:
+      // Silence is the one verdict a diagnostic must not give, and this enum has
+      // just gained a fifth member. ZDOC_BINDING is a documented environment
+      // contract — a caller may supply it and thereby skip the wrapper's whole
+      // resolution block — and a report module older than the wrapper feeding it
+      // meets a verdict it does not know. Rendering nothing there is
+      // indistinguishable from a session that binds cleanly, which is the exact
+      // reading this row exists to prevent. Adding a SIXTH member is now safe
+      // rather than merely documented.
+      if (!env.ZDOC_BINDING) return undefined;
+      return line(BAD, 'binding: this report cannot classify the binding verdict "' + env.ZDOC_BINDING
+        + '" reported for this session — it was produced by a different Zensu version than this report;'
+        + ' run /zensu:doctor from the executing installation');
   }
 }
 

@@ -36,8 +36,9 @@ fi
 # reason this tree states about every hand-maintained count: a number derived from what
 # it is checking agrees with whatever it finds. Raise it deliberately when cases land.
 #
-# What it is guarding is now three families rather than one, because three branches added
-# cases to the same file: the non-blocking workflow-document read and the single-pause-
+# What it is guarding is now four families rather than one, because four branches added
+# cases to the same file: the pruned-plugin-root reader with its successor-installation
+# fixtures, the non-blocking workflow-document read and the single-pause-
 # primitive pin from PR #285, the orphaned-project-root cases, and the workflow-baseline
 # cases (WB1-WB7 plus WB1a and WB5a), which are the only UNIT-level coverage of the
 # classification truth table, the refusal vocabulary and the component the UNSAFE
@@ -53,7 +54,7 @@ fi
 # because it fails CLOSED: it sources the summary helper unconditionally and exits 1
 # when the helper is unavailable, where the inline form would have left the floor
 # silently unchecked.
-SC_FLOOR=157
+SC_FLOOR=170
 
 OUT="$(mktemp "${TMPDIR:-/tmp}/zensu-session-control-core-XXXXXX")" \
   || { printf '%s\n' 'test-session-control-core: cannot create temp file' >&2; exit 1; }
