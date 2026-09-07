@@ -61,6 +61,13 @@ fi
 # silently without node or without its own libraries, and zensu_hook_enabled reports
 # ENABLED when node is missing, so the flag alone would promise a question that
 # cannot fire. Same reasoning, and same shape, as the reviewer-spawn guard above.
+# GRADED ELSEWHERE: this guard's three arms are pinned by D26 (the autoTdd flag),
+# D29 (node) and D30 (the delegate hook file), and the off-state disclosure below
+# by D27 — all in
+# tests/structure/test-plan-approved-delegate.sh, not by this hook's own suite.
+# The split is deliberate — that suite is absent from the blocking Windows PR
+# shard, where D29's stub-PATH fixture would cost budget and is unverified — so
+# editing the tip literals below reddens a suite named for a different file.
 _ZENSU_ROUTE_QUESTION_LIVE=yes
 zensu_hook_enabled autoTdd || _ZENSU_ROUTE_QUESTION_LIVE=no
 command -v node >/dev/null 2>&1 || _ZENSU_ROUTE_QUESTION_LIVE=no

@@ -33,6 +33,11 @@ check() {
   fi
 }
 
+# EXTRACTED BY TEXT: D31/D32 in tests/structure/test-plan-approved-delegate.sh pull
+# these three helpers out with `sed -n '/^name()/p'` and source them on their own,
+# because this file cannot be sourced (it `require`s expect and claude above and
+# then drives a real session). They must stay SINGLE-LINE definitions at column 0.
+# A reformat is caught loudly — the extraction count arm names it — not silently.
 strip_ansi()   { sed -E "s/\x1b\[[0-9;]*[A-Za-z]//g; s/\[[0-9]+[A-Z]//g; s/\[[?][0-9;]+[hl]//g" "$1"; }
 contains()     { strip_ansi "$1" | grep -qiE "$2" && echo PASS || echo FAIL; }
 not_contains() { strip_ansi "$1" | grep -qiE "$2" && echo FAIL || echo PASS; }

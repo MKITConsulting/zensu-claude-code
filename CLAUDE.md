@@ -3580,14 +3580,46 @@ option ADDED to one branch — `P1b`/`P1b2` the option list, `P1b3`/`P1b4` the t
 and the `(B)`-internal non-interactive removal guard). The safety half was unpinned until a
 mutation probe measured it: on a ONE-SIDED reword of heredoc 1, `P1b` through `P1b4` all reported
 PASS while `P1b5` and `P1b7` failed, and a separate reword of the refusal block failed `P1b6`.
-Then `D9pre` and `D9`-`D26` in
+Then `D9pre` and `D9`-`D33` in
 `tests/structure/test-plan-approved-delegate.sh`, which force the strict branch as well because
 the default config resolves to the vanilla one and a single capture would grade only one heredoc;
-that suite now also grades three carriers OUTSIDE the hook — `D18`-`D20` the local-only eval in
-`evals/plan-approval-hook/` (which nothing graded before, so its two ABSENCE assertions reported the
-outward-facing safety property green whenever the driven session died), and `D26` the SessionStart
-banner's route tip against `autoTdd`; and `BNR2c` in the vanilla-mode suite, which is the ONLY check
-that reaches the banner tips —
+that suite ALSO grades carriers outside the hook, and the roster is an ENUMERATION rather than a
+count because a count there was wrong on the day it was written: `D17` five prose carriers
+(`docs/configuration.md`, `docs/architecture.md`, `README.md`, `skills/tdd/SKILL.md`,
+`skills/gauntlet-loop/SKILL.md`, with an examined-carrier floor of 5), `D18`-`D20`/`D28`/`D31`-`D33`
+the local-only eval in `evals/plan-approval-hook/` and its README (which nothing graded before, so
+its two ABSENCE assertions reported the outward-facing safety property green whenever the driven
+session died), and `D26`/`D27`/`D29`/`D30` the SessionStart banner. The suite's own header carries
+that enumeration too, because an edit to any of those files reddens a suite named for a different
+one; `hooks/session-start-banner.sh` and `tests/structure/test-session-start-banner.sh` now carry a
+pointer back, which is the half this repository keeps discovering it is missing. **`D18`-`D20` and `D26` are all SOURCE or single-arm pins, and
+`D29`-`D32` are what closed the two holes that left**, both measured rather than argued. The banner's
+`_ZENSU_ROUTE_QUESTION_LIVE` guard has THREE conditions and only the flag arm was graded: deleting
+either the `command -v node` line or the `[ -f .../plan-approved-delegate.sh ]` line left this suite,
+`test-session-start-banner.sh` AND `test-tdd-vanilla-mode.sh` fully green, so `D29`/`D30` drive the
+real banner with node hidden behind a stub PATH and with the delegate hook missing from a subset
+plugin root. And the eval runner's absence GATE was pinned only by its presence at the call sites:
+rewriting `nonempty()` to a constant `echo PASS` reinstated the exact defect `D18`/`D20` are named
+for with the suite still green, so `D31` grades the helper's BEHAVIOUR and `D32` states executably
+the premise the whole design rests on — that `not_contains()` is satisfied by a transcript that was
+never written. The runner cannot be sourced, so both extract the one-line helpers by text.
+`D29`'s stub-PATH fixture is UNVERIFIED on Windows, so it SKIPs rather than fails when it cannot be
+built — and TWO budgets are unmeasured, not one: the ubuntu shard weight in
+`tests/profiles/ci-shard-weights.v1.json` still reads its pre-change value, and the WEEKLY Windows
+structure shard, which this suite does reach through `ciStructureTests`, has never measured
+`D30`'s `cp -R` of the whole `hooks/` subtree or `D29`'s two symlink directories at all. Take both
+figures in one pass from a green run rather than estimating either — the suite gained a third verdict for it, following `H10` in
+`tests/structure/test-evidence-discipline.sh`, whose own stripped-PATH case declines to redden a
+weekly run for a reason unrelated to the feature. Three further constraints come from that same
+precedent and each was reached by getting it wrong here first: the interpreter is resolved by
+ABSOLUTE path, the two stubs are built by two link loops rather than by copying one onto the other
+(macOS SIGKILLs a copied signed binary), and a shell builtin — whose `command -v` answers a bare
+word — is skipped instead of being linked to itself. TWO banner literals are pinned by `D29`/`D30`
+and both must move with the hook: the route promise `asks which delivery route to take`, and the
+bare else-branch tip, which is matched WHOLE-LINE because it is a strict PREFIX of the
+`autoTdd`-off disclosure and a substring test would let the flag arm satisfy the node arm's check; and `BNR2c` in the vanilla-mode suite, which is the only check
+that reaches the four-route IF-branch tip in BOTH mode variants — `D26`/`D27`/`D29`/`D30` reach the
+tips too, and `D29`/`D30` are the sole grader of the bare ELSE-branch tip, while
 `P8c` greps the whole banner file and is satisfied by its pre-existing Skills line; and
 `hooks/user-prompt-tdd-reminder.sh` — BOTH heredocs, TDD arms only — together with `P2`, because
 §Language requires these phrase lists in lockstep and this chain edited that hook's arms; that hook

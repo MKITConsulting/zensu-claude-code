@@ -15,22 +15,37 @@
 #   MUST NOT reference the removed pre-0.4.0 'tdd-manager' subagent.
 # This is the deterministic counterpart to evals/plan-approval-hook (interactive
 # expect+API) — it proves the hook's emitted directive without spawning a session.
+# CARRIERS OUTSIDE THIS SUITE'S NAMESAKE, because an edit to any of them reddens a
+# suite named for a different file and nothing there points back here:
+#   docs/configuration.md, docs/architecture.md, README.md, skills/tdd/SKILL.md,
+#     skills/gauntlet-loop/SKILL.md            -> D17 (route-question prose)
+#   hooks/session-start-banner.sh              -> D26, D27 (the autoTdd flag arm and
+#     the off-state disclosure), D29, D30 (the node and delegate-hook arms of the
+#     _ZENSU_ROUTE_QUESTION_LIVE guard, and the ONLY grader of the else-branch tip)
+#   evals/plan-approval-hook/run-eval.sh       -> D18, D19, D28, D31, D32, D33
+#   evals/plan-approval-hook/README.md         -> D20
 set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 HOOK="$PLUGIN_DIR/hooks/plan-approved-delegate.sh"
 BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 
-PASS=0; FAIL=0
+PASS=0; FAIL=0; SKIP=0
 check() {
   local label="$1" cond="$2"
   if [ "$cond" = "PASS" ]; then echo "  PASS  $label"; PASS=$((PASS+1));
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
+# A fixture this host cannot build is neither a pass nor a product failure. The
+# repository's precedent is H10 in tests/structure/test-evidence-discipline.sh,
+# whose stripped-PATH case declines to redden a run for a reason unrelated to the
+# feature. It is a DISTINCT verdict and never a PASS, because "nothing was
+# measured" must never read as "the property holds" — the rule D18 exists for.
+skip() { echo "  SKIP  $1"; SKIP=$((SKIP+1)); }
 
 if [ ! -f "$HOOK" ]; then
   check "hooks/plan-approved-delegate.sh exists" FAIL
-  echo "----"; echo "test-plan-approved-delegate: $PASS PASS / $FAIL FAIL"; exit 1
+  echo "----"; echo "test-plan-approved-delegate: $PASS PASS / $FAIL FAIL / $SKIP SKIP"; exit 1
 fi
 check "D0 hooks/plan-approved-delegate.sh exists" PASS
 
@@ -561,6 +576,207 @@ else
   check "D20 eval README contradicts its own runner" FAIL
 fi
 
+
+# ─── The banner's route-tip guard (hooks/session-start-banner.sh) ─────────────
+# D26 covers the FLAG arm of the banner's _ZENSU_ROUTE_QUESTION_LIVE guard. That
+# guard has THREE conditions and the other two were graded by nothing: deleting
+# either the `command -v node` line or the `[ -f .../plan-approved-delegate.sh ]`
+# line leaves this suite AND test-session-start-banner.sh fully green (measured,
+# 31/31 and 19/19 with each mutation applied). Both reach the same defect D26
+# exists for — the banner promising a question that cannot fire — through a
+# broken installation rather than a configured choice.
+BANNER_ROUTE_PROMISE='asks which delivery route to take'
+BANNER_SHORT_TIP='zensu: Tip — use Claude Code Plan mode for code changes.'
+
+# D29 node absent -> the promise is withheld. `zensu_hook_enabled` reports ENABLED
+# when node is missing, so the flag arm cannot see this one. PATH is the only lever
+# a parent has over `command -v`, so the fixture is a STUB PATH holding just the
+# binaries the banner needs. Removing the node-bearing directories from the real
+# PATH was tried first and is wrong: on a host whose node sits in /usr/bin that also
+# removes bash, grep and sed, and the check would report a host limitation on every
+# ordinary Linux runner.
+# THREE constraints come from H10 in tests/structure/test-evidence-discipline.sh,
+# this repository's existing fixture of the stripped-PATH class, and each one was
+# reached by getting it wrong here first:
+#   * the interpreter is resolved by ABSOLUTE path — it must not have to be on the
+#     stub, or the case degenerates into `bash not found`;
+#   * the two stubs are built by two link loops and never by copying one onto the
+#     other, because a COPY of a signed system binary is SIGKILLed by macOS once it
+#     leaves its directory;
+#   * a fixture this host cannot build SKIPs rather than reddening a run.
+# A shell builtin resolves to a bare word rather than a path (`command -v printf`
+# answers `printf`), so a non-absolute resolution is skipped instead of being linked
+# to itself. The POSITIVE CONTROL is what keeps this honest: an incomplete stub can
+# only reach the SKIP or a named FAIL, never a false PASS. This suite runs on the
+# weekly Windows structure shard, where the stub's behaviour is UNVERIFIED.
+_stub_link() { # $1 stub dir, $2.. binary names
+  local _dir="$1"; shift
+  local _b _p
+  mkdir -p "$_dir"
+  for _b in "$@"; do
+    _p="$(command -v "$_b" 2>/dev/null)" || continue
+    case "$_p" in /*) ;; *) continue ;; esac
+    ln -sf "$_p" "$_dir/$(basename "$_p")" 2>/dev/null
+    ln -sf "$_p" "$_dir/$_b" 2>/dev/null
+  done
+}
+STUB_BINS="bash sh dirname basename sed grep cat tr cut head tail awk uname mktemp date wc sort id stat realpath readlink rm mkdir cp mv chmod ls find expr env touch"
+STUB_PATH_DIR="$TMP_DIR/stub-path"
+STUB_WITH_NODE="$TMP_DIR/stub-path-node"
+# shellcheck disable=SC2086
+_stub_link "$STUB_PATH_DIR" $STUB_BINS
+# shellcheck disable=SC2086
+_stub_link "$STUB_WITH_NODE" $STUB_BINS node
+ABS_BASH="$(command -v bash 2>/dev/null)"
+BN_NODE_ON=""; BN_NODE_OFF=""
+if [ -n "$ABS_BASH" ]; then
+  BN_NODE_ON="$(printf '%s' '{"source":"startup"}' | PATH="$STUB_WITH_NODE" ZENSU_CONFIG="$TMP_DIR/no-such-config.json" "$ABS_BASH" "$BANNER_HOOK" 2>/dev/null)"
+  BN_NODE_OFF="$(printf '%s' '{"source":"startup"}' | PATH="$STUB_PATH_DIR" ZENSU_CONFIG="$TMP_DIR/no-such-config.json" "$ABS_BASH" "$BANNER_HOOK" 2>/dev/null)"
+fi
+if [ -z "$ABS_BASH" ] || [ -z "$BN_NODE_ON" ]; then
+  skip "D29 stub PATH cannot run the banner on this host — the node arm was NOT exercised"
+elif ! printf '%s' "$BN_NODE_ON" | grep -qF "$BANNER_ROUTE_PROMISE"; then
+  check "D29 stub banner carries no route promise — the literal drifted or the stub is incomplete" FAIL
+elif PATH="$STUB_PATH_DIR" command -v node >/dev/null 2>&1; then
+  check "D29 stub PATH still resolves node — the arm could not be reached" FAIL
+elif printf '%s' "$BN_NODE_OFF" | grep -qF "$BANNER_ROUTE_PROMISE"; then
+  check "D29 the banner promises a route question with no node to run it" FAIL
+elif printf '%s' "$BN_NODE_OFF" | grep -qxF "$BANNER_SHORT_TIP"; then
+  check "D29 the route promise is withheld when node is absent" PASS
+else
+  check "D29 node absent yields neither the promise nor the bare short tip — banner output drifted" FAIL
+fi
+
+# D30 the delegate hook file absent -> the promise is withheld. The fixture is a
+# SUBSET plugin root rather than a pointer at another tree: the banner re-derives
+# its own root and refuses an inherited CLAUDE_PLUGIN_ROOT that disagrees with the
+# script it is executing, so the file has to be missing from the tree the banner
+# actually runs out of. The same root serves both states, which is what keeps the
+# absence from being satisfied by a root that simply cannot run the banner.
+# Each way of failing gets its OWN arm: sharing one `else` between the positive
+# control and the assertion would report that the banner PROMISES a question in the
+# case where the promise literal had merely drifted.
+SUBSET_ROOT="$TMP_DIR/plugin-subset"
+mkdir -p "$SUBSET_ROOT"
+cp -R "$PLUGIN_DIR/hooks" "$SUBSET_ROOT/hooks" 2>/dev/null
+cp -R "$PLUGIN_DIR/.claude-plugin" "$SUBSET_ROOT/.claude-plugin" 2>/dev/null
+SUBSET_BANNER="$SUBSET_ROOT/hooks/session-start-banner.sh"
+if [ ! -f "$SUBSET_BANNER" ] || [ ! -f "$SUBSET_ROOT/hooks/plan-approved-delegate.sh" ]; then
+  check "D30 subset plugin-root fixture not built" FAIL
+else
+  BN_FILE_ON="$(printf '%s' '{"source":"startup"}' | CLAUDE_PLUGIN_ROOT="$SUBSET_ROOT" ZENSU_CONFIG="$TMP_DIR/no-such-config.json" bash "$SUBSET_BANNER" 2>/dev/null)"
+  rm -f "$SUBSET_ROOT/hooks/plan-approved-delegate.sh"
+  BN_FILE_OFF="$(printf '%s' '{"source":"startup"}' | CLAUDE_PLUGIN_ROOT="$SUBSET_ROOT" ZENSU_CONFIG="$TMP_DIR/no-such-config.json" bash "$SUBSET_BANNER" 2>/dev/null)"
+  if ! printf '%s' "$BN_FILE_ON" | grep -qF "$BANNER_ROUTE_PROMISE"; then
+    check "D30 subset banner carries no route promise — the literal drifted or the fixture is incomplete" FAIL
+  elif printf '%s' "$BN_FILE_OFF" | grep -qF "$BANNER_ROUTE_PROMISE"; then
+    check "D30 the banner promises a route question its hook cannot ask" FAIL
+  elif printf '%s' "$BN_FILE_OFF" | grep -qxF "$BANNER_SHORT_TIP"; then
+    check "D30 the route promise is withheld when the delegate hook is missing" PASS
+  else
+    check "D30 the delegate hook is missing and the banner emits neither tip — output drifted" FAIL
+  fi
+fi
+
+# D31/D32 the eval runner's absence GATE, graded by BEHAVIOUR. D18/D20 pin that the
+# gate is wired in at the call sites and described in the README; rewriting
+# nonempty() to a constant `echo PASS` satisfies both and reinstates the exact
+# defect — measured: this suite stayed green with that mutation applied. The runner
+# cannot be sourced (it `require`s expect and claude at the top and then drives a
+# real session), so the three helpers, each a single line, are extracted by text and
+# sourced on their own. That imposes a SOURCE-LAYOUT contract on the runner, which
+# is recorded there too: the definitions must stay single-line and at column 0.
+EVAL_FN="$TMP_DIR/eval-helpers.sh"
+EMPTY_FILE="$TMP_DIR/transcript-empty.log"; : > "$EMPTY_FILE"
+FULL_FILE="$TMP_DIR/transcript-full.log"; printf 'Executing via /zensu:tdd\n' > "$FULL_FILE"
+if [ ! -f "$EVAL_RUNNER" ]; then
+  check "D31 eval runner exists" FAIL
+  check "D32 eval runner exists" FAIL
+else
+  sed -n '/^nonempty()/p;/^not_contains()/p;/^strip_ansi()/p' "$EVAL_RUNNER" > "$EVAL_FN" 2>/dev/null
+  # `grep -c` prints 0 AND exits 1 on no match, so a `|| echo 0` fallback yields the
+  # two-line value "0\n0"; the arithmetic test below then errors, returns 2, and
+  # control falls through to the ELSE branch — the deliberately written extraction
+  # arm never fires and both checks report the wrong cause. Normalise explicitly.
+  EVAL_FN_LINES="$(grep -c . "$EVAL_FN" 2>/dev/null)"
+  case "$EVAL_FN_LINES" in ''|*[!0-9]*) EVAL_FN_LINES=0 ;; esac
+  if [ "$EVAL_FN_LINES" -ne 3 ]; then
+    check "D31 could not extract nonempty/not_contains/strip_ansi from the runner (got $EVAL_FN_LINES of 3)" FAIL
+    check "D32 not_contains() premise ungraded — extraction failed" FAIL
+  else
+    # shellcheck disable=SC1090
+    D31_EMPTY="$(. "$EVAL_FN"; nonempty "$EMPTY_FILE")"
+    # shellcheck disable=SC1090
+    D31_FULL="$(. "$EVAL_FN"; nonempty "$FULL_FILE")"
+    if [ "$D31_EMPTY" = FAIL ] && [ "$D31_FULL" = PASS ]; then
+      check "D31 nonempty() reports FAIL for an empty transcript and PASS for a real one" PASS
+    else
+      check "D31 nonempty() does not discriminate (empty=$D31_EMPTY full=$D31_FULL)" FAIL
+    fi
+    # D32 the premise the whole gating design rests on, stated executably: an absence
+    # assertion is SATISFIED by a transcript that was never written. The README, this
+    # file's own D18/D20 comments and CLAUDE.md all assert it; nothing checked it. If
+    # it ever stopped holding, every one of those statements would be false and the
+    # gates would be guarding a hazard that no longer exists.
+    # shellcheck disable=SC1090
+    D32_EMPTY="$(. "$EVAL_FN"; not_contains "$EMPTY_FILE" 'Executing via /zensu:autopilot')"
+    # shellcheck disable=SC1090
+    D32_HIT="$(. "$EVAL_FN"; not_contains "$FULL_FILE" 'Executing via /zensu:tdd')"
+    if [ "$D32_EMPTY" = PASS ] && [ "$D32_HIT" = FAIL ]; then
+      check "D32 not_contains() is satisfied by an empty transcript — the premise the gate exists for" PASS
+    else
+      check "D32 not_contains() premise changed (empty=$D32_EMPTY hit=$D32_HIT)" FAIL
+    fi
+  fi
+fi
+
+# D33 the absence gates, DERIVED rather than enumerated. D18 asserts fixed counts
+# over the not-graded arms and an earlier spelling of this check walked a hardcoded
+# list of three gate variables — so a FIFTH absence assertion added to the runner
+# without a gate would leave every check in this family green, which is the exact
+# defect the family is named for. The population is therefore computed from the
+# runner itself: every `check` line carrying an absence assertion (a `not_contains`
+# call, or the inlined `&& echo FAIL || echo PASS` spelling T2.5 uses) must sit
+# inside a `if [ "$VAR" = PASS ]; then` region, and the FIRST check inside each such
+# region must not be a not-graded arm. Inverting a gate to `!= PASS` fails BOTH
+# ways: the region stops being recognised, so its assertions count as ungated.
+# The floor is what keeps a derivation that finds nothing from reading as a clean
+# sweep — the rule D17 and Z19b already apply to their own rosters.
+# The `check` pattern accepts ANY indentation on purpose. The runner writes gated
+# assertions indented inside their `if` and ungated ones at column 0, so a pattern
+# anchored on two spaces can only ever see the gated half — it would report a clean
+# sweep over a population that excludes exactly the shape this check exists to
+# catch. Measured: with the anchored pattern, adding an ungated `not_contains` at
+# column 0 left this suite fully green.
+if [ ! -f "$EVAL_RUNNER" ]; then
+  check "D33 eval runner exists" FAIL
+else
+  D33_STATS="$(awk '
+    /^if \[ "\$[A-Za-z0-9_]+" = PASS \]; then$/ { gate=1; first=1; next }
+    /^else$/ { gate=0; next }
+    /^fi$/   { gate=0; next }
+    /^[ \t]*check "/ {
+      absent = (index($0, "not_contains ") > 0) || (index($0, "echo FAIL || echo PASS") > 0)
+      if (absent) { total++; if (!gate) ungated++ }
+      if (gate && first) { first = 0; if (index($0, "not graded") > 0) inverted++ }
+    }
+    END { printf "%d %d %d\n", total+0, ungated+0, inverted+0 }
+  ' "$EVAL_RUNNER")"
+  D33_TOTAL="${D33_STATS%% *}"
+  D33_REST="${D33_STATS#* }"
+  D33_UNGATED="${D33_REST%% *}"
+  D33_INVERTED="${D33_REST##* }"
+  if [ "$D33_TOTAL" -lt 4 ]; then
+    check "D33 derived only $D33_TOTAL absence assertions in the runner — expected at least 4" FAIL
+  elif [ "$D33_UNGATED" -ne 0 ]; then
+    check "D33 $D33_UNGATED of $D33_TOTAL absence assertions run outside a PASS gate" FAIL
+  elif [ "$D33_INVERTED" -ne 0 ]; then
+    check "D33 $D33_INVERTED gate(s) put the not-graded arm on the PASS branch" FAIL
+  else
+    check "D33 all $D33_TOTAL absence assertions sit inside a gate that runs them on the PASS branch" PASS
+  fi
+fi
+
 echo "----"
-echo "test-plan-approved-delegate: $PASS PASS / $FAIL FAIL"
+echo "test-plan-approved-delegate: $PASS PASS / $FAIL FAIL / $SKIP SKIP"
 [ "$FAIL" -eq 0 ]
