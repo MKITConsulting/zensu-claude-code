@@ -752,6 +752,26 @@ if [ -n "$STRAND_BEFORE" ] && [ "$STRAND_BEFORE" = "$STRAND_AFTER" ]; then
 else
   check "P1mr a report run leaves every workflow document byte- and mtime-identical" FAIL
 fi
+# P1mp2 — the ONE executed test of the branch that decides ZDOC_BINDING for every
+# session. It must run HERE, while `strand-open` is still the bound session: the
+# three restores below hand the environment back and there is no bound fixture after
+# them. The toolchain verdicts are injected so this costs a bind and a render rather
+# than a CLI probe sweep; ZDOC_BINDING is deliberately NOT injected, because it is
+# the value under test.
+STRAND_E2E="$(ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github \
+  ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_CONFIG="" bash "$HELPER" 2>/dev/null)"
+case "$STRAND_E2E" in
+  *'binding: '*) ;;
+  *) check "P1mp2 — VACUOUS: the wrapper produced no binding row at all" FAIL ;;
+esac
+case "$STRAND_E2E" in
+  *'binding: this session has a valid Session Control record'*)
+    check "P1mp2 the real wrapper binds this fixture end to end" PASS ;;
+  *)
+    check "P1mp2 the real wrapper binds this fixture end to end (got: $(printf '%s' "$STRAND_E2E" | grep -i 'binding:' | head -1))" FAIL ;;
+esac
+
 export CLAUDE_PROJECT_DIR="$STRAND_SAVED_PROJECT"
 export CLAUDE_PLUGIN_DATA="$STRAND_SAVED_DATA"
 export CLAUDE_CODE_SESSION_ID="$STRAND_SAVED_SESSION"
@@ -769,25 +789,33 @@ unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
 # body — source, bind, four shape guards, tab-joined printf — reproduces that with
 # rc=0 and a correct pair when run inline.
 #
-# What could NOT be made to work is the wrapper END TO END: `bash "$HELPER"` with
-# that same environment still reports `binding: this session has no valid Session
-# Control record`. The cause is NOT the comment inside the substitution (removing it
+# What could not be made to work, for a while, was the wrapper END TO END: `bash
+# "$HELPER"` against that same environment reported `binding: this session has no
+# valid Session Control record`. Two candidate causes were ruled out here and both
+# rulings still stand — it is NOT the comment inside the substitution (removing it
 # changes nothing, measured) and NOT the shape guards (each exits 0, which would
-# still yield `bound`). It was not established, so the end-to-end check was removed
-# rather than left failing or weakened until it passed.
+# still yield `bound`). The cause was recorded as unestablished and the end-to-end
+# check was removed rather than weakened until it passed.
 #
-# CONSEQUENCE, stated so nobody reads the greps as more than they are: the branch
-# that PRODUCES the pair, and that decides ZDOC_BINDING for EVERY session, has no
-# executed coverage. A grep sees the `|| exit 0` literal; it cannot see the
-# composite exit status, the TAB split, or the pair reaching the renderer.
-# The structural pin must therefore cover the shape-failure DIRECTION, not only the
-# shape — flipping `|| exit 0` to `|| exit 1` makes the elif fail, so a genuinely
-# bound session is reported `unbound`, and a pattern that stopped at the regex would
-# still match.
+# IT IS ESTABLISHED NOW, and the end-to-end check below is restored because the
+# defect it kept failing on is fixed. The wrapper carried its control-byte case arm
+# in the bare `pattern)` form, and bash 3.2 — which macOS ships as /bin/bash — reads
+# that `)` as the end of the enclosing `$( )`. The body truncated mid-`case`, the
+# subshell died of a syntax error, the assignment returned 1, and this elif took its
+# else. That also explains why the inline reproduction disagreed: run inline there is
+# no substitution to truncate. The fix is the POSIX-optional leading paren; see
+# CLAUDE.md "bash 3.2 Command-Substitution Truncation" and
+# tests/structure/test-bash32-portability.sh, which guards the shape tree-wide.
+#
+# The greps below are still worth their lines, and one property is theirs alone: the
+# shape-failure DIRECTION. Flipping `|| exit 0` to `|| exit 1` makes the elif fail, so
+# a genuinely bound session is reported `unbound`, and a pattern that stopped at the
+# regex would still match. P1mp2 covers the composite exit status, the TAB split and
+# the pair reaching the renderer, which no grep can see.
 if grep -qF 'elif ZDOC_SESSION_PAIR="$(' "$HELPER" \
   && grep -qE 'ZENSU_SESSION_KEY:-\}" =~ \^scv1_\[a-f0-9\]\{64\}\$ \]\] \|\| exit 0' "$HELPER" \
   && grep -qE '\[ -d "\$\{ZENSU_PROJECT_ROOT:-\}" \] \|\| exit 0' "$HELPER" \
-  && grep -qF 'case "${ZENSU_PROJECT_ROOT:-}" in *[[:cntrl:]]*) exit 0' "$HELPER" \
+  && grep -qF 'case "${ZENSU_PROJECT_ROOT:-}" in (*[[:cntrl:]]*) exit 0' "$HELPER" \
   && grep -qE '^export ZDOC_ZENSU' "$HELPER" \
   && grep -qF 'ZDOC_SESSION_KEY ZDOC_SESSION_PROJECT_ROOT' "$HELPER"; then
   check "P1mp the wrapper shape-guards the bound pair, drops on failure, and exports it" PASS
@@ -1464,10 +1492,47 @@ case "$OUT" in
     esac ;;
   *) check "P1ad2 orphaned row without a path (got: $OUT)" FAIL ;;
 esac
+# A record whose minting installation was pruned from the plugin cache is the
+# fourth named bind failure: intact record, no installation able to re-verify
+# it, adoption the remedy. It must render its own row with both versions and
+# never the no-record sentence, and still classify when the pair is unavailable.
+OUT="$(ZDOC_BINDING_RECORDED_VERSION=0.17.0 ZDOC_BINDING_EXECUTING_VERSION=0.18.0 run_report_binding pruned-plugin-root)"
+case "$OUT" in
+  *'has been removed from the plugin cache (record minted by 0.17.0, executing 0.18.0)'*)
+    case "$OUT" in
+      *'has no valid Session Control record'*|*'declares an incompatible lineage'*)
+        check "P1ad3 pruned-installation binding row (also claims another state: $OUT)" FAIL ;;
+      *'/zensu:adopt-session --confirm'*)
+        check "P1ad3 a pruned minting installation renders its own ❌ row naming both versions and the adopt remedy" PASS ;;
+      *) check "P1ad3 pruned-installation binding row names no remedy (got: $OUT)" FAIL ;;
+    esac ;;
+  *) check "P1ad3 pruned-installation binding row (got: $OUT)" FAIL ;;
+esac
+OUT="$(run_report_binding pruned-plugin-root)"
+case "$OUT" in
+  *'has been removed from the plugin cache'*)
+    case "$OUT" in
+      *'removed from the plugin cache ('*) check "P1ad4 pruned row without a pair (stray parenthesis: $OUT)" FAIL ;;
+      *) check "P1ad4 the pruned row still classifies when the version pair is unavailable" PASS ;;
+    esac ;;
+  *) check "P1ad4 pruned row without a pair (got: $OUT)" FAIL ;;
+esac
 OUT="$(run_report_binding unavailable)"
 case "$OUT" in *'zensu-session.sh is missing or symlinked'*) check "P1ae unavailable binder renders a ❌ binding row" PASS ;; *) check "P1ae unavailable binder binding row (got: $OUT)" FAIL ;; esac
 OUT="$(run_report_binding unknown)"
 case "$OUT" in *'binding:'*) check "P1af unknown binding stays silent instead of guessing" FAIL ;; *) check "P1af unknown binding stays silent instead of guessing" PASS ;; esac
+# `unknown` above and an unset value below are the wrapper's OWN verdicts and
+# stay silent — it discloses that case in its own row, so a second one here would
+# double-report it. A value that is NEITHER is a different thing: ZDOC_BINDING is
+# a documented environment contract a caller may supply, and the wrapper now emits
+# verdicts an older report module does not know. Silence is the one verdict a
+# diagnostic must not give, so the unclassifiable case states what it saw.
+OUT="$(run_report_binding pruned-plugin-roo)"
+case "$OUT" in
+  *'cannot classify the binding verdict "pruned-plugin-roo"'*)
+    check "P1af1 a binding verdict this report does not know renders a ❌ row instead of no row at all" PASS ;;
+  *) check "P1af1 unclassifiable binding verdict (got: $OUT)" FAIL ;;
+esac
 OUT="$(run_report "$SBOX/plug" - "$EMPTY_PROJECT")"
 case "$OUT" in *'binding:'*) check "P1ag an unset ZDOC_BINDING renders no binding row" FAIL ;; *) check "P1ag an unset ZDOC_BINDING renders no binding row" PASS ;; esac
 if grep -qF 'zensu_bind_model_session' "$HELPER" && grep -qF 'ZDOC_BINDING=unknown' "$HELPER" \

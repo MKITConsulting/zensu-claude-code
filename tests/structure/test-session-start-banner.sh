@@ -1,4 +1,7 @@
 #!/bin/bash
+# NOT GRADED HERE: the banner's _ZENSU_ROUTE_QUESTION_LIVE guard and both delivery
+# route tips are pinned by D26/D27/D29/D30 in test-plan-approved-delegate.sh, and
+# the four-route IF-branch tip additionally by BNR2c in test-tdd-vanilla-mode.sh.
 set -u
 
 # Pins the SessionStart "Zensu active" banner + agent primer (0.4.0):

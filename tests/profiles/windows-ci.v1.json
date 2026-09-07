@@ -360,13 +360,6 @@
       "profileTimeoutMs": 1800000,
       "suites": [
         {
-          "id": "plan-payload-path-transport",
-          "runner": "bash",
-          "path": "tests/structure/test-plan-payload-fallback.sh",
-          "args": [],
-          "timeoutMs": 900000
-        },
-        {
           "id": "review-worker-evidence-lease",
           "runner": "bash",
           "path": "tests/structure/test-review-worker-evidence-lease.sh",
@@ -379,6 +372,13 @@
           "path": "tests/structure/test-session-trail-lineage.sh",
           "args": [],
           "timeoutMs": 600000
+        },
+        {
+          "id": "plan-payload-path-transport",
+          "runner": "bash",
+          "path": "tests/structure/test-plan-payload-fallback.sh",
+          "args": [],
+          "timeoutMs": 1200000
         }
       ]
     }

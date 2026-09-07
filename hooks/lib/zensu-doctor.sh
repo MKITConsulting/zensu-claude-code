@@ -194,10 +194,42 @@ fi
 # orphaned-project-root, which is the only one that has a path to report.
 ZDOC_BINDING_PROJECT_ROOT="${ZDOC_BINDING_PROJECT_ROOT:-}"
 # Same contract for the version pair: empty for every verdict except
-# incompatible-runtime, the only one that has two versions to name.
+# incompatible-runtime and pruned-plugin-root, the two that name a version pair.
 ZDOC_BINDING_RECORDED_VERSION="${ZDOC_BINDING_RECORDED_VERSION:-}"
 ZDOC_BINDING_EXECUTING_VERSION="${ZDOC_BINDING_EXECUTING_VERSION:-}"
 ZDOC_BINDING_VERSIONS=""
+# ONE implementation of the version-pair probe the binding ladder below runs for
+# each named state. The two copies were identical but for the predicate name —
+# same subshell, same source guard, same shape guard, same `printf '\t'`
+# degradation — roughly fourteen duplicated lines that also added a fifth level of
+# `else` nesting. Taking the predicate as an argument lets the ladder be a flat
+# loop, which puts the "the order between the two is immaterial" claim into the
+# code instead of leaving it in a comment.
+#
+# The shape guard MUST stay INSIDE this subshell, where the library that owns
+# ZENSU_SAFE_VERSION_RE is sourced. The doctor's own shell never sees that
+# variable, and under `set -u` referencing it out here aborts the branch and
+# silently falls back to the wrong row — the one part of the duplicated block that
+# was subtle, and the one an extraction must not lose. A pair failing the shape is
+# DROPPED rather than printed: it prints a lone separator, so the caller still
+# names the state and the renderer simply omits the two numbers. Losing two
+# numbers is a worse message, never a wrong one.
+zdoc_version_pair() {  # $1 = model predicate function name
+  (
+    # shellcheck disable=SC1090
+    source "$DIR/zensu-session.sh" >/dev/null 2>&1 || exit 1
+    zdoc_pair="$("$1")" || exit 1
+    [ -n "$zdoc_pair" ] || exit 1
+    zdoc_recorded="${zdoc_pair%%$'\t'*}"
+    zdoc_executing="${zdoc_pair##*$'\t'}"
+    if [[ "$zdoc_recorded" =~ $ZENSU_SAFE_VERSION_RE ]] \
+      && [[ "$zdoc_executing" =~ $ZENSU_SAFE_VERSION_RE ]]; then
+      printf '%s\t%s' "$zdoc_recorded" "$zdoc_executing"
+    else
+      printf '\t'
+    fi
+  )
+}
 # The session's own key and the RECORD's own project anchor, so the renderer can
 # tell a chain THIS session owns from one it does not, and can refuse the
 # comparison when the record and the caller disagree about which project it is.
@@ -242,20 +274,41 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
   # the authority every writer resolves through: it fails such a root outright, so
   # accepting one here would report on a tree no writer can reach.
   #
-  # Apostrophes may NOT appear in a comment inside the substitution below. macOS
-  # ships bash 3.2, whose parser mis-handles one there, and the file then fails
-  # to parse entirely rather than at that line. Ordinary comments are fine, which
-  # is why the shellcheck directive can stay.
+  # TWO bash 3.2 traps apply INSIDE the substitution below, and they are ONE
+  # defect seen twice: that release extracts a $( ) body with a naive scanner
+  # that tracks quotes and parens instead of parsing it, so any token the scanner
+  # miscounts ends the substitution early. macOS ships 3.2 as /bin/bash, so this
+  # is the default shell here rather than an edge case.
+  #
+  # 1. An apostrophe in a comment opens a quote state the scanner never closes,
+  #    and the file then fails to parse entirely rather than at that line.
+  #    Ordinary comments are fine, which is why the shellcheck directive stays.
+  # 2. A case arm in the bare `pattern)` form supplies an unbalanced `)` that
+  #    CLOSES the substitution at that character. Write every case pattern in
+  #    here with the POSIX-optional leading paren — `(pattern)` — which balances
+  #    the scanner and parses identically on bash 5.
+  #
+  # Trap 2 shipped in 0.20.0 and its cost was the whole binding verdict, not a
+  # cosmetic one. Measured on 3.2.57 against a genuinely bound session: the body
+  # truncates mid-`case`, the subshell dies of a syntax error, the assignment
+  # returns 1, this elif falls to the else branch, neither follow-up question
+  # matches, and the report renders `unbound` — telling the user to start a fresh
+  # session over a record that is present, readable and already bound. Note the
+  # ORDER that hid it: 3.2 executes the body command by command, so the bind runs
+  # and SUCCEEDS before the malformed `case` is ever reached. The record was never
+  # the problem, only the reporting of it, which is why every other component
+  # disagreed with this row. tests/structure/test-bash32-portability.sh pins the
+  # rule tree-wide.
   elif ZDOC_SESSION_PAIR="$(
     # shellcheck disable=SC1090
-    # no apostrophes in comments here: bash 3.2 parse bug, see above
+    # no apostrophes in comments, no bare case pattern: bash 3.2, see above
     source "$DIR/zensu-session.sh" >/dev/null 2>&1 || exit 1
     zensu_bind_model_session >/dev/null 2>&1 || exit 1
     [[ "${ZENSU_SESSION_KEY:-}" =~ ^scv1_[a-f0-9]{64}$ ]] || exit 0
     [ -n "${ZENSU_PROJECT_ROOT:-}" ] || exit 0
     [ ! -L "${ZENSU_PROJECT_ROOT:-}" ] || exit 0
     [ -d "${ZENSU_PROJECT_ROOT:-}" ] || exit 0
-    case "${ZENSU_PROJECT_ROOT:-}" in *[[:cntrl:]]*) exit 0 ;; esac
+    case "${ZENSU_PROJECT_ROOT:-}" in (*[[:cntrl:]]*) exit 0 ;; esac
     printf '%s\t%s' "${ZENSU_SESSION_KEY:-}" "${ZENSU_PROJECT_ROOT:-}"
   )"; then
     ZDOC_BINDING=bound
@@ -297,41 +350,31 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
     if [ -n "$ZDOC_BINDING_PROJECT_ROOT" ]; then
       ZDOC_BINDING=orphaned-project-root
     else
-      # The SECOND narrow follow-up, asked only after the orphan question and
-      # never before it. A record can be both orphaned and lineage-incompatible;
-      # the vanished root is the heavier diagnosis and the one whose remedy is
-      # different, so it wins. Asking in the other order would report a repairable
-      # lineage state for a session whose workflow document is already gone.
-      # The shape guard runs INSIDE this subshell, where the library that owns
-      # ZENSU_SAFE_VERSION_RE is sourced — the doctor's own shell never sees that
-      # variable, and under `set -u` referencing it out here aborts the branch and
-      # silently falls back to the wrong row. Same guard the deny path applies,
-      # and for the same reason: a manifest version is validated only by
-      # requireText, and this pair is rendered verbatim into the terminal and into
-      # the model's context by the doctor skill. A pair that fails the shape is
-      # dropped, not printed — losing two numbers is a worse message, never a
-      # wrong one, and the row still names the state.
-      ZDOC_BINDING_VERSIONS="$(
-        # shellcheck disable=SC1090
-        source "$DIR/zensu-session.sh" >/dev/null 2>&1 || exit 1
-        zdoc_pair="$(zensu_session_incompatible_runtime_model)" || exit 1
-        [ -n "$zdoc_pair" ] || exit 1
-        zdoc_recorded="${zdoc_pair%%$'\t'*}"
-        zdoc_executing="${zdoc_pair##*$'\t'}"
-        if [[ "$zdoc_recorded" =~ $ZENSU_SAFE_VERSION_RE ]] \
-          && [[ "$zdoc_executing" =~ $ZENSU_SAFE_VERSION_RE ]]; then
-          printf '%s\t%s' "$zdoc_recorded" "$zdoc_executing"
-        else
-          printf '\t'
-        fi
-      )" || ZDOC_BINDING_VERSIONS=""
-      if [ -n "$ZDOC_BINDING_VERSIONS" ]; then
-        ZDOC_BINDING=incompatible-runtime
+      # The two narrow follow-ups, asked only AFTER the orphan question and never
+      # before it. A record can be both orphaned and lineage-incompatible; the
+      # vanished root is the heavier diagnosis and the one whose remedy differs,
+      # so it wins. Asking in the other order would report a repairable lineage
+      # state for a session whose workflow document is already gone.
+      #
+      # Between THESE two the order is immaterial, and the loop is what says so:
+      # the predicates are disjoint by construction — the lineage one needs the
+      # strict read to succeed, the pruned one needs it to fail at the plugin root
+      # — so at most one can answer. Both render the same pair into the same two
+      # variables, because the row that consumes them is one shape with two
+      # causes. `unbound` is the default rather than a trailing `else`, so a third
+      # named state is one row in this list.
+      ZDOC_BINDING=unbound
+      for zdoc_named in \
+        'incompatible-runtime:zensu_session_incompatible_runtime_model' \
+        'pruned-plugin-root:zensu_session_pruned_plugin_root_model'; do
+        ZDOC_BINDING_VERSIONS="$(zdoc_version_pair "${zdoc_named#*:}")" \
+          || ZDOC_BINDING_VERSIONS=""
+        [ -n "$ZDOC_BINDING_VERSIONS" ] || continue
+        ZDOC_BINDING="${zdoc_named%%:*}"
         ZDOC_BINDING_RECORDED_VERSION="${ZDOC_BINDING_VERSIONS%%$'\t'*}"
         ZDOC_BINDING_EXECUTING_VERSION="${ZDOC_BINDING_VERSIONS##*$'\t'}"
-      else
-        ZDOC_BINDING=unbound
-      fi
+        break
+      done
     fi
   fi
 fi

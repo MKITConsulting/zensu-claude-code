@@ -99,6 +99,30 @@ function canonicalDirectory(input, label) {
   return canonical;
 }
 
+// The shape half of canonicalDirectory for a path that is EXPECTED to be absent.
+// The two relaxed readers below each waive that function's existence check for
+// one recorded root, and this is what they re-apply instead. It is NOT a strict
+// subset of canonicalDirectory: it rejects a WIDER control-character class — the
+// value is echoed to stderr and into the /zensu:doctor report, which the doctor
+// skill renders verbatim — and it adds an absoluteness and a normalization
+// check, because `/a/b/../c` passes isAbsolute alone and would never compare
+// equal to the canonical spelling every other site holds.
+const UNSAFE_PATH_CHARACTERS = new RegExp('[\\u0000-\\u001f\\u007f]');
+
+function requireAbsentDirectoryPath(input, label) {
+  const value = requireText(input, label);
+  if (UNSAFE_PATH_CHARACTERS.test(value)) {
+    fail(`${label} is unsafe`);
+  }
+  if (!path.isAbsolute(value)) {
+    fail(`${label} must be absolute`);
+  }
+  if (path.resolve(value) !== value) {
+    fail(`${label} must be normalized`);
+  }
+  return value;
+}
+
 function isInside(base, candidate) {
   const relative = path.relative(base, candidate);
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
@@ -154,6 +178,31 @@ function readRegularFileSnapshot(
 ) {
   const noFollow = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)
     ? fs.constants.O_NOFOLLOW : 0;
+  // O_NONBLOCK is what keeps this reader from BLOCKING, which is a different
+  // hazard from the symlink one O_NOFOLLOW covers. `open(2)` on a FIFO with no
+  // writer waits forever, and the `isFile()` rejection below cannot help: it runs
+  // on the DESCRIPTOR, so it is reached only once the open has already returned.
+  // Every caller reads a path under `<project>/.zensu/state/`, which is writable
+  // from inside a session and covered by no gate while a chain is inactive, so a
+  // planted FIFO is reachable — and one caller, the zen-mode UserPromptSubmit
+  // hook, reads on EVERY prompt, which turns a blocked open into a session with
+  // no way out: the prompt never reaches the model, so the off-phrase escape is
+  // never evaluated either.
+  //
+  // POSIX LEAVES the flag UNSPECIFIED for a regular file — it specifies
+  // `O_NONBLOCK` for FIFOs and for block and character special files, and says
+  // nothing about the rest. "Unspecified" is not "no effect", and the stronger
+  // wording stood here as the reason this change was safe for the shared
+  // reader's other callers. What is true, and what the safety actually rests on:
+  // Linux and macOS ignore it on a regular file, so no legitimate caller changes
+  // behaviour on the supported hosts; on a FIFO or device the open returns
+  // immediately and the existing `fstat` `isFile()` check rejects it. The read
+  // loop below carries an `EAGAIN` arm so the residual — a filesystem where the
+  // unspecified behaviour does bite — is handled rather than assumed away.
+  // Guarded the same way as O_NOFOLLOW because the constant is not defined on
+  // every build; where it is absent `nonBlock` is 0 and this class stays open.
+  const nonBlock = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NONBLOCK)
+    ? fs.constants.O_NONBLOCK : 0;
   let descriptor;
   let pathBefore = null;
   const parent = path.dirname(file);
@@ -176,7 +225,7 @@ function readRegularFileSnapshot(
       if (pathBefore.isSymbolicLink()) fail(`symlink file rejected: ${file}`);
     }
     try {
-      descriptor = fs.openSync(file, fs.constants.O_RDONLY | noFollow);
+      descriptor = fs.openSync(file, fs.constants.O_RDONLY | noFollow | nonBlock);
     } catch (error) {
       if (missingAllowed && error.code === 'ENOENT') return null;
       if (error.code === 'ELOOP' || error.code === 'EMLINK') {
@@ -196,8 +245,39 @@ function readRegularFileSnapshot(
 
     const data = Buffer.alloc(before.size);
     let offset = 0;
+    // AN EAGAIN ARM, so the non-blocking open's guarantee is true by
+    // construction rather than by platform behaviour. The descriptor is already
+    // gated behind the `isFile()` check above, so a FIFO or device never reaches
+    // this loop and `EAGAIN` is unreachable on the hosts this ships to. It is
+    // still handled, because the flag is what makes that true: on a filesystem
+    // where the unspecified regular-file behaviour does bite — historically
+    // Linux mandatory locking, some network and FUSE mounts — `readSync` throws
+    // rather than returning a short count, and an unhandled throw here would
+    // surface as a corrupt-document failure. The retry budget is bounded so a
+    // descriptor that never becomes readable fails loudly instead of spinning.
+    // PACED, not spun. A bare `continue` spent all 64 retries in microseconds, so
+    // the budget bounded the LOOP without ever waiting for the condition it
+    // exists to outlast — a descriptor that is momentarily unreadable is
+    // unreadable for milliseconds, not nanoseconds. `sleep` is this module's ONE
+    // blocking pause - `setTimeout` needs an event loop this synchronous call
+    // never returns to - and it is asked for the BEST-EFFORT contract here: the
+    // retry budget terminates without the pause, so a host that cannot wait costs
+    // latency and nothing else, whereas the lock poll sharing that primitive must
+    // actually wait and keeps the strict default. The worst case is bounded at
+    // 64 ms of wall clock, paid only on a host where the arm is reachable at all.
+    let againBudget = 64;
     while (offset < data.length) {
-      const read = fs.readSync(descriptor, data, offset, data.length - offset, null);
+      let read;
+      try {
+        read = fs.readSync(descriptor, data, offset, data.length - offset, null);
+      } catch (error) {
+        if ((error.code === 'EAGAIN' || error.code === 'EWOULDBLOCK') && againBudget > 0) {
+          againBudget -= 1;
+          sleep(1, { bestEffort: true });
+          continue;
+        }
+        throw error;
+      }
       if (read === 0) fail(`file changed while reading: ${file}`);
       offset += read;
     }
@@ -537,14 +617,37 @@ function buildContext(options) {
   };
 }
 
-// `options.allowMissingProjectRoot` waives ONE check and nothing else: whether
-// the recorded project root still exists on disk. It defaults to off, so every
-// caller that does not opt in keeps the strict behaviour. The only opt-in
-// caller is readOrphanedProjectRootContext, which separately PROVES the path is
-// absent — waiving the check does not mean the field is unvalidated, because
-// the requireText loop below still rejects a missing, blank, or unsafe value.
+// `options.allowMissingProjectRoot` and `options.allowMissingPluginRoot` are NOT
+// symmetric, and the asymmetry is stated HERE because this is the block a caller
+// reads before opting in.
+//
+// `allowMissingProjectRoot` waives ONE check and nothing else: whether that
+// recorded root still exists on disk.
+//
+// `allowMissingPluginRoot` waives THREE, because readContextInternal reads the
+// same flag a SECOND time — the root's existence here, plus the runtime-digest
+// re-measure and the manifest-version match there. It CANNOT be narrowed: both of
+// those read the tree that is gone (computeRuntimeDigest and pluginMetadata are
+// handed context.plugin_root), so they have no input once the installation is
+// pruned. Splitting the flag in two would advertise a separation that does not
+// exist.
+//
+// State what that costs precisely, because it reads worse than it is: the waiver
+// drops a CONSISTENCY check, not a barrier. runtime_digest is a content hash of a
+// readable tree computed by an exported pure function — never a secret — so anyone
+// able to write the private records directory could always mint a record carrying
+// a correct digest for the executing tree. The barrier is that directory itself,
+// and every other bound still holds; readPrunedPluginRootContext enumerates them.
+//
+// Both default to off, so every caller that does not opt in keeps the strict
+// behaviour. Each has exactly one opt-in caller —
+// readOrphanedProjectRootContext and readPrunedPluginRootContext — which
+// separately PROVES the path is absent and re-applies the shape half through
+// requireAbsentDirectoryPath. Waiving the check does not mean the field is
+// unvalidated: the requireText loop below still rejects a missing or blank value.
 function validateContext(context, expectedHost, options) {
   const allowMissingProjectRoot = Boolean(options && options.allowMissingProjectRoot);
+  const allowMissingPluginRoot = Boolean(options && options.allowMissingPluginRoot);
   if (!context || typeof context !== 'object' || Array.isArray(context)) {
     fail('context record must be an object');
   }
@@ -573,7 +676,9 @@ function validateContext(context, expectedHost, options) {
   if (!allowMissingProjectRoot) {
     canonicalDirectory(context.project_root, 'context project root');
   }
-  canonicalDirectory(context.plugin_root, 'context plugin root');
+  if (!allowMissingPluginRoot) {
+    canonicalDirectory(context.plugin_root, 'context plugin root');
+  }
   canonicalDirectory(context.plugin_data, 'context plugin data');
   if (!HASH_RE.test(context.runtime_digest)) {
     fail('context runtime digest is invalid');
@@ -588,9 +693,27 @@ function contextRecordFile(recordsDir, sessionId) {
   return path.join(recordsDir, `${sessionKey(sessionId)}.json`);
 }
 
-function sleep(milliseconds) {
-  const buffer = new SharedArrayBuffer(4);
-  Atomics.wait(new Int32Array(buffer), 0, 0, milliseconds);
+// THE ONE PAUSE PRIMITIVE, and the fault contract is the CALLER'S to state. A
+// second copy of this function shipped beside it for one release, performing the
+// identical `Atomics.wait` while SWALLOWING a throw — so the module held two
+// opposite contracts for one mechanism and nothing said which was right. On a
+// build without `SharedArrayBuffer`, or one that refuses `Atomics.wait` on the
+// main thread, the two would have diverged exactly where it matters: the lock
+// poll would throw while the reader spun.
+//
+// The DEFAULT is strict, because that is what a poll that must actually wait
+// needs — silently not waiting there would burn the CPU and break the lock's own
+// timing, which is worse than a loud failure. `bestEffort` is opt-in for a caller
+// whose bound terminates without the pause: the EAGAIN retry is bounded at 64
+// iterations either way, so for it a missing pause costs latency and nothing else.
+function sleep(milliseconds, options) {
+  const bestEffort = !!(options && options.bestEffort);
+  try {
+    const buffer = new SharedArrayBuffer(4);
+    Atomics.wait(new Int32Array(buffer), 0, 0, milliseconds);
+  } catch (error) {
+    if (!bestEffort) throw error;
+  }
 }
 
 function processStartIdentity(pid) {
@@ -1294,23 +1417,35 @@ function readContextInternal(options) {
   const file = contextRecordFile(recordsDir, options.sessionId);
   const context = validateContext(readJson(file), options.expectedHost, {
     allowMissingProjectRoot: options.allowMissingProjectRoot,
+    allowMissingPluginRoot: options.allowMissingPluginRoot,
   });
   if (context.session_id_hash !== sessionIdHash(options.sessionId)) {
     fail('context session hash mismatch');
   }
-  const currentDigest = computeRuntimeDigest(context.plugin_root, context.host);
-  if (currentDigest !== context.runtime_digest) {
-    fail('context runtime digest mismatch');
-  }
-  const { manifest } = pluginMetadata(context.plugin_root, context.host);
-  if (manifest.version !== context.plugin_version) {
-    fail('context plugin version mismatch');
+  // With the minting installation gone there is nothing to re-measure: the
+  // digest and the declared version stay shape-checked by validateContext and
+  // are otherwise taken on the record's word. That is the stated cost of the
+  // pruned-root waiver, and readPrunedPluginRootContext — its only caller —
+  // proves the root is absent before it hands the record to anyone.
+  if (!options.allowMissingPluginRoot) {
+    const currentDigest = computeRuntimeDigest(context.plugin_root, context.host);
+    if (currentDigest !== context.runtime_digest) {
+      fail('context runtime digest mismatch');
+    }
+    const { manifest } = pluginMetadata(context.plugin_root, context.host);
+    if (manifest.version !== context.plugin_version) {
+      fail('context plugin version mismatch');
+    }
   }
   return context;
 }
 
 function readContext(options) {
-  return readContextInternal({ ...options, allowMissingProjectRoot: false });
+  return readContextInternal({
+    ...options,
+    allowMissingProjectRoot: false,
+    allowMissingPluginRoot: false,
+  });
 }
 
 // One of the two bind failures a caller may treat as "nothing left to enforce"
@@ -1330,28 +1465,41 @@ function readContext(options) {
 // not a vanished worktree, and a second disagreement is never relaxed alongside
 // the first. Throws on every one of them; returns the context only for the
 // exact state described above.
-// Control characters and DEL. canonicalDirectory rejects a subset of these on
-// the strict path; the orphan reader skips that function for its EXISTENCE
-// check and must not lose its shape check with it.
-const UNSAFE_PATH_CHARACTERS = new RegExp('[\\u0000-\\u001f\\u007f]');
-
 function readOrphanedProjectRootContext(options) {
-  const context = readContextInternal({ ...options, allowMissingProjectRoot: true });
+  // Both waivers are pinned, not just this reader's own: the spread carries the
+  // caller's options, and the COMBINED state — project root gone AND installation
+  // pruned — must refuse because the reader forbids it, never because no caller
+  // happened to pass the other flag. readContext pins both for the same reason.
+  const context = readContextInternal({
+    ...options,
+    allowMissingProjectRoot: true,
+    allowMissingPluginRoot: false,
+  });
   // Waiving canonicalDirectory waives its EXISTENCE check, which is the point —
   // but it would also waive that function's shape validation, and this value is
   // not inert: callers print it to stderr and into the /zensu:doctor report,
-  // which the doctor skill renders verbatim. Without these two guards a record
+  // which the doctor skill renders verbatim. Without the shape half a record
   // whose project_root alone was edited to an absent path carrying newlines or
   // ANSI escapes would classify as the relaxable state and get its bytes echoed
   // into a terminal and into the model's context — a record the strict
-  // readContext fails closed on. Re-apply the shape half, so EXISTENCE stays
-  // the only waived check.
-  if (UNSAFE_PATH_CHARACTERS.test(context.project_root)) {
-    fail('context project root is unsafe');
-  }
-  if (!path.isAbsolute(context.project_root)) {
-    fail('context project root must be absolute');
-  }
+  // readContext fails closed on. Re-apply it, so EXISTENCE stays the only
+  // waived check.
+  //
+  // NAMING THE TIGHTENING, because the extraction carried it in silently and the
+  // reworded sentence above absorbs it without saying so. The inline code this
+  // replaced applied TWO checks, UNSAFE_PATH_CHARACTERS and path.isAbsolute.
+  // requireAbsentDirectoryPath adds a THIRD — `path.resolve(value) !== value` — so
+  // a project_root that is absent, absolute and control-character free but NOT
+  // resolve-normalized used to classify as the relaxable orphan state, where Stop
+  // releases and the gates relax, and now fails closed into the generic deny. The
+  // tightening is INTENDED for this reader: the value reaches the same terminal and
+  // the same report the other two checks protect, and a non-normalized spelling is
+  // exactly the shape that makes a printed path mean something other than it reads.
+  // The practical blast radius is nil, because project_root is minted through
+  // canonicalDirectory and a realpathSync.native result is resolve-stable on POSIX
+  // and win32 alike — but that is an argument, not a test, so this arm has its own
+  // unit case rather than inheriting the pruned call site's.
+  requireAbsentDirectoryPath(context.project_root, 'context project root');
   // lstat, never realpath: realpath follows a symlink and would report a
   // dangling link as absent, quietly turning a present-but-wrong root into the
   // relaxable state.
@@ -1367,8 +1515,40 @@ function readOrphanedProjectRootContext(options) {
   fail('context project root still exists');
 }
 
+// The relaxed reader for the OTHER recorded root. An installation the host has
+// pruned from its plugin cache leaves a record that is intact in every respect
+// except that its plugin_root no longer exists — and with it every way to
+// re-measure the runtime digest or re-read the declared version. Existence is
+// the one waived check, and it is proven rather than assumed: the path must be
+// absent (lstat, never realpath, for the reason the orphan reader states), and
+// its PARENT must still be a real directory, because a pruned installation
+// leaves its cache directory behind while a record naming a root under a
+// directory that never existed is not this state. Lineage is deliberately NOT
+// judged here — the state is reachable under a compatible lineage too, and in
+// both cases the record cannot be served; the callers decide what the absence
+// means, and adoption is the one exit.
+function readPrunedPluginRootContext(options) {
+  // Sibling waiver pinned off — see readOrphanedProjectRootContext above.
+  const context = readContextInternal({
+    ...options,
+    allowMissingPluginRoot: true,
+    allowMissingProjectRoot: false,
+  });
+  requireAbsentDirectoryPath(context.plugin_root, 'context plugin root');
+  canonicalDirectory(path.dirname(context.plugin_root), 'context plugin root parent');
+  try {
+    fs.lstatSync(context.plugin_root);
+  } catch (error) {
+    if (error.code === 'ENOENT') return context;
+    fail('context plugin root is unreadable');
+  }
+  fail('context plugin root still exists');
+}
+
 // ---------------------------------------------------------------------------
-// Adoption — serving an intact record from a declared-incompatible lineage.
+// Adoption — taking an intact record over when the executing runtime cannot SERVE
+// it: a declared-incompatible lineage, or a pruned minting installation. Say
+// "taking over", never "serving": a pruned record is adopted once and never served.
 // ---------------------------------------------------------------------------
 //
 // runtimeLineageCompatible decides who may serve a record from the DECLARED
@@ -1406,7 +1586,9 @@ function readOrphanedProjectRootContext(options) {
 // composes it with the creating helpers; adoptionWorkflowStatePath composes it
 // without them. Both must agree, or the read-only probe and the read it guards
 // resolve to different files.
-const WORKFLOW_STATE_SEGMENTS = ['.zensu', 'state'];
+// Frozen because it is EXPORTED: an external consumer that pushed a segment
+// would move where this module itself resolves every workflow document.
+const WORKFLOW_STATE_SEGMENTS = Object.freeze(['.zensu', 'state']);
 const WORKFLOW_STATE_PREFIX = 'tdd-phase-';
 
 const ADOPTION_REFUSALS = {
@@ -1463,18 +1645,44 @@ function adoptableRecord(options) {
   let executingPluginRoot;
   let pluginData;
   let context;
+  let prunedPluginRoot = false;
   try {
     executingPluginRoot = canonicalDirectory(options.executingPluginRoot, 'executing plugin root');
     pluginData = canonicalDirectory(options.pluginData, 'plugin data');
-    // Condition 1 — the record is still provably itself. readContext recomputes
-    // the runtime digest against the RECORDED root and re-reads that root's
-    // manifest, so a forged or hand-edited record cannot reach adoption; it also
-    // enforces the context schema and that the recorded project root exists.
-    context = readContext({
+    // Condition 1 — the record is still provably itself. On the STRICT branch
+    // readContext recomputes the runtime digest against the RECORDED root and
+    // re-reads that root's manifest, so a forged or hand-edited record cannot
+    // reach adoption; it also enforces the context schema and that the recorded
+    // project root exists.
+    //
+    // A recorded installation the host PRUNED from its cache is the ONE
+    // disagreement admitted past that strict read, and only through it failing
+    // first. Say what the relaxed branch gives up, because "the root's existence
+    // alone" is false: readPrunedPluginRootContext proves the absence and waives
+    // THREE checks — the root's existence, the digest re-measure and the
+    // manifest-version match — the last two because they read the tree that is
+    // gone. So the forgery sentence above does NOT carry over: here the digest
+    // and the declared version are taken on the record's word.
+    //
+    // What still bounds this branch, stated rather than left to be inferred: the
+    // session-id hash, the full schema and principal-profile validation,
+    // source_revision === runtime_digest, plugin_data equality, the sibling-root
+    // bound, ADOPTION_SAFE_VERSION_RE on both versions before either reaches a
+    // filename, the never-backwards comparison, and the PROVEN absence of the
+    // recorded root with its parent still present. The barrier was never the
+    // digest — it is the private records directory. That is the stated cost, and
+    // the reason such a record is adopted once rather than served.
+    const readerOptions = {
       recordsDir: options.recordsDir,
       sessionId: options.sessionId,
       expectedHost: options.host,
-    });
+    };
+    try {
+      context = readContext(readerOptions);
+    } catch {
+      context = readPrunedPluginRootContext(readerOptions);
+      prunedPluginRoot = true;
+    }
   } catch {
     return adoptionRefusal(ADOPTION_REFUSALS.RECORD_UNREADABLE);
   }
@@ -1493,7 +1701,10 @@ function adoptableRecord(options) {
   //
   // Condition 3 — nothing to adopt when this runtime already serves the record.
   // Refusing here keeps adoption from being a way to re-mint a healthy session.
-  if (servesRecordedRuntime(context, executingPluginRoot, context.host)) {
+  // A pruned root serves nothing — the strict read already failed — so the
+  // check is skipped for it: a compatible-but-pruned record is adoptable, not
+  // "already served", because no installation can bind it any more.
+  if (!prunedPluginRoot && servesRecordedRuntime(context, executingPluginRoot, context.host)) {
     return adoptionRefusal(ADOPTION_REFUSALS.ALREADY_SERVED);
   }
   // Condition 4 — the same structural bound servesRecordedRuntime applies: a
@@ -1549,6 +1760,7 @@ function adoptableRecord(options) {
     context,
     recorded: context.plugin_version,
     executing: executingVersion,
+    prunedPluginRoot,
   };
 }
 
@@ -1646,6 +1858,7 @@ function adoptContext(options) {
       recorded: verdict.recorded,
       executing: verdict.executing,
       projectRoot: verdict.context.project_root,
+      prunedPluginRoot: verdict.prunedPluginRoot,
     };
   });
 
@@ -4327,6 +4540,13 @@ module.exports = {
   SCHEMA_VERSION,
   WORKFLOW_SCHEMA,
   ATTESTATION_SCHEMA,
+  // The workflow-document LAYOUT, exported so a caller that must judge the file
+  // before this module opens it does not re-spell the path. `workflowStateFile`
+  // is deliberately NOT the export for that job: it reaches
+  // `ensureDescendantDirectory`, so merely asking it for the path CREATES the
+  // directory, which is the opposite of what a read-only pre-check wants.
+  WORKFLOW_STATE_SEGMENTS,
+  WORKFLOW_STATE_PREFIX,
   sessionIdHash,
   sessionKey,
   computeRuntimeDigest,
@@ -4337,6 +4557,9 @@ module.exports = {
   registerContext,
   readContext,
   readOrphanedProjectRootContext,
+  readPrunedPluginRootContext,
+  requireAbsentDirectoryPath,
+  ADOPTION_SAFE_VERSION_RE,
   ADOPTION_REFUSALS,
   ADOPTION_HISTORY_PHASE,
   ADOPTION_HISTORY_REASON_PREFIX,
