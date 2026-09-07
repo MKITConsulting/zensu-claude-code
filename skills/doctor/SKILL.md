@@ -374,7 +374,7 @@ classifier will refuse a spawn, not only when the whole table is green.
   re-create exactly the printed directory and the recorded session binds again.
   Otherwise start a fresh session. Meanwhile the session is diagnosable but not
   workable — this read-only report runs, `Stop` is released rather than wedged,
-  and `Edit`/`Write` stay denied because nothing can anchor a write to a
+  and `Edit`, `Write`, `MultiEdit` and any Bash command that WRITES stay denied because nothing can anchor a write to a
   project. Do NOT report this row as a missing record.
 - **A plugin upgrade is normally NOT a binding failure any more.** A record binds
   to any executing installation whose declared version is a compatible lineage of
@@ -396,7 +396,36 @@ classifier will refuse a spawn, not only when the whole table is green.
   condition that failed, and `workflow-schema-mismatch` in particular means a
   persisted shape really did change and a fresh session is the only way forward.
   Adoption re-binds the session from the next tool call onward — do NOT tell the
-  user to restart after a successful one.
+  user to restart after a successful one. Carry the same conditional limit the
+  row below carries: if the recorded project root is ALSO gone, the adoption
+  clears the lineage break while `Edit`, `Write`, `MultiEdit` and any Bash command that WRITES stay denied until that exact
+  directory is re-created. This row is reachable in that state — the doctor
+  falls back to it whenever the third-fact probe cannot answer — so offering the
+  remedy without the clause would promise something this check did not establish.
+- **❌ binding: this session's Session Control record is readable, but BOTH the
+  recorded project root … is gone and the running Zensu installation declares an
+  incompatible lineage** → both of the two rows above at once, and it is its own
+  row because each of those two answers "not me" for it. It prints the dead path
+  AND both declared versions. Never report it as a missing record. It IS
+  repairable in place and `/zensu:adopt-session` applies — that is the difference
+  from the plain orphaned row, which the running installation already serves and
+  which adoption refuses as `already-served`. State the limit whenever you offer
+  the repair: adoption clears the LINEAGE break, so READ-ONLY Bash and this
+  diagnostic work again, while `Edit`, `Write`, `MultiEdit` and any Bash command that WRITES
+  stay denied until that exact directory is re-created — a write cannot be
+  attributed to a project that is not there. The workflow document lived under
+  that directory and is not reachable from this record, so no chain state is
+  reachable and no later `Stop` can enforce it while that directory is missing —
+  do not tell the user their review chain resumes. If it was moved rather than
+  deleted, its state still exists there — and say the ORDER, because it decides
+  whether a check runs at all: re-creating exactly that directory **first** is the
+  better order. Adoption then reads that workflow document and verifies its schema,
+  so a genuine break is named as `workflow-schema-mismatch` with a remedy; adopting
+  first skips that check, because it is guarded on the document being reachable, and
+  a document restored afterwards surfaces a mismatch later as an anonymous
+  fail-closed deny. Re-creating first also yields a fully bound session rather than
+  an orphaned one. Never close this row by telling the user to adopt and then
+  restore — that is the order every offer implies and the one that loses the check.
   **The converse also has no row, and it matters for a trust question.** Because
   the rule compares declared versions and never content, a *bound* session's
   enforcing runtime may be a different installation that merely shares

@@ -190,13 +190,19 @@ fi
 # cannot bind points the user here, so reproduce that exact binding attempt.
 # It needs the two inputs the model-side path needs; without them this stays
 # `unknown` and the renderer prints nothing rather than a guess.
-# Injectable alongside ZDOC_BINDING, and empty for every verdict except
-# orphaned-project-root, which is the only one that has a path to report.
+# Injectable alongside ZDOC_BINDING, and empty for every verdict except the two
+# that have a path to report: orphaned-project-root and
+# orphaned-project-root+incompatible-runtime.
 ZDOC_BINDING_PROJECT_ROOT="${ZDOC_BINDING_PROJECT_ROOT:-}"
-# Same contract for the version pair: empty for every verdict except
-# incompatible-runtime and pruned-plugin-root, the two that name a version pair.
+# Same contract for the version pair: empty for every verdict except the three
+# that have versions to name — incompatible-runtime, pruned-plugin-root and
+# orphaned-project-root+incompatible-runtime.
 ZDOC_BINDING_RECORDED_VERSION="${ZDOC_BINDING_RECORDED_VERSION:-}"
 ZDOC_BINDING_EXECUTING_VERSION="${ZDOC_BINDING_EXECUTING_VERSION:-}"
+# Set only on the incompatible-runtime verdict, and only when the third-fact
+# probe could not answer at all. It is the difference between "the recorded root
+# is still there" and "nobody could tell", which the row must not blur.
+ZDOC_BINDING_ROOT_UNKNOWN="${ZDOC_BINDING_ROOT_UNKNOWN:-}"
 ZDOC_BINDING_VERSIONS=""
 # ONE implementation of the version-pair probe the binding ladder below runs for
 # each named state. The two copies were identical but for the predicate name —
@@ -375,12 +381,123 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
         ZDOC_BINDING_EXECUTING_VERSION="${ZDOC_BINDING_VERSIONS##*$'\t'}"
         break
       done
+      # The THIRD probe, layered on top of the loop above rather than folded into
+      # it. The loop's two predicates are disjoint and interchangeable; this one is
+      # NOT — it refines a verdict the loop has already reached, so it runs only
+      # once that verdict is the lineage break, and never on its own.
+      if [ "$ZDOC_BINDING" = incompatible-runtime ]; then
+        # THIRD narrow question, asked ONLY once the lineage break is
+        # established, and never on its own. The orphan question above already
+        # answered no for this session — it re-applies servesRecordedRuntime,
+        # which an incompatible lineage fails — so a record that is BOTH orphaned
+        # and lineage-incompatible would otherwise be reported as a plain lineage
+        # break and the user would never learn their project root is gone. That
+        # matters after the repair as much as before it: adoption succeeds in this
+        # state and leaves the session orphaned, where Edit, Write and any WRITING
+        # Bash command still deny — read-only Bash and this diagnostic do run.
+        # No shape guard here, matching the orphan branch above: the printed path
+        # comes from readOrphanedProjectRootContext, which rejects control
+        # characters and a non-absolute value before it returns.
+        # `|| exit 1` rather than `&&`, mirroring the versions probe above. Under
+        # `&&` a failed source leaves the SOURCE's status in the subshell's exit
+        # code, and the ladder below reads every value except 3 as unknown — so a
+        # source that happened to exit 3 would clear the unknown flag and let the
+        # plain lineage row DROP its hedge, implicitly asserting the recorded
+        # project root still exists on evidence nobody produced. That is the exact
+        # collapse the block below says it exists to prevent. The library's last
+        # statement is `export -f ... || true`, so today a successful source
+        # returns 0 and a missing file returns 1; this normalizes the CHANNEL, not
+        # a demonstrated 3.
+        # The status VOCABULARY is named in zensu-session.sh, and every `source` of that
+        # library in this file is inside a command substitution, so the names are not in
+        # scope out here — reading one directly under `set -u` aborted the whole
+        # diagnostic. Both values are copied out of the owner in ONE subshell rather than
+        # re-spelled as literals, which is the point of naming them at all.
+        #
+        # Each is then SCREENED as a decimal, the same guard ZDOC_TTL_REBOUND gets above.
+        # An owner that RETYPED a value — `PRESENT=present` rather than `=3` — passes a
+        # bare non-empty test and then reaches `-eq` with a non-numeric operand, which
+        # bash reports on a stderr this script does NOT redirect and which the model reads
+        # verbatim. Screening turns that into the empty value the fail-safe already
+        # handles.
+        ZDOC_ROOT_STATE_PAIR="$(
+          # shellcheck disable=SC1090
+          source "$DIR/zensu-session.sh" >/dev/null 2>&1 \
+            && printf '%s\t%s' "${ZENSU_ROOT_STATE_GONE:-}" "${ZENSU_ROOT_STATE_PRESENT:-}"
+        )" || ZDOC_ROOT_STATE_PAIR=""
+        ZDOC_ROOT_STATE_GONE="${ZDOC_ROOT_STATE_PAIR%%$'\t'*}"
+        ZDOC_ROOT_STATE_PRESENT="${ZDOC_ROOT_STATE_PAIR#*$'\t'}"
+        case "$ZDOC_ROOT_STATE_GONE" in ''|*[!0-9]*) ZDOC_ROOT_STATE_GONE='' ;; esac
+        case "$ZDOC_ROOT_STATE_PRESENT" in ''|*[!0-9]*) ZDOC_ROOT_STATE_PRESENT='' ;; esac
+        if ZDOC_BINDING_PROJECT_ROOT="$(
+          # shellcheck disable=SC1090
+          source "$DIR/zensu-session.sh" >/dev/null 2>&1 || exit 1
+          zensu_session_incompatible_orphaned_root_model
+        )"; then
+          ZDOC_ORPHAN_ROOT_STATUS=0
+        else
+          ZDOC_ORPHAN_ROOT_STATUS=$?
+          ZDOC_BINDING_PROJECT_ROOT=""
+        fi
+        # The GONE half is guarded exactly like the PRESENT half below, and for the
+        # same reason. It shipped as "${ZDOC_ROOT_STATE_GONE:-0}", which defeated both
+        # halves of the screen above it: an owner that is unreadable, or whose constant
+        # was retyped, yielded the empty string and the default then put the literal 0
+        # back — the magic number this pair exists to remove — while still being able to
+        # select the row that ASSERTS the recorded project root is gone. Requiring the
+        # value instead routes an unresolvable constant to the else arm, which renders
+        # the hedged row and sets the unknown flag. That is the fail-safe direction: a
+        # missing constant must cost a definite claim, never manufacture one.
+        if [ -n "$ZDOC_ROOT_STATE_GONE" ] \
+        && [ "$ZDOC_ORPHAN_ROOT_STATUS" -eq "$ZDOC_ROOT_STATE_GONE" ] \
+        && [ -n "$ZDOC_BINDING_PROJECT_ROOT" ]; then
+        ZDOC_BINDING=orphaned-project-root+incompatible-runtime
+        # The probe POSITIVELY answered here, so the unknown flag must not be
+        # set: the gone status is not the present one, and an unguarded test would
+        # export "unknown"
+        # for the one state where the answer is certain. Placing the flag
+        # outside this branch is exactly the trap the block below claims to
+        # close.
+        ZDOC_BINDING_ROOT_UNKNOWN=""
+        else
+        # WHY the status is captured at all, given both remaining arms render the
+        # same verdict: it is what makes the claim CHECKABLE. The PRESENT status positively
+        # says the recorded root is still there; every other non-zero says the
+        # question could not be answered. The plain `incompatible-runtime` row
+        # therefore has to be true in BOTH cases, which is why its body carries
+        # the conditional Edit/Write clause rather than an unqualified repair
+        # offer — an earlier revision of this block claimed the renderer already
+        # did that and it did not. Export the distinction so the row can say so,
+        # and so a future arm cannot be added that silently assumes a negative.
+        # The status vocabulary is NAMED in zensu-session.sh, and this file only ever
+        # sources that library inside a command substitution — every `source` call
+        # here is in a subshell — so the name is not in scope out here, and under
+        # `set -u` reading it directly aborts the whole diagnostic. Read the VALUE out
+        # of the owner instead of re-spelling the literal: that keeps ONE definition,
+        # which is the entire point of giving the trichotomy a name.
+        #
+        # The guard fails SAFE, and the direction is deliberate: a rename or removal
+        # in the owner yields an empty string and the flag stays SET, so the row says
+        # the question could not be determined. Defaulting to the literal instead
+        # would silently restore the magic number this change exists to remove.
+        # The `|| ZDOC_BINDING_ROOT_UNKNOWN=1` shape is kept deliberately: AC-C19 counts
+        # this exact line, because it sits after a `||` and so no anchored count of the
+        # assignments above reaches it — deleting it once left the clause permanently
+        # unreachable with every row still green. An `if` block reads more plainly and
+        # was tried; it makes that pin count zero, which is the wrong trade.
+        ZDOC_BINDING_ROOT_UNKNOWN=""
+        [ -n "$ZDOC_ROOT_STATE_PRESENT" ] \
+          && [ "$ZDOC_ORPHAN_ROOT_STATUS" -eq "$ZDOC_ROOT_STATE_PRESENT" ] \
+          || ZDOC_BINDING_ROOT_UNKNOWN=1
+        fi
+      fi
     fi
   fi
 fi
 
 export ZDOC_ZENSU ZDOC_NODE ZDOC_PLAYWRIGHT ZDOC_BINDING ZDOC_BINDING_PROJECT_ROOT \
   ZDOC_BINDING_RECORDED_VERSION ZDOC_BINDING_EXECUTING_VERSION \
+  ZDOC_BINDING_ROOT_UNKNOWN \
   ZDOC_SESSION_KEY ZDOC_SESSION_PROJECT_ROOT
 
 if ! command -v node >/dev/null 2>&1; then
