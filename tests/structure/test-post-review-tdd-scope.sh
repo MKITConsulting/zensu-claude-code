@@ -912,25 +912,50 @@ S20_AFTER="$(digest "$S20_STATE")"
   && check "S20 a matched ticket alone arms the disclosure when the prompt does not open with the marker" PASS \
   || check "S20 a matched ticket alone arms the disclosure when the prompt does not open with the marker" FAIL
 
-# S22 — AC-005. The reminder header claims the phrase lists are mirrored with
-# plan-approved-delegate.sh while the PRECEDENCE is not, and nothing pinned either
-# half: a grep over tests/ for its distinguishing literals returned nothing, so the
-# qualification could be deleted or re-broken with every suite green. It was in fact
-# shipped garbled once, as a duplicated noun phrase left by a substitution.
+# S22 — AC-005. The reminder header states how its fast-path phrase lists relate to
+# plan-approved-delegate.sh's, and nothing pinned that claim: a grep over tests/ for
+# its distinguishing literals returned nothing, so it could be deleted or re-broken
+# with every suite green. It was in fact shipped garbled once, as a duplicated noun
+# phrase left by a substitution.
+#
+# The needles moved when the plan hook grew its four-route delivery question and this
+# header was rewritten around it. The property is the same and is now stated in three
+# parts: the two lists OVERLAP rather than nest, neither is a superset of the other,
+# and this hook mirrors ONLY the TDD half — which is what makes a claim of mirrored
+# precedence impossible to write here in the first place. Anchor on those, and keep
+# the garble arm FILE-INDEPENDENT rather than on the retired phrase: a substitution
+# that duplicates a noun phrase leaves an immediately repeated word run, and that is
+# detectable without knowing which sentence broke.
 S22_HOOK="$PLUGIN_DIR/hooks/user-prompt-tdd-reminder.sh"
 # Strip the comment marker from each line BEFORE flattening. A needle spanning a
 # line break otherwise carries the NEXT line's `#`, which couples it to the physical
 # wrap: a benign reflow of this comment turns the check red, and a re-garble wrapped
 # one word earlier escapes it entirely. Count OCCURRENCES with grep -o, not lines:
 # after flattening the stream is one line, so grep -c can only ever answer 0 or 1.
-s22_flat() { sed 's/^[[:space:]]*#[[:space:]]\{0,1\}//' "$1" | tr '\n' ' ' | tr -s ' '; }
-S22_LISTS="$(s22_flat "$S22_HOOK" | grep -o 'IN THEIR PHRASE LISTS' | wc -l | tr -d ' ')"
-S22_PREC="$(s22_flat "$S22_HOOK" | grep -o 'NOT identical in PRECEDENCE' | wc -l | tr -d ' ')"
-S22_DUP="$(s22_flat "$S22_HOOK" | grep -o 'utterance like a mixed utterance' | wc -l | tr -d ' ')"
-if [ "$S22_LISTS" -ge 1 ] && [ "$S22_PREC" -eq 1 ] && [ "$S22_DUP" -eq 0 ]; then
-  check "S22 the reminder header claims mirrored phrase lists without claiming mirrored precedence, ungarbled" PASS
+s22_flat() { sed -n '1,/^set -u/p' "$1" | sed 's/^[[:space:]]*#[[:space:]]\{0,1\}//' | tr '\n' ' ' | tr -s ' '; }
+S22_LISTS="$(s22_flat "$S22_HOOK" | grep -o 'OVERLAP rather than nest' | wc -l | tr -d ' ')"
+S22_SUPERSET="$(s22_flat "$S22_HOOK" | grep -o 'neither is a superset of the other' | wc -l | tr -d ' ')"
+S22_SCOPE="$(s22_flat "$S22_HOOK" | grep -o 'mirrors ONLY the TDD half' | wc -l | tr -d ' ')"
+S22_DUP="$(s22_flat "$S22_HOOK" | node -e '
+let s = "";
+process.stdin.on("data", (c) => { s += c; });
+process.stdin.on("end", () => {
+  // A substitution that duplicates a noun phrase leaves an immediately repeated
+  // run of words. Four is the width: shorter runs occur legitimately, and the
+  // observed garble repeated more than four. Measured against this header on
+  // 2026-09-07: 228 words, zero repeats, so the arm is not vacuous by luck.
+  const w = s.trim().split(/\s+/);
+  let hits = 0;
+  for (let i = 0; i + 8 <= w.length; i++) {
+    if (w.slice(i, i + 4).join(" ") === w.slice(i + 4, i + 8).join(" ")) hits++;
+  }
+  process.stdout.write(String(hits));
+});' 2>/dev/null)"
+case "$S22_DUP" in ''|*[!0-9]*) S22_DUP=-1 ;; esac
+if [ "$S22_LISTS" -eq 1 ] && [ "$S22_SUPERSET" -eq 1 ] && [ "$S22_SCOPE" -eq 1 ] && [ "$S22_DUP" -eq 0 ]; then
+  check "S22 the reminder header states how its phrase lists relate to the plan hook, ungarbled" PASS
 else
-  check "S22 the reminder header claims mirrored phrase lists without claiming mirrored precedence, ungarbled (lists=$S22_LISTS precedence=$S22_PREC duplicate=$S22_DUP)" FAIL
+  check "S22 the reminder header states how its phrase lists relate to the plan hook, ungarbled (overlap=$S22_LISTS superset=$S22_SUPERSET scope=$S22_SCOPE repeats=$S22_DUP)" FAIL
 fi
 
 # S23 — AC-006. Both operator carriers state the envelope collapse rule, and the

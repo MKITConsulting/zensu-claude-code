@@ -737,7 +737,7 @@ fi
 # re-points CLAUDE_PROJECT_DIR; placed mid-file it reset the chain for every
 # later case and turned 23 of them red in one run. It therefore sits at the
 # tail, where nothing follows it. The cost is real and is stated rather than
-# hidden: on windows-shard-8 a suite TIMED_OUT truncates the tail first, so
+# hidden: on windows-shard-9 a suite TIMED_OUT truncates the tail first, so
 # this is the check most likely to go unverified there. Closing that needs the
 # fixture to stop calling start_session, not a move.
 # The exactly-one rule counts DISTINCT lines. A repeat that is byte-identical

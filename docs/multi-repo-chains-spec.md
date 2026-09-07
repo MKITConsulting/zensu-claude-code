@@ -525,9 +525,9 @@ mechanism over `codeRoots[]` is specified as a stage-2 precondition.
 **The Session Control record does not authenticate its own contents either.**
 This matters because §6.1.1 offers that record as a carrier, which reads as
 though it settles requirement 1. `validateContext`
-(`hooks/lib/session-control-core-v1.js:546`) enforces the schema pair, a fixed
+(`hooks/lib/session-control-core-v1.js:648`) enforces the schema pair, a fixed
 list of required fields, and that `source_revision` equals `runtime_digest` — but
-that digest is computed by `manifestRuntimeEntries` (`:391`) over the executing
+that digest is computed by `manifestRuntimeEntries` (`:471`) over the executing
 plugin tree's `hooks`, `agents`, `skills`, `docs` and `templates` plus the
 manifest. Nothing in it covers the record's own fields. A `code_roots` entry
 rewritten in place would leave the digest untouched and validate. There is also
@@ -540,10 +540,10 @@ executing runtime, never of the list. Candidate 1 satisfies requirement 1 only i
 combination with the containment gate of §6.1.2, and its security rests entirely
 on the records directory being unwritable by the session. Two obligations travel
 with it: `adoptContext` re-mints through `buildContext`
-(`hooks/lib/session-control-core-v1.js:1652`), so a new field
+(`hooks/lib/session-control-core-v1.js:582`), so a new field
 must be threaded there or it is silently dropped at every adoption; and a
 `SCHEMA_VERSION` bump makes `readContext` throw, so adoption refuses across that
-one release boundary as `record-unreadable` (`:1386`).
+one release boundary as `record-unreadable` (`:1687`).
 
 The existing inline escapes (`ZENSU_BASH_WRITE_GATE=off`,
 `ZENSU_EDIT_LANDING_GATE=off`) are unchanged and keep landing their bypass-ledger

@@ -228,13 +228,6 @@
           "timeoutMs": 900000
         },
         {
-          "id": "plan-payload-path-transport",
-          "runner": "bash",
-          "path": "tests/structure/test-plan-payload-fallback.sh",
-          "args": [],
-          "timeoutMs": 900000
-        },
-        {
           "id": "tdd-state-junction-safety",
           "runner": "bash",
           "path": "tests/structure/test-tdd-state-path-safety.sh",
@@ -373,6 +366,19 @@
           "args": [],
           "timeoutMs": 600000
         },
+        {
+          "id": "plan-payload-path-transport",
+          "runner": "bash",
+          "path": "tests/structure/test-plan-payload-fallback.sh",
+          "args": [],
+          "timeoutMs": 1200000
+        }
+      ]
+    },
+    "windows-shard-9": {
+      "platform": "win32",
+      "profileTimeoutMs": 1800000,
+      "suites": [
         {
           "id": "post-review-self-review-handoff",
           "runner": "bash",

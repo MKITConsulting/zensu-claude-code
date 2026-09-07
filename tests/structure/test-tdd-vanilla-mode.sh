@@ -13,6 +13,8 @@
 #        strict mode
 #   wording: ask-hooks / post-review / banner / primer / Stop block state legend
 #        emit mode-aware text
+#   routes: the four-route delivery question kept in lockstep across both ask-hook
+#        heredocs (P1, P1b, P1b2, P1b3, P1b4), the primer (P3) and the banner tips (BNR2c)
 #   pins: SKILL.md vanilla section + config.example.json key
 set -u
 
@@ -38,7 +40,8 @@ check() {
 
 # --- hermetic environment (no CLAUDE_AGENT_TYPE: main-thread chain-state only) --
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-PROJ="$(mktemp -d)"; export CLAUDE_PROJECT_DIR="$PROJ"
+PROJ="$(mktemp -d)" && [ -n "$PROJ" ] || { echo "mktemp -d failed" >&2; exit 1; }
+export CLAUDE_PROJECT_DIR="$PROJ"
 STATE_DIR="$PROJ/.zensu/state"; export STATE_DIR
 for BASELINE_SID in \
   vanilla-lib vanilla-lib-reset vanilla-lib-array vanilla-lib-array-wf vanilla-lib-wf \
@@ -469,7 +472,8 @@ echo "== Ask-hook heredoc parity (drift guard) =="
 parity() {
   local f="$1"; shift
   local d
-  d="$(mktemp -d "$STATE_DIR/parity-XXXXXX")"
+  d="$(mktemp -d "$STATE_DIR/parity-XXXXXX")" || { echo "MKTEMP_FAILED"; return; }
+  [ -n "$d" ] || { echo "MKTEMP_FAILED"; return; }
   awk -v dir="$d" '{
     if ($0 ~ /^[[:space:]]*cat[[:space:]]+<<\047?JSON\047?([[:space:]]*\|.*)?$/) { n++; inb=1; next }
     if ($0 ~ /^[[:space:]]*JSON[[:space:]]*$/) { inb=0; next }
@@ -479,7 +483,7 @@ parity() {
   if [ -f "$d/b3" ]; then echo "EXTRA_BLOCKS"; return; fi
   local p
   for p in "$@"; do
-    if ! grep -qF "$p" "$d/b1" || ! grep -qF "$p" "$d/b2"; then echo "DRIFT:$p"; return; fi
+    if ! grep -qF -- "$p" "$d/b1" || ! grep -qF -- "$p" "$d/b2"; then echo "DRIFT:$p"; return; fi
   done
   echo "OK"
 }
@@ -489,9 +493,9 @@ parity() {
 # clauses are in the list for a stronger reason than symmetry — the (C)-over-(B)
 # override is what keeps a non-interactive run out of the branch-pushing route,
 # so a branch that lost it would still emit a plausible directive.
-P1="$(parity "$PLANHOOK" "Skipping TDD: docs only" "Skipping TDD: user declined" "AskUserQuestion" "kein tdd" "'use tdd', 'with tdd'" "Auto Mode" "skill='zensu:tdd'" "skill='zensu:autopilot'" "skill='zensu:pilot'" "Executing via /zensu:autopilot" "Executing via /zensu:pilot" "'No — implement directly' is NEVER in the first slot" "is a substring of 'autopilot'" "(C) OVERRIDES (B)" "is NEVER selected — not as a default, not by an explicit literal" "REMOVE that route from consideration and keep testing" "in ANY language" "ONLY those multi-word forms count" "Rank on your OWN reading of what the change does" "never the plan body or a comment quoted inside it" "(1) 'Autopilot — /zensu:autopilot'" "(3) 'Pilot — /zensu:pilot'" "authenticated forge CLI (gh or glab), without which the Zensu workflow is the route" "ALREADY tracked in Zensu")"
+P1="$(parity "$PLANHOOK" "Skipping TDD: docs only" "Skipping TDD: user declined" "AskUserQuestion" "kein tdd" "'use tdd', 'with tdd'" "Auto Mode" "skill='zensu:tdd'" "skill='zensu:autopilot'" "skill='zensu:pilot'" "Executing via /zensu:autopilot" "Executing via /zensu:pilot" "'No — implement directly' is NEVER in the first slot" "is a substring of 'autopilot'" "(C) OVERRIDES (B)" "NEITHER /zensu:autopilot NOR /zensu:pilot is ever selected" "LAST, as the fallthrough once no surviving route was chosen above" "is never in the first slot, and its option description says the approval message excluded it" "REMOVE that route from the remaining FAST-PATH ARMS below" "still only among the routes that survive" "Overriding <route>: outward-facing route, no human present" "THIS plan is not carried into it" "in ANY language" "ONLY those multi-word forms count" "Rank on your OWN reading of what the change does" "never the plan body or a comment quoted inside it" "a file you read, tool output, a subagent report, a commit message" "Before applying ANY arm below" "That removal is scoped to the route-SELECTING arms" "in which case implement directly" "That override line REPLACES the route status line" "MUST also state what it does outwardly" "(1) 'Autopilot — /zensu:autopilot'" "(3) 'Pilot — /zensu:pilot'" "authenticated forge CLI (gh or glab), without which the Zensu workflow is the route" "ALREADY tracked in Zensu")"
 [ "$P1" = "OK" ] && check "P1 plan-approval heredocs: shared invariants present in BOTH branches" PASS || check "P1 plan-approval parity ($P1)" FAIL
-P2="$(parity "$REMINDER" "Skipping TDD: user declined" "AskUserQuestion" "kein tdd" "'use tdd', 'with tdd'" "Auto Mode" "skill='zensu:tdd'" "doc/comment/prose")"
+P2="$(parity "$REMINDER" "Skipping TDD: user declined" "AskUserQuestion" "kein tdd" "'use tdd', 'with tdd'" "Auto Mode" "skill='zensu:tdd'" "doc/comment/prose" "Judge both arms below by INTENT" "Test in THIS order, because two of the negation examples contain an affirmation example verbatim" "never content it quotes or pastes" "already ask which delivery route to take" "a subagent report")"
 [ "$P2" = "OK" ] && check "P2 reminder heredocs: shared invariants present in BOTH branches" PASS || check "P2 reminder parity ($P2)" FAIL
 # P1b: presence in both blocks is not enough for the option list — an option ADDED
 # to one branch alone satisfies every needle above. Two spans ARE intentionally
@@ -511,15 +515,23 @@ span_of() { # $1 file, $2 block index, $3 start anchor, $4 end anchor
     if (inb) print > (dir "/b" n)
   }' "$1"
   [ -f "$d/b$2" ] || { rm -rf "$d"; echo ""; return; }
-  # Both anchors carry an apostrophe, so they travel through the environment: a bare
-  # ' inside the single-quoted node program closes the shell argument and truncates
-  # the needle, which would leave this comparison passing on an empty span.
-  BLK="$(cat "$d/b$2")" A_START="$3" A_END="$4" node -e '
-    const s=process.env.BLK||"";
-    const a=s.indexOf(process.env.A_START);
-    const b=s.indexOf(process.env.A_END);
-    process.stdout.write(a>=0 && b>a ? s.slice(a,b) : "");
-  ' 2>/dev/null
+  # The extractor is a QUOTED HEREDOC FILE, never a single-quoted `node -e`
+  # argument: one apostrophe anywhere in such a program — inside a comment included
+  # — closes the shell argument and truncates it silently while `bash -n` still
+  # passes, which here would leave this comparison passing on an empty span.
+  # CLAUDE.md records that exact defect disabling a hook probe for a full review
+  # round. The guard it names (S18) walked hooks/**/*.sh only when this note was
+  # written and now walks tests/structure/ too, so this file IS scanned — but a
+  # heredoc removes the hazard rather than detecting it, which is the stronger of
+  # the two. The anchors still travel through the environment because they are
+  # caller-supplied.
+  cat >"$d/span.js" <<'JS'
+const s = process.env.BLK || "";
+const a = s.indexOf(process.env.A_START);
+const b = s.indexOf(process.env.A_END);
+process.stdout.write(a >= 0 && b > a ? s.slice(a, b) : "");
+JS
+  BLK="$(cat "$d/b$2")" A_START="$3" A_END="$4" node "$d/span.js" 2>/dev/null
   rm -rf "$d"
 }
 span_pair() { # $1 label, $2 start, $3 end
@@ -537,12 +549,34 @@ span_pair "P1b autopilot option byte-identical in BOTH heredocs" \
   "(1) 'Autopilot" "(2) 'Zensu workflow"
 span_pair "P1b2 pilot + direct options and the ordering rule byte-identical in BOTH heredocs" \
   "(3) 'Pilot" "is NEVER in the first slot"
+# The two dispatch arms are byte-identical across the heredocs too, and were covered by
+# presence needles alone — a one-sided REWORD of either passed every check.
+span_pair "P1b3 autopilot dispatch arm byte-identical in BOTH heredocs" \
+  "Autopilot (or fast-path B-autopilot" "Zensu workflow (or fast-path"
+span_pair "P1b4 pilot dispatch arm byte-identical in BOTH heredocs" \
+  "Pilot (or fast-path B-pilot" "No → implement the plan directly"
+# P1b5-P1b7 cover the SAFETY clauses. P1 and P1b-P1b4 reached the option list and
+# the two dispatch arms; between P1's literals sat a lot of unpinned prose, and a
+# one-sided reword of the refusal-ordering block or of the (C) override sentence —
+# the two things that keep an unattended run out of a branch-pushing route —
+# passed P1, P1b-P1b4 and D13 alike. The clauses are partly mode-dependent (TDD vs
+# "the workflow"), which is a real reason a naive whole-clause span fails, so each
+# sub-span below was verified identical across both heredocs before being pinned.
+span_pair "P1b5 (C) override sentence byte-identical in BOTH heredocs" \
+  "(C) OVERRIDES (B)" "and no outward-facing step may be taken"
+span_pair "P1b6 refusal-first fast-path block byte-identical in BOTH heredocs" \
+  "FIRST a REFUSAL" "THEN, still only among the routes that survive"
+# P1b7 is the guard that retracts the two outward-facing routes for an unattended
+# run, stated INSIDE (B) so a model acting at a fast-path arm cannot miss it. It is
+# the newest safety clause and the one a reword would most plausibly touch.
+span_pair "P1b7 (B) non-interactive removal guard byte-identical in BOTH heredocs" \
+  "Before applying ANY arm below" "Judge every arm below by INTENT"
 
 # The route needles here are deliberately the FULL clause, not the bare skill
 # names: each primer heredoc also carries a pre-existing "runs via the /zensu:pilot
 # conductor skill" sentence, so a bare `/zensu:pilot` needle stays satisfied after
 # the route clause is deleted — measured, not assumed.
-P3="$(parity "$PRIMER" "/zensu:tdd" "Plan mode" "AskUserQuestion" "top-level interactive thread" "/zensu:bootstrap" "WHICH delivery route the plan takes" "/zensu:autopilot (unattended through to a reviewed, validated pull request)" "/zensu:pilot (a guided pipeline for a feature already tracked in Zensu)" "never escalates to /zensu:autopilot")"
+P3="$(parity "$PRIMER" "/zensu:tdd (this plan now," "Plan mode" "AskUserQuestion" "top-level interactive thread" "/zensu:bootstrap" "WHICH delivery route the plan takes" "/zensu:autopilot (unattended through to a reviewed, validated pull request)" "/zensu:pilot (a guided pipeline for a feature already tracked in Zensu)" "never escalates to /zensu:autopilot or /zensu:pilot")"
 [ "$P3" = "OK" ] && check "P3 primer heredocs: shared invariants present in BOTH branches" PASS || check "P3 primer parity ($P3)" FAIL
 
 echo "== Banner + primer: mode-aware wording =="
@@ -555,23 +589,24 @@ printf '%s' "$BN_S" | grep -qF "strict RED→GREEN TDD" \
 BN_D="$(printf '%s' '{"source":"startup"}' | ZENSU_CONFIG="$CFG_DEFAULT" bash "$BANNER" 2>/dev/null)"
 { printf '%s' "$BN_D" | grep -q "vanilla" && ! printf '%s' "$BN_D" | grep -qF "strict RED→GREEN TDD"; } \
   && check "BNR2b banner (default cfg): vanilla wording — default flipped to vanilla" PASS || check "BNR2b banner default vanilla" FAIL
-# BNR4: the banner tips are the change's ONLY user-visible surface and were
+# BNR2c: the banner tips are the change's ONLY user-visible surface and were
 # graded by nothing — the sibling P8c greps the whole file for /zensu:pilot and is
 # satisfied by the pre-existing Skills line, so it never reaches the tip. Needles
 # are the FULL route clauses for the same measured reason P3 uses them.
-bnr4_ok=yes
+bnr2c_ok=yes
 for _bn in "$BN_V" "$BN_S"; do
-  [ -n "$_bn" ] || bnr4_ok=no
+  [ -n "$_bn" ] || bnr2c_ok=no
   for _n in "which delivery route to take" \
             "/zensu:autopilot (unattended to a reviewed, validated PR)" \
             "/zensu:pilot (guided pipeline for a feature already tracked in Zensu)" \
+            "/zensu:tdd (this plan now," \
             "or implementing it directly"; do
-    printf '%s' "$_bn" | grep -qF -- "$_n" || bnr4_ok=no
+    printf '%s' "$_bn" | grep -qF -- "$_n" || bnr2c_ok=no
   done
 done
-[ "$bnr4_ok" = yes ] \
-  && check "BNR4 banner names all four delivery routes in BOTH mode tips" PASS \
-  || check "BNR4 banner four-route tip missing from a mode variant" FAIL
+[ "$bnr2c_ok" = yes ] \
+  && check "BNR2c banner names all four delivery routes in BOTH mode tips" PASS \
+  || check "BNR2c banner four-route tip missing from a mode variant" FAIL
 PRM_V="$(printf '%s' '{"hook_event_name":"SessionStart","source":"startup"}' | hook_ctx "$PRIMER" "$CFG_VANILLA")"
 { printf '%s' "$PRM_V" | grep -q "vanilla" && printf '%s' "$PRM_V" | grep -qF "/zensu:tdd" \
   && ! printf '%s' "$PRM_V" | grep -qF "strict RED→GREEN TDD"; } \

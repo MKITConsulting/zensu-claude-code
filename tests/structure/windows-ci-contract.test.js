@@ -70,22 +70,42 @@ const expectedProfiles = [
   // shard 7 (see the note above) because this shard had the headroom and that one had
   // none. 154673 + 137147 ms of measured work against an 1800000 ms envelope.
   //
-  // A THIRD arrived the same way. `post-review-self-review-handoff` reported
-  // TIMED_OUT at 720126 ms against its 720000 ms cap on shard 5 (run 33804565979,
-  // job 100811827008), after this branch grew it by roughly 200 lines of new cases.
-  // The SHARD was not what bound — that job finished in 21m5s inside the 1800000 ms
-  // envelope — so the per-suite cap had to rise, and raising it in place would have
-  // left shard 5's worst case at about 27 of its 30 minutes. It moved here instead,
-  // where the two resident suites measure ~292 s together, and the cap is 1080000.
+  // The THIRD suite is `plan-payload-path-transport`, and it is the same error a third
+  // time: 848420 ms measured against a 900000 ms cap on run 34069644202 — 94.3%, which
+  // is "budget AT the measurement" once more. Run 34110308541 was killed at 900152 ms,
+  // and because shard 4's four suites had summed to 1737578 ms of its 1800000 ms
+  // envelope (96.5%), the kill starved its neighbour too: `tdd-state-junction-safety`
+  // was granted 95474 ms of its own 180000 ms cap and aborted. Two red checks, one
+  // cause. Neither number could be raised in place — the shard had 62 s left — so the
+  // suite moved here, where 292 s of measured work leaves it 1427 s, and the cap rose
+  // to 1200000: about 41% over the last completing measurement, which covers the 29%
+  // run-to-run spread this repo records elsewhere while staying far below the 10x that
+  // stopped shard 8's own cap being a tripwire. It runs LAST on purpose, so its own cap
+  // binds before the profile envelope and a slow run surfaces as a suite TIMED_OUT
+  // rather than as an abort that truncates the tail silently.
+  'windows-shard-8',
+  // Shard 9 is solo, and it exists because TWO suites needed shard 8's headroom in the
+  // same release and only one of them fits. `post-review-self-review-handoff` reported
+  // TIMED_OUT at 720126 ms against its 720000 ms cap on shard 5 (run 33804565979, job
+  // 100811827008), after roughly 200 lines of new cases. The SHARD was not what bound
+  // — that job finished in 21m5s inside the 1800000 ms envelope — so the per-suite cap
+  // had to rise, and raising it in place would have left shard 5's worst case at about
+  // 27 of its 30 minutes.
   //
-  // State that number honestly: it is NOT a measurement. The suite has no green
-  // Windows wall clock at its current size — the only figure this branch has is the
+  // It cannot join shard 8: 292 s of resident work plus 848 s of measured
+  // `plan-payload-path-transport` plus this suite's own 720 s lower bound is about
+  // 1860 s against an 1800000 ms envelope, which is the abort-truncates-the-tail
+  // failure both notes above are written about. The arithmetic, not a preference,
+  // is what put it on a shard of its own.
+  //
+  // State the cap honestly: 1080000 is NOT a measurement. The suite has no green
+  // Windows wall clock at its current size — the only figure that exists is the
   // 720126 ms at which it was killed, which is a lower bound. 1080000 is 50% above
   // that lower bound, chosen so the first green run has room to report a real number
   // and so a genuine runaway still trips the cap rather than the profile. REPLACE it
-  // with the measurement from the first green run on this shard, exactly as the two
-  // notes above were replaced.
-  'windows-shard-8',
+  // with the measurement from the first green run on this shard, exactly as the notes
+  // above were replaced.
+  'windows-shard-9',
 ];
 const expectedCommandCount = 43;
 const expectedCommandDigest = '759e33875689db60325a145b8357f592c9d2f0fe2418883b651d2673a4eea2df';

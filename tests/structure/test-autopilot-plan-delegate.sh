@@ -501,6 +501,8 @@ fi
 # named. The tdd-refusal arm is therefore tested LAST, after both other
 # affirmations, and says so. Both directive variants are asserted, because the
 # repo convention is that the strict and vanilla copies never move apart.
+# The ordering survived the four-route rewrite; only the qualifier's WORDING moved,
+# and the needle below travels with it.
 P20_OK=true
 P20_SEEN=0
 P20_WHY=""
@@ -531,7 +533,13 @@ while IFS= read -r directive_line; do
     const pilotArm = s.indexOf(pNeedle);
     const uniqueAnchors = s.split(aNeedle).length === 2 && s.split(pNeedle).length === 2;
     const tddRefusal = s.indexOf("IS the implement-directly preference");
-    const qualifier = s.indexOf("only when no other route");
+    // The qualifier is what makes the refusal NON-terminal, and its spelling moved
+    // when the directive was rewritten to remove the two outward-facing routes for an
+    // unattended run: it read "only when no other route survived as an explicit
+    // affirmation above" and now names the same property as a fallthrough. Anchor on
+    // the property, not on the retired sentence — a stale needle here reports a
+    // correctly ordered directive as broken, which is what it did on that merge.
+    const qualifier = s.indexOf("fallthrough once no surviving route was chosen above");
     const ok = autopilotArm > 0 && pilotArm > 0 && tddRefusal > 0 && qualifier > 0
       && uniqueAnchors && tddRefusal > autopilotArm && tddRefusal > pilotArm;
     process.stdout.write(ok ? "ok" : "autopilot=" + autopilotArm + " pilot=" + pilotArm + " refusal=" + tddRefusal + " qualifier=" + qualifier + " unique=" + uniqueAnchors);
