@@ -71,3 +71,4 @@ tests/.bswgate-tmp.*/
 
 # c8 coverage output (npm run session-trail:coverage)
 coverage/
+evals/plan-approval-hook/results/

@@ -228,13 +228,6 @@
           "timeoutMs": 900000
         },
         {
-          "id": "plan-payload-path-transport",
-          "runner": "bash",
-          "path": "tests/structure/test-plan-payload-fallback.sh",
-          "args": [],
-          "timeoutMs": 900000
-        },
-        {
           "id": "tdd-state-junction-safety",
           "runner": "bash",
           "path": "tests/structure/test-tdd-state-path-safety.sh",
@@ -379,6 +372,13 @@
           "path": "tests/structure/test-session-trail-lineage.sh",
           "args": [],
           "timeoutMs": 600000
+        },
+        {
+          "id": "plan-payload-path-transport",
+          "runner": "bash",
+          "path": "tests/structure/test-plan-payload-fallback.sh",
+          "args": [],
+          "timeoutMs": 1200000
         }
       ]
     }

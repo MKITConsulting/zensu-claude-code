@@ -96,7 +96,15 @@ LOG="$ROOT/hooks/lib/zensu-log.sh"
 ```
 
 Before presenting the Phase-0 plan, generate one token-safe run id (`run_<random-hex>`) and
-persist it from the worktree root:
+persist it from the worktree root.
+
+**Verify FIRST that the plan content you are about to present carries exactly one
+`<!-- zensu-autopilot:... -->` marker — this run's — after applying Phase 0.D's
+marker-hygiene rule.** Do that before the command below, not after it: the command mints
+the run and takes the working tree, so a collision discovered afterwards leaves a run that
+already holds the working tree while the plan gate refuses the approval as
+`PLAN_MARKER_MISSING_OR_AMBIGUOUS`. There is no in-place fix for that state — report the
+refusal and use `/zensu:autopilot-release`, which is the only exit.
 
 ```bash
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-begin --run "$RUN_ID" --cover "$COVER" --validate "$VALIDATE"
@@ -120,7 +128,9 @@ user's call: report the refusal and use `/zensu:autopilot-release`, the guided f
 reports the holding run first and mutates nothing without an explicit yes. Never run the raw
 verb unasked.
 
-This must succeed before `ExitPlanMode`. Append exactly one invisible binding line to the
+This must succeed before `ExitPlanMode`. **Phase 0.D owns the marker-hygiene rule in full —
+apply it exactly as written there; do not restate or improvise it here.** Then append exactly
+one invisible binding line to the
 plan CONTENT you pass to `ExitPlanMode` — the gate matches the marker in the bytes the
 harness hands back (`tool_response.plan`, saved at `tool_response.filePath`), never in a
 file it was not given, so the marker has to travel inside the plan itself:
@@ -309,7 +319,20 @@ exists, else `$ROOT/templates/autopilot-spec.md` under the validated session plu
 gates / validate commands the probe chose, so the user sees exactly what will run) via
 **ExitPlanMode**, and wait for approval. If the probe wrote or would write
 `.zensu/autopilot.yaml`, propose committing it (secret-free, shared) — but **never commit
-without the user's explicit OK**. Immediately before `ExitPlanMode`, create the durable run
+without the user's explicit OK**. **Remove every pre-existing `<!-- zensu-autopilot:... -->` COMMENT from the plan CONTENT you are about to pass to
+`ExitPlanMode` — leaving the rest of each line intact — before appending this run's
+marker.** Strip the comment, never the whole line: the gate's matcher is unanchored, so a
+marker can share a line with real requirement text that must survive. The plan content is
+the only document the gate reads, so stripping the incoming feature description is not enough:
+Phase 0.C turns that description into the spec and the numbered acceptance criteria, and a
+marker carried across while writing them survives a strip of the description while the gate
+still counts two. Because `--autopilot-begin` runs before this presentation, a collision found
+here is found too late — the run already holds the working tree, and `/zensu:autopilot-release`
+is the exit; verify the count before that command, as the durable-begin section states. The plan-approval gate now
+offers this route for an ordinary approved plan, and a plan whose earlier run is DONE or
+CANCELLED still carries that run's marker; appending a second one makes the gate refuse
+the approval as `PLAN_MARKER_MISSING_OR_AMBIGUOUS`, which is the single planning gate this
+run cannot get past. Immediately before `ExitPlanMode`, create the durable run
 with `--autopilot-begin` and include its exact `<!-- zensu-autopilot:<RUN_ID> -->` marker in
 the plan content you pass to `ExitPlanMode`. Do not proceed if either operation fails.
 
