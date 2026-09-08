@@ -10,7 +10,12 @@ const MEMORY_VERSION = 1;
 const MEMORY_NAME_RE = /^verify-consent-scv1_[a-f0-9]{64}\.json$/;
 const MAX_MEMORY_BYTES = 65536;
 const MAX_RECORDS = 512;
-const DECIDED_BY = Object.freeze(['prompt', 'memory', 'policy']);
+// The vocabulary names what the recorder can OBSERVE, never what a human did. PostToolUse
+// carries no evidence that anyone answered a prompt, so `prompt` claimed more than the record
+// could establish — a reader of the report Consent block took it as "a person approved this
+// origin" when it meant "the pre hook would have asked". `asked` states the raised prompt and
+// nothing beyond it.
+const DECIDED_BY = Object.freeze(['asked', 'remembered', 'policy-mode']);
 
 const REASONS = Object.freeze({
   NOT_A_NAVIGATION: 'not-a-navigation',
@@ -19,6 +24,7 @@ const REASONS = Object.freeze({
   NEW_ORIGIN: 'new-origin-needs-consent',
   REMOTE_NEEDS_POLICY: `remote-target-needs-parent-environment-policy: ${floor.CONSENT_REMOTE_REASON}`,
   PAYLOAD_UNREADABLE: 'hook-payload-unreadable',
+  TARGET_UNREADABLE: 'navigation-target-unreadable',
   MEMORY_UNREADABLE: 'consent-memory-unreadable',
   MEMORY_PATH_REFUSED: 'consent-memory-path-refused',
 });
@@ -60,6 +66,19 @@ function targetOf(toolName, toolInput) {
   }
   if (input.action === 'new' && typeof input.url === 'string' && input.url) return input.url;
   return null;
+}
+
+// targetOf answers null for two different things, and only one of them is benign: an ordinary
+// tab operation genuinely is not a navigation, while a call the matcher accepts in a shape
+// contracted to carry a URL is a navigation whose target could not be read. Without this
+// separation both produced allow/not-a-navigation, preEnvelope returned null, and the hook
+// wrote nothing — which the host reads as allow. It is deliberately SHAPE-based rather than
+// "the target is null", so the discrimination survives a change to targetOf.
+function navigationExpected(toolName, toolInput) {
+  if (typeof toolName !== 'string' || !NAVIGATION_TOOL_RE.test(toolName)) return false;
+  if (/browser_navigate$/.test(toolName)) return true;
+  const input = toolInput && typeof toolInput === 'object' ? toolInput : {};
+  return input.action === 'new';
 }
 
 function normalizeRoutes(declaredRoutes) {
@@ -195,6 +214,7 @@ function appendRecord(memoryPath, record, options = {}) {
 
 const MAX_PROMPT_ROUTE = 120;
 const MAX_PROMPT_ROUTES = 12;
+const MAX_PROMPT_ROUTES_TEXT = 320;
 
 // The prompt is the human's only control, so nothing rendered into it may be unbounded or
 // carry a control byte: the route comes from a URL a caller supplied, and the declared list
@@ -205,10 +225,23 @@ function promptRoute(route) {
   return clean.length > MAX_PROMPT_ROUTE ? `${clean.slice(0, MAX_PROMPT_ROUTE)}…` : clean;
 }
 
+// Two bounds, because the count bound alone does not bound the text: MAX_PROMPT_ROUTES routes
+// at MAX_PROMPT_ROUTE characters each render about 1.5 KB, which pushed the consent-scope
+// sentence past the point where a surface truncates. Whichever bound bites first stops the
+// list, and the dropped count is always stated so the human knows the list is partial.
 function promptRoutes(routes) {
-  if (routes.length <= MAX_PROMPT_ROUTES) return routes.map(promptRoute).join(', ');
-  const shown = routes.slice(0, MAX_PROMPT_ROUTES).map(promptRoute).join(', ');
-  return `${shown} (and ${routes.length - MAX_PROMPT_ROUTES} more)`;
+  const shown = [];
+  let width = 0;
+  for (const route of routes.slice(0, MAX_PROMPT_ROUTES)) {
+    const rendered = promptRoute(route);
+    const cost = shown.length === 0 ? rendered.length : rendered.length + 2;
+    if (shown.length > 0 && width + cost > MAX_PROMPT_ROUTES_TEXT) break;
+    shown.push(rendered);
+    width += cost;
+  }
+  const dropped = routes.length - shown.length;
+  const list = shown.join(', ');
+  return dropped > 0 ? `${list} (and ${dropped} more)` : list;
 }
 
 function promptText({ origin, route, mode, declaredRoutes }) {
@@ -218,9 +251,20 @@ function promptText({ origin, route, mode, declaredRoutes }) {
   // elicitation channel, so a reader does not conclude consent mode prompts for remote targets.
   const modeWord = mode === 'remote' ? 'a deployed (remote) target' : 'a local loopback target';
   const lines = [];
-  lines.push(`Zensu verify-feature wants to open the browser on ${origin} (${modeWord}), starting with the route ${promptRoute(route)}.`);
+  // Server-neutral on purpose. The matcher accepts the bare mcp__playwright__ spelling, which
+  // belongs to any MCP server keyed "playwright", so this gate cannot know that the caller is a
+  // /zensu:verify-feature run — and a prompt that asserts a requester it cannot observe is asking
+  // the human to decide on a false premise. The foreign-server note preEnvelope attaches to an
+  // ask is the other half of this: it names the doubt instead of hiding it.
+  lines.push(`A browser navigation was requested to ${origin} (${modeWord}), starting with the route ${promptRoute(route)}.`);
+  // The scope sentence comes before the route list on purpose. It is the only line that tells
+  // the human what a Yes grants, and the route list is recipe-controlled content that would
+  // otherwise push it past the point where a surface truncates.
+  // "read" understated the grant. The broker's approved set gates NAVIGATION, and every later
+  // interaction happens inside a page it already admitted — click, type, form submission — so a
+  // Yes buys interaction, not just reading. A GET is not a read either: it can change state.
+  lines.push(`Answering Yes approves this origin for the rest of the session: the model may then open, read and interact with (click, type, submit forms on) any page on ${origin}, screenshots included, without asking again. Consent is per origin, never per route.`);
   if (routes.length > 0) lines.push(`The run declares these routes as synthetic-safe: ${promptRoutes(routes)}.`);
-  lines.push(`Answering Yes approves this origin for the rest of the session: the model may then open and read any page on ${origin}, screenshots included, without asking again. Consent is per origin, never per route.`);
   lines.push('Answer No to keep the browser closed for this origin; the run then reports PARTIAL.');
   return lines.join(' ');
 }
@@ -228,12 +272,21 @@ function promptText({ origin, route, mode, declaredRoutes }) {
 function decide({ toolName, toolInput, records, declaredRoutes, policyPresent }) {
   const target = targetOf(toolName, toolInput);
   if (target === null) return { verdict: 'allow', reason: REASONS.NOT_A_NAVIGATION };
-  if (policyPresent) return { verdict: 'allow', reason: REASONS.POLICY_MODE, target };
+  // The floor runs BEFORE the policy-mode allow, so policy mode narrows who is asked and never
+  // what is reachable. A valid policy enumerates its own targets, so an address the floor refuses
+  // was never in it and applying the floor costs a legitimate policy nothing — while skipping it
+  // made one environment variable a total bypass of the address rules, link-local metadata
+  // services included.
   const classified = floor.classifyOrigin(target, true);
   if (!classified.ok) {
     return { verdict: 'deny', reason: classified.reason, target, origin: classified.origin || null };
   }
   const { origin, pathname: route, mode } = classified;
+  // Remote is legitimate here and only here: a policy is exactly what the floor's remote refusal
+  // below tells the user to supply, and the broker enforces that policy's own targets and pins.
+  if (policyPresent) {
+    return { verdict: 'allow', reason: REASONS.POLICY_MODE, target, origin, route, mode, decidedBy: 'policy-mode' };
+  }
   if (mode !== 'local') {
     return { verdict: 'deny', reason: REASONS.REMOTE_NEEDS_POLICY, target, origin, route, mode };
   }
@@ -247,14 +300,32 @@ function decide({ toolName, toolInput, records, declaredRoutes, policyPresent })
   // removes that class rather than patching it.
   const known = Array.isArray(records) ? records : [];
   if (known.some((entry) => entry.origin === origin)) {
-    return { verdict: 'allow', reason: REASONS.MEMORY_HIT, target, origin, route, mode, decidedBy: 'memory' };
+    return { verdict: 'allow', reason: REASONS.MEMORY_HIT, target, origin, route, mode, decidedBy: 'remembered' };
   }
   return {
     verdict: 'ask',
     reason: REASONS.NEW_ORIGIN,
-    target, origin, route, mode, decidedBy: 'prompt',
+    target, origin, route, mode, decidedBy: 'asked',
     prompt: promptText({ origin, route, mode, declaredRoutes }),
   };
+}
+
+// The POST path's own ladder. It shares `decide`'s floor and its ordering and deliberately
+// stops short of building a prompt: PostToolUse never shows one, and constructing it there was
+// what made the recorder infer a human decision from a re-run of the pre-navigation state. A
+// `null` label means there is nothing to record — not a navigation, or an address the floor
+// refuses — and the caller skips rather than writing a record it cannot justify.
+function recordLabel({ toolName, toolInput, records, policyPresent }) {
+  const target = targetOf(toolName, toolInput);
+  if (target === null) return { label: null, reason: REASONS.NOT_A_NAVIGATION };
+  const classified = floor.classifyOrigin(target, true);
+  if (!classified.ok) return { label: null, reason: classified.reason };
+  const { origin, pathname: route, mode } = classified;
+  if (policyPresent) return { label: 'policy-mode', origin, route, mode };
+  if (mode !== 'local') return { label: null, reason: REASONS.REMOTE_NEEDS_POLICY };
+  const known = Array.isArray(records) ? records : [];
+  if (known.some((entry) => entry.origin === origin)) return { label: 'remembered', origin, route, mode };
+  return { label: 'asked', origin, route, mode };
 }
 
 function preEnvelope(decision) {
@@ -263,8 +334,13 @@ function preEnvelope(decision) {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
       permissionDecision: decision.verdict,
+      // An ask carries the note unconditionally, and that is the SAME doubt the neutral opening
+      // creates rather than a second rule: this gate cannot know which server serves the tool,
+      // so every prompt it raises may be about a navigation that is not a verify-feature run.
+      // A deny stays CONDITIONAL, because there the note explains a cause and must not be
+      // attached to a payload fault it does not explain.
       permissionDecisionReason: decision.verdict === 'ask'
-        ? decision.prompt
+        ? `${decision.prompt} ${FOREIGN_SERVER_NOTE}`
         : `Zensu browser consent gate denied the navigation: ${decision.reason}${foreignServerNoteApplies(decision.reason) ? ` ${FOREIGN_SERVER_NOTE}` : ''}`,
     },
   };
@@ -361,7 +437,14 @@ function readInputs(env) {
     memoryPath: env.ZENSU_VERIFY_CONSENT_MEMORY || '',
     projectRoot,
     declaredRoutes: declared,
-    policyPresent: Boolean(env.ZENSU_VERIFY_NAVIGATION_POLICY_V1),
+    // "Present" means a policy the BROKER would accept, never merely a non-empty variable.
+    // Boolean(env) disarmed this gate for any value at all, including one the broker refuses at
+    // startup — so the hook stood down while the broker denied every navigation, and the user
+    // got neither a prompt nor a working browser. The check is the floor's synchronous
+    // top-level contract, so no DNS is reached from a PreToolUse hook.
+    policyPresent: typeof env.ZENSU_VERIFY_NAVIGATION_POLICY_V1 === 'string'
+      && env.ZENSU_VERIFY_NAVIGATION_POLICY_V1 !== ''
+      && floor.policyContractFault(env.ZENSU_VERIFY_NAVIGATION_POLICY_V1) === '',
   };
 }
 
@@ -398,6 +481,12 @@ function runPre(payload, env, out, err) {
     declaredRoutes: inputs.declaredRoutes,
     policyPresent: inputs.policyPresent,
   });
+  // Pre-hook only, per its own finding: runPost's skip is correct, because a memory write for
+  // a navigation that never resolved a target has nothing to record.
+  if (decision.reason === REASONS.NOT_A_NAVIGATION && navigationExpected(payload.tool_name, payload.tool_input)) {
+    out.write(JSON.stringify(preEnvelope({ verdict: 'deny', reason: REASONS.TARGET_UNREADABLE })));
+    return;
+  }
   const envelope = preEnvelope(decision);
   if (envelope) out.write(JSON.stringify(envelope));
 }
@@ -415,29 +504,16 @@ function runPost(payload, env, err) {
   if (responseFailed(payload.tool_response)) return { ok: true, skipped: 'navigation-rejected-by-broker' };
   const inputs = readInputs(env);
   const memory = readConsentMemory(inputs.memoryPath, inputs.projectRoot);
-  const decision = decide({
+  const labelled = recordLabel({
     toolName: payload.tool_name,
     toolInput: payload.tool_input,
     records: memory.records,
-    declaredRoutes: inputs.declaredRoutes,
     policyPresent: inputs.policyPresent,
   });
-  if (decision.reason === REASONS.NOT_A_NAVIGATION || decision.verdict === 'deny') {
-    return { ok: true, skipped: decision.reason };
-  }
-  let decidedBy = decision.decidedBy || 'prompt';
-  let origin = decision.origin;
-  let route = decision.route;
-  if (decision.reason === REASONS.POLICY_MODE) {
-    const classified = floor.classifyOrigin(decision.target, true);
-    if (!classified.ok) return { ok: true, skipped: classified.reason };
-    decidedBy = 'policy';
-    origin = classified.origin;
-    route = classified.pathname;
-  }
+  if (labelled.label === null) return { ok: true, skipped: labelled.reason };
   const result = appendRecord(
     inputs.memoryPath,
-    { origin, route, decidedBy, at: new Date().toISOString() },
+    { origin: labelled.origin, route: labelled.route, decidedBy: labelled.label, at: new Date().toISOString() },
     { projectRoot: inputs.projectRoot },
   );
   if (!result.ok) err.write(`zensu: verify consent memory not written (${result.reason})\n`);
@@ -451,6 +527,7 @@ module.exports = {
   MAX_MEMORY_BYTES,
   MAX_PROMPT_ROUTE,
   MAX_PROMPT_ROUTES,
+  MAX_PROMPT_ROUTES_TEXT,
   MAX_RECIPE_BYTES,
   MAX_RECORDS,
   MEMORY_NAME_RE,
@@ -465,15 +542,18 @@ module.exports = {
   foreignServerNoteApplies,
   isIsoInstant,
   memoryPathAllowed,
+  navigationExpected,
   normalizeRoutes,
   payloadFromRaw,
   preEnvelope,
   promptRoute,
+  promptRoutes,
   promptText,
   readConsentMemory,
   readInputs,
   readMemory,
   readRecipeRoutes,
+  recordLabel,
   resolveRecipeFile,
   responseFailed,
   runPost,

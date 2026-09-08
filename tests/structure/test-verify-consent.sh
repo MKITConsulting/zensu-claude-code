@@ -180,7 +180,7 @@ MEMORY="$PROJ/.zensu/state/verify-consent-${ZENSU_SESSION_KEY}.json"
   || check "V12 first navigation to a new loopback origin asks" FAIL
 REASON="$(pre_reason "$NAV" "http://127.0.0.1:4200/login" "$SID" "$PROJ")"
 case "$REASON" in
-  *'http://127.0.0.1:4200'*'/login'*'may then open and read any page on http://127.0.0.1:4200'*'Consent is per origin, never per route.'*) check "V13 the prompt names origin, route and the origin-wide consequence" PASS ;;
+  *'http://127.0.0.1:4200'*'/login'*'may then open, read and interact with (click, type, submit forms on) any page on http://127.0.0.1:4200'*'Consent is per origin, never per route.'*) check "V13 the prompt names origin, route and the origin-wide consequence" PASS ;;
   *) check "V13 the prompt names origin, route and the origin-wide consequence" FAIL ;;
 esac
 [ ! -e "$MEMORY" ] && check "V14 asking writes no memory" PASS || check "V14 asking writes no memory" FAIL
@@ -200,7 +200,7 @@ post_run "$NAV" "http://127.0.0.1:4200/login" "$SID" "$PROJ" >/dev/null
 [ -f "$MEMORY" ] && node -e '
   const doc = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
   const r = doc.records;
-  process.exit(doc.version === 1 && r.length === 1 && r[0].origin === "http://127.0.0.1:4200" && r[0].route === "/login" && r[0].decidedBy === "prompt" ? 0 : 1);
+  process.exit(doc.version === 1 && r.length === 1 && r[0].origin === "http://127.0.0.1:4200" && r[0].route === "/login" && r[0].decidedBy === "asked" ? 0 : 1);
 ' "$MEMORY" 2>/dev/null \
   && check "V17 an executed navigation is recorded as (origin, route, prompt) in the session memory" PASS \
   || check "V17 an executed navigation is recorded as (origin, route, prompt) in the session memory" FAIL
@@ -271,10 +271,10 @@ post_run "$NAV" "http://127.0.0.1:4200/" "$SID" "$PROJ" >/dev/null
 node -e '
   const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).records;
   const hit = r.filter((e) => e.origin === "http://127.0.0.1:4200" && e.route === "/");
-  process.exit(hit.length === 1 && hit[0].decidedBy === "memory" ? 0 : 1);
+  process.exit(hit.length === 1 && hit[0].decidedBy === "remembered" ? 0 : 1);
 ' "$MEMORY" 2>/dev/null \
-  && check "V26 a silently allowed navigation is recorded with decidedBy memory" PASS \
-  || check "V26 a silently allowed navigation is recorded with decidedBy memory" FAIL
+  && check "V26 a silently allowed navigation is recorded with decidedBy remembered" PASS \
+  || check "V26 a silently allowed navigation is recorded with decidedBy remembered" FAIL
 
 [ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1}' pre_verdict "$NAV" "http://localhost:4200/" "$SID" "$PROJ")" = "ALLOW" ] \
   && check "V27 with a parent policy present the gate stays silent and leaves enforcement to the broker" PASS \
@@ -288,6 +288,42 @@ CLAUDE_PLUGIN_ROOT="$PROJ" bash "$PRE_HOOK" < "$PROJ/mismatch-payload.json" >/de
 [ "$(CLAUDE_PLUGIN_ROOT="$PROJ" pre_verdict "$NAV" "http://127.0.0.1:4200/" "$SID" "$PROJ")" = "ERROR" ] \
   && check "V28a the harness reports an aborted hook as ERROR rather than as a silent allow" PASS \
   || check "V28a the harness reports an aborted hook as ERROR rather than as a silent allow" FAIL
+
+# AC-007: a stdin read that FAILS, and one that yields nothing, must both deny. The `|| true`
+# discarded cat's status, so an EIO or an early-closed stdin produced an empty payload and the
+# module's non-navigation allow — a silent fail-open on the one layer that asks a human.
+# The discriminating shape is a plugin root with NO decision module: the wrapper must decide the
+# read failure itself, ahead of the node/module ladder, so the reason names the actual cause. A
+# directory on fd 0 fails the read deterministically and cannot hang the way a closed fd can.
+STDIN_FAIL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-stdin.XXXXXX")"
+NOMOD_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-nomod.XXXXXX")"
+mkdir -p "$NOMOD_ROOT/hooks/lib"
+cp "$PLUGIN_DIR/hooks/pre-browser-navigation-consent.sh" "$NOMOD_ROOT/hooks/"
+STDIN_FAIL_OUT="$(bash "$NOMOD_ROOT/hooks/pre-browser-navigation-consent.sh" 2>/dev/null < "$STDIN_FAIL_DIR")"
+case "$STDIN_FAIL_OUT" in *'"permissionDecision":"deny"'*) FAILREAD_DENY=1 ;; *) FAILREAD_DENY=0 ;; esac
+case "$STDIN_FAIL_OUT" in *'hook payload unreadable'*) FAILREAD_CAUSE=1 ;; *) FAILREAD_CAUSE=0 ;; esac
+[ "$FAILREAD_DENY" -eq 1 ] && [ "$FAILREAD_CAUSE" -eq 1 ] \
+  && check "V31 a failed stdin read is denied by the wrapper itself, naming the payload" PASS \
+  || check "V31 a failed stdin read is denied by the wrapper itself, naming the payload" FAIL
+rm -rf "$NOMOD_ROOT" "$STDIN_FAIL_DIR"
+# AC-008: the recorder is documented as never blocking, and exit 2 from a PostToolUse hook IS
+# the blocking status. Its three plugin-root arms sat above skip() and could not use it.
+POST_MISMATCH_RC=0
+CLAUDE_PLUGIN_ROOT="$PROJ" bash "$POST_HOOK" </dev/null >/dev/null 2>&1 || POST_MISMATCH_RC=$?
+[ "$POST_MISMATCH_RC" -eq 0 ] \
+  && check "V32 the recorder never blocks: an inherited plugin-root mismatch exits 0" PASS \
+  || check "V32 the recorder never blocks: an inherited plugin-root mismatch exits 0 (rc=$POST_MISMATCH_RC)" FAIL
+POST_MISMATCH_ERR="$(CLAUDE_PLUGIN_ROOT="$PROJ" bash "$POST_HOOK" </dev/null 2>&1 >/dev/null)"
+case "$POST_MISMATCH_ERR" in *'CLAUDE_PLUGIN_ROOT'*) MISMATCH_SAID=1 ;; *) MISMATCH_SAID=0 ;; esac
+[ "$MISMATCH_SAID" -eq 1 ] \
+  && check "V32a the non-blocking mismatch still names its cause on stderr" PASS \
+  || check "V32a the non-blocking mismatch still names its cause on stderr" FAIL
+
+STDIN_EMPTY_OUT="$(printf '' | bash "$PRE_HOOK" 2>/dev/null)"
+case "$STDIN_EMPTY_OUT" in *'"permissionDecision":"deny"'*) EMPTY_OK=1 ;; *) EMPTY_OK=0 ;; esac
+[ "$EMPTY_OK" -eq 1 ] \
+  && check "V31a an empty payload denies rather than reading as a non-navigation" PASS \
+  || check "V31a an empty payload denies rather than reading as a non-navigation" FAIL
 
 STDERR_UNBOUND="$(payload PreToolUse "$NAV" "http://127.0.0.1:4200/x" "no-such-session" "$PROJ" | bash "$PRE_HOOK" 2>&1 >/dev/null)"
 [ "$(pre_verdict "$NAV" "http://127.0.0.1:4200/x" "no-such-session" "$PROJ")" = "ASK" ] \

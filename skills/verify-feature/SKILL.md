@@ -368,9 +368,11 @@ Use this format:
   responsiveness, styling, and legibility. “Screenshot taken” is not an observation.
 - **Reproduction:** exact steps and captured signal for each failure.
 - **Consent:** one line per `(origin, route, decidedBy)` record the session's consent memory
-  holds after the run, where `decidedBy` is `prompt` (the user answered the host's prompt),
-  `memory` (any route on an origin the user had already approved — the route is never tested),
-  or `policy` (a parent-environment policy authorized it). In consent mode also name the recipe
+  holds after the run, where `decidedBy` is `asked` (the host raised a consent prompt for this
+  origin — the recorder cannot observe how the human answered, only that the navigation then
+  executed), `remembered` (any route on an origin already present in the memory — the route is
+  never tested), or `policy-mode` (a parent-environment policy the broker accepts authorized
+  it). In consent mode also name the recipe
   that supplied the declared routes shown IN the prompt, and every prompt the user refused.
 - **Limitations:** environment, fixture, auth, or deployment-identity gaps.
 

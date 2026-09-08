@@ -8,7 +8,8 @@ const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
 const consent = require('../../hooks/lib/verify-consent-v1.js');
-const { FLOOR_REASONS } = require('../../hooks/lib/verify-navigation-floor-v1.js');
+const floorModule = require('../../hooks/lib/verify-navigation-floor-v1.js');
+const { FLOOR_REASONS } = floorModule;
 const {
   CONSENT_MATCHER,
   MEMORY_VERSION,
@@ -28,6 +29,11 @@ const {
 const MODULE = path.resolve(__dirname, '../../hooks/lib/verify-consent-v1.js');
 const KEY = 'scv1_' + 'a'.repeat(64);
 const NAV = 'mcp__plugin_zensu_playwright__browser_navigate';
+const VALID_POLICY = JSON.stringify({
+  version: 1,
+  mode: 'local',
+  targets: [{ origin: 'http://127.0.0.1:4200', routes: ['/'], evidenceMode: 'declared-safe' }],
+});
 const TABS = 'mcp__playwright__browser_tabs';
 
 function project() {
@@ -36,7 +42,7 @@ function project() {
   return { root, memory: path.join(root, '.zensu', 'state', `verify-consent-${KEY}.json`) };
 }
 
-function record(origin, route, decidedBy = 'prompt', declaredRoutes) {
+function record(origin, route, decidedBy = 'asked', declaredRoutes) {
   const entry = { origin, route, decidedBy, at: '2026-09-02T20:00:00.000Z' };
   if (declaredRoutes !== undefined) entry.declaredRoutes = declaredRoutes;
   return entry;
@@ -81,7 +87,7 @@ test('a navigation to a new origin asks, names the origin, the route and the con
   assert.equal(decision.mode, 'local');
   assert.match(decision.prompt, /http:\/\/127\.0\.0\.1:4200/);
   assert.match(decision.prompt, /\/login/);
-  assert.match(decision.prompt, /may then open and read any page on http:\/\/127\.0\.0\.1:4200/);
+  assert.match(decision.prompt, /may then open, read and interact with \(click, type, submit forms on\) any page on http:\/\/127\.0\.0\.1:4200/);
   assert.match(decision.prompt, /without asking again/);
   assert.match(decision.prompt, /The run declares these routes as synthetic-safe: \/, \/login\./);
   assert.match(decision.prompt, /reports PARTIAL/);
@@ -92,7 +98,7 @@ test('consent is per origin: an approved origin admits every route and a new ori
   const sameRoute = decide({ toolName: NAV, toolInput: { url: 'http://127.0.0.1:4200/login' }, records, declaredRoutes: [] });
   assert.equal(sameRoute.verdict, 'allow');
   assert.equal(sameRoute.reason, REASONS.MEMORY_HIT);
-  assert.equal(sameRoute.decidedBy, 'memory');
+  assert.equal(sameRoute.decidedBy, 'remembered');
   const otherRoute = decide({ toolName: NAV, toolInput: { url: 'http://127.0.0.1:4200/admin' }, records, declaredRoutes: [] });
   assert.equal(otherRoute.verdict, 'allow');
   assert.equal(otherRoute.reason, REASONS.MEMORY_HIT);
@@ -135,11 +141,11 @@ test('a record is judged on its stamp independently of its route', () => {
   assert.equal(isIsoInstant('2026-02-31T00:00:00.000Z'), false);
   assert.equal(isIsoInstant('2026-09-02T20:00:00Z'), false);
   // The route is deliberately valid on every arm below, so the stamp is what decides.
-  assert.equal(validRecord({ origin: 'http://127.0.0.1:1', route: '/', decidedBy: 'prompt', at: 'now' }), false);
-  assert.equal(validRecord({ origin: 'http://127.0.0.1:1', route: '/', decidedBy: 'prompt', at: '2026-02-31T00:00:00.000Z' }), false);
-  assert.equal(validRecord({ origin: 'http://127.0.0.1:1', route: '/', decidedBy: 'prompt', at: '2026-09-02T20:00:00.000Z' }), true);
-  assert.equal(validRecord({ origin: '', route: '/', decidedBy: 'prompt', at: '2026-09-02T20:00:00.000Z' }), false);
-  assert.equal(validRecord({ origin: 'http://127.0.0.1:1', route: 'nope', decidedBy: 'prompt', at: '2026-09-02T20:00:00.000Z' }), false);
+  assert.equal(validRecord({ origin: 'http://127.0.0.1:1', route: '/', decidedBy: 'asked', at: 'now' }), false);
+  assert.equal(validRecord({ origin: 'http://127.0.0.1:1', route: '/', decidedBy: 'asked', at: '2026-02-31T00:00:00.000Z' }), false);
+  assert.equal(validRecord({ origin: 'http://127.0.0.1:1', route: '/', decidedBy: 'asked', at: '2026-09-02T20:00:00.000Z' }), true);
+  assert.equal(validRecord({ origin: '', route: '/', decidedBy: 'asked', at: '2026-09-02T20:00:00.000Z' }), false);
+  assert.equal(validRecord({ origin: 'http://127.0.0.1:1', route: 'nope', decidedBy: 'asked', at: '2026-09-02T20:00:00.000Z' }), false);
   assert.equal(validRecord({ origin: 'http://127.0.0.1:1', route: '/', decidedBy: 'nobody', at: '2026-09-02T20:00:00.000Z' }), false);
 });
 
@@ -176,7 +182,9 @@ test('consent mode admits loopback origins only; a remote target is refused with
 });
 
 test('policy mode and non-navigation calls allow silently', () => {
-  const policy = decide({ toolName: NAV, toolInput: { url: 'http://localhost:1/' }, records: [], declaredRoutes: [], policyPresent: true });
+  // A literal loopback address, not "localhost": the floor now runs ahead of the policy-mode
+  // allow, and a hostname is exactly what its local rule refuses. AC-005 owns that discrimination.
+  const policy = decide({ toolName: NAV, toolInput: { url: 'http://127.0.0.1:1/' }, records: [], declaredRoutes: [], policyPresent: true });
   assert.equal(policy.verdict, 'allow');
   assert.equal(policy.reason, REASONS.POLICY_MODE);
   const snapshot = decide({ toolName: 'mcp__plugin_zensu_playwright__browser_snapshot', toolInput: {}, records: [], declaredRoutes: [] });
@@ -193,7 +201,7 @@ test('memory reads refuse a symlink, a non-file, an oversized file and a malform
   assert.equal(readMemory(memory).ok, false);
   fs.writeFileSync(memory, JSON.stringify({ version: 2, records: [] }));
   assert.equal(readMemory(memory).reason, REASONS.MEMORY_UNREADABLE);
-  fs.writeFileSync(memory, JSON.stringify({ version: 1, records: [{ origin: 'http://127.0.0.1:1', route: '/', decidedBy: 'prompt', at: 'now' }] }));
+  fs.writeFileSync(memory, JSON.stringify({ version: 1, records: [{ origin: 'http://127.0.0.1:1', route: '/', decidedBy: 'asked', at: 'now' }] }));
   assert.equal(readMemory(memory).ok, false);
   fs.writeFileSync(memory, JSON.stringify({ version: 1, records: [] }).padEnd(70000, ' '));
   assert.equal(readMemory(memory).ok, false);
@@ -216,7 +224,7 @@ test('memory writes are contained to the session state directory and land by O_E
   const first = appendRecord(memory, record('http://127.0.0.1:4200', '/'), { projectRoot: root });
   assert.equal(first.ok, true);
   assert.equal(first.duplicate, false);
-  const again = appendRecord(memory, record('http://127.0.0.1:4200', '/', 'memory'), { projectRoot: root });
+  const again = appendRecord(memory, record('http://127.0.0.1:4200', '/', 'remembered'), { projectRoot: root });
   assert.equal(again.duplicate, true);
   const second = appendRecord(memory, record('http://127.0.0.1:4200', '/login'), { projectRoot: root });
   assert.equal(second.records.length, 2);
@@ -229,7 +237,7 @@ test('memory writes are contained to the session state directory and land by O_E
   assert.equal(appendRecord(path.join(root, `verify-consent-${KEY}.json`), record('http://127.0.0.1:1', '/'), { projectRoot: root }).reason, REASONS.MEMORY_PATH_REFUSED);
   assert.equal(appendRecord(path.join(root, '.zensu', 'state', 'other.json'), record('http://127.0.0.1:1', '/'), { projectRoot: root }).reason, REASONS.MEMORY_PATH_REFUSED);
   assert.equal(appendRecord(memory, record('http://127.0.0.1:1', '/'), { projectRoot: '' }).reason, REASONS.MEMORY_PATH_REFUSED);
-  assert.equal(appendRecord(memory, { origin: 'http://127.0.0.1:1', route: '/', decidedBy: 'prompt', at: 'not-an-instant' }, { projectRoot: root }).reason, 'record-invalid');
+  assert.equal(appendRecord(memory, { origin: 'http://127.0.0.1:1', route: '/', decidedBy: 'asked', at: 'not-an-instant' }, { projectRoot: root }).reason, 'record-invalid');
 
   const foreign = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'zensu-consent-foreign-'));
   fs.mkdirSync(path.join(foreign, 'state'));
@@ -287,7 +295,7 @@ test('the pre CLI emits ask or deny envelopes and denies an unreadable payload',
   const unreadable = runCli('pre', '{not json', env);
   assert.equal(unreadable.envelope.hookSpecificOutput.permissionDecision, 'deny');
   assert.match(unreadable.envelope.hookSpecificOutput.permissionDecisionReason, /hook-payload-unreadable/);
-  const policy = runCli('pre', { tool_name: NAV, tool_input: { url: 'http://localhost:4200/' } }, { ...env, ZENSU_VERIFY_NAVIGATION_POLICY_V1: '{"version":1}' });
+  const policy = runCli('pre', { tool_name: NAV, tool_input: { url: 'http://127.0.0.1:4200/' } }, { ...env, ZENSU_VERIFY_NAVIGATION_POLICY_V1: VALID_POLICY });
   assert.equal(policy.stdout, '');
   const memoryAllows = runCli('pre', { tool_name: NAV, tool_input: { url: 'http://127.0.0.1:4200/' } }, env);
   assert.equal(memoryAllows.envelope.hookSpecificOutput.permissionDecision, 'ask');
@@ -350,18 +358,18 @@ test('the post CLI records an executed navigation, tags its decision source and 
   const env = { ZENSU_VERIFY_CONSENT_MEMORY: memory, ZENSU_VERIFY_PROJECT_ROOT: root };
   runCli('post', { tool_name: NAV, tool_input: { url: 'http://127.0.0.1:4200/' } }, env);
   let stored = JSON.parse(fs.readFileSync(memory, 'utf8'));
-  assert.deepEqual(stored.records.map((entry) => [entry.route, entry.decidedBy]), [['/', 'prompt']]);
+  assert.deepEqual(stored.records.map((entry) => [entry.route, entry.decidedBy]), [['/', 'asked']]);
   runCli('post', { tool_name: NAV, tool_input: { url: 'http://127.0.0.1:4200/login' } }, env);
   stored = JSON.parse(fs.readFileSync(memory, 'utf8'));
-  assert.deepEqual(stored.records.map((entry) => [entry.route, entry.decidedBy]), [['/', 'prompt'], ['/login', 'memory']]);
+  assert.deepEqual(stored.records.map((entry) => [entry.route, entry.decidedBy]), [['/', 'asked'], ['/login', 'remembered']]);
   runCli('post', { tool_name: NAV, tool_input: { url: 'http://localhost:4200/' } }, env);
   runCli('post', { tool_name: 'mcp__plugin_zensu_playwright__browser_snapshot', tool_input: {} }, env);
   runCli('post', { tool_name: NAV, tool_input: { url: 'http://127.0.0.1:4200/rejected' }, tool_response: { isError: true, content: [{ type: 'text', text: 'Zensu browser broker rejected the operation: x' }] } }, env);
   stored = JSON.parse(fs.readFileSync(memory, 'utf8'));
   assert.equal(stored.records.length, 2);
-  runCli('post', { tool_name: NAV, tool_input: { url: 'https://app.example.com/dashboard' } }, { ...env, ZENSU_VERIFY_NAVIGATION_POLICY_V1: '{"version":1}' });
+  runCli('post', { tool_name: NAV, tool_input: { url: 'https://app.example.com/dashboard' } }, { ...env, ZENSU_VERIFY_NAVIGATION_POLICY_V1: VALID_POLICY });
   stored = JSON.parse(fs.readFileSync(memory, 'utf8'));
-  assert.deepEqual(stored.records[2], { ...stored.records[2], origin: 'https://app.example.com', route: '/dashboard', decidedBy: 'policy' });
+  assert.deepEqual(stored.records[2], { ...stored.records[2], origin: 'https://app.example.com', route: '/dashboard', decidedBy: 'policy-mode' });
   const refused = runCli('post', { tool_name: NAV, tool_input: { url: 'http://127.0.0.1:4200/x' } }, { ...env, ZENSU_VERIFY_PROJECT_ROOT: '' });
   assert.match(refused.stderr, /consent memory not written/);
   assert.equal(refused.status, 0);
@@ -526,4 +534,212 @@ test('the prompt route is bounded and stripped of control bytes', () => {
   assert.equal(overflow.prompt.includes(longRoute), false);
   assert.equal(overflow.prompt.includes('…'), true);
   assert.equal(overflow.prompt.includes('(and 1 more)'), true);
+});
+
+// A tool name the matcher accepts is a navigation the host guaranteed would carry a target.
+// When no target can be read, that is a fault, not a non-navigation: decide() answers
+// not-a-navigation for both, so without a separate reason the gate stays silent and the host
+// reads silence as allow. The discrimination that matters is the control below — an ordinary
+// tab operation genuinely is not a navigation and must keep passing.
+test('AC-001 runPre denies a matcher-accepted navigation whose target cannot be read', () => {
+  const call = (payload) => {
+    let stdout = '';
+    consent.runPre(payload, {}, { write: (chunk) => { stdout += chunk; } }, { write: () => {} });
+    return stdout;
+  };
+  const denied = (payload) => {
+    const raw = call(payload);
+    assert.notEqual(raw, '', 'expected a decision envelope, got silence');
+    const envelope = JSON.parse(raw).hookSpecificOutput;
+    assert.equal(envelope.permissionDecision, 'deny');
+    return envelope.permissionDecisionReason;
+  };
+
+  assert.equal(REASONS.TARGET_UNREADABLE, 'navigation-target-unreadable');
+
+  assert.match(denied({ tool_name: NAV, tool_input: {} }), /navigation-target-unreadable/);
+  assert.match(denied({ tool_name: NAV, tool_input: { url: ['http://127.0.0.1:9999'] } }), /navigation-target-unreadable/);
+  assert.match(denied({ tool_name: NAV, tool_input: { url: 42 } }), /navigation-target-unreadable/);
+  assert.match(denied({ tool_name: NAV }), /navigation-target-unreadable/);
+  assert.match(denied({ tool_name: TABS, tool_input: { action: 'new' } }), /navigation-target-unreadable/);
+  assert.match(denied({ tool_name: TABS, tool_input: { action: 'new', url: '' } }), /navigation-target-unreadable/);
+
+  assert.equal(call({ tool_name: TABS, tool_input: { action: 'list' } }), '');
+  assert.equal(call({ tool_name: TABS, tool_input: { action: 'close', index: 1 } }), '');
+  assert.equal(call({ tool_name: TABS, tool_input: { action: 'select', index: 0 } }), '');
+  assert.equal(call({ tool_name: 'Read', tool_input: { file_path: '/etc/hosts' } }), '');
+});
+
+// The scope sentence is the one line that tells the human what a Yes actually grants, so it
+// must not be displaceable by content the recipe controls. MAX_PROMPT_ROUTES bounds the route
+// COUNT and each route is bounded individually, but twelve routes at the per-route cap still
+// render a kilobyte of text ahead of the sentence in any surface that truncates.
+test('AC-002 the consent-scope sentence precedes the route list, and the route list is bounded by total length', () => {
+  const routes = [];
+  for (let i = 0; i < consent.MAX_PROMPT_ROUTES; i += 1) routes.push('/' + String(i) + 'x'.repeat(consent.MAX_PROMPT_ROUTE));
+
+  const decision = decide({
+    toolName: NAV,
+    toolInput: { url: 'http://127.0.0.1:4200/' },
+    records: [],
+    declaredRoutes: routes,
+  });
+  assert.equal(decision.verdict, 'ask');
+
+  const scopeAt = decision.prompt.indexOf('Answering Yes approves this origin');
+  const routesAt = decision.prompt.indexOf('The run declares these routes');
+  assert.notEqual(scopeAt, -1);
+  assert.notEqual(routesAt, -1);
+  assert.ok(scopeAt < routesAt, `the scope sentence must precede the route list (scope=${scopeAt} routes=${routesAt})`);
+
+  assert.equal(typeof consent.MAX_PROMPT_ROUTES_TEXT, 'number');
+  const rendered = consent.promptRoutes(routes);
+  assert.ok(
+    rendered.length <= consent.MAX_PROMPT_ROUTES_TEXT + 32,
+    `the joined route list must be bounded by total length, got ${rendered.length}`,
+  );
+  assert.ok(rendered.includes('more)'), 'a truncated route list must say how many it dropped');
+
+  // Control: a short list is rendered whole, so the bound never costs an ordinary prompt.
+  assert.equal(consent.promptRoutes(['/a', '/b']), '/a, /b');
+});
+
+// The human answers one question about two things: what the grant covers, and who is asking.
+// The prompt got both wrong. It described a read grant while the broker's approved set gates
+// every interaction on the origin — click, type and form submission included — and it opened
+// by naming /zensu:verify-feature as the requester, which the gate cannot know: the matcher
+// accepts the bare mcp__playwright__ spelling belonging to any MCP server keyed "playwright".
+test('AC-003/AC-004 the prompt states an interactive grant and asserts no requester', () => {
+  const decision = decide({
+    toolName: NAV,
+    toolInput: { url: 'http://127.0.0.1:4200/login' },
+    records: [],
+    declaredRoutes: [],
+  });
+  assert.equal(decision.verdict, 'ask');
+
+  assert.match(decision.prompt, /interact with/);
+  assert.match(decision.prompt, /click/);
+  assert.match(decision.prompt, /submit/);
+
+  assert.equal(decision.prompt.includes('Zensu verify-feature wants to'), false,
+    'the opening must not assert which run requested the navigation');
+  assert.match(decision.prompt, /^A browser navigation was requested to http:\/\/127\.0\.0\.1:4200 /);
+
+  // The foreign-server note belongs to the ask envelope too: the same doubt that forbids
+  // naming a requester is what the note explains, and only a deny carried it before.
+  const envelope = preEnvelope(decision).hookSpecificOutput;
+  assert.equal(envelope.permissionDecision, 'ask');
+  assert.ok(
+    envelope.permissionDecisionReason.includes(consent.FOREIGN_SERVER_NOTE),
+    'an ask must carry the foreign-server note',
+  );
+});
+
+// policyPresent was Boolean(env), so ANY non-empty value disarmed the gate — including one the
+// broker refuses at startup. The two components then disagreed about the same string: the hook
+// stood down while the broker denied every navigation, and the user got neither a prompt nor a
+// working browser. Presence must mean "a policy the broker would accept", decided without DNS.
+test('AC-005 an unacceptable policy counts as absent, and the floor stays armed in policy mode', () => {
+  assert.equal(typeof floorModule.policyContractFault, 'function');
+  assert.equal(floorModule.policyContractFault(JSON.stringify({
+    version: 1,
+    mode: 'local',
+    targets: [{ origin: 'http://127.0.0.1:4200', routes: ['/'], evidenceMode: 'declared-safe' }],
+  })), '');
+  assert.notEqual(floorModule.policyContractFault('{oops'), '');
+  assert.notEqual(floorModule.policyContractFault('{}'), '');
+  assert.notEqual(floorModule.policyContractFault(JSON.stringify({ version: 2, mode: 'local', targets: [1] })), '');
+  assert.notEqual(floorModule.policyContractFault(JSON.stringify({ version: 1, mode: 'sideways', targets: [1] })), '');
+  assert.notEqual(floorModule.policyContractFault(JSON.stringify({ version: 1, mode: 'local', targets: [] })), '');
+
+  const valid = JSON.stringify({
+    version: 1,
+    mode: 'local',
+    targets: [{ origin: 'http://127.0.0.1:4200', routes: ['/'], evidenceMode: 'declared-safe' }],
+  });
+  assert.equal(consent.readInputs({ ZENSU_VERIFY_NAVIGATION_POLICY_V1: valid }).policyPresent, true);
+  assert.equal(consent.readInputs({ ZENSU_VERIFY_NAVIGATION_POLICY_V1: '{oops' }).policyPresent, false);
+  assert.equal(consent.readInputs({ ZENSU_VERIFY_NAVIGATION_POLICY_V1: 'yes' }).policyPresent, false);
+  assert.equal(consent.readInputs({}).policyPresent, false);
+
+  // Policy mode no longer skips the address floor. A valid policy names its own targets, so a
+  // target the floor refuses was never in it — applying the floor costs a legitimate policy
+  // nothing and removes a total bypass reachable from one environment variable.
+  const refused = decide({
+    toolName: NAV,
+    toolInput: { url: 'http://169.254.169.254/latest/meta-data/' },
+    records: [],
+    policyPresent: true,
+  });
+  assert.equal(refused.verdict, 'deny');
+
+  // Control: with the floor satisfied, policy mode still allows without prompting.
+  const allowed = decide({
+    toolName: NAV,
+    toolInput: { url: 'http://127.0.0.1:4200/' },
+    records: [],
+    policyPresent: true,
+  });
+  assert.equal(allowed.verdict, 'allow');
+  assert.equal(allowed.reason, REASONS.POLICY_MODE);
+});
+
+test('AC-006 the recorded label names what was observed, and runPost builds no prompt', () => {
+  // PostToolUse carries no evidence that a human answered. The old vocabulary said `prompt`,
+  // which a reader of the report Consent block takes as "a person approved this origin";
+  // what the recorder can actually establish is that the pre hook WOULD have asked.
+  assert.deepEqual(consent.DECIDED_BY, ['asked', 'remembered', 'policy-mode']);
+
+  // recordLabel is the post path's own ladder: one classifyOrigin plus an explicit label.
+  // It must never construct a prompt — this path shows none, and building one invites the
+  // same inference the vocabulary rename removes.
+  assert.equal(typeof consent.recordLabel, 'function');
+  const fresh = consent.recordLabel({
+    toolName: NAV,
+    toolInput: { url: 'http://127.0.0.1:4200/dashboard' },
+    records: [],
+    policyPresent: false,
+  });
+  assert.equal(fresh.label, 'asked');
+  assert.equal(fresh.origin, 'http://127.0.0.1:4200');
+  assert.equal(fresh.route, '/dashboard');
+  assert.equal('prompt' in fresh, false);
+
+  const seen = consent.recordLabel({
+    toolName: NAV,
+    toolInput: { url: 'http://127.0.0.1:4200/other' },
+    records: [record('http://127.0.0.1:4200', '/', 'asked')],
+    policyPresent: false,
+  });
+  assert.equal(seen.label, 'remembered');
+
+  // Policy mode still runs the floor first, so a refused address records nothing at all.
+  assert.equal(consent.recordLabel({
+    toolName: NAV,
+    toolInput: { url: 'http://127.0.0.1:4200/' },
+    records: [],
+    policyPresent: true,
+  }).label, 'policy-mode');
+  assert.equal(consent.recordLabel({
+    toolName: NAV,
+    toolInput: { url: 'http://169.254.169.254/latest/meta-data/' },
+    records: [],
+    policyPresent: true,
+  }).label, null);
+
+  // End to end: the value that lands in the memory file is the new vocabulary, and
+  // validRecord accepts it.
+  const { root, memory } = project();
+  const err = { write() {} };
+  const result = consent.runPost(
+    { tool_name: NAV, tool_input: { url: 'http://127.0.0.1:4200/dashboard' } },
+    { ZENSU_VERIFY_PROJECT_ROOT: root, ZENSU_VERIFY_CONSENT_MEMORY: memory },
+    err,
+  );
+  assert.equal(result.ok, true);
+  const written = readMemory(memory, root).records;
+  assert.equal(written.length, 1);
+  assert.equal(written[0].decidedBy, 'asked');
+  assert.equal(validRecord(written[0]), true);
 });

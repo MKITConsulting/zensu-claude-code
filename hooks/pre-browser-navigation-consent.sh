@@ -18,13 +18,19 @@ fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
 unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 
-INPUT="$(cat 2>/dev/null || true)"
-
 deny() {
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Zensu browser consent gate denied the navigation: %s"}}' "$1"
   echo "zensu: browser consent gate denied the navigation ($1)" >&2
   exit 0
 }
+
+# deny() is defined ABOVE the read on purpose: a read that fails has no other channel to report
+# on. `cat 2>/dev/null || true` discarded the status, so an EIO, an EPIPE or a host that closed
+# stdin early produced an empty payload — and every layer below then judged something it never
+# received. The module refuses a blank payload on its own, but only once node has run and only
+# while the module is loadable, so this gate must not depend on either to refuse its own input.
+if ! INPUT="$(cat 2>/dev/null)"; then deny "hook payload unreadable"; fi
+[ -n "$INPUT" ] || deny "hook payload unreadable"
 
 command -v node >/dev/null 2>&1 || deny "node unavailable"
 MODULE="$CLAUDE_PLUGIN_ROOT/hooks/lib/verify-consent-v1.js"

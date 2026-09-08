@@ -626,3 +626,39 @@ test('the locked upstream runtime exposes exactly the broker allowlist after fil
   const result = await server._requestHandlers.get('tools/list')({ method: 'tools/list', params: {} }, {});
   assert.deepEqual(result.tools.map((tool) => tool.name).sort(), ALLOWED_TOOLS);
 });
+
+test('AC-009 a url-less new tab is refused before the tab exists', async () => {
+  // opensUrl required a truthy url, so `browser_tabs {action:"new"}` skipped both the consent
+  // approval and the floor and reached upstream. The tab then opened at about:blank, and every
+  // later pre-call assertActiveUrls saw two pages — the allowInitialBlank escape needs exactly
+  // one — so the session was wedged for every tool but browser_close.
+  const policy = await parsePolicy(rawPolicy('local', 'http://127.0.0.1:5173'));
+  let upstreamCalls = 0;
+  const server = {
+    _requestHandlers: new Map([
+      ['tools/list', async () => ({ tools: ALLOWED_TOOLS.map((name) => ({ name })) })],
+      ['tools/call', async () => { upstreamCalls += 1; return { content: [] }; }],
+    ]),
+  };
+  installCapabilityBoundary(server, policy, async () => {}, () => ['http://127.0.0.1:5173/inventory']);
+  const refused = await server._requestHandlers.get('tools/call')({
+    params: { name: 'browser_tabs', arguments: { action: 'new' } },
+  });
+  assert.equal(refused.isError, true);
+  assert.equal(upstreamCalls, 0);
+
+  // Control: the same call WITH an allowed url still reaches upstream, so the refusal is about
+  // the missing url and not about browser_tabs.
+  const allowed = await server._requestHandlers.get('tools/call')({
+    params: { name: 'browser_tabs', arguments: { action: 'new', url: 'http://127.0.0.1:5173/inventory' } },
+  });
+  assert.equal(allowed.isError, undefined);
+  assert.equal(upstreamCalls, 1);
+
+  // A non-'new' action carries no url and must stay unaffected.
+  const listTabs = await server._requestHandlers.get('tools/call')({
+    params: { name: 'browser_tabs', arguments: { action: 'list' } },
+  });
+  assert.equal(listTabs.isError, undefined);
+  assert.equal(upstreamCalls, 2);
+});

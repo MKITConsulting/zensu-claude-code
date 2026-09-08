@@ -153,10 +153,36 @@ function classifyOrigin(rawUrl, navigation = true) {
   return { ...target, mode: 'remote', hostname };
 }
 
+// The three TOP-LEVEL guards parsePolicy applies before it touches a single target, extracted so
+// the three components that need them share one implementation instead of three. It is
+// SYNCHRONOUS and reaches no resolver by construction — the per-target rules, which are the ones
+// that can resolve DNS for a remote origin, stay parsePolicy's alone. It answers '' for a policy
+// whose contract holds and a short reason otherwise, so a caller renders the reason it was given
+// rather than inventing one.
+//
+// An EMPTY raw is not judged here: parsePolicy returns its deny default before any check, and a
+// caller asking "is a policy present" must decide absence itself. Answering '' for '' would tell
+// such a caller that the empty string is an acceptable policy.
+function policyContractFault(raw) {
+  let value;
+  try { value = JSON.parse(raw); }
+  catch (_error) { return 'policy is not valid JSON'; }
+  const keys = Object.keys(value || {}).sort();
+  if (JSON.stringify(keys) !== JSON.stringify(['mode', 'targets', 'version'])) {
+    return 'policy contains unknown or missing keys';
+  }
+  if (value.version !== 1 || !['local', 'remote'].includes(value.mode)
+      || !Array.isArray(value.targets) || value.targets.length < 1 || value.targets.length > 8) {
+    return 'policy contract is invalid';
+  }
+  return '';
+}
+
 module.exports = {
   CONSENT_REMOTE_REASON,
   FLOOR_REASONS,
   checkNavigationTarget,
+  policyContractFault,
   classifyOrigin,
   expandIpv6,
   inIpv4Range,

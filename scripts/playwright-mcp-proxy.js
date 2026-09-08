@@ -225,6 +225,14 @@ function installCapabilityBoundary(server, policy, closeOwned = async () => {}, 
       }
       const opensUrl = name === 'browser_navigate'
         || (name === 'browser_tabs' && request.params.arguments?.action === 'new' && request.params.arguments?.url);
+      // A new tab that names no url opened at about:blank with nothing judged — neither the
+      // consent approval nor the floor — and the tab survived the post-call refusal. From then
+      // on two pages were open, so assertActiveUrls' allowInitialBlank escape (exactly one page)
+      // could not fire for any tool but browser_close: the session was wedged with no recovery.
+      // Refusing here, inside the try, returns deniedToolResult and opens nothing.
+      if (name === 'browser_tabs' && request.params.arguments?.action === 'new' && !opensUrl) {
+        throw new Error('a new tab must name the url it opens');
+      }
       if (opensUrl) {
         const url = request.params.arguments?.url;
         // The refusal sits INSIDE the block on purpose. Moving this test into opensUrl

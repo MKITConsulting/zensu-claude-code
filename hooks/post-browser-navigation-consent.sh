@@ -1,29 +1,29 @@
 #!/bin/bash
 set -u
 
-_ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || {
-  echo "zensu: browser consent memory cannot resolve its own plugin root" >&2
-  exit 2
+# skip() is defined FIRST because this hook may never block. Its three plugin-root arms used to
+# sit above the definition and could only `exit 2` — and exit 2 from a PostToolUse hook is the
+# blocking status, which contradicts the contract this recorder ships under: a memory line is
+# worth strictly less than the tool call it follows, so every fault here is a stderr note and a
+# clean exit. The sibling PreToolUse gate keeps exit 2 deliberately; there, blocking is correct.
+skip() {
+  echo "zensu: browser consent memory not written ($1)" >&2
+  exit 0
 }
+
+_ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" \
+  || skip "plugin root unresolved"
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
-  _ZENSU_DECLARED_PLUGIN_ROOT="$(cd -P -- "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || {
-    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
-    exit 2
-  }
+  _ZENSU_DECLARED_PLUGIN_ROOT="$(cd -P -- "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" \
+    || skip "inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin"
   if [ "$_ZENSU_DECLARED_PLUGIN_ROOT" != "$_ZENSU_EXECUTED_PLUGIN_ROOT" ]; then
-    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
-    exit 2
+    skip "inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin"
   fi
 fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
 unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 
 INPUT="$(cat 2>/dev/null || true)"
-
-skip() {
-  echo "zensu: browser consent memory not written ($1)" >&2
-  exit 0
-}
 
 command -v node >/dev/null 2>&1 || skip "node unavailable"
 MODULE="$CLAUDE_PLUGIN_ROOT/hooks/lib/verify-consent-v1.js"

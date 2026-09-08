@@ -366,7 +366,13 @@ opened. In consent mode neither layer enforces routes — the human consented to
 same-origin redirect to an undeclared route is stopped by neither.
 
 **With a parent policy present the gate stays silent** and the broker enforces the policy
-exactly as before; the PostToolUse hook then records `decidedBy: policy`.
+exactly as before; the PostToolUse hook then records `decidedBy: policy-mode`.
+
+**The recorded `decidedBy` names an OBSERVATION, never a human decision.** PostToolUse carries
+no evidence of how the permission was resolved, so the vocabulary is `asked` (a prompt was
+raised for this origin), `remembered` (the memory already held the origin) and `policy-mode`.
+`asked` does not assert that a person said yes — it asserts that the pre hook would have asked
+and the navigation then executed.
 
 **Fault direction.** The PreToolUse hook is a gate and fails closed: a missing `node`, an
 absent or symlinked module, or a module failure denies the navigation with a stderr note. A
