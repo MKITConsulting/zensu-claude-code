@@ -2345,13 +2345,37 @@ hand; the release pipeline owns it.
   prefix: three of the copies carry no `AUTOPILOT_` token at all — the beacon filename and its
   `isFile`/`nlink` rule live inside `autopilotOwnerSilence`, the exact pointer shape inside
   `autopilotPointerDesignates`, and the owner-key rule in a bare `createHash` call. Several
-  are pinned — P1na, P1nm and P1nn in `tests/structure/test-doctor.sh` — and the pins compare
-  spellings, not behaviour, so a semantic change that keeps the spelling passes. The durable fix
+  are pinned — P1na, P1nm, P1nm1, P1nn and, since the two `ownerWouldAccept` inputs got theirs,
+  P1nz5 and P1nz6 in `tests/structure/test-doctor.sh` — and the pins compare
+  spellings, not behaviour, so a semantic change that keeps the spelling passes. P1nz5 compares
+  THREE sources rather than two: `ap_run_valid` inlines the stage-to-action table a third time,
+  and a fixture that agrees with the renderer by construction cannot fail on the drift it exists
+  for. The durable fix
   is to extract the run-record vocabulary into a host-neutral module and require it from BOTH
   sides; inline `node` programs in this tree already load modules by an env-supplied path, so
   "no `require` can reach a bash file" is a property of the packaging rather than a bound. It was
   not taken here because rewiring the worker's heredoc program is a change to the most heavily
   pinned code in that module and belongs in its own review.
+- **`ownerWouldAccept` applies the owner's `workspaceRoot` rule, and it is NOT the renderer's own
+  render-safety rule.** It mirrors `nonEmpty(value, 4096)` — string, non-empty, at most 4096, no
+  C0 byte. The render check beside it is deliberately WIDER (it also refuses DEL, C1, U+2028/9, a
+  relative spelling and a backtick, because that value is echoed into a row the model relays), so
+  keying the glyph on it would drop out of green records the owner reads perfectly well. The field
+  was omitted from the strict check for a release, and the cost was the exact inversion the check
+  exists to prevent: OK plus "all checks green" over a project where `readRunInventory` fails
+  every Autopilot verb closed. P1nz7 pins both directions.
+- **A readably TERMINAL document never reaches the could-not-be-read row.** That row asserts the
+  record "still holds its working tree", which is false for a DONE or CANCELLED one, and the
+  trigger is not exotic: `AUTOPILOT_STATE_KEYS` is an EXACT key match, so the first release that
+  adds a field to the owner would turn every accumulated run document in every project — the
+  finished ones included — into that row, with a permanent false claim and a permanently
+  suppressed green summary. `autopilotRun` reads `stage` loosely BEFORE the key-set match and
+  answers a distinct sentinel, `AUTOPILOT_TERMINAL_UNSHAPED`, which the single call site consumes
+  immediately. The narrowing is deliberately confined to the KEY-SET rejection: every other
+  refusal — schemaVersion, id class, owner class, a foreign `projectRoot` — still reports, because
+  those are genuine "this report does not accept it" verdicts rather than accidental drift. P1nz8
+  pins both halves, the terminal one leaving the set and a nonterminal one of the same shape
+  staying in it.
 - **The Windows wall clock for both grown suites is UNMEASURED.** `test-autopilot-state-machine.sh`
   runs on a blocking Windows PR shard and this change adds two git worktrees plus the `W16a`/`W16b`,
   `W31a`-`W31k` and `W32`/`W32a`-`W32d`/`W32z` families, four of which bind a Session Control record
@@ -2411,9 +2435,11 @@ cross-version mixing arises.
   audience `model` and the ownership from the SAME record, so a lead-in can never contradict the
   sentence it introduces. Its STATUS vocabulary is the load-bearing half: 0 rendered, 1 the tree
   is PROVEN free, 5 the question could not be answered, 3 a REFUSED CALL — a bad arity, an
-  unrecognized audience, or a caller-session argument that is not a session id — and ONLY the
-  worker's own verdict reaches 1, so an all-clear can never be printed for a check that did not
-  run. That is why the probe it runs under the lease always returns 0, and why a failed render is
+  unrecognized audience, or a caller-session argument that is not a session id — and TWO paths
+  reach 1 rather than one: the worker's own verdict, and an absent state directory, which
+  short-circuits ahead of the lease because no run document can exist without one. Every OTHER
+  storage, lease or worker failure maps to 5, so an all-clear can never be printed for a check
+  that did not run. That is why the probe it runs under the lease always returns 0, and why a failed render is
   remapped to 5 rather than inheriting the renderer's own 1
   — so the own-vs-foreign choice stays in the one renderer that owns it, no file
   outside the module calls an `_autopilot_*` helper, and no `--confirm` invocation reaches a

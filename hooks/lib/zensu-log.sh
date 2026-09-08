@@ -411,9 +411,11 @@ case "${1:-}" in
       # answered at all. The third is easy to miss when counting — it is the
       # `case` default rather than a named arm — and an earlier comment here said
       # FOUR while five were emitted. `1` is the
-      # PROVEN-free verdict and nothing else reaches it: the report verb maps a
-      # lock, storage or worker failure to 5, so the all-clear below can never be
-      # printed because the check could not run. A diagnostic that says "nothing
+      # PROVEN-free verdict, and TWO paths reach it rather than one: the worker's
+      # own "no run holds this tree", and an absent state directory, which
+      # short-circuits ahead of the lease because no run document can exist without
+      # it. Every OTHER lock, storage or worker failure maps to 5, so the all-clear
+      # below can never be printed because the check could not run. A diagnostic that says "nothing
       # holds this tree" when it could not look is worse than the silence it
       # replaced.
       if [ "$_zensu_hold_rc" -eq 0 ] && [ -n "$_zensu_hold_text" ]; then

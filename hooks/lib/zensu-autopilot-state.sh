@@ -2682,9 +2682,10 @@ _autopilot_hold_probe() {
 }
 
 # Prints one line: `<own|foreign|unknown><TAB><sentence>`.
-# Exit 0 a holder was found and rendered; 1 the tree is PROVEN free (the worker's
-# own verdict); 5 the question could not be answered — the project lease, the
-# storage check or the worker failed; 3 a REFUSED CALL — a bad arity, an unrecognized
+# Exit 0 a holder was found and rendered; 1 the tree is PROVEN free — the worker's
+# own verdict, OR an absent state directory, which reaches this status ahead of the
+# lease because no run document can exist without one; 5 the question could not be
+# answered — the project lease, the storage-safety check or the worker failed; 3 a REFUSED CALL — a bad arity, an unrecognized
 # audience, or a caller-session argument that is not a session id.
 #
 # `_autopilot_locked_run` runs its callback in the CURRENT shell, so this function

@@ -3879,12 +3879,6 @@ rm -f "$AP_STATE"/autopilot-run-*.json
 # owner's own reader. The
 # renderer checks the schemaVersion VALUE now, not merely the key's presence.
 rm -f "$AP_STATE"/autopilot-run-*.json
-node -e '
-  var fs = require("fs");
-  var rec = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-  rec.schemaVersion = 2;
-  fs.writeFileSync(process.argv[1], JSON.stringify(rec));
-' /dev/null 2>/dev/null || true
 ap_run run_schema_a GATES "$AP_FOREIGN" "/w/t"
 node -e '
   var fs = require("fs");
@@ -4232,6 +4226,142 @@ if printf '%s' "$AP_TICK_OUT" | grep -qF 'does not render' \
   check "P1nz4 a backtick in a workspaceRoot or a run filename is withheld, never delimited" PASS
 else
   check "P1nz4 backtick rejection (got: $AP_TICK_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json
+
+# P1nz5 — `AUTOPILOT_NEXT_ACTION` is a hand copy of the owner's `NEXT_ACTION`, and it
+# is one of the two inputs of `ownerWouldAccept`, which gates the OK glyph and with it
+# the green summary. Its four siblings each got a pin (P1na, P1nm, P1nm1, P1nn); this
+# one had none, so a stage-to-action pair changed upstream would flip EVERY healthy own
+# row to WARN, permanently, with every check in this suite still passing.
+# THREE sources, because `ap_run_valid` inlines the same table a third time: a fixture
+# that agrees with the renderer by construction cannot fail on the drift it exists for.
+AP_NEXT_OWNER="$(node -e '
+  var fs = require("fs");
+  var m = /const NEXT_ACTION = Object\.freeze\(\{([\s\S]*?)\}\);/.exec(fs.readFileSync(process.argv[1], "utf8"));
+  if (!m) { process.stdout.write("UNDERIVABLE"); process.exit(0); }
+  var v = m[1].match(/[A-Z_]+:\s*"[A-Z_]+"/g) || [];
+  process.stdout.write(v.map(function (s) { return s.replace(/[\s"]/g, ""); }).sort().join(","));
+' "$AP_OWNER_SRC")"
+AP_NEXT_COPY="$(node -e '
+  var fs = require("fs");
+  var m = /var AUTOPILOT_NEXT_ACTION = \{([\s\S]*?)\n\};/.exec(fs.readFileSync(process.argv[1], "utf8"));
+  if (!m) { process.stdout.write("UNDERIVABLE"); process.exit(0); }
+  var v = m[1].match(/[A-Z_]+:\s*\x27[A-Z_]+\x27/g) || [];
+  process.stdout.write(v.map(function (s) { return s.replace(/[\s\x27]/g, ""); }).sort().join(","));
+' "$REPORT")"
+AP_NEXT_FIXTURE="$(node -e '
+  var fs = require("fs");
+  var m = /var NEXT = \{([\s\S]*?)\n      \};/.exec(fs.readFileSync(process.argv[1], "utf8"));
+  if (!m) { process.stdout.write("UNDERIVABLE"); process.exit(0); }
+  var v = m[1].match(/[A-Z_]+:\s*"[A-Z_]+"/g) || [];
+  process.stdout.write(v.map(function (s) { return s.replace(/[\s"]/g, ""); }).sort().join(","));
+' "$PLUGIN_DIR/tests/structure/test-doctor.sh")"
+# An UNDERIVABLE side is a FAIL, never a skip — the same rule P1na states: a renamed
+# constant would otherwise make this compare empty strings and pass vacuously.
+if [ "$AP_NEXT_OWNER" != "UNDERIVABLE" ] && [ -n "$AP_NEXT_OWNER" ] \
+  && [ "$AP_NEXT_OWNER" = "$AP_NEXT_COPY" ] && [ "$AP_NEXT_OWNER" = "$AP_NEXT_FIXTURE" ]; then
+  check "P1nz5 the renderer's and the fixture's NEXT_ACTION copies match zensu-autopilot-state.sh" PASS
+else
+  check "P1nz5 NEXT_ACTION drifted (owner=$AP_NEXT_OWNER copy=$AP_NEXT_COPY fixture=$AP_NEXT_FIXTURE)" FAIL
+fi
+
+# P1nz6 — `AUTOPILOT_NESTED_KEYS` is the SECOND input of `ownerWouldAccept` and was
+# equally unpinned. The owner spells each set as `exact(state.<field>, [...])` inside
+# `stateValid`; a key added there and not here keeps handing out the OK glyph for a
+# record every Autopilot verb refuses, which is the exact inversion the strict check
+# was added to prevent.
+AP_NESTED_OWNER="$(node -e '
+  var fs = require("fs");
+  var src = fs.readFileSync(process.argv[1], "utf8");
+  var out = [];
+  ["options", "tdd", "effects", "blocked", "stopBudget"].forEach(function (f) {
+    var re = new RegExp("exact\\(state\\." + f + ",\\s*\\[([^\\]]*)\\]\\)");
+    var m = re.exec(src);
+    if (!m) { out.push(f + "=UNDERIVABLE"); return; }
+    var v = m[1].match(/"[A-Za-z0-9_]+"/g) || [];
+    out.push(f + "=" + v.map(function (s) { return s.slice(1, -1); }).sort().join("+"));
+  });
+  process.stdout.write(out.sort().join(","));
+' "$AP_OWNER_SRC")"
+AP_NESTED_COPY="$(node -e '
+  var fs = require("fs");
+  var m = /var AUTOPILOT_NESTED_KEYS = \{([\s\S]*?)\n\};/.exec(fs.readFileSync(process.argv[1], "utf8"));
+  if (!m) { process.stdout.write("UNDERIVABLE"); process.exit(0); }
+  var out = [];
+  (m[1].match(/[A-Za-z0-9_]+:\s*\[[^\]]*\]/g) || []).forEach(function (row) {
+    var f = row.slice(0, row.indexOf(":"));
+    var v = row.match(/\x27[A-Za-z0-9_]+\x27/g) || [];
+    out.push(f + "=" + v.map(function (s) { return s.slice(1, -1); }).sort().join("+"));
+  });
+  process.stdout.write(out.sort().join(","));
+' "$REPORT")"
+if [ "$AP_NESTED_OWNER" != "UNDERIVABLE" ] && [ -n "$AP_NESTED_OWNER" ] \
+  && ! printf '%s' "$AP_NESTED_OWNER" | grep -qF 'UNDERIVABLE' \
+  && [ "$AP_NESTED_OWNER" = "$AP_NESTED_COPY" ]; then
+  check "P1nz6 the renderer's nested key sets match stateValid in zensu-autopilot-state.sh" PASS
+else
+  check "P1nz6 nested key sets drifted (owner=$AP_NESTED_OWNER copy=$AP_NESTED_COPY)" FAIL
+fi
+
+# P1nz7 — `ownerWouldAccept` must apply the owner's `workspaceRoot` rule. It checked
+# the stage-to-action map, the five nested key sets and a non-empty ledger, and left
+# out the one field `stateValid` guards separately — so a record with a workspaceRoot
+# over the owner's 4096 bound, or carrying a C0 byte, rendered OK plus "all checks
+# green" while `readRunInventory` failed the WHOLE project closed on it. The value
+# check mirrors `nonEmpty(value, 4096)`, NOT the renderer's own render-safety rule:
+# that one is wider (it also rejects DEL, C1, U+2028/9, a relative spelling and a
+# backtick), and keying the glyph on it would drop legitimate records out of green.
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+AP_WS_LONG="/w/$(printf 'a%.0s' $(seq 1 5000))"
+ap_run_valid run_wsbad_a GATES "$AP_OWN" "$AP_WS_LONG"
+ap_pointer "$AP_OWN" run_wsbad_a
+AP_WSBAD_OUT="$(ap_report bound "$AP_OWN")"
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+# Control: the SAME fixture with a workspaceRoot the owner accepts still renders green,
+# so the check discriminates the field rather than the ap_run_valid shape.
+ap_run_valid run_wsok_a GATES "$AP_OWN" "/w/t"
+ap_pointer "$AP_OWN" run_wsok_a
+AP_WSOK_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_WSBAD_OUT" | grep -F 'autopilot: nonterminal durable run run_wsbad_a' | grep -qF '⚠️' \
+  && printf '%s' "$AP_WSBAD_OUT" | grep -qF 'the owner validates more' \
+  && printf '%s' "$AP_WSOK_OUT" | grep -F 'autopilot: nonterminal durable run run_wsok_a' | grep -qF '✅' \
+  && ! printf '%s' "$AP_WSOK_OUT" | grep -qF 'the owner validates more'; then
+  check "P1nz7 a workspaceRoot the owner refuses drops the OK glyph, a valid one keeps it" PASS
+else
+  check "P1nz7 workspaceRoot must gate the green arm (bad=$AP_WSBAD_OUT ok=$AP_WSOK_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+
+# P1nz8 — a readably TERMINAL document must never reach the could-not-be-read row.
+# That row asserts "such a record still holds its working tree", which is false for a
+# DONE or CANCELLED one. The trigger is not exotic: `AUTOPILOT_STATE_KEYS` is an EXACT
+# key match, so the first release that adds a field to the owner turns every
+# accumulated run document in every project — the finished ones included — into that
+# row, with a permanent false claim and a permanently suppressed green summary.
+rm -f "$AP_STATE"/autopilot-run-*.json
+ap_run run_term_a DONE "$AP_FOREIGN" "/w/t"
+ap_run run_live_a GATES "$AP_FOREIGN" "/w/t"
+AP_EXTRA_DIR="$AP_STATE" node -e '
+  var fs = require("fs"), path = require("path");
+  ["run_term_a", "run_live_a"].forEach(function (id) {
+    var p = path.join(process.env.AP_EXTRA_DIR, "autopilot-run-" + id + ".json");
+    var rec = JSON.parse(fs.readFileSync(p, "utf8"));
+    rec.futureField = 1;
+    fs.writeFileSync(p, JSON.stringify(rec));
+  });
+'
+AP_TERM_OUT="$(ap_report bound "$AP_OWN")"
+# Both halves are required: the terminal document must NOT be counted, and the
+# nonterminal one with the same unaccepted shape MUST still be, or the fix would have
+# deleted the finding instead of narrowing it.
+if printf '%s' "$AP_TERM_OUT" | grep -qF 'could not be read' \
+  && printf '%s' "$AP_TERM_OUT" | grep -qF 'autopilot-run-run_live_a.json' \
+  && ! printf '%s' "$AP_TERM_OUT" | grep -qF 'autopilot-run-run_term_a.json' \
+  && printf '%s' "$AP_TERM_OUT" | grep -qF '1 durable run document(s) that could not be read'; then
+  check "P1nz8 a readably terminal document is not reported as holding a working tree" PASS
+else
+  check "P1nz8 terminal document must leave the unreadable set (got: $AP_TERM_OUT)" FAIL
 fi
 rm -f "$AP_STATE"/autopilot-run-*.json
 

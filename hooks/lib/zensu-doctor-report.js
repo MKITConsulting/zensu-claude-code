@@ -2423,6 +2423,12 @@ var AUTOPILOT_RENDER_MAX = 200;
 var AUTOPILOT_STATE_KEYS = ['schemaVersion', 'runId', 'projectRoot', 'ownerSessionId',
   'stage', 'nextActionCode', 'approvedPlanSha256', 'options', 'tdd', 'effects',
   'evidence', 'blocked', 'bypasses', 'stopBudget', 'events'];
+var AUTOPILOT_TERMINAL_UNSHAPED = { terminalUnshaped: true };
+var AUTOPILOT_OWNER_C0_RE = /[\u0000-\u001f]/;
+function autopilotOwnerNonEmpty(value, max) {
+  return typeof value === 'string' && value.length > 0 && value.length <= max
+    && !AUTOPILOT_OWNER_C0_RE.test(value);
+}
 
 // Reads one file out of the session-writable state directory. Deliberately NOT
 // `readJson`, which is the CONFIG reader: that one declines O_NOFOLLOW on purpose,
@@ -2485,11 +2491,14 @@ function autopilotCanonical(value) {
 function autopilotRun(file, stem, projectRoot) {
   var parsed = readAutopilotJson(file);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  var looseStage = typeof parsed.stage === 'string' ? parsed.stage : '';
+  var shapeReject = AUTOPILOT_TERMINAL.indexOf(looseStage) !== -1
+    ? AUTOPILOT_TERMINAL_UNSHAPED : null;
   var keys = Object.keys(parsed).sort();
   var expected = AUTOPILOT_STATE_KEYS.slice().sort();
   var expectedWs = AUTOPILOT_STATE_KEYS.concat(['workspaceRoot']).sort();
   var keyString = keys.join(',');
-  if (keyString !== expected.join(',') && keyString !== expectedWs.join(',')) return null;
+  if (keyString !== expected.join(',') && keyString !== expectedWs.join(',')) return shapeReject;
   // The owner refuses on the VALUE too, and a record it refuses fails the whole
   // project's inventory closed — so describing it here as an ordinary run would
   // pair a description with a remedy that cannot execute.
@@ -2554,7 +2563,9 @@ function autopilotRun(file, stem, projectRoot) {
   // otherwise have been a green row and an "all checks green" summary for a
   // project every Autopilot verb fails closed on.
   var ownerWouldAccept = parsed.nextActionCode === AUTOPILOT_NEXT_ACTION[stage]
-    && Array.isArray(parsed.events) && parsed.events.length > 0;
+    && Array.isArray(parsed.events) && parsed.events.length > 0
+    && (!Object.prototype.hasOwnProperty.call(parsed, 'workspaceRoot')
+      || autopilotOwnerNonEmpty(parsed.workspaceRoot, AUTOPILOT_FIELD_MAX));
   if (ownerWouldAccept) {
     ownerWouldAccept = Object.keys(AUTOPILOT_NESTED_KEYS).every(function (field) {
       var value = parsed[field];
@@ -2675,6 +2686,7 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
   var ttl = ttlHours();
   scanned.forEach(function (c) {
     var run = autopilotRun(path.join(dir, c.name), c.stem, projectRoot);
+    if (run === AUTOPILOT_TERMINAL_UNSHAPED) return;
     if (!run) { unreadable.push(c.name); return; }
     if (AUTOPILOT_TERMINAL.indexOf(run.stage) !== -1) return;
     // THREE cases, never two. `ownKey` is empty for every binding verdict but

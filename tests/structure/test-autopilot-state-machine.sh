@@ -1855,12 +1855,17 @@ fi
 # reached here through a fixture rather than through the product.
 W16A_RB="$(native_directory "$REL_P/.claude/worktrees/rb" 2>/dev/null || printf '%s' "$REL_P/.claude/worktrees/rb")"
 W16A_RA="$(native_directory "$REL_P/.claude/worktrees/ra" 2>/dev/null || printf '%s' "$REL_P/.claude/worktrees/ra")"
+# An EMPTY needle is a vacuous check, not a lenient one: `||` catches only a failing
+# `native_directory`, never a success with empty output, and `grep -qF ''` matches every
+# non-empty file — so both conjuncts would wave through exactly the refusal that names
+# neither tree. Invisible on macOS, where the fallback value is already correct.
 if [ "$REL_READY" = true ] \
+  && [ -n "$W16A_RB" ] && [ -n "$W16A_RA" ] \
   && grep -qF "$W16A_RB" "$REL_SCOPE_ERR" \
   && grep -qF "$W16A_RA" "$REL_SCOPE_ERR"; then
   check "W16a the exit-6 refusal names the caller's tree and the tree the run holds" PASS
 else
-  check "W16a exit-6 must name both trees (got: $(cat "$REL_SCOPE_ERR" 2>/dev/null))" FAIL
+  check "W16a exit-6 must name both trees (needles rb='$W16A_RB' ra='$W16A_RA'; got: $(cat "$REL_SCOPE_ERR" 2>/dev/null))" FAIL
 fi
 
 # W16b — and it states the containment rule, because "release it from the tree it

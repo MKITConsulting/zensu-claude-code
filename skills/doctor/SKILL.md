@@ -578,7 +578,11 @@ classifier will refuse a spawn, not only when the whole table is green.
   same finding as no run. Such a record still holds its working tree while
   `/zensu:autopilot-release` needs a run id it cannot supply. Name the files and
   the directory the row prints and stop; offer no cleanup, and never suggest
-  deleting a run document to clear it.
+  deleting a run document to clear it. The count excludes a document the report
+  could still read well enough to see a `DONE` or `CANCELLED` stage, because such a
+  record holds nothing — so a run file you know to be malformed may legitimately be
+  absent from this row. Everything the row DOES count is nonterminal or unreadable
+  outright, which is what makes its working-tree claim true of every member.
 - **❌ state: this session's own workflow document is MISSING** → the record is
   intact and the document it anchors is gone, so the capability gate is denying
   every tool in this session. A deleted and re-created worktree causes it, because
