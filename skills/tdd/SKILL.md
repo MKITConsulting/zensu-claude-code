@@ -85,7 +85,7 @@ explicitly labeled interactive paths.
 
 ## When to Use
 
-- After the user approves a plan that adds executable code, the plan-approval hook (`plan-approved-delegate.sh`) asks the user whether to run the TDD flow and directs you here when they confirm (or on its fast-paths: an explicit TDD affirmation in the approval message, or non-interactive Auto Mode).
+- After the user approves a plan that adds executable code, the plan-approval hook (`plan-approved-delegate.sh`) asks the user WHICH delivery route the plan takes — `/zensu:autopilot`, this skill, `/zensu:pilot`, or implementing directly — and directs you here when they pick this one (or on its fast-paths: an explicit route preference in the approval message — which may also name `/zensu:autopilot` or `/zensu:pilot` — or non-interactive Auto Mode, which defaults here and, by a clause that overrides the preference fast-path, never selects `/zensu:autopilot` or `/zensu:pilot`).
 - `/zensu:implement` Step 3 hands you a feature specification built from the Zensu feature + security context.
 - A user invokes `/zensu:tdd` directly with a feature spec.
 

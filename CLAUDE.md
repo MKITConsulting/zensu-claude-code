@@ -21,11 +21,15 @@ artifact the plugin emits.
 — and verbatim citations of those literals in structure-test pins, in
 README/CHANGELOG feature descriptions, and in this carve-out — may contain
 non-English phrases ONLY as match literals for real user input:
-the TDD preference fast-paths (e.g. `'kein tdd'`, `'mit tdd'`, `'tdd bitte'`)
+the TDD-preference AND delivery-route fast-paths (e.g. `'kein tdd'`, `'mit tdd'`,
+`'tdd bitte'`, `'mit autopilot'`, `'mit pilot'`)
 and the generic-action literals that are explicitly NOT a preference
 (e.g. `'mach mal'`, `'los gehts'`, `'jetzt umsetzen'`) in
 `plan-approved-delegate.sh` / `user-prompt-tdd-reminder.sh`. They exist to
-recognize what multilingual users actually type, never as prose. Keep these
+recognize what multilingual users actually type, never as prose. Since the delivery-route and TDD
+arms became INTENT-judged, they now ship as EXAMPLES of real user utterances inside an intent rule
+rather than as a closed match set; the permission and the bound are unchanged — they stay quoted
+specimens, never directive prose. Keep these
 phrase lists in lockstep across every directive variant (strict and vanilla)
 — never edit one variant alone.
 
@@ -814,7 +818,9 @@ account, including the pin this weakens and the two attestation fields that
 state the executing runtime. `tests/session-control/session-control-core-v1.test.js`
 pins the axis and the sibling rule;
 `tests/structure/test-versioned-plugin-upgrade.sh` pins the end-to-end verdicts
-across synthetic installs, including that serving a record never rewrites it.
+across synthetic installs, including that serving a record never rewrites it and
+that a capability gate DENYING on an incompatible lineage leaves every record in
+the shared store byte-identical.
 
 ## Adopting a Record Across a Lineage Break (`adoptableRecord` / `adoptContext`)
 
@@ -858,8 +864,8 @@ included this comparison. It also put the module back in step with itself:
 `resolveHookSession` answers `projectRoot: context.project_root` under "The mutable
 payload cwd is never a project authority", and this was the one place a
 caller-supplied directory outranked the record. A record whose project root is GONE
-is still refused, as `record-unreadable` — `validateContext` canonicalizes it at
-condition 1. Consequently `zensu-session-adopt.sh` no longer requires
+is ADMITTED at condition 1 — see the paragraph below, which states that rule and its
+bound once. Consequently `zensu-session-adopt.sh` no longer requires
 `CLAUDE_PROJECT_DIR`; it used to render it through `zensu-host-path.sh`, which
 rejects a non-directory, so an unset or deleted value exited before printing any
 report. The recognizer still ACCEPTS the assignment — the diagnostic reads it and the
@@ -895,46 +901,356 @@ Moving together: `RECOGNIZED` in the recognizer, `isRecognizedInvocation` (the
 module main and `reviewer-capability-v1.js` both call it; `isDoctorInvocation`
 stays the doctor-only predicate), and `zensu_doctor_allowed`'s contract comment.
 
-**The whole feature needs the SUPERSEDED installation to still be on disk.**
-`validateContext` canonicalizes `context.plugin_root` and `readContextInternal`
-recomputes the digest against it, so an absent recorded root makes `readContext`
-throw — and then `resolveIncompatibleRuntime` answers null, the doctor falls back
-to the `unbound` row whose "no valid record" wording this work exists to remove,
-and `adoptableRecord` refuses as `record-unreadable`. The diagnosis degrades to
-the misleading wording exactly when the repair is impossible. Do not describe the
-lineage row as covering every mid-session upgrade; it covers the ones whose
-previous version was not pruned.
+**A SUPERSEDED installation that has been PRUNED from the plugin cache is its own
+named state, `pruned-plugin-root`, and it is adoptable.** It used to be the wedge
+this section warned about: `validateContext` canonicalized `context.plugin_root`
+unconditionally, so an absent recorded root made `readContext` throw,
+`resolveIncompatibleRuntime` answered null, every gate denied with the generic
+revalidation text, the doctor fell back to the `unbound` row whose "no valid
+record" wording is false, `adoptableRecord` refused `record-unreadable` — and the
+Stop hook fell through to its unbounded block and LOOPED, in a session whose every
+other channel was already denied. Measured on the maintainer's machine before the
+fix: the cache held three versions, 4101 of 7913 records named a pruned root, one
+live session was wedged this way and twenty-two more were recorded on the next
+two versions to be pruned.
 
-**A vanished recorded PROJECT root is an OPEN gap, not a settled distinction.**
-Removing the caller's project-root condition closed one of the two ways the two
-sources of truth diverge in worktree workflows — a cwd that was a worktree while the
-harness reported elsewhere. The other is still a permanent wedge: a worktree later
+**The reader is `readPrunedPluginRootContext`, and existence is the ONE waived
+check — proven, never assumed.** `validateContext` and `readContextInternal` take
+an `allowMissingPluginRoot` waiver (the twin of `allowMissingProjectRoot`; each has
+exactly one opt-in caller) under which the digest re-measure and the manifest
+re-read are SKIPPED — there is nothing left to measure. The reader re-applies the
+shape half through `requireAbsentDirectoryPath` (control characters, absoluteness,
+normalization — spelled as PR #272 spells it, so a merge keeps one copy), requires
+the root's PARENT to be a real directory (a pruned installation leaves its cache
+directory behind; a record naming a root under a directory that never existed is
+not this state), and returns only on a clean `lstat` ENOENT — a present root fails
+`still exists`. **The cost, stated:** with the minting tree gone, `runtime_digest`
+and `plugin_version` are shape-checked only and taken on the record's word. What
+still binds the record: session hash, schema, principal profiles, `plugin_data`
+equality, the recorded project root existing, the sibling cache directory, and the
+workflow document's schema. That is why such a record is **adopted once, with
+`--confirm`, and never served** — serving stays strict at every strict read site
+(`resolveHookSession`, `currentClaudeSessionContext`, `zensu_resolve_project_dir`,
+SessionStart resume/compact, SubagentStart), and the re-minted record is
+re-verifiable again.
+
+**Disjoint from `incompatible-runtime` by construction, and blind to lineage on
+purpose.** `resolvePrunedPluginRoot` requires the STRICT read to fail and the
+relaxed read to succeed; the lineage predicate requires the strict read to succeed.
+No consumer has to order the two, and the state is reachable under a compatible
+lineage as well (three patch releases inside one minor while a session lives),
+where the remedy is the same. The binder modes `pruned-plugin-root` /
+`model-pruned-plugin-root` print the same two-field `recorded<TAB>executing` pair,
+so the five parsers of that pair read it unchanged. **Sites that move together:**
+the reader, the waiver and the helper in the core plus its exports;
+`resolvePrunedPluginRoot` / `prunedPluginRootSession` and the mode pair in the
+binder; `zensu_session_pruned_plugin_root` / `_model` and the `pruned-plugin-root`
+scope of `zensu_emit_hook_session_deny` in `zensu-session.sh`, which now spells
+FIVE scopes; the pruned branch beside the lineage branch in all four binding gates
+(`pre-bash-zensu-gate.sh`, `pre-bash-source-write-gate.sh`,
+`pre-write-secret-scan.sh`, `pre-edit-tdd-reminder.sh`) and the self-worded FIFTH
+denier in `reviewer-capability-v1.js` — five deniers, the same set as the lineage
+state, which that file's own neighbouring comments already count as five; the FOURTH release arm in
+`stop-chain-enforcer.sh` plus its block reason and final stderr, which count four
+released states; the third probe in `zensu-doctor.sh` and the `pruned-plugin-root`
+case of `bindingLine()`; `adoptableRecord`'s condition-1 ladder (strict → pruned),
+its condition-3 skip, and the `prunedPluginRoot` field on the verdict and on the
+`adoptContext` result; `PRUNED_NOTE` / `PRUNED_EXPLANATION` and the reworded
+`record-unreadable` remedy in `session-adopt-report-v1.js`; and the operator
+accounts in `docs/session-control.md` §"Unbindable sessions",
+`docs/tdd-manager-workflow.md`'s Stop-binding paragraphs, `skills/doctor/SKILL.md`,
+`skills/adopt-session/SKILL.md` — and the `stop-chain-enforcer.sh` row in
+`docs/configuration.md`, which states the COUNT of released bind failures and is the
+one carrier this change originally left behind, saying three where the hook's own
+fallback already said four. `ADOPTION_REFUSALS` is unchanged — seven
+values, so CONV-1 is untouched — and no persisted shape moved.
+
+**Pins, and one thing Part D learned.** Part D (AC-D01…AC-D10) in
+`tests/structure/test-versioned-plugin-upgrade.sh` replaced JUDGE-3, which pinned
+the old boundary — do not restore it; the unit cases beside the lease-lock cases in
+`tests/session-control/session-control-core-v1.test.js` drive the reader, the
+helper and the ladder; `P1ad3`/`P1ad4` in `tests/structure/test-doctor.sh` pin the
+row. In this state the bind fails inside the CORE, so the authoritative stderr
+diagnostic is the raw `session-control-v1: context plugin root does not exist`
+line rather than a binder-prefixed one, and Part D's gate helper tolerates exactly
+that line where AC-C04's tolerates only the prefix. **Composition with PR #272:**
+condition 1 becomes `strict → orphaned-project-root → pruned-plugin-root` when
+that PR lands; the COMBINED state — project root gone AND installation pruned —
+still refuses `record-unreadable`, and is the recorded gap. **Version: `patch`** —
+no record or workflow field, no strict key set, no hook added, removed or renamed,
+no matcher change, no config key, no attestation change; every change relaxes a
+deny or names a state, and the new argv modes are a call convention inside one
+installation.
+
+**A vanished recorded PROJECT root is ADMITTED at condition 1, and it is the only
+disagreement that is.** Both ways the two sources of truth diverge in worktree
+workflows are closed now: removing the caller's project-root condition handled a cwd
+that was a worktree while the harness reported elsewhere, and condition 1 reads
+strictly first and falls back to `readOrphanedProjectRootContext` for a worktree later
 REMOVED (`git worktree remove`, the documented cleanup in `skills/pr-team-review`
-Phase E) makes `readContext` throw at condition 1, so adoption answers
-`record-unreadable` whose remedy says to start a fresh session. Combined with an
-incompatible lineage, `orphanedProjectRootSession` does not fire either, and
-`/zensu:doctor` falls back to the same `unbound` row. `readOrphanedProjectRootContext`
-ALREADY distinguishes *record intact, project root absent* from *record altered or
-pruned*, and the gates already consume it — adoption does not. Widening it is a
-separate and larger decision, because adoption would then have to succeed with an
-anchor that does not exist. Word it as open here and in `skills/adopt-session/SKILL.md`,
-so the next reader does not take "that one still refuses" for "and should".
+Phase E), which used to make `readContext` throw and answer `record-unreadable` while
+`/zensu:doctor` fell back to the `unbound` row. The fallback cannot widen: the orphan
+reader waives exactly one check and REFUSES a root that still exists, so every other
+disagreement throws in BOTH readers and still lands on `record-unreadable`. Nothing is
+waived by admitting it — the workflow document lived under that root and is not reachable from this record,
+the same argument that already relaxes a vanished root for a COMPATIBLE upgrade.
 
-**Three re-encodings move with this.** Their coverage is stated once, in the
-store-layout bullet below, and nowhere else — a ledger that contradicts itself about
-its own pins is the failure mode it exists to prevent. The wire format and the
-version-shape rule are unchecked:
+**That "nothing is waived" sentence is TRUE ONLY WHILE THE ROOT STAYS GONE, and the
+gap is named here rather than left for the next reader to find.** The authorising axis
+of adoption is SCHEMA equality, and `CLAUDE.md` calls that gate self-closing — a release
+that moves a persisted shape makes the document unreadable and adoption declines with no
+new check to remember. In THIS state it does not close: condition 6 is guarded by
+`fs.existsSync(workflowFile)`, which is false for an absent root, so `readWorkflowState`
+never runs and `workflow-schema-mismatch` is unreachable. The same predicate later in
+`adoptContext` skips the `RUNTIME_ADOPTED` history entry, which invariant 1 names as the
+design's ONLY provenance mechanism while invariant 2 forbids a bypass-ledger entry — so
+an adoption here leaves the superseded record's filename as its only durable evidence.
+Neither is a defect in the mechanism and neither is worth a control-flow change: what was
+wrong was the CLAIM. The adoption report now discloses in this branch that no workflow
+document could be read, so the schema check was not performed and a document restored
+later is not verified. Say "not evaluated", never "verified", and note the ORDER:
+re-creating the directory BEFORE adopting is what lets condition 6 run at all.
 
+**`readOrphanedProjectRootContext` is STRICTER than the code it replaced, which is not
+obvious from a diff that reads as an extraction.** The two inline rules it dropped were
+the unsafe-character test and `path.isAbsolute`; `requireAbsentDirectoryPath` applies a
+THIRD, `path.resolve(value) !== value`. That reader backs `orphanedProjectRootSession`,
+so a recorded `project_root` which is not a `path.resolve` fixed point now loses the
+relaxation entirely — the wedge this feature family exists to remove, restored for that
+one value class. The rule is kept on the read path deliberately: applying it only where
+the value is written would move the refusal out of `adoptableRecord` into a throw inside
+`adoptContext` and would break the AC-C14b row. Exposure is narrow because every root is
+minted through `realpathSync.native`, whose POSIX output is normalized; the residual is a
+win32 UNC share root, where `path.win32.resolve` appends a separator `realpathSync.native`
+does not. That spelling is UNVERIFIED in both directions — no suite exercises it, so do
+not record it as covered.
+
+**Removed with this feature, and named here because the roster is what a port works
+from:** `incompatibleRuntimeSession` is gone from `hooks/lib/claude-hook-session-v1.js`'s
+exports along with its definition. Every ADDITION in that change was added to the roster
+above; the removal was not, and a port that keeps its own equivalent keeps a predicate
+nothing calls.
+
+`buildContext` gained `allowMissingProjectRoot` for the re-mint. It waives exactly the
+existence check `validateContext` waives and re-applies that function's shape half
+through a SHARED `requireAbsentDirectoryPath` — the orphan reader calls it too, so the
+split rule has one implementation rather than two copies. No record field moves, so
+invariant 1 above still holds and this stays a `patch`.
+
+**Three things are load-bearing and easy to undo by accident.** First, the verdict
+carries `orphanedProjectRoot` and `adoptContext` passes it through rather than
+re-deriving it: asking the filesystem a second time would let a directory re-created
+between the two reads turn a waived check into a canonicalized one. Second, the deleted
+root must NOT be recreated — the provenance write is guarded by the workflow document's
+own `existsSync`, so `mutateWorkflowState`, which mkdirs every missing component of
+`<project>/.zensu/state`, is never reached; AC-C16 pins it. Third, the repair fixes the
+LINEAGE and not the anchor: the adopted session lands in the ordinary
+orphaned-project-root state, where `Edit`, `Write`, `MultiEdit` and any WRITING Bash command still deny. The report says so before
+and after `--confirm` and the doctor row says so too, because announcing an unqualified
+success there sends the user into a deny they were just told was repaired.
+
+**The DIAGNOSIS moved with it, and deliberately not into a fourth predicate.**
+`resolveIncompatibleRuntime` takes the same strict-then-orphan fallback, so the combined
+state is reported by the predicate every deny site already consults — which is what gives
+all five the `incompatible-runtime` scope, whose text names `/zensu:adopt-session`,
+instead of the generic "start a fresh session" that would now contradict the doctor. Its
+`recorded<TAB>executing` line stays TWO fields for the reason the wire-format bullet below
+gives; the third fact travels on its own mode pair, `orphaned-incompatible-root` and
+`model-orphaned-incompatible-root`. Do NOT relax `resolveOrphanedProjectRoot` to accept
+an incompatible lineage instead: that would let an incompatible runtime SERVE a session
+with no user decision and no provenance, which is what the lineage rule exists to prevent.
+Re-anchoring the record to a live directory was also considered and refused — a session
+may delete its own root, so a caller-named anchor would become a cross-project write
+escape.
+
+**Widening that predicate changed what the message surfaces enumerated below mean — FIVE entries, six if both doctor rows are counted separately, and that is the part
+to re-check on every later edit.** `zensu_session_incompatible_runtime` is now true for
+two states that disagree about the one fact those surfaces assert: whether the workflow
+document still exists. Anything that speaks about it must ask the third fact and branch —
+`hooks/stop-chain-enforcer.sh` does, and its THREE releases say different things on purpose:
+a deferral when the root is present, "not reachable from this record, and no later Stop can
+enforce this chain while that directory is missing" when it is not, and a state-neutral one
+claiming NEITHER when the probe could not answer. **The wording of that middle arm is
+itself a rule, not a phrasing choice.** Its whole evidence base is one `ENOENT`, which a
+MOVED or renamed root and an unmounted volume produce identically — so it is held to the
+same standard the sibling orphan release 60 lines above it sets, and which that release's
+own comment states: "not reachable", never "gone". It shipped once as "is GONE with it" and
+"no later Stop will enforce this chain", both unprovable from that one fact, in a sentence
+that then closed by admitting a move leaves the state intact. The enforcement half must
+also stay BOUNDED to while the directory is missing, which is what makes it true: re-create
+the root and a later bind takes the deferral arm instead. The same standard governs every
+mirror of it — `docs/session-control.md`, both doctor rows, the adoption report's
+pre-confirm paragraph and its no-workflow-document NOTE, the two SKILL files
+(`skills/doctor/SKILL.md`, `skills/adopt-session/SKILL.md`), and the two operator docs
+(`docs/tdd-manager-workflow.md` §"When the session binding itself cannot be resolved",
+`docs/operations.md`'s combined-state troubleshooting row). The roster has now been
+wrong TWICE in the same way — each time it was extended, the newly named members
+turned out to be carrying the forbidden spelling already, and the members added the
+round after that were carrying it too. Treat an unlisted surface that says anything
+about the workflow document as unchecked, not as compliant. The skills were left off
+this list when it was first written and both promptly shipped the forbidden spelling,
+which is the whole argument for naming them here rather than trusting a sweep. **It
+governs the POSITIVE half too**, and that was missed the same way: the deferral arm
+claimed the workflow document "SURVIVES and is unchanged" on a probe that established
+only that the anchor RESOLVED — nothing on that path opens the document — so it is
+now worded as reachability, not as contents. That third arm exists because the channel answers on three statuses — 0 with the
+path, 3 for a live recorded root, 1 for an unavailable answer — and a caller that reads only
+truthiness collapses the last two, which is precisely how a surface comes to assert a
+workflow document that is gone. The first attempt at this fix contained that collapse. The others carry an unconditional clause instead, which is true in
+both halves: the deny scope in `zensu-session.sh`, the `.*` capability gate's own JS deny in
+`reviewer-capability-v1.js`, the COMBINED doctor row, and `skills/adopt-session/SKILL.md`.
+The plain lineage row is the one exception and states its clause CONDITIONALLY, on
+`ZDOC_BINDING_ROOT_UNKNOWN` — it is unconditionally true only that the row must not promise
+more than the probe established. The doctor is therefore in BOTH lists deliberately: it
+branches to pick a row, and the row it falls back to still carries the clause whenever the
+probe could not answer, because the probe can fail. The rule this feature states about itself — what the
+repair does not buy is stated wherever it is offered — is what those clauses satisfy; a
+surface that offers `/zensu:adopt-session` without them is a defect, not a nicety. The
+first draft of this change shipped all of the four that then existed speaking the pre-change contract and the
+review caught it.
+
+**FOUR re-encodings move with this**, and they do NOT share one coverage statement any
+more. The root-status pair states its own, because it is the only member with a real pin;
+the store layout states its own, in its bullet below; the wire format and the
+version-shape rule are UNCHECKED and say so. Read each bullet's own coverage sentence —
+an earlier lead-in here said coverage was stated "once … and nowhere else" while listing
+three bullets over four, and the version-shape bullet twelve lines down records that
+exact drift in its own words ("state the base or the count means nothing"):
+
+- the root-status pair `ZENSU_ROOT_STATE_GONE` / `ZENSU_ROOT_STATE_PRESENT`. The shell
+  constants live in `hooks/lib/zensu-session.sh`, but that file is a MIRROR, not the
+  definition: the values are exit statuses produced by `hooks/lib/claude-hook-session-v1.js`,
+  which sets `process.exitCode = 3` as a bare literal, and nothing compares the two sides.
+  Say "mirror", or a maintainer following this entry to "change the trichotomy" edits the
+  shell constant and silently degrades both consumers to their hedged arms while AC-C19
+  stays green — that pin covers the CONSUMERS' spellings only, and the producer is pinned
+  separately by AC-C15f with its own bare `3`. TWO consumers reach the pair by DIFFERENT routes —
+  and the route is the part a reader gets wrong. `stop-chain-enforcer.sh` sources the
+  owner in its PARENT shell and compares against those names directly;
+  `zensu-doctor.sh` sources it only inside command substitutions, where the name is out
+  of scope and reading it under `set -u` aborted the whole diagnostic, so it copies the
+  VALUES out in one subshell and compares against its own `ZDOC_ROOT_STATE_*`. One
+  definition, two spellings, on purpose. There is deliberately no `_UNKNOWN` member: it
+  is the residual, so nothing compares against it. AC-C19 in
+  `tests/structure/test-versioned-plugin-upgrade.sh` pins both MEMBERS in both files, in
+  each consumer's own spelling, plus a negative needle forbidding the defaulted
+  `${ZDOC_ROOT_STATE_GONE:-0}` form. That negative needle is not decoration: the pair
+  shipped with only `_PRESENT` pinned, and the doctor had meanwhile put the literal back
+  through exactly such a default, on the member no needle covered — a half-pinned pair
+  reads greener than an unpinned one. When adding a member, pin it in both files before
+  writing any comment that says both are covered.
 - the `recorded<TAB>executing` wire format — one producer
   (`claude-hook-session-v1.js`) and five parsers (`zensu-doctor.sh`,
   `stop-chain-enforcer.sh`, `pre-bash-zensu-gate.sh`, `pre-edit-tdd-reminder.sh`,
   `pre-bash-source-write-gate.sh` / `pre-write-secret-scan.sh` share one spelling).
   Every parser reads `${V##*$'\t'}` for the executing half, which takes the LAST
   field: adding a third field silently redirects all five rather than failing.
-- the version-shape rule, spelled twice for two different hazards —
-  `ADOPTION_SAFE_VERSION_RE` (a version reaches a FILENAME) and
-  `ZENSU_SAFE_VERSION_RE` (a version reaches a JSON string, and now also the
-  doctor report). Identical alternation, deliberate hand-copy; keep them in step.
+- the version-shape rule, spelled THREE times for three different hazards —
+  `ADOPTION_SAFE_VERSION_RE` in `session-control-core-v1.js` (a version reaches a
+  FILENAME), `ZENSU_SAFE_VERSION_RE` in `zensu-session.sh` (a version reaches a
+  JSON string, and now also the doctor report), and `SAFE_VERSION` / `safeVersion`
+  in `reviewer-capability-v1.js` (a version reaches the `.*` gate's own JSON deny
+  reason, which that gate spells itself rather than through
+  `zensu_emit_hook_session_deny`). Identical ALTERNATION in all three, deliberate hand-copy;
+  keep them in step. A FOURTH spelling of the same alternation lives OUTSIDE production,
+  in `tests/structure/test-versioned-plugin-upgrade.sh`'s `AC-C20b` precondition, which
+  re-spells it to decide whether its shared fixture still fails the shape. It holds
+  nothing in lockstep and is not a member of the three — but a widening that leaves it
+  behind makes that row refuse its own fixture, so it belongs on this roster and is named
+  here rather than left for a grep to turn up. The CONSEQUENCE deliberately differs and an earlier wording
+  claimed it did not: `ADOPTION_SAFE_VERSION_RE` performs no substitution at all —
+  a failing version REFUSES the adoption (`EXECUTING_UNIDENTIFIED`) — while the
+  other two substitute `(unreadable)` and keep rendering. Same rule, three members,
+  two outcomes. The count was raised
+  to three while the enumeration still named two, which is the drift this bullet
+  exists to prevent — state the base or the count means nothing.
+
+  **Coverage, per member and NOT to be confused with the `UNCHECKED` above.** TWO of the
+  three members have an executed BEHAVIOURAL case in
+  `tests/structure/test-versioned-plugin-upgrade.sh`: `AC-C19b` drives
+  `ZENSU_SAFE_VERSION_RE` in both slots, and `AC-C20b` drives `SAFE_VERSION`/`safeVersion`
+  through `pre-reviewer-capability-gate.sh`.
+
+  **`ADOPTION_SAFE_VERSION_RE` is the exception, and an earlier revision of this paragraph
+  asserted the opposite — that `AC-C09` "drives its REFUSAL".** It does not, and cannot.
+  What `AC-C09` establishes is that an installation declaring no usable version is
+  refused, and it would establish exactly that with this member deleted:
+  `parseRuntimeVersion` re-tests BOTH versions in the very next statement — the shape
+  guard sits immediately above the `// Condition 5` comment and the two calls are that
+  condition's first statements, so state the ADJACENCY and never an ordinal — and returns
+  the
+  IDENTICAL `ADOPTION_REFUSALS.EXECUTING_UNIDENTIFIED`, while `RUNTIME_VERSION_RE` is a
+  strict SUBSET of the shape guard — an `N.N.N` whose parts are at most nine digits each
+  is at most 29 characters of digits and dots and always satisfies it — so everything the
+  guard refuses the parse refuses anyway. The non-string arm is covered too, and NOT by
+  the mechanism an earlier revision named: it said `exec` "coerces a non-string to text
+  and returns no match rather than throwing", which is false twice — `parseRuntimeVersion`
+  opens with `typeof value !== 'string'` and returns `null` on the line BEFORE `exec`, so
+  `exec` is never reached with a non-string at all, and coercion does not imply no match
+  (`RUNTIME_VERSION_RE.exec(['0.19.0'])` coerces and DOES match). That `typeof` line is
+  the only guard on the recorded version at that point, so a maintainer trusting the old
+  sentence could delete it. MEASURED, not
+  argued: with the whole `ADOPTION_SAFE_VERSION_RE` condition removed from
+  `adoptableRecord` and committed, every `AC-C09` row still passed and the suite stayed
+  green.
+
+  **Redundant, and RETAINED — say both, because the first draft of this correction said
+  only the first half and the second draft only the second.** The redundancy is
+  CONTINGENT: `verdict.recorded` is `context.plugin_version`, condition 5's parse ran on
+  that same value above the single `ok: true` return, and a successful parse means the
+  string IS `N.N.N`. So while that ordering holds, the value that reaches
+  `<key>.superseded-<recorded-version>.json` is digits and dots, and the guard is defence
+  in depth rather than the thing keeping a traversal sequence out of that filename — a
+  claim this entry made unqualified for one round. Move the parse below the return, or
+  put a value there that the parse never saw, and the guard becomes load-bearing again
+  with nothing announcing it. **The redundancy does NOT transfer to the two twins.**
+  `ZENSU_SAFE_VERSION_RE` and `SAFE_VERSION` have no parser above them at all; they
+  substitute rather than refuse, and deleting either lets a malformed version reach a
+  rendered string directly. Treat this member as SOURCE-PINNABLE ONLY until a case exists
+  that fails without it,
+  and do not restore the old claim from a green suite — a green suite is exactly what it
+  produces.
+
+  That is per-member coverage only — the lead-in's
+  `UNCHECKED` is about the CROSS-COPY lockstep pin, which still does not exist: NO check
+  compares the three alternations against each other, so a one-sided widening still
+  ships silently. **State that as the property and NEVER as a grep result.** An earlier
+  revision of this paragraph offered "a `grep -rl` over `tests/` returns ZERO files
+  naming any of the three constants" as its proof, and the very commit that wrote that
+  sentence falsified it by adding the census comments this paragraph points at: the
+  constant NAMES now occur under `tests/`, as prose, which is not a comparison — so the
+  verdict stood while its stated evidence did not. Do NOT amend that word on the
+  strength of this paragraph; the two
+  claims are about different things, and conflating them would assert a pin the tree
+  does not have. TWO further `(unreadable)` substitution SITES sit outside this
+  three-member rule census and are uncovered: `hooks/stop-chain-enforcer.sh`, which
+  sets BOTH slots when EITHER fails — a blanket rule, unlike the per-slot members
+  above — and `safeVersion(lineage.recorded)` in `reviewer-capability-v1.js`, whose
+  refusing direction needs an install tampered BEFORE the record is minted.
+  `zensu-doctor.sh` is NOT among them: it consumes `ZENSU_SAFE_VERSION_RE` from the
+  sourced owner and DROPS the pair rather than substituting, and `AC-C02` already
+  covers its accepting direction.
+
+  **A THIRD KIND of site is outside that count entirely, and it is the one the census
+  shape cannot see: a branch that applies NO bound of its own.** `reviewer-capability-v1.js`
+  emits `immutable context revalidation failed: ${error.message}` unfiltered, so an
+  UNBOUNDED manifest-controlled value can reach a user-facing deny reason through a
+  sibling branch that never consults the rule. It is not a substitution site, which is
+  why counting substitutions misses it — and it is a different value CLASS from the three
+  members, which hold VERSION strings: name it as manifest-controlled, never as "a value
+  the three-member rule exists to hold to a shape".
+
+  **State the bound on the message this can carry, because the first draft of this
+  paragraph did not and read as a wider hole than it is.** The thrower is
+  `localManifestEntry` — in `session-control-core-v1.js`, NOT in the gate file above it —
+  and its two messages differ: `${label} escapes plugin root` carries no path at all, and
+  `${label} is missing: ${candidate}` carries one only AFTER `isInside(pluginRoot,
+  candidate)` has passed, so that path is already proven to be under the plugin root.
+  What is genuinely unbounded is the CATCH: nothing filters `error.message`, so any other
+  throw on that path renders whole. Whether the catch is reachable from this thrower was
+  NOT traced — say unverified, not unreachable. Named in a comment beside `AC-C20b` in
+  `tests/structure/test-versioned-plugin-upgrade.sh` and, until this entry, nowhere
+  durable.
 - the review-evidence store layout, hardcoded in `discardSupersededLeases` as
   `review-evidence/v1/{records,superseded}/<key>` and re-implementing the
   ownership predicate that `review-evidence-lease-v1.js` owns, plus — since the
@@ -966,7 +1282,7 @@ version-shape rule are unchecked:
   — the adoption ENTRY POINT calls it after the record swap — so a port that takes
   only the core delta gets an adoption that never sweeps and leaves every superseded
   lease wedging the store. What the move bought: the function is exported and driven
-  by `tests/structure/session-control-lease-sweep.test.js`, so its refusal arms cost
+  by `tests/structure/review-evidence-sweep-v1.test.js`, so its refusal arms cost
   a temp directory each instead of a full synthetic install plus a session
   lifecycle, and three return shapes the shell layer could not reach are ordinary
   cases.
@@ -978,7 +1294,68 @@ version-shape rule are unchecked:
 
 **Port-relevant.** The core half is `adoptableRecord` / `adoptContext` /
 `executingPluginVersion` / `adoptionWorkflowStatePath` plus `ADOPTION_REFUSALS`, in
-the cross-host `session-control-core-v1.js`. `discardSupersededLeases` is NO LONGER
+the cross-host `session-control-core-v1.js` — and, since the vanished-root work and the
+pruned-installation state, also condition 1's strict-then-orphan-then-pruned ladder,
+`readPrunedPluginRootContext`, the `allowMissingPluginRoot` waiver beside it,
+`requireAbsentDirectoryPath`, and `buildContext`'s SECOND parameter. That last one is the trap: a port that takes only the
+enumerated core half has `adoptContext` passing a second argument to a `buildContext` that
+ignores it, so `canonicalDirectory` runs on an absent path and adoption THROWS in exactly
+the state the feature was written for. **`hooks/lib/zensu-safe-display-v1.js` joins
+the core half**, and it is the one entry a port is likeliest to skip because it looks
+cosmetic: it owns `safeDisplayValue(value, followedBy)` — the `label : value` pair-forgery
+guard plus the positive letter/number/mark allowlist — it requires NOTHING, not even a node
+builtin, and both report renderers consume it. **The SECOND parameter is part of the
+obligation and is the easiest half to drop.** It carries what the caller will render
+immediately after the value; only the POSITIONAL rules see the join, because the allowlist
+judges which characters the VALUE may contain and the caller's marker is not the value's
+business; and a caller's appended marker must carry ONE space, or the double-space rule
+fires on every appended render and folds the disclosure exactly when it is being disclosed.
+A port that implements the one-argument description gets a function that silently ignores
+its second argument — unlike the `buildContext` second-parameter trap this roster already
+names, which at least throws. The doctor renderer's `foldPath` is a THIRD member beside
+`foldSlot` and `parentheticalWriter`: it carries the fold to the prose rows, and a port that
+copies the other two re-ships the raw-interpolation defect. It is also the one deliberate
+exception to the no-parentheses rule below — a prose row supplies no call-site parentheses,
+so `foldPath` returns a pre-parenthesized string while `foldSlot` must not. **ONE rule, deliberately.** A second, narrower
+`foldDisplayHiders` shipped here for one review round: it was written for the doctor's
+load-failure fallback, that fallback was then changed to DROP the value instead of
+folding it, and the export survived with no consumer and no executed case while this
+paragraph named the file a port obligation. Four review seats found it independently.
+A port that re-adds a weaker sibling rule re-creates exactly the two-implementation
+class the extraction removed. The rule
+lived inside `session-adopt-report-v1.js`, a feature command's module with five
+requires of its own, and the doctor reached for it through a guarded lazy require
+with a second, narrower spelling behind the guard: a display rule in two
+implementations, with a four-file load chain behind it, inside the one tool whose job
+is to speak in a damaged installation. **The two consumers require it DIFFERENTLY,
+and that asymmetry is load-bearing.** The adoption report takes it at top level; the
+doctor renderer keeps its require LAZY and GUARDED, because that file deliberately
+has no hard sibling require — `test-doctor.sh` P1mf builds a plugin root carrying
+exactly the core and that renderer, to prove a missing `chain-recovery-v1.js`
+degrades to one warning row rather than killing the report, and a top-level require
+made the renderer unloadable in that tree. Its fallback NAMES ITS REASON — the row prints
+`(not rendered — the display-safety module could not be loaded)` — rather than
+re-authoring the fold or dropping the value silently, because two other surfaces tell
+the user "/zensu:doctor names the directory" unconditionally. **The fold returns a
+RECORD, not a string** — `foldSlot` answers `{text, present, ok}`, where `present` is
+about the INPUT (an empty value has never produced a parenthetical) and `ok` is about
+the fold. The two were once conflated in one returned string, which forced every call
+site to fold TWICE to ask both questions and made the load-failure SENTENCE the value.
+**A fold failure is stated once per ROW, never once per slot.** `parentheticalWriter`
+owns that: one writer per `bindingLine()` call, with a `stated` flag closed over it. It
+is not cosmetic — with the sentence substituted per slot, the two-version row rendered
+`(record minted by <sentence>, executing <sentence>)`, which repeats the reason, buries
+the fact that BOTH values are missing, and reads as though the sentence were a version;
+the combined row has three slots and said it three times. `P1mf2` in `test-doctor.sh`
+pins the COUNT, on both remaining multi-slot bindings; `P1mf1` pins that the SINGLE-slot
+rendering is unchanged. **The returned string must carry no parentheses of its own**,
+and that is the part to keep: the fallback shipped as `(unrenderable)` in one round and
+as `(not rendered — …)` in the next, and BOTH were wrapped again by the call site's
+`' (' + … + ')'`, rendering `… no longer exists ((not rendered — …)) — …`. The same
+defect, twice, in successive fixes for it. A port that re-authors the fold, collapses
+`present` and `ok` back into one value, states the reason per slot, or returns a
+pre-parenthesized string gets one of those defects back.
+`discardSupersededLeases` is NO LONGER
 among them — it moved to `hooks/lib/review-evidence-sweep-v1.js` and is the EIGHTH
 host obligation enumerated below. Note that
 `adoptableRecord`'s `options.projectRoot` is now INERT — accepted and never read —
@@ -986,18 +1363,34 @@ so a port that takes only the core delta (the condition gone) while its own entr
 script still requires and host-path-renders a project-dir variable still exits
 before printing any report, which is the same wedge in a different place. The two
 halves move together. The host
-half is EIGHT separate obligations, and a port that takes only the core delta gets
+half is NINE separate obligations, and a port that takes only the core delta gets
 `adoptContext` with no reachable caller and keeps the wedge: the entry script, the
 recognizer's `RECOGNIZED` entry, the doctor branch and row, the Stop release, the
 deny scope at every gate that denies in this state, the skill, — easy to miss
 — a binder exporting a `privateRecordsDirectory` equivalent that applies the
 symlink/alias/permission/ownership checks, because the entry script resolves the
-records directory through it and never by hand-joining, and EIGHTH the sweep itself
+records directory through it and never by hand-joining, **and a `validateSessionId`
+equivalent**, which the report module now imports from the same binder and calls
+before anything derived from that id locates a file — a port that takes the entry
+script and the report against a binder without it gets a TypeError inside
+`buildRequest`, which is literally the failure this roster's closing sentence names, EIGHTH the sweep itself
 (`hooks/lib/review-evidence-sweep-v1.js`, plus the owner exports it consumes and the
 entry point's call to it) — a port that skips it re-mints the record and leaves every
-superseded lease wedging the store. A port that copies only
-the script gets a TypeError rendered as the wrong refusal. `zensu-codex`,
-`zensu-kiro` and `zensu-antigravity` were NOT included in this change.
+superseded lease wedging the store — NINTH the third-fact channel: the
+`orphaned-incompatible-root` / `model-orphaned-incompatible-root` argv pair, both
+shell wrappers, and the THREE-way exit status those wrappers carry, without which a
+port gets a Stop hook telling a user whose worktree is gone that their chain state
+survived, and TENTH the pruned-installation surface set: the binder mode pair, the
+shell wrapper pair, the deny scope, the gate branches, the Stop arm and the doctor
+probe, because a port that takes the reader alone gets a record it can adopt and no
+surface that tells the user so. The ninth and tenth arrived from different branches
+and BOTH were written as "NINTH"; they are two obligations, not one. That ninth entry sat in the prose ABOVE this enumeration for one review
+round on this branch while the count still read EIGHT — it was never released that
+way, and saying otherwise would overstate the history — which is the failure this
+file records elsewhere about its own rosters: a port works from the list, not from the paragraph, so an
+obligation named only in prose is an obligation that gets skipped. A port that
+copies only the script gets a TypeError rendered as the wrong refusal.
+`zensu-codex`, `zensu-kiro` and `zensu-antigravity` were NOT included in this change.
 
 **Two spellings of one root, and only Windows can tell them apart.** The sweep decides
 ownership with `record.plugin_root === executingPluginRoot`, a STRING compare. Leases carry
@@ -1042,20 +1435,61 @@ themselves deleted when the seam was taken. Getting that set wrong is its own ha
 opposite direction: a reader who believes an uncommitted constant is invisible will
 misread a pin that in fact grades it immediately. Commit first, then measure.
 
-**The Windows timeout for `test-versioned-plugin-upgrade.sh` is MEASURED, and the
-measurement is one sample.** `windows-shard-2` logged
-`PASSED versioned-plugin-upgrade (107613ms)` against the 900000 ms ceiling — roughly
-12%, so about seven eighths of the budget is unused. Taken at the head that carried
-Part C plus the AC-C11/AC-C11b/AC-C12 family.
+**The Windows timeout for `test-versioned-plugin-upgrade.sh` has ONE recorded
+sample, taken on the head that carries Part C2.** `windows-shard-2` logged
+`PASSED versioned-plugin-upgrade (152553ms)` against the 900000 ms ceiling — roughly
+17% — on the green run of commit `22dd388`. It is the first Windows wall clock taken
+after the seam work added two `node --test` drivers and the vanished-project-root
+work added Part C2: further armed sessions, a Stop invocation, capability-gate
+drives and tampered record copies, each spawning `node` or `bash`. It SUPERSEDES the
+previous sample of 107613 ms, which was taken at the head carrying Part C plus the
+AC-C11/AC-C11b/AC-C12 family; the two are 42% apart on content that grew, which is
+the growth this figure now prices in and the caveat below refuses to treat as a
+bound. Re-measure on the next green Windows run after a change that adds process
+runs, and replace the number and this provenance sentence together. Deliberately
+no row count here: this file's own rule two paragraphs up is that a hand-maintained
+number is what a driven loop cannot catch, and the count written into an earlier
+version of this paragraph had already drifted from the suite's own reported total
+before it was read a second time.
 
-**That sample is now STALE, and saying so is the point of recording it.** The work
-that took the seam added two further `node --test` drivers to this suite plus roughly
-450 lines of rows, and no Windows wall clock was taken afterwards. The 107613 ms
-figure describes a head that no longer exists. Do not budget against it; re-measure
-on the next green Windows run and replace the number and its provenance sentence
-together.
+**THAT SAMPLE NO LONGER COVERS THE FILE, and the headroom is UNMEASURED until a green
+Windows run replaces it.** The PR #272 review round added checks to this suite —
+deliberately not counted here, for the reason the paragraph above gives: the count in
+that paragraph's own earlier wording had already drifted, and so had this one, which
+read `five` while the round stood at six. What prices the round is the WORK, not a
+numeral —
+including one that COPIES the whole lib directory and executes the adoption entry point
+twice, and `AC-C20b`, which drives the capability gate a third time but deliberately
+adds NO install, reusing `AC-C09`'s already-tampered sibling root instead — and rewrote
+a case in `tests/structure/session-adopt-report-v1.test.js`, which
+this suite drives from the WORKING TREE, into a walk over the entire Unicode code space
+(`for (let cp = 0; cp <= 0x10ffff; cp += 1)`, three property regexes per code point).
+The 152553 ms figure predates all of it. `tests/session-control/run.sh` sits on the same
+`windows-shard-2` and grew too. The ceiling was deliberately NOT raised: raising it
+without a measurement trades a visible `TIMED_OUT` for a silently truncated tail, which
+is the failure this file records for two sibling suites. Say "unmeasured", not "17% of
+cap" — the percentage is arithmetic over a stale numerator. Same reason as ever, the
+caveat cannot live in the manifest: `tests/run-profile.js`'s `SUITE_KEYS` throws on any
+key outside `{id, runner, path, args, timeoutMs}` and aborts every Windows shard at
+manifest load.
 
-Read the original sample as ONE sample, not as a bound. The sibling
+Part D of the same suite — the pruned-installation rows, three further synthetic
+installs — landed after that note without a Windows sample either, so the same
+instruction applies twice over.
+
+**And the SUITE cap is the wrong ceiling to reason about alone — the SHARD envelope binds
+first.** `windows-shard-2` carries `profileTimeoutMs: 1800000` across eight entries, and
+`versioned-plugin-upgrade` is the LAST object in that array. `tests/run-profile.js`
+computes `effectiveTimeoutMs: Math.min(suite.timeoutMs, remaining)` where `remaining` is
+the shard budget minus everything already spent, so this suite receives the REMAINDER, not
+its own 900000. That is not hypothetical: this file records shard-3's eight suites summing
+to 1800072 ms, with its last entry granted 139971 ms of a 420000 ms cap and reporting
+`TIMED_OUT` — "It was not slow; it was not paid for." Shard-2's job duration is UNMEASURED
+here too, so a genuine overrun in this suite may surface as a profile abort rather than the
+suite `TIMED_OUT` its ceiling exists to make visible. Record both figures when the next
+green Windows run supplies them.
+
+Read this sample as ONE sample, not as a bound. The sibling
 `stop-enforcer-self-review-routing` note in this file records a 29% spread across
 two green runs of byte-identical content on the same runner class, so a single
 figure says nothing about the worst case — it says only that the suite is not
@@ -1076,7 +1510,8 @@ Operator-facing accounts that must move with it: `docs/session-control.md`
 `skills/adopt-session/SKILL.md`. `tests/structure/test-versioned-plugin-upgrade.sh`
 Part C pins the named state, the doctor row, the Stop release, the Bash-matcher
 allowance with its ordinary-command discrimination, the refusal truth table, the
-end-to-end repair, and that the reserved phase cannot be minted through `--phase`.
+end-to-end repair, that the reserved phase cannot be minted through `--phase`, and
+that the gate's deny leaves every Session Control record byte-identical.
 
 ## Workflow-Baseline Repair (`workflowBaselineVerdict` / `repairWorkflowBaseline`)
 
@@ -1851,7 +2286,8 @@ hand; the release pipeline owns it.
   it used to refuse falls through to the standalone policy instead.** A foreign session that
   approves a plan carrying another run's `<!-- zensu-autopilot:<run> -->` marker no longer
   reaches the owner comparison, because the run is invisible to its owner-scoped read; it is
-  asked the ordinary "run /zensu:tdd?" question. Nothing is mutated — the foreign run is not
+  asked the four-route delivery question, which now carries `/zensu:autopilot` and `/zensu:pilot`
+  beside it (see §"Plan-Approval Delivery Route"). Nothing is mutated — the foreign run is not
   touched and no binding is created — so this is a lost DIAGNOSTIC, not a lost guarantee.
   Restoring it needs the marker before the read, and the marker is only resolved inside the
   payload evaluator (see "Plan-Gate Payload Sources"), which reads fields by name and must
@@ -2855,25 +3291,41 @@ properties are easy to get wrong and cost the whole feature:
 
 Shell wrappers live in `hooks/lib/zensu-session.sh` (`zensu_session_unregistered`,
 `zensu_session_orphaned_project_root`, `..._model`, plus
-`zensu_session_incompatible_runtime` / `..._model`). The orphaned wrapper **prints the
-dead path on stdout** and the incompatible-runtime pair prints `recorded<TAB>executing`;
+`zensu_session_incompatible_runtime` / `..._model` and
+`zensu_session_incompatible_orphaned_root` / `..._model`, and
+`zensu_session_pruned_plugin_root` / `..._model`). The orphaned wrapper **prints the
+dead path on stdout**, BOTH version-pair predicates print `recorded<TAB>executing`, and the
+orphaned-root pair prints **the dead path** too;
 inside a PreToolUse gate stdout is the JSON decision channel, so a caller wanting the
 predicate alone must discard it explicitly, and a caller wanting the value must capture
-it into a variable before emitting anything.
+it into a variable before emitting anything. The orphaned-root pair additionally answers on
+THREE statuses — 0 with a path, **3** for a positive negative, 1 for an unavailable answer —
+because a caller that cannot tell the last two apart has to guess, and guessing wrong makes it
+assert a workflow document that is gone.
 
-**The third predicate is a DIAGNOSIS, never a third relaxation.** `zensu_session_incompatible_runtime`
-belongs to this roster only because every gate that consults the two above must decide what
-to do about it too — and the answer is the same everywhere: keep denying. A workflow document
-is still reachable in that state, so relaxing would waive a live guarantee rather than a dead
-one. What it changes is the MESSAGE: `zensu_emit_hook_session_deny` gained a fourth scope,
-`incompatible-runtime`, taking the two versions as positional arguments. FIVE gates can deny
-in that state: the four shell gates emit that scope, and `pre-reviewer-capability-gate.sh` —
+**The third and fourth predicates are DIAGNOSES, never further relaxations.**
+`zensu_session_incompatible_runtime` and `zensu_session_pruned_plugin_root`
+belong to this roster only because every gate that consults the two above must decide what
+to do about them too — and the answer is the same everywhere: keep denying. The pruned state
+is unrelaxed because a workflow document is still reachable there — its project root is
+present by construction. The lineage predicate matches TWO states, and they are unrelaxed for
+DIFFERENT reasons: with the recorded project root still present a workflow document is
+reachable, so relaxing would waive a live guarantee rather than a dead one; with that root
+gone the document is not reachable from this record, and what stands in for the guarantee is
+that the state has a real in-place repair — adoption, a user action leaving provenance —
+rather than a silent waiver. A consumer that says anything about the workflow document must
+ask `zensu_session_incompatible_orphaned_root` and branch. TWO do: the Stop hook, and
+`zensu-doctor.sh`, which asks the model twin and selects its fourth binding row from it.
+What the predicates change is the MESSAGE: `zensu_emit_hook_session_deny` now spells FIVE
+scopes, two of which — `incompatible-runtime` and `pruned-plugin-root` — take the two
+versions as positional arguments. FIVE gates can deny
+in either state: the four shell gates emit the matching scope, and `pre-reviewer-capability-gate.sh` —
 the `.*` matcher, where `isRecognizedInvocation` is false for every non-Bash tool — spells the
 same cause and remedy itself in JS, because the shell emitter is not reachable from it. A gate
 left on the generic text tells the user to start a fresh session while its sibling says the session can
-be repaired in place — two denies contradicting each other about the one bind failure that
-has an in-place remedy. The Stop hook is the single exception and RELEASES, because it cannot
-read the chain from an unbound session at all.
+be repaired in place — two denies contradicting each other about the two bind failures that
+have an in-place remedy. The Stop hook is the single exception and RELEASES for both, because
+it cannot read the chain from an unbound session at all.
 
 `zensu_emit_hook_session_deny` must never assert "no record" as the cause: naming the
 wrong relaxable state sends a user whose worktree was deleted hunting for a record that is
@@ -2892,7 +3344,9 @@ bypass entry would live in is the one that became unreachable — so a detection
 sidecar beside the immutable record, surfaced by `/zensu:doctor`) is still missing.
 
 **Port-relevant.** The core half (`validateContext`'s `allowMissingProjectRoot`,
-`readContextInternal`/`readOrphanedProjectRootContext`) lives in the cross-host
+`readContextInternal`/`readOrphanedProjectRootContext`, and `requireAbsentDirectoryPath`,
+which is the shape-without-existence rule both that reader and `buildContext`'s waived
+branch share) lives in the cross-host
 `session-control-core-v1.js`; the host half (binder mode, shell predicate, gate
 re-decisions, doctor row) is per host. A port that takes only the core delta keeps the
 worktree-deletion wedge; a port that takes neither drifts from this core.
@@ -4000,6 +4454,268 @@ host-neutral half is everything below the resolution: the single `<!-- zensu-aut
 marker, run-id equality, the owner and stage checks that precede every read, and the digest.
 A port that takes only the module gets the field decision; it still owns its own emission and
 its own exit ladder, which stay in `hooks/plan-approved-delegate.sh`.
+
+## Plan-Approval Delivery Route (`hooks/plan-approved-delegate.sh`, standalone branch)
+
+The STANDALONE branch of the plan gate asks ONE `AskUserQuestion` naming four mutually
+exclusive delivery routes — `/zensu:autopilot`, `/zensu:tdd`, `/zensu:pilot`, and implementing
+directly. It replaced a yes/no question about `/zensu:tdd` alone, which left the plugin's other
+two delivery routes invisible at the one moment they are relevant.
+
+**The DURABLE branch is untouched and must stay that way.** A plan carrying a validated
+`<!-- zensu-autopilot:<run> -->` marker still emits `PLAN_APPROVED` with "Do not ask another
+TDD/workflow question": Autopilot has spent its single planning gate by then, and a second
+question there would break that contract.
+
+**Two prerequisites are stated INSIDE the options rather than gating them, and the reason is
+that a hook cannot check either cheaply.** `/zensu:autopilot` owns its own Phase 0, which ends
+in its own `ExitPlanMode`, so choosing it after an approval costs a SECOND approval round for
+the spec, the `AC-###` list and the probed recipe — and it needs an authenticated forge CLI.
+`/zensu:pilot` needs an authenticated `zensu` CLI plus a feature ALREADY tracked in Zensu; its
+own skill sends ad-hoc work to `/zensu:tdd` instead. Both options are offered unconditionally
+and carry their cost in their own description. The ground is NOT that probing is expensive —
+`hooks/session-start-banner.sh` already runs `command -v zensu`, so the PRESENCE half is cheap.
+It is that a conditional option set would make the gate's own "exactly these four mutually
+exclusive options and no others" contract environment-dependent and therefore unpinnable, and
+that the half that actually matters — whether the CLI is AUTHENTICATED and the feature already
+tracked — needs a network call this hook must not make.
+
+**Auto Mode must NEVER select `/zensu:autopilot` OR `/zensu:pilot`, and this is the one safety
+property in the section.** Autopilot pushes a branch and opens a pull request; pilot commits,
+opens a pull request and mutates tracked feature state behind a per-transition confirm. TWO clauses choose a route
+without asking, and saying "the non-interactive one is the only place" was the overstatement
+review caught: fast-path (B) also selects without asking and carries no interactivity scope of
+its own, so an earlier wording in which (C) forbade only a *default* left a headless run whose
+driving prompt named the route reaching it through (B). (C) therefore OVERRIDES (B) in as many
+words, and forbids selection "not as a default, not by an explicit literal, and not by any
+other clause". Two further guards sit in (B) for the same reason and are not cosmetic: a route
+name carrying a negation REFUSES that route rather than selecting it — the bare literal
+`'autopilot'` meant `"no autopilot"` contained the token tested first — and only multi-word
+forms count, because in THIS repository `"fix the autopilot state machine"` is an ordinary
+sentence. `D13` in `tests/structure/test-plan-approved-delegate.sh` is the pin, and it grades a
+PROPERTY rather than a spelling list: it slices BOTH the (B) and the (C) clause, requires (C) to carry
+EXACTLY ONE `/zensu:autopilot` mention, the prohibition and override clauses, and no dispatch
+spelling; requires (C) to carry pilot's own rationale, which the never-clause needle cannot see;
+requires (B) to carry the refusal guard, the open-set marker and the multi-word rule,
+AND to state the refusal BEFORE the preference arms (an offset comparison, not a presence one —
+without it, moving the refusal below the autopilot arm passes every check); and requires the
+remainder after both clauses to tie no non-interactive run to a route. NO slice carries an emptiness arm: the composite index guard at the top makes all three
+non-empty by construction and reports `SLICE_FAILED` when it cannot. **State the residual rather than the count:** no conjunct binds the counted
+(C) occurrence TO the prohibition sentence, so a (C) clause that both defaults to the route and
+forbids a DIFFERENT one still passes. An earlier form rejected two hand-picked spellings and
+would have passed `"default to running /zensu:autopilot"`.
+
+**The fast-path literal order is load-bearing.** `pilot` is a SUBSTRING of `autopilot`, so the
+longer literal is tested first; testing the shorter one first routes an autopilot request to
+the wrong skill. The directive states the order and the reason, because the matching is done by
+a model reading prose and not by a regex anyone can order.
+
+**The ORDERING rule is encoded as a judgement, not as a fixed winner**, because which route is
+best depends on the plan: Autopilot leads for a whole user-visible feature meant to reach a pull
+request, Pilot for work belonging to an already-tracked feature, otherwise the Zensu workflow —
+and "implement directly" is never first. That last clause is what keeps the do-nothing option
+out of the recommended slot, which the repository's own best-solution-first rule forbids.
+
+**Coupled sites that move together:** both heredocs in `hooks/plan-approved-delegate.sh` — never
+one alone, and the file must keep exactly TWO `cat <<'JSON'` blocks, because the parity helper in
+`tests/structure/test-tdd-vanilla-mode.sh` refuses a third; that helper's `P1` needle list, which
+now carries the route literals and is what makes a one-sided edit fail, plus `P1b`-`P1b7`, which
+compare mode-INDEPENDENT spans byte-for-byte because presence alone cannot see an
+option ADDED to one branch — `P1b`/`P1b2` the option list, `P1b3`/`P1b4` the two dispatch arms, and
+`P1b5`/`P1b6`/`P1b7` the SAFETY clauses (the `(C) OVERRIDES (B)` sentence, the refusal-first block,
+and the `(B)`-internal non-interactive removal guard). The safety half was unpinned until a
+mutation probe measured it: on a ONE-SIDED reword of heredoc 1, `P1b` through `P1b4` all reported
+PASS while `P1b5` and `P1b7` failed, and a separate reword of the refusal block failed `P1b6`.
+Then `D9pre` and `D9`-`D33` in
+`tests/structure/test-plan-approved-delegate.sh`, which force the strict branch as well because
+the default config resolves to the vanilla one and a single capture would grade only one heredoc;
+that suite ALSO grades carriers outside the hook, and the roster is an ENUMERATION rather than a
+count because a count there was wrong on the day it was written: `D17` five prose carriers
+(`docs/configuration.md`, `docs/architecture.md`, `README.md`, `skills/tdd/SKILL.md`,
+`skills/gauntlet-loop/SKILL.md`, with an examined-carrier floor of 5), `D18`-`D20`/`D28`/`D31`-`D33`
+the local-only eval in `evals/plan-approval-hook/` and its README (which nothing graded before, so
+its two ABSENCE assertions reported the outward-facing safety property green whenever the driven
+session died), and `D26`/`D27`/`D29`/`D30` the SessionStart banner. The suite's own header carries
+that enumeration too, because an edit to any of those files reddens a suite named for a different
+one; `hooks/session-start-banner.sh` and `tests/structure/test-session-start-banner.sh` now carry a
+pointer back, which is the half this repository keeps discovering it is missing. **`D18`-`D20` and `D26` are all SOURCE or single-arm pins, and
+`D29`-`D32` are what closed the two holes that left**, both measured rather than argued. The banner's
+`_ZENSU_ROUTE_QUESTION_LIVE` guard has THREE conditions and only the flag arm was graded: deleting
+either the `command -v node` line or the `[ -f .../plan-approved-delegate.sh ]` line left this suite,
+`test-session-start-banner.sh` AND `test-tdd-vanilla-mode.sh` fully green, so `D29`/`D30` drive the
+real banner with node hidden behind a stub PATH and with the delegate hook missing from a subset
+plugin root. And the eval runner's absence GATE was pinned only by its presence at the call sites:
+rewriting `nonempty()` to a constant `echo PASS` reinstated the exact defect `D18`/`D20` are named
+for with the suite still green, so `D31` grades the helper's BEHAVIOUR and `D32` states executably
+the premise the whole design rests on — that `not_contains()` is satisfied by a transcript that was
+never written. The runner cannot be sourced, so both extract the one-line helpers by text.
+`D29`'s stub-PATH fixture is UNVERIFIED on Windows, so it SKIPs rather than fails when it cannot be
+built — and TWO budgets are unmeasured, not one: the ubuntu shard weight in
+`tests/profiles/ci-shard-weights.v1.json` still reads its pre-change value, and the WEEKLY Windows
+structure shard, which this suite does reach through `ciStructureTests`, has never measured
+`D30`'s `cp -R` of the whole `hooks/` subtree or `D29`'s two symlink directories at all. Take both
+figures in one pass from a green run rather than estimating either — the suite gained a third verdict for it, following `H10` in
+`tests/structure/test-evidence-discipline.sh`, whose own stripped-PATH case declines to redden a
+weekly run for a reason unrelated to the feature. Three further constraints come from that same
+precedent and each was reached by getting it wrong here first: the interpreter is resolved by
+ABSOLUTE path, the two stubs are built by two link loops rather than by copying one onto the other
+(macOS SIGKILLs a copied signed binary), and a shell builtin — whose `command -v` answers a bare
+word — is skipped instead of being linked to itself. TWO banner literals are pinned by `D29`/`D30`
+and both must move with the hook: the route promise `asks which delivery route to take`, and the
+bare else-branch tip, which is matched WHOLE-LINE because it is a strict PREFIX of the
+`autoTdd`-off disclosure and a substring test would let the flag arm satisfy the node arm's check; and `BNR2c` in the vanilla-mode suite, which is the only check
+that reaches the four-route IF-branch tip in BOTH mode variants — `D26`/`D27`/`D29`/`D30` reach the
+tips too, and `D29`/`D30` are the sole grader of the bare ELSE-branch tip, while
+`P8c` greps the whole banner file and is satisfied by its pre-existing Skills line; and
+`hooks/user-prompt-tdd-reminder.sh` — BOTH heredocs, TDD arms only — together with `P2`, because
+§Language requires these phrase lists in lockstep and this chain edited that hook's arms; that hook
+is under the SAME two-heredoc constraint, since `P2` calls the same helper. Two further carriers
+this chain created: `skills/pilot/SKILL.md`'s "Do NOT Use For" bullet, which PARAPHRASES option (3)'s
+prerequisite and points at both heredocs as its verbatim carrier, saying to change both together —
+the direction matters, because a maintainer who greps that skill for the option text finds nothing
+and could "repair" it by pasting in a third copy, and the marker instruction in
+`skills/autopilot/SKILL.md`, which USED to be a hand-copied PAIR (the durable-begin site and Phase
+0.D). It is no longer a pair: the durable-begin site is a pure pointer plus a pre-begin
+single-marker precondition, Phase 0.D holds the one authoritative statement, and `D12`-`D15` in
+`tests/structure/test-autopilot-durable-skill.sh` pin exactly that — so "pinned against nothing" no
+longer holds for it.
+
+**The Phase 0.D ORDERING is now PINNED, and the two entries that follow are notes ABOUT roster
+members rather than roster members themselves.** `D14` in
+`tests/structure/test-autopilot-durable-skill.sh` compares LINE NUMBERS: the single-marker
+precondition must appear before the `--autopilot-begin --run "$RUN_ID"` command, so reversing the
+two now fails rather than passing every check. The paragraph this replaces said the ordering was
+"enforced by nothing" and told the reader to check it by hand; that was true until the offset
+comparison landed. What `D14` does NOT see is the ordering relative to `ExitPlanMode` itself —
+that half is still by hand.
+`skills/autopilot/SKILL.md` Phase 0.D is on this roster for a reason that is easy to miss: it
+requires `--autopilot-begin` to run IMMEDIATELY BEFORE `ExitPlanMode`, and that ordering is the
+only thing putting the durable run at `PLANNING` in time for Autopilot's OWN approval to land on
+the durable branch. Reverse it — a plausible refactor, "do not mint a run the user may reject" —
+and Autopilot's planning gate falls through to the standalone directive, which now re-asks the
+four-route question with `/zensu:autopilot` still on it. That approval loop did not exist before
+this change made the route reachable from this gate. `tests/structure/test-pilot-skill.sh` is on
+it for a blunter reason: its `P8d` graded a WHOLE-FILE `/zensu:pilot` count against a literal,
+so the primer edit turned a CI-run suite red. It is a per-heredoc assertion now, and the needle is
+the FULL route clause (`PILOT_ROUTE_CLAUSE`) rather than the bare skill name: both primer heredocs
+carry a pre-existing "runs via the `/zensu:pilot` conductor skill" sentence, so a bare needle stayed
+satisfied after the four-route clause was deleted from BOTH heredocs — measured on a mutant, where
+the bare needle reported PASS and the clause needle FAILED.
+
+**The strip rule and its target document are pinned too, by `D12`/`D13` in that same suite.** `D12`
+requires exactly one authoritative statement (`Strip the comment, never the whole line`) and zero
+restatements, so the hand-copied PAIR this section used to name cannot come back; `D13` requires the
+rule to name the plan CONTENT and forbids the retired `COMMENT from the incoming` spelling, which
+targeted a document the gate never reads. `D15` requires the minted-then-refused wedge to name
+`/zensu:autopilot-release` beside it.
+
+Operator-facing accounts, and the list is longer than the obvious two because every surface that
+described the old yes/no question became false at once: the `plan-approved-delegate.sh`,
+`autoTdd`, `tddImplementation`, `session-start-banner.sh`, `session-start-primer.sh` and
+`user-prompt-tdd-reminder.sh` rows in `docs/configuration.md` — the `tddImplementation` row is the
+one recording that the two ask-hooks no longer share one wording; BOTH branches of `hooks/session-start-primer.sh` (whose own `P3`
+parity needles now carry the route literals) and BOTH tips in `hooks/session-start-banner.sh`,
+which is the ONLY user-visible surface and was the one the whole review panel missed; the "When
+to Use" bullet in `skills/tdd/SKILL.md`; the two interception paragraphs in
+`skills/gauntlet-loop/SKILL.md`; the Layer 2 Mermaid edge in `docs/architecture.md`; the "Just
+this change" paragraph in `README.md` — BOTH the "Just this change" paragraph and the "A plan you approve
+first" bullet; `evals/plan-approval-hook/` — whose expect script must
+select the Zensu-workflow option BY LABEL, never by the ordinal `1`, since the ordering rule can
+put the branch-pushing route in slot 1 and a blind ordinal would take it unattended, and whose
+RUNNER must keep three properties the PR #295 review round added: every ABSENCE assertion is gated
+on a positive one (`T1.5` on `T1.0`, `T2.5` on `T2.0`, `T2.7`/`T2.8` on `T2.4`) because an empty
+transcript satisfies an absence — and note that `T2.5` inlines its own `grep` instead of calling
+`not_contains`, which is exactly how it escaped the first sweep, so the rule is "every absence
+assertion", never "every `not_contains` call"; the subprocess watchdog is a `timeout` -> `gtimeout`
+-> unwrapped ladder that ANNOUNCES the unwrapped case AFTER the header write, because that write is
+a truncating `tee` and a NOTE emitted above it is erased on exactly the host the fallback exists
+for — base macOS ships neither binary, the runner required neither, so both `timeout N …`
+invocations exited 127, `|| true` swallowed it, and the checks
+that read as the outward-facing safety evidence went green over a session that never started; and
+`T2.6` grades two rendered option LABELS rather than the bare phrase `implement directly`, which a
+model narrating its intent also emits. That eval is local-only and never runs in CI, which is why
+`D18`-`D20` and `D28` in `tests/structure/test-plan-approved-delegate.sh` grade the runner and its
+README from a suite that does — and `D18` binds the ` FAIL` VERDICT token on each not-graded arm,
+because a pin on the label alone let the arms be rewritten to `PASS` with the check still green.
+Every needle into that README must be LINE-LOCAL: the file wraps, and a `grep -qF` over a phrase
+that crosses a break can never match, which turned `D20` red for a claim that was in fact present;
+and THIS
+file's own §"Autopilot Run Scope" `OWNER_SESSION_MISMATCH` bullet, which describes what a foreign
+caller is asked when it falls through to the standalone policy.
+
+**NAMED FOLLOW-UP, not done here: the two heredocs carry the route text VERBATIM TWICE.** That
+duplication is why `P1b`/`P1b2` must compare mode-independent spans byte-for-byte at all, and three
+consecutive fix rounds each introduced a fresh defect in that duplicated clause. This file already
+ships the shape that removes the class — `emit_autopilot_context` composes the durable branch's
+directive from ONE string through node — so building the mode-independent span once and
+interpolating the two mode-specific fragments would make a one-sided edit structurally impossible
+rather than test-detected. Not done here because it re-authors `P1`/`P1b`/`P1b2` and the
+"exactly TWO `cat <<'JSON'` blocks" contract and turns the byte-for-byte pins tautological — a real
+control traded for a structural guarantee, which is a decision to take deliberately rather than
+mid-chain. **The pin-coverage claim above is SCOPED, because an earlier revision overstated it:**
+the span comparisons reach the option list, the two dispatch arms and — since the PR #295 review
+round — the three safety clauses (`P1b5`-`P1b7`); everything
+else in a multi-kilobyte directive is covered by presence needles plus `D13`, so the pins are far
+from tautological today. **TRIGGER:** take the seam at the next round that has to re-author
+`P1`/`P1b`/`P1b2` anyway, or at a fourth one-sided defect in the duplicated span.
+
+**The TRIGGER was evaluated in the PR #295 review round and deliberately NOT fired.** That round
+ADDED to `P1`'s needle list and added `P1b5`-`P1b7`; it re-authored neither `P1b` nor `P1b2`, and it
+introduced no one-sided defect in the duplicated span — every directive edit landed through a
+`replace_all` over an anchor verified to occur exactly twice, or as an explicit pair for the one
+mode-DEPENDENT clause (`run TDD instead` / `run the workflow instead`). Recorded so the next reader
+does not have to re-derive whether the condition was met: it was checked, and it was not.
+
+**Deliberately NOT changed — the QUESTION SHAPE, not the file:** `hooks/user-prompt-tdd-reminder.sh`
+keeps its yes/no question. Its TDD arms WERE edited by this chain (intent-judging, arm order, the
+untrusted-input scoping), which is why it is on the coupled-sites roster above. The route choice belongs to the moment a plan is approved; re-asking it on
+every prompt while no chain is active would be four options of noise.
+
+**Port-relevant.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` carry the same plan gate
+against different harnesses and were NOT included in this change. A port owns more here than a
+reworded directive: its own ROUTE VOCABULARY, because `/zensu:autopilot` and `/zensu:pilot` are
+skills a port may not ship at all, so copying the four-option text there would offer routes that
+do not exist; whether its harness has an `AskUserQuestion` equivalent that can carry four options;
+and — the one a literal-renaming port misses — whether a route can be selected NON-INTERACTIVELY
+on that host, which is the premise the whole (C)-overrides-(B) safety property rests on.
+
+**Version: `patch`.** Walked against §"Runtime Lineage" entry by entry: no context-record or
+workflow-state schema field, no strict key set, no hook added, removed or renamed and no matcher
+changed, no new config key (`autoTdd` is reused), no attestation change. The hook's only output is
+`additionalContext` — the ADVISORY shape the hook-inventory exemption names — and it returns no
+`permissionDecision` in either direction.
+
+**Why (C) names BOTH outward-facing routes, stated as a CRITERION so a later reader can widen or
+narrow it on the test rather than on a route name:** a route is barred non-interactively when it
+takes an outward-facing or externally-mutating step whose only guard is a human answer. Autopilot
+meets it because `skills/autopilot/SKILL.md` declares its Phase 1 "autonomous, ZERO questions", so
+the branch push is unattended once the plan is approved. Pilot meets it too, and an earlier
+revision of this paragraph said the opposite — that Pilot "has no unattended outward-facing step
+to guard" — which is false: it offers a commit and a pull request and it mutates tracked feature
+state, and the confirm that guards each transition IS an `AskUserQuestion` answer, exactly the
+control a headless run cannot supply. `/zensu:tdd` meets neither half and stays selectable.
+
+**Known gaps, accepted and named:** the four routes are prose the model follows, not a gate, so
+nothing enforces that the question is asked or that the ordering rule is honoured. The SEAM is
+the same one the yes/no question always had; the BLAST RADIUS is not — the old option set could
+only implement locally, while the new one adds a route that pushes a branch and opens a pull
+request and one that mutates external Zensu state. Neither prerequisite is verified before its option
+is shown, so a user without a tracked feature can still pick Pilot and learn the answer from that
+skill's own Phase 0. And `/zensu:doctor` carries no row for this question, so a project that set
+`autoTdd:false` still sees no doctor signal that the route choice is switched off — the
+SessionStart banner now says so, which is a user-visible surface rather than a diagnostic row, and
+the review round that added it did not close the doctor half.
+
+**The (C) safety property has NO behavioural coverage, and this is the largest named gap.** Both
+cases in `evals/plan-approval-hook/` drive an INTERACTIVE session via expect, while clause (C)
+governs a run with no human to answer — so the feature's only behavioural surface does not touch
+the half of its own contract that keeps an unattended run out of a branch-pushing route. A headless
+`claude -p` case is the obvious addition and was NOT implemented: the hook fires only on
+ExitPlanMode SUCCESS, that README already records `claude -p --permission-mode plan` auto-denying
+and firing no hook, and whether any other headless permission mode can produce an APPROVED
+ExitPlanMode was not established. Until it is, clause (C) is covered by `D13` alone, which grades
+the emitted directive rather than a model's behaviour — and `D13`'s own detection of an unattended
+escalation is a spelling list, not a property, in BOTH the `(B)` and the tail slice.
 
 ## Host-Refused Reviewer Spawn (`hooks/lib/reviewer-spawn-denial-v1.js`)
 

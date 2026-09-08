@@ -1,8 +1,15 @@
 #!/usr/bin/env expect -f
-# Positive test: a code-change plan should make Claude ASK whether to run the
-# TDD flow (AskUserQuestion) and, on "Yes", route to the /zensu:tdd skill in
-# the main thread. We approve the plan, answer Yes to the TDD question, then
-# assert the 'Executing via /zensu:tdd' status line.
+# Positive test: a code-change plan should make Claude ASK which delivery route
+# to take (AskUserQuestion, four mutually exclusive options) and, when the Zensu
+# workflow is chosen, route to the /zensu:tdd skill in the main thread. We
+# approve the plan, select the Zensu-workflow option, then assert the
+# 'Executing via /zensu:tdd' status line.
+#
+# Select by LABEL, never by ordinal. The directive orders the four options by
+# what fits the plan and marks the first one recommended, so slot 1 is not a
+# fixed answer: for a feature-shaped plan it is /zensu:autopilot, which pushes a
+# branch and opens a pull request. A blind "1" into a reordered question could
+# take that outward-facing route from an unattended script.
 
 set timeout 240
 set DEBUG_LOG [lindex $argv 0]
@@ -28,17 +35,19 @@ expect {
   }
 }
 
-# Ask-first: Claude should now ask whether to run the TDD flow. Answer Yes (1).
+# Ask-first: Claude should now ask which delivery route to take. Answer by the
+# option LABEL — typing the label selects it regardless of the slot it landed in,
+# which an ordinal cannot do once the directive reorders the four options.
 expect {
-  -re "TDD flow|Run the strict|Yes .*TDD" {
-    send_user "\n>>> TDD question detected — answering Yes (1)\n"
-    send "1\r"
+  -re "Zensu workflow — /zensu:tdd|Autopilot — /zensu:autopilot" {
+    send_user "\n>>> Delivery-route question detected — selecting the Zensu workflow by label\n"
+    send "Zensu workflow\r"
   }
   -re "Executing via /zensu:tdd" {
     send_user "\n>>> Routed to /zensu:tdd before an explicit prompt match\n"
   }
   timeout {
-    send_user "\n>>> TIMEOUT waiting for the TDD question\n"
+    send_user "\n>>> TIMEOUT waiting for the delivery-route question\n"
   }
 }
 

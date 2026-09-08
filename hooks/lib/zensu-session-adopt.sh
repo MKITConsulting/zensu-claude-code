@@ -1,6 +1,9 @@
 #!/bin/bash
 # zensu-session-adopt.sh — report on, and optionally perform, the adoption of an
-# intact Session Control record by a declared-incompatible executing runtime.
+# intact Session Control record by a runtime that cannot SERVE it: either a
+# declared-incompatible lineage, or a minting installation the host pruned from
+# its plugin cache. The second is reachable under a COMPATIBLE lineage too, so do
+# not narrow this line back to the incompatible case.
 #
 # This is the SECOND script the PreToolUse Bash gates recognize in a bind
 # failure, and it differs from the first in the one way that matters: the
@@ -36,14 +39,26 @@
 #     <plugin_data>/{session-control,review-evidence} and the recorded project.
 #   - What BOUNDS that write is not derivation — CLAUDE_PLUGIN_DATA is a
 #     caller-supplied literal, exactly as it is for the diagnostic — it is
-#     readContext: the session-hash must match, the
-#     runtime digest is recomputed against the RECORDED root, and that root's
-#     manifest must still declare the recorded version. Add the sibling-root
-#     bound and the plugin_data equality check, and a record the caller authored
-#     under a directory it controls cannot reach the write for a session it does
-#     not already own. State it this way and not as "every location is derived
-#     from the record": that is the stronger claim, and it is not what the code
-#     enforces.
+#     adoptableRecord's condition-1 LADDER. Naming only its first rung, as this
+#     header once did, states a check the code does not always perform:
+#       * the strict readContext: the session-hash must match, the runtime digest
+#         is recomputed against the RECORDED root, and that root's manifest must
+#         still declare the recorded version;
+#       * else, when that root was PRUNED from the cache,
+#         readPrunedPluginRootContext, which re-measures NEITHER the digest nor the
+#         declared version — nothing can read a tree that is gone — and instead
+#         PROVES the root absent with its parent still present.
+#     On BOTH rungs: the session-hash match, the full schema and principal-profile
+#     validation, source_revision === runtime_digest, the sibling-root bound, the
+#     plugin_data equality check, and ADOPTION_SAFE_VERSION_RE on both versions
+#     before either reaches a filename. So a record the caller authored under a
+#     directory it controls still cannot reach the write for a session it does not
+#     already own. What the pruned rung drops is a CONSISTENCY check, not a
+#     barrier: runtime_digest is a content hash of a readable tree computed by an
+#     exported pure function, never a secret, so write access to the private
+#     records directory could always produce a matching one. That directory is the
+#     barrier. State it this way and not as "every location is derived from the
+#     record": that is the stronger claim, and it is not what the code enforces.
 #   - The record and history writes require every adoptableRecord condition to
 #     hold. There are exactly TWO bounded exceptions, and they are stated here
 #     because this header is what the recognizer's admission rests on. Both are
@@ -87,47 +102,76 @@ PLUGIN_ROOT="$(cd "$DIR/../.." && pwd -P)" || {
   printf '%s\n' 'zensu:adopt-session: cannot resolve the executing plugin root' >&2
   exit 1
 }
-CORE="$DIR/session-control-core-v1.js"
-[ -f "$CORE" ] && [ ! -L "$CORE" ] || {
-  printf '%s\n' 'zensu:adopt-session: the Session Control runtime is missing or symlinked; repair the Zensu plugin installation' >&2
-  exit 1
-}
-# The binder is loaded by the report module for its private-store constructor, so it
-# gets the same guard the core does — zensu-session.sh applies it to this exact file
-# at three sites, and a symlinked binder must not be the one library this
-# write-capable script loads unchecked.
-BINDER="$DIR/claude-hook-session-v1.js"
-[ -f "$BINDER" ] && [ ! -L "$BINDER" ] || {
-  printf '%s\n' 'zensu:adopt-session: the Session Control binder is missing or symlinked; repair the Zensu plugin installation' >&2
-  exit 1
-}
-# The report itself. It used to be a `node -e` payload carried inside this script as a
-# single-quoted string, which is why safe() had no test in either direction; it is a
-# real module now and gets the same missing-or-symlinked guard as the two libraries
-# above, because this is the file the write-capable command actually executes.
-REPORT="$DIR/session-adopt-report-v1.js"
-[ -f "$REPORT" ] && [ ! -L "$REPORT" ] || {
-  printf '%s\n' 'zensu:adopt-session: the adoption report module is missing or symlinked; repair the Zensu plugin installation' >&2
-  exit 1
-}
-# The sweep the report invokes after adoptContext, guarded for the same reason: a
-# missing or symlinked sweep must stop this command BEFORE any record is mutated,
-# not after.
-SWEEP="$DIR/review-evidence-sweep-v1.js"
-[ -f "$SWEEP" ] && [ ! -L "$SWEEP" ] || {
-  printf '%s\n' 'zensu:adopt-session: the review-evidence sweep module is missing or symlinked; repair the Zensu plugin installation' >&2
-  exit 1
-}
-# The lease-store OWNER, which the sweep requires. It is new to this command's load
-# graph — before the seam the core hand-copied its constants precisely to avoid the
-# require cycle — and it is the module that decides WHICH leases move
-# (leaseRecordIsOwned) and that creates and chmods the store (ensurePrivateDirectory,
-# storage). Leaving it unguarded while its four siblings are guarded would mean the
-# one command still reachable in a tamper-suspicious state loads its move selector
-# from a file nothing checked.
-LEASE="$DIR/review-evidence-lease-v1.js"
-[ -f "$LEASE" ] && [ ! -L "$LEASE" ] || {
-  printf '%s\n' 'zensu:adopt-session: the review-evidence lease module is missing or symlinked; repair the Zensu plugin installation' >&2
+# EVERY module this command loads, guarded from ONE table. These were seven
+# byte-for-byte copies differing only in a variable name, a path and a noun, while the
+# two SHELL siblings further down were already guarded by a loop — one file carrying
+# two spellings of one rule, with the better one demonstrated in the same file.
+#
+# The LIST is the safety property, not the tidiness. This file's own history records
+# claude-path-v1.js being left out when the list last grew, with the omission written
+# into a comment as a known gap: a list that grows by copy-paste is a list that loses a
+# member, and the loss is silent because every surviving copy still passes.
+#
+# Each row keeps its noun, so all seven emitted messages are unchanged. Why each module
+# is on the list, carried over from the guards this replaces:
+#   session-control-core-v1.js   the runtime that reads and re-mints the record
+#   claude-hook-session-v1.js    loaded by the report for its private-store constructor.
+#                                zensu-session.sh guards this exact file at three sites,
+#                                and a symlinked binder must not be the one library this
+#                                write-capable script loads unchecked
+#   session-adopt-report-v1.js   the file this command actually executes
+#   review-evidence-sweep-v1.js  invoked after adoptContext; a missing or symlinked
+#                                sweep must stop this command BEFORE any record is
+#                                mutated, not after
+#   review-evidence-lease-v1.js  the lease-store OWNER the sweep requires, so the one
+#                                command still reachable in a tamper-suspicious state
+#                                does not load its move selector from an unchecked file
+#   zensu-safe-display-v1.js     decides what every value in the report may look like
+#                                before it reaches a terminal and the model's context.
+#                                node's require FOLLOWS symlinks, so a link planted at
+#                                this name substitutes the fold for the whole report —
+#                                including the project line the user reads to decide
+#   claude-path-v1.js            reached TRANSITIVELY, and not inert on that path:
+#                                canonicalDirectory runs every trust-boundary path
+#                                through normalizeHostPathInput, including the
+#                                CLAUDE_PLUGIN_DATA value that locates the private
+#                                record store, and nothing else re-verifies the
+#                                EXECUTING tree here
+#
+# The loop runs in THIS shell — a `while … done < input` is not a subshell in bash — so
+# `exit 1` still stops the command rather than only the loop. The loop variable is
+# lowercase and `_zsa_`-prefixed, matching the shell-sibling loop below, which is the
+# shape this replacement wants more of. tests/structure/test-versioned-plugin-upgrade.sh
+# pins both halves: that no per-module hand-copied guard returns, and that no module
+# silently drops off this list.
+_zsa_seen=0
+while IFS='|' read -r _zsa_file _zsa_noun; do
+  [ -n "$_zsa_file" ] || continue
+  _zsa_seen=$((_zsa_seen + 1))
+  [ -f "$DIR/$_zsa_file" ] && [ ! -L "$DIR/$_zsa_file" ] || {
+    printf '%s\n' "zensu:adopt-session: the $_zsa_noun is missing or symlinked; repair the Zensu plugin installation" >&2
+    exit 1
+  }
+done <<'ZSA_REQUIRED_MODULES'
+session-control-core-v1.js|Session Control runtime
+claude-hook-session-v1.js|Session Control binder
+session-adopt-report-v1.js|adoption report module
+review-evidence-sweep-v1.js|review-evidence sweep module
+review-evidence-lease-v1.js|review-evidence lease module
+zensu-safe-display-v1.js|display-safety module
+claude-path-v1.js|host-path module
+ZSA_REQUIRED_MODULES
+# A loop that never ran verified nothing, and said so to no one. The seven guards this
+# replaced could not skip — each was a straight-line test — so consolidating them into
+# one loop introduced a failure mode they did not have: this script sets `set -u` but
+# NOT `set -e`, so a failed redirection reports and then falls straight through to the
+# node invocation with zero modules checked. Counting the rows closes it on every
+# shell, and also catches a table truncated to a prefix, which no per-row test can see.
+# The number is spelled here rather than derived because the table is the thing being
+# verified: deriving the expectation from it would make the check agree with whatever
+# it found.
+[ "$_zsa_seen" -eq 7 ] || {
+  printf '%s\n' 'zensu:adopt-session: the required-module table could not be read in full; repair the Zensu plugin installation' >&2
   exit 1
 }
 
@@ -170,15 +214,24 @@ command -v node >/dev/null 2>&1 || {
 # Both crossings into native Node go through the host-path renderer, as every
 # other stateful helper does, and are excluded from Git Bash's heuristic
 # environment conversion so a drive spelling is not reinterpreted twice.
-# Guarded like the five node modules above, and for a stronger reason: this one is
-# SOURCED, so a symlinked copy executes in THIS process and can redefine every later
-# printf, the host-path renderer and the node invocation itself. It was the one load
-# in this script without the pair, in the write-capable half of the two commands the
-# Bash gates recognize.
-[ -f "$DIR/zensu-session.sh" ] && [ ! -L "$DIR/zensu-session.sh" ] || {
-  printf '%s\n' 'zensu:adopt-session: the session library is missing or symlinked; repair the Zensu plugin installation' >&2
-  exit 1
-}
+# The two SHELL siblings. Every JS module in this command's require graph is guarded
+# above; these two were not, and `source` executes arbitrary shell IN THIS PROCESS,
+# which is strictly more powerful than a `require`. The read-only /zensu:doctor already
+# refuses a symlinked `zensu-session.sh` and renders a dedicated row for it, so the
+# write-capable command was the weaker of the two on the same file. Same bound as the
+# others, stated rather than implied: `[ ! -L ]` catches a link, not a replaced regular
+# file, so this is consistency in a defense-in-depth convention, not an independent
+# control.
+for _zsa_lib in "$DIR/zensu-session.sh" "$DIR/zensu-host-path.sh"; do
+  [ -f "$_zsa_lib" ] && [ ! -L "$_zsa_lib" ] || {
+    printf '%s\n' "zensu:adopt-session: ${_zsa_lib##*/} is missing or symlinked; repair the Zensu plugin installation" >&2
+    exit 1
+  }
+done
+
+# Directly above the `source` it suppresses, and not a line earlier: shellcheck binds a
+# directive to the NEXT COMMAND, and while it sat above the comment block it bound to the
+# `for` loop instead, leaving this line unsuppressed. Pre-existing, found in review.
 # shellcheck disable=SC1090
 source "$DIR/zensu-session.sh" >/dev/null 2>&1 || {
   printf '%s\n' 'zensu:adopt-session: the Session Control shell library is unavailable' >&2

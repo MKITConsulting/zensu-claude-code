@@ -69,6 +69,20 @@ const expectedProfiles = [
   // The second suite arrived later: `review-worker-evidence-lease` was moved off
   // shard 7 (see the note above) because this shard had the headroom and that one had
   // none. 154673 + 137147 ms of measured work against an 1800000 ms envelope.
+  //
+  // The THIRD suite is `plan-payload-path-transport`, and it is the same error a third
+  // time: 848420 ms measured against a 900000 ms cap on run 34069644202 — 94.3%, which
+  // is "budget AT the measurement" once more. Run 34110308541 was killed at 900152 ms,
+  // and because shard 4's four suites had summed to 1737578 ms of its 1800000 ms
+  // envelope (96.5%), the kill starved its neighbour too: `tdd-state-junction-safety`
+  // was granted 95474 ms of its own 180000 ms cap and aborted. Two red checks, one
+  // cause. Neither number could be raised in place — the shard had 62 s left — so the
+  // suite moved here, where 292 s of measured work leaves it 1427 s, and the cap rose
+  // to 1200000: about 41% over the last completing measurement, which covers the 29%
+  // run-to-run spread this repo records elsewhere while staying far below the 10x that
+  // stopped shard 8's own cap being a tripwire. It runs LAST on purpose, so its own cap
+  // binds before the profile envelope and a slow run surfaces as a suite TIMED_OUT
+  // rather than as an abort that truncates the tail silently.
   'windows-shard-8',
 ];
 const expectedCommandCount = 43;
