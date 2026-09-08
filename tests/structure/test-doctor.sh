@@ -3948,7 +3948,12 @@ rm -f "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
 # P1nq3 — BLOCKED is not terminal, so an own BLOCKED run with a live pointer still
 # holds the tree and must NOT render green beside "all checks green".
 rm -f "$AP_STATE"/autopilot-run-*.json
-ap_run run_blocked_a BLOCKED "$AP_OWN" "/w/t"
+# ap_run_valid, not ap_run. The loose helper writes nested objects the owner refuses,
+# so `ownerWouldAccept` is false for it whatever the stage — and the ⚠️ conjunct was
+# then satisfied by the shape gate rather than by BLOCKED's non-terminality. With an
+# owner-acceptable record the glyph is attributable to BLOCKED alone, which is what
+# this check is named for.
+ap_run_valid run_blocked_a BLOCKED "$AP_OWN" "/w/t"
 ap_pointer "$AP_OWN" run_blocked_a
 AP_BLOCKED_OUT="$(ap_report bound "$AP_OWN")"
 if printf '%s' "$AP_BLOCKED_OUT" | grep -F 'autopilot: nonterminal durable run run_blocked_a' | grep -qF '⚠️' \
@@ -4027,16 +4032,24 @@ rm -f "$AP_STATE"/autopilot-run-*.json
 # 236, not 400. `autopilot-run-` + 400 + `.json` is 419 bytes and NAME_MAX is 255
 # on every filesystem this suite runs on, so the create ALWAYS failed and the check
 # ALWAYS took its skip branch — reporting PASS for an assertion that never ran even
-# once. 236 gives a 255-byte name, the largest that fits, and it still exceeds
-# AUTOPILOT_RENDER_MAX (200), which is what the elision is measured against.
+# once. 236 gives a 255-byte name, the largest that fits.
+# The SUBJECT changed with the stem filter and the check follows it rather than being
+# weakened around it: the render now requires the stem to satisfy `AUTOPILOT_ID_RE`,
+# which caps at 128 characters, so a 236-character stem is one the owner could never
+# have minted and is WITHHELD rather than elided. Withholding is the stronger answer —
+# eliding half-renders forged text — and it makes `AUTOPILOT_RENDER_MAX` unreachable
+# on THIS channel, which `workspaceRoot` still exercises. What must stay true is that
+# the COUNT still fires and the withheld clause explains the absence, because the
+# count is the finding.
 AP_LONGNAME="autopilot-run-$(node -e 'process.stdout.write("z".repeat(236))').json"
 if : > "$AP_STATE/$AP_LONGNAME" 2>/dev/null && [ -f "$AP_STATE/$AP_LONGNAME" ]; then
   AP_LONGNAME_OUT="$(ap_report bound "$AP_OWN")"
-  if printf '%s' "$AP_LONGNAME_OUT" | grep -qF '… (elided)' \
-    && ! printf '%s' "$AP_LONGNAME_OUT" | grep -qF "$(node -e 'process.stdout.write("z".repeat(210))')"; then
-    check "P1nt a long run filename is counted but rendered elided" PASS
+  if printf '%s' "$AP_LONGNAME_OUT" | grep -qF 'durable run document(s) that could not be read' \
+    && printf '%s' "$AP_LONGNAME_OUT" | grep -qF 'are withheld because they carry a' \
+    && ! printf '%s' "$AP_LONGNAME_OUT" | grep -qF "$(node -e 'process.stdout.write("z".repeat(140))')"; then
+    check "P1nt an over-long run filename is counted but its name is withheld, never half-rendered" PASS
   else
-    check "P1nt long filename must be rendered elided" FAIL
+    check "P1nt over-long filename must be counted and withheld (got: $AP_LONGNAME_OUT)" FAIL
   fi
   rm -f "$AP_STATE/$AP_LONGNAME"
 else
@@ -4218,7 +4231,12 @@ rm -f "$AP_STATE"/autopilot-run-*.json
 # clause, in a row the doctor skill tells the model to relay verbatim. Rejection has
 # no legitimate cost — neither a git toplevel nor a valid run filename can carry one.
 ap_run run_tick_a GATES "$AP_FOREIGN" '/w/a`b'
-: > "$AP_STATE/autopilot-run-tick"'`'"name.json" 2>/dev/null || true
+# ASSERTED, not attempted. `|| true` swallows a failed create, and both surviving
+# conjuncts are then satisfied by the workspaceRoot half alone — the negative one
+# because it names a literal that never existed. The filename channel would be graded
+# by nothing on any filesystem or shell setting that refuses the create.
+AP_TICK_NAME="autopilot-run-tick"'`'"name.json"
+if : > "$AP_STATE/$AP_TICK_NAME" 2>/dev/null && [ -f "$AP_STATE/$AP_TICK_NAME" ]; then
 AP_TICK_OUT="$(ap_report bound "$AP_OWN")"
 if printf '%s' "$AP_TICK_OUT" | grep -qF 'does not render' \
   && ! printf '%s' "$AP_TICK_OUT" | grep -qF '/w/a`b' \
@@ -4226,6 +4244,9 @@ if printf '%s' "$AP_TICK_OUT" | grep -qF 'does not render' \
   check "P1nz4 a backtick in a workspaceRoot or a run filename is withheld, never delimited" PASS
 else
   check "P1nz4 backtick rejection (got: $AP_TICK_OUT)" FAIL
+fi
+else
+  check "P1nz4 skipped: this filesystem rejects a backtick in a filename" PASS
 fi
 rm -f "$AP_STATE"/autopilot-run-*.json
 
@@ -4362,6 +4383,61 @@ if printf '%s' "$AP_TERM_OUT" | grep -qF 'could not be read' \
   check "P1nz8 a readably terminal document is not reported as holding a working tree" PASS
 else
   check "P1nz8 terminal document must leave the unreadable set (got: $AP_TERM_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json
+
+# P1nz9 — `ownerWouldAccept` must apply the owner's nested VALUE rules, not only its
+# key sets. This conjunct gates the OK glyph and, through `warnCount`, the report's
+# "all checks green" summary, so everything it MISSES costs a green row that should
+# have been a warning — the inverse of what the comment above it used to claim.
+# `stateValid` rejects a record whose `stopBudget.stage` disagrees with `stage`, whose
+# `blocked` pair is non-null off BLOCKED, whose `approvedPlanSha256` is neither null
+# nor a sha256, or whose `options`/`tdd` values are the wrong type. Every one of those
+# keeps the exact key set, so the key-set mirror alone let a record `readRunInventory`
+# fails the whole project on render as an ordinary healthy run.
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+ap_run_valid run_vals_a GATES "$AP_OWN" "/w/t"
+AP_VALS_DIR="$AP_STATE" node -e '
+  var fs = require("fs"), path = require("path");
+  var p = path.join(process.env.AP_VALS_DIR, "autopilot-run-run_vals_a.json");
+  var rec = JSON.parse(fs.readFileSync(p, "utf8"));
+  rec.stopBudget = { stage: "PLANNING", count: 0 };
+  fs.writeFileSync(p, JSON.stringify(rec));
+'
+ap_pointer "$AP_OWN" run_vals_a
+AP_VALS_OUT="$(ap_report bound "$AP_OWN")"
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+# Control: the same fixture untouched still renders green, so the check discriminates
+# the VALUE rule rather than the ap_run_valid shape.
+ap_run_valid run_vals_ok GATES "$AP_OWN" "/w/t"
+ap_pointer "$AP_OWN" run_vals_ok
+AP_VALSOK_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_VALS_OUT" | grep -F 'autopilot: nonterminal durable run run_vals_a' | grep -qF '⚠️' \
+  && printf '%s' "$AP_VALS_OUT" | grep -qF 'the owner validates more' \
+  && printf '%s' "$AP_VALSOK_OUT" | grep -F 'autopilot: nonterminal durable run run_vals_ok' | grep -qF '✅'; then
+  check "P1nz9 a nested VALUE the owner refuses drops the OK glyph, a clean record keeps it" PASS
+else
+  check "P1nz9 nested value rules must gate the green arm (bad=$AP_VALS_OUT ok=$AP_VALSOK_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+
+# P1nz10 — a readably TERMINAL document must leave the could-not-be-read set at EVERY
+# shape gate, not only at the key-set one. That row asserts the record "still holds its
+# working tree", which is false for DONE or CANCELLED whatever made the record
+# unreadable — a moved project root, a bumped schemaVersion, a stem that disagrees.
+# The first spelling narrowed the escape to the key-set rejection alone, which left the
+# false sentence reachable through the six value gates below it.
+rm -f "$AP_STATE"/autopilot-run-*.json
+ap_run run_term_root DONE "$AP_FOREIGN" "/w/t" "/nonexistent/foreign/root"
+ap_run run_live_root GATES "$AP_FOREIGN" "/w/t" "/nonexistent/foreign/root"
+AP_TERMROOT_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_TERMROOT_OUT" | grep -qF 'could not be read' \
+  && printf '%s' "$AP_TERMROOT_OUT" | grep -qF 'autopilot-run-run_live_root.json' \
+  && ! printf '%s' "$AP_TERMROOT_OUT" | grep -qF 'autopilot-run-run_term_root.json' \
+  && printf '%s' "$AP_TERMROOT_OUT" | grep -qF '1 durable run document(s) that could not be read'; then
+  check "P1nz10 a terminal document leaves the unreadable set at a value gate too" PASS
+else
+  check "P1nz10 terminal escape must cover every shape gate (got: $AP_TERMROOT_OUT)" FAIL
 fi
 rm -f "$AP_STATE"/autopilot-run-*.json
 

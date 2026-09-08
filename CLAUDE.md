@@ -2341,6 +2341,13 @@ hand; the release pipeline owns it.
   enumeration here went stale within one review round, so this is a GREP and not a list: before
   changing any of them run
   `grep -nE 'AUTOPILOT_|autopilotOwnerSilence|autopilotPointerDesignates|createHash' hooks/lib/zensu-doctor-report.js`
+  **and `grep -nE 'CONTROL_BYTE|renderable|bound\(' hooks/lib/zensu-autopilot-state.sh`**. The
+  second root is not optional and the omission was a real defect: the exit-6 release refusal
+  carries its OWN inline spelling of the renderer's render-safety class plus a second copy of
+  `AUTOPILOT_RENDER_MAX`'s 200, in shell, and the one-file grep this paragraph used to prescribe
+  could not see it. The coupling runs in the DANGEROUS direction — the doctor row now routes a
+  model to that command, so a widening on the JS side that does not reach the shell literal
+  launders the withheld characters through the one command the row recommends.
   and check each hit against its owner. The needle is deliberately wider than a constant-name
   prefix: three of the copies carry no `AUTOPILOT_` token at all — the beacon filename and its
   `isFile`/`nlink` rule live inside `autopilotOwnerSilence`, the exact pointer shape inside

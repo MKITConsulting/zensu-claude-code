@@ -2424,6 +2424,11 @@ var AUTOPILOT_STATE_KEYS = ['schemaVersion', 'runId', 'projectRoot', 'ownerSessi
   'stage', 'nextActionCode', 'approvedPlanSha256', 'options', 'tdd', 'effects',
   'evidence', 'blocked', 'bypasses', 'stopBudget', 'events'];
 var AUTOPILOT_TERMINAL_UNSHAPED = { terminalUnshaped: true };
+var AUTOPILOT_SHA256_RE = /^[a-fA-F0-9]{64}$/;
+var AUTOPILOT_TDD_OUTCOMES = ['pass', 'no-changes', 'max-rounds'];
+function autopilotNatural(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
 var AUTOPILOT_OWNER_C0_RE = /[\u0000-\u001f]/;
 function autopilotOwnerNonEmpty(value, max) {
   return typeof value === 'string' && value.length > 0 && value.length <= max
@@ -2502,13 +2507,13 @@ function autopilotRun(file, stem, projectRoot) {
   // The owner refuses on the VALUE too, and a record it refuses fails the whole
   // project's inventory closed — so describing it here as an ordinary run would
   // pair a description with a remedy that cannot execute.
-  if (parsed.schemaVersion !== 1) return null;
+  if (parsed.schemaVersion !== 1) return shapeReject;
   var runId = typeof parsed.runId === 'string' ? parsed.runId : '';
   var stage = typeof parsed.stage === 'string' ? parsed.stage : '';
   var owner = typeof parsed.ownerSessionId === 'string' ? parsed.ownerSessionId : '';
-  if (!AUTOPILOT_ID_RE.test(runId) || runId !== stem) return null;
-  if (!AUTOPILOT_OWNER_RE.test(owner)) return null;
-  if (AUTOPILOT_STAGES.indexOf(stage) === -1) return null;
+  if (!AUTOPILOT_ID_RE.test(runId) || runId !== stem) return shapeReject;
+  if (!AUTOPILOT_OWNER_RE.test(owner)) return shapeReject;
+  if (AUTOPILOT_STAGES.indexOf(stage) === -1) return shapeReject;
   // The owner refuses a record whose `projectRoot` disagrees with the tree it was
   // found in, and every Autopilot verb then fails closed for the whole project.
   // CANONICAL on both sides. The record's value is a realpath — `_autopilot_project_root`
@@ -2517,7 +2522,7 @@ function autopilotRun(file, stem, projectRoot) {
   // `path.resolve` resolves no symlink. Comparing the two lexically rejected every valid
   // run in a non-bound session whose project path traverses a link, and rendered the
   // rejection as "could not be read", which is not what happened.
-  if (typeof parsed.projectRoot !== 'string') return null;
+  if (typeof parsed.projectRoot !== 'string') return shapeReject;
   // ONE side is canonicalized, and it is the CALLER's — exactly as the owner does
   // it. The worker replaces its own project-root argument with
   // `realpathSync.native(path.resolve(...))` and then compares the RECORD's field
@@ -2529,7 +2534,7 @@ function autopilotRun(file, stem, projectRoot) {
   // `/private/var` case the canonicalization was added for is still fixed, because
   // the mismatch was always on the caller's side — `stateProjectRoot()` returns a
   // `path.resolve`, not a realpath.
-  if (parsed.projectRoot !== autopilotCanonical(projectRoot)) return null;
+  if (parsed.projectRoot !== autopilotCanonical(projectRoot)) return shapeReject;
   // ABSENT and PRESENT-BUT-UNUSABLE are different answers and the row says so.
   // A record minted before workspace scoping carries no `workspaceRoot` at all,
   // and `mayHoldWorkspace` short-circuits on that: it then holds EVERY tree in
@@ -2552,20 +2557,43 @@ function autopilotRun(file, stem, projectRoot) {
       // Rejection has NO legitimate cost — a git toplevel cannot contain a
       // backtick — and the value still renders, as the "does not render" arm.
       && parsed.workspaceRoot.indexOf('`') === -1
+      // The denylist above is NOT the bar this file sets elsewhere. `forgesReportRow`
+      // is the row-forgery predicate defined in this same module for exactly this job,
+      // and it consults the shared owner's rules rather than a local character class:
+      // a `label : value` pair separator, a double space, a separator-adjacent
+      // modifier letter, every Default_Ignorable code point, and an orphan combining
+      // mark. None of those is a control byte, so all of them passed — into a row the
+      // doctor skill tells the model to relay verbatim, two clauses before this row's
+      // own release recommendation. It fails CLOSED on a module load failure, which
+      // routes to the "does not render" arm. The allowlist-based `safeDisplayValue` is
+      // deliberately NOT used: it rejects shell-active characters an ordinary path
+      // legitimately contains.
+      && !forgesReportRow(parsed.workspaceRoot)
       ? parsed.workspaceRoot : '';
   }
   // The STRICTER verdict, carried beside the loose one. It mirrors the parts of
   // `stateValid` a read-side copy can hold cheaply: the stage-to-next-action map,
-  // the exact key sets of the five nested objects, and a non-empty event ledger.
-  // It is NOT a second copy of `stateValid` and does not claim to be — it is the
-  // floor below which the OK glyph may not be handed out. Everything it misses
-  // costs a WARN row that could have been green; everything it catches would
-  // otherwise have been a green row and an "all checks green" summary for a
-  // project every Autopilot verb fails closed on.
+  // the exact key sets of the five nested objects, a non-empty event ledger, and
+  // the nested VALUE rules that need no owner vocabulary this reader does not
+  // already carry.
+  // DIRECTION, because the first spelling of this comment had it backwards and
+  // that is exactly what would have kept the gap open: this predicate is a
+  // REQUIRED CONJUNCT of the green arm, so everything it MISSES costs a green row
+  // and an "all checks green" summary for a project every Autopilot verb fails
+  // closed on. Over-strictness is the SAFE direction and costs only a WARN that
+  // could have been green.
+  // Still UNMIRRORED, named rather than implied: `tdd.returnStage` membership,
+  // `effectValid` / `teamReviewEffectValid` / `evidenceValid` and their
+  // cross-consistency, `bypasses` element shape, and the event ledger's own
+  // validity, id uniqueness and `fromStage` chaining. Each needs a further hand
+  // copy of an owner vocabulary, which is the cost this reader exists to stop
+  // paying — so this is explicitly a FLOOR, never a second `stateValid`.
   var ownerWouldAccept = parsed.nextActionCode === AUTOPILOT_NEXT_ACTION[stage]
     && Array.isArray(parsed.events) && parsed.events.length > 0
     && (!Object.prototype.hasOwnProperty.call(parsed, 'workspaceRoot')
-      || autopilotOwnerNonEmpty(parsed.workspaceRoot, AUTOPILOT_FIELD_MAX));
+      || autopilotOwnerNonEmpty(parsed.workspaceRoot, AUTOPILOT_FIELD_MAX))
+    && (parsed.approvedPlanSha256 === null
+      || AUTOPILOT_SHA256_RE.test(parsed.approvedPlanSha256));
   if (ownerWouldAccept) {
     ownerWouldAccept = Object.keys(AUTOPILOT_NESTED_KEYS).every(function (field) {
       var value = parsed[field];
@@ -2573,6 +2601,19 @@ function autopilotRun(file, stem, projectRoot) {
       var want = AUTOPILOT_NESTED_KEYS[field].slice().sort().join(',');
       return Object.keys(value).sort().join(',') === want;
     });
+  }
+  if (ownerWouldAccept) {
+    ownerWouldAccept = typeof parsed.options.cover === 'boolean'
+      && typeof parsed.options.validate === 'boolean'
+      && autopilotNatural(parsed.tdd.attempt)
+      && typeof parsed.tdd.headUpdateRequired === 'boolean'
+      && (parsed.tdd.outcome === null
+        || AUTOPILOT_TDD_OUTCOMES.indexOf(parsed.tdd.outcome) !== -1)
+      && autopilotNatural(parsed.stopBudget.count)
+      && parsed.stopBudget.stage === stage
+      && (stage === 'BLOCKED'
+        ? parsed.blocked.from !== null && parsed.blocked.code !== null
+        : parsed.blocked.from === null && parsed.blocked.code === null);
   }
   return {
     runId: runId, stage: stage, owner: owner, workspace: workspace,
@@ -2760,8 +2801,10 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
           + ' is NOT terminal, so it still holds this tree: resume or cancel it from this session'
           + ' rather than releasing it';
       } else if (designates === false) {
-        remedy = 'no active pointer designates it — a torn begin is one cause and a pointer naming'
-          + ' another run is another: finish or repair that run rather than releasing it';
+        remedy = 'no active pointer designates it — a torn begin is one cause, a pointer naming'
+          + ' another run is another, and so is the run reaching a terminus between the two'
+          + ' independent reads this report took: finish or repair that run rather than'
+          + ' releasing it';
       } else {
         remedy = 'this session\'s active pointer could not be read, so whether the run is ordinary'
           + ' or torn was NOT established — a missing check, not a verdict: finish or repair that'
@@ -2894,7 +2937,18 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
     // command. A legitimate run filename cannot carry one — the owner's
     // `identifier` forbids it — so rejection costs nothing real.
     var safe = unreadable.filter(function (n) {
-      return !CONTROL_BYTE_RE.test(n) && n.indexOf('`') === -1;
+      // POSITIVE shape, not only the two negative tests. `AUTOPILOT_RUN_RE`'s `(.*)`
+      // accepts any stem and an EMPTY file with a chosen name is enough — no valid
+      // JSON needed — which makes this the cheaper and larger of the two co-tenant
+      // channels, and it was the one held to the weaker bar. A name the owner could
+      // ever have minted satisfies `AUTOPILOT_ID_RE` on its stem, because
+      // `autopilotRun` refuses any record whose `runId` disagrees with it; a
+      // legitimately minted but corrupt document therefore still renders, and only a
+      // forged name is withheld. The COUNT is unaffected — it is the finding.
+      var m = AUTOPILOT_RUN_RE.exec(n);
+      return !!m && AUTOPILOT_ID_RE.test(m[1])
+        && !CONTROL_BYTE_RE.test(n) && n.indexOf('`') === -1
+        && !forgesReportRow(n);
     })
       .map(function (n) {
         return '`' + (n.length > AUTOPILOT_RENDER_MAX

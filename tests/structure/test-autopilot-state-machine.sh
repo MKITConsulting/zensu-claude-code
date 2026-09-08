@@ -1895,7 +1895,12 @@ if [ "$REL_READY" = true ]; then
   ( cd "$REL_P/.claude/worktrees/rh" && autopilot_begin_run run_hold_s session_hold_s "$REL_P" false true "" ) >/dev/null 2>&1
   HOLD_OWN="$( cd "$REL_P/.claude/worktrees/rh" && autopilot_workspace_hold_report "$REL_P" session_hold_s model 2>/dev/null )"
   HOLD_FOREIGN="$( cd "$REL_P/.claude/worktrees/rh" && autopilot_workspace_hold_report "$REL_P" session_hold_other model 2>/dev/null )"
-  ( cd "$REL_P/.claude/worktrees/rf" && autopilot_workspace_hold_report "$REL_P" session_hold_other model ) >/dev/null 2>&1
+  # `|| exit 97`, never `&&`. With `( cd DIR && verb )` a FAILED cd short-circuits and
+  # the subshell exits 1 — the exact value W31d and W31h assert as the PROVEN-FREE
+  # verdict — so the verb would never run and both checks would still pass. That is the
+  # very conflation those checks exist to forbid, reproduced one layer up in the
+  # harness. 97 is a value no arm of the verb can return.
+  ( cd "$REL_P/.claude/worktrees/rf" || exit 97; autopilot_workspace_hold_report "$REL_P" session_hold_other model ) >/dev/null 2>&1
   HOLD_FREE_RC=$?
   HOLD_OPERATOR="$( cd "$REL_P/.claude/worktrees/rh" && autopilot_workspace_hold_report "$REL_P" session_hold_other operator 2>/dev/null )"
   ( cd "$REL_P/.claude/worktrees/rh" && autopilot_workspace_hold_report "$REL_P" session_hold_other bogus ) >/dev/null 2>&1
