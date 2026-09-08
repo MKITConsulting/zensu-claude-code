@@ -192,7 +192,7 @@ policy is the supported alternative, exactly as today. `ESCAPE_STEMS` in
 `<project>/.zensu/state/verify-consent-<session-key>.json`, written only by the
 PostToolUse hook. It takes NO lease and no lock — the guarantee it provides is atomic
 REPLACEMENT, through an `O_EXCL` temp file plus a rename, one record per
-`(origin, route)`, plus `decidedBy: prompt | memory | policy`. A record carries no route set:
+`(origin, route)`, plus `decidedBy: asked | remembered | policy-mode`, which names what the recorder could observe rather than how a human answered. A record carries no route set:
 consent is granted per origin, so a route the record names is an audit line rather than an
 input to any later decision. The reader validates the shape before use, refuses symlinks, hard
 links and non-files, and requires each `at` to be the fixed-width UTC instant `toISOString()`
