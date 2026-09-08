@@ -276,9 +276,16 @@ node -e '
   && check "V26 a silently allowed navigation is recorded with decidedBy remembered" PASS \
   || check "V26 a silently allowed navigation is recorded with decidedBy remembered" FAIL
 
-[ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1}' pre_verdict "$NAV" "http://localhost:4200/" "$SID" "$PROJ")" = "ALLOW" ] \
-  && check "V27 with a parent policy present the gate stays silent and leaves enforcement to the broker" PASS \
-  || check "V27 with a parent policy present the gate stays silent and leaves enforcement to the broker" FAIL
+VALID_POLICY='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:4300","routes":["/"],"evidenceMode":"declared-safe"}]}'
+[ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$VALID_POLICY" pre_verdict "$NAV" "http://127.0.0.1:4300/" "$SID" "$PROJ")" = "ALLOW" ] \
+  && check "V27 with a policy the broker accepts the gate stays silent and leaves enforcement to the broker" PASS \
+  || check "V27 with a policy the broker accepts the gate stays silent and leaves enforcement to the broker" FAIL
+[ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$VALID_POLICY" pre_verdict "$NAV" "http://localhost:4200/" "$SID" "$PROJ")" = "DENY" ] \
+  && check "V27a the floor still refuses a hostname target in policy mode" PASS \
+  || check "V27a the floor still refuses a hostname target in policy mode" FAIL
+[ "$(ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1}' pre_verdict "$NAV" "http://127.0.0.1:4301/" "$SID" "$PROJ")" = "ASK" ] \
+  && check "V27b a policy value the broker would refuse leaves the gate armed" PASS \
+  || check "V27b a policy value the broker would refuse leaves the gate armed" FAIL
 
 ROOT_MISMATCH_RC=0
 payload PreToolUse "$NAV" "http://127.0.0.1:4200/" "$SID" "$PROJ" > "$PROJ/mismatch-payload.json"
@@ -299,7 +306,7 @@ STDIN_FAIL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-stdin.XXXXXX")"
 NOMOD_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-nomod.XXXXXX")"
 mkdir -p "$NOMOD_ROOT/hooks/lib"
 cp "$PLUGIN_DIR/hooks/pre-browser-navigation-consent.sh" "$NOMOD_ROOT/hooks/"
-STDIN_FAIL_OUT="$(bash "$NOMOD_ROOT/hooks/pre-browser-navigation-consent.sh" 2>/dev/null < "$STDIN_FAIL_DIR")"
+STDIN_FAIL_OUT="$(CLAUDE_PLUGIN_ROOT="$NOMOD_ROOT" bash "$NOMOD_ROOT/hooks/pre-browser-navigation-consent.sh" 2>/dev/null < "$STDIN_FAIL_DIR")"
 case "$STDIN_FAIL_OUT" in *'"permissionDecision":"deny"'*) FAILREAD_DENY=1 ;; *) FAILREAD_DENY=0 ;; esac
 case "$STDIN_FAIL_OUT" in *'hook payload unreadable'*) FAILREAD_CAUSE=1 ;; *) FAILREAD_CAUSE=0 ;; esac
 [ "$FAILREAD_DENY" -eq 1 ] && [ "$FAILREAD_CAUSE" -eq 1 ] \
@@ -378,7 +385,8 @@ fi
 if grep -qF '### Attach mode' "$SKILL_MD" && grep -qF 'worktree identity proven' "$SKILL_MD" \
   && grep -qF 'attached runtime, identity unproven' "$SKILL_MD" \
   && grep -qF 'never stop, signal, or restart the attached process' "$SKILL_MD" \
-  && grep -qF -- '- **Consent:**' "$SKILL_MD" && grep -qF '`prompt`' "$SKILL_MD" && grep -qF '`policy`' "$SKILL_MD"; then
+  && grep -qF -- '- **Consent:**' "$SKILL_MD" && grep -qF '`asked`' "$SKILL_MD" \
+  && grep -qF '`remembered`' "$SKILL_MD" && grep -qF '`policy-mode`' "$SKILL_MD"; then
   check "V33 SKILL.md attach mode proves identity by process cwd and the report carries a Consent block" PASS
 else
   check "V33 SKILL.md attach mode proves identity by process cwd and the report carries a Consent block" FAIL
