@@ -503,29 +503,19 @@ if [ -z "${ZDOC_VERIFY:-}" ]; then
     # Presence is not validity: the broker parses this value at start and REFUSES to
     # serve when it does not satisfy the contract, so a doctor claiming an active policy
     # from the variable alone reports green for a session whose browser cannot start.
-    # Only the three TOP-LEVEL guards parsePolicy applies first are repeated here; the
-    # per-target rules stay the broker's, and the reason says which check answered. Calling
-    # parsePolicy itself was weighed and declined, and the DNS argument is NOT the reason: that
-    # function takes its resolver as a parameter and reaches DNS only for mode "remote". The real
-    # reason is that a stubbed refusing resolver would report a VALID remote policy as invalid,
-    # which is the one verdict a diagnostic must never invent. NOTHING PINS THIS COPY against its
-    # owner — no test compares it to parsePolicy — so a change there leaves this silently stale.
-    # The row it feeds says what it checked: a green row here means the top-level contract holds,
-    # never that the broker will serve.
-    ZDOC_VERIFY_POLICY_FAULT="$(node -e '
-      const raw = process.env.ZENSU_VERIFY_NAVIGATION_POLICY_V1 || "";
-      let value;
-      try { value = JSON.parse(raw); }
-      catch (_error) { process.stdout.write("policy is not valid JSON"); process.exit(0); }
-      const keys = Object.keys(value || {}).sort();
-      if (JSON.stringify(keys) !== JSON.stringify(["mode", "targets", "version"])) {
-        process.stdout.write("policy contains unknown or missing keys"); process.exit(0);
-      }
-      if (value.version !== 1 || !["local", "remote"].includes(value.mode)
-          || !Array.isArray(value.targets) || value.targets.length < 1 || value.targets.length > 8) {
-        process.stdout.write("policy contract is invalid"); process.exit(0);
-      }
-      process.stdout.write("");
+    # The three TOP-LEVEL guards are CALLED, not copied: verify-navigation-floor-v1.js owns
+    # policyContractFault and the consent gate calls the same function, so the doctor and the
+    # gate cannot drift about what a usable policy is. The per-target rules stay parsePolicy's
+    # alone, which is what keeps this synchronous — those are the ones that resolve DNS for a
+    # remote origin, and a stubbed refusing resolver would report a VALID remote policy as
+    # invalid, the one verdict a diagnostic must never invent. A module that will not load
+    # answers "could not be judged" rather than green: the row says what it checked, and a
+    # green row means the top-level contract holds, never that the broker will serve.
+    ZDOC_VERIFY_POLICY_FAULT="$(ZDOC_FLOOR="$ZDOC_ROOT/hooks/lib/verify-navigation-floor-v1.js" node -e '
+      const floor = require(process.env.ZDOC_FLOOR);
+      const fault = floor.policyContractFault(process.env.ZENSU_VERIFY_NAVIGATION_POLICY_V1 || "");
+      if (typeof fault !== "string") process.exit(1);
+      process.stdout.write(fault);
     ' 2>/dev/null)" || ZDOC_VERIFY_POLICY_FAULT="policy could not be judged"
     if [ -n "$ZDOC_VERIFY_POLICY_FAULT" ]; then
       ZDOC_VERIFY=policy-invalid

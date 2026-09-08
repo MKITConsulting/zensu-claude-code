@@ -381,19 +381,24 @@ const {
   CONSENT_REMOTE_REASON,
   approveConsentOrigin,
   consentHookRegistered,
+  consentRecorderRegistered,
   resolveStartupPolicy,
 } = require('../../scripts/playwright-mcp-proxy.js');
 
-function syntheticRoot(withHook) {
+function syntheticRoot(withHook, withRecorder = false) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-consent-root-'));
   fs.mkdirSync(path.join(root, 'hooks', 'lib'), { recursive: true });
   fs.copyFileSync(path.join(PLUGIN_ROOT, 'hooks', 'lib', 'verify-consent-v1.js'), path.join(root, 'hooks', 'lib', 'verify-consent-v1.js'));
   fs.copyFileSync(path.join(PLUGIN_ROOT, 'hooks', 'lib', 'verify-navigation-floor-v1.js'), path.join(root, 'hooks', 'lib', 'verify-navigation-floor-v1.js'));
   const { CONSENT_MATCHER } = require(path.join(PLUGIN_ROOT, 'hooks', 'lib', 'verify-consent-v1.js'));
-  const registry = { hooks: { PreToolUse: [] } };
+  const registry = { hooks: { PreToolUse: [], PostToolUse: [] } };
   if (withHook) {
     fs.writeFileSync(path.join(root, 'hooks', 'pre-browser-navigation-consent.sh'), '#!/bin/bash\nexit 0\n');
     registry.hooks.PreToolUse.push({ matcher: CONSENT_MATCHER, hooks: [{ type: 'command', command: 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/pre-browser-navigation-consent.sh"' }] });
+  }
+  if (withRecorder) {
+    fs.writeFileSync(path.join(root, 'hooks', 'post-browser-navigation-consent.sh'), '#!/bin/bash\nexit 0\n');
+    registry.hooks.PostToolUse.push({ matcher: CONSENT_MATCHER, hooks: [{ type: 'command', command: 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/post-browser-navigation-consent.sh"' }] });
   }
   fs.writeFileSync(path.join(root, 'hooks', 'hooks.json'), JSON.stringify(registry));
   return root;
@@ -416,6 +421,31 @@ test('without a policy the broker starts in consent mode only when the consent h
   registry.hooks.PreToolUse[0].matcher = 'Bash';
   fs.writeFileSync(path.join(wrongMatcher, 'hooks', 'hooks.json'), JSON.stringify(registry));
   assert.equal(consentHookRegistered(wrongMatcher), false);
+});
+
+test('the consent recorder predicate is graded across the same truth table as its sibling', () => {
+  // consentRecorderRegistered is exported and was referenced by no test: it executed only
+  // incidentally, through the doctor wrapper's true branch, while consentHookRegistered was
+  // driven across registered / unregistered / file-deleted / wrong-matcher. The asymmetry
+  // matters because the broker starts in consent mode on the GATE alone — a missing recorder
+  // prompts on every navigation and remembers nothing, which is silent without this check.
+  assert.equal(consentRecorderRegistered(PLUGIN_ROOT), true);
+  assert.equal(consentRecorderRegistered(os.tmpdir()), false);
+  const gateOnly = syntheticRoot(true, false);
+  const recorderOnly = syntheticRoot(false, true);
+  const both = syntheticRoot(true, true);
+  assert.equal(consentRecorderRegistered(gateOnly), false);
+  assert.equal(consentHookRegistered(gateOnly), true);
+  assert.equal(consentRecorderRegistered(recorderOnly), true);
+  assert.equal(consentHookRegistered(recorderOnly), false);
+  assert.equal(consentRecorderRegistered(both), true);
+  fs.unlinkSync(path.join(both, 'hooks', 'post-browser-navigation-consent.sh'));
+  assert.equal(consentRecorderRegistered(both), false);
+  const wrongMatcher = syntheticRoot(false, true);
+  const registry = JSON.parse(fs.readFileSync(path.join(wrongMatcher, 'hooks', 'hooks.json'), 'utf8'));
+  registry.hooks.PostToolUse[0].matcher = 'Bash';
+  fs.writeFileSync(path.join(wrongMatcher, 'hooks', 'hooks.json'), JSON.stringify(registry));
+  assert.equal(consentRecorderRegistered(wrongMatcher), false);
 });
 
 test('consent mode approves loopback navigations, keeps the floor, and refuses remote and unapproved origins', async () => {

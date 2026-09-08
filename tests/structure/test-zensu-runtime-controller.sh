@@ -293,6 +293,37 @@ else
   check "failed up removes partial secret/state ownership files" FAIL
 fi
 
+# The secrets write moved from a truncating > plus a follow-up chmod to an O_EXCL create at
+# 0600, and the threat it names is a symlink planted between the top-of-arm absence test and
+# the write — which would carry DB_PASSWORD, JWT_SECRET and RUNTIME_LEASE out of the run
+# directory. What the suite asserted about that file was only that it is GONE after `down`,
+# which a passing run proves without exercising either property the change was made for. A
+# DANGLING symlink is the discriminating shape: `[ ! -e ]` is true for it, so it survives the
+# absence guard and reaches the write, where O_EXCL must refuse it.
+SECRET_LINK="$RUN_PARENT/run-secret-link"
+mkdir -p "$SECRET_LINK"
+SECRET_LINK_TARGET="$RUN_PARENT/secret-link-target"
+rm -f "$SECRET_LINK_TARGET"
+ln -s "$SECRET_LINK_TARGET" "$SECRET_LINK/zensu-runtime.secrets"
+# Its own DOCKER_STATE: the shared one holds single-value label/name files the stub
+# overwrites per run, and a later check reads them to prove a missing container is still torn
+# down. Reusing COMMON_ENV here clobbered that state and turned an unrelated check red.
+SECRET_LINK_DOCKER="$TMP/docker-secret-link"
+mkdir -p "$SECRET_LINK_DOCKER"
+: >"$SECRET_LINK_DOCKER/events"
+SECRET_LINK_OUT="$(env "${COMMON_ENV[@]}" DOCKER_STATE="$SECRET_LINK_DOCKER" bash "$CONTROLLER" up "$SECRET_LINK" "$WORKTREE" 2>&1)"
+SECRET_LINK_RC=$?
+case "$SECRET_LINK_OUT" in
+  *'could not be created exclusively'*) SECRET_LINK_NAMED=1 ;;
+  *) SECRET_LINK_NAMED=0 ;;
+esac
+if [ "$SECRET_LINK_RC" != 0 ] && [ "$SECRET_LINK_NAMED" = 1 ] && [ ! -e "$SECRET_LINK_TARGET" ]; then
+  check "a symlinked secrets name is refused exclusively and its target is never written" PASS
+else
+  check "a symlinked secrets name is refused exclusively and its target is never written (rc=$SECRET_LINK_RC named=$SECRET_LINK_NAMED)" FAIL
+fi
+rm -f "$SECRET_LINK/zensu-runtime.secrets" "$SECRET_LINK_TARGET"
+
 PARTIAL="$RUN_PARENT/run-partial"
 mkdir -p "$PARTIAL"
 if [ "$LOOPBACK_AVAILABLE" != 1 ]; then

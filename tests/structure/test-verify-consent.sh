@@ -312,6 +312,48 @@ case "$STDIN_FAIL_OUT" in *'hook payload unreadable'*) FAILREAD_CAUSE=1 ;; *) FA
 [ "$FAILREAD_DENY" -eq 1 ] && [ "$FAILREAD_CAUSE" -eq 1 ] \
   && check "V31 a failed stdin read is denied by the wrapper itself, naming the payload" PASS \
   || check "V31 a failed stdin read is denied by the wrapper itself, naming the payload" FAIL
+# AC-010: the pre hook has four refusal arms and only the exit-2 one was covered. These drive
+# the two that decide whether a broken installation denies or silently allows, and they assert
+# the REASON rather than the verdict, so the arms stay distinguishable from each other. The
+# third, "node unavailable", is structurally unreachable here — this suite exits near the top
+# when node is absent — and is left to the source pin below.
+NOMOD_DENY="$(payload PreToolUse "$NAV" "http://127.0.0.1:4200/" "$SID" "$PROJ" \
+  | CLAUDE_PLUGIN_ROOT="$NOMOD_ROOT" bash "$NOMOD_ROOT/hooks/pre-browser-navigation-consent.sh" 2>/dev/null)"
+case "$NOMOD_DENY" in
+  *'"permissionDecision":"deny"'*'decision module absent or symlinked'*)
+    check "V31d a plugin root with no decision module denies, naming the module" PASS ;;
+  *) check "V31d a plugin root with no decision module denies, naming the module" FAIL ;;
+esac
+BADMOD_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-badmod.XXXXXX")"
+mkdir -p "$BADMOD_ROOT/hooks/lib"
+cp "$PLUGIN_DIR/hooks/pre-browser-navigation-consent.sh" "$BADMOD_ROOT/hooks/"
+printf 'throw new Error("module load fault");\n' > "$BADMOD_ROOT/hooks/lib/verify-consent-v1.js"
+BADMOD_DENY="$(payload PreToolUse "$NAV" "http://127.0.0.1:4200/" "$SID" "$PROJ" \
+  | CLAUDE_PLUGIN_ROOT="$BADMOD_ROOT" bash "$BADMOD_ROOT/hooks/pre-browser-navigation-consent.sh" 2>/dev/null)"
+case "$BADMOD_DENY" in
+  *'"permissionDecision":"deny"'*)
+    check "V31e a decision module that will not load denies rather than allowing" PASS ;;
+  *) check "V31e a decision module that will not load denies rather than allowing" FAIL ;;
+esac
+rm -rf "$BADMOD_ROOT"
+# AC-011: post_run routes stderr onto stdout and every call site discarded it, so the
+# recorder's exit status was read by nothing — a hook that crashed before reading the payload
+# satisfied the record-count assertions just as well as one that worked. This reads both.
+NOMODP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-nomodp.XXXXXX")"
+mkdir -p "$NOMODP_ROOT/hooks/lib"
+cp "$PLUGIN_DIR/hooks/post-browser-navigation-consent.sh" "$NOMODP_ROOT/hooks/"
+POST_SKIP_RC=0
+POST_SKIP_OUT="$(payload PostToolUse "$NAV" "http://127.0.0.1:4200/" "$SID" "$PROJ" \
+  | CLAUDE_PLUGIN_ROOT="$NOMODP_ROOT" bash "$NOMODP_ROOT/hooks/post-browser-navigation-consent.sh" 2>&1 >/dev/null)" \
+  || POST_SKIP_RC=$?
+case "$POST_SKIP_OUT" in
+  *'consent memory not written (decision module absent or symlinked)'*) POST_SKIP_NAMED=1 ;;
+  *) POST_SKIP_NAMED=0 ;;
+esac
+[ "$POST_SKIP_RC" -eq 0 ] && [ "$POST_SKIP_NAMED" -eq 1 ] \
+  && check "V32b a recorder skip exits 0 and names its cause" PASS \
+  || check "V32b a recorder skip exits 0 and names its cause (rc=$POST_SKIP_RC named=$POST_SKIP_NAMED)" FAIL
+rm -rf "$NOMODP_ROOT"
 rm -rf "$NOMOD_ROOT" "$STDIN_FAIL_DIR"
 # AC-008: the recorder is documented as never blocking, and exit 2 from a PostToolUse hook IS
 # the blocking status. Its three plugin-root arms sat above skip() and could not use it.

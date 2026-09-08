@@ -687,8 +687,17 @@ unverified regardless of how many checks passed before it.
 came true before it moved.** This paragraph used to name it as the second big suite
 on `windows-shard-4` at a measured 714 s. On run 33968034396 it measured **874281 ms**
 — a 22% swing over that figure — and the shard's first three suites summed to
-1718167 ms of the 1800000 ms envelope, so `tdd-state-junction-safety` received the
-remaining 81927 ms against its own 180000 ms cap and reported `TIMED_OUT`. The suite
+1718167 ms of the 1800000 ms envelope, so `tdd-state-junction-safety` received LESS than the
+remaining 81833 ms against its own 180000 ms cap and reported `TIMED_OUT`. **State that
+figure as an upper bound, never as the grant.** An earlier revision wrote 81927, which is
+larger than 1800000 − 1718167 and puts the shard 94 ms over its own envelope — impossible under
+`tests/run-profile.js`, which starts the profile clock before the first suite while each
+suite's reported `durationMs` is measured inside `executeSuite` and therefore excludes the
+inter-suite overhead the profile clock keeps counting. So the grant is strictly BELOW the
+subtraction, and rounding across three suites accounts for about 1.5 ms, not for 94. The
+conclusion is unchanged at either value — the suite times out against its 180000 ms cap — but a
+note whose purpose is to keep the sizing lesson re-derivable must not hand the next reader a
+base that does not add up. The suite
 was not slow; it was not paid for. `plan-payload-path-transport` moved to
 `windows-shard-8`, which the contract test's own note measures at roughly 292 s of
 work; moving the 180000 ms suite instead would have left this shard at 1718167 ms,
@@ -7393,3 +7402,34 @@ runtime is still serving, which is the disqualifier that bullet spells out.
 - **The residual class the gate cannot close** is the one every PreToolUse gate carries: the
   broker trusts that the host ran the hook. With hooks disabled host-side, consent mode accepts
   unconsented loopback navigations, and the doctor reports registration rather than execution.
+- **The consent decision is SINGLE-LAYER, and the layer that survives in-session tampering is
+  the one that does not enforce consent.** State it that way rather than folding it into the
+  bullet above, which covers a host that never ran the hook and not a session that changed what
+  the hook does. In consent mode `approveConsentOrigin` inserts the origin into
+  `policy.approved` and the `assertAllowedUrl` on the next line tests membership in that same
+  set — which was just made true — so for a `browser_navigate` the broker re-checks the FLOOR
+  and nothing else. That is defensible as a design: the approved set is what polices
+  subresources and in-page navigations, and `configureContext` genuinely refuses an unapproved
+  origin there. What it means is that the human's answer is enforced in exactly one place. The
+  broker loads its floor once at start; the hook re-executes its decision module from the plugin
+  root on EVERY call, and no write gate covers that tree — `pre-write-plugin-data-guard.sh`
+  defends the plugin DATA store, not the plugin root. So an in-session module swap changes every
+  later verdict, and the broker cannot notice.
+- **Consent mode is entered from a FILE READ, and the fallback is more permissive than the
+  state it replaced.** `resolveStartupPolicy` enters consent when `consentHookRegistered` is
+  true, and that predicate `lstat`s two files and parses `hooks/hooks.json` under
+  `path.join(__dirname, '..')` — a claim made by a file in the broker's own tree, never a fact
+  about the running session. Every other gate in this repository falls back to the PRE-EXISTING
+  capability set; this one falls back to MORE. Before consent mode, no policy meant
+  `parsePolicy('')` → `mode: 'deny'` and no navigation at all. After it, no policy plus a hook
+  file on disk means unprompted access to every loopback origin whenever the hook does not
+  actually execute. Three reachable ways: hooks disabled host-side; the broker launched from
+  tree A (`__dirname/..`) while the host loaded its hook registry from tree B — an installed
+  root beside a `--plugin-dir` checkout, with nothing comparing the two; and a plugin swap
+  while the long-lived MCP process still holds the mode it resolved once at start.
+  **The uncompromised fix is not implemented and is named here rather than implied:** require
+  positive evidence that the gate ran IN THIS SESSION — a hook-written per-session marker the
+  broker refuses to self-approve without — and re-check it rather than caching the mode for the
+  process lifetime. The cheaper half, which is also not implemented, is a `/zensu:doctor` row
+  reporting EXECUTION rather than registration. Until one of them exists, read the shipped
+  `verify-feature:` row as "the pair is installed", never as "the gate ran".

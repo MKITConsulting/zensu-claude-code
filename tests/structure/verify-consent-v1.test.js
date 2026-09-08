@@ -232,7 +232,12 @@ test('memory writes are contained to the session state directory and land by O_E
   assert.equal(stored.version, MEMORY_VERSION);
   assert.deepEqual(stored.records.map((entry) => entry.route), ['/', '/login']);
   assert.equal(fs.readdirSync(path.dirname(memory)).filter((name) => name.endsWith('.tmp')).length, 0);
-  assert.equal((fs.statSync(memory).mode & 0o777), 0o600);
+  // POSIX only: on win32 Node maps a file's mode to the read-only flag alone, so a writable
+  // file reports 0o666 and this would fail deterministically there — a platform mapping being
+  // reported as a defect in the consent feature.
+  if (process.platform !== 'win32') {
+    assert.equal((fs.statSync(memory).mode & 0o777), 0o600);
+  }
 
   assert.equal(appendRecord(path.join(root, `verify-consent-${KEY}.json`), record('http://127.0.0.1:1', '/'), { projectRoot: root }).reason, REASONS.MEMORY_PATH_REFUSED);
   assert.equal(appendRecord(path.join(root, '.zensu', 'state', 'other.json'), record('http://127.0.0.1:1', '/'), { projectRoot: root }).reason, REASONS.MEMORY_PATH_REFUSED);
@@ -272,7 +277,11 @@ test('the write side refuses a leaf that is a symlink, a directory or a hard lin
   }
 
   fs.linkSync(real, memory);
-  assert.equal(fs.lstatSync(memory).nlink, 2);
+  // Same platform bound as the mode assertion above: NTFS link counting was not established
+  // for this shape, so the claim is made only where it is known to hold.
+  if (process.platform !== 'win32') {
+    assert.equal(fs.lstatSync(memory).nlink, 2);
+  }
   assert.equal(appendRecord(memory, good, { projectRoot: root }).reason, REASONS.MEMORY_PATH_REFUSED);
   fs.unlinkSync(memory);
 
@@ -295,6 +304,16 @@ test('the pre CLI emits ask or deny envelopes and denies an unreadable payload',
   const unreadable = runCli('pre', '{not json', env);
   assert.equal(unreadable.envelope.hookSpecificOutput.permissionDecision, 'deny');
   assert.match(unreadable.envelope.hookSpecificOutput.permissionDecisionReason, /hook-payload-unreadable/);
+  // The envelope KEY SET, not just the verdict. hookEventName is the field the host keys on;
+  // without this, dropping it leaves the shell suite and every unit verdict assertion green
+  // while the gate silently stops being applied.
+  for (const [label, produced] of [['ask', ask], ['deny', deny], ['unreadable', unreadable]]) {
+    assert.deepEqual(
+      Object.keys(produced.envelope.hookSpecificOutput).sort(),
+      ['hookEventName', 'permissionDecision', 'permissionDecisionReason'],
+      `${label} envelope key set`);
+    assert.equal(produced.envelope.hookSpecificOutput.hookEventName, 'PreToolUse', `${label} hookEventName`);
+  }
   const policy = runCli('pre', { tool_name: NAV, tool_input: { url: 'http://127.0.0.1:4200/' } }, { ...env, ZENSU_VERIFY_NAVIGATION_POLICY_V1: VALID_POLICY });
   assert.equal(policy.stdout, '');
   const memoryAllows = runCli('pre', { tool_name: NAV, tool_input: { url: 'http://127.0.0.1:4200/' } }, env);

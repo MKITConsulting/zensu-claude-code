@@ -317,10 +317,44 @@ case "$(vf_live '{"version":1,"mode":"local","targets":[{"origin":"http://127.0.
   *'environment policy active'*) check "P1vk-control a policy that satisfies the contract still renders active" PASS ;;
   *) check "P1vk-control a policy that satisfies the contract still renders active" FAIL ;;
 esac
+# Every vf_live case above reaches its reason only because all four `unavailable` elifs
+# PASSED, so only their true side ever ran. This one drives the last of them: a synthetic
+# plugin root registering the PreToolUse consent gate and NOT the PostToolUse recorder is the
+# state the doctor exists to name — the broker starts in consent mode on the gate alone, so
+# every navigation prompts and none is ever remembered. The root carries only the six files
+# hookRegistered and the doctor's own guards open, so it costs six copies rather than a tree.
+# ZDOC_ROOT comes from the doctor script's OWN location, never from ZENSU_DOCTOR_PLUGIN_DIR,
+# so the fixture has to copy the tree and run the COPY — pointing the variable at a synthetic
+# root while executing the real script measures the real registry and reports ready.
+VF_NOREC_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-norec.XXXXXX")" || exit 1
+cp -R "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/scripts" "$VF_NOREC_ROOT/" 2>/dev/null
+node -e '
+  const fs = require("node:fs");
+  const registry = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const recorder = "/hooks/post-browser-navigation-consent.sh";
+  const before = JSON.stringify(registry).includes(recorder);
+  registry.hooks.PostToolUse = (registry.hooks.PostToolUse || []).filter(
+    (group) => !(group.hooks || []).some(
+      (hook) => typeof hook.command === "string" && hook.command.includes(recorder)));
+  if (!before || JSON.stringify(registry).includes(recorder)) process.exit(1);
+  fs.writeFileSync(process.argv[1], JSON.stringify(registry, null, 2));
+' "$VF_NOREC_ROOT/hooks/hooks.json" \
+  && check "P1vl-control the recorder-missing fixture really dropped the PostToolUse registration" PASS \
+  || check "P1vl-control the recorder-missing fixture really dropped the PostToolUse registration" FAIL
+VF_NOREC_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
+  ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=ready \
+  ZENSU_DOCTOR_PLUGIN_DIR="$VF_NOREC_ROOT" CLAUDE_PLUGIN_ROOT="$VF_NOREC_ROOT" \
+  CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$VF_NOREC_ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null)"
+case "$VF_NOREC_OUT" in
+  *'consent recorder not registered'*) check "P1vl an unregistered consent recorder is named rather than absorbed" PASS ;;
+  *) check "P1vl an unregistered consent recorder is named rather than absorbed" FAIL ;;
+esac
+rm -rf "$VF_NOREC_ROOT"
 rm -rf "$VF_LIVE_ROOT"
 
 if grep -qF 'ZDOC_VERIFY=policy' "$HELPER" && grep -qF 'ZDOC_VERIFY=consent-no-recipe' "$HELPER" \
   && grep -qF 'ZDOC_VERIFY=unavailable' "$HELPER" && grep -qF 'consentHookRegistered' "$HELPER" \
+  && grep -qF 'consentRecorderRegistered' "$HELPER" \
   && grep -qF 'ZENSU_VERIFY_NAVIGATION_POLICY_V1' "$HELPER" \
   && grep -qF 'ZDOC_SESSION_PROJECT_ROOT ZDOC_VERIFY ZDOC_VERIFY_REASON' "$HELPER"; then
   check "P1vf wrapper derives the verify state from the policy env, the registered hook and the recipe, and exports it" PASS
@@ -331,9 +365,12 @@ VF_SKILL="$PLUGIN_DIR/skills/doctor/SKILL.md"
 # The phrase set is DERIVED from the renderer's own arms, never hand-listed: a hand list
 # passes unchanged when a state is added, which is exactly how a shipped state reached the
 # report with no bullet documenting it. Each arm renders 'verify-feature: <claim> — <remedy>',
-# and the claim before the em dash is what the skill must carry.
+# and the claim before the em dash is what the skill must carry. The strip uses the LITERAL
+# em dash: \xHH is a GNU sed extension, so on BSD/macOS sed the pattern degraded to the literal
+# text and matched nothing, leaving the tail attached and the derived phrase absent from
+# SKILL.md — red on macOS, green on the GNU-sed runner.
 VF_PHRASES="$(grep -oE "'verify-feature: [^']*'" "$REPORT" \
-  | sed "s/^'//; s/'\$//" | sed 's/ \xe2\x80\x94 .*//; s/ ($//' | sort -u)"
+  | sed "s/^'//; s/'\$//" | sed 's/ — .*//; s/ ($//' | sort -u)"
 VF_PHRASE_COUNT="$(printf '%s\n' "$VF_PHRASES" | grep -c . || true)"
 VF_SKILL_MISS=""
 while IFS= read -r phrase; do
