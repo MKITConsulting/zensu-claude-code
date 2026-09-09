@@ -2352,8 +2352,8 @@ hand; the release pipeline owns it.
   prefix: three of the copies carry no `AUTOPILOT_` token at all — the beacon filename and its
   `isFile`/`nlink` rule live inside `autopilotOwnerSilence`, the exact pointer shape inside
   `autopilotPointerDesignates`, and the owner-key rule in a bare `createHash` call. Several
-  are pinned — P1na, P1nm, P1nm1, P1nn and, since the two `ownerWouldAccept` inputs got theirs,
-  P1nz5 and P1nz6 in `tests/structure/test-doctor.sh` — and the pins compare
+  are pinned — P1na, P1nm, P1nm1, P1nn and, since the `ownerWouldAccept` inputs got theirs,
+  P1nz5, P1nz6, P1nz7, P1nz11 and P1nz12 in `tests/structure/test-doctor.sh` — and the pins compare
   spellings, not behaviour, so a semantic change that keeps the spelling passes. P1nz5 compares
   THREE sources rather than two: `ap_run_valid` inlines the stage-to-action table a third time,
   and a fixture that agrees with the renderer by construction cannot fail on the drift it exists
@@ -2378,17 +2378,28 @@ hand; the release pipeline owns it.
   finished ones included — into that row, with a permanent false claim and a permanently
   suppressed green summary. `autopilotRun` reads `stage` loosely BEFORE the key-set match and
   answers a distinct sentinel, `AUTOPILOT_TERMINAL_UNSHAPED`, which the single call site consumes
-  immediately. The narrowing is deliberately confined to the KEY-SET rejection: every other
-  refusal — schemaVersion, id class, owner class, a foreign `projectRoot` — still reports, because
-  those are genuine "this report does not accept it" verdicts rather than accidental drift. P1nz8
-  pins both halves, the terminal one leaving the set and a nonterminal one of the same shape
-  staying in it.
+  immediately. **The escape covers EVERY shape gate, not only the key-set one** — schemaVersion,
+  id class, owner class and a foreign `projectRoot` included — because the row's false sentence is
+  false for a terminal record whatever made it unreadable. This paragraph said the opposite for a
+  release while `P1nz10` already pinned the wider behaviour, so the governing document and the
+  suite asserted opposite contracts; that is the drift to check for first if the two disagree again.
+  **The escape NARROWS the finding and must never delete it.** `readRunInventory` never consults
+  terminality: it validates every `autopilot-run-*.json` in the directory and fails 2 on the first
+  it refuses, and `begin` and `read-workspace` pass no owner and stay strict — so a DONE document
+  with a foreign `projectRoot` fails every Autopilot verb closed for the WHOLE project, and this
+  report is the only thing that names that state. The escaped set therefore gets a SECOND row of
+  its own, carrying the claim that is true of it (the record holds no working tree, and the verbs
+  validate every document in the directory, so it can still fail them all closed) and quoting NO
+  release command, since `--autopilot-release` refuses a terminal run. Both rows withhold names
+  through ONE implementation, `autopilotSafeNames`. P1nz8 and P1nz10 pin the escape at the key-set
+  gate and at a value gate, ROW-SCOPED in both directions — absent from the false-claim row AND
+  present in the true-claim one — and P1nz13 pins the second row plus its control.
 - **The Windows wall clock for both grown suites is UNMEASURED.** `test-autopilot-state-machine.sh`
   runs on a blocking Windows PR shard and this change adds two git worktrees plus the `W16a`/`W16b`,
   `W31a`-`W31k` and `W32`/`W32a`-`W32d`/`W32z` families, four of which bind a Session Control record
   and invoke `zensu-log.sh`. `test-doctor.sh` is not on that shard at all but does run in the weekly
   Windows Safety structure inventory, and it gained the whole `P1na`-`P1nz` family together with
-  the `P1nm1` and `P1nz1`-`P1nz4` checks added in the round that followed. **Named as ID
+  the `P1nm1` and `P1nz1`-`P1nz13` checks added in the rounds that followed. **Named as ID
   RANGES rather than as numerals, deliberately** — this file's own rule about hand-maintained
   censuses applies to its own gap list, and it did not hold here: both numerals were written once
   and were wrong within the same change, reading "ten" and "eighteen" against a tree that carried 19

@@ -1971,7 +1971,7 @@ HOLD_TRANSPOSED_RC=9
 if [ "$REL_READY" = true ]; then
   HOLD_REPORT_OWN="$( cd "$REL_P/.claude/worktrees/rh" && autopilot_workspace_hold_report "$REL_P" session_hold_s model 2>/dev/null )"
   HOLD_REPORT_FOREIGN="$( cd "$REL_P/.claude/worktrees/rh" && autopilot_workspace_hold_report "$REL_P" session_hold_other model 2>/dev/null )"
-  ( cd "$REL_P/.claude/worktrees/rf" && autopilot_workspace_hold_report "$REL_P" session_hold_other model ) >/dev/null 2>&1
+  ( cd "$REL_P/.claude/worktrees/rf" || exit 97; autopilot_workspace_hold_report "$REL_P" session_hold_other model ) >/dev/null 2>&1
   HOLD_REPORT_FREE_RC=$?
   # The ownership fact is the report line's own `<kind>` field. It used to be a
   # separate `autopilot_workspace_hold_is_own` verb, which was DELETED: it had no

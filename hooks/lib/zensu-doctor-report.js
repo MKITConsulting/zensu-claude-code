@@ -2426,6 +2426,18 @@ var AUTOPILOT_STATE_KEYS = ['schemaVersion', 'runId', 'projectRoot', 'ownerSessi
 var AUTOPILOT_TERMINAL_UNSHAPED = { terminalUnshaped: true };
 var AUTOPILOT_SHA256_RE = /^[a-fA-F0-9]{64}$/;
 var AUTOPILOT_TDD_OUTCOMES = ['pass', 'no-changes', 'max-rounds'];
+// The owner's `sha256` is a TYPE test as much as a pattern test, and the type half is
+// the load-bearing one here: `RegExp.prototype.test` applies ToString to its argument,
+// so `['a'.repeat(64)]` satisfies a bare `.test` and fails the owner. This predicate
+// gates the green glyph, where looseness is the unsafe direction, so mirror both halves.
+function autopilotSha256(value) {
+  return typeof value === 'string' && AUTOPILOT_SHA256_RE.test(value);
+}
+// `nullableIdentifier` in the owner. `AUTOPILOT_ID_RE` is already the `identifier`
+// mirror (P1nm1 pins it), so this costs no further vocabulary.
+function autopilotNullableId(value) {
+  return value === null || (typeof value === 'string' && AUTOPILOT_ID_RE.test(value));
+}
 function autopilotNatural(value) {
   return Number.isSafeInteger(value) && value >= 0;
 }
@@ -2582,18 +2594,25 @@ function autopilotRun(file, stem, projectRoot) {
   // and an "all checks green" summary for a project every Autopilot verb fails
   // closed on. Over-strictness is the SAFE direction and costs only a WARN that
   // could have been green.
-  // Still UNMIRRORED, named rather than implied: `tdd.returnStage` membership,
+  // Still UNMIRRORED, named rather than implied — and NOT under one blanket reason,
+  // because the reason differs per item and an earlier wording gave the same one for
+  // all of them while three of the items it named needed no new vocabulary at all
+  // (those three are mirrored now). What remains needs a vocabulary this reader does
+  // not carry, which IS the cost this reader exists to stop paying: `tdd.returnStage`
+  // membership (`RETURN_STAGES`, a SUBSET of the stage set and not the stage set —
+  // reusing `AUTOPILOT_STAGES` for it would be looser than the owner),
+  // `tdd.headUpdateRequired`'s cross-check against `HEAD_UPDATE_STAGES`,
   // `effectValid` / `teamReviewEffectValid` / `evidenceValid` and their
-  // cross-consistency, `bypasses` element shape, and the event ledger's own
-  // validity, id uniqueness and `fromStage` chaining. Each needs a further hand
-  // copy of an owner vocabulary, which is the cost this reader exists to stop
-  // paying — so this is explicitly a FLOOR, never a second `stateValid`.
+  // cross-consistency, `bypasses` element shape, the event ledger's own validity,
+  // `MAX_EVENTS` bound, id uniqueness, `EVENT_TYPES` membership, payload digests and
+  // `fromStage` chaining, and `semanticHistoryValid`. So this is explicitly a FLOOR,
+  // never a second `stateValid`.
   var ownerWouldAccept = parsed.nextActionCode === AUTOPILOT_NEXT_ACTION[stage]
     && Array.isArray(parsed.events) && parsed.events.length > 0
     && (!Object.prototype.hasOwnProperty.call(parsed, 'workspaceRoot')
       || autopilotOwnerNonEmpty(parsed.workspaceRoot, AUTOPILOT_FIELD_MAX))
     && (parsed.approvedPlanSha256 === null
-      || AUTOPILOT_SHA256_RE.test(parsed.approvedPlanSha256));
+      || autopilotSha256(parsed.approvedPlanSha256));
   if (ownerWouldAccept) {
     ownerWouldAccept = Object.keys(AUTOPILOT_NESTED_KEYS).every(function (field) {
       var value = parsed[field];
@@ -2609,8 +2628,17 @@ function autopilotRun(file, stem, projectRoot) {
       && typeof parsed.tdd.headUpdateRequired === 'boolean'
       && (parsed.tdd.outcome === null
         || AUTOPILOT_TDD_OUTCOMES.indexOf(parsed.tdd.outcome) !== -1)
+      && autopilotNullableId(parsed.tdd.chainId)
+      && autopilotNullableId(parsed.tdd.sessionId)
       && autopilotNatural(parsed.stopBudget.count)
       && parsed.stopBudget.stage === stage
+      // MEMBERSHIP as well as the null/non-null cross-check below. The owner applies
+      // both, and neither needs a vocabulary this reader lacks — `AUTOPILOT_STAGES` and
+      // `AUTOPILOT_ID_RE` are already declared and already pinned against their owner.
+      && (parsed.blocked.from === null
+        || AUTOPILOT_STAGES.indexOf(parsed.blocked.from) !== -1)
+      && (parsed.blocked.code === null || (typeof parsed.blocked.code === 'string'
+        && AUTOPILOT_ID_RE.test(parsed.blocked.code)))
       && (stage === 'BLOCKED'
         ? parsed.blocked.from !== null && parsed.blocked.code !== null
         : parsed.blocked.from === null && parsed.blocked.code === null);
@@ -2707,6 +2735,30 @@ function autopilotPointerDesignates(dir, owner, runId) {
 // renames or deletes one. The confirmed `pending-review.json` cleanup in the
 // skill's Phase 3 remains the report's only write, and it does not reach these
 // files.
+// ONE name-safety implementation for BOTH document rows. It was inline in the
+// could-not-be-read row until the terminal rejects got a row of their own; a second
+// copy of a render-safety rule is the drift class this file already tracks, and the
+// two rows print into the same relayed report, so they must withhold the same names.
+//
+// POSITIVE shape, not only the two negative tests. `AUTOPILOT_RUN_RE`'s `(.*)` accepts
+// any stem and an EMPTY file with a chosen name is enough — no valid JSON needed —
+// which makes this the cheaper and larger of the two co-tenant channels, and it was the
+// one held to the weaker bar. A name the owner could ever have minted satisfies
+// `AUTOPILOT_ID_RE` on its stem, because `autopilotRun` refuses any record whose `runId`
+// disagrees with it; a legitimately minted but corrupt document therefore still renders,
+// and only a forged name is withheld. The COUNT is unaffected — it is the finding.
+function autopilotSafeNames(names) {
+  return names.filter(function (n) {
+    var m = AUTOPILOT_RUN_RE.exec(n);
+    return !!m && AUTOPILOT_ID_RE.test(m[1])
+      && !CONTROL_BYTE_RE.test(n) && n.indexOf('`') === -1
+      && !forgesReportRow(n);
+  }).map(function (n) {
+    return '`' + (n.length > AUTOPILOT_RENDER_MAX
+      ? n.slice(0, AUTOPILOT_RENDER_MAX) + '… (elided)' : n) + '`';
+  });
+}
+
 function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
   var candidates = [];
   entries.forEach(function (f) {
@@ -2723,11 +2775,16 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
   var scanned = candidates.slice(0, AUTOPILOT_SCAN_MAX);
   var unscanned = candidates.length - scanned.length;
   var unreadable = [];
+  var terminalUnshaped = [];
   var rows = [];
   var ttl = ttlHours();
   scanned.forEach(function (c) {
     var run = autopilotRun(path.join(dir, c.name), c.stem, projectRoot);
-    if (run === AUTOPILOT_TERMINAL_UNSHAPED) return;
+    // NARROWED, never deleted. This record leaves the could-not-be-read row because
+    // that row asserts it still holds its working tree, which is false for a terminal
+    // one — but `readRunInventory` never consults terminality, so it can still fail
+    // every Autopilot verb closed for the whole project. Its own row says that.
+    if (run === AUTOPILOT_TERMINAL_UNSHAPED) { terminalUnshaped.push(c.name); return; }
     if (!run) { unreadable.push(c.name); return; }
     if (AUTOPILOT_TERMINAL.indexOf(run.stage) !== -1) return;
     // THREE cases, never two. `ownKey` is empty for every binding verdict but
@@ -2936,24 +2993,7 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
     // CHAIN_ROW_LIMIT names are joined into one row that also names the release
     // command. A legitimate run filename cannot carry one — the owner's
     // `identifier` forbids it — so rejection costs nothing real.
-    var safe = unreadable.filter(function (n) {
-      // POSITIVE shape, not only the two negative tests. `AUTOPILOT_RUN_RE`'s `(.*)`
-      // accepts any stem and an EMPTY file with a chosen name is enough — no valid
-      // JSON needed — which makes this the cheaper and larger of the two co-tenant
-      // channels, and it was the one held to the weaker bar. A name the owner could
-      // ever have minted satisfies `AUTOPILOT_ID_RE` on its stem, because
-      // `autopilotRun` refuses any record whose `runId` disagrees with it; a
-      // legitimately minted but corrupt document therefore still renders, and only a
-      // forged name is withheld. The COUNT is unaffected — it is the finding.
-      var m = AUTOPILOT_RUN_RE.exec(n);
-      return !!m && AUTOPILOT_ID_RE.test(m[1])
-        && !CONTROL_BYTE_RE.test(n) && n.indexOf('`') === -1
-        && !forgesReportRow(n);
-    })
-      .map(function (n) {
-        return '`' + (n.length > AUTOPILOT_RENDER_MAX
-          ? n.slice(0, AUTOPILOT_RENDER_MAX) + '… (elided)' : n) + '`';
-      });
+    var safe = autopilotSafeNames(unreadable);
     var withheld = unreadable.length - safe.length;
     line(WARN, 'autopilot: ' + unreadable.length + ' durable run document(s) that could not be read'
       + ' (unparseable, a shape this report does not accept, or a run id that disagrees with the'
@@ -2962,6 +3002,29 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
       + (safe.length ? ' Inspect ' + truncatedList(safe) + ' in ' + dir + '.' : '')
       + (withheld ? ' ' + withheld + ' further name(s) are withheld because they carry a'
         + ' character this report will not echo; list ' + dir + ' directly.' : ''));
+  }
+  // The row above may not carry these: it asserts the record "still holds its working
+  // tree", and a DONE or CANCELLED one does not. That was the whole reason for the
+  // escape — but the escape alone DELETED the finding, and the finding is real:
+  // `readRunInventory` reads every `autopilot-run-*.json` in this directory, validates
+  // each one and fails 2 on the first it refuses, and `begin` and `read-workspace` pass
+  // no owner and stay strict. So a terminal document this report cannot accept still
+  // fails every Autopilot verb closed for the whole project, and it is the ONLY
+  // diagnostic that names that state. NARROW the claim, never the row.
+  //
+  // No release command is offered and that is deliberate: `--autopilot-release` applies
+  // a CANCEL to a nonterminal run and refuses a terminal one, so quoting it here would
+  // prescribe a command that cannot execute. The remedy is to inspect and delete.
+  if (terminalUnshaped.length) {
+    var termSafe = autopilotSafeNames(terminalUnshaped);
+    var termWithheld = terminalUnshaped.length - termSafe.length;
+    line(WARN, 'autopilot: ' + terminalUnshaped.length + ' durable run document(s) this report'
+      + ' does not accept whose recorded stage is terminal (DONE or CANCELLED) — such a record'
+      + ' holds no working tree, but the Autopilot verbs validate EVERY document in this'
+      + ' directory, so this one can still fail every Autopilot verb closed for this project.'
+      + (termSafe.length ? ' Inspect ' + truncatedList(termSafe) + ' in ' + dir + '.' : '')
+      + (termWithheld ? ' ' + termWithheld + ' further name(s) are withheld because they carry'
+        + ' a character this report will not echo; list ' + dir + ' directly.' : ''));
   }
 }
 
