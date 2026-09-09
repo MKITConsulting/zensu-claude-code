@@ -4484,6 +4484,69 @@ else
 fi
 rm -f "$AP_STATE"/autopilot-run-*.json
 
+# P1nz14 — the three remaining nullable/identifier conjuncts. Each is a REQUIRED conjunct
+# of the green arm, so deleting any of them prints ✅ plus "all checks green" for a record
+# `readRunInventory` fails the whole project on — and none had a refusing case, so all
+# three could be deleted with the suite green. `blocked.code` needs a BLOCKED stage to be
+# reachable at all (the null/non-null cross-check demands a non-null code there), so its
+# observable is the stricter check's own clause rather than the glyph, as in P1nz12.
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+RUN_PATCH_JSON='{"blocked":{"from":"GATES","code":"xy"}}' \
+  ap_run_valid run_bcodebad BLOCKED "$AP_OWN" "/w/t"
+ap_pointer "$AP_OWN" run_bcodebad
+AP_BCODE_OUT="$(ap_report bound "$AP_OWN")"
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+RUN_PATCH_JSON='{"tdd":{"chainId":42}}' ap_run_valid run_chainbad GATES "$AP_OWN" "/w/t"
+ap_pointer "$AP_OWN" run_chainbad
+AP_CHAIN_OUT="$(ap_report bound "$AP_OWN")"
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+RUN_PATCH_JSON='{"tdd":{"sessionId":"a"}}' ap_run_valid run_sessbad GATES "$AP_OWN" "/w/t"
+ap_pointer "$AP_OWN" run_sessbad
+AP_SESS_OUT="$(ap_report bound "$AP_OWN")"
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+# Control: the same three fields carrying values the owner accepts keep the glyph, so each
+# arm discriminates the VALUE rather than the ap_run_valid shape or the patch mechanism.
+RUN_PATCH_JSON='{"tdd":{"chainId":"chain_abc","sessionId":"sess_abc"}}' \
+  ap_run_valid run_idsok GATES "$AP_OWN" "/w/t"
+ap_pointer "$AP_OWN" run_idsok
+AP_IDSOK_OUT="$(ap_report bound "$AP_OWN")"
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+if printf '%s' "$AP_BCODE_OUT" | grep -F 'run run_bcodebad' | grep -qF 'the owner validates more' \
+  && printf '%s' "$AP_CHAIN_OUT" | grep -F 'run run_chainbad' | grep -qF 'the owner validates more' \
+  && printf '%s' "$AP_SESS_OUT" | grep -F 'run run_sessbad' | grep -qF 'the owner validates more' \
+  && printf '%s' "$AP_IDSOK_OUT" | grep -F 'autopilot: nonterminal durable run run_idsok' | grep -qF '✅' \
+  && ! printf '%s' "$AP_IDSOK_OUT" | grep -qF 'the owner validates more'; then
+  check "P1nz14 an under-length blocked.code and non-identifier tdd ids each fail the stricter check" PASS
+else
+  check "P1nz14 the nullable/identifier conjuncts must each have a refusing case (code=$AP_BCODE_OUT chain=$AP_CHAIN_OUT sess=$AP_SESS_OUT ok=$AP_IDSOK_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+
+# P1nz15 — the terminal row's own withhold arithmetic. Every other withheld assertion in
+# this suite drives the could-not-be-read row, so `termWithheld` and its clause had no
+# executed case: a wrong operand there would compute 0 against every existing fixture and
+# no check would see it. Sharing `autopilotSafeNames` makes the two rows apply the same
+# FILTER; it does not make the second row count the right list. The fixture parses (so it
+# is not merely unreadable), records a terminal stage (so it reaches the escaped set) and
+# carries a backtick in its stem (so the name is withheld while the count still fires).
+rm -f "$AP_STATE"/autopilot-run-*.json
+AP_TICK_TERM="autopilot-run-t"'`'"k.json"
+if printf '{"stage":"DONE"}' > "$AP_STATE/$AP_TICK_TERM" 2>/dev/null && [ -f "$AP_STATE/$AP_TICK_TERM" ]; then
+  AP_TERMWH_OUT="$(ap_report bound "$AP_OWN")"
+  if printf '%s' "$AP_TERMWH_OUT" | grep -qF '1 durable run document(s) this report does not accept' \
+    && printf '%s' "$AP_TERMWH_OUT" | grep -F 'recorded stage is terminal' \
+      | grep -qF '1 further name(s) are withheld' \
+    && ! printf '%s' "$AP_TERMWH_OUT" | grep -qF 't`k'; then
+    check "P1nz15 a forged terminal-reject name is counted but withheld by the second row" PASS
+  else
+    check "P1nz15 the terminal row must count a withheld name (got: $AP_TERMWH_OUT)" FAIL
+  fi
+  rm -f "$AP_STATE/$AP_TICK_TERM"
+else
+  check "P1nz15 skipped: this filesystem rejects a backtick in a filename" PASS
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json
+
 # P1nz13 — the terminal escape must NARROW the finding, never delete it. `readRunInventory`
 # never consults terminality: it validates every `autopilot-run-*.json` in the directory and
 # fails 2 on the first one it refuses, and `begin` and `read-workspace` pass no owner, so a
