@@ -4269,18 +4269,27 @@ ap_run run_tick_a GATES "$AP_FOREIGN" '/w/a`b'
 # conjuncts are then satisfied by the workspaceRoot half alone — the negative one
 # because it names a literal that never existed. The filename channel would be graded
 # by nothing on any filesystem or shell setting that refuses the create.
+# TWO channels, TWO checks, because they have different preconditions. The
+# workspaceRoot half needs only the record `ap_run` just wrote, so gating it on the
+# filesystem accepting a backtick in a FILENAME made it skip — reporting PASS — on any
+# host that refuses that create, leaving the half that needs no forged name ungraded.
+AP_TICK_WS_OUT="$(ap_report bound "$AP_OWN")"
+if printf '%s' "$AP_TICK_WS_OUT" | grep -qF 'does not render' \
+  && ! printf '%s' "$AP_TICK_WS_OUT" | grep -qF '/w/a`b'; then
+  check "P1nz4 a backtick in a workspaceRoot is withheld, never delimited" PASS
+else
+  check "P1nz4 workspaceRoot backtick rejection (got: $AP_TICK_WS_OUT)" FAIL
+fi
 AP_TICK_NAME="autopilot-run-tick"'`'"name.json"
 if : > "$AP_STATE/$AP_TICK_NAME" 2>/dev/null && [ -f "$AP_STATE/$AP_TICK_NAME" ]; then
 AP_TICK_OUT="$(ap_report bound "$AP_OWN")"
-if printf '%s' "$AP_TICK_OUT" | grep -qF 'does not render' \
-  && ! printf '%s' "$AP_TICK_OUT" | grep -qF '/w/a`b' \
-  && ! printf '%s' "$AP_TICK_OUT" | grep -qF 'tick`name'; then
-  check "P1nz4 a backtick in a workspaceRoot or a run filename is withheld, never delimited" PASS
+if ! printf '%s' "$AP_TICK_OUT" | grep -qF 'tick`name'; then
+  check "P1nz4a a backtick in a run filename is withheld, never delimited" PASS
 else
-  check "P1nz4 backtick rejection (got: $AP_TICK_OUT)" FAIL
+  check "P1nz4a filename backtick rejection (got: $AP_TICK_OUT)" FAIL
 fi
 else
-  check "P1nz4 skipped: this filesystem rejects a backtick in a filename" PASS
+  check "P1nz4a skipped: this filesystem rejects a backtick in a filename" PASS
 fi
 rm -f "$AP_STATE"/autopilot-run-*.json
 

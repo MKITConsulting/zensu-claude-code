@@ -2990,24 +2990,11 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
       + ' — inspect ' + dir + ' directly.');
   }
   if (unreadable.length) {
-    // The NAMES come from a session-writable directory and `(.*)` admits every
-    // control byte but a line terminator, so ESC and DEL reach a report the skill
-    // prints verbatim. Withhold those names rather than the count: the count is
-    // the finding.
-    // Bounded per NAME, not only per count. `AUTOPILOT_RUN_RE`'s `(.*)` accepts any
-    // non-line-terminator text, so a filename is a co-tenant-writable free-text channel
-    // into a row the doctor skill tells the model to relay — the same reason
-    // `workspaceRoot` is render-bounded above, and cheaper to reach, since an empty file
-    // with a chosen name is enough.
-    // DELIMITED for the same reason the workspace path above is: `(.*)` accepts
-    // any printable text, so a chosen filename rendered bare continues the row's
-    // own sentence. Same residual: a name containing a backtick is not escaped.
-    // The BACKTICK is refused here for the same reason as `workspaceRoot`, and this
-    // channel is the cheaper and larger of the two: `(.*)` accepts any stem, an
-    // EMPTY file with a chosen name is enough (no valid JSON needed), and up to
-    // CHAIN_ROW_LIMIT names are joined into one row that also names the release
-    // command. A legitimate run filename cannot carry one — the owner's
-    // `identifier` forbids it — so rejection costs nothing real.
+    // Why these names are bounded at all, and by what, is stated ONCE at
+    // `autopilotSafeNames`. It said so here too until the filter moved into that
+    // function, which left one call site describing rules that can now change without
+    // it while the sibling call site described none — the drift the extraction removed.
+    // Withhold the NAME, never the count: the count is the finding.
     var safe = autopilotSafeNames(unreadable);
     var withheld = unreadable.length - safe.length;
     line(WARN, 'autopilot: ' + unreadable.length + ' durable run document(s) that could not be read'
