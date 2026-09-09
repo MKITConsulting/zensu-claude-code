@@ -2446,6 +2446,15 @@ function autopilotNullableId(value) {
 function autopilotNatural(value) {
   return Number.isSafeInteger(value) && value >= 0;
 }
+// `MAX_EVENTS` in the owner. A hand copy like every other constant in this mirror — the
+// drift grep above covers it through the `AUTOPILOT_` arm.
+var AUTOPILOT_MAX_EVENTS = 512;
+// `eventValid` is deliberately NOT mirrored, so the two ledger entries this reader does
+// look at may be anything. This keeps a non-object element failing the predicate instead
+// of throwing inside it, which would take the whole report down for one bad record.
+function autopilotPlainObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
 var AUTOPILOT_OWNER_C0_RE = /[\u0000-\u001f]/;
 function autopilotOwnerNonEmpty(value, max) {
   return typeof value === 'string' && value.length > 0 && value.length <= max
@@ -2619,6 +2628,19 @@ function autopilotRun(file, stem, projectRoot) {
   // never a second `stateValid`.
   var ownerWouldAccept = parsed.nextActionCode === AUTOPILOT_NEXT_ACTION[stage]
     && Array.isArray(parsed.events) && parsed.events.length > 0
+    // THREE further ledger rules the owner applies that need no vocabulary this reader
+    // lacks: a length compare against its `MAX_EVENTS`, a property read on the first
+    // entry, and a comparison of the last entry's `toStage` against the stage this
+    // function already holds. Mirroring `Array.isArray` and a non-empty ledger and
+    // stopping there let a record `readRunInventory` fails the whole project on earn the
+    // OK glyph — the same direction, and the same argument, as the `bypasses` gap below.
+    // The entries are read defensively because `eventValid` is NOT mirrored: an element
+    // that is not a plain object must fail this predicate rather than throw inside it.
+    && parsed.events.length <= AUTOPILOT_MAX_EVENTS
+    && autopilotPlainObject(parsed.events[0])
+    && parsed.events[0].eventType === 'START'
+    && autopilotPlainObject(parsed.events[parsed.events.length - 1])
+    && parsed.events[parsed.events.length - 1].toStage === stage
     // The owner refuses a non-array `bypasses` and one over 128 entries before it looks
     // at any element. Neither half needs a vocabulary this reader lacks, so leaving the
     // whole field out let `"bypasses": {}` earn the green glyph for a document
@@ -2772,8 +2794,13 @@ function autopilotPointerDesignates(dir, owner, runId) {
 // refuses. The "wider than the owner" argument belongs to the `workspaceRoot` arm and is
 // stated there. The BACKTICK is refused
 // rather than escaped, because a delimiter the value can itself contain is not an escape:
-// the name would close its own code span and land mid-sentence, immediately before this
-// row's release clause. `forgesReportRow` is the row-forgery predicate — a `label : value`
+// the name would close its own code span and land mid-sentence inside the `Inspect … in
+// <dir>` clause — and on the terminal-document row beside a clause that deliberately
+// offers no release command at all. Say it that way: the "immediately before this row's
+// release clause" wording belongs to the `workspaceRoot` arm, where `held` really is
+// interpolated ahead of the remedy, and it is false for BOTH rows this function serves,
+// because the names are appended AFTER the release clause on one and there is no release
+// clause on the other. `forgesReportRow` is the row-forgery predicate — a `label : value`
 // pair separator, a double space, a separator-adjacent modifier letter, a
 // Default_Ignorable code point, an orphan combining mark — none of them a control byte,
 // all of them reaching a row `skills/doctor/SKILL.md` tells the model to relay verbatim;
@@ -2923,8 +2950,8 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
       // so a value the owner ACCEPTED can be withheld here, and saying "cannot
       // read" would blame the file for a decision this renderer took.
       : (run.workspace === '' ? 'names a working tree this report does not render'
-        + ' (it is not a non-empty string, it is longer than this report will echo, it'
-        + ' is not an absolute path, it carries a control character this report refuses'
+        + ' (it is not a non-empty string, it is longer than the 4096 characters the owner'
+        + ' accepts, it is not an absolute path, it carries a control character this report refuses'
         + ' to echo even though the owner accepts it, it carries a backtick, or it would'
         + ' forge a row of this report)'
         // Bounded at the point of RENDER as well as at the point of read. The field

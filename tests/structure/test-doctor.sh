@@ -3366,8 +3366,11 @@ ap_run() { # ap_run <runId> <stage> <owner> [workspaceRoot|-] [projectRoot]
         validation: null, coverage: null, delivery: null };
       rec.blocked = { from: null, code: null };
       rec.stopBudget = { stage: rec.stage, count: 0 };
+      // toStage tracks the STAGE, because the owner requires the last entry to land on
+      // it and the reader mirrors that. A fixed "PLANNING" made every green-arm control
+      // in this file depend on the stage it happened to use.
       rec.events = [{ eventId: "e1", eventType: "START", payloadDigest: "", payload: {},
-        fromStage: null, toStage: "PLANNING" }];
+        fromStage: null, toStage: rec.stage }];
     }
     // RAW JSON patch, applied LAST so it can defeat any arm above it. It exists because
     // several owner rules are TYPE tests as much as shape tests and no positional
@@ -3596,12 +3599,16 @@ rm -f "$AP_STATE"/autopilot-run-*.json
 AP_LONG_WS="$(node -e 'process.stdout.write("/w/" + "x".repeat(5000))')"
 ap_run run_longws_a GATES "$AP_OWN" "$AP_LONG_WS"
 AP_LONGWS_OUT="$(ap_report bound "$AP_OWN")"
-# The CAUSE is bound too, not only the lead sentence. This fixture is absolute, carries
-# no control byte, no backtick and matches no forgery rule, so the length bound is the one
-# conjunct it fails — and the rendered list named four causes, every one of them false for
-# it, in a row the doctor skill tells the model to relay verbatim.
+# The cause list is UNCONDITIONAL — every value taking this arm renders all six causes,
+# with no branch on which conjunct rejected it — so the second needle binds that the length
+# clause is PRESENT in the list, never that this fixture is what fired it. Say it that way:
+# an earlier wording read "the CAUSE is bound too", which is attribution the needle cannot
+# make. The length rule itself is discriminated by the two conjuncts beside it, because
+# deleting it from `autopilotRun` makes this 5003-character value render. It is worth
+# binding at all because the list named four causes for a while, every one of them false
+# for this fixture, in a row the doctor skill tells the model to relay verbatim.
 if printf '%s' "$AP_LONGWS_OUT" | grep -qF 'names a working tree this report does not render' \
-  && printf '%s' "$AP_LONGWS_OUT" | grep -qF 'longer than this report will echo' \
+  && printf '%s' "$AP_LONGWS_OUT" | grep -qF 'longer than the 4096 characters the owner accepts' \
   && ! printf '%s' "$AP_LONGWS_OUT" | grep -qF 'xxxxxxxxxxxxxxxxxxxx'; then
   check "P1ng1 an over-long workspaceRoot is refused and never echoed into the report" PASS
 else
@@ -3662,7 +3669,13 @@ AP_ESC_NAME="$(printf 'autopilot-run-a\033b.json')"
 printf 'not json' > "$AP_STATE/$AP_ESC_NAME" 2>/dev/null || AP_ESC_NAME=""
 if [ -n "$AP_ESC_NAME" ] && [ -f "$AP_STATE/$AP_ESC_NAME" ]; then
   AP_ESC_OUT="$(ap_report bound "$AP_OWN")"
-  if printf '%s' "$AP_ESC_OUT" | grep -qF 'withheld because this report could not establish' \
+  # SCOPED to the unreadable row: the terminal-unshaped row at the same call site emits
+  # the withheld clause verbatim, and only the unreadable row's lead-in carries
+  # `could not be read`. Unambiguous today only as a property of the fixture state, which
+  # is exactly what a scoped needle stops depending on.
+  if printf '%s' "$AP_ESC_OUT" | grep -qF '1 durable run document(s) that could not be read' \
+    && printf '%s' "$AP_ESC_OUT" | grep -F 'could not be read' \
+      | grep -qF 'withheld because this report could not establish' \
     && ! printf '%s' "$AP_ESC_OUT" | grep -q "$(printf 'a\033b')"; then
     check "P1ni2 a run filename the writer could not have minted is counted but withheld" PASS
   else
@@ -4087,8 +4100,11 @@ rm -f "$AP_STATE"/autopilot-run-*.json
 AP_LONGNAME="autopilot-run-$(node -e 'process.stdout.write("z".repeat(236))').json"
 if : > "$AP_STATE/$AP_LONGNAME" 2>/dev/null && [ -f "$AP_STATE/$AP_LONGNAME" ]; then
   AP_LONGNAME_OUT="$(ap_report bound "$AP_OWN")"
+  # SCOPED to the unreadable row, same reason as P1ni2 and P1nz4a: both document rows emit
+  # the withheld clause verbatim and only this one's lead-in carries `could not be read`.
   if printf '%s' "$AP_LONGNAME_OUT" | grep -qF 'durable run document(s) that could not be read' \
-    && printf '%s' "$AP_LONGNAME_OUT" | grep -qF 'are withheld because this report could not establish' \
+    && printf '%s' "$AP_LONGNAME_OUT" | grep -F 'could not be read' \
+      | grep -qF 'are withheld because this report could not establish' \
     && ! printf '%s' "$AP_LONGNAME_OUT" | grep -qF "$(node -e 'process.stdout.write("z".repeat(140))')"; then
     check "P1nt an over-long run filename is counted but its name is withheld, never half-rendered" PASS
   else
@@ -4301,6 +4317,10 @@ AP_TICK_OUT="$(ap_report bound "$AP_OWN")"
 # is reached, so what this proves is that a name the Autopilot writer could not have
 # minted is withheld — the backtick clause itself is defence in depth on this channel and
 # is discriminated only by P1nz4, on the workspaceRoot one.
+# SCOPED to the unreadable row on purpose: the terminal-unshaped row at the same call site
+# emits `further name(s) are withheld …` verbatim, and only the unreadable row's lead-in
+# carries `could not be read`. Without the pipe the needle is unambiguous only as a
+# property of this fixture state, which is what a later reader would collapse as noise.
 if printf '%s' "$AP_TICK_OUT" | grep -qF '1 durable run document(s) that could not be read' \
   && printf '%s' "$AP_TICK_OUT" | grep -F 'could not be read' \
     | grep -qF '1 further name(s) are withheld' \
@@ -4513,6 +4533,43 @@ else
   check "P1nz10 terminal escape must cover every shape gate (got: $AP_TERMROOT_OUT)" FAIL
 fi
 rm -f "$AP_STATE"/autopilot-run-*.json
+
+# P1nz16 — the three CHEAP `events` conjuncts. The reader mirrored `Array.isArray` and a
+# non-empty ledger and stopped there, while the owner also refuses a ledger over
+# `MAX_EVENTS`, one whose first entry is not `START`, and one whose last `toStage`
+# disagrees with `stage`. None of the three needs a vocabulary this reader lacks — a
+# length compare, a property read, and a comparison against a value it already holds — so
+# the residual comment justifying their omission with "needs a vocabulary this reader does
+# not carry" did not describe them. Same class, same direction and same argument as the
+# `bypasses` gap closed one conjunct earlier: a record `readRunInventory` fails the whole
+# project on was earning the OK glyph and an "all checks green" summary.
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+RUN_PATCH_JSON='{"events":[{"eventId":"ev_first","eventType":"APPROVE","payloadDigest":"","payload":{},"fromStage":null,"toStage":"PLANNING"}]}' \
+  ap_run_valid run_evstart GATES "$AP_OWN" "/w/t"
+ap_pointer "$AP_OWN" run_evstart
+AP_EVSTART_OUT="$(ap_report bound "$AP_OWN")"
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+RUN_PATCH_JSON='{"events":[{"eventId":"ev_first","eventType":"START","payloadDigest":"","payload":{},"fromStage":null,"toStage":"PLANNING"}]}' \
+  ap_run_valid run_evtail GATES "$AP_OWN" "/w/t"
+ap_pointer "$AP_OWN" run_evtail
+AP_EVTAIL_OUT="$(ap_report bound "$AP_OWN")"
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+# Control: a ledger whose first entry is START and whose last toStage equals the stage
+# keeps the glyph, so each arm above discriminates its own rule rather than the patch.
+RUN_PATCH_JSON='{"events":[{"eventId":"ev_first","eventType":"START","payloadDigest":"","payload":{},"fromStage":null,"toStage":"GATES"}]}' \
+  ap_run_valid run_evok GATES "$AP_OWN" "/w/t"
+ap_pointer "$AP_OWN" run_evok
+AP_EVOK_OUT="$(ap_report bound "$AP_OWN")"
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+if printf '%s' "$AP_EVSTART_OUT" | grep -F 'run run_evstart' | grep -qF 'the owner validates more' \
+  && printf '%s' "$AP_EVTAIL_OUT" | grep -F 'run run_evtail' | grep -qF 'the owner validates more' \
+  && printf '%s' "$AP_EVOK_OUT" | grep -F 'autopilot: nonterminal durable run run_evok' | grep -qF '✅' \
+  && ! printf '%s' "$AP_EVOK_OUT" | grep -qF 'the owner validates more'; then
+  check "P1nz16 a first event that is not START and a tail toStage that disagrees each fail the stricter check" PASS
+else
+  check "P1nz16 the cheap events conjuncts must gate the stricter check (start=$AP_EVSTART_OUT tail=$AP_EVTAIL_OUT ok=$AP_EVOK_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
 
 # P1nz14 — the three remaining nullable/identifier conjuncts. Each is a REQUIRED conjunct
 # of the green arm, so deleting any of them prints ✅ plus "all checks green" for a record
