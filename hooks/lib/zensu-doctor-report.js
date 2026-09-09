@@ -2766,9 +2766,11 @@ function autopilotPointerDesignates(dir, owner, runId) {
 // The four rules below the shape test, stated HERE because the call sites now point at
 // this function for them and an earlier revision pointed here while they lived only at a
 // call site, or only in the `workspaceRoot` arm ~190 lines up, which is a DIFFERENT
-// channel. `CONTROL_BYTE_RE` is deliberately WIDER than the owner's `nonEmpty`: it also
-// covers C1, DEL and U+2028/9, so a name the owner accepts can be withheld here — that is
-// a render decision, never a claim the file could not be read. The BACKTICK is refused
+// channel. `CONTROL_BYTE_RE` covers C1, DEL and U+2028/9 as well as C0 — wider than the
+// owner's `nonEmpty`, but `nonEmpty` governs `workspaceRoot`, not this: the owner rule on
+// a run FILENAME is `identifier` on the stem, which already excludes every byte this test
+// refuses. The "wider than the owner" argument belongs to the `workspaceRoot` arm and is
+// stated there. The BACKTICK is refused
 // rather than escaped, because a delimiter the value can itself contain is not an escape:
 // the name would close its own code span and land mid-sentence, immediately before this
 // row's release clause. `forgesReportRow` is the row-forgery predicate — a `label : value`
@@ -2779,12 +2781,18 @@ function autopilotPointerDesignates(dir, owner, runId) {
 // rendering an unbounded one. And `AUTOPILOT_RENDER_MAX` bounds the RENDER as well as the
 // read, so a long accepted name cannot become a long rendered one beside a remedy.
 //
-// UNPINNED, and named so a maintainer knows: whenever the stem satisfies
-// `AUTOPILOT_ID_RE`, the whole name is `autopilot-run-` plus that class plus `.json`, so
-// the control-byte and backtick tests can never decide the verdict on this channel — they
-// are defence in depth against a future widening of that class, and no fixture in this
-// tree discriminates them here. They ARE discriminating on the `workspaceRoot` channel,
-// which P1nz4 grades.
+// UNPINNED, and named so a maintainer knows. Whenever the stem satisfies
+// `AUTOPILOT_ID_RE`, the whole name is `autopilot-run-` plus that class plus `.json` — and
+// that premise reaches FOUR rules, not the two an earlier wording drew it over. It admits
+// no space, no `\p{Lm}`, no Default_Ignorable and no `\p{M}`, so none of
+// `forgesReportRow`'s five value rules can fire either; and it caps the name at 14 + 128 +
+// 5 = 147 characters, below `AUTOPILOT_RENDER_MAX`, so the elision below is unreachable
+// too. All four are defence in depth against a future widening of that class, and no
+// fixture in this tree discriminates them here. The ONE way `forgesReportRow` still
+// decides on this channel is its `catch`, which returns true and withholds every name when
+// the display-safety module cannot load — the third cause both row sentences name. On the
+// `workspaceRoot` channel they do discriminate: P1nz4 grades the backtick there and P1nx
+// the control byte.
 function autopilotSafeNames(names) {
   return names.filter(function (n) {
     var m = AUTOPILOT_RUN_RE.exec(n);
@@ -2915,9 +2923,10 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
       // so a value the owner ACCEPTED can be withheld here, and saying "cannot
       // read" would blame the file for a decision this renderer took.
       : (run.workspace === '' ? 'names a working tree this report does not render'
-        + ' (it is not an absolute path, it carries a control character this report'
-        + ' refuses to echo even though the owner accepts it, it carries a backtick,'
-        + ' or it would forge a row of this report)'
+        + ' (it is not a non-empty string, it is longer than this report will echo, it'
+        + ' is not an absolute path, it carries a control character this report refuses'
+        + ' to echo even though the owner accepts it, it carries a backtick, or it would'
+        + ' forge a row of this report)'
         // Bounded at the point of RENDER as well as at the point of read. The field
         // is co-tenant-writable free text and the doctor skill tells the model to
         // relay this row, so 4096 accepted characters must not become 4096 rendered

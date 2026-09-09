@@ -3596,7 +3596,12 @@ rm -f "$AP_STATE"/autopilot-run-*.json
 AP_LONG_WS="$(node -e 'process.stdout.write("/w/" + "x".repeat(5000))')"
 ap_run run_longws_a GATES "$AP_OWN" "$AP_LONG_WS"
 AP_LONGWS_OUT="$(ap_report bound "$AP_OWN")"
+# The CAUSE is bound too, not only the lead sentence. This fixture is absolute, carries
+# no control byte, no backtick and matches no forgery rule, so the length bound is the one
+# conjunct it fails — and the rendered list named four causes, every one of them false for
+# it, in a row the doctor skill tells the model to relay verbatim.
 if printf '%s' "$AP_LONGWS_OUT" | grep -qF 'names a working tree this report does not render' \
+  && printf '%s' "$AP_LONGWS_OUT" | grep -qF 'longer than this report will echo' \
   && ! printf '%s' "$AP_LONGWS_OUT" | grep -qF 'xxxxxxxxxxxxxxxxxxxx'; then
   check "P1ng1 an over-long workspaceRoot is refused and never echoed into the report" PASS
 else
@@ -3646,8 +3651,12 @@ if printf '%s' "$AP_SHORTID_OUT" | grep -qF 'could not be read' \
 else
   check "P1ni1 short run id must be refused (got: $AP_SHORTID_OUT)" FAIL
 fi
-# P1ni2 — a filename carrying a control byte is COUNTED but its name is withheld,
-# because the report is printed verbatim by the model.
+# P1ni2 — a run filename the Autopilot writer could not have minted is COUNTED but its
+# name is withheld, because the report is printed verbatim by the model. NAMED for what it
+# grades: this fixture's stem fails `AUTOPILOT_ID_RE` at the first conjunct of
+# `autopilotSafeNames`, so `CONTROL_BYTE_RE` is never reached and deleting it leaves this
+# check green. The control-byte rule is discriminated only by P1nx, on the workspaceRoot
+# channel; here it is defence in depth against a widening of the id class.
 rm -f "$AP_STATE"/autopilot-run-*.json
 AP_ESC_NAME="$(printf 'autopilot-run-a\033b.json')"
 printf 'not json' > "$AP_STATE/$AP_ESC_NAME" 2>/dev/null || AP_ESC_NAME=""
@@ -3655,9 +3664,9 @@ if [ -n "$AP_ESC_NAME" ] && [ -f "$AP_STATE/$AP_ESC_NAME" ]; then
   AP_ESC_OUT="$(ap_report bound "$AP_OWN")"
   if printf '%s' "$AP_ESC_OUT" | grep -qF 'withheld because this report could not establish' \
     && ! printf '%s' "$AP_ESC_OUT" | grep -q "$(printf 'a\033b')"; then
-    check "P1ni2 a run filename carrying a control byte is counted but withheld" PASS
+    check "P1ni2 a run filename the writer could not have minted is counted but withheld" PASS
   else
-    check "P1ni2 control-byte filename must be withheld (got: $AP_ESC_OUT)" FAIL
+    check "P1ni2 unmintable filename must be withheld (got: $AP_ESC_OUT)" FAIL
   fi
   rm -f "$AP_STATE/$AP_ESC_NAME"
 else
@@ -4293,7 +4302,8 @@ AP_TICK_OUT="$(ap_report bound "$AP_OWN")"
 # minted is withheld — the backtick clause itself is defence in depth on this channel and
 # is discriminated only by P1nz4, on the workspaceRoot one.
 if printf '%s' "$AP_TICK_OUT" | grep -qF '1 durable run document(s) that could not be read' \
-  && printf '%s' "$AP_TICK_OUT" | grep -qF '1 further name(s) are withheld' \
+  && printf '%s' "$AP_TICK_OUT" | grep -F 'could not be read' \
+    | grep -qF '1 further name(s) are withheld' \
   && ! printf '%s' "$AP_TICK_OUT" | grep -qF 'tick`name'; then
   check "P1nz4a a run filename the writer could not have minted is counted but withheld" PASS
 else
