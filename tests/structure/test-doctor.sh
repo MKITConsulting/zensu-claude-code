@@ -4283,10 +4283,21 @@ fi
 AP_TICK_NAME="autopilot-run-tick"'`'"name.json"
 if : > "$AP_STATE/$AP_TICK_NAME" 2>/dev/null && [ -f "$AP_STATE/$AP_TICK_NAME" ]; then
 AP_TICK_OUT="$(ap_report bound "$AP_OWN")"
-if ! printf '%s' "$AP_TICK_OUT" | grep -qF 'tick`name'; then
-  check "P1nz4a a backtick in a run filename is withheld, never delimited" PASS
+# POSITIVE first, then the absence. A lone negative is satisfied by a report that never
+# rendered — `ap_report` discards stderr, so a crashed renderer leaves the capture empty —
+# and, worse, by a future narrowing that stops the forged name reaching `unreadable` at
+# all, which deletes the finding while the needle stays green. The two counts are exact
+# here: `run_tick_a` is the only valid record and the forged file is the only unreadable
+# one. NAMED for what it grades: the stem fails `AUTOPILOT_ID_RE` before the backtick test
+# is reached, so what this proves is that a name the Autopilot writer could not have
+# minted is withheld — the backtick clause itself is defence in depth on this channel and
+# is discriminated only by P1nz4, on the workspaceRoot one.
+if printf '%s' "$AP_TICK_OUT" | grep -qF '1 durable run document(s) that could not be read' \
+  && printf '%s' "$AP_TICK_OUT" | grep -qF '1 further name(s) are withheld' \
+  && ! printf '%s' "$AP_TICK_OUT" | grep -qF 'tick`name'; then
+  check "P1nz4a a run filename the writer could not have minted is counted but withheld" PASS
 else
-  check "P1nz4a filename backtick rejection (got: $AP_TICK_OUT)" FAIL
+  check "P1nz4a filename withholding (got: $AP_TICK_OUT)" FAIL
 fi
 else
   check "P1nz4a skipped: this filesystem rejects a backtick in a filename" PASS

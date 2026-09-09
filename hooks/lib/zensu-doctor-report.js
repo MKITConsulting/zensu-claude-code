@@ -2762,6 +2762,29 @@ function autopilotPointerDesignates(dir, owner, runId) {
 // `AUTOPILOT_ID_RE` on its stem, because `autopilotRun` refuses any record whose `runId`
 // disagrees with it; a legitimately minted but corrupt document therefore still renders,
 // and only a forged name is withheld. The COUNT is unaffected — it is the finding.
+//
+// The four rules below the shape test, stated HERE because the call sites now point at
+// this function for them and an earlier revision pointed here while they lived only at a
+// call site, or only in the `workspaceRoot` arm ~190 lines up, which is a DIFFERENT
+// channel. `CONTROL_BYTE_RE` is deliberately WIDER than the owner's `nonEmpty`: it also
+// covers C1, DEL and U+2028/9, so a name the owner accepts can be withheld here — that is
+// a render decision, never a claim the file could not be read. The BACKTICK is refused
+// rather than escaped, because a delimiter the value can itself contain is not an escape:
+// the name would close its own code span and land mid-sentence, immediately before this
+// row's release clause. `forgesReportRow` is the row-forgery predicate — a `label : value`
+// pair separator, a double space, a separator-adjacent modifier letter, a
+// Default_Ignorable code point, an orphan combining mark — none of them a control byte,
+// all of them reaching a row `skills/doctor/SKILL.md` tells the model to relay verbatim;
+// it fails CLOSED on a module load failure, which withholds every name rather than
+// rendering an unbounded one. And `AUTOPILOT_RENDER_MAX` bounds the RENDER as well as the
+// read, so a long accepted name cannot become a long rendered one beside a remedy.
+//
+// UNPINNED, and named so a maintainer knows: whenever the stem satisfies
+// `AUTOPILOT_ID_RE`, the whole name is `autopilot-run-` plus that class plus `.json`, so
+// the control-byte and backtick tests can never decide the verdict on this channel — they
+// are defence in depth against a future widening of that class, and no fixture in this
+// tree discriminates them here. They ARE discriminating on the `workspaceRoot` channel,
+// which P1nz4 grades.
 function autopilotSafeNames(names) {
   return names.filter(function (n) {
     var m = AUTOPILOT_RUN_RE.exec(n);
@@ -2892,8 +2915,9 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
       // so a value the owner ACCEPTED can be withheld here, and saying "cannot
       // read" would blame the file for a decision this renderer took.
       : (run.workspace === '' ? 'names a working tree this report does not render'
-        + ' (it is not an absolute path, or it carries a control character this'
-        + ' report refuses to echo even though the owner accepts it)'
+        + ' (it is not an absolute path, it carries a control character this report'
+        + ' refuses to echo even though the owner accepts it, it carries a backtick,'
+        + ' or it would forge a row of this report)'
         // Bounded at the point of RENDER as well as at the point of read. The field
         // is co-tenant-writable free text and the doctor skill tells the model to
         // relay this row, so 4096 accepted characters must not become 4096 rendered
@@ -2990,11 +3014,12 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
       + ' — inspect ' + dir + ' directly.');
   }
   if (unreadable.length) {
-    // Why these names are bounded at all, and by what, is stated ONCE at
-    // `autopilotSafeNames`. It said so here too until the filter moved into that
-    // function, which left one call site describing rules that can now change without
-    // it while the sibling call site described none — the drift the extraction removed.
-    // Withhold the NAME, never the count: the count is the finding.
+    // Why these names are bounded at all, and by what, is stated at
+    // `autopilotSafeNames` — every rule, including the ones this call site used to carry
+    // alone. It said so here too until the filter moved into that function, which left
+    // one call site describing rules that could then change without it while the sibling
+    // call site described none. Withhold the NAME, never the count: the count is the
+    // finding.
     var safe = autopilotSafeNames(unreadable);
     var withheld = unreadable.length - safe.length;
     line(WARN, 'autopilot: ' + unreadable.length + ' durable run document(s) that could not be read'
