@@ -2388,6 +2388,11 @@ var AUTOPILOT_NESTED_KEYS = {
   effects: ['prOpen', 'teamReview'],
   blocked: ['from', 'code'],
   stopBudget: ['stage', 'count'],
+  // `evidence` is key-checked by the owner inside `evidenceValid` rather than inline in
+  // `stateValid`, which is why it was the one nested object missing here — and why P1nz6
+  // could not see the omission: a field absent from BOTH sides compares equal. Only the
+  // KEY SET is mirrored; every value rule in `evidenceValid` stays residual.
+  evidence: ['pr', 'gates', 'review', 'findings', 'validation', 'coverage', 'delivery'],
 };
 var AUTOPILOT_RUN_RE = /^autopilot-run-(.*)\.json$/;
 var AUTOPILOT_STAGES = ['PLANNING', 'AWAIT_TDD', 'TDD_RUNNING', 'GATES', 'CONVERGE',
@@ -2597,18 +2602,28 @@ function autopilotRun(file, stem, projectRoot) {
   // Still UNMIRRORED, named rather than implied — and NOT under one blanket reason,
   // because the reason differs per item and an earlier wording gave the same one for
   // all of them while three of the items it named needed no new vocabulary at all
-  // (those three are mirrored now). What remains needs a vocabulary this reader does
-  // not carry, which IS the cost this reader exists to stop paying: `tdd.returnStage`
+  // (those three are mirrored now, and so are two more — see below). What remains needs
+  // a vocabulary this reader does not carry, EXCEPT where a member is named for its value
+  // half alone: `evidence` and `bypasses` were listed WHOLE while each was half
+  // mirrorable, so `evidence`'s key set now sits in `AUTOPILOT_NESTED_KEYS` and
+  // `bypasses`'s array/bound half is a conjunct above, leaving only their element and
+  // value rules here. What is left: `tdd.returnStage`
   // membership (`RETURN_STAGES`, a SUBSET of the stage set and not the stage set —
   // reusing `AUTOPILOT_STAGES` for it would be looser than the owner),
   // `tdd.headUpdateRequired`'s cross-check against `HEAD_UPDATE_STAGES`,
-  // `effectValid` / `teamReviewEffectValid` / `evidenceValid` and their
-  // cross-consistency, `bypasses` element shape, the event ledger's own validity,
+  // `effectValid` / `teamReviewEffectValid` and the VALUE rules of `evidenceValid` plus
+  // their cross-consistency, the per-element `bypasses` rule (an exact `gate`/`stage`
+  // pair, `identifier(gate)`, stage membership), the event ledger's own validity,
   // `MAX_EVENTS` bound, id uniqueness, `EVENT_TYPES` membership, payload digests and
   // `fromStage` chaining, and `semanticHistoryValid`. So this is explicitly a FLOOR,
   // never a second `stateValid`.
   var ownerWouldAccept = parsed.nextActionCode === AUTOPILOT_NEXT_ACTION[stage]
     && Array.isArray(parsed.events) && parsed.events.length > 0
+    // The owner refuses a non-array `bypasses` and one over 128 entries before it looks
+    // at any element. Neither half needs a vocabulary this reader lacks, so leaving the
+    // whole field out let `"bypasses": {}` earn the green glyph for a document
+    // `readRunInventory` fails the whole project on. Only the per-ELEMENT rule is residual.
+    && Array.isArray(parsed.bypasses) && parsed.bypasses.length <= 128
     && (!Object.prototype.hasOwnProperty.call(parsed, 'workspaceRoot')
       || autopilotOwnerNonEmpty(parsed.workspaceRoot, AUTOPILOT_FIELD_MAX))
     && (parsed.approvedPlanSha256 === null
@@ -3000,8 +3015,10 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
       + ' filename) — this is NOT the same as no run: such a record still holds its working tree,'
       + ' and /zensu:autopilot-release needs a run id it cannot supply.'
       + (safe.length ? ' Inspect ' + truncatedList(safe) + ' in ' + dir + '.' : '')
-      + (withheld ? ' ' + withheld + ' further name(s) are withheld because they carry a'
-        + ' character this report will not echo; list ' + dir + ' directly.' : ''));
+      + (withheld ? ' ' + withheld + ' further name(s) are withheld because this report could'
+        + ' not establish the name is safe to echo — a stem the Autopilot writer could not'
+        + ' have minted, a character this report will not echo, or a display-safety rule that'
+        + ' could not be applied; list ' + dir + ' directly.' : ''));
   }
   // The row above may not carry these: it asserts the record "still holds its working
   // tree", and a DONE or CANCELLED one does not. That was the whole reason for the
@@ -3020,11 +3037,14 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
     var termWithheld = terminalUnshaped.length - termSafe.length;
     line(WARN, 'autopilot: ' + terminalUnshaped.length + ' durable run document(s) this report'
       + ' does not accept whose recorded stage is terminal (DONE or CANCELLED) — such a record'
-      + ' holds no working tree, but the Autopilot verbs validate EVERY document in this'
-      + ' directory, so this one can still fail every Autopilot verb closed for this project.'
+      + ' holds no working tree, but `--autopilot-begin` and the workspace-occupancy check'
+      + ' validate every document in this directory without owner scoping, so this one can'
+      + ' still fail those closed for this project.'
       + (termSafe.length ? ' Inspect ' + truncatedList(termSafe) + ' in ' + dir + '.' : '')
-      + (termWithheld ? ' ' + termWithheld + ' further name(s) are withheld because they carry'
-        + ' a character this report will not echo; list ' + dir + ' directly.' : ''));
+      + (termWithheld ? ' ' + termWithheld + ' further name(s) are withheld because this report'
+        + ' could not establish the name is safe to echo — a stem the Autopilot writer could'
+        + ' not have minted, a character this report will not echo, or a display-safety rule'
+        + ' that could not be applied; list ' + dir + ' directly.' : ''));
   }
 }
 

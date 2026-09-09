@@ -2685,8 +2685,14 @@ _autopilot_hold_probe() {
 # Exit 0 a holder was found and rendered; 1 the tree is PROVEN free — the worker's
 # own verdict, OR an absent state directory, which reaches this status ahead of the
 # lease because no run document can exist without one; 5 the question could not be
-# answered — the project lease, the storage-safety check or the worker failed; 3 a REFUSED CALL — a bad arity, an unrecognized
-# audience, or a caller-session argument that is not a session id.
+# answered — stated as a CRITERION rather than a list, because the list was written once
+# naming three causes while the verb carried far more `return 5` sites than that, and a
+# numeral here would go stale the next time one is added: EVERY fault that is not a
+# decision maps to 5, which today means path resolution, the storage-safety check, the
+# project lease, the worker, an empty holder record, a holder whose owner could not be
+# resolved when the caller supplied a session id, and a failed render; 3 a REFUSED CALL —
+# a bad arity, an unrecognized audience, or a caller-session argument that is not a
+# session id.
 #
 # `_autopilot_locked_run` runs its callback in the CURRENT shell, so this function
 # must not be wrapped in a command substitution by its own body; the caller may

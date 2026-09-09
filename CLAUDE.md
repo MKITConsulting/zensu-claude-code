@@ -2306,7 +2306,9 @@ hand; the release pipeline owns it.
   still designates it AND whose stage is not `BLOCKED`, which renders OK because it is an ordinary
   run in progress rather than a finding, naming the run id, the stage, own-vs-foreign,
   the held tree, the run document's path and the owner's silence, plus a second row counting run
-  documents it could not read. Every OTHER surface stays as enumerated: the `--autopilot-begin`
+  documents it could not read and a THIRD counting those it does not accept whose recorded stage
+  is terminal. The second row's count deliberately EXCLUDES the third's, so the two are disjoint
+  and neither is the total. Every OTHER surface stays as enumerated: the `--autopilot-begin`
   refusal, the standalone-TDD begin refusal, the deferred-review Stop refusal (which names the
   holding run whenever it can be read — including when it belongs to this session, where only the
   release COMMAND is withheld — and names no run at all when the read failed), the stderr line the
@@ -2340,7 +2342,7 @@ hand; the release pipeline owns it.
   bounds, `pointerValid`'s exact pointer shape and `_autopilot_owner_key`'s sha256 rule. An
   enumeration here went stale within one review round, so this is a GREP and not a list: before
   changing any of them run
-  `grep -nE 'AUTOPILOT_|autopilotOwnerSilence|autopilotPointerDesignates|createHash' hooks/lib/zensu-doctor-report.js`
+  `grep -nE 'AUTOPILOT_|autopilot[A-Z]|createHash' hooks/lib/zensu-doctor-report.js`
   **and `grep -nE 'CONTROL_BYTE|renderable|bound\(' hooks/lib/zensu-autopilot-state.sh`**. The
   second root is not optional and the omission was a real defect: the exit-6 release refusal
   carries its OWN inline spelling of the renderer's render-safety class plus a second copy of
@@ -2349,9 +2351,15 @@ hand; the release pipeline owns it.
   model to that command, so a widening on the JS side that does not reach the shell literal
   launders the withheld characters through the one command the row recommends.
   and check each hit against its owner. The needle is deliberately wider than a constant-name
-  prefix: three of the copies carry no `AUTOPILOT_` token at all — the beacon filename and its
-  `isFile`/`nlink` rule live inside `autopilotOwnerSilence`, the exact pointer shape inside
-  `autopilotPointerDesignates`, and the owner-key rule in a bare `createHash` call. Several
+  prefix, and the `autopilot[A-Z]` alternation is what covers the copies carrying no
+  `AUTOPILOT_` token: the beacon filename and its `isFile`/`nlink` rule inside
+  `autopilotOwnerSilence`, the exact pointer shape inside `autopilotPointerDesignates`, the
+  canonicalization rule inside `autopilotCanonical`, and the whole predicate family —
+  `autopilotNatural`, `autopilotSha256`, `autopilotNullableId`, `autopilotOwnerNonEmpty` — each
+  character-equivalent to an owner predicate (`natural`, `sha256`, `nullableIdentifier`,
+  `nonEmpty(…, 4096)`). The owner-key rule needs the bare `createHash` arm. An earlier spelling
+  named THREE copies and prescribed a needle blind to the predicate family, so a maintainer
+  changing the owner's `natural` got no hit naming it. Several
   are pinned — P1na, P1nm, P1nm1, P1nn and, since the `ownerWouldAccept` inputs got theirs,
   P1nz5, P1nz6, P1nz7, P1nz11 and P1nz12 in `tests/structure/test-doctor.sh` — and the pins compare
   spellings, not behaviour, so a semantic change that keeps the spelling passes. P1nz5 compares
@@ -2388,9 +2396,13 @@ hand; the release pipeline owns it.
   it refuses, and `begin` and `read-workspace` pass no owner and stay strict — so a DONE document
   with a foreign `projectRoot` fails every Autopilot verb closed for the WHOLE project, and this
   report is the only thing that names that state. The escaped set therefore gets a SECOND row of
-  its own, carrying the claim that is true of it (the record holds no working tree, and the verbs
-  validate every document in the directory, so it can still fail them all closed) and quoting NO
-  release command, since `--autopilot-release` refuses a terminal run. Both rows withhold names
+  its own, carrying the claim that is true of it (the record holds no working tree, but
+  `--autopilot-begin` and the workspace-occupancy check validate every document in the directory
+  WITHOUT owner scoping, so it can still fail those closed) and quoting NO release command, since
+  `--autopilot-release` refuses a terminal run. **Scope that clause to the unscoped verbs and no
+  further**: `read-active` DOES pass an owner and `readRunInventory` skips a record it can prove
+  belongs to another session before validating it, so "every Autopilot verb" is false, and it is
+  false in a row the doctor skill tells the model to relay. Both rows withhold names
   through ONE implementation, `autopilotSafeNames`. P1nz8 and P1nz10 pin the escape at the key-set
   gate and at a value gate, ROW-SCOPED in both directions — absent from the false-claim row AND
   present in the true-claim one — and P1nz13 pins the second row plus its control.

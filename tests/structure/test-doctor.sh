@@ -3362,6 +3362,8 @@ ap_run() { # ap_run <runId> <stage> <owner> [workspaceRoot|-] [projectRoot]
       rec.tdd = { attempt: 1, chainId: null, sessionId: null, returnStage: null,
         outcome: null, headUpdateRequired: false };
       rec.effects = { prOpen: {}, teamReview: {} };
+      rec.evidence = { pr: null, gates: null, review: null, findings: null,
+        validation: null, coverage: null, delivery: null };
       rec.blocked = { from: null, code: null };
       rec.stopBudget = { stage: rec.stage, count: 0 };
       rec.events = [{ eventId: "e1", eventType: "START", payloadDigest: "", payload: {},
@@ -3651,7 +3653,7 @@ AP_ESC_NAME="$(printf 'autopilot-run-a\033b.json')"
 printf 'not json' > "$AP_STATE/$AP_ESC_NAME" 2>/dev/null || AP_ESC_NAME=""
 if [ -n "$AP_ESC_NAME" ] && [ -f "$AP_STATE/$AP_ESC_NAME" ]; then
   AP_ESC_OUT="$(ap_report bound "$AP_OWN")"
-  if printf '%s' "$AP_ESC_OUT" | grep -qF 'withheld because they carry a' \
+  if printf '%s' "$AP_ESC_OUT" | grep -qF 'withheld because this report could not establish' \
     && ! printf '%s' "$AP_ESC_OUT" | grep -q "$(printf 'a\033b')"; then
     check "P1ni2 a run filename carrying a control byte is counted but withheld" PASS
   else
@@ -3975,15 +3977,20 @@ rm -f "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
 # P1nq3 — BLOCKED is not terminal, so an own BLOCKED run with a live pointer still
 # holds the tree and must NOT render green beside "all checks green".
 rm -f "$AP_STATE"/autopilot-run-*.json
-# ap_run_valid, not ap_run. The loose helper writes nested objects the owner refuses,
-# so `ownerWouldAccept` is false for it whatever the stage — and the ⚠️ conjunct was
-# then satisfied by the shape gate rather than by BLOCKED's non-terminality. With an
-# owner-acceptable record the glyph is attributable to BLOCKED alone, which is what
-# this check is named for.
-ap_run_valid run_blocked_a BLOCKED "$AP_OWN" "/w/t"
+# ap_run_valid, not ap_run, AND patched. The loose helper writes nested objects the
+# strict floor refuses, so the ⚠️ conjunct was satisfied by the shape gate rather than by
+# BLOCKED non-terminality — but ap_run_valid ALONE does not fix that: it writes
+# `blocked: { from: null, code: null }`, which the floor refuses for a BLOCKED stage
+# through its own null/non-null cross-check. So the glyph was still attributable to the
+# floor rather than to the stage, and deleting `run.stage !== 'BLOCKED'` from `ordinary`
+# left both conjuncts holding. The patch supplies the blocked pair the floor demands, and
+# the third conjunct asserts the floor was NOT what produced the warning.
+RUN_PATCH_JSON='{"blocked":{"from":"GATES","code":"blocked_reason"}}' \
+  ap_run_valid run_blocked_a BLOCKED "$AP_OWN" "/w/t"
 ap_pointer "$AP_OWN" run_blocked_a
 AP_BLOCKED_OUT="$(ap_report bound "$AP_OWN")"
 if printf '%s' "$AP_BLOCKED_OUT" | grep -F 'autopilot: nonterminal durable run run_blocked_a' | grep -qF '⚠️' \
+  && ! printf '%s' "$AP_BLOCKED_OUT" | grep -qF 'the owner validates more' \
   && printf '%s' "$AP_BLOCKED_OUT" | grep -qF 'the run is BLOCKED, which is NOT terminal'; then
   check "P1nq3 an own BLOCKED run with a live pointer still warns" PASS
 else
@@ -4072,7 +4079,7 @@ AP_LONGNAME="autopilot-run-$(node -e 'process.stdout.write("z".repeat(236))').js
 if : > "$AP_STATE/$AP_LONGNAME" 2>/dev/null && [ -f "$AP_STATE/$AP_LONGNAME" ]; then
   AP_LONGNAME_OUT="$(ap_report bound "$AP_OWN")"
   if printf '%s' "$AP_LONGNAME_OUT" | grep -qF 'durable run document(s) that could not be read' \
-    && printf '%s' "$AP_LONGNAME_OUT" | grep -qF 'are withheld because they carry a' \
+    && printf '%s' "$AP_LONGNAME_OUT" | grep -qF 'are withheld because this report could not establish' \
     && ! printf '%s' "$AP_LONGNAME_OUT" | grep -qF "$(node -e 'process.stdout.write("z".repeat(140))')"; then
     check "P1nt an over-long run filename is counted but its name is withheld, never half-rendered" PASS
   else
@@ -4323,8 +4330,12 @@ AP_NESTED_OWNER="$(node -e '
   var fs = require("fs");
   var src = fs.readFileSync(process.argv[1], "utf8");
   var out = [];
-  ["options", "tdd", "effects", "blocked", "stopBudget"].forEach(function (f) {
-    var re = new RegExp("exact\\(state\\." + f + ",\\s*\\[([^\\]]*)\\]\\)");
+  // `evidence` is the one member the owner key-checks OUTSIDE stateValid, inside
+  // evidenceValid, so it is spelled `exact(evidence, [...])` with no `state.` prefix. It
+  // was absent from BOTH sides for a release, and a field missing from both compares
+  // equal — which is why this loop makes the prefix optional rather than listing five.
+  ["options", "tdd", "effects", "blocked", "stopBudget", "evidence"].forEach(function (f) {
+    var re = new RegExp("exact\\((?:state\\.)?" + f + ",\\s*\\[([^\\]]*)\\]\\)");
     var m = re.exec(src);
     if (!m) { out.push(f + "=UNDERIVABLE"); return; }
     var v = m[1].match(/"[A-Za-z0-9_]+"/g) || [];
@@ -4492,9 +4503,10 @@ ap_run run_live_only2 GATES "$AP_FOREIGN" "/w/t" "/nonexistent/foreign/root"
 AP_TERMROW_CTL="$(ap_report bound "$AP_OWN")"
 rm -f "$AP_STATE"/autopilot-run-*.json
 if printf '%s' "$AP_TERMROW_OUT" | grep -qF 'recorded stage is terminal' \
-  && printf '%s' "$AP_TERMROW_OUT" | grep -qF 'fail every Autopilot verb closed' \
+  && printf '%s' "$AP_TERMROW_OUT" | grep -qF 'without owner scoping' \
   && printf '%s' "$AP_TERMROW_OUT" | grep -qF 'autopilot-run-run_term_root2.json' \
   && printf '%s' "$AP_TERMROW_OUT" | grep -qF '1 durable run document(s) that could not be read' \
+  && printf '%s' "$AP_TERMROW_CTL" | grep -qF '1 durable run document(s) that could not be read' \
   && ! printf '%s' "$AP_TERMROW_CTL" | grep -qF 'recorded stage is terminal'; then
   check "P1nz13 an escaped terminal reject is reported in its own row, not deleted" PASS
 else
@@ -4549,7 +4561,13 @@ RUN_PATCH_JSON='{"blocked":{"from":"GATES","code":"blocked_reason"}}' \
   ap_run_valid run_blkok_a BLOCKED "$AP_OWN" "/w/t"
 ap_pointer "$AP_OWN" run_blkok_a
 AP_BLKOK_OUT="$(ap_report bound "$AP_OWN")"
-if printf '%s' "$AP_BLKBAD_OUT" | grep -qF 'the owner validates more' \
+# Both captures are anchored POSITIVELY first. An absence assertion is satisfied by a
+# report that never rendered — a fixture that failed to write leaves `autopilotRows`
+# returning on an empty candidate list — so the control proves its row exists before it
+# proves the clause is missing, and the subject needle is row-scoped rather than
+# report-wide.
+if printf '%s' "$AP_BLKBAD_OUT" | grep -F 'run run_blkbad_a' | grep -qF 'the owner validates more' \
+  && printf '%s' "$AP_BLKOK_OUT" | grep -F 'autopilot: nonterminal durable run run_blkok_a' | grep -qF '⚠️' \
   && ! printf '%s' "$AP_BLKOK_OUT" | grep -qF 'the owner validates more'; then
   check "P1nz12 a blocked.from outside the stage set fails the stricter check" PASS
 else
