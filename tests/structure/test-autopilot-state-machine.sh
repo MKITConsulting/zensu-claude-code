@@ -2359,18 +2359,21 @@ REL_TTL0_ERR="$ROOT/rel-ttl0.err"
 if [ "$REL_READY" = true ]; then
   ( cd "$REL_P/.claude/worktrees/rt" && autopilot_begin_run run_rel_ttl0 session_rel_ttl0 "$REL_P" false true "" ) >/dev/null 2>&1
   printf '%s\n' '{}' > "$REL_P/.zensu/state/tdd-phase-session_rel_ttl0.json"
-  REL_TTL_SAVED="$(declare -f zensu_pending_review_ttl_hours)"
-  zensu_pending_review_ttl_hours() { echo 0; }
+  REL_TTL_SAVED="$(declare -f zensu_autopilot_owner_activity_ttl_hours)"
+  zensu_autopilot_owner_activity_ttl_hours() { echo 0; }
   ( cd "$REL_P/.claude/worktrees/rt" && autopilot_release_run run_rel_ttl0 evt_rel_ttl0 "$REL_P" session_rel_other ) >/dev/null 2>"$REL_TTL0_ERR"
   REL_TTL0_RC=$?
   eval "$REL_TTL_SAVED"
 fi
-# pendingReviewTtlHours=0 disables the liveness refusal for a demonstrably live
-# owner. That is the repository's established meaning of 0, so it stays — but it
-# must not be silent, or an operator reads exit 6 as a boundary that is no longer
-# being enforced at all.
+# autopilotOwnerActivityTtlHours=0 disables the liveness refusal for a demonstrably
+# live owner. The key is deliberately NOT pendingReviewTtlHours, whose six-hour
+# default answers how long a deferred-review marker stays meaningful and made a run
+# whose owner was gone unreachable for that long. Zero is the repository's
+# established meaning of "disabled", so it stays — but it must not be silent, or an
+# operator reads the missing refusal as a boundary that is no longer being enforced
+# at all.
 if [ "$REL_READY" = true ] && [ "$REL_TTL0_RC" -eq 0 ] \
-  && grep -qF 'owner liveness unchecked' "$REL_TTL0_ERR"; then
+  && grep -qF 'owner liveness unchecked: autopilotOwnerActivityTtlHours is 0' "$REL_TTL0_ERR"; then
   check "W24 a zero TTL disables the liveness refusal and says so" PASS
 else
   check "W24 a zero TTL must disable the check and disclose it (rc=$REL_TTL0_RC, want 0 + disclosure)" FAIL
@@ -2491,14 +2494,90 @@ else
   check "W18 containment must be separator-correct and total" FAIL
 fi
 
+# W18b pins the ANCHORING, which W18 does not: it grades the signature, the
+# `path.relative` derivation and the ABSENCE of the retired `inner.startsWith(outer + "/")`
+# form, so reverting to a bare `!rel.startsWith("..")` satisfied all three. No fixture
+# builds a worktree whose basename starts with `..`, so nothing behavioural catches it
+# either — and the consequence is not cosmetic: `<project>/..bak` would read as FREE,
+# `workspaceHolder` would find no holder, and a standalone `/zensu:tdd` chain would arm
+# underneath a live durable run in the same tree. Both clauses, or neither.
+W18B_OK=true
+# Filtered off comment lines, the same class W19 was fixed for: `contains` sits
+# directly under a comment block that already discusses its anchoring, and this
+# predicate has NO behavioural case, so the source pin is its only coverage.
+w18b_code() { grep -F "$1" "$LIB" | grep -cvE '^[[:space:]]*//'; }
+[ "$(w18b_code 'rel !== ".."')" -ge 1 ] || W18B_OK=false
+[ "$(w18b_code 'rel.startsWith(".." + path.sep)')" -ge 1 ] || W18B_OK=false
+# The unanchored form must NOT come back. The needle carries the closing paren that
+# only the BARE spelling has, so it does not match the anchored one as a substring.
+grep -qF 'rel.startsWith("..")' "$LIB" && W18B_OK=false
+if [ "$W18B_OK" = true ]; then
+  check "W18b the containment predicate is ANCHORED on both clauses and the bare startsWith form has not returned" PASS
+else
+  check "W18b the containment predicate lost an anchoring clause or regained the bare startsWith form" FAIL
+fi
+
 # The liveness bound must exclude a future timestamp: a negative age never
 # crosses the bound, so a skewed or planted mtime would make the run
 # permanently unreleasable. This repository already states that rule for the
 # reviewer-denial note TTL; the same bound applies here.
-if grep -qF 'ageMs >= 0 && ageMs < ttlHours * 3600000' "$LIB"; then
-  check "W19 the owner-liveness bound rejects a future timestamp" PASS
+#
+# COUNTED, not merely found. The literal now appears once per verb — release and
+# adopt — and `grep -q` was satisfied by either copy alone, so the adopt clause
+# could lose its bound with this check still green. Both verbs must carry it.
+# R7-10: counted over CODE LINES, like every needle below it. An unfiltered count
+# let a comment quoting the bound expression hold the total at 2 after one of the
+# two code bounds was deleted — and this file narrates that expression in prose.
+w19_code() { grep -F "$1" "$LIB" | grep -cvE '^[[:space:]]*//'; }
+W19_BOUNDS="$(w19_code 'ageMs >= 0 && ageMs < ttlHours * 3600000')"
+# COUNTED OVER CODE LINES ONLY. An earlier spelling counted over the whole file, so a
+# comment carrying the same words satisfied the count while the code path that emits
+# it was deleted — the check could not tell a disclosure from a description of one.
+# Every needle below is therefore filtered to a line that actually EMITS: a
+# `process.stderr.write(` for a disclosure, a `fail(7` for a refusal.
+# Filtered off COMMENT lines, not merely matched against an emitter substring: an
+# earlier spelling counted any line containing `if (` or `process.stderr.write(`,
+# which a comment quoting the whole statement satisfies — and this file quotes code
+# in comments as a matter of style. `grep -cvE '^[[:space:]]*//'` is the filter the
+# sibling W18b uses and the only one here that actually excludes prose.
+w19_emitted() { grep -F "$2" "$LIB" | grep -F "$1" | grep -cvE '^[[:space:]]*//'; }
+# The absent-beacon disclosure is still a hand copy across BOTH verbs: it is the one
+# stand-down an outsider reaches by unlinking an ordinary file, so both must say so.
+W19_NO_DOC="$(w19_emitted 'process.stderr.write(' 'owner liveness unchecked: no workflow document for the recorded owner')"
+# The FUTURE-dated case is deliberately ASYMMETRIC and this check is what holds the
+# asymmetry in place. `adopt` PERMITS and discloses — a reversible ownership move,
+# and refusing there would wedge the constructive verb on a clock artefact. `release`
+# REFUSES with exit 7, because a skewed clock must never authorise an irreversible
+# CANCEL against a session that is demonstrably alive; the run stays reachable
+# through the ordinary event path, through adoption, and through the documented
+# `autopilotOwnerActivityTtlHours: 0`. One of each, never two of either.
+W19_FUTURE_DISCLOSE="$(w19_emitted 'process.stderr.write(' 'owner liveness unchecked: the recorded owner workflow document is dated in the future')"
+W19_FUTURE_REFUSE="$(w19_emitted 'fail(7' 'dated in the future, so its age cannot bound this cancel')"
+if [ "$W19_BOUNDS" -eq 2 ] && [ "$W19_NO_DOC" -eq 2 ] \
+  && [ "$W19_FUTURE_DISCLOSE" -eq 1 ] && [ "$W19_FUTURE_REFUSE" -eq 1 ]; then
+  check "W19 both verbs bound the owner-liveness age, both disclose an absent beacon, and a future-dated one is disclosed by adopt and refused by release" PASS
 else
-  check "W19 owner-liveness must bound the age in both directions" FAIL
+  check "W19 owner-liveness bounds=$W19_BOUNDS no-doc-disclosures=$W19_NO_DOC (each must be 2), future-disclose=$W19_FUTURE_DISCLOSE future-refuse=$W19_FUTURE_REFUSE (each must be 1)" FAIL
+fi
+
+# W19b is the CONTROL for the filter W19 now applies: it proves the needles are
+# absent from comment text, so a future comment carrying them cannot silently
+# restore the file-wide count W19 replaced.
+# `[[:space:]]`, not `\s`: the latter is a GNU extension and not POSIX BRE, so on a
+# grep that does not honour it this control counts 0 and PASSES for a reason
+# unrelated to its subject — silently weakening the filter W19 depends on.
+W19B_RE='^[[:space:]]*//'
+# Widened to EVERY needle W19 counts, not just the disclosure literals. Naming
+# itself "the CONTROL for the filter W19 applies" while covering two of its four
+# needles is the same overclaim this suite exists to catch.
+W19B_COMMENTED="$(grep -F -e 'owner liveness unchecked:' -e 'ageMs >= 0 && ageMs < ttlHours * 3600000' -e 'dated in the future, so its age cannot bound this cancel' "$LIB" | grep -cE "$W19B_RE" || true)"
+# POSITIVE CONTROL for the pattern itself. Without it a `[[:space:]]` that this
+# host's grep also mishandled would be indistinguishable from a clean tree.
+W19B_CONTROL="$(printf '  // owner liveness unchecked: sample\n' | grep -cE "$W19B_RE" || true)"
+if [ "$W19B_COMMENTED" -eq 0 ] && [ "$W19B_CONTROL" -eq 1 ]; then
+  check "W19b no owner-liveness disclosure literal is carried by a comment line" PASS
+else
+  check "W19b commented=$W19B_COMMENTED (must be 0) control=$W19B_CONTROL (must be 1 — a 0 means this host's grep does not honour the pattern, so the check proves nothing)" FAIL
 fi
 
 printf '%s\n' "----" "test-autopilot-state-machine: $PASS PASS / $FAIL FAIL"

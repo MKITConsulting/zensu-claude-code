@@ -539,9 +539,12 @@ classifier will refuse a spawn, not only when the whole table is green.
   Owned by THIS session, or with the owner not established, the row names no
   release command, and you must not suggest one: a release applies a real `CANCEL`,
   so against your own live generation it ends the work you are doing. Owned by
-  ANOTHER session, report it and run `/zensu:autopilot-release` only after the user
-  says yes; that skill is the guided form and asks for the confirmation itself.
-  Never run the bare `zensu-log.sh --autopilot-release … --confirm` on their behalf.
+  ANOTHER session, report it and offer `/zensu:autopilot-adopt` first — it continues the
+  run under this session — and `/zensu:autopilot-release` only if the user wants the run
+  cancelled instead, each only after the user says yes; both skills are the guided forms and
+  ask for the confirmation themselves. Adoption comes first because a cancel cannot be undone.
+  Never run the bare `zensu-log.sh --autopilot-adopt … --confirm` or
+  `zensu-log.sh --autopilot-release … --confirm` on their behalf.
   When the row says it `accepted the record on its SHAPE`, relay that too: the owner
   validates more than this row checks, and a record that fails the stricter check
   makes every Autopilot verb fail closed for the whole project — so the document
