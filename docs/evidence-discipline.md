@@ -101,9 +101,11 @@ to be this rule may override it. Agents act on the block; humans and the hook re
 The discipline is not only prose. These are the places that already fail closed on it, and
 the reason the rule is worded the way it is:
 
-- The **Phase 6 witness cross-check** (`hooks/post-bash-witness.sh` plus the `/zensu:tdd`
-  audit) matches every claimed `cmd="…"` against an independent log of what actually ran, and
-  contradicts a claimed pass whose captured output shows a failure. That is R6 in code.
+- The **Phase 6 witness cross-check** (`hooks/pre-bash-witness.sh` and
+  `hooks/post-bash-witness.sh` plus the `/zensu:tdd` audit) matches every claimed `cmd="…"`
+  against an independent log of what actually ran, and contradicts a claimed pass whose
+  captured output shows a failure — or whose command was attempted and never completed,
+  which is the only record a failing Bash call leaves. That is R6 in code.
 - The **REVIEW PACKET v1** contract makes reviewers reject a spawn whose evidence fields are
   missing instead of reviewing from imagination, and instructs them never to reproduce a
   build or test claim they did not receive. That is R2 and R6 for the review chain.

@@ -169,8 +169,12 @@ zensu_session_orphaned_project_root() {
 }
 
 # The model-side twin of the predicate above, for /zensu:doctor: same question
-# and same printed path, but no hook payload exists there, so the session id
-# comes from CLAUDE_CODE_SESSION_ID.
+# and same printed path — TWO statuses, 0 with the path and 1 for everything
+# else, exactly as its hook-payload sibling — but no hook payload exists there,
+# so the session id comes from CLAUDE_CODE_SESSION_ID. Do not give this pair a
+# third status by copying the incompatible-orphaned pair's contract onto it: they
+# back different argv modes, and a consumer that branched on `-ne 3` here would
+# read every unavailable answer as a live recorded root.
 zensu_session_orphaned_project_root_model() {
   local lib_dir binder plugin_root native_plugin_root native_plugin_data
   local msys_env_exclusions
@@ -193,26 +197,39 @@ zensu_session_orphaned_project_root_model() {
   ) 2>/dev/null
 }
 
-# Returns 0 ONLY when a Session Control record is intact in every respect and the
-# SOLE disagreement is that the executing runtime declares an incompatible
-# lineage — what a plugin update landing mid-session produces. It is NOT a
-# relaxable state and does not belong to the pair above: a workflow document is
-# still reachable here, so relaxing a write gate for it would waive a live
-# guarantee rather than a dead one. It exists so the doctor row, the Stop release
-# and the deny text can NAME the cause instead of falling through to "no record",
-# which is false and sends the user hunting for a record that is sitting intact.
-# The decision lives in claude-hook-session-v1.js so every caller shares exactly
-# one implementation.
+# ONE implementation behind the four binder-mode wrappers below. They were four
+# copies of the same body — the node probe, the lib_dir/plugin_root resolution,
+# the binder `[ -f ] && [ ! -L ]` guard, both zensu-host-path.sh renders,
+# zensu_msys_env_exclusions and the `cd -P` subshell — differing only in the argv
+# mode and the `model-` prefix. The cost was never the lines: it was that a change
+# to the MSYS preamble or to the symlink guard had to land in all four by hand,
+# with nothing failing when one was missed.
 #
-# On a match this PRINTS `recorded<TAB>executing` on stdout. The same warning the
-# orphaned wrapper carries applies with equal force: inside a PreToolUse gate
-# stdout is the hook's JSON decision channel, so a caller that wants the
-# predicate alone MUST discard stdout explicitly (`>/dev/null`).
-zensu_session_incompatible_runtime() {
-  local payload="${1:-}"
+# The MODE selects the calling convention, not the argument count. A `model-` mode
+# takes its session id from CLAUDE_CODE_SESSION_ID and writes no stdin; every
+# other mode requires a payload and pipes it in. Keying on the mode rather than on
+# "was the payload empty" keeps a payload mode called with an empty payload a
+# REFUSAL, instead of silently falling through to the model convention and
+# answering about a different session than the caller asked about.
+#
+# CLAUDE_PLUGIN_DATA is read as `${CLAUDE_PLUGIN_DATA:-}` on both paths. The model
+# wrappers used the bare `$CLAUDE_PLUGIN_DATA`, which was safe only because the
+# emptiness check two lines above it happened to run first; the guarded spelling
+# does not depend on that ordering surviving an edit.
+_zensu_session_binder_mode() {
+  local mode="${1:-}" payload="${2:-}"
   local lib_dir binder plugin_root native_plugin_root native_plugin_data
   local msys_env_exclusions
-  [ -n "$payload" ] || return 1
+  [ -n "$mode" ] || return 1
+  case "$mode" in
+    model-*)
+      [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] || return 1
+      [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
+      ;;
+    *)
+      [ -n "$payload" ] || return 1
+      ;;
+  esac
   command -v node >/dev/null 2>&1 || return 1
   lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
   plugin_root="$(cd "$lib_dir/../.." && pwd -P)" || return 1
@@ -222,38 +239,188 @@ zensu_session_incompatible_runtime() {
   native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}")" || return 1
   msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
     || return 1
+  # ONE invocation, with the MODE choosing what stands on stdin. Two subshells —
+  # one piped, one not — would double the `node ./claude-hook-session-v1.js` count
+  # while the MSYS exclusion is still computed once, and that pair is a shipped
+  # invariant: test-msys-runtime-boundaries asserts that every relative binder
+  # invocation in this file is covered by its own
+  # `zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA`.
+  #
+  # Piping an EMPTY stdin for a model mode is not a behaviour change: the binder
+  # reads the payload only on the non-model branches, taking the session id from
+  # CLAUDE_CODE_SESSION_ID otherwise, so those invocations never touched stdin.
+  # The closed pipe is the safer of the two anyway — the previous spelling let
+  # them inherit whatever descriptor the caller happened to hold.
   (
     cd -P -- "$lib_dir" || exit 1
-    printf '%s' "$payload" \
+    case "$mode" in
+      model-*) : ;;
+      *) printf '%s' "$payload" ;;
+    esac \
       | MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
         CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
-        node ./claude-hook-session-v1.js incompatible-runtime
+        node ./claude-hook-session-v1.js "$mode"
   ) 2>/dev/null
+}
+
+# Returns 0 when a Session Control record READS and the disagreement is that the
+# executing runtime declares an incompatible lineage — what a plugin update
+# landing mid-session produces — with or WITHOUT a vanished project root. It is
+# NOT a relaxable state in either half, and does not belong to the pair above,
+# but the two halves are unrelaxed for different reasons: with the recorded root
+# still present a workflow document is reachable, so relaxing a write gate would
+# waive a live guarantee rather than a dead one; with that root gone the document
+# is not reachable from this record, and what stands in for the guarantee is that
+# the state has a real in-place repair (adoption) rather than a silent waiver. A
+# caller that says anything about the workflow document must ask the third fact
+# separately — zensu_session_incompatible_orphaned_root below — and branch on it.
+# It exists so the doctor row, the Stop release and the deny text can NAME the
+# cause instead of falling through to "no record", which is false and sends the
+# user hunting for a record that is sitting intact.
+# The decision lives in claude-hook-session-v1.js so every caller shares exactly
+# one implementation.
+#
+# On a match this PRINTS `recorded<TAB>executing` on stdout. The same warning the
+# orphaned wrapper carries applies with equal force: inside a PreToolUse gate
+# stdout is the hook's JSON decision channel, so a caller that wants the
+# predicate alone MUST discard stdout explicitly (`>/dev/null`).
+zensu_session_incompatible_runtime() {
+  _zensu_session_binder_mode incompatible-runtime "${1:-}"
 }
 
 # The model-side twin of the predicate above, for /zensu:doctor: same question
 # and same printed version pair, but no hook payload exists there, so the session
 # id comes from CLAUDE_CODE_SESSION_ID.
 zensu_session_incompatible_runtime_model() {
-  local lib_dir binder plugin_root native_plugin_root native_plugin_data
-  local msys_env_exclusions
-  [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] || return 1
-  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
-  command -v node >/dev/null 2>&1 || return 1
-  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
-  plugin_root="$(cd "$lib_dir/../.." && pwd -P)" || return 1
-  binder="$lib_dir/claude-hook-session-v1.js"
-  [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
-  native_plugin_root="$(bash "$lib_dir/zensu-host-path.sh" "$plugin_root")" || return 1
-  native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "$CLAUDE_PLUGIN_DATA")" || return 1
-  msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
-    || return 1
-  (
-    cd -P -- "$lib_dir" || exit 1
-    MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
-      CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
-      node ./claude-hook-session-v1.js model-incompatible-runtime
-  ) 2>/dev/null
+  _zensu_session_binder_mode model-incompatible-runtime
+}
+
+# Returns 0 ONLY when a Session Control record is intact in every respect and the
+# SOLE disagreement is that the installation which minted it no longer exists on
+# disk — what the host's plugin-cache pruning produces for a session that
+# outlived a few releases. Like the lineage predicate above it is NAMED, never
+# relaxed: a workflow document is still reachable, and adoption re-mints the
+# record under the running installation. Disjoint from the lineage predicate by
+# construction (that one needs the strict read to succeed, this one needs it to
+# fail), and deliberately blind to lineage, because the remedy is the same
+# either way. The decision lives in claude-hook-session-v1.js.
+#
+# On a match this PRINTS the same `recorded<TAB>executing` pair the lineage
+# predicate prints, so every consumer of that pair reads this one unchanged. The
+# same stdout warning applies: a caller wanting the predicate alone MUST discard
+# stdout explicitly (`>/dev/null`).
+zensu_session_pruned_plugin_root() {
+  _zensu_session_binder_mode pruned-plugin-root "${1:-}"
+}
+
+# The model-side twin, for /zensu:doctor: same question, same printed pair, the
+# session id from CLAUDE_CODE_SESSION_ID.
+zensu_session_pruned_plugin_root_model() {
+  _zensu_session_binder_mode model-pruned-plugin-root
+}
+
+# The per-gate bind-failure ladder, in ONE place. Four gates carried the same nine
+# lines plus the same three-line comment, differing only in the payload variable
+# and in the fallback scope — so adding a fifth named state meant eight edits with
+# nothing that fails when one is missed, and the only control was a hand-maintained
+# roster in CLAUDE.md. The fallback scope is the one thing that legitimately
+# differs between the gates, so it stays the argument.
+#
+# The rationale the copies carried, kept here because it is the reason the ladder
+# exists at all: before it, a gate in a named state printed "start a fresh Claude
+# Code session" while its siblings said the session could be adopted — two denies
+# contradicting each other about the one bind failure that has an in-place remedy.
+#
+# Both predicates PRINT `recorded<TAB>executing` on stdout, and inside a PreToolUse
+# gate stdout is the JSON decision channel, so each is captured into a variable and
+# never leaked. The two are disjoint by construction — the lineage one needs the
+# strict read to succeed, the pruned one needs it to fail — so their order is
+# immaterial. A caller that passes no fallback scope gets the generic deny.
+zensu_emit_named_bind_deny() {
+  local payload="${1:-}" fallback="${2:-}"
+  local pair
+  if pair="$(zensu_session_incompatible_runtime "$payload")" && [ -n "$pair" ]; then
+    zensu_emit_hook_session_deny incompatible-runtime \
+      "${pair%%$'\t'*}" "${pair##*$'\t'}"
+    return
+  fi
+  if pair="$(zensu_session_pruned_plugin_root "$payload")" && [ -n "$pair" ]; then
+    zensu_emit_hook_session_deny pruned-plugin-root \
+      "${pair%%$'\t'*}" "${pair##*$'\t'}"
+    return
+  fi
+  zensu_emit_hook_session_deny ${fallback:+"$fallback"}
+}
+
+# THE THREE-WAY STATUS HAS A NAME, and this is it. The trichotomy below is a good
+# design and it was spelled as a bare `3` in two hooks plus a structure pin, with the
+# vocabulary living only in the prose of this comment — so a reader of either call site
+# saw a magic number and could not tell `3` (a POSITIVE negative: the root is there)
+# from the failure status it sits next to. That is exactly the collapse the paragraph
+# below warns about, one level up: not a caller reading truthiness, but a maintainer
+# reading a literal.
+#
+# Both consumers reach the trichotomy through these names, but NOT by the same route,
+# and the difference is worth stating because an earlier wording here flattened it into
+# "both compare against these names" and was wrong about one of them.
+# hooks/stop-chain-enforcer.sh sources this file in its PARENT shell, so it compares
+# against ZENSU_ROOT_STATE_* directly. hooks/lib/zensu-doctor.sh sources it only inside
+# command substitutions, where the name is out of scope and reading it under `set -u`
+# aborted the whole diagnostic; it copies the VALUES out in one subshell and compares
+# against its own ZDOC_ROOT_STATE_* instead. Still one definition, still no literal —
+# but the doctor is held to a DERIVED name, not to this one.
+#
+# Keep them in step — AC-C19 in tests/structure/test-versioned-plugin-upgrade.sh greps
+# for both members in both files, in the spelling each consumer actually uses, so a
+# silent revert to a literal fails rather than passing. That claim was false for one
+# round: only the PRESENT member was pinned, nothing named _GONE at all, and the doctor
+# had meanwhile reintroduced the literal through a `:-0` default on exactly the member
+# no needle covered. Do not write "both files" here without checking that both MEMBERS
+# are pinned too.
+#
+# Deliberately values, not a wrapper function: the two consumers reach the trichotomy
+# through DIFFERENT probes — the payload flavour and the `_model` twin — and in
+# opposite directions, so a single accessor would have to take a flavour argument and
+# would buy nothing the names do not already buy.
+# TWO names, not three, and the missing one is deliberate. The third state —
+# "the question could not be answered" — is the RESIDUAL: it is every status that is
+# neither of these two, so no site ever compares against it and a constant for it would
+# be a name nothing consumes. This file's own neighbourhood states the rule that made
+# that decision: an exported rule with no consumer, reachable by a future caller who
+# mistakes it for the real one, is worse than no export at all
+# (hooks/lib/zensu-safe-display-v1.js, on the retired foldDisplayHiders).
+#
+# A first version of this block did declare a third, `ZENSU_ROOT_STATE_UNKNOWN=1`, and a
+# review seat caught that it had no consumer anywhere while the literals it was meant to
+# replace were still spelled at four sites. Both of the names below are consumed.
+ZENSU_ROOT_STATE_GONE=0
+ZENSU_ROOT_STATE_PRESENT=3
+
+# The THIRD fact of the incompatible-lineage state, asked separately so the
+# version pair above stays two TAB-separated fields — five callers read the
+# executing half as `${V##*$'\t'}`, so a third field there would silently
+# redirect all five. Returns 0 and PRINTS the recorded project root only when the
+# lineage is incompatible AND that root is gone; **3** for a plain incompatible
+# lineage whose recorded root still exists; and 1 only when the question could not
+# be answered at all. THREE statuses, never two — a caller that reads only
+# truthiness collapses the last two, and that collapse is what makes a consumer
+# assert a workflow document that is gone.
+#
+# The same stdout warning the two wrappers above carry applies here: inside a
+# PreToolUse gate stdout is the hook's JSON decision channel, so a caller that
+# wants the predicate alone MUST discard stdout explicitly.
+zensu_session_incompatible_orphaned_root() {
+  _zensu_session_binder_mode orphaned-incompatible-root "${1:-}"
+}
+
+# The model-side twin of the predicate above, for /zensu:doctor: same question,
+# same printed path and the SAME THREE statuses — 0 with the dead path, 3 for a
+# recorded root that positively still exists, 1 for an unavailable answer — but no
+# hook payload exists there, so the session id comes from CLAUDE_CODE_SESSION_ID.
+# The third status is what lets /zensu:doctor tell a negative from a failure; the
+# plain orphan pair above has only two and must not be branched on the same way.
+zensu_session_incompatible_orphaned_root_model() {
+  _zensu_session_binder_mode model-orphaned-incompatible-root
 }
 
 # Returns 0 ONLY when this PreToolUse payload is one of the two recognized Bash
@@ -324,8 +491,9 @@ zensu_doctor_allowed() {
   zensu_hook_is_main_principal "$payload" PreToolUse
 }
 
-# Four scopes, because the same emitter serves callers with very different
-# knowledge. A caller that already ruled out the RELAXABLE states may say so; a
+# Five scopes, because the same emitter serves callers with very different
+# knowledge. Keep this numeral in step with the list below it — it is what a
+# caller reads before adding a sixth. A caller that already ruled out the RELAXABLE states may say so; a
 # caller that denies on any bind failure must NOT, or it tells a user in a
 # relaxable state that /zensu:doctor is denied when it is exactly the command
 # that still works for them.
@@ -342,9 +510,12 @@ zensu_doctor_allowed() {
 #                     gate needs is missing — so the doctor is denied too
 #   incompatible-runtime  the caller POSITIVELY identified the lineage state and
 #                     supplies both declared versions ($2 recorded, $3 executing);
-#                     this is the one scope that can name a remedy which fixes
-#                     the session in place rather than telling the user to start
-#                     over
+#                     this scope names a remedy which fixes the session in place
+#                     rather than telling the user to start over
+#   pruned-plugin-root  the caller POSITIVELY identified that the installation
+#                     which minted the record is gone from the plugin cache, and
+#                     supplies the same version pair; the remedy is the same
+#                     in-place adoption, the cause is a different one
 #
 # The version pair is interpolated into a JSON string, so it is held to a strict
 # shape first. A manifest version is ordinary text as far as the record schema is
@@ -367,7 +538,17 @@ zensu_emit_hook_session_deny() {
     # session — the contradiction this scope exists to remove.
     [[ "$recorded" =~ $ZENSU_SAFE_VERSION_RE ]] || recorded="(unreadable)"
     [[ "$executing" =~ $ZENSU_SAFE_VERSION_RE ]] || executing="(unreadable)"
-    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is intact, and the only disagreement is that the running Zensu installation declares an incompatible lineage — the record was minted by %s and %s is executing. While the plugin is at major 0 the minor is the breaking axis, so a plugin update that landed mid-session stops serving the record and every stateful tool fails closed. The record is NOT damaged and NOT missing. Run /zensu:adopt-session to check whether this session can be adopted by the running installation in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If it refuses, the persisted shapes really did change and a fresh Claude Code session is the only way forward."}}\n' \
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is readable, and the disagreement is that the running Zensu installation declares an incompatible lineage — the record was minted by %s and %s is executing. While the plugin is at major 0 the minor is the breaking axis, so a plugin update that landed mid-session stops serving the record and every stateful tool fails closed. The record is NOT damaged and NOT missing. Run /zensu:adopt-session to check whether this session can be adopted by the running installation in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — the adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created; /zensu:doctor names the path when that is the case. If it refuses, the persisted shapes really did change and a fresh Claude Code session is the only way forward."}}\n' \
+      "$recorded" "$executing"
+    return
+  fi
+  if [ "$scope" = pruned-plugin-root ]; then
+    local recorded="${2:-}" executing="${3:-}"
+    # Same degradation policy as the lineage scope: substitute, keep the wording,
+    # never lose the in-place remedy over two unreadable numbers.
+    [[ "$recorded" =~ $ZENSU_SAFE_VERSION_RE ]] || recorded="(unreadable)"
+    [[ "$executing" =~ $ZENSU_SAFE_VERSION_RE ]] || executing="(unreadable)"
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is intact, but the Zensu installation that minted it (version %s) has been removed from the plugin cache — the host keeps only a few versions — so the running installation (%s) cannot re-verify the record and every stateful tool fails closed. The record is NOT damaged and NOT missing. Run /zensu:adopt-session to check whether the running installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If it refuses, the refusal names its own cause and remedy: this predicate is deliberately blind to lineage, so a DOWNGRADE reaches this state too, and there adoption refuses as executing-runtime-older and re-installing the newer version is the way back — a persisted shape that really did change is the case that needs a fresh Claude Code session."}}\n' \
       "$recorded" "$executing"
     return
   fi
@@ -457,7 +638,18 @@ zensu_resolve_project_dir() {
 }
 
 export -f zensu_bind_hook_session zensu_bind_model_session zensu_emit_hook_session_deny \
+  _zensu_session_binder_mode zensu_emit_named_bind_deny \
   zensu_session_unregistered \
   zensu_session_orphaned_project_root zensu_session_orphaned_project_root_model \
   zensu_session_incompatible_runtime zensu_session_incompatible_runtime_model \
+  zensu_session_incompatible_orphaned_root zensu_session_incompatible_orphaned_root_model \
+  zensu_session_pruned_plugin_root zensu_session_pruned_plugin_root_model \
   zensu_session_key zensu_resolve_session_id zensu_resolve_project_dir 2>/dev/null || true
+
+# THE ZEN-MODE STATE PREDICATES MOVED OUT, to `hooks/lib/zensu-zen-shared.sh`.
+# `zen_marker_active`, `zen_marker_shape_fault` and `zen_path_untraversable` have
+# exactly two callers, both zen-mode, while THIS file is the Session Control
+# binding library that every stateful gate sources — so a syntax fault introduced
+# here while editing a presentation feature failed every PreToolUse Bash gate
+# CLOSED. Blast radius is the whole argument; the reasoning that used to sit here
+# travelled with the code.

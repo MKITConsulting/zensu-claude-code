@@ -21,11 +21,15 @@ artifact the plugin emits.
 — and verbatim citations of those literals in structure-test pins, in
 README/CHANGELOG feature descriptions, and in this carve-out — may contain
 non-English phrases ONLY as match literals for real user input:
-the TDD preference fast-paths (e.g. `'kein tdd'`, `'mit tdd'`, `'tdd bitte'`)
+the TDD-preference AND delivery-route fast-paths (e.g. `'kein tdd'`, `'mit tdd'`,
+`'tdd bitte'`, `'mit autopilot'`, `'mit pilot'`)
 and the generic-action literals that are explicitly NOT a preference
 (e.g. `'mach mal'`, `'los gehts'`, `'jetzt umsetzen'`) in
 `plan-approved-delegate.sh` / `user-prompt-tdd-reminder.sh`. They exist to
-recognize what multilingual users actually type, never as prose. Keep these
+recognize what multilingual users actually type, never as prose. Since the delivery-route and TDD
+arms became INTENT-judged, they now ship as EXAMPLES of real user utterances inside an intent rule
+rather than as a closed match set; the permission and the bound are unchanged — they stay quoted
+specimens, never directive prose. Keep these
 phrase lists in lockstep across every directive variant (strict and vanilla)
 — never edit one variant alone.
 
@@ -36,18 +40,39 @@ rather than as a file-and-grader list because the list was written that way once
 and was wrong in both directions within a single round — it named
 `anchor-failed-step.yaml`'s failure-in-the-prose grader "and nothing else" while
 the German counter-grader arms (`schritt`, `von`, `aus`) sat in that file AND in
-`anchor-multi-step.yaml`, which the list excluded by name. Two members exist
-today, both under `evals/zen-mode-reaction/scenarios/`: the failure-in-the-prose
-grader (`fehlgeschlag`, `fehlschlag`, `gescheitert`, `rot`, `schlägt fehl`) and
-the `Step N of M` counter grader, which appears in both anchor scenarios. The reason is the same in kind
+`anchor-multi-step.yaml`, which the list excluded by name. THREE members exist
+today, all under `evals/zen-mode-reaction/scenarios/`: the failure-in-the-prose
+grader (`fehlgeschlag`, `fehlschlag`, `gescheitert`, `rot`, `schlägt fehl`), the
+`Step N of M` counter grader, which appears in both anchor scenarios, and the
+anchor-prefix grader in `contract-compliance.yaml`, whose `/^(Zensu|Run|Ablauf):/`
+alternation admits the German lead-in a correct reply to a German-speaking user
+carries. That third one landed while this census still read "two", which is the
+same drift the paragraph above records — check by grep before relying on the
+count. The reason is the same in kind
 but the source is the other side of the exchange: the zen-mode directive that
 scenario grades says the words around the anchor's marks follow the USER's own
 language, so a correct reply to a German-speaking user is German prose. An
 English-only alternation would report that correct reply as a violation, which
 `evals/zen-mode-reaction/README.md` names as the one outcome an eval must never
-produce. The FIXTURES are a different matter and carry no allowance: every
-canned reply in `tests/structure/zen-anchor-assertions.test.js` is English,
-because a fixture is authored text rather than a match literal. Extend this
+produce. The FIXTURES carry ONE narrow allowance and no more, and stating it
+as none was wrong: a canned reply that exists to EXERCISE a grader alternation
+this carve-out already admits may carry that alternation's own literal, because
+a fixture which cannot reach the arm it grades tests nothing. The one member is
+`tests/structure/zen-anchor-assertions.test.js`, and it carries the literal in TWO
+shapes, not one — an earlier wording named only the first, which would have made the
+second read as a violation. The first is the canned replies its anchor-prefix cases
+build from `Zensu:`, `Run:` and `Ablauf:` to drive `contract-compliance.yaml`'s
+`/^(Zensu|Run|Ablauf):/`. The second is a SELECTOR: the same file filters that
+scenario's assertion bodies on `.includes("Ablauf")` to find WHICH grader to bind,
+so the German literal is the key rather than the input. It is admitted on the same
+ground — a test that cannot locate the arm it grades tests nothing — and the
+distinction is worth keeping, because a selector is not prose in either direction:
+it is neither authored text nor a match against model output. A THIRD carrier sits
+outside this file and outside the allowance as stated: `tests/structure/test-zen-mode.sh`
+drives `Ablauf: ✓a` through the shell grammar as a NEGATIVE fixture, proving the
+reader refuses the very lead-in the eval admits. It qualifies for the same reason
+the canned replies do — check by grep before treating this list as closed. Every other canned reply there is English, because an
+ordinary fixture is authored text rather than a match literal. Extend this
 carve-out only for another grader in the same position — a pattern matched
 against text whose language the product does not control — and never for prose,
 a comment, or a fixture.
@@ -59,7 +84,7 @@ literal in ANY carrier it scans, which is precisely what keeps prose, comments a
 fixtures violations everywhere. So the load-bearing half is enforced and the
 ENUMERATION is not — a German arm added to a grader in `safety-carve-out.yaml` would
 pass the guard with this paragraph unamended, and so would a further arm in an existing
-one. The SHAPE is what governs; the two members named above are a census taken at one
+one. The SHAPE is what governs; the members named above are a census taken at one
 moment, not a bound the suite holds. Check by grep before relying on it, and never
 strip a German arm because this paragraph did not list its grader.
 
@@ -127,9 +152,13 @@ The divergence is deliberate: `zensu_hook_enabled` spawns `node` per call and
 spawn on the hottest path in the workflow. Recorded rather than left for someone to
 discover from a refusal naming a variable the config row never mentions.
 
-**THREE WRITERS apply it, and the third exists because the first two cannot be
-enough:** `zensu-log.sh append` (the narrative log, at write time),
-`hooks/post-bash-witness.sh` (the witness `cmd` — see the symmetry rule below), and
+**FOUR WRITERS apply it, and the last exists because the first two cannot be
+enough:** `zensu-log.sh append` (the narrative log, at write time), BOTH witness
+writers — `hooks/pre-bash-witness.sh` for the `BASH-ATTEMPT cmd` field and
+`hooks/post-bash-witness.sh` for the `BASH cmd` one, which share the single
+extraction in `hooks/lib/zensu-witness.sh` precisely so their substitution cannot
+diverge (see the symmetry rule below, and §"Witness Attempt Half" for why there are
+two of them at all), and
 `hooks/post-artifact-redact.sh` (a bounded sweep on BOTH registered matchers,
 plus the named `file_path` on the write matchers). Both artifacts are
 MODEL-authored, so a guarantee that holds only while the model follows a recipe is
@@ -752,6 +781,18 @@ just a number. Choosing `patch` for a change in that list ships a compatibility
 claim the code cannot honour. The predicate encodes what the numbers *mean*; it
 cannot verify that this policy was followed.
 
+**Practical consequence for anyone RUNNING a suite: never edit the plugin tree while
+one is in flight.** `manifestRuntimeEntries` folds `hooks`, `agents`, `skills`, `docs` and
+`templates` in wholesale, so a suite that mints a Session Control record and then invokes a
+stateful verb measures the digest TWICE — and an edit to any file under those five directories
+between the two measurements makes the second disagree with the first. The verb then refuses
+the binding, and the failure surfaces far from its cause: measured here, a one-paragraph edit to
+`skills/doctor/SKILL.md` during a `test-doctor.sh` run made `--tdd-begin` fail to arm, so the
+chain rendered `no-session` and `P1mc` failed while every check around it stayed green. Nothing
+in the failure text names the digest. `CLAUDE.md` itself is NOT in that set and is safe to edit
+mid-run; the five directories are not. When a suite must run while you keep working, run it from
+a detached `git worktree` instead.
+
 **The release that introduces this policy is itself a `minor`**, because it adds
 `executing_plugin_root` and `executing_runtime_digest` to the attestation. It is
 the last release before the policy binds, so nothing is served across it.
@@ -777,7 +818,9 @@ account, including the pin this weakens and the two attestation fields that
 state the executing runtime. `tests/session-control/session-control-core-v1.test.js`
 pins the axis and the sibling rule;
 `tests/structure/test-versioned-plugin-upgrade.sh` pins the end-to-end verdicts
-across synthetic installs, including that serving a record never rewrites it.
+across synthetic installs, including that serving a record never rewrites it and
+that a capability gate DENYING on an incompatible lineage leaves every record in
+the shared store byte-identical.
 
 ## Adopting a Record Across a Lineage Break (`adoptableRecord` / `adoptContext`)
 
@@ -821,8 +864,8 @@ included this comparison. It also put the module back in step with itself:
 `resolveHookSession` answers `projectRoot: context.project_root` under "The mutable
 payload cwd is never a project authority", and this was the one place a
 caller-supplied directory outranked the record. A record whose project root is GONE
-is still refused, as `record-unreadable` — `validateContext` canonicalizes it at
-condition 1. Consequently `zensu-session-adopt.sh` no longer requires
+is ADMITTED at condition 1 — see the paragraph below, which states that rule and its
+bound once. Consequently `zensu-session-adopt.sh` no longer requires
 `CLAUDE_PROJECT_DIR`; it used to render it through `zensu-host-path.sh`, which
 rejects a non-directory, so an unset or deleted value exited before printing any
 report. The recognizer still ACCEPTS the assignment — the diagnostic reads it and the
@@ -858,46 +901,356 @@ Moving together: `RECOGNIZED` in the recognizer, `isRecognizedInvocation` (the
 module main and `reviewer-capability-v1.js` both call it; `isDoctorInvocation`
 stays the doctor-only predicate), and `zensu_doctor_allowed`'s contract comment.
 
-**The whole feature needs the SUPERSEDED installation to still be on disk.**
-`validateContext` canonicalizes `context.plugin_root` and `readContextInternal`
-recomputes the digest against it, so an absent recorded root makes `readContext`
-throw — and then `resolveIncompatibleRuntime` answers null, the doctor falls back
-to the `unbound` row whose "no valid record" wording this work exists to remove,
-and `adoptableRecord` refuses as `record-unreadable`. The diagnosis degrades to
-the misleading wording exactly when the repair is impossible. Do not describe the
-lineage row as covering every mid-session upgrade; it covers the ones whose
-previous version was not pruned.
+**A SUPERSEDED installation that has been PRUNED from the plugin cache is its own
+named state, `pruned-plugin-root`, and it is adoptable.** It used to be the wedge
+this section warned about: `validateContext` canonicalized `context.plugin_root`
+unconditionally, so an absent recorded root made `readContext` throw,
+`resolveIncompatibleRuntime` answered null, every gate denied with the generic
+revalidation text, the doctor fell back to the `unbound` row whose "no valid
+record" wording is false, `adoptableRecord` refused `record-unreadable` — and the
+Stop hook fell through to its unbounded block and LOOPED, in a session whose every
+other channel was already denied. Measured on the maintainer's machine before the
+fix: the cache held three versions, 4101 of 7913 records named a pruned root, one
+live session was wedged this way and twenty-two more were recorded on the next
+two versions to be pruned.
 
-**A vanished recorded PROJECT root is an OPEN gap, not a settled distinction.**
-Removing the caller's project-root condition closed one of the two ways the two
-sources of truth diverge in worktree workflows — a cwd that was a worktree while the
-harness reported elsewhere. The other is still a permanent wedge: a worktree later
+**The reader is `readPrunedPluginRootContext`, and existence is the ONE waived
+check — proven, never assumed.** `validateContext` and `readContextInternal` take
+an `allowMissingPluginRoot` waiver (the twin of `allowMissingProjectRoot`; each has
+exactly one opt-in caller) under which the digest re-measure and the manifest
+re-read are SKIPPED — there is nothing left to measure. The reader re-applies the
+shape half through `requireAbsentDirectoryPath` (control characters, absoluteness,
+normalization — spelled as PR #272 spells it, so a merge keeps one copy), requires
+the root's PARENT to be a real directory (a pruned installation leaves its cache
+directory behind; a record naming a root under a directory that never existed is
+not this state), and returns only on a clean `lstat` ENOENT — a present root fails
+`still exists`. **The cost, stated:** with the minting tree gone, `runtime_digest`
+and `plugin_version` are shape-checked only and taken on the record's word. What
+still binds the record: session hash, schema, principal profiles, `plugin_data`
+equality, the recorded project root existing, the sibling cache directory, and the
+workflow document's schema. That is why such a record is **adopted once, with
+`--confirm`, and never served** — serving stays strict at every strict read site
+(`resolveHookSession`, `currentClaudeSessionContext`, `zensu_resolve_project_dir`,
+SessionStart resume/compact, SubagentStart), and the re-minted record is
+re-verifiable again.
+
+**Disjoint from `incompatible-runtime` by construction, and blind to lineage on
+purpose.** `resolvePrunedPluginRoot` requires the STRICT read to fail and the
+relaxed read to succeed; the lineage predicate requires the strict read to succeed.
+No consumer has to order the two, and the state is reachable under a compatible
+lineage as well (three patch releases inside one minor while a session lives),
+where the remedy is the same. The binder modes `pruned-plugin-root` /
+`model-pruned-plugin-root` print the same two-field `recorded<TAB>executing` pair,
+so the five parsers of that pair read it unchanged. **Sites that move together:**
+the reader, the waiver and the helper in the core plus its exports;
+`resolvePrunedPluginRoot` / `prunedPluginRootSession` and the mode pair in the
+binder; `zensu_session_pruned_plugin_root` / `_model` and the `pruned-plugin-root`
+scope of `zensu_emit_hook_session_deny` in `zensu-session.sh`, which now spells
+FIVE scopes; the pruned branch beside the lineage branch in all four binding gates
+(`pre-bash-zensu-gate.sh`, `pre-bash-source-write-gate.sh`,
+`pre-write-secret-scan.sh`, `pre-edit-tdd-reminder.sh`) and the self-worded FIFTH
+denier in `reviewer-capability-v1.js` — five deniers, the same set as the lineage
+state, which that file's own neighbouring comments already count as five; the FOURTH release arm in
+`stop-chain-enforcer.sh` plus its block reason and final stderr, which count four
+released states; the third probe in `zensu-doctor.sh` and the `pruned-plugin-root`
+case of `bindingLine()`; `adoptableRecord`'s condition-1 ladder (strict → pruned),
+its condition-3 skip, and the `prunedPluginRoot` field on the verdict and on the
+`adoptContext` result; `PRUNED_NOTE` / `PRUNED_EXPLANATION` and the reworded
+`record-unreadable` remedy in `session-adopt-report-v1.js`; and the operator
+accounts in `docs/session-control.md` §"Unbindable sessions",
+`docs/tdd-manager-workflow.md`'s Stop-binding paragraphs, `skills/doctor/SKILL.md`,
+`skills/adopt-session/SKILL.md` — and the `stop-chain-enforcer.sh` row in
+`docs/configuration.md`, which states the COUNT of released bind failures and is the
+one carrier this change originally left behind, saying three where the hook's own
+fallback already said four. `ADOPTION_REFUSALS` is unchanged — seven
+values, so CONV-1 is untouched — and no persisted shape moved.
+
+**Pins, and one thing Part D learned.** Part D (AC-D01…AC-D10) in
+`tests/structure/test-versioned-plugin-upgrade.sh` replaced JUDGE-3, which pinned
+the old boundary — do not restore it; the unit cases beside the lease-lock cases in
+`tests/session-control/session-control-core-v1.test.js` drive the reader, the
+helper and the ladder; `P1ad3`/`P1ad4` in `tests/structure/test-doctor.sh` pin the
+row. In this state the bind fails inside the CORE, so the authoritative stderr
+diagnostic is the raw `session-control-v1: context plugin root does not exist`
+line rather than a binder-prefixed one, and Part D's gate helper tolerates exactly
+that line where AC-C04's tolerates only the prefix. **Composition with PR #272:**
+condition 1 becomes `strict → orphaned-project-root → pruned-plugin-root` when
+that PR lands; the COMBINED state — project root gone AND installation pruned —
+still refuses `record-unreadable`, and is the recorded gap. **Version: `patch`** —
+no record or workflow field, no strict key set, no hook added, removed or renamed,
+no matcher change, no config key, no attestation change; every change relaxes a
+deny or names a state, and the new argv modes are a call convention inside one
+installation.
+
+**A vanished recorded PROJECT root is ADMITTED at condition 1, and it is the only
+disagreement that is.** Both ways the two sources of truth diverge in worktree
+workflows are closed now: removing the caller's project-root condition handled a cwd
+that was a worktree while the harness reported elsewhere, and condition 1 reads
+strictly first and falls back to `readOrphanedProjectRootContext` for a worktree later
 REMOVED (`git worktree remove`, the documented cleanup in `skills/pr-team-review`
-Phase E) makes `readContext` throw at condition 1, so adoption answers
-`record-unreadable` whose remedy says to start a fresh session. Combined with an
-incompatible lineage, `orphanedProjectRootSession` does not fire either, and
-`/zensu:doctor` falls back to the same `unbound` row. `readOrphanedProjectRootContext`
-ALREADY distinguishes *record intact, project root absent* from *record altered or
-pruned*, and the gates already consume it — adoption does not. Widening it is a
-separate and larger decision, because adoption would then have to succeed with an
-anchor that does not exist. Word it as open here and in `skills/adopt-session/SKILL.md`,
-so the next reader does not take "that one still refuses" for "and should".
+Phase E), which used to make `readContext` throw and answer `record-unreadable` while
+`/zensu:doctor` fell back to the `unbound` row. The fallback cannot widen: the orphan
+reader waives exactly one check and REFUSES a root that still exists, so every other
+disagreement throws in BOTH readers and still lands on `record-unreadable`. Nothing is
+waived by admitting it — the workflow document lived under that root and is not reachable from this record,
+the same argument that already relaxes a vanished root for a COMPATIBLE upgrade.
 
-**Three re-encodings move with this.** Their coverage is stated once, in the
-store-layout bullet below, and nowhere else — a ledger that contradicts itself about
-its own pins is the failure mode it exists to prevent. The wire format and the
-version-shape rule are unchecked:
+**That "nothing is waived" sentence is TRUE ONLY WHILE THE ROOT STAYS GONE, and the
+gap is named here rather than left for the next reader to find.** The authorising axis
+of adoption is SCHEMA equality, and `CLAUDE.md` calls that gate self-closing — a release
+that moves a persisted shape makes the document unreadable and adoption declines with no
+new check to remember. In THIS state it does not close: condition 6 is guarded by
+`fs.existsSync(workflowFile)`, which is false for an absent root, so `readWorkflowState`
+never runs and `workflow-schema-mismatch` is unreachable. The same predicate later in
+`adoptContext` skips the `RUNTIME_ADOPTED` history entry, which invariant 1 names as the
+design's ONLY provenance mechanism while invariant 2 forbids a bypass-ledger entry — so
+an adoption here leaves the superseded record's filename as its only durable evidence.
+Neither is a defect in the mechanism and neither is worth a control-flow change: what was
+wrong was the CLAIM. The adoption report now discloses in this branch that no workflow
+document could be read, so the schema check was not performed and a document restored
+later is not verified. Say "not evaluated", never "verified", and note the ORDER:
+re-creating the directory BEFORE adopting is what lets condition 6 run at all.
 
+**`readOrphanedProjectRootContext` is STRICTER than the code it replaced, which is not
+obvious from a diff that reads as an extraction.** The two inline rules it dropped were
+the unsafe-character test and `path.isAbsolute`; `requireAbsentDirectoryPath` applies a
+THIRD, `path.resolve(value) !== value`. That reader backs `orphanedProjectRootSession`,
+so a recorded `project_root` which is not a `path.resolve` fixed point now loses the
+relaxation entirely — the wedge this feature family exists to remove, restored for that
+one value class. The rule is kept on the read path deliberately: applying it only where
+the value is written would move the refusal out of `adoptableRecord` into a throw inside
+`adoptContext` and would break the AC-C14b row. Exposure is narrow because every root is
+minted through `realpathSync.native`, whose POSIX output is normalized; the residual is a
+win32 UNC share root, where `path.win32.resolve` appends a separator `realpathSync.native`
+does not. That spelling is UNVERIFIED in both directions — no suite exercises it, so do
+not record it as covered.
+
+**Removed with this feature, and named here because the roster is what a port works
+from:** `incompatibleRuntimeSession` is gone from `hooks/lib/claude-hook-session-v1.js`'s
+exports along with its definition. Every ADDITION in that change was added to the roster
+above; the removal was not, and a port that keeps its own equivalent keeps a predicate
+nothing calls.
+
+`buildContext` gained `allowMissingProjectRoot` for the re-mint. It waives exactly the
+existence check `validateContext` waives and re-applies that function's shape half
+through a SHARED `requireAbsentDirectoryPath` — the orphan reader calls it too, so the
+split rule has one implementation rather than two copies. No record field moves, so
+invariant 1 above still holds and this stays a `patch`.
+
+**Three things are load-bearing and easy to undo by accident.** First, the verdict
+carries `orphanedProjectRoot` and `adoptContext` passes it through rather than
+re-deriving it: asking the filesystem a second time would let a directory re-created
+between the two reads turn a waived check into a canonicalized one. Second, the deleted
+root must NOT be recreated — the provenance write is guarded by the workflow document's
+own `existsSync`, so `mutateWorkflowState`, which mkdirs every missing component of
+`<project>/.zensu/state`, is never reached; AC-C16 pins it. Third, the repair fixes the
+LINEAGE and not the anchor: the adopted session lands in the ordinary
+orphaned-project-root state, where `Edit`, `Write`, `MultiEdit` and any WRITING Bash command still deny. The report says so before
+and after `--confirm` and the doctor row says so too, because announcing an unqualified
+success there sends the user into a deny they were just told was repaired.
+
+**The DIAGNOSIS moved with it, and deliberately not into a fourth predicate.**
+`resolveIncompatibleRuntime` takes the same strict-then-orphan fallback, so the combined
+state is reported by the predicate every deny site already consults — which is what gives
+all five the `incompatible-runtime` scope, whose text names `/zensu:adopt-session`,
+instead of the generic "start a fresh session" that would now contradict the doctor. Its
+`recorded<TAB>executing` line stays TWO fields for the reason the wire-format bullet below
+gives; the third fact travels on its own mode pair, `orphaned-incompatible-root` and
+`model-orphaned-incompatible-root`. Do NOT relax `resolveOrphanedProjectRoot` to accept
+an incompatible lineage instead: that would let an incompatible runtime SERVE a session
+with no user decision and no provenance, which is what the lineage rule exists to prevent.
+Re-anchoring the record to a live directory was also considered and refused — a session
+may delete its own root, so a caller-named anchor would become a cross-project write
+escape.
+
+**Widening that predicate changed what the message surfaces enumerated below mean — FIVE entries, six if both doctor rows are counted separately, and that is the part
+to re-check on every later edit.** `zensu_session_incompatible_runtime` is now true for
+two states that disagree about the one fact those surfaces assert: whether the workflow
+document still exists. Anything that speaks about it must ask the third fact and branch —
+`hooks/stop-chain-enforcer.sh` does, and its THREE releases say different things on purpose:
+a deferral when the root is present, "not reachable from this record, and no later Stop can
+enforce this chain while that directory is missing" when it is not, and a state-neutral one
+claiming NEITHER when the probe could not answer. **The wording of that middle arm is
+itself a rule, not a phrasing choice.** Its whole evidence base is one `ENOENT`, which a
+MOVED or renamed root and an unmounted volume produce identically — so it is held to the
+same standard the sibling orphan release 60 lines above it sets, and which that release's
+own comment states: "not reachable", never "gone". It shipped once as "is GONE with it" and
+"no later Stop will enforce this chain", both unprovable from that one fact, in a sentence
+that then closed by admitting a move leaves the state intact. The enforcement half must
+also stay BOUNDED to while the directory is missing, which is what makes it true: re-create
+the root and a later bind takes the deferral arm instead. The same standard governs every
+mirror of it — `docs/session-control.md`, both doctor rows, the adoption report's
+pre-confirm paragraph and its no-workflow-document NOTE, the two SKILL files
+(`skills/doctor/SKILL.md`, `skills/adopt-session/SKILL.md`), and the two operator docs
+(`docs/tdd-manager-workflow.md` §"When the session binding itself cannot be resolved",
+`docs/operations.md`'s combined-state troubleshooting row). The roster has now been
+wrong TWICE in the same way — each time it was extended, the newly named members
+turned out to be carrying the forbidden spelling already, and the members added the
+round after that were carrying it too. Treat an unlisted surface that says anything
+about the workflow document as unchecked, not as compliant. The skills were left off
+this list when it was first written and both promptly shipped the forbidden spelling,
+which is the whole argument for naming them here rather than trusting a sweep. **It
+governs the POSITIVE half too**, and that was missed the same way: the deferral arm
+claimed the workflow document "SURVIVES and is unchanged" on a probe that established
+only that the anchor RESOLVED — nothing on that path opens the document — so it is
+now worded as reachability, not as contents. That third arm exists because the channel answers on three statuses — 0 with the
+path, 3 for a live recorded root, 1 for an unavailable answer — and a caller that reads only
+truthiness collapses the last two, which is precisely how a surface comes to assert a
+workflow document that is gone. The first attempt at this fix contained that collapse. The others carry an unconditional clause instead, which is true in
+both halves: the deny scope in `zensu-session.sh`, the `.*` capability gate's own JS deny in
+`reviewer-capability-v1.js`, the COMBINED doctor row, and `skills/adopt-session/SKILL.md`.
+The plain lineage row is the one exception and states its clause CONDITIONALLY, on
+`ZDOC_BINDING_ROOT_UNKNOWN` — it is unconditionally true only that the row must not promise
+more than the probe established. The doctor is therefore in BOTH lists deliberately: it
+branches to pick a row, and the row it falls back to still carries the clause whenever the
+probe could not answer, because the probe can fail. The rule this feature states about itself — what the
+repair does not buy is stated wherever it is offered — is what those clauses satisfy; a
+surface that offers `/zensu:adopt-session` without them is a defect, not a nicety. The
+first draft of this change shipped all of the four that then existed speaking the pre-change contract and the
+review caught it.
+
+**FOUR re-encodings move with this**, and they do NOT share one coverage statement any
+more. The root-status pair states its own, because it is the only member with a real pin;
+the store layout states its own, in its bullet below; the wire format and the
+version-shape rule are UNCHECKED and say so. Read each bullet's own coverage sentence —
+an earlier lead-in here said coverage was stated "once … and nowhere else" while listing
+three bullets over four, and the version-shape bullet twelve lines down records that
+exact drift in its own words ("state the base or the count means nothing"):
+
+- the root-status pair `ZENSU_ROOT_STATE_GONE` / `ZENSU_ROOT_STATE_PRESENT`. The shell
+  constants live in `hooks/lib/zensu-session.sh`, but that file is a MIRROR, not the
+  definition: the values are exit statuses produced by `hooks/lib/claude-hook-session-v1.js`,
+  which sets `process.exitCode = 3` as a bare literal, and nothing compares the two sides.
+  Say "mirror", or a maintainer following this entry to "change the trichotomy" edits the
+  shell constant and silently degrades both consumers to their hedged arms while AC-C19
+  stays green — that pin covers the CONSUMERS' spellings only, and the producer is pinned
+  separately by AC-C15f with its own bare `3`. TWO consumers reach the pair by DIFFERENT routes —
+  and the route is the part a reader gets wrong. `stop-chain-enforcer.sh` sources the
+  owner in its PARENT shell and compares against those names directly;
+  `zensu-doctor.sh` sources it only inside command substitutions, where the name is out
+  of scope and reading it under `set -u` aborted the whole diagnostic, so it copies the
+  VALUES out in one subshell and compares against its own `ZDOC_ROOT_STATE_*`. One
+  definition, two spellings, on purpose. There is deliberately no `_UNKNOWN` member: it
+  is the residual, so nothing compares against it. AC-C19 in
+  `tests/structure/test-versioned-plugin-upgrade.sh` pins both MEMBERS in both files, in
+  each consumer's own spelling, plus a negative needle forbidding the defaulted
+  `${ZDOC_ROOT_STATE_GONE:-0}` form. That negative needle is not decoration: the pair
+  shipped with only `_PRESENT` pinned, and the doctor had meanwhile put the literal back
+  through exactly such a default, on the member no needle covered — a half-pinned pair
+  reads greener than an unpinned one. When adding a member, pin it in both files before
+  writing any comment that says both are covered.
 - the `recorded<TAB>executing` wire format — one producer
   (`claude-hook-session-v1.js`) and five parsers (`zensu-doctor.sh`,
   `stop-chain-enforcer.sh`, `pre-bash-zensu-gate.sh`, `pre-edit-tdd-reminder.sh`,
   `pre-bash-source-write-gate.sh` / `pre-write-secret-scan.sh` share one spelling).
   Every parser reads `${V##*$'\t'}` for the executing half, which takes the LAST
   field: adding a third field silently redirects all five rather than failing.
-- the version-shape rule, spelled twice for two different hazards —
-  `ADOPTION_SAFE_VERSION_RE` (a version reaches a FILENAME) and
-  `ZENSU_SAFE_VERSION_RE` (a version reaches a JSON string, and now also the
-  doctor report). Identical alternation, deliberate hand-copy; keep them in step.
+- the version-shape rule, spelled THREE times for three different hazards —
+  `ADOPTION_SAFE_VERSION_RE` in `session-control-core-v1.js` (a version reaches a
+  FILENAME), `ZENSU_SAFE_VERSION_RE` in `zensu-session.sh` (a version reaches a
+  JSON string, and now also the doctor report), and `SAFE_VERSION` / `safeVersion`
+  in `reviewer-capability-v1.js` (a version reaches the `.*` gate's own JSON deny
+  reason, which that gate spells itself rather than through
+  `zensu_emit_hook_session_deny`). Identical ALTERNATION in all three, deliberate hand-copy;
+  keep them in step. A FOURTH spelling of the same alternation lives OUTSIDE production,
+  in `tests/structure/test-versioned-plugin-upgrade.sh`'s `AC-C20b` precondition, which
+  re-spells it to decide whether its shared fixture still fails the shape. It holds
+  nothing in lockstep and is not a member of the three — but a widening that leaves it
+  behind makes that row refuse its own fixture, so it belongs on this roster and is named
+  here rather than left for a grep to turn up. The CONSEQUENCE deliberately differs and an earlier wording
+  claimed it did not: `ADOPTION_SAFE_VERSION_RE` performs no substitution at all —
+  a failing version REFUSES the adoption (`EXECUTING_UNIDENTIFIED`) — while the
+  other two substitute `(unreadable)` and keep rendering. Same rule, three members,
+  two outcomes. The count was raised
+  to three while the enumeration still named two, which is the drift this bullet
+  exists to prevent — state the base or the count means nothing.
+
+  **Coverage, per member and NOT to be confused with the `UNCHECKED` above.** TWO of the
+  three members have an executed BEHAVIOURAL case in
+  `tests/structure/test-versioned-plugin-upgrade.sh`: `AC-C19b` drives
+  `ZENSU_SAFE_VERSION_RE` in both slots, and `AC-C20b` drives `SAFE_VERSION`/`safeVersion`
+  through `pre-reviewer-capability-gate.sh`.
+
+  **`ADOPTION_SAFE_VERSION_RE` is the exception, and an earlier revision of this paragraph
+  asserted the opposite — that `AC-C09` "drives its REFUSAL".** It does not, and cannot.
+  What `AC-C09` establishes is that an installation declaring no usable version is
+  refused, and it would establish exactly that with this member deleted:
+  `parseRuntimeVersion` re-tests BOTH versions in the very next statement — the shape
+  guard sits immediately above the `// Condition 5` comment and the two calls are that
+  condition's first statements, so state the ADJACENCY and never an ordinal — and returns
+  the
+  IDENTICAL `ADOPTION_REFUSALS.EXECUTING_UNIDENTIFIED`, while `RUNTIME_VERSION_RE` is a
+  strict SUBSET of the shape guard — an `N.N.N` whose parts are at most nine digits each
+  is at most 29 characters of digits and dots and always satisfies it — so everything the
+  guard refuses the parse refuses anyway. The non-string arm is covered too, and NOT by
+  the mechanism an earlier revision named: it said `exec` "coerces a non-string to text
+  and returns no match rather than throwing", which is false twice — `parseRuntimeVersion`
+  opens with `typeof value !== 'string'` and returns `null` on the line BEFORE `exec`, so
+  `exec` is never reached with a non-string at all, and coercion does not imply no match
+  (`RUNTIME_VERSION_RE.exec(['0.19.0'])` coerces and DOES match). That `typeof` line is
+  the only guard on the recorded version at that point, so a maintainer trusting the old
+  sentence could delete it. MEASURED, not
+  argued: with the whole `ADOPTION_SAFE_VERSION_RE` condition removed from
+  `adoptableRecord` and committed, every `AC-C09` row still passed and the suite stayed
+  green.
+
+  **Redundant, and RETAINED — say both, because the first draft of this correction said
+  only the first half and the second draft only the second.** The redundancy is
+  CONTINGENT: `verdict.recorded` is `context.plugin_version`, condition 5's parse ran on
+  that same value above the single `ok: true` return, and a successful parse means the
+  string IS `N.N.N`. So while that ordering holds, the value that reaches
+  `<key>.superseded-<recorded-version>.json` is digits and dots, and the guard is defence
+  in depth rather than the thing keeping a traversal sequence out of that filename — a
+  claim this entry made unqualified for one round. Move the parse below the return, or
+  put a value there that the parse never saw, and the guard becomes load-bearing again
+  with nothing announcing it. **The redundancy does NOT transfer to the two twins.**
+  `ZENSU_SAFE_VERSION_RE` and `SAFE_VERSION` have no parser above them at all; they
+  substitute rather than refuse, and deleting either lets a malformed version reach a
+  rendered string directly. Treat this member as SOURCE-PINNABLE ONLY until a case exists
+  that fails without it,
+  and do not restore the old claim from a green suite — a green suite is exactly what it
+  produces.
+
+  That is per-member coverage only — the lead-in's
+  `UNCHECKED` is about the CROSS-COPY lockstep pin, which still does not exist: NO check
+  compares the three alternations against each other, so a one-sided widening still
+  ships silently. **State that as the property and NEVER as a grep result.** An earlier
+  revision of this paragraph offered "a `grep -rl` over `tests/` returns ZERO files
+  naming any of the three constants" as its proof, and the very commit that wrote that
+  sentence falsified it by adding the census comments this paragraph points at: the
+  constant NAMES now occur under `tests/`, as prose, which is not a comparison — so the
+  verdict stood while its stated evidence did not. Do NOT amend that word on the
+  strength of this paragraph; the two
+  claims are about different things, and conflating them would assert a pin the tree
+  does not have. TWO further `(unreadable)` substitution SITES sit outside this
+  three-member rule census and are uncovered: `hooks/stop-chain-enforcer.sh`, which
+  sets BOTH slots when EITHER fails — a blanket rule, unlike the per-slot members
+  above — and `safeVersion(lineage.recorded)` in `reviewer-capability-v1.js`, whose
+  refusing direction needs an install tampered BEFORE the record is minted.
+  `zensu-doctor.sh` is NOT among them: it consumes `ZENSU_SAFE_VERSION_RE` from the
+  sourced owner and DROPS the pair rather than substituting, and `AC-C02` already
+  covers its accepting direction.
+
+  **A THIRD KIND of site is outside that count entirely, and it is the one the census
+  shape cannot see: a branch that applies NO bound of its own.** `reviewer-capability-v1.js`
+  emits `immutable context revalidation failed: ${error.message}` unfiltered, so an
+  UNBOUNDED manifest-controlled value can reach a user-facing deny reason through a
+  sibling branch that never consults the rule. It is not a substitution site, which is
+  why counting substitutions misses it — and it is a different value CLASS from the three
+  members, which hold VERSION strings: name it as manifest-controlled, never as "a value
+  the three-member rule exists to hold to a shape".
+
+  **State the bound on the message this can carry, because the first draft of this
+  paragraph did not and read as a wider hole than it is.** The thrower is
+  `localManifestEntry` — in `session-control-core-v1.js`, NOT in the gate file above it —
+  and its two messages differ: `${label} escapes plugin root` carries no path at all, and
+  `${label} is missing: ${candidate}` carries one only AFTER `isInside(pluginRoot,
+  candidate)` has passed, so that path is already proven to be under the plugin root.
+  What is genuinely unbounded is the CATCH: nothing filters `error.message`, so any other
+  throw on that path renders whole. Whether the catch is reachable from this thrower was
+  NOT traced — say unverified, not unreachable. Named in a comment beside `AC-C20b` in
+  `tests/structure/test-versioned-plugin-upgrade.sh` and, until this entry, nowhere
+  durable.
 - the review-evidence store layout, hardcoded in `discardSupersededLeases` as
   `review-evidence/v1/{records,superseded}/<key>` and re-implementing the
   ownership predicate that `review-evidence-lease-v1.js` owns, plus — since the
@@ -929,7 +1282,7 @@ version-shape rule are unchecked:
   — the adoption ENTRY POINT calls it after the record swap — so a port that takes
   only the core delta gets an adoption that never sweeps and leaves every superseded
   lease wedging the store. What the move bought: the function is exported and driven
-  by `tests/structure/session-control-lease-sweep.test.js`, so its refusal arms cost
+  by `tests/structure/review-evidence-sweep-v1.test.js`, so its refusal arms cost
   a temp directory each instead of a full synthetic install plus a session
   lifecycle, and three return shapes the shell layer could not reach are ordinary
   cases.
@@ -941,7 +1294,68 @@ version-shape rule are unchecked:
 
 **Port-relevant.** The core half is `adoptableRecord` / `adoptContext` /
 `executingPluginVersion` / `adoptionWorkflowStatePath` plus `ADOPTION_REFUSALS`, in
-the cross-host `session-control-core-v1.js`. `discardSupersededLeases` is NO LONGER
+the cross-host `session-control-core-v1.js` — and, since the vanished-root work and the
+pruned-installation state, also condition 1's strict-then-orphan-then-pruned ladder,
+`readPrunedPluginRootContext`, the `allowMissingPluginRoot` waiver beside it,
+`requireAbsentDirectoryPath`, and `buildContext`'s SECOND parameter. That last one is the trap: a port that takes only the
+enumerated core half has `adoptContext` passing a second argument to a `buildContext` that
+ignores it, so `canonicalDirectory` runs on an absent path and adoption THROWS in exactly
+the state the feature was written for. **`hooks/lib/zensu-safe-display-v1.js` joins
+the core half**, and it is the one entry a port is likeliest to skip because it looks
+cosmetic: it owns `safeDisplayValue(value, followedBy)` — the `label : value` pair-forgery
+guard plus the positive letter/number/mark allowlist — it requires NOTHING, not even a node
+builtin, and both report renderers consume it. **The SECOND parameter is part of the
+obligation and is the easiest half to drop.** It carries what the caller will render
+immediately after the value; only the POSITIONAL rules see the join, because the allowlist
+judges which characters the VALUE may contain and the caller's marker is not the value's
+business; and a caller's appended marker must carry ONE space, or the double-space rule
+fires on every appended render and folds the disclosure exactly when it is being disclosed.
+A port that implements the one-argument description gets a function that silently ignores
+its second argument — unlike the `buildContext` second-parameter trap this roster already
+names, which at least throws. The doctor renderer's `foldPath` is a THIRD member beside
+`foldSlot` and `parentheticalWriter`: it carries the fold to the prose rows, and a port that
+copies the other two re-ships the raw-interpolation defect. It is also the one deliberate
+exception to the no-parentheses rule below — a prose row supplies no call-site parentheses,
+so `foldPath` returns a pre-parenthesized string while `foldSlot` must not. **ONE rule, deliberately.** A second, narrower
+`foldDisplayHiders` shipped here for one review round: it was written for the doctor's
+load-failure fallback, that fallback was then changed to DROP the value instead of
+folding it, and the export survived with no consumer and no executed case while this
+paragraph named the file a port obligation. Four review seats found it independently.
+A port that re-adds a weaker sibling rule re-creates exactly the two-implementation
+class the extraction removed. The rule
+lived inside `session-adopt-report-v1.js`, a feature command's module with five
+requires of its own, and the doctor reached for it through a guarded lazy require
+with a second, narrower spelling behind the guard: a display rule in two
+implementations, with a four-file load chain behind it, inside the one tool whose job
+is to speak in a damaged installation. **The two consumers require it DIFFERENTLY,
+and that asymmetry is load-bearing.** The adoption report takes it at top level; the
+doctor renderer keeps its require LAZY and GUARDED, because that file deliberately
+has no hard sibling require — `test-doctor.sh` P1mf builds a plugin root carrying
+exactly the core and that renderer, to prove a missing `chain-recovery-v1.js`
+degrades to one warning row rather than killing the report, and a top-level require
+made the renderer unloadable in that tree. Its fallback NAMES ITS REASON — the row prints
+`(not rendered — the display-safety module could not be loaded)` — rather than
+re-authoring the fold or dropping the value silently, because two other surfaces tell
+the user "/zensu:doctor names the directory" unconditionally. **The fold returns a
+RECORD, not a string** — `foldSlot` answers `{text, present, ok}`, where `present` is
+about the INPUT (an empty value has never produced a parenthetical) and `ok` is about
+the fold. The two were once conflated in one returned string, which forced every call
+site to fold TWICE to ask both questions and made the load-failure SENTENCE the value.
+**A fold failure is stated once per ROW, never once per slot.** `parentheticalWriter`
+owns that: one writer per `bindingLine()` call, with a `stated` flag closed over it. It
+is not cosmetic — with the sentence substituted per slot, the two-version row rendered
+`(record minted by <sentence>, executing <sentence>)`, which repeats the reason, buries
+the fact that BOTH values are missing, and reads as though the sentence were a version;
+the combined row has three slots and said it three times. `P1mf2` in `test-doctor.sh`
+pins the COUNT, on both remaining multi-slot bindings; `P1mf1` pins that the SINGLE-slot
+rendering is unchanged. **The returned string must carry no parentheses of its own**,
+and that is the part to keep: the fallback shipped as `(unrenderable)` in one round and
+as `(not rendered — …)` in the next, and BOTH were wrapped again by the call site's
+`' (' + … + ')'`, rendering `… no longer exists ((not rendered — …)) — …`. The same
+defect, twice, in successive fixes for it. A port that re-authors the fold, collapses
+`present` and `ok` back into one value, states the reason per slot, or returns a
+pre-parenthesized string gets one of those defects back.
+`discardSupersededLeases` is NO LONGER
 among them — it moved to `hooks/lib/review-evidence-sweep-v1.js` and is the EIGHTH
 host obligation enumerated below. Note that
 `adoptableRecord`'s `options.projectRoot` is now INERT — accepted and never read —
@@ -949,18 +1363,34 @@ so a port that takes only the core delta (the condition gone) while its own entr
 script still requires and host-path-renders a project-dir variable still exits
 before printing any report, which is the same wedge in a different place. The two
 halves move together. The host
-half is EIGHT separate obligations, and a port that takes only the core delta gets
+half is NINE separate obligations, and a port that takes only the core delta gets
 `adoptContext` with no reachable caller and keeps the wedge: the entry script, the
 recognizer's `RECOGNIZED` entry, the doctor branch and row, the Stop release, the
 deny scope at every gate that denies in this state, the skill, — easy to miss
 — a binder exporting a `privateRecordsDirectory` equivalent that applies the
 symlink/alias/permission/ownership checks, because the entry script resolves the
-records directory through it and never by hand-joining, and EIGHTH the sweep itself
+records directory through it and never by hand-joining, **and a `validateSessionId`
+equivalent**, which the report module now imports from the same binder and calls
+before anything derived from that id locates a file — a port that takes the entry
+script and the report against a binder without it gets a TypeError inside
+`buildRequest`, which is literally the failure this roster's closing sentence names, EIGHTH the sweep itself
 (`hooks/lib/review-evidence-sweep-v1.js`, plus the owner exports it consumes and the
 entry point's call to it) — a port that skips it re-mints the record and leaves every
-superseded lease wedging the store. A port that copies only
-the script gets a TypeError rendered as the wrong refusal. `zensu-codex`,
-`zensu-kiro` and `zensu-antigravity` were NOT included in this change.
+superseded lease wedging the store — NINTH the third-fact channel: the
+`orphaned-incompatible-root` / `model-orphaned-incompatible-root` argv pair, both
+shell wrappers, and the THREE-way exit status those wrappers carry, without which a
+port gets a Stop hook telling a user whose worktree is gone that their chain state
+survived, and TENTH the pruned-installation surface set: the binder mode pair, the
+shell wrapper pair, the deny scope, the gate branches, the Stop arm and the doctor
+probe, because a port that takes the reader alone gets a record it can adopt and no
+surface that tells the user so. The ninth and tenth arrived from different branches
+and BOTH were written as "NINTH"; they are two obligations, not one. That ninth entry sat in the prose ABOVE this enumeration for one review
+round on this branch while the count still read EIGHT — it was never released that
+way, and saying otherwise would overstate the history — which is the failure this
+file records elsewhere about its own rosters: a port works from the list, not from the paragraph, so an
+obligation named only in prose is an obligation that gets skipped. A port that
+copies only the script gets a TypeError rendered as the wrong refusal.
+`zensu-codex`, `zensu-kiro` and `zensu-antigravity` were NOT included in this change.
 
 **Two spellings of one root, and only Windows can tell them apart.** The sweep decides
 ownership with `record.plugin_root === executingPluginRoot`, a STRING compare. Leases carry
@@ -1005,20 +1435,61 @@ themselves deleted when the seam was taken. Getting that set wrong is its own ha
 opposite direction: a reader who believes an uncommitted constant is invisible will
 misread a pin that in fact grades it immediately. Commit first, then measure.
 
-**The Windows timeout for `test-versioned-plugin-upgrade.sh` is MEASURED, and the
-measurement is one sample.** `windows-shard-2` logged
-`PASSED versioned-plugin-upgrade (107613ms)` against the 900000 ms ceiling — roughly
-12%, so about seven eighths of the budget is unused. Taken at the head that carried
-Part C plus the AC-C11/AC-C11b/AC-C12 family.
+**The Windows timeout for `test-versioned-plugin-upgrade.sh` has ONE recorded
+sample, taken on the head that carries Part C2.** `windows-shard-2` logged
+`PASSED versioned-plugin-upgrade (152553ms)` against the 900000 ms ceiling — roughly
+17% — on the green run of commit `22dd388`. It is the first Windows wall clock taken
+after the seam work added two `node --test` drivers and the vanished-project-root
+work added Part C2: further armed sessions, a Stop invocation, capability-gate
+drives and tampered record copies, each spawning `node` or `bash`. It SUPERSEDES the
+previous sample of 107613 ms, which was taken at the head carrying Part C plus the
+AC-C11/AC-C11b/AC-C12 family; the two are 42% apart on content that grew, which is
+the growth this figure now prices in and the caveat below refuses to treat as a
+bound. Re-measure on the next green Windows run after a change that adds process
+runs, and replace the number and this provenance sentence together. Deliberately
+no row count here: this file's own rule two paragraphs up is that a hand-maintained
+number is what a driven loop cannot catch, and the count written into an earlier
+version of this paragraph had already drifted from the suite's own reported total
+before it was read a second time.
 
-**That sample is now STALE, and saying so is the point of recording it.** The work
-that took the seam added two further `node --test` drivers to this suite plus roughly
-450 lines of rows, and no Windows wall clock was taken afterwards. The 107613 ms
-figure describes a head that no longer exists. Do not budget against it; re-measure
-on the next green Windows run and replace the number and its provenance sentence
-together.
+**THAT SAMPLE NO LONGER COVERS THE FILE, and the headroom is UNMEASURED until a green
+Windows run replaces it.** The PR #272 review round added checks to this suite —
+deliberately not counted here, for the reason the paragraph above gives: the count in
+that paragraph's own earlier wording had already drifted, and so had this one, which
+read `five` while the round stood at six. What prices the round is the WORK, not a
+numeral —
+including one that COPIES the whole lib directory and executes the adoption entry point
+twice, and `AC-C20b`, which drives the capability gate a third time but deliberately
+adds NO install, reusing `AC-C09`'s already-tampered sibling root instead — and rewrote
+a case in `tests/structure/session-adopt-report-v1.test.js`, which
+this suite drives from the WORKING TREE, into a walk over the entire Unicode code space
+(`for (let cp = 0; cp <= 0x10ffff; cp += 1)`, three property regexes per code point).
+The 152553 ms figure predates all of it. `tests/session-control/run.sh` sits on the same
+`windows-shard-2` and grew too. The ceiling was deliberately NOT raised: raising it
+without a measurement trades a visible `TIMED_OUT` for a silently truncated tail, which
+is the failure this file records for two sibling suites. Say "unmeasured", not "17% of
+cap" — the percentage is arithmetic over a stale numerator. Same reason as ever, the
+caveat cannot live in the manifest: `tests/run-profile.js`'s `SUITE_KEYS` throws on any
+key outside `{id, runner, path, args, timeoutMs}` and aborts every Windows shard at
+manifest load.
 
-Read the original sample as ONE sample, not as a bound. The sibling
+Part D of the same suite — the pruned-installation rows, three further synthetic
+installs — landed after that note without a Windows sample either, so the same
+instruction applies twice over.
+
+**And the SUITE cap is the wrong ceiling to reason about alone — the SHARD envelope binds
+first.** `windows-shard-2` carries `profileTimeoutMs: 1800000` across eight entries, and
+`versioned-plugin-upgrade` is the LAST object in that array. `tests/run-profile.js`
+computes `effectiveTimeoutMs: Math.min(suite.timeoutMs, remaining)` where `remaining` is
+the shard budget minus everything already spent, so this suite receives the REMAINDER, not
+its own 900000. That is not hypothetical: this file records shard-3's eight suites summing
+to 1800072 ms, with its last entry granted 139971 ms of a 420000 ms cap and reporting
+`TIMED_OUT` — "It was not slow; it was not paid for." Shard-2's job duration is UNMEASURED
+here too, so a genuine overrun in this suite may surface as a profile abort rather than the
+suite `TIMED_OUT` its ceiling exists to make visible. Record both figures when the next
+green Windows run supplies them.
+
+Read this sample as ONE sample, not as a bound. The sibling
 `stop-enforcer-self-review-routing` note in this file records a 29% spread across
 two green runs of byte-identical content on the same runner class, so a single
 figure says nothing about the worst case — it says only that the suite is not
@@ -1039,7 +1510,307 @@ Operator-facing accounts that must move with it: `docs/session-control.md`
 `skills/adopt-session/SKILL.md`. `tests/structure/test-versioned-plugin-upgrade.sh`
 Part C pins the named state, the doctor row, the Stop release, the Bash-matcher
 allowance with its ordinary-command discrimination, the refusal truth table, the
-end-to-end repair, and that the reserved phase cannot be minted through `--phase`.
+end-to-end repair, that the reserved phase cannot be minted through `--phase`, and
+that the gate's deny leaves every Session Control record byte-identical.
+
+## Workflow-Baseline Repair (`workflowBaselineVerdict` / `repairWorkflowBaseline`)
+
+**A DIFFERENT wedge from the one adoption exits, and confusing the two is the mistake
+this section exists to prevent.** Adoption answers "this runtime may not SERVE the
+record". This answers "this runtime serves it perfectly well, and the workflow
+document the record anchors is GONE". They share a section boundary and nothing else:
+adoption re-mints a record, this rebuilds a document, and neither is reachable in the
+other's state.
+
+The cause is ordinary rather than exotic: a git worktree deleted and re-created loses
+`<project>/.zensu/state/tdd-phase-<key>.json`, because `.zensu/*` is gitignored, and a
+COMPACTION continues the SAME session instead of minting a new one. `revalidateWorkflowState`
+in `hooks/lib/reviewer-capability-v1.js` then throws on the `.*` matcher, so **every tool
+denies** — Edit, Write, Bash, subagents.
+
+**The deny is CORRECT and STAYS. Nothing here relaxes it.** Reading a deleted document
+as "never active" is exactly how a session would escape an armed review chain by
+deleting one file. The repair REBUILDS the document; it never waives the gate. Do not
+"simplify" this into a relaxable bind failure — the two relaxable states in
+§"Relaxable Bind Failures" share an argument this one does not: there NO workflow
+document is reachable, so relaxing waives a dead guarantee. Here the document is
+exactly what is missing, and its absence is the signal.
+
+**THE SEAM WAS ALREADY THERE, and taking it is why the recognizer is untouched.**
+`already-served` + `--confirm` is ALREADY the "the record is fine, something beside it
+is wedged" path in `session-adopt-report-v1.js` (`shouldRepairInPlace`), and it swept
+the lease store. The baseline is its SECOND repairable item. Consequently
+`hooks/lib/zensu-doctor-invocation.js`'s recognized COMMAND SET is unchanged: the
+recognized list stays at two and `RECOGNIZED.adopt.args` stays `["--confirm"]`. A new
+command or a new flag would have needed its own justification written down the way that
+file demands; reusing the seam needed none. Do NOT write "that file is unchanged" — its
+write-class comment DID move, it is on the roster below, and this paragraph and that
+roster contradicted each other about the same file for a release.
+
+**The baseline half runs BEFORE the lease sweep**, and that is a decision rather than
+layout: a wedged session cannot make a tool call until the document is back, while a
+stuck lease only costs it a review. Both halves compose into ONE headline and ONE exit
+code (`repairHeadline` / `repairExitCode`, both taking the baseline as an OPTIONAL
+second argument so the pre-existing single-argument contract and its four unit
+assertions are byte-identical). EITHER half failing exits non-zero — a rebuilt baseline
+does not launder a stuck lease.
+
+**ONLY `missing` is repairable, and the other two arms are the discrimination test.**
+`classifyWorkflowBaseline` answers `present` / `missing` / `unsafe` / `unreadable`, and
+the ORDER is the contract: the safety tests (symlink, hard link, non-file,
+`> MAX_JSON_BYTES`) run BEFORE the parse, so tamper is reported as tamper rather than
+as a document that failed to validate. `unsafe` and `unreadable` are REFUSED with their
+bytes left alone — something is at that path, and rebuilding over it would destroy the
+evidence and hand the session its capabilities back in the same step. A check that only
+proves "a missing document is rebuilt" passes identically in a tree that rebuilds
+anything it cannot read. The rows that separate them are `AC-D02` (an unreadable
+document is refused and its bytes are left alone) and `AC-D07b` (a hard-linked document
+keeps the generic gate wording and is offered no rebuild), both in
+`test-versioned-plugin-upgrade.sh` — `AC-002` is a PLAN id and names no row in any suite,
+which is what this sentence claimed for a release.
+
+**The bind is the INVERSE of adoption's condition 3.** Adoption refuses when the
+executing runtime already serves the record; this REQUIRES it. A record this runtime
+may not serve is a lineage break with its own exit, and rebuilding a document under a
+runtime not allowed to read the record anchoring it would be the wrong repair for the
+wrong cause. `BASELINE_REFUSALS` is deliberately a SEPARATE vocabulary from
+`ADOPTION_REFUSALS` — one shared set would invite a caller to render one's remedy for
+the other's cause.
+
+**Provenance is a history entry and NOT a bypass-ledger entry**, the same rule
+`--chain-recover` and adoption follow, and for the same two reasons. A record or state
+FIELD would be a persisted shape change, which under §"Runtime Lineage" costs a
+breaking release and would wedge every session then running. And the ledger records
+gate ESCAPES so that everything rendered under "Gates bypassed" is true — this escaped
+no gate, because the document a gate would have read was already gone.
+`BASELINE_REBUILT` and the `baseline-rebuilt: ` reason prefix are therefore reserved
+beside `CHAIN_RECOVERED` and `RUNTIME_ADOPTED` at the same guard bodies those two use:
+`zensu-log.sh --phase`, `tdd_write_phase` and `_tdd_write_phase_critical` — THREE bodies
+carrying TWO literals each. State the unit or the number means nothing: an earlier
+wording here read "all four ... (`zensu-log.sh --phase` ×2, `zensu-tdd-phase.sh` ×2)",
+which counts literals in one place and functions in the other and matches no count in
+the tree. §"Adopting a Record Across a Lineage Break" and §"Chain Shape & Rearm Receipt"
+both say "two guard sites" for this SAME set, bundling the phase library's pair as one;
+that is the same set counted differently, not a fourth answer.
+
+**And the reserved phase is evidence a heal HAPPENED, never evidence that none did.**
+The entry is the feature's only disclosure, and it is erasable by exactly the session it
+discloses: `initializeWorkflowState` writes the rebuilt document with `active: false`,
+`pre-edit-tdd-reminder.sh` returns early while a session is not active — above its
+`.zensu/state` classification — and `bash-source-write-parse.js` carries no `.zensu` rule
+at all, so neither the Edit matcher nor any Bash gate covers that path. The four
+reserved-phase guards stop the phase being MINTED through the plugin's verbs; nothing
+stops the entry being DELETED by a direct write, and `validateWorkflowExtensions` checks
+`history` structurally with no MAC and no counter. So "a forgeable provenance entry is
+worse than none, because it is believed" is the right reason for reserving the phase and
+is NOT a claim that the entry is tamper-evident. A real control needs a rebuild counter
+in the plugin-data store — which `pre-write-plugin-data-guard.sh` defends for main-thread
+file tools and `reviewer-capability-v1.js` for every other principal — compared against
+the document's own `history` by `/zensu:doctor`. That is a store-layout addition rather
+than a workflow-state field, so it does not cost the breaking `minor` this section
+declines to pay. NOT implemented; recorded so the bound is not read as a guarantee.
+
+**SessionStart heals the same state without a user, and the argument is not new.** The
+*record exists* branch of `claude-session-control-v1.js` classified nothing and called
+`readWorkflowState`, which failed the hook and repaired nothing — and no later
+SessionStart could help either, because that same branch would fail again. It now
+re-initializes on a clean **ENOENT only**; invalid JSON, a failed validation, a symlink
+and a hard link still fail there. The justification is the one the sibling *no record*
+branch already makes in its own comment: refusing creates no document, and no document
+fails every stateful hook closed for the rest of the session.
+
+**Moving together:** `BASELINE_STATES` / `BASELINE_REFUSALS` / `BASELINE_HISTORY_PHASE` /
+`BASELINE_HISTORY_REASON_PREFIX` / `classifyWorkflowBaseline` / `workflowBaselineVerdict` /
+`repairWorkflowBaseline` / the newly exported `adoptionWorkflowStatePath` — and FIVE more
+this roster omitted for a release, every one of which has a production consumer outside
+the core: `classifyWorkflowBaselineShape` and `baselineUnsafeComponent` (the adopt report
+and, for the second, the doctor row), `isBaselineAlreadyPresent` with its two
+`BASELINE_ALREADY_PRESENT_CODE` / `BASELINE_NOT_REPAIRABLE_CODE` constants, which travel
+as ONE unit: a tree carrying the writer without the predicate reports EVERY refusal —
+tamper included — as the benign race, headline "nothing to repair", exit 0, which is the
+one omission here whose failure is silent. Plus `baselineComponentLadder`, the single walk
+`classifyWorkflowBaselineShape` and `baselineUnsafeComponent` now share, whose two readers
+deliberately disagree on the absent-component arm — all in
+`session-control-core-v1.js`; the four reserved-phase guards; `baselineVerdict` /
+`repairBaseline` / `baselineFault` / `leaseFault` / `renderBaselineDiagnosis` /
+`renderBaselineNotes` / `survivingEvidence` plus the two-argument `repairHeadline` /
+`repairExitCode` in `session-adopt-report-v1.js`; `BASELINE_MISSING_CODE` and its TWO
+throw sites in `reviewer-capability-v1.js` — say two, and note that they produce THREE
+tagged causes only because one sits inside a two-element directory loop; a reader
+counting `baselineMissing(` finds two, and the roster said three for a release; the
+`case 1)` reason in `stop-chain-enforcer.sh`; the `stateBlock` row in
+`zensu-doctor-report.js` — which is ONE renderer, `ownDocumentVerdict`, called from BOTH
+the `readdirSync` ENOENT branch and the populated path, because it was a hand-written row
+on the populated path alone and was therefore unreachable in the shape the feature
+targets; **the record-exists SessionStart branch in `claude-session-control-v1.js`**,
+which consumes SIX exported core symbols (`adoptionWorkflowStatePath`,
+`classifyWorkflowBaseline`, `BASELINE_STATES.MISSING`, `BASELINE_STATES.PRESENT`,
+`repairWorkflowBaseline`, `isBaselineAlreadyPresent`) and is the one caller with no local
+`catch` around the repair, so an untyped throw there exits the whole hook — it was
+missing from this roster for a release, so a rename would have sent a maintainer to six
+sites and not to the self-heal. Say `catch`, never `fail`: that branch DOES call the
+module-level `fail`, and a maintainer checking the claim by grepping finds it at once; and the write-class enumerations, of which there are **FIVE** and not three:
+`hooks/lib/zensu-session-adopt.sh`'s header, `hooks/lib/zensu-doctor-invocation.js`,
+`reviewer-capability-v1.js`'s recognized-command comment, **`docs/session-control.md`
+§"Unbindable sessions"** and **the recognized-commands intro of `docs/gates.md`**. The
+adopt header is the document the PreToolUse recognizer's admission RESTS on, and the
+`--confirm` baseline repair added a FOURTH write class (this session's workflow document
+plus its `.zensu` ancestors, under the recorded project root) that all five enumerated as
+three for a release — the two DOC carriers were still stale a full round after the three
+code carriers were fixed, precisely because this roster named three. TWO of the four
+classes leave the plugin-data store, the document and the history entry, and the history
+entry is written on the ORDINARY adoption with no `already-served` qualifier; the
+recognizer's comment called the document write "the one" that leaves the store, which was
+false.
+**Operator-facing accounts:** `skills/adopt-session/SKILL.md` §"Strict Scope", its
+`already-served` refusal row, its "Do NOT Use For" bullet (TWO `--confirm` exceptions,
+not one — the lease store AND the workflow document; routing the second to
+`/zensu:doctor` is wrong, that command is read-only and cannot rebuild), its "FIVE
+things are NOT clean states" list, its exit-code paragraph (EITHER half failing exits 1)
+and its Response Style rule; its FRONTMATTER description, which covered only the lineage
+break while the capability gate now routes a served-record session here as well; the FOUR
+state rows in `skills/doctor/SKILL.md` — not two, and the pair that was missing is the one
+that matters, because the UNSAFE/UNREADABLE row says `--confirm` will REFUSE while the
+documented MISSING row says to run it, so a model holding only the MISSING bullet relays a
+rebuild the repair declines by design — plus that file's frontmatter `session state`
+clause, which reads as a complete inventory of the block and did not name this row; the
+`stop-chain-enforcer.sh` row in `docs/configuration.md`, whose blocking-state list
+presents itself as complete and does not name a missing workflow baseline (a state whose
+record binds perfectly well);
+`docs/session-control.md` §"Unbindable sessions" (as a FOURTH state that is NOT one of
+the two relaxable bind failures, and whose absence from the per-gate table is stated
+there rather than left to be noticed); and `docs/gates.md` §"Missing Workflow Baseline".
+
+**Port-relevant.** The core half is `BASELINE_STATES` / `BASELINE_REFUSALS` /
+`BASELINE_HISTORY_PHASE` / `BASELINE_HISTORY_REASON_PREFIX` / `classifyWorkflowBaseline` /
+`workflowBaselineVerdict` / `repairWorkflowBaseline` / the newly exported
+`adoptionWorkflowStatePath` — plus `classifyWorkflowBaselineShape`,
+`baselineUnsafeComponent`, `baselineComponentLadder` and the
+`isBaselineAlreadyPresent` + two-constant unit, which this list omitted for a release: a
+port copying exactly it ships an adopt report and a doctor row calling three undefined
+functions, and reports every tamper refusal as "nothing to repair" — all in the
+host-neutral `session-control-core-v1.js`. The
+host half is SEVEN obligations, and a port that takes only the core delta gets a writer
+with no reachable caller and keeps the wedge: the adopt-report renderer and its two-argument
+`repairHeadline`/`repairExitCode`, the capability-gate deny branch and its
+`BASELINE_MISSING_CODE` tagging, the SessionStart adapter, the Stop `case 1)` reason, the
+doctor row, the four reserved-phase guards, and — easiest to miss — the write-class
+justification the host's own gate admission rests on, which the baseline repair extends.
+`zensu-codex`, `zensu-kiro` and `zensu-antigravity` were NOT included in this change; each
+carries its own recognizer and its own doctor against a different harness, and the
+directory-component ladder in `classifyWorkflowBaseline` has to be re-decided against
+whatever that host canonicalizes.
+
+**Version: `patch`.** Walked against §"Runtime Lineage" entry by entry: no context-record
+or workflow-state schema field (`BASELINE_REBUILT` is a history-entry VALUE, and
+`workflowState`/`event` are shape-validated by `validateWorkflowToken`, not members of a
+vocabulary); no strict key set; no hook added, removed or renamed and no matcher changed;
+no new config key; no attestation change; and no change to the recognized command set or
+its argument list. The capability gate's deny is a REWORDING of an existing deny, not a
+new one — the shape it refuses is byte-identical.
+
+**Known gaps, accepted and named:**
+
+- **The rebuild is a real LOSS, not a restore.** A chain that was live when the document
+  vanished is gone, and the rebuilt baseline reads "never active" because that is all a
+  fresh baseline can say. Nothing in the rebuilt document says what was lost. The
+  mitigations are disclosure only: the writer is unreachable without `--confirm`, the
+  report lists the session-keyed evidence that survived (`pending-review.json`, its
+  `.claim`, an Autopilot pointer, a reviewer-denial note) WITHOUT interpreting it, and
+  every carrier states the cost beside the command. Since `baselineRebuiltRow` in
+  `hooks/lib/zensu-doctor-report.js`, the provenance entry is also RENDERED — a `WARN`
+  row on the PRESENT arm of the own-document verdict, which is the only state a rebuilt
+  document can be in. It reads its phase token from the LOADED core rather than from a
+  literal, so a rename reports a missing check instead of silently deleting the row;
+  `P6r`-`P6r4` in `tests/structure/test-doctor.sh` pin the row, its cost-and-remedy
+  wording, the history control and both halves of that token rule.
+- **The SessionStart self-heal is not user-confirmed.** A session could delete its own
+  document and wait for an automatic compaction. The history entry makes that visible —
+  and since the doctor row above it is visible to a USER rather than only to a guard
+  reader, which is what the disclosure argument always assumed and did not have. The
+  adapter also PUSHES it: `BASELINE_HEAL_NOTICE` in
+  `hooks/lib/claude-session-control-v1.js` rides the `additionalContext` the hook already
+  emits, so the first reply after an automatic heal can say what was lost rather than
+  waiting for someone to run the doctor. Two bounds travel with it and neither is
+  cosmetic: the notice is MODEL-facing, so nothing forces the model to relay it, and it is
+  APPENDED to the principal's rendered context rather than substituted for it, because that
+  context is what binds the session. Blocking at Stop was weighed and REJECTED — after a
+  rebuild the baseline reads "never active", so there is no armed chain left to enforce and
+  a block would obstruct the common blameless case, a deleted and re-created worktree, to
+  catch a rare one it cannot tell apart, the distinguishing state having been destroyed with
+  the document. Nothing prevents the deletion itself. It matches the existing *no record* branch, which already
+  re-registers without consent for the same reason — but say "matches", never "is
+  therefore safe".
+- **Windows is unverified for the in-session half — and scope that claim to the
+  RECOGNIZER, not to the suite.** `zensu-doctor-invocation.js` refuses on win32 by
+  design, so the repair COMMAND is unreachable there exactly as `/zensu:doctor` is; only
+  the SessionStart self-heal and the doctor row apply on that host. Do NOT write "Part D
+  has no Windows profile entry": that was false when it was written.
+  `test-versioned-plugin-upgrade.sh` is registered in `windows-ci.v1.json`,
+  `windows-native-structure.v1.json` and `windows-ci-command-catalog.v1.json`. What IS
+  open there is the BUDGET: neither the `timeoutMs` nor the shard weight was re-measured
+  after Part D, Part D is the file's TAIL, and a `TIMED_OUT` therefore takes exactly
+  these rows. Take the figure from the next green Windows shard.
+- **The doctor's directory-absent arm is NARROWED, deliberately.** When
+  `<project>/.zensu/state` is absent AND no bound session key is available, the
+  own-document row is WITHHELD rather than disclosed. The judge pass asked for the
+  disclosure in both cases; warning there fires on every ordinary run in a fresh project
+  and is the "trained away within a day" failure this file records for the
+  implementing-turns row. The defect the row exists for — a green report over a session
+  whose capability gate is denying every tool — requires a BOUND session, which is
+  exactly the case where the key is available and the ❌ row does fire. The POPULATED
+  path still discloses. `P6e`/`P6f` in `test-doctor.sh` pin both halves.
+- **`verdict-unavailable` has no executed case and cannot get one from the unit layer.**
+  `workflowBaselineVerdict` wraps its whole bind derivation in a try that returns a
+  REFUSAL, so a caller-supplied fault lands as `record-unreadable`; the catch in
+  `baselineVerdict` fires only for a throw AFTER a successful bind, which needs a real
+  bound record the report unit suite does not build. Its sibling `rebuild-failed` IS
+  driven from its producer. Stated rather than faked with a hand-built object.
+- **`classifyWorkflowBaseline`'s `file` parameter is derivable from its other two and
+  the relation is not enforced.** The directory ladder is anchored on
+  `fs.realpathSync.native(projectRoot)` while the leaf is lstat'ed on the caller's own
+  string, so a third caller passing a mismatched pair would have the ladder judge one
+  tree and the leaf name another, silently. Both shipped callers derive it with
+  `adoptionWorkflowStatePath`. Dropping the parameter is the durable fix and is NOT taken
+  here, because it churns every call site and pin for no behaviour change.
+- **`ownDocumentVerdict(discloseWithoutKey)` threads call-site identity through
+  a boolean**, so the policy it selects lives only in a comment. Passing the directory
+  state instead would read from a value that names the condition.
+- **`MAX_JSON_BYTES` (core) and `MAX_PAYLOAD_BYTES` (`reviewer-capability-v1.js`) are a
+  hand-copied pair with no pin.** They are equal today. Were the gate's bound lowered, a
+  document between the two would be denied by the `.*` gate while the classifier answered
+  PRESENT — so both the adopt report and the doctor row would call the document fine in a
+  session where every tool is refused. The gate already requires the core; importing the
+  bound is the fix.
+- **Four arms of the directory ladder have no executed case:** the root-realpath failure,
+  the component-lstat non-ENOENT errno, the `realpathSync.native(candidate) !== candidate`
+  arm, and the THROW from that same component realpath — which an earlier wording of this
+  bullet promised as a fourth and then listed three, in a bullet whose whole purpose is to
+  bound what is unverified. `WB5a` covers the component-symlink arm and `WB1a` the non-directory
+  half. The canonical arm is the one that mirrors the gate's `is not canonical` check, so
+  a divergence between the two ladders would not be observed.
+- **Nothing in this repository can measure `hooks/lib` coverage.** The only `c8` script in
+  `package.json` includes `skills/session-trail/scripts/*.mjs`; the 80.93% / 72.63%
+  figures quoted for this feature came from an ad-hoc invocation and are not reproducible
+  by any command in the tree. An explicit `hooks:coverage` script is the fix. Note also
+  what re-measuring would NOT have caught: the vacuous `AC-D04b` is invisible to a
+  line-coverage tool, because the guard lines ARE executed.
+- **`renderBaselineNotes`'s `sessionId` is currently unread.** The diagnosis's local-fault
+  branch returns before the branch that lists surviving evidence, so the threading is
+  dead today. It is kept because passing `""` was an active defect — `core.sessionKey`
+  throws on it — rather than a neutral placeholder.
+- **One `--confirm` run derives the same bind three times**, and all three
+  `BASELINE_REFUSALS` members are therefore unreachable from both shipped callers — both
+  reach the verdict only after the bind is already established. The obvious fix, an entry
+  point taking an already-validated verdict, is REJECTED rather than pending: the second
+  derivation inside `repairWorkflowBaseline` is the TOCTOU re-check, and accepting the
+  caller's verdict would delete it. The cost is a repeated runtime-digest computation on
+  a path that runs once per repair.
+- **The evidence listing is a closed candidate set, and it is not complete.** The
+  Autopilot pointer is matched by SHAPE (`autopilot-active-<64 hex>.json`) rather than by
+  this session's owner hash, because that hash is not derivable from what the report
+  holds. So a foreign session's pointer can be listed. It is listed, never interpreted,
+  which is why that is acceptable — but do not describe the list as "this session's".
 
 ## Autopilot Run Scope (`hooks/lib/zensu-autopilot-state.sh`)
 
@@ -1066,7 +1837,8 @@ three `stop-chain-enforcer.sh` sites, both `post-review-tdd-delegate.sh` sites, 
 `--autopilot-status`. "Does ANY session hold this working tree" is owner-INDEPENDENT and
 must stay so: `_autopilot_begin_standalone_tdd_critical`,
 `_autopilot_adopt_pending_review_critical`, and both fences in
-`_autopilot_deferred_contention_result`. All four call
+`_autopilot_deferred_contention_result`, plus `_autopilot_hold_probe`, the callback
+`autopilot_workspace_hold_report` runs under its OWN `_autopilot_locked_run`. All five call
 `_autopilot_read_workspace_critical` DIRECTLY, and the reason DIFFERS per group —
 saying "each is already inside the project lease" is false for half of them. The
 two locked fences are inside it. The two contention fences deliberately read
@@ -1075,7 +1847,11 @@ acquired; their own header calls that a read-only proof. What holds for all four
 is that none of them may take a SECOND lease acquisition. The public
 `autopilot_read_workspace` is the wrapper for callers
 OUTSIDE it — it takes the lease itself — and it has exactly ONE: the
-`post-review-tdd-delegate.sh` preflight, which passes a single argument. The Stop hook's rc=4
+`post-review-tdd-delegate.sh` preflight, which passes a single argument. **A SECOND
+lease-taking public reader of the owner-independent question now exists and deliberately does
+NOT route through that wrapper**: `autopilot_workspace_hold_report` needs the worker's own rc
+AND the holder record, and the wrapper collapses both into one status — the exact conflation
+that verb was built to remove. Say "two public readers", never "one wrapper". The Stop hook's rc=4
 read was deleted when the fence began publishing its sentence, so the wrapper's preference
 parameter currently has no production caller at all — S7h2 guards it for the next one. The symbol to look for is `autopilot_read_workspace`'s third
 parameter, not a line number. Do NOT restate this as "there is deliberately no public
@@ -1242,10 +2018,16 @@ implying both.
 `_autopilot_publish_workspace_refusal` sets `ZENSU_AUTOPILOT_WORKSPACE_HOLD_TEXT` beside every
 rc=4 render, and BOTH public entry points — `autopilot_adopt_pending_review` and
 `autopilot_begin_standalone_tdd` — clear it first, so a stale sentence can never be reused.
-(The name carries the library prefix on purpose: it is one of the THREE module-scope
-assignments in this file — the others are `ZENSU_AUTOPILOT_ADOPTED_PREVIOUS_OWNER` and
-`ZENSU_AUTOPILOT_ADOPT_OUTCOME`, both in the adoption block below — and the house precedent
-for a sourced-library global the Stop hook reads by name is `ZENSU_SAFE_VERSION_RE`.) **TWO forms are rendered from one holder.** The OPERATOR form goes to
+(The name carries the library prefix on purpose, and so do the two names the adoption block
+publishes — `ZENSU_AUTOPILOT_ADOPTED_PREVIOUS_OWNER` and `ZENSU_AUTOPILOT_ADOPT_OUTCOME` — because
+all three are read by name across a file boundary: this one by the Stop hook, the adoption pair by
+the `--autopilot-adopt` arm of `zensu-log.sh`. Only this one is DECLARED at module scope; the
+adoption pair is assigned inside the verb that publishes it. The hold-report verb added two further
+module-scope declarations, `_ZENSU_AP_HOLD_RECORD` and `_ZENSU_AP_HOLD_WORKER_RC`, and those carry
+the underscore-private prefix deliberately: they are an intra-file callback channel read only by
+`_autopilot_hold_probe` and `autopilot_workspace_hold_report`, never across a file boundary — which
+is exactly what the three unprefixed names are NOT, and the house precedent for a sourced-library
+global the Stop hook reads by name is `ZENSU_SAFE_VERSION_RE`.) **TWO forms are rendered from one holder.** The OPERATOR form goes to
 stderr and quotes the audited `zensu-log.sh --autopilot-release --run <id> --confirm`, because a
 human reads it. The MODEL form is what the block reason carries and names `/zensu:autopilot-release`
 INSTEAD — `--confirm` is the consent control, so a complete invocation in a model-facing channel
@@ -1339,11 +2121,13 @@ is a call convention inside one installation and never a persisted shape — an 
 passing three args gets its previous answer. The Stop hook denies strictly LESS than before,
 which cannot make state written by one runtime unreadable to the other; the capability rule
 in that section is about ADDING a hook that can deny, and relaxing an existing hook's deny is
-not in the list. Recorded here because the section's other `**Version.**` paragraph reads
-`minor` and describes the ORIGINAL pointer/schema change, not this delta.
+not in the list. Recorded here because this section carries THREE `**Version.**` paragraphs: the `minor` one
+describes the ORIGINAL pointer/schema change, this one the run-scope delta, and a third the
+run-visibility delta. A releaser matching on the wrong one gets the wrong answer.
 
-**The audience is a property of the CHANNEL, and all three model-read channels were routed to
-the guided form.** The two that a first pass left behind were `_autopilot_begin_standalone_tdd_critical`'s
+**The audience is a property of the CHANNEL, and all FOUR model-read channels are routed to
+the guided form.** The fourth arrived with the `--autopilot-status` stderr disclosure; the three
+original ones are named below. The two that a first pass left behind were `_autopilot_begin_standalone_tdd_critical`'s
 stderr — the tool RESULT of a `zensu-log.sh --tdd-begin` a model runs — and the `begin` worker's
 own `fail(4, …)` twin, surfaced by `zensu-log.sh` the same way. Both now emit
 `/zensu:autopilot-release` rather than a runnable `--confirm` invocation, which cost W3 and W13
@@ -1736,7 +2520,8 @@ still covers only the LEGACY pointer by name.
   it used to refuse falls through to the standalone policy instead.** A foreign session that
   approves a plan carrying another run's `<!-- zensu-autopilot:<run> -->` marker no longer
   reaches the owner comparison, because the run is invisible to its owner-scoped read; it is
-  asked the ordinary "run /zensu:tdd?" question. Nothing is mutated — the foreign run is not
+  asked the four-route delivery question, which now carries `/zensu:autopilot` and `/zensu:pilot`
+  beside it (see §"Plan-Approval Delivery Route"). Nothing is mutated — the foreign run is not
   touched and no binding is created — so this is a lost DIAGNOSTIC, not a lost guarantee.
   Restoring it needs the marker before the read, and the marker is only resolved inside the
   payload evaluator (see "Plan-Gate Payload Sources"), which reads fields by name and must
@@ -1749,16 +2534,32 @@ still covers only the LEGACY pointer by name.
   `tests/structure/test-autopilot-plan-delegate.sh`. Those five cases were written against
   the refusal receipt and now assert the silence instead; F45c in particular no longer pins
   an ORDERING between the ownership and origin refusals, because neither is reachable.
-- `/zensu:doctor` still carries NO Autopilot row of any kind. A held workspace is visible in
-  the `--autopilot-begin` refusal, in the standalone-TDD begin refusal, in the deferred-review
-  Stop refusal (which names the holding run whenever it can be read — including when it
-  belongs to this session, where the guided `/zensu:autopilot-adopt` is offered and
-  release is withheld — and names no run at all when the read failed, where neither is
-  offered because ownership is unknown), in the
-  stderr line the fence prints when it stands down, in `/zensu:autopilot-adopt` and in
-  `/zensu:autopilot-release`. Do not
-  claim doctor visibility until that row exists — and keep this enumeration in step with the
-  rc=4 account above, which is where those refusals are specified.
+- **RESOLVED — `/zensu:doctor` now carries an `autopilot:` row, and the bound is what to keep in
+  view.** `autopilotRows` in `hooks/lib/zensu-doctor-report.js` renders one row per nonterminal
+  run found in the record-anchored state directory — WARN, except an own run whose active pointer
+  still designates it AND whose stage is not `BLOCKED`, which renders OK because it is an ordinary
+  run in progress rather than a finding, naming the run id, the stage, own-vs-foreign,
+  the held tree, the run document's path and the owner's silence, plus a second row counting run
+  documents it could not read and a THIRD counting those it does not accept whose recorded stage
+  is terminal. The second row's count deliberately EXCLUDES the third's, so the two are disjoint
+  and neither is the total. Every OTHER surface stays as enumerated: the `--autopilot-begin`
+  refusal, the standalone-TDD begin refusal, the deferred-review Stop refusal (which names the
+  holding run whenever it can be read — including when it belongs to this session, where the guided
+  `/zensu:autopilot-adopt` is offered and only the release COMMAND is withheld — and names no run
+  at all when the read failed, where neither is offered because ownership is unknown), the stderr
+  line the fence prints when it stands down, `/zensu:autopilot-adopt` and `/zensu:autopilot-release`. Keep this in step with the
+  rc=4 account above, which is where those refusals are specified. **THREE bounds ship with the
+  row and none of them is cosmetic.** It is SILENT when the project holds no run document at all,
+  matching the `pending-review.json` row, so absence of the row is not evidence the tree is free —
+  it is evidence no run document exists in the directory the report scanned. Its `ownKey` comes
+  from `currentSessionKey()`, which is empty for every binding verdict but `bound`, and the row
+  then reports the owner as not established and names NO release command — the same direction the
+  refusal renderer takes when it cannot read a holder. And its stage vocabulary
+  (`AUTOPILOT_STAGES` / `AUTOPILOT_TERMINAL`) is a HAND COPY of `zensu-autopilot-state.sh`'s
+  `STAGES` / `TERMINAL`, which no `require` can reach because the owner is a bash file; P1na in
+  `tests/structure/test-doctor.sh` is what holds the copy against its owner, and without it a
+  stage added upstream would silently render every run carrying it as unreadable.
+
 - The `SESSION_CONTEXT_UNAVAILABLE` arm in `plan-approved-delegate.sh` is defense in depth, not
   the live path: `zensu_bind_hook_session` refuses an unresolvable session earlier, so the receipt
   a caller actually sees in that state is `RUNTIME_UNAVAILABLE`. Measured by P8a-P8c in
@@ -1768,6 +2569,153 @@ still covers only the LEGACY pointer by name.
   checked at each of the TWO sites that write it, `_autopilot_begin_critical` and
   `_autopilot_adopt_critical`. Reads are protected by `regularFile`, which rejects symlinks
   and hard links.
+
+**Known gaps of the run-visibility delta, accepted and named:**
+
+- **The renderer is a READ-side mirror of the run schema, not a consumer of it.** A whole family is
+  hand-copied from `zensu-autopilot-state.sh` — the stage set, the terminal set, the run-record key
+  set, the id class, the owner-silence policy, the run-filename envelope, the field and record size
+  bounds, `pointerValid`'s exact pointer shape and `_autopilot_owner_key`'s sha256 rule. An
+  enumeration here went stale within one review round, so this is a GREP and not a list: before
+  changing any of them run
+  `grep -nE 'AUTOPILOT_|autopilot[A-Z]|createHash' hooks/lib/zensu-doctor-report.js`
+  **and `grep -nE 'CONTROL_BYTE|renderable|bound\(' hooks/lib/zensu-autopilot-state.sh`**. The
+  second root is not optional and the omission was a real defect: the exit-6 release refusal
+  carries its OWN inline spelling of the renderer's render-safety class plus a second copy of
+  `AUTOPILOT_RENDER_MAX`'s 200, in shell, and the one-file grep this paragraph used to prescribe
+  could not see it. The coupling runs in the DANGEROUS direction — the doctor row now routes a
+  model to that command, so a widening on the JS side that does not reach the shell literal
+  launders the withheld characters through the one command the row recommends.
+  and check each hit against its owner. The needle is deliberately wider than a constant-name
+  prefix, and the `autopilot[A-Z]` alternation is what covers the copies carrying no
+  `AUTOPILOT_` token: the beacon filename and its `isFile`/`nlink` rule inside
+  `autopilotOwnerSilence`, the exact pointer shape inside `autopilotPointerDesignates`, the
+  canonicalization rule inside `autopilotCanonical`, and the whole predicate family —
+  `autopilotNatural`, `autopilotSha256`, `autopilotNullableId`, `autopilotOwnerNonEmpty` — each
+  character-equivalent to an owner predicate (`natural`, `sha256`, `nullableIdentifier`,
+  `nonEmpty(…, 4096)`). The owner-key rule needs the bare `createHash` arm. An earlier spelling
+  named THREE copies and prescribed a needle blind to the predicate family, so a maintainer
+  changing the owner's `natural` got no hit naming it. Several
+  are pinned — P1na, P1nm, P1nm1, P1nn and, since the `ownerWouldAccept` inputs got theirs,
+  the `P1nz` family in `tests/structure/test-doctor.sh`, named as a FAMILY because every attempt
+  to enumerate it here has gone stale within a round — and the pins compare
+  spellings, not behaviour, so a semantic change that keeps the spelling passes. P1nz5 compares
+  THREE sources rather than two: `ap_run_valid` inlines the stage-to-action table a third time,
+  and a fixture that agrees with the renderer by construction cannot fail on the drift it exists
+  for. The durable fix
+  is to extract the run-record vocabulary into a host-neutral module and require it from BOTH
+  sides; inline `node` programs in this tree already load modules by an env-supplied path, so
+  "no `require` can reach a bash file" is a property of the packaging rather than a bound. It was
+  not taken here because rewiring the worker's heredoc program is a change to the most heavily
+  pinned code in that module and belongs in its own review.
+- **`ownerWouldAccept` applies the owner's `workspaceRoot` rule, and it is NOT the renderer's own
+  render-safety rule.** It mirrors `nonEmpty(value, 4096)` — string, non-empty, at most 4096, no
+  C0 byte. The render check beside it is deliberately WIDER (it also refuses DEL, C1, U+2028/9, a
+  relative spelling and a backtick, because that value is echoed into a row the model relays), so
+  keying the glyph on it would drop out of green records the owner reads perfectly well. The field
+  was omitted from the strict check for a release, and the cost was the exact inversion the check
+  exists to prevent: OK plus "all checks green" over a project where `readRunInventory` fails
+  every Autopilot verb closed. P1nz7 pins both directions.
+- **A readably TERMINAL document never reaches the could-not-be-read row.** That row asserts the
+  record "still holds its working tree", which is false for a DONE or CANCELLED one, and the
+  trigger is not exotic: `AUTOPILOT_STATE_KEYS` is an EXACT key match, so the first release that
+  adds a field to the owner would turn every accumulated run document in every project — the
+  finished ones included — into that row, with a permanent false claim and a permanently
+  suppressed green summary. `autopilotRun` reads `stage` loosely BEFORE the key-set match and
+  answers a distinct sentinel, `AUTOPILOT_TERMINAL_UNSHAPED`, which the single call site consumes
+  immediately. **The escape covers EVERY shape gate, not only the key-set one** — schemaVersion,
+  id class, owner class and a foreign `projectRoot` included — because the row's false sentence is
+  false for a terminal record whatever made it unreadable. This paragraph said the opposite for a
+  release while `P1nz10` already pinned the wider behaviour, so the governing document and the
+  suite asserted opposite contracts; that is the drift to check for first if the two disagree again.
+  **The escape NARROWS the finding and must never delete it.** `readRunInventory` never consults
+  terminality: it validates every `autopilot-run-*.json` in the directory and fails 2 on the first
+  it refuses, and `begin` and `read-workspace` pass no owner and stay strict — so a DONE document
+  with a foreign `projectRoot` fails every Autopilot verb closed for the WHOLE project, and this
+  report is the only thing that names that state. The escaped set therefore gets a SECOND row of
+  its own, carrying the claim that is true of it (the record holds no working tree, but
+  `--autopilot-begin` and the workspace-occupancy check validate every document in the directory
+  WITHOUT owner scoping, so it can still fail those closed) and quoting NO release command, since
+  `--autopilot-release` refuses a terminal run. **Scope that clause to the unscoped verbs and no
+  further**: `read-active` DOES pass an owner and `readRunInventory` skips a record it can prove
+  belongs to another session before validating it, so "every Autopilot verb" is false, and it is
+  false in a row the doctor skill tells the model to relay. Both rows withhold names
+  through ONE implementation, `autopilotSafeNames`. P1nz8 and P1nz10 pin the escape at the key-set
+  gate and at a value gate, ROW-SCOPED in both directions — absent from the false-claim row AND
+  present in the true-claim one — and P1nz13 pins the second row plus its control.
+- **The Windows wall clock for both grown suites is UNMEASURED.** `test-autopilot-state-machine.sh`
+  runs on a blocking Windows PR shard and this change adds two git worktrees plus the `W16a`/`W16b`,
+  `W31a`-`W31k` and `W32`/`W32a`-`W32d`/`W32z` families, four of which bind a Session Control record
+  and invoke `zensu-log.sh`. `test-doctor.sh` is not on that shard at all but does run in the weekly
+  Windows Safety structure inventory, and it gained the whole `P1na`-`P1nz` family together with
+  the `P1nm1` check and the whole `P1nz` family added in the rounds that followed. **Named as ID
+  FAMILIES rather than as numerals or endpoints, deliberately** — a RANGE was tried and went
+  stale twice: it read `P1na`-`P1ny` while `P1nz` already existed, and then `P1nz1`-`P1nz13`
+  while the tree carried `P1nz20`. An endpoint is a hand-maintained numeral wearing a range's
+  clothes, and this bullet is where that keeps being rediscovered — this file's own rule about hand-maintained
+  censuses applies to its own gap list, and it did not hold here: both numerals were written once
+  and were wrong within the same change, reading "ten" and "eighteen" against a tree that carried 19
+  and 43. A range is cheaper to keep true than a numeral, but it is NOT self-maintaining: it also
+  goes stale when a check is APPENDED past its endpoint, which is exactly what happened next — the
+  bullet read `P1na`-`P1ny` while `P1nz` already existed, with no rename involved. Re-grep the
+  family before trusting either form.
+  This repository's rule is that a ceiling comes from a green shard measurement
+  and never from an estimate, so no ceiling was raised: take both figures from the next green
+  Windows run and record them before adding further fixtures to either file.
+- **A foreign nonterminal run permanently withholds the green summary.** The row is `WARN` and
+  `line()` counts WARN toward `warnCount`, which `main()` gates "all checks green" on — so while
+  any other session in this project holds a nonterminal run, `/zensu:doctor` cannot print a clean
+  summary. A hold is a steady STATE, not an event, so this does not self-clear. Accepted on the
+  same ground the sibling rows accept it: a held tree is real state the user should clear, and a
+  row that can never affect the summary is a row people stop reading. Named here because
+  §"Foreign-Chain Row" and §"Implementing-Phase Turn Counter" both record the identical cost for
+  their own rows while this section said nothing, leaving the next reader to rediscover it as a
+  defect. The green form of the OWN-run row exists precisely so a session's own live run does not
+  pay this price.
+- **The doctor row reads the owner-keyed pointer to tell an ordinary in-progress own run from the
+  torn-`begin` shape.** That is a THIRD file the row opens, and its absence is treated as "no
+  pointer designates this run" while an unreadable one is treated as "not established" — the row
+  then keeps its WARN. The pointer digest is computed here rather than obtained from the owner, so
+  `_autopilot_owner_key`'s rule is a sixth hand-copy; it is exercised behaviourally by P1ne2 and
+  pinned by nothing.
+
+**Version for the run-visibility delta: `patch`.** This section now carries THREE
+`**Version.**` statements and a releaser matching on the wrong one gets the wrong answer, so
+this one names its own scope: the `/zensu:doctor` `autopilot:` row, the public
+`autopilot_workspace_hold_report` verb with the `--autopilot-status` disclosure that consumes it,
+and the exit-6 wording. Walked against §"Runtime Lineage" entry by entry: no context-record or
+workflow-state schema field (the row READS `autopilot-run-*.json` and the owner-keyed pointer and
+writes nothing); no strict key set — `AUTOPILOT_STATE_KEYS` in the renderer is a READ-side mirror
+of `STATE_KEYS`, pinned by P1nm, and rejecting a record there costs one row, never a document;
+no hook added, removed or renamed and no matcher changed; no new config key (the row reuses
+`zensu_pending_review_ttl_hours` through the already-exported `ZDOC_TTL_HOURS`); no attestation
+change; and no `permissionDecision` in either direction, the doctor being advisory. The new
+shell verb is a call convention inside one installation — an older runtime does not have it
+and nothing writes it anywhere — and it ships in the same tree as its only caller, so no
+cross-version mixing arises.
+
+- **`--autopilot-status` discloses the hold on stderr**, keeping its exit 1 and its stdout
+  unchanged because SEVEN skills run this verb and parse that stdout as JSON —
+  `autopilot`, `autopilot-release`, `tdd`, `pr-team-review`, `pr-fix-findings`, `self-review` and
+  `reset-review-limit` — several of them failing closed on a mismatch. An earlier wording named
+  `session-start-autopilot-resume.sh` here, which calls the LIBRARY's `autopilot_read_active`
+  directly and never runs this CLI verb, so the rule was right and its stated cause was not. It renders through the PUBLIC
+  `autopilot_workspace_hold_report`, which takes ONE leased read and prints
+  `<own|foreign|unknown><TAB><sentence>` — the sentence from `_autopilot_workspace_refusal` with
+  audience `model` and the ownership from the SAME record, so a lead-in can never contradict the
+  sentence it introduces. Its STATUS vocabulary is the load-bearing half: 0 rendered, 1 the tree
+  is PROVEN free, 5 the question could not be answered, 3 a REFUSED CALL — a bad arity, an
+  unrecognized audience, or a caller-session argument that is not a session id — and TWO paths
+  reach 1 rather than one: the worker's own verdict, and an absent state directory, which
+  short-circuits ahead of the lease because no run document can exist without one. Every OTHER
+  storage, lease or worker failure maps to 5, so an all-clear can never be printed for a check
+  that did not run. That is why the probe it runs under the lease always returns 0, and why a failed render is
+  remapped to 5 rather than inheriting the renderer's own 1
+  — so the own-vs-foreign choice stays in the one renderer that owns it, no file
+  outside the module calls an `_autopilot_*` helper, and no `--confirm` invocation reaches a
+  model-read channel. That verb is the FIFTH caller of the renderer and the first that is not a
+  fence; a sixth needs its audience chosen deliberately, since the argument is positionally
+  required and a two-argument call refuses rather than defaulting.
 
 Moving together with the scope: `autopilot_adopt_run` / `_autopilot_adopt_critical` and the
 `adopt` worker mode with its `path_indexes=(0 1 3 5 8)` entry PLUS its `projectRootIndex: 3` and
@@ -1827,7 +2775,23 @@ worker's `ownerIdentity`, the INTERSECTION predicate both persisting verbs apply
 either half silently returns `begin` and `adopt` to disagreeing vocabularies — then
 `_autopilot_owner_key`, `_autopilot_active_path`,
 `_autopilot_legacy_active_path`, `autopilot_workspace_root`, `_autopilot_session_workspace`,
-`_autopilot_read_workspace_critical`, `autopilot_read_workspace` and
+`_autopilot_read_workspace_critical`, `autopilot_read_workspace`,
+`autopilot_workspace_hold_report` — the PUBLIC verb `hooks/lib/zensu-log.sh`'s
+`--autopilot-status` branch calls by name, together with its `<kind><TAB><sentence>` wire format
+and its 0/1/5/3 status vocabulary, both of which that branch parses. **TWO thin derivations were
+DELETED rather than kept, and the reason generalizes:** `autopilot_workspace_hold_sentence` and
+`autopilot_workspace_hold_is_own` had NO production caller anywhere in the tree, each took a
+second leased read of its own, and this roster's own previous wording warned that they must never
+be composed with each other because two reads can name different holders. A public verb with no
+consumers, carrying a composition hazard, is a liability rather than an API — the ownership fact
+lives in the report line's `<kind>` field, which is the same answer from the same read. Their
+coverage moved with them: `W31a`-`W31e` now drive the report verb directly and `W31i` reads that
+field, so nothing was lost. Do not reintroduce either as a convenience wrapper.
+Renaming the report verb
+is a cross-file edit whose failure mode is SILENT and wrong in the dangerous direction: the
+caller captures the sentence in a command substitution and reads the status, so a missing
+function yields 127, which the branch reports as "could not be determined" — correct only by
+accident — and
 `_autopilot_workspace_refusal` — which `stop-chain-enforcer.sh`'s rc=4 arm NO LONGER resolves at
 all: it once resolved three names there by `declare -F`, and all three are gone (the ownership
 read moved into the renderer, and the re-read fallback was deleted). What the arm now depends on
@@ -2008,10 +2972,11 @@ is `0`, which passed the `>= 0` bound, so a wrapper fault that exported an empty
 switched the window off silently — and `zensu-doctor.sh` exports the variable unconditionally
 after a conditional resolve, which makes blank reachable. `ttlHours` and `implStopThreshold`
 read through one `boundedEnvInt`, so absent and blank take the fallback and only an in-range
-integer wins. `ttlHours()` has THREE call sites — this row, the pending-review verdict and
-`reviewerDenialRows` — and a FOURTH consumer of the resolved value, `ownRefusalNoteLive`,
+integer wins. `ttlHours()` has FOUR call sites — this row, the pending-review verdict,
+`reviewerDenialRows` and `autopilotRows` (which quotes it in the holding run's owner-silence
+clause) — and a FIFTH consumer of the resolved value, `ownRefusalNoteLive`,
 which takes it as a parameter rather than re-reading it. Word it that way: counting it as a
-fourth CALL SITE double-counts the read this row already performs. That fourth consumer is
+fifth CALL SITE double-counts the read this row already performs. That fifth consumer is
 what decides whether the implementing-turns row carries its refusal caveat. That last one
 carries a consequence the discussion above does not otherwise cover: at the documented `0`,
 `classifyDenialNote` never returns `stale`, so a note of any age keeps qualifying that row.
@@ -2279,17 +3244,37 @@ be rediscovered: read the existing note's `detectedAtMs` before the clear and ca
 a re-mint with an unchanged `kind`, so the TTL ages the REFUSAL rather than the turn.
 
 **Sites that move together:** `zensu_run_bounded` in `hooks/lib/zensu-bounded-run.sh`, the ONE
-watchdog ladder for the two Stop-path children that read outside the process — the `git status` this
-counter runs and the refused-spawn transcript read. They carried hand-copied ladders and the
+watchdog ladder for every child that reads outside the process. It was created for the two on the
+Stop path — the `git status` this counter runs and the refused-spawn transcript read — and it now
+also bounds callers that are not on that path at all, which is why the ladder's own header states
+the CRITERION rather than a count: raising the deadline stopped being a Stop-path-only decision.
+The criterion is what governs; the roster below is a census taken at one moment, kept because the
+next caller needs somewhere concrete to look. Its live call sites outside the Stop hook are FOUR,
+in TWO files, and both this roster and the ladder's own header enumerated fewer:
+`hooks/user-prompt-zen-mode.sh` holds the merged prompt-and-anchor child, the prompt-only
+recovery child and the off-phrase marker write, and `hooks/lib/zensu-zen-mode.sh` holds the
+out-of-band writer, which sources the ladder itself. Named that way rather than with a colon
+after the file name: `C41` forbids the `<file>` plus line-number anchor form, and a
+backtick-closed `path.sh` plus colon sits ONE CHARACTER from it - close enough that the next
+reader copies the shape and the pin then fires on their edit instead of on the one that
+introduced it. The deadline is a fixed, unparameterized 5 s, so the next caller needing a
+different one has to find every site — which is what this roster is for. The two on the Stop
+path carried hand-copied ladders and the
 `gtimeout` arm reached only one of them; `C49` and `C56a` pin each call site by name, `C42`/`C42a`
 pin the ladder's own arms and their order, `C56` forbids a `return` in the arm positions its
 pattern can see and `C56d` requires an unwrapped `"$@"` to survive in the body — neither reads
-ARM POSITION, so do not restate them as pinning "the last arm". It LIVES in `hooks/lib/` because a third consumer already exists —
+ARM POSITION, so do not restate them as pinning "the last arm". It LIVES in `hooks/lib/` because a FURTHER consumer already exists —
 `user-prompt-context-nudge.sh` reads a host-supplied transcript path with no watchdog at all —
-and a helper defined in a leaf hook cannot serve it. Three review rounds asked for that move
-before it was taken. **What is still owed at that third site is the WRAPPING**, one `source`
-line plus one call, left to its own review because it alters a second hook's behaviour and
-belongs to that hook's suite. Its exposure is also WIDER than the Stop hook's and the comment
+and a helper defined in a leaf hook cannot serve it. That one is a CANDIDATE, not a caller, and
+the ordinal here deliberately counts nothing: it used to read "a third consumer" while the call
+sites it would be counted against had already grown past three, which is the same drift the
+census sentence above now avoids by stating the criterion. Three review rounds asked for that move
+before it was taken. **`hooks/user-prompt-zen-mode.sh` now WRAPS its own child** — it
+sources the ladder and runs the prompt-and-anchor child through it, which is the criterion
+this paragraph states rather than an ordinal; the census sentence above is the one that
+counts. **What is still owed at the context-nudge site is the
+WRAPPING**, one `source` line plus one call, left to its own review because it alters a second
+hook's behaviour and belongs to that hook's suite. Its exposure is also WIDER than the Stop hook's and the comment
 there now says so: that reader opens with a plain `openSync` after a shell `[ -f ]` in another
 process, where the Stop-path reader hardens the open, so a FIFO in the TOCTOU window blocks it.
 Both the watchdog and the hardened open are owed there. Then `_zensu_config_bounded_int` in
@@ -2632,10 +3617,14 @@ The authoritative per-gate roster is the "Unbindable sessions" table in
 carries one column per state; keep exactly one roster and do not duplicate it here. Two
 properties are easy to get wrong and cost the whole feature:
 
-- **A deny from ANY hook on a matcher wins.** `hooks.json` registers three PreToolUse
-  hooks on the `Bash` matcher (`pre-bash-zensu-gate.sh`, `pre-bash-source-write-gate.sh`,
-  `pre-write-secret-scan.sh`) and one on `.*` (`pre-reviewer-capability-gate.sh` via
-  `reviewer-capability-v1.js`). `/zensu:doctor` runs through Bash, so it is reachable only
+- **A deny from ANY hook on a matcher wins.** `hooks.json` registers four PreToolUse
+  hooks on the `Bash` matcher (`pre-bash-witness.sh`, `pre-bash-zensu-gate.sh`,
+  `pre-bash-source-write-gate.sh`, `pre-write-secret-scan.sh`) and one on `.*`
+  (`pre-reviewer-capability-gate.sh` via `reviewer-capability-v1.js`). Only four of the
+  five can deny: `pre-bash-witness.sh` is advisory by construction and always exits 0
+  (§"Witness Attempt Half"), which is exactly why it may sit on this matcher at all — but
+  it is counted here rather than left out, because O21a enumerates the matcher and would
+  have to be re-derived by anyone who trusted a roster that omitted it. `/zensu:doctor` runs through Bash, so it is reachable only
   if EVERY one of them allows. Both the `.*` gate and the secret-scan gate were missed in
   turn while the single-gate test stayed green and the feature silently did not work.
   `tests/structure/test-orphaned-project-root.sh` O21a therefore enumerates the Bash
@@ -2657,25 +3646,41 @@ properties are easy to get wrong and cost the whole feature:
 
 Shell wrappers live in `hooks/lib/zensu-session.sh` (`zensu_session_unregistered`,
 `zensu_session_orphaned_project_root`, `..._model`, plus
-`zensu_session_incompatible_runtime` / `..._model`). The orphaned wrapper **prints the
-dead path on stdout** and the incompatible-runtime pair prints `recorded<TAB>executing`;
+`zensu_session_incompatible_runtime` / `..._model` and
+`zensu_session_incompatible_orphaned_root` / `..._model`, and
+`zensu_session_pruned_plugin_root` / `..._model`). The orphaned wrapper **prints the
+dead path on stdout**, BOTH version-pair predicates print `recorded<TAB>executing`, and the
+orphaned-root pair prints **the dead path** too;
 inside a PreToolUse gate stdout is the JSON decision channel, so a caller wanting the
 predicate alone must discard it explicitly, and a caller wanting the value must capture
-it into a variable before emitting anything.
+it into a variable before emitting anything. The orphaned-root pair additionally answers on
+THREE statuses — 0 with a path, **3** for a positive negative, 1 for an unavailable answer —
+because a caller that cannot tell the last two apart has to guess, and guessing wrong makes it
+assert a workflow document that is gone.
 
-**The third predicate is a DIAGNOSIS, never a third relaxation.** `zensu_session_incompatible_runtime`
-belongs to this roster only because every gate that consults the two above must decide what
-to do about it too — and the answer is the same everywhere: keep denying. A workflow document
-is still reachable in that state, so relaxing would waive a live guarantee rather than a dead
-one. What it changes is the MESSAGE: `zensu_emit_hook_session_deny` gained a fourth scope,
-`incompatible-runtime`, taking the two versions as positional arguments. FIVE gates can deny
-in that state: the four shell gates emit that scope, and `pre-reviewer-capability-gate.sh` —
+**The third and fourth predicates are DIAGNOSES, never further relaxations.**
+`zensu_session_incompatible_runtime` and `zensu_session_pruned_plugin_root`
+belong to this roster only because every gate that consults the two above must decide what
+to do about them too — and the answer is the same everywhere: keep denying. The pruned state
+is unrelaxed because a workflow document is still reachable there — its project root is
+present by construction. The lineage predicate matches TWO states, and they are unrelaxed for
+DIFFERENT reasons: with the recorded project root still present a workflow document is
+reachable, so relaxing would waive a live guarantee rather than a dead one; with that root
+gone the document is not reachable from this record, and what stands in for the guarantee is
+that the state has a real in-place repair — adoption, a user action leaving provenance —
+rather than a silent waiver. A consumer that says anything about the workflow document must
+ask `zensu_session_incompatible_orphaned_root` and branch. TWO do: the Stop hook, and
+`zensu-doctor.sh`, which asks the model twin and selects its fourth binding row from it.
+What the predicates change is the MESSAGE: `zensu_emit_hook_session_deny` now spells FIVE
+scopes, two of which — `incompatible-runtime` and `pruned-plugin-root` — take the two
+versions as positional arguments. FIVE gates can deny
+in either state: the four shell gates emit the matching scope, and `pre-reviewer-capability-gate.sh` —
 the `.*` matcher, where `isRecognizedInvocation` is false for every non-Bash tool — spells the
 same cause and remedy itself in JS, because the shell emitter is not reachable from it. A gate
 left on the generic text tells the user to start a fresh session while its sibling says the session can
-be repaired in place — two denies contradicting each other about the one bind failure that
-has an in-place remedy. The Stop hook is the single exception and RELEASES, because it cannot
-read the chain from an unbound session at all.
+be repaired in place — two denies contradicting each other about the two bind failures that
+have an in-place remedy. The Stop hook is the single exception and RELEASES for both, because
+it cannot read the chain from an unbound session at all.
 
 `zensu_emit_hook_session_deny` must never assert "no record" as the cause: naming the
 wrong relaxable state sends a user whose worktree was deleted hunting for a record that is
@@ -2694,7 +3699,9 @@ bypass entry would live in is the one that became unreachable — so a detection
 sidecar beside the immutable record, surfaced by `/zensu:doctor`) is still missing.
 
 **Port-relevant.** The core half (`validateContext`'s `allowMissingProjectRoot`,
-`readContextInternal`/`readOrphanedProjectRootContext`) lives in the cross-host
+`readContextInternal`/`readOrphanedProjectRootContext`, and `requireAbsentDirectoryPath`,
+which is the shape-without-existence rule both that reader and `buildContext`'s waived
+branch share) lives in the cross-host
 `session-control-core-v1.js`; the host half (binder mode, shell predicate, gate
 re-decisions, doctor row) is per host. A port that takes only the core delta keeps the
 worktree-deletion wedge; a port that takes neither drifts from this core.
@@ -2748,13 +3755,55 @@ pinned. THREE needles in `docs/gates.md` §"Source-Write Gate" ARE pinned, by T2
 containment claim, so rewording it fails the suite. That file is no longer wholly
 unpinned; see the section below.
 
-**The gate's ANCHOR contract is restated in SIX carriers outside the parser, and
+**The gate's ANCHOR contract is restated in NINE carriers outside the parser, and
 nothing pins them against it.** `writeAnchor` / `writesLines` / `writeAnchorCaution`
-in `skills/session-trail/scripts/trail.mjs`, flow 3 and the Limits bullet in
-`skills/session-trail/SKILL.md`, and the cross-worktree paragraph in
-`docs/gates.md` §"Source-Write Gate". They do NOT carry the same content, and the
-difference is what decides where an edit is owed. All of them state the CONTAINMENT
-rule.
+/ `continuationPlan` in `skills/session-trail/scripts/trail.mjs`, flow 3, the step-4
+placement paragraph and the Limits bullet in `skills/session-trail/SKILL.md`, and
+BOTH paragraphs of `docs/gates.md` §"Source-Write Gate" — the cross-worktree one and
+the continuation one beside it, which states the rule again in its own words. They do NOT carry
+the same content, and the difference is what decides where an edit is owed. All of
+them state the CONTAINMENT rule.
+
+**`continuationPlan` is the one carrier that ACTS on the rule instead of only
+restating it**, and its three narrowings are the reason it may. It renders and never
+executes, and the reason is APPROVAL rather than gate coverage — a first wording claimed
+the latter and was wrong about the two commands that matter. This script's writes happen
+inside node where no PreToolUse gate can see them, so a worktree it created would be
+unseen; but so are two of the four it RENDERS. Only `git apply` and the patch redirect
+are judged: `bash-source-write-parse.js` gates `worktree` for `remove`/`move` only and
+says `add` "stays ungated", and `detectChannels` recognizes no `tar -xf -`. What stands
+in for the gate there is the renderer's own refusals — same repository, existing anchor,
+resolved branch — which is why they are load-bearing rather than cosmetic. Four carriers
+state this and all four must say it the same way. It prescribes a target path only off a TRUSTED channel: `covered ===
+false` measured through `CLAUDE_PROJECT_DIR` is a sound DENY but its `callerRoot` is
+the wider root, so a path derived from it can land outside the immutable one, and the
+finding is reported with the path withheld (`weak-channel-no-target`). And its base
+branch comes only from a LIVE read of the source worktree, never from the session
+record's `branch` field — measured 2026-08-27, that field answered `main` for a
+worktree actually on `claude/plugin-auto-mode-permissions-665942`, so the rendered
+`git worktree add … -b` would have branched the continuation off `main` and left every
+commit behind; with no live read it answers `branch-unresolved` rather than guessing.
+Its `CONTINUATION_REASONS` set is closed and CARRIES `writeAnchor`'s own reason codes
+verbatim, so renaming one there silently degrades every null cause here to
+`unclassified` — the two sets move together, and `unclassified` is deliberately NOT
+`no-channel`, whose own sentence asserts that neither environment variable was set. The `takeover` MARKDOWN brief deliberately
+carries none of it, on the same terms as `writes`: a brief is read by a different
+session than the one measured, where a rendered target path is a confident instruction
+into the wrong tree.
+
+**Windows is UNMEASURED here, not unreachable, and the distinction was got wrong
+once.** `tests/structure/test-session-trail-verdict.sh` is in the `excluded` list of
+`tests/profiles/windows-native-structure.v1.json` and absent from
+`tests/profiles/windows-ci.v1.json`, so the BLOCKING PR shards skip it — but it IS in
+`ciStructureTests` in `tests/profiles/promptfoo-local-only.v1.json`, so the weekly
+windows-safety run executes it. The WC block will therefore run on Windows; it simply
+never has yet. It is also the first case in that suite to create a real git repository
+and worktree, which is new platform surface AND new wall clock for a suite whose
+Windows runtime nobody has measured — take the figure from the first weekly run after
+this lands. Both of its preconditions SKIP rather than fail, deliberately: a git that
+cannot build the fixture, and a filesystem whose canonical spelling differs from the
+literal one, are environment properties, and failing on either would redden a weekly
+run for a reason unrelated to this feature.
 
 **The two env channels are NOT equally authoritative, and only one direction of the
 weaker one is sound.** `claude-hook-session-v1.js` reads `CLAUDE_PROJECT_DIR` solely
@@ -2774,7 +3823,8 @@ VERBATIM (`.trim()` decides presence only; a trailing space is legal in a POSIX
 directory name and the gate receives the untrimmed value). `W10`/`W11` pin all
 four. The environment variables are named by `writeAnchor`'s header,
 `writesLines`'
-emitted text and SKILL.md flow 3. The rule letters are named by `writeAnchor`'s
+emitted text, `continuationPlan`'s own `weak-channel-no-target` line (which spells
+`CLAUDE_PROJECT_DIR` to a user) and SKILL.md flow 3. The rule letters are named by `writeAnchor`'s
 header (A, B and C), `writesLines` (A, B and C), flow 3 (A, B and C) and `docs/gates.md`
 (C only). `writeAnchorCaution` names neither — deliberately, because it is persisted
 into a brief a stranger reads. The Limits bullet withholds only those two things: it
@@ -2784,8 +3834,8 @@ then points at flow 3 for the routing rule. Do not describe it as an index entry
 an earlier wording here did, and `T30` in `test-session-trail-skill.sh` now fails on
 that claim for as long as the bullet really carries the hook roster. A change to
 `within()`, to how `project_root` is minted (`claude-session-control-v1.js`
-`projectRoot: eventCwd`), or to which hook exports `ZENSU_PROJECT_ROOT` leaves all
-six wrong with both session-trail suites green — they drive `trail.mjs` against its
+`projectRoot: eventCwd`), or to which hook exports `ZENSU_PROJECT_ROOT` leaves every
+carrier enumerated above wrong with both session-trail suites green — they drive `trail.mjs` against its
 own definition and grep the prose for literals. `writeAnchor` no longer holds a hand-copy of
 `within`: the parser now defines it at MODULE scope and EXPORTS it, and
 `trail.mjs` requires the parser and CALLS it, so the containment rule has one
@@ -2819,8 +3869,10 @@ source — which is exactly where this answers `allowed`, and the third realpath
 sides while the gate realpaths only its roots and resolves a `cd` operand
 lexically. That asymmetry is the property to re-check before letting the
 hand-copy
-drift. `writeAnchor`'s measured verdict never leaves `show`'s stdout and
-`show --json`; what reaches a `~/.claude/handoffs/` brief is `writeAnchorCaution`'s
+drift. `writeAnchor`'s measured verdict reaches THREE carriers — `show`'s stdout,
+`show --json` and `takeover --json` — and the third was already true before the
+continuation work; an earlier wording here named only the first two and was wrong.
+What reaches a `~/.claude/handoffs/` brief is `writeAnchorCaution`'s
 STATIC containment sentence, deliberately unmeasured because a brief is read by a
 session it was not measured against. A correction to that WORDING does not reach
 files already written.
@@ -3161,6 +4213,159 @@ the host half and passed as options, so a port re-decides those reads without to
 decision. `zensu-codex`,
 `zensu-kiro` and `zensu-antigravity` were NOT included in this change.
 
+## Witness Attempt Half (`hooks/pre-bash-witness.sh` + `hooks/lib/zensu-witness.sh`)
+
+The Phase 6 witness cross-check could corroborate a PASS and **structurally could not
+corroborate a FAILURE**, and the cause is the host rather than any code in this repo.
+Claude Code does not deliver `PostToolUse` for a Bash call that did not complete
+successfully, so `hooks/post-bash-witness.sh` never ran for a failing command and the
+witness log carried no record of it at all. Since
+`hooks/lib/zensu-evidence-crosscheck.js` matches a CHECKPOINT/AUDIT claim against a
+witness entry by EQUALITY, every claim naming a failing command could only ever reach
+`EVIDENCE GAP` — the same verdict as a command that was never run. The evidence channel
+was one-sided in exactly the direction evidence discipline cares about most.
+
+**MEASURED, in both halves, and the two halves answer different questions.** Live, with
+a chain armed: `bash -c 'echo …; exit 3'` produced zero matching witness lines while the
+same command exiting 0 produced exactly one; in the wild, a structure suite exiting 1
+produced no entry while four sibling suites exiting 0 immediately around it all did.
+Against a fixture, the RESULT hook was fed five payload dialects — `exit_code: 3`,
+`exit_code: 0`, a bare-string `tool_response`, no `tool_response` at all, and
+`is_error: true` — and wrote a line for every one of them. So the hook has no branch on
+the exit status and cannot be the cause; the missing line is the event never arriving.
+Do not re-diagnose this as an early return in the writer. `P12-A0` in
+`tests/structure/test-post-bash-witness.sh` keeps that control executed, precisely so the
+next reader does not have to re-derive it.
+
+**The fix is a SECOND writer on the one channel the host fires unconditionally.**
+`hooks/pre-bash-witness.sh` runs on `PreToolUse` `Bash` and records
+`BASH-ATTEMPT cmd="…"` before the command runs. An attempt with no matching completed
+entry is then POSITIVE evidence rather than an absence, and the cross-check consumes it
+as such:
+
+| witness | claimed green | claimed non-pass |
+|---------|---------------|------------------|
+| attempt + completed | judged on the completed entry's `tail=`, unchanged | unchanged |
+| attempt, no completed | `EVIDENCE CONTRADICTION` | **verified** — the direction that was unreachable |
+| neither | `EVIDENCE GAP`, unchanged | `EVIDENCE GAP`, unchanged |
+
+**Nothing about corroboration was widened to get there, and the check that proves it is
+the one to keep.** A claim matching neither kind is still a gap; a log-writing command's
+ATTEMPT is excluded exactly as its completed entry always was; and a witness log written
+before this hook existed carries no attempt lines, so every verdict over it is
+byte-identical to the previous behaviour. `P6d`, `P6f` and `P6g` in
+`tests/structure/test-evidence-crosscheck.sh` are those three.
+
+**The attempt line proves the call REACHED the Bash tool, never that it exited
+non-zero**, and the wording must not be tightened. Every `PreToolUse` hook on a matcher
+runs whatever any of them decides, so an attempt is recorded for a call another gate then
+DENIES — and for one the user aborts. `ATTEMPT_ONLY_MARKER` therefore reads "the tool
+call never completed (non-zero exit, interruption or denial)", and it is EXPORTED so no
+consumer re-spells it.
+
+**The fail-then-fix cycle is why the attempt records are not consulted once a completed
+entry exists.** A command that failed, was fixed and re-ran green leaves two attempts and
+one completed entry; treating the surplus attempts as evidence would report a false
+contradiction on every normal red-to-green cycle. `P6e` is the pin.
+
+**ADVISORY, and that is load-bearing rather than stylistic.** The hook writes nothing to
+stdout, returns no `permissionDecision` of any kind, and always exits 0 — including on
+the inherited-plugin-root mismatch every sibling answers with `exit 2`. On `PreToolUse`,
+stdout is the decision channel and a non-zero exit BLOCKS the call, so a witness that
+failed closed would break every Bash call in the session, starting with the ones it
+exists to record.
+
+**ONE extraction, called twice.** `hooks/lib/zensu-witness.sh` owns the redact-module
+resolution and the payload decode; both hooks source it. The two writers must redact
+`cmd` identically or the attempt matches neither its own completed entry nor the claim,
+so this is the one place in the feature where a hand copy would lose evidence silently
+rather than loudly. What each hook deliberately KEEPS is the house pattern the existing
+pins scan per file: the plugin-root guard, the principal check, the session bind, the
+bypass-ledger block and the log-path spelling.
+
+**`ZENSU_TEST_WITNESS=off` governs BOTH halves**, and both record the ledger entry. The
+recorder dedups per gate, so a session still lands exactly one — and recording it in the
+attempt half is what keeps the ledger honest for a session in which the escape is set and
+every Bash call fails, where the result half never runs at all. No new stem enters
+`ESCAPE_STEMS`; the spelling already existed.
+
+**The attempt half is scoped exactly like the result half** — main principal, bound
+session, chain-state `active`. Recording attempts for an unarmed session would put lines
+in a log the result half never writes to, and the cross-check would read every one of
+them as a run that did not finish.
+
+**Version: `patch`.** Walked against §"Runtime Lineage (`version_type` is load-bearing)"
+entry by entry: no context-record or workflow-state schema field, no strict key set, no
+hook removed or renamed and no matcher changed, no new config key, no attestation change.
+Adding a hook is a `patch` UNLESS it can return a `permissionDecision`, which this one
+cannot in either direction — it is the ADVISORY shape that exemption names. The witness
+log gains a line KIND, but it is an ephemeral per-session artifact read only by the
+cross-check in the same tree, never a persisted shape two runtimes must agree on, and the
+parser accepts a log with no attempt lines unchanged.
+
+**Coupled sites that move together:** `WITNESS_ATTEMPT_MARKER` / `WITNESS_MARKER` /
+`ATTEMPT_ONLY_MARKER` in `hooks/lib/zensu-evidence-crosscheck.js` (all three EXPORTED so
+the suite builds its fixtures from the producer rather than re-spelling the format); the
+`kind` field `parseWitness` now stamps on every entry, whose ABSENCE means a completed
+entry — a legacy log parses with no `kind` at all, so the predicate tests for `attempt`
+and never for `result`, and inverting it would silently discard every pre-upgrade entry;
+the `Bash` `PreToolUse` matcher in `hooks/hooks.json`; the hook count in
+`docs/configuration.md` (header, prose and the `#hooks-N` anchor) plus the
+`configuration.md#hooks-N` cross-link in `docs/architecture.md`; `R19` and `R32` in
+`tests/structure/test-artifact-redaction.sh`, which now scan BOTH writers and the shared
+library respectively; the mechanism-2 consumer list in the header of
+`tests/structure/test-msys-special-plugin-module-boundaries.sh`; `P3`'s roster in
+`tests/structure/test-bypass-ledger.sh`; and `adopt_hook_expected` in
+`tests/structure/test-versioned-plugin-upgrade.sh`, which is the coupling that fired
+in the UNOBVIOUS direction and cost a red Windows shard. AC-C04 enumerates the Bash
+matcher from `hooks.json` and expects EVERY hook on it to deny the adoption command
+on win32, so registering an advisory hook there reported as `unexpected:
+pre-bash-witness.sh` in a suite named for plugin upgrades. The exception set now
+lives in one helper both AC-C04 loops call, and every member states why it cannot
+deny — a third entry needs its own sentence. Note the platform bound on verifying
+this: `ADOPT_EXPECTED` is `allow` on POSIX, so on macOS every hook expects `allow`
+and the regression is INVISIBLE; the helper's deny-default branch is driven
+directly rather than reached through the suite.
+
+**Operator-facing accounts that must move with it:** the `pre-bash-witness.sh` row, the
+`post-bash-witness.sh` row and the `ZENSU_TEST_WITNESS` row in `docs/configuration.md`;
+the four-channel table, the redaction-writer table and §"Witness channel" in
+`docs/tdd-manager-workflow.md`; and `skills/tdd/SKILL.md` Phase 6 step 1 together with
+the claim-format note beside it that states the witness `exit=` is always `?` — the two
+sit in different steps and a reader who finds one must be told about the other.
+
+**Known gaps, accepted and named:**
+
+- **A denied or aborted call is indistinguishable from a failed one.** All three leave
+  the same attempt-only shape, and the contradiction text says so rather than guessing.
+  Narrowing it would need the host to report the outcome, which is the thing it does not
+  do.
+- **The doubled hook cost is real, and it is NOT confined to armed chains** — an earlier
+  wording of this bullet said an unarmed session pays nothing, and that is false by simple
+  reading. Both writers run the payload extraction BEFORE the activation check, because the
+  session id they check activation for comes out of that extraction, so every Bash call in
+  every session with a readable Session Control record now spawns one extra `bash`
+  (`zensu-host-path.sh`) and one extra `node` (the extractor) whether or not a chain is
+  armed. That ordering is pre-existing in the result half; the attempt half doubles it. The
+  cheap fix is available and NOT taken here: `zensu_bind_hook_session` exports
+  `ZENSU_SESSION_KEY`, so the attempt half could test activation off that value first and
+  return before spawning anything — left alone because the final check is the authoritative
+  one and reordering it is a behaviour change to a path every Bash call travels, which
+  belongs in its own review. Say "unmeasured", never "free".
+- **Windows is UNVERIFIED.** `test-post-bash-witness.sh` and `test-evidence-crosscheck.sh`
+  are absent from `tests/profiles/windows-ci.v1.json`, whose shards this file records as
+  already close to their `profileTimeoutMs`, so the new checks never run on the blocking
+  Windows PR shard. Say "unverified", never "covered".
+- **No `/zensu:doctor` row.** A session in which the attempt half stopped recording — an
+  unregistered hook, a `hooks.json` edit — is visible only as cross-check verdicts
+  reverting to `EVIDENCE GAP`, which is exactly the pre-change behaviour and therefore
+  silent. `P12-A1` pins the registration at build time; nothing checks an installed tree.
+- **No ports.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were NOT included.
+  The premise is host-coupled in both directions: a port must re-measure whether its own
+  harness fires the post-tool event for a failing command, and whether its pre-tool event
+  fires unconditionally. A port that copies the hook without taking that measurement
+  ships a second writer for a gap it may not have.
+
 ## Bypass Ledger Read Contract (`tdd_bypasses`)
 
 `tdd_bypasses` is the ONE member of the `_tdd_read_validated_state` reader family
@@ -3217,6 +4422,168 @@ needs a persisted authenticity signal, which is a workflow-state schema field an
 therefore a breaking minor under the Runtime Lineage rule; it is deliberately not
 paid for. Say "what a readable document recorded", never "no gate was escaped".
 
+## Status-Marker Legend (CHAIN-END SUMMARY + PR bodies)
+
+Every status and verdict cell of the chain-end report and of the plugin-opened PR body
+carries a leading marker — 🟢 good, 🟡 attention, 🔴 bad, ⚪ not applicable. **The marker
+PREFIXES the value and never replaces it**, which is the whole safety property: a
+verbatim-carry literal (`EDIT NOT LANDED`, `UNVERIFIED (no claims logged)`, an unresolved
+`PENDING PREDICATE`, `EVIDENCE GAP`, `EVIDENCE CONTRADICTION`,
+`EVIDENCE CROSS-CHECK UNAVAILABLE`, `FINDING VERIFICATION DEGRADED`, the bypass ledger's
+`UNREADABLE — …`) keeps its own words after its marker. Reducing one to a bare coloured
+dot deletes the disclosure while keeping the colour, which is worse than having no colour
+at all.
+
+**"Keeps its own words" is NOT "byte for byte", and the difference was a real
+contradiction before it was written down.** The same cells are subject to the pipe-escaping
+rule — first every backslash doubled, then every pipe as a backslash-pipe — and an escaped
+cell is by construction not byte-identical to its source. The two rules were both stated as
+absolutes over one cell, and a model resolving that in favour of byte-identity emits an
+unescaped `|`, which splits the table row and drops exactly the verdict clause the row
+exists to surface. The legend now subordinates one to the other explicitly.
+
+**⚪ is bound to PROVENANCE, never to judgement**, and it has exactly ONE admissible case:
+a requirement row the plan already marks deprecated. An earlier spelling added "or a step
+this project has no equivalent of", which cites no source at all and let a skipped build or
+a disabled gate be spelled ⚪ — benign-looking — where the next sentence demands 🟡. The
+bound matters because `skills/autopilot/SKILL.md` states that a dropped criterion "keeps its
+ID and is marked deprecated", so *dropped* and *deprecated* name one observable state
+through two vocabularies whose markers are opposite. An outcome merely not run is 🟡; a
+requirement this session did not implement is 🔴 dropped even if it was retired mid-session.
+
+**The `Check | Verdict` marking rule is a VALUE-SHAPE rule, not an enumeration**, and the
+difference is what keeps it total. An earlier spelling listed the OUTCOME rows by name, so
+a row added later stayed unclassified and unmarked with every check green — and the FACT
+rationale it carried ("a title, a count and a path are not verdicts") contradicted its own
+membership, because `Tests created` and `Coverage` render as counts and were nonetheless
+listed as OUTCOME rows. The rule now names only the four unmarked rows — Feature, Files
+modified, Plan, Log — marks everything else, and states that a count measured AGAINST a
+target is a state. Two rows were added at the same time, and their extra arms are of DIFFERENT kinds:
+`Finding verification` carries a NOT-RUN arm (🟡, because the gate is config-gated and a
+disabled gate must never render like a clean one — the rule this repo already applies to
+`reviewerSpawnPermissionCheck`), while `Gates bypassed` carries a NOT-READABLE arm, since
+its value is always read and the failure mode is an unreadable ledger rather than an absent
+one. Its 🟢 is bound to the literal `none` and everything else is 🔴, so a reworded ledger
+constant cannot render clean.
+
+**EIGHT CARRIERS, and a census in prose goes stale the next time one is added — so this is
+a GREP, not a list: before rewording the legend or the vocabulary, run
+`grep -rlE '🟢|🟡|🔴|⚪' hooks skills templates docs agents` and judge every hit.** Use `-E`;
+an earlier spelling of this instruction used a BRE alternation over `🟡 unvalidated` and
+`🟡 partial`, which matched NOTHING under `docs` — the operator carrier spells the set as
+`🟡 attention (partial, …)` — so the one root added to reach that carrier reached nothing,
+reintroducing under the fix the exact census failure this file records for the
+`zensu:code-reviewer` and `scv1_` identities. The eight as of this writing:
+
+1. `hooks/post-review-tdd-delegate.sh` — the `COMBINED_SUMMARY_DIRECTIVE` string.
+2. `skills/self-review/SKILL.md` §"### Final report" — the second renderer.
+3. `docs/tdd-manager-workflow.md` §"Chain-end combined summary" — the operator account.
+4. `templates/pr-body.md` — the AC `Status` column.
+5. `templates/autopilot-pr-body.md` — the same column, autopilot's variant.
+6. `skills/autopilot/SKILL.md` — the step-3 PR-body renderer, which restates the whole
+   vocabulary, AND the Phase 2 delivery invariant, which restates the `deprecated` cell. The
+   invariant was missed on the first pass and shipped the unmarked spelling for a round.
+7. `skills/cover/rules/drivers.md` — the one behavioural CONSUMER, which resolves ACs from
+   the PR body and must match the status WORD inside the cell rather than compare the cell
+   to a bare literal.
+8. `docs/review-chain.md` — the OVERRIDE contract, whose mandatory-section rows for both
+   PR-body templates name the marker prefix. It is what keeps a repo override from deleting
+   the rule silently, so the argument two paragraphs down depends on it; it was omitted from
+   the roster while both a pin and that argument already pointed at it.
+
+Carriers 1 and 2 must carry the legend SENTENCE byte-identically;
+`evals/config-gate/test-post-review-combined-summary.sh` extracts it from the hook's
+DECODED `additionalContext` and from the skill and compares, with a non-empty control on
+each extraction. That pin was bite-tested: a one-word reword of the skill legend turns it
+red. **That pin covers the legend SENTENCE and NOTHING BELOW IT**, because `LEGEND_RE`
+terminates at `takes no marker.` — so every marker-bearing rule the two carriers share
+sits after it. A separate SHARED-VOCABULARY arm closes that: it asserts the deliverable
+`Status` vocabulary, the `ID | Status` vocabulary and the delimited no-Requirements
+fallback line in BOTH schemas, each with a non-empty control. Two properties are
+load-bearing. Both schemas are whitespace-FLATTENED first, because the skill wraps the
+`ID | Status` vocabulary across two physical lines while the hook carries it on one, so
+an unflattened needle would fail on the skill for a reason unrelated to drift. And the
+fallback needle carries its BACKTICK DELIMITERS: both carriers delimit that literal so
+the model knows where the emitted line ends, the hook's copy sits inside a `$'...'`
+segment where a backtick is literal, and asserting the delimited form over the RENDERED
+directive therefore proves in one check that the delimiter is present AND that it was
+not eaten by command substitution. Bite-tested the same way: a one-word reword on the
+SKILL side alone reports 50 PASS / 1 FAIL and restoring returns it green.
+**The verbatim-literal pins are PER CARRIER and the two lists legitimately differ** —
+the delegate renderer has a `Mtime audit` row where the self-review renderer has
+`Evidence cross-check`, so the evidence literals live only in the latter. Both loops are
+SCOPED to the summary schema, because a file-wide presence grep is satisfied by occurrences
+elsewhere in the same file and cannot fail for the reason it is written for. The
+orphaned-marker predicate runs over the RENDERED directive, never the hook source: the whole
+directive is one physical source line whose breaks are `\n` escapes, so a source-side scan
+was structurally inert for that carrier. It prints a sentinel on a clean scan, so a throw is
+distinguishable from "no orphans found".
+
+Carrier 3 is pinned by `R17-P2b` in `tests/structure/test-tdd-manager-patches.sh`; carrier 4
+by `P5a2` and carrier 5 by `P2c2` in `tests/structure/test-templates.sh` (that suite binds
+`TPL_PR` to the AUTOPILOT template and `TPL_PRBODY` to the shared one — easy to invert, and
+this paragraph did invert it once); `P5a4` pins both templates' PROSE rule, which is the only
+thing an override author reads; `P5a5` pins carrier 6 and forbids the exact spelling
+``status `deprecated` `` anywhere in it — that literal is the WHOLE needle, so an unmarked
+`status: deprecated` written without backticks is NOT caught, and the claim must not be
+widened past it; `P8c` in `tests/structure/test-plan-requirement-ids.sh` pins
+carrier 7. `P5a3` pins the override mandatory-section rows and is anchored PER ROW, because
+the phrase occurs on both and a file-wide needle stays green after a one-sided deletion.
+
+**The legend equality is asserted on carrier 1's RENDERED form**, never on its source: the
+eval extracts it from the decoded `additionalContext`, so a `\'` inside the `$'…'` string
+renders as `'` and compares equal to the skill's plain apostrophe. Two constraints were
+claimed here and BOTH were retired for the same reason — no mechanism observes them: a
+backtick is literal inside `$'…'` and inside the double-quoted re-expansion, and an
+apostrophe survives the render. Keep the sentence readable in both syntaxes by convention
+if you like; do not state it here as a rule the pin enforces.
+
+**A repo override can delete the rule from carriers 4 and 5**, because
+`docs/review-chain.md` states an override REPLACES a template wholesale. The marker prefix
+is therefore listed among both templates' MANDATORY SECTIONS there. Do not restate the
+operator doc's claim as covering override repos without it.
+
+**Two neighbouring vocabularies are deliberately NOT reconciled.**
+`hooks/lib/zensu-doctor-report.js` declares `OK = '✅'; WARN = '⚠️'; BAD = '❌'` for the same
+good/attention/bad axis. They stay separate because this set has a fourth state the doctor
+has no counterpart for, and because `⚠️` is an emoji-presentation sequence whose width
+misaligns a table column. A later reader should not "reconcile" the two sets.
+
+**Known gaps, accepted and named:**
+
+- The `## Open` table carries the same evidence literals UNMARKED while the
+  `Check | Verdict` cell marks them — deliberate, because every row in `## Open` is by
+  definition open, and both renderers now state that exemption so it does not live only in
+  the operator doc.
+- The unmarked-rows rule is pinned at the INSTRUCTION level only. Whether a model actually
+  renders it is model behaviour that only a live-model eval could observe, so do not claim
+  the invariant is enforced.
+- **Two per-requirement vocabularies exist over the same `AC-###` ids and are NOT
+  reconciled:** the chain-end `ID | Status` table uses met / partial / contradicted /
+  dropped / deprecated, while the PR body uses pass / partial / unvalidated / fail /
+  deprecated. They answer different questions — one is plan coverage, the other is
+  validation outcome — but nothing states the mapping, and `skills/converge/SKILL.md`
+  carries a THIRD (met / partial / missing / contradicted, plus `deprecated — skipped`)
+  with no markers at all, offered from inside the very `## Open` section this feature
+  colours. Colouring converge was considered and deliberately not done here.
+- The `Gates bypassed` row names the ledger's `UNREADABLE — …` prefix, whose owning
+  constants are named in §"Bypass Ledger Read Contract". The row is keyed so that 🟢 is
+  exclusive to the literal `none` and EVERYTHING else is 🔴, which is what makes a reworded
+  constant safe — an earlier wording here claimed it "still falls to 🔴 for any named
+  escape", which was false, because a reworded unreadable line is neither `none` nor a
+  named escape and matched no arm at all. Recorded here rather than in that section's
+  roster.
+
+**Version: `patch`.** Walked against §"Runtime Lineage" entry by entry: no context-record or
+workflow-state schema field, no strict key set, no hook added, removed or renamed and no
+matcher changed, no new config key, no attestation change, and no `permissionDecision` in
+either direction — the change is directive text plus template and doc prose, which that
+section classifies explicitly as a `patch`.
+
+**Port-relevant.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were NOT included.
+A port owns its own renderers and its own PR-body template, so it re-decides the vocabulary
+and the pins; the marker set and the provenance bound are the portable half.
+
 ## Chain Shape & Rearm Receipt (`hooks/lib/chain-recovery-v1.js`)
 
 `chain-recovery-v1.js` is the single source of truth for two things, and it is **not**
@@ -3241,7 +4608,20 @@ one direction that matters: it compared against the `NEXT_COMMAND` lookup table,
 literal `chainShape` RETURNS while leaving the table key in place kept the copy agreeing while a
 genuinely closed foreign chain rendered as open. A consumer cannot check a producer it does not
 own, which is why the set moved here; `test-doctor.sh` P1ms pins the export and its contents, P1ms1 that the
-renderer keeps no private copy), the ticket issuer, and the rearm writer
+renderer keeps no private copy), the ticket issuer, `hooks/lib/zen-anchor-v1.js` (a FIELD-NAME, VALUE-DOMAIN and EXPORT consumer since
+the zen-mode chain anchor landed: it reads `report.shape`, `report.linkage` and
+`report.autopilot.outcome`, and it consumes `STUCK_SHAPES` — the module body reads that
+export and no other, it is that export's only consumer under `hooks/`, and removing or
+renaming it makes `anchorToken` THROW for every shape that HAS a position, disabling the
+anchor on every prompt of every zen-mode session, with the disclosure landing on a channel
+this file records as unverified for delivery. Say "that has a position", not "every shape":
+the two inert shapes return `none` before the read is reached. `ALL_SHAPES` is
+consumed by that module's UNIT CONTRACT and never by the module — its only appearance
+under `hooks/` outside the owner is a comment — so removing it reddens the key-parity
+cases alone. Stated the way the doctor's `INERT_SHAPES` clause six lines above is, and its `OUTCOME_POSITION` allowlist is keyed on `CHAIN_OUTCOMES`
+members — a fifth member added there renders no anchor rather than inheriting a mark, which is
+the fail-open direction, but it does mean a new outcome reaches that module silently and needs
+a row there), and the rearm writer
 (`_tdd_rearm_autopilot_review_critical`, which takes `isLinkId`, `RETURN_STAGES` and
 `REARM_MARKER_KEYS` from here) — adding a receipt field or a return stage in the writer
 alone would make every receipt it mints classify as stale and wedge the chain permanently.
@@ -3436,6 +4816,268 @@ host-neutral half is everything below the resolution: the single `<!-- zensu-aut
 marker, run-id equality, the owner and stage checks that precede every read, and the digest.
 A port that takes only the module gets the field decision; it still owns its own emission and
 its own exit ladder, which stay in `hooks/plan-approved-delegate.sh`.
+
+## Plan-Approval Delivery Route (`hooks/plan-approved-delegate.sh`, standalone branch)
+
+The STANDALONE branch of the plan gate asks ONE `AskUserQuestion` naming four mutually
+exclusive delivery routes — `/zensu:autopilot`, `/zensu:tdd`, `/zensu:pilot`, and implementing
+directly. It replaced a yes/no question about `/zensu:tdd` alone, which left the plugin's other
+two delivery routes invisible at the one moment they are relevant.
+
+**The DURABLE branch is untouched and must stay that way.** A plan carrying a validated
+`<!-- zensu-autopilot:<run> -->` marker still emits `PLAN_APPROVED` with "Do not ask another
+TDD/workflow question": Autopilot has spent its single planning gate by then, and a second
+question there would break that contract.
+
+**Two prerequisites are stated INSIDE the options rather than gating them, and the reason is
+that a hook cannot check either cheaply.** `/zensu:autopilot` owns its own Phase 0, which ends
+in its own `ExitPlanMode`, so choosing it after an approval costs a SECOND approval round for
+the spec, the `AC-###` list and the probed recipe — and it needs an authenticated forge CLI.
+`/zensu:pilot` needs an authenticated `zensu` CLI plus a feature ALREADY tracked in Zensu; its
+own skill sends ad-hoc work to `/zensu:tdd` instead. Both options are offered unconditionally
+and carry their cost in their own description. The ground is NOT that probing is expensive —
+`hooks/session-start-banner.sh` already runs `command -v zensu`, so the PRESENCE half is cheap.
+It is that a conditional option set would make the gate's own "exactly these four mutually
+exclusive options and no others" contract environment-dependent and therefore unpinnable, and
+that the half that actually matters — whether the CLI is AUTHENTICATED and the feature already
+tracked — needs a network call this hook must not make.
+
+**Auto Mode must NEVER select `/zensu:autopilot` OR `/zensu:pilot`, and this is the one safety
+property in the section.** Autopilot pushes a branch and opens a pull request; pilot commits,
+opens a pull request and mutates tracked feature state behind a per-transition confirm. TWO clauses choose a route
+without asking, and saying "the non-interactive one is the only place" was the overstatement
+review caught: fast-path (B) also selects without asking and carries no interactivity scope of
+its own, so an earlier wording in which (C) forbade only a *default* left a headless run whose
+driving prompt named the route reaching it through (B). (C) therefore OVERRIDES (B) in as many
+words, and forbids selection "not as a default, not by an explicit literal, and not by any
+other clause". Two further guards sit in (B) for the same reason and are not cosmetic: a route
+name carrying a negation REFUSES that route rather than selecting it — the bare literal
+`'autopilot'` meant `"no autopilot"` contained the token tested first — and only multi-word
+forms count, because in THIS repository `"fix the autopilot state machine"` is an ordinary
+sentence. `D13` in `tests/structure/test-plan-approved-delegate.sh` is the pin, and it grades a
+PROPERTY rather than a spelling list: it slices BOTH the (B) and the (C) clause, requires (C) to carry
+EXACTLY ONE `/zensu:autopilot` mention, the prohibition and override clauses, and no dispatch
+spelling; requires (C) to carry pilot's own rationale, which the never-clause needle cannot see;
+requires (B) to carry the refusal guard, the open-set marker and the multi-word rule,
+AND to state the refusal BEFORE the preference arms (an offset comparison, not a presence one —
+without it, moving the refusal below the autopilot arm passes every check); and requires the
+remainder after both clauses to tie no non-interactive run to a route. NO slice carries an emptiness arm: the composite index guard at the top makes all three
+non-empty by construction and reports `SLICE_FAILED` when it cannot. **State the residual rather than the count:** no conjunct binds the counted
+(C) occurrence TO the prohibition sentence, so a (C) clause that both defaults to the route and
+forbids a DIFFERENT one still passes. An earlier form rejected two hand-picked spellings and
+would have passed `"default to running /zensu:autopilot"`.
+
+**The fast-path literal order is load-bearing.** `pilot` is a SUBSTRING of `autopilot`, so the
+longer literal is tested first; testing the shorter one first routes an autopilot request to
+the wrong skill. The directive states the order and the reason, because the matching is done by
+a model reading prose and not by a regex anyone can order.
+
+**The ORDERING rule is encoded as a judgement, not as a fixed winner**, because which route is
+best depends on the plan: Autopilot leads for a whole user-visible feature meant to reach a pull
+request, Pilot for work belonging to an already-tracked feature, otherwise the Zensu workflow —
+and "implement directly" is never first. That last clause is what keeps the do-nothing option
+out of the recommended slot, which the repository's own best-solution-first rule forbids.
+
+**Coupled sites that move together:** both heredocs in `hooks/plan-approved-delegate.sh` — never
+one alone, and the file must keep exactly TWO `cat <<'JSON'` blocks, because the parity helper in
+`tests/structure/test-tdd-vanilla-mode.sh` refuses a third; that helper's `P1` needle list, which
+now carries the route literals and is what makes a one-sided edit fail, plus `P1b`-`P1b7`, which
+compare mode-INDEPENDENT spans byte-for-byte because presence alone cannot see an
+option ADDED to one branch — `P1b`/`P1b2` the option list, `P1b3`/`P1b4` the two dispatch arms, and
+`P1b5`/`P1b6`/`P1b7` the SAFETY clauses (the `(C) OVERRIDES (B)` sentence, the refusal-first block,
+and the `(B)`-internal non-interactive removal guard). The safety half was unpinned until a
+mutation probe measured it: on a ONE-SIDED reword of heredoc 1, `P1b` through `P1b4` all reported
+PASS while `P1b5` and `P1b7` failed, and a separate reword of the refusal block failed `P1b6`.
+Then `D9pre` and `D9`-`D33` in
+`tests/structure/test-plan-approved-delegate.sh`, which force the strict branch as well because
+the default config resolves to the vanilla one and a single capture would grade only one heredoc;
+that suite ALSO grades carriers outside the hook, and the roster is an ENUMERATION rather than a
+count because a count there was wrong on the day it was written: `D17` five prose carriers
+(`docs/configuration.md`, `docs/architecture.md`, `README.md`, `skills/tdd/SKILL.md`,
+`skills/gauntlet-loop/SKILL.md`, with an examined-carrier floor of 5), `D18`-`D20`/`D28`/`D31`-`D33`
+the local-only eval in `evals/plan-approval-hook/` and its README (which nothing graded before, so
+its two ABSENCE assertions reported the outward-facing safety property green whenever the driven
+session died), and `D26`/`D27`/`D29`/`D30` the SessionStart banner. The suite's own header carries
+that enumeration too, because an edit to any of those files reddens a suite named for a different
+one; `hooks/session-start-banner.sh` and `tests/structure/test-session-start-banner.sh` now carry a
+pointer back, which is the half this repository keeps discovering it is missing. **`D18`-`D20` and `D26` are all SOURCE or single-arm pins, and
+`D29`-`D32` are what closed the two holes that left**, both measured rather than argued. The banner's
+`_ZENSU_ROUTE_QUESTION_LIVE` guard has THREE conditions and only the flag arm was graded: deleting
+either the `command -v node` line or the `[ -f .../plan-approved-delegate.sh ]` line left this suite,
+`test-session-start-banner.sh` AND `test-tdd-vanilla-mode.sh` fully green, so `D29`/`D30` drive the
+real banner with node hidden behind a stub PATH and with the delegate hook missing from a subset
+plugin root. And the eval runner's absence GATE was pinned only by its presence at the call sites:
+rewriting `nonempty()` to a constant `echo PASS` reinstated the exact defect `D18`/`D20` are named
+for with the suite still green, so `D31` grades the helper's BEHAVIOUR and `D32` states executably
+the premise the whole design rests on — that `not_contains()` is satisfied by a transcript that was
+never written. The runner cannot be sourced, so both extract the one-line helpers by text.
+`D29`'s stub-PATH fixture is UNVERIFIED on Windows, so it SKIPs rather than fails when it cannot be
+built — and TWO budgets are unmeasured, not one: the ubuntu shard weight in
+`tests/profiles/ci-shard-weights.v1.json` still reads its pre-change value, and the WEEKLY Windows
+structure shard, which this suite does reach through `ciStructureTests`, has never measured
+`D30`'s `cp -R` of the whole `hooks/` subtree or `D29`'s two symlink directories at all. Take both
+figures in one pass from a green run rather than estimating either — the suite gained a third verdict for it, following `H10` in
+`tests/structure/test-evidence-discipline.sh`, whose own stripped-PATH case declines to redden a
+weekly run for a reason unrelated to the feature. Three further constraints come from that same
+precedent and each was reached by getting it wrong here first: the interpreter is resolved by
+ABSOLUTE path, the two stubs are built by two link loops rather than by copying one onto the other
+(macOS SIGKILLs a copied signed binary), and a shell builtin — whose `command -v` answers a bare
+word — is skipped instead of being linked to itself. TWO banner literals are pinned by `D29`/`D30`
+and both must move with the hook: the route promise `asks which delivery route to take`, and the
+bare else-branch tip, which is matched WHOLE-LINE because it is a strict PREFIX of the
+`autoTdd`-off disclosure and a substring test would let the flag arm satisfy the node arm's check; and `BNR2c` in the vanilla-mode suite, which is the only check
+that reaches the four-route IF-branch tip in BOTH mode variants — `D26`/`D27`/`D29`/`D30` reach the
+tips too, and `D29`/`D30` are the sole grader of the bare ELSE-branch tip, while
+`P8c` greps the whole banner file and is satisfied by its pre-existing Skills line; and
+`hooks/user-prompt-tdd-reminder.sh` — BOTH heredocs, TDD arms only — together with `P2`, because
+§Language requires these phrase lists in lockstep and this chain edited that hook's arms; that hook
+is under the SAME two-heredoc constraint, since `P2` calls the same helper. Two further carriers
+this chain created: `skills/pilot/SKILL.md`'s "Do NOT Use For" bullet, which PARAPHRASES option (3)'s
+prerequisite and points at both heredocs as its verbatim carrier, saying to change both together —
+the direction matters, because a maintainer who greps that skill for the option text finds nothing
+and could "repair" it by pasting in a third copy, and the marker instruction in
+`skills/autopilot/SKILL.md`, which USED to be a hand-copied PAIR (the durable-begin site and Phase
+0.D). It is no longer a pair: the durable-begin site is a pure pointer plus a pre-begin
+single-marker precondition, Phase 0.D holds the one authoritative statement, and `D12`-`D15` in
+`tests/structure/test-autopilot-durable-skill.sh` pin exactly that — so "pinned against nothing" no
+longer holds for it.
+
+**The Phase 0.D ORDERING is now PINNED, and the two entries that follow are notes ABOUT roster
+members rather than roster members themselves.** `D14` in
+`tests/structure/test-autopilot-durable-skill.sh` compares LINE NUMBERS: the single-marker
+precondition must appear before the `--autopilot-begin --run "$RUN_ID"` command, so reversing the
+two now fails rather than passing every check. The paragraph this replaces said the ordering was
+"enforced by nothing" and told the reader to check it by hand; that was true until the offset
+comparison landed. What `D14` does NOT see is the ordering relative to `ExitPlanMode` itself —
+that half is still by hand.
+`skills/autopilot/SKILL.md` Phase 0.D is on this roster for a reason that is easy to miss: it
+requires `--autopilot-begin` to run IMMEDIATELY BEFORE `ExitPlanMode`, and that ordering is the
+only thing putting the durable run at `PLANNING` in time for Autopilot's OWN approval to land on
+the durable branch. Reverse it — a plausible refactor, "do not mint a run the user may reject" —
+and Autopilot's planning gate falls through to the standalone directive, which now re-asks the
+four-route question with `/zensu:autopilot` still on it. That approval loop did not exist before
+this change made the route reachable from this gate. `tests/structure/test-pilot-skill.sh` is on
+it for a blunter reason: its `P8d` graded a WHOLE-FILE `/zensu:pilot` count against a literal,
+so the primer edit turned a CI-run suite red. It is a per-heredoc assertion now, and the needle is
+the FULL route clause (`PILOT_ROUTE_CLAUSE`) rather than the bare skill name: both primer heredocs
+carry a pre-existing "runs via the `/zensu:pilot` conductor skill" sentence, so a bare needle stayed
+satisfied after the four-route clause was deleted from BOTH heredocs — measured on a mutant, where
+the bare needle reported PASS and the clause needle FAILED.
+
+**The strip rule and its target document are pinned too, by `D12`/`D13` in that same suite.** `D12`
+requires exactly one authoritative statement (`Strip the comment, never the whole line`) and zero
+restatements, so the hand-copied PAIR this section used to name cannot come back; `D13` requires the
+rule to name the plan CONTENT and forbids the retired `COMMENT from the incoming` spelling, which
+targeted a document the gate never reads. `D15` requires the minted-then-refused wedge to name
+`/zensu:autopilot-release` beside it.
+
+Operator-facing accounts, and the list is longer than the obvious two because every surface that
+described the old yes/no question became false at once: the `plan-approved-delegate.sh`,
+`autoTdd`, `tddImplementation`, `session-start-banner.sh`, `session-start-primer.sh` and
+`user-prompt-tdd-reminder.sh` rows in `docs/configuration.md` — the `tddImplementation` row is the
+one recording that the two ask-hooks no longer share one wording; BOTH branches of `hooks/session-start-primer.sh` (whose own `P3`
+parity needles now carry the route literals) and BOTH tips in `hooks/session-start-banner.sh`,
+which is the ONLY user-visible surface and was the one the whole review panel missed; the "When
+to Use" bullet in `skills/tdd/SKILL.md`; the two interception paragraphs in
+`skills/gauntlet-loop/SKILL.md`; the Layer 2 Mermaid edge in `docs/architecture.md`; the "Just
+this change" paragraph in `README.md` — BOTH the "Just this change" paragraph and the "A plan you approve
+first" bullet; `evals/plan-approval-hook/` — whose expect script must
+select the Zensu-workflow option BY LABEL, never by the ordinal `1`, since the ordering rule can
+put the branch-pushing route in slot 1 and a blind ordinal would take it unattended, and whose
+RUNNER must keep three properties the PR #295 review round added: every ABSENCE assertion is gated
+on a positive one (`T1.5` on `T1.0`, `T2.5` on `T2.0`, `T2.7`/`T2.8` on `T2.4`) because an empty
+transcript satisfies an absence — and note that `T2.5` inlines its own `grep` instead of calling
+`not_contains`, which is exactly how it escaped the first sweep, so the rule is "every absence
+assertion", never "every `not_contains` call"; the subprocess watchdog is a `timeout` -> `gtimeout`
+-> unwrapped ladder that ANNOUNCES the unwrapped case AFTER the header write, because that write is
+a truncating `tee` and a NOTE emitted above it is erased on exactly the host the fallback exists
+for — base macOS ships neither binary, the runner required neither, so both `timeout N …`
+invocations exited 127, `|| true` swallowed it, and the checks
+that read as the outward-facing safety evidence went green over a session that never started; and
+`T2.6` grades two rendered option LABELS rather than the bare phrase `implement directly`, which a
+model narrating its intent also emits. That eval is local-only and never runs in CI, which is why
+`D18`-`D20` and `D28` in `tests/structure/test-plan-approved-delegate.sh` grade the runner and its
+README from a suite that does — and `D18` binds the ` FAIL` VERDICT token on each not-graded arm,
+because a pin on the label alone let the arms be rewritten to `PASS` with the check still green.
+Every needle into that README must be LINE-LOCAL: the file wraps, and a `grep -qF` over a phrase
+that crosses a break can never match, which turned `D20` red for a claim that was in fact present;
+and THIS
+file's own §"Autopilot Run Scope" `OWNER_SESSION_MISMATCH` bullet, which describes what a foreign
+caller is asked when it falls through to the standalone policy.
+
+**NAMED FOLLOW-UP, not done here: the two heredocs carry the route text VERBATIM TWICE.** That
+duplication is why `P1b`/`P1b2` must compare mode-independent spans byte-for-byte at all, and three
+consecutive fix rounds each introduced a fresh defect in that duplicated clause. This file already
+ships the shape that removes the class — `emit_autopilot_context` composes the durable branch's
+directive from ONE string through node — so building the mode-independent span once and
+interpolating the two mode-specific fragments would make a one-sided edit structurally impossible
+rather than test-detected. Not done here because it re-authors `P1`/`P1b`/`P1b2` and the
+"exactly TWO `cat <<'JSON'` blocks" contract and turns the byte-for-byte pins tautological — a real
+control traded for a structural guarantee, which is a decision to take deliberately rather than
+mid-chain. **The pin-coverage claim above is SCOPED, because an earlier revision overstated it:**
+the span comparisons reach the option list, the two dispatch arms and — since the PR #295 review
+round — the three safety clauses (`P1b5`-`P1b7`); everything
+else in a multi-kilobyte directive is covered by presence needles plus `D13`, so the pins are far
+from tautological today. **TRIGGER:** take the seam at the next round that has to re-author
+`P1`/`P1b`/`P1b2` anyway, or at a fourth one-sided defect in the duplicated span.
+
+**The TRIGGER was evaluated in the PR #295 review round and deliberately NOT fired.** That round
+ADDED to `P1`'s needle list and added `P1b5`-`P1b7`; it re-authored neither `P1b` nor `P1b2`, and it
+introduced no one-sided defect in the duplicated span — every directive edit landed through a
+`replace_all` over an anchor verified to occur exactly twice, or as an explicit pair for the one
+mode-DEPENDENT clause (`run TDD instead` / `run the workflow instead`). Recorded so the next reader
+does not have to re-derive whether the condition was met: it was checked, and it was not.
+
+**Deliberately NOT changed — the QUESTION SHAPE, not the file:** `hooks/user-prompt-tdd-reminder.sh`
+keeps its yes/no question. Its TDD arms WERE edited by this chain (intent-judging, arm order, the
+untrusted-input scoping), which is why it is on the coupled-sites roster above. The route choice belongs to the moment a plan is approved; re-asking it on
+every prompt while no chain is active would be four options of noise.
+
+**Port-relevant.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` carry the same plan gate
+against different harnesses and were NOT included in this change. A port owns more here than a
+reworded directive: its own ROUTE VOCABULARY, because `/zensu:autopilot` and `/zensu:pilot` are
+skills a port may not ship at all, so copying the four-option text there would offer routes that
+do not exist; whether its harness has an `AskUserQuestion` equivalent that can carry four options;
+and — the one a literal-renaming port misses — whether a route can be selected NON-INTERACTIVELY
+on that host, which is the premise the whole (C)-overrides-(B) safety property rests on.
+
+**Version: `patch`.** Walked against §"Runtime Lineage" entry by entry: no context-record or
+workflow-state schema field, no strict key set, no hook added, removed or renamed and no matcher
+changed, no new config key (`autoTdd` is reused), no attestation change. The hook's only output is
+`additionalContext` — the ADVISORY shape the hook-inventory exemption names — and it returns no
+`permissionDecision` in either direction.
+
+**Why (C) names BOTH outward-facing routes, stated as a CRITERION so a later reader can widen or
+narrow it on the test rather than on a route name:** a route is barred non-interactively when it
+takes an outward-facing or externally-mutating step whose only guard is a human answer. Autopilot
+meets it because `skills/autopilot/SKILL.md` declares its Phase 1 "autonomous, ZERO questions", so
+the branch push is unattended once the plan is approved. Pilot meets it too, and an earlier
+revision of this paragraph said the opposite — that Pilot "has no unattended outward-facing step
+to guard" — which is false: it offers a commit and a pull request and it mutates tracked feature
+state, and the confirm that guards each transition IS an `AskUserQuestion` answer, exactly the
+control a headless run cannot supply. `/zensu:tdd` meets neither half and stays selectable.
+
+**Known gaps, accepted and named:** the four routes are prose the model follows, not a gate, so
+nothing enforces that the question is asked or that the ordering rule is honoured. The SEAM is
+the same one the yes/no question always had; the BLAST RADIUS is not — the old option set could
+only implement locally, while the new one adds a route that pushes a branch and opens a pull
+request and one that mutates external Zensu state. Neither prerequisite is verified before its option
+is shown, so a user without a tracked feature can still pick Pilot and learn the answer from that
+skill's own Phase 0. And `/zensu:doctor` carries no row for this question, so a project that set
+`autoTdd:false` still sees no doctor signal that the route choice is switched off — the
+SessionStart banner now says so, which is a user-visible surface rather than a diagnostic row, and
+the review round that added it did not close the doctor half.
+
+**The (C) safety property has NO behavioural coverage, and this is the largest named gap.** Both
+cases in `evals/plan-approval-hook/` drive an INTERACTIVE session via expect, while clause (C)
+governs a run with no human to answer — so the feature's only behavioural surface does not touch
+the half of its own contract that keeps an unattended run out of a branch-pushing route. A headless
+`claude -p` case is the obvious addition and was NOT implemented: the hook fires only on
+ExitPlanMode SUCCESS, that README already records `claude -p --permission-mode plan` auto-denying
+and firing no hook, and whether any other headless permission mode can produce an APPROVED
+ExitPlanMode was not established. Until it is, clause (C) is covered by `D13` alone, which grades
+the emitted directive rather than a model's behaviour — and `D13`'s own detection of an unattended
+escalation is a spelling list, not a property, in BOTH the `(B)` and the tail slice.
 
 ## Host-Refused Reviewer Spawn (`hooks/lib/reviewer-spawn-denial-v1.js`)
 
@@ -3743,12 +5385,60 @@ added a session and a Stop after the range was taken, and the T38-T59 scope-sent
 added a second post-range increment on top of that — one further session and two further
 `bash "$STOP"` invocations in T59, plus roughly twenty source and behavioural checks. The
 ceiling was NOT raised for either: 85% of cap was already the slow sample's share, and this
-file's own rule is that a ceiling comes from a green wall clock and never from an estimate. Treat the remaining headroom as
-UNMEASURED until a green Windows run reports a new figure; if the shard starts reporting
-`TIMED_OUT`, this is the first thing to re-measure, and note that the 1800000 ms shard
-budget below would surface such a run as a profile abort rather than a suite timeout.
+file's own rule is that a ceiling comes from a green wall clock and never from an estimate.
 
-**The shard budget is the SECOND ceiling, and it binds first.** `windows-shard-7`'s
+**IT WAS RE-MEASURED, AND IT HAD ALREADY GONE RED — the ceiling HAS since been raised, so
+the paragraph above is history rather than current state.** It said to re-measure if the
+shard ever reported `TIMED_OUT`; it did, on more than one branch. The cap sat AT the
+measurement — the error the shard-8 note in `windows-ci-contract.test.js` ends by naming —
+so `main` itself was a coin flip on every run rather than a suite under test being at
+fault. Two things changed together: `review-worker-evidence-lease` MOVED to
+`windows-shard-8`, leaving this suite ALONE on shard 7 with the shard's whole envelope, and
+the cap rose. **The NUMBERS live in that contract-test note and are deliberately not copied
+here**, for the reason this file gives about `MAX_BLOCK` and about the architecture doc's
+KB totals: a prose copy of a measurement goes stale silently, and the note carries the run
+ids, the measured wall clocks and the arithmetic together.
+
+**KNOWN RESIDUAL, and it is the reason this is a mitigation rather than a fix:** the raise
+does not absorb the 29% spread recorded above, and at this suite's current size no cap
+inside the shard envelope can — the envelope itself is smaller than the spread's upper end.
+The raise cannot go further without moving `timeout-minutes` and every profile's
+`profileTimeoutMs` together. The durable answer is to find why this suite needs 25 minutes
+on Windows, and until then, treat a `TIMED_OUT` here as the suite outgrowing its shard
+rather than as a defect in whatever change happened to be under test — and expect the cap
+to bind again.
+
+**IT DID REPORT `TIMED_OUT`, and the prediction above held exactly.** On the PR carrying
+the workflow-baseline repair, `windows-shard-7` reported
+`TIMED_OUT stop-enforcer-self-review-routing (1500157ms)` against its own 1500000 cap while
+the same shard was GREEN on `main` — so the content this suite scans grew past the edge the
+paragraph above says it was sitting on. The remedy was NOT to raise the cap inside the
+shard: the sibling `review-worker-evidence-lease` measured 158850 ms on that run, so the
+1800000 shard budget left roughly 141000 ms of room and a raise would have bought 9% against
+an unknown requirement. The SIBLING moved instead, to `windows-shard-8`, which measured a
+196 s job against the same 1800000 budget after `session-trail-lineage` came down to 154673 ms
+— the same rebalance-rather-than-add move this file records for that suite, and it costs no
+new CI job because a suite moving between existing profiles changes no key in
+`expectedProfiles`. `stop-enforcer-self-review-routing` now holds `windows-shard-7` ALONE at
+`timeoutMs: 1740000`, deliberately below the 1800000 profile budget so an overrun still
+surfaces as a visible suite `TIMED_OUT` rather than as a profile abort that truncates the
+tail silently.
+
+**The green figure arrived on the very next run and is now the one to budget against:
+`PASSED stop-enforcer-self-review-routing (1482704ms)`**, alone on `windows-shard-7`, with
+the whole shard job at 1579 s. Two things about it are worth keeping. It is BELOW the
+1500000 cap the previous run breached at 1500157 ms, so the failure was the documented 29%
+spread landing on its slow side rather than a step change — which is exactly why a single
+sample must not be read as headroom. And 1482704 against 1740000 is **85% of cap**, the same
+share this section already called too tight at the old ceiling; the difference is that the
+suite now holds the shard alone, so the only other bound is the 1800000 profile budget it
+no longer shares. Treat further growth here as needing a shard of its own, not another
+raise. The sibling measured `PASSED review-worker-evidence-lease (113321ms)` on
+`windows-shard-8`, whose two suites together came to roughly 265 s against 1800000.
+
+**The shard budget is the SECOND ceiling, and it binds first — though on the run that
+forced the rebalance above it was the SUITE cap that bound, not the shard.**
+`windows-shard-7`'s
 `profileTimeoutMs` is 1800000 and every profile is pinned to that same value
 (`windows-ci-contract.test.js`), which is itself pinned against the job's
 `timeout-minutes: 35`. A suite therefore never receives its configured `timeoutMs` — it
@@ -4602,7 +6292,7 @@ rather than defaulting to `[]`. The unknown-command refusal stays FIRST, so a ty
 reported as a typo. Two entries are DELIBERATE accept-and-ignore, not oversights:
 `--force` on `list` and `limited`, which SKILL.md documents as a survey rule —
 `instances` emits no verdict and so refuses it. `L56h` derives both key sets from
-source and compares them, so a tenth command cannot be added to one alone;
+source and compares them, so an eleventh command cannot be added to one alone;
 `test-session-trail-skill.sh`'s `T16` and its `json-mode-order` guard read `COMMANDS`
 and `handler(opts)` and BOTH went red when the if/else chain was replaced — they are
 part of this coupling, not collateral.
@@ -4828,8 +6518,13 @@ was not slow; it was not paid for. That is the failure §Host-Refused Reviewer S
 records verbatim ("read the shard's remaining budget", not the suite's `timeoutMs`),
 observed rather than predicted.
 
-**The suite therefore moved to `windows-shard-8`, alone.** Not to a different
-neighbour: the same run's job durations were shard-1 1630 s, shard-2 1187 s, shard-3
+**The suite therefore moved to `windows-shard-8`, alone AT THE TIME.** It no longer is:
+the `stop-enforcer-self-review-routing` rebalance recorded above later moved
+`review-worker-evidence-lease` onto this shard, so shard 8 now carries TWO suites whose
+run together came to roughly 265 s against the same 1800000 budget. Keep the "alone"
+qualified rather than deleting the sentence — the arithmetic below is what justified
+creating the shard, and it was taken when the suite really was the only member. Not to a
+different neighbour: the same run's job durations were shard-1 1630 s, shard-2 1187 s, shard-3
 1886 s, shard-4 1779 s, shard-5 1008 s, shard-6 1011 s, shard-7 1516 s, and 893 s does
 not fit inside any of them under a 1800 s envelope. Adding a shard is what the
 arithmetic left; rebalancing was not available. The move is three files in one commit —
@@ -4857,8 +6552,12 @@ lower bound on a distribution, never a bound on the next run. A ceiling set from
 projection is only as good as what the samples measured, and these measured a defect.
 And a ceiling set far ABOVE the measurement stops being a tripwire at all: 600000 is
 3.9x the real figure and deliberately BELOW the ~650 s a reintroduced probe stall would
-cost, so that regression trips the cap instead of merely making CI slow. Alone on shard
-8 the cap — not the shard — is what binds this suite.
+cost, so that regression trips the cap instead of merely making CI slow. The cap — not
+the shard — is still what binds this suite, and the reason is now arithmetic rather than
+solitude: shard 8 carries a second suite (`review-worker-evidence-lease`, measured
+113321 ms), and the two together came to roughly 265 s against the 1800000 profile
+budget, so the shard has room to spare while 600000 remains the tighter bound. Re-derive
+this if a third suite lands here; "alone" is no longer the premise.
 
 **That measurement is also why 600000 was REJECTED for this suite, not merely not
 adopted.** The parallel working copy lowered its own ceiling to 600000 on the strength
@@ -4938,8 +6637,12 @@ subject:
   comparisons already used.
 
 **The suite isolates by `--config-dir` and `$ZENSU_CCD_STORE`, deliberately not by
-`$HOME`.** Its sibling `test-session-trail-verdict.sh` redirects HOME and therefore
-skips itself whole on Windows, where `os.homedir()` reads `USERPROFILE`. Both suites
+`$HOME`.** Its sibling `test-session-trail-verdict.sh` redirects the home directory
+instead — and it does NOT skip itself on Windows, which an earlier revision of this
+paragraph claimed: `trailrun` sets `USERPROFILE` alongside `HOME` and that suite's own
+V0 probe measures the PAIR, so the redirection succeeds where `os.homedir()` reads
+`USERPROFILE`. §"Git Mutation Tables" says the WC block "will therefore run on
+Windows", and the two paragraphs now agree. Both suites
 also unset `CLAUDE_CONFIG_DIR`, because `trail.mjs` honours it and `$HOME` is only a
 fallback — with it exported, a fixture read would resolve against the developer's
 real config root and a `takeover` would write a real edge there. In the lineage suite
@@ -5207,34 +6910,225 @@ with a thrown error, and re-point the extractor.
 
 ## zen-mode Chain-Progress Anchor (`user-prompt-zen-mode.sh` rule 6)
 
-Rule 6 of the zen-mode contract asks for a one-line progress anchor above the closing
-next step. It lives in the hook, the skill, the operator doc row and EVERY
+Rule 6 of the zen-mode contract carries a one-line progress anchor above the closing next
+step. **The hook SUPPLIES that line; the model no longer derives it.** The directive ends
+with a `ZENSU CHAIN ANCHOR:` field carrying either a `Zensu: …` line to render verbatim or
+the word `none`, and `none` means no Zensu chain is armed and no anchor is rendered at all.
+The rule lives in the hook, the skill, the operator doc row and EVERY
 `evals/zen-mode-reaction/scenarios/*.yaml`, and `tests/structure/test-zen-mode.sh` pins all
 of them — the count is deliberately not written out here, because the eval roster is DERIVED
-from the directory and a hand-maintained numeral is exactly what a driven loop cannot catch: `hooks/user-prompt-zen-mode.sh` (the ACTIVE `additionalContext` directive — the
+from the directory and a hand-maintained numeral is exactly what a driven loop cannot catch:
+`hooks/user-prompt-zen-mode.sh` (the ACTIVE `additionalContext` directive — the
 authoritative copy, re-injected every prompt), `skills/zen-mode/SKILL.md` rule 6,
 `docs/configuration.md`'s `user-prompt-zen-mode.sh` hook row, and every
 `evals/zen-mode-reaction/scenarios/*.yaml`, which embed the whole directive verbatim.
 Z19b pins the directive carriers against each other, Z19c pins the extraction regex
 across the two zen suites, Z19d pins the operator row.
 
-**The anchor is deliberately DECOUPLED from `hooks/lib/zensu-autopilot-state.sh`.** An
-earlier revision used that module's `STAGES` set as the label vocabulary, and review
-found the copy already wrong in three ways: `GATES` (unconditional) was missing while
-`VALIDATE`/`COVER` (gated on `state.options`) were listed, `AWAIT_TDD` was missing too,
-and the four marks are linear while that machine is cyclic — `GATES`, `CONVERGE`,
-`VALIDATE` and `COVER` all re-enter through `toAwaitTdd`, so a retried stage had no
-defined mark. The rule now names the steps the SESSION observed plus the ones it told
-the user it would take, and explicitly forbids copying a canonical pipeline out of
-another component. **Do not reintroduce the coupling**, and note that the worked EXAMPLE
-is part of it: a model copies the example before it obeys the prohibition beside it, so
-the example's step names must belong to no shipped component (they are checked against
-`.claude-plugin/plugin.json`'s skill list by hand — `implement` is a skill and `verify` is the stem of `verify-feature`,
-`fetch`/`parse`/`render` are not).
+**Why the model stopped deriving it.** The anchor rendered for ANY multi-turn work, so a
+session that merely answered "what is this Python process?" still closed with
+`Flow: ✓processes ✓identified ✓transcript ✓cause` — four invented steps that read like
+evidence and described no process at all. The observed session was conducted in German and
+its anchor was rendered in German; it is translated here because this repository is
+English-only outside a match literal, and these words are prose rather than literals. The anchor only means something inside a
+Zensu-driven development process; outside one it is decoration wearing the costume of a
+progress report. Reported by the user against a real session, not theorised.
 
-**Five couplings fire in the UNOBVIOUS direction**, the same shape §"Gate-Disable
+**The DECOUPLING RULE this amends — read the amendment, not just the prohibition.** An
+earlier revision derived the label vocabulary from `hooks/lib/zensu-autopilot-state.sh`'s
+`STAGES`, and review found that HAND-COPY already wrong in three ways: `GATES`
+(unconditional) was missing while `VALIDATE`/`COVER` (gated on `state.options`) were listed,
+`AWAIT_TDD` was missing too, and the four marks are linear while that machine is cyclic —
+`GATES`, `CONVERGE`, `VALIDATE` and `COVER` all re-enter through `toAwaitTdd`, so a retried
+stage had no defined mark. **That prohibition stands and is unchanged for `STAGES`.** What
+the anchor now does is a different mechanism: a LIVE READ of an owner-EXPORTED classifier.
+`hooks/lib/chain-recovery-v1.js` exports its shape literals precisely so consumers never
+re-spell them — CLAUDE.md already records the `INERT_SHAPES` case where a table-driven copy
+went silently wrong and the classifier-driven form caught it. `hooks/lib/zen-anchor-v1.js`
+therefore maps a shape the classifier PRODUCED, holds no second copy of anything, and
+answers `none` for any shape it does not map, so a shape added to `chainShape` costs an
+anchor rather than producing a wrong one. **Two of its three inputs are READ from the
+owner rather than restated**, and both were restated first: the FAILED mark is read from
+the owner's own composed `STUCK_SHAPES` (it WAS a hand-concatenation of
+`RECOVERABLE_SHAPES` / `DEAD_END_SHAPES`, which is the restated version that was replaced —
+see the corrected roster bullet below, and note that a failed read now THROWS rather than
+rendering `none`) (a hand-written `blocked` set had marked
+`ticket-spent` and `ticket-lost` as failures under a comment claiming the owner treated
+them as wedged — the owner calls neither wedged, and its own remedy for both is an
+ordinary advance instruction), and the TOTAL shape set comes from the new `ALL_SHAPES`
+export (the consumer's drift guard had used `NEXT_COMMAND`'s key set as a proxy for an
+invariant that module never enforced). Both exports were added to `chain-recovery-v1.js`
+by this change; a missing one makes the module render NO anchor rather than guess through
+it. Do NOT read this as licence to copy a stage table:
+`zensu-autopilot-state.sh`'s `STAGES` stays out of scope, for the cyclic-versus-linear reason
+above. The worked EXAMPLE is now the real vocabulary rather than a
+placeholder, which is what removes the old hazard that a model copied the example before it
+obeyed the prohibition beside it. It lives in the SKILL carrier alone — the hook derives
+its own at runtime and carries no example — and `Z19b` requires that line to be a token
+`zen-anchor-v1.js` can actually produce, because the `shared` needle list it is otherwise
+judged by deliberately holds no step name, so a renamed step used to move the module, the
+hook and every eval carrier while that one line kept teaching the old words.
+
+**The mechanism, end to end.** ONE node process does both things this hook needs from
+outside the shell — the prompt text and the anchor — because it fires on every prompt of
+every zen-mode session and a second spawn on that channel is not free; the anchor is only
+needed once the mode has resolved to ACTIVE, which is decided before that call. It resolves
+`ZENSU_PROJECT_ROOT` (the host-native spelling node needs — NOT the shell-namespace
+`ZEN_ROOT` the marker paths are built from) plus the `scv1_` session key, calls
+`session-control-core-v1.js`'s `readWorkflowState` (which takes that key as its `sessionId`,
+exactly as `zensu-doctor-report.js` calls it), classifies with `chain-recovery-v1.js`,
+renders through `zen-anchor-v1.js`, and substitutes the result into the directive's
+`{{ZENSU_CHAIN_ANCHOR}}` placeholder by shell PARAMETER EXPANSION. **The read is guarded by
+an `lstat` on the document that does TWO jobs**, and neither is an optimisation:
+`readWorkflowState` reaches `ensureDescendantDirectory`, which CREATES the missing
+components, so without a guard a per-prompt hook would mkdir `<project>/.zensu/state` in any
+project that has none — and the shared reader opens before it checks that the file is
+regular, which is the blocking hazard the paragraph further down states in full. The
+document path is built from the owner-exported `WORKFLOW_STATE_SEGMENTS` /
+`WORKFLOW_STATE_PREFIX`, so the layout is not re-spelled here; an earlier spelling used an
+`existsSync` on a hand-written two-segment path, and both halves of that are retired. The
+placeholder is what keeps the directive a STATIC literal in source, so Z19b, Z30 and P8 can
+still extract and measure it; the eval carriers hold a rendered token instead, and both
+suites compare verbatim up to the marker and then ask the module whether the token is one it
+can produce. **Every fault answers `none`** — an absent, unreadable, foreign or
+unclassifiable document, a document that is not a REGULAR file, a module that will not load,
+a `node` that runs and fails, or a value that fails the module's own token predicate. A
+missing anchor costs a line of presentation; a wrong one misreports where the session
+stands. **A `node` that is ABSENT is NOT in that list**, and the distinction is not
+pedantic: `zensu_bind_hook_session` already requires one, so the hook exits above this
+point and injects NOTHING — zen-mode is not re-injected at all that turn. AC-005 of the
+plan names "missing node" among the faults that leave the mode active, which no hook in
+this plugin can satisfy; the carriers say "a `node` that runs and fails" instead.
+
+**The token is spliced into a JSON string, so its charset is load-bearing — and it is checked
+in TWO PROCESSES by FOUR readers that share no spelling.** Count processes and readers
+separately, because they do not agree and an earlier wording gave one number for both -
+and a later one then contradicted the bold lead in the very next sentence by counting three
+processes. The module and the hook-side node program are ONE process: the hook `require`s
+the module INSIDE its node child, so `anchorTokenSafe` and the hook's own regex run there
+together and hold one reader each. The shell is the SECOND process, and it holds two
+readers of its own — `zen_anchor_grammar_ok` and `zen_anchor_bytes_ok` — composed by a third
+function, `zen_anchor_sanitized`, which is graded by `Z47` alone. Each owns a
+different property — an earlier wording called the node program "the ONLY grammar reader on
+that path" while the paragraph below already described a second, which is the kind of
+self-contradiction this section exists to prevent. The module's `anchorTokenSafe` owns the
+output SHAPE: `none`, or `Zensu:` plus mark/step pairs, and nothing else. The hook's node
+program re-checks against a grammar spelled in the HOOK, which is what a swapped module
+cannot change — the module blessing its own output is exactly the case that belt exists for.
+The shell then reads the grammar AGAIN over the bytes that ARRIVED, which is the only reader
+positioned to see a truncated write, plus the byte tests below. The shell then applies a BYTE test: a quote breaks the JSON, a
+backslash changes what an escape means, and any control byte — a CR or a TAB, not only LF —
+is invalid inside a JSON string and would lose the whole directive silently. Its `&`, `|`,
+`$` and backtick arms are RETAINED from the `sed` era rather than needed by the current
+expansion; they cost nothing, since no producible token carries them. **The shell now reads BOTH the grammar and the bytes, and the reason is a case the node
+program structurally cannot see.** Its prefix arm accepted `Zensu: <arbitrary prose>`, and the
+argument for that — the grammar belongs to the reader above — held only against a SWAPPED
+module. It does not hold against a TRUNCATED WRITE: the child emits `anchor + "\n" + prompt`
+in one call, so a child killed mid-write puts a PREFIX of an already-validated token on the
+wire, after that reader has passed on the whole one. `zen_anchor_grammar_ok` is a pure-shell
+field walk beside the byte test, not instead of it — the two own different properties and
+neither subsumes the other. It matches the mark set as an ALTERNATION of whole strings, never
+a bracket expression, because the marks are multi-byte and a bracket class over them matches
+individual BYTES under a byte locale.
+
+**The locale is PINNED, and the step-name class is spelled letter by letter — and only ONE of
+the two is measured.** Say which: the collation defect below was REPRODUCED on this host, the
+control-byte one was NOT, and an earlier heading here claimed "both MEASURED" over a body that
+already recorded the second as unreproduced. `local LC_ALL=C` scopes the pin to the call, since bash applies an
+assignment to LC_ALL immediately without an export. Written as `[a-z]` the walk accepted
+`Zensu: ✓Implement`, because a `case` range follows the collation order, which interleaves the
+cases in this locale. `[[:cntrl:]]` has the mirror exposure — three of the four marks carry
+a byte in the C1 range 0x80-0x9F, which a single-byte ISO8859 locale classifies as a control
+character (0x9C in ✓ and ✗, 0x96 in ▶, none in ·; an earlier wording said all three carried
+0x9C, which is false) — but say what was and was not observed: `Z34a` did NOT reproduce that rejection under `en_SG.ISO8859-1`
+on macOS, so it is a POSITIVE CONTROL on the fix's direction and the SOURCE arm `Z34` is the
+only bite this half has.
+
+**The node program carries no literal non-ASCII in its argv.** The four marks sat there as
+literal UTF-8, so the grammar travelled through the argument vector as bytes above 0x7F; on a
+path that is not UTF-8 clean the anchor dies silently, and only on that host — the class this
+file already records for the MSYS argv namespace. `Z35` scans the WHOLE spawning function
+rather than the quoted program alone, a deliberate over-reach whose only extra cost is that
+comments inside that one function stay ASCII, and it has already caught em dashes later edits introduced
+(the count lives in the check's own comment, which is the one carrier that moves with
+them).
+
+**EVERY fault DISCLOSES on stderr under a named class**, because `none` is also what a session
+with no chain armed legitimately renders: without a line, a corrupt document, an unloadable
+module and a dead child were byte-identical to ordinary healthy output on every channel, and
+this repository's own rule is that a silent failure is a lie. An ABSENT document is
+deliberately NOT a fault — it is the ordinary state of every project that never armed a chain,
+and disclosing it would put a line on every prompt of every non-Zensu session. `Z36` is the
+bite and `Z36-control` is what keeps the line off the healthy path.
+
+**The DELIVERY of that channel is UNVERIFIED, and is recorded as such.** Nothing measured here
+establishes that a `UserPromptSubmit` hook's stderr on exit 0 reaches the user, which is the
+same standard §"Autopilot Run Scope" states for its own Stop-hook disclosure. If it does not,
+the disclosure has no observable and the argument above buys nothing. The durable answer is a
+`/zensu:doctor` row — the shape `ruleCarrierRows` already ships for the two marker-block
+carriers — and it is deliberately NOT taken here.
+
+**Two residuals travel with it, and the first was WORSE than this paragraph used to say.**
+NOTHING is latched — not the child's line and not the parent's. An earlier revision described
+a per-session band file latching the parent's two classes and excused the child's repetition
+against it; that latch was REMOVED rather than hardened, for the three reasons the hook states
+at the call site (a bare read of a session-writable path outside the watchdog, where `[ -L ]`
+does not exclude the FIFO class this very change closed at the shared reader; a truncating `>`
+that a hard link turns into a destroy; and a guessable value a co-tenant could pre-seed to
+suppress a first disclosure). So the repetition is accepted on BOTH sides: while a fault
+persists, its line prints once per prompt. Second, the child's fault classes cannot move into
+`zen-anchor-v1.js` as an exported set, which is the shape this file prescribes for reason
+vocabularies elsewhere — one of them exists precisely for the case where that module cannot
+be loaded, so the vocabulary has to survive its absence. `Z46` pins the set instead, derived
+from the assignment sites in the comment-stripped body and compared BOTH ways, so a class
+added to the child REDDENS Z46 until `Z46_DECLARED` is amended, rather than being pinned
+by nothing, and a class that survives only in a comment is caught. Say "reddens", never
+"covered without editing the check": an edit IS owed, and the value of the derivation is
+that it forces one instead of letting the class ship unpinned. The CARRIER set is derived
+too — a third `*Fault` variable folded into the emission enrols itself — so only the
+declared list is hand-maintained.
+
+**The child runs under the SHARED watchdog ladder**, `zensu_run_bounded`, and the PAYLOAD
+reaches it on STDIN. Three channels were tried for that one value and the first two were
+wrong in different ways. An assignment written after a command word is an ordinary ARGUMENT,
+so it put the verbatim user prompt into an argument vector, where `/proc/<pid>/cmdline` is
+world-readable on Linux and the watchdog holds the line for the child's whole life. Exporting
+fixed that and left a smaller exposure: an environment is captured by process-listing,
+crash-reporting and telemetry tooling that does not capture stdin, `execve` caps a single
+environment string so an oversized prompt makes the exec FAIL, and MSYS rewrites exported
+variables on the way into a native binary while stdin is the one channel it never touches.
+Piping is also what both sibling consumers of this same payload already do — see
+`zensu-agent-context.sh` and `zensu-session.sh` — so the hook stopped being the odd one out.
+The two remaining exports carry no user content: a project root and a session key. `Z41` pins
+the whole contract TOTALLY rather than per name: no `NAME=value` token on the spawn line at
+all, the payload piped, and every name the child reads derived from the program and required
+to be exported. State THREE bounds with it. The ladder falls through to an UNBOUNDED arm when neither
+`timeout` nor `gtimeout` exists, which is base macOS, so this is a deadline where the host
+supplies one and nothing where it does not. Its deadline is a FIXED 5 seconds with no
+parameter, and this hook is its first PER-PROMPT caller — the ladder was written for two
+Stop-path children, where a five-second stall is paid once at a turn end, and it is now paid
+on the way IN to every prompt of every zen-mode session. Five seconds is generous for the
+work this child does and the constant was left alone deliberately, but the next caller that
+needs a different one has to parameterize the ladder rather than copy it, and doing so
+reaches `hooks/stop-chain-enforcer.sh` through `C49`/`C56a`. And a kill costs this caller
+more than it costs those two: they lose a diagnostic, while this one loses the prompt. A killed child returns NOTHING, and what that costs is NARROWER than an earlier
+wording here claimed. It said the turn loses the whole directive; it does not. An empty
+capture yields an empty anchor, which the sanitizer answers `none` for, and the directive is
+injected exactly as it is for any session with no chain armed. What is lost is the anchor and
+the PROMPT, and the prompt is the expensive half: the off-phrase branch reads an empty string
+and cannot see `zen off`, so the one in-band escape from the mode is unavailable for that turn.
+Overstating it as the whole directive pointed a reader at the wrong failure. ALL THREE
+modules are `lstat`ed before ANY is required, so a symlink or a non-regular file in
+`hooks/lib` is refused rather than loaded — verifying and requiring one at a time did NOT
+hold that property, because `zen-anchor-v1.js` requires `chain-recovery-v1.js` at top level
+and so executed the sibling before its own guard ran.
+
+**The couplings below fire in the UNOBVIOUS direction**, the same shape §"Gate-Disable
 Prefixes" records for G12 — an ordinary edit elsewhere reddens a suite named for the
-zen-mode hook, and nothing points at it from the side that changes:
+zen-mode hook, and nothing points at it from the side that changes. The count is
+deliberately NOT written out: this same section states that rule for its eval roster,
+and a first revision of this list opened "Five couplings" above seven bullets, which
+is the drift the rule exists to prevent.
 
 - Z19b DERIVES its eval carrier roster from `evals/zen-mode-reaction/scenarios`, so
   ADDING or REMOVING a scenario reddens this suite. Both halves are real only because
@@ -5244,103 +7138,600 @@ zen-mode hook, and nothing points at it from the side that changes:
   the ONLY CI-run check that reads that directory, the sibling that compares against the
   config being local-only. The derivation must be able to fail LOUDLY when it derives
   NOTHING: a `registered > 0` conjunct guarded the comparison at first, so a changed
-  registration spelling silently dropped the floor back to the absolute one. Measured
-  against a fixture, the same real loss reported
-  `eval-dir:4-scenarios-but-config-registers-5` with an intact config and reported []
-  once the spelling moved. It pushes `eval-config:registers-only-N` below three and then
-  compares unconditionally.
+  registration spelling silently dropped the floor back to the absolute one.
+- Z19b ALSO loads `hooks/lib/zen-anchor-v1.js` to derive the producible token set, so
+  renaming that module or its `SHAPE_POSITION` / `anchorToken` exports reddens this suite
+  AND `test-promptfoo-zen-mode.sh` P8, which derives the same set the same way. Z30 loads it
+  for the same reason — it substitutes the LONGEST producible token into the template before
+  measuring, because the source literal still holds the placeholder and measuring that
+  understated what a session receives.
+- `hooks/lib/chain-recovery-v1.js` now owes this feature FOUR exports it did not have:
+  `ALL_SHAPES` (the total set the anchor's key parity is pinned against, and which
+  `zen-anchor-v1.test.js` in turn pins against the literals in `chainShape`'s own source),
+  `DEAD_END_SHAPES`, and `STUCK_SHAPES` — the composition the failed mark is now read from,
+  which the owner already computed for its own `wedged` verdict and kept private, so the
+  consumer concatenated the two subsets a second time. Removing ANY ONE of the three
+  leaves the chain-recovery suite green while the zen suite goes red, but by
+  DIFFERENT mechanisms, and stating the outcome alone hid that. **The roster below is the
+  CORRECTED one; the previous wording was wrong twice after `stuckShapes` began reading the
+  owner`s composition, and the correction below was itself wrong once more after that.**
+  The load-bearing export is now `STUCK_SHAPES`, and removing it makes `anchorToken` THROW -
+  `chain-recovery-v1.js: STUCK_SHAPES unavailable, refusing to guess the anchor` - for every
+  shape that HAS a position. It does NOT answer `none`, which is the opposite mechanism and
+  the opposite failure direction: a throw is caught by the hook and disclosed, while a
+  `none` renders as an ordinary "no anchor can be justified this turn". The two inert
+  shapes still answer `none`, because their falsy `SHAPE_POSITION` entry returns before the
+  read is reached. Removing `DEAD_END_SHAPES` does NOT — the owner
+  builds `STUCK_SHAPES` from its module-scope constants rather than from its own exports, so
+  `anchorToken` stays fully functional and the zen suite reddens instead at the case named
+  'the failed mark is READ from the owner', which is that export's ONLY use in the unit
+  file. Removing `ALL_SHAPES` reddens the key-parity case AND the second case that asserts
+  the same set — two cases, not one. (Both attributions were wrong here for a round, which
+  matters in a roster whose whole purpose is to say what will catch the mistake.) The
+  FOURTH is `CHAIN_OUTCOMES`, which this roster omitted for a round while the Version
+  paragraph in this same section already named it as part of the change - so a maintainer
+  renaming it read here that zen-mode does not depend on it. It does: `OUTCOME_POSITION` is
+  DERIVED by reducing over it and THROWS AT LOAD if a row names an outcome the owner does
+  not declare, and its mechanism is the fourth distinct one - the anchor keeps rendering and
+  the allowlist-membership case in `zen-anchor-v1.test.js` is what reddens. Four exports,
+  four different mechanisms, and only one of them silences the anchor.
+- `tests/SUITE-OVERVIEW.md` carries a row per driven `node --test` file with its
+  REGISTRATION count, so adding or removing a case in either zen unit file makes that
+  table stale — silently, since nothing compares them. Its section 1 row for
+  `tests/structure/*.test.js` deliberately reads "(count deliberately omitted)", so adding a
+  unit FILE owes nothing there. An earlier wording here claimed that row carried a total and
+  that the file named itself its single owner; neither statement is in that file, and a
+  maintainer working from it would have gone looking for a figure that does not exist. The
+  per-file row is the whole obligation.
 - `tests/structure/test-best-solution-first.sh` B14/B14a/B14b pin THIS directive's SCOPE
   clause — its ranking obligation and the anti-inflation counterweight — so editing that
-  clause reddens a suite named for the best-solution-first hook, with nothing in this
-  section pointing at it. Note the boundary: a rule-6-only edit does NOT trip B14, so the
-  coupling is invisible until the day someone condenses the whole directive.
+  clause reddens a suite named for the best-solution-first hook. Note the boundary: a
+  rule-6-only edit does NOT trip B14, so the coupling is invisible until the day someone
+  condenses the whole directive.
 - Z19c binds `tests/structure/test-promptfoo-zen-mode.sh` and compares the
   ACTIVE-directive extraction regex SOURCE, so editing that suite reddens this one.
 - Z19d greps the `docs/configuration.md` hook row and anchors on
-  `^\|\s*`user-prompt-zen-mode\.sh`\s*\|`, so rewording that row — or renaming the hook
+  ``^\|\s*`user-prompt-zen-mode\.sh`\s*\|``, so rewording that row — or renaming the hook
   file — reddens this suite.
 - Z29 drives `tests/structure/zen-anchor-assertions.test.js`, which derives its scenario
   roster from that same directory and pins each anchor scenario's grader COUNT and its
   pass/fail VECTOR. So adding, removing or reordering a grader inside a scenario reddens
-  this suite. TWO floors guard the unit file and they count different things — do not
-  conflate them, as an earlier revision of this bullet did. `Z29_FLOOR` lives in
-  `test-zen-mode.sh` and counts `test()` REGISTRATIONS; the per-table `floor:` values live
-  in the unit file and count CASES. Both fire on REMOVAL only: adding a case or a test
-  cannot turn either red, so raising the matching number in the same commit that adds one is
-  a CONVENTION the file states in its own comment, not an enforcement — the same convention
-  `test-session-trail-skill.sh` T22 records. `Z29_FLOOR` sat at 3 against a file of 6 and
-  admitted the deletion of every case that actually executes a grader; the per-table floors
-  were added after three cases were landed in one round without a test, which left each of
-  them deletable with everything green. WHICH CEILING PAYS for the driver, stated because
-  both sibling sections state it for theirs and re-deriving it is a grep across four
-  manifests: `test-zen-mode.sh` has NO `windows-ci.v1.json` entry — it is in that profile's
-  sibling `windows-native-structure.v1.json` `excluded` list with a reason — so no per-suite
-  Windows cap can be blown here, and its `node --test` cost lands on the ubuntu shard
-  partition through `ci-shard-weights.v1.json`, at the unchanged `defaultSeconds`. That file
-  calls its own numbers a balance hint on which coverage never depends.
+  this suite. TWO KINDS of floor guard the unit file and they count different
+  things — do not conflate them, and note that the two kinds do not move together.
+  `Z29_FLOOR` lives in `test-zen-mode.sh` and counts `test()` REGISTRATIONS in the whole
+  file; the per-table `floor:` values live in the unit file and count CASES inside one
+  scenario. So binding a further scenario raises the registration count and no case count,
+  while adding a grader to a scenario already bound does the reverse — which is why
+  "raise the matching number" needs the word MATCHING. Both kinds fire on REMOVAL only, so
+  raising either in the same commit that adds to it is a CONVENTION the file states in its
+  own comment, not an enforcement. **Both anchor tables were LOWERED** (14 → 12 and 10 → 8)
+  when the mark-derivation graders went: the cases that drove them described a decision the
+  reply no longer makes. That is a deliberate lowering with its reason recorded at the
+  constant, and lowering it again needs the same note. The per-table count is deliberately
+  not written out here — it grew by one when the third scenario was bound, and a numeral in
+  this file is exactly what nothing recomputes.
+- Z31 drives `tests/structure/zen-anchor-v1.test.js`, the anchor module's own unit
+  contract, with the same registration floor. Z32 drives the hook end to end against a real
+  Session Control record: `none` with no chain, the implementing position with one armed,
+  and — the load-bearing arm — an unreadable workflow document costing the ANCHOR and never
+  the MODE.
+
+**A THIRD fix round ran against this feature, and it changed the shape enough to be worth
+stating rather than folding in.** Five reviewer perspectives found seven defects in the round-2
+work itself, and four of them were in code round 2 had just written:
+
+- **A FIFO at the SESSION MARKER forced the mode ON and then wedged the way out of it.** The
+  resolution tested `[ -L ]` and `[ -f ]`, and a FIFO is neither, so control fell through to
+  the CONFIGURED DEFAULT — which ships TRUE — and unreadable state IMPOSED the mode, the exact
+  opposite of what this hook's header promises. The off-phrase write then opened that FIFO
+  BLOCKING, so the one in-band exit wedged the session. Same blocking class this feature closed
+  at the shared reader, one marker over, and it had been there all along: `[ -e ]` plus `[ ! -f ]`
+  is the arm that distinguishes a present non-regular file from an absent one.
+- **The off-phrase write is HARDENED, and the argument is this file's own.** A truncating `>` at
+  a session-writable path is a destroy primitive aimed at whatever a HARD LINK there points at,
+  which is one of the three reasons the band file was deleted 35 lines above it. It lands an
+  `O_EXCL` temp and renames now. Cost is one `node` spawn on the off-phrase path only.
+- **The state-directory symlink guard covers the `.zensu` component too.** Testing
+  `.zensu/state` alone resolves THROUGH a symlinked `.zensu`.
+- **The `workflow document` label was cleared too early**, so a stub module in `hooks/lib` whose
+  export is missing passed the `lstat` guard, threw at the call, and was disclosed as a CORRUPT
+  DOCUMENT — sending an operator to `.zensu/state/` for a fault in the plugin tree. `anchor
+  render` is the class for everything past the read.
+- **The disclosure is TWO lead-ins, not one.** `fault` costs the ANCHOR, a line of presentation.
+  `payloadFault` costs the PROMPT, and with it the only in-band way out of the mode. Announcing
+  the second as an unavailable anchor told the user the one thing that was still working. `Z49`
+  is the executed case, and it had none before: every fixture built a payload carrying `prompt`.
+- **A fault-path prompt recovery restores the escape.** Merging both jobs into one child put the
+  PROMPT behind a filesystem read it never needed, so a stall destroyed it along with the anchor
+  and `zen off` did nothing. A second child loads no module, opens no path and reads fd 0. It
+  runs only when the first already failed — and NOT when the first was killed by the watchdog,
+  because three 5 s ladders are reachable in series against a 20 s registration and the
+  elapsed < 3 s gate is what holds the worst case at the header's 3 + 5 + 5 = 13 s: letting the
+  recovery run after the first ladder already spent its full 5 s is what threatens the deadline,
+  and a killed HOOK loses the whole directive, which is strictly worse than the anchor loss being
+  repaired.
+- **The sanitizer's rejection discloses, and an EMPTY value is not a rejection.** The first
+  spelling reported every degraded path as `token rejected on arrival`, naming a cause that
+  never occurred and sending a maintainer to compare two grammars that never ran.
+
+Four suite checks were found unable to fail and were rewritten rather than trusted: `Z47`
+grepped a bare NAME, so a trailing comment satisfied it; nothing at all pinned that the hook
+still CALLS the sanitizer (`Z47a` now does — deleting the call site left four checks grading a
+function nothing invokes); `Z36` asserted the lead-in and not the CLASS, so the emitted line
+could drop `classes.join` entirely; and the hook's own document `lstat` was graded by nothing,
+because the shared reader's `O_NONBLOCK` produces the identical observable — `Z48` pins the
+ORDER instead, since the guard's second job is preventing a per-prompt `mkdir` of
+`.zensu/state`. `Z32e` was byte-identical to two fail-open checks and now requires SILENCE on
+stderr; `Z19b` discarded the regex FLAGS, so an added `i` widened the shipped reader invisibly.
+
+**TWO WRITERS LAND THAT MARKER, and hardening one of them left the guarantee false.**
+`hooks/lib/zensu-zen-mode.sh` is the OUT-OF-BAND remedy, and the hook NAMES it in the sentence
+it prints when the in-band `zen off` escape is unavailable — so for exactly the corrupt marker
+path that makes the hook decline, the user was being pointed at a writer that still carried all
+three hazards: no `.zensu` component in its symlink guard, no non-regular arm (a FIFO there
+hangs a plain redirect with no reader), and a truncating `>`. Both writers now carry the same
+three guards and both publish by `O_EXCL` temp plus rename. **State the rename's effect
+precisely**, because the `nlink !== 1` test does not do what a first comment credited it with:
+`rename(2)` repoints a NAME and never truncates the linked inode, so the hard-link destroy
+primitive is defused by the rename itself. **The `nlink !== 1` conjunct is GONE from BOTH
+writers**, and its removal is the point rather than a detail: refusing on it defended nothing the
+rename had not already closed, while one `ln` in a session-writable directory made every later
+off-attempt fail, in-band and out-of-band alike — an availability regression on the only escape
+from the mode, against the truncating write it replaced. Do not restore it as a "defensible
+signal". The temp
+suffix is random rather than the pid, because nothing reaps a temp left by a killed write and a
+later invocation landing on the same pid would then fail the `O_EXCL` open and report only
+`COULD NOT BE DEACTIVATED` — a one-off crash turned into a permanent refusal of the in-band exit.
+
+**A NON-TRAVERSABLE state directory used to impose the mode too**, on the permission axis rather
+than the file-type one. `test -L`, `-e` and `-f` all fail with EACCES, so the ladder fell through
+to the configured default. The asymmetry that shows the ladder already knew the right answer: an
+unreadable MARKER resolves OFF one arm up; only the unreadable DIRECTORY fell the wrong way.
+
+**Round 3 shipped four of its seven fixes with no check at all**, which is the same class this
+whole feature exists to close — the round that found four defects inside round 2's own code
+repeated the pattern. `Z50` pins the marker guards on BOTH writers plus the rename landing,
+`Z51` pins the recovery ladder and all three distinct causes, and its `124|137` arm is a
+NEGATIVE one — it sets `Z51_BAD` when that literal watchdog-skip case arm is PRESENT and requires
+the `-ge 124` comparison instead, because a two-value case arm names two exit codes where the
+property is "the watchdog killed it". A maintainer reading this sentence as "Z51 pins the arm"
+restores exactly what Z51 forbids, and `Z52` scans EVERY `node` child rather than the one function `Z35`/`Z41`/`Z46`/`Z48`
+all derive from. **`Z52`'s own first spelling was the same defect it exists to catch, and CI
+found it — not this suite.** It scanned the WHOLE FILE for non-ASCII, so it reported the em dash
+inside the OFF directive — ordinary prose that reaches no argv — as a leak; and it did that
+through `grep -nP`, a GNU extension, so the identical tree was GREEN on macOS and RED on
+ubuntu. Both halves are in `node` now, bounded to each child's PROGRAM TEXT. Its argv arm walks
+TOKENS and resets at every shell operator, because position is the whole property: a LEADING
+`NAME=v cmd` sets an environment and appears in no argv, while the same token after a command
+word is an ARGUMENT — which is the historical leak here, `zensu_run_bounded PAYLOAD="$INPUT"
+node -e …` making the ladder exec `timeout 5 PAYLOAD=… node …`. Line continuations are joined
+first, because the shipped spawn spans two physical lines and a per-line walk skipped the one
+carrying the assignment — round 3 added two further programs outside that slice, so writing
+`PAYLOAD="$INPUT" node -e ...` in the recovery child would have put the verbatim prompt back
+into an argv with `Z41` green.
+
+**A FOURTH round followed, and its three findings were ONE shape: round 3 fixed a leaf and
+left the component above it, the sibling writer, and the executed case behind.**
+
+- **The permission arm covered `.zensu/state` and not `.zensu`.** With the parent unsearchable
+  every test in the ladder fails for EACCES rather than for its own reason — including that
+  arm's own `[ -d "$ZEN_STATE_DIR" ]` — so control reached the configured default again and a
+  recorded `{"active":false}` was ignored. The symlink arm one line above already tested both
+  components and said so; the new arm did not. `Z54` drives BOTH levels and the `.zensu` level
+  is the one a leaf-only arm can never catch.
+- **`zensu-zen-mode.sh --status` had no equivalent arm at all**, so it reported the configured
+  default — `on` — for a session the hook resolves OFF and injects nothing into. Two readers of
+  one state disagreeing is the class this file forbids elsewhere, and `--status` is the surface
+  a user consults exactly when the mode misbehaves.
+- **Both resolution arms were source-pinned only**, in a suite that already plants a `mkfifo`
+  for `Z32d` — on the workflow document, never on the marker. `Z53` and `Z54` are the executed
+  cases; each was probed by deleting its arm.
+
+**`stuckShapes` now READS the composition instead of restating it.** `chain-recovery-v1.js`
+computes `STUCK_SHAPES` for its own `wedged` verdict and kept it private, so the consumer
+concatenated the two exported subsets a second time. A third stuck subset added to the owner
+would have been folded into `wedged` and silently omitted here, rendering a wedged chain's
+running mark instead of its failed one with both suites green. The constant is exported and
+consumed; verified identical to the previous concatenation before the swap.
+
+**The shell grammar reader's truncation justification was STRONGER than what it delivers**, and
+the comment now says so. Both grammars accept any number of complete mark/step pairs, so a
+truncation at a field boundary or inside a step name passes both; only a cut inside a mark or
+straight after one is refused. And a truncated write implies a non-zero child status, which the
+parent already answers by discarding the whole capture first. What that reader genuinely owns
+is the swapped-module case plus the prefix arm the byte test alone allowed.
+
+**`Z50`'s comment strip removed SHELL comments only, and that was measured rather than argued:**
+commenting out `fs.renameSync(...)` inside an embedded node program left the check green even
+after its needle was anchored on a call position. It strips `//` lines too now, and its
+negative arm matches ANY truncating redirect at the marker rather than one historical
+`&& { printf ... }` spelling.
+
+**Which ceiling pays for the two `node --test` drivers:** `test-zen-mode.sh` has NO
+`windows-ci.v1.json` entry — it is in that profile's sibling `windows-native-structure.v1.json`
+`excluded` list with a reason — so no per-suite Windows cap can be blown here, and the cost
+lands on the ubuntu shard partition through `ci-shard-weights.v1.json`. That file carries an
+EXPLICIT entry for this suite (a figure that happens to equal `defaultSeconds`, which is why a
+first revision of this paragraph mistook it for the default), and its own note says the seconds
+map was measured on one named CI run. That measurement predates both drivers: Z31 adds a
+`node --test` process and Z32 adds a session registration, three hook invocations and one
+`--tdd-begin` against a temp project. Treat the entry as UNREMEASURED and take a new figure
+from the next green ubuntu run — the wording that file already uses for `test-doctor.sh` and
+`test-autopilot-stop-enforcer.sh`. No Windows wall clock exists for it either, so say
+"unmeasured", never "cheap".
 
 **The safety carve-out rides in the SAME directive string as the anchor**, and P8 in
 `test-promptfoo-zen-mode.sh` — the only full-fidelity check that the eval copies match
 the hook — is `localStructureTests` and never runs in CI (`run-all.sh --ci` skips it).
 Z19b therefore carries three carve-out needles applied to the whole-directive carriers
 only, NOT to the `skill` carrier, which is sliced to rule 6 while the carve-out is rule 9.
-Without them a reworded carve-out would leave `safety-carve-out.yaml` grading a directive
-no session receives, with every CI suite green.
+Without them a reworded carve-out would leave `safety-carve-out.yaml` — the one live-model
+check that a warning is never compressed — grading a directive no session receives, with
+every CI suite green.
 
 **A run-time seam exists for the carrier problem and was DECLINED, deliberately.**
 `hooks/lib/rule-block-v1.js` exports `readRuleBlock`, and both
 `hooks/session-start-evidence-discipline.sh` and `hooks/user-prompt-best-solution-first.sh`
-consume it instead of holding a copy; `/zensu:doctor` already renders a `rule carriers:`
-row for those two. Adopting it here would move the directive into a markdown block, delete
-Z19c outright (neither suite would need a hand-copied extractor), and give zen-mode an
-operator surface that can tell "stopped injecting" from "user turned it off" — which it
-currently has none of. The cost is real on both sides and is why it was not taken in this
-change: a malformed block drops the injection SILENTLY, which for zen-mode means the mode
-quietly stops; every eval `spec_block` copy still needs its own text regardless, so it
-removes one copy and not all of them; and it is a migration commit of its own rather than a
-line in a fix. **The fact that actually settles the cost is a BOUND, and an earlier
-revision of this paragraph omitted it:** `hooks/lib/rule-block-v1.js` declares `MAX_BLOCK`
-and refuses a larger block, and `Z30`'s floor for this directive — its declared ceiling
-minus its declared headroom — sits ABOVE that constant, so EVERY admissible directive
-length is over the shared reader's limit. The comparison is stated qualitatively on
-purpose: §"Marker-Block Carriers" above says to name that constant and never to spell its
-value, because a prose copy of the number goes stale silently, and the copy it already had
-to remove from `docs/architecture.md` is the precedent. Adopting the seam is therefore not "a migration commit of its own" but a
-re-decision of a bound shared with the two always-on marker-block carriers, which is a
-larger change than the paragraph implied and lands squarely in the silent
-dropped-injection failure it warns about. Recorded so the next reader knows the
-alternative was weighed, not missed.
+consume it instead of holding a copy; `/zensu:doctor` already renders a `rule carriers:` row
+for those two. Adopting it here would move the directive into a markdown block, delete Z19c
+outright (neither suite would need a hand-copied extractor), and give zen-mode an operator
+surface that can tell "stopped injecting" from "user turned it off" — which it currently has
+none of. The cost is real on both sides: a malformed block drops the injection SILENTLY,
+which for zen-mode means the mode quietly stops; every eval `spec_block` copy still needs its
+own text regardless, so it removes one copy and not all of them. **And the bound that
+settles it is `MAX_BLOCK`**, which `rule-block-v1.js` declares and this file must never
+re-spell as a number: the Z30 floor still sits ABOVE it, so every admissible directive length
+is over the shared reader's limit — but the margin NARROWED when rule 6 shrank, so re-derive
+it rather than trusting this sentence. A further obstacle is new: the directive now carries a
+substituted field, and a markdown block read at run time would have to carry the placeholder
+and the substitution with it.
 
-**The injection is now BOUNDED, and that is what makes the figures maintainable.** `Z30` in
+**The injection is BOUNDED, and that is what makes the figures maintainable.** `Z30` in
 `tests/structure/test-zen-mode.sh` measures the emitted directive through `node`
-(`String.length`, because the text carries four non-ASCII marks and `${#var}` counts bytes
-or code points depending on locale) and holds it one-sidedly: growth past the declared
+(`String.length`, because the text carries non-ASCII marks and `${#var}` counts bytes or code
+points depending on locale) and holds it one-sidedly in BOTH directions: growth past the
 ceiling fails, and so does a shrink further below it than the declared headroom, because a
-ceiling that has drifted away from its text has stopped being a tripwire. The rule 6
-rewrite took the directive from 2951 to 4664 characters — 57% — with nothing observing it.
+ceiling that has drifted away from its text has stopped being a tripwire. The rule-6 rewrite
+took the directive from 2951 to 4664 characters — 57% — with nothing observing it; the
+supplied-anchor rewrite then SHRANK it to **4208** (the static literal, placeholder included)
+and the window was re-derived to a ceiling of 4300 with 95 of headroom. **4208 is the static
+literal and 4224 is what Z30 MEASURES** — it substitutes the longest producible token for the
+placeholder first — so the realized slack is 76 rather than the 92 the static figure invites,
+and both pass. 4224 is also the figure the per-turn totals use.
 
 **Known gap, accepted:** the KB/KiB totals in `docs/architecture.md` are still hand-derived
 from that character count, so they age whenever the directive moves even though the count
-itself is now pinned. They were corrected in this change (4664 + 1764 ≈ 6.3 KB per turn),
-and the `C6` attribution error in the same paragraph — it named
-`tests/structure/test-best-solution-first.sh`, which contains no `C6` — was corrected with
-them.
+itself is pinned. They were corrected in this change (4224 + 1756 ≈ 5980 characters per turn,
+about 117 KiB over 20 turns and 351 KiB over 60). Both operands are stated in the SAME unit
+on purpose: an earlier wording summed 4224 characters with the sibling's 1764-BYTE figure.
+
+**A CLOSED chain renders NO anchor, and the two readings that preceded that are why.**
+`chain-closed` maps to `null`, the same value `no-session` carries, which is how the owner
+already groups them — `INERT_SHAPES` holds exactly those two.
+
+Both earlier readings asserted something untrue. `done: 3` claimed passes: `chainShape`
+answers `chain-closed` on `chainDone === true` before it looks at any ticket or round, and
+the gate on it was `codeReviewDone === true || reviewRound >= 1`, where BOTH operands say a
+round was ISSUED rather than that it succeeded. The classifier cannot say more —
+`chainOutcome` is a workflow-state key whose vocabulary includes `max-rounds`, and
+`classifyChain` does not put it on its report at all — so a chain that ran one round and
+closed without converging was indistinguishable from one that passed, while the directive
+publishes the tick as "a step that finished and passed". The fallback reading `done: 1`
+claimed the opposite: it renders the pending mark, which that same directive publishes as
+"not yet reached", for a chain that is over.
+
+**The PERSISTENCE is what made either one more than a one-turn slip.** The workflow document
+survives the terminus — the phase library treats active-plus-implComplete-plus-chainDone as a
+regular state — and the hook re-resolves on EVERY prompt with no recency bound, so a closed
+chain kept rendering its line over unrelated work for the rest of the session. That is
+precisely the "anchor rendered for work with no Zensu process behind it" defect this whole
+module exists to remove, reintroduced one shape over.
+
+Rendering on the CLOSING turn alone would be defensible and the shape cannot express it:
+`chain-closed` cannot distinguish "just closed" from "closed two hours ago". That needs a
+recency signal the classifier does not supply. Mapping to `null` removed the
+`unreviewedDone` rung, the `options.reviewed` parameter and the whole `reviewedFromReport`
+derivation with it. `anchorToken` then took a shape and nothing else — and that contract was
+RETIRED again by the outcome read below: it now accepts a shape OR the classifier report, and
+`outcomePosition` reads `report.linkage` and `report.autopilot.outcome` off the latter. The
+report input is deliberately MONOTONE (it can only refine a position the shape alone leaves
+unmapped, never override one), which is the bound that replaced the old contract.
+
+**KNOWN RESIDUAL of the same class, one shape over, and it is NOT fixed here.**
+`awaiting-self-review` and `self-review-unbindable` are both reached from
+`codeReviewDone === true`, and the bound max-round handoff states its own postcondition as
+outcome `max-rounds` WITH `codeReviewDone` true. So a review that exhausted its budget
+without converging still renders a ticked `review` step. Every in-vocabulary answer is worse
+or larger: the pending mark would claim a review still ahead of one that is over, and the
+honest mark is the failed one, which this module renders only for shapes the owner's own
+stuck sets name. **This is now IMPLEMENTED for a BOUND chain and only for one**:
+`outcomePosition` reads `report.autopilot.outcome` and renders the blocked mark for
+`max-rounds`, taking the value off the classifier's own `autopilotLinkage` rather than adding a
+field to its report. What is still open is the STANDALONE case, which carries no
+`chainOutcome` anywhere the anchor can reach, so a standalone chain that exhausted its budget
+still renders a ticked `review` step. Closing that needs the outcome surfaced for a standalone
+chain, which is a change to the report shape and belongs in its own commit.
+
+**Port-relevant.** The core half is `anchorToken` / `anchorTokenSafe` / `SHAPE_POSITION` /
+`ANCHOR_STEPS` / `ANCHOR_NONE` / `ANCHOR_PREFIX` / the four marks / `ANCHOR_TOKEN_RE` /
+`stuckShapes` / `anchorNoneIsExpected` / `producibleTokens` / `OUTCOME_DEPENDENT_SHAPES` /
+`OUTCOME_POSITION` / `outcomePosition`, in `hooks/lib/zen-anchor-v1.js`, together with its ONE sibling
+require — the classifier whose shapes it maps and whose composed `STUCK_SHAPES` it reads, without which
+it does not load at all. `stuckShapes` is exported for its TEST SEAM alone: its optional `owner` parameter reaches
+the non-array and absent-export guards AND proves the module does not fall back to
+re-concatenating the two subsets, which is the property the `STUCK_SHAPES` swap turns on.
+Say it that way rather than "what makes the two `return null` guards reachable" — the
+EMPTY-array guard is also reached without the parameter, through a copied module beside a
+stub. Production always calls it with no argument. There is deliberately NO `reviewed` input of any kind —
+an earlier round carried one as a host obligation and then moved it into the module, and
+mapping `chain-closed` to `null` deleted it outright; a port that reintroduces one has
+reintroduced the false-completion class. The host half is NINE obligations a port must
+re-decide, and the FIRST is the one a port satisfying every other still gets wrong: the CALL
+SHAPE. `anchorToken` accepts either a bare shape string or the whole classifier REPORT, and
+only the report carries the linkage and the outcome the two `OUTCOME_DEPENDENT_SHAPES` need.
+A port that passes `report.shape` - the spelling the module's name and its `SHAPE_POSITION`
+export both invite - gets `ANCHOR_NONE` for those two, so a bound chain's self-review
+position never renders, and `anchorNoneIsExpected` then answers true so the port's own
+disclosure stays silent as well. Classify with the owner and pass the WHOLE report. Then:
+WHICH document carries
+the chain and which identity names it; the MODULE TRANSPORT (this host runs `node` with its
+cwd inside `hooks/lib` — the first of the two mechanisms
+`test-msys-special-plugin-module-boundaries.sh` sanctions — because the second needs a
+`zensu-host-path.sh` render and that is a second process on the hottest path in the plugin);
+the substitution into the directive AND its own independent re-check of the token BEFORE it is
+written (this host spells the grammar a second time inside its node program precisely so a
+swapped module cannot both produce a bad token and bless it); the SECOND, shell-side re-check
+over the bytes that ARRIVED, which is a separate obligation and not a restatement of the one
+before it — the body above argues that neither subsumes the other, because only a reader
+positioned after the transport can see a TRUNCATED WRITE, and a port that folds the two into
+one line drops exactly the defense that argument exists for; the charset belt appropriate to
+that host's transport — the module's predicate is an output-SHAPE contract, not a JSON
+escaping rule, and a port with a different transport still owes its own check; the DEADLINE on
+the child, which this list omitted for a release even though the body above already said the
+child runs under the shared ladder — a port whose child reads a file on stalled storage and is
+never bounded hangs the prompt path itself, and the ladder's own header names that residual;
+the DISCLOSURE — the
+fault-class vocabulary, the channel it is written to, and the decision that an ABSENT
+document is not a fault, an obligation easy to miss because it lives in the host half
+entirely while reading like a property of the module, and a port that omits it ships the
+silence this feature exists to remove; and the operator accounts.
+The pre-open guard on the document is no longer among them in the same way: it still exists
+because this host's `readWorkflowState` CREATES the state directory, but the BLOCKING half
+moved into the shared reader, where a port inherits it from the core rather than owing it.
+
+**Operator-facing accounts that must move with it:** `skills/zen-mode/SKILL.md` rule 6, the
+`user-prompt-zen-mode.sh` hook row in `docs/configuration.md` (pinned by Z19d, so a reword
+there reddens this feature's suite), and the per-turn character and KiB totals in
+`docs/architecture.md`, which are hand-derived from the measured directive length and are the
+one account in this list that ages silently whenever the directive moves. They are named
+individually further up as well; this bullet exists so a maintainer finds all three in one
+place rather than by reading the whole section.
+
+**The disclosure is spelled TWICE within this host, on opposite sides of a process
+boundary, and that is why the lead-in has a pin of its own.** The child writes its own line
+from inside the node program; the parent writes a second one for the two outcomes the child
+cannot report, a watchdog kill and an unreachable `hooks/lib`. A shared constant cannot span
+that boundary — the child is a single-quoted argv program with no access to a shell variable —
+so the lead-in `zensu: zen-mode anchor unavailable (` exists in two languages in one file.
+`Z42` pins the parent arms and `Z46` pins the child vocabulary, and `Z42b` extracts the ANCHOR
+lead-in from BOTH sides of the shipped hook and requires them equal, so a reword on one side
+fails rather than splitting one diagnostic into two an operator would never grep for together.
+It filters each side to the anchor wording deliberately: the parent also owns a
+`zensu: zen-mode prompt unavailable (` lead-in, a different fault class that must not be forced
+to agree with this one. A port owes the same pin, or the same divergence. A port that
+takes only the module gets a mapping with no reachable caller. `zensu-codex`, `zensu-kiro`
+and `zensu-antigravity` were NOT included in this change.
+
+**A NON-REGULAR document is refused before it is opened, and that guard is about blocking
+rather than tidiness.** `.zensu/state/` is writable from inside a session and no gate covers
+it while the chain is inactive, so a `mkfifo` at the workflow document's path is reachable
+from in-session. `readRegularFileSnapshot` THEN opened `O_RDONLY|O_NOFOLLOW` and only
+afterwards `fstat`ed for `isFile()`, with no `O_NONBLOCK`, so the open on a FIFO never
+returned — and this hook fires on EVERY prompt. Past tense throughout: the flag landed in
+that reader in this same change, as the paragraph below records, and stating the gap in the
+present here would assert the defect still exists. That wedges the session with no escape from inside: the prompt
+never reaches the model, so the off-phrase branch is never evaluated either. The hook
+therefore `lstat`s the document first, and builds its path from the OWNER's newly exported
+`WORKFLOW_STATE_SEGMENTS` / `WORKFLOW_STATE_PREFIX` rather than re-spelling the layout — the
+export exists because `workflowStateFile` cannot serve a read-only pre-check: asking it for
+the path CREATES the directory.
+
+**THE UNCOMPROMISED FIX WAS TAKEN, and the hook-side guard is now belt rather than the
+boundary.** `readRegularFileSnapshot` adds `O_NONBLOCK` to its open, guarded exactly as
+`O_NOFOLLOW` already is because the constant is not defined on every build. **POSIX LEAVES
+the flag UNSPECIFIED for a regular file rather than giving it no effect** — the stronger
+wording stood here as the reason this was safe for that reader's other callers, and the
+module retracted it in the same change. What the safety rests on is that Linux and macOS
+ignore it there, plus the bounded `EAGAIN`/`EWOULDBLOCK` retry arm the read loop now
+carries: 64 iterations, each pausing through the module's ONE `sleep` primitive under its
+best-effort contract, so a host where the unspecified behaviour does bite degrades in
+latency instead of surfacing as a corrupt-document failure. On a FIFO or device the open
+returns immediately and the existing descriptor `isFile()` check rejects it. That closes the class for EVERY caller of that reader rather
+than narrowing it for one — `readWorkflowStateSnapshot` and every gate that reads a workflow
+document inherit it.
+
+The earlier round declined that fix on the ground that the module is required by every gate
+and needs its own regression pass. The ground was sound and the CONCLUSION did not follow,
+which review named: this same change already edits that module for two exports, so the bar
+was being applied inconsistently. Taking the flag is the smaller of the two remaining
+options, because the alternative left a check-then-use race the writer could retry on every
+prompt.
+
+The hook's own `lstat` STAYS, for the directory-creation job it also does and as defence in
+depth on the blocking one. The `timeout` on the `hooks.json` registration stays too, and its
+own bound is unchanged: a killed hook emits nothing at all, so that turn loses the whole
+directive — the anchor, the contract and the off-phrase branch — which is the one fault in
+this file that is not routed to `none`. Whether this host lets the prompt through when a
+`UserPromptSubmit` hook hits its `timeout`, and whether it kills the process group or only
+the direct child, are both UNVERIFIED; nothing in this work measured either.
+
+`Z32d` plants a real FIFO and BOUNDS the hook, reporting a block rather than
+waiting for it: the first spelling used a command substitution with a background killer and,
+measured against a hook with the guard removed, hung past two minutes anyway, because a
+command substitution reads until every writer closes the pipe and the blocked `node` still
+held it.
+
+**ALL modules are verified before ANY is required, and the one-at-a-time spelling did not
+hold the property it claimed.** `zen-anchor-v1.js` requires `chain-recovery-v1.js` at top
+level, so verifying and requiring one module at a time loaded and EXECUTED the sibling on the
+first `require` — before its own `lstat` could refuse it. A guard that runs after the file has
+executed is not a guard. Two independent reviewers reported this in the same round.
+
+**The substitution is parameter expansion, not `sed` — and the `sed` spelling is a DRAFT OF
+THIS BRANCH, never shipped history.** Say so, because three code comments framed it as a
+predecessor and a reviewer correctly reported that `main` contains no `sed` and no `existsSync`
+in this hook at all: it carries no substitution, because it carries no anchor field. In that
+draft the ACTIVE directive was the only one of the hook's three emissions that depended on an
+external command, and nothing examined that command's exit status: an absent or failing `sed`
+produced empty stdout, the model received no zen-mode context at all, and the unconditional
+`exit 0` made that indistinguishable from the hook not running. Every other fault in that file
+is routed to `none`; that one was routed to silence. The expansions need no process, and the
+placeholder is held in a variable so it stays a literal pattern rather than a glob. The same
+correction applies to the `existsSync` guard the document-path paragraph above describes as one
+"this block used to carry" — it was carried by an earlier draft here, not by a release.
+
+**The byte tests are a FUNCTION, `zen_anchor_bytes_ok`, for a coverage reason.** Name that
+function and not `zen_anchor_sanitized`, which after the split contains no `case` block at
+all and is the COMPOSITION `Z47` grades — the same section states that correctly further up,
+and this sentence contradicted it. As
+inline `case` blocks they were unreachable from every fixture — by the time they run the value
+can only be `none`, a module-produced token, or empty — so all three could be deleted with the
+suite green. `Z33` extracts the function from the shipped hook and drives it, with the
+accepting cases first so a function that answered `none` for everything could not satisfy the
+rejections.
+
+**Known gap, accepted:** a rendered `✓review` reports what a READABLE DOCUMENT CLAIMED, never
+evidence that a review ran. `validateWorkflowState` is structural — it derives
+`session_id_hash` from the file's own name, there is no MAC, and `.zensu/state/` is writable
+from inside the session — so a forged document can put a completion line in front of a user
+this directive itself describes as working at low capacity, on every turn. The reachable
+outputs are a closed set, so this is not a text-injection channel; it is a completion SIGNAL a
+co-tenant writer controls. Authenticating it needs a persisted signal, which is a
+workflow-state schema change and therefore a `minor`, which the `patch` walk below declines.
+
+**Known gap, accepted:** the `ZENSU CHAIN ANCHOR: ` field is identified to the model by a
+fixed, guessable literal with no per-turn binding, so the same literal in content the model
+reads LATER in the turn — a repo file, a pasted diff, a fetched page — can compete with the
+injected one. It occurs in this repository's own tests. The impact is a wrong assurance line,
+not instruction hijack: the heredoc is quoted and the only substituted value is the
+closed-vocabulary token. Binding it (a per-turn nonce in the field name, named by the
+directive as the only one it may trust) is the fix and is not implemented.
+
+**Known gap, accepted:** the anchor covers the review CHAIN only — `implement`, `review`,
+`self-review`. An Autopilot run's own stages are deliberately absent, for the cyclic-versus-
+linear reason stated above, so a durable run shows the inner chain's position and not the
+outer run's. `classifyChain` supplies `linkage` and `autopilot`, so surfacing the run id is
+available and was not taken.
 
 **Version: `patch`.** Walked against §"Runtime Lineage (`version_type` is load-bearing)"
 entry by entry: no context-record or workflow-state schema field, no strict key set, no
 hook added, removed or renamed and no matcher changed, no new config key (`zenMode` and
-`zenModeDefault` are pre-existing), and no attestation change. The hook's only output is
-`additionalContext`, which is exactly the ADVISORY shape the hook-inventory exemption
-names, and it returns no `permissionDecision` in either direction. Two things read like a
-breaking change here and are not, which is why the walk is written down rather than left to
-be re-derived: the runtime digest DOES move, because `manifestRuntimeEntries` folds `hooks`
-and `docs` in wholesale — but `readContextInternal` measures the RECORDED root — and the
-directive is stateless, re-emitted from the executing tree on every prompt, so nothing
-persisted crosses the upgrade. The only per-session artefact zen-mode owns is the
-`{"active":true|false}` marker, whose shape is untouched. Choosing `minor` would be
-actively harmful rather than merely wasteful: while the plugin is at major `0` the minor is
-the breaking axis, so it would refuse every in-flight session until the user ran
-`/zensu:adopt-session --confirm`.
+`zenModeDefault` are pre-existing, and this change deliberately adds none), and no
+attestation change. The hook's only output is `additionalContext`, which is exactly the
+ADVISORY shape the hook-inventory exemption names, and it returns no `permissionDecision` in
+either direction. The hook now READS the workflow document; it writes nothing to it, so no
+persisted shape moves. Two later additions were walked separately and neither moves the
+verdict: a `timeout` key on the existing `hooks.json` registration is not a hook added,
+removed or renamed and not a matcher change, and the two new exports on
+`session-control-core-v1.js` (`WORKFLOW_STATE_SEGMENTS`, `WORKFLOW_STATE_PREFIX`) are
+additive — an older runtime that does not read them is unaffected, and no validator gains a
+key. A THIRD group was walked the same way after the review rounds and is named here so the
+verdict can be re-derived from what this paragraph lists rather than from memory: the
+`O_NONBLOCK` open flag and the paced `EAGAIN` retry in `session-control-core-v1.js`, a module
+every gate loads, together with its collapse to ONE `sleep` primitive taking its fault
+contract as a parameter; and the four further exports on `hooks/lib/zen-anchor-v1.js`
+(`anchorNoneIsExpected`, `producibleTokens`, and the outcome allowlist behind them) plus
+`CHAIN_OUTCOMES` becoming frozen and exported on `chain-recovery-v1.js`. None is a listed
+breaking entry — no persisted shape moves, no validator gains a key, no matcher changes and
+nothing returns a `permissionDecision` — so the `patch` verdict is unchanged; only the
+enumeration was short. Two things read like a breaking change here and are not, which is why
+the walk is written down rather than left to be re-derived: the runtime digest DOES move,
+because `manifestRuntimeEntries` folds `hooks` and `docs` in wholesale — but
+`readContextInternal` measures the RECORDED root — and the directive is re-emitted from the
+executing tree on every prompt, so nothing persisted crosses the upgrade. The only
+per-session artefact zen-mode owns is the `{"active":true|false}` marker, whose shape is
+untouched. Choosing `minor` would be actively harmful rather than merely wasteful: while the
+plugin is at major `0` the minor is the breaking axis, so it would refuse every in-flight
+session until the user ran `/zensu:adopt-session --confirm`.
+
+## bash 3.2 Command-Substitution Truncation (`test-bash32-portability.sh`)
+
+macOS ships GNU bash **3.2.57** as `/bin/bash`, so it is the DEFAULT shell for every
+hook and helper this plugin runs there — not an edge case, and not something a
+`#!/bin/bash` shebang opts out of. That release extracts a `$( ... )` body with a naive
+scanner that tracks quotes and parens instead of parsing, so any token the scanner
+miscounts ends the substitution early. **The rule: inside a command substitution, write
+every `case` pattern with the POSIX-optional leading paren — `(pattern)`.** The bare
+`pattern)` form supplies an unbalanced `)` that CLOSES the substitution at that
+character; the paren form balances the scanner and parses identically on bash 5.
+
+**It shipped, and its cost was a whole verdict rather than a cosmetic row.** In 0.20.0
+the `ZDOC_SESSION_PAIR` substitution in `hooks/lib/zensu-doctor.sh` carried the bare form.
+Measured on 3.2.57 against a session that was genuinely bound: the body truncates
+mid-`case`, the subshell dies of a syntax error, the assignment returns 1, the `elif`
+falls to its `else`, neither follow-up question matches, and `/zensu:doctor` renders
+`binding: this session has no valid Session Control record — … start a fresh Claude Code
+session` over a record that is present, readable and already bound. Reproduced in the
+shipped tree and closed by switching that one arm to `(*[[:cntrl:]]*)`.
+
+**TWO properties made it survive, and both generalize to the next instance.** The failure
+is INVISIBLE at build time: bash 3.2 parses a substitution body only when it expands it,
+so `bash -n` over the whole file passes and no lint sees it. And the ORDER hides the
+cause: 3.2 executes the body command by command, so everything above the malformed `case`
+runs and SUCCEEDS first — in the doctor's case the session bind itself. The record was
+never the problem, only the reporting of it, which is exactly why every other component
+disagreed with that row. Do not diagnose a contradiction of this shape by re-examining the
+state; check whether the reporter parsed.
+
+**The guard is an ORACLE, not a heuristic**, which is what lets it run anywhere.
+`tests/structure/bash32-substitution-scan.js` reproduces the naive scanner, takes the body
+it would have handed the parser, and asks a real `bash -n` whether that text parses. A
+truncated body is a syntax error under EVERY POSIX shell, so the check reports identically
+on a macOS 3.2 host and on a Linux 5.x runner — verified in both, and in a `bash:5`
+container. `test-bash32-portability.sh` drives it over the tree with four controls: the
+scanned-file population (a scanner that walks nothing reports a clean tree), a probe pair
+that must be reported and must not be, and a live-bash premise check. The pair is DERIVED
+by deleting the single `(` from the fixed form rather than written twice — the suite is
+itself a `*.sh` under the scanned root, so a literal bare case arm in a heredoc is a real
+finding, and it failed on its own fixture the first time it ran.
+
+**The coupling runs in the UNOBVIOUS direction**, the shape this file already records for
+`ESCAPE_STEMS` and G12: an ordinary edit to ANY shell file in the tree can turn a suite
+named for bash 3.2 red, and the remedy is in the file that changed, never in the suite.
+
+**One sibling trap is documented and deliberately NOT machine-checked:** an apostrophe
+inside a comment within a substitution opens a quote state the same scanner never closes,
+and the file then fails to parse entirely rather than at that line. A detector for it was
+written and measured over this tree — five candidates, none of them real — so it stays a
+prose warning at the call sites rather than a check that cries wolf. The warning lives
+beside the `ZDOC_SESSION_PAIR` substitution together with the case rule; `B3` pins that
+both survive there.
+
+**Version: `patch`.** Walked against §"Runtime Lineage" entry by entry: no context-record
+or workflow-state schema field, no strict key set, no hook added, removed or renamed and no
+matcher changed, no new config key, no attestation change, and no `permissionDecision` in
+either direction — the doctor is read-only and always exits 0. The report's own binding row
+CHANGES what it says for macOS users, which reads like a behaviour change and is not one in
+the lineage sense: it is a renderer correcting a false verdict, and it persists nothing.
+
+**Known gaps, accepted and named:**
+
+- **The suite has no `windows-ci.v1.json` entry**, deliberately: every shard there is
+  already close to its `profileTimeoutMs`, adding one has to be paid for by moving another
+  suite off, and this check has no Windows dimension to justify that. It is in
+  `ciStructureTests`, so the weekly Windows Safety structure shard does run it — say
+  "not on the Windows PR shard", never "POSIX only".
+- **No `tests/profiles/ci-shard-weights.v1.json` entry**, so it is costed at
+  `defaultSeconds`. That file's own note sanctions the omission until a real CI figure
+  exists; take one from the first green ubuntu-latest `--ci` run rather than estimating.
+  Measured locally on macOS at roughly 20 s, spawn-dominated: one `bash -n` per multi-line
+  substitution across the tree.
+- **The scan is bounded to `*.sh`.** A hook body with no extension, or shell embedded in a
+  `.js` heredoc, is invisible to it. Every shell carrier in this tree ends in `.sh` today.
+- **It cannot see a substitution the naive scanner mis-delimits for the OTHER reason.** A
+  comment apostrophe corrupts the walk before the body is extracted, so the body handed to
+  `bash -n` is not the one 3.2 would parse and the finding may not surface. That is the
+  same limitation the un-shipped detector above has, from the other side.
 
 ## Pull Request Workflow
 

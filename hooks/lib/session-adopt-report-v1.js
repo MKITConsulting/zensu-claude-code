@@ -17,6 +17,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const safeDisplay = require("./zensu-safe-display-v1.js");
 const core = require("./session-control-core-v1.js");
 // The superseded-lease sweep. It is NOT part of adoptContext any more: requiring the
 // lease owner from the core is a require cycle, so the sweep moved into its own
@@ -41,8 +42,18 @@ const sweepLeases = require("./review-evidence-sweep-v1.js");
 // denied, and where those conditions are exactly the diagnosis the user needs
 // stated plainly.
 const privateRecordsDirectory = require("./claude-hook-session-v1.js").privateRecordsDirectory;
+// The SAME rule every argv mode in the binder applies to a host session id, applied
+// here because this was the one entry point that did not. `zensu-session-adopt.sh`
+// forwards `CLAUDE_CODE_SESSION_ID` verbatim, and `core.sessionKey` returns an
+// `scv1_<64hex>` value UNCHANGED — that spelling is the name of a record file in the
+// store, so without this check the store's own directory listing was a list of
+// accepted identities. Called in main() FIRST, with its own
+// headline and remedy, and again inside buildRequest so the invariant stays local to
+// the function that builds the request and a second caller cannot skip it.
+const validateSessionId = require("./claude-hook-session-v1.js").validateSessionId;
 const buildRequest = () => {
   const pluginData = process.env.ZADOPT_PLUGIN_DATA;
+  validateSessionId(process.env.ZADOPT_SESSION_ID);
   return {
     recordsDir: privateRecordsDirectory(pluginData),
     sessionId: process.env.ZADOPT_SESSION_ID,
@@ -83,70 +94,18 @@ const buildRequest = () => {
 // Every named threat still folds, because none of them is a letter, a number or a
 // combining mark: the bidi overrides are \p{Cf}, U+2028/2029 are \p{Zl}/\p{Zp}, and
 // U+007F is \p{Cc}.
-const SAFE_DISPLAY = /^[\p{L}\p{N}\p{M} _.,:;/\\@+~()=-]*$/u;
-const DOUBLE_SPACE = / {2}/;
-// The class admits a space AND a colon, and DOUBLE_SPACE only rejects two ADJACENT
-// spaces — so a value with single spaces and colons passed through raw and could
-// forge a further `label : value` pair after the line it sits on. That needs no local
-// privilege: context.project_root is minted from the SessionStart cwd and
-// validateContext rejects only NUL, CR and LF in it, so anyone who supplies the
-// directory name the user opens Claude Code in controls this substring. A real path
-// containing " : " now renders JSON-quoted, which is still readable.
-// It guards `: ` and ` :`, not only ` : `. This report emits THREE separator
-// spellings and this guard covered one: `  ` (the padding), ` : ` (the aligned pair),
-// and `: ` in `WARNING: `, `NOTE: `, `  superseded record: ` and
-// ` could NOT be set aside: `. A project directory named `repo WARNING: inspect
-// /tmp/x` carries only allowlisted characters, no double space and no ` : `, so it
-// printed VERBATIM and forged a whole warning line — the lines skills/adopt-session
-// tells the model to relay word for word.
-//
-// MEASURED against this allowlist, not assumed: of the known colon confusables,
-// exactly three pass SAFE_DISPLAY — U+003A itself, U+02D0 MODIFIER LETTER TRIANGULAR
-// COLON (\p{Lm}) and U+A4FD LISU LETTER TONE MYA JEU (\p{Lo}). Every other one, and
-// every non-ASCII space, is already rejected by the positive class.
-const COLON_LIKE = "\\u003a\\u02d0\\ua4fd";
-const PAIR_SEPARATOR = new RegExp("[" + COLON_LIKE + "] | [" + COLON_LIKE + "]", "u");
-// Renders as nothing while counting as a letter or a mark, which is how an invisible
-// character splits the two literal guards above. MEASURED: nine default-ignorable
-// code points pass SAFE_DISPLAY — U+034F, U+115F, U+1160, U+17B4, U+17B5, U+180B,
-// U+3164, U+FE00, U+FFA0 — and each one turns `repo X: recorded` back into a value
-// that prints verbatim while still reading as a label.
-const INVISIBLE = /\p{Default_Ignorable_Code_Point}/u;
-// A combining mark with no base of its own attaches to the PRECEDING space and paints
-// on it. MEASURED: U+0301 and the spacing visargas U+0903 and U+0F7F all printed as
-// themselves, because \p{M} is inside the allowlist and neither literal guard carries
-// a mark. The rule is the mark's BASE, so a decomposed accent on a letter — the case
-// the allowlist was widened for — still prints as itself.
-const ORPHAN_MARK = /(?:^|[ ])\p{M}/u;
-const NON_ASCII = /[\u007f-\uffff]/g;
-const SPACE_RUN = / {2,}/g;
-// Applied AFTER NON_ASCII has folded U+02D0 and U+A4FD to escapes, so only the ASCII
-// colon can still sit beside a space here.
-const COLON_SPACE_GLOBAL = /:[ ]/g;
-const SPACE_COLON_GLOBAL = /[ ]:/g;
-const safe = (value) => {
-  const text = String(value);
-  if (SAFE_DISPLAY.test(text)
-    && !DOUBLE_SPACE.test(text)
-    && !PAIR_SEPARATOR.test(text)
-    && !INVISIBLE.test(text)
-    && !ORPHAN_MARK.test(text)) {
-    return text;
-  }
-  return JSON.stringify(text)
-    .replace(NON_ASCII, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"))
-    // The DOUBLE_SPACE invariant applies to BOTH branches. It used to guard only the
-    // fast path, so `/tmp/a"b  project : x` was rendered through JSON.stringify with
-    // the two-space run and the colon intact — the exact forgery the fast-path guard
-    // exists to stop, arriving through the branch meant to be the safer one. Single
-    // spaces survive, so an ordinary quoted path stays readable.
-    .replace(SPACE_RUN, (run) => "\\u0020".repeat(run.length))
-    // Same reasoning as the double-space fold above, for the separator the fast path
-    // now also guards: a value that reached this branch for an unrelated reason must
-    // not keep a usable `: ` intact.
-    .replace(COLON_SPACE_GLOBAL, ":\\u0020")
-    .replace(SPACE_COLON_GLOBAL, "\\u0020:");
-};
+// The rule itself now lives in the dependency-free leaf module beside this one.
+// It was defined HERE first, and the doctor renderer then reached for it with a
+// guarded lazy require plus its own narrower fallback copy — a display rule in two
+// implementations, owned by a feature command that drags four further modules in
+// behind it. `safe` is kept as this file's spelling because the report and its unit
+// suite are written against that name.
+const safe = safeDisplay.safeDisplayValue;
+// Re-exported unchanged so the unit suite keeps pinning the rule through the
+// consumer that renders it, rather than having to know where it now lives.
+const {
+  SAFE_DISPLAY, DOUBLE_SPACE, NON_ASCII, INVISIBLE, PAIR_SEPARATOR, ORPHAN_MARK,
+} = safeDisplay;
 
 // WHICH directory the sweep refused, empty when it refused nothing.
 //
@@ -209,23 +168,94 @@ const repairSweepRoot = (request) => {
   }
 };
 
-// The headline is CHOSEN from the sweep verdict. It used to be printed before the
-// verdict was consulted, so a refused sweep still announced a repair.
-const repairHeadline = (repaired) => {
-  if (leasesScope(repaired) || (repaired.failed && repaired.failed.length > 0)) {
-    return "Zensu session adoption — ALREADY SERVED (lease store NOT repaired)";
-  }
-  if (!repaired.discarded) {
-    return "Zensu session adoption — ALREADY SERVED (nothing to repair)";
-  }
-  return "Zensu session adoption — ALREADY SERVED (lease store repaired)";
+const leaseFault = (repaired) =>
+  !!(leasesScope(repaired) || (repaired.failed && repaired.failed.length > 0));
+
+// The SECOND thing an already-served run can repair, and the reason that refusal
+// stopped being a dead end. The record needs nothing; the workflow document the
+// record ANCHORS can still be gone, and while it is, reviewer-capability-v1.js
+// denies every tool in the session. See §"Workflow-Baseline Repair" in CLAUDE.md.
+//
+// EVERY comparison against a baseline state token goes through this accessor, and
+// that is a contract rather than a style. A bare `core.BASELINE_STATES.MISSING`
+// throws a TypeError when the loaded core predates the baseline exports — and this
+// command's whole job is to answer in a state where everything else fails closed,
+// so a crash here is the worst available outcome. `baselineVerdict` already wraps
+// its own call for exactly that reason; a bare dereference in the comparisons
+// AROUND it undoes the contract from outside the try. One site sat on a
+// POST-MUTATION path, after the record swap had already been committed, where a
+// throw would have lost the closing warning and every lease result with it.
+// A positive `typeof` test, never `=== undefined`: an absent export would
+// otherwise match an absent state and read as a hit, which is the same trap the
+// `isBaselineAlreadyPresent` predicate below exists to avoid.
+const baselineState = (name) => {
+  const states = (core && core.BASELINE_STATES) || {};
+  return typeof states[name] === "string" && states[name] ? states[name] : null;
+};
+const isBaselineState = (value, name) => {
+  const token = baselineState(name);
+  return token !== null && value === token;
+};
+// Membership is read from the OWNER's exported vocabulary rather than a literal
+// list here, so a state added there is recognised without a second edit — and a
+// state this build has never heard of stays unrecognised, which is the case the
+// residual arms below exist for. An unreadable export makes NOTHING recognised,
+// which errs toward disclosing rather than toward a silent clean bill.
+const isRecognizedBaselineState = (value) => {
+  const states = (core && core.BASELINE_STATES) || {};
+  return Object.keys(states).some((name) => isBaselineState(value, name));
 };
 
-// A refused or partial sweep is a failure, and the exit code has to say so: the
+// The half is FAULTED, never merely "not done", when the document is present but
+// unsafe or unreadable: something is sitting at that path, and this command
+// refuses to build over it. `present` is not a fault — it is the ordinary state
+// of a healthy session running this command for the lease half alone.
+const baselineFault = (baseline) => {
+  if (!baseline) return "";
+  if (typeof baseline.fault === "string" && baseline.fault) return baseline.fault;
+  if (typeof baseline.refusal === "string" && baseline.refusal) return baseline.refusal;
+  if (isBaselineState(baseline.state, "UNSAFE")
+    || isBaselineState(baseline.state, "UNREADABLE")) {
+    return baseline.state;
+  }
+  // RESIDUAL ARM. A state this build does not recognise is a state this build
+  // cannot vouch for, so it counts as a fault and the exit code says so. Without
+  // it an unrecognised classification fell through every arm above, rendered as a
+  // clean bill of health and exited 0 — the one verdict a diagnostic may not give.
+  if (typeof baseline.state === "string" && baseline.state && !isRecognizedBaselineState(baseline.state)) {
+    return "unrecognized-state:" + baseline.state;
+  }
+  return "";
+};
+
+// The headline is CHOSEN from the verdicts, never printed before them: a refused
+// sweep once announced a repair. It now composes BOTH halves, so a run that
+// rebuilt the baseline and left a lease stuck cannot report either one alone.
+// `baseline` is optional — omitted, the two-clause form collapses to exactly the
+// lease-only wording this function had before the baseline half existed.
+const repairHeadline = (repaired, baseline) => {
+  const parts = [];
+  if (baselineFault(baseline)) {
+    parts.push("workflow baseline NOT repaired");
+  } else if (baseline && baseline.rebuilt) {
+    parts.push("workflow baseline rebuilt");
+  }
+  if (leaseFault(repaired)) {
+    parts.push("lease store NOT repaired");
+  } else if (repaired.discarded) {
+    parts.push("lease store repaired");
+  }
+  if (!parts.length) return "Zensu session adoption — ALREADY SERVED (nothing to repair)";
+  return "Zensu session adoption — ALREADY SERVED (" + parts.join("; ") + ")";
+};
+
+// A refused or partial repair is a failure, and the exit code has to say so: the
 // branch returned without touching process.exitCode, so it exited 0 on a refusal
 // while the skill's own contract reserves 0 for a successful report or adoption.
-const repairExitCode = (repaired) =>
-  (leasesScope(repaired) || (repaired.failed && repaired.failed.length > 0) ? 1 : 0);
+// EITHER half failing is enough — a rebuilt baseline does not launder a stuck
+// lease, and a clean sweep does not launder a baseline this command refused.
+const repairExitCode = (repaired, baseline) =>
+  (baselineFault(baseline) || leaseFault(repaired) ? 1 : 0);
 
 const shouldRepairInPlace = (verdict, confirmed) =>
   !!verdict
@@ -233,16 +263,278 @@ const shouldRepairInPlace = (verdict, confirmed) =>
   && verdict.reason === core.ADOPTION_REFUSALS.ALREADY_SERVED
   && confirmed === true;
 
+// Read-only, and it never throws. The core contracts that its verdict function
+// does not either, but this command's whole job is to answer in a state where
+// everything else fails closed, so a crashed helper here would be the worst
+// available outcome. A local failure is reported as `fault`, which is
+// deliberately NOT a word from core.BASELINE_REFUSALS: a reader must be able to
+// tell "the core refused the bind" from "this command could not reach a verdict".
+const baselineVerdict = (request) => {
+  let verdict;
+  try {
+    verdict = core.workflowBaselineVerdict(request);
+  } catch (error) {
+    return {
+      fault: "verdict-unavailable",
+      detail: error && error.message ? error.message : "unknown",
+    };
+  }
+  if (!verdict.ok) return { refusal: verdict.reason };
+  return {
+    state: verdict.state,
+    path: verdict.path,
+    // The component the refusal is about. Naming the leaf for an ancestor fault
+    // sends the operator to a path that need not exist.
+    unsafeAt: verdict.unsafeAt || null,
+    projectRoot: verdict.projectRoot,
+  };
+};
+
+// The baseline half of a --confirm run. It runs BEFORE the lease sweep, and the
+// order is not cosmetic: the sweep is about evidence a later review needs, while
+// the baseline decides whether this session can make a tool call at all.
+//
+// Only `missing` is acted on. Everything else — a healthy document, a tamper
+// shape, a refused bind — is returned unchanged, so this function can be called
+// unconditionally and the caller does not re-implement the repairable rule.
+const repairBaseline = (request, baseline) => {
+  if (!baseline || !isBaselineState(baseline.state, "MISSING")) return baseline;
+  try {
+    const repaired = core.repairWorkflowBaseline(request);
+    return {
+      ...baseline,
+      rebuilt: true,
+      provenance: repaired.provenance,
+      path: repaired.path,
+    };
+  } catch (error) {
+    // A BENIGN race is not a fault. Between this command's verdict and the core's
+    // own re-check, a concurrent SessionStart or a second window can heal the
+    // document — which is the outcome this command wanted. Reporting that as
+    // `rebuild-failed` gave exit 1 and told the user "the cause above has to be
+    // cleared first" for a session that was already fine, while the SessionStart
+    // caller swallowed the identical throw. The core now types the two apart so
+    // both callers make ONE judgement.
+    // The PREDICATE, never the raw constant: `undefined === undefined` reads as a
+    // match, so a tree where the export is missing would report every refusal —
+    // tamper included — as the benign race, with exit 0 and "nothing to repair".
+    if (typeof core.isBaselineAlreadyPresent === "function"
+      && core.isBaselineAlreadyPresent(error)) {
+      return { ...baseline, state: baselineState("PRESENT") || baseline.state, healedElsewhere: true };
+    }
+    return {
+      ...baseline,
+      fault: "rebuild-failed",
+      detail: error && error.message ? error.message : "unknown",
+    };
+  }
+};
+
+// What SURVIVED the document. A rebuilt baseline reads "never active", so these
+// are the only remaining traces of what the lost one may have been in the middle
+// of. They are LISTED and never interpreted: this command cannot tell a live
+// deferred review from a stale marker, and saying which would be a claim it has
+// not earned. A closed candidate set plus a cap, because the directory is
+// session-writable and this output is read back by a model.
+const EVIDENCE_MAX = 12;
+// The four NAMES below are hand-copies and there is no accessor to take them
+// from: `pending-review.json` is owned by `zensu_pending_review_file`,
+// `pending-review.json.claim` by `zensu_pending_review_claim_file` (both shell,
+// in hooks/lib/zensu-tdd-phase.sh), `reviewer-spawn-denied-<key>.json` by
+// hooks/stop-chain-enforcer.sh and hooks/lib/zensu-doctor-report.js, and the
+// `autopilot-active-` prefix by `OWNER_POINTER_PREFIX` in
+// hooks/lib/zensu-autopilot-state.sh. The failure direction is SILENT
+// SUBTRACTION: a renamed artifact simply drops out of a list this command
+// presents to the user as what survived, with nothing reporting that anything
+// was missed. They are on the coupled-site roster in CLAUDE.md for that reason.
+//
+// The DIRECTORY is no longer among them. It used to re-join `.zensu`/`state` by
+// hand inside the very feature whose core declares that layout once; it is now
+// derived from the document's own resolved path, so a layout move cannot leave
+// this reader scanning a directory no writer uses.
+const survivingEvidence = (projectRoot, sessionId) => {
+  if (typeof projectRoot !== "string" || !projectRoot) return [];
+  let key;
+  let stateDirectory;
+  try {
+    key = core.sessionKey(sessionId);
+    stateDirectory = path.dirname(core.adoptionWorkflowStatePath(projectRoot, sessionId));
+  } catch {
+    return [];
+  }
+  let entries;
+  try {
+    entries = fs.readdirSync(stateDirectory);
+  } catch {
+    return [];
+  }
+  const wanted = (name) => name === "pending-review.json"
+    || name === "pending-review.json.claim"
+    || name === "reviewer-spawn-denied-" + key + ".json"
+    || /^autopilot-active-[0-9a-f]{64}\.json$/.test(name);
+  return entries.filter(wanted).sort().slice(0, EVIDENCE_MAX);
+};
+
+// The report-only diagnosis, and the reason an already-served run is worth making
+// at all in a wedged session. The generic remedy says the record is fine — true,
+// and on its own it sends the user away from the actual cause.
+function renderBaselineDiagnosis(baseline, sessionId) {
+  const out = [];
+  const w = (line) => out.push(line);
+  // The FAULT test runs FIRST, and the order is the contract. repairBaseline's
+  // catch spreads the verdict, so a failed rebuild keeps `state: MISSING` — with
+  // the state branches first, that shape reached the MISSING branch and printed
+  // "Re-run this command with --confirm to rebuild it" underneath the line saying
+  // the rebuild had just been refused. A remedy that is the operation that
+  // already failed is worse than none, and it was reachable: a symlinked
+  // .zensu/state classifies MISSING while ensureDescendantDirectory refuses it.
+  // NARROWER than baselineFault on purpose. baselineFault also reports `unsafe`
+  // and `unreadable` as faults — correct for the headline and the exit code,
+  // wrong here, because those two have their OWN wording below and testing the
+  // broad predicate first swallowed it. What must precede the state branches is a
+  // LOCAL fault only: this command could not judge, or its rebuild was refused.
+  const localFault = (baseline && typeof baseline.fault === "string" && baseline.fault)
+    || (baseline && typeof baseline.refusal === "string" && baseline.refusal)
+    || "";
+  if (localFault) {
+    w("\nThe workflow document of this session could NOT be judged or repaired ("
+      + safe(localFault) + ").\n");
+    if (baseline && baseline.detail) w("  " + safe(baseline.detail) + "\n");
+    w("That is a missing check rather than an all-clear, and the cause above has to be\n");
+    w("cleared first — re-running this command will fail the same way. Run /zensu:doctor.\n");
+    return out.join("");
+  }
+  if (baseline && isBaselineState(baseline.state, "MISSING")) {
+    w("\nThis session's workflow document is MISSING:\n");
+    w("  " + safe(baseline.path) + "\n");
+    w("\nWhile it is gone the capability gate denies EVERY tool in this session, because a\n");
+    w("deleted document must never be read as \"no chain was ever active\". Re-run this\n");
+    w("command with --confirm to rebuild it.\n");
+    w("\nRebuilding is a real loss, not a restore: a review chain that was live when the\n");
+    w("document vanished is gone, and the new baseline reads \"never active\".\n");
+    const evidence = survivingEvidence(baseline.projectRoot, sessionId);
+    if (evidence.length) {
+      w("\nThese session-state files survived and may say what the lost document was in the\n");
+      w("middle of. This command does not interpret them:\n");
+      evidence.forEach((name) => w("  " + safe(name) + "\n"));
+    }
+    return out.join("");
+  }
+  if (baseline && (isBaselineState(baseline.state, "UNSAFE")
+    || isBaselineState(baseline.state, "UNREADABLE"))) {
+    w("\nThis session's workflow document is " + safe(baseline.state).toUpperCase() + ":\n");
+    // The OFFENDING component, which is not always the leaf: the directory ladder
+    // reports the same UNSAFE token for a symlinked `.zensu` or `.zensu/state`,
+    // and with one of those replaced the leaf below it need not exist at all —
+    // so printing the leaf sent the operator to a path they could not inspect and
+    // told them to remove a file that was not there.
+    w("  " + safe(baseline.unsafeAt || baseline.path) + "\n");
+    if (baseline.unsafeAt && baseline.unsafeAt !== baseline.path) {
+      w("  (the document itself is " + safe(baseline.path) + ", but the component above\n");
+      w("  is what makes it unsafe — inspect that one)\n");
+    }
+    // No repair is offered here, deliberately. Something IS sitting at that path;
+    // rebuilding over it would destroy the evidence and hand the session its
+    // capabilities back in the same step.
+    w("\nThat is not a missing document, so this command will NOT rebuild it — something is\n");
+    w("at that path. Inspect it before doing anything else: a symlink, a hard link or a\n");
+    w("non-file there is a tamper signal, while unreadable content can also be an ordinary\n");
+    w("truncated write. Once you know which, remove the file and start a fresh session.\n");
+    return out.join("");
+  }
+  // RESIDUAL ARM, paired with the one in baselineFault. Reaching here with a state
+  // no arm above claimed means this build does not recognise it — and returning
+  // the empty string then rendered an unknown classification as a clean bill of
+  // health while repairExitCode answered 0. Silence is the one verdict a
+  // diagnostic may not give.
+  if (baseline && typeof baseline.state === "string" && baseline.state
+    && !isRecognizedBaselineState(baseline.state)) {
+    w("\nThis session's workflow document reports a state this build does not recognise:\n");
+    w("  " + safe(baseline.state) + "\n");
+    w("  " + safe(baseline.path || "(path not reported)") + "\n");
+    w("\nThat is a missing check rather than an all-clear. This command will NOT rebuild or\n");
+    w("repair it, because it cannot tell what is at that path. Inspect it, then start a\n");
+    w("fresh Claude Code session, and report the state name above if it came from a\n");
+    w("Zensu release rather than from a hand-edited file.\n");
+    return out.join("");
+  }
+  return "";
+}
+
+// The --confirm counterpart. Every state that is not a clean rebuild has to reach
+// the user as its own sentence: a rebuild whose provenance could not be written is
+// a real repair with an unrecorded cause, and folding it into the success line
+// would lose the one fact a later reader needs.
+function renderBaselineNotes(baseline, sessionId) {
+  const out = [];
+  const w = (line) => out.push(line);
+  if (!baseline) return "";
+  if (baseline.healedElsewhere) {
+    // Its OWN sentence, which is this function's stated contract. Without it the
+    // benign race rendered byte-identical to "the document was fine all along":
+    // headline "nothing to repair", `workflow baseline: present`, exit 0 — for a
+    // user whose report-only run had just called the document MISSING.
+    w("\nNOTE: the workflow document was missing when this command reported it, and was\n");
+    w("rebuilt by something else — a concurrent SessionStart, or a second window — before\n");
+    w("--confirm acted. This run rebuilt nothing, and the session is usable again.\n");
+    return out.join("");
+  }
+  if (baseline.rebuilt) {
+    w("\nNOTE: the workflow document was missing and has been rebuilt at\n");
+    w("  " + safe(baseline.path) + "\n");
+    w("This session is able to run tools again. The rebuilt baseline reads \"never active\":\n");
+    w("a review chain that was live when the document vanished is gone and is not recovered\n");
+    w("by this repair.\n");
+    // The listing belongs HERE too, and this is the branch that needs it most: the
+    // report-only path prints it while the document is still missing, but the
+    // rebuild is the step that destroys the context those files describe. Omitting
+    // it left the user with a usable session and no pointer to what the lost
+    // document had been in the middle of. The sessionId is already threaded for it.
+    const rebuiltEvidence = survivingEvidence(baseline.projectRoot, sessionId);
+    if (rebuiltEvidence.length) {
+      w("\nThese session-state files survived the rebuild and may say what the lost document\n");
+      w("was in the middle of. This command does not interpret them:\n");
+      rebuiltEvidence.forEach((name) => w("  " + safe(name) + "\n"));
+    }
+    if (baseline.provenance !== "recorded") {
+      w("\nWARNING: the rebuild succeeded but its provenance entry could not be written (\""
+        + safe(String(baseline.provenance)) + "\").\n");
+      w("The rebuild is real and unrecorded in the workflow history; report this rather than\n");
+      w("repeating it.\n");
+    }
+    return out.join("");
+  }
+  if (baselineFault(baseline)) {
+    // The lead states WHAT happened; the diagnosis owns the cause, the detail and
+    // the remedy. Writing the fault token and `detail` here as well printed both
+    // twice.
+    //
+    // The sessionId is threaded rather than passed as "", and the honest bound is
+    // that it is currently UNREAD on this path: the diagnosis's local-fault branch
+    // returns before the MISSING branch that lists surviving evidence, and
+    // `baselineFault` is truthy only for a local fault or for a tamper state,
+    // which takes its own branch. It is threaded anyway because passing "" was an
+    // active defect rather than a neutral placeholder — an empty id makes
+    // core.sessionKey throw, so survivingEvidence would silently return an empty
+    // list the moment a branch reordering made it reachable, which is exactly the
+    // failure this parameter now cannot have.
+    w("\nWARNING: the workflow document was NOT repaired.\n");
+    w(renderBaselineDiagnosis(baseline, sessionId));
+    return out.join("");
+  }
+  return "";
+}
+
 // Every refusal names the condition that was not met, and every one of them has
 // a different remedy. A generic "not adoptable" would put the user back where
 // the misleading doctor row left them.
 const REMEDY = {
   [core.ADOPTION_REFUSALS.RECORD_UNREADABLE]:
-    "The record could not be re-verified against the installation that minted it. Its recorded project root may be gone, that installation may have been pruned from the plugin cache, the record may have been altered, or a persisted schema really did change in this release. Adoption cannot tell these apart, and in this state /zensu:doctor cannot name the directory either. Start a fresh Claude Code session.",
+    "The record could not be re-verified against the installation that minted it. The record may have been altered, or a persisted schema really did change in this release. Two states that used to land here no longer do on their own: a recorded project root that is merely GONE is adoptable, and so is a minting installation that was merely pruned from the plugin cache. A pruned installation IS still this refusal when the recorded project root is ALSO gone, and so is a vanished project root when the minting installation is also pruned — each relaxed reader pins the other's waiver off, so nothing is left to anchor the record to — and so is having no record for this session at all. Adoption cannot tell the remaining causes apart, and in this state /zensu:doctor cannot name the cause either. Start a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.PLUGIN_DATA]:
     "The record belongs to a different plugin-data store — typically a development checkout against an installed plugin, or the reverse. That boundary is never relaxed. Start a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.ALREADY_SERVED]:
-    "Nothing to RE-MINT: this installation already serves the record. The lease store is a separate matter — an adoption writes the record first and sweeps the store afterwards, so a run that died in between leaves the record correct and the store still wedged. Re-run this command with --confirm to sweep it again; that repair is idempotent and re-mints nothing. If tools are still failing after it, the cause is a different one — run /zensu:doctor.",
+    "Nothing to RE-MINT: this installation already serves the record. TWO things beside the record can still be wedged. The workflow document this session is anchored to may be gone — a deleted and re-created worktree loses it, because .zensu/state/ is gitignored — and while it is, the capability gate denies every tool in the session. The lease store is the second: an adoption writes the record first and sweeps the store afterwards, so a run that died in between leaves the record correct and the store still wedged. Re-run this command with --confirm to repair both; it is idempotent and re-mints nothing. Anything the lines below report as MISSING is what --confirm will act on. If tools are still failing after it, the cause is a different one — run /zensu:doctor.",
   [core.ADOPTION_REFUSALS.NOT_SIBLING]:
     "The executing installation is not a sibling of the one that minted the record, so it cannot be an upgrade of it. A --plugin-dir checkout never adopts an installed session. Start a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.EXECUTING_UNIDENTIFIED]:
@@ -253,11 +545,39 @@ const REMEDY = {
     "The workflow document of this session cannot be read by the executing runtime, which means a persisted shape really did change. This is the case adoption must refuse. Start a fresh Claude Code session.",
 };
 
+// The one adoptable state in which the record could NOT be re-measured: the
+// installation that minted it is gone from the plugin cache. Said on the row
+// that names the minting version, so the user learns why the strict read failed
+// without a detour through /zensu:doctor, and repeated as one sentence because
+// a parenthetical alone does not say what adoption will do about it.
+const PRUNED_NOTE = " (installation no longer on disk)";
+const PRUNED_EXPLANATION = "The installation that minted the record has been pruned from the plugin cache, so the\nrecord could not be re-measured; adoption re-mints it under the running installation.\n";
+const prunedNote = (pruned) => (pruned ? PRUNED_NOTE : "");
+
 // Wrapped in a function because `node -e` evaluates at module top level, where a
 // bare `return` is a syntax error — and a syntax error here would surface as a
 // crashed helper rather than as the refusal it was meant to print.
 function main() {
   let request;
+  // TWO refusal classes, two headlines. `buildRequest` performs two independent
+  // checks — the session identity and the private record store — and routing both
+  // into one `catch` printed `private-record-store-unsafe` for a malformed or
+  // DERIVED session id, telling the user to repair a store that was never reached.
+  // That contradicted this file's own contract that every refusal names the
+  // condition it failed; three review seats found it independently. Each class
+  // keeps its own cause and its own remedy now.
+  try {
+    validateSessionId(process.env.ZADOPT_SESSION_ID);
+  } catch (error) {
+    process.stdout.write("Zensu session adoption — NOT adoptable (session-id-unusable)\n\n");
+    process.stdout.write("The session identity this command was given cannot be used: "
+      + safe(error && error.message ? error.message : "unknown") + "\n");
+    process.stdout.write("It is empty, malformed, or a DERIVED Session Control identifier rather than the\n");
+    process.stdout.write("raw host session id. Nothing was read and nothing was changed. Start a fresh\n");
+    process.stdout.write("Claude Code session; the record store is not implicated.\n");
+    process.exitCode = 1;
+    return;
+  }
   try {
     request = buildRequest();
   } catch (error) {
@@ -285,39 +605,98 @@ function main() {
       // The sweep root is the EXECUTING installation — see repairSweepRoot for why
       // the recorded one inverted the selector on exactly the upgrade this branch
       // serves.
+      // The BASELINE half runs first — see repairBaseline for why the order is a
+      // decision rather than a layout. A wedged session cannot make a tool call
+      // until the workflow document is back; a stuck lease only costs it a review.
+      const baseline = repairBaseline(request, baselineVerdict(request));
       const repaired = sweepLeases.discardSupersededLeases(
         request.pluginData,
         core.sessionKey(request.sessionId),
         repairSweepRoot(request),
       );
-      // Headline AFTER the verdict, never before it: printing "repaired"
+      // Headline AFTER both verdicts, never before them: printing "repaired"
       // unconditionally made a refused sweep announce a success.
-      process.stdout.write(repairHeadline(repaired) + "\n\n");
+      process.stdout.write(repairHeadline(repaired, baseline) + "\n\n");
+      process.stdout.write("  workflow baseline: " + safe(baselineFault(baseline)
+        || (baseline && baseline.rebuilt ? "rebuilt" : String((baseline && baseline.state) || "unknown"))) + "\n");
       process.stdout.write("  leases set aside : " + repaired.discarded + "\n");
       process.stdout.write("  leases stuck     : " + repaired.failed.length + "\n\n");
-      process.stdout.write("This installation already serves the record, so nothing was re-minted. The lease\n");
-      process.stdout.write("store was swept again, which is the one part of an adoption that can be left\n");
-      process.stdout.write("half-done if the previous run died after the record was written.\n");
-      if (repaired.discarded === 0 && repaired.failed.length === 0 && !leasesScope(repaired)) {
+      process.stdout.write("This installation already serves the record, so nothing was re-minted. The workflow\n");
+      process.stdout.write("document and the lease store are the two parts beside the record that can still be\n");
+      process.stdout.write("wedged, and both were checked.\n");
+      if (repaired.discarded === 0 && repaired.failed.length === 0 && !leasesScope(repaired)
+        && !baselineFault(baseline) && !(baseline && baseline.rebuilt)) {
         process.stdout.write("Nothing needed repairing. If tools are still failing, the cause is a different\n");
         process.stdout.write("one — run /zensu:doctor.\n");
       }
+      process.stdout.write(renderBaselineNotes(baseline, request.sessionId));
       reportLeaseWarnings(repaired);
-      process.exitCode = repairExitCode(repaired);
+      process.exitCode = repairExitCode(repaired, baseline);
       return;
     }
     process.stdout.write("Zensu session adoption — NOT adoptable (" + safe(verdict.reason) + ")\n\n");
     process.stdout.write((REMEDY[verdict.reason] || "No remedy is known for this refusal. Start a fresh Claude Code session.") + "\n");
+    // ONLY on already-served, and only without --confirm: this is the read-only
+    // half of the one refusal that has something left to do. Every other refusal
+    // means the record itself is the problem, so a diagnosis of the document it
+    // anchors would point past the actual cause. Strictly read-only — that is the
+    // premise the PreToolUse recognizer's admission of this command rests on.
+    if (verdict.reason === core.ADOPTION_REFUSALS.ALREADY_SERVED) {
+      process.stdout.write(renderBaselineDiagnosis(baselineVerdict(request), request.sessionId));
+    }
     process.exitCode = 1;
     return;
   }
 
   if (process.env.ZADOPT_CONFIRM !== "1") {
     process.stdout.write("Zensu session adoption — ADOPTABLE\n\n");
-    process.stdout.write("  record minted by : " + safe(verdict.recorded) + "\n");
+    process.stdout.write("  record minted by : " + safe(verdict.recorded) + prunedNote(verdict.prunedPluginRoot) + "\n");
     process.stdout.write("  executing        : " + safe(verdict.executing) + "\n");
-    process.stdout.write("  project          : " + safe(verdict.context.project_root) + "\n\n");
-    process.stdout.write("The record is intact and this installation can take it over in place.\n");
+    // Same seam as the adopted row below: the marker is handed to safe() so a value
+    // ending in a separator-shaped character is folded before the marker completes it.
+    process.stdout.write("  project          : "
+      + safe(verdict.context.project_root, verdict.orphanedProjectRoot ? " (GONE)" : "")
+      + (verdict.orphanedProjectRoot ? " (GONE)" : "") + "\n\n");
+    // The unqualified sentence is only earned when a workflow document was
+    // actually readable. In the orphaned branch condition 6 never ran, so
+    // claiming the record is "intact" at the same strength as on the ordinary
+    // path overstates what was checked — see the qualified line below.
+    if (!verdict.orphanedProjectRoot) {
+      process.stdout.write("The record is intact and this installation can take it over in place.\n");
+    }
+    // The pruned branch keeps the unqualified sentence above: its project root is
+    // present, so condition 6 DID run. What it adds is why the record could not be
+    // re-measured in the first place.
+    if (verdict.prunedPluginRoot) {
+      process.stdout.write(PRUNED_EXPLANATION);
+    }
+    // Stated BEFORE the user confirms, not only after: an adoption that leaves
+    // Edit, Write and every WRITING Bash command denied is not the rescue an
+    // unqualified "adoptable" implies,
+    // and finding that out afterwards reads as a failed repair.
+    if (verdict.orphanedProjectRoot) {
+      process.stdout.write("The record itself is readable and this installation can take it over in place.\n");
+      process.stdout.write("\nThe recorded project root no longer exists — a deleted or recycled worktree left\n");
+      process.stdout.write("the workflow state unreachable from this record. Adoption still applies and is\n");
+      process.stdout.write("worth doing: it clears the lineage break, so READ-ONLY Bash and the read-only\n");
+      process.stdout.write("diagnostics work again. It does NOT restore writes — Edit, Write and MultiEdit\n");
+      process.stdout.write("stay denied, and so does any Bash command the source-write gate can attribute\n");
+      process.stdout.write("as a write, because a write cannot be attributed to a project that is not\n");
+      process.stdout.write("there. NotebookEdit is the one mutation that still passes, in a healthy\n");
+      process.stdout.write("session too. To write again, re-create exactly that directory or start a\n");
+      process.stdout.write("fresh Claude Code session. If it was moved rather than deleted, its state\n");
+      process.stdout.write("still exists there.\n");
+      // The schema-equality check that authorises an ordinary takeover did NOT
+      // run here, and a report that stays silent about it lets the user read a
+      // weaker check as the stronger one. Condition 6 is guarded by an
+      // existsSync on the workflow document, which is false for an absent root.
+      process.stdout.write("\nNOT CHECKED: with no readable workflow document, the schema-equality check that\n");
+      process.stdout.write("normally authorises a takeover was not performed, and a document restored later\n");
+      process.stdout.write("is checked only when it is first read, not here. Re-creating the directory\n");
+      process.stdout.write("BEFORE adopting is the better order: the check then names its own refusal\n");
+      process.stdout.write("(workflow-schema-mismatch, with a remedy) instead of an anonymous fail-closed\n");
+      process.stdout.write("deny at the first read after the repair.\n");
+    }
     process.stdout.write("Nothing has been changed. Run the same command with --confirm to adopt.\n");
     return;
   }
@@ -333,24 +712,117 @@ function main() {
     adopted.context.plugin_root,
   );
   process.stdout.write("Zensu session adoption — ADOPTED\n\n");
-  process.stdout.write("  record minted by : " + safe(adopted.recorded) + "\n");
+  process.stdout.write("  record minted by : " + safe(adopted.recorded) + prunedNote(adopted.prunedPluginRoot) + "\n");
   process.stdout.write("  now served by    : " + safe(adopted.executing) + "\n");
   // The anchor the session is bound to from here on. It is carried from the
   // record, never from where this command was invoked, and naming it is the one
   // place the user learns which project that actually is.
-  process.stdout.write("  project          : " + safe(adopted.projectRoot) + "\n");
+  // The marker is passed to safe() as well as appended. A root ending in a colon, or in
+  // a colon-confusable modifier letter, is harmless until this marker lands after it and
+  // completes a separator — so the fold has to see what will follow. One space, not two:
+  // two would trip the double-space rule on every appended render.
+  process.stdout.write("  project          : "
+    + safe(adopted.projectRoot, adopted.orphanedProjectRoot ? " (GONE)" : "")
+    + (adopted.orphanedProjectRoot ? " (GONE)" : "") + "\n");
   process.stdout.write("  superseded record: " + safe(adopted.supersededFile) + "\n");
   process.stdout.write("  provenance       : " + safe(adopted.provenance) + "\n");
   process.stdout.write("  leases set aside : " + leases.discarded + "\n");
   process.stdout.write("  leases stuck     : " + leases.failed.length + "\n\n");
-  process.stdout.write("This session is bound again from the next tool call onward — no restart is needed.\n");
+  if (adopted.orphanedProjectRoot) {
+    // Never the unqualified "bound again" line for this shape. The lineage break
+    // is gone, but the anchor is still a directory that does not exist, which is
+    // the ordinary orphaned-project-root state: reads and diagnostics run, writes
+    // do not. Saying otherwise would send the user straight into a deny.
+    process.stdout.write("This session's lineage break is repaired from the next tool call onward — no restart\n");
+    process.stdout.write("is needed. The recorded project root is still gone, so the session is now in the\n");
+    process.stdout.write("orphaned-project-root state: READ-ONLY Bash and the read-only diagnostics work,\n");
+    process.stdout.write("while Edit, Write and MultiEdit stay denied, and so does any Bash command\n");
+    process.stdout.write("the source-write gate can attribute as a write — a write cannot be attributed\n");
+    process.stdout.write("to a project that is not there. NotebookEdit is the one mutation that still\n");
+    process.stdout.write("passes, in a healthy session too. Re-create exactly that directory, or start a\n");
+    process.stdout.write("fresh Claude Code session, to write again.\n");
+  } else {
+    process.stdout.write("This session is bound again from the next tool call onward — no restart is needed.\n");
+    if (adopted.prunedPluginRoot) {
+      process.stdout.write(PRUNED_EXPLANATION);
+    }
+  }
   if (adopted.provenance === "no-workflow-document") {
-    process.stdout.write("\nNOTE: this session had no workflow document, so there was nothing to record the\n");
-    process.stdout.write("takeover in. That is a normal state, not a fault.\n");
+    // TWO shapes for one provenance value, because that value means two different
+    // things and only ONE of them has a repair. The guard behind it is an existsSync
+    // UNDER adopted.projectRoot, and in the ORPHANED case that directory is the
+    // absent one — so `no-workflow-document` is returned unconditionally there,
+    // whether or not the session ever had a document. Classifying the baseline is
+    // meaningless in that state and "re-run with --confirm to rebuild" is wrong
+    // advice there: the root itself is gone, so there is nowhere to rebuild into.
+    // Held to the same evidentiary standard the Stop releases use — "not reachable",
+    // never "gone" — since one ENOENT cannot tell a delete from a move.
+    if (adopted.orphanedProjectRoot) {
+      process.stdout.write("\nNOTE: the recorded project root is gone, so any workflow document it held is not\n");
+      process.stdout.write("reachable from this record and the takeover could not be written into one. If that\n");
+      process.stdout.write("directory was moved rather than deleted, its state still exists there.\n");
+    } else {
+      // NOT "a normal state, not a fault" — that wording predates the
+      // workflow-baseline repair and is now false in the composed state it names.
+      // adoptableRecord condition 6 tolerates a missing document, so a lineage
+      // break PLUS a missing baseline lands here: the record is re-minted, the
+      // report reads fully successful, and the capability gate then denies every
+      // later tool call for the one reason this report did not mention.
+      // CLASSIFY before promising. `adoptContext` decides this provenance with
+      // `fs.existsSync`, which FOLLOWS symlinks and returns false on any error — so
+      // a dangling symlink or an EACCES at the leaf lands here too, and an
+      // unconditional "re-run with --confirm to rebuild" then points at a repair
+      // that refuses by design. That is the same `test -e` hazard the Stop arm was
+      // qualified for and the doctor row was moved off, left standing on this one
+      // carrier.
+      let adoptedShape = null;
+      try {
+        adoptedShape = core.classifyWorkflowBaselineShape(
+          core.adoptionWorkflowStatePath(adopted.projectRoot, request.sessionId),
+          adopted.projectRoot,
+        );
+      } catch (_error) { adoptedShape = null; }
+      process.stdout.write("\nWARNING: this session has no usable workflow document, so there was nothing to\n");
+      process.stdout.write("record the takeover in — and while that is so the capability gate denies EVERY\n");
+      process.stdout.write("tool in this session. The adoption above is real and is not enough on its own.\n");
+      if (isBaselineState(adoptedShape, "UNSAFE")) {
+        // GUARDED like its sibling twelve lines above, and for a stronger reason: this
+        // runs on the POST-MUTATION path, after the record swap has already happened.
+        // An exception here would replace the whole closing report with a stack trace
+        // in the one function whose contract is never to throw — losing the warning
+        // above it and every lease result below it. The component NAME is a nicety;
+        // the warning is not, so a failure costs the name and keeps the sentence.
+        let unsafeComponent = null;
+        try {
+          unsafeComponent = core.baselineUnsafeComponent(
+            adopted.projectRoot,
+            core.adoptionWorkflowStatePath(adopted.projectRoot, request.sessionId),
+          );
+        } catch (_error) { unsafeComponent = null; }
+        process.stdout.write("Something is SITTING at that path, so --confirm will REFUSE to rebuild it:\n");
+        process.stdout.write("  " + safe(unsafeComponent
+          || "(the offending component could not be named — inspect .zensu/state/ by hand)") + "\n");
+        process.stdout.write("Inspect that before doing anything else, then start a fresh session.\n");
+      } else {
+        process.stdout.write("Re-run this command with --confirm to rebuild the document, provided it is\n");
+        process.stdout.write("genuinely absent rather than replaced; rebuilding is a loss, not a restore — a\n");
+        process.stdout.write("review chain that was live when it vanished is gone.\n");
+      }
+    }
   } else if (adopted.provenance !== "recorded") {
     process.stdout.write("\nWARNING: the adoption succeeded but its provenance entry could not be written.\n");
     process.stdout.write("The takeover is real and unrecorded in the workflow history; report this rather than repeating it.\n");
   }
+  // DELIBERATELY no `process.exitCode` here, and the asymmetry with the repair branch
+  // is the point rather than an oversight. There the sweep IS the whole operation, so
+  // a refused or partial sweep is the operation failing and exit 1 says so. Here the
+  // record was re-minted successfully and the sweep is secondary: exiting non-zero
+  // would tell a caller the ADOPTION failed, which is false and is the more damaging
+  // wrong answer of the two. The warnings below carry the sweep's verdict in full.
+  //
+  // Recorded because a review round proposed unifying the two, the unified version was
+  // written, and AC-C12 caught it: that row requires this command to exit 0 while its
+  // destination refusal is named — it is the pin that encodes this distinction.
   reportLeaseWarnings(leases);
 }
 
@@ -416,7 +888,16 @@ function renderLeaseWarnings(leases) {
     }
   }
   if (leases.failed.length > 0) {
-    w("\nWARNING: " + leases.failed.length + " review-evidence lease(s) could NOT be set aside: " + leases.failed.map(safe).join(", ") + "\n");
+    // NOT `.map(safe)`. Array.prototype.map calls its callback as (element, index,
+    // array), so the point-free form fed the ARRAY INDEX into safe()'s `followedBy`
+    // parameter — telling the guard something false at the one site where the
+    // parameter's contract is definitely violated. Inert (a digit forms no separator,
+    // and extra context can only ADD matches), but a guard fed a lie is a guard nobody
+    // can reason about. Each name is also bracketed, because these are raw readdir
+    // entries folded in ISOLATION: an entry beginning with a colon would otherwise abut
+    // the join's separator and put a ` :` into the rendered line that no fold ever saw.
+    w("\nWARNING: " + leases.failed.length + " review-evidence lease(s) could NOT be set aside: "
+      + leases.failed.map(function (n) { return "[" + safe(n) + "]"; }).join(" ") + "\n");
     // Do NOT assert which of the several possible causes applies. An entry lands here
     // when the move collided with a file already set aside, when the link or the
     // unlink half failed, or on an ordinary I/O error — naming only "they still name
@@ -436,6 +917,13 @@ function reportLeaseWarnings(leases) {
   process.stdout.write(renderLeaseWarnings(leases));
 }
 
+// THIS IS A RE-EXPORT SURFACE, NOT THE RULE'S HOME, and it deliberately names fewer
+// rules than `safe` applies — `safe` also folds invisible letters, colon-confusable
+// modifier letters and the pair separator. Read hooks/lib/zensu-safe-display-v1.js for
+// the complete set; its export block carries every guard the fold applies and a test
+// derives that list from the function itself. The three names below are kept only
+// because this surface carried them before the rule moved to the leaf, so removing
+// them would be an unrelated break. Do not infer the fold from this list.
 module.exports = {
   DOUBLE_SPACE,
   INVISIBLE,
@@ -445,6 +933,13 @@ module.exports = {
   REMEDY,
   SAFE_DISPLAY,
   leasesScope,
+  leaseFault,
+  baselineFault,
+  baselineVerdict,
+  repairBaseline,
+  renderBaselineDiagnosis,
+  renderBaselineNotes,
+  survivingEvidence,
   renderLeaseWarnings,
   repairExitCode,
   repairHeadline,

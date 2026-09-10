@@ -10,9 +10,12 @@ description: >
   string is silently ignored by strict === checks, and whether the permission rules
   in ~/.claude/settings.json expose the zensu:code-reviewer spawn to a refusal
   before any chain has wedged), and session state (state dir writable, canonical
-  CAS workflow documents valid, each review chain's shape plus any wedged chain and
+  CAS workflow documents valid, whether THIS session's own workflow document is
+  there and usable and whether it was rebuilt rather than restored, each review
+  chain's shape plus any wedged chain and
   its recovery command, any open chain not owned by this session, any chain this
-  session owns that has ended many turns at implementing, any reviewer spawn
+  session owns that has ended many turns at implementing, any nonterminal durable
+  Autopilot run holding a working tree, any reviewer spawn
   the host permission layer refused, expired pending-review surfaced).
   The only write is an explicit, user-confirmed cleanup of one
   expired pending-review.json — CAS workflow documents are never deleted. Use
@@ -372,7 +375,7 @@ classifier will refuse a spawn, not only when the whole table is green.
   re-create exactly the printed directory and the recorded session binds again.
   Otherwise start a fresh session. Meanwhile the session is diagnosable but not
   workable — this read-only report runs, `Stop` is released rather than wedged,
-  and `Edit`/`Write` stay denied because nothing can anchor a write to a
+  and `Edit`, `Write`, `MultiEdit` and any Bash command that WRITES stay denied because nothing can anchor a write to a
   project. Do NOT report this row as a missing record.
 - **A plugin upgrade is normally NOT a binding failure any more.** A record binds
   to any executing installation whose declared version is a compatible lineage of
@@ -394,7 +397,36 @@ classifier will refuse a spawn, not only when the whole table is green.
   condition that failed, and `workflow-schema-mismatch` in particular means a
   persisted shape really did change and a fresh session is the only way forward.
   Adoption re-binds the session from the next tool call onward — do NOT tell the
-  user to restart after a successful one.
+  user to restart after a successful one. Carry the same conditional limit the
+  row below carries: if the recorded project root is ALSO gone, the adoption
+  clears the lineage break while `Edit`, `Write`, `MultiEdit` and any Bash command that WRITES stay denied until that exact
+  directory is re-created. This row is reachable in that state — the doctor
+  falls back to it whenever the third-fact probe cannot answer — so offering the
+  remedy without the clause would promise something this check did not establish.
+- **❌ binding: this session's Session Control record is readable, but BOTH the
+  recorded project root … is gone and the running Zensu installation declares an
+  incompatible lineage** → both of the two rows above at once, and it is its own
+  row because each of those two answers "not me" for it. It prints the dead path
+  AND both declared versions. Never report it as a missing record. It IS
+  repairable in place and `/zensu:adopt-session` applies — that is the difference
+  from the plain orphaned row, which the running installation already serves and
+  which adoption refuses as `already-served`. State the limit whenever you offer
+  the repair: adoption clears the LINEAGE break, so READ-ONLY Bash and this
+  diagnostic work again, while `Edit`, `Write`, `MultiEdit` and any Bash command that WRITES
+  stay denied until that exact directory is re-created — a write cannot be
+  attributed to a project that is not there. The workflow document lived under
+  that directory and is not reachable from this record, so no chain state is
+  reachable and no later `Stop` can enforce it while that directory is missing —
+  do not tell the user their review chain resumes. If it was moved rather than
+  deleted, its state still exists there — and say the ORDER, because it decides
+  whether a check runs at all: re-creating exactly that directory **first** is the
+  better order. Adoption then reads that workflow document and verifies its schema,
+  so a genuine break is named as `workflow-schema-mismatch` with a remedy; adopting
+  first skips that check, because it is guarded on the document being reachable, and
+  a document restored afterwards surfaces a mismatch later as an anonymous
+  fail-closed deny. Re-creating first also yields a fully bound session rather than
+  an orphaned one. Never close this row by telling the user to adopt and then
+  restore — that is the order every offer implies and the one that loses the check.
   **The converse also has no row, and it matters for a trust question.** Because
   the rule compares declared versions and never content, a *bound* session's
   enforcing runtime may be a different installation that merely shares
@@ -414,6 +446,17 @@ classifier will refuse a spawn, not only when the whole table is green.
   `/zensu:adopt-session --confirm`: on an `already-served` record that re-runs the
   lease sweep as an idempotent in-place repair and re-mints nothing. A fresh session
   is the fallback, for the refusals that have no in-place exit.
+- **❌ binding: this session's Session Control record is intact, but the
+  installation that minted it has been removed from the plugin cache** → the
+  fourth named bind failure, with its own row naming both versions (`record
+  minted by X, executing Y`). The host keeps only a few plugin versions in its
+  cache, so a session that outlives them lands here whatever its lineage: nothing
+  can re-verify the record any more and no installation serves it. Never report
+  it as a missing record. The remedy is the same in-place adoption as the lineage
+  row — `/zensu:adopt-session`, then `/zensu:adopt-session --confirm` — and the
+  adoption report marks the minting version `(installation no longer on disk)`.
+  Both commands and this diagnostic stay reachable, and `Stop` is released rather
+  than wedged. Do NOT tell the user to restart after a successful adoption.
 - **⚠️ chain: wedged chain(s)** → a review chain reached a shape no supported
   command can advance. Report it and name `/zensu:recover-chain`, which must be
   run **from the session that owns that chain** (the row prints its truncated
@@ -487,6 +530,115 @@ classifier will refuse a spawn, not only when the whole table is green.
   the caveat to shorten the row, and do not read its ABSENCE as proof no refusal is
   outstanding — the note is cleared on every Stop and re-minted only by one that reaches
   the notice, so a clean-tree turn leaves the caveat off while the refusal stands.
+- **⚠️ autopilot: nonterminal durable run `<id>` at stage `<stage>`** → a durable
+  Autopilot run is holding a git working tree, so no second Autopilot run and no
+  standalone `/zensu:tdd` chain can arm there. Relay the row's own facts and add
+  nothing: the run id, the stage, whether this session owns it, the tree it holds,
+  the run document's path, and how long the owner has been silent. **The remedy
+  depends on ownership and the row already chose it — never substitute your own.**
+  Owned by THIS session, or with the owner not established, the row names no
+  release command, and you must not suggest one: a release applies a real `CANCEL`,
+  so against your own live generation it ends the work you are doing. Owned by
+  ANOTHER session, report it and run `/zensu:autopilot-release` only after the user
+  says yes; that skill is the guided form and asks for the confirmation itself.
+  Never run the bare `zensu-log.sh --autopilot-release … --confirm` on their behalf.
+  When the row says it `accepted the record on its SHAPE`, relay that too: the owner
+  validates more than this row checks, and a record that fails the stricter check
+  makes every Autopilot verb fail closed for the whole project — so the document
+  itself is the finding. That clause sits in the ROW, not in one remedy, so it
+  reaches you whoever owns the run. Report it; do not retry the release and do not
+  edit the document. A run carrying that clause never renders green.
+  Two facts in the row are there because both are routinely got wrong, so relay
+  them rather than paraphrasing: the hash in the active-pointer filename is
+  `sha256` of the OWNING SESSION id and not of the project path, and the hold comes
+  from path containment between the two trees in EITHER direction, not from a
+  shared git directory. `BLOCKED` is NOT terminal — only `DONE` and `CANCELLED`
+  are — so a run parked at `BLOCKED` holds the tree indefinitely. This row is
+  read-only like every other; Phase 3 below remains the report's only write and
+  never touches a run document.
+- **✅ autopilot: nonterminal durable run `<id>` … owned by THIS session** → the green form of
+  the same row, and deliberately NOT a finding. The row calls such a run an
+  `ordinary run in progress`, which means this session's own active pointer still designates it
+  and its stage is not `BLOCKED`. Say so and move on. It names no release command — releasing a
+  run this session owns cancels its own live generation — and it does not suppress the green
+  summary, which is why the arm exists. Every OTHER own-run form is a ⚠️, each stating a
+  different fact, so relay the clause the row actually printed and never translate one into
+  another. When it says
+  `the run is BLOCKED, which is NOT terminal`, the run still holds the tree and must be resumed
+  or cancelled from this session. When it says `no active pointer designates it`, the pointer is
+  gone — a torn begin is only one cause of that. And a pointer that
+  `could not be read, so whether the run is ordinary` or torn was not established is a missing
+  check rather than a verdict.
+- **⚠️ autopilot: … the run listing is incomplete / … were not opened at all** → the listing you
+  were given is bounded, and the row says so with the words `NOT a complete` account of what holds
+  this project. Relay that bound rather than summarizing the rows above it as the whole picture:
+  more runs may hold this project than the report named. Point the reader at the state directory
+  the row prints; offer no cleanup.
+- **⚠️ autopilot: `<N>` durable run document(s) that could not be read** → NOT the
+  same finding as no run. Such a record still holds its working tree while
+  `/zensu:autopilot-release` needs a run id it cannot supply. Name the files and
+  the directory the row prints and stop; offer no cleanup, and never suggest
+  deleting a run document counted by THIS row — one of them may still hold a
+  working tree a live run is driving, which is the whole reason the row exists.
+  The row below is the deliberate exception and states its own ground. The count excludes a document the report
+  could still read well enough to see a `DONE` or `CANCELLED` stage, because the
+  working-tree claim is false of such a record — NOT because it is harmless. Those
+  are counted by the row below instead, so a run file you know to be malformed may
+  legitimately be absent from THIS row and present in that one. Everything this row
+  counts is nonterminal or unreadable outright, which is what makes its
+  working-tree claim true of every member.
+- **⚠️ autopilot: `<N>` durable run document(s) this report does not accept whose
+  recorded stage is terminal** → the escaped set from the row above. Such a record
+  holds no working tree, but the Autopilot verbs validate EVERY document in that
+  directory, so one of these can still fail `/zensu:autopilot` and every occupancy
+  check closed for the whole project. Relay the names and the directory the row
+  prints. Do NOT offer `/zensu:autopilot-release` here — it applies a CANCEL to a
+  nonterminal run and refuses a terminal one, so it cannot clear this. Removal IS
+  the remedy here, and it is safe only because the record's own recorded stage
+  says `DONE` or `CANCELLED`, so it holds no tree. Say that when you offer it,
+  because this report does NOT validate that field: it reads the stage out of a
+  document it has just refused, in a directory any session in the project can
+  write. Leave the removal to the user, and never generalize this permission to
+  the row above.
+- **❌ state: this session's own workflow document is MISSING** → the record is
+  intact and the document it anchors is gone, so the capability gate is denying
+  every tool in this session. A deleted and re-created worktree causes it, because
+  `.zensu/state/` is gitignored. Relay the path the row prints, and both halves of
+  the remedy: `/zensu:adopt-session` for the diagnosis, `/zensu:adopt-session
+  --confirm` to rebuild — AND that rebuilding is a loss rather than a restore, so a
+  review chain that was live when the document vanished is gone. Never relay the
+  command without the cost.
+- **❌ state: this session's own workflow document is UNSAFE / UNREADABLE** → the
+  opposite instruction from the row above, and the reason this bullet exists: something
+  IS sitting at that path — a symlink, a hard link, a non-file, an oversized file, or a
+  present document that does not validate — so `/zensu:adopt-session --confirm` will
+  REFUSE to rebuild it, by design. Relay the component the row prints, which is not
+  always the document itself: with `.zensu` or `.zensu/state` replaced, the leaf need not
+  exist at all. Tell the user to run `/zensu:adopt-session` for the diagnosis, inspect
+  what is there before doing anything else, and then start a fresh Claude Code session.
+  Never relay the rebuild command for this row.
+- **⚠️ state: this session's workflow document was REBUILT** → the document is present
+  and healthy-looking, and its history carries the reserved `BASELINE_REBUILT` provenance
+  entry, so it was rebuilt by `/zensu:adopt-session --confirm` or by the SessionStart
+  self-heal. Relay it as a LOSS, never as a repair that succeeded: the rebuilt baseline
+  reads "never active", so a review chain that was live when the document vanished is
+  gone and the Stop guard now releases this session without asking for a reviewer. The
+  row names the entry count, the timestamp and which state was repaired. Offer
+  `/zensu:tdd` to re-arm if that work still needs a review.
+- **⚠️ state: this session's workflow document was not checked for rebuild provenance**
+  → either the core exported no rebuild phase token or the document did not read back,
+  so the check did NOT run. A missing check, never an all-clear, and never a claim that
+  the document was not rebuilt.
+- **⚠️ state: this session's own workflow document could not be classified** → the
+  Session Control core did not load from the plugin directory the row names, so the check
+  did NOT run. A missing check, never an all-clear.
+- **⚠️ state: this session's own workflow document came back with a classification this
+  build does not recognize** → the core answered with a state this report does not know,
+  which means the two are from different builds. A missing check, never an all-clear, and
+  never a reason to relay a rebuild.
+- **⚠️ state: this session's own workflow document was not checked** → no bound
+  session key was available, so the check above did not run. A missing check, never
+  an all-clear.
 - **⚠️ state: `<dir>` could not be read (`<errno>`)** → the session-state checks did
   NOT run. Relay it as a missing check, never as an all-clear: no chain shape, no
   wedged or foreign-chain row and no pending-review verdict was computed, so their

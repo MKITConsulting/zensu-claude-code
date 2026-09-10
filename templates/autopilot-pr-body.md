@@ -9,11 +9,14 @@
 ## Acceptance criteria
 
 One row per stable `AC-###` ID — deprecated rows stay listed (never deleted or
-renumbered) with status `deprecated` and no evidence.
+renumbered) with status `⚪ deprecated` and no evidence. Each Status carries a
+leading marker so the column is scannable: 🟢 pass, 🟡 partial, 🟡 unvalidated,
+🔴 fail, ⚪ deprecated. The marker prefixes the word and never replaces it, and ⚪ is
+bound to provenance — use it only for a row the spec already marks deprecated.
 
 | AC | Criterion | Status | Evidence |
 |----|-----------|--------|----------|
-| AC-001 | {criterion} | {pass/fail/unvalidated/deprecated} | {evidence per active AC} |
+| AC-001 | {criterion} | {🟢 pass / 🟡 partial / 🟡 unvalidated / 🔴 fail / ⚪ deprecated} | {evidence per active AC} |
 
 ## Verification
 

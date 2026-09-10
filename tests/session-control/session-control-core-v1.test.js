@@ -4448,3 +4448,904 @@ test('external process lease reclaims a live PID with a mismatched start identit
     token: acquired.token,
   });
 });
+
+// requireAbsentDirectoryPath was exported "for the unit layer alone" and had no unit
+// consumer at all — the same dead-export class this PR removes one file over. These four
+// cases are what make the export honest, and the predicate backs
+// orphanedProjectRootSession, so its rules are load-bearing rather than cosmetic.
+//
+// Written platform-neutrally ON PURPOSE: this suite runs on the Windows shard, where a
+// POSIX literal such as '/a/b' IS absolute but is NOT a path.resolve fixed point, so a
+// hardcoded POSIX path would trip the normalization rule for a reason unrelated to the
+// property under test. Every value is therefore built from path.resolve and path.sep.
+// The non-normalized case asserts its own premise first: without that line a change to
+// path.resolve would leave the case vacuous rather than red.
+const ABSENT_PROBE = path.resolve(os.tmpdir(), 'zensu-absent-probe');
+
+test('requireAbsentDirectoryPath accepts an absolute, normalized path', () => {
+  assert.equal(core.requireAbsentDirectoryPath(ABSENT_PROBE, 'probe'), ABSENT_PROBE);
+});
+
+test('requireAbsentDirectoryPath rejects a control character', () => {
+  const value = ABSENT_PROBE + String.fromCharCode(7);
+  assert.throws(
+    () => core.requireAbsentDirectoryPath(value, 'probe'),
+    /^Error: session-control-v1: probe is unsafe$/,
+  );
+});
+
+test('requireAbsentDirectoryPath rejects a relative path', () => {
+  assert.throws(
+    () => core.requireAbsentDirectoryPath(path.join('relative', 'probe'), 'probe'),
+    /^Error: session-control-v1: probe must be absolute$/,
+  );
+});
+
+test('requireAbsentDirectoryPath rejects an absolute path that is not normalized', () => {
+  const value = ['a', '..', 'b'].reduce((acc, segment) => acc + path.sep + segment, ABSENT_PROBE);
+  assert.notEqual(path.resolve(value), value);
+  assert.throws(
+    () => core.requireAbsentDirectoryPath(value, 'probe'),
+    /^Error: session-control-v1: probe must be normalized$/,
+  );
+});
+
+// The pruned-root reader: existence of the recorded plugin root is the one
+// waived check, and the waiver is proven rather than assumed.
+function prunedReaderFixture() {
+  const f = fixture('claude');
+  const cacheParent = path.join(f.root, 'cache');
+  fs.mkdirSync(cacheParent, { recursive: true });
+  const installed = path.join(cacheParent, 'plugin');
+  fs.renameSync(f.pluginRoot, installed);
+  f.pluginRoot = installed;
+  f.cacheParent = cacheParent;
+  f.currentContext = register(f);
+  f.recordFile = path.join(f.recordsDir, `${core.sessionKey(RAW_SESSION)}.json`);
+  f.readerOptions = { recordsDir: f.recordsDir, sessionId: RAW_SESSION, expectedHost: 'claude' };
+  return f;
+}
+
+test('the pruned-root reader admits only a record whose recorded plugin root is gone', () => {
+  const f = prunedReaderFixture();
+  assert.equal(core.readContext(f.readerOptions).plugin_root, f.currentContext.plugin_root);
+  assert.throws(
+    () => core.readPrunedPluginRootContext(f.readerOptions),
+    /context plugin root still exists/,
+  );
+  fs.rmSync(f.pluginRoot, { recursive: true, force: true });
+  assert.throws(() => core.readContext(f.readerOptions), /context plugin root does not exist/);
+  assert.throws(
+    () => core.readOrphanedProjectRootContext(f.readerOptions),
+    /context plugin root does not exist/,
+  );
+  const relaxed = core.readPrunedPluginRootContext(f.readerOptions);
+  assert.equal(relaxed.plugin_root, f.currentContext.plugin_root);
+  assert.equal(relaxed.runtime_digest, f.currentContext.runtime_digest);
+  assert.equal(relaxed.plugin_version, '9.8.7');
+});
+
+test('the pruned-root reader refuses a root whose cache directory never existed', () => {
+  const f = prunedReaderFixture();
+  fs.rmSync(f.cacheParent, { recursive: true, force: true });
+  assert.throws(
+    () => core.readPrunedPluginRootContext(f.readerOptions),
+    /context plugin root parent does not exist/,
+  );
+  assert.throws(() => core.readContext(f.readerOptions), /context plugin root does not exist/);
+});
+
+test('the pruned-root reader refuses a file standing where the recorded plugin root was', () => {
+  const f = prunedReaderFixture();
+  fs.rmSync(f.pluginRoot, { recursive: true, force: true });
+  fs.writeFileSync(f.pluginRoot, 'not a directory\n');
+  assert.throws(
+    () => core.readPrunedPluginRootContext(f.readerOptions),
+    /context plugin root still exists/,
+  );
+});
+
+test('existence is the only check the pruned-root reader waives', () => {
+  const tampered = prunedReaderFixture();
+  fs.rmSync(tampered.pluginRoot, { recursive: true, force: true });
+  rewriteJson(tampered.recordFile, (record) => {
+    record.session_id_hash = `sha256:${'f'.repeat(64)}`;
+    return record;
+  });
+  assert.throws(
+    () => core.readPrunedPluginRootContext(tampered.readerOptions),
+    /context session hash mismatch/,
+  );
+  const drifted = prunedReaderFixture();
+  fs.rmSync(drifted.pluginRoot, { recursive: true, force: true });
+  rewriteJson(drifted.recordFile, (record) => {
+    record.source_revision = `sha256:${'e'.repeat(64)}`;
+    return record;
+  });
+  assert.throws(
+    () => core.readPrunedPluginRootContext(drifted.readerOptions),
+    /source revision must equal its runtime content digest/,
+  );
+  const orphaned = prunedReaderFixture();
+  fs.rmSync(orphaned.pluginRoot, { recursive: true, force: true });
+  fs.rmSync(orphaned.projectRoot, { recursive: true, force: true });
+  assert.throws(
+    () => core.readPrunedPluginRootContext(orphaned.readerOptions),
+    /context project root does not exist/,
+  );
+});
+
+// requireAbsentDirectoryPath is driven directly further down, but a direct driver
+// cannot observe the CALL being deleted. Every other pruned fixture supplies a
+// well-formed path, so without these two arms the guard could be dropped from
+// readPrunedPluginRootContext and the whole suite would stay green — while the
+// bytes of a hand-edited record reached stderr and the /zensu:doctor report,
+// which is the hazard the orphan reader's twin comment documents. Line coverage
+// cannot see it either: the line runs on every pruned read, so it reports covered.
+test('the pruned-root reader shape-checks the recorded plugin root at its call site', () => {
+  const controlByte = String.fromCharCode(7);
+  const unsafe = prunedReaderFixture();
+  fs.rmSync(unsafe.pluginRoot, { recursive: true, force: true });
+  rewriteJson(unsafe.recordFile, (record) => {
+    record.plugin_root = unsafe.pluginRoot + controlByte;
+    return record;
+  });
+  // Premise, asserted rather than assumed, and built through String.fromCharCode
+  // so the byte stays visible in source.
+  assert.ok(
+    Array.from(JSON.parse(fs.readFileSync(unsafe.recordFile, 'utf8')).plugin_root)
+      .some((character) => character.charCodeAt(0) < 32),
+  );
+  assert.throws(
+    () => core.readPrunedPluginRootContext(unsafe.readerOptions),
+    /context plugin root is unsafe/,
+  );
+  const unnormalized = prunedReaderFixture();
+  fs.rmSync(unnormalized.pluginRoot, { recursive: true, force: true });
+  const drifted = unnormalized.pluginRoot + path.sep + '..' + path.sep + 'probe';
+  assert.notEqual(path.resolve(drifted), drifted);
+  rewriteJson(unnormalized.recordFile, (record) => {
+    record.plugin_root = drifted;
+    return record;
+  });
+  assert.throws(
+    () => core.readPrunedPluginRootContext(unnormalized.readerOptions),
+    /context plugin root must be normalized/,
+  );
+});
+
+test('requireAbsentDirectoryPath accepts only an absolute, normalized, printable path', () => {
+  const absent = path.resolve(os.tmpdir(), 'zensu-absent-probe');
+  assert.equal(core.requireAbsentDirectoryPath(absent, 'probe'), absent);
+  // Build the control byte visibly and assert the premise before asserting the
+  // refusal. The previous spelling embedded a literal C0 byte in the source, which
+  // rendered identically to the accepted value on the line above, so a reader could
+  // not see what the case tested and anyone tidying the redundant-looking literal
+  // would have deleted the only coverage of the character class.
+  const unsafe = `${absent}${String.fromCharCode(7)}`;
+  assert.ok(Array.from(unsafe).some((character) => character.charCodeAt(0) < 32));
+  assert.throws(
+    () => core.requireAbsentDirectoryPath(unsafe, 'probe'),
+    /^Error: session-control-v1: probe is unsafe$/,
+  );
+  assert.throws(
+    () => core.requireAbsentDirectoryPath(path.join('relative', 'probe'), 'probe'),
+    /^Error: session-control-v1: probe must be absolute$/,
+  );
+  const unnormalized = `${absent}${path.sep}..${path.sep}probe`;
+  assert.notEqual(path.resolve(unnormalized), unnormalized);
+  assert.throws(
+    () => core.requireAbsentDirectoryPath(unnormalized, 'probe'),
+    /^Error: session-control-v1: probe must be normalized$/,
+  );
+});
+
+// A full successor installation beside the recorded one: the recorded tree is
+// copied before it is pruned, so the successor carries every digest-bound asset
+// and only its declared version differs.
+function successorInstallation(f, version) {
+  const successor = path.join(f.cacheParent, `successor-${version}`);
+  fs.cpSync(f.pluginRoot, successor, { recursive: true });
+  fs.writeFileSync(
+    path.join(successor, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'zensu', version }),
+  );
+  return fs.realpathSync.native(successor);
+}
+
+function adoptionOptions(f, executingPluginRoot) {
+  return {
+    executingPluginRoot,
+    pluginData: f.pluginData,
+    recordsDir: f.recordsDir,
+    sessionId: RAW_SESSION,
+    host: 'claude',
+  };
+}
+
+test('a record whose recorded installation was pruned is adoptable by a newer sibling', () => {
+  const f = prunedReaderFixture();
+  // A major bump: the fixture records 9.8.7, and above major 0 every newer
+  // version inside the major is compatible, so only a new major makes the
+  // pre-pruning control an ordinary (present-root) lineage adoption.
+  const successor = successorInstallation(f, '10.0.0');
+  const beforePruning = core.adoptableRecord(adoptionOptions(f, successor));
+  assert.equal(beforePruning.ok, true, JSON.stringify(beforePruning));
+  assert.equal(beforePruning.prunedPluginRoot, false);
+  fs.rmSync(f.pluginRoot, { recursive: true, force: true });
+  const verdict = core.adoptableRecord(adoptionOptions(f, successor));
+  assert.equal(verdict.ok, true, JSON.stringify(verdict));
+  assert.equal(verdict.prunedPluginRoot, true);
+  assert.equal(verdict.recorded, '9.8.7');
+  assert.equal(verdict.executing, '10.0.0');
+  const adopted = core.adoptContext(adoptionOptions(f, successor));
+  assert.equal(adopted.prunedPluginRoot, true);
+  assert.equal(adopted.context.plugin_root, successor);
+  assert.equal(adopted.provenance, 'no-workflow-document');
+  assert.ok(fs.existsSync(adopted.supersededFile));
+  assert.equal(core.readContext(f.readerOptions).plugin_root, successor);
+});
+
+test('a compatible-but-pruned record is adoptable rather than already served', () => {
+  const f = prunedReaderFixture();
+  const successor = successorInstallation(f, '9.8.8');
+  assert.equal(core.adoptableRecord(adoptionOptions(f, successor)).reason, 'already-served');
+  fs.rmSync(f.pluginRoot, { recursive: true, force: true });
+  const verdict = core.adoptableRecord(adoptionOptions(f, successor));
+  assert.equal(verdict.ok, true, JSON.stringify(verdict));
+  assert.equal(verdict.prunedPluginRoot, true);
+});
+
+test('the pruned-root admission relaxes nothing else about adoption', () => {
+  const older = prunedReaderFixture();
+  const olderSuccessor = successorInstallation(older, '9.8.6');
+  fs.rmSync(older.pluginRoot, { recursive: true, force: true });
+  assert.equal(
+    core.adoptableRecord(adoptionOptions(older, olderSuccessor)).reason,
+    'executing-runtime-older',
+  );
+  const foreign = prunedReaderFixture();
+  const foreignRoot = successorInstallation(foreign, '9.9.0');
+  const elsewhere = path.join(foreign.root, 'elsewhere');
+  fs.renameSync(foreignRoot, elsewhere);
+  fs.rmSync(foreign.pluginRoot, { recursive: true, force: true });
+  assert.equal(
+    core.adoptableRecord(adoptionOptions(foreign, elsewhere)).reason,
+    'not-a-sibling-installation',
+  );
+  const unrooted = prunedReaderFixture();
+  const unrootedSuccessor = successorInstallation(unrooted, '9.9.0');
+  const parked = path.join(unrooted.root, 'parked');
+  fs.renameSync(unrootedSuccessor, parked);
+  fs.rmSync(unrooted.cacheParent, { recursive: true, force: true });
+  assert.equal(
+    core.adoptableRecord(adoptionOptions(unrooted, parked)).reason,
+    'record-unreadable',
+  );
+});
+
+// Exported surface is a one-way door: adding an export later is free, removing one
+// later is the break, and the port obligations invite a second host to implement
+// whatever this module exports. `prunedPluginRootSession` was added for symmetry
+// with a sibling that is itself unused, and nothing under hooks/ ever called it —
+// every real consumer needs the version pair, not a boolean. The sibling is left
+// alone deliberately: it predates this change and removing it belongs to its own.
+test('the pruned binder module exports no predicate without a consumer', () => {
+  const hookModule = require(path.join(
+    path.dirname(process.env.SESSION_CONTROL_CORE),
+    'claude-hook-session-v1.js',
+  ));
+  assert.equal(typeof hookModule.resolvePrunedPluginRoot, 'function');
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(hookModule, 'prunedPluginRootSession'),
+    false,
+  );
+});
+
+// Each relaxed reader waives ONE recorded root and must refuse to waive the other,
+// whatever its caller passes. Both of them spread the caller's options, so before
+// this pin the combined state — project root gone AND installation pruned — refused
+// only because no caller happened to set the sibling flag. Both readers are exported
+// and the port obligations invite a second host to call them, so the guarantee has
+// to live in the reader rather than in a convention.
+test('a relaxed reader refuses to waive its sibling root as well', () => {
+  const pruned = prunedReaderFixture();
+  fs.rmSync(pruned.pluginRoot, { recursive: true, force: true });
+  fs.rmSync(pruned.currentContext.project_root, { recursive: true, force: true });
+  assert.throws(
+    () => core.readPrunedPluginRootContext({
+      ...pruned.readerOptions,
+      allowMissingProjectRoot: true,
+    }),
+    /context project root does not exist/,
+  );
+
+  const orphan = prunedReaderFixture();
+  fs.rmSync(orphan.pluginRoot, { recursive: true, force: true });
+  fs.rmSync(orphan.currentContext.project_root, { recursive: true, force: true });
+  assert.throws(
+    () => core.readOrphanedProjectRootContext({
+      ...orphan.readerOptions,
+      allowMissingPluginRoot: true,
+    }),
+    /context plugin root does not exist/,
+  );
+});
+
+// The safe-version shape is exported so every producer that renders a recorded
+// version applies ONE rule. It was module-private while the adoption path was its
+// only consumer; the pruned binder mode is a second consumer, and on that path the
+// manifest cross-check that used to bound `plugin_version` is exactly what the
+// waiver drops — so a hand-copied alternation there would be the fourth copy of a
+// rule whose whole job is to be single.
+test('the safe-version shape is exported and rejects a separator inside a version', () => {
+  assert.ok(core.ADOPTION_SAFE_VERSION_RE instanceof RegExp);
+  assert.ok(core.ADOPTION_SAFE_VERSION_RE.test('0.19.0'));
+  assert.ok(core.ADOPTION_SAFE_VERSION_RE.test('1.0.0-rc.1+build'));
+  assert.equal(core.ADOPTION_SAFE_VERSION_RE.test(`0.19.0${String.fromCharCode(9)}9.9.9`), false);
+  assert.equal(core.ADOPTION_SAFE_VERSION_RE.test(''), false);
+  assert.equal(core.ADOPTION_SAFE_VERSION_RE.test('.leading'), false);
+});
+
+// CHARACTERIZATION, and it grades the ORPHAN reader on purpose. The extraction
+// into requireAbsentDirectoryPath added a third check over the two the inline
+// code applied — `path.resolve(value) !== value` — and the cases added with it
+// drive that arm through the PRUNED call site only. A change to the shared helper
+// that relaxed normalization would therefore move the boundary of a relaxable
+// bind failure with every existing case green. This is the arm that notices.
+test('the orphan reader enforces normalization too, not only the pruned call site', () => {
+  const f = fixture('claude');
+  const context = register(f);
+  const recordFile = path.join(f.recordsDir, `${core.sessionKey(RAW_SESSION)}.json`);
+  const readerOptions = { recordsDir: f.recordsDir, sessionId: RAW_SESSION, expectedHost: 'claude' };
+  fs.rmSync(context.project_root, { recursive: true, force: true });
+  assert.equal(
+    core.readOrphanedProjectRootContext(readerOptions).project_root,
+    context.project_root,
+    'the relaxable orphan state is established before the tightening is probed',
+  );
+  const drifted = context.project_root + path.sep + '..' + path.sep + 'probe';
+  assert.notEqual(path.resolve(drifted), drifted, 'the probe path really is un-normalized');
+  rewriteJson(recordFile, (record) => {
+    record.project_root = drifted;
+    return record;
+  });
+  assert.throws(
+    () => core.readOrphanedProjectRootContext(readerOptions),
+    /context project root must be normalized/,
+  );
+});
+
+// --- Non-blocking open of the workflow document (PR #285 review finding) ---
+//
+// `readRegularFileSnapshot` opens with `O_NOFOLLOW | O_NONBLOCK`. The symlink
+// half has cases; the non-blocking half had none, because the only FIFO fixture
+// in the tree sits behind the zen-mode hook's own `lstat`, which rejects a
+// non-regular document before this reader is ever called. Deleting `| nonBlock`
+// therefore left every suite green. This case reaches the open directly through
+// `readWorkflowState`, with no `lstat` in front of it.
+//
+// The assertion is a DEADLINE, not a return value: `open(2)` on a FIFO with no
+// writer blocks forever, so the discriminating observation is that the process
+// finishes at all. It runs in a child for that reason — a blocking read in this
+// process would hang the whole suite instead of failing one case.
+const MKFIFO_AVAILABLE = (() => {
+  if (WINDOWS) return false;
+  const probe = require('node:child_process').spawnSync('sh', ['-c', 'command -v mkfifo']);
+  return probe.status === 0;
+})();
+
+test('the workflow-document read does not block on a FIFO', { skip: MKFIFO_AVAILABLE ? false : 'mkfifo is unavailable on this host' }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-nonblock-'));
+  try {
+    const projectRoot = path.join(root, 'project');
+    const stateDir = path.join(projectRoot, ...core.WORKFLOW_STATE_SEGMENTS);
+    fs.mkdirSync(stateDir, { recursive: true });
+    const key = core.sessionKey(RAW_SESSION);
+    const target = path.join(stateDir, `${core.WORKFLOW_STATE_PREFIX}${key}.json`);
+    const made = require('node:child_process').spawnSync('mkfifo', [target]);
+    assert.equal(made.status, 0, 'the fixture could not create a FIFO');
+    assert.ok(fs.lstatSync(target).isFIFO(), 'the fixture is not a FIFO');
+
+    const program = `
+      const core = require(${JSON.stringify(path.resolve(corePath))});
+      try { core.readWorkflowState({ projectRoot: ${JSON.stringify(projectRoot)}, sessionId: ${JSON.stringify(RAW_SESSION)} }); }
+      catch (error) { process.stdout.write('threw: ' + String(error && error.message)); }
+      process.exit(0);
+    `;
+    // STDOUT IS READ, not only the exit. The module's argument has TWO halves -
+    // the open returns immediately BECAUSE of O_NONBLOCK, and the descriptor
+    // check then rejects it - and asserting only that the child exited measures
+    // the first while leaving the second free to change. A reader that returned
+    // before the guarded open would keep this case green while exercising
+    // nothing.
+    const seen = await new Promise((resolve) => {
+      const child = spawn(process.execPath, ['-e', program], { stdio: ['ignore', 'pipe', 'pipe'] });
+      let out = '';
+      child.stdout.on('data', (chunk) => { out += String(chunk); });
+      const timer = setTimeout(() => { child.kill('SIGKILL'); resolve(null); }, 10000);
+      child.on('exit', () => { clearTimeout(timer); resolve(out); });
+    });
+    assert.ok(seen !== null, 'the read blocked on a FIFO with no writer');
+    assert.match(
+      seen,
+      /threw: .*not a regular file/i,
+      `the FIFO must be refused by the descriptor check, got: ${JSON.stringify(seen)}`,
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('the exported workflow-document layout is frozen', () => {
+  // The other new export of this change. `zen-anchor-v1.test.js` pins its own
+  // constants the same way; without this the layout could be mutated by any
+  // consumer that requires this module.
+  assert.ok(Object.isFrozen(core.WORKFLOW_STATE_SEGMENTS));
+  assert.deepEqual([...core.WORKFLOW_STATE_SEGMENTS], ['.zensu', 'state']);
+  assert.equal(core.WORKFLOW_STATE_PREFIX, 'tdd-phase-');
+});
+
+test('the EAGAIN retry arm is present, bounded and paced', () => {
+  // BEHAVIOURALLY UNREACHABLE on every host this ships to: the descriptor is
+  // gated behind `isFile()`, so a FIFO or device never reaches the read loop and
+  // `EAGAIN` cannot be raised from a regular file on Linux or macOS. A source pin
+  // is therefore the only available control - the standard this repo already
+  // applies to its other unreachable branches - and without one the arm had no
+  // pin of any kind: a grep for EAGAIN across tests/ returned nothing.
+  const src = fs.readFileSync(path.resolve(corePath), 'utf8');
+  const loop = src.slice(src.indexOf('let againBudget'), src.indexOf('const after = fs.fstatSync(descriptor)'));
+  assert.ok(loop.length > 0, 'the read loop could not be sliced out of the module');
+  assert.match(loop, /EAGAIN/, 'the EAGAIN arm is gone');
+  assert.match(loop, /EWOULDBLOCK/, 'the EWOULDBLOCK spelling is gone');
+  assert.match(loop, /againBudget\s*-=\s*1/, 'the retry budget is no longer decremented');
+  assert.match(loop, /againBudget\s*>\s*0/, 'the retry is no longer bounded');
+  // PACED. All 64 retries burned in microseconds and could not outlast any of the
+  // conditions the comment beside them names, so the bound was a spin rather than
+  // a wait. A blocking pause with no event loop is what a synchronous reader can
+  // do here.
+  assert.match(loop, /sleep\(/, 'the retry has no pause, so the budget is spent in microseconds');
+});
+
+test('the module has ONE pause primitive, and its fault contract is explicit per call site', () => {
+  // Two pause functions performing the identical `Atomics.wait` shipped side by
+  // side with OPPOSITE fault contracts: the new reader swallowed a throw, the
+  // pre-existing lock poll did not. One of the two had to be wrong on any host
+  // where the throw is real, and nothing in the tree said which. The contract is
+  // now a PARAMETER, so each call site states what it wants rather than picking a
+  // function whose name does not say.
+  const src = fs.readFileSync(path.resolve(corePath), 'utf8');
+  const defs = src.match(/^function sleep[A-Za-z]*\(/gm) || [];
+  assert.deepStrictEqual(
+    defs,
+    ['function sleep('],
+    `exactly one pause primitive, got ${JSON.stringify(defs)}`,
+  );
+  assert.match(src, /function sleep\(milliseconds, options\)/, 'the contract is not a parameter');
+  // The EAGAIN retry asks for the best-effort contract explicitly.
+  const loop = src.slice(src.indexOf('let againBudget'), src.indexOf('const after = fs.fstatSync(descriptor)'));
+  assert.match(loop, /sleep\(1, \{ bestEffort: true \}\)/, 'the retry does not state its contract');
+  // The lock poll keeps the strict one, which is the default.
+  assert.doesNotMatch(
+    src.slice(src.indexOf('function sleep(')),
+    /sleep\([^)]*bestEffort[^)]*\)[\s\S]*acquireExternalLock/,
+    'the lock poll must not silently adopt the best-effort contract',
+  );
+});
+
+// ── Workflow-baseline repair ────────────────────────────────────────────────
+//
+// A DIFFERENT wedge from the one adoption exits, and the distinction is the whole
+// point: the record is intact and SERVED by the executing runtime, and the
+// workflow document the record anchors is gone. While it is, the capability gate
+// denies every tool in the session. See §"Workflow-Baseline Repair" in CLAUDE.md.
+
+function baselineOptions(f, overrides = {}) {
+  return {
+    recordsDir: f.recordsDir,
+    sessionId: RAW_SESSION,
+    pluginData: f.pluginData,
+    executingPluginRoot: f.pluginRoot,
+    host: f.host,
+    ...overrides,
+  };
+}
+
+// The CANONICAL project root, and the reason it is a helper rather than
+// f.projectRoot inline: readContext canonicalizes the recorded root, so on macOS
+// the verdict answers /private/var/... while the fixture's own spelling is
+// /var/... . A raw compare here fails against perfectly correct code, which is
+// exactly what it did on the first run of these tests.
+function baselineProject(f) {
+  return fs.realpathSync.native(f.projectRoot);
+}
+
+function baselineFile(f) {
+  return core.adoptionWorkflowStatePath(baselineProject(f), RAW_SESSION);
+}
+
+// A real SIBLING of the recorded root, because servesRecordedRuntime requires one
+// whatever the declared version says. Local rather than reusing siblingPluginRoot,
+// which reads f.currentContext — a field only the deferred-review fixtures set.
+function baselineSibling(f, version) {
+  const root = fs.mkdtempSync(path.join(path.dirname(f.pluginRoot), 'zensu-baseline-sibling-'));
+  const manifestDir = f.host === 'codex' ? '.codex-plugin' : '.claude-plugin';
+  fs.mkdirSync(path.join(root, manifestDir), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, manifestDir, 'plugin.json'),
+    JSON.stringify({ name: 'zensu', version }),
+  );
+  return fs.realpathSync.native(root);
+}
+
+test('WB1 the classification names all four shapes, and both tamper shapes are one verdict', (t) => {
+  const f = fixture('claude');
+  register(f);
+  const file = core.adoptionWorkflowStatePath(f.projectRoot, RAW_SESSION);
+  const classify = () => core.classifyWorkflowBaseline(file, f.projectRoot, RAW_SESSION);
+
+  assert.equal(classify(), core.BASELINE_STATES.MISSING);
+  initialize(f);
+  assert.equal(classify(), core.BASELINE_STATES.PRESENT);
+
+  // Present and does not validate is UNREADABLE, never missing: something is
+  // there, and calling it absent would aim the repair at a path it cannot own.
+  fs.writeFileSync(file, '{not json');
+  assert.equal(classify(), core.BASELINE_STATES.UNREADABLE);
+
+  // A hard link is a second directory entry for a real file, so it passes every
+  // test a plain regular file passes except nlink. It is the shape an isFile or
+  // size test alone would admit.
+  fs.unlinkSync(file);
+  const elsewhere = path.join(f.projectRoot, 'elsewhere.json');
+  fs.writeFileSync(elsewhere, '{}');
+  fs.linkSync(elsewhere, file);
+  assert.equal(classify(), core.BASELINE_STATES.UNSAFE, 'a hard link is unsafe, not readable');
+
+  if (WINDOWS_SYMLINK_SKIP) {
+    t.diagnostic(WINDOWS_SYMLINK_SKIP);
+    return;
+  }
+  fs.unlinkSync(file);
+  fs.symlinkSync(elsewhere, file);
+  assert.equal(classify(), core.BASELINE_STATES.UNSAFE, 'a symlink is unsafe, not readable');
+});
+
+test('WB1a a NON-DIRECTORY state component is UNSAFE, never missing', () => {
+  const f = fixture('claude');
+  register(f);
+  // A FILE where the state directory belongs. State the MECHANISM correctly: the
+  // ladder's lstat on `.zensu/state` SUCCEEDS here — it is a regular file — and the
+  // verdict comes from the `!componentStat.isDirectory()` arm, NOT from a thrown
+  // ENOTDIR. The previous title and comment claimed the throw arm, which this
+  // fixture never reaches, so the case passed for a different reason than it named.
+  // The throw arm has its own case below.
+  const zensuDir = path.join(f.projectRoot, '.zensu');
+  fs.mkdirSync(zensuDir, { recursive: true });
+  fs.writeFileSync(path.join(zensuDir, 'state'), 'not a directory');
+  assert.equal(
+    core.classifyWorkflowBaseline(baselineFile(f), baselineProject(f), RAW_SESSION),
+    core.BASELINE_STATES.UNSAFE,
+  );
+  // And the verdict refuses to repair it, so the error can never be rebuilt over.
+  assert.equal(core.workflowBaselineVerdict(baselineOptions(f)).repairable, false);
+});
+
+test('WB1b a LEAF lstat error that is not ENOENT is UNSAFE, never missing', (t) => {
+  if (process.platform === 'win32' || process.getuid?.() === 0) {
+    t.diagnostic('needs POSIX mode bits and a non-root uid to make lstat fail with EACCES');
+    return;
+  }
+  const f = fixture('claude');
+  register(f);
+  // The arm WB1a was titled for and never reached: a THROWN non-ENOENT errno. The
+  // components are all proper directories, so the ladder passes; the leaf lstat then
+  // fails with EACCES because its parent is unsearchable. ENOENT is the only errno
+  // that means absence — anything else must not be reported as a missing document,
+  // or the repair would build over a path it could not even read.
+  const stateDir = path.dirname(baselineFile(f));
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.chmodSync(stateDir, 0o000);
+  try {
+    assert.equal(
+      core.classifyWorkflowBaselineShape(baselineFile(f), baselineProject(f)),
+      core.BASELINE_STATES.UNSAFE,
+    );
+  } finally {
+    fs.chmodSync(stateDir, 0o700);
+  }
+});
+
+test('WB1c a DANGLING symlink is an existing entry to both write gates', (t) => {
+  if (WINDOWS_SYMLINK_SKIP) {
+    t.diagnostic(WINDOWS_SYMLINK_SKIP);
+    return;
+  }
+  const f = fixture('claude');
+  register(f);
+  // fs.existsSync FOLLOWS the link, so it answers false for a dangling one. Both
+  // write gates keyed their guards on it, so the shape the classifier calls UNSAFE
+  // was invisible to them: the rename replaced the link and reported a clean write,
+  // destroying the tamper artifact. lstat is what makes an existing entry visible.
+  const file = baselineFile(f);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.symlinkSync(path.join(f.projectRoot, 'no-such-target.json'), file);
+
+  assert.equal(
+    core.classifyWorkflowBaselineShape(file, baselineProject(f)),
+    core.BASELINE_STATES.UNSAFE,
+    'the classifier already sees it — the write gates must agree',
+  );
+  assert.throws(
+    () => core.atomicWriteJson(file, { any: 'value' }),
+    /symlink state file rejected/,
+  );
+  assert.throws(
+    () => core.initializeWorkflowState({
+      projectRoot: baselineProject(f),
+      sessionId: RAW_SESSION,
+    }),
+    /unsafe workflow state file rejected/,
+  );
+  // The artifact SURVIVES: destroying it is what made the old behaviour a loss of
+  // evidence rather than merely a wrong return value.
+  assert.equal(fs.lstatSync(file).isSymbolicLink(), true);
+});
+
+test('WB1d the locked re-check refuses a document that appeared after the verdict', () => {
+  const f = fixture('claude');
+  register(f);
+  initialize(f);
+  const file = baselineFile(f);
+  assert.equal(fs.existsSync(file), true, 'the document really is there');
+
+  // The arm this reaches had NO executed case anywhere: it is only reachable when
+  // the OUTER verdict says repairable and the LOCKED create then finds the document
+  // already present. WB6 refuses one ladder earlier, at !verdict.repairable, so no
+  // fixture ever constructed the window. Faking a single ENOENT on the leaf lstat
+  // makes the outer classification see MISSING while the locked check sees the real
+  // file — exactly the benign race a concurrent SessionStart produces.
+  const realLstat = fs.lstatSync;
+  let faked = false;
+  fs.lstatSync = function patchedLstat(target, ...rest) {
+    if (!faked && String(target) === file) {
+      faked = true;
+      const absent = new Error(`ENOENT: no such file or directory, lstat '${file}'`);
+      absent.code = 'ENOENT';
+      throw absent;
+    }
+    return realLstat.call(this, target, ...rest);
+  };
+  try {
+    assert.throws(
+      () => core.repairWorkflowBaseline(baselineOptions(f)),
+      (error) => core.isBaselineAlreadyPresent(error)
+        && error.baselineState === core.BASELINE_STATES.PRESENT,
+      'the benign race is typed apart from tamper, so both callers can branch on it',
+    );
+  } finally {
+    fs.lstatSync = realLstat;
+  }
+  assert.equal(faked, true, 'the fake must actually have been consumed');
+});
+
+test('WB2 the verdict refuses every bind it cannot establish, and names which', () => {
+  const f = fixture('claude');
+
+  // No record at all — the read fails, and the refusal says so rather than
+  // reporting a verdict about a document nothing anchors.
+  assert.deepEqual(
+    core.workflowBaselineVerdict(baselineOptions(f)),
+    { ok: false, reason: core.BASELINE_REFUSALS.RECORD_UNREADABLE },
+  );
+
+  register(f);
+
+  const otherData = fs.mkdtempSync(path.join(f.root, 'other-plugin-data-'));
+  assert.deepEqual(
+    core.workflowBaselineVerdict(baselineOptions(f, { pluginData: otherData })),
+    { ok: false, reason: core.BASELINE_REFUSALS.PLUGIN_DATA },
+    'the plugin-data boundary is never relaxed here either',
+  );
+
+  // The INVERSE of adoption's condition 3: this repair REQUIRES the executing
+  // runtime to serve the record. A lineage break has its own exit, and rebuilding
+  // a document under a runtime not allowed to read the record anchoring it would
+  // be the wrong repair for the wrong cause. The fixture declares 9.8.7, so a
+  // major step is what breaks the lineage.
+  const foreign = baselineSibling(f, '10.0.0');
+  assert.deepEqual(
+    core.workflowBaselineVerdict(baselineOptions(f, { executingPluginRoot: foreign })),
+    { ok: false, reason: core.BASELINE_REFUSALS.NOT_SERVED },
+  );
+});
+
+test('WB3 only a missing document is repairable', () => {
+  const f = fixture('claude');
+  register(f);
+
+  const missing = core.workflowBaselineVerdict(baselineOptions(f));
+  assert.equal(missing.ok, true);
+  assert.equal(missing.state, core.BASELINE_STATES.MISSING);
+  assert.equal(missing.repairable, true);
+  assert.equal(missing.projectRoot, baselineProject(f));
+  assert.equal(missing.path, baselineFile(f));
+
+  initialize(f);
+  const present = core.workflowBaselineVerdict(baselineOptions(f));
+  assert.equal(present.state, core.BASELINE_STATES.PRESENT);
+  assert.equal(present.repairable, false, 'a healthy document is never rebuilt over');
+
+  fs.writeFileSync(present.path, '{not json');
+  const unreadable = core.workflowBaselineVerdict(baselineOptions(f));
+  assert.equal(unreadable.state, core.BASELINE_STATES.UNREADABLE);
+  assert.equal(unreadable.repairable, false, 'tamper is never repaired away');
+});
+
+test('WB4 the repair rebuilds the document, records BASELINE_REBUILT once, and ledgers nothing', () => {
+  const f = fixture('claude');
+  register(f);
+  const file = baselineFile(f);
+  assert.equal(fs.existsSync(file), false, 'precondition: the document is genuinely absent');
+
+  const repaired = core.repairWorkflowBaseline(baselineOptions(f));
+  assert.equal(repaired.path, file);
+  assert.equal(repaired.projectRoot, baselineProject(f));
+  assert.equal(repaired.provenance, 'recorded');
+  assert.equal(fs.existsSync(file), true);
+
+  const state = core.readWorkflowState({ projectRoot: f.projectRoot, sessionId: RAW_SESSION });
+  const rebuilt = state.history.filter((entry) => entry.phase === core.BASELINE_HISTORY_PHASE);
+  assert.equal(rebuilt.length, 1, 'exactly one provenance entry, never a second on the same repair');
+  assert.equal(rebuilt[0].reason, core.BASELINE_HISTORY_REASON_PREFIX + core.BASELINE_STATES.MISSING);
+  // `ts`, never `timestamp`: the key every other history writer sets and the one
+  // validateWorkflowExtensions validates.
+  assert.ok(typeof rebuilt[0].ts === 'string' && rebuilt[0].ts.length > 0);
+
+  // The bypass ledger records gate ESCAPES so that everything rendered under
+  // "Gates bypassed" is true. This escaped no gate — the document a gate would
+  // have read was already gone — so an entry here would make that line false.
+  assert.deepEqual(state.bypasses, [], 'the repair is never a bypass-ledger entry');
+});
+
+test('WB5 the repair refuses a document that is present but unsafe or unreadable', (t) => {
+  const f = fixture('claude');
+  register(f);
+  const file = core.adoptionWorkflowStatePath(f.projectRoot, RAW_SESSION);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+
+  fs.writeFileSync(file, '{not json');
+  // The CODE, not only the message. The message is what the core's own comment
+  // tells callers never to match on, and both shipped consumers branch on
+  // `error.code` alone — so a swapped ternary would report a real tamper refusal
+  // as the benign race ("nothing to repair", exit 0) with every message assertion
+  // still green.
+  assert.throws(
+    () => core.repairWorkflowBaseline(baselineOptions(f)),
+    (error) => /workflow-document-unreadable/.test(error.message)
+      && error.code === core.BASELINE_NOT_REPAIRABLE_CODE
+      && core.isBaselineAlreadyPresent(error) === false,
+  );
+  // The refusal leaves the bytes alone: rebuilding over them would destroy the
+  // one thing a reader needs to tell tamper from a truncated write.
+  assert.equal(fs.readFileSync(file, 'utf8'), '{not json');
+
+  fs.unlinkSync(file);
+  const elsewhere = path.join(f.projectRoot, 'elsewhere.json');
+  fs.writeFileSync(elsewhere, '{}');
+  fs.linkSync(elsewhere, file);
+  assert.throws(
+    () => core.repairWorkflowBaseline(baselineOptions(f)),
+    (error) => /workflow-document-unsafe/.test(error.message)
+      && error.code === core.BASELINE_NOT_REPAIRABLE_CODE,
+  );
+  // The LEAF-level control for WB5a's ancestor case. `baselineUnsafeComponent`
+  // could return the leaf unconditionally and WB5a alone would not see it — the
+  // two together are what make the namer's answer discriminating.
+  // CANONICAL on both sides. The ladder anchors on the resolved project root, and
+  // on macOS a temp root is spelled `/var/...` by the caller and `/private/var/...`
+  // by the kernel — the same trap the classifier's own comment records.
+  assert.equal(
+    core.workflowBaselineVerdict(baselineOptions(f)).unsafeAt,
+    path.join(fs.realpathSync.native(path.dirname(file)), path.basename(file)),
+    'a bad LEAF names the leaf',
+  );
+  // The tamper arm asserts the SAME property the unreadable arm above does, and
+  // it did not: a refusal that first unlinked or truncated the link would throw
+  // the identical message and pass. The link, its target's bytes and the link
+  // count are all part of the evidence the refusal exists to preserve.
+  assert.equal(fs.readFileSync(elsewhere, 'utf8'), '{}', 'the link target is untouched');
+  assert.equal(fs.lstatSync(file).nlink, 2, 'the hard link still has two entries');
+  assert.ok(fs.existsSync(file), 'the refusal did not unlink the document path');
+
+  if (WINDOWS_SYMLINK_SKIP) {
+    t.diagnostic(WINDOWS_SYMLINK_SKIP);
+    return;
+  }
+  // A SYMLINK driven through the REPAIR had no case anywhere — WB1 exercises that
+  // shape through the classifier only, so the writer's own refusal of it was
+  // unverified in both directions.
+  fs.unlinkSync(file);
+  const outside = path.join(f.projectRoot, 'outside.json');
+  fs.writeFileSync(outside, '{"kept":true}');
+  fs.symlinkSync(outside, file);
+  assert.throws(
+    () => core.repairWorkflowBaseline(baselineOptions(f)),
+    /workflow-document-unsafe/,
+  );
+  assert.equal(fs.readFileSync(outside, 'utf8'), '{"kept":true}', 'the symlink target is untouched');
+  assert.ok(fs.lstatSync(file).isSymbolicLink(), 'the symlink itself survived the refusal');
+});
+
+test('WB5a a symlinked .zensu/state component is UNSAFE, never a repairable absence', (t) => {
+  const f = fixture('claude');
+  register(f);
+  if (WINDOWS_SYMLINK_SKIP) {
+    t.diagnostic(WINDOWS_SYMLINK_SKIP);
+    return;
+  }
+  const file = core.adoptionWorkflowStatePath(f.projectRoot, RAW_SESSION);
+  const stateDir = path.dirname(file);
+  fs.mkdirSync(path.dirname(stateDir), { recursive: true });
+  // An EMPTY real directory somewhere else, reached through a symlink at the
+  // `.zensu/state` position. `lstat` resolves every component EXCEPT the last, so
+  // before the directory ladder existed this answered ENOENT on the leaf and
+  // classified MISSING/repairable — a tamper shape offered as rebuildable, whose
+  // write then failed at ensureDescendantDirectory and whose report told the user
+  // to retry the repair that cannot succeed.
+  const decoy = path.join(f.projectRoot, 'decoy-state');
+  fs.mkdirSync(decoy, { recursive: true });
+  fs.symlinkSync(decoy, stateDir);
+  assert.equal(
+    core.classifyWorkflowBaseline(file, f.projectRoot, RAW_SESSION),
+    core.BASELINE_STATES.UNSAFE,
+    'a symlinked state directory is tamper, not absence',
+  );
+  const verdict = core.workflowBaselineVerdict(baselineOptions(f));
+  assert.equal(verdict.ok, true);
+  assert.equal(verdict.repairable, false, 'and it is therefore not repairable');
+  // WHICH component, not just that one is unsafe. With `.zensu/state` symlinked
+  // the leaf need not exist at all, so naming it sent the operator to a path they
+  // could not inspect — the defect `baselineUnsafeComponent` was written to fix,
+  // and nothing asserted its answer until here. WB5's leaf case is the control.
+  const realStateDir = path.join(fs.realpathSync.native(f.projectRoot), '.zensu', 'state');
+  assert.equal(verdict.unsafeAt, realStateDir, 'the ANCESTOR is named, not the leaf');
+  assert.notEqual(verdict.unsafeAt, file, 'and the leaf is not what is reported');
+  assert.throws(
+    () => core.repairWorkflowBaseline(baselineOptions(f)),
+    (error) => /workflow-document-unsafe/.test(error.message)
+      && error.code === core.BASELINE_NOT_REPAIRABLE_CODE,
+  );
+  assert.ok(fs.lstatSync(stateDir).isSymbolicLink(), 'the refusal left the component alone');
+});
+
+test('WB6 a second repair refuses instead of rebuilding over the first', () => {
+  const f = fixture('claude');
+  register(f);
+  core.repairWorkflowBaseline(baselineOptions(f));
+  const file = core.adoptionWorkflowStatePath(f.projectRoot, RAW_SESSION);
+  const before = fs.readFileSync(file, 'utf8');
+  assert.throws(
+    () => core.repairWorkflowBaseline(baselineOptions(f)),
+    (error) => /workflow-document-present/.test(error.message)
+      && error.code === core.BASELINE_ALREADY_PRESENT_CODE
+      && core.isBaselineAlreadyPresent(error) === true,
+    'the second call sees a present document and refuses it as the benign race',
+  );
+  assert.equal(fs.readFileSync(file, 'utf8'), before, 'a refused repair changes nothing');
+});
+
+test('WB7 a bind the repair cannot establish refuses before any write', () => {
+  const f = fixture('claude');
+  register(f);
+  const foreign = baselineSibling(f, '10.0.0');
+  assert.throws(
+    () => core.repairWorkflowBaseline(baselineOptions(f, { executingPluginRoot: foreign })),
+    /not-served-by-executing-runtime/,
+  );
+  assert.equal(
+    fs.existsSync(core.adoptionWorkflowStatePath(f.projectRoot, RAW_SESSION)),
+    false,
+    'a refused bind never creates the document it declined to judge',
+  );
+});

@@ -484,7 +484,14 @@ jobs:
           TAG="${{ steps.v.outputs.tag }}"
           ASSET="zensu-claude-code-v${VER}.zip"
           EXPECTED_DIGEST="sha256:$(sha256sum "$ASSET" | awk '{print $1}')"
-          RELEASE_ID=""
+          # Dedicate fd 3 to workflow annotations, bound to the step's real stdout
+          # before any redirect exists. Writing them on fd 1 made them collateral
+          # of whatever a call site did with the wrapped command's output, which is
+          # how a trailing `>/dev/null` on a run_step invocation discarded the
+          # annotation at both gh api sites. On fd 3 a caller's redirect cannot
+          # reach them at all, so the property holds by construction rather than by
+          # a convention three separate checks have to police.
+          exec 3>&1
           NOTES_FILE="${{ runner.temp }}/notes.md"
           METADATA_FILE="${{ runner.temp }}/release-metadata.json"
 
@@ -494,24 +501,77 @@ jobs:
           # branch below, so a rerun would create a second draft instead of
           # adopting the first. The list endpoint returns drafts to a token with
           # push access, so resolve the id there and address the release by id.
+          # That rule governs the REST reads and the publish PATCH. It does NOT
+          # govern `gh release create` and `gh release upload`, which still resolve
+          # by tag because gh exposes no by-id form for them — an accepted
+          # narrowing, not an unconverted site. `commits/$TAG` in verify_exact_tag
+          # is by-tag on purpose: resolving the git tag is what it is for.
           resolve_release_id() {
             gh api --paginate -H 'Accept: application/vnd.github+json' \
               -H 'X-GitHub-Api-Version: 2026-03-10' \
               "repos/$GITHUB_REPOSITORY/releases" \
               --jq "map(select(.tag_name == \"$TAG\")) | .[0].id // empty"
           }
+          # TWO failure causes, TWO statuses, and conflating them is not cosmetic:
+          # the not-found path emits no stderr at all (`.[0].id // empty` plus the
+          # emptiness test below), so a single status made a transient list failure
+          # read as "no release carries this tag" and sent the caller on to create a
+          # SECOND draft against a tag that may already carry one.
+          #   1 = no release carries this tag
+          #   2 = the API call itself failed
           release_json() {
             local id
-            id="$RELEASE_ID"
-            if [ -z "$id" ]; then
-              id="$(resolve_release_id)"
-              id="${id%%$'\n'*}"
-            fi
+            id="$(resolve_release_id)" || return 2
+            id="${id%%$'\n'*}"
             [ -n "$id" ] || return 1
-            RELEASE_ID="$id"
             gh api -H 'Accept: application/vnd.github+json' \
               -H 'X-GitHub-Api-Version: 2026-03-10' \
-              "repos/$GITHUB_REPOSITORY/releases/$id"
+              "repos/$GITHUB_REPOSITORY/releases/$id" || return 2
+          }
+          # A bare command in this step dies under `set -euo pipefail` with no
+          # annotation and no stderr in the job log. Release run 33397732337
+          # produced exactly one line of output — the draft release URL — before
+          # exiting 1, which left the draft at 0 assets, stranded the version as an
+          # untagged draft, and made the cause unrecoverable after the fact. A
+          # retry of the same unchanged code then succeeded, so the failure was
+          # transient; this wrapper does not address whatever that transient cause
+          # was, it makes the next one nameable. Route every otherwise-unguarded
+          # command through it: the annotation names the operation and carries the
+          # first stderr line, and the full stderr still reaches the job log.
+          # Use `--quiet` rather than a redirect on the invocation. A trailing
+          # `>/dev/null` binds to the run_step SIMPLE COMMAND rather than to "$@",
+          # so it suppresses the whole function; `--quiet` applies the sink to the
+          # wrapped command alone. That used to be a correctness rule, because the
+          # annotation shared fd 1 with the payload and such a redirect discarded it
+          # — measured, and it shipped that way for one review round at both gh api
+          # sites. Since the annotation moved to fd 3 it is a noise rule instead: a
+          # caller's redirect can no longer reach the report, only the payload.
+          # Known bound: the wrapper buffers stderr and replays it after the command
+          # returns, so a step killed by cancellation or the job timeout yields no
+          # stderr at all, where an unwrapped command would have streamed it live.
+          run_step() {
+            local quiet=0
+            if [ "${1:-}" = --quiet ]; then quiet=1; shift; fi
+            [ "$#" -ge 2 ] || {
+              echo "::error::run_step called without a label and a command" >&3
+              return 2
+            }
+            local label="$1"; shift
+            local err_file rc=0 first
+            err_file="$(mktemp "${RUNNER_TEMP:-/tmp}/release-run-step.XXXXXX")"
+            if [ "$quiet" -eq 1 ]; then
+              "$@" >/dev/null 2>"$err_file" || rc=$?
+            else
+              "$@" 2>"$err_file" || rc=$?
+            fi
+            if [ "$rc" -ne 0 ]; then
+              first="$(head -1 "$err_file" | tr -d '\r')"
+              echo "::error::${label} failed (exit ${rc}): ${first:-no stderr output}" >&3
+              printf '%s\n' "--- stderr of: $* ---" >&2
+            fi
+            cat "$err_file" >&2
+            rm -f "$err_file"
+            return "$rc"
           }
           verify_asset() {
             printf '%s' "$1" | jq -e --arg name "$ASSET" --arg digest "$EXPECTED_DIGEST" '
@@ -521,10 +581,18 @@ jobs:
               and .assets[0].digest == $digest
             ' >/dev/null
           }
+          # Capture before comparing. A failed read used to yield an empty string,
+          # which compared unequal and made every call site assert that the tag
+          # resolves ELSEWHERE — a positive claim the code had not established.
+          #   1 = the tag resolves to a different commit
+          #   2 = the commit could not be read at all
           verify_exact_tag() {
-            test "$(gh api -H 'Accept: application/vnd.github+json' \
+            local tag_sha
+            tag_sha="$(gh api -H 'Accept: application/vnd.github+json' \
               -H 'X-GitHub-Api-Version: 2026-03-10' \
-              "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)" = "${{ github.sha }}"
+              "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)" || return 2
+            [ -n "$tag_sha" ] || return 2
+            test "$tag_sha" = "${{ github.sha }}"
           }
           verify_metadata() {
             local release_json="$1" expected_draft="$2" expected_immutable="$3"
@@ -546,7 +614,10 @@ jobs:
           }
           normalize_draft_metadata() {
             local release_json="$1" release_id
-            release_id="$(printf '%s' "$release_json" | jq -er '.id | select(type == "number")')"
+            release_id="$(printf '%s' "$release_json" | jq -er '.id | select(type == "number")')" || {
+              echo "::error::draft release object for $TAG carries no release id; refusing to normalize"
+              return 1
+            }
             jq -n \
               --arg tag "$TAG" \
               --arg sha "${{ github.sha }}" \
@@ -554,20 +625,33 @@ jobs:
               --rawfile body "$NOTES_FILE" \
               '{tag_name:$tag,target_commitish:$sha,name:$title,body:$body,draft:true,prerelease:false}' \
               > "$METADATA_FILE"
-            gh api --method PATCH \
+            run_step --quiet "draft metadata normalization for $TAG (id $release_id)" \
+              gh api --method PATCH \
               -H 'Accept: application/vnd.github+json' \
               -H 'X-GitHub-Api-Version: 2026-03-10' \
               "repos/$GITHUB_REPOSITORY/releases/$release_id" \
-              --input "$METADATA_FILE" >/dev/null
+              --input "$METADATA_FILE"
           }
 
-          if RELEASE="$(release_json 2>/dev/null)"; then
+          RELEASE_STATUS=0
+          RELEASE="$(release_json)" || RELEASE_STATUS=$?
+          if [ "$RELEASE_STATUS" -eq 2 ]; then
+            echo "::error::could not read the release list for $TAG; refusing to create a second draft"
+            exit 1
+          fi
+          if [ "$RELEASE_STATUS" -eq 0 ]; then
             if printf '%s' "$RELEASE" | jq -e '.draft == false' >/dev/null; then
               verify_metadata "$RELEASE" false true || {
                 echo "::error::existing published release metadata is not the exact immutable contract; refusing repair"
                 exit 1
               }
-              verify_exact_tag
+              verify_exact_tag || {
+                case "$?" in
+                  2) echo "::error::could not resolve $TAG to a commit" ;;
+                  *) echo "::error::$TAG resolves to a different commit than the exact main SHA" ;;
+                esac
+                exit 1
+              }
               verify_asset "$RELEASE" || {
                 echo "::error::existing immutable release asset is incomplete or has the wrong digest"
                 exit 1
@@ -587,35 +671,72 @@ jobs:
                 exit 1
               }
             else
-              gh release upload "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY"
+              run_step "asset upload to the existing draft $TAG" \
+                gh release upload "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY"
             fi
           else
-            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+            run_step "draft release creation for $TAG" \
+              gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
               --draft --title "$TAG" --target "${{ github.sha }}" \
               --notes-file "${{ runner.temp }}/notes.md"
-            RELEASE="$(release_json)"
+            RELEASE="$(release_json)" || {
+              echo "::error::could not read the draft release object for $TAG after creating it"
+              exit 1
+            }
             printf '%s' "$RELEASE" | jq -e '
               .draft == true and .immutable == false and (.assets | length) == 0
             ' >/dev/null || {
               echo "::error::new draft release is not a mutable empty draft"
               exit 1
             }
-            gh release upload "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY"
+            run_step "asset upload to the new draft $TAG" \
+              gh release upload "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY"
           fi
 
-          RELEASE="$(release_json)"
+          RELEASE="$(release_json)" || {
+            echo "::error::could not read the release object for $TAG before normalizing its metadata"
+            exit 1
+          }
           normalize_draft_metadata "$RELEASE"
-          RELEASE="$(release_json)"
+          RELEASE="$(release_json)" || {
+            echo "::error::could not re-read the release object for $TAG after normalizing its metadata"
+            exit 1
+          }
           verify_metadata "$RELEASE" true false || {
             echo "::error::draft tag/target/prerelease/title/body metadata differs immediately before publish"
             exit 1
           }
-          verify_asset "$RELEASE"
-          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+          verify_asset "$RELEASE" || {
+            echo "::error::draft asset for $TAG is incomplete or has the wrong digest immediately before publish"
+            exit 1
+          }
+          # `gh release edit` selects the release by TAG and a draft carries no git
+          # tag, which is the same published-only addressing this step already
+          # avoids for its REST reads. No gh version is named here on purpose: this
+          # step no longer calls that sub-command, and the workflow pins no gh
+          # build, so a version in this comment would be an unverifiable claim
+          # about whatever the runner image happens to ship.
+          # The id is already inside the draft object just verified, so publish
+          # through the REST object directly and keep tag resolution out of the one
+          # call that flips the release live. This removes a resolution dependency;
+          # it is NOT a fix for the transient failure described above, whose cause
+          # was never established.
+          PUBLISH_ID="$(printf '%s' "$RELEASE" | jq -er '.id | select(type == "number")')" || {
+            echo "::error::verified draft carries no release id; refusing to publish"
+            exit 1
+          }
+          run_step --quiet "publishing draft release $TAG (id $PUBLISH_ID)" \
+            gh api --method PATCH -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/releases/$PUBLISH_ID" \
+            -F draft=false
 
           PUBLISHED=""
           for ATTEMPT in $(seq 1 10); do
-            CANDIDATE="$(release_json)"
+            CANDIDATE="$(release_json)" || {
+              echo "::error::could not read the published release object for $TAG while verifying immutability"
+              exit 1
+            }
             if verify_metadata "$CANDIDATE" false true && verify_asset "$CANDIDATE"; then
               PUBLISHED="$CANDIDATE"
               break
@@ -626,5 +747,21 @@ jobs:
             fi
             sleep 2
           done
-          verify_exact_tag
-          verify_asset "$PUBLISHED"
+          verify_exact_tag || {
+            case "$?" in
+              2) echo "::error::could not resolve $TAG to a commit after publishing" ;;
+              *) echo "::error::published $TAG resolves to a different commit than the exact main SHA" ;;
+            esac
+            exit 1
+          }
+          # Re-READ rather than re-check. `verify_asset "$PUBLISHED"` re-derived the
+          # same answer from the same string the poll loop had just accepted, so it
+          # asserted nothing; this observes state taken after the tag exists.
+          FINAL="$(release_json)" || {
+            echo "::error::could not re-read the published release object for $TAG"
+            exit 1
+          }
+          verify_asset "$FINAL" || {
+            echo "::error::published asset for $TAG is incomplete or has the wrong digest on a fresh read"
+            exit 1
+          }

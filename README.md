@@ -18,8 +18,8 @@ Any language, any stack. Nothing to configure, and no account needed to start.
 
 ## What you get
 
-- **A plan you approve first.** Claude Code plans; Zensu asks once whether to
-  run the guided workflow. You stay in the loop exactly once, not every turn.
+- **A plan you approve first.** Claude Code plans; Zensu asks once which delivery
+  route to take. You stay in the loop exactly once, not every turn.
 - **A review that cannot be skipped.** Five specialist reviewers run in
   parallel, an independent judge checks their blind spots, and a Stop hook makes
   sure the chain actually finished before the turn ends.
@@ -75,7 +75,8 @@ validated pull request: one planning gate, then plan → build → review → fi
 verify, unattended. It stops at a ready PR and never merges.
 
 **Just this change** — describe what you want and approve the plan. Zensu asks
-whether to run the guided workflow with its review chain.
+which delivery route to take: autopilot to a reviewed PR, the guided workflow
+with its review chain, the step-by-step pilot, or implementing it directly.
 
 ## What's included
 
@@ -93,7 +94,7 @@ whether to run the guided workflow with its review chain.
 | `/zensu:autopilot` | Idea → validated pull request, unattended after one planning gate. Never merges or deploys |
 | `/zensu:pilot` | The guided counterpart to autopilot: probes a feature's real state and offers the next step |
 | `/zensu:cover` | Backfill durable tests at the right level (unit → integration → E2E) for existing code |
-| `/zensu:verify-feature` | Drive the real UI in a browser and report what actually happened. Report-only |
+| `/zensu:verify-feature` | Drive the real UI in a browser and report what actually happened. Report-only. [How to run it standalone](docs/verify-feature.md) |
 | `/zensu:plan-review` | Have a tailored reviewer team revalidate a plan *before* any code is written |
 | `/zensu:pr-team-review` | Multi-agent review of an existing GitHub or GitLab PR, published as one consolidated review |
 | `/zensu:pr-fix-findings` | Work through every unresolved review thread on a PR and resolve it |
@@ -211,6 +212,7 @@ supported.
 | [Configuration](docs/configuration.md) | Every hook, every flag, merge order, environment variables |
 | [Operations](docs/operations.md) | Upgrade path, platform support, troubleshooting |
 | [TDD workflow](docs/tdd-manager-workflow.md) | The full per-step reference for the implementation workflow |
+| [Verify a feature live](docs/verify-feature.md) | Running `/zensu:verify-feature` on its own: the launch-time navigation policy, the local-mode rules, a minimal runtime recipe, remote mode |
 | [Evidence discipline](docs/evidence-discipline.md) | The one rule underneath everything else |
 | [Best solution first](docs/best-solution-first.md) | Why the best long-term option must be in every choice you are offered, and first |
 

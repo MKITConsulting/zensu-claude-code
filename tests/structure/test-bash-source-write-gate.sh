@@ -1228,8 +1228,19 @@ DENY_NARROWED="$(bash -c 'source "$1"; zensu_emit_hook_session_deny narrowed' _ 
   && printf '%s' "$DENY_NARROWED" | grep -qF 'recorded project root no longer exists'; } \
   && check "W96 the narrowed deny says BOTH relaxable states were already ruled out" PASS \
   || check "W96 narrowed deny (got '$DENY_NARROWED')" FAIL
-# Only callers that actually pre-filter may claim the narrowed scope.
-NARROWED_CALLERS="$(grep -rlF 'zensu_emit_hook_session_deny narrowed' "$PLUGIN_DIR/hooks" 2>/dev/null | sort)"
+# Only callers that actually pre-filter may claim the narrowed scope. TWO routes
+# reach it now and both are scanned, because scanning one alone is how this check
+# went quietly wrong once: the per-gate ladder moved into
+# zensu_emit_named_bind_deny, the gates began passing the scope as an argument,
+# and the grep for the direct spelling matched NOTHING while the property it
+# guards was still perfectly intact. An empty result compares unequal, so it
+# failed loudly rather than passing — but a needle that matches nothing has
+# stopped testing its subject in either direction. The shared helper itself must
+# never appear in this set: it renders whatever scope it is handed and claims none.
+NARROWED_CALLERS="$( {
+  grep -rlF 'zensu_emit_hook_session_deny narrowed' "$PLUGIN_DIR/hooks"
+  grep -rlE 'zensu_emit_named_bind_deny "\$[A-Za-z_][A-Za-z0-9_]*" narrowed' "$PLUGIN_DIR/hooks"
+} 2>/dev/null | sort -u)"
 NARROWED_EXPECTED="$(printf '%s\n%s\n' "$PLUGIN_DIR/hooks/pre-bash-source-write-gate.sh" "$PLUGIN_DIR/hooks/pre-write-secret-scan.sh" | sort)"
 [ "$NARROWED_CALLERS" = "$NARROWED_EXPECTED" ] \
   && check "W97 only the two predicate-filtering gates use the narrowed deny scope" PASS \

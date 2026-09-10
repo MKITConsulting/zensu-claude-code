@@ -9,7 +9,8 @@ description: >
   the user confirms, cancels it with one audited event that bypasses the ownership check and
   nothing else. It never resumes a run, never advances a stage, and never releases a run
   this session owns — that one is cancelled the ordinary way. It is scoped by run id within
-  the project rather than by working tree, so the id must come from a refusal. Use when `--autopilot-begin` refuses because the workspace is held, when a
+  the project rather than by working tree, so the id comes from a refusal, from the `autopilot:`
+  row of /zensu:doctor, or from the --autopilot-status stderr disclosure. Use when `--autopilot-begin` refuses because the workspace is held, when a
   session that was running Autopilot is gone for good, or via /zensu:autopilot-release. No
   network or API key. Do not use to escape a review or to restart a run that is still live.
 ---
@@ -36,10 +37,12 @@ the working tree stays refused permanently, because `CANCEL` requires the owner.
 ## What it does NOT do
 
 - It does not resume, retry, or advance the run. The only transition it makes is `CANCEL`.
-- It is scoped by RUN ID within this project, not by working tree. It does not read
-  `workspaceRoot`, but it releases only a run that holds the working tree you are standing in
-  (exit `6` otherwise). A run id is an ordinary filename in a listable directory, so the id is
-  not a scope control and "take it from a refusal" is about relevance, not availability.
+- It is scoped by RUN ID within this project, not by working tree. It releases only a run that
+  holds the working tree you are standing in (exit `6` otherwise), and "holds" is CONTAINMENT
+  IN EITHER DIRECTION: a tree that contains the run's own tree, or one contained by it, counts
+  as holding it, so only a SIBLING worktree is refused. A run id is an ordinary filename in a
+  listable directory, so the id is not a scope control and "take it from a refusal" is about
+  relevance, not availability.
   **Exit `6` is an accident guard, not an authorization boundary.** Anything that can run this
   command can also change directory into the holding tree, and the refusal itself names that
   tree — so it stops a mistake, never a caller who means to release the run. Do not cite it as
@@ -88,12 +91,32 @@ LOG="$ROOT/hooks/lib/zensu-log.sh"
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-status
 ```
 
-A run belonging to another session is deliberately invisible there. The run id you need is the
-one quoted in a refusal that names it. Three do: the `--autopilot-begin` refusal, the
-standalone `/zensu:tdd` begin refusal raised when a durable run already holds the tree, and
-the Stop refusal raised when a deferred review cannot be adopted for the same reason. Do not
-guess it and do not enumerate the state directory looking for candidates; an id you did not
-read from a refusal is not evidence.
+`--autopilot-status` answers about runs you OWN, so its stdout cannot show you a foreign run —
+but it is no longer silent about one. In the rc-1 case it writes a stderr line carrying one of FOUR answers — a foreign run holds
+this working tree and which one; a run this session OWNS holds it; a run holds it whose OWNER
+could not be established; or nothing holds it — plus a FIFTH line saying the question could not
+be answered at all. Count them as five branches: an earlier wording here said "one of four
+things" above three items that expand to five, which is the same off-by-one the hook comment
+had already been corrected for. Read that line: it is the cheapest source of the id.
+
+SIX surfaces name the run id, and any of them is evidence:
+
+1. the `--autopilot-begin` refusal;
+2. the standalone `/zensu:tdd` begin refusal raised when a durable run already holds the tree;
+3. the Stop refusal raised when a deferred review cannot be adopted for the same reason;
+4. the `autopilot:` row of `/zensu:doctor`;
+5. the `--autopilot-status` stderr line described above;
+6. the stderr line the deferred-review fence prints when it STANDS DOWN — a run holds the tree
+   but has no deferred review to interleave with, so Stop is released rather than blocked. It is
+   easy to miss because it accompanies a non-refusal, and it is the only entry here that can
+   print `(unnamed)` instead of an id, when the holding record could not be read. `(unnamed)` is
+   not an id: treat that line as no evidence and use another surface.
+
+What is still not evidence is an id you derived by listing `.zensu/state/` yourself. The doctor
+row is an enumeration of that directory, but it is one this plugin performs, validates against the
+schema its own worker enforces, and renders with the ownership already decided — which is exactly
+what reading the directory by hand does not give you. Take the id from one of the six surfaces;
+do not read the directory yourself and do not guess.
 
 One case is explicitly NOT a release: when a refusal says the holding run belongs to THIS
 session, it names the run but deliberately withholds the release command, because in that
@@ -134,8 +157,10 @@ invocation (a missing `--run`, a missing or duplicated `--confirm`, an unknown a
 unreadable/unsafe durable state; `3` a malformed run id, or a run that is already terminal; `4` the
 caller owns the run AND that session's pointer still designates it, the run's ledger is
 exhausted, or the derived event id collides with an existing entry; `5` the durable write could
-not be staged or replaced; `6` the run does not hold the working tree you are standing in —
-release it from the tree it holds, which is the tree whose refusal named the id; `7` the owning
+not be staged or replaced; `6` the run does not hold the working tree you are standing in. The
+refusal NAMES both trees — the one you are in and the one the run holds — so move to the named
+tree, or to one that contains it or is contained by it, since occupancy is containment in either
+direction and only a sibling worktree is refused; `7` the owning
 session still looks active, so releasing it would end a live run. On `1` or `5`, report the code
 and stop — neither is repaired by retrying the release. On `7`, do not retry, and READ THE MESSAGE — the code
 covers two different situations and only one of them resolves by waiting. If it says the owning

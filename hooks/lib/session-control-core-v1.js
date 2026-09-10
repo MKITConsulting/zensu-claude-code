@@ -99,6 +99,40 @@ function canonicalDirectory(input, label) {
   return canonical;
 }
 
+// Control characters and DEL. canonicalDirectory rejects a SUBSET of these
+// (`[\0\r\n]`) on the strict path; the callers below need the wider class,
+// because their value never passes through realpath and reaches a terminal and
+// the model's context as-is — the /zensu:doctor report renders it verbatim.
+const UNSAFE_PATH_CHARACTERS = new RegExp('[\\u0000-\\u001f\\u007f]');
+
+// The shape half of canonicalDirectory's job, for the callers that must NOT
+// require the directory to exist. There are THREE, and they arrived from two
+// branches: the orphaned-project-root reader and the pruned-plugin-root reader
+// each waive that function's existence check for one recorded root, and
+// buildContext re-mints a record around a value one of them returned.
+//
+// It is NOT a strict subset of canonicalDirectory, and saying so would mislead:
+// it rejects a WIDER control-character class, and it adds an absoluteness and a
+// normalization check that the canonicalizing path gets for free from realpath.
+// Those two are what keep a waived branch from admitting a spelling no
+// canonical comparison will ever match — `/a/b/../c` passes `isAbsolute` alone.
+// Kept as one function rather than inline copies because a shape check guarding
+// a value printed into a terminal is exactly the rule that rots when written
+// twice.
+function requireAbsentDirectoryPath(input, label) {
+  const value = requireText(input, label);
+  if (UNSAFE_PATH_CHARACTERS.test(value)) {
+    fail(`${label} is unsafe`);
+  }
+  if (!path.isAbsolute(value)) {
+    fail(`${label} must be absolute`);
+  }
+  if (path.resolve(value) !== value) {
+    fail(`${label} must be normalized`);
+  }
+  return value;
+}
+
 function isInside(base, candidate) {
   const relative = path.relative(base, candidate);
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
@@ -154,6 +188,31 @@ function readRegularFileSnapshot(
 ) {
   const noFollow = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)
     ? fs.constants.O_NOFOLLOW : 0;
+  // O_NONBLOCK is what keeps this reader from BLOCKING, which is a different
+  // hazard from the symlink one O_NOFOLLOW covers. `open(2)` on a FIFO with no
+  // writer waits forever, and the `isFile()` rejection below cannot help: it runs
+  // on the DESCRIPTOR, so it is reached only once the open has already returned.
+  // Every caller reads a path under `<project>/.zensu/state/`, which is writable
+  // from inside a session and covered by no gate while a chain is inactive, so a
+  // planted FIFO is reachable — and one caller, the zen-mode UserPromptSubmit
+  // hook, reads on EVERY prompt, which turns a blocked open into a session with
+  // no way out: the prompt never reaches the model, so the off-phrase escape is
+  // never evaluated either.
+  //
+  // POSIX LEAVES the flag UNSPECIFIED for a regular file — it specifies
+  // `O_NONBLOCK` for FIFOs and for block and character special files, and says
+  // nothing about the rest. "Unspecified" is not "no effect", and the stronger
+  // wording stood here as the reason this change was safe for the shared
+  // reader's other callers. What is true, and what the safety actually rests on:
+  // Linux and macOS ignore it on a regular file, so no legitimate caller changes
+  // behaviour on the supported hosts; on a FIFO or device the open returns
+  // immediately and the existing `fstat` `isFile()` check rejects it. The read
+  // loop below carries an `EAGAIN` arm so the residual — a filesystem where the
+  // unspecified behaviour does bite — is handled rather than assumed away.
+  // Guarded the same way as O_NOFOLLOW because the constant is not defined on
+  // every build; where it is absent `nonBlock` is 0 and this class stays open.
+  const nonBlock = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NONBLOCK)
+    ? fs.constants.O_NONBLOCK : 0;
   let descriptor;
   let pathBefore = null;
   const parent = path.dirname(file);
@@ -176,7 +235,7 @@ function readRegularFileSnapshot(
       if (pathBefore.isSymbolicLink()) fail(`symlink file rejected: ${file}`);
     }
     try {
-      descriptor = fs.openSync(file, fs.constants.O_RDONLY | noFollow);
+      descriptor = fs.openSync(file, fs.constants.O_RDONLY | noFollow | nonBlock);
     } catch (error) {
       if (missingAllowed && error.code === 'ENOENT') return null;
       if (error.code === 'ELOOP' || error.code === 'EMLINK') {
@@ -196,8 +255,39 @@ function readRegularFileSnapshot(
 
     const data = Buffer.alloc(before.size);
     let offset = 0;
+    // AN EAGAIN ARM, so the non-blocking open's guarantee is true by
+    // construction rather than by platform behaviour. The descriptor is already
+    // gated behind the `isFile()` check above, so a FIFO or device never reaches
+    // this loop and `EAGAIN` is unreachable on the hosts this ships to. It is
+    // still handled, because the flag is what makes that true: on a filesystem
+    // where the unspecified regular-file behaviour does bite — historically
+    // Linux mandatory locking, some network and FUSE mounts — `readSync` throws
+    // rather than returning a short count, and an unhandled throw here would
+    // surface as a corrupt-document failure. The retry budget is bounded so a
+    // descriptor that never becomes readable fails loudly instead of spinning.
+    // PACED, not spun. A bare `continue` spent all 64 retries in microseconds, so
+    // the budget bounded the LOOP without ever waiting for the condition it
+    // exists to outlast — a descriptor that is momentarily unreadable is
+    // unreadable for milliseconds, not nanoseconds. `sleep` is this module's ONE
+    // blocking pause - `setTimeout` needs an event loop this synchronous call
+    // never returns to - and it is asked for the BEST-EFFORT contract here: the
+    // retry budget terminates without the pause, so a host that cannot wait costs
+    // latency and nothing else, whereas the lock poll sharing that primitive must
+    // actually wait and keeps the strict default. The worst case is bounded at
+    // 64 ms of wall clock, paid only on a host where the arm is reachable at all.
+    let againBudget = 64;
     while (offset < data.length) {
-      const read = fs.readSync(descriptor, data, offset, data.length - offset, null);
+      let read;
+      try {
+        read = fs.readSync(descriptor, data, offset, data.length - offset, null);
+      } catch (error) {
+        if ((error.code === 'EAGAIN' || error.code === 'EWOULDBLOCK') && againBudget > 0) {
+          againBudget -= 1;
+          sleep(1, { bestEffort: true });
+          continue;
+        }
+        throw error;
+      }
       if (read === 0) fail(`file changed while reading: ${file}`);
       offset += read;
     }
@@ -499,9 +589,27 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function buildContext(options) {
+// The existence waiver is a SECOND PARAMETER, never a key of `options`, and that
+// is load-bearing rather than stylistic: `registerContext` forwards its caller's
+// whole options object into this function (`buildContext({ ...options, … })`),
+// so a waiver carried inside it could ride that spread into a FRESH record mint
+// — a path with no absence proof at all. Exactly the shape validateContext
+// already uses for its namesake, and for the same reason.
+//
+// It waives the SAME single check validateContext waives — whether the project
+// root still exists — and re-applies that function's shape half in its place, so
+// the only difference between the two paths is the existence test. It exists for
+// ONE caller, adoptContext, re-minting a record whose recorded worktree was
+// deleted: there is nothing to realpath, and refusing would leave that session
+// wedged with no write channel to repair itself. The emitted record shape is
+// unchanged — the value carried through is the one the previous record already
+// held, which was canonicalized when that record was minted.
+function buildContext(options, buildOptions) {
   const host = requireHost(options.host);
-  const projectRoot = canonicalDirectory(options.projectRoot, 'project root');
+  const allowMissingProjectRoot = Boolean(buildOptions && buildOptions.allowMissingProjectRoot);
+  const projectRoot = allowMissingProjectRoot
+    ? requireAbsentDirectoryPath(options.projectRoot, 'project root')
+    : canonicalDirectory(options.projectRoot, 'project root');
   const { pluginRoot, manifest } = pluginMetadata(options.pluginRoot, host);
   const pluginData = canonicalDirectory(options.pluginData, 'plugin data');
   const createdAt = options.createdAt || nowIso();
@@ -537,14 +645,41 @@ function buildContext(options) {
   };
 }
 
-// `options.allowMissingProjectRoot` waives ONE check and nothing else: whether
-// the recorded project root still exists on disk. It defaults to off, so every
-// caller that does not opt in keeps the strict behaviour. The only opt-in
-// caller is readOrphanedProjectRootContext, which separately PROVES the path is
-// absent — waiving the check does not mean the field is unvalidated, because
-// the requireText loop below still rejects a missing, blank, or unsafe value.
+// `options.allowMissingProjectRoot` and `options.allowMissingPluginRoot` are NOT
+// symmetric, and the asymmetry is stated HERE because this is the block a caller
+// reads before opting in.
+//
+// `allowMissingProjectRoot` waives ONE check and nothing else: whether that
+// recorded root still exists on disk.
+//
+// `allowMissingPluginRoot` waives THREE, because readContextInternal reads the
+// same flag a SECOND time — the root's existence here, plus the runtime-digest
+// re-measure and the manifest-version match there. It CANNOT be narrowed: both of
+// those read the tree that is gone (computeRuntimeDigest and pluginMetadata are
+// handed context.plugin_root), so they have no input once the installation is
+// pruned. Splitting the flag in two would advertise a separation that does not
+// exist.
+//
+// State what that costs precisely, because it reads worse than it is: the waiver
+// drops a CONSISTENCY check, not a barrier. runtime_digest is a content hash of a
+// readable tree computed by an exported pure function — never a secret — so anyone
+// able to write the private records directory could always mint a record carrying
+// a correct digest for the executing tree. The barrier is that directory itself,
+// and every other bound still holds; readPrunedPluginRootContext enumerates them.
+//
+// Both default to off, so every caller that does not opt in keeps the strict
+// behaviour. Each has exactly one opt-in caller —
+// readOrphanedProjectRootContext and readPrunedPluginRootContext — which
+// separately PROVES the path is absent and re-applies the shape half through
+// requireAbsentDirectoryPath. Waiving the check does not mean the field is
+// unvalidated: the requireText loop below still rejects a missing or blank value.
+//
+// buildContext takes a waiver named `allowMissingProjectRoot` too, for the
+// adoption re-mint. It is a SEPARATE parameter on a different function and the
+// two never reach each other; the name is shared because the thing waived is.
 function validateContext(context, expectedHost, options) {
   const allowMissingProjectRoot = Boolean(options && options.allowMissingProjectRoot);
+  const allowMissingPluginRoot = Boolean(options && options.allowMissingPluginRoot);
   if (!context || typeof context !== 'object' || Array.isArray(context)) {
     fail('context record must be an object');
   }
@@ -573,7 +708,9 @@ function validateContext(context, expectedHost, options) {
   if (!allowMissingProjectRoot) {
     canonicalDirectory(context.project_root, 'context project root');
   }
-  canonicalDirectory(context.plugin_root, 'context plugin root');
+  if (!allowMissingPluginRoot) {
+    canonicalDirectory(context.plugin_root, 'context plugin root');
+  }
   canonicalDirectory(context.plugin_data, 'context plugin data');
   if (!HASH_RE.test(context.runtime_digest)) {
     fail('context runtime digest is invalid');
@@ -588,9 +725,27 @@ function contextRecordFile(recordsDir, sessionId) {
   return path.join(recordsDir, `${sessionKey(sessionId)}.json`);
 }
 
-function sleep(milliseconds) {
-  const buffer = new SharedArrayBuffer(4);
-  Atomics.wait(new Int32Array(buffer), 0, 0, milliseconds);
+// THE ONE PAUSE PRIMITIVE, and the fault contract is the CALLER'S to state. A
+// second copy of this function shipped beside it for one release, performing the
+// identical `Atomics.wait` while SWALLOWING a throw — so the module held two
+// opposite contracts for one mechanism and nothing said which was right. On a
+// build without `SharedArrayBuffer`, or one that refuses `Atomics.wait` on the
+// main thread, the two would have diverged exactly where it matters: the lock
+// poll would throw while the reader spun.
+//
+// The DEFAULT is strict, because that is what a poll that must actually wait
+// needs — silently not waiting there would burn the CPU and break the lock's own
+// timing, which is worse than a loud failure. `bestEffort` is opt-in for a caller
+// whose bound terminates without the pause: the EAGAIN retry is bounded at 64
+// iterations either way, so for it a missing pause costs latency and nothing else.
+function sleep(milliseconds, options) {
+  const bestEffort = !!(options && options.bestEffort);
+  try {
+    const buffer = new SharedArrayBuffer(4);
+    Atomics.wait(new Int32Array(buffer), 0, 0, milliseconds);
+  } catch (error) {
+    if (!bestEffort) throw error;
+  }
 }
 
 function processStartIdentity(pid) {
@@ -1294,23 +1449,35 @@ function readContextInternal(options) {
   const file = contextRecordFile(recordsDir, options.sessionId);
   const context = validateContext(readJson(file), options.expectedHost, {
     allowMissingProjectRoot: options.allowMissingProjectRoot,
+    allowMissingPluginRoot: options.allowMissingPluginRoot,
   });
   if (context.session_id_hash !== sessionIdHash(options.sessionId)) {
     fail('context session hash mismatch');
   }
-  const currentDigest = computeRuntimeDigest(context.plugin_root, context.host);
-  if (currentDigest !== context.runtime_digest) {
-    fail('context runtime digest mismatch');
-  }
-  const { manifest } = pluginMetadata(context.plugin_root, context.host);
-  if (manifest.version !== context.plugin_version) {
-    fail('context plugin version mismatch');
+  // With the minting installation gone there is nothing to re-measure: the
+  // digest and the declared version stay shape-checked by validateContext and
+  // are otherwise taken on the record's word. That is the stated cost of the
+  // pruned-root waiver, and readPrunedPluginRootContext — its only caller —
+  // proves the root is absent before it hands the record to anyone.
+  if (!options.allowMissingPluginRoot) {
+    const currentDigest = computeRuntimeDigest(context.plugin_root, context.host);
+    if (currentDigest !== context.runtime_digest) {
+      fail('context runtime digest mismatch');
+    }
+    const { manifest } = pluginMetadata(context.plugin_root, context.host);
+    if (manifest.version !== context.plugin_version) {
+      fail('context plugin version mismatch');
+    }
   }
   return context;
 }
 
 function readContext(options) {
-  return readContextInternal({ ...options, allowMissingProjectRoot: false });
+  return readContextInternal({
+    ...options,
+    allowMissingProjectRoot: false,
+    allowMissingPluginRoot: false,
+  });
 }
 
 // One of the two bind failures a caller may treat as "nothing left to enforce"
@@ -1318,7 +1485,7 @@ function readContext(options) {
 // reader): every part of the record validates exactly as readContext demands,
 // and its recorded project root is simply gone — the harness recycled or the user deleted that
 // worktree. The workflow document lives at <project_root>/.zensu/state/, so it
-// died with the directory: no review chain and no Autopilot run remain
+// is not reachable from this record: no review chain and no Autopilot run remain
 // reachable, which is the same argument that already releases a session with no
 // record at all.
 //
@@ -1330,28 +1497,51 @@ function readContext(options) {
 // not a vanished worktree, and a second disagreement is never relaxed alongside
 // the first. Throws on every one of them; returns the context only for the
 // exact state described above.
-// Control characters and DEL. canonicalDirectory rejects a subset of these on
-// the strict path; the orphan reader skips that function for its EXISTENCE
-// check and must not lose its shape check with it.
-const UNSAFE_PATH_CHARACTERS = new RegExp('[\\u0000-\\u001f\\u007f]');
-
 function readOrphanedProjectRootContext(options) {
-  const context = readContextInternal({ ...options, allowMissingProjectRoot: true });
+  // Both waivers are pinned, not just this reader's own: the spread carries the
+  // caller's options, and the COMBINED state — project root gone AND installation
+  // pruned — must refuse because the reader forbids it, never because no caller
+  // happened to pass the other flag. readContext pins both for the same reason.
+  const context = readContextInternal({
+    ...options,
+    allowMissingProjectRoot: true,
+    allowMissingPluginRoot: false,
+  });
   // Waiving canonicalDirectory waives its EXISTENCE check, which is the point —
   // but it would also waive that function's shape validation, and this value is
   // not inert: callers print it to stderr and into the /zensu:doctor report,
-  // which the doctor skill renders verbatim. Without these two guards a record
+  // which the doctor skill renders verbatim. Without the shape half a record
   // whose project_root alone was edited to an absent path carrying newlines or
   // ANSI escapes would classify as the relaxable state and get its bytes echoed
   // into a terminal and into the model's context — a record the strict
-  // readContext fails closed on. Re-apply the shape half, so EXISTENCE stays
-  // the only waived check.
-  if (UNSAFE_PATH_CHARACTERS.test(context.project_root)) {
-    fail('context project root is unsafe');
-  }
-  if (!path.isAbsolute(context.project_root)) {
-    fail('context project root must be absolute');
-  }
+  // readContext fails closed on. Re-apply it, so EXISTENCE stays the only
+  // waived check ON THIS READER — the pruned-plugin-root reader below waives
+  // three, and the flag block above says which.
+  //
+  // NAMING THE TIGHTENING, because the extraction carried it in silently and the
+  // reworded sentence above absorbs it without saying so. The inline code this
+  // replaced applied TWO checks, UNSAFE_PATH_CHARACTERS and path.isAbsolute.
+  // requireAbsentDirectoryPath adds a THIRD — `path.resolve(value) !== value` — so
+  // a project_root that is absent, absolute and control-character free but NOT
+  // resolve-normalized used to classify as the relaxable orphan state, where Stop
+  // releases and the gates relax, and now fails closed into the generic deny. The
+  // tightening is INTENDED for this reader: the value reaches the same terminal and
+  // the same report the other two checks protect, and a non-normalized spelling is
+  // exactly the shape that makes a printed path mean something other than it reads.
+  //
+  // The rule is kept HERE deliberately. Applying it only where the value is
+  // WRITTEN would move the refusal out of adoptableRecord into a throw inside
+  // adoptContext, and would break the AC-C14b row that pins an absolute-but-
+  // unnormalized project_root as `record-unreadable`.
+  //
+  // The practical blast radius is nil, because project_root is minted through
+  // canonicalDirectory and a realpathSync.native result is resolve-stable on POSIX
+  // and win32 alike — but that is an argument, not a test, so this arm has its own
+  // unit case rather than inheriting the pruned call site's. The one spelling the
+  // argument does not cover is a win32 UNC share root, where path.win32.resolve
+  // appends a separator realpathSync.native does not; that is UNVERIFIED in both
+  // directions, because no suite exercises it.
+  requireAbsentDirectoryPath(context.project_root, 'context project root');
   // lstat, never realpath: realpath follows a symlink and would report a
   // dangling link as absent, quietly turning a present-but-wrong root into the
   // relaxable state.
@@ -1367,8 +1557,40 @@ function readOrphanedProjectRootContext(options) {
   fail('context project root still exists');
 }
 
+// The relaxed reader for the OTHER recorded root. An installation the host has
+// pruned from its plugin cache leaves a record that is intact in every respect
+// except that its plugin_root no longer exists — and with it every way to
+// re-measure the runtime digest or re-read the declared version. Existence is
+// the one waived check, and it is proven rather than assumed: the path must be
+// absent (lstat, never realpath, for the reason the orphan reader states), and
+// its PARENT must still be a real directory, because a pruned installation
+// leaves its cache directory behind while a record naming a root under a
+// directory that never existed is not this state. Lineage is deliberately NOT
+// judged here — the state is reachable under a compatible lineage too, and in
+// both cases the record cannot be served; the callers decide what the absence
+// means, and adoption is the one exit.
+function readPrunedPluginRootContext(options) {
+  // Sibling waiver pinned off — see readOrphanedProjectRootContext above.
+  const context = readContextInternal({
+    ...options,
+    allowMissingPluginRoot: true,
+    allowMissingProjectRoot: false,
+  });
+  requireAbsentDirectoryPath(context.plugin_root, 'context plugin root');
+  canonicalDirectory(path.dirname(context.plugin_root), 'context plugin root parent');
+  try {
+    fs.lstatSync(context.plugin_root);
+  } catch (error) {
+    if (error.code === 'ENOENT') return context;
+    fail('context plugin root is unreadable');
+  }
+  fail('context plugin root still exists');
+}
+
 // ---------------------------------------------------------------------------
-// Adoption — serving an intact record from a declared-incompatible lineage.
+// Adoption — taking an intact record over when the executing runtime cannot SERVE
+// it: a declared-incompatible lineage, or a pruned minting installation. Say
+// "taking over", never "serving": a pruned record is adopted once and never served.
 // ---------------------------------------------------------------------------
 //
 // runtimeLineageCompatible decides who may serve a record from the DECLARED
@@ -1406,7 +1628,9 @@ function readOrphanedProjectRootContext(options) {
 // composes it with the creating helpers; adoptionWorkflowStatePath composes it
 // without them. Both must agree, or the read-only probe and the read it guards
 // resolve to different files.
-const WORKFLOW_STATE_SEGMENTS = ['.zensu', 'state'];
+// Frozen because it is EXPORTED: an external consumer that pushed a segment
+// would move where this module itself resolves every workflow document.
+const WORKFLOW_STATE_SEGMENTS = Object.freeze(['.zensu', 'state']);
 const WORKFLOW_STATE_PREFIX = 'tdd-phase-';
 
 const ADOPTION_REFUSALS = {
@@ -1463,18 +1687,68 @@ function adoptableRecord(options) {
   let executingPluginRoot;
   let pluginData;
   let context;
+  let orphanedProjectRoot = false;
+  let prunedPluginRoot = false;
   try {
     executingPluginRoot = canonicalDirectory(options.executingPluginRoot, 'executing plugin root');
     pluginData = canonicalDirectory(options.pluginData, 'plugin data');
-    // Condition 1 — the record is still provably itself. readContext recomputes
-    // the runtime digest against the RECORDED root and re-reads that root's
-    // manifest, so a forged or hand-edited record cannot reach adoption; it also
-    // enforces the context schema and that the recorded project root exists.
-    context = readContext({
+    // Condition 1 — the record is still provably itself. On the STRICT branch
+    // readContext recomputes the runtime digest against the RECORDED root and
+    // re-reads that root's manifest, so a forged or hand-edited record cannot
+    // reach adoption; it also enforces the context schema and that both recorded
+    // roots exist.
+    //
+    // TWO disagreements are admitted past that strict read, and only through it
+    // failing first. They arrived from different branches and are DISJOINT by
+    // construction, each reader pinning the other's waiver off, so a record with
+    // BOTH roots gone is refused by both and lands on `record-unreadable`. That
+    // disjointness is what makes the order below non-load-bearing.
+    //
+    // A recorded project root that is GONE. It has to be admitted: `git worktree
+    // remove` on a live session is an ordinary, documented cleanup, and combined
+    // with a mid-session plugin update it wedged the session permanently — every
+    // write channel denied, /zensu:doctor reporting "no valid record" for a record
+    // sitting intact in plugin data. Nothing is waived by admitting it: the
+    // workflow document lived under that root and is not reachable from this
+    // record, so there is no persisted shape left for the two runtimes to disagree
+    // about, which is the same argument that already relaxes this state for a
+    // COMPATIBLE upgrade. readOrphanedProjectRootContext waives exactly one check
+    // and REFUSES a root that still exists.
+    //
+    // A recorded installation the host PRUNED from its cache. Say what that
+    // branch gives up, because "the root's existence alone" is false:
+    // readPrunedPluginRootContext proves the absence and waives THREE checks —
+    // the root's existence, the digest re-measure and the manifest-version match
+    // — the last two because they read the tree that is gone. So the forgery
+    // sentence above does NOT carry over: there the digest and the declared
+    // version are taken on the record's word.
+    //
+    // What still bounds both relaxed branches, stated rather than left to be
+    // inferred: the session-id hash, the full schema and principal-profile
+    // validation, source_revision === runtime_digest, plugin_data equality, the
+    // sibling-root bound, ADOPTION_SAFE_VERSION_RE on both versions before either
+    // reaches a filename, the never-backwards comparison, and the PROVEN absence
+    // of the waived root. The barrier was never the digest — it is the private
+    // records directory. That is the stated cost, and the reason such a record is
+    // adopted once rather than served. Every OTHER disagreement — plugin version,
+    // session hash, schema, principal profiles — throws in all three readers and
+    // still lands on `record-unreadable` below.
+    const readerOptions = {
       recordsDir: options.recordsDir,
       sessionId: options.sessionId,
       expectedHost: options.host,
-    });
+    };
+    try {
+      context = readContext(readerOptions);
+    } catch {
+      try {
+        context = readOrphanedProjectRootContext(readerOptions);
+        orphanedProjectRoot = true;
+      } catch {
+        context = readPrunedPluginRootContext(readerOptions);
+        prunedPluginRoot = true;
+      }
+    }
   } catch {
     return adoptionRefusal(ADOPTION_REFUSALS.RECORD_UNREADABLE);
   }
@@ -1487,13 +1761,17 @@ function adoptableRecord(options) {
   // the mutable payload cwd is never a project authority. It also made this repair
   // unreachable in the state it exists for: a fork whose cwd was a worktree records
   // that worktree while the harness still reports the origin repo. The full account,
-  // including why a record whose project root is GONE is still refused as
-  // `record-unreadable`, is in `docs/session-control.md` under "Unbindable
+  // including why a record whose project root is GONE is ADMITTED at condition 1
+  // above while every other disagreement still refuses as `record-unreadable`,
+  // is in `docs/session-control.md` under "Unbindable
   // sessions".
   //
   // Condition 3 — nothing to adopt when this runtime already serves the record.
   // Refusing here keeps adoption from being a way to re-mint a healthy session.
-  if (servesRecordedRuntime(context, executingPluginRoot, context.host)) {
+  // A pruned root serves nothing — the strict read already failed — so the
+  // check is skipped for it: a compatible-but-pruned record is adoptable, not
+  // "already served", because no installation can bind it any more.
+  if (!prunedPluginRoot && servesRecordedRuntime(context, executingPluginRoot, context.host)) {
     return adoptionRefusal(ADOPTION_REFUSALS.ALREADY_SERVED);
   }
   // Condition 4 — the same structural bound servesRecordedRuntime applies: a
@@ -1549,6 +1827,13 @@ function adoptableRecord(options) {
     context,
     recorded: context.plugin_version,
     executing: executingVersion,
+    // WHICH relaxed reader answered, carried rather than re-derived: the caller
+    // must re-mint the record around the SAME value, and asking the filesystem a
+    // second time would let a directory re-created between the two reads turn a
+    // waived check into a canonicalized one. The two are mutually exclusive —
+    // the readers pin each other's waiver off — so at most one is ever true.
+    orphanedProjectRoot,
+    prunedPluginRoot,
   };
 }
 
@@ -1580,6 +1865,21 @@ function adoptContext(options) {
       pluginRoot: executingPluginRoot,
       pluginData,
       createdAt: verdict.context.created_at,
+    }, {
+      // Taken from the verdict, never re-derived from the filesystem. When it is
+      // set the anchor is a directory that no longer exists, so buildContext
+      // waives the existence check and keeps the recorded spelling; the new
+      // record then lands the session in the ordinary orphaned-project-root
+      // state, where reads and this repair's own diagnostics work and writes stay
+      // denied. Nothing recreates the deleted directory: the provenance write
+      // below is guarded by the workflow document's own existsSync, which is
+      // false for a root that is gone, so mutateWorkflowState — which mkdirs
+      // every missing component — is never reached.
+      //
+      // The SECOND argument, never a key of the object above: that object is the
+      // shape registerContext spreads a caller's options into, and this waiver
+      // must not be reachable from there.
+      allowMissingProjectRoot: verdict.orphanedProjectRoot,
     });
     // Set aside, never overwrite. "The record is immutable" stays literally true:
     // no record is ever rewritten, a second one is minted beside it, and the
@@ -1646,6 +1946,13 @@ function adoptContext(options) {
       recorded: verdict.recorded,
       executing: verdict.executing,
       projectRoot: verdict.context.project_root,
+      // Reported so the caller can say what the session is bound to NOW. For a
+      // vanished project root that is an anchor which no longer exists, which
+      // leaves writes denied after a successful adoption; announcing an
+      // unqualified success there would send the user straight into a deny they
+      // were just told was repaired.
+      orphanedProjectRoot: verdict.orphanedProjectRoot,
+      prunedPluginRoot: verdict.prunedPluginRoot,
     };
   });
 
@@ -1698,6 +2005,371 @@ function adoptContext(options) {
   // with the superseded leases still wedging every later lease operation.
   return {
     ...adopted,
+    provenance,
+  };
+}
+
+// A DIFFERENT wedge from the one adoption exits, and confusing the two is the
+// mistake this block exists to prevent. Adoption answers "this runtime may not
+// serve the record"; this answers "this runtime serves the record perfectly
+// well, and the workflow document the record anchors is GONE". The observed
+// cause is a worktree deleted and re-created — `.zensu/state/` is gitignored, so
+// the document does not come back — followed by a compaction that continues the
+// SAME session rather than starting a new one.
+//
+// The state is fail-closed by design and STAYS so. revalidateWorkflowState in
+// reviewer-capability-v1.js throws on a missing document precisely so that
+// deleting one file cannot turn an armed chain into "never active", and that
+// hook is on the `.*` matcher, so it denies every tool. Nothing here relaxes it.
+// The repair REBUILDS the document and leaves provenance behind.
+//
+// What it costs, stated here because the code cannot state it later: a chain
+// that was live when the document vanished is GONE. The rebuilt baseline reads
+// "never active", because that is all a fresh baseline can say. That is why the
+// writer records BASELINE_REBUILT on every path.
+//
+// Say what GATES it precisely, because an earlier wording here claimed a consent
+// control that does not exist. TWO callers reach this writer and NEITHER is user
+// consent. The adopt entry point requires the literal `--confirm` in argv, which
+// is a token the model supplies to itself — the same prose-backed, not
+// consent-backed shape CLAUDE.md already records for `--autopilot-release`; the
+// "wait for the user to say yes" rule lives in skills/adopt-session/SKILL.md, not
+// in a gate. And claude-session-control-v1.js's SessionStart record-exists branch
+// reaches it with NO token at all, on a clean ENOENT, so a session could delete
+// its own document and wait for an automatic compaction. That is an accepted gap
+// recorded in CLAUDE.md §"Workflow-Baseline Repair", not a control.
+const BASELINE_STATES = {
+  PRESENT: 'present',
+  MISSING: 'missing',
+  UNSAFE: 'unsafe',
+  UNREADABLE: 'unreadable',
+};
+
+// Refusals name the BIND, never the document: reaching a verdict about the
+// document at all requires the record to be provably this session's and this
+// runtime's. Separate vocabulary from ADOPTION_REFUSALS on purpose — the two
+// commands answer different questions, and one shared set would invite a caller
+// to render one's remedy for the other's cause.
+const BASELINE_REFUSALS = {
+  RECORD_UNREADABLE: 'record-unreadable',
+  PLUGIN_DATA: 'plugin-data-mismatch',
+  NOT_SERVED: 'not-served-by-executing-runtime',
+};
+
+const BASELINE_HISTORY_PHASE = 'BASELINE_REBUILT';
+const BASELINE_HISTORY_REASON_PREFIX = 'baseline-rebuilt: ';
+
+// The two ways repairWorkflowBaseline can refuse, as CODES rather than as prose a
+// caller has to substring-match. The distinction is the whole reason they exist:
+// ALREADY_PRESENT is benign — someone else healed the document between the
+// caller's verdict and this one, which is the outcome the caller wanted — while
+// NOT_REPAIRABLE means something is sitting at that path and the refusal is the
+// point. Callers that cannot tell them apart end up contradicting each other.
+const BASELINE_ALREADY_PRESENT_CODE = 'ZENSU_WORKFLOW_BASELINE_ALREADY_PRESENT';
+const BASELINE_NOT_REPAIRABLE_CODE = 'ZENSU_WORKFLOW_BASELINE_NOT_REPAIRABLE';
+
+// The PREDICATE, not the raw constant, is what consumers must use. Comparing
+// `error.code === core.BASELINE_ALREADY_PRESENT_CODE` reads as a match whenever
+// BOTH sides are undefined — a port that copies the writer without the constant,
+// or any tree where the export is dropped, then reports EVERY refusal as the
+// benign race: headline "nothing to repair", exit 0, tamper included. A function
+// that tests a non-empty string cannot fail that way.
+// The guard is the FUNCTION, never a conjunct inside it. Two `typeof` tests used
+// to sit here against a module-scope literal declared a few lines above, where
+// they can never be false — they read as a defense while defending nothing. What
+// actually removes the hazard is that a consumer compares through a call instead
+// of against a constant it would have to import.
+function isBaselineAlreadyPresent(error) {
+  return Boolean(error) && error.code === BASELINE_ALREADY_PRESENT_CODE;
+}
+
+function baselineRefusal(reason) {
+  return { ok: false, reason };
+}
+
+// Classifies the document without reading it when a cheaper test already
+// decides, and the ORDER is the contract: the safety tests run before the parse,
+// so a symlink or a hard link is reported as tamper rather than as a document
+// that merely failed to validate. It mirrors revalidateWorkflowState in
+// reviewer-capability-v1.js — the gate whose refusal sends a user here — so the
+// two agree about which shapes are unsafe. MAX_JSON_BYTES is the same bound
+// readRegularFile applies, so a document called oversized here is one the reader
+// would refuse anyway.
+//
+// The DIRECTORY components are judged first, and leaving them out was a real
+// defect rather than an omission: `lstat` resolves every component except the
+// last, so a symlinked `.zensu` or `.zensu/state` whose target lacks the document
+// answered ENOENT and classified MISSING/repairable — a tamper shape offered as
+// rebuildable, while the write then failed at ensureDescendantDirectory and the
+// report told the user to retry the repair that cannot succeed. The gate this
+// claims to mirror has always checked them; the claim was false until it did.
+// The SHAPE half, split out because it needs no session id. Everything above the
+// parse — the directory ladder and the leaf's safety tests — answers MISSING or
+// UNSAFE from the filesystem alone, and PRESENT here means only "the shape is
+// fine, now read it". `/zensu:doctor` holds a session KEY rather than a raw
+// session id, so it can reach this and not the full classifier; without the split
+// it was left deciding MISSING from a `readdirSync` listing, which follows
+// symlinks and therefore promised a rebuild for shapes the repair refuses by
+// design, and rendered NOTHING when a symlinked component resolved to a real
+// directory holding the document while the gate denied every tool.
+// ONE walk over the directory components, reporting BOTH the verdict and the
+// component that produced it. It existed twice — once in the classifier that
+// DECIDES the verdict, once in the namer that decides WHICH path the operator is
+// told to inspect — as two hand-written copies with nothing pinning them
+// together. Adding a component or changing a safety test in the classifier alone
+// left the namer falling through to the leaf and naming it for an ancestor fault,
+// which is verbatim the defect the namer was written to fix, and it would have
+// failed silently. Both public signatures are unchanged.
+//
+// The components are composed from WORKFLOW_STATE_SEGMENTS rather than spelled
+// here, because that constant's own comment calls itself the ONE spelling of the
+// document's location: a layout move that edited it while these walks kept
+// validating `.zensu/state` would have judged one tree while the leaf named
+// another.
+//
+// The walk is anchored on the RESOLVED project root, not on the caller's
+// spelling. revalidateWorkflowState can compare each component against itself
+// because its projectRoot arrives canonical from the bound record; the classifier
+// is also called with a raw fixture path, and on macOS a temp root is spelled
+// `/var/...` by the caller and `/private/var/...` by the kernel — so requiring
+// the caller's own spelling to be canonical reported every healthy document under
+// such a root as tamper. Resolving the root once keeps the property that matters
+// (no symlink at `.zensu` or `.zensu/state`) without inheriting an ancestor's
+// legitimate aliasing.
+function baselineComponentLadder(projectRoot) {
+  let rootReal;
+  try {
+    rootReal = fs.realpathSync.native(projectRoot);
+  } catch {
+    // UNSAFE for EVERY failure, ENOENT included, and that is not the same rule
+    // the component loop below uses. An absent COMPONENT is what the repair
+    // creates; an absent PROJECT ROOT is not — `initializeWorkflowState` fails on
+    // it, so calling it MISSING would set `repairable: true` and put the report
+    // back to offering a rebuild that cannot succeed, which is the exact shape
+    // this ladder was added to remove. A vanished recorded root is already owned
+    // by `readContext`, which refuses it as `record-unreadable` before any caller
+    // reaches here.
+    return { rootReal: null, verdict: BASELINE_STATES.UNSAFE, at: projectRoot };
+  }
+  let candidate = rootReal;
+  for (const segment of WORKFLOW_STATE_SEGMENTS) {
+    candidate = path.join(candidate, segment);
+    let componentStat;
+    try {
+      componentStat = fs.lstatSync(candidate);
+    } catch (error) {
+      // A clean ENOENT is the repairable shape: initializeWorkflowState creates
+      // these components. Every other errno is NOT absence.
+      if (error && error.code === 'ENOENT') {
+        return { rootReal, verdict: BASELINE_STATES.MISSING, at: candidate };
+      }
+      return { rootReal, verdict: BASELINE_STATES.UNSAFE, at: candidate };
+    }
+    if (componentStat.isSymbolicLink() || !componentStat.isDirectory()) {
+      return { rootReal, verdict: BASELINE_STATES.UNSAFE, at: candidate };
+    }
+    try {
+      if (fs.realpathSync.native(candidate) !== candidate) {
+        return { rootReal, verdict: BASELINE_STATES.UNSAFE, at: candidate };
+      }
+    } catch {
+      return { rootReal, verdict: BASELINE_STATES.UNSAFE, at: candidate };
+    }
+  }
+  return { rootReal, verdict: null, at: null };
+}
+
+function classifyWorkflowBaselineShape(file, projectRoot) {
+  const ladder = baselineComponentLadder(projectRoot);
+  if (ladder.verdict !== null) return ladder.verdict;
+  let stat;
+  try {
+    stat = fs.lstatSync(file);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return BASELINE_STATES.MISSING;
+    // Anything else — EACCES, ENOTDIR, a symlink loop — is NOT absence.
+    // Reporting it as missing would aim the repair at a path it cannot own.
+    return BASELINE_STATES.UNSAFE;
+  }
+  if (stat.isSymbolicLink() || !stat.isFile() || stat.nlink !== 1 || stat.size > MAX_JSON_BYTES) {
+    return BASELINE_STATES.UNSAFE;
+  }
+  return BASELINE_STATES.PRESENT;
+}
+
+function classifyWorkflowBaseline(file, projectRoot, sessionId) {
+  const shape = classifyWorkflowBaselineShape(file, projectRoot);
+  if (shape !== BASELINE_STATES.PRESENT) return shape;
+  try {
+    readWorkflowState({ projectRoot, sessionId });
+  } catch {
+    return BASELINE_STATES.UNREADABLE;
+  }
+  return BASELINE_STATES.PRESENT;
+}
+
+// WHICH component made the verdict UNSAFE. The state alone cannot say: the ladder
+// returns the same bare token for a symlinked `.zensu`, a symlinked
+// `.zensu/state` and a bad leaf. Naming the leaf for all three sent the operator
+// to a path that need not exist — with `.zensu/state` symlinked elsewhere the
+// leaf is not there at all — while the diagnosis said "something is at that path"
+// and "remove the file". This file already fixed that class for the lease sweep
+// with `nameComponent()`; this is the same remedy for the same defect.
+//
+// Recomputed rather than threaded out of the classifier, so the classifier keeps
+// its one-value return and every existing caller and pin is untouched. It is only
+// ever called once, on a verdict already known to be UNSAFE.
+function baselineUnsafeComponent(projectRoot, file) {
+  const ladder = baselineComponentLadder(projectRoot);
+  // The two readings of one walk deliberately DIVERGE on the absent-component arm,
+  // and keeping that divergence is the reason this is a shared ladder rather than
+  // a shared return value. A clean ENOENT is MISSING to the classifier, because
+  // the repair creates those components; to the NAMER an absent component is not
+  // what made anything unsafe, so it falls through to the leaf exactly as the
+  // hand-written copy did by continuing past it.
+  if (ladder.rootReal === null) return projectRoot;
+  if (ladder.verdict === BASELINE_STATES.UNSAFE) return ladder.at;
+  return file;
+}
+
+// Never throws, for the reason adoptableRecord never throws: every caller is
+// already on a failure path, and an exception would replace a named condition
+// with a stack trace.
+function workflowBaselineVerdict(options) {
+  let context;
+  let executingPluginRoot;
+  let pluginData;
+  try {
+    executingPluginRoot = canonicalDirectory(options.executingPluginRoot, 'executing plugin root');
+    pluginData = canonicalDirectory(options.pluginData, 'plugin data');
+    context = readContext({
+      recordsDir: options.recordsDir,
+      sessionId: options.sessionId,
+      expectedHost: options.host,
+    });
+  } catch {
+    return baselineRefusal(BASELINE_REFUSALS.RECORD_UNREADABLE);
+  }
+  if (context.plugin_data !== pluginData) {
+    return baselineRefusal(BASELINE_REFUSALS.PLUGIN_DATA);
+  }
+  // The INVERSE of adoption's condition 3, deliberately. Adoption refuses when
+  // the executing runtime already serves the record; this REQUIRES it. A record
+  // this runtime may not serve is a lineage break with its own exit — routing it
+  // here would rebuild a document under a runtime that is not allowed to read
+  // the record anchoring it.
+  if (!servesRecordedRuntime(context, executingPluginRoot, context.host)) {
+    return baselineRefusal(BASELINE_REFUSALS.NOT_SERVED);
+  }
+  const file = adoptionWorkflowStatePath(context.project_root, options.sessionId);
+  const state = classifyWorkflowBaseline(file, context.project_root, options.sessionId);
+  return {
+    ok: true,
+    state,
+    // ONLY `missing` is repairable. `unsafe` and `unreadable` mean something IS
+    // sitting at that path; rebuilding over it would destroy the evidence and
+    // hand the session its capabilities back in the same step.
+    repairable: state === BASELINE_STATES.MISSING,
+    path: file,
+    // The component the refusal is ABOUT, so a diagnosis can send the operator to
+    // the thing that is actually there. Equals `path` when the leaf is at fault.
+    unsafeAt: state === BASELINE_STATES.UNSAFE
+      ? baselineUnsafeComponent(context.project_root, file)
+      : null,
+    projectRoot: context.project_root,
+    context,
+  };
+}
+
+// Rebuilds a MISSING baseline and records that it did. The verdict is evaluated
+// twice — once by the caller to report, once here to act — for the reason
+// adoptContext re-evaluates its own: between the two, the document could have
+// come back, or something could have been planted at its path.
+function repairWorkflowBaseline(options) {
+  const verdict = workflowBaselineVerdict(options);
+  if (!verdict.ok) fail(`workflow baseline is not repairable: ${verdict.reason}`);
+  if (!verdict.repairable) {
+    // TYPED, not a prose string. The refusal has two meanings a caller must be
+    // able to tell apart, and matching on the message is how that claim goes
+    // quietly wrong — the same argument reviewer-capability-v1.js makes for
+    // BASELINE_MISSING_CODE. `present` is a BENIGN race: between the caller's
+    // verdict and this one, a concurrent SessionStart or a second window healed
+    // the document, and the caller wanted it healed. Everything else is tamper.
+    // Without the code the two shipped callers disagreed: the SessionStart
+    // adapter re-classified and swallowed the race, while the adopt report
+    // reported `rebuild-failed`, exited 1, and told the user the cause had to be
+    // cleared first — for a session that was already fine.
+    const error = new Error(
+      `workflow baseline is not repairable: workflow-document-${verdict.state}`,
+    );
+    error.code = verdict.state === BASELINE_STATES.PRESENT
+      ? BASELINE_ALREADY_PRESENT_CODE
+      : BASELINE_NOT_REPAIRABLE_CODE;
+    error.baselineState = verdict.state;
+    throw error;
+  }
+  // Idempotent by construction: it returns an existing document untouched, so a
+  // concurrent writer that won the race is never overwritten.
+  //
+  // DECIDE FROM THE LOCKED CHECK, never from the verdict above it. That verdict is
+  // taken outside the state-directory lock, so a document created between it and
+  // this call is invisible to it — and the refusal ladder above only fires when
+  // the verdict ITSELF saw PRESENT. Reporting the narrower window as a rebuild
+  // this run performed appended a SECOND `BASELINE_REBUILT` entry onto somebody
+  // else's heal and printed "has been rebuilt" for work this run did not do,
+  // breaking the exactly-one invariant the suites pin. Routing it through the
+  // same typed refusal both callers already handle costs nothing and makes the
+  // benign race read the same however narrow the window was.
+  const initialized = initializeWorkflowStateDetailed({
+    projectRoot: verdict.projectRoot,
+    sessionId: options.sessionId,
+  });
+  if (!initialized.created) {
+    const raced = new Error(
+      `workflow baseline is not repairable: workflow-document-${BASELINE_STATES.PRESENT}`,
+    );
+    raced.code = BASELINE_ALREADY_PRESENT_CODE;
+    raced.baselineState = BASELINE_STATES.PRESENT;
+    throw raced;
+  }
+  // Provenance is a history entry and NOT a record or state field, exactly as it
+  // is for the adoption and for --chain-recover: a field would be a persisted
+  // shape change, which under the runtime-lineage rule costs a breaking release
+  // and would wedge every session then running.
+  //
+  // And deliberately NOT a bypass-ledger entry. The ledger records gate ESCAPES
+  // so that everything rendered under "Gates bypassed" is true; this escaped no
+  // gate, because the document a gate would have read was already gone.
+  let provenance = 'recorded';
+  try {
+    mutateWorkflowState({
+      projectRoot: verdict.projectRoot,
+      sessionId: options.sessionId,
+      actor: 'main-v1',
+      workflowState: 'baseline_rebuilt',
+      event: 'baseline-rebuilt',
+    }, (state) => {
+      const history = Array.isArray(state.history) ? state.history : [];
+      // `ts`, never `timestamp`: that is the key validateWorkflowExtensions
+      // validates and the one every existing history writer sets.
+      history.push({
+        step: '',
+        phase: BASELINE_HISTORY_PHASE,
+        ts: nowIso(),
+        reason: `${BASELINE_HISTORY_REASON_PREFIX}${verdict.state}`,
+      });
+      state.history = history;
+      return state;
+    });
+  } catch (error) {
+    // Reported, never smoothed over, and never rolled back: the document is real
+    // and its provenance is not. Undoing a rebuild that already succeeded would
+    // put the session back in the state this repair exists to leave.
+    provenance = `unavailable: ${error && error.message ? error.message : 'unknown'}`;
+  }
+  return {
+    path: verdict.path,
+    projectRoot: verdict.projectRoot,
     provenance,
   };
 }
@@ -2039,8 +2711,18 @@ function validateWorkflowState(state, sessionId) {
 }
 
 function atomicWriteJson(file, value) {
-  if (fs.existsSync(file)) {
-    const existing = fs.lstatSync(file);
+  // lstat, never existsSync. existsSync FOLLOWS the link, so it answers false for a
+  // DANGLING symlink and skipped all three guards below for exactly the shape they
+  // exist to catch: the rename then replaced the link and reported a clean write,
+  // destroying the tamper artifact. Only a clean ENOENT is absence; any other errno
+  // means something is at that path that this function must not write over.
+  let existing = null;
+  try {
+    existing = fs.lstatSync(file);
+  } catch (error) {
+    if (!error || error.code !== 'ENOENT') fail(`unreadable state file rejected: ${file}`);
+  }
+  if (existing) {
     if (existing.isSymbolicLink()) fail('symlink state file rejected');
     if (!existing.isFile()) fail('non-regular state file rejected');
     if (existing.nlink > 1) fail('multi-linked state file rejected');
@@ -2199,12 +2881,38 @@ function mutateWorkflowState(options, mutation) {
   ));
 }
 
-function initializeWorkflowState(options) {
+// The detailed form reports whether THIS call created the document. Every
+// pre-existing caller wants the document itself and is served by the wrapper
+// below, so the contract they were written against is unchanged; the repair is
+// the one caller that has to tell a creation from a find, because it appends a
+// provenance entry claiming it performed one.
+function initializeWorkflowStateDetailed(options) {
   const key = sessionKey(options.sessionId);
   const stateDirectory = workflowStateDirectory(options.projectRoot);
   const file = path.join(stateDirectory, `${WORKFLOW_STATE_PREFIX}${key}.json`);
   return withFileLock(stateDirectory, `state-${key}`, () => {
-    if (fs.existsSync(file)) return validateWorkflowState(readJson(file), key);
+    // lstat, never existsSync, and for the same reason atomicWriteJson uses it: a
+    // DANGLING symlink is invisible to existsSync, so this re-check was STRICTLY
+    // WEAKER than the classifyWorkflowBaseline verdict it exists to confirm under
+    // the lock — it reported `created: true` for a shape the classifier calls
+    // UNSAFE. Any existing entry, whatever its kind, is NOT a creation.
+    let existing = null;
+    try {
+      existing = fs.lstatSync(file);
+    } catch (error) {
+      if (!error || error.code !== 'ENOENT') {
+        fail(`unreadable workflow state file rejected: ${file}`);
+      }
+    }
+    if (existing) {
+      if (existing.isSymbolicLink() || !existing.isFile() || existing.nlink !== 1) {
+        // Never read through it and never create over it: the outer classifier
+        // already refuses this shape, and rebuilding here would destroy the
+        // evidence the refusal exists to preserve.
+        fail(`unsafe workflow state file rejected: ${file}`);
+      }
+      return { state: validateWorkflowState(readJson(file), key), created: false };
+    }
     const initial = stampWorkflowState({
       active: false,
       vanilla: false,
@@ -2225,8 +2933,12 @@ function initializeWorkflowState(options) {
       history: [],
     }, key, 'idle', 'session-start', undefined, 0);
     atomicWriteJson(file, initial);
-    return initial;
+    return { state: initial, created: true };
   });
+}
+
+function initializeWorkflowState(options) {
+  return initializeWorkflowStateDetailed(options).state;
 }
 
 function transitionWorkflowState(options) {
@@ -3922,6 +4634,13 @@ module.exports = {
   SCHEMA_VERSION,
   WORKFLOW_SCHEMA,
   ATTESTATION_SCHEMA,
+  // The workflow-document LAYOUT, exported so a caller that must judge the file
+  // before this module opens it does not re-spell the path. `workflowStateFile`
+  // is deliberately NOT the export for that job: it reaches
+  // `ensureDescendantDirectory`, so merely asking it for the path CREATES the
+  // directory, which is the opposite of what a read-only pre-check wants.
+  WORKFLOW_STATE_SEGMENTS,
+  WORKFLOW_STATE_PREFIX,
   sessionIdHash,
   sessionKey,
   computeRuntimeDigest,
@@ -3932,11 +4651,54 @@ module.exports = {
   registerContext,
   readContext,
   readOrphanedProjectRootContext,
+  readPrunedPluginRootContext,
+  // Exported for the unit layer alone — no production caller requires it; all
+  // of its call sites are in this file. Without a direct handle its three rules
+  // (the UNSAFE_PATH_CHARACTERS class, path.isAbsolute, and the
+  // path.resolve(value) !== value normalization test) are reachable only through
+  // a full synthetic record fixture, and CLAUDE.md already names it a core-half
+  // port obligation, so a port has to be able to pin it cheaply.
+  requireAbsentDirectoryPath,
+  ADOPTION_SAFE_VERSION_RE,
   ADOPTION_REFUSALS,
   ADOPTION_HISTORY_PHASE,
   ADOPTION_HISTORY_REASON_PREFIX,
   adoptableRecord,
   adoptContext,
+  // The read-only path helper. Exported because SessionStart needs to ASK where
+  // the document is without creating it — workflowStateFile resolves through
+  // ensureDescendantDirectory and mkdirs every missing component, which is right
+  // for a writer and wrong for a probe.
+  adoptionWorkflowStatePath,
+  BASELINE_STATES,
+  BASELINE_REFUSALS,
+  BASELINE_ALREADY_PRESENT_CODE,
+  BASELINE_NOT_REPAIRABLE_CODE,
+  // PRODUCTION consumers, not test seams — a port that drops either ships a
+  // report and a doctor row calling an undefined function. `baselineUnsafeComponent`
+  // is read by hooks/lib/zensu-doctor-report.js (the own-document row) and by
+  // hooks/lib/session-adopt-report-v1.js (the adopted-with-no-document warning);
+  // `classifyWorkflowBaselineShape` by the same report.
+  baselineUnsafeComponent,
+  classifyWorkflowBaselineShape,
+  // Likewise production, and the one whose absence is SILENT rather than loud:
+  // hooks/lib/session-adopt-report-v1.js and hooks/lib/claude-session-control-v1.js
+  // both route the benign race through it, and a tree without it reports every
+  // refusal — tamper included — as "nothing to repair" with exit 0. The two
+  // constants below it travel with it for the same reason.
+  isBaselineAlreadyPresent,
+  BASELINE_HISTORY_PHASE,
+  BASELINE_HISTORY_REASON_PREFIX,
+  // ALSO a production consumer, and the comment here used to say the opposite:
+  // hooks/lib/claude-session-control-v1.js calls it for the SessionStart self-heal
+  // and hooks/lib/zensu-doctor-report.js for the own-document row. A port reading
+  // "for the unit layer alone" would have dropped both. It IS additionally the
+  // handle the unit layer needs, because driving the unsafe/unreadable arms
+  // through workflowBaselineVerdict needs a full synthetic install — so without it
+  // the classification truth table would ship with two arms nothing executes.
+  classifyWorkflowBaseline,
+  workflowBaselineVerdict,
+  repairWorkflowBaseline,
   renderMainContext,
   renderReviewerContext,
   renderEvidenceWorkerContext,

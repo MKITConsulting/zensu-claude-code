@@ -228,13 +228,6 @@
           "timeoutMs": 900000
         },
         {
-          "id": "plan-payload-path-transport",
-          "runner": "bash",
-          "path": "tests/structure/test-plan-payload-fallback.sh",
-          "args": [],
-          "timeoutMs": 900000
-        },
-        {
           "id": "tdd-state-junction-safety",
           "runner": "bash",
           "path": "tests/structure/test-tdd-state-path-safety.sh",
@@ -354,18 +347,11 @@
       "profileTimeoutMs": 1800000,
       "suites": [
         {
-          "id": "review-worker-evidence-lease",
-          "runner": "bash",
-          "path": "tests/structure/test-review-worker-evidence-lease.sh",
-          "args": [],
-          "timeoutMs": 300000
-        },
-        {
           "id": "stop-enforcer-self-review-routing",
           "runner": "bash",
           "path": "tests/structure/test-stop-enforcer-self-review-routing.sh",
           "args": [],
-          "timeoutMs": 1500000
+          "timeoutMs": 1700000
         }
       ]
     },
@@ -374,11 +360,25 @@
       "profileTimeoutMs": 1800000,
       "suites": [
         {
+          "id": "review-worker-evidence-lease",
+          "runner": "bash",
+          "path": "tests/structure/test-review-worker-evidence-lease.sh",
+          "args": [],
+          "timeoutMs": 300000
+        },
+        {
           "id": "session-trail-lineage",
           "runner": "bash",
           "path": "tests/structure/test-session-trail-lineage.sh",
           "args": [],
           "timeoutMs": 600000
+        },
+        {
+          "id": "plan-payload-path-transport",
+          "runner": "bash",
+          "path": "tests/structure/test-plan-payload-fallback.sh",
+          "args": [],
+          "timeoutMs": 1200000
         }
       ]
     }

@@ -10,6 +10,17 @@ const hookSession = require('./claude-hook-session-v1.js');
 const evidenceLeases = require('./review-evidence-lease-v1.js');
 const doctorInvocation = require('./zensu-doctor-invocation.js');
 
+// The FOURTH consumer of the `recorded`/`executing` pair, and the one outside the
+// shell family that shares a degradation policy. `zensu_emit_hook_session_deny`,
+// stop-chain-enforcer.sh and zensu-doctor.sh all hold the pair to a shape before
+// printing it, because a plugin_version is only requireText-validated: a newline
+// in it splits one deny reason into several that read as separate hook messages.
+// The same alternation, the same `(unreadable)` substitution.
+const SAFE_VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/;
+const safeVersion = (value) => (
+  typeof value === 'string' && SAFE_VERSION.test(value) ? value : '(unreadable)'
+);
+
 const MAX_PAYLOAD_BYTES = 1024 * 1024;
 const REVIEWER_READ_TOOLS = new Set(['Read', 'Grep', 'Glob']);
 const COMMAND_TOOLS = new Set(['Bash', 'shell', 'exec', 'exec_command', 'terminal', 'command']);
@@ -100,6 +111,22 @@ function canonicalDirectory(value, label, rejectAlias = false) {
   return canonical;
 }
 
+// The ONE cause in this file that has an in-place remedy, tagged rather than
+// matched by message text. A deny that names a remedy is worth having only if it
+// names it for the right cause, and a substring test against prose is how that
+// claim goes quietly wrong on the next reword.
+//
+// Tagged ONLY for a clean ENOENT. `is unsafe` and `is not canonical` are tamper
+// shapes and stay on the generic wording: something is sitting at that path, and
+// offering a rebuild there would tell the user to build over the evidence.
+const BASELINE_MISSING_CODE = 'ZENSU_WORKFLOW_BASELINE_MISSING';
+
+function baselineMissing(message) {
+  const error = new Error(message);
+  error.code = BASELINE_MISSING_CODE;
+  return error;
+}
+
 function revalidateWorkflowState(options) {
   // SessionStart always creates one project-bound baseline CAS record. Validate
   // its existing path before calling the core reader so deletion can never
@@ -113,7 +140,11 @@ function revalidateWorkflowState(options) {
     let stat;
     try {
       stat = fs.lstatSync(candidate);
-    } catch {
+    } catch (error) {
+      // A clean ENOENT is the repairable shape: the repair's own
+      // initializeWorkflowState creates these components. Every other errno is
+      // NOT absence and keeps the generic wording.
+      if (error && error.code === 'ENOENT') throw baselineMissing(`${label} is missing`);
       throw new Error(`${label} is missing`);
     }
     if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`${label} is unsafe`);
@@ -126,7 +157,10 @@ function revalidateWorkflowState(options) {
   let stateStat;
   try {
     stateStat = fs.lstatSync(stateFile);
-  } catch {
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      throw baselineMissing('activated workflow CAS state is missing');
+    }
     throw new Error('activated workflow CAS state is missing');
   }
   if (
@@ -461,8 +495,14 @@ function main() {
     // here is reached before the Bash gates ever run. It admits exactly two
     // recognized commands for the main thread: hooks/lib/zensu-doctor.sh, which
     // writes nothing, and hooks/lib/zensu-session-adopt.sh, which writes its own
-    // session's record, one workflow history entry and a move of its own stale
-    // review-evidence leases, and carries its own justification in its header. A
+    // session's record, one workflow history entry, a move of its own stale
+    // review-evidence leases, and — with --confirm on an already-served refusal
+    // only — its own missing workflow document plus that document's .zensu
+    // ancestors in the recorded project (`.zensu` and not `.zensu/state`: the mkdir
+    // creates BOTH components, and `.zensu` is not inside `.zensu/state` — the adopt
+    // header makes that argument and two carriers still spelled the narrower one),
+    // and carries its own justification in its
+    // header. A
     // remedy the user cannot invoke is not a remedy.
     //
     // This gate is the FIFTH denier in the incompatible-runtime state, and the
@@ -480,10 +520,67 @@ function main() {
     // here while the Edit gate said the session could be repaired in place. Two
     // denies contradicting each other about the one bind failure that HAS an
     // in-place remedy is exactly what CLAUDE.md forbids, so this branch names the
-    // same cause and remedy the four emitting gates do.
+    // same cause and remedy the four gates emitting the shell scope do.
+    //
+    // The predicate matches TWO states — with and without a vanished recorded
+    // project root — and this gate is on the `.*` matcher, so an Edit lands here:
+    // precisely the tool that stays denied after the adoption. The limit is
+    // therefore stated the same way the shell scope states it, as a conditional
+    // clause true in both halves. Offering the repair without it is the defect,
+    // not the nicety; this branch shipped without it for one round.
+    // The CAUSE is for everyone; only the REMEDY is MAIN-only. Two separate
+    // decisions, and collapsing them was a real regression this branch shipped for
+    // one review round.
+    //
+    // The remedy half: `/zensu:adopt-session --confirm` WRITES the immutable record,
+    // and `zensu_doctor_allowed` conjoins `zensu_hook_is_main_principal` — so a
+    // reviewer, an evidence worker or any neutral child that reached this catch
+    // would be handed a command every gate refuses it. Deny text is model-read
+    // content: pointing a read-only principal at a privileged write is the shape
+    // this repo treats as a defect, not a nicety.
+    //
+    // The cause half: withholding the diagnosis TOO dropped a non-main principal
+    // back to `immutable context revalidation failed`, which names neither the
+    // lineage break nor either version — a cause-free deny in the one bind failure
+    // that has a name and an in-place repair. `safeVersion` already renders the
+    // pair safely for any principal, so there was never a reason to hide it. A
+    // constrained child is told what happened and who can fix it.
     const lineage = hookSession.resolveIncompatibleRuntime(payload);
     if (lineage) {
-      deny(`this session's Session Control record is intact, but the running Zensu installation declares an incompatible lineage — the record was minted by ${lineage.recorded} and ${lineage.executing} is executing. Run /zensu:adopt-session to check whether this installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state.`);
+      const cause = `this session's Session Control record is readable, and the running Zensu installation declares an incompatible lineage — the record was minted by ${safeVersion(lineage.recorded)} and ${safeVersion(lineage.executing)} is executing.`;
+      if (principals.classifyPreToolPayload(payload) === principals.PRINCIPALS.MAIN) {
+        deny(`${cause} Run /zensu:adopt-session to check whether this installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — the adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created; /zensu:doctor names the path when that is the case.`);
+        return;
+      }
+      deny(`${cause} The repair writes the immutable record and is reserved for the main thread, so it is not available here — report this to the main thread rather than retrying.`);
+      return;
+    }
+    // The other named state with the same in-place remedy, and the FIFTH denier
+    // for it — the same five as the lineage state above, counted the same way:
+    // the four emitting gates plus this one. The installation that minted the
+    // record was pruned from the plugin cache. Disjoint from the lineage question above, so the order of
+    // the two is immaterial.
+    const pruned = hookSession.resolvePrunedPluginRoot(payload);
+    if (pruned) {
+      deny(`this session's Session Control record is intact, but the Zensu installation that minted it (version ${pruned.recorded}) has been removed from the plugin cache, so the running installation (${pruned.executing}) cannot re-verify the record. Run /zensu:adopt-session to check whether this installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If it refuses, the refusal names its own cause and remedy: this predicate is deliberately blind to lineage, so a DOWNGRADE reaches this state too, and there adoption refuses as executing-runtime-older and re-installing the newer version is the way back — a persisted shape that really did change is the case that needs a fresh Claude Code session.`);
+      return;
+    }
+    // The SECOND named cause, and the second one with an in-place remedy. It sits
+    // below the lineage branch deliberately: the two are mutually exclusive in
+    // practice — a lineage break throws inside resolveHookSession, before this
+    // file ever reaches the workflow document — and where they are not, adoption
+    // is the correct remedy, because the repair below requires a SERVED record.
+    //
+    // The generic wording is what this branch removes. "immutable context
+    // revalidation failed: activated workflow CAS state is missing" is accurate
+    // and names no way out, in a state where this hook denies every tool and the
+    // only reachable commands are the two the Bash recognizer admits.
+    if (error && error.code === BASELINE_MISSING_CODE) {
+      // The reachability clause is PLATFORM-QUALIFIED on purpose. zensu-doctor-invocation.js
+      // sets PLATFORM_SUPPORTED = process.platform !== "win32" and gates both recognizers on
+      // it, so on win32 the Bash recognizer admits NEITHER command and an unconditional
+      // "both stay reachable" is false in the one state where a wrong remedy has no fallback.
+      deny("this session's Session Control record is intact and served by the running Zensu installation, but the workflow document it anchors is missing — a deleted and re-created worktree loses it, because .zensu/state/ is gitignored. It is NOT read as \"no chain was ever active\": that is why every tool is denied. Run /zensu:adopt-session to see the diagnosis, and /zensu:adopt-session --confirm to rebuild the document. On macOS and Linux both stay reachable in this state; on Windows the Bash recognizer admits neither, so start a fresh Claude Code session instead. Rebuilding is a loss, not a restore — a review chain that was live when the document vanished is gone.");
       return;
     }
     deny(`immutable context revalidation failed: ${error.message}`);

@@ -466,11 +466,13 @@ _tdd_reserved_provenance() {
     [Cc][Hh][Aa][Ii][Nn]_[Rr][Ee][Cc][Oo][Vv][Ee][Rr][Ee][Dd]) return 0 ;;
     [Rr][Uu][Nn][Tt][Ii][Mm][Ee]_[Aa][Dd][Oo][Pp][Tt][Ee][Dd]) return 0 ;;
     [Aa][Uu][Tt][Oo][Pp][Ii][Ll][Oo][Tt]_[Aa][Dd][Oo][Pp][Tt][Ee][Dd]) return 0 ;;
+    [Bb][Aa][Ss][Ee][Ll][Ii][Nn][Ee]_[Rr][Ee][Bb][Uu][Ii][Ll][Tt]) return 0 ;;
   esac
   case "${2:-}" in
     [Cc][Hh][Aa][Ii][Nn]-[Rr][Ee][Cc][Oo][Vv][Ee][Rr][Ee][Dd]:\ *) return 0 ;;
     [Rr][Uu][Nn][Tt][Ii][Mm][Ee]-[Aa][Dd][Oo][Pp][Tt][Ee][Dd]:\ *) return 0 ;;
     [Aa][Uu][Tt][Oo][Pp][Ii][Ll][Oo][Tt]-[Aa][Dd][Oo][Pp][Tt][Ee][Dd]:\ *) return 0 ;;
+    [Bb][Aa][Ss][Ee][Ll][Ii][Nn][Ee]-[Rr][Ee][Bb][Uu][Ii][Ll][Tt]:\ *) return 0 ;;
   esac
   return 1
 }

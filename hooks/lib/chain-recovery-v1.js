@@ -21,13 +21,37 @@ const REARM_MARKER_KEYS = Object.freeze([
 const RETURN_STAGES = Object.freeze(['GATES', 'CONVERGE', 'FIX_FINDINGS', 'VALIDATE', 'COVER']);
 const RECOVERY_HISTORY_PHASE = 'CHAIN_RECOVERED';
 const RECOVERY_HISTORY_REASON_PREFIX = 'chain-recovered: ';
-const CHAIN_OUTCOMES = ['', 'pass', 'no-changes', 'max-rounds'];
+// FROZEN AND EXPORTED like every other shape table beside it. It was neither,
+// while `hooks/lib/zen-anchor-v1.js` keys its own outcome allowlist on these
+// members - so a RENAMED member left a dead key there, and in that file's test
+// literals, with every check green and the blocked mark silently unreachable.
+const CHAIN_OUTCOMES = Object.freeze(['', 'pass', 'no-changes', 'max-rounds']);
 // FROZEN like every other exported shape table. `RECOVERABLE_SHAPES` is exported and feeds
 // `recoverable`, the flag that authorizes `--chain-recover`, while `STUCK_SHAPES` spreads it
 // at load — so a mutation would move `recoverable` and `blocked` without moving `wedged`.
 const RECOVERABLE_SHAPES = Object.freeze(['wedged-stale-rearm']);
 const DEAD_END_SHAPES = Object.freeze(['self-review-unbindable']);
 const STUCK_SHAPES = Object.freeze([...RECOVERABLE_SHAPES, ...DEAD_END_SHAPES]);
+// EVERY literal `chainShape` can return. The subsets above answer "is this shape
+// stuck"; nothing answered "is this every shape", so a consumer that needs the
+// total set had to use `NEXT_COMMAND`'s key set as a proxy — an invariant this
+// module never enforced. Keep in step with `chainShape` below; the sibling suite
+// derives the literals from that function's own source and compares them here, so
+// a shape added there without a row lands as a red check rather than as a
+// consumer silently answering nothing for a real chain.
+const ALL_SHAPES = Object.freeze([
+  'no-session',
+  'implementing',
+  'chain-closed',
+  'awaiting-self-review',
+  'self-review-unbindable',
+  'review-in-flight',
+  'ticket-unclaimed',
+  'ticket-spent',
+  'wedged-stale-rearm',
+  'ticket-lost',
+  'ready-for-review',
+]);
 // The shapes that carry no work forward. Exported so a consumer never hand-copies
 // them; keep in step with the literals `chainShape` returns below. See CLAUDE.md
 // §"Chain Shape & Rearm Receipt".
@@ -304,11 +328,15 @@ function countRecoveries(state) {
 }
 
 module.exports = {
+  CHAIN_OUTCOMES,
+  ALL_SHAPES,
   BLOCKED_RECOVERY_COMMAND,
+  DEAD_END_SHAPES,
   INERT_SHAPES,
   NEXT_COMMAND,
   REARM_MARKER_KEYS,
   RECOVERABLE_SHAPES,
+  STUCK_SHAPES,
   RECOVERY_HISTORY_PHASE,
   RECOVERY_HISTORY_REASON_PREFIX,
   RETURN_STAGES,

@@ -244,6 +244,143 @@ fi
 # return under any other wording with this row still green. Kept scoped to
 # $WORKFLOW_DOC: docs/architecture.md quotes the retired recipe deliberately, as
 # history, and would false-positive if the guard were widened to docs/.
+# ── P6: the attempt half — corroborating a FAILURE ──────────────────────────
+#
+# Claude Code fires no PostToolUse for a Bash call that did not complete
+# successfully, so a failing command left no `BASH cmd=` line and every claim
+# naming it could only ever reach `EVIDENCE GAP`. This check could corroborate a
+# PASS and structurally could not corroborate a FAILURE. `pre-bash-witness.sh`
+# records `BASH-ATTEMPT cmd=` from PreToolUse, which the host fires
+# unconditionally, so an attempt with no completed line is positive evidence.
+#
+# Every row below is a PAIR: the attempt-only shape and the same claim over a
+# COMPLETED (zero-exit) run. Without the completed control a row would pass just
+# as well if the library had started ignoring completed entries entirely, which
+# is the regression that would silently reinstate the gap.
+
+# attempt_line <cmd> -> the exact format pre-bash-witness.sh writes. Built from
+# the library's own exported marker so a rename of the format cannot leave this
+# suite agreeing with a spelling nothing writes any more.
+attempt_line() {
+  node -e '
+    const marker = require(process.argv[1]).WITNESS_ATTEMPT_MARKER;
+    process.stdout.write(marker + JSON.stringify(process.argv[2]) + "\n");
+  ' "$LIB" "$1"
+}
+
+P6_MARKER="$(node -e 'process.stdout.write(require(process.argv[1]).WITNESS_ATTEMPT_MARKER)' "$LIB" 2>/dev/null)"
+P6_RESULT_MARKER="$(node -e 'process.stdout.write(require(process.argv[1]).WITNESS_MARKER)' "$LIB" 2>/dev/null)"
+if [ "$P6_MARKER" = "BASH-ATTEMPT cmd=" ] && [ "$P6_RESULT_MARKER" = "BASH cmd=" ] \
+  && ! printf '%s' "$P6_MARKER" | grep -qF "$P6_RESULT_MARKER"; then
+  check "P6a the two witness markers are exported and neither contains the other" PASS
+else
+  check "P6a witness markers (attempt='$P6_MARKER' result='$P6_RESULT_MARKER')" FAIL
+fi
+
+# P6b — a green claim over an attempt with no completed run is CONTRADICTED.
+# Before the attempt half existed this was an EVIDENCE GAP, indistinguishable
+# from a command that never ran at all.
+printf '%s\n' 'AUDIT — cmd="bash tests/run-all.sh" exit=0 result="PASS"' > "$RUNLOG"
+attempt_line 'bash tests/run-all.sh' > "$WITNESS"
+OUT="$(node "$LIB" --log "$RUNLOG" --witness "$WITNESS" 2>&1)"; RC=$?
+if [ "$RC" -ne 0 ] \
+  && printf '%s' "$OUT" | grep -qF 'EVIDENCE CONTRADICTION' \
+  && printf '%s' "$OUT" | grep -qF 'records only an attempt' \
+  && printf '%s' "$OUT" | grep -qF 'contradictions=1' \
+  && ! printf '%s' "$OUT" | grep -qF 'EVIDENCE GAP'; then
+  check "P6b a claimed PASS over an attempt with no completed run is a contradiction" PASS
+else
+  check "P6b claimed PASS over an attempt-only record (rc=$RC)" FAIL
+  printf '%s\n' "$OUT"
+fi
+
+# P6b-control — the zero-exit twin. The SAME claim, with a completed entry added
+# beside the attempt, is verified and exits 0.
+attempt_line 'bash tests/run-all.sh' > "$WITNESS"
+witness_line 'bash tests/run-all.sh' 'all suites passed' false >> "$WITNESS"
+OUT="$(node "$LIB" --log "$RUNLOG" --witness "$WITNESS" 2>&1)"; RC=$?
+if [ "$RC" -eq 0 ] \
+  && printf '%s' "$OUT" | grep -qF 'verified cmd="bash tests/run-all.sh"' \
+  && printf '%s' "$OUT" | grep -qF 'contradictions=0'; then
+  check "P6b-control zero-exit twin: the same claim with a completed run is verified" PASS
+else
+  check "P6b-control the same claim with a completed run is verified (rc=$RC)" FAIL
+  printf '%s\n' "$OUT"
+fi
+
+# P6c — the direction this check could not reach at all: a claimed FAILURE over
+# an attempt-only record is CORROBORATED rather than reported as a gap.
+printf '%s\n' 'AUDIT — cmd="bash tests/run-all.sh" exit=1 result="FAIL"' > "$RUNLOG"
+attempt_line 'bash tests/run-all.sh' > "$WITNESS"
+OUT="$(node "$LIB" --log "$RUNLOG" --witness "$WITNESS" 2>&1)"; RC=$?
+if [ "$RC" -eq 0 ] \
+  && printf '%s' "$OUT" | grep -qF 'verified cmd="bash tests/run-all.sh"' \
+  && printf '%s' "$OUT" | grep -qF 'the claim asserts no pass, so the record corroborates it' \
+  && printf '%s' "$OUT" | grep -qF 'gaps=0'; then
+  check "P6c a claimed FAILURE over an attempt-only record is corroborated, not a gap" PASS
+else
+  check "P6c claimed FAILURE over an attempt-only record (rc=$RC)" FAIL
+  printf '%s\n' "$OUT"
+fi
+
+# P6d — the gap is NOT swallowed. A claim matching neither kind still reports a
+# gap, so the new verdicts narrowed the blind spot without widening corroboration.
+printf '%s\n' 'AUDIT — cmd="never-ran --at-all" exit=0 result="PASS"' > "$RUNLOG"
+attempt_line 'something-else' > "$WITNESS"
+OUT="$(node "$LIB" --log "$RUNLOG" --witness "$WITNESS" 2>&1)"; RC=$?
+if [ "$RC" -ne 0 ] \
+  && printf '%s' "$OUT" | grep -qF 'EVIDENCE GAP' \
+  && printf '%s' "$OUT" | grep -qF 'gaps=1'; then
+  check "P6d a claim matching neither an attempt nor a completed run is still a gap" PASS
+else
+  check "P6d unmatched claim is still a gap (rc=$RC)" FAIL
+  printf '%s\n' "$OUT"
+fi
+
+# P6e — the fail-fix-rerun cycle. An attempt-only record from the failing run
+# must not contradict a claim the later green run corroborates, or every normal
+# red-then-green cycle would report a false contradiction.
+printf '%s\n' 'AUDIT — cmd="npm test" exit=0 result="PASS"' > "$RUNLOG"
+attempt_line 'npm test' > "$WITNESS"
+attempt_line 'npm test' >> "$WITNESS"
+witness_line 'npm test' '3 passed' false >> "$WITNESS"
+OUT="$(node "$LIB" --log "$RUNLOG" --witness "$WITNESS" 2>&1)"; RC=$?
+if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -qF 'contradictions=0'; then
+  check "P6e a failed-then-fixed cycle still verifies on its completed run" PASS
+else
+  check "P6e failed-then-fixed cycle (rc=$RC)" FAIL
+  printf '%s\n' "$OUT"
+fi
+
+# P6f — the log-write exclusion covers attempts too. The printf that WROTE the
+# claim is attempted like any other command, and must not stand in for the run.
+CLAIM6='AUDIT — cmd="bash tests/run-all.sh --ci" exit=0 result="PASS"'
+printf '%s\n' "$CLAIM6" > "$RUNLOG"
+attempt_line "printf '%s\\n' \"$CLAIM6\" >> $RUNLOG" > "$WITNESS"
+OUT="$(node "$LIB" --log "$RUNLOG" --witness "$WITNESS" 2>&1)"; RC=$?
+if [ "$RC" -ne 0 ] \
+  && printf '%s' "$OUT" | grep -qF 'EVIDENCE GAP' \
+  && ! printf '%s' "$OUT" | grep -qF 'EVIDENCE CONTRADICTION'; then
+  check "P6f a log-writing command's ATTEMPT never corroborates or contradicts the claim" PASS
+else
+  check "P6f log-writing attempt is excluded (rc=$RC)" FAIL
+  printf '%s\n' "$OUT"
+fi
+
+# P6g — backwards compatibility. A witness log written before the attempt half
+# existed carries no attempt lines, and every verdict over it is unchanged.
+printf '%s\n' 'AUDIT — cmd="npm test" exit=0 result="PASS"' > "$RUNLOG"
+witness_line 'npm test' 'pass 3' false > "$WITNESS"
+OUT="$(node "$LIB" --log "$RUNLOG" --witness "$WITNESS" 2>&1)"; RC=$?
+if [ "$RC" -eq 0 ] \
+  && printf '%s' "$OUT" | grep -qF 'verified cmd="npm test"' \
+  && ! printf '%s' "$OUT" | grep -qF 'attempt'; then
+  check "P6g a pre-attempt-half witness log verifies exactly as before" PASS
+else
+  check "P6g legacy witness log is unchanged (rc=$RC)" FAIL
+  printf '%s\n' "$OUT"
+fi
+
 if grep -qF 'hooks/lib/zensu-evidence-crosscheck.js' "$WORKFLOW_DOC" \
   && grep -qF -- 'not a hand-written `grep` — is the recipe' "$WORKFLOW_DOC" \
   && ! grep -qF -- "grep -F -q 'cmd=" "$WORKFLOW_DOC"; then
