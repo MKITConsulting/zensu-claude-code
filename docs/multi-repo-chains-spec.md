@@ -34,7 +34,7 @@ therefore a trusted value derived from the immutable Session Control record.
 Nothing in this proposal weakens that.
 
 Two of the consumers named in §6.3 do NOT sit on that binding: the terminus
-count reads `git -C "${CLAUDE_PROJECT_DIR:-.}"` (`hooks/lib/zensu-log.sh:1278`) and
+count reads `git -C "${CLAUDE_PROJECT_DIR:-.}"` (`hooks/lib/zensu-log.sh:1352`) and
 the audit's default `--project` is `${CLAUDE_PROJECT_DIR:-.}`
 (`hooks/lib/zensu-edit-landing.sh:41`) — both ambient, both with a `.` fallback.
 Which root that variable names in a multi-root topology, and what the fallback
@@ -50,8 +50,8 @@ writes receipts nothing reads, and each run reports the other repository's claim
 as not landed, so no run can exit 0.
 
 **The receipt gate is scoped by the anchor's change count.**
-`hooks/lib/zensu-log.sh:764-766` counts `git diff --name-only HEAD` plus untracked
-files under a root resolved by `zensu_resolve_project_dir()` (`:711`) — not the
+`hooks/lib/zensu-log.sh:840-842` counts `git diff --name-only HEAD` plus untracked
+files under a root resolved by `zensu_resolve_project_dir()` (`:787`) — not the
 ambient variable, and with the git environment scrubbed — and skips the receipt
 requirement entirely at zero. A clean orchestrator therefore closes the chain with
 no receipt at all. The comment at `:681` states this mirrors the `--chain-done`
@@ -335,7 +335,7 @@ dropped: a dropped root is a root nothing audits.
 | Edit-landing | Enumerate the union; resolve each claim through its label; write ONE merged receipt beside the anchor's workflow document, carrying a per-root verdict. | `hooks/lib/zensu-edit-landing.sh`, receipt path `:292` |
 | Review packet | Enumerate `changed_files` per root and emit them label-prefixed. | `skills/tdd/SKILL.md` step 10.2 |
 | Write gate | Rules (B) and (C) accept a path inside ANY union member. | `hooks/lib/bash-source-write-parse.js:817`, `:863` |
-| Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:764-766` |
+| Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:840-842` |
 | Capability confinement (stage 3) | The reviewer's root check and its protected-root set both take the union. | `hooks/lib/reviewer-capability-v1.js:320`, `:300` |
 
 The write gate receives the union the same way it receives the anchor today —
@@ -525,9 +525,9 @@ mechanism over `codeRoots[]` is specified as a stage-2 precondition.
 **The Session Control record does not authenticate its own contents either.**
 This matters because §6.1.1 offers that record as a carrier, which reads as
 though it settles requirement 1. `validateContext`
-(`hooks/lib/session-control-core-v1.js:648`) enforces the schema pair, a fixed
+(`hooks/lib/session-control-core-v1.js:680`) enforces the schema pair, a fixed
 list of required fields, and that `source_revision` equals `runtime_digest` — but
-that digest is computed by `manifestRuntimeEntries` (`:471`) over the executing
+that digest is computed by `manifestRuntimeEntries` (`:481`) over the executing
 plugin tree's `hooks`, `agents`, `skills`, `docs` and `templates` plus the
 manifest. Nothing in it covers the record's own fields. A `code_roots` entry
 rewritten in place would leave the digest untouched and validate. There is also
