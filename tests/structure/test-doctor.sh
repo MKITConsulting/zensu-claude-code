@@ -3390,6 +3390,23 @@ ap_run() { # ap_run <runId> <stage> <owner> [workspaceRoot|-] [projectRoot]
         rec[k] = mergeable ? Object.assign({}, cur, nxt) : nxt;
       });
     }
+    // A ledger built by COUNT rather than handed over as a payload. Two fixtures need a
+    // ledger sized from the MAX_EVENTS the owner declares, and serializing one into
+    // RUN_PATCH_JSON put ~56 KB into a single environment string on the way to this
+    // program — a per-string exec limit is a platform property, and this suite runs on the
+    // weekly Windows inventory. It also removes a hand-duplicated pair of generators whose
+    // only intended difference was the count: with two copies, a one-sided edit to
+    // `toStage` would move which conjunct the refusing fixture fails, and that check would
+    // stay green while the bound it is named for went unpinned.
+    // NO APOSTROPHE may appear anywhere in this program, per the rule stated above.
+    if (process.env.RUN_EVENT_COUNT) {
+      var evN = Number(process.env.RUN_EVENT_COUNT), evOut = [];
+      for (var evI = 0; evI < evN; evI += 1) {
+        evOut.push({ eventId: "ev_" + evI, eventType: evI === 0 ? "START" : "APPROVE",
+          payloadDigest: "", payload: {}, fromStage: null, toStage: rec.stage });
+      }
+      rec.events = evOut;
+    }
     // REPLACE, not merge, and it exists because the merge above cannot express a nested
     // object with FEWER keys than the default. A key-set case needs exactly that: patching
     // an object into `effects` adds a key rather than replacing the set, so the fixture
@@ -4587,9 +4604,11 @@ rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
 # that LOWERS it would leave this reader wider — the green-glyph-over-a-project-that-
 # fails-closed direction. The ledger size is DERIVED from the owner's own value rather than
 # hardcoded: a legitimate bump on both sides would otherwise turn this red with a message
-# printing a matching pair and no stated cause. At the owner's 512 that is ~56 KB, well
-# under the reader's own byte cap, so unlike the pre-existing over-long fixture it actually
-# reaches `ownerWouldAccept`.
+# printing a matching pair and no stated cause. The ledger is built inside `ap_run`'s own
+# program from a COUNT, because at the owner's 512 the serialized form is ~56 KB and handing
+# that to a child as one environment string is a platform limit this suite should not rest
+# on. It stays well under the reader's byte cap, so unlike the pre-existing over-long
+# fixture it actually reaches `ownerWouldAccept`.
 rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
 AP_MAXEV_OWNER="$(node -e '
   var m = /const MAX_EVENTS = (\d+);/.exec(require("fs").readFileSync(process.argv[1], "utf8"));
@@ -4599,17 +4618,12 @@ AP_MAXEV_COPY="$(node -e '
   var m = /var AUTOPILOT_MAX_EVENTS = (\d+);/.exec(require("fs").readFileSync(process.argv[1], "utf8"));
   process.stdout.write(m ? m[1] : "UNDERIVABLE");
 ' "$REPORT")"
-AP_EV_OVER="${AP_MAXEV_OWNER:-0}"
+# The two arms differ in the COUNT and in nothing else, which is the whole property this
+# block rests on — so the count is the only thing either arm supplies. `AP_EV_OVER` is 0
+# for every value the extraction cannot turn into digits, and the `-gt 0` conjunct below
+# fails the check loudly rather than letting an empty ledger pass for the wrong reason.
 case "$AP_MAXEV_OWNER" in ([0-9]*) AP_EV_OVER=$((AP_MAXEV_OWNER + 1)) ;; (*) AP_EV_OVER=0 ;; esac
-AP_EV513="$(AP_EV_N="$AP_EV_OVER" node -e '
-  var n = Number(process.env.AP_EV_N), out = [];
-  for (var i = 0; i < n; i += 1) {
-    out.push({ eventId: "ev_" + i, eventType: i === 0 ? "START" : "APPROVE",
-      payloadDigest: "", payload: {}, fromStage: null, toStage: "GATES" });
-  }
-  process.stdout.write(JSON.stringify({ events: out }));
-')"
-RUN_PATCH_JSON="$AP_EV513" ap_run_valid run_evmany GATES "$AP_OWN" "/w/t"
+RUN_EVENT_COUNT="$AP_EV_OVER" ap_run_valid run_evmany GATES "$AP_OWN" "/w/t"
 ap_pointer "$AP_OWN" run_evmany
 AP_EVMANY_OUT="$(ap_report bound "$AP_OWN")"
 rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
@@ -4617,15 +4631,7 @@ rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
 # comment claims. Without it an off-by-one to `<` in the reader passes every check here,
 # and the block's only green discrimination would be borrowed from a different fixture in
 # a different check.
-AP_EVAT="$(AP_EV_N="$AP_MAXEV_OWNER" node -e '
-  var n = Number(process.env.AP_EV_N), out = [];
-  for (var i = 0; i < n; i += 1) {
-    out.push({ eventId: "ev_" + i, eventType: i === 0 ? "START" : "APPROVE",
-      payloadDigest: "", payload: {}, fromStage: null, toStage: "GATES" });
-  }
-  process.stdout.write(JSON.stringify({ events: out }));
-')"
-RUN_PATCH_JSON="$AP_EVAT" ap_run_valid run_evat GATES "$AP_OWN" "/w/t"
+RUN_EVENT_COUNT="$AP_MAXEV_OWNER" ap_run_valid run_evat GATES "$AP_OWN" "/w/t"
 ap_pointer "$AP_OWN" run_evat
 AP_EVAT_OUT="$(ap_report bound "$AP_OWN")"
 rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
@@ -4652,6 +4658,14 @@ rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
 # with this check green — the identical trap this file records for P1nz16's first arm, and
 # it bit here next. The second fixture puts a valid first entry ahead of a null tail so the
 # chain reaches the tail read with a non-object.
+# The renderer-failure needle is DERIVED from the producer, not retyped. Both uses of it
+# here are NEGATIVE, and nothing else in this suite asserts the literal positively, so a
+# reword of the fallback would leave the "and the renderer did not fail" half asserted by
+# nothing. An underivable needle fails the check rather than matching everything.
+AP_RENDER_FAIL_LIT="$(node -e '
+  var m = /zensu-doctor: (diagnostics renderer failed)/.exec(require("fs").readFileSync(process.argv[1], "utf8"));
+  process.stdout.write(m ? m[1] : "");
+' "$REPORT")"
 rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
 RUN_PATCH_JSON='{"events":[null]}' ap_run_valid run_evnull GATES "$AP_OWN" "/w/t"
 ap_pointer "$AP_OWN" run_evnull
@@ -4662,15 +4676,16 @@ RUN_PATCH_JSON='{"events":[{"eventId":"ev_first","eventType":"START","payloadDig
 ap_pointer "$AP_OWN" run_evtailnull
 AP_EVTAILNULL_OUT="$(ap_report bound "$AP_OWN")"
 rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
-if printf '%s' "$AP_EVNULL_OUT" | grep -qF 'autopilot: nonterminal durable run run_evnull' \
+if [ -n "$AP_RENDER_FAIL_LIT" ] \
+  && printf '%s' "$AP_EVNULL_OUT" | grep -qF 'autopilot: nonterminal durable run run_evnull' \
   && printf '%s' "$AP_EVNULL_OUT" | grep -F 'run run_evnull' | grep -qF 'the owner validates more' \
-  && ! printf '%s' "$AP_EVNULL_OUT" | grep -qF 'diagnostics renderer failed' \
+  && ! printf '%s' "$AP_EVNULL_OUT" | grep -qF "$AP_RENDER_FAIL_LIT" \
   && printf '%s' "$AP_EVTAILNULL_OUT" | grep -qF 'autopilot: nonterminal durable run run_evtailnull' \
   && printf '%s' "$AP_EVTAILNULL_OUT" | grep -F 'run run_evtailnull' | grep -qF 'the owner validates more' \
-  && ! printf '%s' "$AP_EVTAILNULL_OUT" | grep -qF 'diagnostics renderer failed'; then
+  && ! printf '%s' "$AP_EVTAILNULL_OUT" | grep -qF "$AP_RENDER_FAIL_LIT"; then
   check "P1nz18 a non-object ledger entry at either end fails the check without killing the report" PASS
 else
-  check "P1nz18 a non-object ledger entry must not throw (head=$AP_EVNULL_OUT tail=$AP_EVTAILNULL_OUT)" FAIL
+  check "P1nz18 a non-object ledger entry must not throw (lit=$AP_RENDER_FAIL_LIT head=$AP_EVNULL_OUT tail=$AP_EVTAILNULL_OUT)" FAIL
 fi
 rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
 
@@ -4701,6 +4716,25 @@ else
   check "P1nz19 the nested key-set mirror must be exact, not a joined string (bad=$AP_EVJOIN_OUT ok=$AP_EVJOINOK_OUT)" FAIL
 fi
 rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+
+# P1nz20 — the joined-string key comparison must not come back ANYWHERE in the renderer.
+# P1nz19 grades one site through a fixture; nothing forbade the shape itself, which is
+# exactly why the pointer site kept it for a round after the other two were converted, and
+# why a fourth site would arrive unobserved. SOURCE-scoped by necessity: two of the three
+# sites cannot be reached with a colliding record at all. Comments are stripped first, since
+# the helper's own header names the retired form on purpose.
+AP_JOINED_HITS="$(node -e '
+  var src = require("fs").readFileSync(process.argv[1], "utf8")
+    .split("\n").filter(function (l) { return !/^\s*\/\//.test(l); }).join("\n");
+  var re = /Object\.keys\([^)]*\)[^;\n]*\.join\(/g, n = 0, m;
+  while ((m = re.exec(src)) !== null) { n += 1; }
+  process.stdout.write(String(n));
+' "$REPORT")"
+if [ "$AP_JOINED_HITS" = "0" ]; then
+  check "P1nz20 no key set in the renderer is compared through a joined string" PASS
+else
+  check "P1nz20 a joined-string key comparison is back in the renderer ($AP_JOINED_HITS site(s))" FAIL
+fi
 
 # P1nz14 — the three remaining nullable/identifier conjuncts. Each is a REQUIRED conjunct
 # of the green arm, so deleting any of them prints ✅ plus "all checks green" for a record
