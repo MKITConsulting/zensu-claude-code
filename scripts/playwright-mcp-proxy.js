@@ -42,6 +42,13 @@ const {
   resolveRemoteHost,
 } = require(path.join(__dirname, '..', 'hooks', 'lib', 'verify-navigation-floor-v1.js'));
 
+// The three TOP-LEVEL guards below are a hand copy of policyContractFault in
+// hooks/lib/verify-navigation-floor-v1.js, which the consent gate and /zensu:doctor call to
+// decide whether a policy value is usable. The two must agree in both directions: widen one
+// and the gate disarms the floor for a policy this broker refuses to start on; narrow one and
+// the doctor reports a fault for a policy that works. They are held in step only by
+// tests/structure/verify-navigation-floor-v1.test.js, so an edit HERE -- to a message, to the
+// key set, or to the 1..8 target range -- turns a suite named for the floor module red.
 async function parsePolicy(raw, resolver = dns.promises.lookup) {
   if (!raw) return {
     version: 1, mode: 'deny', targets: new Map(), pins: new Map(),

@@ -99,7 +99,7 @@ run_unit() { # $1 label  $2 file  $3 registered floor  $4 SUITE-OVERVIEW row key
     check "$1-overview the SUITE-OVERVIEW Blocks cell equals it too (cell=${cell:-<none>} registered=${registered:-<none>})" FAIL
   fi
 }
-run_unit "V6 floor" "$UNIT_FLOOR" 7 "verify-navigation-floor-v1.test.js"
+run_unit "V6 floor" "$UNIT_FLOOR" 10 "verify-navigation-floor-v1.test.js"
 run_unit "V7 consent" "$UNIT_CONSENT" 39 "verify-consent-v1.test.js"
 run_unit "V7b free-port" "$UNIT_PORT" 3 "verify-free-port.test.js"
 

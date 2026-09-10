@@ -7369,13 +7369,26 @@ block — the doctor renderer has no such block, and naming it there sent a main
 that does not carry it; every doctor STATE against the rows documented in the doctor skill, which
 a suite check holds in step — do not restate a COUNT here, because the next state added
 invalidates it, and this roster already shipped one that was stale on the day it was written;
-the doctor's THREE top-level policy guards against `parsePolicy`'s own three throw messages in
-`scripts/playwright-mcp-proxy.js`, a deliberate hand copy that **NOTHING PINS** — no test compares
-it to its owner, so a change there leaves the copy silently stale. State the reason for the copy
-correctly too: it is NOT that calling the owner would put DNS in a read-only diagnostic, since
-`parsePolicy(raw, resolver)` takes its resolver as a parameter and reaches DNS only for
-`mode: "remote"`. It is that a stubbed refusing resolver would report a VALID remote policy as
-invalid, which is the one verdict a diagnostic must never invent;
+the doctor's three top-level policy guards, which used to be a hand copy of `parsePolicy`'s own
+three throw messages and are now a CALL: `hooks/lib/verify-navigation-floor-v1.js` owns
+`policyContractFault`, and `zensu-doctor.sh` and the consent gate both invoke it, so those two
+cannot drift about what a usable policy is. The reason the doctor may call it is worth keeping,
+because an earlier wording had it wrong: it is NOT that calling the owner would put DNS in a
+read-only diagnostic, since `parsePolicy(raw, resolver)` takes its resolver as a parameter and
+reaches DNS only for `mode: "remote"`. It is that a stubbed refusing resolver would report a
+VALID remote policy as invalid, which is the one verdict a diagnostic must never invent — so the
+PER-TARGET rules stay `parsePolicy`'s alone and the shared check is top-level only.
+**The remaining hand copy is `parsePolicy`'s own**, which still spells those three guards itself
+rather than calling `policyContractFault`, and it is no longer unpinned: the last test in
+`tests/structure/verify-navigation-floor-v1.test.js` compares the two in BOTH directions — every
+value the shared check refuses must be one the broker refuses or denies, and its thrown message
+must equal `'navigation ' + policyContractFault(raw)`; every value it accepts must be one the
+broker accepts, across `local`, `remote` and the eight-target upper bound, so a one-sided
+TIGHTENING is caught as well as a one-sided widening. That pin fires in the UNOBVIOUS direction,
+which is why `parsePolicy` carries a pointer comment naming it: an edit inside
+`scripts/playwright-mcp-proxy.js` reddens a suite named for the floor module. **The uncompromised
+fix is NOT taken:** have `parsePolicy` call `policyContractFault` and delete its three literals,
+leaving one implementation instead of two kept in step by a test;
 the EXECUTION-MARKER family, which this roster omitted for a round while the feature shipped:
 `STATE_SEGMENTS` / `evidenceDirFor` (the one owner for the module's JS consumers — the broker
 and the doctor wrapper consume it rather than joining the segments themselves. Say it that way
