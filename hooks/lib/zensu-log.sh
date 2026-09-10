@@ -105,21 +105,37 @@ case "${1:-}" in
       echo "zensu-log.sh --phase requires a phase value" >&2
       exit 2
     fi
-    if [ "$phase_val" = CHAIN_RECOVERED ]; then
-      echo "zensu-log.sh --phase: CHAIN_RECOVERED is written only by --chain-recover; it is the provenance record of a repair and cannot be minted by a caller" >&2
-      exit 2
-    fi
-    if [ "$phase_val" = RUNTIME_ADOPTED ]; then
-      echo "zensu-log.sh --phase: RUNTIME_ADOPTED is written only by the session adoption; it is the provenance record of a runtime takeover and cannot be minted by a caller" >&2
-      exit 2
-    fi
+    # Matched case-INSENSITIVELY. The phase is lower-cased downstream into
+    # `workflow_state` and `last_event`, and pushed into `history` verbatim, so an
+    # exact comparison let `AUTOPILOT_ADOPTEd` through all three guard sites and
+    # persisted a document indistinguishable from real provenance. The bracket
+    # classes are the portable spelling: `${var^^}` needs bash 4 and this ships to
+    # macOS bash 3.2, while `tr` would put a subprocess on a guard.
+    case "$phase_val" in
+      [Cc][Hh][Aa][Ii][Nn]_[Rr][Ee][Cc][Oo][Vv][Ee][Rr][Ee][Dd])
+        echo "zensu-log.sh --phase: CHAIN_RECOVERED is written only by --chain-recover; it is the provenance record of a repair and cannot be minted by a caller" >&2
+        exit 2
+        ;;
+      [Rr][Uu][Nn][Tt][Ii][Mm][Ee]_[Aa][Dd][Oo][Pp][Tt][Ee][Dd])
+        echo "zensu-log.sh --phase: RUNTIME_ADOPTED is written only by the session adoption; it is the provenance record of a runtime takeover and cannot be minted by a caller" >&2
+        exit 2
+        ;;
+      [Aa][Uu][Tt][Oo][Pp][Ii][Ll][Oo][Tt]_[Aa][Dd][Oo][Pp][Tt][Ee][Dd])
+        echo "zensu-log.sh --phase: AUTOPILOT_ADOPTED is written only by --autopilot-adopt; it is the provenance record of a run takeover and cannot be minted by a caller" >&2
+        exit 2
+        ;;
+    esac
     case "$reason_val" in
-      "chain-recovered: "*)
+      [Cc][Hh][Aa][Ii][Nn]-[Rr][Ee][Cc][Oo][Vv][Ee][Rr][Ee][Dd]:\ *)
         echo "zensu-log.sh --phase: a 'chain-recovered: ' reason is reserved for --chain-recover" >&2
         exit 2
         ;;
-      "runtime-adopted: "*)
+      [Rr][Uu][Nn][Tt][Ii][Mm][Ee]-[Aa][Dd][Oo][Pp][Tt][Ee][Dd]:\ *)
         echo "zensu-log.sh --phase: a 'runtime-adopted: ' reason is reserved for the session adoption" >&2
+        exit 2
+        ;;
+      [Aa][Uu][Tt][Oo][Pp][Ii][Ll][Oo][Tt]-[Aa][Dd][Oo][Pp][Tt][Ee][Dd]:\ *)
+        echo "zensu-log.sh --phase: an 'autopilot-adopted: ' reason is reserved for --autopilot-adopt" >&2
         exit 2
         ;;
     esac
@@ -423,8 +439,98 @@ case "${1:-}" in
         exit 2
         ;;
     esac
+    # Same named refusal as the adopt twin. Without it a failed source surfaces as
+    # bash's own "command not found" with exit 127, which names no cause the operator
+    # can act on and differs from the sibling verb for no reason.
+    if ! command -v autopilot_release_run >/dev/null 2>&1; then
+      echo "zensu-log.sh --autopilot-release: the Autopilot state library did not load; no run was released" >&2
+      exit 2
+    fi
     autopilot_release_run "$run_val" "$event_val" "${CLAUDE_PROJECT_DIR:-.}" "$session_val"
     exit $?
+    ;;
+  --autopilot-adopt)
+    # Take over a nonterminal run owned by ANOTHER session, so the work continues
+    # instead of being cancelled. Explicit --confirm only: this mutates state this
+    # session does not own. No event id is derived, because the verb writes no
+    # event — idempotency comes from the worker's already-owner exit.
+    run_val=""
+    seen_run=false
+    confirmed=false
+    shift
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --run)
+          [ "$seen_run" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh --autopilot-adopt: duplicate/missing --run" >&2; exit 2; }
+          seen_run=true; run_val="$2"; shift 2
+          ;;
+        --confirm)
+          [ "$confirmed" = false ] || { echo "zensu-log.sh --autopilot-adopt: duplicate --confirm" >&2; exit 2; }
+          confirmed=true; shift
+          ;;
+        *) echo "zensu-log.sh --autopilot-adopt: unknown argument '$1'" >&2; exit 2 ;;
+      esac
+    done
+    [ "$seen_run" = true ] || { echo "zensu-log.sh --autopilot-adopt requires --run <id>" >&2; exit 2; }
+    [ "$confirmed" = true ] || {
+      echo "zensu-log.sh --autopilot-adopt requires --confirm: this takes over a run owned by another session" >&2
+      exit 2
+    }
+    export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 --autopilot-adopt --run $run_val}"
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+    session_val="$(zensu_resolve_session_id "")" || {
+      echo "zensu-log.sh: Session Control session identity unavailable" >&2
+      exit 2
+    }
+    # `zensu-autopilot-state.sh` sources `zensu-tdd-phase.sh` itself, so no second
+    # source is needed here; the redundant one only made this arm look like it had a
+    # dependency the sibling verb lacked.
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
+    # Both names are cleared HERE as well as inside the verb, and the reason is the
+    # ordering: they decide the stderr assertion below AND gate the reserved
+    # AUTOPILOT_ADOPTED write, while the only other clear lives inside the function a
+    # failed `source` would leave undefined. This file runs under `set -u` but not
+    # `set -e`, so that failure would fall through with an INHERITED environment still
+    # deciding both. Refusing on a missing verb closes the same hole from the other
+    # side; neither is a demonstrated bypass, and both are one line.
+    ZENSU_AUTOPILOT_ADOPT_OUTCOME=""
+    ZENSU_AUTOPILOT_ADOPTED_PREVIOUS_OWNER=""
+    if ! command -v autopilot_adopt_run >/dev/null 2>&1; then
+      echo "zensu-log.sh --autopilot-adopt: the Autopilot state library did not load; no run was adopted" >&2
+      exit 2
+    fi
+    autopilot_adopt_run "$run_val" "${CLAUDE_PROJECT_DIR:-.}" "$session_val"
+    adopt_rc=$?
+    # Exit 0 covers THREE outcomes and every one of them names itself, so silence is
+    # never an outcome. Only the first is an adoption. The third — record and pointer
+    # already in agreement — used to say nothing at all while the skill promised
+    # stderr would say which, which left a model looking for a provenance entry that
+    # was never going to exist.
+    case "${ZENSU_AUTOPILOT_ADOPT_OUTCOME:-}" in
+      adopted)
+        echo "zensu-log.sh --autopilot-adopt: run $run_val was taken over from ${ZENSU_AUTOPILOT_ADOPTED_PREVIOUS_OWNER:-an unrecorded owner}; this session is now its owner." >&2
+        ;;
+      repaired)
+        echo "zensu-log.sh --autopilot-adopt: this session already owned run $run_val; its owner pointer was missing or named a run that has already finished, and has been reinstalled. No takeover occurred and no AUTOPILOT_ADOPTED entry is written." >&2
+        ;;
+      already-owned)
+        echo "zensu-log.sh --autopilot-adopt: this session already owns run $run_val and its owner pointer already designates it; nothing was changed. No takeover occurred and no AUTOPILOT_ADOPTED entry is written." >&2
+        ;;
+    esac
+    # Gated on the OUTCOME, never on the return code. `_tdd_locked_run` returns 1
+    # when the lease fails to RELEASE, which happens after the callback has already
+    # installed both files — so an `rc -eq 0` test silently dropped the history
+    # entry for a takeover that had in fact completed.
+    if [ "${ZENSU_AUTOPILOT_ADOPT_OUTCOME:-}" = adopted ] && [ -n "${ZENSU_AUTOPILOT_ADOPTED_PREVIOUS_OWNER:-}" ]; then
+      # Provenance is best-effort and never changes the verdict: the run record and
+      # its pointer already moved under the project lock, so failing the history
+      # append here would report a takeover that did happen as one that did not.
+      if ! tdd_write_autopilot_adopted "$session_val" "$run_val" \
+        "$ZENSU_AUTOPILOT_ADOPTED_PREVIOUS_OWNER"; then
+        echo "zensu-log.sh --autopilot-adopt: run adopted, but the AUTOPILOT_ADOPTED provenance entry could not be written" >&2
+      fi
+    fi
+    exit "$adopt_rc"
     ;;
   --tdd-begin|--tdd-complete|--review-ticket|--current-review-ticket|--review-rearm|--chain-done|--code-review-done|--self-review-fixed|--tdd-reset|--chain-status|--chain-recover|--workflow-begin|--workflow-end)
     verb="$1"

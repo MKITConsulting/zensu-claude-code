@@ -13,10 +13,10 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (147 = 140 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 140 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 147). **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 139 against 140 CI-classified suites, so one CI
+reconciled to that manifest (148 = 141 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 141 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 148). **§3 is NOT fully reconciled to it**, and the residual is stated rather than
+asserted away: its eleven CI group headers sum to 140 against 141 CI-classified suites, so one CI
 suite appears in no §3 group. `main` recorded that suite as `test-session-trail-lineage.sh`; this
 merge did not re-derive the NAME, because §3 lists suites in prose rather than by filename and a
 wrong name in a group is worse than none. The gap predates both the plugin-data guard, filed under
@@ -56,8 +56,8 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **146** — 139 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **139 structure suites + 5 offline evals = 144 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 146 − 139 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **148** — 141 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **141 structure suites + 5 offline evals = 146 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 148 − 141 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | **28 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -69,8 +69,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 146 structure suites + 5 offline evals | none |
-| `--ci` | 139 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 148 structure suites + 5 offline evals | none |
+| `--ci` | 141 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -146,7 +146,15 @@ one-shot review ticket CAS and budget rearm, deferred/pending review markers plu
 their TTL, `--chain-status` / `--chain-recover`, and the zero-file-change gate on the
 unqualified chain terminus.
 
-### Autopilot (16)
+### Autopilot (17)
+`autopilot-adopt-cli` (**no Windows PR-shard entry** — every `windows-ci.v1.json` shard is
+already close to its `profileTimeoutMs`, so adding one has to be paid for by moving another
+suite off. It is in `ciStructureTests`, and `run-windows-safety-shard.js` maps every such entry
+with no exclusion filter, so the WEEKLY Windows Safety structure shard does execute it: the
+status is "no green Windows run reported yet", not "never observed on Windows". `adopt`'s
+`projectRootIndex`/`workspaceRootIndex` entries are pinned at SOURCE by
+`test-msys-runtime-boundaries.sh`, which greps `adopt: 3` and `adopt: 6` and runs on POSIX —
+that pin was never a Windows question; what is unverified is the runtime behaviour) ·
 `autopilot-adversarial-recovery` · `autopilot-bound-payload-windows` ·
 `autopilot-chain-integration` · `autopilot-delegated-skill-contract` ·
 `autopilot-durable-skill` · `autopilot-full-cycle` · `autopilot-id-and-start-boundaries` ·

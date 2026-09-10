@@ -148,13 +148,29 @@ _autopilot_identifier_ok() {
 
 # Hook session ids predate the durable Autopilot schema and may legitimately be
 # shorter than its three-character identifiers (for example a test/runtime id
-# such as "hx").  A reconciliation caller is used only to compare ownership;
-# it is never persisted unless it already equals the schema-validated owner.
+# such as "hx").  A reconciliation caller is used only to compare ownership.
+# NOT a blanket "never persisted" claim: BOTH verbs that persist an owner id —
+# `autopilot_adopt_run` and `autopilot_begin_run` — gate with the STRICT
+# `_autopilot_identifier_ok` instead, mirroring the worker's `ownerIdentity`. Every
+# caller of THIS predicate keys or reads a pointer already on disk and only compares,
+# which is exactly why it must stay loose: tightening it would make a pointer minted
+# under the older rule unreachable rather than refuse a new one.
+# The write gate is the INTERSECTION of the two vocabularies, so nothing this predicate
+# would refuse can be persisted: an owner containing `.` or `:` used to pass the write
+# gate and then be refused HERE as a bare `return 3` with no message.
 _autopilot_session_id_ok() {
   case "${1:-}" in
     ''|*[!A-Za-z0-9_-]*) return 1 ;;
   esac
   [ "${#1}" -le 128 ]
+}
+
+# The shell mirror of the worker's `ownerIdentity`: the INTERSECTION of the two
+# vocabularies, applied by every verb that PERSISTS an owner id. Spelled as the
+# conjunction rather than as a third character class so the two halves cannot drift
+# apart from the predicates they mirror.
+_autopilot_owner_identity_ok() {
+  _autopilot_identifier_ok "${1:-}" && _autopilot_session_id_ok "${1:-}"
 }
 
 # The pointer is keyed by a digest of the owner session id rather than by the
@@ -178,6 +194,24 @@ _autopilot_owner_key() {
 # references. See the `read-active` worker mode.
 _autopilot_legacy_active_path() {
   printf '%s\n' "${1%/}/autopilot-active.json"
+}
+
+# The BASENAME rule for both pointer spellings, in one place. It exists because the
+# adopt retire path re-spelled `autopilot-active-` and `autopilot-active.json` inline,
+# which made a THIRD shell copy of each name; the roster tracks those names and a
+# hand-copy drifts silently. Callers pass a basename that reached them from a record,
+# so this is a shape gate, not a formatter: it admits the owner-keyed
+# `autopilot-active-<64 lowercase hex>.json` and the fixed legacy literal, and nothing
+# else — no separator can survive either arm.
+_autopilot_owner_pointer_basename_ok() {
+  local name="${1:-}" key
+  [ "$name" = "autopilot-active.json" ] && return 0
+  key="${name#autopilot-active-}"
+  key="${key%.json}"
+  case "$key" in
+    *[!0-9a-f]*) return 1 ;;
+  esac
+  [ "${#key}" -eq 64 ] && [ "autopilot-active-${key}.json" = "$name" ]
 }
 
 # The owner is REQUIRED. An empty one used to fall back to the shared legacy
@@ -339,7 +373,23 @@ _autopilot_locked_run() {
 _autopilot_locked_dispatch() {
   local root="$1" run_id="$2"
   shift 2
-  _autopilot_storage_safe "$root" "$run_id" || return 2
+  # This dispatcher serves every verb, so the line is deliberately VERB-NEUTRAL —
+  # `_autopilot_adopt_refusal` would name the wrong verb for a release or a begin.
+  # It must still say something: this is the post-lock re-check, reached when a
+  # component was swapped between the pre-lock test and the lock, and returning a
+  # bare 2 made a genuine tamper signal indistinguishable from a mistyped flag.
+  _autopilot_storage_safe "$root" "$run_id" || {
+    # Five callers pass an EMPTY run id (`read-active`, `read-workspace`, the
+    # standalone-TDD fence, the deferred-review adoption and reconcile-stop), and
+    # interpolating it produced "run storage for  is unsafe" — a sentence naming
+    # neither run nor verb, in the one state the message exists to attribute.
+    if [ -n "$run_id" ]; then
+      printf '[zensu-autopilot-state] refused under the project lock: run storage for %s is unsafe\n' "$run_id" >&2
+    else
+      printf '[zensu-autopilot-state] refused under the project lock: run storage in this project is unsafe\n' >&2
+    fi
+    return 2
+  }
   "$@"
 }
 
@@ -366,6 +416,7 @@ _autopilot_node() {
     begin) path_indexes=(0 1 2 3 6 10) ;;
     apply) path_indexes=(0 1 2 7) ;;
     release) path_indexes=(0 1 4 6) ;;
+    adopt) path_indexes=(0 1 3 5 8) ;;
     team-review-receipt-meta) path_indexes=(0) ;;
     increment-budget|increment-budget-capped) path_indexes=(0 1 2 5) ;;
     *) return 3 ;;
@@ -396,6 +447,7 @@ const projectRootIndex = Object.freeze({
   begin: 6,
   apply: 7,
   release: 4,
+  adopt: 3,
   "increment-budget": 5,
   "increment-budget-capped": 5,
 })[mode];
@@ -418,6 +470,7 @@ const workspaceRootIndex = Object.freeze({
   begin: 9,
   "read-workspace": 2,
   release: 7,
+  adopt: 6,
 })[mode];
 if (workspaceRootIndex !== undefined) {
   const requested = args[workspaceRootIndex];
@@ -443,8 +496,21 @@ const identifier = value => typeof value === "string"
 const nullableIdentifier = value => value === null || identifier(value);
 // Hook session ids predate the durable schema and may be shorter than an
 // `identifier`; this mirrors `_autopilot_session_id_ok` in the shell half.
+// This is the READ vocabulary: it keys and reads pointers ALREADY on disk, so it
+// must stay loose or a pointer minted before this rule becomes unreachable.
 const sessionIdentifier = value => typeof value === "string"
   && value.length >= 1 && value.length <= 128 && /^[A-Za-z0-9_-]+$/.test(value);
+// The WRITE vocabulary for `ownerSessionId`. ONE name for the rule every verb that
+// PERSISTS that field applies — `begin` and `adopt` — so the two cannot diverge again.
+// It is the INTERSECTION of the two predicates, and it has to be, because they are not
+// nested in either direction: `ab` passes only `sessionIdentifier`, `a.b` only
+// `identifier`, `_abc` only `sessionIdentifier`. A persisted owner must satisfy BOTH —
+// `stateValid` judges the field with `identifier`, and `_autopilot_owner_key` derives
+// every pointer filename with the `sessionIdentifier` charset. Accepting a value that
+// passes only one is what produced a refusal three layers away with no message: the
+// write gate admitted `a.b`, then the pointer derivation refused it as a bare exit 3.
+// A real host session id is a UUID, which satisfies both.
+const ownerIdentity = value => identifier(value) && sessionIdentifier(value);
 const nonEmpty = (value, max = 512) => typeof value === "string" && value.length > 0 && value.length <= max
   && !/[\u0000-\u001f]/.test(value);
 const sha = value => typeof value === "string" && /^[a-fA-F0-9]{7,64}$/.test(value);
@@ -480,10 +546,18 @@ const workspaceOf = state => state.workspaceRoot;
 // replaces on the one platform the namespace hazard lives on. Total over
 // non-strings on purpose — `.startsWith` on a malformed record would throw,
 // node would exit 1, and the standalone gate reads 1 as "no holder".
+// ANCHORED, and the anchoring is not cosmetic. The bare `startsWith("..")` form
+// reports a real directory named `..bak` INSIDE `outer` as OUTSIDE it, which is the
+// `..bak` defect CLAUDE.md records for the source-write gate. Here that direction is
+// UNDER-inclusive: a contained tree reads free, `mayHoldWorkspace` answers false, and
+// a standalone chain arms underneath a live durable run. Anchoring moves every
+// consumer toward BLOCKING, which is the fail-closed direction.
 const contains = (outer, inner) => {
   if (!(typeof outer === "string" && typeof inner === "string")) return false;
   const rel = path.relative(outer, inner);
-  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+  if (rel === "") return true;
+  if (path.isAbsolute(rel)) return false;
+  return rel !== ".." && !rel.startsWith(".." + path.sep);
 };
 // A record without the field held the whole PROJECT before this change, and the
 // new keys are git toplevels — so comparing it against `projectRoot` would make
@@ -866,13 +940,32 @@ const readState = (file, absentCode = 2) => {
 // here so the worker can resolve a run's pointer from the run record alone.
 const OWNER_POINTER_PREFIX = "autopilot-active-";
 const LEGACY_POINTER_NAME = "autopilot-active.json";
-const activePointerFor = (stateDir, ownerSessionId, runId) => {
+// ONE resolution ladder with TWO views of it FOR CALLERS THAT RESOLVE A RUN'S
+// POINTER FROM THE RUN RECORD — say it that way, never "the one ladder in this
+// worker", which is false and which CLAUDE.md explicitly retracts. `read-active`
+// builds its OWN ladder inline and calls neither accessor, and its legacy
+// predicate is deliberately STRICTER: it accepts the pre-scoping pointer only
+// when the referenced run is in the owner-scoped inventory AND carries the
+// caller's owner id, where this one accepts on `legacy.runId === runId` alone.
+// Change when the legacy pointer may be honoured and you must change BOTH, or
+// the verb that REPORTS a run and the verb that RETIRES its pointer disagree
+// about which pointer designates it. `adopt` has to retire the pointer it
+// actually judged, and deriving that name from the owner digest was wrong whenever
+// the LEGACY fallback below won: the unlink then named a file that does not exist
+// while `autopilot-active.json` survived, still naming the run. Callers that only
+// need the value keep the thin wrapper; the one that needs the FILE takes the pair,
+// so the two can never disagree about which pointer was read.
+const activePointerFileFor = (stateDir, ownerSessionId, runId) => {
   const ownerFile = path.join(stateDir, `${OWNER_POINTER_PREFIX}${rawDigest(ownerSessionId)}.json`);
-  if (regularFile(ownerFile)) return readPointer(ownerFile);
+  if (regularFile(ownerFile)) return { file: ownerFile, pointer: readPointer(ownerFile) };
   const legacyFile = path.join(stateDir, LEGACY_POINTER_NAME);
   if (!regularFile(legacyFile)) return null;
   const legacy = readPointer(legacyFile);
-  return legacy.runId === runId ? legacy : null;
+  return legacy.runId === runId ? { file: legacyFile, pointer: legacy } : null;
+};
+const activePointerFor = (stateDir, ownerSessionId, runId) => {
+  const resolved = activePointerFileFor(stateDir, ownerSessionId, runId);
+  return resolved ? resolved.pointer : null;
 };
 const readPointer = file => {
   const pointer = readJson(file);
@@ -1271,10 +1364,16 @@ if (mode === "read-run") {
 if (mode === "begin") {
   const [activeFile, runFile, runOutput, activeOutput, runId, ownerSessionId, projectRoot, coverRaw, validateRaw,
     workspaceRoot, legacyActiveFile = ""] = args;
-  // `sessionIdentifier`, not `identifier`: the pointer-name derivation and
-  // `read-active` both use that vocabulary, and an owner containing `.` or `:`
-  // would otherwise be minted here and be unreadable forever after.
-  if (!identifier(runId) || !sessionIdentifier(ownerSessionId) || !nonEmpty(projectRoot, 4096)
+  // `ownerIdentity`, the WRITE-side vocabulary, matching this verb's own shell layer
+  // (`autopilot_begin_run`) and `stateValid`, which judges the persisted field. The
+  // loose `sessionIdentifier` was the opposite choice from `adopt`, which mints the
+  // same field — and the two are not nested in EITHER direction, so one of them was
+  // always wrong. It deferred the refusal to "initial state failed internal
+  // validation", which reads as a bug in this code rather than a bad argument.
+  // The READ side deliberately stays loose: `_autopilot_owner_key` and `read-active`
+  // key and read pointers ALREADY on disk, so tightening them would make an existing
+  // pointer unreachable rather than refuse a new one.
+  if (!identifier(runId) || !ownerIdentity(ownerSessionId) || !nonEmpty(projectRoot, 4096)
     || !nonEmpty(workspaceRoot, 4096)
     || !["true", "false"].includes(coverRaw) || !["true", "false"].includes(validateRaw)) fail(3, "invalid begin arguments");
   const options = { cover: coverRaw === "true", validate: validateRaw === "true" };
@@ -1346,7 +1445,7 @@ if (mode === "begin") {
     }
     fail(4, `workspace held by nonterminal run ${workspaceHolder.runId} (stage ${workspaceHolder.stage}); `
       + `report it to the user and, only after they say yes, run `
-      + `/zensu:autopilot-release`);
+      + `/zensu:autopilot-adopt to continue it here, or /zensu:autopilot-release to cancel it`);
   }
 
   const existing = inventory.find(candidate => candidate.runId === runId);
@@ -1467,8 +1566,14 @@ if (mode === "apply") {
 if (mode === "release") {
   const [runFile, runOutput, runId, eventId, expectedProjectRoot, callerSessionId,
     stateDir, callerWorkspace, ownerActivityTtlHours] = args;
+  // `ownerActivityTtlHours` is shape-checked for the same reason `adopt` checks it:
+  // without it a non-numeric value reaches `Number()` as NaN, `Number.isFinite` is
+  // false, and the liveness gate is skipped silently — here, ahead of an irreversible
+  // CANCEL. The shipped shell entry point normalizes the value before the worker sees
+  // it, so this is the SECOND line of defence for a direct worker call, not the first.
   if (!identifier(runId) || !identifier(eventId) || !sessionIdentifier(callerSessionId)
-    || !nonEmpty(stateDir, 4096) || !nonEmpty(callerWorkspace, 4096)) {
+    || !nonEmpty(stateDir, 4096) || !nonEmpty(callerWorkspace, 4096)
+    || !/^[0-9]+$/.test(String(ownerActivityTtlHours))) {
     fail(3, "invalid release arguments");
   }
   const state = readState(runFile);
@@ -1509,16 +1614,52 @@ if (mode === "release") {
     if (Number.isFinite(ttlHours) && ttlHours > 0) {
       const ownerActivity = regularFile(path.join(stateDir, `tdd-phase-${state.ownerSessionId}.json`));
       if (ownerActivity) {
-        // Bounded in BOTH directions: a future mtime yields a negative age that
-        // never crosses the bound, which would make the run permanently
-        // unreleasable — and the mtime is operator-settable.
         const ageMs = Date.now() - ownerActivity.mtimeMs;
         if (ageMs >= 0 && ageMs < ttlHours * 3600000) {
           fail(7, "the owning session is still active; ask it to cancel, or wait for it to go stale");
         }
+        // A FUTURE mtime REFUSES on this verb, and the asymmetry with `adopt` is
+        // deliberate. The premise an earlier spelling stood on — that refusing would
+        // make the run permanently unreleasable — is false: the owner can still
+        // cancel through the ordinary event path, `--autopilot-adopt` still permits
+        // here and reaches the same record, and `autopilotOwnerActivityTtlHours: 0`
+        // is the documented, disclosed off-switch. So the choice is not "refuse
+        // forever" against "permit"; it is one extra, better-attributed step against
+        // letting a clock artefact authorise an irreversible CANCEL on a session
+        // that is demonstrably alive.
+        //
+        // The ACCIDENTAL case decides it. Against a deliberate writer refusing buys
+        // nothing — this directory is session-writable and DELETING the beacon
+        // stands the same guard down two branches below. But a future mtime arrives
+        // without one: a VM whose clock jumped, a container skewed against a shared
+        // filesystem, an NFS mount, a restore that carries mtimes forward. In every
+        // one of those the owner is LIVE, which is the case this guard exists for.
+        // Adopt failing open there costs a reversible ownership move; release
+        // failing open there costs a live run.
+        //
+        // The remedy is BRANCHED, and that follows the house rule this file already
+        // enforces one function over: `_autopilot_workspace_refusal` never pairs a
+        // run id with a mutating command it has not verified as applicable. Adoption
+        // refuses a run whose PENDING stage is `TDD_RUNNING` — the inner chain
+        // belongs to another session — so offering it unconditionally sent a caller
+        // whose run was abandoned mid-chain to a verb that answers exit 3, leaving
+        // them with no exit they could reach at all. The stage is in hand here, so
+        // the message withholds the adopt route exactly when it would not work.
+        if (ageMs < 0) {
+          const releasePendingStage = state.stage === "BLOCKED" ? state.blocked.from : state.stage;
+          const adoptRoute = releasePendingStage === "TDD_RUNNING"
+            ? "adoption cannot take this one over while its inner TDD chain is live, so it is not an exit here"
+            : "adopt the run with /zensu:autopilot-adopt and cancel it from there";
+          fail(7, `the recorded owner workflow document is dated in the future, so its age cannot bound this cancel; waiting will not resolve it. Ask the owning session to cancel; ${adoptRoute}; or have the user set hooks.autopilotOwnerActivityTtlHours to 0 to release without a liveness check`);
+        }
+      } else {
+        // The beacon is an ordinary file in a session-writable directory, so its
+        // ABSENCE removes the only recency bound on an irreversible cancel. Silence
+        // here made a clock-free release indistinguishable from one the clock allowed.
+        process.stderr.write("[zensu-autopilot-state] owner liveness unchecked: no workflow document for the recorded owner\n");
       }
     } else {
-      process.stderr.write("[zensu-autopilot-state] owner liveness unchecked: pendingReviewTtlHours is 0\n");
+      process.stderr.write(`[zensu-autopilot-state] owner liveness unchecked: autopilotOwnerActivityTtlHours is ${ownerActivityTtlHours}\n`);
     }
   }
   if (state.events.length >= MAX_EVENTS) fail(4, "event ledger exhausted");
@@ -1527,6 +1668,216 @@ if (mode === "release") {
   state.events.push({ eventId, eventType: "CANCEL", payloadDigest, payload, fromStage, toStage: state.stage });
   if (!stateValid(state)) fail(2, "transition produced invalid state");
   writeOutput(runOutput, state);
+  process.exit(0);
+}
+
+// Adoption is release's CONSTRUCTIVE counterpart: the session standing in the
+// run's tree becomes its owner and continues it, instead of cancelling work that
+// is already delivered. It writes NO event and adds NO field — `STATE_KEYS` /
+// `STATE_KEYS_WORKSPACE` and `EVENT_TYPES` are strict sets and `readRunInventory`
+// fails the FIRST invalid record, so a new member of either would make every
+// older installation fail the whole project closed. Only `ownerSessionId`, an
+// existing field, takes a new value, and the owner pointer moves with it.
+// Provenance lives in the adopting session's workflow history under the reserved
+// `AUTOPILOT_ADOPTED` phase, exactly as session adoption records `RUNTIME_ADOPTED`.
+if (mode === "adopt") {
+  const [runFile, runOutput, runId, expectedProjectRoot, callerSessionId,
+    stateDir, callerWorkspace, ownerActivityTtlHours, callerPointerOutput] = args;
+  // `ownerIdentity`, the shared WRITE vocabulary: the assignment to
+  // `state.ownerSessionId` below PERSISTS this value and `stateValid` judges it with
+  // the same rule, so a looser check only defers the refusal to
+  // `fail(2, "adoption produced invalid state")` — after both temps were written, and
+  // reading like a corrupt record rather than a bad argument. `begin` now applies the
+  // identical predicate; the two used to disagree in both directions.
+  // `ownerActivityTtlHours` is shape-checked here for the same reason `release`
+  // checks it: without it a non-numeric value silently disables the liveness gate
+  // and the disclosure below blames a `0` the operator never set.
+  if (!identifier(runId) || !ownerIdentity(callerSessionId)
+    || !nonEmpty(stateDir, 4096) || !nonEmpty(callerWorkspace, 4096)
+    || !nonEmpty(callerPointerOutput, 4096)
+    || !/^[0-9]+$/.test(String(ownerActivityTtlHours))) {
+    fail(3, "invalid adopt arguments");
+  }
+  const state = readState(runFile);
+  if (state.runId !== runId || state.projectRoot !== expectedProjectRoot) {
+    fail(2, "run file identity or physical project root mismatch");
+  }
+  if (TERMINAL.has(state.stage)) fail(3, "terminal run cannot be adopted");
+  // Same scope control as release, and state its STRENGTH honestly rather than the
+  // strength one would want: a run id is an ordinary filename in a listable directory,
+  // and this narrows who may name one — it does not reduce the set to "the one tree".
+  // `mayHoldWorkspace` admits containment in EITHER direction and short-circuits TRUE
+  // on a record carrying no `workspaceRoot` at all, while `_autopilot_session_workspace`
+  // substitutes the project root whenever cwd is outside it. So a run whose recorded
+  // tree IS the project root — what `begin` records for a session started there — is
+  // reachable from every directory in that project, and a pre-`workspaceRoot` record is
+  // reachable unconditionally. It is already bounded to ONE project by the identity
+  // check above, and `ownerSessionId` is an unauthenticated field in a session-writable
+  // directory, so this is a guard against accidental takeover and never an
+  // authorization boundary. Refusing a `workspaceRoot`-less record here was weighed and
+  // declined: it would strand exactly the pre-upgrade runs adoption exists to rescue,
+  // to tighten a check that was never load-bearing for that threat.
+  if (!mayHoldWorkspace(state, callerWorkspace)) {
+    fail(6, "run does not hold the caller's working tree; adopt it from the tree it holds");
+  }
+  // THREE outcomes live under "the caller already owns this record", and each one
+  // gets its OWN exit code rather than a token inside stdout. A code cannot be
+  // produced by a dropped write, so a lost stdout line on the takeover path falls
+  // into the protocol fault instead of impersonating a repair — which is what the
+  // in-band token existed to prevent, at the cost of a sentinel the shell had to
+  // re-spell. 10 = already fully owned, 11 = pointer repaired, 0 = real takeover.
+  if (state.ownerSessionId === callerSessionId) {
+    const ownPointer = activePointerFor(stateDir, callerSessionId, runId);
+    if (ownPointer && ownPointer.runId === runId) process.exit(10);
+    // The repair is about to install a pointer at the caller's OWN key, so any OTHER
+    // nonterminal run this caller owns is orphaned behind it: `read-active` then
+    // refuses with exit 2 for every consumer while the CLI has just reported a
+    // successful repair, and the skill's own Step 3 verification cannot pass.
+    // Keyed on the INVENTORY, not on the pointer. An earlier spelling asked
+    // `activePointerFor` for the shadowed run, which answers null on the legacy
+    // fallback whenever `autopilot-active.json` names a different run — exactly the
+    // shape that most needs the refusal — and it also sat ABOVE the `ownedElsewhere`
+    // check the takeover path applies, so a caller owning a second run with no owner
+    // pointer at all was never judged either. One owner-scoped filter covers both.
+    const shadowed = readRunInventory(stateDir, expectedProjectRoot, callerSessionId)
+      .find(candidate => candidate.runId !== runId && !TERMINAL.has(candidate.stage));
+    if (shadowed) {
+      fail(4, `caller already owns nonterminal run ${shadowed.runId}; finish it, or cancel it through the ordinary CANCEL event path, before repairing this one`);
+    }
+    // The record is already correct, but the shell installs BOTH temps, so the run
+    // temp has to carry the unchanged record or the replace would publish an empty
+    // file. No stdout line at all: there is no previous owner to record and no
+    // pointer to retire, and the exit code already carries the outcome.
+    writeOutput(callerPointerOutput, { schemaVersion: 1, runId });
+    writeOutput(runOutput, state);
+    process.exit(11);
+  }
+  // An inner TDD chain is driven by `state.tdd.sessionId`'s session and this verb
+  // moves the RUN only. Refusing keeps the two from disagreeing about who owns the
+  // generation, which a half-move would guarantee. The test is the PENDING stage,
+  // not the literal one: BLOCK is legal from TDD_RUNNING (`STOP_TERMINAL` excludes
+  // it) and RESUME restores `blocked.from`, while `tdd.sessionId` still names the
+  // previous owner's chain — so a literal test would adopt a run whose
+  // `TDD_RUNNING:TDD_CHAIN_DONE` the new owner can never satisfy. `stateValid`
+  // spells the same idiom.
+  const pendingStage = state.stage === "BLOCKED" ? state.blocked.from : state.stage;
+  if (pendingStage === "TDD_RUNNING") {
+    fail(3, "run has a live inner TDD chain; finish or block that chain before adopting");
+  }
+  // The caller's pointer is about to be overwritten, so a run it ALREADY owns would
+  // be orphaned behind it: `read-active` refuses with exit 2 for every consumer once
+  // a pointer hides a nonterminal owned run, and `begin`'s own recovery arm cannot
+  // repair it because it requires a terminal active run. `begin` guards exactly this
+  // with `hiddenNonterminal`; the adopt branch reads only the target run file, so
+  // the inventory has to be built here to see the caller's other runs at all. The
+  // reachable shape is a session driving a run in one worktree that adopts a
+  // stranded run in a sibling worktree of the same project — the workspace hold
+  // makes it impossible within one tree.
+  //
+  // The read is OWNER-SCOPED, and that is not an optimization: it narrows how often
+  // a foreign record can deny this verb. The filter below already narrows to the
+  // caller, so passing the owner is verdict-identical; `read-active` passes it for
+  // the same reason.
+  //
+  // KNOWN RESIDUAL, stated because an earlier wording of this comment claimed the
+  // scoping CLOSED it and it does not. `readRunInventory` skips a foreign record
+  // only when `rawOwnerOf` returns a STRING that differs. Two sub-cases never reach
+  // that comparison and still deny the verb project-wide:
+  //   * an UNPARSEABLE record — `rawOwnerOf` answers null, which is not skipped, so
+  //     the record falls through to `readState` and `fail(2)`s;
+  //   * an UNSAFE record — `rawOwnerOf` opens through `regularFile`, which `fail(2)`s
+  //     on a symlink, a hard link, a non-file or a >1 MiB record before returning.
+  // So one truncated or planted `autopilot-run-*.json` — what a crashed `begin`
+  // leaves behind — makes `--autopilot-adopt` exit 2 for every run in the project
+  // while `--autopilot-release --confirm` keeps working, because release builds no
+  // inventory. That inverts the constructive-before-destructive preference the
+  // skill states, and closing it means deciding what an unattributable foreign
+  // record does to an owner-scoped read — a change to `readRunInventory`'s contract
+  // with its own test round, not a line here.
+  //
+  // It runs BEFORE the liveness block: this is a CALLER-side precondition, and a
+  // caller that can never adopt anything must not first be told to wait for the
+  // target's owner to go stale. It also keeps the inventory off the exit-7 path.
+  const ownedElsewhere = readRunInventory(stateDir, expectedProjectRoot, callerSessionId)
+    .filter(candidate => candidate.ownerSessionId === callerSessionId
+      && candidate.runId !== runId
+      && !TERMINAL.has(candidate.stage));
+  if (ownedElsewhere.length > 0) {
+    // NOT "release it": `--autopilot-release` refuses precisely this caller, whose
+    // own pointer still designates its own run ("caller owns this run; cancel it
+    // through the ordinary event path"). Naming a remedy the sibling verb rejects
+    // is what makes the two contracts fail to compose. The run named here is read
+    // from an unauthenticated record in a session-writable directory.
+    fail(4, `caller already owns nonterminal run ${ownedElsewhere[0].runId}; finish it, or cancel it through the ordinary CANCEL event path, before adopting another`);
+  }
+  const previousOwner = state.ownerSessionId;
+  // Read UNCONDITIONALLY, because two decisions depend on it and only one of them
+  // is the clock. Nested inside the TTL branch this read never happened at
+  // `autopilotOwnerActivityTtlHours: 0`, yet the retire line below still emitted a
+  // basename — so the shell unlinked a pointer whose contents nobody had checked
+  // against this run. Path traversal was never open (the basename is a sha256 hex
+  // digest), but the CHOICE of file was, and `--autopilot-release` unlinks no
+  // pointer at all, so this was the one place adoption reached further into another
+  // session's state than its destructive sibling.
+  const ownerResolved = activePointerFileFor(stateDir, previousOwner, runId);
+  const ownerPointer = ownerResolved ? ownerResolved.pointer : null;
+  const ownerPointerDesignatesRun = Boolean(ownerPointer && ownerPointer.runId === runId);
+  const ttlHours = Number(ownerActivityTtlHours);
+  if (Number.isFinite(ttlHours) && ttlHours > 0) {
+    // A pointer that no longer designates the run is abandonment evidence that owes
+    // nothing to a clock: without it the previous owner's own `read-active` returns
+    // nothing, so it is not driving this run whatever its document mtime says.
+    if (ownerPointerDesignatesRun) {
+      const ownerActivity = regularFile(path.join(stateDir, `tdd-phase-${previousOwner}.json`));
+      if (ownerActivity) {
+        // Bounded in BOTH directions, and NOT as in release — the two verbs answer a
+        // FUTURE mtime differently on purpose. Here a negative age never crosses the
+        // bound, so the guard stands down, discloses, and PERMITS: the move adoption
+        // makes is reversible, and refusing would wedge the constructive verb on a
+        // clock artefact. Release REFUSES the same input with exit 7, because a
+        // skewed clock must never authorise an irreversible CANCEL against a session
+        // that is demonstrably alive. Do not "align" these two without re-reading
+        // that argument; an earlier spelling of this comment said "as in release" and
+        // asserted the divergence away at one of the two sites that carry it.
+        const ageMs = Date.now() - ownerActivity.mtimeMs;
+        if (ageMs >= 0 && ageMs < ttlHours * 3600000) {
+          fail(7, "the owning session is still active; ask it to hand the run over, or wait for it to go stale");
+        }
+        if (ageMs < 0) {
+          process.stderr.write("[zensu-autopilot-state] owner liveness unchecked: the recorded owner workflow document is dated in the future\n");
+        }
+      } else {
+        process.stderr.write("[zensu-autopilot-state] owner liveness unchecked: no workflow document for the recorded owner\n");
+      }
+    } else {
+      // The guard has FOUR ways to stand down and every one must say so. The `0` case below
+      // already disclosed; this one did not, and it is the one an outsider can reach:
+      // the pointer is an ordinary file in a session-writable directory, so unlinking
+      // it removes the only recency bound on this takeover. Silence here made a
+      // clock-free adoption indistinguishable from one the clock allowed.
+      process.stderr.write("[zensu-autopilot-state] owner liveness unchecked: the previous owner's active pointer no longer designates this run\n");
+    }
+  } else {
+    process.stderr.write(`[zensu-autopilot-state] owner liveness unchecked: autopilotOwnerActivityTtlHours is ${ownerActivityTtlHours}\n`);
+  }
+  state.ownerSessionId = callerSessionId;
+  if (!stateValid(state)) fail(2, "adoption produced invalid state");
+  writeOutput(callerPointerOutput, { schemaVersion: 1, runId });
+  writeOutput(runOutput, state);
+  // The caller installs the two temps, retires this pointer, and carries the
+  // previous owner into the provenance entry. Only the pointer BASENAME travels,
+  // and the shell re-checks its shape, so a value read out of a run record can
+  // never name a file outside the state directory. The basename is emitted ONLY
+  // when the pointer designates THIS run: an empty first field is the shell's
+  // "nothing to retire", and it is what keeps the unlink from naming a pointer of
+  // the previous owner's that belongs to some other run of theirs. It is taken from
+  // the file the resolution ACTUALLY read, never re-derived from the owner digest —
+  // the legacy fallback wins often enough that a derived name pointed at nothing
+  // while the pointer that designated the run survived.
+  const retiredBasename = ownerPointerDesignatesRun
+    ? path.basename(ownerResolved.file)
+    : "";
+  process.stdout.write(`${retiredBasename}\t${previousOwner}\n`);
   process.exit(0);
 }
 
@@ -1628,7 +1979,8 @@ _autopilot_begin_critical() {
   legacy_file="$(_autopilot_legacy_active_path "$state_dir")" || return 3
   local run_tmp active_tmp rc
   # `_autopilot_storage_safe` covers the legacy pointer by name; the
-  # owner-keyed one is validated here, at the only site that writes it.
+  # owner-keyed one is validated at each of the TWO sites that write it — here and
+  # in `_autopilot_adopt_critical`.
   CLAUDE_PROJECT_DIR="$root" _tdd_path_safe "$active_file" regular-or-absent || return 2
   run_tmp="$(_autopilot_mktemp_beside "$run_file")" || return 5
   active_tmp="$(_autopilot_mktemp_beside "$active_file")" || { rm -f "$run_tmp"; return 5; }
@@ -1649,7 +2001,7 @@ _autopilot_begin_critical() {
 
 autopilot_begin_run() {
   local run_id="${1:-}" owner_session_id="${2:-}" root cover validate workspace_root session_workspace root_rendered declared_rendered
-  _autopilot_identifier_ok "$run_id" && _autopilot_identifier_ok "$owner_session_id" || return 3
+  _autopilot_identifier_ok "$run_id" && _autopilot_owner_identity_ok "$owner_session_id" || return 3
   root="$(_autopilot_project_root "${3:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
   cover="${4:-false}"
   validate="${5:-true}"
@@ -1844,11 +2196,234 @@ autopilot_release_run() {
   _autopilot_session_id_ok "$caller_session_id" || return 3
   root="$(_autopilot_project_root "${3:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
   caller_workspace="$(_autopilot_session_workspace "$root")" || return 2
-  ttl_hours="$(zensu_pending_review_ttl_hours 2>/dev/null)" || ttl_hours=""
-  case "$ttl_hours" in *[!0-9]*|'') ttl_hours=0 ;; esac
+  ttl_hours="$(zensu_autopilot_owner_activity_ttl_hours 2>/dev/null)" || ttl_hours=""
+  # A failed or non-numeric read falls back to the getter's own DEFAULT, never to 0:
+  # 0 disables the liveness check, so normalizing a fault to it would fail OPEN on a
+  # guard whose job is to protect a live owner's run, and would emit a disclosure
+  # blaming a config value the operator never set. Only a real configured 0 disables.
+  case "$ttl_hours" in *[!0-9]*|'') ttl_hours=1 ;; esac
   _autopilot_read_storage_ready "$root" "$run_id" || return $?
   _autopilot_locked_run "$root" "$run_id" _autopilot_release_critical \
     "$root" "$run_id" "$event_id" "$caller_session_id" "$caller_workspace" "$ttl_hours"
+}
+
+_autopilot_adopt_critical() {
+  local root="$1" run_id="$2" caller_session_id="$3"
+  local caller_workspace="$4" ttl_hours="$5"
+  local state_dir="$root/.zensu/state"
+  local run_file="$state_dir/autopilot-run-${run_id}.json"
+  local caller_pointer run_tmp ptr_tmp retired retired_line rc
+  # The two outcome names the CLI reads are module-scope on purpose (they must cross
+  # this function's boundary), so they are STAGED here and published only after both
+  # installs land. Assigning them at classification time made a failed install report
+  # a takeover the caller could then never find: the CLI selects its stderr line AND
+  # gates the AUTOPILOT_ADOPTED provenance write on the token, deliberately not on the
+  # return code, so a `return 5` with the token already set announced and RECORDED a
+  # takeover that had not happened. Both success arms had the defect, at two different
+  # assignment sites, so fixing only one leaves the other live.
+  local pending_outcome="" pending_owner=""
+  caller_pointer="$(_autopilot_active_path "$state_dir" "$caller_session_id")" || {
+    _autopilot_adopt_refusal "the owner pointer path could not be derived for this caller"
+    return 3
+  }
+  # Same pre-check `_autopilot_begin_critical` performs: `_autopilot_storage_safe`
+  # covers the LEGACY pointer by name only, so the owner-keyed one is validated at
+  # each site that writes it. `_tdd_atomic_replace_regular` re-applies the check, so
+  # this is defense in depth — but it turns a late exit 5 into an early, named exit 2.
+  CLAUDE_PROJECT_DIR="$root" _tdd_path_safe "$caller_pointer" regular-or-absent || {
+    _autopilot_adopt_refusal "the owner pointer path was refused: not a regular file or an absent path inside the state directory"
+    return 2
+  }
+  run_tmp="$(_autopilot_mktemp_beside "$run_file")" || {
+    _autopilot_adopt_refusal "temp allocation beside the run record failed; nothing moved"
+    return 5
+  }
+  ptr_tmp="$(_autopilot_mktemp_beside "$caller_pointer")" || {
+    rm -f "$run_tmp"
+    _autopilot_adopt_refusal "temp allocation beside the owner pointer failed; nothing moved"
+    return 5
+  }
+  retired_line="$(_autopilot_node adopt "$run_file" "$run_tmp" "$run_id" "$root" \
+    "$caller_session_id" "$state_dir" "$caller_workspace" "$ttl_hours" "$ptr_tmp")"
+  rc=$?
+  # THREE outcomes are successes and each arrives as its OWN exit code, so no token
+  # travels inside stdout: 10 = record and pointer already agree, nothing to do;
+  # 11 = the record was already ours and its pointer was reinstalled; 0 = a real
+  # takeover, the only one that carries a stdout line. An exit code cannot be
+  # produced by a dropped write, which is what the retired in-band token existed to
+  # guarantee at the cost of a sentinel both halves had to spell identically.
+  if [ "$rc" -eq 10 ]; then
+    rm -f "$run_tmp" "$ptr_tmp"
+    ZENSU_AUTOPILOT_ADOPT_OUTCOME=already-owned
+    return 0
+  fi
+  if [ "$rc" -eq 11 ]; then
+    pending_outcome=repaired
+    retired=""
+  elif [ "$rc" -ne 0 ]; then
+    rm -f "$run_tmp" "$ptr_tmp"
+    return "$rc"
+  else
+    # A takeover ALWAYS emits a TAB, so a tabless line is a lost or short stdout
+    # write, not an outcome, and it can no longer impersonate a repair.
+    case "$retired_line" in
+      *$'\t'*) ;;
+      *)
+        rm -f "$run_tmp" "$ptr_tmp"
+        _autopilot_adopt_refusal "the worker result line was malformed; no install was attempted and nothing moved"
+        return 5
+        ;;
+    esac
+    retired="${retired_line%%$'\t'*}"
+    pending_owner="${retired_line#*$'\t'}"
+    # The SECOND field carries the same weight as the tab: `zensu-log.sh` gates the
+    # `AUTOPILOT_ADOPTED` provenance write on a non-empty previous owner, so a line
+    # that ends AT the tab produces a real takeover recorded as coming from nobody —
+    # the exact class the tab guard above exists to close, one field short. The test
+    # this replaced compared the stripped value against the whole line, which the tab
+    # guard had already made impossible, so it never fired.
+    if [ -z "$pending_owner" ]; then
+      rm -f "$run_tmp" "$ptr_tmp"
+      _autopilot_adopt_refusal "the worker result line named no previous owner; no install was attempted and nothing moved"
+      return 5
+    fi
+    pending_outcome=adopted
+  fi
+  # Install the POINTER first, and note what that torn state actually costs,
+  # because both halves of the original justification were wrong. A crash between
+  # the two installs leaves the caller holding a pointer to a run it does not yet
+  # own, and `read-active` does NOT filter that out — it REFUSES with exit 2 until a
+  # retry completes the adoption. The reverse order would leave the caller owning
+  # the record with no pointer, which the already-owner branch above now REPAIRS, so
+  # "a retry would never repair it" stopped being true when that branch landed.
+  # BOTH orderings are therefore retry-recoverable, but they are NOT symmetric and
+  # the asymmetry runs AGAINST the chosen one. State the record-first bound exactly,
+  # because "unconditionally" was wrong: that torn state is repaired whenever the run
+  # is still nonterminal, still holds the caller's tree, and the caller owns no OTHER
+  # nonterminal run — three refusals sit above the already-owner branch and one sits
+  # inside it. What the branch does skip is the pending-stage and liveness refusals.
+  # The pointer-first torn state has to re-enter the whole takeover ladder on retry
+  # and stays refused for as long as the previous owner's beacon keeps being touched. The order is kept on the one ground
+  # that survives that: a refusing reader is a loud torn state, a silently missing
+  # pointer is not. An ordinary failure of the SECOND install returns 5 with the
+  # pointer already moved and is NOT rolled back; the exit-5 row in
+  # skills/autopilot-adopt/SKILL.md states that rather than claiming nothing moved.
+  _tdd_atomic_replace_regular "$ptr_tmp" "$caller_pointer" || {
+    rm -f "$run_tmp" "$ptr_tmp"
+    _autopilot_adopt_refusal "pointer install failed; nothing moved"
+    return 5
+  }
+  _tdd_atomic_replace_regular "$run_tmp" "$run_file" || {
+    rm -f "$run_tmp"
+    _autopilot_adopt_refusal "record install failed; the owner pointer has ALREADY moved and this run stays torn until the verb is retried"
+    return 5
+  }
+  # Both installs landed, so the outcome may now be published to the CLI. Nothing
+  # above this line may set either name, with ONE deliberate exception: the rc=10
+  # arm sets the outcome to `already-owned` and returns without installing anything,
+  # so there is no torn state for a premature publication to misreport. Every arm
+  # that DOES install publishes here and only here.
+  ZENSU_AUTOPILOT_ADOPT_OUTCOME="$pending_outcome"
+  ZENSU_AUTOPILOT_ADOPTED_PREVIOUS_OWNER="$pending_owner"
+  # The worker prints a BASENAME; re-check its shape here so a value that reached
+  # the run record from anywhere cannot name a file outside the state directory. A
+  # pointer left behind does NOT go unnoticed — `read-active` builds an owner-scoped
+  # inventory, so the previous owner's own read finds a pointer to a run its inventory
+  # skips and REFUSES with exit 2 rather than reporting no active run. That is the same
+  # loud torn state the install order accepts, so a failed check skips the unlink and
+  # never the adoption, but it is disclosed rather than swallowed.
+  # TWO accepted spellings, because the worker now emits the name of the file it
+  # actually read: the owner-keyed `autopilot-active-<64 hex>.json`, and the LEGACY
+  # `autopilot-active.json`, which `activePointerFileFor` still resolves. The shape
+  # rule lives in `_autopilot_owner_pointer_basename_ok` so this site does not become
+  # a third shell spelling of either pointer name.
+  if [ -n "$retired" ]; then
+    if _autopilot_owner_pointer_basename_ok "$retired"; then
+      rm -f "$state_dir/$retired" || _autopilot_retire_unreachable "$retired"
+    else
+      _autopilot_retire_unreachable "$retired"
+    fi
+  fi
+  return 0
+}
+
+# One line, on the OPERATOR channel, for every refusal the shell half of
+# `--autopilot-adopt` takes on its own. Without it those paths returned 2, 3 and 5 in
+# silence — `_tdd_paths_safe` redirects everything and the CLI prints nothing when no
+# outcome was published — while skills/autopilot-adopt/SKILL.md instructs the reader
+# that "the stderr line tells them apart" and names a refused owner-pointer path as
+# one of the cases to distinguish. A documented discriminator that emits nothing is
+# worse than none, because it is followed.
+_autopilot_adopt_refusal() {
+  printf '[zensu-autopilot-state] --autopilot-adopt refused: %s\n' "$1" >&2
+}
+
+# One line, on the OPERATOR channel, when the previous owner's pointer survives an
+# adoption. It is not cosmetic: that pointer makes the previous owner's own
+# `read-active` refuse with exit 2 for every one of its hook call sites, and without
+# this the only trace of the cause is a file nobody was told about.
+_autopilot_retire_unreachable() {
+  printf '[zensu-autopilot-state] previous owner pointer not retired: %s; its session will see "active pointer references a run that is absent or owned by another session" until it is removed\n' \
+    "$1" >&2
+}
+
+# Take over a nonterminal run owned by ANOTHER session — release's constructive
+# counterpart, where the work continues under a new owner instead of being
+# cancelled. It runs under the same project lock as every other writer, so it
+# cannot race a live owner mid-event, and it writes no event: only the record's
+# `ownerSessionId` and the owner pointer move.
+autopilot_adopt_run() {
+  local run_id="${1:-}" root caller_session_id="${3:-}"
+  local caller_workspace ttl_hours ready_rc
+  # Cleared FIRST, so a previous call's value can never be read as this one's —
+  # the same discipline `_autopilot_publish_workspace_refusal` follows.
+  ZENSU_AUTOPILOT_ADOPTED_PREVIOUS_OWNER=""
+  ZENSU_AUTOPILOT_ADOPT_OUTCOME=""
+  _autopilot_identifier_ok "$run_id" || {
+    _autopilot_adopt_refusal "the run id is not a schema identifier"
+    return 3
+  }
+  # The WRITE predicate, unlike every sibling verb that only COMPARES a caller id:
+  # this one PERSISTS it as `ownerSessionId`. `begin` applies the identical rule.
+  # Gating loosely here only deferred the refusal into the worker, where it surfaces
+  # as the generic "invalid adopt arguments" the skill's exit-3 row attributes to
+  # three other causes. Both gates MUST name themselves: moving the refusal earlier
+  # is only an improvement while it still says something, and the first spelling of
+  # this gate returned a bare 3, which was strictly worse than the worker line it
+  # replaced.
+  _autopilot_owner_identity_ok "$caller_session_id" || {
+    _autopilot_adopt_refusal "the caller session id is not a persistable owner identity"
+    return 3
+  }
+  root="$(_autopilot_project_root "${2:-${CLAUDE_PROJECT_DIR:-.}}")" || {
+    _autopilot_adopt_refusal "the project root could not be resolved"
+    return 2
+  }
+  caller_workspace="$(_autopilot_session_workspace "$root")" || {
+    _autopilot_adopt_refusal "the caller working tree could not be resolved"
+    return 2
+  }
+  ttl_hours="$(zensu_autopilot_owner_activity_ttl_hours 2>/dev/null)" || ttl_hours=""
+  # A failed or non-numeric read falls back to the getter's own DEFAULT, never to 0:
+  # 0 disables the liveness check, so normalizing a fault to it would fail OPEN on a
+  # guard whose job is to protect a live owner's run, and would emit a disclosure
+  # blaming a config value the operator never set. Only a real configured 0 disables.
+  case "$ttl_hours" in *[!0-9]*|'') ttl_hours=1 ;; esac
+  # rc 1 and rc 2 are DIFFERENT conditions and only rc 2 is a fault. rc 1 is an
+  # absent `.zensu/state`, which a fresh clone, a `git clean` and a removed worktree
+  # all produce, and the skill's exit-1 row says so; asserting corruption there sent
+  # the reader hunting for a planted symlink that was never there.
+  _autopilot_read_storage_ready "$root" "$run_id" || {
+    ready_rc=$?
+    if [ "$ready_rc" -eq 1 ]; then
+      _autopilot_adopt_refusal "this project holds no Autopilot run storage"
+    else
+      _autopilot_adopt_refusal "the run record is unreadable or the state directory is unsafe"
+    fi
+    return "$ready_rc"
+  }
+  _autopilot_locked_run "$root" "$run_id" _autopilot_adopt_critical \
+    "$root" "$run_id" "$caller_session_id" "$caller_workspace" "$ttl_hours"
 }
 
 # Chain ids share the 128-character durable identifier contract, while the
@@ -2326,8 +2901,9 @@ autopilot_store_team_review_payload() {
 # refusal that discards this record names a remedy nobody can carry out.
 # The THIRD argument is REQUIRED and closed: `operator` or `model`, nothing else.
 # An omission or an unknown value returns non-zero with NO output — it does not
-# fall back to a form. That direction is deliberate: the OPERATOR form quotes the
-# audited `zensu-log.sh --autopilot-release --run <id> --confirm` command, so
+# fall back to a form. That direction is deliberate: the OPERATOR form quotes BOTH
+# audited commands, `zensu-log.sh --autopilot-adopt --run <id> --confirm` and
+# `zensu-log.sh --autopilot-release --run <id> --confirm`, so
 # defaulting to it would hand a runnable cancel to whichever channel forgot to
 # say who reads it. Any site whose output a MODEL reads passes `model`.
 #
@@ -2360,6 +2936,15 @@ _autopilot_workspace_refusal() {
   # reads as "holder unreadable", which the fence treats as BLOCKING: the wedge
   # this whole change removes would come back for any run with a long history.
   # `emit_block` in the Stop hook already uses this shape for the same reason.
+  # NO APOSTROPHES anywhere inside the `node -e` program below, comments included. It is
+  # one single-quoted shell argument, so a single apostrophe closes that string and the
+  # renderer silently returns EMPTY for every audience — a measured failure, not a
+  # hypothetical. The bound is the whole program, from the opening quote to the closing
+  # one, never "below some point in this function".
+  #
+  # This comment sits ABOVE the pipeline for a second reason of the same kind: the
+  # invocation spans a backslash continuation, and a comment placed between the
+  # continued lines breaks the command exactly as an apostrophe breaks the program.
   printf '%s' "$holder" | MSYS2_ENV_CONV_EXCL="$env_exclusions" \
     CALLER_SESSION="${caller_session}" REFUSAL_AUDIENCE="${audience}" node -e '
     let input = "";
@@ -2399,26 +2984,46 @@ _autopilot_workspace_refusal() {
     // removal of a hazard class, not a fix for an observed defect. Returning
     // costs nothing: the handler is the last thing the program does.
     if (caller !== "" && String(value.ownerSessionId || "") === caller) {
+      // RELEASE stays withheld here and adoption does NOT, and the asymmetry is the
+      // point. The release worker skips its self-release guard in exactly this state,
+      // so following it would cancel the live generation this very session owns. The
+      // adopt own-run path is non-destructive: it reinstalls a missing owner pointer
+      // and exits 11, or exits 10 having changed nothing, and this branch is reached
+      // precisely when that pointer read failed, which is the state the verb repairs.
+      // Withholding it inherited the release rule without the release reason, leaving
+      // the one branch whose repair exists pointing at no remedy at all. The GUIDED
+      // form only: `--confirm` is the consent control and a model must not be handed
+      // a complete invocation.
+      //
       process.stdout.write(`workspace held by nonterminal run ${runId} (stage ${stage}), `
         + `which belongs to this session; its durable state is still active here, `
-        + `so finish or repair that run rather than releasing it\n`);
+        + `so finish or repair that run rather than releasing it — `
+        + `/zensu:autopilot-adopt reinstalls its owner pointer if that is what is missing\n`);
       return;
     }
     if (String(process.env.REFUSAL_AUDIENCE || "") === "model") {
       // The model-facing form deliberately does NOT quote a ready-to-run
-      // release command. That command is a real CANCEL of a live run owned by
-      // another session, and --confirm is the consent control: the skill
-      // requires an explicit yes in the conversation before it is issued, so
-      // handing a model a complete invocation routes around the only place that
-      // control exists. It also refuses to name a bare zensu-log.sh, which a
-      // model would resolve against the repository it is standing in.
+      // command. Both remedies mutate a run owned by another session, and
+      // --confirm is the consent control: the skills require an explicit yes in
+      // the conversation before either is issued, so handing a model a complete
+      // invocation routes around the only place that control exists. It also
+      // refuses to name a bare zensu-log.sh, which a model would resolve against
+      // the repository it is standing in. Adoption comes FIRST because it is the
+      // constructive remedy — the work continues under a new owner — and a cancel
+      // that was reached for first cannot be undone.
       process.stdout.write(`workspace held by nonterminal run ${runId} (stage ${stage}); `
         + `report it to the user and, only after they say yes, run `
-        + `/zensu:autopilot-release\n`);
+        + `/zensu:autopilot-adopt to continue it here, or /zensu:autopilot-release to cancel it\n`);
       return;
     }
+    // One command per LINE. This is the channel a human copy-pastes from, and prose
+    // appended after a complete invocation is copied along with it — an earlier
+    // spelling of this renderer produced `--confirm.` that way. Both lead-ins sit
+    // AHEAD of their command so nothing trails one.
     process.stdout.write(`workspace held by nonterminal run ${runId} (stage ${stage}); `
-      + `ask that session to cancel it, or once it is idle release it with: `
+      + `ask that session to hand it over, or once it is idle take it over with:\n`
+      + `zensu-log.sh --autopilot-adopt --run ${runId} --confirm\n`
+      + `or cancel it with:\n`
       + `zensu-log.sh --autopilot-release --run ${runId} --confirm\n`);
     });
   ' 2>/dev/null
@@ -2437,12 +3042,12 @@ _autopilot_workspace_refusal() {
 # frame between the assignment and the hook's read runs in the current shell.
 # Both public entry points clear it first, so a stale sentence cannot be reused.
 #
-# TWO forms are produced. The operator form goes to stderr and quotes the audited
-# CLI verb, because a human reads it. The MODEL form is what the block reason
-# carries, and it names `/zensu:autopilot-release` instead: that command is a real
-# CANCEL of another session's live run and `--confirm` is its consent control, so
-# handing a model a complete invocation would route around the only place that
-# control exists.
+# TWO forms are produced. The operator form goes to stderr and quotes BOTH audited
+# CLI verbs, because a human reads it. The MODEL form is what the block reason
+# carries, and it names the two guided skills instead — `/zensu:autopilot-adopt`
+# first, `/zensu:autopilot-release` second — because a complete `--confirm`
+# invocation would route a model around the only place that consent control exists,
+# and because adoption continues the run while release cancels it irreversibly.
 ZENSU_AUTOPILOT_WORKSPACE_HOLD_TEXT=""
 _autopilot_publish_workspace_refusal() {
   # The audience is REQUIRED here TOO. Guarding only the inner renderer left the
@@ -2554,10 +3159,12 @@ _autopilot_begin_standalone_tdd_critical() {
 # guards it for the next caller.
 #
 # The divergence between the PREFERRED holder and `holders[0]` is not cosmetic:
-# the OPERATOR form of the rendered remedy is
-# `zensu-log.sh --autopilot-release --run <id> --confirm`, which applies a real
-# CANCEL with no liveness check, so naming the wrong run points a destructive
-# command at a live foreign one. (The model form names only the guided skill.)
+# the OPERATOR form of the rendered remedy quotes BOTH audited commands, and one of
+# them, `zensu-log.sh --autopilot-release --run <id> --confirm`, applies a real
+# CANCEL — bounded now by the owner-liveness ladder, which refuses with exit 7 while
+# the owner's document is fresh, but a bound is not an exemption. Naming the wrong
+# run still points a destructive command at a live foreign one. (The model form
+# names two guided skills, adoption first.)
 autopilot_read_workspace() {
   local root workspace prefer_owner="${3:-}"
   root="$(_autopilot_project_root "${1:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
@@ -2601,6 +3208,9 @@ _autopilot_holder_owner() {
   # Piped for the same reason as the renderer above: a large but schema-valid
   # record must not turn this into an E2BIG spawn failure, which the caller
   # reads as an unreadable holder and answers by blocking.
+  # NO APOSTROPHES inside the program below, comments included — same single-quoted
+  # `node -e` hazard as the renderer. A broken program here reads as an unreadable
+  # holder, and the fence answers that by BLOCKING.
   printf '%s' "$holder" | node -e '
     let input = "";
     process.stdin.setEncoding("utf8");
@@ -2629,6 +3239,9 @@ _autopilot_holder_run_id() {
   [ "$#" -eq 1 ] || return 1
   local holder="${1:-}"
   [ -n "$holder" ] || return 1
+  # NO APOSTROPHES inside the program below, comments included — same single-quoted
+  # `node -e` hazard as the renderer. A broken program here reads as an unreadable
+  # holder, and the fence answers that by BLOCKING.
   printf '%s' "$holder" | node -e '
     let input = "";
     process.stdin.setEncoding("utf8");

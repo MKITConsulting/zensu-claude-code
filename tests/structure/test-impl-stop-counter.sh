@@ -1934,7 +1934,7 @@ else
   check "C57pre all four TTL literals were located, so the comparison below is not vacuous (cfg=$C57_CFG_DEF/$C57_CFG_MAX doctor=$C57_DOC_DEF/$C57_DOC_MAX)" FAIL
 fi
 
-# --- C58: the shared bounded-int helper's arithmetic, for ALL THREE call sites -
+# --- C58: the shared bounded-int helper's arithmetic, for ALL FOUR call sites --
 # The helper's own comment claimed a characterization matrix as the thing any future
 # change to it owes the three getters. That matrix was run by hand and committed
 # nowhere, so the claim named evidence the suite did not carry — and only
@@ -1950,10 +1950,17 @@ C58_FAILS=""
 # The bounds are DERIVED through the same `getter_operand` C57 uses, not hand-copied:
 # restating them here would turn C58 red on a legitimate bound change for a reason
 # unrelated to the arithmetic it grades.
-for c58row in \
-  "zensu_autofix_max_rounds:autoFixMaxRounds" \
-  "zensu_pending_review_ttl_hours:pendingReviewTtlHours" \
-  "zensu_impl_stop_nudge_after:implStopNudgeAfter"; do
+# The population is DERIVED from the config library, not hand-listed: a fifth caller
+# added there would otherwise be uncovered silently, which is exactly what happened
+# when the fourth landed. An empty derivation is a FAIL, never a skip.
+C58_ROWS="$(grep -oE '^[a-z_]+\(\)[[:space:]]*\{[[:space:]]*_zensu_config_bounded_int [A-Za-z]+' "$PLUGIN_DIR/hooks/lib/zensu-config.sh" \
+  | sed -E 's/^([a-z_]+)\(\)[[:space:]]*\{[[:space:]]*_zensu_config_bounded_int ([A-Za-z]+)$/\1:\2/')"
+if [ -z "$C58_ROWS" ]; then
+  check "C58rows the getter population could not be derived from the config library" FAIL
+else
+  check "C58rows the getter population derives from the config library ($(printf '%s\n' "$C58_ROWS" | grep -c .) getters)" PASS
+fi
+for c58row in $C58_ROWS; do
   c58fn="${c58row%%:*}"; c58key="${c58row#*:}"
   c58def="$(getter_operand "$c58fn" "$c58key" 1)"
   c58min="$(getter_operand "$c58fn" "$c58key" 2)"
@@ -1967,7 +1974,7 @@ for c58row in \
   #
   # The quoted case uses the MIN, never the default: quoting the default made acceptance
   # and rejection produce the same string, so replacing `Number.isInteger` with a coercing
-  # `Number` left the row green. The min differs from the default in all three rows.
+  # `Number` left the row green. The min differs from the default in all four rows.
   for c58case in "$c58min:$c58min" "$c58max:$c58max" "$((c58min - 1)):$c58def" \
                  "$((c58max + 1)):$c58def" "1.5:$c58def" "\"$c58min\":$c58def"; do
     c58in="${c58case%%:*}"; c58want="${c58case#*:}"
@@ -1980,7 +1987,7 @@ done
 # The control matters: a typo in the loop would leave C58_FAILS empty and report a green
 # matrix that never ran. Require the accepted cases to have produced real values first.
 # The object-shape conjunct (`typeof h === "object" && !Array.isArray(h)`) is unreachable
-# through the three shipped getters, because none of their keys is one a string or an array
+# through the four shipped getters, because none of their keys is one a string or an array
 # owns. Drive the helper DIRECTLY with the key `length` against both shapes: with
 # `hasOwnProperty` alone, `"abcdefgh".length` and `[1,2,3,4,5].length` are own integers that
 # would pass the bounds and be echoed instead of the default.
@@ -2006,8 +2013,8 @@ C58_CTL="$(c58_get zensu_impl_stop_nudge_after '{"hooks":{"implStopNudgeAfter":7
   && check "C58pre the matrix harness really drives the getters, so an empty failure list means something" PASS \
   || check "C58pre the matrix harness really drives the getters (got '$C58_CTL')" FAIL
 [ -z "$C58_FAILS" ] \
-  && check "C58 all three bounded-int getters honour their own min, max, fallback and absent-key behaviour" PASS \
-  || check "C58 all three bounded-int getters honour their own bounds (failures:$C58_FAILS)" FAIL
+  && check "C58 all four bounded-int getters honour their own min, max, fallback and absent-key behaviour" PASS \
+  || check "C58 all four bounded-int getters honour their own bounds (failures:$C58_FAILS)" FAIL
 
 echo ""
 echo "impl-stop-counter: $PASS passed, $FAIL failed"

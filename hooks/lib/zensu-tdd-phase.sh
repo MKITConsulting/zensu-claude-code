@@ -447,16 +447,53 @@ tdd_is_test_path() {
   echo "false"
 }
 
+# The reserved-provenance guard, in ONE place. Both `tdd_write_phase` and
+# `_tdd_write_phase_critical` apply it, and BOTH call sites stay: `export -f` makes
+# the critical function a directly invocable entry point in any child shell, not a
+# private callee, so deleting either copy re-opens forged provenance from a subshell.
+# Extracted so the two cannot drift, never so one can be removed.
+#
+# Case-INSENSITIVE, and that is not pedantry: the phase is lower-cased downstream
+# into `workflowState` and `event` while `history` keeps it verbatim, so an exact
+# comparison admitted `AUTOPILOT_ADOPTEd` and persisted a document a reader cannot
+# tell from real provenance. Bracket classes rather than `${var^^}`, which needs
+# bash 4 while this ships to macOS bash 3.2, and rather than `tr`, which would put
+# a subprocess on a guard.
+#
+# Returns 0 when the pair is RESERVED and must be refused.
+_tdd_reserved_provenance() {
+  case "${1:-}" in
+    [Cc][Hh][Aa][Ii][Nn]_[Rr][Ee][Cc][Oo][Vv][Ee][Rr][Ee][Dd]) return 0 ;;
+    [Rr][Uu][Nn][Tt][Ii][Mm][Ee]_[Aa][Dd][Oo][Pp][Tt][Ee][Dd]) return 0 ;;
+    [Aa][Uu][Tt][Oo][Pp][Ii][Ll][Oo][Tt]_[Aa][Dd][Oo][Pp][Tt][Ee][Dd]) return 0 ;;
+  esac
+  case "${2:-}" in
+    [Cc][Hh][Aa][Ii][Nn]-[Rr][Ee][Cc][Oo][Vv][Ee][Rr][Ee][Dd]:\ *) return 0 ;;
+    [Rr][Uu][Nn][Tt][Ii][Mm][Ee]-[Aa][Dd][Oo][Pp][Tt][Ee][Dd]:\ *) return 0 ;;
+    [Aa][Uu][Tt][Oo][Pp][Ii][Ll][Oo][Tt]-[Aa][Dd][Oo][Pp][Tt][Ee][Dd]:\ *) return 0 ;;
+  esac
+  return 1
+}
+
 _tdd_write_phase_critical() {
   local state_file="$1"
   local session_id="$2"
   local step_id="$3"
   local phase="$4"
   local reason="$5"
-  [ "$phase" = CHAIN_RECOVERED ] && return 1
-  [ "$phase" = RUNTIME_ADOPTED ] && return 1
-  case "$reason" in "chain-recovered: "*) return 1 ;; esac
-  case "$reason" in "runtime-adopted: "*) return 1 ;; esac
+  # The reserved-provenance guard. BOTH sites keep this call: `export -f` makes
+  # `_tdd_write_phase_critical` a directly invocable entry point in any child shell,
+  # so neither call is a redundant inner copy — deleting either re-opens forged
+  # provenance from a subshell.
+  #
+  # FAIL CLOSED on a missing helper, and that is what makes the extraction safe.
+  # Replacing two inline `case` blocks with a call introduced a failure mode the
+  # duplication did not have: the helper is reached through `export -f`, and an
+  # unexported or shadowed name would make the call fail, the `&&` not fire, and the
+  # guard vanish SILENTLY. Refusing when the predicate cannot be reached turns that
+  # into a loud refusal instead of a bypass.
+  if ! command -v _tdd_reserved_provenance >/dev/null 2>&1; then return 1; fi
+  _tdd_reserved_provenance "$phase" "$reason" && return 1
   local ts="$6"
 
   CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" STEP="$step_id" PHASE="$phase" REASON="$reason" TS="$ts" \
@@ -476,6 +513,52 @@ _tdd_write_phase_critical() {
         state.history.push(entry);
         state.step_id = process.env.STEP;
         state.phase = process.env.PHASE;
+        return state;
+      });
+    ' 2>/dev/null
+}
+
+# The ONE sanctioned writer of the reserved AUTOPILOT_ADOPTED phase. The guards
+# above refuse it on every generic path, exactly as they refuse CHAIN_RECOVERED and
+# RUNTIME_ADOPTED, so a run takeover cannot be minted by a caller. It appends a
+# history entry and re-stamps the document's own `workflow_state`, `last_event`,
+# `revision` and `updated_at` — `mutateWorkflowState` moves those for every writer.
+# What it leaves alone is the FSM cursor: `phase` and `step_id` belong to the TDD
+# state machine, and adopting a durable run must never move a running chain's. Provenance lives
+# here rather than in the run record because `STATE_KEYS` and `EVENT_TYPES` are
+# strict sets — see the adopt worker mode in hooks/lib/zensu-autopilot-state.sh.
+tdd_write_autopilot_adopted() {
+  local supplied_session="${1:-}" run_id="${2:-}" previous_owner="${3:-}"
+  local session_id state_file ts=""
+  [ -n "$run_id" ] && [ -n "$previous_owner" ] || return 1
+  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+  session_id="$(zensu_resolve_session_id "$supplied_session")" || return 1
+  state_file="$(tdd_state_file "$session_id")" || return 1
+  [ -f "$state_file" ] && [ ! -L "$state_file" ] || return 1
+  if [ "$(_zensu_log_style)" != "none" ]; then
+    ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  fi
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" \
+  PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" \
+  SID="$session_id" RUN_ID="$run_id" PREV="$previous_owner" TS="$ts" \
+    node -e '
+      const core = require(process.env.CONTROL_CORE);
+      core.mutateWorkflowState({
+        projectRoot: process.env.PROJECT_ROOT,
+        sessionId: process.env.SID,
+        workflowState: "autopilot_adopted",
+        event: "autopilot-adopted",
+        updatedAt: process.env.TS || undefined,
+      }, (state) => {
+        if (!Array.isArray(state.history)) state.history = [];
+        const entry = {
+          step: typeof state.step_id === "string" ? state.step_id : "",
+          phase: "AUTOPILOT_ADOPTED",
+          reason: "autopilot-adopted: run " + process.env.RUN_ID
+            + " taken over from " + process.env.PREV,
+        };
+        if (process.env.TS) entry.ts = process.env.TS;
+        state.history.push(entry);
         return state;
       });
     ' 2>/dev/null
@@ -759,10 +842,19 @@ tdd_write_phase() {
   local step_id="${2:-}"
   local phase="${3:-}"
   local reason="${4:-}"
-  [ "$phase" = CHAIN_RECOVERED ] && return 1
-  [ "$phase" = RUNTIME_ADOPTED ] && return 1
-  case "$reason" in "chain-recovered: "*) return 1 ;; esac
-  case "$reason" in "runtime-adopted: "*) return 1 ;; esac
+  # The reserved-provenance guard. BOTH sites keep this call: `export -f` makes
+  # `_tdd_write_phase_critical` a directly invocable entry point in any child shell,
+  # so neither call is a redundant inner copy — deleting either re-opens forged
+  # provenance from a subshell.
+  #
+  # FAIL CLOSED on a missing helper, and that is what makes the extraction safe.
+  # Replacing two inline `case` blocks with a call introduced a failure mode the
+  # duplication did not have: the helper is reached through `export -f`, and an
+  # unexported or shadowed name would make the call fail, the `&&` not fire, and the
+  # guard vanish SILENTLY. Refusing when the predicate cannot be reached turns that
+  # into a loud refusal instead of a bypass.
+  if ! command -v _tdd_reserved_provenance >/dev/null 2>&1; then return 1; fi
+  _tdd_reserved_provenance "$phase" "$reason" && return 1
   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
   session_id="$(zensu_resolve_session_id "$supplied_session")" || return 1
 
@@ -3705,7 +3797,7 @@ case "${OSTYPE:-}" in
     # must never fall back to an inherited ZENSU_* module path.
     export _ZENSU_TDD_CONTROL_CORE _ZENSU_TDD_NATIVE_PLUGIN_ROOT _ZENSU_TDD_CHAIN_RECOVERY
     export -f _tdd_core_lock_keeper 2>/dev/null || true
-    export -f _tdd_winpid_from_ps _tdd_is_msys_runtime _tdd_native_path _tdd_native_process_pid _tdd_context_binding tdd_activation_status tdd_state_file _tdd_bound_project_root _tdd_native_project_path _tdd_paths_safe _tdd_path_safe _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical _tdd_read_validated_state tdd_state_status tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_increment_counter_critical tdd_increment_counter tdd_reset_review_budget _tdd_write_clear_critical tdd_clear_session _tdd_clear_standalone_session_critical tdd_clear_standalone_session _tdd_clear_autopilot_session_critical tdd_clear_autopilot_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session tdd_autopilot_context tdd_chain_snapshot _tdd_autopilot_link_id_shape_ok _tdd_autopilot_attempt_shape_ok _tdd_mark_impl_complete_bound_critical tdd_mark_impl_complete_bound _tdd_mark_impl_complete_standalone_critical tdd_mark_impl_complete_standalone _tdd_set_chain_outcome_critical tdd_set_chain_outcome _tdd_finish_autopilot_chain_critical tdd_finish_autopilot_chain _tdd_review_ticket_shape_ok _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket_context tdd_consume_review_ticket _tdd_mark_autopilot_max_round_handoff_critical tdd_mark_autopilot_max_round_handoff _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review _tdd_rearm_autopilot_review_critical tdd_rearm_autopilot_review tdd_get_flag tdd_get_counter tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses zensu_bypass_display _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_pending_review_owned_by_other tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale tdd_seed_deferred_review _tdd_chain_recovery_module_ok _tdd_chain_preflight tdd_chain_diagnostics _tdd_recover_chain_critical tdd_recover_chain 2>/dev/null || true
+    export -f _tdd_winpid_from_ps _tdd_is_msys_runtime _tdd_native_path _tdd_native_process_pid _tdd_context_binding tdd_activation_status tdd_state_file _tdd_bound_project_root _tdd_native_project_path _tdd_paths_safe _tdd_path_safe _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run _tdd_reserved_provenance tdd_write_phase _tdd_write_phase_critical _tdd_read_validated_state tdd_state_status tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_increment_counter_critical tdd_increment_counter tdd_reset_review_budget _tdd_write_clear_critical tdd_clear_session _tdd_clear_standalone_session_critical tdd_clear_standalone_session _tdd_clear_autopilot_session_critical tdd_clear_autopilot_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session tdd_autopilot_context tdd_chain_snapshot _tdd_autopilot_link_id_shape_ok _tdd_autopilot_attempt_shape_ok _tdd_mark_impl_complete_bound_critical tdd_mark_impl_complete_bound _tdd_mark_impl_complete_standalone_critical tdd_mark_impl_complete_standalone _tdd_set_chain_outcome_critical tdd_set_chain_outcome _tdd_finish_autopilot_chain_critical tdd_finish_autopilot_chain _tdd_review_ticket_shape_ok _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket_context tdd_consume_review_ticket _tdd_mark_autopilot_max_round_handoff_critical tdd_mark_autopilot_max_round_handoff _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review _tdd_rearm_autopilot_review_critical tdd_rearm_autopilot_review tdd_get_flag tdd_get_counter tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses zensu_bypass_display _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_pending_review_owned_by_other tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale tdd_seed_deferred_review _tdd_chain_recovery_module_ok _tdd_chain_preflight tdd_chain_diagnostics _tdd_recover_chain_critical tdd_recover_chain 2>/dev/null || true
     export -f _tdd_cancel_pending_review_claim_core tdd_reset_pending_review_claim 2>/dev/null || true
     ;;
 esac

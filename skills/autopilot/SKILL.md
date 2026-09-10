@@ -115,9 +115,11 @@ cautions travel with it. First, `--autopilot-begin` has three refusals that name
 the workspace-hold one is foreign by construction — the own-run cases fail above it, so its
 holder can never be yours. The other two, `nonterminal orphan … requires exact recovery` and
 `active run … is not terminal`, DO name a run of your own; the release verb refuses a caller
-that owns the run, and such a run is finished or repaired rather than released. Second, when the run really is another session's, cancelling it is the
-user's call: report the refusal and use `/zensu:autopilot-release`, the guided form that
-reports the holding run first and mutates nothing without an explicit yes. Never run the raw
+that owns the run, and such a run is finished or repaired rather than released. Second, when the run really is another session's, what happens to it
+is the user's call: report the refusal and use `/zensu:autopilot-adopt` to continue the run
+here, or `/zensu:autopilot-release` to cancel it — adoption first, because a cancel that was
+reached for first cannot be undone. Both are guided forms that report the holding run and
+mutate nothing without an explicit yes. Never run the raw
 verb unasked.
 
 This must succeed before `ExitPlanMode`. Append exactly one invisible binding line to the

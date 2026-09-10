@@ -204,7 +204,8 @@ OUT7D="$(invoke "$P5" foreign_session)"; AFTER5P="$(digest "$RF5")"
 if [ "$(printf '%s' "$OUT7D" | decision)" = block ] \
   && printf '%s' "$OUT7D" | grep -qF 'holds this working tree' \
   && printf '%s' "$OUT7D" | grep -qF 'stop_run_owner' \
-  && printf '%s' "$OUT7D" | grep -qF 'run /zensu:autopilot-release' \
+  && printf '%s' "$OUT7D" | grep -qF 'run /zensu:autopilot-adopt' \
+  && printf '%s' "$OUT7D" | grep -qF '/zensu:autopilot-release to cancel it' \
   && ! printf '%s' "$OUT7D" | grep -qF -- '--confirm' \
   && printf '%s' "$OUT7D" | grep -qF 'Retrying Stop cannot clear the hold' \
   && [ "$BEFORE5P" = "$AFTER5P" ] \
@@ -830,18 +831,33 @@ MODEL7K="$(_autopilot_workspace_refusal "$HOLD_FOREIGN" "$ZENSU_SESSION_KEY" mod
 # The exclusion needle is the BARE stem: `--autopilot-release` is not a substring
 # of `/zensu:autopilot-release`, so an own-run render that offered the guided form
 # would have passed the narrower spelling. Both audiences are checked.
+#
+# ADOPT is now OFFERED in the own-run arm and RELEASE is still withheld, and the
+# asymmetry is the assertion: release skips its self-release guard in exactly this
+# state and would cancel this session's own live generation, while adopt's own-run
+# path is non-destructive and REPAIRS the missing pointer that makes this arm
+# reachable. The guided form only — the audited `--confirm` spelling stays out of
+# both audiences here, which the two `--confirm`/`zensu-log.sh` exclusions below pin.
 if printf '%s' "$OWN7K" | grep -qF 'belongs to this session' \
   && printf '%s' "$OWN7K_MODEL" | grep -qF 'belongs to this session' \
   && ! printf '%s' "$OWN7K" | grep -qF 'autopilot-release' \
   && ! printf '%s' "$OWN7K_MODEL" | grep -qF 'autopilot-release' \
+  && printf '%s' "$OWN7K" | grep -qF '/zensu:autopilot-adopt' \
+  && printf '%s' "$OWN7K_MODEL" | grep -qF '/zensu:autopilot-adopt' \
+  && ! printf '%s' "$OWN7K" | grep -qF -- '--autopilot-adopt' \
+  && ! printf '%s' "$OWN7K_MODEL" | grep -qF -- '--autopilot-adopt' \
+  && ! printf '%s' "$OWN7K" | grep -qF -- '--confirm' \
+  && ! printf '%s' "$OWN7K_MODEL" | grep -qF -- '--confirm' \
   && printf '%s' "$OWN7K_MODEL" | grep -qF 'finish or repair that run' \
   && printf '%s' "$FOREIGN7K" | grep -qF -- '--autopilot-release --run hold_run_foreign --confirm' \
+  && printf '%s' "$FOREIGN7K" | grep -qF -- '--autopilot-adopt --run hold_run_foreign --confirm' \
   && printf '%s' "$MODEL7K" | grep -qF 'hold_run_foreign' \
-  && printf '%s' "$MODEL7K" | grep -qF 'run /zensu:autopilot-release' \
+  && printf '%s' "$MODEL7K" | grep -qF 'run /zensu:autopilot-adopt' \
+  && printf '%s' "$MODEL7K" | grep -qF '/zensu:autopilot-release to cancel it' \
   && ! printf '%s' "$MODEL7K" | grep -qF -- '--confirm' \
   && ! printf '%s' "$MODEL7K" | grep -qF 'zensu-log.sh'; then
-  check "S7k the operator form quotes the audited command, the model form names only the guided skill, and an own-run holder gets neither" PASS
-else check "S7k own-run refusal must withhold the release command (own=$OWN7K own_model=$OWN7K_MODEL foreign=$FOREIGN7K model=$MODEL7K)" FAIL; fi
+  check "S7k the operator form quotes both audited commands, the model form names only guided skills, and an own-run holder is offered adopt but never release" PASS
+else check "S7k own-run refusal must withhold release and offer the guided adopt (own=$OWN7K own_model=$OWN7K_MODEL foreign=$FOREIGN7K model=$MODEL7K)" FAIL; fi
 
 # The holder PREFERENCE decides which of several holders the fence judges, and
 # the own-run arm rests on it. A record carrying no `workspaceRoot` holds every
@@ -925,7 +941,7 @@ for needle in 'which belongs to this session' 'finish or repair that run'; do
   printf '%s' "$OWN_RENDER" | grep -qF "$needle" || SKILL_OK=0
   grep -qF "$needle" "$SKILL_OWN" || SKILL_OK=0
 done
-for needle in 'run /zensu:autopilot-release'; do
+for needle in 'run /zensu:autopilot-adopt to continue it here, or' '/zensu:autopilot-release to cancel it'; do
   printf '%s' "$FOREIGN_RENDER" | grep -qF "$needle" || SKILL_OK=0
   grep -qF "$needle" "$SKILL_OWN" || SKILL_OK=0
 done
@@ -933,6 +949,11 @@ done
 # both cases the same way.
 printf '%s' "$FOREIGN_RENDER" | grep -qF 'which belongs to this session' && SKILL_OK=0
 printf '%s' "$OWN_RENDER" | grep -qF 'run /zensu:autopilot-release' && SKILL_OK=0
+# The own-run arm names the guided ADOPT — that is the remedy for the state it is
+# reached in — but never the foreign lead-in, which is what keeps the two renders
+# distinguishable by the phrase a reader keys on.
+printf '%s' "$OWN_RENDER" | grep -qF 'run /zensu:autopilot-adopt to continue it here' && SKILL_OK=0
+printf '%s' "$OWN_RENDER" | grep -qF '/zensu:autopilot-adopt' || SKILL_OK=0
 if [ "$SKILL_OK" -eq 1 ]; then
   check "S7o every own-run literal the release skill teaches is one the renderer actually emits" PASS
 else check "S7o the skill's own-run recognizer must match the renderer (render=$OWN_RENDER)" FAIL; fi
@@ -986,7 +1007,8 @@ else
     && [ "$RC7C" -eq 0 ] && [ -z "$OUT7C" ] \
     && [ "$(printf '%s' "$OUT7C2" | decision)" = block ] \
     && printf '%s' "$OUT7C2" | grep -qF 'contain_run' \
-    && printf '%s' "$OUT7C2" | grep -qF 'run /zensu:autopilot-release' \
+    && printf '%s' "$OUT7C2" | grep -qF 'run /zensu:autopilot-adopt' \
+  && printf '%s' "$OUT7C2" | grep -qF '/zensu:autopilot-release to cancel it' \
     && [ "$BEFORE5C" = "$(digest "$RF5C")" ]; then
     check "S7i a run driving a NESTED worktree holds the containing tree: release with nothing queued, refusal naming it once a marker exists" PASS
   else check "S7i containment hold must release without work and refuse with it (premise=$S7I_PREMISE held=$HELD5C rc=$RC7C)" FAIL; fi
@@ -1053,6 +1075,8 @@ if [ "$(printf '%s' "$OUT8G" | decision)" = block ] \
   && printf '%s' "$OUT8G" | grep -qF 'stop_run_contention' \
   && printf '%s' "$OUT8G" | grep -qF 'belongs to this session' \
   && ! printf '%s' "$OUT8G" | grep -qF 'autopilot-release' \
+  && printf '%s' "$OUT8G" | grep -qF '/zensu:autopilot-adopt' \
+  && ! printf '%s' "$OUT8G" | grep -qF -- '--autopilot-adopt' \
   && [ -s "$TMP/adoption-contention-read" ] \
   && [ -s "$TMP/adoption-contention-lock" ] \
   && [ "$BEFORE8G" = "$AFTER8G" ]; then
@@ -1099,7 +1123,8 @@ OUT8J="$(printf '%s' '{"hook_event_name":"Stop","session_id":"stop_session_forei
 if [ "$(printf '%s' "$OUT8J" | decision)" = block ] \
   && [ -s "$TMP/foreign-contention-work-lock" ] \
   && printf '%s' "$OUT8J" | grep -qF 'stop_run_foreign_contention' \
-  && printf '%s' "$OUT8J" | grep -qF 'run /zensu:autopilot-release' \
+  && printf '%s' "$OUT8J" | grep -qF 'run /zensu:autopilot-adopt' \
+  && printf '%s' "$OUT8J" | grep -qF '/zensu:autopilot-release to cancel it' \
   && ! printf '%s' "$OUT8J" | grep -qF -- '--confirm' \
   && [ -f "$PF6H" ] \
   && [ "$BEFORE8J" = "$(digest "$RF6H")" ]; then
@@ -1149,7 +1174,8 @@ SECOND_READS="$(wc -l < "$TMP/second-fence-reads" 2>/dev/null | tr -d ' ')"
 if [ "$(printf '%s' "$OUT8K" | decision)" = block ] \
   && [ "${SECOND_READS:-0}" -ge 2 ] \
   && printf '%s' "$OUT8K" | grep -qF 'stop_run_second_fence' \
-  && printf '%s' "$OUT8K" | grep -qF 'run /zensu:autopilot-release' \
+  && printf '%s' "$OUT8K" | grep -qF 'run /zensu:autopilot-adopt' \
+  && printf '%s' "$OUT8K" | grep -qF '/zensu:autopilot-release to cancel it' \
   && ! printf '%s' "$OUT8K" | grep -qF -- '--confirm' \
   && [ "$BEFORE8K" = "$(digest "$RF6K")" ]; then
   check "S8k the second contention fence publishes its holder, naming the run without a runnable cancel" PASS
@@ -1177,6 +1203,8 @@ if [ "$(printf '%s' "$OUT8I" | decision)" = block ] \
   && printf '%s' "$OUT8I" | grep -qF 'own_remedy_run' \
   && printf '%s' "$OUT8I" | grep -qF 'belongs to this session' \
   && ! printf '%s' "$OUT8I" | grep -qF 'autopilot-release' \
+  && printf '%s' "$OUT8I" | grep -qF '/zensu:autopilot-adopt' \
+  && ! printf '%s' "$OUT8I" | grep -qF -- '--autopilot-adopt' \
   && [ "$BEFORE8I" = "$(digest "$RF6I")" ]; then
   check "S8i an own-run holder is named in the block reason but never offered the release command" PASS
 else check "S8i own-run rc=4 must name the run and withhold the release command (reason=$(printf '%s' "$OUT8I" | context))" FAIL; fi
