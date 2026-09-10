@@ -377,13 +377,21 @@ else
   # A case-count floor as well as the exit status: `node --test` exits 0 for a file
   # that registers ZERO cases, so the status alone cannot tell a green run from a
   # suite that stopped being discovered.
-  B0_PASS="$(printf '%s\n' "$B0_OUT" | sed -n 's/^# pass \([0-9]*\)$/\1/p;s/^. pass \([0-9]*\)$/\1/p' | head -1)"
+  #
+  # `^[^ ]*` and never `^.`: node writes its summary as `ℹ pass 10`, and that mark is
+  # THREE bytes, which a single-byte `.` cannot match under a byte locale. The old
+  # pattern read nothing, so B0 reported a fully green unit suite as failing on every
+  # macOS run. The first field is the only thing that varies between node's reporters
+  # (`#` on the TAP one), so matching one space-free token covers both and depends on no
+  # locale. It cannot match node's failure detail either: those lines are INDENTED, and
+  # this pattern requires the count to be the second field of an unindented line.
+  B0_PASS="$(printf '%s\n' "$B0_OUT" | sed -n 's/^[^ ]* pass \([0-9]*\)$/\1/p' | head -1)"
   # Two cases skip themselves on win32 — a real symlink and a FIFO, neither of which
   # that host can produce — so a single pass floor cannot hold on both platforms. The
   # REGISTERED floor (pass + skipped) is what catches a file that stopped being
   # discovered; the pass floor below it is what keeps an all-skipped file from
   # satisfying the registered one.
-  B0_SKIP="$(printf '%s\n' "$B0_OUT" | sed -n 's/^# skipped \([0-9]*\)$/\1/p;s/^. skipped \([0-9]*\)$/\1/p' | head -1)"
+  B0_SKIP="$(printf '%s\n' "$B0_OUT" | sed -n 's/^[^ ]* skipped \([0-9]*\)$/\1/p' | head -1)"
   [ -n "$B0_SKIP" ] || B0_SKIP=0
   B0_SEEN=$(( ${B0_PASS:-0} + B0_SKIP ))
   if [ "$B0_RC" -eq 0 ] && [ -n "$B0_PASS" ] && [ "$B0_SEEN" -ge 9 ] && [ "$B0_PASS" -ge 7 ]; then
