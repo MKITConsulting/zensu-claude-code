@@ -14,7 +14,8 @@ description: >
   there and usable and whether it was rebuilt rather than restored, each review
   chain's shape plus any wedged chain and
   its recovery command, any open chain not owned by this session, any chain this
-  session owns that has ended many turns at implementing, any reviewer spawn
+  session owns that has ended many turns at implementing, any nonterminal durable
+  Autopilot run holding a working tree, any reviewer spawn
   the host permission layer refused, expired pending-review surfaced).
   The only write is an explicit, user-confirmed cleanup of one
   expired pending-review.json — CAS workflow documents are never deleted. Use
@@ -529,6 +530,76 @@ classifier will refuse a spawn, not only when the whole table is green.
   the caveat to shorten the row, and do not read its ABSENCE as proof no refusal is
   outstanding — the note is cleared on every Stop and re-minted only by one that reaches
   the notice, so a clean-tree turn leaves the caveat off while the refusal stands.
+- **⚠️ autopilot: nonterminal durable run `<id>` at stage `<stage>`** → a durable
+  Autopilot run is holding a git working tree, so no second Autopilot run and no
+  standalone `/zensu:tdd` chain can arm there. Relay the row's own facts and add
+  nothing: the run id, the stage, whether this session owns it, the tree it holds,
+  the run document's path, and how long the owner has been silent. **The remedy
+  depends on ownership and the row already chose it — never substitute your own.**
+  Owned by THIS session, or with the owner not established, the row names no
+  release command, and you must not suggest one: a release applies a real `CANCEL`,
+  so against your own live generation it ends the work you are doing. Owned by
+  ANOTHER session, report it and run `/zensu:autopilot-release` only after the user
+  says yes; that skill is the guided form and asks for the confirmation itself.
+  Never run the bare `zensu-log.sh --autopilot-release … --confirm` on their behalf.
+  When the row says it `accepted the record on its SHAPE`, relay that too: the owner
+  validates more than this row checks, and a record that fails the stricter check
+  makes every Autopilot verb fail closed for the whole project — so the document
+  itself is the finding. That clause sits in the ROW, not in one remedy, so it
+  reaches you whoever owns the run. Report it; do not retry the release and do not
+  edit the document. A run carrying that clause never renders green.
+  Two facts in the row are there because both are routinely got wrong, so relay
+  them rather than paraphrasing: the hash in the active-pointer filename is
+  `sha256` of the OWNING SESSION id and not of the project path, and the hold comes
+  from path containment between the two trees in EITHER direction, not from a
+  shared git directory. `BLOCKED` is NOT terminal — only `DONE` and `CANCELLED`
+  are — so a run parked at `BLOCKED` holds the tree indefinitely. This row is
+  read-only like every other; Phase 3 below remains the report's only write and
+  never touches a run document.
+- **✅ autopilot: nonterminal durable run `<id>` … owned by THIS session** → the green form of
+  the same row, and deliberately NOT a finding. The row calls such a run an
+  `ordinary run in progress`, which means this session's own active pointer still designates it
+  and its stage is not `BLOCKED`. Say so and move on. It names no release command — releasing a
+  run this session owns cancels its own live generation — and it does not suppress the green
+  summary, which is why the arm exists. Every OTHER own-run form is a ⚠️, each stating a
+  different fact, so relay the clause the row actually printed and never translate one into
+  another. When it says
+  `the run is BLOCKED, which is NOT terminal`, the run still holds the tree and must be resumed
+  or cancelled from this session. When it says `no active pointer designates it`, the pointer is
+  gone — a torn begin is only one cause of that. And a pointer that
+  `could not be read, so whether the run is ordinary` or torn was not established is a missing
+  check rather than a verdict.
+- **⚠️ autopilot: … the run listing is incomplete / … were not opened at all** → the listing you
+  were given is bounded, and the row says so with the words `NOT a complete` account of what holds
+  this project. Relay that bound rather than summarizing the rows above it as the whole picture:
+  more runs may hold this project than the report named. Point the reader at the state directory
+  the row prints; offer no cleanup.
+- **⚠️ autopilot: `<N>` durable run document(s) that could not be read** → NOT the
+  same finding as no run. Such a record still holds its working tree while
+  `/zensu:autopilot-release` needs a run id it cannot supply. Name the files and
+  the directory the row prints and stop; offer no cleanup, and never suggest
+  deleting a run document counted by THIS row — one of them may still hold a
+  working tree a live run is driving, which is the whole reason the row exists.
+  The row below is the deliberate exception and states its own ground. The count excludes a document the report
+  could still read well enough to see a `DONE` or `CANCELLED` stage, because the
+  working-tree claim is false of such a record — NOT because it is harmless. Those
+  are counted by the row below instead, so a run file you know to be malformed may
+  legitimately be absent from THIS row and present in that one. Everything this row
+  counts is nonterminal or unreadable outright, which is what makes its
+  working-tree claim true of every member.
+- **⚠️ autopilot: `<N>` durable run document(s) this report does not accept whose
+  recorded stage is terminal** → the escaped set from the row above. Such a record
+  holds no working tree, but the Autopilot verbs validate EVERY document in that
+  directory, so one of these can still fail `/zensu:autopilot` and every occupancy
+  check closed for the whole project. Relay the names and the directory the row
+  prints. Do NOT offer `/zensu:autopilot-release` here — it applies a CANCEL to a
+  nonterminal run and refuses a terminal one, so it cannot clear this. Removal IS
+  the remedy here, and it is safe only because the record's own recorded stage
+  says `DONE` or `CANCELLED`, so it holds no tree. Say that when you offer it,
+  because this report does NOT validate that field: it reads the stage out of a
+  document it has just refused, in a directory any session in the project can
+  write. Leave the removal to the user, and never generalize this permission to
+  the row above.
 - **❌ state: this session's own workflow document is MISSING** → the record is
   intact and the document it anchors is gone, so the capability gate is denying
   every tool in this session. A deleted and re-created worktree causes it, because
