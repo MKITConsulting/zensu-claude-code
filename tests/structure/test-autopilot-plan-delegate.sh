@@ -493,4 +493,65 @@ if [ "$P8E_OK" = true ]; then
 else
   check "P8e fail-closed arm nonterminal gating" FAIL
 fi
+# --- P20 a /zensu:tdd refusal is not terminal for the surviving routes ---
+# Clause (B) opens by stating that a refusal "is never terminal for the others"
+# and then made a /zensu:tdd refusal terminal: it routed straight to
+# implement-directly, ABOVE the autopilot and pilot arms. So an approval message
+# reading "kein tdd, mach das mit autopilot" lost the route the user had just
+# named. The tdd-refusal arm is therefore tested LAST, after both other
+# affirmations, and says so. Both directive variants are asserted, because the
+# repo convention is that the strict and vanilla copies never move apart.
+# The ordering survived the four-route rewrite; only the qualifier's WORDING moved,
+# and the needle below travels with it.
+P20_OK=true
+P20_SEEN=0
+P20_WHY=""
+# Built here rather than inline: the needles carry apostrophes, and nesting them
+# inside the command substitution below is the quoting trap that made an
+# earlier spelling produce no output at all, which reads as a failure with
+# an empty cause.
+P20_A_NEEDLE="FIRST 'use autopilot'"
+P20_P_NEEDLE="THEN 'use pilot'"
+while IFS= read -r directive_line; do
+  case "$directive_line" in
+    *"plan above was just approved"*) ;;
+    *) continue ;;
+  esac
+  P20_SEEN=$((P20_SEEN + 1))
+  POS_OK="$(LINE="$directive_line" A_NEEDLE="$P20_A_NEEDLE" P_NEEDLE="$P20_P_NEEDLE" node -e '
+    const s = process.env.LINE;
+    // Anchor on the ROUTE arm, never on the bare verb: `use autopilot` also
+    // occurs inside the refusal example `never use autopilot`, which precedes
+    // the arm, so the bare needle measured the refusal list and the ordering
+    // conjunct held for any placement after it. Each anchor is additionally
+    // required to be unique, so a reworded duplicate cannot re-point it.
+    // The needles carry apostrophes, and this program lives in a bash
+    // single-quoted string, so they travel through the environment: an
+    // escaped apostrophe would terminate the program instead.
+    const aNeedle = process.env.A_NEEDLE, pNeedle = process.env.P_NEEDLE;
+    const autopilotArm = s.indexOf(aNeedle);
+    const pilotArm = s.indexOf(pNeedle);
+    const uniqueAnchors = s.split(aNeedle).length === 2 && s.split(pNeedle).length === 2;
+    const tddRefusal = s.indexOf("IS the implement-directly preference");
+    // The qualifier is what makes the refusal NON-terminal, and its spelling moved
+    // when the directive was rewritten to remove the two outward-facing routes for an
+    // unattended run: it read "only when no other route survived as an explicit
+    // affirmation above" and now names the same property as a fallthrough. Anchor on
+    // the property, not on the retired sentence — a stale needle here reports a
+    // correctly ordered directive as broken, which is what it did on that merge.
+    const qualifier = s.indexOf("fallthrough once no surviving route was chosen above");
+    const ok = autopilotArm > 0 && pilotArm > 0 && tddRefusal > 0 && qualifier > 0
+      && uniqueAnchors && tddRefusal > autopilotArm && tddRefusal > pilotArm;
+    process.stdout.write(ok ? "ok" : "autopilot=" + autopilotArm + " pilot=" + pilotArm + " refusal=" + tddRefusal + " qualifier=" + qualifier + " unique=" + uniqueAnchors);
+  ')"
+  [ "$POS_OK" = ok ] || { P20_OK=false; P20_WHY="$POS_OK"; }
+done < "$HOOK"
+# Both variants must have been seen; a directive that stopped matching the
+# selector would otherwise leave this check passing over an empty set.
+if [ "$P20_SEEN" -eq 2 ] && [ "$P20_OK" = true ]; then
+  check "P20 both directive variants test the /zensu:tdd refusal after the autopilot and pilot arms" PASS
+else
+  check "P20 both directive variants test the /zensu:tdd refusal after the autopilot and pilot arms (variants=$P20_SEEN why=${P20_WHY:-none})" FAIL
+fi
+
 echo "----"; echo "test-autopilot-plan-delegate: $PASS PASS / $FAIL FAIL"; [ "$FAIL" -eq 0 ]

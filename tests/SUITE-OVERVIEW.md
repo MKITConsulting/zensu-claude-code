@@ -400,10 +400,11 @@ on its own:
 | `windows-shard-2` | 8 | installed-wrapper, msys-runtime-boundaries, pre-edit-hook-mirror, reviewer-capability-gate, runtime-fixture-installer-concurrency, session-control-core, upgrade-hook-large-identity, versioned-plugin-upgrade |
 | `windows-shard-3` | 7 | autopilot-release-cli, deferred-reset-races, file-exists-path-transport, msys-special-plugin-module-boundaries, session-start-banner, vcs-review-marker-reconcile, windows-profile-lifecycle-contract |
 | `windows-shard-4` | 3 | best-solution-first, deferred-claim-adoption, tdd-state-junction-safety |
-| `windows-shard-5` | 7 | autopilot-plan-delegate, coverage-report-windows-paths, post-review-self-review-handoff, session-id-v1, session-safe-file-read, upgrade-provider-zero-launch, windows-portability-guards |
+| `windows-shard-5` | 6 | autopilot-plan-delegate, coverage-report-windows-paths, session-id-v1, session-safe-file-read, upgrade-provider-zero-launch, windows-portability-guards |
 | `windows-shard-6` | 5 | bash-source-write-gate, deferred-transfer-reset, marketplace-fixture, session-control-claude, upgrade-process-windows-boundaries |
 | `windows-shard-7` | 1 | stop-enforcer-self-review-routing |
 | `windows-shard-8` | 3 | session-trail-lineage, review-worker-evidence-lease, plan-payload-path-transport |
+| `windows-shard-9` | 1 | post-review-self-review-handoff |
 
 Runner guarantees: full manifest + audited command catalog validated before any child
 starts; every suite bound to a validated content digest; per-suite **and** 30-minute

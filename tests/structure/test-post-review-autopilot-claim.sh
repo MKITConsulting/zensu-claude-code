@@ -112,6 +112,14 @@ fi
 
 # Every partial-link variant must fail before the authoritative ticket claim.
 # The single Session Control document must remain byte-stable.
+#
+# Failing closed and DISCLOSING are separate properties, and this case carries
+# both. The decline is decided by THIS session's own record, so it is not one of
+# the two classes that stay silent — a silent no-op here is exactly what left a
+# chain at `ticket-unclaimed` with no cause reported on any channel. The ticket
+# value never travels in either direction. `P13d` in
+# `test-post-review-self-review-handoff.sh` pins the same contract for the
+# envelope-free prompt this fixture sends.
 PARTIAL_OK=true
 INDEX=0
 for KEY in autopilotRunId autopilotAttempt autopilotReturnStage chainId chainOutcome; do
@@ -133,14 +141,17 @@ for KEY in autopilotRunId autopilotAttempt autopilotReturnStage chainId chainOut
   STATE_DIGEST="$(digest "$SF")"
   STATE_INODE="$(inode "$SF")"
   OUT="$(run_hook "$SID_RAW" "$TICKET")"
-  [ -z "$OUT" ] || PARTIAL_OK=false
+  printf '%s' "$OUT" \
+    | grep -qF -- "was NOT recorded against this session's review chain" \
+    || PARTIAL_OK=false
+  ! printf '%s' "$OUT" | grep -qF -- "$TICKET" || PARTIAL_OK=false
   [ "$(digest "$SF")" = "$STATE_DIGEST" ] || PARTIAL_OK=false
   [ "$(inode "$SF")" = "$STATE_INODE" ] || PARTIAL_OK=false
 done
 if [ "$PARTIAL_OK" = true ]; then
-  check "C3 every partial Autopilot linkage leaves CAS state byte-identical" PASS
+  check "C3 every partial Autopilot linkage leaves CAS state byte-identical and discloses without echoing the ticket" PASS
 else
-  check "C3 every partial Autopilot linkage leaves CAS state byte-identical" FAIL
+  check "C3 every partial Autopilot linkage leaves CAS state byte-identical and discloses without echoing the ticket" FAIL
 fi
 
 # The hook must consume the structured claim result directly. A second

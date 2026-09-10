@@ -84,6 +84,40 @@ const expectedProfiles = [
   // binds before the profile envelope and a slow run surfaces as a suite TIMED_OUT
   // rather than as an abort that truncates the tail silently.
   'windows-shard-8',
+  // Shard 9 is solo, and it exists because TWO suites needed shard 8's headroom in the
+  // same release and only one of them fits. `post-review-self-review-handoff` reported
+  // TIMED_OUT at 720126 ms against its 720000 ms cap on shard 5 (run 33804565979, job
+  // 100811827008), after roughly 200 lines of new cases. The SHARD was not what bound
+  // — that job finished in 21m5s inside the 1800000 ms envelope — so the per-suite cap
+  // had to rise, and raising it in place would have left shard 5's worst case at about
+  // 27 of its 30 minutes.
+  //
+  // It cannot join shard 8: 292 s of resident work plus 848 s of measured
+  // `plan-payload-path-transport` plus this suite's own 720 s lower bound is about
+  // 1860 s against an 1800000 ms envelope, which is the abort-truncates-the-tail
+  // failure both notes above are written about. The arithmetic, not a preference,
+  // is what put it on a shard of its own.
+  //
+  // The cap shipped at 1080000, stated openly as NOT a measurement: the only figure
+  // that existed was the 720126 ms at which the suite had been killed, a lower bound,
+  // and 1080000 was 50% above it so the first green run could report a real number.
+  //
+  // It did, and it landed 1.5% under: run 34135206712 reported
+  // `PASSED post-review-self-review-handoff (1064039ms)` against that 1080000 ms cap,
+  // with the job itself finishing in 19m21s. That is "budget AT the measurement" for
+  // the fourth time in these notes — green by sixteen seconds, against a run-to-run
+  // spread this repo records elsewhere as 29%. The next run was a coin flip. The
+  // 50%-over placeholder was reasoned from a lower bound that turned out to sit far
+  // below the truth, which is the standing hazard of sizing against a kill rather
+  // than against a completion.
+  //
+  // The cap is 1500000 now: about 41% over the measured 1064039 ms, the same margin
+  // shard 8 took for `plan-payload-path-transport` and for the same stated reason —
+  // it covers the recorded spread while staying far below the 10x that stopped an
+  // earlier cap being a tripwire. The shard is solo, so the suite receives the whole
+  // 1800000 ms envelope and its own cap binds first, which is what makes a slow run
+  // surface as a suite TIMED_OUT rather than as an abort that truncates the tail.
+  'windows-shard-9',
 ];
 const expectedCommandCount = 43;
 const expectedCommandDigest = '759e33875689db60325a145b8357f592c9d2f0fe2418883b651d2673a4eea2df';

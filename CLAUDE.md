@@ -2481,6 +2481,18 @@ cross-version mixing arises.
   fence; a sixth needs its audience chosen deliberately, since the argument is positionally
   required and a two-argument call refuses rather than defaulting.
 
+**THREE checks OUTSIDE this section's own suites now read this library by source, and the
+remedy for each lives in a suite whose name gives no hint of it:** `S24` reads the verbatim
+declaration `const STAGES = new Set([`, `S25` reads the `team-review:v1:${digest(` spelling,
+and `S26` reads `const RETURN_STAGES = new Set([`. All three are in
+`tests/structure/test-post-review-tdd-scope.sh`, and they exist because the delegate hook
+hand-copies those vocabularies. Reformatting any of the three declarations — or renaming
+`digest` — reddens that suite. `S25` additionally SOURCES this library and CALLS
+`autopilot_team_review_operation_key`, so it is the one of the three that stops being a source
+scan: renaming that verb, or making the library unsourceable from a bare `bash -c`, reddens it
+too, and its `no-shell-producer` / `no-produced-key` arms are what name which half broke. §"Ticket-Keyed Review Consumption" carries the consumer-side
+account.
+
 Moving together with the scope: `_autopilot_owner_key`, `_autopilot_active_path`,
 `_autopilot_legacy_active_path`, `autopilot_workspace_root`, `_autopilot_session_workspace`,
 `_autopilot_read_workspace_critical`, `autopilot_read_workspace`,
@@ -4565,6 +4577,21 @@ non-empty by construction and reports `SLICE_FAILED` when it cannot. **State the
 forbids a DIFFERENT one still passes. An earlier form rejected two hand-picked spellings and
 would have passed `"default to running /zensu:autopilot"`.
 
+**A SECOND ordering rule lives in the same directive, and it is load-bearing for a
+different reason.** Clause (B) opens by stating that a refusal is never terminal for the
+other routes, and a `/zensu:tdd` refusal used to contradict that by routing straight to
+implement-directly ABOVE the autopilot and pilot arms — so an approval that refused TDD while naming the
+autopilot route dropped the route the user named. The refusal arm is now tested LAST, as the
+fallthrough once no surviving route was chosen above.
+`P20` in `tests/structure/test-autopilot-plan-delegate.sh` pins the ordering by byte
+offset over BOTH heredocs; its anchors must stay the route-arm spellings, since the bare
+verb also occurs inside the refusal EXAMPLES that precede the arm. **Coupled, and it
+bites from the other side:** `D13` in `tests/structure/test-plan-approved-delegate.sh`
+strips its two SANCTIONED strings out of the dispatch tail and then refuses ANY remaining
+unattended-run vocabulary there, so a symmetric parenthetical for the pilot route cannot be
+added to the tail without adding it to that sanctioned set first. The prohibition therefore
+lives inside clause (C) rather than in the tail.
+
 **The fast-path literal order is load-bearing.** `pilot` is a SUBSTRING of `autopilot`, so the
 longer literal is tested first; testing the shorter one first routes an autopilot request to
 the wrong skill. The directive states the order and the reason, because the matching is done by
@@ -4777,6 +4804,318 @@ ExitPlanMode was not established. Until it is, clause (C) is covered by `D13` al
 the emitted directive rather than a model's behaviour — and `D13`'s own detection of an unattended
 escalation is a spelling list, not a property, in BOTH the `(B)` and the tail slice.
 
+## Ticket-Keyed Review Consumption (`hooks/post-review-tdd-delegate.sh`)
+
+**The one-shot review ticket is what binds a `zensu:code-reviewer` completion to a chain, and
+nothing else is.** The prompt must carry the chain's OUTSTANDING ticket on a line of its own,
+spelled `REVIEW-TICKET: <ticket>`; it may sit anywhere, and further `REVIEW-TICKET:` lines are
+ignored. `PRE-MERGED FINDINGS (fan-out)` is still instructed by every producer and is NOT what
+the hook decides on. The Autopilot envelope is matched the same way — by CONTENT (exactly one
+DISTINCT REGEX-VALID line each of `ZENSU-DELEGATED-CALLER` / `AUTOPILOT-BINDING` /
+`AUTOPILOT-STAGE` — a byte-identical repeat is accepted, two DIFFERENT regex-valid lines are
+refused, and a binding or stage line failing its regex is dropped before the collapse rather
+than counted, so a quoted column-0 placeholder beside a real rendered line is accepted, while
+the caller line keeps the exact-literal test and has no such filter — no `AUTOPILOT-REVIEW-OP`,
+the caller value exact, both regexes, then every field compared against the durable run) — never by the lines it occupies.
+
+**The consumer is a PostToolUse hook on the `Agent` matcher.** `SubagentStop` carries only
+`hooks/review-evidence-subagent-stop.sh`, the pr-team-review evidence lease. A diagnosis that
+blames `SubagentStop` for an unrecorded review round is looking at the wrong hook; this
+paragraph exists because that mistake was made in a real session.
+
+**What the positional contract cost, measured rather than argued.** Marker on line 1, ticket
+on line 2, envelope on lines 3/4/5 — all MODEL-authored, and every deviation was a bare
+`exit 0`. Because `_tdd_issue_review_ticket_critical` does NOT require the previous ticket to
+be consumed, the chain then minted another ticket into the same mismatch. The observable was a
+chain parked at `chainShape` `ticket-unclaimed` with the reviewer having run and reported,
+`recoverable: false`, `stopBlockCount: 11`, and no cause on any channel. The positions bought
+nothing the ticket does not already buy: the claim transaction compares
+`s.reviewTicket === TICKET` under lock, so a reviewer spawned by another flow — `/zensu:cover`
+spawns `zensu:code-reviewer` without arming a chain — carries no ticket line and still cannot
+consume.
+
+**The uniqueness rule was REJECTED, and the reason is not hypothetical.** An earlier spelling
+required exactly one `REVIEW-TICKET:` line. The REVIEW PACKET quotes that literal at column 0
+whenever the reviewer is reviewing THIS repository, so the rule would have refused a correct
+consume in exactly the case this feature was built in. Matching against the outstanding ticket
+is strictly stronger and immune to quoting.
+
+**A decline decided by THIS session's own artifacts DISCLOSES; the silent set is narrower than
+a first draft claimed, and getting that boundary wrong is what left the largest strand
+open.** `decline()` emits one `additionalContext` line naming the gate when — and only when —
+the document is this session's (`session_id_hash` checked exactly as the claim checks it), the
+chain is live with an unclaimed ticket, AND the prompt showed CONSUME INTENT: the fan-out marker
+as the prompt's FIRST line, or a `REVIEW-TICKET:` line whose value already MATCHED the
+outstanding ticket. **Never spell that second signal as "carries a `REVIEW-TICKET:` line"** — a
+prompt merely QUOTING the literal satisfies it, column-0 examples live in this repository's own
+test files, and the remedy the disclosure then hands a chainless reviewer ROTATES this chain's
+outstanding ticket. Only the MATCHED ticket is unforgeable; the marker is ordinary text, and
+this repository itself renders it at column 0 inside the Stop block reason a model reads back,
+so an ANY-LINE marker test would arm the disclosure from quoted text. Requiring index 0 is what
+makes the quoted copy have to be the prompt's opening line, which no chainless flow produces.
+**Do not restate that as "neither signal can be supplied by a chainless flow"** — that was
+asserted here and is false. That conjunct is not decoration. `/zensu:cover`,
+`/zensu:wargame`, `/zensu:gauntlet-loop` and `/zensu:implement` all spawn `zensu:code-reviewer`
+without arming a chain; those completions already could not consume, and without the gate the
+disclosure would hijack them with a re-spawn instruction for a chain they were never part of,
+for as long as the ticket stayed outstanding.
+
+It fires at the ticket match, the envelope parse, the run-state read, the bound-envelope field
+comparison, and a failed workspace read. It deliberately does NOT fire for a bound prompt this
+session has no active durable run to bind to, because that state is UNREACHABLE: `EXPECT_BOUND`
+is derived from `PREFLIGHT_CONTEXT` and the classifier emits kind `bound` only when it is `yes`.
+An arm for it stood in the bound branch and could never be false, and this enumeration named it
+as live for as long as it stood — which is the cost that removed it, not the dead code itself. **The unreadable-record arms deliberately name NO owner** — `autopilot_read_active`
+fails closed on an UNATTRIBUTABLE record too (`rawOwnerOf` returns null for an unsafe or
+unparseable file, so it is validated rather than skipped), and `.zensu/state/` is writable from
+inside any session in the project, so a co-tenant's corrupt run record reaches that arm. Wording
+it as "this session's own record" asserted an ownership the read has not established. Same for
+the workspace-read FAILURE arm: it discloses because the chain would otherwise strand, NOT
+because it "confirms nothing about anyone else" — that read is owner-INDEPENDENT and fails on any
+invalid record in the shared directory, so the residual is that a foreign record which does not
+validate is observable through it. **Say "the workspace-holder read", never "another session's state" as a
+class** — the first spelling of this paragraph named the state-readability, outer-run-ownership
+and linkage preflights as foreign-decided, and that was FALSE: all of them read
+`NATIVE_TDD_STATE_FILE` under this session's own `SID`. Only `autopilot_read_workspace` is
+owner-independent, because a disclosure there would answer "is a
+foreign run holding this tree?" — the existence-oracle property
+`tests/structure/test-plan-payload-fallback.sh` F20/F32/F45c pin for the sibling plan gate. The
+mislabel cost a real gap: a bound chain whose model drifted its envelope against its own record
+exited silently with the ticket unclaimed, which is exactly the `ticket-unclaimed` strand this
+feature exists to end.
+
+**Say "the workspace-holder read ANSWERING rc 0", not "that read", and state BOTH silent
+classes plus the one arm outside both — a partition that omits a member reads as a guarantee and
+is not one.** A second draft of this section said the workspace read "alone stays silent" while
+three own-decided exits below it still exited bare, which is the same overstatement one clause
+narrower. The silent set is exactly TWO: (1) `autopilot_read_workspace` answering rc 0, the
+foreign-state question — its FAILURE arm is NOT in the class and discloses, so that the chain
+does not strand; and (2) the ticket claim and every exit below it. **A THIRD bare `exit 0`
+exists and belongs to neither class**: the `else` arm of the standalone/bound split, for a
+`PROMPT_AUTOPILOT_KIND` the parse above cannot emit. It is unreachable by construction and is
+named in the hook's own comment rather than omitted, because a reader counting `exit 0` finds it.
+
+**TWO remedies, selected by the caller, and one for every cause is worse than none.** The
+re-spawn recipe is correct only where the PROMPT was refused. Five gates refuse on DURABLE RUN
+STATE, and there a fresh ticket plus a re-spawn reproduces byte-identical inputs to the same
+gate — an UNBOUNDED loop, because this hook never blocks and the Stop cap therefore never
+arbitrates it, while the rotation strands any spawn still in flight. Those five pass `runstate`
+and receive a remedy that forbids both actions and points at `--autopilot-status`. The re-spawn
+remedy also states the reviewer AGENT's rule, not this hook's: first line the marker, SECOND
+line the ticket. Under-specifying there is worst at exactly this surface, whose audience has
+just produced a malformed header — a prompt that satisfies the hook but not the agent records
+the round and throws the fan-out away.
+
+The ticket claim is the second, and its justification is WEAKER than the silence — record
+it that way. The common cause is a concurrent delivery that already recorded the round, and
+`S13` in `tests/structure/test-post-review-tdd-scope.sh` counts routed outputs across 20
+parallel deliveries and requires exactly one winner, so disclosing there would make every loser
+look like a winner. But `tdd_consume_review_ticket_context` also returns 1 on a ticket-shape
+refusal, a missing `node`, and any `_tdd_locked_run` failure; those leave the chain stranded
+with nothing reported. That is a KNOWN GAP, not a proof — closing it needs the claim to
+distinguish "someone else took it" from "it could not be taken". Below the claim the ticket is
+already CONSUMED, so a silent exit there does not leave the chain in the `ticket-unclaimed`
+state this seam is about — which is why the class ends at the claim rather than at the file.
+**The ticket value is never echoed** — it is a capability token.
+
+**NO APOSTROPHE MAY APPEAR INSIDE A `node -e '...'` PROGRAM, and this file's own history is the
+argument.** A bash single-quoted string ends at the FIRST apostrophe, so one inside the JS —
+including inside a `//` comment, which is exactly where nobody looks — truncates the program.
+`bash -n` still passes, because the remainder re-quotes into valid shell; the assignment lands
+EMPTY and the feature is silently gone. A comment reading `this repo's own test files` disabled
+the consume-intent probe of this hook OUTRIGHT for a full review round, through five reviewers
+and a green `bash -n`; only a behavioural case caught it, and only because the probe's absence
+changed a decline. `S18` in `tests/structure/test-post-review-tdd-scope.sh` guards every such program under
+`hooks/` AND `tests/structure/` with THREE tests, and a parse check alone would not have been enough: a truncation
+whose prefix happens to be complete JavaScript compiles clean and ships dead, which the
+historical instance avoided only because its apostrophe sat inside two unclosed blocks. So it
+(a) compiles the slice with `new vm.Script`, (b) refuses a WORD CHARACTER immediately after the
+closing quote — after a real closing quote the shell continues with a redirect, a pipe, a paren,
+an operator or a newline — and (c) refuses a slice whose last line is a `//` comment, the shape
+the observed defect had. Its floor is close to the measured population rather than a round
+number well below it, because a regression that stopped descending into `hooks/lib/` would
+otherwise still report a clean scan over a fraction of the tree. Scope bound, stated rather than
+implied: it walks `hooks/**/*.sh` only, so `skills/*/scripts/` and `tests/` carriers are outside
+it. It is deliberately TREE-WIDE: a failure there can name a file that suite
+is not otherwise about, and the remedy is the apostrophe in the file the message names, never
+this suite. It carries a scanned-count floor, because a scanner that finds nothing and a
+scanner that ran over nothing report identically.
+
+**`emit_post_context` is defined at the TOP of the file on purpose.** It used to sit beside its
+three other call sites near the end; `decline` runs long before them, and a bash function must
+be defined before the CALL, not before another function that names it. Moving it back down
+makes every disclosure a silent no-op with every check green.
+
+**Coupled sites that move together.** The `REVIEW-TICKET: ` prefix literal is a GREP, not a
+list — an enumeration here was written once and undercounted its test carriers roughly
+threefold on the day it landed, which is the same failure this file records for
+`zensu:code-reviewer` and `scv1_`. **Before changing that literal, run
+`grep -rn 'REVIEW-TICKET: ' hooks/ skills/ agents/ docs/ tests/ evals/ CLAUDE.md` and change
+every site.** `CLAUDE.md` is on that list because it is itself a carrier — the instruction you
+are reading is one of the matches, exactly as §"Gate-Disable Prefixes" and §"Host-Refused
+Reviewer Spawn" record for their own literals.
+`evals/` is in that list because it carries the literal in ten files and an earlier spelling of
+this instruction omitted it — an eval that embeds a retired spelling grades a directive no
+session receives, exactly as `Z19b` records for the zen-mode carriers. Two
+facts a grep cannot supply: `agents/code-reviewer.md` selects its consume MODE on that literal
+plus the fan-out marker, and `docs/session-control.md` carries it inside a Workflow example.
+Then: the envelope's three line prefixes and their two regexes, plus the rule that
+bound-vs-standalone is decided by the DURABLE STATE and never by counting those prefixes in the
+prompt — deciding it from the prompt is what let one quoted literal refuse a standalone chain.
+
+**The arming predicate is not a duplicate of the claim's validator, and calling it one gets the
+failure direction backwards.** It MIRRORS the conjuncts `_tdd_consume_review_ticket_critical`
+and `_tdd_review_ticket_shape_ok` apply, and it must keep mirroring them: a predicate WEAKER
+than the claim arms a disclosure whose remedy the claim then refuses, so the model re-spawns
+correctly and is stranded anyway. **The requirement is UNPINNED, and calling `S11a` its bite was
+wrong.** That case (in `tests/structure/test-post-review-tdd-scope.sh` — name the suite, the id is
+not unique across this tree) deletes `vanilla` and asserts silence, but with the
+`typeof s.vanilla === "boolean"` conjunct removed from the pre-read the ticket still matches, no
+gate declines, and the only refusal is the CLAIM — which is in the silent class, so the case stays
+green. It is an instance of the shape, not a check that bites. The four `S7g`-`S7j` cases DO bite
+now, each with a same-fixture positive control that the intact document discloses for the identical
+prompt; without that control an absence proved nothing, because `break_state_field` rewrites the
+whole document and a hook that never disclosed at all would have satisfied every one of them. The
+quiet direction is still the OTHER one, and it is not the one to guard against.
+
+**Both `INNER_REVIEW_HEADERS` variants in `hooks/stop-chain-enforcer.sh` restate this contract
+to the model** — the standalone and the bound spelling — and they must move in lockstep, the
+same rule that file's own section states for every paired directive. `T60` in
+`tests/structure/test-stop-enforcer-self-review-routing.sh` derives the variant count from the
+source and requires the clause on every one, so adding a third variant fails there rather than
+shipping a directive that still teaches the retired positional rule.
+
+**A THIRD hand-copy family lives in this hook and neither roster named it:** the durable run
+record's own vocabulary, parsed inline in `node -e`. `["DONE", "CANCELLED"]` is a copy of
+`TERMINAL` in `hooks/lib/zensu-autopilot-state.sh`, which sits beside a SECOND set,
+`STOP_TERMINAL`, that also holds `BLOCKED` — so the copy silently picks one of two, and a
+`BLOCKED` outer run is therefore still classified non-terminal and refused; what changed is the CAUSE, which now names the observed stage instead of asserting the run is live. `ownerSessionId` and `stage` are
+read by name here too. The durable end state is for the library to answer "is this run terminal
+for an unbound claim" rather than have the consumer re-decide it. This hook also adds two
+carriers to the `scv1_` grep family §"Foreign-Chain Row" governs, both spelled
+`SID.slice("scv1_".length)`.
+
+
+**That family has a SECOND member and the roster must name both:** the run-stage vocabulary,
+copied inline as `RENDERABLE` in the standalone preflight of `hooks/post-review-tdd-delegate.sh`.
+Its owner is `STAGES` in `hooks/lib/zensu-autopilot-state.sh`, which carries a second copy of its
+own, `RENDERABLE_STAGES`; `S7u` in `tests/structure/test-autopilot-stop-enforcer.sh` compares
+those two and is bound to that FILE, so it cannot see this third copy. `S24` in
+`tests/structure/test-post-review-tdd-scope.sh` is what pins it — see the roster paragraph
+below. A stage
+added to `STAGES` alone makes the arm render `observed: unreported` for a stage the record
+actually named — not hypothetical: the copy shipped one review round missing `CONVERGE`.
+
+Operator-facing accounts: the `post-review-tdd-delegate.sh` row in `docs/configuration.md`,
+§"What binds a reviewer completion to the chain" in `docs/tdd-manager-workflow.md`,
+`agents/code-reviewer.md`'s own consume-mode paragraph, and `skills/tdd/SKILL.md` Phase 6 step 5
+— whose content-matching clause is UNPINNED: the only check over that file
+(`tests/structure/test-tdd-skill-review-fanout.sh` F10a) greps the header SPELLING, not the
+clause. That step deliberately states the header slip as a COST rather than a convention,
+because `agents/code-reviewer.md` selects consume mode positionally and stays stricter than this
+hook: a slip no longer strands the chain, but the reviewer then re-reviews from scratch and the
+round's whole fan-out is thrown away.
+`tests/structure/test-post-review-tdd-scope.sh` pins the ticket match, the disclosure and every
+byte-stable no-op; `tests/structure/test-post-review-self-review-handoff.sh` pins the envelope
+rules and the position-free acceptance; `tests/structure/test-tdd-skill-review-fanout.sh` F10a
+pins the reviewer agent's own consume-mode contract;
+`tests/structure/test-stop-enforcer-self-review-routing.sh` `T60` pins the Stop directive.
+
+**SIX checks in that first suite read files OTHER than the hook, and every one of them fires
+in the UNOBVIOUS direction. State the base or the count means nothing: THREE grade PROSE —
+`S19`, `S22`, `S23` — and THREE compare SOURCE across files: `S24`, `S25` and `S26`, all of
+which read `hooks/lib/zensu-autopilot-state.sh`. For the first three the trigger is a PROSE edit — two of them in
+`docs/`, the third in a hook HEADER COMMENT; for the last three it is an edit to that library.** The coupling fires in the direction this
+file records for `G12` under §"Gate-Disable
+Prefixes" and for `C39`/`C41`/`C42b`/`C51`/`C52`/`C53`/`C59` under §"Implementing-Phase Turn Counter". An ordinary
+documentation edit reddens a suite named for the delegate's TDD scope, and nothing points at the
+remedy from the side that changes. `S19` reads THIS file and `docs/tdd-manager-workflow.md`. It
+forbids one historical spelling of the live-diagnosis enumeration in each — do not look them up
+here, because quoting either literal in this paragraph is itself what turns the check red, which
+is how this sentence was first written and how it failed. Read them out of the suite. It also
+requires each file to keep DISCUSSING the case, and — since the round that widened it — requires
+every mention of that case in either carrier to sit within reach of an unreachability marker
+(`UNREACHABLE` or `does NOT fire`), which is the class-wide half a two-spelling blacklist could
+not give; that clause is the second reason this paragraph must describe rather than quote. It
+also pins the guard derivation at EXACTLY one occurrence, because a guard reintroduced with `=`
+rather than `!=` raises that count where a `-ge 1` bound would not see it. `S23` grades the
+`## Autopilot envelope` collapse clause in `docs/configuration.md` and
+`docs/tdd-manager-workflow.md` and requires the QUALIFIED wording — the unqualified "two lines
+that differ are refused" is false for a shape-invalid line, which the bound branch drops before
+collapsing. `S22` grades `hooks/user-prompt-tdd-reminder.sh`'s header. `S24` compares the
+delegate's `RENDERABLE` stage array against `const STAGES` in `hooks/lib/zensu-autopilot-state.sh`
+by MEMBER SET: `S7u` pins the library's two copies against each other but reads only that one
+file, so it is structurally blind to this third one, and a stage added there and not here makes
+the standalone decline render `observed: unreported` for a stage the record named. `S25` pins the
+`REVIEW_OP_RE` recognizer against a key the state library REALLY MINTED — it sources
+`autopilot_team_review_operation_key` and feeds its output to the captured pattern, rather than
+comparing spellings — because that divergence is fail-OPEN: a real header the pattern stops
+matching is read as absent and the bound envelope is accepted. The recognizer is the EXACT
+producer shape now (`key=team-review:v1:[a-f0-9]{64}`), which is the third copy of a shape the
+library already spells twice itself; the character class it replaced owned a domain neither side
+did, wider than anything either producer mints and narrower than the `nonEmpty(operationKey, 256)`
+the worker validator takes. `S26` compares the delegate's THREE return-stage copies — `STAGE_RE`'s alternation, the
+`PREFLIGHT_CONTEXT` validator over `s.autopilotReturnStage`, and the claim validator over
+`binding.returnStage` — against `RETURN_STAGES` in that same library.
+An end-to-end `CONVERGE` fixture was tried instead and REMOVED: `PLAN_APPROVED` sets
+`tdd.returnStage` to `GATES` unconditionally and `TDD_STARTED` only CHECKS the field rather than
+assigning from the payload, so a `--tdd-begin` naming `CONVERGE` is refused before any chain is
+armed. Before changing the terminal-stage pair the delegate hardcodes, run
+`grep -rnE '"DONE", *"CANCELLED"|DONE\|CANCELLED\)' hooks/` — an alternation, because the pair
+is spelled BOTH ways: the quoted JS form and, in `hooks/plan-approved-delegate.sh`, a bash `case`
+arm the JS pattern alone cannot see. Judge every hit; some are incidental array tails rather than
+the terminal pair. No numeral is written here on purpose — a hand-maintained count of a grep
+result is exactly what this file forbids for the `zensu:code-reviewer` and `scv1_` identities.
+`S24` incidentally compares ONE of those sites against its owner, as stage-array members; nothing
+compares the rest.
+
+**Version: `patch`.** Walked against §"Runtime Lineage" entry by entry: no context-record or
+workflow-state schema field, no strict key set, no hook added, removed or renamed and no
+matcher changed, no new config key, no attestation change. The hook's only output is
+`additionalContext` — the ADVISORY shape the hook-inventory exemption names — and it returns
+no `permissionDecision` in either direction.
+
+**An ownership comparison in the standalone outer-run arm was ADDED and then DELETED, and the
+retraction is recorded because the reasoning that produced it was wrong twice.** `rc 0` from
+`autopilot_read_active` ALREADY proves ownership: the `read-active` worker in
+`hooks/lib/zensu-autopilot-state.sh` runs `if (state.ownerSessionId !== expectedOwnerSessionId)
+fail(2, ...)` before its only `process.exit(0)`, and `readRunInventory` additionally skips
+records it can prove belong to another owner. A comparison in the consumer was therefore dead
+code whose only reachable effect would have been a THIRD silent class on a branch the producer
+cannot reach. The measurement that seemed to contradict this was a FIXTURE defect, not a
+product one: `test-post-review-self-review-handoff.sh` P15 derived its "foreign" owner key from
+the SAME raw session id the case binds, and `sessionKey` is a pure function of that string, so
+the case was a byte-for-byte duplicate of the own-owner one. Its sibling `corrupt-pointer`
+corrupted `autopilot-active.json`, the LEGACY pointer that is read only when the owner-keyed one
+is absent — which `begin` had just written — so it duplicated the same case again. Both are
+fixed, and P15 now asserts per-case texts. Do not reintroduce the comparison from an older
+reading of this paragraph.
+
+**Known gap, NARROWED DELIBERATELY and named rather than hidden: a prompt that misses BOTH
+signals declines silently.** Marker not on line 1 AND a ticket that is not the outstanding one
+leaves the chain exactly where this feature found it — unclaimed ticket, nothing on any channel.
+It is a real hole in AC-006, and it is the price of closing the security one: an any-line marker
+test arms the disclosure from quoted text, and dropping the intent gate entirely lets any
+chainless `zensu:code-reviewer` completion be handed a remedy that rotates a live ticket. The
+direction was chosen deliberately — a lost diagnostic beats a rotated ticket — and the shape
+that would close both needs a signal a quotation cannot forge which also survives a decorated
+marker, which the workflow document does not currently carry.
+
+**Known gaps, accepted and named:** the hook now reads the workflow document one step earlier
+than it used to, so a completion that previously exited at a prompt gate now performs one
+extra read — no mutation, and `S1` still proves no state file is created for an unrelated
+agent, but a port should not assume the old ordering. The disclosure is UNRATED and repeats on
+every qualifying delivery; nothing latches it, the same cost §"Implementing-Phase Turn Counter"
+records for its own stderr notice. And `/zensu:doctor` still reports `ticket-unclaimed` only as
+a chain shape with its `NEXT_COMMAND`; it carries no row saying a completion was declined, so
+the disclosure is visible to the MODEL and not to the operator.
+
+**Port-relevant.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` carry the same delegate
+against different harnesses and were NOT included in this change. A port owns the host half —
+which payload field carries the prompt and the session id, and whether its harness even fires a
+PostToolUse for an agent completion — plus the decision to disclose at all, which is only sound
+on a host whose `additionalContext` reaches the model that must retry.
+
 ## Host-Refused Reviewer Spawn (`hooks/lib/reviewer-spawn-denial-v1.js`)
 
 The Stop chain-enforcer demands a `zensu:code-reviewer` spawn. When the HOST
@@ -4844,15 +5183,28 @@ Ten things are coupled and must move together:
   degrades one row, while a top-level require would take the whole report down.
   `DENIAL_RULE` in `stop-chain-enforcer.sh` carries the same identity again — and so
   do seven further files. **Do not treat any enumeration of them as complete.** The
-  literal lives in TEN files under `hooks/` (34 matching lines, re-measured 2026-08-31
-  after this branch merged `main`, which is exactly the occasion the note below warns about
-  — the two branches carried different counts and the merged tree has neither; `grep -rc … | awk` summed — and the grep instruction below is itself one of them,
-  which is why the number moves when this very paragraph is edited),
+  literal lives in TEN files under `hooks/` (37 matching lines, `grep -rc … | awk` summed,
+  re-measured 2026-09-02 after §"Ticket-Keyed Review Consumption" added the decline
+  disclosure, then its fix round added the consume-intent probe, then its THIRD round split
+  the one remedy into two — each of the three named the agent in its own text, the same
+  unobvious direction this paragraph warns about, and T47 caught every one of them rather
+  than anything in the edited file. The third is worth naming precisely, because the LINE
+  count moved without the agent being mentioned once more: the single remedy string held the
+  literal twice on ONE line, and splitting it into two `remedy=` branches put the same two
+  mentions on two lines. It was 36 earlier that day, 35 before that and 34 on
+  2026-08-31, re-measured after this branch merged `main`, which is exactly the occasion
+  the note below warns about: the two branches carried different counts and the merged tree
+  had neither. The grep instruction below is itself one of the matches, which is why the
+  number moves when this very paragraph is edited),
   including two functional comparisons a rename breaks silently:
   `post-review-tdd-delegate.sh`'s `SUBAGENT_TYPE` test and `claude-principal-v1.js`'s
   list entry. A census in prose goes stale the next time a site is added, which is why
   the instruction is a GREP and not a list: **before renaming this identity, run
-  `grep -rn 'zensu:code-reviewer' hooks/` and change every site.** ONE pair is
+  `grep -rn 'zensu:code-reviewer' hooks/ skills/ agents/ docs/ evals/ templates/` and change
+  every site.** The CENSUS below is scoped to `hooks/` and stays that way — it is what T47's
+  arithmetic measures — but the RENAME is not: the literal lives in a further eleven files under
+  `skills/`, four under `docs/` and twenty-odd under `evals/`, and an instruction scoped to
+  `hooks/` while saying "every site" sends a maintainer past all of them. ONE pair is
   machine-checked — `test-doctor.sh` P1by pins `REVIEWER_AGENT` against the exporting
   `REVIEWER_SUBAGENT_TYPE`, the pair most likely to diverge because the require is lazy
   and nothing at load time compares them. A SECOND carrier is pinned, and the count
