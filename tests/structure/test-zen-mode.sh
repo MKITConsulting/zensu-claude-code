@@ -1387,10 +1387,20 @@ else
   # A case-count floor as well as the exit status: `node --test` exits 0 for a
   # file that registers ZERO cases, so the status alone cannot tell a green run
   # from a file that stopped being discovered.
-  Z29_PASS_N="$(printf '%s\n' "$Z29_OUT" | sed -n 's/^# pass \([0-9]*\)$/\1/p;s/^. pass \([0-9]*\)$/\1/p' | head -1)"
-  Z29_SKIP_N="$(printf '%s\n' "$Z29_OUT" | sed -n 's/^# skipped \([0-9]*\)$/\1/p;s/^. skipped \([0-9]*\)$/\1/p' | head -1)"
+  #
+  # `^[^ ]*` and never `^.`: node writes its summary as `ℹ pass 25`, and that mark is
+  # THREE bytes, which a single-byte `.` cannot match under a byte locale. The old
+  # pattern read nothing, so `pass` resolved to empty and `fail` to `unknown`, and Z29
+  # and Z31 both reported a fully green unit suite as failing on every macOS run — the
+  # same byte-versus-character hazard CLAUDE.md already records for the anchor marks
+  # themselves. The first field is the only thing that varies between node's reporters
+  # (`#` on the TAP one), so matching one space-free token covers both and depends on no
+  # locale. It cannot match node's failure detail either: those lines are INDENTED, and
+  # this pattern requires the count to be the second field of an unindented line.
+  Z29_PASS_N="$(printf '%s\n' "$Z29_OUT" | sed -n 's/^[^ ]* pass \([0-9]*\)$/\1/p' | head -1)"
+  Z29_SKIP_N="$(printf '%s\n' "$Z29_OUT" | sed -n 's/^[^ ]* skipped \([0-9]*\)$/\1/p' | head -1)"
   [ -n "$Z29_SKIP_N" ] || Z29_SKIP_N=0
-  Z29_FAIL_N="$(printf '%s\n' "$Z29_OUT" | sed -n 's/^# fail \([0-9]*\)$/\1/p;s/^. fail \([0-9]*\)$/\1/p' | head -1)"
+  Z29_FAIL_N="$(printf '%s\n' "$Z29_OUT" | sed -n 's/^[^ ]* fail \([0-9]*\)$/\1/p' | head -1)"
   [ -n "$Z29_FAIL_N" ] || Z29_FAIL_N=unknown
   Z29_SEEN=$(( ${Z29_PASS_N:-0} + Z29_SKIP_N ))
   # The floors are the REGISTRATION step for a new case, the convention this repo
@@ -1427,10 +1437,10 @@ elif ! command -v node >/dev/null 2>&1; then
 else
   Z31_OUT="$(node --test "$Z31_UNIT" 2>&1)"
   Z31_RC=$?
-  Z31_PASS_N="$(printf '%s\n' "$Z31_OUT" | sed -n 's/^# pass \([0-9]*\)$/\1/p;s/^. pass \([0-9]*\)$/\1/p' | head -1)"
-  Z31_SKIP_N="$(printf '%s\n' "$Z31_OUT" | sed -n 's/^# skipped \([0-9]*\)$/\1/p;s/^. skipped \([0-9]*\)$/\1/p' | head -1)"
+  Z31_PASS_N="$(printf '%s\n' "$Z31_OUT" | sed -n 's/^[^ ]* pass \([0-9]*\)$/\1/p' | head -1)"
+  Z31_SKIP_N="$(printf '%s\n' "$Z31_OUT" | sed -n 's/^[^ ]* skipped \([0-9]*\)$/\1/p' | head -1)"
   [ -n "$Z31_SKIP_N" ] || Z31_SKIP_N=0
-  Z31_FAIL_N="$(printf '%s\n' "$Z31_OUT" | sed -n 's/^# fail \([0-9]*\)$/\1/p;s/^. fail \([0-9]*\)$/\1/p' | head -1)"
+  Z31_FAIL_N="$(printf '%s\n' "$Z31_OUT" | sed -n 's/^[^ ]* fail \([0-9]*\)$/\1/p' | head -1)"
   [ -n "$Z31_FAIL_N" ] || Z31_FAIL_N=unknown
   Z31_SEEN=$(( ${Z31_PASS_N:-0} + Z31_SKIP_N ))
   if [ "$Z31_RC" -eq 0 ] && [ -n "$Z31_PASS_N" ] && [ "$Z31_FAIL_N" = "0" ] && [ "$Z31_SEEN" -ge "$Z31_FLOOR" ]; then
