@@ -2455,7 +2455,10 @@ var AUTOPILOT_MAX_EVENTS = 512;
 function autopilotPlainObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
-// `exact` in the owner, and it replaced a joined-string comparison at BOTH key-set sites.
+// `exact` in the owner, and it replaced a joined-string comparison at every key-set site
+// in this mirror — the two in `autopilotRun` and the pointer one in
+// `autopilotPointerDesignates`. Say "every site", never a count: the first wording said
+// BOTH while the pointer site still carried the old form.
 // `Object.keys(value).sort().join(',')` is not injective: one key that CONTAINS the
 // separator spells the whole set, so `{"prOpen,teamReview": 0}` satisfied the `effects`
 // mirror. `effects` and `evidence` are the two members no later statement reads, so for
@@ -2610,7 +2613,8 @@ function autopilotRun(file, stem, projectRoot) {
   }
   // The STRICTER verdict, carried beside the loose one. It mirrors the parts of
   // `stateValid` a read-side copy can hold cheaply: the stage-to-next-action map,
-  // the exact key sets of the five nested objects, a non-empty event ledger, and
+  // the exact key sets of every member of `AUTOPILOT_NESTED_KEYS`, a non-empty event
+  // ledger, and
   // the nested VALUE rules that need no owner vocabulary this reader does not
   // already carry.
   // DIRECTION, because the first spelling of this comment had it backwards and
@@ -2747,9 +2751,11 @@ function autopilotPointerDesignates(dir, owner, runId) {
         return (e && e.code === 'ENOENT') ? 'absent' : null;
       }
     }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-    var keys = Object.keys(parsed).sort().join(',');
-    if (keys !== 'runId,schemaVersion') return null;
+    // THIRD key-set site, and it kept the joined-string form for one round after the other
+    // two were converted. The collision is not exploitable here — a single key literally
+    // named `runId,schemaVersion` dies at the `schemaVersion` test below — but leaving one
+    // site on the weaker shape is how the next one comes back.
+    if (!autopilotExactKeys(parsed, ['runId', 'schemaVersion'])) return null;
     if (parsed.schemaVersion !== 1) return null;
     if (typeof parsed.runId !== 'string' || !AUTOPILOT_ID_RE.test(parsed.runId)) return null;
     return parsed.runId === runId;

@@ -4585,11 +4585,24 @@ rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
 # P1nz17 — the MAX_EVENTS bound, in both directions plus its constant. The bound shipped
 # with no executed case and no mirror pin, unlike every sibling constant here, so an owner
 # that LOWERS it would leave this reader wider — the green-glyph-over-a-project-that-
-# fails-closed direction. 513 entries is ~56 KB, well under the reader's own byte cap, so
-# unlike the pre-existing over-long fixture it actually reaches `ownerWouldAccept`.
+# fails-closed direction. The ledger size is DERIVED from the owner's own value rather than
+# hardcoded: a legitimate bump on both sides would otherwise turn this red with a message
+# printing a matching pair and no stated cause. At the owner's 512 that is ~56 KB, well
+# under the reader's own byte cap, so unlike the pre-existing over-long fixture it actually
+# reaches `ownerWouldAccept`.
 rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
-AP_EV513="$(node -e '
-  var n = 513, out = [];
+AP_MAXEV_OWNER="$(node -e '
+  var m = /const MAX_EVENTS = (\d+);/.exec(require("fs").readFileSync(process.argv[1], "utf8"));
+  process.stdout.write(m ? m[1] : "UNDERIVABLE");
+' "$AP_OWNER_SRC")"
+AP_MAXEV_COPY="$(node -e '
+  var m = /var AUTOPILOT_MAX_EVENTS = (\d+);/.exec(require("fs").readFileSync(process.argv[1], "utf8"));
+  process.stdout.write(m ? m[1] : "UNDERIVABLE");
+' "$REPORT")"
+AP_EV_OVER="${AP_MAXEV_OWNER:-0}"
+case "$AP_MAXEV_OWNER" in ([0-9]*) AP_EV_OVER=$((AP_MAXEV_OWNER + 1)) ;; (*) AP_EV_OVER=0 ;; esac
+AP_EV513="$(AP_EV_N="$AP_EV_OVER" node -e '
+  var n = Number(process.env.AP_EV_N), out = [];
   for (var i = 0; i < n; i += 1) {
     out.push({ eventId: "ev_" + i, eventType: i === 0 ? "START" : "APPROVE",
       payloadDigest: "", payload: {}, fromStage: null, toStage: "GATES" });
@@ -4600,19 +4613,30 @@ RUN_PATCH_JSON="$AP_EV513" ap_run_valid run_evmany GATES "$AP_OWN" "/w/t"
 ap_pointer "$AP_OWN" run_evmany
 AP_EVMANY_OUT="$(ap_report bound "$AP_OWN")"
 rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
-AP_MAXEV_OWNER="$(node -e '
-  var m = /const MAX_EVENTS = (\d+);/.exec(require("fs").readFileSync(process.argv[1], "utf8"));
-  process.stdout.write(m ? m[1] : "UNDERIVABLE");
-' "$AP_OWNER_SRC")"
-AP_MAXEV_COPY="$(node -e '
-  var m = /var AUTOPILOT_MAX_EVENTS = (\d+);/.exec(require("fs").readFileSync(process.argv[1], "utf8"));
-  process.stdout.write(m ? m[1] : "UNDERIVABLE");
-' "$REPORT")"
+# ACCEPTING control at EXACTLY the bound, so the block drives both directions its own
+# comment claims. Without it an off-by-one to `<` in the reader passes every check here,
+# and the block's only green discrimination would be borrowed from a different fixture in
+# a different check.
+AP_EVAT="$(AP_EV_N="$AP_MAXEV_OWNER" node -e '
+  var n = Number(process.env.AP_EV_N), out = [];
+  for (var i = 0; i < n; i += 1) {
+    out.push({ eventId: "ev_" + i, eventType: i === 0 ? "START" : "APPROVE",
+      payloadDigest: "", payload: {}, fromStage: null, toStage: "GATES" });
+  }
+  process.stdout.write(JSON.stringify({ events: out }));
+')"
+RUN_PATCH_JSON="$AP_EVAT" ap_run_valid run_evat GATES "$AP_OWN" "/w/t"
+ap_pointer "$AP_OWN" run_evat
+AP_EVAT_OUT="$(ap_report bound "$AP_OWN")"
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
 if printf '%s' "$AP_EVMANY_OUT" | grep -F 'run run_evmany' | grep -qF 'the owner validates more' \
-  && [ "$AP_MAXEV_OWNER" != "UNDERIVABLE" ] && [ "$AP_MAXEV_COPY" = "$AP_MAXEV_OWNER" ]; then
-  check "P1nz17 a ledger over MAX_EVENTS fails the stricter check, and the bound matches its owner" PASS
+  && printf '%s' "$AP_EVAT_OUT" | grep -F 'autopilot: nonterminal durable run run_evat' | grep -qF '✅' \
+  && ! printf '%s' "$AP_EVAT_OUT" | grep -qF 'the owner validates more' \
+  && [ "$AP_MAXEV_OWNER" != "UNDERIVABLE" ] && [ "$AP_MAXEV_COPY" = "$AP_MAXEV_OWNER" ] \
+  && [ "$AP_EV_OVER" -gt 0 ]; then
+  check "P1nz17 a ledger over MAX_EVENTS fails the stricter check, one at the bound does not, and the bound matches its owner" PASS
 else
-  check "P1nz17 MAX_EVENTS must gate and mirror (many=$AP_EVMANY_OUT owner=$AP_MAXEV_OWNER copy=$AP_MAXEV_COPY)" FAIL
+  check "P1nz17 MAX_EVENTS must gate both directions and mirror (many=$AP_EVMANY_OUT at=$AP_EVAT_OUT owner=$AP_MAXEV_OWNER copy=$AP_MAXEV_COPY over=$AP_EV_OVER)" FAIL
 fi
 rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
 
@@ -4623,17 +4647,30 @@ rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
 # the WHOLE report with one `diagnostics renderer failed` line, and every other row a user
 # came for disappears with it. Both halves are asserted: the row still renders, and the
 # renderer did not fail.
+# TWO fixtures, because the conjuncts short-circuit. A one-element `[null]` ledger dies at
+# the FIRST guard and never reaches the last-entry read, so the tail guard could be deleted
+# with this check green — the identical trap this file records for P1nz16's first arm, and
+# it bit here next. The second fixture puts a valid first entry ahead of a null tail so the
+# chain reaches the tail read with a non-object.
 rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
 RUN_PATCH_JSON='{"events":[null]}' ap_run_valid run_evnull GATES "$AP_OWN" "/w/t"
 ap_pointer "$AP_OWN" run_evnull
 AP_EVNULL_OUT="$(ap_report bound "$AP_OWN")"
 rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+RUN_PATCH_JSON='{"events":[{"eventId":"ev_first","eventType":"START","payloadDigest":"","payload":{},"fromStage":null,"toStage":"GATES"},null]}' \
+  ap_run_valid run_evtailnull GATES "$AP_OWN" "/w/t"
+ap_pointer "$AP_OWN" run_evtailnull
+AP_EVTAILNULL_OUT="$(ap_report bound "$AP_OWN")"
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
 if printf '%s' "$AP_EVNULL_OUT" | grep -qF 'autopilot: nonterminal durable run run_evnull' \
   && printf '%s' "$AP_EVNULL_OUT" | grep -F 'run run_evnull' | grep -qF 'the owner validates more' \
-  && ! printf '%s' "$AP_EVNULL_OUT" | grep -qF 'diagnostics renderer failed'; then
-  check "P1nz18 a non-object ledger entry fails the check without killing the report" PASS
+  && ! printf '%s' "$AP_EVNULL_OUT" | grep -qF 'diagnostics renderer failed' \
+  && printf '%s' "$AP_EVTAILNULL_OUT" | grep -qF 'autopilot: nonterminal durable run run_evtailnull' \
+  && printf '%s' "$AP_EVTAILNULL_OUT" | grep -F 'run run_evtailnull' | grep -qF 'the owner validates more' \
+  && ! printf '%s' "$AP_EVTAILNULL_OUT" | grep -qF 'diagnostics renderer failed'; then
+  check "P1nz18 a non-object ledger entry at either end fails the check without killing the report" PASS
 else
-  check "P1nz18 a non-object ledger entry must not throw (got: $AP_EVNULL_OUT)" FAIL
+  check "P1nz18 a non-object ledger entry must not throw (head=$AP_EVNULL_OUT tail=$AP_EVTAILNULL_OUT)" FAIL
 fi
 rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
 
