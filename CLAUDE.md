@@ -2361,7 +2361,8 @@ hand; the release pipeline owns it.
   named THREE copies and prescribed a needle blind to the predicate family, so a maintainer
   changing the owner's `natural` got no hit naming it. Several
   are pinned — P1na, P1nm, P1nm1, P1nn and, since the `ownerWouldAccept` inputs got theirs,
-  P1nz5, P1nz6, P1nz7, P1nz11 and P1nz12 in `tests/structure/test-doctor.sh` — and the pins compare
+  the `P1nz` family in `tests/structure/test-doctor.sh`, named as a FAMILY because every attempt
+  to enumerate it here has gone stale within a round — and the pins compare
   spellings, not behaviour, so a semantic change that keeps the spelling passes. P1nz5 compares
   THREE sources rather than two: `ap_run_valid` inlines the stage-to-action table a third time,
   and a fixture that agrees with the renderer by construction cannot fail on the drift it exists
@@ -2411,8 +2412,11 @@ hand; the release pipeline owns it.
   `W31a`-`W31k` and `W32`/`W32a`-`W32d`/`W32z` families, four of which bind a Session Control record
   and invoke `zensu-log.sh`. `test-doctor.sh` is not on that shard at all but does run in the weekly
   Windows Safety structure inventory, and it gained the whole `P1na`-`P1nz` family together with
-  the `P1nm1` and `P1nz1`-`P1nz13` checks added in the rounds that followed. **Named as ID
-  RANGES rather than as numerals, deliberately** — this file's own rule about hand-maintained
+  the `P1nm1` check and the whole `P1nz` family added in the rounds that followed. **Named as ID
+  FAMILIES rather than as numerals or endpoints, deliberately** — a RANGE was tried and went
+  stale twice: it read `P1na`-`P1ny` while `P1nz` already existed, and then `P1nz1`-`P1nz13`
+  while the tree carried `P1nz20`. An endpoint is a hand-maintained numeral wearing a range's
+  clothes, and this bullet is where that keeps being rediscovered — this file's own rule about hand-maintained
   censuses applies to its own gap list, and it did not hold here: both numerals were written once
   and were wrong within the same change, reading "ten" and "eighteen" against a tree that carried 19
   and 43. A range is cheaper to keep true than a numeral, but it is NOT self-maintaining: it also
