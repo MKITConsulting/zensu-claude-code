@@ -2455,6 +2455,20 @@ var AUTOPILOT_MAX_EVENTS = 512;
 function autopilotPlainObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
+// `exact` in the owner, and it replaced a joined-string comparison at BOTH key-set sites.
+// `Object.keys(value).sort().join(',')` is not injective: one key that CONTAINS the
+// separator spells the whole set, so `{"prOpen,teamReview": 0}` satisfied the `effects`
+// mirror. `effects` and `evidence` are the two members no later statement reads, so for
+// them the collision survived to the return — a green glyph, an "all checks green"
+// summary, and the "the owner validates more" caveat suppressed, over a record
+// `readRunInventory` fails the whole project on. A length compare plus `hasOwnProperty`
+// per key is what the owner does and needs no vocabulary this reader lacks.
+function autopilotExactKeys(value, want) {
+  if (!autopilotPlainObject(value)) return false;
+  return Object.keys(value).length === want.length && want.every(function (key) {
+    return Object.prototype.hasOwnProperty.call(value, key);
+  });
+}
 var AUTOPILOT_OWNER_C0_RE = /[\u0000-\u001f]/;
 function autopilotOwnerNonEmpty(value, max) {
   return typeof value === 'string' && value.length > 0 && value.length <= max
@@ -2525,11 +2539,8 @@ function autopilotRun(file, stem, projectRoot) {
   var looseStage = typeof parsed.stage === 'string' ? parsed.stage : '';
   var shapeReject = AUTOPILOT_TERMINAL.indexOf(looseStage) !== -1
     ? AUTOPILOT_TERMINAL_UNSHAPED : null;
-  var keys = Object.keys(parsed).sort();
-  var expected = AUTOPILOT_STATE_KEYS.slice().sort();
-  var expectedWs = AUTOPILOT_STATE_KEYS.concat(['workspaceRoot']).sort();
-  var keyString = keys.join(',');
-  if (keyString !== expected.join(',') && keyString !== expectedWs.join(',')) return shapeReject;
+  if (!autopilotExactKeys(parsed, AUTOPILOT_STATE_KEYS)
+    && !autopilotExactKeys(parsed, AUTOPILOT_STATE_KEYS.concat(['workspaceRoot']))) return shapeReject;
   // The owner refuses on the VALUE too, and a record it refuses fails the whole
   // project's inventory closed — so describing it here as an ordinary run would
   // pair a description with a remedy that cannot execute.
@@ -2652,10 +2663,7 @@ function autopilotRun(file, stem, projectRoot) {
       || autopilotSha256(parsed.approvedPlanSha256));
   if (ownerWouldAccept) {
     ownerWouldAccept = Object.keys(AUTOPILOT_NESTED_KEYS).every(function (field) {
-      var value = parsed[field];
-      if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-      var want = AUTOPILOT_NESTED_KEYS[field].slice().sort().join(',');
-      return Object.keys(value).sort().join(',') === want;
+      return autopilotExactKeys(parsed[field], AUTOPILOT_NESTED_KEYS[field]);
     });
   }
   if (ownerWouldAccept) {

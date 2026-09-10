@@ -3390,6 +3390,14 @@ ap_run() { # ap_run <runId> <stage> <owner> [workspaceRoot|-] [projectRoot]
         rec[k] = mergeable ? Object.assign({}, cur, nxt) : nxt;
       });
     }
+    // REPLACE, not merge, and it exists because the merge above cannot express a nested
+    // object with FEWER keys than the default. A key-set case needs exactly that: patching
+    // an object into `effects` adds a key rather than replacing the set, so the fixture
+    // never reaches the comparison it is written for and passes for the wrong reason.
+    if (process.env.RUN_REPLACE_JSON) {
+      var replace = JSON.parse(process.env.RUN_REPLACE_JSON);
+      Object.keys(replace).forEach(function (k) { rec[k] = replace[k]; });
+    }
     process.stdout.write(JSON.stringify(rec));
   ' > "$AP_STATE/autopilot-run-$1.json"
 }
@@ -4544,7 +4552,10 @@ rm -f "$AP_STATE"/autopilot-run-*.json
 # `bypasses` gap closed one conjunct earlier: a record `readRunInventory` fails the whole
 # project on was earning the OK glyph and an "all checks green" summary.
 rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
-RUN_PATCH_JSON='{"events":[{"eventId":"ev_first","eventType":"APPROVE","payloadDigest":"","payload":{},"fromStage":null,"toStage":"PLANNING"}]}' \
+# ONE variable against the control. The array holds a single element, so `events[0]` is
+# also the last entry: an arm that also moved `toStage` would fail on the TAIL rule and
+# stay green with the START conjunct deleted, which is what the first spelling did.
+RUN_PATCH_JSON='{"events":[{"eventId":"ev_first","eventType":"APPROVE","payloadDigest":"","payload":{},"fromStage":null,"toStage":"GATES"}]}' \
   ap_run_valid run_evstart GATES "$AP_OWN" "/w/t"
 ap_pointer "$AP_OWN" run_evstart
 AP_EVSTART_OUT="$(ap_report bound "$AP_OWN")"
@@ -4568,6 +4579,89 @@ if printf '%s' "$AP_EVSTART_OUT" | grep -F 'run run_evstart' | grep -qF 'the own
   check "P1nz16 a first event that is not START and a tail toStage that disagrees each fail the stricter check" PASS
 else
   check "P1nz16 the cheap events conjuncts must gate the stricter check (start=$AP_EVSTART_OUT tail=$AP_EVTAIL_OUT ok=$AP_EVOK_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+
+# P1nz17 — the MAX_EVENTS bound, in both directions plus its constant. The bound shipped
+# with no executed case and no mirror pin, unlike every sibling constant here, so an owner
+# that LOWERS it would leave this reader wider — the green-glyph-over-a-project-that-
+# fails-closed direction. 513 entries is ~56 KB, well under the reader's own byte cap, so
+# unlike the pre-existing over-long fixture it actually reaches `ownerWouldAccept`.
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+AP_EV513="$(node -e '
+  var n = 513, out = [];
+  for (var i = 0; i < n; i += 1) {
+    out.push({ eventId: "ev_" + i, eventType: i === 0 ? "START" : "APPROVE",
+      payloadDigest: "", payload: {}, fromStage: null, toStage: "GATES" });
+  }
+  process.stdout.write(JSON.stringify({ events: out }));
+')"
+RUN_PATCH_JSON="$AP_EV513" ap_run_valid run_evmany GATES "$AP_OWN" "/w/t"
+ap_pointer "$AP_OWN" run_evmany
+AP_EVMANY_OUT="$(ap_report bound "$AP_OWN")"
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+AP_MAXEV_OWNER="$(node -e '
+  var m = /const MAX_EVENTS = (\d+);/.exec(require("fs").readFileSync(process.argv[1], "utf8"));
+  process.stdout.write(m ? m[1] : "UNDERIVABLE");
+' "$AP_OWNER_SRC")"
+AP_MAXEV_COPY="$(node -e '
+  var m = /var AUTOPILOT_MAX_EVENTS = (\d+);/.exec(require("fs").readFileSync(process.argv[1], "utf8"));
+  process.stdout.write(m ? m[1] : "UNDERIVABLE");
+' "$REPORT")"
+if printf '%s' "$AP_EVMANY_OUT" | grep -F 'run run_evmany' | grep -qF 'the owner validates more' \
+  && [ "$AP_MAXEV_OWNER" != "UNDERIVABLE" ] && [ "$AP_MAXEV_COPY" = "$AP_MAXEV_OWNER" ]; then
+  check "P1nz17 a ledger over MAX_EVENTS fails the stricter check, and the bound matches its owner" PASS
+else
+  check "P1nz17 MAX_EVENTS must gate and mirror (many=$AP_EVMANY_OUT owner=$AP_MAXEV_OWNER copy=$AP_MAXEV_COPY)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+
+# P1nz18 — a ledger ENTRY that is not an object must fail the predicate, never throw
+# inside it. `eventValid` is not mirrored, so the two entries this reader reads may be
+# anything, and `.zensu/state/` is writable from inside any session in the project. With
+# the guards deleted, `parsed.events[0].eventType` throws, `main()`'s only wrapper replaces
+# the WHOLE report with one `diagnostics renderer failed` line, and every other row a user
+# came for disappears with it. Both halves are asserted: the row still renders, and the
+# renderer did not fail.
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+RUN_PATCH_JSON='{"events":[null]}' ap_run_valid run_evnull GATES "$AP_OWN" "/w/t"
+ap_pointer "$AP_OWN" run_evnull
+AP_EVNULL_OUT="$(ap_report bound "$AP_OWN")"
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+if printf '%s' "$AP_EVNULL_OUT" | grep -qF 'autopilot: nonterminal durable run run_evnull' \
+  && printf '%s' "$AP_EVNULL_OUT" | grep -F 'run run_evnull' | grep -qF 'the owner validates more' \
+  && ! printf '%s' "$AP_EVNULL_OUT" | grep -qF 'diagnostics renderer failed'; then
+  check "P1nz18 a non-object ledger entry fails the check without killing the report" PASS
+else
+  check "P1nz18 a non-object ledger entry must not throw (got: $AP_EVNULL_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+
+# P1nz19 — the nested key-set comparison must be `exact`, not a joined string. Comparing
+# `Object.keys(value).sort().join(",")` against the joined target is NOT injective: a
+# single key that CONTAINS the separator collides with the whole set. `effects` and
+# `evidence` are the two members no later statement reads, so for them the collision
+# survives to the return — `ownerWouldAccept` stays true, the row renders ✅ plus "all
+# checks green", and the "the owner validates more" caveat is suppressed too, for a record
+# `readRunInventory` fails the whole project on. The owner's `exact` compares a LENGTH and
+# then each key by `hasOwnProperty`, which needs no vocabulary this reader lacks.
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+RUN_REPLACE_JSON='{"effects":{"prOpen,teamReview":0}}' ap_run_valid run_evjoin GATES "$AP_OWN" "/w/t"
+ap_pointer "$AP_OWN" run_evjoin
+AP_EVJOIN_OUT="$(ap_report bound "$AP_OWN")"
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+# Control: the SAME field replaced with the key set the owner accepts keeps the glyph, so
+# the arm discriminates the comparison rather than the replace channel itself.
+RUN_REPLACE_JSON='{"effects":{"prOpen":{},"teamReview":{}}}' ap_run_valid run_evjoinok GATES "$AP_OWN" "/w/t"
+ap_pointer "$AP_OWN" run_evjoinok
+AP_EVJOINOK_OUT="$(ap_report bound "$AP_OWN")"
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
+if printf '%s' "$AP_EVJOIN_OUT" | grep -F 'run run_evjoin' | grep -qF 'the owner validates more' \
+  && printf '%s' "$AP_EVJOINOK_OUT" | grep -F 'autopilot: nonterminal durable run run_evjoinok' | grep -qF '✅' \
+  && ! printf '%s' "$AP_EVJOINOK_OUT" | grep -qF 'the owner validates more'; then
+  check "P1nz19 a single nested key spelling the joined set does not satisfy the key-set mirror" PASS
+else
+  check "P1nz19 the nested key-set mirror must be exact, not a joined string (bad=$AP_EVJOIN_OUT ok=$AP_EVJOINOK_OUT)" FAIL
 fi
 rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
 
