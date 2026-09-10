@@ -3372,7 +3372,10 @@ ap_run() { # ap_run <runId> <stage> <owner> [workspaceRoot|-] [projectRoot]
       rec.events = [{ eventId: "e1", eventType: "START", payloadDigest: "", payload: {},
         fromStage: null, toStage: rec.stage }];
     }
-    // RAW JSON patch, applied LAST so it can defeat any arm above it. It exists because
+    // RAW JSON patch, applied after every RUN_VALID arm so it can defeat any of them — and
+    // itself overridable by the RUN_EVENT_COUNT and RUN_REPLACE_JSON blocks below, either of
+    // which replaces what this one may have set. It read "applied LAST" while two blocks
+    // already ran after it. It exists because
     // several owner rules are TYPE tests as much as shape tests and no positional
     // argument can express a non-string value: `sha256` in the owner is
     // `typeof value === "string" && /.../.test(value)`, and `RegExp.prototype.test`
@@ -4662,8 +4665,13 @@ rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
 # here are NEGATIVE, and nothing else in this suite asserts the literal positively, so a
 # reword of the fallback would leave the "and the renderer did not fail" half asserted by
 # nothing. An underivable needle fails the check rather than matching everything.
+# Comments are stripped first, the way P1nz20 does it. Without that, a reword of the
+# fallback that left the old phrase behind in a renderer comment would have the needle
+# derive from the comment, and BOTH negative conjuncts below would become unfalsifiable.
 AP_RENDER_FAIL_LIT="$(node -e '
-  var m = /zensu-doctor: (diagnostics renderer failed)/.exec(require("fs").readFileSync(process.argv[1], "utf8"));
+  var src = require("fs").readFileSync(process.argv[1], "utf8")
+    .split("\n").filter(function (l) { return !/^\s*\/\//.test(l); }).join("\n");
+  var m = /zensu-doctor: (diagnostics renderer failed)/.exec(src);
   process.stdout.write(m ? m[1] : "");
 ' "$REPORT")"
 rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
@@ -4717,23 +4725,44 @@ else
 fi
 rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json
 
-# P1nz20 — the joined-string key comparison must not come back ANYWHERE in the renderer.
-# P1nz19 grades one site through a fixture; nothing forbade the shape itself, which is
-# exactly why the pointer site kept it for a round after the other two were converted, and
-# why a fourth site would arrive unobserved. SOURCE-scoped by necessity: two of the three
-# sites cannot be reached with a colliding record at all. Comments are stripped first, since
-# the helper's own header names the retired form on purpose.
+# P1nz20 — the joined-string key comparison must not come back. P1nz19 grades one site
+# through a fixture; nothing forbade the shape itself, which is exactly why the pointer site
+# kept it for a round after the other two were converted, and why a fourth site would
+# arrive unobserved. SOURCE-scoped by necessity: two of the three sites cannot be reached
+# with a colliding record at all.
+#
+# TWO halves, because a negative scan alone enforces a LAYOUT rather than the property. The
+# POSITIVE half is layout-independent: the helper must still be CALLED, so a site converted
+# away from it turns this red whatever replaced it. A FLOOR, so adding a site cannot make it
+# stale — but the floor has to be the CURRENT count, not one below it. Measured on a bite:
+# with the pointer site converted away the count fell from 5 to 4, and a floor of 4 let the
+# positive half pass while only the negative one fired. That is the whole point of having
+# two, so removing a site deliberately means lowering this number deliberately.
+# The NEGATIVE half flattens whitespace first, so a chain
+# wrapped mid-expression — which this renderer does as a matter of style — is caught rather
+# than passing; it requires a comparison operator in the same statement, so an ordinary
+# display join beside a key count is not reported as the defect; and it strips full-line
+# comments, because the helper header names the retired form on purpose.
+#
+# STATED BOUND: the negative half sees one STATEMENT. The same defect written as two —
+# assigning the join to a variable and comparing on the next statement — is invisible to
+# it, and the positive half is what covers that case.
+AP_EXACT_CALLS="$(grep -c 'autopilotExactKeys(' "$REPORT")"
 AP_JOINED_HITS="$(node -e '
   var src = require("fs").readFileSync(process.argv[1], "utf8")
-    .split("\n").filter(function (l) { return !/^\s*\/\//.test(l); }).join("\n");
-  var re = /Object\.keys\([^)]*\)[^;\n]*\.join\(/g, n = 0, m;
-  while ((m = re.exec(src)) !== null) { n += 1; }
+    .split("\n").filter(function (l) { return !/^\s*\/\//.test(l); }).join("\n")
+    .replace(/\s+/g, " ");
+  var n = 0;
+  src.split(";").forEach(function (stmt) {
+    if (!/[!=]==?/.test(stmt)) { return; }
+    if (/Object\.keys\([^;]*\)[^;]*\.join\(/.test(stmt)) { n += 1; }
+  });
   process.stdout.write(String(n));
 ' "$REPORT")"
-if [ "$AP_JOINED_HITS" = "0" ]; then
-  check "P1nz20 no key set in the renderer is compared through a joined string" PASS
+if [ "$AP_JOINED_HITS" = "0" ] && [ "$AP_EXACT_CALLS" -ge 5 ]; then
+  check "P1nz20 every key set routes through the exact helper and none through a joined string" PASS
 else
-  check "P1nz20 a joined-string key comparison is back in the renderer ($AP_JOINED_HITS site(s))" FAIL
+  check "P1nz20 key-set comparison shape regressed (joined=$AP_JOINED_HITS exactCalls=$AP_EXACT_CALLS)" FAIL
 fi
 
 # P1nz14 — the three remaining nullable/identifier conjuncts. Each is a REQUIRED conjunct
