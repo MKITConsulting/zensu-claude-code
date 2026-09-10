@@ -2896,10 +2896,10 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
         + ' owns would cancel its own live generation';
     } else {
       ownership = 'owned by another session';
-      // The release verb is SCOPED to the caller's own tree: it refuses with exit 6
+      // Both guided verbs are SCOPED to the caller's own tree: each refuses with exit 6
       // unless the run's tree contains the caller's or the caller's contains it.
       // Sibling worktrees under one project root share this state directory, so a
-      // bare release instruction here would name a command that refuses. The row
+      // bare adopt or release instruction here would name a command that refuses. The row
       // cannot resolve the caller's tree (this renderer takes no git dependency),
       // so it says where the command has to be issued from rather than implying
       // anywhere will do. Both directions are named: `mayHoldWorkspace` ORs
@@ -2907,9 +2907,11 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
       // NESTED inside the held tree is a valid caller too. Naming only the
       // containing direction contradicted the occupancy sentence this same row
       // prints two clauses later, and sent a reader out of a tree that works.
-      remedy = 'if that session is gone for good, report it and run /zensu:autopilot-release'
-        + ' after the user says yes — from the working tree that run holds, or one that'
-        + ' contains it or sits inside it, because only a sibling worktree is refused';
+      remedy = 'if that session is gone for good, report it and offer /zensu:autopilot-adopt to'
+        + ' continue it here, or /zensu:autopilot-release to cancel it — adoption first, because a'
+        + ' cancel cannot be undone — each only after the user says yes, and from the working tree'
+        + ' that run holds, or one that contains it or sits inside it, because only a sibling'
+        + ' worktree is refused';
     }
     // An OWN run whose pointer still designates it is an ordinary run in
     // progress, not a finding: it renders OK, so a live Autopilot run does not

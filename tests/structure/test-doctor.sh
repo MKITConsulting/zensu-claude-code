@@ -3502,7 +3502,8 @@ else
 fi
 
 # P1nc — a FOREIGN nonterminal run is reported, names the run, and prescribes the
-# GUIDED release form. `--confirm` must be absent FROM THE AUTOPILOT ROW: that row
+# GUIDED adoption form FIRST and the GUIDED release form second — a cancel reached for
+# first cannot be undone. `--confirm` must be absent FROM THE AUTOPILOT ROW: that row
 # is read by the model, and a complete invocation there routes around the only
 # place consent lives. The negative is SCOPED to the row rather than to the whole
 # report, because other rows legitimately carry their own `--confirm` remedy — the
@@ -3513,9 +3514,11 @@ AP_FOREIGN_OUT="$(ap_report bound "$AP_OWN")"
 if printf '%s' "$AP_FOREIGN_OUT" | grep -qF 'autopilot: nonterminal durable run run_foreign_a at stage BLOCKED' \
   && printf '%s' "$AP_FOREIGN_OUT" | grep -qF 'owned by another session' \
   && printf '%s' "$AP_FOREIGN_OUT" | grep -qF '/zensu:autopilot-release' \
+  && printf '%s' "$AP_FOREIGN_OUT" | grep -F 'autopilot: nonterminal durable run' \
+    | awk 'BEGIN { ok = 0 } { a = index($0, "/zensu:autopilot-adopt"); r = index($0, "/zensu:autopilot-release"); if (a > 0 && r > 0 && a < r) ok = 1 } END { exit !ok }' \
   && ! printf '%s' "$AP_FOREIGN_OUT" | grep -F 'autopilot: nonterminal durable run' \
     | grep -qF -- '--confirm'; then
-  check "P1nc a foreign nonterminal run is named with the guided release form and no --confirm" PASS
+  check "P1nc a foreign nonterminal run names the guided adoption form before the guided release form, with no --confirm" PASS
 else
   check "P1nc foreign run row (got: $AP_FOREIGN_OUT)" FAIL
 fi
@@ -3778,6 +3781,7 @@ AP_DRIFT_OK=true
 for AP_PHRASE in \
   'autopilot: nonterminal durable run' \
   'durable run document(s) that could not be read' \
+  '/zensu:autopilot-adopt' \
   '/zensu:autopilot-release' \
   'owned by THIS session' \
   'ordinary run in progress' \

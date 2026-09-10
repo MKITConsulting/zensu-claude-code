@@ -39,7 +39,7 @@ the session that is actually working in its tree.
 
 **The machine cannot infer the takeover.** The SessionStart payload carries no predecessor
 id, and nothing else in the record establishes descent. That is why this needs a human to say
-yes, and why the id must come from a refusal rather than from a directory listing.
+yes, and why the id must come from a surface that named it rather than from a directory listing.
 
 ## What it does NOT do
 
@@ -81,13 +81,15 @@ yes, and why the id must come from a refusal rather than from a directory listin
 
 ## Step 1 — report, do not act
 
-Take the run id from the refusal that named it. Do not list `.zensu/state/` to find one: a
-run id is an ordinary filename there, and the refusal is what ties the id to the tree you are
-standing in.
+Take the run id from a surface that named it — a refusal, the `autopilot:` row of
+`/zensu:doctor`, or the `--autopilot-status` stderr disclosure. Do not list `.zensu/state/` to
+find one: a run id is an ordinary filename there, and a naming surface is what ties the id to
+the working tree the run holds, which is the tree this skill has to be run from (or one
+containing it or inside it).
 
 Report to the user, in their language:
 
-- the run id and its stage, exactly as the refusal stated them;
+- the run id and its stage, exactly as the naming surface stated them;
 - that adoption makes THIS session the owner so the run can continue, and that
   `/zensu:autopilot-release` is the alternative that cancels it instead;
 - that nothing about the run's progress changes — no stage moves, no event is written.

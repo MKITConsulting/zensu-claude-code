@@ -878,9 +878,9 @@ value nobody reads.
 **Two invariants, both learned from the chain-recovery precedent:**
 
 1. **No record field is ever added.** Provenance is a workflow `history` entry
-   under the reserved phase `RUNTIME_ADOPTED`, protected in the same two guard
-   sites as `CHAIN_RECOVERED` (`zensu-log.sh --phase` and `tdd_write_phase` /
-   `_tdd_write_phase_critical`). A field would itself be the breaking bump this
+   under the reserved phase `RUNTIME_ADOPTED`, protected in the same two guard sites as `CHAIN_RECOVERED` (`zensu-log.sh --phase`, which holds its
+   own literal, and `tdd_write_phase` / `_tdd_write_phase_critical`, which delegate theirs to
+   `_tdd_reserved_provenance`). A field would itself be the breaking bump this
    feature exists to survive, and would cost a `minor` — which would wedge every
    session then running.
 2. **No bypass-ledger entry.** The ledger records gate ESCAPES so that everything
@@ -1584,14 +1584,15 @@ breaking release and would wedge every session then running. And the ledger reco
 gate ESCAPES so that everything rendered under "Gates bypassed" is true — this escaped
 no gate, because the document a gate would have read was already gone.
 `BASELINE_REBUILT` and the `baseline-rebuilt: ` reason prefix are therefore reserved
-beside `CHAIN_RECOVERED` and `RUNTIME_ADOPTED` at the same guard bodies those two use:
-`zensu-log.sh --phase`, `tdd_write_phase` and `_tdd_write_phase_critical` — THREE bodies
-carrying TWO literals each. State the unit or the number means nothing: an earlier
-wording here read "all four ... (`zensu-log.sh --phase` ×2, `zensu-tdd-phase.sh` ×2)",
-which counts literals in one place and functions in the other and matches no count in
-the tree. §"Adopting a Record Across a Lineage Break" and §"Chain Shape & Rearm Receipt"
-both say "two guard sites" for this SAME set, bundling the phase library's pair as one;
-that is the same set counted differently, not a fourth answer.
+beside `CHAIN_RECOVERED` and `RUNTIME_ADOPTED`, and all three are enforced at the same three
+entry points: `zensu-log.sh --phase`, `tdd_write_phase` and `_tdd_write_phase_critical`. The
+LITERALS live in only TWO bodies — `zensu-log.sh --phase` and `_tdd_reserved_provenance`, which
+both phase-library write functions call — TWO literals each, matched case-INSENSITIVELY in both,
+because the reserved-provenance extraction moved them out of the write functions. State the unit
+or the number means nothing: counted as entry points it is three, counted as literal-carrying
+bodies it is two, and §"Adopting a Record Across a Lineage Break" and §"Chain Shape & Rearm
+Receipt" both say "two guard sites" for this SAME set, which since the extraction is also the
+body count. A rename lands in those two bodies; the write functions hold no literal to find.
 
 **And the reserved phase is evidence a heal HAPPENED, never evidence that none did.**
 The entry is the feature's only disclosure, and it is erasable by exactly the session it
@@ -2313,8 +2314,8 @@ of either set would fail an entire project closed for every installation that pr
 change — the same FORWARD-direction hazard this section already records for `workspaceRoot`.
 Only `ownerSessionId`, an existing field, takes a new value. Provenance therefore lives in the
 ADOPTING session's workflow `history` under the reserved phase `AUTOPILOT_ADOPTED`, protected in
-the same three guard sites as `CHAIN_RECOVERED` and `RUNTIME_ADOPTED` (`zensu-log.sh --phase`
-plus `tdd_write_phase` / `_tdd_write_phase_critical`), with `tdd_write_autopilot_adopted` in
+the same three guard sites as `CHAIN_RECOVERED` and `RUNTIME_ADOPTED` (`zensu-log.sh --phase`, which holds its own literal, plus `tdd_write_phase` /
+`_tdd_write_phase_critical`, which delegate theirs to `_tdd_reserved_provenance`), with `tdd_write_autopilot_adopted` in
 `zensu-tdd-phase.sh` as its ONE sanctioned writer. That writer appends history and touches
 neither `phase` nor `step_id`: those belong to the TDD FSM and an adoption must never move a
 running chain's cursor. The provenance write is BEST-EFFORT and deliberately cannot fail the
@@ -2414,8 +2415,8 @@ restoring it from an older reading of this paragraph turns B22 red.
 REFUSED rather than half-moved, so a chain whose owner is gone still needs its own repair; `ownerSessionId` remains an
 unauthenticated field in a session-writable directory, so this is a guard against accidental
 takeover and NOT an authorization boundary — say it that way, exactly as the own-run fence
-paragraph above already does for itself; and `/zensu:doctor` still carries no Autopilot row, so the
-new verb joins the enumeration of refusals that are the only place a held workspace is visible.
+paragraph above already does for itself; and — no longer a gap since the run-visibility change — `/zensu:doctor` now carries an
+`autopilot:` row that names a held run and offers the guided adoption before the release.
 **A fourth gap is the provenance's own lifetime, and it differs from both precedents.**
 `CHAIN_RECOVERED` and `RUNTIME_ADOPTED` describe the SESSION, whose lifetime the workflow
 document shares; `AUTOPILOT_ADOPTED` describes a RUN that outlives it, and the three full
@@ -4647,8 +4648,9 @@ narrows the terminus only WHILE a chain is wedged — `--chain-recover` drops th
 the terminus becomes reachable again, by design. Renaming the field without updating the
 conjunct removes even that narrowing.
 
-Two more sites hardcode the provenance literals rather than importing them:
-`zensu-log.sh --phase` and `tdd_write_phase` / `_tdd_write_phase_critical` reserve the
+Two more sites hardcode the provenance literals rather than importing them: `zensu-log.sh --phase`,
+and `_tdd_reserved_provenance` — the one body `tdd_write_phase` and `_tdd_write_phase_critical` both
+delegate to — reserve the
 `CHAIN_RECOVERED` phase and the `chain-recovered: ` reason prefix so only the repair can
 mint a provenance entry. Renaming `RECOVERY_HISTORY_PHASE` or `RECOVERY_HISTORY_REASON_PREFIX`
 without updating those guards leaves them reserving a dead name and makes the `recoveries`
