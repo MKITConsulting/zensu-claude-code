@@ -4,7 +4,8 @@ description: >
   [Zensu] Read-only setup diagnostics for the Zensu plugin. Runs
   hooks/lib/zensu-doctor.sh and prints a four-block ✅/⚠️/❌ table: CLI &
   tooling (zensu CLI + auth, node, the code-forge CLI gh/glab + auth resolved
-  from the repo's provider, lockfile-backed Playwright MCP config/readiness), plugin integrity
+  from the repo's provider, lockfile-backed Playwright MCP config/readiness, and the browser
+  consent gate's registration plus its per-session execution marker), plugin integrity
   (hooks.json wired to files on disk, plugin.json ↔ marketplace.json version
   sync), config (valid JSON, the quoted-boolean trap where "true"/"false" as a
   string is silently ignored by strict === checks, and whether the permission rules
@@ -390,6 +391,56 @@ classifier will refuse a spawn, not only when the whole table is green.
 - **⚠️ verify-feature: not checked** → the wrapper reported no verify state at all, so the
   report says nothing about the browser path. This is a missing check rather than an
   all-clear; run `/zensu:doctor` from a session whose plugin root resolves.
+- **✅ verify-feature gate: executed in this session** → a live marker whose NAME carries this
+  session's key records the gate deciding a navigation, so the gate is being exercised and not
+  merely registered. The rows above are derived from files on disk in the plugin's own tree and
+  cannot tell a session whose hooks ran from one whose hooks are switched off host-side; this row
+  gets closer. TWO bounds ride on it and neither is optional. The session binding is the
+  FILENAME, and `<project>/.zensu/state` is writable from any session in the project, so this is
+  evidence about a file rather than an attestation — `docs/gates.md` states that in as many
+  words. And this row reads under the session RECORD's project root, while the browser broker
+  anchors on its own working directory, so a green row here does not establish that the broker
+  will approve. Ordinarily nothing to do; if a navigation is nonetheless being refused, read the
+  broker's own refusal. TWO of its six refusal states name the tree it read under — the one for a
+  state directory it could not open, and the one for a marker walk that hit its budget — so a
+  refusal naming no tree is telling you something narrower rather than withholding it.
+- **✅ verify-feature gate: executed in this session, on a prompted origin** → the live marker
+  records the gate ASKING about the navigation rather than clearing it from memory. The marker is
+  written BEFORE the answer exists, so a prompt that was DECLINED leaves the same marker live for
+  its window — the residual `docs/gates.md` names — and this row therefore reports the question,
+  not the answer. The same two bounds as the row above apply. Ordinarily nothing to do.
+- **✅ verify-feature gate: registered, and no live execution marker was read for this session** →
+  the pair is installed and the state directory held no live marker. TWO ordinary causes, and
+  naming only the first is what this row used to do: no browser navigation has reached the gate
+  yet, OR a marker it wrote has passed the window the gate keeps markers for. The row therefore
+  says what the probe proved — no LIVE marker — rather than asserting that no navigation
+  occurred, and it is stated rather than left silent so that "installed" is never read as
+  "enforced". Nothing to do.
+- **⚠️ verify-feature gate: execution not checked** → no bound session key or no recorded
+  project root was available, so the session-keyed marker was never looked for AND none can be
+  written either: consent mode can still ask, and the broker then refuses the navigation for want
+  of a marker. A missing check rather than an all-clear. Do NOT read it as "this session has no
+  Session Control record" — the wrapper sets this state for every binding verdict except `bound`,
+  including the three where a valid record is sitting in plugin data and the binding row above
+  prescribes `/zensu:adopt-session`. Take the remedy from that row, or launch with the
+  parent-environment navigation policy, which needs no hook.
+- **⚠️ verify-feature gate: execution could not be judged** → the decision module did not load,
+  did not export the reader, the state directory could not be read, or the read hit the marker
+  budget before it could answer. A contract fault is reported as one rather than collapsing into
+  the benign row. Reinstall the plugin, check that `<project>/.zensu/state` is readable, and clear
+  stale `verify-consent-exec-*` files from it — and nothing else in that directory, which also
+  holds this session's workflow document, whose removal makes every tool deny until the session is
+  adopted again. That scope clause is the broker's own and is not optional here: Phase 3 below
+  forbids a glob, `find`, parent traversal or worktree discovery against this directory, so the
+  only sanctioned spelling is `rm -f` on the exact marker names you have listed and read. The
+  fourth cause is the one neither of the first two remedies touches, and it is the same condition
+  the broker names as "too many execution markers".
+- **⚠️ verify-feature gate: execution state not recognized (…)** → the wrapper reported a state
+  this report has no row for. A missing check rather than an all-clear; the parenthesis names the
+  value. Do NOT read it as the two halves having drifted — the wrapper derives its word from a
+  closed accept-list, so every value that derivation can produce already has a row above, and this
+  row is reachable only when a caller supplies `ZDOC_VERIFY_EXEC` itself. The renderer claims
+  exactly that much and no more, and so does this bullet.
 - **❌ binding: this session has no valid Session Control record** → the cause
   behind the `Blocked: the immutable Zensu session binding is unavailable or
   invalid` denial. Nothing in this session can be repaired in place; start a

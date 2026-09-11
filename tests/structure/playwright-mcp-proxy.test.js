@@ -32,6 +32,24 @@ const {
   run,
 } = require('../../scripts/playwright-mcp-proxy.js');
 
+// Consent mode no longer self-approves on registration alone: it requires evidence that the
+// gate RAN in this session for the origin. These fixtures exercise the approval path, so each
+// needs a project whose state directory carries that evidence — writing it is what a real
+// PreToolUse gate does immediately before the broker sees the call.
+function consentProject(origins) {
+  const consent = require('../../hooks/lib/verify-consent-v1.js');
+  const projectRoot = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-consent-proj-')));
+  const stateDir = path.join(projectRoot, '.zensu', 'state');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const key = 'scv1_' + 'c'.repeat(64);
+  origins.forEach((origin) => {
+    const evidencePath = consent.evidencePathFor(path.join(stateDir, `verify-consent-${key}.json`), origin);
+    const written = consent.writeExecutionEvidence(evidencePath, origin, { projectRoot, verdict: 'allowed' });
+    assert.equal(written.ok, true, `evidence for ${origin}`);
+  });
+  return projectRoot;
+}
+
 function rawPolicy(mode, origin, evidenceMode = 'declared-safe', routes = ['/inventory']) {
   return JSON.stringify({
     version: 1,
@@ -449,7 +467,8 @@ test('the consent recorder predicate is graded across the same truth table as it
 });
 
 test('consent mode approves loopback navigations, keeps the floor, and refuses remote and unapproved origins', async () => {
-  const policy = await resolveStartupPolicy('', { pluginRoot: PLUGIN_ROOT });
+  const projectRoot = consentProject(['http://127.0.0.1:5173']);
+  const policy = await resolveStartupPolicy('', { pluginRoot: PLUGIN_ROOT, projectRoot });
   assert.equal(policy.mode, 'consent');
   assert.throws(() => assertAllowedUrl(policy, 'http://127.0.0.1:5173/inventory'), /origin is not approved/);
   const approved = approveConsentOrigin(policy, 'http://127.0.0.1:5173/inventory');
@@ -479,7 +498,8 @@ test('consent mode approves loopback navigations, keeps the floor, and refuses r
 });
 
 test('consent-mode call boundary approves on navigate and tabs-new and blocks everything else', async () => {
-  const policy = await resolveStartupPolicy('', { pluginRoot: PLUGIN_ROOT });
+  const projectRoot = consentProject(['http://127.0.0.1:5173', 'http://127.0.0.1:7777', 'http://127.0.0.1:9000']);
+  const policy = await resolveStartupPolicy('', { pluginRoot: PLUGIN_ROOT, projectRoot });
   let upstreamCalls = 0;
   let activeUrls = ['about:blank'];
   const server = {
@@ -657,6 +677,251 @@ test('the locked upstream runtime exposes exactly the broker allowlist after fil
   assert.deepEqual(result.tools.map((tool) => tool.name).sort(), ALLOWED_TOOLS);
 });
 
+test('AC-101/AC-102 consent self-approval requires live in-session gate evidence, re-read on every first approval of an origin', async () => {
+  // resolveStartupPolicy enters consent mode from a FILE READ in the broker's own tree, so
+  // registration is a claim rather than a fact about the running session. Without this check a
+  // host with hooks disabled — or a broker launched from a different tree than the one whose
+  // registry the host loaded — self-approves every loopback origin unprompted, which is MORE
+  // than the deny-everything state consent mode replaced.
+  const consent = require('../../hooks/lib/verify-consent-v1.js');
+  const pluginRoot = path.resolve(__dirname, '../..');
+  const projectRoot = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-broker-')));
+  const stateDir = path.join(projectRoot, '.zensu', 'state');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const key = 'scv1_' + 'b'.repeat(64);
+  const memory = path.join(stateDir, `verify-consent-${key}.json`);
+  const evidence = consent.evidencePathFor(memory, 'http://127.0.0.1:5173');
+  const evidence74 = consent.evidencePathFor(memory, 'http://127.0.0.1:5174');
+
+  const policy = await resolveStartupPolicy('', { pluginRoot, projectRoot });
+  assert.equal(policy.mode, 'consent', 'this repository registers the consent hook, so consent mode is the shape under test');
+
+  // No gate ran: the broker must not approve its own way in.
+  assert.throws(() => approveConsentOrigin(policy, 'http://127.0.0.1:5173/inventory'), /no in-session evidence/);
+  assert.equal(policy.approved.has('http://127.0.0.1:5173'), false);
+
+  // The gate ran for both origins: approval proceeds exactly as before.
+  assert.equal(consent.writeExecutionEvidence(evidence, 'http://127.0.0.1:5173', { projectRoot }).ok, true);
+  assert.equal(consent.writeExecutionEvidence(evidence74, 'http://127.0.0.1:5174', { projectRoot }).ok, true);
+  assert.equal(approveConsentOrigin(policy, 'http://127.0.0.1:5173/inventory').origin, 'http://127.0.0.1:5173');
+
+  // AC-102: the evidence is consulted on every FIRST approval of an origin, never cached for the
+  // process lifetime. A long-lived MCP process that resolved its mode once at start is precisely
+  // the third route the finding names, so removing a marker after a successful read elsewhere
+  // must take effect on the next call. The removal is what this asserts: :5174 was approvable a
+  // line ago, and is not once its own marker is gone.
+  assert.equal(approveConsentOrigin(policy, 'http://127.0.0.1:5174/inventory').origin, 'http://127.0.0.1:5174');
+  policy.approved.delete('http://127.0.0.1:5174');
+  fs.unlinkSync(evidence74);
+  assert.throws(() => approveConsentOrigin(policy, 'http://127.0.0.1:5174/inventory'), /no in-session evidence/);
+
+  // An EXPIRED marker is refused too, and names its own cause rather than claiming the gate
+  // never ran — the window covers the human's deliberation, so a slow answer lands here.
+  const stale = consent.evidencePathFor(memory, 'http://127.0.0.1:5199');
+  // Planted DIRECTLY. Writing it through `writeExecutionEvidence` with a back-dated `at` used to
+  // work only because the sweep was clocked on that same stamp; the sweep reads the wall clock
+  // now, so a marker the writer stamps already-expired is unhonourable from birth and its own
+  // write removes it. That is the correct sweep behaviour, and it leaves this case nothing to
+  // grade unless the fixture bypasses the writer.
+  fs.writeFileSync(stale, `${JSON.stringify({
+    version: consent.EVIDENCE_VERSION,
+    origin: 'http://127.0.0.1:5199',
+    verdict: 'allowed',
+    at: new Date(Date.now() - consent.MAX_EVIDENCE_AGE_MS - 60000).toISOString(),
+  })}\n`);
+  assert.throws(() => approveConsentOrigin(policy, 'http://127.0.0.1:5199/inventory'), /older than the accepted window/);
+
+  // An origin already in the approved set stays approved — the evidence gates the WRITE into
+  // that set, and assertAllowedUrl keeps policing every later navigation against it.
+  assert.equal(policy.approved.has('http://127.0.0.1:5173'), true);
+});
+
+test('the production consent anchor comes from the environment, not only from an injected option', async () => {
+  // Every other consent case supplies `projectRoot` explicitly, so the ladder `run()` actually
+  // travels — option, then ZENSU_VERIFY_PROJECT_ROOT, then cwd — had no executed case. That
+  // matters because the launcher execs the broker through `env -i`: if the variable is not
+  // carried, the anchor silently becomes the broker's own cwd while the gate writes under the
+  // Session Control record's root, and the broker then refuses every loopback origin while the
+  // doctor reports the gate as executing.
+  const projectRoot = consentProject(['http://127.0.0.1:5188']);
+  const previous = process.env.ZENSU_VERIFY_PROJECT_ROOT;
+  process.env.ZENSU_VERIFY_PROJECT_ROOT = projectRoot;
+  try {
+    const policy = await resolveStartupPolicy('', { pluginRoot: PLUGIN_ROOT });
+    assert.equal(policy.mode, 'consent');
+    assert.equal(approveConsentOrigin(policy, 'http://127.0.0.1:5188/inventory').origin, 'http://127.0.0.1:5188');
+  } finally {
+    if (previous === undefined) delete process.env.ZENSU_VERIFY_PROJECT_ROOT;
+    else process.env.ZENSU_VERIFY_PROJECT_ROOT = previous;
+  }
+
+  // And the launcher must actually carry it IN THE ALLOWLIST: the `env -i` sweep is what makes
+  // the env term reachable in production at all. A whole-file match cannot see that — the
+  // launcher names the variable in its own prose too, so deleting it from the `for name in`
+  // operand list left this check green while the broker's production anchor was stripped. The
+  // slice is the operand list itself, and the control fails if that list ever stops matching.
+  const launcher = fs.readFileSync(path.resolve(__dirname, '../../scripts/playwright-mcp.sh'), 'utf8');
+  const allowlist = (launcher.split(/^\s*for name in \\?$/m)[1] || '').split(/;\s*do$/m)[0] || '';
+  assert.notEqual(allowlist.trim(), '', 'control: the env -i allowlist operand list was extracted');
+  assert.match(allowlist, /ZENSU_VERIFY_PROJECT_ROOT/, 'the anchor survives the env -i sweep');
+  assert.match(allowlist, /ZENSU_VERIFY_NAVIGATION_POLICY_V1/, 'control: its sibling is in the same list');
+  assert.match(launcher, /ZENSU_VERIFY_PROJECT_ROOT/);
+});
+
+test('the consent policy carries its anchor, and a module fault is refused as unjudged rather than as a gate that never ran', async () => {
+  const { consentEvidenceState } = require('../../scripts/playwright-mcp-proxy.js');
+  const projectRoot = consentProject(['http://127.0.0.1:5177']);
+  const policy = await resolveStartupPolicy('', { pluginRoot: PLUGIN_ROOT, projectRoot });
+
+  // The anchor has to reach the RECORD on the policy, or the reader's directory-component walk
+  // is skipped on the one read that writes into the approved set. A previous revision passed it
+  // at the call site while the constructor took two parameters, so it was dropped in silence.
+  assert.equal(policy.projectRoot, projectRoot);
+  assert.equal(consentEvidenceState(policy, 'http://127.0.0.1:5177'), 'present');
+
+  // The anchor is CANONICALIZED before the evidence directory is derived from it. The reader
+  // compares its own `realpathSync.native` of the root against the directory it is handed, so a
+  // non-canonical spelling makes those two operands differ and the granting read refuses every
+  // loopback origin in the project. A symlink to the same tree is the reachable shape: the caller
+  // supplies the link, the writer's markers live under the real path.
+  const aliasHome = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-consent-alias-')));
+  const alias = path.join(aliasHome, 'link');
+  let aliased = true;
+  try {
+    fs.symlinkSync(projectRoot, alias);
+  } catch (error) {
+    if (!error || error.code !== 'EPERM') throw error;
+    aliased = false;
+  }
+  if (aliased) {
+    const aliasPolicy = await resolveStartupPolicy('', { pluginRoot: PLUGIN_ROOT, projectRoot: alias });
+    assert.equal(aliasPolicy.projectRoot, projectRoot, 'the policy carries the canonical root, not the caller spelling');
+    assert.equal(consentEvidenceState(aliasPolicy, 'http://127.0.0.1:5177'), 'present', 'and the granting read still matches the directory the writer used');
+  }
+
+  // A module that cannot be read is a fault in the plugin tree, not a gate that never ran, and
+  // the refusal has to say so — otherwise it sends the reader after a gate that is working. The
+  // fixture is a plugin root with NO module rather than a policy with an empty `evidenceDir`:
+  // that field is re-derived per call now, so an empty one is recoverable and no longer stands
+  // in for a module fault. Using it here would have graded the recovery instead.
+  const broken = {
+    mode: 'consent',
+    approved: new Map(),
+    pluginRoot: fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-consent-nomod-'))),
+    evidenceDir: '',
+    projectRoot,
+  };
+  assert.equal(consentEvidenceState(broken, 'http://127.0.0.1:5177'), 'unjudged');
+  assert.throws(() => approveConsentOrigin(broken, 'http://127.0.0.1:5177/x'), /could be judged/);
+
+  // A symlinked `.zensu` is refused by the granting read exactly as the writer refuses it.
+  const linked = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-consent-link-')));
+  const real = path.join(linked, 'elsewhere', 'state');
+  fs.mkdirSync(real, { recursive: true });
+  const consent = require('../../hooks/lib/verify-consent-v1.js');
+  fs.writeFileSync(
+    path.join(real, `verify-consent-exec-scv1_${'a'.repeat(64)}-${consent.evidenceOriginTag('http://127.0.0.1:5178')}.json`),
+    `${JSON.stringify({ version: consent.EVIDENCE_VERSION, origin: 'http://127.0.0.1:5178', verdict: 'allowed', at: new Date().toISOString() })}\n`,
+  );
+  try {
+    fs.symlinkSync(path.join(linked, 'elsewhere'), path.join(linked, '.zensu'));
+  } catch (error) {
+    if (!error || error.code !== 'EPERM') throw error;
+    return;
+  }
+  const linkedPolicy = await resolveStartupPolicy('', { pluginRoot: PLUGIN_ROOT, projectRoot: linked });
+  // The reader REFUSES that tree rather than resolving through the link, and the refusal says so:
+  // "no in-session evidence" would name a gate that never ran for a directory this read declined
+  // to open at all, which is the conflation the state split removed.
+  assert.throws(() => approveConsentOrigin(linkedPolicy, 'http://127.0.0.1:5178/x'), /could not be read/);
+});
+
+// A plugin root carrying exactly one file: the consent module, with a body this test chooses.
+// The `unjudged` fixture above sets `evidenceDir: ''` and returns at the FIRST guard, so the
+// module-load throw, the missing-reader arm and the outer catch had no executed case at all.
+function stubPluginRoot(body) {
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-consent-stub-')));
+  fs.mkdirSync(path.join(root, 'hooks', 'lib'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'hooks', 'lib', 'verify-consent-v1.js'), body);
+  return root;
+}
+
+test('the granting read names every cause it can distinguish, and refuses rather than reading unguarded', async () => {
+  const { consentEvidenceState } = require('../../scripts/playwright-mcp-proxy.js');
+  const projectRoot = consentProject(['http://127.0.0.1:5180']);
+  const evidenceDir = path.join(projectRoot, '.zensu', 'state');
+
+  // An ANCHORLESS policy must refuse, not read. `liveEvidenceOrigins` runs its realpath equality
+  // and component walk only when a root is supplied, so an empty anchor silently DROPPED the
+  // containment guard on the one read that grants access — the fail-open direction, and exactly
+  // the inertness that hid the round-3 arity defect.
+  const anchorless = { mode: 'consent', approved: new Map(), pluginRoot: PLUGIN_ROOT, evidenceDir, projectRoot: '' };
+  assert.equal(consentEvidenceState(anchorless, 'http://127.0.0.1:5180'), 'unjudged');
+
+  // A module that THROWS at load is a plugin-tree fault. Reached through a real stub root, so
+  // the require and the outer catch are executed rather than argued about.
+  const thrower = { mode: 'consent', approved: new Map(), pluginRoot: stubPluginRoot('throw new Error("boom");\n'), evidenceDir, projectRoot };
+  assert.equal(consentEvidenceState(thrower, 'http://127.0.0.1:5180'), 'unjudged');
+  assert.throws(() => approveConsentOrigin(thrower, 'http://127.0.0.1:5180/x'), /could be judged/);
+
+  // A module missing the READER is the same class.
+  const gutted = { mode: 'consent', approved: new Map(), pluginRoot: stubPluginRoot('module.exports = {};\n'), evidenceDir, projectRoot };
+  assert.equal(consentEvidenceState(gutted, 'http://127.0.0.1:5180'), 'unjudged');
+
+  // A module missing only MAX_EVIDENCE_AGE_MS still reports `expired`: the expired probe passes
+  // its own maxAgeMs and never reads that export, so gating on it degraded a real expiry to
+  // `absent` and emitted the wrong cause.
+  const REAL = JSON.stringify(path.join(PLUGIN_ROOT, 'hooks', 'lib', 'verify-consent-v1.js'));
+  const noConst = stubPluginRoot(`const real = require(${REAL});\nconst copy = Object.assign({}, real);\ndelete copy.MAX_EVIDENCE_AGE_MS;\nmodule.exports = copy;\n`);
+  const consent = require('../../hooks/lib/verify-consent-v1.js');
+  const staleOrigin = 'http://127.0.0.1:5181';
+  fs.writeFileSync(
+    path.join(evidenceDir, `verify-consent-exec-scv1_${'a'.repeat(64)}-${consent.evidenceOriginTag(staleOrigin)}.json`),
+    `${JSON.stringify({ version: consent.EVIDENCE_VERSION, origin: staleOrigin, verdict: 'allowed', at: new Date(Date.now() - consent.MAX_EVIDENCE_AGE_MS - 60000).toISOString() })}\n`,
+  );
+  const staleState = { mode: 'consent', approved: new Map(), pluginRoot: PLUGIN_ROOT, evidenceDir, projectRoot };
+  assert.equal(consentEvidenceState(staleState, staleOrigin), 'expired');
+  assert.equal(consentEvidenceState({ mode: 'consent', approved: new Map(), pluginRoot: noConst, evidenceDir, projectRoot }, staleOrigin), 'expired');
+
+  // The expired refusal names BOTH causes and points at a diagnostic. A gate that has STOPPED
+  // running leaves a permanently expired marker — nothing writes, so nothing reaps — and the
+  // retry the old text prescribed re-entered this arm forever while blaming the clock.
+  assert.throws(() => approveConsentOrigin(staleState, `${staleOrigin}/x`), /older than the accepted window/);
+  assert.throws(() => approveConsentOrigin(staleState, `${staleOrigin}/x`), /stopped running/);
+  assert.throws(() => approveConsentOrigin(staleState, `${staleOrigin}/x`), /zensu:doctor/);
+
+  // A walk that did not FINISH is not a walk that found nothing, and an unreadable state
+  // directory is neither. Collapsing all three into `absent` made the refusal name a gate that
+  // had run — so each answers under its own name.
+  const seenStub = (record) => stubPluginRoot(`module.exports = { executionEvidencePresent: () => false, executionEvidenceSeen: () => (${JSON.stringify(record)}) };\n`);
+  const truncated = { mode: 'consent', approved: new Map(), pluginRoot: seenStub({ present: false, read: true, truncated: true, origin: '', verdict: '' }), evidenceDir, projectRoot };
+  assert.equal(consentEvidenceState(truncated, 'http://127.0.0.1:5180'), 'truncated');
+  assert.throws(() => approveConsentOrigin(truncated, 'http://127.0.0.1:5180/x'), /too many execution markers/);
+  const unread = { mode: 'consent', approved: new Map(), pluginRoot: seenStub({ present: false, read: false, truncated: false, origin: '', verdict: '' }), evidenceDir, projectRoot };
+  assert.equal(consentEvidenceState(unread, 'http://127.0.0.1:5180'), 'unread');
+  assert.throws(() => approveConsentOrigin(unread, 'http://127.0.0.1:5180/x'), /could not be read/);
+
+  // The LEGACY fallback: a module that exports the boolean reader and not the richer one. The
+  // comment above that arm states the degradation as a contract, and no stub had that shape —
+  // every one either exported both readers or neither, so the arm had no executed case at all.
+  const legacy = {
+    mode: 'consent',
+    approved: new Map(),
+    pluginRoot: stubPluginRoot('module.exports = { executionEvidencePresent: () => true };\n'),
+    evidenceDir,
+    projectRoot,
+  };
+  assert.equal(consentEvidenceState(legacy, 'http://127.0.0.1:5181'), 'present', 'a module predating the split degrades to the boolean rather than refusing');
+  const legacyAbsent = {
+    mode: 'consent',
+    approved: new Map(),
+    pluginRoot: stubPluginRoot('module.exports = { executionEvidencePresent: () => false };\n'),
+    evidenceDir,
+    projectRoot,
+  };
+  assert.equal(consentEvidenceState(legacyAbsent, 'http://127.0.0.1:5181'), 'absent', 'control: the same shape still refuses when the boolean says no');
+});
+
 test('AC-009 a url-less new tab is refused before the tab exists', async () => {
   // opensUrl required a truthy url, so `browser_tabs {action:"new"}` skipped both the consent
   // approval and the floor and reached upstream. The tab then opened at about:blank, and every
@@ -691,4 +956,96 @@ test('AC-009 a url-less new tab is refused before the tab exists', async () => {
   });
   assert.equal(listTabs.isError, undefined);
   assert.equal(upstreamCalls, 2);
+});
+
+test('the evidence directory is re-derived per call, so a transient startup fault is recoverable', async () => {
+  const { consentEvidenceState } = require('../../scripts/playwright-mcp-proxy.js');
+  // `consentModule` is deliberately re-read on every call, because this process outlives any
+  // number of navigations and can outlive the plugin tree it resolved its mode from. The
+  // DIRECTORY derived from that module was resolved once at startup and cached, so a module
+  // fault in that one window disabled consent approval for the life of the MCP server and then
+  // told the user to reinstall a plugin that was fine. The anchor is on the policy; the layout
+  // belongs to the module; so the join belongs to the call, not to startup.
+  const projectRoot = consentProject(['http://127.0.0.1:5190']);
+  const startupFault = { mode: 'consent', approved: new Map(), pluginRoot: PLUGIN_ROOT, evidenceDir: '', projectRoot };
+  assert.equal(consentEvidenceState(startupFault, 'http://127.0.0.1:5190'), 'present', 'a recovered module recovers the broker');
+
+  // An ANCHORLESS policy still refuses: the directory cannot be derived without a root, and the
+  // containment walk the reader runs is checked against that same root.
+  const anchorless = { mode: 'consent', approved: new Map(), pluginRoot: PLUGIN_ROOT, evidenceDir: '', projectRoot: '' };
+  assert.equal(consentEvidenceState(anchorless, 'http://127.0.0.1:5190'), 'unjudged');
+});
+
+test('every evidence state has its own refusal, and an unrecognized one is never given a cause', () => {
+  const proxy = require('../../scripts/playwright-mcp-proxy.js');
+  const { CONSENT_EVIDENCE_STATES, consentRefusalFor } = proxy;
+
+  // The state set has ONE owner. `approveConsentOrigin` used to re-spell it as four `if` arms
+  // plus a catch-all that ASSERTED a cause — "no in-session evidence that the Zensu consent gate
+  // ran for this origin" — so a state added to the producer would have named a fact the probe
+  // never established. That is the exact conflation the unread/truncated split removed one layer
+  // down, and the sibling doctor renderer already carries an explicit unrecognized-state row.
+  assert.equal(Array.isArray(CONSENT_EVIDENCE_STATES), true);
+  assert.equal(Object.isFrozen(CONSENT_EVIDENCE_STATES), true);
+  assert.deepEqual(
+    [...CONSENT_EVIDENCE_STATES].sort(),
+    ['absent', 'expired', 'present', 'truncated', 'unjudged', 'unread'],
+  );
+
+  // Derived, not hand-listed: every value the producer can return must be a member, so a seventh
+  // state cannot reach the refusal ladder without joining the set first.
+  const produced = fs.readFileSync(path.join(PLUGIN_ROOT, 'scripts', 'playwright-mcp-proxy.js'), 'utf8')
+    .split('function consentEvidenceState(')[1]
+    .split('\nfunction ')[0]
+    .match(/return '([a-z-]+)'/g)
+    .map((m) => m.slice(8, -1));
+  assert.notEqual(produced.length, 0, 'control: the producer body was extracted');
+  for (const state of produced) {
+    assert.equal(CONSENT_EVIDENCE_STATES.includes(state), true, `${state} is produced but not declared`);
+  }
+
+  // `present` is not a refusal; every other member names its own cause.
+  for (const state of CONSENT_EVIDENCE_STATES) {
+    if (state === 'present') { assert.equal(consentRefusalFor(state), '', 'present is not a refusal'); continue; }
+    assert.notEqual(consentRefusalFor(state), '', `${state} has no refusal`);
+  }
+  assert.match(consentRefusalFor('expired'), /older than the accepted window/);
+  assert.match(consentRefusalFor('truncated'), /too many execution markers/);
+  assert.match(consentRefusalFor('unread'), /could not be read/);
+  assert.match(consentRefusalFor('unjudged'), /decision module could not be read/);
+  assert.match(consentRefusalFor('absent'), /no in-session evidence/);
+
+  // The residual arm states WHAT it could not interpret and claims nothing about the gate.
+  const residual = consentRefusalFor('something-new');
+  assert.match(residual, /something-new/, 'the unrecognized state is named');
+  assert.equal(/no in-session evidence/.test(residual), false, 'and no cause is asserted for it');
+
+  // Every remedy that prescribes a DELETION is scoped to the marker glob. `.zensu/state/` also
+  // holds the CAS workflow documents `skills/doctor/SKILL.md` forbids deleting, and this refusal
+  // is read by the MODEL, which holds Bash and reaches that directory ungated — so an unscoped
+  // "clear stale files from .zensu/state" is an instruction to wedge the session. Both sibling
+  // carriers already scope it.
+  const truncated = consentRefusalFor('truncated');
+  assert.match(truncated, /verify-consent-exec-\*/, 'the deletion remedy names the marker glob');
+  assert.equal(/clear stale files from/.test(truncated), false, 'and never prescribes an unscoped clear');
+
+  // The `unread` refusal names the ANCHOR it read under rather than instructing a comparison
+  // neither surface can supply: it printed no path of its own, and the doctor's gate rows print
+  // none either, so "compare the two" named nothing the reader could see.
+  const unreadWithAnchor = proxy.consentRefusalFor('unread', '/tmp/some-anchor');
+  assert.match(unreadWithAnchor, /\/tmp\/some-anchor/, 'the anchor the broker read under is named');
+  assert.equal(/compare the two/.test(unreadWithAnchor), false, 'and no uncomparable comparison is instructed');
+
+  // `present` is the one member that decides pass versus refuse, and the approval path compares
+  // against the exported member rather than a bare literal — while KEEPING the inequality. Routing
+  // the decision through this renderer's empty string would make any future state that renders ''
+  // approve silently, which turns a fail-closed test into a fail-open one.
+  assert.equal(proxy.CONSENT_EVIDENCE_PRESENT, 'present');
+  assert.equal(CONSENT_EVIDENCE_STATES.includes(proxy.CONSENT_EVIDENCE_PRESENT), true);
+  const approveBody = fs.readFileSync(path.join(PLUGIN_ROOT, 'scripts', 'playwright-mcp-proxy.js'), 'utf8')
+    .split('function approveConsentOrigin(')[1]
+    .split('\nfunction ')[0];
+  assert.notEqual(approveBody.trim(), '', 'control: the approval body was extracted');
+  assert.match(approveBody, /state !== CONSENT_EVIDENCE_PRESENT/, 'the pass test stays an inequality against the owner');
+  assert.equal(/state !== 'present'/.test(approveBody), false, 'and no bare literal survives beside the owner');
 });

@@ -559,10 +559,73 @@ if [ -z "${ZDOC_VERIFY:-}" ]; then
   fi
 fi
 
+# AC-104: the row above reports REGISTRATION — it is derived from files on disk in the plugin's
+# own tree and says nothing about whether the hook ran. This second state reports EXECUTION,
+# read from the per-session marker the gate writes on every decided loopback navigation. It is
+# derived only for the consent states: in policy mode consent mode is never entered, and under
+# `unavailable` the row above is already red.
+ZDOC_VERIFY_EXEC="${ZDOC_VERIFY_EXEC:-}"
+if [ -z "$ZDOC_VERIFY_EXEC" ]; then
+  case "${ZDOC_VERIFY:-}" in
+    (consent|consent-no-recipe|consent-recipe-unchecked)
+      if [ -z "${ZDOC_SESSION_KEY:-}" ] || [ -z "${ZDOC_SESSION_PROJECT_ROOT:-}" ]; then
+        # No bound key or no recorded root: the marker is session-keyed, so the question could
+        # not be asked. Saying "not exercised" here would report a finding about a file this
+        # run never looked for.
+        ZDOC_VERIFY_EXEC=unknown
+      else
+        # The STATUS is captured rather than reduced to success/failure by an `elif`. A missing
+        # export, a module that will not load and a directory that cannot be read are contract
+        # faults, and collapsing them into the benign state made the report render a green row
+        # --- verify-feature gate EXECUTION probe -------------------------------------------
+        # The verdict travels as a WORD the decision module produced, never as an exit status this
+        # shell re-interprets. A status ladder put the answer on the same channel as every way a
+        # process can die: the benign verdict shared 1 with node's generic fatal and with a failed
+        # `cd`, and moving it to another small integer only traded one collision for another. The
+        # classification itself belongs to the module — this probe used to spell its own, deciding
+        # the same rules the broker's classifier already owns, with nothing comparing the two.
+        ZDOC_VERIFY_WORD="$(cd -P -- "$ZDOC_ROOT" 2>/dev/null || exit 0
+          ZDOC_VERIFY_ROOT="$ZDOC_SESSION_PROJECT_ROOT" ZDOC_VERIFY_KEY="$ZDOC_SESSION_KEY" node -e '
+            try {
+              const fs = require("node:fs");
+              // The SAME load guard the gate and the broker apply. This probe is the third
+              // consumer of the decision module and used a bare require: with a symlinked module
+              // the gate denies every navigation while both verify rows render green for the
+              // remaining life of an older marker.
+              const info = fs.lstatSync("./hooks/lib/verify-consent-v1.js");
+              if (!info.isFile() || info.isSymbolicLink()) process.exit(0);
+              const mod = require("./hooks/lib/verify-consent-v1.js");
+              if (typeof mod.classifyExecution !== "function"
+                || typeof mod.executionEvidenceSeen !== "function"
+                || typeof mod.evidenceDirFor !== "function") process.exit(0);
+              // Canonicalized ONCE here: the reader compares its own realpath of the root
+              // against the directory it was handed, so a spelling that is not already a
+              // realpath fixed point made the two disagree and reported a working check as
+              // a contract fault.
+              const root = fs.realpathSync.native(process.env.ZDOC_VERIFY_ROOT || "");
+              const seen = mod.executionEvidenceSeen(mod.evidenceDirFor(root), {
+                projectRoot: root,
+                sessionKey: process.env.ZDOC_VERIFY_KEY || "",
+              });
+              process.stdout.write(String(mod.classifyExecution(seen)));
+            } catch (_error) {
+              // Silence, which the shell reads as the could-not-judge residual.
+            }
+          ' 2>/dev/null)"
+        case "$ZDOC_VERIFY_WORD" in
+          (ran|ran-asked|none) ZDOC_VERIFY_EXEC="$ZDOC_VERIFY_WORD" ;;
+          (*) ZDOC_VERIFY_EXEC=unjudged ;;
+        esac
+      fi
+      ;;
+    (*) ZDOC_VERIFY_EXEC="" ;;
+  esac
+fi
+
 export ZDOC_ZENSU ZDOC_NODE ZDOC_PLAYWRIGHT ZDOC_BINDING ZDOC_BINDING_PROJECT_ROOT \
   ZDOC_BINDING_RECORDED_VERSION ZDOC_BINDING_EXECUTING_VERSION \
   ZDOC_BINDING_ROOT_UNKNOWN \
-  ZDOC_SESSION_KEY ZDOC_SESSION_PROJECT_ROOT ZDOC_VERIFY ZDOC_VERIFY_REASON
+  ZDOC_SESSION_KEY ZDOC_SESSION_PROJECT_ROOT ZDOC_VERIFY ZDOC_VERIFY_REASON ZDOC_VERIFY_EXEC
 
 if ! command -v node >/dev/null 2>&1; then
   printf 'Zensu doctor — read-only setup diagnostics\n\n  %s  node: not found on PATH — cannot run the JSON/config/state checks\n' '⚠️'

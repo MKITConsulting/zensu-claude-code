@@ -762,3 +762,593 @@ test('AC-006 the recorded label names what was observed, and runPost builds no p
   assert.equal(written[0].decidedBy, 'asked');
   assert.equal(validRecord(written[0]), true);
 });
+
+test('AC-103 the gate records per-session EXECUTION evidence, bounded and contained', (t) => {
+  // Consent mode is entered from a file read: the broker lstats two files in its OWN tree and
+  // parses hooks.json there. That is a claim a file makes, never a fact about this session, so
+  // a host with hooks disabled — or a broker launched from a different tree than the one whose
+  // registry the host loaded — self-approves every loopback origin with nothing having asked.
+  // This marker is what the broker can require instead: the gate wrote it, in this session,
+  // for this origin.
+  const { root } = project();
+  const dir = consent.evidenceDirFor(root);
+  const evidence = consent.evidencePathFor(path.join(dir, `verify-consent-${KEY}.json`), 'http://127.0.0.1:4200');
+
+  assert.equal(typeof consent.writeExecutionEvidence, 'function');
+  assert.equal(typeof consent.executionEvidencePresent, 'function');
+
+  // Absent evidence is the state a disabled hook leaves behind, and it must not read as a pass.
+  assert.equal(consent.executionEvidencePresent(dir, 'http://127.0.0.1:4200', { projectRoot: root }), false);
+
+  const written = consent.writeExecutionEvidence(evidence, 'http://127.0.0.1:4200', { projectRoot: root });
+  assert.equal(written.ok, true);
+  assert.equal(consent.executionEvidencePresent(dir, 'http://127.0.0.1:4200', { projectRoot: root }), true);
+
+  // The evidence is bound to the ORIGIN the gate decided, so a marker for one origin never
+  // licenses self-approval of another.
+  assert.equal(consent.executionEvidencePresent(dir, 'http://127.0.0.1:4201', { projectRoot: root }), false);
+
+  // And it is bounded in TIME, so a marker left by an earlier navigation cannot stand in for a
+  // gate that did not run for this one.
+  assert.equal(typeof consent.MAX_EVIDENCE_AGE_MS, 'number');
+  assert.equal(consent.executionEvidencePresent(dir, 'http://127.0.0.1:4200', { projectRoot: root, now: Date.now() + consent.MAX_EVIDENCE_AGE_MS + 60000 }), false);
+
+  // The name is per (session, ORIGIN), so a second decided origin coexists with the first
+  // instead of renaming over it — two navigations in flight together used to clobber one
+  // another and the earlier origin was then refused.
+  const second = consent.evidencePathFor(path.join(dir, `verify-consent-${KEY}.json`), 'http://127.0.0.1:4201');
+  assert.notEqual(second, evidence);
+  assert.equal(consent.writeExecutionEvidence(second, 'http://127.0.0.1:4201', { projectRoot: root }).ok, true);
+  assert.equal(consent.executionEvidencePresent(dir, 'http://127.0.0.1:4200', { projectRoot: root }), true);
+  assert.equal(consent.executionEvidencePresent(dir, 'http://127.0.0.1:4201', { projectRoot: root }), true);
+
+  // The writer applies the containment the consent memory already applies: the name shape, the
+  // state directory, and a leaf that is a plain file. An evidence-path fault names the EVIDENCE
+  // artifact rather than the memory, so the operator is not sent to inspect the wrong file.
+  assert.equal(consent.writeExecutionEvidence(path.join(dir, 'not-evidence.json'), 'http://127.0.0.1:4200', { projectRoot: root }).reason, consent.REASONS.EVIDENCE_PATH_REFUSED);
+  assert.equal(consent.writeExecutionEvidence(path.join(root, path.basename(evidence)), 'http://127.0.0.1:4200', { projectRoot: root }).ok, false);
+  assert.equal(consent.writeExecutionEvidence(evidence, 'http://169.254.169.254', { projectRoot: root }).ok, false);
+
+  // A HARD LINK does not wedge the marker: the writer publishes by rename, which repoints the
+  // name and never truncates the linked inode, so refusing here would defend nothing while one
+  // `ln` in this session-writable directory disabled every loopback navigation for good.
+  const linked = consent.evidencePathFor(path.join(dir, `verify-consent-${KEY}.json`), 'http://127.0.0.1:4202');
+  fs.writeFileSync(path.join(dir, 'evidence-link-source'), '{}\n');
+  fs.linkSync(path.join(dir, 'evidence-link-source'), linked);
+  assert.equal(consent.writeExecutionEvidence(linked, 'http://127.0.0.1:4202', { projectRoot: root }).ok, true);
+
+  assert.equal(consent.executionEvidencePresent(dir, 'http://127.0.0.1:4202', { projectRoot: root }), true, 'a hard-linked marker is still honoured, which is what makes the allowance safe');
+  // That assertion grades a file that is NO LONGER hard-linked: the write above publishes by
+  // rename, which repoints the name onto a fresh single-link inode. So it proves the writer's
+  // allowance and says nothing about what the READER does with a live hard link. The reader
+  // refuses one (`nlink !== 1`), and the REAPER has to agree, or such an entry is unreadable and
+  // unreapable at once and holds a walk-budget slot the reaper exists to free.
+  assert.equal(fs.lstatSync(linked).nlink, 1, 'the rename left a single-link inode, which is why the case above proves only the writer');
+  const stuck = consent.evidencePathFor(path.join(dir, `verify-consent-${KEY}.json`), 'http://127.0.0.1:4204');
+  fs.writeFileSync(
+    path.join(dir, 'evidence-live-link-source'),
+    `${JSON.stringify({ version: consent.EVIDENCE_VERSION, origin: 'http://127.0.0.1:4204', verdict: 'allowed', at: new Date().toISOString() })}\n`,
+  );
+  fs.linkSync(path.join(dir, 'evidence-live-link-source'), stuck);
+  assert.equal(consent.executionEvidencePresent(dir, 'http://127.0.0.1:4204', { projectRoot: root }), false, 'the reader refuses a live hard-linked marker');
+  const sweep = consent.evidencePathFor(path.join(dir, `verify-consent-${KEY}.json`), 'http://127.0.0.1:4205');
+  assert.equal(consent.writeExecutionEvidence(sweep, 'http://127.0.0.1:4205', { projectRoot: root }).ok, true);
+  assert.equal(fs.existsSync(stuck), false, 'and the reaper removes it, because no reader can ever honour it');
+
+  // An OVERSIZE marker is skipped by the SIZE guard, so the body has to stay valid JSON —
+  // padding with non-JSON would be discarded by the parse whether or not the guard exists.
+  const fat = consent.evidencePathFor(path.join(dir, `verify-consent-${KEY}.json`), 'http://127.0.0.1:4203');
+  fs.writeFileSync(fat, JSON.stringify({ version: 1, origin: 'http://127.0.0.1:4203', verdict: 'allowed', at: new Date().toISOString() }).padEnd(consent.MAX_EVIDENCE_BYTES + 1, ' '));
+  assert.equal(consent.executionEvidencePresent(dir, 'http://127.0.0.1:4203', { projectRoot: root }), false);
+
+  // Each per-entry guard gets a body differing from a good one in exactly ONE field, so none of
+  // them can be deleted while the suite stays green.
+  const plant = (origin, body) => {
+    const at = consent.evidencePathFor(path.join(dir, `verify-consent-${KEY}.json`), origin);
+    fs.writeFileSync(at, `${JSON.stringify(body)}\n`);
+    return origin;
+  };
+  const good = (origin) => ({ version: consent.EVIDENCE_VERSION, origin, verdict: 'allowed', at: new Date().toISOString() });
+  assert.equal(consent.executionEvidencePresent(dir, plant('http://127.0.0.1:4220', good('http://127.0.0.1:4220')), { projectRoot: root }), true, 'positive control for the four guards below');
+  assert.equal(consent.executionEvidencePresent(dir, plant('http://127.0.0.1:4221', Object.assign(good('http://127.0.0.1:4221'), { version: consent.EVIDENCE_VERSION + 1 })), { projectRoot: root }), false, 'schema discriminator');
+  assert.equal(consent.executionEvidencePresent(dir, plant('http://127.0.0.1:4222', Object.assign(good('http://127.0.0.1:4222'), { at: 'July 4, 2026' })), { projectRoot: root }), false, 'stamp shape');
+  // The re-classification arm is asserted with the body origin EQUAL to the requested one. A
+  // marker whose body names a DIFFERENT origin is already refused by the lookup itself — the walk
+  // pushes `parsed.origin` and the caller asks for its own string — so such a case passes with
+  // the whole re-classification block deleted and proves nothing about it. Each of the three
+  // sub-rules gets its own body, because they refuse for different reasons.
+  assert.equal(consent.executionEvidencePresent(dir, plant('https://app.example.com', good('https://app.example.com')), { projectRoot: root }), false, 're-classification on read: a remote origin is refused even when the body names it exactly');
+  assert.equal(consent.executionEvidencePresent(dir, plant('http://localhost:4225', good('http://localhost:4225')), { projectRoot: root }), false, 're-classification on read: an origin the floor no longer accepts at all');
+  assert.equal(consent.executionEvidencePresent(dir, plant('http://127.0.0.1:4226/', good('http://127.0.0.1:4226/')), { projectRoot: root }), false, 're-classification on read: a spelling that does not survive normalization');
+  assert.equal(consent.executionEvidencePresent(dir, plant('http://127.0.0.1:4224', Object.assign(good('http://127.0.0.1:4224'), { verdict: 'whatever' })), { projectRoot: root }), false, 'verdict vocabulary');
+
+  // The walk's budget is spent on THIS session's markers, so foreign accumulation cannot push a
+  // live one outside the examined set — and exhausting it is reported rather than read as empty.
+  const crowd = project();
+  const crowdDir = consent.evidenceDirFor(crowd.root);
+  for (let i = 0; i <= consent.MAX_EVIDENCE_FILES; i += 1) {
+    const foreignKey = 'scv1_' + String(i).padStart(4, '0') + 'f'.repeat(60);
+    const origin = `http://127.0.0.1:${5000 + i}`;
+    fs.writeFileSync(
+      path.join(crowdDir, `verify-consent-exec-${foreignKey}-${consent.evidenceOriginTag(origin)}.json`),
+      `${JSON.stringify(good(origin))}\n`,
+    );
+  }
+  const mineOrigin = 'http://127.0.0.1:4999';
+  fs.writeFileSync(
+    path.join(crowdDir, `verify-consent-exec-${KEY}-${consent.evidenceOriginTag(mineOrigin)}.json`),
+    `${JSON.stringify(good(mineOrigin))}\n`,
+  );
+  assert.equal(consent.executionEvidencePresent(crowdDir, mineOrigin, { projectRoot: crowd.root, sessionKey: KEY }), true, 'a session-scoped walk is immune to foreign accumulation');
+  // That assertion alone does NOT discriminate: with the session filter moved BELOW the budget the
+  // walk still examines 512 of the 514 entries, so `readdirSync` order decides whether this
+  // session's single marker lands inside the examined set and the check passes about 99.6% of the
+  // time with the defect present. TRUNCATION is the order-independent witness — a scoped walk over
+  // one matching name can never exhaust the budget, while a budget spent on foreign names always
+  // does.
+  const scoped = consent.executionEvidenceSeen(crowdDir, { projectRoot: crowd.root, sessionKey: KEY });
+  assert.equal(scoped.truncated, false, 'the session filter runs before the budget, so foreign accumulation cannot spend it');
+  assert.equal(scoped.present, true, 'and the one matching marker is still found');
+  assert.equal(consent.executionEvidenceSeen(crowdDir, { projectRoot: crowd.root }).truncated, true, 'an unscoped walk past the budget reports truncation rather than an empty read');
+
+  // A marker that is not a regular file is refused rather than read, and the reader reports
+  // that it COULD read the directory — an unreadable directory is a different verdict from an
+  // empty one, which is what keeps the doctor from rendering a fault as a clean row.
+  const foreign = project();
+  const foreignDir = consent.evidenceDirFor(foreign.root);
+  fs.mkdirSync(consent.evidencePathFor(path.join(foreignDir, `verify-consent-${KEY}.json`), 'http://127.0.0.1:4200'), { recursive: true });
+  assert.equal(consent.executionEvidencePresent(foreignDir, 'http://127.0.0.1:4200', { projectRoot: foreign.root }), false);
+  assert.equal(consent.executionEvidenceSeen(foreignDir, { projectRoot: foreign.root }).read, true);
+  // Named for the guard it actually reaches: this stateDir does not match the root's own join, so
+  // it returns before any directory is opened. The `readdirSync` catch is a DIFFERENT arm and had
+  // no executed case anywhere — every other case here returns at the realpath, the equality or the
+  // component guard — so it is driven below on a directory that satisfies all three and still
+  // cannot be read.
+  assert.equal(consent.executionEvidenceSeen(path.join(foreign.root, 'no-such-dir'), { projectRoot: foreign.root }).read, false, 'a stateDir that is not the root\'s own join is refused before it is opened');
+  // TWO conditions, split and NAMED, because the combined `process.getuid && getuid() !== 0`
+  // guard skipped in silence and for the wrong stated reason. On win32 `getuid` is undefined, so
+  // that guard is what suppressed the assertions there — while the real obstacle is that
+  // `chmodSync(dir, 0o000)` does not restrict directory reads on win32 at all, so the fixture
+  // cannot produce the state. As root the chmod is simply not enforced. Either way the
+  // readdirSync catch goes unexercised, and a run that cannot reach it says so rather than
+  // reporting a green case that tested nothing.
+  const rootUser = typeof process.getuid === 'function' && process.getuid() === 0;
+  const chmodBindsDirReads = process.platform !== 'win32' && typeof process.getuid === 'function';
+  if (chmodBindsDirReads && !rootUser) {
+    const sealed = project();
+    const sealedDir = consent.evidenceDirFor(sealed.root);
+    try {
+      fs.chmodSync(sealedDir, 0o000);
+      const blind = consent.executionEvidenceSeen(sealedDir, { projectRoot: sealed.root });
+      assert.equal(blind.read, false, 'a directory that passes every containment guard and still cannot be read answers read:false');
+      assert.equal(blind.present, false);
+    } finally {
+      try { fs.chmodSync(sealedDir, 0o700); } catch (_ignore) { /* best effort */ }
+    }
+  } else {
+    t.diagnostic('SKIPPED: the liveEvidenceOrigins readdirSync catch is unexercised here — '
+      + (process.platform === 'win32'
+        ? 'chmod 0o000 does not restrict directory reads on win32'
+        : (rootUser ? 'running as root, where the mode is not enforced' : 'this host exposes no getuid'))
+      + '; that arm has no other executed case, so it is UNVERIFIED on this run');
+  }
+
+  // The walk binds to ONE session when a key is supplied, so a row claiming "executed in this
+  // session" is never satisfied by a sibling session's marker.
+  const otherKey = 'scv1_' + 'd'.repeat(64);
+  const sibling = path.join(dir, `verify-consent-exec-${otherKey}-${consent.evidenceOriginTag('http://127.0.0.1:4210')}.json`);
+  assert.equal(consent.writeExecutionEvidence(sibling, 'http://127.0.0.1:4210', { projectRoot: root }).ok, true);
+  assert.equal(consent.executionEvidencePresent(dir, 'http://127.0.0.1:4210', { projectRoot: root }), true);
+  assert.equal(consent.executionEvidencePresent(dir, 'http://127.0.0.1:4210', { projectRoot: root, sessionKey: KEY }), false);
+
+  // A symlinked `.zensu` is refused by the READER as well as by the writer when the caller
+  // supplies the root, so the two halves cannot disagree about which tree they looked at.
+  assert.equal(consent.executionEvidenceSeen(dir, { projectRoot: root }).present, true);
+  // A root that does not exist reaches the realpath throw, not the component walk — asserted
+  // separately so the two arms cannot pass for each other's reason.
+  assert.equal(consent.executionEvidenceSeen(dir, { projectRoot: path.join(root, 'nope') }).read, false);
+  // The component walk itself: a real `.zensu` SYMLINK is refused by the reader exactly as the
+  // writer refuses it, which is what keeps the granting read from resolving through a link the
+  // writer would not follow.
+  const linkedRoot = project().root;
+  const realState = path.join(linkedRoot, 'elsewhere', 'state');
+  fs.mkdirSync(realState, { recursive: true });
+  fs.rmSync(path.join(linkedRoot, '.zensu'), { recursive: true, force: true });
+  try {
+    fs.symlinkSync(path.join(linkedRoot, 'elsewhere'), path.join(linkedRoot, '.zensu'));
+    assert.equal(consent.executionEvidenceSeen(consent.evidenceDirFor(linkedRoot), { projectRoot: linkedRoot }).read, false);
+  } catch (error) {
+    if (!error || error.code !== 'EPERM') throw error;
+  }
+  // And a stateDir that does not match the root's own join is refused rather than read.
+  assert.equal(consent.executionEvidenceSeen(path.join(root, 'somewhere-else'), { projectRoot: root }).read, false);
+});
+
+test('the stamp predicate is TOTAL, so a planted marker cannot wedge every loopback origin', () => {
+  // ISO_INSTANT_RE admits two digits per field, so `9999-99-99T99:99:99.999Z` matches the shape
+  // and yields an invalid Date — and `toISOString()` raises RangeError on one. The predicate is
+  // called from `liveEvidenceOrigins` OUTSIDE every enclosing try, so a throw there escaped the
+  // reader entirely: the broker caught it, answered `unjudged`, and refused EVERY loopback
+  // origin in the project naming a plugin-tree fault that had not occurred. `.zensu/state/` is
+  // session-writable, and the reaper reached the same predicate inside its own try and skipped
+  // past, so the wedge was permanent until the file was removed by hand.
+  assert.equal(consent.isIsoInstant('9999-99-99T99:99:99.999Z'), false);
+  assert.equal(consent.isIsoInstant('2026-02-31T00:00:00.000Z'), false, 'shape alone is still not validity');
+  assert.equal(consent.isIsoInstant('2026-09-10T12:00:00.000Z'), true, 'positive control');
+
+  const { root } = project();
+  const dir = consent.evidenceDirFor(root);
+  const poisoned = 'http://127.0.0.1:4230';
+  fs.writeFileSync(
+    path.join(dir, `verify-consent-exec-${KEY}-${consent.evidenceOriginTag(poisoned)}.json`),
+    `${JSON.stringify({ version: consent.EVIDENCE_VERSION, origin: poisoned, verdict: 'allowed', at: '9999-99-99T99:99:99.999Z' })}\n`,
+  );
+  assert.equal(consent.executionEvidencePresent(dir, poisoned, { projectRoot: root }), false);
+  const live = 'http://127.0.0.1:4231';
+  const livePath = consent.evidencePathFor(path.join(dir, `verify-consent-${KEY}.json`), live);
+  assert.equal(consent.writeExecutionEvidence(livePath, live, { projectRoot: root, verdict: 'allowed' }).ok, true);
+  assert.equal(consent.executionEvidencePresent(dir, live, { projectRoot: root }), true, 'one poisoned marker does not deny the whole project');
+});
+
+test('the reaper removes what the reader can never honour, and only that', () => {
+  const { root } = project();
+  const dir = consent.evidenceDirFor(root);
+  const memory = path.join(dir, `verify-consent-${KEY}.json`);
+  const stale = 'http://127.0.0.1:4240';
+  const stalePath = consent.evidencePathFor(memory, stale);
+  // Past the SWEEP's own grace bound, not merely past the reader's window: a marker that has only
+  // just expired is held for one further window so the broker's `expired` refusal keeps its input.
+  const old = new Date(Date.now() - consent.MAX_EVIDENCE_REAP_AGE_MS - 60000).toISOString();
+  // Planted DIRECTLY rather than written through the writer. The sweep is clocked on the wall
+  // clock, so a marker the writer stamps already-expired is unhonourable from birth and is swept
+  // by its own write — correct, but it would leave this case with nothing to reap. Writing it by
+  // hand is what keeps the NEXT write the thing under test.
+  fs.writeFileSync(stalePath, `${JSON.stringify({ version: consent.EVIDENCE_VERSION, origin: stale, verdict: 'allowed', at: old })}\n`);
+  assert.equal(fs.existsSync(stalePath), true, 'the fixture is in place before the write under test');
+
+  // A correctly-named file the reader can never honour still costs walk budget, and the walk the
+  // BROKER takes is unscoped — so an accumulation of these refused every loopback origin with a
+  // message naming a gate that had run. Reaping only well-formed EXPIRED markers left them.
+  const junk = path.join(dir, `verify-consent-exec-${KEY}-${consent.evidenceOriginTag('http://127.0.0.1:4241')}.json`);
+  fs.writeFileSync(junk, '{}\n');
+  const futureOrigin = 'http://127.0.0.1:4242';
+  const future = path.join(dir, `verify-consent-exec-${KEY}-${consent.evidenceOriginTag(futureOrigin)}.json`);
+  fs.writeFileSync(future, `${JSON.stringify({ version: consent.EVIDENCE_VERSION, origin: futureOrigin, verdict: 'allowed', at: new Date(Date.now() + 86400000).toISOString() })}\n`);
+
+  const fresh = 'http://127.0.0.1:4243';
+  const freshPath = consent.evidencePathFor(memory, fresh);
+  assert.equal(consent.writeExecutionEvidence(freshPath, fresh, { projectRoot: root, verdict: 'allowed' }).ok, true);
+
+  assert.equal(fs.existsSync(stalePath), false, 'an expired marker is reaped by the next write');
+  assert.equal(fs.existsSync(junk), false, 'so is a correctly-named body the reader refuses');
+  assert.equal(fs.existsSync(future), false, 'and so is a stamp outside the window in the other direction');
+  assert.equal(fs.existsSync(freshPath), true, 'the marker just published is left alone');
+
+  // The memory is not a marker and is never a reap candidate.
+  fs.writeFileSync(memory, '{}\n');
+  const second = consent.evidencePathFor(memory, 'http://127.0.0.1:4244');
+  assert.equal(consent.writeExecutionEvidence(second, 'http://127.0.0.1:4244', { projectRoot: root }).ok, true);
+  assert.equal(fs.existsSync(memory), true);
+});
+
+test('the doctor verdict does not depend on readdir order, and the broker can see a truncated walk', () => {
+  const { root } = project();
+  const dir = consent.evidenceDirFor(root);
+  const memory = path.join(dir, `verify-consent-${KEY}.json`);
+  const allowed = 'http://127.0.0.1:4250';
+  const asked = 'http://127.0.0.1:4251';
+  assert.equal(consent.writeExecutionEvidence(consent.evidencePathFor(memory, allowed), allowed, { projectRoot: root, verdict: 'allowed' }).ok, true);
+  assert.equal(consent.writeExecutionEvidence(consent.evidencePathFor(memory, asked), asked, { projectRoot: root, verdict: 'asked' }).ok, true);
+  // Two origins decided inside the window is ordinary in a multi-origin verify run. Reporting
+  // `origins[0]` made the doctor's `ran` / `ran-asked` row flip between runs for identical state
+  // and could drop the declined-prompt disclosure, so the weaker verdict wins.
+  assert.equal(consent.executionEvidenceSeen(dir, { projectRoot: root, sessionKey: KEY }).verdict, 'asked');
+
+  // The broker asks about ONE origin, and it must be able to tell "no marker" from "the walk did
+  // not finish" — collapsing both to false made a budget-exhausted read refuse with a sentence
+  // naming a gate that had run.
+  const seen = consent.executionEvidenceSeen(dir, { projectRoot: root, wantOrigin: allowed });
+  assert.equal(seen.present, true);
+  assert.equal(seen.origin, allowed, 'wantOrigin selects the origin asked about, not the first on disk');
+  assert.equal(seen.truncated, false);
+
+  // That positive is NOT the discriminator, and saying so is the point: the walk breaks as soon
+  // as it parses the wanted origin, so whenever that marker is read first the fallback selector
+  // returns the same value and the assertion cannot fail. `readdirSync` is unordered, so which
+  // happens is filesystem-dependent. The order-INDEPENDENT claim is the negative one: a named
+  // origin that is NOT live must answer `present: false`, whatever else the directory holds.
+  // Without it `present` reported on the directory rather than on the question, and the broker's
+  // authorization path was correct only because its caller conjoined `seen.origin === origin`.
+  const missing = consent.executionEvidenceSeen(dir, { projectRoot: root, wantOrigin: 'http://127.0.0.1:4252' });
+  assert.equal(missing.present, false, 'a named origin with no live marker is absent, whatever else is live');
+  assert.equal(missing.origin, '', 'and no other origin is reported in its place');
+  assert.equal(missing.read, true, 'the directory was still read, which is a different fact from the answer');
+});
+
+test('the execution verdict is classified by the module, not a second time by the doctor', () => {
+  // The doctor probe hand-wrote its own classifier over `executionEvidenceSeen`'s record inside a
+  // `node -e` string, re-deciding rules the broker's own classifier already owns — "a walk that
+  // did not finish is not a walk that found nothing", "an unreadable directory is not an empty
+  // one" — with nothing comparing the two, and unreachable from a unit layer. The record's shape
+  // belongs to this module, so the classification does too.
+  assert.equal(typeof consent.classifyExecution, 'function');
+  assert.deepEqual([...consent.EXECUTION_VERDICTS].sort(), ['none', 'ran', 'ran-asked', 'unjudged']);
+  assert.equal(Object.isFrozen(consent.EXECUTION_VERDICTS), true);
+
+  const seen = (over) => Object.assign({ present: false, read: true, truncated: false, origin: '', verdict: '' }, over);
+  assert.equal(consent.classifyExecution(seen({ present: true, origin: 'http://127.0.0.1:1', verdict: consent.EVIDENCE_VERDICT_ALLOWED })), 'ran');
+  assert.equal(consent.classifyExecution(seen({ present: true, origin: 'http://127.0.0.1:1', verdict: consent.EVIDENCE_VERDICT_WEAKEST })), 'ran-asked');
+  assert.equal(consent.classifyExecution(seen({})), 'none', 'read, and held nothing');
+  assert.equal(consent.classifyExecution(seen({ read: false })), 'unjudged', 'an unreadable directory is not an empty one');
+  assert.equal(consent.classifyExecution(seen({ truncated: true })), 'unjudged', 'and a walk that did not finish is not one that found nothing');
+  assert.equal(consent.classifyExecution(seen({ truncated: true, present: true, origin: 'http://127.0.0.1:1', verdict: consent.EVIDENCE_VERDICT_ALLOWED })), 'ran', 'a truncated walk that still found this session answers on what it found');
+  assert.equal(consent.classifyExecution(null), 'unjudged', 'every fault is a missing check rather than an all-clear');
+  assert.equal(consent.classifyExecution({}), 'unjudged');
+});
+
+test('the sweep keeps the expiry diagnosis its input, and the body rule has one owner', () => {
+  const { root, memory } = project();
+  const dir = consent.evidenceDirFor(root);
+
+  // The reaper and the readers share the BODY rule, not only the stat rule. Both spelled the same
+  // ladder — version, origin, stamp shape, the re-classification, the verdict set, the age bound —
+  // so tightening one side would restore exactly the class the shared stat rule removed.
+  assert.equal(typeof consent.evidenceBodyLive, 'function');
+  const good = (origin, at) => ({ version: consent.EVIDENCE_VERSION, origin, verdict: consent.EVIDENCE_VERDICT_ALLOWED, at });
+  const now = Date.now();
+  assert.equal(consent.evidenceBodyLive(good('http://127.0.0.1:4300', new Date(now).toISOString()), now, consent.MAX_EVIDENCE_AGE_MS), true);
+  assert.equal(consent.evidenceBodyLive(good('https://app.example.com', new Date(now).toISOString()), now, consent.MAX_EVIDENCE_AGE_MS), false, 're-classification');
+  assert.equal(consent.evidenceBodyLive(good('http://127.0.0.1:4300', 'July 4, 2026'), now, consent.MAX_EVIDENCE_AGE_MS), false, 'stamp shape');
+  assert.equal(consent.evidenceBodyLive({ version: consent.EVIDENCE_VERSION + 1 }, now, consent.MAX_EVIDENCE_AGE_MS), false, 'schema discriminator');
+
+  // The SWEEP's age bound is a GRACE window strictly larger than the reader's, and that is what
+  // keeps the broker's `expired` refusal reachable. The only thing that can produce `expired` is a
+  // read with a widened window; a sweep clocked on the reader's own bound would delete exactly the
+  // marker that diagnosis needs, and the broker would then say the gate never ran — the wrong
+  // cause the `expired` arm exists to prevent.
+  assert.equal(consent.MAX_EVIDENCE_REAP_AGE_MS > consent.MAX_EVIDENCE_AGE_MS, true);
+  const aged = 'http://127.0.0.1:4301';
+  const agedPath = consent.evidencePathFor(memory, aged);
+  fs.writeFileSync(agedPath, `${JSON.stringify(good(aged, new Date(now - consent.MAX_EVIDENCE_AGE_MS - 60000).toISOString()))}\n`);
+  const trigger = 'http://127.0.0.1:4302';
+  assert.equal(consent.writeExecutionEvidence(consent.evidencePathFor(memory, trigger), trigger, { projectRoot: root }).ok, true);
+  assert.equal(fs.existsSync(agedPath), true, 'a just-expired marker survives the sweep so its expiry can still be reported');
+  assert.equal(consent.executionEvidencePresent(dir, aged, { projectRoot: root }), false, 'while every ordinary read still refuses it');
+  assert.equal(consent.executionEvidencePresent(dir, aged, { projectRoot: root, maxAgeMs: Number.MAX_SAFE_INTEGER }), true, 'which is what the expiry probe reads');
+
+  // Past the grace bound it goes.
+  const ancient = 'http://127.0.0.1:4303';
+  const ancientPath = consent.evidencePathFor(memory, ancient);
+  fs.writeFileSync(ancientPath, `${JSON.stringify(good(ancient, new Date(now - consent.MAX_EVIDENCE_REAP_AGE_MS - 60000).toISOString()))}\n`);
+  const second = 'http://127.0.0.1:4304';
+  assert.equal(consent.writeExecutionEvidence(consent.evidencePathFor(memory, second), second, { projectRoot: root }).ok, true);
+  assert.equal(fs.existsSync(ancientPath), false, 'and a marker past the grace bound is swept');
+
+  // The marker's NAME is bound to the origin its body names. `evidencePathAllowed` only shape-
+  // tests the name, so a caller handing the tag for origin A with a body naming origin B would
+  // rename over A's marker and destroy evidence for an origin that was never approved. The
+  // writer is exported, so a second caller is reachable.
+  const wrong = consent.evidencePathFor(memory, 'http://127.0.0.1:4305');
+  const refused = consent.writeExecutionEvidence(wrong, 'http://127.0.0.1:4306', { projectRoot: root });
+  assert.equal(refused.ok, false, 'a name that does not carry this origin is refused');
+  assert.match(String(refused.reason), /origin/, 'and the refusal names the cause');
+  assert.equal(consent.writeExecutionEvidence(wrong, 'http://127.0.0.1:4305', { projectRoot: root }).ok, true, 'control: the matching name is accepted');
+});
+
+test('exactly one decision envelope leaves the hook, and the ordering claim is bounded to what it buys', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', '..', 'hooks', 'lib', 'verify-consent-v1.js'), 'utf8');
+
+  // `runPre` REPORTS whether it emitted. The CLI catch used to write a deny envelope
+  // unconditionally, so a throw after the envelope write appended a SECOND object to a stdout that
+  // already carried one — not valid JSON — while node still exited 0, so the wrapper's `|| deny`
+  // did not fire and a malformed decision was forwarded to the host.
+  const { root, memory } = project();
+  let stdout = '';
+  const emitted = consent.runPre(
+    { tool_name: 'mcp__plugin_zensu_playwright__browser_navigate', tool_input: { url: 'http://127.0.0.1:4290/x' } },
+    { ZENSU_VERIFY_PROJECT_ROOT: root, ZENSU_VERIFY_CONSENT_MEMORY: memory },
+    { write: (chunk) => { stdout += chunk; } },
+    { write: () => {} },
+  );
+  assert.equal(emitted, true, 'runPre reports the emission its caller has to know about');
+  assert.equal(JSON.parse(stdout).hookSpecificOutput.permissionDecision, 'ask', 'control: one well-formed envelope');
+
+  const cli = src.split('const finalize = () => {')[1].split('process.stdin.on(')[0];
+  assert.notEqual(cli.trim(), '', 'control: the CLI finalize body was extracted');
+  assert.match(cli, /if\s*\(!\s*recorder\.emitted\(\)\s*\)/, 'the catch consults the STREAM recorder, which is the only record of an emission a throw cannot abandon');
+  assert.doesNotMatch(cli, /emitted\s*=\s*runPre\s*\(/, 'and never a flag assigned from the very call that can throw');
+  assert.match(cli, /process\.exitCode = 2/, 'and sets a non-zero status so the wrapper denies rather than forwarding');
+
+  // The reap runs BEFORE the publish. The wrapper captures node's stdout in a command
+  // substitution, which reads to EOF, so nothing this module writes reaches the host until the
+  // process exits — the envelope-first ordering therefore buys only what happens INSIDE the
+  // process, and every instruction between the rename and exit widens the window in which a
+  // killed hook leaves a live marker behind. Sweeping first removes up to MAX_EVIDENCE_FILES
+  // read-and-parse rounds from that window.
+  const writer = src.split('function writeExecutionEvidence(')[1].split('\nfunction ')[0];
+  assert.notEqual(writer.trim(), '', 'control: the writer body was extracted');
+  const reapAt = writer.indexOf('reapExpiredEvidence(');
+  const renameAt = writer.indexOf('renameSync(');
+  assert.notEqual(reapAt, -1, 'control: the writer sweeps');
+  assert.notEqual(renameAt, -1, 'control: the writer publishes by rename');
+  assert.equal(reapAt < renameAt, true, 'the sweep precedes the publish, so it is not inside the post-rename window');
+});
+
+test('both marker disclosures are emitted, and they say different things', () => {
+  // Neither line had an executed case anywhere, and the hook header names the FIRST of them as
+  // the mitigation for an absent state directory — a disclosure nothing exercises is a
+  // disclosure nobody notices has stopped being emitted.
+  const call = (env) => {
+    let err = '';
+    consent.runPre(
+      { tool_name: 'mcp__plugin_zensu_playwright__browser_navigate', tool_input: { url: 'http://127.0.0.1:4280/x' } },
+      env,
+      { write: () => {} },
+      { write: (chunk) => { err += chunk; } },
+    );
+    return err;
+  };
+
+  // No bound session: there is no key to bind a marker to, so the broker will refuse the
+  // navigation the human is about to be asked about, and the operator hears that rather than a
+  // path fault.
+  const { root } = project();
+  const unbound = call({ ZENSU_VERIFY_PROJECT_ROOT: root });
+  assert.match(unbound, /execution evidence not written \(no bound session\)/);
+  assert.match(unbound, /cannot complete a consent-mode navigation/);
+
+  // A WRITE that was attempted and refused is a different fact, and names the refusal's reason.
+  const second = project();
+  fs.rmSync(path.join(second.root, '.zensu'), { recursive: true, force: true });
+  const refused = call({ ZENSU_VERIFY_PROJECT_ROOT: second.root, ZENSU_VERIFY_CONSENT_MEMORY: second.memory });
+  assert.match(refused, /execution evidence not written \(/);
+  assert.match(refused, /the broker will not self-approve this origin/);
+  assert.equal(/no bound session/.test(refused), false, 'the two disclosures are not interchangeable');
+
+  // Control: with a usable state directory neither line is written at all.
+  const third = project();
+  assert.equal(call({ ZENSU_VERIFY_PROJECT_ROOT: third.root, ZENSU_VERIFY_CONSENT_MEMORY: third.memory }), '');
+});
+
+test('the readers refuse an anchorless call rather than reading a directory they cannot contain', () => {
+  // The directory-component containment walk used to run ONLY when a caller supplied
+  // `projectRoot`, so the module's default was open: `executionEvidencePresent(dir, origin)` read
+  // whatever directory it was handed, through a symlinked `.zensu` or `state`, with no check. One
+  // caller was hardened against that — the broker refuses an anchorless policy — but the module a
+  // port copies kept the permissive default, which is how this class returns. The anchor is what
+  // the walk is checked AGAINST, so without one there is nothing to verify and the only
+  // fail-closed answer is to refuse.
+  const { root } = project();
+  const dir = consent.evidenceDirFor(root);
+  const origin = 'http://127.0.0.1:4270';
+  const memory = path.join(dir, `verify-consent-${KEY}.json`);
+  assert.equal(consent.writeExecutionEvidence(consent.evidencePathFor(memory, origin), origin, { projectRoot: root }).ok, true);
+
+  assert.equal(consent.executionEvidencePresent(dir, origin, { projectRoot: root }), true, 'positive control: the anchored read finds it');
+  assert.equal(consent.executionEvidencePresent(dir, origin), false, 'an anchorless read refuses rather than answering');
+  const seen = consent.executionEvidenceSeen(dir);
+  assert.equal(seen.read, false, 'and reports that it did not read, never that the directory was empty');
+  assert.equal(seen.present, false);
+  assert.equal(consent.executionEvidenceSeen(dir, { projectRoot: '' }).read, false, 'an empty anchor is not an anchor');
+});
+
+test('the marker verdict vocabulary has one owner, the way decidedBy does', () => {
+  // `decidedBy` is governed by the frozen exported DECIDED_BY and validated through it. The
+  // marker's own `verdict` was hand-spelled at the writer's coercion, at both validators, at the
+  // weakest-verdict selector, at the caller's ternary and again across a process boundary in the
+  // doctor probe — seven spellings of a two-value set, with no owner to change.
+  assert.equal(Array.isArray(consent.EVIDENCE_VERDICTS), true);
+  assert.equal(Object.isFrozen(consent.EVIDENCE_VERDICTS), true);
+  assert.deepEqual([...consent.EVIDENCE_VERDICTS].sort(), ['allowed', 'asked']);
+  // The WEAKER member is named rather than positional: the doctor's row prefers it so a declined
+  // prompt is disclosed, and reading it off an index would break silently on a reorder.
+  assert.equal(consent.EVIDENCE_VERDICT_WEAKEST, 'asked');
+  assert.equal(consent.EVIDENCE_VERDICTS.includes(consent.EVIDENCE_VERDICT_WEAKEST), true);
+
+  // No MARKER-VERDICT line in the module carries a bare spelling. The scan is scoped to lines
+  // that name the `verdict` field rather than to the two literals alone, because `DECIDED_BY`
+  // legitimately holds `'asked'` too — the two vocabularies overlap on one word and belong to
+  // different artifacts, so an unscoped scan would report the memory's owner as a drift.
+  const body = fs.readFileSync(path.join(__dirname, '..', '..', 'hooks', 'lib', 'verify-consent-v1.js'), 'utf8')
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('//')
+      && !/EVIDENCE_VERDICT_ALLOWED = |EVIDENCE_VERDICT_WEAKEST = /.test(line));
+  assert.notEqual(body.length, 0, 'control: the module body was read');
+  const verdictLines = body.filter((line) => /verdict/i.test(line));
+  assert.notEqual(verdictLines.length, 0, 'control: the scan found verdict-bearing lines to judge');
+  const bare = verdictLines.filter((line) => /'allowed'|'asked'/.test(line));
+  assert.deepEqual(bare, [], `the verdict set has one owner; bare spellings remain: ${bare.join(' | ')}`);
+});
+
+test('the decision envelope is emitted before the marker is published, and the reap is off the decision path', () => {
+  const { root, memory } = project();
+  const origin = 'http://127.0.0.1:4260';
+  const evidencePath = consent.evidencePathFor(memory, origin);
+  // The ordering is the whole safety property. For a NEW origin the envelope is the `ask`, and
+  // the marker the gate writes for it carries verdict `asked`, which the broker treats as a
+  // clearance. So while the marker landed FIRST, a hook process tree that died before the write
+  // left a live self-approving marker behind with no prompt ever raised. Emitting first is
+  // fail-closed in the other direction: a lost marker refuses, a lost envelope must not approve.
+  let markerAtEnvelope = null;
+  const out = { write: () => { markerAtEnvelope = fs.existsSync(evidencePath); } };
+  consent.runPre(
+    { tool_name: 'mcp__plugin_zensu_playwright__browser_navigate', tool_input: { url: `${origin}/first` } },
+    { ZENSU_VERIFY_PROJECT_ROOT: root, ZENSU_VERIFY_CONSENT_MEMORY: memory },
+    out,
+    { write: () => {} },
+  );
+  assert.equal(markerAtEnvelope, false, 'the envelope must be written before the marker exists on disk');
+  assert.equal(fs.existsSync(evidencePath), true, 'and the marker must still be written afterwards');
+
+  // The reap is budgeted like the reader it protects: `.zensu/state` is session-writable, so an
+  // unbounded walk put one read-and-parse per entry inside the hook that gates the navigation.
+  const dir = consent.evidenceDirFor(root);
+  const good = (o) => ({ version: consent.EVIDENCE_VERSION, origin: o, verdict: 'allowed', at: new Date().toISOString() });
+  for (let i = 0; i <= consent.MAX_EVIDENCE_FILES; i += 1) {
+    const key = 'scv1_' + String(i).padStart(4, '0') + 'b'.repeat(60);
+    const o = `http://127.0.0.1:${6000 + i}`;
+    fs.writeFileSync(path.join(dir, `verify-consent-exec-${key}-${consent.evidenceOriginTag(o)}.json`), `${JSON.stringify(good(o))}\n`);
+  }
+  const later = 'http://127.0.0.1:4261';
+  assert.equal(consent.reapBudgetSpent(dir, new Date().toISOString()) <= consent.MAX_EVIDENCE_FILES, true, 'the reap examines at most the reader budget');
+  assert.equal(consent.writeExecutionEvidence(consent.evidencePathFor(memory, later), later, { projectRoot: root, verdict: 'allowed' }).ok, true);
+
+  // And the reap is clocked on the real clock, never on the caller's stamp: a back-dated `at`
+  // made every live marker in the directory fail the `age >= 0` arm and be reaped. This arm runs
+  // in its OWN project, because the crowd above holds more entries than the sweep's budget — with
+  // the defect present the survivor would then escape only if `readdirSync` happened to put it
+  // past the budget, which is the order dependence this file forbids elsewhere.
+  const clockRoot = project();
+  const clockDir = consent.evidenceDirFor(clockRoot.root);
+  const live = 'http://127.0.0.1:4265';
+  const survivor = consent.evidencePathFor(clockRoot.memory, live);
+  assert.equal(consent.writeExecutionEvidence(survivor, live, { projectRoot: clockRoot.root, verdict: 'allowed' }).ok, true);
+  assert.equal(fs.readdirSync(clockDir).filter((n) => n.startsWith('verify-consent-exec-')).length, 1, 'control: the sweep cannot be budget-bound here');
+  const backdated = 'http://127.0.0.1:4266';
+  assert.equal(consent.writeExecutionEvidence(consent.evidencePathFor(clockRoot.memory, backdated), backdated, {
+    projectRoot: clockRoot.root,
+    verdict: 'allowed',
+    at: new Date(Date.now() - consent.MAX_EVIDENCE_REAP_AGE_MS - 60000).toISOString(),
+  }).ok, true);
+  assert.equal(fs.existsSync(survivor), true, 'a back-dated write must not reap a live marker');
+});
+
+test('AC-104 emission is observable from the throwing path, so the deny envelope can never double it', () => {
+  // A throw ABANDONS an assignment, so `emitted = runPre(...)` is still false inside the caller's
+  // catch — on every path, including the one where the envelope had already been written. The
+  // guard that reads it therefore always passed and the comment above it named a protection the
+  // code could not give. What survives a throw is what the STREAM saw, so the recorder is the
+  // flag. Severity was bounded rather than absent: `process.exitCode = 2` is what makes the
+  // wrapper's `|| deny` fire, so the malformed two-object stdout never reached the host.
+  let written = '';
+  const rec = consent.recordingStream({ write: (chunk) => { written += chunk; } });
+  assert.equal(rec.emitted(), false, 'nothing observed before the first write');
+  rec.write('{"one":1}');
+  assert.equal(rec.emitted(), true, 'a write stays observable after the call that made it throws');
+  assert.equal(written, '{"one":1}', 'control: the chunk still reaches the underlying stream');
+
+  // Driven through the real emitter: what `runPre` writes is what the recorder reports.
+  const { root, memory } = project();
+  let out = '';
+  const live = consent.recordingStream({ write: (chunk) => { out += chunk; } });
+  consent.runPre(
+    { tool_name: 'mcp__plugin_zensu_playwright__browser_navigate', tool_input: { url: 'http://127.0.0.1:4291/x' } },
+    { ZENSU_VERIFY_PROJECT_ROOT: root, ZENSU_VERIFY_CONSENT_MEMORY: memory },
+    live,
+    { write: () => {} },
+  );
+  assert.equal(live.emitted(), true, 'the recorder reports the envelope runPre wrote');
+  assert.equal(JSON.parse(out).hookSpecificOutput.permissionDecision, 'ask', 'control: one well-formed envelope');
+
+  // The target-unreadable arm emits and must report it on runPre's own contract too, so a future
+  // caller reading the return value is not told nothing was written.
+  let unreadable = '';
+  const reported = consent.runPre(
+    { tool_name: 'mcp__plugin_zensu_playwright__browser_navigate', tool_input: {} },
+    { ZENSU_VERIFY_PROJECT_ROOT: root, ZENSU_VERIFY_CONSENT_MEMORY: memory },
+    { write: (chunk) => { unreadable += chunk; } },
+    { write: () => {} },
+  );
+  assert.equal(JSON.parse(unreadable).hookSpecificOutput.permissionDecision, 'deny', 'control: the arm denied');
+  assert.equal(reported, true, 'and runPre reports the emission rather than returning undefined');
+});

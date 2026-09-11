@@ -180,10 +180,13 @@ and no-escape assertions, a payload-declared non-main principal whose premise co
 `claude-principal-v1.js` itself, a second-path-field row, six faults covered — four asserting their own reason literal and two asserting the documented
 silence, the exit-2 plugin-root refusal, two source-absence checks with controls, and a
 two-group matcher shape compared against the module's exported tool set), the browser consent
-gate (79 checks: the hook pair driven against a real Session Control session, the shared
+gate (103 checks: the hook pair driven against a real Session Control session, the shared
 navigation floor, the loopback bound, the session memory and its containment, the per-origin
 consent rule a later recipe cannot widen, the one recipe resolver both hooks and the
-doctor row consume, and the skill wording), and the writer-side
+doctor row consume, the per-session execution marker the broker requires before it
+self-approves an origin — its writer, its origin binding, the policy-mode branch that
+deliberately mints none, and the reap of every correctly-named file no reader can honour —
+and the skill wording), and the writer-side
 redaction that keeps `.zensu/plans` and `.zensu/logs` artifacts free of
 absolute developer paths (~100 assertions).
 
@@ -309,8 +312,8 @@ that suite's failure.
 | `review-evidence-sweep-v1.test.js` | 32 | `test-versioned-plugin-upgrade.sh` | superseded-lease sweep: the ownership selector, the canonicalized repair root, and the ancestor probe that separates *no store here* from *an ancestor is a file* |
 | `session-adopt-report-v1.test.js` | 34 | `test-versioned-plugin-upgrade.sh` | the adoption report payload: `safe()` in both directions (ordinary path verbatim; bidi, line separators and DEL folded; a localized path unchanged), the `label : value` pair-forgery guard on both branches, the space-adjacency rule that folds every Modifier_Letter a forged row could use (walked over the whole category rather than a list), the separator in BOTH spellings the consumers emit (`space-colon-space` and `colon-space`) with an ordinary colon still rendering raw, the trailing-position seam where the caller appends text after the value, the invisible-letter guard, that the exported constants and the applied rules predict each other in both directions, the in-place lease repair, and that the display rule has exactly ONE owner |
 | `rule-block-v1.test.js` | 10 | `test-best-solution-first.sh` | the one-line marker-block reader both rule carriers share: marker position, the FILE and BLOCK ceilings, the short-read and swapped-file refusals |
-| `playwright-mcp-proxy.test.js` | 20 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy, including its three start modes (policy, consent, deny) and the consent-mode approval boundary |
-| `verify-consent-v1.test.js` | 22 | `test-verify-consent.sh` (V7) | browser consent decision: matcher and tool spellings, ask/allow/deny ladder, per-origin consent, loopback-only bound, memory shape and containment refusals, the foreign-server note's attachment rule, stamp validity independent of route, the shared memory read's containment rule and its not-configured case, recipe route extraction, pre/post CLI |
+| `playwright-mcp-proxy.test.js` | 28 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy, including its three start modes (policy, consent, deny), the consent-mode approval boundary, and the per-session execution-marker precondition that boundary now requires (every `consentEvidenceState` value and the refusal each one produces, and the production project-root anchor ladder) |
+| `verify-consent-v1.test.js` | 39 | `test-verify-consent.sh` (V7) | browser consent decision: matcher and tool spellings, ask/allow/deny ladder, per-origin consent, loopback-only bound, memory shape and containment refusals, the foreign-server note's attachment rule, stamp validity independent of route, the shared memory read's containment rule and its not-configured case, recipe route extraction, pre/post CLI, and the per-session execution marker (writer, origin binding, staleness, hard-link and oversize arms, session-scoped and project-scoped reads, and the directory-component containment the reader shares with the writer) |
 | `verify-navigation-floor-v1.test.js` | 7 | `test-verify-consent.sh` (V6) | the one navigation floor the broker and the consent hook share: loopback and public-address classes, URL refusals, remote host resolution |
 | `verify-free-port.test.js` | 3 | `test-verify-consent.sh` (V7b) | free loopback port helper: argument parsing, occupied and excluded ports, CLI contract |
 | `release-run-step.test.js` | 9 | `test-immutable-marketplace-release.sh` | the release step's `run_step` wrapper, EXECUTED: the annotation on failure, the full stderr replay, exit-status propagation, the `--quiet` sink applying to the wrapped command and never to the annotation, the no-stderr fallback, `head -1` bounding the annotation to one line, and temp-file cleanup under `RUNNER_TEMP`. Driven first in that suite, because it is the wrapper's only executable coverage anywhere and the suite's other pins are source greps that stay green against a present-but-broken wrapper |

@@ -7,7 +7,8 @@ const floor = require('./verify-navigation-floor-v1.js');
 const CONSENT_MATCHER = 'mcp__(plugin_zensu_)?playwright__browser_(navigate|tabs)';
 const NAVIGATION_TOOL_RE = /^mcp__(plugin_zensu_)?playwright__browser_(navigate|tabs)$/;
 const MEMORY_VERSION = 1;
-const MEMORY_NAME_RE = /^verify-consent-scv1_[a-f0-9]{64}\.json$/;
+const MEMORY_NAME_PREFIX = 'verify-consent-';
+const MEMORY_NAME_RE = new RegExp(`^${MEMORY_NAME_PREFIX}scv1_[a-f0-9]{64}\\.json$`);
 const MAX_MEMORY_BYTES = 65536;
 const MAX_RECORDS = 512;
 // The vocabulary names what the recorder can OBSERVE, never what a human did. PostToolUse
@@ -16,6 +17,15 @@ const MAX_RECORDS = 512;
 // origin" when it meant "the pre hook would have asked". `asked` states the raised prompt and
 // nothing beyond it.
 const DECIDED_BY = Object.freeze(['asked', 'remembered', 'policy-mode']);
+// The EXECUTION MARKER's own verdict vocabulary, owned once the way DECIDED_BY owns the memory's.
+// It was hand-spelled at seven sites — the writer's coercion, both validators, the weakest-verdict
+// selector, the caller's ternary and, across a process boundary, the doctor probe and its shell
+// suites — for a two-value set whose sibling field already had an owner. The WEAKEST member is
+// NAMED rather than taken by index, because the doctor's row prefers it so a declined prompt is
+// disclosed, and an index would break silently on a reorder.
+const EVIDENCE_VERDICT_ALLOWED = 'allowed';
+const EVIDENCE_VERDICT_WEAKEST = 'asked';
+const EVIDENCE_VERDICTS = Object.freeze([EVIDENCE_VERDICT_ALLOWED, EVIDENCE_VERDICT_WEAKEST]);
 
 const REASONS = Object.freeze({
   NOT_A_NAVIGATION: 'not-a-navigation',
@@ -27,6 +37,7 @@ const REASONS = Object.freeze({
   TARGET_UNREADABLE: 'navigation-target-unreadable',
   MEMORY_UNREADABLE: 'consent-memory-unreadable',
   MEMORY_PATH_REFUSED: 'consent-memory-path-refused',
+  EVIDENCE_PATH_REFUSED: 'consent-evidence-path-refused',
 });
 
 // Attached only to the denies a foreign server can actually cause — the origin
@@ -101,9 +112,16 @@ function normalizeRoutes(declaredRoutes) {
 // audit line its true time and changes no decision.
 const ISO_INSTANT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
+// TOTAL by construction: the regex admits two digits per field, so `9999-99-99T99:99:99.999Z`
+// matches the shape and produces an invalid Date, and `toISOString()` raises RangeError on one.
+// Every caller here is a guard over a session-writable file, and two of them sit outside any
+// enclosing try — a throw there escaped `liveEvidenceOrigins` entirely, so one planted marker
+// made the broker answer `unjudged` and refuse EVERY loopback origin in the project, naming a
+// plugin-tree fault that had not occurred. A predicate is not a guard if it can throw.
 function isIsoInstant(value) {
-  return typeof value === 'string' && ISO_INSTANT_RE.test(value)
-    && new Date(value).toISOString() === value;
+  if (typeof value !== 'string' || !ISO_INSTANT_RE.test(value)) return false;
+  try { return new Date(value).toISOString() === value; }
+  catch (_error) { return false; }
 }
 
 // The record's route is deliberately judged more loosely than a DECLARED route, and the
@@ -147,29 +165,74 @@ function readMemory(memoryPath) {
 }
 
 function memoryPathAllowed(memoryPath, projectRoot) {
-  if (typeof memoryPath !== 'string' || !path.isAbsolute(memoryPath)) return { ok: false, reason: REASONS.MEMORY_PATH_REFUSED };
-  if (typeof projectRoot !== 'string' || !path.isAbsolute(projectRoot)) return { ok: false, reason: REASONS.MEMORY_PATH_REFUSED };
-  if (!MEMORY_NAME_RE.test(path.basename(memoryPath))) return { ok: false, reason: REASONS.MEMORY_PATH_REFUSED };
+  return statePathAllowed(memoryPath, projectRoot, MEMORY_NAME_RE);
+}
+
+// The containment rule the consent memory has always applied, taken as a parameter so the
+// execution-evidence marker beside it cannot drift into a second, weaker copy of it. Only the
+// NAME shape differs between the two artifacts; the directory, the component checks and the
+// leaf rules are one implementation.
+// The REASON is a parameter because the two artifacts are different files: reporting an
+// evidence-path fault as `consent-memory-path-refused` names the wrong file class and sends the
+// reader to inspect the memory path for a fault in the marker path.
+//
+// `refuseHardLink` is a parameter for a reason the memory half does not share. Both writers
+// publish by `renameSync`, which repoints a NAME and never truncates the linked inode, so the
+// conjunct defends nothing the rename has not already closed — while one `ln` in this
+// session-writable directory would make every later write fail. For the MEMORY that is a lost
+// record; for the EVIDENCE marker it is a permanent refusal of every loopback navigation, which
+// is a worse outcome than the write it was meant to guard. CLAUDE.md records the identical
+// decision for the zen-mode marker writers. The memory keeps its pre-existing behaviour rather
+// than being changed under a fix for a different artifact.
+function statePathAllowed(memoryPath, projectRoot, nameRe, reason = REASONS.MEMORY_PATH_REFUSED, refuseHardLink = true) {
+  if (typeof memoryPath !== 'string' || !path.isAbsolute(memoryPath)) return { ok: false, reason };
+  if (typeof projectRoot !== 'string' || !path.isAbsolute(projectRoot)) return { ok: false, reason };
+  if (!nameRe.test(path.basename(memoryPath))) return { ok: false, reason };
   let rootReal;
   try { rootReal = fs.realpathSync.native(projectRoot); }
-  catch (_error) { return { ok: false, reason: REASONS.MEMORY_PATH_REFUSED }; }
-  const stateDir = path.join(rootReal, '.zensu', 'state');
-  if (path.dirname(memoryPath) !== stateDir) return { ok: false, reason: REASONS.MEMORY_PATH_REFUSED };
-  for (const component of [path.join(rootReal, '.zensu'), stateDir]) {
-    let info;
-    try { info = fs.lstatSync(component); }
-    catch (_error) { return { ok: false, reason: REASONS.MEMORY_PATH_REFUSED }; }
-    if (!info.isDirectory() || info.isSymbolicLink()) return { ok: false, reason: REASONS.MEMORY_PATH_REFUSED };
-  }
+  catch (_error) { return { ok: false, reason }; }
+  const stateDir = evidenceDirFor(rootReal);
+  if (path.dirname(memoryPath) !== stateDir) return { ok: false, reason };
+  if (!stateComponentsSafe(rootReal)) return { ok: false, reason };
   let leaf = null;
   try { leaf = fs.lstatSync(memoryPath); }
   catch (error) {
-    if (!error || error.code !== 'ENOENT') return { ok: false, reason: REASONS.MEMORY_PATH_REFUSED };
+    if (!error || error.code !== 'ENOENT') return { ok: false, reason };
   }
-  if (leaf && (!leaf.isFile() || leaf.isSymbolicLink() || leaf.nlink !== 1)) {
-    return { ok: false, reason: REASONS.MEMORY_PATH_REFUSED };
+  if (leaf && (!leaf.isFile() || leaf.isSymbolicLink() || (refuseHardLink && leaf.nlink !== 1))) {
+    return { ok: false, reason };
   }
   return { ok: true, stateDir };
+}
+
+// ONE owner for the `.zensu/state` layout AMONG THIS MODULE'S JS CONSUMERS, and the qualifier is
+// the load-bearing half. Before this the segments were joined independently in the module, in the
+// broker and in the doctor wrapper, and a layout change would have made the broker refuse loudly
+// while the doctor rendered green over a marker one path away. What is NOT covered: both consent
+// HOOKS still spell `<root>/.zensu/state` in shell (`pre-browser-navigation-consent.sh` builds the
+// memory path, `post-browser-navigation-consent.sh` builds it and mkdirs it plus its two symlink
+// guards), and `session-control-core-v1.js` declares its own `WORKFLOW_STATE_SEGMENTS` twin. A
+// layout change is therefore a multi-site edit and this constant does not make it one edit — say
+// "one owner for the JS consumers", never "one owner".
+const STATE_SEGMENTS = Object.freeze(['.zensu', 'state']);
+
+function evidenceDirFor(projectRoot) {
+  return path.join(projectRoot, ...STATE_SEGMENTS);
+}
+
+// The WRITER validated every directory component and the READER validated none, so with `.zensu`
+// a symlink the writer refused while the reader sourced markers from the link target. Both halves
+// apply the same walk now.
+function stateComponentsSafe(rootReal) {
+  let seen = rootReal;
+  for (const segment of STATE_SEGMENTS) {
+    seen = path.join(seen, segment);
+    let info;
+    try { info = fs.lstatSync(seen); }
+    catch (_error) { return false; }
+    if (!info.isDirectory() || info.isSymbolicLink()) return false;
+  }
+  return true;
 }
 
 function appendRecord(memoryPath, record, options = {}) {
@@ -210,6 +273,351 @@ function appendRecord(memoryPath, record, options = {}) {
     return { ok: false, reason: `memory-write-failed:${error && error.code ? error.code : 'unknown'}` };
   }
   return { ok: true, records, duplicate: false };
+}
+
+// --- Per-session execution evidence -----------------------------------------------------
+//
+// The broker enters consent mode when it can lstat this hook and find it in a hooks.json under
+// its OWN tree. That is a claim a file makes, never a fact about the running session, and the
+// fallback is more permissive than the state it replaced: before consent mode, no policy meant
+// no navigation at all. Three reachable ways to get the permissive half without the gate —
+// hooks disabled host-side, a broker launched from a different tree than the one whose registry
+// the host loaded, and a plugin swap while the long-lived MCP process holds a mode it resolved
+// once at start.
+//
+// This marker is the positive evidence that closes them. It says the gate RAN, in this session,
+// for this ORIGIN — never that a human approved anything, which a PreToolUse hook cannot know.
+// It is deliberately short-lived: the gate rewrites it on every decision, so a live one is
+// milliseconds old on the legitimate path, and a stale one cannot stand in for a gate that did
+// not run for the navigation actually in flight.
+// The name carries the session key AND a digest of the origin. With one file per session a
+// second decided origin renamed over the first, destroying evidence for an origin that had not
+// been approved yet; two navigations in flight together clobbered one another and the earlier
+// one was refused. Keying on the origin makes them coexist, and the reader already walks the
+// directory rather than opening one path, so nothing downstream changes.
+const EVIDENCE_NAME_PREFIX = 'verify-consent-exec-';
+const EVIDENCE_NAME_RE = new RegExp(`^${EVIDENCE_NAME_PREFIX}scv1_[a-f0-9]{64}-[a-f0-9]{16}\\.json$`);
+// The marker gets its own schema discriminator rather than sharing the consent memory's. The two
+// artifacts have different lifetimes — the marker expires in minutes, the memory lasts the
+// session — and `appendRecord` deliberately REFUSES an unreadable memory rather than rebuilding
+// it, so a bump made to move the marker's body would have made every project's memory unreadable
+// with no writer able to repair it.
+const EVIDENCE_VERSION = 1;
+// The walk is bounded like the memory's record cap: a long-lived project accumulates one marker
+// per (session, origin) and an unbounded walk would grow without limit on the interactive
+// approval path. `reapExpiredEvidence` removes what no reader can honour, which bounds the
+// accumulation but does not replace this cap — a project can hold more LIVE markers than the
+// budget, and exhausting it is reported through `truncated` rather than read as an empty walk.
+const MAX_EVIDENCE_FILES = 512;
+
+function evidenceOriginTag(origin) {
+  return crypto.createHash('sha256').update(String(origin)).digest('hex').slice(0, 16);
+}
+const MAX_EVIDENCE_BYTES = 4096;
+const MAX_EVIDENCE_AGE_MS = 5 * 60 * 1000;
+// The SWEEP's age bound, deliberately LARGER than the reader's default window, and the gap is what
+// keeps one diagnosis reachable. `liveEvidenceOrigins` takes `maxAgeMs` as an option, and the
+// broker's expiry probe drives it with `Number.MAX_SAFE_INTEGER` — that widened read is the only
+// thing that can answer `expired`, which is how a slow human answer is told apart from a gate that
+// never ran. A sweep clocked on the reader's own window would delete exactly the marker that
+// diagnosis needs, and any later marker write anywhere in the project would do it, because the
+// sweep is neither session- nor origin-scoped. So the reaper removes what NO reader can honour at
+// ANY window immediately, and holds an age-expired marker for one further window before removing
+// it. State the bound rather than claiming the two rules cannot diverge: they diverge on purpose,
+// on this one axis, and nowhere else.
+const MAX_EVIDENCE_REAP_AGE_MS = 2 * MAX_EVIDENCE_AGE_MS;
+
+function evidencePathAllowed(evidencePath, projectRoot) {
+  return statePathAllowed(evidencePath, projectRoot, EVIDENCE_NAME_RE, REASONS.EVIDENCE_PATH_REFUSED, false);
+}
+
+// The evidence path is DERIVED from the memory path rather than resolved a second time, so the
+// session key is spelled once and the two artifacts cannot name different sessions. A memory
+// path that does not carry the memory shape yields no evidence path at all: with no bound
+// session there is no key to bind a marker to, and the broker then refuses to self-approve,
+// which is the fail-closed direction.
+function evidencePathFor(memoryPath, origin) {
+  if (typeof memoryPath !== 'string' || memoryPath === '') return '';
+  if (typeof origin !== 'string' || origin === '') return '';
+  const name = path.basename(memoryPath);
+  if (!MEMORY_NAME_RE.test(name)) return '';
+  const stem = name.replace(MEMORY_NAME_PREFIX, EVIDENCE_NAME_PREFIX).replace(/\.json$/, '');
+  return path.join(path.dirname(memoryPath), `${stem}-${evidenceOriginTag(origin)}.json`);
+}
+
+function writeExecutionEvidence(evidencePath, origin, options = {}) {
+  // The origin is re-classified rather than trusted: a marker is only ever written for a target
+  // the floor admits, so a refused address can never leave evidence a later read would honour.
+  const classified = floor.classifyOrigin(origin, true);
+  if (!classified.ok || classified.mode !== 'local' || classified.origin !== origin) {
+    return { ok: false, reason: 'evidence-origin-refused' };
+  }
+  const allowed = evidencePathAllowed(evidencePath, options.projectRoot);
+  if (!allowed.ok) return allowed;
+  // The NAME must carry the origin this body names. `evidencePathAllowed` shape-tests the name and
+  // never compares its tag to the origin, and the tag is what makes two decided origins coexist —
+  // so a caller handing the tag for origin A with a body naming origin B would rename over A's
+  // marker and destroy evidence for an origin that was never approved. `runPre` derives the path
+  // from the origin and so agrees by construction, but this function is exported and a second
+  // caller is reachable.
+  if (!path.basename(evidencePath).endsWith(`-${evidenceOriginTag(origin)}.json`)) {
+    return { ok: false, reason: 'evidence-origin-tag-mismatch' };
+  }
+  const at = typeof options.at === 'string' ? options.at : new Date().toISOString();
+  if (!isIsoInstant(at)) return { ok: false, reason: 'evidence-stamp-invalid' };
+  // The VERDICT travels with the marker. Without it the broker cannot tell an
+  // asked-and-refused execution from an asked-and-approved one, and in the plugin-swap route
+  // this feature exists for, a declined origin would be self-approved unprompted inside the
+  // marker's window. A caller that names no verdict gets `asked`, the weaker of the two.
+  const verdict = options.verdict === EVIDENCE_VERDICT_ALLOWED ? EVIDENCE_VERDICT_ALLOWED : EVIDENCE_VERDICT_WEAKEST;
+  const body = `${JSON.stringify({ version: EVIDENCE_VERSION, origin, verdict, at })}\n`;
+  if (Buffer.byteLength(body) > MAX_EVIDENCE_BYTES) return { ok: false, reason: 'evidence-too-large' };
+  // SWEPT BEFORE THE PUBLISH, and the order is about a window rather than tidiness. The wrapper
+  // captures this process's stdout in a command substitution, which reads to EOF, so nothing the
+  // module writes reaches the host until the process EXITS — every instruction between the rename
+  // and exit therefore widens the interval in which a killed hook leaves a live marker behind with
+  // no decision delivered. The sweep is up to `MAX_EVIDENCE_FILES` read-and-parse rounds, which is
+  // the largest thing that was in that interval. Best effort in its own try, for the reason the
+  // previous placement made concrete: a throw escaping it must never report a marker as unwritten.
+  try { reapExpiredEvidence(allowed.stateDir, new Date().toISOString()); }
+  catch (_ignore) { /* best effort: a marker that cannot be removed costs nothing */ }
+  const temp = path.join(allowed.stateDir, `.${path.basename(evidencePath)}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`);
+  try {
+    const fd = fs.openSync(temp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+    try {
+      fs.writeSync(fd, body);
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(temp, evidencePath);
+  } catch (error) {
+    try { fs.unlinkSync(temp); } catch (_ignore) { /* nothing to remove */ }
+    return { ok: false, reason: `evidence-write-failed:${error && error.code ? error.code : 'unknown'}` };
+  }
+  return { ok: true, origin, verdict, at };
+}
+
+// Markers are otherwise never removed, and the reader's walk is budgeted, so an accumulating
+// project would eventually push a live marker outside the examined set and refuse a navigation
+// with a message naming a gate that did run. Reaping happens at the one site that already holds
+// a validated state directory, and is best effort: a marker that cannot be removed costs nothing.
+//
+// The candidate set is EVERYTHING THE READER CAN NEVER HONOUR, not just what has expired. Reaping
+// only well-formed expired markers left the one class that actually exhausts the budget: a
+// correctly-named file whose body the reader refuses — `{}`, a wrong schema version, a foreign
+// origin, an unknown verdict, a stamp in the FUTURE — is skipped by every reader forever and by
+// the old reaper too, while `liveEvidenceOrigins` counts it against `MAX_EVIDENCE_FILES` BEFORE
+// parsing. Since the broker's granting read is unscoped, enough of those refused every loopback
+// origin in the project with a durable message naming a cause that had not occurred.
+//
+// TWO bounds are deliberate and neither is cosmetic. A non-regular entry is left alone: this
+// verb may only remove what it can prove is a dead marker, and a directory or a symlink at that
+// name is tamper evidence rather than litter. And the candidate is re-`lstat`ed IMMEDIATELY
+// before the unlink and skipped when dev/ino/mtime moved, because `writeExecutionEvidence`
+// publishes by rename onto exactly these names — without the re-check an interleaving deleted a
+// FRESH marker, which is the failure this function exists to prevent.
+//
+// The reap is NOT session-scoped, so a write in one session removes a sibling session's dead
+// markers too. That is deliberate — the budget it protects is project-wide, and the entries it
+// removes are ones no reader in any session could have honoured — and it is disclosed in
+// docs/gates.md beside the window rather than left to be discovered.
+// BUDGETED to `MAX_EVIDENCE_FILES`, the same cap the reader carries, and the reason is not
+// symmetry: this walk runs inside the PreToolUse hook that GATES the navigation, and it reads
+// and parses every candidate rather than only stat-ing it. `.zensu/state/` is writable from
+// inside a session through an ungated Bash redirect, so an unbounded walk let the contents of
+// that directory decide how long the gating hook takes to answer — one readdir plus N
+// read-and-parse rounds per decided navigation. Exhausting the budget is not reported here: the
+// reap is a best-effort sweep rather than an answer, and the READER is what tells a caller that
+// a walk did not finish.
+//
+// The counter is returned so the bound has an executed case; nothing in production reads it.
+function reapExpiredEvidence(stateDir, nowIso) {
+  const now = Date.parse(nowIso);
+  if (!Number.isFinite(now)) return 0;
+  let names;
+  try { names = fs.readdirSync(stateDir); }
+  catch (_error) { return 0; }
+  let examined = 0;
+  for (const name of names) {
+    if (!EVIDENCE_NAME_RE.test(name)) continue;
+    if (examined >= MAX_EVIDENCE_FILES) break;
+    examined += 1;
+    const candidate = path.join(stateDir, name);
+    try {
+      const info = fs.lstatSync(candidate);
+      if (!info.isFile() || info.isSymbolicLink()) continue;
+      if (evidenceStillHonourable(candidate, info, now)) continue;
+      const before = fs.lstatSync(candidate);
+      if (before.dev !== info.dev || before.ino !== info.ino || before.mtimeMs !== info.mtimeMs) continue;
+      fs.unlinkSync(candidate);
+    } catch (_error) { /* a marker that will not be read is a marker that will not be reaped */ }
+  }
+  return examined;
+}
+
+// The reap candidate test, stated as the reader's own liveness rule so the two cannot drift into
+// removing a marker a reader would still honour. Anything this answers false for is refused by
+// every reader for as long as it exists.
+// The STAT-level half of that rule, owned once. Both the reader and the reaper apply it, and
+// splitting it was a real defect rather than a tidiness point: the reader refused `nlink !== 1`
+// while the reaper's own predicate checked only the size, so a live hard-linked marker was
+// refused by every reader AND reported honourable by the sweep — unreadable and unreapable at
+// once, holding a walk-budget slot the sweep exists to free. A stat rule added to one side alone
+// cannot reintroduce that now, because there is one side.
+function evidenceStatUsable(info) {
+  return info.isFile() && !info.isSymbolicLink() && info.nlink === 1 && info.size <= MAX_EVIDENCE_BYTES;
+}
+
+// The BODY half of the liveness rule, owned once beside the stat half. Unifying only the stat
+// rule left this ladder spelled twice, which is the same drift class one level down: a rule
+// tightened on the reader alone would make the sweep report honourable what no reader honours.
+// The WINDOW is a parameter rather than a constant precisely because the two callers legitimately
+// use different ones — see `MAX_EVIDENCE_REAP_AGE_MS`.
+function evidenceBodyLive(parsed, now, maxAge) {
+  if (!parsed || typeof parsed !== 'object' || parsed.version !== EVIDENCE_VERSION) return false;
+  if (typeof parsed.origin !== 'string' || parsed.origin === '' || !isIsoInstant(parsed.at)) return false;
+  const reread = floor.classifyOrigin(parsed.origin, true);
+  if (!reread.ok || reread.mode !== 'local' || reread.origin !== parsed.origin) return false;
+  if (!EVIDENCE_VERDICTS.includes(parsed.verdict)) return false;
+  const age = now - Date.parse(parsed.at);
+  return age >= 0 && age <= maxAge;
+}
+
+function evidenceStillHonourable(candidate, info, now) {
+  if (!evidenceStatUsable(info)) return false;
+  let parsed;
+  try { parsed = JSON.parse(fs.readFileSync(candidate, 'utf8')); }
+  catch (_error) { return false; }
+  return evidenceBodyLive(parsed, now, MAX_EVIDENCE_REAP_AGE_MS);
+}
+
+// The reader takes a DIRECTORY rather than a path because its caller is the broker, which has no
+// session key: it can only ask whether SOME gate in this project recorded a decision for this
+// origin. Every fault answers false — this is the evidence half of a fail-closed check, so an
+// unreadable directory, an unparseable marker or a marker that is not a plain file must never
+// read as a pass.
+function executionEvidencePresent(stateDir, origin, options = {}) {
+  if (typeof origin !== 'string' || origin === '') return false;
+  return liveEvidenceOrigins(stateDir, Object.assign({}, options, { wantOrigin: origin })).origins.includes(origin);
+}
+
+// The doctor asks a DIFFERENT question from the broker's: not "may this origin be approved" but
+// "did the gate run at all in this session". Sharing one walk is what keeps the two answers from
+// disagreeing about which markers are live — a diagnostic that judged staleness by its own rule
+// would report a gate as never executed while the broker was honouring its marker.
+// `read` is what separates "the directory held no live marker" from "the directory could not be
+// read", and the doctor needs that split: rendering an unreadable state directory as a clean
+// green row is the same benign-looking silence the execution row exists to remove.
+function executionEvidenceSeen(stateDir, options = {}) {
+  const walk = liveEvidenceOrigins(stateDir, options);
+  // The reported origin is the one the caller ASKED about when it named one, and otherwise the
+  // one carrying the WEAKER verdict. `origins[0]` was `readdirSync` order: with one `allowed`
+  // and one `asked` marker live — two origins decided inside the window, ordinary in a
+  // multi-origin verify run — the doctor's row flipped between runs for identical state and
+  // could drop the declined-prompt disclosure entirely.
+  //
+  // A NAMED origin scopes the ANSWER, not only the label. When `wantOrigin` was supplied but not
+  // live, control fell to the selector below and returned `present: true` carrying a DIFFERENT
+  // origin — so `present` reported on the directory rather than on the question that was asked.
+  // The broker's authorization path was correct only because its caller conjoined
+  // `seen.origin === origin`, a compensation this function neither announced nor guaranteed.
+  let chosen = '';
+  if (typeof options.wantOrigin === 'string' && options.wantOrigin !== '') {
+    chosen = walk.origins.includes(options.wantOrigin) ? options.wantOrigin : '';
+  } else {
+    for (const origin of walk.origins) {
+      if (chosen === '') chosen = origin;
+      if (walk.verdicts[origin] === EVIDENCE_VERDICT_WEAKEST) { chosen = origin; break; }
+    }
+  }
+  return { present: chosen !== '', read: walk.read, truncated: walk.truncated, origin: chosen, verdict: chosen === '' ? '' : (walk.verdicts[chosen] || '') };
+}
+
+// The EXECUTION verdict, classified here rather than a second time by each consumer. The doctor
+// probe hand-wrote this ladder inside a `node -e` string and encoded it in exit statuses, which
+// put the answer on the same channel as every way a process can die and left the two classifiers
+// held against nothing. The record's shape belongs to this module, so the reading of it does too.
+// Every fault is `unjudged`: a walk that could not be read and one that did not FINISH are both
+// missing checks rather than clean reads, which is the benign-looking silence this vocabulary
+// exists to remove.
+const EXECUTION_VERDICTS = Object.freeze(['ran', 'ran-asked', 'none', 'unjudged']);
+
+function classifyExecution(seen) {
+  if (!seen || typeof seen !== 'object') return 'unjudged';
+  // Answered on what was FOUND before the walk's completeness is weighed: a budget-exhausted walk
+  // that still carries this session's marker has established the execution it was asked about.
+  if (seen.present === true) {
+    return seen.verdict === EVIDENCE_VERDICT_ALLOWED ? 'ran' : 'ran-asked';
+  }
+  if (seen.read !== true || seen.truncated === true) return 'unjudged';
+  return 'none';
+}
+
+// `sessionKey` binds the walk to ONE session's markers. The broker has no session key and passes
+// none — its question is deliberately project-scoped, and the carriers say so — but the doctor
+// does have one, and a row claiming "executed in this session" must not be satisfied by a
+// sibling session's marker.
+function liveEvidenceOrigins(stateDir, options = {}) {
+  const found = { origins: [], verdicts: {}, read: false, truncated: false };
+  if (typeof stateDir !== 'string' || stateDir === '') return found;
+  const now = Number.isFinite(options.now) ? options.now : Date.now();
+  const maxAge = Number.isFinite(options.maxAgeMs) ? options.maxAgeMs : MAX_EVIDENCE_AGE_MS;
+  const wanted = typeof options.sessionKey === 'string' && options.sessionKey !== ''
+    ? `${EVIDENCE_NAME_PREFIX}${options.sessionKey}-`
+    : '';
+  // The anchor is REQUIRED, and that is the fail-closed direction rather than a convenience.
+  // The containment walk is checked AGAINST this root, so a call that supplies none has nothing
+  // to verify — and while it was optional the module's DEFAULT was open: `executionEvidencePresent
+  // (dir, origin)` read whatever directory it was handed, through a symlinked `.zensu` or `state`.
+  // One caller was hardened against that (the broker refuses an anchorless policy), but the
+  // module is the cross-host half a port copies, so the permissive default is how the class comes
+  // back. An anchorless call now answers `read: false`, which every consumer already renders as
+  // "could not be judged" rather than as an empty directory.
+  if (typeof options.projectRoot !== 'string' || options.projectRoot === '') return found;
+  let rootReal;
+  try { rootReal = fs.realpathSync.native(options.projectRoot); }
+  catch (_error) { return found; }
+  if (path.join(rootReal, ...STATE_SEGMENTS) !== stateDir || !stateComponentsSafe(rootReal)) return found;
+  let names;
+  try { names = fs.readdirSync(stateDir); }
+  catch (_error) { return found; }
+  found.read = true;
+  let examined = 0;
+  for (const name of names) {
+    if (!EVIDENCE_NAME_RE.test(name)) continue;
+    // The session filter runs BEFORE the budget, so a session-scoped walk cannot be starved by
+    // markers other sessions left in the same project — `readdirSync` is unordered, so which
+    // entries a budget spent on foreign names would have covered is filesystem-dependent.
+    if (wanted !== '' && !name.startsWith(wanted)) continue;
+    if (examined >= MAX_EVIDENCE_FILES) { found.truncated = true; break; }
+    examined += 1;
+    const candidate = path.join(stateDir, name);
+    let info;
+    try { info = fs.lstatSync(candidate); }
+    catch (_error) { continue; }
+    if (!evidenceStatUsable(info)) continue;
+    let parsed;
+    try { parsed = JSON.parse(fs.readFileSync(candidate, 'utf8')); }
+    catch (_error) { continue; }
+    // ONE owner for the body rule, shared with the reaper. It re-classifies the origin on READ as
+    // well as on write, because the value comes from a session-writable file and is handed back to
+    // callers; it admits BOTH verdicts, because the ask path IS the primary route — first
+    // navigation to a new origin asks, and the broker reads the marker after the human answers —
+    // so refusing `asked` would refuse the feature's own main route; and it treats a FUTURE stamp
+    // as outside the window rather than absolute-valued, so a skewed or planted marker cannot hold
+    // the window open. The residual it does NOT close is stated in the carriers: a prompt the
+    // human DECLINED leaves an `asked` marker live for its window, so an origin declined and then
+    // re-navigated while the gate is not running is admitted. Closing that needs a signal the gate
+    // cannot emit before the answer exists.
+    if (!evidenceBodyLive(parsed, now, maxAge)) continue;
+    found.origins.push(parsed.origin);
+    found.verdicts[parsed.origin] = parsed.verdict;
+    // The broker asks about ONE origin and never reads the rest of the list, so stopping here
+    // keeps the interactive approval path off a full directory parse.
+    if (typeof options.wantOrigin === 'string' && options.wantOrigin === parsed.origin) break;
+  }
+  return found;
 }
 
 const MAX_PROMPT_ROUTE = 120;
@@ -469,7 +877,7 @@ function readConsentMemory(memoryPath, projectRoot) {
 function runPre(payload, env, out, err) {
   if (!payload || typeof payload !== 'object' || typeof payload.tool_name !== 'string') {
     out.write(JSON.stringify(preEnvelope({ verdict: 'deny', reason: REASONS.PAYLOAD_UNREADABLE })));
-    return;
+    return true;
   }
   const inputs = readInputs(env);
   const memory = readConsentMemory(inputs.memoryPath, inputs.projectRoot);
@@ -485,10 +893,62 @@ function runPre(payload, env, out, err) {
   // a navigation that never resolved a target has nothing to record.
   if (decision.reason === REASONS.NOT_A_NAVIGATION && navigationExpected(payload.tool_name, payload.tool_input)) {
     out.write(JSON.stringify(preEnvelope({ verdict: 'deny', reason: REASONS.TARGET_UNREADABLE })));
-    return;
+    return true;
   }
+  // AC-103: record that the gate EXECUTED for this origin, before the verdict is emitted. The
+  // broker reads this marker at approval time, so a session whose hooks never ran leaves none
+  // and consent mode refuses to self-approve rather than falling back to something MORE
+  // permissive than the deny-everything state it replaced.
+  //
+  // Written for every verdict but DENY, and only for an origin the floor calls local. A denied
+  // navigation never reaches the broker, so a marker for it would record an execution that
+  // granted nothing; an ASK is recorded because the hook returns before the human answers and
+  // the call only reaches the broker at all when the answer was yes.
+  //
+  // POLICY mode is excluded, and that is a security bound rather than an optimisation: `decide`
+  // returns allow with reason `policy-mode` WITHOUT testing the target against the policy's own
+  // targets — it delegates that to the broker — so a marker minted there asserts a clearance no
+  // gate gave. The broker's granting read carries no session key, so a consent-mode broker in
+  // the same project would then self-approve that origin inside the window, unprompted. An
+  // aligned policy-mode session never enters consent mode, so the marker has no consumer there
+  // and the skip costs nothing.
+  //
+  // The ENVELOPE IS EMITTED FIRST, and the order is a safety property rather than layout. For a
+  // new origin the envelope is the `ask`, and the marker written for it carries verdict `asked`,
+  // which the broker treats as a clearance. With the marker published first, a hook process tree
+  // that died before the envelope reached stdout — a host PreToolUse timeout killing the group, a
+  // SIGKILL, an OOM — left a live self-approving marker behind while no prompt was ever raised.
+  // The wrapper's `|| deny` catches an ordinary non-zero exit, so that path needs the wrapper
+  // killed too, and whether this host admits a call after a timed-out hook is UNVERIFIED; the
+  // reorder is taken anyway because it is free and fail-closed in the other direction — a lost
+  // marker refuses, where a lost envelope approved.
   const envelope = preEnvelope(decision);
-  if (envelope) out.write(JSON.stringify(envelope));
+  let emitted = false;
+  if (envelope) { out.write(JSON.stringify(envelope)); emitted = true; }
+  if (decision.verdict !== 'deny' && decision.reason !== REASONS.POLICY_MODE
+    && decision.mode === 'local' && typeof decision.origin === 'string') {
+    const evidencePath = evidencePathFor(inputs.memoryPath, decision.origin);
+    if (evidencePath === '') {
+      // Distinguished from every other fault on purpose: with no bound Session Control record
+      // there is no key to bind a marker to, the broker will refuse the navigation the human is
+      // about to be asked about, and the operator needs to hear that rather than a path fault.
+      err.write('zensu: verify consent execution evidence not written (no bound session) — this session cannot complete a consent-mode navigation; run /zensu:doctor\n');
+    } else {
+      const written = writeExecutionEvidence(evidencePath, decision.origin, {
+        projectRoot: inputs.projectRoot,
+        verdict: decision.reason === REASONS.NEW_ORIGIN ? EVIDENCE_VERDICT_WEAKEST : EVIDENCE_VERDICT_ALLOWED,
+      });
+      if (!written.ok) err.write(`zensu: verify consent execution evidence not written (${written.reason}); the broker will not self-approve this origin\n`);
+    }
+  }
+  // This function's OWN report, for a caller that returns normally. It is deliberately NOT what
+  // the CLI catch reads: a throw abandons a return, so a flag assigned from this call is still
+  // false in the catch on every path, including the one where the envelope was already written.
+  // The CLI hands in a `recordingStream` for that reason. Writing a deny envelope unconditionally
+  // there appended a SECOND object to a stdout that already carried one — two concatenated
+  // objects are not valid JSON — while the process still exited 0, so the wrapper forwarded a
+  // malformed decision instead of denying.
+  return emitted;
 }
 
 function runPost(payload, env, err) {
@@ -520,10 +980,25 @@ function runPost(payload, env, err) {
   return result;
 }
 
+// A throw ABANDONS an assignment, so `emitted = runPre(...)` can never be true inside the
+// caller's catch — the value that survives is what the STREAM saw. This wrapper is that record:
+// the CLI hands it to `runPre` in place of `process.stdout` and the catch asks it, rather than a
+// flag the throw skipped over.
+function recordingStream(out) {
+  const state = { emitted: false };
+  return {
+    emitted: () => state.emitted,
+    write: (chunk) => { state.emitted = true; return out.write(chunk); },
+  };
+}
+
 module.exports = {
   CONSENT_MATCHER,
+  recordingStream,
   DECIDED_BY,
   FOREIGN_SERVER_NOTE,
+  MAX_EVIDENCE_AGE_MS,
+  MAX_EVIDENCE_BYTES,
   MAX_MEMORY_BYTES,
   MAX_PROMPT_ROUTE,
   MAX_PROMPT_ROUTES,
@@ -531,7 +1006,19 @@ module.exports = {
   MAX_RECIPE_BYTES,
   MAX_RECORDS,
   MEMORY_NAME_RE,
+  EVIDENCE_NAME_PREFIX,
+  MEMORY_NAME_PREFIX,
+  EVIDENCE_VERSION,
+  EVIDENCE_VERDICTS,
+  EVIDENCE_VERDICT_ALLOWED,
+  EVIDENCE_VERDICT_WEAKEST,
+  MAX_EVIDENCE_FILES,
+  MAX_EVIDENCE_REAP_AGE_MS,
+  EXECUTION_VERDICTS,
+  classifyExecution,
+  evidenceBodyLive,
   MEMORY_VERSION,
+  STATE_SEGMENTS,
   NAVIGATION_TOOL_RE,
   REASONS,
   RECIPE_NAMES,
@@ -539,6 +1026,15 @@ module.exports = {
   decide,
   declaredRoutesFromRecipe,
   emptyMemory,
+  evidenceDirFor,
+  evidenceOriginTag,
+  evidencePathAllowed,
+  evidencePathFor,
+  executionEvidencePresent,
+  executionEvidenceSeen,
+  // Exported for its BOUND alone: the reap runs inside the gating hook and nothing in production
+  // reads the count, so without a handle the budget would ship with no executed case.
+  reapBudgetSpent: reapExpiredEvidence,
   foreignServerNoteApplies,
   isIsoInstant,
   memoryPathAllowed,
@@ -558,8 +1054,10 @@ module.exports = {
   responseFailed,
   runPost,
   runPre,
+  statePathAllowed,
   targetOf,
   validRecord,
+  writeExecutionEvidence,
 };
 
 if (require.main === module) {
@@ -580,12 +1078,22 @@ if (require.main === module) {
       if (settled) return;
       settled = true;
       const payload = payloadFromRaw(raw, accumulationFailed);
+      const recorder = recordingStream(process.stdout);
       try {
-        if (mode === 'pre') runPre(payload, process.env, process.stdout, process.stderr);
+        if (mode === 'pre') runPre(payload, process.env, recorder, process.stderr);
         else runPost(payload, process.env, process.stderr);
       } catch (error) {
         if (mode === 'pre') {
-          process.stdout.write(JSON.stringify(preEnvelope({ verdict: 'deny', reason: `hook-failed:${error && error.code ? error.code : 'unknown'}` })));
+          // The deny envelope is written ONLY when the stream carries nothing yet: a second object
+          // on a stdout that already carries one is not valid JSON, and the wrapper captures the
+          // whole stream. The RECORDER is what makes that observable — a throw abandons runPre's
+          // return, so a flag assigned from that call is false here on every path and the guard
+          // could never fire. What makes the wrapper DENY rather than forward whatever it
+          // captured is the non-zero status below; this guard only keeps the stream well-formed.
+          if (!recorder.emitted()) {
+            process.stdout.write(JSON.stringify(preEnvelope({ verdict: 'deny', reason: `hook-failed:${error && error.code ? error.code : 'unknown'}` })));
+          }
+          process.exitCode = 2;
         } else {
           process.stderr.write('zensu: verify consent memory not written (hook failed)\n');
         }

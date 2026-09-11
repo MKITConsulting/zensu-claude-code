@@ -7376,10 +7376,114 @@ correctly too: it is NOT that calling the owner would put DNS in a read-only dia
 `parsePolicy(raw, resolver)` takes its resolver as a parameter and reaches DNS only for
 `mode: "remote"`. It is that a stubbed refusing resolver would report a VALID remote policy as
 invalid, which is the one verdict a diagnostic must never invent;
-`consentHookRegistered` / `consentRecorderRegistered`, which share one lookup because their
+the EXECUTION-MARKER family, which this roster omitted for a round while the feature shipped:
+`STATE_SEGMENTS` / `evidenceDirFor` (the one owner for the module's JS consumers — the broker
+and the doctor wrapper consume it rather than joining the segments themselves. Say it that way
+rather than as oneness: both consent HOOKS still hand-join the two segments in shell, and
+`session-control-core-v1.js` declares its own `WORKFLOW_STATE_SEGMENTS` twin, so a layout change
+is a multi-site edit),
+`MEMORY_NAME_PREFIX` / `EVIDENCE_NAME_PREFIX` (the one owner of each half of the marker name FOR
+THE MODULE'S OWN JS CONSUMERS — the regex, `evidencePathFor`'s substitution and
+`liveEvidenceOrigins`' session filter are all built from it, because a one-sided edit there left
+the writer working while the doctor's filter matched nothing and rendered the benign row. State
+the qualifier: `MEMORY_NAME_PREFIX` is HAND-COPIED in both consent hooks, which each spell
+`verify-consent-${ZENSU_SESSION_KEY}.json` in shell, so renaming it is a three-site edit and this
+constant makes it neither one edit nor a loud failure — the hooks would build a path the module's
+own `MEMORY_NAME_RE` then refuses. `EVIDENCE_NAME_PREFIX` has TWO code carriers besides its owner — the
+proxy's `truncated` refusal and the renderer's `unjudged` row, both of which spell the marker
+glob into a sentence a model reads — and its literal is restated in FOUR operator accounts:
+`docs/gates.md`, `docs/verify-feature.md`, the `pre-browser-navigation-consent.sh` row in
+`docs/configuration.md`, and `skills/doctor/SKILL.md`. Treat that as a census taken at one moment
+rather than a bound the suite holds: `grep -rln 'verify-consent-exec-'` over `hooks`, `scripts`,
+`docs`, `skills` and this file is what settles it) / `EVIDENCE_NAME_RE` / `evidenceOriginTag` / `evidencePathFor` /
+`evidenceStatUsable` (the STAT-level half of the liveness rule, owned ONCE: the reader refused
+`nlink !== 1` while the reaper's own predicate checked only the size, so a live hard-linked
+marker was refused by every reader AND reported honourable by the sweep — unreadable and
+unreapable at once, holding a walk-budget slot the sweep exists to free) /
+`evidenceBodyLive(parsed, now, maxAge)` (the BODY half, owned once for the same reason — unifying
+only the stat rule left the version/origin/stamp/re-classification/verdict/age ladder spelled
+twice. Its WINDOW is a parameter because the two callers legitimately differ: `MAX_EVIDENCE_REAP_AGE_MS`
+is strictly larger than `MAX_EVIDENCE_AGE_MS`, and that gap is load-bearing. `liveEvidenceOrigins`
+takes `maxAgeMs` as an option and the broker's expiry probe drives it with `Number.MAX_SAFE_INTEGER` —
+that widened read is the ONLY thing that can answer `expired`, so a sweep clocked on the reader's
+own window would delete exactly the marker that diagnosis needs, from any later write anywhere in
+the project, and the broker would then report a gate that never ran. Never state the two rules as
+unable to diverge: they diverge on this one axis by design and nowhere else) /
+`EXECUTION_VERDICTS` / `classifyExecution(seen)` (the doctor's row vocabulary, owned here rather
+than hand-written a second time inside the probe's `node -e` string. It travels to the shell as a
+WORD, never as an exit status: a status ladder put the answer on the same channel as every way a
+process can die, and moving the benign verdict from 1 to another small integer only traded one
+collision for another) /
+`evidencePathAllowed` / `EVIDENCE_VERSION` (the marker's OWN schema discriminator, deliberately
+not the memory's — `appendRecord` refuses an unreadable memory rather than rebuilding it, so a
+bump made for the marker would have wedged every project's memory) / `MAX_EVIDENCE_FILES` (the
+name is per session AND per
+origin; a one-file-per-session shape made a second decided origin rename over the first),
+`writeExecutionEvidence` / `executionEvidencePresent` / `executionEvidenceSeen` /
+`liveEvidenceOrigins` and `MAX_EVIDENCE_AGE_MS` / `MAX_EVIDENCE_BYTES`, the marker's own
+`{version, origin, verdict, at}` body — whose `verdict` now has an OWNER, `EVIDENCE_VERDICTS`
+with its two NAMED members `EVIDENCE_VERDICT_ALLOWED` and `EVIDENCE_VERDICT_WEAKEST`, the way
+`DECIDED_BY` owns the memory's `decidedBy`. The weakest member is named rather than taken by
+index because the doctor's row PREFERS it so a declined prompt is disclosed. It was hand-spelled
+at seven sites for a two-value set, and one of those crossed a PROCESS boundary: the doctor
+probe's `seen.verdict === "allowed"` ternary, which now reads `mod.EVIDENCE_VERDICT_ALLOWED` and
+falls back to the literal for a module that predates the export — without that read a rename
+would have reported every `asked` marker as cleared, silently. The two vocabularies OVERLAP on
+the word `asked` and belong to different artifacts, so a scan for bare spellings has to be scoped
+to `verdict`-bearing lines or it reports the memory's owner as a drift — `REASONS.EVIDENCE_PATH_REFUSED`, and
+`statePathAllowed`'s reason and hard-link parameters — the memory keeps `nlink !== 1` and the
+marker does not, deliberately, so a change there is a two-artifact decision. Across files:
+`consentEvidenceState` in `scripts/playwright-mcp-proxy.js` (SIX values — `present` /
+`expired` / `absent` / `unjudged` / `unread` / `truncated` — where the `expired` arm keeps a slow
+human answer from being reported as a gate that never ran, `unjudged` keeps a module fault from
+being reported as one either, `unread` names a state directory the walk could not open, and
+`truncated` names a walk that hit `MAX_EVIDENCE_FILES` before it could answer. The last two were
+`absent` for a round, which is the same conflation the first two exist to remove: a directory
+that could not be opened and a budget that ran out both refused with a sentence naming a gate
+that had run), `CONSENT_EVIDENCE_STATES` and `consentRefusalFor` in that same file — ONE owner for the state
+set and ONE renderer for the refusal each state produces, because the approval ladder re-spelled
+the set as four `if` arms plus a catch-all that ASSERTED a cause, so a seventh state would have
+named a fact the probe never established; the residual arm is state-NEUTRAL and names only what
+it could not interpret, the shape the sibling doctor renderer already had —
+the consent-policy record's own field set (`pluginRoot` / `evidenceDir` / `projectRoot`,
+where a constructor taking two of the three silently dropped the anchor and left the granting
+read's containment walk inert, and where `evidenceDir` is now RE-DERIVED per call from the loaded
+module rather than taken from the startup value: `consentModule` is re-VERIFIED every call — `require` returns the cache for an unchanged path, so
+what re-runs is the `lstat` and its plain-file test, which is the only per-call verification there
+is — because this process outlives the tree it resolved its mode from, while the directory derived
+from it was resolved once, so a module fault in that one window disabled consent approval for the life of the
+MCP server and emitted "reinstall the plugin" for a plugin that had recovered), the
+`ZENSU_VERIFY_PROJECT_ROOT` entry in `scripts/playwright-mcp.sh`'s `env -i` allowlist — without
+it the broker's anchor silently becomes its own cwd — and the `ZDOC_VERIFY_EXEC` wire between
+`hooks/lib/zensu-doctor.sh` and `hooks/lib/zensu-doctor-report.js`, whose FIVE states
+(`ran|ran-asked|none|unjudged|unknown`) each need a row and a `skills/doctor/SKILL.md` bullet.
+`ran-asked` is the one a census is likeliest to miss: it is a SECOND success state, reached when
+the live marker records the gate ASKING rather than clearing from memory, so a reader counting
+"one green state" finds two. Two
+hand-copies travel with it and both are PINNED rather than trusted: the consent arming set
+(`consent|consent-no-recipe|consent-recipe-unchecked`), spelled in the wrapper and in the
+renderer's `CONSENT_MODE_STATES`, by `P1vr`; and every `verify-feature`/`verify-feature gate`
+row against the skill, by `P1vg`, whose selector had to be widened — its `'verify-feature: '`
+form could not see the `gate:` family at all, which is the half-pinned shape this file records
+for `AC-C19`. Then `consentHookRegistered` / `consentRecorderRegistered`, which share one lookup because their
 CONSUMERS differ — the broker asks only about the gate, the doctor about both; and the operator accounts in `docs/gates.md`, `docs/configuration.md`
 (both hook rows plus the hook count and its anchors), `docs/verify-feature.md`, the README
 docs-index rows, the suite manifest entry and the counts in `tests/SUITE-OVERVIEW.md`.
+
+**Version for the EXECUTION-MARKER delta: `patch`, and it is its own verdict.** The paragraph
+below is about the ORIGINAL hook addition; a releaser matching on it would get the wrong answer
+for this one, which is why this file states one scoped verdict per delta. Walked against
+§"Runtime Lineage" entry by entry: no context-record or workflow-state schema field — the marker
+is a file in `<project>/.zensu/state`, the same class as the consent memory, and it is the
+argument §"Workflow-Baseline Repair" uses for its own rebuild counter; no strict key set; no hook
+added, removed or renamed and no matcher changed; no new config key; no attestation change. The
+new module exports are additive, and a runtime that does not read them is unaffected. ONE mixed
+case is real and is scored here rather than left to be discovered: a NEWER broker beside an OLDER
+gate that writes no marker refuses every loopback origin. That is a refusal rather than an
+unreadable persisted shape, and the two ship in one tree — the broker is launched from the plugin
+root that carries the gate — so it is not a lineage break; a `--plugin-dir` checkout beside an
+installed root is the shape that could produce it, and the sibling-root rule already refuses to
+serve across that boundary.
 
 **Version: `minor`.** Walked against §"Runtime Lineage": adding a hook is a `patch` UNLESS it
 can DENY or ASK, and this one does both. It changes the capability set of every session an older
@@ -7398,10 +7502,78 @@ runtime is still serving, which is the disqualifier that bullet spells out.
   stays unverified until that weekly run reports green. Say "unverified", never "never runs".
 - **No ports.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were not included. A port
   owns both halves, and the host half includes a measurement rather than an assumption: whether
-  its harness renders a PreToolUse `ask` as a prompt the model cannot answer.
-- **The residual class the gate cannot close** is the one every PreToolUse gate carries: the
-  broker trusts that the host ran the hook. With hooks disabled host-side, consent mode accepts
-  unconsented loopback navigations, and the doctor reports registration rather than execution.
+  its harness renders a PreToolUse `ask` as a prompt the model cannot answer. The EXECUTION MARKER
+  splits the same way and a port that takes one half gets a broken gate: the core half is
+  `STATE_SEGMENTS` / `evidenceDirFor` / `stateComponentsSafe` / `EVIDENCE_NAME_RE` /
+  `evidenceOriginTag` / `evidencePathFor` / `evidencePathAllowed` / `writeExecutionEvidence` /
+  `executionEvidencePresent` / `executionEvidenceSeen` / `liveEvidenceOrigins` /
+  `EVIDENCE_NAME_PREFIX` / `EVIDENCE_VERSION` / `EVIDENCE_VERDICTS` with both named members /
+  `MAX_EVIDENCE_AGE_MS` / `MAX_EVIDENCE_BYTES` /
+  `MAX_EVIDENCE_FILES` / `evidenceStatUsable` / `evidenceStillHonourable` / `reapExpiredEvidence` /
+  `MAX_EVIDENCE_REAP_AGE_MS` / `evidenceBodyLive` / `EXECUTION_VERDICTS` / `classifyExecution` /
+  `recordingStream` plus
+  `statePathAllowed`'s two parameters — and `MEMORY_NAME_PREFIX` / `MEMORY_NAME_RE`, which this
+  list omitted for a round while `evidencePathFor` DERIVES the marker name from the MEMORY name
+  — it tests `MEMORY_NAME_RE` and substitutes one prefix for the other — so a port that takes the
+  marker half alone gets a writer that throws on its first call. The two are NOT what keeps the
+  reaper off a consent memory: `EVIDENCE_NAME_RE` is, and it is already on this list. Say the
+  derivation, not the separation; the host half is FIVE obligations — where the broker's
+  project anchor comes from and how it survives the launcher's environment sanitization (this
+  host names `ZENSU_VERIFY_PROJECT_ROOT` in an `env -i` allowlist), the broker's own refusal
+  wording including its `expired` arm, the doctor wrapper's five-state derivation and its
+  session binding, the renderer's SIX rows — the sixth is the unrecognized-state row, which is
+  what keeps a drifted wrapper value from rendering silence — and the operator accounts. A port that copies only
+  the module gets a marker nothing writes and nothing reads.
+- **THREE ordering and budget rules are load-bearing and read as layout, so they are stated
+  here rather than left to a diff.** FIRST, `runPre` emits the decision ENVELOPE before it writes
+  the marker. For a new origin the envelope is the `ask` and the marker written for it carries
+  verdict `asked`, which the broker treats as a clearance — so with the marker first, a hook
+  process tree that died before the write left a live self-approving marker behind and no prompt
+  was ever raised. The wrapper's `|| deny` catches an ordinary non-zero exit, so that path needs
+  the wrapper killed too, and whether this host admits a call after a timed-out hook is
+  UNVERIFIED; the order is taken anyway because it is free and fail-closed the other way round —
+  a lost marker refuses, where a lost envelope approved. SECOND, `reapExpiredEvidence` is
+  BUDGETED to `MAX_EVIDENCE_FILES` and sits OUTSIDE the publish `try`, clocked on the wall clock
+  rather than on the caller's `at`. It runs inside the gating hook and reads and parses every
+  candidate, so an unbounded walk let a session-writable directory decide how long that hook
+  takes to answer; inside the try, a throw would have reported a marker that DID land as
+  `evidence-write-failed:*`; and clocked on a back-dated `at`, every live marker in the directory
+  failed the `age >= 0` arm and was swept. `reapBudgetSpent` is exported for the bound's executed
+  case alone and has no production reader. THIRD, the doctor probe's benign verdict is exit **4**,
+  not 1: `node` exits 1 on a fatal outside its own try and a failed `cd -P` short-circuiting the
+  `&&` exits 1 too, and stderr is discarded there, so either one rendered the green row asserting
+  that the directory was read and held nothing — the exact claim the status capture exists to
+  prevent. The `cd` carries its own `|| exit 2` for the same reason.
+- **The readers REFUSE an anchorless call.** `liveEvidenceOrigins` requires `options.projectRoot`
+  and answers `read: false` without it. The containment walk is checked AGAINST that root, so a
+  call supplying none has nothing to verify — and while the anchor was optional the module's
+  DEFAULT was open: `executionEvidencePresent(dir, origin)` read whatever directory it was handed,
+  through a symlinked `.zensu` or `state`. One caller was hardened against that and the module a
+  port copies was not, which is how the class comes back.
+- **The marker reader opens with a plain `readFileSync` after an `lstat`, so a FIFO swapped into
+  that window blocks the broker's approval path — and there are now TWO such sites, on two
+  different paths.** The second is `evidenceStillHonourable`, which the reaper calls once per
+  candidate, so a decided navigation carries up to `MAX_EVIDENCE_FILES` of these windows INSIDE
+  the PreToolUse gate. Say COUNT and never a comparison against the broker: `liveEvidenceOrigins`
+  breaks early only on a wantOrigin MATCH, and a miss is exactly what produces a refusal, so the
+  broker's own path is bounded by the same budget — twice over, because `consentEvidenceState`
+  runs that walk once for the present probe and again for the widened expiry probe. Scope the
+  class to the reader alone and the wider surface goes unrecorded. An already-present FIFO is refused by `evidenceStatUsable`
+  before either read, so this is the swap race alone — and the sibling consent
+  memory reader has had the identical shape since before this feature. Both belong behind an
+  `O_RDONLY|O_NOFOLLOW|O_NONBLOCK` open plus `fstat`, the hardening
+  `readRegularFileSnapshot` in `session-control-core-v1.js` already applies for this class.
+  NOT taken here: changing the memory reader too is a second artifact's regression surface, and
+  changing only the marker would leave the pair inconsistent. Named rather than left to be
+  rediscovered.
+- **CLOSED, and recorded so it is not re-opened as a gap.** The broker used to trust that the
+  host ran the hook, so with hooks disabled host-side consent mode accepted unconsented loopback
+  navigations while the doctor reported registration rather than execution. It now requires a
+  live per-session marker the gate writes for every decided local target, and `/zensu:doctor`
+  carries a SECOND row — `verify-feature gate:` — reporting EXECUTION beside the registration
+  row. What is NOT closed is authenticity: the marker is a file in a directory the session can
+  write, so it separates a gate that ran from one that did not and authenticates nothing against
+  a session forging its own. Say "the silent case is gone", never "the gate cannot be forged".
 - **The consent decision is SINGLE-LAYER, and the layer that survives in-session tampering is
   the one that does not enforce consent.** State it that way rather than folding it into the
   bullet above, which covers a host that never ran the hook and not a session that changed what
@@ -7415,21 +7587,25 @@ runtime is still serving, which is the disqualifier that bullet spells out.
   root on EVERY call, and no write gate covers that tree — `pre-write-plugin-data-guard.sh`
   defends the plugin DATA store, not the plugin root. So an in-session module swap changes every
   later verdict, and the broker cannot notice.
-- **Consent mode is entered from a FILE READ, and the fallback is more permissive than the
-  state it replaced.** `resolveStartupPolicy` enters consent when `consentHookRegistered` is
-  true, and that predicate `lstat`s two files and parses `hooks/hooks.json` under
-  `path.join(__dirname, '..')` — a claim made by a file in the broker's own tree, never a fact
-  about the running session. Every other gate in this repository falls back to the PRE-EXISTING
-  capability set; this one falls back to MORE. Before consent mode, no policy meant
-  `parsePolicy('')` → `mode: 'deny'` and no navigation at all. After it, no policy plus a hook
-  file on disk means unprompted access to every loopback origin whenever the hook does not
-  actually execute. Three reachable ways: hooks disabled host-side; the broker launched from
-  tree A (`__dirname/..`) while the host loaded its hook registry from tree B — an installed
-  root beside a `--plugin-dir` checkout, with nothing comparing the two; and a plugin swap
-  while the long-lived MCP process still holds the mode it resolved once at start.
-  **The uncompromised fix is not implemented and is named here rather than implied:** require
-  positive evidence that the gate ran IN THIS SESSION — a hook-written per-session marker the
-  broker refuses to self-approve without — and re-check it rather than caching the mode for the
-  process lifetime. The cheaper half, which is also not implemented, is a `/zensu:doctor` row
-  reporting EXECUTION rather than registration. Until one of them exists, read the shipped
-  `verify-feature:` row as "the pair is installed", never as "the gate ran".
+- **Consent mode is still ENTERED from a file read, and what changed is what entering it
+  buys.** `resolveStartupPolicy` enters consent when `consentHookRegistered` is true, and that
+  predicate `lstat`s two files and parses `hooks/hooks.json` under `path.join(__dirname, '..')`
+  — a claim made by a file in the broker's own tree, never a fact about the running session.
+  The three routes by which the hook does not actually execute are unchanged: hooks disabled
+  host-side; the broker launched from tree A (`__dirname/..`) while the host loaded its hook
+  registry from tree B — an installed root beside a `--plugin-dir` checkout, with nothing
+  comparing the two; and a plugin swap while the long-lived MCP process still holds the mode it
+  resolved once at start. What is closed is the CONSEQUENCE: `approveConsentOrigin` refuses
+  without a live per-session marker, so all three routes now land on a refusal rather than on
+  unprompted access to every loopback origin. **Two properties carry that and neither is
+  optional.** The marker is read at APPROVAL time, never cached with the mode, which is what
+  reaches the third route inside a process that resolved its mode once. And it is ORIGIN-bound
+  and time-bounded, with every fault answering absent, so a marker for one origin can never
+  admit a second and a stale one cannot hold the window open. **The residual is
+  authenticity, not silence:** the state directory is session-writable, so this separates a
+  gate that ran from one that did not and does not defend against a session forging its own
+  marker; closing that needs a signal the session cannot mint, which nothing here provides.
+  A SECOND residual is the approved SET: once an origin is in it the broker checks the marker
+  no further for that origin, deliberately — a consent the human already gave is not revoked
+  by a later plugin change — so read "re-read every time" as being about the WRITE into that
+  set, never about each later navigation.

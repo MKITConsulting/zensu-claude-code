@@ -289,6 +289,113 @@ VF_BADPOLICY="$(verify_row policy-invalid "policy is not valid JSON")"
 case "$VF_BADPOLICY" in *'❌'*'browser broker will refuse it'*'policy is not valid JSON'*'fall back to consent mode'*) check "P1vh a set-but-unusable policy renders red and names the fault" PASS ;; *) check "P1vh a set-but-unusable policy renders red and names the fault" FAIL ;; esac
 case "$VF_BADPOLICY" in *'all checks green'*) check "P1vh1 the invalid-policy row withholds the green summary" FAIL ;; *) check "P1vh1 the invalid-policy row withholds the green summary" PASS ;; esac
 
+# --- AC-104: the row reports gate EXECUTION, never registration alone ----
+# The row above is derived from files on disk in the broker's OWN tree, so it reports that the
+# pair is installed and says nothing about whether the hook ran. A host with hooks switched
+# off, or a broker launched from a different tree than the one whose registry the host loaded,
+# renders that row green while consent mode self-approves every loopback origin unprompted.
+exec_row() { # $1 ZDOC_VERIFY  $2 ZDOC_VERIFY_EXEC
+  ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=ready \
+  ZDOC_VERIFY="$1" ZDOC_VERIFY_REASON="" ZDOC_VERIFY_EXEC="$2" \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
+    node "$REPORT" 2>/dev/null
+}
+VF_EXEC_RAN="$(exec_row consent ran)"
+case "$VF_EXEC_RAN" in *'✅  verify-feature gate: executed in this session'*) check "P1vm an executed gate renders its own row naming EXECUTION" PASS ;; *) check "P1vm an executed gate renders its own row naming EXECUTION" FAIL ;; esac
+case "$VF_EXEC_RAN" in *'all checks green'*) check "P1vm1 an executed gate keeps the green summary" PASS ;; *) check "P1vm1 an executed gate keeps the green summary" FAIL ;; esac
+VF_EXEC_NONE="$(exec_row consent none)"
+case "$VF_EXEC_NONE" in *'verify-feature gate: registered'*'no live execution marker was read'*'reports registration'*) check "P1vn a registered-but-unexercised gate says so instead of inheriting the mode row" PASS ;; *) check "P1vn a registered-but-unexercised gate says so instead of inheriting the mode row" FAIL ;; esac
+# An ordinary session that never drove the browser has no marker, so this state must NOT warn:
+# a row that fires on every normal run is trained away within a day.
+case "$VF_EXEC_NONE" in *'all checks green'*) check "P1vn1 the unexercised state keeps the green summary" PASS ;; *) check "P1vn1 the unexercised state keeps the green summary" FAIL ;; esac
+case "$VF_EXEC_RAN" in *'verify-feature gate: registered'*) check "P1vn2 the two execution states render DIFFERENTLY" FAIL ;; *) check "P1vn2 the two execution states render DIFFERENTLY" PASS ;; esac
+VF_EXEC_UNKNOWN="$(exec_row consent unknown)"
+case "$VF_EXEC_UNKNOWN" in *'⚠️  verify-feature gate: execution not checked'*'missing check rather than an all-clear'*) check "P1vo an unanswerable execution probe says so rather than staying silent" PASS ;; *) check "P1vo an unanswerable execution probe says so rather than staying silent" FAIL ;; esac
+case "$VF_EXEC_UNKNOWN" in *'all checks green'*) check "P1vo1 the unchecked execution row withholds the green summary" FAIL ;; *) check "P1vo1 the unchecked execution row withholds the green summary" PASS ;; esac
+# Policy mode does not use consent mode at all, so an execution row there would report on a
+# mechanism this session never reaches.
+VF_EXEC_ASKED="$(exec_row consent ran-asked)"
+case "$VF_EXEC_ASKED" in *'verify-feature gate: executed in this session, on a prompted origin'*) check "P1vw the row names the kind of execution the marker recorded" PASS ;; *) check "P1vw the row names the kind of execution the marker recorded" FAIL ;; esac
+case "$VF_EXEC_ASKED" in *'all checks green'*) check "P1vw1 a prompted-origin execution keeps the green summary" PASS ;; *) check "P1vw1 a prompted-origin execution keeps the green summary" FAIL ;; esac
+VF_EXEC_UNJUDGED="$(exec_row consent unjudged)"
+case "$VF_EXEC_UNJUDGED" in *'verify-feature gate: execution could not be judged'*'missing check rather than an all-clear'*) check "P1vt a contract fault renders as could-not-judge rather than as the benign row" PASS ;; *) check "P1vt a contract fault renders as could-not-judge rather than as the benign row" FAIL ;; esac
+case "$VF_EXEC_UNJUDGED" in *'all checks green'*) check "P1vt1 the could-not-judge row withholds the green summary" FAIL ;; *) check "P1vt1 the could-not-judge row withholds the green summary" PASS ;; esac
+VF_EXEC_WEIRD="$(exec_row consent 'weird;value $(x)')"
+case "$VF_EXEC_WEIRD" in *'verify-feature gate: execution state not recognized (weirdvalue'*) check "P1vu an unrecognized state renders a row and its value is bounded" PASS ;; *) check "P1vu an unrecognized state renders a row and its value is bounded" FAIL ;; esac
+case "$VF_EXEC_WEIRD" in *'not recognized (weird;'*|*'not recognized (weirdvalue $('*) check "P1vu1 the sanitizer strips the shell metacharacters" FAIL ;; *) check "P1vu1 the sanitizer strips the shell metacharacters" PASS ;; esac
+VF_EXEC_POLICY="$(exec_row policy ran)"
+case "$VF_EXEC_POLICY" in *'verify-feature gate:'*) check "P1vp policy mode renders no execution row" FAIL ;; *) check "P1vp policy mode renders no execution row" PASS ;; esac
+# The unknown-exec arm must not ASSERT a binding cause. ZDOC_VERIFY_EXEC is `unknown` for every
+# binding verdict except `bound` — orphaned-project-root, incompatible-runtime, pruned-plugin-root
+# and `unavailable` all reach it with a valid record in plugin data, and the same report's binding
+# row prescribes /zensu:adopt-session there. A row saying the session has no record sends the user
+# hunting for one that is sitting intact, which is the rule CLAUDE.md states for these rows.
+VF_EXEC_UNBOUND="$(exec_row consent unknown)"
+case "$VF_EXEC_UNBOUND" in *'no bound Session Control record'*) check "P1vs5 the unknown-exec row does not assert that no record exists" FAIL ;; *) check "P1vs5 the unknown-exec row does not assert that no record exists" PASS ;; esac
+case "$VF_EXEC_UNBOUND" in *'no bound session key'*) check "P1vs5a it states what the probe established instead" PASS ;; *) check "P1vs5a it states what the probe established instead" FAIL ;; esac
+# And it is ADDITIVE rather than an arm of the mode chain: inserted into the else/if ladder it
+# DISPLACED the consent-no-recipe and consent-recipe-unchecked rows, so an unbound session in a
+# recipe-less project lost the only remedy that would have helped it.
+VF_EXEC_NORECIPE="$(exec_row consent-no-recipe unknown)"
+case "$VF_EXEC_NORECIPE" in *'/zensu:verify-feature --setup'*) check "P1vs6 an unbound session still gets the no-recipe remedy" PASS ;; *) check "P1vs6 an unbound session still gets the no-recipe remedy" FAIL ;; esac
+VF_EXEC_UNCHECKED="$(exec_row consent-recipe-unchecked unknown)"
+case "$VF_EXEC_UNCHECKED" in *'recipe not checked'*) check "P1vs7 and the recipe-unchecked row is not displaced either" PASS ;; *) check "P1vs7 and the recipe-unchecked row is not displaced either" FAIL ;; esac
+# The could-not-judge row names every cause the wrapper routes there, and the wrapper routes a
+# BUDGET-TRUNCATED walk there too — a cause neither the row nor the skill bullet named, and one
+# that neither of their remedies clears.
+case "$VF_EXEC_UNJUDGED" in *'marker budget'*) check "P1vs8 the could-not-judge row names the budget cause" PASS ;; *) check "P1vs8 the could-not-judge row names the budget cause" FAIL ;; esac
+case "$VF_EXEC_UNJUDGED" in *'verify-consent-exec-'*) check "P1vs9 and prescribes clearing the markers that caused it" PASS ;; *) check "P1vs9 and prescribes clearing the markers that caused it" FAIL ;; esac
+# The BENIGN verdict must not share a status with a generic failure. Status 1 is what `node`
+# exits on a fatal outside the program's own try, and what a failed `cd -P` short-circuiting the
+# `&&` produces — and stderr is discarded here, so either one rendered the ✅ `none` row, which
+# asserts that the directory was read and held nothing. That is the exact claim the status
+# capture exists to prevent. Source-pinned rather than driven: neither cause is inducible through
+# the wrapper's own inputs (ZDOC_ROOT is validated before this block, and a SyntaxError cannot be
+# planted into a `-e` program from outside), so a fixture asserting the row would pass for the
+# wrong reason. The control fails if the extraction ever matches nothing.
+VF_PROBE_BLOCK="$(sed -n '/--- verify-feature gate EXECUTION probe/,/esac/p' "$HELPER")"
+if [ -n "$VF_PROBE_BLOCK" ]; then
+  check "P1vs10-control the execution probe's status ladder was extracted" PASS
+else
+  check "P1vs10-control the execution probe's status ladder was extracted" FAIL
+fi
+# The verdict travels as a WORD the decision module produced, never as an exit status this shell
+# re-interprets. A status ladder made the answer share a channel with every way a process can die:
+# the benign verdict sat on 1 beside node's generic fatal and a failed `cd`, and moving it to
+# another small integer only traded one collision for another. A word cannot collide, and the word
+# set has ONE owner.
+case "$VF_PROBE_BLOCK" in *'classifyExecution'*) check "P1vs10 the probe classifies through the module rather than a second time" PASS ;; *) check "P1vs10 the probe classifies through the module rather than a second time" FAIL ;; esac
+case "$VF_PROBE_BLOCK" in *'ZDOC_VERIFY_EXEC=none)'*|*'(ran|ran-asked|none)'*) check "P1vs11 the shell accepts only words the module declares" PASS ;; *) check "P1vs11 the shell accepts only words the module declares" FAIL ;; esac
+case "$VF_PROBE_BLOCK" in *'ZDOC_VERIFY_EXEC=unjudged'*) check "P1vs12 anything else is the could-not-judge residual" PASS ;; *) check "P1vs12 anything else is the could-not-judge residual" FAIL ;; esac
+# The probe is a THIRD consumer of the decision module and applies the same load guard its two
+# siblings do: the gate refuses a symlinked or non-regular module, and so does the broker. Without
+# it a symlinked module made the gate deny every navigation while both verify rows rendered green
+# for the remaining life of an older marker.
+case "$VF_PROBE_BLOCK" in *'isSymbolicLink'*) check "P1vs13 the probe refuses a module that is not a plain file" PASS ;; *) check "P1vs13 the probe refuses a module that is not a plain file" FAIL ;; esac
+# The four words are DERIVED from the module rather than hand-listed here.
+VF_EXEC_WORDS="$(node -e 'process.stdout.write([...require(process.argv[1]).EXECUTION_VERDICTS].sort().join(","))' "$PLUGIN_DIR/hooks/lib/verify-consent-v1.js" 2>/dev/null)"
+if [ "$VF_EXEC_WORDS" = "none,ran,ran-asked,unjudged" ]; then
+  check "P1vs14-control the module declares the execution word set ($VF_EXEC_WORDS)" PASS
+else
+  check "P1vs14-control the module declares the execution word set (got: ${VF_EXEC_WORDS:-<none>})" FAIL
+fi
+VF_EXEC_MISS=""
+for _w in ran ran-asked none unjudged; do
+  case "$VF_EXEC_WORDS" in *"$_w"*) ;; *) VF_EXEC_MISS="$VF_EXEC_MISS $_w" ;; esac
+  grep -qF "ve === '$_w'" "$REPORT" || VF_EXEC_MISS="$VF_EXEC_MISS renderer:$_w"
+done
+[ -z "$VF_EXEC_MISS" ] \
+  && check "P1vs14 every declared execution word has a renderer row" PASS \
+  || check "P1vs14 execution words with no renderer row:$VF_EXEC_MISS" FAIL
+
+# The wrapper must DERIVE the state, or the row is a renderer nothing ever feeds.
+if grep -qF 'ZDOC_VERIFY_EXEC' "$HELPER" && grep -qF 'executionEvidenceSeen' "$HELPER" \
+  && grep -qF 'ZDOC_VERIFY_EXEC' "$REPORT"; then
+  check "P1vq the wrapper derives the execution state and exports it to the renderer" PASS
+else
+  check "P1vq the wrapper derives the execution state and exports it to the renderer" FAIL
+fi
+
 # P1vi-P1vk drive the WRAPPER, so the derivation block itself executes. Every other
 # verify-feature check supplies ZDOC_VERIFY and therefore skips it entirely.
 VF_LIVE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-verify.XXXXXX")" || exit 1
@@ -300,12 +407,15 @@ vf_live() { # $1 policy value (may be empty)
     ZENSU_DOCTOR_PLUGIN_DIR="$PLUGIN_DIR" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
     CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$HELPER" 2>/dev/null
 }
-case "$(vf_live '')" in
+case "$(ZDOC_VERIFY_EXEC=none vf_live '')" in
   *'consent mode ready, no runtime recipe'*) check "P1vi the wrapper derives consent-no-recipe when no recipe is present" PASS ;;
   *) check "P1vi the wrapper derives consent-no-recipe when no recipe is present" FAIL ;;
 esac
 printf 'version: 1\n' > "$VF_LIVE_ROOT/.zensu/runtime.yaml"
-case "$(vf_live '')" in
+# The fixture binds no Session Control record, so the MODE row correctly degrades to the
+# no-bound-record warning; what P1vj is about is the wrapper's resolution, so it supplies the
+# execution state and reads the row that resolution produces.
+case "$(ZDOC_VERIFY_EXEC=none vf_live '')" in
   *'consent mode ready — no parent policy'*) check "P1vj the same wrapper run flips to consent once a runtime recipe exists" PASS ;;
   *) check "P1vj the same wrapper run flips to consent once a runtime recipe exists" FAIL ;;
 esac
@@ -369,9 +479,30 @@ VF_SKILL="$PLUGIN_DIR/skills/doctor/SKILL.md"
 # em dash: \xHH is a GNU sed extension, so on BSD/macOS sed the pattern degraded to the literal
 # text and matched nothing, leaving the tail attached and the derived phrase absent from
 # SKILL.md — red on macOS, green on the GNU-sed runner.
-VF_PHRASES="$(grep -oE "'verify-feature: [^']*'" "$REPORT" \
+# P1vr holds the two spellings of the consent arming set in step. The wrapper decides WHICH
+# verdicts get an execution state and the renderer decides which get a row; they are separate
+# literals in separate languages, and a fourth consent state added to one alone makes the row
+# silently disappear.
+VF_ARM_SH="$(sed -n 's/.*(\(consent|consent-no-recipe|consent-recipe-unchecked\)).*/\1/p' "$HELPER" | head -1)"
+VF_ARM_JS="$(sed -n "s/.*CONSENT_MODE_STATES = \[\(.*\)\];.*/\1/p" "$REPORT" | head -1 | tr -d " '" )"
+VF_ARM_JS_PIPED="$(printf '%s' "$VF_ARM_JS" | tr ',' '|')"
+if [ -n "$VF_ARM_SH" ] && [ "$VF_ARM_SH" = "$VF_ARM_JS_PIPED" ]; then
+  check "P1vr the consent arming set agrees between the doctor wrapper and the renderer" PASS
+else
+  check "P1vr the consent arming set agrees between the doctor wrapper and the renderer (sh=[$VF_ARM_SH] js=[$VF_ARM_JS_PIPED])" FAIL
+fi
+
+VF_PHRASES="$(grep -oE "'verify-feature( gate)?: [^']*'" "$REPORT" \
   | sed "s/^'//; s/'\$//" | sed 's/ — .*//; s/ ($//' | sort -u)"
 VF_PHRASE_COUNT="$(printf '%s\n' "$VF_PHRASES" | grep -c . || true)"
+# A floor alone cannot fail for the narrowing this selector was widened to fix: the eight
+# `verify-feature: ` phrases already satisfy any count the gate family would also satisfy, so
+# the family itself is what must be asserted.
+if printf '%s\n' "$VF_PHRASES" | grep -q '^verify-feature gate: '; then
+  check "P1vg-family the derivation reaches the verify-feature gate rows, not only the mode rows" PASS
+else
+  check "P1vg-family the derivation reaches the verify-feature gate rows, not only the mode rows" FAIL
+fi
 VF_SKILL_MISS=""
 while IFS= read -r phrase; do
   [ -n "$phrase" ] || continue
@@ -379,12 +510,15 @@ while IFS= read -r phrase; do
 done <<VFEOF
 $VF_PHRASES
 VFEOF
-[ "${VF_PHRASE_COUNT:-0}" -ge 5 ] \
+[ "${VF_PHRASE_COUNT:-0}" -ge 13 ] \
   && check "P1vg-control the verify-feature row phrases derive from the renderer ($VF_PHRASE_COUNT found)" PASS \
   || check "P1vg-control the verify-feature row phrases derive from the renderer (only ${VF_PHRASE_COUNT:-0} found)" FAIL
 # The count is CONJOINED: an empty derivation would otherwise report every row documented
-# while comparing nothing, which is the shape this check replaced.
-if [ "${VF_PHRASE_COUNT:-0}" -ge 5 ] && [ -z "$VF_SKILL_MISS" ]; then
+# while comparing nothing, which is the shape this check replaced. The floor moved 14 -> 13 when
+# the unknown-exec arm was retired from the MODE chain: it asserted a binding cause the probe
+# never established, and sitting at the top of that else/if ladder it displaced the no-recipe and
+# recipe-unchecked rows. The observable it reported is carried by the gate family's own row.
+if [ "${VF_PHRASE_COUNT:-0}" -ge 13 ] && [ -z "$VF_SKILL_MISS" ]; then
   check "P1vg every verify-feature row the renderer can emit is documented in skills/doctor/SKILL.md ($VF_PHRASE_COUNT rows)" PASS
 else
   check "P1vg verify-feature rows missing from skills/doctor/SKILL.md:$VF_SKILL_MISS" FAIL
@@ -502,6 +636,126 @@ CAS_FILE="$CAS_ST/tdd-phase-${CAS_KEY}.json"
 OUT="$(run_report "$PLUGIN_DIR" "$SBOX/good-cfg.json" "$CAS_PROJECT")"
 case "$OUT" in *'1 validated CAS workflow document(s); reviewRound/stopBlockCount/implStopCount are integrated fields'*) check "P1m valid CAS workflow document is reported with integrated counters" PASS ;; *) check "P1m valid CAS workflow state (got: $OUT)" FAIL ;; esac
 case "$OUT" in *'per-session marker'*|*'1 rounds'*|*'1 stopblocks'*) check "P1ma retired sidecars are not counted as session state" FAIL ;; *) check "P1ma retired sidecars are not counted as session state" PASS ;; esac
+
+# P1vs/P1vs1/P1vs2 drive the WRAPPER's execution probe, which every exec_row case skips by
+# supplying ZDOC_VERIFY_EXEC directly. Without them the ran/none arms and the export are pinned
+# by a source grep only, and dropping ZDOC_VERIFY_EXEC from the export list keeps those greps
+# green while the row never renders. A bound session is what makes the probe reachable at all.
+printf 'version: 1\n' > "$CAS_PROJECT/.zensu/runtime.yaml"
+VF_WRAP_BASE=(ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=ready
+  ZENSU_DOCTOR_PLUGIN_DIR="$PLUGIN_DIR" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
+  ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$CAS_PROJECT")
+vf_wrap() { env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 "${VF_WRAP_BASE[@]}" bash "$HELPER" 2>/dev/null; }
+rm -f "$CAS_ST"/verify-consent-exec-*.json
+case "$(vf_wrap)" in
+  *'verify-feature gate: registered, and no live execution marker was read'*) check "P1vs the wrapper derives none when the state directory holds no marker" PASS ;;
+  *) check "P1vs the wrapper derives none when the state directory holds no marker" FAIL ;;
+esac
+# The row may not assert a cause the probe did not establish. Markers expire, and the reaper
+# removes them on the next write, so a session that drove the browser past the window renders
+# byte-identically to one that never did — naming only "no navigation yet" was false for it.
+case "$(vf_wrap)" in
+  *'or that its marker has passed'*) check "P1vs0 the none row names expiry beside the never-navigated cause" PASS ;;
+  *) check "P1vs0 the none row names expiry beside the never-navigated cause" FAIL ;;
+esac
+VF_WRAP_EV="$(node -e '
+  const c = require(process.argv[1] + "/hooks/lib/verify-consent-v1.js");
+  const path = require("node:path");
+  const root = require("node:fs").realpathSync.native(process.argv[2]);
+  process.stdout.write(c.evidencePathFor(path.join(c.evidenceDirFor(root), `verify-consent-${process.argv[3]}.json`), "http://127.0.0.1:4400"));
+' "$PLUGIN_DIR" "$CAS_PROJECT" "$CAS_KEY" 2>/dev/null)"
+node -e '
+  const c = require(process.argv[1] + "/hooks/lib/verify-consent-v1.js");
+  const r = c.writeExecutionEvidence(process.argv[2], "http://127.0.0.1:4400", { projectRoot: process.argv[3], verdict: "allowed" });
+  process.exit(r.ok ? 0 : 1);
+' "$PLUGIN_DIR" "$VF_WRAP_EV" "$CAS_PROJECT" 2>/dev/null   && check "P1vs-control the marker fixture landed" PASS || check "P1vs-control the marker fixture landed" FAIL
+# The needle names what only the ALLOWED row carries: the shorter lead is a strict PREFIX of the
+# prompted-origin row too, so inverting the wrapper's verdict ternary left this check green.
+case "$(vf_wrap)" in
+  *'executed in this session — a live marker'*) check "P1vs1 the wrapper derives ran from a live marker for this session" PASS ;;
+  *) check "P1vs1 the wrapper derives ran from a live marker for this session" FAIL ;;
+esac
+# And the exit-3 arm is DRIVEN rather than supplied: every exec_row case hands the state in
+# directly and skips the derivation, so the ternary that reads the marker's verdict had no
+# executed case in either direction.
+node -e '
+  const c = require(process.argv[1] + "/hooks/lib/verify-consent-v1.js");
+  const r = c.writeExecutionEvidence(process.argv[2], "http://127.0.0.1:4400", { projectRoot: process.argv[3] });
+  process.exit(r.ok && r.verdict === "asked" ? 0 : 1);
+' "$PLUGIN_DIR" "$VF_WRAP_EV" "$CAS_PROJECT" 2>/dev/null   && check "P1vs3-control the asked-verdict marker fixture landed" PASS || check "P1vs3-control the asked-verdict marker fixture landed" FAIL
+case "$(vf_wrap)" in
+  *'on a prompted origin'*) check "P1vs3 the wrapper derives ran-asked from a marker the gate only asked about" PASS ;;
+  *) check "P1vs3 the wrapper derives ran-asked from a marker the gate only asked about" FAIL ;;
+esac
+rm -f "$CAS_ST"/verify-consent-exec-*.json
+# A walk that did not FINISH is not a walk that found nothing. Without this the budget-exhausted
+# read rendered the benign green row asserting a cause the probe never established.
+node -e '
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const c = require(process.argv[1] + "/hooks/lib/verify-consent-v1.js");
+  const dir = process.argv[2];
+  const key = process.argv[3];
+  // Bodies the reader REFUSES: they cost walk budget before they are parsed, and no live marker
+  // survives them, so the walk ends truncated with nothing found — which is the only shape that
+  // separates "did not finish" from "finished and found nothing".
+  for (let i = 0; i <= c.MAX_EVIDENCE_FILES; i += 1) {
+    const origin = `http://127.0.0.1:${6000 + i}`;
+    fs.writeFileSync(
+      path.join(dir, `verify-consent-exec-${key}-${c.evidenceOriginTag(origin)}.json`),
+      "{}\n",
+    );
+  }
+' "$PLUGIN_DIR" "$CAS_ST" "$CAS_KEY" 2>/dev/null   && check "P1vs4-control the crowded state directory landed" PASS || check "P1vs4-control the crowded state directory landed" FAIL
+case "$(vf_wrap)" in
+  *'verify-feature gate: execution could not be judged'*) check "P1vs4 a walk that exhausted its budget is a missing check, not a clean read" PASS ;;
+  *) check "P1vs4 a walk that exhausted its budget is a missing check, not a clean read" FAIL ;;
+esac
+rm -f "$CAS_ST"/verify-consent-exec-*.json
+# A SIBLING session's marker must not satisfy a row that claims this session executed.
+# WRITTEN, not renamed: this used to `mv "$VF_WRAP_EV"`, a path two earlier `rm -f` sweeps had
+# already deleted, so the `mv` failed into 2>/dev/null and the row was rendered over an EMPTY
+# directory — which trivially does not claim an execution. The session filter could be deleted
+# with the check still green. The control below is what keeps that from coming back.
+VF_SIBLING_KEY="scv1_$(printf 'e%.0s' $(seq 64))"
+VF_SIBLING="$CAS_ST/verify-consent-exec-$VF_SIBLING_KEY-0123456789abcdef.json"
+node -e '
+  const fs = require("node:fs");
+  const c = require(process.argv[1] + "/hooks/lib/verify-consent-v1.js");
+  fs.writeFileSync(process.argv[2], JSON.stringify({
+    version: c.EVIDENCE_VERSION,
+    origin: "http://127.0.0.1:4400",
+    verdict: c.EVIDENCE_VERDICT_ALLOWED,
+    at: new Date().toISOString(),
+  }) + "\n");
+' "$PLUGIN_DIR" "$VF_SIBLING" 2>/dev/null
+if [ -s "$VF_SIBLING" ]; then
+  check "P1vs2-control the sibling-session marker fixture landed" PASS
+else
+  check "P1vs2-control the sibling-session marker fixture landed" FAIL
+fi
+case "$(vf_wrap)" in
+  *'verify-feature gate: executed in this session'*) check "P1vs2 a sibling session marker does not satisfy the row" FAIL ;;
+  *) check "P1vs2 a sibling session marker does not satisfy the row" PASS ;;
+esac
+# Discrimination: the SAME body under THIS session's key does satisfy it, so the refusal above is
+# about the session binding and not about the fixture being unreadable.
+rm -f "$VF_SIBLING"
+node -e '
+  const fs = require("node:fs");
+  const c = require(process.argv[1] + "/hooks/lib/verify-consent-v1.js");
+  fs.writeFileSync(process.argv[2], JSON.stringify({
+    version: c.EVIDENCE_VERSION,
+    origin: "http://127.0.0.1:4400",
+    verdict: c.EVIDENCE_VERDICT_ALLOWED,
+    at: new Date().toISOString(),
+  }) + "\n");
+' "$PLUGIN_DIR" "$VF_WRAP_EV" 2>/dev/null
+case "$(vf_wrap)" in
+  *'verify-feature gate: executed in this session'*) check "P1vs2a the same marker under this session's key does satisfy it" PASS ;;
+  *) check "P1vs2a the same marker under this session's key does satisfy it" FAIL ;;
+esac
+rm -f "$CAS_ST"/verify-consent-exec-*.json "$CAS_PROJECT/.zensu/runtime.yaml"
 
 # the chain block: shape row, truncated session key, no false alarm, exit 0
 case "$OUT" in *'chain: 1 review chain(s) — scv1_'*': implementing'*) check "P1mc chain row names the shape and a truncated session key" PASS ;; *) check "P1mc chain row names the shape and a truncated session key (got: $OUT)" FAIL ;; esac
@@ -3694,6 +3948,30 @@ case "$P6_NODIR_UNBOUND" in
   *) check "P6f an absent .zensu/state with no bound key withholds the row (narrowed on purpose)" PASS ;;
 esac
 mkdir -p "$P6_PROJECT/.zensu/state"
+
+# --- the deletion instruction is SCOPED, and the unrecognized-state row claims no cause ---
+# `skills/doctor/SKILL.md` Phase 3 forbids a glob, `find`, parent traversal or worktree discovery
+# for this directory, and requires `rm -f` on the quoted literal the row PRINTED. The renderer's
+# unjudged row and its skill bullet both instruct clearing `verify-consent-exec-*` from a
+# re-derived `<project>/.zensu/state`, which is that glob — so both must carry the same scope
+# clause the broker's own sibling refusal already carries, naming what the directory also holds.
+SCOPE_CLAUSE='and nothing else in that directory'
+grep -qF -- "$SCOPE_CLAUSE" "$REPORT" \
+  && check "P1vx the renderer's unjudged row scopes the verify-consent-exec-* deletion" PASS \
+  || check "P1vx the renderer's unjudged row scopes the verify-consent-exec-* deletion" FAIL
+grep -qF -- "$SCOPE_CLAUSE" "$SKILL_MD" \
+  && check "P1vx1 the doctor skill's own bullet carries the same scope clause" PASS \
+  || check "P1vx1 the doctor skill's own bullet carries the same scope clause" FAIL
+# The wrapper derives its word from a closed accept-list, so every value it can emit HAS a row.
+# The residual row is reachable through the inherited ZDOC_VERIFY_EXEC pass-through alone, and it
+# must claim only what it observed. The renderer already says "a missing check rather than an
+# all-clear"; the skill bullet asserted a CAUSE the derivation cannot produce.
+grep -qF -- 'the two halves have drifted' "$SKILL_MD" \
+  && check "P1vx2 the unrecognized-state bullet asserts a drift the wrapper cannot produce" FAIL \
+  || check "P1vx2 the unrecognized-state bullet claims no cause the probe did not establish" PASS
+grep -qF -- 'missing check rather than an all-clear' "$SKILL_MD" \
+  && check "P1vx2-control the bullet still states what it IS" PASS \
+  || check "P1vx2-control the bullet still states what it IS" FAIL
 
 rm -rf "$SBOX"
 echo "----"

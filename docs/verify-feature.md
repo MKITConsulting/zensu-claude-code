@@ -44,9 +44,30 @@ hook pair on the broker's navigation tools (`/zensu:doctor` reports this as
   through `scripts/verify-free-port.js`, hands it to the recipe as `ZENSU_VERIFY_PORT`, and
   the prompt shows the resulting origin.
 
-What consent mode does not do: the consent memory is a file the session can write, so it is
-a control, not a proof — the floor bounds what a forged record could reach to other loopback
-services. With the policy present the hook stays silent and the broker enforces the policy
+- The broker does not take the plugin's word that the gate is installed. Consent mode
+  self-approves an origin only when a live marker
+  (`.zensu/state/verify-consent-exec-<session-key>-<origin digest>.json`) records the gate
+  deciding a navigation to that origin, and it reads the marker each time it is asked to approve
+  an origin it has not already approved in this broker process, rather than caching the mode it
+  resolved at start. The broker has no session key, so its read is scoped to the project rather
+  than to one session; the `/zensu:doctor` row is the session-scoped half — scoped by the
+  marker's FILENAME, which any session in the project can write, so that row reports a file and
+  never attests a run. So hooks switched off host-side, or a broker launched from a different plugin tree
+  than the one the host loaded its hooks from, produce a refusal rather than unprompted access in
+  the COMMON case — not in every case, and `docs/gates.md` states the same bound: the broker's read
+  is project-scoped and carries no session key, so a live marker for the same loopback origin
+  written by a different session in the cwd-anchored project satisfies it instead.
+  `/zensu:doctor` reports the two facts separately: `verify-feature:` for registration and
+  `verify-feature gate:` for execution.
+
+What consent mode does not do: an origin already approved inside the broker's process stays
+approved — the marker gates the write into that set, never each later navigation — so hooks
+switched off AFTER an origin's first approval produce no refusal for that origin. A prompt the
+user DECLINED also leaves its marker live for the marker's window, because the gate writes
+before the human answers. And the consent memory and the execution marker are both files the
+session can write, so they are controls, not proofs — the floor bounds what a forged record
+could reach to other loopback services, and the marker separates a gate that ran from one that
+did not without authenticating who wrote it. With the policy present the hook stays silent and the broker enforces the policy
 exactly as in the sections below.
 
 ### Guided setup and attach mode
@@ -295,6 +316,7 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
 |---|---|---|
 | PARTIAL before any browser call; reason `navigation policy mode does not match` | a policy is exported but its `mode` disagrees with `--mode`, or the consent hook is not registered so an absent policy still means deny-everything (`/zensu:doctor` shows `verify-feature: cannot start`) | fix the policy's mode, or reinstall the plugin so consent mode is available |
 | PARTIAL; reason `consent mode admits literal loopback origins only` | `--mode=remote` or a remote base URL without a launch-time policy | launch Claude Code with the remote policy of section 4 |
+| PARTIAL; reason names `no in-session evidence that the Zensu consent gate ran for this origin` | the consent gate left no live execution marker for this origin under the tree the BROKER is anchored to — hooks switched off host-side, no bound session, or a broker anchored on a different tree than the one the gate wrote under | run `/zensu:doctor` and read its `verify-feature gate:` row. It is a DIFFERENT read, not the same fact twice: it is session-scoped and covers every origin, while the broker's is project-scoped and asks about this one origin, and it runs under the session record's project root rather than the broker's own. This refusal names no tree — only the two that report an unreadable state directory or an exhausted marker budget do |
 | the permission prompt was answered No | you declined the origin | re-run and answer Yes. Declaring routes in the recipe does NOT help: consent is per origin, and the recipe's declared routes are prompt context only |
 | PARTIAL; `consent mode ready, no runtime recipe` in `/zensu:doctor` | nothing tells the skill how to start the app | run `/zensu:verify-feature --setup`, or pass `--attach=<loopback-origin>` |
 | PARTIAL; reason names `loopback-IP origins only` | local origin spelled with `localhost` | use `127.0.0.1` in the policy, the recipe, and the `baseUrlCommand` output |

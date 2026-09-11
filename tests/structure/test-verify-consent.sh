@@ -14,6 +14,9 @@ UNIT_PORT="$PLUGIN_DIR/tests/structure/verify-free-port.test.js"
 FREE_PORT="$PLUGIN_DIR/scripts/verify-free-port.js"
 ESCAPE_STEMS_SUITE="$PLUGIN_DIR/tests/structure/test-gauntlet-loop-skill.sh"
 TDD_PHASE_LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+GATES_DOC="$PLUGIN_DIR/docs/gates.md"
+REPO_CONVENTIONS="$PLUGIN_DIR/CLAUDE.md"
+VF_DOC="$PLUGIN_DIR/docs/verify-feature.md"
 NAV="mcp__plugin_zensu_playwright__browser_navigate"
 NAV_CLI="mcp__playwright__browser_navigate"
 TABS="mcp__plugin_zensu_playwright__browser_tabs"
@@ -63,18 +66,42 @@ done
 node -e 'process.exit(new RegExp("^" + process.argv[1] + "$").test(process.argv[2]) ? 1 : 0)' "$MATCHER" "mcp__plugin_zensu_playwright__browser_snapshot" \
   && check "V5-control matcher leaves browser_snapshot alone" PASS || check "V5-control matcher leaves browser_snapshot alone" FAIL
 
-run_unit() { # $1 label  $2 file  $3 floor
-  local out pass_n
-  out="$(node --test --test-reporter=tap "$2" 2>&1)"; local rc=$?
-  pass_n="$(printf '%s\n' "$out" | sed -n 's/^# pass \([0-9][0-9]*\)$/\1/p')"
-  [ -z "$pass_n" ] && pass_n=0
+. "$(dirname "$0")/lib-unit-summary.sh"
+
+# The summary parse belongs to tests/structure/lib-unit-summary.sh, whose own header records that
+# this expression was hand-copied into two suites before that file existed. The floor is on the
+# REGISTERED total rather than on passes, for the reason that library states: a passing floor is a
+# claim about how many cases run on the host executing it, and cases skip themselves for platform
+# reasons. A real failure is already non-zero from node, which the rc arm below reports.
+# The floor is EQUAL to what the file registers, and the SUITE-OVERVIEW cell is compared against
+# the same number, because a hand-maintained floor one below the real count hides a deleted case —
+# which is exactly what the V6 floor did. The sibling suite already derives both this way for the
+# proxy unit file; this is the same rule applied to the three files this suite drives.
+run_unit() { # $1 label  $2 file  $3 registered floor  $4 SUITE-OVERVIEW row key
+  local out rc registered cell
+  out="$(node --test --test-reporter=tap "$2" 2>&1)"; rc=$?
   [ "$rc" -eq 0 ] && check "$1 unit suite passes" PASS || check "$1 unit suite passes (rc=$rc)" FAIL
-  [ "$pass_n" -ge "$3" ] && check "$1-floor at least $3 unit cases ran ($pass_n)" PASS \
-    || check "$1-floor at least $3 unit cases ran (only $pass_n)" FAIL
+  if unit_cases_registered_floor_text "$out" "$3"; then
+    check "$1-floor at least $3 unit cases registered ($(unit_cases_report_text "$out"))" PASS
+  else
+    check "$1-floor at least $3 unit cases registered ($(unit_cases_report_text "$out"))" FAIL
+  fi
+  registered="$(printf '%s\n' "$out" | sed -n 's/^# tests \([0-9][0-9]*\)$/\1/p' | head -1)"
+  if [ -n "$registered" ] && [ "$3" = "$registered" ]; then
+    check "$1-exact the floor equals what the file registers (floor=$3 registered=$registered)" PASS
+  else
+    check "$1-exact the floor equals what the file registers (floor=$3 registered=${registered:-<none>})" FAIL
+  fi
+  cell="$(sed -n "s/^| \`$4\` | \([0-9][0-9]*\) |.*/\1/p" "$PLUGIN_DIR/tests/SUITE-OVERVIEW.md" | head -1)"
+  if [ -n "$registered" ] && [ "$cell" = "$registered" ]; then
+    check "$1-overview the SUITE-OVERVIEW Blocks cell equals it too (cell=$cell)" PASS
+  else
+    check "$1-overview the SUITE-OVERVIEW Blocks cell equals it too (cell=${cell:-<none>} registered=${registered:-<none>})" FAIL
+  fi
 }
-run_unit "V6 floor" "$UNIT_FLOOR" 6
-run_unit "V7 consent" "$UNIT_CONSENT" 16
-run_unit "V7b free-port" "$UNIT_PORT" 3
+run_unit "V6 floor" "$UNIT_FLOOR" 7 "verify-navigation-floor-v1.test.js"
+run_unit "V7 consent" "$UNIT_CONSENT" 39 "verify-consent-v1.test.js"
+run_unit "V7b free-port" "$UNIT_PORT" 3 "verify-free-port.test.js"
 
 grep -qF 'verify-navigation-floor-v1.js' "$PROXY" && ! grep -qE '^function isLoopbackHost' "$PROXY" \
   && grep -qF "require('./verify-navigation-floor-v1.js')" "$MODULE" \
@@ -375,8 +402,15 @@ case "$STDIN_EMPTY_OUT" in *'"permissionDecision":"deny"'*) EMPTY_OK=1 ;; *) EMP
   || check "V31a an empty payload denies rather than reading as a non-navigation" FAIL
 
 STDERR_UNBOUND="$(payload PreToolUse "$NAV" "http://127.0.0.1:4200/x" "no-such-session" "$PROJ" | bash "$PRE_HOOK" 2>&1 >/dev/null)"
+# The hook's own line and the module's are pinned separately: both carry the phrase "no bound
+# session", so a shared needle stopped discriminating and deleting either left the other's check
+# green. The module's line is the one that says the navigation cannot complete at all.
+case "$STDERR_UNBOUND" in
+  *'this session cannot complete a consent-mode navigation'*) check "V29c the module discloses that an unbound session cannot finish the navigation" PASS ;;
+  *) check "V29c the module discloses that an unbound session cannot finish the navigation" FAIL ;;
+esac
 [ "$(pre_verdict "$NAV" "http://127.0.0.1:4200/x" "no-such-session" "$PROJ")" = "ASK" ] \
-  && case "$STDERR_UNBOUND" in *'no bound session'*) true ;; *) false ;; esac \
+  && case "$STDERR_UNBOUND" in *'nothing is remembered'*) true ;; *) false ;; esac \
   && check "V29 an unbound session still asks, enforces the floor and says it remembers nothing" PASS \
   || check "V29 an unbound session still asks, enforces the floor and says it remembers nothing" FAIL
 [ "$(pre_verdict "$NAV" "http://localhost:4200/" "no-such-session" "$PROJ")" = "DENY" ] \
@@ -396,9 +430,9 @@ if grep -qF '**Consent mode (no parent policy).**' "$SKILL_MD" \
   && grep -qF 'A remote target is refused in consent mode' "$SKILL_MD" \
   && grep -qF 'verify-consent-<session-key>.json' "$SKILL_MD" \
   && grep -qF 'never answer it on their behalf' "$SKILL_MD"; then
-  check "V31 SKILL.md states consent mode, its hook, its loopback bound and the user-owned prompt" PASS
+  check "V31s SKILL.md states consent mode, its hook, its loopback bound and the user-owned prompt" PASS
 else
-  check "V31 SKILL.md states consent mode, its hook, its loopback bound and the user-owned prompt" FAIL
+  check "V31s SKILL.md states consent mode, its hook, its loopback bound and the user-owned prompt" FAIL
 fi
 SKILL_POLICY_SITES="$(grep -cF 'In POLICY mode' "$SKILL_MD" || true)"
 if [ "${SKILL_POLICY_SITES:-0}" -ge 2 ] && grep -qF 'In CONSENT mode** there is' "$SKILL_MD" \
@@ -420,9 +454,9 @@ if grep -qF -- '`--attach=<origin>`' "$SKILL_MD" && grep -qF -- '`--setup`' "$SK
   && grep -qF 'else `.zensu/runtime.yaml`, else `.zensu/autopilot.yaml`' "$SKILL_MD" \
   && grep -qF 'No runtime recipe found. Set one up now?' "$SKILL_MD" \
   && grep -qF 'scripts/verify-free-port.js" --from 5173' "$SKILL_MD"; then
-  check "V32 SKILL.md carries attach, setup, print-policy, the recipe order, the setup offer and the free-port helper" PASS
+  check "V32s SKILL.md carries attach, setup, print-policy, the recipe order, the setup offer and the free-port helper" PASS
 else
-  check "V32 SKILL.md carries attach, setup, print-policy, the recipe order, the setup offer and the free-port helper" FAIL
+  check "V32s SKILL.md carries attach, setup, print-policy, the recipe order, the setup offer and the free-port helper" FAIL
 fi
 if grep -qF '### Attach mode' "$SKILL_MD" && grep -qF 'worktree identity proven' "$SKILL_MD" \
   && grep -qF 'attached runtime, identity unproven' "$SKILL_MD" \
@@ -489,6 +523,188 @@ if grep -qF 'In consent mode (the preflight printed `consent`)' "$BROWSER_MD" \
 else
   check "V35 both rule files and the adapter describe the consent-mode origin path" FAIL
 fi
+
+# V36 closes the finding this whole marker exists for: consent mode is entered from a FILE
+# READ in the broker's own tree, so registration is a claim and not a fact about the running
+# session. The gate must leave positive evidence that it EXECUTED for the origin it just
+# decided, or the broker has nothing to distinguish a session whose hooks ran from one whose
+# hooks are switched off host-side.
+evidence_path() { # $1 origin -> the marker path the gate would write for it
+  node -e '
+    const consent = require(process.argv[1]);
+    const path = require("node:path");
+    process.stdout.write(consent.evidencePathFor(
+      path.join(consent.evidenceDirFor(process.argv[2]), `verify-consent-${process.argv[3]}.json`),
+      process.argv[4],
+    ));
+  ' "$MODULE" "$PROJ" "$ZENSU_SESSION_KEY" "$1" 2>/dev/null
+}
+evidence_clear() { rm -f "$PROJ"/.zensu/state/verify-consent-exec-*.json; }
+EVIDENCE="$(evidence_path 'http://127.0.0.1:4291')"
+evidence_clear
+pre_verdict "$NAV" "http://127.0.0.1:4291/dash" "$SID" "$PROJ" >/dev/null
+# The reader takes the project ANCHOR, not only the directory: it is what the containment walk is
+# checked against, and a call that supplies none is refused rather than answered.
+if [ -f "$EVIDENCE" ] && node -e '
+  const { executionEvidencePresent } = require(process.argv[1]);
+  process.exit(executionEvidencePresent(process.argv[2], process.argv[3], { projectRoot: process.argv[4] }) === true ? 0 : 1);
+' "$MODULE" "$PROJ/.zensu/state" "http://127.0.0.1:4291" "$PROJ" 2>/dev/null; then
+  check "V36 a decided loopback navigation leaves in-session execution evidence for its origin" PASS
+else
+  check "V36 a decided loopback navigation leaves in-session execution evidence for its origin" FAIL
+fi
+# The marker is ORIGIN-bound, so evidence for one origin can never launder a second one in. The
+# ANCHOR is passed for the reason V36 states: an anchorless read refuses unconditionally, so
+# without it this check answered false for every input and could not fail. A positive control
+# runs first, or "refused" and "refused for the right reason" read the same.
+if node -e '
+  const { executionEvidencePresent } = require(process.argv[1]);
+  const opts = { projectRoot: process.argv[4] };
+  const decided = executionEvidencePresent(process.argv[2], process.argv[5], opts) === true;
+  const other = executionEvidencePresent(process.argv[2], process.argv[3], opts) === true;
+  process.exit(decided && !other ? 0 : 1);
+' "$MODULE" "$PROJ/.zensu/state" "http://127.0.0.1:4292" "$PROJ" "http://127.0.0.1:4291" 2>/dev/null; then
+  check "V36a the marker names only the decided origin" PASS
+else
+  check "V36a the marker names only the decided origin" FAIL
+fi
+# A navigation the floor REFUSES never reaches the broker, so leaving evidence for it would
+# record an execution that granted nothing and widen what a later self-approval may accept.
+evidence_clear
+pre_verdict "$NAV" "https://app.example.com/" "$SID" "$PROJ" >/dev/null
+[ -z "$(ls -A "$PROJ"/.zensu/state/verify-consent-exec-*.json 2>/dev/null)" ] \
+  && check "V36b a floor-denied navigation leaves no execution evidence" PASS \
+  || check "V36b a floor-denied navigation leaves no execution evidence" FAIL
+# An already-remembered origin still records the execution: the broker checks the marker on
+# every first approval of an origin in its own process, which a memory hit does not skip. The
+# origin has to be one the MEMORY carries, or this is byte-identical to V36's ask arm and the
+# allow/MEMORY_HIT branch of the write condition has no executed case at all — conjoining on the
+# verdict is what makes that failure visible rather than silent.
+evidence_clear
+EVIDENCE_REMEMBERED="$(evidence_path 'http://127.0.0.1:4200')"
+if [ "$(pre_verdict "$NAV" "http://127.0.0.1:4200/again" "$SID" "$PROJ")" = "ALLOW" ] && [ -f "$EVIDENCE_REMEMBERED" ]; then
+  check "V36c a remembered origin records its execution too" PASS
+else
+  check "V36c a remembered origin records its execution too" FAIL
+fi
+# An ASK records `asked`, not `allowed`: with a constant on the writer's side every check on the
+# allowed path still passed, so the two arms are asserted separately.
+evidence_clear
+pre_verdict "$NAV" "http://127.0.0.1:4295/first" "$SID" "$PROJ" >/dev/null
+if node -e '
+  const j = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+  process.exit(j.verdict === "asked" ? 0 : 1);
+' "$(evidence_path 'http://127.0.0.1:4295')" 2>/dev/null; then
+  check "V36f a first navigation records the asked verdict" PASS
+else
+  check "V36f a first navigation records the asked verdict" FAIL
+fi
+evidence_clear
+pre_verdict "$NAV" "http://127.0.0.1:4200/again" "$SID" "$PROJ" >/dev/null
+# The verdict travels with the marker, so the broker and the doctor can tell an execution that
+# CLEARED the origin from one that only asked about it.
+if node -e '
+  const c = require(process.argv[1]);
+  const j = JSON.parse(require("node:fs").readFileSync(process.argv[2], "utf8"));
+  process.exit(j.verdict === "allowed" ? 0 : 1);
+' "$MODULE" "$EVIDENCE_REMEMBERED" 2>/dev/null; then
+  check "V36d the marker records the verdict the gate reached" PASS
+else
+  check "V36d the marker records the verdict the gate reached" FAIL
+fi
+# Two origins decided before either is approved coexist, where one file per session made the
+# second rename over the first and the earlier origin was then refused.
+evidence_clear
+pre_verdict "$NAV" "http://127.0.0.1:4293/a" "$SID" "$PROJ" >/dev/null
+pre_verdict "$NAV" "http://127.0.0.1:4294/b" "$SID" "$PROJ" >/dev/null
+if [ -f "$(evidence_path 'http://127.0.0.1:4293')" ] && [ -f "$(evidence_path 'http://127.0.0.1:4294')" ]; then
+  check "V36e two decided origins keep separate markers" PASS
+else
+  check "V36e two decided origins keep separate markers" FAIL
+fi
+# POLICY mode decides nothing about the target: `decide` returns allow with reason `policy-mode`
+# and delegates the target test to the broker, so a marker minted there asserts a clearance no
+# gate gave. The broker's granting read carries no session key, so a consent-mode broker in the
+# same project would then self-approve that origin inside the window with no prompt at all.
+evidence_clear
+ZENSU_VERIFY_NAVIGATION_POLICY_V1="$VALID_POLICY" pre_verdict "$NAV" "http://127.0.0.1:4296/x" "$SID" "$PROJ" >/dev/null
+[ -z "$(ls -A "$PROJ"/.zensu/state/verify-consent-exec-*.json 2>/dev/null)" ] \
+  && check "V36g policy mode records no execution evidence for a target it never judged" PASS \
+  || check "V36g policy mode records no execution evidence for a target it never judged" FAIL
+evidence_clear
+
+# --- the operator account may not outrun what the code does ---
+# `liveEvidenceOrigins` breaks early ONLY on a wantOrigin MATCH, and `consentEvidenceState` runs
+# that walk TWICE on a miss — once for the present probe and once for the widened expiry probe —
+# so a refusal, which is exactly the miss case, carries up to two budgets of windows on the
+# broker's side too. "the broker's own read carries one" was a comparison that reversed the
+# finding it was drawn to state.
+for f in "$GATES_DOC" "$REPO_CONVENTIONS"; do
+  [ -f "$f" ] || check "V40 carrier exists: ${f#"$PLUGIN_DIR"/}" FAIL
+done
+grep -qF -- "the broker's own read carries one" "$GATES_DOC" \
+  && check "V40 the gates account still compares the sweep against a one-window broker read" FAIL \
+  || check "V40 the gates account makes no one-window claim about the broker's own read" PASS
+grep -qF -- "lstat\`-then-read windows" "$GATES_DOC" \
+  && check "V40-control the window-count bound is still stated at all" PASS \
+  || check "V40-control the window-count bound is still stated at all" FAIL
+grep -qF -- "rather than one on the broker's read" "$REPO_CONVENTIONS" \
+  && check "V40a the repo conventions carry the same reversed comparison" FAIL \
+  || check "V40a the repo conventions carry no reversed comparison" PASS
+
+# The reap is clocked on MAX_EVIDENCE_REAP_AGE_MS, which is strictly wider than the reader's own
+# window — and the broker's expiry probe reads with no window at all. So a marker past the reap
+# age is removed while that reader would still honour it, which is the one input the `expired`
+# diagnosis needs. An account that names only the five-minute window states neither.
+grep -qF -- 'no reader in ANY session could honour' "$GATES_DOC" \
+  && check "V40b the reap bound still claims no reader could honour what it removes" FAIL \
+  || check "V40b the reap bound claims only what the grace horizon allows" PASS
+grep -qF -- 'MAX_EVIDENCE_REAP_AGE_MS' "$GATES_DOC" \
+  && check "V40c the operator account names the reap horizon, not only the read window" PASS \
+  || check "V40c the operator account names the reap horizon, not only the read window" FAIL
+
+# The emitting surface tells an unbindable session it cannot complete a consent-mode navigation.
+# The fault-direction paragraph said the opposite: floor plus prompt, nothing remembered.
+grep -qF -- 'nothing is remembered, and the hook says so on stderr' "$GATES_DOC" \
+  && check "V40d the fault-direction paragraph carries the retired unbindable account" FAIL \
+  || check "V40d the fault-direction paragraph matches what the hook emits" PASS
+grep -qF -- 'cannot complete a consent-mode navigation' "$GATES_DOC" \
+  && check "V40d-control it states the consequence the emitting surface states" PASS \
+  || check "V40d-control it states the consequence the emitting surface states" FAIL
+
+# --- the troubleshooting row may not promise what the refusal it is keyed on does not carry ---
+# That row is keyed on the `absent` refusal, and `consentRefusalFor` interpolates its anchor for
+# `truncated` and `unread` ONLY. The doctor row it points at is also a DIFFERENT read: session
+# scoped and all origins, against the broker's project-scoped this-origin one.
+grep -qF -- "the broker's own refusal names the tree it read" "$VF_DOC" \
+  && check "V41 the absent-keyed row promises an anchor that refusal does not carry" FAIL \
+  || check "V41 the absent-keyed row promises only what its own refusal carries" PASS
+grep -qF -- 'no in-session evidence that the Zensu consent gate ran for this origin' "$VF_DOC" \
+  && check "V41-control the row it is about is still there" PASS \
+  || check "V41-control the row it is about is still there" FAIL
+
+# A port works from the roster, not from the paragraph. Four owners this feature created were
+# absent from the core half, and `evidenceStillHonourable` and `liveEvidenceOrigins` — both ON
+# that list — call `evidenceBodyLive` with `MAX_EVIDENCE_REAP_AGE_MS`, so a port copying exactly
+# the list gets a ReferenceError on its first marker read.
+if node -e '
+  const fs = require("fs");
+  const t = fs.readFileSync(process.argv[1], "utf8");
+  const i = t.indexOf("the core half is\n  `STATE_SEGMENTS`");
+  const j = t.indexOf("the host half is FIVE obligations", i);
+  if (i < 0 || j < 0) process.exit(2);
+  const slice = t.slice(i, j);
+  const owed = ["MAX_EVIDENCE_REAP_AGE_MS", "evidenceBodyLive", "EXECUTION_VERDICTS", "classifyExecution", "recordingStream"];
+  const missing = owed.filter((n) => !slice.includes("`" + n + "`"));
+  if (missing.length) { console.error("missing: " + missing.join(", ")); process.exit(1); }
+' "$REPO_CONVENTIONS" 2>/dev/null; then
+  check "V41a the port core half names every owner this feature created" PASS
+else
+  check "V41a the port core half names every owner this feature created" FAIL
+fi
+grep -qF -- 'has no code hand-copy' "$REPO_CONVENTIONS" \
+  && check "V41b the EVIDENCE_NAME_PREFIX census still claims no code hand-copy" FAIL \
+  || check "V41b the EVIDENCE_NAME_PREFIX census counts what a grep finds" PASS
 
 echo "----"
 echo "test-verify-consent: $PASS PASS / $FAIL FAIL"

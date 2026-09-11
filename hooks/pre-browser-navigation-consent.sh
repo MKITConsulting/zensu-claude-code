@@ -46,10 +46,18 @@ if source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh" 2>/dev/null \
     ZENSU_VERIFY_CONSENT_MEMORY="$_ZENSU_CONSENT_ROOT/.zensu/state/verify-consent-${ZENSU_SESSION_KEY}.json"
   fi
 else
-  echo "zensu: browser consent gate has no bound session — every navigation asks and nothing is remembered" >&2
+  echo "zensu: browser consent gate has no bound session — every navigation asks, nothing is remembered, and consent mode cannot complete: no execution marker can be written, so the browser broker refuses the navigation after you have answered. Run /zensu:doctor" >&2
 fi
 # Which recipe governs is resolved INSIDE the decision module from the project root, so
 # this hook, its PostToolUse sibling and the /zensu:doctor row cannot disagree about it.
+#
+# This hook became a WRITER into <root>/.zensu/state when the execution marker landed, and it
+# deliberately does NOT create that directory: its PostToolUse sibling owns the mkdir, and
+# duplicating it here would put a directory-creating write on the PreToolUse path of every
+# navigation. The consequence is stated rather than hidden — for a bound session the directory
+# exists by construction, and where it does not the marker write refuses, the hook discloses on
+# stderr, the broker refuses the navigation, and the sibling's mkdir heals it after one round
+# trip.
 export ZENSU_VERIFY_CONSENT_MEMORY ZENSU_VERIFY_PROJECT_ROOT
 
 DECISION="$(printf '%s' "$INPUT" | (

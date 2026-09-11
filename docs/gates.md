@@ -377,7 +377,10 @@ and the navigation then executed.
 **Fault direction.** The PreToolUse hook is a gate and fails closed: a missing `node`, an
 absent or symlinked module, or a module failure denies the navigation with a stderr note. A
 session that cannot bind its Session Control record still gets the floor and a prompt for
-every navigation — nothing is remembered, and the hook says so on stderr. The PostToolUse hook
+every navigation, but the prompt is all it gets: with no session key there is no name to bind an
+execution marker to, so the broker refuses the navigation the human was just asked about. The
+hook says exactly that on stderr — that this session cannot complete a consent-mode navigation,
+and to run `/zensu:doctor` — rather than the older and weaker "nothing is remembered". The PostToolUse hook
 never blocks: every fault is a stderr note and exit `0` — with the one exception every sibling
 hook shares, the plugin-root identity guard, which refuses with exit 2 before the hook body runs
 (self-resolution failure and inherited-root mismatch are two distinct messages). A navigation the
@@ -403,10 +406,74 @@ to the plugin-scoped spelling would remove the gate wherever the bare spelling i
 so the matcher is left as it is until the prefix is measured across desktop and CLI, default and
 `--plugin-dir` installs. The consent memory is a file in a directory the
 session can write through a Bash redirect, so a forged record skips the prompt for that origin;
-the floor bounds the damage to other loopback services. The broker trusts that the host ran
-the hook: with hooks disabled host-side, consent mode accepts unconsented loopback navigations.
-`/zensu:doctor` reports registration, not host-side execution. MCP elicitation would remove
-both residuals in the CLI; it is not the shipped channel because the desktop app lacks it, and
+the floor bounds the damage to other loopback services. The broker no longer trusts that the
+host ran the hook: consent mode refuses to self-approve an origin without a live per-session
+marker the gate writes for every decided loopback navigation, one per (session, origin), and it
+reads that marker each time it is asked to approve an origin it has not already approved in this
+process, rather than caching a mode resolved once at start — so hooks switched off host-side, a
+broker launched from a different tree than the one whose registry the host loaded, and a plugin
+swap inside a long-lived MCP process all leave the broker refusing rather than self-approving.
+The launcher carries `ZENSU_VERIFY_PROJECT_ROOT` through its `env -i` allowlist, so the broker
+anchors on that root when something upstream supplies it. **Nothing in the plugin does**, and
+saying otherwise was a false guarantee this document briefly carried: a derivation in the
+launcher was tried and removed, because that process has no hook payload for the session binder
+and no guaranteed session identity for the payload-free one. In practice the broker therefore
+anchors on its own cwd, and for a session whose cwd is a worktree while the record names another
+tree the two anchors disagree. State the consequence in BOTH directions rather than as a refusal:
+the broker refuses when the cwd-anchored tree holds no live marker for that origin, and the
+`/zensu:doctor` execution row, which reads under the RECORD's root, can then report a gate that
+ran while that broker still refuses — but a loopback origin is the same string in every project,
+and the broker's read carries no session key, so a live marker for that origin written by a
+different session in the cwd-anchored project satisfies the check instead. Refusal is the common
+case, not the guaranteed one. `/zensu:doctor` reports
+both facts on separate rows: `verify-feature:` reports REGISTRATION, and `verify-feature gate:`
+reports EXECUTION, session-scoped, with a contract fault reported as `could not be judged` rather
+than as the benign row. SEVEN bounds travel with that and are stated rather than implied. The
+marker lives in a directory the session can write through a Bash redirect, so it authenticates
+nothing against a session forging its own; what it removes is the SILENT case, where a gate that
+never ran was indistinguishable from one that did. An origin already approved inside the
+broker's process stays approved — the marker gates the WRITE into the approved set, never each
+later navigation against it, because a consent the human gave is not revoked by a later plugin
+change. The BROKER's read is project-scoped rather than session-scoped, because it has no
+session key: a sibling session's marker for the same origin satisfies it, and only the doctor
+row binds the session — and that binding is the marker's own FILENAME, not anything the body
+proves. `.zensu/state/` is writable from any session in the project, so a co-tenant can write
+`verify-consent-exec-<another session's key>-<any tag>.json` and make THAT session's doctor
+print an execution row for a gate run it never had. The row is therefore evidence about a file,
+not an attestation; closing it needs the session key inside the signed-for body, which the
+marker has no way to authenticate today either. And a prompt the human DECLINED still leaves a marker live for its
+window, because the gate writes before the answer exists; the marker records `asked` rather than
+`allowed`, which names the state but does not close it — closing it needs a signal the gate
+cannot emit before the human has answered. The fifth bound is that WINDOW itself
+(`MAX_EVIDENCE_AGE_MS`, five minutes): a marker is honoured only while it is inside it, so a
+session whose gate ran an hour ago and has navigated nowhere since is refused by the broker and
+reported by the doctor as registered-with-no-live-marker. Neither surface is saying the gate
+never ran, and both say so in as many words — the `verify-feature gate:` row names expiry beside
+"no navigation yet" as an ordinary cause, and the broker's refusal names the window and points at
+that row. The sixth is that the reap which keeps the walk's budget from filling is NOT
+session-scoped: a write in one session removes markers a sibling session wrote. It is clocked on
+`MAX_EVIDENCE_REAP_AGE_MS`, which is twice the read window above, and that GRACE is load-bearing
+rather than slack: the broker's expiry probe deliberately reads with no window at all, and a
+marker it would still honour is the only input that can produce the `expired` diagnosis instead
+of a bare `absent`. So the sweep is NOT bounded to entries no reader anywhere could honour — past
+the ten-minute horizon it removes exactly the ones that probe wants, and a sweep clocked on the
+five-minute window would have removed them from the first write anywhere in the project. What it
+does not remove is anything a NAVIGATION could still have used. The cost of the grace is the
+other way round: a dead marker holds a walk slot for twice as long against the budget whose
+exhaustion is the `truncated` state. Either way a session's markers can disappear under it, which
+is why the doctor row is worded as a report about a LIVE marker rather than about the gate's
+history. The seventh is that the sweep runs INSIDE the gating hook and reads and parses
+every candidate it examines, up to the same budget — so a decided navigation carries up to that
+many `lstat`-then-read windows. That is a count, not a comparison: the broker's own read is
+bounded by the same budget rather than by one window, because `liveEvidenceOrigins` stops early
+only when it MATCHES the origin it was given, and a miss is exactly the case that produces a
+refusal. On a miss the broker walks the directory TWICE — once for the present probe and once for
+the widened expiry probe — so both sides are bounded by that budget and neither is bounded by
+one. An already-present
+non-regular file is refused before either read, so the exposure is the swap race rather than a
+plantable block; the count is what is new, and it is named here rather than left to be discovered
+from a hook that has become slow. MCP elicitation would remove
+the prompt residual in the CLI; it is not the shipped channel because the desktop app lacks it, and
 the decision module is shaped so elicitation can replace the prompt without changing the
 memory or the wording.
 
