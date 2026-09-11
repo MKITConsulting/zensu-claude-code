@@ -59,7 +59,14 @@ preflight fails, do not start or navigate. Report PARTIAL with instructions to l
 Claude session with the exact origin and evidence-route policy. A child Bash command cannot
 change the MCP server's parent environment.
 
-Before `up`, the Claude parent environment must authorize exactly one target containing a
+Without a parent policy the broker runs in consent mode and the same three commands still
+apply: `planned-origin` then picks a free literal-loopback port through
+`<absolute-plugin-root>/scripts/verify-free-port.js`, records it once in the run directory
+(`zensu-planned-origin`, mode `0600`) so `up` reuses the same origin, and `--check-policy`
+prints `consent` with exit `0`. The first `browser_navigate` to that origin opens the host's
+permission prompt to the user; a refused prompt ends the run PARTIAL after `down`.
+
+With a parent policy, before `up` that environment must authorize exactly one target containing a
 literal `http://127.0.0.1:<port>` origin, page route `/`, and `declared-safe` evidence mode.
 `up` uses that exact frontend port, fails if it is occupied,
 derives a collision-safe container name, selects free PostgreSQL/backend ports rooted at

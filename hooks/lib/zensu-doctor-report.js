@@ -155,6 +155,18 @@ var SETTINGS_MAX_BYTES = 1048576;
 // One pair IS machine-checked — P1by pins THIS constant against the exporting one, so
 // the two spellings cannot drift apart unnoticed. The other six files are not pinned.
 var REVIEWER_AGENT = 'zensu:code-reviewer';
+
+// The arming set is spelled ONCE and consumed by both halves of the ladder below. It is also
+// the set `hooks/lib/zensu-doctor.sh` derives ZDOC_VERIFY_EXEC for; the two are held in step by
+// a pin rather than by trust, because a fourth consent state added to one side alone would make
+// the execution row silently disappear.
+var CONSENT_MODE_STATES = ['consent', 'consent-no-recipe', 'consent-recipe-unchecked'];
+
+// The wrapper's value reaches a rendered line, so it is bounded here rather than trusted: the
+// row exists to report a state, never to relay whatever a caller put in the variable.
+function safeVerifyExec(value) {
+  return String(value).replace(/[^A-Za-z0-9_.:-]/g, '').slice(0, 40) || 'unnamed';
+}
 // The Claude Code build (2.1.235) whose settings shape and permission-rule
 // grammar the check below was read against. Recorded for the same reason
 // DENIAL_MARKERS_SOURCE_BUILD is: only a named build lets a human re-verify
@@ -360,6 +372,47 @@ function toolBlock() {
   else if (p === 'declared') line(WARN, 'Playwright MCP: valid integrity-locked plugin config but npm is missing from PATH');
   else if (p === 'present') line(WARN, 'Playwright: PATH binary found, but /zensu:verify-feature requires loaded Playwright MCP tools');
   else line(WARN, 'Playwright MCP: valid plugin config not detected — /zensu:verify-feature cannot drive the UI and autopilot browser validation may skip');
+
+  var v = env.ZDOC_VERIFY || '';
+  var vr = env.ZDOC_VERIFY_REASON || '';
+  if (v === 'policy') line(OK, 'verify-feature: environment policy active — the parent-environment navigation policy governs every browser origin this session; only its top-level contract was checked here, and the broker judges each target when it starts');
+  else if (v === 'consent') line(OK, 'verify-feature: consent mode ready — no parent policy; the browser asks you once per origin through the permission prompt and then admits every route on it, and a runtime recipe is present');
+  else if (v === 'consent-no-recipe') line(WARN, 'verify-feature: consent mode ready, no runtime recipe — run /zensu:verify-feature --setup to write .zensu/runtime.yaml, or pass --attach=<loopback-origin> for an app you already run');
+  else if (v === 'consent-recipe-unchecked') line(WARN, 'verify-feature: consent mode ready, recipe not checked — no project root resolved, so no .zensu/runtime.yaml was looked for; this is a missing check rather than a missing recipe');
+  else if (v === 'policy-invalid') line(BAD, 'verify-feature: a parent-environment navigation policy is set but the browser broker will refuse it (' + (vr || 'reason unknown') + ') — only the top-level contract was checked here, so fix that value or unset it to fall back to consent mode');
+  else if (v === 'unavailable') line(BAD, 'verify-feature: cannot start (' + (vr || 'reason unknown') + ') — the consent hook pair, its module and the broker must ship together; reinstall the plugin or launch Claude Code with the parent-environment policy');
+  else line(WARN, 'verify-feature: not checked — the wrapper reported no verify state, so this is a missing check rather than an all-clear; run /zensu:doctor from a session whose plugin root resolves');
+  // AC-104. The row above is derived from files on disk in the plugin's own tree, so it reports
+  // that the pair is INSTALLED. This one reports that the gate RAN, read from the per-session
+  // marker the PreToolUse hook writes for every decided loopback navigation. Without it a host
+  // with hooks switched off renders the mode row green while the broker's consent mode
+  // self-approves every loopback origin unprompted.
+  // The renderer enforces the arming rule itself rather than trusting the wrapper to have
+  // cleared the value: a caller that supplies ZDOC_VERIFY_EXEC directly skips that derivation
+  // entirely, and a row about consent-mode enforcement beside a policy-mode verdict would
+  // report on a mechanism the session never reaches.
+  var ve = CONSENT_MODE_STATES.indexOf(v) !== -1 ? String(env.ZDOC_VERIFY_EXEC || '') : '';
+  // TWO bounds ride on both green rows, and neither is a hedge. The marker's session binding is
+  // its FILENAME, and `.zensu/state/` is writable from any session in the project, so this row is
+  // evidence about a FILE rather than an attestation that this session's gate ran — docs/gates.md
+  // states that in as many words. And the row reads under the session RECORD's project root while
+  // the broker anchors on its own cwd (nothing in this plugin sets ZENSU_VERIFY_PROJECT_ROOT for
+  // the MCP server), so a green row here does not establish that the broker will approve. Without
+  // both clauses a user whose broker refuses every navigation was told the gate is enforced.
+  if (ve === 'ran') line(OK, 'verify-feature gate: executed in this session — a live marker whose name carries this session\'s key records the gate deciding a navigation, so consent mode is being exercised rather than only registered. Two bounds: the marker is a file any session in this project could write, so this is evidence about a file rather than an attestation; and it is read under the session record\'s project root, while the browser broker anchors on its own working directory, so a green row here does not establish that the broker will approve');
+  else if (ve === 'ran-asked') line(OK, 'verify-feature gate: executed in this session, on a prompted origin — the live marker records the gate ASKING about the navigation rather than clearing it from memory; the marker is written before the answer exists, so a prompt that was DECLINED leaves the same marker live for its window, which is the residual docs/gates.md names. The same two bounds as the row above apply: the marker is a file any session in this project could write, and it is read under the session record\'s project root while the broker anchors on its own working directory');
+  else if (ve === 'none') line(OK, 'verify-feature gate: registered, and no live execution marker was read for this session — the row above reports registration; this one reports EXECUTION. The ordinary causes are that no browser navigation has reached the gate yet, or that its marker has passed the window the gate keeps them for, so this row is not evidence that no navigation occurred');
+  // This row carries the consequence the retired mode-chain arm used to state, minus its cause.
+  // That arm asserted "this session has no bound Session Control record" and prescribed a fresh
+  // session, but the wrapper sets `unknown` for EVERY binding verdict except `bound` — including
+  // orphaned-project-root, incompatible-runtime and pruned-plugin-root, where a valid record is
+  // sitting in plugin data and this same report's binding row prescribes /zensu:adopt-session.
+  // It also sat at the TOP of the mode chain, so it displaced the no-recipe and recipe-unchecked
+  // rows and took their remedies with it. One observable, one row, and the remedy is the binding
+  // row's to give.
+  else if (ve === 'unknown') line(WARN, 'verify-feature gate: execution not checked — no bound session key or recorded project root was available, so the per-session marker was never looked for and none can be written either; consent mode can still ask, and the browser broker will then refuse the navigation for want of a marker. This is a missing check rather than an all-clear — read the binding row above for what to do about it, or launch with the parent-environment navigation policy, which needs no hook');
+  else if (ve === 'unjudged') line(WARN, 'verify-feature gate: execution could not be judged — the decision module did not load, did not export the reader, the state directory could not be read, or the read hit the marker budget before it could answer; this is a missing check rather than an all-clear. Reinstall the plugin, check that <project>/.zensu/state is readable, and clear stale verify-consent-exec-* files from it — and nothing else in that directory, which also holds this session\'s workflow document');
+  else if (ve !== '') line(WARN, 'verify-feature gate: execution state not recognized (' + safeVerifyExec(ve) + ') — the wrapper reported a state this report has no row for, so this is a missing check rather than an all-clear');
 }
 
 function pluginBlock() {
