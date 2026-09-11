@@ -231,6 +231,10 @@ SID_B="22222222-0000-0000-0000-00000000000b"
 SID_C="33333333-0000-0000-0000-00000000000c"
 SID_D="44444444-0000-0000-0000-00000000000d"
 SID_E="55555555-0000-0000-0000-00000000000e"
+# The GONE-leg fixture for L70g. It needs a worktree name of its own: A/B/C share
+# `handover`, which is also `$SELF_CWD`, so removing that directory would take the
+# working directory of every other `trail` invocation in this suite with it.
+SID_H="88888888-0000-0000-0000-000000000088"
 
 LIVE_SLEEPER="$(node -e '
 const { spawn } = require("node:child_process");
@@ -247,6 +251,12 @@ DEAD_PID=2147483647
 fix "$SID_A" "$DEAD_PID"  90 handover "$ACCT_A" stalled
 fix "$SID_B" "$DEAD_PID"  60 handover "$ACCT_B"
 fix "$SID_C" "$LIVE_PID"  10 handover "$ACCT_C"
+# The GONE-leg fixture for L70g: built like the others, then its worktree is REMOVED, so
+# `dirExists(cwd)` is false, `adviceLeg` answers `gone`, and `cmdAdopt` takes the other
+# branch of `printWhereAdvice`. Removing the directory does not hide the session — the
+# index is built from transcripts, and `cwdExists` is a separate field.
+fix "$SID_H" "$DEAD_PID"  40 goneleg "$ACCT_A"
+rm -rf "$CFG/work/goneleg"
 
 # The worktree every `trail` call runs from — see the note on trail() above.
 SELF_CWD="$CFG/work/handover"
@@ -2377,6 +2387,343 @@ if grep -q -- "-Command'," "$TRAIL_MJS"; then
 else
   check "L69a no -Command spelling survives beside it" PASS
 fi
+
+# -- L70 -- adopt renders the takeover destination guidance, on both carriers --
+# `adopt` was the ONE route that rendered neither the own-worktree rule nor the
+# carry-over recipe: `takeover` and `handoff` write both into their briefs, `show`
+# prints the decision half, and this verb printed only its three receipt lines. A real
+# ledger edge carrying `recordedBy: "adopt"` was recorded for a handover that reused a
+# worktree of its own -- which flow 3 step 4 allows -- and left the source tree's
+# uncommitted changes behind, which nothing on this route had told it about.
+#
+# WHICH ARM AND LEG this fixture exercises, written down because every content needle
+# below depends on it and a fixture edit would move them SILENTLY: `$SID_A` is never
+# archived, so `worktreeAdvice` takes the `active` arm; `$SELF_CWD` exists, so it takes
+# the `present` leg. That pair is the only one emitting `TAKE_YOUR_OWN` plus
+# `CARRY_OVER` -- the gone leg emits neither, and another arm emits another lead. An
+# `archive "$SID_A"` call added anywhere above moves this whole block.
+reset_ledger
+A70_RC=0
+ADOPT_OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" adopt "$SID_A" --all)" || A70_RC=$?
+A70_MISS=""
+# WHICH CARRIER produced the lines below, asserted before any of them is read -- the
+# mirror of L70g's own pair, and it was missing here while that fixture had it. Every
+# content needle in this block is emitted by `printWhereAdvice` -- the advice array included,
+# since that closure is what renders it -- and `cmdAdopt` calls it identically from the
+# SUCCESS receipt and from the catch branch's `NOT RECORDED` one, so an unwritable ledger
+# satisfies every one of them. No numeral here on purpose: the arm count below moves with
+# every needle added, and a hand-maintained one is what this file's own rule calls the thing
+# a driven loop cannot catch. Without these two arms this check
+# would grade a FAILURE carrier as a present-leg success render: the vacuous shape L70d's
+# `[claims-a-record]`/`[exited-zero]` pair exists to reject, one fixture over, and the
+# shape L70g already rejects on the other leg. `^RECORDED ` is line-anchored for the
+# reason L70d gives -- the negative receipt contains that word too.
+[ "$(printf '%s\n' "$ADOPT_OUT" | grep -c '^RECORDED ' || true)" = "1" ] || A70_MISS="$A70_MISS [not-the-success-carrier]"
+[ "$A70_RC" = "0" ] || A70_MISS="$A70_MISS [exited-nonzero]"
+case "$ADOPT_OUT" in *"git worktree add"*) ;; *) A70_MISS="$A70_MISS [create-recipe]" ;; esac
+case "$ADOPT_OUT" in *"-b 'claude/<name>-cont'"*) ;; *) A70_MISS="$A70_MISS [new-branch-rule]" ;; esac
+# The carry-over half specifically, and this needle is the one that matters: the create
+# recipe alone is what `show` already prints, so a check that stopped there would pass
+# against the decision half and never notice the recipe was missing.
+case "$ADOPT_OUT" in *"apply --stat"*) ;; *) A70_MISS="$A70_MISS [carry-over]" ;; esac
+# Through `adviceBlock`, not a prefix loop -- L70e below grades the SPLIT that renderer
+# owns; this only establishes that a fence exists at all.
+case "$ADOPT_OUT" in *'```bash'*) ;; *) A70_MISS="$A70_MISS [not-fenced]" ;; esac
+# BOUND TO THE ARM AND TO THE SOURCE ROW. Every needle above is text `worktreeAdvice`
+# emits for ANY present-leg row under ANY arm, so substituting a different row -- the
+# taker's, say -- passed all of them unchanged while the four-arm ladder stayed
+# unexercised on this carrier.
+#
+# The arm needle is the LONG literal on purpose. `still belongs to an archivable session`
+# occurs in TWO cells -- `active.present` and `unreadable.present` -- so it cannot make
+# the arm observable, and `unreadable` is exactly the arm this call site risks drifting
+# into: `archived` is `null` whenever `r.app` is absent, and `cmdAdopt` passes the bare
+# `resolve(...)` row rather than `hydrate(resolve(...))`. The negative arm below is what
+# catches that drift rather than absorbing it.
+case "$ADOPT_OUT" in *"Never continue in a worktree"*) ;; *) A70_MISS="$A70_MISS [wrong-arm-lead]" ;; esac
+case "$ADOPT_OUT" in *"The archive state could not be read"*) A70_MISS="$A70_MISS [unreadable-arm-leaked]" ;; esac
+A70_HEAD="$(printf '%s\n' "$ADOPT_OUT" | grep '^WHERE ' | head -1)"
+case "$A70_HEAD" in *"${SID_A%%-*}"*) ;; *) A70_MISS="$A70_MISS [head-names-no-source-session]" ;; esac
+# The THIRD present/gone discriminator, and the one that was left one-directional: L70g
+# asserts `!! MISSING` on the gone leg and nothing forbade it here. Dropping the ternary
+# that produces it leaves every other check green -- this head assertion greps only
+# `^WHERE ` and the session tag, L70d's `[no-source-head]` matches either way -- and
+# `adopt` then tells a user their present, existing worktree is missing. Scoped to the
+# extracted head line rather than the whole output, so the arm grades what it names.
+case "$A70_HEAD" in *"!! MISSING"*) A70_MISS="$A70_MISS [missing-qualifier-on-present-leg]" ;; esac
+# THE PLACEHOLDER MAPPING, on its own line. The value must arrive as `'<their worktree>'
+# = '<path>'` and not as a bare parenthesised path: the recipe's operand is already
+# quoted, `briefShellArg` brings its own quotes, and a reader who replaces only the token
+# inside those quotes gets two quoted words back to back — ONE unquoted word to the
+# shell. Requiring the quoted token on the left is what rejects the parenthesised form.
+A70_MAP="$(printf '%s\n' "$ADOPT_OUT" | grep "'<their worktree>' = " | head -1)"
+case "$A70_MAP" in *"'<their worktree>' = '"*) ;; *) A70_MISS="$A70_MISS [no-quoted-placeholder-mapping]" ;; esac
+# The GATE for L70g's `[present-leg-instruction-on-gone-leg]` absence arm. Without a
+# positive assertion here, deleting the producer outright leaves the whole suite green
+# and that absence arm then passes for an unestablished reason -- the line missing on
+# BOTH legs, which is the shape the present/gone split exists to reject. The repo states
+# the rule by name in CLAUDE.md: every ABSENCE assertion is gated on a positive one.
+case "$ADOPT_OUT" in *"Replace the placeholder"*) ;; *) A70_MISS="$A70_MISS [no-placeholder-instruction]" ;; esac
+# The mirror of L70g's `[no-gone-leg-recorded-path]`: the gone-leg LABEL must not appear
+# here, or the two shapes have collapsed into one unconditional render and neither leg's
+# arm discriminates any more.
+case "$ADOPT_OUT" in *"recorded worktree (gone)"*) A70_MISS="$A70_MISS [gone-label-on-present-leg]" ;; esac
+# PRESENCE ONLY, and stated as such rather than sold as a second independent binding:
+# `fix` builds A, B and C with the SAME worktree name (`handover`), and `$SELF_CWD` is
+# that same directory, so the source row's `wt` and the taker's cwd are one path here.
+# Substituting the taker's row would leave this needle matching. Only the session-id
+# needle above discriminates; giving `$SID_A` its own worktree name is what would make
+# this one bind, and that is a fixture change this check deliberately does not make.
+case "$A70_MAP" in *handover*) ;; *) A70_MISS="$A70_MISS [mapping-names-no-worktree]" ;; esac
+if [ -z "$A70_MISS" ]; then
+  check "L70 adopt prints the own-worktree rule and the carry-over recipe, bound to the source row" PASS
+else
+  check "L70 adopt destination guidance missing:$A70_MISS (rc=$A70_RC)" FAIL
+fi
+# ORDER: ALL THREE receipt lines are printed before the advice. Pinning only the first
+# left the ledger-path line -- the one this check exists to protect -- asserted nowhere,
+# so deleting it kept every check green.
+RECORDED_LINE="$(printf '%s\n' "$ADOPT_OUT" | grep -n '^RECORDED ' | head -1 | cut -d: -f1)"
+REASON_LINE="$(printf '%s\n' "$ADOPT_OUT" | grep -n '^ *reason: ' | head -1 | cut -d: -f1)"
+# Backslashes folded first: this needle matches RENDERED output, and the receipt path is
+# built with node's `path.join`, which is backslash-separated on win32 — where this suite
+# runs on the blocking shard. Without the fold the check goes red there for a reason
+# unrelated to its contract. Same fold as `norm()` above.
+LEDGER_LINE="$(printf '%s\n' "$ADOPT_OUT" | tr '\\' '/' | grep -n '/edges/' | head -1 | cut -d: -f1)"
+ADVICE_LINE="$(printf '%s\n' "$ADOPT_OUT" | grep -n 'git worktree add' | head -1 | cut -d: -f1)"
+if [ -n "$RECORDED_LINE" ] && [ -n "$REASON_LINE" ] && [ -n "$LEDGER_LINE" ] && [ -n "$ADVICE_LINE" ] \
+  && [ "$RECORDED_LINE" -lt "$REASON_LINE" ] && [ "$REASON_LINE" -lt "$LEDGER_LINE" ] \
+  && [ "$LEDGER_LINE" -lt "$ADVICE_LINE" ]; then
+  check "L70a all three receipt lines precede the advice, in order" PASS
+else
+  check "L70a receipt order (recorded=$RECORDED_LINE reason=$REASON_LINE ledger=$LEDGER_LINE advice=$ADVICE_LINE)" FAIL
+fi
+# SOURCE PIN, because the printed order above cannot see the property its own comment
+# names: hoisting `worktreeAdvice(row)` into one shared variable -- the refactor
+# `cmdAdopt` forbids in as many words -- leaves the rendered order byte-identical. The
+# `fail()` path it protects is behaviourally unreachable (all four arms x both legs are
+# declared), so a source pin is the only available control. Same shape as L69.
+ADOPT_SRC="$(awk '/^function cmdAdopt\(/{f=1} f{print} f && /^\}$/{exit}' "$TRAIL_MJS")"
+# OCCURRENCES, not matching LINES: `grep -c` reports lines, so a fourth call site
+# appended to an existing line would have been invisible and the count right only by
+# fixture accident.
+#
+# THREE is not one per carrier, and saying so was wrong once: the two TEXT carriers -- the
+# success receipt and the NOT RECORDED negative one -- share the single `printWhereAdvice`
+# closure, so 3 = that one shared call plus the two `--json` payloads, success and failure.
+# The property the count pins is that no site HOISTS the value, not how many carriers exist.
+A70_INLINE="$(printf '%s\n' "$ADOPT_SRC" | grep -o 'worktreeAdvice(row)' | wc -l | tr -d ' ')"
+# NEWLINES FOLDED FIRST, for the reason the sibling line states about itself: this scan
+# is the ONLY conjunct enforcing "hoists none of them", because the occurrence count of 3
+# is satisfied by a hoisted form too (one hoist plus the two `--json` sites). A hoist
+# written with the operator and the call on separate lines -- `const adviceLines =` then
+# `  worktreeAdvice(row);` -- is invisible to a line-scoped grep, so the forbidden
+# refactor would ship with this check green.
+A70_ASSIGN="$(printf '%s' "$ADOPT_SRC" | tr '\n' ' ' | grep -oE '=[[:space:]]*worktreeAdvice\(' | wc -l | tr -d ' ')"
+if [ -z "$ADOPT_SRC" ]; then
+  check "L70a-control cmdAdopt could not be extracted from trail.mjs, so the source pin is vacuous" FAIL
+elif [ "$A70_INLINE" = "3" ] && [ "$A70_ASSIGN" = "0" ] \
+  && printf '%s\n' "$ADOPT_SRC" | grep -qF 'briefShellArg(row.wt)'; then
+  check "L70a-src cmdAdopt calls worktreeAdvice inline at all three sites (one shared text closure plus both --json payloads), hoists none of them, and shell-quotes the worktree" PASS
+else
+  # `briefShellArg`, not `flatPath`: the head supplies a value the reader pastes into a
+  # shell word, and the swap is invisible to every other check in both suites -- the
+  # skill suite's PRINT_WRAPPED allowlist accepts either helper, and L70's own needles
+  # match either rendering.
+  check "L70a-src cmdAdopt inline call sites (inline=$A70_INLINE expected 3 = one shared printWhereAdvice closure + two --json payloads, assignments=$A70_ASSIGN expected 0, briefShellArg(row.wt) required)" FAIL
+fi
+# The PASTE-UNIT SPLIT, which is the property `adviceBlock` owns and a fence-presence
+# needle cannot see: both rejected shapes -- one fence for everything, and one fence per
+# line -- satisfy that needle. The two READING steps must share a fence and the
+# destructive apply must sit in a later one.
+#
+# STANDING FIX, named rather than taken, and stated correctly here because an earlier
+# wording of it was wrong in both directions. This is ONE OF THREE fence-index walks in
+# the tree, not "the third of three per-check walks": `WT8q` and `WT8q2` in
+# test-session-trail-verdict.sh SHARE one helper, `fence_of`, so they are two pins over
+# one implementation; the third implementation is `fenceOf` in worktree-advice-v1.test.js,
+# which a maintainer hunting per-check walks would never reach. The property is
+# renderer-INDEPENDENT -- it belongs to `adviceBlock`'s coalescing and to `CARRY_OVER`'s
+# column-zero prose line, both reachable from a unit layer since `adviceBlock` and
+# `worktreeAdvice` are exported -- and that unit grading ALREADY SHIPS, in
+# worktree-advice-v1.test.js's `the destructive apply is not in the same paste unit as the
+# steps that gate it`. So the outstanding work is THINNING these three renderer pins to a
+# "this carrier went through `adviceBlock`" needle, never adding the unit case again.
+A70_FENCE="$(printf '%s\n' "$ADOPT_OUT" | awk '
+  /^[[:space:]]*```bash$/ { inf = 1; n += 1; next }
+  /^[[:space:]]*```$/ { inf = 0; next }
+  inf && index($0, "apply --stat") { print "stat " n }
+  inf && index($0, "mktemp") { print "mktemp " n }
+  inf && index($0, "apply \"$PATCH\"") { print "apply " n }
+')"
+A70_STAT="$(printf '%s\n' "$A70_FENCE" | awk '$1=="stat"{print $2; exit}')"
+A70_MKTEMP="$(printf '%s\n' "$A70_FENCE" | awk '$1=="mktemp"{print $2; exit}')"
+A70_APPLY="$(printf '%s\n' "$A70_FENCE" | awk '$1=="apply"{print $2; exit}')"
+if [ -n "$A70_STAT" ] && [ -n "$A70_MKTEMP" ] && [ -n "$A70_APPLY" ] \
+  && [ "$A70_MKTEMP" = "$A70_STAT" ] && [ "$A70_APPLY" != "$A70_STAT" ]; then
+  check "L70e the paste-unit split holds on this renderer: read steps together, destructive apply in a later fence" PASS
+else
+  check "L70e paste-unit split (mktemp=$A70_MKTEMP stat=$A70_STAT apply=$A70_APPLY)" FAIL
+fi
+# The machine carrier gets the same guidance, as `show --json` and `takeover --json`
+# already do -- a tool driving `adopt` must not have to re-run another verb for it. The
+# needle requires BOTH halves: `git worktree add` alone is emitted by the decision half
+# too, so rewriting this carrier to `carryOver: false` -- exactly the asymmetry `cmdShow`
+# ships one command over -- would have left the old needle green.
+reset_ledger
+A70J_RC=0
+ADOPT_JSON="$(trail "$STORE" "$SID_C" "$LIVE_PID" adopt "$SID_A" --all --json)" || A70J_RC=$?
+A70J="$(jq_field "$ADOPT_JSON" worktreeAdvice)"
+# WHICH CARRIER, asserted before the content ladder. `worktreeAdvice` is byte-identical on
+# the success and catch payloads -- the same call on the same row -- so the content arms
+# below cannot tell them apart. Today this check still cannot pass vacuously, and the
+# reason is a property of the HARNESS rather than of the check: `trail()` merges stderr,
+# the catch arm's `fail()` writes there, so the merged stream is unparseable and the first
+# arm grades PARSE_ERROR as FAIL. That is exactly why the pairing is pinned here instead
+# of relied on -- a future invocation that drops stderr the way L70f does would silently
+# turn this into a second copy of L70f while it still claims to grade the SUCCESS payload.
+A70J_REC="$(jq_field "$ADOPT_JSON" recorded)"
+if [ "$A70J_RC" != "0" ] || [ "$A70J_REC" = "null" ] || [ "$A70J_REC" = "ABSENT" ]; then
+  check "L70b adopt --json is not the success carrier (rc=$A70J_RC recorded=$A70J_REC)" FAIL
+else
+case "$A70J" in
+  ABSENT|PARSE_ERROR|''|'[]') check "L70b adopt --json carries the advice (got ${A70J:-<empty>})" FAIL ;;
+  # A RENDERED array is a shape the machine carrier exists to reject: passing the lines
+  # through `adviceBlock` here would inject fence markers and blank lines into a
+  # consumer's payload while both substrings above still matched.
+  *'```bash'*) check "L70b adopt --json carries the RAW advice array, not an adviceBlock render" FAIL ;;
+  *"git worktree add"*"apply --stat"*) check "L70b adopt --json carries the same FULL advice under worktreeAdvice, carry-over included" PASS ;;
+  *) check "L70b adopt --json carries the full advice (create recipe and/or carry-over recipe missing)" FAIL ;;
+esac
+fi
+# A LEDGER WRITE THAT FAILS still renders the guidance, then refuses. `ZENSU_SESSION_LINEAGE=off`
+# is a documented way to decline the record, and before this the decline also silently
+# declined the one thing this route exists to say. The refusal itself is unchanged:
+# non-zero exit, the cause on stderr, no edge written.
+rm -rf "$CFG/zensu"
+printf 'not a directory' > "$CFG/zensu"
+A70F_RC=0
+A70F="$(trail "$STORE" "$SID_C" "$LIVE_PID" adopt "$SID_A" --all)" || A70F_RC=$?
+# The fixture stays UP until L70f below has driven the --json carrier against it. Tearing
+# it down here made that check measure a writable ledger and grade a SUCCESS payload.
+A70F_MISS=""
+case "$A70F" in *"apply --stat"*) ;; *) A70F_MISS="$A70F_MISS [no-recipe]" ;; esac
+case "$A70F" in *"WHERE    for"*) ;; *) A70F_MISS="$A70F_MISS [no-source-head]" ;; esac
+case "$A70F" in *"could not record the handover"*) ;; *) A70F_MISS="$A70F_MISS [no-refusal]" ;; esac
+[ "$A70F_RC" != "0" ] || A70F_MISS="$A70F_MISS [exited-zero]"
+# THE NEGATIVE RECEIPT, and the two things that must NOT be on this carrier. Without
+# these the check could not tell "renders guidance, then refuses" from "claims a record
+# that was never written, renders guidance, then refuses" -- hoisting the three receipt
+# prints above the `try`, the plausible refactor AC-004 guards, would emit `RECORDED`
+# and an `/edges/` path for an edge that never existed while every other L70 check, all
+# of which read the SUCCESS output, stayed green. `^RECORDED ` is line-anchored on
+# purpose: the negative receipt itself contains that word.
+case "$A70F" in *"NOT RECORDED"*) ;; *) A70F_MISS="$A70F_MISS [no-negative-receipt]" ;; esac
+[ "$(printf '%s\n' "$A70F" | grep -c '^RECORDED ' || true)" = "0" ] || A70F_MISS="$A70F_MISS [claims-a-record]"
+[ "$(printf '%s\n' "$A70F" | tr '\\' '/' | grep -c '/edges/' || true)" = "0" ] || A70F_MISS="$A70F_MISS [names-a-ledger-file]"
+if [ -z "$A70F_MISS" ]; then
+  check "L70d an unwritable ledger renders a negative receipt plus the guidance, then refuses non-zero" PASS
+else
+  check "L70d unwritable-ledger guidance:$A70F_MISS (rc=$A70F_RC)" FAIL
+fi
+# THE MACHINE CARRIER ON THE SAME PATH. `trail()` folds stderr into stdout, which is what
+# lets L70d see the refusal but would also make the JSON unparseable, so this one drops
+# stderr and invokes directly -- carrying `env -u CLAUDE_CONFIG_DIR` like every other
+# invocation in this suite, so L28's single-exemption count is unchanged. Without it the
+# `--json` carrier had no case at all on the failure path: L70b is json+success and L70d
+# is text+failure, and the branch that serves both was added in the same round.
+A70FJ_RC=0
+A70FJ="$( ( cd "$SELF_CWD" 2>/dev/null || cd "$FAKE"
+  HOME="$FAKE" USERPROFILE="$FAKE" ZENSU_CCD_STORE="$STORE" \
+  CLAUDE_CODE_SESSION_ID="$SID_C" CLAUDE_PID="$LIVE_PID" CLAUDE_CODE_HOST_SESSION_ID="local_host-$SID_C" \
+  env -u CLAUDE_CONFIG_DIR node "$TRAIL_MJS" adopt "$SID_A" --all --json --config-dir "$CFG" 2>/dev/null ) )" || A70FJ_RC=$?
+A70FJ_MISS=""
+[ "$(jq_field "$A70FJ" recorded)" = "null" ] || A70FJ_MISS="$A70FJ_MISS [recorded-not-null($(jq_field "$A70FJ" recorded))]"
+[ "$(jq_field "$A70FJ" skipped)" != "ABSENT" ] || A70FJ_MISS="$A70FJ_MISS [no-skipped-field]"
+case "$(jq_field "$A70FJ" worktreeAdvice)" in
+  *"apply --stat"*) ;;
+  *) A70FJ_MISS="$A70FJ_MISS [no-advice]" ;;
+esac
+case "$A70FJ" in *"WHERE    for"*) A70FJ_MISS="$A70FJ_MISS [prose-leaked-into-json]" ;; esac
+# The EXIT STATUS, or "prints the payload, then returns 0" passes: replacing the catch
+# arm's `fail()` with a bare `return` would leave every needle above green while a tool
+# driving `adopt --json` read success for a handover that was never recorded. The text
+# carrier pins the same property at `[exited-zero]` in L70d.
+[ "$A70FJ_RC" != "0" ] || A70FJ_MISS="$A70FJ_MISS [exited-zero]"
+if [ -z "$A70FJ_MISS" ]; then
+  check "L70f adopt --json stays parseable on a failed ledger write and still carries the advice" PASS
+else
+  check "L70f adopt --json on a failed write:$A70FJ_MISS" FAIL
+fi
+rm -f "$CFG/zensu"
+reset_ledger
+# DISCRIMINATOR, not decoration: `show` deliberately passes `carryOver: false` because it
+# renders a survey. Without this, L70's carry-over needle could be satisfied by a string
+# every advice carrier emits, and a change that gave `show` the full recipe -- undoing the
+# reason that option exists -- would go unnoticed here.
+SHOW_OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" show "$SID_A" --all --no-git)"
+case "$SHOW_OUT" in
+  *"apply --stat"*) check "L70c-control show still withholds the carry-over recipe from its survey view" FAIL ;;
+  *"git worktree add"*) check "L70c-control show prints the decision half and withholds the carry-over recipe" PASS ;;
+  *) check "L70c-control show prints the decision half (no create recipe found, so L70's needles prove nothing)" FAIL ;;
+esac
+reset_ledger
+# -- L70g -- the GONE leg, which no other adopt fixture reaches --------------
+# `printWhereAdvice` renders the placeholder mapping on the PRESENT leg only: there the
+# recorded path IS the substitution value, while the gone-leg advice body tells the
+# reader to substitute a DIFFERENT root ("run it against the root that still exists,
+# substituting it for <their worktree>, rather than against the path recorded here").
+# BOTH directions are asserted, and the second is the one that matters: without it an
+# unconditional mapping -- the shape this split exists to reject -- satisfies the check
+# exactly as it satisfies L70.
+reset_ledger
+A70G_RC=0
+A70G="$(trail "$STORE" "$SID_C" "$LIVE_PID" adopt "$SID_H" --all)" || A70G_RC=$?
+A70G_MISS=""
+# WHICH CARRIER produced the lines below, asserted before any of them is read. The gone leg
+# is about the recorded WORKTREE, never about the ledger, so this fixture must land on the
+# SUCCESS receipt -- and `printWhereAdvice` is called identically from that receipt and from
+# the catch branch's NOT RECORDED one, so every needle after this point is emitted on both
+# paths. Without these two arms an unwritable ledger would satisfy the whole check and it
+# would grade a failure carrier as a gone-leg render: the vacuous shape L70d's own
+# `[claims-a-record]`/`[exited-zero]` pair exists to reject, one fixture over. `^RECORDED `
+# is line-anchored for the reason L70d gives -- the negative receipt contains that word too.
+[ "$(printf '%s\n' "$A70G" | grep -c '^RECORDED ' || true)" = "1" ] || A70G_MISS="$A70G_MISS [not-the-success-carrier]"
+[ "$A70G_RC" = "0" ] || A70G_MISS="$A70G_MISS [exited-nonzero]"
+case "$A70G" in *"!! MISSING"*) ;; *) A70G_MISS="$A70G_MISS [no-missing-qualifier]" ;; esac
+case "$A70G" in *"'<their worktree>' = "*) A70G_MISS="$A70G_MISS [present-leg-mapping-on-gone-leg]" ;; esac
+case "$A70G" in *"Replace the placeholder"*) A70G_MISS="$A70G_MISS [present-leg-instruction-on-gone-leg]" ;; esac
+# And the gone leg names the recorded path in its OWN shape. Withholding the mapping is
+# only half the rule: this leg's advice body tells the reader to act "rather than against
+# the path recorded here" and to read that path first, so with no path on the carrier the
+# nearest antecedent was the receipt's `worktree:` line one row below -- the TAKER's tree.
+# The label is what makes it safe to render: nothing quotes it into a shell word, so it is
+# not a substitution operand and cannot be pasted into the recipe by mistake.
+case "$A70G" in *"recorded worktree (gone) = "*) ;; *) A70G_MISS="$A70G_MISS [no-gone-leg-recorded-path]" ;; esac
+# THE VALUE, not just the label. The arm above stops matching at the `= `, so a producer
+# that renders `flatPath(edge.to.worktree)` -- the TAKER's tree, which is the exact
+# wrong-antecedent condition this line exists to remove, and `edge` IS in scope there --
+# satisfies it, and so does deleting the interpolation and leaving a bare label. This
+# fixture is the one place in the suite where the two trees are distinguishable: `$SID_H`
+# was deliberately given its own worktree name (`goneleg`) while `$SELF_CWD` is
+# `handover`, which is why L70's own `[mapping-names-no-worktree]` documents itself as
+# unable to make this distinction and this check can.
+case "$A70G" in *"recorded worktree (gone) = "*goneleg*) ;; *) A70G_MISS="$A70G_MISS [gone-leg-path-is-not-the-source-worktree]" ;; esac
+case "$A70G" in *"recorded worktree (gone) = "*handover*) A70G_MISS="$A70G_MISS [gone-leg-path-names-the-taker]" ;; esac
+# The gone leg still renders its OWN create recipe, so an empty or failed render cannot
+# pass the two absence arms above by rendering nothing at all.
+case "$A70G" in *"git worktree add"*) ;; *) A70G_MISS="$A70G_MISS [no-create-recipe]" ;; esac
+# And the fixture really is on the gone leg rather than merely unresolved. The needle is
+# the `active.gone` lead specifically: `$SID_H` is never archived, so the arm is `active`,
+# and the `survivor.gone` wording ("the recorded directory is not readable from") belongs
+# to a different arm — using it here reported a correct gone-leg render as a failure.
+case "$A70G" in *"This session is not archived, and the recorded directory is gone"*) ;; *) A70G_MISS="$A70G_MISS [not-the-gone-leg]" ;; esac
+if [ -z "$A70G_MISS" ]; then
+  check "L70g the gone leg records, then carries the MISSING qualifier and withholds the present-leg mapping" PASS
+else
+  check "L70g gone-leg rendering:$A70G_MISS (rc=$A70G_RC)" FAIL
+fi
+reset_ledger
 
 # -- L28/L29 -- the suite's own isolation, scanned rather than assumed ------
 # `--config-dir` already outranks CLAUDE_CONFIG_DIR in resolveRoots, so the unset

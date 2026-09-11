@@ -701,8 +701,9 @@ const CONTROL_RUN = /(?:[\u0000-\u0008\u000a-\u001f\u007f-\u009f\u2028\u2029]|\p
 // `\v`. `CONTROL_RUN` is the shared class — every C0 and C1 control except TAB,
 // plus U+2028/U+2029 — and ordinary spaces are deliberately NOT collapsed, which
 // is what keeps the spelling comparable. Applied directly by every PLAIN-TEXT
-// renderer — `show`, `list`, `limited`, `instances` and `resolve`'s
-// ambiguous-candidate list — and reached by both BRIEF carriers too: `briefPath`
+// renderer — `show`, `list`, `limited`, `instances`, `resolve`'s
+// ambiguous-candidate list, and `adopt`'s NOT RECORDED negative receipt, which
+// interpolates the ledger writer's own message — and reached by both BRIEF carriers too: `briefPath`
 // and `briefShellArg` each route through it before applying their own bound. An
 // earlier spelling of this note claimed the class was "never [used] by a brief",
 // and that gap was the defect: the persisted artifact was the one carrier without
@@ -734,9 +735,14 @@ function flatPath(p) {
 // the same brief and a reader could not tell which spelling is real. (The handoff
 // brief's bullet and its operand are deliberately different values — `r.wt` vs
 // `r.cwd` — so there the harm is simply that the operand is not the path.)
-// All FIVE runnable lines use `briefShellArg` — the two brief ones, the two
-// `printResume` prints, which flow 3 names as the remedy for a blocked commit, and the
-// one `continuationPlan` renders on its `already-contained` branch.
+// All FIVE runnable REACH-A-WORKTREE lines use `briefShellArg` — the two brief ones,
+// the two `printResume` prints, which flow 3 names as the remedy for a blocked commit,
+// and the one `continuationPlan` renders on its `already-contained` branch. State the
+// FAMILY or the count means nothing: the operator carrier `SKILL.md` scopes the same
+// census to "the runnable `cd -- <cwd> && claude --resume <id>` lines", and this file
+// renders further runnable `briefShellArg` commands outside it — `continuationPlan`'s
+// four `git -C …` lines, which operate ON a worktree rather than entering one. They are
+// bound by the same no-clip rule and are enumerated in the carrier census below.
 // `CONTROL_RUN` FIRST, then `oneLine`. The two bounds are not interchangeable and
 // neither subsumes the other: `oneLine` collapses `/\s+/`, and JS `\s` is only the
 // line-break class plus a few spaces — it does not cover ESC, the rest of C0, DEL
@@ -750,13 +756,62 @@ function briefPath(p) {
   return oneLine(String(p == null ? '' : p).replace(CONTROL_RUN, ' '), 200).replace(/`/g, "'") || '(unknown)';
 }
 
-// The FIVE carriers that must stay UNCLIPPED and be safe to paste: the takeover
-// brief's `## How to continue` step 1 and the handoff brief's `## Continue this
-// work` block, both inside a ```bash fence, `printResume`'s two `show` prints,
-// which are plain terminal output, and `continuationPlan`'s `already-contained`
-// line, which reaches the same `show` output. The skill tells a reader all five are
-// runnable. (Counting by `claude --resume` alone finds four — the takeover brief's
-// fence is a bare `cd`, which is exactly as paste-critical.) Single-quoting is what neutralizes `$( )`, `;`, `&&` and
+// The TWELVE carriers that must stay UNCLIPPED and be safe to paste, in THREE classes.
+// The count moved from SIX in one round because the enumeration named `continuationPlan`
+// once and that function renders SEVEN carriers: 6 − 1 + 7 = 12, which is the only
+// arithmetic that reconciles. Saying "six" there is what a first draft wrote, and it
+// leaves the total unreachable by one.
+//
+// THE CONTROL IS A DERIVED SCAN, and this prose is no longer the only one. The case
+// `the briefShellArg carrier population is derived, and a thirteenth carrier fails here`
+// in `tests/structure/worktree-advice-v1.test.js` walks this file, resolves a binding back
+// to its `briefShellArg` initializer, attributes every carrier to its enclosing function
+// through the same `enclosing()` walk the `adviceLeg` roster uses, and asserts THREE
+// things: the per-function roster, the (a)/(b)/(c) split below, and that at least one
+// carrier is reachable ONLY through a binding — the last so the binding resolution cannot
+// decay into decoration while the roster is quietly lowered to match. A thirteenth carrier
+// fails there,
+// and so does one that merely MOVES between classes. Keep that expectation and this census
+// in step; the failure message prints the derived table so the moved line names itself.
+//
+// CHECKING IT BY GREP TAKES TWO PATTERNS, and the obvious one alone under-reports in BOTH
+// directions. `grep -n 'briefShellArg(' ` misses class (c)'s two `continuationPlan`
+// mappings entirely — they interpolate the `S` and `T` bindings and carry no
+// `briefShellArg(` text at all — while returning hits that are NOT carriers: the
+// definition, the three `const A`/`S`/`T` binding lines, and every line of THIS comment
+// block that carries the literal in prose — TWO today, SIX non-carriers in total. Do not
+// trust that subtrahend: it moves whenever this paragraph is reworded, which is exactly
+// how the previous spelling came to say "five" while three comment lines matched. The
+// derived scan named above is the control; this grep is a spot-check. Use
+// `grep -nE 'briefShellArg\(|\$\{[ST]\}' ` and subtract those seven.
+//
+// (a) REACH-A-WORKTREE lines, FIVE — the takeover brief's `## How to continue` step 1
+// and the handoff brief's `## Continue this work` block, both inside a ```bash fence,
+// `printResume`'s two `show` prints, which are plain terminal output, and
+// `continuationPlan`'s `already-contained` line, which reaches the same `show` output.
+// This is the class the runnable-lines sentence above counts. (Counting by
+// `claude --resume` alone finds four — the takeover brief's fence is a bare `cd`, which
+// is exactly as paste-critical.)
+//
+// (b) OPERATE-ON-A-WORKTREE commands, FOUR, all in `continuationPlan` and all reaching
+// the same `show` output through `cont.lines`: the `branch-unresolved` arm's
+// `git -C … rev-parse HEAD`, the `source-toplevel-unresolved` arm's
+// `git -C … rev-parse --show-toplevel`, and the `ready` block's `git -C … check-ignore`
+// and `git -C … worktree add -b … -- <target>`. The last is why this class cannot be
+// dropped from the roster: a clip on its target operand creates the continuation
+// worktree at a shorter path git accepts.
+//
+// (c) PLACEHOLDER MAPPINGS, THREE — `continuationPlan`'s `'<their worktree>' = …` and
+// `'<your new worktree>' = …`, and `cmdAdopt`'s `'<their worktree>' = …`, which reaches
+// both of that verb's text carriers. These are not runnable lines at all: each is the
+// OPERAND a reader pastes into one of the commands above, replacing the placeholder
+// together with its quotes, so it needs this rule's quoting and its no-clip bound while
+// belonging to no count of runnable lines. `cmdAdopt`'s own comment says this shape is
+// the one `continuationPlan` already uses — so the class had two members before that
+// verb added a third, and a census naming only the newest one contradicts it.
+//
+// Extend the right class when a renderer is added, and amend the runnable-lines sentence
+// above only for class (a). Single-quoting is what neutralizes `$( )`, `;`, `&&` and
 // `|` — the metacharacters `briefPath`'s backtick swap leaves live — and the
 // POSIX `'\''` idiom closes and reopens the quote around an embedded apostrophe.
 // No length clip: a shortened path is a DIFFERENT path that `cd` still accepts.
@@ -2506,7 +2561,8 @@ function siblings(opts, row) {
 // removes the only thing that kept it.
 //
 // EVERY command line is indented two spaces and every prose line starts at column
-// zero, because `adviceBlock` fences on exactly that shape for both briefs.
+// zero, because `adviceBlock` fences on exactly that shape for every one of its
+// callers — the two persisted briefs and the `adopt` receipt.
 //
 // COUPLED CARRIER: `skills/session-trail/SKILL.md` flow 3 step 4 restates this
 // recipe for the model, in a fenced block of its own. It is a hand-copy — the two
@@ -2795,11 +2851,13 @@ const ADVICE_LEADS = {
   },
 };
 
-// ONE implementation of the leg decision, because it has THREE consumers and they must not
+// ONE implementation of the leg decision, because it has FOUR consumers and they must not
 // drift: `worktreeAdvice` picks its lead AND its body from it, `cmdShow` decides from the
 // same answer whether to print the pointer at the carry-over recipe its survey view
-// withholds, and `printResume` decides whether to print its own copy of the gone-leg create
-// command. Every one of those was a hand-written `r.cwdExists` at some point, and one of them
+// withholds, `printResume` decides whether to print its own copy of the gone-leg create
+// command, and `cmdAdopt`'s `printWhereAdvice` decides whether to render the placeholder
+// mapping at all — the present leg is the only one where the recorded path IS the
+// substitution value. Every one of those was a hand-written `r.cwdExists` at some point, and one of them
 // drifted INSIDE this function — the lead came from here while the body came from a raw
 // re-derivation, which would have emitted a gone lead above a present body. No fixture
 // renders a gone-leg `show`, so nothing would have caught the `cmdShow` half either. Before
@@ -2836,6 +2894,34 @@ function adviceLeg(r) { return r.cwdExists ? 'present' : 'gone'; }
 // whole thing by default, and a new caller that forgets the option gets more rather than
 // less. On the gone leg there is no carry-over half at all, so the option changes nothing
 // there.
+//
+// THREE kinds of caller, not two, and the third is why this sentence is here rather than
+// left to be inferred from the option's name: `cmdAdopt` is a CONFIRMATION, neither a
+// brief nor a survey, and it takes the default. By the time that verb runs the directory
+// is already chosen, so the decision half is a check on a choice already made while the
+// carry-over half is the one still actionable — which is the whole reason it renders this
+// at all. `adopt` was the ONE route that rendered neither.
+//
+// INPUT CONTRACT, stated because the callers no longer agree on the row's shape and the
+// agreement they DO have is accidental. `cmdShow`, `cmdTakeover` and `cmdHandoff` pass
+// `hydrate(resolve(...))`; `cmdAdopt` passes the bare `resolve(...)` row. This function
+// and `adviceLeg` read exactly four fields — `app`, `ccdStore`, `live`, `cwdExists` —
+// and all four are written by `buildIndex`'s row literal, which `hydrate` never touches:
+// `summarize()` emits none of them. So a `resolve()` row is sufficient TODAY. It is not
+// sufficient by construction: the moment an arm reads a `summarize`-supplied field —
+// `branch`, `title`, `mode` — the two call shapes start answering differently about the
+// same session with every suite green, which is the exact defect the `cwd`-after-spread
+// comment in `buildIndex` records. Read a fifth field here and either hydrate in
+// `cmdAdopt` or move the field into the row literal.
+//
+// The CONTRACT IS THE ADVICE SURFACE'S, and the four-field count is only this function's
+// half of it. `cmdAdopt`'s `printWhereAdvice` renders beside this array off the SAME
+// unhydrated row and reads two more — `wt` and `sessionId`. Both are row-literal fields
+// and neither is a `summarize` key: the `cwd`-after-spread comment in `buildIndex` states
+// outright that `summarize` has no `wt` key, which is exactly what let a null `cwd` hide
+// behind a correct `r.wt` there. So the bare row is sufficient for those two on the same
+// ground rather than by a separate argument, and the instruction above is the one to
+// follow for a SEVENTH field, wherever on this surface it is read.
 function worktreeAdvice(r, options = {}) {
   const withCarryOver = options.carryOver !== false;
   const archived = r.app ? r.app.archived === true : null;
@@ -2925,8 +3011,9 @@ function worktreeAdvice(r, options = {}) {
 //
 // The rule is structural, so it cuts both ways and the SECOND direction is the one a
 // reader has to hold: a prose line that acquires a two-space lead-in becomes a fenced
-// command in two persisted briefs. `WT8p` grades both directions rather than matching
-// a list of known verbs, which is what a hand-kept allowlist could not do.
+// command in every `adviceBlock` caller — the two persisted briefs and the `adopt`
+// receipt. `WT8p` grades both directions rather than matching a list of known verbs,
+// which is what a hand-kept allowlist could not do.
 //
 // Named for `worktreeAdvice` rather than `ADVICE`: that shorter prefix is taken by the
 // per-verdict doctrine dictionary further up, and a grep for it should not return two
@@ -3368,16 +3455,21 @@ function cmdShow(opts) {
   // whether taking over is safe, `writesLines` whether you may write there, and
   // this whether the directory will still exist while you do.
   print('');
-  // The DECISION half only. This is a survey view — nine-space prefix, no fence — and
-  // the carry-over recipe is dozens of lines of paste-and-run text whose home is a persisted
-  // brief. Dumping it here cost `show` the one property it has, which is that you can
-  // scan it. The `--json` payload above is NOT summarized: it is a data carrier.
+  // The DECISION half only, and the criterion is SURVEY versus ACTIONABLE rather than
+  // anything about where the recipe belongs — `cmdAdopt` prints it to a terminal, so
+  // "whose home is a persisted brief" stopped being true the moment that caller landed.
+  // This is a survey view — nine-space prefix, no fence — and the carry-over recipe is
+  // dozens of lines of paste-and-run text. Dumping it here cost `show` the one property
+  // it has, which is that you can scan it. The `--json` payload above is NOT summarized:
+  // it is a data carrier.
   const wtAdvice = worktreeAdvice(r, { carryOver: false });
   print(`WHERE    ${wtAdvice[0]}`);
   for (const advice of wtAdvice.slice(1)) print(`         ${advice}`);
   if (adviceLeg(r) === 'present') {
     print('         The uncommitted half needs a carry-over recipe this view does not print.');
     print('         Run handoff or takeover for it — those write a brief you paste from.');
+    print('         adopt prints it too, but that verb also writes a machine-wide ledger');
+    print('         edge, so it is not a read-only route to the recipe.');
   }
   for (const line of writesLines(w)) print(line);
   // BELOW `writesLines`, and never inside it. The verdict suite reads that block with
@@ -4011,14 +4103,142 @@ function cmdAdopt(opts) {
   const edge = buildEdge(row, me, opts.reason || 'manual', 'adopt', 'confirmed', nowStamp());
   // Guarded exactly as the takeover path is: the same unwritable-ledger condition
   // must not kill one verb with a stack trace while its sibling reports it.
+  // ONE renderer for both TEXT carriers. The head and its `adviceBlock` loop were
+  // hand-copied into the failure and the success path, and only the success copy's
+  // content was graded — a reword of the other would have gone green. It stays a
+  // FUNCTION rather than a hoisted array: `worktreeAdvice` is still called at render
+  // time on whichever carrier runs, which is the ordering the receipt-first rule below
+  // depends on.
+  //
+  // `briefShellArg`, not `flatPath`, because the value is pasted into a shell word: a
+  // path holding an apostrophe closes the recipe's quoting at substitution time, and the
+  // `'\''` idiom is what this file's own doctrine calls the answer everywhere it
+  // substitutes a path itself.
+  //
+  // It is rendered as a PLACEHOLDER MAPPING and not as a parenthesised value, which is
+  // the shape `continuationPlan` already uses and states the reason for: the recipe's
+  // operand is ALREADY quoted (`git -C '<their worktree>'`), and `briefShellArg` brings
+  // its own quotes, so a reader who replaces the bare token inside those quotes produces
+  // `''/path''` — two quoted words back to back, which the shell joins into ONE
+  // UNQUOTED word, reinstating the word-splitting the quoting existed to prevent.
+  // Writing `'<their worktree>' = '/path'` makes the unit of substitution the whole
+  // quoted token, which is the only spelling that composes correctly.
+  //
+  // The `!! MISSING` qualifier is `cmdShow`'s SPELLING and only `cmdShow`'s. Both briefs
+  // carry the same CONDITION in the markdown spelling `**MISSING**`, because a brief is
+  // markdown and `!!` is not a mark there. Saying this mirrors `cmdTakeover` named a
+  // literal that verb does not carry, and sent a maintainer grepping for a needle that is
+  // in neither brief. On the gone leg `row.wt` is the raw recorded cwd and may be a
+  // subdirectory.
+  //
+  // The MAPPING is PRESENT-LEG ONLY, and that is not cosmetic. `row.wt` is the right
+  // substitution value only there. On the gone leg the advice body says to run the
+  // carry-over "against the root that still exists, substituting it for
+  // <their worktree>, rather than against the path recorded here" — so an unconditional
+  // mapping told the reader to substitute exactly the path the body two lines below it
+  // forbids.
+  //
+  // The gone leg gets a LABELLED recorded path instead, and the earlier "no replacement
+  // text" answer was wrong about its own premise rather than merely terse. It argued
+  // that a labelled value would have nothing to substitute it into — true of
+  // SUBSTITUTION, and beside the point, because the gone-leg body NAMES that value
+  // twice: it tells the reader to act "rather than against the path recorded here" and
+  // that "that path comes out of another session's transcript, so read it before you act
+  // on it". With no path on the carrier the nearest antecedent was the receipt's own
+  // `edge.to.worktree` one line below, which is the TAKER's tree — the exact
+  // wrong-antecedent condition the `WHERE` head exists to remove. Every other carrier of
+  // this array supplies the referent (`cmdShow`'s `WORKTREE` row, both briefs'
+  // `- worktree:` bullet); `adopt` was the first that did not, and the `!! MISSING`
+  // qualifier alone marks the absence without naming what is absent.
+  //
+  // It is `flatPath` and NOT `briefShellArg`, and the LABEL is what earns that: nothing
+  // on this leg quotes the value into a shell word, so the pasteable-operand rule does
+  // not reach it and it stays off the `briefShellArg` carrier census, which sits ABOVE
+  // this function, beside `briefPath`. "Below" is where this sentence pointed for a
+  // round — roughly 3300 lines the wrong way, into a file with no second census to find.
+  //
+  // The leg comes from `adviceLeg`, not from a raw `row.cwdExists`: that function's own
+  // header records a drift INSIDE `worktreeAdvice` from exactly such a re-derivation and
+  // says to grep `cwdExists` before adding a renderer that depends on the leg.
+  const printWhereAdvice = () => {
+    const leg = adviceLeg(row);
+    print(`WHERE    for ${sessionTag(row.sessionId)}${leg === 'present' ? '' : '   !! MISSING'}:`);
+    if (leg === 'present') {
+      print(`           '<their worktree>' = ${briefShellArg(row.wt)}`);
+      print('           Replace the placeholder TOGETHER WITH the quotes around it.');
+    } else {
+      print(`           recorded worktree (gone) = ${flatPath(row.wt)}`);
+    }
+    for (const line of adviceBlock(worktreeAdvice(row), '  ', '  ')) print(line);
+  };
   let file;
   try { file = ledgerWrite(edge); } catch (e) {
-    fail(`could not record the handover: ${e && e.message ? e.message : 'write failed'}`);
+    const why = e && e.message ? e.message : 'write failed';
+    // The guidance is rendered BEFORE the refusal, not instead of it: the uncommitted
+    // half is left behind whether or not a record was minted, and a privacy opt-out
+    // must not also opt out of being told so — `ZENSU_SESSION_LINEAGE=off` throws here
+    // by design, so this branch is reachable by configuration and not only by I/O error.
+    // `fail()` flushes the buffer and then exits non-zero, so the exit status, the
+    // stderr cause and the "no edge was written" property are all unchanged.
+    //
+    // The JSON carrier gets a PAYLOAD, never the prose. `skippedNote`'s own gate exists
+    // because trailing prose turns a degraded-but-parseable answer into a hard
+    // JSON.parse failure, and this payload carries `skipped` for the same reason every
+    // other one does — `SKIPPED` can be non-zero here, since `resolve()` ran first.
+    if (opts.json) {
+      print(JSON.stringify({ recorded: null, file: null, error: why, worktreeAdvice: worktreeAdvice(row), skipped: SKIPPED }, null, 2));
+      fail(`could not record the handover: ${why}`);
+    }
+    // A NEGATIVE receipt occupies the receipt slot. Without it this path was
+    // byte-identical to a success from the head down while the refusal lived on stderr
+    // alone, so `adopt 2>/dev/null` read as a recorded handover.
+    // `flatPath(why)`: this is the only line here interpolating an error message, and
+    // `ledgerWrite`'s messages carry filesystem text. A CSI run in it would overwrite the
+    // very row this negative receipt exists to make unmistakable. The `--json` arm above
+    // needs no bound — `JSON.stringify` escapes controls.
+    print(`NOT RECORDED  ${sessionTag(row.sessionId)} → ${sessionTag(me.sessionId)} — ${flatPath(why)}`);
+    print('');
+    printWhereAdvice();
+    fail(`could not record the handover: ${why}`);
   }
-  if (opts.json) return print(JSON.stringify({ recorded: edge, file, skipped: SKIPPED }, null, 2));
+  // WHERE the work continues, and what a `git worktree add` does not carry. `adopt` was
+  // the ONE route that rendered neither: `takeover` and `handoff` write the advice into
+  // their briefs and `show` prints its decision half, while this verb — the documented
+  // fallback for a handover taken some other way — printed only its receipt. Measured on
+  // a real ledger edge carrying `recordedBy: "adopt"`: the taking session continued in a
+  // worktree of its own, which SKILL.md flow 3 step 4 allows, and left the source tree's
+  // uncommitted changes behind, which nothing on this route had told it about.
+  //
+  // The FULL advice, carry-over included, unlike `cmdShow`, which passes
+  // `carryOver: false` because it renders a survey. This verb is a confirmation: by the
+  // time it runs the directory is already chosen, so the decision half is a check on a
+  // choice already made, while the carry-over half is the one still actionable.
+  if (opts.json) return print(JSON.stringify({ recorded: edge, file, worktreeAdvice: worktreeAdvice(row), skipped: SKIPPED }, null, 2));
   print(`RECORDED  ${sessionTag(row.sessionId)} (${endpointLabel(edge.from)}) → ${sessionTag(me.sessionId)} (${endpointLabel(edge.to)})`);
   print(`          reason: ${edge.reason}   worktree: ${edge.to.worktree || '(unknown)'}`);
   print(`          ${path.join(LEDGER_DIR, file ? path.basename(file) : '')}`);
+  // Computed AFTER the receipt is in the buffer, and deliberately not hoisted into a
+  // variable shared with the branch above. `worktreeAdvice` can `fail()` on an advice
+  // cell it cannot resolve, `fail()` flushes the buffer, and the ledger edge has already
+  // landed by this point — so on THIS carrier the receipt naming that record still
+  // reaches stdout. It is the same hazard `worktreeAdvice`'s own header records for
+  // `cmdTakeover`, and the `--json` branch above carries it unchanged: there the receipt
+  // lives inside the payload, so a render fault loses it exactly as it already does for
+  // `show` and `takeover`. Through `adviceBlock` rather than a prefix loop, because the
+  // carry-over recipe's paste-unit split — the destructive `git apply` alone in its own
+  // fence, away from the two read steps above it — is a property of that renderer and
+  // not of the array. `cmdShow` is the deliberate exception on both counts: it is a
+  // survey view, nine-space prefix and no fence.
+  //
+  // The `WHERE` head names the SOURCE session and its recorded worktree, and it is not
+  // decoration: the receipt above it ends on `edge.to.worktree`, which is the TAKER's
+  // tree, so the nearest antecedent to the advice was the wrong one. It is also the
+  // operand the recipe's own gate needs — "If it is a worktree you would not cd into, do
+  // not run this at all" is unperformable against a `<their worktree>` placeholder, and
+  // both brief carriers supply the value on a `- worktree:` line. Rendered through the
+  // ONE `printWhereAdvice` above rather than a second hand-copy of those two lines.
+  print('');
+  printWhereAdvice();
 }
 
 function lineageDiagnose(opts) {
@@ -4683,9 +4903,17 @@ const COMMAND_FLAGS = {
   // `--days` is deliberately absent: the listing branch reads `opts.all` and
   // `opts.repo` and nothing else from the scan set.
   lineage: ['--diagnose', '--backfill', '--forget', '--where', '--apply', '--all', '--repo'],
-  // `adopt` IS the record, so `--no-record` would leave a verb whose entire
-  // output is suppressed. It used to be accepted and then ignored, which wrote the
-  // machine-wide record the flag said it was skipping.
+  // `--no-record` is REFUSED here, and the reason had to be restated: "that verb's
+  // entire output is the record" stopped being true the moment `adopt` began rendering
+  // the destination guidance, which is output the flag has no business suppressing. The
+  // surviving reason is the historical one — it used to be accepted and then IGNORED,
+  // which wrote the machine-wide record the flag said it was skipping — and a refusal is
+  // the safe resting place for a flag whose meaning on this verb is now ambiguous.
+  // NAMED FOLLOW-UP, not taken here: accept-and-HONOUR is coherent now (print the head
+  // and the advice, write no edge, exit 0) and would give a user who wants the guidance
+  // without a permanent machine-wide record something narrower than the process-global
+  // `ZENSU_SESSION_LINEAGE=off`. It changes a documented flag contract with its own pins
+  // (`L56c`/`L56d`), so it belongs in its own change rather than inside this one.
   adopt: ['--reason', ...SCAN_FLAGS],
   // No selector scan at all: a label is keyed by account or window, so `resolve()` is
   // never reached and none of the scan flags decides anything here.

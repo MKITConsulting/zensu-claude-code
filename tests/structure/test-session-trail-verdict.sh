@@ -82,7 +82,7 @@ case "$WT_UNIT_PASS" in ''|*[!0-9]*) WT_UNIT_PASS=0 ;; esac
 # EXACT, not a floor, and hand-maintained on purpose: a floor accepts a case that
 # quietly started skipping itself, and deriving the number from the file under test
 # would make the check agree with whatever that file currently says.
-WT_UNIT_TOTAL_WANT=42
+WT_UNIT_TOTAL_WANT=43
 if [ "$WT_UNIT_RC" = "0" ] && [ "$WT_UNIT_TOTAL" = "$WT_UNIT_TOTAL_WANT" ] && [ "$WT_UNIT_PASS" = "$WT_UNIT_TOTAL_WANT" ]; then
   check "WT-unit worktree-advice-v1.test.js passes ($WT_UNIT_PASS/$WT_UNIT_TOTAL cases)" PASS
 else

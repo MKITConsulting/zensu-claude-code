@@ -525,15 +525,18 @@ test('the emitted rationale describes the bound the command actually uses', () =
     'the reason the chain uses && rather than exit is stated in SKILL.md and not here');
 });
 
-// ONE decision, THREE consumers — the same count `trail.mjs`'s own header and CLAUDE.md
-// carry, and the same three the renderer test below enumerates (`no renderer re-derives the
-// leg by hand`). `worktreeAdvice` picks its lead AND its
+// ONE decision, FOUR consumers — the same count `trail.mjs`'s own header and CLAUDE.md
+// carry. The renderer test below (`no renderer re-derives the leg by hand`) enumerates only
+// THREE of them; `cmdAdopt` is the fourth and is graded by the derived-population check
+// further down and by nothing else. `worktreeAdvice` picks its lead AND its
 // body from it (those two drifted apart inside one function once, which is how a gone lead
 // came to sit above a present body); `cmdShow` decides from the same answer whether to print
 // its "the recipe is not in this view" pointer, and it would otherwise print that pointer on
 // an arm that emits no carry-over, which no fixture would catch because none renders a
-// gone-leg `show`; and `printResume` decides whether to print its own copy of the gone-leg
-// create command.
+// gone-leg `show`; `printResume` decides whether to print its own copy of the gone-leg
+// create command; and `cmdAdopt`'s `printWhereAdvice` decides whether to render the
+// `'<their worktree>' = …` mapping line at all, the recorded path being the substitution
+// value on the present leg only.
 test('the leg decision has one implementation, and it answers both legs', () => {
   assert.equal(typeof mod.adviceLeg, 'function');
   assert.equal(mod.adviceLeg(rec()), 'present');
@@ -574,9 +577,9 @@ test('no renderer re-derives the leg by hand', () => {
     'cmdShow re-derives the leg by hand inside the WHERE block');
 });
 
-// The population is DERIVED, not counted. "Three consumers" is asserted in prose in three
+// The population is DERIVED, not counted. "Four consumers" is asserted in prose in three
 // carriers — this file, `trail.mjs`'s own header and CLAUDE.md — and the renderer scan above
-// grades only renderers it NAMES, so a fourth consumer that uses `adviceLeg` correctly would
+// grades only renderers it NAMES, so a fifth consumer that uses `adviceLeg` correctly would
 // leave all three prose copies stale with every check green. Scanning the call sites and
 // comparing the SET is the repo's own idiom for exactly this (`T36-control` derives its
 // citation population by scanning both documents rather than counting its own rows).
@@ -590,7 +593,7 @@ test('no renderer re-derives the leg by hand', () => {
 // status and display sites, which is why `cmdShow` is already excluded by hand above. The
 // standing instruction is prose, in `trail.mjs`'s header and in CLAUDE.md: before adding a
 // renderer that depends on the leg, grep `cwdExists`.
-test('the adviceLeg consumer set is exactly the three the carriers name', () => {
+test('the adviceLeg consumer set is exactly the four the carriers name', () => {
   const src = fs.readFileSync(new URL('../../skills/session-trail/scripts/trail.mjs', import.meta.url), 'utf8');
   const lines = src.split('\n');
   // The walk STOPS at a column-zero `}`. Without that it never sees a function END, so a
@@ -613,9 +616,108 @@ test('the adviceLeg consumer set is exactly the three the carriers name', () => 
     if (/^function adviceLeg\b/.test(l) || l.trim().startsWith('//') || l.startsWith('export ')) return;
     callers.add(enclosing(i));
   });
-  assert.deepEqual([...callers].sort(), ['cmdShow', 'printResume', 'worktreeAdvice'],
+  // `cmdAdopt` joined with the adopt-advice route: its `printWhereAdvice` renders the
+  // placeholder mapping on the PRESENT leg only, because that is the only leg where the
+  // recorded path IS the substitution value.
+  assert.deepEqual([...callers].sort(), ['cmdAdopt', 'cmdShow', 'printResume', 'worktreeAdvice'],
     'the adviceLeg consumer set moved — update the count and the roster in trail.mjs\'s header, '
     + 'in this file\'s header and in CLAUDE.md §"Takeover Destination" together');
+});
+
+// The `briefShellArg` CARRIER POPULATION, derived rather than counted. The census above
+// `briefShellArg` in `trail.mjs` points HERE by name and states the same arithmetic this case
+// asserts; before this walk existed, seven of the twelve carriers were held by that prose
+// alone. The obvious `grep 'briefShellArg('` cannot close it either: TWO carriers interpolate
+// a binding (`${S}`, `${T}`) and carry no call text at all, which is exactly how a future
+// `const U = briefShellArg(…)` would hide a thirteenth. This walk resolves a binding back to
+// its initializer, so it cannot.
+//
+// THE CASE TITLE IS A CROSS-FILE LITERAL, and it is PINNED from this side. That census quotes
+// it verbatim to send a maintainer here, so an unpinned rename would leave the pointer naming
+// a check the tree does not have. The title is therefore ONE literal here —
+// `CENSUS_CASE_TITLE` names the case AND is the needle — and the fourth assertion below
+// requires the census to still quote it. `TestContext.name` would spell it once more cheaply
+// and is deliberately NOT used: it landed in Node v20.5.0 while CI pins a bare
+// `node-version: 20`, so on 20.0-20.4 this case would fail for a version reason rather than a
+// contract one, which is the shape this repo refuses.
+//
+// Describe the census by its ANCHOR rather than by quoting a sentence out of it,
+// for the mirror reason: an earlier draft of this comment quoted two sentences from it that
+// the same change then retired, leaving both greppable from nowhere.
+//
+// FOUR assertions, and each one is load-bearing on its own:
+//   - the per-function ROSTER, which is what a thirteenth carrier fails on;
+//   - the per-CLASS split, which is the census's own (a)/(b)/(c) arithmetic — a carrier moved
+//     between classes keeps the total at twelve and changes what the prose means;
+//   - the BINDING half, which has no other control. Delete the `${name}` resolution and the
+//     roster simply reads ten, a number a maintainer would "fix" by lowering the expectation.
+//     Requiring that at least one carrier is reachable ONLY through a binding is what makes
+//     the resolution load-bearing rather than decorative;
+//   - the POINTER BACK, which closes the cross-file literal the paragraph above names.
+//
+// The enclosing walk is the one the `adviceLeg` consumer scan above uses, for the reason
+// stated there: it STOPS at a column-zero `}`, so a module-scope site cannot be attributed to
+// whichever `function` precedes it textually.
+const CENSUS_CASE_TITLE = 'the briefShellArg carrier population is derived, and a thirteenth carrier fails here';
+test(CENSUS_CASE_TITLE, () => {
+  const src = fs.readFileSync(new URL('../../skills/session-trail/scripts/trail.mjs', import.meta.url), 'utf8');
+  const lines = src.split('\n');
+  const enclosing = (i) => {
+    for (let j = i; j >= 0; j -= 1) {
+      if (lines[j] === '}') return '(module scope)';
+      const m = /^function ([A-Za-z0-9_]+)\s*\(/.exec(lines[j]);
+      if (m) return m[1];
+    }
+    return '(module scope)';
+  };
+  const isComment = (l) => l.trim().startsWith('//');
+  // A binding is an initializer, never a carrier itself: the value is not pasted at this
+  // line. Its USES are the carriers, and they are what the second pass collects.
+  const bindings = new Map();
+  lines.forEach((l, i) => {
+    const m = /^\s*const ([A-Za-z0-9_]+) = briefShellArg\(/.exec(l);
+    if (m && !isComment(l)) bindings.set(m[1], i);
+  });
+  assert.ok(bindings.size > 0,
+    'no `const <name> = briefShellArg(...)` binding found — the binding half of this walk is vacuous');
+  const bindingLines = new Set(bindings.values());
+  const carriers = [];
+  lines.forEach((l, i) => {
+    if (isComment(l)) return;
+    if (/^function briefShellArg\b/.test(l)) return;
+    if (bindingLines.has(i)) return;
+    const direct = l.includes('briefShellArg(');
+    const viaBinding = [...bindings.keys()].some((n) => l.includes('${' + n + '}'));
+    if (!direct && !viaBinding) return;
+    // The census's own three classes, decided from the rendered line. The MAPPING test runs
+    // first: class (c) is the one shape that is not a runnable line at all, and one of its
+    // members would otherwise read as class (a) for want of a `git -C`.
+    const cls = /'<[^']*>' = /.test(l) ? 'c (placeholder mapping)'
+      : l.includes('git -C ') ? 'b (operate on a worktree)'
+        : 'a (reach a worktree)';
+    carriers.push({ line: i + 1, fn: enclosing(i), cls, onlyViaBinding: !direct && viaBinding });
+  });
+  const table = carriers.map((c) => `  trail.mjs:${c.line}  ${c.cls}  ${c.fn}${c.onlyViaBinding ? '  (via binding)' : ''}`).join('\n');
+  const tally = (key) => carriers.reduce((acc, c) => { acc[c[key]] = (acc[c[key]] || 0) + 1; return acc; }, {});
+  // The ROSTER, per enclosing function. `continuationPlan` carries SEVEN, which is the number
+  // that makes the total reconcile: the census moved from six to twelve as 6 − 1 + 7, and a
+  // spelling that says six there leaves the total unreachable by one.
+  assert.deepEqual(tally('fn'), {
+    continuationPlan: 7, printResume: 2, cmdTakeover: 1, cmdHandoff: 1, cmdAdopt: 1,
+  }, 'the briefShellArg carrier roster moved — update the census above `briefShellArg` in '
+    + 'trail.mjs and this expectation together:\n' + table);
+  assert.deepEqual(tally('cls'), {
+    'a (reach a worktree)': 5, 'b (operate on a worktree)': 4, 'c (placeholder mapping)': 3,
+  }, 'the briefShellArg CLASS split moved — the census states FIVE / FOUR / THREE:\n' + table);
+  assert.ok(carriers.some((c) => c.onlyViaBinding),
+    'no carrier is reachable ONLY through a binding, so the binding resolution in this walk '
+    + 'is now decorative and a `const U = briefShellArg(…)` could hide one:\n' + table);
+  // The pointer back. The census sends a maintainer here by this case's exact title, so
+  // without this a rename leaves that sentence naming a check the tree does not have — the
+  // same drift class the census itself exists to prevent one level down.
+  assert.ok(src.includes('`' + CENSUS_CASE_TITLE + '`'),
+    'the briefShellArg census in trail.mjs no longer quotes this case by name — rename both '
+    + 'together, or the census points at a check that does not exist');
 });
 
 test('every advice line is a two-space command or column-zero prose, on every arm', () => {

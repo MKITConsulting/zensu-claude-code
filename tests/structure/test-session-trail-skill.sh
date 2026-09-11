@@ -828,7 +828,10 @@ if grep -qE 'skippedNote\(\)' "$TRAIL_MJS" && grep -qE '^function flush\(\)' "$T
   # 14 -> 19: `lineage --forget` emits three payloads (unreadable ledger, dry run,
   # applied) and `label --remove` two (nothing to remove, removed). 19 -> 20: the
   # window-probe test seam emits its result on the same machine carrier.
-  [ "$JSON_EMITS" = "20" ] || GUARD_MISS="$GUARD_MISS [json-emit-count($JSON_EMITS, expected 20)]"
+  # 20 -> 21: `cmdAdopt`'s ledger-failure branch emits its own payload, because prose on
+  # stdout under --json is exactly what the `skippedNote` gate above exists to prevent
+  # and that branch is reachable by configuration (`ZENSU_SESSION_LINEAGE=off`).
+  [ "$JSON_EMITS" = "21" ] || GUARD_MISS="$GUARD_MISS [json-emit-count($JSON_EMITS, expected 21)]"
 else
   GUARD_MISS="$GUARD_MISS [note-not-in-flush]"
 fi
@@ -1959,8 +1962,8 @@ t36_cite "$SKILL_MD" 'scopes by transcript-directory' "$T36_SPEC" 'skills/sessio
 # both onto one number and this pair reported `no-citation-in` plus `2-matches` rather than
 # passing over a clobbered citation. When a target crosses a hundred boundary these two
 # prefixes move with it, and the failure says which.
-t36_cite "$TRAIL_MJS" 'function gitState' "$T36_HTML" 'trail\.mjs:21[0-9][0-9]'
-t36_cite "$TRAIL_MJS" 'claude --resume' "$T36_HTML" 'trail\.mjs:34[0-9][0-9]'
+t36_cite "$TRAIL_MJS" 'function gitState' "$T36_HTML" 'trail\.mjs:22[0-9][0-9]'
+t36_cite "$TRAIL_MJS" 'claude --resume' "$T36_HTML" 'trail\.mjs:35[0-9][0-9]'
 t36_cite "$SKILL_MD" 'scopes by transcript-directory' "$T36_HTML" 'skills/session-trail/SKILL\.md:2[0-9]+'
 # The POPULATION, scanned out of the documents rather than counted off the row table
 # above. `T36_ROWS` counts rows this test declares; it can never notice a citation the
