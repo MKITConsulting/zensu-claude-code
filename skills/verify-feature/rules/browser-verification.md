@@ -16,6 +16,16 @@ the source skill's dependency on a personal `/test-feature` command.
    parent-environment policy. It aborts every unapproved request or redirect before response
    evidence reaches the model. Never replace it with navigate-then-check logic. The policy must
    bind the same exact page route to the same origin with `evidenceMode: declared-safe`.
+   In consent mode (the preflight printed `consent`) the ORIGIN half of that boundary holds with
+   the user in the loop instead of the policy: the broker admits literal loopback origins only,
+   and the consent hook opens the host's permission prompt once per new loopback origin. The
+   ROUTE half does NOT hold — neither layer enforces routes in consent mode, because the human
+   consented to the whole origin — so binding a page route to its evidence is a prose obligation
+   on you here, not a boundary anything checks. Wait for the user's answer; a refused prompt makes
+   that origin's rows PARTIAL.
+   Never re-issue a refused navigation and never try another spelling of the same target to avoid the prompt.
+   The session consent memory named in SKILL.md is yours to READ for the report and never to
+   write, edit or delete: a record you place there skips the human's prompt for that origin.
 1. Navigate to the resolved base URL and route only after that declaration and policy preflight pass.
 2. Take `browser_snapshot` before interacting. Confirm the URL, title/heading, authentication
    state, and that the page is not a generic error or login wall.

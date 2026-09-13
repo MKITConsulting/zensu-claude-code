@@ -81,6 +81,19 @@ run_child() {
 run_sanitized_child() {
   local arg_conv_excl="$1"
   shift
+  # The broker reads the consent gate's execution markers, which the gate writes under the
+  # Session Control record's project root. `env -i` strips everything not named below, so
+  # ZENSU_VERIFY_PROJECT_ROOT is carried when something upstream supplies it and the broker
+  # then anchors on the same root as the writer.
+  #
+  # A derivation was tried here and REMOVED rather than hardened, which is worth recording so
+  # it is not rebuilt: this process has no hook payload, so `zensu_bind_hook_session ""`
+  # returns 1 before it reaches node; and the payload-free `zensu_bind_model_session` needs
+  # CLAUDE_CODE_SESSION_ID and CLAUDE_PLUGIN_DATA, neither of which an MCP server process is
+  # guaranteed. The block therefore never exported anything while `docs/gates.md` stated the
+  # anchor as a guarantee. What ships is the honest version: the variable travels when it
+  # exists, and otherwise the broker anchors on its own cwd, which is the residual the
+  # operator carriers now name.
   local env_args=(
     "PATH=$PATH"
     "HOME=$SANITIZED_HOME"
@@ -94,7 +107,7 @@ run_sanitized_child() {
     TMPDIR SHELL TERM LANG LC_ALL CI \
     HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy all_proxy no_proxy \
     SSL_CERT_FILE SSL_CERT_DIR NODE_EXTRA_CA_CERTS \
-    ZENSU_VERIFY_NAVIGATION_POLICY_V1; do
+    ZENSU_VERIFY_NAVIGATION_POLICY_V1 ZENSU_VERIFY_PROJECT_ROOT; do
     value="${!name-}"
     [ -z "$value" ] || env_args+=( "$name=$value" )
   done
