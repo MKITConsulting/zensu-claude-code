@@ -282,6 +282,13 @@ case "$VF_NORECIPE" in *'⚠️  verify-feature: consent mode ready, no runtime 
 case "$VF_NORECIPE" in *'all checks green'*) check "P1vc1 the no-recipe warning withholds the green summary" FAIL ;; *) check "P1vc1 the no-recipe warning withholds the green summary" PASS ;; esac
 VF_UNAVAILABLE="$(verify_row unavailable "consent hook not registered on the navigation matcher")"
 case "$VF_UNAVAILABLE" in *'❌  verify-feature: cannot start (consent hook not registered on the navigation matcher)'*) check "P1vd unavailable renders red with the wrapper's reason" PASS ;; *) check "P1vd unavailable renders red with the wrapper's reason" FAIL ;; esac
+# The reason is free text the wrapper relays, and this report is read line by line: a newline plus
+# one of its own severity glyphs forged a row the doctor never judged. The unavailable and the
+# invalid-policy rows share the filter, so one fixture covers both; the control keeps the check from
+# passing for a renderer that simply dropped the reason.
+VF_FORGED="$(verify_row unavailable $'hook gone\n❌  forged: a row this report never judged')"
+case "$VF_FORGED" in *$'\n❌  forged:'*) check "P1vd1 a relayed reason cannot forge a report row" FAIL ;; *) check "P1vd1 a relayed reason cannot forge a report row" PASS ;; esac
+case "$VF_FORGED" in *'verify-feature: cannot start (hook gone'*'forged: a row this report never judged)'*) check "P1vd1-control the reason itself still renders" PASS ;; *) check "P1vd1-control the reason itself still renders" FAIL ;; esac
 VF_ABSENT="$(verify_row "" "")"
 case "$VF_ABSENT" in *'⚠️  verify-feature: not checked'*'missing check rather than an all-clear'*) check "P1ve an absent ZDOC_VERIFY says the check did not run rather than staying silent" PASS ;; *) check "P1ve an absent ZDOC_VERIFY says the check did not run rather than staying silent" FAIL ;; esac
 case "$VF_ABSENT" in *'all checks green'*) check "P1ve1 the did-not-check row withholds the green summary" FAIL ;; *) check "P1ve1 the did-not-check row withholds the green summary" PASS ;; esac
@@ -303,6 +310,10 @@ exec_row() { # $1 ZDOC_VERIFY  $2 ZDOC_VERIFY_EXEC
 VF_EXEC_RAN="$(exec_row consent ran)"
 case "$VF_EXEC_RAN" in *'✅  verify-feature gate: executed in this session'*) check "P1vm an executed gate renders its own row naming EXECUTION" PASS ;; *) check "P1vm an executed gate renders its own row naming EXECUTION" FAIL ;; esac
 case "$VF_EXEC_RAN" in *'all checks green'*) check "P1vm1 an executed gate keeps the green summary" PASS ;; *) check "P1vm1 an executed gate keeps the green summary" FAIL ;; esac
+# P1vm's needle is a strict PREFIX of the prompted-origin row, so it alone does not separate the
+# two success states at the RENDERER: rendering `ran-asked` for `ran` satisfies it. The wrapper
+# cases below catch that end to end; this arm catches it here, where the row is chosen.
+case "$VF_EXEC_RAN" in *'on a prompted origin'*) check "P1vm2 the ran row does not claim the prompted-origin variant" FAIL ;; *) check "P1vm2 the ran row does not claim the prompted-origin variant" PASS ;; esac
 VF_EXEC_NONE="$(exec_row consent none)"
 case "$VF_EXEC_NONE" in *'verify-feature gate: registered'*'no live execution marker was read'*'reports registration'*) check "P1vn a registered-but-unexercised gate says so instead of inheriting the mode row" PASS ;; *) check "P1vn a registered-but-unexercised gate says so instead of inheriting the mode row" FAIL ;; esac
 # An ordinary session that never drove the browser has no marker, so this state must NOT warn:

@@ -38,6 +38,16 @@ const REASONS = Object.freeze({
   MEMORY_UNREADABLE: 'consent-memory-unreadable',
   MEMORY_PATH_REFUSED: 'consent-memory-path-refused',
   EVIDENCE_PATH_REFUSED: 'consent-evidence-path-refused',
+  // The marker writer's own refusals. They are owned here rather than spelled at the five return
+  // sites that produce them, because `runPre` interpolates the value into an operator line: these
+  // are rendered strings, and a renamed literal moves a message nobody can grep for.
+  // `EVIDENCE_WRITE_FAILED` is a PREFIX — the suffix is Node's own errno for the failed publish,
+  // which this module does not own and must not invent a name for.
+  EVIDENCE_ORIGIN_REFUSED: 'evidence-origin-refused',
+  EVIDENCE_ORIGIN_TAG_MISMATCH: 'evidence-origin-tag-mismatch',
+  EVIDENCE_STAMP_INVALID: 'evidence-stamp-invalid',
+  EVIDENCE_TOO_LARGE: 'evidence-too-large',
+  EVIDENCE_WRITE_FAILED: 'evidence-write-failed',
 });
 
 // Attached only to the denies a foreign server can actually cause — the origin
@@ -350,7 +360,7 @@ function writeExecutionEvidence(evidencePath, origin, options = {}) {
   // the floor admits, so a refused address can never leave evidence a later read would honour.
   const classified = floor.classifyOrigin(origin, true);
   if (!classified.ok || classified.mode !== 'local' || classified.origin !== origin) {
-    return { ok: false, reason: 'evidence-origin-refused' };
+    return { ok: false, reason: REASONS.EVIDENCE_ORIGIN_REFUSED };
   }
   const allowed = evidencePathAllowed(evidencePath, options.projectRoot);
   if (!allowed.ok) return allowed;
@@ -361,17 +371,17 @@ function writeExecutionEvidence(evidencePath, origin, options = {}) {
   // from the origin and so agrees by construction, but this function is exported and a second
   // caller is reachable.
   if (!path.basename(evidencePath).endsWith(`-${evidenceOriginTag(origin)}.json`)) {
-    return { ok: false, reason: 'evidence-origin-tag-mismatch' };
+    return { ok: false, reason: REASONS.EVIDENCE_ORIGIN_TAG_MISMATCH };
   }
   const at = typeof options.at === 'string' ? options.at : new Date().toISOString();
-  if (!isIsoInstant(at)) return { ok: false, reason: 'evidence-stamp-invalid' };
+  if (!isIsoInstant(at)) return { ok: false, reason: REASONS.EVIDENCE_STAMP_INVALID };
   // The VERDICT travels with the marker. Without it the broker cannot tell an
   // asked-and-refused execution from an asked-and-approved one, and in the plugin-swap route
   // this feature exists for, a declined origin would be self-approved unprompted inside the
   // marker's window. A caller that names no verdict gets `asked`, the weaker of the two.
   const verdict = options.verdict === EVIDENCE_VERDICT_ALLOWED ? EVIDENCE_VERDICT_ALLOWED : EVIDENCE_VERDICT_WEAKEST;
   const body = `${JSON.stringify({ version: EVIDENCE_VERSION, origin, verdict, at })}\n`;
-  if (Buffer.byteLength(body) > MAX_EVIDENCE_BYTES) return { ok: false, reason: 'evidence-too-large' };
+  if (Buffer.byteLength(body) > MAX_EVIDENCE_BYTES) return { ok: false, reason: REASONS.EVIDENCE_TOO_LARGE };
   // SWEPT BEFORE THE PUBLISH, and the order is about a window rather than tidiness. The wrapper
   // captures this process's stdout in a command substitution, which reads to EOF, so nothing the
   // module writes reaches the host until the process EXITS — every instruction between the rename
@@ -379,7 +389,7 @@ function writeExecutionEvidence(evidencePath, origin, options = {}) {
   // no decision delivered. The sweep is up to `MAX_EVIDENCE_FILES` read-and-parse rounds, which is
   // the largest thing that was in that interval. Best effort in its own try, for the reason the
   // previous placement made concrete: a throw escaping it must never report a marker as unwritten.
-  try { reapExpiredEvidence(allowed.stateDir, new Date().toISOString()); }
+  try { reapExpiredEvidence(allowed.stateDir, new Date().toISOString(), { projectRoot: options.projectRoot }); }
   catch (_ignore) { /* best effort: a marker that cannot be removed costs nothing */ }
   const temp = path.join(allowed.stateDir, `.${path.basename(evidencePath)}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`);
   try {
@@ -393,7 +403,7 @@ function writeExecutionEvidence(evidencePath, origin, options = {}) {
     fs.renameSync(temp, evidencePath);
   } catch (error) {
     try { fs.unlinkSync(temp); } catch (_ignore) { /* nothing to remove */ }
-    return { ok: false, reason: `evidence-write-failed:${error && error.code ? error.code : 'unknown'}` };
+    return { ok: false, reason: `${REASONS.EVIDENCE_WRITE_FAILED}:${error && error.code ? error.code : 'unknown'}` };
   }
   return { ok: true, origin, verdict, at };
 }
@@ -432,9 +442,18 @@ function writeExecutionEvidence(evidencePath, origin, options = {}) {
 // a walk did not finish.
 //
 // The counter is returned so the bound has an executed case; nothing in production reads it.
-function reapExpiredEvidence(stateDir, nowIso) {
+function reapExpiredEvidence(stateDir, nowIso, options = {}) {
   const now = Date.parse(nowIso);
   if (!Number.isFinite(now)) return 0;
+  // ANCHORED like the reader it protects, and for the same reason that one states: this is an
+  // unlink primitive on the public surface, so without a root there is nothing to verify the
+  // directory against and a caller-named path would be swept through a symlinked `.zensu` or
+  // `state`. The one production caller already holds both operands, so this costs it nothing.
+  if (typeof options.projectRoot !== 'string' || options.projectRoot === '') return 0;
+  let rootReal;
+  try { rootReal = fs.realpathSync.native(options.projectRoot); }
+  catch (_error) { return 0; }
+  if (evidenceDirFor(rootReal) !== stateDir || !stateComponentsSafe(rootReal)) return 0;
   let names;
   try { names = fs.readdirSync(stateDir); }
   catch (_error) { return 0; }
@@ -578,7 +597,7 @@ function liveEvidenceOrigins(stateDir, options = {}) {
   let rootReal;
   try { rootReal = fs.realpathSync.native(options.projectRoot); }
   catch (_error) { return found; }
-  if (path.join(rootReal, ...STATE_SEGMENTS) !== stateDir || !stateComponentsSafe(rootReal)) return found;
+  if (evidenceDirFor(rootReal) !== stateDir || !stateComponentsSafe(rootReal)) return found;
   let names;
   try { names = fs.readdirSync(stateDir); }
   catch (_error) { return found; }

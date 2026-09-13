@@ -1290,7 +1290,7 @@ test('the decision envelope is emitted before the marker is published, and the r
     fs.writeFileSync(path.join(dir, `verify-consent-exec-${key}-${consent.evidenceOriginTag(o)}.json`), `${JSON.stringify(good(o))}\n`);
   }
   const later = 'http://127.0.0.1:4261';
-  assert.equal(consent.reapBudgetSpent(dir, new Date().toISOString()) <= consent.MAX_EVIDENCE_FILES, true, 'the reap examines at most the reader budget');
+  assert.equal(consent.reapBudgetSpent(dir, new Date().toISOString(), { projectRoot: root }) <= consent.MAX_EVIDENCE_FILES, true, 'the reap examines at most the reader budget');
   assert.equal(consent.writeExecutionEvidence(consent.evidencePathFor(memory, later), later, { projectRoot: root, verdict: 'allowed' }).ok, true);
 
   // And the reap is clocked on the real clock, never on the caller's stamp: a back-dated `at`
@@ -1351,4 +1351,67 @@ test('AC-104 emission is observable from the throwing path, so the deny envelope
   );
   assert.equal(JSON.parse(unreadable).hookSpecificOutput.permissionDecision, 'deny', 'control: the arm denied');
   assert.equal(reported, true, 'and runPre reports the emission rather than returning undefined');
+});
+
+test('the sweep is anchored like the reader it protects, so a caller-named directory is refused', () => {
+  const { root } = project();
+  const dir = consent.evidenceDirFor(root);
+  const stale = path.join(dir, `verify-consent-exec-${KEY}-0123456789abcdef.json`);
+  const plant = () => fs.writeFileSync(stale, `${JSON.stringify({
+    version: consent.EVIDENCE_VERSION,
+    origin: 'http://127.0.0.1:4270',
+    verdict: consent.EVIDENCE_VERDICT_ALLOWED,
+    at: new Date(Date.now() - 10 * consent.MAX_EVIDENCE_REAP_AGE_MS).toISOString(),
+  })}\n`);
+
+  // An unlink primitive on the public surface, so it carries the reader's own anchor: without a
+  // root there is nothing to verify the directory against, and this module is the cross-host half
+  // a port copies, which is how a permissive default comes back.
+  plant();
+  assert.equal(consent.reapBudgetSpent(dir, new Date().toISOString()), 0, 'an anchorless sweep examines nothing');
+  assert.equal(fs.existsSync(stale), true, 'and removes nothing');
+
+  // A root that does not own this directory is refused on the same ladder.
+  const { root: other } = project();
+  assert.equal(consent.reapBudgetSpent(dir, new Date().toISOString(), { projectRoot: other }), 0, 'a foreign anchor sweeps nothing');
+  assert.equal(fs.existsSync(stale), true, 'and removes nothing');
+
+  // Control, or the two arms above pass for a sweep that never reaps anything at all.
+  assert.equal(consent.reapBudgetSpent(dir, new Date().toISOString(), { projectRoot: root }) >= 1, true, 'control: the anchored sweep examines the marker');
+  assert.equal(fs.existsSync(stale), false, 'control: and reaps an expired one');
+});
+
+test('every write-failure reason the writer returns is owned by REASONS', () => {
+  assert.equal(REASONS.EVIDENCE_ORIGIN_REFUSED, 'evidence-origin-refused');
+  assert.equal(REASONS.EVIDENCE_ORIGIN_TAG_MISMATCH, 'evidence-origin-tag-mismatch');
+  assert.equal(REASONS.EVIDENCE_STAMP_INVALID, 'evidence-stamp-invalid');
+  assert.equal(REASONS.EVIDENCE_TOO_LARGE, 'evidence-too-large');
+  assert.equal(REASONS.EVIDENCE_WRITE_FAILED, 'evidence-write-failed');
+
+  // Driven rather than asserted from the constants alone: `runPre` renders `written.reason` into an
+  // operator line, so the value a refusal actually carries is what has to be the owned one.
+  const { root, memory } = project();
+  const origin = 'http://127.0.0.1:4272';
+  const evidencePath = consent.evidencePathFor(memory, origin);
+  const remote = 'http://example.com';
+  assert.equal(
+    consent.writeExecutionEvidence(consent.evidencePathFor(memory, remote), remote, { projectRoot: root }).reason,
+    REASONS.EVIDENCE_ORIGIN_REFUSED,
+    'a target the floor refuses leaves no marker',
+  );
+  assert.equal(
+    consent.writeExecutionEvidence(evidencePath, 'http://127.0.0.1:4273', { projectRoot: root }).reason,
+    REASONS.EVIDENCE_ORIGIN_TAG_MISMATCH,
+    'a name whose tag belongs to another origin is refused',
+  );
+  assert.equal(
+    consent.writeExecutionEvidence(evidencePath, origin, { projectRoot: root, at: 'not-a-stamp' }).reason,
+    REASONS.EVIDENCE_STAMP_INVALID,
+    'an unusable stamp is refused',
+  );
+  assert.equal(
+    consent.writeExecutionEvidence(evidencePath, origin, { projectRoot: root }).ok,
+    true,
+    'control: the same call with nothing wrong still writes',
+  );
 });
