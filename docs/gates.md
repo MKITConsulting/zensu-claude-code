@@ -530,6 +530,38 @@ to itself — prose-backed, not consent-backed, exactly as `--autopilot-release`
 `SessionStart` self-heal above requires no token at all. Do not restate the writer as
 gated on `--confirm`: that sentence contradicted the `SessionStart` bullet four lines above it.
 
+## Vanished Working Directory
+
+A session can outlive the directory it was working in; a git worktree removed after its pull
+request merged is the ordinary way. The Session Control record still binds, its recorded
+project root still exists, and the host keeps reporting the deleted directory as the
+PreToolUse `cwd`. The `.*` capability gate (`hooks/pre-reviewer-capability-gate.sh`) used to
+canonicalize that `cwd` while revalidating the binding, so it denied every tool call except the
+two recognized commands above (which Windows does not admit either) with `immutable context revalidation failed: PreToolUse cwd does
+not exist` — a message that names no cause and no remedy, over a value the main thread never
+uses.
+
+It is **not a bind failure** and not a third relaxable state (see
+[Session Control](session-control.md#unbindable-sessions)). The `cwd` is a per-call input, and
+only a path rule consumes it — to resolve a relative tool input, or as the traversal root of a
+`Grep`/`Glob` that names no path:
+
+- **The main thread** returns before any path rule runs, so a vanished `cwd` does not deny it.
+- **An evidence worker** resolves its leased paths against the recorded project root, so its
+  verdict is decided by its lease and is the same with or without the directory.
+- **A reviewer, a PLM subagent and a neutral child** resolve paths against it, so they are still
+  denied — with a reason that names their profile and the unusable working directory, and tells
+  them to report to the main thread rather than retry.
+
+Nothing else is relaxed. The binding, the recorded project root, the runtime digest and the
+workflow document are revalidated for every principal BEFORE the `cwd` is looked at, so a
+vanished `cwd` never masks one of those denies — a deleted workflow document still gets the
+named deny of §Missing Workflow Baseline. Re-creating the directory, or changing to one that
+exists, is needed only before a subagent is spawned again.
+`tests/structure/test-vanished-session-cwd.sh` pins these verdicts and, for every `PreToolUse`
+registration in `hooks/hooks.json`, that a vanished `cwd` never makes a verdict stricter than
+the same call with an existing one.
+
 ## TDD Phase Gate
 
 Unlike prompt-based TDD ("please write tests first"), the `/zensu:tdd` workflow **structurally prevents** violations via a PreToolUse FSM gate on Edit/Write/MultiEdit:

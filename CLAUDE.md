@@ -3370,6 +3370,37 @@ properties are easy to get wrong and cost the whole feature:
   defect it reports, and the healthy-anchor test fixtures hid it; `O29`/`O29a` pin both
   the deleted-root and unset-anchor shapes.
 
+**A vanished LIVE `cwd` is NOT a third member, and it must not become one.** Both states
+above are failures of the BIND. A PreToolUse `cwd` that no longer names a real directory —
+a worktree removed while the session was still inside it, with the recorded project root
+intact — leaves the bind whole. `reviewer-capability-v1.js` used to canonicalize that `cwd`
+inside `revalidateSessionContext`, so every tool call of a perfectly bound session — the two
+recognized commands aside, and those only off win32 — was denied with the generic `immutable context revalidation
+failed: PreToolUse cwd does not exist`, and neither relaxation above could reach it, because
+both key on the bind and the bind had not failed. It now
+canonicalizes the `cwd` only in the three branches whose path rules consume it —
+`reviewer-readonly-v1`, `zensu-plm-readonly-v1` and `host-profile-v1`, which deny through
+`unusableWorkingDirectoryReason` — while `main-v1` returns before any path rule and
+`evidence-worker-v1` resolves its leased paths against the canonical project root on
+`trusted`. **The ORDER is the contract:** the bind, the recorded root, the digest and the
+workflow revalidation all run BEFORE the `cwd` is judged, so the missing-baseline named deny
+and every bind-failure deny still win for the main thread. `pathResolutionProfile` re-spells
+the branch ladder below it to pick the profile name, so a new principal branch lands in both.
+A branch placed ABOVE the resolution that reads `trusted.toolCwd` gets `undefined`, and
+`path.resolve` throws a `TypeError` into that branch's own catch — fail-closed, but unnamed.
+Measured before the change: driving every `PreToolUse` registration in `hooks/hooks.json`
+with a vanished `cwd` showed the capability gate as the ONLY hook that denied.
+`tests/structure/test-vanished-session-cwd.sh` pins the verdict matrix and re-derives that
+cross-hook comparison, so a later hook that starts canonicalizing the `cwd` fails there
+rather than wedging sessions in the field. Operator accounts: the `cwd` sentence in
+`docs/session-control.md` §"Claude Code Workflows" and `docs/gates.md` §"Vanished Working
+Directory". **Version: `patch`** — it lifts an existing deny for two principals and rewords
+it for three; no schema field, strict key set, hook, matcher, config key or attestation
+moves. Windows is UNVERIFIED: the suite is in `ciStructureTests` and not in
+`windows-ci.v1.json`, so only the weekly Windows Safety structure shard reaches it.
+`zensu-codex`, `zensu-kiro` and `zensu-antigravity` carry their own capability gates and
+were NOT included.
+
 Shell wrappers live in `hooks/lib/zensu-session.sh` (`zensu_session_unregistered`,
 `zensu_session_orphaned_project_root`, `..._model`, plus
 `zensu_session_incompatible_runtime` / `..._model` and

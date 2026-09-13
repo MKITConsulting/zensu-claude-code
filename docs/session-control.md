@@ -34,7 +34,16 @@ Both are handled by Session Control v1:
   environment. The record's `project_root` remains the immutable
   workflow-state anchor, while the canonical host-reported `cwd` may move to an
   external detached worktree after `CwdChanged` and is used only to resolve
-  relative tool paths. Fresh `startup`/`clear`/`fork` events may create that
+  relative tool paths. That `cwd` is therefore NOT part of the binding, and the
+  capability gate judges it only where a path rule consumes it: when it no longer
+  names a real directory — a git worktree removed while the session was still
+  working inside it — the main thread and an evidence worker (which resolves its
+  leased paths against the recorded project root) are not denied for it, while a
+  reviewer, a PLM subagent and a neutral child are denied with a reason naming the
+  unusable working directory and their own profile. The binding, the recorded
+  project root, the runtime digest and the workflow document are revalidated for
+  every principal regardless, so a vanished `cwd` never masks one of those denies.
+  Fresh `startup`/`clear`/`fork` events may create that
   binding; `resume`/`compact` reuse the existing record's original project even
   when the current directory changed. A session id with no record yet — a
   `fork`, whose new id can never have one, or a continuation whose private
