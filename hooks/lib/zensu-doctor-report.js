@@ -167,6 +167,13 @@ var CONSENT_MODE_STATES = ['consent', 'consent-no-recipe', 'consent-recipe-unche
 function safeVerifyExec(value) {
   return String(value).replace(/[^A-Za-z0-9_.:-]/g, '').slice(0, 40) || 'unnamed';
 }
+// The wrapper's REASON reaches a rendered line too, and it carries a free-form cause rather than
+// a state word, so it gets its own bound instead of the state filter above: a newline plus one of
+// this report's own severity glyphs forges an extra row, which is the one thing a reader of the
+// report cannot check. Everything else a cause names is kept.
+function safeVerifyReason(value) {
+  return String(value).replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ').replace(/[\u2705\u26a0\ufe0f\u274c]/g, '').slice(0, 200);
+}
 // The Claude Code build (2.1.235) whose settings shape and permission-rule
 // grammar the check below was read against. Recorded for the same reason
 // DENIAL_MARKERS_SOURCE_BUILD is: only a named build lets a human re-verify
@@ -379,8 +386,8 @@ function toolBlock() {
   else if (v === 'consent') line(OK, 'verify-feature: consent mode ready — no parent policy; the browser asks you once per origin through the permission prompt and then admits every route on it, and a runtime recipe is present');
   else if (v === 'consent-no-recipe') line(WARN, 'verify-feature: consent mode ready, no runtime recipe — run /zensu:verify-feature --setup to write .zensu/runtime.yaml, or pass --attach=<loopback-origin> for an app you already run');
   else if (v === 'consent-recipe-unchecked') line(WARN, 'verify-feature: consent mode ready, recipe not checked — no project root resolved, so no .zensu/runtime.yaml was looked for; this is a missing check rather than a missing recipe');
-  else if (v === 'policy-invalid') line(BAD, 'verify-feature: a parent-environment navigation policy is set but the browser broker will refuse it (' + (vr || 'reason unknown') + ') — only the top-level contract was checked here, so fix that value or unset it to fall back to consent mode');
-  else if (v === 'unavailable') line(BAD, 'verify-feature: cannot start (' + (vr || 'reason unknown') + ') — the consent hook pair, its module and the broker must ship together; reinstall the plugin or launch Claude Code with the parent-environment policy');
+  else if (v === 'policy-invalid') line(BAD, 'verify-feature: a parent-environment navigation policy is set but the browser broker will refuse it (' + (safeVerifyReason(vr) || 'reason unknown') + ') — only the top-level contract was checked here, so fix that value or unset it to fall back to consent mode');
+  else if (v === 'unavailable') line(BAD, 'verify-feature: cannot start (' + (safeVerifyReason(vr) || 'reason unknown') + ') — the consent hook pair, its module and the broker must ship together; reinstall the plugin or launch Claude Code with the parent-environment policy');
   else line(WARN, 'verify-feature: not checked — the wrapper reported no verify state, so this is a missing check rather than an all-clear; run /zensu:doctor from a session whose plugin root resolves');
   // AC-104. The row above is derived from files on disk in the plugin's own tree, so it reports
   // that the pair is INSTALLED. This one reports that the gate RAN, read from the per-session

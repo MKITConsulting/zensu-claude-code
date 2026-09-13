@@ -7643,11 +7643,19 @@ with its two NAMED members `EVIDENCE_VERDICT_ALLOWED` and `EVIDENCE_VERDICT_WEAK
 `DECIDED_BY` owns the memory's `decidedBy`. The weakest member is named rather than taken by
 index because the doctor's row PREFERS it so a declined prompt is disclosed. It was hand-spelled
 at seven sites for a two-value set, and one of those crossed a PROCESS boundary: the doctor
-probe's `seen.verdict === "allowed"` ternary, which now reads `mod.EVIDENCE_VERDICT_ALLOWED` and
-falls back to the literal for a module that predates the export — without that read a rename
-would have reported every `asked` marker as cleared, silently. The two vocabularies OVERLAP on
+probe's `seen.verdict === "allowed"` ternary, which would have reported every `asked` marker as
+cleared if the constant were renamed under it. State where that comparison lives NOW, because it
+MOVED and this paragraph described the intermediate step for a release: the probe compares no
+verdict at all — it calls `mod.classifyExecution(seen)`, which does the comparison inside the
+module, so the crossing that remains is the FUNCTION and the literal fallback is gone. A probe
+against a module without that export refuses as `unjudged` rather than degrading. The two vocabularies OVERLAP on
 the word `asked` and belong to different artifacts, so a scan for bare spellings has to be scoped
-to `verdict`-bearing lines or it reports the memory's owner as a drift — `REASONS.EVIDENCE_PATH_REFUSED`, and
+to `verdict`-bearing lines or it reports the memory's owner as a drift — `REASONS.EVIDENCE_PATH_REFUSED`
+plus the writer's own five refusals, `EVIDENCE_ORIGIN_REFUSED` / `EVIDENCE_ORIGIN_TAG_MISMATCH` /
+`EVIDENCE_STAMP_INVALID` / `EVIDENCE_TOO_LARGE` / `EVIDENCE_WRITE_FAILED`, which were ad-hoc
+literals at their five return sites while `runPre` interpolated the value into an operator line —
+so they were rendered strings with no owner. The last is a PREFIX and the suffix stays Node's own
+errno, which this module does not own, and
 `statePathAllowed`'s reason and hard-link parameters — the memory keeps `nlink !== 1` and the
 marker does not, deliberately, so a change there is a two-artifact decision. Across files:
 `consentEvidenceState` in `scripts/playwright-mcp-proxy.js` (SIX values — `present` /
@@ -7657,7 +7665,13 @@ being reported as one either, `unread` names a state directory the walk could no
 `truncated` names a walk that hit `MAX_EVIDENCE_FILES` before it could answer. The last two were
 `absent` for a round, which is the same conflation the first two exist to remove: a directory
 that could not be opened and a budget that ran out both refused with a sentence naming a gate
-that had run), `CONSENT_EVIDENCE_STATES` and `consentRefusalFor` in that same file — ONE owner for the state
+that had run. The two classifiers of ONE record are deliberately unequal, and saying so here is
+what keeps a later reader from "aligning" them: the broker splits `unread` and `truncated` because
+its refusal names a cause to a human, while `classifyExecution` collapses both into `unjudged`
+because the doctor's row offers one remedy for either. Their module-compat contracts are OPPOSITE
+too — the broker degrades to the older boolean `executionEvidencePresent` when `executionEvidenceSeen`
+is missing, and the doctor probe REFUSES a module without `classifyExecution`. Both directions are
+right for their own consumer; neither is a drift), `CONSENT_EVIDENCE_STATES` and `consentRefusalFor` in that same file — ONE owner for the state
 set and ONE renderer for the refusal each state produces, because the approval ladder re-spelled
 the set as four `if` arms plus a catch-all that ASSERTED a cause, so a seventh state would have
 named a fact the probe never established; the residual arm is state-NEUTRAL and names only what
@@ -7714,6 +7728,13 @@ runtime is still serving, which is the disqualifier that bullet spells out.
   it, because it is a signature change across both hooks and the unit suite.
 - **The gate count in the `docs/gates.md` intro is checked by nothing**, and this feature moved
   it. The same gap the plugin-data guard records for its own row.
+- **The `unknown` execution row withholds the green summary for every non-`bound` session.** The
+  wrapper answers `unknown` whenever no session key or recorded project root is available, and
+  §"Foreign-Chain Row" records that both are empty for every binding verdict except `bound` — so
+  an orphaned-project-root, incompatible-runtime or pruned-installation session in a consent-mode
+  project can never print "all checks green". The row is correct and the cost is real; it is
+  recorded here because three sibling rows record the identical cost for themselves and this
+  section said nothing.
 - **The Windows half is unverified.** The suite is in the CI structure inventory the weekly
   Windows Safety shard builds, and NOT in the blocking Windows PR profile, so the Windows half
   stays unverified until that weekly run reports green. Say "unverified", never "never runs".
@@ -7726,7 +7747,9 @@ runtime is still serving, which is the disqualifier that bullet spells out.
   `executionEvidencePresent` / `executionEvidenceSeen` / `liveEvidenceOrigins` /
   `EVIDENCE_NAME_PREFIX` / `EVIDENCE_VERSION` / `EVIDENCE_VERDICTS` with both named members /
   `MAX_EVIDENCE_AGE_MS` / `MAX_EVIDENCE_BYTES` /
-  `MAX_EVIDENCE_FILES` / `evidenceStatUsable` / `evidenceStillHonourable` / `reapExpiredEvidence` /
+  `MAX_EVIDENCE_FILES` / `evidenceStatUsable` / `evidenceStillHonourable` / `reapExpiredEvidence`
+  (whose EXPORT key is `reapBudgetSpent`, so a port implementing the name written here alone ships
+  a module the suite's own driver cannot reach) /
   `MAX_EVIDENCE_REAP_AGE_MS` / `evidenceBodyLive` / `EXECUTION_VERDICTS` / `classifyExecution` /
   `recordingStream` plus
   `statePathAllowed`'s two parameters — and `MEMORY_NAME_PREFIX` / `MEMORY_NAME_RE`, which this
@@ -7766,7 +7789,21 @@ runtime is still serving, which is the disqualifier that bullet spells out.
   call supplying none has nothing to verify — and while the anchor was optional the module's
   DEFAULT was open: `executionEvidencePresent(dir, origin)` read whatever directory it was handed,
   through a symlinked `.zensu` or `state`. One caller was hardened against that and the module a
-  port copies was not, which is how the class comes back.
+  port copies was not, which is how the class comes back. The DELETING sibling carries the same
+  anchor now, and it is the one that needed it most: `reapExpiredEvidence` is an `unlink`
+  primitive whose export key sits on the public surface, and it took a bare directory while the
+  reading sibling refused one. Its production call site already held both operands, so the anchor
+  cost it nothing — a caller that supplies none now reaps zero rather than sweeping a directory
+  nothing verified.
+- **Two diagnoses are COARSER than their cause, and both are named rather than fixed.** A
+  `.zensu` swapped for a symlink and a state directory that is simply not there both leave
+  `liveEvidenceOrigins` answering `read: false`, so the broker's `unread` refusal hedges about a
+  directory that may not exist when what it found was tamper. And a non-regular object planted at
+  a derivable marker name makes `statePathAllowed` refuse the WRITE for as long as it stands while
+  every reader skips it, so `consentEvidenceState` answers `absent` — naming absence where the
+  cause is a refused write. Neither surface makes a false claim and the write refusal is disclosed
+  on stderr; separating them means a seventh broker state, which is a vocabulary decision for
+  `CONSENT_EVIDENCE_STATES` and `consentRefusalFor` rather than a wording change.
 - **The marker reader opens with a plain `readFileSync` after an `lstat`, so a FIFO swapped into
   that window blocks the broker's approval path — and there are now TWO such sites, on two
   different paths.** The second is `evidenceStillHonourable`, which the reaper calls once per

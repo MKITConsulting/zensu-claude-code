@@ -100,7 +100,7 @@ run_unit() { # $1 label  $2 file  $3 registered floor  $4 SUITE-OVERVIEW row key
   fi
 }
 run_unit "V6 floor" "$UNIT_FLOOR" 10 "verify-navigation-floor-v1.test.js"
-run_unit "V7 consent" "$UNIT_CONSENT" 39 "verify-consent-v1.test.js"
+run_unit "V7 consent" "$UNIT_CONSENT" 41 "verify-consent-v1.test.js"
 run_unit "V7b free-port" "$UNIT_PORT" 3 "verify-free-port.test.js"
 
 grep -qF 'verify-navigation-floor-v1.js' "$PROXY" && ! grep -qE '^function isLoopbackHost' "$PROXY" \
