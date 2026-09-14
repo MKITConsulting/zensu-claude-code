@@ -1,8 +1,14 @@
 // Unit contract for the takeover-destination advice in
-// skills/session-trail/scripts/trail.mjs — `worktreeAdvice`, its module-scope
-// recipe constants, `WORKTREE_ADVICE_COMMAND` and `adviceBlock`.
+// skills/session-trail/scripts/trail.mjs — the whole EXPORTED advice surface plus the
+// module-scope recipe constants it renders. Stated as the surface rather than as a list:
+// the list said four while the file drove seven, and a roster that enumerates is a roster
+// that goes stale on the next export.
 //
-// These are pure functions of a plain record with no I/O, and every property
+// These are functions of a plain record. They do not open files and they write nothing; the
+// one filesystem contact is `whereAdviceLines`, which canonicalizes two paths through
+// `canonicalPair` to decide whether the taker is standing in the source worktree and falls back
+// to the lexical spelling when either does not resolve. Say that rather than "no I/O" — the
+// retired wording was false once `whereAdviceLines` joined the surface. Every property
 // below was previously graded only end to end: each arm assertion in
 // test-session-trail-verdict.sh costs two node spawns and can reach the array
 // only through a JSON payload. Two branches had no executed case ANYWHERE for
@@ -14,7 +20,10 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 const mod = await import(new URL('../../skills/session-trail/scripts/trail.mjs', import.meta.url));
 
@@ -62,7 +71,7 @@ test('WORKTREE_ADVICE_COMMAND accepts exactly two spaces and rejects every other
 });
 
 test('adviceBlock coalesces a contiguous command run into ONE fence', () => {
-  const out = mod.adviceBlock(['lead', '  one', '  two', '  three', 'tail'], '   ', '   ');
+  const out = mod.adviceBlock(['lead', '  one', '  two', '  three', 'tail'], '   ', '   ', { carrier: 'markdown' });
   assert.equal(out.filter((l) => l.trim().startsWith('```bash')).length, 1);
   assert.equal(fenceOf(out, 'one'), 1);
   assert.equal(fenceOf(out, 'two'), 1);
@@ -70,7 +79,7 @@ test('adviceBlock coalesces a contiguous command run into ONE fence', () => {
 });
 
 test('adviceBlock splits a run broken by a column-zero prose line into TWO fences', () => {
-  const out = mod.adviceBlock(['lead', '  one', 'read this first', '  two'], '   ', '   ');
+  const out = mod.adviceBlock(['lead', '  one', 'read this first', '  two'], '   ', '   ', { carrier: 'markdown' });
   assert.equal(out.filter((l) => l.trim().startsWith('```bash')).length, 2);
   assert.equal(fenceOf(out, 'one'), 1);
   assert.equal(fenceOf(out, 'two'), 2);
@@ -82,17 +91,17 @@ test('adviceBlock splits a run broken by a column-zero prose line into TWO fence
 // placement of `firstPrefix` on that one line.
 test('adviceBlock puts firstPrefix on the fence when the array OPENS with a command', () => {
   assert.deepEqual(
-    mod.adviceBlock(['  only'], '   ', '- '),
+    mod.adviceBlock(['  only'], '   ', '- ', { carrier: 'markdown' }),
     ['', '- ```bash', '   only', '   ```', ''],
   );
 });
 
 test('adviceBlock on an empty array returns an empty array', () => {
-  assert.deepEqual(mod.adviceBlock([], '   ', '   '), []);
+  assert.deepEqual(mod.adviceBlock([], '   ', '   ', { carrier: 'markdown' }), []);
 });
 
 test('adviceBlock on a single prose line prefixes it with firstPrefix and opens no fence', () => {
-  const out = mod.adviceBlock(['just prose'], '   ', '- ');
+  const out = mod.adviceBlock(['just prose'], '   ', '- ', { carrier: 'markdown' });
   assert.deepEqual(out, ['- just prose']);
 });
 
@@ -178,7 +187,7 @@ test('the emitted recipe names the patch lifetime and gives the temp file a find
 // READ FIRST, and an argument about execution order only holds if the human stops
 // between the third command and the fourth. A column-zero prose line breaks the run.
 test('the destructive apply is not in the same paste unit as the steps that gate it', () => {
-  const rendered = mod.adviceBlock(mod.worktreeAdvice(rec({ app: { archived: true } })), '   ', '   ');
+  const rendered = mod.adviceBlock(mod.worktreeAdvice(rec({ app: { archived: true } })), '   ', '   ', { carrier: 'markdown' });
   const gate = fenceOf(rendered, 'apply --stat');
   const grep = fenceOf(rendered, 'grep -nE');
   const destructive = fenceOf(rendered, 'apply "$PATCH"');
@@ -266,6 +275,38 @@ test('the gone leg does not deny surviving work and then point at a surviving ro
     assert.ok(/SUBDIRECTORY of a root that still exists/.test(text),
       `the gone leg dropped the surviving-root remedy (archived=${archived})`);
   }
+});
+
+// The gone leg used to order a substitution for `<their worktree>` — the token the
+// carry-over recipe is built around — and to say the recipe "DOES apply" against a
+// surviving root. No carrier renders that recipe on this leg: `worktreeAdvice` returns
+// before the `...CARRY_OVER` spread, `cmdShow`'s pointer to the verbs that would print
+// it is gated on the PRESENT leg, and `recipePlaceholders` scans COMMAND lines only, so
+// a token named in prose never enters the printed substitution rule. The reader was
+// therefore told to substitute a third token four lines under a rule block that had just
+// finished naming two. The control is the other half of the same fact and is what keeps
+// this from passing on a body that lost the recipe everywhere: the PRESENT leg carries
+// that token in a runnable line, so the needle is live.
+test('the gone leg orders no substitution into a recipe no carrier prints there', () => {
+  const present = mod.worktreeAdvice(rec({ app: { archived: true } }));
+  assert.ok(commands(present).some((l) => l.includes('<their worktree>')),
+    'the present leg no longer carries the recipe token, so this needle proves nothing');
+  for (const archived of [true, false, null]) {
+    const lines = mod.worktreeAdvice(rec({ app: archived === null ? null : { archived }, cwdExists: false }));
+    const text = lines.join('\n');
+    assert.ok(!text.includes('<their worktree>'),
+      `the gone leg still names the recipe's own placeholder (archived=${archived})`);
+    assert.ok(/prints no carry-over recipe at all/.test(text),
+      `the gone leg does not say the recipe is absent here (archived=${archived})`);
+  }
+  // The same claim, one carrier over. `whereAdviceLines` passes an EMPTY mapping on this leg
+  // — the head's own labelled value is there to be read, not pasted — so a head sentence
+  // telling the reader what "the advice below substitutes" describes a substitution that does
+  // not happen. It survived the body fix because it lives in a different function; the pinned
+  // read-not-paste and re-quote needles are unaffected and stay in the sibling case below.
+  const goneHead = whereHead(mod.whereAdviceLines(whereRow({ cwdExists: false }), null));
+  assert.ok(!/substitutes/.test(goneHead),
+    `the gone-leg head still claims the advice below substitutes something:\n${goneHead}`);
 });
 
 // `cmdShow` prints every advice line into a SURVEY view with a nine-space prefix and
@@ -380,7 +421,7 @@ test('the copy step refuses a symlinked destination parent', () => {
 // that cannot run. Nothing graded that, because every fence assertion named the four apply
 // commands.
 test('the copy loop renders as ONE fence, opener and closer together', () => {
-  const rendered = mod.adviceBlock(mod.worktreeAdvice(rec({ app: { archived: true } })), '   ', '   ');
+  const rendered = mod.adviceBlock(mod.worktreeAdvice(rec({ app: { archived: true } })), '   ', '   ', { carrier: 'markdown' });
   const open = fenceOf(rendered, 'while IFS=');
   const close = fenceOf(rendered, 'done');
   assert.ok(open !== null && close !== null, `the loop is outside a fence (while=${open} done=${close})`);
@@ -525,16 +566,23 @@ test('the emitted rationale describes the bound the command actually uses', () =
     'the reason the chain uses && rather than exit is stated in SKILL.md and not here');
 });
 
-// ONE decision, FOUR consumers — the same count `trail.mjs`'s own header and CLAUDE.md
+// ONE decision, FIVE consumers — the same count `trail.mjs`'s own header and CLAUDE.md
 // carry. The renderer test below (`no renderer re-derives the leg by hand`) enumerates only
-// THREE of them; `cmdAdopt` is the fourth and is graded by the derived-population check
-// further down and by nothing else. `worktreeAdvice` picks its lead AND its
+// THREE of them; `whereAdviceLines` and `cmdAdopt` are the fourth and fifth, and both are graded
+// by the derived-population check further down and by nothing else. This comment said FOUR for a
+// round after `cmdAdopt` became a consumer in its own right, while the derived check five lines
+// below already asserted the true five-set and therefore stayed green — the exact shape a
+// hand-maintained census beside a derived one produces. `worktreeAdvice` picks its lead AND its
 // body from it (those two drifted apart inside one function once, which is how a gone lead
 // came to sit above a present body); `cmdShow` decides from the same answer whether to print
-// its "the recipe is not in this view" pointer, and it would otherwise print that pointer on
-// an arm that emits no carry-over, which no fixture would catch because none renders a
-// gone-leg `show`; `printResume` decides whether to print its own copy of the gone-leg
-// create command; and `cmdAdopt`'s `printWhereAdvice` decides whether to render the
+// its "The uncommitted half needs a carry-over recipe this view does not print." pointer, and
+// it would otherwise print that pointer on an arm that emits no carry-over, which NO ARM
+// asserts the absence of — the reason is the arm set and not the fixture set, and saying
+// "no fixture renders a gone-leg `show`" was false in both halves: `SHOW_MD` in
+// test-session-trail-verdict.sh is built from the `-0002` record, which that file's own
+// comment labels the DIRECTORY-GONE leg, so the gone-leg render exists and it is the
+// PRESENT-leg one that no `show` fixture covers; `printResume` decides whether to print its own copy of the gone-leg
+// create command; and `whereAdviceLines`, which `cmdAdopt` renders, decides whether to emit the
 // `'<their worktree>' = …` mapping line at all, the recorded path being the substitution
 // value on the present leg only.
 test('the leg decision has one implementation, and it answers both legs', () => {
@@ -550,37 +598,48 @@ test('the leg decision has one implementation, and it answers both legs', () => 
 // declared unreadable, immediately followed by the recipe that reads it.
 test('no renderer re-derives the leg by hand', () => {
   const src = fs.readFileSync(new URL('../../skills/session-trail/scripts/trail.mjs', import.meta.url), 'utf8');
+  // COMMENTS ARE STRIPPED, as the three sibling whole-file walks in this file already do. This
+  // one scanned raw source, so a future explanatory comment spelling `r.cwdExists` inside one of
+  // these bodies would redden it for a reason unrelated to its contract — and `worktreeAdvice`'s
+  // own header already discusses `cwdExists`, surviving only because it omits the `r.` prefix.
+  const stripComments = (text) => text.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
   const body = (name, open) => {
     const i = src.indexOf(open);
     assert.ok(i !== -1, `${name} not found`);
-    return src.slice(i, src.indexOf('\n}\n', i));
+    return stripComments(src.slice(i, src.indexOf('\n}\n', i)));
   };
-  // `cmdShow` is deliberately NOT in this list, and the reason is stated rather than left to
-  // be rediscovered: it reads `r.cwdExists` legitimately, for the `!! MISSING` marker, so the
-  // same blanket predicate would fail on correct code. Its leg derivation is therefore graded
-  // only by the narrower assertion below.
+  // `cmdShow` IS in this list now, and the exclusion it replaces is worth recording because it
+  // went stale silently. It read `r.cwdExists` for the `!! MISSING` marker, so the blanket
+  // predicate would have failed on correct code — and the narrow slice that stood in for it
+  // started at the advice render, which put the marker OUTSIDE the graded region. Then the
+  // round that gave `cmdShow` a complete WHERE head hoisted `adviceLeg(r)` into one local ~40
+  // lines BELOW that marker, so one view derived the same fact twice, through two derivations,
+  // and the scan was anchored past the first of them. The marker now renders from the hoisted
+  // leg, `cmdShow` holds no `r.cwdExists` at all, and the blanket form is therefore available
+  // — which is strictly stronger than a widened slice, because it needs no anchor to stay
+  // correct as the function moves.
   for (const [name, open] of [
     ['worktreeAdvice', 'function worktreeAdvice(r, options = {}) {'],
     ['printResume', 'function printResume(r) {'],
+    ['cmdShow', 'function cmdShow(opts) {'],
   ]) {
     assert.ok(!/r\.cwdExists/.test(body(name, open)),
       `${name} still derives the leg from r.cwdExists instead of adviceLeg`);
   }
-  // The `cmdShow` half, scoped to the WHERE block so the legitimate `!! MISSING` read is not
-  // swept up: between the advice render and the write-anchor lines, the leg comes from
-  // `adviceLeg` and from nothing else.
-  const show = src.slice(src.indexOf('const wtAdvice = worktreeAdvice(r, { carryOver: false });'));
-  const where = show.slice(0, show.indexOf('writesLines('));
-  assert.ok(where.includes("adviceLeg(r) === 'present'"),
+  // The blanket list asserts ABSENCE and nothing else, so on its own it is satisfied by a
+  // `cmdShow` that derives the leg some third way — or not at all. The positive half is what
+  // the retired slice carried and must not be lost with it. The CALL, not the comparison:
+  // `cmdShow` hoists the answer into one local, and pinning `adviceLeg(r) === 'present'` would
+  // forbid that hoist rather than the hand-derivation.
+  assert.ok(body('cmdShow', 'function cmdShow(opts) {').includes('adviceLeg(r)'),
     'cmdShow no longer takes its leg from adviceLeg');
-  assert.ok(!/r\.cwdExists/.test(where),
-    'cmdShow re-derives the leg by hand inside the WHERE block');
 });
 
-// The population is DERIVED, not counted. "Four consumers" is asserted in prose in three
+// The population is DERIVED, not counted. "Five consumers" is asserted in prose in three
 // carriers — this file, `trail.mjs`'s own header and CLAUDE.md — and the renderer scan above
-// grades only renderers it NAMES, so a fifth consumer that uses `adviceLeg` correctly would
-// leave all three prose copies stale with every check green. Scanning the call sites and
+// grades only renderers it NAMES, so a sixth consumer that uses `adviceLeg` correctly would
+// leave all three prose copies stale with every check green. That is not hypothetical: it
+// happened when `cmdAdopt` became the fifth, and this check passed throughout. Scanning the call sites and
 // comparing the SET is the repo's own idiom for exactly this (`T36-control` derives its
 // citation population by scanning both documents rather than counting its own rows).
 //
@@ -593,7 +652,7 @@ test('no renderer re-derives the leg by hand', () => {
 // status and display sites, which is why `cmdShow` is already excluded by hand above. The
 // standing instruction is prose, in `trail.mjs`'s header and in CLAUDE.md: before adding a
 // renderer that depends on the leg, grep `cwdExists`.
-test('the adviceLeg consumer set is exactly the four the carriers name', () => {
+test('the adviceLeg consumer set is exactly the five the carriers name', () => {
   const src = fs.readFileSync(new URL('../../skills/session-trail/scripts/trail.mjs', import.meta.url), 'utf8');
   const lines = src.split('\n');
   // The walk STOPS at a column-zero `}`. Without that it never sees a function END, so a
@@ -616,10 +675,18 @@ test('the adviceLeg consumer set is exactly the four the carriers name', () => {
     if (/^function adviceLeg\b/.test(l) || l.trim().startsWith('//') || l.startsWith('export ')) return;
     callers.add(enclosing(i));
   });
-  // `cmdAdopt` joined with the adopt-advice route: its `printWhereAdvice` renders the
-  // placeholder mapping on the PRESENT leg only, because that is the only leg where the
-  // recorded path IS the substitution value.
-  assert.deepEqual([...callers].sort(), ['cmdAdopt', 'cmdShow', 'printResume', 'worktreeAdvice'],
+  // `whereAdviceLines` joined with the adopt-advice route: it hands the renderer a placeholder
+  // mapping on the PRESENT leg only, because that is the only leg where the recorded path IS
+  // the substitution value. It is named here rather than `cmdAdopt` because the renderer was
+  // extracted to module scope — the consumer is the FUNCTION that reads the leg, and this
+  // walk attributes a site to its enclosing function.
+  //
+  // `cmdAdopt` is a consumer in its OWN right now: its failure payload names the leg, because
+  // that is what tells a machine reader whether the recorded path may be substituted for
+  // `'<their worktree>'` or is the one the body forbids substituting. Deriving that from
+  // `row.cwdExists` at the payload would be the raw re-derivation this decision was extracted
+  // to remove, and a gated key would make absence ambiguous against an older tool.
+  assert.deepEqual([...callers].sort(), ['cmdAdopt', 'cmdShow', 'printResume', 'whereAdviceLines', 'worktreeAdvice'],
     'the adviceLeg consumer set moved — update the count and the roster in trail.mjs\'s header, '
     + 'in this file\'s header and in CLAUDE.md §"Takeover Destination" together');
 });
@@ -687,31 +754,106 @@ test(CENSUS_CASE_TITLE, () => {
     if (/^function briefShellArg\b/.test(l)) return;
     if (bindingLines.has(i)) return;
     const direct = l.includes('briefShellArg(');
-    const viaBinding = [...bindings.keys()].some((n) => l.includes('${' + n + '}'));
+    // TWO spellings, because the mapping moved into `substitutionRuleLines` and took the
+    // interpolated one with it. A bound value used to reach a rendered line as `${S}`; it now
+    // reaches the renderer as a bare `S` inside a `['<token>', S]` pair. Recognizing only the
+    // first made the binding half of this walk decorative — the assertion below says so in as
+    // many words — and dropped two real carriers out of the census at the same time.
+    const viaBinding = [...bindings.keys()].some((n) => l.includes('${' + n + '}')
+      || new RegExp(',\\s*' + n + '\\s*\\]').test(l));
     if (!direct && !viaBinding) return;
     // The census's own three classes, decided from the rendered line. The MAPPING test runs
     // first: class (c) is the one shape that is not a runnable line at all, and one of its
-    // members would otherwise read as class (a) for want of a `git -C`.
-    const cls = /'<[^']*>' = /.test(l) ? 'c (placeholder mapping)'
+    // members would otherwise read as class (a) for want of a `git -C`. It has TWO spellings
+    // since the mapping moved into `substitutionRuleLines`: the rendered `'<token>' = value`
+    // line the renderer emits, and the `['<token>', value]` PAIR a caller hands it. Recognizing
+    // only the first left the one remaining caller-side mapping in the residual, which is the
+    // class this split exists to keep empty.
+    // Class (a) is EXPLICIT and the residual is named `UNCLASSIFIED`, because an implicit
+    // residual is the shape this repository records as a defect elsewhere: a carrier of a
+    // genuinely new kind — a `git --git-dir` form, a `tar -C` extraction, both of which the
+    // skill prose already discusses — would land in (a) by default and the class assertion
+    // would then report a MOVED member where a NEW class arrived, sending the maintainer to
+    // reconcile the wrong prose. All five of today's (a) members carry `cd -- `.
+    const cls = /'<[^']*>' = /.test(l) || /\['<[^']*>', /.test(l) ? 'c (placeholder mapping)'
       : l.includes('git -C ') ? 'b (operate on a worktree)'
-        : 'a (reach a worktree)';
+        : /\bcd -- |claude --resume /.test(l) ? 'a (reach a worktree)'
+          : 'UNCLASSIFIED';
     carriers.push({ line: i + 1, fn: enclosing(i), cls, onlyViaBinding: !direct && viaBinding });
   });
+  // The binding walk recognizes ONE syntactic form, so a binding written any other way — a
+  // two-line `const U =` / `  briefShellArg(…)`, a `var`, a value returned from a helper —
+  // leaves its `${U}` USES uncollected while the binding line itself is miscounted as a direct
+  // carrier. This assertion is deliberately INDEPENDENT of `carriers`: an earlier spelling
+  // walked the same four-way filter the carrier loop applies and then excluded every line that
+  // loop had pushed, which made it tautologically empty and unable to fail at all. What it
+  // compares instead is the STRICT binding form against a LOOSE one, so a shape the strict form
+  // misses is named rather than silently reclassified. The loose pattern cannot match a direct
+  // carrier: those interpolate as `= ${briefShellArg(`, with `${` between the operator and the
+  // call.
+  //
+  // BOUND, stated rather than implied: this is a SINGLE-LINE scan, so it sees a `let`, a `var`,
+  // an unusual spacing or a reassignment — and it does NOT see a two-line initializer
+  // (`const U =` then `briefShellArg(…)`) or a value returned from a helper, because neither
+  // puts the operator and the call on one line. Those two surface instead as a changed
+  // per-function roster below, whose message says to update the census; a maintainer meeting
+  // them there should widen the binding form rather than lower that expectation.
+  //
+  // Counted against `strictBindings.length`, NOT `bindings.size`: the map is keyed by NAME, so
+  // two same-named bindings in different functions — `const S = briefShellArg(…)` in two
+  // renderers — would collapse to one entry and report an initializer form that does not exist.
+  const strictBindings = [];
+  const looseBindings = [];
+  lines.forEach((l, i) => {
+    if (isComment(l) || /^function briefShellArg\b/.test(l)) return;
+    if (/^\s*const ([A-Za-z0-9_]+) = briefShellArg\(/.test(l)) strictBindings.push(i);
+    if (/=\s*briefShellArg\(/.test(l)) looseBindings.push(`  trail.mjs:${i + 1}  ${l.trim()}`);
+  });
+  assert.equal(looseBindings.length, strictBindings.length,
+    'a briefShellArg binding uses an initializer form this walk does not recognize, so its '
+    + '${name} uses are collected as nothing — widen the binding regex:\n' + looseBindings.join('\n'));
   const table = carriers.map((c) => `  trail.mjs:${c.line}  ${c.cls}  ${c.fn}${c.onlyViaBinding ? '  (via binding)' : ''}`).join('\n');
   const tally = (key) => carriers.reduce((acc, c) => { acc[c[key]] = (acc[c[key]] || 0) + 1; return acc; }, {});
   // The ROSTER, per enclosing function. `continuationPlan` carries SEVEN, which is the number
   // that makes the total reconcile: the census moved from six to twelve as 6 − 1 + 7, and a
   // spelling that says six there leaves the total unreachable by one.
   assert.deepEqual(tally('fn'), {
-    continuationPlan: 7, printResume: 2, cmdTakeover: 1, cmdHandoff: 1, cmdAdopt: 1,
+    continuationPlan: 6, printResume: 2, cmdTakeover: 1, cmdHandoff: 1, whereAdviceLines: 1,
   }, 'the briefShellArg carrier roster moved — update the census above `briefShellArg` in '
     + 'trail.mjs and this expectation together:\n' + table);
+  assert.equal(tally('cls').UNCLASSIFIED, undefined,
+    'a briefShellArg carrier matches none of the three classes — it is a NEW kind rather than '
+    + 'a moved member, so widen the classifier and the census prose together rather than '
+    + 'reconciling the split below:\n' + table);
   assert.deepEqual(tally('cls'), {
-    'a (reach a worktree)': 5, 'b (operate on a worktree)': 4, 'c (placeholder mapping)': 3,
-  }, 'the briefShellArg CLASS split moved — the census states FIVE / FOUR / THREE:\n' + table);
+    // Class (c) fell from three to TWO when `substitutionRuleLines` took over emitting the
+    // mapping line. `continuationPlan` used to render two mapping lines of its own; it hands
+    // the renderer ONE pair literal now, carrying both values, so two carriers on two lines
+    // became one carrier on one. The other member is `whereAdviceLines`'s own pair, whose
+    // value is an inline `briefShellArg(row.wt)` rather than a binding.
+    'a (reach a worktree)': 5, 'b (operate on a worktree)': 4, 'c (placeholder mapping)': 2,
+  }, 'the briefShellArg CLASS split moved — this expectation is the only statement of it, '
+    + 'because the census in trail.mjs deliberately carries the classification RULE and no '
+    + 'numerals:\n' + table);
+  // The roster and class assertions above already fail on a deleted `${name}` resolution:
+  // dropping it takes `continuationPlan` to five and class (c) to one, and both run first. So
+  // this one can never be what REPORTS the deletion, and saying it "has no other control" was
+  // an over-claim. What it guards is the maintainer's RESPONSE — lowering those two
+  // expectations to match rather than restoring the resolution — which is worth guarding and
+  // is a different thing. Leaving the over-claim in place is how the next reader concludes the
+  // roster does not cover the binding half and duplicates it.
   assert.ok(carriers.some((c) => c.onlyViaBinding),
     'no carrier is reachable ONLY through a binding, so the binding resolution in this walk '
     + 'is now decorative and a `const U = briefShellArg(…)` could hide one:\n' + table);
+  // The census states the classification RULE and no counts. A hand-maintained numeral beside
+  // a derived scan is a lagging copy of it, and this one had already contradicted itself: the
+  // block said SIX non-carriers in one sentence and SEVEN in the next, four lines apart, while
+  // warning in between that the subtrahend moves whenever the paragraph is reworded.
+  for (const stale of ['CHECKING IT BY GREP', 'subtract those seven', 'subtract those six']) {
+    assert.equal(src.includes(stale), false,
+      `the briefShellArg census still carries the hand-maintained grep arithmetic (${stale}) — `
+      + 'the derived scan in this case is the control, and a numeral beside it only goes stale');
+  }
   // The pointer back. The census sends a maintainer here by this case's exact title, so
   // without this a rename leaves that sentence naming a check the tree does not have — the
   // same drift class the census itself exists to prevent one level down.
@@ -730,4 +872,570 @@ test('every advice line is a two-space command or column-zero prose, on every ar
       assert.ok(ok, `line is neither a two-space command nor column-zero prose: ${JSON.stringify(line)}`);
     }
   }
+});
+
+// `adopt`'s `WHERE` head was a closure inside `cmdAdopt`, so its pure leg logic was
+// reachable only through the full CLI and was graded exclusively by two shell fixtures —
+// one of which had to `rm -rf` a real worktree to reach the gone leg at all. Its three
+// siblings are module-scope exported members of the same advice surface — two of them array
+// producers, `adviceLeg` a string one; this one closed over exactly one
+// variable and bought nothing a parameter would not. The taker's own worktree is a SECOND
+// parameter rather than a second closure read, because the caution below is the one thing
+// the head can say that depends on where the READER is standing.
+const whereRow = (over = {}) => ({
+  sessionId: 'sess-source-0000000000000000', wt: '/tmp/source-wt',
+  app: null, live: null, ccdStore: true, cwdExists: true, ...over,
+});
+
+test('whereAdviceLines is exported and renders the head on both legs', () => {
+  assert.equal(typeof mod.whereAdviceLines, 'function');
+  const present = mod.whereAdviceLines(whereRow(), null);
+  assert.ok(present[0].startsWith('WHERE    for '), `head: ${JSON.stringify(present[0])}`);
+  assert.equal(present[0].includes('!! MISSING'), false);
+  const gone = mod.whereAdviceLines(whereRow({ cwdExists: false }), null);
+  assert.ok(gone[0].includes('!! MISSING'), `gone head: ${JSON.stringify(gone[0])}`);
+});
+
+// The HEAD is everything before the advice body. `adviceBlock` renders at the caller's
+// two-space indent, so no line it produces can carry the head's eleven-space lead — which
+// is what lets these cases assert on the head alone. Asserting on the joined output would
+// find `<path>` and `<session-branch>` in `TAKE_YOUR_OWN` and pass while the head names
+// neither, which is the exact defect P1 reported.
+const whereHead = (out) => {
+  const head = [];
+  for (const l of out) {
+    if (l.startsWith('WHERE') || l.startsWith('           ')) head.push(l);
+    else break;
+  }
+  return head.join('\n');
+};
+
+test('the present-leg head names every unmapped placeholder and the receipt trap', () => {
+  const head = whereHead(mod.whereAdviceLines(whereRow(), null));
+  // The quoting rule is SPLIT, and that split is the correctness of it. `'<their worktree>'` is
+  // replaced together with its quotes ONLY because the value rendered above it already carries
+  // its own — two quoted words back to back join into one unquoted word. Every other
+  // placeholder is a BARE token the reader supplies, so taking its quotes with it strips the
+  // single-quoting this file calls its own neutralizer for `$( )`, `;`, `&&` and `|` — and
+  // `<session-branch>` is foreign-derived, where `git check-ref-format` admits all four.
+  assert.ok(head.includes("Replace '<their worktree>' TOGETHER WITH the quotes around it"),
+    `the mapped token's substitution rule is missing:\n${head}`);
+  assert.ok(head.includes('replace the token INSIDE the'),
+    `the head tells the reader to strip the quoting from the placeholders they supply:\n${head}`);
+  assert.ok(head.includes('LEAVE THE QUOTES THERE'), `no keep-the-quotes rule:\n${head}`);
+  assert.equal(head.includes('Replace each placeholder TOGETHER WITH'), false);
+  assert.equal(head.includes('Replace the placeholder'), false);
+  for (const ph of ['<path>', '<name>', '<session-branch>', '<your new worktree>']) {
+    assert.ok(head.includes(ph), `the head never names ${ph}:\n${head}`);
+  }
+  // The wrong antecedent the head exists to remove: the receipt line one step above prints
+  // `worktree: <edge.to.worktree>`, which is the tree the reader is ALREADY in. Substituting
+  // it for `<your new worktree>` applies another session's uncommitted diff over their own
+  // live work, so the head has to name that trap rather than merely leave the operand blank.
+  assert.ok(head.includes('NOT the worktree named on the receipt line above'),
+    `the head does not warn against the receipt line's own worktree:\n${head}`);
+  // `<name>` is the ONE placeholder the together-with-the-quotes rule does not govern: it sits
+  // INSIDE `'claude/<name>-cont'` (TAKE_YOUR_OWN), so replacing the quoted token drops the
+  // `claude/` prefix and the `-cont` suffix and produces an unquoted branch operand. The head
+  // must carve it out rather than state the rule over all five.
+  assert.ok(head.includes("write '\\'' for an apostrophe"),
+    `the head prescribes four hand-substitutions into quoted operands and never names the '\\'' idiom:\n${head}`);
+  // `<path>` and `<your new worktree>` are ONE directory under two spellings: the create line
+  // writes `<path>` and every destructive step writes `<your new worktree>`. A reader supplying
+  // two different values creates the tree in one place and applies the diff into another.
+  assert.ok(head.includes('the same directory'),
+    `the head does not say <path> and <your new worktree> are one directory:\n${head}`);
+});
+
+// Flow 5 step 6 documents a hand-resumed session, and a hand-resume lands the taker IN the
+// source's worktree. From that moment the carry-over's first step snapshots the source's
+// uncommitted work AND the taker's own, mixed — so "the carry-over half is still fully
+// actionable" is not sound on the route the paragraph serves. `cmdAdopt` has both values in
+// scope, so the head says so instead of leaving the reader to notice.
+// The trigger is EQUALITY, not containment, and the reason is what the two operands ARE. Both
+// are `worktreeRoot()` results, and that walk returns the nearest ancestor holding a `.git`
+// entry — so a plain subdirectory of the source worktree collapses to the source worktree
+// itself and equality already covers it. Containment-without-equality therefore requires the
+// taker's root to carry its OWN `.git`, which means a separate linked worktree: this
+// repository's own mandated continuation layout, `<main>/.claude/worktrees/<name>`. There the
+// caution's sentence is false — the patch step reads `git -C '<their worktree>' … diff HEAD` in
+// the MAIN tree, which does not see a separate worktree's uncommitted state — so containment
+// bought no true positive and one false warning on the layout the skill recommends.
+test('the head warns when the taker is standing in the source worktree', () => {
+  const marker = 'You are standing IN that tree';
+  const at = (taker) => whereHead(mod.whereAdviceLines(whereRow(), taker));
+  assert.ok(at('/tmp/source-wt').includes(marker), `equal paths raise no caution:\n${at('/tmp/source-wt')}`);
+  // A nested tree of the taker's OWN is not the source's worktree, and saying so was the
+  // defect this arm used to pin as intended behaviour.
+  assert.equal(at('/tmp/source-wt/sub').includes(marker), false);
+  assert.equal(at('/tmp/other-wt').includes(marker), false);
+  assert.equal(at('/tmp/source-wt-2').includes(marker), false);
+  assert.equal(at(null).includes(marker), false);
+  assert.equal(at('').includes(marker), false);
+});
+
+// Every arm of that ladder that CANNOT answer must SAY so. A falsy taker worktree used to take
+// neither branch — no caution, no disclosure, nothing — which is precisely the outcome the
+// GATE arm beside it exists to forbid: "a failed load must not silently change a verdict".
+// It is not hypothetical. `cmdAdopt`'s own success receipt spells
+// `flatPath(edge.to.worktree) || '(unknown)'`, so this change's code already admits the value
+// it passes here can be empty, and `boundPath` in the ledger module returns null for a path
+// over its length bound. The two unanswerable causes get DIFFERENT reasons on purpose: a
+// reader who is told the module did not load goes looking at the installation, and a reader
+// whose own worktree was never resolved has a different thing to check.
+test('an unanswerable standing-in check discloses its own reason', () => {
+  const marker = 'could not be checked here';
+  for (const taker of [null, '', undefined]) {
+    const head = whereHead(mod.whereAdviceLines(whereRow(), taker));
+    assert.ok(head.includes(marker),
+      `a falsy taker worktree emitted neither the caution nor a disclosure (${JSON.stringify(taker)}):\n${head}`);
+    assert.ok(head.includes('was not resolved'),
+      `the disclosure does not name the taker's own worktree as the missing operand:\n${head}`);
+  }
+  // The ANSWERABLE arm must not acquire a disclosure it does not need.
+  const answered = whereHead(mod.whereAdviceLines(whereRow(), '/tmp/other-wt'));
+  assert.equal(answered.includes(marker), false,
+    `a resolvable comparison still disclosed that it could not be made:\n${answered}`);
+});
+
+// The CANONICALIZING branch, which every case above leaves unexercised: those paths do not
+// exist, so `canonicalPair` takes its lexical fallback and the equality it reports is a string
+// comparison. The property the design argument rests on is the other one — that two different
+// SPELLINGS of one directory compare equal — and nothing proved it at any layer.
+test('two spellings of one directory raise the standing-in-source caution', (t) => {
+  let real;
+  let link;
+  try {
+    real = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'wt-canon-')));
+    link = path.join(path.dirname(real), `${path.basename(real)}-link`);
+    fs.symlinkSync(real, link, 'dir');
+  } catch {
+    // A filesystem that refuses a symlink is an environment property, not a contract failure.
+    t.skip('could not create a symlinked second spelling');
+    return;
+  }
+  // The OTHER environment cause, which the guard above cannot see: this case needs
+  // `canonicalPair`, and `canonicalPair` needs a usable gate module. Where that module is
+  // missing the renderer takes its could-not-check arm, `standingIn` stays false, and the
+  // assertion below would blame the filesystem for a module-load fault — pointing a maintainer
+  // at the wrong component. Probe the renderer's own disclosure instead of guessing.
+  if (whereHead(mod.whereAdviceLines(whereRow(), '/tmp/other-wt')).includes('could not be checked here')) {
+    t.skip('the path-comparison module is not usable here, so this case cannot measure canonicalPair');
+    try { fs.unlinkSync(link); } catch { /* best effort */ }
+    try { fs.rmSync(real, { recursive: true, force: true }); } catch { /* best effort */ }
+    return;
+  }
+  try {
+    const head = whereHead(mod.whereAdviceLines(whereRow({ wt: real }), link));
+    assert.ok(head.includes('You are standing IN that tree'),
+      `a symlinked second spelling of the same directory raised no caution:\n${head}`);
+  } finally {
+    try { fs.unlinkSync(link); } catch { /* best effort */ }
+    try { fs.rmSync(real, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+});
+
+// The gone leg's body tells the reader to run the carry-over "against the root that still
+// exists, substituting it for <their worktree>" — so it DOES prescribe a substitution into a
+// single-quoted operand, and the only candidate path on the carrier is this one. It stays
+// `flatPath`, because the value the reader substitutes is a PREFIX of it rather than the value
+// itself, and quoting a path they are not going to paste would invite pasting it. What was
+// missing is the sentence saying so.
+// DERIVED, and this is the case that says so — with the expectation taken from the RECIPE
+// ARRAYS rather than from `recipePlaceholders`. The first spelling of this case graded the
+// renderer against the very function the renderer calls, which is tautological in the one
+// direction that matters: a derivation defect could not fail it. The tokens below are read
+// out of the rendered body with an independent scan.
+//
+// A rule whose placeholder set is handed in by the caller is one more copy of that set, and
+// the copy is what drifts. The renderer also emits the MAPPING lines now: a caller that
+// spells its token once in a rendered line and once in an argument has the same hand-copy the
+// extraction was justified by removing.
+//
+// SCOPE THE INDEPENDENCE CLAIM, because half of it is a hand-copy. What is independent is the
+// SET: this scanner collects, dedupes and orders the tokens itself, so a defect in
+// `recipePlaceholders`' collection fails the equality both ways. What is SHARED, by copy, is
+// the indent PREDICATE — `/^ {2}\S/` is `WORKTREE_ADVICE_COMMAND` re-spelled — so a change to
+// what counts as a runnable line moves both halves together and this case cannot see it. The
+// copy is deliberate: importing the exported constant would make the predicate independent by
+// construction and delete the only cross-check there is on the collection.
+const tokensIn = (lines) => {
+  const seen = [];
+  for (const line of lines) {
+    if (!/^ {2}\S/.test(line)) continue;
+    for (const t of line.match(/<[^<>\n]+>/g) || []) if (!seen.includes(t)) seen.push(t);
+  }
+  return seen;
+};
+
+test('the substitution rule names exactly the placeholders of the recipe it governs', () => {
+  const body = mod.worktreeAdvice(whereRow());
+  const expected = tokensIn(body);
+  assert.ok(expected.length >= 4,
+    `the recipe carries too few placeholders for this case to mean anything: ${JSON.stringify(expected)}`);
+  const rule = mod.substitutionRuleLines(body, [['<their worktree>', "'/tmp/source-wt'"]],
+    { indent: '  ', carrier: 'terminal' }).join('\n');
+  // EVERY token the runnable lines carry is named, and the set is exactly that — both
+  // directions, so a rule naming a token the recipe does not carry fails here too.
+  for (const token of expected) {
+    assert.ok(rule.includes(token), `the rule never names ${token}:\n${rule}`);
+  }
+  const named = [...new Set(rule.match(/<[^<>\n]+>/g) || [])];
+  assert.deepEqual(named.slice().sort(), expected.slice().sort(),
+    `the rule and the recipe name different sets:\n  rule:   ${JSON.stringify(named)}\n  recipe: ${JSON.stringify(expected)}`);
+  // The renderer emits its OWN mapping line, so the token is spelled once at the call site.
+  assert.ok(rule.includes("'<their worktree>' = '/tmp/source-wt'"),
+    `the renderer did not emit the mapping line it was given:\n${rule}`);
+  assert.ok(rule.includes("Replace '<their worktree>' TOGETHER WITH the quotes"),
+    `the mapped token lost its own rule:\n${rule}`);
+  assert.equal(rule.includes('<their worktree> are yours to supply'), false,
+    `a token the tool maps is also listed as the reader's to supply:\n${rule}`);
+  // The SENTENCE is scoped to what was scanned. Widening the scan to prose was the other
+  // option and it makes the quoting claim false for MORE tokens, not fewer: a prose
+  // occurrence is genuinely unquoted. Scoping the claim is what makes it checkable.
+  assert.ok(rule.includes('runnable line'),
+    `the rule quantifies over the whole recipe while it was derived from the runnable lines only:\n${rule}`);
+  // No POSITIONAL word: one carrier prints this rule after its body, and "below" then points
+  // at a different block carrying the opposite rule.
+  assert.equal(/\bbelow\b/.test(rule), false, `the rule still names a position:\n${rule}`);
+  // A token added to a runnable line enrols itself, with no second list to maintain.
+  const grown = body.concat(["  git -C '<a brand new operand>' status"]);
+  const grownRule = mod.substitutionRuleLines(grown, [], { indent: '  ', carrier: 'terminal' }).join('\n');
+  assert.ok(grownRule.includes('<a brand new operand>'),
+    `a placeholder added to the recipe did not reach the rule, so the set is not derived:\n${grownRule}`);
+  // A placeholder named only in PROSE stays out, deliberately: the rule governs runnable
+  // operands, and prose in these arrays quotes shell syntax freely.
+  const prosed = body.concat(['A sentence mentioning <not an operand> in passing.']);
+  assert.equal(mod.substitutionRuleLines(prosed, [], { indent: '  ', carrier: 'terminal' })
+    .join('\n').includes('<not an operand>'), false,
+    'a placeholder named only in prose was pulled into the rule');
+});
+
+// THE CARRIER decides how a token is rendered, not the caller's indent. On the two PERSISTED
+// briefs this text is markdown prose, and `<path>` is a well-formed HTML tag name there: a
+// renderer or a sanitizer drops it, leaving "Nothing here is substituted for you: , , and are
+// yours to supply." The only statement of which values a reader must supply becomes empty on
+// the one carrier a different session opens.
+test('the markdown carrier renders every placeholder as a code span', () => {
+  const body = mod.worktreeAdvice(whereRow());
+  const md = mod.substitutionRuleLines(body, [], { indent: '   ', carrier: 'markdown' }).join('\n');
+  for (const token of tokensIn(body)) {
+    assert.ok(md.includes('`' + token + '`'),
+      `the markdown carrier renders ${token} as raw HTML:\n${md}`);
+  }
+  const term = mod.substitutionRuleLines(body, [], { indent: '   ', carrier: 'terminal' }).join('\n');
+  assert.equal(term.includes('`<path>`'), false,
+    `the terminal carrier acquired markdown code spans:\n${term}`);
+  assert.ok(term.includes('<path>'), `the terminal carrier lost the token entirely:\n${term}`);
+});
+
+test('the gone leg says its recorded path is for reading, not for pasting', () => {
+  const head = whereHead(mod.whereAdviceLines(whereRow({ cwdExists: false }), null));
+  assert.ok(head.includes('recorded worktree (gone) = '), `no labelled value on the gone leg:\n${head}`);
+  assert.ok(head.includes('shown for reading, not for pasting'),
+    `the gone-leg value carries no read-not-paste caution:\n${head}`);
+  assert.ok(head.includes('quote it yourself'),
+    `the gone leg never tells the reader to re-quote before building a -C operand:\n${head}`);
+  // The gone-leg BODY emits quoted placeholders of its own and the head used to prescribe
+  // nothing about them at all, while the present leg one arm over carries a rule about
+  // replacing a token together with its quotes. A reader who carries that habit across strips
+  // the quoting off an operand this leg never mapped. Both legs state the rule that governs
+  // the placeholders they actually render.
+  //
+  // DERIVED, never spelled out here. The first version of this case hardcoded the pair it
+  // believed that body carried, which pinned the renderer's own derivation defect in place:
+  // when the derivation was wrong the case agreed with it. The expectation comes off the
+  // rendered body now, so the two cannot agree by construction.
+  assert.ok(head.includes('LEAVE THE QUOTES THERE'),
+    `the gone leg renders quoted placeholders and prescribes nothing about them:\n${head}`);
+  assert.ok(head.includes("write '\\'' for an apostrophe"),
+    `the gone leg prescribes a hand substitution into a quoted operand without the '\\'' idiom:\n${head}`);
+  const goneTokens = tokensIn(mod.worktreeAdvice(whereRow({ cwdExists: false })));
+  assert.ok(goneTokens.length >= 2,
+    `the gone body carries too few placeholders for this case to mean anything: ${JSON.stringify(goneTokens)}`);
+  for (const ph of goneTokens) {
+    assert.ok(head.includes(ph), `the gone-leg head never names ${ph}:\n${head}`);
+  }
+  // And it must NOT acquire the mapped half: nothing on this leg carries a pre-quoted value.
+  assert.equal(head.includes('TOGETHER WITH the quotes'), false,
+    `the gone leg offers a together-with-the-quotes rule for a value it never maps:\n${head}`);
+});
+
+// `adviceBlock` emits literal ```bash markers, and the justification everywhere in this repo
+// is "one fence is one COPY BUTTON" — a MARKDOWN-renderer property. `adopt` prints to a
+// terminal, where those three backticks bound no selection and a reader who selects the block
+// pastes them into a shell that answers `command not found`. The coalescing walk still owns
+// the paste-unit split; only the marker is carrier-specific.
+// ONE documented `--json` key, THREE producers, and they do not share an input shape: `show`
+// and `takeover` pass `hydrate(resolve(...))`, `adopt` passes the BARE `resolve(...)` row.
+// SKILL.md's adopt row tells a consumer the key behaves "as show and takeover already do",
+// which asserts exactly the equivalence the input shapes do not guarantee. It holds today
+// because every field the advice path reads is a `buildIndex` ROW-LITERAL field rather than a
+// `summarize` key — and that argument was enforced by nothing, so adding one `summarize`-
+// supplied read to any advice arm would make the same key carry different values for the same
+// session depending on which verb produced it, with every suite green.
+//
+// Hydrating inside `cmdAdopt` would close it too and was DECLINED: `hydrate` re-summarizes the
+// whole transcript and that verb needs it for nothing else, so the cost lands on a confirmation
+// command that is otherwise pure. The derived population below is the cheaper half of the same
+// guarantee, and it is the shape the sibling census case already uses.
+test('every row field the advice path reads is supplied by the buildIndex row literal', () => {
+  const src = fs.readFileSync(new URL('../../skills/session-trail/scripts/trail.mjs', import.meta.url), 'utf8');
+  const lines = src.split('\n');
+  const isComment = (l) => l.trim().startsWith('//');
+  const start = lines.findIndex((l) => /^\s*const row = \{$/.test(l));
+  assert.ok(start >= 0, 'the buildIndex row literal could not be located, so this walk is vacuous');
+  const supplied = new Set();
+  let spread = false;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^\s*\};\s*$/.test(lines[i])) break;
+    if (isComment(lines[i])) continue;
+    if (lines[i].includes('...s')) { spread = true; continue; }
+    const m = /^\s*([A-Za-z0-9_]+)\s*[,:]/.exec(lines[i]);
+    if (m) supplied.add(m[1]);
+  }
+  assert.ok(supplied.size > 0, 'no row-literal keys were collected, so this walk is vacuous');
+  assert.ok(spread, 'the buildIndex row literal no longer spreads summarize() — re-derive which '
+    + 'keys are row-literal and which are transcript-derived before trusting this case');
+  // `title` is deliberately NOT added. It arrives through the `...s` spread — `summarize()`
+  // emits the key unconditionally and the statement after the literal only BACKFILLS it from
+  // the desktop-app record — so whitelisting it would let an advice arm read exactly the class
+  // of field this case exists to forbid, and `hydrate` re-derives it from a deep summarize, so
+  // the two call shapes can genuinely disagree about its value.
+  const bodyOf = (name) => {
+    const i = lines.findIndex((l) => new RegExp(`^function ${name}\\(`).test(l));
+    assert.ok(i >= 0, `the advice-path function ${name} could not be located`);
+    if (/\}\s*$/.test(lines[i]) && lines[i].includes('return')) return [lines[i]];
+    const out = [];
+    for (let j = i; j < lines.length; j += 1) { out.push(lines[j]); if (lines[j] === '}') break; }
+    return out;
+  };
+  const read = new Set();
+  for (const fn of ['worktreeAdvice', 'adviceLeg', 'whereAdviceLines']) {
+    for (const l of bodyOf(fn)) {
+      if (isComment(l)) continue;
+      for (const m of l.matchAll(/\b(?:r|row)\.([A-Za-z0-9_]+)\b/g)) read.add(m[1]);
+    }
+  }
+  assert.ok(read.size > 0, 'no row-field reads were found in the advice path, so this walk is vacuous');
+  const unsupplied = [...read].filter((k) => !supplied.has(k)).sort();
+  assert.deepEqual(unsupplied, [],
+    'the advice path reads a row field the buildIndex row literal does not supply, so it comes '
+    + 'from summarize() and `adopt --json` (which passes the BARE row) now disagrees with '
+    + '`show --json` and `takeover --json` for the same session:\n  ' + unsupplied.join('\n  ')
+    + '\n  supplied: ' + [...supplied].sort().join(' '));
+});
+
+test('adviceBlock renders unfenced when the caller asks for it', () => {
+  // `git one |` leaves the command OPEN, so `git two` is a continuation of it rather than a
+  // second command — which is what keeps the expected prompt count at two while the block
+  // still holds three command lines. A fixture of three independent commands would now
+  // legitimately carry three prompts, and would stop grading the continuation rule at all.
+  const lines = ['Prose line.', '  git one |', '  git two', 'More prose.', '  git three'];
+  const fenced = mod.adviceBlock(lines, '  ', '  ', { carrier: 'markdown' });
+  const plain = mod.adviceBlock(lines, '  ', '  ', { carrier: 'terminal' });
+  // `fenced` used to test the DEFAULT and now tests the explicit markdown BRANCH: the carrier
+  // became required, so the default-behaviour case this pair once carried disappeared with the
+  // default itself. Recorded here rather than silently converted — the discrimination the pair
+  // exists for (fence versus prompt) is unchanged, but it no longer says anything about what an
+  // omitted argument does, and the two refusal cases at the foot of this file own that now.
+  assert.ok(fenced.some((l) => l.includes('```bash')), 'the markdown branch lost its fence');
+  assert.equal(plain.some((l) => l.includes('```')), false,
+    `an unfenced render still carries a markdown fence:\n${plain.join('\n')}`);
+  // The SPLIT survives: the two blocks stay separated by the column-zero prose line, so the
+  // command that WRITES is still not in the same paste unit as the steps that gate it.
+  const idxTwo = plain.findIndex((l) => l.includes('git two'));
+  const idxProse = plain.findIndex((l) => l.includes('More prose.'));
+  const idxThree = plain.findIndex((l) => l.includes('git three'));
+  assert.ok(idxTwo < idxProse && idxProse < idxThree, `the paste units collapsed:\n${plain.join('\n')}`);
+  for (const l of plain) {
+    if (l.trim()) assert.ok(l.startsWith('  '), `an unfenced line lost the caller's indent: ${JSON.stringify(l)}`);
+  }
+  // The MARKER, on the first line of every COMMAND and nowhere else. Without an assertion the `$ ` could
+  // be deleted with every suite green, because the order and indent checks above hold either
+  // way and `L70`'s needles are substrings that match a prefixed line too.
+  assert.equal(plain.filter((l) => l.includes('$ ')).length, 2,
+    `one prompt per COMMAND, not per line and not none:\n${plain.join('\n')}`);
+  assert.ok(plain.some((l) => l === '  $ git one |'), `the block opener carries no prompt:\n${plain.join('\n')}`);
+  assert.ok(plain.some((l) => l === '    git two'), `a continuation line carries a prompt:\n${plain.join('\n')}`);
+  assert.ok(plain.some((l) => l === '  $ git three'), `a later command in its own block carries no prompt:\n${plain.join('\n')}`);
+  // The UNFENCED branch's `firstPrefix`, which had no case at all: every call site in the tree
+  // passes it equal to `indent`, so the value `open` carries was unobservable and the arm could
+  // be collapsed to `indent` with every suite green. Its fenced twin is pinned exactly; this is
+  // the same pin on the other branch. The array OPENS with a command, which is the only shape
+  // that reaches the arm.
+  assert.deepEqual(mod.adviceBlock(['  only'], '   ', '- ', { carrier: 'terminal' }),
+    ['', '- $ only', ''],
+    'the unfenced branch ignored the caller\'s firstPrefix on a leading command');
+});
+
+// The REAL array through the terminal carrier's own option. Every other unfenced assertion in
+// this file drives a synthetic three-command fixture, so the shape `cmdAdopt` actually ships —
+// `CARRY_OVER`, whose untracked-copy step is ONE construct spanning a dozen entries — reached no
+// layer. A per-line prompt on that construct asserts twelve separate commands and breaks the
+// `&&`, `|` and `do…done` chain for anyone who pastes it, and nothing would have reported it.
+// The marker marks a COMMAND, not a block. One prompt per block was the fix for a per-line
+// spelling that broke the copy loop's `while … do … done` construct, and it overshot: the
+// first block of `CARRY_OVER` holds THREE independent commands — take the patch, grep it for
+// symlink and executable modes, list what it would change — and only the first was marked.
+// The other two rendered prompt-less at a deeper indent, which reads as OUTPUT of the line
+// above them. Those two are exactly the steps that exist to be READ before the destructive
+// apply, so a reader who takes them for output skips the gate and runs the write blind.
+//
+// A continuation line is one the shell is still waiting to finish: the previous line ended in
+// `|`, `&&`, `||`, `\`, `do` or `then`, or we are inside a `do … done` / `then … fi` body.
+// Everything else starts a command and carries its own prompt.
+test('every independent command in a block carries its own prompt, and no continuation line does', () => {
+  const out = mod.adviceBlock(mod.worktreeAdvice(rec({ app: { archived: true } })), '  ', '  ', { carrier: 'terminal' });
+  const marked = (needle) => {
+    const line = out.find((l) => l.includes(needle));
+    assert.ok(line, `the recipe never rendered ${needle}:\n${out.join('\n')}`);
+    return line.includes('$ ');
+  };
+  // The three independent reads of the first block.
+  assert.ok(marked('PATCH="$(mktemp'), 'the patch step lost its prompt');
+  assert.ok(marked('grep -nE'), 'the mode grep renders as output of the line above it');
+  assert.ok(marked('apply --stat'), 'the --stat listing renders as output of the line above it');
+  // The destructive apply, in its own block.
+  assert.ok(marked('apply "$PATCH" && rm -f'), 'the destructive apply lost its prompt');
+  // The copy loop: two assignments, then one pipeline whose body must stay unmarked.
+  assert.ok(marked("SRC='<their worktree>'"), 'the loop preamble lost its prompt');
+  assert.ok(marked('DSTR=$(CDPATH='), 'the destination resolve is a command of its own');
+  assert.equal(marked('while IFS='), false, 'a continuation of a pipeline carries its own prompt');
+  assert.equal(marked('n=$(printf'), false, 'a line inside the loop body carries its own prompt');
+  assert.equal(marked('  done'), false, 'the loop terminator carries its own prompt');
+});
+
+test('the real recipe renders unfenced with one prompt per block and its split intact', () => {
+  const out = mod.adviceBlock(mod.worktreeAdvice(rec({ app: { archived: true } })), '  ', '  ', { carrier: 'terminal' });
+  assert.equal(out.some((l) => l.includes('```')), false, `a markdown fence on the terminal carrier:\n${out.join('\n')}`);
+  // BY CONTENT, and anchored on nothing. The selector used to be `/^\s+(?:done|…)/`, which
+  // cannot match a line the regression it targets would have produced: under a per-line prompt
+  // those lines render `  $ done`, where the character after the leading spaces is `$` and the
+  // keyword alternation never gets its turn. The filter came back empty, the precondition below
+  // fired instead, and the assertion this case is named for could never bite. Measured on all
+  // four spellings before the change.
+  const loopBody = out.filter((l) => /(?:\bdone\s*$|while IFS=|n=\$\(printf)/.test(l) && !l.includes('SRC='));
+  assert.ok(loopBody.length >= 3, `the copy loop did not render:\n${out.join('\n')}`);
+  // None of these is the FIRST line of its block — that is `SRC=… DST=…` — so none may carry a
+  // prompt. This is the assertion the per-line spelling failed: it marked all twelve.
+  for (const l of loopBody) {
+    assert.equal(l.includes('$ '), false,
+      `a continuation line of the copy loop carries its own prompt: ${JSON.stringify(l)}`);
+  }
+  // The SPLIT the renderer owns, asserted on the carrier that ships rather than on the fenced
+  // one: the destructive apply must not sit in the same blank-line-delimited block as the two
+  // read steps that gate it.
+  const blockOf = (needle) => {
+    let n = 0;
+    let prevBlank = true;
+    for (const l of out) {
+      if (!l.trim()) { prevBlank = true; continue; }
+      if (prevBlank) n += 1;
+      prevBlank = false;
+      if (l.includes(needle)) return n;
+    }
+    return null;
+  };
+  const stat = blockOf('apply --stat');
+  const apply = blockOf('apply "$PATCH"');
+  assert.ok(stat !== null && apply !== null, `a carry-over step did not render:\n${out.join('\n')}`);
+  assert.notEqual(apply, stat, `the destructive apply shares a paste unit with the steps that gate it:\n${out.join('\n')}`);
+});
+
+// A REAL SHELL, not a regex. `CARRY_OVER` and `TAKE_YOUR_OWN` are shell programs authored as
+// JavaScript string arrays, and roughly twenty assertions in this file grade them by pattern —
+// every one of which holds while the composed script fails to parse. The tree's own shell-parse
+// oracle, tests/structure/bash32-substitution-scan.js, selects candidates with
+// `name.endsWith('.sh')`, so it cannot see a line of this recipe; CLAUDE.md records that bound
+// in §"bash 3.2 Command-Substitution Truncation" as an accepted limitation. This closes it for
+// the one recipe a reader is invited to paste and run.
+//
+// Per BLOCK rather than per line, because a block is the paste unit and a line of the copy loop
+// is not a program on its own. The blocks are taken the way `adviceBlock` takes them — runs of
+// consecutive command lines — so this grades exactly what a reader copies.
+test('every rendered command block parses in a real shell', (t) => {
+  const probe = spawnSync('bash', ['-n', '-c', ':'], { encoding: 'utf8' });
+  if (probe.error || probe.status !== 0) {
+    // A host with no usable bash is an environment property, not a contract failure — the same
+    // ground the symlink case above skips on.
+    t.skip('no usable bash on PATH');
+    return;
+  }
+  // FROM THE RENDERER, not from the source array. What a reader pastes is what `adviceBlock`
+  // coalesced into one unit; re-deriving the split here meant a change to that coalescing —
+  // the thing that decides the paste unit — could never reach this check. Both legs, because
+  // the gone leg renders a command of its own and reached no shell at all.
+  let graded = 0;
+  for (const row of [rec({ app: { archived: true } }), rec({ app: { archived: true }, cwdExists: false })]) {
+    const rendered = mod.adviceBlock(mod.worktreeAdvice(row), '  ', '  ', { carrier: 'terminal' });
+    const blocks = [];
+    let current = [];
+    for (const line of rendered) {
+      // A rendered COMMAND is either marked (`  $ cmd`) or a continuation, which `adviceBlock`
+      // indents two further spaces past the caller's indent. PROSE sits at the caller's indent
+      // with no marker — the same two spaces a source-array command carries, which is why the
+      // source-array predicate cannot be reused on rendered output.
+      const code = line.replace(/^\s*\$ /, '').replace(/^\s+/, '');
+      if (line.trim() === '') { if (current.length) { blocks.push(current); current = []; } continue; }
+      if (/^\s*\$ /.test(line) || /^ {4}\S/.test(line)) { current.push(code); continue; }
+      if (current.length) { blocks.push(current); current = []; }
+    }
+    if (current.length) blocks.push(current);
+    for (const block of blocks) {
+      const program = block.join('\n');
+      const r = spawnSync('bash', ['-n', '-c', program], { encoding: 'utf8' });
+      assert.equal(r.status, 0,
+        `a rendered block does not parse:\n${program}\n--- bash said ---\n${r.stderr || '(nothing)'}`);
+      graded += 1;
+    }
+  }
+  assert.ok(graded >= 4, `too few rendered blocks reached a shell across both legs: ${graded}`);
+});
+
+// TWO renderers, ONE carrier axis, and it is REQUIRED rather than defaulted. They used to
+// default in OPPOSITE directions — `adviceBlock` rendered MARKDOWN for an absent carrier and
+// `substitutionRuleLines` rendered TERMINAL — so a reader of either signature inferred the
+// wrong default for its sibling, and both persisted-brief call sites already relied on that
+// asymmetry by naming the carrier on one and omitting it on the other. The failure directions
+// are not symmetric either: a defaulted fence puts stray backticks on a terminal, while a
+// dropped code span lets a markdown sanitizer empty the token list and leave "Nothing here is
+// substituted for you: , , and are yours to supply." in a file a DIFFERENT session opens.
+//
+// REFUSING is the house answer for an argument of this class, not aligning the two defaults on
+// one value. `_autopilot_workspace_refusal` in this repository takes its audience as a
+// POSITIONALLY REQUIRED argument and refuses a two-argument call rather than falling back to a
+// form, for the same reason: the wrong value has a user-visible safety consequence, so omitting
+// it must be the thing a new call site trips over rather than something it inherits silently.
+// Aligning the defaults removes the contradiction and keeps the silent fallback.
+//
+// The THROW is safe here SPECIFICALLY because `main()` carries a total try/catch that flushes
+// before it reports, so a bad carrier surfaces as a reported cause rather than a half-written
+// brief. If that catch is ever removed, throwing becomes a partial-write hazard.
+test('adviceBlock refuses an absent or unrecognized carrier rather than defaulting', () => {
+  const lines = ['Prose line.', '  git one'];
+  assert.throws(() => mod.adviceBlock(lines, '  ', '  '), /carrier/,
+    'an omitted carrier still renders instead of refusing');
+  assert.throws(() => mod.adviceBlock(lines, '  ', '  ', {}), /carrier/,
+    'an empty options object still renders instead of refusing');
+  assert.throws(() => mod.adviceBlock(lines, '  ', '  ', { carrier: 'markdwon' }), /carrier/,
+    'a misspelled carrier still renders instead of refusing');
+  // BOTH recognized values still render, so the refusal cannot be satisfied by a function that
+  // throws unconditionally.
+  assert.ok(mod.adviceBlock(lines, '  ', '  ', { carrier: 'markdown' }).some((l) => l.includes('```bash')));
+  assert.equal(mod.adviceBlock(lines, '  ', '  ', { carrier: 'terminal' }).some((l) => l.includes('```')), false);
+});
+
+test('substitutionRuleLines refuses an absent or unrecognized carrier rather than defaulting', () => {
+  const body = mod.worktreeAdvice(rec({ app: { archived: true } }));
+  assert.throws(() => mod.substitutionRuleLines(body, [], { indent: '  ' }), /carrier/,
+    'an omitted carrier still renders instead of refusing');
+  assert.throws(() => mod.substitutionRuleLines(body, []), /carrier/,
+    'an omitted options object still renders instead of refusing');
+  assert.throws(() => mod.substitutionRuleLines(body, [], { indent: '  ', carrier: 'terminl' }), /carrier/,
+    'a misspelled carrier still renders instead of refusing');
+  const md = mod.substitutionRuleLines(body, [], { indent: '  ', carrier: 'markdown' }).join('\n');
+  const term = mod.substitutionRuleLines(body, [], { indent: '  ', carrier: 'terminal' }).join('\n');
+  assert.ok(md.includes('`<path>`'), `the markdown carrier stopped code-spanning:\n${md}`);
+  assert.equal(term.includes('`<path>`'), false, `the terminal carrier grew a code span:\n${term}`);
 });
