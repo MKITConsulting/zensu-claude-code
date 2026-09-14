@@ -2,8 +2,15 @@
 set -u
 
 # Behavioural contract for the session-trail TAKEOVER verdict (V*) AND for the
-# WRITES anchor (W1-W19, under their own banner below) — two contracts, one file,
-# because both are driven by the same synthetic-HOME fixture harness.
+# WRITES anchor (W*, under their own banner below) — two contracts, one file,
+# because both are driven by the same synthetic-HOME fixture harness. Beside those
+# two it also carries the WT8 family (the takeover-destination contract), the WC*
+# continuation block, and the `worktree-advice-v1.test.js` unit driver it runs near
+# the top of the file — that driver is why a case added to the unit file reddens a
+# suite named for the verdict. The families are named and NOT numbered: every
+# numeric range written into this banner has gone stale within a round, which is
+# the same hand-maintained-census failure the WT8 expectations record about
+# themselves. Re-grep before trusting any count.
 #
 # test-session-trail-skill.sh pins the verdict VOCABULARY against SKILL.md; it
 # cannot observe what the script decides. This suite runs trail.mjs against
@@ -77,17 +84,72 @@ WT_UNIT_RC=$?
 # failure. Copied in shape from test-session-trail-lineage.sh's driver for that reason.
 WT_UNIT_TOTAL="$(printf '%s' "$WT_UNIT_OUT" | sed -n 's/^.*[[:space:]]tests \([0-9][0-9]*\)$/\1/p' | tail -1)"
 WT_UNIT_PASS="$(printf '%s' "$WT_UNIT_OUT" | sed -n 's/^.*[[:space:]]pass \([0-9][0-9]*\)$/\1/p' | tail -1)"
+# SKIPPED is captured because `pass` and `skipped` are DISJOINT counters, and this driver
+# used to demand `pass = total`. One case in that file creates a symlinked second spelling
+# of a directory and calls `t.skip` where the filesystem refuses one -- an environment
+# property, which its own comment says is not a contract failure -- so on the weekly Windows
+# structure shard a DESIGNED skip reddened this suite. The sibling driver in
+# test-session-trail-lineage.sh already solved exactly this, and the comment below says this
+# one was copied in shape from it; the skip half was what the copy left behind.
+WT_UNIT_SKIP="$(printf '%s' "$WT_UNIT_OUT" | sed -n 's/^.*[[:space:]]skipped \([0-9][0-9]*\)$/\1/p' | tail -1)"
 case "$WT_UNIT_TOTAL" in ''|*[!0-9]*) WT_UNIT_TOTAL=0 ;; esac
 case "$WT_UNIT_PASS" in ''|*[!0-9]*) WT_UNIT_PASS=0 ;; esac
+case "$WT_UNIT_SKIP" in ''|*[!0-9]*) WT_UNIT_SKIP=0 ;; esac
 # EXACT, not a floor, and hand-maintained on purpose: a floor accepts a case that
 # quietly started skipping itself, and deriving the number from the file under test
 # would make the check agree with whatever that file currently says.
-WT_UNIT_TOTAL_WANT=42
-if [ "$WT_UNIT_RC" = "0" ] && [ "$WT_UNIT_TOTAL" = "$WT_UNIT_TOTAL_WANT" ] && [ "$WT_UNIT_PASS" = "$WT_UNIT_TOTAL_WANT" ]; then
-  check "WT-unit worktree-advice-v1.test.js passes ($WT_UNIT_PASS/$WT_UNIT_TOTAL cases)" PASS
+#
+# WHAT AN EXACT COUNT CANNOT SEE IS SUBSTITUTION. Delete a case and add an unrelated one in
+# the same commit and the total is unchanged, every arm here passes, and the tree has lost a
+# control. Closing that in general means the hand-maintained roster this count exists to
+# avoid, so it is closed for ONE case only — the one whose loss would be invisible and whose
+# title is already a self-identifying literal that the census in trail.mjs quotes back. Apply
+# this shape to a case whose disappearance nothing else would report, never as a blanket rule.
+WT_UNIT_TOTAL_WANT=59
+# The skip BOUND is DERIVED from the file rather than hand-written, and then the derivation
+# itself is registered. A bare ceiling would accept a case that quietly started skipping
+# itself, which is the failure the exact-count comment above exists to prevent; counting the
+# `t.skip(` declarations means a new skip has to be registered here deliberately, while a
+# case that starts skipping without declaring one still cannot hide.
+# CASES, not declarations. A case may hold more than one `t.skip(` and still skip at most once,
+# so counting declarations admitted a higher `skipped` total than any declared route can reach:
+# three declarations sit in two cases today. The bound is the number of cases that can skip.
+WT_UNIT_SKIP_CASES="$(node -e '
+const fs = require("fs");
+const lines = fs.readFileSync(process.argv[1], "utf8").split("\n");
+let inCase = false;
+let counted = false;
+let cases = 0;
+for (const l of lines) {
+  if (/^test\(/.test(l)) { inCase = true; counted = false; continue; }
+  if (/^\}\);\s*$/.test(l)) { inCase = false; continue; }
+  if (inCase && !counted && l.includes("t.skip(")) { cases += 1; counted = true; }
+}
+process.stdout.write(String(cases));
+' "$PLUGIN_DIR/tests/structure/worktree-advice-v1.test.js")"
+case "$WT_UNIT_SKIP_CASES" in ''|*[!0-9]*) WT_UNIT_SKIP_CASES=0 ;; esac
+# CASES, matching what the walk above actually counts. The identifier and both messages said
+# "declarations" while the value has always been cases -- a case may hold more than one
+# `t.skip(`, and three declarations sit in two cases today -- so the name contradicted the
+# comment four lines above it that makes exactly this correction.
+WT_UNIT_SKIP_CASES_WANT=2
+if [ "$WT_UNIT_SKIP_CASES" != "$WT_UNIT_SKIP_CASES_WANT" ]; then
+  check "WT-unit-cases the cases that can skip in worktree-advice-v1.test.js drifted (source has $WT_UNIT_SKIP_CASES, the expectation is $WT_UNIT_SKIP_CASES_WANT)" FAIL
 else
-  check "WT-unit worktree-advice-v1.test.js (rc=$WT_UNIT_RC pass=${WT_UNIT_PASS:-0} total=${WT_UNIT_TOTAL:-0}, want exactly $WT_UNIT_TOTAL_WANT cases all passing)" FAIL
+  check "WT-unit-cases the skip expectation matches the cases that can skip in the file ($WT_UNIT_SKIP_CASES)" PASS
+fi
+if [ "$WT_UNIT_RC" = "0" ] && [ "$WT_UNIT_TOTAL" = "$WT_UNIT_TOTAL_WANT" ] \
+  && [ "$WT_UNIT_SKIP" -le "$WT_UNIT_SKIP_CASES" ] \
+  && [ "$WT_UNIT_PASS" = "$((WT_UNIT_TOTAL - WT_UNIT_SKIP))" ]; then
+  check "WT-unit worktree-advice-v1.test.js passes ($WT_UNIT_PASS/$WT_UNIT_TOTAL cases, $WT_UNIT_SKIP skipped)" PASS
+else
+  check "WT-unit worktree-advice-v1.test.js (rc=$WT_UNIT_RC pass=${WT_UNIT_PASS:-0} total=${WT_UNIT_TOTAL:-0} skipped=${WT_UNIT_SKIP:-0}, want exactly $WT_UNIT_TOTAL_WANT cases, at most $WT_UNIT_SKIP_CASES skipped, and every unskipped case passing)" FAIL
   printf '%s\n' "$WT_UNIT_OUT" | tail -20
+fi
+if grep -qF 'the briefShellArg carrier population is derived' "$PLUGIN_DIR/tests/structure/worktree-advice-v1.test.js"; then
+  check "WT-unit the derived briefShellArg census case is still registered" PASS
+else
+  check "WT-unit the derived briefShellArg census case is gone — the twelve-carrier roster has no control left, and the exact total above cannot see a substitution" FAIL
 fi
 
 FAKE="$(mktemp -d -t zensu-session-trail-verdict-XXXXXX)" || FAKE=""
@@ -578,6 +640,164 @@ else
   check "V11f persisted brief carriers:$V11F_BAD" FAIL
 fi
 
+# -- V11g -- every carrier that RENDERS a quoted placeholder states how to substitute it --
+# The rule lived in exactly one renderer, `whereAdviceLines`, which only the `adopt` route
+# reaches. The two BRIEFS persist the same recipe into a file a different session opens, and
+# `show` prints the create line with three quoted placeholders of its own -- and none of the
+# three said a word about substitution. A reader who carries the mapped-value habit across
+# from `adopt` strips the quoting off an operand the tool never mapped, which is the exact
+# defect the split rule exists to prevent, on the carriers a human actually pastes from.
+SHOW_MD="$(trailrun show bbbbbbbb-0000-0000-0000-000000000002 --all 2>/dev/null)"
+V11G_BAD=""
+# A FUNCTION rather than an indirect expansion: the loop that preceded it read a variable
+# NAME through `eval`, and one lost dollar sign made every arm test the literal string "TAKEOVER_MD"
+# -- which contains none of the needles, so the check failed for a reason that had nothing to
+# do with the carriers. It reported the defect it was written for while measuring nothing.
+v11g_carrier() { # <label> <body>
+  case "$2" in "") V11G_BAD="$V11G_BAD $1-empty" ;; esac
+  case "$2" in *"LEAVE THE QUOTES THERE"*) ;; *) V11G_BAD="$V11G_BAD $1-no-inside-the-quotes-rule" ;; esac
+  case "$2" in *"for an apostrophe"*) ;; *) V11G_BAD="$V11G_BAD $1-no-apostrophe-idiom" ;; esac
+  case "$2" in *"Replace each placeholder TOGETHER WITH"*) V11G_BAD="$V11G_BAD $1-blanket-rule" ;; esac
+}
+# SCOPED for `show`, because that view prints the rule TWICE: its own, over the create line's
+# placeholders, and `continuationPlan`'s further down through `cont.lines`. Matching the whole
+# body meant the first one could be deleted and the second would satisfy every needle, so the
+# arm's bite depended on which branch `continuationPlan` happened to take in this fixture. The
+# slice is the WHERE block: from the advice head down to the WRITES section that follows it.
+#
+# THE TERMINATOR IS ASSERTED, not assumed. `[ -z "$SHOW_ADVICE" ]` alone could not see the
+# failure this slice exists to prevent: with no `^WRITES` line the awk runs to EOF, the slice
+# widens to the whole body, `continuationPlan`'s rule satisfies every needle, and the control
+# still reports a non-empty string. The control therefore asks the discriminating question --
+# did the terminator EXIST in the source, and does it sit BELOW the head the slice starts at --
+# so a renamed or MOVED WRITES head fails loudly instead of silently restoring the vacuity.
+#
+# OFFSETS, and the arm they replace is why. The third arm used to grep the SLICE for `^WRITES`,
+# which no input can ever satisfy: in `/^WHERE /{f=1} f && /^WRITES/{exit} f{print}` awk runs
+# the `exit` rule BEFORE the `print` rule for the same record, so a `^WRITES` line terminates
+# the slice instead of entering it. Measured directly. That left arm 2 as the only
+# discriminator, and arm 2 asks only whether a `^WRITES` line exists SOMEWHERE in the body --
+# so hoisting `writesLines(w)` above the WHERE block kept it green, ran the slice to EOF, and
+# restored exactly the vacuity this control was added to close. The offset comparison is the
+# instrument `L70m` already uses for the same class of question.
+SHOW_ADVICE="$(printf '%s\n' "$SHOW_MD" | awk '/^WHERE /{f=1} f && /^WRITES/{exit} f{print}')"
+V11G_WHERE_AT="$(printf '%s\n' "$SHOW_MD" | grep -n '^WHERE ' | head -1 | cut -d: -f1)"
+V11G_WRITES_AT="$(printf '%s\n' "$SHOW_MD" | grep -n '^WRITES' | head -1 | cut -d: -f1)"
+if [ -z "$SHOW_ADVICE" ]; then
+  check "V11g-control the WHERE block could not be sliced out of show, so the show arm is vacuous" FAIL
+elif [ -z "$V11G_WRITES_AT" ]; then
+  check "V11g-control show renders no ^WRITES head, so the WHERE slice ran to EOF and the show arm is vacuous" FAIL
+elif [ -z "$V11G_WHERE_AT" ]; then
+  check "V11g-control show renders no ^WHERE head, so the slice has no anchor and the show arm is vacuous" FAIL
+elif [ "$V11G_WRITES_AT" -le "$V11G_WHERE_AT" ]; then
+  check "V11g-control the WRITES head does not follow the WHERE head (where@$V11G_WHERE_AT writes@$V11G_WRITES_AT), so the slice ran to EOF and the show arm is vacuous" FAIL
+fi
+v11g_carrier TAKEOVER_MD "$TAKEOVER_MD"
+v11g_carrier HANDOFF_MD "$HANDOFF_MD"
+v11g_carrier SHOW_ADVICE "$SHOW_ADVICE"
+if [ -z "$V11G_BAD" ]; then
+  check "V11g both briefs and the survey view state the inside-the-quotes rule for the placeholders they render, and none states the blanket one" PASS
+else
+  check "V11g placeholder-rule carriers:$V11G_BAD" FAIL
+  printf '%s\n' "$TAKEOVER_MD" | grep -n 'Choose the working directory' || echo '(no advice section in the brief)'
+  printf '%s\n' "$TAKEOVER_MD" | grep -n -A 12 'Choose the working directory' | head -16
+fi
+
+# V11h -- the CARRIER each persisted brief renders its advice with, graded on the rendered brief
+# rather than on the argument. Nothing anywhere read those five production call sites: the only
+# `carrier:` spelling under tests/ was the unit file's own direct call, which builds its own
+# input, so flipping `cmdTakeover` or `cmdHandoff` to 'terminal' shipped raw `<path>` into a file
+# a DIFFERENT session opens with every suite green. The carrier axis is now REQUIRED rather than
+# defaulted, which removes the silent fallback -- it does not grade the value a call site picked,
+# and that is what this does.
+#
+# FOUR arms per brief, and only TWO of them grade anything — say which, because the wording
+# this replaces said "presence alone passes for at least one arm" and it is true of BOTH
+# positive arms. Arm 1 tests the whole brief for a ```bash fence, and each brief pushes an
+# unrelated one for its own `cd --` line (`cmdTakeover` and `cmdHandoff` both do, the latter
+# unconditionally), so it is satisfied whatever carrier the advice was rendered with. Arm 3 is
+# a whole-body glob for a code span and is satisfied by one span anywhere, including rows this
+# feature does not own. The BITE is arms 2 and 4, the two NEGATIVE ones: markdown emits no
+# `$ ` prompt, and its rule sentence spans every token it names. Measured on the shipped
+# renderer. Scoping arm 1 to the advice section, or deleting arms 1 and 3 outright, is the
+# repair -- deliberately NOT taken in the round that found this, which had already established
+# that four controls added the round before could not fail for the reasons they named, and
+# adding a fifth arm beside them repeats the practice rather than ending it.
+V11H_BAD=""
+v11h_brief() { # <label> <body>
+  case "$2" in "") V11H_BAD="$V11H_BAD $1-empty"; return ;; esac
+  case "$2" in *'```bash'*) ;; *) V11H_BAD="$V11H_BAD $1-no-fence" ;; esac
+  if printf '%s\n' "$2" | grep -q '^ *\$ '; then V11H_BAD="$V11H_BAD $1-terminal-prompt"; fi
+  case "$2" in *'`<'*'>`'*) ;; *) V11H_BAD="$V11H_BAD $1-no-code-span" ;; esac
+  # SCOPED TO THE RULE SENTENCE, deliberately, and not to every line outside a fence. The rule
+  # is derived from RUNNABLE lines only -- widening it to prose was weighed and rejected,
+  # because a prose occurrence is genuinely unquoted and the quoting claim would then be false
+  # for MORE tokens, not fewer -- so `CARRY_OVER`'s own prose legitimately carries a bare
+  # `<name>` and a bare `<their worktree>`, and a blanket arm here would reverse that pinned
+  # decision rather than grade the carrier. The rule's OWN enumeration is what flips with the
+  # carrier: markdown spans each token, terminal leaves it bare.
+  BARE="$(printf '%s\n' "$2" | awk '
+    /yours to supply|^ *Replace / {
+      line = $0; gsub(/`[^`]*`/, "", line);
+      if (line ~ /<[A-Za-z][^<>]*>/) print NR ": " $0
+    }')"
+  if [ -n "$BARE" ]; then V11H_BAD="$V11H_BAD $1-rule-names-a-token-outside-a-span"; fi
+}
+v11h_brief TAKEOVER_MD "$TAKEOVER_MD"
+v11h_brief HANDOFF_MD "$HANDOFF_MD"
+
+# V11i -- `show`'s WHERE head is a COMPLETE line and the advice paragraph renders contiguously
+# after the rule. It used to print `WHERE    ${wtAdvice[0]}`, and every `ADVICE_LEADS` cell is a
+# multi-line paragraph, so the head carried a SENTENCE FRAGMENT: the rule block was then printed
+# between it and its own continuation, and the reader met "…so treat this worktree as one" /
+# [six lines of quoting rule] / "that still belongs to an archivable session." Introduced by the
+# round that moved the rule ahead of the body -- the three sibling carriers put the rule after a
+# one-line head, and this one had no head to put it after.
+#
+# The head is pinned as a CLOSED LITERAL SET rather than by shape: a literal cannot be a
+# fragment, so re-splicing advice into it fails here by construction. The second arm is the
+# positive discriminator -- without it "the paragraph is contiguous" is trivially true for a
+# one-line lead, which is the shape that cannot exhibit the defect at all.
+#
+# KNOWN RESIDUAL, and it is LEG COVERAGE rather than a dead control. `SHOW_MD` is built from the
+# `-0002` fixture, which this file's own comment upstream labels the DIRECTORY-GONE leg, so only
+# the `GONE` member of the set is ever reached and the two arms below it are graded on that leg
+# alone. What that does NOT mean is that the check cannot fail: the head is a single ternary
+# inside one template literal, so reverting it to `wtAdvice[0]` yields a fragment on THIS
+# fixture and fails the set here. What escapes is narrower -- a reintroduction that SPLITS the
+# ternary and puts the fragment on the `present` arm only. A present-leg fixture is the repair
+# and is deliberately deferred to the control-porting round, for the reason stated at V11h.
+V11I_BAD=""
+SHOW_WHERE_HEAD="$(printf '%s\n' "$SHOW_ADVICE" | sed -n '1p')"
+case "$SHOW_WHERE_HEAD" in
+  'WHERE    the recorded worktree is present') ;;
+  'WHERE    the recorded worktree is GONE') ;;
+  *) V11I_BAD="$V11I_BAD head-is-not-a-complete-line" ;;
+esac
+# Every line after the rule block, to the end of the WHERE slice, at the survey prefix. The rule
+# ends at its own last sentence; the advice lead follows it and must run without interruption.
+SHOW_AFTER_RULE="$(printf '%s\n' "$SHOW_ADVICE" | awk '/yours to supply in the runnable lines\.$/{f=1; next} f && NF {print}')"
+SHOW_AFTER_N="$(printf '%s\n' "$SHOW_AFTER_RULE" | grep -c '[^[:space:]]' || true)"
+if [ "${SHOW_AFTER_N:-0}" -lt 2 ]; then
+  V11I_BAD="$V11I_BAD fewer-than-two-advice-lines-after-the-rule($SHOW_AFTER_N)"
+fi
+# NOTHING from the rule may reappear below it: a second run of rule text after the advice began
+# is the interleaving this check exists to reject, in the other direction.
+if printf '%s\n' "$SHOW_AFTER_RULE" | grep -q 'LEAVE THE QUOTES THERE'; then
+  V11I_BAD="$V11I_BAD rule-text-reappears-below-the-advice"
+fi
+if [ -z "$V11I_BAD" ]; then
+  check "V11i show renders a complete WHERE head, then the rule, then its advice paragraph contiguously ($SHOW_AFTER_N advice lines)" PASS
+else
+  check "V11i show WHERE block:$V11I_BAD (head was: $SHOW_WHERE_HEAD)" FAIL
+fi
+if [ -z "$V11H_BAD" ]; then
+  check "V11h both persisted briefs render their advice on the markdown carrier: fenced, no shell prompt, and every placeholder outside a fence in a code span" PASS
+else
+  check "V11h brief carrier:$V11H_BAD" FAIL
+  printf '%s\n' "$TAKEOVER_MD" | grep -n '<[A-Za-z]' | head -8
+fi
+
 # V12 — the suppressed queue is NAMED rather than silently dropped. Without this
 # the stale and truncated cases would be indistinguishable from "no queue", and
 # a reader could not tell an absent hazard from an unmeasurable one.
@@ -762,7 +982,7 @@ fi
 # V-clock report a lapsed budget for checks that were comfortably inside it.
 CLOCK_IDLE="$(field aaaaaaaa-0000-0000-0000-000000000001 takeover.idleMin)"
 
-# ── W1-W19 — the WRITES anchor, and the renderer bounds around it ───────────
+# ── W* — the WRITES anchor, and the renderer bounds around it ───────────────
 # A takeover into another worktree can edit and test but cannot commit: the Bash
 # source-write gate compares every write against the session's IMMUTABLE project
 # root, and nothing re-anchors a session. `show` therefore reports whether the

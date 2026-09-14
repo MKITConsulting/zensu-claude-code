@@ -3156,7 +3156,7 @@ positive on that ground.
 
 **SEVEN checks in `tests/structure/test-impl-stop-counter.sh` grade THIS FILE, and the
 coupling fires in the UNOBVIOUS direction** — the shape §"Gate-Disable Prefixes" records
-for G12 and §"Session Lineage Ledger" for its own two. An ordinary CLAUDE.md prose edit
+for G12 and §"Session Lineage Ledger" for its own three. An ordinary CLAUDE.md prose edit
 reddens a suite named for the implementing-turns counter, and nothing points at the remedy
 from the side that changes. They are: `C41`, which forbids a `<file>:<line>` source anchor
 ANYWHERE in this file and is filename-independent, so a source filename followed by a colon
@@ -5984,7 +5984,7 @@ indistinguishable from "no handover happened".
 segment quoted in `skills/session-trail/SKILL.md`, `tests/structure/session-lineage-v1.test.js`,
 and the `v1` path spelled throughout `tests/structure/test-session-trail-lineage.sh`.
 
-**Two couplings fire in the UNOBVIOUS direction**, the same shape §"Gate-Disable
+**THREE couplings fire in the UNOBVIOUS direction**, the same shape §"Gate-Disable
 Prefixes" records for G12 — an ordinary edit elsewhere reddens a suite named for
 something else, and nothing points at it from the side that changes:
 
@@ -5999,6 +5999,32 @@ something else, and nothing points at it from the side that changes:
   (`L41` the exact `c8` pin, `L41a` that the coverage run drives all three suites, `L41b`
   the include glob's quoting, `L41c-control`). So an ordinary dependency bump or npm-script
   edit reddens the session-trail lineage suite.
+- The `L70` family in that same suite grades §"Takeover Destination" content, not ledger
+  content, and it binds FOUR `trail.mjs` constants — not two — plus THREE `cmdAdopt` literals:
+  `apply --stat` is a `CARRY_OVER` literal, `Never continue in a worktree` is
+  `ADVICE_LEADS.active.present`, `This session is not archived, and the recorded directory
+  is gone` is `ADVICE_LEADS.active.gone` — bound by `L70g`, and reworded once already when
+  the previous needle came from the `survivor.gone` cell and reported a correct gone-leg
+  render as a failure — and `-b 'claude/<name>-cont'` is `TAKE_YOUR_OWN`. `L70` and `L70g`
+  additionally bind `whereAdviceLines`'s own `'<their worktree>' = `, `Replace '<their worktree>' TOGETHER WITH the quotes` -- and the retired blanket spelling `Replace each placeholder TOGETHER WITH` is now a NEGATIVE
+  needle in three checks rather than a bound line, so restoring it from this roster would
+  redden them --
+  and `recorded worktree (gone) = ` lines — plus the three literals that carry the P1 fix, the
+  unmapped-placeholder sentence, the `NOT the worktree named on the receipt line above` trap
+  and the gone leg's `shown for reading, not for pasting` caution — and `L70a-src` greps both
+  that renderer's source and `cmdAdopt`'s. **Two later members bind SYMBOLS rather than emitted
+  text, which widens the blast radius from a reword to a rename:** `L70n` takes comment-stripped
+  OFFSETS out of `cmdTakeover` and `cmdAdopt` and requires every throwing render
+  (`worktreeAdvice(`, `substitutionRuleLines(`, `adviceBlock(` in the first; `whereAdviceLines(`
+  in the second) to precede the durable write (`recordTakeoverEdge(`, `ledgerWrite(`), so
+  renaming ANY of those six — or moving a render back below its write — reddens this suite; and
+  `L70o` requires the adopt receipt's ledger path to be spelled `flatPath(path.join(LEDGER_DIR`.
+  So rewording any of those constants in `skills/session-trail/scripts/trail.mjs`, or
+  restructuring that function, reddens a suite named for the lineage ledger. This is the
+  third member, and the count above was carried at two in TWO places — here and in
+  §"Implementing-Phase Turn Counter", which cross-references "§\"Session Lineage Ledger\"
+  for its own three" — quoted in its CURRENT spelling, because a quote of the retired one
+  is a string a maintainer greps for and never finds. Both move together.
 
 **The DISPATCHER owns command-flag scoping, and two tables must stay key-identical.**
 `parseArgs` accepts every flag for every command, so a flag belonging to another verb
@@ -6204,7 +6230,8 @@ before it.
 
 **`tests/structure/test-session-trail-lineage.sh`'s Windows ceiling is MEASURED, and
 the measurement is now STALE — say so rather than quoting it as headroom.** The figure
-below was taken at 70 checks; the suite is at 268. The rule this section exists to
+below was taken at 70 checks; the suite has grown several times over since — read its own
+reported total rather than a numeral here, which has already drifted twice. The rule this section exists to
 record is that the ceiling is set from the FIRST GREEN WALL CLOCK on the shard, never
 estimated from the macOS time and never raised speculatively — so the number stands
 until a green Windows run replaces it, and until then the 9x ratio is what new checks
@@ -6374,8 +6401,9 @@ second exemption is indistinguishable from a forgotten `env -u`.
 ## Takeover Destination (`worktreeAdvice` in `skills/session-trail/scripts/trail.mjs`)
 
 **A THIRD session-trail axis, and the one most easily confused with the other two.**
-§"Git Mutation Tables" tracks the WRITE-ANCHOR contract — *may I write there* — in six
-carriers. §"Session Lineage Ledger" tracks a chain of sessions handing work to each
+§"Git Mutation Tables" tracks the WRITE-ANCHOR contract — *may I write there* — in NINE
+carriers (that section enumerates nine; this clause read "six" for a release, and the phrase
+wraps across two lines, which is why a line-local grep for it found nothing). §"Session Lineage Ledger" tracks a chain of sessions handing work to each
 other. This one asks *will the directory still exist while I work in it*, and it shares
 no code with either. All three live in the same skill; a change to one lands in none of
 the others.
@@ -6477,41 +6505,124 @@ floor: a floor survives deleting the `apply --stat` step from both carriers at o
 the edit the pin exists to stop. `T35b-control` guards both scans against an empty slice.
 
 **`WORKTREE_ADVICE_COMMAND` / `adviceBlock` are a producer/consumer contract between one
-array and two briefs.** A command line is one indented exactly two spaces; prose sits at
+array and THREE renderers** — `cmdTakeover` and `cmdHandoff`, which persist their output
+into a brief, and `cmdAdopt`, which prints to a terminal. Do NOT restate the count as
+"two briefs": that spelling was true until the `adopt` route began rendering the advice,
+and it is the census drift this same section records against itself twice below. A
+command line is one indented exactly two spaces; prose sits at
 column zero. It is deliberately NOT a `git `-anchored rule any more — `CARRY_OVER` opens
 with a `PATCH="$(mktemp …)" && …` line, and its copy loop carries `while`, `[`, `mkdir` and
 `done` lines besides — and the widening cuts both ways: a prose line that acquires
-a two-space lead-in is published inside a ```bash fence in two persisted briefs. `WT8p`
+a two-space lead-in becomes a COMMAND in every one of those three renderers, and in the two
+that persist a file someone else opens later it is published inside a ```bash fence as well —
+`cmdAdopt` renders `{ carrier: 'terminal' }`, because a terminal has no copy button. `WT8p`
 grades both directions structurally rather than against a verb allowlist. Before the
 extraction the two briefs disagreed about the same array — `cmdHandoff` re-fenced per line,
 `cmdTakeover` fenced nothing — so a recipe was runnable in one brief and prose in the other.
-Contiguous commands coalesce into ONE fence, and it takes TWO pins to hold that — one per
-renderer. `WT8q` drives `cmdTakeover` and `WT8q2` drives `cmdHandoff`, which is the call
+Contiguous commands coalesce into ONE block, and it takes ONE PIN PER RENDERER to hold that —
+TWO output pins for the two briefs, plus a SOURCE pin for the terminal carrier, whose block is
+delimited by a blank line and a prompt rather than by a fence. `WT8q` drives `cmdTakeover` and `WT8q2` drives `cmdHandoff`,
+which is the call
 site whose own comment names it as the origin of the per-line-fencing defect. One was not
 enough and that is measured, not argued: with only `WT8q`, reverting `cmdHandoff` alone
 left every check in both suites green. Both render a PRESENT-leg brief, which no other
 fixture here does — every other one is directory-gone, and a single isolated command cannot
 show coalescing at all. `WT8r` consumes those same two renders rather than making its own,
 and covers the other axis: the `r.cwdExists` prose branches in both briefs, graded against
-the gone leg so it cannot pass by rendering one branch twice.
+the gone leg so it cannot pass by rendering one branch twice. **There is no longer a THIRD
+split pin, and `L70e` is no longer one:** the `adopt` carrier's split is graded ONCE, at the
+unit layer, by `the destructive apply is not in the same paste unit as the steps that gate it`,
+and `L70e` was thinned to a source pin establishing WHICH RENDERER produced that carrier —
+three `grep -qF` literals over the extracted `whereAdviceLines` body — `const body =
+worktreeAdvice(row)`, `substitutionRuleLines(body,` and `adviceBlock(body,` — which pin the
+IDENTITY rather than the render alone: the array is hoisted, and the rule that renderer prints
+is derived from the very lines the block renders, so the same value must reach both. An earlier
+wording here quoted a single `adviceBlock(worktreeAdvice(row)` needle that matches nothing in
+the tree, the hoist having replaced it. That is
+the claim only this layer can make, and it is source-shaped, so an output walk was the wrong
+instrument for it twice over: the property is renderer-independent, and the terminal carrier
+stopped carrying a markdown fence at all. `L70`'s own fence needle is the NEGATIVE one now —
+`[markdown-fence-on-a-terminal-carrier]` — because `adopt` prints to stdout. The split pin for
+the BRIEFS arrived as a NEW sibling check rather than as a correction to
+`L70`, so a roster naming `L70` sends a maintainer to the check that does not hold the
+property.
 
-**Coalescing is now a TWO-SIDED property, and both pins assert the split as well.** One
+**Standing fix, named rather than taken:** the split is renderer-INDEPENDENT — it is
+owned jointly by `adviceBlock`'s coalescing and by `CARRY_OVER`'s column-zero prose line
+— so one pin per renderer scales linearly for a property that has one implementation.
+`adviceBlock` and `worktreeAdvice` are both exported, and THAT HALF ALREADY SHIPS: the
+unit case `the destructive apply is not in the same paste unit as the steps that gate it`
+in `tests/structure/worktree-advice-v1.test.js` grades the split directly through
+`mod.adviceBlock(mod.worktreeAdvice(...))`. What is still outstanding is THINNING the
+three renderer pins to a "this carrier went through `adviceBlock`" needle — say it that
+way, never "grade it once at the unit layer", or a maintainer taking the fix adds a
+second copy of a test that exists.
+**The fence-walk census is TWO implementations over TWO renderer pins, and it was three until
+`L70e` was thinned to a source pin.** `WT8q` and `WT8q2` do NOT each carry their own awk: both
+call one shared `fence_of()` in
+`tests/structure/test-session-trail-verdict.sh`. `L70e` carried an inline awk of its own and no
+longer does — it greps the renderer call instead, which is the claim that layer actually owns.
+And the SECOND implementation sits in the destination file — `fenceOf` in
+`worktree-advice-v1.test.js`, whose own comment says it mirrors `fence_of` — which a
+maintainer hunting for "three per-check awk walks" to delete would never reach. The
+mirror of this paragraph inside `test-session-trail-lineage.sh` carries the same
+correction and moves with it.
+
+**Operator-facing accounts that must move with it**, and the first two live in DIFFERENT
+steps — bundling them under one was wrong, because `T35`'s slice is anchored on
+`/^4\. \*\*Decide WHERE to continue/` and would extract a region the content sits outside
+of: `skills/session-trail/SKILL.md` flow 3 **step 4** carries the `CARRY_OVER` hand-copy,
+while flow 3 **step 3** carries the renderer enumeration that names three commands. Then
+the `adopt <selector>` row of that file's command table, its flow 5 step 6 paragraph, its
+§"What leaves the machine's project boundaries" paragraph, and the Safety section's
+`--no-record` bullet — the last FOUR all describe the `adopt` route's advice, and `T38` in
+`tests/structure/test-session-trail-skill.sh` now pins all four, slicing each passage on its
+own anchor so a reword of the `WHERE` head or of `worktreeAdvice`'s carry-over arm fails
+loudly instead of leaving them stale. The claim that nothing pinned them outlived the pin by
+a round, which is the drift this roster exists to catch and did not catch in itself. The Safety bullet joined that set only when the
+`--no-record` refusal's stated ground was corrected, and it was missed on the first pass.
+
+**Coalescing is now a TWO-SIDED property, and BOTH BRIEF renderer pins assert the split as
+well, the terminal carrier being graded at the unit layer instead — state the base, because "both pins" was written when there were two, and a first
+correction then said "TWO of the THREE" while its own closing sentence named the third
+grading it.** One
 fence is one COPY BUTTON, so coalescing all four carry-over commands put the destructive
 `git apply` in the same paste unit as the `grep` and the `apply --stat` that exist to gate
 it — and the "these steps sit between the diff and the apply" argument is about execution
 ORDER, which only holds if the human stops between the third command and the fourth. A
 column-zero prose line breaks `adviceBlock`'s run, so the two READING steps still coalesce
 (splitting those from each other would reintroduce the per-line fencing) while the
-destructive line sits in a later fence of its own. `WT8q`/`WT8q2` grade both halves, because
-either one alone is satisfied by the shape they exist to reject.
+destructive line sits in a later fence of its own. `WT8q`/`WT8q2` grade both halves for the
+two BRIEFS, because either one alone is satisfied by the shape they exist to reject. For
+`cmdAdopt` the split is graded at the UNIT layer instead, and `L70e` is a source pin on the
+renderer choice rather than a third fence walk — the terminal carrier renders
+`{ carrier: 'terminal' }`, so there are no fence indices there to walk, and `L70`'s fence needle
+is the NEGATIVE one. **The carrier is REQUIRED on both renderers and neither defaults.** They
+used to default in OPPOSITE directions — `adviceBlock` rendered markdown for an absent carrier,
+`substitutionRuleLines` rendered terminal — so each signature taught the wrong default for its
+sibling, and both persisted-brief call sites already relied on the asymmetry. `resolveCarrier`
+is the one reader and it THROWS outside `{'markdown','terminal'}`; that is safe only because
+`main()` flushes before it reports, so remove that catch and the throw becomes a partial-write
+hazard. Aligning the two defaults on one value was the cheaper end state and was REJECTED: it
+removes the contradiction and keeps a silent fallback on the axis whose wrong value lands in a
+file a different session opens, against the `_autopilot_workspace_refusal` precedent this file
+already records for a positionally-required audience argument.
 
-**A THIRD consumer renders the same array and no check reached it.** `cmdShow` prints every
+**`cmdShow` is the SURVEY consumer, and for a long time no check reached it.** Name the
+consumers by ROLE and never by ordinal: this paragraph opened "A THIRD consumer renders
+the same array" until a fourth arrived, which is the drift the heading two paragraphs up
+now warns about in its own words. There are FOUR — `cmdShow` (survey), `cmdTakeover` and
+`cmdHandoff` (briefs), and `cmdAdopt` (confirmation). `cmdShow` prints every
 line into a survey view with a nine-space prefix and no fence; when the carry-over recipe
 landed the array grew from roughly six lines to dozens, so `show` began dumping a
 paste-and-run recipe into the middle of the one output whose value is that you can scan it.
 `worktreeAdvice(r, { carryOver: false })` returns the decision half only, and `cmdShow`
-points at the briefs for the rest. The option is opt-OUT on purpose: the briefs are what a
-human pastes from, and a new caller that forgets it gets more rather than less. The `--json`
+points at the briefs for the rest — and at `adopt`, qualified, because that verb also
+writes a machine-wide ledger edge and is therefore not a read-only route to the recipe.
+The option is opt-OUT on purpose: the briefs are what a
+human pastes from, and a new caller that forgets it gets more rather than less — which is
+exactly what `cmdAdopt` wants, so it takes the default deliberately rather than by
+omission. The `--json`
 payload is deliberately NOT summarized — it is a data carrier, and every `wt_case` in the
 verdict suite reads the advice through it, which is what `WT8s` grades from both sides.
 
@@ -6523,7 +6634,7 @@ is exactly that shape: `session-lineage-v1.mjs` sits in the same directory with 
 `worktree-advice-v1.test.js`, for a module that does not exist. Importing the "pure" advice
 surface evaluates `claude-path-v1.js`, `bash-source-write-parse.js` and `session-lineage-v1.mjs`
 at load, because they are `trail.mjs`'s own imports. And `worktreeAdvice` can reach
-`process.exit` through `fail()`, which is not a thing a library does to its importer.
+`process.exit` through `fail()`, RETIRED: that refusal throws today, so this argument is discharged.
 
 What argued against taking it in the round that raised it is concrete rather than
 conservative: `T35`'s extractor anchors `^const CARRY_OVER = \[`, `^function worktreeAdvice\(`,
@@ -6532,8 +6643,68 @@ already gone dead once without a sound. Moving the constants re-points four anch
 `T35_EXPECT`, this roster and the unit file's import in one edit.
 
 **The trigger is a second importer, or the next change that has to re-point those anchors
-anyway.** The move carries three obligations: re-home `livePid`, replace the `fail()` call
-with a thrown error, and re-point the extractor.
+anyway.** The move now carries TWO obligations, not three: re-home `livePid` and re-point the
+extractor. The third — replacing the `fail()` call with a thrown error — is DISCHARGED: that
+refusal throws today and `main` flushes before reporting it, so the move is cheaper than this
+ledger said. The trigger was EVALUATED in the round that discharged it and did not fire:
+there is still no second importer, and that round re-pointed no `T35` anchor. Recorded so the
+next reader does not have to re-derive whether it was considered — it was.
+
+**ONE RENDERER owns the placeholder mapping and the rule that governs it**, and the rule's
+placeholder set is DERIVED from the recipe it is printed beside rather than handed in.
+`substitutionRuleLines` and `recipePlaceholders` in `trail.mjs` are that renderer and its
+scanner, and SIX carriers consume it: `whereAdviceLines` on both legs, `continuationPlan`,
+`cmdShow`'s WHERE head, and both persisted briefs. Three things about it are load-bearing and
+were each learned from a defect. It takes PAIRS and emits the mapping line ITSELF, because a
+caller that spells its token once in a rendered line and once in an argument is the hand-copy
+the extraction existed to remove. It takes the CARRIER rather than a bare indent, because on
+the two persisted MARKDOWN briefs a bare `<path>` is a well-formed HTML tag name that a
+renderer or a sanitizer drops, which emptied the only sentence naming what a reader must
+supply. And its sentence is SCOPED to runnable lines, because `recipePlaceholders` reads
+only those: widening the scan to prose makes the quoting claim false for MORE tokens, not
+fewer, since a prose occurrence is genuinely unquoted. It also carries no positional word —
+`cmdShow` prints this rule and then `continuationPlan`'s, which governs a different set, and
+while the text said "below" the first rule introduced the second rule's block. The unit
+layer derives its expectation from the recipe arrays, never from `recipePlaceholders`:
+grading the renderer against the function the renderer calls is tautological in the one
+direction that matters, and it pinned a wrong set in place for a round.
+
+**TAKEN, in the round that shipped its sibling: `adviceBlock`'s `fence` option named one
+symptom of what it selects.** The two branches differ in the markdown marker AND in how a
+command block is marked for a reader — a fence is a copy button, a terminal has neither — so
+the axis is the CARRIER, and `{ carrier: 'markdown' | 'terminal' }` is the option that reads
+as the condition rather than as one of its effects. This file already records the identical
+shape against itself for `ownDocumentVerdict(discloseWithoutKey)`: a boolean threads call-site
+identity through a value whose policy then lives only in a comment. It was deferred once, on the ground that the option is exported,
+consumed at ONE production call site plus four in the unit file across THREE cases, and read
+twice inside `adviceBlock` itself — a cross-file edit whose whole value is legibility. The
+deferral said to take it when something else already had to re-author those assertions, and
+that is exactly what happened: `substitutionRuleLines` grew a `carrier` option on the SAME axis,
+and two options naming one axis in two vocabularies is worse than either. Both now take
+`{ carrier: 'markdown' | 'terminal' }`. The earlier count in this paragraph said four call
+sites and two unit cases, which was wrong in both halves.
+
+**THE THROWING RENDER RUNS BEFORE THE DURABLE WRITE, in every verb that writes one.** Three
+functions in this surface can throw — `worktreeAdvice` on an `ADVICE_LEADS` cell it cannot
+resolve, and `adviceBlock` / `substitutionRuleLines` through `resolveCarrier`'s required-carrier
+refusal — and two verbs write a machine-wide ledger edge. `cmdTakeover` recorded its edge at the
+top of the verb and made its first `print` roughly 160 lines below, so a throw in between landed
+a durable edge with an EMPTY buffer for `main()` to flush: the edge existed and the `LINEAGE`
+line SKILL.md requires never appeared. **Announcing after the write is NOT the fix and was
+proposed as one**: that verb has TWO carriers and the `--json` one returns before any
+announcement could be reached, evaluating `worktreeAdvice(r)` inside the payload literal. The
+order is inverted instead — `cmdTakeover` builds its advice arrays above `recordTakeoverEdge`,
+`cmdAdopt` renders `whereAdviceLines` above `ledgerWrite` into one variable both its carriers
+push — which covers all four carriers at once and makes a render fault mean NO edge lands.
+`main()`'s flush-before-report is the backstop for everything downstream of the write, not the
+mechanism that makes the write safe; it was the stated mechanism for a release and covered only
+the text carrier. FOUR comment carriers assert this contract and must move together:
+`resolveCarrier`'s header, `worktreeAdvice`'s own THROW comment, `cmdAdopt`'s two (the second of
+which explicitly PRESCRIBED the old order and would have had the next round revert the fix), and
+`main()`'s choke-point comment. `L70n` in `tests/structure/test-session-trail-lineage.sh` pins
+the order by comment-stripped offsets. `cmdHandoff` is deliberately ungraded: it writes nothing
+durable, so it has no ordering to hold.
+
 
 **Known gaps, accepted and named:**
 
@@ -6566,13 +6737,29 @@ with a thrown error, and re-point the extractor.
   `firstPrefix`-on-a-leading-command arm is still dormant by construction — every arm opens
   with a prose sentence naming its cause — and it exists so the helper does not silently eat
   `cmdHandoff`'s `- ` bullet the first time an arm is reordered. `trail.mjs` now guards its
-  CLI dispatch on being the process entry point and exports FOUR names — `adviceBlock`,
-  `worktreeAdvice`, `adviceLeg` and `WORKTREE_ADVICE_COMMAND` — so
+  CLI dispatch on being the process entry point and exports SEVEN names — `adviceBlock`,
+  `worktreeAdvice`, `adviceLeg`, `whereAdviceLines`, `substitutionRuleLines`,
+  `recipePlaceholders` and `WORKTREE_ADVICE_COMMAND` — of which
+  `whereAdviceLines` is NOT pure: it canonicalizes two paths through `canonicalPair` to decide
+  whether the taker is standing in the source worktree, so the surface's own "plain record, no
+  filesystem" criterion is stated as "reads the filesystem only to canonicalize" now. So
   `tests/structure/worktree-advice-v1.test.js` drives that branch, an empty input and a
   single-line input directly. `adviceLeg` is the ONE implementation of the present/gone
-  decision, and it exists because that decision has three consumers: `worktreeAdvice` picks
-  its lead AND its body from it, `cmdShow` decides from the same answer whether to print the
-  pointer at the recipe its survey view withholds, and `printResume` decides whether to print
+  decision, and it exists because that decision has FIVE consumers. `whereAdviceLines` is the
+  fourth, deciding whether to render the placeholder mapping at all, and it was added with the
+  adopt-advice route while this census still read three; `cmdAdopt` is the FIFTH and it is a
+  consumer in its OWN right, naming `leg` in both its `--json` payloads so a machine consumer
+  is told whether the recorded path may be substituted. Both are named because the derived
+  scan attributes a site to the FUNCTION that reads the leg, and both functions now do:
+  `whereAdviceLines` was extracted to module scope and exported, and `cmdAdopt` calls
+  `adviceLeg` twice on its own. This census read FOUR for a round after that second call
+  landed, while the derived pin in `tests/structure/worktree-advice-v1.test.js` already
+  asserted the true five-set and therefore stayed green — the exact failure a hand-maintained
+  count beside a derived one produces, and the second time it has happened to this list.
+  `worktreeAdvice` picks
+  its lead AND its body from it, `cmdShow` reads it once into a hoisted local and uses it
+  twice — for its `WHERE` head and for the pointer at the recipe its survey view withholds —
+  and `printResume` decides whether to print
   its own copy of the gone-leg create command. Every one of those was a hand-written
   `r.cwdExists` at some point in this feature's history, and one of them drifted INSIDE a
   single function — the lead came from `adviceLeg` while the body came from a raw
@@ -6626,6 +6813,21 @@ with a thrown error, and re-point the extractor.
   graded) and the W13 case's `mkdir -p` (which is real but not first) — so name the helper
   and its first call site, not a line number that moves. Pre-existing, predates this rule,
   and it means one of the two hedged wordings has no executed case anywhere.
+
+**Version: `patch`.** Walked against §"Runtime Lineage" entry by entry so the next reader can
+CHECK the claim rather than re-derive it: no context-record or workflow-state schema field —
+`trail.mjs` writes neither; no strict key set — nothing here validates by exact key membership;
+no hook added, removed or renamed and no matcher changed; no config key; no attestation change;
+and no `permissionDecision` in either direction, this being a skill CLI rather than a hook.
+
+**The decisive check for this feature family is the DURABLE shape, and it is clean.**
+`skills/session-trail/scripts/session-lineage-v1.mjs` is untouched, so `LEDGER_SCHEMA_VERSION`,
+`makeEndpoint` / `ENDPOINT_KEYS` and `buildEdge` are byte-identical: nothing an older runtime
+wrote becomes unreadable, and nothing this build writes becomes unreadable to an older one.
+The `--json` payloads of `adopt` are an EXCHANGED shape rather than a persisted one — produced
+and consumed inside one invocation — and the `worktreeAdvice` key is read by no validator that
+rejects unknown keys. State the untouched-module sentence whenever this verdict is restated:
+it is the one fact that makes the walk checkable in a grep rather than by reading the diff.
 
 ## zen-mode Chain-Progress Anchor (`user-prompt-zen-mode.sh` rule 6)
 
