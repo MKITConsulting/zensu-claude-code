@@ -828,7 +828,10 @@ if grep -qE 'skippedNote\(\)' "$TRAIL_MJS" && grep -qE '^function flush\(\)' "$T
   # 14 -> 19: `lineage --forget` emits three payloads (unreadable ledger, dry run,
   # applied) and `label --remove` two (nothing to remove, removed). 19 -> 20: the
   # window-probe test seam emits its result on the same machine carrier.
-  [ "$JSON_EMITS" = "20" ] || GUARD_MISS="$GUARD_MISS [json-emit-count($JSON_EMITS, expected 20)]"
+  # 20 -> 21: `cmdAdopt`'s ledger-failure branch emits its own payload, because prose on
+  # stdout under --json is exactly what the `skippedNote` gate above exists to prevent
+  # and that branch is reachable by configuration (`ZENSU_SESSION_LINEAGE=off`).
+  [ "$JSON_EMITS" = "21" ] || GUARD_MISS="$GUARD_MISS [json-emit-count($JSON_EMITS, expected 21)]"
 else
   GUARD_MISS="$GUARD_MISS [note-not-in-flush]"
 fi
@@ -1890,7 +1893,9 @@ fi
 # `test-multi-repo-doc-citations.sh` grades those docs and states its own bound in its
 # header: a citation that comes to point at a DIFFERENT BUT SUBSTANTIVE line is invisible
 # to it, and roughly 94% of lines in the cited files are substantive. That bound is not
-# theoretical — three of these four citations broke during a single change to this skill,
+# theoretical — three of the citations then in this table broke during a single change to this
+# skill, and the numeral is deliberately gone: the table has grown since and a hand-maintained
+# count beside a driven loop is what this file records as its own failure mode,
 # each time silently, each time with that suite green, because every edit above a cited
 # line shifts it. The docs are not the natural owner of the check either: the file that
 # MOVES the target is this skill, so the tripwire belongs in this skill's own suite.
@@ -1957,10 +1962,22 @@ t36_cite "$SKILL_MD" 'scopes by transcript-directory' "$T36_SPEC" 'skills/sessio
 # thing here: the `<p class="src">` lines carry no other context, so there is nothing else
 # on the line to key on. It has already earned its keep — a bulk citation rewrite collapsed
 # both onto one number and this pair reported `no-citation-in` plus `2-matches` rather than
-# passing over a clobbered citation. When a target crosses a hundred boundary these two
-# prefixes move with it, and the failure says which.
-t36_cite "$TRAIL_MJS" 'function gitState' "$T36_HTML" 'trail\.mjs:21[0-9][0-9]'
-t36_cite "$TRAIL_MJS" 'claude --resume' "$T36_HTML" 'trail\.mjs:34[0-9][0-9]'
+# passing over a clobbered citation. The two classes are NOT alike and the difference is
+# stated at each one: the `gitState` row below is a fixed band that needs a hand edit when
+# its target crosses a hundred boundary, while the `claude --resume` row is an open-topped
+# lower bound that does not. An earlier wording of this paragraph claimed both moved with
+# the target, which contradicted the row comment directly beneath it from the round that
+# widened that second class.
+t36_cite "$TRAIL_MJS" 'function gitState' "$T36_HTML" 'trail\.mjs:22[0-9][0-9]'
+# The HTML cites `trail.mjs` TWICE, so this row cannot use the generic `trail\.mjs:[0-9]+` its
+# spec-side siblings use — it would match the other citation. The class is the whole 3000-and-up
+# range rather than a fixed band: it still separates this citation from the `gitState` one in the
+# 2000s, and it does NOT need a hand edit when the file grows. The previous spelling was
+# `3[0-9][0-9][0-9]`, which was written to stop exactly that hand edit and then required one the
+# first time the citation crossed 4000 — a band is a hand-maintained numeral wearing a class's
+# clothes. A LOWER BOUND with an open top is what survives growth; it costs the ability to tell
+# this citation from a future third one above 3000, which is a trade to re-take if one lands.
+t36_cite "$TRAIL_MJS" 'claude --resume' "$T36_HTML" 'trail\.mjs:[3-9][0-9][0-9][0-9]'
 t36_cite "$SKILL_MD" 'scopes by transcript-directory' "$T36_HTML" 'skills/session-trail/SKILL\.md:2[0-9]+'
 # The POPULATION, scanned out of the documents rather than counted off the row table
 # above. `T36_ROWS` counts rows this test declares; it can never notice a citation the
@@ -2008,6 +2025,83 @@ case "but it answers \`allowed\` or \`denied here\` $T37_ABSOLUTE — neither no
   *"$T37_ABSOLUTE"*) check "T37b the absolute-claim needle still matches the wording it forbids" PASS ;;
   *) check "T37b the absolute-claim needle matches nothing — T37's negative half is inert" FAIL ;;
 esac
+
+# -- T38 -- the ADOPT-ADVICE carriers, which shipped restating renderer behaviour on trust --
+# Four passages in this file describe the `adopt` route's advice and NONE of them was pinned:
+# the `adopt <selector>` table row, flow 5 step 6, the disclosure paragraph and the Safety
+# bullet. T35 pins flow 3 step 4 needle by needle and L70 pins five trail.mjs literals, while
+# these four shipped on review alone, so a reword of the `WHERE` head or of the carry-over arm
+# left them stale silently. These needles are deliberately the LITERALS the passages depend
+# on, not their prose: a passage may be rewritten, but not into one that no longer names the
+# thing it describes.
+#
+# EACH NEEDLE IS SCOPED TO ITS OWN PASSAGE, and that is the whole control. A whole-file
+# `grep -qF` for these literals is satisfied several times over — `WHERE` alone occurs in flow 3
+# step 4, which T35 already pins and which is not one of these four carriers — so deleting any
+# single passage left every needle green. Each slice is taken by its own opening literal and cut
+# at the next blank line, and each is asserted NON-EMPTY first, so a passage that moves fails
+# loudly rather than silently taking the whole file as its slice.
+T38_MISS=""
+t38_slice() { # <opening literal>
+  awk -v pat="$1" 'index($0, pat) { f = 1 } f { if (f > 1 && $0 ~ /^[[:space:]]*$/) exit; print; f = 2 }' "$SKILL_MD"
+}
+t38_need() { # <label> <slice> <needle...>
+  local label="$1" slice="$2"; shift 2
+  if [ -z "$slice" ]; then T38_MISS="$T38_MISS [slice-empty:$label]"; return; fi
+  local n
+  for n in "$@"; do
+    case "$slice" in *"$n"*) ;; *) T38_MISS="$T38_MISS [$label:$n]" ;; esac
+  done
+}
+T38_ROW="$(t38_slice '| `adopt <selector>` |')"
+T38_STEP6="$(t38_slice 'Read the guidance it prints')"
+T38_DISCLOSE="$(t38_slice '**`adopt --json` and `lineage --backfill` disclose more')"
+# The Safety slice opens on a literal unique to THAT bullet, never on the needle it is about to
+# assert. Opening it on `ZENSU_SESSION_LINEAGE=off` matched the FIRST occurrence — flow 3 step 0's
+# decline list, a different passage — and then re-asserted its own opening literal, so the arm
+# could only ever report `slice-empty` and the Safety bullet was pinned by nothing.
+T38_SAFETY="$(t38_slice 'The ledger write is the one persistence this skill performs')"
+t38_need adopt-row "$T38_ROW" 'carry-over recipe' 'worktreeAdvice'
+t38_need flow5-step6 "$T38_STEP6" 'WHERE' 'carry-over' 'recorded directory is gone'
+t38_need disclosure "$T38_DISCLOSE" 'WHERE' 'worktreeAdvice'
+t38_need safety-bullet "$T38_SAFETY" 'ZENSU_SESSION_LINEAGE=off' '--no-record'
+# The renderer TRIO. Flow 3 step 3 names which verbs render `CARRY_OVER`, and the enumeration
+# is a four-way hand copy -- this line, trail.mjs's `adviceBlock` header, CLAUDE.md's Takeover
+# Destination section, and the three renderer pins in code. T35's slice is anchored on flow 3
+# STEP 4, which begins below this line, so nothing reached it and the enumeration could drift
+# back to two with every suite green.
+grep -qF 'which `handoff`, `takeover` and `adopt` render' "$SKILL_MD" \
+  || T38_MISS="$T38_MISS [renderer-trio-enumeration]"
+# The `--json` KEY, pinned across both carriers. The table row tells a consumer the field is
+# called `worktreeAdvice`; nothing compared that against the producer, so a rename left the
+# skill describing a field that no longer exists.
+grep -qF 'worktreeAdvice: worktreeAdvice(row)' "$TRAIL_MJS" \
+  || T38_MISS="$T38_MISS [json-key-not-emitted-by-cmdAdopt]"
+# The RECEIPT-SLOT collision. `NOT RECORDED ` CONTAINS `RECORDED `, in the same slot, so any
+# consumer that matched the success token unanchored now reads a refused handover as a
+# recorded one. The suites anchor at line start and say why in test prose; nothing stated it
+# where a consumer of the command would look.
+grep -qF 'anchor it at the start of the line' "$SKILL_MD" \
+  || T38_MISS="$T38_MISS [receipt-slot-collision-undisclosed]"
+# The BOUNDED carry-over claim. Flow 5 step 6 serves the hand-resume route, and a hand-resume
+# lands the taker IN the source worktree -- where the patch step snapshots their own edits too.
+# "Still fully actionable" was unsound on the very route the paragraph documents.
+grep -qF 'only while you have written nothing into that tree yourself' "$SKILL_MD" \
+  || T38_MISS="$T38_MISS [carry-over-claim-unbounded]"
+case "$(cat "$SKILL_MD")" in
+  *"The carry-over half is still fully actionable"*) T38_MISS="$T38_MISS [unbounded-claim-returned]" ;;
+esac
+# The PID clause, stated by PRODUCER. The leading clause scoped the pid disclosure to the
+# present leg and attributed it to both producers, and the sentence after it said that exact
+# scoping was wrong -- two opposite answers in adjacent sentences, in the disclosure section a
+# reader consults to decide what `adopt` leaks.
+grep -qF 'on the present leg from the snapshot caution, and on either leg from the live arm' "$SKILL_MD" \
+  || T38_MISS="$T38_MISS [pid-clause-not-stated-by-producer]"
+if [ -z "$T38_MISS" ]; then
+  check "T38 the four adopt-advice carriers, the renderer trio and the receipt-slot collision are pinned" PASS
+else
+  check "T38 adopt-advice carriers:$T38_MISS" FAIL
+fi
 
 echo "----"
 echo "test-session-trail-skill: $PASS PASS / $FAIL FAIL / $SKIP SKIP"

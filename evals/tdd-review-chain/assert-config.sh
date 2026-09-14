@@ -9,14 +9,14 @@ check() { if [ "$2" = PASS ]; then echo "  PASS  $1"; PASS=$((PASS+1)); else ech
 
 node -e '
   const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
-  const blocks=(j.hooks?.PostToolUse||[]).filter(x=>x.matcher==="Agent");
+  const blocks=(j.hooks?.PostToolUse||[]).filter(x=>x.matcher==="Agent|Task");
   const commands=blocks.flatMap(x=>x.hooks||[]).map(x=>x.command||"");
   process.exit(blocks.length===1
     && commands.length===1
     && /post-review-tdd-delegate\.sh/.test(commands[0])
     && !commands.some(x=>/post-tdd-review-delegate/.test(x)) ? 0 : 1);
-' "$HOOKS" && check "PostToolUse:Agent owns only reviewer-to-main routing" PASS \
-  || check "PostToolUse:Agent wiring drifted" FAIL
+' "$HOOKS" && check "PostToolUse:Agent|Task owns only reviewer-to-main routing" PASS \
+  || check "PostToolUse:Agent|Task wiring drifted" FAIL
 
 node -e '
   const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));

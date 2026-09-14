@@ -71,9 +71,9 @@ at all, and `pre-write-secret-scan.sh:84` references one only through the
 orphaned-root bind predicate, never as a path check.
 
 **The reviewer is confined to the project root.**
-`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:320` refuses any
+`protectedAccessViolation` in `hooks/lib/reviewer-capability-v1.js:366` refuses any
 reviewer path input outside the root with `file access must remain inside the
-immutable project root`, and `:285-291` rejects an absolute Grep/Glob pattern, a
+immutable project root`, and `:341-343` rejects an absolute Grep/Glob pattern, a
 `..` segment, and a `.zensu` segment. A reviewer cannot read a sibling repository
 even when the packet names its files.
 
@@ -275,7 +275,7 @@ containment, and it lifts at `RED_WRITE` and `REFACTOR`
 mistake this paragraph exists to prevent. Second, the first run of this
 measurement recorded a false DENY from the capability gate for every destination,
 because the payload carried no `cwd`
-(`hooks/lib/reviewer-capability-v1.js:59`); any re-measurement must carry one, or
+(`hooks/lib/reviewer-capability-v1.js:69`); any re-measurement must carry one, or
 it will report a containment that is not there.
 
 ### 6.2 Validation, performed once at arming
@@ -336,7 +336,7 @@ dropped: a dropped root is a root nothing audits.
 | Review packet | Enumerate `changed_files` per root and emit them label-prefixed. | `skills/tdd/SKILL.md` step 10.2 |
 | Write gate | Rules (B) and (C) accept a path inside ANY union member. | `hooks/lib/bash-source-write-parse.js:817`, `:863` |
 | Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:840-842` |
-| Capability confinement (stage 3) | The reviewer's root check and its protected-root set both take the union. | `hooks/lib/reviewer-capability-v1.js:320`, `:300` |
+| Capability confinement (stage 3) | The reviewer's root check and its protected-root set both take the union. | `hooks/lib/reviewer-capability-v1.js:366`, `:347` |
 
 The write gate receives the union the same way it receives the anchor today —
 from the hook, which reads it from the trusted record and the workflow document,
@@ -348,7 +348,7 @@ never from the parser's own environment.
 has exactly one `cwd` and one transcript. What degrades is fidelity, and one part
 of it degrades dangerously.
 
-`gitState(cwd, full)` (`skills/session-trail/scripts/trail.mjs:2149`) takes a
+`gitState(cwd, full)` (`skills/session-trail/scripts/trail.mjs:2248`) takes a
 single path, and that path is the anchor. In this topology the anchor is clean
 while the changed files sit in the code roots, so a `takeover` brief would report
 no uncommitted changes for a session with a dirty tree in two other repositories.
@@ -364,7 +364,7 @@ grouped by label.
 Two properties stay as they are, deliberately:
 
 - **Resume happens in the anchor, always.** The printed
-  `cd -- <cwd> && claude --resume <id>` (`trail.mjs:3422`) already lands there.
+  `cd -- <cwd> && claude --resume <id>` (`trail.mjs:4018`) already lands there.
   Resuming inside a code root would present a different `CLAUDE_PROJECT_DIR` while
   the recorded `project_root` still EXISTS, and a present-but-different root is
   never relaxed — the orphaned relaxation requires the recorded path to be absent.
@@ -378,7 +378,7 @@ Two properties stay as they are, deliberately:
   who trusts that list.
 - **Discovery stays anchor-scoped.** `list` keeps only transcript directories
   whose name starts with the slug of the repo's main checkout
-  (`skills/session-trail/SKILL.md:285`), so from a code root's repository the
+  (`skills/session-trail/SKILL.md:287`), so from a code root's repository the
   session is reachable only via `--all` or from the anchor. This is pre-existing
   behavior that multi-repo makes more consequential; this proposal does not
   change it and must not claim to.
@@ -440,7 +440,7 @@ one capability grant instead of two and delete the open question below. It is no
 chosen here only because it moves the read cost onto the main thread; it should be
 weighed again before stage 3 is built.
 
-The Grep/Glob pattern rule at `reviewer-capability-v1.js:285-291` needs a
+The Grep/Glob pattern rule at `reviewer-capability-v1.js:333-335` needs a
 decision this document does not make: a cross-root reviewer needs to search more
 than one tree, and the present rule forbids an absolute pattern. Either the tool
 call carries an explicit root selector, or the pattern rule learns the same leased

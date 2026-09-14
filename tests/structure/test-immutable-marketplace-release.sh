@@ -49,7 +49,13 @@ RUN_STEP_TEST="$ROOT/tests/structure/release-run-step.test.js"
 if [ -f "$RUN_STEP_TEST" ]; then
   RUN_STEP_OUT="$(node --test "$RUN_STEP_TEST" 2>&1)"
   RUN_STEP_RC=$?
-  RUN_STEP_CASES="$(printf '%s\n' "$RUN_STEP_OUT" | sed -n 's/^. tests \([0-9]*\)$/\1/p' | head -1)"
+  # `^[^ ]*` and never `^.`: node writes its summary as `ℹ tests 11`, and that mark is
+  # THREE bytes, which a single-byte `.` cannot match under a byte locale. The old pattern
+  # read nothing, `${RUN_STEP_CASES:-0}` resolved to 0, and this check reported a green
+  # unit suite as failing on every macOS run. The first field is the only thing that varies
+  # between node's reporters (`#` on the TAP one), so matching one space-free token covers
+  # both without depending on the locale at all.
+  RUN_STEP_CASES="$(printf '%s\n' "$RUN_STEP_OUT" | sed -n 's/^[^ ]* tests \([0-9]*\)$/\1/p' | head -1)"
   # The floor is the REGISTRATION step for a new case: raise this number in the
   # same commit that adds one. Without it a case can be added and then deleted
   # again with this driver still green.

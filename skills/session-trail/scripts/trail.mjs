@@ -69,6 +69,18 @@ const GATE = (() => {
   } catch { return null; }
 })();
 const IS_WINDOWS = process.platform === 'win32';
+// The require above returns whatever the module resolved to and answers `null` only on a
+// LOAD failure, so a sibling that loads while MISSING an export is TRUTHY. Every consumer
+// below then dereferences that export — `msysToDrive` in `canonicalPair` and `lexicalDir`,
+// `within` twice in `containment` — so a truthiness guard passes and a TypeError lands one
+// line later. On the `adopt` carriers that throw arrives AFTER the machine-wide ledger edge
+// is written while `print` is still buffering, so the receipt naming that record would never
+// reach stdout. ONE predicate asserts the export SHAPE and every site that used to test
+// `GATE` tests this instead; `L70k` pins that there is exactly one definition and no bare
+// test left. It is a SHAPE check, not a behaviour one: a present function of the wrong arity
+// still passes, which is the residual this seam accepts rather than hides.
+const GATE_READY = !!(GATE && typeof GATE.msysToDrive === 'function' && typeof GATE.within === 'function');
+
 
 const HOME = os.homedir();
 // The config root is resolved, not hardcoded: an instance started with its own
@@ -198,6 +210,17 @@ function fail(msg, code = 1) {
   process.exit(code);
 }
 
+// The SILENT exit, for the one caller that has already written its cause to stderr itself. It
+// is a separate verb rather than an empty-message branch inside `fail`, and that is the whole
+// point: an in-band sentinel on the parameter that carries the diagnostic makes every FALSY
+// message — a `fail()` with no argument, an interpolation that came back empty — exit with no
+// output at all, which is the shape this repository treats as worse than a loud wrong message.
+// Reaching this one requires naming it.
+function exitAfterOwnDiagnostic(code = 1) {
+  flush();
+  process.exit(code);
+}
+
 function git(cwd, args) {
   try {
     return execFileSync('git', args, { cwd, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
@@ -287,8 +310,8 @@ function trimDir(p) {
 // directory) a genuinely nested worktree then compared as an escape. Either both
 // sides are real or neither is: one failure drops BOTH back to lexical.
 function canonicalPair(a, b) {
-  const absA = path.resolve(GATE ? GATE.msysToDrive(a, IS_WINDOWS) : a);
-  const absB = path.resolve(GATE ? GATE.msysToDrive(b, IS_WINDOWS) : b);
+  const absA = path.resolve(GATE_READY ? GATE.msysToDrive(a, IS_WINDOWS) : a);
+  const absB = path.resolve(GATE_READY ? GATE.msysToDrive(b, IS_WINDOWS) : b);
   let realA = absA;
   let realB = absB;
   let bothReal = true;
@@ -308,7 +331,7 @@ function canonicalPair(a, b) {
 // models a writer whose SHELL cwd is already inside the target across separate
 // Bash calls, not a `cd` in the same command.
 function lexicalDir(p) {
-  return trimDir(path.resolve(GATE ? GATE.msysToDrive(String(p), IS_WINDOWS) : String(p)));
+  return trimDir(path.resolve(GATE_READY ? GATE.msysToDrive(String(p), IS_WINDOWS) : String(p)));
 }
 
 // Containment, asked BOTH ways, because the gate's answer depends on how the
@@ -334,7 +357,7 @@ function lexicalDir(p) {
 // definite. The dual reading therefore engages exactly where both paths exist and
 // the target's spelling actually resolves elsewhere.
 function containment(callerRoot, targetRoot) {
-  if (!GATE) return null;
+  if (!GATE_READY) return null;
   const [anchor, targetCanon] = canonicalPair(callerRoot, targetRoot);
   const literal = GATE.within(anchor, lexicalDir(targetRoot));
   const resolved = GATE.within(anchor, targetCanon);
@@ -521,10 +544,11 @@ function writeAnchor(targetWt, opts) {
         : 'the target session has no recorded worktree',
     };
   }
-  // No local fallback when the gate module did not load. A hand-rolled copy here
-  // is exactly what this seam removed, and answering off a weaker rule than the
-  // gate's would be a confident verdict measured with the wrong instrument.
-  if (!GATE) {
+  // No local fallback when the gate module did not load, or loaded without the exports
+  // this file calls. A hand-rolled copy here is exactly what this seam removed, and
+  // answering off a weaker rule than the gate's would be a confident verdict measured
+  // with the wrong instrument.
+  if (!GATE_READY) {
     return {
       callerRoot,
       targetRoot,
@@ -532,7 +556,7 @@ function writeAnchor(targetWt, opts) {
       source: 'rejected:gate-unavailable',
       sourceTrusted: winner.trusted,
       reasonCode: 'gate-unavailable',
-      reason: 'the source-write gate module could not be loaded, so its own containment predicate was never asked',
+      reason: 'the source-write gate module could not be loaded, or loaded without the containment predicate this file calls, so it was never asked',
     };
   }
   const contained = containment(callerRoot, targetRoot);
@@ -701,8 +725,16 @@ const CONTROL_RUN = /(?:[\u0000-\u0008\u000a-\u001f\u007f-\u009f\u2028\u2029]|\p
 // `\v`. `CONTROL_RUN` is the shared class — every C0 and C1 control except TAB,
 // plus U+2028/U+2029 — and ordinary spaces are deliberately NOT collapsed, which
 // is what keeps the spelling comparable. Applied directly by every PLAIN-TEXT
-// renderer — `show`, `list`, `limited`, `instances` and `resolve`'s
-// ambiguous-candidate list — and reached by both BRIEF carriers too: `briefPath`
+// renderer — `show`, `list`, `limited`, `instances`, `resolve`'s
+// ambiguous-candidate list, and `adopt`, which applies it at FOUR sites — the stderr pre-write
+// that precedes the payload, BOTH interpolations on the RECORDED success receipt (its own
+// comment calls the other two its siblings), and the NOT RECORDED negative
+// receipt, which interpolates the ledger writer's own message, and `whereAdviceLines`'s
+// gone-leg recorded path, which reaches the SUCCESS receipt as well, since that renderer is
+// called identically from both. Naming only the negative receipt under-named the verb's use
+// of this class, and the gone-leg value's own comment argues it stays off the `briefShellArg`
+// census precisely BECAUSE it routes through here — so this enumeration is the only place
+// that carrier is recorded at all — and reached by both BRIEF carriers too: `briefPath`
 // and `briefShellArg` each route through it before applying their own bound. An
 // earlier spelling of this note claimed the class was "never [used] by a brief",
 // and that gap was the defect: the persisted artifact was the one carrier without
@@ -734,9 +766,14 @@ function flatPath(p) {
 // the same brief and a reader could not tell which spelling is real. (The handoff
 // brief's bullet and its operand are deliberately different values — `r.wt` vs
 // `r.cwd` — so there the harm is simply that the operand is not the path.)
-// All FIVE runnable lines use `briefShellArg` — the two brief ones, the two
-// `printResume` prints, which flow 3 names as the remedy for a blocked commit, and the
-// one `continuationPlan` renders on its `already-contained` branch.
+// All FIVE runnable REACH-A-WORKTREE lines use `briefShellArg` — the two brief ones,
+// the two `printResume` prints, which flow 3 names as the remedy for a blocked commit,
+// and the one `continuationPlan` renders on its `already-contained` branch. State the
+// FAMILY or the count means nothing: the operator carrier `SKILL.md` scopes the same
+// census to "the runnable `cd -- <cwd> && claude --resume <id>` lines", and this file
+// renders further runnable `briefShellArg` commands outside it — `continuationPlan`'s
+// four `git -C …` lines, which operate ON a worktree rather than entering one. They are
+// bound by the same no-clip rule and are enumerated in the carrier census below.
 // `CONTROL_RUN` FIRST, then `oneLine`. The two bounds are not interchangeable and
 // neither subsumes the other: `oneLine` collapses `/\s+/`, and JS `\s` is only the
 // line-break class plus a few spaces — it does not cover ESC, the rest of C0, DEL
@@ -750,13 +787,75 @@ function briefPath(p) {
   return oneLine(String(p == null ? '' : p).replace(CONTROL_RUN, ' '), 200).replace(/`/g, "'") || '(unknown)';
 }
 
-// The FIVE carriers that must stay UNCLIPPED and be safe to paste: the takeover
-// brief's `## How to continue` step 1 and the handoff brief's `## Continue this
-// work` block, both inside a ```bash fence, `printResume`'s two `show` prints,
-// which are plain terminal output, and `continuationPlan`'s `already-contained`
-// line, which reaches the same `show` output. The skill tells a reader all five are
-// runnable. (Counting by `claude --resume` alone finds four — the takeover brief's
-// fence is a bare `cd`, which is exactly as paste-critical.) Single-quoting is what neutralizes `$( )`, `;`, `&&` and
+// The carriers that must stay UNCLIPPED and be safe to paste, in three classes.
+//
+// NO COUNTS HERE, and that is the decision rather than an omission. The roster, the class
+// split and the per-function tally are all OWNED by the derived scan named below, which
+// prints the real table when it disagrees with the tree. A numeral repeated in this comment
+// is a lagging copy of that expectation: it cannot fail on its own, it goes stale on the
+// next carrier, and the previous spelling had already drifted twice — once naming
+// `continuationPlan` as a single carrier when it renders seven, and once stating two
+// different subtrahends four lines apart. What this comment owns is the CLASSIFICATION
+// RULE: what makes a line class (a), (b) or (c), and why each must stay unclipped.
+//
+// THE CONTROL IS A DERIVED SCAN, and this prose is no longer the only one. The case
+// `the briefShellArg carrier population is derived, and a thirteenth carrier fails here`
+// in `tests/structure/worktree-advice-v1.test.js` walks this file, resolves a binding back
+// to its `briefShellArg` initializer, attributes every carrier to its enclosing function
+// through the same `enclosing()` walk the `adviceLeg` roster uses, and asserts FOUR things:
+// the per-function roster, the (a)/(b)/(c) split below, that at least one carrier is reachable
+// ONLY through a binding — so the binding resolution cannot decay into decoration while the
+// roster is quietly lowered to match — and a POINTER BACK, which requires this comment to quote
+// that case by its exact title. The fourth is the one a maintainer renaming the case has to
+// know about, and naming only three left them unwarned that this very block is pinned. A new
+// carrier fails there, and so does one that merely MOVES between classes. Keep that expectation
+// and this census in step; the failure message prints the derived table so the moved line names
+// itself.
+//
+// A plain `grep 'briefShellArg('` UNDER-reports: two class-(c) carriers interpolate the `S`
+// and `T` bindings and carry no call text at all. The derived scan above is the control, and
+// it prints the full table on failure — there is no hand-maintained arithmetic here to
+// reconcile, deliberately. The previous spelling carried one and contradicted itself in four
+// lines, saying SIX non-carriers in one sentence and SEVEN in the next while warning in
+// between that the number moves whenever the paragraph is reworded.
+//
+// (a) REACH-A-WORKTREE lines — the takeover brief's `## How to continue` step 1
+// and the handoff brief's `## Continue this work` block, both inside a ```bash fence,
+// `printResume`'s two `show` prints, which are plain terminal output, and
+// `continuationPlan`'s `already-contained` line, which reaches the same `show` output.
+// This is the class the runnable-lines sentence above counts. (Counting by
+// `claude --resume` alone finds four — the takeover brief's fence is a bare `cd`, which
+// is exactly as paste-critical.)
+//
+// (b) OPERATE-ON-A-WORKTREE commands, all in `continuationPlan` and all reaching
+// the same `show` output through `cont.lines`: the `branch-unresolved` arm's
+// `git -C … rev-parse HEAD`, the `source-toplevel-unresolved` arm's
+// `git -C … rev-parse --show-toplevel`, and the `ready` block's `git -C … check-ignore`
+// and `git -C … worktree add -b … -- <target>`. The last is why this class cannot be
+// dropped from the roster: a clip on its target operand creates the continuation
+// worktree at a shorter path git accepts.
+//
+// (c) PLACEHOLDER MAPPINGS — the `'<token>' = value` pairs both `continuationPlan` and
+// `whereAdviceLines` hand to `substitutionRuleLines`. These are not runnable lines at all:
+// each is the OPERAND a reader pastes into one of the commands above, replacing the
+// placeholder together with its quotes, so it needs this rule's quoting and its no-clip bound
+// while belonging to no count of runnable lines.
+//
+// THE RENDER MOVED and the census moved with it, which is worth stating because the count
+// changed for a reason that is not a lost carrier. `substitutionRuleLines` EMITS the mapping
+// line now, from a pair, so the lines `continuationPlan` used to render itself are gone
+// from that function — the block above forbids repeating its new tally here, and the derived
+// case owns it — and the renderer carries no
+// `briefShellArg` call of its own, because it receives values already quoted. So the mapping
+// RENDER is no longer visible to the derived census in the unit file at all; what that census
+// still sees is where the VALUE is produced. A second bound travels with it: the `S` and `T`
+// bindings reach the renderer as bare identifiers inside a pair literal, and the census's
+// binding-use detector keys on `${name}`, so those two uses are counted at the pair line only
+// through `whereAdviceLines`'s own inline call. Both bounds are stated here rather than left
+// for the next reader to derive from a number that moved.
+//
+// Extend the right class when a renderer is added, and amend the runnable-lines sentence
+// above only for class (a). Single-quoting is what neutralizes `$( )`, `;`, `&&` and
 // `|` — the metacharacters `briefPath`'s backtick swap leaves live — and the
 // POSIX `'\''` idiom closes and reopens the quote around an embedded apostrophe.
 // No length clip: a shortened path is a DIFFERENT path that `cd` still accepts.
@@ -2506,7 +2605,11 @@ function siblings(opts, row) {
 // removes the only thing that kept it.
 //
 // EVERY command line is indented two spaces and every prose line starts at column
-// zero, because `adviceBlock` fences on exactly that shape for both briefs.
+// zero, because `adviceBlock` decides the COMMAND BLOCK on exactly that shape for every one of
+// its callers — the two persisted briefs and the `adopt` receipt. The ```bash MARKER is
+// carrier-specific and only the two briefs carry it: `adopt` prints to a terminal and asks for
+// `{ carrier: 'terminal' }`, where the same shape decides the same blocks and a blank line delivers
+// the split.
 //
 // COUPLED CARRIER: `skills/session-trail/SKILL.md` flow 3 step 4 restates this
 // recipe for the model, in a fenced block of its own. It is a hand-copy — the two
@@ -2661,9 +2764,15 @@ const CARRY_OVER = [
   'paths. The control bound sits on the FILENAME — that is what $n is — and never on the',
   'diagnostic line, so a crafted name cannot scroll the SKIPPED list away or forge a row in it,',
   'and that list is what tells you which entries the test rejected. printf\'s own format supplies',
-  'the terminator, which is why $n may delete the whole class including \\012. An earlier spelling',
-  'bounded the LINE and therefore had to spare \\012 — which handed the one control byte the',
-  'source controls straight back.',
+  'the terminator, which is why $n may delete \\012 too. An earlier spelling bounded the LINE and',
+  'therefore had to spare \\012 — which handed the one control byte the source controls straight',
+  'back. STATE THE CLASS EXACTLY: tr -d deletes C0 and DEL, never "the control class". DEL is in',
+  'it, C1 (\\200-\\237) is NOT, and neither is the bidi/format class — U+202A-U+202E and',
+  'U+2066-U+2069, which this tool bounds everywhere it renders a path itself, because they make a',
+  'name READ as a different name. So a filename carrying U+202E still reorders the SKIPPED line',
+  'it appears on. Left as C0+DEL deliberately: this is POSIX text you paste on an unknown host,',
+  'and no portable tr spelling for the wider class was established. The line cannot be scrolled',
+  'away or a row forged in it; it can be visually reordered.',
   'THREE smaller decisions on those lines, for the same reason they are not obvious. CDPATH=',
   'prefixes both cd calls because cd consults that variable for a relative operand and PRINTS',
   'the path it resolved, which the substitution would capture — measuring a tree the following',
@@ -2703,6 +2812,11 @@ const CARRY_OVER = [
   'through, so nothing is listed from BEHIND a link that this test would miss. Symlinks',
   'reach you by TWO routes — this one and the tracked one the grep above covers — and no',
   'git flag closes either.',
+  'The tr -d on the SKIPPED diagnostic deletes C0 and DEL and nothing else, so a filename',
+  'carrying a bidi override — U+202A-U+202E, U+2066-U+2069 — still reorders the line it is',
+  'printed on. It cannot scroll the list away or forge a row; it can make one entry read as',
+  'another. Read the SKIPPED list knowing that, or list the rejected names with git',
+  'ls-files --others --exclude-standard -z and inspect them with your own tooling.',
 ];
 
 // The create recipe alone. It no longer spreads `CARRY_OVER`, because the carry-over
@@ -2795,11 +2909,15 @@ const ADVICE_LEADS = {
   },
 };
 
-// ONE implementation of the leg decision, because it has THREE consumers and they must not
-// drift: `worktreeAdvice` picks its lead AND its body from it, `cmdShow` decides from the
-// same answer whether to print the pointer at the carry-over recipe its survey view
-// withholds, and `printResume` decides whether to print its own copy of the gone-leg create
-// command. Every one of those was a hand-written `r.cwdExists` at some point, and one of them
+// ONE implementation of the leg decision, because it has FIVE consumers and they must not
+// drift: `worktreeAdvice` picks its lead AND its body from it, `cmdShow` uses it twice from
+// one hoisted local — for its `WHERE` head and for the pointer at the carry-over recipe its
+// survey view withholds — `printResume` decides whether to print its own copy of the gone-leg
+// create command, `whereAdviceLines` decides whether to render the placeholder
+// mapping at all, and `cmdAdopt` names the leg in BOTH its `--json` payloads in its own
+// right, so a machine consumer is told whether the recorded path may be substituted —
+// the present leg is the only one where the recorded path IS the
+// substitution value. Every one of those was a hand-written `r.cwdExists` at some point, and one of them
 // drifted INSIDE this function — the lead came from here while the body came from a raw
 // re-derivation, which would have emitted a gone lead above a present body. No fixture
 // renders a gone-leg `show`, so nothing would have caught the `cmdShow` half either. Before
@@ -2836,6 +2954,34 @@ function adviceLeg(r) { return r.cwdExists ? 'present' : 'gone'; }
 // whole thing by default, and a new caller that forgets the option gets more rather than
 // less. On the gone leg there is no carry-over half at all, so the option changes nothing
 // there.
+//
+// THREE kinds of caller, not two, and the third is why this sentence is here rather than
+// left to be inferred from the option's name: `cmdAdopt` is a CONFIRMATION, neither a
+// brief nor a survey, and it takes the default. By the time that verb runs the directory
+// is already chosen, so the decision half is a check on a choice already made while the
+// carry-over half is the one still actionable — which is the whole reason it renders this
+// at all. `adopt` was the ONE route that rendered neither.
+//
+// INPUT CONTRACT, stated because the callers no longer agree on the row's shape and the
+// agreement they DO have is accidental. `cmdShow`, `cmdTakeover` and `cmdHandoff` pass
+// `hydrate(resolve(...))`; `cmdAdopt` passes the bare `resolve(...)` row. This function
+// and `adviceLeg` read exactly four fields — `app`, `ccdStore`, `live`, `cwdExists` —
+// and all four are written by `buildIndex`'s row literal, which `hydrate` never touches:
+// `summarize()` emits none of them. So a `resolve()` row is sufficient TODAY. It is not
+// sufficient by construction: the moment an arm reads a `summarize`-supplied field —
+// `branch`, `title`, `mode` — the two call shapes start answering differently about the
+// same session with every suite green, which is the exact defect the `cwd`-after-spread
+// comment in `buildIndex` records. Read a fifth field here and either hydrate in
+// `cmdAdopt` or move the field into the row literal.
+//
+// The CONTRACT IS THE ADVICE SURFACE'S, and the four-field count is only this function's
+// half of it. `cmdAdopt`'s `whereAdviceLines` renders beside this array off the SAME
+// unhydrated row and reads two more — `wt` and `sessionId`. Both are row-literal fields
+// and neither is a `summarize` key: the `cwd`-after-spread comment in `buildIndex` states
+// outright that `summarize` has no `wt` key, which is exactly what let a null `cwd` hide
+// behind a correct `r.wt` there. So the bare row is sufficient for those two on the same
+// ground rather than by a separate argument, and the instruction above is the one to
+// follow for a SEVENTH field, wherever on this surface it is read.
 function worktreeAdvice(r, options = {}) {
   const withCarryOver = options.carryOver !== false;
   const archived = r.app ? r.app.archived === true : null;
@@ -2876,13 +3022,19 @@ function worktreeAdvice(r, options = {}) {
       : unreadable ? 'unreadable'
         : 'active';
   const leg = adviceLeg(r);
-  // Fail closed rather than let an undefined cell throw mid-render: `cmdTakeover` has
-  // already written its machine-wide lineage edge by the time it reaches this, and the
-  // output buffer is only flushed at the end of `main()` — so an uncaught throw here
-  // would land an edge while printing nothing, including the LINEAGE announcement that a
-  // read command which writes is required to make.
+  // THROW, not `fail`. This used to exit for a reason that no longer holds: `cmdTakeover`
+  // had already written its machine-wide lineage edge by the time it reached here, the
+  // output buffer is only written by `main()`, and an uncaught throw therefore landed an
+  // edge while printing nothing — the LINEAGE announcement a read command which writes is
+  // required to make included. Both writing verbs now render BEFORE they write (`L70n`), so
+  // a throw from here costs the render and no edge lands at all; `main()`'s flush before it
+  // reports a throw is the backstop for what happens after that point. Exiting from inside
+  // a renderer would also keep the caller-side ordering rules in `cmdAdopt` load-bearing
+  // forever, since a `try` cannot catch `process.exit`. The branch stays unreachable — `arm` is one of four literals,
+  // `leg` one of two, and `ADVICE_LEADS` has all eight cells — and it is here so a
+  // reordering of the arms fails loudly rather than rendering `undefined`.
   const cell = ADVICE_LEADS[arm] && ADVICE_LEADS[arm][leg];
-  if (!cell) fail(`internal: no advice lead for ${arm}/${leg}`);
+  if (!cell) throw new Error(`internal: no advice lead for ${arm}/${leg}`);
   const lead = cell({ pid: livePid(r.live), why: unreadableWhy });
   if (leg === 'gone') {
     // No `CARRY_OVER` here, and the omission is a statement about THIS PATH rather than
@@ -2902,9 +3054,9 @@ function worktreeAdvice(r, options = {}) {
       'If git answers that the branch is already checked out somewhere, the recorded path was',
       'a SUBDIRECTORY of a root that still exists — that root holds the branch, so add yours',
       'with -b claude/<name>-cont instead. Not --force, and not git checkout elsewhere. That',
-      'root is also where the carry-over recipe DOES apply: run it against the root that',
-      'still exists, substituting it for <their worktree>, rather than against the path',
-      'recorded here.',
+      'root is also where a carry-over would apply. But this leg prints no carry-over recipe at all:',
+      'the recorded source is not readable from here, so there is nothing to substitute into. Its',
+      'shape is in the session-trail skill documentation, flow 3 step 4.',
       'That path comes out of another session\'s transcript, so read it before you act on it.',
     ];
   }
@@ -2924,9 +3076,11 @@ function worktreeAdvice(r, options = {}) {
 // prose in the middle of a fenced recipe.
 //
 // The rule is structural, so it cuts both ways and the SECOND direction is the one a
-// reader has to hold: a prose line that acquires a two-space lead-in becomes a fenced
-// command in two persisted briefs. `WT8p` grades both directions rather than matching
-// a list of known verbs, which is what a hand-kept allowlist could not do.
+// reader has to hold: a prose line that acquires a two-space lead-in becomes a COMMAND in
+// every `adviceBlock` caller — the two persisted briefs and the `adopt` receipt — and in the
+// two briefs it is fenced as well, `adopt` having asked for `{ carrier: 'terminal' }` because a
+// terminal has no copy button. `WT8p` grades both directions rather than matching a list of known verbs,
+// which is what a hand-kept allowlist could not do.
 //
 // Named for `worktreeAdvice` rather than `ADVICE`: that shorter prefix is taken by the
 // per-verdict doctrine dictionary further up, and a grep for it should not return two
@@ -2942,7 +3096,79 @@ const WORKTREE_ADVICE_COMMAND = /^ {2}\S/;
 // the recipe has grown twice since this was written, and a number would have gone stale
 // both times. Fences carry the caller's indent so they stay inside the list item they
 // belong to.
-function adviceBlock(lines, indent, firstPrefix) {
+// `fence` is CARRIER-specific and the coalescing walk above it is not. The split — the
+// destructive `git apply` alone, away from the two read steps that gate it — is this
+// renderer's property and is delivered by the blank line either way. The ```bash MARKER is a
+// markdown-renderer property: the justification for it everywhere in this repo is "one fence
+// is one COPY BUTTON", and a copy button is exactly what a terminal does not have. Printed to
+// stdout the three backticks bound no selection, and a reader who drags across the block
+// pastes them into a shell that answers `command not found`. So the two persisted briefs keep
+// the marker and `cmdAdopt`, which prints to a terminal, asks for `{ carrier: 'terminal' }`.
+// `cmdShow` is the SURVEY carrier and is deliberately outside this helper entirely: it is a
+// survey view with a nine-space prefix that prints the DECISION half only.
+// A line the shell is still waiting to finish is a CONTINUATION and carries no prompt of its
+// own; every other line STARTS a command and gets one. Two signals decide it and both are
+// needed: the previous line ending in a token that leaves the command open (`|`, `||`, `&&`,
+// a trailing backslash, `do`, `then`), and a compound BODY we are inside, where every line
+// belongs to the construct its opener began. The body test is what keeps `done` unmarked —
+// its own predecessor ends in nothing open, so the operator test alone would mark it.
+// THE BOUND, stated rather than widened. This tracks the constructs these arrays actually
+// use — a pipeline into `while … do … done` — and it is NOT a shell parser. Its opener and
+// closer sets are deliberately not duals: `esac` closes and `case … in` never opens, and an
+// `elif … then` would open twice and close once. Both are unreachable while every `case` in
+// the recipe stays on ONE line, which it does. Adding a `case` opener is whack-a-mole toward
+// a parser this helper must not become; a recipe that needs a multi-line compound other than
+// the loop should state so here first.
+const OPEN_TAIL = /(?:\|\||&&|\||\\|\bdo|\bthen)$/;
+function commandStarts(block) {
+  const starts = [];
+  let depth = 0;
+  for (let n = 0; n < block.length; n += 1) {
+    const prev = n === 0 ? '' : block[n - 1].trim();
+    const here = block[n].trim();
+    starts.push(n === 0 ? true : depth === 0 && !OPEN_TAIL.test(prev));
+    if (OPEN_TAIL.test(here) && /\b(?:do|then)$/.test(here)) depth += 1;
+    else if (/^(?:done|fi|esac)\b/.test(here)) depth = Math.max(0, depth - 1);
+  }
+  return starts;
+}
+
+// ONE carrier axis for both renderers, and it is REQUIRED rather than defaulted. The two used
+// to default in OPPOSITE directions — `adviceBlock` rendered MARKDOWN for an absent carrier,
+// `substitutionRuleLines` rendered TERMINAL — so a reader of either signature inferred the
+// wrong default for its sibling, and both persisted-brief call sites already relied on that
+// asymmetry by naming the carrier on one and omitting it on the other. The failure directions
+// are not symmetric: a defaulted fence puts stray backticks on a terminal, while a dropped code
+// span lets a markdown sanitizer empty the token list and leave "Nothing here is substituted for
+// you: , , and are yours to supply." in a file a DIFFERENT session opens.
+//
+// REFUSING rather than aligning the two defaults on one value. This repository has already
+// decided this class the other way round: `_autopilot_workspace_refusal` takes its AUDIENCE as a
+// positionally required argument and refuses a short call rather than falling back to a form,
+// because the wrong value has a user-visible safety consequence. Aligning removes the
+// contradiction and keeps the silent fallback; requiring makes an omission the thing a new call
+// site trips over. The churn is mechanical and bounded; the fallback would be permanent.
+//
+// THE THROW IS SAFE HERE SPECIFICALLY because every writing caller renders BEFORE its durable
+// write — `cmdTakeover` above `recordTakeoverEdge`, `cmdAdopt` above `ledgerWrite`, pinned by
+// `L70n` — so a bad carrier refuses with no ledger edge to be inconsistent with. `main()`'s
+// total try/catch, which flushes the buffer before reporting the cause, is the backstop for
+// everything downstream of that point. The flush ALONE is not the argument, and saying it was
+// is what let this claim stand while it was false: it saves a receipt already in the buffer,
+// and on a `--json` carrier there is none, the receipt living inside a payload the throw
+// prevents from being built. Move a render back below its write and this sentence stops
+// holding for that verb.
+const ADVICE_CARRIERS = ['markdown', 'terminal'];
+function resolveCarrier(options, who) {
+  const carrier = options && options.carrier;
+  if (!ADVICE_CARRIERS.includes(carrier)) {
+    throw new Error(`internal: ${who} needs an explicit carrier (${ADVICE_CARRIERS.join(' or ')}), got ${JSON.stringify(carrier)}`);
+  }
+  return carrier;
+}
+
+function adviceBlock(lines, indent, firstPrefix, opts = {}) {
+  const fence = resolveCarrier(opts, 'adviceBlock') !== 'terminal';
   const out = [];
   for (let i = 0; i < lines.length; i += 1) {
     if (!WORKTREE_ADVICE_COMMAND.test(lines[i])) {
@@ -2957,9 +3183,343 @@ function adviceBlock(lines, indent, firstPrefix) {
     // it is here because the alternative is a helper that silently eats `cmdHandoff`'s
     // `- ` bullet the first time an arm is reordered.
     const open = i === block.length - 1 ? firstPrefix : indent;
-    out.push('', `${open}\`\`\`bash`, ...block.map((c) => indent + c), `${indent}\`\`\``, '');
+    if (fence) {
+      out.push('', `${open}\`\`\`bash`, ...block.map((c) => indent + c), `${indent}\`\`\``, '');
+    } else {
+      // `$ ` on the FIRST line of the block only, because the marker is what the fence was
+      // providing and a BLOCK is the unit it marks. Without any marker a command and a prose
+      // line emerge at the SAME two-space lead — the very shape `WORKTREE_ADVICE_COMMAND` uses
+      // to tell them apart — and `CARRY_OVER`'s prose quotes shell syntax, so a terminal reader
+      // scanning the receipt cannot see which lines are runnable.
+      //
+      // PER LINE was tried and was wrong: a coalesced block is not a list of commands. The
+      // untracked-copy step is ONE construct spanning a dozen entries — a pipeline into
+      // `while … do … done` — so a prompt on each line asserts twelve separate commands and
+      // breaks the `&&`, `|` and `do…done` chain for anyone who pastes it.
+      //
+      // PER BLOCK was the correction, and it OVERSHOT. A block is a paste unit, not a command:
+      // the first block here holds three INDEPENDENT commands — take the patch, grep it for
+      // symlink and executable modes, list what it would change — and marking only the first
+      // left the other two prompt-less at a deeper indent, where they read as OUTPUT of the
+      // line above them. Those two are precisely the steps that exist to be READ before the
+      // destructive apply, so a reader who took them for output ran the write unguarded. The
+      // marker now follows `commandStarts`: one prompt per COMMAND, none on a continuation.
+      const starts = commandStarts(block);
+      out.push('', ...block.map((c, n) => {
+        if (n === 0) return `${open}$ ${c}`;
+        return starts[n] ? `${indent}$ ${c}` : `${indent}  ${c}`;
+      }), '');
+    }
   }
   return out;
+}
+
+
+// Every `<token>` the rendered recipe actually carries, in first-appearance order, scanned
+// from its COMMAND lines only. DERIVED rather than handed in: a caller-supplied list is one
+// more copy of the same set, and this rule has already shipped wrong twice because a list and
+// the recipe it describes drifted apart. `<name>` is found too, although it sits INSIDE
+// `'claude/<name>-cont'` rather than in quotes of its own — which is exactly why the rule is
+// stated over the TOKEN and never over the quoted word.
+const ADVICE_PLACEHOLDER = /<[^<>\n]+>/g;
+function recipePlaceholders(lines) {
+  const seen = [];
+  for (const line of lines) {
+    if (!WORKTREE_ADVICE_COMMAND.test(line)) continue;
+    for (const token of line.match(ADVICE_PLACEHOLDER) || []) {
+      if (!seen.includes(token)) seen.push(token);
+    }
+  }
+  return seen;
+}
+
+// ATOMS, not words. `<your new worktree>` contains spaces, so an ordinary word wrapper breaks
+// the token itself, and the phrase a needle has to find — `<X> are yours to supply` — has to
+// survive on ONE line or a `case "$OUT" in *"…"*` match can never see it. An atom longer than
+// the width gets its own line rather than being split.
+function wrapAtoms(atoms, indent, width) {
+  const out = [];
+  let line = '';
+  for (const atom of atoms) {
+    if (!line) { line = atom; continue; }
+    if ((indent + line + ' ' + atom).length <= width) { line = `${line} ${atom}`; continue; }
+    out.push(indent + line);
+    line = atom;
+  }
+  if (line) out.push(indent + line);
+  return out;
+}
+
+// ONE renderer for the mapping lines AND the rule that governs them, because the two are a
+// single statement. It takes PAIRS, not tokens: a caller that spells its token once in a
+// rendered mapping line and once in an argument has exactly the hand-copy this extraction was
+// justified by removing, and nothing checked the join in either direction. With pairs, `mine`
+// is a fact the renderer derived from what it actually substituted rather than a claim the
+// caller made about itself.
+//
+// It takes the CARRIER, not a bare indent. The two persisted briefs are MARKDOWN, where
+// `<path>` is a well-formed HTML tag name and `<their worktree>` parses as a tag plus
+// attributes: a renderer passes them through as raw HTML and a sanitizer drops them, leaving
+// "Nothing here is substituted for you: , , and are yours to supply." on the one carrier a
+// different session opens. Code spans keep them visible there and stay off the terminal.
+//
+// The SENTENCE is scoped to what was scanned. `recipePlaceholders` reads runnable lines only,
+// and widening it to prose was the other option on the table: it makes the quoting claim false
+// for MORE tokens, not fewer, because a prose occurrence is genuinely unquoted. Scoping the
+// claim is what makes it checkable, and the unit layer pins that prose stays out.
+//
+// NO POSITIONAL WORD. `cmdShow` prints this rule and then prints `continuationPlan`'s, which
+// governs a different set; while this text said "below", the first rule pointed at the second
+// rule's block and the two contradicted each other on one screen.
+function substitutionRuleLines(lines, mapped, options = {}) {
+  const indent = options.indent || '';
+  const markdown = resolveCarrier(options, 'substitutionRuleLines') === 'markdown';
+  const show = (token) => (markdown ? `\`${token}\`` : token);
+  const all = recipePlaceholders(lines);
+  const pairs = (mapped || []).filter(([token]) => all.includes(token));
+  const mine = pairs.map(([token]) => token);
+  const yours = all.filter((t) => !mine.includes(t));
+  const out = [];
+  const width = 90;
+  for (const [token, value] of pairs) out.push(`${indent}  ${show(`'${token}'`)} = ${value}`);
+  if (mine.length) {
+    const list = mine.map((t) => show(`'${t}'`)).join(' and ');
+    out.push(...wrapAtoms([
+      `Replace ${list} TOGETHER WITH the quotes around ${mine.length === 1 ? 'it' : 'them'}:`,
+      mine.length === 1
+        ? 'the value above already carries its own,'
+        : 'the values above already carry their own,',
+      'and two quoted words back to back join into ONE UNQUOTED word.',
+    ], indent, width));
+  }
+  if (yours.length) {
+    out.push(...wrapAtoms([
+      mine.length
+        ? 'EVERY OTHER placeholder in a runnable line is the opposite —'
+        : 'Every placeholder in a runnable line here sits in single quotes —',
+      'replace the token INSIDE the quotes and LEAVE THE QUOTES THERE.',
+      'They are what neutralizes $( ), ;, && and | in a value this tool did not author;',
+      "write '\\'' for an apostrophe.",
+    ], indent, width));
+    const names = yours.map((token, i) => {
+      const t = show(token);
+      if (i === yours.length - 1) return `${t} ${yours.length === 1 ? 'is' : 'are'} yours to supply in the runnable lines.`;
+      if (i === yours.length - 2) return `${t} and`;
+      return `${t},`;
+    });
+    out.push(...wrapAtoms([
+      mine.length
+        ? `Only ${mine.map(show).join(' and ')} ${mine.length === 1 ? 'is' : 'are'} mapped here.`
+        : 'Nothing here is substituted for you:',
+      ...names,
+    ], indent, width));
+  }
+  return out;
+}
+
+// ONE renderer for both of `cmdAdopt`'s TEXT carriers, at module scope and EXPORTED, which is
+// the shape its three siblings already use. The head and its advice loop were hand-copied
+// into the failure and the success path once, and only the success copy's content was graded
+// — a reword of the other would have gone green.
+//
+// `takerWorktree` is a PARAMETER, not a second closure read: this function reads nothing else
+// from its caller, so the closure it replaced bought nothing, and keeping it a function of its
+// arguments is what lets the unit layer drive both legs from a record literal instead of
+// removing a real worktree from a shell fixture to reach the gone one. It is not PURE — the
+// equality test below canonicalizes through `canonicalPair`, which reads the filesystem — and
+// the export header states that impurity where an importer will look for it.
+//
+// `briefShellArg`, not `flatPath`, on the present leg, because the value is pasted into a
+// shell word: a path holding an apostrophe closes the recipe's quoting at substitution time,
+// and the `'\''` idiom is what this file's own doctrine calls the answer everywhere it
+// substitutes a path itself.
+//
+// It is rendered as a PLACEHOLDER MAPPING and not as a parenthesised value, which is the
+// shape `continuationPlan` already uses and states the reason for: the recipe's operand is
+// ALREADY quoted (`git -C '<their worktree>'`), and `briefShellArg` brings its own quotes, so
+// a reader who replaces the bare token inside those quotes produces `''/path''` — two quoted
+// words back to back, which the shell joins into ONE UNQUOTED word, reinstating the
+// word-splitting the quoting existed to prevent. Writing `'<their worktree>' = '/path'` makes
+// the unit of substitution the whole quoted token, which is the only spelling that composes.
+//
+// ONLY `<their worktree>` is mapped, and the head now SAYS so. The block it introduces
+// carries five placeholders — `<path>`, `<name>` and `<session-branch>` from `TAKE_YOUR_OWN`,
+// and `<your new worktree>`, which is the DESTINATION operand of every destructive step in
+// `CARRY_OVER` — while the instruction read "Replace the placeholder", asserting there was
+// one. The trap that makes the omission worse than terse is the RECEIPT line printed
+// immediately above on the success carrier: it ends on `edge.to.worktree` under a bare
+// `worktree:` label, and that is the tree the reader is ALREADY IN. A reader hunting for the
+// missing destination finds that path first, and `git -C <that> apply --binary` writes another
+// session's uncommitted diff over their own live work — the exact wrong-antecedent condition
+// the `WHERE` head exists to remove.
+//
+// MAPPING `edge.to.worktree` to `<your new worktree>` was proposed in review and REFUSED for
+// that same reason: it is not the tree the `git worktree add` line creates, and the two
+// coincide only when the taker has already taken one. Naming the operand and its trap is what
+// the head can honestly do with a value it cannot derive.
+//
+// The `!! MISSING` qualifier is `cmdShow`'s SPELLING and only `cmdShow`'s. Both briefs carry
+// the same CONDITION in the markdown spelling `**MISSING**`, because a brief is markdown and
+// `!!` is not a mark there. On the gone leg `row.wt` is the raw recorded cwd and may be a
+// subdirectory.
+//
+// The MAPPING is PRESENT-LEG ONLY, and that is not cosmetic. `row.wt` is the right
+// substitution value only there. On the gone leg the body prints NO carry-over recipe at all
+// — `worktreeAdvice` returns before the `...CARRY_OVER` spread — so `<their worktree>` is not
+// a token that leg renders and a mapping for it would name an operand nothing on the carrier
+// carries. That body used to order a substitution for it in PROSE, which `recipePlaceholders`
+// cannot see, so the printed rule named two tokens while the text ordered a third; the order
+// is gone and this clause no longer rests on it.
+//
+// The gone leg gets a LABELLED recorded path instead. With no path on the carrier the nearest
+// antecedent was the receipt's own `edge.to.worktree`, which is the TAKER's tree; every other
+// carrier of this array supplies the referent (`cmdShow`'s `WORKTREE` row, both briefs'
+// `- worktree:` bullet), and `adopt` was the first that did not.
+//
+// It stays `flatPath` and NOT `briefShellArg`, and the reason is PASTEABILITY rather than the
+// label: the recorded path is not readable from here, so quoting it would render the one value
+// on this carrier as a ready shell operand when no command on this leg should receive it. That
+// is also what keeps it off the `briefShellArg` carrier census, which sits beside `briefPath`.
+// What the leg owes instead is the sentence saying the value is for reading — the only
+// single-quoted operands this leg renders are `<path>` and `<session-branch>`, which the reader
+// supplies, and this is the only candidate path on the carrier.
+//
+// The leg comes from `adviceLeg`, not from a raw `row.cwdExists`: that function's own header
+// records a drift INSIDE `worktreeAdvice` from exactly such a re-derivation and says to grep
+// `cwdExists` before adding a renderer that depends on the leg.
+//
+// `{ carrier: 'terminal' }`, because this carrier is a TERMINAL receipt — see `adviceBlock`'s own
+// header for why the marker is carrier-specific while the split is not.
+function whereAdviceLines(row, takerWorktree) {
+  const leg = adviceLeg(row);
+  // The BODY is built first because the rule below is DERIVED from it: the placeholder set a
+  // carrier must explain is whatever that carrier actually renders, and every earlier spelling
+  // of this text stated a set somebody had typed out beside the recipe instead.
+  const body = worktreeAdvice(row);
+  const out = [`WHERE    for ${sessionTag(row.sessionId)}${leg === 'present' ? '' : '   !! MISSING'}:`];
+  if (leg === 'present') {
+    out.push(...substitutionRuleLines(body, [['<their worktree>', briefShellArg(row.wt)]],
+      { indent: '           ', carrier: 'terminal' }));
+    out.push('           <path> and');
+    out.push('           <your new worktree> are the same directory: the git worktree add line');
+    out.push('           below creates it, and every step that WRITES names it —');
+    out.push('           NOT the worktree named on the receipt line above, which is the one you');
+    out.push('           are already in.');
+    // Flow 5 step 6 documents a hand-resumed session, and a hand-resume lands the taker in the
+    // SOURCE's worktree. From that moment the carry-over's first step snapshots the source's
+    // uncommitted work and the taker's own, mixed, so applying it into a fresh worktree
+    // duplicates rather than rescues. Both values are in scope here, so the head says so
+    // instead of leaving the reader to notice.
+    //
+    // EQUALITY, not containment, and `canonicalPair` rather than a predicate of this function's
+    // own. Both operands are `worktreeRoot()` results WHEN THAT READ SUCCEEDS, and that
+    // qualifier is load-bearing: `buildIndex` and `selfIdentity` are character-identical
+    // `(dirExists(cwd) && worktreeRoot(cwd)) || cwd`, so a cwd whose `.git` is not found within
+    // the parent walk keeps its RAW value. The collapse the next clause relies on then does not
+    // happen, the comparison measures two different levels of one tree, and `standingIn` stays
+    // false — see the SILENT CASE recorded below, which is this one. While the read does
+    // succeed, a plain subdirectory of the source worktree has already collapsed to that
+    // worktree and equality covers it; containment
+    // WITHOUT equality therefore requires the taker's root to carry its own `.git`, which means
+    // a separate linked worktree — `<main>/.claude/worktrees/<name>`, the layout
+    // `continuationPlan` itself recommends. There the sentence below is FALSE: the patch step
+    // reads `git -C '<their worktree>' … diff HEAD` in the main tree, which does not see a
+    // separate worktree's uncommitted state. So containment bought one false warning on the
+    // mandated layout and no true positive.
+    //
+    // `canonicalPair` is the file's own all-or-nothing canonicalizer: a hand-rolled pair of
+    // independent `realpathSync` calls puts the two operands in DIFFERENT namespaces whenever
+    // exactly one path exists — which is the `!! MISSING` case this very renderer serves — and
+    // skips the `msysToDrive` normalization the gate seam supplied. Its header states that
+    // measurement; re-deriving it here was a hand-copy of both that rule and of `GATE.within`,
+    // in the one file whose own header records taking the seam to remove such a copy.
+    // A BRANCH rather than a sentinel pair chosen to compare unequal: an in-band sentinel on the
+    // value that carries the answer is the shape this file removed from `fail` in the same
+    // round, and it reads as an accident the first time somebody changes the comparison.
+    //
+    // THREE arms, because there are three answers and only one of them is a comparison.
+    // An unusable GATE is DISCLOSED rather than silently answered: `canonicalPair` degrades
+    // `msysToDrive` to identity when the gate module is not usable, so on Git Bash a record
+    // spelled `/c/src/wt` and a taker root spelled `C:\src\wt` would compare unequal and this
+    // caution would simply not appear. The gate-load site states the rule it must not break —
+    // a failed load must not silently change a verdict — and `containment` honours it with an
+    // explicit arm, so this one says it could not check instead of answering no.
+    //
+    // A FALSY `takerWorktree` is the FIRST branch in code — it is named third here because the
+    // two above it are the ones a reader meets in the rendered output — and it used to be
+    // SILENCE, which is the same
+    // defect one operand over: both arms were conjoined on the value, so a caller with no
+    // resolvable worktree got neither the caution nor a word about why. This verb's own
+    // success receipt spells `flatPath(edge.to.worktree) || '(unknown)'` and `boundPath` in
+    // the ledger module returns null past its length bound, so the value really is nullable
+    // on the path that reaches here. The two unanswerable causes carry DIFFERENT reasons on
+    // purpose: one sends the reader to the installation, the other to their own session.
+    //
+    // RECORDED, NOT ACTED ON: the GATE arm is WIDER than its own justification. `canonicalPair`
+    // consults the gate for exactly one thing, `msysToDrive`, which `msysDrivePrefix` returns
+    // unchanged off win32 — so on a POSIX host an unusable gate changes no answer and this arm
+    // discloses a comparison that would have been correct. Narrowing it to `!GATE_READY &&
+    // IS_WINDOWS` makes a user-facing disclosure platform-conditional, which is an unmeasured
+    // behaviour change to the arm this same round rewrote; the honest end state is for
+    // `canonicalPair` to report its own confidence rather than have every caller re-derive it
+    // from the gate's internals. Left as is on purpose, and named here so it is not rediscovered
+    // as a defect.
+    //
+    // TWO FURTHER unanswerable cases are SILENT — a third and a fourth against the base of two
+    // the arms above disclose — and both are recorded here rather than given an arm.
+    //
+    // The THIRD: `canonicalPair` is all-or-nothing, so when either operand fails to realpath
+    // BOTH drop back to the lexical spelling, and a genuine match reached through an
+    // unresolvable path answers FALSE and prints nothing — indistinguishable from a measured
+    // negative.
+    //
+    // The FOURTH is the one the EQUALITY paragraph above qualifies, and it is ORDINARY rather
+    // than exotic: `worktreeRoot` returning null leaves an operand at whatever cwd was recorded,
+    // which `continuationPlan`'s own header calls the ordinary case. The comparison then
+    // measures two different levels of one tree, `standingIn` stays false, and the caution below
+    // — the one that tells a reader the patch step will snapshot their OWN uncommitted edits — is
+    // withheld in exactly the state it exists for.
+    //
+    // Closing either is the same fix the paragraph above names for the GATE arm: have
+    // `canonicalPair` report its own confidence instead of every caller re-deriving it, and for
+    // the fourth, have it say whether each operand is a resolved worktree root or a raw cwd.
+    // That is a change to a shared canonicalizer with three call sites — `containment`, this
+    // function and `continuationPlan` — so it is named rather than taken here. Do NOT reach for
+    // containment instead: the nested-worktree argument above is independently correct.
+    let standingIn = false;
+    if (!takerWorktree) {
+      out.push('           Whether you are standing IN that tree could not be checked here: this');
+      out.push("           session's own worktree root was not resolved. Compare the worktree");
+      out.push('           above with your own before you run the patch step.');
+    } else if (!GATE_READY) {
+      out.push('           Whether you are standing IN that tree could not be checked here: the');
+      out.push('           path-comparison module did not load, or loaded without the check this');
+      out.push('           needs. Compare the worktree above with your own before you run the');
+      out.push('           patch step.');
+    } else {
+      const [srcRoot, takerRoot] = canonicalPair(row.wt, takerWorktree);
+      standingIn = srcRoot === takerRoot;
+    }
+    if (standingIn) {
+      out.push('           You are standing IN that tree: the patch step snapshots whatever is');
+      out.push('           uncommitted there, your own edits included. Decide what is yours');
+      out.push('           before you run it.');
+    }
+  } else {
+    out.push(`           recorded worktree (gone) = ${flatPath(row.wt)}`);
+    out.push('           That value is shown for reading, not for pasting: nothing below is mapped');
+    out.push('           to it, and this leg prints no recipe to paste it into. If you build a -C');
+    out.push('           operand out of it, or out of a surviving root above it, quote it yourself');
+    out.push('           — an apostrophe in a path closes the recipe quoting at exactly that point.');
+    // This leg maps NOTHING, and it still renders quoted placeholders of its own — the
+    // `git worktree add` line below carries two, `<path>` and `<session-branch>`. (THREE is
+    // the PRESENT leg's `TAKE_YOUR_OWN` line, which adds `<name>`; this comment said three for
+    // a release, describing the other leg's recipe beside this leg's rule.) Saying nothing about them let a reader
+    // carry the present leg's mapped-value habit across and strip the quoting off an operand
+    // no value was ever substituted into.
+    out.push(...substitutionRuleLines(body, [], { indent: '           ', carrier: 'terminal' }));
+  }
+  return out.concat(adviceBlock(body, '  ', '  ', { carrier: 'terminal' }));
 }
 
 // The CONTAINMENT axis of a takeover, and deliberately a SECOND renderer beside
@@ -3315,11 +3875,15 @@ function continuationPlan(r, w, branch) {
       '            that sits BETWEEN the diff and the apply because a caution printed after',
       '            the apply is read after it has run. Substitute these two values for its',
       '            placeholders — the recipe cannot compute them, which is why this block',
-      '            exists. Replace each placeholder TOGETHER WITH the single quotes around',
-      '            it: the values below bring their own, and two quoted words written back',
-      '            to back are ONE word to the shell — empty, for a path with a space.',
-      `              '<their worktree>' = ${S}`,
-      `              '<your new worktree>' = ${T}`,
+      '            exists.',
+
+      // DERIVED from `CARRY_OVER` itself rather than stated over "each placeholder". This
+      // block maps two tokens and the recipe carries more than two, so a blanket rule told the
+      // reader to strip the quoting off the ones nobody substituted — the same defect
+      // `whereAdviceLines` had removed one carrier over, in the opposite direction. One
+      // renderer now emits the mapping and the rule that governs it, so the two cannot part.
+      ...substitutionRuleLines(CARRY_OVER, [['<their worktree>', S], ['<your new worktree>', T]],
+        { indent: '            ', carrier: 'terminal' }),
       '         Nothing above writes to the source worktree: a git mutation aimed at that tree',
       '         is refused by this same gate, and would touch another session\'s index.',
     ],
@@ -3349,7 +3913,14 @@ function cmdShow(opts) {
     print(`OWNER    account ${r.app.accountUuid ? instanceId(r.app.accountUuid, 64) : '(not resolvable)'}${r.app.accountUuid ? ` (${accountLabel(r.app.accountUuid)})` : ''}${r.app.archived ? '   **ARCHIVED** (process stopped, worktree may have been cleaned up)' : ''}`);
     print(`CONFIG   model ${oneLine(flatPath(r.app.model), 40) || '?'}   effort ${oneLine(flatPath(r.app.effort), 40) || '?'}   permissions ${oneLine(flatPath(r.app.permissionMode), 40) || '?'}`);
   }
-  print(`WORKTREE ${flatPath(r.wt)}${r.cwdExists ? '' : '   !! MISSING'}`);
+  // ONE derivation for the whole view. This marker and the `WHERE` head ~40 lines below it
+  // state the same fact about the same record, and they used to reach it two different ways —
+  // a raw `r.cwdExists` here, `adviceLeg(r)` there — which is the drift `adviceLeg`'s own
+  // header records happening INSIDE `worktreeAdvice`, one screen wide instead of one function.
+  // Hoisted above the first consumer rather than declared beside the second, so a third
+  // consumer added anywhere below it inherits the answer instead of re-deriving it.
+  const wtLeg = adviceLeg(r);
+  print(`WORKTREE ${flatPath(r.wt)}${wtLeg === 'present' ? '' : '   !! MISSING'}`);
   if (r.cwd !== r.wt) print(`CWD      ${flatPath(r.cwd)}   (session started in a subdirectory)`);
   print(`BRANCH   ${oneLine(flatPath((g && g.branch) || r.branch), 120) || '?'}`);
   print(`LAST     ${ago(r.mtime)} ago   transcript ${flatPath(r.transcript)}`);
@@ -3368,16 +3939,41 @@ function cmdShow(opts) {
   // whether taking over is safe, `writesLines` whether you may write there, and
   // this whether the directory will still exist while you do.
   print('');
-  // The DECISION half only. This is a survey view — nine-space prefix, no fence — and
-  // the carry-over recipe is dozens of lines of paste-and-run text whose home is a persisted
-  // brief. Dumping it here cost `show` the one property it has, which is that you can
-  // scan it. The `--json` payload above is NOT summarized: it is a data carrier.
+  // The DECISION half only, and the criterion is SURVEY versus ACTIONABLE rather than
+  // anything about where the recipe belongs — `cmdAdopt` prints it to a terminal, so
+  // "whose home is a persisted brief" stopped being true the moment that caller landed.
+  // This is a survey view — nine-space prefix, no fence — and the carry-over recipe is
+  // dozens of lines of paste-and-run text. Dumping it here cost `show` the one property
+  // it has, which is that you can scan it. The `--json` payload above is NOT summarized:
+  // it is a data carrier.
   const wtAdvice = worktreeAdvice(r, { carryOver: false });
-  print(`WHERE    ${wtAdvice[0]}`);
-  for (const advice of wtAdvice.slice(1)) print(`         ${advice}`);
-  if (adviceLeg(r) === 'present') {
+  // A COMPLETE head line, which is what the other three carriers already had and this one did
+  // not. It used to print `wtAdvice[0]`, and every `ADVICE_LEADS` cell is a multi-line
+  // paragraph — so the head carried a SENTENCE FRAGMENT and the rule below it landed between
+  // the lead and its own continuation: "…so treat this worktree as one" / [six lines of quoting
+  // rule] / "that still belongs to an archivable session." Rule-before-the-WHOLE-body is the
+  // shape `whereAdviceLines` and both briefs use; the head is what makes it available here.
+  //
+  // It states the LEG rather than the identity. `WORKTREE` above already names the path and its
+  // `!! MISSING` marker, and this is a single-session view, so a `for <tag>:` head in the
+  // sibling's shape would repeat what the reader has already read four lines up. The leg is the
+  // one fact this block is about and the only one not stated above it.
+  //
+  // ONE `adviceLeg` call, hoisted. The `present` branch below asked the same question again,
+  // and a second call is what the derived consumer census in the unit file counts.
+  print(`WHERE    the recorded worktree is ${wtLeg === 'present' ? 'present' : 'GONE'}`);
+  // BEFORE the body, like every other carrier. This view maps nothing and still renders the
+  // create line's quoted placeholders, and further down it prints `continuationPlan`'s rule
+  // for the two values THAT block maps — two rules on one screen over two different sets.
+  // With the rule printed AFTER its body the reader met it between the two, which is how the
+  // first rule came to introduce the second rule's block.
+  for (const line of substitutionRuleLines(wtAdvice, [], { indent: '         ', carrier: 'terminal' })) print(line);
+  for (const advice of wtAdvice) print(`         ${advice}`);
+  if (wtLeg === 'present') {
     print('         The uncommitted half needs a carry-over recipe this view does not print.');
     print('         Run handoff or takeover for it — those write a brief you paste from.');
+    print('         adopt prints it too, but that verb also writes a machine-wide ledger');
+    print('         edge, so it is not a read-only route to the recipe.');
   }
   for (const line of writesLines(w)) print(line);
   // BELOW `writesLines`, and never inside it. The verdict suite reads that block with
@@ -3508,6 +4104,18 @@ function cmdTakeover(opts) {
   const ctx = opts.all ? null : repoContext(opts.repo || process.cwd());
   const target = handoffPath(r, ctx, g && g.branch).replace(/\.md$/, '.takeover.md');
   const tv = activityVerdict(r, opts.force);
+  // RENDERED BEFORE THE WRITE, and the order is the guarantee rather than layout. Every one of
+  // these three can THROW — `worktreeAdvice` on an advice cell it cannot resolve, the two
+  // renderers on a carrier `resolveCarrier` refuses — and the ledger edge below is DURABLE and
+  // machine-wide. Rendering after it left a written edge with an empty output buffer for
+  // `main()` to flush, so the edge landed and nothing announced it, which is exactly the
+  // contract SKILL.md states for this verb. Announcing after the write does not fix that: this
+  // verb has TWO carriers and the `--json` one returns before any announcement could be
+  // reached. Rendering first covers both, and covers `cmdAdopt`'s two carriers by the same
+  // move. The arrays are built here and PUSHED below, because `L` does not exist yet.
+  const wtAdvice = worktreeAdvice(r);
+  const wtRule = substitutionRuleLines(wtAdvice, [], { indent: '   ', carrier: 'markdown' });
+  const wtBlock = adviceBlock(wtAdvice, '   ', '   ', { carrier: 'markdown' });
   // Recorded before the --json branch on purpose: a caller that asked for JSON is
   // taking the session over just as much as one reading the markdown, and an edge
   // that only exists on the text path would be missing exactly when a tool drives
@@ -3527,7 +4135,7 @@ function cmdTakeover(opts) {
   // pointing into the wrong tree. The markdown keeps `writeAnchorCaution`'s static
   // sentence and no continuation at all.
   const tw = writeAnchor(r.wt, opts);
-  if (opts.json) return print(JSON.stringify({ ...r, git: g, diff: d, target, takeover: tv, lineage, writes: tw, continuation: continuationPlan(r, tw, g && g.branch), worktreeAdvice: worktreeAdvice(r), skipped: SKIPPED }, null, 2));
+  if (opts.json) return print(JSON.stringify({ ...r, git: g, diff: d, target, takeover: tv, lineage, writes: tw, continuation: continuationPlan(r, tw, g && g.branch), worktreeAdvice: wtAdvice, skipped: SKIPPED }, null, 2));
   const L = [];
   L.push(`# Takeover: ${briefPath(r.title || path.basename(r.wt))}`);
   L.push('');
@@ -3623,7 +4231,13 @@ function cmdTakeover(opts) {
   // Through `adviceBlock`, not a bare prefix loop: the recipe lines have to arrive
   // fenced here exactly as they do in the handoff brief, or the same array is
   // runnable in one brief and prose in the other.
-  for (const line of adviceBlock(worktreeAdvice(r), '   ', '   ')) L.push(line);
+  // The rule BEFORE the recipe, on the carrier that is PERSISTED: this file is opened by a
+  // different session, which need not have this skill loaded, so SKILL.md's copy of the
+  // quoting doctrine does not reach its reader. The brief maps nothing — every placeholder in
+  // it is the reader's to supply — and it said so nowhere at all.
+  for (const line of wtRule) L.push(line);
+  L.push('');
+  for (const line of wtBlock) L.push(line);
   L.push('');
   // The lead-in used to read "Then, in whichever directory that decision names:"
   // above a fence that names the source worktree unconditionally — so a reader who
@@ -3780,7 +4394,12 @@ function cmdHandoff(opts) {
   // Same renderer as the takeover brief, and a coalescing one: the per-line fencing
   // this loop used to do opened a new ```bash block for every command, so the
   // carry-over recipe arrived as unrelated-looking snippets.
-  for (const line of adviceBlock(worktreeAdvice(r), '  ', '- ')) L.push(line);
+  // Same rule, same reason, on the other persisted carrier. The two briefs render one array
+  // and must not disagree about how to substitute into it.
+  const wtAdviceH = worktreeAdvice(r);
+  for (const line of substitutionRuleLines(wtAdviceH, [], { indent: '  ', carrier: 'markdown' })) L.push(line);
+  L.push('');
+  for (const line of adviceBlock(wtAdviceH, '  ', '- ', { carrier: 'markdown' })) L.push(line);
   L.push('');
   // "That is not always where the work should continue" was true when one arm still
   // adopted the source worktree in place. No arm does, so the qualifier is now the
@@ -4011,14 +4630,147 @@ function cmdAdopt(opts) {
   const edge = buildEdge(row, me, opts.reason || 'manual', 'adopt', 'confirmed', nowStamp());
   // Guarded exactly as the takeover path is: the same unwritable-ledger condition
   // must not kill one verb with a stack trace while its sibling reports it.
+  // The `WHERE` head and its advice body are rendered by the module-scope, exported
+  // `whereAdviceLines`, which carries the whole rationale for what that head says. It is
+  // rendered HERE, into one variable both carriers push, and the position is the point: it can
+  // THROW — `worktreeAdvice` on an unresolvable advice cell, `resolveCarrier` on a bad carrier
+  // — and the `ledgerWrite` below is DURABLE. Rendering after the write left a written edge
+  // announced by nothing on the `--json` carrier, where the receipt lives inside a payload that
+  // is never built. This spelling used to call at RENDER time on whichever carrier ran, argued
+  // from `main`'s flush; that argument covers only the TEXT carrier, and the flush is the weaker
+  // half of the guarantee. Rendering above the write covers both carriers and makes the flush a
+  // backstop rather than the mechanism. Pinned by `L70n` in test-session-trail-lineage.sh.
+  //
+  // The retired spelling was a closure over exactly one variable, so it bought nothing a
+  // parameter does not, and it put the leg logic behind the full CLI: reaching the gone leg
+  // cost a shell fixture that removes a real worktree, where the unit layer states the same
+  // record in one line.
+  //
+  // The taker's own worktree is passed in rather than read inside that renderer, because it
+  // is the one thing the head says that depends on where the READER is standing.
+  const whereLines = whereAdviceLines(row, edge.to.worktree);
   let file;
   try { file = ledgerWrite(edge); } catch (e) {
-    fail(`could not record the handover: ${e && e.message ? e.message : 'write failed'}`);
+    const why = e && e.message ? e.message : 'write failed';
+    // The guidance is rendered BEFORE the refusal, not instead of it: the uncommitted
+    // half is left behind whether or not a record was minted, and a privacy opt-out
+    // must not also opt out of being told so — `ZENSU_SESSION_LINEAGE=off` throws here
+    // by design, so this branch is reachable by configuration and not only by I/O error.
+    // `fail()` flushes the buffer and then exits non-zero, so the exit status, the
+    // stderr cause and the "no edge was written" property are all unchanged.
+    //
+    // The JSON carrier gets a PAYLOAD, never the prose. `skippedNote`'s own gate exists
+    // because trailing prose turns a degraded-but-parseable answer into a hard
+    // JSON.parse failure, and this payload carries `skipped` for the same reason every
+    // other one does — `SKIPPED` can be non-zero here, since `resolve()` ran first.
+    // ONE EXIT, TWO RENDERINGS. The refusal used to be written twice, byte-identically, and
+    // only the text copy was asserted — the lineage suite matches it through a helper that
+    // merges stderr, while the `--json` case invokes node directly with `2>/dev/null` and
+    // checks the exit status alone — so the two literals could drift with CI green. The
+    // shared "both carriers refuse non-zero" property is structural now rather than something
+    // two separate checks each have to remember.
+    //
+    // THE CAUSE REACHES STDERR FIRST, and that ordering is the fix rather than tidiness.
+    // `worktreeAdvice` ends an unresolvable advice cell with a THROW, which `main` flushes and
+    // EXITS, so evaluating it as a property value of the payload literal took `error: why`
+    // — the only machine-readable carrier of the cause on that path — out with it, and left
+    // stderr naming the render fault instead of the ledger failure. A `try` cannot catch
+    // `process.exit`, so writing the cause before the render is the only thing that survives
+    // it. `exitAfterOwnDiagnostic()` below therefore carries the exit status alone — a NAMED
+    // verb, never an empty message handed to `fail`, which would make every falsy message
+    // anywhere in this file exit silently.
+    //
+    // `flatPath(why)` here as well as on the receipt below: `ledgerWrite`'s messages carry
+    // filesystem text, the two channels interleave for a terminal reader, and a CSI run in
+    // either can overwrite a row the reader already trusted.
+    process.stderr.write(`session-trail: could not record the handover: ${flatPath(why)}\n`);
+    if (opts.json) {
+      // The recorded path AND the LEG, because the leg is what decides whether that path may be
+      // substituted at all. `recorded` is null here, so the payload named the source nowhere
+      // while the advice it ships is built around `'<their worktree>'` — the one carrier whose
+      // recipe could not be completed. But supplying it unconditionally was wrong in the other
+      // direction: `whereAdviceLines` maps it to that token on the PRESENT leg only, and on the
+      // gone leg prints it under `recorded worktree (gone) =` with an explicit "shown for
+      // reading, not for pasting", because the body there tells the reader to substitute the
+      // root that still exists instead. A gated key would make absence ambiguous — a consumer
+      // could not tell the gone leg from an older tool — so the leg is NAMED, and it comes from
+      // `adviceLeg`, the single implementation of that decision, never from a raw re-derivation.
+      print(JSON.stringify({ recorded: null, file: null, error: why, recordedWorktree: row.wt, leg: adviceLeg(row), worktreeAdvice: worktreeAdvice(row), skipped: SKIPPED }, null, 2));
+    } else {
+      // A NEGATIVE receipt occupies the receipt slot. Without it this path was
+      // byte-identical to a success from the head down while the refusal lived on stderr
+      // alone, so `adopt 2>/dev/null` read as a recorded handover.
+      // `flatPath(why)`: `ledgerWrite`'s messages carry filesystem text, and a CSI run in one
+      // would overwrite the very row this negative receipt exists to make unmistakable. It is
+      // NOT the only bounded interpolation of that value — the stderr pre-write above applies
+      // the same helper, because the two channels interleave for a terminal reader. The
+      // `--json` arm applies no bound of its own, and the reason is NARROWER than "JSON.stringify
+      // escapes controls", which this comment used to claim. That escaping covers C0 only: DEL,
+      // C1, U+2028/U+2029 and every `\p{Cf}` — the bidi run `CONTROL_RUN` names deliberately,
+      // because it can make a path READ as a different path — survive `JSON.stringify` verbatim.
+      // A machine carrier is not a rendered line, so the value travels raw here on purpose; a
+      // consumer that renders it to a human owes it a bound. It is NOT the only raw carrier
+      // either — `cmdShow --json` spreads the whole row and ships `wt` the same way, and
+      // SKILL.md documents `list --json` as emitting the whole row object — so bounding this one
+      // payload would be a partial answer to a tree-wide question. Recorded rather than half-fixed.
+      print(`NOT RECORDED  ${sessionTag(row.sessionId)} → ${sessionTag(me.sessionId)} — ${flatPath(why)}`);
+      print('');
+      for (const line of whereLines) print(line);
+    }
+    exitAfterOwnDiagnostic();
   }
-  if (opts.json) return print(JSON.stringify({ recorded: edge, file, skipped: SKIPPED }, null, 2));
+  // WHERE the work continues, and what a `git worktree add` does not carry. `adopt` was
+  // the ONE route that rendered neither: `takeover` and `handoff` write the advice into
+  // their briefs and `show` prints its decision half, while this verb — the documented
+  // fallback for a handover taken some other way — printed only its receipt. Measured on
+  // a real ledger edge carrying `recordedBy: "adopt"`: the taking session continued in a
+  // worktree of its own, which SKILL.md flow 3 step 4 allows, and left the source tree's
+  // uncommitted changes behind, which nothing on this route had told it about.
+  //
+  // The FULL advice, carry-over included, unlike `cmdShow`, which passes
+  // `carryOver: false` because it renders a survey. This verb is a confirmation: by the
+  // time it runs the directory is already chosen, so the decision half is a check on a
+  // choice already made, while the carry-over half is the one still actionable.
+  // `leg` for the same reason the failure payload carries it: it is what decides whether the
+  // recorded path may be substituted into the advice at all, and a consumer of the documented
+  // `worktreeAdvice` key had that ambiguity on the branch it will almost always be on. NOT
+  // `recordedWorktree` — `edge.from.worktree` already IS the source worktree here, in the
+  // BOUNDED `makeEndpoint`/`boundPath` spelling, so adding the raw field would put one value
+  // under two keys and the added one would be the weaker of the two.
+  if (opts.json) return print(JSON.stringify({ recorded: edge, file, leg: adviceLeg(row), worktreeAdvice: worktreeAdvice(row), skipped: SKIPPED }, null, 2));
   print(`RECORDED  ${sessionTag(row.sessionId)} (${endpointLabel(edge.from)}) → ${sessionTag(me.sessionId)} (${endpointLabel(edge.to)})`);
-  print(`          reason: ${edge.reason}   worktree: ${edge.to.worktree || '(unknown)'}`);
-  print(`          ${path.join(LEDGER_DIR, file ? path.basename(file) : '')}`);
+  // EVERY value on the receipt bounded, all three lines. They are self-derived rather than
+  // foreign, so this is consistency rather than a closed injection channel — but a CSI run here
+  // would overwrite the very row the `WHERE` head two lines below points at as a trap, which is
+  // the one place on this carrier where an overwritten line changes what a reader substitutes.
+  // The ledger path was the exception for a release, under this same comment: `LEDGER_DIR`
+  // comes from `--config-dir` / `CLAUDE_CONFIG_DIR` through `path.resolve`, which strips no
+  // control character, so the argument above covers it exactly as it covers the other two.
+  // `L70o` pins it.
+  print(`          reason: ${flatPath(edge.reason)}   worktree: ${flatPath(edge.to.worktree) || '(unknown)'}`);
+  print(`          ${flatPath(path.join(LEDGER_DIR, file ? path.basename(file) : ''))}`);
+  // Computed ABOVE the ledger write and shared with the failure branch, which is the
+  // opposite of what this comment used to prescribe and the reason is that the old rule
+  // protected one carrier out of two. It said to render per carrier so that a throw would
+  // still leave the receipt in the buffer for `fail()` to flush — true on the TEXT carrier,
+  // and worth nothing on the `--json` one, where the receipt lives inside a payload that a
+  // throw prevents from ever being built. Rendering before the write removes the hazard on
+  // both: a render fault now means no edge lands at all. The flush stays as a backstop.
+  // `L70n` pins the order. Through `adviceBlock` rather than a prefix loop, because the
+  // carry-over recipe's paste-unit split — the destructive `git apply` alone in its own
+  // fence, away from the two read steps above it — is a property of that renderer and
+  // not of the array. `cmdShow` is the deliberate exception on both counts: it is a
+  // survey view, nine-space prefix and no fence.
+  //
+  // The `WHERE` head names the SOURCE session and its recorded worktree, and it is not
+  // decoration: the receipt above it ends on `edge.to.worktree`, which is the TAKER's
+  // tree, so the nearest antecedent to the advice was the wrong one. It is also the
+  // operand the recipe's own gate needs — "If it is a worktree you would not cd into, do
+  // not run this at all" is unperformable against a `<their worktree>` placeholder, and
+  // both brief carriers supply the value on a `- worktree:` line. Rendered through the
+  // ONE exported `whereAdviceLines` rather than a second hand-copy of those two lines.
+  print('');
+  for (const line of whereLines) print(line);
 }
 
 function lineageDiagnose(opts) {
@@ -4683,9 +5435,17 @@ const COMMAND_FLAGS = {
   // `--days` is deliberately absent: the listing branch reads `opts.all` and
   // `opts.repo` and nothing else from the scan set.
   lineage: ['--diagnose', '--backfill', '--forget', '--where', '--apply', '--all', '--repo'],
-  // `adopt` IS the record, so `--no-record` would leave a verb whose entire
-  // output is suppressed. It used to be accepted and then ignored, which wrote the
-  // machine-wide record the flag said it was skipping.
+  // `--no-record` is REFUSED here, and the reason had to be restated: "that verb's
+  // entire output is the record" stopped being true the moment `adopt` began rendering
+  // the destination guidance, which is output the flag has no business suppressing. The
+  // surviving reason is the historical one — it used to be accepted and then IGNORED,
+  // which wrote the machine-wide record the flag said it was skipping — and a refusal is
+  // the safe resting place for a flag whose meaning on this verb is now ambiguous.
+  // NAMED FOLLOW-UP, not taken here: accept-and-HONOUR is coherent now (print the head
+  // and the advice, write no edge, exit 0) and would give a user who wants the guidance
+  // without a permanent machine-wide record something narrower than the process-global
+  // `ZENSU_SESSION_LINEAGE=off`. It changes a documented flag contract with its own pins
+  // (`L56c`/`L56d`), so it belongs in its own change rather than inside this one.
   adopt: ['--reason', ...SCAN_FLAGS],
   // No selector scan at all: a label is keyed by account or window, so `resolve()` is
   // never reached and none of the scan flags decides anything here.
@@ -4733,8 +5493,10 @@ function refuseForeignFlags(opts, cmd) {
 // Everything argv-dependent lives in here rather than at module scope, so that an
 // `import` of this file parses no arguments, resolves no roots and dispatches no
 // command. That is what makes the advice helpers below unit-testable at all: they
-// are pure functions of a plain record, and the only thing that had ever stood
-// between them and a `node --test` file was this dispatch running on import.
+// are functions of a plain record — `whereAdviceLines` additionally canonicalizes two
+// paths and is therefore not pure, which the export header states — and the only thing
+// that had ever stood between them and a `node --test` file was this dispatch running
+// on import.
 function main() {
   const argv = process.argv.slice(2);
   const opts = parseArgs(argv);
@@ -4752,7 +5514,38 @@ function main() {
   const handler = Object.prototype.hasOwnProperty.call(COMMANDS, cmd) ? COMMANDS[cmd] : null;
   if (!handler) fail(`unknown command: ${cmd} (${Object.keys(COMMANDS).join(' | ')})`);
   refuseForeignFlags(opts, cmd);
-  handler(opts);
+  // THE SINGLE CHOKE POINT for every command, and the only guard that covers a THROW.
+  // `print` merely buffers; this function is where the buffer is written. `fail` and
+  // `exitAfterOwnDiagnostic` flush before they exit, which is the ONLY reason the three
+  // ordering rules in `cmdAdopt` hold — and a `try` cannot catch `process.exit`, so those
+  // rules never covered a throw at all. `cmdTakeover` and `cmdAdopt` both write a
+  // machine-wide ledger edge, and both now RENDER BEFORE THEY WRITE (`L70n` pins it), so a
+  // render fault means no edge lands rather than an edge nothing announces. This flush is
+  // the backstop for everything after that point, not the mechanism that makes the write
+  // safe — it was tried as the mechanism and covered only the text carrier, the `--json`
+  // one having no receipt in the buffer to save.
+  //
+  // ORDER is the contract. Flush FIRST, so every receipt the command already produced
+  // survives, then report the cause on stderr — the two channels interleave for a terminal
+  // reader, and a cause printed above the receipt reads as if the receipt were its output.
+  // The message is bounded through `flatPath` like every other value this file renders: an
+  // exception message can carry filesystem text, and a CSI run in it would overwrite the
+  // row that was just flushed.
+  try {
+    handler(opts);
+  } catch (err) {
+    // RECORDED, NOT ACTED ON: this catch is TOTAL and it is LOSSY. An internal TypeError now
+    // renders exactly like a user-facing refusal — one line, no frame, exit 1 — and it became
+    // load-bearing for a NEW error class in the same round that added it, since the advice
+    // refusal stopped exiting and started throwing. Separating a programmer error from a
+    // refusal (a distinct exit code, a prefix, a stack behind a debug switch) is a new
+    // behaviour with its own control surface and belongs in its own change; what this catch
+    // owes and delivers is that no receipt is lost.
+    flush();
+    const why = err && err.message ? err.message : String(err);
+    process.stderr.write(`session-trail: ${flatPath(why)}\n`);
+    process.exit(1);
+  }
   flush();
 }
 
@@ -4777,19 +5570,43 @@ function isEntryPoint() {
   return real(invoked) === real(scriptPath());
 }
 
-// The advice surface: FOUR names — three functions of a plain record, plus the regex that
-// grades their output. Nothing else in this file can be driven without a filesystem, which
-// is what makes this the right export set. Named exports rather than a default, so a
-// consumer's import list says what it uses.
+// The advice surface: SEVEN names — six functions plus the regex that grades their output.
+// THREE take a plain record (`worktreeAdvice`, `adviceLeg`, `whereAdviceLines`) and THREE take
+// lines (`adviceBlock`, `recipePlaceholders`, `substitutionRuleLines`). The count moved twice
+// without this header moving with it, which is the drift its own closing sentence forbids.
+// Nothing else in this file can be driven without a WORKING TREE — an index, a transcript, a
+// desktop-app store — which is what makes this the right export set. Named exports rather than
+// a default, so a consumer's import list says what it uses.
 //
-// ONE impurity, stated because an importer would otherwise be entitled to assume none:
-// `worktreeAdvice` calls `fail()` on an internally inconsistent `ADVICE_LEADS` lookup, and
-// `fail` flushes, writes stderr and calls `process.exit`. That path is unreachable today —
-// four literal arms against two literal legs, all eight cells present — and the choice is
-// right for the CLI, where a half-rendered brief beside a written ledger edge is worse than
-// a loud exit. An importer must not treat the function as total; if this surface is ever
-// extracted into its own module, replacing that `fail()` with a thrown error is the first
-// obligation the move carries.
-export { adviceBlock, worktreeAdvice, adviceLeg, WORKTREE_ADVICE_COMMAND };
+// TWO impurities, stated because an importer would otherwise be entitled to assume none, and
+// the count moved when `whereAdviceLines` joined the set.
+//
+// The FIRST is a filesystem READ. `whereAdviceLines` calls `canonicalPair`, which calls
+// `fs.realpathSync.native` on both operands to decide whether the taker is standing in the
+// source worktree. It opens no file and performs no write — it canonicalizes, and when either
+// path does not resolve it drops BOTH back to the lexical spelling, so the function still
+// answers from a record alone. Say "reads the filesystem to canonicalize", never "pure".
+//
+// The wording avoids a `writes:` colon pair on purpose: `W7b` in
+// `tests/structure/test-session-trail-verdict.sh` mutates every `writes: <expr>` payload key out
+// of this file and refuses to run its bite when one survives, so a COMMENT carrying that
+// spelling reports the mutation as never applied. Measured here, not assumed.
+//
+// The SECOND is a THROW — catchable, and deliberately not an exit.
+// `worktreeAdvice` throws on an internally inconsistent `ADVICE_LEADS` lookup, and
+// `substitutionRuleLines` and `adviceBlock` throw on a carrier outside `ADVICE_CARRIERS`.
+// `whereAdviceLines` reaches the first transitively, since it renders that array. The lookup
+// path is unreachable today — four literal arms against two literal legs, all eight cells
+// present — and the carrier path is reachable from any caller that forgets the argument,
+// which is the point of making it required. `main()` catches both, flushes the buffer and
+// THEN writes the cause, so the CLI reports a refusal rather than leaving a half-rendered
+// brief beside a written ledger edge.
+//
+// AN IMPORTER MUST CATCH. It must not build a `process.exit` guard: this header said "exit"
+// for a release after the code had already moved to a throw, and an importer following that
+// sentence would have defended against the one failure mode that cannot occur here. Nothing
+// in this surface calls `fail()`, and the extraction obligation that sentence carried is
+// DISCHARGED — do not restore it from an older reading.
+export { adviceBlock, worktreeAdvice, adviceLeg, whereAdviceLines, substitutionRuleLines, recipePlaceholders, WORKTREE_ADVICE_COMMAND };
 
 if (isEntryPoint()) main();

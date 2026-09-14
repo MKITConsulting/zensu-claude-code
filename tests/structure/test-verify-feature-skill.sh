@@ -339,15 +339,31 @@ else
   check "P6a Playwright MCP is pinned, integrity-locked, isolated, and brokered" FAIL
 fi
 PROXY_TEST_OUTPUT="$(node --test "$MCP_PROXY_TEST" 2>&1)"
-# Floor on the REGISTERED total (16). A passing floor is not used: one case already
+# Floor on the REGISTERED total; the call site below carries the value. A passing floor is not used: one case already
 # skips itself on this host and the set of skips is platform-dependent, which is the
 # coupling unit_cases_registered_floor exists to avoid. A real failure is already
 # non-zero from node, and PROXY_TEST_RC covers it.
 PROXY_TEST_RC=$?
-if [ "$PROXY_TEST_RC" = "0" ] && unit_cases_registered_floor_text "$PROXY_TEST_OUTPUT" 16; then
+if [ "$PROXY_TEST_RC" = "0" ] && unit_cases_registered_floor_text "$PROXY_TEST_OUTPUT" 28; then
   check "P6g MCP broker exposes only the exact safe inventory and enforces navigation policy ($(unit_cases_report_text "$PROXY_TEST_OUTPUT"))" PASS
 else
   check "P6g MCP broker inventory/policy behavior (rc=$PROXY_TEST_RC, out=${PROXY_TEST_OUTPUT:0:500})" FAIL
+fi
+# A floor BELOW the registered total is slack a deleted case hides in, and the two carriers of
+# that number — this call site and the `Blocks` cell in tests/SUITE-OVERVIEW.md — are both
+# hand-maintained, so both drifted at once. Derived here so neither can drift again silently.
+PROXY_REGISTERED="$(printf '%s\n' "$PROXY_TEST_OUTPUT" | sed -n 's/^.*[[:space:]]tests \([0-9][0-9]*\)$/\1/p' | tail -1)"
+PROXY_FLOOR_LITERAL="$(sed -n 's/.*unit_cases_registered_floor_text "\$PROXY_TEST_OUTPUT" \([0-9][0-9]*\).*/\1/p' "$0" | head -1)"
+if [ -n "$PROXY_REGISTERED" ] && [ "$PROXY_FLOOR_LITERAL" = "$PROXY_REGISTERED" ]; then
+  check "P6g1 the registered-case floor equals what the proxy unit file registers ($PROXY_REGISTERED)" PASS
+else
+  check "P6g1 the registered-case floor equals what the proxy unit file registers (floor=$PROXY_FLOOR_LITERAL registered=$PROXY_REGISTERED)" FAIL
+fi
+PROXY_OVERVIEW_BLOCKS="$(sed -n 's/^| `playwright-mcp-proxy\.test\.js` | \([0-9][0-9]*\) |.*/\1/p' "$PLUGIN_DIR/tests/SUITE-OVERVIEW.md" | head -1)"
+if [ -n "$PROXY_REGISTERED" ] && [ "$PROXY_OVERVIEW_BLOCKS" = "$PROXY_REGISTERED" ]; then
+  check "P6g2 the SUITE-OVERVIEW Blocks cell equals what the proxy unit file registers ($PROXY_REGISTERED)" PASS
+else
+  check "P6g2 the SUITE-OVERVIEW Blocks cell equals what the proxy unit file registers (cell=$PROXY_OVERVIEW_BLOCKS registered=$PROXY_REGISTERED)" FAIL
 fi
 if grep -qF '@latest' "$MCP_JSON"; then
   check "P6b MCP runtime never floats on @latest" FAIL
