@@ -125,6 +125,7 @@
     "test-tdd-vanilla-mode.sh",
     "test-templates.sh",
     "test-valid-diff-lines.sh",
+    "test-vanished-session-cwd.sh",
     "test-vcs-detect.sh",
     "test-vcs-pr-ops.sh",
     "test-vcs-publish.sh",

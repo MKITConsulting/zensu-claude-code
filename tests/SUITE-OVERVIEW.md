@@ -13,13 +13,14 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (148 = 141 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 141 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 148). **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 140 against 141 CI-classified suites, so one CI
-suite appears in no §3 group. `main` recorded that suite as `test-session-trail-lineage.sh`; this
-merge did not re-derive the NAME, because §3 lists suites in prose rather than by filename and a
-wrong name in a group is worse than none. The gap predates both the plugin-data guard, filed under
+reconciled to that manifest (150 = 143 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 143 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 150). The previous figures here read 148 = 141 + 7 while the manifest already held 142
+CI entries, so they had drifted by one before `test-vanished-session-cwd.sh` added the 143rd.
+**§3 is NOT fully reconciled to it**, and the residual is stated rather than
+asserted away: its eleven CI group headers sum to 142 against 143 CI-classified suites, so one CI
+suite appears in no §3 group. That suite is `test-session-trail-lineage.sh`, re-derived BY NAME
+this time by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
 §"Bash gates, witness & secrets", and the reviewer-spawn grant, filed under §"Review chain &
 findings". §7's profile table was re-derived from `tests/profiles/windows-ci.v1.json` rather than
 described, so its eight shard ids and their membership are the JSON's own, and the entry total
@@ -56,8 +57,8 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **148** — 141 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **141 structure suites + 5 offline evals = 146 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 148 − 141 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **150** — 143 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **143 structure suites + 5 offline evals = 148 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 150 − 143 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -69,8 +70,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 148 structure suites + 5 offline evals | none |
-| `--ci` | 141 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 150 structure suites + 5 offline evals | none |
+| `--ci` | 143 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -93,18 +94,19 @@ Runner-level guarantees (themselves pinned by `test-run-all-preflight-watchdog.s
 
 ## 3. Deterministic structure suites — grouped by what they cover
 
-### Session Control & workflow state (14)
+### Session Control & workflow state (15)
 `orphaned-project-root` · `session-control-claude` · `session-control-core` ·
 `session-control-sandbox-hook-integration` · `session-id-v1` ·
 `session-start-banner` · `state-verb-diagnostics` · `tdd-log-path-anchor` ·
 `tdd-no-flock-external-lease` · `tdd-state-corruption-fail-closed` ·
-`tdd-state-path-safety` · `versioned-plugin-upgrade` · `workflow-scope` ·
-`zensu-runtime-controller`
+`tdd-state-path-safety` · `vanished-session-cwd` · `versioned-plugin-upgrade` ·
+`workflow-scope` · `zensu-runtime-controller`
 
 Covers the canonical CAS workflow document, immutable session binding, the shared
 Bash-3.2-compatible external process lease, symlinked-ancestor / non-regular-leaf
 rejection, fail-closed behavior on an unreadable state file, diagnostics on failed
-state verbs, and the SessionStart banner. `session-control-claude` alone carries ~140
+state verbs, the SessionStart banner, and a vanished live working directory under an
+intact binding. `session-control-claude` alone carries ~140
 assertions.
 
 ### TDD engine & phase gate (17)
