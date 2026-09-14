@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-09-14
+
+### Added
+
+- **session-trail**: Render the destination rule and carry-over recipe on adopt (#302)
+- **verify-feature**: Drive browser verification without a parent-environment policy (#296)
+- **autopilot**: Make a durable run's hold visible before it refuses you (#298)
+- **plan-gate**: Ask which delivery route an approved plan takes (#295)
+- **session-control**: Name and adopt a session whose recorded installation was pruned (#292)
+- **zen-mode**: Bind the chain-progress anchor to the real Zensu chain state (#285)
+- **review**: Colour-code the chain-end summary and PR-body status cells (#286)
+- **session-trail**: Continue a takeover inside the caller's own anchor (#282)
+- **doctor**: Count implementing-phase turns and warn on an unreviewed own chain (#278)
+
+### Changed
+
+- **deferred-review-claim**: Make the C7 and C6b failure messages diagnosable (#293)
+- **session-trail**: Pin the continuation --json payload across every reachable state (#289)
+- **verify-feature**: Add a standalone how-to for the navigation policy and runtime recipe (#288)
+
+### Fixed
+
+- **session-control**: Keep a bound session's tools when its working directory vanishes (#304)
+- **tests**: Read node's summary without assuming a single-byte prefix (#301)
+- **hooks**: Match the review delegate on Task as well as Agent (#299)
+- **verify-feature**: Anchor the marker sweep and own the writer's refusal vocabulary (#303)
+- **session-control**: Adopt a session whose recorded project root is gone (#272)
+- **doctor**: Repair the bash 3.2 parse error that reports a bound session as unbound (#297)
+- **session-control**: Repair a workflow baseline that vanished under a served record (#283)
+- **witness**: Record Bash calls the host never reports back (#291)
+- **deps**: Raise the fast-uri floor past two advisories (#290)
+- **release**: Make every failure in the publish step nameable (#287)
+- **release**: Make the publish step's failures diagnosable (#284)
+
 ## [0.20.0] - 2026-08-31
 
 ### Added
