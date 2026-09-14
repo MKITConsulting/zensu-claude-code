@@ -2122,9 +2122,13 @@ is a call convention inside one installation and never a persisted shape — an 
 passing three args gets its previous answer. The Stop hook denies strictly LESS than before,
 which cannot make state written by one runtime unreadable to the other; the capability rule
 in that section is about ADDING a hook that can deny, and relaxing an existing hook's deny is
-not in the list. Recorded here because this section carries THREE `**Version.**` paragraphs: the `minor` one
-describes the ORIGINAL pointer/schema change, this one the run-scope delta, and a third the
-run-visibility delta. A releaser matching on the wrong one gets the wrong answer.
+not in the list. Recorded here because this section carries FOUR `**Version.**` paragraphs: the `minor` one
+describes the ORIGINAL pointer/schema change, this one the run-scope delta, a third the run
+ADOPTION delta and a fourth the run-visibility delta. A releaser matching on the wrong one gets
+the wrong answer. The count read THREE here and in both later paragraphs while the tree already
+carried four, and the omitted one was the adoption verdict that covers a commit on this branch —
+so re-derive it with `grep -n '^\*\*Version' CLAUDE.md` scoped to this section rather than
+trusting any of the three numerals.
 
 **The audience is a property of the CHANNEL, and all FOUR model-read channels are routed to
 the guided form.** The fourth arrived with the `--autopilot-status` stderr disclosure; the three
@@ -2367,8 +2371,8 @@ with an stderr disclosure, and the worker's message now names the new key. Adopt
 treats a pointer that no longer designates the run as abandonment evidence that owes nothing to a
 clock, which release does not — that asymmetry is deliberate, because adoption is non-destructive.
 
-**Version: `patch` — this is the THIRD verdict in this section, and each covers a different
-delta.** Walked against §"Runtime Lineage" entry by entry: no context-record or workflow-state
+**Version: `patch` — this is the THIRD of FOUR verdicts in this section, and each covers a
+different delta.** Walked against §"Runtime Lineage" entry by entry: no context-record or workflow-state
 schema field (the provenance entry lands in `history`, whose `step`/`phase` are shape-validated
 with no closed enum, and `workflow_state: "autopilot_adopted"` / `last_event: "autopilot-adopted"`
 pass `validateWorkflowToken`); no strict key set moves (`STATE_KEYS`, `STATE_KEYS_WORKSPACE` and
@@ -2461,7 +2465,16 @@ both tables and runs on POSIX, so the membership pin was always affordable. It n
 `adopt: 3` and `adopt: 6`. What stays unverified is the RUNTIME behaviour on Windows, not the
 table membership.
 
-**A tenth is the liveness ladder itself**, which is a HAND COPY across the two verbs, and the
+**A tenth is the liveness ladder itself**, which is a HAND COPY across the two verbs — and, for
+its AGE COMPARISON alone, across a THIRD site outside both: `ownerLivenessClause`'s aged split in
+`hooks/lib/zensu-doctor-report.js` spells `verdict.ageMs >= 0 && verdict.ageMs < window.hours *
+3600000`, which is the verbs' own `ageMs >= 0 && ageMs < ttlHours * 3600000` in the renderer's
+variable names. Only that ONE element is three-way; every other element below stays two-way. The
+renderer's copy is also invisible to the hand-copy GREP this section prescribes further down —
+that needle is `AUTOPILOT_|autopilot[A-Z]|createHash` and the arm matches none of the three — so
+it is named here instead, and the standing `ownerLooksActive(...)` extraction now has THREE
+consumers rather than the two its own paragraph still counts. Both sides are JavaScript, so a
+shared module is reachable rather than blocked by packaging. The
 copy is now FIVE elements deep rather than the two this gap used to name — each spells its own
 `regularFile(tdd-phase-<owner>.json)`, the same age arithmetic, the same `/^[0-9]+$/` argument
 check, the byte-identical stand-down disclosures — **TWO of them**, the absent beacon and the
@@ -2497,7 +2510,11 @@ reached `fail(7)` and the guard stood down on a single `touch -d '+1 minute'`, T
 PERMITS and discloses, because its move is reversible and refusing would wedge the constructive
 verb on a clock artefact. `release` now REFUSES with exit 7, because the premise for permitting
 there — that refusing would strand the run — is false: the owner can cancel through the ordinary
-event path, `adopt` reaches the same record unless its pending stage is `TDD_RUNNING`, where adoption refuses and the config route is the only exit left, and
+event path, `adopt` reaches the same record unless its pending stage is `TDD_RUNNING` or the
+adopting session already owns another nonterminal run — exit 3 and exit 4 respectively, and in
+either case the config route is the only exit left, which is the qualification
+`skills/autopilot-release/SKILL.md` and `docs/tdd-manager-workflow.md` carry too; all THREE
+carriers of this sentence move together and two of them were left unqualified for a round — and
 `autopilotOwnerActivityTtlHours: 0` is the
 documented off-switch. What decides it is the ACCIDENTAL case, not the adversarial one: against
 a deliberate writer refusing buys nothing (deleting the beacon stands the same guard down), but
@@ -2579,7 +2596,11 @@ still covers only the LEGACY pointer by name.
   bounds, `pointerValid`'s exact pointer shape and `_autopilot_owner_key`'s sha256 rule. An
   enumeration here went stale within one review round, so this is a GREP and not a list: before
   changing any of them run
-  `grep -nE 'AUTOPILOT_|autopilot[A-Z]|createHash' hooks/lib/zensu-doctor-report.js`
+  `grep -nE 'AUTOPILOT_|autopilot[A-Z]|createHash|3600000' hooks/lib/zensu-doctor-report.js`
+  — the `3600000` alternation is not decoration: the aged split's age comparison is a third
+  spelling of the verbs' own arithmetic and matches none of the other three needles, so the
+  sweep this paragraph prescribes could not find the copy §"A tenth is the liveness ladder
+  itself" now names —
   **and `grep -nE 'CONTROL_BYTE|renderable|bound\(' hooks/lib/zensu-autopilot-state.sh`**. The
   second root is not optional and the omission was a real defect: the exit-6 release refusal
   carries its OWN inline spelling of the renderer's render-safety class plus a second copy of
@@ -2678,9 +2699,151 @@ still covers only the LEGACY pointer by name.
   pointer designates this run" while an unreadable one is treated as "not established" — the row
   then keeps its WARN. The pointer digest is computed here rather than obtained from the owner, so
   `_autopilot_owner_key`'s rule is a sixth hand-copy; it is exercised behaviourally by P1ne2 and
-  pinned by nothing.
+  pinned by nothing. **It has a SECOND consumer now, with different consequences:**
+  `ownerLivenessClause` calls the same predicate for a FOREIGN owner, where its three-valued
+  answer selects which verbs the owner-silence clause says refuse — both, release only, or a
+  hedge — so a change to its `null` semantics moves that sentence as well as the own-run glyph.
+  P1nk3, P1nk3b and P1nk9 exercise the foreign digest path.
 
-**Version for the run-visibility delta: `patch`.** This section now carries THREE
+- **RESOLVED — `ownerLivenessClause`'s ARM ORDER is a contract, not layout, and it shipped wrong once.**
+  The WINDOW gate runs FIRST, above every beacon-KIND arm. Both verbs wrap their whole liveness
+  block in a `> 0` test — spelled `if (Number.isFinite(ttlHours) && ttlHours > 0) {`, which is
+  what `P1nn` greps; quote that or paraphrase it, never the shorter `ttlHours > 0` form, which
+  occurs nowhere and sends a grep to nothing — release at its
+  `regularFile(tdd-phase-<owner>.json)` call, adopt at the same call one branch in, and the POINTER
+  resolved above that gate in both the verb and the renderer — so at a configured `0` the beacon is
+  never opened at all:
+  there is no exit 2 for a file `regularFile` would refuse and no exit 7 for a future stamp.
+  Judging the kind first asserted refusals no verb takes AND suppressed the `0` disclosure, on
+  the row that offers an irreversible cancel, in a state needing no adversary (the documented
+  off-switch plus a container clock skewed against a shared filesystem). `P1nka` and `P1nkb`
+  drive `0` against an unreadable and a future beacon; `P1nk4` cannot see the order, because it
+  drives `0` against an AGED beacon only.
+
+- **RESOLVED — the exit-2 arm is stated PER VERB, and the ABSENT arm is routed through the same clause.**
+  Under the window gate both verbs share, release reaches the beacon with nothing further in its
+  way; adoption nests the same call one branch deeper, inside `if (ownerPointerDesignatesRun)`,
+  so with the pointer retired it never opens the file and the "both verbs abort" wording is false
+  for that half. Never write "release opens the beacon unconditionally" — that wording stood here
+  for a round, directly below the arm-order bullet stating that at `0` neither verb opens it, and
+  it has a test-comment copy beside `P1nk1` that went stale with it. `P1nk1` pins the release-only
+  form with no pointer and `P1nk1c` the both-verbs form with one, together with the pointer bound
+  that arm now carries. The absent arm was INLINED in `autopilotRows` and is now a branch of
+  `ownerLivenessClause`, so a qualifier added to the other arms reaches it instead of leaving it
+  one arm behind forever.
+
+- **RESOLVED — `null` is not `false`, and only `null` hedges the adoption half.** `autopilotPointerDesignates`
+  answers three values. `false` is a read that SUCCEEDED — the pointer is absent or names another
+  run — and adoption's own verdict follows from it; `null` is a pointer that could not be read, and
+  the adopt worker resolves that pointer ABOVE its window gate, so it can abort on exactly the
+  states this reader maps to `null`. The absent and future-dated arms asserted an adoption verdict
+  (`both verbs stand down`, `adoption permits`) without consulting the pointer at all; both now
+  hedge on `null`, while `false` and `true` keep their wording. `P1nkh` and `P1nki` are the bites.
+
+- **RESOLVED — this reader parses exactly what the owner parses, and a BOM was the counter-example.**
+  `readAutopilotJson` stripped a leading U+FEFF before `JSON.parse`; the owner's `readJson` does
+  not, so such a document reaches `fail(2)` there and `readRunInventory` fails the FIRST one for
+  the whole project. Normalizing it here made the report greener than the tree in both directions:
+  a BOM-prefixed RUN RECORD satisfied every field rule, took the OK glyph and let the summary print
+  "all checks green" over a project on which no Autopilot verb runs, and a BOM-prefixed POINTER
+  answered a definite `designates` verdict for a file both verbs abort on — which is the premise
+  the per-verb clause rests on. The strip is gone. The rule generalizes: a mirror may be STRICTER
+  than its owner and must never be laxer, because the laxer direction deletes findings rather than
+  inventing them. **PARSER TOLERANCE is its own coupling class, and the roster's grep cannot see
+  it**: the only carrier of this one is the ABSENCE of a line, and no constant-name scan finds a
+  removed strip. `P1nks` is what holds it — a BOM-prefixed run document must land in the
+  could-not-be-read row. Note also that this is deliberately NOT a file-wide rule: the settings and
+  config readers in the same file tolerate a BOM on purpose, and their own fixtures pin that.
+
+- **RESOLVED — the per-verb availability is resolved ONCE, in `autopilotRows`, and both halves of the row
+  consume it.** The clause derived it privately and the foreign REMEDY did not derive it at all, so
+  the row told a reader to offer `/zensu:autopilot-adopt` one sentence before the clause said
+  adoption refuses that run with exit 3. Threading the inner-chain fact alone fixed one arm and
+  left the class: the clause ALSO says the release aborts with exit 2 on an unsafe beacon and
+  refuses with exit 7 on a future-dated one, and the remedy went on offering exactly that release.
+  `ownerLivenessClause` therefore returns a RECORD — text plus a per-verb availability pair, its
+  two CAUSE fields and the window it quoted — and the remedy renders from it, so the row can never name a verb its own clause
+  has just said cannot act. The record carries the CAUSE and not only the fact — `releaseBlockedBy`
+  and `adoptBlockedBy` — because the causes take different remedies: a first version knew only
+  "both blocked" and told a reader whose adoption was refused by its inner CHAIN to repair the
+  beacon, which restores the release alone, and told a reader with a future-dated stamp to restore
+  a file that already was a plain regular file. Two rules travel with the shape. **The AGED arm
+  SPLITS on the measured age, and an earlier revision of this paragraph forbade exactly that** — it
+  read "fixes only `releaseBlockedBy`, and fixes it to null … Do not 'complete' the record there by
+  comparing the age", written when the arm's wording was uniformly CONDITIONAL. It is not:
+  `verdict.ageMs` is the same number the row already renders, so INSIDE the window the refusal is a
+  present fact rather than a hypothesis, and the arm sets `releaseBlockedBy = 'aged'` plus, when
+  the pointer designates and no chain blocks, `adoptBlockedBy = 'aged'`. OUTSIDE the window — or
+  with an age that cannot be measured — the wording stays conditional and the arm blocks nothing,
+  which is the case the retired rule was really about. The comparison must stay byte-for-byte the
+  owner's (`ageMs >= 0 && ageMs < ttlHours * 3600000`); it is a THIRD spelling of it, and the
+  hand-copy roster below now says so. An earlier wording claiming the arm "sets neither flag" was
+  false for a chain-blocked run and contradicted `P1nkc`, which is the case that proves it;
+  `P1nkt` is the in-window case and `P1nk3` its out-of-window twin, and the two share every clause
+  literal, so only the slash commands tell them apart — which is why both carry offer positives.
+  And a THIRD state is not a flag but a caveat: adoption also refuses with exit 4 while the caller
+  owns another nonterminal run, which this report knows for the SCANNED set only, so it is
+  appended as a sentence and never used to withhold — the scan is bounded, so withholding on it
+  would be wrong in the other direction. **Making it a CAUSE was tried in one round and reverted,
+  and the ground is a safety property rather than a preference**: the fact is read from a bounded
+  scan of records any session in this project can write, so as a refusal one planted document
+  withholds the constructive verb and leaves the irreversible cancel as the row's ONLY offer.
+  Stating it as a caveat is wrong by a sentence; withholding is wrong by a cancel. The same rule
+  governs `adoptUnknown`, and `skills/doctor/SKILL.md` now states it for the model too: an arm
+  saying a verb REFUSES or ABORTS withholds that verb, while an arm saying its side could not be
+  ESTABLISHED does not. That caveat names an exit CODE, so it is conjoined on
+  `ownerWouldAccept`: a record the owner refuses makes adoption exit 2 inside `readState`, above
+  the exit-4 test, and counting it would state a code the report did not establish. `P1nkc`/`P1nkd` assert the adopt command is ABSENT for a
+  live inner chain; `P1nkm`/`P1nkn`/`P1nko` assert the release is absent where the clause says it
+  aborts or refuses. Asserting only the clause is what let the two halves disagree.
+
+- **A further hand-copy joined the family: the PENDING-stage idiom.** `autopilotRun` returns
+  `pendingStage` (`stage === 'BLOCKED' ? blocked.from : stage`, read defensively because it is
+  computed before `ownerWouldAccept` has vetted the nested key sets), and the clause withholds
+  the adoption half for `TDD_RUNNING` — `_autopilot_adopt_critical` refuses that with `fail(3)`
+  ABOVE its whole liveness block, which is exactly what `_autopilot_release_critical`'s own
+  exit-7 message already branches on when it withholds the adopt route. A row that ROUTES a user
+  to `/zensu:autopilot-adopt` must not contradict the verb that declines to. `P1nkc` drives the
+  literal stage and `P1nkd` the BLOCKED-from-`TDD_RUNNING` spelling.
+
+- **RESOLVED — three forgeable inputs now DISCLOSE, symmetrically.** The rendered age is an ordinary
+  filesystem mtime in `.zensu/state/`, which this file records as session-writable, so one
+  `touch -t` makes a live owner read as hours-silent; the pointer whose presence the
+  `designates === true` arm keys adoption's refusal on is a file any co-tenant can unlink between
+  the report and the user's action; and the PENDING STAGE that withholds adoption entirely is read
+  from the run document in the same directory — the one input that leaves only the irreversible
+  verb on offer, so it is the last one that may read as measured fact. All three now carry a
+  one-clause bound, and a FOURTH clause bounds the word "repaired" on both exit-2 arms: that
+  beacon is the owning session's workflow document, deleting it is not a repair, and it produces
+  the no-document state this same clause calls unbounded. The bound travels with the
+  arm that PROMISES a refusal and not only with the arm that withholds one — attaching it to the
+  weaker claim alone is what made the stronger one read as a guarantee. Mirroring the verbs'
+  mtime read stays correct (changing only this side would desynchronize two readers of one file);
+  what was missing was saying what the input is worth. `P1nk` pins the age bound, `P1nk3` the
+  pointer bound, `P1nkc`/`P1nkd` the pending-stage one and `P1nkq` the repair one — name what each
+  pins rather than counting, because the count moved twice while the sentence said "both".
+
+- **NAMED FOLLOW-UP, not done here: `zensu-doctor.sh` carries the record-root re-resolve TWICE.**
+  The pending-review and owner-activity blocks differ only in four identifiers — the pinned flag,
+  the getter, the rebound temp and the exported window — and the precedent for
+  collapsing them is `zdoc_version_pair()` in the same file. **An earlier revision of this bullet
+  declined it on a false premise**, and the correction matters because the premise was the whole
+  argument: it said the parameterization needs `eval`-based indirect assignment on a bash-3.2
+  target. `zdoc_version_pair()` is the counterexample sitting beside it — it takes the getter NAME
+  as its first argument, calls it directly, and returns through stdout, with no `eval` anywhere,
+  so a helper printing the resolved window for the caller to assign is available on bash 3.2 as it
+  stands. What is left is cost, not risk: the collapse re-authors `C21b`, `C21c` and `C21d`
+  together, on the path that EXPORTS a window the `autopilot:` row quotes beside an irreversible
+  cancel, and that is still a change to take in its own review rather than inside a fix round
+  whose findings are about the row's wording. **TRIGGER:** the next round that
+  has to re-author those three anyway, or a third window needing the same re-resolution. Until
+  then both blocks are pinned: `C21c` derives the resolved-window population and now admits a
+  GROUPED `export` (a mutant grouping the owner-activity export silently dropped it from the
+  population, three windows to two, with the check green) under a floor of three, and `C21d`
+  bounds its `sed` slice at 20 lines (re-indenting the block's closing `fi` grew the slice from
+  16 lines to 166, where every conjunct matched unrelated lines below).
+
+**Version for the run-visibility delta: `patch`.** This section now carries FOUR
 `**Version.**` statements and a releaser matching on the wrong one gets the wrong answer, so
 this one names its own scope: the `/zensu:doctor` `autopilot:` row, the public
 `autopilot_workspace_hold_report` verb with the `--autopilot-status` disclosure that consumes it,
@@ -2689,7 +2852,9 @@ workflow-state schema field (the row READS `autopilot-run-*.json` and the owner-
 writes nothing); no strict key set — `AUTOPILOT_STATE_KEYS` in the renderer is a READ-side mirror
 of `STATE_KEYS`, pinned by P1nm, and rejecting a record there costs one row, never a document;
 no hook added, removed or renamed and no matcher changed; no new config key (the row reuses
-`zensu_pending_review_ttl_hours` through the already-exported `ZDOC_TTL_HOURS`); no attestation
+`zensu_autopilot_owner_activity_ttl_hours`, which the wrapper resolves and exports as
+`ZDOC_OWNER_ACTIVITY_TTL_HOURS` — it quoted `zensu_pending_review_ttl_hours` through
+`ZDOC_TTL_HOURS` for one release, which promised a window neither run verb reads); no attestation
 change; and no `permissionDecision` in either direction, the doctor being advisory. The new
 shell verb is a call convention inside one installation — an older runtime does not have it
 and nothing writes it anywhere — and it ships in the same tree as its only caller, so no
@@ -2753,7 +2918,19 @@ test admitted `AUTOPILOT_ADOPTEd`; the bracket-class spelling is deliberate (`${
 population by grep and compares the four call lines and their operands, never the comment's
 own number, so a fifth getter leaves "ALL FOUR" stale with C58 green), `skills/autopilot-adopt/SKILL.md` and
 its `.claude-plugin/plugin.json` entry, the `autopilotOwnerActivityTtlHours` entry in
-`config.example.json` and its substantial row in `docs/configuration.md`, then `activePointerFileFor` (the resolution ladder `activePointerFor` is now a view over —
+`config.example.json` and its substantial row in `docs/configuration.md` — plus the DOCTOR
+consumers, which a roster naming only the verbs would send a maintainer past: the wrapper's
+`ZDOC_OWNER_ACTIVITY_TTL_HOURS` resolve, export and record-root re-resolution in
+`hooks/lib/zensu-doctor.sh` (pinned by `C21b`, `C21c` and `C21d`), and in
+`hooks/lib/zensu-doctor-report.js` the `OWNER_ACTIVITY_TTL_FALLBACK` / `OWNER_ACTIVITY_TTL_MAX`
+mirror pair, **`ownerActivityWindow`** — which is the ONLY reader of
+`ZDOC_OWNER_ACTIVITY_TTL_HOURS` and the sole producer of `supplied`, the flag deciding
+whether the row discloses that a default was assumed; a rename driven off this roster that misses
+it leaves `supplied` false forever and the row then tells every reader no window was configured in
+a project that configured one, beside an irreversible cancel, with nothing failing — and
+`ownerLivenessClause`, which words the
+`autopilot:` row's owner-silence clause PER VERB because adoption additionally requires the
+owner pointer to still designate the run — then `activePointerFileFor` (the resolution ladder `activePointerFor` is now a view over —
 renaming it silently returns the retire path to a re-derived basename that names nothing whenever
 the legacy fallback won), `_autopilot_owner_pointer_basename_ok` (the ONE shell spelling of the basename SHAPE RULE,
 extracted out of the retire path — NOT "of both pointer basenames", which this clause claimed and
@@ -2971,15 +3148,25 @@ rather than advertising a 0h window.
 that is a behaviour change to this row as much as to the pending-review one.** `Number('')`
 is `0`, which passed the `>= 0` bound, so a wrapper fault that exported an empty string
 switched the window off silently — and `zensu-doctor.sh` exports the variable unconditionally
-after a conditional resolve, which makes blank reachable. `ttlHours` and `implStopThreshold`
-read through one `boundedEnvInt`, so absent and blank take the fallback and only an in-range
-integer wins. `ttlHours()` has FOUR call sites — this row, the pending-review verdict,
-`reviewerDenialRows` and `autopilotRows` (which quotes it in the holding run's owner-silence
-clause) — and a FIFTH consumer of the resolved value, `ownRefusalNoteLive`,
+after a conditional resolve, which makes blank reachable. EVERY `ZDOC_*` window reads through
+one `boundedEnvInt` — grep the calls rather than trusting a list here, as the reader's own
+comment says — so absent and blank take the fallback and only an in-range
+integer wins. `ownerActivityWindow` additionally reports whether the bounded reader ACCEPTED the
+configured value — not merely whether one was present, which got a configured-but-rejected value
+backwards — from the SAME resolution that produced the number,
+because for that key the fallback asserts a protection rather than withholding a claim. `ttlHours()` has THREE call sites — this row, the pending-review verdict and
+`reviewerDenialRows` — and a FOURTH consumer of the resolved value, `ownRefusalNoteLive`,
 which takes it as a parameter rather than re-reading it. Word it that way: counting it as a
-fifth CALL SITE double-counts the read this row already performs. That fifth consumer is
-what decides whether the implementing-turns row carries its refusal caveat. That last one
-carries a consequence the discussion above does not otherwise cover: at the documented `0`,
+fourth CALL SITE double-counts the read this row already performs. That fourth consumer is
+what decides whether the implementing-turns row carries its refusal caveat. `autopilotRows`
+was a call site here until its owner-silence clause moved onto its own accessor,
+`ownerActivityWindow()` over `ZDOC_OWNER_ACTIVITY_TTL_HOURS`: that clause states the exit-7
+refusal both Autopilot run verbs take, and they judge liveness against
+`autopilotOwnerActivityTtlHours`, so quoting the pending-review window there promised a
+protection the destructive verb does not give. `ownRefusalNoteLive`
+carries a consequence the discussion above does not otherwise cover — name it, because an
+inserted sentence broke an earlier "that last one" and pointed the consequence at the
+owner-activity accessor instead: at the documented `0`,
 `classifyDenialNote` never returns `stale`, so a note of any age keeps qualifying that row.
 
 **Known gaps, accepted and named:**
@@ -3287,11 +3474,22 @@ three features documented in other sections entirely. The four getters are
 one-line calls whose four operands must stay positional literals, because `impl_getter_operand`
 in `tests/structure/test-impl-stop-counter.sh` reads the default and the max straight out of
 the implementing-turns call for C29 and C31. The extraction is `getter_operand`, parameterized
-on getter and key, and it reaches ALL FOUR keys — say four, not two: the two CONSTANT-MIRROR
-pins cover two of them (`implStopNudgeAfter` through C29/C31/C31a, and `pendingReviewTtlHours`
+on getter and key, and it reaches ALL FOUR keys — say four, not two: the CONSTANT-MIRROR
+pins cover three of them (`implStopNudgeAfter` through C29/C31/C31a, `pendingReviewTtlHours`
 through **C57**, which pins `TTL_HOURS_FALLBACK` / `TTL_HOURS_MAX` in the doctor renderer
 against the TTL getter's own operands — a pair that declared itself a mirror in prose and was
-pinned nowhere until the collapse made one extractor able to hold it), and **C58** reads every
+pinned nowhere until the collapse made one extractor able to hold it — and
+`autopilotOwnerActivityTtlHours` through **C57b**, which holds
+`OWNER_ACTIVITY_TTL_FALLBACK` / `OWNER_ACTIVITY_TTL_MAX` the same way, with **C57c** binding
+each window reader to its own pair so a swap cannot keep both green — and **C57d** keeping
+C57c honest, because that needle names a reader by SPELLING and a reader nothing calls still
+carries one. A value-only `ownerActivityTtlHours()` accessor survived the move to
+`ownerActivityWindow` with zero callers for a round, and while it stood C57c graded it: the
+live resolution could have been rewritten onto the pending-review pair with every check green,
+which is the exact swap C57c's own comment says it catches. C57d derives the accessor
+population from the renderer's own `function <name>() {` lines and requires each to be called,
+with comment lines STRIPPED first — the dead accessor was NAMED in a comment beside its
+replacement, and a naive occurrence count read that prose as a call site), and **C58** reads every
 getter's operands through the same extraction to drive its bound matrix. So `autoFixMaxRounds`
 has no renderer mirror, but its call line is bound by the positional-literal contract too: an
 operand that stops being readable there fails C58. Then
@@ -3322,7 +3520,10 @@ not `0`, so adding this one would make every reset chain read as non-idle.
 Then `zensu_impl_stop_nudge_after` in `zensu-config.sh` against `IMPL_STOP_NUDGE_FALLBACK`
 / `IMPL_STOP_NUDGE_MAX` in `zensu-doctor-report.js`, which are a hand-copy of its default and
 bounds; and the `ZDOC_IMPL_STOP_NUDGE_AFTER` export in `zensu-doctor.sh` against
-`implStopThreshold` — that file sources `zensu-config.sh` ONCE for both getters, and the count
+`implStopThreshold` — that file sources `zensu-config.sh` ONCE for every getter it resolves
+(three today: the pending-review TTL, this threshold and the owner-activity window, with `C21c`
+deriving that population from the resolve blocks and requiring each to be a disjunct of the
+single-source guard), and the count
 is pinned by `C33` because it shipped as two, one inside each resolve block, while a
 requirements table recorded the single-source rule as met; and **the `implStopNudgeAfter` entry
 in `config.example.json`**, which this roster omitted while both sibling flag sections name
@@ -3519,8 +3720,9 @@ since the branch point — never against the working-tree diff of the round in f
 - **No `tests/profiles/ci-shard-weights.v1.json` entry**, so the suite is costed at
   `defaultSeconds`. That file requires a real CI figure and its own note sanctions the
   omission; add it from the first green ubuntu-latest `--ci` run rather than estimating.
-- **The threshold is resolved BEFORE the session bind** and, unlike the TTL, is never
-  re-resolved against the record root, so it inherits the Config-block root gap the previous
+- **The threshold is resolved BEFORE the session bind** and is the ONE of the three resolved
+  windows never re-resolved against the record root — the pending-review TTL and the
+  owner-activity window both are — so it inherits the Config-block root gap the previous
   section names. **The asymmetry is real and was briefly written out of this file in error, so
   it is worth stating with its evidence:** `zensu-doctor.sh` remembers `ZDOC_TTL_PINNED` before
   the bind and, when the record root and `CLAUDE_PROJECT_DIR` differ, re-resolves the TTL from

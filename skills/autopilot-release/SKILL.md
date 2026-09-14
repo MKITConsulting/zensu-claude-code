@@ -56,8 +56,12 @@ the working tree stays refused permanently, because `CANCEL` requires the owner.
   under "Gates bypassed" is true, and this escapes no gate — it ends a run.
 - It refuses while the owning session still looks active (exit `7`) — but ONLY when the caller does NOT own the run; that check sits inside the foreign-owner branch, so it never fires for the torn-`begin` own-run case above: that session's workflow
   document `.zensu/state/tdd-phase-<owner>.json` is aged against the owner-activity
-  window this verb shares with `/zensu:autopilot-adopt` — NOT the bound `/zensu:doctor`
-  uses, which is a different key answering a different question. That is a heuristic, not proof of death, and it has TWO ways to stand down — state the
+  window (`hooks.autopilotOwnerActivityTtlHours`) this verb shares with
+  `/zensu:autopilot-adopt`, and the `autopilot:` row of `/zensu:doctor` quotes that same
+  window — relay that row's owner-silence clause as the per-verb account of which verb
+  refuses. The doctor's OTHER rows (the pending-review marker, a foreign open chain) age
+  against `pendingReviewTtlHours`, a different key answering a different question, so do
+  not carry a number from one of those rows into this verb. That is a heuristic, not proof of death, and it has TWO ways to stand down — state the
   partition the code actually has, not one per cause. **Stand-down 1: the configured
   window is `0`**, which disables the check on both verbs and writes
   `owner liveness unchecked: autopilotOwnerActivityTtlHours is 0`. **Stand-down 2: there
@@ -75,8 +79,10 @@ the working tree stays refused permanently, because `CANCEL` requires the owner.
   filesystem, an NFS mount, a restore that carried mtimes forward — must never authorise
   an irreversible cancel against a session that is demonstrably alive. The run is not
   stranded by that refusal: the owner can cancel through the ordinary event path, a
-  successor can adopt it and cancel from there, and `hooks.autopilotOwnerActivityTtlHours: 0`
-  is the documented, disclosed off-switch. The durable record still does not name who cancelled a
+  successor can adopt it and cancel from there — unless its pending stage is `TDD_RUNNING`
+  or that successor already owns another nonterminal run, which adoption refuses, and the
+  exit-7 paragraph below carries the full qualification — and
+  `hooks.autopilotOwnerActivityTtlHours: 0` is the documented, disclosed off-switch. The durable record still does not name who cancelled a
   run. The user's yes remains the real control.
 
 ## Step 1 — report, do not act
