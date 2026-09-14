@@ -372,7 +372,85 @@ case "${1:-}" in
     }
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
     autopilot_read_active "${CLAUDE_PROJECT_DIR:-.}" "$session_val"
-    exit $?
+    _zensu_status_rc=$?
+    # rc 1 means THIS session owns no run BY THE OWNER-KEYED POINTER, and the
+    # worker says so as `state file absent: autopilot-active-<hash>.json`. That
+    # sentence is true and it is also the whole problem: the answer is
+    # owner-scoped, so it is structurally identical whether the tree is free or a
+    # foreign run is holding it, and the hash it names is sha256 of the OWNER
+    # SESSION id rather than of the project.
+    #
+    # The exit code and stdout are UNCHANGED, and the reason is the SKILLS, not a
+    # hook: `skills/{autopilot,autopilot-release,tdd,pr-team-review,pr-fix-findings,
+    # self-review,reset-review-limit}` all run this verb and parse its stdout as
+    # JSON, several of them failing closed on a mismatch. An earlier wording here
+    # named `session-start-autopilot-resume.sh` instead, which does not call this
+    # verb at all — it calls the library's `autopilot_read_active` directly, so the
+    # CLI's exit code never reaches it. The rule the wording protects is unchanged
+    # and the justification for it is now the true one. The disclosure goes to
+    # stderr, which no consumer reads as data.
+    #
+    # Audience `model`: this verb is run BY the model in `skills/autopilot` and in
+    # `skills/autopilot-release` step 1. Every model-read channel names only the
+    # guided `/zensu:autopilot-release`, never a complete `--confirm` invocation,
+    # because `--confirm` is the consent control and a ready-to-run cancel in a
+    # model-facing channel routes around the only place it exists.
+    if [ "$_zensu_status_rc" -eq 1 ]; then
+      # ONE read. The sentence and the ownership that selects its lead-in come out
+      # of the same leased read, because two reads can name different holders and
+      # a lead-in derived from the second then contradicts a sentence rendered
+      # from the first — the defect this module deleted from the Stop hook once
+      # already.
+      _zensu_hold_line="$(autopilot_workspace_hold_report "${CLAUDE_PROJECT_DIR:-.}" "$session_val" model 2>/dev/null)"
+      _zensu_hold_rc=$?
+      _zensu_hold_kind="${_zensu_hold_line%%	*}"
+      _zensu_hold_text="${_zensu_hold_line#*	}"
+      # FIVE outcomes, and none of them may be inferred from another: a FOREIGN
+      # holder, an OWN holder (the torn-`begin` shape), a holder whose OWNER could
+      # not be established, a proven-free tree, and a question that could not be
+      # answered at all. The third is easy to miss when counting — it is the
+      # `case` default rather than a named arm — and an earlier comment here said
+      # FOUR while five were emitted. `1` is the
+      # PROVEN-free verdict, and TWO paths reach it rather than one: the worker's
+      # own "no run holds this tree", and an absent state directory, which
+      # short-circuits ahead of the lease because no run document can exist without
+      # it. Every OTHER lock, storage or worker failure maps to 5, so the all-clear
+      # below can never be printed because the check could not run. A diagnostic that says "nothing
+      # holds this tree" when it could not look is worse than the silence it
+      # replaced.
+      if [ "$_zensu_hold_rc" -eq 0 ] && [ -n "$_zensu_hold_text" ]; then
+        case "$_zensu_hold_kind" in
+          own)
+            # State only what was OBSERVED. This arm does NOT prove a torn `begin`, and
+            # saying so was wrong: the worker checks for an own nonterminal run
+            # BEFORE it reports an absent pointer (`orphan` takes `fail(2)`, the
+            # absent pointer `fail(1)`), so a real torn begin never reaches this
+            # rc-1-gated branch at all. What DOES reach it is a run appearing
+            # between this verb's two independent leased reads — a `begin` mid
+            # publication, which is a healthy run. The doctor's equivalent arm
+            # hedges for the same reason, and the two surfaces must not disagree.
+            printf 'zensu-log.sh --autopilot-status: no active pointer designated a run for this session at the moment of the read, and a run this session OWNS holds the working tree. %s Inspect it with the autopilot row of /zensu:doctor and with zensu-log.sh --chain-status.\n' \
+              "$_zensu_hold_text" >&2
+            ;;
+          foreign)
+            printf 'zensu-log.sh --autopilot-status: this session owns no durable Autopilot run, but the working tree is not free: %s\n' \
+              "$_zensu_hold_text" >&2
+            ;;
+          *)
+            # Ownership not established. Asserting either side would state
+            # something this read did not settle, so the lead-in asserts neither.
+            printf 'zensu-log.sh --autopilot-status: no active pointer designates a run for this session, and a nonterminal run holds the working tree whose OWNER could not be established. %s\n' \
+              "$_zensu_hold_text" >&2
+            ;;
+        esac
+      elif [ "$_zensu_hold_rc" -eq 1 ]; then
+        printf 'zensu-log.sh --autopilot-status: this session owns no durable Autopilot run, and no nonterminal run holds this working tree. A run owned by another session would be invisible to this verb but IS reported by /zensu:doctor.\n' >&2
+      else
+        printf 'zensu-log.sh --autopilot-status: this session owns no durable Autopilot run, and whether any run holds this working tree could NOT be determined (status %s) — that is a missing check, not an all-clear. The autopilot row of /zensu:doctor reads the same records without taking the project lease.\n' \
+          "$_zensu_hold_rc" >&2
+      fi
+    fi
+    exit "$_zensu_status_rc"
     ;;
   --autopilot-release)
     # Cancel a nonterminal run owned by ANOTHER session, so that a working tree

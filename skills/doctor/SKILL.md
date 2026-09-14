@@ -4,7 +4,8 @@ description: >
   [Zensu] Read-only setup diagnostics for the Zensu plugin. Runs
   hooks/lib/zensu-doctor.sh and prints a four-block ✅/⚠️/❌ table: CLI &
   tooling (zensu CLI + auth, node, the code-forge CLI gh/glab + auth resolved
-  from the repo's provider, lockfile-backed Playwright MCP config/readiness), plugin integrity
+  from the repo's provider, lockfile-backed Playwright MCP config/readiness, and the browser
+  consent gate's registration plus its per-session execution marker), plugin integrity
   (hooks.json wired to files on disk, plugin.json ↔ marketplace.json version
   sync), config (valid JSON, the quoted-boolean trap where "true"/"false" as a
   string is silently ignored by strict === checks, and whether the permission rules
@@ -14,7 +15,8 @@ description: >
   there and usable and whether it was rebuilt rather than restored, each review
   chain's shape plus any wedged chain and
   its recovery command, any open chain not owned by this session, any chain this
-  session owns that has ended many turns at implementing, any reviewer spawn
+  session owns that has ended many turns at implementing, any nonterminal durable
+  Autopilot run holding a working tree, any reviewer spawn
   the host permission layer refused, expired pending-review surfaced).
   The only write is an explicit, user-confirmed cleanup of one
   expired pending-review.json — CAS workflow documents are never deleted. Use
@@ -360,6 +362,86 @@ classifier will refuse a spawn, not only when the whole table is green.
   detected — add one, or export `ZENSU_VCS_PROVIDER=github|gitlab` for a
   self-hosted host).
 - **⚠️ zensu not authenticated** → `zensu auth login`.
+- **✅ verify-feature: environment policy active** → `ZENSU_VERIFY_NAVIGATION_POLICY_V1` was
+  set when Claude Code started, so the parent-environment policy governs every browser origin
+  and the consent prompt never fires this session. Only its top-level contract is checked
+  here; the broker judges each target when it starts. Nothing to do.
+- **✅ verify-feature: consent mode ready** → no parent policy is set, the consent hook pair is
+  registered on the broker's navigation tools, and a runtime recipe (`.zensu/runtime.yaml` or
+  `.zensu/autopilot.yaml`) is present. The first navigation to each loopback origin asks the
+  user through the permission prompt, and every further route on an approved origin then
+  proceeds without one; remote targets still need the policy.
+- **⚠️ verify-feature: consent mode ready, no runtime recipe** → same as above, but
+  `/zensu:verify-feature` has nothing to boot. Run `/zensu:verify-feature --setup` to write the
+  recipe with the user, or `--attach=<loopback-origin>` for an application they already run.
+- **❌ verify-feature: a parent-environment navigation policy is set but the browser broker will refuse it (…)** → a parent-environment policy
+  IS set, but its value does not satisfy the contract the broker parses at start, so the
+  browser cannot open at all. Only the three top-level guards are repeated in this check —
+  the per-target rules stay the broker's — and the parenthesis names which one answered. The
+  user fixes that value in the environment that launches Claude Code, or unsets it to fall
+  back to consent mode. Never edit it from a Bash call: it is read once when the broker starts.
+- **⚠️ verify-feature: consent mode ready, recipe not checked** → the report resolved no
+  project root, so it looked for no recipe at all. This is a missing check rather than a
+  missing recipe; run `/zensu:doctor` from a session whose project root resolves.
+- **❌ verify-feature: cannot start (…)** → the consent hook pair, its decision module or the
+  broker script is missing, or `hooks/hooks.json` does not register the GATE on the
+  navigation matcher, or it does not register the RECORDER — the broker starts in consent mode
+  on the gate alone, so a missing recorder would prompt on every navigation and remember
+  nothing. Reinstall the plugin, or launch Claude Code with the parent-environment
+  policy, which needs no hook. The parenthesis names which piece is missing.
+- **⚠️ verify-feature: not checked** → the wrapper reported no verify state at all, so the
+  report says nothing about the browser path. This is a missing check rather than an
+  all-clear; run `/zensu:doctor` from a session whose plugin root resolves.
+- **✅ verify-feature gate: executed in this session** → a live marker whose NAME carries this
+  session's key records the gate deciding a navigation, so the gate is being exercised and not
+  merely registered. The rows above are derived from files on disk in the plugin's own tree and
+  cannot tell a session whose hooks ran from one whose hooks are switched off host-side; this row
+  gets closer. TWO bounds ride on it and neither is optional. The session binding is the
+  FILENAME, and `<project>/.zensu/state` is writable from any session in the project, so this is
+  evidence about a file rather than an attestation — `docs/gates.md` states that in as many
+  words. And this row reads under the session RECORD's project root, while the browser broker
+  anchors on its own working directory, so a green row here does not establish that the broker
+  will approve. Ordinarily nothing to do; if a navigation is nonetheless being refused, read the
+  broker's own refusal. TWO of its six refusal states name the tree it read under — the one for a
+  state directory it could not open, and the one for a marker walk that hit its budget — so a
+  refusal naming no tree is telling you something narrower rather than withholding it.
+- **✅ verify-feature gate: executed in this session, on a prompted origin** → the live marker
+  records the gate ASKING about the navigation rather than clearing it from memory. The marker is
+  written BEFORE the answer exists, so a prompt that was DECLINED leaves the same marker live for
+  its window — the residual `docs/gates.md` names — and this row therefore reports the question,
+  not the answer. The same two bounds as the row above apply. Ordinarily nothing to do.
+- **✅ verify-feature gate: registered, and no live execution marker was read for this session** →
+  the pair is installed and the state directory held no live marker. TWO ordinary causes, and
+  naming only the first is what this row used to do: no browser navigation has reached the gate
+  yet, OR a marker it wrote has passed the window the gate keeps markers for. The row therefore
+  says what the probe proved — no LIVE marker — rather than asserting that no navigation
+  occurred, and it is stated rather than left silent so that "installed" is never read as
+  "enforced". Nothing to do.
+- **⚠️ verify-feature gate: execution not checked** → no bound session key or no recorded
+  project root was available, so the session-keyed marker was never looked for AND none can be
+  written either: consent mode can still ask, and the broker then refuses the navigation for want
+  of a marker. A missing check rather than an all-clear. Do NOT read it as "this session has no
+  Session Control record" — the wrapper sets this state for every binding verdict except `bound`,
+  including the three where a valid record is sitting in plugin data and the binding row above
+  prescribes `/zensu:adopt-session`. Take the remedy from that row, or launch with the
+  parent-environment navigation policy, which needs no hook.
+- **⚠️ verify-feature gate: execution could not be judged** → the decision module did not load,
+  did not export the reader, the state directory could not be read, or the read hit the marker
+  budget before it could answer. A contract fault is reported as one rather than collapsing into
+  the benign row. Reinstall the plugin, check that `<project>/.zensu/state` is readable, and clear
+  stale `verify-consent-exec-*` files from it — and nothing else in that directory, which also
+  holds this session's workflow document, whose removal makes every tool deny until the session is
+  adopted again. That scope clause is the broker's own and is not optional here: Phase 3 below
+  forbids a glob, `find`, parent traversal or worktree discovery against this directory, so the
+  only sanctioned spelling is `rm -f` on the exact marker names you have listed and read. The
+  fourth cause is the one neither of the first two remedies touches, and it is the same condition
+  the broker names as "too many execution markers".
+- **⚠️ verify-feature gate: execution state not recognized (…)** → the wrapper reported a state
+  this report has no row for. A missing check rather than an all-clear; the parenthesis names the
+  value. Do NOT read it as the two halves having drifted — the wrapper derives its word from a
+  closed accept-list, so every value that derivation can produce already has a row above, and this
+  row is reachable only when a caller supplies `ZDOC_VERIFY_EXEC` itself. The renderer claims
+  exactly that much and no more, and so does this bullet.
 - **❌ binding: this session has no valid Session Control record** → the cause
   behind the `Blocked: the immutable Zensu session binding is unavailable or
   invalid` denial. Nothing in this session can be repaired in place; start a
@@ -529,6 +611,76 @@ classifier will refuse a spawn, not only when the whole table is green.
   the caveat to shorten the row, and do not read its ABSENCE as proof no refusal is
   outstanding — the note is cleared on every Stop and re-minted only by one that reaches
   the notice, so a clean-tree turn leaves the caveat off while the refusal stands.
+- **⚠️ autopilot: nonterminal durable run `<id>` at stage `<stage>`** → a durable
+  Autopilot run is holding a git working tree, so no second Autopilot run and no
+  standalone `/zensu:tdd` chain can arm there. Relay the row's own facts and add
+  nothing: the run id, the stage, whether this session owns it, the tree it holds,
+  the run document's path, and how long the owner has been silent. **The remedy
+  depends on ownership and the row already chose it — never substitute your own.**
+  Owned by THIS session, or with the owner not established, the row names no
+  release command, and you must not suggest one: a release applies a real `CANCEL`,
+  so against your own live generation it ends the work you are doing. Owned by
+  ANOTHER session, report it and run `/zensu:autopilot-release` only after the user
+  says yes; that skill is the guided form and asks for the confirmation itself.
+  Never run the bare `zensu-log.sh --autopilot-release … --confirm` on their behalf.
+  When the row says it `accepted the record on its SHAPE`, relay that too: the owner
+  validates more than this row checks, and a record that fails the stricter check
+  makes every Autopilot verb fail closed for the whole project — so the document
+  itself is the finding. That clause sits in the ROW, not in one remedy, so it
+  reaches you whoever owns the run. Report it; do not retry the release and do not
+  edit the document. A run carrying that clause never renders green.
+  Two facts in the row are there because both are routinely got wrong, so relay
+  them rather than paraphrasing: the hash in the active-pointer filename is
+  `sha256` of the OWNING SESSION id and not of the project path, and the hold comes
+  from path containment between the two trees in EITHER direction, not from a
+  shared git directory. `BLOCKED` is NOT terminal — only `DONE` and `CANCELLED`
+  are — so a run parked at `BLOCKED` holds the tree indefinitely. This row is
+  read-only like every other; Phase 3 below remains the report's only write and
+  never touches a run document.
+- **✅ autopilot: nonterminal durable run `<id>` … owned by THIS session** → the green form of
+  the same row, and deliberately NOT a finding. The row calls such a run an
+  `ordinary run in progress`, which means this session's own active pointer still designates it
+  and its stage is not `BLOCKED`. Say so and move on. It names no release command — releasing a
+  run this session owns cancels its own live generation — and it does not suppress the green
+  summary, which is why the arm exists. Every OTHER own-run form is a ⚠️, each stating a
+  different fact, so relay the clause the row actually printed and never translate one into
+  another. When it says
+  `the run is BLOCKED, which is NOT terminal`, the run still holds the tree and must be resumed
+  or cancelled from this session. When it says `no active pointer designates it`, the pointer is
+  gone — a torn begin is only one cause of that. And a pointer that
+  `could not be read, so whether the run is ordinary` or torn was not established is a missing
+  check rather than a verdict.
+- **⚠️ autopilot: … the run listing is incomplete / … were not opened at all** → the listing you
+  were given is bounded, and the row says so with the words `NOT a complete` account of what holds
+  this project. Relay that bound rather than summarizing the rows above it as the whole picture:
+  more runs may hold this project than the report named. Point the reader at the state directory
+  the row prints; offer no cleanup.
+- **⚠️ autopilot: `<N>` durable run document(s) that could not be read** → NOT the
+  same finding as no run. Such a record still holds its working tree while
+  `/zensu:autopilot-release` needs a run id it cannot supply. Name the files and
+  the directory the row prints and stop; offer no cleanup, and never suggest
+  deleting a run document counted by THIS row — one of them may still hold a
+  working tree a live run is driving, which is the whole reason the row exists.
+  The row below is the deliberate exception and states its own ground. The count excludes a document the report
+  could still read well enough to see a `DONE` or `CANCELLED` stage, because the
+  working-tree claim is false of such a record — NOT because it is harmless. Those
+  are counted by the row below instead, so a run file you know to be malformed may
+  legitimately be absent from THIS row and present in that one. Everything this row
+  counts is nonterminal or unreadable outright, which is what makes its
+  working-tree claim true of every member.
+- **⚠️ autopilot: `<N>` durable run document(s) this report does not accept whose
+  recorded stage is terminal** → the escaped set from the row above. Such a record
+  holds no working tree, but the Autopilot verbs validate EVERY document in that
+  directory, so one of these can still fail `/zensu:autopilot` and every occupancy
+  check closed for the whole project. Relay the names and the directory the row
+  prints. Do NOT offer `/zensu:autopilot-release` here — it applies a CANCEL to a
+  nonterminal run and refuses a terminal one, so it cannot clear this. Removal IS
+  the remedy here, and it is safe only because the record's own recorded stage
+  says `DONE` or `CANCELLED`, so it holds no tree. Say that when you offer it,
+  because this report does NOT validate that field: it reads the stage out of a
+  document it has just refused, in a directory any session in the project can
+  write. Leave the removal to the user, and never generalize this permission to
+  the row above.
 - **❌ state: this session's own workflow document is MISSING** → the record is
   intact and the document it anchors is gone, so the capability gate is denying
   every tool in this session. A deleted and re-created worktree causes it, because

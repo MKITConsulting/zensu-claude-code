@@ -1,14 +1,16 @@
 # Gates
 
-Five PreToolUse gates keep an agent inside the workflow conventions, plus TWO
+Six PreToolUse gates keep an agent inside the workflow conventions, plus TWO
 completion-time `--tdd-complete` refusals of the same class: the edit-landing
 receipt (discipline patch 10 in [tdd-manager-workflow.md](tdd-manager-workflow.md))
 and §Requirements-Table Gate below, which has its own section here. Six of the
-seven are convention-nudges with a documented escape hatch, not security
+eight are convention-nudges with a documented escape hatch, not security
 boundaries — see [Session Control](session-control.md) for the part that is. The
-exception, §Plugin-Data Guard, deliberately has no escape hatch, and it is still not
-a security boundary: it closes one channel to one directory and names the ones it
-leaves open.
+two exceptions, §Plugin-Data Guard and §Browser Consent Gate, deliberately have no
+escape hatch, and neither is a security boundary on its own: the first closes one
+channel to one directory and names the ones it leaves open; the second puts a human
+prompt in front of a browser origin and states in its own section what a session can
+still do around it.
 
 **Two commands stay reachable when the Session Control bind fails**, in every
 bind failure including a record that exists and disagrees, and they are
@@ -326,6 +328,158 @@ is not a regression, because the total disarm this replaced allowed the whole st
 configuration.
 `tests/structure/test-plugin-data-guard.sh` pins the behavior, both directions, in all three
 chain states.
+
+## Browser Consent Gate
+
+A PreToolUse gate (`pre-browser-navigation-consent.sh`) and its PostToolUse companion
+(`post-browser-navigation-consent.sh`), both registered on the Playwright broker's navigating
+tools — `browser_navigate` and `browser_tabs` in either plugin spelling
+(`mcp__plugin_zensu_playwright__…` / `mcp__playwright__…`). The pair exists so that
+`/zensu:verify-feature` can run without `ZENSU_VERIFY_NAVIGATION_POLICY_V1` in the
+environment that launched Claude Code: that variable was the only channel a model cannot
+write, and it cost every user a shell prefix, a port fixed before launch, and a restart per
+change — and the desktop app has no shell prefix at all.
+
+**What it does.** When no parent policy is present, the broker starts in *consent mode*
+(`scripts/playwright-mcp-proxy.js` checks its own `hooks/hooks.json` for this registration at
+start, and stays in the old deny-everything mode without it). The PreToolUse hook then returns
+`permissionDecision: "ask"` — the host's own prompt, which the model cannot answer — for the
+first navigation to each new loopback origin. Consent is per ORIGIN: once an origin is
+approved, every route on it passes silently for the rest of the session, which is exactly what
+the broker enforces and what the prompt says. The runtime recipe's declared routes are prompt
+CONTEXT — they tell the human what the run intends to visit — and steer no decision. The
+PostToolUse hook records an executed navigation as `(origin, route, decidedBy, at)` in
+`<project>/.zensu/state/verify-consent-<session-key>.json`, written by `O_EXCL` temp plus
+rename, contained to that directory, and never through a symlink. The decision, the prompt
+text and the memory rules live in `hooks/lib/verify-consent-v1.js`; the address and URL
+predicates both the hook and the broker apply live in `hooks/lib/verify-navigation-floor-v1.js`,
+so there is one floor, not two.
+
+**The floor holds regardless of consent.** Both layers refuse, independently: a `localhost`
+or any other hostname, a non-loopback `http` origin, a private, link-local, loopback-mapped
+or documentation address, credentials in the URL, and a query or fragment in a navigation.
+Consent mode admits **literal loopback origins only**. A remote target is refused by the hook
+and by the broker with the same reason, because Chromium's DNS pins are passed at browser
+launch and an origin approved mid-session could not be pinned; remote verification keeps the
+parent policy. Sub-requests, WebSockets and redirects reach only origins the session already
+opened. In consent mode neither layer enforces routes — the human consented to the whole origin — so a
+same-origin redirect to an undeclared route is stopped by neither.
+
+**With a parent policy present the gate stays silent** and the broker enforces the policy
+exactly as before; the PostToolUse hook then records `decidedBy: policy-mode`.
+
+**The recorded `decidedBy` names an OBSERVATION, never a human decision.** PostToolUse carries
+no evidence of how the permission was resolved, so the vocabulary is `asked` (a prompt was
+raised for this origin), `remembered` (the memory already held the origin) and `policy-mode`.
+`asked` does not assert that a person said yes — it asserts that the pre hook would have asked
+and the navigation then executed.
+
+**Fault direction.** The PreToolUse hook is a gate and fails closed: a missing `node`, an
+absent or symlinked module, or a module failure denies the navigation with a stderr note. A
+session that cannot bind its Session Control record still gets the floor and a prompt for
+every navigation, but the prompt is all it gets: with no session key there is no name to bind an
+execution marker to, so the broker refuses the navigation the human was just asked about. The
+hook says exactly that on stderr — that this session cannot complete a consent-mode navigation,
+and to run `/zensu:doctor` — rather than the older and weaker "nothing is remembered". The PostToolUse hook
+never blocks: every fault is a stderr note and exit `0` — with the one exception every sibling
+hook shares, the plugin-root identity guard, which refuses with exit 2 before the hook body runs
+(self-resolution failure and inherited-root mismatch are two distinct messages). A navigation the
+broker rejected (`isError`) is not recorded.
+
+**No escape and no config flag**, deliberately — the same rule as §Plugin-Data Guard. A
+switch the session could flip would relax the hook while the broker, which reads the
+registration once at start, kept trusting the chain. The parent policy is the supported
+alternative, so nothing here lands a bypass-ledger entry.
+
+**Residuals, named rather than implied.** The matcher reaches further than the skill: it is
+registered on the tool NAME, `mcp__(plugin_zensu_)?playwright__browser_(navigate|tabs)`, and the
+optional group means the bare `mcp__playwright__…` spelling matches too. That spelling is not
+hypothetical — this plugin declares its own broker through `.mcp.json` under the server key
+`playwright`, so the same file yields `mcp__plugin_zensu_playwright__…` when it is loaded as a
+plugin and `mcp__playwright__…` when the repository itself is opened as a project. A consuming
+project that runs its OWN MCP server under that key therefore has every non-loopback
+`browser_navigate` denied by this gate, in every session, with no skill running and no config
+flag to turn it off. The deny text names that possibility and its one remedy — rename the server
+key. Launching with the parent-environment policy is deliberately NOT offered: it turns this gate
+off for every target, including the remote ones the floor exists to refuse. Narrowing the matcher
+to the plugin-scoped spelling would remove the gate wherever the bare spelling is the real one,
+so the matcher is left as it is until the prefix is measured across desktop and CLI, default and
+`--plugin-dir` installs. The consent memory is a file in a directory the
+session can write through a Bash redirect, so a forged record skips the prompt for that origin;
+the floor bounds the damage to other loopback services. The broker no longer trusts that the
+host ran the hook: consent mode refuses to self-approve an origin without a live per-session
+marker the gate writes for every decided loopback navigation, one per (session, origin), and it
+reads that marker each time it is asked to approve an origin it has not already approved in this
+process, rather than caching a mode resolved once at start — so hooks switched off host-side, a
+broker launched from a different tree than the one whose registry the host loaded, and a plugin
+swap inside a long-lived MCP process all leave the broker refusing rather than self-approving.
+The launcher carries `ZENSU_VERIFY_PROJECT_ROOT` through its `env -i` allowlist, so the broker
+anchors on that root when something upstream supplies it. **Nothing in the plugin does**, and
+saying otherwise was a false guarantee this document briefly carried: a derivation in the
+launcher was tried and removed, because that process has no hook payload for the session binder
+and no guaranteed session identity for the payload-free one. In practice the broker therefore
+anchors on its own cwd, and for a session whose cwd is a worktree while the record names another
+tree the two anchors disagree. State the consequence in BOTH directions rather than as a refusal:
+the broker refuses when the cwd-anchored tree holds no live marker for that origin, and the
+`/zensu:doctor` execution row, which reads under the RECORD's root, can then report a gate that
+ran while that broker still refuses — but a loopback origin is the same string in every project,
+and the broker's read carries no session key, so a live marker for that origin written by a
+different session in the cwd-anchored project satisfies the check instead. Refusal is the common
+case, not the guaranteed one. `/zensu:doctor` reports
+both facts on separate rows: `verify-feature:` reports REGISTRATION, and `verify-feature gate:`
+reports EXECUTION, session-scoped, with a contract fault reported as `could not be judged` rather
+than as the benign row. SEVEN bounds travel with that and are stated rather than implied. The
+marker lives in a directory the session can write through a Bash redirect, so it authenticates
+nothing against a session forging its own; what it removes is the SILENT case, where a gate that
+never ran was indistinguishable from one that did. An origin already approved inside the
+broker's process stays approved — the marker gates the WRITE into the approved set, never each
+later navigation against it, because a consent the human gave is not revoked by a later plugin
+change. The BROKER's read is project-scoped rather than session-scoped, because it has no
+session key: a sibling session's marker for the same origin satisfies it, and only the doctor
+row binds the session — and that binding is the marker's own FILENAME, not anything the body
+proves. `.zensu/state/` is writable from any session in the project, so a co-tenant can write
+`verify-consent-exec-<another session's key>-<any tag>.json` and make THAT session's doctor
+print an execution row for a gate run it never had. The row is therefore evidence about a file,
+not an attestation; closing it needs the session key inside the signed-for body, which the
+marker has no way to authenticate today either. And a prompt the human DECLINED still leaves a marker live for its
+window, because the gate writes before the answer exists; the marker records `asked` rather than
+`allowed`, which names the state but does not close it — closing it needs a signal the gate
+cannot emit before the human has answered. The fifth bound is that WINDOW itself
+(`MAX_EVIDENCE_AGE_MS`, five minutes): a marker is honoured only while it is inside it, so a
+session whose gate ran an hour ago and has navigated nowhere since is refused by the broker and
+reported by the doctor as registered-with-no-live-marker. Neither surface is saying the gate
+never ran, and both say so in as many words — the `verify-feature gate:` row names expiry beside
+"no navigation yet" as an ordinary cause, and the broker's refusal names the window and points at
+that row. The sixth is that the reap which keeps the walk's budget from filling is NOT
+session-scoped: a write in one session removes markers a sibling session wrote. It is clocked on
+`MAX_EVIDENCE_REAP_AGE_MS`, which is twice the read window above, and that GRACE is load-bearing
+rather than slack: the broker's expiry probe deliberately reads with no window at all, and a
+marker it would still honour is the only input that can produce the `expired` diagnosis instead
+of a bare `absent`. So the sweep is NOT bounded to entries no reader anywhere could honour — past
+the ten-minute horizon it removes exactly the ones that probe wants, and a sweep clocked on the
+five-minute window would have removed them from the first write anywhere in the project. What it
+does not remove is anything a NAVIGATION could still have used. The cost of the grace is the
+other way round: a dead marker holds a walk slot for twice as long against the budget whose
+exhaustion is the `truncated` state. Either way a session's markers can disappear under it, which
+is why the doctor row is worded as a report about a LIVE marker rather than about the gate's
+history. The seventh is that the sweep runs INSIDE the gating hook and reads and parses
+every candidate it examines, up to the same budget — so a decided navigation carries up to that
+many `lstat`-then-read windows. That is a count, not a comparison: the broker's own read is
+bounded by the same budget rather than by one window, because `liveEvidenceOrigins` stops early
+only when it MATCHES the origin it was given, and a miss is exactly the case that produces a
+refusal. On a miss the broker walks the directory TWICE — once for the present probe and once for
+the widened expiry probe — so both sides are bounded by that budget and neither is bounded by
+one. An already-present
+non-regular file is refused before either read, so the exposure is the swap race rather than a
+plantable block; the count is what is new, and it is named here rather than left to be discovered
+from a hook that has become slow. MCP elicitation would remove
+the prompt residual in the CLI; it is not the shipped channel because the desktop app lacks it, and
+the decision module is shaped so elicitation can replace the prompt without changing the
+memory or the wording.
+
+`tests/structure/test-verify-consent.sh` drives the pair against a real Session Control
+session and pins the matcher, the memory, the floor, the loopback bound and the skill wording;
+`tests/structure/playwright-mcp-proxy.test.js` pins the broker's three start modes.
 
 ## Missing Workflow Baseline
 

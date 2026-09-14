@@ -389,6 +389,20 @@ const fail = (code, message) => {
   if (message) process.stderr.write(`[zensu-autopilot-state] ${message}\n`);
   process.exit(code);
 };
+// Node exits 1 on an uncaught exception, and 1 is ALSO a semantic verdict in this
+// worker's vocabulary -- `read-active`'s "no active run" and `read-workspace`'s "no
+// nonterminal run holds this workspace" both spell it. So without this handler a
+// crash is indistinguishable from an all-clear, and every consumer that reads rc 1
+// as a verdict RELAXES on a fault: the four occupancy fences would report a held
+// tree as free, and `autopilot_workspace_hold_report` would answer PROVEN FREE for
+// a question it never got to ask. Map a crash onto 2, the code this module already
+// uses for "could not judge", so exit 1 stays exclusively a decision the worker
+// actually reached. The message keeps the module prefix so the diagnostic survives
+// a caller that only reads the first stderr line.
+process.on("uncaughtException", error => {
+  const detail = error && error.stack ? String(error.stack).split("\n")[0] : String(error);
+  fail(2, `worker fault: ${detail}`);
+});
 const projectRootIndex = Object.freeze({
   "read-active": 2,
   "read-workspace": 1,
@@ -815,6 +829,14 @@ const readState = (file, absentCode = 2) => {
   // run" when its file disappears; it is a corrupt torn state. Direct
   // read-run lookups may opt back into rc=1 for a genuinely unknown id.
   const state = readJson(file, absentCode);
+  // `JSON.parse` accepts `null`, a bare string and a number, none of which the
+  // normalizers below can index — `state.effects` on `null` throws a TypeError,
+  // which is an UNCAUGHT exception rather than a `fail()`, so it aborts the
+  // whole `readRunInventory` walk with a stack trace instead of the typed
+  // schema refusal every other invalid document gets. Refuse the shape here,
+  // with the identical message the exact-schema check below emits, so the
+  // vocabulary stays closed.
+  if (!isObject(state)) fail(2, `state schema invalid: ${path.basename(file)}`);
   // PR #174 wrote schemaVersion 1 review evidence with only
   // published/marker/headSha. Normalize that deployed shape (and the brief
   // five-field development shape) from its already-validated marker before
@@ -1491,7 +1513,45 @@ if (mode === "release") {
   // the refusal that hands out the id is workspace-derived, so scoping here
   // costs the documented workflow nothing and removes enumerate-and-kill.
   if (!mayHoldWorkspace(state, callerWorkspace)) {
-    fail(6, "run does not hold the caller's working tree; release it from the tree it holds");
+    // BOTH trees are named. The bare sentence told the caller they were in the
+    // wrong tree without saying which tree they were in or which one to move to,
+    // so the only way to act on it was to go and read the run document — the same
+    // "go and find out yourself" this whole refusal is meant to replace.
+    //
+    // `workspaceRoot` is a string here by construction: `mayHoldWorkspace`
+    // short-circuits to TRUE when the field is absent or not a string, so a
+    // record that reaches this branch carries one, and `stateValid` gates it
+    // through `nonEmpty`, which forbids control bytes. `callerWorkspace` is
+    // checked by `nonEmpty` at the top of this mode.
+    //
+    // The clause `release it from the tree it holds` is KEPT VERBATIM: W16 in
+    // tests/structure/test-autopilot-state-machine.sh pins it with `grep -qF`,
+    // and it is still the instruction. The tree names are appended rather than
+    // woven through it.
+    // Both values are rendered BOUNDED. `stateValid` accepts `workspaceRoot` up to
+    // 4096 and this message reaches a model through the release skill, which tells it
+    // to move to the named tree — so acceptance and rendering are separate decisions
+    // here exactly as they are in the doctor row that renders the same field.
+    const bound = value => (value.length > 200 ? `${value.slice(0, 200)}… (elided)` : value);
+    // The RECORD's tree is attacker-influenceable text and is judged before it is
+    // rendered; the CALLER's is not — the worker already put `callerWorkspace`
+    // through `realpathSync.native` plus an `lstat` that refuses a symlink or a
+    // non-directory, so it is this caller's own existing tree. `stateValid`'s
+    // `nonEmpty` is an ACCEPTANCE rule, not a rendering rule: it rejects C0 bytes
+    // only, so DEL, C1 and U+2028/U+2029 reach this message — and the doctor row
+    // that now sends a model here withholds exactly those under its own wider
+    // class, which would launder them through the one command it recommends. The
+    // backtick goes too, for the reason the doctor's own arms give.
+    const held = workspaceOf(state);
+    const renderable = typeof held === "string"
+      && !/[\u0000-\u001f\u007f-\u009f\u2028\u2029`]/.test(held);
+    const heldText = renderable
+      ? bound(held)
+      : "a tree this refusal does not render (it carries a character that must not be echoed)";
+    fail(6, `run does not hold the caller's working tree ${bound(callerWorkspace)}; `
+      + `release it from the tree it holds, ${heldText} — occupancy is `
+      + `containment in either direction, so a tree containing or contained by that `
+      + `one also works, and only a sibling worktree is refused`);
   }
   if (state.ownerSessionId === callerSessionId) {
     // The ordinary CANCEL path resolves the owner pointer and refuses when none
@@ -2548,7 +2608,9 @@ _autopilot_begin_standalone_tdd_critical() {
 # The optional THIRD argument is the holder preference and must be forwarded, or
 # a caller that reports the holder to a user names `holders[0]` while the fence
 # that refused judged a different record. Stated, so it is not assumed live: this
-# parameter currently has NO production caller — the Stop hook's re-read was
+# parameter still has NO production caller on THIS wrapper — `autopilot_workspace_hold_report`
+# below forwards the same holder preference, but it does so to
+# `_autopilot_read_workspace_critical` directly rather than through this function — the Stop hook's re-read was
 # deleted once the fence began publishing its sentence, and the one remaining
 # production call (`post-review-tdd-delegate.sh`) passes a single argument. S7h2
 # guards it for the next caller.
@@ -2576,6 +2638,136 @@ autopilot_read_workspace() {
   # inside an EXISTING state directory; that is not what this swap is about.
   _autopilot_read_storage_ready "$root" || return $?
   _autopilot_locked_run "$root" "" _autopilot_read_workspace_critical "$root" "$workspace" "$prefer_owner"
+}
+
+# The rendered hold sentence for the CALLER's own working tree, or a non-zero
+# status when nothing holds it. This is the PUBLIC entry point for a consumer that
+# needs the sentence without being a fence: `zensu-log.sh --autopilot-status`,
+# whose owner-scoped answer is structurally blind to a foreign run and therefore
+# reads as "no run exists" while the tree is held.
+#
+# It exists as a public verb rather than as a direct call to
+# `_autopilot_workspace_refusal` from `zensu-log.sh` for two reasons, both already
+# recorded in this file's own history. First, no file outside this module calls an
+# `_autopilot_*` helper any more, and the last one was deleted deliberately.
+# Second, and load-bearing: the own-vs-foreign choice belongs to the RENDERER. An
+# earlier spelling of that decision lived in a caller and failed OPEN — an
+# unresolvable owner compared unequal to the session id and selected the FOREIGN
+# text, offering a release command against the caller's own live generation
+# exactly when ownership could not be established. Passing the caller's id through
+# to the renderer keeps that one decision in one place.
+#
+# The AUDIENCE is the caller's to choose and is positionally required by the
+# renderer, so a new consumer cannot silently inherit the operator form.
+# ONE read, three facts. The caller needs the rendered sentence AND the ownership
+# that selects its lead-in AND whether the tree was proven free — and taking those
+# from separate leased reads is the defect this module deleted from the Stop hook
+# once already: two reads can name different holders, so a lead-in derived from the
+# second can contradict a sentence rendered from the first, and the remedy then
+# points at a run the other read did not judge.
+#
+# It also separates a PROVEN-FREE verdict from a lease that could not be acquired.
+# `_tdd_locked_run` returns 1 for a storage-safety failure, a keeper launch failure
+# and a failed acquisition, and the worker's own "no run holds this tree" is also
+# 1 — so composing on `autopilot_read_workspace` alone makes a could-not-look
+# indistinguishable from an all-clear. The probe below always returns 0, so a
+# non-zero from `_autopilot_locked_run` is unambiguously the LOCK's, and the
+# worker's own status is carried out separately.
+_ZENSU_AP_HOLD_RECORD=""
+_ZENSU_AP_HOLD_WORKER_RC=""
+_autopilot_hold_probe() {
+  _ZENSU_AP_HOLD_RECORD="$(_autopilot_read_workspace_critical "$1" "$2" "${3:-}" 2>/dev/null)"
+  _ZENSU_AP_HOLD_WORKER_RC=$?
+  return 0
+}
+
+# Prints one line: `<own|foreign|unknown><TAB><sentence>`.
+# Exit 0 a holder was found and rendered; 1 the tree is PROVEN free — the worker's
+# own verdict, OR an absent state directory, which reaches this status ahead of the
+# lease because no run document can exist without one; 5 the question could not be
+# answered — stated as a CRITERION rather than a list, because the list was written once
+# naming three causes while the verb carried far more `return 5` sites than that, and a
+# numeral here would go stale the next time one is added: EVERY fault that is not a
+# decision maps to 5, which today means path resolution, the storage-safety check, the
+# project lease, the worker, an empty holder record, a holder whose owner could not be
+# resolved when the caller supplied a session id, and a failed render; 3 a REFUSED CALL —
+# a bad arity, an unrecognized audience, or a caller-session argument that is not a
+# session id.
+#
+# `_autopilot_locked_run` runs its callback in the CURRENT shell, so this function
+# must not be wrapped in a command substitution by its own body; the caller may
+# substitute it freely, because everything then happens inside that subshell.
+autopilot_workspace_hold_report() {
+  local caller_session="${2:-}" audience="${3:-}" root workspace owner kind
+  [ "$#" -eq 3 ] || return 3
+  case "$audience" in operator|model) ;; *) return 3 ;; esac
+  root="$(_autopilot_project_root "${1:-${CLAUDE_PROJECT_DIR:-.}}")" || return 5
+  workspace="$(_autopilot_session_workspace "$root")" || return 5
+  # DIVERGES from `autopilot_read_workspace` deliberately, and the divergence is
+  # justified by what the argument DECIDES here. There the preference only selects
+  # WHICH holder is reported, never whether the tree is held, so dropping an
+  # unrecognizable one costs nothing. Here the same value decides the KIND — own,
+  # foreign or not established — and it is `$2` in BOTH verbs while meaning a
+  # WORKSPACE PATH in one and a SESSION ID in the other. A transposed call is
+  # therefore silent: a path fails `_autopilot_session_id_ok` on its separators,
+  # the preference is dropped, and the verb confidently reports `unknown`, which
+  # its caller renders as "this session owns no durable run" — a false statement
+  # about ownership rather than a refusal. An empty value still means "no
+  # preference"; only a non-empty one that is not a session id refuses.
+  if [ -n "$caller_session" ] && ! _autopilot_session_id_ok "$caller_session"; then
+    return 3
+  fi
+  _autopilot_read_storage_ready "$root"
+  case "$?" in
+    0) ;;
+    # A state directory that is simply absent is the same "nothing holds this tree"
+    # verdict the locked read would reach, and saying so is not a guess.
+    1) return 1 ;;
+    *) return 5 ;;
+  esac
+  _ZENSU_AP_HOLD_RECORD=""
+  _ZENSU_AP_HOLD_WORKER_RC=""
+  _autopilot_locked_run "$root" "" _autopilot_hold_probe "$root" "$workspace" "$caller_session" || return 5
+  case "$_ZENSU_AP_HOLD_WORKER_RC" in
+    0) ;;
+    1) return 1 ;;
+    *) return 5 ;;
+  esac
+  [ -n "$_ZENSU_AP_HOLD_RECORD" ] || return 5
+  # Ownership from the SAME record the sentence is rendered from.
+  kind=unknown
+  if [ -n "$caller_session" ]; then
+    owner="$(_autopilot_holder_owner "$_ZENSU_AP_HOLD_RECORD" 2>/dev/null)" || owner=""
+    # The KIND and the sentence are derived from one record by two separate `node`
+    # runs, so a transient failure of THIS one while the renderer below succeeds
+    # would print `unknown` beside a sentence reading "which belongs to this
+    # session" — the precise lead-in/sentence contradiction the one-read design
+    # above says it prevents. The read is what is shared; the two DERIVATIONS are
+    # not, so when the caller supplied an id and the owner still cannot be
+    # resolved, the question was not answered: report 5 rather than a lead-in this
+    # verb did not establish. With NO id supplied, `unknown` is the honest answer
+    # and stays one.
+    [ -n "$owner" ] || return 5
+    if [ "$owner" = "$caller_session" ]; then kind=own; else kind=foreign; fi
+  fi
+  # The KIND is printed only once the sentence it introduces has been rendered.
+  # Printing it first put a bare `<kind><TAB>` on stdout and THEN returned 5 when
+  # the render failed, so a caller doing `line="$(verb …)"; rc=$?` held a truncated
+  # line beside a failure status — and the wire format's own contract says the two
+  # halves come from one read precisely so a lead-in can never stand without the
+  # sentence it introduces.
+  local sentence
+  # The renderer's status must NOT become this function's. `_autopilot_workspace_refusal`
+  # returns 1 on several arms — an empty holder, a bad arity, an unrecognized audience,
+  # a failed env-exclusion render — and inherits its `node -e` child's 1 on any uncaught
+  # error. Letting that through would make a failed RENDER indistinguishable from the
+  # worker's own "no run holds this tree", which is the exact conflation every other
+  # fault in this verb is mapped to 5 to avoid. The sibling
+  # `_autopilot_publish_workspace_refusal` gives the same failure its own distinct code
+  # for the same reason.
+  sentence="$(_autopilot_workspace_refusal "$_ZENSU_AP_HOLD_RECORD" "$caller_session" "$audience")" \
+    || return 5
+  printf '%s\t%s\n' "$kind" "$sentence"
 }
 
 autopilot_begin_standalone_tdd() {
