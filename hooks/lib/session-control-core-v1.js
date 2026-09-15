@@ -4641,6 +4641,16 @@ module.exports = {
   // directory, which is the opposite of what a read-only pre-check wants.
   WORKFLOW_STATE_SEGMENTS,
   WORKFLOW_STATE_PREFIX,
+  // The HARDENED reader, exported for the same class of caller as the two layout
+  // constants above: a hook that must read a `<project>/.zensu/state/` document
+  // itself rather than through `readWorkflowState`, which validates and reaches
+  // `ensureDescendantDirectory`. That directory is writable from inside any
+  // session in the project and covered by no gate while a chain is inactive, so a
+  // plain `readFileSync` there is a BLOCKING hazard — `open(2)` on a planted FIFO
+  // waits forever and no descriptor check can help, because the check runs after
+  // the open returns. Every such caller owes this reader rather than its own
+  // open; `hooks/post-review-tdd-delegate.sh` is the first outside this file.
+  readRegularFileSnapshot,
   sessionIdHash,
   sessionKey,
   computeRuntimeDigest,

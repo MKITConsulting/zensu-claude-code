@@ -205,9 +205,12 @@ both_have "D12 fast-path names the autopilot-before-pilot rule" \
 # single-quoted `node -e` argument. A bare apostrophe anywhere in such a program —
 # inside a comment included — closes the shell argument and truncates the program
 # silently while `bash -n` still passes; CLAUDE.md records that exact defect
-# disabling a hook probe outright for a full review round, and the guard it names
-# (S18 in tests/structure/test-post-review-tdd-scope.sh) walks hooks/**/*.sh only,
-# so a suite carrying the same class is unguarded. A quoted heredoc has no
+# disabling a hook probe outright for a full review round. The guard it names
+# (S18 in tests/structure/test-post-review-tdd-scope.sh) walked hooks/**/*.sh only
+# when this note was written and now walks tests/structure/ too, so a suite
+# carrying the same class IS guarded — but the guard is a tripwire rather than a
+# structure, and a heredoc removes the hazard instead of detecting it. A quoted
+# heredoc has no
 # apostrophe hazard, so the needles are written inline here instead of travelling
 # through the environment purely to dodge quoting.
 cat >"$TMP_DIR/arm-order.js" <<'JS'

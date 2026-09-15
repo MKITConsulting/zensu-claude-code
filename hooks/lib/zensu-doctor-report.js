@@ -143,17 +143,35 @@ var SETTINGS_MAX_BYTES = 1048576;
 // Do NOT read the sentence above as a census of the tree. An earlier version named
 // stop-chain-enforcer.sh's DENIAL_RULE as "a third copy" and CLAUDE.md turned that
 // into "the three copies — check them by hand", which made the by-hand instruction
-// unfollowable: the literal really lives in EIGHT files under hooks/ (27 occurrences,
-// measured 2026-08-23 — the grep instruction below is one of them, so the occurrence
-// number moves when this comment is edited while the FILE count does not; that is the
-// second reason to trust the grep over any number written here), and two of them are
+// unfollowable: the literal really lives in TEN files under hooks/. NO LINE COUNT IS
+// WRITTEN HERE, and that omission is the fix rather than an oversight: the measured
+// figure is a LINE count (never an occurrence count — several of those lines carry the
+// literal twice), it is pinned in exactly one place, and this comment is itself one of
+// the lines it would be counting. So a reword here moves the true count, turns the
+// pinned carrier red, and leaves a second copy beside it silently stating the old
+// number. Read the figure off CLAUDE.md, which T47 in
+// tests/structure/test-stop-enforcer-self-review-routing.sh measures against the tree
+// with grep -rhF … | wc -l. The FILE count does not move when this comment is edited,
+// which is why it is the one number this copy may carry. The figures this comment
+// carried before — EIGHT files, 27 occurrences, dated 2026-08-23 — had
+// drifted far enough to contradict CLAUDE.md's own census of the same set, which T47 in
+// tests/structure/test-stop-enforcer-self-review-routing.sh measures against the tree
+// while nothing measures this copy), and two of them are
 // functional comparisons a rename breaks
 // silently — post-review-tdd-delegate.sh's SUBAGENT_TYPE test and
 // claude-principal-v1.js's list entry. An enumeration in a comment goes stale the next
 // time one is added, so the instruction is a GREP, not a list: before renaming this
-// identity, `grep -rn 'zensu:code-reviewer' hooks/` and change every site.
+// identity, run `grep -rn 'zensu:code-reviewer' hooks/ skills/ agents/ docs/ evals/
+// templates/` and change every site. The RENAME roots and the CENSUS root are
+// deliberately different, and reading one for the other is the defect: the figure
+// above is measured over `hooks/` alone because that is what T47 derives, while the
+// literal also lives under `skills/` and `docs/`, so a rename driven off the narrow
+// root walks straight past them.
 // One pair IS machine-checked — P1by pins THIS constant against the exporting one, so
-// the two spellings cannot drift apart unnoticed. The other six files are not pinned.
+// the two spellings cannot drift apart unnoticed. A second carrier is pinned too, by T38
+// in the routing suite, so the other seven files are not pinned. That residual is
+// arithmetic over the two facts above rather than an independent claim: re-derive it
+// when a carrier is added or a pin lands, and never carry it forward.
 var REVIEWER_AGENT = 'zensu:code-reviewer';
 
 // The arming set is spelled ONCE and consumed by both halves of the ladder below. It is also

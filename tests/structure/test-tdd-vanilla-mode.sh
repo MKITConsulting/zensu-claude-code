@@ -520,8 +520,11 @@ span_of() { # $1 file, $2 block index, $3 start anchor, $4 end anchor
   # — closes the shell argument and truncates it silently while `bash -n` still
   # passes, which here would leave this comparison passing on an empty span.
   # CLAUDE.md records that exact defect disabling a hook probe for a full review
-  # round, and the guard it names (S18) walks hooks/**/*.sh only. The anchors still
-  # travel through the environment because they are caller-supplied.
+  # round. The guard it names (S18) walked hooks/**/*.sh only when this note was
+  # written and now walks tests/structure/ too, so this file IS scanned — but a
+  # heredoc removes the hazard rather than detecting it, which is the stronger of
+  # the two. The anchors still travel through the environment because they are
+  # caller-supplied.
   cat >"$d/span.js" <<'JS'
 const s = process.env.BLK || "";
 const a = s.indexOf(process.env.A_START);
