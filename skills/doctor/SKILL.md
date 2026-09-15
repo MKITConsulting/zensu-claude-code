@@ -472,11 +472,18 @@ classifier will refuse a spawn, not only when the whole table is green.
   above, and it has its own row naming BOTH declared versions (`record minted by
   X, executing Y`). Never report it as a missing record: the record is intact in
   plugin data. Unlike a fresh-session remedy, this one **can** be repaired in
-  place — run `/zensu:adopt-session` to see whether the running installation may
-  take the record over, then `/zensu:adopt-session --confirm`. Both stay
-  reachable in this state; so does this diagnostic. A refusal names the exact
-  condition that failed, and `workflow-schema-mismatch` in particular means a
-  persisted shape really did change and a fresh session is the only way forward.
+  place — and Zensu attempts that repair itself: the first hook contact after
+  `/reload-plugins` adopts the record automatically when its persisted schemas
+  still match. A session that still shows this row therefore had that adoption
+  REFUSED (every gate's deny names the refusal token) or opted out through
+  `hooks.sessionAutoAdopt: false` — run `/zensu:adopt-session`, which prints the
+  same refusal in full, then `/zensu:adopt-session --confirm` to retry by hand (it
+  ignores the opt-out). Both stay reachable in this state; so does this
+  diagnostic. A refusal names the exact condition that failed:
+  `workflow-schema-mismatch` means a persisted shape really did change and a
+  fresh session is the only way forward, and `executing-runtime-older` means the
+  running installation is a downgrade, so the newer version has to be
+  re-installed.
   Adoption re-binds the session from the next tool call onward — do NOT tell the
   user to restart after a successful one. Carry the same conditional limit the
   row below carries: if the recorded project root is ALSO gone, the adoption
@@ -489,9 +496,10 @@ classifier will refuse a spawn, not only when the whole table is green.
   incompatible lineage** → both of the two rows above at once, and it is its own
   row because each of those two answers "not me" for it. It prints the dead path
   AND both declared versions. Never report it as a missing record. It IS
-  repairable in place and `/zensu:adopt-session` applies — that is the difference
-  from the plain orphaned row, which the running installation already serves and
-  which adoption refuses as `already-served`. State the limit whenever you offer
+  repairable in place — attempted automatically on the first hook contact, with
+  `/zensu:adopt-session` as the report and the manual retry — that is the
+  difference from the plain orphaned row, which the running installation already
+  serves and which adoption refuses as `already-served`. State the limit whenever you offer
   the repair: adoption clears the LINEAGE break, so READ-ONLY Bash and this
   diagnostic work again, while `Edit`, `Write`, `MultiEdit` and any Bash command that WRITES
   stay denied until that exact directory is re-created — a write cannot be
@@ -534,8 +542,10 @@ classifier will refuse a spawn, not only when the whole table is green.
   cache, so a session that outlives them lands here whatever its lineage: nothing
   can re-verify the record any more and no installation serves it. Never report
   it as a missing record. The remedy is the same in-place adoption as the lineage
-  row — `/zensu:adopt-session`, then `/zensu:adopt-session --confirm` — and the
-  adoption report marks the minting version `(installation no longer on disk)`.
+  row — attempted automatically on the first hook contact; when the row persists,
+  `/zensu:adopt-session` reports the refusal and `/zensu:adopt-session --confirm`
+  retries by hand — and the adoption report marks the minting version
+  `(installation no longer on disk)`.
   Both commands and this diagnostic stay reachable, and `Stop` is released rather
   than wedged. Do NOT tell the user to restart after a successful adoption.
 - **⚠️ chain: wedged chain(s)** → a review chain reached a shape no supported

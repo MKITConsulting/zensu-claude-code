@@ -7,10 +7,12 @@ description: >
   either declares an incompatible lineage or cannot re-verify the record, so every
   stateful tool fails closed: Edit, Write, MultiEdit and writing Bash
   deny, Bash denies everything but the two recognized commands, subagents cannot start,
-  and Stop cannot prove completion. This skill reports whether the running installation
-  may take the record over in place, and with `--confirm` performs that adoption: it
-  mints a new record for the same session under the executing runtime, sets the previous
-  one aside unchanged, and records the takeover in the workflow history. The session is
+  and Stop cannot prove completion. Zensu adopts such a record automatically on the first
+  hook contact after the update, so this skill is the REPORT for a refused or opted-out
+  adoption and, with `--confirm`, the manual retry, which ignores hooks.sessionAutoAdopt
+  being false. The adoption mints a new record for the same session under the executing
+  runtime, sets the previous one aside unchanged, and records the takeover in the
+  workflow history. The session is
   bound again from the next tool call onward — no restart; when the recorded project root is
   also gone the lineage break is cleared while Edit, Write, MultiEdit and writing Bash stay denied until that
   directory is re-created. Adoption is authorised by
@@ -39,6 +41,15 @@ While the plugin is at major `0` the MINOR is the breaking axis, so a record
 minted by `0.17.2` is not served by `0.18.0`. When such an update lands mid
 session the record stays valid against the installation that minted it, and the
 running one refuses to serve it. Everything stateful then fails closed at once.
+
+Not on its own any more: the first hook contact after `/reload-plugins` adopts such a
+record itself when the persisted schemas still match — the same adoption this skill
+performs, with the same provenance, and a deny that names the refusal when it did not
+happen. This skill is for the remainder: the adoption was REFUSED (every gate's deny
+names the refusal token), the automatic path is switched off with
+`hooks.sessionAutoAdopt: false`, or the user wants the full report. One precondition
+the plugin cannot supply: a session keeps executing its previous version until
+`/reload-plugins` runs in it, and nothing on that older version reaches this state.
 
 `/zensu:doctor` names this state explicitly:
 
@@ -201,9 +212,9 @@ AND installation pruned — still refuses `record-unreadable`.
 
 Main thread only: a reviewer or neutral child is refused by every gate.
 
-## Phase 1: Report, confirm, adopt
+## Phase 1: Report, adopt, verify
 
-**Step 1 of 4 — report.** Run the read-only form. It changes nothing.
+**Step 1 of 3 — report.** Run the read-only form. It changes nothing.
 
 ```bash
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh"
@@ -238,12 +249,21 @@ render that verbatim too.
 | `executing-runtime-older` | The executing installation is OLDER. Only forwards is ever allowed. |
 | `workflow-schema-mismatch` | The workflow document cannot be read by this runtime — the case adoption must refuse. |
 
-**Step 2 of 4 — confirm with the user.** Adoption changes the session's immutable
-anchor. Ask before running it, in the user's language, naming both versions and
-the one consequence that is not obvious: any review-evidence lease from before
-the update has to be re-gathered.
+A gate's deny after a refused AUTOMATIC adoption carries one of the reasons above,
+or one of these entry-level tokens, which are not `adoptableRecord` verdicts:
+`opted-out` (`hooks.sessionAutoAdopt: false`; run the `--confirm` form, which
+ignores it), `adopted-concurrently` (a sibling hook won the race and the record
+serves now; retry the call), `not-completed` and `lock-timeout` (the adoption did
+not finish; retry, then run the report), `superseded-record-exists` (an interrupted
+adoption left `<session-key>.superseded-<version>.json` in place; the report names
+it, and moving it aside lets the adoption complete), and `(unknown)` when the binder
+could not answer at all.
 
-**Step 3 of 4 — adopt.** Only after the user agrees:
+**Step 2 of 3 — adopt.** No separate question is asked: the same adoption runs
+automatically on every hook bind, and this form exists for a refusal and for the
+opt-out. Tell the user, in their language, what it does — both versions, and the one
+consequence that is not obvious: any review-evidence lease from before the update has
+to be re-gathered — then run it:
 
 ```bash
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh" --confirm
@@ -285,7 +305,7 @@ leases stuck. A rebuilt baseline does not launder a stuck lease, and a clean swe
 does not launder a refused rebuild. `1` on a refusal or a precondition failure,
 `2` on a bad argument. A non-zero exit is not a broken command — read the message.
 
-**Step 4 of 4 — confirm the repair.** Re-run `/zensu:doctor` and report the binding
+**Step 3 of 3 — confirm the repair.** Re-run `/zensu:doctor` and report the binding
 row, and read it before you describe the outcome. When the recorded project root still
 exists the session is bound from the next tool call onward — do not tell the user to
 restart. When it is GONE the doctor renders the ❌ orphaned-project-root row instead, and
