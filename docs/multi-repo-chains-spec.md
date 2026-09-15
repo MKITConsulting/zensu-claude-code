@@ -54,7 +54,7 @@ as not landed, so no run can exit 0.
 files under a root resolved by `zensu_resolve_project_dir()` (`:895`) — not the
 ambient variable, and with the git environment scrubbed — and skips the receipt
 requirement entirely at zero. A clean orchestrator therefore closes the chain with
-no receipt at all. The comment at `:865` states this mirrors the `--chain-done`
+no receipt at all. The comment at `:886` states this mirrors the `--chain-done`
 dirty-tree refusal; the `--chain-done` site itself was not read for this document.
 
 **The write gate confines Bash writes, the edit gate does not confine paths.**
@@ -675,7 +675,7 @@ re-verify.
 ### Citations to re-verify
 
 - The `--chain-done` dirty-tree refusal was inferred from the comment at
-  `hooks/lib/zensu-log.sh:865`; its own implementation must be read before §6.3's
+  `hooks/lib/zensu-log.sh:886`; its own implementation must be read before §6.3's
   terminus row is implemented.
 - `classifyChain()` was not read; the consumer roster in §7.3 comes from the
   conventions document and must be re-derived from the code.
