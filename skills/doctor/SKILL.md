@@ -476,10 +476,12 @@ classifier will refuse a spawn, not only when the whole table is green.
   `/reload-plugins` adopts the record automatically when its persisted schemas
   still match. A session that still shows this row therefore had that adoption
   REFUSED (every gate's deny names the refusal token) or opted out through
-  `hooks.sessionAutoAdopt: false` — run `/zensu:adopt-session`, which prints the
-  same refusal in full, then `/zensu:adopt-session --confirm` to retry by hand (it
-  ignores the opt-out). Both stay reachable in this state; so does this
-  diagnostic. A refusal names the exact condition that failed:
+  `hooks.sessionAutoAdopt: false` — the row itself says so. Run `/zensu:adopt-session`,
+  which prints the same refusal in full, then `/zensu:adopt-session --confirm` to
+  retry by hand (it ignores the opt-out — and on an `opted-out` refusal ask the user
+  before running it, since the operator switched the automatic path off on purpose).
+  Both stay reachable in this state; so does this diagnostic. A refusal names the
+  exact condition that failed:
   `workflow-schema-mismatch` means a persisted shape really did change and a
   fresh session is the only way forward, and `executing-runtime-older` means the
   running installation is a downgrade, so the newer version has to be
@@ -542,9 +544,10 @@ classifier will refuse a spawn, not only when the whole table is green.
   cache, so a session that outlives them lands here whatever its lineage: nothing
   can re-verify the record any more and no installation serves it. Never report
   it as a missing record. The remedy is the same in-place adoption as the lineage
-  row — attempted automatically on the first hook contact; when the row persists,
-  `/zensu:adopt-session` reports the refusal and `/zensu:adopt-session --confirm`
-  retries by hand — and the adoption report marks the minting version
+  row — attempted automatically on the first hook contact, so a row still rendered
+  means that adoption was refused or opted out; `/zensu:adopt-session`
+  prints the same refusal in full and `/zensu:adopt-session --confirm` retries by
+  hand — and the adoption report marks the minting version
   `(installation no longer on disk)`.
   Both commands and this diagnostic stay reachable, and `Stop` is released rather
   than wedged. Do NOT tell the user to restart after a successful adoption.

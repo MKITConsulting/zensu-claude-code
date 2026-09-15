@@ -201,7 +201,7 @@ fi
 # state-neutral arm and the fallback have no fixture that reaches them, so the
 # spelling is what is pinned.
 STOP_SRC="$ROOT/hooks/stop-chain-enforcer.sh"
-STOP_ARMS_WITH_TOKEN="$(grep -c 'it was REFUSED: ${ADOPTION_REFUSAL}\. ${ADOPTION_REMEDY}\.' "$STOP_SRC" 2>/dev/null || printf 0)"
+STOP_ARMS_WITH_TOKEN="$(awk 'index($0, "it was REFUSED: ${ADOPTION_REFUSAL}.") && index($0, "${ADOPTION_REMEDY}.") { n += 1 } END { print n + 0 }' "$STOP_SRC" 2>/dev/null || printf 0)"
 if [ "$STOP_ARMS_WITH_TOKEN" = 4 ] \
     && grep -qF 'ADOPTION_REFUSAL="(unknown)"' "$STOP_SRC" \
     && grep -qF 'ADOPTION_REMEDY="$(zensu_session_adoption_remedy "$ADOPTION_REFUSAL")"' "$STOP_SRC" \
