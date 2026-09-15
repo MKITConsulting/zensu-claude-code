@@ -13,17 +13,18 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (148 = 141 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 141 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 148). **That derivation is the point of this paragraph and it went stale anyway** — it
-read 147 = 140 + 7 while §1 already said 148 and the tree measured 148, so the one place that
-claims to reconcile the counts disagreed with both the section it reconciles and the directory
-it counts. Re-derive it from the JSON on every suite addition rather than carrying it forward.
+reconciled to that manifest (150 = 143 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 143 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 150). **That derivation is the point of this paragraph and it went stale TWICE anyway** —
+it read 147 = 140 + 7 while §1 already said 148 and the tree measured 148, and it then read
+148 = 141 + 7 while the manifest already held 142 CI entries, so it had drifted by one again
+before `test-vanished-session-cwd.sh` added the 143rd. Each time, the one place that claims to
+reconcile the counts disagreed with both the section it reconciles and the directory it counts.
+Re-derive it from the JSON on every suite addition rather than carrying it forward.
 **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 140 against 141 CI-classified suites, so one CI
-suite appears in no §3 group. `main` recorded that suite as `test-session-trail-lineage.sh`; this
-merge did not re-derive the NAME, because §3 lists suites in prose rather than by filename and a
-wrong name in a group is worse than none. The gap predates both the plugin-data guard, filed under
+asserted away: its eleven CI group headers sum to 142 against 143 CI-classified suites, so one CI
+suite appears in no §3 group. That suite is `test-session-trail-lineage.sh`, re-derived BY NAME
+by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
 §"Bash gates, witness & secrets", and the reviewer-spawn grant, filed under §"Review chain &
 findings". §7's profile table was re-derived from `tests/profiles/windows-ci.v1.json` rather than
 described, so its nine shard ids and their membership are the JSON's own, and the entry total
@@ -60,8 +61,8 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **148** — 141 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes); counts pinned by `windows-ci-contract.test.js` |
-| *(reconciliation)* | a `--ci` run reports **141 structure suites + 5 offline evals = 146 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 148 − 141 gap | counts pinned by `windows-ci-contract.test.js` |
+| `tests/structure/test-*.sh` (deterministic shell) | **150** — 143 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes); counts pinned by `windows-ci-contract.test.js` |
+| *(reconciliation)* | a `--ci` run reports **143 structure suites + 5 offline evals = 148 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 150 − 143 gap | counts pinned by `windows-ci-contract.test.js` |
 | `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh`; count pinned by `windows-ci-contract.test.js` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -73,8 +74,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 148 structure suites + 5 offline evals | none |
-| `--ci` | 141 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 150 structure suites + 5 offline evals | none |
+| `--ci` | 143 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -97,18 +98,19 @@ Runner-level guarantees (themselves pinned by `test-run-all-preflight-watchdog.s
 
 ## 3. Deterministic structure suites — grouped by what they cover
 
-### Session Control & workflow state (14)
+### Session Control & workflow state (15)
 `orphaned-project-root` · `session-control-claude` · `session-control-core` ·
 `session-control-sandbox-hook-integration` · `session-id-v1` ·
 `session-start-banner` · `state-verb-diagnostics` · `tdd-log-path-anchor` ·
 `tdd-no-flock-external-lease` · `tdd-state-corruption-fail-closed` ·
-`tdd-state-path-safety` · `versioned-plugin-upgrade` · `workflow-scope` ·
-`zensu-runtime-controller`
+`tdd-state-path-safety` · `vanished-session-cwd` · `versioned-plugin-upgrade` ·
+`workflow-scope` · `zensu-runtime-controller`
 
 Covers the canonical CAS workflow document, immutable session binding, the shared
 Bash-3.2-compatible external process lease, symlinked-ancestor / non-regular-leaf
 rejection, fail-closed behavior on an unreadable state file, diagnostics on failed
-state verbs, and the SessionStart banner. `session-control-claude` alone carries ~140
+state verbs, the SessionStart banner, and a vanished live working directory under an
+intact binding. `session-control-claude` alone carries ~140
 assertions.
 
 ### TDD engine & phase gate (17)
@@ -165,10 +167,10 @@ generation- and ticket-bound termination, the single planning gate, review-budge
 rearm/retirement, the read-only SessionStart resume hook, and a composed full-lifecycle
 walk.
 
-### Bash gates, witness & secrets (9)
+### Bash gates, witness & secrets (10)
 `artifact-redaction` · `bash-source-write-gate` · `bash-zensu-gate` · `bypass-ledger` ·
 `plugin-data-guard` · `post-bash-witness` · `secret-scan-gate` · `skill-workflow-markers` ·
-`witness-scenario-assertions`
+`verify-consent` · `witness-scenario-assertions`
 
 Covers the PreToolUse(Bash) source-write gate incl. rule (C) git-repo escape
 (183 probe cases + a 30-case pure unit suite), the `zensu <noun> <verb>` write gate,
@@ -183,7 +185,14 @@ control in the other direction — a case-variant store prefix, a two-hop symlin
 and no-escape assertions, a payload-declared non-main principal whose premise consults
 `claude-principal-v1.js` itself, a second-path-field row, six faults covered — four asserting their own reason literal and two asserting the documented
 silence, the exit-2 plugin-root refusal, two source-absence checks with controls, and a
-two-group matcher shape compared against the module's exported tool set), and the writer-side
+two-group matcher shape compared against the module's exported tool set), the browser consent
+gate (103 checks: the hook pair driven against a real Session Control session, the shared
+navigation floor, the loopback bound, the session memory and its containment, the per-origin
+consent rule a later recipe cannot widen, the one recipe resolver both hooks and the
+doctor row consume, the per-session execution marker the broker requires before it
+self-approves an origin — its writer, its origin binding, the policy-mode branch that
+deliberately mints none, and the reap of every correctly-named file no reader can honour —
+and the skill wording), and the writer-side
 redaction that keeps `.zensu/plans` and `.zensu/logs` artifacts free of
 absolute developer paths (~100 assertions).
 
@@ -309,7 +318,10 @@ that suite's failure.
 | `review-evidence-sweep-v1.test.js` | 32 | `test-versioned-plugin-upgrade.sh` | superseded-lease sweep: the ownership selector, the canonicalized repair root, and the ancestor probe that separates *no store here* from *an ancestor is a file* |
 | `session-adopt-report-v1.test.js` | 34 | `test-versioned-plugin-upgrade.sh` | the adoption report payload: `safe()` in both directions (ordinary path verbatim; bidi, line separators and DEL folded; a localized path unchanged), the `label : value` pair-forgery guard on both branches, the space-adjacency rule that folds every Modifier_Letter a forged row could use (walked over the whole category rather than a list), the separator in BOTH spellings the consumers emit (`space-colon-space` and `colon-space`) with an ordinary colon still rendering raw, the trailing-position seam where the caller appends text after the value, the invisible-letter guard, that the exported constants and the applied rules predict each other in both directions, the in-place lease repair, and that the display rule has exactly ONE owner |
 | `rule-block-v1.test.js` | 10 | `test-best-solution-first.sh` | the one-line marker-block reader both rule carriers share: marker position, the FILE and BLOCK ceilings, the short-read and swapped-file refusals |
-| `playwright-mcp-proxy.test.js` | 16 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy |
+| `playwright-mcp-proxy.test.js` | 28 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy, including its three start modes (policy, consent, deny), the consent-mode approval boundary, and the per-session execution-marker precondition that boundary now requires (every `consentEvidenceState` value and the refusal each one produces, and the production project-root anchor ladder) |
+| `verify-consent-v1.test.js` | 41 | `test-verify-consent.sh` (V7) | browser consent decision: matcher and tool spellings, ask/allow/deny ladder, per-origin consent, loopback-only bound, memory shape and containment refusals, the foreign-server note's attachment rule, stamp validity independent of route, the shared memory read's containment rule and its not-configured case, recipe route extraction, pre/post CLI, and the per-session execution marker (writer, origin binding, staleness, hard-link and oversize arms, session-scoped and project-scoped reads, and the directory-component containment the reader shares with the writer) |
+| `verify-navigation-floor-v1.test.js` | 10 | `test-verify-consent.sh` (V6) | the one navigation floor the broker and the consent hook share: loopback and public-address classes, URL refusals, remote host resolution, route normalization (including every encoded dot-segment spelling), and the two-way agreement between `policyContractFault` and the broker's hand-copied `parsePolicy` guards |
+| `verify-free-port.test.js` | 3 | `test-verify-consent.sh` (V7b) | free loopback port helper: argument parsing, occupied and excluded ports, CLI contract |
 | `release-run-step.test.js` | 9 | `test-immutable-marketplace-release.sh` | the release step's `run_step` wrapper, EXECUTED: the annotation on failure, the full stderr replay, exit-status propagation, the `--quiet` sink applying to the wrapped command and never to the annotation, the no-stderr fallback, `head -1` bounding the annotation to one line, and temp-file cleanup under `RUNNER_TEMP`. Driven first in that suite, because it is the wrapper's only executable coverage anywhere and the suite's other pins are source greps that stay green against a present-but-broken wrapper |
 | `zen-anchor-assertions.test.js` | 11 | `test-zen-mode.sh` (Z29) | zen-mode eval GRADERS: every javascript assertion body compiled, a pinned pass/fail vector for the two anchor scenarios plus the safety carve-out, and every scenario bound to an anchor the module can produce |
 | `zen-anchor-v1.test.js` | 25 | `test-zen-mode.sh` (Z31) | zen-mode chain anchor: the shape -> line mapping against the classifier's own total set, the failed mark read from the owner rather than restated, the closed chain rendering no anchor at all, that no shape renders a whole-chain completion claim, that the token takes no second argument and that the classifier-report input is monotone, the bound max-rounds outcome rendering the blocked mark, that the outcome arm is a positive allowlist so an unrecognised member renders nothing, that the two blocked-mark authorities are OR-ed, that anchorNoneIsExpected splits a legitimate `none` from a degraded one for every shape, that the outcome allowlist is keyed on the owner's exported CHAIN_OUTCOMES and its rows are frozen, the degraded-owner fallback, and the token predicate |

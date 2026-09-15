@@ -678,12 +678,33 @@ raising this number buys nothing while the shard is that close to its own ceilin
 
 The suite is spawn-dominated — nearly every check spawns a `bash` plus a `node`,
 it builds five fixture plugin trees, and it now also drives
-`tests/structure/rule-block-v1.test.js` as its B0 driver — and `windows-shard-4`
-also carries `plan-payload-path-transport`, which this file records at a measured
-714 s. Growth here therefore has to be paid for by moving a suite OFF that shard,
-not by raising a number. If the shard starts reporting an abort, the tail of
-whichever suite ran last went unverified regardless of how many checks passed
-before it.
+`tests/structure/rule-block-v1.test.js` as its B0 driver. Growth here therefore has
+to be paid for by moving a suite OFF that shard, not by raising a number. If the
+shard starts reporting an abort, the tail of whichever suite ran last went
+unverified regardless of how many checks passed before it.
+
+**`plan-payload-path-transport` is NO LONGER a neighbour, and the prediction above
+came true before it moved.** This paragraph used to name it as the second big suite
+on `windows-shard-4` at a measured 714 s. On run 33968034396 it measured **874281 ms**
+— a 22% swing over that figure — and the shard's first three suites summed to
+1718167 ms of the 1800000 ms envelope, so `tdd-state-junction-safety` received LESS than the
+remaining 81833 ms against its own 180000 ms cap and reported `TIMED_OUT`. **State that
+figure as an upper bound, never as the grant.** An earlier revision wrote 81927, which is
+larger than 1800000 − 1718167 and puts the shard 94 ms over its own envelope — impossible under
+`tests/run-profile.js`, which starts the profile clock before the first suite while each
+suite's reported `durationMs` is measured inside `executeSuite` and therefore excludes the
+inter-suite overhead the profile clock keeps counting. So the grant is strictly BELOW the
+subtraction, and rounding across three suites accounts for about 1.5 ms, not for 94. The
+conclusion is unchanged at either value — the suite times out against its 180000 ms cap — but a
+note whose purpose is to keep the sizing lesson re-derivable must not hand the next reader a
+base that does not add up. The suite
+was not slow; it was not paid for. `plan-payload-path-transport` moved to
+`windows-shard-8`, which the contract test's own note measures at roughly 292 s of
+work; moving the 180000 ms suite instead would have left this shard at 1718167 ms,
+which is a budget set AT the measurement. Shard 4 now holds
+`best-solution-first`, `deferred-claim-adoption` and `tdd-state-junction-safety`, near
+1024 s. Re-measure both shards on the next green Windows run and replace these
+figures; the headroom sentence above still describes the shard as it was.
 
 The suite-level wall clock on Windows is still **unmeasured**; only the shard is.
 The note lives here because `tests/run-profile.js`'s `SUITE_KEYS` throws on any key
@@ -3154,7 +3175,7 @@ positive on that ground.
 
 **SEVEN checks in `tests/structure/test-impl-stop-counter.sh` grade THIS FILE, and the
 coupling fires in the UNOBVIOUS direction** — the shape §"Gate-Disable Prefixes" records
-for G12 and §"Session Lineage Ledger" for its own two. An ordinary CLAUDE.md prose edit
+for G12 and §"Session Lineage Ledger" for its own three. An ordinary CLAUDE.md prose edit
 reddens a suite named for the implementing-turns counter, and nothing points at the remedy
 from the side that changes. They are: `C41`, which forbids a `<file>:<line>` source anchor
 ANYWHERE in this file and is filename-independent, so a source filename followed by a colon
@@ -3367,6 +3388,37 @@ properties are easy to get wrong and cost the whole feature:
   actually write. Denying unconditionally there once put the diagnostic back behind the
   defect it reports, and the healthy-anchor test fixtures hid it; `O29`/`O29a` pin both
   the deleted-root and unset-anchor shapes.
+
+**A vanished LIVE `cwd` is NOT a third member, and it must not become one.** Both states
+above are failures of the BIND. A PreToolUse `cwd` that no longer names a real directory —
+a worktree removed while the session was still inside it, with the recorded project root
+intact — leaves the bind whole. `reviewer-capability-v1.js` used to canonicalize that `cwd`
+inside `revalidateSessionContext`, so every tool call of a perfectly bound session — the two
+recognized commands aside, and those only off win32 — was denied with the generic `immutable context revalidation
+failed: PreToolUse cwd does not exist`, and neither relaxation above could reach it, because
+both key on the bind and the bind had not failed. It now
+canonicalizes the `cwd` only in the three branches whose path rules consume it —
+`reviewer-readonly-v1`, `zensu-plm-readonly-v1` and `host-profile-v1`, which deny through
+`unusableWorkingDirectoryReason` — while `main-v1` returns before any path rule and
+`evidence-worker-v1` resolves its leased paths against the canonical project root on
+`trusted`. **The ORDER is the contract:** the bind, the recorded root, the digest and the
+workflow revalidation all run BEFORE the `cwd` is judged, so the missing-baseline named deny
+and every bind-failure deny still win for the main thread. `pathResolutionProfile` re-spells
+the branch ladder below it to pick the profile name, so a new principal branch lands in both.
+A branch placed ABOVE the resolution that reads `trusted.toolCwd` gets `undefined`, and
+`path.resolve` throws a `TypeError` into that branch's own catch — fail-closed, but unnamed.
+Measured before the change: driving every `PreToolUse` registration in `hooks/hooks.json`
+with a vanished `cwd` showed the capability gate as the ONLY hook that denied.
+`tests/structure/test-vanished-session-cwd.sh` pins the verdict matrix and re-derives that
+cross-hook comparison, so a later hook that starts canonicalizing the `cwd` fails there
+rather than wedging sessions in the field. Operator accounts: the `cwd` sentence in
+`docs/session-control.md` §"Claude Code Workflows" and `docs/gates.md` §"Vanished Working
+Directory". **Version: `patch`** — it lifts an existing deny for two principals and rewords
+it for three; no schema field, strict key set, hook, matcher, config key or attestation
+moves. Windows is UNVERIFIED: the suite is in `ciStructureTests` and not in
+`windows-ci.v1.json`, so only the weekly Windows Safety structure shard reaches it.
+`zensu-codex`, `zensu-kiro` and `zensu-antigravity` carry their own capability gates and
+were NOT included.
 
 Shell wrappers live in `hooks/lib/zensu-session.sh` (`zensu_session_unregistered`,
 `zensu_session_orphaned_project_root`, `..._model`, plus
@@ -4825,7 +4877,10 @@ than counted, so a quoted column-0 placeholder beside a real rendered line is ac
 the caller line keeps the exact-literal test and has no such filter — no `AUTOPILOT-REVIEW-OP`,
 the caller value exact, both regexes, then every field compared against the durable run) — never by the lines it occupies.
 
-**The consumer is a PostToolUse hook on the `Agent` matcher.** `SubagentStop` carries only
+**The consumer is a PostToolUse hook on the `Agent|Task` matcher.** It read `Agent` alone until
+#299 widened it, so a reviewer spawned through `Task` recorded no round at all; state the pair,
+because a maintainer who matches on `Agent` finds a registration that no longer says that.
+`SubagentStop` carries only
 `hooks/review-evidence-subagent-stop.sh`, the pr-team-review evidence lease. A diagnosis that
 blames `SubagentStop` for an unrecorded review round is looking at the wrong hook; this
 paragraph exists because that mistake was made in a real session.
@@ -6549,7 +6604,7 @@ indistinguishable from "no handover happened".
 segment quoted in `skills/session-trail/SKILL.md`, `tests/structure/session-lineage-v1.test.js`,
 and the `v1` path spelled throughout `tests/structure/test-session-trail-lineage.sh`.
 
-**Two couplings fire in the UNOBVIOUS direction**, the same shape §"Gate-Disable
+**THREE couplings fire in the UNOBVIOUS direction**, the same shape §"Gate-Disable
 Prefixes" records for G12 — an ordinary edit elsewhere reddens a suite named for
 something else, and nothing points at it from the side that changes:
 
@@ -6564,6 +6619,32 @@ something else, and nothing points at it from the side that changes:
   (`L41` the exact `c8` pin, `L41a` that the coverage run drives all three suites, `L41b`
   the include glob's quoting, `L41c-control`). So an ordinary dependency bump or npm-script
   edit reddens the session-trail lineage suite.
+- The `L70` family in that same suite grades §"Takeover Destination" content, not ledger
+  content, and it binds FOUR `trail.mjs` constants — not two — plus THREE `cmdAdopt` literals:
+  `apply --stat` is a `CARRY_OVER` literal, `Never continue in a worktree` is
+  `ADVICE_LEADS.active.present`, `This session is not archived, and the recorded directory
+  is gone` is `ADVICE_LEADS.active.gone` — bound by `L70g`, and reworded once already when
+  the previous needle came from the `survivor.gone` cell and reported a correct gone-leg
+  render as a failure — and `-b 'claude/<name>-cont'` is `TAKE_YOUR_OWN`. `L70` and `L70g`
+  additionally bind `whereAdviceLines`'s own `'<their worktree>' = `, `Replace '<their worktree>' TOGETHER WITH the quotes` -- and the retired blanket spelling `Replace each placeholder TOGETHER WITH` is now a NEGATIVE
+  needle in three checks rather than a bound line, so restoring it from this roster would
+  redden them --
+  and `recorded worktree (gone) = ` lines — plus the three literals that carry the P1 fix, the
+  unmapped-placeholder sentence, the `NOT the worktree named on the receipt line above` trap
+  and the gone leg's `shown for reading, not for pasting` caution — and `L70a-src` greps both
+  that renderer's source and `cmdAdopt`'s. **Two later members bind SYMBOLS rather than emitted
+  text, which widens the blast radius from a reword to a rename:** `L70n` takes comment-stripped
+  OFFSETS out of `cmdTakeover` and `cmdAdopt` and requires every throwing render
+  (`worktreeAdvice(`, `substitutionRuleLines(`, `adviceBlock(` in the first; `whereAdviceLines(`
+  in the second) to precede the durable write (`recordTakeoverEdge(`, `ledgerWrite(`), so
+  renaming ANY of those six — or moving a render back below its write — reddens this suite; and
+  `L70o` requires the adopt receipt's ledger path to be spelled `flatPath(path.join(LEDGER_DIR`.
+  So rewording any of those constants in `skills/session-trail/scripts/trail.mjs`, or
+  restructuring that function, reddens a suite named for the lineage ledger. This is the
+  third member, and the count above was carried at two in TWO places — here and in
+  §"Implementing-Phase Turn Counter", which cross-references "§\"Session Lineage Ledger\"
+  for its own three" — quoted in its CURRENT spelling, because a quote of the retired one
+  is a string a maintainer greps for and never finds. Both move together.
 
 **The DISPATCHER owns command-flag scoping, and two tables must stay key-identical.**
 `parseArgs` accepts every flag for every command, so a flag belonging to another verb
@@ -6769,7 +6850,8 @@ before it.
 
 **`tests/structure/test-session-trail-lineage.sh`'s Windows ceiling is MEASURED, and
 the measurement is now STALE — say so rather than quoting it as headroom.** The figure
-below was taken at 70 checks; the suite is at 268. The rule this section exists to
+below was taken at 70 checks; the suite has grown several times over since — read its own
+reported total rather than a numeral here, which has already drifted twice. The rule this section exists to
 record is that the ceiling is set from the FIRST GREEN WALL CLOCK on the shard, never
 estimated from the macOS time and never raised speculatively — so the number stands
 until a green Windows run replaces it, and until then the 9x ratio is what new checks
@@ -6947,8 +7029,9 @@ second exemption is indistinguishable from a forgotten `env -u`.
 ## Takeover Destination (`worktreeAdvice` in `skills/session-trail/scripts/trail.mjs`)
 
 **A THIRD session-trail axis, and the one most easily confused with the other two.**
-§"Git Mutation Tables" tracks the WRITE-ANCHOR contract — *may I write there* — in six
-carriers. §"Session Lineage Ledger" tracks a chain of sessions handing work to each
+§"Git Mutation Tables" tracks the WRITE-ANCHOR contract — *may I write there* — in NINE
+carriers (that section enumerates nine; this clause read "six" for a release, and the phrase
+wraps across two lines, which is why a line-local grep for it found nothing). §"Session Lineage Ledger" tracks a chain of sessions handing work to each
 other. This one asks *will the directory still exist while I work in it*, and it shares
 no code with either. All three live in the same skill; a change to one lands in none of
 the others.
@@ -7050,41 +7133,124 @@ floor: a floor survives deleting the `apply --stat` step from both carriers at o
 the edit the pin exists to stop. `T35b-control` guards both scans against an empty slice.
 
 **`WORKTREE_ADVICE_COMMAND` / `adviceBlock` are a producer/consumer contract between one
-array and two briefs.** A command line is one indented exactly two spaces; prose sits at
+array and THREE renderers** — `cmdTakeover` and `cmdHandoff`, which persist their output
+into a brief, and `cmdAdopt`, which prints to a terminal. Do NOT restate the count as
+"two briefs": that spelling was true until the `adopt` route began rendering the advice,
+and it is the census drift this same section records against itself twice below. A
+command line is one indented exactly two spaces; prose sits at
 column zero. It is deliberately NOT a `git `-anchored rule any more — `CARRY_OVER` opens
 with a `PATCH="$(mktemp …)" && …` line, and its copy loop carries `while`, `[`, `mkdir` and
 `done` lines besides — and the widening cuts both ways: a prose line that acquires
-a two-space lead-in is published inside a ```bash fence in two persisted briefs. `WT8p`
+a two-space lead-in becomes a COMMAND in every one of those three renderers, and in the two
+that persist a file someone else opens later it is published inside a ```bash fence as well —
+`cmdAdopt` renders `{ carrier: 'terminal' }`, because a terminal has no copy button. `WT8p`
 grades both directions structurally rather than against a verb allowlist. Before the
 extraction the two briefs disagreed about the same array — `cmdHandoff` re-fenced per line,
 `cmdTakeover` fenced nothing — so a recipe was runnable in one brief and prose in the other.
-Contiguous commands coalesce into ONE fence, and it takes TWO pins to hold that — one per
-renderer. `WT8q` drives `cmdTakeover` and `WT8q2` drives `cmdHandoff`, which is the call
+Contiguous commands coalesce into ONE block, and it takes ONE PIN PER RENDERER to hold that —
+TWO output pins for the two briefs, plus a SOURCE pin for the terminal carrier, whose block is
+delimited by a blank line and a prompt rather than by a fence. `WT8q` drives `cmdTakeover` and `WT8q2` drives `cmdHandoff`,
+which is the call
 site whose own comment names it as the origin of the per-line-fencing defect. One was not
 enough and that is measured, not argued: with only `WT8q`, reverting `cmdHandoff` alone
 left every check in both suites green. Both render a PRESENT-leg brief, which no other
 fixture here does — every other one is directory-gone, and a single isolated command cannot
 show coalescing at all. `WT8r` consumes those same two renders rather than making its own,
 and covers the other axis: the `r.cwdExists` prose branches in both briefs, graded against
-the gone leg so it cannot pass by rendering one branch twice.
+the gone leg so it cannot pass by rendering one branch twice. **There is no longer a THIRD
+split pin, and `L70e` is no longer one:** the `adopt` carrier's split is graded ONCE, at the
+unit layer, by `the destructive apply is not in the same paste unit as the steps that gate it`,
+and `L70e` was thinned to a source pin establishing WHICH RENDERER produced that carrier —
+three `grep -qF` literals over the extracted `whereAdviceLines` body — `const body =
+worktreeAdvice(row)`, `substitutionRuleLines(body,` and `adviceBlock(body,` — which pin the
+IDENTITY rather than the render alone: the array is hoisted, and the rule that renderer prints
+is derived from the very lines the block renders, so the same value must reach both. An earlier
+wording here quoted a single `adviceBlock(worktreeAdvice(row)` needle that matches nothing in
+the tree, the hoist having replaced it. That is
+the claim only this layer can make, and it is source-shaped, so an output walk was the wrong
+instrument for it twice over: the property is renderer-independent, and the terminal carrier
+stopped carrying a markdown fence at all. `L70`'s own fence needle is the NEGATIVE one now —
+`[markdown-fence-on-a-terminal-carrier]` — because `adopt` prints to stdout. The split pin for
+the BRIEFS arrived as a NEW sibling check rather than as a correction to
+`L70`, so a roster naming `L70` sends a maintainer to the check that does not hold the
+property.
 
-**Coalescing is now a TWO-SIDED property, and both pins assert the split as well.** One
+**Standing fix, named rather than taken:** the split is renderer-INDEPENDENT — it is
+owned jointly by `adviceBlock`'s coalescing and by `CARRY_OVER`'s column-zero prose line
+— so one pin per renderer scales linearly for a property that has one implementation.
+`adviceBlock` and `worktreeAdvice` are both exported, and THAT HALF ALREADY SHIPS: the
+unit case `the destructive apply is not in the same paste unit as the steps that gate it`
+in `tests/structure/worktree-advice-v1.test.js` grades the split directly through
+`mod.adviceBlock(mod.worktreeAdvice(...))`. What is still outstanding is THINNING the
+three renderer pins to a "this carrier went through `adviceBlock`" needle — say it that
+way, never "grade it once at the unit layer", or a maintainer taking the fix adds a
+second copy of a test that exists.
+**The fence-walk census is TWO implementations over TWO renderer pins, and it was three until
+`L70e` was thinned to a source pin.** `WT8q` and `WT8q2` do NOT each carry their own awk: both
+call one shared `fence_of()` in
+`tests/structure/test-session-trail-verdict.sh`. `L70e` carried an inline awk of its own and no
+longer does — it greps the renderer call instead, which is the claim that layer actually owns.
+And the SECOND implementation sits in the destination file — `fenceOf` in
+`worktree-advice-v1.test.js`, whose own comment says it mirrors `fence_of` — which a
+maintainer hunting for "three per-check awk walks" to delete would never reach. The
+mirror of this paragraph inside `test-session-trail-lineage.sh` carries the same
+correction and moves with it.
+
+**Operator-facing accounts that must move with it**, and the first two live in DIFFERENT
+steps — bundling them under one was wrong, because `T35`'s slice is anchored on
+`/^4\. \*\*Decide WHERE to continue/` and would extract a region the content sits outside
+of: `skills/session-trail/SKILL.md` flow 3 **step 4** carries the `CARRY_OVER` hand-copy,
+while flow 3 **step 3** carries the renderer enumeration that names three commands. Then
+the `adopt <selector>` row of that file's command table, its flow 5 step 6 paragraph, its
+§"What leaves the machine's project boundaries" paragraph, and the Safety section's
+`--no-record` bullet — the last FOUR all describe the `adopt` route's advice, and `T38` in
+`tests/structure/test-session-trail-skill.sh` now pins all four, slicing each passage on its
+own anchor so a reword of the `WHERE` head or of `worktreeAdvice`'s carry-over arm fails
+loudly instead of leaving them stale. The claim that nothing pinned them outlived the pin by
+a round, which is the drift this roster exists to catch and did not catch in itself. The Safety bullet joined that set only when the
+`--no-record` refusal's stated ground was corrected, and it was missed on the first pass.
+
+**Coalescing is now a TWO-SIDED property, and BOTH BRIEF renderer pins assert the split as
+well, the terminal carrier being graded at the unit layer instead — state the base, because "both pins" was written when there were two, and a first
+correction then said "TWO of the THREE" while its own closing sentence named the third
+grading it.** One
 fence is one COPY BUTTON, so coalescing all four carry-over commands put the destructive
 `git apply` in the same paste unit as the `grep` and the `apply --stat` that exist to gate
 it — and the "these steps sit between the diff and the apply" argument is about execution
 ORDER, which only holds if the human stops between the third command and the fourth. A
 column-zero prose line breaks `adviceBlock`'s run, so the two READING steps still coalesce
 (splitting those from each other would reintroduce the per-line fencing) while the
-destructive line sits in a later fence of its own. `WT8q`/`WT8q2` grade both halves, because
-either one alone is satisfied by the shape they exist to reject.
+destructive line sits in a later fence of its own. `WT8q`/`WT8q2` grade both halves for the
+two BRIEFS, because either one alone is satisfied by the shape they exist to reject. For
+`cmdAdopt` the split is graded at the UNIT layer instead, and `L70e` is a source pin on the
+renderer choice rather than a third fence walk — the terminal carrier renders
+`{ carrier: 'terminal' }`, so there are no fence indices there to walk, and `L70`'s fence needle
+is the NEGATIVE one. **The carrier is REQUIRED on both renderers and neither defaults.** They
+used to default in OPPOSITE directions — `adviceBlock` rendered markdown for an absent carrier,
+`substitutionRuleLines` rendered terminal — so each signature taught the wrong default for its
+sibling, and both persisted-brief call sites already relied on the asymmetry. `resolveCarrier`
+is the one reader and it THROWS outside `{'markdown','terminal'}`; that is safe only because
+`main()` flushes before it reports, so remove that catch and the throw becomes a partial-write
+hazard. Aligning the two defaults on one value was the cheaper end state and was REJECTED: it
+removes the contradiction and keeps a silent fallback on the axis whose wrong value lands in a
+file a different session opens, against the `_autopilot_workspace_refusal` precedent this file
+already records for a positionally-required audience argument.
 
-**A THIRD consumer renders the same array and no check reached it.** `cmdShow` prints every
+**`cmdShow` is the SURVEY consumer, and for a long time no check reached it.** Name the
+consumers by ROLE and never by ordinal: this paragraph opened "A THIRD consumer renders
+the same array" until a fourth arrived, which is the drift the heading two paragraphs up
+now warns about in its own words. There are FOUR — `cmdShow` (survey), `cmdTakeover` and
+`cmdHandoff` (briefs), and `cmdAdopt` (confirmation). `cmdShow` prints every
 line into a survey view with a nine-space prefix and no fence; when the carry-over recipe
 landed the array grew from roughly six lines to dozens, so `show` began dumping a
 paste-and-run recipe into the middle of the one output whose value is that you can scan it.
 `worktreeAdvice(r, { carryOver: false })` returns the decision half only, and `cmdShow`
-points at the briefs for the rest. The option is opt-OUT on purpose: the briefs are what a
-human pastes from, and a new caller that forgets it gets more rather than less. The `--json`
+points at the briefs for the rest — and at `adopt`, qualified, because that verb also
+writes a machine-wide ledger edge and is therefore not a read-only route to the recipe.
+The option is opt-OUT on purpose: the briefs are what a
+human pastes from, and a new caller that forgets it gets more rather than less — which is
+exactly what `cmdAdopt` wants, so it takes the default deliberately rather than by
+omission. The `--json`
 payload is deliberately NOT summarized — it is a data carrier, and every `wt_case` in the
 verdict suite reads the advice through it, which is what `WT8s` grades from both sides.
 
@@ -7096,7 +7262,7 @@ is exactly that shape: `session-lineage-v1.mjs` sits in the same directory with 
 `worktree-advice-v1.test.js`, for a module that does not exist. Importing the "pure" advice
 surface evaluates `claude-path-v1.js`, `bash-source-write-parse.js` and `session-lineage-v1.mjs`
 at load, because they are `trail.mjs`'s own imports. And `worktreeAdvice` can reach
-`process.exit` through `fail()`, which is not a thing a library does to its importer.
+`process.exit` through `fail()`, RETIRED: that refusal throws today, so this argument is discharged.
 
 What argued against taking it in the round that raised it is concrete rather than
 conservative: `T35`'s extractor anchors `^const CARRY_OVER = \[`, `^function worktreeAdvice\(`,
@@ -7105,8 +7271,68 @@ already gone dead once without a sound. Moving the constants re-points four anch
 `T35_EXPECT`, this roster and the unit file's import in one edit.
 
 **The trigger is a second importer, or the next change that has to re-point those anchors
-anyway.** The move carries three obligations: re-home `livePid`, replace the `fail()` call
-with a thrown error, and re-point the extractor.
+anyway.** The move now carries TWO obligations, not three: re-home `livePid` and re-point the
+extractor. The third — replacing the `fail()` call with a thrown error — is DISCHARGED: that
+refusal throws today and `main` flushes before reporting it, so the move is cheaper than this
+ledger said. The trigger was EVALUATED in the round that discharged it and did not fire:
+there is still no second importer, and that round re-pointed no `T35` anchor. Recorded so the
+next reader does not have to re-derive whether it was considered — it was.
+
+**ONE RENDERER owns the placeholder mapping and the rule that governs it**, and the rule's
+placeholder set is DERIVED from the recipe it is printed beside rather than handed in.
+`substitutionRuleLines` and `recipePlaceholders` in `trail.mjs` are that renderer and its
+scanner, and SIX carriers consume it: `whereAdviceLines` on both legs, `continuationPlan`,
+`cmdShow`'s WHERE head, and both persisted briefs. Three things about it are load-bearing and
+were each learned from a defect. It takes PAIRS and emits the mapping line ITSELF, because a
+caller that spells its token once in a rendered line and once in an argument is the hand-copy
+the extraction existed to remove. It takes the CARRIER rather than a bare indent, because on
+the two persisted MARKDOWN briefs a bare `<path>` is a well-formed HTML tag name that a
+renderer or a sanitizer drops, which emptied the only sentence naming what a reader must
+supply. And its sentence is SCOPED to runnable lines, because `recipePlaceholders` reads
+only those: widening the scan to prose makes the quoting claim false for MORE tokens, not
+fewer, since a prose occurrence is genuinely unquoted. It also carries no positional word —
+`cmdShow` prints this rule and then `continuationPlan`'s, which governs a different set, and
+while the text said "below" the first rule introduced the second rule's block. The unit
+layer derives its expectation from the recipe arrays, never from `recipePlaceholders`:
+grading the renderer against the function the renderer calls is tautological in the one
+direction that matters, and it pinned a wrong set in place for a round.
+
+**TAKEN, in the round that shipped its sibling: `adviceBlock`'s `fence` option named one
+symptom of what it selects.** The two branches differ in the markdown marker AND in how a
+command block is marked for a reader — a fence is a copy button, a terminal has neither — so
+the axis is the CARRIER, and `{ carrier: 'markdown' | 'terminal' }` is the option that reads
+as the condition rather than as one of its effects. This file already records the identical
+shape against itself for `ownDocumentVerdict(discloseWithoutKey)`: a boolean threads call-site
+identity through a value whose policy then lives only in a comment. It was deferred once, on the ground that the option is exported,
+consumed at ONE production call site plus four in the unit file across THREE cases, and read
+twice inside `adviceBlock` itself — a cross-file edit whose whole value is legibility. The
+deferral said to take it when something else already had to re-author those assertions, and
+that is exactly what happened: `substitutionRuleLines` grew a `carrier` option on the SAME axis,
+and two options naming one axis in two vocabularies is worse than either. Both now take
+`{ carrier: 'markdown' | 'terminal' }`. The earlier count in this paragraph said four call
+sites and two unit cases, which was wrong in both halves.
+
+**THE THROWING RENDER RUNS BEFORE THE DURABLE WRITE, in every verb that writes one.** Three
+functions in this surface can throw — `worktreeAdvice` on an `ADVICE_LEADS` cell it cannot
+resolve, and `adviceBlock` / `substitutionRuleLines` through `resolveCarrier`'s required-carrier
+refusal — and two verbs write a machine-wide ledger edge. `cmdTakeover` recorded its edge at the
+top of the verb and made its first `print` roughly 160 lines below, so a throw in between landed
+a durable edge with an EMPTY buffer for `main()` to flush: the edge existed and the `LINEAGE`
+line SKILL.md requires never appeared. **Announcing after the write is NOT the fix and was
+proposed as one**: that verb has TWO carriers and the `--json` one returns before any
+announcement could be reached, evaluating `worktreeAdvice(r)` inside the payload literal. The
+order is inverted instead — `cmdTakeover` builds its advice arrays above `recordTakeoverEdge`,
+`cmdAdopt` renders `whereAdviceLines` above `ledgerWrite` into one variable both its carriers
+push — which covers all four carriers at once and makes a render fault mean NO edge lands.
+`main()`'s flush-before-report is the backstop for everything downstream of the write, not the
+mechanism that makes the write safe; it was the stated mechanism for a release and covered only
+the text carrier. FOUR comment carriers assert this contract and must move together:
+`resolveCarrier`'s header, `worktreeAdvice`'s own THROW comment, `cmdAdopt`'s two (the second of
+which explicitly PRESCRIBED the old order and would have had the next round revert the fix), and
+`main()`'s choke-point comment. `L70n` in `tests/structure/test-session-trail-lineage.sh` pins
+the order by comment-stripped offsets. `cmdHandoff` is deliberately ungraded: it writes nothing
+durable, so it has no ordering to hold.
+
 
 **Known gaps, accepted and named:**
 
@@ -7139,13 +7365,29 @@ with a thrown error, and re-point the extractor.
   `firstPrefix`-on-a-leading-command arm is still dormant by construction — every arm opens
   with a prose sentence naming its cause — and it exists so the helper does not silently eat
   `cmdHandoff`'s `- ` bullet the first time an arm is reordered. `trail.mjs` now guards its
-  CLI dispatch on being the process entry point and exports FOUR names — `adviceBlock`,
-  `worktreeAdvice`, `adviceLeg` and `WORKTREE_ADVICE_COMMAND` — so
+  CLI dispatch on being the process entry point and exports SEVEN names — `adviceBlock`,
+  `worktreeAdvice`, `adviceLeg`, `whereAdviceLines`, `substitutionRuleLines`,
+  `recipePlaceholders` and `WORKTREE_ADVICE_COMMAND` — of which
+  `whereAdviceLines` is NOT pure: it canonicalizes two paths through `canonicalPair` to decide
+  whether the taker is standing in the source worktree, so the surface's own "plain record, no
+  filesystem" criterion is stated as "reads the filesystem only to canonicalize" now. So
   `tests/structure/worktree-advice-v1.test.js` drives that branch, an empty input and a
   single-line input directly. `adviceLeg` is the ONE implementation of the present/gone
-  decision, and it exists because that decision has three consumers: `worktreeAdvice` picks
-  its lead AND its body from it, `cmdShow` decides from the same answer whether to print the
-  pointer at the recipe its survey view withholds, and `printResume` decides whether to print
+  decision, and it exists because that decision has FIVE consumers. `whereAdviceLines` is the
+  fourth, deciding whether to render the placeholder mapping at all, and it was added with the
+  adopt-advice route while this census still read three; `cmdAdopt` is the FIFTH and it is a
+  consumer in its OWN right, naming `leg` in both its `--json` payloads so a machine consumer
+  is told whether the recorded path may be substituted. Both are named because the derived
+  scan attributes a site to the FUNCTION that reads the leg, and both functions now do:
+  `whereAdviceLines` was extracted to module scope and exported, and `cmdAdopt` calls
+  `adviceLeg` twice on its own. This census read FOUR for a round after that second call
+  landed, while the derived pin in `tests/structure/worktree-advice-v1.test.js` already
+  asserted the true five-set and therefore stayed green — the exact failure a hand-maintained
+  count beside a derived one produces, and the second time it has happened to this list.
+  `worktreeAdvice` picks
+  its lead AND its body from it, `cmdShow` reads it once into a hoisted local and uses it
+  twice — for its `WHERE` head and for the pointer at the recipe its survey view withholds —
+  and `printResume` decides whether to print
   its own copy of the gone-leg create command. Every one of those was a hand-written
   `r.cwdExists` at some point in this feature's history, and one of them drifted INSIDE a
   single function — the lead came from `adviceLeg` while the body came from a raw
@@ -7199,6 +7441,21 @@ with a thrown error, and re-point the extractor.
   graded) and the W13 case's `mkdir -p` (which is real but not first) — so name the helper
   and its first call site, not a line number that moves. Pre-existing, predates this rule,
   and it means one of the two hedged wordings has no executed case anywhere.
+
+**Version: `patch`.** Walked against §"Runtime Lineage" entry by entry so the next reader can
+CHECK the claim rather than re-derive it: no context-record or workflow-state schema field —
+`trail.mjs` writes neither; no strict key set — nothing here validates by exact key membership;
+no hook added, removed or renamed and no matcher changed; no config key; no attestation change;
+and no `permissionDecision` in either direction, this being a skill CLI rather than a hook.
+
+**The decisive check for this feature family is the DURABLE shape, and it is clean.**
+`skills/session-trail/scripts/session-lineage-v1.mjs` is untouched, so `LEDGER_SCHEMA_VERSION`,
+`makeEndpoint` / `ENDPOINT_KEYS` and `buildEdge` are byte-identical: nothing an older runtime
+wrote becomes unreadable, and nothing this build writes becomes unreadable to an older one.
+The `--json` payloads of `adopt` are an EXCHANGED shape rather than a persisted one — produced
+and consumed inside one invocation — and the `worktreeAdvice` key is read by no validator that
+rejects unknown keys. State the untouched-module sentence whenever this verdict is restated:
+it is the one fact that makes the walk checkable in a grep rather than by reading the diff.
 
 ## zen-mode Chain-Progress Anchor (`user-prompt-zen-mode.sh` rule 6)
 
@@ -8047,3 +8304,392 @@ A `gh pr list --head <branch>` check is not sufficient — it does not distingui
 This applies to AI agents and humans alike. The `/create-pr` slash command's "PR already exists for this branch" guard does NOT cover the merged-branch case. "I just rebased ten minutes ago" is not a substitute for the check — re-run it every push.
 
 **Every plugin-opened PR body carries an Acceptance Criteria table.** The shared, repo-overridable template is `templates/pr-body.md` (resolution: `.zensu/templates/pr-body.md` at the working-tree toplevel, else `${CLAUDE_PLUGIN_ROOT}/templates/pr-body.md`). Its `## Acceptance criteria` table takes one row per stable `AC-###`/`FR-###` id read from the feature's TDD plan `## Requirements` table via `hooks/lib/zensu-plan-requirements.sh` (exit 0 = usable); when no usable table exists the template's single stub row stays in place — never ship an empty table. Both PR openers honor this: `/zensu:pilot` renders `pr-body.md`, and `/zensu:autopilot` uses its richer `autopilot-pr-body.md` variant (the same table plus the build-time bypass-ledger audit line).
+
+## Browser Consent Gate (`hooks/lib/verify-consent-v1.js` + the two consent hooks)
+
+`/zensu:verify-feature` used to require a launch-time `ZENSU_VERIFY_NAVIGATION_POLICY_V1`
+before any browser call, which no end user can supply: the broker reads it once when the MCP
+server starts, so no in-session Bash call can configure it, and the desktop app has no shell
+prefix at all. The gate replaces that precondition for LOOPBACK targets with a host-rendered
+permission prompt the model cannot answer. Remote targets still need the policy, and that is
+not a limitation to engineer away: Chromium's DNS pins are passed at browser launch, so an
+origin approved mid-session could not be pinned.
+
+**A PreToolUse hook was chosen over MCP elicitation because the desktop app has no elicitation
+channel** (CLI-only since 2.1.76). The decision module is shaped so elicitation can replace the
+prompt later without changing the memory or the wording.
+
+**The matcher reaches further than the skill, and that is a residual rather than a defect to
+narrow blindly.** It is registered on the tool NAME, and the optional plugin-scope group means
+the bare `mcp__playwright__…` spelling matches too. That spelling is real in this very
+repository: the plugin manifest declares `mcpServers: "./.mcp.json"` and that file names the
+server `playwright`, so ONE file yields the plugin-scoped spelling when loaded as a plugin and
+the bare one when the repository is opened as a project — measured, not inferred, and the
+earlier "CLI versus desktop" reading in the spec was wrong. A consuming project running its own
+MCP server under that key therefore has every non-loopback `browser_navigate` denied, in every
+session, with no skill running. **Do not "fix" this by narrowing the matcher**: where the bare
+spelling is the real one, narrowing removes the gate while the broker still starts in consent
+mode and self-approves. The deny text names the foreign-server possibility and its ONE remedy
+instead — renaming the server key. The second remedy this paragraph used to claim, launching with
+a navigation policy, was retired: it turns the gate off for every target including the remote ones
+the floor exists to refuse, so under the note's own premise it leaves nothing behind it.
+`tests/structure/verify-consent-v1.test.js` machine-forbids the retired spelling, so a carrier
+still naming two remedies asserts something a test refuses. Closing it properly needs the prefix MEASURED across desktop and CLI, default and
+`--plugin-dir` installs; until then neither direction is supported by evidence.
+
+**The prompt must describe the grant the BROKER makes, not the one the hook asks about.** This is
+stated as a RULE, not as a live divergence — both now ask per origin, and the paragraph below
+records why. It is kept because the divergence is the easy one to reintroduce: the broker stores
+the classified ORIGIN and checks no route afterwards, so any future prompt promising a narrower
+grant than that would have the human decide on a false description. The sentence names the origin
+and says the browser does not check routes again.
+
+**CONSENT IS PER ORIGIN, in all three carriers, and the route-scoped design that preceded it is
+recorded here so it is not rebuilt.** The first attempt asked per route while the PROMPT told the
+human a Yes opened the whole origin and the BROKER checked only the origin (`assertAllowedUrl`
+tests `policy.approved.has(target.origin)` and returns before any route test). Three components,
+two contracts. The route half then carried its own defect: a record was stamped with a fresh read
+of the LIVE recipe on every write, INCLUDING writes for navigations that were never prompted, and
+the silent-allow arm tested the union of those sets — so a session could widen the recipe, drive
+one already-allowed route, and launder a new route into the silently-allowed set with no human in
+the loop. Binding the set to the prompt would have fixed that one defect and left the three
+carriers still disagreeing. Removing the route axis fixes both: a record is exactly
+`(origin, route, decidedBy, at)`, the route is an audit line, and the recipe's declared routes are
+prompt CONTEXT only. The cost is stated rather than hidden — there is no per-route control inside
+an approved loopback origin, which is what the prompt has always promised.
+
+**`isSymbolicLink()` beside an `lstat` verdict is DEAD, and this is a SHAPE, not a census.**
+`fs.lstatSync` does not follow the final component, so it never reports a symlink as a file or a
+directory: wherever this feature writes `!info.isFile() || info.isSymbolicLink()` or
+`!info.isDirectory() || info.isSymbolicLink()`, the first half already decides and the second is
+unreachable. It also protects nothing against the edit it looks like a belt against — an
+`lstatSync` → `statSync` "simplification" makes `isFile()`/`isDirectory()` true for a symlink AND
+`isSymbolicLink()` false, so the conjunct dies with the guard it appears to back up. The conjuncts
+are left in place; what must not happen is a reader treating one as load-bearing. Do NOT enumerate
+the sites here — a first attempt named one and a reviewer found eight, which is exactly how a prose
+census goes stale. Grep `isSymbolicLink()` across `hooks/lib/verify-consent-v1.js` and
+`scripts/playwright-mcp-proxy.js` before relying on any of them.
+
+**One resolver decides which recipe governs.** `resolveRecipeFile` prefers `.zensu/runtime.yaml`
+over `.zensu/autopilot.yaml` and skips a symlinked candidate. Both hooks and the `/zensu:doctor`
+row consume it; the ladder used to be spelled three times, where a one-sided edit made the pre
+hook decide against one file while the post hook recorded against another. **The two anchors
+still differ and that is a stated bound, not an oversight:** the hooks resolve the project root
+from the immutable record, the doctor from the session root or the harness value.
+
+**`--config=<path>` steers the SKILL and is invisible to the gate**, so a recipe passed that way
+declares no synthetic-safe routes to the prompt. Stated in the operator doc rather than closed.
+
+**The declared routes come from the guarded recipe read and from nowhere else.** An environment
+override sat in `readInputs` and short-circuited the branch carrying the lstat, symlink and size
+guards, with no production producer and neither hook clearing it. It is deleted; a test that
+needs routes writes a real recipe.
+
+**The consent line sits BELOW the sessionBanner gate**, unlike the reviewer-spawn grant line
+above it. The distinction is what the line reports: the grant announces a capability the plugin
+hands itself, which a checked-out config must not be able to hide; consent announces that a
+PROMPT will appear, which is a usage hint. Hiding it costs the user a hint and hides nothing.
+
+**Coupled sites that move together:** `CONSENT_MATCHER` / `NAVIGATION_TOOL_RE` in the decision
+module against both matcher registrations in the hook manifest and against the broker's own
+`consentHookRegistered`, which reads the module's constant and compares it to the manifest —
+so that check proves internal consistency and says nothing about how the host renders the
+prefix; `RECIPE_NAMES` and `resolveRecipeFile` against the doctor's recipe probe;
+`FLOOR_REASONS`, `CONSENT_REMOTE_REASON` and `normalizeRoute` in the shared floor, which the
+broker and the decision module both consume rather than hand-copying — the remote sentence
+lived in two files with no check comparing them; the memory filename shape against
+`skills/verify-feature/SKILL.md`, which both spells that path and owns the report's `Consent`
+block — the doctor renderer has no such block, and naming it there sent a maintainer to a file
+that does not carry it; every doctor STATE against the rows documented in the doctor skill, which
+a suite check holds in step — do not restate a COUNT here, because the next state added
+invalidates it, and this roster already shipped one that was stale on the day it was written;
+the doctor's three top-level policy guards, which used to be a hand copy of `parsePolicy`'s own
+three throw messages and are now a CALL: `hooks/lib/verify-navigation-floor-v1.js` owns
+`policyContractFault`, and `zensu-doctor.sh` and the consent gate both invoke it, so those two
+cannot drift about what a usable policy is. The reason the doctor may call it is worth keeping,
+because an earlier wording had it wrong: it is NOT that calling the owner would put DNS in a
+read-only diagnostic, since `parsePolicy(raw, resolver)` takes its resolver as a parameter and
+reaches DNS only for `mode: "remote"`. It is that a stubbed refusing resolver would report a
+VALID remote policy as invalid, which is the one verdict a diagnostic must never invent — so the
+PER-TARGET rules stay `parsePolicy`'s alone and the shared check is top-level only.
+**The remaining hand copy is `parsePolicy`'s own**, which still spells those three guards itself
+rather than calling `policyContractFault`, and it is no longer unpinned: the last test in
+`tests/structure/verify-navigation-floor-v1.test.js` compares the two in BOTH directions — every
+value the shared check refuses must be one the broker refuses or denies, and its thrown message
+must equal `'navigation ' + policyContractFault(raw)`; every value it accepts must be one the
+broker accepts, across `local`, `remote` and the eight-target upper bound, so a one-sided
+TIGHTENING is caught as well as a one-sided widening. That pin fires in the UNOBVIOUS direction,
+which is why `parsePolicy` carries a pointer comment naming it: an edit inside
+`scripts/playwright-mcp-proxy.js` reddens a suite named for the floor module. **The uncompromised
+fix is NOT taken:** have `parsePolicy` call `policyContractFault` and delete its three literals,
+leaving one implementation instead of two kept in step by a test;
+the EXECUTION-MARKER family, which this roster omitted for a round while the feature shipped:
+`STATE_SEGMENTS` / `evidenceDirFor` (the one owner for the module's JS consumers — the broker
+and the doctor wrapper consume it rather than joining the segments themselves. Say it that way
+rather than as oneness: both consent HOOKS still hand-join the two segments in shell, and
+`session-control-core-v1.js` declares its own `WORKFLOW_STATE_SEGMENTS` twin, so a layout change
+is a multi-site edit),
+`MEMORY_NAME_PREFIX` / `EVIDENCE_NAME_PREFIX` (the one owner of each half of the marker name FOR
+THE MODULE'S OWN JS CONSUMERS — the regex, `evidencePathFor`'s substitution and
+`liveEvidenceOrigins`' session filter are all built from it, because a one-sided edit there left
+the writer working while the doctor's filter matched nothing and rendered the benign row. State
+the qualifier: `MEMORY_NAME_PREFIX` is HAND-COPIED in both consent hooks, which each spell
+`verify-consent-${ZENSU_SESSION_KEY}.json` in shell, so renaming it is a three-site edit and this
+constant makes it neither one edit nor a loud failure — the hooks would build a path the module's
+own `MEMORY_NAME_RE` then refuses. `EVIDENCE_NAME_PREFIX` has TWO code carriers besides its owner — the
+proxy's `truncated` refusal and the renderer's `unjudged` row, both of which spell the marker
+glob into a sentence a model reads — and its literal is restated in FOUR operator accounts:
+`docs/gates.md`, `docs/verify-feature.md`, the `pre-browser-navigation-consent.sh` row in
+`docs/configuration.md`, and `skills/doctor/SKILL.md`. Treat that as a census taken at one moment
+rather than a bound the suite holds: `grep -rln 'verify-consent-exec-'` over `hooks`, `scripts`,
+`docs`, `skills` and this file is what settles it) / `EVIDENCE_NAME_RE` / `evidenceOriginTag` / `evidencePathFor` /
+`evidenceStatUsable` (the STAT-level half of the liveness rule, owned ONCE: the reader refused
+`nlink !== 1` while the reaper's own predicate checked only the size, so a live hard-linked
+marker was refused by every reader AND reported honourable by the sweep — unreadable and
+unreapable at once, holding a walk-budget slot the sweep exists to free) /
+`evidenceBodyLive(parsed, now, maxAge)` (the BODY half, owned once for the same reason — unifying
+only the stat rule left the version/origin/stamp/re-classification/verdict/age ladder spelled
+twice. Its WINDOW is a parameter because the two callers legitimately differ: `MAX_EVIDENCE_REAP_AGE_MS`
+is strictly larger than `MAX_EVIDENCE_AGE_MS`, and that gap is load-bearing. `liveEvidenceOrigins`
+takes `maxAgeMs` as an option and the broker's expiry probe drives it with `Number.MAX_SAFE_INTEGER` —
+that widened read is the ONLY thing that can answer `expired`, so a sweep clocked on the reader's
+own window would delete exactly the marker that diagnosis needs, from any later write anywhere in
+the project, and the broker would then report a gate that never ran. Never state the two rules as
+unable to diverge: they diverge on this one axis by design and nowhere else) /
+`EXECUTION_VERDICTS` / `classifyExecution(seen)` (the doctor's row vocabulary, owned here rather
+than hand-written a second time inside the probe's `node -e` string. It travels to the shell as a
+WORD, never as an exit status: a status ladder put the answer on the same channel as every way a
+process can die, and moving the benign verdict from 1 to another small integer only traded one
+collision for another) /
+`evidencePathAllowed` / `EVIDENCE_VERSION` (the marker's OWN schema discriminator, deliberately
+not the memory's — `appendRecord` refuses an unreadable memory rather than rebuilding it, so a
+bump made for the marker would have wedged every project's memory) / `MAX_EVIDENCE_FILES` (the
+name is per session AND per
+origin; a one-file-per-session shape made a second decided origin rename over the first),
+`writeExecutionEvidence` / `executionEvidencePresent` / `executionEvidenceSeen` /
+`liveEvidenceOrigins` and `MAX_EVIDENCE_AGE_MS` / `MAX_EVIDENCE_BYTES`, the marker's own
+`{version, origin, verdict, at}` body — whose `verdict` now has an OWNER, `EVIDENCE_VERDICTS`
+with its two NAMED members `EVIDENCE_VERDICT_ALLOWED` and `EVIDENCE_VERDICT_WEAKEST`, the way
+`DECIDED_BY` owns the memory's `decidedBy`. The weakest member is named rather than taken by
+index because the doctor's row PREFERS it so a declined prompt is disclosed. It was hand-spelled
+at seven sites for a two-value set, and one of those crossed a PROCESS boundary: the doctor
+probe's `seen.verdict === "allowed"` ternary, which would have reported every `asked` marker as
+cleared if the constant were renamed under it. State where that comparison lives NOW, because it
+MOVED and this paragraph described the intermediate step for a release: the probe compares no
+verdict at all — it calls `mod.classifyExecution(seen)`, which does the comparison inside the
+module, so the crossing that remains is the FUNCTION and the literal fallback is gone. A probe
+against a module without that export refuses as `unjudged` rather than degrading. The two vocabularies OVERLAP on
+the word `asked` and belong to different artifacts, so a scan for bare spellings has to be scoped
+to `verdict`-bearing lines or it reports the memory's owner as a drift — `REASONS.EVIDENCE_PATH_REFUSED`
+plus the writer's own five refusals, `EVIDENCE_ORIGIN_REFUSED` / `EVIDENCE_ORIGIN_TAG_MISMATCH` /
+`EVIDENCE_STAMP_INVALID` / `EVIDENCE_TOO_LARGE` / `EVIDENCE_WRITE_FAILED`, which were ad-hoc
+literals at their five return sites while `runPre` interpolated the value into an operator line —
+so they were rendered strings with no owner. The last is a PREFIX and the suffix stays Node's own
+errno, which this module does not own, and
+`statePathAllowed`'s reason and hard-link parameters — the memory keeps `nlink !== 1` and the
+marker does not, deliberately, so a change there is a two-artifact decision. Across files:
+`consentEvidenceState` in `scripts/playwright-mcp-proxy.js` (SIX values — `present` /
+`expired` / `absent` / `unjudged` / `unread` / `truncated` — where the `expired` arm keeps a slow
+human answer from being reported as a gate that never ran, `unjudged` keeps a module fault from
+being reported as one either, `unread` names a state directory the walk could not open, and
+`truncated` names a walk that hit `MAX_EVIDENCE_FILES` before it could answer. The last two were
+`absent` for a round, which is the same conflation the first two exist to remove: a directory
+that could not be opened and a budget that ran out both refused with a sentence naming a gate
+that had run. The two classifiers of ONE record are deliberately unequal, and saying so here is
+what keeps a later reader from "aligning" them: the broker splits `unread` and `truncated` because
+its refusal names a cause to a human, while `classifyExecution` collapses both into `unjudged`
+because the doctor's row offers one remedy for either. Their module-compat contracts are OPPOSITE
+too — the broker degrades to the older boolean `executionEvidencePresent` when `executionEvidenceSeen`
+is missing, and the doctor probe REFUSES a module without `classifyExecution`. Both directions are
+right for their own consumer; neither is a drift), `CONSENT_EVIDENCE_STATES` and `consentRefusalFor` in that same file — ONE owner for the state
+set and ONE renderer for the refusal each state produces, because the approval ladder re-spelled
+the set as four `if` arms plus a catch-all that ASSERTED a cause, so a seventh state would have
+named a fact the probe never established; the residual arm is state-NEUTRAL and names only what
+it could not interpret, the shape the sibling doctor renderer already had —
+the consent-policy record's own field set (`pluginRoot` / `evidenceDir` / `projectRoot`,
+where a constructor taking two of the three silently dropped the anchor and left the granting
+read's containment walk inert, and where `evidenceDir` is now RE-DERIVED per call from the loaded
+module rather than taken from the startup value: `consentModule` is re-VERIFIED every call — `require` returns the cache for an unchanged path, so
+what re-runs is the `lstat` and its plain-file test, which is the only per-call verification there
+is — because this process outlives the tree it resolved its mode from, while the directory derived
+from it was resolved once, so a module fault in that one window disabled consent approval for the life of the
+MCP server and emitted "reinstall the plugin" for a plugin that had recovered), the
+`ZENSU_VERIFY_PROJECT_ROOT` entry in `scripts/playwright-mcp.sh`'s `env -i` allowlist — without
+it the broker's anchor silently becomes its own cwd — and the `ZDOC_VERIFY_EXEC` wire between
+`hooks/lib/zensu-doctor.sh` and `hooks/lib/zensu-doctor-report.js`, whose FIVE states
+(`ran|ran-asked|none|unjudged|unknown`) each need a row and a `skills/doctor/SKILL.md` bullet.
+`ran-asked` is the one a census is likeliest to miss: it is a SECOND success state, reached when
+the live marker records the gate ASKING rather than clearing from memory, so a reader counting
+"one green state" finds two. Two
+hand-copies travel with it and both are PINNED rather than trusted: the consent arming set
+(`consent|consent-no-recipe|consent-recipe-unchecked`), spelled in the wrapper and in the
+renderer's `CONSENT_MODE_STATES`, by `P1vr`; and every `verify-feature`/`verify-feature gate`
+row against the skill, by `P1vg`, whose selector had to be widened — its `'verify-feature: '`
+form could not see the `gate:` family at all, which is the half-pinned shape this file records
+for `AC-C19`. Then `consentHookRegistered` / `consentRecorderRegistered`, which share one lookup because their
+CONSUMERS differ — the broker asks only about the gate, the doctor about both; and the operator accounts in `docs/gates.md`, `docs/configuration.md`
+(both hook rows plus the hook count and its anchors), `docs/verify-feature.md`, the README
+docs-index rows, the suite manifest entry and the counts in `tests/SUITE-OVERVIEW.md`.
+
+**Version for the EXECUTION-MARKER delta: `patch`, and it is its own verdict.** The paragraph
+below is about the ORIGINAL hook addition; a releaser matching on it would get the wrong answer
+for this one, which is why this file states one scoped verdict per delta. Walked against
+§"Runtime Lineage" entry by entry: no context-record or workflow-state schema field — the marker
+is a file in `<project>/.zensu/state`, the same class as the consent memory, and it is the
+argument §"Workflow-Baseline Repair" uses for its own rebuild counter; no strict key set; no hook
+added, removed or renamed and no matcher changed; no new config key; no attestation change. The
+new module exports are additive, and a runtime that does not read them is unaffected. ONE mixed
+case is real and is scored here rather than left to be discovered: a NEWER broker beside an OLDER
+gate that writes no marker refuses every loopback origin. That is a refusal rather than an
+unreadable persisted shape, and the two ship in one tree — the broker is launched from the plugin
+root that carries the gate — so it is not a lineage break; a `--plugin-dir` checkout beside an
+installed root is the shape that could produce it, and the sibling-root rule already refuses to
+serve across that boundary.
+
+**Version: `minor`.** Walked against §"Runtime Lineage": adding a hook is a `patch` UNLESS it
+can DENY or ASK, and this one does both. It changes the capability set of every session an older
+runtime is still serving, which is the disqualifier that bullet spells out.
+
+**Known gaps, accepted and named:**
+
+- **The decision module reads host variable NAMES itself**, which the sibling plugin-data guard's
+  port contract forbids: that module takes every anchor as an option and names no variable. Four
+  remain here. A port therefore inherits this host's spellings. Not taken in the round that found
+  it, because it is a signature change across both hooks and the unit suite.
+- **The gate count in the `docs/gates.md` intro is checked by nothing**, and this feature moved
+  it. The same gap the plugin-data guard records for its own row.
+- **The `unknown` execution row withholds the green summary for every non-`bound` session.** The
+  wrapper answers `unknown` whenever no session key or recorded project root is available, and
+  §"Foreign-Chain Row" records that both are empty for every binding verdict except `bound` — so
+  an orphaned-project-root, incompatible-runtime or pruned-installation session in a consent-mode
+  project can never print "all checks green". The row is correct and the cost is real; it is
+  recorded here because three sibling rows record the identical cost for themselves and this
+  section said nothing.
+- **The Windows half is unverified.** The suite is in the CI structure inventory the weekly
+  Windows Safety shard builds, and NOT in the blocking Windows PR profile, so the Windows half
+  stays unverified until that weekly run reports green. Say "unverified", never "never runs".
+- **No ports.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were not included. A port
+  owns both halves, and the host half includes a measurement rather than an assumption: whether
+  its harness renders a PreToolUse `ask` as a prompt the model cannot answer. The EXECUTION MARKER
+  splits the same way and a port that takes one half gets a broken gate: the core half is
+  `STATE_SEGMENTS` / `evidenceDirFor` / `stateComponentsSafe` / `EVIDENCE_NAME_RE` /
+  `evidenceOriginTag` / `evidencePathFor` / `evidencePathAllowed` / `writeExecutionEvidence` /
+  `executionEvidencePresent` / `executionEvidenceSeen` / `liveEvidenceOrigins` /
+  `EVIDENCE_NAME_PREFIX` / `EVIDENCE_VERSION` / `EVIDENCE_VERDICTS` with both named members /
+  `MAX_EVIDENCE_AGE_MS` / `MAX_EVIDENCE_BYTES` /
+  `MAX_EVIDENCE_FILES` / `evidenceStatUsable` / `evidenceStillHonourable` / `reapExpiredEvidence`
+  (whose EXPORT key is `reapBudgetSpent`, so a port implementing the name written here alone ships
+  a module the suite's own driver cannot reach) /
+  `MAX_EVIDENCE_REAP_AGE_MS` / `evidenceBodyLive` / `EXECUTION_VERDICTS` / `classifyExecution` /
+  `recordingStream` plus
+  `statePathAllowed`'s two parameters — and `MEMORY_NAME_PREFIX` / `MEMORY_NAME_RE`, which this
+  list omitted for a round while `evidencePathFor` DERIVES the marker name from the MEMORY name
+  — it tests `MEMORY_NAME_RE` and substitutes one prefix for the other — so a port that takes the
+  marker half alone gets a writer that throws on its first call. The two are NOT what keeps the
+  reaper off a consent memory: `EVIDENCE_NAME_RE` is, and it is already on this list. Say the
+  derivation, not the separation; the host half is FIVE obligations — where the broker's
+  project anchor comes from and how it survives the launcher's environment sanitization (this
+  host names `ZENSU_VERIFY_PROJECT_ROOT` in an `env -i` allowlist), the broker's own refusal
+  wording including its `expired` arm, the doctor wrapper's five-state derivation and its
+  session binding, the renderer's SIX rows — the sixth is the unrecognized-state row, which is
+  what keeps a drifted wrapper value from rendering silence — and the operator accounts. A port that copies only
+  the module gets a marker nothing writes and nothing reads.
+- **THREE ordering and budget rules are load-bearing and read as layout, so they are stated
+  here rather than left to a diff.** FIRST, `runPre` emits the decision ENVELOPE before it writes
+  the marker. For a new origin the envelope is the `ask` and the marker written for it carries
+  verdict `asked`, which the broker treats as a clearance — so with the marker first, a hook
+  process tree that died before the write left a live self-approving marker behind and no prompt
+  was ever raised. The wrapper's `|| deny` catches an ordinary non-zero exit, so that path needs
+  the wrapper killed too, and whether this host admits a call after a timed-out hook is
+  UNVERIFIED; the order is taken anyway because it is free and fail-closed the other way round —
+  a lost marker refuses, where a lost envelope approved. SECOND, `reapExpiredEvidence` is
+  BUDGETED to `MAX_EVIDENCE_FILES` and sits OUTSIDE the publish `try`, clocked on the wall clock
+  rather than on the caller's `at`. It runs inside the gating hook and reads and parses every
+  candidate, so an unbounded walk let a session-writable directory decide how long that hook
+  takes to answer; inside the try, a throw would have reported a marker that DID land as
+  `evidence-write-failed:*`; and clocked on a back-dated `at`, every live marker in the directory
+  failed the `age >= 0` arm and was swept. `reapBudgetSpent` is exported for the bound's executed
+  case alone and has no production reader. THIRD, the doctor probe's benign verdict is exit **4**,
+  not 1: `node` exits 1 on a fatal outside its own try and a failed `cd -P` short-circuiting the
+  `&&` exits 1 too, and stderr is discarded there, so either one rendered the green row asserting
+  that the directory was read and held nothing — the exact claim the status capture exists to
+  prevent. The `cd` carries its own `|| exit 2` for the same reason.
+- **The readers REFUSE an anchorless call.** `liveEvidenceOrigins` requires `options.projectRoot`
+  and answers `read: false` without it. The containment walk is checked AGAINST that root, so a
+  call supplying none has nothing to verify — and while the anchor was optional the module's
+  DEFAULT was open: `executionEvidencePresent(dir, origin)` read whatever directory it was handed,
+  through a symlinked `.zensu` or `state`. One caller was hardened against that and the module a
+  port copies was not, which is how the class comes back. The DELETING sibling carries the same
+  anchor now, and it is the one that needed it most: `reapExpiredEvidence` is an `unlink`
+  primitive whose export key sits on the public surface, and it took a bare directory while the
+  reading sibling refused one. Its production call site already held both operands, so the anchor
+  cost it nothing — a caller that supplies none now reaps zero rather than sweeping a directory
+  nothing verified.
+- **Two diagnoses are COARSER than their cause, and both are named rather than fixed.** A
+  `.zensu` swapped for a symlink and a state directory that is simply not there both leave
+  `liveEvidenceOrigins` answering `read: false`, so the broker's `unread` refusal hedges about a
+  directory that may not exist when what it found was tamper. And a non-regular object planted at
+  a derivable marker name makes `statePathAllowed` refuse the WRITE for as long as it stands while
+  every reader skips it, so `consentEvidenceState` answers `absent` — naming absence where the
+  cause is a refused write. Neither surface makes a false claim and the write refusal is disclosed
+  on stderr; separating them means a seventh broker state, which is a vocabulary decision for
+  `CONSENT_EVIDENCE_STATES` and `consentRefusalFor` rather than a wording change.
+- **The marker reader opens with a plain `readFileSync` after an `lstat`, so a FIFO swapped into
+  that window blocks the broker's approval path — and there are now TWO such sites, on two
+  different paths.** The second is `evidenceStillHonourable`, which the reaper calls once per
+  candidate, so a decided navigation carries up to `MAX_EVIDENCE_FILES` of these windows INSIDE
+  the PreToolUse gate. Say COUNT and never a comparison against the broker: `liveEvidenceOrigins`
+  breaks early only on a wantOrigin MATCH, and a miss is exactly what produces a refusal, so the
+  broker's own path is bounded by the same budget — twice over, because `consentEvidenceState`
+  runs that walk once for the present probe and again for the widened expiry probe. Scope the
+  class to the reader alone and the wider surface goes unrecorded. An already-present FIFO is refused by `evidenceStatUsable`
+  before either read, so this is the swap race alone — and the sibling consent
+  memory reader has had the identical shape since before this feature. Both belong behind an
+  `O_RDONLY|O_NOFOLLOW|O_NONBLOCK` open plus `fstat`, the hardening
+  `readRegularFileSnapshot` in `session-control-core-v1.js` already applies for this class.
+  NOT taken here: changing the memory reader too is a second artifact's regression surface, and
+  changing only the marker would leave the pair inconsistent. Named rather than left to be
+  rediscovered.
+- **CLOSED, and recorded so it is not re-opened as a gap.** The broker used to trust that the
+  host ran the hook, so with hooks disabled host-side consent mode accepted unconsented loopback
+  navigations while the doctor reported registration rather than execution. It now requires a
+  live per-session marker the gate writes for every decided local target, and `/zensu:doctor`
+  carries a SECOND row — `verify-feature gate:` — reporting EXECUTION beside the registration
+  row. What is NOT closed is authenticity: the marker is a file in a directory the session can
+  write, so it separates a gate that ran from one that did not and authenticates nothing against
+  a session forging its own. Say "the silent case is gone", never "the gate cannot be forged".
+- **The consent decision is SINGLE-LAYER, and the layer that survives in-session tampering is
+  the one that does not enforce consent.** State it that way rather than folding it into the
+  bullet above, which covers a host that never ran the hook and not a session that changed what
+  the hook does. In consent mode `approveConsentOrigin` inserts the origin into
+  `policy.approved` and the `assertAllowedUrl` on the next line tests membership in that same
+  set — which was just made true — so for a `browser_navigate` the broker re-checks the FLOOR
+  and nothing else. That is defensible as a design: the approved set is what polices
+  subresources and in-page navigations, and `configureContext` genuinely refuses an unapproved
+  origin there. What it means is that the human's answer is enforced in exactly one place. The
+  broker loads its floor once at start; the hook re-executes its decision module from the plugin
+  root on EVERY call, and no write gate covers that tree — `pre-write-plugin-data-guard.sh`
+  defends the plugin DATA store, not the plugin root. So an in-session module swap changes every
+  later verdict, and the broker cannot notice.
+- **Consent mode is still ENTERED from a file read, and what changed is what entering it
+  buys.** `resolveStartupPolicy` enters consent when `consentHookRegistered` is true, and that
+  predicate `lstat`s two files and parses `hooks/hooks.json` under `path.join(__dirname, '..')`
+  — a claim made by a file in the broker's own tree, never a fact about the running session.
+  The three routes by which the hook does not actually execute are unchanged: hooks disabled
+  host-side; the broker launched from tree A (`__dirname/..`) while the host loaded its hook
+  registry from tree B — an installed root beside a `--plugin-dir` checkout, with nothing
+  comparing the two; and a plugin swap while the long-lived MCP process still holds the mode it
+  resolved once at start. What is closed is the CONSEQUENCE: `approveConsentOrigin` refuses
+  without a live per-session marker, so all three routes now land on a refusal rather than on
+  unprompted access to every loopback origin. **Two properties carry that and neither is
+  optional.** The marker is read at APPROVAL time, never cached with the mode, which is what
+  reaches the third route inside a process that resolved its mode once. And it is ORIGIN-bound
+  and time-bounded, with every fault answering absent, so a marker for one origin can never
+  admit a second and a stale one cannot hold the window open. **The residual is
+  authenticity, not silence:** the state directory is session-writable, so this separates a
+  gate that ran from one that did not and does not defend against a session forging its own
+  marker; closing that needs a signal the session cannot mint, which nothing here provides.
+  A SECOND residual is the approved SET: once an origin is in it the broker checks the marker
+  no further for that origin, deliberately — a consent the human already gave is not revoked
+  by a later plugin change — so read "re-read every time" as being about the WRITE into that
+  set, never about each later navigation.

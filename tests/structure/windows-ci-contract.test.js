@@ -180,6 +180,29 @@ test('manifest and audited command catalog expose one exact bounded profile inve
   }
 });
 
+// The shard REBALANCES this repository records in prose are asserted by nothing on their own:
+// expectedProfiles already lists every shard, so moving a suite between two of them turns no
+// check red. Each entry below is a rebalance that was made for a measured reason, so putting it
+// back has to be a deliberate edit here rather than a silent one in the manifest.
+const expectedShardHomes = {
+  'plan-payload-path-transport': 'windows-shard-8',
+  'stop-enforcer-self-review-routing': 'windows-shard-7',
+  'session-trail-lineage': 'windows-shard-8',
+};
+
+test('measured shard rebalances stay where they were moved', () => {
+  const homes = new Map();
+  for (const [profileId, profile] of Object.entries(manifest.profiles)) {
+    for (const suite of profile.suites) {
+      assert.equal(homes.has(suite.id), false, `${suite.id} is registered on more than one shard`);
+      homes.set(suite.id, profileId);
+    }
+  }
+  for (const [suiteId, expectedProfile] of Object.entries(expectedShardHomes)) {
+    assert.equal(homes.get(suiteId), expectedProfile, `${suiteId} shard home`);
+  }
+});
+
 test('every structure test with a native Windows marker is audited and covered or excluded', () => {
   assert.equal(nativeStructureInventory.schemaVersion, 1);
   assert.ok(Array.isArray(nativeStructureInventory.markers));
@@ -506,7 +529,7 @@ const NUMBER_WORDS = [
 ];
 
 // The SUITE-SIZE figures, which the profile arm below does not touch and nothing else
-// owned. §1 and §2 of SUITE-OVERVIEW restate 148 = 141 + 7, and 141 + 5 = 146 executed,
+// owned. §1 and §2 of SUITE-OVERVIEW restate 150 = 143 + 7, and 143 + 5 = 148 executed,
 // across five hand-maintained statements in two sections — while
 // `tests/profiles/promptfoo-local-only.v1.json` already owns all three inputs and
 // `run-all.sh` refuses to run at all when that manifest and the directory disagree. So a

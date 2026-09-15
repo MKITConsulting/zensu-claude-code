@@ -180,7 +180,6 @@ function revalidateWorkflowState(options) {
 function revalidateSessionContext(payload) {
   const binding = hookSession.resolveHookSession(payload);
   const projectRoot = canonicalDirectory(binding.projectRoot, 'context project root');
-  const toolCwd = canonicalDirectory(payload.cwd, 'PreToolUse cwd');
   revalidateWorkflowState({
     sessionId: payload.session_id,
     projectRoot,
@@ -188,8 +187,22 @@ function revalidateSessionContext(payload) {
   return {
     ...binding,
     projectRoot,
-    toolCwd,
   };
+}
+
+function pathResolutionProfile(payload, principal) {
+  if (principal === principals.PRINCIPALS.REVIEWER) return 'reviewer-readonly-v1';
+  if (principals.PLM_TYPES.has(payload.agent_type)) return 'zensu-plm-readonly-v1';
+  return 'host-profile-v1';
+}
+
+function unusableWorkingDirectoryReason(profile, error) {
+  return `${profile} cannot resolve tool paths: this session's working directory no longer `
+    + `names a usable directory (${error.message}). A git worktree removed while the session `
+    + `was still inside it is one way to reach this state. The Session Control binding itself `
+    + `is intact, and this check does not apply to the main thread, which resolves no tool `
+    + `path against that directory. Report this to the main thread — which can re-create the `
+    + `directory or move the session to one that exists — rather than retrying.`;
 }
 
 function inputStrings(input) {
@@ -599,6 +612,12 @@ function main() {
     } catch (error) {
       deny(`evidence-worker-v1 validation failed: ${error.message}`);
     }
+    return;
+  }
+  try {
+    trusted = { ...trusted, toolCwd: canonicalDirectory(payload.cwd, 'PreToolUse cwd') };
+  } catch (error) {
+    deny(unusableWorkingDirectoryReason(pathResolutionProfile(payload, principal), error));
     return;
   }
   if (principal === principals.PRINCIPALS.REVIEWER) {
