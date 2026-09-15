@@ -13,14 +13,16 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (150 = 143 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 143 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 150). The previous figures here read 148 = 141 + 7 while the manifest already held 142
-CI entries, so they had drifted by one before `test-vanished-session-cwd.sh` added the 143rd.
+reconciled to that manifest (151 = 144 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 144 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 151). The previous figures here read 148 = 141 + 7 while the manifest already held 142
+CI entries, so they had drifted by one before `test-vanished-session-cwd.sh` added the 143rd;
+`test-autopilot-adopt-cli.sh` is the 144th, and it arrived through a merge of two branches that
+each re-derived its own count.
 **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 142 against 143 CI-classified suites, so one CI
+asserted away: its eleven CI group headers sum to 143 against 144 CI-classified suites, so one CI
 suite appears in no §3 group. That suite is `test-session-trail-lineage.sh`, re-derived BY NAME
-this time by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
+by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
 §"Bash gates, witness & secrets", and the reviewer-spawn grant, filed under §"Review chain &
 findings". §7's profile table was re-derived from `tests/profiles/windows-ci.v1.json` rather than
 described, so its eight shard ids and their membership are the JSON's own, and the entry total
@@ -148,7 +150,15 @@ one-shot review ticket CAS and budget rearm, deferred/pending review markers plu
 their TTL, `--chain-status` / `--chain-recover`, and the zero-file-change gate on the
 unqualified chain terminus.
 
-### Autopilot (16)
+### Autopilot (17)
+`autopilot-adopt-cli` (**no Windows PR-shard entry** — every `windows-ci.v1.json` shard is
+already close to its `profileTimeoutMs`, so adding one has to be paid for by moving another
+suite off. It is in `ciStructureTests`, and `run-windows-safety-shard.js` maps every such entry
+with no exclusion filter, so the WEEKLY Windows Safety structure shard does execute it: the
+status is "no green Windows run reported yet", not "never observed on Windows". `adopt`'s
+`projectRootIndex`/`workspaceRootIndex` entries are pinned at SOURCE by
+`test-msys-runtime-boundaries.sh`, which greps `adopt: 3` and `adopt: 6` and runs on POSIX —
+that pin was never a Windows question; what is unverified is the runtime behaviour) ·
 `autopilot-adversarial-recovery` · `autopilot-bound-payload-windows` ·
 `autopilot-chain-integration` · `autopilot-delegated-skill-contract` ·
 `autopilot-durable-skill` · `autopilot-full-cycle` · `autopilot-id-and-start-boundaries` ·

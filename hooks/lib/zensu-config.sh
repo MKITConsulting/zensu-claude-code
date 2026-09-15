@@ -311,9 +311,9 @@ zensu_combined_summary_enabled() {
 # The MIN is inclusive here. `zensu_autofix_max_rounds` spelled its own as `n>0`;
 # for a value that has already passed `Number.isInteger`, `n>0` and `n>=1` are the
 # same predicate, so the collapse is behaviour-preserving rather than a widening.
-# C58 in tests/structure/test-impl-stop-counter.sh drives all three getters against
+# C58 in tests/structure/test-impl-stop-counter.sh drives all four getters against
 # their own min, max, one-below-min, one-above-max, a non-integer, a quoted number and
-# an absent key, and it is what any future change to this helper owes the three call
+# an absent key, and it is what any future change to this helper owes the four call
 # sites below. It replaced a claim about a hand-run matrix that was committed nowhere —
 # naming evidence the suite does not carry is the same defect as a stale comment.
 #
@@ -334,10 +334,10 @@ _zensu_config_bounded_int() {
   echo "$val"
 }
 
-# key default min max — the positional-literal contract binds ALL THREE lines below.
+# key default min max — the positional-literal contract binds ALL FOUR lines below.
 # `getter_operand` in tests/structure/test-impl-stop-counter.sh reads operands straight out of
 # the `implStopNudgeAfter` call (C29, C31, C31a) and the `pendingReviewTtlHours` call (C57) for
-# the two constant-mirror pins, and out of ALL THREE for C58's bound matrix, which fails with
+# the two constant-mirror pins, and out of ALL FOUR for C58's bound matrix, which fails with
 # `operands-unreadable` when any of them stops parsing. Keep the four operands as positional
 # literals on one line in each.
 #
@@ -349,6 +349,18 @@ _zensu_config_bounded_int() {
 zensu_autofix_max_rounds()        { _zensu_config_bounded_int autoFixMaxRounds 5 1 99; }
 zensu_pending_review_ttl_hours()  { _zensu_config_bounded_int pendingReviewTtlHours 6 0 8760; }
 zensu_impl_stop_nudge_after()     { _zensu_config_bounded_int implStopNudgeAfter 12 0 999999; }
+# Owner liveness asks "could this session still act", which `pendingReviewTtlHours` was never
+# sized for — it answers how long a deferred-review marker stays meaningful. The Stop hook
+# writes the owner's workflow document at every turn end, so its mtime is already a per-turn
+# heartbeat and one hour is generous for it. `0` disables the check, with the disclosure the
+# worker already writes to stderr.
+# It governs BOTH verbs, and they are not symmetric: `--autopilot-adopt` is constructive
+# (the run continues under a new owner) while `--autopilot-release` CANCELS another
+# session's run, so this default also shortens the destructive verb's benefit-of-the-doubt
+# window from the six hours it borrowed to one. Accepted deliberately — a run whose owner
+# is gone was unreachable for six hours — but re-decide the default against the destructive
+# verb, not only against adoption, and see CLAUDE.md §"Autopilot Run Scope".
+zensu_autopilot_owner_activity_ttl_hours() { _zensu_config_bounded_int autopilotOwnerActivityTtlHours 1 0 8760; }
 
 zensu_context_nudge_enabled() {
   command -v node >/dev/null 2>&1 || return 0
