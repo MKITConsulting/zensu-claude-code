@@ -23,7 +23,8 @@
 //                            harness-anchored, so a session whose two roots differ
 //                            reads its config overlay from one and its workflow
 //                            documents from the other; the wrapper re-resolves
-//                            ZDOC_TTL_HOURS and ZDOC_OWNER_ACTIVITY_TTL_HOURS from
+//                            ZDOC_TTL_HOURS, ZDOC_OWNER_ACTIVITY_TTL_HOURS and
+//                            ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS from
 //                            the record root, while ZDOC_IMPL_STOP_NUDGE_AFTER stays
 //                            harness-anchored by decision. HOME is
 //                            also the ONLY root the reviewer-spawn permission
@@ -35,9 +36,11 @@
 //   ZDOC_TTL_HOURS           pending-review TTL from the canonical getter
 //   ZDOC_IMPL_STOP_NUDGE_AFTER  implementing-turns bound from the
 //                            canonical getter; blank falls back, 0 disables the row
-//   ZDOC_OWNER_ACTIVITY_TTL_HOURS  owner-liveness window from the canonical
-//                            getter, quoted by the `autopilot:` row; blank falls
-//                            back, 0 renders a switched-off disclosure
+//   ZDOC_OWNER_ACTIVITY_TTL_HOURS  adoption's owner-liveness window from the
+//                            canonical getter, quoted by the `autopilot:` row; blank
+//                            falls back, 0 renders a switched-off disclosure
+//   ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS  the release's own owner-liveness window,
+//                            under the same rules
 //   ZDOC_NOW_MS              clock override for deterministic tests
 //   ZDOC_BINDING             the wrapper's binding verdict (bound / unbound /
 //                            orphaned-project-root / incompatible-runtime /
@@ -108,14 +111,19 @@ var BAD = '❌';
 var TTL_HOURS_FALLBACK = 6;
 var TTL_HOURS_MAX = 8760;
 // Mirror of hooks/lib/zensu-config.sh zensu_autopilot_owner_activity_ttl_hours
-// (default 1, bounds 0..8760), the window BOTH `--autopilot-adopt` and
-// `--autopilot-release` judge owner liveness against. It is a SECOND window and not
-// the one above: the `autopilot:` row quoted the pending-review value for one release
-// while the two verbs had already moved, which promised protection the destructive
-// verb no longer gives. PINNED by C57b in tests/structure/test-impl-stop-counter.sh,
-// the same derivation C57 applies to the pair above.
+// (default 1, bounds 0..8760), the window `--autopilot-adopt` judges owner liveness
+// against. It is a SECOND window and not the one above: the `autopilot:` row quoted
+// the pending-review value for one release while the verbs had already moved, which
+// promised protection the destructive verb no longer gave. PINNED by C57b in
+// tests/structure/test-impl-stop-counter.sh, the same derivation C57 applies to the
+// pair above.
 var OWNER_ACTIVITY_TTL_FALLBACK = 1;
 var OWNER_ACTIVITY_TTL_MAX = 8760;
+// Mirror of hooks/lib/zensu-config.sh zensu_autopilot_release_owner_activity_ttl_hours
+// (default 6, bounds 0..8760), the release's OWN window. The two verbs read separate
+// keys, so the row quotes each verb's number and never one for both. PINNED by C57e.
+var RELEASE_OWNER_ACTIVITY_TTL_FALLBACK = 6;
+var RELEASE_OWNER_ACTIVITY_TTL_MAX = 8760;
 // Mirror of hooks/lib/zensu-config.sh zensu_impl_stop_nudge_after (default 12,
 // bounds 0..999999): the wrapper passes the canonical value via
 // ZDOC_IMPL_STOP_NUDGE_AFTER; these apply only to a direct (test/no-wrapper)
@@ -150,6 +158,13 @@ var IMPL_STOP_NUDGE_MAX = 999999;
 var CHAIN_ROW_LIMIT = 8;
 var NOTE_MAX_BYTES = 4096;
 var SETTINGS_MAX_BYTES = 1048576;
+// The forgeability clause, hand-copied from `zensu-autopilot-state.sh`, which owns it as
+// `forgeableSource` and states it in three renderers of its own. Module scope because the
+// two consumers here sit in different functions — the owner-silence clause and the adopt
+// remedy — and spelling it twice is how one of them goes stale. `P1nky` holds the two
+// files against each other; before it, a reword on either side left the other behind, on
+// the one clause whose whole job is to stop a planted document reading as measured fact.
+var AUTOPILOT_FORGEABLE_SOURCE = 'read from the run document, which is an ordinary file any session in this project can write';
 // A hand-copy of REVIEWER_SUBAGENT_TYPE in hooks/lib/reviewer-spawn-denial-v1.js,
 // which exports it. Deliberate, not an oversight: that module is required lazily
 // inside reviewerDenialRows and a load failure there degrades one row, while a
@@ -2935,10 +2950,11 @@ function autopilotPointerDesignates(dir, owner, runId) {
 // is the same over-claim the pointer split exists to remove, one arm over. Rendering
 // only the aged arm per verb left those two states with a remedy the reader cannot run.
 // THE ORDER OF THE ARMS IS THE CONTRACT, not layout. The window gate runs FIRST,
-// because both verbs wrap their WHOLE liveness block in
-// `if (Number.isFinite(ttlHours) && ttlHours > 0) {` — release
-// at its `regularFile(tdd-phase-<owner>.json)` call, adopt at the same call one branch
-// in. At a configured `0` the beacon is therefore never opened at all: there is no
+// because both verbs read the beacon through one worker evaluation, `ownerLiveness`,
+// that returns on `if (!(Number.isFinite(ttlHours) && ttlHours > 0))` before its
+// `regularFile(tdd-phase-<owner>.json)` call, and adoption's pointer precondition sits
+// between the two. Each verb passes its OWN window, so a verb whose window is `0` never
+// opens the beacon at all: there is no
 // exit 2 for a file `regularFile` would refuse and no exit 7 for a future stamp.
 // Judging the beacon KIND first asserted refusals no verb takes AND suppressed the one
 // arm written for that configuration, on the row that offers an irreversible cancel.
@@ -2958,9 +2974,24 @@ function autopilotPointerDesignates(dir, owner, runId) {
 // ordinary case — a live foreign session rewrites its beacon at every turn end — so
 // leaving it unconditionally conditional is what let the row offer both verbs beside a
 // sentence saying both refuse.
-function ownerLivenessClause(dir, run, window, verdict, adoptBlockedByChain, ownHoldsOwnRun) {
-  var assumed = window.supplied ? ''
-    : '; no configured owner-activity window reached this report, so the built-in default is assumed';
+function ownerLivenessClause(dir, run, window, releaseWindow, verdict, adoptBlockedByChain,
+  ownHoldsOwnRun) {
+  // Two windows, one per verb: `window` is adoption's and `releaseWindow` the release's.
+  // Every number this clause quotes names the verb it belongs to, because the verbs read
+  // separate keys and a single number stated for both would be false whenever they differ.
+  var assumed = '';
+  if (!window.supplied && !releaseWindow.supplied) {
+    assumed = '; no configured owner-activity window reached this report, so the built-in'
+      + ' defaults are assumed';
+  } else if (!window.supplied) {
+    assumed = '; no configured adoption window reached this report, so its built-in default'
+      + ' is assumed';
+  } else if (!releaseWindow.supplied) {
+    assumed = '; no configured release window reached this report, so its built-in default'
+      + ' is assumed';
+  }
+  var adoptSkips = !(window.hours > 0);
+  var releaseSkips = !(releaseWindow.hours > 0);
   // The pointer decides whether adoption ever OPENS the beacon: its `regularFile` call
   // is nested inside `if (ownerPointerDesignatesRun)`, while the release verb's is not.
   // It is resolved ABOVE the window gate, deliberately: the adopt worker resolves the
@@ -2987,8 +3018,7 @@ function ownerLivenessClause(dir, run, window, verdict, adoptBlockedByChain, own
   // file in this session-writable directory — the same bound the age and the pointer
   // already carry. It matters most here, because this is the one arm that leaves only
   // the irreversible verb on offer.
-  var chainBound = ' — that stage is read from the run document, which is an ordinary'
-    + ' file any session in this project can write';
+  var chainBound = ' — that stage is ' + AUTOPILOT_FORGEABLE_SOURCE;
   var pointerBound = ' — adoption only while the owner active pointer still designates'
     + ' this run, and that pointer is an ordinary file any session in this project can'
     + ' delete, so read that half as evidence rather than as a guarantee';
@@ -3026,18 +3056,88 @@ function ownerLivenessClause(dir, run, window, verdict, adoptBlockedByChain, own
   // row's only offer. A caveat states the obstacle and keeps both verbs on the table;
   // that direction is wrong only by a sentence, while the other is wrong by a cancel.
   // Making it a cause was tried in one round and is recorded here so it is not retried.
-  var adoptCaveat = ownHoldsOwnRun && adoptBlockedBy === null;
+  // `adoptCaveat` is DERIVED at the return, beside `adoptBlocked`, and never snapshotted
+  // here. It used to read `adoptBlockedBy` at this point, which is before the ladder
+  // below assigns 'future-stamp', 'beacon' or 'aged' — so the returned field disagreed
+  // with `adoptBlocked` for every cause except 'chain', and was harmless only because
+  // the single consumer happens to conjoin the other field. That is a trap set for the
+  // next consumer, not a property. Nothing about the CAVEAT-not-CAUSE decision above
+  // changes: the own-run fact still never enters `adoptBlockedBy`.
   var text;
-  if (!(window.hours > 0)) {
-    text = ' (no liveness window applies: hooks.autopilotOwnerActivityTtlHours is 0,'
-      + ' so both verbs skip the owner-liveness check without opening this beacon at all,'
-      + ' and a release cancels this run even while its owner is active';
+  var measured = !!verdict && verdict.kind === 'aged' && typeof verdict.ageMs === 'number'
+    && verdict.ageMs >= 0;
+  var insideRelease = measured && !releaseSkips
+    && verdict.ageMs < releaseWindow.hours * 3600000;
+  var insideAdopt = measured && !adoptSkips && verdict.ageMs < window.hours * 3600000;
+  if (adoptSkips && releaseSkips) {
+    text = ' (no liveness window applies: hooks.autopilotOwnerActivityTtlHours is 0 and'
+      + ' hooks.autopilotReleaseOwnerActivityTtlHours is 0, so both verbs skip the'
+      + ' owner-liveness check without opening this beacon at all, and a release cancels this'
+      + ' run even while its owner is active';
     if (adoptBlockedByChain) text += '; ' + chainHalf + chainBound;
     // NOT the no-beacon hedge: at a configured 0 the beacon question is SETTLED — the
     // verbs skip it, as the lead just said. What is unsettled is the POINTER, which
     // adoption resolves above its own window gate and can abort on.
     else if (adoptUnknown) text += '; ' + pointerUnknownAtZero;
     text += ')';
+  } else if (releaseSkips) {
+    // Only the release window is 0: the release never opens the beacon and cancels
+    // unbounded, while adoption still judges it against its own window.
+    text = ' (a release skips the owner-liveness check without opening this beacon, because'
+      + ' hooks.autopilotReleaseOwnerActivityTtlHours is 0, and cancels this run even while its'
+      + ' owner is active; ';
+    if (adoptBlockedByChain) {
+      text += 'adoption is not an exit here, ' + chainReason + chainBound;
+    } else if (designates === false) {
+      text += 'adoption never opens it either, because ' + pointerRetired;
+    } else if (designates === null) {
+      text += pointerUnknownHalf;
+    } else if (verdict && verdict.kind === 'absent') {
+      text += 'with no document adoption stands down too';
+    } else if (verdict && verdict.kind === 'unreadable' && verdict.code === 'future timestamp') {
+      if (adoptBlockedBy === null) adoptBlockedBy = 'future-stamp';
+      text += 'adoption refuses outright with exit 7 while that stamp is in the future and'
+        + ' waiting will not clear it' + pointerBound;
+    } else if (verdict && verdict.kind === 'unreadable') {
+      if (adoptBlockedBy === null) adoptBlockedBy = 'beacon';
+      text += 'adoption aborts on this beacon with exit 2 until it is repaired' + repairBound
+        + pointerBound;
+    } else if (verdict && verdict.kind === 'aged') {
+      if (insideAdopt && adoptBlockedBy === null) adoptBlockedBy = 'aged';
+      text += 'adoption refuses while that is under ' + window.hours + 'h' + pointerBound;
+    } else {
+      text += 'this report does not recognize that beacon state, so it judged adoption against'
+        + ' none of it — a missing check, not a verdict';
+    }
+    text += assumed + ')';
+  } else if (adoptSkips) {
+    // Only the adoption window is 0: adoption never opens the beacon, while the release
+    // still judges it against its own window.
+    text = ' (';
+    if (verdict && verdict.kind === 'absent') {
+      text += 'with no document a release stands down and cancels this run unbounded';
+    } else if (verdict && verdict.kind === 'unreadable' && verdict.code === 'future timestamp') {
+      releaseBlockedBy = 'future-stamp';
+      text += 'a release refuses outright with exit 7 while that stamp is in the future and'
+        + ' waiting will not clear it';
+    } else if (verdict && verdict.kind === 'unreadable') {
+      releaseBlockedBy = 'beacon';
+      text += 'a release aborts on this beacon with exit 2 until it is repaired' + repairBound;
+    } else if (verdict && verdict.kind === 'aged') {
+      if (insideRelease) releaseBlockedBy = 'aged';
+      text += 'a release refuses while that is under ' + releaseWindow.hours + 'h';
+    } else {
+      text += 'this report does not recognize that beacon state, so it judged the release'
+        + ' against none of it — a missing check, not a verdict';
+    }
+    if (adoptBlockedByChain) {
+      text += '; adoption is not an exit here, ' + chainReason + chainBound;
+    } else {
+      text += '; adoption skips the owner-liveness check without opening this beacon, because'
+        + ' hooks.autopilotOwnerActivityTtlHours is 0';
+      if (adoptUnknown) text += '; ' + pointerUnknownAtZero;
+    }
+    text += assumed + ')';
   } else if (verdict && verdict.kind === 'absent') {
     var absentLead = ' (with no document a release stands down and cancels this run unbounded';
     if (adoptBlockedByChain) {
@@ -3050,11 +3150,21 @@ function ownerLivenessClause(dir, run, window, verdict, adoptBlockedByChain, own
     text += assumed + ')';
   } else if (verdict && verdict.kind === 'unreadable' && verdict.code === 'future timestamp') {
     releaseBlockedBy = 'future-stamp';
-    var futureHalf = 'adoption permits and only discloses';
-    if (adoptBlockedByChain) futureHalf = chainHalf + chainBound;
-    else if (designates === null) futureHalf = pointerUnknownHalf;
-    text = ' (a release refuses outright with exit 7 while that stamp is in the future and'
-      + ' waiting will not clear it; ' + futureHalf + assumed + ')';
+    // BOTH verbs refuse a future stamp while the pointer designates the run: adoption
+    // used to permit it, which made it the route around the release's own refusal. With
+    // the pointer RETIRED adoption still never opens the beacon, so it permits there.
+    if (designates === true && !adoptBlockedByChain) {
+      if (adoptBlockedBy === null) adoptBlockedBy = 'future-stamp';
+      text = ' (both verbs refuse outright with exit 7 while that stamp is in the future and'
+        + ' waiting will not clear it' + pointerBound;
+    } else {
+      var futureHalf = 'adoption permits and only discloses, because ' + pointerRetired;
+      if (adoptBlockedByChain) futureHalf = chainHalf + chainBound;
+      else if (designates === null) futureHalf = pointerUnknownHalf;
+      text = ' (a release refuses outright with exit 7 while that stamp is in the future and'
+        + ' waiting will not clear it; ' + futureHalf;
+    }
+    text += assumed + ')';
   } else if (verdict && verdict.kind === 'unreadable') {
     releaseBlockedBy = 'beacon';
     var abortLead = ' (a release aborts on this beacon with exit 2 until it is repaired';
@@ -3080,51 +3190,29 @@ function ownerLivenessClause(dir, run, window, verdict, adoptBlockedByChain, own
       text = abortLead + repairBound + '; ' + pointerUnknownHalf;
     }
     text += assumed + ')';
-  } else if (verdict && verdict.kind === 'aged'
-    && typeof verdict.ageMs === 'number' && verdict.ageMs >= 0
-    && verdict.ageMs < window.hours * 3600000) {
-    // INSIDE the window, the refusal is PRESENT, not conditional — and this is the
-    // ordinary case, because a live foreign session rewrites its beacon at every turn
-    // end. The verbs compare exactly this quantity (`ageMs >= 0 && ageMs < ttlHours *
-    // 3600000`), and the row already renders it, so leaving the wording conditional here
-    // let the remedy offer both verbs beside a sentence saying both refuse.
-    releaseBlockedBy = 'aged';
-    if (designates === true && !adoptBlockedByChain) adoptBlockedBy = 'aged';
-    if (adoptBlockedByChain) {
-      text = ' (a release refuses while that is under ' + window.hours + 'h; ' + chainHalf
-        + chainBound;
-    } else if (designates === true) {
-      text = ' (adoption and a release both refuse while that is under ' + window.hours + 'h'
-        + pointerBound;
-    } else if (designates === false) {
-      text = ' (a release refuses while that is under ' + window.hours + 'h; adoption does not,'
-        + ' because ' + pointerRetired + ', so read it as abandonment evidence rather than as'
-        + ' proof the owner is gone';
-    } else {
-      text = ' (a release refuses while that is under ' + window.hours + 'h; whether adoption'
-        + ' also refuses could not be established, because the owner active pointer could not be'
-        + ' read';
-    }
-    text += assumed + ')';
   } else if (verdict && verdict.kind === 'aged') {
-    // OUTSIDE the window (or with an age this report could not measure), the wording is
-    // genuinely conditional and asserts no PRESENT release refusal, so `releaseBlockedBy`
-    // stays null and the remedy keeps offering the release. The adoption fields are the
-    // caller-supplied facts and the pointer read, and they pass straight through — an
-    // earlier comment claimed the arm "sets neither flag", which was false for a
-    // chain-blocked run and contradicted `P1nkc`.
+    // INSIDE a verb's window its refusal is PRESENT, not conditional — the ordinary case,
+    // because a live foreign session rewrites its beacon at every turn end. Each verb is
+    // judged against its OWN window, exactly as each worker compares `ageMs >= 0 && ageMs <
+    // ttlHours * 3600000` against its own key, so the remedy never offers a verb beside a
+    // sentence saying that verb refuses. OUTSIDE a window, or with an age this report could
+    // not measure, that verb's wording is conditional and it is not blocked here; the
+    // adoption fields are the caller-supplied facts and the pointer read, which pass
+    // straight through.
+    if (insideRelease) releaseBlockedBy = 'aged';
+    if (designates === true && !adoptBlockedByChain && insideAdopt) adoptBlockedBy = 'aged';
+    var releaseAged = 'a release refuses while that is under ' + releaseWindow.hours + 'h';
     if (adoptBlockedByChain) {
-      text = ' (a release refuses while that is under ' + window.hours + 'h; ' + chainHalf
-        + chainBound;
+      text = ' (' + releaseAged + '; ' + chainHalf + chainBound;
     } else if (designates === true) {
-      text = ' (adoption and a release both refuse while that is under ' + window.hours + 'h'
-        + pointerBound;
+      text = ' (adoption refuses while that is under ' + window.hours + 'h and a release while'
+        + ' it is under ' + releaseWindow.hours + 'h' + pointerBound;
     } else if (designates === false) {
-      text = ' (a release refuses while that is under ' + window.hours + 'h; adoption does not,'
+      text = ' (' + releaseAged + '; adoption does not,'
         + ' because ' + pointerRetired + ', so read it as abandonment evidence rather than as'
         + ' proof the owner is gone';
     } else {
-      text = ' (a release refuses while that is under ' + window.hours + 'h; whether adoption'
+      text = ' (' + releaseAged + '; whether adoption'
         + ' also refuses could not be established, because the owner active pointer could not be'
         + ' read';
     }
@@ -3144,10 +3232,11 @@ function ownerLivenessClause(dir, run, window, verdict, adoptBlockedByChain, own
     releaseBlocked: releaseBlockedBy !== null,
     adoptBlocked: adoptBlockedBy !== null,
     adoptUnknown: adoptUnknown,
-    adoptCaveat: adoptCaveat,
-    // Carried so the remedy quotes the SAME number the clause did, rather than resolving
-    // the window a second time one function away.
-    windowHours: window.hours,
+    adoptCaveat: ownHoldsOwnRun && adoptBlockedBy === null,
+    // Carried so the remedy quotes the SAME numbers the clause did, rather than resolving
+    // the windows a second time one function away.
+    adoptWindowHours: window.hours,
+    releaseWindowHours: releaseWindow.hours,
   };
 }
 
@@ -3169,6 +3258,18 @@ function ownerActivityWindow() {
     // `trim() !== ''` made this the only place the rule existed twice, and a
     // presence-only test also got a configured-but-REJECTED value backwards: the row
     // quoted the built-in default while claiming a window had been configured.
+    supplied: resolved.accepted,
+  };
+}
+
+// The release's own window, read the same way and for the same reason. It stays a
+// separate accessor rather than a parameter of the one above, because C57c binds each
+// window reader to its own constant pair by spelling.
+function releaseOwnerActivityWindow() {
+  var resolved = boundedEnvIntResolve('ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS',
+    RELEASE_OWNER_ACTIVITY_TTL_FALLBACK, RELEASE_OWNER_ACTIVITY_TTL_MAX);
+  return {
+    hours: resolved.value,
     supplied: resolved.accepted,
   };
 }
@@ -3262,6 +3363,7 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
   var terminalUnshaped = [];
   var rows = [];
   var ownerActivityWin = ownerActivityWindow();
+  var releaseActivityWin = releaseOwnerActivityWindow();
   // Parsed in ONE pass before any row renders, because a foreign run's remedy depends
   // on a fact about the WHOLE scanned set — whether this session already owns a
   // nonterminal run, which adoption refuses with exit 4 — and that run may sort after
@@ -3329,8 +3431,8 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
     var silenceVerdict = autopilotOwnerSilence(dir, run.owner, nowMs);
     var foreignHolder = ownKey !== '' && !own;
     var liveness = foreignHolder
-      ? ownerLivenessClause(dir, run, ownerActivityWin, silenceVerdict, adoptBlocked,
-        ownHoldsOwnRun)
+      ? ownerLivenessClause(dir, run, ownerActivityWin, releaseActivityWin, silenceVerdict,
+        adoptBlocked, ownHoldsOwnRun)
       : null;
     var livenessText = liveness ? liveness.text : '';
     var ownership;
@@ -3385,21 +3487,26 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
           + ' beacon is restored';
       } else if (releaseCause === 'aged') {
         releaseWhy = 'a release refuses this run with exit 7 while that document is under '
-          + (liveness ? liveness.windowHours : '') + 'h old, so waiting until it is older is'
+          + (liveness ? liveness.releaseWindowHours : '') + 'h old, so waiting until it is older is'
           + ' what clears it';
       }
       var adoptWhy = 'this report does not recognize why adoption is blocked here — a'
         + ' missing check, not a verdict';
       if (adoptCause === 'chain') {
         adoptWhy = 'adoption refuses it with exit 3 before it reads any beacon, because this'
-          + ' run has a live inner TDD chain — that stage is read from the run document, which'
-          + ' is an ordinary file any session in this project can write — so finishing or'
-          + ' blocking that chain is what clears it, and repairing the beacon would not';
+          + ' run has a live inner TDD chain — that stage is ' + AUTOPILOT_FORGEABLE_SOURCE
+          + ' — so finishing or'
+          + ' cancelling that chain in its own session is what clears it, while BLOCKING it'
+          + ' does not, because the verb tests the pending stage, and repairing the beacon'
+          + ' would not either';
       } else if (adoptCause === 'beacon') {
         adoptWhy = 'adoption aborts on that same beacon with exit 2';
+      } else if (adoptCause === 'future-stamp') {
+        adoptWhy = 'adoption refuses it with exit 7 too while that stamp is in the future,'
+          + ' and waiting will not clear it either';
       } else if (adoptCause === 'aged') {
         adoptWhy = 'adoption refuses it too while that document is under '
-          + (liveness ? liveness.windowHours : '') + 'h old';
+          + (liveness ? liveness.adoptWindowHours : '') + 'h old';
       }
       if (releaseOut && adoptOut) {
         // NO consent-and-worktree tail here: it qualifies an OFFER, and this arm offers
@@ -3539,9 +3646,10 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
         + ' project can write, so read it as evidence of silence rather than as proof'
         + ' the owner is gone'
         // The clause states the exit-7 refusal the run verbs take, and it quotes the
-        // window they actually read — `autopilotOwnerActivityTtlHours`, never the
+        // windows they actually read — `autopilotOwnerActivityTtlHours` for adoption and
+        // `autopilotReleaseOwnerActivityTtlHours` for the release, never the
         // pending-review window this row used to quote while `--autopilot-release` and
-        // `--autopilot-adopt` judged liveness against the other key. That mismatch
+        // `--autopilot-adopt` judged liveness against other keys. That mismatch
         // promised hours of protection the destructive verb no longer gives, on the
         // one surface that routes a user to it. WHICH verbs refuse is decided per run
         // by `ownerLivenessClause`, because the two are not symmetric.

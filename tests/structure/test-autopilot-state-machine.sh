@@ -1910,7 +1910,7 @@ if [ "$REL_READY" = true ]; then
 fi
 # The OWN case must carry the own-run clause and NO release command of any spelling.
 case "$HOLD_OWN" in
-  *'run_hold_s'*'which belongs to this session'*'finish or repair that run'*)
+  *'run_hold_s'*'whose run record names this session as its owner'*'finish or repair that run'*)
     case "$HOLD_OWN" in
       *'/zensu:autopilot-release'*|*'--confirm'*)
         check "W31a own-run hold sentence must name no release command (got: $HOLD_OWN)" FAIL ;;
@@ -1994,7 +1994,7 @@ fi
 # sentence it introduces — that agreement is the whole reason both come out of one
 # read.
 case "$HOLD_REPORT_OWN" in
-  own*'which belongs to this session'*)
+  own*'whose run record names this session as its owner'*)
     check "W31f the report verb labels an own holder 'own' and renders the matching sentence" PASS ;;
   *) check "W31f own report line (got: $HOLD_REPORT_OWN)" FAIL ;;
 esac
@@ -2010,7 +2010,7 @@ else
   check "W31h report free verdict (rc=$HOLD_REPORT_FREE_RC, want 1)" FAIL
 fi
 # The KIND field is THREE-valued and a caller must not fold `unknown` into either
-# other answer: the own sentence says "which belongs to this session", so a lead-in
+# other answer: the own sentence says "whose run record names this session as its owner", so a lead-in
 # asserting the caller owns no run would contradict the sentence it introduces.
 if [ "$REL_READY" = true ] && [ "$HOLD_KIND_OWN" = own ] && [ "$HOLD_KIND_FOREIGN" = foreign ]; then
   check "W31i the report line's kind field answers own and foreign from the judged record" PASS
@@ -2329,7 +2329,8 @@ else
   check "W21 a directory at the beacon path must be refused (rc=$REL_DIR_RC, want 2)" FAIL
 fi
 
-if grep -qF 'const ownerActivity = regularFile(path.join(stateDir, `tdd-phase-${state.ownerSessionId}.json`));' "$LIB" \
+if grep -qF 'const ownerActivity = regularFile(path.join(stateDir, `tdd-phase-${ownerSessionId}.json`));' "$LIB" \
+  && ! grep -qF 'fs.statSync(path.join(stateDir, `tdd-phase-${ownerSessionId}.json`))' "$LIB" \
   && ! grep -qF 'fs.statSync(path.join(stateDir, `tdd-phase-${state.ownerSessionId}.json`))' "$LIB"; then
   check "W22 the liveness beacon is read through the regularFile chokepoint" PASS
 else
@@ -2359,21 +2360,21 @@ REL_TTL0_ERR="$ROOT/rel-ttl0.err"
 if [ "$REL_READY" = true ]; then
   ( cd "$REL_P/.claude/worktrees/rt" && autopilot_begin_run run_rel_ttl0 session_rel_ttl0 "$REL_P" false true "" ) >/dev/null 2>&1
   printf '%s\n' '{}' > "$REL_P/.zensu/state/tdd-phase-session_rel_ttl0.json"
-  REL_TTL_SAVED="$(declare -f zensu_autopilot_owner_activity_ttl_hours)"
-  zensu_autopilot_owner_activity_ttl_hours() { echo 0; }
+  REL_TTL_SAVED="$(declare -f zensu_autopilot_release_owner_activity_ttl_hours)"
+  zensu_autopilot_release_owner_activity_ttl_hours() { echo 0; }
   ( cd "$REL_P/.claude/worktrees/rt" && autopilot_release_run run_rel_ttl0 evt_rel_ttl0 "$REL_P" session_rel_other ) >/dev/null 2>"$REL_TTL0_ERR"
   REL_TTL0_RC=$?
   eval "$REL_TTL_SAVED"
 fi
-# autopilotOwnerActivityTtlHours=0 disables the liveness refusal for a demonstrably
-# live owner. The key is deliberately NOT pendingReviewTtlHours, whose six-hour
-# default answers how long a deferred-review marker stays meaningful and made a run
-# whose owner was gone unreachable for that long. Zero is the repository's
-# established meaning of "disabled", so it stays — but it must not be silent, or an
-# operator reads the missing refusal as a boundary that is no longer being enforced
-# at all.
+# autopilotReleaseOwnerActivityTtlHours=0 disables the liveness refusal for a
+# demonstrably live owner. The release reads its own key rather than the adoption
+# window, because it is the destructive verb, and neither is pendingReviewTtlHours,
+# which answers how long a deferred-review marker stays meaningful. Zero is the
+# repository's established meaning of "disabled", so it stays — but it must not be
+# silent, or an operator reads the missing refusal as a boundary that is no longer
+# being enforced at all.
 if [ "$REL_READY" = true ] && [ "$REL_TTL0_RC" -eq 0 ] \
-  && grep -qF 'owner liveness unchecked: autopilotOwnerActivityTtlHours is 0' "$REL_TTL0_ERR"; then
+  && grep -qF 'owner liveness unchecked: autopilotReleaseOwnerActivityTtlHours is 0' "$REL_TTL0_ERR"; then
   check "W24 a zero TTL disables the liveness refusal and says so" PASS
 else
   check "W24 a zero TTL must disable the check and disclose it (rc=$REL_TTL0_RC, want 0 + disclosure)" FAIL
@@ -2522,14 +2523,21 @@ fi
 # permanently unreleasable. This repository already states that rule for the
 # reviewer-denial note TTL; the same bound applies here.
 #
-# COUNTED, not merely found. The literal now appears once per verb — release and
-# adopt — and `grep -q` was satisfied by either copy alone, so the adopt clause
-# could lose its bound with this check still green. Both verbs must carry it.
+# COUNTED, not merely found. The bound now lives in ONE evaluation, `ownerLiveness`,
+# which both verbs call and map, so the pin is the single definition, exactly one
+# future return and one window comparison inside it, and exactly two call sites — a
+# verb that stopped calling it, or a third hand-rolled copy beside it, changes a count.
 # R7-10: counted over CODE LINES, like every needle below it. An unfiltered count
-# let a comment quoting the bound expression hold the total at 2 after one of the
-# two code bounds was deleted — and this file narrates that expression in prose.
+# let a comment quoting the bound expression hold a total after a code copy was
+# deleted — and this file narrates that expression in prose.
 w19_code() { grep -F "$1" "$LIB" | grep -cvE '^[[:space:]]*//'; }
-W19_BOUNDS="$(w19_code 'ageMs >= 0 && ageMs < ttlHours * 3600000')"
+W19_HELPER="$(w19_code 'const ownerLiveness = (stateDir, ownerSessionId, ttlHoursRaw, options = {}) => {')"
+W19_FUTURE_RETURN="$(w19_code 'if (ageMs < 0) return { verdict: "future", ageMs };')"
+W19_WINDOW="$(w19_code 'return { verdict: ageMs < ttlHours * 3600000 ? "fresh" : "stale", ageMs };')"
+W19_CALLS="$(w19_code 'ownerLiveness(stateDir, ')"
+W19_BOUNDS=0
+[ "$W19_HELPER" -eq 1 ] && [ "$W19_FUTURE_RETURN" -eq 1 ] && [ "$W19_WINDOW" -eq 1 ] \
+  && [ "$W19_CALLS" -eq 2 ] && W19_BOUNDS=2
 # COUNTED OVER CODE LINES ONLY. An earlier spelling counted over the whole file, so a
 # comment carrying the same words satisfied the count while the code path that emits
 # it was deleted — the check could not tell a disclosure from a description of one.
@@ -2544,20 +2552,24 @@ w19_emitted() { grep -F "$2" "$LIB" | grep -F "$1" | grep -cvE '^[[:space:]]*//'
 # The absent-beacon disclosure is still a hand copy across BOTH verbs: it is the one
 # stand-down an outsider reaches by unlinking an ordinary file, so both must say so.
 W19_NO_DOC="$(w19_emitted 'process.stderr.write(' 'owner liveness unchecked: no workflow document for the recorded owner')"
-# The FUTURE-dated case is deliberately ASYMMETRIC and this check is what holds the
-# asymmetry in place. `adopt` PERMITS and discloses — a reversible ownership move,
-# and refusing there would wedge the constructive verb on a clock artefact. `release`
-# REFUSES with exit 7, because a skewed clock must never authorise an irreversible
-# CANCEL against a session that is demonstrably alive; the run stays reachable
-# through the ordinary event path, through adoption, and through the documented
-# `autopilotOwnerActivityTtlHours: 0`. One of each, never two of either.
-W19_FUTURE_DISCLOSE="$(w19_emitted 'process.stderr.write(' 'owner liveness unchecked: the recorded owner workflow document is dated in the future')"
+# The FUTURE-dated case is refused by BOTH verbs, each under its own sentence, and this
+# check is what holds that in place. `adopt` used to PERMIT and disclose on the argument
+# that its move is reversible; the release's own refusal then named adoption as its
+# remedy, so two confirmations cancelled a run whose owner is demonstrably alive, and the
+# victim's adopt-back was refused while the adopter's document was fresh. The run stays
+# reachable through the ordinary event path and through the documented per-verb `0`.
+# One sentence each, and the retired disclosure must not come back.
+W19_FUTURE_DISCLOSE="$(w19_emitted 'fail(7' 'dated in the future, so its age cannot show that the owner has stopped')"
 W19_FUTURE_REFUSE="$(w19_emitted 'fail(7' 'dated in the future, so its age cannot bound this cancel')"
+# The retired disclosure must be GONE: while it stood, adoption permitted the input the
+# release refuses, and the release's own remedy pointed at it.
+[ "$(w19_code 'owner liveness unchecked: the recorded owner workflow document is dated in the future')" -eq 0 ] \
+  || W19_FUTURE_DISCLOSE=0
 if [ "$W19_BOUNDS" -eq 2 ] && [ "$W19_NO_DOC" -eq 2 ] \
   && [ "$W19_FUTURE_DISCLOSE" -eq 1 ] && [ "$W19_FUTURE_REFUSE" -eq 1 ]; then
-  check "W19 both verbs bound the owner-liveness age, both disclose an absent beacon, and a future-dated one is disclosed by adopt and refused by release" PASS
+  check "W19 one evaluation bounds the owner-liveness age for both verbs, both disclose an absent beacon, and both refuse a future-dated one under their own wording" PASS
 else
-  check "W19 owner-liveness bounds=$W19_BOUNDS no-doc-disclosures=$W19_NO_DOC (each must be 2), future-disclose=$W19_FUTURE_DISCLOSE future-refuse=$W19_FUTURE_REFUSE (each must be 1)" FAIL
+  check "W19 owner-liveness helper=$W19_HELPER future-return=$W19_FUTURE_RETURN window=$W19_WINDOW (each must be 1) calls=$W19_CALLS no-doc-disclosures=$W19_NO_DOC (each must be 2), future-disclose=$W19_FUTURE_DISCLOSE future-refuse=$W19_FUTURE_REFUSE (each must be 1)" FAIL
 fi
 
 # W19b is the CONTROL for the filter W19 now applies: it proves the needles are
@@ -2570,7 +2582,7 @@ W19B_RE='^[[:space:]]*//'
 # Widened to EVERY needle W19 counts, not just the disclosure literals. Naming
 # itself "the CONTROL for the filter W19 applies" while covering two of its four
 # needles is the same overclaim this suite exists to catch.
-W19B_COMMENTED="$(grep -F -e 'owner liveness unchecked:' -e 'ageMs >= 0 && ageMs < ttlHours * 3600000' -e 'dated in the future, so its age cannot bound this cancel' "$LIB" | grep -cE "$W19B_RE" || true)"
+W19B_COMMENTED="$(grep -F -e 'owner liveness unchecked:' -e 'ageMs < ttlHours * 3600000 ? "fresh"' -e 'dated in the future, so its age cannot bound this cancel' "$LIB" | grep -cE "$W19B_RE" || true)"
 # POSITIVE CONTROL for the pattern itself. Without it a `[[:space:]]` that this
 # host's grep also mishandled would be indistinguishable from a clean tree.
 W19B_CONTROL="$(printf '  // owner liveness unchecked: sample\n' | grep -cE "$W19B_RE" || true)"

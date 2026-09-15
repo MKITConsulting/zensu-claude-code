@@ -64,6 +64,14 @@ export ZENSU_TEST_PLUGIN_DATA
 # absent and the fixture would silently measure the DEFAULT instead of zero.
 printf '%s' '{"hooks":{"autopilotOwnerActivityTtlHours":0}}' > "$TMP/ttl-zero.json"
 
+# `run_verb` pins this per command, but an IN-PROCESS `autopilot_*` call reads the
+# config in the suite's own shell, where `cfg()` falls back to `$HOME/.zensu/config.json`
+# — and this suite does not override HOME. A developer whose global config sets an
+# owner-activity window would then decide a liveness check here, turning an unrelated
+# assertion red. Export the missing-file path once so every in-process call resolves
+# the DEFAULTS; a case that needs another value still sets the variable inline.
+export ZENSU_CONFIG="$TMP/missing-config.json"
+
 activate_session() {
   local project="$1" raw_session="$2"
   mkdir -p "$project" || return 1
@@ -131,20 +139,154 @@ else
   check "B0 fixture premise: owner pointer missing at $OWNER_POINTER" FAIL
 fi
 
-# --- B1 --confirm is required, and its absence changes nothing (AC-001) ------
+# --- B1 without --confirm the verb REPORTS and writes nothing (AC-011) -------
+# The absence of `--confirm` used to be an INVOCATION fault: exit 2, one usage line,
+# and no fact about the run at all. So the user was asked for a yes while the whole
+# liveness question — whether the check will run, how old the owner's document is,
+# whether a retired pointer stands it down — stayed invisible until the command that
+# already moved ownership printed it. This arm is the live-owner half: the report
+# runs the same ladder, reaches the same exit 7, and moves nothing.
+#
+# The taker's session is activated HERE rather than inside `run_verb` alone, because
+# `activate_session` writes that session's own workflow document into the state
+# directory: sampling the directory before that write would report the seed as a
+# mutation this call made.
+activate_session "$PROJECT" adopt_cli_taker || exit 1
+B1_TAKER_KEY="$ZENSU_SESSION_KEY"
+B1_TAKER_POINTER="$(_autopilot_active_path "$STATE_DIR" "$B1_TAKER_KEY")"
+# Filtered to the `autopilot-` entries on purpose: the lease keeper and the session
+# seed both touch this directory, so a bare listing would grade unrelated writes.
+# The two report-mode output operands are named `autopilot-adopt-report-*`, so a
+# regression that reaches a write lands INSIDE this filter rather than beside it.
+B1_AP_BEFORE="$(ls -A "$STATE_DIR" | grep '^autopilot-' | sort | tr '\n' ' ')"
 BEFORE_B1="$(digest "$RUN_FILE")"
-run_verb "$PROJECT" adopt_cli_taker --autopilot-adopt --run adopt_cli_run >/dev/null 2>&1
+BEFORE_B1_PTR="$(digest "$OWNER_POINTER")"
+run_verb "$PROJECT" adopt_cli_taker --autopilot-adopt --run adopt_cli_run \
+  >"$TMP/b1.out" 2>"$TMP/b1.err"
 B1_RC=$?
-if [ "$B1_RC" -eq 2 ] && [ "$(digest "$RUN_FILE")" = "$BEFORE_B1" ]; then
-  check "B1 adopt refuses without --confirm and mutates nothing" PASS
+B1_AP_AFTER="$(ls -A "$STATE_DIR" | grep '^autopilot-' | sort | tr '\n' ' ')"
+# The stderr sentence is graded here and nowhere else: a grep over `tests/`, `skills/`
+# and `docs/` for the retired blanket spelling `report only, nothing was changed`
+# returned NOTHING, so this arm is the only thing standing between that claim and a
+# silent reword. It must name the ENUMERATED set the skill states at its own
+# "changes nothing" sentence, because the blanket form asserts more than the report's
+# guards establish: the verb DOES take the project lease (`_autopilot_locked_run`), so
+# "nothing was changed" is false about the process even though it is true about the
+# three artifacts. The lease's own lock file is created and unlinked by
+# `releaseOwnedLock` in `session-control-core-v1.js`, so the artifact does not persist
+# — but a sentence that has to be defended by tracing two modules is the wrong
+# sentence to print at a user.
+if [ "$B1_RC" -eq 7 ] \
+  && grep -qF 'report: run adopt_cli_run was not changed by this call' "$TMP/b1.out" \
+  && grep -qF 'no record, no pointer and no provenance entry is written' "$TMP/b1.out" \
+  && grep -qF 'report: owner liveness' "$TMP/b1.out" \
+  && grep -qF 'so adoption is refused' "$TMP/b1.out" \
+  && ! grep -qF -- '--confirm would take run' "$TMP/b1.out" \
+  && grep -qF 'no record, no pointer, no provenance entry' "$TMP/b1.err" \
+  && ! grep -qF 'nothing was changed' "$TMP/b1.err" \
+  && [ "$(digest "$RUN_FILE")" = "$BEFORE_B1" ] \
+  && [ "$(digest "$OWNER_POINTER")" = "$BEFORE_B1_PTR" ] \
+  && [ ! -e "$B1_TAKER_POINTER" ] \
+  && [ "$B1_AP_AFTER" = "$B1_AP_BEFORE" ]; then
+  check "B1 adopt without --confirm reports the liveness verdict, takes the same exit 7, and writes nothing" PASS
 else
-  check "B1 adopt without --confirm (rc=$B1_RC)" FAIL
+  check "B1 adopt report (rc=$B1_RC, stdout: $(head -c 200 "$TMP/b1.out" 2>/dev/null))" FAIL
+fi
+
+# --- B1b the PERMIT half of the same report (AC-011) -------------------------
+# B1 alone proves nothing about the report's exit code: a verb that answered 7 for
+# every input passes it. This arm reaches the takeover verdict, so it grades the one
+# claim the user acts on — "--confirm would adopt this" — and then CONFIRMS it in the
+# same fixture, which is what shows the report left the ladder it predicted intact.
+# Its own project, because a report that lied by mutating would be invisible against
+# a fixture another case has already moved.
+B1BP="$TMP/reportstale"; mkdir -p "$B1BP"
+B1BP="$(cd "$B1BP" && pwd -P)"
+if activate_session "$B1BP" adopt_report_owner \
+  && autopilot_begin_run adopt_report_run "$ZENSU_SESSION_KEY" "$B1BP" >/dev/null 2>&1; then
+  B1B_OWNER="$ZENSU_SESSION_KEY"
+  B1B_RUN_FILE="$(autopilot_run_file adopt_report_run "$B1BP")"
+  B1B_POINTER="$(_autopilot_active_path "$B1BP/.zensu/state" "$B1B_OWNER")"
+  B1B_BEACON="$B1BP/.zensu/state/tdd-phase-${B1B_OWNER}.json"
+  printf '%s\n' '{}' > "$B1B_BEACON"
+  touch -t 200001010000 "$B1B_BEACON" 2>/dev/null
+  B1B_RUN_DIGEST="$(digest "$B1B_RUN_FILE")"
+  B1B_PTR_DIGEST="$(digest "$B1B_POINTER")"
+  if [ -f "$B1B_POINTER" ] && [ "$B1B_BEACON" -ot "$B1B_RUN_FILE" ]; then
+    activate_session "$B1BP" adopt_report_taker || exit 1
+    B1B_TAKER="$ZENSU_SESSION_KEY"
+    B1B_TAKER_POINTER="$(_autopilot_active_path "$B1BP/.zensu/state" "$B1B_TAKER")"
+    run_verb "$B1BP" adopt_report_taker --autopilot-adopt --run adopt_report_run \
+      >"$TMP/b1b.out" 2>"$TMP/b1b.err"
+    B1B_RC=$?
+    # Sampled HERE, between the two commands: the confirmed adopt below legitimately
+    # rewrites the record, retires the owner pointer and installs the taker's, so the
+    # same three tests taken after it grade the takeover instead of the report.
+    B1B_UNCHANGED=true
+    [ "$(digest "$B1B_RUN_FILE")" = "$B1B_RUN_DIGEST" ] || B1B_UNCHANGED=false
+    [ "$(digest "$B1B_POINTER")" = "$B1B_PTR_DIGEST" ] || B1B_UNCHANGED=false
+    [ ! -e "$B1B_TAKER_POINTER" ] || B1B_UNCHANGED=false
+    run_verb "$B1BP" adopt_report_taker --autopilot-adopt --run adopt_report_run --confirm \
+      >/dev/null 2>"$TMP/b1b-confirm.err"
+    B1B_CONFIRM_RC=$?
+    if [ "$B1B_RC" -eq 0 ] \
+      && grep -qF "report: --confirm would take run adopt_report_run over from session $B1B_OWNER" "$TMP/b1b.out" \
+      && grep -qF 'so the age check permits adoption' "$TMP/b1b.out" \
+      && [ "$B1B_UNCHANGED" = true ] \
+      && [ "$B1B_CONFIRM_RC" -eq 0 ] \
+      && json_ok "$B1B_RUN_FILE" "value.ownerSessionId === '$B1B_TAKER'"; then
+      check "B1b the report predicts a takeover, changes nothing, and the same command with --confirm then delivers it" PASS
+    else
+      check "B1b adopt report permit (rc=$B1B_RC, unchanged=$B1B_UNCHANGED, confirm rc=$B1B_CONFIRM_RC, stdout: $(head -c 200 "$TMP/b1b.out" 2>/dev/null | tr '\n' ' '))" FAIL
+    fi
+  else
+    check "B1b fixture could not backdate the owner beacon while keeping its pointer" FAIL
+  fi
+else
+  check "B1b fixture could not build a stale-owner run" FAIL
+fi
+
+# --- B1c an unrecognized mode is REFUSED, never read as the mutating one ------
+# `_autopilot_adopt_critical` tests `mode = report` and treats everything else as a
+# confirmed run, so a misspelt mode reaching it would move ownership. The public
+# verb refuses first. Its own project at `autopilotOwnerActivityTtlHours: 0`, because
+# against a live owner a regressed guard would still stop at exit 7 and pass for the
+# wrong reason; with the check disabled the regression is a real takeover, and the
+# `report` control on the same fixture proves that path is otherwise reachable.
+B1CP="$TMP/reportmode"; mkdir -p "$B1CP"
+B1CP="$(cd "$B1CP" && pwd -P)"
+if activate_session "$B1CP" adopt_mode_owner \
+  && autopilot_begin_run adopt_mode_run "$ZENSU_SESSION_KEY" "$B1CP" >/dev/null 2>&1; then
+  B1C_OWNER="$ZENSU_SESSION_KEY"
+  B1C_RUN_FILE="$(autopilot_run_file adopt_mode_run "$B1CP")"
+  activate_session "$B1CP" adopt_mode_taker || exit 1
+  B1C_TAKER="$ZENSU_SESSION_KEY"
+  B1C_TAKER_POINTER="$(_autopilot_active_path "$B1CP/.zensu/state" "$B1C_TAKER")"
+  ( cd "$B1CP" && ZENSU_CONFIG="$TMP/ttl-zero.json" \
+      autopilot_adopt_run adopt_mode_run "$B1CP" "$B1C_TAKER" reprot ) >/dev/null 2>"$TMP/b1c.err"
+  B1C_RC=$?
+  ( cd "$B1CP" && ZENSU_CONFIG="$TMP/ttl-zero.json" \
+      autopilot_adopt_run adopt_mode_run "$B1CP" "$B1C_TAKER" report ) >"$TMP/b1c-report.out" 2>/dev/null
+  B1C_REPORT_RC=$?
+  if [ "$B1C_RC" -eq 3 ] \
+    && grep -qF 'the adoption mode is neither confirm nor report' "$TMP/b1c.err" \
+    && [ "$B1C_REPORT_RC" -eq 0 ] \
+    && grep -qF 'unchecked, because hooks.autopilotOwnerActivityTtlHours is 0' "$TMP/b1c-report.out" \
+    && json_ok "$B1C_RUN_FILE" "value.ownerSessionId === '$B1C_OWNER'" \
+    && [ ! -e "$B1C_TAKER_POINTER" ]; then
+    check "B1c a misspelt adoption mode is refused with exit 3 while the report path on the same fixture stays reachable and nothing moves" PASS
+  else
+    check "B1c adoption mode guard (rc=$B1C_RC, report rc=$B1C_REPORT_RC, stderr: $(head -c 160 "$TMP/b1c.err" 2>/dev/null))" FAIL
+  fi
+else
+  check "B1c fixture could not build a run for the mode guard" FAIL
 fi
 
 # --- B2 the argument parser rejects every malformed spelling -----------------
 B2_OK=true
 run_verb "$PROJECT" adopt_cli_taker --autopilot-adopt --confirm >/dev/null 2>&1
-[ "$?" -eq 2 ] || B2_OK=false
+B2_RC=$?
+[ "$B2_RC" -eq 2 ] || B2_OK=false
 run_verb "$PROJECT" adopt_cli_taker --autopilot-adopt --run adopt_cli_run --confirm --confirm >/dev/null 2>&1
 [ "$?" -eq 2 ] || B2_OK=false
 run_verb "$PROJECT" adopt_cli_taker --autopilot-adopt --run a --run b --confirm >/dev/null 2>&1
@@ -286,14 +428,14 @@ else
   check "B6b fixture could not build a stale-owner run" FAIL
 fi
 
-# --- B6c a FUTURE-dated owner beacon PERMITS the adopt ----------------------
-# The discriminating case for `ageMs >= 0`, which B6 and B6b cannot see: both use a
-# past mtime, so both ages are positive and the clause is deletable against them.
-# A future-dated beacon is the only input whose verdict the clause decides — with it
-# the age is negative, fails `>= 0`, and the adopt PROCEEDS; without it the negative
-# age also satisfies `< ttlHours * 3600000` and the adopt is REFUSED with exit 7,
-# making a run permanently unadoptable behind a clock nobody can correct. That is why
-# the assertion is a PERMIT and not a refusal.
+# --- B6c a FUTURE-dated owner beacon REFUSES the adopt ----------------------
+# The discriminating case for the age sign, which B6 and B6b cannot see: both use a past
+# mtime, so both ages are positive and the future arm is deletable against them.
+# Adoption used to PERMIT here and only disclose, and the release refusal for the same
+# input then recommended adoption as its route — so two confirmations cancelled a run
+# whose owner is demonstrably live, which is the outcome that refusal exists to prevent.
+# Both verbs now refuse a future stamp while the previous owner's pointer designates the
+# run; a RETIRED pointer still stands the whole check down one branch above this one.
 B6CP="$TMP/futureowner"; mkdir -p "$B6CP"
 B6CP="$(cd "$B6CP" && pwd -P)"
 if activate_session "$B6CP" adopt_future_owner \
@@ -310,13 +452,14 @@ if activate_session "$B6CP" adopt_future_owner \
     run_verb "$B6CP" adopt_future_taker --autopilot-adopt --run adopt_future_run --confirm \
       >/dev/null 2>"$TMP/b6c.err"
     B6C_RC=$?
-    B6C_TAKER="$ZENSU_SESSION_KEY"
-    if [ "$B6C_RC" -eq 0 ] \
-      && json_ok "$B6C_RUN_FILE" "value.ownerSessionId === '$B6C_TAKER'" \
-      && grep -qF 'owner liveness unchecked: the recorded owner workflow document is dated in the future' "$TMP/b6c.err"; then
-      check "B6c a future-dated owner beacon PERMITS the adopt and discloses" PASS
+    if [ "$B6C_RC" -eq 7 ] \
+      && json_ok "$B6C_RUN_FILE" "value.ownerSessionId === '$B6C_OWNER'" \
+      && [ -f "$B6C_POINTER" ] \
+      && grep -qF 'dated in the future, so its age cannot show that the owner has stopped' "$TMP/b6c.err" \
+      && ! grep -qF 'owner liveness unchecked: the recorded owner workflow document is dated in the future' "$TMP/b6c.err"; then
+      check "B6c a future-dated owner beacon REFUSES the adopt with exit 7 and moves nothing" PASS
     else
-      check "B6c future-beacon permit (rc=$B6C_RC, stderr: $(head -c 200 "$TMP/b6c.err" 2>/dev/null))" FAIL
+      check "B6c future-beacon refusal (rc=$B6C_RC, stderr: $(head -c 200 "$TMP/b6c.err" 2>/dev/null))" FAIL
     fi
   else
     check "B6c fixture could not forward-date the owner beacon while keeping its pointer" FAIL
@@ -347,8 +490,16 @@ if autopilot_begin_run adopt_tdd_run "$TDD_OWNER" "$TDDP" >/dev/null 2>&1 \
     B5_RC=$?
     # Exit 3 is shared by three refusals (invalid arguments, terminal run, live inner
     # chain), so the code alone would be satisfied by an argument-marshalling regression.
+    # The refusal must name the exits that REMAIN. It used to say "finish or block that
+    # chain before adopting", and blocking changes nothing here: this verb tests the
+    # PENDING stage, which a BLOCK out of TDD_RUNNING preserves — B18 drives exactly that
+    # record and gets the same exit 3. Advising it sent the reader to an action that
+    # cannot clear the refusal.
     if [ "$B5_RC" -eq 3 ] && [ "$(digest "$TDD_RUN_FILE")" = "$BEFORE_B5" ] \
-      && grep -qF 'live inner TDD chain' "$TMP/b5.err"; then
+      && grep -qF 'live inner TDD chain' "$TMP/b5.err" \
+      && grep -qF 'blocking that chain does not make the run adoptable' "$TMP/b5.err" \
+      && grep -qF '/zensu:autopilot-release' "$TMP/b5.err" \
+      && ! grep -qF 'finish or block that chain before adopting' "$TMP/b5.err"; then
       check "B5 a run with a live inner TDD chain is refused with exit 3" PASS
     else
       check "B5 TDD_RUNNING refusal (rc=$B5_RC, expected 3)" FAIL
@@ -564,11 +715,13 @@ else
   check "B11 fixture could not build a terminal run" FAIL
 fi
 
-# --- B12 the NEW config key is what gates the release liveness check (AC-009) -
+# --- B12 the release's OWN config key gates its liveness check (AC-009) -------
 # Two arms over one fixture whose owner looks alive: at the default the release
-# refuses, and at `autopilotOwnerActivityTtlHours: 0` the check is disabled and
-# the same call lands. Without the second arm the first would also pass against
-# the old `pendingReviewTtlHours` reader.
+# refuses, and at `autopilotReleaseOwnerActivityTtlHours: 0` the check is disabled
+# and the same call lands. Without the second arm the first would also pass against
+# any reader that never disables. The adoption key is graded apart in
+# test-autopilot-release-cli.sh A18, which proves it no longer reaches the release.
+printf '%s' '{"hooks":{"autopilotReleaseOwnerActivityTtlHours":0}}' > "$TMP/release-ttl-zero.json"
 RELP="$TMP/release"; mkdir -p "$RELP"
 RELP="$(cd "$RELP" && pwd -P)"
 activate_session "$RELP" adopt_rel_owner || exit 1
@@ -577,12 +730,12 @@ if autopilot_begin_run adopt_rel_run "$REL_OWNER" "$RELP" >/dev/null 2>&1; then
   REL_RUN_FILE="$(autopilot_run_file adopt_rel_run "$RELP")"
   run_verb "$RELP" adopt_rel_taker --autopilot-release --run adopt_rel_run --confirm >/dev/null 2>&1
   B12A_RC=$?
-  run_verb_cfg "$RELP" adopt_rel_taker "$TMP/ttl-zero.json" \
+  run_verb_cfg "$RELP" adopt_rel_taker "$TMP/release-ttl-zero.json" \
     --autopilot-release --run adopt_rel_run --confirm >/dev/null 2>&1
   B12B_RC=$?
   if [ "$B12A_RC" -eq 7 ] && [ "$B12B_RC" -eq 0 ] \
     && json_ok "$REL_RUN_FILE" 'value.stage === "CANCELLED"'; then
-    check "B12 autopilotOwnerActivityTtlHours gates the release liveness check, and 0 disables it" PASS
+    check "B12 autopilotReleaseOwnerActivityTtlHours gates the release liveness check, and 0 disables it" PASS
   else
     check "B12 release TTL key (default rc=$B12A_RC expected 7, zero rc=$B12B_RC expected 0)" FAIL
   fi
@@ -631,6 +784,9 @@ for pair in \
   "$EXAMPLE_CONFIG:autopilotOwnerActivityTtlHours" \
   "$DOC_CONFIG:autopilotOwnerActivityTtlHours" \
   "$DOC_CONFIG:--autopilot-adopt" \
+  "$EXAMPLE_CONFIG:autopilotReleaseOwnerActivityTtlHours" \
+  "$DOC_CONFIG:autopilotReleaseOwnerActivityTtlHours" \
+  "$DOC_WORKFLOW:autopilotReleaseOwnerActivityTtlHours" \
   "$REPO_CLAUDE:autopilot_adopt_run" \
   "$REPO_CLAUDE:AUTOPILOT_ADOPTED" \
   "$DOC_WORKFLOW:--autopilot-adopt" \
@@ -649,22 +805,184 @@ fi
 
 # --- B14 the skill exists and is registered ----------------------------------
 # Registration alone leaves the model-facing spelling ungraded: a typo in the
-# frontmatter name or in either printed command ships with every check green. The
-# sibling `test-autopilot-release-cli.sh` A11 pins exactly this set, so match it.
+# frontmatter name or in any printed command ships with every check green. The
+# sibling `test-autopilot-release-cli.sh` A11 pins the same set minus the report
+# command, which exists only here: release has no read-only mode.
 B14_MISS=""
 if [ -r "$SKILL" ]; then
   grep -qF -- '"./skills/autopilot-adopt"' "$PLUGIN_JSON" || B14_MISS="$B14_MISS plugin.json-entry"
   grep -qE '^name: autopilot-adopt$' "$SKILL" || B14_MISS="$B14_MISS frontmatter-name"
   grep -qF '# /zensu:autopilot-adopt' "$SKILL" || B14_MISS="$B14_MISS heading"
   grep -qF -- '--autopilot-adopt --run <RUN_ID> --confirm' "$SKILL" || B14_MISS="$B14_MISS adopt-command"
+  # The Step 1 REPORT spelling, anchored at end of line: the confirmed spelling above
+  # contains it as a prefix, so an unanchored needle would be satisfied by that line
+  # alone while the report command the model runs first went unpinned.
+  grep -qE -- '--autopilot-adopt --run <RUN_ID>$' "$SKILL" || B14_MISS="$B14_MISS report-command"
   grep -qF -- '--autopilot-status' "$SKILL" || B14_MISS="$B14_MISS status-command"
 else
   B14_MISS=" unreadable"
 fi
 if [ -z "$B14_MISS" ]; then
-  check "B14 the skill is registered and its name, heading and both printed commands are pinned" PASS
+  check "B14 the skill is registered and its name, heading and all three printed commands are pinned" PASS
 else
   check "B14 autopilot-adopt skill contract missing:$B14_MISS" FAIL
+fi
+
+# --- B38 the critical section REQUIRES its mode operand (F4) ------------------
+# `_autopilot_adopt_critical` used to default the mode to `confirm` when the operand
+# was omitted. Refusing an unrecognized VALUE while defaulting an ABSENT one was half a
+# property, and the half that was missing is the dangerous one: the public entry point's
+# own comment justifies the refusal on the ground that the permissive spelling is the one
+# that MOVES OWNERSHIP, so an omission silently selected exactly that spelling.
+#
+# Driven rather than source-pinned, because a source pin on an arity test proves only
+# that someone typed the test. It also supplies an UNCONDITIONAL measured exit 3: the
+# other producers of that code sit inside conditional blocks that a fixture failure can
+# skip, and B21 reads VALUES, so a skipped block contributes nothing and 3 would read as
+# documented-but-unmeasured for a reason that is about this suite rather than the verb.
+#
+# The session is re-bound FIRST. Every call below runs in-process, so it is judged
+# against whatever session the last fixture happened to leave active — and an unbound
+# one refuses at exit 2 before any arity test is reached, which the CONTROL cannot tell
+# from the pass it is named for: an empty stderr satisfies a `grep … && fail` control
+# whatever the cause. Binding here is what makes the control discriminate.
+activate_session "$PROJECT" adopt_cli_taker || exit 1
+B38_ERR="$TMP/b38.err"
+( _autopilot_adopt_critical "$PROJECT" adopt_cli_run "$B1_TAKER_KEY" "$PROJECT" 1 ) \
+  >/dev/null 2>"$B38_ERR"
+B38_RC=$?
+B38_OK=true
+[ "$B38_RC" -eq 3 ] || B38_OK=false
+grep -qF 'the adoption mode operand is required' "$B38_ERR" || B38_OK=false
+# CONTROL: the same call WITH the operand must not be refused for arity. It may refuse
+# for any other reason this fixture produces — what must not happen is the arity cause,
+# and what must not happen either is the silent exit-2 binding fault above, which would
+# satisfy this control while proving nothing.
+( _autopilot_adopt_critical "$PROJECT" adopt_cli_run "$B1_TAKER_KEY" "$PROJECT" 1 report ) \
+  >/dev/null 2>"$TMP/b38b.err"
+B38_CTL_RC=$?
+grep -qF 'the adoption mode operand is required' "$TMP/b38b.err" && B38_OK=false
+if [ "$B38_CTL_RC" -eq 2 ] && [ ! -s "$TMP/b38b.err" ]; then B38_OK=false; fi
+# The PUBLIC entry point carries the same requirement. It kept a `confirm` default while
+# the critical section refused an omission, so the one spelling that MOVES OWNERSHIP was
+# what an omitted operand selected — at the only layer a caller outside this file reaches.
+B38_PUB_ERR="$TMP/b38pub.err"
+( cd "$PROJECT" && autopilot_adopt_run adopt_cli_run "$PROJECT" "$ZENSU_SESSION_KEY" ) \
+  >/dev/null 2>"$B38_PUB_ERR"
+B38_PUB_RC=$?
+[ "$B38_PUB_RC" -eq 3 ] || B38_OK=false
+grep -qF 'the adoption mode operand is required' "$B38_PUB_ERR" || B38_OK=false
+# CONTROL: the same call WITH the operand is not refused for arity.
+( cd "$PROJECT" && autopilot_adopt_run adopt_cli_run "$PROJECT" "$ZENSU_SESSION_KEY" report ) \
+  >/dev/null 2>"$TMP/b38pubb.err"
+grep -qF 'the adoption mode operand is required' "$TMP/b38pubb.err" && B38_OK=false
+if [ "$B38_OK" = true ]; then
+  check "B38 both the critical section and the public entry refuse an omitted mode operand with exit 3 and name it, and accept the same call with one" PASS
+else
+  check "B38 arity guard (critical rc=$B38_RC control rc=$B38_CTL_RC public rc=$B38_PUB_RC, stderr=$(head -c 120 "$B38_PUB_ERR" 2>/dev/null))" FAIL
+fi
+
+# --- B36 the REPORT-mode contract is stated where each audience reads it -------
+# B14 pins the report COMMAND; nothing pinned what the skill promises ABOUT it, and
+# the three promises below were each false in a different direction.
+#
+# The Step 2 exit table describes a CONFIRMED run: its exit-1 row says "the takeover
+# may already have landed" and its exit-5 row prescribes a rollback reading. Neither
+# state is reachable in report mode — the report branch returns before the first temp,
+# and the worker's only `fail(5)` is `writeOutput`, which report mode never reaches.
+# Step 1 nonetheless routed a non-zero REPORT exit straight into that table, so a
+# model reading a refused read-only run was told a takeover might have landed and
+# could go looking for a recovery against a run nothing touched. Exit 1 is genuinely
+# reachable there (`_autopilot_read_storage_ready` answers 1 for an absent
+# `.zensu/state`), so this is not a hypothetical row.
+#
+# The table is scoped in PROSE and never by adding a second table. `B21_DOCUMENTED`
+# below extracts its codes with a `sed` over EVERY numeric-leading table row in this
+# skill, so a parallel "report exits" table would silently enrol its own codes in the
+# documented set and corrupt B21 in both directions at once.
+B36_MISS=""
+if [ -r "$SKILL" ]; then
+  grep -qF 'A non-zero exit from the report never means anything moved' "$SKILL" \
+    || B36_MISS="$B36_MISS step1-nothing-moved"
+  grep -qF 'The table below describes the `--confirm` run' "$SKILL" \
+    || B36_MISS="$B36_MISS step2-scoped-to-confirm"
+  # F11: report mode's own write guard reuses exit 2, which the table already spends on
+  # two unrelated classes. The guard is unreachable today, so the honest fix is to name
+  # the overload in the row rather than to mint a code no case can ever measure.
+  grep -qF "the report's own write guard also exits 2" "$SKILL" \
+    || B36_MISS="$B36_MISS exit2-overload-documented"
+else
+  B36_MISS=" unreadable"
+fi
+# The library half, SLICE-BOUNDED. A file-wide grep is what made S7v vacuous in the
+# sibling suite: the needle existed elsewhere in the same file, so the check passed
+# whatever happened at the site it was named for. Bound to `_autopilot_adopt_critical`
+# and require the lease sentence INSIDE it.
+B36_LIB_START="$(grep -n '^_autopilot_adopt_critical() {' "$LIB" | head -1 | cut -d: -f1)"
+if [ -n "$B36_LIB_START" ]; then
+  B36_LIB_END="$(awk -v s="$B36_LIB_START" 'NR>s && /^}$/ {print NR; exit}' "$LIB")"
+  if [ -n "$B36_LIB_END" ]; then
+    sed -n "${B36_LIB_START},${B36_LIB_END}p" "$LIB" \
+      | grep -qF 'runs under the project lease' \
+      || B36_MISS="$B36_MISS lease-not-disclosed-at-the-report-branch"
+  else
+    B36_MISS="$B36_MISS lib-slice-unbounded"
+  fi
+else
+  B36_MISS="$B36_MISS lib-anchor-missing"
+fi
+if [ -z "$B36_MISS" ]; then
+  check "B36 the skill scopes its exit table to --confirm, states that a non-zero report moved nothing, names the exit-2 overload, and the library discloses the lease at the report branch" PASS
+else
+  check "B36 report-mode contract missing:$B36_MISS" FAIL
+fi
+
+# --- B37 the per-verb window split is stated consistently wherever it is stated ------
+# Four carriers each asserted something the split made false, and every one of them is a
+# CENSUS or a both-verbs claim — the drift class this repository records about itself.
+# They are pinned NEGATIVELY, on the retired spelling, because that is the direction that
+# can actually fail: the replacement wording is mine to choose, so a positive needle would
+# only ever re-assert what I just wrote, while the retired literal is what a later edit
+# would restore by accident.
+B37_MISS=""
+b37_forbid() { # file needle label
+  [ -r "$1" ] || { B37_MISS="$B37_MISS $3=unreadable"; return; }
+  grep -qF -- "$2" "$1" && B37_MISS="$B37_MISS $3"
+  return 0
+}
+b37_require() { # file needle label
+  [ -r "$1" ] || { B37_MISS="$B37_MISS $3=unreadable"; return; }
+  grep -qF -- "$2" "$1" || B37_MISS="$B37_MISS $3"
+  return 0
+}
+# F2 — the doctor paragraph called one key "the window --autopilot-release and
+# --autopilot-adopt actually read". Release reads its own key now, and the SAME file
+# states the split correctly further down, so the file contradicted itself.
+b37_forbid "$DOC_WORKFLOW" \
+  'the window `--autopilot-release` and `--autopilot-adopt` actually read' f2-both-verbs-window
+# F13 — the getter comment named two constant-mirror pins where four getters now read
+# operands through `getter_operand`.
+b37_forbid "$PLUGIN_DIR/hooks/lib/zensu-config.sh" \
+  'the two constant-mirror pins' f13-two-mirror-pins
+# JUDGE-2 — three arms emit the stand-down line; the future-dated case REFUSES with
+# exit 7 instead, which is not a stand-down. Fixing this by adding a fourth emission
+# would contradict AC-005, so the comment is what moves.
+b37_forbid "$LIB" 'FOUR ways to stand down' judge2-four-stand-downs
+# F1 — the CLAUDE.md census said the re-resolve appears TWICE and that C21c runs under a
+# floor of three; there are three blocks and the floor is four. Its own TRIGGER fired.
+b37_forbid "$REPO_CLAUDE" 'record-root re-resolve TWICE' f1-stale-census
+b37_forbid "$REPO_CLAUDE" 'under a floor of three' f1-stale-floor
+# F8 — the trigger fired and the seam was NOT taken. A fired trigger declined in silence
+# is the exact drift F1 documents, so the decline must be written down with a new one.
+# The needle must be SPECIFIC to this seam. `TRIGGER was evaluated` alone already occurs
+# in the Plan-Approval Delivery Route section from an unrelated round, so it matched prose
+# nobody wrote for F8 and could never fail — the same needle-matches-prose defect F10 is
+# about, reintroduced by the check written to prevent it.
+b37_require "$REPO_CLAUDE" 'The TRIGGER FIRED in the per-verb window round' f8-decline-unrecorded
+if [ -z "$B37_MISS" ]; then
+  check "B37 no carrier still claims one window governs both verbs, names two mirror pins, counts four stand-downs or a two-block re-resolve, and the declined seam is recorded" PASS
+else
+  check "B37 per-verb split carriers still stale:$B37_MISS" FAIL
 fi
 
 # --- B15 the model-facing refusal offers adoption BEFORE cancellation --------
@@ -821,6 +1139,7 @@ if autopilot_begin_run adopt_blk_run "$BLK_OWNER" "$BLKP" >/dev/null 2>&1 \
       >/dev/null 2>"$TMP/b18.err"
     B18_RC=$?
     if [ "$B18_RC" -eq 3 ] && grep -qF 'live inner TDD chain' "$TMP/b18.err" \
+      && grep -qF 'blocking that chain does not make the run adoptable' "$TMP/b18.err" \
       && [ "$(digest "$BLK_RUN_FILE")" = "$BEFORE_B18" ]; then
       check "B18 a run blocked out of TDD_RUNNING is refused on its pending stage" PASS
     else
@@ -861,6 +1180,179 @@ if autopilot_begin_run adopt_rep_run "$REP_OWNER" "$REP" >/dev/null 2>&1; then
   fi
 else
   check "B19 fixture could not build a repair run" FAIL
+fi
+
+# --- B19b the repair also covers a pointer naming a FINISHED run ---------------
+# The branch has two entry shapes and B19 drives only the absent pointer. Here the
+# pointer survives and names a run that has since been cancelled, so the exit-10 test
+# fails on the run id and the terminal run is filtered out of the shadowed inventory.
+# The second record is copied BEFORE the cancel: a copy taken afterwards would itself
+# be terminal and the verb would refuse it with exit 3 before reaching the branch.
+FIN="$TMP/finished"; mkdir -p "$FIN"
+FIN="$(cd "$FIN" && pwd -P)"
+activate_session "$FIN" adopt_fin_owner || exit 1
+FIN_OWNER="$ZENSU_SESSION_KEY"
+if autopilot_begin_run adopt_fin_old "$FIN_OWNER" "$FIN" >/dev/null 2>&1; then
+  FIN_PTR="$(_autopilot_active_path "$FIN/.zensu/state" "$FIN_OWNER")"
+  FIN_OLD_FILE="$(autopilot_run_file adopt_fin_old "$FIN")"
+  FIN_NEW_FILE="$(autopilot_run_file adopt_fin_new "$FIN")"
+  node -e '
+    const fs = require("fs");
+    const state = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    state.runId = "adopt_fin_new";
+    fs.writeFileSync(process.argv[2], JSON.stringify(state, null, 2) + "\n");
+  ' "$FIN_OLD_FILE" "$FIN_NEW_FILE" 2>/dev/null
+  autopilot_apply_event adopt_fin_old evt-cancel CANCEL '{}' "$FIN" >/dev/null 2>&1
+  B19B_PREMISE=no
+  [ -f "$FIN_NEW_FILE" ] && json_ok "$FIN_OLD_FILE" 'value.stage === "CANCELLED"' \
+    && json_ok "$FIN_PTR" 'value.runId === "adopt_fin_old"' && B19B_PREMISE=yes
+  B19B_EVENTS="$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).events.length))' "$FIN_NEW_FILE" 2>/dev/null)"
+  run_verb "$FIN" adopt_fin_owner --autopilot-adopt --run adopt_fin_new --confirm >/dev/null 2>"$TMP/b19b.err"
+  B19B_RC=$?
+  if [ "$B19B_PREMISE" = yes ] && [ "$B19B_RC" -eq 0 ] \
+    && grep -qF "its owner pointer was missing or named a run that has already finished, and has been reinstalled" "$TMP/b19b.err" \
+    && json_ok "$FIN_PTR" 'value.runId === "adopt_fin_new"' \
+    && json_ok "$FIN_NEW_FILE" "value.ownerSessionId === '$FIN_OWNER'" \
+    && [ -n "$B19B_EVENTS" ] && json_ok "$FIN_NEW_FILE" "value.events.length === $B19B_EVENTS"; then
+    check "B19b the owner's own adopt reinstalls a pointer that named a finished run and leaves the record's events unchanged" PASS
+  else
+    check "B19b finished-run repair (premise=$B19B_PREMISE, rc=$B19B_RC, events=$B19B_EVENTS, stderr: $(head -c 160 "$TMP/b19b.err" 2>/dev/null))" FAIL
+  fi
+else
+  check "B19b fixture could not build a finished-run repair" FAIL
+fi
+
+# --- B32 a retry retires a stale pointer another key still holds for this run --
+# A takeover that dies after its record install but before its retire leaves the
+# previous owner's pointer naming a run that key no longer owns, and nothing re-derives
+# that filename afterwards, because the previous owner's id has left the record. The
+# retry lands on the already-owned exit, or on the repair when this session's own
+# pointer is gone too, so both paths must sweep. The interrupted retire is reproduced by
+# writing the previous owner's pointer back after a completed takeover.
+b32_arm() {
+  local arm="$1" project="$TMP/b32-$1" owner owner_ptr taker taker_ptr run err rc read_rc ok=true
+  mkdir -p "$project" && project="$(cd "$project" && pwd -P)" || return 1
+  run="adopt_b32_$arm"
+  err="$TMP/b32-$arm.err"
+  activate_session "$project" "adopt_b32_${arm}_owner" || return 1
+  owner="$ZENSU_SESSION_KEY"
+  autopilot_begin_run "$run" "$owner" "$project" >/dev/null 2>&1 || return 1
+  owner_ptr="$(_autopilot_active_path "$project/.zensu/state" "$owner")"
+  run_verb_cfg "$project" "adopt_b32_${arm}_taker" "$TMP/ttl-zero.json" \
+    --autopilot-adopt --run "$run" --confirm >/dev/null 2>&1 || return 1
+  taker="$ZENSU_SESSION_KEY"
+  taker_ptr="$(_autopilot_active_path "$project/.zensu/state" "$taker")"
+  json_ok "$(autopilot_run_file "$run" "$project")" "value.ownerSessionId === '$taker'" || return 1
+  [ ! -e "$owner_ptr" ] || return 1
+  RUN="$run" node -e 'process.stdout.write(JSON.stringify({ schemaVersion: 1, runId: process.env.RUN }, null, 2) + "\n")' > "$owner_ptr" || return 1
+  [ "$arm" = repair ] && rm -f "$taker_ptr"
+  run_verb "$project" "adopt_b32_${arm}_taker" --autopilot-adopt --run "$run" --confirm >/dev/null 2>"$err"
+  rc=$?
+  autopilot_read_active "$project" "$owner" >/dev/null 2>&1
+  read_rc=$?
+  [ "$rc" -eq 0 ] || ok=false
+  [ ! -e "$owner_ptr" ] || ok=false
+  [ "$read_rc" -eq 1 ] || ok=false
+  grep -qF "retired a stale owner pointer that still designated this run: $(basename "$owner_ptr")" "$err" || ok=false
+  json_ok "$taker_ptr" "value.runId === '$run'" || ok=false
+  B32_DETAIL="$B32_DETAIL $arm:rc=$rc,read=$read_rc,stale=$( [ -e "$owner_ptr" ] && echo kept || echo gone)"
+  [ "$ok" = true ]
+}
+B32_DETAIL=""
+B32_OK=true
+b32_arm owned || B32_OK=false
+b32_arm repair || B32_OK=false
+if [ "$B32_OK" = true ]; then
+  check "B32 the already-owned and repair retries both retire a stale pointer another key holds for the run, say so, and free that key's read" PASS
+else
+  check "B32 stale other-key pointer sweep (${B32_DETAIL# })" FAIL
+fi
+
+# --- B33 a just-adopted run is protected before its new owner's next turn end ----
+# Liveness is judged on the owner's workflow-document mtime, and a session that adopts
+# while its own document is stale used to leave that document stale: the second verb
+# queued behind the lease then read the new owner as silent and took the run over, or
+# cancelled it. The CLI's provenance write refreshes the document only AFTER the lease,
+# and only when it succeeds, so the library verb is driven in-process here, where no
+# provenance write follows. Two arms: a second adopter, and a third session's release.
+b33_arm() {
+  local arm="$1" project="$TMP/b33-$1" run owner first err rc ok=true
+  mkdir -p "$project" && project="$(cd "$project" && pwd -P)" || return 1
+  run="adopt_b33_$arm"
+  err="$TMP/b33-$arm.err"
+  activate_session "$project" "adopt_b33_${arm}_owner" || return 1
+  owner="$ZENSU_SESSION_KEY"
+  autopilot_begin_run "$run" "$owner" "$project" >/dev/null 2>&1 || return 1
+  touch -t 200001010000 "$project/.zensu/state/tdd-phase-$owner.json" || return 1
+  activate_session "$project" "adopt_b33_${arm}_first" || return 1
+  first="$ZENSU_SESSION_KEY"
+  touch -t 200001010000 "$project/.zensu/state/tdd-phase-$first.json" || return 1
+  ( cd "$project" && autopilot_adopt_run "$run" "$project" "$first" confirm ) >/dev/null 2>&1 || return 1
+  json_ok "$(autopilot_run_file "$run" "$project")" "value.ownerSessionId === '$first'" || return 1
+  if [ "$arm" = adopt ]; then
+    run_verb "$project" "adopt_b33_${arm}_second" --autopilot-adopt --run "$run" --confirm >/dev/null 2>"$err"
+  else
+    run_verb "$project" "adopt_b33_${arm}_second" --autopilot-release --run "$run" --confirm >/dev/null 2>"$err"
+  fi
+  rc=$?
+  [ "$rc" -eq 7 ] || ok=false
+  grep -qF 'the owning session is still active' "$err" || ok=false
+  json_ok "$(autopilot_run_file "$run" "$project")" "value.ownerSessionId === '$first' && value.stage !== 'CANCELLED'" || ok=false
+  B33_DETAIL="$B33_DETAIL $arm:rc=$rc"
+  [ "$ok" = true ]
+}
+B33_DETAIL=""
+B33_OK=true
+b33_arm adopt || B33_OK=false
+b33_arm release || B33_OK=false
+if [ "$B33_OK" = true ]; then
+  check "B33 a run adopted by a session whose own document was stale is refused to a second adopter and to a release with exit 7" PASS
+else
+  check "B33 just-adopted protection (${B33_DETAIL# }, each expected 7)" FAIL
+fi
+
+# --- B34 the repair refuses a run whose live inner chain another session drives --
+# Ownership on the repair branch is decided by `ownerSessionId`, an unauthenticated
+# field, and the branch used to reinstall the pointer before any pending-stage check,
+# so a record planted with this session's id at TDD_RUNNING became this session's
+# active run. The repair now refuses with exit 3 while the pending stage is TDD_RUNNING
+# and `tdd.sessionId` names another session, and installs nothing. The CONTROL is the
+# same record whose chain this session drives itself, which still repairs.
+b34_arm() {
+  local arm="$1" project="$TMP/b34-$1" run owner chain_session ptr err rc ok=true
+  mkdir -p "$project" && project="$(cd "$project" && pwd -P)" || return 1
+  run="adopt_b34_$arm"
+  err="$TMP/b34-$arm.err"
+  activate_session "$project" "adopt_b34_${arm}_owner" || return 1
+  owner="$ZENSU_SESSION_KEY"
+  chain_session="b34-foreign-chain-session"
+  [ "$arm" = control ] && chain_session="$owner"
+  autopilot_begin_run "$run" "$owner" "$project" >/dev/null 2>&1 || return 1
+  autopilot_apply_event "$run" evt-plan PLAN_APPROVED "{\"approvedPlanSha256\":\"$PLAN_SHA\"}" "$project" >/dev/null 2>&1 || return 1
+  autopilot_apply_event "$run" evt-tdd TDD_STARTED \
+    "{\"attempt\":1,\"chainId\":\"b34-chain-001\",\"sessionId\":\"$chain_session\"}" "$project" >/dev/null 2>&1 || return 1
+  json_ok "$(autopilot_run_file "$run" "$project")" "value.stage === 'TDD_RUNNING'" || return 1
+  ptr="$(_autopilot_active_path "$project/.zensu/state" "$owner")"
+  rm -f "$ptr"
+  run_verb "$project" "adopt_b34_${arm}_owner" --autopilot-adopt --run "$run" --confirm >/dev/null 2>"$err"
+  rc=$?
+  if [ "$arm" = control ]; then
+    [ "$rc" -eq 0 ] && [ -f "$ptr" ] || ok=false
+  else
+    [ "$rc" -eq 3 ] && [ ! -e "$ptr" ] || ok=false
+    grep -qF 'its inner TDD chain is driven by another session' "$err" || ok=false
+  fi
+  B34_DETAIL="$B34_DETAIL $arm:rc=$rc,pointer=$( [ -e "$ptr" ] && echo present || echo absent)"
+  [ "$ok" = true ]
+}
+B34_DETAIL=""
+B34_OK=true
+b34_arm refused || B34_OK=false
+b34_arm control || B34_OK=false
+if [ "$B34_OK" = true ]; then
+  check "B34 the repair refuses a TDD_RUNNING run whose chain another session drives and installs nothing, while a chain this session drives still repairs" PASS
+else
+  check "B34 repair pending-stage refusal (${B34_DETAIL# })" FAIL
 fi
 
 # --- B24 owning a DIFFERENT live run refuses the repair, pointer untouched ------
@@ -904,20 +1396,69 @@ else
   check "B24 fixture could not build a shadowed-pointer run" FAIL
 fi
 
+# --- B35 an unsafe path at the taker's own pointer is refused before any write -
+# The `regular-or-absent` pre-check guards the second writer of the owner-keyed
+# pointer, and until this case its only pin was a source grep. Without the guard the
+# same directory surfaces much later as a pointer-install exit 5, so the discriminator
+# is the exit code together with the named refusal, plus both files left byte-identical.
+UNS="$TMP/unsafe-pointer"; mkdir -p "$UNS"
+UNS="$(cd "$UNS" && pwd -P)"
+activate_session "$UNS" adopt_uns_owner || exit 1
+UNS_OWNER="$ZENSU_SESSION_KEY"
+if autopilot_begin_run adopt_uns_run "$UNS_OWNER" "$UNS" >/dev/null 2>&1; then
+  UNS_RUN_FILE="$(autopilot_run_file adopt_uns_run "$UNS")"
+  UNS_OWNER_PTR="$(_autopilot_active_path "$UNS/.zensu/state" "$UNS_OWNER")"
+  activate_session "$UNS" adopt_uns_taker || exit 1
+  UNS_TAKER_PTR="$(_autopilot_active_path "$UNS/.zensu/state" "$ZENSU_SESSION_KEY")"
+  mkdir -p "$UNS_TAKER_PTR"
+  B35_RUN_BEFORE="$(digest "$UNS_RUN_FILE")"
+  B35_PTR_BEFORE="$(digest "$UNS_OWNER_PTR")"
+  run_verb_cfg "$UNS" adopt_uns_taker "$TMP/ttl-zero.json" \
+    --autopilot-adopt --run adopt_uns_run --confirm >/dev/null 2>"$TMP/b35.err"
+  B35_RC=$?
+  if [ -d "$UNS_TAKER_PTR" ] && [ "$B35_RC" -eq 2 ] \
+    && grep -qF 'the owner pointer path was refused: not a regular file or an absent path inside the state directory' "$TMP/b35.err" \
+    && [ "$(digest "$UNS_RUN_FILE")" = "$B35_RUN_BEFORE" ] \
+    && [ "$(digest "$UNS_OWNER_PTR")" = "$B35_PTR_BEFORE" ]; then
+    check "B35 a directory at the taker's pointer path is refused with exit 2 and a named cause, leaving the record and the previous owner's pointer untouched" PASS
+  else
+    check "B35 caller-pointer pre-check (rc=$B35_RC expected 2, stderr: $(head -c 160 "$TMP/b35.err" 2>/dev/null))" FAIL
+  fi
+else
+  check "B35 fixture could not build an unsafe-pointer run" FAIL
+fi
+
 # --- B20 a broken TTL read falls back to the default, not to 0 ---------------
 # 0 disables the liveness check, so normalizing a getter FAULT to it would fail
 # open on a guard that also gates the destructive verb. Source-pinned: the fault
 # is not reachable through the CLI while the getter returns its own default.
-# The expected literal is DERIVED from the getter's own default operand, so a change
-# there turns this red instead of leaving a stale hand copy green. The negative arm
-# matches any `ttl_hours=0` normalization, not one exact spelling.
-B20_GETTER_DEFAULT="$(sed -n 's/^zensu_autopilot_owner_activity_ttl_hours().*_zensu_config_bounded_int [A-Za-z]* \([0-9][0-9]*\) .*/\1/p' "$CFG")"
-B20_DEFAULT_SITES="$(grep -cF "ttl_hours=${B20_GETTER_DEFAULT} ;; esac" "$LIB" || true)"
+# Each verb reads its OWN window, so each fallback is judged inside its own function:
+# the verb must call its own getter, and its normalization must fall back to THAT
+# getter's default operand, DERIVED from the config library so a changed default turns
+# this red instead of leaving a stale hand copy green. Scoping per function is what
+# catches a swap of the two getters, which a file-wide count cannot see. The negative
+# arm matches any `ttl_hours=0` normalization, not one exact spelling.
+b20_body() { awk -v f="$1" '$0 ~ "^" f "\\(\\) *\\{" { p = 1 } p { print } p && /^\}$/ { exit }' "$LIB"; }
+B20_OK=true
+B20_DETAIL=""
+for B20_PAIR in autopilot_adopt_run:zensu_autopilot_owner_activity_ttl_hours \
+  autopilot_release_run:zensu_autopilot_release_owner_activity_ttl_hours; do
+  B20_VERB="${B20_PAIR%%:*}"
+  B20_GETTER="${B20_PAIR#*:}"
+  B20_DEFAULT="$(sed -n "s/^${B20_GETTER}().*_zensu_config_bounded_int [A-Za-z]* \([0-9][0-9]*\) .*/\1/p" "$CFG")"
+  B20_BODY="$(b20_body "$B20_VERB")"
+  B20_CALLS="$(printf '%s\n' "$B20_BODY" | grep -cF "ttl_hours=\"\$(${B20_GETTER} 2>/dev/null)\"" || true)"
+  B20_SITES="$(printf '%s\n' "$B20_BODY" | grep -cF "ttl_hours=${B20_DEFAULT} ;; esac" || true)"
+  B20_DETAIL="$B20_DETAIL $B20_VERB:default=${B20_DEFAULT:-none},calls=${B20_CALLS:-0},sites=${B20_SITES:-0}"
+  [ -n "$B20_DEFAULT" ] && [ -n "$B20_BODY" ] || B20_OK=false
+  [ "${B20_CALLS:-0}" -eq 1 ] && [ "${B20_SITES:-0}" -eq 1 ] || B20_OK=false
+done
 B20_ZERO_SITES="$(grep -cE 'ttl_hours=0[[:space:]]*;;' "$LIB" || true)"
-if [ -n "$B20_GETTER_DEFAULT" ] && [ "${B20_DEFAULT_SITES:-0}" -eq 2 ] && [ "${B20_ZERO_SITES:-0}" -eq 0 ]; then
-  check "B20 both TTL normalizations fall back to the getter default, never to the disabling 0" PASS
+[ "${B20_ZERO_SITES:-0}" -eq 0 ] || B20_OK=false
+if [ "$B20_OK" = true ]; then
+  check "B20 each verb reads its own window getter and falls back to that getter's default, never to the disabling 0" PASS
 else
-  check "B20 TTL fallback (getter default='${B20_GETTER_DEFAULT}', sites=${B20_DEFAULT_SITES:-0} expected 2, zero-sites=${B20_ZERO_SITES:-0} expected 0)" FAIL
+  check "B20 TTL fallback (${B20_DETAIL# }, zero-sites=${B20_ZERO_SITES:-0} expected 0)" FAIL
 fi
 
 # --- B23 a project with no run storage refuses with exit 1 -------------------
@@ -930,7 +1471,7 @@ NOSTORE_KEY="$ZENSU_SESSION_KEY"
 # The shell entry is driven directly: `run_verb` re-activates the session, and the
 # baseline recreates the very state directory this check needs to be absent.
 rm -rf "$NOSTORE/.zensu/state"
-( cd "$NOSTORE" && autopilot_adopt_run adopt_absent_run "$NOSTORE" "$NOSTORE_KEY" ) >/dev/null 2>&1
+( cd "$NOSTORE" && autopilot_adopt_run adopt_absent_run "$NOSTORE" "$NOSTORE_KEY" confirm ) >/dev/null 2>&1
 B23_RC=$?
 if [ "$B23_RC" -eq 1 ]; then
   check "B23 a project with no run storage refuses with exit 1" PASS
@@ -950,7 +1491,7 @@ fi
 # different halves of one invocation: B23 the exit code, B27 the sentence and the
 # stream it travels on.
 B27_ERR="$TMP/b27.err"
-( cd "$NOSTORE" && autopilot_adopt_run adopt_absent_run "$NOSTORE" "$NOSTORE_KEY" ) >/dev/null 2>"$B27_ERR"
+( cd "$NOSTORE" && autopilot_adopt_run adopt_absent_run "$NOSTORE" "$NOSTORE_KEY" confirm ) >/dev/null 2>"$B27_ERR"
 B27_RC=$?
 B27_OK=true
 [ "$B27_RC" -eq 1 ] || B27_OK=false
@@ -963,7 +1504,7 @@ grep -qF 'this project holds no Autopilot run storage' "$B27_ERR" || B27_OK=fals
 grep -qF 'the run record is unreadable or the state directory is unsafe' "$B27_ERR" && B27_OK=false
 # The refusal travels on stderr, never stdout: stdout is the worker's own
 # `<basename>\t<owner>` protocol channel and a diagnostic must not enter it.
-B27_OUT="$( ( cd "$NOSTORE" && autopilot_adopt_run adopt_absent_run "$NOSTORE" "$NOSTORE_KEY" ) 2>/dev/null )"
+B27_OUT="$( ( cd "$NOSTORE" && autopilot_adopt_run adopt_absent_run "$NOSTORE" "$NOSTORE_KEY" confirm ) 2>/dev/null )"
 [ -z "$B27_OUT" ] || B27_OK=false
 if [ "$B27_OK" = true ]; then
   check "B27 a state-class refusal names itself on stderr, distinguishes absent storage from an unsafe one, and writes nothing to stdout" PASS
@@ -1047,20 +1588,194 @@ else
   check "B22 the exit-0 outcome discriminator or its protocol-fault refusal is missing" FAIL
 fi
 
+# --- B21b exit 5 is driven in-process on every install arm --------------------
+# `_autopilot_adopt_critical` calls `_tdd_atomic_replace_regular` by name in the
+# calling shell, so a subshell shadow reaches each install arm without breaking the
+# filesystem. The shadow is keyed on the TARGET's shape rather than on call order, so
+# an install the lease machinery performs cannot shift which call fails. Five arms:
+# the pointer install fails; the record install fails with no earlier pointer and with
+# one, both of which must roll the pointer back; the rollback itself fails; and the
+# repair path, which has no record to install and must still report its repair.
+eval "b21_real_install() $(declare -f _tdd_atomic_replace_regular | tail -n +2)"
+B21B_POINTER_RC=""
+B21B_DETAIL=""
+b21_arm() {
+  local arm="$1" project="$TMP/b21-$1" owner owner_ptr caller caller_ptr run run_file
+  local prior_digest="" owner_ptr_digest run_digest out rc outcome err mark ok=true
+  mkdir -p "$project" && project="$(cd "$project" && pwd -P)" || return 1
+  run="adopt_b21_$arm"
+  err="$TMP/b21-$arm.err"
+  mark="$TMP/b21-$arm.record-install-attempted"
+  if [ "$arm" = prior ] || [ "$arm" = stuck ]; then
+    activate_session "$project" "adopt_b21_${arm}_taker" || return 1
+    autopilot_begin_run "${run}_old" "$ZENSU_SESSION_KEY" "$project" >/dev/null 2>&1 || return 1
+    autopilot_apply_event "${run}_old" evt-cancel CANCEL '{}' "$project" >/dev/null 2>&1 || return 1
+  fi
+  activate_session "$project" "adopt_b21_${arm}_owner" || return 1
+  owner="$ZENSU_SESSION_KEY"
+  autopilot_begin_run "$run" "$owner" "$project" >/dev/null 2>&1 || return 1
+  run_file="$(autopilot_run_file "$run" "$project")"
+  owner_ptr="$(_autopilot_active_path "$project/.zensu/state" "$owner")"
+  if [ "$arm" = repair ]; then
+    rm -f "$owner_ptr"
+    caller="$owner"
+  else
+    activate_session "$project" "adopt_b21_${arm}_taker" || return 1
+    caller="$ZENSU_SESSION_KEY"
+    owner_ptr_digest="$(digest "$owner_ptr")"
+  fi
+  caller_ptr="$(_autopilot_active_path "$project/.zensu/state" "$caller")"
+  if [ "$arm" = prior ] || [ "$arm" = stuck ]; then
+    json_ok "$caller_ptr" "value.runId === '${run}_old'" || return 1
+    prior_digest="$(digest "$caller_ptr")"
+  fi
+  run_digest="$(digest "$run_file")"
+  out="$(
+    B21_PTR_CALLS=0
+    _tdd_atomic_replace_regular() {
+      case "$2" in
+        (*/autopilot-run-*.json)
+          : > "$mark"
+          case "$arm" in (record|prior|stuck|repair) return 1 ;; esac
+          ;;
+        (*/autopilot-active-*.json)
+          B21_PTR_CALLS=$((B21_PTR_CALLS + 1))
+          [ "$arm" = pointer ] && return 1
+          [ "$arm" = stuck ] && [ "$B21_PTR_CALLS" -ge 2 ] && return 1
+          ;;
+      esac
+      b21_real_install "$@"
+    }
+    export ZENSU_CONFIG="$TMP/ttl-zero.json"
+    cd "$project" || exit 99
+    autopilot_adopt_run "$run" "$project" "$caller" confirm >/dev/null 2>"$err"
+    printf '%s|%s' "$?" "${ZENSU_AUTOPILOT_ADOPT_OUTCOME:-}"
+  )"
+  rc="${out%%|*}"
+  outcome="${out#*|}"
+  case "$arm" in
+    pointer)
+      B21B_POINTER_RC="$rc"
+      [ "$rc" = 5 ] && [ -z "$outcome" ] || ok=false
+      grep -qF 'pointer install failed; nothing moved' "$err" || ok=false
+      [ ! -e "$caller_ptr" ] || ok=false
+      ;;
+    record)
+      [ "$rc" = 5 ] && [ -z "$outcome" ] || ok=false
+      grep -qF 'record install failed; the owner pointer was rolled back and nothing moved' "$err" || ok=false
+      [ ! -e "$caller_ptr" ] || ok=false
+      ;;
+    prior)
+      [ "$rc" = 5 ] && [ -z "$outcome" ] || ok=false
+      grep -qF 'record install failed; the owner pointer was rolled back and nothing moved' "$err" || ok=false
+      [ -f "$caller_ptr" ] && [ "$(digest "$caller_ptr")" = "$prior_digest" ] || ok=false
+      ;;
+    stuck)
+      [ "$rc" = 5 ] && [ -z "$outcome" ] || ok=false
+      grep -qF 'record install failed and rolling back the owner pointer also failed' "$err" || ok=false
+      json_ok "$caller_ptr" "value.runId === '$run'" || ok=false
+      ;;
+    repair)
+      [ "$rc" = 0 ] && [ "$outcome" = repaired ] || ok=false
+      [ ! -e "$mark" ] || ok=false
+      json_ok "$caller_ptr" "value.runId === '$run'" || ok=false
+      ;;
+  esac
+  [ "$(digest "$run_file")" = "$run_digest" ] || ok=false
+  if [ "$arm" != repair ]; then
+    [ "$(digest "$owner_ptr")" = "$owner_ptr_digest" ] || ok=false
+  fi
+  B21B_DETAIL="$B21B_DETAIL $arm:rc=$rc,outcome=${outcome:-none},ptr=$( [ -e "$caller_ptr" ] && echo present || echo absent)"
+  [ "$ok" = true ]
+}
+B21B_OK=true
+for B21B_ARM in pointer record prior stuck repair; do
+  b21_arm "$B21B_ARM" || B21B_OK=false
+done
+if [ "$B21B_OK" = true ]; then
+  check "B21b every install arm is driven: a failed pointer install moves nothing, a failed record install rolls the pointer back or says it could not, and a repair reports itself without a record install" PASS
+else
+  check "B21b install arms (${B21B_DETAIL# })" FAIL
+fi
+
 # --- B21 the skill's exit-code table matches the codes this suite measured ----
 # B14 pins registration only. The table is what a model reads before running a
 # state-mutating verb, so every row must name a code the verb actually returns.
 # The code list is EXTRACTED from the skill's own table rather than hardcoded: a
 # hardcoded list turns the check's name — a universal over what the skill documents
 # — into a fixed sample, so a row naming a code the verb never returns would pass.
+# DEFINED here, beside the B21b arms it continues, and CALLED at the very end of this
+# file. It reads the VALUES of this suite's rc variables, so a variable assigned below
+# the call contributes nothing: `B25_RC` and `B30_RC` sit further down and were both
+# silently absent from the population while the scan itself looked total.
+b21_report() {
 B21_DOCUMENTED="$(sed -n 's/^| *\([0-9][0-9]*\) *|.*/\1/p' "$SKILL" | tr '\n' ' ')"
-# Exit 5 is documented and NOT driven: it needs a temp-file or atomic-install
-# failure inside the locked critical section, which no fixture can force without
-# breaking the filesystem under the suite. The allowance is stated here rather than
-# left as silence, and it is the ONLY one — anything else the skill documents must
-# be measured. B23 above exists so exit 1 is not a second entry on this list.
-B21_UNDRIVEN=" 5 "
-B21_MEASURED=" $B1_RC $B3_RC $B5_RC $B7_RC $B11_RC $B17_RC $B18_RC $B6_RC $B23_RC "
+# Every documented code is measured, exit 5 included: B21b drives it in-process
+# through a shadowed install, so no code needs an undriven allowance. B23 above exists
+# for the same reason on exit 1.
+# `$B2_RC` carries the INVOCATION-fault 2, which `$B1_RC` used to carry: a call with
+# no `--confirm` is a read-only report now, not a usage error, so B1 measures 7 and
+# the only remaining producer of 2 in this suite's own commands is a malformed flag.
+# DERIVED, not hand-listed. This was an eleven-variable string typed by hand, and a
+# hand-curated census beside a derived forward direction is the half-pinned shape that
+# reads greener than an unpinned one: the "documented-but-unmeasured" arm above really
+# does come from the skill's own table, so the pair LOOKED symmetric while this half
+# only ever iterated whatever someone remembered to add.
+#
+# It was also wrong in BOTH directions, which is why the fix is derivation rather than
+# a longer list. The retired string named `$B5_RC`, `$B11_RC` and `$B18_RC` while
+# `B4_RC`, `B4B_RC`, `B8_OLD_RC` and `B27_RC` were absent from it. Extending the list by
+# hand would have repeated the defect one round later — and the first derivation
+# repeated it anyway from the other side: it anchored the scan at column zero, so those
+# same three names, all assigned indented, stayed out of the population it built.
+#
+# The population comes from the suite's own source: every `<name>_RC=` assignment,
+# wherever it sits on the line. Anchoring it at column zero was the same defect one
+# layer down — it collected 13 of the 34 such variables this file assigns, because an
+# assignment inside a conditional block, a function body or a command substitution is
+# indented, so `B5_RC`, `B11_RC` and `B18_RC` were missing for exactly the reason the
+# retired hand-list had them wrong. `eval` is what reads them, and it is safe here
+# because the names are matched to `[A-Z0-9_]*_RC` first, so nothing but an identifier
+# this file assigns can reach it.
+# SCOPED to the CLI layer. `B4B_RC` is excluded by name and the reason is not a
+# convenience: `B4b` captures the WORKER's pre-collapse exit 10 deliberately, asserting
+# it at its own layer, and `zensu-log.sh` collapses 0/10/11 to a single 0 before any
+# caller sees one. The skill's table documents the codes the COMMAND returns, so 10 is
+# not an undocumented CLI exit — it is a worker code that never reaches a CLI table.
+# Sweeping it in made the derivation report a gap that does not exist. This exclusion
+# narrows the population with a stated cause; it must never be extended to silence a
+# code the CLI really can return.
+B21_EXCLUDED='^B4B_RC$'
+B21_NAMES="$(grep -oE '(^|[[:space:]]|;|\()[A-Z0-9_]+_RC=' "$0" | sed 's/^[^A-Z]*//;s/=$//' | sort -u | grep -vE "$B21_EXCLUDED")"
+B21_MEASURED=" "
+for b21_var in $B21_NAMES; do
+  eval "b21_val=\${$b21_var:-}"
+  case "$b21_val" in
+    ''|*[!0-9]*) continue ;;
+  esac
+  case "$B21_MEASURED" in *" $b21_val "*) continue ;; esac
+  B21_MEASURED="$B21_MEASURED$b21_val "
+done
+# Fail loudly rather than vacuously: an empty derivation means the scan stopped
+# matching, and a universal over an empty set passes while grading nothing.
+if [ -z "$(printf '%s' "$B21_MEASURED" | tr -d ' ')" ]; then
+  check "B21pre-measured the rc-variable scan yielded no codes — the derivation, not the verb, is broken" FAIL
+else
+  check "B21pre-measured the rc-variable scan yields codes, so the reverse comparison below is not vacuous" PASS
+fi
+# A non-empty derivation is not enough either, and that is the lesson the anchored scan
+# taught: it was non-empty throughout and still missed two thirds of its population. The
+# FLOOR is the same scan with no position rule at all, which no assignment spelling can
+# escape — so a scan that stops seeing one form fails here rather than quietly grading a
+# smaller world.
+B21_UNBOUNDED="$(grep -oE '[A-Z0-9_]+_RC=' "$0" | sed 's/=$//' | sort -u | grep -vE "$B21_EXCLUDED")"
+B21_NAME_COUNT="$(printf '%s\n' "$B21_NAMES" | grep -c '[A-Z]')"
+B21_FLOOR_COUNT="$(printf '%s\n' "$B21_UNBOUNDED" | grep -c '[A-Z]')"
+if [ "$B21_NAME_COUNT" -gt 0 ] && [ "$B21_NAME_COUNT" -eq "$B21_FLOOR_COUNT" ]; then
+  check "B21pre-population the scan collects every rc variable this file assigns" PASS
+else
+  check "B21pre-population the scan collects every rc variable this file assigns (collected $B21_NAME_COUNT of $B21_FLOOR_COUNT; difference: $(printf '%s\n%s\n' "$B21_NAMES" "$B21_UNBOUNDED" | sort | uniq -u | tr '\n' ' '))" FAIL
+fi
 if [ -z "$(printf '%s' "$B21_DOCUMENTED" | tr -d ' ')" ]; then
   check "B21pre the skill's exit table yielded no codes — the extraction, not the table, is broken" FAIL
 else
@@ -1069,7 +1784,6 @@ fi
 B21_MISSING=""
 for code in $B21_DOCUMENTED; do
   case "$B21_MEASURED" in *" $code "*) continue ;; esac
-  case "$B21_UNDRIVEN" in *" $code "*) continue ;; esac
   B21_MISSING="$B21_MISSING documented-but-unmeasured:$code"
 done
 # The other direction too: a code this suite measures and the skill omits is a gap
@@ -1082,6 +1796,7 @@ if [ -z "$B21_MISSING" ]; then
 else
   check "B21 skill exit-code table vs measured codes:$B21_MISSING" FAIL
 fi
+}
 
 # --- B25 the LEGACY owner pointer is retired by an adopt too ------------------
 # Every other successful-adopt fixture gives the previous owner an owner-KEYED pointer,
@@ -1128,28 +1843,55 @@ else
   check "B25 fixture could not build a legacy-pointer run" FAIL
 fi
 
-# --- B26 the retire-unreachable disclosure exists at source -------------------
-# Behaviourally unreachable from a fixture: the else arm fires only when the basename
-# fails its shape check or the unlink fails, and no fixture can produce either without
-# corrupting the worker's own output. Same position S7n handles with a source pin in
-# test-autopilot-stop-enforcer.sh, and the same remedy. Without it the ONLY trace of a
-# pointer that survived an adoption can be deleted with every suite green.
+# --- B26 both retire-unreachable arms are driven on a real takeover -----------
+# Both arms are selected in the calling shell — the refused-shape arm by a by-name call
+# to `_autopilot_owner_pointer_basename_ok`, the failed-unlink arm by `rm` — so a
+# subshell shadow of either reaches it. The fixture keeps the previous owner's pointer,
+# the only shape in which a retire happens at all, and the ttl-zero config lets the
+# takeover land without a clock deciding it. The disclosure must name the CONSEQUENCE,
+# because the surviving pointer is what makes the previous owner's own read refuse.
+b26_arm() {
+  local arm="$1" project="$TMP/b26-$1" owner owner_ptr taker err rc read_rc said=no ok=true
+  mkdir -p "$project" && project="$(cd "$project" && pwd -P)" || return 1
+  activate_session "$project" "adopt_b26_${arm}_owner" || return 1
+  owner="$ZENSU_SESSION_KEY"
+  autopilot_begin_run "adopt_b26_$arm" "$owner" "$project" >/dev/null 2>&1 || return 1
+  owner_ptr="$(_autopilot_active_path "$project/.zensu/state" "$owner")"
+  [ -f "$owner_ptr" ] || return 1
+  activate_session "$project" "adopt_b26_${arm}_taker" || return 1
+  taker="$ZENSU_SESSION_KEY"
+  err="$TMP/b26-$arm.err"
+  (
+    if [ "$arm" = shape ]; then
+      _autopilot_owner_pointer_basename_ok() { return 1; }
+    else
+      rm() { if [ "$#" -eq 2 ] && [ "$2" = "$owner_ptr" ]; then return 1; fi; command rm "$@"; }
+    fi
+    export ZENSU_CONFIG="$TMP/ttl-zero.json"
+    cd "$project" && autopilot_adopt_run "adopt_b26_$arm" "$project" "$taker" confirm
+  ) >/dev/null 2>"$err"
+  rc=$?
+  autopilot_read_active "$project" "$owner" >/dev/null 2>&1
+  read_rc=$?
+  [ "$rc" -eq 0 ] || ok=false
+  json_ok "$(autopilot_run_file "adopt_b26_$arm" "$project")" "value.ownerSessionId === '$taker'" || ok=false
+  grep -qF "previous owner pointer not retired: $(basename "$owner_ptr")" "$err" \
+    && grep -qF 'active pointer references a run that is absent or owned by another session' "$err" \
+    && said=yes
+  [ "$said" = yes ] || ok=false
+  [ -f "$owner_ptr" ] || ok=false
+  [ "$read_rc" -eq 2 ] || ok=false
+  B26_DETAIL="$B26_DETAIL $arm:rc=$rc,read=$read_rc,said=$said,ptr=$( [ -f "$owner_ptr" ] && echo kept || echo gone)"
+  [ "$ok" = true ]
+}
+B26_DETAIL=""
 B26_OK=true
-grep -qF '_autopilot_retire_unreachable()' "$LIB" || B26_OK=false
-grep -qF 'previous owner pointer not retired' "$LIB" || B26_OK=false
-# It has to name the CONSEQUENCE, not just the file: the surviving pointer is what makes
-# the previous owner's own read-active refuse, and that sentence is hand-copied from the
-# producer, so a reword of either side leaves the operator with an unexplained refusal.
-grep -qF 'active pointer references a run that is absent or owned by another session' "$LIB" || B26_OK=false
-# Both call sites: the failed-unlink path and the refused-shape path.
-[ "$(grep -c '_autopilot_retire_unreachable "\$retired"' "$LIB")" -eq 2 ] || B26_OK=false
-# Control: the scan must be able to fail. A needle that matches nothing anywhere would
-# make every assertion above vacuous.
-grep -qF '_autopilot_retire_unreachable_this_needle_must_not_exist' "$LIB" && B26_OK=false
+b26_arm shape || B26_OK=false
+b26_arm unlink || B26_OK=false
 if [ "$B26_OK" = true ]; then
-  check "B26 the retire-unreachable disclosure, its consequence sentence and both call sites are pinned at source" PASS
+  check "B26 a refused basename and a failed unlink each keep the previous owner's pointer, land the takeover, and disclose the consequence the previous owner's read then shows" PASS
 else
-  check "B26 the retire-unreachable disclosure is missing, reworded, or has lost a call site" FAIL
+  check "B26 retire-unreachable arms (${B26_DETAIL# })" FAIL
 fi
 
 # --- B28 the two round-6 refusal texts exist and are DISTINCT ------------------
@@ -1159,10 +1901,14 @@ fi
 B28_OK=true
 grep -qF 'this project holds no Autopilot run storage' "$LIB" || B28_OK=false
 grep -qF 'the run record is unreadable or the state directory is unsafe' "$LIB" || B28_OK=false
-# Every refusal the shell half takes on its own must NAME itself. These four were
-# bare `return`s until round 6; `:2312` in particular was a regression the round-5
-# fix introduced, replacing a worker line that DID print with silence.
+# Every refusal the shell half takes on its own must NAME itself. Four of them were
+# bare `return`s until round 6, one of which was a regression the round-5 fix
+# introduced, replacing a worker line that DID print with silence. The first needle
+# below is now emitted at TWO layers — the critical section and the public entry — so
+# the call census beneath this loop counts it twice on purpose.
 for B28_NEEDLE in \
+  'the adoption mode operand is required' \
+  'the adoption mode is neither confirm nor report' \
   'the run id is not a schema identifier' \
   'the caller session id is not a persistable owner identity' \
   'the worker result line was malformed; no install was attempted and nothing moved' \
@@ -1170,7 +1916,14 @@ for B28_NEEDLE in \
   'the project root could not be resolved' \
   'the caller working tree could not be resolved' \
   'the owner pointer path could not be derived for this caller' \
-  'the owner pointer path was refused'; do
+  'the owner pointer path was refused' \
+  'temp allocation beside the run record failed; nothing moved' \
+  'temp allocation beside the owner pointer failed; nothing moved' \
+  'pointer install failed; nothing moved' \
+  'temp allocation for the owner pointer rollback copy failed; nothing moved' \
+  'the existing owner pointer could not be copied for rollback; nothing moved' \
+  'record install failed; the owner pointer was rolled back and nothing moved' \
+  'record install failed and rolling back the owner pointer also failed'; do
   grep -qF "$B28_NEEDLE" "$LIB" || B28_OK=false
 done
 # The shared lock dispatcher serves EVERY verb, so its line must stay verb-neutral —
@@ -1180,21 +1933,18 @@ done
 # with it — five callers reach that one, and they are the Stop-hook paths.
 grep -qF 'refused under the project lock: run storage for' "$LIB" || B28_OK=false
 grep -qF 'refused under the project lock: run storage in this project is unsafe' "$LIB" || B28_OK=false
-# ASSERTED, not discarded. This line computed a count, wrote it to /dev/null and
-# fed nothing — a no-op that read as coverage, in a check whose own title claims
-# to grade EVERY shell-half refusal. The file carries `set -u` and no `set -e`, so
-# a zero count could not have aborted either. Derived, never a hardcoded total: the
-# expected value is "every call site plus the definition", which a renamed helper
-# changes in lockstep.
-# DERIVED and compared for EQUALITY, which is what the sentence above claims. An
-# earlier spelling was `-ge 12` against an actual 16 — a hardcoded FLOOR wearing the
-# word "derived", tolerating the deletion of four call sites. The expectation is the
-# definition plus its call sites, both counted from the file, so a renamed helper
-# moves both sides together and a DELETED call site moves only one.
+# The call count is compared against an INDEPENDENT literal. Every call site is a
+# one-line call with a quoted message, so a count derived from the file drops in
+# lockstep with a deleted call site and cannot catch one. Adding or removing a call
+# site must update B28_REFUSAL_CALLS_EXPECTED in the same commit. The USES equality
+# stays beside it for the other failure: a call spelled without the double quote the
+# CALLS count keys on. Its `+ 1` is the comment in the shared lock dispatcher.
+B28_REFUSAL_CALLS_EXPECTED=20
 B28_REFUSAL_USES="$(grep -c '_autopilot_adopt_refusal' "$LIB")"
 B28_REFUSAL_CALLS="$(grep -c '_autopilot_adopt_refusal "' "$LIB")"
 B28_REFUSAL_DEF="$(grep -c '^_autopilot_adopt_refusal()' "$LIB")"
 [ "$B28_REFUSAL_DEF" -eq 1 ] || B28_OK=false
+[ "$B28_REFUSAL_CALLS" -eq "$B28_REFUSAL_CALLS_EXPECTED" ] || B28_OK=false
 [ "$B28_REFUSAL_USES" -eq "$((B28_REFUSAL_CALLS + B28_REFUSAL_DEF + 1))" ] || B28_OK=false
 if [ "$B28_OK" = true ]; then
   check "B28 every shell-half refusal names its own cause and the shared lock dispatcher stays verb-neutral" PASS
@@ -1244,7 +1994,7 @@ if autopilot_begin_run adopt_b30_run "$B30_OWNER" "$B30" false true >/dev/null 2
   activate_session "$B30" adopt_b30_taker || exit 1
   B30_TAKER="$ZENSU_SESSION_KEY"
   B30_ERR="$TMP/b30.err"
-  ( cd "$B30" && autopilot_adopt_run adopt_b30_run "$B30" "$B30_TAKER" ) >/dev/null 2>"$B30_ERR"
+  ( cd "$B30" && autopilot_adopt_run adopt_b30_run "$B30" "$B30_TAKER" confirm ) >/dev/null 2>"$B30_ERR"
   B30_RC=$?
   B30_OK=true
   [ "$B30_RC" -eq 0 ] || B30_OK=false
@@ -1274,7 +2024,7 @@ fi
 # comment names. The project must RESOLVE, or the root check above the gate refuses
 # first and every arm passes for the wrong reason — hence B30's tree, not a bare one.
 B31_OK=true
-b31_gate() { ( cd "$B30" && autopilot_adopt_run adopt_b30_run "$B30" "$1" ) >/dev/null 2>&1; printf '%s' "$?"; }
+b31_gate() { ( cd "$B30" && autopilot_adopt_run adopt_b30_run "$B30" "$1" confirm ) >/dev/null 2>&1; printf '%s' "$?"; }
 # `a.b` passes _autopilot_identifier_ok (dots are legal there) and FAILS
 # _autopilot_session_id_ok, whose charset builds the pointer filename.
 [ "$(b31_gate 'a.b')" -eq 3 ] || B31_OK=false
@@ -1293,13 +2043,15 @@ b31_gate() { ( cd "$B30" && autopilot_adopt_run adopt_b30_run "$B30" "$1" ) >/de
 [ "$(b31_gate 'valid-owner_1')" -ne 3 ] || B31_OK=false
 # And the refusal names itself, so the round-5 regression this closes cannot return.
 B31_ERR="$TMP/b31.err"
-( cd "$B30" && autopilot_adopt_run adopt_b30_run "$B30" 'a.b' ) >/dev/null 2>"$B31_ERR"
+( cd "$B30" && autopilot_adopt_run adopt_b30_run "$B30" 'a.b' confirm ) >/dev/null 2>"$B31_ERR"
 grep -qF 'the caller session id is not a persistable owner identity' "$B31_ERR" || B31_OK=false
 if [ "$B31_OK" = true ]; then
   check "B31 the owner write gate refuses each half-satisfying id, admits one satisfying both, and names its cause" PASS
 else
   check "B31 the owner write gate is not the intersection of the two vocabularies" FAIL
 fi
+
+b21_report
 
 printf '%s\n' "----" "test-autopilot-adopt-cli: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

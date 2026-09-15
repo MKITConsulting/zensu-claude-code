@@ -51,7 +51,8 @@ fi
 # of them sources once. Hoisting it unconditionally would put a source on a path
 # that needs no getter at all.
 if { [ -z "${ZDOC_TTL_HOURS:-}" ] || [ -z "${ZDOC_IMPL_STOP_NUDGE_AFTER:-}" ] \
-  || [ -z "${ZDOC_OWNER_ACTIVITY_TTL_HOURS:-}" ]; } \
+  || [ -z "${ZDOC_OWNER_ACTIVITY_TTL_HOURS:-}" ] \
+  || [ -z "${ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS:-}" ]; } \
   && [ -f "$DIR/zensu-config.sh" ]; then
   # shellcheck source=/dev/null
   . "$DIR/zensu-config.sh" 2>/dev/null || true
@@ -86,11 +87,11 @@ if [ -z "${ZDOC_IMPL_STOP_NUDGE_AFTER:-}" ]; then
 fi
 export ZDOC_IMPL_STOP_NUDGE_AFTER
 
-# The window `--autopilot-adopt` and `--autopilot-release` judge owner liveness
-# against. It is a DIFFERENT question from the pending-review TTL above and has its
-# own key: the `autopilot:` row quoted the pending-review value while both verbs read
-# this one, so the row promised a protection window the destructive verb does not
-# give. Same canonical-getter rule — and, like that TTL and unlike the advisory
+# The window `--autopilot-adopt` judges owner liveness against; `--autopilot-release`
+# reads its own window, resolved in the block after this one. Both are DIFFERENT
+# questions from the pending-review TTL above: the `autopilot:` row once quoted the
+# pending-review value while the verbs read their own keys, so it promised a protection
+# window the destructive verb did not give. Same canonical-getter rule — and, like that TTL and unlike the advisory
 # threshold between them, it IS re-resolved from the record root in the bind block
 # below, because the row it feeds scans record-anchored run documents and stands
 # beside an irreversible-cancel remedy. Remember whether the caller pinned it, for
@@ -103,6 +104,17 @@ if [ -z "${ZDOC_OWNER_ACTIVITY_TTL_HOURS:-}" ]; then
   fi
 fi
 export ZDOC_OWNER_ACTIVITY_TTL_HOURS
+
+# The release's own window, under the same rules as the adoption window above: canonical
+# getter, remembered caller pin, and a record-root re-resolution in the bind block below.
+ZDOC_RELEASE_OWNER_ACTIVITY_TTL_PINNED=""
+[ -n "${ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS:-}" ] && ZDOC_RELEASE_OWNER_ACTIVITY_TTL_PINNED=1
+if [ -z "${ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS:-}" ]; then
+  if command -v zensu_autopilot_release_owner_activity_ttl_hours >/dev/null 2>&1; then
+    ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS="$(zensu_autopilot_release_owner_activity_ttl_hours 2>/dev/null)"
+  fi
+fi
+export ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS
 
 # zensu CLI: installed? authenticated? (auth probe is best-effort + quiet)
 if [ -z "${ZDOC_ZENSU:-}" ]; then
@@ -379,6 +391,22 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
             ;;
         esac
         unset ZDOC_OWNER_ACTIVITY_REBOUND
+      fi
+      if [ -z "${ZDOC_RELEASE_OWNER_ACTIVITY_TTL_PINNED:-}" ] \
+        && [ "$ZDOC_SESSION_PROJECT_ROOT" != "${CLAUDE_PROJECT_DIR:-}" ] \
+        && command -v zensu_autopilot_release_owner_activity_ttl_hours >/dev/null 2>&1; then
+        ZDOC_RELEASE_OWNER_ACTIVITY_REBOUND="$(
+          CLAUDE_PROJECT_DIR="$ZDOC_SESSION_PROJECT_ROOT" \
+            zensu_autopilot_release_owner_activity_ttl_hours 2>/dev/null
+        )"
+        case "$ZDOC_RELEASE_OWNER_ACTIVITY_REBOUND" in
+          ''|*[!0-9]*) ;;
+          *)
+            ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS="$ZDOC_RELEASE_OWNER_ACTIVITY_REBOUND"
+            export ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS
+            ;;
+        esac
+        unset ZDOC_RELEASE_OWNER_ACTIVITY_REBOUND
       fi
     fi
   else

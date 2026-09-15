@@ -369,12 +369,15 @@ else
   grep -qF 'dated in the future, so its age cannot bound this cancel' "$TMP/a13.err" || A13_OK=false
   # It REFUSES rather than standing down, so the stand-down line must be absent.
   grep -qF 'owner liveness unchecked' "$TMP/a13.err" && A13_OK=false
-  # The remedy BRANCHES on the pending stage, and this fixture is at PLANNING, so
-  # the adopt route must be OFFERED here. Asserted as a PAIR with A17's inverse:
-  # the shared lead-in both arms carry matches either one identically, so without
-  # these four assertions the two arms could be swapped with every check green.
-  grep -qF 'adopt the run with /zensu:autopilot-adopt and cancel it from there' "$TMP/a13.err" || A13_OK=false
-  grep -qF 'is not an exit here' "$TMP/a13.err" && A13_OK=false
+  # The remedy names NO adoption route, at any stage: adoption refuses the same future
+  # stamp with its own exit 7 while the owner pointer designates the run, so a message
+  # that sent the caller there would have offered the one route that defeats this
+  # refusal — two confirmations against a demonstrably live owner. A17 is the same
+  # assertion at `TDD_RUNNING`, so a reintroduced branch fails on one of the two.
+  grep -qF '/zensu:autopilot-adopt' "$TMP/a13.err" && A13_OK=false
+  grep -qF 'adopt the run with' "$TMP/a13.err" && A13_OK=false
+  # The user-owned config route stays, and it names the RELEASE window.
+  grep -qF 'hooks.autopilotReleaseOwnerActivityTtlHours to 0' "$TMP/a13.err" || A13_OK=false
   if [ "$A13_OK" = true ]; then
     check "A13 a future-dated owner beacon refuses the release with exit 7, names the cause, and cancels nothing" PASS
   else
@@ -420,7 +423,9 @@ else
 fi
 
 # --- A16 the documented off-switch actually switches off ----------------------
-# `autopilotOwnerActivityTtlHours: 0` is the ONLY exit from the state round 7 named:
+# The release reads its OWN window, `autopilotReleaseOwnerActivityTtlHours`, so that
+# key at `0` is the switch; A18 below proves the adoption key no longer reaches it.
+# The release window at `0` is the ONLY exit from the state round 7 named:
 # a run abandoned mid-`TDD_RUNNING` on a clock-skewed host, where the owner is gone
 # and adoption refuses. Both skills name it and neither exercised it, so it was a
 # documented claim rather than a documented behaviour.
@@ -442,9 +447,9 @@ if ! autopilot_begin_run release_off_run "$OFF_OWNER" "$A_OFF" >/dev/null 2>&1; 
 else
   OFF_RUN_FILE="$(autopilot_run_file release_off_run "$A_OFF")"
   touch -t 209901010000 "$A_OFF/.zensu/state/tdd-phase-$OFF_OWNER.json" 2>/dev/null
-  printf '{"hooks":{"autopilotOwnerActivityTtlHours":0}}\n' > "$TMP/ttl-zero.json"
+  printf '{"hooks":{"autopilotReleaseOwnerActivityTtlHours":0}}\n' > "$TMP/release-ttl-zero.json"
   activate_session "$A_OFF" release_off_taker || exit 1
-  ( cd "$A_OFF" && CLAUDE_PROJECT_DIR="$A_OFF" ZENSU_CONFIG="$TMP/ttl-zero.json" \
+  ( cd "$A_OFF" && CLAUDE_PROJECT_DIR="$A_OFF" ZENSU_CONFIG="$TMP/release-ttl-zero.json" \
       bash "$LOG" --autopilot-release --run release_off_run --confirm ) >/dev/null 2>"$TMP/a16.err"
   A16_RC=$?
   A16_OK=true
@@ -453,7 +458,7 @@ else
   # Switching a guard off must never be silent — the disclosure names the key AND
   # the value, so an operator reading stderr can tell a released run from a
   # released-because-unchecked one.
-  grep -qF 'owner liveness unchecked: autopilotOwnerActivityTtlHours is 0' "$TMP/a16.err" || A16_OK=false
+  grep -qF 'owner liveness unchecked: autopilotReleaseOwnerActivityTtlHours is 0' "$TMP/a16.err" || A16_OK=false
   if [ "$A16_OK" = true ]; then
     check "A16 at window 0 the beacon is not read at all: the run releases and the stand-down names key and value" PASS
   else
@@ -461,13 +466,12 @@ else
   fi
 fi
 
-# --- A17 the exit-7 remedy WITHHOLDS the adopt route on a live inner chain -------
-# Round 7 branched this message because adoption refuses a run whose pending stage
-# is `TDD_RUNNING`, so offering it there sent a caller to a verb that answers exit 3
-# — leaving an abandoned mid-chain run on a clock-skewed host with no reachable exit
-# at all. The branch was pinned by NOTHING: every existing assertion keys on the
-# lead-in that PRECEDES the branched clause, so swapping the ternary's arms left the
-# whole tree green. This is the inverse half of A13's pair.
+# --- A17 the exit-7 remedy names no adopt route at TDD_RUNNING either ------------
+# Round 7 branched this message because adoption refuses a run whose pending stage is
+# `TDD_RUNNING`; round 8 removed the branch, because adoption now refuses the future
+# stamp itself while the owner pointer designates the run, at every stage. This case is
+# the stage half of A13's pair: the same absence, measured where the retired branch
+# used to render its other arm, so a reintroduced ternary fails on one of the two.
 A_TDD="$TMP/tdd-running"; mkdir -p "$A_TDD"
 A_TDD="$(cd "$A_TDD" && pwd -P)"
 A17_PLAN_SHA="$(node -e 'process.stdout.write(require("crypto").createHash("sha256").update("release-plan").digest("hex"))')"
@@ -495,16 +499,67 @@ if autopilot_begin_run release_tdd_run "$TDD_OWNER" "$A_TDD" >/dev/null 2>&1 \
     # PREMISE: the fixture really is at the stage that selects the withholding arm.
     # Without this the pair below could pass because the run never left PLANNING.
     json_ok "$TDD_RUN_FILE" 'value.stage === "TDD_RUNNING"' || A17_OK=false
-    grep -qF 'is not an exit here' "$TMP/a17.err" || A17_OK=false
-    grep -qF 'adopt the run with /zensu:autopilot-adopt and cancel it from there' "$TMP/a17.err" && A17_OK=false
+    grep -qF 'dated in the future, so its age cannot bound this cancel' "$TMP/a17.err" || A17_OK=false
+    grep -qF '/zensu:autopilot-adopt' "$TMP/a17.err" && A17_OK=false
+    grep -qF 'adopt the run with' "$TMP/a17.err" && A17_OK=false
     if [ "$A17_OK" = true ]; then
-      check "A17 a live inner TDD chain withholds the adopt route from the exit-7 remedy" PASS
+      check "A17 the exit-7 remedy names no adoption route for a live inner TDD chain either" PASS
     else
-      check "A17 branched exit-7 remedy (rc=$A17_RC, stderr=$(tr -d '\n' < "$TMP/a17.err" | cut -c1-140))" FAIL
+      check "A17 exit-7 remedy at TDD_RUNNING (rc=$A17_RC, stderr=$(tr -d '\n' < "$TMP/a17.err" | cut -c1-140))" FAIL
     fi
   fi
 else
   check "A17 could not drive the fixture run to TDD_RUNNING — environment, not product" FAIL
+fi
+
+# --- A18 the release window is its own, and it defaults to six hours -----------
+# The owner decided on SEPARATE windows: adoption keeps `autopilotOwnerActivityTtlHours`
+# (default 1) and the destructive release reads `autopilotReleaseOwnerActivityTtlHours`
+# (default 6). Three measurements over one live-looking owner, in order: the ADOPTION
+# key at 0 must not switch the release check off; a beacon two hours old is inside the
+# six-hour default and still refuses; one seven hours old is outside it and releases.
+# The middle arm is what separates a six-hour default from the one-hour adoption
+# default, and the last keeps it from passing for a window that never ends.
+A_SEP="$TMP/release-window"; mkdir -p "$A_SEP"
+A_SEP="$(cd "$A_SEP" && pwd -P)"
+activate_session "$A_SEP" release_sep_owner || exit 1
+SEP_OWNER="$ZENSU_SESSION_KEY"
+if ! autopilot_begin_run release_sep_run "$SEP_OWNER" "$A_SEP" >/dev/null 2>&1; then
+  check "A18 release-window fixture could not be armed — environment, not product" FAIL
+else
+  SEP_RUN_FILE="$(autopilot_run_file release_sep_run "$A_SEP")"
+  SEP_BEACON="$A_SEP/.zensu/state/tdd-phase-$SEP_OWNER.json"
+  a18_age_beacon() {
+    HOURS="$1" node -e 'const fs=require("fs");const t=(Date.now()-Number(process.env.HOURS)*3600000)/1000;fs.utimesSync(process.argv[1],t,t)' "$SEP_BEACON"
+  }
+  printf '{"hooks":{"autopilotOwnerActivityTtlHours":0}}\n' > "$TMP/adopt-ttl-zero.json"
+  : > "$SEP_BEACON"
+  activate_session "$A_SEP" release_sep_taker || exit 1
+  ( cd "$A_SEP" && CLAUDE_PROJECT_DIR="$A_SEP" ZENSU_CONFIG="$TMP/adopt-ttl-zero.json" \
+      bash "$LOG" --autopilot-release --run release_sep_run --confirm ) >/dev/null 2>"$TMP/a18a.err"
+  A18A_RC=$?
+  A18A_STAGE_OK=no; json_ok "$SEP_RUN_FILE" 'value.stage !== "CANCELLED"' && A18A_STAGE_OK=yes
+  a18_age_beacon 2
+  run_verb "$A_SEP" release_sep_taker --autopilot-release --run release_sep_run --confirm \
+    >/dev/null 2>"$TMP/a18b.err"
+  A18B_RC=$?
+  A18B_STAGE_OK=no; json_ok "$SEP_RUN_FILE" 'value.stage !== "CANCELLED"' && A18B_STAGE_OK=yes
+  a18_age_beacon 7
+  run_verb "$A_SEP" release_sep_taker --autopilot-release --run release_sep_run --confirm \
+    >/dev/null 2>"$TMP/a18c.err"
+  A18C_RC=$?
+  A18_OK=true
+  [ "$A18A_RC" -eq 7 ] && [ "$A18A_STAGE_OK" = yes ] || A18_OK=false
+  grep -qF 'the owning session is still active' "$TMP/a18a.err" || A18_OK=false
+  grep -qF 'owner liveness unchecked' "$TMP/a18a.err" && A18_OK=false
+  [ "$A18B_RC" -eq 7 ] && [ "$A18B_STAGE_OK" = yes ] || A18_OK=false
+  [ "$A18C_RC" -eq 0 ] || A18_OK=false
+  json_ok "$SEP_RUN_FILE" 'value.stage === "CANCELLED"' || A18_OK=false
+  if [ "$A18_OK" = true ]; then
+    check "A18 the release reads its own window: the adoption key at 0 does not reach it, a 2h beacon refuses under the 6h default, a 7h beacon releases" PASS
+  else
+    check "A18 separate release window (adopt-key-zero rc=$A18A_RC expected 7, 2h rc=$A18B_RC expected 7, 7h rc=$A18C_RC expected 0)" FAIL
+  fi
 fi
 
 printf '%s\n' "----" "test-autopilot-release-cli: $PASS PASS / $FAIL FAIL"

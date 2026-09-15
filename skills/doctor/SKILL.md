@@ -639,9 +639,10 @@ classifier will refuse a spawn, not only when the whole table is green.
   anything, so only the release is left; `both verbs abort on this beacon with exit 2`
   leaves neither, so report the beacon instead — and note that a release-only exit-2
   arm, an exit-7 future-dated stamp and a pointer that could not be read each narrow the
-  offer the same way; `autopilotOwnerActivityTtlHours is 0` means the liveness check is
-  switched off entirely, so a release cancels the run even while its owner is active —
-  say so before the user answers. With no workflow document at all, the release stands
+  offer the same way. The window is per verb: `hooks.autopilotOwnerActivityTtlHours is 0`
+  means adoption skips its liveness check, and `hooks.autopilotReleaseOwnerActivityTtlHours is 0`
+  means the release skips its own, so a release then cancels the run even while its owner is
+  active — say so before the user answers. With no workflow document at all, the release stands
   down and cancels unbounded; the clause says `both verbs stand down` whenever neither
   verb refuses — which for adoption can be because it never reached that beacon at all,
   a retired owner pointer being one such case — and says something else where a live

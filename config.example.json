@@ -25,7 +25,8 @@
     "reviewerSpawnAutoAllow": true,
     "pendingReviewTtlHours": 6,
     "implStopNudgeAfter": 12,
-    "autopilotOwnerActivityTtlHours": 1
+    "autopilotOwnerActivityTtlHours": 1,
+    "autopilotReleaseOwnerActivityTtlHours": 6
   },
   "context": {
     "compactionNudge": true,

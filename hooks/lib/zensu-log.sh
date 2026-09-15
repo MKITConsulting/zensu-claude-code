@@ -537,9 +537,11 @@ case "${1:-}" in
     ;;
   --autopilot-adopt)
     # Take over a nonterminal run owned by ANOTHER session, so the work continues
-    # instead of being cancelled. Explicit --confirm only: this mutates state this
-    # session does not own. No event id is derived, because the verb writes no
-    # event — idempotency comes from the worker's already-owner exit.
+    # instead of being cancelled. Only `--confirm` mutates; without it the verb is a
+    # read-only REPORT over the same ladder — the liveness verdict and the outcome a
+    # confirmed run would reach, exit 0 when it would proceed and the refusal code
+    # otherwise. No event id is derived, because the verb writes no event —
+    # idempotency comes from the worker's already-owner exit.
     run_val=""
     seen_run=false
     confirmed=false
@@ -558,10 +560,8 @@ case "${1:-}" in
       esac
     done
     [ "$seen_run" = true ] || { echo "zensu-log.sh --autopilot-adopt requires --run <id>" >&2; exit 2; }
-    [ "$confirmed" = true ] || {
-      echo "zensu-log.sh --autopilot-adopt requires --confirm: this takes over a run owned by another session" >&2
-      exit 2
-    }
+    adopt_mode=report
+    [ "$confirmed" = true ] && adopt_mode=confirm
     export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 --autopilot-adopt --run $run_val}"
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
     session_val="$(zensu_resolve_session_id "")" || {
@@ -585,8 +585,29 @@ case "${1:-}" in
       echo "zensu-log.sh --autopilot-adopt: the Autopilot state library did not load; no run was adopted" >&2
       exit 2
     fi
-    autopilot_adopt_run "$run_val" "${CLAUDE_PROJECT_DIR:-.}" "$session_val"
+    autopilot_adopt_run "$run_val" "${CLAUDE_PROJECT_DIR:-.}" "$session_val" "$adopt_mode"
     adopt_rc=$?
+    # The report announces no outcome and writes no provenance: it publishes neither
+    # outcome name, and returning here keeps that true even if a later edit did. Its
+    # own line says so on stderr for EVERY exit, because a refusal taken before the
+    # worker prints no report line at all, and a bare refusal must not read as a
+    # takeover that was attempted.
+    # The sentence ENUMERATES what was not written rather than claiming the world is
+    # unchanged. The blanket form asserted more than this verb's guards establish: the
+    # report runs under the project lease, so a claim about the process is false even
+    # while the claim about the artifacts is true. The enumerated form is also the one
+    # `skills/autopilot-adopt/SKILL.md` already states at its own "changes nothing"
+    # sentence, so the CLI and the skill now say the same thing. B1 in
+    # `tests/structure/test-autopilot-adopt-cli.sh` pins this on stderr and forbids the
+    # retired blanket spelling; before that pin existed nothing in the tree graded it.
+    if [ "$adopt_mode" = report ]; then
+      if [ "$adopt_rc" -eq 0 ]; then
+        echo "zensu-log.sh --autopilot-adopt: report only — no record, no pointer, no provenance entry was written; the same command with --confirm would proceed as the report states." >&2
+      else
+        echo "zensu-log.sh --autopilot-adopt: report only — no record, no pointer, no provenance entry was written; exit $adopt_rc, for the reason stated on stderr." >&2
+      fi
+      exit "$adopt_rc"
+    fi
     # Exit 0 covers THREE outcomes and every one of them names itself, so silence is
     # never an outcome. Only the first is an adoption. The third — record and pointer
     # already in agreement — used to say nothing at all while the skill promised
@@ -600,7 +621,7 @@ case "${1:-}" in
         echo "zensu-log.sh --autopilot-adopt: this session already owned run $run_val; its owner pointer was missing or named a run that has already finished, and has been reinstalled. No takeover occurred and no AUTOPILOT_ADOPTED entry is written." >&2
         ;;
       already-owned)
-        echo "zensu-log.sh --autopilot-adopt: this session already owns run $run_val and its owner pointer already designates it; nothing was changed. No takeover occurred and no AUTOPILOT_ADOPTED entry is written." >&2
+        echo "zensu-log.sh --autopilot-adopt: this session already owns run $run_val and its owner pointer already designates it; ownership was not changed. No takeover occurred and no AUTOPILOT_ADOPTED entry is written." >&2
         ;;
     esac
     # Gated on the OUTCOME, never on the return code. `_tdd_locked_run` returns 1

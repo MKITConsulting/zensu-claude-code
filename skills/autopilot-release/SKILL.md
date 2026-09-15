@@ -55,16 +55,17 @@ the working tree stays refused permanently, because `CANCEL` requires the owner.
 - It records no bypass-ledger entry. The ledger records gate ESCAPES so that everything
   under "Gates bypassed" is true, and this escapes no gate — it ends a run.
 - It refuses while the owning session still looks active (exit `7`) — but ONLY when the caller does NOT own the run; that check sits inside the foreign-owner branch, so it never fires for the torn-`begin` own-run case above: that session's workflow
-  document `.zensu/state/tdd-phase-<owner>.json` is aged against the owner-activity
-  window (`hooks.autopilotOwnerActivityTtlHours`) this verb shares with
-  `/zensu:autopilot-adopt`, and the `autopilot:` row of `/zensu:doctor` quotes that same
-  window — relay that row's owner-silence clause as the per-verb account of which verb
-  refuses. The doctor's OTHER rows (the pending-review marker, a foreign open chain) age
+  document `.zensu/state/tdd-phase-<owner>.json` is aged against this verb's OWN
+  owner-activity window, `hooks.autopilotReleaseOwnerActivityTtlHours` (default 6 hours).
+  `/zensu:autopilot-adopt` reads a different key, `hooks.autopilotOwnerActivityTtlHours`,
+  because an adoption taken too early is recoverable and a cancel is not. The `autopilot:` row
+  of `/zensu:doctor` quotes EACH verb's own window — relay that row's owner-silence clause as
+  the per-verb account of which verb refuses. The doctor's OTHER rows (the pending-review marker, a foreign open chain) age
   against `pendingReviewTtlHours`, a different key answering a different question, so do
   not carry a number from one of those rows into this verb. That is a heuristic, not proof of death, and it has TWO ways to stand down — state the
   partition the code actually has, not one per cause. **Stand-down 1: the configured
-  window is `0`**, which disables the check on both verbs and writes
-  `owner liveness unchecked: autopilotOwnerActivityTtlHours is 0`. **Stand-down 2: there
+  window is `0`**, which disables this verb's check and writes
+  `owner liveness unchecked: autopilotReleaseOwnerActivityTtlHours is 0`. **Stand-down 2: there
   is NO workflow document for the recorded owner** — one shared branch and one shared
   line, covering an owner that never wrote one and an owner whose document was DELETED
   alike, so do not expect two distinguishable messages for those two causes. Both are
@@ -73,16 +74,14 @@ the working tree stays refused permanently, because `CANCEL` requires the owner.
   at all. Read the stderr lines before reporting a clean release.
 
   A document dated in the FUTURE is NOT a stand-down here — it REFUSES with exit `7`,
-  and this is the one place the two verbs diverge on purpose. `/zensu:autopilot-adopt`
-  permits it and discloses, because the move it makes is reversible; this verb refuses,
   because a clock artefact — a jumped VM clock, a container skewed against a shared
   filesystem, an NFS mount, a restore that carried mtimes forward — must never authorise
-  an irreversible cancel against a session that is demonstrably alive. The run is not
-  stranded by that refusal: the owner can cancel through the ordinary event path, a
-  successor can adopt it and cancel from there — unless its pending stage is `TDD_RUNNING`
-  or that successor already owns another nonterminal run, which adoption refuses, and the
-  exit-7 paragraph below carries the full qualification — and
-  `hooks.autopilotOwnerActivityTtlHours: 0` is the documented, disclosed off-switch. The durable record still does not name who cancelled a
+  an irreversible cancel against a session that is demonstrably alive.
+  `/zensu:autopilot-adopt` refuses the same stamp while the previous owner's pointer still
+  designates the run, so it is no route around this refusal. The run is not stranded: the
+  owner can cancel through the ordinary event path, and
+  `hooks.autopilotReleaseOwnerActivityTtlHours: 0` is the documented, disclosed off-switch,
+  which belongs to the user. The durable record still does not name who cancelled a
   run. The user's yes remains the real control.
 
 ## Step 1 — report, do not act
@@ -124,17 +123,30 @@ schema its own worker enforces, and renders with the ownership already decided �
 what reading the directory by hand does not give you. Take the id from one of the six surfaces;
 do not read the directory yourself and do not guess.
 
-One case is explicitly NOT a release: when a refusal says the holding run belongs to THIS
-session, it names the run but deliberately withholds the release command, because in that
-state the verb's self-release guard does not fire and it would cancel this session's own live
-generation. Finish or repair that run instead. Recognize that case POSITIVELY, by the clause it
-carries: an own-run refusal says `which belongs to this session` and `finish or repair that run`,
+One case is explicitly NOT a release: when a refusal says the holding run's record names THIS
+session as its owner, it names the run but deliberately withholds the release command, because in
+that state the verb's self-release guard does not fire and it would cancel this session's own live
+generation. Finish or repair that run instead. The record is an unauthenticated file, so say it
+names this session rather than that the run belongs to it. Recognize that case POSITIVELY, by the
+clause it carries: an own-run refusal says `whose run record names this session as its owner` and
+`finish or repair that run`,
 while a foreign one says `run /zensu:autopilot-adopt to continue it here, or
 /zensu:autopilot-release to cancel it` — adoption is named first because it continues the run
 under a new owner, and a cancel that was reached for first cannot be undone, so consider
 `/zensu:autopilot-adopt` before offering this skill's own remedy. (Both literals are pinned against the
 renderer by S7o in `tests/structure/test-autopilot-stop-enforcer.sh`, so a reword of either side
-turns that check red rather than silently breaking this rule.) Do NOT key on the absence of a
+turns that check red rather than silently breaking this rule, and it grades BOTH own-run shapes.)
+
+The own-run case has TWO shapes, and both carry those two literals. The ordinary one offers the
+guided `/zensu:autopilot-adopt`, which is what reinstalls a missing owner pointer. The second
+offers NEITHER verb: when the held run's pending stage is `TDD_RUNNING` while its record names
+another session as the driver of that inner chain, the pointer repair is refused with exit 3, so
+the refusal quotes no command at all and points at the `autopilot:` row of `/zensu:doctor`
+instead — a read-only step, because everything that refusal states is read from a file any
+session in this project can write. Relay it as it stands. A refusal that quotes no command is
+never licence to offer this skill's remedy.
+
+Do NOT key on the absence of a
 release command — the model-facing foreign form quotes no runnable command either, so absence
 no longer discriminates. Do NOT generalize the rule to any refusal that omits a command: the owner-mismatch
 Stop refusal (`active run … is owned by another top-level session`) also names a run without
@@ -172,17 +184,15 @@ and stop — neither is repaired by retrying the release. On `7`, do not retry, 
 covers two different situations and only one of them resolves by waiting. If it says the owning
 session is still active, the owner is genuinely working or has only just stopped, and the window
 will expire. If it says the document is DATED IN THE FUTURE, waiting resolves nothing: a stamp
-years ahead never goes stale, and the real exits are the ones that message names — two or three of them, because the adopt route is withheld when the run's pending stage is `TDD_RUNNING` — the
-owner's own ordinary cancel, `/zensu:autopilot-adopt` followed by an ordinary cancel from the new
-owner, or the user setting `hooks.autopilotOwnerActivityTtlHours` to `0`. Note that the adopt
-route is not unconditional: adoption refuses a run whose pending stage is `TDD_RUNNING` and a
-caller that already owns another nonterminal run, so for an abandoned mid-chain run on a
-clock-skewed host the config route is the only one left, and it belongs to the user.
+years ahead never goes stale, and the real exits are the two that message names — the owner's
+own ordinary cancel, or the user setting `hooks.autopilotReleaseOwnerActivityTtlHours` to `0`.
+Adoption is not a third: it refuses the same stamp.
 
-Exit `7` is governed by a user-owned
-configuration value, the owner-activity window. Do not widen it to get past a refusal — that
-setting is the user's, no agent may edit a config file to widen its own reach, and the
-operator reference documents the key where the user reads it. When the check stands DOWN — which
+Exit `7` is governed by a user-owned configuration value, this verb's owner-activity window. Do
+not lower or disable it, and do not create, delete, touch or re-date the owner's workflow
+document to get past a refusal — on this verb that removes the only time bound on an
+irreversible cancel. That setting is the user's, no agent may edit a config file to widen its
+own reach, and the operator reference documents the key where the user reads it. When the check stands DOWN — which
 is TWO cases here, not three: the user disabled it, or there is no workflow document for the
 recorded owner — the command says so on stderr as `owner liveness unchecked`, naming which one.
 A future-dated document is NOT among them; it refuses with exit `7` and emits no such line, so do

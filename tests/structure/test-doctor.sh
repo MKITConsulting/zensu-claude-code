@@ -3830,7 +3830,7 @@ ap_pointer() { # ap_pointer <owner> <runId>
 # assert whatever that session happened to hold. Unsetting here rather than inside
 # `ap_report` is what keeps `ap_report_win` working: that helper sets the two in its
 # own subshell around this call, and an `unset` inside the callee would wipe them.
-unset ZDOC_TTL_HOURS ZDOC_OWNER_ACTIVITY_TTL_HOURS
+unset ZDOC_TTL_HOURS ZDOC_OWNER_ACTIVITY_TTL_HOURS ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS
 ap_report() { # ap_report <binding> <session-key>
   ZDOC_BINDING="$1" ZDOC_SESSION_KEY="$2" \
   ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
@@ -3839,12 +3839,15 @@ ap_report() { # ap_report <binding> <session-key>
     node "$REPORT" 2>/dev/null
 }
 
-# Same render, with BOTH windows pinned. The clause under test quotes one of them and
-# the fixture must be able to tell which, so a case that pins neither proves nothing.
-# The subshell keeps the two assignments out of the calling shell, where they would
-# leak into every later ap_report.
-ap_report_win() { # ap_report_win <ownerActivityTtl> <pendingTtl> <binding> <session-key>
-  ( ZDOC_OWNER_ACTIVITY_TTL_HOURS="$1" ZDOC_TTL_HOURS="$2" ap_report "$3" "$4" )
+# Same render, with every window pinned. The clause under test quotes some of them and
+# the fixture must be able to tell which, so a case that pins none proves nothing. The
+# release window takes the adoption value unless a fifth argument sets it apart, so the
+# cases written before the two verbs split keep grading one number; P1nk3d is the one
+# that sets them apart. The subshell keeps the assignments out of the calling shell,
+# where they would leak into every later ap_report.
+ap_report_win() { # ap_report_win <ownerActivityTtl> <pendingTtl> <binding> <session-key> [releaseTtl]
+  ( ZDOC_OWNER_ACTIVITY_TTL_HOURS="$1" ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS="${5-$1}" \
+      ZDOC_TTL_HOURS="$2" ap_report "$3" "$4" )
 }
 
 # P1na — the stage vocabulary is a HAND COPY of zensu-autopilot-state.sh, which owns
@@ -4152,12 +4155,13 @@ ap_run run_silence_a GATES "$AP_FOREIGN" "/w/t"
 printf '{}' > "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
 touch -t 200001010000 "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null
 AP_SILENCE_OUT="$(ap_report bound "$AP_OWN")"
-# The window is UNSET here — `ap_report` pins neither `ZDOC_*` value — so this is
-# also the one case that grades the rendered FALLBACK. Without the `1h`, an accessor
-# rewritten onto the pending-review constants would keep every window case green
-# while every unconfigured run quoted 6h. An unset value ALSO means no configured
-# window reached this report, which the row must say rather than quoting the built-in
-# default as if it had been measured.
+# The windows are UNSET here — `ap_report` pins no `ZDOC_*` value — so this case grades
+# the rendered release FALLBACK of 6h. The owner pointer is retired, so only the release
+# half renders, and the release fallback happens to equal the pending-review fallback:
+# this arm cannot tell those two apart. P1nk6 renders the adoption fallback of 1h beside
+# it, which can, and C57c binds each accessor to its own constant pair at source. An
+# unset value ALSO means no configured window reached this report, which the row must
+# say rather than quoting the built-in default as if it had been measured.
 # The AGE itself carries its own bound, and it is not decoration. The number is an
 # ordinary filesystem mtime read out of `.zensu/state/`, which this file records as
 # session-writable, so a single `touch -t` makes a live owner read as hours-silent —
@@ -4167,7 +4171,7 @@ AP_SILENCE_OUT="$(ap_report bound "$AP_OWN")"
 # measurement rather than as evidence.
 if printf '%s' "$AP_SILENCE_OUT" | grep -qF 'last wrote its workflow document' \
   && printf '%s' "$AP_SILENCE_OUT" | grep -qF 'any session in this project can write' \
-  && printf '%s' "$AP_SILENCE_OUT" | grep -qF 'a release refuses while that is under 1h' \
+  && printf '%s' "$AP_SILENCE_OUT" | grep -qF 'a release refuses while that is under 6h' \
   && printf '%s' "$AP_SILENCE_OUT" | grep -qF 'adoption does not' \
   && printf '%s' "$AP_SILENCE_OUT" | grep -qF 'no configured owner-activity window reached this report'; then
   check "P1nk a foreign run with a workflow document renders the measured silence, its forgeable-mtime bound, the assumed fallback window and the per-verb clause" PASS
@@ -4266,7 +4270,7 @@ AP_ACTTL_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
 # that sets `adoptBlockedBy = 'aged'` for every designating pointer, dropping the
 # `verdict.ageMs < window.hours * 3600000` guard, withholds the NON-DESTRUCTIVE verb for
 # a run adoption would in fact permit, and passes the whole suite.
-if printf '%s' "$AP_ACTTL_OUT" | grep -qF 'adoption and a release both refuse while that is under 3h' \
+if printf '%s' "$AP_ACTTL_OUT" | grep -qF 'adoption refuses while that is under 3h and a release while it is under 3h' \
   && printf '%s' "$AP_ACTTL_OUT" | grep -qF 'any session in this project can delete' \
   && printf '%s' "$AP_ACTTL_OUT" | grep -F 'autopilot: nonterminal durable run run_window_a' \
     | grep -qF '/zensu:autopilot-adopt' \
@@ -4309,6 +4313,28 @@ if printf '%s' "$AP_WINOOR_OUT" | grep -qF 'no configured owner-activity window 
 else
   check "P1nk3c out-of-range owner-activity window (got: $AP_WINOOR_OUT)" FAIL
 fi
+# P1nk3d — each verb's OWN window is quoted, and never one number for both. Adoption reads
+# `autopilotOwnerActivityTtlHours` and the release reads
+# `autopilotReleaseOwnerActivityTtlHours`, so the fixture sets them apart and stamps the
+# beacon between them: three hours old against a two-hour adoption window and a
+# five-hour release window. Adoption is outside its window and stays on offer; the
+# release is inside its window and is withheld, with the remedy quoting the release's
+# own number.
+rm -f "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+ap_pointer "$AP_FOREIGN" run_window_a
+AP_STAMP_FILE="$AP_STATE/tdd-phase-$AP_FOREIGN.json" \
+  node -e 'const fs=require("fs");const t=(Date.now()-3*3600000)/1000;fs.utimesSync(process.env.AP_STAMP_FILE,t,t)'
+AP_SPLIT_ROW="$(ap_report_win 2 6 bound "$AP_OWN" 5 | grep -F 'autopilot: nonterminal durable run run_window_a')"
+touch -t 200001010000 "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null
+if printf '%s' "$AP_SPLIT_ROW" | grep -qF 'adoption refuses while that is under 2h and a release while it is under 5h' \
+  && printf '%s' "$AP_SPLIT_ROW" | grep -qF 'a release refuses this run with exit 7 while that document is under 5h old' \
+  && printf '%s' "$AP_SPLIT_ROW" | grep -qF '/zensu:autopilot-adopt' \
+  && ! printf '%s' "$AP_SPLIT_ROW" | grep -qF '/zensu:autopilot-release' \
+  && ! printf '%s' "$AP_SPLIT_ROW" | grep -qF 'both refuse'; then
+  check "P1nk3d with the two windows set apart the clause and the remedy quote each verb's own window, withholding only the verb whose window the beacon is inside" PASS
+else
+  check "P1nk3d per-verb windows (got: $AP_SPLIT_ROW)" FAIL
+fi
 rm -f "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
 # P1nk4 — a configured 0 disables the check in BOTH verbs, and the row must say so
 # rather than fall silent: a disabled guard that renders like an armed one is the
@@ -4340,34 +4366,47 @@ else
 fi
 # P1nk6 — a BLANK window falls back to the getter's own default, never to 0: an empty
 # string passes a bare `>= 0` bound, so a wrapper fault would otherwise read as the
-# documented off-switch and drop the clause.
+# documented off-switch and drop the clause. The owner pointer designates the run here,
+# so BOTH fallbacks render: adoption's 1h, which differs from the pending-review
+# fallback, and the release's 6h.
 printf '{}' > "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
 touch -t 200001010000 "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null
+ap_pointer "$AP_FOREIGN" run_window_a
 AP_BLANKWIN_OUT="$(ap_report_win '' 6 bound "$AP_OWN")"
-if printf '%s' "$AP_BLANKWIN_OUT" | grep -qF 'while that is under 1h' \
+rm -f "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+if printf '%s' "$AP_BLANKWIN_OUT" | grep -qF 'adoption refuses while that is under 1h and a release while it is under 6h' \
   && printf '%s' "$AP_BLANKWIN_OUT" | grep -qF 'no configured owner-activity window reached this report' \
-  && ! printf '%s' "$AP_BLANKWIN_OUT" | grep -qF 'autopilotOwnerActivityTtlHours is 0'; then
-  check "P1nk6 a blank owner-activity window falls back to the getter default and says the default is assumed" PASS
+  && ! printf '%s' "$AP_BLANKWIN_OUT" | grep -qF 'autopilotOwnerActivityTtlHours is 0' \
+  && ! printf '%s' "$AP_BLANKWIN_OUT" | grep -qF 'autopilotReleaseOwnerActivityTtlHours is 0'; then
+  check "P1nk6 blank owner-activity windows fall back to each getter's default and say the defaults are assumed" PASS
 else
   check "P1nk6 blank owner-activity window (got: $AP_BLANKWIN_OUT)" FAIL
 fi
-# P1nk7 — a FUTURE-dated beacon is where the two verbs diverge hardest: the release
-# worker refuses outright with exit 7 and says waiting will not resolve it, while
-# adoption discloses and PERMITS. Rendering only "not measured" beside a remedy that
-# offers the cancel first would hand the reader a command that cannot run.
+# P1nk7 — a FUTURE-dated beacon is refused by BOTH verbs with exit 7 while the owner
+# pointer designates the run: waiting clears neither, and adoption used to permit it,
+# which made it the route around the release's own refusal. Rendering only "not
+# measured" beside a remedy that offers either verb would hand the reader a command
+# that cannot run.
 printf '{}' > "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+# The pointer has to DESIGNATE the run here: with it retired adoption never opens the
+# beacon and legitimately permits, which is the other half of this arm and the state
+# P1nk3b already measures for the aged one.
+ap_pointer "$AP_FOREIGN" run_window_a
 if touch -t 209901010000 "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null; then
   AP_FUTUREFOREIGN_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
   if printf '%s' "$AP_FUTUREFOREIGN_OUT" | grep -qF 'future timestamp' \
-    && printf '%s' "$AP_FUTUREFOREIGN_OUT" | grep -qF 'a release refuses outright with exit 7' \
-    && printf '%s' "$AP_FUTUREFOREIGN_OUT" | grep -qF 'adoption permits'; then
-    check "P1nk7 a future-dated beacon renders the per-verb divergence rather than a bare missing check" PASS
+    && printf '%s' "$AP_FUTUREFOREIGN_OUT" | grep -qF 'both verbs refuse outright with exit 7' \
+    && ! printf '%s' "$AP_FUTUREFOREIGN_OUT" | grep -qF 'adoption permits' \
+    && ! printf '%s' "$AP_FUTUREFOREIGN_OUT" | grep -F 'autopilot: nonterminal durable run' \
+      | grep -qF '/zensu:autopilot-'; then
+    check "P1nk7 a future-dated beacon renders the refusal of both verbs and offers neither" PASS
   else
     check "P1nk7 future-dated foreign beacon (got: $AP_FUTUREFOREIGN_OUT)" FAIL
   fi
 else
   check "P1nk7 skipped: this platform's touch rejects a year-2099 timestamp" PASS
 fi
+rm -f "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
 # P1nk9 — the THIRD arm of the per-verb clause: a pointer that is present but does not
 # parse settles nothing, so the row must hedge rather than pick a verdict. Without a
 # case the arm's wording is pinned by nothing on either side.
@@ -4388,9 +4427,10 @@ rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/tdd-phase-*.json "$AP_STATE"/
 
 # P1nka / P1nkb — the ORDER inside the clause is the contract, and P1nk4 alone cannot
 # see it: that case drives window `0` against a healthy AGED beacon, where the kind
-# arms are not reachable anyway. Both verbs wrap their whole liveness block in
-# `if (Number.isFinite(ttlHours) && ttlHours > 0) {`, the spelling P1nn greps, so at a
-# configured `0` the beacon is never opened — no exit 2
+# arms are not reachable anyway. Both verbs read the beacon through one evaluation that
+# returns first on `if (!(Number.isFinite(ttlHours) && ttlHours > 0)) return { verdict:
+# "disabled" };`, the spelling P1nn greps, so at a configured `0` the beacon is never
+# opened — no exit 2
 # for a file `regularFile` would refuse, no exit 7 for a future stamp. Judging the
 # beacon KIND before the window asserted refusals no verb takes and SUPPRESSED the
 # one arm written for that configuration, beside a remedy naming an irreversible
@@ -4471,6 +4511,25 @@ if printf '%s' "$AP_CHAINBLOCKED_OUT" | grep -qF 'before it reads any beacon' \
 else
   check "P1nkd pending-stage adoption half (got: $AP_CHAINBLOCKED_OUT)" FAIL
 fi
+# P1nky — the forgeability bound is a HAND COPY across two files. The library owns the
+# source clause and states it in three renderers of its own; this report states the
+# identical sentence over the identical fact. Nothing compared them, so a reword on
+# either side left the other stale — and this is the one clause whose whole job is to
+# stop a planted run document from reading as measured fact beside an irreversible
+# cancel, so a stale copy here is worse than an absent one.
+AP_FORGEABLE_LIB="$(sed -n 's/^ *const forgeableSource = "\(.*\)";$/\1/p' "$AP_OWNER_SRC" | head -1)"
+AP_FORGEABLE_DOC="$(sed -n "s/^var AUTOPILOT_FORGEABLE_SOURCE = '\(.*\)';\$/\1/p" "$REPORT" | head -1)"
+if [ -n "$AP_FORGEABLE_LIB" ] && [ -n "$AP_FORGEABLE_DOC" ]; then
+  check "P1nkypre both forgeability clauses were located, so the comparison below is not vacuous" PASS
+  if [ "$AP_FORGEABLE_LIB" = "$AP_FORGEABLE_DOC" ] \
+    && printf '%s' "$AP_CHAINLIVE_OUT" | grep -qF "$AP_FORGEABLE_LIB"; then
+    check "P1nky the doctor's forgeability clause is the library's own, and the live-inner-chain row emits it" PASS
+  else
+    check "P1nky the doctor's forgeability clause must be the library's (lib=$AP_FORGEABLE_LIB doctor=$AP_FORGEABLE_DOC)" FAIL
+  fi
+else
+  check "P1nkypre both forgeability clauses were located, so the comparison below is not vacuous (lib=$AP_FORGEABLE_LIB doctor=$AP_FORGEABLE_DOC)" FAIL
+fi
 # P1nke / P1nkf / P1nkg — the chain qualifier reached ONLY the aged arm, so the absent,
 # window-0 and future-dated branches could each be reverted with the whole suite green.
 # The absent case is the one that matters most: its own sentence says both verbs stand
@@ -4547,13 +4606,13 @@ AP_E2CHAIN_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
 # over a remedy that says the same false thing in different words. Here the remedy must
 # not claim a beacon abort for adoption — repairing that beacon leaves the exit-3
 # refusal standing — and it must name the chain as the cause.
-# `neither guided verb is on offer here` and `finishing or blocking that chain` belong to
+# `neither guided verb is on offer here` and `finishing or cancelling that chain` belong to
 # the REMEDY and occur nowhere in `ownerLivenessClause`, so they are what keeps this check
 # from grading the clause alone: both strings land in one `line()`, and every other needle
 # here is a clause literal, so `remedy = ''` in this arm left the check green.
 if printf '%s' "$AP_E2CHAIN_OUT" | grep -qF 'before it reads any beacon' \
   && printf '%s' "$AP_E2CHAIN_OUT" | grep -qF 'neither guided verb is on offer here' \
-  && printf '%s' "$AP_E2CHAIN_OUT" | grep -qF 'finishing or blocking that chain is what clears it' \
+  && printf '%s' "$AP_E2CHAIN_OUT" | grep -qF 'finishing or cancelling that chain in its own session is what clears it' \
   && ! printf '%s' "$AP_E2CHAIN_OUT" | grep -qF 'both verbs abort on this beacon' \
   && ! printf '%s' "$AP_E2CHAIN_OUT" | grep -qF 'both abort on this run' \
   && printf '%s' "$AP_E2CHAIN_OUT" | grep -F 'autopilot: nonterminal durable run' \
@@ -4697,7 +4756,7 @@ if touch -t 209901010000 "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null; the
       | grep -qF 'live inner TDD chain' \
     && printf '%s' "$AP_FUTCHAIN_OUT" | grep -qF 'neither guided verb is on offer here' \
     && printf '%s' "$AP_FUTCHAIN_OUT" | grep -qF 'a release refuses this run with exit 7 while that stamp is in the future' \
-    && printf '%s' "$AP_FUTCHAIN_OUT" | grep -qF 'finishing or blocking that chain is what clears it' \
+    && printf '%s' "$AP_FUTCHAIN_OUT" | grep -qF 'finishing or cancelling that chain in its own session is what clears it' \
     && ! printf '%s' "$AP_FUTCHAIN_OUT" | grep -qF 'restored to a plain regular file' \
     && ! printf '%s' "$AP_FUTCHAIN_OUT" | grep -qF 'both abort on this run' \
     && ! printf '%s' "$AP_FUTCHAIN_OUT" | grep -F 'autopilot: nonterminal durable run' \
@@ -4749,7 +4808,7 @@ AP_AGEDIN_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
 # cannot tell the two apart and `remedy = ''` in the neither-verb arm left this check
 # green. `neither guided verb is on offer here` and the per-cause `adoptWhy` sentence
 # occur nowhere in `ownerLivenessClause`, so they bite only on the remedy.
-if printf '%s' "$AP_AGEDIN_OUT" | grep -qF 'adoption and a release both refuse while that is under 3h' \
+if printf '%s' "$AP_AGEDIN_OUT" | grep -qF 'adoption refuses while that is under 3h and a release while it is under 3h' \
   && printf '%s' "$AP_AGEDIN_OUT" | grep -qF 'neither guided verb is on offer here' \
   && printf '%s' "$AP_AGEDIN_OUT" | grep -qF 'adoption refuses it too while that document is under 3h old' \
   && ! printf '%s' "$AP_AGEDIN_OUT" | grep -F 'autopilot: nonterminal durable run' \
@@ -4916,9 +4975,13 @@ fi
 # silently diverge — including the ADOPT half, which spells the beacon off
 # `previousOwner` and nests its refusal inside the pointer precondition the row now
 # renders per verb.
-AP_BEACON_ADOPT=$(grep -cF 'regularFile(path.join(stateDir, `tdd-phase-${previousOwner}.json`))' "$AP_OWNER_SRC")
-AP_ADOPT_GATE=$(grep -cF 'if (ownerPointerDesignatesRun) {' "$AP_OWNER_SRC")
-AP_BEACON_OWNER=$(grep -cF 'regularFile(path.join(stateDir, `tdd-phase-${state.ownerSessionId}.json`))' "$AP_OWNER_SRC")
+# Both verbs now read the beacon through ONE evaluation, `ownerLiveness`, so the owner
+# half is that helper's single beacon read plus the two calls: release passes no pointer
+# precondition, and adoption passes the one it requires.
+AP_BEACON_ADOPT=$(grep -cF '{ requirePointer: true, pointerDesignates: ownerPointerDesignatesRun });' "$AP_OWNER_SRC")
+AP_BEACON_RELEASE=$(grep -cF 'ownerLiveness(stateDir, state.ownerSessionId, ownerActivityTtlHours' "$AP_OWNER_SRC")
+AP_ADOPT_GATE=$(grep -cF 'if (options.requirePointer && !options.pointerDesignates) return { verdict: "retired" };' "$AP_OWNER_SRC")
+AP_BEACON_OWNER=$(grep -cF 'regularFile(path.join(stateDir, `tdd-phase-${ownerSessionId}.json`))' "$AP_OWNER_SRC")
 AP_MTIME_OWNER=$(grep -cF 'ownerActivity.mtimeMs' "$AP_OWNER_SRC")
 # The renderer half is SLICED to the one function that reads the beacon, the way P1no
 # slices `readAutopilotJson`. Counted over the whole file these needles are satisfied
@@ -4949,31 +5012,31 @@ AP_STATSYNC_COPY=$(printf '%s' "$AP_SILENCE_SLICE" | grep -cF "fs.statSync(path.
 # call only under its pointer precondition. Two ordering facts decide the
 # clause and both are pinned as OFFSETS rather than as presence — presence alone is
 # satisfied by a file that carries the same three lines in any order. First the
-# TDD_RUNNING refusal must stay ABOVE adoption's window gate, or the clause's chain
-# arm would claim a refusal the verb no longer takes first. Second the window gate
-# must stay ABOVE adoption's pointer branch, which is what makes "at 0 the beacon is
-# never opened at all" true for both verbs.
-AP_TTL_GATE_OWNER=$(grep -cF 'if (Number.isFinite(ttlHours) && ttlHours > 0) {' "$AP_OWNER_SRC")
+# TDD_RUNNING refusal must stay ABOVE adoption's liveness call, or the clause's chain
+# arm would claim a refusal the verb no longer takes first. Second, inside the shared
+# evaluation, the window gate must stay ABOVE the pointer precondition and both ABOVE
+# the beacon read, which is what makes "at 0 the beacon is never opened at all" true
+# for both verbs.
+AP_TTL_GATE_OWNER=$(grep -cF 'if (!(Number.isFinite(ttlHours) && ttlHours > 0)) return { verdict: "disabled" };' "$AP_OWNER_SRC")
 AP_CHAIN_GATE_OWNER=$(grep -cF 'if (pendingStage === "TDD_RUNNING") {' "$AP_OWNER_SRC")
 AP_CHAIN_LINE=$(grep -nF 'if (pendingStage === "TDD_RUNNING") {' "$AP_OWNER_SRC" | head -1 | cut -d: -f1)
-AP_REL_TTL_LINE=$(grep -nF 'if (Number.isFinite(ttlHours) && ttlHours > 0) {' "$AP_OWNER_SRC" | head -1 | cut -d: -f1)
-AP_ADOPT_TTL_LINE=$(grep -nF 'if (Number.isFinite(ttlHours) && ttlHours > 0) {' "$AP_OWNER_SRC" | tail -1 | cut -d: -f1)
-AP_ADOPT_PTR_LINE=$(grep -nF 'if (ownerPointerDesignatesRun) {' "$AP_OWNER_SRC" | head -1 | cut -d: -f1)
-# The two beacon READS are LOCATED, not only counted. Counting them proves the spelling
-# survives somewhere; the row's claim is about WHERE: "at 0 the beacon is never opened
-# at all" holds only while each verb's read sits BELOW the gate that can skip it, and
-# hoisting either read above its gate satisfies every count-based conjunct while making
-# that sentence false — which is the exact move the adopt verb already made once for
+AP_ADOPT_CALL_LINE=$(grep -nF '{ requirePointer: true, pointerDesignates: ownerPointerDesignatesRun });' "$AP_OWNER_SRC" | head -1 | cut -d: -f1)
+# Inside the one evaluation the three steps are LOCATED, not only counted: the window
+# gate, then the pointer precondition, then the beacon read. "At 0 the beacon is never
+# opened at all" holds only while the read sits BELOW the gate that can skip it, and
+# adoption's "a retired pointer never opens it" only while the read sits below the
+# precondition too — hoisting the read satisfies every count-based conjunct while making
+# both sentences false, which is the exact move the adopt verb once made for
 # `activePointerFileFor`.
-AP_REL_BEACON_LINE=$(grep -nF 'regularFile(path.join(stateDir, `tdd-phase-${state.ownerSessionId}.json`))' "$AP_OWNER_SRC" | head -1 | cut -d: -f1)
-AP_ADOPT_BEACON_LINE=$(grep -nF 'regularFile(path.join(stateDir, `tdd-phase-${previousOwner}.json`))' "$AP_OWNER_SRC" | head -1 | cut -d: -f1)
+AP_TTL_LINE=$(grep -nF 'if (!(Number.isFinite(ttlHours) && ttlHours > 0)) return { verdict: "disabled" };' "$AP_OWNER_SRC" | head -1 | cut -d: -f1)
+AP_PTR_LINE=$(grep -nF 'if (options.requirePointer && !options.pointerDesignates) return { verdict: "retired" };' "$AP_OWNER_SRC" | head -1 | cut -d: -f1)
+AP_BEACON_LINE=$(grep -nF 'regularFile(path.join(stateDir, `tdd-phase-${ownerSessionId}.json`))' "$AP_OWNER_SRC" | head -1 | cut -d: -f1)
 AP_ORDER_OK=false
-if [ -n "$AP_CHAIN_LINE" ] && [ -n "$AP_ADOPT_TTL_LINE" ] && [ -n "$AP_ADOPT_PTR_LINE" ] \
-  && [ -n "$AP_REL_TTL_LINE" ] && [ -n "$AP_REL_BEACON_LINE" ] && [ -n "$AP_ADOPT_BEACON_LINE" ] \
-  && [ "$AP_CHAIN_LINE" -lt "$AP_ADOPT_TTL_LINE" ] \
-  && [ "$AP_ADOPT_TTL_LINE" -lt "$AP_ADOPT_PTR_LINE" ] \
-  && [ "$AP_REL_TTL_LINE" -lt "$AP_REL_BEACON_LINE" ] \
-  && [ "$AP_ADOPT_PTR_LINE" -lt "$AP_ADOPT_BEACON_LINE" ]; then
+if [ -n "$AP_CHAIN_LINE" ] && [ -n "$AP_ADOPT_CALL_LINE" ] && [ -n "$AP_TTL_LINE" ] \
+  && [ -n "$AP_PTR_LINE" ] && [ -n "$AP_BEACON_LINE" ] \
+  && [ "$AP_CHAIN_LINE" -lt "$AP_ADOPT_CALL_LINE" ] \
+  && [ "$AP_TTL_LINE" -lt "$AP_PTR_LINE" ] \
+  && [ "$AP_PTR_LINE" -lt "$AP_BEACON_LINE" ]; then
   AP_ORDER_OK=true
 fi
 # The owner's refusal disjunction is FOUR tests, and the size bound is the one a mirror drops
@@ -4994,6 +5057,9 @@ fi
 # the row asserting a policy no verb runs — with every behavioural check green, since
 # the fixtures drive the RENDERER and never the verbs.
 AP_OWNER_FUT_REFUSE=$(grep -cF 'dated in the future, so its age cannot bound this cancel' "$AP_OWNER_SRC")
+# The ADOPT half of the same verdict: its own exit-7 sentence, and the disclosure it
+# replaced must be gone, or the row would claim a refusal one verb does not take.
+AP_OWNER_FUT_ADOPT=$(grep -cF 'dated in the future, so its age cannot show that the owner has stopped' "$AP_OWNER_SRC")
 AP_OWNER_FUT_DISCLOSE=$(grep -cF 'owner liveness unchecked: the recorded owner workflow document is dated in the future' "$AP_OWNER_SRC")
 AP_OWNER_UNSAFE=$(grep -cF 'unsafe state file' "$AP_OWNER_SRC")
 AP_OWNER_NODOC=$(grep -cF 'no workflow document for the recorded owner' "$AP_OWNER_SRC")
@@ -5003,10 +5069,12 @@ AP_SIZE_COPY=$(printf '%s' "$AP_SILENCE_SLICE" | grep -cF 'st.size > AUTOPILOT_R
 AP_SIZE_LITERAL=$(grep -cF 'st.size > 1024 * 1024' "$REPORT")
 if [ -n "$AP_SILENCE_SLICE" ] \
   && [ "$AP_BEACON_OWNER" -ge 1 ] && [ "$AP_BEACON_COPY" -ge 1 ] \
-  && [ "$AP_BEACON_ADOPT" -ge 1 ] && [ "$AP_ADOPT_GATE" -ge 1 ] \
-  && [ "$AP_TTL_GATE_OWNER" -eq 2 ] && [ "$AP_CHAIN_GATE_OWNER" -ge 1 ] \
+  && [ "$AP_BEACON_ADOPT" -ge 1 ] && [ "$AP_BEACON_RELEASE" -ge 1 ] && [ "$AP_ADOPT_GATE" -eq 1 ] \
+  && [ "$AP_BEACON_OWNER" -eq 1 ] \
+  && [ "$AP_TTL_GATE_OWNER" -eq 1 ] && [ "$AP_CHAIN_GATE_OWNER" -ge 1 ] \
   && [ "$AP_ORDER_OK" = true ] \
-  && [ "$AP_OWNER_FUT_REFUSE" -ge 1 ] && [ "$AP_OWNER_FUT_DISCLOSE" -ge 1 ] \
+  && [ "$AP_OWNER_FUT_REFUSE" -ge 1 ] && [ "$AP_OWNER_FUT_ADOPT" -ge 1 ] \
+  && [ "$AP_OWNER_FUT_DISCLOSE" -eq 0 ] \
   && [ "$AP_OWNER_UNSAFE" -ge 1 ] && [ "$AP_OWNER_NODOC" -ge 1 ] \
   && [ "$AP_MTIME_OWNER" -ge 1 ] && [ "$AP_MTIME_COPY" -ge 1 ] \
   && [ -n "$AP_MAXBYTES_OWNER" ] && [ "$AP_MAXBYTES_OWNER" = "$AP_MAXBYTES_COPY" ] \
@@ -5014,7 +5082,7 @@ if [ -n "$AP_SILENCE_SLICE" ] \
   && [ "$AP_LSTAT_COPY" -ge 1 ] && [ "$AP_STATSYNC_COPY" -eq 0 ]; then
   check "P1nn the owner-silence reconstruction still matches both verbs it quotes" PASS
 else
-  check "P1nn silence reconstruction drifted (slice=${#AP_SILENCE_SLICE} beacon owner=$AP_BEACON_OWNER adopt=$AP_BEACON_ADOPT gate=$AP_ADOPT_GATE copy=$AP_BEACON_COPY; ttlgate=$AP_TTL_GATE_OWNER chaingate=$AP_CHAIN_GATE_OWNER order=$AP_ORDER_OK chain=$AP_CHAIN_LINE ttl=$AP_ADOPT_TTL_LINE ptr=$AP_ADOPT_PTR_LINE; mtime owner=$AP_MTIME_OWNER copy=$AP_MTIME_COPY; maxbytes owner=$AP_MAXBYTES_OWNER copy=$AP_MAXBYTES_COPY size=$AP_SIZE_COPY literal=$AP_SIZE_LITERAL; lstat=$AP_LSTAT_COPY statSync=$AP_STATSYNC_COPY)" FAIL
+  check "P1nn silence reconstruction drifted (slice=${#AP_SILENCE_SLICE} beacon owner=$AP_BEACON_OWNER adopt=$AP_BEACON_ADOPT release=$AP_BEACON_RELEASE gate=$AP_ADOPT_GATE copy=$AP_BEACON_COPY; ttlgate=$AP_TTL_GATE_OWNER chaingate=$AP_CHAIN_GATE_OWNER order=$AP_ORDER_OK chain=$AP_CHAIN_LINE adoptcall=$AP_ADOPT_CALL_LINE ttl=$AP_TTL_LINE ptr=$AP_PTR_LINE beacon=$AP_BEACON_LINE; mtime owner=$AP_MTIME_OWNER copy=$AP_MTIME_COPY; maxbytes owner=$AP_MAXBYTES_OWNER copy=$AP_MAXBYTES_COPY size=$AP_SIZE_COPY literal=$AP_SIZE_LITERAL; lstat=$AP_LSTAT_COPY statSync=$AP_STATSYNC_COPY)" FAIL
 fi
 # P1nn2 — the four defensive arms that no fixture can reach, pinned at SOURCE, which is
 # the remedy this repository already uses for a behaviourally unreachable branch (S7n in
