@@ -25,6 +25,11 @@ const core = require("./session-control-core-v1.js");
 // caller. Required at the TOP on purpose: a broken or missing sweep module then
 // fails this command before adoptContext has mutated anything, rather than after.
 const sweepLeases = require("./review-evidence-sweep-v1.js");
+// The ONE adoption implementation, shared with every hook that adopts on a failed
+// bind. --confirm is the manual fallback for a REFUSED or opted-out automatic
+// adoption, so it passes respectOptOut:false: hooks.sessionAutoAdopt=false switches
+// the hooks off, never the command the user runs by hand.
+const autoAdopt = require("./session-auto-adopt-v1.js");
 
 // The three inputs are read INSIDE buildRequest, not at module scope. Freezing them
 // at require time made main() undrivable from a unit test: every case would share one
@@ -701,16 +706,36 @@ function main() {
     return;
   }
 
-  const adopted = core.adoptContext(request);
-  // The record is swapped at this point. The sweep is the second half of the
-  // adoption and runs here rather than inside adoptContext; every one of its own
-  // filesystem paths is caught internally, so it reports a verdict rather than
-  // throwing after a mutation that already succeeded.
-  const leases = sweepLeases.discardSupersededLeases(
-    request.pluginData,
-    core.sessionKey(request.sessionId),
-    adopted.context.plugin_root,
-  );
+  // adoptContext plus the lease sweep, through the shared adopter: it re-checks
+  // adoptability under the records lock, so a sibling hook adopting in the window
+  // between the preview above and this call is answered as already-served rather
+  // than as a crash, and a refusal that first appears under the lock is named.
+  const adopted = autoAdopt.adoptForHook({ ...request, respectOptOut: false });
+  if (adopted.outcome !== autoAdopt.AUTO_ADOPT_OUTCOMES.ADOPTED) {
+    process.stdout.write("Zensu session adoption — NOT adopted (" + safe(adopted.reason) + ")\n\n");
+    if (adopted.outcome === autoAdopt.AUTO_ADOPT_OUTCOMES.ALREADY_SERVED) {
+      process.stdout.write("The record was adopted by a hook of this session while this command ran, so this\n");
+      process.stdout.write("installation already serves it. Nothing was changed here; re-run this command to\n");
+      process.stdout.write("see the served state, or simply continue in the session.\n");
+    } else {
+      process.stdout.write("The read-only check above found the record adoptable, but the adoption itself did\n");
+      process.stdout.write("not complete: " + safe(adopted.error || adopted.reason) + "\n");
+      if (adopted.supersededFile) {
+        process.stdout.write("A superseded record from an interrupted adoption is already in place:\n");
+        process.stdout.write("  " + safe(adopted.supersededFile) + "\n");
+        process.stdout.write("Move it aside, then re-run this command with --confirm.\n");
+      } else {
+        process.stdout.write("Nothing was changed. Re-run this command with --confirm; if it persists, run\n");
+        process.stdout.write("/zensu:doctor, which names the disagreement.\n");
+      }
+    }
+    process.exitCode = 1;
+    return;
+  }
+  // The record is swapped at this point and the lease store has been swept; the
+  // sweep is the second half of the adoption and its verdict is carried on the
+  // result, never absorbed.
+  const leases = adopted.leases;
   process.stdout.write("Zensu session adoption — ADOPTED\n\n");
   process.stdout.write("  record minted by : " + safe(adopted.recorded) + prunedNote(adopted.prunedPluginRoot) + "\n");
   process.stdout.write("  now served by    : " + safe(adopted.executing) + "\n");

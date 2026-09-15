@@ -39,11 +39,24 @@ emit_session_runtime_missing_block() {
 }
 
 emit_session_bind_failed_block() {
-  printf '%s\n' '{"decision":"block","reason":"Zensu Stop denied: this Stop event cannot be bound to the immutable Session Control record of its session, so review-chain and Autopilot completion cannot be proven. Four bind failures are released before this point — a session with NO record at all, a record whose recorded project root no longer exists (a deleted or recycled worktree), an intact record served by a declared-incompatible plugin lineage, and an intact record whose minting installation was pruned from the plugin cache (both adoptable via /zensu:adopt-session) — so this is none of them: most often a record exists here and disagrees about something else, such as a record minted against a different plugin installation, a runtime digest that drifted, or a root that still exists but no longer matches. Any release check can also simply fail to evaluate, in which case no record was consulted at all. The Session Control binder usually printed the exact cause on stderr; when it did, that line is authoritative. Do not guess between these states and do not treat this as completion: report the block and ask the user to read the stderr output. /zensu:doctor stays reachable in every bind failure and names the disagreement; where a record does disagree for any other reason, only a fresh Claude Code session helps."}'
+  printf '%s\n' '{"decision":"block","reason":"Zensu Stop denied: this Stop event cannot be bound to the immutable Session Control record of its session, so review-chain and Autopilot completion cannot be proven. Four bind failures are released before this point — a session with NO record at all, a record whose recorded project root no longer exists (a deleted or recycled worktree), an intact record served by a declared-incompatible plugin lineage, and an intact record whose minting installation was pruned from the plugin cache (both the shape of a mid-session plugin update; Zensu adopts such a record automatically on the first hook contact, and releases here only when that adoption was REFUSED, naming the refusal) — so this is none of them: most often a record exists here and disagrees about something else, such as a record minted against a different plugin installation, a runtime digest that drifted, or a root that still exists but no longer matches. Any release check can also simply fail to evaluate, in which case no record was consulted at all. The Session Control binder usually printed the exact cause on stderr; when it did, that line is authoritative. Do not guess between these states and do not treat this as completion: report the block and ask the user to read the stderr output. /zensu:doctor stays reachable in every bind failure and names the disagreement; where a record does disagree for any other reason, only a fresh Claude Code session helps."}'
 }
 
 emit_session_record_unusable_block() {
   printf '%s\n' '{"decision":"block","reason":"Zensu Stop denied: the immutable Session Control record of this session no longer resolves against its recorded project root, which still exists, so review-chain and Autopilot completion cannot be proven. Restore that path to exactly what was recorded (a symlinked, moved, or re-created root does not match), then retry."}'
+}
+
+# The bind below already TRIED the adoption: zensu_bind_hook_session adopts a
+# compatible-schema record across a lineage break on the spot, so reaching either
+# adoptable release arm means that adoption was refused, or did not complete. This
+# asks the binder WHICH, as one token, and renders it through the same shape
+# screen the deny scopes apply — the value is interpolated into a stderr line the
+# transcript renders verbatim. Called from the two arms only: it spawns node, and
+# the generic block below needs no token.
+stop_adoption_refusal() {
+  ADOPTION_REFUSAL="$(zensu_session_adoption_refusal "$INPUT")" || ADOPTION_REFUSAL=""
+  [[ "$ADOPTION_REFUSAL" =~ $ZENSU_SAFE_REFUSAL_RE ]] || ADOPTION_REFUSAL="(unknown)"
+  ADOPTION_REMEDY="$(zensu_session_adoption_remedy "$ADOPTION_REFUSAL")"
 }
 
 zensu_stop_guard_opted_out() {
@@ -140,10 +153,13 @@ if ! zensu_bind_hook_session "$INPUT"; then
   # one message. With the recorded project root still present the workflow
   # document stays REACHABLE once the session re-binds — this arm establishes
   # guarantee is DEFERRED: adoption re-binds the session, the same document
-  # becomes reachable, and the very next Stop enforces it. With that root GONE
+  # becomes reachable, and a later Stop enforces it. With that root GONE
   # the document is not reachable from this record, and the adoption re-mints
   # around the same absent anchor — so every later Stop takes the ORPHAN release
-  # above rather than this one. The orphan branch cannot claim the combined state
+  # above rather than this one. Since the bind adopts automatically, an ADOPTABLE
+  # record never reaches either half any more: the first Stop after the update
+  # binds and enforces. What reaches them is a REFUSED (or incomplete) adoption,
+  # and both halves name the refusal token and its remedy. The orphan branch cannot claim the combined state
   # first: resolveOrphanedProjectRoot re-applies servesRecordedRuntime, which an
   # incompatible lineage fails. Asking the third fact here is therefore the only
   # way this hook can tell the user the truth.
@@ -172,6 +188,7 @@ if ! zensu_bind_hook_session "$INPUT"; then
       RECORDED_VERSION="(unreadable)"
       EXECUTING_VERSION="(unreadable)"
     fi
+    stop_adoption_refusal
     # The THIRD fact, on its own channel so the version pair stays two fields.
     # stdout is captured, never leaked, and the STATUS is read as well as the
     # value: ZENSU_ROOT_STATE_GONE with a path means the root is gone,
@@ -224,7 +241,7 @@ if ! zensu_bind_hook_session "$INPUT"; then
       # report's display allowlist. Naming /zensu:doctor instead is what the deny
       # scope in zensu-session.sh already does, and it keeps the fold in one
       # place rather than adding a second one here.
-      echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is readable, but BOTH the recorded project root no longer exists and the running installation declares an incompatible lineage (record minted by ${RECORDED_VERSION}, executing ${EXECUTING_VERSION}). The binding that resolves the project root is what failed, so no review-chain or Autopilot state could be read from here: no completion was proven, only an unprovable guard released. The workflow document lived under that directory and is not reachable from this record — this is not a deferral, and no later Stop can enforce this chain while that directory is missing. If it was moved rather than deleted, its state still exists there, and re-creating exactly that directory FIRST is the better order: adoption then reads that document and checks its schema here, so a mismatch is named as workflow-schema-mismatch rather than surfacing later as an anonymous fail-closed deny at the first read. Otherwise run /zensu:adopt-session, then /zensu:adopt-session --confirm, to clear the lineage break so READ-ONLY Bash and the read-only diagnostics work again; Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created — a write cannot be attributed to a project that is not there. /zensu:doctor names the directory." >&2
+      echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is readable, but BOTH the recorded project root no longer exists and the running installation declares an incompatible lineage (record minted by ${RECORDED_VERSION}, executing ${EXECUTING_VERSION}). Zensu tried to adopt the record automatically at this Stop and it was REFUSED: ${ADOPTION_REFUSAL}. The binding that resolves the project root is what failed, so no review-chain or Autopilot state could be read from here: no completion was proven, only an unprovable guard released. The workflow document lived under that directory and is not reachable from this record — this is not a deferral, and no later Stop can enforce this chain while that directory is missing. If it was moved rather than deleted, its state still exists there, and re-creating exactly that directory FIRST is the better order: adoption then reads that document and checks its schema here, so a mismatch is named as workflow-schema-mismatch rather than surfacing later as an anonymous fail-closed deny at the first read. ${ADOPTION_REMEDY}. /zensu:adopt-session reports the same refusal in full, and /zensu:adopt-session --confirm retries the adoption by hand; once adopted, READ-ONLY Bash and the read-only diagnostics work again, while Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created — a write cannot be attributed to a project that is not there. /zensu:doctor names the directory." >&2
       exit 0
     fi
     if [ -n "$ZENSU_ROOT_STATE_UNRESOLVED" ] \
@@ -232,14 +249,15 @@ if ! zensu_bind_hook_session "$INPUT"; then
       # The probe could not answer. Assert NEITHER half: the state-neutral
       # release says only what this hook actually established, which is that the
       # binding failed and no completion was proven.
-      echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is readable and the running installation declares an incompatible lineage (record minted by ${RECORDED_VERSION}, executing ${EXECUTING_VERSION}). The binding that resolves the project root is what failed, so no review-chain or Autopilot state could be read from here: no completion was proven, only an unprovable guard released. Whether the recorded project root still exists could not be determined here, so nothing is claimed about the workflow document either way — run /zensu:doctor, which names that directory when it is gone. Run /zensu:adopt-session to find out whether this installation may take the record over, then /zensu:adopt-session --confirm. If the executing version is OLDER than the recorded one, adoption refuses and re-installing the newer version is the only way back." >&2
+      echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is readable and the running installation declares an incompatible lineage (record minted by ${RECORDED_VERSION}, executing ${EXECUTING_VERSION}). Zensu tried to adopt the record automatically at this Stop and it was REFUSED: ${ADOPTION_REFUSAL}. The binding that resolves the project root is what failed, so no review-chain or Autopilot state could be read from here: no completion was proven, only an unprovable guard released. Whether the recorded project root still exists could not be determined here, so nothing is claimed about the workflow document either way — run /zensu:doctor, which names that directory when it is gone. ${ADOPTION_REMEDY}. /zensu:adopt-session reports the same refusal in full, and /zensu:adopt-session --confirm retries the adoption by hand." >&2
       exit 0
     fi
-    # The remedy is OFFERED, never promised: this predicate also matches a
-    # DOWNGRADE, and adoption refuses that outright (`executing-runtime-older`).
-    # Claiming the guarantee is merely deferred would be false there — a rolled
-    # back session has no path back except re-installing the newer version.
-    echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is intact, its recorded project root still exists, and the disagreement is that the running installation declares an incompatible lineage (record minted by ${RECORDED_VERSION}, executing ${EXECUTING_VERSION}). The binding that resolves the project root is what failed, so no review-chain or Autopilot state could be read from here: no completion was proven, only an unprovable guard released. The recorded project root still EXISTS, so a workflow document under it stays reachable once the session re-binds — this arm establishes that the anchor resolved, and deliberately claims nothing about the document's contents, which no probe on this path opened. Run /zensu:adopt-session to find out whether this installation may take the record over; if it can, /zensu:adopt-session --confirm re-binds the session and the very next Stop enforces the chain again. If the executing version is OLDER than the recorded one, adoption refuses and re-installing the newer version is the only way back — the guard stays released until then. Blocking instead would loop a session whose Edit and Bash channels are already denied, so the remedy would never reach you." >&2
+    # The remedy is the refusal's own, never a promise: this predicate also
+    # matches a DOWNGRADE, where the token is `executing-runtime-older` and the
+    # remedy names re-installing the newer version — a rolled back session has no
+    # other path back, so claiming the guarantee is merely deferred would be
+    # false there.
+    echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is intact, its recorded project root still exists, and the disagreement is that the running installation declares an incompatible lineage (record minted by ${RECORDED_VERSION}, executing ${EXECUTING_VERSION}). Zensu tried to adopt the record automatically at this Stop and it was REFUSED: ${ADOPTION_REFUSAL}. The binding that resolves the project root is what failed, so no review-chain or Autopilot state could be read from here: no completion was proven, only an unprovable guard released. The recorded project root still EXISTS, so a workflow document under it stays reachable once the session re-binds — this arm establishes that the anchor resolved, and deliberately claims nothing about the document's contents, which no probe on this path opened. ${ADOPTION_REMEDY}. /zensu:adopt-session reports the same refusal in full, and /zensu:adopt-session --confirm retries the adoption by hand; once the record is adopted, a later Stop enforces the chain again — the guard stays released until then. Blocking instead would loop a session whose Edit and Bash channels are already denied, so the remedy would never reach you." >&2
     exit 0
   fi
   # The FOURTH release, for the other named state with the same in-place remedy:
@@ -247,7 +265,9 @@ if ! zensu_bind_hook_session "$INPUT"; then
   # cache, so no installation can serve the record and nothing can re-verify it.
   # FOUR of the lineage release's statements carry over verbatim — the binding
   # failed, the chain cannot be read from here, the document survives, adoption
-  # re-binds — and it was the state this hook still looped on: it fell
+  # re-binds (automatically, at the bind above, so this arm too is reached only
+  # by a REFUSED or incomplete adoption and names the token) — and it was the
+  # state this hook still looped on: it fell
   # through to the block below, unbounded, in a session whose every other
   # channel was already denied. Disjoint from the lineage arm by construction
   # (that predicate needs the strict read to succeed, this one needs it to
@@ -294,11 +314,12 @@ if ! zensu_bind_hook_session "$INPUT"; then
       RECORDED_VERSION="(unreadable)"
       EXECUTING_VERSION="(unreadable)"
     fi
-    echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is intact, but the installation that minted it (version ${RECORDED_VERSION}) has been removed from the plugin cache, so the running installation (${EXECUTING_VERSION}) cannot re-verify the record and no installation can serve it. Unlike the other three released bind failures, its recorded project root is intact — the relaxed reader still proves that root exists — so the workflow document is READABLE here; what failed is the session binding, and this hook declines to read a chain it cannot bind. The guarantee is therefore DEFERRED, not unavailable: no completion was proven, and the workflow document SURVIVES unchanged. Run /zensu:adopt-session to find out whether the running installation may take the record over; if it can, /zensu:adopt-session --confirm re-binds the session and the very next Stop enforces the chain again. Blocking instead would loop a session whose Edit and Bash channels are already denied, so the remedy would never reach you." >&2
+    stop_adoption_refusal
+    echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is intact, but the installation that minted it (version ${RECORDED_VERSION}) has been removed from the plugin cache, so the running installation (${EXECUTING_VERSION}) cannot re-verify the record and no installation can serve it. Unlike the other three released bind failures, its recorded project root is intact — the relaxed reader still proves that root exists — so the workflow document is READABLE here; what failed is the session binding, and this hook declines to read a chain it cannot bind. The guarantee is therefore DEFERRED, not unavailable: no completion was proven, and the workflow document SURVIVES unchanged. Zensu tried to adopt the record automatically at this Stop and it was REFUSED: ${ADOPTION_REFUSAL}. ${ADOPTION_REMEDY}. /zensu:adopt-session reports the same refusal in full, and /zensu:adopt-session --confirm retries the adoption by hand; once the record is adopted, a later Stop enforces the chain again. Blocking instead would loop a session whose Edit and Bash channels are already denied, so the remedy would never reach you." >&2
     exit 0
   fi
   if ! zensu_stop_guard_opted_out; then
-    echo "zensu chain-enforcer: this Stop cannot be bound to the Session Control record of this session. Four bind failures are released before this point — a session with no record at all, a record whose recorded project root no longer exists, a record that is intact but served by a declared-incompatible lineage, and a record whose minting installation was pruned from the plugin cache — so this is none of them: most often a record exists here and disagrees about something else (a foreign plugin installation, a runtime digest that drifted, a root that still exists but no longer matches, a tampered or unreadable record), though any release check can also fail to evaluate, in which case no record was consulted. Read the session-control-v1 line above when there is one — it states the exact cause, and it is authoritative over any inference. The record is immutable, so no Stop can ever prove completion from a record that disagrees: start a new session for further work. /zensu:doctor stays reachable in every bind failure and names the disagreement. ZENSU_CHAIN=off or hooks.chainEnforcer=false releases this guard explicitly." >&2
+    echo "zensu chain-enforcer: this Stop cannot be bound to the Session Control record of this session. Four bind failures are released before this point — a session with no record at all, a record whose recorded project root no longer exists, a record that is intact but served by a declared-incompatible lineage, and a record whose minting installation was pruned from the plugin cache (both adopted automatically on the first hook contact, and released here only when that adoption was refused) — so this is none of them: most often a record exists here and disagrees about something else (a foreign plugin installation, a runtime digest that drifted, a root that still exists but no longer matches, a tampered or unreadable record), though any release check can also fail to evaluate, in which case no record was consulted. Read the session-control-v1 line above when there is one — it states the exact cause, and it is authoritative over any inference. The record is immutable, so no Stop can ever prove completion from a record that disagrees: start a new session for further work. /zensu:doctor stays reachable in every bind failure and names the disagreement. ZENSU_CHAIN=off or hooks.chainEnforcer=false releases this guard explicitly." >&2
     emit_session_bind_failed_block
   fi
   exit 0

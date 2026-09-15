@@ -28,7 +28,7 @@ zensu_bind_hook_session() {
   local lib_dir binder bindings plugin_root native_plugin_root native_plugin_data
   local msys_env_exclusions
   unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
-    ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+    ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT ZENSU_SESSION_ADOPTED
   [ -n "$payload" ] || return 1
   command -v node >/dev/null 2>&1 || return 1
   lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
@@ -51,23 +51,23 @@ zensu_bind_hook_session() {
         node ./claude-hook-session-v1.js
   )" || {
     unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
-      ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+      ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT ZENSU_SESSION_ADOPTED
     return 1
   }
   eval "$bindings" || {
     unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
-      ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+      ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT ZENSU_SESSION_ADOPTED
     return 1
   }
   export ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
-    ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+    ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT ZENSU_SESSION_ADOPTED
 }
 
 zensu_bind_model_session() {
   local lib_dir binder bindings plugin_root native_plugin_root native_plugin_data
   local msys_env_exclusions
   unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
-    ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+    ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT ZENSU_SESSION_ADOPTED
   [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] || return 1
   [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
   command -v node >/dev/null 2>&1 || return 1
@@ -86,16 +86,16 @@ zensu_bind_model_session() {
       node ./claude-hook-session-v1.js model-bind
   )" || {
     unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
-      ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+      ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT ZENSU_SESSION_ADOPTED
     return 1
   }
   eval "$bindings" || {
     unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
-      ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+      ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT ZENSU_SESSION_ADOPTED
     return 1
   }
   export ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
-    ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+    ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT ZENSU_SESSION_ADOPTED
 }
 
 # Returns 0 ONLY when Session Control has never registered this session — one of
@@ -319,6 +319,28 @@ zensu_session_pruned_plugin_root_model() {
   _zensu_session_binder_mode model-pruned-plugin-root
 }
 
+# Prints ONE token on stdout naming why the automatic adoption did not bind this
+# session: an ADOPTION_REFUSALS value, `opted-out`, `adopted-concurrently` (a
+# sibling hook won the lock and the record serves now — retry the call) or
+# `not-completed` (adoptable, yet the caller's own bind failed inside the
+# adoption — a lock timeout or a crash-resume superseded file; retry). Read-only:
+# it previews and never adopts. Non-zero when the question cannot be answered.
+# Never a TAB, so the `recorded<TAB>executing` pair its consumers already parse
+# keeps exactly two fields. Same stdout warning as every predicate above.
+zensu_session_adoption_refusal() {
+  _zensu_session_binder_mode adoption-refusal "${1:-}"
+}
+
+# The remedy sentence for a refusal token, shape-checked here so a consumer outside
+# this library never reaches the private renderer with an unscreened value. The
+# Stop hook is that consumer: it renders the token into a stderr line rather than
+# through zensu_emit_hook_session_deny, whose JSON channel a Stop cannot use.
+zensu_session_adoption_remedy() {
+  local refusal="${1:-}"
+  [[ "$refusal" =~ $ZENSU_SAFE_REFUSAL_RE ]] || refusal="(unknown)"
+  _zensu_adoption_refusal_remedy "$refusal"
+}
+
 # The per-gate bind-failure ladder, in ONE place. Four gates carried the same nine
 # lines plus the same three-line comment, differing only in the payload variable
 # and in the fallback scope — so adding a fifth named state meant eight edits with
@@ -338,15 +360,20 @@ zensu_session_pruned_plugin_root_model() {
 # immaterial. A caller that passes no fallback scope gets the generic deny.
 zensu_emit_named_bind_deny() {
   local payload="${1:-}" fallback="${2:-}"
-  local pair
+  local pair refusal
+  # Either named state is reached only AFTER the bind's own automatic adoption
+  # did not bind the session, so the deny names why. One extra binder spawn, on
+  # the deny path only; an unanswerable question renders as `(unknown)`.
   if pair="$(zensu_session_incompatible_runtime "$payload")" && [ -n "$pair" ]; then
+    refusal="$(zensu_session_adoption_refusal "$payload")" || refusal=""
     zensu_emit_hook_session_deny incompatible-runtime \
-      "${pair%%$'\t'*}" "${pair##*$'\t'}"
+      "${pair%%$'\t'*}" "${pair##*$'\t'}" "$refusal"
     return
   fi
   if pair="$(zensu_session_pruned_plugin_root "$payload")" && [ -n "$pair" ]; then
+    refusal="$(zensu_session_adoption_refusal "$payload")" || refusal=""
     zensu_emit_hook_session_deny pruned-plugin-root \
-      "${pair%%$'\t'*}" "${pair##*$'\t'}"
+      "${pair%%$'\t'*}" "${pair##*$'\t'}" "$refusal"
     return
   fi
   zensu_emit_hook_session_deny ${fallback:+"$fallback"}
@@ -509,13 +536,19 @@ zensu_doctor_allowed() {
 #                     would normally be reachable, but a runtime library the
 #                     gate needs is missing — so the doctor is denied too
 #   incompatible-runtime  the caller POSITIVELY identified the lineage state and
-#                     supplies both declared versions ($2 recorded, $3 executing);
-#                     this scope names a remedy which fixes the session in place
-#                     rather than telling the user to start over
+#                     supplies both declared versions ($2 recorded, $3 executing)
+#                     plus the refusal token ($4) the automatic adoption answered;
+#                     this scope names why the in-place repair did not happen and
+#                     the per-reason remedy, rather than telling the user to
+#                     start over
 #   pruned-plugin-root  the caller POSITIVELY identified that the installation
 #                     which minted the record is gone from the plugin cache, and
-#                     supplies the same version pair; the remedy is the same
-#                     in-place adoption, the cause is a different one
+#                     supplies the same version pair and refusal token; the
+#                     remedy is the same, the cause is a different one
+#
+# Both named scopes are reached only AFTER the bind's own automatic adoption
+# (session-auto-adopt-v1.js, run by the hook-payload bind) did not bind the
+# session, which is why they carry a refusal rather than an offer.
 #
 # The version pair is interpolated into a JSON string, so it is held to a strict
 # shape first. A manifest version is ordinary text as far as the record schema is
@@ -527,40 +560,79 @@ zensu_doctor_allowed() {
 # this scope exists to remove. Losing two numbers is a worse message; losing the
 # remedy is a wrong one.
 ZENSU_SAFE_VERSION_RE='^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$'
+# The refusal token ($4 of the two named scopes) reaches the same JSON string, so
+# it is held to the token grammar the binder's `adoption-refusal` mode produces
+# and substituted with `(unknown)` otherwise — the same policy as the pair.
+ZENSU_SAFE_REFUSAL_RE='^[a-z][a-z0-9-]{0,63}$'
+
+# The per-reason remedy of a refused automatic adoption, chosen from a closed
+# vocabulary: core.ADOPTION_REFUSALS plus the binder's own entry-level tokens.
+# Plain text without a double quote, because it is interpolated into a JSON
+# string. An unrecognized token gets the generic remedy, never a wrong one.
+_zensu_adoption_refusal_remedy() {
+  case "${1:-}" in
+    (executing-runtime-older)
+      printf '%s' 'The running installation is OLDER than the one that minted the record (a downgrade or a --plugin-dir checkout), so re-install the newer version, or start a fresh Claude Code session on this one' ;;
+    (workflow-schema-mismatch)
+      printf '%s' 'The persisted workflow shape really did change between the two versions, so a fresh Claude Code session is the only way forward' ;;
+    (not-a-sibling-installation)
+      printf '%s' 'The running installation is not a sibling of the recorded one (for example a --plugin-dir checkout beside an installed plugin), so a fresh Claude Code session on this installation is the way forward' ;;
+    (plugin-data-mismatch)
+      printf '%s' 'The record belongs to a different plugin data store than this installation uses, so a fresh Claude Code session is the way forward' ;;
+    (record-unreadable)
+      printf '%s' 'The record disagrees with the running installation for a reason adoption does not admit; run /zensu:doctor, which names the check that failed' ;;
+    (executing-runtime-unidentified)
+      printf '%s' 'The running installation declares no usable version, so repair the plugin installation first' ;;
+    (opted-out)
+      printf '%s' 'hooks.sessionAutoAdopt is false in your Zensu config, so run /zensu:adopt-session --confirm yourself; the manual path ignores the opt-out' ;;
+    (adopted-concurrently)
+      printf '%s' 'A sibling hook adopted the record in the meantime and it serves now, so simply retry this call' ;;
+    (not-completed|lock-timeout)
+      printf '%s' 'The adoption did not complete (a lock timeout, or a superseded record left by an interrupted adoption), so retry this call; if it persists, /zensu:adopt-session prints the full report' ;;
+    (superseded-record-exists)
+      printf '%s' 'A superseded record from an interrupted adoption is already in place; /zensu:adopt-session names the file, and moving it aside lets the adoption complete' ;;
+    (*)
+      printf '%s' 'Run /zensu:adopt-session for the full report, and /zensu:adopt-session --confirm to retry the adoption by hand' ;;
+  esac
+}
 
 zensu_emit_hook_session_deny() {
   local scope="${1:-}"
   if [ "$scope" = incompatible-runtime ]; then
-    local recorded="${2:-}" executing="${3:-}"
+    local recorded="${2:-}" executing="${3:-}" refusal="${4:-}" remedy
     # ONE degradation policy across all three consumers of this pair: substitute a
     # placeholder and KEEP the lineage wording. Falling back to `narrowed` here
     # dropped the in-place remedy entirely and told the user to start a fresh
     # session — the contradiction this scope exists to remove.
     [[ "$recorded" =~ $ZENSU_SAFE_VERSION_RE ]] || recorded="(unreadable)"
     [[ "$executing" =~ $ZENSU_SAFE_VERSION_RE ]] || executing="(unreadable)"
-    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is readable, and the disagreement is that the running Zensu installation declares an incompatible lineage — the record was minted by %s and %s is executing. While the plugin is at major 0 the minor is the breaking axis, so a plugin update that landed mid-session stops serving the record and every stateful tool fails closed. The record is NOT damaged and NOT missing. Run /zensu:adopt-session to check whether this session can be adopted by the running installation in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — the adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created; /zensu:doctor names the path when that is the case. If it refuses, the persisted shapes really did change and a fresh Claude Code session is the only way forward."}}\n' \
-      "$recorded" "$executing"
+    [[ "$refusal" =~ $ZENSU_SAFE_REFUSAL_RE ]] || refusal="(unknown)"
+    remedy="$(_zensu_adoption_refusal_remedy "$refusal")"
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is readable, and the disagreement is that the running Zensu installation declares an incompatible lineage — the record was minted by %s and %s is executing. While the plugin is at major 0 the minor is the breaking axis; a plugin update that lands mid-session is normally adopted automatically on the first hook contact, but Zensu tried to adopt this record and it was REFUSED: %s. %s. The record is NOT damaged and NOT missing; /zensu:adopt-session reports the same refusal in full, and /zensu:adopt-session --confirm retries the adoption by hand — both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — an adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created; /zensu:doctor names the path when that is the case."}}\n' \
+      "$recorded" "$executing" "$refusal" "$remedy"
     return
   fi
   if [ "$scope" = pruned-plugin-root ]; then
-    local recorded="${2:-}" executing="${3:-}"
+    local recorded="${2:-}" executing="${3:-}" refusal="${4:-}" remedy
     # Same degradation policy as the lineage scope: substitute, keep the wording,
     # never lose the in-place remedy over two unreadable numbers.
     [[ "$recorded" =~ $ZENSU_SAFE_VERSION_RE ]] || recorded="(unreadable)"
     [[ "$executing" =~ $ZENSU_SAFE_VERSION_RE ]] || executing="(unreadable)"
-    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is intact, but the Zensu installation that minted it (version %s) has been removed from the plugin cache — the host keeps only a few versions — so the running installation (%s) cannot re-verify the record and every stateful tool fails closed. The record is NOT damaged and NOT missing. Run /zensu:adopt-session to check whether the running installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If it refuses, the refusal names its own cause and remedy: this predicate is deliberately blind to lineage, so a DOWNGRADE reaches this state too, and there adoption refuses as executing-runtime-older and re-installing the newer version is the way back — a persisted shape that really did change is the case that needs a fresh Claude Code session."}}\n' \
-      "$recorded" "$executing"
+    [[ "$refusal" =~ $ZENSU_SAFE_REFUSAL_RE ]] || refusal="(unknown)"
+    remedy="$(_zensu_adoption_refusal_remedy "$refusal")"
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is intact, but the Zensu installation that minted it (version %s) has been removed from the plugin cache — the host keeps only a few versions — so the running installation (%s) cannot re-verify the record. Such a record is normally adopted automatically on the first hook contact, but Zensu tried to adopt this one and it was REFUSED: %s. %s. The record is NOT damaged and NOT missing; /zensu:adopt-session reports the same refusal in full, and /zensu:adopt-session --confirm retries the adoption by hand — both stay reachable in this state. This predicate is deliberately blind to lineage, so a DOWNGRADE reaches this state too, and there adoption refuses as executing-runtime-older and re-installing the newer version is the way back — a persisted shape that really did change is the case that needs a fresh Claude Code session."}}\n' \
+      "$recorded" "$executing" "$refusal" "$remedy"
     return
   fi
   if [ "$scope" = narrowed ]; then
-    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid, so this call cannot be attributed to a Session Control record. This is neither relaxable state — a session with no record at all, and a record whose recorded project root no longer exists, are both handled separately — so either a record exists and disagrees with the running plugin installation about something else, or a relaxable-state check could not be evaluated at all. The most common cause is a Zensu plugin change across a breaking version boundary that landed while this session was running: a compatible upgrade keeps serving the record, but a breaking one or a downgrade cannot, because the record stays bound to the installation the session started on and no session can be re-bound in place. Run /zensu:doctor, which stays reachable in this state and names the disagreement, then start a fresh Claude Code session before using stateful tools."}}'
+    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid, so this call cannot be attributed to a Session Control record. This is neither relaxable state — a session with no record at all, and a record whose recorded project root no longer exists, are both handled separately — so either a record exists and disagrees with the running plugin installation about something else, or a relaxable-state check could not be evaluated at all. A Zensu plugin change that landed while this session was running is not that cause on its own any more: a compatible upgrade keeps serving the record, and a breaking one is adopted automatically when the persisted schemas are equal — reaching this deny means the record disagrees for a reason adoption does not admit. Run /zensu:doctor, which stays reachable in this state and names the disagreement, then start a fresh Claude Code session before using stateful tools."}}'
     return
   fi
   if [ "$scope" = damaged-runtime ]; then
     printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session has no usable Session Control binding — either no record at all, or a record whose recorded project root no longer exists — which alone would still leave the interactive thread able to run /zensu:doctor, but a required Zensu runtime library is missing or unreadable, so that diagnostic is denied too. Repair the Zensu plugin installation; a fresh Claude Code session will not help until the installation itself is intact."}}'
     return
   fi
-  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid, so every stateful Zensu tool fails closed. Run /zensu:doctor — it stays reachable in every bind failure and names which check failed: whether this session has no record at all, a record whose recorded project root no longer exists, or a record that disagrees for another reason, most often a Zensu plugin change across a breaking version boundary that landed mid-session; a compatible upgrade no longer denies. Then start a fresh Claude Code session before using stateful tools."}}'
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid, so every stateful Zensu tool fails closed. Run /zensu:doctor — it stays reachable in every bind failure and names which check failed: whether this session has no record at all, a record whose recorded project root no longer exists, or a record that disagrees for another reason. A Zensu plugin change that landed mid-session is adopted automatically when the persisted schemas are equal, and a compatible upgrade no longer denies, so a deny here means the disagreement is one adoption does not admit. Then start a fresh Claude Code session before using stateful tools."}}'
 }
 
 zensu_resolve_session_id() {
@@ -644,6 +716,7 @@ export -f zensu_bind_hook_session zensu_bind_model_session zensu_emit_hook_sessi
   zensu_session_incompatible_runtime zensu_session_incompatible_runtime_model \
   zensu_session_incompatible_orphaned_root zensu_session_incompatible_orphaned_root_model \
   zensu_session_pruned_plugin_root zensu_session_pruned_plugin_root_model \
+  zensu_session_adoption_refusal zensu_session_adoption_remedy _zensu_adoption_refusal_remedy \
   zensu_session_key zensu_resolve_session_id zensu_resolve_project_dir 2>/dev/null || true
 
 # THE ZEN-MODE STATE PREDICATES MOVED OUT, to `hooks/lib/zensu-zen-shared.sh`.

@@ -25,7 +25,12 @@ function start() {
   const payload = readPayload('SubagentStart');
   const kind = leases.kindForAgentType(payload.agent_type);
   if (!kind) return;
-  const binding = hookSession.resolveHookSession(payload);
+  // Opts into the automatic adoption: this hook runs on the same SubagentStart
+  // matcher as the session-control adapter and in parallel with it, so without
+  // adopting here it could bind-fail in the adoption window, mint no lease, and
+  // leave the reviewer denied for the whole review. The records lock serializes
+  // the two; the loser sees already-served and re-reads.
+  const binding = hookSession.resolveHookSession(payload, process.env, { autoAdopt: true });
   leases.bindWorker(payload, binding);
   process.stdout.write(`${JSON.stringify({
     hookSpecificOutput: {
@@ -38,7 +43,12 @@ function start() {
 function stop() {
   const payload = readPayload('SubagentStop');
   if (!leases.kindForAgentType(payload.agent_type)) return;
-  const binding = hookSession.resolveHookSession(payload);
+  // Opts into the automatic adoption: this hook runs on the same SubagentStart
+  // matcher as the session-control adapter and in parallel with it, so without
+  // adopting here it could bind-fail in the adoption window, mint no lease, and
+  // leave the reviewer denied for the whole review. The records lock serializes
+  // the two; the loser sees already-served and re-reads.
+  const binding = hookSession.resolveHookSession(payload, process.env, { autoAdopt: true });
   const outcome = leases.storeWorkerResult(payload, binding);
   if (outcome.action === 'block') {
     process.stdout.write(`${JSON.stringify({

@@ -1841,6 +1841,26 @@ function adoptableRecord(options) {
 const ADOPTION_HISTORY_PHASE = 'RUNTIME_ADOPTED';
 const ADOPTION_HISTORY_REASON_PREFIX = 'runtime-adopted: ';
 
+// The two ways adoptContext refuses under its own lock, as CODES a caller can
+// branch on rather than prose it has to substring-match — the same reason the
+// baseline repair carries BASELINE_ALREADY_PRESENT_CODE. A hook that adopts
+// automatically must tell `already-served` (a concurrent hook won the lock,
+// which is the outcome it wanted) from every other refusal, and the message
+// text alone cannot be that contract. The messages themselves are unchanged.
+const ADOPTION_REFUSED_CODE = 'ZENSU_ADOPTION_REFUSED';
+const SUPERSEDED_EXISTS_CODE = 'ZENSU_SUPERSEDED_EXISTS';
+
+// The PREDICATE is the consumer surface, for the reason isBaselineAlreadyPresent
+// states: comparing against an imported constant reads as a match whenever both
+// sides are undefined.
+function isAdoptionRefusal(error) {
+  return Boolean(error) && error.code === ADOPTION_REFUSED_CODE;
+}
+
+function isSupersededRecordConflict(error) {
+  return Boolean(error) && error.code === SUPERSEDED_EXISTS_CODE;
+}
+
 // Performs the adoption re-checked UNDER the records lock. The precondition is
 // deliberately evaluated twice — once by the caller to report, once here to act
 // — because between the two the plugin could have changed again.
@@ -1853,7 +1873,12 @@ function adoptContext(options) {
 
   const adopted = withFileLock(locksDir, key, () => {
     const verdict = adoptableRecord({ ...options, pluginData, recordsDir });
-    if (!verdict.ok) fail(`record is not adoptable: ${verdict.reason}`);
+    if (!verdict.ok) {
+      const refused = new Error(`session-control-v1: record is not adoptable: ${verdict.reason}`);
+      refused.code = ADOPTION_REFUSED_CODE;
+      refused.reason = verdict.reason;
+      throw refused;
+    }
     const executingPluginRoot = canonicalDirectory(options.executingPluginRoot, 'executing plugin root');
     // created_at is carried over on purpose: the session began when it began,
     // and rewriting that would erase the only provenance the record still holds
@@ -1912,7 +1937,10 @@ function adoptContext(options) {
         // Names the file, because this is also the crash-resume shape — a death
         // between the copy and the swap leaves it behind — and the session has
         // no other write channel to find it with.
-        fail(`a superseded record already exists and adoption would overwrite it: ${supersededFile}`);
+        const conflict = new Error(`session-control-v1: a superseded record already exists and adoption would overwrite it: ${supersededFile}`);
+        conflict.code = SUPERSEDED_EXISTS_CODE;
+        conflict.supersededFile = supersededFile;
+        throw conflict;
       }
       throw error;
     }
@@ -4665,6 +4693,14 @@ module.exports = {
   ADOPTION_HISTORY_REASON_PREFIX,
   adoptableRecord,
   adoptContext,
+  // PRODUCTION consumers: hooks/lib/session-auto-adopt-v1.js branches on the two
+  // predicates to tell a concurrent winner (`already-served`) and a crash-resume
+  // conflict from every other refusal. A port that drops them reports every
+  // refusal as unavailable. The constants travel with them for the unit layer.
+  ADOPTION_REFUSED_CODE,
+  SUPERSEDED_EXISTS_CODE,
+  isAdoptionRefusal,
+  isSupersededRecordConflict,
   // The read-only path helper. Exported because SessionStart needs to ASK where
   // the document is without creating it — workflowStateFile resolves through
   // ensureDescendantDirectory and mkdirs every missing component, which is right
