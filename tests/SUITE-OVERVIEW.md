@@ -57,8 +57,8 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **150** — 143 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **143 structure suites + 5 offline evals = 148 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 150 − 143 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **151** — 144 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **144 structure suites + 5 offline evals = 149 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 151 − 144 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -70,8 +70,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 150 structure suites + 5 offline evals | none |
-| `--ci` | 143 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 151 structure suites + 5 offline evals | none |
+| `--ci` | 144 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
