@@ -433,7 +433,6 @@ function resolveHookSession(payload, environment = process.env, options = {}) {
   const pluginData = canonicalDirectory(environment.CLAUDE_PLUGIN_DATA, 'CLAUDE_PLUGIN_DATA', true);
   const recordsDir = privateRecordsDirectory(pluginData);
   const sessionKey = core.sessionKey(payload.session_id);
-  const readerOptions = { recordsDir, sessionId: payload.session_id, expectedHost: 'claude' };
 
   // The strict bind, unchanged in its semantics. Equal root, or a
   // declared-compatible upgrade of it: a plugin update that lands mid-session
@@ -443,7 +442,7 @@ function resolveHookSession(payload, environment = process.env, options = {}) {
   // inline/dev source and an installed marketplace plugin on separate record
   // stores.
   const served = () => {
-    const context = core.readContext(readerOptions);
+    const context = core.readContext({ recordsDir, sessionId: payload.session_id, expectedHost: 'claude' });
     if (!core.servesRecordedRuntime(context, executedPluginRoot, 'claude')) {
       fail('context plugin root is not a compatible lineage of the executing plugin');
     }
