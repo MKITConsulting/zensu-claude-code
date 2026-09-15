@@ -662,47 +662,66 @@ for outer_case in same-owner foreign-owner corrupt-pointer corrupt-run; do
   #                      `BLOCKED` is one of them, so asserting liveness there
   #                      pinned a cause that is false for a blocked run.
   #   foreign-owner   -> the owner-scoped read is BLIND to it (rc 1), so the
-  #                      owner-INDEPENDENT workspace-holder read refuses instead,
-  #                      and that arm is SILENT. This is the only executed case
-  #                      of the silent class in this suite; without it AC-008's
-  #                      first member is asserted nowhere.
+  #                      owner-INDEPENDENT workspace-holder read refuses instead.
+  #                      That arm used to be SILENT, and this was the only
+  #                      executed case of that silence. It now DISCLOSES with the
+  #                      SAME sentence the workspace-read-failure arm uses, so
+  #                      the disclosure's presence cannot tell "a run holds the
+  #                      tree" from "the read failed" — which is what keeps the
+  #                      cross-session oracle closed while the strand ends.
   #   corrupt-pointer -> the owner-keyed pointer will not parse: rc 2.
   #   corrupt-run     -> the run record will not parse: rc 2. Both disclose
   #                      "could not be read", and that text names no owner,
   #                      because an unattributable record can be anyone's.
+  # REMEDY ATTRIBUTION is asserted per case, because it is the property the
+  # remedy split exists for: only the OWN-run arm (same-owner) may point at
+  # `--autopilot-status` — that verb is owner-scoped and structurally cannot
+  # show a foreign run — and only it may instruct a repair, because the record
+  # behind an unattributable arm may belong to a co-tenant session.
+  P15_SHARED_SENTENCE="whether a durable Autopilot run holds this working tree could not be judged, so a standalone claim cannot be recorded against it"
+  p15_fail() { OUTER_PREFLIGHT_OK=false; P15_WHY="${P15_WHY:-}${P15_WHY:+ }${outer_case}:$1"; }
+  # `postrev_with_ticket` returns the DECODED additionalContext, not the JSON
+  # envelope, so assert the message a model reads and never the
+  # `hookSpecificOutput` key — that key is emitted around an EMPTY body too.
+  printf '%s' "$CASE_CONTEXT" \
+    | grep -qF -- "was NOT recorded against this session's review chain" \
+    || p15_fail no-disclosure
   case "$outer_case" in
-    foreign-owner)
-      [ -z "$CASE_CONTEXT" ] || OUTER_PREFLIGHT_OK=false
+    same-owner)    CASE_NEEDLE="has not reached a terminal stage" ;;
+    foreign-owner) CASE_NEEDLE="$P15_SHARED_SENTENCE" ;;
+    *)             CASE_NEEDLE="could not be read" ;;
+  esac
+  printf '%s' "$CASE_CONTEXT" | grep -qF -- "$CASE_NEEDLE" || p15_fail needle
+  # A run-state refusal must NOT hand back the re-spawn recipe: re-spawning
+  # reproduces it byte for byte while rotating the ticket out from under any
+  # spawn still in flight.
+  printf '%s' "$CASE_CONTEXT" | grep -qF -- 'Do NOT issue a fresh review ticket' \
+    || p15_fail rotation-offered
+  # The token never travels, in either direction.
+  ! printf '%s' "$CASE_CONTEXT" | grep -qF -- "$CASE_TICKET" || p15_fail ticket-leaked
+  case "$outer_case" in
+    same-owner)
+      printf '%s' "$CASE_CONTEXT" | grep -qF -- '--autopilot-status' || p15_fail own-run-lacks-status-read
       ;;
     *)
-      # `postrev_with_ticket` returns the DECODED additionalContext, not the
-      # JSON envelope, so assert the message a model reads and never the
-      # `hookSpecificOutput` key — that key is emitted around an EMPTY body too.
-      printf '%s' "$CASE_CONTEXT" \
-        | grep -qF -- "was NOT recorded against this session's review chain" \
-        || OUTER_PREFLIGHT_OK=false
-      case "$outer_case" in
-        same-owner) CASE_NEEDLE="has not reached a terminal stage" ;;
-        *) CASE_NEEDLE="could not be read" ;;
-      esac
-      printf '%s' "$CASE_CONTEXT" | grep -qF -- "$CASE_NEEDLE" \
-        || OUTER_PREFLIGHT_OK=false
-      # A run-state refusal must NOT hand back the re-spawn recipe: re-spawning
-      # reproduces it byte for byte while rotating the ticket out from under any
-      # spawn still in flight.
-      printf '%s' "$CASE_CONTEXT" | grep -qF -- 'Do NOT issue a fresh review ticket' \
-        || OUTER_PREFLIGHT_OK=false
-      # The token never travels, in either direction.
-      ! printf '%s' "$CASE_CONTEXT" | grep -qF -- "$CASE_TICKET" || OUTER_PREFLIGHT_OK=false
+      ! printf '%s' "$CASE_CONTEXT" | grep -qF -- '--autopilot-status' || p15_fail foreign-names-status-read
+      ! printf '%s' "$CASE_CONTEXT" | grep -qiF -- 'repair' || p15_fail foreign-instructs-repair
       ;;
   esac
-  [ "$(file_digest "$CASE_STATE")" = "$CASE_STATE_DIGEST" ] || OUTER_PREFLIGHT_OK=false
-  [ "$(file_inode "$CASE_STATE")" = "$CASE_STATE_INODE" ] || OUTER_PREFLIGHT_OK=false
+  [ "$(file_digest "$CASE_STATE")" = "$CASE_STATE_DIGEST" ] || p15_fail state-moved
+  [ "$(file_inode "$CASE_STATE")" = "$CASE_STATE_INODE" ] || p15_fail inode-moved
 done
+# The held arm and the read-failure arm must share ONE sentence: two different
+# sentences would let the disclosure's wording answer the very question the
+# silence used to withhold. The count is exact, not a floor — a third site
+# adopting the sentence would be a third arm this pin has not judged.
+P15_HOOK="$(dirname "$LOG")/../post-review-tdd-delegate.sh"
+P15_SHARED_COUNT="$(grep -cF -- "$P15_SHARED_SENTENCE" "$P15_HOOK" || true)"
+[ "$P15_SHARED_COUNT" -eq 2 ] || { OUTER_PREFLIGHT_OK=false; P15_WHY="${P15_WHY:-}${P15_WHY:+ }shared-sentence-count=$P15_SHARED_COUNT"; }
 if [ "$OUTER_PREFLIGHT_OK" = true ]; then
-  check "P15 standalone preflight rejects same/foreign nonterminal and corrupt pointer/run Outer state byte-stably, and discloses each without echoing the ticket" PASS
+  check "P15 standalone preflight rejects same/foreign nonterminal and corrupt pointer/run Outer state byte-stably, discloses each without echoing the ticket, and attributes the remedy" PASS
 else
-  check "P15 standalone Outer preflight fails closed before ticket and counter claim" FAIL
+  check "P15 standalone Outer preflight fails closed before ticket and counter claim (${P15_WHY:-untagged})" FAIL
 fi
 
 # A terminal Outer pointer no longer owns the project and remains compatible

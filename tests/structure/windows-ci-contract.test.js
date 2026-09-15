@@ -34,7 +34,9 @@ const expectedProfiles = [
   // "budget AT the measurement", the error the shard-8 note below ends by naming. The
   // next run over the same content (33437827832) was killed at 1500142 ms. Its
   // neighbour `review-worker-evidence-lease` (measured 137147 ms) moved to shard 8,
-  // whose two suites now measure ~292 s inside an 1800000 ms envelope, and the cap
+  // which AT THAT TIME held two suites measuring ~292 s inside an 1800000 ms envelope —
+  // read the shard-8 note below for its current membership rather than this clause, which
+  // is history and said "now" for a round after a third suite landed there, and the cap
   // rose to 1700000 — about 14% over the last completing measurement, with ~100 s of
   // profile budget left so a slow run still surfaces as a suite TIMED_OUT rather than
   // as a profile abort that truncates the tail silently.
@@ -45,7 +47,13 @@ const expectedProfiles = [
   // fix is the one shard 8 got: find why this suite needs 25 minutes on Windows.
   // Until then, expect this cap to bind again.
   'windows-shard-7',
-  // Shard 8 now carries two suites; it was created for one. Measured on run 32998414210, `session-trail-lineage`
+  // Shard 8 now carries THREE suites — `session-trail-lineage`, `review-worker-evidence-lease`
+  // and `plan-payload-path-transport`, one paragraph each below — and it was created for one.
+  // NAME them rather than only counting: this line read "two suites" while the paragraph below
+  // already described the third and the manifest already listed its id, and CLAUDE.md
+  // designates this note as the authoritative carrier, so the numeral was the one thing a
+  // reader could not check against anything. A member added here is added to that list too.
+  // Measured on run 32998414210, `session-trail-lineage`
   // took 893084 ms of shard 3's 1800000 ms envelope; the eight suites there summed to
   // 1800072 ms and `windows-profile-lifecycle-contract` was granted 139971 ms of its
   // own 420000 ms cap and aborted. No other shard had 893 s of headroom either — the
@@ -77,7 +85,11 @@ const expectedProfiles = [
   // envelope (96.5%), the kill starved its neighbour too: `tdd-state-junction-safety`
   // was granted 95474 ms of its own 180000 ms cap and aborted. Two red checks, one
   // cause. Neither number could be raised in place — the shard had 62 s left — so the
-  // suite moved here, where 292 s of measured work leaves it 1427 s, and the cap rose
+  // suite moved here. Re-derive the remainder from the two measurements this note already
+  // carries rather than trusting a figure: 154673 + 137147 = 291820 ms of resident work
+  // against the 1800000 ms envelope leaves 1508180 ms, about 1508 s. The clause here read
+  // 1427 s with no term accounting for the 81 s difference, which is the base-does-not-add-up
+  // defect this repository records for its own sizing notes. The cap rose
   // to 1200000: about 41% over the last completing measurement, which covers the 29%
   // run-to-run spread this repo records elsewhere while staying far below the 10x that
   // stopped shard 8's own cap being a tripwire. It runs LAST on purpose, so its own cap
@@ -151,6 +163,20 @@ test('manifest and audited command catalog expose one exact bounded profile inve
     assert.equal(profile.platform, 'win32', profileId);
     assert.equal(profile.profileTimeoutMs, 1800000, profileId);
     assert.ok(profile.suites.length > 0, profileId);
+    // A suite never receives its configured `timeoutMs`: `tests/run-profile.js`
+    // grants `Math.min(suite.timeoutMs, remaining)`, where `remaining` is the
+    // shard envelope minus everything already spent. A cap at or above that
+    // envelope can therefore never bind, and an overrun then surfaces as a
+    // PROFILE abort that truncates the tail of whichever suite ran last —
+    // silently — instead of as the visible suite `TIMED_OUT` the cap exists to
+    // produce. The note at the top of this file states that rule; until this
+    // assertion nothing enforced it.
+    for (const suite of profile.suites) {
+      assert.ok(
+        suite.timeoutMs < profile.profileTimeoutMs,
+        `${profileId}/${suite.id}: cap ${suite.timeoutMs} cannot bind before the ${profile.profileTimeoutMs} envelope`,
+      );
+    }
   }
 });
 
@@ -462,6 +488,236 @@ test('scheduled Windows safety workflow partitions the exact former monolith rea
   );
   assert.equal(checkoutSteps(job)[0].with?.['persist-credentials'], false);
   assert.equal(JSON.stringify(safetyWorkflow).includes('secrets.'), false);
+});
+
+// The two operator-facing suite documents restate the profile inventory in prose and in a
+// table, and both were HAND-HELD: `tests/SUITE-OVERVIEW.md` says in its own §7 that this
+// file pins "exactly these nine keys and the 43-entry total", which is a claim about a
+// check that did not exist — nothing compared either document to the manifest, so a shard
+// added, renamed or rebalanced left both of them asserting a layout the JSON no longer has.
+// Everything here is DERIVED from `manifest.profiles`; no count and no member list is
+// written down twice. Member comparison is order-insensitive by design: the JSON's order
+// decides which suite runs last inside a shard and the prose table does not claim to
+// reproduce it, so requiring the order would fail on a rebalance that changed nothing a
+// reader of these documents depends on.
+const NUMBER_WORDS = [
+  'zero', 'one', 'two', 'three', 'four', 'five', 'six',
+  'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve',
+];
+
+// The SUITE-SIZE figures, which the profile arm below does not touch and nothing else
+// owned. §1 and §2 of SUITE-OVERVIEW restate 148 = 141 + 7, and 141 + 5 = 146 executed,
+// across five hand-maintained statements in two sections — while
+// `tests/profiles/promptfoo-local-only.v1.json` already owns all three inputs and
+// `run-all.sh` refuses to run at all when that manifest and the directory disagree. So a
+// suite added to `ciStructureTests` left both sections contradicting the manifest with
+// every other check in this file green, which is the same drift the profile arm was
+// extended to catch one table row up. Derived here rather than restated, and matched over
+// WHITESPACE-FLATTENED SECTION SLICES for the two reasons the §7 needles give: these rows
+// are ordinary wrapped markdown, so a break can fall between any two words, and slicing
+// first is what keeps the needle about the row instead of about the file.
+test('tests/SUITE-OVERVIEW.md restates the structure-suite totals the local-only manifest owns', () => {
+  const suiteOverview = fs.readFileSync(path.join(root, 'tests', 'SUITE-OVERVIEW.md'), 'utf8');
+  const ciSuites = localOnlyProfile.ciStructureTests.length;
+  const localSuites = localOnlyProfile.localStructureTests.length;
+  const offlineSuites = localOnlyProfile.ciOfflineSuites.length;
+  const allSuites = ciSuites + localSuites;
+  const executed = ciSuites + offlineSuites;
+  const section = (heading) => {
+    const chunk = suiteOverview.split(/^## /m).find((c) => c.startsWith(heading));
+    assert.ok(chunk, `tests/SUITE-OVERVIEW.md has no "## ${heading}" section`);
+    return chunk;
+  };
+  const sectionFlat = (heading) => section(heading).replace(/\s+/g, ' ');
+
+  const totalsFlat = sectionFlat('1. Totals');
+  assert.ok(
+    totalsFlat.includes(`**${allSuites}** — ${ciSuites} CI-blocking + ${localSuites} Promptfoo local-only`),
+    `tests/SUITE-OVERVIEW.md §1 does not split ${allSuites} into ${ciSuites} CI-blocking + ${localSuites} local-only`,
+  );
+  // The reconciliation row states the same three numbers a second way, and its arithmetic
+  // is the part a bare count cannot check: the gap it names must be the local-only set.
+  // The separator below is a literal U+2212 MINUS SIGN and NOT a hyphen-minus — the one
+  // substitution that would make this needle match nothing while reading identically in a
+  // diff. Do NOT claim it is written as an escape and that this source stays ASCII: an
+  // earlier wording did, and both halves were false — there is no `−` anywhere in
+  // this file, and the em dashes in these comments and in the §1 needle above are already
+  // non-ASCII. A comment that promises a protection the source does not carry is worse
+  // than no comment, because the next maintainer edits the needle trusting it.
+  assert.ok(
+    totalsFlat.includes(
+      `**${ciSuites} structure suites + ${offlineSuites} offline evals = ${executed} executed**`,
+    ),
+    `tests/SUITE-OVERVIEW.md §1 does not reconcile ${ciSuites} + ${offlineSuites} to ${executed} executed`,
+  );
+  assert.ok(
+    totalsFlat.includes(`the ${localSuites} Promptfoo local-only suites`)
+      && totalsFlat.includes(`the whole ${allSuites} − ${ciSuites} gap`),
+    `tests/SUITE-OVERVIEW.md §1 does not name the ${allSuites} − ${ciSuites} gap as the ${localSuites} local-only suites`,
+  );
+  // ROW-ANCHORED and compared by EQUALITY, for the reason the profiles row below states in
+  // full. A bare `| **N** |` needle is satisfied by ANY §1 row whose count cell reads N,
+  // and §1 carries a Live-E2E row directly beneath the offline one: raising
+  // `ciOfflineSuites` from 5 to 7 while updating only the reconciliation prose would have
+  // been satisfied by that neighbour, with the Offline-eval row still stating 5 — the exact
+  // drift this assertion exists to catch, passing for the wrong row.
+  const offlineRow = section('1. Totals')
+    .split('\n')
+    .find((line) => line.startsWith('| Offline eval suites'));
+  assert.ok(offlineRow, 'tests/SUITE-OVERVIEW.md §1 has no Offline eval suites row');
+  assert.equal(
+    offlineRow.split('|').map((cell) => cell.trim())[2],
+    `**${offlineSuites}**`,
+    `tests/SUITE-OVERVIEW.md §1 restates an offline-eval count the manifest does not own (${offlineRow})`,
+  );
+
+  const modesFlat = sectionFlat('2. Run modes');
+  assert.ok(
+    modesFlat.includes(`all ${allSuites} structure suites + ${offlineSuites} offline evals`),
+    `tests/SUITE-OVERVIEW.md §2 does not state ${allSuites} structure suites + ${offlineSuites} offline evals`,
+  );
+  assert.ok(
+    modesFlat.includes(`${ciSuites} CI structure suites (${localSuites} Promptfoo ones skipped as \`LOCAL\`)`),
+    `tests/SUITE-OVERVIEW.md §2 does not state the --ci selection as ${ciSuites} with ${localSuites} skipped`,
+  );
+});
+
+test('both suite documents restate the profile inventory the manifest owns', () => {
+  const suiteOverview = fs.readFileSync(path.join(root, 'tests', 'SUITE-OVERVIEW.md'), 'utf8');
+  const profileIds = Object.keys(manifest.profiles);
+  const profileCount = profileIds.length;
+  const entryTotal = Object.values(manifest.profiles).reduce(
+    (sum, profile) => sum + profile.suites.length,
+    0,
+  );
+  const countWord = NUMBER_WORDS[profileCount];
+  assert.ok(countWord, `no spelled form for a ${profileCount}-profile manifest`);
+
+  // README: the per-profile invocation block and the spelled count.
+  for (const id of profileIds) {
+    assert.ok(
+      testsReadme.includes(`node tests/run-profile.js ${id}`),
+      `tests/README.md does not show how to run ${id}`,
+    );
+  }
+  assert.ok(
+    testsReadme.includes(`into ${countWord} bounded profiles`),
+    `tests/README.md does not spell the ${profileCount}-profile count`,
+  );
+  assert.ok(
+    testsReadme.includes(`all ${countWord} profiles`)
+      && testsReadme.includes(`exactly those ${countWord}`),
+    `tests/README.md does not spell the ${profileCount}-profile count in the blocking-CI paragraph`,
+  );
+
+  // SUITE-OVERVIEW: the §7 prose totals and the per-shard table.
+  //
+  // The prose needles run over a WHITESPACE-FLATTENED copy. Both of these sentences are
+  // ordinary wrapped markdown, so a break can fall between any two of their words; an earlier
+  // spelling tolerated a newline at exactly ONE hardcoded position, which meant a re-wrap that
+  // moved the break one word either way failed the check for a document that still said the
+  // right thing. Flattening is what makes the needle about the SENTENCE rather than about the
+  // column the editor happened to wrap at.
+  // SCOPED to §7, and derived BEFORE the prose needles rather than after them. Both
+  // needles ran over the whole flattened document, so they were satisfied by the
+  // sentences occurring anywhere at all — including in a §7 that had been moved,
+  // renamed or emptied — which is the same presence-in-the-file-rather-than-in-the-cell
+  // weakness the table rows below already avoid by slicing first.
+  const overviewSection = suiteOverview
+    .split(/^## /m)
+    .find((chunk) => chunk.startsWith('7. Windows contract profiles'));
+  assert.ok(overviewSection, 'tests/SUITE-OVERVIEW.md has no §7 Windows contract profiles section');
+  const overviewFlat = overviewSection.replace(/\s+/g, ' ');
+  assert.ok(
+    overviewFlat.includes(`${profileCount} bounded profiles, ${entryTotal} suite entries`),
+    `tests/SUITE-OVERVIEW.md §7 does not state ${profileCount} profiles / ${entryTotal} entries`,
+  );
+  assert.ok(
+    overviewFlat.includes(`exactly these ${countWord} keys and the ${entryTotal}-entry total`),
+    `tests/SUITE-OVERVIEW.md §7 does not name this file as the pin for ${countWord} keys / ${entryTotal} entries`,
+  );
+  // The THIRD restatement, which sat outside both needles: §1's totals table carries the
+  // same figures in its own words, so a tenth shard left §1 contradicting §7 with every
+  // assertion green. It is matched as a row rather than as flattened prose, because that
+  // is the shape whose drift the table below cannot see either.
+  //
+  // SCOPED to §1 and compared by EQUALITY, and both halves of that are load-bearing. The
+  // row lookup ran over the WHOLE document, so a row with this lead-in anywhere at all
+  // satisfied it — including one left behind in a §1 that had been moved or emptied,
+  // which is the same weakness the §7 slice above was added to remove. And the figures
+  // were tested as SUBSTRINGS, so `143 suite entries` satisfied a needle written for 43
+  // and `**19**` satisfied one written for 9: the pin was strictly weaker than the
+  // drift it exists to catch. The whole cell is built from the manifest and compared
+  // whole, which also picks up the row's THIRD restatement, the shard RANGE, that
+  // neither earlier needle asserted at all — a tenth shard has to move the `…`-9`` end
+  // of it, and until now nothing said so.
+  const overviewTotalsSection = suiteOverview
+    .split(/^## /m)
+    .find((chunk) => chunk.startsWith('1. Totals'));
+  assert.ok(overviewTotalsSection, 'tests/SUITE-OVERVIEW.md has no §1 Totals section');
+  const overviewTotalsRow = overviewTotalsSection
+    .split('\n')
+    .find((line) => line.startsWith('| Windows contract profiles |'));
+  assert.ok(overviewTotalsRow, 'tests/SUITE-OVERVIEW.md §1 has no Windows contract profiles row');
+  const overviewTotalsCell = overviewTotalsRow.split('|').map((cell) => cell.trim())[2];
+  const expectedTotalsCell =
+    `**${profileCount}** (\`windows-shard-1\`…\`-${profileCount}\`, ${entryTotal} suite entries)`;
+  assert.equal(
+    overviewTotalsCell,
+    expectedTotalsCell,
+    `tests/SUITE-OVERVIEW.md §1 restates a profile/range/entry total the manifest does not own (${overviewTotalsRow})`,
+  );
+  for (const [id, profile] of Object.entries(manifest.profiles)) {
+    const row = suiteOverview
+      .split('\n')
+      .find((line) => line.startsWith(`| \`${id}\` |`));
+    assert.ok(row, `tests/SUITE-OVERVIEW.md §7 has no table row for ${id}`);
+    const cells = row.split('|').map((cell) => cell.trim());
+    assert.equal(
+      cells[2],
+      String(profile.suites.length),
+      `${id}: documented entry count disagrees with the manifest`,
+    );
+    assert.deepEqual(
+      cells[3].split(',').map((name) => name.trim()).sort(),
+      profile.suites.map((suite) => suite.id).sort(),
+      `${id}: documented members disagree with the manifest`,
+    );
+  }
+
+  // BOTH DIRECTIONS. The loops above walk the manifest and ask whether each entry is
+  // documented, which is only half of the drift this arm is named for: a shard RENAMED or
+  // REMOVED leaves an orphan run line and an orphan table row that no manifest-driven walk
+  // can see, and the count assertions do not catch it either once `profileCount` and
+  // `entryTotal` are restored. `expectedProfiles` above bounds the exposure to a rename the
+  // author updated deliberately; it does not close it. So the documented id SETS are derived
+  // back out of both files and compared for equality, which fails on an extra member as
+  // loudly as on a missing one.
+  const wanted = [...profileIds].sort();
+  // A leading `-` is excluded so the runner's own flag spellings (`--validate`) are not
+  // read as profile ids; only a real id can start with an alphanumeric.
+  const readmeDocumented = [
+    ...testsReadme.matchAll(/node tests\/run-profile\.js ([A-Za-z0-9][A-Za-z0-9._-]*)/g),
+  ].map((m) => m[1]);
+  assert.deepEqual(
+    [...new Set(readmeDocumented)].sort(),
+    wanted,
+    'tests/README.md documents a profile set the manifest does not own',
+  );
+  // SCOPED to §7 rather than filtered by id shape: this document carries many other
+  // backtick-led tables, and a shape filter would quietly exempt exactly the orphan row
+  // whose id no longer looks like the others. The slice is the one derived above the
+  // prose needles, so both halves of this check read the same section.
+  const overviewDocumented = overviewSection
+    .split('\n')
+    .map((line) => line.match(/^\| `([A-Za-z0-9][A-Za-z0-9._-]*)` \|/))
+    .filter(Boolean)
+    .map((m) => m[1]);
+  assert.deepEqual(
+    [...new Set(overviewDocumented)].sort(),
+    wanted,
+    'tests/SUITE-OVERVIEW.md §7 documents a profile set the manifest does not own',
+  );
 });
 
 test('the documented cutover keeps Promptfoo local-only', () => {

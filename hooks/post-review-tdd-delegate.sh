@@ -1,8 +1,15 @@
 #!/bin/bash
 # PostToolUse hook fired when the Agent (code-reviewer) tool completes.
-# Routes only the consume-mode `zensu:code-reviewer` completion belonging to a
-# live, implementation-complete TDD review chain. Every other Agent completion
-# is a total no-op: it cannot read or mutate the auto-fix counter or chain state.
+# What binds a completion to a chain is the chain's own OUTSTANDING one-shot
+# review ticket, carried in the prompt on a line of its own spelled
+# `REVIEW-TICKET: <ticket>`; the line may sit anywhere and further such lines are
+# ignored. `PRE-MERGED FINDINGS (fan-out)` is instructed by every producer and is
+# NOT what this hook decides on — an earlier criterion routed on the consume-mode
+# HEADER POSITION and refused a correct consume for every model-authored
+# deviation. Only a `zensu:code-reviewer` completion whose prompt carries the
+# ticket of a live, implementation-complete TDD review chain is routed. Every
+# other Agent completion is a total no-op: it cannot read or mutate the auto-fix
+# counter or chain state.
 #
 # Behavior is configurable via ~/.zensu/config.json (resolution order: env,
 # project-local, global):
@@ -87,16 +94,117 @@ SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")" || exit 0
 # Mode-aware fix discipline: the per-session `vanilla` flag was frozen into the
 # state file by `--tdd-begin`. Read the STATE flag (never live config) so the
 # fix-round directive matches the discipline the session actually runs under.
-source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+# The phase library ABORTS ITS OWN LOAD with `return 2` when the host-path render
+# fails or its core module is absent or symlinked, and every helper it defines —
+# `_tdd_state_storage_safe` and `tdd_state_file` included — is declared BELOW that
+# guard. An unchecked source therefore left those names undefined, and the very
+# next `|| exit 0` swallowed the completion silently for the exact fault the
+# core-module disclosure further down is written to report, thirty-odd lines
+# before that disclosure can be reached. It is reported HERE, where the fault is
+# actually reachable, and this sits below the subagent-type filter above, so it
+# can only fire for a real `zensu:code-reviewer` completion. It names no ticket
+# value and no path, for the same reason that disclosure does not.
+if ! source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"; then
+  printf 'zensu: reviewer completion not judged (delegate-phase-library-unavailable) — this hook could not load its workflow-phase library from the plugin tree, so it cannot tell whether this chain holds an unclaimed review ticket and stays silent on the model channel\n' >&2
+  exit 0
+fi
 TDD_STATE_FILE="$(tdd_state_file "$SESSION_ID")"
 
 # Preflight the prompt envelope against both durable planes before consuming
 # the one-shot ticket. A fully well-shaped but stale/conflicting envelope must
 # be as byte-stable as a malformed one, so validation cannot happen after the
 # claim transaction.
-_tdd_state_storage_safe "$TDD_STATE_FILE" || exit 0
+#
+# THIS GUARD IS THE ONE THAT CATCHES TAMPER, and the disclosure belongs here
+# rather than at the ticket probe below. `_tdd_paths_safe`'s JS walk tests
+# `st.nlink !== 1` for the `regular-or-absent` mode this call passes, so a
+# multi-linked workflow document is refused HERE — before any read — and a bare
+# `exit 0` would strand the chain on both channels for exactly the tamper class
+# the probe's own disclosure was written to report. Every trigger of this arm is
+# a fault or a tamper: a symlink, a non-regular file, a second hard link, or a
+# state directory that is not a directory. None of them is an ordinary state, so
+# the line is not noise on a healthy session.
+if ! _tdd_state_storage_safe "$TDD_STATE_FILE"; then
+  printf 'zensu: reviewer completion not judged (delegate-workflow-storage-unsafe) — the workflow document for this session, its lock, or the directory holding them is a symlink, a non-regular file, or carries more than one hard link, so this hook refuses to read it and cannot tell whether this chain holds an unclaimed review ticket\n' >&2
+  exit 0
+fi
+# The guard above already accepted every shape this one would refuse EXCEPT
+# absence: it passes `regular-or-absent` while this passes `regular`, and the
+# JS walk exits 3 for a missing leaf only in the strict mode. So the sole
+# remaining trigger here is a workflow document that does not exist, which is
+# the ordinary state of every reviewer completion in a project with no chain
+# armed. Silence is the honest answer; do not add a disclosure to this line.
 _tdd_path_safe "$TDD_STATE_FILE" regular "$(dirname "$TDD_STATE_FILE")" || exit 0
 NATIVE_TDD_STATE_FILE="$(_tdd_native_project_path "$TDD_STATE_FILE")" || exit 0
+
+# THIS FILE's own two workflow-document reads go through the core's HARDENED
+# reader rather than a bare `readFileSync`. Scope the claim to those two reads and
+# never to the PostToolUse path as a whole: the claim-and-mark verbs this path
+# calls further down live in `hooks/lib/zensu-tdd-phase.sh`, which still opens the
+# state file bare at its own read sites, so the hazard below is narrowed here and
+# not closed for the path. S37's scan is bound to `$HOOK` and measures exactly
+# that narrower claim. Naming those verbs here is deliberately avoided: two suite
+# extractors anchor their regions on those literals, and a comment carrying one
+# silently moves the region a behavioural check is measured over.
+# The path lives under `<project>/.zensu/state/`,
+# which is writable from inside any session in the project and covered by no gate
+# while a chain is inactive, so a planted FIFO there blocks `open(2)` forever and
+# the descriptor checks cannot help — they run only once the open has returned.
+# `zensu-tdd-phase.sh` already resolved the native module path, so this reuses it
+# rather than re-spelling the layout.
+#
+# It is read through the PUBLIC `zensu_tdd_control_core`, never through that
+# library's `_ZENSU_TDD_CONTROL_CORE` directly. The underscore prefix is this
+# repository's mark for an intra-file channel, so reading it across the boundary
+# would make a rename over there a SILENT loss here: the variable resolves
+# empty, `require("")` throws into the catch below, the probe answers `no`, and
+# `decline()`'s own outstanding-ticket guard exits 0 — every reviewer completion
+# becomes an unrouted no-op, which is the exact strand this hook exists to end.
+# The `[ -f ]` / `[ ! -L ]` re-check stays: the accessor reports what the library
+# derived, and this hook still owes its own look before handing a path to node.
+#
+# An UNUSABLE core is therefore disclosed on the operator channel rather than
+# left to that strand. When the variable is empty every `require` below throws
+# into its own catch, the ticket probe answers `no`, and both the operator gate
+# and the model gate read that as "this chain holds no unclaimed ticket" — so the
+# completion is silent on BOTH channels for a reason that is a fault in the
+# plugin tree rather than a property of the chain. One stderr line, below the
+# subagent-type filter so it can only fire for a real `zensu:code-reviewer`
+# completion, and naming no ticket value.
+#
+# STATE THE REACHABLE CAUSES, because an earlier wording named the one cause this
+# check can NEVER see: a module that is already absent or symlinked when the
+# phase library loads aborts that load, which the guarded `source` above now
+# reports under its own class and exits on. What is left for this check is
+# everything that survives a successful load — the accessor renamed or dropped
+# from the library, so the `declare -F` probe leaves the variable empty, and the
+# module unlinked or replaced by a symlink AFTER that load, which only this
+# hook's own `[ -f ]` / `[ ! -L ]` look can catch. Both are real and neither is
+# covered by the guard above; do not restore the absent-at-load reading.
+ZENSU_DELEGATE_CORE=""
+if declare -F zensu_tdd_control_core >/dev/null 2>&1; then
+  ZENSU_DELEGATE_CORE="$(zensu_tdd_control_core)"
+fi
+if [ ! -f "${ZENSU_DELEGATE_CORE:-}" ] || [ -L "${ZENSU_DELEGATE_CORE:-}" ]; then
+  ZENSU_DELEGATE_CORE=""
+  printf 'zensu: reviewer completion not judged (delegate-core-module-unavailable) — this hook could not load its workflow-document reader from the plugin tree, so it cannot tell whether this chain holds an unclaimed review ticket and stays silent on the model channel\n' >&2
+fi
+# HAND-COPY, recorded rather than hoisted. The four disclosures in this file share
+# a lead-in and a tail verbatim and NOTHING holds them in step — no shell constant,
+# no needle in any suite. A reworded tail on one of them leaves an operator with two
+# sentences for one class that no single grep finds together. The durable fix is one
+# constant beside `emit_post_context` plus a check deriving the class tokens from the
+# emission sites, which is the shape `Z42b`/`Z46` already ship for the zen-mode hook;
+# it is a pin design rather than a reword and is deliberately not taken mid-round.
+# Every class token here carries the `delegate-` prefix on purpose: the core composes
+# its own `workflow-document-<state>` refusal reasons for the baseline repair, and an
+# unprefixed token here would answer a grep for that unrelated vocabulary.
+# ONE of the fourteen carriers that source the phase library checks the status, and it
+# is the guarded `source` above. The other thirteen inherit the undefined-helper class
+# this file's own guard exists to remove; that is knowingly left as is rather than
+# fixed here, because it changes thirteen hooks' behaviour. Before relying on the
+# guard as a tree-wide property, run
+# `grep -rn 'hooks/lib/zensu-tdd-phase.sh"' hooks/` and judge every unchecked site.
 
 # The one-shot ticket is what BINDS a reviewer completion to this chain, and the
 # claim transaction below re-checks it under lock. Reading it here as well is
@@ -109,9 +217,15 @@ NATIVE_TDD_STATE_FILE="$(_tdd_native_project_path "$TDD_STATE_FILE")" || exit 0
 # longer load-bearing here. The session hash is checked exactly as the claim
 # checks it, so a document owned by another canonical session is not "this
 # chain's outstanding ticket" and cannot even reach the disclosure below.
-CHAIN_TICKET_STATE="$(STATE_FILE="$NATIVE_TDD_STATE_FILE" SID="$SESSION_ID" node -e '
+CHAIN_TICKET_STATE="$(STATE_FILE="$NATIVE_TDD_STATE_FILE" SID="$SESSION_ID" CORE_MODULE="$ZENSU_DELEGATE_CORE" node -e '
   try {
-    const s = JSON.parse(require("fs").readFileSync(process.env.STATE_FILE, "utf8"));
+    // Hardened read, never a bare readFileSync: the core opens with O_NOFOLLOW
+    // plus O_NONBLOCK and re-judges the descriptor, which is what keeps a FIFO
+    // planted in the session-writable state directory from blocking this hook
+    // forever. A missing or unloadable module throws here and lands in the
+    // catch below, which is the same no-op every other fault on this path takes.
+    const core = require(process.env.CORE_MODULE);
+    const s = JSON.parse(core.readRegularFileSnapshot(process.env.STATE_FILE).data.toString("utf8"));
     const mine = s.session_id_hash === `sha256:${process.env.SID.slice("scv1_".length)}`;
     // These conjuncts mirror `_tdd_consume_review_ticket_critical` and
     // `_tdd_review_ticket_shape_ok`, and the set is NOT decoration: a predicate
@@ -128,11 +242,57 @@ CHAIN_TICKET_STATE="$(STATE_FILE="$NATIVE_TDD_STATE_FILE" SID="$SESSION_ID" node
       && /^[A-Za-z0-9_-]{1,96}$/.test(s.reviewTicket) ? s.reviewTicket : "";
     const outstanding = live && ticket !== "" && s.reviewTicketConsumed === false;
     process.stdout.write((outstanding ? "yes" : "no") + "\t" + (outstanding ? ticket : ""));
-  } catch (_) { process.stdout.write("no\t"); }
+    // A THIRD status, because collapsing a FAULT into the no-ticket answer made
+    // every later disclosure unreachable for the one cause they exist to report.
+    // STATE THE REACHABLE CAUSES. A multi-linked or non-regular state file is NOT
+    // among them: `_tdd_state_storage_safe` above passes mode `regular-or-absent`
+    // into the JS walk of `_tdd_paths_safe`, which tests `st.nlink !== 1` and exits
+    // 3, so that tamper is refused before this program runs and carries its own
+    // disclosure at that guard. What reaches this catch is what the shape guards
+    // cannot see: a document past MAX_JSON_BYTES, unparseable JSON, a non-object
+    // root, a reader module that will not load, and a link planted inside the window
+    // between that guard and this read. With the answer spelled `no`,
+    // the split below cleared the ticket and `decline()`s own outstanding-ticket
+    // guard then exited 0 for EVERY later decline in the session — the strand this
+    // hook exists to end, silent on both channels. The caller re-normalizes this to
+    // `no` immediately after disclosing, so no downstream conjunct sees a new value.
+  } catch (_) { process.stdout.write("unreadable\t"); }
 ' 2>/dev/null)"
-CHAIN_TICKET_OUTSTANDING="${CHAIN_TICKET_STATE%%$'\t'*}"
+# The name carries the tense on purpose. This is a SNAPSHOT taken before the
+# claim and never refreshed, so below the claim it no longer means "the ticket
+# is unconsumed" — it means "this hook judged this session's chain, and that
+# chain held an unclaimed ticket when this completion arrived". Every post-claim
+# decline passes mode `spent`, where the ticket IS consumed and the disclosure
+# still has to fire; a present-tense name there invites a later conjunct to
+# reason from the opposite of what the value records.
+CHAIN_TICKET_WAS_OUTSTANDING="${CHAIN_TICKET_STATE%%$'\t'*}"
 OUTSTANDING_TICKET="${CHAIN_TICKET_STATE#*$'\t'}"
-[ "$CHAIN_TICKET_OUTSTANDING" = "yes" ] || OUTSTANDING_TICKET=""
+[ "$CHAIN_TICKET_WAS_OUTSTANDING" = "yes" ] || OUTSTANDING_TICKET=""
+# The FAULT answer is disclosed on the operator channel and then normalized to `no`,
+# so it reaches exactly one reader and every conjunct below keeps its two-value
+# domain. It sits beside the sibling disclosures above for the same reason they
+# do: below the subagent-type filter, so it can only fire for a real reviewer
+# completion, and naming no path and no ticket value. The agent identity is
+# deliberately NOT re-spelled here — the census CLAUDE.md pins counts matching LINES
+# under `hooks/`, so a comment that names it again moves a figure this comment has no
+# business moving. Without
+# it a document this hook could not read was byte-identical to a chain holding no
+# unclaimed ticket, and since that answer gates `decline()`s own first guard, every
+# later decline in the session went silent on BOTH channels — including the one whose
+# text exists to report exactly this fault.
+if [ "$CHAIN_TICKET_WAS_OUTSTANDING" = "unreadable" ]; then
+  # CONJOINED on the core being usable, and that is a correctness fix rather than a
+  # tidy-up. `require("")` throws into the very same catch, so with the module gone
+  # the probe answers `unreadable` for a fault in the PLUGIN TREE — and an
+  # unconditional line here then printed a SECOND sentence sending the operator to
+  # `.zensu/state/` to inspect a document that was never the problem. The disclosure
+  # above already named that cause under its own class. The NORMALIZATION stays
+  # unconditional, so no downstream conjunct sees a different value either way.
+  if [ -n "$ZENSU_DELEGATE_CORE" ]; then
+    printf 'zensu: reviewer completion not judged (delegate-workflow-document-unreadable) — this hook could not read the workflow document for this session, so it cannot tell whether this chain holds an unclaimed review ticket and stays silent on the model channel\n' >&2
+  fi
+  CHAIN_TICKET_WAS_OUTSTANDING=no
+fi
 
 # A decline that leaves an outstanding ticket unconsumed is the state that
 # stranded chains silently: the reviewer ran, the round was never recorded, and
@@ -140,26 +300,36 @@ OUTSTANDING_TICKET="${CHAIN_TICKET_STATE#*$'\t'}"
 # the model-facing channel whenever the decline was decided by THIS session's
 # own artifacts — the prompt text this session wrote, and its own workflow
 # document, its own durable run record, or this hook's own inability to READ one
-# of those. TWO classes stay silent, and stating one was the error an earlier
-# spelling of this comment made — a partition that omits a member reads as a
-# guarantee and is not one:
-#   (1) the workspace-HOLDER read answering rc 0, the single foreign-state
-#       question in this file. Disclosing there would answer "is a foreign run
-#       holding this tree?" and turn this hook into an existence oracle, the
-#       property `test-plan-payload-fallback.sh` F20/F32/F45c pin for the
-#       sibling plan gate. Its FAILURE arm is not in this class and discloses.
-#   (2) the ticket claim and every exit below it. Do NOT restate that as "a
+# of those. ONE class stays silent, and naming TWO was the error an earlier
+# spelling of this comment made: it listed the workspace-HOLDER read answering
+# rc 0, which DECLINES in the shipped code (the rc-0 arm below), so the
+# partition asserted an existence-oracle guarantee this file does not have —
+# and a partition that misstates a member reads as a guarantee twice over.
+#   (1) the ticket claim and every exit below it. Do NOT restate that as "a
 #       concurrent delivery already recorded the round": that is only the COMMON
 #       cause. `tdd_consume_review_ticket_context` also returns 1 on a
 #       ticket-shape refusal, a missing `node`, and any lock or IO failure, and
 #       those leave the chain stranded with nothing reported — a known gap, not
 #       a proof. Below the claim the ticket is already consumed, so a silent
 #       exit there does not strand the chain in the state this seam is about.
-# ONE further bare `exit 0` exists and is deliberately outside both classes: the
-# `else` arm of the standalone/bound split, for a `PROMPT_AUTOPILOT_KIND` that is
-# neither value. The parse above emits only those two, so it is unreachable by
-# construction — a defensive arm, not a third class. Named here because a reader
-# counting `exit 0` finds it and a partition that ignores it reads as sloppy.
+# What keeps the cross-session existence ORACLE closed is not silence but
+# SAMENESS: both workspace-read arms decline with ONE identical sentence, so the
+# message's presence answers nothing a failed read would not. The handoff suite
+# pins that sentence at exactly two occurrences for precisely this reason.
+# TWO further bare-exit classes sit outside that one, and naming only one of them
+# read as a partition while it was an omission:
+#   (2) every exit ABOVE the ticket read — the principal test, the session bind,
+#       the project-root resolve, the subagent-type filter and the state-storage
+#       guards. No count is written here, because a numeral in prose is a claim
+#       nothing recomputes; read them off `grep -n "exit 0"` down to the
+#       `CHAIN_TICKET_STATE=` assignment. None of them can disclose anything: at
+#       that point this hook has not read a chain, so it does not know whether a
+#       ticket is outstanding, and the message would be about a chain that may
+#       not exist. Silence there is the only honest answer, not a gap.
+#   (3) the `else` arm of the standalone/bound split, for a
+#       `PROMPT_AUTOPILOT_KIND` that is neither value. The parse above emits only
+#       those two, so it is unreachable by construction — a defensive arm, not a
+#       live class. Named because a reader counting `exit 0` finds it.
 # An OWNERSHIP comparison was tried in the outer-run arm and DELETED: see the
 # contract citation at that arm. It could only ever have added a third silent
 # class on a branch the producer cannot reach.
@@ -173,14 +343,21 @@ OUTSTANDING_TICKET="${CHAIN_TICKET_STATE#*$'\t'}"
 # `/zensu:implement`); those completions already could not consume, and without
 # this gate the disclosure would hijack them with a re-spawn instruction for a
 # chain they were never part of — for as long as the ticket stays outstanding.
-PROMPT_CONSUME_INTENT="$(node -e '
+#
+# The SAME program answers a second question the accept path needs: whether the
+# prompt opened with the exact two consume-header lines. That is the convention
+# the reviewer agent selects consume mode on, and it is STRICTER than the ticket
+# match this hook decides on — the ticket may sit anywhere, the header may not.
+# One probe answers both because the outstanding ticket is already resolved here
+# and a second spawn on this path buys nothing.
+PROMPT_CONSUME_PROBE="$(TICKET="$OUTSTANDING_TICKET" node -e '
   let s = "";
   process.stdin.on("data", c => s += c);
   process.stdin.on("end", () => {
     try {
       const j = JSON.parse(s);
       const prompt = j.tool_input && j.tool_input.prompt;
-      if (typeof prompt !== "string") { process.stdout.write("no"); return; }
+      if (typeof prompt !== "string") { process.stdout.write("no\tno"); return; }
       // WHOLE-LINE marker only, and deliberately NOT "carries a REVIEW-TICKET:
       // line". That weaker test is satisfied by a prompt merely QUOTING one,
       // and column-0 examples of that literal live in the test files of this
@@ -200,14 +377,59 @@ PROMPT_CONSUME_INTENT="$(node -e '
       // remedy ROTATES this chain outstanding ticket. Requiring index 0 costs
       // only the marker-not-first-and-no-ticket case, which stays silent; every
       // legitimate consume is already covered by the matched-ticket arm.
-      const intent = prompt.split(/\r?\n/)[0] === "PRE-MERGED FINDINGS (fan-out)";
-      process.stdout.write(intent ? "yes" : "no");
-    } catch (_) { process.stdout.write("no"); }
+      const lines = prompt.split(/\r?\n/);
+      const intent = lines[0] === "PRE-MERGED FINDINGS (fan-out)";
+      // The header verdict, for the accept path only. It never gates this hook:
+      // the ticket is what binds a completion, and a header slip costs the
+      // merged fan-out rather than the round. The ticket value is compared, not
+      // emitted, so the capability token stays off every channel.
+      const want = process.env.TICKET;
+      const header = intent && !!want
+        && lines[1] === "REVIEW-TICKET: " + want;
+      process.stdout.write((intent ? "yes" : "no") + "\t" + (header ? "yes" : "no"));
+    } catch (_) { process.stdout.write("no\tno"); }
   });
 ' <<<"$INPUT" 2>/dev/null)"
+PROMPT_CONSUME_INTENT="${PROMPT_CONSUME_PROBE%%$'\t'*}"
+PROMPT_CONSUME_HEADER="${PROMPT_CONSUME_PROBE#*$'\t'}"
+[ "$PROMPT_CONSUME_INTENT" = "yes" ] || PROMPT_CONSUME_INTENT="no"
+[ "$PROMPT_CONSUME_HEADER" = "yes" ] || PROMPT_CONSUME_HEADER="no"
 
 decline() {
-  [ "$CHAIN_TICKET_OUTSTANDING" = "yes" ] || exit 0
+  local cause="$1" mode="${2:-runstate}" lead remedy
+  [ "$CHAIN_TICKET_WAS_OUTSTANDING" = "yes" ] || exit 0
+  # The OPERATOR channel is not gated on consume intent, and that asymmetry is
+  # the point: the model-facing disclosure below is withheld whenever the prompt
+  # showed no consume intent, so without this line a chain holding an unclaimed
+  # ticket could be stranded with nothing on ANY channel. One line, naming the
+  # gate that refused and the remedy MODE, never the ticket value. It stays
+  # below the outstanding-ticket guard, and the bound that guard enforces is the
+  # SESSION's chain rather than the completing flow: a completion arriving while
+  # this session's chain holds no unclaimed ticket strands nothing and owes the
+  # operator no line. A completion from a chainless flow while this session's own
+  # chain DOES hold one is therefore reported, which is correct — the strand is
+  # the chain's, not the flow's.
+  # ONE post-claim decision, THREE consumers. The lead is per-mode for the same
+  # reason the model-facing opener below is: above the claim the round was NOT
+  # recorded, below it the round counted and only the findings were dropped. One
+  # fixed lead made the two channels contradict each other about the same event.
+  # What decides that is the CLAIM PHASE rather than any single mode name, and
+  # two of the three dispatches used to test the literal `spent` directly — so a
+  # SECOND post-claim mode would have fallen to their catch-all and told the
+  # reader the completion was not recorded while its ticket was consumed and its
+  # round counted. The post-claim set is enumerated HERE, once; the remedy `case`
+  # below still names every mode, because it selects a text per mode rather than
+  # per phase. It is a `local` rather than a file-scope constant deliberately:
+  # `decline()` is extracted and evaluated in isolation by S28a, so every value
+  # its body depends on has to travel with the body.
+  local post_claim_modes="spent"
+  local post_claim=no
+  case " ${post_claim_modes} " in
+    *" ${mode} "*) post_claim=yes ;;
+  esac
+  local stderr_lead="reviewer completion not recorded"
+  [ "$post_claim" = "yes" ] && stderr_lead="reviewer round recorded but its findings were not routed"
+  printf 'zensu: %s (%s) — %s\n' "$stderr_lead" "$mode" "$cause" >&2
   # Consume intent is the marker as the FIRST line, or a ticket that already
   # MATCHED. Only the second is unforgeable: a quotation cannot reproduce the
   # chain's live outstanding value, while the marker is ordinary text that this
@@ -217,19 +439,193 @@ decline() {
   # quoted copy has to be the prompt's opening line, which no chainless flow
   # produces; the residual is recorded rather than claimed away.
   [ "$PROMPT_CONSUME_INTENT" = "yes" ] || [ -n "${REVIEW_TICKET:-}" ] || exit 0
-  # TWO remedies, selected by the caller, because one remedy for every cause is
-  # worse than none. The re-spawn recipe is correct only where the PROMPT is
-  # what was refused. Five gates refuse on DURABLE RUN STATE, and there a fresh
+  # The remedy is selected by the caller through a NAMED mode, because one remedy
+  # for every cause is worse than none. The arm set is the `case` below and its
+  # count is deliberately not written here: a numeral in prose is a claim nothing
+  # recomputes, and the previous one ("TWO") had already drifted past the arms
+  # that shipped. The re-spawn recipe is correct only where the PROMPT is
+  # what was refused. Several gates refuse on DURABLE RUN STATE instead — that
+  # set is likewise not counted; read it off `grep -n runstate` over this file.
+  # On every one of them a fresh
   # ticket plus a re-spawn reproduces byte-identical inputs to the same gate —
   # an unbounded loop, since this hook never blocks and the Stop cap therefore
   # never arbitrates it, while the rotation strands any spawn still in flight.
-  local remedy
-  if [ "${2:-respawn}" = runstate ]; then
-    remedy="Do NOT issue a fresh review ticket and do NOT re-spawn: the prompt is not what was refused, so a re-spawn reproduces this decline exactly while rotating the ticket out from under any spawn still in flight. Resolve the durable run state first — read a fresh ${LOG_COMMAND} --autopilot-status, then finish or release that run, or repair the unreadable record under .zensu/state/ — and only then re-spawn with the ticket the chain already holds."
-  else
-    remedy="Re-spawn zensu:code-reviewer with a prompt whose FIRST line is exactly 'PRE-MERGED FINDINGS (fan-out)' and whose SECOND line is exactly 'REVIEW-TICKET: <the current ticket>'. Both lines, in that order: the reviewer agent enters consume mode only on that pair, and a prompt that satisfies this hook but not the agent still records the round while throwing the whole fan-out away, because the reviewer then re-reviews from scratch instead of consuming the merged findings. Mint a replacement by running: ${LOG_COMMAND} --review-ticket — that verb ISSUES a new ticket and ROTATES the outstanding one, it does not read the current value back, so run it only when no zensu:code-reviewer spawn is still in flight: a spawn already running carries the old value and can never be recorded afterwards. An Autopilot-bound chain must additionally carry exactly one DISTINCT value each of ZENSU-DELEGATED-CALLER, AUTOPILOT-BINDING and AUTOPILOT-STAGE, unchanged — a byte-identical repeat is fine, two regex-valid lines that differ are not, and a binding or stage line failing its regex is dropped before the collapse rather than counted; the caller line keeps its exact-literal test and has no such filter. A STANDALONE chain must not carry a COMPLETE, well-formed set of those three; an incomplete set is ignored, so quoting one of them is harmless."
-  fi
-  printf '%s' "The zensu:code-reviewer subagent above finished, but its completion was NOT recorded against this session's review chain: ${1}. The chain still holds an unclaimed review ticket, so the Stop backstop will keep asking for a review and the chain cannot converge. ${remedy} Do NOT arm a new chain to work around this — that would grant a new review budget." | emit_post_context
+  # The mode is a NAMED positional and the selector is a `case` with a catch-all,
+  # never `${2:-respawn}`: a misspelled or omitted mode at a call site used to
+  # select the rotation text silently, and the rotation is the one remedy that
+  # is destructive when it is wrong. The safe text is therefore the default AND
+  # the catch-all — an unknown mode refuses to guess.
+  # The lead sentence is per-mode, because the state it describes is not the same
+  # above and below the claim. State the CRITERION rather than a list: an
+  # enumeration here read "runstate, runstate-foreign, respawn" while EVERY
+  # pre-claim mode already selected `outstanding_lead`, and every mode added since
+  # made it wronger. EVERY pre-claim mode — which is every mode the
+  # `post_claim_modes` set above does not name — refuses while the ticket is
+  # still OUTSTANDING, so their lead says the
+  # backstop keeps asking and the chain cannot converge. The post-claim callers
+  # pass `spent`: the ticket is already consumed and this round is counted, so the
+  # loss is a DIFFERENT one — the merged findings were dropped — and telling the
+  # reader the ticket is still outstanding would be false and would invite a
+  # rotation that strands nothing but wastes the next budget.
+  local outstanding_lead="The chain still holds an unclaimed review ticket, so the Stop backstop will keep asking for a review and the chain cannot converge."
+  local spent_lead="Its round counted and the ticket is spent, but its findings were NOT routed to a fix round, so the merged findings were dropped while the Stop backstop still asks for a review this chain has not converged."
+  # DERIVED ONCE, off the same `$post_claim` classifier the stderr lead above and
+  # the opener below read — never per-arm inside the remedy `case`. Keyed on the
+  # ARM, a SECOND post-claim mode added to `post_claim_modes` alone would select
+  # `outstanding_lead` here while the opener said the round WAS recorded, so the
+  # two model-facing halves of one message would contradict each other about the
+  # same event. That is the failure a per-mode lead exists to prevent, and an
+  # arm-keyed assignment reintroduces it silently. The `case` below therefore
+  # selects the remedy TEXT alone, which really is per mode rather than per phase.
+  lead="$outstanding_lead"
+  [ "$post_claim" = "yes" ] && lead="$spent_lead"
+  # CROSS-FILE CONTRACT — the two NAMES below are read from another file, so a
+  # rename here is a cross-file edit whose failure surfaces in a suite this file
+  # is not named for. `T63` in `tests/structure/test-stop-enforcer-self-review-routing.sh`
+  # greps `local spent_remedy=` and `local runstate_remedy=` verbatim, then holds
+  # EACH SIDE to its own literals — the delegate slices against delegate-side
+  # needles, both `INNER_REVIEW_HEADERS` variants in `hooks/stop-chain-enforcer.sh`
+  # against Stop-side ones. The two needle sets are DISJOINT and nothing is
+  # compared across the file boundary, so state it that way: T63 fails when either
+  # side stops naming both rotation arms, and does NOT fail when one side is
+  # reworded while still carrying its own needle. That residual is the reason the
+  # rename above is still a cross-file edit to make by hand. Named HERE rather than only
+  # in that suite for the reason the bound-args copy below already records: a
+  # trigger nobody reads at the site that fires it is not a trigger. CLAUDE.md
+  # §"Ticket-Keyed Review Consumption" carries the same pair on its pin roster.
+  local spent_remedy="Nothing is stranded in flight, because the spawn that carried this ticket is the completion above, so do not rotate a ticket on reflex. Mint a fresh ${LOG_COMMAND} --review-ticket and re-spawn zensu:code-reviewer with the same consume header and the same merged findings; that next completion counts against the same review budget. Do NOT take the command ${LOG_COMMAND} --chain-status names in this state: a consumed claim classifies as a review still in flight, whose supported next command is --code-review-done, and running that here would close the round with the dropped findings never routed."
+  # It prescribes no repair under `.zensu/state/`, and that omission is the whole
+  # correction: every sibling remedy forbids editing that directory, the plugin's
+  # own Edit gate denies it while a chain is active, and the only channel left is
+  # an ungated shell redirect this repository records as an accepted residual
+  # rather than a sanctioned one. A remedy that names an action with no
+  # performable sanctioned channel steers the reader into that residual, and this
+  # is the DEFAULT mode as well as the catch-all, so it was the most-reached text
+  # in the file.
+  #
+  # SCOPE THE DENY CLAIM TO THE GATE THAT MAKES IT, because the remedy asserted a
+  # control the tree does not have. What denies is `hooks/pre-edit-tdd-reminder.sh`,
+  # on its `Edit|Write|MultiEdit` matcher, and only while a chain is active. No Bash
+  # gate covers that path at all — `hooks/lib/bash-source-write-parse.js` carries no
+  # `.zensu` rule in any of its three rules — so a shell redirect into
+  # `.zensu/state/` is ungated in every chain state, which is exactly the residual
+  # the paragraph above already names. An unqualified "that path is gate-denied"
+  # therefore told a model the one channel it could still take was closed, which is
+  # both false and the wrong kind of false: it invites the reader to discover the
+  # open channel and read the refusal as a bug. State the gate, and let the
+  # instruction rest on the absence of a sanctioned repair rather than on a deny
+  # that does not exist.
+  #
+  # THE RESIDUAL STAYS HERE AND NEVER IN THE EMITTED STRING, and the two corrections
+  # pull opposite ways — restore neither. An earlier spelling fixed the overstatement
+  # by naming the ungated redirect channel to the MODEL, which is the hatch-teaching
+  # shape CLAUDE.md forbids under §"Git Mutation Tables": a shipped escape teaches the
+  # hatch. This is the catch-all arm, so that sentence reached every consuming repo on
+  # every unclassified decline, with nothing behind it but prose telling the reader not
+  # to use what it had just named. The four sibling remedies forbid the same edit while
+  # naming no channel at all; that is the wording to match. So: do NOT restore the
+  # unqualified "that path is gate-denied", and do NOT restore the channel disclosure.
+  local runstate_remedy="Do NOT issue a fresh review ticket and do NOT re-spawn: the prompt is not what was refused, so a re-spawn reproduces this decline exactly while rotating the ticket out from under any spawn still in flight. Resolve the durable run state first — read a fresh ${LOG_COMMAND} --autopilot-status, then finish or release that run — and only then re-spawn with the ticket the chain already holds. Do not edit anything under .zensu/state/ to make the read succeed: the Edit, Write and MultiEdit tools are gate-denied on that path while a chain is active, and no channel of any kind repairs this."
+  local respawn_remedy="Re-spawn zensu:code-reviewer with a prompt whose FIRST line is exactly 'PRE-MERGED FINDINGS (fan-out)' and whose SECOND line is exactly 'REVIEW-TICKET: <the current ticket>'. Both lines, in that order: the reviewer agent enters consume mode only on that pair, and a prompt that satisfies this hook but not the agent still records the round while throwing the whole fan-out away, because the reviewer then re-reviews from scratch instead of consuming the merged findings. Mint a replacement by running: ${LOG_COMMAND} --review-ticket — that verb ISSUES a new ticket and ROTATES the outstanding one, it does not read the current value back, so run it only when no zensu:code-reviewer spawn is still in flight: a spawn already running carries the old value and can never be recorded afterwards. An Autopilot-bound chain must additionally carry exactly one DISTINCT value each of ZENSU-DELEGATED-CALLER, AUTOPILOT-BINDING and AUTOPILOT-STAGE, unchanged — a byte-identical repeat is fine, two regex-valid lines that differ are not, and a binding or stage line failing its regex is dropped before the collapse rather than counted; the caller line keeps its exact-literal test and has no such filter. A STANDALONE chain must not carry a COMPLETE, well-formed set of those three; an incomplete set is ignored, so quoting one of them is harmless."
+  # The UNATTRIBUTABLE run-state remedy. The arms that select it refused on a
+  # read that is owner-independent — a workspace held by some run, a record in
+  # the shared state directory that would not validate — so nothing here may
+  # point at `--autopilot-status`, which is owner-scoped and structurally cannot
+  # show a foreign run, and nothing here may instruct an edit under
+  # `.zensu/state/`, because the record behind the refusal may belong to another
+  # live session. That is the whole difference from `runstate_remedy`, whose
+  # arms have established that the run is this session's own.
+  local foreign_remedy="Do NOT issue a fresh review ticket and do NOT re-spawn: the prompt is not what was refused, so a re-spawn reproduces this decline exactly while rotating the ticket out from under any spawn still in flight. The durable run state behind this refusal is not attributable to this session from here — the state directory under .zensu/state/ can hold a run record another live session owns — so do not edit anything there. Wait for or coordinate with the session that holds the working tree, or hand this to the user, and re-spawn with the ticket the chain already holds only once the tree is free."
+  # The ENVELOPE remedy exists because the gate that selects it decides on PROMPT
+  # CONTENT ALONE — it reads `tool_input.prompt` and nothing else, and it runs
+  # before any durable run record is read. Routing it to `runstate_remedy` told
+  # the model "the prompt is not what was refused" in the same breath as a cause
+  # naming the prompt's own envelope, and sent it to repair a record under
+  # `.zensu/state/` that nothing on that path established as unreadable. The
+  # ticket rotation stays WITHHELD here, unlike `respawn_remedy`: the prompt is
+  # repairable without a new ticket, and rotating would strand any spawn still in
+  # flight for a fault the next prompt can simply not carry.
+  local envelope_remedy="Do NOT issue a fresh review ticket: the ticket is not what was refused and rotating it would strand any spawn still in flight. What was refused is the Autopilot envelope in the PROMPT, and nothing about the durable run state was read on this path — so do not read --autopilot-status for this and do not edit anything under .zensu/state/. Re-spawn zensu:code-reviewer with the SAME ticket the chain already holds, the same two consume-header lines, and a corrected envelope: a bound chain carries exactly one DISTINCT regex-valid line each of ZENSU-DELEGATED-CALLER, AUTOPILOT-BINDING and AUTOPILOT-STAGE, matching the durable run; a standalone chain carries no complete set of the three at all, so drop them rather than repairing them."
+  # The ENVELOPE-VS-RECORD remedy, and it is a mode of its own rather than a reuse
+  # of `envelope_remedy` for a reason that is easy to get wrong in either
+  # direction. No ordinal is written here: the paragraph above the
+  # `outstanding_lead` declaration states that this function's own mode count is
+  # deliberately not spelled in prose, because a numeral in a comment is a claim
+  # nothing recomputes — and the one that stood here named an ordinal the remedy
+  # `case` had already outgrown while CLAUDE.md named a different one. Anchor that
+  # cross-reference by SYMBOL and never by a line offset: it read "four lines
+  # above" while the statement sat some ninety lines up, which is the stale-anchor
+  # class this repository forbids. Do not restore either numeral.
+  # Both gates refuse on the PROMPT, so both withhold the rotation — three shipped
+  # carriers state that rule (the `post-review-tdd-delegate.sh` row in
+  # `docs/configuration.md`, the matching paragraph in
+  # `docs/tdd-manager-workflow.md`, and `skills/tdd/SKILL.md` Phase 6 step 5), and
+  # routing this arm to `respawn` violated all three: that remedy mints a fresh
+  # ticket, which strands any spawn still in flight for a fault the next prompt
+  # can simply not carry. But `envelope_remedy` additionally asserts that nothing
+  # about the durable run state was read on its path, which is true of the PARSE
+  # gate and false here: this arm compares the prompt against `PREFLIGHT_CONTEXT`,
+  # this chain's OWN workflow document, already read above. Reusing it would have
+  # forbidden the one read that resolves this state. The Stop hook's own clause
+  # rotates the ticket only when the TICKET ITSELF is unusable — a completion that
+  # named no outstanding ticket at all, or one declined after its claim landed and
+  # therefore spent — and neither holds here: the ticket is outstanding and the
+  # prompt is what is wrong, so withholding the rotation is what that clause says
+  # rather than an exception to it. An earlier wording quoted the clause's old
+  # "only when the PROMPT was what a previous completion was refused on" lead and
+  # defended the withholding as a PERMISSION bound; that lead was itself
+  # contradicted by its own second arm and has been replaced, so do not restore
+  # the quotation or the permission argument from it.
+  local envelope_record_remedy="Do NOT issue a fresh review ticket: the ticket is not what was refused, and rotating it would strand any spawn still in flight. What was refused is the Autopilot envelope in the PROMPT, measured against this chain's OWN record rather than against the durable run — so read ${LOG_COMMAND} --chain-status for the run, attempt and chain this chain is bound to, and use a fresh ${LOG_COMMAND} --autopilot-status only to confirm the durable run still agrees with it. Editing anything under .zensu/state/ is not the repair: the record is the truth here and the prompt is what is wrong. Re-spawn zensu:code-reviewer with the SAME ticket the chain already holds, the same two consume-header lines, and an envelope whose run, attempt, chain and stage match that record exactly."
+  # The RUN-GONE remedy, and BOTH of its earlier defects are recorded here because
+  # each reads as correct on its own. `runstate_remedy` prescribes three actions —
+  # finish the run, release it, repair an unreadable record — and on this arm none
+  # has a referent: this session's owner-keyed pointer designates no nonterminal
+  # run, so there is nothing to finish and no record that failed to read.
+  #
+  # (1) It must not forbid what its own exit prescribes. Routing the reader to
+  #     `--chain-status` while forbidding a fresh ticket AND a re-spawn was a dead
+  #     end: at this point the ticket is still outstanding and unconsumed, so the
+  #     chain classifies `ticket-unclaimed`, whose supported next command IS
+  #     "issue a fresh ticket and re-spawn" — the two actions the text banned. The
+  #     bans were written against the OTHER failure mode, a re-spawn that re-enters
+  #     the same read; what makes that harmless here is the order. Re-anchor the
+  #     durable binding FIRST, and only then take the shape's own command.
+  # (2) It must not claim more than an owner-scoped rc 1 proves. That status means
+  #     no nonterminal run of THIS session is designated by the owner-keyed
+  #     pointer; a live record whose pointer read failed produces it too, and there
+  #     the right action is a release rather than the one the old text ruled out.
+  #     Same standard the sibling orphan release states: "not reachable", never
+  #     "gone".
+  # (3) It must name the states its arms REALLY reach, which is the correction
+  #     this round made. Two arms select it and they are not the same state. The
+  #     owner-scoped read's rc 1 is `state file absent: <pointer>` — the pointer
+  #     FILE is gone — and it says nothing at all about release or completion,
+  #     because `autopilot_release_run` leaves the owner's pointer in place. A
+  #     released or completed run therefore answers rc 0 carrying a TERMINAL
+  #     record, and that is the second arm: the bound comparison below splits it
+  #     off rather than letting it fall through to a binding-disagreement verdict
+  #     that misdiagnoses a finished run as a mismatched prompt.
+  local run_gone_remedy="Do NOT rotate the ticket yet, and do not re-spawn into this state unchanged: this session's owner-keyed pointer designates no LIVE durable Autopilot run to judge the bound claim against, so the same read answers the same way and the chain does not advance. Two different states reach here and the cause above says which: either the owner-keyed pointer file itself is absent — which proves only that, never that the run was released or completed — or the run it designates has already reached a terminal stage. Establish which before acting: read ${LOG_COMMAND} --autopilot-status. Where it reports a run, its stage is the answer — a terminal one means this attempt is over and the bound claim has nothing left to record, and a live one means the pointer read failed rather than the run ending, so finish or release that run instead of treating it as absent. Where it refuses in the same way this did, the pointer is genuinely gone. Do not edit anything under .zensu/state/ to make the read succeed. Once the durable binding is settled, read ${LOG_COMMAND} --chain-status and take the supported command it names for the shape it reports — with the ticket still unclaimed that command is a fresh ticket plus a re-spawn, and it is correct THEN because the read it re-enters has been resolved."
+  # The OPENER is decided by the CLAIM PHASE for the same reason the stderr lead
+  # is, and off the same `$post_claim` classifier rather than off its own literal.
+  # A fixed opener asserting the completion was NOT recorded contradicted
+  # `spent_lead` on every post-claim decline, and the Stop hook's own directive
+  # asks the model to branch on exactly that distinction.
+  local opener
+  case "$mode" in
+    runstate)         remedy="$runstate_remedy" ;;
+    runstate-foreign) remedy="$foreign_remedy" ;;
+    respawn)          remedy="$respawn_remedy" ;;
+    envelope)         remedy="$envelope_remedy" ;;
+    envelope-record)  remedy="$envelope_record_remedy" ;;
+    run-gone)         remedy="$run_gone_remedy" ;;
+    spent)            remedy="$spent_remedy" ;;
+    *)                remedy="$runstate_remedy" ;;
+  esac
+  opener="The zensu:code-reviewer subagent above finished, but its completion was NOT recorded against this session's review chain: ${cause}."
+  [ "$post_claim" = "yes" ] && opener="The zensu:code-reviewer subagent above finished and its completion WAS recorded against this session's review chain, but the round's findings were not routed back: ${cause}."
+  printf '%s' "${opener} ${lead} ${remedy} Do NOT arm a new chain to work around this — that would grant a new review budget." | emit_post_context
   exit 0
 }
 
@@ -255,11 +651,14 @@ REVIEW_TICKET="$(TICKET="$OUTSTANDING_TICKET" node -e '
     } catch (_) { process.exit(3); }
   });
 ' <<<"$INPUT" 2>/dev/null)" \
-  || decline "the prompt carried no \`REVIEW-TICKET: <ticket>\` line naming this chain's outstanding ticket"
+  || decline "the prompt carried no \`REVIEW-TICKET: <ticket>\` line naming this chain's outstanding ticket" respawn
 
-PREFLIGHT_CONTEXT="$(STATE_FILE="$NATIVE_TDD_STATE_FILE" SID="$SESSION_ID" node -e '
+PREFLIGHT_CONTEXT="$(STATE_FILE="$NATIVE_TDD_STATE_FILE" SID="$SESSION_ID" CORE_MODULE="$ZENSU_DELEGATE_CORE" node -e '
   try {
-    const fs=require("fs"),s=JSON.parse(fs.readFileSync(process.env.STATE_FILE,"utf8"));
+    // Same hardened read as the ticket probe above, and for the same reason: a
+    // bare open on this session-writable path blocks forever on a planted FIFO.
+    const core = require(process.env.CORE_MODULE);
+    const s=JSON.parse(core.readRegularFileSnapshot(process.env.STATE_FILE).data.toString("utf8"));
     const keys=["autopilotRunId","autopilotAttempt","autopilotReturnStage","chainId","chainOutcome"];
     const count=keys.filter(key => Object.prototype.hasOwnProperty.call(s,key)).length;
     if(count===0){process.stdout.write("{}");process.exitCode=0;}else{
@@ -279,9 +678,20 @@ PREFLIGHT_CONTEXT="$(STATE_FILE="$NATIVE_TDD_STATE_FILE" SID="$SESSION_ID" node 
       returnStage:s.autopilotReturnStage,chainId:s.chainId,outcome:s.chainOutcome
     }));
     }
-  } catch (_) { process.exit(3); }
-' 2>/dev/null)" \
-  || decline "this session's own workflow document did not validate as a chain the reviewer completion could be recorded against" runstate
+  // A FAULT is not a judged payload — the same rule this file applies to both of
+  // its stdin pipes, and the rule the plan-payload gate states for its own load
+  // failures. The catch used to exit 3, indistinguishable from the
+  // `if(!valid)process.exit(3)` above it, so a require fault or a refusal from
+  // the hardened reader was declined as a document that carries an INVALID
+  // linkage block — and the run-state remedy then told the reader to go and
+  // resolve a document nothing had managed to open.
+  } catch (_) { process.exit(4); }
+' 2>/dev/null)" || PREFLIGHT_CONTEXT_RC=$?
+case "${PREFLIGHT_CONTEXT_RC:-0}" in
+  0) ;;
+  4) decline "this session's workflow document could not be read, or its reader module could not be loaded, so the Autopilot linkage block was never judged" runstate ;;
+  *) decline "this session's workflow document carries an incomplete or invalid Autopilot linkage block (run, attempt, return stage, chain id, outcome), so the completion cannot be recorded against it" runstate ;;
+esac
 
 # WHETHER this chain is Autopilot-bound is decided by the DURABLE STATE above,
 # never by counting prefixes in the prompt. Deciding it from the prompt made a
@@ -400,7 +810,7 @@ PROMPT_ENVELOPE_FIELDS="$(EXPECT_BOUND="$EXPECT_BOUND" node -e '
     } catch (_) { process.exit(3); }
   });
 ' <<<"$INPUT" 2>/dev/null)" \
-  || decline "the Autopilot envelope in the prompt did not match this chain: a bound chain needs exactly one DISTINCT line each of ZENSU-DELEGATED-CALLER / AUTOPILOT-BINDING / AUTOPILOT-STAGE and no team-review header, and a standalone chain must carry no complete envelope at all"
+  || decline "the Autopilot envelope in the prompt did not match this chain: a bound chain needs exactly one DISTINCT line each of ZENSU-DELEGATED-CALLER / AUTOPILOT-BINDING / AUTOPILOT-STAGE and no team-review header, and a standalone chain must carry no complete envelope at all" envelope
 IFS=$'\t' read -r PROMPT_AUTOPILOT_KIND PROMPT_AUTOPILOT_RUN \
   PROMPT_AUTOPILOT_ATTEMPT PROMPT_AUTOPILOT_CHAIN PROMPT_AUTOPILOT_STAGE \
   <<<"$PROMPT_ENVELOPE_FIELDS"
@@ -429,9 +839,12 @@ if [ "$PROMPT_AUTOPILOT_KIND" = standalone ]; then
       # that worker check stands. This also explains the one measurement that
       # looked like a counter-example — `test-post-review-self-review-handoff.sh`
       # P15 begins a run under a foreign owner key and this gate reports an own
-      # run for it. It does not: that case fails the worker check, arrives as
-      # rc 2, and is refused by the outer unreadable arm, whose wording
-      # deliberately names no owner.
+      # run for it. It does not, and state that case the way the fixture's own
+      # contract states it rather than the way an earlier wording here guessed:
+      # the owner-scoped read is BLIND to a foreign run, so the owner-keyed
+      # pointer is simply absent and the read answers rc 1. Nothing on this arm
+      # sees it at all; the owner-INDEPENDENT workspace-holder read below is what
+      # refuses, with the shared sentence that names no owner.
       # The terminal pair MIRRORS `TERMINAL` in `hooks/lib/zensu-autopilot-state.sh`
       # and deliberately NOT its `STOP_TERMINAL` sibling, which also holds
       # `BLOCKED`: a blocked run must still refuse an unbound claim, because the
@@ -487,7 +900,7 @@ if [ "$PROMPT_AUTOPILOT_KIND" = standalone ]; then
       esac
       ;;
     1) ;;
-    *) decline "a durable Autopilot run record in this project could not be read, so a standalone claim cannot be judged against it" runstate ;;
+    *) decline "a durable Autopilot run record in this project could not be read, so a standalone claim cannot be judged against it" runstate-foreign ;;
   esac
   # And: is anyone ELSE holding the working tree right now? Arming happens once,
   # at `tdd_begin_session`; this hook runs on every qualifying PostToolUse. A
@@ -497,18 +910,31 @@ if [ "$PROMPT_AUTOPILOT_KIND" = standalone ]; then
   # question is owner-independent, so it needs the owner-independent read.
   # rc 0 is a refusal exactly as the arm-time gate treats it, and anything that
   # is not a clean "free" fails closed.
-  # rc 0 is the one FOREIGN-state answer in this file and stays SILENT: the
-  # message's mere presence would answer "is another session's run holding this
-  # tree?", the existence-oracle property `test-plan-payload-fallback.sh`
-  # F20/F32/F45c pin for the sibling plan gate. A read that FAILED is a
-  # different question — it reports this hook's own inability to look and
-  # confirms nothing about anyone else — so it discloses.
+  # rc 0 is the one FOREIGN-state answer in this file. It used to stay SILENT so
+  # that the message's mere presence could not answer "is another session's run
+  # holding this tree?" — the existence-oracle property
+  # `test-plan-payload-fallback.sh` F20/F32/F45c pin for the sibling plan gate.
+  # Silence reproduced the exact strand this hook exists to end, and once every
+  # other pre-claim arm disclosed, the ABSENCE of a message became the oracle
+  # answer instead. So it now discloses with the SAME sentence the read-failure
+  # arm below uses: presence answers nothing a failed read would not, the strand
+  # ends, and the remedy is the unattributable one — no owner-scoped status
+  # verb, no instruction to touch the shared state directory. P15 holds the two
+  # sentences in lockstep by exact count. A read that FAILED discloses too, and
+  # the reason is the STRAND, never a claim that the failure reveals nothing
+  # about other sessions, which an earlier wording here made and which is false:
+  # this read is owner-INDEPENDENT and fails on any record in the shared state
+  # directory that will not validate, so a foreign record IS observable through
+  # it. That residual is accepted rather than argued away — silence here leaves
+  # the chain holding an unclaimed ticket with nothing on the model channel,
+  # which is the exact failure this seam exists to end, and the remedy it
+  # selects is the unattributable one for the same reason.
   if autopilot_read_workspace "$PROJECT_ROOT" >/dev/null 2>&1; then
-    exit 0
+    decline "whether a durable Autopilot run holds this working tree could not be judged, so a standalone claim cannot be recorded against it" runstate-foreign
   else
     PREFLIGHT_WORKSPACE_RC=$?
     [ "$PREFLIGHT_WORKSPACE_RC" -eq 1 ] \
-      || decline "whether a durable Autopilot run holds this working tree could not be read, so a standalone claim cannot be judged against it" runstate
+      || decline "whether a durable Autopilot run holds this working tree could not be judged, so a standalone claim cannot be recorded against it" runstate-foreign
   fi
 elif [ "$PROMPT_AUTOPILOT_KIND" = bound ]; then
   # There is deliberately NO guard here on `PREFLIGHT_CONTEXT` being the empty
@@ -531,21 +957,31 @@ elif [ "$PROMPT_AUTOPILOT_KIND" = bound ]; then
         process.exit(exact?0:3);
       } catch (_) { process.exit(3); }
     ' 2>/dev/null \
-    || decline "the Autopilot envelope in the prompt disagrees with this chain's own record — check run, attempt, chain and stage against a fresh --autopilot-status"
+    || decline "the Autopilot envelope in the prompt disagrees with this chain's own record — re-derive run, attempt, chain and stage from --chain-status, which reports what this chain is bound to" envelope-record
   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
-  # `autopilot_read_active` is OWNER-SCOPED, so this is the caller's OWN durable
-  # run record — not another session's. It therefore discloses like every other
-  # own-artifact decline; only the owner-INDEPENDENT workspace read stays silent.
+  # `autopilot_read_active` is OWNER-SCOPED, so rc 1 names the caller's OWN durable
+  # run record — not another session's — and discloses as an own-artifact decline.
+  # Every OTHER status does NOT establish that: `readRunInventory` fails closed on
+  # an UNATTRIBUTABLE record, so a co-tenant's corrupt file in the shared state
+  # directory reaches this arm, which is why it names no owner and passes the
+  # owner-independent mode. The one SILENT class in this hook is the ticket claim
+  # and every exit below it; the workspace read is not it — both of its arms
+  # decline, with one identical sentence.
   if PREFLIGHT_OUTER="$(autopilot_read_active "$PROJECT_ROOT" "$SESSION_ID" 2>/dev/null)"; then
     :
   else
-    # rc 1 is "no active run", not a fault: the run was released or completed and
-    # the pointer is gone. Reporting it as unreadable sent the model to repair a
-    # record that is simply absent — the same conflation the standalone branch
-    # above no longer makes.
+    # rc 1 is "no active run", not a fault. State what it PROVES and no more: the
+    # worker reaches it only at `fail(1, "state file absent: <pointer>")`, so the
+    # owner-keyed pointer FILE is absent — and that is not the same as the run
+    # having been released or completed, because `autopilot_release_run` leaves
+    # the owner pointer in place and a released run therefore answers rc 0 with a
+    # terminal record instead. That second state is split off at the comparison
+    # below rather than reported here. Reporting rc 1 as unreadable sent the model
+    # to repair a record that is simply absent — the same conflation the
+    # standalone branch above no longer makes.
     case "$?" in
-      1) decline "this session owns no active durable Autopilot run any more, so the bound claim has nothing to be judged against — the run was released or completed" runstate ;;
-      *) decline "a durable Autopilot run record in this project could not be read, so the bound claim cannot be judged against it" runstate ;;
+      1) decline "this session's owner-keyed Autopilot pointer is absent, so no durable run is designated for the bound claim to be judged against — that proves the pointer is gone, not that the run was released or completed" run-gone ;;
+      *) decline "a durable Autopilot run record in this project could not be read, so the bound claim cannot be judged against it" runstate-foreign ;;
     esac
   fi
   # The record is PIPED for the reason stated at the stage probe above; the small
@@ -557,6 +993,18 @@ elif [ "$PROMPT_AUTOPILOT_KIND" = bound ]; then
       try { raw = require("fs").readFileSync(0, "utf8"); } catch (_) { process.exit(4); }
       try {
         const s=JSON.parse(raw),t=s.tdd;
+        // A run this prompt legitimately names, already at a terminal stage, is
+        // NOT a binding disagreement, and reporting it as one was a real
+        // misdiagnosis. autopilot_release_run leaves the owner pointer in place,
+        // so a released or completed run reaches this probe at rc 0 and fails
+        // only the TDD_RUNNING conjunct below — which the catch-all then rendered
+        // as a prompt whose binding disagrees with the run, sending the model to
+        // resolve a run state that is already resolved. The terminal pair MIRRORS
+        // TERMINAL in hooks/lib/zensu-autopilot-state.sh and deliberately not its
+        // STOP_TERMINAL sibling, exactly as the standalone stage probe above
+        // does; S24 holds every copy in this file against that owner.
+        if (s.runId===process.env.RUN_ID && s.ownerSessionId===process.env.SID
+          && ["DONE", "CANCELLED"].includes(s.stage)) process.exit(5);
         const exact=s.runId===process.env.RUN_ID && s.ownerSessionId===process.env.SID
           && s.stage==="TDD_RUNNING" && s.nextActionCode==="AWAIT_TDD_CHAIN" && t
           && t.sessionId===process.env.SID && String(t.attempt)===process.env.ATTEMPT
@@ -572,6 +1020,7 @@ elif [ "$PROMPT_AUTOPILOT_KIND" = bound ]; then
   case "$?" in
     0) ;;
     4) decline "this session's own durable Autopilot run record could not be read from the pipe, so the prompt's Autopilot binding cannot be compared against it" runstate ;;
+    5) decline "the durable Autopilot run this prompt names is this session's own and has already reached a terminal stage, so there is no live run for the bound claim to be recorded against" run-gone ;;
     *) decline "the prompt's Autopilot binding disagrees with this session's own durable run — resolve the run state first, because the gate above has already pinned the envelope to this chain's own record" runstate ;;
   esac
 else
@@ -619,10 +1068,10 @@ CLAIM_FIELDS="$(CLAIM_CONTEXT="$CLAIM_CONTEXT" node -e '
       ].join("\t"));
     }
   } catch (_) { process.exit(3); }
-' 2>/dev/null)" || exit 0
+' 2>/dev/null)" || decline "the claim was consumed but its binding context did not read back as a parseable standalone or bound linkage" spent
 IFS=$'\t' read -r NEXT AUTOPILOT_KIND AUTOPILOT_RUN AUTOPILOT_ATTEMPT \
   AUTOPILOT_RETURN_STAGE AUTOPILOT_CHAIN <<<"$CLAIM_FIELDS"
-case "$NEXT" in ''|*[!0-9]*) exit 0 ;; esac
+case "$NEXT" in ''|*[!0-9]*) decline "the claimed round counter did not read back as a positive integer, so the round cannot be validated" spent ;; esac
 
 AUTOPILOT_BOUND=false
 AUTOPILOT_BOUND_ARGS=""
@@ -634,7 +1083,7 @@ if [ "$AUTOPILOT_KIND" = bound ]; then
     && [ "$AUTOPILOT_RUN" = "$PROMPT_AUTOPILOT_RUN" ] \
     && [ "$AUTOPILOT_ATTEMPT" = "$PROMPT_AUTOPILOT_ATTEMPT" ] \
     && [ "$AUTOPILOT_RETURN_STAGE" = "$PROMPT_AUTOPILOT_STAGE" ] \
-    && [ "$AUTOPILOT_CHAIN" = "$PROMPT_AUTOPILOT_CHAIN" ] || exit 0
+    && [ "$AUTOPILOT_CHAIN" = "$PROMPT_AUTOPILOT_CHAIN" ] || decline "after the claim, the bound Autopilot envelope no longer matched this chain's own record" spent
   AUTOPILOT_BOUND=true
   AUTOPILOT_RUN_Q="$(printf '%q' "$AUTOPILOT_RUN")"
   AUTOPILOT_ATTEMPT_Q="$(printf '%q' "$AUTOPILOT_ATTEMPT")"
@@ -652,9 +1101,9 @@ if [ "$AUTOPILOT_KIND" = bound ]; then
   AUTOPILOT_CARRY_PHRASE=" Preserve the official three-line Autopilot envelope printed below unchanged and exactly once in the self-review invocation."
   AUTOPILOT_RESPAWN_PHRASE=" For every verification respawn, append the official three-line Autopilot envelope printed below unchanged and exactly once after REVIEW-TICKET."
 elif [ "$AUTOPILOT_KIND" != standalone ]; then
-  exit 0
+  decline "the claimed binding kind was neither a valid bound envelope nor a standalone chain" spent
 elif [ "$PROMPT_AUTOPILOT_KIND" != standalone ]; then
-  exit 0
+  decline "the prompt's binding kind disagreed with this chain's own standalone record after the claim" spent
 fi
 
 if [ "$(tdd_vanilla_mode "$TDD_STATE_FILE")" = "true" ]; then
@@ -702,11 +1151,26 @@ else
   TAIL_DIRECTIVE="${COMBINED_SUMMARY_DIRECTIVE}${BYPASS_TAIL_DIRECTIVE}"
 fi
 
+# The ticket binds a completion by CONTENT, so a prompt that carried it anywhere
+# is recorded — but the reviewer AGENT selects consume mode positionally, on the
+# exact two header lines, and stays stricter than this hook. A slip therefore
+# costs the merged fan-out rather than the round: the agent re-reviews from
+# scratch, the round counts, and the findings the panel merged are thrown away
+# with nothing said. The notice is a PREFIX on every routed directive variant
+# below, so no accept path can emit without it; with the exact header it is
+# empty and every variant renders byte-identically. It says LIKELY, because this
+# hook observes the prompt and never the agent mode, and it never echoes the
+# ticket value.
+CONSUME_SHAPE_NOTICE=""
+if [ "$PROMPT_CONSUME_HEADER" != "yes" ]; then
+  CONSUME_SHAPE_NOTICE="Consume-header slip on the completion above: its prompt carried this chain's ticket, so the round IS recorded, but the prompt did not open with the two required consume-header lines. The reviewer agent enters consume mode only on that exact pair, so it most likely did not enter consume mode and re-reviewed from scratch — the merged fan-out for this round was discarded. If this chain spawns another reviewer at all — the directive below decides that, and not every variant this notice can prefix permits one — put both header lines FIRST, in this order: line 1 exactly 'PRE-MERGED FINDINGS (fan-out)', line 2 exactly 'REVIEW-TICKET: <the freshly minted ticket>', and only then the rest of the prompt. "
+fi
+
 if [ "$AUTO_FIX_ON" = "0" ]; then
   DISABLED_MSG="Auto-fix is disabled for this ticket-bound review completion. Do NOT modify findings automatically and do NOT spawn another reviewer loop. Report the reviewer verdict and all findings unchanged, then ${CLOSE_PASS}"
   DISABLED_TAIL=""
   [ "$SELF_REVIEW_ON" = "0" ] && DISABLED_TAIL="${BYPASS_DIRECTIVE_TRAILING}"
-  printf '%s' "${DISABLED_MSG}${DISABLED_TAIL}${AUTOPILOT_ENVELOPE_DIRECTIVE}" | emit_post_context
+  printf '%s' "${CONSUME_SHAPE_NOTICE}${DISABLED_MSG}${DISABLED_TAIL}${AUTOPILOT_ENVELOPE_DIRECTIVE}" | emit_post_context
   exit 0
 fi
 
@@ -721,9 +1185,9 @@ if [ "$NEXT" -gt "$MAX_ROUNDS" ]; then
     if [ "$AUTOPILOT_BOUND" = "true" ]; then
       tdd_mark_autopilot_max_round_handoff "$SESSION_ID" "$AUTOPILOT_RUN" \
         "$AUTOPILOT_ATTEMPT" "$AUTOPILOT_RETURN_STAGE" "$AUTOPILOT_CHAIN" \
-        "$REVIEW_TICKET" || exit 0
+        "$REVIEW_TICKET" || decline "the max-rounds handoff CAS did not land, so the converged reviewer round could not be recorded" spent
     else
-      tdd_mark_review_converged "$SESSION_ID" "$REVIEW_TICKET" codeReviewDone || exit 0
+      tdd_mark_review_converged "$SESSION_ID" "$REVIEW_TICKET" codeReviewDone || decline "the codeReviewDone convergence CAS did not land, so the reviewer round could not be marked converged" spent
     fi
     CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. The code-reviewer chain is marked converged (codeReviewDone). Do NOT spawn zensu:code-reviewer again and do NOT keep fixing its findings. Your VERY NEXT action MUST be the Skill tool with skill='zensu:self-review' — the terminal self-review stage. Carry this exact generation line into it: 'SELF-REVIEW-TICKET: ${REVIEW_TICKET}'.${AUTOPILOT_CARRY_PHRASE} Carry the remaining reviewer findings forward under '### Findings (max rounds reached, manual fix required)' so they land in the final report. /zensu:self-review owns the ticket-bound chain terminus and renders the final summary — do NOT close the chain yourself. To grant another reviewer budget instead of finalizing, the user can invoke the /zensu:reset-review-limit skill."
   else
@@ -731,13 +1195,13 @@ if [ "$NEXT" -gt "$MAX_ROUNDS" ]; then
       bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --session "$SESSION_ID" \
         --autopilot-run "$AUTOPILOT_RUN" --autopilot-attempt "$AUTOPILOT_ATTEMPT" \
         --chain-id "$AUTOPILOT_CHAIN" --claimed-review-ticket "$REVIEW_TICKET" \
-        --outcome max-rounds >/dev/null 2>&1 || exit 0
+        --outcome max-rounds >/dev/null 2>&1 || decline "the bound chain-done terminus did not land, so the max-rounds outcome could not be recorded" spent
     else
-      tdd_mark_review_converged "$SESSION_ID" "$REVIEW_TICKET" chainDone || exit 0
+      tdd_mark_review_converged "$SESSION_ID" "$REVIEW_TICKET" chainDone || decline "the standalone chainDone terminus CAS did not land, so the review chain could not be closed" spent
     fi
     CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. The review chain is now marked complete (chainDone) so you MAY end your turn. Do NOT spawn zensu:code-reviewer again and do NOT keep fixing. Reply with the remaining findings under '### Findings (max rounds reached, manual fix required)' and stop. To grant another budget and resume the review/fix cycle in this same session, the user can invoke the /zensu:reset-review-limit skill — surface this hint at the end of your reply so the user knows the escape hatch exists.${COMBINED_SUMMARY_DIRECTIVE}${BYPASS_TAIL_DIRECTIVE}"
   fi
-  printf '%s' "${CONV_MSG}${AUTOPILOT_ENVELOPE_DIRECTIVE}" | emit_post_context
+  printf '%s' "${CONSUME_SHAPE_NOTICE}${CONV_MSG}${AUTOPILOT_ENVELOPE_DIRECTIVE}" | emit_post_context
   exit 0
 fi
 
@@ -790,4 +1254,4 @@ EXPANDED_MSG="${MSG//\$\{NEXT\}/$NEXT}"
 EXPANDED_MSG="${EXPANDED_MSG//\$\{MAX_ROUNDS\}/$MAX_ROUNDS}"
 EXPANDED_MSG="${EXPANDED_MSG}${AUTOPILOT_ENVELOPE_DIRECTIVE}"
 
-printf '%s' "$EXPANDED_MSG" | emit_post_context
+printf '%s' "${CONSUME_SHAPE_NOTICE}${EXPANDED_MSG}" | emit_post_context

@@ -14,8 +14,18 @@
 #      `append` verb in hooks/lib/zensu-log.sh, hooks/post-artifact-redact.sh
 #      and hooks/lib/zensu-witness.sh, which both witness writers
 #      -- hooks/pre-bash-witness.sh and hooks/post-bash-witness.sh -- source
-#      rather than each rendering the path themselves). The last three carry
+#      rather than each rendering the path themselves). Three of those carry
 #      zensu-artifact-redact-v1.js, which is probed alongside the plan lib below.
+#      hooks/post-review-tdd-delegate.sh is named here as a DOWNSTREAM consumer
+#      and is deliberately NOT probed, which is the one place this header departs
+#      from the "executes them rather than pinning their source text" rule above
+#      and therefore says so rather than reading as a probe that exists: it
+#      renders no path of its own, it takes the already rendered spelling from
+#      zensu-tdd-phase.sh through the public accessor zensu_tdd_control_core and
+#      re-transports it to its own `node -e` programs in ZENSU_DELEGATE_CORE. The
+#      RENDER it inherits is what the probe below exercises; what the re-transport
+#      carries — session-control-core-v1.js's readRegularFileSnapshot — is pinned
+#      by S37 in tests/structure/test-post-review-tdd-scope.sh instead.
 #
 # The shim cannot police mechanism 2 by scanning argv, and widening it to reject
 # the root in ANY environment value would reject every invocation, because

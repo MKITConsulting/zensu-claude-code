@@ -22,7 +22,7 @@ Exit 0 iff every selected suite passes. A timestamped report lands in `tests/res
 ## Windows contract profiles
 
 The versioned manifest at `tests/profiles/windows-ci.v1.json` divides the
-Windows-specific deterministic contracts into seven bounded profiles. Membership
+Windows-specific deterministic contracts into nine bounded profiles. Membership
 is balanced by measured runtime rather than by theme, so a profile name says
 which shard a suite runs in and nothing about what it covers:
 
@@ -35,6 +35,8 @@ node tests/run-profile.js windows-shard-4
 node tests/run-profile.js windows-shard-5
 node tests/run-profile.js windows-shard-6
 node tests/run-profile.js windows-shard-7
+node tests/run-profile.js windows-shard-8
+node tests/run-profile.js windows-shard-9
 ```
 
 Moving a suite between profiles is a rebalancing decision, not a semantic one.
@@ -51,20 +53,27 @@ suite exit. Child processes receive a disposable home/temp tree and a strict
 operational environment allowlist; credentials, auth homes, interpreter preload
 variables, and live/API modes are unavailable.
 
-The installed-core profile runs fast Windows metadata contracts and the slower
-profile-runner lifecycle contract as separate suites. The metadata suite keeps
-its three-minute deadline; the lifecycle suite has a seven-minute deadline
-derived from its approximately 3.5-minute native Windows baseline plus cleanup
-reserve. This split preserves the full contract without allowing one slow
-lifecycle test to hide which boundary exceeded its budget.
+The fast Windows metadata contract and the slower profile-runner lifecycle
+contract are two separate suites with two separate deadlines, and each carries
+its own: `windows-ci-metadata-contract` keeps a three-minute deadline, and
+`windows-profile-lifecycle-contract` has a seven-minute one derived from its
+approximately 3.5-minute native Windows baseline plus cleanup reserve. The split
+preserves the full contract without letting one slow lifecycle test hide which
+boundary exceeded its budget. Neither shard is named here: membership is a
+rebalancing decision as above, nothing compares a shard name in this prose to the
+manifest, and an earlier draft of this paragraph named both — read
+`tests/profiles/windows-ci.v1.json` for where either suite runs. Deliberately no profile is
+named as owning the pair: the retired `windows-installed-core` profile did, this
+paragraph went on describing it after that layout was replaced, and
+`tests/SUITE-OVERVIEW.md` §7 records the retirement.
 
 CI writes the atomic report below the private runner temp directory. A manual
 run creates a random private report directory and prints its absolute path at
 the end.
 
-Pull-request CI runs all five profiles as blocking Windows contract profiles
+Pull-request CI runs all nine profiles as blocking Windows contract profiles
 and uploads their provenance-bound timing reports. The stable
-`Deterministic suite (windows-latest)` check downloads exactly those five
+`Deterministic suite (windows-latest)` check downloads exactly those nine
 reports, validates SHA/run-attempt consistency plus the exact ordered suite
 inventory and complete execution-contract digest, and fails closed on a missing,
 failed, timed-out, or incompletely cleaned profile. That digest binds the
