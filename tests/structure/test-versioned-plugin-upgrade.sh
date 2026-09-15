@@ -123,14 +123,93 @@ ADOPT_TABLE="$(awk '/<<.ZSA_REQUIRED_MODULES./{f=1;next} /^ZSA_REQUIRED_MODULES$
 ADOPT_MODULES_MISSING=""
 for _adopt_mod in session-control-core-v1.js claude-hook-session-v1.js \
     session-adopt-report-v1.js review-evidence-sweep-v1.js \
-    review-evidence-lease-v1.js zensu-safe-display-v1.js claude-path-v1.js; do
+    review-evidence-lease-v1.js zensu-safe-display-v1.js claude-path-v1.js \
+    session-auto-adopt-v1.js; do
   printf '%s\n' "$ADOPT_TABLE" | grep -qE "^${_adopt_mod}\|" \
     || ADOPT_MODULES_MISSING="$ADOPT_MODULES_MISSING $_adopt_mod"
 done
 if [ "$ADOPT_REFUSALS" = 2 ] && [ -n "$ADOPT_TABLE" ] && [ -z "$ADOPT_MODULES_MISSING" ]; then
-  check "the adoption entry point guards its required modules from one table, not seven copies" PASS
+  check "the adoption entry point guards its required modules from one table, not eight copies" PASS
 else
-  check "the adoption entry point guards its required modules from one table, not seven copies (refusals=$ADOPT_REFUSALS want 2, table_lines=$(printf '%s\n' "$ADOPT_TABLE" | grep -c . ), missing:${ADOPT_MODULES_MISSING:- none})" FAIL
+  check "the adoption entry point guards its required modules from one table, not eight copies (refusals=$ADOPT_REFUSALS want 2, table_lines=$(printf '%s\n' "$ADOPT_TABLE" | grep -c . ), missing:${ADOPT_MODULES_MISSING:- none})" FAIL
+fi
+
+# WORKING TREE, not HEAD. The `.*` gate's ADOPTION_REFUSAL_REMEDIES is a HAND COPY of
+# `_zensu_adoption_refusal_remedy`'s case in zensu-session.sh — the JS gate cannot
+# reach the shell emitter — and prose alone kept the two in step for one round while
+# they disagreed about what the user is told. Both sides are parsed out of source and
+# compared token for token, including the generic fallback; an arm present on one
+# side only, or a differing sentence, is named.
+REMEDY_LOCKSTEP="$(
+  GATE="$ROOT/hooks/lib/reviewer-capability-v1.js" SHELL_LIB="$ROOT/hooks/lib/zensu-session.sh" node -e '
+    const fs = require("node:fs");
+    const gate = fs.readFileSync(process.env.GATE, "utf8");
+    const shell = fs.readFileSync(process.env.SHELL_LIB, "utf8");
+    const js = new Map();
+    for (const m of gate.matchAll(/^\s*\x27([a-z-]+)\x27: \x27([^\x27]*)\x27,$/gm)) js.set(m[1], m[2]);
+    const generic = gate.match(/^const GENERIC_ADOPTION_REMEDY = \x27([^\x27]*)\x27;$/m);
+    const sh = new Map();
+    let shGeneric = null;
+    const lines = shell.split("\n");
+    const start = lines.findIndex((l) => /^_zensu_adoption_refusal_remedy\(\)/.test(l));
+    for (let i = start; i >= 0 && i < lines.length; i += 1) {
+      const arm = lines[i].match(/^\s*\(([a-z|-]+|\*)\)$/);
+      if (!arm) continue;
+      const body = (lines[i + 1] || "").match(/printf \x27%s\x27 \x27([^\x27]*)\x27 ;;/);
+      if (!body) continue;
+      if (arm[1] === "*") { shGeneric = body[1]; break; }
+      for (const token of arm[1].split("|")) sh.set(token, body[1]);
+    }
+    const faults = [];
+    if (js.size < 8 || sh.size < 8) faults.push(`parsed js=${js.size} sh=${sh.size}`);
+    for (const [token, text] of js) {
+      if (!sh.has(token)) faults.push(`shell lacks ${token}`);
+      else if (sh.get(token) !== text) faults.push(`differs: ${token}`);
+    }
+    for (const token of sh.keys()) if (!js.has(token)) faults.push(`gate lacks ${token}`);
+    if (!generic || shGeneric === null) faults.push("generic arm not parsed");
+    else if (generic[1] !== shGeneric) faults.push("differs: generic");
+    if (!/report this refusal and ask the user/.test(js.get("opted-out") || "")) faults.push("opted-out remedy does not ask the user");
+    if (/--confirm yourself/.test(js.get("opted-out") || "")) faults.push("opted-out remedy still tells the model to run --confirm itself");
+    process.stdout.write(faults.length ? faults.join("; ") : "ok");
+  ' 2>/dev/null
+)" || REMEDY_LOCKSTEP=threw
+if [ "$REMEDY_LOCKSTEP" = ok ]; then
+  check "the gate remedy map and the shell remedy case agree token for token, and the opted-out remedy asks the user" PASS
+else
+  check "the gate remedy map and the shell remedy case agree token for token ($REMEDY_LOCKSTEP)" FAIL
+fi
+
+# WORKING TREE, not HEAD. The prose carriers of the opt-out key and the entry-level
+# tokens: the example config advertises every flag, the configuration doc carries the
+# row, and the skill lists the tokens a deny can name beside the refusal table.
+PROSE_CARRIER_GAPS=""
+grep -qF '"sessionAutoAdopt": true' "$ROOT/config.example.json" || PROSE_CARRIER_GAPS="$PROSE_CARRIER_GAPS config.example.json"
+grep -qE '^\| `sessionAutoAdopt` \|' "$ROOT/docs/configuration.md" || PROSE_CARRIER_GAPS="$PROSE_CARRIER_GAPS docs/configuration.md"
+for _token in opted-out adopted-concurrently not-completed lock-timeout superseded-record-exists; do
+  grep -qF "\`$_token\`" "$ROOT/skills/adopt-session/SKILL.md" || PROSE_CARRIER_GAPS="$PROSE_CARRIER_GAPS skill:$_token"
+done
+grep -qF 'ask the user whether to run the `--confirm` form' "$ROOT/skills/adopt-session/SKILL.md" || PROSE_CARRIER_GAPS="$PROSE_CARRIER_GAPS skill:ask-before-confirm"
+if [ -z "$PROSE_CARRIER_GAPS" ]; then
+  check "the opt-out key and the entry-level tokens are carried by the example config, the configuration doc and the skill" PASS
+else
+  check "the opt-out key and the entry-level tokens are carried by the prose (missing:$PROSE_CARRIER_GAPS)" FAIL
+fi
+
+# WORKING TREE, not HEAD. The Stop hook's four release arms all interpolate the
+# refusal token and its remedy, and the capture falls back to (unknown) — the
+# state-neutral arm and the fallback have no fixture that reaches them, so the
+# spelling is what is pinned.
+STOP_SRC="$ROOT/hooks/stop-chain-enforcer.sh"
+STOP_ARMS_WITH_TOKEN="$(grep -c 'it was REFUSED: ${ADOPTION_REFUSAL}\. ${ADOPTION_REMEDY}\.' "$STOP_SRC" 2>/dev/null || printf 0)"
+if [ "$STOP_ARMS_WITH_TOKEN" = 4 ] \
+    && grep -qF 'ADOPTION_REFUSAL="(unknown)"' "$STOP_SRC" \
+    && grep -qF 'ADOPTION_REMEDY="$(zensu_session_adoption_remedy "$ADOPTION_REFUSAL")"' "$STOP_SRC" \
+    && ! grep -qF 'the workflow document is READABLE here' "$STOP_SRC" \
+    && ! grep -qF 'SURVIVES unchanged' "$STOP_SRC"; then
+  check "every Stop release arm names the refusal token and its remedy, the capture falls back to (unknown), and no arm claims the document's contents" PASS
+else
+  check "Stop release arms vs the refusal token (arms=$STOP_ARMS_WITH_TOKEN want 4)" FAIL
 fi
 
 # The two checks above are SOURCE pins, and on their own they leave the guard disarmable
@@ -1200,10 +1279,10 @@ fi
 # injected core and sweep stubs, which no synthetic install can reach.
 AUTO_ADOPT_UNIT="$ROOT/tests/structure/session-auto-adopt-v1.test.js"
 if [ -f "$AUTO_ADOPT_UNIT" ] && node --test "$AUTO_ADOPT_UNIT" >"$TMP/auto-adopt-unit.out" 2>&1 \
-  && unit_cases_registered_floor "$TMP/auto-adopt-unit.out" 16; then
+  && unit_cases_registered_floor "$TMP/auto-adopt-unit.out" 20; then
   check "the automatic-adoption unit suite passes ($(unit_cases_report "$TMP/auto-adopt-unit.out"), driven from here)" PASS
 else
-  check "the automatic-adoption unit suite passes ($(unit_cases_report "$TMP/auto-adopt-unit.out"), want >= 16 registered — driven from here)" FAIL
+  check "the automatic-adoption unit suite passes ($(unit_cases_report "$TMP/auto-adopt-unit.out"), want >= 20 registered — driven from here)" FAIL
   grep -E "^not ok|^# (fail|pass|tests) |Error|expected:|actual:|operator:" \
     "$TMP/auto-adopt-unit.out" 2>/dev/null | head -40
 fi
@@ -1286,13 +1365,13 @@ ADOPT_TOOL_PAYLOAD="$(EVENT=PreToolUse SESSION="$ADOPT_SESSION" CWD="$PROJECT" n
   }));
 ')"
 
-# Every hook drive from here to AC-C07 grades the lineage DENY, so the opt-out is
-# exported for the whole stretch and restored right before the adoption row: one
+# Every hook drive from here to AC-C07 grades the lineage DENY, so every drive that
+# BINDS through a hook payload carries the opt-out as a per-command prefix: one
 # adopting drive here would leave AC-C05, AC-C07 and AC-C11 grading a served
-# record. The outer value, if any, is put back exactly as it was.
-ZENSU_CONFIG_OUTER_SET="${ZENSU_CONFIG+set}"
-ZENSU_CONFIG_OUTER="${ZENSU_CONFIG-}"
-export ZENSU_CONFIG="$OPT_OUT_CONFIG"
+# record. The prefix is per drive rather than a process-global export on purpose —
+# an export over this stretch made a row added inside it grade the opt-out
+# silently when it meant to grade the default path. The three binder MODE drives
+# and the doctor below bind read-only and adopt nothing.
 
 # AC-C01 — the state is NAMED, and named only here. The two relaxable predicates
 # must both answer no: this is a third diagnosis, never a widening of either.
@@ -1351,7 +1430,7 @@ STOP_OUT="$TMP/adopt-stop.out"
 STOP_ERR="$TMP/adopt-stop.err"
 printf '%s' "$ADOPT_STOP_PAYLOAD" \
   | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
-    CLAUDE_PROJECT_DIR="$PROJECT" \
+    CLAUDE_PROJECT_DIR="$PROJECT" ZENSU_CONFIG="$OPT_OUT_CONFIG" \
     bash "$SYNTHETIC_BREAKING_ROOT/hooks/stop-chain-enforcer.sh" >"$STOP_OUT" 2>"$STOP_ERR"
 # The greps name literals ONLY the third release emits. "releasing Stop" and "no
 # completion was proven" also appear in the two opt-out releases (ZENSU_CHAIN=off,
@@ -1455,7 +1534,7 @@ ADOPT_GATE_FAILURES=''
 while IFS= read -r hook_name; do
   [ -n "$hook_name" ] || continue
   hook_expected="$(adopt_hook_expected "$hook_name" "$ADOPT_EXPECTED")"
-  if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$hook_name" "$ADOPT_BASH_PAYLOAD")" != "$hook_expected" ]; then
+  if [ "$(ZENSU_CONFIG="$OPT_OUT_CONFIG" gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$hook_name" "$ADOPT_BASH_PAYLOAD")" != "$hook_expected" ]; then
     ADOPT_GATE_FAILURES="$ADOPT_GATE_FAILURES $hook_name"
   fi
 done <<EOF
@@ -1484,7 +1563,7 @@ ADOPT_LEGACY_FAILURES=''
 while IFS= read -r hook_name; do
   [ -n "$hook_name" ] || continue
   hook_expected="$(adopt_hook_expected "$hook_name" "$ADOPT_EXPECTED")"
-  if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$hook_name" "$ADOPT_LEGACY_PAYLOAD")" != "$hook_expected" ]; then
+  if [ "$(ZENSU_CONFIG="$OPT_OUT_CONFIG" gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$hook_name" "$ADOPT_LEGACY_PAYLOAD")" != "$hook_expected" ]; then
     ADOPT_LEGACY_FAILURES="$ADOPT_LEGACY_FAILURES $hook_name"
   fi
 done <<EOF
@@ -1506,7 +1585,7 @@ fi
 # state and would grade this discrimination as a failure for a reason that has
 # nothing to do with binding. Part B above compares the same way.
 ADOPT_ORDINARY="$(bash_payload "$ADOPT_SESSION" 'ls -la')"
-if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh "$ADOPT_ORDINARY")" = deny ]; then
+if [ "$(ZENSU_CONFIG="$OPT_OUT_CONFIG" gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh "$ADOPT_ORDINARY")" = deny ]; then
   check "AC-C04 an ordinary Bash command in the same state still denies" PASS
 else
   check "AC-C04 an ordinary Bash command in the same state still denies" FAIL
@@ -1529,15 +1608,15 @@ fi
 # POSIX, where the platform refusal is not already supplying that verdict.
 ADOPT_SHAPE_FAILURES=''
 ADOPT_NO_PROJECT="CLAUDE_PLUGIN_DATA=$SHARED_DATA bash $SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh"
-if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh \
+if [ "$(ZENSU_CONFIG="$OPT_OUT_CONFIG" gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh \
     "$(bash_payload "$ADOPT_SESSION" "$ADOPT_NO_PROJECT")")" != "$ADOPT_EXPECTED" ]; then
   ADOPT_SHAPE_FAILURES="$ADOPT_SHAPE_FAILURES no-project-dir"
 fi
-if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh \
+if [ "$(ZENSU_CONFIG="$OPT_OUT_CONFIG" gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh \
     "$(bash_payload "$ADOPT_SESSION" "$ADOPT_NO_PROJECT --confirm")")" != "$ADOPT_EXPECTED" ]; then
   ADOPT_SHAPE_FAILURES="$ADOPT_SHAPE_FAILURES no-project-dir-confirm"
 fi
-if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh \
+if [ "$(ZENSU_CONFIG="$OPT_OUT_CONFIG" gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh \
     "$(bash_payload "$ADOPT_SESSION" "CLAUDE_PLUGIN_DATA=$SHARED_DATA CLAUDE_PROJECT_DIR= bash $SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh")")" != deny ]; then
   ADOPT_SHAPE_FAILURES="$ADOPT_SHAPE_FAILURES empty-project-dir:allowed"
 fi
@@ -1609,7 +1688,7 @@ for reason_hook in pre-edit-tdd-reminder.sh pre-bash-source-write-gate.sh pre-wr
     pre-bash-source-write-gate.sh) reason_payload="$ADOPT_ORDINARY" ;;
     *) reason_payload="$ADOPT_EDIT_PAYLOAD" ;;
   esac
-  reason_text="$(gate_reason_from "$SYNTHETIC_BREAKING_ROOT" "$reason_hook" "$reason_payload")"
+  reason_text="$(ZENSU_CONFIG="$OPT_OUT_CONFIG" gate_reason_from "$SYNTHETIC_BREAKING_ROOT" "$reason_hook" "$reason_payload")"
   # The Edit/Write limit is part of the pattern, not an afterthought. Four of
   # these five deniers emit the SHELL scope in zensu-session.sh, and its new
   # conditional clause had no pin anywhere in tests/ — the only occurrence of that
@@ -1630,7 +1709,7 @@ fi
 # FR-C02 — the Edit matcher itself. pre-edit-tdd-reminder.sh is what denies
 # writes in this state, and no check exercised its matcher at all: a regression
 # that made it ALLOW a write here would have been invisible.
-if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-edit-tdd-reminder.sh "$ADOPT_EDIT_PAYLOAD")" = deny ]; then
+if [ "$(ZENSU_CONFIG="$OPT_OUT_CONFIG" gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-edit-tdd-reminder.sh "$ADOPT_EDIT_PAYLOAD")" = deny ]; then
   check "FR-C02 the Edit gate denies a write in the lineage state" PASS
 else
   check "FR-C02 the Edit gate denies a write in the lineage state" FAIL
@@ -1643,14 +1722,14 @@ fi
 ADOPT_SCRIPT="$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh"
 RECOGNIZER_FAILURES=''
 recognizer_denies() {
-  [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh "$1")" = deny ] \
+  [ "$(ZENSU_CONFIG="$OPT_OUT_CONFIG" gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh "$1")" = deny ] \
     || RECOGNIZER_FAILURES="$RECOGNIZER_FAILURES $2"
 }
-recognizer_denies "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --forge")" undeclared-flag
-recognizer_denies "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm --confirm")" repeated-flag
-recognizer_denies "$(bash_payload "$ADOPT_SESSION" "bash $SYNTHETIC_CANDIDATE_ROOT/hooks/lib/zensu-session-adopt.sh --confirm")" foreign-root
-recognizer_denies "$(bash_payload "$ADOPT_SESSION" "EVIL=1 bash $ADOPT_SCRIPT")" undeclared-assignment
-recognizer_denies "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm" 'zensu:review-aspect')" reviewer-principal
+ZENSU_CONFIG="$OPT_OUT_CONFIG" recognizer_denies "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --forge")" undeclared-flag
+ZENSU_CONFIG="$OPT_OUT_CONFIG" recognizer_denies "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm --confirm")" repeated-flag
+ZENSU_CONFIG="$OPT_OUT_CONFIG" recognizer_denies "$(bash_payload "$ADOPT_SESSION" "bash $SYNTHETIC_CANDIDATE_ROOT/hooks/lib/zensu-session-adopt.sh --confirm")" foreign-root
+ZENSU_CONFIG="$OPT_OUT_CONFIG" recognizer_denies "$(bash_payload "$ADOPT_SESSION" "EVIL=1 bash $ADOPT_SCRIPT")" undeclared-assignment
+ZENSU_CONFIG="$OPT_OUT_CONFIG" recognizer_denies "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm" 'zensu:review-aspect')" reviewer-principal
 # The reviewer case above is graded through the JS gate, whose own principal
 # check short-circuits before the recognizer — so it cannot pin the INDEPENDENT
 # shell conjunct in zensu_doctor_allowed. Grade it through two Bash gates too.
@@ -1662,7 +1741,7 @@ for shell_gate in pre-bash-source-write-gate.sh pre-write-secret-scan.sh; do
   # Graded against $ADOPT_EXPECTED, never a hardcoded `allow`: the recognizer
   # refuses on win32 by design, so a fixed expectation is unpassable on the
   # Windows shard — the same defect class AC-C04 was corrected for.
-  if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$shell_gate" \
+  if [ "$(ZENSU_CONFIG="$OPT_OUT_CONFIG" gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$shell_gate" \
       "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm")")" != "$ADOPT_EXPECTED" ]; then
     RECOGNIZER_FAILURES="$RECOGNIZER_FAILURES bare-form-control:$shell_gate"
   fi
@@ -1674,7 +1753,7 @@ for shell_gate in pre-bash-source-write-gate.sh pre-write-secret-scan.sh; do
   # exact vacuity the positive control above exists to prevent. Skipped explicitly
   # rather than left silently green.
   if [ "$ADOPT_EXPECTED" = allow ]; then
-    if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$shell_gate" \
+    if [ "$(ZENSU_CONFIG="$OPT_OUT_CONFIG" gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$shell_gate" \
         "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm" 'zensu:review-aspect')")" != deny ]; then
       RECOGNIZER_FAILURES="$RECOGNIZER_FAILURES shell-principal:$shell_gate"
     fi
@@ -1755,8 +1834,6 @@ if [ "$FOREIGN_VERDICT" = plugin-data-mismatch ]; then
 else
   check "AC-C06 a second disagreement is never relaxed alongside the lineage (got '$FOREIGN_VERDICT')" FAIL
 fi
-
-if [ -n "$ZENSU_CONFIG_OUTER_SET" ]; then export ZENSU_CONFIG="$ZENSU_CONFIG_OUTER"; else unset ZENSU_CONFIG; fi
 
 # AC-C07 — the repair itself, end to end through the shipped entry point. This
 # runs LAST of the adoption checks because it mutates the record.
@@ -3012,6 +3089,8 @@ EOF
         || ! grep -qF '(version 0.17.0)' "$PRUNED_GATE_OUT" \
         || ! grep -qF '(0.18.0) cannot re-verify' "$PRUNED_GATE_OUT" \
         || ! grep -qF '/zensu:adopt-session' "$PRUNED_GATE_OUT" \
+        || ! grep -qF 'it was REFUSED: opted-out' "$PRUNED_GATE_OUT" \
+        || ! grep -qF 'hooks.sessionAutoAdopt' "$PRUNED_GATE_OUT" \
         || ! grep -qF 'executing-runtime-older' "$PRUNED_GATE_OUT"; then
       PRUNED_DENY_FAILURES="$PRUNED_DENY_FAILURES $hook_name"
     fi
@@ -3043,6 +3122,8 @@ EOF
       && grep -qF 'removed from the plugin cache' "$PRUNED_GATE_OUT" \
       && grep -qF '(version 0.17.0)' "$PRUNED_GATE_OUT" \
       && grep -qF '(0.18.0) cannot re-verify' "$PRUNED_GATE_OUT" \
+      && grep -qF 'it was REFUSED: opted-out' "$PRUNED_GATE_OUT" \
+      && grep -qF 'hooks.sessionAutoAdopt' "$PRUNED_GATE_OUT" \
       && grep -qF '/zensu:adopt-session' "$PRUNED_GATE_OUT"; then
     check "AC-D11 the Edit-matcher gate denies with the pruned wording and both version slots" PASS
   else
@@ -3084,6 +3165,8 @@ EOF
       && grep -qF '(version 0.17.0)' "$PRUNED_CAP_OUT" \
       && grep -qF '(0.18.0) cannot re-verify' "$PRUNED_CAP_OUT" \
       && grep -qF '/zensu:adopt-session' "$PRUNED_CAP_OUT" \
+      && grep -qF 'it was REFUSED: opted-out' "$PRUNED_CAP_OUT" \
+      && grep -qF 'hooks.sessionAutoAdopt' "$PRUNED_CAP_OUT" \
       && grep -qF 'executing-runtime-older' "$PRUNED_CAP_OUT" \
       && ! grep -qF 'immutable context revalidation failed' "$PRUNED_CAP_OUT"; then
     check "AC-D10 the capability gate denies a non-Bash tool with the pruned wording rather than the generic revalidation text" PASS
@@ -5112,16 +5195,37 @@ auto_stdout_field() {
   ' 2>/dev/null
 }
 
+# Holds the per-session records lock from a THIRD process for $3 milliseconds, so
+# two hooks started meanwhile both reach adoptContext's withFileLock and wait on it
+# together: that is what turns "two drives" into an observed race. The lock
+# directory is the one adoptContext uses (the sibling of the records directory).
+AUTO_LOCKS_DIR="$(dirname "$ADOPT_RECORDS_DIR")/locks"
+hold_records_lock() {
+  CORE="$SYNTHETIC_BREAKING_ROOT/hooks/lib/session-control-core-v1.js" LOCKS="$1" KEY="$2" HOLD_MS="$3" node -e '
+    const core = require(process.env.CORE);
+    core.withFileLock(process.env.LOCKS, process.env.KEY, () => {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(process.env.HOLD_MS));
+    });
+  ' >/dev/null 2>&1
+}
+
 # AUTO-1 — the first hook contact adopts: the capability gate ALLOWS, the record
 # is re-minted under the executing installation, the previous record is kept
 # byte-for-byte as the superseded file, exactly one provenance entry lands, and
-# the gate announces the adoption on both channels.
+# the gate announces the adoption on both channels. A lease naming the PREVIOUS
+# installation is planted first, so the hook-path sweep has something to set
+# aside and the announcement's lease clause is graded on a real count.
 AUTO_SESSION='versioned-upgrade-auto-gate'
 AUTO_KEY="$(auto_key "$AUTO_SESSION")"
 AUTO_RECORD="$ADOPT_RECORDS_DIR/$AUTO_KEY.json"
 AUTO_SUPERSEDED="$ADOPT_RECORDS_DIR/$AUTO_KEY.superseded-0.17.0.json"
 AUTO_OUT="$TMP/auto-gate.out"
 AUTO_ERR="$TMP/auto-gate.err"
+AUTO_LEASE_DIR="$CANONICAL_SHARED_DATA/review-evidence/v1/records/$AUTO_KEY"
+AUTO_LEASE_ASIDE="$CANONICAL_SHARED_DATA/review-evidence/v1/superseded/$AUTO_KEY"
+AUTO_LEASE_ID="rel1_$(printf 'd%.0s' $(seq 1 32))"
+mkdir -p "$AUTO_LEASE_DIR"
+write_lease "$AUTO_LEASE_DIR/$AUTO_LEASE_ID.json" "$AUTO_LEASE_ID" "$CANONICAL_CANDIDATE_ROOT"
 if auto_session_start "$AUTO_SESSION" "$PROJECT" "$SYNTHETIC_CANDIDATE_ROOT" "$SHARED_DATA" \
     && [ -f "$AUTO_RECORD" ]; then
   AUTO_RECORD_BEFORE="$(cat "$AUTO_RECORD")"
@@ -5138,28 +5242,38 @@ if auto_session_start "$AUTO_SESSION" "$PROJECT" "$SYNTHETIC_CANDIDATE_ROOT" "$S
       && printf '%s' "$AUTO_SYSTEM" | grep -qF '0.17.0' \
       && printf '%s' "$AUTO_SYSTEM" | grep -qF '0.18.0' \
       && printf '%s' "$AUTO_SYSTEM" | grep -qF 'adopted' \
+      && printf '%s' "$AUTO_SYSTEM" | grep -qF '1 review-evidence lease(s) from before the update set aside' \
+      && printf '%s' "$AUTO_SYSTEM" | grep -qF "kept beside it as $AUTO_KEY.superseded-0.17.0.json" \
+      && ! printf '%s' "$AUTO_SYSTEM" | grep -qF "$ADOPT_RECORDS_DIR" \
       && printf '%s' "$AUTO_CONTEXT" | grep -qF 'adopted' \
+      && [ ! -e "$AUTO_LEASE_DIR/$AUTO_LEASE_ID.json" ] \
+      && [ -f "$AUTO_LEASE_ASIDE/$AUTO_LEASE_ID.json" ] \
       && ! grep -qF '"permissionDecision"' "$AUTO_OUT"; then
-    check "AUTO-1 the first hook contact adopts the record: allow, re-minted, superseded copy kept, one provenance entry, announced on both channels" PASS
+    check "AUTO-1 the first hook contact adopts the record: allow, re-minted, superseded copy kept, one provenance entry, the planted lease swept, announced on both channels by basename" PASS
   else
-    check "AUTO-1 the first hook contact adopts the record (decision=$AUTO_DECISION version=$(auto_record_version "$AUTO_RECORD") after='$AUTO_AFTER' entries=$(auto_adopted_entries "$PROJECT" "$AUTO_SESSION"))" FAIL
-    head -c 300 "$AUTO_OUT" 2>/dev/null; printf '\n  stderr: '; head -c 300 "$AUTO_ERR" 2>/dev/null; printf '\n'
+    check "AUTO-1 the first hook contact adopts the record (decision=$AUTO_DECISION version=$(auto_record_version "$AUTO_RECORD") after='$AUTO_AFTER' entries=$(auto_adopted_entries "$PROJECT" "$AUTO_SESSION") lease-kept=$([ -e "$AUTO_LEASE_DIR/$AUTO_LEASE_ID.json" ] && echo yes || echo no))" FAIL
+    head -c 400 "$AUTO_OUT" 2>/dev/null; printf '\n  stderr: '; head -c 300 "$AUTO_ERR" 2>/dev/null; printf '\n'
   fi
 
   # AUTO-1b — served from here on: every hook on the Bash matcher allows an
-  # ordinary command, which is the property the whole feature buys.
+  # ordinary command, which is the property the whole feature buys — and a SHELL
+  # gate prints NOTHING on allow: stdout is its decision channel, and an empty
+  # stdout is what gate_decision_from maps to allow, so the emptiness is asserted
+  # per hook rather than inferred from the mapping.
   AUTO_BASH="$(bash_payload "$AUTO_SESSION" 'ls -la')"
   AUTO_SERVED_FAILURES=''
   while IFS= read -r hook_name; do
     [ -n "$hook_name" ] || continue
-    if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$hook_name" "$AUTO_BASH")" != allow ]; then
+    if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$hook_name" "$AUTO_BASH" "$TMP/auto-served.out" "$TMP/auto-served.err")" != allow ]; then
       AUTO_SERVED_FAILURES="$AUTO_SERVED_FAILURES $hook_name"
+    elif [ "$hook_name" != pre-reviewer-capability-gate.sh ] && [ -s "$TMP/auto-served.out" ]; then
+      AUTO_SERVED_FAILURES="$AUTO_SERVED_FAILURES $hook_name(stdout-on-allow)"
     fi
   done <<EOF
 $ADOPT_MATCHER_HOOKS
 EOF
   if [ -n "$ADOPT_MATCHER_HOOKS" ] && [ -z "$AUTO_SERVED_FAILURES" ]; then
-    check "AUTO-1b every Bash-matcher hook allows an ordinary command once the record is adopted" PASS
+    check "AUTO-1b every Bash-matcher hook allows an ordinary command once the record is adopted, and the shell gates print nothing on allow" PASS
   else
     check "AUTO-1b every Bash-matcher hook allows an ordinary command once the record is adopted (denied:$AUTO_SERVED_FAILURES)" FAIL
   fi
@@ -5209,13 +5323,21 @@ else
 fi
 
 # AUTO-2 — two hooks racing for one record: exactly one adoption lands, the loser
-# sees already-served and re-reads, and both allow.
+# sees already-served and re-reads, and both allow. The overlap is FORCED: a third
+# process holds the records lock until both hooks have started, so both reach
+# adoptContext's withFileLock together instead of one finishing before the other
+# begins. Each racer's exit status is read on its own, and the announcement count
+# is graded across both channels — the `.*` gate announces on stdout, the shell
+# gate through the binder's stderr line — so exactly one of the two may announce.
 AUTO_RACE_SESSION='versioned-upgrade-auto-race'
 AUTO_RACE_KEY="$(auto_key "$AUTO_RACE_SESSION")"
 AUTO_RACE_RECORD="$ADOPT_RECORDS_DIR/$AUTO_RACE_KEY.json"
 if auto_session_start "$AUTO_RACE_SESSION" "$PROJECT" "$SYNTHETIC_CANDIDATE_ROOT" "$SHARED_DATA" \
     && [ -f "$AUTO_RACE_RECORD" ]; then
   AUTO_RACE_BASH="$(bash_payload "$AUTO_RACE_SESSION" 'echo probe')"
+  hold_records_lock "$AUTO_LOCKS_DIR" "$AUTO_RACE_KEY" 2500 &
+  AUTO_RACE_HOLDER=$!
+  sleep 0.5
   ( printf '%s' "$AUTO_RACE_BASH" \
       | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
         CLAUDE_PROJECT_DIR="$PROJECT" ZENSU_API_URL= ZENSU_MCP_GATE= \
@@ -5228,16 +5350,26 @@ if auto_session_start "$AUTO_RACE_SESSION" "$PROJECT" "$SYNTHETIC_CANDIDATE_ROOT
         bash "$SYNTHETIC_BREAKING_ROOT/hooks/pre-write-secret-scan.sh" \
         >"$TMP/auto-race-2.out" 2>"$TMP/auto-race-2.err" ) &
   AUTO_RACE_PID2=$!
-  wait "$AUTO_RACE_PID1" "$AUTO_RACE_PID2"
+  AUTO_RACE_RC1=0; AUTO_RACE_RC2=0
+  wait "$AUTO_RACE_PID1" || AUTO_RACE_RC1=$?
+  wait "$AUTO_RACE_PID2" || AUTO_RACE_RC2=$?
+  wait "$AUTO_RACE_HOLDER" 2>/dev/null || true
   AUTO_RACE_SUPERSEDED="$(ls "$ADOPT_RECORDS_DIR"/"$AUTO_RACE_KEY".superseded-*.json 2>/dev/null | wc -l | tr -d ' ')"
-  if ! grep -qF '"permissionDecision":"deny"' "$TMP/auto-race-1.out" \
+  AUTO_RACE_ANNOUNCED=0
+  grep -qF '"systemMessage"' "$TMP/auto-race-1.out" && AUTO_RACE_ANNOUNCED=$((AUTO_RACE_ANNOUNCED + 1))
+  grep -qF 'adopted the Session Control record (' "$TMP/auto-race-2.err" && AUTO_RACE_ANNOUNCED=$((AUTO_RACE_ANNOUNCED + 1))
+  if [ "$AUTO_RACE_RC1" = 0 ] && [ "$AUTO_RACE_RC2" = 0 ] \
+      && ! grep -qF '"permissionDecision":"deny"' "$TMP/auto-race-1.out" \
       && ! grep -qF '"permissionDecision":"deny"' "$TMP/auto-race-2.out" \
+      && ! grep -qF 'automatic adoption ' "$TMP/auto-race-1.err" \
+      && ! grep -qF 'automatic adoption ' "$TMP/auto-race-2.err" \
+      && [ "$AUTO_RACE_ANNOUNCED" = 1 ] \
       && [ "$(auto_record_version "$AUTO_RACE_RECORD")" = 0.18.0 ] \
       && [ "$AUTO_RACE_SUPERSEDED" = 1 ] \
       && [ "$(auto_adopted_entries "$PROJECT" "$AUTO_RACE_SESSION")" = 1 ]; then
-    check "AUTO-2 two gates racing for one record produce exactly one adoption, one superseded file and one provenance entry, and both allow" PASS
+    check "AUTO-2 two gates racing under a held lock produce exactly one adoption, one superseded file, one provenance entry and one announcement, and both exit 0 and allow" PASS
   else
-    check "AUTO-2 two gates racing for one record (version=$(auto_record_version "$AUTO_RACE_RECORD") superseded=$AUTO_RACE_SUPERSEDED entries=$(auto_adopted_entries "$PROJECT" "$AUTO_RACE_SESSION"))" FAIL
+    check "AUTO-2 two gates racing under a held lock (rc=$AUTO_RACE_RC1/$AUTO_RACE_RC2 announced=$AUTO_RACE_ANNOUNCED version=$(auto_record_version "$AUTO_RACE_RECORD") superseded=$AUTO_RACE_SUPERSEDED entries=$(auto_adopted_entries "$PROJECT" "$AUTO_RACE_SESSION"))" FAIL
     head -c 200 "$TMP/auto-race-1.err" 2>/dev/null; printf '\n'; head -c 200 "$TMP/auto-race-2.err" 2>/dev/null; printf '\n'
   fi
 else
@@ -5442,14 +5574,17 @@ if auto_session_start "$AUTO_GONE_SESSION" "$AUTO_GONE_PROJECT" "$SYNTHETIC_CAND
       CLAUDE_PROJECT_DIR="$PROJECT" HOME="$AUTO_STOP_HOME" ZENSU_CONFIG="$TMP/no-such-config.json" \
       bash "$SYNTHETIC_BREAKING_ROOT/hooks/stop-chain-enforcer.sh" >"$AUTO_GONE_STOP_OUT" 2>"$AUTO_GONE_STOP_ERR" \
     || AUTO_GONE_STOP_RC=$?
+  AUTO_GONE_SYSTEM="$(auto_stdout_field "$TMP/auto-gone.out" systemMessage)"
   if [ "$AUTO_GONE_DECISION" = allow ] && [ "$AUTO_GONE_EDIT_DECISION" = deny ] \
+      && printf '%s' "$AUTO_GONE_SYSTEM" | grep -qF 'adopted automatically on this tool call' \
+      && printf '%s' "$AUTO_GONE_SYSTEM" | grep -qF 'The recorded project root is still gone, so Edit, Write, MultiEdit' \
       && [ "$(auto_record_version "$AUTO_GONE_RECORD")" = 0.18.0 ] \
       && [ "$(node -p 'require(process.argv[1]).project_root' "$AUTO_GONE_RECORD" 2>/dev/null)" = "$AUTO_GONE_ROOT_BEFORE" ] \
       && [ ! -e "$AUTO_GONE_PROJECT" ] \
       && [ "$AUTO_GONE_STOP_RC" = 0 ] && [ ! -s "$AUTO_GONE_STOP_OUT" ] \
       && grep -qF 'no longer exists' "$AUTO_GONE_STOP_ERR" \
       && ! grep -qF 'declares an incompatible lineage' "$AUTO_GONE_STOP_ERR"; then
-    check "AUTO-11 a gone-root record adopts on the first hook contact, keeps its absent anchor, still denies Edit, and Stop takes the orphan release" PASS
+    check "AUTO-11 a gone-root record adopts on the first hook contact, announces it with the orphan clause, keeps its absent anchor, still denies Edit, and Stop takes the orphan release" PASS
   else
     check "AUTO-11 a gone-root record adopts on the first hook contact (read=$AUTO_GONE_DECISION edit=$AUTO_GONE_EDIT_DECISION version=$(auto_record_version "$AUTO_GONE_RECORD") stop-rc=$AUTO_GONE_STOP_RC)" FAIL
     head -c 300 "$TMP/auto-gone.err" 2>/dev/null; printf '\n'; head -c 300 "$AUTO_GONE_STOP_ERR" 2>/dev/null; printf '\n'
@@ -5489,6 +5624,178 @@ if [ -n "$PRUNED_SUCCESSOR" ]; then
   fi
 else
   check "AUTO-12 fixture: no pruned successor root" FAIL
+fi
+
+# AUTO-13 — the manual entry point IGNORES the opt-out: with hooks.sessionAutoAdopt=false
+# the gate denies this fresh session (control), and `--confirm` under the same config
+# still adopts it.
+AUTO_MANUAL_SESSION='versioned-upgrade-auto-manual-optout'
+AUTO_MANUAL_RECORD="$ADOPT_RECORDS_DIR/$(auto_key "$AUTO_MANUAL_SESSION").json"
+if auto_session_start "$AUTO_MANUAL_SESSION" "$PROJECT" "$SYNTHETIC_CANDIDATE_ROOT" "$SHARED_DATA" \
+    && [ -f "$AUTO_MANUAL_RECORD" ]; then
+  AUTO_MANUAL_CONTROL="$(ZENSU_CONFIG="$OPT_OUT_CONFIG" gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh "$(auto_edit_payload "$AUTO_MANUAL_SESSION")")"
+  AUTO_MANUAL_OUT="$TMP/auto-manual-optout.out"; AUTO_MANUAL_RC=0
+  CLAUDE_CODE_SESSION_ID="$AUTO_MANUAL_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" ZENSU_CONFIG="$OPT_OUT_CONFIG" \
+    bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm >"$AUTO_MANUAL_OUT" 2>&1 \
+    || AUTO_MANUAL_RC=$?
+  if [ "$AUTO_MANUAL_CONTROL" = deny ] && [ "$AUTO_MANUAL_RC" = 0 ] \
+      && grep -qF 'Zensu session adoption — ADOPTED' "$AUTO_MANUAL_OUT" \
+      && [ "$(auto_record_version "$AUTO_MANUAL_RECORD")" = 0.18.0 ] \
+      && [ "$(auto_adopted_entries "$PROJECT" "$AUTO_MANUAL_SESSION")" = 1 ]; then
+    check "AUTO-13 the manual --confirm adopts under hooks.sessionAutoAdopt=false while the gate still denies that session" PASS
+  else
+    check "AUTO-13 the manual --confirm adopts under the opt-out (control=$AUTO_MANUAL_CONTROL rc=$AUTO_MANUAL_RC version=$(auto_record_version "$AUTO_MANUAL_RECORD"))" FAIL
+    head -c 300 "$AUTO_MANUAL_OUT" 2>/dev/null; printf '\n'
+  fi
+else
+  check "AUTO-13 fixture: the manual opt-out session registers under the candidate root" FAIL
+fi
+
+# AUTO-14 — a superseded copy left by an interrupted adoption: the read-only check
+# finds the record adoptable, the adoption itself REFUSES as
+# superseded-record-exists, the entry point says NOT adopted and exits 1 naming the
+# file, the gate denies naming the token, and the record is untouched.
+AUTO_CONFLICT_SESSION='versioned-upgrade-auto-conflict'
+AUTO_CONFLICT_KEY="$(auto_key "$AUTO_CONFLICT_SESSION")"
+AUTO_CONFLICT_RECORD="$ADOPT_RECORDS_DIR/$AUTO_CONFLICT_KEY.json"
+AUTO_CONFLICT_FILE="$ADOPT_RECORDS_DIR/$AUTO_CONFLICT_KEY.superseded-0.17.0.json"
+if auto_session_start "$AUTO_CONFLICT_SESSION" "$PROJECT" "$SYNTHETIC_CANDIDATE_ROOT" "$SHARED_DATA" \
+    && [ -f "$AUTO_CONFLICT_RECORD" ]; then
+  cp "$AUTO_CONFLICT_RECORD" "$AUTO_CONFLICT_FILE"
+  AUTO_CONFLICT_OUT="$TMP/auto-conflict.out"; AUTO_CONFLICT_RC=0
+  CLAUDE_CODE_SESSION_ID="$AUTO_CONFLICT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" \
+    bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm >"$AUTO_CONFLICT_OUT" 2>&1 \
+    || AUTO_CONFLICT_RC=$?
+  AUTO_CONFLICT_REASON="$(gate_reason_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh "$(auto_edit_payload "$AUTO_CONFLICT_SESSION")")"
+  if [ "$AUTO_CONFLICT_RC" = 1 ] \
+      && grep -qF 'NOT adopted (superseded-record-exists)' "$AUTO_CONFLICT_OUT" \
+      && grep -qF "$AUTO_CONFLICT_KEY.superseded-0.17.0.json" "$AUTO_CONFLICT_OUT" \
+      && grep -qF 'Move it aside' "$AUTO_CONFLICT_OUT" \
+      && printf '%s' "$AUTO_CONFLICT_REASON" | grep -qF 'REFUSED: superseded-record-exists' \
+      && [ "$(auto_record_version "$AUTO_CONFLICT_RECORD")" = 0.17.0 ] \
+      && [ "$(auto_adopted_entries "$PROJECT" "$AUTO_CONFLICT_SESSION")" = 0 ]; then
+    check "AUTO-14 a leftover superseded file refuses the adoption as superseded-record-exists: NOT adopted, exit 1, the file named, the gate names the token, the record untouched" PASS
+  else
+    check "AUTO-14 a leftover superseded file refuses the adoption (rc=$AUTO_CONFLICT_RC version=$(auto_record_version "$AUTO_CONFLICT_RECORD"))" FAIL
+    head -c 300 "$AUTO_CONFLICT_OUT" 2>/dev/null; printf '\n'; printf '%s' "$AUTO_CONFLICT_REASON" | head -c 300; printf '\n'
+  fi
+else
+  check "AUTO-14 fixture: the conflict session registers under the candidate root" FAIL
+fi
+
+# AUTO-15 — the review-evidence SubagentStart hook opts in: it binds through the
+# adopting binder before it looks for a lease, so a worker spawned right after a
+# reload re-mints the parent record. No lease exists here, so the hook itself fails
+# on the lease AFTER the adoption — the adoption is the property, not the exit.
+AUTO_EVIDENCE_SESSION='versioned-upgrade-auto-evidence'
+AUTO_EVIDENCE_KEY="$(auto_key "$AUTO_EVIDENCE_SESSION")"
+AUTO_EVIDENCE_RECORD="$ADOPT_RECORDS_DIR/$AUTO_EVIDENCE_KEY.json"
+if auto_session_start "$AUTO_EVIDENCE_SESSION" "$PROJECT" "$SYNTHETIC_CANDIDATE_ROOT" "$SHARED_DATA" \
+    && [ -f "$AUTO_EVIDENCE_RECORD" ]; then
+  AUTO_EVIDENCE_ERR="$TMP/auto-evidence.err"
+  printf '%s' "$(subagent_payload "$AUTO_EVIDENCE_SESSION" 'zensu:plan-review-worker')" \
+    | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      CLAUDE_PROJECT_DIR="$PROJECT" \
+      bash "$SYNTHETIC_BREAKING_ROOT/hooks/review-evidence-subagent-start.sh" >"$TMP/auto-evidence.out" 2>"$AUTO_EVIDENCE_ERR" || true
+  if [ "$(auto_record_version "$AUTO_EVIDENCE_RECORD")" = 0.18.0 ] \
+      && [ -f "$ADOPT_RECORDS_DIR/$AUTO_EVIDENCE_KEY.superseded-0.17.0.json" ] \
+      && [ "$(auto_adopted_entries "$PROJECT" "$AUTO_EVIDENCE_SESSION")" = 1 ] \
+      && ! grep -qF 'automatic adoption ' "$AUTO_EVIDENCE_ERR"; then
+    check "AUTO-15 the review-evidence SubagentStart hook adopts the parent record before it looks for a lease" PASS
+  else
+    check "AUTO-15 the review-evidence SubagentStart hook adopts the parent record (version=$(auto_record_version "$AUTO_EVIDENCE_RECORD") entries=$(auto_adopted_entries "$PROJECT" "$AUTO_EVIDENCE_SESSION"))" FAIL
+    head -c 300 "$AUTO_EVIDENCE_ERR" 2>/dev/null; printf '\n'
+  fi
+else
+  check "AUTO-15 fixture: the evidence session registers under the candidate root" FAIL
+fi
+
+# AUTO-16 — the binder's own export line: the sixth export names the pair on the
+# invocation that adopted and is empty on the next, the stderr line carries the
+# screened basename and the lease clause, and the adoption-refusal mode exits 1
+# with nothing on stdout when it cannot answer at all.
+AUTO_EXPORT_SESSION='versioned-upgrade-auto-export'
+AUTO_EXPORT_KEY="$(auto_key "$AUTO_EXPORT_SESSION")"
+AUTO_EXPORT_RECORD="$ADOPT_RECORDS_DIR/$AUTO_EXPORT_KEY.json"
+if auto_session_start "$AUTO_EXPORT_SESSION" "$PROJECT" "$SYNTHETIC_CANDIDATE_ROOT" "$SHARED_DATA" \
+    && [ -f "$AUTO_EXPORT_RECORD" ]; then
+  AUTO_EXPORT_OUT1="$TMP/auto-export-1.out"; AUTO_EXPORT_ERR1="$TMP/auto-export-1.err"
+  AUTO_EXPORT_OUT2="$TMP/auto-export-2.out"; AUTO_EXPORT_ERR2="$TMP/auto-export-2.err"
+  printf '%s' "$(auto_read_payload "$AUTO_EXPORT_SESSION")" \
+    | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      node "$SYNTHETIC_BREAKING_ROOT/hooks/lib/claude-hook-session-v1.js" >"$AUTO_EXPORT_OUT1" 2>"$AUTO_EXPORT_ERR1" || true
+  printf '%s' "$(auto_read_payload "$AUTO_EXPORT_SESSION")" \
+    | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      node "$SYNTHETIC_BREAKING_ROOT/hooks/lib/claude-hook-session-v1.js" >"$AUTO_EXPORT_OUT2" 2>"$AUTO_EXPORT_ERR2" || true
+  AUTO_REFUSAL_UNANSWERABLE_RC=0
+  AUTO_REFUSAL_UNANSWERABLE="$(printf '{"hook_event_name":"PreToolUse","cwd":"%s"}' "$PROJECT" \
+    | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      node "$SYNTHETIC_BREAKING_ROOT/hooks/lib/claude-hook-session-v1.js" adoption-refusal 2>/dev/null)" \
+    || AUTO_REFUSAL_UNANSWERABLE_RC=$?
+  if grep -qF "export ZENSU_SESSION_ADOPTED='0.17.0 -> 0.18.0'" "$AUTO_EXPORT_OUT1" \
+      && grep -qF "export ZENSU_SESSION_ADOPTED=''" "$AUTO_EXPORT_OUT2" \
+      && [ "$(grep -c '^export ' "$AUTO_EXPORT_OUT1")" = 6 ] \
+      && [ "$(grep -c '^export ' "$AUTO_EXPORT_OUT2")" = 6 ] \
+      && grep -qF "adopted the Session Control record (0.17.0 -> 0.18.0); previous record kept as $AUTO_EXPORT_KEY.superseded-0.17.0.json; provenance recorded; 0 review-evidence lease(s) from before the update set aside" "$AUTO_EXPORT_ERR1" \
+      && ! grep -qF "$ADOPT_RECORDS_DIR" "$AUTO_EXPORT_ERR1" \
+      && [ ! -s "$AUTO_EXPORT_ERR2" ] \
+      && [ "$AUTO_REFUSAL_UNANSWERABLE_RC" = 1 ] && [ -z "$AUTO_REFUSAL_UNANSWERABLE" ] \
+      && [ "$(auto_record_version "$AUTO_EXPORT_RECORD")" = 0.18.0 ]; then
+    check "AUTO-16 the binder exports ZENSU_SESSION_ADOPTED on the adopting invocation only, screens its stderr line, and the refusal mode exits 1 silently when it cannot answer" PASS
+  else
+    check "AUTO-16 the binder's export line (rc-unanswerable=$AUTO_REFUSAL_UNANSWERABLE_RC token='$AUTO_REFUSAL_UNANSWERABLE' version=$(auto_record_version "$AUTO_EXPORT_RECORD"))" FAIL
+    head -c 300 "$AUTO_EXPORT_OUT1" 2>/dev/null; printf '\n  stderr: '; head -c 300 "$AUTO_EXPORT_ERR1" 2>/dev/null; printf '\n'
+  fi
+else
+  check "AUTO-16 fixture: the export session registers under the candidate root" FAIL
+fi
+
+# AUTO-17 — the SessionStart adapter announces the adoption whichever process won
+# the lock: under a held lock it races a shell gate for one record, and its
+# systemMessage carries the adoption either as its own or as a sibling's, while the
+# store still shows exactly one adoption.
+AUTO_ADAPTER_SESSION='versioned-upgrade-auto-adapter-race'
+AUTO_ADAPTER_KEY="$(auto_key "$AUTO_ADAPTER_SESSION")"
+AUTO_ADAPTER_RECORD="$ADOPT_RECORDS_DIR/$AUTO_ADAPTER_KEY.json"
+if auto_session_start "$AUTO_ADAPTER_SESSION" "$PROJECT" "$SYNTHETIC_CANDIDATE_ROOT" "$SHARED_DATA" \
+    && [ -f "$AUTO_ADAPTER_RECORD" ]; then
+  hold_records_lock "$AUTO_LOCKS_DIR" "$AUTO_ADAPTER_KEY" 2500 &
+  AUTO_ADAPTER_HOLDER=$!
+  sleep 0.5
+  ( printf '%s' "$(resume_payload "$AUTO_ADAPTER_SESSION")" \
+      | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+        CLAUDE_PROJECT_DIR="$PROJECT" \
+        bash "$SYNTHETIC_BREAKING_ROOT/hooks/session-start-session-control.sh" \
+        >"$TMP/auto-adapter-race.out" 2>"$TMP/auto-adapter-race.err" ) &
+  AUTO_ADAPTER_PID=$!
+  ( printf '%s' "$(bash_payload "$AUTO_ADAPTER_SESSION" 'echo probe')" \
+      | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+        CLAUDE_PROJECT_DIR="$PROJECT" ZENSU_API_URL= ZENSU_MCP_GATE= \
+        bash "$SYNTHETIC_BREAKING_ROOT/hooks/pre-write-secret-scan.sh" \
+        >"$TMP/auto-adapter-gate.out" 2>"$TMP/auto-adapter-gate.err" ) &
+  AUTO_ADAPTER_GATE_PID=$!
+  AUTO_ADAPTER_RC=0; AUTO_ADAPTER_GATE_RC=0
+  wait "$AUTO_ADAPTER_PID" || AUTO_ADAPTER_RC=$?
+  wait "$AUTO_ADAPTER_GATE_PID" || AUTO_ADAPTER_GATE_RC=$?
+  wait "$AUTO_ADAPTER_HOLDER" 2>/dev/null || true
+  AUTO_ADAPTER_SYSTEM="$(auto_stdout_field "$TMP/auto-adapter-race.out" systemMessage)"
+  AUTO_ADAPTER_SUPERSEDED="$(ls "$ADOPT_RECORDS_DIR"/"$AUTO_ADAPTER_KEY".superseded-*.json 2>/dev/null | wc -l | tr -d ' ')"
+  if [ "$AUTO_ADAPTER_RC" = 0 ] && [ "$AUTO_ADAPTER_GATE_RC" = 0 ] \
+      && printf '%s' "$AUTO_ADAPTER_SYSTEM" | grep -qF 'adopted automatically' \
+      && printf '%s' "$AUTO_ADAPTER_SYSTEM" | grep -qF 'at this SessionStart' \
+      && ! grep -qF '"permissionDecision":"deny"' "$TMP/auto-adapter-gate.out" \
+      && [ "$(auto_record_version "$AUTO_ADAPTER_RECORD")" = 0.18.0 ] \
+      && [ "$AUTO_ADAPTER_SUPERSEDED" = 1 ] \
+      && [ "$(auto_adopted_entries "$PROJECT" "$AUTO_ADAPTER_SESSION")" = 1 ]; then
+    check "AUTO-17 the SessionStart adapter racing a gate under a held lock announces the adoption whichever process won, over exactly one adoption" PASS
+  else
+    check "AUTO-17 the SessionStart adapter racing a gate (rc=$AUTO_ADAPTER_RC/$AUTO_ADAPTER_GATE_RC superseded=$AUTO_ADAPTER_SUPERSEDED version=$(auto_record_version "$AUTO_ADAPTER_RECORD"))" FAIL
+    head -c 300 "$TMP/auto-adapter-race.out" 2>/dev/null; printf '\n  stderr: '; head -c 300 "$TMP/auto-adapter-race.err" 2>/dev/null; printf '\n'
+  fi
+else
+  check "AUTO-17 fixture: the adapter-race session registers under the candidate root" FAIL
 fi
 
 printf '%s\n' '----' \

@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 'use strict';
 
-// Rebuild the five helper-private Session Control bindings from standard
+// Rebuild the six helper-private Session Control bindings from standard
 // Claude inputs: hook payloads provide session_id, while model-side helper
 // calls provide CLAUDE_CODE_SESSION_ID. Ambient ZENSU_* values are deliberately
 // ignored: the private, immutable context record is the only authority. The
 // all-tool capability gate imports the same resolver.
 //
-// argv modes: (none) binds from a hook payload on stdin and prints the five
+// argv modes: (none) binds from a hook payload on stdin and prints the six
 // exports; `model-bind` does the same from CLAUDE_CODE_SESSION_ID;
 // `unregistered` answers by EXIT STATUS ONLY — 0 when Session Control has never
 // registered the session, 1 for every other state including a record that
@@ -749,15 +749,20 @@ function main() {
   const binding = resolveHookSession(payload, process.env, { autoAdopt: process.argv[2] !== 'model-bind' });
   if (binding.adoption) {
     const adopted = binding.adoption;
-    const leases = adopted.leases && Number.isInteger(adopted.leases.discarded) ? adopted.leases.discarded : 0;
     // ONE line, because the gate suites admit a bounded number of stderr lines
     // per hook run. Debug channel: whether a PreToolUse hook's stderr reaches
     // the user on exit 0 is unverified, so the user-facing announcement travels
     // elsewhere (the SessionStart adapter, the capability gate, the doctor).
+    // Every interpolated value goes through the same screens the two
+    // user-facing renderers apply: the version shape, the provenance class, the
+    // superseded BASENAME, and the lease clause that tells a refused sweep from a
+    // clean one. The transcript renders this line verbatim.
+    const notice = autoAdoptModule();
+    const kept = typeof adopted.supersededFile === 'string' ? path.basename(adopted.supersededFile) : '(unknown)';
     process.stderr.write(
-      `claude hook session binder: adopted the Session Control record (${adopted.recorded} -> ${adopted.executing}); `
-      + `previous record kept as ${adopted.supersededFile}; provenance ${adopted.provenance}; `
-      + `${leases} superseded lease(s) set aside\n`,
+      `claude hook session binder: adopted the Session Control record (${notice.safeVersion(adopted.recorded)} -> ${notice.safeVersion(adopted.executing)}); `
+      + `previous record kept as ${kept}; provenance ${notice.safeProvenance(adopted.provenance)}; `
+      + `${notice.leaseClause(adopted.leases)}\n`,
     );
   }
 

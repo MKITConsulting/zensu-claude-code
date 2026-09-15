@@ -1062,6 +1062,14 @@ function releaseOwnedLock(lockDirectory, key, lockFile, acquired, expectedDirect
   }, expectedDirectory);
 }
 
+// A lock that could not be acquired carries a CODE, so the automatic adopter can
+// map it to `lock-timeout` without matching the message text.
+const LOCK_TIMEOUT_CODE = 'ZENSU_LOCK_TIMEOUT';
+
+function isLockTimeout(error) {
+  return Boolean(error) && error.code === LOCK_TIMEOUT_CODE;
+}
+
 function withFileLock(lockDirectory, key, callback) {
   const directory = canonicalDirectory(lockDirectory, 'lock directory');
   if (!/^[a-zA-Z0-9._-]{1,160}$/.test(key)) fail('lock key has an invalid format');
@@ -1088,7 +1096,9 @@ function withFileLock(lockDirectory, key, callback) {
     sleep(20);
   }
   if (!acquired) {
-    fail('timed out acquiring per-session lock');
+    const timedOut = new Error('session-control-v1: timed out acquiring per-session lock');
+    timedOut.code = LOCK_TIMEOUT_CODE;
+    throw timedOut;
   }
   try {
     return callback();
@@ -2025,12 +2035,15 @@ function adoptContext(options) {
     }
   }
 
-  // NO lease sweep here any more. It lives in review-evidence-sweep-v1.js and the
-  // adoption ENTRY SCRIPT calls it after this function returns — see that module's
-  // header for why the direction had to invert (requiring the lease owner from this
-  // file is a cycle). The consequence for a caller: an adoption is not complete
-  // until the sweep has also run, and a host that forgets it gets a re-minted record
-  // with the superseded leases still wedging every later lease operation.
+  // NO lease sweep here any more. It lives in review-evidence-sweep-v1.js and
+  // session-auto-adopt-v1.js's adoptForHook calls it after this function returns,
+  // for every caller — the hooks, the SessionStart adapter and the manual entry
+  // point all adopt through that one ladder. See the sweep module's header for
+  // why the direction had to invert (requiring the lease owner from this file is a
+  // cycle). The consequence for a caller: an adoption is not complete until the
+  // sweep has also run, and a host that calls this function directly gets a
+  // re-minted record with the superseded leases still wedging every later lease
+  // operation.
   return {
     ...adopted,
     provenance,
@@ -4701,6 +4714,8 @@ module.exports = {
   SUPERSEDED_EXISTS_CODE,
   isAdoptionRefusal,
   isSupersededRecordConflict,
+  LOCK_TIMEOUT_CODE,
+  isLockTimeout,
   // The read-only path helper. Exported because SessionStart needs to ASK where
   // the document is without creating it — workflowStateFile resolves through
   // ensureDescendantDirectory and mkdirs every missing component, which is right

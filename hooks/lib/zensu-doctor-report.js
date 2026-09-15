@@ -3344,7 +3344,7 @@ function bindingLine() {
     case 'incompatible-runtime':
       return line(BAD, 'binding: this session\'s Session Control record is intact, but the running Zensu installation declares an incompatible lineage'
         + versions()
-        + ' — while the plugin is at major 0 the minor is the breaking axis, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether this session can be adopted in place, then /zensu:adopt-session --confirm'
+        + ' — while the plugin is at major 0 the minor is the breaking axis, so stateful Zensu tools fail closed. Zensu adopts such a record automatically on the first hook contact, so reaching this row means that adoption was refused or opted out; run /zensu:adopt-session, which prints the same refusal in full, then /zensu:adopt-session --confirm to retry by hand'
         // The limit belongs on THIS row too, not only on the combined one. The row
         // is reachable for a session whose recorded project root is also gone —
         // the doctor falls back to it whenever the third-fact probe cannot answer
@@ -3373,7 +3373,7 @@ function bindingLine() {
     case 'pruned-plugin-root':
       return line(BAD, 'binding: this session\'s Session Control record is intact, but the installation that minted it has been removed from the plugin cache'
         + versions()
-        + ' — the record can no longer be re-verified, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether this session can be adopted in place, then /zensu:adopt-session --confirm');
+        + ' — the record can no longer be re-verified, so stateful Zensu tools fail closed. Zensu adopts such a record automatically on the first hook contact, so reaching this row means that adoption was refused or opted out; run /zensu:adopt-session, which prints the same refusal in full, then /zensu:adopt-session --confirm to retry by hand');
     // BOTH disagreements at once, and the row exists because each of the two
     // above answers "not me" for it: the orphan probe re-applies
     // servesRecordedRuntime, which an incompatible lineage fails, and the lineage

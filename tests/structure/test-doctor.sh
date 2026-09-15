@@ -1908,6 +1908,30 @@ case "$OUT" in
     esac ;;
   *) check "P1ad4 pruned row without a pair (got: $OUT)" FAIL ;;
 esac
+# Both adoptable rows say WHY the user is looking at them: adoption runs on its own
+# on the first hook contact, so a row still rendered means that adoption was refused
+# or opted out, and the remedy is the report first, the manual retry second. The
+# skill relays the row, so the same phrases must exist there — the drift pin P1qr
+# already applies to the denial rows.
+P1AD5_LINEAGE="$(ZDOC_BINDING_RECORDED_VERSION=0.17.0 ZDOC_BINDING_EXECUTING_VERSION=0.18.0 run_report_binding incompatible-runtime)"
+P1AD5_PRUNED="$(ZDOC_BINDING_RECORDED_VERSION=0.17.0 ZDOC_BINDING_EXECUTING_VERSION=0.18.0 run_report_binding pruned-plugin-root)"
+P1AD5_SKILL="$PLUGIN_DIR/skills/doctor/SKILL.md"
+P1AD5_BAD=""
+for p1ad5_phrase in 'reaching this row means that adoption was refused or opted out'     'prints the same refusal in full'     '/zensu:adopt-session --confirm to retry by hand'; do
+  case "$P1AD5_LINEAGE" in *"$p1ad5_phrase"*) ;; *) P1AD5_BAD="$P1AD5_BAD [lineage:$p1ad5_phrase]" ;; esac
+  case "$P1AD5_PRUNED" in *"$p1ad5_phrase"*) ;; *) P1AD5_BAD="$P1AD5_BAD [pruned:$p1ad5_phrase]" ;; esac
+done
+for p1ad5_phrase in 'prints the same refusal in full' 'REFUSED' 'opted out'; do
+  grep -qF "$p1ad5_phrase" "$P1AD5_SKILL" || P1AD5_BAD="$P1AD5_BAD [skill:$p1ad5_phrase]"
+done
+case "$P1AD5_LINEAGE$P1AD5_PRUNED" in
+  *'to see whether this session can be adopted in place'*) P1AD5_BAD="$P1AD5_BAD [manual-first wording survives]" ;;
+esac
+if [ -z "$P1AD5_BAD" ]; then
+  check "P1ad5 both adoptable binding rows name the refused-or-opted-out cause and the report-then-retry remedy, mirrored in the skill" PASS
+else
+  check "P1ad5 adoptable binding rows vs skill (drift:$P1AD5_BAD)" FAIL
+fi
 OUT="$(run_report_binding unavailable)"
 case "$OUT" in *'zensu-session.sh is missing or symlinked'*) check "P1ae unavailable binder renders a ❌ binding row" PASS ;; *) check "P1ae unavailable binder binding row (got: $OUT)" FAIL ;; esac
 OUT="$(run_report_binding unknown)"

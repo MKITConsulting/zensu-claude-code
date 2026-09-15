@@ -251,19 +251,28 @@ render that verbatim too.
 
 A gate's deny after a refused AUTOMATIC adoption carries one of the reasons above,
 or one of these entry-level tokens, which are not `adoptableRecord` verdicts:
-`opted-out` (`hooks.sessionAutoAdopt: false`; run the `--confirm` form, which
-ignores it), `adopted-concurrently` (a sibling hook won the race and the record
-serves now; retry the call), `not-completed` and `lock-timeout` (the adoption did
-not finish; retry, then run the report), `superseded-record-exists` (an interrupted
-adoption left `<session-key>.superseded-<version>.json` in place; the report names
-it, and moving it aside lets the adoption complete), and `(unknown)` when the binder
-could not answer at all.
+`opted-out` (`hooks.sessionAutoAdopt: false` — the operator switched the automatic
+path off on purpose; report it and ask the user whether to run the `--confirm` form,
+which ignores the opt-out, and never run it on your own initiative),
+`adopted-concurrently` (a sibling hook won the race and the record serves now; retry
+the call), `not-completed` and `lock-timeout` (the adoption did not finish; retry,
+then run the report), `superseded-record-exists` (an interrupted adoption left
+`<session-key>.superseded-<version>.json` in place; the report names it, and moving
+it aside lets the adoption complete), and `(unknown)` when the binder could not
+answer at all.
 
-**Step 2 of 3 — adopt.** No separate question is asked: the same adoption runs
-automatically on every hook bind, and this form exists for a refusal and for the
-opt-out. Tell the user, in their language, what it does — both versions, and the one
-consequence that is not obvious: any review-evidence lease from before the update has
-to be re-gathered — then run it:
+**Step 2 of 3 — adopt.** The same adoption runs automatically on every hook bind, so
+this form exists for a refusal and for the opt-out — and `--confirm` is a token you
+supply yourself, not a consent the user gave. TWO of its uses therefore need the
+user's explicit yes BEFORE you run it, and you wait for that answer: when the report
+answered `already-served` and its `workflow baseline` line reads MISSING, `--confirm`
+REBUILDS the document and the review chain that was live when it vanished is lost —
+say so, in the user's language, and wait; and when the deny or the report named
+`opted-out`, the operator switched the automatic path off — report that and wait. For
+every other refusal, and for the idempotent lease-store repair on an `already-served`
+record whose baseline is present, run it directly. Tell the user, in their language,
+what it does — both versions, and the one consequence that is not obvious: any
+review-evidence lease from before the update has to be re-gathered — then run it:
 
 ```bash
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh" --confirm

@@ -532,7 +532,12 @@ to itself — prose-backed, not consent-backed, exactly as `--autopilot-release`
 since every hook adopts a compatible-schema record automatically on a failed bind, the
 ordinary adoption path carries no consent step at all: provenance (the `RUNTIME_ADOPTED`
 history entry and the superseded record) and schema equality are the controls. The
-`SessionStart` self-heal above requires no token at all. Do not restate the writer as
+`SessionStart` self-heal above requires no token at all. What IS prose-backed on the manual
+path: `skills/adopt-session/SKILL.md` tells the model to ask the user and wait before
+`--confirm` on the two uses that lose or override something — the workflow-baseline
+rebuild on an `already-served` record whose baseline is missing, and an `opted-out`
+refusal, where the operator switched the automatic path off — and to run it directly for
+every other refusal. That is an instruction, not a gate. Do not restate the writer as
 gated on `--confirm`: that sentence contradicted the `SessionStart` bullet four lines above it.
 
 ## Vanished Working Directory

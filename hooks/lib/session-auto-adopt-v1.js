@@ -26,6 +26,20 @@
 // a bypass. It applies msysDrivePrefix — the total rule, never the throwing
 // normalizeHostPathInput — so a driveless MSYS spelling falls to "enabled"
 // instead of raising inside a hook.
+//
+// The opt-out is consulted AFTER adoptableRecord, never before it: `opted-out`
+// therefore stands only for a record the ladder would otherwise have adopted. A
+// record that is unreadable, foreign or a downgrade keeps its own refusal reason
+// under the opt-out too, so a deny never blames the config for a state the config
+// did not cause.
+//
+// The adoption NOTICE is rendered here as well, once, for the three places that
+// speak about an adoption to a model or a user — the `.*` gate's allow-path
+// announcement, the SessionStart/SubagentStart adapter's systemMessage plus
+// additionalContext, and the binder's stderr line. The version screen consumes
+// the core's ADOPTION_SAFE_VERSION_RE rather than re-spelling the alternation, and
+// the lease clause distinguishes a clean sweep from a REFUSED one: a refused sweep
+// left every superseded lease in place, which is the opposite of "0 set aside".
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -59,8 +73,84 @@ const AUTO_ADOPT_REASONS = Object.freeze({
 
 const CONFIG_KEY = 'sessionAutoAdopt';
 const CONFIG_MAX_BYTES = 1024 * 1024;
+// Fallback for a core that predates LOCK_TIMEOUT_CODE / isLockTimeout; the typed
+// predicate is consulted first whenever the core exports it.
 const LOCK_TIMEOUT_RE = /timed out acquiring per-session lock/;
 const REQUIRED_REQUEST_FIELDS = Object.freeze(['executingPluginRoot', 'pluginData', 'recordsDir', 'sessionId']);
+
+// Refusal reasons that establish NO named state: the record could not be read by
+// any reader, belongs to another store, or the request itself was unusable. A
+// consumer rendering a lineage or pruned CAUSE must not take one of these for it.
+const STATE_NEUTRAL_REASONS = Object.freeze([
+  'record-unreadable',
+  'plugin-data-mismatch',
+  'invalid-request',
+  'probe-failed',
+]);
+
+// Provenance is one of `recorded`, `no-workflow-document` or `unavailable: <why>`;
+// the third carries an error message, so it is bounded to a printable class
+// rather than trusted into a notice verbatim.
+const SAFE_PROVENANCE = /^[A-Za-z0-9 .,:;_()'/-]{1,200}$/;
+const SAFE_SWEEP_TOKEN = /^[a-z][a-z0-9-]{0,63}$/;
+const versionShape = defaultCore.ADOPTION_SAFE_VERSION_RE instanceof RegExp
+  ? defaultCore.ADOPTION_SAFE_VERSION_RE
+  : null;
+
+function safeVersion(value) {
+  return typeof value === 'string' && versionShape !== null && versionShape.test(value) ? value : '(unreadable)';
+}
+
+function safeProvenance(value) {
+  return typeof value === 'string' && SAFE_PROVENANCE.test(value) ? value : '(unrenderable)';
+}
+
+function establishesNamedState(verdict) {
+  return Boolean(verdict)
+    && typeof verdict.recorded === 'string'
+    && !STATE_NEUTRAL_REASONS.includes(verdict.reason);
+}
+
+// ONE sentence about the sweep, for every renderer. `leases.unsafe` is the sweep's
+// own refusal token (source, locked, destination, sweep-failed): the store was NOT
+// swept and nothing was set aside, which a bare count of 0 would misreport as a
+// clean sweep over an empty store.
+function leaseClause(leases) {
+  if (!leases || typeof leases !== 'object') {
+    return 'no review-evidence lease sweep result was recorded, so run /zensu:adopt-session --confirm to sweep the lease store';
+  }
+  const unsafe = typeof leases.unsafe === 'string' && leases.unsafe !== ''
+    ? (SAFE_SWEEP_TOKEN.test(leases.unsafe) ? leases.unsafe : '(unrenderable)')
+    : '';
+  if (unsafe !== '') {
+    return `the review-evidence lease sweep was REFUSED (${unsafe}) and set aside nothing, so review-evidence operations may keep failing for this session until /zensu:adopt-session --confirm repairs the lease store`;
+  }
+  const discarded = Number.isInteger(leases.discarded) ? leases.discarded : 0;
+  const stuck = Array.isArray(leases.failed) ? leases.failed.length : 0;
+  if (stuck > 0) {
+    return `${discarded} review-evidence lease(s) from before the update set aside and ${stuck} left STUCK in the records directory, so review-evidence operations keep failing until they are moved by hand (/zensu:adopt-session names them)`;
+  }
+  return `${discarded} review-evidence lease(s) from before the update set aside, so a review that was in flight must be re-gathered`;
+}
+
+// The adoption notice, rendered once for every channel. `where` is the phrase that
+// names the event ("on this tool call", "at this SessionStart"). An ALREADY_SERVED
+// verdict reached after a failed strict bind means a sibling hook adopted the
+// record during the same event, and the user is told that too — the announcement
+// must not depend on which of two racing hooks won the lock.
+function renderAdoptionNotice(adoption, options) {
+  const where = options && typeof options.where === 'string' && options.where !== '' ? options.where : 'on this hook';
+  const recorded = safeVersion(adoption && adoption.recorded);
+  const executing = safeVersion(adoption && adoption.executing);
+  if (adoption && adoption.outcome === AUTO_ADOPT_OUTCOMES.ALREADY_SERVED) {
+    return `zensu: the Zensu plugin was updated from ${recorded} to ${executing} while this session was running; its Session Control record was adopted automatically by a sibling hook ${where}, and this hook serves the adopted record. /zensu:doctor shows the details; nothing else to do.`;
+  }
+  const kept = adoption && typeof adoption.supersededFile === 'string' ? path.basename(adoption.supersededFile) : '(unknown)';
+  const orphan = adoption && adoption.orphanedProjectRoot
+    ? ' The recorded project root is still gone, so Edit, Write, MultiEdit and any writing Bash command stay denied until that exact directory is re-created.'
+    : '';
+  return `zensu: the Zensu plugin was updated from ${recorded} to ${executing} while this session was running; its Session Control record was adopted automatically ${where} (previous record kept beside it as ${kept}; provenance ${safeProvenance(adoption && adoption.provenance)}; ${leaseClause(adoption && adoption.leases)}).${orphan} /zensu:doctor shows the details; nothing else to do.`;
+}
 
 function errorMessage(error) {
   if (error && typeof error.message === 'string' && error.message !== '') return error.message;
@@ -219,6 +309,12 @@ function createAutoAdopter(deps) {
     return typeof core.isSupersededRecordConflict === 'function' && core.isSupersededRecordConflict(error);
   }
 
+  // The typed code first; the message match only for a core that predates it.
+  function isLockTimeout(error) {
+    if (typeof core.isLockTimeout === 'function') return core.isLockTimeout(error);
+    return LOCK_TIMEOUT_RE.test(errorMessage(error));
+  }
+
   function previewAdoption(rawRequest) {
     const normalized = normalizeRequest(rawRequest);
     if (!normalized.ok) {
@@ -227,9 +323,6 @@ function createAutoAdopter(deps) {
       });
     }
     const request = normalized.request;
-    if (request.respectOptOut && !enabled(request.environment)) {
-      return verdict(AUTO_ADOPT_OUTCOMES.OPTED_OUT, AUTO_ADOPT_REASONS.OPTED_OUT, versionPair(core, request));
-    }
     let probe;
     try {
       probe = core.adoptableRecord(coreOptions(request));
@@ -244,12 +337,18 @@ function createAutoAdopter(deps) {
       const outcome = reason === 'already-served' ? AUTO_ADOPT_OUTCOMES.ALREADY_SERVED : AUTO_ADOPT_OUTCOMES.REFUSED;
       return verdict(outcome, reason, versionPair(core, request));
     }
-    return verdict(AUTO_ADOPT_OUTCOMES.ADOPTABLE, AUTO_ADOPT_REASONS.ADOPTABLE, {
+    const state = {
       recorded: typeof probe.recorded === 'string' ? probe.recorded : null,
       executing: typeof probe.executing === 'string' ? probe.executing : null,
       orphanedProjectRoot: Boolean(probe.orphanedProjectRoot),
       prunedPluginRoot: Boolean(probe.prunedPluginRoot),
-    });
+    };
+    // The opt-out is asked LAST, so it only ever overrides an adoption that would
+    // have happened: a refusal above keeps its own reason under the opt-out too.
+    if (request.respectOptOut && !enabled(request.environment)) {
+      return verdict(AUTO_ADOPT_OUTCOMES.OPTED_OUT, AUTO_ADOPT_REASONS.OPTED_OUT, state);
+    }
+    return verdict(AUTO_ADOPT_OUTCOMES.ADOPTABLE, AUTO_ADOPT_REASONS.ADOPTABLE, state);
   }
 
   function adoptForHook(rawRequest) {
@@ -279,7 +378,7 @@ function createAutoAdopter(deps) {
           supersededFile: typeof error.supersededFile === 'string' ? error.supersededFile : null,
         });
       }
-      if (LOCK_TIMEOUT_RE.test(errorMessage(error))) {
+      if (isLockTimeout(error)) {
         return verdict(AUTO_ADOPT_OUTCOMES.UNAVAILABLE, AUTO_ADOPT_REASONS.LOCK_TIMEOUT, failed);
       }
       return verdict(AUTO_ADOPT_OUTCOMES.UNAVAILABLE, AUTO_ADOPT_REASONS.ADOPTION_FAILED, failed);
@@ -323,4 +422,11 @@ module.exports = {
   // to be pinnable without a plugin tree.
   effectiveConfig,
   deepMerge,
+  STATE_NEUTRAL_REASONS,
+  establishesNamedState,
+  SAFE_PROVENANCE,
+  safeProvenance,
+  safeVersion,
+  leaseClause,
+  renderAdoptionNotice,
 };

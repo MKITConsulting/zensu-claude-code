@@ -204,12 +204,89 @@ test('the opt-out is honoured on the adoption path only, and the manual caller m
   assert.equal(verdict.reason, 'opted-out');
   assert.equal(verdict.recorded, '0.20.0');
   assert.equal(verdict.executing, '0.21.1');
-  assert.equal(calls.adoptable, 0);
+  // The probe runs BEFORE the opt-out is consulted: opted-out stands only for a
+  // record the ladder would otherwise have adopted.
+  assert.equal(calls.adoptable, 1);
   assert.equal(calls.adopt, 0);
   const manual = instance.adoptForHook({ ...REQUEST, respectOptOut: false });
   assert.equal(manual.outcome, 'adopted');
   assert.equal(calls.adopt, 1);
   assert.equal(instance.autoAdoptEnabled({}), false);
+});
+
+test('under the opt-out a non-adoptable record keeps its own refusal, never opted-out', () => {
+  const disabled = () => ({ hooks: { sessionAutoAdopt: false } });
+  for (const reason of ['record-unreadable', 'plugin-data-mismatch', 'executing-runtime-older', 'workflow-schema-mismatch']) {
+    const { core, calls } = stubCore({ adoptableRecord: () => ({ ok: false, reason }) });
+    const instance = mod.createAutoAdopter({ core, sweep: stubSweep().sweep, readConfig: disabled });
+    const verdict = instance.adoptForHook(REQUEST);
+    assert.equal(verdict.outcome, 'refused', reason);
+    assert.equal(verdict.reason, reason);
+    assert.equal(calls.adopt, 0);
+  }
+  const served = stubCore({ adoptableRecord: () => ({ ok: false, reason: 'already-served' }) });
+  const instance = mod.createAutoAdopter({ core: served.core, sweep: stubSweep().sweep, readConfig: disabled });
+  assert.equal(instance.adoptForHook(REQUEST).outcome, 'already-served');
+});
+
+test('a named state is established only by a reader that answered and a state-bearing reason', () => {
+  assert.deepEqual([...mod.STATE_NEUTRAL_REASONS],
+    ['record-unreadable', 'plugin-data-mismatch', 'invalid-request', 'probe-failed']);
+  assert.equal(mod.establishesNamedState({ recorded: '0.20.0', reason: 'executing-runtime-older' }), true);
+  assert.equal(mod.establishesNamedState({ recorded: '0.20.0', reason: 'opted-out' }), true);
+  assert.equal(mod.establishesNamedState({ recorded: null, reason: 'executing-runtime-older' }), false);
+  for (const reason of mod.STATE_NEUTRAL_REASONS) {
+    assert.equal(mod.establishesNamedState({ recorded: '0.20.0', reason }), false, reason);
+  }
+  assert.equal(mod.establishesNamedState(null), false);
+});
+
+test('a typed lock timeout is recognised by its code before the message is consulted', () => {
+  const typed = new Error('something unrelated');
+  typed.code = realCore.LOCK_TIMEOUT_CODE;
+  const { instance } = adopter({ isLockTimeout: realCore.isLockTimeout, adoptContext: () => { throw typed; } });
+  const verdict = instance.adoptForHook(REQUEST);
+  assert.equal(verdict.outcome, 'unavailable');
+  assert.equal(verdict.reason, 'lock-timeout');
+  assert.equal(realCore.isLockTimeout(new Error('timed out acquiring per-session lock')), false);
+});
+
+test('the notice renderer screens every value and names a refused sweep as refused', () => {
+  const base = {
+    outcome: 'adopted', reason: 'adopted', recorded: '0.20.0', executing: '0.21.1',
+    supersededFile: '/records/scv1_x.superseded-0.20.0.json', provenance: 'recorded',
+    orphanedProjectRoot: false, leases: { discarded: 2, failed: [], unsafe: '', unsafeAt: '' },
+  };
+  const clean = mod.renderAdoptionNotice(base, { where: 'on this tool call' });
+  assert.match(clean, /updated from 0\.20\.0 to 0\.21\.1/);
+  assert.match(clean, /adopted automatically on this tool call/);
+  assert.match(clean, /kept beside it as scv1_x\.superseded-0\.20\.0\.json;/);
+  assert.match(clean, /2 review-evidence lease\(s\) from before the update set aside/);
+  assert.doesNotMatch(clean, /\/records\//);
+  assert.doesNotMatch(clean, /project root is still gone/);
+
+  const refused = mod.renderAdoptionNotice({ ...base, leases: { discarded: 0, failed: [], unsafe: 'locked', unsafeAt: '/x' } }, { where: 'on this tool call' });
+  assert.match(refused, /lease sweep was REFUSED \(locked\) and set aside nothing/);
+  assert.doesNotMatch(refused, /0 review-evidence lease\(s\)/);
+  const stuck = mod.renderAdoptionNotice({ ...base, leases: { discarded: 1, failed: ['a'], unsafe: '' } }, { where: 'on this tool call' });
+  assert.match(stuck, /1 review-evidence lease\(s\) from before the update set aside and 1 left STUCK/);
+  assert.match(mod.leaseClause(null), /no review-evidence lease sweep result was recorded/);
+  assert.match(mod.leaseClause({ discarded: 0, failed: [], unsafe: 'sweep failed!' }), /REFUSED \(\(unrenderable\)\)/);
+
+  const orphan = mod.renderAdoptionNotice({ ...base, orphanedProjectRoot: true }, { where: 'at this SessionStart' });
+  assert.match(orphan, /project root is still gone, so Edit, Write, MultiEdit/);
+  assert.match(orphan, /adopted automatically at this SessionStart/);
+
+  const concurrent = mod.renderAdoptionNotice({ ...base, outcome: 'already-served', reason: 'adopted-concurrently', supersededFile: null, provenance: null, leases: null }, { where: 'at this SubagentStart' });
+  assert.match(concurrent, /adopted automatically by a sibling hook at this SubagentStart/);
+  assert.doesNotMatch(concurrent, /kept beside it/);
+
+  const hostile = mod.renderAdoptionNotice({ ...base, recorded: 'x\ny', executing: 'a"b', provenance: 'unavailable: <script>' }, { where: 'on this tool call' });
+  assert.match(hostile, /from \(unreadable\) to \(unreadable\)/);
+  assert.match(hostile, /provenance \(unrenderable\)/);
+  assert.equal(mod.safeVersion('0.21.1'), '0.21.1');
+  assert.equal(mod.safeProvenance('no-workflow-document'), 'no-workflow-document');
+  assert.equal(mod.SAFE_PROVENANCE.test('unavailable: ENOENT (x)'), true);
 });
 
 test('a throwing config reader degrades to enabled', () => {

@@ -1173,7 +1173,13 @@ exact drift in its own words ("state the base or the count means nothing"):
   in `reviewer-capability-v1.js` (a version reaches the `.*` gate's own JSON deny
   reason, which that gate spells itself rather than through
   `zensu_emit_hook_session_deny`). Identical ALTERNATION in all three, deliberate hand-copy;
-  keep them in step. A FOURTH spelling of the same alternation lives OUTSIDE production,
+  keep them in step. `safeVersion` in `session-auto-adopt-v1.js` — the adoption notice's
+  version screen, which the `.*` gate, the SessionStart adapter and the binder's stderr
+  line all consume — is NOT a fourth copy: it CONSUMES the core's exported
+  `ADOPTION_SAFE_VERSION_RE` and substitutes `(unreadable)`, so it is a fourth
+  substitution SITE on the first member, not a fourth spelling (the adapter briefly held
+  a fourth spelling of its own; it was removed when the notice renderer was hoisted).
+  A FOURTH spelling of the same alternation lives OUTSIDE production,
   in `tests/structure/test-versioned-plugin-upgrade.sh`'s `AC-C20b` precondition, which
   re-spells it to decide whether its shared fixture still fails the shape. It holds
   nothing in lockstep and is not a member of the three — but a widening that leaves it
@@ -1444,9 +1450,10 @@ revision. An uncommitted change under `hooks/` or `skills/` is therefore reporte
 GREEN against the previous commit, which is not a hypothetical: a real regression in
 `discardSupersededLeases` shipped that way for a full review round, because every
 measurement of it had been taken before the commit that carried it. Test-file edits
-DO take effect immediately, and SEVERAL rows read the working tree — the four unit
-drivers (`zensu-doctor-invocation`, `session-control-lineage`, the lease sweep and
-the adoption report), the three seam pins hoisted to the front of the file so a
+DO take effect immediately, and SEVERAL rows read the working tree — the unit
+drivers (`zensu-doctor-invocation`, `session-control-lineage`, the lease sweep, the
+adoption report and the automatic adopter; count them by grep, an earlier wording said
+four while five were driven), the seam pins hoisted to the front of the file so a
 Windows timeout cannot drop them, the committed-tree check beside them, the
 lease-gap grep, and AC-013 — each labelled `WORKING TREE, not HEAD` in place. The
 count is deliberately NOT written out, matching the rule the suite states about
@@ -1589,9 +1596,21 @@ the state that used to need `--confirm` by hand is reached with no manual step.
 **Two hooks racing for one record are serialized by the lock, not by luck.**
 `adoptContext` runs under `withFileLock` and re-checks adoptability inside it, so the
 loser answers `already-served` and re-reads. A timeout maps to a deny, never to a partial
-adoption. The announcement is made ONCE, by the process whose bind carried the verdict
-(`binding.adoption` / `trusted.adoption`); a sibling that bound an already-served record
-prints nothing.
+adoption — and it is TYPED now: `withFileLock` attaches `LOCK_TIMEOUT_CODE` and the core
+exports `isLockTimeout`, which the adopter consults before its message-matching fallback.
+The `.*` gate announces only an adoption ITS process performed (`trusted.adoption`, or
+the verdict the binder attaches to a strict re-read that failed on a vanished root, which
+is the orphan case and carries the orphan clause); a sibling gate that bound an
+already-served record prints nothing. The SessionStart/SubagentStart ADAPTER is the one
+exception, deliberately: it announces an `already-served` verdict reached after its own
+strict serve failed as an adoption a sibling hook performed during that event, because
+the resume hook and the evidence hook bind on the same events through the CLI binder and
+whichever wins the lock must not decide whether the user is told. The adapter appends the
+model-facing copy for the MAIN principal only — the notice names the superseded record,
+whose basename is the session selector every confined context withholds — and the
+`systemMessage` for every principal. `AUTO-2` in the upgrade suite forces the overlap by
+holding the records lock from a third process until both racers have started; `AUTO-17`
+does the same with the adapter beside a gate.
 
 **A refusal still denies, and every deny names the token.** The binder throws a typed
 error carrying the verdict; the `.*` gate renders it from `error.adoption` with the same
@@ -1602,21 +1621,42 @@ and `not-completed` are ENTRY-LEVEL tokens beside the seven `ADOPTION_REFUSALS`,
 mode exits 1 when it cannot answer, which the wrappers render as `(unknown)`) and pass it
 as the FOURTH argument of the `incompatible-runtime` and `pruned-plugin-root` scopes;
 the Stop hook captures it through `stop_adoption_refusal` and names it on all four
-release arms. **`ADOPTION_REFUSAL_REMEDIES` in `reviewer-capability-v1.js` is a HAND COPY
-of `_zensu_adoption_refusal_remedy`'s `case` in `zensu-session.sh`** — the JS gate cannot
-reach the shell emitter — and `ZENSU_SAFE_REFUSAL_RE` / `SAFE_REFUSAL` are the same
-shape rule spelled twice, exactly as the version-shape rule is; both pairs move together
-and neither is pinned against the other. `zensu_session_adoption_remedy` is the PUBLIC
+release arms. The `.*` gate takes its TYPED arm only for a verdict that establishes a
+named state — a reader answered and the reason is not one of
+`STATE_NEUTRAL_REASONS` (`record-unreadable`, `plugin-data-mismatch`, `invalid-request`,
+`probe-failed`, exported by the module beside `establishesNamedState`) — and falls through
+to its predicate-matched arms otherwise, so it never asserts a lineage cause for a record
+no reader could open. The opt-out is consulted AFTER `adoptableRecord`, so `opted-out`
+stands only for a record that would otherwise have been adopted. **`ADOPTION_REFUSAL_REMEDIES`
+in `reviewer-capability-v1.js` is a HAND COPY of `_zensu_adoption_refusal_remedy`'s `case`
+in `zensu-session.sh`** — the JS gate cannot reach the shell emitter — and it IS pinned:
+a seam pin at the front of `tests/structure/test-versioned-plugin-upgrade.sh` compares
+the two token for token, so a one-sided reword fails there. `ZENSU_SAFE_REFUSAL_RE` /
+`SAFE_REFUSAL` are the same shape rule spelled twice, exactly as the version-shape rule
+is; that pair moves together and is not pinned against itself. The `opted-out` remedy
+tells the model to REPORT the refusal and ask the user, never to run `--confirm` itself:
+the operator switched the automatic path off, and a deny that instructed the model to
+override that would have turned the opt-out into a one-call detour (it did, for one
+review round). The `record-unreadable` remedy agrees with the report's REMEDY now — the
+gate and the shell used to send the user to `/zensu:doctor`, "which names the check that
+failed", while the report said the doctor cannot name the cause in that state. `zensu_session_adoption_remedy` is the PUBLIC
 wrapper the Stop hook calls, shape-checked, so no file outside the library reaches the
 private renderer with an unscreened value. The binder's sixth export line is
 `ZENSU_SESSION_ADOPTED` (`recorded -> executing`, or empty), unconditional so the eval'd
 set keeps a fixed shape; it joined every unset/export list, including the pre-source
 unset in `hooks/session-start-autopilot-resume.sh`.
 
-**Disclosure, and what is UNVERIFIED about it.** The binder prints one stderr line per
-adoption (both versions, the superseded file, the provenance, the lease count) — a debug
-channel, because whether a PreToolUse hook's stderr reaches the user on exit 0 is not
-established. The adapter and the `.*` gate additionally emit `systemMessage` plus
+**Disclosure, and what is UNVERIFIED about it.** ONE renderer, `renderAdoptionNotice`
+in the module, serves every channel — the gate's announcement, the adapter's two fields
+and the binder's stderr line consume it or its screens (`safeVersion`, `safeProvenance`,
+`leaseClause`), so the superseded basename, the provenance class and the lease clause
+cannot drift between them. The lease clause is the part that matters: a REFUSED sweep
+(`leases.unsafe` set — source, locked, destination or sweep-failed) is announced as
+refused with the manual repair named, never as "0 lease(s) set aside", and leases left
+STUCK are counted beside the ones set aside. The binder prints one stderr line per
+adoption (both versions, the superseded basename, the provenance, the lease clause) — a
+debug channel, because whether a PreToolUse hook's stderr reaches the user on exit 0 is
+not established. The adapter and the `.*` gate additionally emit `systemMessage` plus
 `additionalContext`; `systemMessage` is a documented hook field, but its delivery by a
 synchronous SessionStart or PreToolUse hook on Claude Code 2.1.269 was not measured in
 this work. A SHELL gate that wins the race prints nothing on allow, so an adoption won
@@ -1649,8 +1689,12 @@ drive, and every later row then grades a served session — the failure shape th
 run of this change produced across forty-four rows. Part E (`AUTO-1` … `AUTO-12`)
 drives the default path, each row on a session of its own: the gate, the race, the
 opt-out, resume, SubagentStart, the doctor's model bind (never adopts), the Stop hook,
-a gone project root, a pruned installation and the refusal tokens; the module's unit
-suite is driven beside the other three `node --test` drivers.
+a gone project root, a pruned installation and the refusal tokens, the manual entry
+point under the opt-out and against a superseded-file conflict, the evidence hook, the
+binder's own export line and the adapter beside a racing gate; the module's unit suite
+is driven beside the other four `node --test` drivers — state the criterion (every
+`*.test.js` under `tests/structure/` this suite names) rather than trusting the count,
+which read "three" for a round while four were driven.
 
 **Known gaps, accepted and named:**
 
@@ -3815,11 +3859,16 @@ that — unlike `ZENSU_BASH_WRITE_GATE=off` — lands no bypass-ledger entry.
 
 **The MSYS drive rule is SHARED, not copied.** `claude-path-v1.js` exports
 `msysDrivePrefix` as a TOTAL function — anything that is not an MSYS drive spelling comes
-back unchanged — and each consumer applies its own policy on top. There are FOUR, not
-two: `normalizeHostPathInput` in that same file, `msysToDrive` in the parser,
-`hooks/lib/zensu-doctor-invocation.js`, and — the first outside `hooks/` —
-`hostPath` in `skills/session-trail/scripts/trail.mjs`, whose policy is a third one
-again (it FAILS when the module cannot be loaded). The two the sentence below
+back unchanged — and each consumer applies its own policy on top. The census here has
+been wrong twice (it read "two", then "FOUR" while five existed), so treat it as a grep
+— `grep -rn 'msysDrivePrefix' hooks skills` — and not as a bound. As of this writing:
+`normalizeHostPathInput` in that same file, `msysToDrive` in the parser,
+`hooks/lib/zensu-doctor-invocation.js`, `effectiveConfig` in
+`hooks/lib/session-auto-adopt-v1.js` (whose policy is a fourth one: a driveless MSYS
+spelling of a config path falls to "adoption enabled", because a config that cannot be
+read must not switch a repair off), and — the first outside `hooks/` — `hostPath` in
+`skills/session-trail/scripts/trail.mjs`, whose policy is a further one again (it FAILS
+when the module cannot be loaded). The two the sentence below
 contrasts are the two whose policies are opposites: its own
 `normalizeHostPathInput` layers a fail-closed-by-THROWING policy for the session-control
 trust boundary, while `msysToDrive` in the parser declines that policy. It has to: the

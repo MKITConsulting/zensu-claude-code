@@ -580,11 +580,11 @@ _zensu_adoption_refusal_remedy() {
     (plugin-data-mismatch)
       printf '%s' 'The record belongs to a different plugin data store than this installation uses, so a fresh Claude Code session is the way forward' ;;
     (record-unreadable)
-      printf '%s' 'The record disagrees with the running installation for a reason adoption does not admit; run /zensu:doctor, which names the check that failed' ;;
+      printf '%s' 'The record could not be re-verified against the installation that minted it — it may have been altered, or a persisted schema really did change — and adoption cannot tell those apart; /zensu:adopt-session prints the full diagnosis, and a fresh Claude Code session is the way forward' ;;
     (executing-runtime-unidentified)
       printf '%s' 'The running installation declares no usable version, so repair the plugin installation first' ;;
     (opted-out)
-      printf '%s' 'hooks.sessionAutoAdopt is false in your Zensu config, so run /zensu:adopt-session --confirm yourself; the manual path ignores the opt-out' ;;
+      printf '%s' 'hooks.sessionAutoAdopt is false in your Zensu config, so the automatic path is switched off on purpose; report this refusal and ask the user whether to run /zensu:adopt-session --confirm, which ignores the opt-out — never run it on your own initiative' ;;
     (adopted-concurrently)
       printf '%s' 'A sibling hook adopted the record in the meantime and it serves now, so simply retry this call' ;;
     (not-completed|lock-timeout)

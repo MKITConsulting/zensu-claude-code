@@ -119,10 +119,12 @@ function authoritativePluginRoot() {
   return root;
 }
 
-// `systemMessage` is the host's user-facing common field — shown by a
-// synchronous hook, discarded by the events that document discarding it — and it
-// rides beside `additionalContext` only when a caller has something the USER,
-// not just the model, must hear: an adoption this hook performed.
+// `systemMessage` is the host's user-facing common field. Its DELIVERY by a
+// synchronous SessionStart or SubagentStart hook is documented but was not
+// measured in this work — CLAUDE.md records it as unverified — so it rides
+// beside `additionalContext` rather than instead of it, and only when a caller
+// has something the USER, not just the model, must hear: an adoption this hook
+// performed or observed.
 function hookOutput(event, additionalContext, systemMessage = '') {
   const output = {
     hookSpecificOutput: {
@@ -161,28 +163,26 @@ const BASELINE_HEAL_NOTICE = 'Zensu: this session\'s workflow document was missi
   + 'asking for a reviewer. Tell the user this in your next reply, and offer /zensu:tdd '
   + 'to re-arm if that work still needs a review. /zensu:doctor reports the same finding.';
 
-const SAFE_VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/;
-const safeVersion = (value) => (typeof value === 'string' && SAFE_VERSION.test(value) ? value : '(unreadable)');
-const SAFE_PROVENANCE = /^[A-Za-z0-9 .,:;_()'/-]{1,200}$/;
-const safeProvenance = (value) => (typeof value === 'string' && SAFE_PROVENANCE.test(value) ? value : '(unrenderable)');
-
 // The PUSH half of the adoption disclosure, on both channels the host offers a
 // SessionStart: `additionalContext` for the model and `systemMessage` for the
-// user. The superseded record is named by its basename — `<key>.superseded-
-// <ver>.json`, both parts shape-checked by the core — never by its absolute path.
+// user. The text comes from session-auto-adopt-v1.js's renderAdoptionNotice — the
+// ONE renderer the `.*` gate and the binder consume too — so this file holds no
+// version screen, no provenance screen and no lease clause of its own.
 function adoptionNotice(adoption, label) {
-  const leases = adoption.leases && Number.isInteger(adoption.leases.discarded) ? adoption.leases.discarded : 0;
-  const kept = typeof adoption.supersededFile === 'string' ? path.basename(adoption.supersededFile) : '(unknown)';
-  const orphan = adoption.orphanedProjectRoot
-    ? ' The recorded project root is still gone, so Edit, Write, MultiEdit and any writing Bash command stay denied until that exact directory is re-created.'
-    : '';
-  return `zensu: the Zensu plugin was updated from ${safeVersion(adoption.recorded)} to ${safeVersion(adoption.executing)} while this session was running; its Session Control record was adopted automatically at this ${label} (previous record kept beside it as ${kept}; provenance ${safeProvenance(adoption.provenance)}; ${leases} review-evidence lease(s) from before the update set aside, so a review that was in flight must be re-gathered).${orphan} /zensu:doctor shows the details; nothing else to do.`;
+  return autoAdopt.renderAdoptionNotice(adoption, { where: `at this ${label}` });
 }
 
 // Serve the existing record, or ADOPT it when the executing installation cannot
 // serve it by version number but adoptableRecord admits it — the same ladder the
 // PreToolUse binder runs, so a compaction or a subagent spawn after a plugin
 // update binds instead of dying. A refusal keeps failing the hook, naming why.
+//
+// An `already-served` verdict reached AFTER the strict serve failed means a
+// sibling hook on the same event adopted the record in the window between the
+// two reads — the resume hook and the evidence hook bind on these same events
+// through the CLI binder. That adoption is announced here too, so the user hears
+// about it whichever process won the lock: the announcement is a fact about the
+// session, not a prize for the winner.
 function serveOrAdopt(readerOptions, pluginRoot, pluginData, sessionId, label, noun) {
   const serve = () => {
     const context = core.readContext(readerOptions);
@@ -206,8 +206,17 @@ function serveOrAdopt(readerOptions, pluginRoot, pluginData, sessionId, label, n
     });
     if (verdict.outcome === 'adopted' || verdict.outcome === 'already-served') {
       // Strict re-read: the adopted record must serve itself. A vanished
-      // recorded project root re-throws here exactly as it always did.
-      return { context: serve(), adoption: verdict.outcome === 'adopted' ? verdict : null };
+      // recorded project root re-throws here exactly as it always did — and
+      // when THIS process adopted, the failure names that adoption, so the
+      // re-mint is not lost behind the message of a bind it could not repair.
+      try {
+        return { context: serve(), adoption: verdict };
+      } catch (again) {
+        if (verdict.outcome === 'adopted') {
+          fail(`${label}: adopted the Session Control record (${autoAdopt.safeVersion(verdict.recorded)} -> ${autoAdopt.safeVersion(verdict.executing)}; previous record kept as ${typeof verdict.supersededFile === 'string' ? path.basename(verdict.supersededFile) : '(unknown)'}; provenance ${autoAdopt.safeProvenance(verdict.provenance)}), but the strict re-read still fails: ${again.message}`);
+        }
+        throw again;
+      }
     }
     fail(`${label}: automatic adoption ${verdict.outcome} (${verdict.reason}); ${error.message}`);
   }
@@ -402,11 +411,16 @@ function main() {
       : core.renderHostContext(context);
   // Appended rather than substituted: the principal's own context is what binds the
   // session, and a notice that replaced it would trade a disclosure for the binding.
-  // The adoption notice is appended the same way, and ALSO travels as the
-  // user-facing systemMessage: an adoption is a fact about the user's session,
-  // not only about the model's context.
+  // The adoption notice ALSO travels as the user-facing systemMessage: an adoption
+  // is a fact about the user's session, not only about the model's context. The
+  // MODEL-facing copy is appended for the main thread only — it names the
+  // superseded record, whose basename is the session selector every confined
+  // principal's rendered context deliberately withholds, and it names
+  // /zensu:doctor, a main-only command. A reviewer, an evidence worker or a
+  // neutral child gets its bound context unchanged; the user still gets the line.
   const adoptionText = adoption ? adoptionNotice(adoption, payload.hook_event_name) : '';
-  const notices = [baselineHealNotice, adoptionText].filter((text) => text !== '');
+  const modelNotice = principal === principals.PRINCIPALS.MAIN ? adoptionText : '';
+  const notices = [baselineHealNotice, modelNotice].filter((text) => text !== '');
   const emittedContext = notices.length === 0
     ? additionalContext
     : `${additionalContext}\n\n${notices.join('\n\n')}`;

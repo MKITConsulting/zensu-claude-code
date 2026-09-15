@@ -15,7 +15,10 @@ const doctorInvocation = require('./zensu-doctor-invocation.js');
 // stop-chain-enforcer.sh and zensu-doctor.sh all hold the pair to a shape before
 // printing it, because a plugin_version is only requireText-validated: a newline
 // in it splits one deny reason into several that read as separate hook messages.
-// The same alternation, the same `(unreadable)` substitution.
+// The same alternation, the same `(unreadable)` substitution. A FIFTH consumer,
+// session-auto-adopt-v1.js's notice renderer, CONSUMES the core's
+// ADOPTION_SAFE_VERSION_RE rather than copying the alternation, so the three
+// hand copies CLAUDE.md's version-shape census names stay three.
 const SAFE_VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/;
 const safeVersion = (value) => (
   typeof value === 'string' && SAFE_VERSION.test(value) ? value : '(unreadable)'
@@ -32,15 +35,17 @@ const safeRefusal = (value) => (
 // HAND COPY of `_zensu_adoption_refusal_remedy` in hooks/lib/zensu-session.sh —
 // the shell emitter cannot be reached from JS and this gate spells its own deny.
 // Keep the two in step sentence for sentence; a reason missing here gets the
-// generic remedy, never a wrong one.
+// generic remedy, never a wrong one. The lockstep is PINNED: the seam pins at the
+// front of tests/structure/test-versioned-plugin-upgrade.sh compare every arm of
+// this map against the shell case token for token.
 const ADOPTION_REFUSAL_REMEDIES = Object.freeze({
   'executing-runtime-older': 'The running installation is OLDER than the one that minted the record (a downgrade or a --plugin-dir checkout), so re-install the newer version, or start a fresh Claude Code session on this one',
   'workflow-schema-mismatch': 'The persisted workflow shape really did change between the two versions, so a fresh Claude Code session is the only way forward',
   'not-a-sibling-installation': 'The running installation is not a sibling of the recorded one (for example a --plugin-dir checkout beside an installed plugin), so a fresh Claude Code session on this installation is the way forward',
   'plugin-data-mismatch': 'The record belongs to a different plugin data store than this installation uses, so a fresh Claude Code session is the way forward',
-  'record-unreadable': 'The record disagrees with the running installation for a reason adoption does not admit; run /zensu:doctor, which names the check that failed',
+  'record-unreadable': 'The record could not be re-verified against the installation that minted it — it may have been altered, or a persisted schema really did change — and adoption cannot tell those apart; /zensu:adopt-session prints the full diagnosis, and a fresh Claude Code session is the way forward',
   'executing-runtime-unidentified': 'The running installation declares no usable version, so repair the plugin installation first',
-  'opted-out': 'hooks.sessionAutoAdopt is false in your Zensu config, so run /zensu:adopt-session --confirm yourself; the manual path ignores the opt-out',
+  'opted-out': 'hooks.sessionAutoAdopt is false in your Zensu config, so the automatic path is switched off on purpose; report this refusal and ask the user whether to run /zensu:adopt-session --confirm, which ignores the opt-out — never run it on your own initiative',
   'adopted-concurrently': 'A sibling hook adopted the record in the meantime and it serves now, so simply retry this call',
   'not-completed': 'The adoption did not complete (a lock timeout, or a superseded record left by an interrupted adoption), so retry this call; if it persists, /zensu:adopt-session prints the full report',
   'lock-timeout': 'The adoption did not complete (a lock timeout, or a superseded record left by an interrupted adoption), so retry this call; if it persists, /zensu:adopt-session prints the full report',
@@ -57,27 +62,14 @@ const adoptionRefusalRemedy = (reason) => (
 // object on the allow path carrying no permissionDecision, so the host's
 // deny > defer > ask > allow precedence is untouched: `additionalContext` is the
 // documented PreToolUse field, `systemMessage` the user-facing common field.
-// The superseded record is named by its basename — `<key>.superseded-<ver>.json`,
-// both parts shape-checked by the core — never by its absolute path.
-// Provenance is one of `recorded`, `no-workflow-document` or `unavailable: <why>`;
-// the third carries an error message, so it is bounded to a printable class
-// rather than trusted into the notice verbatim.
-const SAFE_PROVENANCE = /^[A-Za-z0-9 .,:;_()'/-]{1,200}$/;
-const safeProvenance = (value) => (
-  typeof value === 'string' && SAFE_PROVENANCE.test(value) ? value : '(unrenderable)'
-);
-
-function adoptionNotice(adoption) {
-  const leases = adoption.leases && Number.isInteger(adoption.leases.discarded) ? adoption.leases.discarded : 0;
-  const kept = typeof adoption.supersededFile === 'string' ? path.basename(adoption.supersededFile) : '(unknown)';
-  const orphan = adoption.orphanedProjectRoot
-    ? ' The recorded project root is still gone, so Edit, Write, MultiEdit and any writing Bash command stay denied until that exact directory is re-created.'
-    : '';
-  return `zensu: the Zensu plugin was updated from ${safeVersion(adoption.recorded)} to ${safeVersion(adoption.executing)} while this session was running; its Session Control record was adopted automatically on this tool call (previous record kept beside it as ${kept}; provenance ${safeProvenance(adoption.provenance)}; ${leases} review-evidence lease(s) from before the update set aside, so a review that was in flight must be re-gathered).${orphan} /zensu:doctor shows the details; nothing else to do.`;
-}
-
+// The text is rendered by session-auto-adopt-v1.js — the ONE renderer the adapter
+// and the binder consume too — so the superseded basename, the provenance screen
+// and the lease clause (a REFUSED sweep is not "0 set aside") cannot drift between
+// the three. Required lazily, exactly as the binder requires that module: the
+// sweep it loads requires the lease owner, which requires the binder this gate
+// already holds at top level.
 function announceAdoption(adoption) {
-  const text = adoptionNotice(adoption);
+  const text = require('./session-auto-adopt-v1.js').renderAdoptionNotice(adoption, { where: 'on this tool call' });
   process.stdout.write(`${JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
@@ -596,14 +588,25 @@ function main() {
         && (hookSession.unregisteredSession(payload)
           || hookSession.orphanedProjectRootSession(payload)
           || doctorInvocation.isRecognizedInvocation(payload))) {
+      // An adoption performed on THIS bind whose strict re-read then threw on the
+      // vanished project root: the binder attaches that verdict to the re-thrown
+      // error, and the relaxed allow is where the user has to hear about it —
+      // the orphan clause of the notice is what says Edit and Write stay denied.
+      if (error && error.adoption && error.adoption.outcome === 'adopted') announceAdoption(error.adoption);
       return;
     }
     // The binder ADOPTS before it denies now, so a typed refusal here means the
     // automatic adoption itself was refused, opted out, or did not complete —
     // and the verdict travels on the error, so no second probe re-derives it.
     // The CAUSE is for everyone; the REMEDY is MAIN-only, for the reason the
-    // fallback arm below states.
-    if (core.isAdoptionRefusal(error) && error.adoption && typeof error.adoption === 'object') {
+    // fallback arm below states. The typed arm is taken ONLY for a verdict that
+    // establishes a named state — a reader answered, and the reason is not one of
+    // the state-neutral ones (record-unreadable, plugin-data-mismatch,
+    // invalid-request, probe-failed). Those fall through to the arms below, which
+    // name a state only when their own predicate positively matches, and to the
+    // generic deny, whose message still carries the refusal token.
+    if (core.isAdoptionRefusal(error) && error.adoption && typeof error.adoption === 'object'
+        && require('./session-auto-adopt-v1.js').establishesNamedState(error.adoption)) {
       const adoption = error.adoption;
       const reason = safeRefusal(adoption.reason);
       const recorded = safeVersion(adoption.recorded);
