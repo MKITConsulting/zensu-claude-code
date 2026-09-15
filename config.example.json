@@ -25,6 +25,7 @@
     "aspectActivation": true,
     "reviewSpawnScopeSentence": true,
     "reviewerSpawnAutoAllow": true,
+    "sessionAutoAdopt": true,
     "pendingReviewTtlHours": 6,
     "implStopNudgeAfter": 12
   },

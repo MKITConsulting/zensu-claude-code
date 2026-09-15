@@ -183,13 +183,13 @@ function adoptionNotice(adoption, label) {
 // serve it by version number but adoptableRecord admits it — the same ladder the
 // PreToolUse binder runs, so a compaction or a subagent spawn after a plugin
 // update binds instead of dying. A refusal keeps failing the hook, naming why.
-function serveOrAdopt(readerOptions, pluginRoot, pluginData, sessionId, label) {
+function serveOrAdopt(readerOptions, pluginRoot, pluginData, sessionId, label, noun) {
   const serve = () => {
     const context = core.readContext(readerOptions);
     if (!core.servesRecordedRuntime(context, pluginRoot, 'claude')) {
-      fail(`${label} plugin root is neither the existing session's plugin nor a compatible upgrade of it`);
+      fail(`${label} plugin root is neither the ${noun}'s plugin nor a compatible upgrade of it`);
     }
-    if (context.plugin_data !== pluginData) fail(`${label} plugin data does not match the existing session`);
+    if (context.plugin_data !== pluginData) fail(`${label} plugin data does not match the ${noun}`);
     return context;
   };
   try {
@@ -256,7 +256,7 @@ function main() {
         pluginRoot,
         pluginData,
         payload.session_id,
-        'SessionStart',
+        'SessionStart', 'existing session',
       );
       context = served.context;
       adoption = served.adoption;
@@ -380,7 +380,7 @@ function main() {
       pluginRoot,
       pluginData,
       payload.session_id,
-      'SubagentStart',
+      'SubagentStart', 'parent session',
     );
     context = served.context;
     adoption = served.adoption;

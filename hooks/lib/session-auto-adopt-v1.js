@@ -165,12 +165,18 @@ function coreOptions(request) {
 function versionPair(core, request) {
   const readerOptions = { recordsDir: request.recordsDir, sessionId: request.sessionId, expectedHost: request.host };
   let recorded = null;
+  let orphanedProjectRoot = false;
+  let prunedPluginRoot = false;
   for (const reader of ['readContext', 'readOrphanedProjectRootContext', 'readPrunedPluginRootContext']) {
     if (typeof core[reader] !== 'function') continue;
     try {
       const context = core[reader](readerOptions);
       if (context && typeof context.plugin_version === 'string') {
         recorded = context.plugin_version;
+        // WHICH reader answered is the state a deny has to name: the lineage
+        // wording for a strict or orphan read, the pruned wording for the last.
+        orphanedProjectRoot = reader === 'readOrphanedProjectRootContext';
+        prunedPluginRoot = reader === 'readPrunedPluginRootContext';
         break;
       }
     } catch {
@@ -184,7 +190,7 @@ function versionPair(core, request) {
   } catch {
     executing = null;
   }
-  return { recorded, executing };
+  return { recorded, executing, orphanedProjectRoot, prunedPluginRoot };
 }
 
 function createAutoAdopter(deps) {

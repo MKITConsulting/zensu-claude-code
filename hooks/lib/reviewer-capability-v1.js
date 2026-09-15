@@ -606,9 +606,19 @@ function main() {
     if (core.isAdoptionRefusal(error) && error.adoption && typeof error.adoption === 'object') {
       const adoption = error.adoption;
       const reason = safeRefusal(adoption.reason);
-      const cause = `this session's Session Control record is readable, but the running Zensu installation could not serve it — the record was minted by ${safeVersion(adoption.recorded)} and ${safeVersion(adoption.executing)} is executing. Zensu tried to adopt the record automatically for this session and it was REFUSED: ${reason}.`;
+      const recorded = safeVersion(adoption.recorded);
+      const executing = safeVersion(adoption.executing);
+      // The same two causes the shell scopes spell, chosen by the reader that
+      // answered: a pruned minting installation is its own named state, and the
+      // downgrade sentence stays with it because that predicate is blind to lineage.
+      const cause = adoption.prunedPluginRoot
+        ? `this session's Session Control record is intact, but the Zensu installation that minted it (version ${recorded}) has been removed from the plugin cache, so the running installation (${executing}) cannot re-verify the record. Zensu tried to adopt the record automatically for this session and it was REFUSED: ${reason}.`
+        : `this session's Session Control record is readable, and the running Zensu installation declares an incompatible lineage — the record was minted by ${recorded} and ${executing} is executing. Zensu tried to adopt the record automatically for this session and it was REFUSED: ${reason}.`;
       if (principals.classifyPreToolPayload(payload) === principals.PRINCIPALS.MAIN) {
-        deny(`${cause} ${adoptionRefusalRemedy(reason)}. /zensu:adopt-session reports the same refusal in full, and /zensu:adopt-session --confirm retries the adoption by hand; both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — an adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created; /zensu:doctor names the path when that is the case.`);
+        const tail = adoption.prunedPluginRoot
+          ? 'This predicate is deliberately blind to lineage, so a DOWNGRADE reaches this state too, and there adoption refuses as executing-runtime-older and re-installing the newer version is the way back.'
+          : 'If the recorded project root is ALSO gone — a deleted or recycled worktree — an adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created; /zensu:doctor names the path when that is the case.';
+        deny(`${cause} ${adoptionRefusalRemedy(reason)}. /zensu:adopt-session reports the same refusal in full, and /zensu:adopt-session --confirm retries the adoption by hand; both stay reachable in this state. ${tail}`);
         return;
       }
       deny(`${cause} The repair writes the immutable record and is reserved for the main thread, so it is not available here — report this to the main thread rather than retrying.`);

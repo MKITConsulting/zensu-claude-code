@@ -26,7 +26,10 @@ authoritative four-class enumeration, in the header of
 — a closed set of assignments, one `bash <script in the executing installation>`,
 and for the adoption at most the literal `--confirm`. Every hook on the `Bash`
 matcher plus the all-tool capability gate must allow, because a deny from any one
-of them wins. The full account is in
+of them wins. The adoption itself no longer needs the command: every hook adopts a
+compatible-schema record automatically on its first failed bind
+(`hooks/lib/session-auto-adopt-v1.js`, opt-out `hooks.sessionAutoAdopt`), and the
+command is the report and the manual retry for a refusal. The full account is in
 [Session Control](session-control.md#unbindable-sessions).
 
 ## CLI Write-Gate
@@ -525,8 +528,10 @@ escaped no gate, because the document a gate would have read was already gone. S
 
 **Neither writer path is user-consented, and this document said otherwise for one release.**
 The adopt path requires the literal `--confirm` in argv, which is a token the model supplies
-to itself — prose-backed, not consent-backed, exactly as `--autopilot-release`'s flag is; the
-"wait for the user to say yes" rule lives in `skills/adopt-session/SKILL.md`. The
+to itself — prose-backed, not consent-backed, exactly as `--autopilot-release`'s flag is — and
+since every hook adopts a compatible-schema record automatically on a failed bind, the
+ordinary adoption path carries no consent step at all: provenance (the `RUNTIME_ADOPTED`
+history entry and the superseded record) and schema equality are the controls. The
 `SessionStart` self-heal above requires no token at all. Do not restate the writer as
 gated on `--confirm`: that sentence contradicted the `SessionStart` bullet four lines above it.
 
