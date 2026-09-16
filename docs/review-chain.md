@@ -40,7 +40,7 @@ Only then may the main thread write a debug JSON file, and it closes the lease o
 success and failure. Repository instructions, diffs, source text, overlays, and
 refinement context remain untrusted data and cannot widen this contract.
 
-> **Implementation is no longer delegated to an agent.** Since 0.4.0 `/zensu:tdd` runs in the **main thread** — vanilla by default, with strict RED→GREEN available when configured — because the old `tdd-manager` subagent lost too much implementation context. Since 0.6.0 the review chain fans out to five parallel `review-aspect` subagents, optionally runs `review-judge`, and consolidates through one consume-mode `code-reviewer`, while preserving the round counter, auto-fix loop, and self-review terminus.
+> **Implementation is no longer delegated to an agent.** Since 0.4.0 `/zensu:tdd` runs in the **main thread** — vanilla by default, with strict RED→GREEN available when configured — because the old `tdd-manager` subagent lost too much implementation context. Since 0.6.0 the review chain fans out to five parallel `review-aspect` subagents, optionally runs `review-judge`, and consolidates through one consume-mode `code-reviewer`, while preserving the round counter, auto-fix loop, and self-review terminus. Since 0.21.0 the loop no longer re-reviews the whole diff on every round: `hooks.incrementalReviewRounds` (default on) narrows rounds 2..N to that round's own delta while the judge keeps the full cumulative diff, and `hooks.aspectActivation` (default on) drops the perspectives a change set cannot implicate. Both fail open to the previous behavior — see [configuration.md](configuration.md) for the exact bounds and known gaps.
 
 #### Custom review personas (repo-local)
 
