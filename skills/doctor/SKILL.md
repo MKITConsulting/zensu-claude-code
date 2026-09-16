@@ -763,6 +763,25 @@ classifier will refuse a spawn, not only when the whole table is green.
   the next Stop in that project, so this row can clear without anyone acting on
   it. Offer no cleanup for either row: Phase 3 below is still the only write, and
   it covers `pending-review.json` alone.
+- **⚠️ state: N session(s) where a reviewer completion was DECLINED while the chain
+  still held an unclaimed review ticket** → a `review-decline-<session key>.json` note
+  records that `post-review-tdd-delegate.sh` refused a `zensu:code-reviewer` completion
+  while that session's chain was still waiting for one. This is a DIFFERENT state from
+  the refused-spawn row above: there the host never let the spawn run, here the reviewer
+  ran and the delegate would not bind its completion. The parenthesised `mode×N` summary
+  names WHICH gate refused it and nothing more — the remedy for each mode was rendered at
+  decline time on a channel that does not survive the turn, which is why this note exists
+  at all. Do NOT invent one. Relay the row as it stands and point at
+  `zensu-log.sh --chain-status` from the session that owns the chain for its current shape
+  and supported next command. A `spent` mode is the one to read carefully: it is minted
+  AFTER the claim landed, so the round WAS recorded and only that round's findings went
+  unrouted — never report it as a review that did not happen. The note is retired when a
+  later completion CLAIMS the ticket; otherwise it ages out against
+  `pendingReviewTtlHours` and a later Stop in the project reaps it, so a standing row
+  means no completion has bound since. The two neighbouring rows are again NOT declines: a
+  "reviewer-decline note(s) older than Nh" row comes from a session that never ended a
+  turn again, and a "reviewer-decline note(s) this plugin did not write" row failed to
+  vet. Offer no cleanup for any of the three.
 
 If everything is green, say so in one line and stop — there is nothing to do,
 except that the line must carry the `~/.claude/settings.json` bound stated in

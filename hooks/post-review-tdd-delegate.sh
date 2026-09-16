@@ -189,6 +189,22 @@ if [ ! -f "${ZENSU_DELEGATE_CORE:-}" ] || [ -L "${ZENSU_DELEGATE_CORE:-}" ]; the
   ZENSU_DELEGATE_CORE=""
   printf 'zensu: reviewer completion not judged (delegate-core-module-unavailable) — this hook could not load its workflow-document reader from the plugin tree, so it cannot tell whether this chain holds an unclaimed review ticket and stays silent on the model channel\n' >&2
 fi
+# The claim PREDICATE is resolved the same way and for the same reason. It is the
+# ONE implementation of the conjunct set `_tdd_consume_review_ticket_critical`
+# applies under lock, so this hook no longer spells that set at all: a copy here
+# that grew one conjunct MORE than the claim answers `no` for a chain the claim
+# would accept, `decline()` returns at its first guard, and every disclosure in
+# this file goes silent with the whole test surface green. That is the direction
+# a one-sided source comparison could not see, which is why the copy is gone
+# rather than pinned.
+ZENSU_DELEGATE_CLAIM=""
+if declare -F zensu_tdd_review_ticket_claim_module >/dev/null 2>&1; then
+  ZENSU_DELEGATE_CLAIM="$(zensu_tdd_review_ticket_claim_module)"
+fi
+if [ ! -f "${ZENSU_DELEGATE_CLAIM:-}" ] || [ -L "${ZENSU_DELEGATE_CLAIM:-}" ]; then
+  ZENSU_DELEGATE_CLAIM=""
+  printf 'zensu: reviewer completion not judged (delegate-claim-module-unavailable) — this hook could not load its review-ticket claim predicate from the plugin tree, so it cannot tell whether this chain holds an unclaimed review ticket and stays silent on the model channel\n' >&2
+fi
 # HAND-COPY, recorded rather than hoisted. The four disclosures in this file share
 # a lead-in and a tail verbatim and NOTHING holds them in step — no shell constant,
 # no needle in any suite. A reworded tail on one of them leaves an operator with two
@@ -217,7 +233,8 @@ fi
 # longer load-bearing here. The session hash is checked exactly as the claim
 # checks it, so a document owned by another canonical session is not "this
 # chain's outstanding ticket" and cannot even reach the disclosure below.
-CHAIN_TICKET_STATE="$(STATE_FILE="$NATIVE_TDD_STATE_FILE" SID="$SESSION_ID" CORE_MODULE="$ZENSU_DELEGATE_CORE" node -e '
+CHAIN_TICKET_STATE="$(STATE_FILE="$NATIVE_TDD_STATE_FILE" SID="$SESSION_ID" \
+  CORE_MODULE="$ZENSU_DELEGATE_CORE" CLAIM_MODULE="$ZENSU_DELEGATE_CLAIM" node -e '
   try {
     // Hardened read, never a bare readFileSync: the core opens with O_NOFOLLOW
     // plus O_NONBLOCK and re-judges the descriptor, which is what keeps a FIFO
@@ -225,22 +242,18 @@ CHAIN_TICKET_STATE="$(STATE_FILE="$NATIVE_TDD_STATE_FILE" SID="$SESSION_ID" CORE
     // forever. A missing or unloadable module throws here and lands in the
     // catch below, which is the same no-op every other fault on this path takes.
     const core = require(process.env.CORE_MODULE);
+    // The shared claim predicate, required rather than re-spelled. It owns the
+    // session-hash comparison, the chain-state conjuncts and the ticket shape,
+    // and `_tdd_consume_review_ticket_critical` calls the same module under
+    // lock, so the two carriers cannot disagree about which chain holds an
+    // unclaimed ticket. A module that will not load throws into the catch below,
+    // which is the same no-op every other fault on this path takes.
+    const claim = require(process.env.CLAIM_MODULE);
     const s = JSON.parse(core.readRegularFileSnapshot(process.env.STATE_FILE).data.toString("utf8"));
-    const mine = s.session_id_hash === `sha256:${process.env.SID.slice("scv1_".length)}`;
-    // These conjuncts mirror `_tdd_consume_review_ticket_critical` and
-    // `_tdd_review_ticket_shape_ok`, and the set is NOT decoration: a predicate
-    // WEAKER than the claim arms a disclosure whose remedy the claim then
-    // refuses, so the model re-spawns correctly and is stranded anyway.
-    const live = mine && s.active === true && s.implComplete === true
-      && s.chainDone === false && s.codeReviewDone === false
-      && typeof s.phase === "string" && Array.isArray(s.history)
-      && Array.isArray(s.bypasses) && typeof s.vanilla === "boolean"
-      && typeof s.selfReviewFixed === "boolean"
-      && Number.isSafeInteger(s.reviewRound) && s.reviewRound >= 0
-      && s.reviewRound < Number.MAX_SAFE_INTEGER;
-    const ticket = typeof s.reviewTicket === "string"
-      && /^[A-Za-z0-9_-]{1,96}$/.test(s.reviewTicket) ? s.reviewTicket : "";
-    const outstanding = live && ticket !== "" && s.reviewTicketConsumed === false;
+    // The OUTSTANDING value rather than a match: this hook holds no ticket to
+    // compare against, which is the one conjunct the claim keeps on its own side.
+    const ticket = claim.outstandingTicket(s, process.env.SID);
+    const outstanding = ticket !== "";
     process.stdout.write((outstanding ? "yes" : "no") + "\t" + (outstanding ? ticket : ""));
     // A THIRD status, because collapsing a FAULT into the no-ticket answer made
     // every later disclosure unreachable for the one cause they exist to report.
@@ -281,14 +294,15 @@ OUTSTANDING_TICKET="${CHAIN_TICKET_STATE#*$'\t'}"
 # later decline in the session went silent on BOTH channels — including the one whose
 # text exists to report exactly this fault.
 if [ "$CHAIN_TICKET_WAS_OUTSTANDING" = "unreadable" ]; then
-  # CONJOINED on the core being usable, and that is a correctness fix rather than a
-  # tidy-up. `require("")` throws into the very same catch, so with the module gone
-  # the probe answers `unreadable` for a fault in the PLUGIN TREE — and an
-  # unconditional line here then printed a SECOND sentence sending the operator to
-  # `.zensu/state/` to inspect a document that was never the problem. The disclosure
-  # above already named that cause under its own class. The NORMALIZATION stays
-  # unconditional, so no downstream conjunct sees a different value either way.
-  if [ -n "$ZENSU_DELEGATE_CORE" ]; then
+  # CONJOINED on BOTH plugin-tree modules being usable, and that is a correctness
+  # fix rather than a tidy-up. `require("")` throws into the very same catch, so
+  # with either module gone the probe answers `unreadable` for a fault in the
+  # PLUGIN TREE — and an unconditional line here then printed a SECOND sentence
+  # sending the operator to `.zensu/state/` to inspect a document that was never
+  # the problem. Each disclosure above already named its own cause under its own
+  # class. The NORMALIZATION stays unconditional, so no downstream conjunct sees
+  # a different value either way.
+  if [ -n "$ZENSU_DELEGATE_CORE" ] && [ -n "$ZENSU_DELEGATE_CLAIM" ]; then
     printf 'zensu: reviewer completion not judged (delegate-workflow-document-unreadable) — this hook could not read the workflow document for this session, so it cannot tell whether this chain holds an unclaimed review ticket and stays silent on the model channel\n' >&2
   fi
   CHAIN_TICKET_WAS_OUTSTANDING=no
@@ -395,6 +409,112 @@ PROMPT_CONSUME_HEADER="${PROMPT_CONSUME_PROBE#*$'\t'}"
 [ "$PROMPT_CONSUME_INTENT" = "yes" ] || PROMPT_CONSUME_INTENT="no"
 [ "$PROMPT_CONSUME_HEADER" = "yes" ] || PROMPT_CONSUME_HEADER="no"
 
+# --- Decline note (the DURABLE half of the operator-channel disclosure) -------
+# `additionalContext` is transcript-scoped and the stderr line beside it rides a
+# channel this repository already records as UNVERIFIED for delivery on this
+# host, so before this note a decline died with the turn: a user returning to a
+# stranded chain after a compaction or a fork saw exactly what they saw before
+# the disclosure existed. `--chain-status` renders `ticket-unclaimed` with no
+# notion that a completion was declined, and no workflow field is written.
+#
+# Modelled on `reviewer-spawn-denied-<key>.json` in `hooks/stop-chain-enforcer.sh`:
+# same directory, same lease, the same character-exact name shape the only reader
+# matches, the same `O_EXCL` temp landed by rename, and the same reader-side
+# binding to a sibling `tdd-phase-<key>.json`. It carries the remedy MODE and a
+# timestamp and NEVER the ticket value — the ticket is a capability token, which
+# is why this hook echoes it on no channel at all.
+#
+# Every fault leaves the hook advisory: the write is best-effort, the exit status
+# is untouched, and neither disclosure above it is withheld on a failed note.
+decline_note_path() {
+  # Asserts the SAME shape the doctor filename regex requires rather than the
+  # prefix alone: a `scv1_` id of any other length would land under a name the
+  # only reader silently never matches, which is the "rename one and doctor goes
+  # quiet with everything still green" failure the sibling writer records.
+  case "$SESSION_ID" in
+    scv1_*[!0-9a-f]*) return 1 ;;
+    scv1_????????????????????????????????????????????????????????????????) ;;
+    *) return 1 ;;
+  esac
+  printf '%s/.zensu/state/review-decline-%s.json' "$PROJECT_ROOT" "$SESSION_ID"
+}
+
+decline_note_write_unlocked() {
+  local note
+  note="$(decline_note_path)" || return 0
+  # `dirname` reads argv and cannot block on stdin, so it is the one child here
+  # that carries no `</dev/null` — the same exemption the sibling writer states.
+  [ -d "$(dirname "$note")" ] || return 0
+  # The state directory is writable from inside the session, so the note is
+  # written the way every other record in it is: refuse a pre-planted symlink,
+  # non-file or hard link outright, then land an exclusive temp by rename.
+  # stdout is redirected as well as stderr, because this hook writes its
+  # model-facing context to stdout and a stray byte here would corrupt it.
+  MODE="$1" NOTE="$note" node -e '
+    const fs=require("node:fs");
+    const note=process.env.NOTE;
+    // Per-process temp name, for the reason the sibling writer records: a
+    // deterministic one lets two writers publish bytes neither of them wrote,
+    // and a planted directory at that fixed name silences the note forever.
+    const tmp=note+"."+process.pid+".tmp";
+    try {
+      const st=fs.lstatSync(note);
+      if(st.isSymbolicLink()||!st.isFile()||st.nlink!==1) process.exit(0);
+    } catch (e) { if(e.code!=="ENOENT") process.exit(0); }
+    try {
+      const fd=fs.openSync(tmp,
+        fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL, 0o600);
+      try {
+        fs.writeSync(fd, JSON.stringify({
+          schemaVersion:1, kind:process.env.MODE||"",
+          subagentType:"zensu:code-reviewer", detectedAtMs:Date.now(),
+        })+"\n");
+      } finally { fs.closeSync(fd); }
+      fs.renameSync(tmp, note);
+    } catch (e) {
+      // A half-written temp must not outlive the attempt that made it. Safe
+      // because only this pid can name it.
+      try { fs.rmSync(tmp,{force:true}); } catch (_) { /* nothing else to do */ }
+    }
+  ' </dev/null >/dev/null 2>&1 || true
+  return 0
+}
+
+decline_note_clear_unlocked() {
+  local note
+  note="$(decline_note_path)" || return 0
+  # The temp carries a per-process suffix (see the writer), so the glob is what
+  # retires a crashed writer leftover. An unmatched glob is silently ignored
+  # under `rm -f`, and the shape guard above has already pinned every character
+  # of the name, so this cannot widen past the intended file.
+  rm -f "$note" "$note".*.tmp 2>/dev/null || true
+  return 0
+}
+
+decline_note_clear() {
+  if declare -F _tdd_locked_run >/dev/null 2>&1 && [ -n "${TDD_STATE_FILE:-}" ]; then
+    _tdd_locked_run "$TDD_STATE_FILE" decline_note_clear_unlocked 2>/dev/null && return 0
+  fi
+  decline_note_clear_unlocked
+  return 0
+}
+
+decline_note_write() {
+  # Same `set -u` plus bash 3.2 hazard the sibling lease wrapper guards against,
+  # and `return 0` is the right direction here for the same reason: this writer
+  # never changes what the hook emits.
+  [ "$#" -gt 0 ] || return 0
+  # The lease is an IMPROVEMENT, never a precondition: on a failed acquisition
+  # the write still runs unlocked, because a lost note must not cost the
+  # disclosure. The callback ALWAYS returns 0, which is what makes a non-zero
+  # result here unambiguously a lease failure rather than a failed write.
+  if declare -F _tdd_locked_run >/dev/null 2>&1 && [ -n "${TDD_STATE_FILE:-}" ]; then
+    _tdd_locked_run "$TDD_STATE_FILE" decline_note_write_unlocked "$1" 2>/dev/null && return 0
+  fi
+  decline_note_write_unlocked "$1"
+  return 0
+}
+
 decline() {
   local cause="$1" mode="${2:-runstate}" lead remedy
   [ "$CHAIN_TICKET_WAS_OUTSTANDING" = "yes" ] || exit 0
@@ -430,6 +550,14 @@ decline() {
   local stderr_lead="reviewer completion not recorded"
   [ "$post_claim" = "yes" ] && stderr_lead="reviewer round recorded but its findings were not routed"
   printf 'zensu: %s (%s) — %s\n' "$stderr_lead" "$mode" "$cause" >&2
+  # The DURABLE half of the same disclosure, minted on the SAME gate the line
+  # above uses — the outstanding ticket alone, never the consume-intent test
+  # below — because a decline this hook reports on no durable surface is exactly
+  # the strand this feature exists to end. `declare -F` rather than a bare call:
+  # `decline()` is extracted and evaluated in ISOLATION by the scope suite, where
+  # only `emit_post_context` is stubbed, so an unguarded name would fail a
+  # harness whose fixture never defines it.
+  if declare -F decline_note_write >/dev/null 2>&1; then decline_note_write "$mode"; fi
   # Consume intent is the marker as the FIRST line, or a ticket that already
   # MATCHED. Only the second is unforgeable: a quotation cannot reproduce the
   # chain's live outstanding value, while the marker is ordinary text that this
@@ -1033,6 +1161,14 @@ fi
 # while a concurrent generation reset makes every later bound CAS stale.
 CLAIM_CONTEXT="$(tdd_consume_review_ticket_context \
   "$SESSION_ID" "$REVIEW_TICKET")" || exit 0
+# The claim landed, so this round is recorded and the ticket is spent: a decline
+# note minted for THIS session before it is stale evidence by construction, and
+# a durable surface that keeps reporting a strand the chain has left is the same
+# defect in the other direction. Retired here rather than at a Stop, because the
+# Stop hook never learns that a completion claimed. A post-claim decline below
+# mints its own note again, under the `spent` mode, which is a different and
+# still-current finding. `declare -F` for the isolation reason the mint states.
+if declare -F decline_note_clear >/dev/null 2>&1; then decline_note_clear; fi
 CLAIM_FIELDS="$(CLAIM_CONTEXT="$CLAIM_CONTEXT" node -e '
   try {
     const value = JSON.parse(process.env.CLAIM_CONTEXT);

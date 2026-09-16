@@ -67,8 +67,18 @@ const NEXT_COMMAND = Object.freeze({
     'run /zensu:tdd for the current task — codeReviewDone is set but no consumed ticket can bind the terminal self-review, and neither /zensu:self-review nor /zensu:reset-review-limit can repair that; a fresh --tdd-begin is the only exit',
   'review-in-flight':
     'zensu-log.sh --code-review-done --claimed-review-ticket <the ticket from --current-review-ticket>',
+  // The rotation arm is CONDITIONAL, and stating its precondition is what stops
+  // this surface contradicting the other durable one. `post-review-tdd-delegate.sh`
+  // refuses a completion on durable RUN STATE with a remedy that forbids BOTH the
+  // rotation and the re-spawn, on the ground that the prompt was not what was
+  // refused; unconditional here, this row told the same reader to do exactly what
+  // that remedy had just banned, and a chain reached through a decline is the one
+  // way a reader arrives at this shape. The arm itself STAYS: that hook's own
+  // `run-gone` remedy routes the reader here and says the rotation is correct once
+  // the durable read is resolved, so deleting it would break the remedy pointing
+  // at it. What was missing was the order, which is now part of the sentence.
   'ticket-unclaimed':
-    'let the spawned reviewer finish, or issue a fresh ticket with zensu-log.sh --review-ticket and re-spawn zensu:code-reviewer',
+    'let the spawned reviewer finish; otherwise — once no zensu:code-reviewer spawn is still in flight AND nothing refused the last completion on durable run state — issue a fresh ticket with zensu-log.sh --review-ticket and re-spawn zensu:code-reviewer. A completion declined on run state states its own remedy and is resolved FIRST: re-spawning unchanged reproduces that decline while rotating the ticket out from under any spawn still running',
   'ticket-spent':
     'zensu-log.sh --review-ticket, then spawn zensu:code-reviewer — the retained ticket is already consumed and cannot be claimed again',
   'ticket-lost':

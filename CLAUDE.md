@@ -5345,17 +5345,63 @@ than it used to, so a completion that previously exited at a prompt gate now per
 extra read — no mutation, and `S1` still proves no state file is created for an unrelated
 agent, but a port should not assume the old ordering. The disclosure is UNRATED and repeats on
 every qualifying delivery; nothing latches it, the same cost §"Implementing-Phase Turn Counter"
-records for its own stderr notice. And `/zensu:doctor` still reports `ticket-unclaimed` only as
-a chain shape with its `NEXT_COMMAND`; it carries no row saying a completion was declined, so
-the operator's only account of a refusal is the stderr line — **and whether that line is
-DELIVERED is UNVERIFIED on this host.** Nothing measured in this work establishes that a
+records for its own stderr notice. **And whether that line is DELIVERED is UNVERIFIED on this
+host.** Nothing measured in this work establishes that a
 `PostToolUse` hook's stderr on exit 0 reaches the user, which is the same standard
 §"Autopilot Run Scope" states for its own Stop-hook disclosure and §"zen-mode Chain-Progress
 Anchor" for its `UserPromptSubmit` one. If it is not delivered, the operator channel has no
 observable and the asymmetry argument above buys nothing on this host — so verify it before
-leaning on it, and do not restate the claim as established. The durable answer is the doctor
-row, which is the shape `ruleCarrierRows` already ships for the marker-block carriers, and it
-is deliberately NOT taken here.
+leaning on it, and do not restate the claim as established. **The durable answer HAS now been
+taken and the next paragraph is it**; the sentence this replaced said `/zensu:doctor` carried
+no row for a decline and that the row was deliberately not taken, which is the claim that
+moved.
+
+**A DECLINE SURVIVES THE TURN, because `additionalContext` and stderr are both
+transcript-scoped and a user returning after a compaction or a fork saw neither.** The
+precedent is the reviewer-spawn denial note, and every piece is built the same way. The MINT is
+`decline_note_path` / `decline_note_write_unlocked` / `decline_note_write` in
+`hooks/post-review-tdd-delegate.sh`, called from `decline()` behind `declare -F` — that guard is
+not style, it is `S28a`: the suite EXTRACTS `decline()` and `eval`s it in isolation with only
+`emit_post_context` stubbed, so any helper it names must tolerate being undefined. The note is
+`<record project root>/.zensu/state/review-decline-<session key>.json` and it carries
+`{schemaVersion, kind, subagentType, detectedAtMs}` — the remedy MODE and a timestamp, NEVER the
+ticket, which is a capability token. It is gated on the OPERATOR channel's condition (this
+session's chain holds an unclaimed ticket) rather than the model-facing one, for the reason that
+channel exists at all: a chain refused by a prompt showing no consume intent is exactly the
+strand with nothing on any channel. The write refuses a symlink, a non-file and a hard link,
+lands a per-pid `O_EXCL` temp and publishes by rename, and redirects `</dev/null` because the
+lease keeper is a bash coprocess whose control pipe an inheriting child would hold open.
+
+**The CLEAR is what makes the doctor row's retirement sentence true**, and it is the piece a
+reader is likeliest to think redundant. `decline_note_clear` runs on the SUCCESSFUL-CLAIM path,
+immediately after `tdd_consume_review_ticket_context` returns: the reaper only removes a note
+that is UNBOUND or past the TTL, and a chain that closes keeps its `tdd-phase-<key>.json`, so
+without this call a note would keep reporting a strand the chain had already left. A decline
+BELOW the claim mints its own note again under the `spent` mode, which is a different and still
+current finding.
+
+**The RENDER is `reviewDeclineRows` in `hooks/lib/zensu-doctor-report.js`**, bound to the
+sibling `tdd-phase-<key>.json` exactly as `reviewerDenialRows` is, and it consumes the SHARED
+`classifyDenialNote` rather than a second copy of the shape-and-freshness rule. It passes an
+EMPTY allowlist deliberately: that argument switches the kind-membership conjunct off, because
+this artifact's mode vocabulary lives in shell where no `require` reaches it, and
+`DECLINE_MODE_RE` stands in for it as a SHAPE bound rather than a membership one. So a mode
+renamed in the delegate renders under its real name here, and a mode that is not a plausible
+token renders as `unclassified` — the safe direction, and the same trade the sibling row makes.
+The REAP is `reviewer_denial_notes_reap` in `hooks/stop-chain-enforcer.sh`, widened to two
+families: its glob pre-check tries the denial prefix first and falls back to this one, and its
+character-exact NAME regex admits both. An unreadable note is still NOT reaped, for the reason
+that sweep already states — unlinking a file this plugin did not write destroys evidence.
+
+**Known gaps of the durable half, accepted and named.** The mode vocabulary is a HAND COPY
+across a language boundary and nothing compares the two sides: the delegate mints whatever
+`$mode` its `case` selected, and the renderer only checks that the value LOOKS like a mode. A
+mode the delegate stops emitting leaves this row rendering a name no arm produces. At the
+documented `pendingReviewTtlHours: 0` the age-out is disabled on both sides, so a note of any
+age keeps rendering and the reaper never removes it — the same consequence
+§"Foreign-Chain Row" records for its own TTL consumers. And the row is `WARN`, so a live
+decline note withholds the green summary for as long as it stands, which is the cost every
+sibling row in that block already pays.
 
 **Port-relevant.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` carry the same delegate
 against different harnesses and were NOT included in this change. A port owns the host half —
@@ -5447,10 +5493,14 @@ Ten things are coupled and must move together:
   degrades one row, while a top-level require would take the whole report down.
   `DENIAL_RULE` in `stop-chain-enforcer.sh` carries the same identity again — and so
   do seven further files. **Do not treat any enumeration of them as complete.** The
-  literal lives in TEN files under `hooks/` (43 matching lines, measured the way T47 measures
+  literal lives in TEN files under `hooks/` (44 matching lines, measured the way T47 measures
   it — `grep -rhF … | wc -l`, which is a LINE count and not an occurrence count, because seven
   of those lines carry the literal twice;
-  re-measured 2026-09-13 after that section's FIFTH review round guarded the phase-library
+  re-measured 2026-09-16 after §"Ticket-Keyed Review Consumption" gained its DURABLE decline
+  note, whose mint program writes `subagentType` into the note so the doctor row can bind the
+  artifact to the agent it is about — one further line, in a `node -e` program rather than in
+  prose, which is a carrier class every earlier entry in this list happens not to have; 43
+  on 2026-09-13 after that section's FIFTH review round guarded the phase-library
   source with its own operator disclosure, in a comment that names the agent once more; 42
   earlier the same day after its FOURTH round disclosed an unusable core
   module on that same channel; 41 on

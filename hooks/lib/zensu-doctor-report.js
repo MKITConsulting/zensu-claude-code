@@ -2398,6 +2398,85 @@ function reviewerDenialRows(entries, dir, nowMs) {
   }
 }
 
+// The decline note's own name shape. Same directory, same session-key class and
+// the same sibling binding as `reviewerDenialRows` — a note is only this
+// plugin's word while a `tdd-phase-<key>.json` for the same session still
+// exists, because `.zensu/state/` is writable from inside any session in the
+// project and a note judged on its own contents alone would let anything able to
+// write there mint a row about a chain that was never declined.
+var DECLINE_NOTE_RE = /^review-decline-(scv1_[a-f0-9]{64})\.json$/;
+// The remedy MODE is the delegate hook's own vocabulary, spelled in a shell
+// `case` no `require` can reach — unlike `reviewerDenialRows`, whose kinds come
+// from a JS module it loads. So the kind is NOT vetted against a set here
+// (`classifyDenialNote` is called with an empty allowlist, which switches its
+// membership conjunct off); what bounds it is this LABEL class, because the
+// value is echoed into a row a model relays. Anything outside it renders as
+// `unclassified` rather than suppressing the finding — the decline is the
+// finding, the mode is decoration, which is the rule the sibling row already
+// states for its own kind.
+var DECLINE_MODE_RE = /^[a-z][a-z-]{0,31}$/;
+
+function reviewDeclineRows(entries, dir, nowMs) {
+  var notes = entries.filter(function (f) { return DECLINE_NOTE_RE.test(f); }).sort();
+  if (!notes.length) return;
+  var ttl = ttlHours();
+  var modes = Object.create(null);
+  var valid = 0;
+  var stale = 0;
+  var rejected = 0;
+  notes.forEach(function (f) {
+    var parsed = readNoteJson(path.join(dir, f));
+    if (parsed === NOTE_MISSING) return;
+    var owner = DECLINE_NOTE_RE.exec(f);
+    if (!owner || entries.indexOf('tdd-phase-' + owner[1] + '.json') === -1) {
+      rejected += 1;
+      return;
+    }
+    // The SHARED shape-and-freshness judgement, never a second copy of it. The
+    // empty allowlist is what makes it usable here: this artifact's vocabulary
+    // lives in shell, so the membership conjunct is switched off and the label
+    // bound below stands in for it.
+    var verdict = classifyDenialNote(parsed, [], ttl, nowMs);
+    if (verdict !== 'live') {
+      if (verdict === 'stale') stale += 1;
+      else rejected += 1;
+      return;
+    }
+    var mode = DECLINE_MODE_RE.test(parsed.kind) ? parsed.kind : 'unclassified';
+    modes[mode] = (modes[mode] || 0) + 1;
+    valid += 1;
+  });
+  if (valid) {
+    var summary = Object.keys(modes).sort().map(function (k) {
+      return k + '×' + modes[k];
+    }).join(', ');
+    // The lead states the GATE and never the outcome. A `spent` note is minted
+    // AFTER the claim landed, so "the round was not recorded" — which this row
+    // said for one round — is false for exactly that mode, and it is the mode a
+    // reader is most likely to meet. The retirement sentence is bounded the same
+    // way: the delegate clears the note when a later completion CLAIMS the
+    // ticket, and nothing else retires a BOUND note except the TTL and the Stop
+    // reaper, so a closed chain does not clear one on its own.
+    line(WARN, 'state: ' + valid + ' session(s) where a reviewer completion was DECLINED while the chain '
+      + 'still held an unclaimed review ticket (' + summary + ') — the mode names WHICH gate refused it, '
+      + 'and the chain may still be waiting for a completion it can bind. Run '
+      + '`zensu-log.sh --chain-status` from the session that owns the chain for its current shape and '
+      + 'next command; /zensu:recover-chain documents every shape that can be reported. A note is '
+      + 'retired when a later completion CLAIMS the ticket; otherwise it ages out against '
+      + 'pendingReviewTtlHours and a later Stop in this project reaps it.');
+  }
+  if (stale) {
+    line(WARN, 'state: ' + stale + ' reviewer-decline note(s) older than ' + ttl + 'h — the session that '
+      + 'wrote them never ended a turn again, so nothing retired them; they say nothing about the current '
+      + 'state and are safe to delete.');
+  }
+  if (rejected) {
+    line(WARN, 'state: ' + rejected + ' reviewer-decline note(s) this plugin did not write (unreadable, '
+      + 'oversized, an unrecognized schema, an impossible timestamp, or no matching session) — NOT counted '
+      + 'as declines; delete them.');
+  }
+}
+
 function truncatedList(rows) {
   var listed = rows.slice(0, CHAIN_ROW_LIMIT);
   var overflow = rows.length - listed.length;
@@ -3699,6 +3778,7 @@ function stateBlock(nowMs) {
     chainRows(states, nowMs, entries, dir);
   }
   reviewerDenialRows(entries, dir, nowMs);
+  reviewDeclineRows(entries, dir, nowMs);
   // Same two arguments `chainRows` already takes, plus the clock and this
   // session's key. It sits OUTSIDE the workflow-document branch above on
   // purpose: an Autopilot run holding the tree is a finding whether or not this

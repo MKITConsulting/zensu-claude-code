@@ -603,8 +603,14 @@ reviewer_denial_notes_reap() {
   # Cheap pre-check first: this runs on every clear, and the overwhelming
   # majority of Stops have no note to reap. Without it every Stop in every
   # session would pay for a node process to learn there is nothing to do.
+  # TWO note families share this reaper, so the pre-check asks about both before
+  # it gives up: a project holding only decline notes would otherwise keep them
+  # forever, since nothing else in the tree removes a note whose session is gone.
   set -- "$state_dir"/reviewer-spawn-denied-scv1_*.json
-  [ -f "$1" ] || return 0
+  if [ ! -f "$1" ]; then
+    set -- "$state_dir"/review-decline-scv1_*.json
+    [ -f "$1" ] || return 0
+  fi
   # The SAME TTL the doctor ages a note out against, read from the same config
   # key. A note past it is the one the doctor's own row calls safe to delete.
   # `</dev/null` for the same reason the writer below carries it: this runs inside the
@@ -625,10 +631,14 @@ reviewer_denial_notes_reap() {
   REAP_DIR="$state_dir" REAP_TTL="$ttl" node -e '
     const fs=require("node:fs"), path=require("node:path");
     const dir=process.env.REAP_DIR, ttl=Number(process.env.REAP_TTL);
-    // The same character-exact shape the writer asserts before it writes. This
-    // is the one place a Stop unlinks a file belonging to another session, so
-    // the name is pinned rather than prefix-matched.
-    const NAME=/^reviewer-spawn-denied-(scv1_[a-f0-9]{64})\.json$/;
+    // The same character-exact shapes the two writers assert before they write.
+    // This is the one place a Stop unlinks a file belonging to another session,
+    // so the names are pinned rather than prefix-matched, and the alternation is
+    // anchored on both sides for the same reason. The second family is the
+    // review-decline note minted by hooks/post-review-tdd-delegate.sh, which has
+    // the same owner binding, the same TTL and the same unreadable-is-not-reaped
+    // rule, so one walk serves both rather than two walks disagreeing about them.
+    const NAME=/^(?:reviewer-spawn-denied|review-decline)-(scv1_[a-f0-9]{64})\.json$/;
     let entries;
     try { entries=fs.readdirSync(dir); } catch (e) { process.exit(0); }
     const now=Date.now();

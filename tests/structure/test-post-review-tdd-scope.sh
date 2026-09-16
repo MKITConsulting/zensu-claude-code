@@ -42,6 +42,21 @@ check() {
   fi
 }
 
+# S0 — the `node --test` driver for `tests/structure/review-ticket-claim-v1.test.js`,
+# which is the unit contract of the shared review-ticket claim predicate S32 below
+# proves both carriers call. `tests/run-all.sh` discovers only
+# `tests/structure/test-*.sh`, so a `*.test.js` with no driver is never executed by the
+# tree runner at all. It runs FIRST, before any fixture: it needs only `PLUGIN_DIR`, and
+# at the tail a Windows timeout would take the only coverage that module has anywhere.
+# The registration FLOOR is what keeps exit 0 from also accepting a file that registers
+# nothing — the same reason T26 in the Stop-routing suite carries one.
+S0_UNIT="$PLUGIN_DIR/tests/structure/review-ticket-claim-v1.test.js"
+S0_OUT="$(cd "$PLUGIN_DIR" && node --test "$S0_UNIT" 2>&1)" && S0_RC=0 || S0_RC=$?
+S0_CASES="$(grep -cE "^test\(" "$S0_UNIT" || true)"
+[ "$S0_RC" -eq 0 ] && [ "$S0_CASES" -ge 10 ] \
+  && check "S0 the shared review-ticket claim predicate unit contract passes" PASS \
+  || check "S0 the shared review-ticket claim predicate unit contract passes (rc=$S0_RC cases=$S0_CASES)" FAIL
+
 ROOT="$(mktemp -d -t zensu-postreview-scope-XXXXXX)"
 ROOT="$(cd "$ROOT" && pwd -P)"
 PROJECT="$ROOT/project"
@@ -1659,41 +1674,68 @@ S31_RAW_NOTICE="${S31_SLIP_CTX%%$S31_NOTICE_TAIL*}"
   && check "S31 a header slip prefixes the routed directive with the consume-mode notice, an exact header renders byte-identically, and the ticket is never echoed" PASS \
   || check "S31 a header slip prefixes the routed directive with the consume-mode notice, an exact header renders byte-identically, and the ticket is never echoed (exact-ctx=${#S31_EXACT_CTX} slip-ctx=${#S31_SLIP_CTX} head=${#S31_SLIP_HEAD} tail=${#S31_SLIP_TAIL} norm=${#S31_EXACT_NORM})" FAIL
 
-# S32 — AC-019. The disclosure arming predicate MIRRORS the claim path, and the mirror is
-# not decoration: a predicate WEAKER than the claim arms a disclosure whose remedy the
-# claim then refuses, so the model re-spawns correctly and is stranded anyway. Nothing
-# compared the two sets, and both are hand-written JS inside programs no unit layer can
-# require. Set equality over the workflow-document fields each one reads, plus the ticket
-# SHAPE, whose owner is `_tdd_review_ticket_shape_ok` in the phase library.
-s32_fields() { grep -oE '(^|[^A-Za-z0-9_.])s\.[A-Za-z_][A-Za-z0-9_]*' | sed -E 's/^[^s]*//' | sort -u; }
-s32_hook_fields() { awk '/^CHAIN_TICKET_STATE=/{f=1} f{print} f&&/^CHAIN_TICKET_WAS_OUTSTANDING=/{exit}' "$HOOK" | s32_fields; }
-s32_claim_fields() { awk '/^_tdd_consume_review_ticket_critical\(\) \{/{f=1} f&&/const valid = /{g=1} g{print} g&&/if \(!valid\)/{exit}' "$PHASE" | s32_fields; }
-S32_HOOK_N="$(s32_hook_fields | wc -l | tr -d ' ')"
-S32_CLAIM_N="$(s32_claim_fields | wc -l | tr -d ' ')"
-S32_DIFF="$(diff <(s32_hook_fields) <(s32_claim_fields) 2>/dev/null | tr '\n' ' ')"
-S32_SHAPE_HOOK="$(awk '/^CHAIN_TICKET_STATE=/{f=1} f{print} f&&/^CHAIN_TICKET_WAS_OUTSTANDING=/{exit}' "$HOOK" | grep -cF -- '/^[A-Za-z0-9_-]{1,96}$/' || true)"
+# S32 — AC-019/AC-002. The arming predicate and the claim transaction are now ONE
+# implementation, so this check proves that rather than comparing two copies. What it
+# replaced compared field-name sets plus a ONE-SIDED containment over the value
+# constraints, and the one-sidedness was deliberate: only a hook WEAKER than the claim
+# was thought to strand a correct re-spawn. The STRONGER direction is the one that
+# passed — a hook requiring one conjunct MORE answers `no` for a chain the claim would
+# accept, `decline()` returns at its first guard, and every disclosure in that file goes
+# silent while every fixture satisfies both copies. Comparing two copies cannot see it;
+# deleting one of them can. Each extraction carries a non-empty control, because a scan
+# that matches nothing would otherwise report agreement.
+S32_MODULE="$PLUGIN_DIR/hooks/lib/review-ticket-claim-v1.js"
+s32_hook_slice() { awk '/^CHAIN_TICKET_STATE=/{f=1} f{print} f&&/^CHAIN_TICKET_WAS_OUTSTANDING=/{exit}' "$HOOK"; }
+# The claim slice ENDS at the `claimableWith` call, and that boundary is load-bearing
+# rather than tidiness: everything below it is the Autopilot-linkage block and the round
+# mutation, which legitimately READ `s.reviewRound` to increment it. Running the slice to
+# the closing brace reports that read as a surviving copy of a conjunct the module owns,
+# which is a finding about the mutation rather than about the predicate.
+s32_claim_slice() {
+  awk '
+    /^_tdd_consume_review_ticket_critical\(\) \{/ { f = 1 }
+    f { print }
+    f && /claim\.claimableWith\(/ { exit }
+    f && /^\}$/ { exit }
+  ' "$PHASE"
+}
 s32_shape_owner() { awk '/^_tdd_review_ticket_shape_ok\(\) \{/{f=1} f{print} f&&/^\}/{exit}' "$PHASE"; }
+# Field READS, never writes: the claim legitimately keeps `s.reviewTicketConsumed = true`
+# and `s.reviewRound = next`, which are the mutation the module has no business owning.
+# The write filter alone is not enough on the claim side — see the slice boundary above.
+s32_read_fields() {
+  grep -vE '^[[:space:]]*s\.[A-Za-z_][A-Za-z0-9_]* = ' \
+    | grep -oE '(^|[^A-Za-z0-9_.])(s|state)\.[A-Za-z_][A-Za-z0-9_]*' \
+    | sed -E 's/.*\.//' | sort -u
+}
+S32_HOOK_LINES="$(s32_hook_slice | wc -l | tr -d ' ')"
+S32_CLAIM_LINES="$(s32_claim_slice | wc -l | tr -d ' ')"
+S32_MODULE_FIELDS="$(s32_read_fields < "$S32_MODULE")"
+S32_MODULE_N="$(printf '%s\n' "$S32_MODULE_FIELDS" | grep -c . || true)"
+S32_HOOK_REQ="$(s32_hook_slice | grep -cF -- 'require(process.env.CLAIM_MODULE)' || true)"
+S32_CLAIM_REQ="$(s32_claim_slice | grep -cF -- 'require(process.env.CLAIM_MODULE)' || true)"
+S32_HOOK_CALL="$(s32_hook_slice | grep -cF -- 'claim.outstandingTicket(' || true)"
+S32_CLAIM_CALL="$(s32_claim_slice | grep -cF -- 'claim.claimableWith(' || true)"
+# The conjunct list may survive in NEITHER carrier. The claim keeps its Autopilot-linkage
+# reads, which the module does not hold, so the test is an intersection against the
+# module's own field set rather than a ban on reading the document at all.
+S32_HOOK_COPY="$(comm -12 <(s32_hook_slice | s32_read_fields) <(printf '%s\n' "$S32_MODULE_FIELDS") | tr '\n' ' ')"
+S32_CLAIM_COPY="$(comm -12 <(s32_claim_slice | s32_read_fields) <(printf '%s\n' "$S32_MODULE_FIELDS") | tr '\n' ' ')"
+# The ticket SHAPE has two spellings that no `require` can unify — the module's regex and
+# the shell owner `_tdd_review_ticket_shape_ok`, which `tdd_consume_review_ticket_context`
+# and the issuer still call. They stay pinned to each other here.
+S32_SHAPE_MODULE="$(grep -cF -- '/^[A-Za-z0-9_-]{1,96}$/' "$S32_MODULE" || true)"
 S32_SHAPE_LEN="$(s32_shape_owner | grep -cF -- '-le 96' || true)"
 S32_SHAPE_CLASS="$(s32_shape_owner | grep -cF -- '*[!A-Za-z0-9_-]*' || true)"
-# Set equality over field NAMES cannot see a weakening that keeps the name and moves the
-# VALUE: `s.chainDone === false` and `typeof s.chainDone === "boolean"` read the same field
-# while only one of them is a precondition of the claim. So the pairs are compared too, and
-# the direction is one-sided on purpose — the hook must be at least as strict as the claim,
-# never the reverse, because only the weaker direction strands a correct re-spawn. The
-# claim's `s.reviewTicket === process.env.TICKET` is deliberately outside the extraction:
-# it binds a value the hook does not have at this point and is the one conjunct the hook
-# legitimately spells differently (it reports the outstanding ticket rather than matching one).
-s32_value_pairs() { grep -oE 's\.[A-Za-z_][A-Za-z0-9_]* *(===|!==) *(true|false|"")' | tr -s ' ' | sort -u; }
-S32_HOOK_PAIRS="$(awk '/^CHAIN_TICKET_STATE=/{f=1} f{print} f&&/^CHAIN_TICKET_WAS_OUTSTANDING=/{exit}' "$HOOK" | s32_value_pairs)"
-S32_CLAIM_PAIRS="$(awk '/^_tdd_consume_review_ticket_critical\(\) \{/{f=1} f&&/const valid = /{g=1} g{print} g&&/if \(!valid\)/{exit}' "$PHASE" | s32_value_pairs)"
-S32_PAIR_N="$(printf '%s\n' "$S32_CLAIM_PAIRS" | grep -c . || true)"
-S32_MISSING="$(comm -23 <(printf '%s\n' "$S32_CLAIM_PAIRS") <(printf '%s\n' "$S32_HOOK_PAIRS") | tr '\n' ' ')"
-[ "$S32_HOOK_N" -ge 10 ] && [ "$S32_CLAIM_N" -ge 10 ] \
-  && [ -z "$S32_DIFF" ] \
-  && [ "$S32_SHAPE_HOOK" -eq 1 ] && [ "$S32_SHAPE_LEN" -eq 1 ] && [ "$S32_SHAPE_CLASS" -eq 1 ] \
-  && [ "$S32_PAIR_N" -ge 5 ] && [ -z "$S32_MISSING" ] \
-  && check "S32 the arming predicate reads exactly the workflow fields the claim validates, applies every value constraint the claim applies, and both spell the same ticket shape" PASS \
-  || check "S32 the arming predicate reads exactly the workflow fields the claim validates, applies every value constraint the claim applies, and both spell the same ticket shape (hook=$S32_HOOK_N claim=$S32_CLAIM_N diff=${S32_DIFF:-none} shape=$S32_SHAPE_HOOK/$S32_SHAPE_LEN/$S32_SHAPE_CLASS pairs=$S32_PAIR_N missing=${S32_MISSING:-none})" FAIL
+S32_SHAPE_HOOK="$(s32_hook_slice | grep -cF -- '/^[A-Za-z0-9_-]{1,96}$/' || true)"
+[ "$S32_HOOK_LINES" -ge 5 ] && [ "$S32_CLAIM_LINES" -ge 20 ] && [ "$S32_MODULE_N" -ge 13 ] \
+  && [ "$S32_HOOK_REQ" -eq 1 ] && [ "$S32_CLAIM_REQ" -eq 1 ] \
+  && [ "$S32_HOOK_CALL" -eq 1 ] && [ "$S32_CLAIM_CALL" -eq 1 ] \
+  && [ -z "$S32_HOOK_COPY" ] && [ -z "$S32_CLAIM_COPY" ] \
+  && [ "$S32_SHAPE_MODULE" -eq 1 ] && [ "$S32_SHAPE_LEN" -eq 1 ] && [ "$S32_SHAPE_CLASS" -eq 1 ] \
+  && [ "$S32_SHAPE_HOOK" -eq 0 ] \
+  && check "S32 both carriers require the shared claim predicate and neither re-spells the conjunct list, and the module and the shell shape owner still agree" PASS \
+  || check "S32 both carriers require the shared claim predicate and neither re-spells the conjunct list, and the module and the shell shape owner still agree (hook-lines=$S32_HOOK_LINES claim-lines=$S32_CLAIM_LINES module-fields=$S32_MODULE_N req=$S32_HOOK_REQ/$S32_CLAIM_REQ call=$S32_HOOK_CALL/$S32_CLAIM_CALL copied=${S32_HOOK_COPY:-none}/${S32_CLAIM_COPY:-none} shape=$S32_SHAPE_MODULE/$S32_SHAPE_LEN/$S32_SHAPE_CLASS/$S32_SHAPE_HOOK)" FAIL
 
 # S33 — AC-020. Three comments in this hook stated something the shipped code does not do.
 # The workspace-read comment justified its disclosure with "confirms nothing about anyone
@@ -1916,6 +1958,43 @@ S37_PRIVATE_CODE="$(grep -n '_ZENSU_TDD_CONTROL_CORE' "$HOOK" | cut -d: -f2- | g
   && check "S37 every workflow-document read goes through the core hardened reader, no bare readFileSync on the state file survives, and the module path is CALLED from the phase library's PUBLIC accessor behind its own guard rather than read from its private global" PASS \
   || check "S37 every workflow-document read goes through the core hardened reader, no bare readFileSync on the state file survives, and the module path is CALLED from the phase library's PUBLIC accessor behind its own guard rather than read from its private global (accessor=${S37_ACCESSOR:-none} spawns=$S37_SPAWNS hardened=$S37_HARDENED bare=$S37_BARE calls=$S37_CALLS guard=$S37_GUARD private-code=$S37_PRIVATE_CODE)" FAIL
 
+
+# S38 — AC-006/AC-007/AC-012. `additionalContext` is transcript-scoped, so before this the
+# whole decline died with the turn: a user returning to a stranded chain after a compaction
+# or a fork saw exactly what they saw before the disclosure existed. The note is the durable
+# half, minted on the SAME gate the operator-channel line already uses, and it carries the
+# remedy MODE rather than the ticket — the ticket is a capability token and a note is an
+# ordinary file in a session-writable directory. S36 above produced a real `envelope`
+# decline, so this reads that run's bytes rather than building a second fixture; the control
+# is a completion this hook does not judge, in its own session, which must mint nothing.
+S38_NOTE="$PROJECT/.zensu/state/review-decline-$S36.json"
+S38_BYTES=""
+[ -f "$S38_NOTE" ] && [ ! -L "$S38_NOTE" ] && S38_BYTES="$(cat "$S38_NOTE" 2>/dev/null || true)"
+
+start_session decline-note-control
+S38C="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S38C"
+log --tdd-complete --session "$S38C"
+S38C_TICKET="$(issue_ticket "$S38C")"
+S38C_ERRFILE="$ROOT/s38-control.err"
+S38C_PROMPT="$MARKER
+REVIEW-TICKET: $S38C_TICKET
+ZENSU-DELEGATED-CALLER: autopilot
+AUTOPILOT-BINDING: run=run-fixture attempt=1 chain=chain-fixture
+AUTOPILOT-STAGE: GATES"
+run_hook_capture "$S38C" general-purpose "$S38C_PROMPT" "$S38C_ERRFILE" >/dev/null
+S38C_NOTE="$PROJECT/.zensu/state/review-decline-$S38C.json"
+
+[ -n "$S38_BYTES" ] \
+  && printf '%s' "$S38_BYTES" | grep -qF -- '"schemaVersion":1' \
+  && printf '%s' "$S38_BYTES" | grep -qF -- '"kind":"envelope"' \
+  && printf '%s' "$S38_BYTES" | grep -qF -- '"subagentType":"zensu:code-reviewer"' \
+  && printf '%s' "$S38_BYTES" | grep -qE -- '"detectedAtMs":[0-9]+' \
+  && [ -n "$S36_TICKET" ] \
+  && ! printf '%s' "$S38_BYTES" | grep -qF -- "$S36_TICKET" \
+  && [ ! -e "$S38C_NOTE" ] \
+  && check "S38 a declined reviewer completion mints a durable decline note carrying the remedy mode and a timestamp but never the ticket, and a completion this hook does not judge mints none" PASS \
+  || check "S38 a declined reviewer completion mints a durable decline note carrying the remedy mode and a timestamp but never the ticket, and a completion this hook does not judge mints none (note=${#S38_BYTES} control-note=$([ -e "$S38C_NOTE" ] && echo present || echo absent))" FAIL
 echo "----"
 echo "test-post-review-tdd-scope: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
