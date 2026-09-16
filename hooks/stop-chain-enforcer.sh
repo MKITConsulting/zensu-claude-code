@@ -211,7 +211,8 @@ if ! zensu_bind_hook_session "$INPUT"; then
       # wording — but it must not overclaim either. The evidence is one ENOENT,
       # which a MOVED or renamed root and an unmounted volume produce identically,
       # so this arm holds itself to exactly the standard the sibling orphan
-      # release 60 lines above sets ("not reachable from this record", never
+      # release whose own comment reads `Deliberately says "not reachable", not
+      # "gone"` sets ("not reachable from this record", never
       # "gone"). An earlier spelling said the document "is GONE with it" and that
       # "no later Stop will enforce this chain", then closed by admitting a move
       # leaves the state intact — a self-contradiction, and both halves were
@@ -602,8 +603,14 @@ reviewer_denial_notes_reap() {
   # Cheap pre-check first: this runs on every clear, and the overwhelming
   # majority of Stops have no note to reap. Without it every Stop in every
   # session would pay for a node process to learn there is nothing to do.
+  # TWO note families share this reaper, so the pre-check asks about both before
+  # it gives up: a project holding only decline notes would otherwise keep them
+  # forever, since nothing else in the tree removes a note whose session is gone.
   set -- "$state_dir"/reviewer-spawn-denied-scv1_*.json
-  [ -f "$1" ] || return 0
+  if [ ! -f "$1" ]; then
+    set -- "$state_dir"/review-decline-scv1_*.json
+    [ -f "$1" ] || return 0
+  fi
   # The SAME TTL the doctor ages a note out against, read from the same config
   # key. A note past it is the one the doctor's own row calls safe to delete.
   # `</dev/null` for the same reason the writer below carries it: this runs inside the
@@ -624,10 +631,14 @@ reviewer_denial_notes_reap() {
   REAP_DIR="$state_dir" REAP_TTL="$ttl" node -e '
     const fs=require("node:fs"), path=require("node:path");
     const dir=process.env.REAP_DIR, ttl=Number(process.env.REAP_TTL);
-    // The same character-exact shape the writer asserts before it writes. This
-    // is the one place a Stop unlinks a file belonging to another session, so
-    // the name is pinned rather than prefix-matched.
-    const NAME=/^reviewer-spawn-denied-(scv1_[a-f0-9]{64})\.json$/;
+    // The same character-exact shapes the two writers assert before they write.
+    // This is the one place a Stop unlinks a file belonging to another session,
+    // so the names are pinned rather than prefix-matched, and the alternation is
+    // anchored on both sides for the same reason. The second family is the
+    // review-decline note minted by hooks/post-review-tdd-delegate.sh, which has
+    // the same owner binding, the same TTL and the same unreadable-is-not-reaped
+    // rule, so one walk serves both rather than two walks disagreeing about them.
+    const NAME=/^(?:reviewer-spawn-denied|review-decline)-(scv1_[a-f0-9]{64})\.json$/;
     let entries;
     try { entries=fs.readdirSync(dir); } catch (e) { process.exit(0); }
     const now=Date.now();
@@ -1695,14 +1706,14 @@ INNER_BOUND_ARGS=""
 INNER_ZERO_CHANGE_ARGS=""
 INNER_ZERO_CHANGE_NOTE=" That terminus verifies the claim before it closes anything: it refuses while 'git diff --name-only HEAD' or an untracked non-ignored file still reports a changed file, so it can never stand in for a review of real changes."
 INNER_SELF_REVIEW_ENVELOPE=" "
-INNER_REVIEW_HEADERS="whose prompt starts with exactly two header lines — first 'PRE-MERGED FINDINGS (fan-out)', second 'REVIEW-TICKET: <ticket>'"
+INNER_REVIEW_HEADERS="whose prompt starts with exactly two header lines — first 'PRE-MERGED FINDINGS (fan-out)', second 'REVIEW-TICKET: <ticket>' (the ticket line is what binds the completion to this chain; the hook matches it by content anywhere in the prompt, so a formatting slip no longer strands the chain — but the reviewer agent enters consume mode only on this exact two-line header, so a slip still costs the merged fan-out findings: the round counts, the ticket is spent, and the agent re-reviews from scratch. Rotate the ticket only when the TICKET ITSELF is unusable, which is exactly two cases and no others: when a previous completion carried no line naming the OUTSTANDING ticket at all, and when the last completion was declined AFTER its claim landed — that ticket is already spent and a fresh one is required, because a re-spawn carrying a consumed ticket is refused before any channel reports it. In every other case re-spawn with the OUTSTANDING ticket the chain still holds: if the last completion was declined on durable run state, a fresh ticket reproduces that decline and strands any spawn still in flight, so resolve the run state first; if it was declined on the Autopilot envelope in the prompt, correct the envelope and re-spawn on the same ticket)"
 INNER_REVIEW_SUFFIX=", followed by"
 if [ -n "$INNER_BOUND_RUN" ]; then
   INNER_BOUND_ARGS="$(zensu_autopilot_link_args "$INNER_BOUND_RUN" "$INNER_BOUND_ATTEMPT" "$INNER_BOUND_CHAIN")"
   INNER_ZERO_CHANGE_ARGS="${INNER_BOUND_ARGS} --outcome no-changes"
   INNER_ZERO_CHANGE_NOTE=" That terminus records 'no-changes' as this attempt's audited Autopilot outcome, so the durable run keeps a receipt that distinguishes it from a reviewed close."
   INNER_SELF_REVIEW_ENVELOPE=$' Carry this exact official three-line Autopilot envelope into the skill unchanged and exactly once:\n'"ZENSU-DELEGATED-CALLER: autopilot"$'\n'"AUTOPILOT-BINDING: run=${INNER_BOUND_RUN} attempt=${INNER_BOUND_ATTEMPT} chain=${INNER_BOUND_CHAIN}"$'\n'"AUTOPILOT-STAGE: ${INNER_BOUND_RETURN_STAGE}"$'\n'
-  INNER_REVIEW_HEADERS=$'whose prompt starts with exactly these five header lines:\nPRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: <ticket>\n'"ZENSU-DELEGATED-CALLER: autopilot"$'\n'"AUTOPILOT-BINDING: run=${INNER_BOUND_RUN} attempt=${INNER_BOUND_ATTEMPT} chain=${INNER_BOUND_CHAIN}"$'\n'"AUTOPILOT-STAGE: ${INNER_BOUND_RETURN_STAGE}"$'\n'
+  INNER_REVIEW_HEADERS=$'whose prompt starts with exactly these five header lines (the ticket line is what binds the completion to this chain; the hook matches it by content anywhere in the prompt, so a formatting slip no longer strands the chain — but the reviewer agent enters consume mode only on this exact two-line header, so a slip still costs the merged fan-out findings: the round counts, the ticket is spent, and the agent re-reviews from scratch. Rotate the ticket only when the TICKET ITSELF is unusable, which is exactly two cases and no others: when a previous completion carried no line naming the OUTSTANDING ticket at all, and when the last completion was declined AFTER its claim landed — that ticket is already spent and a fresh one is required, because a re-spawn carrying a consumed ticket is refused before any channel reports it. In every other case re-spawn with the OUTSTANDING ticket the chain still holds: if the last completion was declined on durable run state, a fresh ticket reproduces that decline and strands any spawn still in flight, so resolve the run state first; if it was declined on the Autopilot envelope in the prompt, correct the envelope and re-spawn on the same ticket):\nPRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: <ticket>\n'"ZENSU-DELEGATED-CALLER: autopilot"$'\n'"AUTOPILOT-BINDING: run=${INNER_BOUND_RUN} attempt=${INNER_BOUND_ATTEMPT} chain=${INNER_BOUND_CHAIN}"$'\n'"AUTOPILOT-STAGE: ${INNER_BOUND_RETURN_STAGE}"$'\n'
   INNER_REVIEW_SUFFIX="followed by"
 fi
 if [ "$CODE_REVIEW_DONE" = "true" ]; then

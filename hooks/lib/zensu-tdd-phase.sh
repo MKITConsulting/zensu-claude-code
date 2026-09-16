@@ -27,9 +27,42 @@ _ZENSU_TDD_CONTROL_CORE="${_ZENSU_TDD_NATIVE_PLUGIN_ROOT}/hooks/lib/session-cont
 [ -f "$_ZENSU_TDD_CONTROL_CORE" ] && [ ! -L "$_ZENSU_TDD_CONTROL_CORE" ] \
   || { return 2 2>/dev/null || exit 2; }
 _ZENSU_TDD_CHAIN_RECOVERY="${_ZENSU_TDD_NATIVE_PLUGIN_ROOT}/hooks/lib/chain-recovery-v1.js"
+_ZENSU_TDD_REVIEW_CLAIM="${_ZENSU_TDD_NATIVE_PLUGIN_ROOT}/hooks/lib/review-ticket-claim-v1.js"
+
+# The PUBLIC accessor for the native core module path, and the only spelling a
+# file outside this library may read. `_ZENSU_TDD_CONTROL_CORE` carries the
+# underscore prefix this repository reserves for an intra-file channel, so a
+# rename of it is meant to be a single-file edit; a consumer reading it across
+# the boundary turns that rename into a silent loss of whatever the consumer
+# does with the module. STATE THE REACHABLE CAUSE: an earlier wording said this
+# echoes nothing "when the derivation above refused", which is a state no caller
+# can observe — every refusal there aborts the source with `return 2` BEFORE this
+# function is declared, so wherever this name exists the variable is a non-empty
+# string. The `:-` is `set -u` hygiene, not a fallback anyone reaches. What does
+# leave a consumer holding an empty value is this accessor being renamed or
+# dropped while the consumer still calls it behind a `declare -F` guard, which is
+# why a caller's own `[ -f ]` / `[ ! -L ]` re-check stays meaningful.
+zensu_tdd_control_core() {
+  printf '%s' "${_ZENSU_TDD_CONTROL_CORE:-}"
+}
 
 _tdd_chain_recovery_module_ok() {
   [ -f "$_ZENSU_TDD_CHAIN_RECOVERY" ] && [ ! -L "$_ZENSU_TDD_CHAIN_RECOVERY" ]
+}
+
+# The PUBLIC accessor for the review-ticket claim predicate, and the only
+# spelling a file outside this library may read. It exists for the same reason
+# `zensu_tdd_control_core` does: `_ZENSU_TDD_REVIEW_CLAIM` carries the
+# underscore prefix this repository reserves for an intra-file channel. The
+# module is the ONE implementation of the conjunct set the claim transaction
+# below and `hooks/post-review-tdd-delegate.sh` both apply, so a consumer that
+# re-spelled either half would restore exactly the drift the extraction removed.
+zensu_tdd_review_ticket_claim_module() {
+  printf '%s' "${_ZENSU_TDD_REVIEW_CLAIM:-}"
+}
+
+_tdd_review_claim_module_ok() {
+  [ -f "$_ZENSU_TDD_REVIEW_CLAIM" ] && [ ! -L "$_ZENSU_TDD_REVIEW_CLAIM" ]
 }
 
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
@@ -1610,6 +1643,12 @@ tdd_issue_review_ticket() {
 _tdd_consume_review_ticket_critical() {
   local state_file="$1" session_id="$2" ticket="$3" _counter_file="${4:-}"
   local state_dir state_tmp next_file native_state_file native_state_tmp native_next_file
+  # FAIL CLOSED, and the direction is stated where the dependency is taken: this
+  # claim previously had no module dependency at all. An absent or symlinked
+  # predicate module refuses the claim rather than falling back to a local
+  # conjunct list, because a second copy here is exactly what the extraction
+  # removed. A caller sees the same rc 1 every other unreadable read produces.
+  _tdd_review_claim_module_ok || return 1
   state_dir="$(dirname "$state_file")"
   state_tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
   next_file="$(mktemp "${state_file}.next.XXXXXX" 2>/dev/null)" || {
@@ -1629,8 +1668,17 @@ _tdd_consume_review_ticket_critical() {
     return 1
   }
 
-  if ! STATE_FILE="$native_state_file" SID="$session_id" TICKET="$ticket" node -e '
+  if ! STATE_FILE="$native_state_file" SID="$session_id" TICKET="$ticket" \
+    CLAIM_MODULE="$_ZENSU_TDD_REVIEW_CLAIM" node -e '
     const fs = require("fs");
+    // The ONE implementation of the conjunct set. `hooks/post-review-tdd-delegate.sh`
+    // requires this same module for its disclosure arming read, so the two can no
+    // longer drift — and the dangerous direction is the one a source comparison
+    // could not see: a hook STRICTER than this claim reports no outstanding ticket
+    // for a chain this claim would accept, and every disclosure in that file goes
+    // silent. A module that will not load throws here, which is the same
+    // fail-closed direction the guard above already took.
+    const claim = require(process.env.CLAIM_MODULE);
     let s;
     try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
     catch (_) { process.exit(3); }
@@ -1661,24 +1709,10 @@ _tdd_consume_review_ticket_critical() {
         outcome: s.chainOutcome
       };
     }
-    const valid = s && typeof s === "object" && !Array.isArray(s)
-      && s.session_id_hash === `sha256:${process.env.SID.slice("scv1_".length)}`
-      && typeof s.phase === "string"
-      && Array.isArray(s.history)
-      && Array.isArray(s.bypasses)
-      && typeof s.active === "boolean" && s.active === true
-      && typeof s.vanilla === "boolean"
-      && typeof s.implComplete === "boolean" && s.implComplete === true
-      && typeof s.chainDone === "boolean" && s.chainDone === false
-      && typeof s.codeReviewDone === "boolean" && s.codeReviewDone === false
-      && typeof s.selfReviewFixed === "boolean"
-      && typeof s.reviewTicket === "string"
-      && s.reviewTicket === process.env.TICKET
-      && typeof s.reviewTicketConsumed === "boolean"
-      && s.reviewTicketConsumed === false
-      && Number.isSafeInteger(s.reviewRound) && s.reviewRound >= 0
-      && s.reviewRound < Number.MAX_SAFE_INTEGER;
-    if (!valid) process.exit(3);
+    // The ticket EQUALITY stays on this side rather than in the module: it binds
+    // a value the delegate hook does not hold at its own read, which is why that
+    // carrier asks the module for the OUTSTANDING ticket instead of matching one.
+    if (!claim.claimableWith(s, process.env.SID, process.env.TICKET)) process.exit(3);
 
     // The ticket-bound Session Control document is the sole review-budget
     // authority. No parallel rounds file is consulted or written.
@@ -3707,9 +3741,10 @@ case "${OSTYPE:-}" in
     # Export the module paths only after they were derived from, and
     # identity-checked against, the executing library above. Exported helpers
     # must never fall back to an inherited ZENSU_* module path.
-    export _ZENSU_TDD_CONTROL_CORE _ZENSU_TDD_NATIVE_PLUGIN_ROOT _ZENSU_TDD_CHAIN_RECOVERY
+    export _ZENSU_TDD_CONTROL_CORE _ZENSU_TDD_NATIVE_PLUGIN_ROOT _ZENSU_TDD_CHAIN_RECOVERY _ZENSU_TDD_REVIEW_CLAIM
     export -f _tdd_core_lock_keeper 2>/dev/null || true
-    export -f _tdd_winpid_from_ps _tdd_is_msys_runtime _tdd_native_path _tdd_native_process_pid _tdd_context_binding tdd_activation_status tdd_state_file _tdd_bound_project_root _tdd_native_project_path _tdd_paths_safe _tdd_path_safe _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical _tdd_read_validated_state tdd_state_status tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_increment_counter_critical tdd_increment_counter tdd_reset_review_budget _tdd_write_clear_critical tdd_clear_session _tdd_clear_standalone_session_critical tdd_clear_standalone_session _tdd_clear_autopilot_session_critical tdd_clear_autopilot_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session tdd_autopilot_context tdd_chain_snapshot _tdd_autopilot_link_id_shape_ok _tdd_autopilot_attempt_shape_ok _tdd_mark_impl_complete_bound_critical tdd_mark_impl_complete_bound _tdd_mark_impl_complete_standalone_critical tdd_mark_impl_complete_standalone _tdd_set_chain_outcome_critical tdd_set_chain_outcome _tdd_finish_autopilot_chain_critical tdd_finish_autopilot_chain _tdd_review_ticket_shape_ok _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket_context tdd_consume_review_ticket _tdd_mark_autopilot_max_round_handoff_critical tdd_mark_autopilot_max_round_handoff _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review _tdd_rearm_autopilot_review_critical tdd_rearm_autopilot_review tdd_get_flag tdd_get_counter tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses zensu_bypass_display _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_pending_review_owned_by_other tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale tdd_seed_deferred_review _tdd_chain_recovery_module_ok _tdd_chain_preflight tdd_chain_diagnostics _tdd_recover_chain_critical tdd_recover_chain 2>/dev/null || true
+    export -f zensu_tdd_control_core zensu_tdd_review_ticket_claim_module 2>/dev/null || true
+    export -f _tdd_winpid_from_ps _tdd_is_msys_runtime _tdd_native_path _tdd_native_process_pid _tdd_context_binding tdd_activation_status tdd_state_file _tdd_bound_project_root _tdd_native_project_path _tdd_paths_safe _tdd_path_safe _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical _tdd_read_validated_state tdd_state_status tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_increment_counter_critical tdd_increment_counter tdd_reset_review_budget _tdd_write_clear_critical tdd_clear_session _tdd_clear_standalone_session_critical tdd_clear_standalone_session _tdd_clear_autopilot_session_critical tdd_clear_autopilot_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session tdd_autopilot_context tdd_chain_snapshot _tdd_autopilot_link_id_shape_ok _tdd_autopilot_attempt_shape_ok _tdd_mark_impl_complete_bound_critical tdd_mark_impl_complete_bound _tdd_mark_impl_complete_standalone_critical tdd_mark_impl_complete_standalone _tdd_set_chain_outcome_critical tdd_set_chain_outcome _tdd_finish_autopilot_chain_critical tdd_finish_autopilot_chain _tdd_review_ticket_shape_ok _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket_context tdd_consume_review_ticket _tdd_mark_autopilot_max_round_handoff_critical tdd_mark_autopilot_max_round_handoff _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review _tdd_rearm_autopilot_review_critical tdd_rearm_autopilot_review tdd_get_flag tdd_get_counter tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses zensu_bypass_display _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_pending_review_owned_by_other tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale tdd_seed_deferred_review _tdd_chain_recovery_module_ok _tdd_review_claim_module_ok _tdd_chain_preflight tdd_chain_diagnostics _tdd_recover_chain_critical tdd_recover_chain 2>/dev/null || true
     export -f _tdd_cancel_pending_review_claim_core tdd_reset_pending_review_claim 2>/dev/null || true
     ;;
 esac

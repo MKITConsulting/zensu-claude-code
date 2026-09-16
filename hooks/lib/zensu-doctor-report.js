@@ -143,17 +143,35 @@ var SETTINGS_MAX_BYTES = 1048576;
 // Do NOT read the sentence above as a census of the tree. An earlier version named
 // stop-chain-enforcer.sh's DENIAL_RULE as "a third copy" and CLAUDE.md turned that
 // into "the three copies — check them by hand", which made the by-hand instruction
-// unfollowable: the literal really lives in EIGHT files under hooks/ (27 occurrences,
-// measured 2026-08-23 — the grep instruction below is one of them, so the occurrence
-// number moves when this comment is edited while the FILE count does not; that is the
-// second reason to trust the grep over any number written here), and two of them are
+// unfollowable: the literal really lives in TEN files under hooks/. NO LINE COUNT IS
+// WRITTEN HERE, and that omission is the fix rather than an oversight: the measured
+// figure is a LINE count (never an occurrence count — several of those lines carry the
+// literal twice), it is pinned in exactly one place, and this comment is itself one of
+// the lines it would be counting. So a reword here moves the true count, turns the
+// pinned carrier red, and leaves a second copy beside it silently stating the old
+// number. Read the figure off CLAUDE.md, which T47 in
+// tests/structure/test-stop-enforcer-self-review-routing.sh measures against the tree
+// with grep -rhF … | wc -l. The FILE count does not move when this comment is edited,
+// which is why it is the one number this copy may carry. The figures this comment
+// carried before — EIGHT files, 27 occurrences, dated 2026-08-23 — had
+// drifted far enough to contradict CLAUDE.md's own census of the same set, which T47 in
+// tests/structure/test-stop-enforcer-self-review-routing.sh measures against the tree
+// while nothing measures this copy), and two of them are
 // functional comparisons a rename breaks
 // silently — post-review-tdd-delegate.sh's SUBAGENT_TYPE test and
 // claude-principal-v1.js's list entry. An enumeration in a comment goes stale the next
 // time one is added, so the instruction is a GREP, not a list: before renaming this
-// identity, `grep -rn 'zensu:code-reviewer' hooks/` and change every site.
+// identity, run `grep -rn 'zensu:code-reviewer' hooks/ skills/ agents/ docs/ evals/
+// templates/` and change every site. The RENAME roots and the CENSUS root are
+// deliberately different, and reading one for the other is the defect: the figure
+// above is measured over `hooks/` alone because that is what T47 derives, while the
+// literal also lives under `skills/` and `docs/`, so a rename driven off the narrow
+// root walks straight past them.
 // One pair IS machine-checked — P1by pins THIS constant against the exporting one, so
-// the two spellings cannot drift apart unnoticed. The other six files are not pinned.
+// the two spellings cannot drift apart unnoticed. A second carrier is pinned too, by T38
+// in the routing suite, so the other seven files are not pinned. That residual is
+// arithmetic over the two facts above rather than an independent claim: re-derive it
+// when a carrier is added or a pin lands, and never carry it forward.
 var REVIEWER_AGENT = 'zensu:code-reviewer';
 
 // The arming set is spelled ONCE and consumed by both halves of the ladder below. It is also
@@ -2380,6 +2398,85 @@ function reviewerDenialRows(entries, dir, nowMs) {
   }
 }
 
+// The decline note's own name shape. Same directory, same session-key class and
+// the same sibling binding as `reviewerDenialRows` — a note is only this
+// plugin's word while a `tdd-phase-<key>.json` for the same session still
+// exists, because `.zensu/state/` is writable from inside any session in the
+// project and a note judged on its own contents alone would let anything able to
+// write there mint a row about a chain that was never declined.
+var DECLINE_NOTE_RE = /^review-decline-(scv1_[a-f0-9]{64})\.json$/;
+// The remedy MODE is the delegate hook's own vocabulary, spelled in a shell
+// `case` no `require` can reach — unlike `reviewerDenialRows`, whose kinds come
+// from a JS module it loads. So the kind is NOT vetted against a set here
+// (`classifyDenialNote` is called with an empty allowlist, which switches its
+// membership conjunct off); what bounds it is this LABEL class, because the
+// value is echoed into a row a model relays. Anything outside it renders as
+// `unclassified` rather than suppressing the finding — the decline is the
+// finding, the mode is decoration, which is the rule the sibling row already
+// states for its own kind.
+var DECLINE_MODE_RE = /^[a-z][a-z-]{0,31}$/;
+
+function reviewDeclineRows(entries, dir, nowMs) {
+  var notes = entries.filter(function (f) { return DECLINE_NOTE_RE.test(f); }).sort();
+  if (!notes.length) return;
+  var ttl = ttlHours();
+  var modes = Object.create(null);
+  var valid = 0;
+  var stale = 0;
+  var rejected = 0;
+  notes.forEach(function (f) {
+    var parsed = readNoteJson(path.join(dir, f));
+    if (parsed === NOTE_MISSING) return;
+    var owner = DECLINE_NOTE_RE.exec(f);
+    if (!owner || entries.indexOf('tdd-phase-' + owner[1] + '.json') === -1) {
+      rejected += 1;
+      return;
+    }
+    // The SHARED shape-and-freshness judgement, never a second copy of it. The
+    // empty allowlist is what makes it usable here: this artifact's vocabulary
+    // lives in shell, so the membership conjunct is switched off and the label
+    // bound below stands in for it.
+    var verdict = classifyDenialNote(parsed, [], ttl, nowMs);
+    if (verdict !== 'live') {
+      if (verdict === 'stale') stale += 1;
+      else rejected += 1;
+      return;
+    }
+    var mode = DECLINE_MODE_RE.test(parsed.kind) ? parsed.kind : 'unclassified';
+    modes[mode] = (modes[mode] || 0) + 1;
+    valid += 1;
+  });
+  if (valid) {
+    var summary = Object.keys(modes).sort().map(function (k) {
+      return k + '×' + modes[k];
+    }).join(', ');
+    // The lead states the GATE and never the outcome. A `spent` note is minted
+    // AFTER the claim landed, so "the round was not recorded" — which this row
+    // said for one round — is false for exactly that mode, and it is the mode a
+    // reader is most likely to meet. The retirement sentence is bounded the same
+    // way: the delegate clears the note when a later completion CLAIMS the
+    // ticket, and nothing else retires a BOUND note except the TTL and the Stop
+    // reaper, so a closed chain does not clear one on its own.
+    line(WARN, 'state: ' + valid + ' session(s) where a reviewer completion was DECLINED while the chain '
+      + 'still held an unclaimed review ticket (' + summary + ') — the mode names WHICH gate refused it, '
+      + 'and the chain may still be waiting for a completion it can bind. Run '
+      + '`zensu-log.sh --chain-status` from the session that owns the chain for its current shape and '
+      + 'next command; /zensu:recover-chain documents every shape that can be reported. A note is '
+      + 'retired when a later completion CLAIMS the ticket; otherwise it ages out against '
+      + 'pendingReviewTtlHours and a later Stop in this project reaps it.');
+  }
+  if (stale) {
+    line(WARN, 'state: ' + stale + ' reviewer-decline note(s) older than ' + ttl + 'h — the session that '
+      + 'wrote them never ended a turn again, so nothing retired them; they say nothing about the current '
+      + 'state and are safe to delete.');
+  }
+  if (rejected) {
+    line(WARN, 'state: ' + rejected + ' reviewer-decline note(s) this plugin did not write (unreadable, '
+      + 'oversized, an unrecognized schema, an impossible timestamp, or no matching session) — NOT counted '
+      + 'as declines; delete them.');
+  }
+}
+
 function truncatedList(rows) {
   var listed = rows.slice(0, CHAIN_ROW_LIMIT);
   var overflow = rows.length - listed.length;
@@ -3681,6 +3778,7 @@ function stateBlock(nowMs) {
     chainRows(states, nowMs, entries, dir);
   }
   reviewerDenialRows(entries, dir, nowMs);
+  reviewDeclineRows(entries, dir, nowMs);
   // Same two arguments `chainRows` already takes, plus the clock and this
   // session's key. It sits OUTSIDE the workflow-document branch above on
   // purpose: an Autopilot run holding the tree is a finding whether or not this

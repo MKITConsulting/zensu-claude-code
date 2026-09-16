@@ -126,7 +126,7 @@ the user verbatim before doing anything else:
 | `no-session` | No chain is armed | `/zensu:tdd` |
 | `implementing` | Armed, implementation not marked complete | `--tdd-complete` (the report renders the bound form when the chain is Autopilot-bound) |
 | `ready-for-review` | Idle chain, ready for a reviewer | `--review-ticket`, then spawn `zensu:code-reviewer` |
-| `ticket-unclaimed` | A ticket is outstanding and unconsumed | let that reviewer finish, or issue a fresh ticket and re-spawn |
+| `ticket-unclaimed` | A ticket is outstanding and unconsumed | let that reviewer finish; otherwise, once no spawn is in flight AND nothing refused the last completion on durable run state, issue a fresh ticket and re-spawn |
 | `ticket-spent` | A consumed ticket is retained at round 0 (the shape `/zensu:reset-review-limit` leaves behind) | `--review-ticket`; the retained ticket can never be claimed again |
 | `ticket-lost` | Rounds were consumed and the ticket is gone | `--review-ticket`; the consumed rounds stand |
 | `review-in-flight` | A ticket is claimed, the round is open | the ticket-bound terminus `--code-review-done --claimed-review-ticket` |

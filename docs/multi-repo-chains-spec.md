@@ -27,7 +27,7 @@ Six sites, all single-root.
 
 **The anchor has one resolver.** `tdd_state_file()` builds
 `<project_root>/.zensu/state/tdd-phase-<session>.json` from
-`zensu_resolve_project_dir()` (`hooks/lib/zensu-tdd-phase.sh:144-151`), and
+`zensu_resolve_project_dir()` (`hooks/lib/zensu-tdd-phase.sh:161-168`), and
 `pre-bash-source-write-gate.sh:266-275` refuses an empty recorded root outright
 rather than letting the parser fall back to the payload cwd. The STATE anchor is
 therefore a trusted value derived from the immutable Session Control record.

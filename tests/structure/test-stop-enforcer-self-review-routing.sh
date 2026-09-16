@@ -1017,6 +1017,24 @@ else
   check "T47 the CLAUDE.md carrier census matches the tree ($CENSUS_FILES files, $CENSUS_LINES lines, unpinned=$CENSUS_UNPINNED)" FAIL
 fi
 
+# T60: the two INNER_REVIEW_HEADERS variants are HAND-PARALLEL and were pinned by
+# nothing, so the content-matching clause landed on the standalone arm alone for a
+# round. The bound arm is the one carrying three extra model-authored header lines,
+# i.e. the highest formatting-slip exposure, so it is the arm that most needs it.
+HEADER_CLAUSE="the ticket line is what binds the completion to this chain; the hook matches it by content anywhere in the prompt, so a formatting slip no longer strands the chain"
+HEADER_VARIANTS="$(grep -c 'INNER_REVIEW_HEADERS=' "$STOP" || true)"
+# CO-LOCATED, not merely co-resident. Counting the clause file-wide let any
+# second occurrence on a NON-assignment line — a comment restating the contract,
+# which is this file's house style — offset a variant that had lost it, so the
+# one-sided placement T60 exists to catch would have passed. Both clauses sit on
+# their assignment lines today, so the tightening is behaviour-preserving.
+HEADER_CLAUSED="$(grep 'INNER_REVIEW_HEADERS=' "$STOP" | grep -cF -- "$HEADER_CLAUSE" || true)"
+if [ "$HEADER_VARIANTS" -ge 2 ] && [ "$HEADER_CLAUSED" = "$HEADER_VARIANTS" ]; then
+  check "T60 every INNER_REVIEW_HEADERS variant carries the content-matching clause ($HEADER_VARIANTS/$HEADER_VARIANTS)" PASS
+else
+  check "T60 every INNER_REVIEW_HEADERS variant carries the content-matching clause (variants=$HEADER_VARIANTS claused=$HEADER_CLAUSED)" FAIL
+fi
+
 # The three KNOWN BOUND notes. BOUND 2's remedy named a shared JS module, which is
 # exactly as unreachable from the three POSIX-shell render sites as the shell
 # constant is from JS. BOUND 3 shipped a hand-maintained roster of three files while
@@ -1376,6 +1394,105 @@ else
   check "T59 the record root's config overlay governs the flag, the ambient root's does not" FAIL
 fi
 
+
+# T61 — the content-matching clause T60 pins tells the model a slip no longer STRANDS the
+# chain, and stopping there reads as "the header does not matter". It does: the reviewer
+# AGENT selects consume mode positionally, so a slip spends the ticket, counts the round
+# and throws the merged fan-out away. The second half is the ROTATION rule. Both clauses
+# on BOTH assignment lines, and both in the reason a model actually reads.
+# The rotation rule has TWO arms and pinning only the lead was ONE-SIDED: with the lead
+# alone pinned, the spent arm could be deleted from either variant with every check green,
+# and the model would be told to keep re-spawning with a consumed ticket.
+#
+# The LEAD literal moved, and the reason belongs here rather than only in the commit that
+# moved it. It used to read "Rotate the ticket only when the PROMPT was what a previous
+# completion was refused on", which its own second arm contradicted: a decline AFTER the
+# claim landed is not a prompt refusal, yet that arm states a fresh ticket is REQUIRED
+# there. The rule the tree actually implements keys on the TICKET rather than on which
+# input was refused — rotate when the ticket was never matched at all, or when it is
+# already spent — so the lead now names that, and both prompt-decided delegate modes
+# (`envelope`, `envelope-record`) withhold the rotation in agreement with it rather than
+# as an exception to it.
+T61_COST='the reviewer agent enters consume mode only on this exact two-line header'
+T61_ROTATE='Rotate the ticket only when the TICKET ITSELF is unusable'
+T61_SPENT='that ticket is already spent and a fresh one is required'
+T61_VARIANTS="$(grep -c 'INNER_REVIEW_HEADERS=' "$STOP" || true)"
+T61_COSTED="$(grep 'INNER_REVIEW_HEADERS=' "$STOP" | grep -cF -- "$T61_COST" || true)"
+T61_ROTATED="$(grep 'INNER_REVIEW_HEADERS=' "$STOP" | grep -cF -- "$T61_ROTATE" || true)"
+T61_SPENTED="$(grep 'INNER_REVIEW_HEADERS=' "$STOP" | grep -cF -- "$T61_SPENT" || true)"
+if [ "$T61_VARIANTS" -ge 2 ] \
+  && [ "$T61_COSTED" = "$T61_VARIANTS" ] && [ "$T61_ROTATED" = "$T61_VARIANTS" ] \
+  && [ "$T61_SPENTED" = "$T61_VARIANTS" ] \
+  && printf '%s' "$REASON8" | grep -qF 'Resume the /zensu:tdd Phase 6 review sequence' \
+  && printf '%s' "$REASON8" | grep -qF -- "$T61_COST" \
+  && printf '%s' "$REASON8" | grep -qF -- "$T61_ROTATE" \
+  && printf '%s' "$REASON8" | grep -qF -- "$T61_SPENT"; then
+  check "T61 every INNER_REVIEW_HEADERS variant carries the header-slip cost and BOTH arms of the conditional-rotation clause, and the emitted reason renders all three ($T61_VARIANTS/$T61_VARIANTS)" PASS
+else
+  check "T61 every INNER_REVIEW_HEADERS variant carries the header-slip cost and BOTH arms of the conditional-rotation clause, and the emitted reason renders all three (variants=$T61_VARIANTS cost=$T61_COSTED rotate=$T61_ROTATED spent=$T61_SPENTED)" FAIL
+fi
+
+# T62 — the SKILL is where the first spawn of every chain is ordered, before any hook
+# directive exists, so its step 5 is the one carrier a chain reads BEFORE it can slip.
+# It stated the header as an absolute and called any duplicate envelope a fail-closed
+# blocker; the hook accepts a byte-identical repeat and refuses only two regex-valid
+# lines that DIFFER, so the skill was stricter than the code it describes and the cost
+# of a header slip was stated nowhere.
+T62_SKILL="$PLUGIN_DIR/skills/tdd/SKILL.md"
+T62_CONTENT="$(grep -cF -- 'binds a completion to this chain by CONTENT' "$T62_SKILL" || true)"
+T62_SLIP="$(grep -cF -- 'throws away the merged fan-out' "$T62_SKILL" || true)"
+T62_REPEAT="$(grep -cF -- 'a byte-identical REPEAT of a line is accepted' "$T62_SKILL" || true)"
+T62_OLD="$(grep -cF -- 'A partial, duplicate, malformed, or conflicting envelope is a fail-closed blocker' "$T62_SKILL" || true)"
+T62_HEADERS="$(grep -cF -- 'MUST start with exactly two header lines' "$T62_SKILL" || true)"
+if [ "$T62_CONTENT" -ge 1 ] && [ "$T62_SLIP" -ge 1 ] && [ "$T62_REPEAT" -ge 1 ] \
+  && [ "$T62_OLD" -eq 0 ] && [ "$T62_HEADERS" -ge 1 ]; then
+  check "T62 the TDD skill states the content binding, the header-slip cost and the byte-identical envelope repeat" PASS
+else
+  check "T62 the TDD skill states the content binding, the header-slip cost and the byte-identical envelope repeat (content=$T62_CONTENT slip=$T62_SLIP repeat=$T62_REPEAT retired=$T62_OLD headers=$T62_HEADERS)" FAIL
+fi
+
+# T63 — the conditional-rotation rule is taught in TWO files by TWO different surfaces, and
+# T61 holds it only inside this one. `hooks/post-review-tdd-delegate.sh` carries the same
+# split as its own decline remedies: the `spent` arm tells a model whose claim already landed
+# to MINT a replacement, and the `runstate` arm tells a model refused on durable run state to
+# re-spawn with the ticket the chain still holds. Those are the two arms of the Stop clause,
+# one file over, with nothing comparing them — so a reword on either side could leave the two
+# surfaces prescribing opposite actions for the same state, which is the contradiction the
+# split was introduced to remove. Both directions, on BOTH Stop variants, with a control that
+# each delegate remedy was actually extracted.
+#
+# SCOPE, stated because the check title is easy to over-read: each side is held to its OWN
+# literals. The two needle sets are DISJOINT and nothing is matched across the file boundary,
+# so this catches a remedy that stops saying what its own mode requires and CANNOT catch the
+# two surfaces drifting into two different correct-looking wordings of one rule.
+#
+# The extraction is ANCHORED and counted. A bare substring grep also matches a COMMENT quoting
+# the declaration — this hook carries such prose, and so does the neighbouring section of
+# CLAUDE.md that a maintainer might paste in — and it matches a SECOND declaration too, so the
+# needles would then be evaluated over a concatenation of both lines and could pass with the
+# real remedy gutted. Exactly one anchored declaration per name, or the check fails and says so.
+T63_DELEGATE="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
+T63_SPENT_DECLS="$(grep -cE '^[[:space:]]*local spent_remedy=' "$T63_DELEGATE" || true)"
+T63_RUNSTATE_DECLS="$(grep -cE '^[[:space:]]*local runstate_remedy=' "$T63_DELEGATE" || true)"
+T63_SPENT_REMEDY="$(grep -E '^[[:space:]]*local spent_remedy=' "$T63_DELEGATE" || true)"
+T63_RUNSTATE_REMEDY="$(grep -E '^[[:space:]]*local runstate_remedy=' "$T63_DELEGATE" || true)"
+T63_VARIANTS="$(grep -c 'INNER_REVIEW_HEADERS=' "$STOP" || true)"
+T63_STOP_SPENT="$(grep 'INNER_REVIEW_HEADERS=' "$STOP" | grep -cF -- 'already spent and a fresh one is required' || true)"
+T63_STOP_HOLD="$(grep 'INNER_REVIEW_HEADERS=' "$STOP" | grep -cF -- 'the OUTSTANDING ticket the chain still holds' || true)"
+T63_DELEGATE_MINT=0
+T63_DELEGATE_HOLD=0
+printf '%s' "$T63_SPENT_REMEDY" | grep -qF -- '--review-ticket' \
+  && printf '%s' "$T63_SPENT_REMEDY" | grep -qF -- 'Mint a fresh' && T63_DELEGATE_MINT=1
+printf '%s' "$T63_RUNSTATE_REMEDY" | grep -qF -- 'Do NOT issue a fresh review ticket' \
+  && printf '%s' "$T63_RUNSTATE_REMEDY" | grep -qF -- 'the ticket the chain already holds' \
+  && T63_DELEGATE_HOLD=1
+if [ "$T63_SPENT_DECLS" -eq 1 ] && [ "$T63_RUNSTATE_DECLS" -eq 1 ] && [ "$T63_VARIANTS" -ge 2 ] \
+  && [ "$T63_DELEGATE_MINT" -eq 1 ] && [ "$T63_DELEGATE_HOLD" -eq 1 ] \
+  && [ "$T63_STOP_SPENT" = "$T63_VARIANTS" ] && [ "$T63_STOP_HOLD" = "$T63_VARIANTS" ]; then
+  check "T63 the delegate's spent and runstate remedies each keep their own rotation arm and every Stop header variant states both ($T63_VARIANTS/$T63_VARIANTS)" PASS
+else
+  check "T63 the delegate's spent and runstate remedies each keep their own rotation arm and every Stop header variant states both (spent-decls=$T63_SPENT_DECLS runstate-decls=$T63_RUNSTATE_DECLS mint=$T63_DELEGATE_MINT hold=$T63_DELEGATE_HOLD variants=$T63_VARIANTS stop-spent=$T63_STOP_SPENT stop-hold=$T63_STOP_HOLD)" FAIL
+fi
 
 echo "----"
 echo "test-stop-enforcer-self-review-routing: $PASS PASS / $FAIL FAIL"

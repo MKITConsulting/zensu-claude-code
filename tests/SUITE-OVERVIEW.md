@@ -15,15 +15,19 @@ new suite file and its manifest entry must land in the same commit, or every mod
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
 reconciled to that manifest (150 = 143 + 7, re-derived from the JSON rather than incremented:
 `ciStructureTests` holds 143 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 150). The previous figures here read 148 = 141 + 7 while the manifest already held 142
-CI entries, so they had drifted by one before `test-vanished-session-cwd.sh` added the 143rd.
+returns 150). **That derivation is the point of this paragraph and it went stale TWICE anyway** —
+it read 147 = 140 + 7 while §1 already said 148 and the tree measured 148, and it then read
+148 = 141 + 7 while the manifest already held 142 CI entries, so it had drifted by one again
+before `test-vanished-session-cwd.sh` added the 143rd. Each time, the one place that claims to
+reconcile the counts disagreed with both the section it reconciles and the directory it counts.
+Re-derive it from the JSON on every suite addition rather than carrying it forward.
 **§3 is NOT fully reconciled to it**, and the residual is stated rather than
 asserted away: its eleven CI group headers sum to 142 against 143 CI-classified suites, so one CI
 suite appears in no §3 group. That suite is `test-session-trail-lineage.sh`, re-derived BY NAME
-this time by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
+by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
 §"Bash gates, witness & secrets", and the reviewer-spawn grant, filed under §"Review chain &
 findings". §7's profile table was re-derived from `tests/profiles/windows-ci.v1.json` rather than
-described, so its eight shard ids and their membership are the JSON's own, and the entry total
+described, so its nine shard ids and their membership are the JSON's own, and the entry total
 is **43**.
 
 **Section 4's own header numeral was DROPPED rather than corrected**, so exactly one place
@@ -57,12 +61,12 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **151** — 144 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **144 structure suites + 5 offline evals = 149 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 151 − 144 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **151** — 144 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes); counts pinned by `windows-ci-contract.test.js` |
+| *(reconciliation)* | a `--ci` run reports **144 structure suites + 5 offline evals = 149 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 151 − 144 gap | counts pinned by `windows-ci-contract.test.js` |
 | `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites |
-| Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
+| Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh`; count pinned by `windows-ci-contract.test.js` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
-| Windows contract profiles | **8** (`windows-shard-1`…`-8`, 43 suite entries) | `ci.yml` matrix, `run-profile.js` |
+| Windows contract profiles | **9** (`windows-shard-1`…`-9`, 43 suite entries) | `ci.yml` matrix, `run-profile.js`; cell pinned by `windows-ci-contract.test.js` |
 | Windows safety shards | scheduled/manual matrix | `windows-safety.yml` |
 | Approx. assertions in structure layer | **~4,200** (~3,740 in the CI set) | — |
 
@@ -309,6 +313,7 @@ that suite's failure.
 | `chain-recovery-v1.test.js` | 21 | `test-chain-recover.sh` | chain shape lattice + rearm-receipt predicate |
 | `plugin-data-guard-v1.test.js` | 37 | `test-plugin-data-guard.sh` (G38) | plugin-data containment: the separator class both ways, both resolution bounds, the truncated-walk refusal, the filesystem-root and containing-store arms, the containment export-shape arm via a copied module beside a stub parser, the cwd ranking, and the realpath fast path over targets that exist |
 | `reviewer-spawn-denial-v1.test.js` | 29 | `test-stop-enforcer-self-review-routing.sh` | host-refused reviewer spawn: structural `tool_use_id` keying, the host error flag, the marker prefix, tail/line bounds, degrade-to-none |
+| `review-ticket-claim-v1.test.js` | 11 | `test-post-review-tdd-scope.sh` (S0) | the ONE review-ticket claim predicate both `node -e` programs call: the ticket-shape and session-key rules, the chain-live conjunct set, the outstanding-ticket-slot predicate, and that a hook arming its disclosure can never be STRICTER than the claim it mirrors — the direction that would otherwise silence every decline with the whole suite green |
 | `plan-payload-v1.test.js` | 20 | `test-plan-payload-fallback.sh` | plan-source precedence table, hardened plan-file reader refusals, O_NOFOLLOW-unavailable fallback |
 | `zensu-doctor-invocation.test.js` | 26 | `test-versioned-plugin-upgrade.sh` | `/zensu:doctor` invocation allowlist — driven from that suite, which binds it as `RECOGNIZER_UNIT` and grades it against a registered-case floor; it has no `run-all.sh` entry of its own, because discovery is `test-*.sh` only |
 | `review-evidence-sweep-v1.test.js` | 32 | `test-versioned-plugin-upgrade.sh` | superseded-lease sweep: the ownership selector, the canonicalized repair root, and the ancestor probe that separates *no store here* from *an ancestor is a file* |
@@ -325,7 +330,7 @@ that suite's failure.
 | `fixture-mutation-watch.test.js` | 19 | `test-claude-promptfoo-wrapper.sh` | fixture-event classification: the gated classes (`.git`, the watch root's own name, run-owned ancestors) adjudicated by the manifest, ordinary paths by touch-after-start, and that both watch backends route through one decision spelled once |
 | `session-control-lineage.test.js` | 13 | `test-versioned-plugin-upgrade.sh` | runtime-lineage axis: same-major (same-minor while major is `0`), never-backwards, sibling plugin root |
 | `deferred-review-claim-cases.test.js` | 11 | `test-deferred-review-claim.sh` | deferred-claim case table |
-| `windows-ci-contract.test.js` | 11 | `test-windows-ci-contract.sh` | Windows CI manifest invariants |
+| `windows-ci-contract.test.js` | 13 | `test-windows-ci-contract.sh` | Windows CI manifest invariants, plus the §7 profile inventory both suite documents restate (derived from the manifest and compared in both directions) |
 | `windows-observation.test.js` | 11 | Windows safety | observation summarizer |
 | `claude-stream-render.test.js` | 6 | `test-claude-promptfoo-wrapper.sh` | stream renderer |
 | `windows-safety-shard.test.js` | 5 | Windows safety | shard partitioning (no duplication or loss) |
@@ -395,14 +400,14 @@ assert, `# ` = comment.
 
 ## 7. Windows contract profiles (`tests/profiles/windows-ci.v1.json`)
 
-8 bounded profiles, 43 suite entries, run as a blocking PR matrix in `ci.yml` via
+9 bounded profiles, 43 suite entries, run as a blocking PR matrix in `ci.yml` via
 `node tests/run-profile.js <profile>`. The table below is re-derived from the JSON rather
 than described — the previous five-profile layout (`windows-reset-session`,
 `windows-leases-routing`, `windows-native-state`, `windows-installed-core`,
 `windows-native-branches`) no longer exists under any of those names.
 The reviewer-spawn-allow suite is deliberately NOT among them — see CLAUDE.md §"Reviewer-Spawn
 Grant", known gaps.
-`tests/structure/windows-ci-contract.test.js` pins exactly these eight keys and the
+`tests/structure/windows-ci-contract.test.js` pins exactly these nine keys and the
 43-entry total, so a shard renamed there and not here is drift this table cannot catch
 on its own:
 
@@ -412,10 +417,11 @@ on its own:
 | `windows-shard-2` | 8 | installed-wrapper, msys-runtime-boundaries, pre-edit-hook-mirror, reviewer-capability-gate, runtime-fixture-installer-concurrency, session-control-core, upgrade-hook-large-identity, versioned-plugin-upgrade |
 | `windows-shard-3` | 7 | autopilot-release-cli, deferred-reset-races, file-exists-path-transport, msys-special-plugin-module-boundaries, session-start-banner, vcs-review-marker-reconcile, windows-profile-lifecycle-contract |
 | `windows-shard-4` | 3 | best-solution-first, deferred-claim-adoption, tdd-state-junction-safety |
-| `windows-shard-5` | 7 | autopilot-plan-delegate, coverage-report-windows-paths, post-review-self-review-handoff, session-id-v1, session-safe-file-read, upgrade-provider-zero-launch, windows-portability-guards |
+| `windows-shard-5` | 6 | autopilot-plan-delegate, coverage-report-windows-paths, session-id-v1, session-safe-file-read, upgrade-provider-zero-launch, windows-portability-guards |
 | `windows-shard-6` | 5 | bash-source-write-gate, deferred-transfer-reset, marketplace-fixture, session-control-claude, upgrade-process-windows-boundaries |
 | `windows-shard-7` | 1 | stop-enforcer-self-review-routing |
 | `windows-shard-8` | 3 | session-trail-lineage, review-worker-evidence-lease, plan-payload-path-transport |
+| `windows-shard-9` | 1 | post-review-self-review-handoff |
 
 Runner guarantees: full manifest + audited command catalog validated before any child
 starts; every suite bound to a validated content digest; per-suite **and** 30-minute
@@ -423,7 +429,7 @@ per-profile deadlines; a supervisor alive until the whole process tree is dead;
 disposable home/temp tree; strict env allowlist (no credentials, auth homes,
 interpreter preloads, or live/API modes).
 
-The aggregate check `Deterministic suite (windows-latest)` downloads exactly those 8
+The aggregate check `Deterministic suite (windows-latest)` downloads exactly those 9
 reports and validates SHA / run-attempt consistency, the exact ordered suite inventory,
 and a complete execution-contract digest binding manifest + catalog + runner +
 supervisor + Job-Object helper + summarizer + workflow config + every referenced suite
@@ -433,7 +439,7 @@ file. Fails closed on missing, failed, timed-out, or incompletely-cleaned profil
 
 | Workflow | Invokes |
 |---|---|
-| `ci.yml` | `bash tests/run-all.sh --ci` (Ubuntu, blocking) + the 8 Windows profiles via `run-profile.js` |
+| `ci.yml` | `bash tests/run-all.sh --ci` (Ubuntu, blocking) + the 9 Windows profiles via `run-profile.js` |
 | `release.yml` | `bash tests/run-all.sh --ci` **twice** — once in `prepare` against the local release commit, once in `publish` against the exact `github.sha`; plus runtime-digest and clean-tree evidence |
 | `windows-safety.yml` | `node tests/run-windows-safety-shard.js <kind> <shard> <total>` — scheduled weekly + manual; partitions the former Windows monolith (legacy canary + every non-Promptfoo structure test + all 3 offline eval runners) without duplication or loss, 30-minute command deadline |
 

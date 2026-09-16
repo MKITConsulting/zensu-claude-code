@@ -3,7 +3,12 @@
 # Control project root, never from the ambient CLAUDE_PROJECT_DIR:
 #   O0 no outer run, honest ambient dir      -> the review directive is emitted (control)
 #   O1 no outer run, decoy ambient dir       -> still emitted (regression pin)
-#   O2 nonterminal outer run                 -> unbound claim refused, ticket kept
+#   O2 nonterminal outer run                 -> refused WITH a disclosure, ticket kept
+#   O2a the review ticket survives that refusal unconsumed
+#   O2b a FOREIGN run holding this working tree  -> refused WITH a disclosure, ticket kept
+#   O2b1 the ticket survives the foreign-holder refusal too
+#   O2c a foreign run holding a SIBLING tree     -> leaves this chain unbound
+#   O2d a BLOCKED outer run                      -> refused naming the stage, never as live
 #   O3 the hook reads no ambient project dir -> source guard against reintroduction
 # An ambient project dir outside the bound root does not bypass the ownership
 # check — the path hardening rejects it (rc=2) and the hook exits silently. That
@@ -136,8 +141,22 @@ OWNED_STATE="$(tdd_state_file "$ARMED_KEY")"
 autopilot_begin_run outer-owned-run "$ARMED_KEY" "$OWNED_PROJECT" >/dev/null 2>&1 \
   || { echo "O2 fixture: outer run could not be started" >&2; exit 1; }
 OUT2="$(run_hook "$OWNED_PROJECT" "$ARMED_TICKET")"
-if [ -z "$OUT2" ]; then
-  check "O2 nonterminal outer run refuses the unbound claim" PASS
+# The refusal stands, and it now DISCLOSES. This run is the session's OWN
+# durable generation, read owner-scoped. The owner-INDEPENDENT workspace read
+# discloses too — O2b below pins that, and it used to pin the opposite — so the
+# one silent class left is the ticket claim and every exit below it, which no
+# check in this file reaches. The remedy must be the run-state one: a re-spawn
+# would reproduce this refusal byte for byte while rotating the ticket out from
+# under any spawn still in flight. The ticket never travels in either direction.
+# The cause must NOT assert liveness: the arm fires for every stage outside the
+# terminal pair, and `BLOCKED` is one of them — see O2d, which drives that exact
+# stage. It reports the stage it observed instead.
+if printf '%s' "$OUT2" | grep -qF -- "was NOT recorded against this session's review chain" \
+  && printf '%s' "$OUT2" | grep -qF -- "has not reached a terminal stage" \
+  && printf '%s' "$OUT2" | grep -qF -- "observed: " \
+  && printf '%s' "$OUT2" | grep -qF -- "Do NOT issue a fresh review ticket" \
+  && ! printf '%s' "$OUT2" | grep -qF -- "$ARMED_TICKET"; then
+  check "O2 nonterminal outer run refuses the unbound claim, discloses the observed stage, and withholds the re-spawn remedy" PASS
 else
   check "O2 owned project (out='$OUT2')" FAIL
 fi
@@ -162,10 +181,22 @@ FOREIGN_STATE="$(tdd_state_file "$ARMED_KEY")"
 autopilot_begin_run outer-foreign-run outer_foreign_other_session "$FOREIGN_PROJECT" >/dev/null 2>&1 \
   || { echo "O2b fixture: foreign outer run could not be started" >&2; exit 1; }
 OUT2B="$(run_hook "$FOREIGN_PROJECT" "$ARMED_TICKET")"
-if [ -z "$OUT2B" ]; then
-  check "O2b a foreign run holding this working tree refuses the unbound claim" PASS
+# This arm used to assert SILENCE. It no longer may: the owner-INDEPENDENT
+# workspace read is exactly the class a reviewer showed still reproduced the
+# strand this change exists to end — the reviewer ran, no round was recorded,
+# and nothing said so on any channel. Both of its arms now decline with one
+# identical sentence, so what is pinned here is the DISCLOSURE plus the two
+# properties that made the silence defensible in the first place: the cause is
+# stated without attributing the holding run to this session, and the ticket
+# value never travels.
+if printf '%s' "$OUT2B" | grep -qF -- "was NOT recorded against this session's review chain" \
+  && printf '%s' "$OUT2B" | grep -qF -- "holds this working tree could not be judged" \
+  && printf '%s' "$OUT2B" | grep -qF -- "Do NOT issue a fresh review ticket" \
+  && printf '%s' "$OUT2B" | grep -qF -- "not attributable to this session from here" \
+  && ! printf '%s' "$OUT2B" | grep -qF -- "$ARMED_TICKET"; then
+  check "O2b a foreign run holding this working tree refuses the unbound claim, discloses the owner-independent cause, and never emits the ticket" PASS
 else
-  check "O2b foreign holder must refuse (out='$OUT2B')" FAIL
+  check "O2b foreign holder must refuse and disclose (out='$OUT2B')" FAIL
 fi
 if ! ticket_consumed "$FOREIGN_STATE"; then
   check "O2b1 the review ticket survives the foreign-holder refusal unconsumed" PASS
@@ -207,7 +238,7 @@ fi
 if [ "$SIBLING_READY" != true ]; then
   check "O2c sibling-worktree fixture unavailable" FAIL
 elif printf '%s' "$OUT2C" | grep -qF -- '--code-review-done' \
-  && ! printf '%s' "$OUT2C" | grep -qF 'ZENSU_AUTOPILOT'; then
+  && ! printf '%s' "$OUT2C" | grep -qF 'ZENSU-DELEGATED-CALLER:'; then
   check "O2c a foreign run holding a sibling tree leaves this chain unbound and permits the claim" PASS
 else
   check "O2c sibling-tree claim must proceed (out='$OUT2C')" FAIL
@@ -220,6 +251,28 @@ if [ "$AMBIENT_READS" -eq 0 ] && [ "$RESOLVER_CALLS" -ge 1 ]; then
   check "O3 the hook resolves its project root and reads no ambient fallback" PASS
 else
   check "O3 project-root sourcing (ambient=$AMBIENT_READS resolver=$RESOLVER_CALLS)" FAIL
+fi
+
+# --- O2d a BLOCKED outer run is refused, and is never called live ---
+# `hooks/lib/zensu-autopilot-state.sh` owns TERMINAL = {DONE, CANCELLED} and
+# STOP_TERMINAL = {DONE, BLOCKED, CANCELLED}. The hook's own arm mirrors
+# TERMINAL, so a BLOCKED run takes the non-terminal branch — correct as a
+# DECISION and false as a CAUSE for as long as that branch asserted the run was
+# live. It runs on its OWN armed project so the shared O2 fixture, which later
+# cases still read, is never driven into a terminal-adjacent stage.
+if arm outer-blocked \
+  && autopilot_begin_run outer-blocked-run "$ARMED_KEY" "$ARMED_PROJECT" >/dev/null 2>&1 \
+  && autopilot_apply_event outer-blocked-run block-outer-blocked BLOCK '{"code":"fixture-block"}' "$ARMED_PROJECT" >/dev/null 2>&1; then
+  OUT2D="$(run_hook "$ARMED_PROJECT" "$ARMED_TICKET")"
+  if printf '%s' "$OUT2D" | grep -qF -- "was NOT recorded against this session's review chain" \
+    && printf '%s' "$OUT2D" | grep -qF -- "observed: BLOCKED" \
+    && ! printf '%s' "$OUT2D" | grep -qF -- "$ARMED_TICKET"; then
+    check "O2d a BLOCKED outer run is refused with the stage it observed, never as live" PASS
+  else
+    check "O2d BLOCKED outer run (out='$OUT2D')" FAIL
+  fi
+else
+  check "O2d fixture: the outer run could not be armed and moved to BLOCKED" FAIL
 fi
 
 echo "----"

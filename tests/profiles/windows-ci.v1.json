@@ -257,13 +257,6 @@
           "timeoutMs": 300000
         },
         {
-          "id": "post-review-self-review-handoff",
-          "runner": "bash",
-          "path": "tests/structure/test-post-review-self-review-handoff.sh",
-          "args": [],
-          "timeoutMs": 720000
-        },
-        {
           "id": "session-id-v1",
           "runner": "bash",
           "path": "tests/structure/test-session-id-v1.sh",
@@ -379,6 +372,19 @@
           "path": "tests/structure/test-plan-payload-fallback.sh",
           "args": [],
           "timeoutMs": 1200000
+        }
+      ]
+    },
+    "windows-shard-9": {
+      "platform": "win32",
+      "profileTimeoutMs": 1800000,
+      "suites": [
+        {
+          "id": "post-review-self-review-handoff",
+          "runner": "bash",
+          "path": "tests/structure/test-post-review-self-review-handoff.sh",
+          "args": [],
+          "timeoutMs": 1500000
         }
       ]
     }
