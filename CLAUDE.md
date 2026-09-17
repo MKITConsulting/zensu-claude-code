@@ -7944,7 +7944,7 @@ subagents the bare broker; `tests/structure/test-reviewer-capability-gate.sh` pi
 the deny reason, and the foreign `playwright` server staying allowed. That reason had to move
 with the rename: it read `cannot invoke mutating Zensu MCP tools`, which promises a non-mutating
 variant that would pass, and no browser operation is on the read allowlist — so it now names the
-allowlist itself, and the suite pins BOTH that wording and the absence of the word `mutating`. `CONSENT_MATCHER` also moves against the broker's own
+allowlist itself, and the suite pins BOTH that wording and the absence of the word `mutating`. A SECOND carrier matches a FRAGMENT of that same reason and is easy to miss because it lives outside `tests/`: `evals/session-control/lib/contract-provider.js` passes it to `assertDenied`, and it is reached only by the `evals/session-control (self-check)` suite on a CI ubuntu shard. The rename shipped once with that fragment still reading `mutating Zensu MCP` — every local suite green, CI red on one shard. `CONSENT_MATCHER` also moves against the broker's own
 `consentHookRegistered`, which reads the module's constant and compares it to the manifest —
 so that check proves internal consistency and says nothing about how the host renders the
 prefix; `RECIPE_NAMES` and `resolveRecipeFile` against the doctor's recipe probe;

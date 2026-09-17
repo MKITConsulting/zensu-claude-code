@@ -475,7 +475,7 @@ function provePrincipalAndPreToolContracts(options) {
       agent_type: agentType,
       tool_name: 'mcp__zensu__update_feature',
       tool_input: { feature_id: 'FEATURE-1', status: 'done' },
-    }, environment), 'general-purpose mutating Zensu MCP', 'mutating Zensu MCP');
+    }, environment), 'general-purpose mutating Zensu MCP', 'outside the read allowlist');
     const exactCommandReason = 'reviewer-capability-v1 deny: host-profile-v1 cannot invoke command-execution tools';
     for (const [label, toolName, toolInput] of [
       ['Bash environment enumeration', 'Bash', { command: 'env' }],
