@@ -327,9 +327,10 @@ else
 fi
 
 # P6 — pinned lockfile-backed MCP and plugin manifest wiring.
-if jq -e '.mcpServers.playwright.command == "${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh"' "$MCP_JSON" >/dev/null 2>&1 \
-  && jq -e '.mcpServers.playwright.args | index("--isolated")' "$MCP_JSON" >/dev/null 2>&1 \
-  && jq -e '.mcpServers.playwright.args | index("--caps=storage") | not' "$MCP_JSON" >/dev/null 2>&1 \
+if jq -e '.mcpServers["zensu-browser"].command == "${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh"' "$MCP_JSON" >/dev/null 2>&1 \
+  && jq -e '.mcpServers["zensu-browser"].args | index("--isolated")' "$MCP_JSON" >/dev/null 2>&1 \
+  && jq -e '.mcpServers["zensu-browser"].args | index("--caps=storage") | not' "$MCP_JSON" >/dev/null 2>&1 \
+  && jq -e '.mcpServers | has("playwright") | not' "$MCP_JSON" >/dev/null 2>&1 \
   && [ "$(jq -r '.dependencies["@playwright/mcp"]' "$MCP_PACKAGE")" = '0.0.75' ] \
   && jq -e '.packages["node_modules/@playwright/mcp"] | .version == "0.0.75" and (.integrity | startswith("sha512-"))' "$MCP_LOCK" >/dev/null 2>&1 \
   && grep -qF 'run_sanitized_child '\'''\'' npm ci --prefix "$RUNTIME_GENERATION" --ignore-scripts --no-audit --no-fund' "$MCP_LAUNCHER" \
@@ -337,6 +338,15 @@ if jq -e '.mcpServers.playwright.command == "${CLAUDE_PLUGIN_ROOT}/scripts/playw
   check "P6a Playwright MCP is pinned, integrity-locked, isolated, and brokered" PASS
 else
   check "P6a Playwright MCP is pinned, integrity-locked, isolated, and brokered" FAIL
+fi
+SKILL_FLAT="$(tr '\n' ' ' < "$SKILL_MD" | tr -s ' ')"
+if grep -qF 'accept either the direct `mcp__zensu-browser__<operation>` name or' <<<"$SKILL_FLAT" \
+  && grep -qF 'plugin namespace `mcp__plugin_zensu_zensu-browser__<operation>`. Never drive `mcp__playwright__<operation>` instead: that name belongs to a different MCP server keyed `playwright`, which has no navigation broker and no consent gate.' <<<"$SKILL_FLAT" \
+  && [ "$(grep -oF 'mcp__playwright__' "$SKILL_MD" | wc -l | tr -d ' ')" = "1" ] \
+  && ! grep -qF 'mcp__plugin_zensu_playwright__' "$SKILL_MD"; then
+  check "P6l the skill drives only the two zensu-browser namespaces and names the server keyed playwright once, as the one never to drive" PASS
+else
+  check "P6l the skill drives only the two zensu-browser namespaces and names the server keyed playwright once, as the one never to drive" FAIL
 fi
 PROXY_TEST_OUTPUT="$(node --test "$MCP_PROXY_TEST" 2>&1)"
 # Floor on the REGISTERED total; the call site below carries the value. A passing floor is not used: one case already

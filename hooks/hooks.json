@@ -76,7 +76,7 @@
         ]
       },
       {
-        "matcher": "mcp__(plugin_zensu_)?playwright__browser_(navigate|tabs)",
+        "matcher": "mcp__(plugin_zensu_)?zensu-browser__browser_(navigate|tabs)",
         "hooks": [
           {
             "type": "command",
@@ -128,7 +128,7 @@
         ]
       },
       {
-        "matcher": "mcp__(plugin_zensu_)?playwright__browser_(navigate|tabs)",
+        "matcher": "mcp__(plugin_zensu_)?zensu-browser__browser_(navigate|tabs)",
         "hooks": [
           {
             "type": "command",

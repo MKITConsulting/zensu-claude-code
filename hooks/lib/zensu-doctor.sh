@@ -127,8 +127,17 @@ export ZDOC_FORGE_PROVIDER="${ZDOC_FORGE_PROVIDER:-}" \
 # "configured", not that Claude loaded the MCP server or that npm can install
 # the integrity-locked package graph. A PATH binary is a separate project-driver signal and is
 # never sufficient for /zensu:verify-feature.
+#
+# SEVEN of this predicate's eight inputs come from $probe_root (ZENSU_DOCTOR_PLUGIN_DIR, else
+# this script's own installation). The EIGHTH, the browser server key, deliberately does not: it
+# is read from $DIR, the EXECUTING installation's own hooks/lib, because the key is what the
+# gate registered in THIS process's tree and a probed root need not carry the module at all --
+# test-doctor.sh builds manifest-only sandbox plugin roots that carry no hooks/lib at all, where
+# a probe-root read would answer empty and refuse every fixture. The bound: a probed .mcp.json is
+# judged against a key it does not own, so a probe root keyed for a DIFFERENT executing
+# installation reports "not detected" rather than a key mismatch.
 playwright_mcp_declared() {
-  local probe_root mcp_file plugin_file package_file lock_file launcher proxy
+  local probe_root mcp_file plugin_file package_file lock_file launcher proxy browser_key
   probe_root="${ZENSU_DOCTOR_PLUGIN_DIR:-$DIR/../..}"
   mcp_file="$probe_root/.mcp.json"
   plugin_file="$probe_root/.claude-plugin/plugin.json"
@@ -139,9 +148,26 @@ playwright_mcp_declared() {
   [ -f "$mcp_file" ] && [ -f "$plugin_file" ] && [ -f "$package_file" ] \
     && [ -f "$lock_file" ] && [ -x "$launcher" ] && [ -f "$proxy" ] \
     && command -v node >/dev/null 2>&1 || return 1
+  # The SAME load guard the gate, the broker and the execution probe below apply. A bare require
+  # here would execute a symlinked module, which is the defect that probe's own comment records.
+  browser_key="$(cd -P -- "$DIR" && node -e '
+    const fs = require("node:fs");
+    let info = null;
+    try { info = fs.lstatSync("./verify-consent-v1.js"); } catch (_) { process.exit(1); }
+    if (!info.isFile() || info.isSymbolicLink()) process.exit(1);
+    process.stdout.write(String(require("./verify-consent-v1.js").BROWSER_SERVER_KEY || ""));
+  ' 2>/dev/null)" || browser_key=""
+  # Disclose rather than collapse. Every other input to this predicate is a plugin-config fact,
+  # so routing an unloadable decision module through the same "not detected" verdict asserts that
+  # .mcp.json was judged. The verdict is unchanged -- this row has no state of its own to move
+  # to -- but the CAUSE reaches stderr instead of /dev/null.
+  if [ -z "$browser_key" ]; then
+    printf '%s\n' "zensu-doctor: browser server key unreadable from $DIR/verify-consent-v1.js (absent, symlinked or unloadable) -- the plugin MCP declaration was NOT judged" >&2
+    return 1
+  fi
   (
     cd -P -- "$probe_root" || return 1
-    node -e '
+    ZDOC_BROWSER_SERVER_KEY="$browser_key" node -e '
     const fs = require("fs");
     const mcp = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
     const plugin = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
@@ -155,7 +181,7 @@ playwright_mcp_declared() {
       "browser_select_option", "browser_snapshot", "browser_tabs", "browser_take_screenshot",
       "browser_type", "browser_wait_for"
     ];
-    const server = mcp && mcp.mcpServers && mcp.mcpServers.playwright;
+    const server = mcp && mcp.mcpServers && mcp.mcpServers[process.env.ZDOC_BROWSER_SERVER_KEY];
     const args = server && Array.isArray(server.args) ? server.args : [];
     const locked = lock && lock.packages && lock.packages["node_modules/@playwright/mcp"];
     if (!server || server.type !== "stdio" ||

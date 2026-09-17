@@ -476,7 +476,7 @@ async function runScenario(options) {
       ['TeamCreate', { team_name: 'escape' }], ['SendMessage', { recipient: 'x', content: 'x' }],
       ['Skill', { skill: 'zensu:tdd' }], ['WebFetch', { url: 'https://example.invalid' }],
       ['WebSearch', { query: 'escape' }], ['mcp__zensu__get_feature', { id: 'X-1' }],
-      ['mcp__plugin_zensu_playwright__browser_navigate', { url: 'https://example.invalid' }],
+      ['mcp__plugin_zensu_zensu-browser__browser_navigate', { url: 'https://example.invalid' }],
     ];
     for (const [toolName, input] of calls) {
       assertDenied(tool(options, agentId, toolName, input), `deny matrix ${toolName}`, 'only Read, Grep, and Glob');

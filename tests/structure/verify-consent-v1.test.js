@@ -17,7 +17,6 @@ const {
   REASONS,
   appendRecord,
   decide,
-  foreignServerNoteApplies,
   isIsoInstant,
   preEnvelope,
   memoryPathAllowed,
@@ -28,13 +27,13 @@ const {
 
 const MODULE = path.resolve(__dirname, '../../hooks/lib/verify-consent-v1.js');
 const KEY = 'scv1_' + 'a'.repeat(64);
-const NAV = 'mcp__plugin_zensu_playwright__browser_navigate';
+const NAV = 'mcp__plugin_zensu_zensu-browser__browser_navigate';
 const VALID_POLICY = JSON.stringify({
   version: 1,
   mode: 'local',
   targets: [{ origin: 'http://127.0.0.1:4200', routes: ['/'], evidenceMode: 'declared-safe' }],
 });
-const TABS = 'mcp__playwright__browser_tabs';
+const TABS = 'mcp__zensu-browser__browser_tabs';
 
 function project() {
   const root = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'zensu-consent-'));
@@ -57,13 +56,37 @@ function runCli(mode, payload, env) {
   return { ...result, envelope: result.stdout ? JSON.parse(result.stdout) : null };
 }
 
-test('the matcher and the navigation tool test cover both plugin spellings and only the navigating tools', () => {
+test('a browser server key that is not regex-inert is refused at load', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-key-guard-'));
+  const src = path.resolve(__dirname, '../../hooks/lib');
+  fs.copyFileSync(path.join(src, 'verify-navigation-floor-v1.js'), path.join(dir, 'verify-navigation-floor-v1.js'));
+  const module = path.join(dir, 'verify-consent-v1.js');
+  const text = fs.readFileSync(path.join(src, 'verify-consent-v1.js'), 'utf8');
+  const unsafe = text.replace("const BROWSER_SERVER_KEY = 'zensu-browser';", "const BROWSER_SERVER_KEY = 'zensu.browser';");
+  assert.notEqual(unsafe, text);
+  fs.writeFileSync(module, unsafe);
+  const refused = spawnSync(process.execPath, ['-e', 'require(process.argv[1])', module], { encoding: 'utf8' });
+  assert.notEqual(refused.status, 0);
+  assert.match(String(refused.stderr), /browser server key is not regex-safe/);
+  fs.writeFileSync(module, text);
+  const accepted = spawnSync(process.execPath, ['-e', 'require(process.argv[1])', module], { encoding: 'utf8' });
+  assert.equal(accepted.status, 0, String(accepted.stderr));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('the matcher and the navigation tool test cover both Zensu broker spellings and only the navigating tools', () => {
+  assert.equal(consent.BROWSER_SERVER_KEY, 'zensu-browser');
+  assert.equal(CONSENT_MATCHER, `mcp__(plugin_zensu_)?${consent.BROWSER_SERVER_KEY}__browser_(navigate|tabs)`);
+  assert.equal(NAVIGATION_TOOL_RE.source, `^${CONSENT_MATCHER}$`);
+  const declared = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../.mcp.json'), 'utf8')).mcpServers;
+  assert.equal(Object.prototype.hasOwnProperty.call(declared, consent.BROWSER_SERVER_KEY), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(declared, 'playwright'), false);
   const matcher = new RegExp(`^${CONSENT_MATCHER}$`);
-  for (const name of [NAV, 'mcp__playwright__browser_navigate', TABS, 'mcp__plugin_zensu_playwright__browser_tabs']) {
+  for (const name of [NAV, 'mcp__zensu-browser__browser_navigate', TABS, 'mcp__plugin_zensu_zensu-browser__browser_tabs']) {
     assert.equal(matcher.test(name), true, name);
     assert.equal(NAVIGATION_TOOL_RE.test(name), true, name);
   }
-  for (const name of ['mcp__plugin_zensu_playwright__browser_snapshot', 'mcp__playwright__browser_click', 'Bash', 'mcp__other__browser_navigate']) {
+  for (const name of ['mcp__plugin_zensu_zensu-browser__browser_snapshot', 'mcp__zensu-browser__browser_click', 'Bash', 'mcp__other__browser_navigate']) {
     assert.equal(matcher.test(name), false, name);
     assert.equal(NAVIGATION_TOOL_RE.test(name), false, name);
   }
@@ -75,7 +98,7 @@ test('targetOf reads the navigate url and only a tabs call that opens a new url'
   assert.equal(targetOf(TABS, { action: 'new', url: 'http://127.0.0.1:1/x' }), 'http://127.0.0.1:1/x');
   assert.equal(targetOf(TABS, { action: 'new' }), null);
   assert.equal(targetOf(TABS, { action: 'close', url: 'http://127.0.0.1:1/' }), null);
-  assert.equal(targetOf('mcp__plugin_zensu_playwright__browser_snapshot', { url: 'http://127.0.0.1:1/' }), null);
+  assert.equal(targetOf('mcp__plugin_zensu_zensu-browser__browser_snapshot', { url: 'http://127.0.0.1:1/' }), null);
 });
 
 test('a navigation to a new origin asks, names the origin, the route and the consequence', () => {
@@ -117,21 +140,33 @@ test('consent is per origin: an approved origin admits every route and a new ori
   assert.doesNotMatch(fresh.prompt, /does not declare as synthetic-safe/);
 });
 
-test('the foreign-server note rides only on denies a foreign server can cause, and names one remedy', () => {
-  for (const reason of Object.values(FLOOR_REASONS)) assert.equal(foreignServerNoteApplies(reason), true);
-  assert.equal(foreignServerNoteApplies(REASONS.REMOTE_NEEDS_POLICY), true);
-  assert.equal(foreignServerNoteApplies(REASONS.PAYLOAD_UNREADABLE), false);
-  assert.equal(foreignServerNoteApplies('hook-failed:EACCES'), false);
-  assert.equal(foreignServerNoteApplies(''), false);
-  assert.equal(foreignServerNoteApplies(undefined), false);
+test('a server keyed playwright is never the Zensu broker: its tools reach no decision and no refusal names it', () => {
+  const matcher = new RegExp(`^${CONSENT_MATCHER}$`);
+  assert.equal(matcher.test(NAV), true);
+  assert.equal(NAVIGATION_TOOL_RE.test(TABS), true);
+  const brokerRemote = decide({ toolName: NAV, toolInput: { url: 'https://dev.example.com/' }, records: [], declaredRoutes: [] });
+  assert.equal(brokerRemote.verdict, 'deny');
+  for (const name of [
+    'mcp__playwright__browser_navigate',
+    'mcp__playwright__browser_tabs',
+    'mcp__plugin_zensu_playwright__browser_navigate',
+    'mcp__plugin_zensu_playwright__browser_tabs',
+  ]) {
+    assert.equal(matcher.test(name), false, name);
+    assert.equal(NAVIGATION_TOOL_RE.test(name), false, name);
+    const decision = decide({ toolName: name, toolInput: { url: 'https://dev.example.com/', action: 'new' }, records: [], declaredRoutes: [] });
+    assert.equal(decision.verdict, 'allow', name);
+    assert.equal(decision.reason, REASONS.NOT_A_NAVIGATION, name);
+    assert.equal(preEnvelope(decision), null, name);
+  }
   const floorDeny = preEnvelope({ verdict: 'deny', reason: FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK });
-  assert.ok(floorDeny.hookSpecificOutput.permissionDecisionReason.includes(consent.FOREIGN_SERVER_NOTE));
-  const faultDeny = preEnvelope({ verdict: 'deny', reason: REASONS.PAYLOAD_UNREADABLE });
-  assert.ok(!faultDeny.hookSpecificOutput.permissionDecisionReason.includes(consent.FOREIGN_SERVER_NOTE));
-  // A navigation policy would disarm the gate for every target, so it is not offered here.
-  assert.ok(!consent.FOREIGN_SERVER_NOTE.includes('ZENSU_VERIFY_NAVIGATION_POLICY_V1'));
-  assert.match(consent.FOREIGN_SERVER_NOTE, /rename that server key/);
-  assert.match(consent.FOREIGN_SERVER_NOTE, /never edit an MCP server configuration on their behalf/);
+  assert.equal(floorDeny.hookSpecificOutput.permissionDecisionReason,
+    `Zensu browser consent gate denied the navigation: ${FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK}`);
+  for (const envelope of [floorDeny, preEnvelope(brokerRemote)]) {
+    assert.doesNotMatch(envelope.hookSpecificOutput.permissionDecisionReason, /playwright|server key|different server/);
+  }
+  assert.equal('FOREIGN_SERVER_NOTE' in consent, false);
+  assert.equal('foreignServerNoteApplies' in consent, false);
 });
 
 test('a record is judged on its stamp independently of its route', () => {
@@ -187,7 +222,7 @@ test('policy mode and non-navigation calls allow silently', () => {
   const policy = decide({ toolName: NAV, toolInput: { url: 'http://127.0.0.1:1/' }, records: [], declaredRoutes: [], policyPresent: true });
   assert.equal(policy.verdict, 'allow');
   assert.equal(policy.reason, REASONS.POLICY_MODE);
-  const snapshot = decide({ toolName: 'mcp__plugin_zensu_playwright__browser_snapshot', toolInput: {}, records: [], declaredRoutes: [] });
+  const snapshot = decide({ toolName: 'mcp__plugin_zensu_zensu-browser__browser_snapshot', toolInput: {}, records: [], declaredRoutes: [] });
   assert.equal(snapshot.verdict, 'allow');
   assert.equal(snapshot.reason, REASONS.NOT_A_NAVIGATION);
 });
@@ -299,7 +334,7 @@ test('the pre CLI emits ask or deny envelopes and denies an unreadable payload',
   const deny = runCli('pre', { tool_name: NAV, tool_input: { url: 'http://localhost:4200/' } }, env);
   assert.equal(deny.envelope.hookSpecificOutput.permissionDecision, 'deny');
   assert.match(deny.envelope.hookSpecificOutput.permissionDecisionReason, /literal loopback-IP/);
-  const quiet = runCli('pre', { tool_name: 'mcp__plugin_zensu_playwright__browser_snapshot', tool_input: {} }, env);
+  const quiet = runCli('pre', { tool_name: 'mcp__plugin_zensu_zensu-browser__browser_snapshot', tool_input: {} }, env);
   assert.equal(quiet.stdout, '');
   const unreadable = runCli('pre', '{not json', env);
   assert.equal(unreadable.envelope.hookSpecificOutput.permissionDecision, 'deny');
@@ -382,7 +417,7 @@ test('the post CLI records an executed navigation, tags its decision source and 
   stored = JSON.parse(fs.readFileSync(memory, 'utf8'));
   assert.deepEqual(stored.records.map((entry) => [entry.route, entry.decidedBy]), [['/', 'asked'], ['/login', 'remembered']]);
   runCli('post', { tool_name: NAV, tool_input: { url: 'http://localhost:4200/' } }, env);
-  runCli('post', { tool_name: 'mcp__plugin_zensu_playwright__browser_snapshot', tool_input: {} }, env);
+  runCli('post', { tool_name: 'mcp__plugin_zensu_zensu-browser__browser_snapshot', tool_input: {} }, env);
   runCli('post', { tool_name: NAV, tool_input: { url: 'http://127.0.0.1:4200/rejected' }, tool_response: { isError: true, content: [{ type: 'text', text: 'Zensu browser broker rejected the operation: x' }] } }, env);
   stored = JSON.parse(fs.readFileSync(memory, 'utf8'));
   assert.equal(stored.records.length, 2);
@@ -626,8 +661,8 @@ test('AC-002 the consent-scope sentence precedes the route list, and the route l
 // The human answers one question about two things: what the grant covers, and who is asking.
 // The prompt got both wrong. It described a read grant while the broker's approved set gates
 // every interaction on the origin — click, type and form submission included — and it opened
-// by naming /zensu:verify-feature as the requester, which the gate cannot know: the matcher
-// accepts the bare mcp__playwright__ spelling belonging to any MCP server keyed "playwright".
+// by naming /zensu:verify-feature as the requester, which the gate cannot know: it sees a tool
+// name, never the workflow that called the tool.
 test('AC-003/AC-004 the prompt states an interactive grant and asserts no requester', () => {
   const decision = decide({
     toolName: NAV,
@@ -645,14 +680,9 @@ test('AC-003/AC-004 the prompt states an interactive grant and asserts no reques
     'the opening must not assert which run requested the navigation');
   assert.match(decision.prompt, /^A browser navigation was requested to http:\/\/127\.0\.0\.1:4200 /);
 
-  // The foreign-server note belongs to the ask envelope too: the same doubt that forbids
-  // naming a requester is what the note explains, and only a deny carried it before.
   const envelope = preEnvelope(decision).hookSpecificOutput;
   assert.equal(envelope.permissionDecision, 'ask');
-  assert.ok(
-    envelope.permissionDecisionReason.includes(consent.FOREIGN_SERVER_NOTE),
-    'an ask must carry the foreign-server note',
-  );
+  assert.equal(envelope.permissionDecisionReason, decision.prompt);
 });
 
 // policyPresent was Boolean(env), so ANY non-empty value disarmed the gate — including one the
@@ -1145,7 +1175,7 @@ test('exactly one decision envelope leaves the hook, and the ordering claim is b
   const { root, memory } = project();
   let stdout = '';
   const emitted = consent.runPre(
-    { tool_name: 'mcp__plugin_zensu_playwright__browser_navigate', tool_input: { url: 'http://127.0.0.1:4290/x' } },
+    { tool_name: 'mcp__plugin_zensu_zensu-browser__browser_navigate', tool_input: { url: 'http://127.0.0.1:4290/x' } },
     { ZENSU_VERIFY_PROJECT_ROOT: root, ZENSU_VERIFY_CONSENT_MEMORY: memory },
     { write: (chunk) => { stdout += chunk; } },
     { write: () => {} },
@@ -1181,7 +1211,7 @@ test('both marker disclosures are emitted, and they say different things', () =>
   const call = (env) => {
     let err = '';
     consent.runPre(
-      { tool_name: 'mcp__plugin_zensu_playwright__browser_navigate', tool_input: { url: 'http://127.0.0.1:4280/x' } },
+      { tool_name: 'mcp__plugin_zensu_zensu-browser__browser_navigate', tool_input: { url: 'http://127.0.0.1:4280/x' } },
       env,
       { write: () => {} },
       { write: (chunk) => { err += chunk; } },
@@ -1272,7 +1302,7 @@ test('the decision envelope is emitted before the marker is published, and the r
   let markerAtEnvelope = null;
   const out = { write: () => { markerAtEnvelope = fs.existsSync(evidencePath); } };
   consent.runPre(
-    { tool_name: 'mcp__plugin_zensu_playwright__browser_navigate', tool_input: { url: `${origin}/first` } },
+    { tool_name: 'mcp__plugin_zensu_zensu-browser__browser_navigate', tool_input: { url: `${origin}/first` } },
     { ZENSU_VERIFY_PROJECT_ROOT: root, ZENSU_VERIFY_CONSENT_MEMORY: memory },
     out,
     { write: () => {} },
@@ -1332,7 +1362,7 @@ test('AC-104 emission is observable from the throwing path, so the deny envelope
   let out = '';
   const live = consent.recordingStream({ write: (chunk) => { out += chunk; } });
   consent.runPre(
-    { tool_name: 'mcp__plugin_zensu_playwright__browser_navigate', tool_input: { url: 'http://127.0.0.1:4291/x' } },
+    { tool_name: 'mcp__plugin_zensu_zensu-browser__browser_navigate', tool_input: { url: 'http://127.0.0.1:4291/x' } },
     { ZENSU_VERIFY_PROJECT_ROOT: root, ZENSU_VERIFY_CONSENT_MEMORY: memory },
     live,
     { write: () => {} },
@@ -1344,7 +1374,7 @@ test('AC-104 emission is observable from the throwing path, so the deny envelope
   // caller reading the return value is not told nothing was written.
   let unreadable = '';
   const reported = consent.runPre(
-    { tool_name: 'mcp__plugin_zensu_playwright__browser_navigate', tool_input: {} },
+    { tool_name: 'mcp__plugin_zensu_zensu-browser__browser_navigate', tool_input: {} },
     { ZENSU_VERIFY_PROJECT_ROOT: root, ZENSU_VERIFY_CONSENT_MEMORY: memory },
     { write: (chunk) => { unreadable += chunk; } },
     { write: () => {} },

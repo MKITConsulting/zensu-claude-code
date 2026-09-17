@@ -141,6 +141,17 @@ decision() {
   '
 }
 
+# ONE reason extractor for every probe below. Two verbatim copies of this pipeline existed and
+# a change to the decision envelope could have been applied to one of them alone.
+deny_reason() {
+  payload "$@" | gate_env "$PLUGIN" "$PLUGIN_DATA" | node -e '
+    let s = ""; process.stdin.on("data", c => s += c); process.stdin.on("end", () => {
+      try { process.stdout.write(String(JSON.parse(s).hookSpecificOutput?.permissionDecisionReason || "")); }
+      catch (_) { process.stdout.write(""); }
+    });
+  '
+}
+
 assert_case() {
   local label="$1" expected="$2" type="$3" tool="$4" input="${5:-}" actual
   [ -n "$input" ] || input='{}'
@@ -241,12 +252,7 @@ assert_case "general-purpose builder keeps project writes" allow general-purpose
 # too. Assert the REASON for one of them, which names the principal.
 # Runs through the SAME gate_env decision() uses, so this reason and the verdict rows
 # above can never disagree because of the environment they were invoked under.
-EXPLORE_REASON="$(payload Explore Bash '{"command":"pwd"}' | gate_env "$PLUGIN" "$PLUGIN_DATA" | node -e '
-    let s = ""; process.stdin.on("data", c => s += c); process.stdin.on("end", () => {
-      try { process.stdout.write(String(JSON.parse(s).hookSpecificOutput?.permissionDecisionReason || "")); }
-      catch (_) { process.stdout.write(""); }
-    });
-  ')"
+EXPLORE_REASON="$(deny_reason Explore Bash '{"command":"pwd"}')"
 case "$EXPLORE_REASON" in
   *"host-profile-v1 cannot invoke command-execution tools"*)
     check "Explore is denied AS host-profile-v1, not merely denied" PASS ;;
@@ -270,6 +276,25 @@ assert_case "neutral report content may discuss protected architecture" allow ar
 assert_case "neutral agent keeps host task updates" allow arbitrary-custom TaskUpdate '{"taskId":"review-1","status":"completed"}'
 assert_case "neutral agent keeps unrelated MCP tools" allow arbitrary-custom mcp__github__get_pull_request '{"pull_number":172}'
 assert_case "neutral agent keeps read-only Zensu MCP tools" allow arbitrary-custom mcp__zensu__get_feature '{"feature_id":"F-1"}'
+assert_case "neutral agent keeps browser tools of a foreign server keyed playwright" allow arbitrary-custom mcp__playwright__browser_snapshot '{}'
+assert_case "neutral agent cannot drive the Zensu browser broker under its bare server key" deny arbitrary-custom mcp__zensu-browser__browser_snapshot '{}'
+assert_case "neutral agent cannot drive the Zensu browser broker under its plugin server key" deny arbitrary-custom mcp__plugin_zensu_zensu-browser__browser_snapshot '{}'
+BROKER_REASON="$(deny_reason arbitrary-custom mcp__zensu-browser__browser_snapshot '{}')"
+# The reason must name the READ ALLOWLIST and not "mutating": every browser operation the broker
+# exposes fails ZENSU_MCP_READ_RE, browser_snapshot included, so a reason promising that a
+# non-mutating variant would pass describes a retry that does not exist.
+case "$BROKER_REASON" in
+  *"host-profile-v1 cannot invoke Zensu MCP tools outside the read allowlist"*)
+    check "the bare broker key is denied by the Zensu MCP substring rule, not by an unrelated rule" PASS ;;
+  *)
+    check "the bare broker key deny reason must name the Zensu MCP substring rule (got: ${BROKER_REASON:-<empty>})" FAIL ;;
+esac
+case "$BROKER_REASON" in
+  *mutating*)
+    check "the broker deny reason does not call a read-only browser operation mutating" FAIL ;;
+  *)
+    check "the broker deny reason does not call a read-only browser operation mutating" PASS ;;
+esac
 assert_case "neutral nested-agent capability stays host-governed" allow arbitrary-custom Agent '{"subagent_type":"general-purpose","prompt":"review session-control and main-v1"}'
 assert_case "missing agent_type with an agent_id is neutral" allow ? Read '{"file_path":"x"}'
 assert_case "non-host reviewer alias is neutral, not reviewer" allow zensu-review-domain Write '{"file_path":"x"}'

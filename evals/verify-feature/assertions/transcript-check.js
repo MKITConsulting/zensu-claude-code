@@ -1,6 +1,6 @@
 'use strict';
 
-const BROWSER_NAMESPACES = Object.freeze(['mcp__playwright__', 'mcp__plugin_zensu_playwright__']);
+const BROWSER_NAMESPACES = Object.freeze(['mcp__zensu-browser__', 'mcp__plugin_zensu_zensu-browser__']);
 const SAFE_BROWSER_OPERATIONS = new Set([
   'browser_click', 'browser_close', 'browser_console_messages', 'browser_drag', 'browser_fill_form',
   'browser_handle_dialog', 'browser_hover', 'browser_navigate', 'browser_network_requests',

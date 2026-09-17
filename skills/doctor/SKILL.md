@@ -74,7 +74,9 @@ requires the core operation suffixes used by `/zensu:verify-feature`: `browser_n
 `browser_snapshot`, `browser_take_screenshot`, `browser_click`, `browser_type` or
 `browser_fill_form`, `browser_wait_for`, `browser_console_messages`,
 `browser_network_requests`, and `browser_close`. Accept each
-suffix under either `mcp__playwright__*` or `mcp__plugin_zensu_playwright__*`.
+suffix under either `mcp__zensu-browser__*` or `mcp__plugin_zensu_zensu-browser__*`, and
+never under `mcp__playwright__*`: that name belongs to a different server keyed `playwright`,
+not to this plugin's broker.
 
 Run **exactly one** of the two commands below as a single Bash call — the first
 when that complete tool set is loaded, the second otherwise. Nothing may be added
@@ -161,6 +163,18 @@ the report, not a failed command. Do not re-render or paraphrase the table.
 Briefly call out, in one or two lines, the highest-severity findings and the
 concrete next step for each — but only for rows the table actually marked ⚠️/❌,
 plus the one green row named below, which is always relayed.
+
+A further bound belongs to the helper rather than to a row, and it arrives on
+stderr rather than in the table. A line reading
+`zensu-doctor: browser server key unreadable … the plugin MCP declaration was NOT judged`
+means the decision module this installation ships is absent, symlinked or
+unloadable. Relay that line, and
+report the Playwright MCP row as NOT judged rather than as a finding about
+`.mcp.json` — the row's own wording cannot distinguish the two, and an absent or
+symlinked module in the plugin tree is a tamper indicator rather than a config
+mistake. Its ABSENCE is not an all-clear: a plugin tree damaged badly enough
+surfaces instead as `Session Control: plugin root unavailable or invalid`, whose
+own remedy says nothing about the tree, so read the two rows together.
 
 One bound is stated here rather than in a bullet, because it belongs to the check
 as a whole rather than to any single row: the reviewer-spawn permission check
