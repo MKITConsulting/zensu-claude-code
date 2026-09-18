@@ -51,6 +51,15 @@
 // "did not complete successfully" for that reason and must not be tightened
 // into a claim about the exit status.
 //
+// TWO CLAIM SPELLINGS, and tolerating both is what keeps the equality match
+// usable for a command that contains a double quote. The witness field is
+// JSON-encoded by its writer and decoded here; the claim field is typed by a
+// model into a `cmd="…"` slot, so it arrives either verbatim (`echo "a"`) or
+// JSON-escaped (`echo \"a\"`). Only the first ever matched. `claimCandidates`
+// resolves both and `crossCheck` accepts either, which widens nothing else:
+// the gate is still equality, never containment, and the raw spelling stays a
+// candidate so a command carrying a real `\\` keeps matching as it did.
+//
 // CLI:
 //   node zensu-evidence-crosscheck.js --log <run-log> --witness <witness-log>
 //                                     [--allow-missing-log]
@@ -108,6 +117,42 @@ function extractQuoted(line, key, stopMarker) {
   return line.slice(from, tail);
 }
 
+// The two sides of the match disagreed about escaping, and the disagreement
+// was a silent one-way failure. `parseWitness` reads its `cmd=` through
+// `readJsonString`, so `\"` arrives decoded as `"`. `extractQuoted` is a raw
+// slice, so those same two bytes stay `\"` on the claim side, and `crossCheck`
+// matches by equality — which meant a command containing a double quote could
+// never be corroborated, however faithfully it had been logged. Measured: a run
+// log and a witness log carrying byte-identical `echo \"lint ok\"` reported
+// EVIDENCE GAP, while the same pair with `npm test` reported verified.
+//
+// The claim is hand-written by a model, so neither spelling can be relied on.
+// Some sessions log `echo "a"` verbatim, which the raw slice already matches
+// (the `" exit=` stop marker finds the right boundary either way); others log
+// `echo \"a\"`, which only a decode matches. Resolving BOTH and matching on
+// either is what covers the two conventions without a writer-side encoding
+// contract that nothing enforces.
+//
+// Deliberately NOT an unconditional decode. A command carrying a real double
+// backslash is logged `\\` and decodes to `\`, which would BREAK a pair that
+// matches today; keeping the raw spelling as a candidate is what makes this
+// strictly additive over the previous behaviour. A body that is not a valid
+// JSON string yields no second candidate at all rather than a corrupted one.
+function claimCandidates(raw) {
+  const candidates = [raw.trim()];
+  let decoded = null;
+  try {
+    decoded = JSON.parse('"' + raw + '"');
+  } catch (_) {
+    decoded = null;
+  }
+  if (typeof decoded === 'string') {
+    const trimmed = decoded.trim();
+    if (!candidates.includes(trimmed)) candidates.push(trimmed);
+  }
+  return candidates;
+}
+
 function parseClaims(logText) {
   const claims = [];
   const lines = logText.split('\n');
@@ -119,6 +164,7 @@ function parseClaims(logText) {
       claims.push({
         kind: 'via',
         tool: via[1],
+        // Raw, like `result` below: a via entry is rendered and never matched.
         claim: extractQuoted(line, 'claim') || '',
         line: i + 1,
       });
@@ -128,7 +174,15 @@ function parseClaims(logText) {
     if (cmd === null) continue;
     claims.push({
       kind: 'cmd',
+      // `cmd` stays the spelling the run log carries, because every rendered
+      // line echoes it and a reader greps that line back to its source. The
+      // candidate set is what the equality match consumes.
       cmd,
+      cmdCandidates: claimCandidates(cmd),
+      // `result` is deliberately NOT decoded. Its only consumer is `isGreen`,
+      // a keyword test rather than an equality match, and decoding an escaped
+      // quote inside it moves no pass/fail token — so a decode here would widen
+      // the change without moving a verdict.
       result: extractQuoted(line, 'result') || '',
       line: i + 1,
     });
@@ -236,10 +290,19 @@ function crossCheck(claims, entries, witnessAvailable) {
   return claims.map((claim) => {
     if (claim.kind === 'via') return { claim, verdict: 'via' };
     if (!witnessAvailable) return { claim, verdict: 'gap' };
-    const wanted = claim.cmd.trim();
-    const matches = usable.filter((e) => e.cmd.trim() === wanted);
+    // `parseClaims` resolves the candidate set; the fallback keeps a claim
+    // object hand-built by a consumer that predates `cmdCandidates` working off
+    // its raw `cmd`, exactly as before. Both filters below use the SAME
+    // predicate — an attempt-only claim that reached `gap` because the completed
+    // filter was wider than the attempt one would be the same defect again.
+    const wanted =
+      Array.isArray(claim.cmdCandidates) && claim.cmdCandidates.length
+        ? claim.cmdCandidates
+        : [claim.cmd.trim()];
+    const matchesWanted = (e) => wanted.includes(e.cmd.trim());
+    const matches = usable.filter(matchesWanted);
     if (matches.length === 0) {
-      const tries = attempted.filter((e) => e.cmd.trim() === wanted);
+      const tries = attempted.filter(matchesWanted);
       // No attempt either: the command is absent from the witness entirely, and
       // the verdict is the unchanged gap.
       if (tries.length === 0) return { claim, verdict: 'gap' };
@@ -361,6 +424,7 @@ module.exports = {
   WITNESS_MARKER,
   WITNESS_ATTEMPT_MARKER,
   ATTEMPT_ONLY_MARKER,
+  claimCandidates,
   parseClaims,
   parseWitness,
   isLogWritingCommand,

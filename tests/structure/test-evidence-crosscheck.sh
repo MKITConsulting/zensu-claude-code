@@ -74,10 +74,10 @@ fi
 # node --test prints the summary as `ℹ pass <n>` on this runtime and `# pass <n>`
 # on the TAP-style one; accept either so the floor does not silently stop biting.
 UNIT_PASS="$(grep -Eo '^[#ℹ] pass [0-9]+' "$WORK/unit.out" 2>/dev/null | grep -Eo '[0-9]+$' | head -1)"
-if [ -n "$UNIT_PASS" ] && [ "$UNIT_PASS" -ge 32 ]; then
-  check "P1a the unit suite registered at least 32 cases (actual: $UNIT_PASS)" PASS
+if [ -n "$UNIT_PASS" ] && [ "$UNIT_PASS" -ge 40 ]; then
+  check "P1a the unit suite registered at least 40 cases (actual: $UNIT_PASS)" PASS
 else
-  check "P1a the unit suite registered at least 32 cases (actual: ${UNIT_PASS:-none})" FAIL
+  check "P1a the unit suite registered at least 40 cases (actual: ${UNIT_PASS:-none})" FAIL
 fi
 
 # ── P2: end-to-end CLI ──────────────────────────────────────────────────────
@@ -187,6 +187,41 @@ if [ "$RC" -eq 0 ] || [ "$RC" -eq 1 ]; then
   check "P2i garbage input yields a verdict, never a crash (rc=$RC)" PASS
 else
   check "P2i garbage input yields a verdict, never a crash (rc=$RC)" FAIL
+fi
+
+# P2j — the escaping asymmetry, at the layer a session actually runs this.
+# The witness writer JSON-encodes its `cmd`, so the reader decodes `\"` to `"`;
+# the claim is typed by a model into a `cmd="…"` slot and read by a raw slice.
+# While only the raw slice was matched, a command containing a double quote
+# could never be corroborated — measured on this library, this exact pair
+# reported EVIDENCE GAP and exit 1. The rendered line must still echo the claim
+# as the RUN LOG spells it, so a reader can grep it back to its source line.
+printf '%s\n' 'AUDIT — cmd="echo \"lint ok\"" exit=0 result="PASS" | scope: lint' > "$RUNLOG"
+witness_line 'echo "lint ok"' 'lint ok' false > "$WITNESS"
+OUT="$(node "$LIB" --log "$RUNLOG" --witness "$WITNESS" 2>&1)"; RC=$?
+if [ "$RC" -eq 0 ] \
+  && printf '%s' "$OUT" | grep -qF 'verified cmd="echo \"lint ok\""' \
+  && ! printf '%s' "$OUT" | grep -qF 'EVIDENCE GAP'; then
+  check "P2j an escaped-quote claim matches its witness entry and echoes the logged spelling" PASS
+else
+  check "P2j an escaped-quote claim matches its witness entry and echoes the logged spelling (rc=$RC)" FAIL
+  printf '%s\n' "$OUT"
+fi
+
+# P2k — the control for P2j. Tolerating a second spelling of the SAME command
+# must not turn the gate into containment: a witness entry for a DIFFERENT
+# quote-bearing command is still a gap. Without this, a regression that matched
+# every escaped claim against anything would satisfy P2j.
+printf '%s\n' 'AUDIT — cmd="echo \"lint ok\"" exit=0 result="PASS" | scope: lint' > "$RUNLOG"
+witness_line 'echo "lint broken"' 'lint broken' false > "$WITNESS"
+OUT="$(node "$LIB" --log "$RUNLOG" --witness "$WITNESS" 2>&1)"; RC=$?
+if [ "$RC" -ne 0 ] \
+  && printf '%s' "$OUT" | grep -qF 'EVIDENCE GAP' \
+  && ! printf '%s' "$OUT" | grep -q '^verified '; then
+  check "P2k escape tolerance does not match a different quote-bearing command" PASS
+else
+  check "P2k escape tolerance does not match a different quote-bearing command (rc=$RC)" FAIL
+  printf '%s\n' "$OUT"
 fi
 
 # ── P3: skill wiring ────────────────────────────────────────────────────────

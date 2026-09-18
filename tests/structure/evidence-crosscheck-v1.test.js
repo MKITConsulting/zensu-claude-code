@@ -416,3 +416,111 @@ test('a QUOTED path in the scope segment disarms the contradiction check', () =>
     assert.ok(r.out.some((l) => l.startsWith('verified')));
   });
 });
+
+// --- Claim/witness escaping symmetry -------------------------------------
+//
+// The witness `cmd=` is JSON-encoded by its writer and decoded by parseWitness;
+// the claim `cmd=` is typed by a model into a `cmd="…"` slot and read by a raw
+// slice. While only the raw slice was matched, a command containing a double
+// quote could never be corroborated — a defect measured against this library
+// before the fix: byte-identical `echo \"lint ok\"` on both sides reported
+// EVIDENCE GAP, while `npm test` on both sides reported verified.
+
+test('a claim whose cmd carries escaped quotes matches the witness entry', () => {
+  // AC-001, and the exact reproduction that motivated claimCandidates.
+  const claims = lib.parseClaims('AUDIT — cmd="echo \\"lint ok\\"" exit=0 result="PASS"');
+  const entries = lib.parseWitness(witnessLine('echo "lint ok"', 'lint ok', false, ''), LOG_PATH);
+  assert.strictEqual(entries[0].cmd, 'echo "lint ok"');
+  const results = lib.crossCheck(claims, entries, true);
+  assert.strictEqual(results[0].verdict, 'verified');
+});
+
+test('a rendered line echoes the claim exactly as the run log spells it', () => {
+  // AC-005. The verdict is decided on the decoded candidate, but what the report
+  // prints must still be greppable back to its source line in the run log, so the
+  // RAW spelling is what reaches render() — in both the matched and unmatched arm.
+  const matched = lib.render(
+    lib.crossCheck(
+      lib.parseClaims('AUDIT — cmd="echo \\"a\\"" exit=0 result="PASS"'),
+      lib.parseWitness(witnessLine('echo "a"', 'a', false, ''), LOG_PATH),
+      true
+    )
+  );
+  assert.deepStrictEqual(matched, ['verified cmd="echo \\"a\\""']);
+  const missed = lib.render(
+    lib.crossCheck(lib.parseClaims('AUDIT — cmd="echo \\"a\\"" exit=0 result="PASS"'), [], true)
+  );
+  assert.deepStrictEqual(missed, [
+    'EVIDENCE GAP — cmd="echo \\"a\\"" claimed but not in witness log',
+  ]);
+});
+
+test('an escaped-quote claim reaches the attempt-only path instead of a gap', () => {
+  // AC-006. The completed filter and the attempt filter must share one predicate:
+  // a wider completed filter would leave this claim falling through to `gap`,
+  // which is the same one-sided blindness the attempt half exists to remove.
+  const witness = 'BASH-ATTEMPT cmd=' + JSON.stringify('echo "boom"');
+  const entries = lib.parseWitness(witness, LOG_PATH);
+  assert.strictEqual(entries[0].kind, 'attempt');
+
+  const green = lib.crossCheck(
+    lib.parseClaims('AUDIT — cmd="echo \\"boom\\"" exit=0 result="PASS"'),
+    entries,
+    true
+  );
+  assert.strictEqual(green[0].verdict, 'contradiction');
+  assert.strictEqual(green[0].attemptOnly, true);
+
+  const honest = lib.crossCheck(
+    lib.parseClaims('AUDIT — cmd="echo \\"boom\\"" exit=1 result="FAILED"'),
+    entries,
+    true
+  );
+  assert.strictEqual(honest[0].verdict, 'verified');
+  assert.strictEqual(honest[0].attemptOnly, true);
+});
+
+test('a claim carrying an invalid escape falls back to its raw spelling', () => {
+  // AC-002. `\d` is not a JSON escape, so the decode fails and must yield NO
+  // second candidate rather than a corrupted one — the claim still matches the
+  // witness entry for the command as it was actually run.
+  assert.deepStrictEqual(lib.claimCandidates("grep -E '\\d+' f"), ["grep -E '\\d+' f"]);
+  const claims = lib.parseClaims('AUDIT — cmd="grep -E \'\\d+\' f" exit=0 result="PASS"');
+  const entries = lib.parseWitness(witnessLine("grep -E '\\d+' f", '3', false, ''), LOG_PATH);
+  assert.strictEqual(lib.crossCheck(claims, entries, true)[0].verdict, 'verified');
+});
+
+test('a claim carrying a real double backslash keeps matching', () => {
+  // AC-003, and the reason the raw spelling stays a candidate. An unconditional
+  // decode rewrites `\\` to `\` and breaks a pair that matched before this change.
+  const command = "grep -F '\\\\' f";
+  assert.ok(lib.claimCandidates(command).includes(command));
+  const claims = lib.parseClaims('AUDIT — cmd="' + command + '" exit=0 result="PASS"');
+  assert.strictEqual(claims[0].cmd, command);
+  const entries = lib.parseWitness(witnessLine(command, '1', false, ''), LOG_PATH);
+  assert.strictEqual(lib.crossCheck(claims, entries, true)[0].verdict, 'verified');
+});
+
+test('a claim with no escapes resolves to exactly one candidate', () => {
+  // AC-004 at the resolver: for an unescaped command the decode is the identity,
+  // so the candidate set must not grow a duplicate that hides a later widening.
+  assert.deepStrictEqual(lib.claimCandidates('npm test'), ['npm test']);
+  assert.deepStrictEqual(lib.claimCandidates('  npm test  '), ['npm test']);
+});
+
+test('the escape tolerance does not make an unrelated command match', () => {
+  // AC-004 at the gate: the match is still equality over a resolved spelling,
+  // never containment, and a witness entry for a different command is still a gap.
+  const claims = lib.parseClaims('AUDIT — cmd="echo \\"a\\"" exit=0 result="PASS"');
+  const entries = lib.parseWitness(witnessLine('echo "b"', 'b', false, ''), LOG_PATH);
+  assert.strictEqual(lib.crossCheck(claims, entries, true)[0].verdict, 'gap');
+});
+
+test('crossCheck still works on a claim object built without cmdCandidates', () => {
+  // The compatibility fallback: a consumer that hand-builds a claim the way this
+  // library shaped them before cmdCandidates existed keeps its previous verdict.
+  const legacy = [{ kind: 'cmd', cmd: 'npm test', result: 'PASS', line: 1 }];
+  const entries = lib.parseWitness(witnessLine('npm test', 'ok', false, ''), LOG_PATH);
+  assert.strictEqual(lib.crossCheck(legacy, entries, true)[0].verdict, 'verified');
+  assert.strictEqual(lib.crossCheck(legacy, [], true)[0].verdict, 'gap');
+});
