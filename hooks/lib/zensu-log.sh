@@ -733,6 +733,27 @@ case "${1:-}" in
           tdd_begin_rc=$?
         fi
         if [ "$tdd_begin_rc" -eq 0 ]; then
+          # Retire the previous generation's edit-landing receipt. It is evidence
+          # about THAT generation's run log and says nothing about this one, and
+          # since the terminus began reading its VERDICT a stale `clean: true`
+          # would satisfy the gate for a chain whose own audit never ran. Renamed,
+          # never unlinked: the file is the only durable record of what that audit
+          # found. Best effort — a failure here must not block arming a chain.
+          #
+          # Ordering is a contract, not layout: this runs only on the SUCCESS arm.
+          # `autopilot_begin_standalone_tdd` refuses a held workspace and several
+          # storage and argument faults, and on that arm the PREVIOUS generation is
+          # still the live one. Retiring ahead of the arm left that live chain with
+          # no receipt, so its own `--tdd-complete` refused with "no edit-landing
+          # receipt for this session" — a cause that never happened. Nothing reads
+          # the receipt between here and the arm, so the earlier position bought
+          # nothing.
+          begin_key="$(basename "$begin_state_file")"
+          begin_key="${begin_key#tdd-phase-}"; begin_key="${begin_key%.json}"
+          begin_receipt="$(dirname "$begin_state_file")/edit-landing-${begin_key}.json"
+          if [ -f "$begin_receipt" ] && [ ! -L "$begin_receipt" ]; then
+            mv -f "$begin_receipt" "${begin_receipt}.superseded" 2>/dev/null || true
+          fi
           if [ "$begin_vanilla" = "true" ]; then
             echo "mode: vanilla"
           else
@@ -843,14 +864,161 @@ case "${1:-}" in
                             _tc_git -C "$_tc_root" ls-files --others --exclude-standard 2>/dev/null; } \
                           | sort -u | grep -c . 2>/dev/null || true)"
         fi
+        _tc_receipt_verdict() {
+          ZENSU_TC_RECEIPT="$(_tdd_native_path "$1" 2>/dev/null || printf '%s' "$1")" node -e '
+            const fs = require("fs");
+            let out = "unparseable";
+            let claims = "0";
+            let log = "";
+            let fd = -1;
+            try {
+              const p = process.env.ZENSU_TC_RECEIPT;
+              // O_NOFOLLOW refuses a symlink AT THE OPEN, and O_NONBLOCK keeps a
+              // FIFO planted in the check-then-open window from hanging this verb
+              // — `.zensu/state/` is writable from inside the session, so both are
+              // reachable. Both flags are guarded: a build that does not define
+              // one still opens, and the descriptor tests below still decide.
+              const C = fs.constants;
+              let flags = C.O_RDONLY;
+              if (Number.isInteger(C.O_NOFOLLOW)) flags |= C.O_NOFOLLOW;
+              if (Number.isInteger(C.O_NONBLOCK)) flags |= C.O_NONBLOCK;
+              fd = fs.openSync(p, flags);
+              const st = fs.fstatSync(fd);
+              if (!st.isFile() || st.size > 4 * 1024 * 1024) {
+                out = "unreadable";
+              } else {
+                const buf = Buffer.allocUnsafe(st.size);
+                let off = 0;
+                while (off < st.size) {
+                  const n = fs.readSync(fd, buf, off, st.size - off, off);
+                  if (n <= 0) break;
+                  off += n;
+                }
+                if (off !== st.size) {
+                  out = "unreadable";
+                } else {
+                  const j = JSON.parse(buf.toString("utf8"));
+                  if (!j || typeof j !== "object" || Array.isArray(j)) out = "unparseable";
+                  else if (j.schema !== "edit-landing-v1" && j.schema !== "edit-landing-v2") out = "unknown-schema";
+                  else {
+                    if (j.clean === true) out = "clean";
+                    else if (j.clean === false) out = "unclean";
+                    else out = "no-verdict";
+                    // Harvested only under a KNOWN schema: a count read out of a
+                    // document whose discriminator was just rejected would arm the
+                    // gate on a field this runtime cannot claim to understand.
+                    if (Number.isFinite(j.claims) && j.claims > 0) claims = String(Math.floor(j.claims));
+                    if (typeof j.log === "string") log = j.log;
+                  }
+                }
+              }
+            } catch (e) {
+              // Discriminate the I/O fault from the CONTENT fault. Every `fs`
+              // failure carries an errno `.code` (EACCES, EIO, EPERM, and the
+              // ENOENT race against the shell `-f` test above); `JSON.parse`
+              // throws a SyntaxError that carries none. Reporting an unreadable
+              // receipt as "does not parse" named the wrong cause and prescribed
+              // a remedy — re-run the audit — that would hit the same fault.
+              out = (e && e.code) ? "unreadable" : "unparseable";
+            }
+            finally { if (fd >= 0) { try { fs.closeSync(fd); } catch (e2) {} } }
+            process.stdout.write(out + "\t" + claims + "\t" + log);
+          ' 2>/dev/null || printf 'unavailable\t0\t'
+        }
+        _tc_armed=0
+        [ "${_tc_changes:-0}" -gt 0 ] && _tc_armed=1
+        _tc_receipt_state=""
+        _tc_receipt_claims=0
+        _tc_receipt_log=""
+        if [ -f "$_tc_receipt" ] && [ ! -L "$_tc_receipt" ]; then
+          _tc_receipt_read="$(_tc_receipt_verdict "$_tc_receipt")"
+          _tc_receipt_state="${_tc_receipt_read%%$'\t'*}"
+          _tc_receipt_rest="${_tc_receipt_read#*$'\t'}"
+          _tc_receipt_claims="${_tc_receipt_rest%%$'\t'*}"
+          _tc_receipt_log="${_tc_receipt_rest#*$'\t'}"
+          case "$_tc_receipt_claims" in
+            ''|*[!0-9]*) _tc_receipt_claims=0 ;;
+          esac
+        fi
+        _tc_log_state="none"
+        _tc_log_claims=0
+        # Resolved on BOTH arming channels, not only the zero-change one. The
+        # stem bind below compares this run log against the one the receipt
+        # records, and gating the resolution on `_tc_armed -eq 0` made that
+        # comparison unreachable on the DOMINANT path — a dirty tree — where a
+        # `clean: true` receipt describing some other run log then satisfied the
+        # verdict test unchallenged.
+        _tc_run_log=""
+        if [ "$seen_plan" = true ] && [ -n "$plan_val" ]; then
+          _tc_plan_stem="$(basename "$plan_val")"
+          _tc_plan_stem="${_tc_plan_stem%.md}"
+          _tc_logs_dir="${_tc_root}/.zensu/logs"
+          if [ -z "$_tc_plan_stem" ] || [ -L "$_tc_logs_dir" ]; then
+            _tc_log_state="refused"
+          else
+            _tc_run_log="${_tc_logs_dir}/${_tc_plan_stem}.log"
+            if [ ! -f "$_tc_run_log" ] || [ -L "$_tc_run_log" ]; then
+              _tc_log_state="missing"
+              _tc_run_log=""
+            else
+              _tc_log_state="ok"
+            fi
+          fi
+        fi
+        if [ "$_tc_armed" -eq 0 ]; then
+          [ "$_tc_receipt_claims" -gt 0 ] && _tc_armed=1
+          if [ "$_tc_log_state" = "ok" ]; then
+            _tc_el_lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh"
+            if [ -f "$_tc_el_lib" ] && [ ! -L "$_tc_el_lib" ] && [ -r "$_tc_el_lib" ]; then
+              # Bounded through the ONE shared ladder rather than a fourth copy of
+              # it: the doctor already bounds the identical call at 5 s, and this
+              # child reads a session-writable run log. A missing ladder degrades
+              # to the unbounded spelling rather than skipping the inventory,
+              # because losing the claim channel would silently disarm the gate.
+              _tc_bounded_lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-bounded-run.sh"
+              if [ -f "$_tc_bounded_lib" ] && [ ! -L "$_tc_bounded_lib" ] && [ -r "$_tc_bounded_lib" ]; then
+                # shellcheck source=/dev/null
+                . "$_tc_bounded_lib" 2>/dev/null || true
+              fi
+              if command -v zensu_run_bounded >/dev/null 2>&1; then
+                _tc_inventory="$(zensu_run_bounded bash "$_tc_el_lib" --inventory --log "$_tc_run_log" --project "$_tc_root" 2>/dev/null)"
+              else
+                _tc_inventory="$(bash "$_tc_el_lib" --inventory --log "$_tc_run_log" --project "$_tc_root" 2>/dev/null)"
+              fi
+              _tc_inventory_rc=$?
+              if [ "$_tc_inventory_rc" -ne 0 ]; then
+                _tc_log_claims=0
+                _tc_log_state="inventory-failed"
+              else
+                _tc_log_claims="$(printf '%s\n' "$_tc_inventory" | sed -n 's/^claimed-files=//p' | head -1)"
+                case "$_tc_log_claims" in
+                  ''|*[!0-9]*) _tc_log_claims=0; _tc_log_state="unreadable" ;;
+                esac
+              fi
+            else
+              _tc_log_state="library-unavailable"
+            fi
+          fi
+          [ "$_tc_log_claims" -gt 0 ] && _tc_armed=1
+          if [ "$_tc_armed" -eq 0 ] && [ "${ZENSU_EDIT_LANDING_GATE:-on}" != "off" ]; then
+            case "$_tc_log_state" in
+              inventory-failed|library-unavailable)
+                echo "zensu-log.sh --tdd-complete: EDIT LANDING GATE UNRESOLVED — the anchor reports no changed files and the claim inventory could not be run (${_tc_log_state}: ${_tc_el_lib:-<library path unresolved>}), so a logged claim could not arm the receipt requirement. Completion is not blocked on it." >&2
+                ;;
+              refused|missing|unreadable)
+                echo "zensu-log.sh --tdd-complete: EDIT LANDING GATE UNRESOLVED — the anchor reports no changed files and this session's run log could not be read (${_tc_log_state}: ${_tc_root}/.zensu/logs/), so a logged claim could not arm the receipt requirement. Completion is not blocked on it." >&2
+                ;;
+            esac
+          fi
+        fi
         # The ledger records an escape that short-circuited a DECISION POINT. Out of
         # scope there is no decision to short-circuit, so the scope conjunct belongs
         # here too — otherwise a zero-change chain reports a bypass of a gate that
         # never ran.
-        if [ "${ZENSU_EDIT_LANDING_GATE:-on}" = "off" ] && [ "${_tc_changes:-0}" -gt 0 ]; then
+        if [ "${ZENSU_EDIT_LANDING_GATE:-on}" = "off" ] && [ "$_tc_armed" -eq 1 ]; then
           tdd_record_bypass "$session_val" ZENSU_EDIT_LANDING_GATE >/dev/null 2>&1 || true
         fi
-        if [ "${ZENSU_EDIT_LANDING_GATE:-on}" != "off" ] && [ "${_tc_changes:-0}" -gt 0 ]; then
+        if [ "${ZENSU_EDIT_LANDING_GATE:-on}" != "off" ] && [ "$_tc_armed" -eq 1 ]; then
           # `! -L` as well as `-f`: `-f` FOLLOWS a symlink, and the derived-channel
           # reader below refuses one outright (`lstatSync`). Without this the two
           # halves disagree about what a receipt is — a symlink satisfies the
@@ -860,6 +1028,54 @@ case "${1:-}" in
           # is a file the session can write, so it bounds accidents, not intent.
           if [ ! -f "$_tc_receipt" ] || [ -L "$_tc_receipt" ]; then
             echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — no edit-landing receipt for this session (a symlink at that path is refused rather than followed, so it does not count as one). A claimed edit that never landed leaves no diff, so no reviewer would ever see it. Run the Phase 6 step 5b audit first:" >&2
+            echo "  bash \"\${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh\" --log <run-log> --project \"\${CLAUDE_PROJECT_DIR:-.}\" --session \"<session id>\"" >&2
+            echo "Set ZENSU_EDIT_LANDING_GATE=off only for a session the user has explicitly exempted." >&2
+            exit 1
+          fi
+          if [ "$_tc_receipt_state" = "clean" ] && [ -n "${_tc_run_log:-}" ] && [ -n "${_tc_receipt_log:-}" ]; then
+            # Separator-blind, and NOT `basename`: an `edit-landing-v1` receipt
+            # persists `log` as the raw `--log` spelling the caller wrote, so on
+            # win32 this value can arrive backslash-spelled, where `basename`
+            # strips nothing and the two stems then never compare equal. `v2`
+            # persists a project-relative suffix and the reader accepts both, so
+            # the stem rule has to serve both domains. Z8b in
+            # tests/structure/test-tdd-complete-receipt-gate.sh is the pin — MB4
+            # governs the requirements gate's own `_rq_rel` and says nothing
+            # about these two values.
+            _tc_receipt_stem="${_tc_receipt_log##*/}"; _tc_receipt_stem="${_tc_receipt_stem##*\\}"; _tc_receipt_stem="${_tc_receipt_stem%.log}"
+            _tc_armed_stem="${_tc_run_log##*/}"; _tc_armed_stem="${_tc_armed_stem##*\\}"; _tc_armed_stem="${_tc_armed_stem%.log}"
+            # COMPARE the raw stems; RENDER a screened copy. `_tc_receipt_stem`
+            # comes out of a receipt in `<project>/.zensu/state/`, which this
+            # repository records as session-writable with no gate covering it, so
+            # the value reaching a refusal a model reads gets the same treatment
+            # the doctor's topology row gives a claim root: no control byte, no
+            # backtick, and a bounded length.
+            _tc_receipt_shown="$_tc_receipt_stem"
+            _tc_armed_shown="$_tc_armed_stem"
+            case "$_tc_receipt_shown" in
+              (*[[:cntrl:]\`]*) _tc_receipt_shown="(withheld — unsafe to render)" ;;
+            esac
+            case "$_tc_armed_shown" in
+              (*[[:cntrl:]\`]*) _tc_armed_shown="(withheld — unsafe to render)" ;;
+            esac
+            [ "${#_tc_receipt_shown}" -le 200 ] || _tc_receipt_shown="$(printf '%.200s…' "$_tc_receipt_shown")"
+            [ "${#_tc_armed_shown}" -le 200 ] || _tc_armed_shown="$(printf '%.200s…' "$_tc_armed_shown")"
+            if [ "$_tc_receipt_stem" != "$_tc_armed_stem" ]; then
+              echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — the edit-landing receipt for this session describes the run log \`${_tc_receipt_shown}.log\`, but this chain's own run log is \`${_tc_armed_shown}.log\`. A receipt is evidence about ONE run log; a clean verdict for another one proves nothing about this chain's claims. Re-run the Phase 6 step 5b audit over this chain's own run log:" >&2
+              echo "  bash \"\${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh\" --log \"${_tc_run_log:-}\" --project \"\${CLAUDE_PROJECT_DIR:-.}\" --session \"<session id>\"" >&2
+              exit 1
+            fi
+          fi
+          if [ "$_tc_receipt_state" != "clean" ]; then
+            case "$_tc_receipt_state" in
+              unclean) _tc_verdict_text="records a FAILED audit (\`clean: false\`) — a claimed edit did not land, or nothing gradeable was claimed" ;;
+              no-verdict) _tc_verdict_text="records no verdict: its \`clean\` field is absent or is not a boolean, so it proves nothing about the claimed edits" ;;
+              unknown-schema) _tc_verdict_text="carries a schema this runtime does not know, so its verdict could not be read" ;;
+              unreadable) _tc_verdict_text="could not be read — it is not a regular file of bounded size, or the read itself failed" ;;
+              unparseable) _tc_verdict_text="does not parse as an edit-landing receipt" ;;
+              *) _tc_verdict_text="could not be judged (node is unavailable, or the read failed) — this is not a verdict about its contents" ;;
+            esac
+            echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — the edit-landing receipt for this session ${_tc_verdict_text}. Only a receipt recording \`clean: true\` establishes that the claimed edits landed; the audit writes the receipt BEFORE its own exit status, so its presence alone proves nothing. The only in-chain clearance is to LAND the claimed edit at the path the claim names and re-run the audit — the run log is append-only and the grader retires no claim, so withdrawing one in prose does not clear this, and re-landing foreign-root work in the anchor does not retire the claim that named the other root. Re-run the Phase 6 step 5b audit:" >&2
             echo "  bash \"\${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh\" --log <run-log> --project \"\${CLAUDE_PROJECT_DIR:-.}\" --session \"<session id>\"" >&2
             echo "Set ZENSU_EDIT_LANDING_GATE=off only for a session the user has explicitly exempted." >&2
             exit 1

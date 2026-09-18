@@ -134,6 +134,8 @@ var IMPL_STOP_NUDGE_FALLBACK = 12;
 var IMPL_STOP_NUDGE_MAX = 999999;
 var CHAIN_ROW_LIMIT = 8;
 var NOTE_MAX_BYTES = 4096;
+var RECEIPT_SCHEMAS = ['edit-landing-v1', 'edit-landing-v2'];
+var CLAIM_INVENTORY_TIMEOUT_MS = 5000;
 var SETTINGS_MAX_BYTES = 1048576;
 // A hand-copy of REVIEWER_SUBAGENT_TYPE in hooks/lib/reviewer-spawn-denial-v1.js,
 // which exports it. Deliberate, not an oversight: that module is required lazily
@@ -2056,9 +2058,10 @@ function chainRows(entries, nowMs, dirEntries, stateDir) {
       + ' (That is compatible with a spawn that WAS attempted: the caveat below reports one when'
       + ' a note records it.) Counted in turns,'
       + ' never in elapsed time, so a paused session or a powered-off machine never reaches this row.'
-      + ' The exit is the review chain: run the /zensu:tdd Phase 6 step 5b edit-landing audit and give'
-      + ' the plan a usable `## Requirements` table first, because the completion verb refuses without'
-      + ' both while the tree is dirty.'
+      + ' The exit is the review chain: run the /zensu:tdd Phase 6 step 5b edit-landing audit until its'
+      + ' receipt records a CLEAN verdict, and give the plan a usable `## Requirements` table, because'
+      + ' while the tree is dirty the completion verb refuses a plan without that table and refuses a'
+      + ' receipt that is merely present — every claimed edit has to have landed.'
       // QUALIFIES, never withholds. The caveat is worded so that its absence costs
       // the reader nothing they can act wrongly on: with no live note the row is the
       // ordinary remedy it always was, and with one the reader is told to lift the
@@ -2482,6 +2485,9 @@ var AUTOPILOT_SCAN_MAX = 64;
 // accepted bound on purpose: acceptance decides whether the record is readable,
 // rendering decides how much of it a model is asked to relay.
 var AUTOPILOT_RENDER_MAX = 200;
+// The claim-topology row renders a filesystem path a model is asked to relay,
+// which is the same question this bound answers for a run id, so it consumes the
+// same constant rather than declaring a twin a `grep -nE 'AUTOPILOT_'` cannot see.
 // `STATE_KEYS` / `STATE_KEYS_WORKSPACE` in the owner, which `stateValid` accepts
 // as an EXACT key set in either shape. Checking it here is what keeps this reader
 // from describing a record every Autopilot verb refuses.
@@ -3478,6 +3484,155 @@ function baselineRebuiltRow(core, projectRoot, key) {
     + 'reviewer. Re-arm with /zensu:tdd if that work still needs one.');
 }
 
+function claimRootRenderable(value) {
+  return typeof value === 'string' && value !== ''
+    && !CONTROL_BYTE_RE.test(value) && value.indexOf('`') === -1
+    && !forgesReportRow(value);
+}
+
+function claimRootRender(value) {
+  return '`' + (value.length > AUTOPILOT_RENDER_MAX
+    ? value.slice(0, AUTOPILOT_RENDER_MAX) + '… (elided)' : value) + '`';
+}
+
+function claimRootSafeNames(roots) {
+  return roots.filter(claimRootRenderable).map(claimRootRender);
+}
+
+// Answers a TYPED result, never a bare string. `{ path }` resolved; `{ reason }`
+// something is wrong with the tree and the row must say so; `{}` nothing to
+// check. Collapsing the middle class into silence made a symlinked
+// `.zensu/logs`, an escaping `log` and a symlinked run log read exactly like a
+// project that never ran an audit — the same tamper class the two disclosed
+// branches below already refuse to hide. A clean ENOENT stays silent, because
+// `.zensu/logs` is gitignored and absent in most projects.
+function auditedRunLog(projectRoot, value) {
+  try {
+    if (typeof value !== 'string' || value === '') return {};
+    if (CONTROL_BYTE_RE.test(value)) {
+      return { reason: 'the receipt names a run log whose path carries control bytes' };
+    }
+    var logsDir = path.join(projectRoot, '.zensu', 'logs');
+    var dirStat;
+    try {
+      dirStat = fs.lstatSync(logsDir);
+    } catch (e0) {
+      if (e0 && e0.code === 'ENOENT') return {};
+      return { reason: 'this project\'s .zensu/logs could not be read' };
+    }
+    if (dirStat.isSymbolicLink() || !dirStat.isDirectory()) {
+      return { reason: 'this project\'s .zensu/logs is not a plain directory' };
+    }
+    var canonLogs = fs.realpathSync.native(logsDir);
+    // The leaf lstat is blind to a RELOCATED `.zensu` component, so the logs
+    // directory is bounded against the project root as well — the sibling
+    // derived-channel reader in `zensu-log.sh` carries the same assertion.
+    var relLogs = path.relative(fs.realpathSync.native(projectRoot), canonLogs);
+    if (relLogs === '..' || relLogs.indexOf('..' + path.sep) === 0 || path.isAbsolute(relLogs)) {
+      return { reason: 'this project\'s .zensu/logs resolves outside the project root' };
+    }
+    var raw = path.resolve(projectRoot, value);
+    var resolved = path.join(fs.realpathSync.native(path.dirname(raw)), path.basename(raw));
+    var rel = path.relative(canonLogs, resolved);
+    if (rel === '' || rel === '..' || rel.indexOf('..' + path.sep) === 0 || path.isAbsolute(rel)) {
+      return { reason: 'the receipt names a run log outside this project\'s .zensu/logs' };
+    }
+    var leaf;
+    try {
+      leaf = fs.lstatSync(resolved);
+    } catch (e1) {
+      if (e1 && e1.code === 'ENOENT') return {};
+      return { reason: 'the run log the receipt names could not be read' };
+    }
+    if (leaf.isSymbolicLink() || !leaf.isFile()) {
+      return { reason: 'the run log the receipt names is not a plain file' };
+    }
+    return { path: resolved };
+  } catch (e) {
+    return { reason: 'the run log the receipt names could not be resolved' };
+  }
+}
+
+function claimInventory(logFile, projectRoot) {
+  var lib = path.join(pluginDir(), 'hooks', 'lib', 'zensu-edit-landing.sh');
+  try {
+    var st = fs.lstatSync(lib);
+    if (st.isSymbolicLink() || !st.isFile()) {
+      return { ok: false, reason: 'the inventory command is not a plain file in the plugin tree' };
+    }
+  } catch (e) {
+    if (e && e.code === 'ENOENT') return null;
+    return { ok: false, reason: 'the inventory command could not be examined (' + (e && e.code ? e.code : 'unknown error') + ')' };
+  }
+  var r;
+  try {
+    r = require('child_process').spawnSync('bash',
+      [lib, '--inventory', '--log', logFile, '--project', projectRoot],
+      { encoding: 'utf8', timeout: CLAIM_INVENTORY_TIMEOUT_MS, maxBuffer: 1024 * 1024 });
+  } catch (e) {
+    return { ok: false, reason: 'the inventory command could not be started' };
+  }
+  if (!r || r.error || r.status !== 0 || typeof r.stdout !== 'string') {
+    return { ok: false, reason: 'the inventory command did not complete' };
+  }
+  var roots = [];
+  r.stdout.split('\n').forEach(function (l) {
+    var i = l.indexOf('\t');
+    if (i === -1 || l.slice(0, i) !== 'foreign-root') return;
+    var value = l.slice(i + 1);
+    if (value !== '' && roots.indexOf(value) === -1) roots.push(value);
+  });
+  return { ok: true, roots: roots };
+}
+
+function claimTopologyRow(projectRoot, ownKey) {
+  if (ownKey === '') return;
+  var receipt = path.join(projectRoot, '.zensu', 'state', 'edit-landing-' + ownKey + '.json');
+  var parsed = readNoteJson(receipt);
+  if (parsed === NOTE_MISSING) return;
+  if (!parsed || typeof parsed !== 'object') {
+    line(WARN, 'topology: this session\'s claims were NOT checked against the anchor — its '
+      + 'edit-landing receipt is present but could not be read (it is not a plain file of '
+      + 'bounded size, or it does not parse). That is a missing check, not an all-clear.');
+    return;
+  }
+  if (RECEIPT_SCHEMAS.indexOf(parsed.schema) === -1) {
+    line(WARN, 'topology: this session\'s claims were NOT checked against the anchor — its '
+      + 'edit-landing receipt carries a schema this runtime does not know. That is a missing '
+      + 'check, not an all-clear.');
+    return;
+  }
+  var audited = auditedRunLog(projectRoot, parsed.log);
+  if (audited.reason) {
+    line(WARN, 'topology: this session\'s claims were NOT checked against the anchor — '
+      + audited.reason + '. That is a missing check, not an all-clear.');
+    return;
+  }
+  if (!audited.path) return;
+  var logFile = audited.path;
+  var inventory = claimInventory(logFile, projectRoot);
+  if (inventory === null) return;
+  if (!inventory.ok) {
+    line(WARN, 'topology: this session\'s claims were NOT checked against the anchor — '
+      + inventory.reason + '. That is a missing check, not an all-clear.');
+    return;
+  }
+  if (inventory.roots.length === 0) return;
+  var named = claimRootSafeNames(inventory.roots);
+  var withheld = inventory.roots.length - named.length;
+  line(WARN, 'topology: this session\'s audited run log claims edits under '
+    + inventory.roots.length + ' root(s) that are not the anchor'
+    + (named.length ? ': ' + named.join(', ') : '')
+    + (withheld > 0
+      ? (named.length ? ', and ' : ' (') + withheld + ' name(s) withheld: they carry characters this row cannot render'
+        + (named.length ? '' : ')')
+      : '')
+    + '. The anchor is ' + (claimRootRenderable(projectRoot) ? claimRootRender(projectRoot) : '(unrenderable)')
+    + '. One edit-landing audit grades ONE root, so those claims are reported rather than graded and this'
+    + ' session\'s review chain sees no diff for them — /zensu:tdd is single-root. Run the chain in the'
+    + ' repository the claims name, or land the work in the anchor.');
+}
+
 function stateBlock(nowMs) {
   block('Session state');
   bindingLine();
@@ -3687,6 +3842,7 @@ function stateBlock(nowMs) {
   // project has a single CAS workflow document, and nesting it there would hide
   // the hold in exactly the fresh session most likely to walk into it.
   autopilotRows(entries, dir, nowMs, currentSessionKey(), projectRoot);
+  claimTopologyRow(projectRoot, currentSessionKey());
   var pr = path.join(dir, 'pending-review.json');
   try {
     var st = fs.statSync(pr);
