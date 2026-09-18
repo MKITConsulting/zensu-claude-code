@@ -521,7 +521,12 @@ verdict about the plan, exit 2 and anything else (a missing library included) re
 gate, that a load fault must never be reported as a judged payload.
 
 **Scoping and the switch are copied from the edit-landing receipt gate**, which sits directly
-above it in the same verb: a resolvable git HEAD plus a non-empty change set. The two share ONE
+above it in the same verb: a resolvable git HEAD plus a non-empty change set. **The two SCOPES
+have since diverged and "copied" is historical:** multi-repo stage 1 arms the receipt gate on a
+logged CLAIM as well (see §"Multi-Repo Stage 1"), so that gate conjoins on `_tc_armed` while this
+one still conjoins on `_tc_changes` alone. The zero-change chain this section records below as
+ungated therefore stays ungated HERE — do not read the sibling's wider scope as covering it. The
+two still share ONE
 change-set computation and ONE spelling of the receipt path — the shared values carry a
 verb-scoped `_tc_` prefix, not an `_el_` one, so neither reads as the other's private state, and
 `tests/structure/test-tdd-complete-receipt-gate.sh` W3pre/W3 hardcode that prefix (renaming it
@@ -529,9 +534,11 @@ made W3 silently vacuous once already, which is why W3pre now checks its own anc
 but they must NEVER share a switch: the computation is armed when EITHER is on, and both
 `ZENSU_EDIT_LANDING_GATE` and `ZENSU_REQUIREMENTS_GATE` record a bypass-ledger entry (both were
 added to `ZENSU_BYPASS_GATE_ALLOWLIST`; the ledger is what keeps everything a chain renders
-under "Gates bypassed" true). **All four consumers conjoin on the scope**, the two gates and the
-two ledger records: out of scope there is no decision point to short-circuit, so recording an
-escape there would name a gate that never ran.
+under "Gates bypassed" true). **All four consumers conjoin on THEIR OWN gate's scope** — the
+receipt gate and its ledger record on `_tc_armed`, this gate and its ledger record on
+`_tc_changes` — because out of scope there is no decision point to short-circuit, so recording an
+escape there would name a gate that never ran. Say "their own": the two scopes diverged when
+stage 1 added the claim arm, and one shared "the scope" reads against the paragraph above.
 
 **Every root in this verb comes from `zensu_resolve_project_dir`, and there is NO divergence to
 defend against — a claim an earlier draft of this section got wrong.** `zensu-log.sh` matches
@@ -620,10 +627,12 @@ enumeration in `docs/configuration.md`, and discipline patch 11 in
   wrapper is defined INSIDE the `--tdd-complete` case arm, which makes the asymmetry structural
   rather than a one-line follow-up: sharing it means hoisting the definition above the verb
   dispatch. Knowingly left as is.
-- **A mid-run commit disarms BOTH gates.** The change set is the worktree against `HEAD` with no
-  baseline range, so a chain that committed its work measures zero changes and both preconditions
-  skip — without even the `REQUIREMENTS GATE UNRESOLVED` line, because the whole block is out of
-  scope. The sibling edit-landing library carries a `--baseline` range for exactly this case;
+- **A mid-run commit disarms THIS gate.** The change set is the worktree against `HEAD` with no
+  baseline range, so a chain that committed its work measures zero changes and this precondition
+  skips — without even the `REQUIREMENTS GATE UNRESOLVED` line, because the whole block is out of
+  scope. It no longer disarms the SIBLING: since multi-repo stage 1 the receipt gate also arms on
+  a logged claim, and the shipped invocation always passes `--plan`, so the committed
+  generation's run log still arms it. The sibling edit-landing library carries a `--baseline` range for exactly this case;
   this verb does not.
 - **The standalone `/zensu:converge` offer carries no plan path**, so the gate and the consumer
   can resolve different plans: the gate judges the receipt-derived plan, converge takes the
@@ -7778,6 +7787,227 @@ skill, the fix-round directive in the delegate hook, and the run-log claim FORMA
 derived from — a port whose rounds log their edits differently gets a helper that always answers
 `empty` and therefore never narrows, which is the safe direction but buys nothing. `zensu-codex`,
 `zensu-kiro` and `zensu-antigravity` were NOT included in this change.
+
+## Multi-Repo Stage 1 (`zensu-log.sh` terminus + `zensu-edit-landing.sh` + the doctor row)
+
+Stage 1 of `docs/multi-repo-chains-spec.md` §5. It ships NO multi-root capability; it
+removes the SILENT GREEN a chain produced when its work landed in a repository the
+anchor cannot see. Four behaviours, three files, one shared claim grammar.
+
+**The terminus judges the receipt's VERDICT, never its existence.** The audit writes
+its receipt BEFORE its own exit status, carrying `clean` as a field rather than as a
+precondition for writing, so an existence-and-not-a-symlink test accepted a receipt
+recording `EDIT NOT LANDED`. `_tc_receipt_verdict` in `hooks/lib/zensu-log.sh` reads it
+once per completion and answers `clean` / `unclean` / `no-verdict` / `unknown-schema` /
+`unreadable` / `unparseable` / `unavailable`, and everything but `clean` refuses with
+that state named. **The affirmative spelling is load-bearing:** refusing only on
+`clean: false` would accept a truncated, schema-drifted or hand-planted receipt that
+carries no verdict at all, and `.zensu/state/` is writable from inside the session
+through a shell redirect no gate covers. A missing `node` therefore refuses too (the
+`unavailable` arm) rather than passing — this is one of the few load faults in that verb
+that fails CLOSED, and it says so in its own wording: it is not a verdict about the
+receipt's contents.
+
+**Both accepted schema names live in FOUR places, and the pin is what holds them
+together:** the writer in `zensu-edit-landing.sh`, this reader, the requirements gate's own
+inline node reader a hundred lines below it in the same verb, and `RECEIPT_SCHEMAS` in
+`hooks/lib/zensu-doctor-report.js`. A fifth value domain — what `log` means per schema —
+is re-encoded in the last two. Adding `edit-landing-v3` means all four, and
+`tests/structure/test-tdd-complete-receipt-gate.sh` SCH1 compares the four spellings so a
+one-sided edit fails loudly rather than degrading one consumer silently. **The standing fix
+is one OWNER**, a host-neutral module exporting the set that the doctor `require`s and both
+`node -e` programs load by an env-supplied path — the transport this file already uses for
+`session-control-core-v1.js`. It was not taken in the round that added the pin because the
+writer's node program is the most heavily pinned code in that library; take it at the next
+change that has to re-author that program anyway.
+
+**The requirement is armed by a CLAIM, not only by a dirty tree.** `_tc_armed` is true
+when the anchor's change count is non-zero OR when a claim was logged, which is what
+covers the clean-orchestrator topology. The run log is located from `--plan`'s stem
+(`.zensu/plans/<stem>.md` → `.zensu/logs/<stem>.log`, bounded to a regular file in a
+non-symlinked logs directory), else from the claim count the receipt itself records.
+**A chain that claimed nothing stays exempt**, and that exemption is not cosmetic:
+hermetic chain-mechanics suites drive this verb in projects that change nothing, and
+forcing them to fabricate a receipt would make the gate look enforced where there is no
+claim to verify. When a channel exists but does not resolve, the verb DISCLOSES
+`EDIT LANDING GATE UNRESOLVED` on stderr instead of exempting silently.
+
+**The claim grammar has ONE owner.** `zensu-edit-landing.sh` already extracted
+`IMPL completed — files:` / `WIRED — files:` claims for grading; `--inventory` reports
+the same extraction read-only — `claimed-files=<n>` plus one `foreign-root<TAB><root>` line per
+distinct non-anchor root — without a change set, a verdict or a receipt. Its two
+consumers are the terminus (for `_tc_armed`) and the doctor row. **The wire format is a
+parsed contract:** the terminus reads `claimed-files=` with `sed -n 's/^claimed-files=//p'` and the
+doctor splits on the first TAB and matches the literal `foreign-root`.
+**The key is `claimed-files=` and NOT `claims`, because the receipt carries a field of
+that name holding a DIFFERENT quantity** — this one counts named FILES, the receipt's own
+`claims` counts claim ENTRIES, and an earlier revision of this section named both `claims`,
+which is the conflation the rename removed.
+**`claimed-files=` deliberately counts LESS than the audit's own `CLAIM_COUNT`:** a bare
+`WIRED` line with no `files:` list is a claim to the GRADER (reported `UNVERIFIED`) and
+is NOT one here, because `*"WIRED"*` also matches an ordinary `TDD COMPLETE — … 1 WIRED`
+summary line, and arming a gate on that would wedge a zero-change strict chain whose
+audit can then only ever report it again. An empty file list and a
+`WIRED (verified, no change)` line count as claims in neither.
+
+**An absolute claim is judged by where it RESOLVES.** `absolute_claim_verdict`
+canonicalizes the claim's nearest existing ancestor before comparing it with the audited
+root, so a macOS `/var` spelling of the anchor is in-root rather than foreign; a genuinely
+foreign claim is reported `UNVERIFIED (foreign root)` and NAMES the root, found by walking
+up for a `.git` entry — a filesystem walk, never a `git` invocation inside a repository
+this session does not own. It counts as `UNVERIFIED`, so the receipt shape and the
+`EDIT LANDING AUDIT —` tally line are unchanged and no receipt field was added.
+
+**`claimRootSafeNames` consumes the OWNER's display rules, and `AUTOPILOT_RENDER_MAX` is
+the one render bound.** The row echoes a filesystem path a model is asked to relay, which is
+the same question the autopilot rows answer for a run id, so it applies `forgesReportRow`
+beside the control-byte and backtick tests — a `label : value` pair, a double space, a
+separator-adjacent modifier letter, a Default_Ignorable code point and an orphan combining
+mark are none of them control bytes — and the ANCHOR passes through the same predicate, not
+a weaker inline one. A second `= 200` constant was declared here and removed: the
+`grep -nE 'AUTOPILOT_|autopilot[A-Z]|createHash'` recipe §"Autopilot Run Scope" prescribes
+cannot see a `CLAIM_`-prefixed twin.
+
+**The doctor row spawns the library rather than re-implementing it.**
+`claimTopologyRow` resolves this session's receipt (`readNoteJson`, the hardened reader
+the denial notes already use), resolves its `log` inside the project's own
+`.zensu/logs/`, and `spawnSync`s `bash zensu-edit-landing.sh --inventory` with a 5 s
+timeout. That is the ONLY subprocess in that renderer, and it is deliberate: the
+alternative was a second copy of the claim grammar in JS. The row is SILENT when the
+library is absent (the feature is not installed) and WARNS when the command was there and
+did not complete — a check that did not run must never read as an all-clear. `/zensu:doctor`
+refuses on win32 by design, so `bash` is available wherever this row can render at all.
+
+**Version: `patch`.** Walked against §"Runtime Lineage" entry by entry: no context-record
+or workflow-state schema field (the receipt is neither, and no field was added to it
+either), no strict key set, no hook added, removed or renamed and no matcher changed, no
+new config key (`ZENSU_EDIT_LANDING_GATE` is reused), no attestation change. The terminus
+refuses MORE than before, which is a gate tightening inside one installation rather than a
+capability change to a session an older runtime is serving.
+
+**Operator-facing accounts that must move with it:** discipline patch 10 in
+`docs/tdd-manager-workflow.md`, the `ZENSU_EDIT_LANDING_GATE` row in
+`docs/configuration.md`, the two-refusal lead-in of `docs/gates.md`, the topology bullets
+plus the frontmatter `session state` clause in `skills/doctor/SKILL.md`, Phase 6 step 5b b)
+and step 10.1 in `skills/tdd/SKILL.md`, and ALL THREE multi-repo documents —
+`docs/multi-repo-chains-spec.md` (its status line, the two §2 paragraphs stage 1
+superseded, the §5 heading and the pin roster at the end of §10) together with
+`docs/multi-repo-chains-overview.html` and `docs/multi-repo-chains-principle.html`, which
+carry the same status lede and the same superseded facts in their own words. Naming the
+spec alone was wrong and produced real drift: `test-multi-repo-doc-consistency.sh` X7
+requires the literal `stages 2 and 3 are BLOCKED` in all three, so a status reword is a
+deliberate three-file edit, and the overview's finding cards restate terminus behaviour
+that §2 now marks superseded.
+
+**The review round that followed the first draft changed five things in the
+production halves, and each one is a rule rather than a tidy-up.**
+
+**Every `git` call in the audit library runs through `_el_git`, which unsets the
+discovery and config-injection variables.** `REPO_ROOT` / `REPO_CANON` decide which
+absolute claims `absolute_claim_verdict` calls FOREIGN, so an ambient `GIT_DIR` or
+`GIT_WORK_TREE` moves the anchor and silently empties the doctor's topology row —
+and the same variables move the change UNION that decides landed versus not-landed.
+`--tdd-complete` already scrubbed the same thirteen names for its own count through
+`_tc_git`; the library is spawned as a CHILD and inherits the caller's environment,
+so it has to scrub for itself. Neither caller passes a filtered `env`, deliberately:
+the scrub belongs where the `git` call is, or the next caller re-opens it.
+
+**The receipt reader discriminates an I/O fault from a CONTENT fault.** Every `fs`
+failure carries an errno `.code`; `JSON.parse` throws a `SyntaxError` that carries
+none. One unconditional `catch` reported `EACCES`, `EIO` and the ENOENT race against
+the shell's own `-f` test as "does not parse as an edit-landing receipt" — naming the
+wrong cause AND prescribing a remedy, re-run the audit, that would hit the same
+fault. The `unreadable` refusal text was widened to cover a failed read rather than
+only a non-regular or oversized file.
+
+**The retirement of the previous generation's receipt runs on the SUCCESS arm of
+`--tdd-begin`, never above it.** `autopilot_begin_standalone_tdd` refuses a held
+workspace and several storage and argument faults, and on that arm the PREVIOUS
+generation is still the live one — so retiring first left a live chain with no
+receipt and its own `--tdd-complete` then refused with "no edit-landing receipt for
+this session", a cause that never happened. Nothing reads the receipt between the two
+points, so the earlier position bought nothing. `Z8c` pins the offset, because a
+failing begin cannot be staged from that suite.
+
+**The library's signal traps TERMINATE.** A bash trap handler that RETURNS resumes
+the script, so `trap cleanup EXIT INT TERM` over a `cleanup` ending in `return 0`
+made the doctor's 5 s `spawnSync` deadline unenforceable — and worse, `cleanup`
+unlinked `CLAIMS_FILE` mid-run while the log loop's next `>>` recreated it, so the
+inventory then counted only the claims logged after the signal. `trap cleanup EXIT`
+stays; `INT` and `TERM` get handlers that clean up and exit.
+
+**The run log is resolved on BOTH arming channels.** Gating the resolution on
+`_tc_armed -eq 0` made the stem bind unreachable on the DOMINANT path — a dirty tree
+— where a `clean: true` receipt describing some other run log satisfied the verdict
+test unchallenged. The INVENTORY stays gated on the zero-change arm, because arming
+is the only thing it is for, and it is now bounded through the shared
+`zensu_run_bounded` ladder rather than spawned without a deadline while the doctor
+bounds the identical call.
+
+**`auditedRunLog` answers a TYPED result.** `{path}` resolved, `{reason}` something
+is wrong with the tree, `{}` nothing to check. Collapsing the middle class into
+silence made a symlinked `.zensu/logs`, an escaping `log` and a symlinked run log
+read exactly like a project that never ran an audit — the same tamper class the two
+disclosed branches beside it already refuse to hide. A clean `ENOENT` stays silent,
+because `.zensu/logs` is gitignored and absent in most projects. The logs directory
+is additionally bounded against the project root, which the leaf `lstat` cannot see:
+it is blind to a RELOCATED `.zensu` component, and the sibling derived-channel reader
+in `zensu-log.sh` already carried that assertion.
+
+**The rendered stems are SCREENED and the compared stems are not.** `_tc_receipt_log`
+comes out of a receipt in `<project>/.zensu/state/`, which this file records as
+session-writable with no gate covering it, and its stem reaches a refusal a model
+reads. Comparison uses the raw values; rendering uses a copy with no control byte, no
+backtick and a bounded length — the same treatment the doctor's topology row gives a
+claim root.
+
+**TWO standing fixes are named here rather than taken, each with its trigger.** The
+receipt FILENAME is hand-derived in four places — the writer, both `zensu-log.sh`
+verbs and the doctor renderer — with no owner and no pin, while `SCH1` pins only the
+four SCHEMA spellings; the durable answer is a `tdd_edit_landing_receipt` accessor
+beside `tdd_state_file` in `zensu-tdd-phase.sh`, and the trigger is the next change
+that has to touch any two of the four. And ONE artifact now has TWO readers inside
+`--tdd-complete`: `_tc_receipt_verdict`'s hardened descriptor-side read, and the
+requirements gate's own `lstatSync` + `readFileSync` a hundred lines below it, which
+re-parses the same session-writable file with a window in between and no
+`O_NOFOLLOW`/`O_NONBLOCK`; the durable answer is for the verdict reader to return the
+resolved, containment-checked log and for the requirements gate to take it as input.
+Neither was taken inside a change set already several review rounds deep.
+
+
+**Known gaps, accepted and named:**
+
+- **A RELATIVE foreign claim is ungradeable and stays so.** `src/index.ts` from a sibling
+  repository is textually identical to an anchor claim, and where the anchor holds a dirty
+  file of that name it grades as LANDED — a false green INSIDE the audit, in the exact
+  direction stage 1 exists to close. Only the stage 2 root label closes it; `X6` in
+  `tests/structure/test-edit-landing-audit.sh` pins the current behaviour so the gap cannot
+  be mistaken for detection.
+- **The claim-armed scope needs a channel.** With neither `--plan` nor a receipt — the
+  flag-free recovery spelling of `--tdd-complete` — a zero-change chain keeps the
+  pre-stage-1 exemption, silently, because nothing identifies its run log.
+- **The doctor row needs a receipt.** Before the first audit there is nothing that names
+  this session's run log, so the row cannot fire; after the audit, the audit's own failure
+  has already named the root. The row's value is that it persists across turns.
+- **Anchoring, not enforcement.** The receipt and the run log are ordinary files the
+  session can write, so a model that wants to defeat this can. It bounds accidents — a
+  chain that genuinely worked in two repositories — rather than intent.
+- **The subprocess in the renderer is a named cost, not a settled design.** `claimInventory`
+  is the only `spawnSync` anywhere in `hooks/lib`, in a renderer whose pattern for every other
+  dependency is a lazy guarded `require`, and it carries the audit library's two unscrubbed
+  `git rev-parse` calls onto the doctor's path behind a 5 s timeout. Rejecting a second JS copy
+  of the claim grammar was right; a subprocess is not the only way to keep one owner. **The
+  standing fix is a host-neutral `edit-landing-claims-v1.js`** that the shell loads from its
+  `node -e` and the doctor `require`s — the shape `rule-block-v1.js` already ships for a
+  cross-language carrier. It was not taken here because it re-authors the extraction loop the
+  checks of `test-edit-landing-audit.sh` pin; take it with its own review. No numeral here on
+  purpose — this file's own rule is that a hand-maintained count is what a driven loop cannot
+  catch, and the one that stood here was stale within the change that wrote it.
+- **Windows is UNVERIFIED for all four behaviours.** None of the three suites is in
+  `tests/profiles/windows-ci.v1.json`; `test-edit-landing-audit.sh` and
+  `test-tdd-complete-receipt-gate.sh` run on the weekly Windows Safety structure shard,
+  `test-doctor.sh` runs there too, and no wall clock has been taken for the added rows.
+- **No ports.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were NOT included.
 
 ## Pull Request Workflow
 

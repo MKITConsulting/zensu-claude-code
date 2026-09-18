@@ -197,6 +197,182 @@ RC8=$?
 { [ "$RC8" -ne 0 ] && printf '%s' "$OUT8" | grep -qE 'PENDING PREDICATE|UNVERIFIED'; }
 check "G1 outside git the verdict stays pending/unverified — never a silent landed" "$(verdict $?)"
 
+echo "== Multi-root: a claim outside the audited root is named, never silently graded =="
+# Stage 1 of docs/multi-repo-chains-spec.md: one audit run grades ONE root. A claim
+# that resolves into a sibling repository used to read as "could not be resolved",
+# which names neither the topology nor the repository the work actually landed in.
+MR="$WORK/multiroot"
+mkdir -p "$MR"
+new_repo "$MR/anchor"
+printf 'v1\n' > "$MR/anchor/src.txt"
+G "$MR/anchor" add -A >/dev/null 2>&1; G "$MR/anchor" commit -qm base >/dev/null 2>&1
+printf 'v2\n' > "$MR/anchor/src.txt"
+new_repo "$MR/sibling"
+mkdir -p "$MR/sibling/src"
+printf 'v1\n' > "$MR/sibling/src/app.ts"
+MR_ANCHOR_ABS="$(cd "$MR/anchor" && pwd -P)"
+MR_SIB_ABS="$(cd "$MR/sibling" && pwd -P)"
+ln -s "$MR_ANCHOR_ABS" "$MR/anchor-link" 2>/dev/null || true
+cat > "$MR/run.log" <<EOF
+[10:00:01] S1 IMPL completed — files: ${MR_SIB_ABS}/src/app.ts
+[10:00:02] S2 IMPL completed — files: ${MR_ANCHOR_ABS}/src.txt
+[10:00:03] S3 IMPL completed — files: ${MR}/anchor-link/src.txt
+EOF
+OUT9="$(run_audit --log "$MR/run.log" --project "$MR/anchor" --receipt -)"
+RC9=$?
+[ "$RC9" -ne 0 ]
+check "X1 a claim resolving outside the audited root fails the audit" "$(verdict $?)"
+printf '%s' "$OUT9" | grep -qF 'UNVERIFIED (foreign root) — S1:'
+check "X2 the foreign claim carries its own verdict, not the generic unresolvable one" "$(verdict $?)"
+printf '%s' "$OUT9" | grep -qF "it belongs to ${MR_SIB_ABS}"
+check "X3 the failure NAMES the foreign root" "$(verdict $?)"
+printf '%s' "$OUT9" | grep -qF 'EDIT LANDED — S2: src.txt'
+check "X4 an absolute claim inside the audited root still grades normally" "$(verdict $?)"
+# The claim is spelled through a SYMLINK to the anchor, so the raw `$REPO_ROOT/*`
+# prefix cannot match on any host and only the canonicalizing arm can resolve it.
+# Spelling it `${MR}/anchor/...` instead left the check byte-identical to X4
+# wherever `mktemp -d` already returns a canonical path.
+if [ -L "$MR/anchor-link" ]; then
+  printf '%s' "$OUT9" | grep -qF 'EDIT LANDED — S3: src.txt'
+  check "X5 a non-canonical absolute spelling of the anchor is judged by where it RESOLVES" "$(verdict $?)"
+else
+  check "X5 a non-canonical absolute spelling of the anchor is judged by where it RESOLVES" SKIP
+fi
+
+echo "== Aliasing: a relative foreign claim is ungradeable before the Stage 2 label =="
+# The documented Stage 1 gap (spec §5). `src.txt` from a sibling repository is
+# textually identical to an anchor claim, and the anchor holds a dirty file of that
+# name, so it grades as LANDED. Pinned as CURRENT behaviour so the gap cannot be
+# mistaken for detection — only the §6.1 root label closes it.
+printf '%s\n' "[10:00:04] S4 IMPL completed — files: src.txt" > "$MR/alias.log"
+OUT10="$(run_audit --log "$MR/alias.log" --project "$MR/anchor" --receipt -)"
+RC10=$?
+{ [ "$RC10" -eq 0 ] && printf '%s' "$OUT10" | grep -qF 'EDIT LANDED — S4: src.txt'; }
+check "X6 a RELATIVE claim colliding with a dirty anchor file still grades as landed (Stage 1 gap, named not fixed)" "$(verdict $?)"
+
+echo "== Read-only inventory =="
+cat > "$MR/inv.log" <<EOF
+[10:00:01] S1 IMPL completed — files: ${MR_SIB_ABS}/src/app.ts
+[10:00:02] S2 IMPL completed — files: src.txt, other.txt
+[10:00:03] S3 IMPL completed — files:
+[10:00:04] S4 WIRED (verified, no change) — docs/x.md: nothing to change
+[10:00:05] S5 WIRED — legacy entry naming no files
+EOF
+INV="$(run_audit --inventory --log "$MR/inv.log" --project "$MR/anchor")"
+RCI=$?
+[ "$RCI" -eq 0 ]
+check "V1 the inventory mode exits 0 — it reports, it never grades" "$(verdict $?)"
+printf '%s' "$INV" | grep -qxF 'claimed-files=3'
+check "V2 one claim per NAMED file: an empty list, a verified-no-change line and a bare WIRED entry count none" "$(verdict $?)"
+printf '%s' "$INV" | grep -qF "foreign-root$(printf '\t')${MR_SIB_ABS}"
+check "V3 the inventory names the distinct foreign roots" "$(verdict $?)"
+! printf '%s' "$INV" | grep -qE 'EDIT LANDED|EDIT NOT LANDED|EDIT LANDING AUDIT'
+check "V4 the inventory emits no grading verdict" "$(verdict $?)"
+INV_SESSION="scv1_$(printf '0%.0s' $(seq 1 64))"
+INV_REFUSE="$(run_audit --inventory --log "$MR/inv.log" --project "$MR/anchor" --session "$INV_SESSION")"
+RCIR=$?
+{ [ "$RCIR" -eq 2 ] && printf '%s' "$INV_REFUSE" | grep -qF 'read-only and does not accept --session'; }
+check "V6 --inventory REFUSES a write-mode operand rather than parsing and ignoring it" "$(verdict $?)"
+[ ! -e "$MR/anchor/.zensu/state" ]
+check "V6a the refused inventory run wrote nothing" "$(verdict $?)"
+# The positive control: the SAME operand without --inventory really does derive a
+# receipt path, so V5/V6 are not passing because --session is inert.
+run_audit --log "$MR/inv.log" --project "$MR/anchor" --session "$INV_SESSION" >/dev/null 2>&1
+[ -f "$MR/anchor/.zensu/state/edit-landing-${INV_SESSION}.json" ]
+check "V6b the same --session WITHOUT --inventory does write a receipt" "$(verdict $?)"
+rm -rf "$MR/anchor/.zensu/state"
+for _empty_flag in --baseline --session-epoch --dirty-before; do
+  EMPTY_OUT="$(run_audit --inventory --log "$MR/inv.log" --project "$MR/anchor" "$_empty_flag" "")"
+  EMPTY_RC=$?
+  { [ "$EMPTY_RC" -eq 2 ] && printf '%s' "$EMPTY_OUT" | grep -qF "does not accept ${_empty_flag}"; }
+  check "V5b --inventory refuses an EMPTY ${_empty_flag} — presence, never emptiness" "$(verdict $?)"
+done
+EMPTY_OK="$(run_audit --inventory --log "$MR/inv.log" --project "$MR/anchor")"
+EMPTY_OK_RC=$?
+{ [ "$EMPTY_OK_RC" -eq 0 ] && printf '%s' "$EMPTY_OK" | grep -qxF 'claimed-files=3'; }
+check "V5b-control the same invocation without those operands still reports" "$(verdict $?)"
+
+echo "== A claim that resolves nowhere names no repository =="
+# The failure text of `claim_root_of` used to be captured in a command
+# substitution whose status was discarded, so the prose travelled into the
+# `foreign-root<TAB><root>` wire format as a VALUE and /zensu:doctor rendered it
+# in backticks as a repository to run the chain in.
+NR="$WORK/norepo"
+mkdir -p "$NR/scratch"
+printf 'v1\n' > "$NR/scratch/loose.txt"
+printf '%s\n' "[10:00:01] S1 IMPL completed — files: ${NR}/scratch/loose.txt" > "$MR/norepo.log"
+OUT_NR="$(run_audit --log "$MR/norepo.log" --project "$MR/anchor" --receipt -)"
+RC_NR=$?
+{ [ "$RC_NR" -ne 0 ] && printf '%s' "$OUT_NR" | grep -qF 'UNVERIFIED (no work tree) — S1:'; }
+check "X7 a claim with no work tree above it gets its own verdict, not a foreign-root one" "$(verdict $?)"
+ROOT_SHAPE_OK=1
+while IFS= read -r _fr_line; do
+  case "${_fr_line#foreign-root$(printf '\t')}" in
+    (/*) ;;
+    (*) ROOT_SHAPE_OK=0 ;;
+  esac
+done <<EOF
+$(printf '%s\n' "$INV" | grep '^foreign-root' || true)
+EOF
+[ "$ROOT_SHAPE_OK" -eq 1 ]
+check "X7a every foreign-root VALUE is an absolute path, never a diagnostic sentence" "$(verdict $?)"
+INV_NR="$(run_audit --inventory --log "$MR/norepo.log" --project "$MR/anchor")"
+RC_INR=$?
+{ [ "$RC_INR" -eq 0 ] && printf '%s' "$INV_NR" | grep -qxF 'claimed-files=1'; }
+check "X7b-pre the inventory over that log ran and reported" "$(verdict $?)"
+! printf '%s' "$INV_NR" | grep -q '^foreign-root'
+check "X7b the inventory emits no foreign-root line for a claim that names no repository" "$(verdict $?)"
+
+echo "== A work tree NESTED under the anchor is foreign =="
+# The lexical `$REPO_ROOT/*` prefix answered before the work tree was consulted,
+# so a nested worktree — this repository's own mandated session layout, under an
+# ignored directory — graded as landed while the anchor's git could not see it.
+NEST_OK=0
+if git -C "$MR/anchor" worktree add -q -b nested-probe "$MR/anchor/nested" >/dev/null 2>&1; then NEST_OK=1; fi
+if [ "$NEST_OK" -eq 1 ]; then
+  printf 'v1\n' > "$MR/anchor/nested/app.ts"
+  NEST_ABS="$(cd "$MR/anchor/nested" && pwd -P)"
+  printf '%s\n' "[10:00:01] S1 IMPL completed — files: ${NEST_ABS}/app.ts" > "$MR/nested.log"
+  OUT_NEST="$(run_audit --log "$MR/nested.log" --project "$MR/anchor" --receipt -)"
+  RC_NEST=$?
+  { [ "$RC_NEST" -ne 0 ] && printf '%s' "$OUT_NEST" | grep -qF 'UNVERIFIED (foreign root) — S1:'; }
+  check "X8 a claim into a work tree NESTED under the anchor is named foreign, not landed" "$(verdict $?)"
+  printf '%s' "$OUT_NEST" | grep -qF "it belongs to ${NEST_ABS}"
+  check "X8a the nested work tree is named as the root" "$(verdict $?)"
+  INV_NEST="$(run_audit --inventory --log "$MR/nested.log" --project "$MR/anchor")"
+  printf '%s' "$INV_NEST" | grep -qF "foreign-root$(printf '\t')${NEST_ABS}"
+  check "X8b the inventory reports the nested work tree so the doctor row can fire" "$(verdict $?)"
+else
+  check "X8 a claim into a work tree NESTED under the anchor is named foreign, not landed" SKIP
+  check "X8a the nested work tree is named as the root" SKIP
+  check "X8b the inventory reports the nested work tree so the doctor row can fire" SKIP
+fi
+
+echo "== The strict-mode step 8 summary line is not a claim =="
+# `*"WIRED"*` also matched `TDD COMPLETE — … | Integration: 1 WIRED | …`, which
+# skills/tdd/SKILL.md step 8 logs BEFORE --tdd-complete runs. That counted the
+# summary as an ungradeable claim, so every audit re-run after step 8 wrote
+# `clean: false` — and once the terminus read the VERDICT, the refusal's own
+# remedy could never clear it. A bare claim is `<step> WIRED …` and nothing else.
+cat > "$MR/strict.log" <<EOF
+[10:00:01] S1 IMPL completed — files: src.txt
+[10:00:02] TDD COMPLETE — 5/5 GREEN | Integration: 1 WIRED | Build: – n/a
+EOF
+OUT_ST="$(run_audit --log "$MR/strict.log" --project "$MR/anchor" --receipt -)"
+RC_ST=$?
+{ [ "$RC_ST" -eq 0 ] && printf '%s' "$OUT_ST" | grep -qF 'EDIT LANDED — S1: src.txt'; }
+check "X9 a run log carrying the step 8 summary line still audits CLEAN" "$(verdict $?)"
+! printf '%s' "$OUT_ST" | grep -qF 'a WIRED entry names no files'
+check "X9a the summary line is not reported as an ungradeable claim" "$(verdict $?)"
+printf '%s' "$OUT_ST" | grep -qF 'claims=1 landed=1'
+check "X9b the summary line is not counted as a claim" "$(verdict $?)"
+# The discriminator: a REAL bare WIRED entry is still ungradeable.
+printf '%s\n' "[10:00:03] S9 WIRED — legacy entry naming no files" >> "$MR/strict.log"
+OUT_ST2="$(run_audit --log "$MR/strict.log" --project "$MR/anchor" --receipt -)"
+RC_ST2=$?
+{ [ "$RC_ST2" -ne 0 ] && printf '%s' "$OUT_ST2" | grep -qF 'a WIRED entry names no files'; }
+check "X9c a genuine bare WIRED entry is still UNVERIFIED (the arm is narrowed, not deleted)" "$(verdict $?)"
+
 echo "== Skill: reacts to the library, does not re-implement it =="
 BLOCK="$(audit_block)"
 [ -n "$BLOCK" ]

@@ -16,6 +16,7 @@
 #   zensu-edit-landing.sh --log <run-log> [--project <dir>] [--baseline <sha>]
 #                         [--session-epoch <n>] [--session <id>]
 #                         [--dirty-before <file>] [--receipt <path>]
+#   zensu-edit-landing.sh --inventory --log <run-log> [--project <dir>]
 #
 #   --log            the session run log holding the IMPL/WIRED claims (required)
 #   --project        repository root to audit (default: CLAUDE_PROJECT_DIR or .)
@@ -27,6 +28,19 @@
 #   --dirty-before   file listing paths already dirty BEFORE this round; those
 #                    cannot be certified by union membership alone
 #   --receipt        explicit receipt path ('-' disables the receipt)
+#   --inventory      read-only: report the claimed-file count and the foreign
+#                    roots the claims name, without a change set, a verdict or a
+#                    receipt. Output is `claimed-files=<n>` plus one
+#                    `foreign-root<TAB><root>` line per distinct non-anchor root,
+#                    whose value domain is a PATH and never a diagnostic. The
+#                    count is NOT the receipt's `claims`: this one counts NAMED
+#                    FILES, while the receipt counts claim ENTRIES and therefore
+#                    includes a bare `WIRED` one. It accepts no write-mode
+#                    operand. Its consumers are
+#                    `zensu-log.sh --tdd-complete` (which arms the receipt
+#                    requirement on a claim rather than on a dirty tree) and the
+#                    /zensu:doctor topology row; both need the claim grammar this
+#                    file owns, and neither may write anything.
 #
 # Exit: 0 when every claim is landed or explicitly exempt; 1 when any claim is
 # NOT LANDED, UNVERIFIED, or PENDING PREDICATE; 2 on a usage/environment error —
@@ -47,6 +61,11 @@ DIRTY_BEFORE=""
 RECEIPT_PATH=""
 RECEIPT_EXPLICIT=0
 RECEIPT_FAILED=0
+BASELINE_SEEN=0
+EPOCH_SEEN=0
+DIRTY_SEEN=0
+INVENTORY=0
+INV_ROOTS=""
 
 die() { echo "zensu-edit-landing.sh: $1" >&2; exit 2; }
 
@@ -54,16 +73,32 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --log)           [ $# -ge 2 ] || die "--log requires a value"; LOG_FILE="$2"; shift 2 ;;
     --project)       [ $# -ge 2 ] || die "--project requires a value"; PROJECT_DIR="$2"; shift 2 ;;
-    --baseline)      [ $# -ge 2 ] || die "--baseline requires a value"; BASELINE_SHA="$2"; shift 2 ;;
-    --session-epoch) [ $# -ge 2 ] || die "--session-epoch requires a value"; SESSION_EPOCH="$2"; shift 2 ;;
+    --baseline)      [ $# -ge 2 ] || die "--baseline requires a value"; BASELINE_SHA="$2"; BASELINE_SEEN=1; shift 2 ;;
+    --session-epoch) [ $# -ge 2 ] || die "--session-epoch requires a value"; SESSION_EPOCH="$2"; EPOCH_SEEN=1; shift 2 ;;
     --session)       [ $# -ge 2 ] || die "--session requires a value"; SESSION_ID="$2"; SESSION_SEEN=1; shift 2 ;;
-    --dirty-before)  [ $# -ge 2 ] || die "--dirty-before requires a value"; DIRTY_BEFORE="$2"; shift 2 ;;
+    --dirty-before)  [ $# -ge 2 ] || die "--dirty-before requires a value"; DIRTY_BEFORE="$2"; DIRTY_SEEN=1; shift 2 ;;
     --receipt)       [ $# -ge 2 ] || die "--receipt requires a value"; RECEIPT_PATH="$2"; RECEIPT_EXPLICIT=1; shift 2 ;;
+    --inventory)     INVENTORY=1; shift ;;
     *) die "unknown argument '$1'" ;;
   esac
 done
 
 [ -n "$LOG_FILE" ] || die "--log is required"
+# `--inventory` reports; it grades nothing and writes nothing. A write-mode
+# operand that parses and is then ignored is the shape `zensu-log.sh` refuses
+# for its own verbs through `invalid_known_flag`: silently dropping an operand
+# the caller supplied is worse than refusing it, because the caller believes it
+# took effect. Refuse the whole set rather than the one that writes.
+if [ "$INVENTORY" -eq 1 ]; then
+  [ "$RECEIPT_EXPLICIT" -eq 0 ] || die "--inventory is read-only and does not accept --receipt"
+  [ "$SESSION_SEEN" -eq 0 ] || die "--inventory is read-only and does not accept --session"
+  # PRESENCE, never emptiness. `--inventory --baseline ""` parsed, was dropped and
+  # exited 0 under the `-z` form — the exact shape the paragraph above forbids,
+  # since the caller believes the operand took effect.
+  [ "$BASELINE_SEEN" -eq 0 ] || die "--inventory grades nothing and does not accept --baseline"
+  [ "$EPOCH_SEEN" -eq 0 ] || die "--inventory grades nothing and does not accept --session-epoch"
+  [ "$DIRTY_SEEN" -eq 0 ] || die "--inventory grades nothing and does not accept --dirty-before"
+fi
 # An empty --session yields no receipt path at all, and the refusal branch that
 # would announce it suppresses its own message on an empty path — so the audit
 # would exit 0 having written nothing, and `--tdd-complete` would then blame a
@@ -76,33 +111,58 @@ done
 # silently degrade into auditing the current directory.
 PROJECT_ABS="$(cd "$PROJECT_DIR" 2>/dev/null && pwd -P)" || die "cannot resolve project dir: $PROJECT_DIR"
 
+# Every `git` call in this script runs through `_el_git`, which unsets the
+# discovery and config-injection variables that would otherwise override `-C`.
+# `REPO_ROOT`/`REPO_CANON` decide which absolute claims `absolute_claim_verdict`
+# calls FOREIGN, so an ambient `GIT_DIR` or `GIT_WORK_TREE` moves the anchor and
+# silently empties the doctor's topology row. `zensu-log.sh --tdd-complete`
+# scrubs the same thirteen names for its own change count; the library is spawned
+# as a child and inherits the caller's environment, so it must scrub for itself.
+_el_git() (
+  unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+        GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CEILING_DIRECTORIES \
+        GIT_DISCOVERY_ACROSS_FILESYSTEM GIT_NAMESPACE GIT_PREFIX \
+        GIT_CONFIG GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM
+  git "$@"
+)
+
 IN_GIT=0
 REPO_ROOT="$PROJECT_ABS"
-if git -C "$PROJECT_ABS" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+if _el_git -C "$PROJECT_ABS" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   IN_GIT=1
-  REPO_ROOT="$(git -C "$PROJECT_ABS" rev-parse --show-toplevel 2>/dev/null)" || REPO_ROOT="$PROJECT_ABS"
+  REPO_ROOT="$(_el_git -C "$PROJECT_ABS" rev-parse --show-toplevel 2>/dev/null)" || REPO_ROOT="$PROJECT_ABS"
 fi
+REPO_CANON="$(cd "$REPO_ROOT" 2>/dev/null && pwd -P)" || REPO_CANON="$REPO_ROOT"
+[ -n "$REPO_CANON" ] || REPO_CANON="$REPO_ROOT"
 
 # ── The actual change set ────────────────────────────────────────────────────
 # Anchored with -C so the current working directory cannot narrow it: `ls-files`
 # is cwd-scoped and would silently drop everything outside a subdirectory.
 UNION_FILE="$(mktemp)" || die "mktemp failed"
-cleanup() { rm -f "${UNION_FILE:-}" "${CLAIMS_FILE:-}" "${tmp_receipt:-}" 2>/dev/null; return 0; }
-trap cleanup EXIT INT TERM
+cleanup() { rm -f "${UNION_FILE:-}" "${CLAIMS_FILE:-}" "${tmp_receipt:-}" "${INV_ROOTS:-}" 2>/dev/null; return 0; }
+# A bash trap handler that RETURNS resumes the script, so `trap cleanup ... TERM`
+# made the caller's deadline unenforceable: `spawnSync`'s default killSignal is
+# SIGTERM, and the doctor bounds this child at 5 s. Worse, `cleanup` unlinks
+# CLAIMS_FILE mid-run and the log loop's next `>>` recreated it, so the inventory
+# then counted only the claims logged after the signal. Terminate on a signal;
+# keep the plain EXIT handler for the ordinary path.
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
 
-if [ "$IN_GIT" -eq 1 ]; then
-  if git -C "$REPO_ROOT" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
-    git -C "$REPO_ROOT" diff --name-only HEAD -- 2>/dev/null >> "$UNION_FILE"
+if [ "$INVENTORY" -eq 0 ] && [ "$IN_GIT" -eq 1 ]; then
+  if _el_git -C "$REPO_ROOT" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+    _el_git -C "$REPO_ROOT" diff --name-only HEAD -- 2>/dev/null >> "$UNION_FILE"
     # A mid-run commit empties the worktree diff; the baseline range is what
     # keeps those claims verifiable.
-    if [ -n "$BASELINE_SHA" ] && git -C "$REPO_ROOT" rev-parse --verify --quiet "$BASELINE_SHA" >/dev/null 2>&1; then
-      git -C "$REPO_ROOT" diff --name-only "$BASELINE_SHA"..HEAD -- 2>/dev/null >> "$UNION_FILE"
+    if [ -n "$BASELINE_SHA" ] && _el_git -C "$REPO_ROOT" rev-parse --verify --quiet "$BASELINE_SHA" >/dev/null 2>&1; then
+      _el_git -C "$REPO_ROOT" diff --name-only "$BASELINE_SHA"..HEAD -- 2>/dev/null >> "$UNION_FILE"
     fi
   else
     # Unborn HEAD: `diff HEAD` is fatal, so take the index instead.
-    git -C "$REPO_ROOT" ls-files --cached --others --exclude-standard -- 2>/dev/null >> "$UNION_FILE"
+    _el_git -C "$REPO_ROOT" ls-files --cached --others --exclude-standard -- 2>/dev/null >> "$UNION_FILE"
   fi
-  git -C "$REPO_ROOT" ls-files --others --exclude-standard -- 2>/dev/null >> "$UNION_FILE"
+  _el_git -C "$REPO_ROOT" ls-files --others --exclude-standard -- 2>/dev/null >> "$UNION_FILE"
 fi
 sort -u -o "$UNION_FILE" "$UNION_FILE" 2>/dev/null
 
@@ -115,7 +175,101 @@ was_dirty_before() {
 
 is_ignored() {
   [ "$IN_GIT" -eq 1 ] || return 1
-  git -C "$REPO_ROOT" check-ignore -q -- "$1" 2>/dev/null
+  _el_git -C "$REPO_ROOT" check-ignore -q -- "$1" 2>/dev/null
+}
+
+trim_claim() {
+  local p="$1"
+  p="${p#"${p%%[![:space:]]*}"}"
+  p="${p%"${p##*[![:space:]]}"}"
+  printf '%s' "$p"
+}
+
+canon_claim() {
+  local p="$1" d rest c
+  d="$(dirname "$p")"; rest="$(basename "$p")"
+  while [ "$d" != "/" ] && [ "$d" != "." ] && [ ! -d "$d" ]; do
+    rest="$(basename "$d")/$rest"
+    d="$(dirname "$d")"
+  done
+  c="$(cd "$d" 2>/dev/null && pwd -P)" || c=""
+  [ -n "$c" ] || { printf '%s' "$p"; return 0; }
+  case "$c" in
+    /) printf '/%s' "$rest" ;;
+    *) printf '%s/%s' "$c" "$rest" ;;
+  esac
+}
+
+# Prints the work tree root above a claim, or NOTHING with status 1. Printing a
+# sentence here was a real defect: the one caller captures this in a command
+# substitution, so a diagnostic on stdout becomes the VALUE, travels into the
+# `foreign-root<TAB><root>` wire format and is rendered by `/zensu:doctor` in
+# backticks as a repository to run the chain in — naming a repository that does
+# not exist. A failure says so through the status and stays silent on stdout.
+claim_root_of() {
+  local p="$1" probe
+  probe="$(canon_claim "$(dirname "$p")")"
+  while [ -n "$probe" ] && [ "$probe" != "/" ] && [ "$probe" != "." ]; do
+    if [ -e "$probe/.git" ]; then printf '%s' "$probe"; return 0; fi
+    probe="$(dirname "$probe")"
+  done
+  if [ -e "/.git" ]; then printf '/'; return 0; fi
+  return 1
+}
+
+# Prints the root of a work tree NESTED under the anchor, or nothing with status
+# 1. The walk stops BELOW `$REPO_CANON`, so the anchor itself never matches.
+nested_worktree_of() {
+  local cp="$1" probe
+  probe="$(dirname "$cp")"
+  while [ -n "$probe" ] && [ "$probe" != "/" ] && [ "$probe" != "." ] && [ "$probe" != "$REPO_CANON" ]; do
+    case "$probe" in
+      "$REPO_CANON"/*) ;;
+      *) return 1 ;;
+    esac
+    if [ -e "$probe/.git" ]; then printf '%s' "$probe"; return 0; fi
+    probe="$(dirname "$probe")"
+  done
+  return 1
+}
+
+# Three kinds, and the third exists because the second's value domain is a PATH:
+#   in-root<TAB><repo-relative path>
+#   foreign<TAB><work tree root>
+#   unrooted<TAB><claim directory>   — no work tree above the claim at all
+# Classification is RESOLVE-then-classify. A lexical `"$REPO_ROOT"/*` prefix is
+# not the same question as "the anchor's git can see this path": a git worktree
+# or submodule nested under the anchor sits inside that prefix while its change
+# set belongs to another repository, which is exactly the topology stage 1 exists
+# to name. This repository's own convention puts every session worktree under an
+# ignored `.claude/worktrees/`, where the lexical test graded such a claim
+# `EDIT LANDED (untracked-by-design)`.
+absolute_claim_verdict() {
+  local p="$1" cp rel nested root
+  cp="$(canon_claim "$p")"
+  rel=""
+  case "$p" in
+    "$REPO_ROOT"/*) rel="${p#"$REPO_ROOT"/}" ;;
+  esac
+  if [ -z "$rel" ]; then
+    case "$cp" in
+      "$REPO_CANON"/*) rel="${cp#"$REPO_CANON"/}" ;;
+    esac
+  fi
+  if [ -n "$rel" ]; then
+    if nested="$(nested_worktree_of "$cp")"; then
+      printf 'foreign\t%s' "$nested"
+      return 0
+    fi
+    printf 'in-root\t%s' "$rel"
+    return 0
+  fi
+  if root="$(claim_root_of "$p")"; then
+    printf 'foreign\t%s' "$root"
+    return 0
+  fi
+  printf 'unrooted\t%s' "$(canon_claim "$(dirname "$p")")"
+  return 0
 }
 
 # ── Claim extraction ─────────────────────────────────────────────────────────
@@ -137,14 +291,23 @@ emit() { printf '%s\n' "$1"; }
 # Normalize one claimed path to repo-root-relative. Echoes the resolved path, or
 # nothing when it cannot be resolved unambiguously.
 normalize_claim() {
-  local raw="$1" p
-  p="$raw"
-  p="${p#"${p%%[![:space:]]*}"}"          # ltrim
-  p="${p%"${p##*[![:space:]]}"}"          # rtrim
+  local raw="$1" p verdict kind
+  p="$(trim_claim "$raw")"
   [ -n "$p" ] || return 1
   case "$p" in
-    "$REPO_ROOT"/*) p="${p#"$REPO_ROOT"/}" ;;
-    /*) return 1 ;;                        # absolute but outside the repo
+    /*)
+      verdict="$(absolute_claim_verdict "$p")"
+      kind="${verdict%%$'\t'*}"
+      if [ "$kind" = "foreign" ]; then
+        printf '%s' "${verdict#*$'\t'}"
+        return 3
+      fi
+      if [ "$kind" = "unrooted" ]; then
+        printf '%s' "${verdict#*$'\t'}"
+        return 4
+      fi
+      p="${verdict#*$'\t'}"
+      ;;
   esac
   p="${p#./}"
   # Exact hit, either in the change set or on disk.
@@ -165,9 +328,21 @@ normalize_claim() {
 }
 
 grade_claim() {
-  local step="$1" raw="$2" resolved
+  local step="$1" raw="$2" resolved rc
   CLAIM_COUNT=$((CLAIM_COUNT + 1))
-  if ! resolved="$(normalize_claim "$raw")" || [ -z "$resolved" ]; then
+  resolved="$(normalize_claim "$raw")"
+  rc=$?
+  if [ "$rc" -eq 3 ]; then
+    UNVERIFIED=$((UNVERIFIED + 1))
+    emit "UNVERIFIED (foreign root) — ${step}: claimed \"$(trim_claim "$raw")\" resolves outside the audited root ${REPO_ROOT} — it belongs to ${resolved}. One audit run grades ONE root: this run can neither see that repository's change set nor write a receipt for it, so the claim is reported rather than graded."
+    return
+  fi
+  if [ "$rc" -eq 4 ]; then
+    UNVERIFIED=$((UNVERIFIED + 1))
+    emit "UNVERIFIED (no work tree) — ${step}: claimed \"$(trim_claim "$raw")\" resolves outside the audited root ${REPO_ROOT} and no git work tree was found above ${resolved}, so there is no repository to name and nothing to grade the claim against."
+    return
+  fi
+  if [ "$rc" -ne 0 ] || [ -z "$resolved" ]; then
     UNVERIFIED=$((UNVERIFIED + 1))
     emit "UNVERIFIED — ${step}: claimed \"${raw}\" could not be resolved to a repo-root-relative path"
     return
@@ -231,6 +406,12 @@ while IFS= read -r line || [ -n "$line" ]; do
       files="${line#*WIRED — files:}"
       ;;
     *"WIRED"*)
+      wired_head="${line%% WIRED*}"
+      wired_head="${wired_head#\[*\] }"
+      case "$wired_head" in
+        ''|*[[:space:]]*) continue ;;
+      esac
+      [ "$INVENTORY" -eq 1 ] && continue
       UNVERIFIED=$((UNVERIFIED + 1))
       CLAIM_COUNT=$((CLAIM_COUNT + 1))
       emit "UNVERIFIED — a WIRED entry names no files: list and cannot be graded: ${line}"
@@ -244,6 +425,30 @@ while IFS= read -r line || [ -n "$line" ]; do
     printf '%s\t%s\n' "$step" "$one"
   done >> "$CLAIMS_FILE"
 done < "$LOG_FILE"
+
+if [ "$INVENTORY" -eq 1 ]; then
+  INV_CLAIMS=0
+  INV_ROOTS="$(mktemp)" || die "mktemp failed"
+  while IFS="$(printf '\t')" read -r step raw; do
+    [ -n "${raw// /}" ] || continue
+    INV_CLAIMS=$((INV_CLAIMS + 1))
+    INV_PATH="$(trim_claim "$raw")"
+    case "$INV_PATH" in
+      /*)
+        INV_VERDICT="$(absolute_claim_verdict "$INV_PATH")"
+        case "${INV_VERDICT%%$'\t'*}" in
+          foreign) printf '%s\n' "${INV_VERDICT#*$'\t'}" >> "$INV_ROOTS" ;;
+        esac
+        ;;
+    esac
+  done < "$CLAIMS_FILE"
+  printf 'claimed-files=%s\n' "$INV_CLAIMS"
+  sort -u "$INV_ROOTS" 2>/dev/null | while IFS= read -r inv_root; do
+    [ -n "$inv_root" ] && printf 'foreign-root\t%s\n' "$inv_root"
+  done
+  rm -f "$INV_ROOTS" 2>/dev/null
+  exit 0
+fi
 
 # The pipeline above runs in a subshell, so grade in the parent to keep counters.
 while IFS="$(printf '\t')" read -r step raw; do
