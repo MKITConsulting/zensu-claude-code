@@ -107,7 +107,7 @@ run_unit() { # $1 label  $2 file  $3 registered floor  $4 SUITE-OVERVIEW row key
   fi
 }
 run_unit "V6 floor" "$UNIT_FLOOR" 10 "verify-navigation-floor-v1.test.js"
-run_unit "V7 consent" "$UNIT_CONSENT" 42 "verify-consent-v1.test.js"
+run_unit "V7 consent" "$UNIT_CONSENT" 43 "verify-consent-v1.test.js"
 run_unit "V7b free-port" "$UNIT_PORT" 3 "verify-free-port.test.js"
 
 grep -qF 'verify-navigation-floor-v1.js' "$PROXY" && ! grep -qE '^function isLoopbackHost' "$PROXY" \
@@ -229,6 +229,20 @@ done
 [ "$(pre_verdict "$TABS" "" "$SID" "$PROJ")" = "ALLOW" ] \
   && check "V16b a tabs call that opens no url passes silently" PASS \
   || check "V16b a tabs call that opens no url passes silently" FAIL
+[ "$(pre_verdict "$TABS" "http://127.0.0.1:4291/" "$SID" "$PROJ")" = "ASK" ] \
+  && check "V16c a tabs call opening a fresh loopback url is asked about" PASS \
+  || check "V16c a tabs call opening a fresh loopback url is asked about" FAIL
+case "$(pre_reason "$TABS" "https://remote.example.com/" "$SID" "$PROJ")" in
+  *'parent-environment navigation policy'*) check "V16d a tabs call opening a remote url is refused for want of the parent policy" PASS ;;
+  *) check "V16d a tabs call opening a remote url is refused for want of the parent policy" FAIL ;;
+esac
+case "$(pre_reason "$TABS" "http://localhost:4290/" "$SID" "$PROJ")" in
+  *'literal loopback-IP origins only'*) check "V16e a tabs call opening a non-literal loopback url is denied by the floor" PASS ;;
+  *) check "V16e a tabs call opening a non-literal loopback url is denied by the floor" FAIL ;;
+esac
+[ "$(pre_verdict "$TABS" "http://localhost:4290/" "$SID" "$PROJ")" = "DENY" ] \
+  && check "V16e-control the floor refusal on the tabs path is a deny" PASS \
+  || check "V16e-control the floor refusal on the tabs path is a deny" FAIL
 
 post_run "$NAV" "http://127.0.0.1:4200/login" "$SID" "$PROJ" >/dev/null
 [ -f "$MEMORY" ] && node -e '
@@ -813,7 +827,8 @@ grep -qF -- 'the `ask` and `deny` cases fail silently' "$VF_DOC" \
 # their own negative lists. Bound, stated rather than implied: this scans the driven TOOL-NAME
 # spelling; the `.mcp.json` key half is pinned at its canonical carrier by the unit suite.
 if command -v git >/dev/null 2>&1 && { [ -d "$PLUGIN_DIR/.git" ] || [ -f "$PLUGIN_DIR/.git" ]; }; then
-  RETIRED_EXPECTED="tests/structure/test-reviewer-capability-gate.sh
+  RETIRED_EXPECTED="tests/structure/playwright-mcp-proxy.test.js
+tests/structure/test-reviewer-capability-gate.sh
 tests/structure/test-verify-consent.sh
 tests/structure/verify-consent-v1.test.js"
     # --cached --others --exclude-standard: a NEW file carrying the retired spelling is exactly the
