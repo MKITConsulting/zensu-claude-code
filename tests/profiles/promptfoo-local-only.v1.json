@@ -48,6 +48,7 @@
     "test-gitignore-zensu.sh",
     "test-immutable-marketplace-release.sh",
     "test-impl-stop-counter.sh",
+    "test-incremental-review-rounds.sh",
     "test-intent-router-hook.sh",
     "test-msys-runtime-boundaries.sh",
     "test-msys-special-plugin-module-boundaries.sh",

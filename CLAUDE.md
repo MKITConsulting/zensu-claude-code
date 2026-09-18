@@ -8287,6 +8287,100 @@ the lineage sense: it is a renderer correcting a false verdict, and it persists 
   `bash -n` is not the one 3.2 would parse and the finding may not surface. That is the
   same limitation the un-shipped detector above has, from the other side.
 
+## Incremental Review Rounds (`review-round-scope-v1.js` + `aspect-activation-v1.js`)
+
+Two reductions to what the `/zensu:tdd` review fan-out READS, both gated on a permissively
+read config key and both defaulting ON. They exist because the fan-out, not the round
+counter, is what the chain actually costs: **measured** on this repository's own subagent
+transcripts, one `zensu:review-aspect` agent ingests ~513k context tokens over ~40 internal
+turns, `review-judge` ~540k and the consume `code-reviewer` ~345k, so a single full fan-out
+moves roughly **3.4M** tokens and `autoFixMaxRounds: 5` multiplied that by up to five. Take
+those figures as ONE measurement over six recent sessions, not a bound.
+
+**`hooks.incrementalReviewRounds` narrows rounds 2..N to that round's OWN delta.** Round 1 is
+unchanged. The delta comes from the run log the model already writes — every routed round logs
+`R<n>-<step> IMPL completed — files: …` — so nothing new is persisted and no workflow-state
+field moves. **The reduction is redundancy, not coverage:** an aspect agent re-reading a file
+unchanged since the previous round cites the same lines and cannot raise a new finding.
+
+**The JUDGE is excluded, and that exclusion is what makes the narrowing safe at all.**
+`zensu:review-judge` always receives the full cumulative `changed_files`, because cross-cutting
+drift into a file THIS round did not touch is precisely what a delta hides — it is the one
+finding class a narrowed panel structurally cannot raise. Never "simplify" the judge onto the
+delta; that deletes the compensating control rather than a redundancy.
+
+**FAIL-OPEN IS THE WHOLE CONTRACT, and it has three degraded causes rather than two.**
+`roundScope` answers `ok` only when it resolved a real delta; `empty` (no claims logged for the
+round) and `degraded` keep the WHOLE diff. TRUNCATION at EITHER cap is a degraded cause and was
+a real defect before it was one: the per-claim cap silently dropped paths, so a claim naming more
+than `MAX_CLAIM_FILES` would have reported `status=ok` over a delta missing files — narrowing to
+an incomplete delta skips a file the round changed, which is the exact outcome the module exists
+to prevent. Its own unit suite caught it. Keep `dropped > 0 → degraded`.
+
+**`hooks.aspectActivation` drops the built-in perspectives a change set cannot implicate**, using
+the shape `persona-activation.js` already established for repo-local personas. `conventions` and
+`bugs` ALWAYS spawn; `tests`/`security` are skipped only on a documentation-only change set;
+`architecture` only when the change set carries no production code at all. **`security`
+deliberately still runs on a tests-only change set** — fixtures carry credentials, and that is
+exactly the case a "just tests" heuristic would miss. Empty or unclassifiable input spawns all
+five, so a narrowed panel is always a proven reduction rather than a guess, and the predicates
+therefore ask "is EVERY file X", never "is SOME file X": one production file restores the panel.
+
+**Every reduction DISCLOSES.** A skipped aspect logs `ASPECT SKIPPED — <aspect> (<reason>)` and a
+failing helper logs `ASPECT ACTIVATION UNAVAILABLE — <reason>` and spawns all five. A panel that
+shrank silently is indistinguishable from one that was never spawned, which is the failure this
+repository treats as worse than the cost it removes.
+
+**Coupled sites that move together:** the two libs and their exports; `skills/tdd/SKILL.md`
+step 3 (activation) and step 10 (delta scoping) — both edited INSIDE existing long lines because
+`P3e` in `tests/structure/test-review-personas.sh` caps that file at **433 lines** and it is AT
+the cap; BOTH arms of `hooks/post-review-tdd-delegate.sh`, which are verbatim-identical by
+contract (`P3b` in `test-finding-verification.sh` counts `step 4c Finding Verification Gate`
+exactly twice, so a one-sided edit there fails in a suite named for something else); the two
+config keys in `config.example.json`; and the operator accounts in `docs/configuration.md`,
+`docs/review-chain.md`, `docs/architecture.md` and `docs/tdd-manager-workflow.md`.
+`tests/structure/test-incremental-review-rounds.sh` pins all of it and drives both unit files;
+the manifest entry in `tests/profiles/promptfoo-local-only.v1.json` plus the counts in
+`tests/SUITE-OVERVIEW.md` move with it, because `run-all.sh` refuses to execute at all when the
+manifest and the directory disagree.
+
+**DELIBERATELY NOT CHANGED: `hooks/stop-chain-enforcer.sh`'s resume directive.** It fires when a
+turn ended without continuing the chain, where the round number is not established, so it keeps
+prescribing the full fan-out. That is the fail-safe direction and it costs no test churn.
+
+**Version: `patch`.** Walked against §"Runtime Lineage" entry by entry: no context-record or
+workflow-state schema field (both libs are read-only and persist nothing), no strict key set, no
+hook added, removed or renamed and no matcher changed, no attestation change, and no
+`permissionDecision` in either direction. The two new config keys are read through the
+PERMISSIVE `zensu_hook_enabled`, which that section classifies explicitly as a `patch`.
+
+**Known gaps, accepted and named:**
+
+- **The delta is only as complete as the model's own claims.** A round that edits a file without
+  logging its `R<n>-*` IMPL claim narrows the packet past that file. The Phase 6 step 5b Edit
+  Landing Audit is what surfaces an unlogged edit and the convergence branch's full-suite re-run
+  is the backstop, but neither is a review of that file BY the panel in that round.
+- **The activation classifier is path-shaped.** A production file living under `tests/` reads as
+  a test, and a `.md` file carrying executable examples reads as documentation. The direction is
+  a narrowed panel, not a wrong verdict, and `bugs`/`conventions` still run on everything.
+- **The saving is UNMEASURED end to end.** The per-agent figures above are measured; what an
+  actual chain saves is arithmetic over them, not an observation. Take a real figure by comparing
+  subagent transcript sizes across a chain with ≥2 fix rounds before trusting a percentage.
+- **No Windows measurement.** `test-incremental-review-rounds.sh` is in `ciStructureTests`, so the
+  weekly Windows Safety structure shard runs it, with no wall clock taken yet. Say "unmeasured",
+  never "POSIX only". It has no `tests/profiles/ci-shard-weights.v1.json` entry either, so it is
+  costed at `defaultSeconds` until a real ubuntu `--ci` figure exists.
+- **No `/zensu:doctor` row.** A project whose activation helper stopped loading is visible only
+  in the run log's `ASPECT ACTIVATION UNAVAILABLE` line, not in a diagnostic.
+
+**Port-relevant.** The core half is both libs, which are host-neutral, zero-dependency and carry
+no environment reads of their own — every anchor arrives as an option or an argument. The host
+half is FOUR obligations: the two config keys and their reader, the two step directives in the
+skill, the fix-round directive in the delegate hook, and the run-log claim FORMAT the delta is
+derived from — a port whose rounds log their edits differently gets a helper that always answers
+`empty` and therefore never narrows, which is the safe direction but buys nothing. `zensu-codex`,
+`zensu-kiro` and `zensu-antigravity` were NOT included in this change.
+
 ## Pull Request Workflow
 
 **Never commit or push to a closed or merged PR's branch.** Once a PR is merged or closed, its branch is dead — additional commits there belong on a new branch with a new PR.
@@ -8324,23 +8418,43 @@ origin approved mid-session could not be pinned.
 channel** (CLI-only since 2.1.76). The decision module is shaped so elicitation can replace the
 prompt later without changing the memory or the wording.
 
-**The matcher reaches further than the skill, and that is a residual rather than a defect to
-narrow blindly.** It is registered on the tool NAME, and the optional plugin-scope group means
-the bare `mcp__playwright__…` spelling matches too. That spelling is real in this very
-repository: the plugin manifest declares `mcpServers: "./.mcp.json"` and that file names the
-server `playwright`, so ONE file yields the plugin-scoped spelling when loaded as a plugin and
-the bare one when the repository is opened as a project — measured, not inferred, and the
-earlier "CLI versus desktop" reading in the spec was wrong. A consuming project running its own
-MCP server under that key therefore has every non-loopback `browser_navigate` denied, in every
-session, with no skill running. **Do not "fix" this by narrowing the matcher**: where the bare
-spelling is the real one, narrowing removes the gate while the broker still starts in consent
-mode and self-approves. The deny text names the foreign-server possibility and its ONE remedy
-instead — renaming the server key. The second remedy this paragraph used to claim, launching with
-a navigation policy, was retired: it turns the gate off for every target including the remote ones
-the floor exists to refuse, so under the note's own premise it leaves nothing behind it.
-`tests/structure/verify-consent-v1.test.js` machine-forbids the retired spelling, so a carrier
-still naming two remedies asserts something a test refuses. Closing it properly needs the prefix MEASURED across desktop and CLI, default and
-`--plugin-dir` installs; until then neither direction is supported by evidence.
+**The broker's MCP server key is `zensu-browser`, unique on purpose, and the matcher keeps both
+spellings of it.** The gate is registered on the tool NAME,
+`mcp__(plugin_zensu_)?zensu-browser__browser_(navigate|tabs)`. The key used to be `playwright`,
+which is also the default key of upstream `@playwright/mcp`, so the optional plugin-scope group
+matched every foreign server keyed `playwright`: the gate applied this plugin's loopback-only
+floor to a user's own browser server and denied its remote navigations in every session, with no
+skill running. `/zensu:verify-feature` and `/zensu:doctor` also accepted that foreign server as
+the broker. Renaming the plugin's OWN key closed all of it without narrowing anything, and the
+foreign-server deny note retired with the collision it explained.
+**Do not answer a future collision by narrowing the matcher to the plugin-scoped spelling.** Two
+facts forbid it. The bare spelling is real for this plugin: the manifest declares
+`mcpServers: "./.mcp.json"`, and when this repository is opened as a project that same file loads
+as a project-scope server under the bare name — measured, not inferred. That ordinary load fails
+to start (see the residual below), so the bare matcher arm is DEFENSE IN DEPTH rather than a
+spelling a running broker is known to carry: a broker runs under the bare name only where the
+declaration starts outside the plugin loader with a resolvable command — `${CLAUDE_PLUGIN_ROOT}`
+resolving because that variable is present where Claude Code expands `.mcp.json`, or the
+declaration copied into another MCP scope with a real path. Neither launch was measured here. And
+`hookRegistered` in `scripts/playwright-mcp-proxy.js` compares only the matcher STRING and never
+sees the server name, so a broker launched under a spelling the matcher does not cover still
+starts in consent mode with no gate, where it approves any loopback origin that holds a live
+execution marker — and the broker's own marker read carries no session key, although the marker
+NAME embeds one. A unique key keeps both spellings gated. **It is a naming CONVENTION, not a
+server identity:** a foreign server keyed `zensu-browser` would still match the gate and would
+still be accepted as the broker by `/zensu:doctor` and `/zensu:verify-feature`. The rename makes
+a collision unlikely rather than impossible, and that look-alike case is a residual. Claude Code's
+MCP documentation states that a hook matcher written against the bare server key never fires for
+a plugin-bundled server, which is why the plugin-scoped spelling is the one an installed plugin
+produces. `tests/structure/verify-consent-v1.test.js` pins that a server keyed `playwright`
+reaches no decision and that no refusal names one; `tests/structure/test-verify-consent.sh` V21c
+pins the first half through the hook, judged on the hook's exit status as well as its output,
+and V21d the second half on the broker's real remote refusal.
+**Known residual:** root `.mcp.json` still loads as a project-scope server whenever this
+repository is opened as a project, where `${CLAUDE_PLUGIN_ROOT}` is unexpanded and the server
+fails with ENOENT. It no longer hides anyone's `playwright` server. Inlining `mcpServers` into
+`.claude-plugin/plugin.json` would remove it; that touches every suite that copies `.mcp.json`
+into a sandbox plugin tree plus the doctor's config-integrity check, and is not done here.
 
 **The prompt must describe the grant the BROKER makes, not the one the hook asks about.** This is
 stated as a RULE, not as a live divergence — both now ask per origin, and the paragraph below
@@ -8395,8 +8509,44 @@ above it. The distinction is what the line reports: the grant announces a capabi
 hands itself, which a checked-out config must not be able to hide; consent announces that a
 PROMPT will appear, which is a usage hint. Hiding it costs the user a hint and hides nothing.
 
-**Coupled sites that move together:** `CONSENT_MATCHER` / `NAVIGATION_TOOL_RE` in the decision
-module against both matcher registrations in the hook manifest and against the broker's own
+**Coupled sites that move together:** the `zensu-browser` server key in `.mcp.json` against
+`BROWSER_SERVER_KEY`, its one owner in the decision module. Only three readers DERIVE from that
+export — `CONSENT_MATCHER` / `NAVIGATION_TOOL_RE` in the same module, and the key
+`playwright_mcp_declared` reads in `hooks/lib/zensu-doctor.sh`, which takes it from the executing
+installation's module rather than spelling it. Every other carrier is a HAND COPY: both matcher
+registrations in the hook manifest, the accepted namespaces in `skills/verify-feature/SKILL.md`
+and `skills/doctor/SKILL.md`, `BROWSER_NAMESPACES` in
+`evals/verify-feature/assertions/transcript-check.js`, and the Session Control mutating-control
+canary in `scripts/session-control-claude-wrapper.sh`, `evals/session-control/lib/live-evidence.js`,
+`evals/session-control/lib/evidence-worker-contract.js` and
+`evals/session-control/tests/wrapper-selftest.sh`. They are pinned rather than derived, and the pin
+list has to cover every carrier the sentence above names or a carrier reads as unheld: the unit
+suite holds the export against `.mcp.json` and the matcher, `V4` in
+`tests/structure/test-verify-consent.sh` holds BOTH hook-manifest registrations string-equal to
+the module's `CONSENT_MATCHER`, the near-match case in
+`tests/structure/verify-feature-transcript-check.test.js` holds `BROWSER_NAMESPACES` against the
+exported key, `P6l` holds the verify-feature skill, `P2l` the doctor skill, and the selftest stub
+refuses a wrapper whose canary prompt or probe agent names a different tool. The DERIVATION
+itself is held too, and it was not: `P1el`/`P1el2`/`P1el3` in `tests/structure/test-doctor.sh`
+extract `playwright_mcp_declared`'s body and require it to name `BROWSER_SERVER_KEY`, to carry no
+literal `zensu-browser`, and to guard the module the way every other consumer does — without
+them, reverting the doctor to a hand copy kept every suite green, because `P1ek` asserts an
+output message a literal satisfies identically. The key itself is REFUSED at load unless it is
+regex-inert (`/^[a-z][a-z0-9-]*$/`): it reaches a `RegExp` source while the hook manifest carries
+the same matcher as a literal the host compiles, so a metacharacter would make the two readers
+disagree about which tool names are gated, and a quantifier would narrow the module's own test
+until every navigation read as "not a navigation" and the host took the silence as allow. **A grep for `zensu-browser` does NOT find every carrier.** The `.*`
+capability gate in `hooks/lib/reviewer-capability-v1.js` treats any tool name matching
+`/^mcp__.*zensu/i` as a Zensu MCP tool and denies host-profile-v1 every one whose operation is not
+on its `ZENSU_MCP_READ_RE` prefix list, which no browser operation is — even `browser_snapshot` —
+so it denies neutral subagents the broker under BOTH spellings — the plugin-scoped one through
+`plugin_zensu_`, the bare one only because the key happens to contain `zensu`. The retired bare
+`mcp__playwright__*` never matched. A future key without `zensu` in it would silently hand neutral
+subagents the bare broker; `tests/structure/test-reviewer-capability-gate.sh` pins both verdicts,
+the deny reason, and the foreign `playwright` server staying allowed. That reason had to move
+with the rename: it read `cannot invoke mutating Zensu MCP tools`, which promises a non-mutating
+variant that would pass, and no browser operation is on the read allowlist — so it now names the
+allowlist itself, and the suite pins BOTH that wording and the absence of the word `mutating`. A SECOND carrier matches a FRAGMENT of that same reason and is easy to miss because it lives outside `tests/`: `evals/session-control/lib/contract-provider.js` passes it to `assertDenied`, and it is reached only by the `evals/session-control (self-check)` suite on a CI ubuntu shard. The rename shipped once with that fragment still reading `mutating Zensu MCP` — every local suite green, CI red on one shard. `CONSENT_MATCHER` also moves against the broker's own
 `consentHookRegistered`, which reads the module's constant and compares it to the manifest —
 so that check proves internal consistency and says nothing about how the host renders the
 prefix; `RECIPE_NAMES` and `resolveRecipeFile` against the doctor's recipe probe;
@@ -8555,7 +8705,58 @@ serve across that boundary.
 can DENY or ASK, and this one does both. It changes the capability set of every session an older
 runtime is still serving, which is the disqualifier that bullet spells out.
 
+**Version for the SERVER-KEY rename: `minor`, and it is its own verdict.** Walked against
+§"Runtime Lineage": changing a hook's matcher is on the breaking list, and both consent
+registrations moved. The MCP tool namespace moved with it, so EVERY permission rule written for
+`mcp__plugin_zensu_playwright__*` or `mcp__playwright__*` stops matching the broker and has to be
+re-spelled for `mcp__plugin_zensu_zensu-browser__*` or `mcp__zensu-browser__*` — an `allow` rule
+starts prompting again, which is loud, while a `deny` or `ask` rule silently stops restricting
+the broker, which is the direction that needs saying. The user-facing account of it lives in
+`docs/gates.md` and in the `docs/verify-feature.md` troubleshooting table, and it belongs in the
+release commit body. Whether a session that spans the update can hold the old
+tool names beside the new hook registrations is UNVERIFIED; if it can, the gate does not fire for
+those names, so no execution marker is written for them, and the broker refuses a consent-mode
+navigation unless a marker another gate wrote for that origin in the same tree is still live. The
+mixed state therefore fails closed in the ordinary case. No context-record or workflow-state
+field, strict key set or attestation moved.
+
 **Known gaps, accepted and named:**
+
+- **A rename voids a user's own `permissions` rules for the broker, and the shipped mitigation is
+  prose only.** Every rule written for `mcp__plugin_zensu_playwright__…` / `mcp__playwright__…`
+  stops matching: an `allow` shows itself, because the call prompts again, while an `ask` or a
+  `deny` stops restricting SILENTLY — and the consent gate covers only `browser_navigate` and
+  `browser_tabs`, so for the broker's other fifteen tools a lost deny is replaced by no Zensu gate
+  ON THE MAIN THREAD. Every non-main principal is still denied all seventeen, and the
+  OUTCOME is one while the MECHANISM is three: `host-profile-v1` through
+  `reviewer-capability-v1.js`'s `/^mcp__.*zensu/i` substring rule plus `ZENSU_MCP_READ_RE`, which
+  is the only one of the three that depends on the key CONTAINING `zensu`; `reviewer-readonly-v1`
+  and `zensu-plm-readonly-v1` through `REVIEWER_READ_TOOLS` in that same module; and
+  `evidence-worker-v1` through `ALLOWED_TOOLS` in `review-evidence-lease-v1.js`. The principal
+  ladder returns at the second and third before the substring rule is reached, so a future key
+  without `zensu` in it costs coverage for the NEUTRAL principal alone. Two tripwires fire in the
+  UNOBVIOUS direction if this gap is ever closed: `V43c` in
+  `tests/structure/test-verify-consent.sh` reddens when either operator account names a doctor row
+  for the retired tool names, and `V45`'s tree-wide census in the same suite reddens when any file
+  outside its four-carrier list drives the retired spelling — both in a suite named for the
+  consent gate rather than for the doctor. `docs/gates.md` §"Re-spell permission rules after updating" and the
+  `docs/verify-feature.md` §5 troubleshooting row are the whole remedy. **A `/zensu:doctor` row
+  for it was BUILT and then REMOVED, and that is recorded rather than left to be rediscovered.**
+  It read `~/.claude/settings.json` through the existing reader and warned when a retired name
+  still appeared in `deny`, `ask` or `allow`. Five review perspectives found five separate
+  defects in it in one round: it re-read a credential-bearing file a second time in the same
+  block, against that function's own read-once rule; its `!shape.ok` gate re-collapsed the
+  deferred-carrier split `settingsShape` exists to provide; it hand-copied the CURRENT broker
+  namespaces instead of deriving them from `BROWSER_SERVER_KEY`, so a later key move would have
+  made the row instruct a re-spelling toward a name that was itself retired; its silence rested
+  on a sibling disclosure that `hooks.reviewerSpawnPermissionCheck: false` removes; and it warned
+  permanently for a bare `mcp__playwright__` rule that legitimately targets a user's OWN upstream
+  server, which `warnCount` then denies a green summary forever. Doing it properly means
+  threading ONE settings read through `configBlock` into both consumers, splitting the
+  plugin-scoped spelling from the bare one, giving the row its own did-not-run arms, deriving the
+  new names from the key, and joining it to the `P1be` renderer-vs-skill drift pin — a change to
+  the permission-exposure subsystem with its own contracts, and its own review. It does NOT
+  belong inside a server-key rename.
 
 - **The decision module reads host variable NAMES itself**, which the sibling plugin-data guard's
   port contract forbids: that module takes every anchor as an option and names no variable. Four

@@ -168,11 +168,12 @@ case "$REAL_MANIFEST" in
   *"hooks wiring: all $EXPECTED_HOOKS hooks referenced in hooks.json exist on disk"*) check "P2o real hook manifest covers all $EXPECTED_HOOKS hook scripts" PASS ;;
   *) check "P2o real hook manifest count does not match $EXPECTED_HOOKS hook scripts on disk" FAIL ;;
 esac
-if grep -qF 'mcp__playwright__*' "$SKILL_MD" && grep -qF 'mcp__plugin_zensu_playwright__*' "$SKILL_MD" \
+if grep -qF 'mcp__zensu-browser__*' "$SKILL_MD" && grep -qF 'mcp__plugin_zensu_zensu-browser__*' "$SKILL_MD" \
+  && grep -qF 'never under `mcp__playwright__*`' "$SKILL_MD" && ! grep -qF 'mcp__plugin_zensu_playwright__' "$SKILL_MD" \
   && grep -qF 'ZDOC_PLAYWRIGHT_TOOLS=ready bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"' "$SKILL_MD"; then
-  check "P2l doctor skill propagates loaded MCP-tool readiness into the helper" PASS
+  check "P2l doctor skill propagates loaded MCP-tool readiness into the helper and accepts only the zensu-browser namespaces" PASS
 else
-  check "P2l doctor skill propagates loaded MCP-tool readiness into the helper" FAIL
+  check "P2l doctor skill propagates loaded MCP-tool readiness into the helper and accepts only the zensu-browser namespaces" FAIL
 fi
 
 PHASE3_SKILL="$(sed -n '/^## Phase 3:/,/^## Response Style/p' "$SKILL_MD")"
@@ -543,7 +544,7 @@ mkdir -p "$MCP_PLUG/.claude-plugin" "$MCP_PLUG/hooks" "$MCP_PLUG/scripts" "$MCP_
 printf '{"name":"zensu","version":"1.2.3","mcpServers":"./.mcp.json"}\n' > "$MCP_PLUG/.claude-plugin/plugin.json"
 printf '{"plugins":[{"name":"zensu","version":"1.2.3"}]}\n' > "$MCP_PLUG/.claude-plugin/marketplace.json"
 printf '{"hooks":{}}\n' > "$MCP_PLUG/hooks/hooks.json"
-printf '%s\n' '{"mcpServers":{"playwright":{"type":"stdio","command":"${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh","args":["--isolated"]}}}' > "$MCP_PLUG/.mcp.json"
+printf '%s\n' '{"mcpServers":{"zensu-browser":{"type":"stdio","command":"${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh","args":["--isolated"]}}}' > "$MCP_PLUG/.mcp.json"
 printf '%s\n' '{"private":true,"dependencies":{"@playwright/mcp":"0.0.75"}}' > "$MCP_PLUG/mcp-runtime/package.json"
 printf '%s\n' '{"lockfileVersion":3,"packages":{"":{"dependencies":{"@playwright/mcp":"0.0.75"}},"node_modules/@playwright/mcp":{"version":"0.0.75","integrity":"sha512-fixture"}}}' > "$MCP_PLUG/mcp-runtime/package-lock.json"
 printf '#!/bin/bash\nexit 0\n' > "$MCP_PLUG/scripts/playwright-mcp.sh"
@@ -570,7 +571,7 @@ if [ -e "$NPM_MARKER" ]; then
 else
   check "P1ec helper never executes npm during offline detection" PASS
 fi
-printf '%s\n' '{"mcpServers":{"playwright":{"type":"stdio","command":"npx","args":["@playwright/mcp@latest"]}}}' > "$MCP_PLUG/.mcp.json"
+printf '%s\n' '{"mcpServers":{"zensu-browser":{"type":"stdio","command":"npx","args":["@playwright/mcp@latest"]}}}' > "$MCP_PLUG/.mcp.json"
 rm -f "$NPM_MARKER"
 BAD_MCP_OUT="$(PATH="$FAKE_BIN:/usr/bin:/bin" FAKE_NPM_MARKER="$NPM_MARKER" ZDOC_PLAYWRIGHT_TOOLS=ready \
   ZENSU_DOCTOR_PLUGIN_DIR="$MCP_PLUG" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
@@ -583,6 +584,67 @@ else
   check "P1eg invalid MCP detection still never executes npm" PASS
 fi
 printf '%s\n' '{"mcpServers":{"playwright":{"type":"stdio","command":"${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh","args":["--isolated"]}}}' > "$MCP_PLUG/.mcp.json"
+OLD_KEY_OUT="$(PATH="$FAKE_BIN:/usr/bin:/bin" FAKE_NPM_MARKER="$NPM_MARKER" ZDOC_PLAYWRIGHT_TOOLS=ready \
+  ZENSU_DOCTOR_PLUGIN_DIR="$MCP_PLUG" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
+  bash "$HELPER" 2>/dev/null)"
+case "$OLD_KEY_OUT" in *'Playwright MCP: valid plugin config not detected'*) check "P1ek a valid declaration under the retired playwright key is not the plugin's broker" PASS ;; *) check "P1ek retired playwright key (got: $OLD_KEY_OUT)" FAIL ;; esac
+# P1ek passes identically against a hardcoded `browser_key="zensu-browser"`, so nothing above
+# holds the DERIVATION. Reverting it would restore the hand copy this round removed while
+# CLAUDE.md asserts the doctor takes the key from the executing installation's module.
+if PW_BODY="$(awk '/^playwright_mcp_declared\(\) \{/,/^\}$/' "$HELPER")" && [ -n "$PW_BODY" ]; then
+  check "P1el-control the playwright_mcp_declared body is extractable" PASS
+  # Needle the READ, not the bare constant name: the probe subshell exports
+  # ZDOC_BROWSER_SERVER_KEY, so a literal hand copy still carries that substring and a
+  # name-only needle passed against exactly the revert this check exists to catch.
+  case "$PW_BODY" in
+    *'verify-consent-v1.js").BROWSER_SERVER_KEY'*) check "P1el the doctor derives the browser server key from the decision module" PASS ;;
+    *) check "P1el the doctor derives the browser server key from the decision module" FAIL ;;
+  esac
+  case "$PW_BODY" in
+    *'"zensu-browser"'*|*"'zensu-browser'"*) check "P1el2 the doctor keeps no literal copy of the server key" FAIL ;;
+    *) check "P1el2 the doctor keeps no literal copy of the server key" PASS ;;
+  esac
+  # Needle the DECIDING call and its live conjunct. `isSymbolicLink()` beside an lstat verdict is
+  # dead — `lstatSync` never reports a symlink as a file — and an `lstatSync` -> `statSync`
+  # "simplification" kills the guard while leaving that token in place, which is exactly the edit
+  # this check exists to catch.
+  case "$PW_BODY" in
+    *'lstatSync("./verify-consent-v1.js")'*'!info.isFile()'*)
+      check "P1el3 the key read guards the decision module the way every other consumer does" PASS ;;
+    *) check "P1el3 the key read guards the decision module the way every other consumer does" FAIL ;;
+  esac
+  case "$PW_BODY" in
+    *'fs.statSync('*) check "P1el4 the key read does not follow a symlink through a bare statSync" FAIL ;;
+    *) check "P1el4 the key read does not follow a symlink through a bare statSync" PASS ;;
+  esac
+  # SOURCE-pinned, and the reason is MEASURED rather than argued. The key is read from $DIR,
+  # the doctor's own hooks/lib, so a fixture has to run a COPY of the helper — and a copied
+  # hooks/lib is refused as a plugin root before playwright_mcp_declared is ever called: both
+  # routes tried here, deleting verify-consent-v1.js from the copy and deleting the sibling its
+  # top-level require needs, render only
+  # "Session Control: plugin root unavailable or invalid" with an EMPTY stderr. The preflight at
+  # the top of zensu-doctor.sh names neither module, so the refusal is the plugin-root validity
+  # check and not a module check; the disclosure branch stays behaviourally unreachable either way.
+  # LINE-LOCAL on purpose. A bare `>&2` needle over the whole body asserts only that SOME
+  # statement writes to fd 2, so it would stay green the moment a second stderr write lands in
+  # this function while the disclosure itself moved to the report's stdout. (The body's other
+  # redirections, 2>&1 and 2>/dev/null, carry no `>&2` substring and were never the hazard.)
+  case "$PW_BODY" in
+    *'was NOT judged" >&2'*)
+      check "P1el5 the unreadable-module cause is disclosed, on stderr rather than in the report" PASS ;;
+    *) check "P1el5 the unreadable-module cause is disclosed, on stderr rather than in the report" FAIL ;;
+  esac
+  # The skill hand-quotes that emitted line so the model can recognize it. Hold the two sides in
+  # step: a reword on either side otherwise orphans the relay instruction silently.
+  if grep -qF 'browser server key unreadable' "$SKILL_MD" && grep -qF 'was NOT judged' "$SKILL_MD"; then
+    check "P1el6 the doctor skill quotes the disclosure it tells the model to relay" PASS
+  else
+    check "P1el6 the doctor skill quotes the disclosure it tells the model to relay" FAIL
+  fi
+else
+  check "P1el-control the playwright_mcp_declared body is extractable" FAIL
+fi
+printf '%s\n' '{"mcpServers":{"zensu-browser":{"type":"stdio","command":"${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh","args":["--isolated"]}}}' > "$MCP_PLUG/.mcp.json"
 NO_NPM_BIN="$SBOX/no-npm-bin"
 mkdir -p "$NO_NPM_BIN"
 ln -s "$(command -v node)" "$NO_NPM_BIN/node"

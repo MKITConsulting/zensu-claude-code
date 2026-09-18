@@ -173,7 +173,12 @@ written here is hand-derived like every other one below, and ages the same way. 
 the only figure a check reads out of this paragraph. A `/zensu:tdd` review round spawns five
 `review-aspect` agents plus a judge and a code-reviewer, so the `SubagentStart` leg adds about
 **at least** 12 KB across one fan-out — more with repo-custom personas, and again per auto-fix
-round. The dominant term, though, is the other leg, and it is the one the design deliberately
+round, though `hooks.aspectActivation` can drop up to three of those five aspects on a change set
+with no production code, and `hooks.incrementalReviewRounds` narrows every round after the first
+to that round's own delta. The injected prompt is the small term here in any case: measured on
+this repository's own subagent transcripts, one `review-aspect` agent ingests ~513k context
+tokens over ~40 internal turns, so what a round actually costs is the agents' own reading, not
+the packet handed to them. The dominant term, though, is the other leg, and it is the one the design deliberately
 leaves unbounded: `UserPromptSubmit` fires every prompt with no de-bounce, so with zen-mode active
 — the shipped default — the standing per-prompt injection is 4224 + 1756 = about **5980
 characters every turn**, roughly 117 KiB over 20 turns and 351 KiB over 60. The two operands are

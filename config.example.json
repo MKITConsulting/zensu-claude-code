@@ -21,6 +21,8 @@
     "secretScan": true,
     "reviewJudge": true,
     "findingVerification": true,
+    "incrementalReviewRounds": true,
+    "aspectActivation": true,
     "reviewSpawnScopeSentence": true,
     "reviewerSpawnAutoAllow": true,
     "pendingReviewTtlHours": 6,

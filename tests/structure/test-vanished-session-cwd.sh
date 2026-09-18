@@ -67,8 +67,8 @@ const TOOL_INPUT = {
   Task: { subagent_type: 'general-purpose', prompt: 'x', description: 'x' },
   ToolSearch: { query: 'select:Read' },
   TaskUpdate: { taskId: 'probe-1', status: 'completed' },
-  mcp__plugin_zensu_playwright__browser_navigate: { url: 'http://127.0.0.1:9/' },
-  mcp__plugin_zensu_playwright__browser_tabs: { action: 'list' },
+  'mcp__plugin_zensu_zensu-browser__browser_navigate': { url: 'http://127.0.0.1:9/' },
+  'mcp__plugin_zensu_zensu-browser__browser_tabs': { action: 'list' },
 };
 
 function readStdin() {

@@ -17,9 +17,12 @@ TDD_PHASE_LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
 GATES_DOC="$PLUGIN_DIR/docs/gates.md"
 REPO_CONVENTIONS="$PLUGIN_DIR/CLAUDE.md"
 VF_DOC="$PLUGIN_DIR/docs/verify-feature.md"
-NAV="mcp__plugin_zensu_playwright__browser_navigate"
-NAV_CLI="mcp__playwright__browser_navigate"
-TABS="mcp__plugin_zensu_playwright__browser_tabs"
+SESSION_CONTROL_DOC="$PLUGIN_DIR/docs/session-control.md"
+DOCTOR_SKILL="$PLUGIN_DIR/skills/doctor/SKILL.md"
+NAV="mcp__plugin_zensu_zensu-browser__browser_navigate"
+NAV_CLI="mcp__zensu-browser__browser_navigate"
+TABS="mcp__plugin_zensu_zensu-browser__browser_tabs"
+FOREIGN_NAV="mcp__playwright__browser_navigate"
 
 PASS=0; FAIL=0
 check() {
@@ -59,12 +62,16 @@ if node -e '
 else
   check "V4 hooks.json registers the pair on the module's matcher, each on its own event" FAIL
 fi
-for name in "$NAV" "$NAV_CLI" "$TABS" "mcp__playwright__browser_tabs"; do
+for name in "$NAV" "$NAV_CLI" "$TABS" "mcp__zensu-browser__browser_tabs"; do
   node -e 'process.exit(new RegExp("^" + process.argv[1] + "$").test(process.argv[2]) ? 0 : 1)' "$MATCHER" "$name" \
     && check "V5 matcher covers $name" PASS || check "V5 matcher covers $name" FAIL
 done
-node -e 'process.exit(new RegExp("^" + process.argv[1] + "$").test(process.argv[2]) ? 1 : 0)' "$MATCHER" "mcp__plugin_zensu_playwright__browser_snapshot" \
-  && check "V5-control matcher leaves browser_snapshot alone" PASS || check "V5-control matcher leaves browser_snapshot alone" FAIL
+for name in "mcp__plugin_zensu_zensu-browser__browser_snapshot" "$FOREIGN_NAV" "mcp__playwright__browser_tabs" \
+  "mcp__plugin_zensu_playwright__browser_navigate" "mcp__plugin_zensu_playwright__browser_tabs" \
+  "mcp__zensu-browserX__browser_navigate" "mcp__zensuXbrowser__browser_navigate"; do
+  node -e 'process.exit(new RegExp("^" + process.argv[1] + "$").test(process.argv[2]) ? 1 : 0)' "$MATCHER" "$name" \
+    && check "V5-control matcher leaves $name alone" PASS || check "V5-control matcher leaves $name alone" FAIL
+done
 
 . "$(dirname "$0")/lib-unit-summary.sh"
 
@@ -100,7 +107,7 @@ run_unit() { # $1 label  $2 file  $3 registered floor  $4 SUITE-OVERVIEW row key
   fi
 }
 run_unit "V6 floor" "$UNIT_FLOOR" 10 "verify-navigation-floor-v1.test.js"
-run_unit "V7 consent" "$UNIT_CONSENT" 41 "verify-consent-v1.test.js"
+run_unit "V7 consent" "$UNIT_CONSENT" 42 "verify-consent-v1.test.js"
 run_unit "V7b free-port" "$UNIT_PORT" 3 "verify-free-port.test.js"
 
 grep -qF 'verify-navigation-floor-v1.js' "$PROXY" && ! grep -qE '^function isLoopbackHost' "$PROXY" \
@@ -216,7 +223,7 @@ for url in "http://localhost:4200/" "http://10.0.0.5/" "https://192.168.1.10/" "
   [ "$(pre_verdict "$NAV" "$url" "$SID" "$PROJ")" = "DENY" ] \
     && check "V15 floor denies $url" PASS || check "V15 floor denies $url" FAIL
 done
-[ "$(pre_verdict "mcp__plugin_zensu_playwright__browser_snapshot" "" "$SID" "$PROJ")" = "ALLOW" ] \
+[ "$(pre_verdict "mcp__plugin_zensu_zensu-browser__browser_snapshot" "" "$SID" "$PROJ")" = "ALLOW" ] \
   && check "V16 a non-navigating browser tool passes silently" PASS \
   || check "V16 a non-navigating browser tool passes silently" FAIL
 [ "$(pre_verdict "$TABS" "" "$SID" "$PROJ")" = "ALLOW" ] \
@@ -234,9 +241,12 @@ post_run "$NAV" "http://127.0.0.1:4200/login" "$SID" "$PROJ" >/dev/null
 [ "$(pre_verdict "$NAV" "http://127.0.0.1:4200/login" "$SID" "$PROJ")" = "ALLOW" ] \
   && check "V18 the remembered (origin, route) now passes silently" PASS \
   || check "V18 the remembered (origin, route) now passes silently" FAIL
+[ "$(pre_verdict "$NAV_CLI" "http://localhost:4200/" "$SID" "$PROJ")" = "DENY" ] \
+  && check "V18b-control the bare broker spelling is gated: the floor denies localhost on it" PASS \
+  || check "V18b-control the bare broker spelling is gated: the floor denies localhost on it" FAIL
 [ "$(pre_verdict "$NAV_CLI" "http://127.0.0.1:4200/login" "$SID" "$PROJ")" = "ALLOW" ] \
-  && check "V18b the CLI tool spelling shares the same memory" PASS \
-  || check "V18b the CLI tool spelling shares the same memory" FAIL
+  && check "V18b the bare broker spelling shares the same memory" PASS \
+  || check "V18b the bare broker spelling shares the same memory" FAIL
 [ "$(pre_verdict "$NAV" "http://127.0.0.1:4200/admin" "$SID" "$PROJ")" = "ALLOW" ] \
   && check "V19 a route the recipe never declared passes on the approved origin" PASS \
   || check "V19 a route the recipe never declared passes on the approved origin" FAIL
@@ -248,6 +258,23 @@ post_run "$NAV" "http://127.0.0.1:4200/login" "$SID" "$PROJ" >/dev/null
 case "$(pre_reason "$NAV" "https://app.example.com/" "$SID" "$PROJ")" in
   *'parent-environment navigation policy'*) check "V21b the remote refusal names the policy the target needs" PASS ;;
   *) check "V21b the remote refusal names the policy the target needs" FAIL ;;
+esac
+# `pre_verdict` maps hook SILENCE and an explicit `allow` envelope to the same ALLOW, so the
+# verdict alone cannot say "no decision was taken". The empty reason is what establishes it.
+if [ "$(pre_verdict "$FOREIGN_NAV" "https://app.example.com/" "$SID" "$PROJ")" = "ALLOW" ] \
+  && [ -z "$(pre_reason "$FOREIGN_NAV" "https://app.example.com/" "$SID" "$PROJ")" ]; then
+  check "V21c a server keyed playwright gets no gate decision for the remote target V21 refuses on the broker" PASS
+else
+  check "V21c a server keyed playwright gets no gate decision for the remote target V21 refuses on the broker" FAIL
+fi
+V21_REASON="$(pre_reason "$NAV" "https://app.example.com/" "$SID" "$PROJ")"
+case "$V21_REASON" in
+  *'parent-environment navigation policy'*)
+    case "$V21_REASON" in
+      *playwright*|*'server key'*|*'different server'*) check "V21d the broker's remote refusal names no foreign server" FAIL ;;
+      *) check "V21d the broker's remote refusal names no foreign server" PASS ;;
+    esac ;;
+  *) check "V21d the broker's remote refusal names no foreign server" FAIL ;;
 esac
 
 post_run "$NAV" "http://127.0.0.1:4200/rejected" "$SID" "$PROJ" '{"isError":true,"content":[{"type":"text","text":"Zensu browser broker rejected the operation: navigation target origin is not approved"}]}' >/dev/null
@@ -705,6 +732,106 @@ fi
 grep -qF -- 'has no code hand-copy' "$REPO_CONVENTIONS" \
   && check "V41b the EVIDENCE_NAME_PREFIX census still claims no code hand-copy" FAIL \
   || check "V41b the EVIDENCE_NAME_PREFIX census counts what a grep finds" PASS
+
+# --- the key's own shape guard is pinned ---------------------------------
+# `BROWSER_SERVER_KEY` reaches a RegExp source while hooks/hooks.json carries the same matcher
+# as a literal the host compiles. The unit suite pins the key's VALUE, which makes the throw
+# branch unreachable in-tree, so without a pin here the guard could be deleted with every suite
+# green and the future key change it exists to catch would land silently.
+# Both needles run over the module's PRE-MATCHER head with comment lines STRIPPED. The strip is
+# the protection that matters: a whole-file needle is satisfied by prose carrying the same
+# literal, so a guard reduced to a comment would keep both green. The slice is belt, and it needs
+# its own control, because `sed -n '1,/RE/p'` prints to EOF when its end address never matches —
+# renaming `const CONSENT_MATCHER` would silently widen both needles back to the whole file.
+# The unit suite drives the REFUSAL itself.
+MODULE_HEAD="$(sed -n '1,/^const CONSENT_MATCHER/p' "$MODULE" | grep -v '^[[:space:]]*//')"
+[ "$(wc -l <<<"$MODULE_HEAD")" -lt "$(wc -l < "$MODULE")" ] \
+  && check "V46-control the pre-matcher slice terminated instead of running to EOF" PASS \
+  || check "V46-control the pre-matcher slice terminated instead of running to EOF" FAIL
+grep -qF 'throw new Error' <<<"$MODULE_HEAD" && grep -qF 'browser server key is not regex-safe' <<<"$MODULE_HEAD" \
+  && check "V46 the decision module refuses a key that is not regex-inert" PASS \
+  || check "V46 the decision module refuses a key that is not regex-inert" FAIL
+grep -qF '/^[a-z][a-z0-9-]*$/.test(BROWSER_SERVER_KEY)' <<<"$MODULE_HEAD" \
+  && check "V46a the guard tests the key itself, not something derived from it" PASS \
+  || check "V46a the guard tests the key itself, not something derived from it" FAIL
+
+# --- the rename's own accounts are pinned, not only the claims round 1 corrected ---
+# Both carriers of the unbindable-session consent row must say the same thing. Only the
+# docs/gates.md twin was pinned (V40d), so the retired "remembers nothing" account could return
+# in docs/session-control.md with every suite green.
+[ -f "$SESSION_CONTROL_DOC" ] \
+  && check "V42-control the session-control carrier exists" PASS \
+  || check "V42-control the session-control carrier exists" FAIL
+grep -qF -- 'remembering nothing' "$SESSION_CONTROL_DOC" \
+  && check "V42 the consent row carries the retired remembers-nothing account" FAIL \
+  || check "V42 the consent row matches what the broker does" PASS
+grep -qF -- 'no execution marker can be written' "$SESSION_CONTROL_DOC" \
+  && check "V42a the consent row names the marker the broker needs" PASS \
+  || check "V42a the consent row names the marker the broker needs" FAIL
+grep -qF -- 'refuses the navigation after you have answered' "$SESSION_CONTROL_DOC" \
+  && check "V42b the consent row states the refusal that follows the prompt" PASS \
+  || check "V42b the consent row states the refusal that follows the prompt" FAIL
+
+# The rename's user-visible remediation is prose in two files and was pinned by nothing. Two of
+# the three gates.md paragraphs REPLACE claims review round 1 found false, which is the drift
+# class this family exists to hold.
+grep -qF -- 'Re-spell permission rules after updating' "$GATES_DOC" \
+  && check "V43 the gates account tells the user to re-spell their permission rules" PASS \
+  || check "V43 the gates account tells the user to re-spell their permission rules" FAIL
+grep -qF -- 'naming convention, not a server identity' "$GATES_DOC" \
+  && check "V43a the gates account calls the key a convention rather than an identity" PASS \
+  || check "V43a the gates account calls the key a convention rather than an identity" FAIL
+grep -qF -- 'defense in depth' "$GATES_DOC" \
+  && check "V43b the gates account calls the bare matcher arm defense in depth" PASS \
+  || check "V43b the gates account calls the bare matcher arm defense in depth" FAIL
+grep -qF -- 'Why the server key is' "$GATES_DOC" \
+  && check "V43-control the section those three claims live in still exists" PASS \
+  || check "V43-control the section those three claims live in still exists" FAIL
+# The `/zensu:doctor` row for retired permission rules was built and removed; the operator docs
+# must not point at a row the renderer no longer has. V43 is the positive control for this pair.
+# grep exits 2 on a file it cannot read, which is non-zero, so without an existence control the
+# doctor-skill half of this disjunction reports PASS having scanned nothing.
+[ -f "$DOCTOR_SKILL" ] \
+  && check "V43c-control the doctor skill carrier exists" PASS \
+  || check "V43c-control the doctor skill carrier exists" FAIL
+if grep -qF 'retired browser tool names' "$GATES_DOC" || grep -qF 'retired browser tool names' "$DOCTOR_SKILL"; then
+  check "V43c no operator account points at a doctor row for retired browser tool names" FAIL
+else
+  check "V43c no operator account points at a doctor row for retired browser tool names" PASS
+fi
+grep -qF -- 're-spell each rule for' "$VF_DOC" \
+  && check "V44 the troubleshooting row carries the re-spell remedy" PASS \
+  || check "V44 the troubleshooting row carries the re-spell remedy" FAIL
+grep -qF -- 'the `ask` and `deny` cases fail silently' "$VF_DOC" \
+  && check "V44-control the row states why the user would not notice" PASS \
+  || check "V44-control the row states why the user would not notice" FAIL
+
+# --- AC-009: the retired spelling is scanned tree-wide, not only per carrier ---
+# Every other guard is per-file, so a reintroduced `playwright__browser` tool name in docs/,
+# evals/, scripts/, templates/, agents/ or an unpinned skill would ship silently. The scan is a
+# CENSUS rather than a bare absence: three test files legitimately carry the retired spelling in
+# their own negative lists. Bound, stated rather than implied: this scans the driven TOOL-NAME
+# spelling; the `.mcp.json` key half is pinned at its canonical carrier by the unit suite.
+if command -v git >/dev/null 2>&1 && { [ -d "$PLUGIN_DIR/.git" ] || [ -f "$PLUGIN_DIR/.git" ]; }; then
+  RETIRED_EXPECTED="tests/structure/test-reviewer-capability-gate.sh
+tests/structure/test-verify-consent.sh
+tests/structure/verify-consent-v1.test.js"
+    # --cached --others --exclude-standard: a NEW file carrying the retired spelling is exactly the
+  # case this census exists for, and `git ls-files` alone lists index entries only.
+  RETIRED_FOUND="$(cd "$PLUGIN_DIR" && git ls-files -z --cached --others --exclude-standard | xargs -0 grep -ln -e 'playwright__browser' -- 2>/dev/null | grep -v '^CHANGELOG.md$' | LC_ALL=C sort -u)"
+  if [ -n "$RETIRED_FOUND" ]; then
+    check "V45-control the tree-wide scan reaches the carriers that legitimately name it" PASS
+  else
+    check "V45-control the tree-wide scan reaches the carriers that legitimately name it" FAIL
+  fi
+  if [ "$RETIRED_FOUND" = "$(printf '%s\n' "$RETIRED_EXPECTED" | LC_ALL=C sort)" ]; then
+    check "V45 no file outside the negative-list census drives the retired browser tool name" PASS
+  else
+    check "V45 no file outside the negative-list census drives the retired browser tool name (got: $(printf '%s' "$RETIRED_FOUND" | tr '\n' ' '))" FAIL
+  fi
+else
+  check "V45 tree-wide retired-spelling census SKIPPED (no git checkout)" PASS
+fi
 
 echo "----"
 echo "test-verify-consent: $PASS PASS / $FAIL FAIL"

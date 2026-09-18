@@ -153,7 +153,7 @@ in §6.5, not hidden in the table.
 ### 6.3 Consent hook pair
 
 Two hooks, both on the matcher
-`mcp__(plugin_zensu_)?playwright__browser_(navigate|tabs)`:
+`mcp__(plugin_zensu_)?zensu-browser__browser_(navigate|tabs)`:
 
 - **PreToolUse `pre-browser-navigation-consent.sh`.** Resolves the target URL from
   `tool_input.url` (or `tool_input.url` under `action: new` for `browser_tabs`). Applies
@@ -397,14 +397,16 @@ session can write.
 - That PostToolUse fires for plugin-namespaced MCP tools after a human-approved `ask`.
 - Whether a permission rule allowing the tool suppresses a hook `ask`; the docs say the
   hook's `ask` wins, and the suite should pin the observed answer.
-- The exact desktop-app spelling of the tool name (`mcp__plugin_zensu_playwright__…`) is
-  confirmed by this session's tool list. The bare `mcp__playwright__…` spelling is NOT a
-  CLI-versus-desktop distinction, which an earlier revision of this line claimed: measured
-  2026-09-04, `.claude-plugin/plugin.json` declares `mcpServers: "./.mcp.json"` and that file
-  names the server `playwright`, so the SAME file yields the plugin-scoped spelling when the
-  plugin is loaded and the bare one when this repository is opened as a project. Both spellings
-  stay in the matcher, and the bare arm's reach into a foreign server of the same key is
-  recorded as a residual in `docs/gates.md` § Browser Consent Gate. What is still unmeasured is
-  the prefix a RENAMED or `--plugin-dir` install produces; until that is taken, neither
-  narrowing nor widening the matcher is supported by evidence.
+- The broker's MCP server key is `zensu-browser`. It was `playwright` until the key was found
+  to collide with the default key of upstream `@playwright/mcp`: the bare arm of the matcher
+  then gated a user's own browser server and denied its remote navigations. The bare spelling is
+  NOT a CLI-versus-desktop distinction, which an earlier revision of this line claimed: measured
+  2026-09-04, `.claude-plugin/plugin.json` declares `mcpServers: "./.mcp.json"`, so the SAME
+  file yields the plugin-scoped spelling when the plugin is loaded and the bare one when this
+  repository is opened as a project. Both spellings stay in the matcher, now as
+  `mcp__plugin_zensu_zensu-browser__…` and `mcp__zensu-browser__…`. The key is a naming
+  convention, not a server identity: a different server someone keys `zensu-browser` would still
+  match both, so a collision is unlikely rather than impossible. `docs/gates.md` § Browser Consent
+  Gate states why the matcher is not narrowed and why the bare arm is defense in depth.
+  What is still unmeasured is the prefix a RENAMED or `--plugin-dir` install produces.
 - Windows wall clock for the new suite (unmeasured until a weekly Windows Safety run).
