@@ -276,6 +276,7 @@ test('report-only and transcript integrity checks reject writes and malformed st
   assert.equal(check(toolUse('Bash', 'combined-browser', { command: 'bash /plugin/scripts/playwright-mcp.sh --check-policy local http://127.0.0.1:1 / declared-safe; npx playwright open' }) + attestation(), 'reportOnly').pass, false);
   assert.equal(check(toolUse('Bash', 'policy', { command: 'bash /plugin/scripts/playwright-mcp.sh --check-policy local http://127.0.0.1:1 / declared-safe' }) + attestation(), 'reportOnly').pass, true);
   assert.equal(checkTranscript(readOnly, { config: { check: 'unknownCheck' } }).pass, false);
+  assert.equal(check(toolUse('Bash', 'safe-install', { command: 'bash /plugin/scripts/playwright-mcp.sh install-browser' }) + attestation(), 'reportOnly').pass, true);
   assert.equal(check(readOnly + '[stream_warning] event limit reached\n' + attestation(), 'reportOnly').pass, false);
   assert.equal(check('[tool_use: malformed frame\n' + attestation(), 'reportOnly').pass, false);
   assert.equal(check(readOnly + attestation() + attestation('/tmp/other'), 'reportOnly').pass, false);
@@ -326,4 +327,19 @@ test('console evidence must follow the loaded state and remain error-free', () =
 
   assert.equal(check(earlyConsole + loadedSnapshot + capture + network + attestation(), 'localEvidence').pass, false);
   assert.equal(check(loadedSnapshot + capture + runtimeEvidence + lateError + attestation(), 'localEvidence').pass, false);
+});
+
+test('a declared-safe policy check cannot launder a browser launch through its arguments', () => {
+  const launder = (argument) => check(toolUse('Bash', 'laundered', {
+    command: `bash /plugin/scripts/playwright-mcp.sh --check-policy local ${argument} / declared-safe`,
+  }) + attestation(), 'reportOnly').pass;
+
+  assert.equal(launder('"$(npx playwright open)"'), false);
+  assert.equal(launder('"`npx playwright open`"'), false);
+  assert.equal(launder("'http://127.0.0.1:1;npx playwright open'"), false);
+  assert.equal(launder('http://127.0.0.1:1\\;npx'), false);
+
+  assert.equal(launder('"http://127.0.0.1:1"'), true);
+  assert.equal(launder("'http://127.0.0.1:1'"), true);
+  assert.equal(launder('http://127.0.0.1:1'), true);
 });

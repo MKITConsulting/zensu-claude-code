@@ -1445,3 +1445,27 @@ test('every write-failure reason the writer returns is owned by REASONS', () => 
     'control: the same call with nothing wrong still writes',
   );
 });
+
+test('every copy of the broker tool allowlist is held in step with the broker itself', () => {
+  const repoRoot = path.resolve(__dirname, '..', '..');
+  const broker = require(path.join(repoRoot, 'scripts', 'playwright-mcp-proxy.js')).ALLOWED_TOOLS;
+  assert.ok(broker.length > 0, 'control: the broker exports a non-empty allowlist');
+
+  const grader = require(path.join(repoRoot, 'evals', 'verify-feature', 'assertions', 'transcript-check.js')).SAFE_BROWSER_OPERATIONS;
+  assert.deepEqual([...grader].sort(), [...broker].sort());
+
+  const quoted = (text) => [...text.matchAll(/["']([^"']*)["']/g)].map((match) => match[1]);
+  const block = (text, opening) => {
+    const start = text.indexOf(opening);
+    assert.notEqual(start, -1, `control: ${opening} is still spelled that way`);
+    const end = text.indexOf(']', start);
+    assert.notEqual(end, -1, `control: ${opening} still closes`);
+    return quoted(text.slice(start + opening.length, end));
+  };
+
+  const doctor = fs.readFileSync(path.join(repoRoot, 'hooks', 'lib', 'zensu-doctor.sh'), 'utf8');
+  assert.deepEqual(block(doctor, 'const expectedTools = ['), [...broker]);
+
+  const doctorSuite = fs.readFileSync(path.join(repoRoot, 'tests', 'structure', 'test-doctor.sh'), 'utf8');
+  assert.deepEqual(block(doctorSuite, 'module.exports.ALLOWED_TOOLS = ['), [...broker]);
+});
