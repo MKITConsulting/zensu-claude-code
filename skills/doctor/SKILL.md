@@ -634,9 +634,37 @@ classifier will refuse a spawn, not only when the whole table is green.
   Owned by THIS session, or with the owner not established, the row names no
   release command, and you must not suggest one: a release applies a real `CANCEL`,
   so against your own live generation it ends the work you are doing. Owned by
-  ANOTHER session, report it and run `/zensu:autopilot-release` only after the user
-  says yes; that skill is the guided form and asks for the confirmation itself.
-  Never run the bare `zensu-log.sh --autopilot-release … --confirm` on their behalf.
+  ANOTHER session, report it and offer `/zensu:autopilot-adopt` first — it continues the
+  run under this session — and `/zensu:autopilot-release` only if the user wants the run
+  cancelled instead, each only after the user says yes; both skills are the guided forms and
+  ask for the confirmation themselves. Adoption comes first because a cancel cannot be undone.
+  Never run the bare `zensu-log.sh --autopilot-adopt … --confirm` or
+  `zensu-log.sh --autopilot-release … --confirm` on their behalf.
+  **The owner-silence clause decides which of the two verbs is actually on offer, and it
+  outranks this bullet.** It is worded per verb because the two are not symmetric. The
+  RULE, not a list: any arm that says a verb REFUSES or ABORTS withholds that verb from
+  what you offer, while an arm saying its side could not be ESTABLISHED does NOT — an
+  unsettled side is relayed with its caveat, because withholding on it would leave the
+  irreversible cancel as the only thing on the table. Relay the remedy the row printed
+  rather than reconstructing one: it is rendered from the same judgement, and it also
+  carries obstacles the clause does not word, such as adoption's exit-4 refusal while
+  this session owns a nonterminal run of its own. Worked examples, which are examples and not the whole set: a
+  `live inner TDD chain` means adoption refuses that run with exit 3 before it reads
+  anything, so only the release is left; `both verbs abort on this beacon with exit 2`
+  leaves neither, so report the beacon instead — and note that a release-only exit-2
+  arm, an exit-7 future-dated stamp and a pointer that could not be read each narrow the
+  offer the same way. The window is per verb: `hooks.autopilotOwnerActivityTtlHours is 0`
+  means adoption skips its liveness check, and `hooks.autopilotReleaseOwnerActivityTtlHours is 0`
+  means the release skips its own, so a release then cancels the run even while its owner is
+  active — say so before the user answers. With no workflow document at all, the release stands
+  down and cancels unbounded; the clause says `both verbs stand down` whenever neither
+  verb refuses — which for adoption can be because it never reached that beacon at all,
+  a retired owner pointer being one such case — and says something else where a live
+  inner chain or an unreadable owner pointer leaves its side unsettled. Either way that
+  is the LEAST protected state, not the safest one. Relay the clause's own words; never
+  soften them into "the owner looks idle". Where the row leaves only the release on
+  offer, relay its reason too: the deciding stage is read from the run document, which
+  any session in this project can write.
   When the row says it `accepted the record on its SHAPE`, relay that too: the owner
   validates more than this row checks, and a record that fails the stricter check
   makes every Autopilot verb fail closed for the whole project — so the document
@@ -653,7 +681,8 @@ classifier will refuse a spawn, not only when the whole table is green.
   never touches a run document.
 - **✅ autopilot: nonterminal durable run `<id>` … owned by THIS session** → the green form of
   the same row, and deliberately NOT a finding. The row calls such a run an
-  `ordinary run in progress`, which means this session's own active pointer still designates it
+  `ordinary run in progress`, which means the run document also passes the stricter check the
+  owner applies, and that this session's own active pointer still designates it
   and its stage is not `BLOCKED`. Say so and move on. It names no release command — releasing a
   run this session owns cancels its own live generation — and it does not suppress the green
   summary, which is why the arm exists. Every OTHER own-run form is a ⚠️, each stating a
