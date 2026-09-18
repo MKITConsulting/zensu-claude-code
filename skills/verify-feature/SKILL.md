@@ -402,8 +402,10 @@ route, and configuration tools are never advertised or callable. Every MCP serve
 materializes a private generation from the SRI-pinned lockfile outside the plugin root;
 concurrent servers never share `node_modules`. The normal npm cache remains enabled, but a
 cache miss may require network access. For every required browser operation, accept either the
-direct `mcp__playwright__<operation>` name or Claude's plugin namespace
-`mcp__plugin_zensu_playwright__<operation>`. If the complete operation set is absent, report
+direct `mcp__zensu-browser__<operation>` name or Claude's plugin namespace
+`mcp__plugin_zensu_zensu-browser__<operation>`. Never drive `mcp__playwright__<operation>`
+instead: that name belongs to a different MCP server keyed `playwright`, which has no navigation
+broker and no consent gate. If the complete operation set is absent, report
 that the plugin MCP server was not loaded and ask the user to restart Claude Code after
 checking the plugin installation. If the browser binary is missing, require the validated
 natively rendered `${CLAUDE_PLUGIN_ROOT}` path, obtain explicit approval for the networked

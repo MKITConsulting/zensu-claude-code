@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const checkTranscript = require('../../evals/verify-feature/assertions/transcript-check.js');
+const { BROWSER_SERVER_KEY } = require('../../hooks/lib/verify-consent-v1.js');
 
 function check(output, name) {
   return checkTranscript(output, { config: { check: name } });
@@ -27,17 +28,17 @@ function attestation(root = '/tmp/eval', clean = true) {
 }
 
 const image = `[image omitted media_type=image/png bytes=12 sha256=${'a'.repeat(64)}]`;
-const loadedSnapshot = toolUse('mcp__playwright__browser_snapshot', 'loaded-snapshot', {})
-  + toolResult('mcp__playwright__browser_snapshot', 'loaded-snapshot',
+const loadedSnapshot = toolUse('mcp__zensu-browser__browser_snapshot', 'loaded-snapshot', {})
+  + toolResult('mcp__zensu-browser__browser_snapshot', 'loaded-snapshot',
     '2 items available\nrow Alpha quantity 3\nrow Beta quantity 7');
-const runtimeEvidence = toolUse('mcp__playwright__browser_console_messages', 'console', {})
-  + toolResult('mcp__playwright__browser_console_messages', 'console', 'Total messages: 0 (Errors: 0)')
-  + toolUse('mcp__playwright__browser_network_requests', 'network', {})
-  + toolResult('mcp__playwright__browser_network_requests', 'network', 'GET /api/items => 200 OK');
-const orderedInventory = toolUse('mcp__playwright__browser_snapshot', 'initial-snapshot', {})
-  + toolResult('mcp__playwright__browser_snapshot', 'initial-snapshot', 'button Load inventory')
-  + toolUse('mcp__playwright__browser_click', 'load-click', { element: 'Load inventory', ref: 'e1' })
-  + toolResult('mcp__playwright__browser_click', 'load-click', 'clicked')
+const runtimeEvidence = toolUse('mcp__zensu-browser__browser_console_messages', 'console', {})
+  + toolResult('mcp__zensu-browser__browser_console_messages', 'console', 'Total messages: 0 (Errors: 0)')
+  + toolUse('mcp__zensu-browser__browser_network_requests', 'network', {})
+  + toolResult('mcp__zensu-browser__browser_network_requests', 'network', 'GET /api/items => 200 OK');
+const orderedInventory = toolUse('mcp__zensu-browser__browser_snapshot', 'initial-snapshot', {})
+  + toolResult('mcp__zensu-browser__browser_snapshot', 'initial-snapshot', 'button Load inventory')
+  + toolUse('mcp__zensu-browser__browser_click', 'load-click', { element: 'Load inventory', ref: 'e1' })
+  + toolResult('mcp__zensu-browser__browser_click', 'load-click', 'clicked')
   + loadedSnapshot;
 
 test('terminal verdict is accepted only as one bare final line', () => {
@@ -53,19 +54,19 @@ test('terminal verdict is accepted only as one bare final line', () => {
 });
 
 test('visual evidence requires a no-filename screenshot with an inline image result', () => {
-  const capture = toolUse('mcp__playwright__browser_take_screenshot', 'shot', {})
-    + toolResult('mcp__playwright__browser_take_screenshot', 'shot', image);
+  const capture = toolUse('mcp__zensu-browser__browser_take_screenshot', 'shot', {})
+    + toolResult('mcp__zensu-browser__browser_take_screenshot', 'shot', image);
   const observation = '[assistant_text]\nLoaded table is styled and readable without overlap or clipping.\n';
 
   const suffix = observation + runtimeEvidence + attestation();
   assert.equal(check(loadedSnapshot + capture + suffix, 'localEvidence').pass, true);
 
-  const namedCapture = toolUse('mcp__playwright__browser_take_screenshot', 'shot', { filename: 'loaded.png' })
-    + toolResult('mcp__playwright__browser_take_screenshot', 'shot', image);
+  const namedCapture = toolUse('mcp__zensu-browser__browser_take_screenshot', 'shot', { filename: 'loaded.png' })
+    + toolResult('mcp__zensu-browser__browser_take_screenshot', 'shot', image);
   assert.equal(check(loadedSnapshot + namedCapture + suffix, 'localEvidence').pass, false);
 
-  const pathOnly = toolUse('mcp__playwright__browser_take_screenshot', 'shot', {})
-    + toolResult('mcp__playwright__browser_take_screenshot', 'shot', '[Screenshot](./loaded.png)')
+  const pathOnly = toolUse('mcp__zensu-browser__browser_take_screenshot', 'shot', {})
+    + toolResult('mcp__zensu-browser__browser_take_screenshot', 'shot', '[Screenshot](./loaded.png)')
     + toolUse('Read', 'read', { file_path: '/tmp/eval/loaded.png' })
     + toolResult('Read', 'read', image);
   assert.equal(check(loadedSnapshot + pathOnly + suffix, 'localEvidence').pass, false);
@@ -75,23 +76,23 @@ test('visual evidence requires a no-filename screenshot with an inline image res
 });
 
 test('direct image screenshot evidence remains supported when the MCP result contains the image', () => {
-  const capture = toolUse('mcp__playwright__browser_take_screenshot', 'shot', {})
-    + toolResult('mcp__playwright__browser_take_screenshot', 'shot', image)
+  const capture = toolUse('mcp__zensu-browser__browser_take_screenshot', 'shot', {})
+    + toolResult('mcp__zensu-browser__browser_take_screenshot', 'shot', image)
     + '[assistant_text]\nThe visual hierarchy is styled and legible with no overlap or clipping.\n';
   assert.equal(check(loadedSnapshot + capture + runtimeEvidence + attestation(), 'localEvidence').pass, true);
   const zeroByteImage = image.replace('bytes=12', 'bytes=0');
-  const emptyCapture = toolUse('mcp__playwright__browser_take_screenshot', 'shot', {})
-    + toolResult('mcp__playwright__browser_take_screenshot', 'shot', zeroByteImage)
+  const emptyCapture = toolUse('mcp__zensu-browser__browser_take_screenshot', 'shot', {})
+    + toolResult('mcp__zensu-browser__browser_take_screenshot', 'shot', zeroByteImage)
     + '[assistant_text]\nThe visual hierarchy is styled and legible with no overlap or clipping.\n';
   assert.equal(check(loadedSnapshot + emptyCapture + runtimeEvidence + attestation(), 'localEvidence').pass, false);
 });
 
 test('pre-load screenshot cannot substitute for a failed loaded-state screenshot', () => {
-  const preload = toolUse('mcp__playwright__browser_take_screenshot', 'preload', {})
-    + toolResult('mcp__playwright__browser_take_screenshot', 'preload', image)
+  const preload = toolUse('mcp__zensu-browser__browser_take_screenshot', 'preload', {})
+    + toolResult('mcp__zensu-browser__browser_take_screenshot', 'preload', image)
     + '[assistant_text]\nThe initial page is styled and readable without overlap or clipping.\n';
-  const failedLoaded = toolUse('mcp__playwright__browser_take_screenshot', 'loaded', {})
-    + toolResult('mcp__playwright__browser_take_screenshot', 'loaded', 'timeout', true);
+  const failedLoaded = toolUse('mcp__zensu-browser__browser_take_screenshot', 'loaded', {})
+    + toolResult('mcp__zensu-browser__browser_take_screenshot', 'loaded', 'timeout', true);
   assert.equal(check(preload + loadedSnapshot + failedLoaded + runtimeEvidence + attestation(), 'localEvidence').pass, false);
 });
 
@@ -107,14 +108,14 @@ test('required browser operations accept a recovered extra failure but require o
   ];
   const successful = suffixes.map((suffix, index) => {
     const id = `ok-${index}`;
-    const name = `mcp__playwright__${suffix}`;
+    const name = `mcp__zensu-browser__${suffix}`;
     return toolUse(name, id, {}) + toolResult(name, id, 'ok');
   }).join('');
-  const recoveredFailure = toolUse('mcp__playwright__browser_take_screenshot', 'late-fail', {})
-    + toolResult('mcp__playwright__browser_take_screenshot', 'late-fail', 'timeout', true);
+  const recoveredFailure = toolUse('mcp__zensu-browser__browser_take_screenshot', 'late-fail', {})
+    + toolResult('mcp__zensu-browser__browser_take_screenshot', 'late-fail', 'timeout', true);
 
   assert.equal(check(successful + recoveredFailure, 'localBrowserTools').pass, true);
-  assert.equal(check(successful.replace(toolResult('mcp__playwright__browser_close', 'ok-6', 'ok'), ''), 'localBrowserTools').pass, false);
+  assert.equal(check(successful.replace(toolResult('mcp__zensu-browser__browser_close', 'ok-6', 'ok'), ''), 'localBrowserTools').pass, false);
   const spoofed = suffixes.map((suffix, index) => {
     const id = `fake-${index}`;
     return toolUse(`fake_${suffix}`, id, {}) + toolResult(`fake_${suffix}`, id, 'ok');
@@ -122,7 +123,7 @@ test('required browser operations accept a recovered extra failure but require o
   assert.equal(check(spoofed, 'localBrowserTools').pass, false);
   const reversed = suffixes.map((suffix, index) => {
     const id = `reverse-${index}`;
-    const name = `mcp__playwright__${suffix}`;
+    const name = `mcp__zensu-browser__${suffix}`;
     return toolResult(name, id, 'ok') + toolUse(name, id, {});
   }).join('');
   assert.equal(check(reversed, 'localBrowserTools').pass, false);
@@ -131,8 +132,8 @@ test('required browser operations accept a recovered extra failure but require o
 test('fixture teardown requires the exact standalone down command and correlated success', () => {
   const up = toolUse('Bash', 'up', { command: './scripts/fixture-runtime.sh up' })
     + toolResult('Bash', 'up', 'fixture-runtime: started');
-  const browser = toolUse('mcp__playwright__browser_snapshot', 'during-run', {})
-    + toolResult('mcp__playwright__browser_snapshot', 'during-run', 'page');
+  const browser = toolUse('mcp__zensu-browser__browser_snapshot', 'during-run', {})
+    + toolResult('mcp__zensu-browser__browser_snapshot', 'during-run', 'page');
   const exactDown = toolUse('Bash', 'down', { command: './scripts/fixture-runtime.sh down' })
     + toolResult('Bash', 'down', 'fixture-runtime: stopped');
   const exact = up + browser + exactDown;
@@ -144,8 +145,8 @@ test('fixture teardown requires the exact standalone down command and correlated
     + toolUse('Bash', 'down', { command: './scripts/fixture-runtime.sh down' });
   const sourceWrite = exact + toolUse('Write', 'write', { file_path: 'src/app.js' });
   const earlyDown = exactDown + up + browser;
-  const browserCall = toolUse('mcp__playwright__browser_snapshot', 'late-result', {});
-  const browserResult = toolResult('mcp__playwright__browser_snapshot', 'late-result', 'page');
+  const browserCall = toolUse('mcp__zensu-browser__browser_snapshot', 'late-result', {});
+  const browserResult = toolResult('mcp__zensu-browser__browser_snapshot', 'late-result', 'page');
   const downBeforeBrowserResult = up + browserCall + exactDown + browserResult;
   const restartedAfterCleanup = exact + toolUse('Bash', 'late-up', { command: './scripts/fixture-runtime.sh up' })
     + toolResult('Bash', 'late-up', 'fixture-runtime: started');
@@ -216,19 +217,19 @@ test('skill invocation and remote short-circuit require the exact decoded Skill 
 test('accepted remote mode proves brokered evidence before deployment-identity PARTIAL', () => {
   const skill = toolUse('Skill', 'remote-skill', { skill: 'zensu:verify-feature', args: '--mode=remote https://example.com/' })
     + toolResult('Skill', 'remote-skill', 'loaded');
-  const navigate = toolUse('mcp__playwright__browser_navigate', 'remote-nav', { url: 'https://example.com/' })
-    + toolResult('mcp__playwright__browser_navigate', 'remote-nav', 'Example Domain');
-  const snapshot = toolUse('mcp__playwright__browser_snapshot', 'remote-snapshot', {})
-    + toolResult('mcp__playwright__browser_snapshot', 'remote-snapshot', 'heading Example Domain\nlink More information...');
-  const screenshot = toolUse('mcp__playwright__browser_take_screenshot', 'remote-shot', {})
-    + toolResult('mcp__playwright__browser_take_screenshot', 'remote-shot', image);
+  const navigate = toolUse('mcp__zensu-browser__browser_navigate', 'remote-nav', { url: 'https://example.com/' })
+    + toolResult('mcp__zensu-browser__browser_navigate', 'remote-nav', 'Example Domain');
+  const snapshot = toolUse('mcp__zensu-browser__browser_snapshot', 'remote-snapshot', {})
+    + toolResult('mcp__zensu-browser__browser_snapshot', 'remote-snapshot', 'heading Example Domain\nlink More information...');
+  const screenshot = toolUse('mcp__zensu-browser__browser_take_screenshot', 'remote-shot', {})
+    + toolResult('mcp__zensu-browser__browser_take_screenshot', 'remote-shot', image);
   const observation = '[assistant_text]\nThe page is styled and readable with no overlap or clipping.\n';
-  const runtime = toolUse('mcp__playwright__browser_console_messages', 'remote-console', {})
-    + toolResult('mcp__playwright__browser_console_messages', 'remote-console', 'Errors: 0')
-    + toolUse('mcp__playwright__browser_network_requests', 'remote-network', {})
-    + toolResult('mcp__playwright__browser_network_requests', 'remote-network', 'GET https://example.com/ => 200 OK');
-  const close = toolUse('mcp__playwright__browser_close', 'remote-close', {})
-    + toolResult('mcp__playwright__browser_close', 'remote-close', 'closed');
+  const runtime = toolUse('mcp__zensu-browser__browser_console_messages', 'remote-console', {})
+    + toolResult('mcp__zensu-browser__browser_console_messages', 'remote-console', 'Errors: 0')
+    + toolUse('mcp__zensu-browser__browser_network_requests', 'remote-network', {})
+    + toolResult('mcp__zensu-browser__browser_network_requests', 'remote-network', 'GET https://example.com/ => 200 OK');
+  const close = toolUse('mcp__zensu-browser__browser_close', 'remote-close', {})
+    + toolResult('mcp__zensu-browser__browser_close', 'remote-close', 'closed');
   const report = '[assistant_text]\nDeployment identity is unavailable, so worktree equivalence is unproven.\nVERIFY-FEATURE-VERDICT: PARTIAL\n';
   const transcript = skill + navigate + snapshot + screenshot + observation + runtime + close + report + attestation();
 
@@ -247,10 +248,10 @@ test('inventory grading requires a P0 matrix and bounded snapshot values', () =>
   assert.equal(check(orderedInventory + '[assistant_text]\nNo matrix.\n', 'localInventory').pass, false);
   assert.equal(check(loadedSnapshot + report, 'localInventory').pass, false);
   const clickAfterLoaded = loadedSnapshot
-    + toolUse('mcp__playwright__browser_snapshot', 'late-initial', {})
-    + toolResult('mcp__playwright__browser_snapshot', 'late-initial', 'button Load inventory')
-    + toolUse('mcp__playwright__browser_click', 'late-click', { element: 'Load inventory', ref: 'e1' })
-    + toolResult('mcp__playwright__browser_click', 'late-click', 'clicked');
+    + toolUse('mcp__zensu-browser__browser_snapshot', 'late-initial', {})
+    + toolResult('mcp__zensu-browser__browser_snapshot', 'late-initial', 'button Load inventory')
+    + toolUse('mcp__zensu-browser__browser_click', 'late-click', { element: 'Load inventory', ref: 'e1' })
+    + toolResult('mcp__zensu-browser__browser_click', 'late-click', 'clicked');
   assert.equal(check(clickAfterLoaded + report, 'localInventory').pass, false);
 });
 
@@ -265,9 +266,9 @@ test('report-only and transcript integrity checks reject writes and malformed st
   const legacyAttestation = '\n===== wrapper attestation =====\n'
     + '[wrapper_attestation] {"init_git":true,"tracked_clean":true,"root":"/tmp/eval"}\n';
   assert.equal(check(readOnly + legacyAttestation, 'reportOnly').pass, false);
-  assert.equal(check(toolUse('mcp__playwright__browser_evaluate', 'evaluate', { function: '() => 1' }) + attestation(), 'reportOnly').pass, false);
+  assert.equal(check(toolUse('mcp__zensu-browser__browser_evaluate', 'evaluate', { function: '() => 1' }) + attestation(), 'reportOnly').pass, false);
   for (const unsafe of ['browser_run_code_unsafe', 'browser_storage_state', 'browser_cookie_list', 'browser_route']) {
-    assert.equal(check(toolUse(`mcp__playwright__${unsafe}`, unsafe, {}) + attestation(), 'reportOnly').pass, false, unsafe);
+    assert.equal(check(toolUse(`mcp__zensu-browser__${unsafe}`, unsafe, {}) + attestation(), 'reportOnly').pass, false, unsafe);
   }
   assert.equal(check(toolUse('mcp__other__browser_snapshot', 'other-browser', {}) + attestation(), 'reportOnly').pass, false);
   assert.equal(check(toolUse('mcp__other__playwright_snapshot', 'other-playwright', {}) + attestation(), 'reportOnly').pass, false);
@@ -280,42 +281,48 @@ test('report-only and transcript integrity checks reject writes and malformed st
   assert.equal(check(readOnly + attestation() + attestation('/tmp/other'), 'reportOnly').pass, false);
 });
 
-test('plugin browser namespace is accepted exactly while near-match namespaces fail closed', () => {
+test('plugin browser namespace is accepted exactly while near-match and foreign playwright namespaces fail closed', () => {
   const suffixes = [
     'browser_navigate', 'browser_snapshot', 'browser_click', 'browser_take_screenshot',
     'browser_console_messages', 'browser_network_requests', 'browser_close'
   ];
   const transcript = suffixes.map((suffix, index) => {
-    const name = `mcp__plugin_zensu_playwright__${suffix}`;
+    const name = `mcp__plugin_zensu_zensu-browser__${suffix}`;
     const id = `plugin-${index}`;
     return toolUse(name, id, {}) + toolResult(name, id, 'ok');
   }).join('');
   assert.equal(check(transcript, 'localBrowserTools').pass, true);
-  assert.equal(check(transcript.replaceAll('mcp__plugin_zensu_playwright__', 'mcp__plugin_zensu_playwright_'), 'localBrowserTools').pass, false);
-  assert.equal(check(toolUse('mcp__plugin_zensu_playwright_extra__browser_evaluate', 'near', {}) + attestation(), 'reportOnly').pass, false);
+  assert.equal(check(transcript.replaceAll('mcp__plugin_zensu_zensu-browser__', 'mcp__plugin_zensu_zensu-browser_'), 'localBrowserTools').pass, false);
+  assert.equal(check(transcript.replaceAll('mcp__plugin_zensu_zensu-browser__', 'mcp__playwright__'), 'localBrowserTools').pass, false);
+  assert.equal(check(transcript.replaceAll('mcp__plugin_zensu_zensu-browser__', 'mcp__plugin_zensu_playwright__'), 'localBrowserTools').pass, false);
+  const reportOnlyWith = (name) => check(toolUse(name, 'near', {}) + attestation(), 'reportOnly').pass;
+  assert.equal(reportOnlyWith(`mcp__plugin_zensu_${BROWSER_SERVER_KEY}__browser_snapshot`), true);
+  assert.equal(reportOnlyWith(`mcp__${BROWSER_SERVER_KEY}__browser_snapshot`), true);
+  assert.equal(reportOnlyWith(`mcp__plugin_zensu_${BROWSER_SERVER_KEY}_extra__browser_snapshot`), false);
+  assert.equal(reportOnlyWith(`mcp__${BROWSER_SERVER_KEY}_extra__browser_snapshot`), false);
 });
 
 test('local runtime evidence rejects failed requests even when the required request succeeded', () => {
-  const capture = toolUse('mcp__playwright__browser_take_screenshot', 'shot', {})
-    + toolResult('mcp__playwright__browser_take_screenshot', 'shot', image)
+  const capture = toolUse('mcp__zensu-browser__browser_take_screenshot', 'shot', {})
+    + toolResult('mcp__zensu-browser__browser_take_screenshot', 'shot', image)
     + '[assistant_text]\nThe loaded table is styled and readable without overlap or clipping.\n';
   const failedNetwork = runtimeEvidence
-    + toolUse('mcp__playwright__browser_network_requests', 'network-fail', {})
-    + toolResult('mcp__playwright__browser_network_requests', 'network-fail', 'GET /api/secondary => 500 failed');
+    + toolUse('mcp__zensu-browser__browser_network_requests', 'network-fail', {})
+    + toolResult('mcp__zensu-browser__browser_network_requests', 'network-fail', 'GET /api/secondary => 500 failed');
 
   assert.equal(check(loadedSnapshot + capture + failedNetwork + attestation(), 'localEvidence').pass, false);
 });
 
 test('console evidence must follow the loaded state and remain error-free', () => {
-  const capture = toolUse('mcp__playwright__browser_take_screenshot', 'shot', {})
-    + toolResult('mcp__playwright__browser_take_screenshot', 'shot', image)
+  const capture = toolUse('mcp__zensu-browser__browser_take_screenshot', 'shot', {})
+    + toolResult('mcp__zensu-browser__browser_take_screenshot', 'shot', image)
     + '[assistant_text]\nThe loaded table is styled and readable without overlap or clipping.\n';
-  const earlyConsole = toolUse('mcp__playwright__browser_console_messages', 'early-console', {})
-    + toolResult('mcp__playwright__browser_console_messages', 'early-console', 'Errors: 0');
-  const network = toolUse('mcp__playwright__browser_network_requests', 'network-after', {})
-    + toolResult('mcp__playwright__browser_network_requests', 'network-after', 'GET /api/items => 200 OK');
-  const lateError = toolUse('mcp__playwright__browser_console_messages', 'late-error', {})
-    + toolResult('mcp__playwright__browser_console_messages', 'late-error', 'Errors: 1 TypeError');
+  const earlyConsole = toolUse('mcp__zensu-browser__browser_console_messages', 'early-console', {})
+    + toolResult('mcp__zensu-browser__browser_console_messages', 'early-console', 'Errors: 0');
+  const network = toolUse('mcp__zensu-browser__browser_network_requests', 'network-after', {})
+    + toolResult('mcp__zensu-browser__browser_network_requests', 'network-after', 'GET /api/items => 200 OK');
+  const lateError = toolUse('mcp__zensu-browser__browser_console_messages', 'late-error', {})
+    + toolResult('mcp__zensu-browser__browser_console_messages', 'late-error', 'Errors: 1 TypeError');
 
   assert.equal(check(earlyConsole + loadedSnapshot + capture + network + attestation(), 'localEvidence').pass, false);
   assert.equal(check(loadedSnapshot + capture + runtimeEvidence + lateError + attestation(), 'localEvidence').pass, false);

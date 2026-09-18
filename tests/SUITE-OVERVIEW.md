@@ -13,13 +13,19 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (150 = 143 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 143 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 150). The previous figures here read 148 = 141 + 7 while the manifest already held 142
-CI entries, so they had drifted by one before `test-vanished-session-cwd.sh` added the 143rd.
+reconciled to that manifest (151 = 144 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 144 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 151). The figures here have drifted TWICE in the same direction and both corrections are
+recorded rather than overwritten: they once read 148 = 141 + 7 against a manifest already holding
+142 CI entries, and then 150 = 143 + 7 while the manifest already held 144. Both of those
+were internally consistent and merely stale. Correcting only the headline to 151 = 144 + 7 and
+leaving the three derivation clauses at 143 and 150 then produced a THIRD state that was not
+stale but self-contradictory — the failure shape the section-4 header-numeral paragraph below
+names — and that is the state this revision closes.
 **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 142 against 143 CI-classified suites, so one CI
-suite appears in no §3 group. That suite is `test-session-trail-lineage.sh`, re-derived BY NAME
+asserted away: its eleven CI group headers sum to 142 against 144 CI-classified suites, so TWO CI
+suites appear in no §3 group. They are `test-session-trail-lineage.sh` and
+`test-incremental-review-rounds.sh`, re-derived BY NAME
 this time by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
 §"Bash gates, witness & secrets", and the reviewer-spawn grant, filed under §"Review chain &
 findings". §7's profile table was re-derived from `tests/profiles/windows-ci.v1.json` rather than
@@ -315,7 +321,7 @@ that suite's failure.
 | `session-adopt-report-v1.test.js` | 34 | `test-versioned-plugin-upgrade.sh` | the adoption report payload: `safe()` in both directions (ordinary path verbatim; bidi, line separators and DEL folded; a localized path unchanged), the `label : value` pair-forgery guard on both branches, the space-adjacency rule that folds every Modifier_Letter a forged row could use (walked over the whole category rather than a list), the separator in BOTH spellings the consumers emit (`space-colon-space` and `colon-space`) with an ordinary colon still rendering raw, the trailing-position seam where the caller appends text after the value, the invisible-letter guard, that the exported constants and the applied rules predict each other in both directions, the in-place lease repair, and that the display rule has exactly ONE owner |
 | `rule-block-v1.test.js` | 10 | `test-best-solution-first.sh` | the one-line marker-block reader both rule carriers share: marker position, the FILE and BLOCK ceilings, the short-read and swapped-file refusals |
 | `playwright-mcp-proxy.test.js` | 28 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy, including its three start modes (policy, consent, deny), the consent-mode approval boundary, and the per-session execution-marker precondition that boundary now requires (every `consentEvidenceState` value and the refusal each one produces, and the production project-root anchor ladder) |
-| `verify-consent-v1.test.js` | 41 | `test-verify-consent.sh` (V7) | browser consent decision: matcher and tool spellings, ask/allow/deny ladder, per-origin consent, loopback-only bound, memory shape and containment refusals, the foreign-server note's attachment rule, stamp validity independent of route, the shared memory read's containment rule and its not-configured case, recipe route extraction, pre/post CLI, and the per-session execution marker (writer, origin binding, staleness, hard-link and oversize arms, session-scoped and project-scoped reads, and the directory-component containment the reader shares with the writer) |
+| `verify-consent-v1.test.js` | 42 | `test-verify-consent.sh` (V7) | browser consent decision: the exported server key against `.mcp.json`, its load-time regex-safety guard, and the matcher derived from it, tool spellings, ask/allow/deny ladder, per-origin consent, loopback-only bound, memory shape and containment refusals, a server keyed playwright reaching no decision and no refusal naming it, stamp validity independent of route, the shared memory read's containment rule and its not-configured case, recipe route extraction, pre/post CLI, and the per-session execution marker (writer, origin binding, staleness, hard-link and oversize arms, session-scoped and project-scoped reads, and the directory-component containment the reader shares with the writer) |
 | `verify-navigation-floor-v1.test.js` | 10 | `test-verify-consent.sh` (V6) | the one navigation floor the broker and the consent hook share: loopback and public-address classes, URL refusals, remote host resolution, route normalization (including every encoded dot-segment spelling), and the two-way agreement between `policyContractFault` and the broker's hand-copied `parsePolicy` guards |
 | `verify-free-port.test.js` | 3 | `test-verify-consent.sh` (V7b) | free loopback port helper: argument parsing, occupied and excluded ports, CLI contract |
 | `release-run-step.test.js` | 9 | `test-immutable-marketplace-release.sh` | the release step's `run_step` wrapper, EXECUTED: the annotation on failure, the full stderr replay, exit-status propagation, the `--quiet` sink applying to the wrapped command and never to the annotation, the no-stderr fallback, `head -1` bounding the annotation to one line, and temp-file cleanup under `RUNNER_TEMP`. Driven first in that suite, because it is the wrapper's only executable coverage anywhere and the suite's other pins are source greps that stay green against a present-but-broken wrapper |
@@ -334,13 +340,22 @@ that suite's failure.
 | `owned-process.test.js` | 2 | `test-claude-promptfoo-wrapper.sh` | owned-process lifecycle |
 | `reviewer-spawn-allow-v1.test.js` | 18 | `test-reviewer-spawn-allow.sh` | the reviewer-spawn grant's derived agent set, its silence on every non-grant path, and the one-definition scan |
 
-Five further files — `review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js`,
-`session-lineage-v1.test.js`, `worktree-advice-v1.test.js` and
-`session-adopt-report-v1.test.js` — exist on disk without a row here. For FOUR of them that drift predates the reviewer-spawn
-grant; `worktree-advice-v1.test.js` is different and the distinction is worth keeping —
+FOUR further files — `session-lineage-v1.test.js`, `worktree-advice-v1.test.js`,
+`aspect-activation-v1.test.js` and `review-round-scope-v1.test.js` — exist on disk without a row
+here, re-derived by comparing `ls tests/structure/*.test.js` (35 files) against this table's 31
+rows rather than by editing the previous list. That previous list was wrong in BOTH directions
+and is recorded here rather than quietly replaced: it named
+`review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js` and `session-adopt-report-v1.test.js`,
+all three of which DO have rows twenty lines above it, and it named neither of the two files PR
+#306 added. For TWO of the four that drift predates the reviewer-spawn
+grant, while `aspect-activation-v1.test.js` and `review-round-scope-v1.test.js` postdate it; `worktree-advice-v1.test.js` is different and the distinction is worth keeping —
 it was added by the session-trail takeover-destination change and left rowless
-deliberately, because SUITE-OVERVIEW.md itself is graded by no suite and a row here would
-be one more hand-maintained copy of a count nothing checks. The unit file IS driven — by
+deliberately, because nothing grades a row's PRESENCE here, so a row would be one more
+hand-maintained copy of a count nothing checks. Say it that way rather than "this file is graded
+by no suite", which is false: the §4 `Blocks` column IS graded for six rows by three suites —
+`test-zen-mode.sh` Z78 for the two zen-anchor rows, `test-verify-consent.sh`'s `run_unit` for the
+floor, consent and free-port rows, and `test-verify-feature-skill.sh` P6g2 for the proxy row.
+What no suite checks is the reconciliation above and the absence of a row. The unit file IS driven — by
 `test-session-trail-verdict.sh`, which pins its case count exactly — so it is rowless
 here, not ungraded there. Both are recorded rather than silently
 absorbed. The inventory row above no longer carries a unit-file numeral at all, for the

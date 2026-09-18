@@ -4,8 +4,18 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const floor = require('./verify-navigation-floor-v1.js');
 
-const CONSENT_MATCHER = 'mcp__(plugin_zensu_)?playwright__browser_(navigate|tabs)';
-const NAVIGATION_TOOL_RE = /^mcp__(plugin_zensu_)?playwright__browser_(navigate|tabs)$/;
+const BROWSER_SERVER_KEY = 'zensu-browser';
+// The key reaches a RegExp source on the next line while hooks/hooks.json carries the same
+// matcher as a literal the HOST compiles, so a metacharacter here makes the two readers
+// disagree about which tool names are gated: a `.` widens this module's own test while the
+// manifest stays literal, and a quantifier or anchor narrows it until `targetOf` returns null,
+// every navigation reads as "not a navigation" and the host takes the silence as allow.
+// Refuse at load so every consumer fails loudly instead of silently regrading.
+if (!/^[a-z][a-z0-9-]*$/.test(BROWSER_SERVER_KEY)) {
+  throw new Error('verify-consent-v1: browser server key is not regex-safe');
+}
+const CONSENT_MATCHER = `mcp__(plugin_zensu_)?${BROWSER_SERVER_KEY}__browser_(navigate|tabs)`;
+const NAVIGATION_TOOL_RE = new RegExp(`^${CONSENT_MATCHER}$`);
 const MEMORY_VERSION = 1;
 const MEMORY_NAME_PREFIX = 'verify-consent-';
 const MEMORY_NAME_RE = new RegExp(`^${MEMORY_NAME_PREFIX}scv1_[a-f0-9]{64}\\.json$`);
@@ -49,22 +59,6 @@ const REASONS = Object.freeze({
   EVIDENCE_TOO_LARGE: 'evidence-too-large',
   EVIDENCE_WRITE_FAILED: 'evidence-write-failed',
 });
-
-// Attached only to the denies a foreign server can actually cause — the origin
-// classification and the remote refusal. A payload fault or a crashed hook is not
-// explained by this note, and a deny that guesses at its own cause sends the reader after
-// the wrong thing. The remedy is deliberately ONE: launching with a navigation policy
-// would turn this gate off for every target, including the remote ones the floor exists to
-// refuse, which under this note's own premise leaves nothing behind it.
-const FOREIGN_SERVER_NOTE = 'This gate matches on the tool name alone, and the bare mcp__playwright__ spelling belongs to any MCP server keyed "playwright". If this navigation is not a /zensu:verify-feature run, the tool is served by a different server and this refusal is not about your request: the remedy is to rename that server key, which is the user\'s own configuration to change — ask them, and never edit an MCP server configuration on their behalf to widen what this gate allows.';
-
-// Derived from the floor's own vocabulary rather than hand-listed, so a reason added there
-// carries the note without an edit here and a reason removed there cannot leave a dead arm.
-function foreignServerNoteApplies(reason) {
-  if (typeof reason !== 'string' || !reason) return false;
-  if (reason.startsWith('remote-target-needs-parent-environment-policy')) return true;
-  return Object.values(floor.FLOOR_REASONS).includes(reason);
-}
 
 function payloadFromRaw(raw, accumulationFailed) {
   if (accumulationFailed) return null;
@@ -678,11 +672,9 @@ function promptText({ origin, route, mode, declaredRoutes }) {
   // elicitation channel, so a reader does not conclude consent mode prompts for remote targets.
   const modeWord = mode === 'remote' ? 'a deployed (remote) target' : 'a local loopback target';
   const lines = [];
-  // Server-neutral on purpose. The matcher accepts the bare mcp__playwright__ spelling, which
-  // belongs to any MCP server keyed "playwright", so this gate cannot know that the caller is a
-  // /zensu:verify-feature run — and a prompt that asserts a requester it cannot observe is asking
-  // the human to decide on a false premise. The foreign-server note preEnvelope attaches to an
-  // ask is the other half of this: it names the doubt instead of hiding it.
+  // Server-neutral on purpose. The gate sees a tool name, never the workflow that called the
+  // tool, so it cannot know that the caller is a /zensu:verify-feature run — and a prompt that
+  // asserts a requester it cannot observe is asking the human to decide on a false premise.
   lines.push(`A browser navigation was requested to ${origin} (${modeWord}), starting with the route ${promptRoute(route)}.`);
   // The scope sentence comes before the route list on purpose. It is the only line that tells
   // the human what a Yes grants, and the route list is recipe-controlled content that would
@@ -761,14 +753,9 @@ function preEnvelope(decision) {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
       permissionDecision: decision.verdict,
-      // An ask carries the note unconditionally, and that is the SAME doubt the neutral opening
-      // creates rather than a second rule: this gate cannot know which server serves the tool,
-      // so every prompt it raises may be about a navigation that is not a verify-feature run.
-      // A deny stays CONDITIONAL, because there the note explains a cause and must not be
-      // attached to a payload fault it does not explain.
       permissionDecisionReason: decision.verdict === 'ask'
-        ? `${decision.prompt} ${FOREIGN_SERVER_NOTE}`
-        : `Zensu browser consent gate denied the navigation: ${decision.reason}${foreignServerNoteApplies(decision.reason) ? ` ${FOREIGN_SERVER_NOTE}` : ''}`,
+        ? decision.prompt
+        : `Zensu browser consent gate denied the navigation: ${decision.reason}`,
     },
   };
 }
@@ -1012,10 +999,10 @@ function recordingStream(out) {
 }
 
 module.exports = {
+  BROWSER_SERVER_KEY,
   CONSENT_MATCHER,
   recordingStream,
   DECIDED_BY,
-  FOREIGN_SERVER_NOTE,
   MAX_EVIDENCE_AGE_MS,
   MAX_EVIDENCE_BYTES,
   MAX_MEMORY_BYTES,
@@ -1054,7 +1041,6 @@ module.exports = {
   // Exported for its BOUND alone: the reap runs inside the gating hook and nothing in production
   // reads the count, so without a handle the budget would ship with no executed case.
   reapBudgetSpent: reapExpiredEvidence,
-  foreignServerNoteApplies,
   isIsoInstant,
   memoryPathAllowed,
   navigationExpected,

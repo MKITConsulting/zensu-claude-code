@@ -393,7 +393,7 @@ function neutralViolation(payload, trusted) {
     ? payload.tool_name.split('__').at(-1)
     : null;
   if (zensuMcpTool && !ZENSU_MCP_READ_RE.test(zensuMcpTool)) {
-    return 'host-profile-v1 cannot invoke mutating Zensu MCP tools';
+    return 'host-profile-v1 cannot invoke Zensu MCP tools outside the read allowlist';
   }
 
   const protectedRoots = [

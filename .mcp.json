@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "playwright": {
+    "zensu-browser": {
       "type": "stdio",
       "command": "${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh",
       "args": [

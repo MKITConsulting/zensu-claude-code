@@ -333,8 +333,8 @@ chain states.
 
 A PreToolUse gate (`pre-browser-navigation-consent.sh`) and its PostToolUse companion
 (`post-browser-navigation-consent.sh`), both registered on the Playwright broker's navigating
-tools — `browser_navigate` and `browser_tabs` in either plugin spelling
-(`mcp__plugin_zensu_playwright__…` / `mcp__playwright__…`). The pair exists so that
+tools — `browser_navigate` and `browser_tabs` in either spelling of the broker's server key
+`zensu-browser` (`mcp__plugin_zensu_zensu-browser__…` / `mcp__zensu-browser__…`). The pair exists so that
 `/zensu:verify-feature` can run without `ZENSU_VERIFY_NAVIGATION_POLICY_V1` in the
 environment that launched Claude Code: that variable was the only channel a model cannot
 write, and it cost every user a shell prefix, a port fixed before launch, and a restart per
@@ -391,20 +391,39 @@ switch the session could flip would relax the hook while the broker, which reads
 registration once at start, kept trusting the chain. The parent policy is the supported
 alternative, so nothing here lands a bypass-ledger entry.
 
-**Residuals, named rather than implied.** The matcher reaches further than the skill: it is
-registered on the tool NAME, `mcp__(plugin_zensu_)?playwright__browser_(navigate|tabs)`, and the
-optional group means the bare `mcp__playwright__…` spelling matches too. That spelling is not
-hypothetical — this plugin declares its own broker through `.mcp.json` under the server key
-`playwright`, so the same file yields `mcp__plugin_zensu_playwright__…` when it is loaded as a
-plugin and `mcp__playwright__…` when the repository itself is opened as a project. A consuming
-project that runs its OWN MCP server under that key therefore has every non-loopback
-`browser_navigate` denied by this gate, in every session, with no skill running and no config
-flag to turn it off. The deny text names that possibility and its one remedy — rename the server
-key. Launching with the parent-environment policy is deliberately NOT offered: it turns this gate
-off for every target, including the remote ones the floor exists to refuse. Narrowing the matcher
-to the plugin-scoped spelling would remove the gate wherever the bare spelling is the real one,
-so the matcher is left as it is until the prefix is measured across desktop and CLI, default and
-`--plugin-dir` installs. The consent memory is a file in a directory the
+**Why the server key is `zensu-browser`.** The gate is registered on the tool NAME,
+`mcp__(plugin_zensu_)?zensu-browser__browser_(navigate|tabs)`. The key used to be `playwright`,
+the default key of upstream `@playwright/mcp`, so the optional group also matched a user's own
+browser server keyed `playwright` and denied its remote navigations in every session, with no
+skill running. A key upstream does not use ends that without narrowing the matcher. The key is a
+naming convention, not a server identity: a different server that someone keys `zensu-browser`
+would still match the gate and would still be taken for the broker by `/zensu:doctor` and
+`/zensu:verify-feature`, so a collision is unlikely rather than impossible. Both spellings stay
+gated because both come from this plugin's own declaration: the same `.mcp.json` yields
+`mcp__plugin_zensu_zensu-browser__…` when it is loaded as a plugin and `mcp__zensu-browser__…`
+when the repository itself is opened as a project. That project load normally fails to start (see
+the residuals below), so the bare arm is defense in depth: a broker runs under the bare name only
+where the declaration starts outside the plugin loader with a resolvable command, for example
+with `CLAUDE_PLUGIN_ROOT` present where Claude Code expands `.mcp.json`, or with the declaration
+copied into another MCP scope. Narrowing to the plugin-scoped spelling would leave exactly that
+broker in consent mode with no gate, because the broker checks the registration by matcher string
+and never sees its own server name.
+
+**Re-spell permission rules after updating.** The broker's tool names moved from
+`mcp__plugin_zensu_playwright__…` / `mcp__playwright__…` to `mcp__plugin_zensu_zensu-browser__…`
+/ `mcp__zensu-browser__…`. Every `permissions` rule written for the old names stops matching the
+broker, whichever list it sits in: an `allow` rule no longer pre-approves it, so its calls prompt
+again, and an `ask` or `deny` rule no longer applies, so the new names fall back to whatever the
+rest of your rules and your permission mode decide. The first shows itself; the other two do not,
+so move each rule to the new name. Weigh the second case by what the gate covers: it registers on
+`browser_navigate` and `browser_tabs` only, so a lost `deny` or `ask` on any other broker tool —
+`browser_take_screenshot` and `browser_network_requests` among them — is replaced by nothing in this
+plugin on the main thread. A rule for `mcp__playwright__…` still matches a server of your
+own keyed `playwright`, which this plugin no longer gates.
+
+**Residuals, named rather than implied.** Opening this repository as a project still loads root
+`.mcp.json` as a project-scope server, where `${CLAUDE_PLUGIN_ROOT}` is unexpanded and the server
+fails to start; it no longer hides a server keyed `playwright`. The consent memory is a file in a directory the
 session can write through a Bash redirect, so a forged record skips the prompt for that origin;
 the floor bounds the damage to other loopback services. The broker no longer trusts that the
 host ran the hook: consent mode refuses to self-approve an origin without a live per-session
