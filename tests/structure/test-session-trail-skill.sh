@@ -1758,7 +1758,7 @@ ADVICE_N="$(printf '%s\n' "$ADVICE_CMDS" | grep -c . || true)"
 # EXACT, not a floor. A floor of two survives the deletion of the `apply --stat` step —
 # the one command whose whole purpose is to be read before the destructive line — from
 # BOTH carriers at once, which is precisely the edit this pin exists to stop.
-T35_EXPECT=19
+T35_EXPECT=20
 # The slice is extracted BEFORE the command loop, not after it, because T35 greps it too
 # now. Scoping the RATIONALE scan and leaving the COMMAND scan against the whole file was
 # half a check: a whole-file grep proves presence-in-the-file, never presence-in-the-right-
@@ -1882,10 +1882,165 @@ EOF
   # Each needle is a phrase that occurs only in the paragraph it defends.
   printf '%s' "$STEP4" | grep -qF 'including the one you just created as a sibling' || T35B_MISS="$T35B_MISS [route-vs-rule-paragraph]"
   printf '%s' "$STEP4" | grep -qF 'but it still decides the `-b`' || T35B_MISS="$T35B_MISS [recorded-subdirectory-paragraph]"
+  # The MOVE alternative's prose. `T35` above pins its COMMAND and nothing else, so without
+  # these the attestation and the whole cost paragraph are deletable with both suites green,
+  # leaving a bare fenced command that relocates another session's worktree with no
+  # condition beside it. Each needle is unique to the paragraph it defends — the emitted
+  # copy is pinned separately by the `WT8v`/`WT8w` move-route family in the verdict suite, and the two carriers
+  # must not drift apart. The three gate needles are the BOUNDED wordings: all three shipped
+  # unbounded first and all three were then measured false against their owners, so a needle
+  # on the unbounded form would cement the false claim rather than protect the true one.
+  printf '%s' "$STEP4" | grep -qF 'only you can authorize it' || T35B_MISS="$T35B_MISS [move-attestation]"
+  printf '%s' "$STEP4" | grep -qF 'mutates the other session' || T35B_MISS="$T35B_MISS [move-cost]"
+  printf '%s' "$STEP4" | grep -qF 'bounded to one repository' || T35B_MISS="$T35B_MISS [move-same-repo-bound]"
+  printf '%s' "$STEP4" | grep -qF 'judges **both** operands' || T35B_MISS="$T35B_MISS [move-gate-both-operands]"
+  printf '%s' "$STEP4" | grep -qF 'containment, not construction' || T35B_MISS="$T35B_MISS [move-gate-containment]"
+  printf '%s' "$STEP4" | grep -qF 'while a Zensu chain is armed' || T35B_MISS="$T35B_MISS [move-ledger-bound]"
+  printf '%s' "$STEP4" | grep -qF 'never spelled, and never prescribed' || T35B_MISS="$T35B_MISS [move-escape-not-prescribed]"
+  # The CONSEQUENCE of taking the escape anyway, which the two needles above do not reach:
+  # they pin that the gate judges both operands and that the escape is not prescribed, and
+  # neither sees that the DESTINATION is then unchecked and must be placed inside the anchor by
+  # hand. Its emitted twin is `WT8v7c`; both were unpinned until this round.
+  printf '%s' "$STEP4" | grep -qF 'so that path goes inside your own anchor by your own hand' || T35B_MISS="$T35B_MISS [move-destination-containment]"
+  # The MOVE route's OWN stop condition and its fsmonitor disclosure, both in the `**Before you
+  # run it:**` bar and both unpinned on EITHER carrier until now. The move route has FIVE
+  # sibling paragraphs in this flow — the `**One ALTERNATIVE**` lead, the same-branch bound, the
+  # human-attestation one, the cost one and the three-gate-claims one — and FOUR of them got
+  # needles; the attestation paragraph got none, which the third needle below repairs. The bar
+  # guards the one rendered command this flow calls "the one rendered command in this flow that
+  # writes to the source worktree with no refusal standing in front of it", and it DECLARES its
+  # own obligation in as many words: "`T35` pins only the command literal, so this prose half
+  # and the emitted array's must be kept in step by hand." The emitted twins are the `WT8v10` family plus
+  # `WT8v11`/`WT8v11b` in the verdict suite — a FAMILY rather than an enumeration, because the
+  # three that shipped with these needles (`WT8v10c`, `WT8v10d`, `WT8v11b`) were missing from
+  # the enumeration on the day it was written, which is the census drift this block repairs
+  # one paragraph up — NOT `WT8v3`, which pins the attestation
+  # sentence and reaches neither half of this bar. Note the fsmonitor needle already present at
+  # the top of this block matches the CARRY-OVER bullet's `fsmonitor` hook rationale, not this
+  # bar's `-c core.fsmonitor=false` disclosure, so it does not cover this.
+  #
+  # Both needles are the JOINED form, for the reason the carry-over escape needle below states
+  # about itself: the stop condition is a TRIGGER plus a PROHIBITION plus an ALTERNATIVE, and
+  # the closing clause alone survives a reword that deletes the bar. Judge caution, recorded so
+  # it is not "harmonized" later: the move's trigger deliberately reads `a tree you would not
+  # `cd` into` while the carry-over's reads `a worktree you would not cd into` —
+  # `worktree-advice-v1.test.js` asserts the latter occurs exactly ONCE and its comment records
+  # the distinction as deliberate, so aligning the two spellings would redden that case.
+  printf '%s' "$STEP4" | grep -qF 'if it is a tree you would not `cd` into, stop and take the create route instead' || T35B_MISS="$T35B_MISS [move-stop-condition]"
+  printf '%s' "$STEP4" | grep -qF '**Before you run it:** `<their worktree>` is a repository you have not vetted' || T35B_MISS="$T35B_MISS [move-unvetted-tree]"
+  printf '%s' "$STEP4" | grep -qF 'deliberately not an arm predicate' || T35B_MISS="$T35B_MISS [move-attestation-not-a-predicate]"
+  printf '%s' "$STEP4" | grep -qF '`-c core.fsmonitor=false` and the diff flags beside it, and this line passes none of them' || T35B_MISS="$T35B_MISS [move-fsmonitor-not-carried]"
+  printf '%s' "$STEP4" | grep -qF 'consults that config was not measured' || T35B_MISS="$T35B_MISS [move-fsmonitor-hedge]"
+  # The CARRY-OVER escape sentence, which no needle here covered: T35 pins two-space command
+  # literals and this is prose, so the SKILL.md half of the stop condition could be deleted
+  # outright with both suites green. Its emitted twin is pinned by `WT8m5` and by the unit
+  # escape case; this is the doc half. The needle is the JOINED THREE-CLAUSE sentence, not its
+  # closing clause, and that is the whole point: the condition is a TRIGGER, a PROHIBITION and
+  # an ALTERNATIVE, and a reword to "You can always copy the files across by hand instead."
+  # keeps the closing clause while deleting the bar — a stop on running the recipe degrades
+  # into an offered convenience, with every check in both suites green. The sibling unit case
+  # in `worktree-advice-v1.test.js` repaired exactly that one-clause shape on the EMITTED
+  # carrier with three conjuncts; this needle shipped in the one-clause shape for one round and
+  # is the same repair on the doc carrier.
+  #
+  # Two further properties come free and both are load-bearing. The joined form is a strict
+  # SUPERSTRING of `ESCAPE_NEEDLE` below, so the two arms now separate on a REWORD of this
+  # carrier's trigger: the closing clause survives it, `T35d` still passes, and only this arm
+  # fires. That is the genuinely uncovered state. State it that way and NOT as "the earlier
+  # byte-identical spelling fired if and only if `T35d` did" — that was false, and the
+  # paragraph below `ESCAPE_NEEDLE` already says why: a trail.mjs-only deletion fires `T35d`'s
+  # CONTROL while this needle passes, so even then the two were separable in one direction.
+  # What the byte-identical spelling could not separate was an edit to THIS carrier. And it
+  # cannot be satisfied by a
+  # BACK-REFERENCE: the short form `do not run this at all` occurs three times in this carrier,
+  # measured 203, 203 and 230 — the sentence itself, a quoted back-reference in the SAME
+  # bullet, and one further down — while the joined form occurs once.
+  printf '%s' "$STEP4" | grep -qF 'source worktree is one you would not `cd` into, do not run this at all — copy the files across by hand instead' || T35B_MISS="$T35B_MISS [carryover-escape]"
+  # A cross-carrier AGREEMENT check on a pair that is genuinely DISJOINT, which the first
+  # spelling of this check was not: it anchored on the attestation sentence, and that one
+  # literal is already shared byte-for-byte by the `[move-attestation]` needle above and by
+  # `WT8v3` in the verdict suite — so its drift arm could only fail where one of those two
+  # already failed. The COST sentence is the real case: SKILL.md writes "the other session's
+  # layout" and the emitted array writes "the OTHER session's layout", so `grep -qF` on either
+  # side passes while the other is reworded alone. Compared CASE-NORMALIZED for that reason.
+  #
+  # Both controls strip JS COMMENT lines from the slice first, and the reason is that the
+  # scoping alone does not buy what an earlier wording here claimed. `$ADVICE_SRC` runs from
+  # `const CARRY_OVER` to the close of `worktreeAdvice`, and that range carries several hundred
+  # comment lines — deliberately no numeral, because it moves on every edit to that function
+  # and a stale one here reads as a measurement; comments in this file routinely quote emitted
+  # and SKILL.md text verbatim, so one inside the range could satisfy a control and the arm
+  # would then report agreement between SKILL.md and a COMMENT. What the scoping genuinely
+  # buys is excluding comments OUTSIDE the region. MEASURED, and NOT what an earlier wording
+  # here claimed: neither control's literal occurs anywhere in `trail.mjs` outside the range —
+  # `do not run this at all` and `copy the files across by hand instead` each occur exactly
+  # once, both inside `CARRY_OVER` itself. The nearest thing to a carrier outside it is the
+  # `cmdTakeover` comment describing the carry-over paste-unit split, which quotes the
+  # PROPERTY and not either literal, so it is a near-miss rather than a hit.
+  # Do NOT "fix" this by routing either control through `$ADVICE_CMDS`: that extraction
+  # requires the opening quote to be followed by TWO SPACES, which is the COMMAND grammar, and
+  # both of these sentences are PROSE elements — measured, the rule returns zero matches for
+  # either — so the control would then fail unconditionally.
+  ADVICE_PROSE="$(printf '%s\n' "$ADVICE_SRC" | grep -v '^[[:space:]]*//')"
+  COST_NEEDLE='it mutates the other session'
+  if ! printf '%s\n' "$ADVICE_PROSE" | tr 'A-Z' 'a-z' | grep -qF -- "$COST_NEEDLE"; then
+    check "T35c-control the cost anchor is absent from the extracted advice source, so the cross-carrier check is vacuous" FAIL
+  elif printf '%s' "$STEP4" | tr 'A-Z' 'a-z' | grep -qF -- "$COST_NEEDLE"; then
+    check "T35c the move cost sentence agrees between the emitted array and flow 3 step 4" PASS
+  else
+    check "T35c the move cost sentence drifted between trail.mjs and flow 3 step 4" FAIL
+  fi
+  # A SECOND agreement arm, on the carry-over escape, because SKILL.md asserts in its own prose
+  # that the emitted array spells that clause the same way — a cross-carrier claim that nothing
+  # held. It compares the ALTERNATIVE CLAUSE and says so in its own name, because the sentence
+  # as a whole does NOT agree across the carriers and must not be claimed to: the TRIGGER
+  # clauses genuinely differ (`the source worktree is one you would not `cd` into` against
+  # `it is a worktree you would not cd into`), and the emitted side splits the sentence across
+  # two array elements. Unlike the cost arm it needs no case normalisation; like it, its
+  # control strips comments.
+  #
+  # The `[carryover-escape]` needle above is NOT redundant with this arm, and the state that
+  # shows it is the BOTH-DELETED one: there this arm reports only its control, which speaks
+  # about the advice source, and the needle above is the only assertion naming the SKILL.md
+  # carrier. (The trail.mjs-only-deleted state is NOT that case — the literal is still in
+  # `$STEP4` there, so the needle passes and protects nothing. An earlier note here named that
+  # state and was wrong.) The two also differ in length now, so each can fail alone.
+  ESCAPE_NEEDLE='copy the files across by hand instead'
+  if ! printf '%s\n' "$ADVICE_PROSE" | grep -qF -- "$ESCAPE_NEEDLE"; then
+    check "T35d-control the escape alternative clause is absent from the extracted advice prose, so the cross-carrier check is vacuous" FAIL
+  elif printf '%s' "$STEP4" | grep -qF -- "$ESCAPE_NEEDLE"; then
+    check "T35d the carry-over escape ALTERNATIVE clause agrees between the emitted array and flow 3 step 4" PASS
+  else
+    check "T35d the carry-over escape ALTERNATIVE clause drifted between trail.mjs and flow 3 step 4" FAIL
+  fi
   if [ -z "$T35B_MISS" ]; then
     check "T35b flow 3 step 4 keeps every safety reason behind the recipe's shape" PASS
   else
-    check "T35b flow 3 step 4 carry-over rationale:$T35B_MISS" FAIL
+    # "safety prose", not "carry-over rationale": nearly half the accumulated tags are move-route
+    # or route-vs-rule ids, so the older label named the wrong subject for many of its own
+    # needles and reported a move-prose deletion as a carry-over failure.
+    check "T35b flow 3 step 4 safety prose:$T35B_MISS" FAIL
+  fi
+
+  # T35e — the PLACEMENT of the move route's stop condition on the DOC carrier, which every
+  # needle above is blind to. `[move-stop-condition]` and its four siblings are `grep -qF`
+  # presence checks over `$STEP4`, and `T35`'s command extraction is presence-only too, so the
+  # `**Before you run it:**` bar could be moved back BELOW the fenced move command with every
+  # one of them green. That placement is the whole subject of the round that added these
+  # needles, and the emitted carrier holds it in two places — the array states it in words and
+  # `worktree-advice-v1.test.js` grades it positionally — while the model-facing copy held it
+  # nowhere. Offsets rather than a needle, the idiom `L70n` already uses in the lineage suite:
+  # the property is an ORDER, and no substring can express one.
+  T35E_BAR="$(printf '%s\n' "$STEP4" | grep -n -F '**Before you run it:**' | head -1 | cut -d: -f1)"
+  T35E_CMD="$(printf '%s\n' "$STEP4" | grep -n -F "worktree move '<their worktree>'" | head -1 | cut -d: -f1)"
+  if [ -z "$T35E_BAR" ] || [ -z "$T35E_CMD" ]; then
+    # Not a silent skip: an unresolvable offset means the slice or one of the two anchors moved,
+    # and reporting that as agreement is the failure this whole block exists against.
+    check "T35e-control the stop-condition bar or the move command could not be located inside flow 3 step 4 (bar='$T35E_BAR' cmd='$T35E_CMD'), so the placement check is vacuous" FAIL
+  elif [ "$T35E_BAR" -lt "$T35E_CMD" ]; then
+    check "T35e the move route's stop condition is stated ABOVE the command it gates" PASS
+  else
+    check "T35e the move route's stop condition sits BELOW the fenced command — one fenced command is one copy button, so it is read after it has run (bar=$T35E_BAR cmd=$T35E_CMD)" FAIL
   fi
 fi
 
@@ -1951,7 +2106,7 @@ T36_HTML="$PLUGIN_DIR/docs/multi-repo-chains-overview.html"
 t36_cite "$TRAIL_MJS" 'function gitState' "$T36_SPEC" 'skills/session-trail/scripts/trail\.mjs:[0-9]+'
 t36_cite "$TRAIL_MJS" 'claude --resume' "$T36_SPEC" '`trail\.mjs:[0-9]+`'
 t36_cite "$SKILL_MD" 'ONLY write channel' "$T36_SPEC" 'skills/session-trail/SKILL\.md:75'
-t36_cite "$SKILL_MD" 'scopes by transcript-directory' "$T36_SPEC" 'skills/session-trail/SKILL\.md:2[0-9]+'
+t36_cite "$SKILL_MD" 'scopes by transcript-directory' "$T36_SPEC" 'skills/session-trail/SKILL\.md:3[0-9]+'
 # For THESE three the HTML spells each citation as its own `<p class="src">` line, so the
 # two trail.mjs rows need distinguishing regexes exactly as the spec's two SKILL.md rows
 # do. That is not a property of the document — elsewhere it puts two citations on one
@@ -1978,7 +2133,7 @@ t36_cite "$TRAIL_MJS" 'function gitState' "$T36_HTML" 'trail\.mjs:22[0-9][0-9]'
 # clothes. A LOWER BOUND with an open top is what survives growth; it costs the ability to tell
 # this citation from a future third one above 3000, which is a trade to re-take if one lands.
 t36_cite "$TRAIL_MJS" 'claude --resume' "$T36_HTML" 'trail\.mjs:[3-9][0-9][0-9][0-9]'
-t36_cite "$SKILL_MD" 'scopes by transcript-directory' "$T36_HTML" 'skills/session-trail/SKILL\.md:2[0-9]+'
+t36_cite "$SKILL_MD" 'scopes by transcript-directory' "$T36_HTML" 'skills/session-trail/SKILL\.md:3[0-9]+'
 # The POPULATION, scanned out of the documents rather than counted off the row table
 # above. `T36_ROWS` counts rows this test declares; it can never notice a citation the
 # docs grew that no row covers — a `session-lineage-v1.mjs:NNN` would be graded by

@@ -217,10 +217,33 @@ test('the untracked copy step is runnable and tests both -f and ! -L', () => {
 // SKILL.md, which the model reads. The array below is what lands in a persisted
 // brief a HUMAN opens and pastes from, and it stated the threat model and then went
 // straight into the commands. The stop-condition belongs with whoever executes.
+// EXACT COUNTS, not presence, and that is the whole repair. Keyed on presence of
+// `do not run this at all` this case went vacuous for a round: the move alternative acquired
+// a paragraph carrying the same words, both arrays render on the present leg, and deleting
+// `CARRY_OVER`'s escape outright left the assert green. Re-pointing the needle fixed the
+// INSTANCE and left the CLASS open — it discriminated again only by the accidental absence of
+// a second carrier. A count of 1 makes uniqueness structural: a second carrier reddens
+// immediately instead of silently absorbing the check. Same idiom as the exact-count asserts
+// on the SKIPPED diagnostics further down, and for the same stated reason.
+// THREE conjuncts, because the sentence spans three clauses across two array elements and
+// each can be deleted alone: the CONDITION that triggers the stop, the stop itself, and the
+// alternative it names. An earlier comment here claimed the needle was "the WHOLE escape
+// sentence" while it pinned only the closing clause — so the trigger could be deleted and an
+// unconditional stop clause would ship into the brief a human pastes from.
 test('the emitted recipe carries the do-not-run-this-at-all escape', () => {
   const prose = mod.worktreeAdvice(rec({ app: { archived: true } })).join('\n');
-  assert.ok(/do not run this at all/i.test(prose), 'the emitted recipe has no way out');
-  assert.ok(/by hand/i.test(prose), 'the escape does not name the alternative');
+  const count = (re) => (prose.match(re) || []).length;
+  assert.equal(count(/copy the files across by hand instead/gi), 1,
+    'the escape alternative is missing, or acquired a second carrier and can no longer say which array lost it');
+  assert.equal(count(/do not run this at all/gi), 1,
+    'the stop clause is missing, or acquired a second carrier');
+  // `a worktree you would not cd into`, not the bare `would not cd into`: the move
+  // alternative legitimately carries its own stop condition on the same tree, phrased `a tree
+  // you would not cd into`. The count caught that on the first run, which is the point — the
+  // bare form has two emitted carriers and would have been ambiguous from the day it was
+  // written. The second source occurrence is a code comment and never reaches the array.
+  assert.equal(count(/a worktree you would not cd into/gi), 1,
+    'the condition that triggers the stop is missing, or acquired a second carrier');
 });
 
 // The recipe's first step SNAPSHOTS a working tree another agent may be editing, and
@@ -317,11 +340,125 @@ test('the gone leg orders no substitution into a recipe no carrier prints there'
 test('the survey form drops the carry-over recipe and the brief form keeps it', () => {
   const r = rec({ app: { archived: true } });
   const full = mod.worktreeAdvice(r);
-  const survey = mod.worktreeAdvice(r, { carryOver: false });
+  const noRecipe = mod.worktreeAdvice(r, { carryOver: false });
   assert.ok(full.some((l) => l.includes('PATCH="$(mktemp')), 'the full advice lost the recipe');
-  assert.ok(!survey.some((l) => l.includes('PATCH="$(mktemp')), 'the survey form still carries the recipe');
+  assert.ok(!noRecipe.some((l) => l.includes('PATCH="$(mktemp')), 'carryOver:false still carries the recipe');
+  assert.ok(noRecipe.some((l) => l.includes('git worktree add')), 'carryOver:false lost the create recipe');
+  assert.ok(noRecipe.length < full.length, 'carryOver:false is not shorter than the full one');
+});
+
+// TWO axes, and the second one needs its own case because the first cannot stand in for it.
+// The move alternative is withheld from the survey for a DIFFERENT reason than the recipe —
+// the recipe is bulk, the route is a decision that must not be offered without the cost
+// paragraph qualifying it — and while it rode the `carryOver` flag every assertion in the
+// case above stayed true if the block were hoisted above the early return, because
+// `CARRY_OVER` alone keeps the full form longer. Nothing in either suite would have seen it.
+test('the survey form drops the move alternative and the brief form keeps it', () => {
+  const r = rec({ app: { archived: true } });
+  const full = mod.worktreeAdvice(r);
+  const survey = mod.worktreeAdvice(r, { carryOver: false, move: false });
+  assert.ok(full.some((l) => l.includes('worktree move')), 'the full advice lost the move alternative');
+  assert.ok(!survey.some((l) => l.includes('worktree move')), 'the survey form leaked the move alternative');
   assert.ok(survey.some((l) => l.includes('git worktree add')), 'the survey form lost the create recipe');
-  assert.ok(survey.length < full.length, 'the survey form is not shorter than the full one');
+});
+
+// The axes are INDEPENDENT, which is the whole point of splitting them: dropping the
+// migration half must not drop the decision half with it. A single flag could never fail
+// this, which is why it is a case rather than a comment.
+test('dropping the carry-over recipe alone keeps the move alternative', () => {
+  const r = rec({ app: { archived: true } });
+  const only = mod.worktreeAdvice(r, { carryOver: false });
+  assert.ok(only.some((l) => l.includes('worktree move')), 'carryOver:false also dropped the move route');
+  assert.ok(!only.some((l) => l.includes('PATCH="$(mktemp')), 'carryOver:false kept the recipe');
+});
+
+// The two routes must never share a fence, and until this case nothing held that.
+// `MOVE_ALTERNATIVE`'s own header declares the separation load-bearing, and what produces
+// it is the ELEVEN column-zero prose lines between the two commands — two closing ones from
+// `TAKE_YOUR_OWN` and nine leading ones from `MOVE_ALTERNATIVE`. MEASURED: deleting either
+// run alone leaves the fences split, and deleting both collapses them into one (create=1
+// move=1), which is one copy button that creates the taker's worktree and then relocates
+// the source session's out from under it. So this case catches the condense-the-advice
+// edit and not a one-sided trim; the sibling ordering case below is what holds the leading
+// run on its own. Every other move needle in both suites tests PRESENCE, never which paste
+// unit the line lands in, so both edits were green everywhere.
+//
+// The relation is `create < move`, never a bare `notEqual`, and that is the ORDER contract
+// rather than a tighter spelling of the same one. `worktreeAdvice`'s own splice comment says
+// the create route is first because it is the default and needs no judgement from the reader;
+// three emitted sentences then depend on it — `take the create route above instead`, `the
+// -b claude/<name>-cont fork above is not needed`, and `the create recipe above stays the
+// default`. Transposing the two spliced arrays leaves them in separate fences either way, so
+// `notEqual` passes while the destructive route is offered ahead of the default and all three
+// `above` sentences become false. `create < move` subsumes the separation at no extra cost.
+test('the create route and the move alternative are not in the same paste unit', () => {
+  const rendered = mod.adviceBlock(mod.worktreeAdvice(rec({ app: { archived: true } })), '   ', '   ', { carrier: 'markdown' });
+  const create = fenceOf(rendered, "worktree add '<path>' -b");
+  const move = fenceOf(rendered, "worktree move '<their worktree>'");
+  assert.ok(create !== null && move !== null,
+    `a route command is outside every fence (create=${create} move=${move})`);
+  assert.ok(create < move,
+    `the destructive move route is not offered after the default create route (create=${create} move=${move})`);
+});
+
+// The move's stop condition has to be READ before the command, for the reason the emitted
+// text itself gives: one fenced command is one copy button, so a caution printed after it
+// is read after it has run. The snapshot-caution case above pins the same property for the
+// carry-over recipe; this is the move's own, and neither stands in for the other because
+// the two arms are spliced independently.
+test('the move alternative states its stop condition before the command', () => {
+  const lines = mod.worktreeAdvice(rec({ app: { archived: true } }));
+  const stopAt = lines.findIndex((l) => l.includes('take the create route above instead'));
+  const moveAt = lines.findIndex((l) => l.includes("worktree move '<their worktree>'"));
+  assert.ok(stopAt !== -1, 'the move alternative carries no stop condition at all');
+  assert.ok(moveAt !== -1, 'the fixture arm carries no move alternative at all');
+  assert.ok(stopAt < moveAt, 'the stop condition does not precede the command it is about');
+});
+
+// `movePid` derives from `livePid` rather than re-spelling its predicate, and what it tests
+// is that function's SENTINEL — `'?'`, the value `livePid` answers for anything that is not
+// a positive integer. Every other `live` fixture in this file is `null` or a real pid, so
+// the sentinel branch had no executed case at any layer and the guard could only be read,
+// never run. That matters because the branch decides whether a line labelled MEASURED is
+// emitted at all: with the guard gone, an unresolvable pid renders `pid ? was registered and
+// alive for that worktree` into a brief a different session opens later — a measurement
+// claim with no measurement behind it. The case drives the BRANCH and not the literal, so a
+// rename of `livePid`'s fallback cannot slip past it.
+test('an unresolvable pid renders no MEASURED line in the move route', () => {
+  const unresolvable = mod.worktreeAdvice(rec({ app: { archived: false }, live: { pid: null } }));
+  const text = unresolvable.join('\n');
+  assert.ok(text.includes('worktree move'), 'the fixture arm carries no move alternative at all');
+  assert.ok(!text.includes('was registered and alive for that worktree'),
+    'the move route claims a MEASURED pid it could not resolve');
+  // The asymmetry the derivation deliberately keeps: the snapshot caution still renders the
+  // sentinel, because there it qualifies a tree-reading recipe rather than asserting a
+  // measurement. Without this half the case would pass against a build that dropped the
+  // caution's pid entirely, which is a different defect wearing the same green.
+  assert.ok(text.includes('pid ?'), 'the live snapshot caution stopped naming the pid slot');
+  // The positive control, so the two assertions above cannot both pass vacuously: a real pid
+  // DOES reach the MEASURED line on the same arm.
+  const resolvable = mod.worktreeAdvice(rec({ app: { archived: false }, live: { pid: 4242 } })).join('\n');
+  assert.ok(resolvable.includes('pid 4242 was registered and alive for that worktree'),
+    'a resolvable pid no longer reaches the move route at all');
+});
+
+// `whereAdviceLines` DERIVES both its route sentence and its `<your new worktree>` claim from
+// the body it renders. Without a narrowed body nothing distinguishes those derivations from
+// hardcoded constants — the single production caller passes no options, so `hasMove` and
+// `hasNewWorktree` are `true` on every reachable path and `const hasMove = true` would pass
+// every other check in both suites. This is the one input that separates them.
+test('the WHERE head derives its route sentences from the body it actually renders', () => {
+  // `whereRow()` rather than `rec()`: this renderer reads `row.wt` through `briefShellArg`,
+  // which `rec()` does not supply. Its declaration sits further down the file and resolves by
+  // the time a registered case runs, which is how every sibling `whereAdviceLines` case works.
+  const r = whereRow({ app: { archived: true } });
+  const full = mod.whereAdviceLines(r, '/tmp/taker-worktree').join('\n');
+  const narrowed = mod.whereAdviceLines(r, '/tmp/taker-worktree', { move: false, carryOver: false }).join('\n');
+  assert.ok(full.includes('On the move route instead'), 'the full head lost its route sentence');
+  assert.ok(full.includes('<your new worktree>'), 'the full head lost its carry-over operand claim');
+  assert.ok(!narrowed.includes('On the move route instead'), 'the narrowed head announces a route its body does not carry');
+  assert.ok(!narrowed.includes('<your new worktree>'), 'the narrowed head names an operand its body does not render');
+  assert.ok(narrowed.includes('git worktree add'), 'the narrowed head lost the create route it still carries');
 });
 
 // The gone leg has no carry-over half at all, so the option must change nothing there
@@ -341,8 +478,12 @@ test('the copy step does not claim the pair excludes a hard link', () => {
   const prose = mod.worktreeAdvice(rec({ app: { archived: true } })).join('\n');
   assert.ok(!/\[ ! -L \] alone lets a HARD LINK through/.test(prose),
     'the text still offers the hard link as the reason both predicates are needed');
-  assert.ok(/hard link/i.test(prose), 'the hard-link residual is not named at all');
-  assert.ok(/residual/i.test(prose), 'the hard link is not disclosed as an accepted residual');
+  // ANCHORED on the disclosure sentence, not on two common words. `hard link` has two emitted
+  // carriers and `residual` five, all inside `CARRY_OVER`, so the conjunction stayed green
+  // with the one sentence this case exists to pin deleted — the same one-literal-several-
+  // suppliers class the escape case above records, live in this same file.
+  assert.equal((prose.match(/A HARD LINK is an ACCEPTED RESIDUAL/g) || []).length, 1,
+    'the hard link is not disclosed as an accepted residual, or the disclosure has a second carrier');
 });
 
 // MEASURED against git 2.51.0: a tracked symlink whose TARGET is repointed produces
@@ -575,7 +716,7 @@ test('the emitted rationale describes the bound the command actually uses', () =
 // hand-maintained census beside a derived one produces. `worktreeAdvice` picks its lead AND its
 // body from it (those two drifted apart inside one function once, which is how a gone lead
 // came to sit above a present body); `cmdShow` decides from the same answer whether to print
-// its "The uncommitted half needs a carry-over recipe this view does not print." pointer, and
+// its "TWO things are withheld here" (its anchor; the sentence after it is reworded whenever the withheld set changes) pointer, and
 // it would otherwise print that pointer on an arm that emits no carry-over, which NO ARM
 // asserts the absence of — the reason is the arm set and not the fixture set, and saying
 // "no fixture renders a gone-leg `show`" was false in both halves: `SHOW_MD` in
@@ -713,7 +854,7 @@ test('the adviceLeg consumer set is exactly the five the carriers name', () => {
 // the same change then retired, leaving both greppable from nowhere.
 //
 // FOUR assertions, and each one is load-bearing on its own:
-//   - the per-function ROSTER, which is what a thirteenth carrier fails on;
+//   - the per-function ROSTER, which is what a twelfth carrier fails on;
 //   - the per-CLASS split, which is the census's own (a)/(b)/(c) arithmetic — a carrier moved
 //     between classes keeps the total at twelve and changes what the prose means;
 //   - the BINDING half, which has no other control. Delete the `${name}` resolution and the
@@ -725,7 +866,7 @@ test('the adviceLeg consumer set is exactly the five the carriers name', () => {
 // The enclosing walk is the one the `adviceLeg` consumer scan above uses, for the reason
 // stated there: it STOPS at a column-zero `}`, so a module-scope site cannot be attributed to
 // whichever `function` precedes it textually.
-const CENSUS_CASE_TITLE = 'the briefShellArg carrier population is derived, and a thirteenth carrier fails here';
+const CENSUS_CASE_TITLE = 'the briefShellArg carrier population is derived, and a twelfth carrier fails here';
 test(CENSUS_CASE_TITLE, () => {
   const src = fs.readFileSync(new URL('../../skills/session-trail/scripts/trail.mjs', import.meta.url), 'utf8');
   const lines = src.split('\n');
@@ -814,9 +955,13 @@ test(CENSUS_CASE_TITLE, () => {
     + '${name} uses are collected as nothing — widen the binding regex:\n' + looseBindings.join('\n'));
   const table = carriers.map((c) => `  trail.mjs:${c.line}  ${c.cls}  ${c.fn}${c.onlyViaBinding ? '  (via binding)' : ''}`).join('\n');
   const tally = (key) => carriers.reduce((acc, c) => { acc[c[key]] = (acc[c[key]] || 0) + 1; return acc; }, {});
-  // The ROSTER, per enclosing function. `continuationPlan` carries SEVEN, which is the number
-  // that makes the total reconcile: the census moved from six to twelve as 6 − 1 + 7, and a
-  // spelling that says six there leaves the total unreachable by one.
+  // The ROSTER, per enclosing function, and the expectation object below is the ONLY statement
+  // of the count that can fail — this sentence is derived from it, never the other way round.
+  // A previous spelling here said `continuationPlan` carries SEVEN and the census "moved from
+  // six to twelve", while the object said six and the roster sums to eleven; the case title
+  // still said a THIRTEENTH carrier fails, where at eleven it is a twelfth. That is the lagging
+  // prose copy the owner comment above `briefShellArg` in `trail.mjs` forbids in as many words,
+  // reproduced in the file that owns the derivation. Read the object, not a numeral.
   assert.deepEqual(tally('fn'), {
     continuationPlan: 6, printResume: 2, cmdTakeover: 1, cmdHandoff: 1, whereAdviceLines: 1,
   }, 'the briefShellArg carrier roster moved — update the census above `briefShellArg` in '

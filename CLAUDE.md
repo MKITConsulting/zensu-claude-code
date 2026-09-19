@@ -3749,7 +3749,7 @@ It is 600000 now (matching `autopilot-plan-delegate`). Adding checks costs Windo
 clock; if the shard starts reporting `TIMED_OUT` again, the tail of the file has gone
 unverified regardless of how many checks passed before it.
 
-**Three cross-file couplings.** (The MSYS drive rule is deliberately NOT among them: it is
+**Cross-file couplings — stated as a CRITERION, never a count**, because the count was "Three" while the list already held four: every hand-copy of a rule this parser owns, plus every PROSE assertion elsewhere that a message this parser emits says a particular thing. (The MSYS drive rule is deliberately NOT among them: it is
 shared through `claude-path-v1.js`'s `msysDrivePrefix` rather than hand-copied — see the
 paragraph above.) `WRAP` — the transparent-wrapper set rule (C)'s
 `cmd0` anchoring depends on — is hand-duplicated as a JS literal in
@@ -3770,7 +3770,15 @@ user ever read as a VERDICT rather than as a deny is gone. Its `W22` pins the
 export, the specifier and the degrade-on-load-failure behaviour. Removing either
 `within` or `msysToDrive` from the export list therefore breaks a shipped skill,
 not just a test — which is the cost that buys the single implementation. Unlike `within()`↔`isInside`, `WRAP` is NOT pinned
-against its `pre-bash-zensu-gate.sh` copy — check that one by hand. And
+against its `pre-bash-zensu-gate.sh` copy — check that one by hand. **A further coupling is
+PROSE rather than a table, and nothing pins it either:** the deny message rule (C) emits ends
+with a sentence naming the deliberate one-off escape prefix, and `skills/session-trail`'s
+move-alternative advice ASSERTS that it does — it tells the reader the refusal names the
+escape and deliberately declines to spell it, which is true only while that inline literal
+survives. It is an inline string here rather than a named constant, and a grep for its
+distinguishing words across `tests/` returns nothing, so a reword silently leaves a shipped
+skill pointing at a message that names nothing. Either pin the literal against its owner or
+re-check that skill by hand before rewording any deny text. And
 `skills/pr-team-review` Phase E depends on `worktree remove` being judged on the tree
 it destroys rather than on the addressed repository — narrow that carve-out and the
 skill's documented cleanup starts denying, which is what W181/W185-W187 exist to
@@ -6037,7 +6045,7 @@ something else, and nothing points at it from the side that changes:
   is gone` is `ADVICE_LEADS.active.gone` — bound by `L70g`, and reworded once already when
   the previous needle came from the `survivor.gone` cell and reported a correct gone-leg
   render as a failure — and `-b 'claude/<name>-cont'` is `TAKE_YOUR_OWN`. `L70` and `L70g`
-  additionally bind `whereAdviceLines`'s own `'<their worktree>' = `, `Replace '<their worktree>' TOGETHER WITH the quotes` -- and the retired blanket spelling `Replace each placeholder TOGETHER WITH` is now a NEGATIVE
+  additionally bind `whereAdviceLines`'s own `'<their worktree>' = `, `Replace '<their worktree>' TOGETHER WITH the quotes` — and the retired blanket spelling `Replace each placeholder TOGETHER WITH` is now a NEGATIVE
   needle in three checks rather than a bound line, so restoring it from this roster would
   redden them --
   and `recorded worktree (gone) = ` lines — plus the three literals that carry the P1 fix, the
@@ -6459,6 +6467,185 @@ forbidden needle is the LONGER `add <path> -b claude/`, because its own prose le
 offers `-b claude/<name>-cont` as the remedy when git reports the branch already checked
 out somewhere.
 
+**ONE ALTERNATIVE exists and it is NOT an arm, which is the whole reason it took this
+long to ship.** `MOVE_ALTERNATIVE` offers `git worktree move` on the PRESENT leg, and the
+create recipe stays the default because it is the only route that needs no judgement from
+the reader. Three PRECONDITIONS sit ABOVE the fenced line and none of them may drift below it: the
+unvetted-tree stop, the `-c core.fsmonitor=false` non-carry, and the same-repository bound.
+One fenced command is one copy button, so a caution printed after it is read after it has
+run — and the round that moved the first one up left the other two below, in the carrier with
+the copy button, while the doc carrier had already moved one of them. Both carriers now agree.
+`T35e` grades the doc carrier by OFFSET rather than by a needle, because the property is an
+ORDER and no substring can express one; the emitted carrier is graded positionally by
+`worktree-advice-v1.test.js`.
+
+The move's condition is a HUMAN ATTESTATION — the reader KNOWS that session
+will not be continued, after an account switch, a usage limit or an abandoned window —
+and it is deliberately keyed on NO predicate at all. That is measured rather than
+cautious: the run that prompted it had a registered LIVE pid on a session its human had
+abandoned, so `archived`, `live` and the whole four-way ladder answer the wrong question,
+and keying the route on any of them would offer it exactly where it is unsafe and withhold
+it exactly where it is right. A pid is a process, not an intention. **The rule above is
+unchanged and still holds** — every arm still returns a `git worktree add` line, so `WT8k`
+is untouched; the move is an alternative, never a replacement.
+
+**THREE claims about the gate ship BOUNDED, and all three shipped UNBOUNDED first and were
+then measured false.** Record them that way rather than as a list of wordings, because the
+unbounded form of each is the one a later editor will reach for again. **This is a deliberate
+EXCEPTION to the rule this section states below for the sibling `CARRY_OVER` recipe**,
+which says this section restates neither that recipe's safety properties nor their count and
+points at the two reader-facing carriers instead. The exception is narrow and it is about
+FALSIFICATION rather than about content: what is recorded here is not the correct wording —
+that lives in the emitted array and in SKILL.md flow 3 step 4, as the sibling rule requires —
+but WHICH unbounded form was measured false and against WHICH owner. A carrier cannot hold
+that; it would read as a caution about a claim it does not make. Do not extend the exception
+to the correct wordings themselves, or this becomes the fourth hand-maintained copy the
+sibling rule exists to prevent. (a) Rule (C) judges
+BOTH operands: `bash-source-write-parse.js` keeps every pathish operand after
+`worktree remove|move` and its own comment says "`move` names source and destination; both
+are candidates", so taking the escape drops the containment check on the DESTINATION too —
+which is why the emitted text now tells the reader to place `<path>` inside their own anchor
+by hand. An earlier wording said the gate "judges it against the tree it relocates rather
+than the one it lands in", which is the opposite of what the parser does. (b) The deny is
+CONTAINMENT, never a construction-time property: `escapes` is
+`!isTemp(p) && !within(projectRoot, p)`, and THIS repository's own mandated layout nests
+every worktree under the main checkout, so a source worktree inside the taker's anchor is the
+ORDINARY case and is not refused at all — `trail.mjs` even renders a named `already-contained`
+state for it. "Outside the taker's anchor by construction" was false and sat in this very
+section. (c) The bypass-ledger entry is CONDITIONAL: `tdd_record_bypass` writes only while
+`tdd_session_active` is true and `tdd_add_bypass` returns early with no state file, so a
+session-trail takeover — which normally arms no chain — records NOTHING. An unconditional
+"taking it is RECORDED" told a reader that a destructive escape leaves a trail it will not
+leave, which is worse than saying nothing.
+
+**The ESCAPE is named, never SPELLED, and never PRESCRIBED — and the fourth of those was
+missing for a round.** Rendering the prefix would be the shipped hatch §"Git Mutation Tables"
+forbids outright, and that much was right from the start. What was wrong was "take it from
+there rather than from here", which INSTRUCTS the reader to take it and contradicts
+`skills/session-trail/SKILL.md` §5's own "Do not plan around the escape prefix the deny
+names … do not go looking for the spelling in order to use it" — a rule that also records
+that the host classifier commonly refuses the prefix, so the old wording pointed at a remedy
+which usually cannot be taken. **That sentence in the parser is a cross-module dependency registered in PROSE and pinned
+by nothing**: the advice asserts the deny message names an escape, the only thing making
+that true is an inline string literal in `bash-source-write-parse.js`, and nothing in
+`tests/` greps it. It IS registered on §"Git Mutation Tables"'s coupled-sites roster and is pinned by nothing
+there; `WT8v8` asserts only the negative direction, that no arm spells the prefix.
+
+**The SAME-BRANCH benefit is bounded to one repository.** Across two, the create line fails
+harmlessly on a branch it cannot resolve while the move SUCCEEDS and relocates a foreign
+repository's linked worktree into the taker's tree — `continuationPlan` refuses that case by
+name, and this is the first rendered command in that file which writes to the SOURCE worktree
+with no refusal standing in front of it, on brief carriers where the sibling renderer's
+refusals are deliberately withheld.
+
+**`MOVE_ALTERNATIVE` is a FUNCTION of the measured live pid, and that is not cosmetic.** As a
+static array it sat ABOVE the `r.live` spread, so on the `active` and `unreadable` arms —
+whose `ADVICE_LEADS` cells name no pid — a destructive relocation was offered before any line
+named the registered process, which is precisely the gap `LIVE_SNAPSHOT_CAUTION` exists to
+close for the READ recipe. Naming the pid inside the route was taken over the obvious reorder
+because that caution's first sentence scopes itself to the carry-over below it, so moving the
+route under it would have made a correct sentence introduce the wrong command. **It also has
+its OWN axis** (`options.move`), not a ride on `carryOver`. State that defect STRUCTURALLY,
+because the obvious wording is wrong and shipped here once: the rider did NOT invert which
+caller saw the route — `cmdShow` still withholds it and `cmdAdopt` still renders it. What one
+flag removed was the CHOICE, since no caller could keep the decision half while dropping the
+route or the reverse; the unit case `dropping the carry-over recipe alone keeps the move
+alternative` is the one that needs two axes to exist at all, and `cmdShow`'s withholding is an
+independent, still-current decision recorded at that call site rather than here.
+
+**Pins, and the ORDER of the present leg is now stated in one place** rather than spread
+across four constant headers: create, then move, then the live caution, then the carry-over.
+`WT8v1`/`WT8v2` grade presence on the present leg and ABSENCE on the gone one — `WT8v1`'s
+needle carries the `git -C` anchor for the reason `WT8L`'s does for `-b`, and `WT8v2`'s
+forbidden needle is command-shaped because the gone-leg `live` leads legitimately discuss
+moving worktrees. `WT8v3`/`WT8v4` grade the attestation, `WT8v5` the cost to the other
+session, `WT8v6`/`WT8v6b`/`WT8v7`/`WT8v7b` the four bounded gate-and-escape claims, and
+`WT8v9` the same-repository bound. The measured pid is `WT8w1`/`WT8w2`, on its OWN stem
+rather than as a fourth `WT8v7` suffix: a suffix means "sibling of the same subject" in this
+file (`WT8L`/`WT8L2`, `WT8m3`-`WT8m5`), and using it as a sequential allocator is what forced
+this very sentence to re-group the ids in prose. `L70` gained two conjuncts for the WHERE
+head's route clause and its standing-in qualifier, `L70c-control` one asserting `worktree
+move` is ABSENT from `show`'s render — without that last one, deleting `move: false` left
+`show` printing the route directly above its own sentence claiming to withhold it, with every
+check in both suites green — and there are TWO cross-carrier EQUALITY arms, `T35c` on the
+COST sentence and `T35d`/`T35d-control` on the carry-over escape's ALTERNATIVE clause, because
+each carrier's wording was pinned and their agreement was not. **Say cost, not attestation, and
+say clause, not sentence.** `T35c` was written on the attestation sentence and MOVED, because
+that pair is not disjoint: `WT8v3` and the `[move-attestation]` needle both carry
+`only you can authorize it` byte-for-byte, so the drift arm could only fail where one of those
+two already failed. The cost pair IS disjoint, and deliberately by SUBSTRING rather than by
+different words — `[move-cost]` greps `mutates the other session` while `COST_NEEDLE` is the
+strict superstring `it mutates the other session` — which is the relation to reproduce for any
+third arm. `T35d` is that third arm and it shipped WITHOUT the relation: its needle was
+byte-identical to the `[carryover-escape]` needle beside it. **State what that cost precisely,
+because "neither could fail alone" was the overstatement review caught and it contradicted the
+`ESCAPE_NEEDLE` paragraph in the suite itself.** The two arms read DIFFERENT carriers — the
+needle greps `$STEP4`, `T35d`'s control greps the extracted advice prose — so a trail.mjs-only
+deletion already separated them, firing the control while the needle passed. What the
+byte-identical spelling could not separate was an edit to the DOC carrier. The repair was to
+widen the `T35b` side to the JOINED THREE-CLAUSE sentence rather than to delete either,
+because a one-clause needle also left the TRIGGER and the PROHIBITION deletable — a reword
+keeping the closing clause turned a bar on running the recipe into an offered convenience, and
+that reword is the state the widening genuinely newly covers. Both controls strip COMMENT
+lines from `$ADVICE_SRC` first: that slice carries several hundred of them — no numeral here
+or in the suite, because it moves on every edit to `worktreeAdvice` and a stale one reads as a
+measurement — and comments in this tree quote emitted text verbatim, so "scoped to the slice,
+so a comment cannot satisfy it" was false. MEASURED, against the further claim that a comment
+OUTSIDE the slice carries either literal: none does. Do NOT route either control through `$ADVICE_CMDS`
+instead — that extraction requires the opening quote plus TWO SPACES, which is the COMMAND
+grammar, and both sentences are PROSE elements, so the control would fail unconditionally.
+The MOVE route's own stop condition AND its fsmonitor disclosure — two subjects, which both
+suite comments state separately and which this sentence collapsed for a round — are pinned by
+the `[move-stop-condition]`,
+`[move-unvetted-tree]`, `[move-fsmonitor-not-carried]` and `[move-fsmonitor-hedge]` needles on
+the doc carrier and by the `WT8v10` family plus `WT8v11`/`WT8v11b` on the emitted one; it was
+unpinned on BOTH for the whole chain that introduced it. **THREE separate subjects sit in that
+sentence and an earlier wording ran them together, so state each on its own.** (1) The
+stop-condition bar itself. (2) The move route has FIVE sibling paragraphs and FOUR of them had
+needles on the doc carrier — the attestation paragraph had none until
+`[move-attestation-not-a-predicate]` landed, so "its four sibling paragraphs all had needles"
+described the emitted carrier and not this one; the emitted side really did have one per
+sibling. (3) The bar guards the one rendered command in this flow that writes to the source
+worktree with no REFUSAL STANDING in front of it — "refusal standing", never "gate refusal":
+what is absent there are the renderer's own refusals, while the write gate DOES judge this
+command, so naming the gate flips the claim onto the thing that applies. A fourth subject was
+unpinned on both carriers until the same round and is NOT part of that sentence: the
+consequence of taking the escape anyway, pinned by `WT8v7c` and
+`[move-destination-containment]`. The fence SEPARATION of the create and move commands is a
+unit case, and it catches the both-runs-deleted edit only — measured, deleting either prose
+run alone leaves the fences split, so the ordering case beside it is what holds the leading
+run. `WT8v8` loops `WT8k`'s roster — accumulated in THAT
+loop rather than a second one, which saved 16 node spawns — and asserts no arm spells the
+prefix. `T35b` gained needles for the SKILL.md prose, because `T35` pins the COMMAND alone
+and the attestation and cost paragraphs were otherwise deletable with both suites green.
+Two further unit cases pin that the survey drops the route and that the two axes are
+independent. **Adding the command cost BOTH hand-maintained counters in the same change** —
+`WT8_PRESENT_EXPECT` and `T35_EXPECT`, whose sum invariant this section's own roster already
+names — plus `WT_UNIT_TOTAL_WANT` and the SKILL.md flow 3 step 4 mirror `T35` greps them
+against. **And it moved two line-anchored citations**: `T36` caught both immediately, which
+is exactly what that pin exists for. It introduces NO new placeholder — `<their worktree>`
+and `<path>` were both already in the present leg's command set, so `recipePlaceholders`
+returns the same SET. Claim the set and never the ORDER, and carry no ordinal: an earlier
+wording here said `<their worktree>` "was already the fourth distinct token, so the same list
+in the same order", which is exactly the ordinal-in-prose this file forbids elsewhere, over a
+derived scanner output whose only comparing case sorts BOTH sides — so membership has an
+owner and order does not. The route's prose carries `<path>` and `<name>` at column zero,
+which that scanner never reads.
+
+**Three bounds are ACCEPTED rather than closed, and each is stated where it is offered.**
+(1) The cross-repository hazard is answered by a SENTENCE where this file's own precedent is a
+REFUSAL — `continuationPlan` withholds its target on a `cross-repository` reason code. A
+refusal here needs the caller's anchor threaded into `worktreeAdvice`, which takes only the
+row, so it would change that function's contract and all four call sites. (2) The measured pid
+reaches a persisted brief a DIFFERENT session opens later, so the sentence states the instant
+it was written at and tells the reader to re-check rather than claiming anything about now;
+the pid-in-a-brief class itself is pre-existing, through `ADVICE_LEADS.live.present` and
+`LIVE_SNAPSHOT_CAUTION`. (3) `WT8w1` rests on the suite's `LIVE_PID="$$"` premise, which
+§"Session Lineage Ledger" records as MEASURED FALSE under Git Bash for the sibling suite and
+which no probe in this suite self-names on lapse; a lapse reports as needle failures naming
+pids rather than naming the premise, and the `L0b`-style detached-node-helper probe is the
+standing fix.
+
 **`archivedAndDead` is named for what the EXPRESSION computes.** It was `safeToAdopt` —
 a name that read as clearance — and then `archivedSurvivor`, which read as "the directory
 survived" and needed eight lines of apology on the gone leg explaining that it means the
@@ -6514,9 +6701,13 @@ expectation drops in lockstep with the defect and passes. The exactness is load-
 what was missing was signposting.
 
 **Coupled carriers, and the pin that holds them:** the advice command literals —
-`TAKE_YOUR_OWN`'s and the gone leg's `git worktree add` spellings AND every `CARRY_OVER`
-command — are hand-restated in `skills/session-trail/SKILL.md` flow 3 step 4, in its table
-and its fenced blocks. A FOURTH copy of the gone-leg spelling lives in `printResume` and is
+`TAKE_YOUR_OWN`'s, `MOVE_ALTERNATIVE`'s and the gone leg's `git worktree add` /
+`git worktree move` spellings AND every `CARRY_OVER` command — are hand-restated in
+`skills/session-trail/SKILL.md` flow 3 step 4, in its table and its fenced blocks. State the
+roster from the EXTRACTION RANGE, never from a remembered list: `T35`'s awk runs from
+`const CARRY_OVER = [` to `worktreeAdvice`'s closing brace, so every two-space literal
+declared between those two anchors is a member, and this sentence named three sources while
+the range already held four for a round. A FOURTH copy of the gone-leg spelling lives in `printResume` and is
 OUTSIDE the extractor's range, which ends at `worktreeAdvice`'s closing brace: it is
 byte-identical today and a one-sided edit to it is unpinned. `T35`/`T35-control` in `tests/structure/test-session-trail-skill.sh`
 extract every two-space command literal from the first hoisted constant through the END of
@@ -6565,7 +6756,7 @@ split pin, and `L70e` is no longer one:** the `adopt` carrier's split is graded 
 unit layer, by `the destructive apply is not in the same paste unit as the steps that gate it`,
 and `L70e` was thinned to a source pin establishing WHICH RENDERER produced that carrier —
 three `grep -qF` literals over the extracted `whereAdviceLines` body — `const body =
-worktreeAdvice(row)`, `substitutionRuleLines(body,` and `adviceBlock(body,` — which pin the
+worktreeAdvice(row,`, `substitutionRuleLines(body,` and `adviceBlock(body,` — which pin the
 IDENTITY rather than the render alone: the array is hoisted, and the rule that renderer prints
 is derived from the very lines the block renders, so the same value must reach both. An earlier
 wording here quoted a single `adviceBlock(worktreeAdvice(row)` needle that matches nothing in
@@ -6647,13 +6838,23 @@ now warns about in its own words. There are FOUR — `cmdShow` (survey), `cmdTak
 line into a survey view with a nine-space prefix and no fence; when the carry-over recipe
 landed the array grew from roughly six lines to dozens, so `show` began dumping a
 paste-and-run recipe into the middle of the one output whose value is that you can scan it.
-`worktreeAdvice(r, { carryOver: false })` returns the decision half only, and `cmdShow`
-points at the briefs for the rest — and at `adopt`, qualified, because that verb also
-writes a machine-wide ledger edge and is therefore not a read-only route to the recipe.
-The option is opt-OUT on purpose: the briefs are what a
-human pastes from, and a new caller that forgets it gets more rather than less — which is
-exactly what `cmdAdopt` wants, so it takes the default deliberately rather than by
-omission. The `--json`
+TWO options now, not one, and they are separate axes deliberately:
+`worktreeAdvice(r, { carryOver: false, move: false })` is what `cmdShow` passes. `carryOver`
+is the DATA-MIGRATION switch and `move` is the ROUTE switch, and one flag for both meant no
+caller could keep the decision half while dropping the route or the reverse — the split is
+what makes `worktree-advice-v1.test.js`'s `dropping the carry-over recipe alone keeps the
+move alternative` expressible at all. `cmdShow` withholds BOTH and its pointer now says so in
+as many words ("TWO things are withheld here, not one … a second ROUTE"), which
+`L70c-control` pins together with a needle asserting `worktree move` is absent from that
+render — without that one, deleting `move: false` left `show` printing the route directly
+above its own sentence claiming to withhold it, with every check green. It points at the
+briefs for the rest — and at `adopt`, qualified, because that verb also writes a machine-wide
+ledger edge and is therefore not a read-only route to either.
+Both options are opt-OUT on purpose: the briefs are what a
+human pastes from, and a new caller that forgets one gets more rather than less — which is
+exactly what `cmdAdopt` wants, so it takes both defaults deliberately rather than by
+omission, and its own comment now justifies each of the two separately rather than arguing
+one and granting two. The `--json`
 payload is deliberately NOT summarized — it is a data carrier, and every `wt_case` in the
 verdict suite reads the advice through it, which is what `WT8s` grades from both sides.
 
@@ -6729,8 +6930,10 @@ order is inverted instead — `cmdTakeover` builds its advice arrays above `reco
 push — which covers all four carriers at once and makes a render fault mean NO edge lands.
 `main()`'s flush-before-report is the backstop for everything downstream of the write, not the
 mechanism that makes the write safe; it was the stated mechanism for a release and covered only
-the text carrier. FOUR comment carriers assert this contract and must move together:
-`resolveCarrier`'s header, `worktreeAdvice`'s own THROW comment, `cmdAdopt`'s two (the second of
+the text carrier. SIX comment carriers assert this contract and must move together:
+`resolveCarrier`'s header, `worktreeAdvice`'s own THROW comment, `cmdTakeover`'s own
+RENDERED-BEFORE-THE-WRITE comment — the one this paragraph's narrative is ABOUT, and the one
+an earlier count of FOUR over five enumerated items left out — `cmdAdopt`'s two (the second of
 which explicitly PRESCRIBED the old order and would have had the next round revert the fix), and
 `main()`'s choke-point comment. `L70n` in `tests/structure/test-session-trail-lineage.sh` pins
 the order by comment-stripped offsets. `cmdHandoff` is deliberately ungraded: it writes nothing
@@ -6755,7 +6958,13 @@ durable, so it has no ordering to hold.
   RESIDUAL, not a case the pair closes** — MEASURED, a hard link is a second directory entry
   for a regular file. The review finding that prompted the loop, the first emitted wording and
   an earlier revision of this bullet all claimed otherwise; the two reader-facing carriers now
-  state the residual and name the link-count test beside it. It is emitted rather than described because prose left the reader to
+  state the residual and name the link-count test beside it. Every placeholder token in PROSE is wrapped in a code span, and that is a CARRIER property
+rather than typography: `adviceBlock` pushes a prose line verbatim, both persisted briefs are
+MARKDOWN, and `<path>` is a well-formed HTML tag name there — a renderer or a sanitizer drops
+it, so a caution loses the operand it is about in the one carrier a different session opens.
+`substitutionRuleLines` already owned the fix for its own tokens; the two advice constants did
+not, and three of the seven bare ones were new safety prose. Two live needles carry the
+backtick with them (`WT8v7c`, `WT8v10d`); the rest never quoted a token. It is emitted rather than described because prose left the reader to
   improvise a loop that word-splits on a filename with a space. It still applies to copying
   by hand, because the "do not run this at all" escape does not answer it — and that escape
   now lives in the EMITTED array too, not only in SKILL.md, since SKILL.md is read by the
