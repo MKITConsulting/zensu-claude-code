@@ -1348,14 +1348,22 @@ ADOPT_CMD="CLAUDE_PLUGIN_DATA=$SHARED_DATA bash $SYNTHETIC_BREAKING_ROOT/hooks/l
 # could re-add the assignment and every row below would stay green while the real
 # invocation was refused — a green enumeration over a command that never runs. The
 # skill is the only producer of that shape and no other suite reads it.
+#
+# THREE emitted forms, not two: the adoption report, its `--confirm` twin, and
+# the `--restore-root` report the project-root restore added. The fourth mode,
+# `--restore-root --confirm`, is named in prose as "the same command with
+# --confirm" rather than spelled again, so it adds no literal here. The COUNT is
+# hand-maintained and the `CLAUDE_PROJECT_DIR` conjunct beside it is the
+# load-bearing half — an added form has to be counted here deliberately, which is
+# exactly what caught the restore mode.
 ADOPT_SKILL_COMMANDS="$(grep -c 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh"' \
   "$SYNTHETIC_BREAKING_ROOT/skills/adopt-session/SKILL.md" 2>/dev/null || printf 0)"
-if [ "$ADOPT_SKILL_COMMANDS" = 2 ] \
+if [ "$ADOPT_SKILL_COMMANDS" = 3 ] \
     && ! grep -q 'CLAUDE_PROJECT_DIR.*zensu-session-adopt\.sh' \
       "$SYNTHETIC_BREAKING_ROOT/skills/adopt-session/SKILL.md"; then
-  check "AC-C04 the skill emits both adoption forms, neither carrying CLAUDE_PROJECT_DIR" PASS
+  check "AC-C04 the skill emits all three adoption forms, none carrying CLAUDE_PROJECT_DIR" PASS
 else
-  check "AC-C04 the skill emits both adoption forms, neither carrying CLAUDE_PROJECT_DIR (found $ADOPT_SKILL_COMMANDS)" FAIL
+  check "AC-C04 the skill emits all three adoption forms, none carrying CLAUDE_PROJECT_DIR (found $ADOPT_SKILL_COMMANDS)" FAIL
 fi
 ADOPT_BASH_PAYLOAD="$(bash_payload "$ADOPT_SESSION" "$ADOPT_CMD")"
 # The SAME enumerator Part B uses, called rather than re-spelled: two copies
