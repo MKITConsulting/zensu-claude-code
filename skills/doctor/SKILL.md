@@ -466,9 +466,22 @@ classifier will refuse a spawn, not only when the whole table is green.
   a different diagnosis with a different remedy: the record is intact, and the
   directory it names is gone (a deleted or recycled worktree), taking the
   workflow document under `<project_root>/.zensu/state/` with it. The row prints
-  that exact path. Unlike the row above, this one CAN be repaired in place:
-  re-create exactly the printed directory and the recorded session binds again.
-  Otherwise start a fresh session. Meanwhile the session is diagnosable but not
+  that exact path. Unlike the row above, this one CAN be repaired in place, and
+  the remedy is a COMMAND rather than a bare `mkdir`: run
+  `/zensu:adopt-session --restore-root` to report. That report is read-only, and you do NOT
+  run the repair yourself: relay its verdict and all three disclosure lines, then stop and
+  ask the user, exactly as `skills/adopt-session/SKILL.md` requires. Asking the user is the consent control for this
+  repair. The record-carried destination, the `not-served` and `root-present` refusals
+  and the ancestor ladder are its safety bounds, not consent controls.
+  It re-creates exactly the printed directory **and** rebuilds the workflow
+  document the removal took with it — a hand-made directory leaves the second
+  half missing, and the capability gate then denies every tool with
+  `activated workflow CAS state is missing`. Say the cost whenever you offer it:
+  it restores the ANCHOR, not the work. The directory comes back empty, it is not
+  a git worktree, and the chain that lived there is gone rather than restored; the
+  user re-adds the worktree themselves with `git worktree add <path> <branch>`.
+  Otherwise start a fresh session. If the directory was MOVED rather than deleted,
+  moving it back is better than re-creating it, because its state is still there. Meanwhile the session is diagnosable but not
   workable — this read-only report runs, `Stop` is released rather than wedged,
   and `Edit`, `Write`, `MultiEdit` and any Bash command that WRITES stay denied because nothing can anchor a write to a
   project. Do NOT report this row as a missing record.
@@ -508,20 +521,27 @@ classifier will refuse a spawn, not only when the whole table is green.
   which adoption refuses as `already-served`. State the limit whenever you offer
   the repair: adoption clears the LINEAGE break, so READ-ONLY Bash and this
   diagnostic work again, while `Edit`, `Write`, `MultiEdit` and any Bash command that WRITES
-  stay denied until that exact directory is re-created — a write cannot be
-  attributed to a project that is not there. The workflow document lived under
+  stay denied until that exact directory is re-created by
+  `/zensu:adopt-session --restore-root`, which must run AFTER the adoption: that repair
+  requires the running installation to SERVE the record, which is exactly what the
+  adoption establishes, so it refuses `not-served` before it. The workflow document lived under
   that directory and is not reachable from this record, so no chain state is
   reachable and no later `Stop` can enforce it while that directory is missing —
   do not tell the user their review chain resumes. If it was moved rather than
-  deleted, its state still exists there — and say the ORDER, because it decides
-  whether a check runs at all: re-creating exactly that directory **first** is the
-  better order. Adoption then reads that workflow document and verifies its schema,
-  so a genuine break is named as `workflow-schema-mismatch` with a remedy; adopting
-  first skips that check, because it is guarded on the document being reachable, and
-  a document restored afterwards surfaces a mismatch later as an anonymous
-  fail-closed deny. Re-creating first also yields a fully bound session rather than
-  an orphaned one. Never close this row by telling the user to adopt and then
-  restore — that is the order every offer implies and the one that loses the check.
+  deleted, its state still exists there — and say the ORDER, which depends on WHICH
+  of those two cases holds.
+  **If the directory was MOVED, moving it back by hand first is the better order**,
+  because adoption then reads the surviving workflow document and verifies its
+  schema, so a genuine break is named as `workflow-schema-mismatch` with a remedy;
+  adopting first skips that check, which is guarded on the document being reachable,
+  and a document restored afterwards surfaces a mismatch later as an anonymous
+  fail-closed deny. It also yields a fully bound session rather than an orphaned one.
+  **If the directory was DELETED, adoption MUST come first** and there is no choice
+  to offer: `--restore-root` refuses `not-served` until this installation
+  serves the record, which is exactly what the adoption establishes. The schema check
+  is unreachable in that case whatever the order, because a rebuilt baseline is a
+  fresh document and there is nothing surviving to compare. Do not carry the
+  moved-case advice into the deleted case — it prescribes an order the code refuses.
   **The converse also has no row, and it matters for a trust question.** Because
   the rule compares declared versions and never content, a *bound* session's
   enforcing runtime may be a different installation that merely shares

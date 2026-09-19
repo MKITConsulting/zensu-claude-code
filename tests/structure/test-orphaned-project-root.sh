@@ -661,11 +661,30 @@ if ! printf '%s' "$DOCTOR_OUT" | grep -qF 'has no valid Session Control record';
 else
   check "O42 doctor still claims no record" FAIL
 fi
-if printf '%s' "$DOCTOR_OUT" | grep -qF 'Re-create exactly that directory' \
-  || printf '%s' "$DOCTOR_OUT" | grep -qF 're-create exactly that directory'; then
+# The remedy used to be a bare "re-create exactly that directory", and that was
+# INCOMPLETE: the workflow document lived under the recorded root, so a hand-made
+# directory leaves the session in a second wedge where the capability gate denies
+# every tool. The row now names the command that does both halves. Pinned as the
+# COMMAND rather than as prose, because it is the part a reader runs.
+if printf '%s' "$DOCTOR_OUT" | grep -qF -- '/zensu:adopt-session --restore-root'; then
   check "O43 the doctor line carries the actionable remedy" PASS
 else
   check "O43 doctor remedy missing" FAIL
+fi
+# ...and NOT the complete consent invocation: this line is relayed to the model,
+# where handing over the complete invocation would bypass the consent step in
+# skills/adopt-session/SKILL.md. Defence in depth, not a control.
+if printf '%s' "$DOCTOR_OUT" | grep -qF -- '--restore-root --confirm'; then
+  check "O43c the doctor line quotes no complete consent invocation" FAIL
+else
+  check "O43c the doctor line quotes no complete consent invocation" PASS
+fi
+# The cost travels with the remedy, so a reader who follows it does not read the
+# surviving-but-empty directory as a failed repair.
+if printf '%s' "$DOCTOR_OUT" | grep -qF -- 'not the work'; then
+  check "O43b the remedy states what it does NOT restore" PASS
+else
+  check "O43b the remedy omits its cost" FAIL
 fi
 # A session that is merely unbound for another reason must keep the old line.
 UNBOUND_OUT="$(env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$GONE_DATA" \

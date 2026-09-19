@@ -18,13 +18,16 @@ recognized by `hooks/lib/zensu-doctor-invocation.js` rather than by any
 individual gate: `/zensu:doctor`, which writes nothing, and
 `/zensu:adopt-session`, whose writes are confined to the calling session's own
 record, one workflow history entry, a move of that session's stale
-review-evidence leases, and — on an `already-served` refusal with `--confirm`
+review-evidence leases — on an `already-served` refusal with `--confirm`
 only — that session's own missing workflow document plus its `.zensu` ancestors
-under the recorded project root; it carries its own justification, and the
-authoritative four-class enumeration, in the header of
+under the recorded project root, and — under `--restore-root --confirm` only —
+the recorded project root itself when that directory is what is gone; it carries
+its own justification, and the authoritative five-class enumeration, in the header of
 `hooks/lib/zensu-session-adopt.sh`. Both are matched as exact whitelisted shapes
 — a closed set of assignments, one `bash <script in the executing installation>`,
-and for the adoption at most the literal `--confirm`. Every hook on the `Bash`
+and for the adoption at most the literals `--restore-root` and `--confirm`, each
+at most once. Neither literal takes a VALUE, which is what keeps a destination out
+of every invocation this gate admits. Every hook on the `Bash`
 matcher plus the all-tool capability gate must allow, because a deny from any one
 of them wins. The full account is in
 [Session Control](session-control.md#unbindable-sessions).
@@ -548,6 +551,60 @@ to itself — prose-backed, not consent-backed, exactly as `--autopilot-release`
 "wait for the user to say yes" rule lives in `skills/adopt-session/SKILL.md`. The
 `SessionStart` self-heal above requires no token at all. Do not restate the writer as
 gated on `--confirm`: that sentence contradicted the `SessionStart` bullet four lines above it.
+
+## Vanished Recorded Project Root
+
+The ordinary shape after `git worktree remove`: the Session Control record is readable, this
+installation may serve it, and the directory it records as `project_root` is gone.
+`readOrphanedProjectRootContext` waives exactly that one existence check, so reads and the
+read-only diagnostics keep working — while `Edit`, `Write`, `MultiEdit` and every writing Bash
+command deny, because the workflow document lived under that root and no write can be
+attributed to a project that is not there. It IS a relaxable bind failure, and the table in
+[Session Control](session-control.md#unbindable-sessions) carries the per-gate roster.
+
+Re-creating the directory by hand does not repair it, and that is the trap this remedy exists
+for. `adoptionWorkflowStatePath` joins `.zensu/state/tdd-phase-<session key>.json` onto the
+recorded root, so an empty re-created directory moves the session into a SECOND wedge:
+`revalidateWorkflowState` then throws on the `.*` matcher and every tool denies with
+`activated workflow CAS state is missing` (§Missing Workflow Baseline).
+
+```bash
+# read-only report
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh" --restore-root
+# re-creates the root AND rebuilds the baseline
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh" --restore-root --confirm
+```
+
+Rendered in full because the recognizer admits only `bash <script in the executing
+installation>`: a bare script name is refused, so the short form would be a spelling
+nobody can run. `/zensu:adopt-session --restore-root` is the slash equivalent.
+
+`/zensu:adopt-session --restore-root` reports the verdict and writes nothing; adding
+`--confirm` performs both halves in one run. **The path comes only from the record.**
+No argument names a directory anywhere in this mode, and neither literal it accepts takes a
+value, so the anchor never moves and the source-write gate compares against exactly the root
+it compared against before. Creating a directory at a path the record already names restores the
+authority the session already had and adds none.
+
+Six refusals, each naming which condition failed: `record-unreadable`, `plugin-data-mismatch`,
+`not-served`, `root-present`, `unsafe-ancestor`, `too-many-missing-components`. The nearest
+existing ancestor must be a real directory that is its own realpath and not a symlink, and at
+most four components may be missing below it — a record pointing into a tree that is mostly
+gone is not a recycled worktree.
+
+**It restores the ANCHOR, not the work.** The directory comes back empty, it is not a git
+worktree, and the chain that lived there is gone rather than restored; the rebuilt baseline
+reads "never active", because that is all a fresh baseline can say. Both reports state this
+before and after `--confirm`. If the directory was moved rather than deleted, moving it back
+is the better repair. Provenance is a `PROJECT_ROOT_RESTORED` workflow history entry, which
+`zensu-log.sh --phase` and both phase writers reserve; it records no bypass-ledger entry,
+because no gate was escaped.
+
+**Order matters when the lineage is also broken.** `restoreRootVerdict` requires this
+installation to SERVE the record, so a session that is ALSO an incompatible runtime must run
+`/zensu:adopt-session --confirm` first and only then `--restore-root --confirm`.
+`tests/structure/test-restore-project-root.sh` pins every refusal, the read-only contract and
+the end-to-end repair.
 
 ## Vanished Working Directory
 

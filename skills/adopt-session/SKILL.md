@@ -13,13 +13,17 @@ description: >
   one aside unchanged, and records the takeover in the workflow history. The session is
   bound again from the next tool call onward — no restart; when the recorded project root is
   also gone the lineage break is cleared while Edit, Write, MultiEdit and writing Bash stay denied until that
-  directory is re-created. Adoption is authorised by
+  directory is re-created, which a SECOND mode, `--restore-root --confirm`, does in one step together with the
+  workflow document the removal took with it — it restores the anchor and not the work, so the directory comes
+  back empty and the chain that lived there is gone. Adoption is authorised by
   SCHEMA equality, not by the version numbers, so a release that really changed a
   persisted shape is refused. Use when /zensu:doctor reports an incompatible lineage,
   when tools started failing closed right after a plugin update, when this session's own
   workflow document is gone and every tool denies with `activated workflow CAS state is
   missing` — a served record whose baseline a deleted and re-created worktree took with
-  it, which is NOT a plugin update and which `--confirm` rebuilds in place — or via
+  it, which is NOT a plugin update and which `--confirm` rebuilds in place — when
+  /zensu:doctor reports that the recorded project root itself no longer exists, the ordinary
+  shape after `git worktree remove`, which `--restore-root --confirm` repairs — or via
   /zensu:adopt-session. No network or API key. It never edits code, never touches the
   workflow document's decision fields, and never bypasses a review.
 ---
@@ -67,10 +71,12 @@ in its cache, so a session that outlives them lands here whatever its lineage.
 Nothing can re-verify the record any more and no installation serves it; adoption
 re-mints it under the running installation.
 
-If the doctor row instead says the session has **no** record, or names ONLY a
-recorded **project root** that no longer exists with no lineage break beside it,
-this skill does not apply — those are different states with different remedies,
-and it will refuse (the second as `already-served`, because that runtime already
+If the doctor row instead says the session has **no** record, this skill does not
+apply — that is a different state with a different remedy. A row naming ONLY a
+recorded **project root** that no longer exists, with no lineage break beside it,
+DOES belong here: it is what `--restore-root` repairs (see the section below). What
+does not apply there is the DEFAULT argv mode, which refuses that state as
+`already-served` ( because that runtime already
 serves the record). "Refuse" is exact about the record and not about the whole
 command: the `--confirm` form still re-runs the idempotent lease sweep in that
 state, which sets aside superseded lease records. Nothing is re-minted and the
@@ -188,7 +194,58 @@ in the ordinary orphaned-project-root state, so READ-ONLY Bash and the read-only
 diagnostics work again while `Edit`, `Write`, `MultiEdit` and any Bash command that WRITES stay
 denied until that directory is re-created. The report says so before and after `--confirm`; repeat it rather than
 announcing an unqualified success, or the user walks straight into a deny they
-were just told was fixed. The adoption never re-creates the deleted directory.
+were just told was fixed. The adoption never re-creates the deleted directory —
+`--restore-root` is the mode that does, and it is a SEPARATE run.
+
+### `--restore-root` — re-creating a vanished recorded project root
+
+A second argv mode, and its own question: not "may this runtime serve the record"
+but "the runtime serves it fine and the DIRECTORY it anchors is gone". That is the
+ordinary shape after `git worktree remove`.
+
+```bash
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh" --restore-root
+```
+
+Read-only — it reports the verdict and writes nothing. **With `--confirm`** it
+re-creates the recorded root and rebuilds the workflow document over it in the SAME run, which is what a hand-made
+`mkdir` does not do: the document lived under that root, so a bare directory leaves
+the session in a second wedge where the capability gate denies every tool.
+
+**Confirm with the user before adding `--confirm`.** `--confirm` is an argv token this
+thread can supply to itself, so it is not a consent control — the control is this step.
+Run the read-only form first, relay the verdict and all three disclosure lines verbatim
+(the directory comes back EMPTY, it is not a git worktree, and the chain that lived there
+is gone rather than restored), and say plainly that if the directory was MOVED rather than
+deleted, moving it back is the better repair. Only after the user agrees, run the same
+command with `--confirm`. This mirrors Step 2 of 4 of the adoption flow below, and it
+matters at least as much here: this is the mode that creates a directory.
+
+**The destination is carried from the record and never from an argument.** Neither
+literal takes a value, and the PreToolUse gate admits no other token, so no
+invocation can name a directory. The anchor does not MOVE; only the path the record
+already names is created. Re-anchoring a record to a caller-named directory was
+considered and refused — a session may delete its own root, so a caller-named anchor
+would be a cross-project write escape — and this mode is not a step toward it.
+
+**It restores the anchor, not the work.** The directory comes back EMPTY and is not
+a git worktree; nothing here runs git. The chain that lived there is gone rather
+than restored, and the rebuilt baseline reads as never active. Say all three when
+you relay the result — the report says them before and after `--confirm`, and an
+unqualified "restored" sends the user looking for work that is not there. To get
+the worktree back they run `git worktree add <path> <branch>` themselves, naming the
+branch: the record's own branch field has been observed stale.
+
+**Order matters in the COMBINED state.** When the lineage is ALSO broken, the
+restore refuses `not-served` — it requires this installation to serve the record.
+Adopt first, then run `--restore-root --confirm`.
+
+Its refusals: `root-present` (nothing is missing), `not-served` (adopt first),
+`record-unreadable` (the strict read failed for another reason — `/zensu:doctor`),
+`plugin-data-mismatch`, `unsafe-ancestor` (the nearest existing directory on the way
+is a symlink or not a directory, so creating the root through it would land it in a
+different tree) and `too-many-missing-components` (the gap is deeper than one
+removed worktree leaves, so the tree probably MOVED). Each writes nothing.
 
 **The OTHER recorded root is closed.** A minting installation pruned from the
 plugin cache is admitted at condition 1 through `readPrunedPluginRootContext`,
@@ -202,6 +259,12 @@ AND installation pruned — still refuses `record-unreadable`.
 Main thread only: a reviewer or neutral child is refused by every gate.
 
 ## Phase 1: Report, confirm, adopt
+
+> **If the diagnosis is a vanished recorded project root, this Phase does not apply.**
+> That state has its own mode, `--restore-root`, documented under Prerequisites above —
+> including its own confirm-with-the-user step, which the four steps below do not cover.
+> Read that section before emitting anything, and never emit `--restore-root --confirm`
+> from here.
 
 **Step 1 of 4 — report.** Run the read-only form. It changes nothing.
 
@@ -298,8 +361,9 @@ unqualified success.
 
 Both forms are recognized by the PreToolUse Bash gates only in their exact shape:
 a whitelisted assignment prefix, `bash`, the script path in the executing
-installation, and at most the literal `--confirm`. Anything else — a second
-command, a different flag, a copy of the script — is denied. Every PATH assignment in
+installation, and at most the literals `--restore-root` and `--confirm`, each at
+most once and NEITHER taking a value. Anything else — a second
+command, a different flag, a path, a copy of the script — is denied. Every PATH assignment in
 that prefix must carry a rooted literal value; an empty one is refused, which is
 one reason the form above passes only the variable the script actually reads.
 Emit the command exactly as written above; do not wrap it, redirect it, or chain

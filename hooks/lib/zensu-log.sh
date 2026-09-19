@@ -117,6 +117,10 @@ case "${1:-}" in
       echo "zensu-log.sh --phase: BASELINE_REBUILT is written only by the workflow-baseline repair; it is the provenance record of a rebuilt baseline and cannot be minted by a caller" >&2
       exit 2
     fi
+    if [ "$phase_val" = PROJECT_ROOT_RESTORED ]; then
+      echo "zensu-log.sh --phase: PROJECT_ROOT_RESTORED is written only by the project-root restore; it is the provenance record of a re-created project root and cannot be minted by a caller" >&2
+      exit 2
+    fi
     case "$reason_val" in
       "chain-recovered: "*)
         echo "zensu-log.sh --phase: a 'chain-recovered: ' reason is reserved for --chain-recover" >&2
@@ -128,6 +132,10 @@ case "${1:-}" in
         ;;
       "baseline-rebuilt: "*)
         echo "zensu-log.sh --phase: a 'baseline-rebuilt: ' reason is reserved for the workflow-baseline repair" >&2
+        exit 2
+        ;;
+      "project-root-restored: "*)
+        echo "zensu-log.sh --phase: a 'project-root-restored: ' reason is reserved for the project-root restore" >&2
         exit 2
         ;;
     esac

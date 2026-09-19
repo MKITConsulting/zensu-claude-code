@@ -3327,13 +3327,23 @@ function bindingLine() {
     case 'unbound':
       return line(BAD, 'binding: this session has no valid Session Control record — every stateful Zensu tool fails closed; start a fresh Claude Code session');
     // A record that is valid in every other respect, pointing at a directory
-    // that is gone. Naming the path matters: "re-create exactly that directory"
-    // is only actionable if the user is told which one, and the generic unbound
-    // line above would send them looking for a record that is right there.
+    // that is gone. Naming the path matters: the remedy is only actionable if the
+    // user is told which directory, and the generic unbound line above would send
+    // them looking for a record that is right there.
+    //
+    // THE REMEDY NAMES THE COMMAND, not a bare mkdir, and the correction is worth
+    // recording because the bare form shipped for several releases and was
+    // INCOMPLETE. The workflow document lived under that root, so re-creating the
+    // directory by hand leaves the session in a SECOND wedge — the capability gate
+    // then throws on a missing document and denies every tool, with a message
+    // naming neither this row nor the directory. `--restore-root` does
+    // both halves in one run. The cost is named here rather than only in that
+    // command's own report: a reader who acts on this row and finds the chain gone
+    // afterwards reads it as a failed repair.
     case 'orphaned-project-root':
       return line(BAD, 'binding: the project root recorded for this session no longer exists'
         + one(env.ZDOC_BINDING_PROJECT_ROOT)
-        + ' — a deleted or recycled worktree left the workflow state unreachable from this record, so stateful Zensu tools fail closed while this read-only diagnostic still runs; re-create exactly that directory to resume, or start a fresh Claude Code session. If it was moved rather than deleted, its state still exists there');
+        + ' — a deleted or recycled worktree left the workflow state unreachable from this record, so stateful Zensu tools fail closed while this read-only diagnostic still runs; run /zensu:adopt-session --restore-root to see whether that directory can be re-created in place. That report writes nothing; confirming the repair it describes re-creates the directory and rebuilds the workflow document the removal took with it, in one run. It restores the ANCHOR, not the work: the directory comes back empty, it is not a git worktree, and the review chain that lived there is gone rather than restored. Starting a fresh Claude Code session remains the alternative. If the directory was moved rather than deleted, its state still exists there, and moving it back is better than re-creating it');
     // The record is INTACT and only the runtime serving it declares an
     // incompatible lineage — a plugin update that landed mid-session. Before this
     // row existed the state fell through to `unbound` above, whose line asserts
@@ -3359,7 +3369,7 @@ function bindingLine() {
         // already pins the quoted-"false" hazard for a config flag, and a channel
         // with a two-value producer deserves a two-value reader.
         + (env.ZDOC_BINDING_ROOT_UNKNOWN === '1'
-          ? '. Whether the recorded project root still exists could not be determined here; if it is gone, the adoption clears the lineage break while Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created'
+          ? '. Whether the recorded project root still exists could not be determined here; if it is gone, the adoption clears the lineage break while Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created — run /zensu:adopt-session --restore-root AFTERWARDS to see whether that is possible; confirming the repair it describes does that and rebuilds the workflow document in one step, the order mattering because that repair requires the running installation to serve the record'
           : ''));
     // The record is INTACT and the installation that minted it has been pruned
     // from the plugin cache — the host keeps only a few versions, and a session
@@ -3391,7 +3401,7 @@ function bindingLine() {
         // OFFERED, never promised — the same hedge the row above carries and for
         // the same reason: this state is reachable on a DOWNGRADE, which adoption
         // refuses outright as executing-runtime-older.
-        + ' — a deleted or recycled worktree left the workflow state unreachable from this record while a plugin update landed, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether the running installation may take the record over, then /zensu:adopt-session --confirm. That unblocks READ-ONLY Bash and this diagnostic, but Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write, because the recorded project root is still gone — a write cannot be attributed to a project that is not there — re-create exactly that directory, or start a fresh Claude Code session, to write again. If it was moved rather than deleted, its state still exists there');
+        + ' — a deleted or recycled worktree left the workflow state unreachable from this record while a plugin update landed, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether the running installation may take the record over, then /zensu:adopt-session --confirm. That unblocks READ-ONLY Bash and this diagnostic, but Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write, because the recorded project root is still gone — a write cannot be attributed to a project that is not there. To write again, run /zensu:adopt-session --restore-root AFTERWARDS: it re-creates exactly that directory and rebuilds the workflow document in one step, where a bare mkdir leaves the second half missing and every tool denied. The ORDER matters — that repair requires the running installation to serve the record, which the adoption above is what establishes. It restores the anchor, not the work: the directory comes back empty and the chain that lived there is gone. Starting a fresh Claude Code session remains the alternative. If the directory was moved rather than deleted, its state still exists there, and moving it back is better than re-creating it');
     case 'unavailable':
       return line(BAD, 'binding: hooks/lib/zensu-session.sh is missing or symlinked — Session Control cannot bind');
     // The wrapper's OWN "could not resolve it" verdict, and the unset value the

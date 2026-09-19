@@ -497,8 +497,14 @@ function renderBaselineNotes(baseline, sessionId) {
       rebuiltEvidence.forEach((name) => w("  " + safe(name) + "\n"));
     }
     if (baseline.provenance !== "recorded") {
-      w("\nWARNING: the rebuild succeeded but its provenance entry could not be written (\""
-        + safe(String(baseline.provenance)) + "\").\n");
+      // THE ROW RULE: the status token is ours and must not fold; the cause is a
+      // foreign `error.message` carrying `session-control-v1: ` from fail(), so it
+      // goes on its own line where the fold reaches it alone.
+      w("\nWARNING: the rebuild succeeded but its provenance entry could not be written ("
+        + safe(String(baseline.provenance)) + ").\n");
+      if (baseline.provenanceCause) {
+        w("  provenance cause : " + safe(String(baseline.provenanceCause)) + "\n");
+      }
       w("The rebuild is real and unrecorded in the workflow history; report this rather than\n");
       w("repeating it.\n");
     }
@@ -554,6 +560,168 @@ const PRUNED_NOTE = " (installation no longer on disk)";
 const PRUNED_EXPLANATION = "The installation that minted the record has been pruned from the plugin cache, so the\nrecord could not be re-measured; adoption re-mints it under the running installation.\n";
 const prunedNote = (pruned) => (pruned ? PRUNED_NOTE : "");
 
+// --- the project-root restore -----------------------------------------------
+
+const RESTORE_REMEDY = {
+  [core.RESTORE_ROOT_REFUSALS.RECORD_UNREADABLE]:
+    "The record could not be read as a session whose project root is merely GONE. The strict read failed for some OTHER reason — an altered record, a schema break, or an installation pruned from the plugin cache. Those have their own exits and this one must not stand in for them: run /zensu:doctor, and /zensu:adopt-session for a lineage break.",
+  [core.RESTORE_ROOT_REFUSALS.PLUGIN_DATA]:
+    "The record belongs to a different plugin-data store — typically a development checkout against an installed plugin, or the reverse. That boundary is never relaxed. Start a fresh Claude Code session.",
+  [core.RESTORE_ROOT_REFUSALS.NOT_SERVED]:
+    "The executing installation may not serve this record, so it must not create the directory the record anchors. That is a lineage break with its own exit: run /zensu:adopt-session first, then this command again.",
+  [core.RESTORE_ROOT_REFUSALS.ROOT_PRESENT]:
+    "The recorded project root is there. Nothing is missing, so nothing is created. If tools are still failing, the cause is a different one — run /zensu:doctor.",
+  [core.RESTORE_ROOT_REFUSALS.UNSAFE_ANCESTOR]:
+    "The nearest existing directory on the way to the recorded root is a symlink, is not a directory, or could not be read. Every project root is minted through a real-path resolution, so it contained no link when it was recorded: a link there now means the tree changed under the record, and creating the root through it would land it in a DIFFERENT tree. Nothing was created. Inspect the path named above, or start a fresh Claude Code session.",
+  [core.RESTORE_ROOT_REFUSALS.TOO_MANY_MISSING_COMPONENTS]:
+    "Too many directories on the way to the recorded root are missing. One removed worktree leaves a few; a gap this deep means the whole tree MOVED rather than one worktree being removed, and re-creating a stub there would plant an empty directory where nobody asked for one. Nothing was created. If the tree really did move, move it back, or start a fresh Claude Code session.",
+};
+
+// Stated BEFORE the user confirms and again after, never only after: a repair that
+// hands back the write gate and nothing else is not the rescue an unqualified
+// "restorable" implies, and finding that out afterwards reads as a failed repair.
+// This is the same rule the orphaned-root branch of the adoption report follows.
+const RESTORE_DISCLOSURE = "What this repairs, and what it does NOT:\n"
+  + "  * The directory is re-created EMPTY. It is NOT a git worktree — nothing here runs\n"
+  + "    git and no branch is checked out. To get the worktree back, run\n"
+  + "    `git worktree add <path> <branch>` yourself and name the branch: the record's\n"
+  + "    own branch field has been observed stale, so it is deliberately not used.\n"
+  + "  * The chain state that lived under that root is GONE, not restored. The workflow\n"
+  + "    baseline is rebuilt fresh, so it reads as never active — that is all a fresh\n"
+  + "    baseline can say.\n"
+  + "  * The anchor does not MOVE. Only the path the record already names is created, so\n"
+  + "    the source-write gate keeps comparing against exactly the root it compared\n"
+  + "    against before. No ARGUMENT names a directory: the destination comes from the\n"
+  + "    record inside the plugin-data store this invocation names, and that store's\n"
+  + "    ownership and permission check is what bounds it.\n";
+
+// RENDERS through process.stdout and returns the exit code rather than setting it,
+// so main() keeps one place where the process result is decided — and so every arm
+// is drivable from a unit test, which is the lesson renderLeaseWarnings records
+// about having been write-only.
+// `deps` is the seam, and it is the shape the sibling renderers in this file already
+// have: renderBaselineDiagnosis, renderBaselineNotes and repairBaseline all TAKE their
+// verdict rather than resolving it, and their unit cases drive them with plain object
+// literals. Resolving from the module-level `core` forced this one's only unit file to
+// swap that module into and out of the global require cache — a seam novel in this
+// tree, reaching every hook in hooks/lib, to test one function. Defaulted, so every
+// production call site is unchanged.
+function renderRestoreRoot(request, confirmed, deps) {
+  const resolveVerdict = (deps && deps.verdict) || core.restoreRootVerdict;
+  const runRestore = (deps && deps.restore) || core.restoreWorkflowProjectRoot;
+  const verdict = resolveVerdict(request);
+  if (!verdict.ok) {
+    process.stdout.write("Zensu project-root restore — NOT restorable ("
+      + safe(verdict.reason) + ")\n\n");
+    if (verdict.at) {
+      process.stdout.write("  nearest existing : " + safe(verdict.at) + "\n");
+    }
+    if (typeof verdict.missingCount === "number") {
+      process.stdout.write("  missing below it : " + verdict.missingCount
+        + " (limit " + verdict.limit + ")\n");
+    }
+    if (verdict.at || typeof verdict.missingCount === "number") {
+      process.stdout.write("\n");
+    }
+    // hasOwnProperty, not a bare index: an inherited member such as `constructor`
+    // is TRUTHY, so a bare lookup skips the `||` fallback and renders a function
+    // body. Not reachable through the shipped producer, whose vocabulary is closed
+    // — but `deps.verdict` is an injectable seam and the fallback exists for values
+    // the producer does not emit, which is exactly this class.
+    process.stdout.write((Object.prototype.hasOwnProperty.call(RESTORE_REMEDY, verdict.reason)
+      ? RESTORE_REMEDY[verdict.reason]
+      : "No remedy is known for this refusal. Start a fresh Claude Code session.") + "\n");
+    return 1;
+  }
+  if (!confirmed) {
+    process.stdout.write("Zensu project-root restore — RESTORABLE\n\n");
+    process.stdout.write("  recorded project : " + safe(verdict.projectRoot) + "\n");
+    process.stdout.write("  nearest existing : " + safe(verdict.nearestExisting) + "\n");
+    process.stdout.write("  to be created    : " + verdict.missing.length + "\n\n");
+    process.stdout.write("The record is readable and this installation serves it. Only the recorded project\n");
+    process.stdout.write("root is gone, which is why every write is denied while reads still work.\n\n");
+    process.stdout.write(RESTORE_DISCLOSURE);
+    process.stdout.write("\nNothing has been changed. Run the same command with --confirm to restore.\n");
+    return 0;
+  }
+  let restored;
+  try {
+    restored = runRestore(request);
+  } catch (error) {
+    // The benign race: something re-created the directory between the verdict and
+    // the write. That is the outcome this command wanted, so it is not a failure —
+    // but it is also not work this run did, and saying otherwise would claim a
+    // repair that did not happen.
+    // typeof-guarded like its sibling at the baseline call: a core that predates
+    // this export would otherwise crash here, AFTER runRestore may already have
+    // created directories, and never report what it made.
+    if (typeof core.isRestoreRootAlreadyPresent === "function"
+      && core.isRestoreRootAlreadyPresent(error)) {
+      process.stdout.write("Zensu project-root restore — ALREADY RESTORED\n\n");
+      const racedMade = Array.isArray(error.created) ? error.created.length : 0;
+      process.stdout.write("  created          : " + racedMade + "\n\n");
+      // NOT "created nothing": the recorded root is the LAST missing component, so a
+      // race on it can follow components this run really did plant.
+      process.stdout.write("The recorded project root came back between the check and the write, so this run\n");
+      process.stdout.write("did not create it" + (racedMade > 0
+        ? " — though it did create the " + racedMade + " component(s) above it, counted here"
+        : " and created nothing") + ". If tools are still failing, run\n");
+      process.stdout.write("/zensu:adopt-session --confirm to rebuild the workflow document, then /zensu:doctor.\n");
+      return 0;
+    }
+    process.stdout.write("Zensu project-root restore — FAILED\n\n");
+    // THE ROW RULE, stated once here and referenced by symbol below. `safe()` is
+    // `safeDisplayValue`, whose `PAIR_SEPARATOR = / :|: /` folds any value that
+    // looks like a `label: value` pair — correct, and what the rule is for. But an
+    // `error.message` on these paths always carries `session-control-v1: `, the
+    // prefix `fail()` adds, so composing it into a sentence with our own label and
+    // folding the RESULT quotes the label too. Label on its own, foreign message on
+    // its own row: the fold then reaches only what it should.
+    process.stdout.write("The recorded project root could not be re-created.\n");
+    process.stdout.write("  cause            : "
+      + safe(error && error.message ? error.message : "unknown") + "\n");
+    const madeBefore = error && Array.isArray(error.created) ? error.created.length : 0;
+    if (madeBefore > 0) {
+      process.stdout.write("  created          : " + madeBefore
+        + " (component(s) this run planted before it failed)\n");
+    }
+    process.stdout.write("Nothing is claimed about the session state. Run /zensu:doctor.\n");
+    return 1;
+  }
+  process.stdout.write("Zensu project-root restore — RESTORED\n\n");
+  process.stdout.write("  recorded project : " + safe(restored.projectRoot) + "\n");
+  process.stdout.write("  created          : " + restored.created.length + "\n");
+  // THE ROW RULE (see the comment on the FAILED branch above, which states it in
+  // full). `restored.baselineError` is an `error.message`, so composing
+  // `"NOT rebuilt (" + baselineError + ")"` and folding the result quoted the row.
+  process.stdout.write("  workflow baseline: " + safe(restored.baselineError
+    ? "NOT rebuilt"
+    : (restored.baseline && restored.baseline.provenance === "existing"
+      ? "already present"
+      : "rebuilt")) + "\n");
+  if (restored.baselineError) {
+    process.stdout.write("  baseline cause   : " + safe(restored.baselineError) + "\n");
+  }
+  process.stdout.write("  provenance       : " + safe(restored.provenance) + "\n");
+  // THE ROW RULE again; see the FAILED branch above for the full statement.
+  if (restored.provenanceCause) {
+    process.stdout.write("  provenance cause : " + safe(restored.provenanceCause) + "\n");
+  }
+  process.stdout.write("\n");
+  process.stdout.write(RESTORE_DISCLOSURE);
+  if (restored.baselineError) {
+    // The directory IS back and the document is not, which is the second wedge this
+    // command exists to close in one step. Reported rather than rolled back: undoing
+    // the mkdir would put the session back where it started.
+    process.stdout.write("\nThe directory is back but the workflow document is NOT. Until it exists the\n");
+    process.stdout.write("capability gate denies every tool. Run /zensu:adopt-session --confirm to rebuild\n");
+    process.stdout.write("it, then /zensu:doctor.\n");
+    return 1;
+  }
+  process.stdout.write("\nThe session is anchored again from the next tool call onward. No restart is needed.\n");
+  return 0;
+}
+
 // Wrapped in a function because `node -e` evaluates at module top level, where a
 // bare `return` is a syntax error — and a syntax error here would surface as a
 // crashed helper rather than as the refusal it was meant to print.
@@ -587,6 +755,15 @@ function main() {
     process.stdout.write("It is missing, aliased, or has unsafe permissions or ownership. Repair the store\n");
     process.stdout.write("or start a fresh Claude Code session; adoption cannot mint a record into it.\n");
     process.exitCode = 1;
+    return;
+  }
+  // The project-root restore is its own question and its own answer, so it routes
+  // ABOVE the adoptability ladder rather than as a branch inside it. Routing it
+  // below would run adoptableRecord first, which answers `already-served` for
+  // exactly this state — a true answer to a question nobody asked here, and one
+  // whose --confirm branch repairs the OTHER half.
+  if (process.env.ZADOPT_MODE === "restore-root") {
+    process.exitCode = renderRestoreRoot(request, process.env.ZADOPT_CONFIRM === "1");
     return;
   }
   const verdict = core.adoptableRecord(request);
@@ -683,19 +860,34 @@ function main() {
       process.stdout.write("stay denied, and so does any Bash command the source-write gate can attribute\n");
       process.stdout.write("as a write, because a write cannot be attributed to a project that is not\n");
       process.stdout.write("there. NotebookEdit is the one mutation that still passes, in a healthy\n");
-      process.stdout.write("session too. To write again, re-create exactly that directory or start a\n");
-      process.stdout.write("fresh Claude Code session. If it was moved rather than deleted, its state\n");
-      process.stdout.write("still exists there.\n");
+      process.stdout.write("session too. To write again, run this command with --restore-root --confirm\n");
+      process.stdout.write("AFTER the adoption: it re-creates exactly that directory and rebuilds the\n");
+      process.stdout.write("workflow document in one step, where a bare mkdir leaves the second half\n");
+      process.stdout.write("missing and every tool denied. The order matters — the restore requires this\n");
+      process.stdout.write("installation to SERVE the record, which is what the adoption establishes. It\n");
+      process.stdout.write("restores the anchor, not the work: the directory comes back empty and the\n");
+      process.stdout.write("chain that lived there is gone. If it was moved rather than deleted, its state\n");
+      process.stdout.write("still exists there, and moving it back is better than re-creating it.\n");
       // The schema-equality check that authorises an ordinary takeover did NOT
       // run here, and a report that stays silent about it lets the user read a
       // weaker check as the stronger one. Condition 6 is guarded by an
       // existsSync on the workflow document, which is false for an absent root.
+      //
+      // This paragraph used to close by prescribing "re-creating the directory
+      // BEFORE adopting", which contradicted the adopt-first order stated twelve
+      // lines above it and by every other carrier — and the order it named is
+      // unperformable: this block is reachable only on verdict.ok, which
+      // adoptableRecord returns only when the executing runtime does NOT serve
+      // the record, and restoreRootVerdict refuses exactly that as NOT_SERVED.
+      // Under the other reading, a bare mkdir, the stated payoff never
+      // materialises either, because the guard is on the DOCUMENT rather than
+      // the directory. Keep the disclosure; do not restore the order claim.
       process.stdout.write("\nNOT CHECKED: with no readable workflow document, the schema-equality check that\n");
       process.stdout.write("normally authorises a takeover was not performed, and a document restored later\n");
-      process.stdout.write("is checked only when it is first read, not here. Re-creating the directory\n");
-      process.stdout.write("BEFORE adopting is the better order: the check then names its own refusal\n");
-      process.stdout.write("(workflow-schema-mismatch, with a remedy) instead of an anonymous fail-closed\n");
-      process.stdout.write("deny at the first read after the repair.\n");
+      process.stdout.write("is checked only when it is first read, not here. That check cannot be brought\n");
+      process.stdout.write("forward by repairing the directory first: --restore-root --confirm refuses with\n");
+      process.stdout.write("not-served until this installation serves the record, which is what the adoption\n");
+      process.stdout.write("establishes. Adopt first, then restore.\n");
     }
     process.stdout.write("Nothing has been changed. Run the same command with --confirm to adopt.\n");
     return;
@@ -726,6 +918,13 @@ function main() {
     + (adopted.orphanedProjectRoot ? " (GONE)" : "") + "\n");
   process.stdout.write("  superseded record: " + safe(adopted.supersededFile) + "\n");
   process.stdout.write("  provenance       : " + safe(adopted.provenance) + "\n");
+  // THE ROW RULE (see the FAILED branch of renderRestoreRoot for the full
+  // statement). Without this row the split above DELETES the cause instead of
+  // mangling it: the composed form it replaced was unreadable-but-present, and a
+  // bare token with no consumer for its cause is strictly worse.
+  if (adopted.provenanceCause) {
+    process.stdout.write("  provenance cause : " + safe(adopted.provenanceCause) + "\n");
+  }
   process.stdout.write("  leases set aside : " + leases.discarded + "\n");
   process.stdout.write("  leases stuck     : " + leases.failed.length + "\n\n");
   if (adopted.orphanedProjectRoot) {
@@ -739,8 +938,12 @@ function main() {
     process.stdout.write("while Edit, Write and MultiEdit stay denied, and so does any Bash command\n");
     process.stdout.write("the source-write gate can attribute as a write — a write cannot be attributed\n");
     process.stdout.write("to a project that is not there. NotebookEdit is the one mutation that still\n");
-    process.stdout.write("passes, in a healthy session too. Re-create exactly that directory, or start a\n");
-    process.stdout.write("fresh Claude Code session, to write again.\n");
+    process.stdout.write("passes, in a healthy session too. To write again, run this command once more\n");
+    process.stdout.write("with --restore-root --confirm — now that the lineage break is cleared, this\n");
+    process.stdout.write("installation serves the record, which is what that repair requires. It\n");
+    process.stdout.write("re-creates exactly that directory and rebuilds the workflow document in one\n");
+    process.stdout.write("step, restoring the anchor and not the work: the directory comes back empty\n");
+    process.stdout.write("and the chain that lived there is gone. Or start a fresh Claude Code session.\n");
   } else {
     process.stdout.write("This session is bound again from the next tool call onward — no restart is needed.\n");
     if (adopted.prunedPluginRoot) {
@@ -941,6 +1144,9 @@ module.exports = {
   renderBaselineNotes,
   survivingEvidence,
   renderLeaseWarnings,
+  renderRestoreRoot,
+  RESTORE_DISCLOSURE,
+  RESTORE_REMEDY,
   repairExitCode,
   repairHeadline,
   repairSweepRoot,

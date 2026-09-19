@@ -286,10 +286,16 @@ test("the adoption is recognized bare and with exactly one --confirm", () => {
   );
 });
 
-test("the adoption declares exactly one argument and refuses every other shape", () => {
+test("the adoption declares two literal arguments and refuses every other shape", () => {
   assert.strictEqual(anyVerdict(`bash "${adoptPath}" --force`).reason, REASONS.ARGUMENT);
   assert.strictEqual(anyVerdict(`bash "${adoptPath}" --confirm --confirm`).reason, REASONS.ARGUMENT);
   assert.strictEqual(anyVerdict(`bash "${adoptPath}" --confirm extra`).reason, REASONS.ARGUMENT);
+  assert.strictEqual(anyVerdict(`bash "${adoptPath}" --restore-root --restore-root`).reason,
+    REASONS.ARGUMENT);
+  // The one that matters most for this mode: a DESTINATION is never admitted,
+  // whichever flag precedes it.
+  assert.strictEqual(anyVerdict(`bash "${adoptPath}" --restore-root /tmp/evil`).reason,
+    REASONS.ARGUMENT);
   assert.strictEqual(anyVerdict(`EVIL=1 bash "${adoptPath}"`).reason, REASONS.ASSIGNMENT);
   assert.strictEqual(anyVerdict(`bash "${adoptPath}"; whoami`).reason, REASONS.CHARSET);
 });
@@ -308,5 +314,27 @@ test("isDoctorInvocation never admits the write, and the recognized list stays a
   assert.strictEqual(isRecognizedInvocation(payload(`bash "${liveDoctor}"`)), PLATFORM_SUPPORTED);
   assert.deepStrictEqual(Object.keys(RECOGNIZED).sort(), ["adopt", "doctor"]);
   assert.deepStrictEqual(RECOGNIZED.doctor.args, []);
-  assert.deepStrictEqual(RECOGNIZED.adopt.args, ["--confirm"]);
+  assert.deepStrictEqual(RECOGNIZED.adopt.args, ["--restore-root", "--confirm"]);
+  // The property that makes widening this list safe, pinned as a property
+  // rather than as today's two spellings: every admitted argument is an exact
+  // literal and NONE of them takes a value. An entry that could carry a
+  // destination would let an invocation name a directory, which is the
+  // caller-named re-anchoring the design refuses — so it must fail HERE rather
+  // than be discovered in the script that consumes it.
+  for (const arg of RECOGNIZED.adopt.args) {
+    assert.match(arg, /^--[a-z][a-z-]*$/, `${arg} is not a bare literal flag`);
+  }
+});
+
+// The argv surface the recognizer admits must be exactly the one the script
+// accepts, in both directions. A literal admitted here and refused there is a
+// remedy the user is told to run and cannot; a literal accepted there and
+// refused here is a mode the gate silently blocks.
+test("every admitted adopt argument is one the adopt script itself accepts", () => {
+  const script = fs.readFileSync(
+    nodePath.join(executingPluginRoot(), ...ADOPT_SEGMENTS), "utf8");
+  for (const arg of RECOGNIZED.adopt.args) {
+    assert.ok(script.includes(`    ${arg})`),
+      `${arg} is admitted by the recognizer but has no case arm in the adopt script`);
+  }
 });
