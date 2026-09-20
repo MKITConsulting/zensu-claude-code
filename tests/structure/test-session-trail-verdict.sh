@@ -102,10 +102,14 @@ case "$WT_UNIT_SKIP" in ''|*[!0-9]*) WT_UNIT_SKIP=0 ;; esac
 # WHAT AN EXACT COUNT CANNOT SEE IS SUBSTITUTION. Delete a case and add an unrelated one in
 # the same commit and the total is unchanged, every arm here passes, and the tree has lost a
 # control. Closing that in general means the hand-maintained roster this count exists to
-# avoid, so it is closed for ONE case only — the one whose loss would be invisible and whose
-# title is already a self-identifying literal that the census in trail.mjs quotes back. Apply
-# this shape to a case whose disappearance nothing else would report, never as a blanket rule.
-WT_UNIT_TOTAL_WANT=59
+# avoid, so it is closed for exactly TWO cases, and they were admitted on DIFFERENT criteria.
+# The FIRST is the one whose loss would be invisible and whose
+# title is already a self-identifying literal that the census in trail.mjs quotes back. The
+# SECOND meets only the first half of that — the fence case's title is quoted by no census
+# anywhere — and is admitted on the looser criterion alone: a case whose disappearance nothing
+# else would report. Both guards name their own case below. Apply this shape on that looser
+# criterion, never as a blanket rule, and state which of the two a third one matches.
+WT_UNIT_TOTAL_WANT=65
 # The skip BOUND is DERIVED from the file rather than hand-written, and then the derivation
 # itself is registered. A bare ceiling would accept a case that quietly started skipping
 # itself, which is the failure the exact-count comment above exists to prevent; counting the
@@ -149,7 +153,28 @@ fi
 if grep -qF 'the briefShellArg carrier population is derived' "$PLUGIN_DIR/tests/structure/worktree-advice-v1.test.js"; then
   check "WT-unit the derived briefShellArg census case is still registered" PASS
 else
-  check "WT-unit the derived briefShellArg census case is gone — the twelve-carrier roster has no control left, and the exact total above cannot see a substitution" FAIL
+  check "WT-unit the derived briefShellArg census case is gone — the derived carrier roster has no control left, and the exact total above cannot see a substitution" FAIL
+fi
+# The SECOND title guard, admitted on the criterion the comment above `WT_UNIT_TOTAL_WANT`
+# states: apply this shape to a case whose disappearance nothing else would report. The
+# fence-separation case is the ONLY holder of the create-then-move paste-unit contract that
+# `MOVE_ALTERNATIVE`'s own header calls load-bearing — every other move check in both suites
+# is a presence needle. Delete it and add any unrelated case in the same commit and the exact
+# total stays 65 while the property has zero holders in the tree. Two carriers, not one, so a
+# maintainer who moves the case still has to move its guard.
+if grep -qF 'the create route and the move alternative are not in the same paste unit' "$PLUGIN_DIR/tests/structure/worktree-advice-v1.test.js"; then
+  check "WT-unit the create-then-move paste-unit case is still registered" PASS
+else
+  check "WT-unit the create-then-move paste-unit case is gone — the fence separation and its ordering have no holder left, and the exact total above cannot see a substitution" FAIL
+fi
+# The THIRD, on the same looser criterion. `WT8v10b` asserts the emitted CLAIM `sits ABOVE the
+# line`; only this unit case asserts the PLACEMENT that claim describes, so deleting it leaves
+# the array free to be reordered while `WT8v10b` keeps asserting a sentence that has become
+# false — the one shape a presence needle can never see.
+if grep -qF 'the move alternative states its stop condition before the command' "$PLUGIN_DIR/tests/structure/worktree-advice-v1.test.js"; then
+  check "WT-unit the stop-condition placement case is still registered" PASS
+else
+  check "WT-unit the stop-condition placement case is gone — WT8v10b then asserts a claim with nothing holding the placement it describes" FAIL
 fi
 
 FAKE="$(mktemp -d -t zensu-session-trail-verdict-XXXXXX)" || FAKE=""
@@ -2964,9 +2989,25 @@ wt_case "WT8j a record saying NOT archived, directory gone, gets the definite wo
 WT8_ALL="$(grep -oE '^WT8_[A-Z_]+=[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$' "$0" | sed 's/^WT8_[A-Z_]*=//')"
 WT8_ALL_N="$(printf '%s\n' "$WT8_ALL" | grep -c .)"
 WT8_STAY=""
+# Accumulated in THIS loop rather than in a second one of its own — `WT8v8` below consumes
+# it. Its own loop re-rendered all eight arms this one had already rendered, and `wt_advice`
+# is two node processes per call, so that cost 16 avoidable spawns in a suite whose Windows
+# wall clock is unmeasured. Same precedent as the `ONE render per arm` note further down.
+WT8_SPELLED=""
+WT8_SCANNED=0
+# `WT8_SCANNED` is the accumulation CONTROL for `WT8v8`, and it counts SCANS rather than
+# RENDERS — the distinction is the whole check. An earlier spelling counted renders, which is
+# independent of the escape `case` below: deleting that one line left the render count at 8
+# and `WT8v8` reported PASS having graded nothing, which is exactly what the control was
+# written to stop. A default arm on the scan itself cannot be satisfied without the scan
+# running. `WT8k`'s own arm is a control for an EMPTY RENDER and sees neither.
 for sid in $WT8_ALL; do
   got="$(wt_advice "$sid")"
   case "$got" in *'git worktree add'*) ;; *) WT8_STAY="$WT8_STAY ${sid%%-*}" ;; esac
+  case "$got" in
+    *'ZENSU_BASH_WRITE_GATE'*) WT8_SPELLED="$WT8_SPELLED ${sid%%-*}"; WT8_SCANNED=$((WT8_SCANNED + 1)) ;;
+    *) WT8_SCANNED=$((WT8_SCANNED + 1)) ;;
+  esac
 done
 if [ "${WT8_ALL_N:-0}" -lt 8 ]; then
   check "WT8k the derived arm roster is short (found $WT8_ALL_N of 8), so the rule check is weaker than it reads" FAIL
@@ -3031,13 +3072,157 @@ wt_case "WT8m4 the emitted carry-over names the check, not just the hazard" \
   "$WT8_ADOPT" '! -L "$s"' 'cannot run against it as printed'
 # WT8m5 — the STOP-CONDITION, on the carrier that executes. SKILL.md ends its config
 # bullet with "if the source worktree is one you would not cd into, do not run this at
-# all — copy the files by hand", and that was the only bar anywhere for deciding whether
+# all — copy the files across by hand instead", and that was the only bar anywhere for deciding whether
 # to run the recipe. SKILL.md is read by the MODEL; this array lands in a persisted
 # brief a HUMAN opens and pastes from, and it stated the threat model and then went
 # straight into the commands with no way out. The asymmetry was visible in the docs
 # themselves: SKILL.md back-references that sentence for a reader who has never seen it.
 wt_case "WT8m5 the emitted carry-over carries the do-not-run-this-at-all escape" \
-  "$WT8_ADOPT" 'do not run this at all' 'cannot run against it as printed'
+  "$WT8_ADOPT" 'copy the files across by hand instead' 'cannot run against it as printed'
+
+# WT8v — the MOVE alternative, graded in BOTH directions. A presence pin alone passes in a
+# tree that renders the route on every leg, and the gone leg is exactly where it must not
+# appear: the recorded directory is not readable from here, so there is nothing to move and
+# a rendered command would name a source that is not there — the same reason the gone leg
+# prints no carry-over recipe either.
+# WT8v1's needle carries the `git -C` ANCHOR, not just the verb, for the reason `WT8L`'s
+# comment gives about `-b`: a needle starting at `worktree move` still matches after the
+# repository anchor is deleted, `T35` is a cross-carrier equality that a two-sided edit
+# satisfies, and `WT8p` counts commands rather than reading them — so the anchor would be
+# unpinned in both suites. WT8v2's FORBIDDEN needle is the command-shaped form for the
+# mirror reason `WT8L2` states: the gone-leg `live` leads legitimately say "create or move a
+# worktree at that path", so a bare `worktree move` would turn this red for a reword that
+# has nothing to do with the route.
+wt_case "WT8v1 a present arm offers the worktree-move alternative, anchored at the READER's repository" \
+  "$WT8_ADOPT" 'git -c core.fsmonitor=false worktree move' 'cannot run against it as printed'
+wt_case "WT8v2 a gone arm offers no move — the recorded directory is not there to move" \
+  "$WT8_ADOPT_GONE" 'cannot run against it as printed' "worktree move '<their worktree>'"
+# The CONDITION is a human attestation and must never read as a verdict this tool reached.
+# The run that prompted this route had a registered LIVE pid on a session its human had
+# abandoned after an account switch, so `archived`, `live` and the whole four-way ladder
+# answer the wrong question. Keying the route on any of them would offer it exactly where
+# it is unsafe and withhold it exactly where it is right, which is why the text states the
+# condition as the reader's and says so.
+wt_case "WT8v3 the move route states the condition as the reader's to attest" \
+  "$WT8_ADOPT" 'only you can authorize it' 'cannot run against it as printed'
+wt_case "WT8v4 the move route says why no predicate here can establish that condition" \
+  "$WT8_ADOPT" 'A registered pid is a process, not an intention' 'cannot run against it as printed'
+# The COST half. Without it the route reads as a free upgrade over the create recipe, and
+# that reading is exactly how someone else's live worktree gets moved out from under them.
+# Each claim gets its own pin, and the three gate claims are pinned in their BOUNDED form
+# because all three shipped unbounded first and all three were then measured false against
+# their owners: the gate judges BOTH operands (`bash-source-write-parse.js` keeps every
+# pathish operand after `worktree remove|move`), the deny is CONTAINMENT rather than a
+# construction-time property (`escapes` is `!isTemp(p) && !within(projectRoot, p)`, and this
+# repo's own nested layout makes an inside-the-anchor worktree ordinary), and the ledger
+# entry is CONDITIONAL (`tdd_record_bypass` writes only while a chain is armed). A pin on
+# the unbounded wording is worse than no pin, because it cements the false claim.
+wt_case "WT8v5 the move route names what it costs the other session" \
+  "$WT8_ADOPT" "mutates the OTHER session's layout" 'cannot run against it as printed'
+wt_case "WT8v6 the move route says the gate judges BOTH operands, not only the source" \
+  "$WT8_ADOPT" 'judges BOTH operands of' 'cannot run against it as printed'
+wt_case "WT8v6b the move route states the deny as containment, not as a construction-time fact" \
+  "$WT8_ADOPT" 'already nested inside your anchor' 'outside your anchor by construction'
+wt_case "WT8v7 the ledger disclosure is bounded to a session with an armed chain" \
+  "$WT8_ADOPT" 'only while a Zensu chain' 'cannot run against it as printed'
+wt_case "WT8v7b the move route does not PRESCRIBE taking the escape" \
+  "$WT8_ADOPT" 'do not go looking for the spelling' 'take it from there'
+# The one instruction that survives every OTHER gate needle above: `WT8v6` pins that the gate
+# judges both operands and `WT8v7b` that the escape is not prescribed, and neither of them
+# sees the consequence of a reader taking it anyway — that the DESTINATION then has no
+# containment check and must be placed inside the anchor by hand. Unpinned on both carriers
+# until now; a grep for `containment check on` across tests/ returned nothing.
+wt_case "WT8v7c taking the escape is stated to drop the DESTINATION containment check" \
+  "$WT8_ADOPT" 'check on the DESTINATION, so put `<path>` inside your own anchor' 'cannot run against it as printed'
+# The SAME-BRANCH claim is the route's headline benefit and it is false across two
+# repositories, where the create line fails harmlessly and the move succeeds. Pinned
+# separately from the cost paragraph because it qualifies a BUYS claim, not a cost one.
+# The bound is no longer a SENTENCE the reader must honour — dropping -C makes git enforce it,
+# measured against 2.51.0. The needle moved onto git's own refusal for that reason: pinning the
+# old advisory wording would cement the weaker contract this round replaced.
+wt_case "WT8v9 the same-repository bound is enforced by git, not by the reader's attention" \
+  "$WT8_ADOPT" 'is refused outright with "is not a working' 'cannot run against it as printed'
+# The move route's OWN STOP CONDITION and its fsmonitor disclosure — the emitted twins of
+# SKILL.md's, both of which were unpinned on EITHER carrier until this round while every
+# sibling move paragraph on THIS carrier already had one (`WT8v3`/`WT8v4` the attestation,
+# `WT8v5` the cost, `WT8v6`/`WT8v6b`/`WT8v7`/`WT8v7b` the gate claims, `WT8v9` the branch
+# bound). The doc carrier is NOT symmetrical with that and the skill suite's own comment says
+# so: its attestation paragraph had no needle at all until this round. This is the sentence
+# guarding the one rendered command in this flow that writes to the SOURCE worktree with no
+# refusal standing in front of it — "refusal standing", never "gate refusal": the renderer
+# refusals are what is absent here, while the write gate DOES judge this command, so naming
+# the gate flips the claim onto the thing that applies. Leaving it unpinned left the most
+# consequential paragraph of the route the least protected.
+#
+# The condition is a TRIGGER plus a PROHIBITION, and the emitted array SPLITS them across two
+# elements, so one joined needle cannot match the rendered output — that is why they are two
+# cases here where the doc carrier takes one joined needle. `take the create route above
+# instead` rather than the bare `create route`: the phrase occurs in the route-vs-rule prose
+# too, and a needle that matches there passes with the stop condition deleted. The PLACEMENT
+# claim is pinned separately below, because a caution printed AFTER a fenced command is read
+# after that command has already run.
+wt_case "WT8v10 the move route bars running it against a tree the reader would not enter" \
+  "$WT8_ADOPT" 'take the create route above instead' 'cannot run against it as printed'
+wt_case "WT8v10c the move route states the TRIGGER for that bar, not only the bar" \
+  "$WT8_ADOPT" 'If it is a tree you would not cd into, stop' 'cannot run against it as printed'
+# The needle carries the paragraph-unique `Before the command:` lead, not the bare appositive:
+# `a repository you have not vetted` occurs THREE times in this array — the carry-over config
+# rationale and its copy-step sibling use the same words — so an existential needle over the
+# short form survives deleting the move route's own sentence outright.
+wt_case "WT8v10d the move route says the tree it runs git inside is unvetted" \
+  "$WT8_ADOPT" 'Before the command: `<their worktree>` is a repository you have not vetted' 'cannot run against it as printed'
+# The flag NAME and its CONSEQUENCE are two cases because the emitted sentence splits them
+# across an array element boundary and `wt_case` greps the comma-joined array: no single needle
+# can span that seam, so deleting `and this line passes` / `none of them.` left both the name
+# and the hedge matching while the paragraph no longer said this command passes none of them.
+wt_case "WT8v11d the move route says what the flag is FOR, not merely that it is present" \
+  "$WT8_ADOPT" 'stops an unvetted repository executing one during the move' 'cannot run against it as printed'
+wt_case "WT8v10b the move route states that the caution sits above the command line" \
+  "$WT8_ADOPT" 'sits ABOVE the line' 'cannot run against it as printed'
+# The disclosure NAMES the flag rather than gesturing at it. `carry over here` alone was the
+# lead-in only, so the sentence could be reduced to "one protection does not carry over here"
+# with this case green and the reader never told WHICH protection. The HEDGE is a second case
+# for the same reason the placement claim is: it is what keeps the paragraph from claiming the
+# difference is harmless, which nobody measured.
+wt_case "WT8v11 the move route names the carry-over flag it now PASSES" \
+  "$WT8_ADOPT" 'passes -c core.fsmonitor=false and the' 'cannot run against it as printed'
+wt_case "WT8v11b the move route states the measured fact rather than a hedge" \
+  "$WT8_ADOPT" 'worktree move DOES consult that config' 'cannot run against it as printed'
+# `WT8v11b`'s needle stops at an ARRAY-ELEMENT boundary — the sentence spans three elements
+# and `consults that config was NOT` is the tail of the first — so it cannot see the word the
+# hedge turns on. Replace the two elements below it with `measured, but the difference is
+# harmless.` and `WT8v11b` still matches while the hedge is gone, which is the same
+# closing-clause-survives-a-reword shape the doc carrier's own joined needles were widened
+# against. This case owns the operative clause; the two together own the sentence.
+wt_case "WT8v11c the measurement names its control, so a green reading cannot be a check that never ran" \
+  "$WT8_ADOPT" 'with a control proving the hook fires' 'cannot run against it as printed'
+# The MEASURED live pid travels INSIDE the route on every arm that has one. As a static
+# array this block sat above the only line naming a registered process, and two of the four
+# present arms name no pid in their lead at all — so a destructive relocation was offered
+# with no live signal anywhere above it. `WT8_ALIVE` is the fixture with a registered pid.
+wt_case "WT8w1 the move route names the measured live pid when one is registered" \
+  "$WT8_ALIVE" "pid $LIVE_PID was registered and alive for that worktree" 'cannot run against it as printed'
+wt_case "WT8w2 an arm with no registered pid renders no measured-pid line" \
+  "$WT8_ADOPT" 'only you can authorize it' 'was registered and alive for that worktree'
+
+# WT8v8 — the escape is NAMED and never SPELLED, over EVERY arm rather than one. Shipping
+# the prefix inside a skill teaches the hatch, which the repo convention forbids outright;
+# the gate's own deny message carries it, and carries it at the moment the reader needs it,
+# so pointing at the refusal costs nothing. The roster is the derived one `WT8k` uses, for
+# the same reason it gives: a hand list cannot detect its own omission. `WT8_SPELLED` is
+# accumulated in `WT8k`'s loop rather than in one of its own — see the note there — and it
+# is safe to declare at top level because the roster grep matches a UUID-shaped value, which
+# an empty string is not, so it cannot join the roster the way `WT8_PRESENT_EXPECT=5` once
+# did.
+if [ "${WT8_ALL_N:-0}" -lt 8 ]; then
+  check "WT8v8 the derived arm roster is short (found $WT8_ALL_N of 8), so the escape-spelling check is weaker than it reads" FAIL
+elif [ "${WT8_SCANNED:-0}" != "${WT8_ALL_N:-0}" ]; then
+  check "WT8v8 the escape scan ran over $WT8_SCANNED of $WT8_ALL_N arms, so a clean result would be graded over a scan that did not run" FAIL
+elif [ -n "$WT8_SPELLED" ]; then
+  check "WT8v8 no arm spells the gate-disable prefix (arms that do:$WT8_SPELLED)" FAIL
+else
+  check "WT8v8 none of the $WT8_ALL_N arms spells the gate-disable prefix" PASS
+fi
 
 # WT8p — the two-space indent is not cosmetic: a command line indented any other way
 # renders as prose inside a numbered instruction and stops being runnable. `cmdHandoff`
@@ -3091,8 +3276,8 @@ WT8_INDENT_BAD=""
 # lockstep with the defect and passes. The exactness is load-bearing; what was missing
 # was signposting, which the failure messages now carry. SIBLING CONSTANT: `T35_EXPECT`
 # in tests/structure/test-session-trail-skill.sh, where
-# T35_EXPECT = WT8_PRESENT_EXPECT + WT8_GONE_EXPECT (19 = 18 + 1).
-WT8_PRESENT_EXPECT=18
+# T35_EXPECT = WT8_PRESENT_EXPECT + WT8_GONE_EXPECT (20 = 19 + 1).
+WT8_PRESENT_EXPECT=19
 WT8_GONE_EXPECT=1
 # The four arms whose recorded directory EXISTS — the ones `mkcwd` was called for.
 # Hand-maintained beside the counts on purpose: it is the ground truth the loop grades
