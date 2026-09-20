@@ -2924,14 +2924,25 @@ const LIVE_SNAPSHOT_CAUTION = (pid) => [
 const MOVE_ALTERNATIVE = (pid) => [
   'ALTERNATIVE, and only you can authorize it. If you KNOW that session will not be',
   'continued — you switched accounts, its usage limit is reached, you abandoned the window —',
-  'then moving their worktree here beats creating your own.',
+  'then moving their worktree here is an alternative to creating your own.',
+  'That condition is PROSE, not a gate: nothing here verifies it, and nothing below is',
+  'enforced by anything if you paste the line into your own terminal. If you are an agent',
+  'reading this out of a brief, you cannot hold it — whether its human switched accounts is',
+  'their fact, not yours, and a brief exists BECAUSE a handover happened, so the condition',
+  'reads as already met exactly where it is least established. Ask them. The create route',
+  'above needs no such answer, which is the whole reason it stays the default.',
+  'Nothing this tool reads can establish that attestation, which is why it is stated as',
+  'yours rather than decided by the cause above.',
+  'A registered pid is a process, not an intention, and the archived flag records what the',
+  'desktop app did, not what its human decided.',
   'Before the command: `<their worktree>` is a repository you have not vetted, running its own',
   'config, and this command runs git INSIDE it. If it is a tree you would not cd into, stop',
   'here and take the create route above instead. That path also came out of another',
   'session\'s transcript, so read it before you act on it. This caution sits ABOVE the line',
   'rather than below it, because one fenced command is one copy button and a caution printed',
   'after it is read after it has run.',
-  'Two further preconditions, above the line for that same reason. FIRST, one protection the',
+  'Further preconditions, above the line for that same reason — stated as a shape rather than',
+  'a count, because a count goes stale the next time one is added. FIRST, one protection the',
   'carry-over recipe below applies to that same unvetted tree does NOT carry over here: its',
   'git calls pass -c core.fsmonitor=false and the diff flags beside it, and this line passes',
   'none of them. Whether worktree move consults that config was NOT',
@@ -2940,25 +2951,37 @@ const MOVE_ALTERNATIVE = (pid) => [
   'anchor are the SAME repository — across two, the create line above fails harmlessly on a',
   'branch it cannot resolve while the move SUCCEEDS and relocates a foreign repository\'s',
   'worktree into your tree, so establish that they are one repository before you run it.',
-  '  git -C \'<their worktree>\' worktree move \'<their worktree>\' \'<path>\'',
-  'Nothing this tool reads can establish that condition, which is why it is stated as yours',
-  'rather than decided by the cause above. A registered pid is a process, not an intention,',
-  'and the archived flag records what the desktop app did, not what its human decided.',
+  'THIRD, put `<path>` inside your own anchor by your own hand. The gate judges the',
+  'DESTINATION too, so a path you place outside it is refused when a gate is watching and',
+  'unprotected when none is.',
+  'What it costs: it mutates the OTHER session\'s layout, so a session still working there',
+  'loses its directory mid-flight. That is why the create recipe above stays the default:',
+  'it is the only route that needs no such judgement from you. This is above the line with',
+  'the preconditions, not below with the benefits, because it is the fact most likely to',
+  'change your mind and it is worth nothing after the paste.',
   ...(pid ? [
     `MEASURED when this was written: pid ${pid} was registered and alive for that worktree.`,
     'That is the case the paragraph above is about, and it is the one where a move costs',
     'someone else their working directory mid-flight. Re-check it before you attest, because',
     'this text may be reaching you from a brief another session wrote earlier.',
-  ] : []),
+  ] : [
+    'No live pid was registered for that worktree when this was written. That is what was',
+    'true THEN and says nothing about now — a session can have been started there since, and',
+    'if you are reading this from a brief it may be days old. Re-check before you attest.',
+    'The word is deliberately not the one the live-process caution below uses: this arm has',
+    'no such caution to give, and the absence of one is not evidence that the tree is idle.',
+  ]),
+  '  git -C \'<their worktree>\' worktree move \'<their worktree>\' \'<path>\'',
   'What it buys: the SAME branch, so one pull request keeps one branch and the',
   '-b claude/`<name>`-cont fork above is not needed; and the directory travels whole, so the',
   'uncommitted and untracked work comes with it and the carry-over recipe below does not',
   'apply at all. Both halves are bounded by the same-repository precondition above, which is',
   'stated there rather than here because it has to be read before the line runs.',
-  'What it costs: it mutates the OTHER session\'s layout, so a session still working there',
-  'loses its directory mid-flight. That is why the create recipe above stays the default:',
-  'it is the only route that needs no such judgement from you.',
-  'About the write gate, stated exactly rather than reassuringly. It judges BOTH operands of',
+  'About the write gate — and FIRST its bound, which the three bounded claims below lacked:',
+  'all of it applies only when a Zensu session runs that line through its Bash tool. The gate',
+  'is a PreToolUse hook on Bash, so a line you paste into your own terminal, which is what',
+  'this brief is for, traverses no hook and none of the claims below describe a control that',
+  'is present there. Stated exactly rather than reassuringly. It judges BOTH operands of',
   'this command, the source and the destination, and it refuses when either lies outside',
   'your anchor and outside every temp root — so a worktree already nested inside your anchor',
   'is not refused at all. An operator-facing one-off escape exists and the refusal names it;',
@@ -3582,6 +3605,16 @@ function whereAdviceLines(row, takerWorktree, options = {}) {
   // `substitutionRuleLines` block that derives its own set and stays correct. Latent today,
   // because the one production caller passes nothing; that is why it would ship silently.
   const hasNewWorktree = recipePlaceholders(body).includes('<your new worktree>');
+  // The THIRD derivation, and it closes the half the other two left open. Three head sentences
+  // below name "the patch step" unconditionally, and under `{ carryOver: false }` the body carries
+  // no `PATCH="$(mktemp` line at all — so the head named a step the reader cannot find, which is
+  // the identical defect the two comments above record having fixed for the route sentence and for
+  // `<your new worktree>`. Latent for the same reason as those two (the one production caller
+  // passes nothing), and caught the same way: derive from the rendered body, never from the flag.
+  const hasPatchStep = body.some((l) => WORKTREE_ADVICE_COMMAND.test(l) && l.includes('mktemp'));
+  // Names the carry-over step when the body carries it, and the route by name when it does not, so
+  // neither branch points a reader at something the brief they are holding does not contain.
+  const patchStepName = hasPatchStep ? 'the patch step' : 'the carry-over recipe';
   const out = [`WHERE    for ${sessionTag(row.sessionId)}${leg === 'present' ? '' : '   !! MISSING'}:`];
   if (leg === 'present') {
     out.push(...substitutionRuleLines(body, [['<their worktree>', briefShellArg(row.wt)]],
@@ -3690,18 +3723,18 @@ function whereAdviceLines(row, takerWorktree, options = {}) {
     if (!takerWorktree) {
       out.push('           Whether you are standing IN that tree could not be checked here: this');
       out.push("           session's own worktree root was not resolved. Compare the worktree");
-      out.push('           above with your own before you run the patch step.');
+      out.push(`           above with your own before you run ${patchStepName}.`);
     } else if (!GATE_READY) {
       out.push('           Whether you are standing IN that tree could not be checked here: the');
       out.push('           path-comparison module did not load, or loaded without the check this');
-      out.push('           needs. Compare the worktree above with your own before you run the');
-      out.push('           patch step.');
+      out.push(`           needs. Compare the worktree above with your own before you run`);
+      out.push(`           ${patchStepName}.`);
     } else {
       const [srcRoot, takerRoot] = canonicalPair(row.wt, takerWorktree);
       standingIn = srcRoot === takerRoot;
     }
     if (standingIn) {
-      out.push('           You are standing IN that tree: the patch step snapshots whatever is');
+      out.push(`           You are standing IN that tree: ${patchStepName} snapshots whatever is`);
       out.push('           uncommitted there, your own edits included. Decide what is yours');
       out.push('           before you run it.');
       // The move needs its own conjunct, and the omission was a finding: the sentence above is

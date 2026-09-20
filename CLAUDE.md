@@ -6470,14 +6470,25 @@ out somewhere.
 **ONE ALTERNATIVE exists and it is NOT an arm, which is the whole reason it took this
 long to ship.** `MOVE_ALTERNATIVE` offers `git worktree move` on the PRESENT leg, and the
 create recipe stays the default because it is the only route that needs no judgement from
-the reader. Three PRECONDITIONS sit ABOVE the fenced line and none of them may drift below it: the
-unvetted-tree stop, the `-c core.fsmonitor=false` non-carry, and the same-repository bound.
-One fenced command is one copy button, so a caution printed after it is read after it has
-run — and the round that moved the first one up left the other two below, in the carrier with
-the copy button, while the doc carrier had already moved one of them. Both carriers now agree.
-`T35e` grades the doc carrier by OFFSET rather than by a needle, because the property is an
-ORDER and no substring can express one; the emitted carrier is graded positionally by
-`worktree-advice-v1.test.js`.
+the reader. **Everything that can change the reader's mind sits ABOVE the fenced line, and the
+rule is a SHAPE rather than a count of members** — a count here went stale inside a single
+review round, which is the drift this file records about itself everywhere else. Members today:
+the unvetted-tree stop, the `-c core.fsmonitor=false` non-carry, the same-repository bound, the
+destination-containment instruction for `<path>`, the COST, and the measured-pid line. One
+fenced command is one copy button, so anything printed after it is read after it has run.
+
+**The history is worth keeping because the claim was FALSE TWICE, in opposite directions.**
+A first round moved one precondition up and left two below. A second round wrote "Three
+PRECONDITIONS sit ABOVE the fenced line … Both carriers now agree" — and that was false for
+the doc carrier, where the same-repository bound still sat below the fence, and false in a
+second way for both carriers, where the cost and the measured pid sat below it while every
+sentence arguing FOR the route sat above. Three independent reviewers found the first half and
+a fourth found the second. Do not restate agreement between the carriers as a fact; state what
+is graded. `T35e` grades the doc carrier by OFFSET rather than by a needle, because the
+property is an ORDER and no substring can express one — it resolves the `**Before you run it:**`
+bar, the `core.fsmonitor` non-carry and the same-repository bound against the command, so a
+member added to the bar needs an anchor added there too or it is graded by nothing. The emitted
+carrier is graded positionally by `worktree-advice-v1.test.js`, on the stop condition alone.
 
 The move's condition is a HUMAN ATTESTATION — the reader KNOWS that session
 will not be continued, after an account switch, a usage limit or an abandoned window —

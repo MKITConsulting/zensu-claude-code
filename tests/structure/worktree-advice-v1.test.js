@@ -856,7 +856,9 @@ test('the adviceLeg consumer set is exactly the five the carriers name', () => {
 // FOUR assertions, and each one is load-bearing on its own:
 //   - the per-function ROSTER, which is what a twelfth carrier fails on;
 //   - the per-CLASS split, which is the census's own (a)/(b)/(c) arithmetic — a carrier moved
-//     between classes keeps the total at twelve and changes what the prose means;
+//     between classes keeps the total unchanged and changes what the prose means. Read the
+//     object for the total — a numeral here went stale the moment the roster moved to eleven,
+//     which is the drift this whole case exists to catch;
 //   - the BINDING half, which has no other control. Delete the `${name}` resolution and the
 //     roster simply reads ten, a number a maintainer would "fix" by lowering the expectation.
 //     Requiring that at least one carrier is reachable ONLY through a binding is what makes

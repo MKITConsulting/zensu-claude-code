@@ -153,7 +153,7 @@ fi
 if grep -qF 'the briefShellArg carrier population is derived' "$PLUGIN_DIR/tests/structure/worktree-advice-v1.test.js"; then
   check "WT-unit the derived briefShellArg census case is still registered" PASS
 else
-  check "WT-unit the derived briefShellArg census case is gone — the twelve-carrier roster has no control left, and the exact total above cannot see a substitution" FAIL
+  check "WT-unit the derived briefShellArg census case is gone — the derived carrier roster has no control left, and the exact total above cannot see a substitution" FAIL
 fi
 # The SECOND title guard, admitted on the criterion the comment above `WT_UNIT_TOTAL_WANT`
 # states: apply this shape to a case whose disappearance nothing else would report. The

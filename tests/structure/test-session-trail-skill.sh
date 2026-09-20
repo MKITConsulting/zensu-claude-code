@@ -2031,16 +2031,35 @@ EOF
   # `worktree-advice-v1.test.js` grades it positionally — while the model-facing copy held it
   # nowhere. Offsets rather than a needle, the idiom `L70n` already uses in the lineage suite:
   # the property is an ORDER, and no substring can express one.
-  T35E_BAR="$(printf '%s\n' "$STEP4" | grep -n -F '**Before you run it:**' | head -1 | cut -d: -f1)"
+  # THREE anchors, not one, and the widening is the repair for a measured defect: graded on the
+  # bar alone, this check reported agreement while the same-repository bound — the precondition
+  # whose failure is the only UNRECOVERABLE one, a move that SUCCEEDS across two repositories —
+  # sat BELOW the fence on this carrier, and `CLAUDE.md` asserted the opposite. A member added to
+  # the bar and not added here is graded by nothing, which is why the loop names each anchor.
   T35E_CMD="$(printf '%s\n' "$STEP4" | grep -n -F "worktree move '<their worktree>'" | head -1 | cut -d: -f1)"
-  if [ -z "$T35E_BAR" ] || [ -z "$T35E_CMD" ]; then
-    # Not a silent skip: an unresolvable offset means the slice or one of the two anchors moved,
+  T35E_MISS=""
+  T35E_LATE=""
+  while IFS='|' read -r t35e_id t35e_needle; do
+    [ -n "$t35e_id" ] || continue
+    t35e_at="$(printf '%s\n' "$STEP4" | grep -n -F "$t35e_needle" | head -1 | cut -d: -f1)"
+    if [ -z "$t35e_at" ]; then
+      T35E_MISS="$T35E_MISS [$t35e_id]"
+    elif [ -z "$T35E_CMD" ] || [ "$t35e_at" -ge "$T35E_CMD" ]; then
+      T35E_LATE="$T35E_LATE [$t35e_id@$t35e_at]"
+    fi
+  done <<'T35E_ANCHORS'
+stop-condition|**Before you run it:**
+fsmonitor-non-carry|core.fsmonitor=false
+same-repository-bound|must be ONE repository
+T35E_ANCHORS
+  if [ -z "$T35E_CMD" ] || [ -n "$T35E_MISS" ]; then
+    # Not a silent skip: an unresolvable offset means the slice or one of the anchors moved,
     # and reporting that as agreement is the failure this whole block exists against.
-    check "T35e-control the stop-condition bar or the move command could not be located inside flow 3 step 4 (bar='$T35E_BAR' cmd='$T35E_CMD'), so the placement check is vacuous" FAIL
-  elif [ "$T35E_BAR" -lt "$T35E_CMD" ]; then
-    check "T35e the move route's stop condition is stated ABOVE the command it gates" PASS
+    check "T35e-control an anchor or the move command could not be located inside flow 3 step 4 (cmd='$T35E_CMD' missing=${T35E_MISS:-none}), so the placement check is vacuous" FAIL
+  elif [ -z "$T35E_LATE" ]; then
+    check "T35e every move-route precondition is stated ABOVE the command it gates" PASS
   else
-    check "T35e the move route's stop condition sits BELOW the fenced command — one fenced command is one copy button, so it is read after it has run (bar=$T35E_BAR cmd=$T35E_CMD)" FAIL
+    check "T35e a move-route precondition sits BELOW the fenced command — one fenced command is one copy button, so it is read after it has run (cmd=$T35E_CMD late:$T35E_LATE)" FAIL
   fi
 fi
 
