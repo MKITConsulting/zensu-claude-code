@@ -6500,6 +6500,33 @@ it exactly where it is right. A pid is a process, not an intention. **The rule a
 unchanged and still holds** — every arm still returns a `git worktree add` line, so `WT8k`
 is untouched; the move is an alternative, never a replacement.
 
+**THE COMMAND CARRIES NO `-C`, AND THAT IS THE STRONGEST GUARANTEE THIS ROUTE HAS.** It
+shipped as `git -C '<their worktree>' worktree move …` for one round. Dropping the `-C` makes
+git resolve the repository from the READER's cwd instead of from inside the tree being moved,
+which converts the same-repository precondition from a sentence the reader must honour into a
+refusal git issues itself. MEASURED against git 2.51.0 — record the measurements, because the
+review that asked for this could not make them and the next editor will not either:
+
+- `-C` at a FOREIGN repository, moving another repository's worktree: refused, `is not a
+  working tree`. With no `-C` and a cwd inside a different repository: refused identically.
+  With no `-C` and a cwd that is not a repository at all: refused. With no `-C` and a cwd
+  inside the taker's own worktree of the SAME repository: succeeds.
+- `worktree move` **does** consult `core.fsmonitor` — a hook that ran, with a control proving
+  the same hook fires on an ordinary `status` in that repository — and `-c core.fsmonitor=false`
+  **suppresses** it. The round before this one shipped `Whether worktree move consults that
+  config was NOT measured`; it is measured now, the flag is on the line, and the hedge is gone.
+  Do not restore the hedge: `core.fsmonitor` names a command git runs FOR you.
+- A RELATIVE destination is refused with `Invalid argument`. A review finding claimed it would
+  silently resolve against the moved tree and produce a different directory than the create
+  line one fence up. That is REFUTED for 2.51.0 — the failure is loud. The finding was right
+  that the two lines resolved their operands differently and wrong about the consequence, which
+  is why the measurement is recorded rather than the finding.
+
+The cost of dropping `-C` is that the command now depends on where the reader is standing, and
+that dependency is stated in the emitted text rather than left implicit. The accepted-gap
+paragraph below, which frames the cross-repository hazard as answered by a SENTENCE where
+`continuationPlan` answers it with a REFUSAL, is superseded for this route: git refuses it.
+
 **THREE claims about the gate ship BOUNDED, and all three shipped UNBOUNDED first and were
 then measured false.** Record them that way rather than as a list of wordings, because the
 unbounded form of each is the one a later editor will reach for again. **This is a deliberate

@@ -1929,8 +1929,9 @@ EOF
   printf '%s' "$STEP4" | grep -qF 'if it is a tree you would not `cd` into, stop and take the create route instead' || T35B_MISS="$T35B_MISS [move-stop-condition]"
   printf '%s' "$STEP4" | grep -qF '**Before you run it:** `<their worktree>` is a repository you have not vetted' || T35B_MISS="$T35B_MISS [move-unvetted-tree]"
   printf '%s' "$STEP4" | grep -qF 'deliberately not an arm predicate' || T35B_MISS="$T35B_MISS [move-attestation-not-a-predicate]"
-  printf '%s' "$STEP4" | grep -qF '`-c core.fsmonitor=false` and the diff flags beside it, and this line passes none of them' || T35B_MISS="$T35B_MISS [move-fsmonitor-not-carried]"
-  printf '%s' "$STEP4" | grep -qF 'consults that config was not measured' || T35B_MISS="$T35B_MISS [move-fsmonitor-hedge]"
+  printf '%s' "$STEP4" | grep -qF '`worktree move` **does** consult that config' || T35B_MISS="$T35B_MISS [move-fsmonitor-consulted]"
+  printf '%s' "$STEP4" | grep -qF 'a control proving the hook fires' || T35B_MISS="$T35B_MISS [move-fsmonitor-control]"
+  printf '%s' "$STEP4" | grep -qF 'is not a working tree' || T35B_MISS="$T35B_MISS [move-same-repo-enforced]"
   # The CARRY-OVER escape sentence, which no needle here covered: T35 pins two-space command
   # literals and this is prose, so the SKILL.md half of the stop condition could be deleted
   # outright with both suites green. Its emitted twin is pinned by `WT8m5` and by the unit

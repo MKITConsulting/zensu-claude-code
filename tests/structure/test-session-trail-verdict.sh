@@ -3093,8 +3093,8 @@ wt_case "WT8m5 the emitted carry-over carries the do-not-run-this-at-all escape"
 # mirror reason `WT8L2` states: the gone-leg `live` leads legitimately say "create or move a
 # worktree at that path", so a bare `worktree move` would turn this red for a reword that
 # has nothing to do with the route.
-wt_case "WT8v1 a present arm offers the worktree-move alternative, anchored at its repository" \
-  "$WT8_ADOPT" "git -C '<their worktree>' worktree move" 'cannot run against it as printed'
+wt_case "WT8v1 a present arm offers the worktree-move alternative, anchored at the READER's repository" \
+  "$WT8_ADOPT" 'git -c core.fsmonitor=false worktree move' 'cannot run against it as printed'
 wt_case "WT8v2 a gone arm offers no move — the recorded directory is not there to move" \
   "$WT8_ADOPT_GONE" 'cannot run against it as printed' "worktree move '<their worktree>'"
 # The CONDITION is a human attestation and must never read as a verdict this tool reached.
@@ -3137,8 +3137,11 @@ wt_case "WT8v7c taking the escape is stated to drop the DESTINATION containment 
 # The SAME-BRANCH claim is the route's headline benefit and it is false across two
 # repositories, where the create line fails harmlessly and the move succeeds. Pinned
 # separately from the cost paragraph because it qualifies a BUYS claim, not a cost one.
-wt_case "WT8v9 the same-branch claim is bounded to one repository" \
-  "$WT8_ADOPT" 'SAME repository' 'cannot run against it as printed'
+# The bound is no longer a SENTENCE the reader must honour — dropping -C makes git enforce it,
+# measured against 2.51.0. The needle moved onto git's own refusal for that reason: pinning the
+# old advisory wording would cement the weaker contract this round replaced.
+wt_case "WT8v9 the same-repository bound is enforced by git, not by the reader's attention" \
+  "$WT8_ADOPT" 'is refused outright with "is not a working' 'cannot run against it as printed'
 # The move route's OWN STOP CONDITION and its fsmonitor disclosure — the emitted twins of
 # SKILL.md's, both of which were unpinned on EITHER carrier until this round while every
 # sibling move paragraph on THIS carrier already had one (`WT8v3`/`WT8v4` the attestation,
@@ -3172,8 +3175,8 @@ wt_case "WT8v10d the move route says the tree it runs git inside is unvetted" \
 # across an array element boundary and `wt_case` greps the comma-joined array: no single needle
 # can span that seam, so deleting `and this line passes` / `none of them.` left both the name
 # and the hedge matching while the paragraph no longer said this command passes none of them.
-wt_case "WT8v11d the move route says this line passes none of those flags" \
-  "$WT8_ADOPT" 'none of them. Whether worktree move' 'cannot run against it as printed'
+wt_case "WT8v11d the move route says what the flag is FOR, not merely that it is present" \
+  "$WT8_ADOPT" 'stops an unvetted repository executing one during the move' 'cannot run against it as printed'
 wt_case "WT8v10b the move route states that the caution sits above the command line" \
   "$WT8_ADOPT" 'sits ABOVE the line' 'cannot run against it as printed'
 # The disclosure NAMES the flag rather than gesturing at it. `carry over here` alone was the
@@ -3181,18 +3184,18 @@ wt_case "WT8v10b the move route states that the caution sits above the command l
 # with this case green and the reader never told WHICH protection. The HEDGE is a second case
 # for the same reason the placement claim is: it is what keeps the paragraph from claiming the
 # difference is harmless, which nobody measured.
-wt_case "WT8v11 the move route names the carry-over flag it does not pass" \
-  "$WT8_ADOPT" '-c core.fsmonitor=false and the diff flags beside it' 'cannot run against it as printed'
-wt_case "WT8v11b the move route hedges rather than calling that difference harmless" \
-  "$WT8_ADOPT" 'consults that config was NOT' 'cannot run against it as printed'
+wt_case "WT8v11 the move route names the carry-over flag it now PASSES" \
+  "$WT8_ADOPT" 'passes -c core.fsmonitor=false and the' 'cannot run against it as printed'
+wt_case "WT8v11b the move route states the measured fact rather than a hedge" \
+  "$WT8_ADOPT" 'worktree move DOES consult that config' 'cannot run against it as printed'
 # `WT8v11b`'s needle stops at an ARRAY-ELEMENT boundary — the sentence spans three elements
 # and `consults that config was NOT` is the tail of the first — so it cannot see the word the
 # hedge turns on. Replace the two elements below it with `measured, but the difference is
 # harmless.` and `WT8v11b` still matches while the hedge is gone, which is the same
 # closing-clause-survives-a-reword shape the doc carrier's own joined needles were widened
 # against. This case owns the operative clause; the two together own the sentence.
-wt_case "WT8v11c the hedge states what it declines to claim, not only that a measurement is missing" \
-  "$WT8_ADOPT" 'rather than claiming the difference is' 'cannot run against it as printed'
+wt_case "WT8v11c the measurement names its control, so a green reading cannot be a check that never ran" \
+  "$WT8_ADOPT" 'with a control proving the hook fires' 'cannot run against it as printed'
 # The MEASURED live pid travels INSIDE the route on every arm that has one. As a static
 # array this block sat above the only line naming a registered process, and two of the four
 # present arms name no pid in their lead at all — so a destructive relocation was offered
