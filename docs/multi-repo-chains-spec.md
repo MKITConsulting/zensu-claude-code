@@ -5,7 +5,7 @@
 requirement on a logged claim), `hooks/lib/zensu-edit-landing.sh` (a claim resolving
 outside the audited root fails the audit and names the foreign root, plus the
 read-only `--inventory` mode its two consumers share) and
-`hooks/lib/zensu-doctor-report.js` (the topology row). Stage 2 must not be
+`hooks/lib/zensu-doctor-report.js` (the topology row). **Which half of stage 1 is universally live is narrower than "stage 1 is implemented":** `zensu-log.sh append` redacts a run-log message before it lands, rewriting `$HOME` to `~` and the project root to `<project>`, and the audit's absolute-claim arm only ever sees a path still beginning with `/`. So a foreign root OUTSIDE both `$HOME` and the project root — `/opt`, `/srv`, a CI checkout under `/builds` — is detected, while a SIBLING REPOSITORY UNDER `$HOME`, the topology §2's own worked example uses, is rewritten out of that shape and is not. See the fourth known gap in `CLAUDE.md` §"Multi-Repo Stage 1". Stage 2 must not be
 implemented until the carrier question of §6.1.1 is answered and the
 carrier-integrity finding of §8.1 is resolved. Every "today" statement below was
 read at the cited site in the worktree that authored this document; every "would"
@@ -50,7 +50,7 @@ the fallback means when it is unset, is an open question (§11).
 
 **The edit-landing audit already takes a `--project` argument** — it defaults to
 `CLAUDE_PROJECT_DIR` (`hooks/lib/zensu-edit-landing.sh:55`, flag at `:75`) and
-enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:154-165`). But its receipt
+enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:194-204`). But its receipt
 lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:497`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
 (`hooks/lib/zensu-log.sh:803`). Running the audit once per repository therefore
@@ -346,7 +346,7 @@ dropped: a dropped root is a root nothing audits.
 
 | Consumer | Change | Site |
 |---|---|---|
-| Edit-landing | Enumerate the union; resolve each claim through its label; write ONE merged receipt beside the anchor's workflow document, carrying a per-root verdict. | `hooks/lib/zensu-edit-landing.sh`, receipt path `:595` |
+| Edit-landing | Enumerate the union; resolve each claim through its label; write ONE merged receipt beside the anchor's workflow document, carrying a per-root verdict. | `hooks/lib/zensu-edit-landing.sh`, receipt path `:838` |
 | Review packet | Enumerate `changed_files` per root and emit them label-prefixed. | `skills/tdd/SKILL.md` step 10.2 |
 | Write gate | Rules (B) and (C) accept a path inside ANY union member. | `hooks/lib/bash-source-write-parse.js:817`, `:863` |
 | Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:861-863` |
@@ -705,7 +705,7 @@ re-verify.
 ### Citations to re-verify
 
 - The `--chain-done` dirty-tree refusal was inferred from the comment at
-  `hooks/lib/zensu-log.sh:780`; its own implementation must be read before §6.3's
+  `hooks/lib/zensu-log.sh:844`; its own implementation must be read before §6.3's
   terminus row is implemented.
 - `classifyChain()` was not read; the consumer roster in §7.3 comes from the
   conventions document and must be re-derived from the code.

@@ -5880,6 +5880,95 @@ esac
 # Restore the ordinary foreign claim for the cases below.
 printf 'S1 IMPL completed — files: %s/src/app.ts\n' "$TOPO_SIB_ABS" > "$TOPO_PROJECT/.zensu/logs/run.log"
 
+# P1tp9/P1tp10 — the two ways the inventory channel used to read as a CLEAN
+# topology. `pluginDir()` resolves to this renderer's own tree, so if the row is
+# executing at all the feature IS installed: an ENOENT on the inventory command
+# there is a damaged or partially-restored tree, not an absent feature. And a
+# child that exits 0 with output this parser does not recognise — a renamed key,
+# a future `--inventory` revision, an empty stdout — used to yield roots=[] and
+# render nothing, while every other fault arm in the same function says "that is
+# a missing check, not an all-clear". The terminus already guards the other half
+# of this contract: it requires a `claimed-files=` line and discloses when it is
+# absent, so the two consumers of one parsed format disagreed.
+#
+# Both cases run the renderer from a COPIED tree with no ZENSU_DOCTOR_PLUGIN_DIR,
+# because that override is the fixture seam and the silence is gated on it.
+TOPO_COPY="$SBOX/topo-copy"
+mkdir -p "$TOPO_COPY/hooks"
+cp -R "$PLUGIN_DIR/hooks/lib" "$TOPO_COPY/hooks/lib" 2>/dev/null
+run_report_topo_copy() {
+  ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  CLAUDE_PROJECT_DIR="$TOPO_PROJECT" \
+  ZDOC_BINDING=bound ZDOC_SESSION_KEY="$TOPO_KEY" ZDOC_SESSION_PROJECT_ROOT="$TOPO_PROJECT" \
+    node "$TOPO_COPY/hooks/lib/zensu-doctor-report.js" 2>/dev/null
+}
+rm -f "$TOPO_COPY/hooks/lib/zensu-edit-landing.sh"
+TOPO_OUT_NOLIB="$(run_report_topo_copy)"
+if ! topo_rendered "$TOPO_OUT_NOLIB"; then
+  check "P1tp9 the copied-tree report did not render, so its silence proves nothing" FAIL
+else
+  case "$TOPO_OUT_NOLIB" in
+    *'topology:'*'not present in this plugin tree'*)
+      check "P1tp9 a damaged plugin tree renders a missing-check row, never a clean topology" PASS ;;
+    *) check "P1tp9 a damaged plugin tree renders a missing-check row, never a clean topology" FAIL ;;
+  esac
+fi
+printf '#!/bin/bash\nexit 0\n' > "$TOPO_COPY/hooks/lib/zensu-edit-landing.sh"
+chmod +x "$TOPO_COPY/hooks/lib/zensu-edit-landing.sh"
+TOPO_OUT_ODDFMT="$(run_report_topo_copy)"
+if ! topo_rendered "$TOPO_OUT_ODDFMT"; then
+  check "P1tp10 the copied-tree report did not render, so its silence proves nothing" FAIL
+else
+  case "$TOPO_OUT_ODDFMT" in
+    *'topology:'*'format this runtime does not recognise'*)
+      check "P1tp10 an unrecognised inventory answer renders a missing-check row, never an all-clear" PASS ;;
+    *) check "P1tp10 an unrecognised inventory answer renders a missing-check row, never an all-clear" FAIL ;;
+  esac
+fi
+
+# P1tp11 — the row returned SILENTLY when no bound session key was available,
+# where `ownDocumentVerdict` in the same file splits that case and renders "that
+# is a missing check, not an all-clear". `currentSessionKey()` is empty for every
+# binding verdict except `bound`, so an orphaned-project-root, incompatible-
+# runtime or pruned-installation session got no topology row and no disclosure
+# while every other arm of this function says the check is missing.
+#
+# The split is gated on a receipt EXISTING in the state directory rather than
+# warning unconditionally: without a key there is no receipt path to test, so a
+# literal reading of "gate on the receipt" would build `edit-landing-.json`,
+# never find it, and ship a row that is silent forever. Scanning the directory is
+# what makes the arm reachable — and it is stated at the row that it cannot claim
+# the receipt it found belongs to THIS session, the same bound the Autopilot
+# pointer row carries.
+run_report_topo_nokey() {
+  ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  CLAUDE_PROJECT_DIR="$TOPO_PROJECT" \
+  ZDOC_BINDING=unbound ZDOC_SESSION_KEY="" ZDOC_SESSION_PROJECT_ROOT="" \
+    node "$PLUGIN_DIR/hooks/lib/zensu-doctor-report.js" 2>/dev/null
+}
+TOPO_OUT_NOKEY="$(run_report_topo_nokey)"
+if ! topo_rendered "$TOPO_OUT_NOKEY"; then
+  check "P1tp11 the no-key report did not render, so its silence proves nothing" FAIL
+else
+  case "$TOPO_OUT_NOKEY" in
+    *'topology:'*'no bound session key'*)
+      check "P1tp11 with a receipt present and no bound key the row says the check was not run" PASS ;;
+    *) check "P1tp11 with a receipt present and no bound key the row says the check was not run" FAIL ;;
+  esac
+fi
+# Control: with NO receipt in the directory the same unbound session stays
+# silent, so P1tp11 cannot pass by warning on every unbound report — which would
+# withhold the green summary from every non-`bound` session in every project.
+mv "$TOPO_RECEIPT" "$TOPO_RECEIPT.aside"
+TOPO_OUT_NOKEY_NONE="$(run_report_topo_nokey)"
+mv "$TOPO_RECEIPT.aside" "$TOPO_RECEIPT"
+case "$TOPO_OUT_NOKEY_NONE" in
+  *'topology:'*) check "P1tp11-control an unbound session with no receipt stays silent" FAIL ;;
+  *) check "P1tp11-control an unbound session with no receipt stays silent" PASS ;;
+esac
+
 # P1tp4's own discriminator: the in-project log still carries the foreign claim, so
 # the ABSENT receipt is the only reason the row stays silent.
 rm -f "$TOPO_RECEIPT"

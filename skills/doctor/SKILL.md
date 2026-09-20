@@ -709,8 +709,24 @@ classifier will refuse a spawn, not only when the whole table is green.
   Do NOT suggest re-running the audit against the foreign root: its receipt would
   land where this session's terminus never reads it.
 - **⚠️ topology: this session's claims were NOT checked against the anchor** → a
-  missing check, not an all-clear: the inventory command did not complete. Say that
-  plainly rather than reporting the topology as clean.
+  missing check, not an all-clear. The renderer emits this lead-in for a CLASS of
+  causes, not one: an unreadable or unknown-schema edit-landing receipt, a run log
+  the receipt names that lies outside this project's `.zensu/logs/` or is not a
+  plain file, an inventory command that is absent from the plugin tree, one that
+  did not complete, and one that answered in a format this runtime does not
+  recognise, and — since the round that split it — no bound session key at all,
+  where the receipt cannot even be located. **Relay the cause the row itself
+  prints** — do not say the inventory command failed, because in the common case
+  it never ran. Say plainly that the check is missing rather than reporting the
+  topology as clean.
+- **The ABSENCE of a topology row is not evidence of a single-root chain.** The
+  run log is REDACTED on the way in: a claim under `$HOME` is
+  rewritten to `~/...` by `zensu-log.sh append` before it lands, so a sibling repository beside this one is
+  no longer an absolute path when the audit reads it, no foreign root is derived
+  and no row can fire. Roots outside BOTH `$HOME` and the project — `/opt`,
+  `/srv`, a CI checkout under `/builds` — are unaffected and the row works on
+  them. Say WHICH HALF is live when you relay a silent topology; never report it
+  as proof that the chain stayed in one repository.
 - **❌ state: this session's own workflow document is MISSING** → the record is
   intact and the document it anchors is gone, so the capability gate is denying
   every tool in this session. A deleted and re-created worktree causes it, because

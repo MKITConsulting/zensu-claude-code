@@ -748,11 +748,75 @@ case "${1:-}" in
           # receipt for this session" — a cause that never happened. Nothing reads
           # the receipt between here and the arm, so the earlier position bought
           # nothing.
+          # The destination is UNIQUE. A fixed `.superseded` meant the second
+          # retirement destroyed the first, which contradicts the sentence above
+          # about the only durable record. `mktemp` in the same directory both
+          # picks the name and reserves it.
+          #
+          # And the failure is DISCLOSED. Every other unresolved precondition in
+          # this verb family announces itself — `EDIT LANDING GATE UNRESOLVED`,
+          # `REQUIREMENTS GATE STEM UNCHECKED` — while this one swallowed EACCES,
+          # EROFS and a destination that is a directory behind `|| true`. Since
+          # the terminus began reading the receipt's VERDICT, a retirement that
+          # did not happen leaves the NEXT generation able to satisfy its gate
+          # with this generation's clean verdict, so silence there is the most
+          # expensive silence in the verb.
+          _tdd_retire_receipt_critical() {
+            local receipt="$1" dest
+            # THREE states, not two. Absent is success — there is nothing to
+            # retire. Present and a plain file is the work. Present and NOT a
+            # plain file (a symlink, which is exactly what the terminus refuses
+            # to read, or a directory) is a FAILURE: an earlier spelling folded
+            # it into the absent case and returned 0, so the disclosure below
+            # never fired and the object survived into the next generation while
+            # this verb reported it retired. That the terminus happens to refuse
+            # a symlinked receipt anyway is a downstream guard this function does
+            # not know about, so it cannot be this function's contract.
+            if [ ! -e "$receipt" ] && [ ! -L "$receipt" ]; then
+              return 0
+            fi
+            if [ ! -f "$receipt" ] || [ -L "$receipt" ]; then
+              return 1
+            fi
+            # No fixed-name fallback. The retired spelling was
+            # `|| dest="${receipt}.superseded"`, which reinstated a PREDICTABLE
+            # name: the `mv -f` could then overwrite an earlier generation's
+            # record, and the cleanup `rm -f "$dest"` below could UNLINK one this
+            # call never created — both against the "renamed, never unlinked"
+            # invariant this verb states. It bought nothing either: a directory
+            # where `mktemp` cannot create a sibling is one where the `mv` would
+            # fail anyway. ACCEPTED CHANGE OF FAILURE MODE, recorded rather than
+            # discovered later: on a host with no `mktemp` at all every
+            # `--tdd-begin` now emits the disclosure below instead of silently
+            # using the fixed name. That is the fail-loud direction and the tree
+            # already hard-depends on `mktemp` elsewhere.
+            dest="$(mktemp "${receipt}.superseded-XXXXXX" 2>/dev/null)" || return 1
+            mv -f "$receipt" "$dest" 2>/dev/null && return 0
+            # Only ever the empty temp THIS call created.
+            rm -f "$dest" 2>/dev/null
+            return 1
+          }
           begin_key="$(basename "$begin_state_file")"
           begin_key="${begin_key#tdd-phase-}"; begin_key="${begin_key%.json}"
           begin_receipt="$(dirname "$begin_state_file")/edit-landing-${begin_key}.json"
-          if [ -f "$begin_receipt" ] && [ ! -L "$begin_receipt" ]; then
-            mv -f "$begin_receipt" "${begin_receipt}.superseded" 2>/dev/null || true
+          # `-e || -L` and NOT `-f && ! -L`: the narrower guard skipped the call
+          # entirely for a symlinked receipt, so the function's own three-state
+          # verdict was unreachable and the disclosure could never fire for the
+          # one shape the terminus refuses to read. Presence is the question
+          # here; WHAT is present is the function's to judge.
+          if [ -e "$begin_receipt" ] || [ -L "$begin_receipt" ]; then
+            # The lease is an IMPROVEMENT, never a precondition: the audit
+            # publishes with `mktemp` + `mv -f` and this renames, so a concurrent
+            # publish could otherwise be lost — but a mutex that cannot be taken
+            # must not stop a chain arming. A non-zero result here is a lease
+            # fault OR a real failure, and the unlocked retry is what tells them
+            # apart: the callback returns 0 immediately when the file is already
+            # gone.
+            if ! _tdd_locked_run "$begin_state_file" _tdd_retire_receipt_critical "$begin_receipt"; then
+              if ! _tdd_retire_receipt_critical "$begin_receipt"; then
+                echo "zensu-log.sh --tdd-begin: RECEIPT RETIREMENT UNRESOLVED — the previous generation's edit-landing receipt could not be retired (${begin_receipt}). It records a verdict about ANOTHER generation's run log, and this chain's --tdd-complete may accept it as its own. Move or delete that file before completing." >&2
+              fi
+            fi
           fi
           if [ "$begin_vanilla" = "true" ]; then
             echo "mode: vanilla"
@@ -833,10 +897,14 @@ case "${1:-}" in
         # `GIT_CEILING_DIRECTORIES`, `GIT_DISCOVERY_ACROSS_FILESYSTEM`), the object
         # database (`GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`,
         # `GIT_NAMESPACE`) — `rev-parse --verify HEAD` needs the object FOUND, not
-        # just the ref resolved — and config injection (`GIT_CONFIG`,
-        # `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, and `GIT_CONFIG_COUNT`, which is
-        # the single lever for the numbered `GIT_CONFIG_KEY_n`/`VALUE_n` pairs, so
-        # unsetting it neutralises them without enumerating any). `core.excludesFile`
+        # just the ref resolved — the cwd-relative prefix (`GIT_PREFIX`), and config
+        # injection, which has TWO channels rather than one: `GIT_CONFIG`,
+        # `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `GIT_CONFIG_COUNT` (the gate for
+        # the numbered `GIT_CONFIG_KEY_n`/`VALUE_n` pairs, so unsetting it neutralises
+        # them without enumerating any) and `GIT_CONFIG_PARAMETERS`, git's SERIALIZED
+        # `-c` channel, which is gated by nothing and injects directly. This comment
+        # enumerated thirteen while the code unset fourteen, and called the pair gate
+        # "the single lever" while a second channel stood open. `core.excludesFile`
         # alone empties `ls-files --others --exclude-standard`.
         #
         # The identical unscrubbed shape still ships for the `--chain-done`
@@ -851,8 +919,8 @@ case "${1:-}" in
           unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR \
                 GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES \
                 GIT_CEILING_DIRECTORIES GIT_DISCOVERY_ACROSS_FILESYSTEM \
-                GIT_NAMESPACE GIT_CONFIG GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM \
-                GIT_CONFIG_COUNT
+                GIT_NAMESPACE GIT_PREFIX GIT_CONFIG GIT_CONFIG_GLOBAL \
+                GIT_CONFIG_SYSTEM GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS
           git "$@"
         ); }
         if _tc_git -C "$_tc_root" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
@@ -907,7 +975,19 @@ case "${1:-}" in
                     // Harvested only under a KNOWN schema: a count read out of a
                     // document whose discriminator was just rejected would arm the
                     // gate on a field this runtime cannot claim to understand.
-                    if (Number.isFinite(j.claims) && j.claims > 0) claims = String(Math.floor(j.claims));
+                    //
+                    // `claims` is a GATE INPUT now, not a report field — it arms the
+                    // receipt requirement on a clean anchor — so its TYPE is
+                    // load-bearing. A producer serialising it as `"2"` used to fail
+                    // `Number.isFinite`, fall back to zero, and disarm the channel
+                    // with nothing said on any surface. `?` is the unreadable
+                    // marker the shell turns into a disclosure; a legitimate `0` is
+                    // still `0`, because claiming nothing is a real answer.
+                    if (typeof j.claims === "number" && Number.isFinite(j.claims) && j.claims >= 0) {
+                      claims = String(Math.floor(j.claims));
+                    } else {
+                      claims = "?";
+                    }
                     if (typeof j.log === "string") log = j.log;
                   }
                 }
@@ -929,6 +1009,7 @@ case "${1:-}" in
         [ "${_tc_changes:-0}" -gt 0 ] && _tc_armed=1
         _tc_receipt_state=""
         _tc_receipt_claims=0
+        _tc_receipt_claims_bad=0
         _tc_receipt_log=""
         if [ -f "$_tc_receipt" ] && [ ! -L "$_tc_receipt" ]; then
           _tc_receipt_read="$(_tc_receipt_verdict "$_tc_receipt")"
@@ -936,8 +1017,19 @@ case "${1:-}" in
           _tc_receipt_rest="${_tc_receipt_read#*$'\t'}"
           _tc_receipt_claims="${_tc_receipt_rest%%$'\t'*}"
           _tc_receipt_log="${_tc_receipt_rest#*$'\t'}"
+          # `?` is the reader's unreadable-count marker; anything else non-numeric
+          # is a wire-format fault. Both mean the same thing to this gate — the
+          # claim channel did not resolve — and both are DISCLOSED below rather
+          # than collapsed into a silent zero. Only a receipt this runtime could
+          # actually read carries the marker, so an unknown-schema or unparseable
+          # receipt (which refuses loudly on its own) never reaches it.
           case "$_tc_receipt_claims" in
-            ''|*[!0-9]*) _tc_receipt_claims=0 ;;
+            ''|*[!0-9]*)
+              case "$_tc_receipt_state" in
+                clean|unclean|no-verdict) _tc_receipt_claims_bad=1 ;;
+              esac
+              _tc_receipt_claims=0
+              ;;
           esac
         fi
         _tc_log_state="none"
@@ -970,11 +1062,25 @@ case "${1:-}" in
           if [ "$_tc_log_state" = "ok" ]; then
             _tc_el_lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh"
             if [ -f "$_tc_el_lib" ] && [ ! -L "$_tc_el_lib" ] && [ -r "$_tc_el_lib" ]; then
-              # Bounded through the ONE shared ladder rather than a fourth copy of
-              # it: the doctor already bounds the identical call at 5 s, and this
-              # child reads a session-writable run log. A missing ladder degrades
-              # to the unbounded spelling rather than skipping the inventory,
-              # because losing the claim channel would silently disarm the gate.
+              # Routed through the ONE shared ladder rather than a fourth copy of
+              # it. State the bound CONDITIONALLY, because it is: the ladder probes
+              # `timeout`, then `gtimeout`, then runs the child with NO deadline —
+              # and on base macOS, this repository's own development platform,
+              # neither binary exists, so the last arm is what runs. The parity
+              # with the doctor is asymmetric too: `spawnSync`'s `timeout` is
+              # enforced by node regardless of PATH, while this one is enforced by
+              # a binary that may be absent. A missing ladder FILE degrades the
+              # same way rather than skipping the inventory, because losing the
+              # claim channel would silently disarm the gate.
+              #
+              # What actually bounds this child on such a host are its own
+              # in-process budgets — `CLAIM_ANCESTOR_BUDGET` and
+              # `INV_CLAIM_BUDGET` in zensu-edit-landing.sh — which cap the NUMBER
+              # of filesystem probes over paths a session-writable run log named.
+              # They do not bound a single probe that never returns: a claim on a
+              # stalled mount still hangs, and `|| return 0` cannot help, because
+              # it tests an exit status and a hang produces none. That residual is
+              # recorded in the ladder's own header.
               _tc_bounded_lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-bounded-run.sh"
               if [ -f "$_tc_bounded_lib" ] && [ ! -L "$_tc_bounded_lib" ] && [ -r "$_tc_bounded_lib" ]; then
                 # shellcheck source=/dev/null
@@ -983,27 +1089,73 @@ case "${1:-}" in
               if command -v zensu_run_bounded >/dev/null 2>&1; then
                 _tc_inventory="$(zensu_run_bounded bash "$_tc_el_lib" --inventory --log "$_tc_run_log" --project "$_tc_root" 2>/dev/null)"
               else
+                # DISCLOSED, not silent. This block already sets and reports
+                # `library-unavailable` for its sibling file, and an absent
+                # watchdog on THIS path costs more than a diagnostic: the
+                # ladder's own header records that here the price is the VERB —
+                # a child that never returns means the chain never completes.
+                # Running it anyway is still right (losing the claim channel
+                # would silently disarm the gate), but saying nothing was not.
+                echo "zensu-log.sh --tdd-complete: CLAIM INVENTORY UNBOUNDED — the shared watchdog ladder (${_tc_bounded_lib:-<path unresolved>}) could not be loaded, so the claim inventory ran with no deadline. A child that never returns cannot be interrupted here and this verb would not complete." >&2
                 _tc_inventory="$(bash "$_tc_el_lib" --inventory --log "$_tc_run_log" --project "$_tc_root" 2>/dev/null)"
               fi
               _tc_inventory_rc=$?
+              # The count is read on BOTH arms. A child that could not complete
+              # still prints the `claimed-files=` it had already counted before
+              # it broke, and that partial figure is a sound LOWER BOUND: the
+              # claims it counted are claims that exist. Forcing it to 0 on any
+              # non-zero rc inverted the gate — a run log naming more claims than
+              # the child's own budget can process ARMED LESS than one naming
+              # three, and the receipt requirement disarmed on exactly the logs
+              # most likely to need it. Arming is monotone in the count, so a
+              # lower bound is the right thing to arm on; the incompleteness is
+              # DISCLOSED below rather than absorbed.
+              _tc_log_claims="$(printf '%s\n' "$_tc_inventory" | sed -n 's/^claimed-files=//p' | head -1)"
+              case "$_tc_log_claims" in
+                ''|*[!0-9]*) _tc_log_claims=0 ;;
+              esac
               if [ "$_tc_inventory_rc" -ne 0 ]; then
-                _tc_log_claims=0
                 _tc_log_state="inventory-failed"
-              else
-                _tc_log_claims="$(printf '%s\n' "$_tc_inventory" | sed -n 's/^claimed-files=//p' | head -1)"
-                case "$_tc_log_claims" in
-                  ''|*[!0-9]*) _tc_log_claims=0; _tc_log_state="unreadable" ;;
-                esac
+              elif [ "$_tc_log_claims" -eq 0 ] \
+                   && ! printf '%s\n' "$_tc_inventory" | grep -q '^claimed-files='; then
+                _tc_log_state="unreadable"
               fi
             else
               _tc_log_state="library-unavailable"
             fi
           fi
           [ "$_tc_log_claims" -gt 0 ] && _tc_armed=1
+          # HOISTED out of the `_tc_armed -eq 0` block below, and that placement
+          # is the point rather than tidying. Arming on a partial count sets
+          # `_tc_armed=1` one line above, so an incompleteness notice left inside
+          # that block would never fire for the very case it describes: the fix
+          # for a silent DISARM would have shipped a silent ARM. Same structural
+          # trap as the stem cross-check further down, which needed its own ARMED
+          # arm for the same reason. The wording asserts nothing about the change
+          # set, because on this path the anchor may be dirty or clean.
+          # TWO consumers, ONE child, two readings of its non-zero status, and
+          # the divergence is deliberate: here a partial `claimed-files=` is a
+          # sound LOWER BOUND and arming is monotone in the count, while in
+          # `claimInventory` (hooks/lib/zensu-doctor-report.js) the doctor
+          # discards the whole answer, because a truncated foreign-ROOT list is
+          # not trustworthy for a row that names repositories to the user. Both
+          # sites carry this note so the next maintainer does not "align" them
+          # and reintroduce the disarm this arming exists to remove.
+          if [ "${ZENSU_EDIT_LANDING_GATE:-on}" != "off" ] \
+             && [ "$_tc_log_state" = "inventory-failed" ]; then
+            echo "zensu-log.sh --tdd-complete: CLAIM INVENTORY INCOMPLETE — the claim inventory over ${_tc_root}/.zensu/logs/ did not complete, so ${_tc_log_claims} is a LOWER BOUND on this chain's claimed files rather than the count. The receipt requirement is armed on it when it is non-zero; a zero here means the child answered nothing before it stopped, and the requirement then rests on the change set alone. Re-run the Phase 6 step 5b audit to see the cause." >&2
+          fi
           if [ "$_tc_armed" -eq 0 ] && [ "${ZENSU_EDIT_LANDING_GATE:-on}" != "off" ]; then
+            if [ "$_tc_receipt_claims_bad" -eq 1 ]; then
+              echo "zensu-log.sh --tdd-complete: EDIT LANDING GATE UNRESOLVED — the anchor reports no changed files and this session's edit-landing receipt carries no readable \`claims\` count (the field is absent, or is present and is not a number), so a logged claim could not arm the receipt requirement through the receipt channel. Completion is not blocked on it." >&2
+            fi
             case "$_tc_log_state" in
               inventory-failed|library-unavailable)
-                echo "zensu-log.sh --tdd-complete: EDIT LANDING GATE UNRESOLVED — the anchor reports no changed files and the claim inventory could not be run (${_tc_log_state}: ${_tc_el_lib:-<library path unresolved>}), so a logged claim could not arm the receipt requirement. Completion is not blocked on it." >&2
+                # Reached only when the count was zero as well, since a non-zero
+                # one arms. `inventory-failed` is therefore "it answered nothing"
+                # here, and the CLAIM INVENTORY INCOMPLETE line above has already
+                # named the truncation itself.
+                echo "zensu-log.sh --tdd-complete: EDIT LANDING GATE UNRESOLVED — the anchor reports no changed files and the claim inventory answered no count (${_tc_log_state}: ${_tc_el_lib:-<library path unresolved>}), so a logged claim could not arm the receipt requirement. Completion is not blocked on it." >&2
                 ;;
               refused|missing|unreadable)
                 echo "zensu-log.sh --tdd-complete: EDIT LANDING GATE UNRESOLVED — the anchor reports no changed files and this session's run log could not be read (${_tc_log_state}: ${_tc_root}/.zensu/logs/), so a logged claim could not arm the receipt requirement. Completion is not blocked on it." >&2
@@ -1020,7 +1172,12 @@ case "${1:-}" in
         fi
         if [ "${ZENSU_EDIT_LANDING_GATE:-on}" != "off" ] && [ "$_tc_armed" -eq 1 ]; then
           # `! -L` as well as `-f`: `-f` FOLLOWS a symlink, and the derived-channel
-          # reader below refuses one outright (`lstatSync`). Without this the two
+          # reader below refuses one outright — at the OPEN, with `O_NOFOLLOW`,
+          # judging the descriptor rather than the name. An earlier revision of
+          # this comment named `lstatSync`, which that reader stopped using when
+          # it was hardened; a comment naming a retired mechanism is worse than
+          # none, because the next reader goes looking for a guard that is not
+          # there. Without this line the two
           # halves disagree about what a receipt is — a symlink satisfies the
           # precondition here and then derives nothing, which routes an explicit
           # `--plan` into a refusal whose named cause is the audit rather than the
@@ -1050,32 +1207,103 @@ case "${1:-}" in
             # the value reaching a refusal a model reads gets the same treatment
             # the doctor's topology row gives a claim root: no control byte, no
             # backtick, and a bounded length.
-            _tc_receipt_shown="$_tc_receipt_stem"
-            _tc_armed_shown="$_tc_armed_stem"
-            case "$_tc_receipt_shown" in
-              (*[[:cntrl:]\`]*) _tc_receipt_shown="(withheld — unsafe to render)" ;;
-            esac
-            case "$_tc_armed_shown" in
-              (*[[:cntrl:]\`]*) _tc_armed_shown="(withheld — unsafe to render)" ;;
-            esac
-            [ "${#_tc_receipt_shown}" -le 200 ] || _tc_receipt_shown="$(printf '%.200s…' "$_tc_receipt_shown")"
-            [ "${#_tc_armed_shown}" -le 200 ] || _tc_armed_shown="$(printf '%.200s…' "$_tc_armed_shown")"
+            # The screen is SOURCED from hooks/lib/zensu-safe-render.sh, the
+            # same implementation the audit library uses. It was a local copy
+            # documented as carrying the same rules as its sibling while the
+            # two had already diverged on the empty-value arm — and both were
+            # wrong in the same two ways, so a cross-file pin over them would
+            # have reported agreement about a rule set matching neither owner.
+            # That library's header carries the rules, the escape/withhold split
+            # and the locale pin; restating them here is how the pair drifted.
+            _tc_render_lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-safe-render.sh"
+            if [ -f "$_tc_render_lib" ] && [ ! -L "$_tc_render_lib" ] && [ -r "$_tc_render_lib" ]; then
+              # shellcheck source=hooks/lib/zensu-safe-render.sh
+              . "$_tc_render_lib" 2>/dev/null || true
+            fi
+            if ! command -v zensu_safe_render >/dev/null 2>&1; then
+              # Fail CLOSED, for the reason the audit library's own fallback
+              # states: an unscreened stem in a refusal a model relays is the
+              # outcome the screen exists to prevent.
+              zensu_safe_render() { printf '%s' "(withheld — the render screen could not be loaded)"; }
+            fi
+            _tc_render_stem() { zensu_safe_render "$1"; }
+            _tc_receipt_shown="$(_tc_render_stem "$_tc_receipt_stem")"
+            _tc_armed_shown="$(_tc_render_stem "$_tc_armed_stem")"
             if [ "$_tc_receipt_stem" != "$_tc_armed_stem" ]; then
               echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — the edit-landing receipt for this session describes the run log \`${_tc_receipt_shown}.log\`, but this chain's own run log is \`${_tc_armed_shown}.log\`. A receipt is evidence about ONE run log; a clean verdict for another one proves nothing about this chain's claims. Re-run the Phase 6 step 5b audit over this chain's own run log:" >&2
-              echo "  bash \"\${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh\" --log \"${_tc_run_log:-}\" --project \"\${CLAUDE_PROJECT_DIR:-.}\" --session \"<session id>\"" >&2
+              # The run log is SCREENED here too. The two stems one line above
+              # go through the shared screen and this value is derived from the
+              # same `--plan` argv plus a filename in the session-writable
+              # `.zensu/logs`, so rendering it raw inside a double-quoted
+              # command the model is told to run was the one unscreened value
+              # left in this refusal.
+              echo "  bash \"\${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh\" --log \"$(_tc_render_stem "${_tc_run_log:-}")\" --project \"\${CLAUDE_PROJECT_DIR:-.}\" --session \"<session id>\"" >&2
               exit 1
             fi
           fi
+          # THE ARMED ARM of the same disclosure. The two messages above open with
+          # "the anchor reports no changed files" and live inside `_tc_armed -eq 0`,
+          # because that is where a failed channel costs the ARMING. On a dirty
+          # tree the arming is not in doubt — but the stem cross-check above is,
+          # and it is conjoined on `_tc_run_log` being non-empty. So when the
+          # caller named a plan and the run log could not be resolved, the receipt
+          # is accepted without ever being bound to THIS chain's run log, and the
+          # skipped check used to read exactly like a passed one. Same rule the
+          # sibling requirements gate states for `REQUIREMENTS GATE UNRESOLVED`.
+          if [ "$_tc_receipt_state" = "clean" ] && [ -z "${_tc_run_log:-}" ] \
+             && [ "$seen_plan" = true ] && [ -n "$plan_val" ]; then
+            echo "zensu-log.sh --tdd-complete: EDIT LANDING GATE UNRESOLVED — this session's own run log could not be resolved (${_tc_log_state}: ${_tc_root}/.zensu/logs/), so the receipt's \`log\` field was never cross-checked against it. The receipt records a clean verdict about SOME run log; nothing here establishes it is this chain's. Completion is not blocked on it." >&2
+          fi
+          # THE OTHER CELL. The cross-check above is conjoined on BOTH values
+          # being non-empty, and the arm above covers only the half where the
+          # RUN LOG is missing. When the run log resolved and the RECEIPT's own
+          # `log` did not — absent, or present and not a string — the check was
+          # skipped just as completely and said nothing, which is the shape both
+          # of these disclosures exist to remove. The receipt is an ordinary file
+          # in `.zensu/state/`, so dropping one field is the cheapest way to
+          # reach it.
+          if [ "$_tc_receipt_state" = "clean" ] && [ -n "${_tc_run_log:-}" ] \
+             && [ -z "${_tc_receipt_log:-}" ]; then
+            echo "zensu-log.sh --tdd-complete: EDIT LANDING GATE UNRESOLVED — this session's edit-landing receipt records a clean verdict but names no run log (its \`log\` field is absent, or is present and is not a string), so it was never cross-checked against this chain's own run log. A receipt is evidence about ONE run log; a clean verdict that names none proves nothing about this chain's claims. Re-run the Phase 6 step 5b audit over this chain's own run log. Completion is not blocked on it." >&2
+          fi
           if [ "$_tc_receipt_state" != "clean" ]; then
+            # The CAUSE and the REMEDY are chosen together, per state. They used to
+            # diverge: every state named its own cause accurately and then shared one
+            # appended paragraph telling the author to LAND the claimed edit, which is
+            # true of `unclean` and of nothing else. Landing an edit cannot make an
+            # unreadable file readable; for a corrupt, truncated or unknown-schema
+            # receipt every claimed edit may already have landed; and the residual arm
+            # is not a verdict about claims at all, so prescribing a claims remedy there
+            # contradicted the sentence before it. Naming the right cause and then
+            # prescribing the wrong remedy is the same defect this reader's own
+            # I/O-versus-content discrimination exists to remove, one layer up.
             case "$_tc_receipt_state" in
-              unclean) _tc_verdict_text="records a FAILED audit (\`clean: false\`) — a claimed edit did not land, or nothing gradeable was claimed" ;;
-              no-verdict) _tc_verdict_text="records no verdict: its \`clean\` field is absent or is not a boolean, so it proves nothing about the claimed edits" ;;
-              unknown-schema) _tc_verdict_text="carries a schema this runtime does not know, so its verdict could not be read" ;;
-              unreadable) _tc_verdict_text="could not be read — it is not a regular file of bounded size, or the read itself failed" ;;
-              unparseable) _tc_verdict_text="does not parse as an edit-landing receipt" ;;
-              *) _tc_verdict_text="could not be judged (node is unavailable, or the read failed) — this is not a verdict about its contents" ;;
+              unclean)
+                _tc_verdict_text="records a FAILED audit (\`clean: false\`) — a claimed edit did not land, or nothing gradeable was claimed"
+                _tc_remedy_text="The only in-chain clearance is to LAND the claimed edit at the path the claim names and re-run the audit — the run log is append-only and the grader retires no claim, so withdrawing one in prose does not clear this, and re-landing foreign-root work in the anchor does not retire the claim that named the other root."
+                ;;
+              no-verdict)
+                _tc_verdict_text="records no verdict: its \`clean\` field is absent or is not a boolean, so it proves nothing about the claimed edits"
+                _tc_remedy_text="This is a fault in the receipt FILE and not a verdict about the claimed edits — they may all have landed. Repair or remove the receipt at that path and re-run the audit so it writes a fresh one."
+                ;;
+              unknown-schema)
+                _tc_verdict_text="carries a schema this runtime does not know, so its verdict could not be read"
+                _tc_remedy_text="This is a fault in the receipt FILE and not a verdict about the claimed edits — they may all have landed. Re-running the audit with this runtime writes a schema it can read; nothing needs to be re-landed for that."
+                ;;
+              unreadable)
+                _tc_verdict_text="could not be read — it is not a regular file of bounded size, or the read itself failed"
+                _tc_remedy_text="This is a fault in the receipt FILE and not a verdict about the claimed edits — they may all have landed. Fix the named file condition (permissions, size, or whatever object now sits at that path), then re-run the audit so it writes a fresh receipt."
+                ;;
+              unparseable)
+                _tc_verdict_text="does not parse as an edit-landing receipt"
+                _tc_remedy_text="This is a fault in the receipt FILE and not a verdict about the claimed edits — they may all have landed. Repair or remove the receipt at that path and re-run the audit so it writes a fresh one."
+                ;;
+              *)
+                _tc_verdict_text="could not be judged (node is unavailable, or the read failed) — this is not a verdict about its contents"
+                _tc_remedy_text="No verdict was read at all, so nothing is known about the claimed edits. The clearance is to make \`node\` reachable from this hook and re-run the audit."
+                ;;
             esac
-            echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — the edit-landing receipt for this session ${_tc_verdict_text}. Only a receipt recording \`clean: true\` establishes that the claimed edits landed; the audit writes the receipt BEFORE its own exit status, so its presence alone proves nothing. The only in-chain clearance is to LAND the claimed edit at the path the claim names and re-run the audit — the run log is append-only and the grader retires no claim, so withdrawing one in prose does not clear this, and re-landing foreign-root work in the anchor does not retire the claim that named the other root. Re-run the Phase 6 step 5b audit:" >&2
+            echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — the edit-landing receipt for this session ${_tc_verdict_text}. Only a receipt recording \`clean: true\` establishes that the claimed edits landed; the audit writes the receipt BEFORE its own exit status, so its presence alone proves nothing. ${_tc_remedy_text} Re-run the Phase 6 step 5b audit:" >&2
             echo "  bash \"\${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh\" --log <run-log> --project \"\${CLAUDE_PROJECT_DIR:-.}\" --session \"<session id>\"" >&2
             echo "Set ZENSU_EDIT_LANDING_GATE=off only for a session the user has explicitly exempted." >&2
             exit 1
@@ -1154,9 +1382,35 @@ case "${1:-}" in
             _rq_rel="$(ZENSU_RQ_RECEIPT="$_rq_native_receipt" ZENSU_RQ_ROOT="$_rq_native_root" node -e '
               try {
                 const fs = require("fs"), path = require("path");
-                const st = fs.lstatSync(process.env.ZENSU_RQ_RECEIPT);
-                if (st.isSymbolicLink() || !st.isFile() || st.size > 4 * 1024 * 1024) process.exit(0);
-                const j = JSON.parse(fs.readFileSync(process.env.ZENSU_RQ_RECEIPT, "utf8"));
+                // ONE artifact, TWO reads inside one invocation of this verb, about
+                // two hundred lines apart with a `bash … --inventory` child between
+                // them. This one used to be `lstatSync` followed by `readFileSync`:
+                // a SECOND path resolution, with no O_NOFOLLOW and no O_NONBLOCK.
+                // `.zensu/state/` is writable from inside the session, so replacing
+                // the receipt with a FIFO in that window made `readFileSync` block
+                // in open(2) forever — and the call site is a bare command
+                // substitution with `|| true`, which tests an exit status and can do
+                // nothing about a hang. It now opens a descriptor and judges THAT,
+                // exactly as the verdict reader above does.
+                let fd = -1, j = null;
+                try {
+                  const C = fs.constants;
+                  let flags = C.O_RDONLY;
+                  if (Number.isInteger(C.O_NOFOLLOW)) flags |= C.O_NOFOLLOW;
+                  if (Number.isInteger(C.O_NONBLOCK)) flags |= C.O_NONBLOCK;
+                  fd = fs.openSync(process.env.ZENSU_RQ_RECEIPT, flags);
+                  const st = fs.fstatSync(fd);
+                  if (!st.isFile() || st.size > 4 * 1024 * 1024) process.exit(0);
+                  const buf = Buffer.allocUnsafe(st.size);
+                  let off = 0;
+                  while (off < st.size) {
+                    const n = fs.readSync(fd, buf, off, st.size - off, off);
+                    if (n <= 0) break;
+                    off += n;
+                  }
+                  if (off !== st.size) process.exit(0);
+                  j = JSON.parse(buf.toString("utf8"));
+                } finally { if (fd >= 0) { try { fs.closeSync(fd); } catch (e2) {} } }
                 // TWO schema versions are accepted, and the discriminator is what
                 // tells them apart rather than the value shape. `edit-landing-v1`
                 // persisted `log` as the caller spelled `--log`; `edit-landing-v2`

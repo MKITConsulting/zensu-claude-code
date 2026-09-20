@@ -2009,6 +2009,69 @@ C58_CTL="$(c58_get zensu_impl_stop_nudge_after '{"hooks":{"implStopNudgeAfter":7
   && check "C58 all three bounded-int getters honour their own min, max, fallback and absent-key behaviour" PASS \
   || check "C58 all three bounded-int getters honour their own bounds (failures:$C58_FAILS)" FAIL
 
+# C62 — the receipt-exit clause both implementing-turn notices carry. A grep over
+# the whole tests/ tree for `records a CLEAN verdict` and for `verdict rather than
+# its existence` returned NOTHING: the notices execute, other needles inside them
+# are pinned, and this specific wording could be reverted or drift out of step
+# with every check green. The same claim landed in five carriers at once, and this
+# file already uses module-scope constants (REVIEWER_SPAWN_ALLOW_RULE,
+# REVIEWER_SPAWN_DENY_FIRST) for exactly that, interpolated into these very echoes.
+C62_CLAUSE='it reads the receipt'"'"'s verdict rather than its existence'
+# `grep -c` already prints 0 on no match AND exits 1, so `|| echo 0` appends a
+# SECOND line and the variable becomes `0\n0` — every later `[ "$C62_HITS" -eq 1 ]`
+# then errors under the two-line value rather than comparing. `zensu-log.sh`
+# documents this exact defect in production code, which is where the shape was
+# copied from; reproducing it in the check written against that file is the
+# irony worth not shipping. `|| true` keeps the status tolerated without adding
+# a line.
+C62_HITS="$(grep -cF "$C62_CLAUSE" "$STOP" 2>/dev/null || true)"
+C62_HITS="${C62_HITS:-0}"
+[ "$C62_HITS" -ge 1 ] \
+  && check "C62pre the receipt-exit clause is present in the Stop enforcer at all" PASS \
+  || check "C62pre the receipt-exit clause is present in the Stop enforcer at all" FAIL
+[ "$C62_HITS" -eq 1 ] \
+  && check "C62 the receipt-exit clause has ONE owner in the Stop enforcer, not one copy per notice" PASS \
+  || check "C62 the receipt-exit clause is hand-authored $C62_HITS times in the Stop enforcer" FAIL
+# Second instance of the same shape — the finding named only the first.
+C62_NOTICES="$(grep -cF 'until its receipt records a CLEAN verdict' "$STOP" 2>/dev/null || true)"
+C62_NOTICES="${C62_NOTICES:-0}"
+[ "$C62_NOTICES" -eq 1 ] \
+  && check "C62a the CLEAN-verdict instruction has one owner too" PASS \
+  || check "C62a the CLEAN-verdict instruction appears $C62_NOTICES times" FAIL
+# C62c — the LITERAL count says the clause has one owner; it says nothing about
+# how many notices CONSUME that owner. A third implementing-turn notice added
+# without calling the renderer would hand-author the exit again with C62 and
+# C62a both green, which is the drift those two exist to catch. Count the call
+# sites and require every one of them to go through the renderer.
+C62_CALLS="$(grep -cF 'zensu_impl_receipt_exit "${complete_cmd}"' "$STOP" 2>/dev/null || true)"
+C62_CALLS="${C62_CALLS:-0}"
+# Count NOTICES, not calls. `-ge 2` counted call sites and never notices, so a
+# third notice rendering the exit in its own words passed — which is exactly the
+# hand-authoring C62 and C62a exist to catch, one level up.
+C62_NOTICE_LEAD='Zensu review chain: this session has now ended ${count} turns'
+C62_NOTICE_N="$(grep -cF "$C62_NOTICE_LEAD" "$STOP" 2>/dev/null || true)"
+C62_NOTICE_N="${C62_NOTICE_N:-0}"
+[ "$C62_NOTICE_N" -ge 1 ] \
+  && check "C62c-pre the implementing-turn notices were located at all" PASS \
+  || check "C62c-pre no implementing-turn notice matched the lead-in" FAIL
+[ "$C62_CALLS" -eq "$C62_NOTICE_N" ] \
+  && check "C62c every implementing-turn notice renders the exit through the shared owner" PASS \
+  || check "C62c $C62_CALLS of $C62_NOTICE_N notices call zensu_impl_receipt_exit" FAIL
+C62_DEFS="$(grep -cE '^zensu_impl_receipt_exit\(\)' "$STOP" 2>/dev/null || true)"
+C62_DEFS="${C62_DEFS:-0}"
+[ "$C62_DEFS" -eq 1 ] \
+  && check "C62c-control the renderer is defined exactly once at module scope" PASS \
+  || check "C62c-control the renderer is defined $C62_DEFS times" FAIL
+# Cross-carrier drift pin, the shape P1tp8 uses for the topology bullets: the
+# same claim must survive in the hook and in the doctor renderer together.
+C62_MISS=""
+for C62_F in "$STOP" "$PLUGIN_DIR/hooks/lib/zensu-doctor-report.js" "$PLUGIN_DIR/skills/doctor/SKILL.md"; do
+  grep -qF 'records a CLEAN verdict' "$C62_F" 2>/dev/null || C62_MISS="$C62_MISS $(basename "$C62_F")"
+done
+[ -z "$C62_MISS" ] \
+  && check "C62b the CLEAN-verdict claim survives in the hook, the renderer and the doctor skill together" PASS \
+  || check "C62b the CLEAN-verdict claim is missing from:$C62_MISS" FAIL
+
 echo ""
 echo "impl-stop-counter: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
