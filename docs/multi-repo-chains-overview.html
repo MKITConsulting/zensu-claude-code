@@ -287,7 +287,7 @@
       <p>The audit writes to <code>&lt;--project&gt;/.zensu/state/</code> while the terminus looks in
       the anchor's state directory. Two runs therefore leave two receipts nobody reads — and each run
       reports the other repository's claims as not landed.</p>
-      <p class="src">zensu-edit-landing.sh:497 · zensu-log.sh:803</p>
+      <p class="src">zensu-edit-landing.sh:838 · zensu-log.sh:994</p>
     </div>
     <div class="card">
       <span class="tag warn">Asymmetry</span>
@@ -304,11 +304,13 @@
       orchestrator the count is zero, the receipt was skipped, and the chain closed — with a
       reviewer that saw nothing either. <strong>Stage 1, item 2 supersedes this:</strong> the gate
       now ALSO arms on a logged claim, and it judges the receipt's <code>clean</code> verdict rather
-      than its existence. Two details the earlier wording got wrong: the count resolves its root
-      through <code>zensu_resolve_project_dir()</code> rather than the ambient
-      <code>CLAUDE_PROJECT_DIR</code>, and it runs with the git environment scrubbed. A chain that
-      claimed nothing is still exempt.</p>
-      <p class="src">zensu-log.sh:863 · zensu-log.sh:944-1012</p>
+      than its existence. Two details the earlier wording got wrong about
+      <code>--tdd-complete</code>: the count resolves its root through
+      <code>zensu_resolve_project_dir()</code> rather than the ambient
+      <code>CLAUDE_PROJECT_DIR</code>, and it runs with the git environment scrubbed. The
+      <code>--chain-done</code> zero-change terminus is the half that stayed ambient and
+      unscrubbed. A chain that claimed nothing is still exempt.</p>
+      <p class="src">zensu-log.sh:988 · zensu-log.sh:971-1061 · zensu-log.sh:1953-1955</p>
     </div>
   </div>
 </section>
@@ -438,7 +440,7 @@
           counts the union. Otherwise a clean anchor still closes an empty chain. Stage 1, item 2
           narrowed this for <code>--tdd-complete</code> — it also arms on a logged claim — and left
           the <code>--chain-done</code> zero-change terminus unchanged.</td>
-          <td class="where mono">zensu-log.sh:863</td>
+          <td class="where mono">zensu-log.sh:1058-1060<br>zensu-log.sh:1953-1955</td>
         </tr>
         <tr>
           <th scope="row"><strong>Capability confinement</strong><span class="tag flat inline">stage 3</span></th>

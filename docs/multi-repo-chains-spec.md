@@ -40,20 +40,24 @@ Nothing in this proposal weakens that.
 
 One of the consumers named in §6.3 does NOT sit on that binding: the audit's
 default `--project` is `${CLAUDE_PROJECT_DIR:-.}`
-(`hooks/lib/zensu-edit-landing.sh:55`) — ambient, with a `.` fallback. The terminus
-count is NOT: it resolves its root through `zensu_resolve_project_dir()` and runs
-every `git` call with the discovery and config-injection variables unset
-(`hooks/lib/zensu-log.sh:863`). An earlier revision of this paragraph named it
-ambient, which contradicted the superseded-fact paragraph below in the same
-section. Which root the ambient variable names in a multi-root topology, and what
-the fallback means when it is unset, is an open question (§11).
+(`hooks/lib/zensu-edit-landing.sh:55`) — ambient, with a `.` fallback. The Terminus
+row covers TWO sites and they differ. `--tdd-complete`'s change count is NOT
+ambient: it resolves its root through `zensu_resolve_project_dir()`
+(`hooks/lib/zensu-log.sh:1001`) and runs every `git` call with the discovery and
+config-injection variables unset (`:1045`, `:1058-1060`). The `--chain-done`
+zero-change terminus still reads `git -C "${CLAUDE_PROJECT_DIR:-.}"` unscrubbed
+(`:1953-1955`) — ambient, with the same `.` fallback. An earlier revision of this
+paragraph called the whole row ambient, which contradicted the superseded-fact
+paragraph below in the same section. Which root the ambient variable names in a
+multi-root topology, and what the fallback means when it is unset, is an open
+question (§11).
 
 **The edit-landing audit already takes a `--project` argument** — it defaults to
-`CLAUDE_PROJECT_DIR` (`hooks/lib/zensu-edit-landing.sh:55`, flag at `:75`) and
-enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:194-204`). But its receipt
-lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:497`), while
+`CLAUDE_PROJECT_DIR` (`hooks/lib/zensu-edit-landing.sh:55`, flag at `:89`) and
+enumerates the change set with `_el_git -C "$REPO_ROOT"` (`:231-236`). But its receipt
+lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:838`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
-(`hooks/lib/zensu-log.sh:803`). Running the audit once per repository therefore
+(`hooks/lib/zensu-log.sh:994`). Running the audit once per repository therefore
 writes receipts nothing reads, and no run can exit 0. What each run REPORTS changed
 with stage 1, item 3: an ABSOLUTE claim resolving outside the audited root is now
 named as a foreign root rather than reported as unresolvable, while a RELATIVE
@@ -68,7 +72,8 @@ no receipt at all. It now ALSO arms on a logged claim: the run log located from
 `--plan`'s stem, else the claim count the receipt itself records. A chain that
 claimed nothing is still exempt, and that exemption is what keeps hermetic
 chain-mechanics tests from having to fabricate a receipt. The `--chain-done`
-zero-change terminus was not read for this document and is unchanged.
+zero-change terminus is unchanged, and it is the half that stayed ambient and
+unscrubbed — see the paragraph above.
 
 **The write gate confines Bash writes, the edit gate does not confine paths.**
 Rule (B) denies at `!within(projectRoot, p)`
@@ -349,7 +354,7 @@ dropped: a dropped root is a root nothing audits.
 | Edit-landing | Enumerate the union; resolve each claim through its label; write ONE merged receipt beside the anchor's workflow document, carrying a per-root verdict. | `hooks/lib/zensu-edit-landing.sh`, receipt path `:838` |
 | Review packet | Enumerate `changed_files` per root and emit them label-prefixed. | `skills/tdd/SKILL.md` step 10.2 |
 | Write gate | Rules (B) and (C) accept a path inside ANY union member. | `hooks/lib/bash-source-write-parse.js:817`, `:863` |
-| Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:861-863` |
+| Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:1058-1060`, `:1953-1955` |
 | Capability confinement (stage 3) | The reviewer's root check and its protected-root set both take the union. | `hooks/lib/reviewer-capability-v1.js:366`, `:347` |
 
 The write gate receives the union the same way it receives the anchor today —
@@ -705,7 +710,7 @@ re-verify.
 ### Citations to re-verify
 
 - The `--chain-done` dirty-tree refusal was inferred from the comment at
-  `hooks/lib/zensu-log.sh:844`; its own implementation must be read before §6.3's
+  `hooks/lib/zensu-log.sh:971`; its own implementation must be read before §6.3's
   terminus row is implemented.
 - `classifyChain()` was not read; the consumer roster in §7.3 comes from the
   conventions document and must be re-derived from the code.

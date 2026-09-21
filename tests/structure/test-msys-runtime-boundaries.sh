@@ -28,6 +28,20 @@ AUTOPILOT_NODE_BLOCK="$(awk '
   /^_autopilot_begin_critical\(\)/ { capture=0 }
   capture
 ' "$AUTOPILOT_STATE")"
+# The two operand tables are SLICED apart before any entry is matched. Grepping the
+# whole block cannot tell which table an entry sits in, so TRANSPOSING a mode's two
+# indexes left every needle matching — and on win32 a transposed project root is
+# exactly the mis-rooting these pins exist to prevent.
+PROJECT_ROOT_TABLE="$(printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | awk '
+  /^const projectRootIndex = Object\.freeze\(\{/ { capture=1 }
+  capture { print }
+  capture && /^\}\)\[mode\];/ { exit }
+')"
+WORKSPACE_ROOT_TABLE="$(printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | awk '
+  /^const workspaceRootIndex = Object\.freeze\(\{/ { capture=1 }
+  capture { print }
+  capture && /^\}\)\[mode\];/ { exit }
+')"
 PASS=0
 FAIL=0
 
@@ -67,16 +81,21 @@ if printf '%s\n' "$AUTOPILOT_NODE_BLOCK" \
       | grep -qF 'const canonicalProjectRoot = fs.realpathSync.native(path.resolve(requestedProjectRoot));' \
     && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" \
       | grep -qF 'args[projectRootIndex] = canonicalProjectRoot;' \
-    && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF '  "read-active": 2,' \
-    && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF '  "read-run": 2,' \
-    && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF '  begin: 6,' \
-    && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF '  apply: 7,' \
-    && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF '  "increment-budget": 5,' \
-    && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF '  "increment-budget-capped": 5,' \
-    && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF '  "read-workspace": 1,' \
-    && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF '  release: 4,' \
-    && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF '  begin: 9,' \
-    && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF '  "read-workspace": 2,' \
+    && [ -n "$PROJECT_ROOT_TABLE" ] && [ -n "$WORKSPACE_ROOT_TABLE" ] \
+    && printf '%s\n' "$PROJECT_ROOT_TABLE" | grep -qF '  "read-active": 2,' \
+    && printf '%s\n' "$PROJECT_ROOT_TABLE" | grep -qF '  "read-run": 2,' \
+    && printf '%s\n' "$PROJECT_ROOT_TABLE" | grep -qF '  begin: 6,' \
+    && printf '%s\n' "$PROJECT_ROOT_TABLE" | grep -qF '  apply: 7,' \
+    && printf '%s\n' "$PROJECT_ROOT_TABLE" | grep -qF '  "increment-budget": 5,' \
+    && printf '%s\n' "$PROJECT_ROOT_TABLE" | grep -qF '  "increment-budget-capped": 5,' \
+    && printf '%s\n' "$PROJECT_ROOT_TABLE" | grep -qF '  "read-workspace": 1,' \
+    && printf '%s\n' "$PROJECT_ROOT_TABLE" | grep -qF '  release: 4,' \
+    && printf '%s\n' "$PROJECT_ROOT_TABLE" | grep -qF '  adopt: 3,' \
+    && printf '%s\n' "$WORKSPACE_ROOT_TABLE" | grep -qF '  begin: 9,' \
+    && printf '%s\n' "$WORKSPACE_ROOT_TABLE" | grep -qF '  "read-workspace": 2,' \
+    && printf '%s\n' "$WORKSPACE_ROOT_TABLE" | grep -qF '  adopt: 6,' \
+    && ! printf '%s\n' "$PROJECT_ROOT_TABLE" | grep -qF '  adopt: 6,' \
+    && ! printf '%s\n' "$WORKSPACE_ROOT_TABLE" | grep -qF '  adopt: 3,' \
     && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF 'const canonical = fs.realpathSync.native(path.resolve(requested));' \
     && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF 'args[workspaceRootIndex] = canonical;'; then
   check "Autopilot canonicalizes every mode-specific physical project root before persistence or comparison" PASS
