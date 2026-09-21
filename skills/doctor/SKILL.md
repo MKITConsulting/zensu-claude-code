@@ -471,7 +471,7 @@ classifier will refuse a spawn, not only when the whole table is green.
   `/zensu:adopt-session --restore-root` to report. That report is read-only, and you do NOT
   run the repair yourself: relay its verdict and all three disclosure lines, then stop and
   ask the user, exactly as `skills/adopt-session/SKILL.md` requires. Asking the user is the consent control for this
-  repair. The record-carried destination, the `not-served` and `root-present` refusals
+  repair. The record-carried destination, the `not-served-by-executing-runtime` and `root-present` refusals
   and the ancestor ladder are its safety bounds, not consent controls.
   It re-creates exactly the printed directory **and** rebuilds the workflow
   document the removal took with it — a hand-made directory leaves the second
@@ -524,7 +524,7 @@ classifier will refuse a spawn, not only when the whole table is green.
   stay denied until that exact directory is re-created by
   `/zensu:adopt-session --restore-root`, which must run AFTER the adoption: that repair
   requires the running installation to SERVE the record, which is exactly what the
-  adoption establishes, so it refuses `not-served` before it. The workflow document lived under
+  adoption establishes, so it refuses `not-served-by-executing-runtime` before it. The workflow document lived under
   that directory and is not reachable from this record, so no chain state is
   reachable and no later `Stop` can enforce it while that directory is missing —
   do not tell the user their review chain resumes. If it was moved rather than
@@ -537,7 +537,7 @@ classifier will refuse a spawn, not only when the whole table is green.
   and a document restored afterwards surfaces a mismatch later as an anonymous
   fail-closed deny. It also yields a fully bound session rather than an orphaned one.
   **If the directory was DELETED, adoption MUST come first** and there is no choice
-  to offer: `--restore-root` refuses `not-served` until this installation
+  to offer: `--restore-root` refuses `not-served-by-executing-runtime` until this installation
   serves the record, which is exactly what the adoption establishes. The schema check
   is unreachable in that case whatever the order, because a rebuilt baseline is a
   fresh document and there is nothing surviving to compare. Do not carry the

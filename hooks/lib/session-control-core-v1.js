@@ -2410,7 +2410,12 @@ function repairWorkflowBaseline(options) {
 const RESTORE_ROOT_REFUSALS = Object.freeze({
   RECORD_UNREADABLE: 'record-unreadable',
   PLUGIN_DATA: 'plugin-data-mismatch',
-  NOT_SERVED: 'not-served',
+  // Spelled exactly as BASELINE_REFUSALS.NOT_SERVED, because the CONDITION is
+  // identical — both are produced by servesRecordedRuntime. The sets stay separate
+  // objects for the reason stated above; what a separate vocabulary does not license
+  // is one constant NAME carrying two wire values, which turns a lookup against the
+  // wrong set into a silent false instead of a loud miss.
+  NOT_SERVED: 'not-served-by-executing-runtime',
   ROOT_PRESENT: 'root-present',
   UNSAFE_ANCESTOR: 'unsafe-ancestor',
   TOO_MANY_MISSING_COMPONENTS: 'too-many-missing-components',
@@ -2485,7 +2490,17 @@ function restoreRootComponentLadder(projectRoot) {
       // is NOT absence, and answering "missing" for it would aim a mkdir at a
       // path this process cannot see.
       if (!error || (error.code !== 'ENOENT' && error.code !== 'ENOTDIR')) {
-        return restoreRootRefusal(RESTORE_ROOT_REFUSALS.UNSAFE_ANCESTOR, candidate);
+        // The candidate has NOT been proven to exist — the lstat on it is what just
+        // failed — so the refusal must not hand it to a renderer that labels `at` as
+        // the nearest EXISTING component. On the first iteration `candidate` IS the
+        // recorded root, and the report then told the operator to inspect a path that
+        // is very likely absent. That is the same failure the ENOTDIR arm above states
+        // it avoids, applied to one arm and not to its neighbour. The path is still
+        // carried, because it is the one an operator has to look at; only the CLAIM
+        // about it changes, and `atUnreadable` is what the renderer keys its label on.
+        const refusal = restoreRootRefusal(RESTORE_ROOT_REFUSALS.UNSAFE_ANCESTOR, candidate);
+        refusal.atUnreadable = true;
+        return refusal;
       }
       missing.push(candidate);
       const parent = path.dirname(candidate);
@@ -2595,6 +2610,64 @@ function restoreRootVerdict(options) {
   };
 }
 
+// ONE builder for the benign race. It was constructed verbatim at three sites, and a
+// suite row pinned the DUPLICATION (`grep -c 'code = RESTORE_ALREADY_PRESENT_CODE'`
+// equal to 3) rather than the property. The claim worth holding is that every
+// producer routes through here, which is what that row asserts now.
+// ONE predicate for "the rebuild happened and its BASELINE_REBUILT history entry did
+// not". It was spelled three times with three different tests — in the adopt report's
+// two renderers and in the SessionStart self-heal — and the three had already diverged
+// on which provenance values count. `existing` is excluded because nothing was rebuilt
+// there, so nothing was owed a history entry.
+function baselineProvenanceUnrecorded(baseline) {
+  if (!baseline || typeof baseline !== 'object') return false;
+  return baseline.provenance !== 'recorded' && baseline.provenance !== 'existing';
+}
+
+function restoreRootAlreadyPresentError(created) {
+  const raced = new Error(
+    `recorded project root is not restorable: ${RESTORE_ROOT_REFUSALS.ROOT_PRESENT}`,
+  );
+  raced.code = RESTORE_ALREADY_PRESENT_CODE;
+  raced.created = Array.isArray(created) ? created.slice() : [];
+  return raced;
+}
+
+// Does `candidate` name a directory the RECORD CAN USE? Three answers in one call,
+// because the writer has to tell them apart and a bare `lstat` cannot: absent,
+// present-but-unusable, present-and-usable.
+//
+// EXPORTED for its own cases. The leaf arm that consumes it sits immediately below a
+// re-derivation of the verdict, so a present leaf is already ROOT_PRESENT there and
+// no fixture can reach the arm itself — routing the decision through one helper is
+// what gives the discrimination coverage at all.
+//
+// `real` is `realpathSync.native(candidate) === candidate`, which is the ladder's own
+// whole-chain test: equality proves transitively that NO component on the way here is
+// a link, not merely that the leaf is not one. A dangling link, a regular file, a
+// FIFO and a directory reached through a symlinked parent all answer present-unusable.
+function restoreRootRealDirectory(candidate) {
+  let entry;
+  try {
+    entry = fs.lstatSync(candidate);
+  } catch (error) {
+    // ENOENT and ENOTDIR are both absence: an ancestor that is a file means this
+    // path cannot exist either. Every other errno is NOT absence — EACCES and a
+    // symlink loop mean the process cannot see what is there — so they answer
+    // present-unusable, which is the refusing direction.
+    if (error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) {
+      return { present: false, real: false };
+    }
+    return { present: true, real: false };
+  }
+  if (entry.isSymbolicLink() || !entry.isDirectory()) return { present: true, real: false };
+  try {
+    return { present: true, real: fs.realpathSync.native(candidate) === candidate };
+  } catch {
+    return { present: true, real: false };
+  }
+}
+
 // Re-creates the recorded project root and rebuilds the workflow baseline in the
 // same run. The verdict is evaluated twice — once by the caller to report, once
 // here to act — for the reason adoptContext and repairWorkflowBaseline re-evaluate
@@ -2610,7 +2683,14 @@ function restoreRootVerdict(options) {
 // failed document rebuild is reported so the caller can say so, exactly as
 // repairWorkflowBaseline reports a failed provenance write rather than undoing a
 // rebuild that succeeded.
-function restoreWorkflowProjectRoot(options) {
+// `deps` is a FILESYSTEM seam and deliberately not a verdict one. An injectable
+// verdict would delete the TOCTOU re-check this function exists to be; an injectable
+// mkdir leaves every check in place and lets a fixture plant a name BETWEEN two
+// iterations, which is the only way any post-verdict arm below is reachable — the
+// verdict is re-derived here, so a static fixture just changes what the ladder
+// computes. Defaulted, so every production call site is unchanged.
+function restoreWorkflowProjectRoot(options, deps) {
+  const mkdir = (deps && deps.mkdir) || ((target) => fs.mkdirSync(target, { mode: 0o755 }));
   const verdict = restoreRootVerdict(options);
   if (!verdict.ok) {
     // ROOT_PRESENT is the BENIGN race and must be TYPED, not a generic fail().
@@ -2622,32 +2702,25 @@ function restoreWorkflowProjectRoot(options) {
     // had just become completely healthy, which is the opposite of what
     // RESTORE_ALREADY_PRESENT_CODE exists to express.
     if (verdict.reason === RESTORE_ROOT_REFUSALS.ROOT_PRESENT) {
-      const raced = new Error(
-        `recorded project root is not restorable: ${RESTORE_ROOT_REFUSALS.ROOT_PRESENT}`,
-      );
-      raced.code = RESTORE_ALREADY_PRESENT_CODE;
-      throw raced;
+      throw restoreRootAlreadyPresentError([]);
     }
     fail(`recorded project root is not restorable: ${verdict.reason}`);
   }
   // The TOCTOU re-check, immediately before the write and never folded into the
-  // verdict above it. lstat, never existsSync: a DANGLING symlink is invisible to
-  // existsSync, and mkdir on one fails with EEXIST rather than creating anything.
-  let present = false;
-  try {
-    fs.lstatSync(verdict.projectRoot);
-    present = true;
-  } catch (error) {
-    if (!error || error.code !== 'ENOENT') {
+  // verdict above it. It DECIDES FROM EVIDENCE rather than from presence: a bare
+  // lstat answered "the recorded project root came back" for anything at that name,
+  // so one `ln -s /nonexistent <root>` — or a `touch` — turned the fully wedged
+  // state into an exit-0 "ALREADY RESTORED". The root had not come back:
+  // readContext realpaths the value, and readOrphanedProjectRootContext names a
+  // dangling symlink or a file there as explicitly NOT this state. The verdict one
+  // line up already refuses that shape as record-unreadable; only this window used
+  // to drop the standard.
+  const leaf = restoreRootRealDirectory(verdict.projectRoot);
+  if (leaf.present) {
+    if (!leaf.real) {
       fail(`recorded project root is not restorable: ${RESTORE_ROOT_REFUSALS.UNSAFE_ANCESTOR}`);
     }
-  }
-  if (present) {
-    const raced = new Error(
-      `recorded project root is not restorable: ${RESTORE_ROOT_REFUSALS.ROOT_PRESENT}`,
-    );
-    raced.code = RESTORE_ALREADY_PRESENT_CODE;
-    throw raced;
+    throw restoreRootAlreadyPresentError([]);
   }
   // ONE COMPONENT AT A TIME, and never `recursive: true`. A recursive mkdir
   // resolves every intermediate component through ordinary path resolution, so a
@@ -2659,8 +2732,14 @@ function restoreWorkflowProjectRoot(options) {
   // already ordered top-down at the ladder for precisely this loop.
   //
   // This narrows the race; it does not close it. Node exposes no `mkdirat`, so
-  // between two iterations a component can still be swapped. What the loop buys
-  // is that a swap is REFUSED rather than traversed.
+  // between two iterations a component can still be swapped, and what the loop buys
+  // depends on WHERE: `mkdir(2)` does not follow a symlink at the FINAL component, so
+  // a name planted there fails EEXIST and is refused before anything is written —
+  // while every component ABOVE it is resolved normally and a swap there is followed
+  // in silence. The post-create realpath check below is what catches the second case,
+  // and it is detection AFTER the fact: the directory has already landed in the other
+  // tree. Do not restate this as "a swap is REFUSED rather than traversed" — that is
+  // true of one of the two positions, and the check below says so in its own words.
   //
   // Mode is explicit rather than the ambient umask. The intent — a user project
   // directory, not a private store — is preserved, because umask can only clear
@@ -2671,66 +2750,135 @@ function restoreWorkflowProjectRoot(options) {
   const created = [];
   for (const component of verdict.missing) {
     try {
-      fs.mkdirSync(component, { mode: 0o755 });
+      mkdir(component);
     } catch (error) {
-      // EEXIST is the BENIGN RACE only for the recorded root itself. For an
-      // INTERMEDIATE it is not: the root did not come back, this run DID create
-      // the components already on `created` — which the throw discards — and the
-      // caller would print "ALREADY RESTORED … this run created nothing" and exit
-      // 0, telling the skill a repair succeeded while every write stays denied.
-      // It is also how a planted symlinked intermediate reaches here: the syscall
-      // refuses to traverse it, and classifying that refusal as the benign race
-      // converts a refusal into a success report.
-      if (error && error.code === 'EEXIST' && component === verdict.projectRoot) {
-        const raced = new Error(
-          `recorded project root is not restorable: ${RESTORE_ROOT_REFUSALS.ROOT_PRESENT}`,
-        );
-        raced.code = RESTORE_ALREADY_PRESENT_CODE;
-        // The work is CARRIED, not discarded. `verdict.projectRoot` is the LAST
-        // element of `verdict.missing`, so with two or more missing components this
-        // run has already created the ones above it — and dropping `created` here
-        // made the caller print "this run created nothing" over directories it had
-        // just planted. The single-component case, where that sentence is true, is
-        // the only one the unit fixture models.
-        raced.created = created.slice();
-        throw raced;
-      }
-      // Every failure arm carries it too: the operator cleaning up needs to know
-      // which components this run planted, and a message cannot carry them — a
-      // composed `fail()` string is folded by safeDisplayValue's pair rule.
-      const planted = created.slice();
-      let failure;
-      try {
-        if (error && error.code === 'EEXIST') {
-          fail(`a component of the recorded project root already exists at ${component}, `
-            + 'so the path below it cannot be created as recorded — something is at that '
-            + 'name that the verdict did not see, or it is not a directory');
+      if (error && error.code === 'EEXIST') {
+        // EEXIST is the ONE signal this primitive gives, and all three readings of
+        // it are decided from EVIDENCE rather than from the component's position.
+        // The position alone got two of them wrong: an intermediate EEXIST was
+        // read as tamper, and a leaf EEXIST as the benign race.
+        //
+        // FIRST, the whole chain. The race the comments describe is a
+        // `git worktree add` in another terminal, and git creates every component
+        // at once — so the loop meets EEXIST on an INTERMEDIATE first. If the
+        // recorded root is now a real canonical directory the repair is complete,
+        // whatever this component is: realpath equality on the leaf proves
+        // transitively that nothing on the way to it is a link. Reporting that as
+        // `FAILED … Run /zensu:doctor` is the same wrong outcome the ROOT_PRESENT
+        // re-derivation was added to prevent, one component up.
+        const leafNow = restoreRootRealDirectory(verdict.projectRoot);
+        if (leafNow.real) {
+          // The work is CARRIED, not discarded. `verdict.projectRoot` is the LAST
+          // element of `verdict.missing`, so with two or more missing components
+          // this run has already created the ones above it — and dropping `created`
+          // here made the caller print "this run created nothing" over directories
+          // it had just planted.
+          throw restoreRootAlreadyPresentError(created);
         }
+        // SECOND, a sibling repair. ONE project_root can be named by SEVERAL
+        // records — a worktree that hosted three sessions and was then removed
+        // leaves three — so two sessions each running --restore-root --confirm is
+        // ordinary, not contrived. The loser meets EEXIST on a component the winner
+        // created, and what is at that name IS the directory the record needs.
+        // NOT pushed onto `created`: the provenance entry counts what THIS run
+        // performed, and claiming another run's work would make that entry false.
+        // EVIDENCE FIRST, identity second. Testing the identity first left one window
+        // open: a leaf whose directory becomes real BETWEEN the `leafNow` read above
+        // and this one failed the `component !== verdict.projectRoot` conjunct and fell
+        // to the refusal below, whose three claims this read has just disproven. No
+        // fixture can open that window — the seam injects mkdir, not the reads — so the
+        // ORDER is what closes it.
+        const there = restoreRootRealDirectory(component);
+        if (there.real) {
+          if (component === verdict.projectRoot) {
+            throw restoreRootAlreadyPresentError(created);
+          }
+          continue;
+        }
+        // THIRD, everything else: a regular file, a link, or a name this process
+        // cannot canonicalize. Now the message describes what the code ESTABLISHED
+        // rather than what it assumed — the previous wording asserted "something is
+        // at that name that the verdict did not see" without ever looking.
+        try {
+          fail(`a component of the recorded project root already exists at ${component}, `
+            + 'so the path below it cannot be created as recorded — it is not a directory, '
+            + 'or it is a link, or it does not canonicalize to itself');
+        } catch (thrown) {
+          // Every failure arm carries the work too: the operator cleaning up needs to
+          // know which components this run planted, and a message cannot carry them —
+          // a composed `fail()` string is folded by safeDisplayValue's pair rule.
+          thrown.created = created.slice();
+          throw thrown;
+        }
+      }
+      // `fail()` throws, so the catch is what builds the error. Written as a catch
+      // around the call and never through an intermediate `let failure`: that shape
+      // read like ordinary flow, and if `fail()` ever stopped throwing on some path
+      // it left `failure` undefined and raised an untyped TypeError on the next
+      // line — AFTER this run had already created directories, which is the one
+      // moment the function must still be able to report what it planted.
+      try {
         fail(`recorded project root could not be created at ${component}: `
           + `${error && error.message ? error.message : 'unknown'}`);
       } catch (thrown) {
-        failure = thrown;
+        thrown.created = created.slice();
+        throw thrown;
       }
-      failure.created = planted;
-      throw failure;
+    }
+    // mkdir(2) does not follow a symlink at the LAST component, so a name planted
+    // THERE fails EEXIST — but every component above it is resolved normally, and a
+    // swap there is followed in silence. The ladder's realpath test proved the whole
+    // chain link-free at verdict time; this re-applies it after each create, which is
+    // detection AFTER the fact — the directory is already in the wrong place — but it
+    // converts a silent success report naming the recorded path into a refusal.
+    // `created` deliberately does NOT gain this component: the name resolves
+    // somewhere else, so listing it under the recorded spelling would be false.
+    if (!restoreRootRealDirectory(component).real) {
+      const moved = new Error(
+        `recorded project root is not restorable: ${RESTORE_ROOT_REFUSALS.UNSAFE_ANCESTOR}`,
+      );
+      moved.created = created.slice();
+      // Reported under its OWN spelling rather than under none. Keeping it off
+      // `created` is right — that name resolves somewhere else, so listing it there
+      // would be false — but it left the one directory an operator most needs to find
+      // named nowhere at all, in the only branch that establishes tamper.
+      moved.misplaced = component;
+      throw moved;
     }
     created.push(component);
   }
   let baseline = null;
   let baselineError = null;
+  let baselineNotRepairable = false;
   try {
     baseline = repairWorkflowBaseline(options);
   } catch (error) {
     // A concurrent SessionStart that healed the document first is the benign race
     // and is NOT an error — it is the outcome this call wanted.
     if (isBaselineAlreadyPresent(error)) {
+      // GUARDED, because this is the one call after the mkdir loop that can throw:
+      // adoptionWorkflowStatePath routes through sessionKey, which fails on a value
+      // this function never re-validates. Every other post-loop throw site attaches
+      // `created` precisely so the caller can report what was planted, and a throw
+      // escaping here would carry none — the one moment that report matters most.
+      let baselinePath = '';
+      try {
+        baselinePath = adoptionWorkflowStatePath(verdict.projectRoot, options.sessionId);
+      } catch (pathFault) {
+        baselinePath = '';
+      }
       baseline = {
-        path: adoptionWorkflowStatePath(verdict.projectRoot, options.sessionId),
+        path: baselinePath,
         projectRoot: verdict.projectRoot,
         provenance: 'existing',
       };
     } else {
       baselineError = error && error.message ? error.message : 'unknown';
+      // CARRIED as its own field, because the two faults have opposite remedies: a
+      // document that is merely MISSING is rebuilt by the adoption, while one that is
+      // UNSAFE or UNREADABLE is tamper evidence the repair refuses by design. Folding
+      // both into one message sent the operator into the command that just declined.
+      baselineNotRepairable = Boolean(error && error.code === BASELINE_NOT_REPAIRABLE_CODE);
     }
   }
   // Provenance is a history entry and NOT a record or state field, exactly as it
@@ -2796,6 +2944,7 @@ function restoreWorkflowProjectRoot(options) {
     nearestExisting: verdict.nearestExisting,
     baseline,
     baselineError,
+    baselineNotRepairable,
     provenance,
     provenanceCause,
   };
@@ -5130,7 +5279,7 @@ module.exports = {
   //
   // PORT-RELEVANT, stated here because every sibling repair in this family
   // carries the split and a port works from the roster rather than the prose.
-  // The CORE half is exactly the nine names below plus RESTORE_ROOT_REFUSALS's
+  // The CORE half is exactly the names below plus RESTORE_ROOT_REFUSALS's
   // six members: they are host-neutral and read nothing from the environment,
   // every anchor arriving as an option. The HOST half is SEVEN obligations, and a
   // port that takes only the core delta gets a writer with no reachable caller and
@@ -5156,6 +5305,8 @@ module.exports = {
   RESTORE_ALREADY_PRESENT_CODE,
   isRestoreRootAlreadyPresent,
   restoreRootComponentLadder,
+  restoreRootRealDirectory,
+  baselineProvenanceUnrecorded,
   restoreRootVerdict,
   restoreWorkflowProjectRoot,
   renderMainContext,

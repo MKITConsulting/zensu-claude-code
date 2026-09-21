@@ -136,12 +136,18 @@ if ! zensu_bind_hook_session "$INPUT"; then
     # beside the function for exactly this. Its only upstream check rejects
     # [\u0000-\u001f\u007f] plus non-absolute and non-normalized, so U+2028, the
     # bidi overrides and a forged `label : value` pair all reach here unfolded.
-    if ! ORPHANED_PROJECT_ROOT="$(LC_ALL=C; case "$ORPHANED_PROJECT_ROOT" in
-        (*"$ZENSU_FORGERY_DOUBLE_SPACE"*|*"$ZENSU_FORGERY_PAIR_SPACE_COLON"*|*"$ZENSU_FORGERY_PAIR_COLON_SPACE"*) printf '(unreadable)' ;;
-        (*) [[ "$ORPHANED_PROJECT_ROOT" =~ $ZENSU_SAFE_DISPLAY_PATH_RE ]] \
-          && [ "${#ORPHANED_PROJECT_ROOT}" -le "$ZENSU_SAFE_DISPLAY_PATH_MAX" ] \
-          && printf '%s' "$ORPHANED_PROJECT_ROOT" || printf '(unreadable)' ;;
-      esac)"; then
+    #
+    # THE PRESENCE TESTS ARE THE GUARANTEE, and they are written WITHOUT `:-` on
+    # purpose: R8p6 forbids a default here, because a default is how a weaker bound
+    # gets substituted silently. They are fail-closed in both regimes anyway — under
+    # this file's `set -u` an unset constant aborts the substitution and the `if !`
+    # below catches it, and with `set -u` off the test sees an empty string and
+    # takes the placeholder. What they add over that is the EMPTY case, which
+    # neither regime catches: MEASURED on bash 5.2.15, an empty
+    # ZENSU_SAFE_DISPLAY_PATH_RE made the `[[ =~ ]]` match everything and this arm
+    # printed a raw injected value; on bash 3.2.57 the same input already degraded,
+    # because an empty ERE is a regcomp error there.
+    if ! ORPHANED_PROJECT_ROOT="$(zensu_safe_display_path "$ORPHANED_PROJECT_ROOT")"; then
       ORPHANED_PROJECT_ROOT="(unreadable)"
     fi
     echo "zensu chain-enforcer: releasing Stop — the project root recorded for this session (${ORPHANED_PROJECT_ROOT}) no longer exists, so its workflow document is not reachable from this record and no completion could ever be proven from it. No review-chain or Autopilot state was evaluated: no completion was proven, only an unprovable guard released. If that directory was moved rather than deleted, its state still exists there and moving it back is better than re-creating it. Otherwise run /zensu:adopt-session --restore-root first — it reports the verdict and writes nothing — and only then /zensu:adopt-session --restore-root --confirm, which re-creates exactly that directory AND rebuilds the workflow document the removal took with it — a bare mkdir leaves the second half missing and every tool denied. It restores the anchor, not the work: the directory comes back empty and the chain that lived there is gone. Or start a new session for further work." >&2

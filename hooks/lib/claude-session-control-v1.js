@@ -227,11 +227,13 @@ function main() {
           // Records its own BASELINE_REBUILT history entry, so an automatic heal is
           // never silent — the same provenance the confirmed repair leaves. The
           // RESULT is read rather than discarded: repairWorkflowBaseline catches a
-          // failed mutateWorkflowState internally and returns
-          // `provenance: "unavailable: ..."` instead of throwing, so an
-          // unrecorded rebuild would otherwise leave no trace on the ONE path that
-          // runs without the user asking for it. The confirmed path already
-          // surfaces this; this one said nothing.
+          // failed mutateWorkflowState internally and returns the bare token
+          // `provenance: 'unavailable'` with the reason on a SEPARATE
+          // `provenanceCause` field, instead of throwing, so an unrecorded rebuild
+          // would otherwise leave no trace on the ONE path that runs without the
+          // user asking for it. Both fields are rendered below: the token alone
+          // says a provenance entry is missing and says nothing about why, and this
+          // is the surface with the least surviving evidence to spare.
           const healed = core.repairWorkflowBaseline({
             recordsDir,
             sessionId: payload.session_id,
@@ -244,13 +246,21 @@ function main() {
           // missing rebuild — hanging the notice off `provenance` would withhold it
           // in exactly the case with the least surviving evidence.
           baselineHealNotice = BASELINE_HEAL_NOTICE;
-          if (healed && healed.provenance !== 'recorded') {
+          // THE SHARED PREDICATE, because this rule was spelled three times with three
+          // different tests — here and in the adopt report's two renderers — and the
+          // three had already diverged on which provenance values count.
+          if (typeof core.baselineProvenanceUnrecorded === 'function'
+            ? core.baselineProvenanceUnrecorded(healed)
+            : Boolean(healed && healed.provenance !== 'recorded')) {
             process.stderr.write(
               'zensu SessionStart: the workflow document was rebuilt but its '
               + 'BASELINE_REBUILT provenance entry could not be written ('
-              + String(healed.provenance) + '). The rebuild is real and '
-              + 'unrecorded in the workflow history; report this rather than '
-              + 'repeating it.\n',
+              + String(healed.provenance) + ').'
+              + (healed.provenanceCause
+                ? ' cause: ' + String(healed.provenanceCause)
+                : '')
+              + ' The rebuild is real and unrecorded in the workflow history; '
+              + 'report this rather than repeating it.\n',
             );
           }
         } catch (error) {

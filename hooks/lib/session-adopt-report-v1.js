@@ -570,7 +570,7 @@ const RESTORE_REMEDY = {
   [core.RESTORE_ROOT_REFUSALS.NOT_SERVED]:
     "The executing installation may not serve this record, so it must not create the directory the record anchors. That is a lineage break with its own exit: run /zensu:adopt-session first, then this command again.",
   [core.RESTORE_ROOT_REFUSALS.ROOT_PRESENT]:
-    "The recorded project root is there. Nothing is missing, so nothing is created. If tools are still failing, the cause is a different one — run /zensu:doctor.",
+    "The recorded project root is there, so nothing is missing and nothing is created. If tools are still failing the cause is NOT necessarily a different one: the workflow document under that root may still be absent, including after an interrupted --restore-root --confirm, which creates the directory before it rebuilds the document. Run /zensu:adopt-session --confirm to rebuild it, then /zensu:doctor.",
   [core.RESTORE_ROOT_REFUSALS.UNSAFE_ANCESTOR]:
     "The nearest existing directory on the way to the recorded root is a symlink, is not a directory, or could not be read. Every project root is minted through a real-path resolution, so it contained no link when it was recorded: a link there now means the tree changed under the record, and creating the root through it would land it in a DIFFERENT tree. Nothing was created. Inspect the path named above, or start a fresh Claude Code session.",
   [core.RESTORE_ROOT_REFUSALS.TOO_MANY_MISSING_COMPONENTS]:
@@ -592,8 +592,11 @@ const RESTORE_DISCLOSURE = "What this repairs, and what it does NOT:\n"
   + "  * The anchor does not MOVE. Only the path the record already names is created, so\n"
   + "    the source-write gate keeps comparing against exactly the root it compared\n"
   + "    against before. No ARGUMENT names a directory: the destination comes from the\n"
-  + "    record inside the plugin-data store this invocation names, and that store's\n"
-  + "    ownership and permission check is what bounds it.\n";
+  + "    record inside the plugin-data store this invocation names, and that store\n"
+  + "    decides WHICH record is read rather than where the directory lands. The path\n"
+  + "    itself is not bounded by location — only by depth, at most a few components\n"
+  + "    below a directory that is still there — so what stands behind it is who can\n"
+  + "    write a record into that store.\n";
 
 // RENDERS through process.stdout and returns the exit code rather than setting it,
 // so main() keeps one place where the process result is decided — and so every arm
@@ -609,12 +612,67 @@ const RESTORE_DISCLOSURE = "What this repairs, and what it does NOT:\n"
 function renderRestoreRoot(request, confirmed, deps) {
   const resolveVerdict = (deps && deps.verdict) || core.restoreRootVerdict;
   const runRestore = (deps && deps.restore) || core.restoreWorkflowProjectRoot;
+  // NAMED for what it resolves, because `repairBaseline` is already a module-level
+  // helper with a DIFFERENT arity, return shape and fault contract — that one takes a
+  // verdict and never throws, this one takes the request and does. A shadow whose two
+  // meanings differ is how a removed local silently resolves to the other.
+  const runBaselineRepair = (deps && deps.repairBaseline) || core.repairWorkflowBaseline;
+  // A document that is UNSAFE or UNREADABLE is tamper evidence, and repairWorkflowBaseline
+  // refuses it by design — so the rebuild remedy is the operation that already declined.
+  // This module's own renderBaselineDiagnosis has said so for the adoption path all along.
+  const notRepairable = (fault) => Boolean(fault && fault.code
+    && typeof core.BASELINE_NOT_REPAIRABLE_CODE === "string"
+    && fault.code === core.BASELINE_NOT_REPAIRABLE_CODE);
+  const TAMPER_NOTE = "\nThe workflow document was NOT rebuilt, and must not be: something is at that path\n"
+    + "that is not a document this installation wrote — a link, a hard link, a directory or\n"
+    + "an oversized file. Rebuilding over it would destroy the evidence, so the repair\n"
+    + "declines rather than overwriting. Inspect it yourself, then re-run this command.\n";
+  // ONE writer for the two baseline rows, because the raced arm and the restored arm
+  // report the same two facts and used to agree by hand — which is how the raced one
+  // came to report neither.
+  const writeBaselineRows = (baseline, baselineError) => {
+    // THREE-VALUED, because `rebuilt` was rendered from the ABSENCE of information:
+    // with no error captured and no baseline returned, the row made a positive claim
+    // nothing established. An unestablished baseline is its own state and its own
+    // non-zero exit.
+    process.stdout.write("  workflow baseline: " + safe(baselineError
+      ? "NOT rebuilt"
+      : (baseline && baseline.provenance === "existing"
+        ? "already present"
+        : (baseline ? "rebuilt" : "not established"))) + "\n");
+    if (baselineError) {
+      process.stdout.write("  baseline cause   : " + safe(baselineError) + "\n");
+      return;
+    }
+    // A rebuild whose BASELINE_REBUILT history write failed is reported as its OWN
+    // sentence, the rule renderBaselineNotes already follows for the same value.
+    // Reading `provenance` only to tell "existing" from everything else rendered
+    // `rebuilt` with no warning and exit 0 — and the missing history entry is also
+    // what silences the doctor's own rebuilt row, so the loss hid on both surfaces
+    // at once.
+    if (typeof core.baselineProvenanceUnrecorded === "function"
+      ? core.baselineProvenanceUnrecorded(baseline)
+      : Boolean(baseline && baseline.provenance !== "recorded" && baseline.provenance !== "existing")) {
+      process.stdout.write("\nWARNING: the workflow document was rebuilt but its provenance entry could not\n");
+      process.stdout.write("be written (" + safe(baseline.provenance) + "). The rebuild is real and unrecorded in the\n");
+      process.stdout.write("workflow history, so /zensu:doctor will not report it.\n");
+      if (baseline.provenanceCause) {
+        process.stdout.write("  baseline provenance cause : " + safe(baseline.provenanceCause) + "\n");
+      }
+    }
+  };
   const verdict = resolveVerdict(request);
   if (!verdict.ok) {
     process.stdout.write("Zensu project-root restore — NOT restorable ("
       + safe(verdict.reason) + ")\n\n");
     if (verdict.at) {
-      process.stdout.write("  nearest existing : " + safe(verdict.at) + "\n");
+      // The LABEL is the claim. On the ladder's non-absence errno arm the lstat on this
+      // candidate is what failed, so it has not been proven to exist and calling it the
+      // nearest EXISTING component sends an operator to inspect a path that may not be
+      // there — which is what that arm's own sibling comment says it avoids.
+      process.stdout.write(verdict.atUnreadable
+        ? "  could not be read : " + safe(verdict.at) + "\n"
+        : "  nearest existing : " + safe(verdict.at) + "\n");
     }
     if (typeof verdict.missingCount === "number") {
       process.stdout.write("  missing below it : " + verdict.missingCount
@@ -659,15 +717,52 @@ function renderRestoreRoot(request, confirmed, deps) {
       && core.isRestoreRootAlreadyPresent(error)) {
       process.stdout.write("Zensu project-root restore — ALREADY RESTORED\n\n");
       const racedMade = Array.isArray(error.created) ? error.created.length : 0;
-      process.stdout.write("  created          : " + racedMade + "\n\n");
+      process.stdout.write("  created          : " + racedMade + "\n");
+      // THE OTHER HALF IS STILL THIS COMMAND'S JOB. All three raced throws fire ABOVE
+      // repairWorkflowBaseline, so this arm used to report success with the document
+      // never rebuilt, never classified and never even looked at — the same end state
+      // the sibling arm below exits 1 for, because until it exists the capability gate
+      // denies every tool. Attempting it here is what the feature's own headline
+      // promises ("re-creates the directory AND rebuilds the workflow document in one
+      // step"), and repairWorkflowBaseline is idempotent: it re-derives its own verdict
+      // and answers the already-present race rather than rewriting a live document.
+      let racedBaseline = null;
+      let racedBaselineError = null;
+      let racedTamper = false;
+      try {
+        racedBaseline = runBaselineRepair(request);
+      } catch (baselineRepairFault) {
+        if (typeof core.isBaselineAlreadyPresent === "function"
+          && core.isBaselineAlreadyPresent(baselineRepairFault)) {
+          racedBaseline = { provenance: "existing" };
+        } else {
+          racedTamper = notRepairable(baselineRepairFault);
+          racedBaselineError = baselineRepairFault && baselineRepairFault.message
+            ? baselineRepairFault.message
+            : "unknown";
+        }
+      }
+      writeBaselineRows(racedBaseline, racedBaselineError);
+      process.stdout.write("\n");
       // NOT "created nothing": the recorded root is the LAST missing component, so a
       // race on it can follow components this run really did plant.
       process.stdout.write("The recorded project root came back between the check and the write, so this run\n");
       process.stdout.write("did not create it" + (racedMade > 0
         ? " — though it did create the " + racedMade + " component(s) above it, counted here"
-        : " and created nothing") + ". If tools are still failing, run\n");
-      process.stdout.write("/zensu:adopt-session --confirm to rebuild the workflow document, then /zensu:doctor.\n");
-      return 0;
+        : " and created nothing") + ".\n");
+      if (racedBaselineError) {
+        if (racedTamper) {
+          process.stdout.write(TAMPER_NOTE);
+          return 1;
+        }
+        process.stdout.write("\nThe directory is back but the workflow document is NOT. Until it exists the\n");
+        process.stdout.write("capability gate denies every tool. Run /zensu:adopt-session --confirm to rebuild\n");
+        process.stdout.write("it, then /zensu:doctor.\n");
+        return 1;
+      }
+      // An unestablished baseline is not a success either: nothing proved the document
+      // is there, and the gate denies every tool until it is.
+      return racedBaseline ? 0 : 1;
     }
     process.stdout.write("Zensu project-root restore — FAILED\n\n");
     // THE ROW RULE, stated once here and referenced by symbol below. `safe()` is
@@ -685,6 +780,13 @@ function renderRestoreRoot(request, confirmed, deps) {
       process.stdout.write("  created          : " + madeBefore
         + " (component(s) this run planted before it failed)\n");
     }
+    // ITS OWN ROW, per the ROW RULE above. A component that resolved somewhere else
+    // after it was created is deliberately kept off `created` — listing it under the
+    // recorded spelling would be false — which left the one directory an operator most
+    // needs to find named nowhere at all, in the only branch that establishes tamper.
+    if (error && error.misplaced) {
+      process.stdout.write("  misplaced        : " + safe(String(error.misplaced)) + "\n");
+    }
     process.stdout.write("Nothing is claimed about the session state. Run /zensu:doctor.\n");
     return 1;
   }
@@ -694,14 +796,7 @@ function renderRestoreRoot(request, confirmed, deps) {
   // THE ROW RULE (see the comment on the FAILED branch above, which states it in
   // full). `restored.baselineError` is an `error.message`, so composing
   // `"NOT rebuilt (" + baselineError + ")"` and folding the result quoted the row.
-  process.stdout.write("  workflow baseline: " + safe(restored.baselineError
-    ? "NOT rebuilt"
-    : (restored.baseline && restored.baseline.provenance === "existing"
-      ? "already present"
-      : "rebuilt")) + "\n");
-  if (restored.baselineError) {
-    process.stdout.write("  baseline cause   : " + safe(restored.baselineError) + "\n");
-  }
+  writeBaselineRows(restored.baseline, restored.baselineError);
   process.stdout.write("  provenance       : " + safe(restored.provenance) + "\n");
   // THE ROW RULE again; see the FAILED branch above for the full statement.
   if (restored.provenanceCause) {
@@ -709,6 +804,10 @@ function renderRestoreRoot(request, confirmed, deps) {
   }
   process.stdout.write("\n");
   process.stdout.write(RESTORE_DISCLOSURE);
+  if (restored.baselineError && restored.baselineNotRepairable) {
+    process.stdout.write(TAMPER_NOTE);
+    return 1;
+  }
   if (restored.baselineError) {
     // The directory IS back and the document is not, which is the second wedge this
     // command exists to close in one step. Reported rather than rolled back: undoing
@@ -886,8 +985,8 @@ function main() {
       process.stdout.write("normally authorises a takeover was not performed, and a document restored later\n");
       process.stdout.write("is checked only when it is first read, not here. That check cannot be brought\n");
       process.stdout.write("forward by repairing the directory first: --restore-root --confirm refuses with\n");
-      process.stdout.write("not-served until this installation serves the record, which is what the adoption\n");
-      process.stdout.write("establishes. Adopt first, then restore.\n");
+      process.stdout.write("not-served-by-executing-runtime until this installation serves the record, which is\n");
+      process.stdout.write("what the adoption establishes. Adopt first, then restore.\n");
     }
     process.stdout.write("Nothing has been changed. Run the same command with --confirm to adopt.\n");
     return;

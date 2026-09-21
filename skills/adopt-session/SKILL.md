@@ -237,10 +237,20 @@ the worktree back they run `git worktree add <path> <branch>` themselves, naming
 branch: the record's own branch field has been observed stale.
 
 **Order matters in the COMBINED state.** When the lineage is ALSO broken, the
-restore refuses `not-served` — it requires this installation to serve the record.
+restore refuses `not-served-by-executing-runtime` — it requires this installation to serve the record.
 Adopt first, then run `--restore-root --confirm`.
 
-Its refusals: `root-present` (nothing is missing), `not-served` (adopt first),
+Its `--confirm` output carries two baseline rows, and their vocabulary is the restore's
+own rather than the adoption's: `workflow baseline:` reads `rebuilt` (this run wrote the
+document), `already present` (a concurrent SessionStart wrote it first — a CLEAN outcome,
+not a finding), `NOT rebuilt` (it could not be written, and the next lines say whether the
+remedy is `/zensu:adopt-session --confirm` or an inspection, because a document that is a
+link, a hard link, a directory or oversized is tamper evidence the repair declines by
+design), or `not established` (nothing proved either way — also not a success). A
+`WARNING:` about a provenance entry that could not be written is its own sentence and is
+always relayed.
+
+Its refusals: `root-present` (nothing is missing), `not-served-by-executing-runtime` (adopt first),
 `record-unreadable` (the strict read failed for another reason — `/zensu:doctor`),
 `plugin-data-mismatch`, `unsafe-ancestor` (the nearest existing directory on the way
 is a symlink or not a directory, so creating the root through it would land it in a
@@ -315,7 +325,7 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib
 Render the output verbatim. FIVE things are NOT clean states and must be
 surfaced rather than summarized away:
 
-- a `workflow baseline` value other than `present` or `rebuilt` — and any
+- a `workflow baseline` value other than `present`, `rebuilt` or `already present` — and any
   `WARNING:` line about the workflow document. `rebuilt` is a real repair and
   still carries a cost the user has to hear: the chain that was live when the
   document vanished is gone. Anything else means the document was NOT repaired,

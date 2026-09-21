@@ -47,6 +47,27 @@
 #     re-create the anchor a session already had while never being steerable to a
 #     new one. Nothing else, and nothing outside
 #     <plugin_data>/{session-control,review-evidence} and the recorded project.
+#   - CLASS 5 IS not bounded by location, and the distinction matters because the
+#     two claims read alike: "the destination is CARRIED from the record" is true,
+#     "the destination is BOUNDED" is not. Classes 1-4 land inside <plugin_data>
+#     or inside the recorded project, and the barrier paragraph below was written
+#     for them. Class 5 is the first whose destination is an ARBITRARY absolute
+#     path: restoreRootComponentLadder applies no containment check of any kind —
+#     not under $HOME, not inside a git repository, not excluding a child of the
+#     filesystem root — and the private records directory bounds WHICH RECORD IS
+#     READ, never where the syscall lands. What IS bounded is the DEPTH: at most
+#     RESTORE_MAX_MISSING_COMPONENTS components below a nearest-existing ancestor
+#     the ladder proved to be a real, canonical, link-free directory, and each one
+#     is re-verified by realpath after it is created.
+#     A LOCATION allowlist was weighed and REFUSED. `git worktree remove` does
+#     leave the parent in place, so a `$HOME`-or-inside-a-git-repository rule would
+#     admit the ordinary case — but it also refuses legitimate roots this project
+#     really has (a worktree under /opt, /srv or /Volumes, and this repository's
+#     own fixtures under the canonicalized temp root), and it would be a policy
+#     invented at the boundary rather than derived from the record. The barrier
+#     stays the records directory, which is the same one classes 1-4 rest on: a
+#     principal able to author a record there already holds the capability this
+#     write would give it. State it that way, and never as a location bound.
 #   - What BOUNDS that write is not derivation — CLAUDE_PLUGIN_DATA is a
 #     caller-supplied literal, exactly as it is for the diagnostic — it is
 #     adoptableRecord's condition-1 LADDER. Naming only its first rung, as this

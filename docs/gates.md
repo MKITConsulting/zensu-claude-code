@@ -586,10 +586,22 @@ value, so the anchor never moves and the source-write gate compares against exac
 it compared against before. Creating a directory at a path the record already names restores the
 authority the session already had and adds none.
 
+**Carried from the record is not the same as bounded, and only the first is true.** This is the
+one write class whose destination is an arbitrary absolute path: it is **not bounded by location**
+— not to `$HOME`, not to a git repository, not away from a child of the filesystem root — and the
+private records directory bounds *which record is read*, never where the directory lands. What is bounded is the DEPTH: at most four components below a nearest-existing
+ancestor the ladder proved to be a real, canonical, link-free directory (the bound is
+`RESTORE_MAX_MISSING_COMPONENTS`), with each created component re-verified by realpath. A location allowlist was weighed and refused: it would admit
+the ordinary case and reject legitimate roots under `/opt`, `/srv` or `/Volumes`, and it would
+be a policy invented at the boundary instead of derived from the record. The barrier is the one
+every other write class rests on — write access to the private records directory, which is
+already the capability this repair would grant.
+
 Six refusals, each naming which condition failed: `record-unreadable`, `plugin-data-mismatch`,
-`not-served`, `root-present`, `unsafe-ancestor`, `too-many-missing-components`. The nearest
+`not-served-by-executing-runtime`, `root-present`, `unsafe-ancestor`,
+`too-many-missing-components`. The nearest
 existing ancestor must be a real directory that is its own realpath and not a symlink, and at
-most four components may be missing below it — a record pointing into a tree that is mostly
+at most `RESTORE_MAX_MISSING_COMPONENTS` components may be missing below it — a record pointing into a tree that is mostly
 gone is not a recycled worktree.
 
 **It restores the ANCHOR, not the work.** The directory comes back empty, it is not a git

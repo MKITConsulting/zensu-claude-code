@@ -3219,6 +3219,12 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
 // the adoption report.
 var FOLD_UNAVAILABLE = 'not rendered — the display-safety module could not be loaded';
 
+// The SECOND refusal sentence, and it deliberately does not borrow the first. A value
+// this row declines to DELIMIT is not a module that failed to LOAD, and rendering the
+// load-failure text for it would send an operator to repair an installation that is
+// fine — the same wrong-report class this file records about its own earlier rows.
+var FOLD_UNDELIMITABLE = 'not rendered — the recorded value carries a parenthesis this row cannot delimit';
+
 // One slot, folded ONCE. The three fields are separate: `present` is about the input
 // (an empty value has never produced a parenthetical), `ok` is about the fold. Keeping
 // them apart is what lets the caller distinguish "there was nothing to say" from
@@ -3303,6 +3309,24 @@ function parentheticalWriter() {
         if (stated) return '';
         stated = true;
         return ' (' + FOLD_UNAVAILABLE + ')';
+      }
+    }
+    // THE DELIMITER BOUND, and it belongs HERE rather than in the shared class.
+    // safeDisplayValue admits `(` and `)` on purpose: other consumers render the same
+    // value in prose, where a parenthesis closes nothing and a project directory may
+    // legitimately contain one. This renderer is the one that WRAPS the value, so a
+    // `)` inside it ends the parenthetical and everything after renders as free prose
+    // — in a row skills/doctor/SKILL.md tells the model to relay, immediately before
+    // the row's own remedy instructions. MEASURED: a recorded root spelled
+    // `/tmp/x) Note. …` rendered its forged sentence into exactly that position.
+    // Dropping `()` from SAFE_DISPLAY was the alternative and is strictly worse: it
+    // changes a rule several other rows depend on, and its cost to legitimate paths
+    // has not been measured.
+    for (var k = 0; k < slots.length; k += 1) {
+      if (String(slots[k].text).indexOf(')') !== -1) {
+        if (stated) return '';
+        stated = true;
+        return ' (' + FOLD_UNDELIMITABLE + ')';
       }
     }
     return ' (' + render(slots.map(function (slot) { return slot.text; })) + ')';
