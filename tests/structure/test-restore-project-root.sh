@@ -443,6 +443,37 @@ else check "R6i  the roster names the phase token that row reads from the core" 
 # down wherever it exists: R13 grades tests/SUITE-OVERVIEW.md and the R12 family grades
 # comment prose inside session-control-core-v1.js, so an edit to either reddens a suite
 # named for the project-root restore.
+# R10c — every guarded FALLBACK for `baselineProvenanceUnrecorded` must apply the same
+# rule as the shared predicate. The core extracted that predicate because the rule "was
+# spelled three times with three different tests ... and the three had already diverged
+# on which provenance values count" — and the `typeof ... === "function" ? shared :
+# <inline copy>` form kept one of those divergences alive: the SessionStart self-heal's
+# fallback omitted the `existing` exclusion, so on a core predating the export it warns
+# about a missing provenance entry for a document nothing rebuilt. Anchored on the
+# GUARD, not on a bare comparison: this feature has other `provenance !== "recorded"`
+# tests that are deliberately different predicates.
+r10c_fallbacks_ok() {
+  awk '
+    /core\.baselineProvenanceUnrecorded/ { n++; win = 3; buf = ""; }
+    win > 0 { buf = buf $0 " "; win--; if (win == 0 && buf !~ /existing/) bad++ }
+    END { printf "%d %d", n+0, bad+0 }
+  ' "$1"
+}
+R10C_FILES="$PLUGIN_DIR/hooks/lib/session-adopt-report-v1.js $PLUGIN_DIR/hooks/lib/claude-session-control-v1.js"
+R10C_SEEN=0; R10C_BAD=""
+for r10c_f in $R10C_FILES; do
+  r10c_out="$(r10c_fallbacks_ok "$r10c_f")"
+  r10c_n="${r10c_out%% *}"; r10c_b="${r10c_out##* }"
+  R10C_SEEN=$((R10C_SEEN + r10c_n))
+  [ "$r10c_b" -eq 0 ] || R10C_BAD="$R10C_BAD $(basename "$r10c_f")($r10c_b)"
+done
+if [ "$R10C_SEEN" -ge 3 ]; then
+  check "R10c-control the guarded fallbacks are found ($R10C_SEEN sites)" PASS
+else check "R10c-control the guarded fallbacks are found ($R10C_SEEN sites)" FAIL; fi
+if [ -z "$R10C_BAD" ]; then
+  check "R10c every guarded fallback excludes \`existing\` as the shared predicate does" PASS
+else check "R10c a guarded fallback omits the \`existing\` exclusion:$R10C_BAD" FAIL; fi
+
 if printf '%s' "$R6_SECTION" | grep -qF 'SUITE-OVERVIEW.md'; then
   check "R6j  the section records the coupling that fires in the unobvious direction" PASS
 else check "R6j  the section records the coupling that fires in the unobvious direction" FAIL; fi

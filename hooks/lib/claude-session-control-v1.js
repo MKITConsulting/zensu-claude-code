@@ -249,9 +249,15 @@ function main() {
           // THE SHARED PREDICATE, because this rule was spelled three times with three
           // different tests — here and in the adopt report's two renderers — and the
           // three had already diverged on which provenance values count.
+          // The fallback applies the SHARED rule, `existing` exclusion included. It
+          // omitted that clause and was therefore the surviving member of the very
+          // divergence the extraction removed: on a core predating the export this
+          // warned that a rebuild's provenance entry was missing for a document
+          // nothing had rebuilt. R10c holds all three guarded fallbacks to one rule.
           if (typeof core.baselineProvenanceUnrecorded === 'function'
             ? core.baselineProvenanceUnrecorded(healed)
-            : Boolean(healed && healed.provenance !== 'recorded')) {
+            : Boolean(healed && healed.provenance !== 'recorded'
+              && healed.provenance !== 'existing')) {
             process.stderr.write(
               'zensu SessionStart: the workflow document was rebuilt but its '
               + 'BASELINE_REBUILT provenance entry could not be written ('
