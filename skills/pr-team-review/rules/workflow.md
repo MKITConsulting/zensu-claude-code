@@ -56,8 +56,7 @@ Trigger detection runs against `git diff origin/<base>...pr-<n>-review --name-on
 | Signal type | Weight |
 |---|---|
 | Every code PR (unconditional) | Forces the holistic core — `coverage-audit` + `bug-hunter` + `maintainability` + `adversarial` |
-| File-extension match | Activates persona |
-| Path-prefix match (e.g. `docs/DDD/`) | Activates persona |
+| Diff meets a persona's trigger criterion — the file types, paths and annotations a trigger names are examples, not a closed list (see *Reading a trigger* in `reviewer-personas.md`) | Activates persona |
 | Migration directory present | Forces `persistence-db` |
 | New endpoint files | Forces `security` + `rest-api` + `observability` |
 | Authorization or tenant-scoping code changed in an EXISTING path — role/permission checks, ownership predicates, repository or query filters | Forces `security` |
@@ -74,7 +73,7 @@ Trigger detection runs against `git diff origin/<base>...pr-<n>-review --name-on
 
 Cast size sanity check: with the always-on holistic core (4) plus matched specialists, a typical code PR runs **6-12 reviewers** — that is healthy, not bloated. All reviewers run in parallel in the background, so wall-clock is ~constant regardless of count (the concurrency cap `min(16, cores-2)` queues any excess automatically). Only ask the user to trim above ~14, and only where several specialists clearly don't apply. A docs-only PR runs just 2 (`docs-only` + `coverage-audit`).
 
-For docs-only PRs (only `*.md` changes), skip the multi-cast AND the rest of the holistic core — go straight to `docs-only` single reviewer **plus `coverage-audit`** (which reports `N/A — no production code changed`) + simplified synthesis that still carries the mandatory `### Test Coverage` section.
+For docs-only PRs (only `*.md`, `*.adoc` or `*.rst` changes — the closed list in the `docs-only` trigger), skip the multi-cast AND the rest of the holistic core — go straight to `docs-only` single reviewer **plus `coverage-audit`** (which reports `N/A — no production code changed`) + simplified synthesis that still carries the mandatory `### Test Coverage` section.
 
 **Repo-custom seats (beyond the pool).** The cast also ingests repo-defined personas from `.claude/agents/zensu-review-*.md` via `node "$ROOT/hooks/lib/persona-activation.js"` (unless `--no-custom-roles`), the same convention `/zensu:tdd` uses. **Discover from the BASE checkout `$REPO/.claude/agents`, NEVER `$WORKTREE`** — the PR head is untrusted and must not inject its own reviewer seats (same rule as the repo overlay). Activation globs match against the worktree diff's file *paths* (plain strings, no code executed); a seat with no `activation:` field always joins. The helper caps customs at 5 (matched-before-always-join); log every `skip`/`drop`/`unavailable` verdict humanized — never silently omit one. **On a docs-only PR** discovery still runs — if a repo-custom seat matches (an always-join seat, or one with `activation: "**/*.md"`), cast it alongside the lean `docs-only` + `coverage-audit` pair and fold its findings straight into the simplified synthesis (the debate round stays skipped); if none match, the lean path is unchanged. See `SKILL.md` Phase A.2 for the command and `reviewer-personas.md` § Repo-custom seats for the contract.
 
