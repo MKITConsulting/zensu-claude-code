@@ -26,7 +26,9 @@
     "reviewSpawnScopeSentence": true,
     "reviewerSpawnAutoAllow": true,
     "pendingReviewTtlHours": 6,
-    "implStopNudgeAfter": 12
+    "implStopNudgeAfter": 12,
+    "worktreeKeep": true,
+    "worktreeKeepIdleHours": 72
   },
   "context": {
     "compactionNudge": true,

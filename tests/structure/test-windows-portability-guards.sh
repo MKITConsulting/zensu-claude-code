@@ -687,6 +687,23 @@ else
   check "doctor renderer keeps a guarded O_NONBLOCK on all four opens and O_NOFOLLOW on the two session-writable readers" FAIL
 fi
 
+WORKTREE_KEEP="$ROOT/hooks/lib/worktree-keep-v1.js"
+if [ "$(grep -cF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)" "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF 'Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0' "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.openSync(file, fs.constants.O_RDONLY | noFollowFlag() | nonBlockFlag())' "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_CREAT | noFollowFlag() | nonBlockFlag()' "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF "fs.openSync(temp, 'wx', 0o600)" "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF "fs.openSync(marker.file, 'wx', 0o644)" "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -oF 'fs.openSync(' "$WORKTREE_KEEP" | wc -l | tr -d ' ')" -eq 4 ] \
+  && ! grep -qF 'readFileSync' "$WORKTREE_KEEP" \
+  && ! grep -qF 'appendFileSync' "$WORKTREE_KEEP" \
+  && ! grep -qF 'fs.constants.O_NOFOLLOW || 0' "$WORKTREE_KEEP" \
+  && ! grep -qF 'fs.constants.O_NONBLOCK || 0' "$WORKTREE_KEEP"; then
+  check "worktree-keep opens its one reader hardened, lands both markers exclusively and appends the exclude line through a descriptor" PASS
+else
+  check "worktree-keep opens its one reader hardened, lands both markers exclusively and appends the exclude line through a descriptor" FAIL
+fi
+
 if [ "$(grep -cF 'process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0' "$VCS")" -eq 10 ] \
   && ! grep -qF 'O_RDONLY|(fs.constants.O_NOFOLLOW||0)' "$VCS" \
   && ! grep -qF 'O_WRONLY|(fs.constants.O_NOFOLLOW||0)' "$VCS" \

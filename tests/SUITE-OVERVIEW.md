@@ -13,9 +13,9 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (151 = 144 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 144 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 151). The figures here have drifted TWICE in the same direction and both corrections are
+reconciled to that manifest (152 = 145 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 145 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 152). The figures here have drifted TWICE in the same direction and both corrections are
 recorded rather than overwritten: they once read 148 = 141 + 7 against a manifest already holding
 142 CI entries, and then 150 = 143 + 7 while the manifest already held 144. Both of those
 were internally consistent and merely stale. Correcting only the headline to 151 = 144 + 7 and
@@ -23,7 +23,7 @@ leaving the three derivation clauses at 143 and 150 then produced a THIRD state 
 stale but self-contradictory — the failure shape the section-4 header-numeral paragraph below
 names — and that is the state this revision closes.
 **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 142 against 144 CI-classified suites, so TWO CI
+asserted away: its eleven CI group headers sum to 143 against 145 CI-classified suites, so TWO CI
 suites appear in no §3 group. They are `test-session-trail-lineage.sh` and
 `test-incremental-review-rounds.sh`, re-derived BY NAME
 this time by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
@@ -63,8 +63,8 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **151** — 144 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **144 structure suites + 5 offline evals = 149 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 151 − 144 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **152** — 145 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **145 structure suites + 5 offline evals = 150 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 152 − 145 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -76,8 +76,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 151 structure suites + 5 offline evals | none |
-| `--ci` | 144 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 152 structure suites + 5 offline evals | none |
+| `--ci` | 145 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -100,19 +100,20 @@ Runner-level guarantees (themselves pinned by `test-run-all-preflight-watchdog.s
 
 ## 3. Deterministic structure suites — grouped by what they cover
 
-### Session Control & workflow state (15)
+### Session Control & workflow state (16)
 `orphaned-project-root` · `session-control-claude` · `session-control-core` ·
 `session-control-sandbox-hook-integration` · `session-id-v1` ·
 `session-start-banner` · `state-verb-diagnostics` · `tdd-log-path-anchor` ·
 `tdd-no-flock-external-lease` · `tdd-state-corruption-fail-closed` ·
 `tdd-state-path-safety` · `vanished-session-cwd` · `versioned-plugin-upgrade` ·
-`workflow-scope` · `zensu-runtime-controller`
+`workflow-scope` · `worktree-keep` · `zensu-runtime-controller`
 
 Covers the canonical CAS workflow document, immutable session binding, the shared
 Bash-3.2-compatible external process lease, symlinked-ancestor / non-regular-leaf
 rejection, fail-closed behavior on an unreadable state file, diagnostics on failed
-state verbs, the SessionStart banner, and a vanished live working directory under an
-intact binding. `session-control-claude` alone carries ~140
+state verbs, the SessionStart banner, a vanished live working directory under an
+intact binding, and the worktree-keep marker, anchor and drift lifecycle that keeps an
+app-managed worktree out of the Claude Desktop pool while a session is bound to it. `session-control-claude` alone carries ~140
 assertions.
 
 ### TDD engine & phase gate (17)
@@ -339,10 +340,11 @@ that suite's failure.
 | `process-supervisor.test.js` | 3 | wrapper / profile suites | bounded supervisor + process-tree teardown |
 | `owned-process.test.js` | 2 | `test-claude-promptfoo-wrapper.sh` | owned-process lifecycle |
 | `reviewer-spawn-allow-v1.test.js` | 18 | `test-reviewer-spawn-allow.sh` | the reviewer-spawn grant's derived agent set, its silence on every non-grant path, and the one-definition scan |
+| `worktree-keep-v1.test.js` | 36 | `test-worktree-keep.sh` (K3) | worktree keep: managed-worktree detection, anchor guards and the ref-shape rule, marker lifecycle with the reap window, exclude line, git-environment scrub, sibling sweep, drift and backfill rules, the unrenderable-branch read, the rejected-anchor marker hold, the anchor-file bound, the hook envelope, CLI verbs |
 
 FOUR further files — `session-lineage-v1.test.js`, `worktree-advice-v1.test.js`,
 `aspect-activation-v1.test.js` and `review-round-scope-v1.test.js` — exist on disk without a row
-here, re-derived by comparing `ls tests/structure/*.test.js` (35 files) against this table's 31
+here, re-derived by comparing `ls tests/structure/*.test.js` (36 files) against this table's 32
 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
 and is recorded here rather than quietly replaced: it named
 `review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js` and `session-adopt-report-v1.test.js`,

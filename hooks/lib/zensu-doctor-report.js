@@ -1629,6 +1629,104 @@ function ttlHours() {
 function implStopThreshold() {
   return boundedEnvInt('ZDOC_IMPL_STOP_NUDGE_AFTER', IMPL_STOP_NUDGE_FALLBACK, IMPL_STOP_NUDGE_MAX);
 }
+
+function worktreeKeepRows(nowMs, ownKey, projectRoot) {
+  var mod;
+  var underContainer = (path.sep + projectRoot + path.sep).indexOf(path.sep + '.claude' + path.sep + 'worktrees' + path.sep) !== -1;
+  try {
+    mod = require(path.join(pluginDir(), 'hooks', 'lib', 'worktree-keep-v1.js'));
+  } catch (e) {
+    if (!underContainer) {
+      line(OK, 'worktree: not under a .claude/worktrees container — ' + foldPath(projectRoot, ' needs no keep marker') + ' needs no keep marker');
+      return;
+    }
+    line(WARN, 'worktree: keep check NOT performed — hooks/lib/worktree-keep-v1.js could not be loaded ('
+      + (e && e.message ? e.message : String(e)) + ')');
+    return;
+  }
+  var managed = null;
+  try {
+    managed = mod.managedWorktree(projectRoot);
+  } catch (e) {
+    managed = null;
+  }
+  if (!managed) {
+    line(OK, 'worktree: not an app-managed worktree — ' + foldPath(projectRoot, ' needs no keep marker') + ' needs no keep marker');
+    return;
+  }
+  var root = managed.worktreeRoot;
+  if (env.ZDOC_WORKTREE_KEEP === 'off') {
+    line(OK, 'worktree: keep marker switched off (hooks.worktreeKeep=false) — the desktop pool may reuse or reap '
+      + foldPath(root, ' while a session is live here') + ' while a session is live here');
+    return;
+  }
+  // Every module call below reads a session-writable directory, so one errno the module
+  // re-throws would otherwise propagate out of stateBlock and discard the WHOLE report,
+  // which is accumulated and written once. The cost of a fault here is this row family.
+  try {
+    var idleMs = mod.idleMsFromHours(env.ZDOC_WORKTREE_KEEP_IDLE_HOURS);
+    var anchors = mod.listAnchors(root, nowMs, idleMs);
+    var marker = mod.markerState(root);
+    // listAnchors answers ok:false with EMPTY lists, so reading live.length as a count
+    // would render a green row with 0 over a directory the check never read.
+    var readable = anchors.ok !== false;
+    if (!readable) {
+      line(WARN, 'worktree: anchors in ' + foldPath(root, ' could not be read') + ' could not be read ('
+        + (anchors.reason || 'unknown') + ') — that is a missing check, not an all-clear, and the keep marker is left as it stands');
+    }
+    if (marker.state === mod.MARKER_STATES.REFUSED) {
+      line(WARN, 'worktree: keep marker refused — ' + foldPath(marker.file, ' is not a plain file')
+        + ' is not a plain file; the plugin neither creates nor removes it, inspect it by hand');
+    } else if (marker.state === mod.MARKER_STATES.FOREIGN) {
+      line(OK, 'worktree: keep marker in ' + foldPath(root, ' was not written by this plugin')
+        + ' was not written by this plugin — left alone, the desktop pool still honours it');
+    } else if (marker.state === mod.MARKER_STATES.OURS && readable) {
+      line(OK, 'worktree: keep marker present in ' + foldPath(root, ' (') + ' (' + anchors.live.length + ' live session anchor(s))');
+    } else if (marker.state === mod.MARKER_STATES.OURS) {
+      line(OK, 'worktree: keep marker present in ' + foldPath(root, ' — ') + ' — how many session anchors are live could not be read');
+    }
+    if (ownKey !== '') {
+      var own = mod.anchorVerdict(root, ownKey, nowMs, idleMs);
+      if (own.verdict === mod.VERDICTS.MISSING) {
+        line(WARN, 'worktree: this session has no anchor in ' + foldPath(root, ' yet')
+          + ' yet — the next prompt writes one and restores the keep marker');
+      } else if (own.verdict === mod.VERDICTS.REJECTED) {
+        line(WARN, 'worktree: this session\'s anchor in ' + foldPath(root, ' is not one this plugin wrote')
+          + ' is not one this plugin wrote (' + own.reason + ') — remove it by hand; the next prompt rewrites it');
+      } else if (mod.unresolvedRecord(own.record)) {
+        line(WARN, 'worktree: this session\'s anchor in ' + foldPath(root, ' recorded no branch')
+          + ' recorded no branch — the branch read failed when the session started; the next prompt records the current one');
+      } else {
+        if (marker.state === mod.MARKER_STATES.ABSENT && own.verdict === mod.VERDICTS.LIVE) {
+          line(WARN, 'worktree: keep marker MISSING in ' + foldPath(root, ' while this session')
+            + ' while this session\'s anchor is live — the desktop pool may reuse or reap it; the next prompt restores the marker');
+        }
+        var current = mod.currentBranch(root);
+        var drift = mod.detectDrift(own.record, current);
+        if (drift) {
+          line(WARN, 'worktree: branch drift — ' + mod.driftSentence(foldPath(root, ' is now on '), drift)
+            + '; another session may have taken the directory. '
+            + mod.remedyLines({ worktreeRoot: root, from: drift.from }).join(' '));
+        } else if (current.ok) {
+          line(OK, 'worktree: this session still sits on its recorded ' + mod.describeBranch(own.record.branch)
+            + ' in ' + foldPath(root, ''));
+        } else {
+          line(WARN, 'worktree: current branch unreadable in ' + foldPath(root, ', so a takeover could not be ruled out')
+            + ', so a takeover could not be ruled out');
+        }
+      }
+    } else if (marker.state === mod.MARKER_STATES.ABSENT) {
+      line(OK, 'worktree: no keep marker in ' + foldPath(root, ' and this session is not bound')
+        + ' and this session is not bound, so its own anchor was not judged');
+    }
+    if (anchors.rejected.length) {
+      line(WARN, 'worktree: anchor file(s) this plugin did not write in ' + foldPath(root, ' — inspect: ')
+        + ' — inspect: ' + anchors.rejected.map(function (r) { return r.name; }).join(', '));
+    }
+  } catch (e) {
+    line(WARN, 'worktree: keep check NOT performed for ' + foldPath(root, ' (') + ' (' + (e && e.message ? e.message : String(e)) + ')');
+  }
+}
 // The shapes that carry no work forward. Taken from chain-recovery-v1.js, which
 // OWNS the vocabulary and mints these literals a few lines from where it lists
 // them. A hand-copy here was tried and was wrong in the one direction that
@@ -3857,6 +3955,7 @@ function stateBlock(nowMs) {
     if (e && e.code === 'ENOENT') {
       line(OK, 'state: ' + foldPath(dir, ' does not exist yet') + ' does not exist yet — nothing to clean');
       ownDocumentVerdict(false);
+      worktreeKeepRows(nowMs, currentSessionKey(), projectRoot);
     } else {
       // Every other errno is a check that did NOT run. Rendering it green hid the
       // whole Session state block behind an all-clear, which is the one verdict
@@ -3931,6 +4030,7 @@ function stateBlock(nowMs) {
   // the hold in exactly the fresh session most likely to walk into it.
   autopilotRows(entries, dir, nowMs, currentSessionKey(), projectRoot);
   claimTopologyRow(projectRoot, currentSessionKey());
+  worktreeKeepRows(nowMs, currentSessionKey(), projectRoot);
   var pr = path.join(dir, 'pending-review.json');
   try {
     var st = fs.statSync(pr);

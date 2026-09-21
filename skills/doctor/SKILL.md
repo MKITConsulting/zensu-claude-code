@@ -16,7 +16,8 @@ description: >
   chain's shape plus any wedged chain and
   its recovery command, any open chain not owned by this session, any chain this
   session owns that has ended many turns at implementing, any nonterminal durable
-  Autopilot run holding a working tree, any reviewer spawn
+  Autopilot run holding a working tree, whether this session's app-managed worktree
+  carries the desktop-pool keep marker and still sits on its recorded branch, any reviewer spawn
   the host permission layer refused, any claim this session audited against a root
   that is not the anchor, expired pending-review surfaced).
   The only write is an explicit, user-confirmed cleanup of one
@@ -809,6 +810,61 @@ classifier will refuse a spawn, not only when the whole table is green.
   the next Stop in that project, so this row can clear without anyone acting on
   it. Offer no cleanup for either row: Phase 3 below is still the only write, and
   it covers `pending-review.json` alone.
+- **✅ worktree: not an app-managed worktree — … needs no keep marker** → the session runs
+  in a plain checkout, which the Claude Desktop worktree pool never reuses; nothing to do. The
+  sibling **✅ worktree: not under a .claude/worktrees container** says the same from a plugin
+  root that could not load the keep module.
+- **✅ worktree: keep marker present in … (N live session anchor(s))** → the
+  `.worktree-keep` file the `session-start-worktree-keep.sh` hook writes is in place, so the
+  desktop pool skips this directory both as a reuse candidate and in its idle reaper. Nothing
+  to do. The sibling **✅ worktree: keep marker present in … — how many session anchors are
+  live could not be read** says the marker is in place while the anchor directory itself could
+  not be listed, so the count is withheld rather than rendered as zero.
+- **⚠️ worktree: anchors in … could not be read** → the session-anchor directory could not be
+  listed, so this check did not run. It is a missing check, not an all-clear: the keep marker
+  is left exactly as it stands, and no live-anchor count and no rejected-anchor row can be
+  trusted for that directory. Relay the reason the row names and inspect the directory by hand.
+- **✅ worktree: keep marker in … was not written by this plugin** → a marker someone placed
+  by hand. The plugin never removes it; the pool still honours it.
+- **✅ worktree: keep marker switched off (hooks.worktreeKeep=false)** → the check is
+  disabled by configuration, so the row says so instead of falling silent; the desktop pool
+  may reuse or reap the directory while a session is live in it. Report the flag.
+- **✅ worktree: this session still sits on its recorded branch … in …** → the branch this
+  session recorded when it started is still checked out; nothing to do.
+- **✅ worktree: no keep marker in … and this session is not bound** → the report ran without
+  a session binding, so the session's own anchor was not judged; the marker is absent because
+  no live anchor exists there. Nothing to do unless a binding row above names a fault.
+- **⚠️ worktree: keep marker MISSING in … while this session's anchor is live** → the
+  next prompt restores it through `user-prompt-worktree-keep.sh`; if the row persists across
+  prompts, the marker path is refused (a symlink or a non-file sits there) or the hook is not
+  registered. Nothing to delete.
+- **⚠️ worktree: this session has no anchor in … yet** → the session started before the hook
+  existed, or its anchor was reaped; the next prompt writes one. Nothing to do.
+- **⚠️ worktree: this session's anchor in … is not one this plugin wrote (reason)** → an
+  unreadable or foreign record sits at this session's own anchor path. The row asks the user
+  to remove it by hand, after which the next prompt rewrites it; relay that. Phase 3 covers
+  `pending-review.json` alone, so offer no cleanup here. The sibling **⚠️ worktree: this
+  session's anchor in … recorded no branch** means the branch read failed when the session
+  started; the next prompt records the current branch, nothing to do.
+- **⚠️ worktree: branch drift — … is now on branch X (HEAD …) but this session's anchor
+  recorded branch Y when it started** → another Claude session took over this directory: the
+  desktop pool re-leased it and checked X out in place. Relay the remedy the row prints
+  verbatim — continue in a worktree NESTED inside this directory
+  (`git worktree add .claude/worktrees/<slug> Y`), never switch the shared directory back to Y,
+  never work in a sibling or temp-dir worktree (the desktop write-guard refuses those as
+  `sibling_worktree`), and if a review chain is armed in this session close it here first,
+  because its gates still measure this directory. If the session switched branches itself,
+  say so and stop; the row clears once Y is checked out again.
+- **⚠️ worktree: current branch unreadable in …** → git could not answer for this worktree,
+  so a takeover could not be ruled out; name it and stop.
+- **⚠️ worktree: keep marker refused — … is not a plain file** and
+  **⚠️ worktree: anchor file(s) this plugin did not write in …** → the marker or an anchor is a symlink, a non-file
+  or an unreadable record. The plugin neither creates nor removes such an object; name it and
+  let the user inspect it. Phase 3 covers `pending-review.json` alone, so offer no cleanup
+  here.
+- **⚠️ worktree: keep check NOT performed** and **⚠️ worktree: keep check NOT performed for
+  …** → `hooks/lib/worktree-keep-v1.js` could not be loaded from this plugin root, or the
+  anchor directory could not be listed; a missing check, not an all-clear.
 
 If everything is green, say so in one line and stop — there is nothing to do,
 except that the line must carry the `~/.claude/settings.json` bound stated in
