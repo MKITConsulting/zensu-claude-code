@@ -448,6 +448,17 @@ REVIEWER_SPAWN_ALLOW_RULE="Add the rule \"Agent(zensu:code-reviewer)\" to permis
 # unconditionally here rather than rebuilt per kind, because this surface is advisory
 # and a wrong kind would cost more than a redundant sentence.
 REVIEWER_SPAWN_DENY_FIRST="Deny is evaluated before ask and allow, so remove any deny rule naming the Agent tool first — while one stands, adding the allow rule changes nothing."
+# The receipt exit BOTH implementing-turn notices prescribe. It was hand-authored
+# twice, in two ~290-character strings differing in five characters, in a file that
+# already keeps module-scope constants for exactly this and interpolates them into
+# those same echoes. Nothing under tests/ grepped for either half, so a reword of
+# one copy could drift from the other with every check green. It is a FUNCTION and
+# not a bare constant because `complete_cmd` is computed inside the nudge, below
+# this point — the same ordering constraint the two constants above already state
+# about `LOG_COMMAND`.
+zensu_impl_receipt_exit() {
+  printf '%s' "run the /zensu:tdd Phase 6 step 5b edit-landing audit until its receipt records a CLEAN verdict, make sure the plan carries a usable '## Requirements' table, then mark the implementation complete with ${1} — while the tree is dirty that verb refuses a plan without that table, and it reads the receipt's verdict rather than its existence, so every claimed edit has to have landed."
+}
 
 reviewer_spawn_denial_probe() {
   local lib probe
@@ -1463,7 +1474,7 @@ zensu_impl_stop_nudge() {
     else
       nudge_denial_attempt="Report the refusal and the rule above to the user in your next message rather than acting on it silently; if they say in this conversation that they have just lifted it, completing the implementation is the right next move — the chain issues its own ticket and spawns the reviewer, and a second refusal means stop and say so."
     fi
-    echo "Zensu review chain: this session has now ended ${count} turns with its chain still at 'implementing' while the worktree reports a changed file outside '.zensu', so the review chain has not asked for a reviewer and nothing here has been reviewed. Read the next sentence before acting on that, because it is compatible with a spawn that WAS attempted: the host permission layer refused this session's zensu:code-reviewer spawn (kind: ${REVIEWER_DENIAL_KIND:-unclassified}, refusals observed: ${REVIEWER_DENIALS:-0}). That is a harness permission setting outside this conversation, so the user has to lift it, and you must never edit a settings file yourself to widen your own permissions. ${REVIEWER_SPAWN_DENY_FIRST} ${REVIEWER_SPAWN_ALLOW_RULE}. The exit is still the review chain: run the /zensu:tdd Phase 6 step 5b edit-landing audit, make sure the plan carries a usable '## Requirements' table, then mark the implementation complete with ${complete_cmd} — that verb refuses without both while the tree is dirty. Take that exit once the permission exists; while it does not, completing only moves the chain to a gate the host will not let it pass and every later Stop blocks until the cap releases. ${nudge_denial_attempt} Stop is not blocked; this notice repeats at each turn end while the worktree still reports a changed file outside '.zensu' and the chain is still at 'implementing'." >&2
+    echo "Zensu review chain: this session has now ended ${count} turns with its chain still at 'implementing' while the worktree reports a changed file outside '.zensu', so the review chain has not asked for a reviewer and nothing here has been reviewed. Read the next sentence before acting on that, because it is compatible with a spawn that WAS attempted: the host permission layer refused this session's zensu:code-reviewer spawn (kind: ${REVIEWER_DENIAL_KIND:-unclassified}, refusals observed: ${REVIEWER_DENIALS:-0}). That is a harness permission setting outside this conversation, so the user has to lift it, and you must never edit a settings file yourself to widen your own permissions. ${REVIEWER_SPAWN_DENY_FIRST} ${REVIEWER_SPAWN_ALLOW_RULE}. The exit is still the review chain: $(zensu_impl_receipt_exit "${complete_cmd}") Take that exit once the permission exists; while it does not, completing only moves the chain to a gate the host will not let it pass and every later Stop blocks until the cap releases. ${nudge_denial_attempt} Stop is not blocked; this notice repeats at each turn end while the worktree still reports a changed file outside '.zensu' and the chain is still at 'implementing'." >&2
     return 0
   fi
   # Says what the probe MEASURES. `git status --porcelain` reports untracked
@@ -1482,7 +1493,7 @@ zensu_impl_stop_nudge() {
   # its own message, so the notice can go silent with the chain exactly where it
   # was — and a reader who took silence as progress would be wrong. The clause
   # names the conditions the code actually re-tests.
-  echo "Zensu review chain: this session has now ended ${count} turns with its chain still at 'implementing' while the worktree reports a changed file outside '.zensu', so the review chain has not asked for a reviewer and nothing here has been reviewed. The exit is the review chain: run the /zensu:tdd Phase 6 step 5b edit-landing audit, make sure the plan carries a usable '## Requirements' table, then mark the implementation complete with ${complete_cmd} — that verb refuses without both while the tree is dirty. Stop is not blocked; this notice repeats at each turn end while the worktree still reports a changed file outside '.zensu' and the chain is still at 'implementing'." >&2
+  echo "Zensu review chain: this session has now ended ${count} turns with its chain still at 'implementing' while the worktree reports a changed file outside '.zensu', so the review chain has not asked for a reviewer and nothing here has been reviewed. The exit is the review chain: $(zensu_impl_receipt_exit "${complete_cmd}") Stop is not blocked; this notice repeats at each turn end while the worktree still reports a changed file outside '.zensu' and the chain is still at 'implementing'." >&2
   return 0
 }
 

@@ -182,7 +182,11 @@
   <p class="lede">How a Zensu chain could span several repositories without giving up the one
   trusted project root — and how a review sitting on top of it can see contract breaks between
   those roots.</p>
-  <p class="lede"><strong>Status: proposed, and stages 2 and 3 are BLOCKED.</strong> Nothing here is
+  <p class="lede"><strong>Status: stage 1 is implemented; stages 2 and 3 are BLOCKED.</strong> Stage 1
+  ships the detect-and-refuse half: the terminus judges the edit-landing receipt's verdict, a logged
+  claim arms that requirement even when the anchor's tree is clean, a claim resolving outside the
+  audited root fails the audit and names the foreign root, and <code>/zensu:doctor</code> carries a
+  topology row. <strong>Which half of stage 1 is universally live is narrower than “stage 1 is implemented”:</strong> the log writer redacts a message before it lands, rewriting <code>$HOME</code> to <code>~</code> and the project root to <code>&lt;project&gt;</code>, and the audit's absolute-claim arm only ever sees a path still beginning with <code>/</code>. A foreign root outside both <code>$HOME</code> and the project root is detected; a sibling repository under <code>$HOME</code> is rewritten out of that shape and is not. Nothing else here is
   implemented. Stage 2 must not be built until the carrier question of the specification's §6.1.1 is
   answered and the carrier-integrity finding of §8.1 is resolved: the workflow document is writable
   from inside the session and carries no integrity check, so it cannot hold a capability. Read the
@@ -283,7 +287,7 @@
       <p>The audit writes to <code>&lt;--project&gt;/.zensu/state/</code> while the terminus looks in
       the anchor's state directory. Two runs therefore leave two receipts nobody reads — and each run
       reports the other repository's claims as not landed.</p>
-      <p class="src">zensu-edit-landing.sh:292 · zensu-log.sh:888</p>
+      <p class="src">zensu-edit-landing.sh:838 · zensu-log.sh:994</p>
     </div>
     <div class="card">
       <span class="tag warn">Asymmetry</span>
@@ -294,12 +298,19 @@
       <p class="src">bash-source-write-parse.js:817 · hooks/pre-edit-tdd-reminder.sh:137-164</p>
     </div>
     <div class="card">
-      <span class="tag bad">Silent pass</span>
-      <h3>The terminus checks nothing</h3>
-      <p>The receipt gate fires only when <code>git -C "$CLAUDE_PROJECT_DIR"</code> counts changes.
-      With a clean orchestrator the count is zero, the receipt is skipped, and the chain closes — with
-      a reviewer that saw nothing either.</p>
-      <p class="src">zensu-log.sh:948-950</p>
+      <span class="tag bad">Silent pass — superseded by stage 1</span>
+      <h3>The terminus checked nothing</h3>
+      <p>The receipt gate fired only when the anchor's change count was non-zero. With a clean
+      orchestrator the count is zero, the receipt was skipped, and the chain closed — with a
+      reviewer that saw nothing either. <strong>Stage 1, item 2 supersedes this:</strong> the gate
+      now ALSO arms on a logged claim, and it judges the receipt's <code>clean</code> verdict rather
+      than its existence. Two details the earlier wording got wrong about
+      <code>--tdd-complete</code>: the count resolves its root through
+      <code>zensu_resolve_project_dir()</code> rather than the ambient
+      <code>CLAUDE_PROJECT_DIR</code>, and it runs with the git environment scrubbed. The
+      <code>--chain-done</code> zero-change terminus is the half that stayed ambient and
+      unscrubbed. A chain that claimed nothing is still exempt.</p>
+      <p class="src">zensu-log.sh:988 · zensu-log.sh:971-1061 · zensu-log.sh:1953-1955</p>
     </div>
   </div>
 </section>
@@ -426,8 +437,10 @@
         <tr>
           <th scope="row"><strong>Terminus</strong><span class="tag flat inline">stage 2</span></th>
           <td>The zero-change scoping of <code>--tdd-complete</code> and <code>--chain-done</code>
-          counts the union. Otherwise a clean anchor still closes an empty chain.</td>
-          <td class="where mono">zensu-log.sh:948-950</td>
+          counts the union. Otherwise a clean anchor still closes an empty chain. Stage 1, item 2
+          narrowed this for <code>--tdd-complete</code> — it also arms on a logged claim — and left
+          the <code>--chain-done</code> zero-change terminus unchanged.</td>
+          <td class="where mono">zensu-log.sh:1058-1060<br>zensu-log.sh:1953-1955</td>
         </tr>
         <tr>
           <th scope="row"><strong>Capability confinement</strong><span class="tag flat inline">stage 3</span></th>
@@ -582,14 +595,14 @@
       repo's main checkout. From a code root's repository the session is reachable only via
       <code>--all</code>, otherwise only from the anchor. Pre-existing behavior that multi-repo makes
       more consequential.</p>
-      <p class="src">skills/session-trail/SKILL.md:287</p>
+      <p class="src">skills/session-trail/SKILL.md:305</p>
     </div>
     <div class="card">
       <span class="tag ok">Resume</span>
       <h3>Already correct today</h3>
       <p>The printed continuation line <code>cd -- ${r.cwd} &amp;&amp; claude --resume …</code> lands in
       the anchor. That is exactly the right place and needs no change.</p>
-      <p class="src">trail.mjs:4018</p>
+      <p class="src">trail.mjs:4276</p>
     </div>
   </div>
 

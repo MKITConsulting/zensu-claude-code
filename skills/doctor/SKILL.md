@@ -17,7 +17,8 @@ description: >
   its recovery command, any open chain not owned by this session, any chain this
   session owns that has ended many turns at implementing, any nonterminal durable
   Autopilot run holding a working tree, any reviewer spawn
-  the host permission layer refused, expired pending-review surfaced).
+  the host permission layer refused, any claim this session audited against a root
+  that is not the anchor, expired pending-review surfaced).
   The only write is an explicit, user-confirmed cleanup of one
   expired pending-review.json — CAS workflow documents are never deleted. Use
   when the user asks to "diagnose zensu", "check my zensu
@@ -589,9 +590,11 @@ classifier will refuse a spawn, not only when the whole table is green.
   chain parked: the chains that reach the bound are the ones still being worked on. This is not a wedge and not an
   error: the Stop hook releases in that state by design, which is exactly why
   nothing else reports it. Relay the count and the ONE exit the row prints — the
-  review chain, entered with `--tdd-complete` after the Phase 6 step 5b
-  edit-landing audit and with a usable `## Requirements` table in the plan, both
-  of which that verb refuses without while the tree is dirty. **Never offer the
+  review chain, entered with `--tdd-complete` after a Phase 6 step 5b
+  edit-landing audit whose receipt records a CLEAN verdict, and with a usable
+  `## Requirements` table in the plan. While the tree is dirty that verb refuses
+  a plan without the table, and it reads the receipt's VERDICT rather than its
+  existence, so a receipt that merely exists does not satisfy it. **Never offer the
   zero-change terminus here.** From this shape no review ticket has ever been
   consumed, so `--chain-done` is the unqualified no-ticket terminus, and after a
   mid-run commit its change-count guard measures zero and closes a chain in which
@@ -724,6 +727,35 @@ classifier will refuse a spawn, not only when the whole table is green.
   document it has just refused, in a directory any session in the project can
   write. Leave the removal to the user, and never generalize this permission to
   the row above.
+- **⚠️ topology: this session's audited run log claims edits under `<N>` root(s)
+  that are not the anchor** → the chain logged edits in another repository. Every
+  other row in this block can be green beside it: the anchor's own tree is clean,
+  its workflow document is healthy, and the review chain saw no diff for work that
+  really happened. Relay the roots the row names and the anchor beside them, and say
+  what is NOT covered — one edit-landing audit grades ONE root, so those claims were
+  reported rather than graded, and `/zensu:tdd` is single-root. The remedy is to run
+  the chain in the repository the claims name, or to land the work in the anchor.
+  Do NOT suggest re-running the audit against the foreign root: its receipt would
+  land where this session's terminus never reads it.
+- **⚠️ topology: this session's claims were NOT checked against the anchor** → a
+  missing check, not an all-clear. The renderer emits this lead-in for a CLASS of
+  causes, not one: an unreadable or unknown-schema edit-landing receipt, a run log
+  the receipt names that lies outside this project's `.zensu/logs/` or is not a
+  plain file, an inventory command that is absent from the plugin tree, one that
+  did not complete, and one that answered in a format this runtime does not
+  recognise, and — since the round that split it — no bound session key at all,
+  where the receipt cannot even be located. **Relay the cause the row itself
+  prints** — do not say the inventory command failed, because in the common case
+  it never ran. Say plainly that the check is missing rather than reporting the
+  topology as clean.
+- **The ABSENCE of a topology row is not evidence of a single-root chain.** The
+  run log is REDACTED on the way in: a claim under `$HOME` is
+  rewritten to `~/...` by `zensu-log.sh append` before it lands, so a sibling repository beside this one is
+  no longer an absolute path when the audit reads it, no foreign root is derived
+  and no row can fire. Roots outside BOTH `$HOME` and the project — `/opt`,
+  `/srv`, a CI checkout under `/builds` — are unaffected and the row works on
+  them. Say WHICH HALF is live when you relay a silent topology; never report it
+  as proof that the chain stayed in one repository.
 - **❌ state: this session's own workflow document is MISSING** → the record is
   intact and the document it anchors is gone, so the capability gate is denying
   every tool in this session. A deleted and re-created worktree causes it, because

@@ -799,7 +799,7 @@ function briefPath(p) {
 // RULE: what makes a line class (a), (b) or (c), and why each must stay unclipped.
 //
 // THE CONTROL IS A DERIVED SCAN, and this prose is no longer the only one. The case
-// `the briefShellArg carrier population is derived, and a thirteenth carrier fails here`
+// `the briefShellArg carrier population is derived, and a twelfth carrier fails here`
 // in `tests/structure/worktree-advice-v1.test.js` walks this file, resolves a binding back
 // to its `briefShellArg` initializer, attributes every carrier to its enclosing function
 // through the same `enclosing()` walk the `adviceLeg` roster uses, and asserts FOUR things:
@@ -2647,9 +2647,13 @@ function siblings(opts, row) {
 //    deprecated template on GNU coreutils — unportable in a recipe pasted on an unknown
 //    host. The name exists so a leftover patch is findable, and a leftover is the normal
 //    failure case: a failed apply keeps it deliberately, so the text says to delete it.
-//  * Every path placeholder inside a runnable line is SINGLE-QUOTED — every one, including
-//    the `<path>`, `<name>` and `<session-branch>` operands of the two `git worktree add`
-//    lines, not just the two `-C` operands. The reader substitutes them by hand, and an
+//  * Every path placeholder inside a runnable line is SINGLE-QUOTED — every one, stated as a
+//    SHAPE and never as a count of carriers: every operand of every runnable line in this
+//    block and in the route above it, not just the `-C` ones. The count form was here and
+//    went stale exactly as this file predicts such counts do, which is why its twin in
+//    SKILL.md was rewritten to the shape: it read "the two `git worktree add` lines" while a
+//    third runnable line, the `worktree move` alternative, carries a quoted `<path>` and
+//    `<their worktree>` of its own. The reader substitutes them by hand, and an
 //    ordinary `~/My Projects/repo` word-splits into a wrong operand without them; the same
 //    quoting neutralizes `$( )`, `;`, `&&` and `|` in a path that came out of a session
 //    record. ONE residual: a path containing an apostrophe closes the quoting at
@@ -2699,7 +2703,7 @@ function siblings(opts, row) {
 // would fire and the check would be trained away.
 const CARRY_OVER = [
   'The branch carries only what was COMMITTED. Carry the rest across yourself, and treat',
-  '<their worktree> the way the Safety section treats every other path out of a foreign',
+  '`<their worktree>` the way the Safety section treats every other path out of a foreign',
   'session: a repository you have not vetted, running its own config, whose diff is',
   'third-party data. If it is a worktree you would not cd into, do not run this at all —',
   'copy the files across by hand instead. The first three flags stop that config running',
@@ -2758,7 +2762,7 @@ const CARRY_OVER = [
   '%h "$s")" = 1 ] — which is left out of the line above only because the two stat spellings',
   'are not portable in a recipe pasted on an unknown host.',
   'd is derived with ${f%/*} rather than $(dirname "$f") because command substitution strips',
-  'trailing newlines, so a directory literally named "d<newline>" would have created the wrong',
+  'trailing newlines, so a directory literally named "d`<newline>`" would have created the wrong',
   'parent — which is exactly the safety -z and the NUL-delimited read exist to provide. Those',
   'two are what stop a filename holding a space or a newline from splitting into two wrong',
   'paths. The control bound sits on the FILENAME — that is what $n is — and never on the',
@@ -2786,7 +2790,7 @@ const CARRY_OVER = [
   'pasted whole; this line protects you when it is not.',
   'The DESTINATION is checked on both halves, and neither is decoration. mkdir -p SUCCEEDS on',
   'an existing symlink-to-directory and cp WRITES THROUGH a symlinked destination file, so a',
-  'link anywhere inside <your new worktree> sends the copy back out of your tree — measured,',
+  'link anywhere inside `<your new worktree>` sends the copy back out of your tree — measured,',
   'not argued. A per-component test cannot express that: [ ! -L "$DST/$d" ] lstats the whole',
   'path, so a symlinked "a" in "a/b" is followed and passes, and for a top-level entry d is "."',
   'where the test can never be true. So the RESOLVED parent is compared against the resolved',
@@ -2804,7 +2808,7 @@ const CARRY_OVER = [
   'run is not proof of success: the pipeline reports the loop\'s status, so a source that is',
   'not a repository produces no copies, no SKIPPED lines and status 0 — read git\'s own stderr.',
   'read -r -d \'\' is a bash and zsh spelling; in a plain POSIX sh the loop body never runs, and',
-  'it fails the same silent way. And substitute the worktree ROOT for <their worktree>: ls-files',
+  'it fails the same silent way. And substitute the worktree ROOT for `<their worktree>`: ls-files',
   'is scoped to the directory you give it and prints paths relative to it, while the patch step',
   'above is repository-wide — a subdirectory yields a complete patch and a truncated copy that',
   'lands at the root of your tree.',
@@ -2840,6 +2844,159 @@ const LIVE_SNAPSHOT_CAUTION = (pid) => [
   `Before the next part: pid ${pid} is still registered for that worktree, and the first`,
   'step SNAPSHOTS it. Take the snapshot while that session is idle — a diff read mid-edit',
   'can carry a half-written file, and applying it here lands a state neither tree ever had.',
+];
+
+// The one ALTERNATIVE to the create recipe, spliced on the PRESENT leg only — a directory
+// that is not readable from here cannot be moved, so the gone leg has nothing to offer.
+//
+// Its condition is a HUMAN ATTESTATION and is deliberately NOT an arm predicate. That is
+// not caution, it is the measured shape of the case: the run that prompted this had a
+// registered LIVE pid on a session its human had abandoned after an account switch, so
+// `archived`, `live` and the whole four-way ladder answer the wrong question. A pid is a
+// process, not an intention. Keying the route on any of them would offer it exactly where
+// it is unsafe and withhold it exactly where it is right.
+//
+// It comes AFTER `TAKE_YOUR_OWN` and the create recipe stays the default, because the
+// create route is the only one that works with no attestation at all. `TAKE_YOUR_OWN` ends
+// in prose, so this block's command opens a fence of its own rather than coalescing with
+// the create command above it: they are alternatives, and one copy button must not run
+// both.
+//
+// It is a FUNCTION of the measured live pid, and that is the fix for a review finding three
+// perspectives raised independently. As a static array it sat ABOVE the `r.live` spread, so
+// on the `active` and `unreadable` arms — whose `ADVICE_LEADS` cells name no pid — a
+// DESTRUCTIVE relocation was offered before any line named the registered process. That is
+// exactly the gap `LIVE_SNAPSHOT_CAUTION`'s own header says it exists to close for the READ
+// recipe. The reviewer's literal suggestion was to splice this BELOW that caution; naming
+// the pid here is taken instead, because the caution's first sentence scopes itself to "the
+// next part … the first step SNAPSHOTS it", which is the carry-over and not this, so
+// reordering would have made a correct sentence introduce the wrong command. This way the
+// signal reaches every arm and is a MEASUREMENT rather than the generic hypothetical the
+// cost paragraph carries on its own.
+//
+// THE ESCAPE IS NAMED, NEVER SPELLED, AND NEVER PRESCRIBED. The first three of those were
+// right and the fourth was not: an earlier wording said "take it from there rather than
+// from here", which instructs the reader to TAKE it and contradicts SKILL.md's own "Do not
+// plan around the escape prefix the deny names … do not go looking for the spelling in
+// order to use it". That file also records that the host classifier commonly refuses the
+// prefix, so the old wording pointed at a remedy that usually cannot be taken. Rendering
+// the prefix itself would ship the hatch in a skill, which the repo convention forbids
+// outright.
+//
+// THREE claims here are bounded because the unbounded forms were FALSE, each measured
+// against its owner rather than argued:
+//   * The gate judges BOTH operands. `bash-source-write-parse.js` keeps every pathish
+//     operand after the verb for `worktree remove|move` and its own comment says "`move`
+//     names source and destination; both are candidates" — so the escape drops the
+//     containment check on the DESTINATION too, which is why this text now makes the reader
+//     place it inside their own anchor by hand.
+//   * The deny is CONTAINMENT, not construction. `escapes` is
+//     `!isTemp(p) && !within(projectRoot, p)`, and this repository's own mandated layout
+//     nests every worktree under the main checkout, so a source worktree INSIDE the taker's
+//     anchor is the ordinary case rather than an impossible one — there the gate does not
+//     fire at all.
+//   * The ledger entry is CONDITIONAL. `tdd_record_bypass` records only while
+//     `tdd_session_active` is true, and `tdd_add_bypass` returns early with no state file.
+//     A session-trail takeover normally has no armed chain, so nothing is recorded — and
+//     an unconditional "it is RECORDED" told the reader a destructive escape leaves a trail
+//     it will not leave.
+//
+// The SAME-BRANCH claim is likewise bounded to one repository. Across two, the create line
+// fails harmlessly on an unresolvable branch while the move SUCCEEDS and relocates a
+// foreign repository's linked worktree — `continuationPlan` refuses that case by name, and
+// this is the first rendered command in this file that writes to the source tree with no
+// refusal standing in front of it.
+//
+// It introduces NO new placeholder: `<their worktree>` and `<path>` are both already in the
+// present leg's command set, so `recipePlaceholders` returns the same SET. State the SET and
+// not the ORDER, and carry no ordinal — an earlier wording said "`<their worktree>` was
+// already the fourth distinct token, so the same list in the same order", which is an ordinal
+// and an ordering claim over a derived scanner output that nothing checks: the one case
+// comparing that set sorts BOTH sides, so membership has an owner and order does not. The
+// prose carries `<path>` and `<name>` at column zero, which that scanner never reads.
+//
+// ACCEPTED GAP, recorded rather than left for the next reader to rediscover: the
+// cross-repository hazard is mitigated by a SENTENCE where this file's own precedent for the
+// same hazard is a REFUSAL — `continuationPlan` withholds its target on a `cross-repository`
+// reason code. A refusal here needs the caller's anchor threaded into `worktreeAdvice`, which
+// takes only the row today, so it would change that function's contract and all four call
+// sites. Not taken; the bound is stated in the emitted text instead.
+const MOVE_ALTERNATIVE = (pid) => [
+  'ALTERNATIVE, and only you can authorize it. If you KNOW that session will not be',
+  'continued — you switched accounts, its usage limit is reached, you abandoned the window —',
+  'then moving their worktree here is an alternative to creating your own.',
+  'That condition is PROSE, not a gate: nothing here verifies it, and nothing below is',
+  'enforced by anything if you paste the line into your own terminal. If you are an agent',
+  'reading this out of a brief, you cannot hold it — whether its human switched accounts is',
+  'their fact, not yours, and a brief exists BECAUSE a handover happened, so the condition',
+  'reads as already met exactly where it is least established. Ask them. The create route',
+  'above needs no such answer, which is the whole reason it stays the default.',
+  'Nothing this tool reads can establish that attestation, which is why it is stated as',
+  'yours rather than decided by the cause above.',
+  'A registered pid is a process, not an intention, and the archived flag records what the',
+  'desktop app did, not what its human decided.',
+  'Before the command: `<their worktree>` is a repository you have not vetted, running its own',
+  'config. If it is a tree you would not cd into, stop',
+  'here and take the create route above instead. That path also came out of another',
+  'session\'s transcript, so read it before you act on it. This caution sits ABOVE the line',
+  'rather than below it, because one fenced command is one copy button and a caution printed',
+  'after it is read after it has run.',
+  'RUN IT FROM YOUR OWN WORKTREE, and note that the line below carries no -C for that reason.',
+  'An earlier spelling passed -C `<their worktree>`, which made git resolve the repository from',
+  'inside the tree being moved. Dropping it buys the strongest guarantee this route has, and it',
+  'was MEASURED against git 2.51.0 rather than argued: with no -C, git resolves YOUR repository,',
+  'so a worktree belonging to a DIFFERENT repository is refused outright with "is not a working',
+  'tree" and nothing moves. That is the same-repository precondition enforced by git instead of',
+  'by your attention — the one precondition whose failure is otherwise unrecoverable, because',
+  'across two repositories the move SUCCEEDS and relocates a foreign repository\'s worktree into',
+  'your tree. Stand somewhere that is not a repository at all and it refuses too.',
+  'Further preconditions, above the line for that same reason — stated as a shape rather than',
+  'a count, because a count goes stale the next time one is added. FIRST, the -c flag on the',
+  'line is not decoration: the carry-over recipe below passes -c core.fsmonitor=false and the',
+  'diff flags beside it to that same unvetted tree, and worktree move DOES consult that config',
+  '— measured against git 2.51.0 with a control proving the hook fires, and measured again to',
+  'confirm the flag suppresses it. core.fsmonitor names a command git runs FOR you, so the flag',
+  'is what stops an unvetted repository executing one during the move.',
+  'SECOND, put `<path>` inside your own anchor by your own hand. The gate judges the',
+  'DESTINATION too, so a path you place outside it is refused when a gate is watching and',
+  'unprotected when none is. A RELATIVE `<path>` is refused by git itself ("Invalid argument",',
+  'measured), so the failure there is loud rather than a directory in the wrong place.',
+  'What it costs: it mutates the OTHER session\'s layout, so a session still working there',
+  'loses its directory mid-flight. That is why the create recipe above stays the default:',
+  'it is the only route that needs no such judgement from you. This is above the line with',
+  'the preconditions, not below with the benefits, because it is the fact most likely to',
+  'change your mind and it is worth nothing after the paste.',
+  ...(pid ? [
+    `MEASURED when this was written: pid ${pid} was registered and alive for that worktree.`,
+    'That is the case the paragraph above is about, and it is the one where a move costs',
+    'someone else their working directory mid-flight. Re-check it before you attest, because',
+    'this text may be reaching you from a brief another session wrote earlier.',
+  ] : [
+    'No live pid was registered for that worktree when this was written. That is what was',
+    'true THEN and says nothing about now — a session can have been started there since, and',
+    'if you are reading this from a brief it may be days old. Re-check before you attest.',
+    'The word is deliberately not the one the live-process caution below uses: this arm has',
+    'no such caution to give, and the absence of one is not evidence that the tree is idle.',
+  ]),
+  '  git -c core.fsmonitor=false worktree move \'<their worktree>\' \'<path>\'',
+  'What it buys: the SAME branch, so one pull request keeps one branch and the',
+  '-b claude/`<name>`-cont fork above is not needed; and the directory travels whole, so the',
+  'uncommitted and untracked work comes with it and the carry-over recipe below does not',
+  'apply at all. Both halves are bounded by the same-repository precondition above, which is',
+  'stated there rather than here because it has to be read before the line runs.',
+  'About the write gate — and FIRST its bound, which the three bounded claims below lacked:',
+  'all of it applies only when a Zensu session runs that line through its Bash tool. The gate',
+  'is a PreToolUse hook on Bash, so a line you paste into your own terminal, which is what',
+  'this brief is for, traverses no hook and none of the claims below describe a control that',
+  'is present there. Stated exactly rather than reassuringly. It judges BOTH operands of',
+  'this command, the source and the destination, and it refuses when either lies outside',
+  'your anchor and outside every temp root — so a worktree already nested inside your anchor',
+  'is not refused at all. An operator-facing one-off escape exists and the refusal names it;',
+  'this text does not, and do not go looking for the spelling in order to use it, because',
+  'the host classifier commonly refuses it anyway. Taking it would also drop the containment',
+  'check on the DESTINATION, so put `<path>` inside your own anchor yourself rather than',
+  'relying on the gate for that. It is written to the bypass ledger only while a Zensu chain',
+  'is armed in this session; a takeover with no armed chain records nothing.',
 ];
 
 // One table, four arms, two legs — and the ARM is chosen once, above the split.
@@ -2984,6 +3141,16 @@ function adviceLeg(r) { return r.cwdExists ? 'present' : 'gone'; }
 // follow for a SEVENTH field, wherever on this surface it is read.
 function worktreeAdvice(r, options = {}) {
   const withCarryOver = options.carryOver !== false;
+  // Its OWN axis, not a rider on `carryOver`. State the defect STRUCTURALLY: an earlier
+  // wording here said the rider "inverted which caller saw it", which is not what the split
+  // changed — `cmdShow` still withholds the route and `cmdAdopt` still renders it. What the
+  // rider actually removed was the CHOICE: `carryOver` is the data-migration switch, the move
+  // is a decision-half concern replacing `TAKE_YOUR_OWN`'s fork, and with one flag no caller
+  // could keep the decision half while dropping the route, or the reverse. The unit case
+  // `dropping the carry-over recipe alone keeps the move alternative` is the one that needs
+  // two axes to exist at all. `cmdShow`'s own withholding is an independent and still-current
+  // choice with its own reason, recorded at that call site rather than here.
+  const withMove = options.move !== false;
   const archived = r.app ? r.app.archived === true : null;
   // `null` is not `false`. It means no record was readable for this session, and
   // asserting "not archived" there is exactly what SKILL.md forbids.
@@ -3060,10 +3227,40 @@ function worktreeAdvice(r, options = {}) {
       'That path comes out of another session\'s transcript, so read it before you act on it.',
     ];
   }
-  if (!withCarryOver) return [...lead, ...TAKE_YOUR_OWN];
+  // The WHOLE-SEQUENCE rationale, owned here. It does NOT own every pairwise claim, and
+  // saying it did was itself a finding: two constant headers still state a position, they are
+  // properties of their own block rather than of the sequence, and they stay there —
+  // `LIVE_SNAPSHOT_CAUTION`'s "spliced ahead of `CARRY_OVER`" is its CONDITION, and
+  // `MOVE_ALTERNATIVE`'s "comes AFTER `TAKE_YOUR_OWN`" is its FENCE rationale.
+  // What this comment owns: the CREATE route is first because it is the default and needs no
+  // judgement from the reader; the MOVE follows it as the alternative, carrying the measured
+  // live pid inside its own text so it never depends on a later block for that signal; the
+  // live SNAPSHOT caution comes next because its first sentence introduces the carry-over
+  // below it and nothing else; the carry-over recipe is last. An insertion between any two of
+  // these states its reasoning HERE unless the claim is genuinely about the inserted block
+  // alone.
+  // Gated on the VALUE, never on `livePid`'s truthiness. `livePid` returns the string `'?'`
+  // for a row whose pid is not a usable integer, and `'?'` is truthy — so the obvious
+  // `r.live ? livePid(r.live) : null` renders "MEASURED … pid ? was registered", a sentence
+  // labelled MEASURED with no measurement in it. `liveRegistry` normalizes the pid before
+  // storing it, so production cannot reach that today; `worktreeAdvice` is an exported entry
+  // point taking a caller-supplied row, and `endpointFromRow` re-tests `Number.isFinite` on
+  // the same field as if it could fail, so the guard is where the claim is made rather than
+  // where the row happens to come from.
+  // DERIVED from `livePid` rather than re-spelling its predicate: the two sat one line apart
+  // with opposite fallbacks, so a row with an unusable pid made the SAME brief say nothing in
+  // the move route and `pid ?` in the snapshot caution below. The asymmetry that remains is
+  // deliberate and is the whole point of this guard — the move route renders NO measured-pid
+  // sentence where the caution still renders its own `?`, because a sentence labelled MEASURED
+  // with no measurement in it is worse than silence, while the caution's `?` reads as the
+  // unknown it is. One predicate, two policies, stated here rather than in two spellings.
+  const movePid = r.live ? (livePid(r.live) === '?' ? null : livePid(r.live)) : null;
+  const move = withMove ? MOVE_ALTERNATIVE(movePid) : [];
+  if (!withCarryOver) return [...lead, ...TAKE_YOUR_OWN, ...move];
   return [
     ...lead,
     ...TAKE_YOUR_OWN,
+    ...move,
     ...(r.live ? LIVE_SNAPSHOT_CAUTION(livePid(r.live)) : []),
     ...CARRY_OVER,
   ];
@@ -3390,21 +3587,64 @@ function substitutionRuleLines(lines, mapped, options = {}) {
 //
 // `{ carrier: 'terminal' }`, because this carrier is a TERMINAL receipt — see `adviceBlock`'s own
 // header for why the marker is carrier-specific while the split is not.
-function whereAdviceLines(row, takerWorktree) {
+function whereAdviceLines(row, takerWorktree, options = {}) {
   const leg = adviceLeg(row);
   // The BODY is built first because the rule below is DERIVED from it: the placeholder set a
   // carrier must explain is whatever that carrier actually renders, and every earlier spelling
-  // of this text stated a set somebody had typed out beside the recipe instead.
-  const body = worktreeAdvice(row);
+  // of this text stated a set somebody had typed out beside the recipe instead. `options` is
+  // forwarded so a caller narrowing the body narrows the head with it — the route sentence
+  // below was hardcoded for one round, which locked this head to `worktreeAdvice`'s defaults
+  // and would have had a narrowed caller announce a command its own body did not carry.
+  const body = worktreeAdvice(row, options);
+  // DERIVED, not asserted, for the same reason `substitutionRuleLines` derives its set: this
+  // sentence is a substitution-safety claim on a terminal receipt, and a claim about which
+  // commands are below it must be read off the lines that are actually below it.
+  // The command, never the prose: `MOVE_ALTERNATIVE` also NAMES `worktree move` in its
+  // fsmonitor sentence, so a bare substring test is satisfied by a body whose command line is
+  // gone. The claim this gates is about a LINE — the head says the move line relocates theirs
+  // into the taker's tree — so it routes through the file's own command grammar, exactly as
+  // the sibling `hasNewWorktree` below already does through `recipePlaceholders`.
+  const hasMove = body.some((l) => WORKTREE_ADVICE_COMMAND.test(l) && l.includes('worktree move'));
+  // The `<your new worktree>` claim is derived the same way, and the asymmetry it removes was
+  // a finding: forwarding `options` widened this function's contract, but only the ROUTE
+  // sentence was derived while this one still hardcoded a `CARRY_OVER` token — so under
+  // `{ carryOver: false }` the head would name an operand the body no longer renders, beside a
+  // `substitutionRuleLines` block that derives its own set and stays correct. Latent today,
+  // because the one production caller passes nothing; that is why it would ship silently.
+  const hasNewWorktree = recipePlaceholders(body).includes('<your new worktree>');
+  // The THIRD derivation, and it closes the half the other two left open. Three head sentences
+  // below name "the patch step" unconditionally, and under `{ carryOver: false }` the body carries
+  // no `PATCH="$(mktemp` line at all — so the head named a step the reader cannot find, which is
+  // the identical defect the two comments above record having fixed for the route sentence and for
+  // `<your new worktree>`. Latent for the same reason as those two (the one production caller
+  // passes nothing), and caught the same way: derive from the rendered body, never from the flag.
+  const hasPatchStep = body.some((l) => WORKTREE_ADVICE_COMMAND.test(l) && l.includes('mktemp'));
+  // Names the carry-over step when the body carries it, and the route by name when it does not, so
+  // neither branch points a reader at something the brief they are holding does not contain.
+  const patchStepName = hasPatchStep ? 'the patch step' : 'the carry-over recipe';
   const out = [`WHERE    for ${sessionTag(row.sessionId)}${leg === 'present' ? '' : '   !! MISSING'}:`];
   if (leg === 'present') {
     out.push(...substitutionRuleLines(body, [['<their worktree>', briefShellArg(row.wt)]],
       { indent: '           ', carrier: 'terminal' }));
-    out.push('           <path> and');
-    out.push('           <your new worktree> are the same directory: the git worktree add line');
-    out.push('           below creates it, and every step that WRITES names it —');
-    out.push('           NOT the worktree named on the receipt line above, which is the one you');
-    out.push('           are already in.');
+    if (hasNewWorktree) {
+      out.push('           <path> and');
+      out.push('           <your new worktree> are the same directory, and every step that');
+      out.push('           WRITES names it — NOT the worktree named on the receipt line above,');
+      out.push('           which is the one you are already in. The git worktree add line below');
+      out.push('           makes that directory.');
+    } else {
+      out.push('           <path> is the directory every step that WRITES names — NOT the');
+      out.push('           worktree named on the receipt line above, which is the one you are');
+      out.push('           already in. The git worktree add line below makes it.');
+    }
+    if (hasMove) {
+      out.push('           On the move route instead, the worktree move line relocates THEIRS');
+      out.push('           into it.');
+      if (hasNewWorktree) {
+        out.push('           The carry-over that <your new worktree> spelling belongs to does');
+        out.push('           not run at all on that route.');
+      }
+    }
     // Flow 5 step 6 documents a hand-resumed session, and a hand-resume lands the taker in the
     // SOURCE's worktree. From that moment the carry-over's first step snapshots the source's
     // uncommitted work and the taker's own, mixed, so applying it into a fresh worktree
@@ -3490,20 +3730,30 @@ function whereAdviceLines(row, takerWorktree) {
     if (!takerWorktree) {
       out.push('           Whether you are standing IN that tree could not be checked here: this');
       out.push("           session's own worktree root was not resolved. Compare the worktree");
-      out.push('           above with your own before you run the patch step.');
+      out.push(`           above with your own before you run ${patchStepName}.`);
     } else if (!GATE_READY) {
       out.push('           Whether you are standing IN that tree could not be checked here: the');
       out.push('           path-comparison module did not load, or loaded without the check this');
-      out.push('           needs. Compare the worktree above with your own before you run the');
-      out.push('           patch step.');
+      out.push(`           needs. Compare the worktree above with your own before you run`);
+      out.push(`           ${patchStepName}.`);
     } else {
       const [srcRoot, takerRoot] = canonicalPair(row.wt, takerWorktree);
       standingIn = srcRoot === takerRoot;
     }
     if (standingIn) {
-      out.push('           You are standing IN that tree: the patch step snapshots whatever is');
+      out.push(`           You are standing IN that tree: ${patchStepName} snapshots whatever is`);
       out.push('           uncommitted there, your own edits included. Decide what is yours');
       out.push('           before you run it.');
+      // The move needs its own conjunct, and the omission was a finding: the sentence above is
+      // scoped verbatim to the READ step, while in this one measured state the move relocates
+      // the directory the reader is standing in. Its own cost paragraph frames the loser as
+      // someone else ("a session still working there"), which is exactly wrong here — and the
+      // measurement that settles it is already in hand at this point.
+      if (hasMove) {
+        out.push('           That applies harder to the move route below: it relocates the tree');
+        out.push('           you are standing in, not only the tree you are reading. Its cost');
+        out.push('           paragraph names "the OTHER session" — here that is you.');
+      }
     }
   } else {
     out.push(`           recorded worktree (gone) = ${flatPath(row.wt)}`);
@@ -3946,7 +4196,12 @@ function cmdShow(opts) {
   // dozens of lines of paste-and-run text. Dumping it here cost `show` the one property
   // it has, which is that you can scan it. The `--json` payload above is NOT summarized:
   // it is a data carrier.
-  const wtAdvice = worktreeAdvice(r, { carryOver: false });
+  // BOTH axes, named separately. The move alternative is withheld for a different reason
+  // than the recipe: the recipe is bulk this view cannot afford, while the route is a
+  // decision that must not be offered without the cost paragraph that qualifies it. Passing
+  // one flag for both was how the route came to be withheld silently, with the pointer below
+  // still describing only the recipe.
+  const wtAdvice = worktreeAdvice(r, { carryOver: false, move: false });
   // A COMPLETE head line, which is what the other three carriers already had and this one did
   // not. It used to print `wtAdvice[0]`, and every `ADVICE_LEADS` cell is a multi-line
   // paragraph — so the head carried a SENTENCE FRAGMENT and the rule below it landed between
@@ -3970,10 +4225,13 @@ function cmdShow(opts) {
   for (const line of substitutionRuleLines(wtAdvice, [], { indent: '         ', carrier: 'terminal' })) print(line);
   for (const advice of wtAdvice) print(`         ${advice}`);
   if (wtLeg === 'present') {
-    print('         The uncommitted half needs a carry-over recipe this view does not print.');
-    print('         Run handoff or takeover for it — those write a brief you paste from.');
-    print('         adopt prints it too, but that verb also writes a machine-wide ledger');
-    print('         edge, so it is not a read-only route to the recipe.');
+    print('         TWO things are withheld here, not one. The uncommitted half needs a');
+    print('         carry-over recipe this view does not print, and there is a second ROUTE');
+    print('         besides the create line above — moving their worktree here instead,');
+    print('         which only you can authorize and which carries a cost paragraph this');
+    print('         view has no room for. Run handoff or takeover for both — those write a');
+    print('         brief you paste from. adopt prints them too, but that verb also writes a');
+    print('         machine-wide ledger edge, so it is not a read-only route to either.');
   }
   for (const line of writesLines(w)) print(line);
   // BELOW `writesLines`, and never inside it. The verdict suite reads that block with
@@ -4727,10 +4985,14 @@ function cmdAdopt(opts) {
   // worktree of its own, which SKILL.md flow 3 step 4 allows, and left the source tree's
   // uncommitted changes behind, which nothing on this route had told it about.
   //
-  // The FULL advice, carry-over included, unlike `cmdShow`, which passes
-  // `carryOver: false` because it renders a survey. This verb is a confirmation: by the
-  // time it runs the directory is already chosen, so the decision half is a check on a
-  // choice already made, while the carry-over half is the one still actionable.
+  // The FULL advice on BOTH axes, unlike `cmdShow`, which passes `carryOver: false` AND
+  // `move: false`. Each default is accepted for its own reason, because they are no longer
+  // one switch. CARRY-OVER: this verb is a confirmation, so by the time it runs the directory
+  // is already chosen, the decision half is a check on a choice already made, and the
+  // carry-over half is the one still actionable. MOVE: the route is a decision the survey
+  // could not qualify in its nine-space view, and this carrier can — it prints the whole cost
+  // paragraph, the measured live pid when there is one, and the standing-in conjunct above,
+  // which is the only place the reader is told that the tree being relocated may be theirs.
   // `leg` for the same reason the failure payload carries it: it is what decides whether the
   // recorded path may be substituted into the advice at all, and a consumer of the documented
   // `worktreeAdvice` key had that ambiguity on the branch it will almost always be on. NOT

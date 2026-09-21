@@ -403,8 +403,15 @@ const {
   resolveStartupPolicy,
 } = require('../../scripts/playwright-mcp-proxy.js');
 
+const SYNTHETIC_ROOTS = [];
+
+test.after(() => {
+  for (const root of SYNTHETIC_ROOTS) fs.rmSync(root, { recursive: true, force: true });
+});
+
 function syntheticRoot(withHook, withRecorder = false) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-consent-root-'));
+  SYNTHETIC_ROOTS.push(root);
   fs.mkdirSync(path.join(root, 'hooks', 'lib'), { recursive: true });
   fs.copyFileSync(path.join(PLUGIN_ROOT, 'hooks', 'lib', 'verify-consent-v1.js'), path.join(root, 'hooks', 'lib', 'verify-consent-v1.js'));
   fs.copyFileSync(path.join(PLUGIN_ROOT, 'hooks', 'lib', 'verify-navigation-floor-v1.js'), path.join(root, 'hooks', 'lib', 'verify-navigation-floor-v1.js'));
@@ -439,6 +446,17 @@ test('without a policy the broker starts in consent mode only when the consent h
   registry.hooks.PreToolUse[0].matcher = 'Bash';
   fs.writeFileSync(path.join(wrongMatcher, 'hooks', 'hooks.json'), JSON.stringify(registry));
   assert.equal(consentHookRegistered(wrongMatcher), false);
+
+  const staleMatcher = syntheticRoot(true, true);
+  assert.equal(consentHookRegistered(staleMatcher), true);
+  assert.equal(consentRecorderRegistered(staleMatcher), true);
+  const stale = JSON.parse(fs.readFileSync(path.join(staleMatcher, 'hooks', 'hooks.json'), 'utf8'));
+  stale.hooks.PreToolUse[0].matcher = 'mcp__(plugin_zensu_)?playwright__browser_(navigate|tabs)';
+  stale.hooks.PostToolUse[0].matcher = 'mcp__(plugin_zensu_)?playwright__browser_(navigate|tabs)';
+  fs.writeFileSync(path.join(staleMatcher, 'hooks', 'hooks.json'), JSON.stringify(stale));
+  assert.equal(consentHookRegistered(staleMatcher), false);
+  assert.equal(consentRecorderRegistered(staleMatcher), false);
+  assert.equal((await resolveStartupPolicy('', { pluginRoot: staleMatcher })).mode, 'deny');
 });
 
 test('the consent recorder predicate is graded across the same truth table as its sibling', () => {

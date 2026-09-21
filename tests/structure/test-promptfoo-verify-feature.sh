@@ -62,10 +62,10 @@ else
 fi
 
 CONTRACT_OUT="$(node --test "$CONTRACT_TEST" 2>&1)"
-if [ "$?" = 0 ] && unit_cases_registered_floor_text "$CONTRACT_OUT" 14; then
+if [ "$?" = 0 ] && unit_cases_registered_floor_text "$CONTRACT_OUT" 15; then
   check "deterministic transcript contract regressions pass ($(unit_cases_report_text "$CONTRACT_OUT"))" PASS
 else
-  check "deterministic transcript contract regressions pass ($(unit_cases_report_text "$CONTRACT_OUT"), want >= 14 registered)" FAIL
+  check "deterministic transcript contract regressions pass ($(unit_cases_report_text "$CONTRACT_OUT"), want >= 15 registered)" FAIL
 fi
 
 ASSERTION_SMOKE="$(node -e 'const check=require(process.argv[1]); const attest="\n===== wrapper attestation =====\n[wrapper_attestation] {\"init_git\":true,\"tracked_clean\":true,\"manifest_version\":1,\"root\":\"/tmp/eval\"}\n"; const up="[tool_use: Bash] id=u input={\"command\":\"./scripts/fixture-runtime.sh up\"}\n[tool_result: Bash] id=u is_error=false\nfixture-runtime: started\n"; const browser="[tool_use: mcp__zensu-browser__browser_snapshot] id=s input={}\n[tool_result: mcp__zensu-browser__browser_snapshot] id=s is_error=false\nok\n"; const down="[tool_use: Bash] id=d input={\"command\":\"./scripts/fixture-runtime.sh down\"}\n[tool_result: Bash] id=d is_error=false\nfixture-runtime: stopped\n"; const good=up+browser+down+attest; const fake=up+browser+"[tool_use: Bash] id=d input={\"command\":\"printf stopped # fixture-runtime.sh down\"}\n[tool_result: Bash] id=d is_error=false\nfixture-runtime: stopped\n"+attest; const unsafe=up+browser+"[tool_use: mcp__zensu-browser__browser_run_code_unsafe] id=e input={}\n"+down+attest; if(check(good,{config:{check:"localTeardown"}}).pass&&!check(fake,{config:{check:"localTeardown"}}).pass&&!check(unsafe,{config:{check:"localTeardown"}}).pass) process.stdout.write("ok");' "$ASSERTION" 2>/dev/null)"

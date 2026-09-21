@@ -6658,6 +6658,264 @@ grep -qF -- 'missing check rather than an all-clear' "$SKILL_MD" \
   && check "P1vx2-control the bullet still states what it IS" PASS \
   || check "P1vx2-control the bullet still states what it IS" FAIL
 
+# P1tp — the multi-repo topology row (docs/multi-repo-chains-spec.md §5.4). A chain
+# whose claims name another repository is invisible to every other row in this block:
+# the anchor's own change set is clean, its workflow document is healthy, and the
+# review chain sees no diff for work that really happened. The row reads THIS
+# session's audited run log — the receipt is what names it — and asks the audit
+# library itself which roots the claims resolve to, so the claim grammar has one
+# owner rather than a copy here.
+# This runner deliberately does NOT sandbox ZENSU_DOCTOR_PLUGIN_DIR: the row needs
+# the real hooks/lib/zensu-edit-landing.sh, and a stubbed plugin root would make it
+# fall silent for the very reason the check exists to observe.
+TOPO_PROJECT="$SBOX/topo-project"
+TOPO_SIBLING="$SBOX/topo-sibling"
+TOPO_KEY="scv1_$(node -e 'process.stdout.write("b".repeat(64))')"
+mkdir -p "$TOPO_PROJECT/.zensu/state" "$TOPO_PROJECT/.zensu/logs" "$TOPO_SIBLING/src"
+git init -q --template= "$TOPO_PROJECT" >/dev/null 2>&1
+git init -q --template= "$TOPO_SIBLING" >/dev/null 2>&1
+printf 'v1\n' > "$TOPO_SIBLING/src/app.ts"
+printf 'v1\n' > "$TOPO_PROJECT/own.txt"
+TOPO_SIB_ABS="$(cd "$TOPO_SIBLING" && pwd -P)"
+TOPO_RECEIPT="$TOPO_PROJECT/.zensu/state/edit-landing-$TOPO_KEY.json"
+run_report_topo() {
+  ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  CLAUDE_PROJECT_DIR="$TOPO_PROJECT" \
+  ZDOC_BINDING=bound ZDOC_SESSION_KEY="$TOPO_KEY" ZDOC_SESSION_PROJECT_ROOT="$TOPO_PROJECT" \
+    node "$REPORT" 2>/dev/null
+}
+# Every absence assertion below must be gated on the report having rendered at
+# all: the runner discards stderr, so a renderer that threw produced empty output
+# in which `topology:` is trivially absent — and P1tp4, whose whole subject is a
+# branch that returns early, would have reported that as its own success.
+topo_rendered() {
+  case "$1" in
+    (*'Zensu doctor'*) return 0 ;;
+    (*) return 1 ;;
+  esac
+}
+printf 'S1 IMPL completed — files: %s/src/app.ts\n' "$TOPO_SIB_ABS" > "$TOPO_PROJECT/.zensu/logs/run.log"
+printf '{"schema":"edit-landing-v2","session":"x","log":".zensu/logs/run.log","claims":1,"clean":false}\n' \
+  > "$TOPO_RECEIPT"
+TOPO_OUT="$(run_report_topo)"
+case "$TOPO_OUT" in
+  *"⚠️  topology: this session's audited run log claims edits under"*"$TOPO_SIB_ABS"*)
+    check "P1tp a claim under a non-anchor root renders the topology row, naming that root" PASS ;;
+  *) check "P1tp topology row missing or unnamed (got: $(printf '%s' "$TOPO_OUT" | grep -c .) lines)" FAIL ;;
+esac
+case "$TOPO_OUT" in
+  *'single-root'*) check "P1tp1 the row states the consequence: the chain is single-root" PASS ;;
+  *) check "P1tp1 the row omits the consequence" FAIL ;;
+esac
+# The negative control is the same session and the same receipt with an anchor-only
+# claim: a row that fires on ANY audited log would pass the positive case above
+# while telling every single-root session it has a multi-repo problem.
+printf 'S1 IMPL completed — files: own.txt\n' > "$TOPO_PROJECT/.zensu/logs/run.log"
+TOPO_OUT_OK="$(run_report_topo)"
+if ! topo_rendered "$TOPO_OUT_OK"; then
+  check "P1tp2 the report did not render, so its silence proves nothing" FAIL
+else
+  case "$TOPO_OUT_OK" in
+    *'topology:'*) check "P1tp2 an anchor-only claim renders NO topology row" FAIL ;;
+    *) check "P1tp2 an anchor-only claim renders NO topology row" PASS ;;
+  esac
+fi
+# A log the receipt names OUTSIDE the project's own .zensu/logs/ is refused rather
+# than read: the receipt is an ordinary file this session can write. The OUTSIDE
+# log must carry the foreign claim, or the containment guard is not what keeps the
+# row silent — deleting it would leave the row silent anyway and the check could
+# not fail. Restore the foreign claim in the in-project log too, so the only thing
+# separating this case from P1tp is which log the receipt names.
+printf 'S1 IMPL completed — files: %s/src/app.ts\n' "$TOPO_SIB_ABS" > "$TOPO_PROJECT/.zensu/logs/run.log"
+printf 'S1 IMPL completed — files: %s/src/app.ts\n' "$TOPO_SIB_ABS" > "$SBOX/outside.log"
+printf '{"schema":"edit-landing-v2","session":"x","log":"%s","claims":1,"clean":false}\n' "$SBOX/outside.log" \
+  > "$TOPO_RECEIPT"
+TOPO_OUT_ESC="$(run_report_topo)"
+case "$TOPO_OUT_ESC" in
+  *'topology:'*'run log outside'*'missing check, not an all-clear'*)
+    check "P1tp3 a receipt naming a log outside .zensu/logs/ is refused AND disclosed" PASS ;;
+  *) check "P1tp3 a receipt naming a log outside .zensu/logs/ is refused AND disclosed" FAIL ;;
+esac
+# The discriminator: the outside log is never READ. Its foreign claim is the only
+# one in play for this case, so a row naming the sibling root would mean the
+# containment guard was bypassed rather than merely reported.
+case "$TOPO_OUT_ESC" in
+  *"$TOPO_SIB_ABS"*) check "P1tp3a the refused log's claims are not rendered" FAIL ;;
+  *) check "P1tp3a the refused log's claims are not rendered" PASS ;;
+esac
+# An unreadable receipt is NOT the same state as an absent one: it is a check that
+# did not run, and reporting it with the same silence would be an all-clear.
+printf 'not json at all\n' > "$TOPO_RECEIPT"
+TOPO_OUT_BAD="$(run_report_topo)"
+case "$TOPO_OUT_BAD" in
+  *'topology:'*'NOT checked against the anchor'*'missing check, not an all-clear'*)
+    check "P1tp5 an unreadable receipt renders a missing-check row, never silence" PASS ;;
+  *) check "P1tp5 an unreadable receipt renders a missing-check row, never silence" FAIL ;;
+esac
+printf '{"schema":"edit-landing-v9","session":"x","log":".zensu/logs/run.log","claims":1,"clean":false}\n' \
+  > "$TOPO_RECEIPT"
+TOPO_OUT_SCH="$(run_report_topo)"
+case "$TOPO_OUT_SCH" in
+  *'topology:'*'schema this runtime does not know'*)
+    check "P1tp6 an unknown receipt schema renders a missing-check row, never silence" PASS ;;
+  *) check "P1tp6 an unknown receipt schema renders a missing-check row, never silence" FAIL ;;
+esac
+# The row echoes a filesystem path a model is asked to relay, so a root whose own
+# name is unsafe to render is COUNTED and WITHHELD rather than printed. Without a
+# case here the whole screen — `claimRootRenderable`, `claimRootRender` and the
+# withheld clause — could be deleted with every suite green.
+TOPO_ODD="$SBOX/topo-odd\`x"
+mkdir -p "$TOPO_ODD/src"
+git init -q --template= "$TOPO_ODD" >/dev/null 2>&1
+printf 'v1\n' > "$TOPO_ODD/src/app.ts"
+TOPO_ODD_ABS="$(cd "$TOPO_ODD" && pwd -P)"
+printf 'S1 IMPL completed — files: %s/src/app.ts\n' "$TOPO_ODD_ABS" > "$TOPO_PROJECT/.zensu/logs/run.log"
+printf '{"schema":"edit-landing-v2","session":"x","log":".zensu/logs/run.log","claims":1,"clean":false}\n' \
+  > "$TOPO_RECEIPT"
+TOPO_OUT_ODD="$(run_report_topo)"
+case "$TOPO_OUT_ODD" in
+  *'topology:'*'1 root(s) that are not the anchor'*'withheld'*)
+    check "P1tp7 a root whose name is unsafe to render is counted and withheld" PASS ;;
+  *) check "P1tp7 a root whose name is unsafe to render is counted and withheld" FAIL ;;
+esac
+case "$TOPO_OUT_ODD" in
+  *'topo-odd'*) check "P1tp7a the unsafe name never reaches the rendered row" FAIL ;;
+  *) check "P1tp7a the unsafe name never reaches the rendered row" PASS ;;
+esac
+# Restore the ordinary foreign claim for the cases below.
+printf 'S1 IMPL completed — files: %s/src/app.ts\n' "$TOPO_SIB_ABS" > "$TOPO_PROJECT/.zensu/logs/run.log"
+
+# P1tp9/P1tp10 — the two ways the inventory channel used to read as a CLEAN
+# topology. `pluginDir()` resolves to this renderer's own tree, so if the row is
+# executing at all the feature IS installed: an ENOENT on the inventory command
+# there is a damaged or partially-restored tree, not an absent feature. And a
+# child that exits 0 with output this parser does not recognise — a renamed key,
+# a future `--inventory` revision, an empty stdout — used to yield roots=[] and
+# render nothing, while every other fault arm in the same function says "that is
+# a missing check, not an all-clear". The terminus already guards the other half
+# of this contract: it requires a `claimed-files=` line and discloses when it is
+# absent, so the two consumers of one parsed format disagreed.
+#
+# Both cases run the renderer from a COPIED tree with no ZENSU_DOCTOR_PLUGIN_DIR,
+# because that override is the fixture seam and the silence is gated on it.
+TOPO_COPY="$SBOX/topo-copy"
+mkdir -p "$TOPO_COPY/hooks"
+cp -R "$PLUGIN_DIR/hooks/lib" "$TOPO_COPY/hooks/lib" 2>/dev/null
+run_report_topo_copy() {
+  ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  CLAUDE_PROJECT_DIR="$TOPO_PROJECT" \
+  ZDOC_BINDING=bound ZDOC_SESSION_KEY="$TOPO_KEY" ZDOC_SESSION_PROJECT_ROOT="$TOPO_PROJECT" \
+    node "$TOPO_COPY/hooks/lib/zensu-doctor-report.js" 2>/dev/null
+}
+rm -f "$TOPO_COPY/hooks/lib/zensu-edit-landing.sh"
+TOPO_OUT_NOLIB="$(run_report_topo_copy)"
+if ! topo_rendered "$TOPO_OUT_NOLIB"; then
+  check "P1tp9 the copied-tree report did not render, so its silence proves nothing" FAIL
+else
+  case "$TOPO_OUT_NOLIB" in
+    *'topology:'*'not present in this plugin tree'*)
+      check "P1tp9 a damaged plugin tree renders a missing-check row, never a clean topology" PASS ;;
+    *) check "P1tp9 a damaged plugin tree renders a missing-check row, never a clean topology" FAIL ;;
+  esac
+fi
+printf '#!/bin/bash\nexit 0\n' > "$TOPO_COPY/hooks/lib/zensu-edit-landing.sh"
+chmod +x "$TOPO_COPY/hooks/lib/zensu-edit-landing.sh"
+TOPO_OUT_ODDFMT="$(run_report_topo_copy)"
+if ! topo_rendered "$TOPO_OUT_ODDFMT"; then
+  check "P1tp10 the copied-tree report did not render, so its silence proves nothing" FAIL
+else
+  case "$TOPO_OUT_ODDFMT" in
+    *'topology:'*'format this runtime does not recognise'*)
+      check "P1tp10 an unrecognised inventory answer renders a missing-check row, never an all-clear" PASS ;;
+    *) check "P1tp10 an unrecognised inventory answer renders a missing-check row, never an all-clear" FAIL ;;
+  esac
+fi
+
+# P1tp11 — the row returned SILENTLY when no bound session key was available,
+# where `ownDocumentVerdict` in the same file splits that case and renders "that
+# is a missing check, not an all-clear". `currentSessionKey()` is empty for every
+# binding verdict except `bound`, so an orphaned-project-root, incompatible-
+# runtime or pruned-installation session got no topology row and no disclosure
+# while every other arm of this function says the check is missing.
+#
+# The split is gated on a receipt EXISTING in the state directory rather than
+# warning unconditionally: without a key there is no receipt path to test, so a
+# literal reading of "gate on the receipt" would build `edit-landing-.json`,
+# never find it, and ship a row that is silent forever. Scanning the directory is
+# what makes the arm reachable — and it is stated at the row that it cannot claim
+# the receipt it found belongs to THIS session, the same bound the Autopilot
+# pointer row carries.
+run_report_topo_nokey() {
+  ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  CLAUDE_PROJECT_DIR="$TOPO_PROJECT" \
+  ZDOC_BINDING=unbound ZDOC_SESSION_KEY="" ZDOC_SESSION_PROJECT_ROOT="" \
+    node "$PLUGIN_DIR/hooks/lib/zensu-doctor-report.js" 2>/dev/null
+}
+TOPO_OUT_NOKEY="$(run_report_topo_nokey)"
+if ! topo_rendered "$TOPO_OUT_NOKEY"; then
+  check "P1tp11 the no-key report did not render, so its silence proves nothing" FAIL
+else
+  case "$TOPO_OUT_NOKEY" in
+    *'topology:'*'no bound session key'*)
+      check "P1tp11 with a receipt present and no bound key the row says the check was not run" PASS ;;
+    *) check "P1tp11 with a receipt present and no bound key the row says the check was not run" FAIL ;;
+  esac
+fi
+# Control: with NO receipt in the directory the same unbound session stays
+# silent, so P1tp11 cannot pass by warning on every unbound report — which would
+# withhold the green summary from every non-`bound` session in every project.
+mv "$TOPO_RECEIPT" "$TOPO_RECEIPT.aside"
+TOPO_OUT_NOKEY_NONE="$(run_report_topo_nokey)"
+mv "$TOPO_RECEIPT.aside" "$TOPO_RECEIPT"
+case "$TOPO_OUT_NOKEY_NONE" in
+  *'topology:'*) check "P1tp11-control an unbound session with no receipt stays silent" FAIL ;;
+  *) check "P1tp11-control an unbound session with no receipt stays silent" PASS ;;
+esac
+
+# P1tp4's own discriminator: the in-project log still carries the foreign claim, so
+# the ABSENT receipt is the only reason the row stays silent.
+rm -f "$TOPO_RECEIPT"
+TOPO_OUT_NONE="$(run_report_topo)"
+if ! topo_rendered "$TOPO_OUT_NONE"; then
+  check "P1tp4 the report did not render, so its silence proves nothing" FAIL
+else
+  case "$TOPO_OUT_NONE" in
+    *'topology:'*) check "P1tp4 with no receipt the row stays silent (nothing was audited yet)" FAIL ;;
+    *) check "P1tp4 with no receipt the row stays silent (nothing was audited yet)" PASS ;;
+  esac
+fi
+
+# P1tp8 — the two topology bullets in skills/doctor/SKILL.md are held against the
+# renderer's own row lead-ins. Both sibling row families in this suite carry such a
+# drift pin (P1qr for the denial rows, P1vg for verify-feature); without one, a
+# reworded row or a deleted bullet drifts with every check green.
+TOPO_SKILL="$SKILL_MD"
+TOPO_REPORT_SRC="$REPORT"
+TOPO_LEADS_OK=1
+# The needles deliberately carry NO apostrophe: the renderer escapes it as `\'`
+# inside its own single-quoted strings, so a needle spelling `session's` matches
+# the skill and never the source, and the pin would fail for a reason unrelated
+# to drift.
+for _lead in \
+  "audited run log claims edits under" \
+  "claims were NOT checked against the anchor"; do
+  grep -qF "$_lead" "$TOPO_REPORT_SRC" || TOPO_LEADS_OK=0
+  grep -qF "$_lead" "$TOPO_SKILL" || TOPO_LEADS_OK=0
+done
+if [ "$TOPO_LEADS_OK" -eq 1 ]; then
+  check "P1tp8 every topology row lead-in is both emitted and documented in the skill" PASS
+else
+  check "P1tp8 every topology row lead-in is both emitted and documented in the skill" FAIL
+fi
+if grep -qF "topology: this session's claims were never audited at all" "$TOPO_REPORT_SRC"; then
+  check "P1tp8-control the pin is not matching an arbitrary topology lead-in" FAIL
+else
+  check "P1tp8-control the pin is not matching an arbitrary topology lead-in" PASS
+fi
+
 rm -rf "$SBOX"
 echo "----"
 echo "test-doctor: $PASS PASS / $FAIL FAIL"

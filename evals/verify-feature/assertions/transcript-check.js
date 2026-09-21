@@ -97,7 +97,7 @@ function hasDirectBashBrowserAccess(uses) {
     const command = parseToolInput(call)?.command;
     if (typeof command !== 'string') return false;
     const launcher = String.raw`(?:"[^"\n]*playwright-mcp\.sh"|'[^'\n]*playwright-mcp\.sh'|[^\s;&|]*playwright-mcp\.sh)`;
-    const argument = String.raw`(?:"[^"\n]+"|'[^'\n]+'|[^\s;&|]+)`;
+    const argument = String.raw`(?:"[^"\n$\`\\;&|]+"|'[^'\n;&|]+'|[^\s;&|$\`\\]+)`;
     const safeInstall = new RegExp(`^\\s*bash\\s+${launcher}\\s+install-browser\\s*$`);
     const safeCheck = new RegExp(`^\\s*bash\\s+${launcher}\\s+--check-policy\\s+(?:local|remote)\\s+${argument}\\s+${argument}\\s+declared-safe\\s*$`);
     if (safeInstall.test(command) || safeCheck.test(command)) return false;
@@ -341,3 +341,5 @@ module.exports = (output, context) => {
 };
 
 module.exports.parseTranscript = parseTranscript;
+module.exports.BROWSER_NAMESPACES = BROWSER_NAMESPACES;
+module.exports.SAFE_BROWSER_OPERATIONS = Object.freeze([...SAFE_BROWSER_OPERATIONS]);
