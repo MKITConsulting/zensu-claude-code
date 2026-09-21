@@ -166,8 +166,10 @@ const BASELINE_HEAL_NOTICE = 'Zensu: this session\'s workflow document was missi
 // The PUSH half of the adoption disclosure, on both channels the host offers a
 // SessionStart: `additionalContext` for the model and `systemMessage` for the
 // user. The text comes from session-auto-adopt-v1.js's renderAdoptionNotice — the
-// ONE renderer the `.*` gate and the binder consume too — so this file holds no
-// version screen, no provenance screen and no lease clause of its own.
+// renderer the `.*` gate's allow-path announcement uses too — so this file holds
+// no version screen, no provenance screen and no lease clause of its own. (The
+// binder's stderr line is a third surface with its own lead-in; it shares the
+// SCREENS, not the renderer.)
 function adoptionNotice(adoption, label) {
   return autoAdopt.renderAdoptionNotice(adoption, { where: `at this ${label}` });
 }
@@ -184,9 +186,15 @@ function adoptionNotice(adoption, label) {
 // about it whichever process won the lock: the announcement is a fact about the
 // session, not a prize for the winner.
 function serveOrAdopt(readerOptions, pluginRoot, pluginData, sessionId, label, noun) {
+  const OUTCOMES = autoAdopt.AUTO_ADOPT_OUTCOMES;
+  // The version this process READ before anyone adopted, kept for the sibling
+  // case below. It is the only honest source for "updated FROM": once a sibling
+  // has re-minted the record, its plugin_version is the executing version.
+  let observedRecorded = null;
   const serve = () => {
     const context = core.readContext(readerOptions);
     if (!core.servesRecordedRuntime(context, pluginRoot, 'claude')) {
+      if (typeof context.plugin_version === 'string') observedRecorded = context.plugin_version;
       fail(`${label} plugin root is neither the ${noun}'s plugin nor a compatible upgrade of it`);
     }
     if (context.plugin_data !== pluginData) fail(`${label} plugin data does not match the ${noun}`);
@@ -195,7 +203,7 @@ function serveOrAdopt(readerOptions, pluginRoot, pluginData, sessionId, label, n
   try {
     return { context: serve(), adoption: null };
   } catch (error) {
-    const verdict = autoAdopt.adoptForHook({
+    const probed = autoAdopt.adoptForHook({
       executingPluginRoot: pluginRoot,
       pluginData,
       recordsDir: readerOptions.recordsDir,
@@ -204,16 +212,23 @@ function serveOrAdopt(readerOptions, pluginRoot, pluginData, sessionId, label, n
       environment: process.env,
       respectOptOut: true,
     });
-    if (verdict.outcome === 'adopted' || verdict.outcome === 'already-served') {
+    // An `already-served` verdict carries no `recorded` of its own (see the module's
+    // renderer); this process supplies the version it observed, when it observed one.
+    const verdict = probed.outcome === OUTCOMES.ALREADY_SERVED && probed.recorded === null
+      ? { ...probed, recorded: observedRecorded }
+      : probed;
+    if (verdict.outcome === OUTCOMES.ADOPTED || verdict.outcome === OUTCOMES.ALREADY_SERVED) {
       // Strict re-read: the adopted record must serve itself. A vanished
       // recorded project root re-throws here exactly as it always did — and
       // when THIS process adopted, the failure names that adoption, so the
       // re-mint is not lost behind the message of a bind it could not repair.
+      // The lease clause travels with it: this message is the ONLY report of that
+      // adoption's sweep, because the hook fails and no notice is ever rendered.
       try {
         return { context: serve(), adoption: verdict };
       } catch (again) {
-        if (verdict.outcome === 'adopted') {
-          fail(`${label}: adopted the Session Control record (${autoAdopt.safeVersion(verdict.recorded)} -> ${autoAdopt.safeVersion(verdict.executing)}; previous record kept as ${typeof verdict.supersededFile === 'string' ? path.basename(verdict.supersededFile) : '(unknown)'}; provenance ${autoAdopt.safeProvenance(verdict.provenance)}), but the strict re-read still fails: ${again.message}`);
+        if (verdict.outcome === OUTCOMES.ADOPTED) {
+          fail(`${label}: adopted the Session Control record (${autoAdopt.safeVersion(verdict.recorded)} -> ${autoAdopt.safeVersion(verdict.executing)}; previous record kept as ${typeof verdict.supersededFile === 'string' ? path.basename(verdict.supersededFile) : '(unknown)'}; provenance ${autoAdopt.safeProvenance(verdict.provenance)}; ${autoAdopt.leaseClause(verdict.leases)}), but the strict re-read still fails: ${again.message}`);
         }
         throw again;
       }

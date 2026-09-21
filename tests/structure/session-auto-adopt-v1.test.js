@@ -129,14 +129,31 @@ test('an adoptable record is adopted, and the sweep result travels verbatim', ()
 });
 
 test('every core refusal reason maps to REFUSED and already-served to ALREADY_SERVED, without a write', () => {
+  // The refusal carries its own state, exactly as the real adoptableRecord attaches
+  // it. The readers below THROW on purpose: the verdict's state has to come off the
+  // probe, and a module that re-derived it from a second walk of the reader ladder
+  // would fail here instead of silently agreeing with a stub.
+  const readerMustNotRun = () => { throw new Error('the module must not re-read the record'); };
   for (const reason of Object.values(realCore.ADOPTION_REFUSALS)) {
-    const { instance, calls } = adopter({ adoptableRecord: () => ({ ok: false, reason }) });
+    const { instance, calls } = adopter({
+      readContext: readerMustNotRun,
+      readOrphanedProjectRootContext: readerMustNotRun,
+      readPrunedPluginRootContext: readerMustNotRun,
+      executingPluginVersion: readerMustNotRun,
+      adoptableRecord: () => ({
+        ok: false, reason, recorded: '0.20.0', executing: '0.21.1', orphanedProjectRoot: false, prunedPluginRoot: true,
+      }),
+    });
     const verdict = instance.adoptForHook(REQUEST);
     const expected = reason === 'already-served' ? 'already-served' : 'refused';
     assert.equal(verdict.outcome, expected, reason);
     assert.equal(verdict.reason, reason);
-    assert.equal(verdict.recorded, '0.20.0');
+    // already-served deliberately drops `recorded`: the record on disk is the
+    // re-minted one by then, so its version is not the one this session came FROM.
+    assert.equal(verdict.recorded, reason === 'already-served' ? null : '0.20.0', reason);
     assert.equal(verdict.executing, '0.21.1');
+    assert.equal(verdict.prunedPluginRoot, true, 'the state flag travels with the refusal');
+    assert.equal(verdict.orphanedProjectRoot, false);
     assert.equal(calls.adopt, 0, `adoptContext must not run for ${reason}`);
     for (const field of VERDICT_FIELDS) assert.ok(field in verdict, field);
   }
@@ -178,11 +195,17 @@ test('a lock timeout is UNAVAILABLE / lock-timeout, anything else UNAVAILABLE / 
   assert.match(failed.error, /EACCES/);
 });
 
-test('a throwing probe never escapes: UNAVAILABLE / probe-failed', () => {
+test('a throwing probe never escapes: UNAVAILABLE / probe-failed, with no state at all', () => {
   const { instance, calls } = adopter({ adoptableRecord: () => { throw new TypeError('boom'); } });
   const verdict = instance.adoptForHook(REQUEST);
   assert.equal(verdict.outcome, 'unavailable');
   assert.equal(verdict.reason, 'probe-failed');
+  // Nothing about the record was established, so nothing is claimed about it: the
+  // stub's readContext would have answered 0.20.0 had the module gone looking.
+  assert.equal(verdict.recorded, null);
+  assert.equal(verdict.executing, null);
+  assert.equal(mod.establishesNamedState(verdict), false);
+  assert.match(verdict.error, /boom/);
   assert.equal(calls.adopt, 0);
 });
 
@@ -251,6 +274,20 @@ test('a typed lock timeout is recognised by its code before the message is consu
   assert.equal(realCore.isLockTimeout(new Error('timed out acquiring per-session lock')), false);
 });
 
+test('the core MINTS the typed lock timeout it exports a predicate for', () => {
+  // The case above proves the adopter READS the code. Nothing proved the core still
+  // WRITES it: withFileLock waits ten seconds before it times out, which is too long
+  // to drive here, so the producer is pinned at source — the three lines that build,
+  // type and throw the error, in that order. Deleting the middle one leaves every
+  // behavioural case green and sends a real timeout to the message-matching fallback.
+  const source = fs.readFileSync(CORE_FILE, 'utf8');
+  const message = "new Error('session-control-v1: timed out acquiring per-session lock');";
+  assert.equal(source.split(message).length - 1, 1, 'the timeout message is minted at exactly one site');
+  const after = source.slice(source.indexOf(message) + message.length).split('\n').slice(1, 3).map((line) => line.trim());
+  assert.deepEqual(after, ['timedOut.code = LOCK_TIMEOUT_CODE;', 'throw timedOut;']);
+  assert.equal(realCore.LOCK_TIMEOUT_CODE, 'ZENSU_LOCK_TIMEOUT');
+});
+
 test('the notice renderer screens every value and names a refused sweep as refused', () => {
   const base = {
     outcome: 'adopted', reason: 'adopted', recorded: '0.20.0', executing: '0.21.1',
@@ -268,8 +305,18 @@ test('the notice renderer screens every value and names a refused sweep as refus
   const refused = mod.renderAdoptionNotice({ ...base, leases: { discarded: 0, failed: [], unsafe: 'locked', unsafeAt: '/x' } }, { where: 'on this tool call' });
   assert.match(refused, /lease sweep was REFUSED \(locked\) and set aside nothing/);
   assert.doesNotMatch(refused, /0 review-evidence lease\(s\)/);
+  // A refusal does not imply that nothing moved: the destination guard refuses per
+  // lease, so the sweep can set some aside and then stop. "Set aside nothing" over a
+  // count of two would be the same misreport the refused arm exists to prevent.
+  const partial = mod.leaseClause({ discarded: 2, failed: [], unsafe: 'destination', unsafeAt: '/x' });
+  assert.match(partial, /lease sweep set aside 2 lease\(s\) and was then REFUSED \(destination\)/);
+  assert.doesNotMatch(partial, /set aside nothing/);
+  assert.match(partial, /\/zensu:adopt-session --confirm repairs the lease store/);
   const stuck = mod.renderAdoptionNotice({ ...base, leases: { discarded: 1, failed: ['a'], unsafe: '' } }, { where: 'on this tool call' });
   assert.match(stuck, /1 review-evidence lease\(s\) from before the update set aside and 1 left STUCK/);
+  // The command named there has to be the one that actually names them: the
+  // read-only report does not re-run the sweep, the --confirm form does.
+  assert.match(stuck, /\/zensu:adopt-session --confirm re-runs the sweep and names them/);
   assert.match(mod.leaseClause(null), /no review-evidence lease sweep result was recorded/);
   assert.match(mod.leaseClause({ discarded: 0, failed: [], unsafe: 'sweep failed!' }), /REFUSED \(\(unrenderable\)\)/);
 
@@ -280,6 +327,13 @@ test('the notice renderer screens every value and names a refused sweep as refus
   const concurrent = mod.renderAdoptionNotice({ ...base, outcome: 'already-served', reason: 'adopted-concurrently', supersededFile: null, provenance: null, leases: null }, { where: 'at this SubagentStart' });
   assert.match(concurrent, /adopted automatically by a sibling hook at this SubagentStart/);
   assert.doesNotMatch(concurrent, /kept beside it/);
+  assert.match(concurrent, /updated from 0\.20\.0 to 0\.21\.1 while/);
+  // Nobody measured the previous version: the sentence drops that half rather than
+  // printing the re-minted record's version as the one the session came from.
+  const unmeasured = mod.renderAdoptionNotice({ ...base, outcome: 'already-served', reason: 'already-served', recorded: null, supersededFile: null, provenance: null, leases: null }, { where: 'at this SessionStart' });
+  assert.match(unmeasured, /plugin was updated to 0\.21\.1 while this session was running/);
+  assert.doesNotMatch(unmeasured, /updated from/);
+  assert.doesNotMatch(unmeasured, /\(unreadable\)/);
 
   const hostile = mod.renderAdoptionNotice({ ...base, recorded: 'x\ny', executing: 'a"b', provenance: 'unavailable: <script>' }, { where: 'on this tool call' });
   assert.match(hostile, /from \(unreadable\) to \(unreadable\)/);
@@ -287,6 +341,24 @@ test('the notice renderer screens every value and names a refused sweep as refus
   assert.equal(mod.safeVersion('0.21.1'), '0.21.1');
   assert.equal(mod.safeProvenance('no-workflow-document'), 'no-workflow-document');
   assert.equal(mod.SAFE_PROVENANCE.test('unavailable: ENOENT (x)'), true);
+  // No slash: provenance carries an error message, and that is where a path arrives.
+  assert.equal(mod.SAFE_PROVENANCE.test('unavailable: ENOENT /Users/someone/project'), false);
+  assert.equal(mod.safeProvenance('unavailable: ENOENT /Users/someone/project'), '(unrenderable)');
+});
+
+test('the token grammar has one JavaScript owner, and the gate consumes it', () => {
+  assert.ok(mod.SAFE_TOKEN instanceof RegExp);
+  for (const token of [...Object.values(realCore.ADOPTION_REFUSALS), ...Object.values(mod.AUTO_ADOPT_REASONS)]) {
+    assert.equal(mod.SAFE_TOKEN.test(token), true, token);
+  }
+  for (const hostile of ['', 'Opted-Out', 'a b', 'a"b', 'x\ny', '-lead', 'a'.repeat(65)]) {
+    assert.equal(mod.SAFE_TOKEN.test(hostile), false, JSON.stringify(hostile));
+  }
+  // The gate reads the grammar off THIS export. A private copy there is the third
+  // spelling this export was introduced to retire, so the literal must not come back.
+  const gate = fs.readFileSync(path.join(LIB, 'reviewer-capability-v1.js'), 'utf8');
+  assert.match(gate, /autoAdoptModule\(\)\.SAFE_TOKEN/);
+  assert.doesNotMatch(gate, /\[a-z\]\[a-z0-9-\]\{0,63\}/);
 });
 
 test('a throwing config reader degrades to enabled', () => {
@@ -315,18 +387,79 @@ test('an invalid request is UNAVAILABLE / invalid-request and never reaches the 
   assert.equal(calls.adopt, 0);
 });
 
-test('the version pair on a refusal is best-effort and absorbs every reader fault', () => {
-  const { instance } = adopter({
-    adoptableRecord: () => ({ ok: false, reason: 'record-unreadable' }),
-    readContext: () => { throw new Error('strict read failed'); },
-    readOrphanedProjectRootContext: () => { throw new Error('no'); },
-    readPrunedPluginRootContext: () => ({ plugin_version: '0.19.0' }),
-    executingPluginVersion: () => { throw new Error('no manifest'); },
-  });
-  const verdict = instance.adoptForHook(REQUEST);
-  assert.equal(verdict.outcome, 'refused');
-  assert.equal(verdict.recorded, '0.19.0');
-  assert.equal(verdict.executing, null);
+test('a refusal names the state the PROBE carried, and claims none the probe did not', () => {
+  // The stub readers answer a DIFFERENT version than the probe on purpose. A module
+  // that still re-derived the pair from its own walk of the reader ladder would
+  // report 0.19.0 here; the probe said 0.20.0, and the probe is the walk that
+  // produced the refusal.
+  const lying = { plugin_version: '0.19.0' };
+  const carried = adopter({
+    readContext: () => lying,
+    readOrphanedProjectRootContext: () => lying,
+    readPrunedPluginRootContext: () => lying,
+    adoptableRecord: () => ({
+      ok: false, reason: 'executing-runtime-older', recorded: '0.20.0', executing: '0.21.1',
+      orphanedProjectRoot: true, prunedPluginRoot: false,
+    }),
+  }).instance.adoptForHook(REQUEST);
+  assert.equal(carried.outcome, 'refused');
+  assert.equal(carried.recorded, '0.20.0');
+  assert.equal(carried.executing, '0.21.1');
+  assert.equal(carried.orphanedProjectRoot, true);
+  assert.equal(carried.prunedPluginRoot, false);
+  assert.equal(mod.establishesNamedState(carried), true);
+
+  // A probe that carries NO state — `record-unreadable`, or a core that predates the
+  // state fields — yields the empty state, never a guess. Flags are read strictly:
+  // a truthy non-boolean is not a flag.
+  const bare = adopter({
+    readContext: () => lying,
+    adoptableRecord: () => ({ ok: false, reason: 'record-unreadable', orphanedProjectRoot: 'yes', recorded: 7 }),
+  }).instance.adoptForHook(REQUEST);
+  assert.equal(bare.outcome, 'refused');
+  assert.equal(bare.recorded, null);
+  assert.equal(bare.executing, null);
+  assert.equal(bare.orphanedProjectRoot, false);
+  assert.equal(bare.prunedPluginRoot, false);
+  assert.equal(mod.establishesNamedState(bare), false);
+});
+
+test('the real adoptableRecord attaches the state to a refusal it reaches past the read', () => {
+  // The module trusts the probe for the state, so the probe has to supply it. Driven
+  // against the REAL core with a records directory that holds nothing: the one
+  // refusal reachable without a fixture is `record-unreadable`, which is reached
+  // BEFORE any record is read and therefore carries the empty state — every field
+  // present, none of them a guess.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-auto-adopt-probe-'));
+  try {
+    const pluginData = path.join(root, 'data');
+    const recordsDir = path.join(pluginData, 'session-control', 'v1', 'records');
+    fs.mkdirSync(recordsDir, { recursive: true });
+    const refusal = realCore.adoptableRecord({
+      executingPluginRoot: path.join(__dirname, '..', '..'),
+      pluginData,
+      recordsDir,
+      sessionId: 'no-such-session',
+      host: 'claude',
+    });
+    assert.equal(refusal.ok, false);
+    assert.equal(refusal.reason, 'record-unreadable');
+    assert.deepEqual(Object.keys(refusal).sort(),
+      ['executing', 'ok', 'orphanedProjectRoot', 'prunedPluginRoot', 'reason', 'recorded']);
+    assert.equal(refusal.recorded, null);
+    assert.equal(refusal.executing, null);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+  // The later refusals carry what condition 1 established. They need a minted record
+  // to reach, which the upgrade suite builds; here the contract is pinned at source:
+  // every refusal below the read passes `state`, and only the pre-read one does not.
+  const source = fs.readFileSync(CORE_FILE, 'utf8');
+  const body = source.slice(source.indexOf('function adoptableRecord(options)'), source.indexOf("const ADOPTION_HISTORY_PHASE"));
+  const refusals = body.match(/adoptionRefusal\([^)]*\)/g) || [];
+  assert.ok(refusals.length >= 7, `expected the full refusal roster, found ${refusals.length}`);
+  const stateless = refusals.filter((call) => !/, state\)$/.test(call));
+  assert.deepEqual(stateless, ['adoptionRefusal(ADOPTION_REFUSALS.RECORD_UNREADABLE)']);
 });
 
 test('the config reader mirrors the shell precedence: explicit file, then global merged with the project overlay', () => {

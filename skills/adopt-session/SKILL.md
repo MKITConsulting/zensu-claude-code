@@ -249,17 +249,24 @@ render that verbatim too.
 | `executing-runtime-older` | The executing installation is OLDER. Only forwards is ever allowed. |
 | `workflow-schema-mismatch` | The workflow document cannot be read by this runtime — the case adoption must refuse. |
 
-A gate's deny after a refused AUTOMATIC adoption carries one of the reasons above,
-or one of these entry-level tokens, which are not `adoptableRecord` verdicts:
+A gate's deny after an AUTOMATIC adoption that did not bind the session carries one
+of the reasons above, or one of these entry-level tokens, which are not
+`adoptableRecord` verdicts. The deny's own verb tells the two kinds apart: a record
+that was judged reads `it was REFUSED: <token>`, a ladder that never reached a
+verdict reads `it did not complete: <token>`.
 `opted-out` (`hooks.sessionAutoAdopt: false` — the operator switched the automatic
 path off on purpose; report it and ask the user whether to run the `--confirm` form,
 which ignores the opt-out, and never run it on your own initiative),
 `adopted-concurrently` (a sibling hook won the race and the record serves now; retry
-the call), `not-completed` and `lock-timeout` (the adoption did not finish; retry,
-then run the report), `superseded-record-exists` (an interrupted adoption left
+the call), `not-completed`, `lock-timeout` and `adoption-failed` (the adoption did
+not finish; retry, then run the report — the last two appear only in the all-tool
+gate's deny, which sees the adoption's own error where the shell gates see a
+preview), `superseded-record-exists` (an interrupted adoption left
 `<session-key>.superseded-<version>.json` in place; the report names it, and moving
-it aside lets the adoption complete), and `(unknown)` when the binder could not
-answer at all.
+it aside lets the adoption complete — a retry alone is a loop), and `(unknown)` when
+the binder could not answer at all. A refusal that establishes no named state —
+`record-unreadable`, `plugin-data-mismatch` — rides on the generic bind-failure deny
+as one appended sentence rather than on the lineage or pruned wording.
 
 **Step 2 of 3 — adopt.** The same adoption runs automatically on every hook bind, so
 this form exists for a refusal and for the opt-out — and `--confirm` is a token you
@@ -267,8 +274,12 @@ supply yourself, not a consent the user gave. TWO of its uses therefore need the
 user's explicit yes BEFORE you run it, and you wait for that answer: when the report
 answered `already-served` and its `workflow baseline` line reads MISSING, `--confirm`
 REBUILDS the document and the review chain that was live when it vanished is lost —
-say so, in the user's language, and wait; and when the deny or the report named
-`opted-out`, the operator switched the automatic path off — report that and wait. For
+say so, in the user's language, and wait; and when a gate's deny or the Stop release
+named `opted-out`, the operator switched the automatic path off — report that and
+wait. The report itself never names `opted-out`, and neither does the `/zensu:doctor`
+row, which cannot tell the three cases apart: the report shows such
+a record as ADOPTABLE, because the opt-out governs the automatic path only, so an
+ADOPTABLE report in a session whose tools are denied is the signature of it. For
 every other refusal, and for the idempotent lease-store repair on an `already-served`
 record whose baseline is present, run it directly. Tell the user, in their language,
 what it does — both versions, and the one consequence that is not obvious: any

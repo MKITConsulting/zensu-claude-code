@@ -1908,27 +1908,70 @@ case "$OUT" in
     esac ;;
   *) check "P1ad4 pruned row without a pair (got: $OUT)" FAIL ;;
 esac
-# Both adoptable rows say WHY the user is looking at them: adoption runs on its own
-# on the first hook contact, so a row still rendered means that adoption was refused
-# or opted out, and the remedy is the report first, the manual retry second. The
-# skill relays the row, so the same phrases must exist there — the drift pin P1qr
-# already applies to the denial rows.
+# All THREE adoptable rows say WHY the user is looking at them: adoption runs on its
+# own on the first hook contact, so a row still rendered means that adoption was
+# refused, opted out or did not complete, and the remedy is the report first, the
+# manual retry second — with the user asked first where the operator switched the
+# automatic path off. The third row is the COMBINED one (a vanished project root AND
+# a lineage break); it shipped one round on the older two-cause wording because this
+# pin graded two rows of three.
+#
+# The skill relays the rows, so the same claims must exist there — PER BULLET. A
+# whole-file grep is satisfied by one bullet on behalf of its two siblings, which is
+# how the combined bullet kept the retired wording with this check green. Each bullet
+# is sliced by its bold title and whitespace-flattened, so a re-wrap cannot fail it.
 P1AD5_LINEAGE="$(ZDOC_BINDING_RECORDED_VERSION=0.17.0 ZDOC_BINDING_EXECUTING_VERSION=0.18.0 run_report_binding incompatible-runtime)"
 P1AD5_PRUNED="$(ZDOC_BINDING_RECORDED_VERSION=0.17.0 ZDOC_BINDING_EXECUTING_VERSION=0.18.0 run_report_binding pruned-plugin-root)"
+P1AD5_COMBINED="$(ZDOC_BINDING_RECORDED_VERSION=0.17.0 ZDOC_BINDING_EXECUTING_VERSION=0.18.0 run_report_binding orphaned-project-root+incompatible-runtime /gone/worktree)"
 P1AD5_SKILL="$PLUGIN_DIR/skills/doctor/SKILL.md"
 P1AD5_BAD=""
-for p1ad5_phrase in 'reaching this row means that adoption was refused or opted out'     'prints the same refusal in full'     '/zensu:adopt-session --confirm to retry by hand'; do
+p1ad5_bullet() {
+  # $1 a phrase of the bullet's bold TITLE; prints that bullet flattened, or nothing
+  # unless exactly one bullet matches.
+  SKILL="$P1AD5_SKILL" NEEDLE="$1" node -e '
+    const fs = require("node:fs");
+    const bullets = [];
+    let current = null;
+    for (const line of fs.readFileSync(process.env.SKILL, "utf8").split("\n")) {
+      if (/^- \*\*/.test(line)) { current = [line]; bullets.push(current); continue; }
+      if (current && /^\S/.test(line)) { current = null; continue; }
+      if (current) current.push(line);
+    }
+    const hits = bullets
+      .map((bullet) => bullet.join(" ").replace(/\s+/g, " "))
+      .filter((text) => {
+        const close = text.indexOf("**", 4);
+        return close > 0 && text.slice(0, close).includes(process.env.NEEDLE);
+      });
+    process.stdout.write(hits.length === 1 ? hits[0] : "");
+  ' 2>/dev/null
+}
+P1AD5_BULLET_LINEAGE="$(p1ad5_bullet 'is intact, but the running Zensu installation declares an incompatible lineage')"
+P1AD5_BULLET_COMBINED="$(p1ad5_bullet 'is readable, but BOTH the recorded project root')"
+P1AD5_BULLET_PRUNED="$(p1ad5_bullet 'installation that minted it has been removed from the plugin cache')"
+for p1ad5_phrase in 'reaching this row means that adoption was refused, opted out or did not complete' \
+    'it prints the same refusal in full, or reports the record as adoptable when the automatic path was opted out' \
+    'ask the user before going further' \
+    '/zensu:adopt-session --confirm to retry by hand'; do
   case "$P1AD5_LINEAGE" in *"$p1ad5_phrase"*) ;; *) P1AD5_BAD="$P1AD5_BAD [lineage:$p1ad5_phrase]" ;; esac
   case "$P1AD5_PRUNED" in *"$p1ad5_phrase"*) ;; *) P1AD5_BAD="$P1AD5_BAD [pruned:$p1ad5_phrase]" ;; esac
+  case "$P1AD5_COMBINED" in *"$p1ad5_phrase"*) ;; *) P1AD5_BAD="$P1AD5_BAD [combined:$p1ad5_phrase]" ;; esac
 done
-for p1ad5_phrase in 'prints the same refusal in full' 'REFUSED' 'opted out'; do
-  grep -qF "$p1ad5_phrase" "$P1AD5_SKILL" || P1AD5_BAD="$P1AD5_BAD [skill:$p1ad5_phrase]"
+for p1ad5_phrase in 'adoption was refused, opted out or did not complete' \
+    'the same refusal in full' \
+    'or reports the record as adoptable when the automatic path was opted out' \
+    'ask the user before' \
+    '`/zensu:adopt-session --confirm` retries by hand'; do
+  case "$P1AD5_BULLET_LINEAGE" in *"$p1ad5_phrase"*) ;; *) P1AD5_BAD="$P1AD5_BAD [skill-lineage:$p1ad5_phrase]" ;; esac
+  case "$P1AD5_BULLET_COMBINED" in *"$p1ad5_phrase"*) ;; *) P1AD5_BAD="$P1AD5_BAD [skill-combined:$p1ad5_phrase]" ;; esac
+  case "$P1AD5_BULLET_PRUNED" in *"$p1ad5_phrase"*) ;; *) P1AD5_BAD="$P1AD5_BAD [skill-pruned:$p1ad5_phrase]" ;; esac
 done
-case "$P1AD5_LINEAGE$P1AD5_PRUNED" in
-  *'to see whether this session can be adopted in place'*) P1AD5_BAD="$P1AD5_BAD [manual-first wording survives]" ;;
+case "$P1AD5_LINEAGE$P1AD5_PRUNED$P1AD5_COMBINED$P1AD5_BULLET_LINEAGE$P1AD5_BULLET_COMBINED$P1AD5_BULLET_PRUNED" in
+  *'to see whether this session can be adopted in place'*|*'to see whether the running installation may take the record over'*|*'adoption was refused or opted out'*)
+    P1AD5_BAD="$P1AD5_BAD [retired wording survives]" ;;
 esac
 if [ -z "$P1AD5_BAD" ]; then
-  check "P1ad5 both adoptable binding rows name the refused-or-opted-out cause and the report-then-retry remedy, mirrored in the skill" PASS
+  check "P1ad5 all three adoptable binding rows name the refused, opted-out or incomplete cause and the report-then-retry remedy, each mirrored in its own skill bullet" PASS
 else
   check "P1ad5 adoptable binding rows vs skill (drift:$P1AD5_BAD)" FAIL
 fi

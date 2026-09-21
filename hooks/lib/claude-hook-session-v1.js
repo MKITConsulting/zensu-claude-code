@@ -50,9 +50,11 @@
 // executing installation with provenance and sweeps the superseded leases, and
 // the bind then succeeds on its strict re-read. The sixth export
 // `ZENSU_SESSION_ADOPTED` names `recorded -> executing` when THIS invocation did
-// that and is empty otherwise. `adoption-refusal` (payload on stdin) is the
-// read-only companion for the deny emitters: it prints ONE token — an
-// ADOPTION_REFUSALS value, `opted-out`, `adopted-concurrently` or
+// that and is empty otherwise; NO hook reads it yet — it exists so the shell hook
+// that adopted can announce it, and the planned consumer is the install-lineage
+// notice hook. `adoption-refusal` (payload on stdin) is the read-only companion
+// for the deny emitters: it prints ONE token — an ADOPTION_REFUSALS value,
+// `opted-out`, `adopted-concurrently`, `superseded-record-exists` or
 // `not-completed` — never a TAB, so the two-field pair above keeps its five
 // parsers, and exits 1 when the question cannot be answered.
 
@@ -402,9 +404,10 @@ function shellQuote(value) {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-// The adoption request every hook-side caller hands to session-auto-adopt-v1.js.
-// Built once here so the binder, the `adoption-refusal` mode and the capability
-// gate cannot disagree about which five keys the ladder reads.
+// The adoption request this file hands to session-auto-adopt-v1.js. Built once so
+// its two callers — resolveHookSession and the `adoption-refusal` mode — cannot
+// disagree about the seven keys the ladder reads. The capability gate is NOT a
+// caller: it reaches the ladder through resolveHookSession's `autoAdopt` option.
 function adoptionRequest(payload, environment, executedPluginRoot, pluginData, recordsDir) {
   return {
     executingPluginRoot: executedPluginRoot,
@@ -464,11 +467,13 @@ function resolveHookSession(payload, environment = process.env, options = {}) {
     // on `record-unreadable` and on the unchanged deny below. `model-bind` never
     // opts in: a doctor or a zensu-log verb must stay write-free.
     if (!options.autoAdopt) throw error;
-    const verdict = autoAdoptModule().adoptForHook(
+    const autoAdopt = autoAdoptModule();
+    const OUTCOMES = autoAdopt.AUTO_ADOPT_OUTCOMES;
+    const verdict = autoAdopt.adoptForHook(
       adoptionRequest(payload, environment, executedPluginRoot, pluginData, recordsDir),
     );
-    if (verdict.outcome === 'adopted') adoption = verdict;
-    if (verdict.outcome === 'adopted' || verdict.outcome === 'already-served') {
+    if (verdict.outcome === OUTCOMES.ADOPTED) adoption = verdict;
+    if (verdict.outcome === OUTCOMES.ADOPTED || verdict.outcome === OUTCOMES.ALREADY_SERVED) {
       // Re-read STRICTLY: the adopted record must serve itself. An adoption
       // whose recorded project root is gone legitimately re-throws here, and the
       // gates' orphan ladder then takes over — that is the AC-C17 property, now
@@ -513,29 +518,50 @@ function adoptionRefusalToken(payload, environment = process.env) {
   if (declaredPluginRoot !== executedPluginRoot) fail('CLAUDE_PLUGIN_ROOT does not match the executing plugin');
   const pluginData = canonicalDirectory(environment.CLAUDE_PLUGIN_DATA, 'CLAUDE_PLUGIN_DATA', true);
   const recordsDir = privateRecordsDirectory(pluginData);
-  const preview = autoAdoptModule().previewAdoption(
+  const autoAdopt = autoAdoptModule();
+  const OUTCOMES = autoAdopt.AUTO_ADOPT_OUTCOMES;
+  const REASONS = autoAdopt.AUTO_ADOPT_REASONS;
+  const preview = autoAdopt.previewAdoption(
     adoptionRequest(payload, environment, executedPluginRoot, pluginData, recordsDir),
   );
   switch (preview.outcome) {
-    case 'refused':
+    case OUTCOMES.REFUSED:
       return preview.reason;
-    case 'opted-out':
-      return 'opted-out';
-    case 'already-served': {
+    case OUTCOMES.OPTED_OUT:
+      return REASONS.OPTED_OUT;
+    case OUTCOMES.ALREADY_SERVED: {
       // Served NOW: either a concurrent hook adopted it since the caller's bind
       // failed, or the caller's failure was never a lineage one. Only a strict
-      // read can tell, and only the first is this token's business.
+      // read can tell, and only the first is this token's business. The second
+      // answers NULL, never `not-completed`: the record serves, so nothing about
+      // an adoption is incomplete, and a deny that blamed the adoption for a bind
+      // that failed on a vanished project root would send the reader to retry a
+      // call no retry can fix.
       try {
         resolveHookSession(payload, environment);
-        return 'adopted-concurrently';
+        return REASONS.ADOPTED_CONCURRENTLY;
       } catch {
-        return 'not-completed';
+        return null;
       }
     }
-    case 'adoptable':
-      // Adoptable, yet the caller's own bind failed inside adoptContext — a
-      // lock timeout or the crash-resume superseded file. Retrying is the remedy.
-      return 'not-completed';
+    case OUTCOMES.ADOPTABLE: {
+      // Adoptable, yet the caller's own bind failed inside adoptContext. TWO causes
+      // reach here and they need OPPOSITE remedies, so the preview asks the one
+      // question that separates them. A superseded file already in place is the
+      // crash-resume shape: it blocks every later adoption until it is moved, so
+      // "retry" would be a loop. lstat, never existsSync — adoptContext's own check
+      // is COPYFILE_EXCL, which a dangling link at that name trips as well. Anything
+      // else (a lock timeout) really is a retry.
+      if (typeof preview.recorded === 'string') {
+        try {
+          fs.lstatSync(core.supersededRecordFile(recordsDir, core.sessionKey(payload.session_id), preview.recorded));
+          return REASONS.SUPERSEDED_EXISTS;
+        } catch {
+          // Absent, or unreadable: the retry token below is the honest answer.
+        }
+      }
+      return REASONS.NOT_COMPLETED;
+    }
     default:
       return null;
   }
@@ -750,9 +776,17 @@ function main() {
   if (binding.adoption) {
     const adopted = binding.adoption;
     // ONE line, because the gate suites admit a bounded number of stderr lines
-    // per hook run. Debug channel: whether a PreToolUse hook's stderr reaches
-    // the user on exit 0 is unverified, so the user-facing announcement travels
-    // elsewhere (the SessionStart adapter, the capability gate, the doctor).
+    // per hook run. Debug channel: whether a hook's stderr reaches the user on
+    // exit 0 is unverified, so the user-facing announcement travels elsewhere (the
+    // SessionStart adapter, the capability gate, the doctor).
+    //
+    // State the ORDER, because it decides which of those actually speaks. After a
+    // /reload-plugins the first bound contact of a turn is a UserPromptSubmit shell
+    // hook, which binds through this very mode — so on the ordinary flow THIS
+    // invocation adopts, and the capability gate's allow-path announcement is never
+    // reached: by the time a tool call arrives the record already serves. That
+    // leaves this line and /zensu:doctor as the only trace of such an adoption
+    // until a hook consumes ZENSU_SESSION_ADOPTED.
     // Every interpolated value goes through the same screens the two
     // user-facing renderers apply: the version shape, the provenance class, the
     // superseded BASENAME, and the lease clause that tells a refused sweep from a

@@ -5,8 +5,10 @@
 // when the executing installation cannot serve a session's Session Control
 // record by version number: adoptableRecord -> adoptContext -> the superseded
 // lease sweep, composed here so the binder (claude-hook-session-v1.js), the
-// SessionStart adapter (claude-session-control-v1.js) and the manual entry point
-// (session-adopt-report-v1.js) share one implementation instead of three.
+// SessionStart adapter (claude-session-control-v1.js) and the manual entry point's
+// --confirm path (session-adopt-report-v1.js) share one implementation instead of
+// three. That report's READ-ONLY path is not a caller: it asks adoptableRecord
+// directly, because it has to print a refusal's remedy table rather than a verdict.
 //
 // Never throws out of adoptForHook / previewAdoption: every outcome is a typed
 // verdict, because the caller is a PreToolUse hook whose own failure mode is a
@@ -27,19 +29,29 @@
 // normalizeHostPathInput — so a driveless MSYS spelling falls to "enabled"
 // instead of raising inside a hook.
 //
+// KNOWN DIVERGENCE, recorded rather than closed: the project overlay is anchored
+// on the AMBIENT CLAUDE_PROJECT_DIR, exactly as _ZENSU_CFG_JS anchors it, while
+// every state writer in this plugin anchors on the record's project_root. Where the two
+// differ — a session whose cwd is a worktree — the opt-out is read from the
+// harness root. Anchoring on the record instead would make this reader disagree
+// with the shell reader it mirrors, which is the worse of the two drifts.
+//
 // The opt-out is consulted AFTER adoptableRecord, never before it: `opted-out`
 // therefore stands only for a record the ladder would otherwise have adopted. A
 // record that is unreadable, foreign or a downgrade keeps its own refusal reason
 // under the opt-out too, so a deny never blames the config for a state the config
 // did not cause.
 //
-// The adoption NOTICE is rendered here as well, once, for the three places that
+// The adoption NOTICE is rendered here as well, once, for the TWO places that
 // speak about an adoption to a model or a user — the `.*` gate's allow-path
-// announcement, the SessionStart/SubagentStart adapter's systemMessage plus
-// additionalContext, and the binder's stderr line. The version screen consumes
-// the core's ADOPTION_SAFE_VERSION_RE rather than re-spelling the alternation, and
-// the lease clause distinguishes a clean sweep from a REFUSED one: a refused sweep
-// left every superseded lease in place, which is the opposite of "0 set aside".
+// announcement and the SessionStart/SubagentStart adapter's systemMessage plus
+// additionalContext. The binder's stderr line is NOT a caller of the renderer: it
+// is an operator line with its own lead-in, and it consumes the three SCREENS
+// below (safeVersion, safeProvenance, leaseClause) so the two cannot disagree
+// about what is safe to print. The version screen consumes the core's
+// ADOPTION_SAFE_VERSION_RE rather than re-spelling the alternation, and the lease
+// clause distinguishes a clean sweep from a REFUSED one: a refused sweep may have
+// left superseded leases in place, which is the opposite of "0 set aside".
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -90,9 +102,16 @@ const STATE_NEUTRAL_REASONS = Object.freeze([
 
 // Provenance is one of `recorded`, `no-workflow-document` or `unavailable: <why>`;
 // the third carries an error message, so it is bounded to a printable class
-// rather than trusted into a notice verbatim.
-const SAFE_PROVENANCE = /^[A-Za-z0-9 .,:;_()'/-]{1,200}$/;
-const SAFE_SWEEP_TOKEN = /^[a-z][a-z0-9-]{0,63}$/;
+// rather than trusted into a notice verbatim. The class admits NO slash: an error
+// message is where a filesystem path arrives, and a path in a user-facing notice
+// is the one thing this screen exists to keep out. Such a message renders as
+// `(unrenderable)` here, and /zensu:doctor carries the detail.
+const SAFE_PROVENANCE = /^[A-Za-z0-9 .,:;_()'-]{1,200}$/;
+// The token grammar every adoption token is held to before it is rendered. ONE
+// JavaScript owner: the `.*` gate consumes this export for refusal tokens rather
+// than spelling the class again. The shell twin is ZENSU_SAFE_REFUSAL_RE in
+// hooks/lib/zensu-session.sh, which no `require` can reach.
+const SAFE_TOKEN = /^[a-z][a-z0-9-]{0,63}$/;
 const versionShape = defaultCore.ADOPTION_SAFE_VERSION_RE instanceof RegExp
   ? defaultCore.ADOPTION_SAFE_VERSION_RE
   : null;
@@ -111,24 +130,30 @@ function establishesNamedState(verdict) {
     && !STATE_NEUTRAL_REASONS.includes(verdict.reason);
 }
 
-// ONE sentence about the sweep, for every renderer. `leases.unsafe` is the sweep's
-// own refusal token (source, locked, destination, sweep-failed): the store was NOT
-// swept and nothing was set aside, which a bare count of 0 would misreport as a
-// clean sweep over an empty store.
+// ONE sentence about the sweep, for every renderer. `leases.unsafe` is a refusal
+// token: `source`, `locked` and `destination` are the sweep's own, and
+// `sweep-failed` is minted by THIS module's catch around the sweep call. A refusal
+// does not imply that nothing moved — the destination guard refuses per lease, so
+// a sweep can set some aside and then stop — which is why the count is read before
+// the sentence is chosen. A bare count of 0 over a refused sweep would misreport
+// an unswept store as a clean one.
 function leaseClause(leases) {
   if (!leases || typeof leases !== 'object') {
     return 'no review-evidence lease sweep result was recorded, so run /zensu:adopt-session --confirm to sweep the lease store';
   }
+  const discarded = Number.isInteger(leases.discarded) ? leases.discarded : 0;
   const unsafe = typeof leases.unsafe === 'string' && leases.unsafe !== ''
-    ? (SAFE_SWEEP_TOKEN.test(leases.unsafe) ? leases.unsafe : '(unrenderable)')
+    ? (SAFE_TOKEN.test(leases.unsafe) ? leases.unsafe : '(unrenderable)')
     : '';
   if (unsafe !== '') {
-    return `the review-evidence lease sweep was REFUSED (${unsafe}) and set aside nothing, so review-evidence operations may keep failing for this session until /zensu:adopt-session --confirm repairs the lease store`;
+    const tail = 'so review-evidence operations may keep failing for this session until /zensu:adopt-session --confirm repairs the lease store';
+    return discarded > 0
+      ? `the review-evidence lease sweep set aside ${discarded} lease(s) and was then REFUSED (${unsafe}), ${tail}`
+      : `the review-evidence lease sweep was REFUSED (${unsafe}) and set aside nothing, ${tail}`;
   }
-  const discarded = Number.isInteger(leases.discarded) ? leases.discarded : 0;
   const stuck = Array.isArray(leases.failed) ? leases.failed.length : 0;
   if (stuck > 0) {
-    return `${discarded} review-evidence lease(s) from before the update set aside and ${stuck} left STUCK in the records directory, so review-evidence operations keep failing until they are moved by hand (/zensu:adopt-session names them)`;
+    return `${discarded} review-evidence lease(s) from before the update set aside and ${stuck} left STUCK in the records directory, so review-evidence operations keep failing until they are moved by hand; /zensu:adopt-session --confirm re-runs the sweep and names them`;
   }
   return `${discarded} review-evidence lease(s) from before the update set aside, so a review that was in flight must be re-gathered`;
 }
@@ -138,13 +163,22 @@ function leaseClause(leases) {
 // verdict reached after a failed strict bind means a sibling hook adopted the
 // record during the same event, and the user is told that too — the announcement
 // must not depend on which of two racing hooks won the lock.
+//
+// That verdict's `recorded` is NULL unless the caller observed the previous
+// version itself: by the time the probe answers `already-served` the record on
+// disk is the RE-MINTED one, so its plugin_version is the executing version and
+// "updated from X to X" would be the result. The sentence drops the first half of
+// the pair rather than printing a number nobody measured.
 function renderAdoptionNotice(adoption, options) {
   const where = options && typeof options.where === 'string' && options.where !== '' ? options.where : 'on this hook';
-  const recorded = safeVersion(adoption && adoption.recorded);
   const executing = safeVersion(adoption && adoption.executing);
   if (adoption && adoption.outcome === AUTO_ADOPT_OUTCOMES.ALREADY_SERVED) {
-    return `zensu: the Zensu plugin was updated from ${recorded} to ${executing} while this session was running; its Session Control record was adopted automatically by a sibling hook ${where}, and this hook serves the adopted record. /zensu:doctor shows the details; nothing else to do.`;
+    const span = typeof adoption.recorded === 'string'
+      ? `from ${safeVersion(adoption.recorded)} to ${executing}`
+      : `to ${executing}`;
+    return `zensu: the Zensu plugin was updated ${span} while this session was running; its Session Control record was adopted automatically by a sibling hook ${where}, and this hook serves the adopted record. /zensu:doctor shows the details; nothing else to do.`;
   }
+  const recorded = safeVersion(adoption && adoption.recorded);
   const kept = adoption && typeof adoption.supersededFile === 'string' ? path.basename(adoption.supersededFile) : '(unknown)';
   const orphan = adoption && adoption.orphanedProjectRoot
     ? ' The recorded project root is still gone, so Edit, Write, MultiEdit and any writing Bash command stay denied until that exact directory is re-created.'
@@ -248,39 +282,22 @@ function coreOptions(request) {
   };
 }
 
-// Best-effort version pair for a verdict that carries no adoptable record: the
-// deny that follows a refusal still has to name both versions. Every reader is
-// tried in the same order as adoptableRecord's own ladder and every fault is
-// absorbed — a null here costs a name in a message, never the verdict.
-function versionPair(core, request) {
-  const readerOptions = { recordsDir: request.recordsDir, sessionId: request.sessionId, expectedHost: request.host };
-  let recorded = null;
-  let orphanedProjectRoot = false;
-  let prunedPluginRoot = false;
-  for (const reader of ['readContext', 'readOrphanedProjectRootContext', 'readPrunedPluginRootContext']) {
-    if (typeof core[reader] !== 'function') continue;
-    try {
-      const context = core[reader](readerOptions);
-      if (context && typeof context.plugin_version === 'string') {
-        recorded = context.plugin_version;
-        // WHICH reader answered is the state a deny has to name: the lineage
-        // wording for a strict or orphan read, the pruned wording for the last.
-        orphanedProjectRoot = reader === 'readOrphanedProjectRootContext';
-        prunedPluginRoot = reader === 'readPrunedPluginRootContext';
-        break;
-      }
-    } catch {
-      // The next reader in the ladder may still answer.
-    }
-  }
-  let executing = null;
-  try {
-    const version = core.executingPluginVersion(request.executingPluginRoot, request.host);
-    executing = typeof version === 'string' ? version : null;
-  } catch {
-    executing = null;
-  }
-  return { recorded, executing, orphanedProjectRoot, prunedPluginRoot };
+// The four state fields a verdict carries, READ OFF THE PROBE and never re-derived.
+// adoptableRecord attaches them to a refusal as well as to an accepting verdict, so
+// the deny that follows a refusal names both versions and the reader that answered
+// from the very walk that produced the refusal. This module used to walk condition
+// 1's reader ladder a second time to get them — a hand copy that could answer
+// differently from the walk it was describing. A probe that carries none (an older
+// core, or `record-unreadable`) yields the empty state, which every consumer reads
+// as "no named state was established".
+function probeState(probe) {
+  const source = isPlainObject(probe) ? probe : {};
+  return {
+    recorded: typeof source.recorded === 'string' ? source.recorded : null,
+    executing: typeof source.executing === 'string' ? source.executing : null,
+    orphanedProjectRoot: source.orphanedProjectRoot === true,
+    prunedPluginRoot: source.prunedPluginRoot === true,
+  };
 }
 
 function createAutoAdopter(deps) {
@@ -327,22 +344,24 @@ function createAutoAdopter(deps) {
     try {
       probe = core.adoptableRecord(coreOptions(request));
     } catch (error) {
+      // No state: the probe is documented never to throw, so a throw means nothing
+      // about the record was established, and `probe-failed` is state-neutral.
       return verdict(AUTO_ADOPT_OUTCOMES.UNAVAILABLE, AUTO_ADOPT_REASONS.PROBE_FAILED, {
-        ...versionPair(core, request),
         error: errorMessage(error),
       });
     }
+    const state = probeState(probe);
     if (!probe || probe.ok !== true) {
       const reason = probe && typeof probe.reason === 'string' ? probe.reason : AUTO_ADOPT_REASONS.PROBE_FAILED;
-      const outcome = reason === 'already-served' ? AUTO_ADOPT_OUTCOMES.ALREADY_SERVED : AUTO_ADOPT_OUTCOMES.REFUSED;
-      return verdict(outcome, reason, versionPair(core, request));
+      if (reason === 'already-served') {
+        // The record on disk already serves, so its plugin_version is whatever the
+        // adopting sibling re-minted it under — not the version this session was
+        // updated FROM. A caller that observed the previous version itself supplies
+        // it; this verdict must not pass the re-minted one off as that.
+        return verdict(AUTO_ADOPT_OUTCOMES.ALREADY_SERVED, reason, { ...state, recorded: null });
+      }
+      return verdict(AUTO_ADOPT_OUTCOMES.REFUSED, reason, state);
     }
-    const state = {
-      recorded: typeof probe.recorded === 'string' ? probe.recorded : null,
-      executing: typeof probe.executing === 'string' ? probe.executing : null,
-      orphanedProjectRoot: Boolean(probe.orphanedProjectRoot),
-      prunedPluginRoot: Boolean(probe.prunedPluginRoot),
-    };
     // The opt-out is asked LAST, so it only ever overrides an adoption that would
     // have happened: a refusal above keeps its own reason under the opt-out too.
     if (request.respectOptOut && !enabled(request.environment)) {
@@ -424,6 +443,7 @@ module.exports = {
   deepMerge,
   STATE_NEUTRAL_REASONS,
   establishesNamedState,
+  SAFE_TOKEN,
   SAFE_PROVENANCE,
   safeProvenance,
   safeVersion,

@@ -321,24 +321,40 @@ zensu_session_pruned_plugin_root_model() {
 
 # Prints ONE token on stdout naming why the automatic adoption did not bind this
 # session: an ADOPTION_REFUSALS value, `opted-out`, `adopted-concurrently` (a
-# sibling hook won the lock and the record serves now — retry the call) or
+# sibling hook won the lock and the record serves now — retry the call),
+# `superseded-record-exists` (adoptable, but the file an interrupted adoption left
+# behind is in the way — moving it is the remedy, a retry is a loop) or
 # `not-completed` (adoptable, yet the caller's own bind failed inside the
-# adoption — a lock timeout or a crash-resume superseded file; retry). Read-only:
-# it previews and never adopts. Non-zero when the question cannot be answered.
+# adoption — a lock timeout; retry). Read-only: it previews and never adopts.
+# Non-zero when the question cannot be answered — which includes a record that
+# already serves while the bind still fails: that failure was never an adoption
+# one, and a token here would blame the adoption for it.
 # Never a TAB, so the `recorded<TAB>executing` pair its consumers already parse
 # keeps exactly two fields. Same stdout warning as every predicate above.
 zensu_session_adoption_refusal() {
   _zensu_session_binder_mode adoption-refusal "${1:-}"
 }
 
-# The remedy sentence for a refusal token, shape-checked here so a consumer outside
-# this library never reaches the private renderer with an unscreened value. The
-# Stop hook is that consumer: it renders the token into a stderr line rather than
-# through zensu_emit_hook_session_deny, whose JSON channel a Stop cannot use.
+# The three sentences a refusal token selects, shape-checked here so a consumer
+# outside this library never reaches a private renderer with an unscreened value.
+# The Stop hook is that consumer: it renders the token into a stderr line rather
+# than through zensu_emit_hook_session_deny, whose JSON channel a Stop cannot use.
 zensu_session_adoption_remedy() {
   local refusal="${1:-}"
   [[ "$refusal" =~ $ZENSU_SAFE_REFUSAL_RE ]] || refusal="(unknown)"
   _zensu_adoption_refusal_remedy "$refusal"
+}
+
+zensu_session_adoption_attempt() {
+  local refusal="${1:-}"
+  [[ "$refusal" =~ $ZENSU_SAFE_REFUSAL_RE ]] || refusal="(unknown)"
+  _zensu_adoption_attempt "$refusal"
+}
+
+zensu_session_adoption_tail() {
+  local refusal="${1:-}"
+  [[ "$refusal" =~ $ZENSU_SAFE_REFUSAL_RE ]] || refusal="(unknown)"
+  _zensu_adoption_tail "$refusal"
 }
 
 # The per-gate bind-failure ladder, in ONE place. Four gates carried the same nine
@@ -367,16 +383,61 @@ zensu_emit_named_bind_deny() {
   if pair="$(zensu_session_incompatible_runtime "$payload")" && [ -n "$pair" ]; then
     refusal="$(zensu_session_adoption_refusal "$payload")" || refusal=""
     zensu_emit_hook_session_deny incompatible-runtime \
-      "${pair%%$'\t'*}" "${pair##*$'\t'}" "$refusal"
+      "${pair%%$'\t'*}" "${pair##*$'\t'}" "$refusal" "$(_zensu_deny_audience "$payload")"
     return
   fi
   if pair="$(zensu_session_pruned_plugin_root "$payload")" && [ -n "$pair" ]; then
     refusal="$(zensu_session_adoption_refusal "$payload")" || refusal=""
     zensu_emit_hook_session_deny pruned-plugin-root \
-      "${pair%%$'\t'*}" "${pair##*$'\t'}" "$refusal"
+      "${pair%%$'\t'*}" "${pair##*$'\t'}" "$refusal" "$(_zensu_deny_audience "$payload")"
+    return
+  fi
+  # NEITHER named state, and the adoption may still have run: the bind attempts it
+  # before any predicate is asked, so a refusal that establishes no named state
+  # (`record-unreadable`, a foreign store) or a race a sibling hook won lands HERE,
+  # on wording that used to say nothing about it. The token is asked once and
+  # rendered when there is one; an empty answer leaves the scope as it always was.
+  refusal="$(zensu_session_adoption_refusal "$payload")" || refusal=""
+  if [ "$refusal" = adopted-concurrently ]; then
+    # The record serves NOW, so neither named predicate can match any more. This
+    # is the only scope whose remedy is simply to retry.
+    zensu_emit_hook_session_deny adoption-incomplete "$refusal" "$(_zensu_deny_audience "$payload")"
+    return
+  fi
+  if [ -n "$refusal" ]; then
+    zensu_emit_hook_session_deny "$fallback" "$refusal" "$(_zensu_deny_audience "$payload")"
     return
   fi
   zensu_emit_hook_session_deny ${fallback:+"$fallback"}
+}
+
+# WHO reads the deny: `main` or `child`. The remedy of every adoption deny is a
+# command that WRITES the immutable record, and `zensu_doctor_allowed` conjoins the
+# main principal — so a reviewer, an evidence worker or a neutral child handed that
+# command is pointed at a write every gate refuses it. The `.*` gate has always
+# split its wording on this; the shell scopes did not, and handed the remedy to
+# every principal. Asked only on a deny that renders an adoption sentence.
+#
+# `main` whenever the principal cannot be established, and that direction is
+# deliberate: a child shown the main wording still cannot run the command, while
+# the main thread shown the child wording loses the one in-place remedy this state
+# has. Losing the remedy is the wrong message; an unusable one is only a worse one.
+_zensu_deny_audience() {
+  local payload="${1:-}" lib_dir context_lib principal
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || { printf 'main'; return; }
+  context_lib="$lib_dir/zensu-agent-context.sh"
+  if [ ! -r "$context_lib" ] || [ -L "$context_lib" ]; then
+    printf 'main'
+    return
+  fi
+  # shellcheck disable=SC1090
+  source "$context_lib" || { printf 'main'; return; }
+  principal="$(zensu_hook_principal "$payload" PreToolUse 2>/dev/null)" || principal=""
+  if [ -n "$principal" ] && [ "$principal" != main-v1 ]; then
+    printf 'child'
+    return
+  fi
+  printf 'main'
 }
 
 # THE THREE-WAY STATUS HAS A NAME, and this is it. The trichotomy below is a good
@@ -518,9 +579,9 @@ zensu_doctor_allowed() {
   zensu_hook_is_main_principal "$payload" PreToolUse
 }
 
-# Five scopes, because the same emitter serves callers with very different
+# Six scopes, because the same emitter serves callers with very different
 # knowledge. Keep this numeral in step with the list below it — it is what a
-# caller reads before adding a sixth. A caller that already ruled out the RELAXABLE states may say so; a
+# caller reads before adding a seventh. A caller that already ruled out the RELAXABLE states may say so; a
 # caller that denies on any bind failure must NOT, or it tells a user in a
 # relaxable state that /zensu:doctor is denied when it is exactly the command
 # that still works for them.
@@ -545,10 +606,25 @@ zensu_doctor_allowed() {
 #                     which minted the record is gone from the plugin cache, and
 #                     supplies the same version pair and refusal token; the
 #                     remedy is the same, the cause is a different one
+#   adoption-incomplete  NEITHER named state holds any more, because a sibling hook
+#                     adopted the record while this bind was failing ($2 is the
+#                     token, `adopted-concurrently`); the record serves now, so
+#                     this is the one scope whose remedy is simply to retry
 #
 # Both named scopes are reached only AFTER the bind's own automatic adoption
 # (session-auto-adopt-v1.js, run by the hook-payload bind) did not bind the
 # session, which is why they carry a refusal rather than an offer.
+#
+# The (default) and `narrowed` scopes take an OPTIONAL refusal token as $2: a
+# refusal that establishes no named state — an unreadable record, a foreign store —
+# lands on them, and a deny that said nothing about the adoption that had just run
+# left the reader with two surfaces telling different stories. With a shape-valid
+# token they append one sentence naming it; with none they read exactly as before.
+#
+# The LAST argument of every adoption-bearing scope is the AUDIENCE, `main` or
+# `child` (see _zensu_deny_audience). `child` keeps the cause, the attempt and the
+# token and withholds every command: the repair writes the immutable record and
+# is the main thread's alone.
 #
 # The version pair is interpolated into a JSON string, so it is held to a strict
 # shape first. A manifest version is ordinary text as far as the record schema is
@@ -588,7 +664,7 @@ _zensu_adoption_refusal_remedy() {
     (adopted-concurrently)
       printf '%s' 'A sibling hook adopted the record in the meantime and it serves now, so simply retry this call' ;;
     (not-completed|lock-timeout)
-      printf '%s' 'The adoption did not complete (a lock timeout, or a superseded record left by an interrupted adoption), so retry this call; if it persists, /zensu:adopt-session prints the full report' ;;
+      printf '%s' 'The adoption did not complete (a lock timeout, or a fault inside the adoption itself), so retry this call; if it persists, /zensu:adopt-session prints the full report' ;;
     (superseded-record-exists)
       printf '%s' 'A superseded record from an interrupted adoption is already in place; /zensu:adopt-session names the file, and moving it aside lets the adoption complete' ;;
     (*)
@@ -596,10 +672,60 @@ _zensu_adoption_refusal_remedy() {
   esac
 }
 
+# WHAT HAPPENED to the attempt, as a verb. HAND COPY of ADOPTION_INCOMPLETE_REASONS
+# in hooks/lib/reviewer-capability-v1.js, pinned against it. `lock-timeout` and
+# `adoption-failed` never reach a shell caller — the `adoption-refusal` mode is a
+# preview and cannot observe either — and they stay in this arm, as `lock-timeout`
+# stays in the remedy above, because the pin compares the two vocabularies BOTH
+# ways: a token one side knows and the other does not is what it exists to catch.
+_zensu_adoption_attempt() {
+  case "${1:-}" in
+    (adopted-concurrently|not-completed|lock-timeout|adoption-failed)
+      printf '%s' 'it did not complete' ;;
+    (*)
+      printf '%s' 'it was REFUSED' ;;
+  esac
+}
+
+# The sentence that FOLLOWS the remedy. HAND COPY of the three *_ADOPTION_TAIL
+# constants in hooks/lib/reviewer-capability-v1.js, pinned against them. It depends
+# on the token for the reason that file gives: an unconditional "--confirm retries
+# the adoption by hand" straight after the opted-out remedy's "never run it on
+# your own initiative" is one deny contradicting itself.
+_zensu_adoption_tail() {
+  case "${1:-}" in
+    (opted-out)
+      printf '%s' '/zensu:adopt-session reports the record as adoptable, because the opt-out governs the automatic path only, and /zensu:adopt-session --confirm adopts it by hand once the user has said yes' ;;
+    (adopted-concurrently|not-completed|lock-timeout|adoption-failed)
+      printf '%s' 'if a retry does not bind the session, /zensu:adopt-session prints the full report and /zensu:adopt-session --confirm retries the adoption by hand' ;;
+    (*)
+      printf '%s' '/zensu:adopt-session reports the same refusal in full, and /zensu:adopt-session --confirm retries the adoption by hand' ;;
+  esac
+}
+
+# The sentence every `child` deny ends on. One spelling, shared with the `.*` gate
+# word for word.
+ZENSU_ADOPTION_CHILD_CLOSE='The repair writes the immutable record and is reserved for the main thread, so it is not available here — report this to the main thread rather than retrying.'
+
 zensu_emit_hook_session_deny() {
   local scope="${1:-}"
+  if [ "$scope" = adoption-incomplete ]; then
+    local refusal="${2:-}" audience="${3:-main}" attempt remedy tail
+    [[ "$refusal" =~ $ZENSU_SAFE_REFUSAL_RE ]] || refusal="(unknown)"
+    attempt="$(_zensu_adoption_attempt "$refusal")"
+    if [ "$audience" = child ]; then
+      printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this call could not be bound to the session'"'"'s Session Control record. Zensu tried to adopt the record automatically for this session and %s: %s. A sibling hook adopted it in the meantime, so retrying this call is expected to bind; if it keeps failing, report this to the main thread."}}\n' \
+        "$attempt" "$refusal"
+      return
+    fi
+    remedy="$(_zensu_adoption_refusal_remedy "$refusal")"
+    tail="$(_zensu_adoption_tail "$refusal")"
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this call could not be bound to the session'"'"'s Session Control record. Zensu tried to adopt the record automatically for this session and %s: %s. %s; %s."}}\n' \
+      "$attempt" "$refusal" "$remedy" "$tail"
+    return
+  fi
   if [ "$scope" = incompatible-runtime ]; then
-    local recorded="${2:-}" executing="${3:-}" refusal="${4:-}" remedy
+    local recorded="${2:-}" executing="${3:-}" refusal="${4:-}" audience="${5:-main}" attempt remedy tail
     # ONE degradation policy across all three consumers of this pair: substitute a
     # placeholder and KEEP the lineage wording. Falling back to `narrowed` here
     # dropped the in-place remedy entirely and told the user to start a fresh
@@ -607,32 +733,60 @@ zensu_emit_hook_session_deny() {
     [[ "$recorded" =~ $ZENSU_SAFE_VERSION_RE ]] || recorded="(unreadable)"
     [[ "$executing" =~ $ZENSU_SAFE_VERSION_RE ]] || executing="(unreadable)"
     [[ "$refusal" =~ $ZENSU_SAFE_REFUSAL_RE ]] || refusal="(unknown)"
+    attempt="$(_zensu_adoption_attempt "$refusal")"
+    if [ "$audience" = child ]; then
+      printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is readable, and the disagreement is that the running Zensu installation declares an incompatible lineage — the record was minted by %s and %s is executing. Zensu tried to adopt the record automatically for this session and %s: %s. %s"}}\n' \
+        "$recorded" "$executing" "$attempt" "$refusal" "$ZENSU_ADOPTION_CHILD_CLOSE"
+      return
+    fi
     remedy="$(_zensu_adoption_refusal_remedy "$refusal")"
-    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is readable, and the disagreement is that the running Zensu installation declares an incompatible lineage — the record was minted by %s and %s is executing. While the plugin is at major 0 the minor is the breaking axis; a plugin update that lands mid-session is normally adopted automatically on the first hook contact, but Zensu tried to adopt this record and it was REFUSED: %s. %s. The record is NOT damaged and NOT missing; /zensu:adopt-session reports the same refusal in full, and /zensu:adopt-session --confirm retries the adoption by hand — both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — an adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created; /zensu:doctor names the path when that is the case."}}\n' \
-      "$recorded" "$executing" "$refusal" "$remedy"
+    tail="$(_zensu_adoption_tail "$refusal")"
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is readable, and the disagreement is that the running Zensu installation declares an incompatible lineage — the record was minted by %s and %s is executing. While the plugin is at major 0 the minor is the breaking axis; a plugin update that lands mid-session is normally adopted automatically on the first hook contact, but Zensu tried to adopt this record and %s: %s. %s. The record is NOT damaged and NOT missing; %s — both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — an adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created; /zensu:doctor names the path when that is the case."}}\n' \
+      "$recorded" "$executing" "$attempt" "$refusal" "$remedy" "$tail"
     return
   fi
   if [ "$scope" = pruned-plugin-root ]; then
-    local recorded="${2:-}" executing="${3:-}" refusal="${4:-}" remedy
+    local recorded="${2:-}" executing="${3:-}" refusal="${4:-}" audience="${5:-main}" attempt remedy tail
     # Same degradation policy as the lineage scope: substitute, keep the wording,
     # never lose the in-place remedy over two unreadable numbers.
     [[ "$recorded" =~ $ZENSU_SAFE_VERSION_RE ]] || recorded="(unreadable)"
     [[ "$executing" =~ $ZENSU_SAFE_VERSION_RE ]] || executing="(unreadable)"
     [[ "$refusal" =~ $ZENSU_SAFE_REFUSAL_RE ]] || refusal="(unknown)"
+    attempt="$(_zensu_adoption_attempt "$refusal")"
+    if [ "$audience" = child ]; then
+      printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is intact, but the Zensu installation that minted it (version %s) has been removed from the plugin cache — the host keeps only a few versions — so the running installation (%s) cannot re-verify the record. Zensu tried to adopt the record automatically for this session and %s: %s. %s"}}\n' \
+        "$recorded" "$executing" "$attempt" "$refusal" "$ZENSU_ADOPTION_CHILD_CLOSE"
+      return
+    fi
     remedy="$(_zensu_adoption_refusal_remedy "$refusal")"
-    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is intact, but the Zensu installation that minted it (version %s) has been removed from the plugin cache — the host keeps only a few versions — so the running installation (%s) cannot re-verify the record. Such a record is normally adopted automatically on the first hook contact, but Zensu tried to adopt this one and it was REFUSED: %s. %s. The record is NOT damaged and NOT missing; /zensu:adopt-session reports the same refusal in full, and /zensu:adopt-session --confirm retries the adoption by hand — both stay reachable in this state. This predicate is deliberately blind to lineage, so a DOWNGRADE reaches this state too, and there adoption refuses as executing-runtime-older and re-installing the newer version is the way back — a persisted shape that really did change is the case that needs a fresh Claude Code session."}}\n' \
-      "$recorded" "$executing" "$refusal" "$remedy"
+    tail="$(_zensu_adoption_tail "$refusal")"
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is intact, but the Zensu installation that minted it (version %s) has been removed from the plugin cache — the host keeps only a few versions — so the running installation (%s) cannot re-verify the record. Such a record is normally adopted automatically on the first hook contact, but Zensu tried to adopt this one and %s: %s. %s. The record is NOT damaged and NOT missing; %s — both stay reachable in this state. This predicate is deliberately blind to lineage, so a DOWNGRADE reaches this state too, and there adoption refuses as executing-runtime-older and re-installing the newer version is the way back — a persisted shape that really did change is the case that needs a fresh Claude Code session."}}\n' \
+      "$recorded" "$executing" "$attempt" "$refusal" "$remedy" "$tail"
     return
   fi
+  # The adoption sentence the two scopes below append when the caller supplies a
+  # shape-valid token. Empty for no token, so both scopes read exactly as they did
+  # before a token existed. The `child` form names the attempt and withholds the
+  # remedy, for the reason _zensu_deny_audience gives.
+  local appended=""
+  if [ "$scope" != damaged-runtime ] && [[ "${2:-}" =~ $ZENSU_SAFE_REFUSAL_RE ]]; then
+    if [ "${3:-main}" = child ]; then
+      appended=" Zensu also tried to adopt the record automatically for this session and $(_zensu_adoption_attempt "$2"): $2. $ZENSU_ADOPTION_CHILD_CLOSE"
+    else
+      appended=" Zensu also tried to adopt the record automatically for this session and $(_zensu_adoption_attempt "$2"): $2. $(_zensu_adoption_refusal_remedy "$2")."
+    fi
+  fi
   if [ "$scope" = narrowed ]; then
-    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid, so this call cannot be attributed to a Session Control record. This is neither relaxable state — a session with no record at all, and a record whose recorded project root no longer exists, are both handled separately — so either a record exists and disagrees with the running plugin installation about something else, or a relaxable-state check could not be evaluated at all. A Zensu plugin change that landed while this session was running is not that cause on its own any more: a compatible upgrade keeps serving the record, and a breaking one is adopted automatically when the persisted schemas are equal — reaching this deny means the record disagrees for a reason adoption does not admit. Run /zensu:doctor, which stays reachable in this state and names the disagreement, then start a fresh Claude Code session before using stateful tools."}}'
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid, so this call cannot be attributed to a Session Control record. This is neither relaxable state — a session with no record at all, and a record whose recorded project root no longer exists, are both handled separately — so either a record exists and disagrees with the running plugin installation about something else, or a relaxable-state check could not be evaluated at all. A Zensu plugin change that landed while this session was running is not that cause on its own any more: a compatible upgrade keeps serving the record, and a breaking one is adopted automatically when the persisted schemas are equal — reaching this deny means the record disagrees for a reason adoption does not admit. Run /zensu:doctor, which stays reachable in this state and names the disagreement, then start a fresh Claude Code session before using stateful tools.%s"}}\n' \
+      "$appended"
     return
   fi
   if [ "$scope" = damaged-runtime ]; then
     printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session has no usable Session Control binding — either no record at all, or a record whose recorded project root no longer exists — which alone would still leave the interactive thread able to run /zensu:doctor, but a required Zensu runtime library is missing or unreadable, so that diagnostic is denied too. Repair the Zensu plugin installation; a fresh Claude Code session will not help until the installation itself is intact."}}'
     return
   fi
-  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid, so every stateful Zensu tool fails closed. Run /zensu:doctor — it stays reachable in every bind failure and names which check failed: whether this session has no record at all, a record whose recorded project root no longer exists, or a record that disagrees for another reason. A Zensu plugin change that landed mid-session is adopted automatically when the persisted schemas are equal, and a compatible upgrade no longer denies, so a deny here means the disagreement is one adoption does not admit. Then start a fresh Claude Code session before using stateful tools."}}'
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid, so every stateful Zensu tool fails closed. Run /zensu:doctor — it stays reachable in every bind failure and names which check failed: whether this session has no record at all, a record whose recorded project root no longer exists, or a record that disagrees for another reason. A Zensu plugin change that landed mid-session is adopted automatically when the persisted schemas are equal, and a compatible upgrade no longer denies, so a deny here means the disagreement is one adoption does not admit. Then start a fresh Claude Code session before using stateful tools.%s"}}\n' \
+    "$appended"
 }
 
 zensu_resolve_session_id() {
@@ -717,6 +871,8 @@ export -f zensu_bind_hook_session zensu_bind_model_session zensu_emit_hook_sessi
   zensu_session_incompatible_orphaned_root zensu_session_incompatible_orphaned_root_model \
   zensu_session_pruned_plugin_root zensu_session_pruned_plugin_root_model \
   zensu_session_adoption_refusal zensu_session_adoption_remedy _zensu_adoption_refusal_remedy \
+  zensu_session_adoption_attempt _zensu_adoption_attempt \
+  zensu_session_adoption_tail _zensu_adoption_tail _zensu_deny_audience \
   zensu_session_key zensu_resolve_session_id zensu_resolve_project_dir 2>/dev/null || true
 
 # THE ZEN-MODE STATE PREDICATES MOVED OUT, to `hooks/lib/zensu-zen-shared.sh`.

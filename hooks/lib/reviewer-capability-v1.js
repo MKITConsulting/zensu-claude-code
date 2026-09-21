@@ -24,13 +24,26 @@ const safeVersion = (value) => (
   typeof value === 'string' && SAFE_VERSION.test(value) ? value : '(unreadable)'
 );
 
+// session-auto-adopt-v1.js is required LAZILY, and the reason is cost, not a
+// cycle: nothing that module loads requires this file. This gate runs on every
+// tool call of every session, the adoption path runs once per plugin update, and
+// the module pulls in the lease sweep — so the hot path does not pay for it.
+const autoAdoptModule = () => require('./session-auto-adopt-v1.js');
+
 // The refusal token of a failed automatic adoption reaches the deny reason the
-// same way the version pair does, so it is held to the token grammar the binder
-// produces (ZENSU_SAFE_REFUSAL_RE in zensu-session.sh is the shell twin).
-const SAFE_REFUSAL = /^[a-z][a-z0-9-]{0,63}$/;
-const safeRefusal = (value) => (
-  typeof value === 'string' && SAFE_REFUSAL.test(value) ? value : '(unknown)'
-);
+// same way the version pair does, so it is held to the token grammar. That grammar
+// has ONE JavaScript owner, the module's SAFE_TOKEN (ZENSU_SAFE_REFUSAL_RE in
+// zensu-session.sh is the shell twin no `require` can reach). A module that will
+// not load screens every token OUT rather than letting one through unscreened.
+function safeRefusal(value) {
+  let grammar = null;
+  try {
+    grammar = autoAdoptModule().SAFE_TOKEN;
+  } catch {
+    grammar = null;
+  }
+  return typeof value === 'string' && grammar instanceof RegExp && grammar.test(value) ? value : '(unknown)';
+}
 
 // HAND COPY of `_zensu_adoption_refusal_remedy` in hooks/lib/zensu-session.sh —
 // the shell emitter cannot be reached from JS and this gate spells its own deny.
@@ -47,8 +60,8 @@ const ADOPTION_REFUSAL_REMEDIES = Object.freeze({
   'executing-runtime-unidentified': 'The running installation declares no usable version, so repair the plugin installation first',
   'opted-out': 'hooks.sessionAutoAdopt is false in your Zensu config, so the automatic path is switched off on purpose; report this refusal and ask the user whether to run /zensu:adopt-session --confirm, which ignores the opt-out — never run it on your own initiative',
   'adopted-concurrently': 'A sibling hook adopted the record in the meantime and it serves now, so simply retry this call',
-  'not-completed': 'The adoption did not complete (a lock timeout, or a superseded record left by an interrupted adoption), so retry this call; if it persists, /zensu:adopt-session prints the full report',
-  'lock-timeout': 'The adoption did not complete (a lock timeout, or a superseded record left by an interrupted adoption), so retry this call; if it persists, /zensu:adopt-session prints the full report',
+  'not-completed': 'The adoption did not complete (a lock timeout, or a fault inside the adoption itself), so retry this call; if it persists, /zensu:adopt-session prints the full report',
+  'lock-timeout': 'The adoption did not complete (a lock timeout, or a fault inside the adoption itself), so retry this call; if it persists, /zensu:adopt-session prints the full report',
   'superseded-record-exists': 'A superseded record from an interrupted adoption is already in place; /zensu:adopt-session names the file, and moving it aside lets the adoption complete',
 });
 const GENERIC_ADOPTION_REMEDY = 'Run /zensu:adopt-session for the full report, and /zensu:adopt-session --confirm to retry the adoption by hand';
@@ -58,25 +71,49 @@ const adoptionRefusalRemedy = (reason) => (
     : GENERIC_ADOPTION_REMEDY
 );
 
-// The user-facing announcement of an adoption THIS process performed. One JSON
-// object on the allow path carrying no permissionDecision, so the host's
-// deny > defer > ask > allow precedence is untouched: `additionalContext` is the
-// documented PreToolUse field, `systemMessage` the user-facing common field.
-// The text is rendered by session-auto-adopt-v1.js — the ONE renderer the adapter
-// and the binder consume too — so the superseded basename, the provenance screen
-// and the lease clause (a REFUSED sweep is not "0 set aside") cannot drift between
-// the three. Required lazily, exactly as the binder requires that module: the
-// sweep it loads requires the lease owner, which requires the binder this gate
-// already holds at top level.
-function announceAdoption(adoption) {
-  const text = require('./session-auto-adopt-v1.js').renderAdoptionNotice(adoption, { where: 'on this tool call' });
-  process.stdout.write(`${JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: 'PreToolUse',
-      additionalContext: text,
-    },
-    systemMessage: text,
-  })}\n`);
+// WHAT HAPPENED to the attempt, as a verb. Four tokens mean the ladder never
+// reached a verdict about the record — a sibling won the lock, a lock timed out,
+// the adoption threw — and calling that "REFUSED" tells the reader the record was
+// judged and rejected, which is false and sends them to repair a record that is
+// fine. HAND COPY of `_zensu_adoption_attempt` in hooks/lib/zensu-session.sh, held
+// in step by the same seam pin that compares the remedy arms.
+const ADOPTION_INCOMPLETE_REASONS = Object.freeze(['adopted-concurrently', 'not-completed', 'lock-timeout', 'adoption-failed']);
+const adoptionAttempt = (reason) => (
+  ADOPTION_INCOMPLETE_REASONS.includes(reason) ? 'it did not complete' : 'it was REFUSED'
+);
+
+// The sentence that FOLLOWS the per-reason remedy, and it depends on the reason
+// too: an unconditional "--confirm retries the adoption by hand" directly after the
+// opted-out remedy's "never run it on your own initiative" is a contradiction in
+// one deny, and "reports the same refusal" is false where nothing was refused.
+// Three CONSTANTS rather than a map, deliberately: the remedy lockstep pin reads
+// every `'token': 'sentence',` line in this file as a remedy arm. HAND COPY of
+// `_zensu_adoption_tail` in hooks/lib/zensu-session.sh, pinned with the remedies.
+const GENERIC_ADOPTION_TAIL = '/zensu:adopt-session reports the same refusal in full, and /zensu:adopt-session --confirm retries the adoption by hand';
+const OPTED_OUT_ADOPTION_TAIL = '/zensu:adopt-session reports the record as adoptable, because the opt-out governs the automatic path only, and /zensu:adopt-session --confirm adopts it by hand once the user has said yes';
+const INCOMPLETE_ADOPTION_TAIL = 'if a retry does not bind the session, /zensu:adopt-session prints the full report and /zensu:adopt-session --confirm retries the adoption by hand';
+const adoptionTail = (reason) => {
+  if (reason === 'opted-out') return OPTED_OUT_ADOPTION_TAIL;
+  return ADOPTION_INCOMPLETE_REASONS.includes(reason) ? INCOMPLETE_ADOPTION_TAIL : GENERIC_ADOPTION_TAIL;
+};
+
+// The announcement of an adoption THIS process performed. One JSON object on the
+// allow path carrying no permissionDecision, so the host's deny > defer > ask >
+// allow precedence is untouched. `systemMessage` is the user-facing common field
+// and is emitted for EVERY principal: an adoption changes the session, and a user
+// whose subagent's tool call happened to perform it must still hear about it.
+// `additionalContext` is model context and goes to the MAIN thread only — a
+// confined child's context is not where a session-level notice belongs.
+// The text is rendered by session-auto-adopt-v1.js, the renderer the SessionStart
+// adapter uses too, so the superseded basename, the provenance screen and the
+// lease clause (a REFUSED sweep is not "0 set aside") cannot drift between them.
+function announceAdoption(adoption, options) {
+  const text = autoAdoptModule().renderAdoptionNotice(adoption, { where: 'on this tool call' });
+  const output = { systemMessage: text };
+  if (options && options.model === true) {
+    output.hookSpecificOutput = { hookEventName: 'PreToolUse', additionalContext: text };
+  }
+  process.stdout.write(`${JSON.stringify(output)}\n`);
 }
 
 const MAX_PAYLOAD_BYTES = 1024 * 1024;
@@ -91,7 +128,12 @@ const MUTATING_FILE_TOOLS = new Set([
 ]);
 const ZENSU_MCP_READ_RE = /^(?:list_|get_|search_|suggest_|view_|validate_|analyze_journey_health$|ghost_get_candidates$|pulse_(?:start_session|end_session|session_summary)$)/;
 
+// Whether this run has already written its decision. stdout carries exactly ONE
+// JSON object, so the allow-path adoption notice below must never follow a deny.
+let decisionWritten = false;
+
 function deny(reason) {
+  decisionWritten = true;
   process.stdout.write(`${JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
@@ -592,7 +634,13 @@ function main() {
       // vanished project root: the binder attaches that verdict to the re-thrown
       // error, and the relaxed allow is where the user has to hear about it —
       // the orphan clause of the notice is what says Edit and Write stay denied.
-      if (error && error.adoption && error.adoption.outcome === 'adopted') announceAdoption(error.adoption);
+      // The binder attaches a verdict only for an adoption it PERFORMED, so its
+      // presence is the whole test; the outcome is compared against the module's
+      // own constant rather than a literal that a rename would silently orphan.
+      if (error && error.adoption
+          && error.adoption.outcome === autoAdoptModule().AUTO_ADOPT_OUTCOMES.ADOPTED) {
+        announceAdoption(error.adoption, { model: true });
+      }
       return;
     }
     // The binder ADOPTS before it denies now, so a typed refusal here means the
@@ -606,22 +654,26 @@ function main() {
     // name a state only when their own predicate positively matches, and to the
     // generic deny, whose message still carries the refusal token.
     if (core.isAdoptionRefusal(error) && error.adoption && typeof error.adoption === 'object'
-        && require('./session-auto-adopt-v1.js').establishesNamedState(error.adoption)) {
+        && autoAdoptModule().establishesNamedState(error.adoption)) {
       const adoption = error.adoption;
       const reason = safeRefusal(adoption.reason);
       const recorded = safeVersion(adoption.recorded);
       const executing = safeVersion(adoption.executing);
+      // What happened to the attempt, in the verb the token actually supports:
+      // "REFUSED" for a record that was judged, "did not complete" for a ladder
+      // that never reached a verdict.
+      const attempt = `Zensu tried to adopt the record automatically for this session and ${adoptionAttempt(reason)}: ${reason}.`;
       // The same two causes the shell scopes spell, chosen by the reader that
       // answered: a pruned minting installation is its own named state, and the
       // downgrade sentence stays with it because that predicate is blind to lineage.
       const cause = adoption.prunedPluginRoot
-        ? `this session's Session Control record is intact, but the Zensu installation that minted it (version ${recorded}) has been removed from the plugin cache, so the running installation (${executing}) cannot re-verify the record. Zensu tried to adopt the record automatically for this session and it was REFUSED: ${reason}.`
-        : `this session's Session Control record is readable, and the running Zensu installation declares an incompatible lineage — the record was minted by ${recorded} and ${executing} is executing. Zensu tried to adopt the record automatically for this session and it was REFUSED: ${reason}.`;
+        ? `this session's Session Control record is intact, but the Zensu installation that minted it (version ${recorded}) has been removed from the plugin cache, so the running installation (${executing}) cannot re-verify the record. ${attempt}`
+        : `this session's Session Control record is readable, and the running Zensu installation declares an incompatible lineage — the record was minted by ${recorded} and ${executing} is executing. ${attempt}`;
       if (principals.classifyPreToolPayload(payload) === principals.PRINCIPALS.MAIN) {
         const tail = adoption.prunedPluginRoot
           ? 'This predicate is deliberately blind to lineage, so a DOWNGRADE reaches this state too, and there adoption refuses as executing-runtime-older and re-installing the newer version is the way back.'
           : 'If the recorded project root is ALSO gone — a deleted or recycled worktree — an adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created; /zensu:doctor names the path when that is the case.';
-        deny(`${cause} ${adoptionRefusalRemedy(reason)}. /zensu:adopt-session reports the same refusal in full, and /zensu:adopt-session --confirm retries the adoption by hand; both stay reachable in this state. ${tail}`);
+        deny(`${cause} ${adoptionRefusalRemedy(reason)}. ${adoptionTail(reason)}; both stay reachable in this state. ${tail}`);
         return;
       }
       deny(`${cause} The repair writes the immutable record and is reserved for the main thread, so it is not available here — report this to the main thread rather than retrying.`);
@@ -700,14 +752,22 @@ function main() {
   }
 
   const principal = principals.classifyPreToolPayload(payload);
-  if (principal === principals.PRINCIPALS.MAIN) {
-    // Announce only an adoption THIS process performed: `trusted.adoption` is
-    // set by the binder for the one invocation that won the records lock, so a
-    // concurrent sibling gate never repeats the line. Main thread only — a
-    // confined child's context is not where a session-level notice belongs.
-    if (trusted.adoption) announceAdoption(trusted.adoption);
-    return;
+  judgePrincipal(payload, trusted, principal);
+  // Announce only an adoption THIS process performed: `trusted.adoption` is set by
+  // the binder for the one invocation that won the records lock, so a concurrent
+  // sibling gate never repeats the line. Only on an ALLOW — a deny already wrote
+  // this run's one JSON object. Every principal gets the user-facing half; see
+  // announceAdoption for why the model half is the main thread's alone.
+  if (!decisionWritten && trusted.adoption) {
+    announceAdoption(trusted.adoption, { model: principal === principals.PRINCIPALS.MAIN });
   }
+}
+
+// The per-principal capability judgement, after the bind and the workflow
+// revalidation have both passed. Writes at most one deny; an allow writes nothing.
+function judgePrincipal(payload, bound, principal) {
+  let trusted = bound;
+  if (principal === principals.PRINCIPALS.MAIN) return;
   if (principal === principals.PRINCIPALS.EVIDENCE_WORKER) {
     try {
       const violation = evidenceLeases.toolViolation(payload, trusted);

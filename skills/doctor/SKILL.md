@@ -474,12 +474,14 @@ classifier will refuse a spawn, not only when the whole table is green.
   plugin data. Unlike a fresh-session remedy, this one **can** be repaired in
   place — and Zensu attempts that repair itself: the first hook contact after
   `/reload-plugins` adopts the record automatically when its persisted schemas
-  still match. A session that still shows this row therefore had that adoption
-  REFUSED (every gate's deny names the refusal token) or opted out through
-  `hooks.sessionAutoAdopt: false` — the row itself says so. Run `/zensu:adopt-session`,
-  which prints the same refusal in full, then `/zensu:adopt-session --confirm` to
-  retry by hand (it ignores the opt-out — and on an `opted-out` refusal ask the user
-  before running it, since the operator switched the automatic path off on purpose).
+  still match. A session that still shows this row is therefore one whose
+  adoption was refused, opted out or did not complete — the row itself says so, and
+  a gate's deny names the token. Run `/zensu:adopt-session`: it prints the same
+  refusal in full, or reports the record as adoptable when the automatic path was opted out
+  through `hooks.sessionAutoAdopt: false`, because the opt-out governs the automatic
+  path only. Then `/zensu:adopt-session --confirm` retries by hand — it ignores the
+  opt-out, so on an opted-out record ask the user before running it: the operator
+  switched the automatic path off on purpose.
   Both stay reachable in this state; so does this diagnostic. A refusal names the
   exact condition that failed:
   `workflow-schema-mismatch` means a persisted shape really did change and a
@@ -498,8 +500,13 @@ classifier will refuse a spawn, not only when the whole table is green.
   incompatible lineage** → both of the two rows above at once, and it is its own
   row because each of those two answers "not me" for it. It prints the dead path
   AND both declared versions. Never report it as a missing record. It IS
-  repairable in place — attempted automatically on the first hook contact, with
-  `/zensu:adopt-session` as the report and the manual retry — that is the
+  repairable in place — attempted automatically on the first hook contact, so a row
+  still rendered means that
+  adoption was refused, opted out or did not complete; `/zensu:adopt-session` prints
+  the same refusal in full,
+  or reports the record as adoptable when the automatic path was opted out
+  (ask the user before `--confirm` then), and `/zensu:adopt-session --confirm`
+  retries by hand — that is the
   difference from the plain orphaned row, which the running installation already
   serves and which adoption refuses as `already-served`. State the limit whenever you offer
   the repair: adoption clears the LINEAGE break, so READ-ONLY Bash and this
@@ -545,9 +552,13 @@ classifier will refuse a spawn, not only when the whole table is green.
   can re-verify the record any more and no installation serves it. Never report
   it as a missing record. The remedy is the same in-place adoption as the lineage
   row — attempted automatically on the first hook contact, so a row still rendered
-  means that adoption was refused or opted out; `/zensu:adopt-session`
-  prints the same refusal in full and `/zensu:adopt-session --confirm` retries by
-  hand — and the adoption report marks the minting version
+  means that
+  adoption was refused, opted out or did not complete; `/zensu:adopt-session` prints
+  the same refusal in full,
+  or reports the record as adoptable when the automatic path was opted out
+  — ask the user before `--confirm` then, since the operator switched the automatic
+  path off on purpose — and `/zensu:adopt-session --confirm` retries by
+  hand. The adoption report marks the minting version
   `(installation no longer on disk)`.
   Both commands and this diagnostic stay reachable, and `Stop` is released rather
   than wedged. Do NOT tell the user to restart after a successful adoption.

@@ -3309,6 +3309,18 @@ function parentheticalWriter() {
   };
 }
 
+// ONE sentence for the three binding rows whose remedy is an adoption — the
+// lineage row, the pruned row and the combined one. They used to spell it
+// separately, and the combined row was left on the manual-first wording ("to see
+// whether the running installation may take the record over") a release after the
+// bind began adopting on its own. Three things it has to get right, each of which
+// one of those spellings got wrong: reaching the row means the automatic adoption
+// already ran and did not bind the session; the read-only report does NOT print a
+// refusal for an opted-out record — it reports it as adoptable, because the
+// opt-out governs the automatic path only; and that case needs the user's yes
+// before --confirm, which the deny scopes say and a row that omitted it undid.
+var ADOPTION_ROW_REMEDY = 'Zensu adopts such a record automatically on the first hook contact, so reaching this row means that adoption was refused, opted out or did not complete; run /zensu:adopt-session — it prints the same refusal in full, or reports the record as adoptable when the automatic path was opted out (hooks.sessionAutoAdopt is false; ask the user before going further) — then /zensu:adopt-session --confirm to retry by hand';
+
 function bindingLine() {
   // One writer per CALL, so `stated` scopes to the row this invocation renders.
   var paren = parentheticalWriter();
@@ -3344,7 +3356,7 @@ function bindingLine() {
     case 'incompatible-runtime':
       return line(BAD, 'binding: this session\'s Session Control record is intact, but the running Zensu installation declares an incompatible lineage'
         + versions()
-        + ' — while the plugin is at major 0 the minor is the breaking axis, so stateful Zensu tools fail closed. Zensu adopts such a record automatically on the first hook contact, so reaching this row means that adoption was refused or opted out; run /zensu:adopt-session, which prints the same refusal in full, then /zensu:adopt-session --confirm to retry by hand'
+        + ' — while the plugin is at major 0 the minor is the breaking axis, so stateful Zensu tools fail closed. ' + ADOPTION_ROW_REMEDY
         // The limit belongs on THIS row too, not only on the combined one. The row
         // is reachable for a session whose recorded project root is also gone —
         // the doctor falls back to it whenever the third-fact probe cannot answer
@@ -3373,7 +3385,7 @@ function bindingLine() {
     case 'pruned-plugin-root':
       return line(BAD, 'binding: this session\'s Session Control record is intact, but the installation that minted it has been removed from the plugin cache'
         + versions()
-        + ' — the record can no longer be re-verified, so stateful Zensu tools fail closed. Zensu adopts such a record automatically on the first hook contact, so reaching this row means that adoption was refused or opted out; run /zensu:adopt-session, which prints the same refusal in full, then /zensu:adopt-session --confirm to retry by hand');
+        + ' — the record can no longer be re-verified, so stateful Zensu tools fail closed. ' + ADOPTION_ROW_REMEDY);
     // BOTH disagreements at once, and the row exists because each of the two
     // above answers "not me" for it: the orphan probe re-applies
     // servesRecordedRuntime, which an incompatible lineage fails, and the lineage
@@ -3388,10 +3400,12 @@ function bindingLine() {
         + one(env.ZDOC_BINDING_PROJECT_ROOT)
         + ' is gone and the running Zensu installation declares an incompatible lineage'
         + versions()
-        // OFFERED, never promised — the same hedge the row above carries and for
-        // the same reason: this state is reachable on a DOWNGRADE, which adoption
-        // refuses outright as executing-runtime-older.
-        + ' — a deleted or recycled worktree left the workflow state unreachable from this record while a plugin update landed, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether the running installation may take the record over, then /zensu:adopt-session --confirm. That unblocks READ-ONLY Bash and this diagnostic, but Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write, because the recorded project root is still gone — a write cannot be attributed to a project that is not there — re-create exactly that directory, or start a fresh Claude Code session, to write again. If it was moved rather than deleted, its state still exists there');
+        // The shared sentence says the adoption already RAN and did not bind the
+        // session — this state is reachable on a DOWNGRADE, which adoption refuses
+        // outright as executing-runtime-older — and the orphan limit follows it,
+        // because an adoption here still leaves the session without a write anchor.
+        + ' — a deleted or recycled worktree left the workflow state unreachable from this record while a plugin update landed, so stateful Zensu tools fail closed. ' + ADOPTION_ROW_REMEDY
+        + '. An adoption unblocks READ-ONLY Bash and this diagnostic, but Edit, Write and MultiEdit stay denied, and so does any Bash command the source-write gate can attribute as a write, because the recorded project root is still gone — a write cannot be attributed to a project that is not there — re-create exactly that directory, or start a fresh Claude Code session, to write again. If it was moved rather than deleted, its state still exists there');
     case 'unavailable':
       return line(BAD, 'binding: hooks/lib/zensu-session.sh is missing or symlinked — Session Control cannot bind');
     // The wrapper's OWN "could not resolve it" verdict, and the unset value the
