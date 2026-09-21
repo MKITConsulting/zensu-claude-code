@@ -562,6 +562,21 @@ const prunedNote = (pruned) => (pruned ? PRUNED_NOTE : "");
 // Wrapped in a function because `node -e` evaluates at module top level, where a
 // bare `return` is a syntax error — and a syntax error here would surface as a
 // crashed helper rather than as the refusal it was meant to print.
+// ONE rendering of the crash-resume refusal, for the read-only report and for
+// --confirm. The two used to disagree about the same state: the read-only path
+// answered ADOPTABLE, because the probe finds the record adoptable, while --confirm
+// refused it and opened on "the read-only check above found the record adoptable"
+// — and every deny that names this token tells the reader that THIS command names
+// the file. Both now ask the shared preview, which owns the check, and both print
+// this.
+function renderSupersededConflict(file) {
+  process.stdout.write("The record itself is adoptable, but a superseded record from an interrupted adoption\n");
+  process.stdout.write("is already in place, and the adoption refuses to overwrite it:\n");
+  process.stdout.write("  " + safe(file) + "\n");
+  process.stdout.write("Nothing was changed. That file is the copy taken before the earlier adoption was\n");
+  process.stdout.write("interrupted. Move it aside, then re-run this command with --confirm.\n");
+}
+
 function main() {
   let request;
   // TWO refusal classes, two headlines. `buildRequest` performs two independent
@@ -654,6 +669,21 @@ function main() {
   }
 
   if (process.env.ZADOPT_CONFIRM !== "1") {
+    // The crash-resume shape, asked of the SAME preview every hook asks. The probe
+    // above finds this record adoptable — it is — while a superseded file an
+    // interrupted adoption left behind makes adoptContext's exclusive copy refuse
+    // every later attempt. Strictly read-only: the preview performs no write, which
+    // is the premise the PreToolUse recognizer's admission of this command rests on.
+    // respectOptOut:false for the reason --confirm passes it — the opt-out governs
+    // the hooks, never the command the user runs by hand, so an opted-out record
+    // still reads ADOPTABLE here.
+    const blocked = autoAdopt.previewAdoption({ ...request, respectOptOut: false });
+    if (blocked.reason === autoAdopt.AUTO_ADOPT_REASONS.SUPERSEDED_EXISTS) {
+      process.stdout.write("Zensu session adoption — NOT adoptable (" + safe(blocked.reason) + ")\n\n");
+      renderSupersededConflict(blocked.supersededFile);
+      process.exitCode = 1;
+      return;
+    }
     process.stdout.write("Zensu session adoption — ADOPTABLE\n\n");
     process.stdout.write("  record minted by : " + safe(verdict.recorded) + prunedNote(verdict.prunedPluginRoot) + "\n");
     process.stdout.write("  executing        : " + safe(verdict.executing) + "\n");
@@ -717,17 +747,24 @@ function main() {
       process.stdout.write("The record was adopted by a hook of this session while this command ran, so this\n");
       process.stdout.write("installation already serves it. Nothing was changed here; re-run this command to\n");
       process.stdout.write("see the served state, or simply continue in the session.\n");
+    } else if (adopted.supersededFile) {
+      // Named by the preview before the lock, or by adoptContext's own exclusive
+      // copy under it; the same state either way, so the same rendering.
+      renderSupersededConflict(adopted.supersededFile);
+    } else if (adopted.outcome === autoAdopt.AUTO_ADOPT_OUTCOMES.REFUSED) {
+      // A refusal that first appears UNDER the records lock: the probe at the top of
+      // this run passed, so the record stopped being adoptable in between. Calling
+      // it adoptable here would contradict the headline one line up.
+      process.stdout.write("The adoption was refused under the records lock, although the probe a moment\n");
+      process.stdout.write("earlier found the record adoptable — the state changed in between. Nothing was\n");
+      process.stdout.write("changed. Re-run this command WITHOUT --confirm to read that refusal and its remedy.\n");
     } else {
-      process.stdout.write("The read-only check above found the record adoptable, but the adoption itself did\n");
-      process.stdout.write("not complete: " + safe(adopted.error || adopted.reason) + "\n");
-      if (adopted.supersededFile) {
-        process.stdout.write("A superseded record from an interrupted adoption is already in place:\n");
-        process.stdout.write("  " + safe(adopted.supersededFile) + "\n");
-        process.stdout.write("Move it aside, then re-run this command with --confirm.\n");
-      } else {
-        process.stdout.write("Nothing was changed. Re-run this command with --confirm; if it persists, run\n");
-        process.stdout.write("/zensu:doctor, which names the disagreement.\n");
-      }
+      // No "the read-only check above" here: nothing above this line was printed in
+      // this invocation, so the sentence pointed at output the reader never saw.
+      process.stdout.write("The record is adoptable, but the adoption itself did not complete: "
+        + safe(adopted.error || adopted.reason) + "\n");
+      process.stdout.write("Nothing was changed. Re-run this command with --confirm; if it persists, run\n");
+      process.stdout.write("/zensu:doctor, which names the disagreement.\n");
     }
     process.exitCode = 1;
     return;

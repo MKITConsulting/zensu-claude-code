@@ -375,21 +375,28 @@ zensu_session_adoption_tail() {
 # strict read to succeed, the pruned one needs it to fail — so their order is
 # immaterial. A caller that passes no fallback scope gets the generic deny.
 zensu_emit_named_bind_deny() {
-  local payload="${1:-}" fallback="${2:-}"
+  local payload="${1:-}" fallback="${2:-}" audience="${3:-}"
   local pair refusal
+  # The AUDIENCE is an optional third argument: a caller that has already
+  # established its principal — the Edit gate exits for every non-main principal
+  # before it can reach this function — passes it and saves the node spawn the
+  # derivation costs. Anything but `main` or `child` is derived instead.
+  case "$audience" in (main|child) ;; (*) audience="" ;; esac
   # Either named state is reached only AFTER the bind's own automatic adoption
   # did not bind the session, so the deny names why. One extra binder spawn, on
   # the deny path only; an unanswerable question renders as `(unknown)`.
   if pair="$(zensu_session_incompatible_runtime "$payload")" && [ -n "$pair" ]; then
     refusal="$(zensu_session_adoption_refusal "$payload")" || refusal=""
+    [ -n "$audience" ] || audience="$(_zensu_deny_audience "$payload")"
     zensu_emit_hook_session_deny incompatible-runtime \
-      "${pair%%$'\t'*}" "${pair##*$'\t'}" "$refusal" "$(_zensu_deny_audience "$payload")"
+      "${pair%%$'\t'*}" "${pair##*$'\t'}" "$refusal" "$audience"
     return
   fi
   if pair="$(zensu_session_pruned_plugin_root "$payload")" && [ -n "$pair" ]; then
     refusal="$(zensu_session_adoption_refusal "$payload")" || refusal=""
+    [ -n "$audience" ] || audience="$(_zensu_deny_audience "$payload")"
     zensu_emit_hook_session_deny pruned-plugin-root \
-      "${pair%%$'\t'*}" "${pair##*$'\t'}" "$refusal" "$(_zensu_deny_audience "$payload")"
+      "${pair%%$'\t'*}" "${pair##*$'\t'}" "$refusal" "$audience"
     return
   fi
   # NEITHER named state, and the adoption may still have run: the bind attempts it
@@ -401,14 +408,31 @@ zensu_emit_named_bind_deny() {
   if [ "$refusal" = adopted-concurrently ]; then
     # The record serves NOW, so neither named predicate can match any more. This
     # is the only scope whose remedy is simply to retry.
-    zensu_emit_hook_session_deny adoption-incomplete "$refusal" "$(_zensu_deny_audience "$payload")"
+    [ -n "$audience" ] || audience="$(_zensu_deny_audience "$payload")"
+    zensu_emit_hook_session_deny adoption-incomplete "$refusal" "$audience"
     return
   fi
   if [ -n "$refusal" ]; then
-    zensu_emit_hook_session_deny "$fallback" "$refusal" "$(_zensu_deny_audience "$payload")"
+    [ -n "$audience" ] || audience="$(_zensu_deny_audience "$payload")"
+    zensu_emit_hook_session_deny "$fallback" "$refusal" "$audience"
     return
   fi
   zensu_emit_hook_session_deny ${fallback:+"$fallback"}
+}
+
+# Sources the agent-context library beside this file. ONE loader for the two
+# callers that need a principal — zensu_doctor_allowed and _zensu_deny_audience —
+# which spelled this preamble separately. It only reports; the FAIL DIRECTION is
+# each caller's own and the two are opposite on purpose: the allowance fails
+# CLOSED (an unresolved principal is not the main thread), the audience falls to
+# `main` (losing the remedy is the wrong message, an unusable one only a worse one).
+_zensu_load_agent_context() {
+  local lib_dir context_lib
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  context_lib="$lib_dir/zensu-agent-context.sh"
+  [ -r "$context_lib" ] && [ ! -L "$context_lib" ] || return 1
+  # shellcheck disable=SC1090
+  source "$context_lib" || return 1
 }
 
 # WHO reads the deny: `main` or `child`. The remedy of every adoption deny is a
@@ -423,15 +447,8 @@ zensu_emit_named_bind_deny() {
 # the main thread shown the child wording loses the one in-place remedy this state
 # has. Losing the remedy is the wrong message; an unusable one is only a worse one.
 _zensu_deny_audience() {
-  local payload="${1:-}" lib_dir context_lib principal
-  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || { printf 'main'; return; }
-  context_lib="$lib_dir/zensu-agent-context.sh"
-  if [ ! -r "$context_lib" ] || [ -L "$context_lib" ]; then
-    printf 'main'
-    return
-  fi
-  # shellcheck disable=SC1090
-  source "$context_lib" || { printf 'main'; return; }
+  local payload="${1:-}" principal
+  _zensu_load_agent_context || { printf 'main'; return; }
   principal="$(zensu_hook_principal "$payload" PreToolUse 2>/dev/null)" || principal=""
   if [ -n "$principal" ] && [ "$principal" != main-v1 ]; then
     printf 'child'
@@ -485,9 +502,9 @@ ZENSU_ROOT_STATE_GONE=0
 ZENSU_ROOT_STATE_PRESENT=3
 
 # The THIRD fact of the incompatible-lineage state, asked separately so the
-# version pair above stays two TAB-separated fields — five callers read the
+# version pair above stays two TAB-separated fields — every shell parser reads the
 # executing half as `${V##*$'\t'}`, so a third field there would silently
-# redirect all five. Returns 0 and PRINTS the recorded project root only when the
+# redirect all of them. Returns 0 and PRINTS the recorded project root only when the
 # lineage is incompatible AND that root is gone; **3** for a plain incompatible
 # lineage whose recorded root still exists; and 1 only when the question could not
 # be answered at all. THREE statuses, never two — a caller that reads only
@@ -569,13 +586,8 @@ zensu_doctor_invocation() {
 # is not the main thread.
 zensu_doctor_allowed() {
   local payload="${1:-}"
-  local lib_dir context_lib
   zensu_doctor_invocation "$payload" || return 1
-  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
-  context_lib="$lib_dir/zensu-agent-context.sh"
-  [ -r "$context_lib" ] && [ ! -L "$context_lib" ] || return 1
-  # shellcheck disable=SC1090
-  source "$context_lib" || return 1
+  _zensu_load_agent_context || return 1
   zensu_hook_is_main_principal "$payload" PreToolUse
 }
 
@@ -664,7 +676,7 @@ _zensu_adoption_refusal_remedy() {
     (adopted-concurrently)
       printf '%s' 'A sibling hook adopted the record in the meantime and it serves now, so simply retry this call' ;;
     (not-completed|lock-timeout)
-      printf '%s' 'The adoption did not complete (a lock timeout, or a fault inside the adoption itself), so retry this call; if it persists, /zensu:adopt-session prints the full report' ;;
+      printf '%s' 'The adoption did not complete (a lock timeout, or a fault inside the adoption itself), so retry this call' ;;
     (superseded-record-exists)
       printf '%s' 'A superseded record from an interrupted adoption is already in place; /zensu:adopt-session names the file, and moving it aside lets the adoption complete' ;;
     (*)
@@ -703,8 +715,12 @@ _zensu_adoption_tail() {
   esac
 }
 
-# The sentence every `child` deny ends on. One spelling, shared with the `.*` gate
-# word for word.
+# The sentence a `child` deny ends on, in every scope BUT ONE. One spelling, shared
+# with the `.*` gate word for word. The exception is the `adoption-incomplete`
+# scope, whose child form ends on its own retry sentence instead: there nothing is
+# reserved for the main thread — a sibling hook already adopted the record, so a
+# plain retry by the child itself is the remedy, and telling it that the repair
+# "is not available here" would be false.
 ZENSU_ADOPTION_CHILD_CLOSE='The repair writes the immutable record and is reserved for the main thread, so it is not available here — report this to the main thread rather than retrying.'
 
 zensu_emit_hook_session_deny() {
@@ -872,8 +888,15 @@ export -f zensu_bind_hook_session zensu_bind_model_session zensu_emit_hook_sessi
   zensu_session_pruned_plugin_root zensu_session_pruned_plugin_root_model \
   zensu_session_adoption_refusal zensu_session_adoption_remedy _zensu_adoption_refusal_remedy \
   zensu_session_adoption_attempt _zensu_adoption_attempt \
-  zensu_session_adoption_tail _zensu_adoption_tail _zensu_deny_audience \
+  zensu_session_adoption_tail _zensu_adoption_tail \
+  _zensu_deny_audience _zensu_load_agent_context \
   zensu_session_key zensu_resolve_session_id zensu_resolve_project_dir 2>/dev/null || true
+# The underscore-private helpers in that list are there for CLOSURE, not as API: an
+# exported function that reaches a child shell runs there without this file, so
+# every helper it calls has to travel with it. zensu_emit_named_bind_deny calls
+# _zensu_deny_audience, which calls _zensu_load_agent_context; dropping either
+# leaves the exported emitter printing "command not found" and falling back to the
+# `main` wording for every principal.
 
 # THE ZEN-MODE STATE PREDICATES MOVED OUT, to `hooks/lib/zensu-zen-shared.sh`.
 # `zen_marker_active`, `zen_marker_shape_fault` and `zen_path_untraversable` have

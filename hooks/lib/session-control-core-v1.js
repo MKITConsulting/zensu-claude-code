@@ -1875,6 +1875,15 @@ function adoptableRecord(options) {
 
 const ADOPTION_HISTORY_PHASE = 'RUNTIME_ADOPTED';
 const ADOPTION_HISTORY_REASON_PREFIX = 'runtime-adopted: ';
+// What adoptContext reports about its own provenance write. Two of the three
+// outcomes are closed tokens and get an owner here, because two renderers decide
+// on them: the adoption notice says what /zensu:doctor can show, and that is an
+// entry ONLY under RECORDED. The third outcome is `unavailable: <message>`, which
+// is open text by construction and stays a prefix nobody branches on.
+const ADOPTION_PROVENANCE = Object.freeze({
+  RECORDED: 'recorded',
+  NO_DOCUMENT: 'no-workflow-document',
+});
 
 // The two ways adoptContext refuses under its own lock, as CODES a caller can
 // branch on rather than prose it has to substring-match — the same reason the
@@ -1897,13 +1906,21 @@ function isSupersededRecordConflict(error) {
 }
 
 // Where adoptContext sets the previous record aside. ONE spelling, exported: the
-// hook binder's read-only `adoption-refusal` preview has to ask whether that file
-// is already there — the crash-resume shape, which a preview cannot otherwise see
-// because it never reaches the copy — and a second spelling of the name would let
-// the two disagree about which file blocks the adoption. `recordedVersion` must
-// already have passed ADOPTION_SAFE_VERSION_RE; adoptableRecord guarantees that
-// for every verdict it accepts.
+// shared adoption preview has to ask whether that file is already there — the
+// crash-resume shape, which a preview cannot otherwise see because it never
+// reaches the copy — and a second spelling of the name would let the two disagree
+// about which file blocks the adoption.
+//
+// The version reaches a FILENAME, so the shape is ENFORCED here and no longer left
+// as a caller precondition. adoptableRecord guarantees it for every verdict it
+// accepts, but since a refusal carries the recorded version as well — attached
+// before the shape guard runs — a later caller handing a refusal's `recorded` in
+// would have joined an unscreened string into a path. It throws; every caller
+// either holds an accepted verdict or treats the throw as "no such file".
 function supersededRecordFile(recordsDir, key, recordedVersion) {
+  if (typeof recordedVersion !== 'string' || !ADOPTION_SAFE_VERSION_RE.test(recordedVersion)) {
+    fail('superseded record name needs a recorded version of the safe shape');
+  }
   return path.join(recordsDir, `${key}.superseded-${recordedVersion}.json`);
 }
 
@@ -2032,14 +2049,14 @@ function adoptContext(options) {
   // recorded after the swap because it is provenance, not a precondition: a
   // failure here is reported to the caller, never smoothed over, and never
   // reverts an adoption that already succeeded.
-  let provenance = 'recorded';
+  let provenance = ADOPTION_PROVENANCE.RECORDED;
   // A session with no workflow document is a state adoptableRecord explicitly
   // blesses ("a missing document is not a disagreement"), so it must not be
   // routed through the failure branch below — mutateWorkflowState fails closed on
   // a missing baseline, and the caller renders that as an anomaly worth
   // reporting. Say plainly that there was nothing to write to instead.
   if (!fs.existsSync(adoptionWorkflowStatePath(adopted.projectRoot, options.sessionId))) {
-    provenance = 'no-workflow-document';
+    provenance = ADOPTION_PROVENANCE.NO_DOCUMENT;
   } else {
     try {
       mutateWorkflowState({
@@ -4737,6 +4754,7 @@ module.exports = {
   ADOPTION_REFUSALS,
   ADOPTION_HISTORY_PHASE,
   ADOPTION_HISTORY_REASON_PREFIX,
+  ADOPTION_PROVENANCE,
   adoptableRecord,
   adoptContext,
   // PRODUCTION consumers: hooks/lib/session-auto-adopt-v1.js branches on the two

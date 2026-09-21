@@ -475,20 +475,30 @@ test('the config reader mirrors the shell precedence: explicit file, then global
 
   write(globalFile, { hooks: { sessionAutoAdopt: false, other: true } });
   write(projectFile, { hooks: { sessionAutoAdopt: true } });
+  // The MERGED view keeps the precedence every other reader applies: project wins.
   const projectWins = mod.effectiveConfig({ HOME: home, CLAUDE_PROJECT_DIR: project }, 'linux');
   assert.equal(projectWins.hooks.sessionAutoAdopt, true);
   assert.equal(projectWins.hooks.other, true);
+  // ...and the DECISION does not follow it. For this key `false` is sticky: the
+  // overlay lives in a directory a session can write, so an overlay `true` must not
+  // be able to switch back on what the operator switched off globally. This row
+  // asserted `true` while the merged precedence decided, which is the direction
+  // that let a seeded overlay re-enable an unprompted adoption.
   assert.equal(mod.createAutoAdopter({ core: stubCore({}).core, sweep: stubSweep().sweep, platform: 'linux' })
-    .autoAdoptEnabled({ HOME: home, CLAUDE_PROJECT_DIR: project }), true);
+    .autoAdoptEnabled({ HOME: home, CLAUDE_PROJECT_DIR: project }), false);
+  assert.equal(mod.configLayers({ HOME: home, CLAUDE_PROJECT_DIR: project }, 'linux').length, 2);
 
   write(globalFile, { hooks: { sessionAutoAdopt: true } });
   write(projectFile, { hooks: { sessionAutoAdopt: false } });
   assert.equal(mod.createAutoAdopter({ core: stubCore({}).core, sweep: stubSweep().sweep, platform: 'linux' })
     .autoAdoptEnabled({ HOME: home, CLAUDE_PROJECT_DIR: project }), false);
 
+  // An explicit ZENSU_CONFIG is ONE layer, read verbatim: the project overlay above
+  // still says false and must not reach the decision.
   write(explicit, { hooks: { sessionAutoAdopt: true } });
   assert.equal(mod.createAutoAdopter({ core: stubCore({}).core, sweep: stubSweep().sweep, platform: 'linux' })
     .autoAdoptEnabled({ ZENSU_CONFIG: explicit, HOME: home, CLAUDE_PROJECT_DIR: project }), true);
+  assert.equal(mod.configLayers({ ZENSU_CONFIG: explicit, HOME: home, CLAUDE_PROJECT_DIR: project }, 'linux').length, 1);
 
   write(projectFile, '{ not json');
   assert.equal(mod.createAutoAdopter({ core: stubCore({}).core, sweep: stubSweep().sweep, platform: 'linux' })
@@ -514,4 +524,247 @@ test('the default instance is wired to the real core and sweep', () => {
   const verdict = mod.adoptForHook({ executingPluginRoot: '', pluginData: '', recordsDir: '', sessionId: '' });
   assert.equal(verdict.outcome, 'unavailable');
   assert.equal(verdict.reason, 'invalid-request');
+});
+
+// The crash-resume shape belongs to the PREVIEW, so every consumer of it agrees:
+// the hook binder, the read-only report and --confirm. It was asked by the binder
+// alone, which left the report answering ADOPTABLE for a state the deny named as a
+// refusal and told the reader that report would name the file.
+test('the preview names a blocking superseded file, ahead of the opt-out, and only for a record it could adopt', () => {
+  const seen = [];
+  const present = { lstatSync: (file) => { seen.push(file); return {}; } };
+  const overrides = { supersededRecordFile: realCore.supersededRecordFile };
+  const blocked = adopter(overrides, null, { fs: present });
+  const verdict = blocked.instance.previewAdoption(REQUEST);
+  assert.equal(verdict.outcome, 'refused');
+  assert.equal(verdict.reason, 'superseded-record-exists');
+  const expected = path.join(REQUEST.recordsDir, 'scv1_session-id.superseded-0.20.0.json');
+  assert.equal(verdict.supersededFile, expected);
+  assert.deepEqual(seen, [expected]);
+  assert.equal(verdict.recorded, '0.20.0', 'the state travels with the refusal');
+  // adoptForHook stops at the preview: adoptContext is never reached.
+  assert.equal(blocked.instance.adoptForHook(REQUEST).reason, 'superseded-record-exists');
+  assert.equal(blocked.calls.adopt, 0);
+
+  // Ahead of the opt-out: a refusal keeps its own reason under the opt-out too.
+  const { core } = stubCore(overrides);
+  const optedOut = mod.createAutoAdopter({
+    core, sweep: stubSweep().sweep, fs: present, readConfig: () => ({ hooks: { sessionAutoAdopt: false } }),
+  });
+  assert.equal(optedOut.previewAdoption(REQUEST).reason, 'superseded-record-exists');
+
+  // Absent file: the ordinary verdict, untouched.
+  const absent = { lstatSync: () => { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; } };
+  assert.equal(adopter(overrides, null, { fs: absent }).instance.previewAdoption(REQUEST).outcome, 'adoptable');
+
+  // A record the probe REFUSES is never asked about: the refusal is the answer.
+  const refused = adopter({
+    ...overrides,
+    adoptableRecord: () => ({ ok: false, reason: 'executing-runtime-older', recorded: '0.20.0', executing: '0.19.0' }),
+  }, null, { fs: { lstatSync: () => { throw new Error('must not be asked'); } } });
+  assert.equal(refused.instance.previewAdoption(REQUEST).reason, 'executing-runtime-older');
+
+  // A core that predates the shared name answers the ordinary verdict.
+  assert.equal(adopter({}, null, { fs: present }).instance.previewAdoption(REQUEST).outcome, 'adoptable');
+});
+
+test('a DANGLING link at the superseded name blocks too: lstat, never stat or existsSync', () => {
+  // adoptContext copies with COPYFILE_EXCL, which a dangling link at that name trips
+  // as well. A followed link answers "absent" for exactly the file that refuses the
+  // copy, so swapping lstatSync for statSync here has to fail — and against a stub
+  // filesystem it would not.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-auto-adopt-dangling-'));
+  try {
+    const recordsDir = path.join(root, 'records');
+    fs.mkdirSync(recordsDir);
+    const name = path.join(recordsDir, 'scv1_session-id.superseded-0.20.0.json');
+    try {
+      fs.symlinkSync(path.join(root, 'no-such-target.json'), name);
+    } catch (error) {
+      // A host that cannot create a symlink cannot produce the state either.
+      if (error && (error.code === 'EPERM' || error.code === 'EACCES')) return;
+      throw error;
+    }
+    assert.equal(fs.existsSync(name), false, 'the fixture is a DANGLING link');
+    const { core } = stubCore({ supersededRecordFile: realCore.supersededRecordFile });
+    const instance = mod.createAutoAdopter({ core, sweep: stubSweep().sweep, readConfig: () => ({}) });
+    const verdict = instance.previewAdoption({ ...REQUEST, recordsDir });
+    assert.equal(verdict.reason, 'superseded-record-exists');
+    assert.equal(verdict.supersededFile, name);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('the superseded name refuses a version that is not of the safe shape', () => {
+  // The version reaches a FILENAME. adoptContext screens it before calling; the
+  // preview calls the same function with a value read off a probe, so the function
+  // enforces its own precondition instead of trusting both callers to.
+  assert.equal(path.basename(realCore.supersededRecordFile('/r', 'scv1_k', '0.20.0')), 'scv1_k.superseded-0.20.0.json');
+  for (const hostile of ['../../x', 'a/b', '', 'x'.repeat(65), 7, null, undefined]) {
+    assert.throws(() => realCore.supersededRecordFile('/r', 'scv1_k', hostile), /safe shape/, JSON.stringify(hostile));
+  }
+  // ...and the preview turns that refusal into "no conflict established", never a throw.
+  const { core } = stubCore({
+    supersededRecordFile: realCore.supersededRecordFile,
+    adoptableRecord: () => ({ ok: true, recorded: '../../x', executing: '0.21.1', context: {} }),
+  });
+  const instance = mod.createAutoAdopter({
+    core, sweep: stubSweep().sweep, readConfig: () => ({}), fs: { lstatSync: () => ({}) },
+  });
+  assert.equal(instance.previewAdoption(REQUEST).outcome, 'adoptable');
+});
+
+test('the observed version reaches an already-served verdict through the request, and nowhere else', () => {
+  const served = { adoptableRecord: () => ({ ok: false, reason: 'already-served', recorded: '0.21.1', executing: '0.21.1' }) };
+  const observed = adopter(served).instance.adoptForHook({ ...REQUEST, observedRecorded: '0.20.0' });
+  assert.equal(observed.outcome, 'already-served');
+  assert.equal(observed.recorded, '0.20.0');
+  // Nobody observed it: null, never the re-minted record's own version.
+  assert.equal(adopter(served).instance.adoptForHook(REQUEST).recorded, null);
+  for (const junk of ['', 7, null, {}]) {
+    assert.equal(adopter(served).instance.adoptForHook({ ...REQUEST, observedRecorded: junk }).recorded, null);
+  }
+  // It is an observation about a SIBLING's adoption. A record this process adopts
+  // names the version the adoption itself measured, whatever the caller handed in.
+  assert.equal(adopter({}).instance.adoptForHook({ ...REQUEST, observedRecorded: '0.1.0' }).recorded, '0.20.0');
+});
+
+test('the operator line and the kept name are screens: a basename, two versions, the lease clause', () => {
+  const adoption = {
+    outcome: 'adopted', recorded: '0.20.0', executing: '0.21.1', provenance: 'no-workflow-document',
+    supersededFile: '/private/records/scv1_x.superseded-0.20.0.json',
+    leases: { discarded: 1, failed: [], unsafe: '' },
+  };
+  assert.equal(mod.keptName(adoption), 'scv1_x.superseded-0.20.0.json');
+  assert.equal(mod.keptName({}), '(unknown)');
+  assert.equal(mod.keptName(null), '(unknown)');
+  const line = mod.operatorLine(adoption);
+  assert.equal(line, 'adopted the Session Control record (0.20.0 -> 0.21.1); previous record kept as '
+    + 'scv1_x.superseded-0.20.0.json; provenance no-workflow-document; '
+    + '1 review-evidence lease(s) from before the update set aside, so a review that was in flight must be re-gathered');
+  assert.doesNotMatch(line, /\/private\//, 'the path never reaches an operator line');
+  const hostile = mod.operatorLine({ recorded: 'x\ny', executing: 'a"b', provenance: '/etc/passwd', supersededFile: 7, leases: null });
+  assert.match(hostile, /\(\(unreadable\) -> \(unreadable\)\)/);
+  assert.match(hostile, /kept as \(unknown\); provenance \(unrenderable\);/);
+  assert.doesNotThrow(() => mod.operatorLine(null));
+});
+
+test('the notice says what /zensu:doctor can actually show, per provenance', () => {
+  // The doctor renders the RUNTIME_ADOPTED history entry and nothing else, so it has
+  // an adoption to show only when a workflow document recorded one.
+  assert.equal(realCore.ADOPTION_PROVENANCE.RECORDED, 'recorded');
+  assert.equal(realCore.ADOPTION_PROVENANCE.NO_DOCUMENT, 'no-workflow-document');
+  const recorded = mod.doctorPointer({ outcome: 'adopted', provenance: realCore.ADOPTION_PROVENANCE.RECORDED });
+  assert.match(recorded, /shows the adoption in its session-state block/);
+  for (const provenance of [realCore.ADOPTION_PROVENANCE.NO_DOCUMENT, 'unavailable: EACCES', null]) {
+    const pointer = mod.doctorPointer({ outcome: 'adopted', provenance });
+    assert.match(pointer, /has no entry for it and the kept record is its evidence/, String(provenance));
+  }
+  // A sibling's adoption carries no provenance here: conditional, never a claim.
+  assert.match(mod.doctorPointer({ outcome: 'already-served' }), /when a workflow document recorded it/);
+  const base = {
+    outcome: 'adopted', recorded: '0.20.0', executing: '0.21.1', supersededFile: '/r/k.superseded-0.20.0.json',
+    leases: { discarded: 0, failed: [], unsafe: '' },
+  };
+  assert.match(mod.renderAdoptionNotice({ ...base, provenance: 'no-workflow-document' }, { where: 'on this tool call' }),
+    /has no entry for it and the kept record is its evidence; nothing else to do\.$/);
+  assert.match(mod.renderAdoptionNotice({ ...base, provenance: 'recorded' }, { where: 'on this tool call' }),
+    /shows the adoption in its session-state block; nothing else to do\.$/);
+});
+
+test('the gate screens and selectors are EXECUTED, not only parsed', () => {
+  // The seam pin at the front of the upgrade suite compares these sentences against
+  // their shell twins and pins the selector lines. It cannot see a predicate whose
+  // BODY changed: `grammar.test(value)` rewritten to `true` kept every source pin
+  // green. Requiring the gate must not run it — it reads stdin.
+  const gate = require(path.join(LIB, 'reviewer-capability-v1.js'));
+  assert.equal(gate.safeRefusal('opted-out'), 'opted-out');
+  for (const hostile of ['', 'BAD"TOKEN', 'a b', 'x\ny', 'Opted-Out', 7, null, undefined, 'a'.repeat(65)]) {
+    assert.equal(gate.safeRefusal(hostile), '(unknown)', JSON.stringify(hostile));
+  }
+  assert.equal(gate.safeVersion('0.21.1'), '0.21.1');
+  assert.equal(gate.safeVersion('a"b'), '(unreadable)');
+  // The VERB and the TAIL, per token class.
+  for (const token of gate.ADOPTION_INCOMPLETE_REASONS) {
+    assert.equal(gate.adoptionAttempt(token), 'it did not complete', token);
+    assert.match(gate.adoptionTail(token), /^if a retry does not bind the session/, token);
+  }
+  assert.deepEqual([...gate.ADOPTION_INCOMPLETE_REASONS].sort(),
+    ['adopted-concurrently', 'adoption-failed', 'lock-timeout', 'not-completed']);
+  for (const token of ['executing-runtime-older', 'superseded-record-exists', '(unknown)']) {
+    assert.equal(gate.adoptionAttempt(token), 'it was REFUSED', token);
+    assert.match(gate.adoptionTail(token), /reports the same refusal in full/, token);
+  }
+  assert.equal(gate.adoptionAttempt('opted-out'), 'it was REFUSED');
+  assert.match(gate.adoptionTail('opted-out'), /once the user has said yes$/);
+  assert.doesNotMatch(gate.adoptionTail('opted-out'), /retries the adoption by hand/);
+  // The REMEDY: a token with no arm of its own takes the generic sentence.
+  assert.match(gate.adoptionRefusalRemedy('superseded-record-exists'), /moving it aside lets the adoption complete/);
+  assert.match(gate.adoptionRefusalRemedy('adoption-failed'), /^Run \/zensu:adopt-session for the full report/);
+  assert.match(gate.adoptionRefusalRemedy('(unknown)'), /^Run \/zensu:adopt-session for the full report/);
+  assert.match(gate.adoptionRefusalRemedy('not-completed'), /so retry this call$/);
+});
+
+// The SessionStart/SubagentStart adapter's serve-or-adopt, driven with stubs. The
+// upgrade suite races the adapter against a gate under a HELD lock, and there the
+// loss is detected under the lock, where the verdict still carries the version the
+// probe read — so the adapter's own observation is never the source in that row.
+// The probe-time loss, where a sibling finished first, is only reachable here.
+test('the adapter hands the version it observed to the module, and announces a sibling adoption with it', () => {
+  const adapter = require(path.join(LIB, 'claude-session-control-v1.js'));
+  assert.equal(typeof adapter.serveOrAdopt, 'function');
+  let reads = 0;
+  const core = {
+    // First read: the record as minted by 0.20.0. Second read: the sibling's re-mint.
+    readContext: () => { reads += 1; return { plugin_version: reads === 1 ? '0.20.0' : '0.21.1', plugin_data: '/data' }; },
+    servesRecordedRuntime: (context) => context.plugin_version === '0.21.1',
+  };
+  const requests = [];
+  const served = stubCore({
+    adoptableRecord: () => ({ ok: false, reason: 'already-served', recorded: '0.21.1', executing: '0.21.1' }),
+  });
+  const instance = mod.createAutoAdopter({ core: served.core, sweep: stubSweep().sweep, readConfig: () => ({}) });
+  const autoAdopt = { ...mod, adoptForHook: (request) => { requests.push(request); return instance.adoptForHook(request); } };
+  const result = adapter.serveOrAdopt({ recordsDir: '/data/records' }, '/plugins/zensu/0.21.1', '/data', 'session-id',
+    'SessionStart context', 'session', { core, autoAdopt });
+  assert.equal(reads, 2, 'one failed serve, one strict re-read');
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].observedRecorded, '0.20.0');
+  assert.equal(requests[0].respectOptOut, true);
+  assert.equal(result.adoption.outcome, 'already-served');
+  assert.equal(result.adoption.recorded, '0.20.0');
+  assert.match(mod.renderAdoptionNotice(result.adoption, { where: 'at this SessionStart' }),
+    /updated from 0\.20\.0 to 0\.21\.1 while this session was running; its Session Control record was adopted automatically by a sibling hook/);
+
+  // A record that serves at once is returned with no adoption and no module call.
+  const healthy = adapter.serveOrAdopt({ recordsDir: '/data/records' }, '/p', '/data', 'session-id', 'label', 'session', {
+    core: { readContext: () => ({ plugin_version: '0.21.1', plugin_data: '/data' }), servesRecordedRuntime: () => true },
+    autoAdopt: { ...mod, adoptForHook: () => { throw new Error('must not be called'); } },
+  });
+  assert.equal(healthy.adoption, null);
+});
+
+test('the adapter names an adoption it performed when the strict re-read still fails, and a refusal by its token', () => {
+  const adapter = require(path.join(LIB, 'claude-session-control-v1.js'));
+  const core = {
+    readContext: () => ({ plugin_version: '0.20.0', plugin_data: '/data' }),
+    servesRecordedRuntime: () => false,
+  };
+  const adopting = mod.createAutoAdopter({ core: stubCore({}).core, sweep: stubSweep().sweep, readConfig: () => ({}) });
+  assert.throws(
+    () => adapter.serveOrAdopt({ recordsDir: '/data/records' }, '/p', '/data', 'session-id', 'resume context', 'session',
+      { core, autoAdopt: { ...mod, adoptForHook: adopting.adoptForHook } }),
+    /resume context: adopted the Session Control record \(0\.20\.0 -> 0\.21\.1\); previous record kept as scv1_x\.superseded-0\.20\.0\.json; provenance recorded; 2 review-evidence lease\(s\).* — but the strict re-read still fails: /,
+  );
+  const refusing = mod.createAutoAdopter({
+    core: stubCore({ adoptableRecord: () => ({ ok: false, reason: 'executing-runtime-older', recorded: '0.20.0', executing: '0.19.0' }) }).core,
+    sweep: stubSweep().sweep,
+    readConfig: () => ({}),
+  });
+  assert.throws(
+    () => adapter.serveOrAdopt({ recordsDir: '/data/records' }, '/p', '/data', 'session-id', 'resume context', 'session',
+      { core, autoAdopt: { ...mod, adoptForHook: refusing.adoptForHook } }),
+    /resume context: automatic adoption refused \(executing-runtime-older\); /,
+  );
 });

@@ -27,7 +27,7 @@
 // answer the third fact of the lineage state separately — 0 and the dead path
 // when the lineage is incompatible AND the recorded root is gone, **3** when it
 // positively is not, and 1 for every unavailable answer — so the two-field
-// format above can stay exactly as its five parsers read it. That three-way
+// format above can stay exactly as every shell parser reads it. That three-way
 // status is not decoration: a caller that cannot tell a negative from an
 // unavailable answer must guess, and the wrong guess makes it assert the
 // workflow document survived. None of these prints bindings: a session in any of
@@ -55,8 +55,8 @@
 // notice hook. `adoption-refusal` (payload on stdin) is the read-only companion
 // for the deny emitters: it prints ONE token — an ADOPTION_REFUSALS value,
 // `opted-out`, `adopted-concurrently`, `superseded-record-exists` or
-// `not-completed` — never a TAB, so the two-field pair above keeps its five
-// parsers, and exits 1 when the question cannot be answered.
+// `not-completed` — never a TAB, so the two-field pair above keeps the shape
+// its shell parsers read, and exits 1 when the question cannot be answered.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -348,8 +348,8 @@ function resolvePrunedPluginRoot(payload, environment = process.env) {
         !== path.dirname(executedPluginRoot)) return null;
     const executing = core.executingPluginVersion(executedPluginRoot, 'claude');
     if (typeof executing !== 'string' || executing === '') return null;
-    // The recorded version is rendered into `recorded<TAB>executing`, which five
-    // parsers split with ${V%%$'\t'*} and ${V##*$'\t'} — first field and LAST. On
+    // The recorded version is rendered into `recorded<TAB>executing`, which the
+    // shell parsers split with ${V%%$'\t'*} and ${V##*$'\t'} — first field and LAST. On
     // the lineage path readContextInternal proves manifest.version equals this
     // field, and that comparison is what has kept it separator-free; the pruned
     // waiver drops exactly that comparison, so this is the first producer without
@@ -425,6 +425,35 @@ function adoptionRequest(payload, environment, executedPluginRoot, pluginData, r
 // would close that cycle; inside a function body every module is initialized.
 function autoAdoptModule() {
   return require('./session-auto-adopt-v1.js');
+}
+
+// The ONE stderr line about an adoption THIS process performed, for every caller
+// that has no model or user channel: the CLI mode below on its success path, the
+// CLI mode's failure path when the strict re-read fails after the adoption, and
+// the in-process review-evidence hook. The sentence itself is the module's
+// operatorLine, so every interpolated value goes through the shared screens.
+// Never throws: it runs inside catch blocks, where a second fault would replace
+// the diagnostic it was meant to accompany.
+// The adoption a FAILED bind performed, or null. resolveHookSession hangs a verdict
+// on two different errors: the typed refusal (outcome refused, opted-out, …) and the
+// strict re-read that failed AFTER an adoption landed. Only the second is an
+// adoption to disclose, and the outcome is compared against the module's constant
+// rather than a literal a rename would silently orphan.
+function performedAdoption(error) {
+  if (!error || !error.adoption || typeof error.adoption !== 'object') return null;
+  try {
+    return error.adoption.outcome === autoAdoptModule().AUTO_ADOPT_OUTCOMES.ADOPTED ? error.adoption : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeAdoptionOperatorLine(adoption) {
+  try {
+    process.stderr.write(`claude hook session binder: ${autoAdoptModule().operatorLine(adoption)}\n`);
+  } catch {
+    process.stderr.write('claude hook session binder: adopted the Session Control record (details unavailable)\n');
+  }
 }
 
 function resolveHookSession(payload, environment = process.env, options = {}) {
@@ -508,7 +537,7 @@ function resolveHookSession(payload, environment = process.env, options = {}) {
 }
 
 // The refusal TOKEN for the shell deny emitters: one word, never a TAB, so the
-// `recorded<TAB>executing` pair its five parsers read stays exactly two fields.
+// `recorded<TAB>executing` pair the shell parsers read stays exactly two fields.
 // Read-only — it previews, it never adopts. Answers null when the question
 // cannot be answered at all, which the CLI mode renders as exit 1.
 function adoptionRefusalToken(payload, environment = process.env) {
@@ -518,6 +547,17 @@ function adoptionRefusalToken(payload, environment = process.env) {
   if (declaredPluginRoot !== executedPluginRoot) fail('CLAUDE_PLUGIN_ROOT does not match the executing plugin');
   const pluginData = canonicalDirectory(environment.CLAUDE_PLUGIN_DATA, 'CLAUDE_PLUGIN_DATA', true);
   const recordsDir = privateRecordsDirectory(pluginData);
+  // NO RECORD AT ALL is not an adoption question. Every reader throws on an absent
+  // record file, so the probe would answer `record-unreadable`, and the default
+  // deny would then tell a session that simply has no record — hooks loaded
+  // mid-session, the pre-Session-Control upgrade state — that its record "may have
+  // been altered". A clean ENOENT answers null, so the deny reads as it always did.
+  // Any other lstat fault falls through: something IS there, and the probe names it.
+  try {
+    fs.lstatSync(path.join(recordsDir, `${core.sessionKey(payload.session_id)}.json`));
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return null;
+  }
   const autoAdopt = autoAdoptModule();
   const OUTCOMES = autoAdopt.AUTO_ADOPT_OUTCOMES;
   const REASONS = autoAdopt.AUTO_ADOPT_REASONS;
@@ -544,24 +584,13 @@ function adoptionRefusalToken(payload, environment = process.env) {
         return null;
       }
     }
-    case OUTCOMES.ADOPTABLE: {
-      // Adoptable, yet the caller's own bind failed inside adoptContext. TWO causes
-      // reach here and they need OPPOSITE remedies, so the preview asks the one
-      // question that separates them. A superseded file already in place is the
-      // crash-resume shape: it blocks every later adoption until it is moved, so
-      // "retry" would be a loop. lstat, never existsSync — adoptContext's own check
-      // is COPYFILE_EXCL, which a dangling link at that name trips as well. Anything
-      // else (a lock timeout) really is a retry.
-      if (typeof preview.recorded === 'string') {
-        try {
-          fs.lstatSync(core.supersededRecordFile(recordsDir, core.sessionKey(payload.session_id), preview.recorded));
-          return REASONS.SUPERSEDED_EXISTS;
-        } catch {
-          // Absent, or unreadable: the retry token below is the honest answer.
-        }
-      }
+    case OUTCOMES.ADOPTABLE:
+      // Adoptable, yet the caller's own bind failed inside adoptContext: a lock
+      // timeout, or a fault in the adoption itself — a retry. The OTHER cause that
+      // used to be separated here, a superseded record already in place, is asked
+      // by the shared preview now and arrives above as a REFUSED verdict, so the
+      // hook deny, the manual report and the adoption agree about that state.
       return REASONS.NOT_COMPLETED;
-    }
     default:
       return null;
   }
@@ -658,9 +687,11 @@ function main() {
       process.exitCode = 1;
       return;
     }
-    // TWO fields, never three. Five shell parsers read the executing half as
+    // TWO fields, never three. Every shell parser reads the executing half as
     // `${V##*$'\t'}`, which takes the LAST field, so appending anything here
-    // would silently redirect all five rather than fail. The dead project root
+    // would silently redirect all of them rather than fail. (Find them with a grep
+    // for that expansion under hooks/ — the four shell gates share ONE site,
+    // zensu_emit_named_bind_deny, beside the Stop hook and the doctor wrapper.) The dead project root
     // that resolveIncompatibleRuntime now also reports travels on its own mode
     // below instead.
     process.stdout.write(`${versions.recorded}\t${versions.executing}\n`);
@@ -694,7 +725,7 @@ function main() {
   }
   if (process.argv[2] === 'orphaned-incompatible-root' || process.argv[2] === 'model-orphaned-incompatible-root') {
     // The third fact of the combined state, asked separately so the two-field
-    // wire format above can stay exactly as its five parsers read it. Exit 0 and
+    // wire format above can stay exactly as its shell parsers read it. Exit 0 and
     // print the dead project root only when the record is lineage-incompatible
     // AND its recorded project root is gone; exit **3** for a plain incompatible
     // lineage whose root still exists, and 1 only when the question could not be
@@ -791,13 +822,7 @@ function main() {
     // user-facing renderers apply: the version shape, the provenance class, the
     // superseded BASENAME, and the lease clause that tells a refused sweep from a
     // clean one. The transcript renders this line verbatim.
-    const notice = autoAdoptModule();
-    const kept = typeof adopted.supersededFile === 'string' ? path.basename(adopted.supersededFile) : '(unknown)';
-    process.stderr.write(
-      `claude hook session binder: adopted the Session Control record (${notice.safeVersion(adopted.recorded)} -> ${notice.safeVersion(adopted.executing)}); `
-      + `previous record kept as ${kept}; provenance ${notice.safeProvenance(adopted.provenance)}; `
-      + `${notice.leaseClause(adopted.leases)}\n`,
-    );
+    writeAdoptionOperatorLine(adopted);
   }
 
   const values = {
@@ -819,6 +844,13 @@ if (require.main === module) {
   try {
     main();
   } catch (error) {
+    // An adoption this invocation PERFORMED whose strict re-read then failed — a
+    // vanished project root — is still an adoption: the record was re-minted, a
+    // superseded copy written and the lease store swept. resolveHookSession hangs
+    // that verdict on the error it re-throws, and only a PERFORMED adoption
+    // carries one, so the line is written before the failure that follows it.
+    const performed = performedAdoption(error);
+    if (performed) writeAdoptionOperatorLine(performed);
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;
   }
@@ -832,9 +864,10 @@ module.exports = {
   // `scv1_<64hex>`, i.e. the name of a record file in the store — an accepted
   // identity there while the sibling modes refuse exactly that shape.
   validateSessionId,
-  // Read-only companion of the automatic adoption: the capability gate and the
-  // Stop hook name the refusal through it instead of re-deriving the ladder.
-  adoptionRefusalToken,
+  // For the in-process adopters (the review-evidence hook): the same operator line
+  // the CLI mode prints, so an adoption performed outside the CLI is not silent.
+  writeAdoptionOperatorLine,
+  performedAdoption,
   orphanedProjectRootSession,
   resolveFreshHookProject,
   resolveHookSession,

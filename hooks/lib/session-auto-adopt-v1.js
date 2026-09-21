@@ -7,8 +7,11 @@
 // lease sweep, composed here so the binder (claude-hook-session-v1.js), the
 // SessionStart adapter (claude-session-control-v1.js) and the manual entry point's
 // --confirm path (session-adopt-report-v1.js) share one implementation instead of
-// three. That report's READ-ONLY path is not a caller: it asks adoptableRecord
-// directly, because it has to print a refusal's remedy table rather than a verdict.
+// three. That report's READ-ONLY path asks adoptableRecord directly, because it has
+// to print a refusal's remedy table rather than a verdict — and then asks
+// previewAdoption the ONE question adoptableRecord cannot answer: whether a
+// superseded record already blocks the adoption. That check lives in the preview,
+// so the hook binder, the manual report and the adoption itself agree about it.
 //
 // Never throws out of adoptForHook / previewAdoption: every outcome is a typed
 // verdict, because the caller is a PreToolUse hook whose own failure mode is a
@@ -22,10 +25,12 @@
 //
 // The opt-out `hooks.sessionAutoAdopt === false` is read HERE and only here, on
 // the adoption path — never on the hot bind. The reader mirrors _ZENSU_CFG_JS in
-// hooks/lib/zensu-config.sh (ZENSU_CONFIG verbatim, else the global file deep-
-// merged with the project overlay, project winning per key) and degrades to
-// "enabled" on every fault, because the enabled state runs a REPAIR rather than
-// a bypass. It applies msysDrivePrefix — the total rule, never the throwing
+// hooks/lib/zensu-config.sh in WHICH files it reads (ZENSU_CONFIG verbatim, else
+// the global file and the project overlay) and deliberately NOT in how it combines
+// them: for this one key `false` is STICKY, so the path is off when EITHER layer
+// says so — see configLayers for why project-wins ran the unsafe way round here.
+// It degrades to "enabled" on every fault, because the enabled state runs a REPAIR
+// rather than a bypass. It applies msysDrivePrefix — the total rule, never the throwing
 // normalizeHostPathInput — so a driveless MSYS spelling falls to "enabled"
 // instead of raising inside a hook.
 //
@@ -45,10 +50,12 @@
 // The adoption NOTICE is rendered here as well, once, for the TWO places that
 // speak about an adoption to a model or a user — the `.*` gate's allow-path
 // announcement and the SessionStart/SubagentStart adapter's systemMessage plus
-// additionalContext. The binder's stderr line is NOT a caller of the renderer: it
-// is an operator line with its own lead-in, and it consumes the three SCREENS
-// below (safeVersion, safeProvenance, leaseClause) so the two cannot disagree
-// about what is safe to print. The version screen consumes the core's
+// additionalContext. The OPERATOR line is a second renderer, `operatorLine`, for
+// every process that can perform an adoption and has no model or user channel:
+// the CLI binder (on its success path AND when the strict re-read then fails), the
+// in-process evidence hook, and the adapter's adopted-then-failed message. Both
+// renderers consume the four SCREENS below (safeVersion, safeProvenance, keptName,
+// leaseClause) so they cannot disagree about what is safe to print. The version screen consumes the core's
 // ADOPTION_SAFE_VERSION_RE rather than re-spelling the alternation, and the lease
 // clause distinguishes a clean sweep from a REFUSED one: a refused sweep may have
 // left superseded leases in place, which is the opposite of "0 set aside".
@@ -124,6 +131,16 @@ function safeProvenance(value) {
   return typeof value === 'string' && SAFE_PROVENANCE.test(value) ? value : '(unrenderable)';
 }
 
+// The FOURTH shared screen: the kept record's BASENAME, never its path. It was
+// derived by hand at three sites — the notice below, the SessionStart adapter's
+// adopted-then-failed message and the binder's operator line — and it is the one
+// value of the three that names the session, so its rendering must not drift.
+function keptName(adoption) {
+  return adoption && typeof adoption.supersededFile === 'string'
+    ? path.basename(adoption.supersededFile)
+    : '(unknown)';
+}
+
 function establishesNamedState(verdict) {
   return Boolean(verdict)
     && typeof verdict.recorded === 'string'
@@ -169,6 +186,38 @@ function leaseClause(leases) {
 // disk is the RE-MINTED one, so its plugin_version is the executing version and
 // "updated from X to X" would be the result. The sentence drops the first half of
 // the pair rather than printing a number nobody measured.
+// ONE operator-facing sentence about an adoption THIS process performed, for every
+// process that can perform one. The CLI binder printed it on its success path
+// only, so an adoption whose strict re-read then failed — a vanished project root
+// — and an adoption the in-process evidence hook performed left no line at all:
+// the record was re-minted, a superseded copy written and the lease store swept,
+// with the superseded filename as the only trace. No prefix and no newline: each
+// caller owns its own lead-in.
+function operatorLine(adoption) {
+  return `adopted the Session Control record (${safeVersion(adoption && adoption.recorded)} -> ${safeVersion(adoption && adoption.executing)}); `
+    + `previous record kept as ${keptName(adoption)}; provenance ${safeProvenance(adoption && adoption.provenance)}; `
+    + `${leaseClause(adoption && adoption.leases)}`;
+}
+
+// What /zensu:doctor can show about THIS adoption, stated per provenance. The
+// doctor's adoption row reads the RUNTIME_ADOPTED history entry and nothing else,
+// so it exists only when a workflow document recorded one. The notice used to
+// close on an unconditional "/zensu:doctor shows the details", which sent a user
+// whose worktree is gone — the `no-workflow-document` case — to a report that says
+// nothing about the adoption at all. A sibling's adoption carries no provenance
+// here, and neither does a core that predates the vocabulary, so both take the
+// conditional wording rather than a claim this process cannot back.
+function doctorPointer(adoption) {
+  const vocabulary = defaultCore.ADOPTION_PROVENANCE;
+  const performed = Boolean(adoption) && adoption.outcome === AUTO_ADOPT_OUTCOMES.ADOPTED;
+  if (!performed || !vocabulary || typeof vocabulary.RECORDED !== 'string') {
+    return '/zensu:doctor shows the adoption when a workflow document recorded it';
+  }
+  return adoption.provenance === vocabulary.RECORDED
+    ? '/zensu:doctor shows the adoption in its session-state block'
+    : 'no workflow document recorded this adoption, so /zensu:doctor has no entry for it and the kept record is its evidence';
+}
+
 function renderAdoptionNotice(adoption, options) {
   const where = options && typeof options.where === 'string' && options.where !== '' ? options.where : 'on this hook';
   const executing = safeVersion(adoption && adoption.executing);
@@ -176,14 +225,14 @@ function renderAdoptionNotice(adoption, options) {
     const span = typeof adoption.recorded === 'string'
       ? `from ${safeVersion(adoption.recorded)} to ${executing}`
       : `to ${executing}`;
-    return `zensu: the Zensu plugin was updated ${span} while this session was running; its Session Control record was adopted automatically by a sibling hook ${where}, and this hook serves the adopted record. /zensu:doctor shows the details; nothing else to do.`;
+    return `zensu: the Zensu plugin was updated ${span} while this session was running; its Session Control record was adopted automatically by a sibling hook ${where}, and this hook serves the adopted record. ${doctorPointer(adoption)}; nothing else to do.`;
   }
   const recorded = safeVersion(adoption && adoption.recorded);
-  const kept = adoption && typeof adoption.supersededFile === 'string' ? path.basename(adoption.supersededFile) : '(unknown)';
+  const kept = keptName(adoption);
   const orphan = adoption && adoption.orphanedProjectRoot
     ? ' The recorded project root is still gone, so Edit, Write, MultiEdit and any writing Bash command stay denied until that exact directory is re-created.'
     : '';
-  return `zensu: the Zensu plugin was updated from ${recorded} to ${executing} while this session was running; its Session Control record was adopted automatically ${where} (previous record kept beside it as ${kept}; provenance ${safeProvenance(adoption && adoption.provenance)}; ${leaseClause(adoption && adoption.leases)}).${orphan} /zensu:doctor shows the details; nothing else to do.`;
+  return `zensu: the Zensu plugin was updated from ${recorded} to ${executing} while this session was running; its Session Control record was adopted automatically ${where} (previous record kept beside it as ${kept}; provenance ${safeProvenance(adoption && adoption.provenance)}; ${leaseClause(adoption && adoption.leases)}).${orphan} ${doctorPointer(adoption)}; nothing else to do.`;
 }
 
 function errorMessage(error) {
@@ -218,21 +267,39 @@ function deepMerge(base, overlay) {
   return result;
 }
 
+// The MERGED view — the precedence every other Zensu reader applies, project over
+// global per key. Built from configLayers below, so WHERE the two files live is
+// spelled once; the two functions used to resolve the same three paths separately.
 function effectiveConfig(environment, platform = process.platform, fsModule = fs) {
-  const spell = (value) => hostPaths.msysDrivePrefix(value, platform);
-  const explicit = environment.ZENSU_CONFIG;
-  if (typeof explicit === 'string' && explicit !== '') return readJsonObject(spell(explicit), fsModule);
-  const home = typeof environment.HOME === 'string' ? environment.HOME : '';
-  const global = readJsonObject(path.join(spell(home), '.zensu', 'config.json'), fsModule);
-  const projectDir = environment.CLAUDE_PROJECT_DIR;
-  const overlay = typeof projectDir === 'string' && projectDir !== ''
-    ? readJsonObject(path.join(spell(projectDir), '.zensu', 'config.json'), fsModule)
-    : {};
-  return deepMerge(global, overlay);
+  return configLayers(environment, platform, fsModule)
+    .reduce((merged, layer) => deepMerge(merged, layer), {});
 }
 
 function disabledByConfig(config) {
   return Boolean(config) && isPlainObject(config.hooks) && config.hooks[CONFIG_KEY] === false;
+}
+
+// The two layers effectiveConfig merges, separately. `enabled` needs them apart for
+// ONE reason: for this key `false` is STICKY — the automatic path is off when EITHER
+// layer says so. Everywhere else in Zensu the project overlay wins per key, and for
+// this key that precedence ran the unsafe way round: the overlay lives in a
+// directory a session can write while no chain is armed, so a seeded
+// `sessionAutoAdopt: true` there silently overrode an operator's GLOBAL false and
+// the next plugin update adopted unprompted. "Enabled" is the state that acts
+// without asking, so most-restrictive-wins is the fail-closed direction. No shell
+// reader consumes this key, so diverging from _ZENSU_CFG_JS costs nothing at run
+// time. An explicit ZENSU_CONFIG is one layer and is read verbatim.
+function configLayers(environment, platform = process.platform, fsModule = fs) {
+  const spell = (value) => hostPaths.msysDrivePrefix(value, platform);
+  const explicit = environment.ZENSU_CONFIG;
+  if (typeof explicit === 'string' && explicit !== '') return [readJsonObject(spell(explicit), fsModule)];
+  const home = typeof environment.HOME === 'string' ? environment.HOME : '';
+  const layers = [readJsonObject(path.join(spell(home), '.zensu', 'config.json'), fsModule)];
+  const projectDir = environment.CLAUDE_PROJECT_DIR;
+  if (typeof projectDir === 'string' && projectDir !== '') {
+    layers.push(readJsonObject(path.join(spell(projectDir), '.zensu', 'config.json'), fsModule));
+  }
+  return layers;
 }
 
 function verdict(outcome, reason, extra) {
@@ -268,6 +335,12 @@ function normalizeRequest(request) {
       host: typeof source.host === 'string' && source.host !== '' ? source.host : 'claude',
       environment: isPlainObject(source.environment) ? source.environment : process.env,
       respectOptOut: source.respectOptOut !== false,
+      // The version the CALLER read before anyone adopted. Only a caller can know
+      // it, and only this module may put it on a verdict — see the already-served
+      // arm of previewAdoption.
+      observedRecorded: typeof source.observedRecorded === 'string' && source.observedRecorded !== ''
+        ? source.observedRecorded
+        : null,
     },
   };
 }
@@ -306,13 +379,15 @@ function createAutoAdopter(deps) {
   const sweep = options.sweep || defaultSweep;
   const fsModule = options.fs || fs;
   const platform = options.platform || process.platform;
-  const readConfig = typeof options.readConfig === 'function'
-    ? options.readConfig
-    : (environment) => effectiveConfig(environment, platform, fsModule);
+  // An injected reader answers ONE merged config (the unit seam); the default
+  // reader answers the layers, so a `false` in either one switches the path off.
+  const readLayers = typeof options.readConfig === 'function'
+    ? (environment) => [options.readConfig(environment)]
+    : (environment) => configLayers(environment, platform, fsModule);
 
   function enabled(environment) {
     try {
-      return !disabledByConfig(readConfig(environment));
+      return !readLayers(environment).some(disabledByConfig);
     } catch {
       return true;
     }
@@ -330,6 +405,25 @@ function createAutoAdopter(deps) {
   function isLockTimeout(error) {
     if (typeof core.isLockTimeout === 'function') return core.isLockTimeout(error);
     return LOCK_TIMEOUT_RE.test(errorMessage(error));
+  }
+
+  // The path of a superseded record that already blocks this adoption, or null.
+  // lstat, never existsSync or stat: adoptContext's own check is COPYFILE_EXCL,
+  // which a DANGLING link at that name trips as well, and a followed link would
+  // answer "absent" for exactly the file that refuses the copy. A core that
+  // predates the shared name, a version the name refuses, and any read fault all
+  // answer null — the retry token is then the honest one.
+  function supersededConflict(request, recorded) {
+    if (typeof recorded !== 'string'
+        || typeof core.supersededRecordFile !== 'function'
+        || typeof core.sessionKey !== 'function') return null;
+    try {
+      const file = core.supersededRecordFile(request.recordsDir, core.sessionKey(request.sessionId), recorded);
+      fsModule.lstatSync(file);
+      return file;
+    } catch {
+      return null;
+    }
   }
 
   function previewAdoption(rawRequest) {
@@ -356,11 +450,29 @@ function createAutoAdopter(deps) {
       if (reason === 'already-served') {
         // The record on disk already serves, so its plugin_version is whatever the
         // adopting sibling re-minted it under — not the version this session was
-        // updated FROM. A caller that observed the previous version itself supplies
-        // it; this verdict must not pass the re-minted one off as that.
-        return verdict(AUTO_ADOPT_OUTCOMES.ALREADY_SERVED, reason, { ...state, recorded: null });
+        // updated FROM, and this verdict must not pass the re-minted one off as
+        // that. A caller that observed the previous version itself hands it in on
+        // the request, and THIS is the one place it reaches the field: the caller
+        // used to patch the returned verdict, which left three layers writing one
+        // field that meant two different things.
+        return verdict(AUTO_ADOPT_OUTCOMES.ALREADY_SERVED, reason, { ...state, recorded: request.observedRecorded });
       }
       return verdict(AUTO_ADOPT_OUTCOMES.REFUSED, reason, state);
+    }
+    // The crash-resume shape, asked HERE so every consumer of this preview agrees
+    // about it. The record is adoptable, yet a superseded file from an interrupted
+    // adoption already sits at the name adoptContext would copy to, and its
+    // COPYFILE_EXCL refuses every later attempt until the file is moved — so
+    // "retry" would be a loop. It used to be asked by the hook binder alone, which
+    // left the read-only report answering ADOPTABLE for a state the deny named as
+    // a refusal. Above the opt-out for the reason the opt-out comment gives: a
+    // refusal keeps its own reason under the opt-out too.
+    const blocking = supersededConflict(request, state.recorded);
+    if (blocking !== null) {
+      return verdict(AUTO_ADOPT_OUTCOMES.REFUSED, AUTO_ADOPT_REASONS.SUPERSEDED_EXISTS, {
+        ...state,
+        supersededFile: blocking,
+      });
     }
     // The opt-out is asked LAST, so it only ever overrides an adoption that would
     // have happened: a refusal above keeps its own reason under the opt-out too.
@@ -447,6 +559,10 @@ module.exports = {
   SAFE_PROVENANCE,
   safeProvenance,
   safeVersion,
+  keptName,
   leaseClause,
+  operatorLine,
+  doctorPointer,
+  configLayers,
   renderAdoptionNotice,
 };

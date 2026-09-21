@@ -60,8 +60,8 @@ const ADOPTION_REFUSAL_REMEDIES = Object.freeze({
   'executing-runtime-unidentified': 'The running installation declares no usable version, so repair the plugin installation first',
   'opted-out': 'hooks.sessionAutoAdopt is false in your Zensu config, so the automatic path is switched off on purpose; report this refusal and ask the user whether to run /zensu:adopt-session --confirm, which ignores the opt-out — never run it on your own initiative',
   'adopted-concurrently': 'A sibling hook adopted the record in the meantime and it serves now, so simply retry this call',
-  'not-completed': 'The adoption did not complete (a lock timeout, or a fault inside the adoption itself), so retry this call; if it persists, /zensu:adopt-session prints the full report',
-  'lock-timeout': 'The adoption did not complete (a lock timeout, or a fault inside the adoption itself), so retry this call; if it persists, /zensu:adopt-session prints the full report',
+  'not-completed': 'The adoption did not complete (a lock timeout, or a fault inside the adoption itself), so retry this call',
+  'lock-timeout': 'The adoption did not complete (a lock timeout, or a fault inside the adoption itself), so retry this call',
   'superseded-record-exists': 'A superseded record from an interrupted adoption is already in place; /zensu:adopt-session names the file, and moving it aside lets the adoption complete',
 });
 const GENERIC_ADOPTION_REMEDY = 'Run /zensu:adopt-session for the full report, and /zensu:adopt-session --confirm to retry the adoption by hand';
@@ -97,6 +97,13 @@ const adoptionTail = (reason) => {
   return ADOPTION_INCOMPLETE_REASONS.includes(reason) ? INCOMPLETE_ADOPTION_TAIL : GENERIC_ADOPTION_TAIL;
 };
 
+// The sentence a non-main principal's deny ends on instead of the remedy. ONE
+// constant, because three arms below render it and the seam pin used to test
+// `gate.includes(sentence)`, which stays true while ANY inlined copy matches — so
+// rewording one arm alone left the pin green. HAND COPY of
+// ZENSU_ADOPTION_CHILD_CLOSE in hooks/lib/zensu-session.sh, pinned for equality.
+const ADOPTION_CHILD_CLOSE = 'The repair writes the immutable record and is reserved for the main thread, so it is not available here — report this to the main thread rather than retrying.';
+
 // The announcement of an adoption THIS process performed. One JSON object on the
 // allow path carrying no permissionDecision, so the host's deny > defer > ask >
 // allow precedence is untouched. `systemMessage` is the user-facing common field
@@ -128,12 +135,7 @@ const MUTATING_FILE_TOOLS = new Set([
 ]);
 const ZENSU_MCP_READ_RE = /^(?:list_|get_|search_|suggest_|view_|validate_|analyze_journey_health$|ghost_get_candidates$|pulse_(?:start_session|end_session|session_summary)$)/;
 
-// Whether this run has already written its decision. stdout carries exactly ONE
-// JSON object, so the allow-path adoption notice below must never follow a deny.
-let decisionWritten = false;
-
 function deny(reason) {
-  decisionWritten = true;
   process.stdout.write(`${JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
@@ -283,15 +285,26 @@ function revalidateSessionContext(payload) {
   // and `binding.adoption` (spread into the trusted context below) carries the
   // verdict so the allow path can announce it once.
   const binding = hookSession.resolveHookSession(payload, process.env, { autoAdopt: true });
-  const projectRoot = canonicalDirectory(binding.projectRoot, 'context project root');
-  revalidateWorkflowState({
-    sessionId: payload.session_id,
-    projectRoot,
-  });
-  return {
-    ...binding,
-    projectRoot,
-  };
+  // Two checks run AFTER the bind and either can throw — a missing workflow
+  // baseline is the ordinary case, and it coincides with a plugin update whenever
+  // a worktree was deleted and re-created. The error they throw knows nothing
+  // about an adoption the bind above just performed, so the verdict is re-attached:
+  // the catch in main() reads it off the error, and without it that adoption was
+  // never announced — every later call sees a record that simply serves.
+  try {
+    const projectRoot = canonicalDirectory(binding.projectRoot, 'context project root');
+    revalidateWorkflowState({
+      sessionId: payload.session_id,
+      projectRoot,
+    });
+    return {
+      ...binding,
+      projectRoot,
+    };
+  } catch (error) {
+    if (binding.adoption && error && typeof error === 'object' && !error.adoption) error.adoption = binding.adoption;
+    throw error;
+  }
 }
 
 function pathResolutionProfile(payload, principal) {
@@ -673,10 +686,12 @@ function main() {
         const tail = adoption.prunedPluginRoot
           ? 'This predicate is deliberately blind to lineage, so a DOWNGRADE reaches this state too, and there adoption refuses as executing-runtime-older and re-installing the newer version is the way back.'
           : 'If the recorded project root is ALSO gone — a deleted or recycled worktree — an adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created; /zensu:doctor names the path when that is the case.';
-        deny(`${cause} ${adoptionRefusalRemedy(reason)}. ${adoptionTail(reason)}; both stay reachable in this state. ${tail}`);
+          // ONE joiner, the shell scopes' own: `remedy; tail.` The tails start in lower
+        // case, so a full stop before them rendered a sentence starting mid-word.
+        deny(`${cause} ${adoptionRefusalRemedy(reason)}; ${adoptionTail(reason)}. Both stay reachable in this state. ${tail}`);
         return;
       }
-      deny(`${cause} The repair writes the immutable record and is reserved for the main thread, so it is not available here — report this to the main thread rather than retrying.`);
+      deny(`${cause} ${ADOPTION_CHILD_CLOSE}`);
       return;
     }
     // The FIFTH denier in the incompatible-runtime state, and it used to be the
@@ -716,7 +731,7 @@ function main() {
         deny(`${cause} Zensu adopts such a record automatically on the first hook contact; that did not bind this session, so run /zensu:adopt-session for the full report and /zensu:adopt-session --confirm to retry the adoption by hand; both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — an adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created; /zensu:doctor names the path when that is the case.`);
         return;
       }
-      deny(`${cause} The repair writes the immutable record and is reserved for the main thread, so it is not available here — report this to the main thread rather than retrying.`);
+      deny(`${cause} ${ADOPTION_CHILD_CLOSE}`);
       return;
     }
     // The other named state with the same in-place remedy, and the FIFTH denier
@@ -726,7 +741,18 @@ function main() {
     // the two is immaterial.
     const pruned = hookSession.resolvePrunedPluginRoot(payload);
     if (pruned) {
-      deny(`this session's Session Control record is intact, but the Zensu installation that minted it (version ${pruned.recorded}) has been removed from the plugin cache, so the running installation (${pruned.executing}) cannot re-verify the record. Zensu adopts such a record automatically on the first hook contact; that did not bind this session, so run /zensu:adopt-session for the full report and /zensu:adopt-session --confirm to retry the adoption by hand; both stay reachable in this state. The refusal names its own cause and remedy: this predicate is deliberately blind to lineage, so a DOWNGRADE reaches this state too, and there adoption refuses as executing-runtime-older and re-installing the newer version is the way back — a persisted shape that really did change is the case that needs a fresh Claude Code session.`);
+      // The same two decisions the lineage arm above makes, which this arm did not:
+      // the CAUSE is for everyone and goes through safeVersion — resolvePrunedPluginRoot
+      // bounds `recorded` but only requires `executing` to be a non-empty string — and
+      // the REMEDY, a command that writes the immutable record, is the main thread's
+      // alone. It handed `--confirm` to every principal, in the one arm reached when
+      // the adoption module itself could not be loaded.
+      const cause = `this session's Session Control record is intact, but the Zensu installation that minted it (version ${safeVersion(pruned.recorded)}) has been removed from the plugin cache, so the running installation (${safeVersion(pruned.executing)}) cannot re-verify the record.`;
+      if (principals.classifyPreToolPayload(payload) === principals.PRINCIPALS.MAIN) {
+        deny(`${cause} Zensu adopts such a record automatically on the first hook contact; that did not bind this session, so run /zensu:adopt-session for the full report and /zensu:adopt-session --confirm to retry the adoption by hand; both stay reachable in this state. The refusal names its own cause and remedy: this predicate is deliberately blind to lineage, so a DOWNGRADE reaches this state too, and there adoption refuses as executing-runtime-older and re-installing the newer version is the way back — a persisted shape that really did change is the case that needs a fresh Claude Code session.`);
+        return;
+      }
+      deny(`${cause} ${ADOPTION_CHILD_CLOSE}`);
       return;
     }
     // The SECOND named cause, and the second one with an in-place remedy. It sits
@@ -752,64 +778,81 @@ function main() {
   }
 
   const principal = principals.classifyPreToolPayload(payload);
-  judgePrincipal(payload, trusted, principal);
+  // stdout carries exactly ONE JSON object per run, and this is the one place
+  // that decides which: the judgement RETURNS its verdict instead of writing it,
+  // so "a deny is never followed by a notice" is the shape of this branch rather
+  // than a module-level flag every later output path would have to remember.
+  const violation = judgePrincipal(payload, trusted, principal);
+  if (violation !== null) {
+    deny(violation);
+    return;
+  }
   // Announce only an adoption THIS process performed: `trusted.adoption` is set by
   // the binder for the one invocation that won the records lock, so a concurrent
-  // sibling gate never repeats the line. Only on an ALLOW — a deny already wrote
-  // this run's one JSON object. Every principal gets the user-facing half; see
-  // announceAdoption for why the model half is the main thread's alone.
-  if (!decisionWritten && trusted.adoption) {
+  // sibling gate never repeats the line. Every principal gets the user-facing
+  // half; see announceAdoption for why the model half is the main thread's alone.
+  if (trusted.adoption) {
     announceAdoption(trusted.adoption, { model: principal === principals.PRINCIPALS.MAIN });
   }
 }
 
 // The per-principal capability judgement, after the bind and the workflow
-// revalidation have both passed. Writes at most one deny; an allow writes nothing.
+// revalidation have both passed. RETURNS the deny reason, or null for an allow —
+// it writes nothing itself, so the caller owns the run's single JSON object. The
+// branch order is unchanged.
 function judgePrincipal(payload, bound, principal) {
   let trusted = bound;
-  if (principal === principals.PRINCIPALS.MAIN) return;
+  if (principal === principals.PRINCIPALS.MAIN) return null;
   if (principal === principals.PRINCIPALS.EVIDENCE_WORKER) {
     try {
       const violation = evidenceLeases.toolViolation(payload, trusted);
-      if (violation) {
-        deny(violation.startsWith('evidence-worker-v1')
-          ? violation : `evidence-worker-v1 ${violation}`);
-      }
+      if (!violation) return null;
+      return violation.startsWith('evidence-worker-v1') ? violation : `evidence-worker-v1 ${violation}`;
     } catch (error) {
-      deny(`evidence-worker-v1 validation failed: ${error.message}`);
+      return `evidence-worker-v1 validation failed: ${error.message}`;
     }
-    return;
   }
   try {
     trusted = { ...trusted, toolCwd: canonicalDirectory(payload.cwd, 'PreToolUse cwd') };
   } catch (error) {
-    deny(unusableWorkingDirectoryReason(pathResolutionProfile(payload, principal), error));
-    return;
+    return unusableWorkingDirectoryReason(pathResolutionProfile(payload, principal), error);
   }
   if (principal === principals.PRINCIPALS.REVIEWER) {
     try {
-      const violation = readOnlyViolation(payload, trusted, 'reviewer-readonly-v1');
-      if (violation) deny(violation);
+      return readOnlyViolation(payload, trusted, 'reviewer-readonly-v1') || null;
     } catch (error) {
-      deny(`reviewer-readonly-v1 path validation failed: ${error.message}`);
+      return `reviewer-readonly-v1 path validation failed: ${error.message}`;
     }
-    return;
   }
   if (principals.PLM_TYPES.has(payload.agent_type)) {
     try {
-      const violation = readOnlyViolation(payload, trusted, 'zensu-plm-readonly-v1');
-      if (violation) deny(violation);
+      return readOnlyViolation(payload, trusted, 'zensu-plm-readonly-v1') || null;
     } catch (error) {
-      deny(`zensu-plm-readonly-v1 path validation failed: ${error.message}`);
+      return `zensu-plm-readonly-v1 path validation failed: ${error.message}`;
     }
-    return;
   }
   try {
-    const violation = neutralViolation(payload, trusted);
-    if (violation) deny(violation);
+    return neutralViolation(payload, trusted) || null;
   } catch (error) {
-    deny(`host-profile-v1 input validation failed: ${error.message}`);
+    return `host-profile-v1 input validation failed: ${error.message}`;
   }
 }
 
-main();
+// Running as a program is the ONLY production entry: pre-reviewer-capability-gate.sh
+// executes this file and nothing requires it. The export exists for the unit layer
+// alone. The token screen and the three token-dependent selectors were reachable
+// only through a whole gate drive, where no fixture can produce a hostile token, a
+// lock timeout or a fault inside the adoption — so each was held by a source regex
+// that a changed predicate BODY stayed green under. Requiring the file must not run
+// the gate, which reads stdin.
+if (require.main === module) main();
+
+module.exports = {
+  safeRefusal,
+  safeVersion,
+  adoptionAttempt,
+  adoptionRefusalRemedy,
+  adoptionTail,
+  ADOPTION_INCOMPLETE_REASONS,
+  ADOPTION_CHILD_CLOSE,
+};

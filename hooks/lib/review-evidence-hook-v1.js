@@ -21,6 +21,27 @@ function readPayload(expectedEvent) {
   return payload;
 }
 
+// Binds with the automatic adoption opted in, and DISCLOSES an adoption this
+// process performed. This hook binds IN PROCESS, never through the CLI binder, so
+// the binder's one operator line was never written for it: an adoption landing
+// here re-minted the record, kept a superseded copy and swept the lease store
+// without a line anywhere — and on SubagentStop no sibling adapter exists to speak
+// for it. Both halves are covered: a bind that returns carries the verdict on
+// `binding.adoption`, and a bind whose strict re-read then throws carries it on the
+// error, exactly as the CLI mode reads it.
+function bindAndDisclose(payload) {
+  let binding;
+  try {
+    binding = hookSession.resolveHookSession(payload, process.env, { autoAdopt: true });
+  } catch (error) {
+    const performed = hookSession.performedAdoption(error);
+    if (performed) hookSession.writeAdoptionOperatorLine(performed);
+    throw error;
+  }
+  if (binding.adoption) hookSession.writeAdoptionOperatorLine(binding.adoption);
+  return binding;
+}
+
 function start() {
   const payload = readPayload('SubagentStart');
   const kind = leases.kindForAgentType(payload.agent_type);
@@ -30,7 +51,7 @@ function start() {
   // adopting here it could bind-fail in the adoption window, mint no lease, and
   // leave the reviewer denied for the whole review. The records lock serializes
   // the two; the loser sees already-served and re-reads.
-  const binding = hookSession.resolveHookSession(payload, process.env, { autoAdopt: true });
+  const binding = bindAndDisclose(payload);
   leases.bindWorker(payload, binding);
   process.stdout.write(`${JSON.stringify({
     hookSpecificOutput: {
@@ -48,7 +69,7 @@ function stop() {
   // adopting here it could bind-fail in the adoption window, mint no lease, and
   // leave the reviewer denied for the whole review. The records lock serializes
   // the two; the loser sees already-served and re-reads.
-  const binding = hookSession.resolveHookSession(payload, process.env, { autoAdopt: true });
+  const binding = bindAndDisclose(payload);
   const outcome = leases.storeWorkerResult(payload, binding);
   if (outcome.action === 'block') {
     process.stdout.write(`${JSON.stringify({

@@ -9,7 +9,9 @@ const principals = require('./claude-principal-v1.js');
 // Top-level here is fine: this adapter is a hook entry point nothing requires,
 // so adapter -> auto-adopt -> sweep -> lease -> binder -> core is acyclic. The
 // binder itself must require the same module lazily — see its header.
-const autoAdopt = require('./session-auto-adopt-v1.js');
+const defaultAutoAdopt = require('./session-auto-adopt-v1.js');
+const autoAdopt = defaultAutoAdopt;
+const defaultCore = core;
 
 const MAX_PAYLOAD_BYTES = 1024 * 1024;
 const MAX_SESSION_SOURCE_LENGTH = 64;
@@ -181,11 +183,21 @@ function adoptionNotice(adoption, label) {
 //
 // An `already-served` verdict reached AFTER the strict serve failed means a
 // sibling hook on the same event adopted the record in the window between the
-// two reads — the resume hook and the evidence hook bind on these same events
-// through the CLI binder. That adoption is announced here too, so the user hears
-// about it whichever process won the lock: the announcement is a fact about the
-// session, not a prize for the winner.
-function serveOrAdopt(readerOptions, pluginRoot, pluginData, sessionId, label, noun) {
+// two reads. Two siblings bind on these events: the Autopilot resume hook, through
+// the CLI binder with its output discarded, and the review-evidence hook, IN
+// PROCESS through resolveHookSession — neither has a user channel of its own, so
+// that adoption is announced here. The bound is stated rather than implied: this
+// notice exists only when THIS process read the old record first. A sibling that
+// finished before the first serve below leaves a record that simply serves, the
+// first serve succeeds, and nothing here knows an adoption happened — so ordering
+// still decides whether the user hears about it from this hook, and /zensu:doctor's
+// adoption row is the surface that does not depend on it.
+//
+// `deps` is the unit seam: the substitution of the observed version is unreachable
+// from the upgrade suite, whose held lock makes every racer probe the old record.
+function serveOrAdopt(readerOptions, pluginRoot, pluginData, sessionId, label, noun, deps) {
+  const core = (deps && deps.core) || defaultCore;
+  const autoAdopt = (deps && deps.autoAdopt) || defaultAutoAdopt;
   const OUTCOMES = autoAdopt.AUTO_ADOPT_OUTCOMES;
   // The version this process READ before anyone adopted, kept for the sibling
   // case below. It is the only honest source for "updated FROM": once a sibling
@@ -203,7 +215,11 @@ function serveOrAdopt(readerOptions, pluginRoot, pluginData, sessionId, label, n
   try {
     return { context: serve(), adoption: null };
   } catch (error) {
-    const probed = autoAdopt.adoptForHook({
+    // The observed version travels ON THE REQUEST: an `already-served` verdict has
+    // no `recorded` of its own, and the module is the one place that may put the
+    // caller's observation on the verdict. This process used to patch the returned
+    // verdict instead.
+    const verdict = autoAdopt.adoptForHook({
       executingPluginRoot: pluginRoot,
       pluginData,
       recordsDir: readerOptions.recordsDir,
@@ -211,12 +227,8 @@ function serveOrAdopt(readerOptions, pluginRoot, pluginData, sessionId, label, n
       host: 'claude',
       environment: process.env,
       respectOptOut: true,
+      observedRecorded,
     });
-    // An `already-served` verdict carries no `recorded` of its own (see the module's
-    // renderer); this process supplies the version it observed, when it observed one.
-    const verdict = probed.outcome === OUTCOMES.ALREADY_SERVED && probed.recorded === null
-      ? { ...probed, recorded: observedRecorded }
-      : probed;
     if (verdict.outcome === OUTCOMES.ADOPTED || verdict.outcome === OUTCOMES.ALREADY_SERVED) {
       // Strict re-read: the adopted record must serve itself. A vanished
       // recorded project root re-throws here exactly as it always did — and
@@ -228,7 +240,7 @@ function serveOrAdopt(readerOptions, pluginRoot, pluginData, sessionId, label, n
         return { context: serve(), adoption: verdict };
       } catch (again) {
         if (verdict.outcome === OUTCOMES.ADOPTED) {
-          fail(`${label}: adopted the Session Control record (${autoAdopt.safeVersion(verdict.recorded)} -> ${autoAdopt.safeVersion(verdict.executing)}; previous record kept as ${typeof verdict.supersededFile === 'string' ? path.basename(verdict.supersededFile) : '(unknown)'}; provenance ${autoAdopt.safeProvenance(verdict.provenance)}; ${autoAdopt.leaseClause(verdict.leases)}), but the strict re-read still fails: ${again.message}`);
+          fail(`${label}: ${autoAdopt.operatorLine(verdict)} — but the strict re-read still fails: ${again.message}`);
         }
         throw again;
       }
@@ -442,9 +454,16 @@ function main() {
   process.stdout.write(`${JSON.stringify(hookOutput(payload.hook_event_name, emittedContext, adoptionText))}\n`);
 }
 
-try {
-  main();
-} catch (error) {
-  process.stderr.write(`${error.message}\n`);
-  process.exit(1);
+// Exports ABOVE the entry guard, so a module that requires this file never sees an
+// empty export object. `serveOrAdopt` is exported for its unit seam alone; the hook
+// wrapper launches this file as the entry module, where the guard below runs main.
+module.exports = { serveOrAdopt };
+
+if (require.main === module) {
+  try {
+    main();
+  } catch (error) {
+    process.stderr.write(`${error.message}\n`);
+    process.exit(1);
+  }
 }

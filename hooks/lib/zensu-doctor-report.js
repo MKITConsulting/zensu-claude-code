@@ -3313,13 +3313,17 @@ function parentheticalWriter() {
 // lineage row, the pruned row and the combined one. They used to spell it
 // separately, and the combined row was left on the manual-first wording ("to see
 // whether the running installation may take the record over") a release after the
-// bind began adopting on its own. Three things it has to get right, each of which
-// one of those spellings got wrong: reaching the row means the automatic adoption
-// already ran and did not bind the session; the read-only report does NOT print a
-// refusal for an opted-out record — it reports it as adoptable, because the
-// opt-out governs the automatic path only; and that case needs the user's yes
-// before --confirm, which the deny scopes say and a row that omitted it undid.
-var ADOPTION_ROW_REMEDY = 'Zensu adopts such a record automatically on the first hook contact, so reaching this row means that adoption was refused, opted out or did not complete; run /zensu:adopt-session — it prints the same refusal in full, or reports the record as adoptable when the automatic path was opted out (hooks.sessionAutoAdopt is false; ask the user before going further) — then /zensu:adopt-session --confirm to retry by hand';
+// bind began adopting on its own. Four things it has to get right, each of which
+// one spelling of it got wrong: reaching the row means the automatic adoption
+// already ran and did not bind the session; the read-only report prints a refusal
+// — or names the superseded record file an interrupted adoption left behind —
+// only for a record the adoption REFUSES; an ADOPTABLE answer there has TWO causes
+// and not one, the opt-out (which governs the automatic path only) and an adoption
+// that did not complete (a lock timeout, or a fault inside the adoption itself),
+// so reading it as the opt-out alone sends a user whose adoption timed out looking
+// for a config key nobody set; and the opt-out case needs the user's yes before
+// --confirm, which the deny scopes say and a row that omitted it undid.
+var ADOPTION_ROW_REMEDY = 'Zensu adopts such a record automatically on the first hook contact, so reaching this row means that adoption was refused, opted out or did not complete; run /zensu:adopt-session — it prints the same refusal in full and names a superseded record file when one blocks the adoption; when it reports the record as adoptable instead, the automatic path was either opted out (hooks.sessionAutoAdopt is false; ask the user before going further) or did not complete (a lock timeout, or a fault inside the adoption itself) — then /zensu:adopt-session --confirm to retry by hand';
 
 function bindingLine() {
   // One writer per CALL, so `stated` scopes to the row this invocation renders.
@@ -3351,8 +3355,9 @@ function bindingLine() {
     // row existed the state fell through to `unbound` above, whose line asserts
     // "no valid Session Control record": false, and it sends the user hunting for
     // a record sitting intact in plugin data. Naming both versions is what makes
-    // the cause checkable rather than a claim the user has to take on faith, and
-    // this is the only binding row whose remedy repairs the session in place.
+    // the cause checkable rather than a claim the user has to take on faith. It is
+    // one of THREE binding rows whose remedy repairs the session in place: the
+    // pruned row and the combined one below share ADOPTION_ROW_REMEDY with it.
     case 'incompatible-runtime':
       return line(BAD, 'binding: this session\'s Session Control record is intact, but the running Zensu installation declares an incompatible lineage'
         + versions()
@@ -3451,29 +3456,7 @@ function bindingLine() {
 // the same reason `BASELINE_STATES` does in the caller: nothing in the tree compares
 // this renderer's spelling against the core's, so a rename would SILENCE the row with
 // every check still green. An absent export is therefore a missing check, not a pass.
-function baselineRebuiltRow(core, projectRoot, key) {
-  var phase = (core && typeof core.BASELINE_HISTORY_PHASE === 'string' && core.BASELINE_HISTORY_PHASE)
-    ? core.BASELINE_HISTORY_PHASE
-    : '';
-  if (phase === '') {
-    line(WARN, 'state: this session\'s workflow document was not checked for rebuild '
-      + 'provenance — the Session Control core in ' + pluginDir() + ' exports no rebuild '
-      + 'phase token. That is a missing check, not an all-clear.');
-    return;
-  }
-  var state;
-  try {
-    state = core.readWorkflowState({ projectRoot: projectRoot, sessionId: key });
-  } catch (e) {
-    // The document classified PRESENT and still did not read back. The invalid-document
-    // row further down names the FILE; this one names the CHECK that did not run. The
-    // two findings are different and neither substitutes for the other, so both render.
-    line(WARN, 'state: this session\'s workflow document was not checked for rebuild '
-      + 'provenance — it did not read back (' + ((e && e.code) || 'unreadable')
-      + '). That is a missing check, not an all-clear.');
-    return;
-  }
-  var history = (state && Array.isArray(state.history)) ? state.history : [];
+function baselineRebuiltRow(history, phase) {
   var rebuilds = history.filter(function (entry) {
     return entry && entry.phase === phase;
   });
@@ -3490,6 +3473,104 @@ function baselineRebuiltRow(core, projectRoot, key) {
     + 'baseline reads "never active", so a review chain that was live when the document '
     + 'vanished is gone and the Stop guard releases this session without asking for a '
     + 'reviewer. Re-arm with /zensu:tdd if that work still needs one.');
+}
+
+// The RUNTIME_ADOPTED provenance row, and the surface other carriers had already
+// promised: the adoption notice points the user at /zensu:doctor, and until this
+// row nothing here rendered an adoption at all — so the one durable record of a
+// repair the user never confirmed had no reader. Same rules as the rebuild row:
+// PRESENT arm only, the phase token from the LOADED core, silence when no entry
+// exists.
+//
+// OK and not WARN, deliberately. An adoption is a repair that SUCCEEDED — the
+// session binds again and no workflow state was lost — so a row that withheld the
+// green summary for the rest of every updated session would be trained away, the
+// failure this file records for the implementing-turns row. The rebuild row is
+// WARN because a rebuild IS a loss.
+//
+// The reason is PARSED, never echoed. It comes out of a document the session can
+// write, this report is relayed by a model, and the only thing the row needs from
+// it is a version pair — so anything that is not the core's own prefix plus two
+// versions of the safe shape renders as unrecorded rather than verbatim.
+//
+// ONE bound travels with it and the row states it rather than implying coverage:
+// an adoption made while no workflow document existed wrote no entry, so it can
+// never appear here, and neither can one whose provenance write failed.
+function runtimeAdoptedRow(core, history, phase, key) {
+  var adoptions = history.filter(function (entry) {
+    return entry && entry.phase === phase;
+  });
+  if (!adoptions.length) return;
+  var last = adoptions[adoptions.length - 1];
+  var when = (last && typeof last.ts === 'string' && last.ts) ? last.ts : 'an unrecorded time';
+  var prefix = typeof core.ADOPTION_HISTORY_REASON_PREFIX === 'string' ? core.ADOPTION_HISTORY_REASON_PREFIX : '';
+  var shape = core.ADOPTION_SAFE_VERSION_RE instanceof RegExp ? core.ADOPTION_SAFE_VERSION_RE : null;
+  var reason = (last && typeof last.reason === 'string') ? last.reason : '';
+  var from = '';
+  var to = '';
+  if (prefix !== '' && shape !== null && reason.indexOf(prefix) === 0) {
+    var pair = reason.slice(prefix.length).split(' -> ');
+    if (pair.length === 2 && shape.test(pair[0]) && shape.test(pair[1])) {
+      from = pair[0];
+      to = pair[1];
+    }
+  }
+  var span = from !== '' ? ' (' + from + ' -> ' + to + ')' : ' (the version pair is not recorded in a readable form)';
+  // The NAME comes from the core that writes it, never from a suffix spelled here.
+  var kept = '';
+  if (from !== '' && typeof core.supersededRecordFile === 'function') {
+    try { kept = path.basename(core.supersededRecordFile('', key, from)); } catch (e) { kept = ''; }
+  }
+  line(OK, 'state: this session\'s Session Control record was ADOPTED across a plugin update — '
+    + adoptions.length + (adoptions.length === 1 ? ' entry' : ' entries')
+    + ', most recently at ' + when + span + '. The session binds again and no workflow state was lost'
+    + (kept !== '' ? '; the previous record was kept beside the new one as ' + kept : '')
+    + '; any review-evidence lease minted before the update was set aside, so a review that was '
+    + 'in flight then has to be re-gathered. An adoption made while no workflow document existed '
+    + 'wrote no entry and cannot appear here — the kept record is then its only evidence.');
+}
+
+function provenancePhase(core, name) {
+  return (core && typeof core[name] === 'string' && core[name]) ? core[name] : '';
+}
+
+// The provenance rows of a PRESENT own document. ONE read serves both: giving the
+// adoption row a read of its own would have reported one unreadable document
+// twice, under two check names. A read that fails is therefore stated ONCE, naming
+// every check it cost, while an absent phase token stays per row — a core that
+// exports one token and not the other ran one check and skipped the other.
+function ownProvenanceRows(core, projectRoot, key) {
+  var rebuildPhase = provenancePhase(core, 'BASELINE_HISTORY_PHASE');
+  var adoptionPhase = provenancePhase(core, 'ADOPTION_HISTORY_PHASE');
+  if (rebuildPhase === '') {
+    line(WARN, 'state: this session\'s workflow document was not checked for rebuild '
+      + 'provenance — the Session Control core in ' + pluginDir() + ' exports no rebuild '
+      + 'phase token. That is a missing check, not an all-clear.');
+  }
+  if (adoptionPhase === '') {
+    line(WARN, 'state: this session\'s workflow document was not checked for adoption '
+      + 'provenance — the Session Control core in ' + pluginDir() + ' exports no adoption '
+      + 'phase token. That is a missing check, not an all-clear.');
+  }
+  if (rebuildPhase === '' && adoptionPhase === '') return;
+  var state;
+  try {
+    state = core.readWorkflowState({ projectRoot: projectRoot, sessionId: key });
+  } catch (e) {
+    // The document classified PRESENT and still did not read back. The invalid-document
+    // row further down names the FILE; this one names the CHECKS that did not run. The
+    // two findings are different and neither substitutes for the other, so both render.
+    var unread = [];
+    if (rebuildPhase !== '') unread.push('rebuild');
+    if (adoptionPhase !== '') unread.push('adoption');
+    line(WARN, 'state: this session\'s workflow document was not checked for ' + unread.join(' or ')
+      + ' provenance — it did not read back (' + ((e && e.code) || 'unreadable')
+      + '). That is a missing check, not an all-clear.');
+    return;
+  }
+  var history = (state && Array.isArray(state.history)) ? state.history : [];
+  if (rebuildPhase !== '') baselineRebuiltRow(history, rebuildPhase);
+  if (adoptionPhase !== '') runtimeAdoptedRow(core, history, adoptionPhase, key);
 }
 
 function stateBlock(nowMs) {
@@ -3567,7 +3648,8 @@ function stateBlock(nowMs) {
     if (ownIs('PRESENT')) {
       // PRESENT is not "nothing to say": a document that was REBUILT is present and
       // healthy-looking, and its provenance is the one thing this block never rendered.
-      baselineRebuiltRow(ownCore, projectRoot, ownKey);
+      // An ADOPTED record is the second provenance of the same document.
+      ownProvenanceRows(ownCore, projectRoot, ownKey);
       return;
     }
     if (ownIs('UNSAFE') || ownIs('UNREADABLE')) {
