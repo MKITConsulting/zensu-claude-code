@@ -391,7 +391,16 @@ else check "R6a  the doctor row names the remedy" FAIL; fi
 # either sed anchor and the slice comes back empty, the grep finds nothing, and the
 # row reports PASS over a check that graded no bytes at all. The slice is non-empty
 # today — that is what makes an unguarded version look correct.
-r6_consent_rows() { sed -n '/orphaned-project-root/,/^  }$/p' "$1" | sed -e 's|^[[:space:]]*//.*$||'; }
+# ANCHORED on the case LABEL, not on the bare scope name. `orphaned-project-root`
+# occurs in this renderer's header comment thousands of lines above the row, so the
+# unanchored form started there and took 402 lines — the whole binder-mode region
+# rather than the one row this check names. It was non-empty, so the emptiness arm
+# below never fired and the window it actually graded was never what the label said.
+r6_consent_rows() {
+  awk "/case 'orphaned-project-root':/ { on = 1 }
+       on && NR > start && /^    case '/ && !/orphaned-project-root':/ { exit }
+       on { if (!start) start = NR; print }" "$1" | sed -e 's|^[[:space:]]*//.*$||'
+}
 r6_consent_verdict() {
   local rows
   rows="$(r6_consent_rows "$1")"
@@ -399,6 +408,12 @@ r6_consent_verdict() {
   if printf '%s' "$rows" | grep -qF -- '--restore-root --confirm'; then printf 'FAIL'; return; fi
   printf 'PASS'
 }
+# ...and the slice must be the ROW, not a region that merely contains it. A bound is
+# what separates "anchored" from "non-empty": the unanchored form was 402 lines.
+R6_ROWS_LINES="$(r6_consent_rows "$REPORT_JS" | wc -l | tr -d ' ')"
+if [ "${R6_ROWS_LINES:-0}" -gt 0 ] && [ "${R6_ROWS_LINES:-0}" -le 60 ]; then
+  check "R6a3 the doctor-row slice is the row, not the region around it ($R6_ROWS_LINES lines)" PASS
+else check "R6a3 the doctor-row slice is the row, not the region around it ($R6_ROWS_LINES lines)" FAIL; fi
 R6_VERDICT="$(r6_consent_verdict "$REPORT_JS")"
 case "$R6_VERDICT" in
   (PASS) check "R6a2 the doctor row quotes no complete consent invocation" PASS ;;
