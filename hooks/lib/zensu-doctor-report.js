@@ -1751,9 +1751,15 @@ function forgesReportRow(value) {
 // The reader re-enforces the ONE invariant of its producer that has a consequence
 // here, which is the rule `currentSessionKey` states one function up: a caller
 // supplying `ZDOC_BINDING` skips the wrapper's whole resolution block, so a guard
-// that lives only there is not a guard. `dir` is printed RAW in three rows, so a
-// newline in the recorded root injects fabricated lines into a report the model
-// reads back and summarizes.
+// that lives only there is not a guard. This screen is the LAST bound on the recorded
+// root that is not a fold: it rejects control bytes, so a newline cannot inject
+// fabricated lines into a report the model reads back — and it rejects NOTHING else,
+// so every positional rule (`PAIR_SEPARATOR`, `DOUBLE_SPACE`, `INVISIBLE`,
+// `ORPHAN_MARK`, `SEPARATOR_ADJACENT_MODIFIER_LETTER`) survives it. Do NOT restate
+// this as a census of raw rows: one was written that way, it named `stateBlock`'s three,
+// and it went stale the moment those three were folded while six in `autopilotRows`
+// were not. Every consumer of this value now folds it; before adding a seventh, grep
+// `+ dir` and `path.join(dir` in this file rather than trusting a number here.
 //
 // Deliberately NOT re-checked here: that the root is an existing directory. The
 // wrapper refuses a non-directory, and adding the same test to this side would make
@@ -3090,7 +3096,7 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
       // rendering the opened name is what makes that true rather than argued.
       text: 'autopilot: nonterminal durable run ' + run.runId + ' at stage ' + run.stage
         + ', ' + ownership + ' — it ' + held + ', so no second Autopilot run and no standalone'
-        + ' /zensu:tdd chain may arm there.' + occupancy + ' Tracked in ' + path.join(dir, c.name)
+        + ' /zensu:tdd chain may arm there.' + occupancy + ' Tracked in ' + foldPath(path.join(dir, c.name), ', with the active pointer')
         + ', with the active pointer named for sha256 of the OWNING SESSION id, never of the'
         + ' project path. ' + silence + '. Only DONE and CANCELLED are terminal — BLOCKED is'
         + ' not — and ' + remedy + '.'
@@ -3121,7 +3127,7 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
           + ' scan is bounded at ' + AUTOPILOT_SCAN_MAX + ' — so this block is NOT a complete'
           + ' account of what holds this project'
         : '')
-      + ' — inspect ' + dir + ' directly.');
+      + ' — inspect ' + foldPath(dir, ' directly.') + ' directly.');
   }
   if (unreadable.length) {
     // Why these names are bounded at all, and by what, is stated at
@@ -3136,11 +3142,11 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
       + ' (unparseable, a shape this report does not accept, or a run id that disagrees with the'
       + ' filename) — this is NOT the same as no run: such a record still holds its working tree,'
       + ' and /zensu:autopilot-release needs a run id it cannot supply.'
-      + (safe.length ? ' Inspect ' + truncatedList(safe) + ' in ' + dir + '.' : '')
+      + (safe.length ? ' Inspect ' + truncatedList(safe) + ' in ' + foldPath(dir, '.') + '.' : '')
       + (withheld ? ' ' + withheld + ' further name(s) are withheld because this report could'
         + ' not establish the name is safe to echo — a stem the Autopilot writer could not'
         + ' have minted, a character this report will not echo, or a display-safety rule that'
-        + ' could not be applied; list ' + dir + ' directly.' : ''));
+        + ' could not be applied; list ' + foldPath(dir, ' directly.') + ' directly.' : ''));
   }
   // The row above may not carry these: it asserts the record "still holds its working
   // tree", and a DONE or CANCELLED one does not. That was the whole reason for the
@@ -3162,11 +3168,11 @@ function autopilotRows(entries, dir, nowMs, ownKey, projectRoot) {
       + ' holds no working tree, but `--autopilot-begin` and the workspace-occupancy check'
       + ' validate every document in this directory without owner scoping, so this one can'
       + ' still fail those closed for this project.'
-      + (termSafe.length ? ' Inspect ' + truncatedList(termSafe) + ' in ' + dir + '.' : '')
+      + (termSafe.length ? ' Inspect ' + truncatedList(termSafe) + ' in ' + foldPath(dir, '.') + '.' : '')
       + (termWithheld ? ' ' + termWithheld + ' further name(s) are withheld because this report'
         + ' could not establish the name is safe to echo — a stem the Autopilot writer could'
         + ' not have minted, a character this report will not echo, or a display-safety rule'
-        + ' that could not be applied; list ' + dir + ' directly.' : ''));
+        + ' that could not be applied; list ' + foldPath(dir, ' directly.') + ' directly.' : ''));
   }
 }
 
@@ -3224,6 +3230,63 @@ var FOLD_UNAVAILABLE = 'not rendered — the display-safety module could not be 
 // load-failure text for it would send an operator to repair an installation that is
 // fine — the same wrong-report class this file records about its own earlier rows.
 var FOLD_UNDELIMITABLE = 'not rendered — the recorded value carries a parenthesis this row cannot delimit';
+
+// The BRACKET twin, named for its OWN delimiter rather than borrowing the sibling's.
+// The two provenance rows wrap their slots in `[...]`, so the character that ends the
+// note there is `]`, and an operator told "a parenthesis" would look for the wrong
+// one. Same reason the load-failure sentence above is not reused for a delimiter
+// refusal: a sentence that names the wrong cause sends the reader to the wrong repair.
+var FOLD_UNDELIMITABLE_BRACKET = 'not rendered — the recorded value carries a bracket this row cannot delimit';
+
+// The provenance cap and its marker. A NEW constant rather than `AUTOPILOT_RENDER_MAX`:
+// that one is hand-copied into shell (the exit-6 release refusal spells its value a
+// second time), so binding this bound to it would make a change here reach a command
+// this file does not own. The marker carries no `]` and exactly ONE space — a second
+// space would trip the double-space rule on every elided render, folding the value
+// precisely when it is being disclosed.
+var PROVENANCE_RENDER_MAX = 200;
+var PROVENANCE_ELISION = '\u2026 (elided)';
+
+// What a suppressed slot says. Plugin-authored on purpose: the alternative is the empty
+// string, which the callers' ternaries read as "nothing was recorded".
+var PROVENANCE_TIME_SUPPRESSED = 'a recorded but unrenderable time';
+var PROVENANCE_REASON_SUPPRESSED = ', for a recorded but unrenderable reason';
+
+// The two POSITIONAL rules, asked about a join `foldSlot` never sees. All four rules in
+// that module are positional, not two — the reason only these two are asked here is
+// narrower and worth stating exactly, because the obvious wording is wrong:
+// `ORPHAN_MARK` and `SEPARATOR_ADJACENT_MODIFIER_LETTER` each carry a `^` alternative,
+// and `safeDisplayValue` tests them against `tail + followedBy`, so a tail BEGINNING
+// with a mark or a modifier letter is already caught in the leaf. That is a dependency
+// on a module this one does not own: it holds only while both reserved prefixes end in
+// a space, and the day one stops, this seam needs those two rules as well. The rules are
+// IMPORTED, never re-spelled — same reason `forgesReportRow` above imports them. A load
+// failure answers TRUE, which routes the value into the unexempted re-fold: folding more
+// is always available, rendering an unjudged seam is what this exists to prevent. That
+// arm is UNREACHABLE from the only caller, which reaches this function solely after
+// `foldSlot` returned `ok` and therefore after the same module loaded; it is kept as the
+// fail-safe direction for a second caller, not as a route the tree can take today.
+//
+// THE WINDOW is two characters and that is not an optimisation — it is what keeps the
+// test from firing on the prefix's OWN colon-space. Both rules are exactly two
+// characters wide (`/ {2}/` and `/ :|: /`) — a premise held by nothing until `H5` in
+// test-doctor.sh pinned it, and `SPACE_RUN = / {2,}/` sits in the same module one
+// copy-paste away, so a widening there would make a spanning forgery invisible to this
+// window. Because both rules are that wide, a match that spans the join must occupy
+// the last character of the head and the first of the tail; a match lying wholly inside
+// either half is that half's own business and the fold already judged the tail. Testing
+// the ASSEMBLED string instead reports every honest `project-root-restored: …` as a
+// forgery and escapes the plugin's own spelling on every legitimate render.
+function provenanceJunctionForges(head, tail) {
+  if (head === '' || tail === '') return false;
+  try {
+    var rules = require('./zensu-safe-display-v1.js');
+    var seam = head.charAt(head.length - 1) + tail.charAt(0);
+    return rules.PAIR_SEPARATOR.test(seam) || rules.DOUBLE_SPACE.test(seam);
+  } catch (e) {
+    return true;
+  }
+}
 
 // One slot, folded ONCE. The three fields are separate: `present` is about the input
 // (an empty value has never produced a parenthetical), `ok` is about the fold. Keeping
@@ -3284,6 +3347,35 @@ function foldPath(value, followedBy) {
   return slot.ok ? slot.text : '(' + FOLD_UNAVAILABLE + ')';
 }
 
+// The same fold for a path the row WRAPS in parentheses rather than embedding in prose.
+// `foldPath` cannot serve these: it returns a PRE-parenthesized sentence on a load
+// failure, so a call site supplying its own `(...)` renders `((not rendered — …))` —
+// the double-wrapping defect this file already records for `foldSlot`, in the one
+// direction `foldPath`'s own contract makes easy to reach. It owns the `)` bound for
+// the same reason `parentheticalWriter` owns its own: the renderer that WRAPS is the one
+// that can tell whether the value closes the delimiter early. `provenanceSlot` is the
+// ONE exception and must not be cited as an example here — it is the PRODUCER, and
+// `provenanceRendering` is what writes the brackets. That asymmetry is inert, because
+// the wrapper only brackets a slot whose `bracket` flag is false, but the principle is
+// stated falsely if this comment claims it.
+//
+// EVERY renderer that WRAPS a folded value owns the bound for its own delimiter. That
+// is the criterion; there is deliberately NO count here and none in CLAUDE.md either,
+// because the two carriers held different numerals ("THREE writers" against "FOUR
+// renderers") and a clause both shared — "three delimiter pairs" — was false in both.
+// Before relying on membership, grep `FOLD_UNDELIMITABLE` and `indexOf(']')` in this
+// file. Collapsing the wrappers into one parameterised writer was reported by a panel
+// and deliberately NOT taken: it touches `parentheticalWriter`'s row-scoped `stated`
+// flag, which two suites pin. Named here so the next round starts from the decision
+// rather than from the diff.
+function parenthesizedPath(value, followedBy) {
+  var slot = foldSlot(value, followedBy);
+  if (!slot.present) return '';
+  if (!slot.ok) return '(' + FOLD_UNAVAILABLE + ')';
+  if (String(slot.text).indexOf(')') !== -1) return '(' + FOLD_UNDELIMITABLE + ')';
+  return '(' + slot.text + ')';
+}
+
 // A parenthetical is stated ONCE PER ROW, not once per slot. Under a missing fold
 // module the two-version row rendered
 //   (record minted by <sentence>, executing <sentence>)
@@ -3333,6 +3425,11 @@ function parentheticalWriter() {
   };
 }
 
+// The Session Control binding rows, and the reason this function exists at all rather
+// than a plain string per verdict: several of those rows carry MORE THAN ONE folded
+// slot, and a fold failure is stated once per ROW. It is the family's first consumer of
+// `parentheticalWriter`, so it is where the row-scoped `stated` flag is created and
+// where the widened P6s15 window now begins to reach.
 function bindingLine() {
   // One writer per CALL, so `stated` scopes to the row this invocation renders.
   var paren = parentheticalWriter();
@@ -3454,6 +3551,164 @@ function bindingLine() {
   }
 }
 
+// The BRACKET twin of parentheticalWriter's delimiter bound, for the two provenance
+// rows below. TWO halves, and neither closes the finding alone.
+//
+// (a) THE FOLD. Both rows used safeVerifyReason, which is the ZDOC_VERIFY_REASON
+// bound: it strips C0/C1, U+2028/9 and the three severity glyphs and caps at 200. It
+// is NOT this file's display rule. safeDisplayValue additionally refuses the invisible
+// class, the `label : value` pair forgery and an orphan combining mark, and it is what
+// every other relayed row in this report goes through. A history `reason` is the ONE
+// field validateWorkflowExtensions leaves unbounded — it tests
+// `typeof entry.reason !== 'string'` where `step` and `phase` go through
+// validateWorkflowString — and `.zensu/state/` is writable from inside the session,
+// so the weaker bound was the wrong one for the stronger threat.
+//
+// (b) THE DELIMITER, and it is why a fold swap alone would not have closed this. `]`
+// survives BOTH folds: SAFE_DISPLAY's class omits the brackets entirely, so
+// safeDisplayValue neither admits nor escapes one, and the escaping branch's
+// JSON.stringify leaves it alone. A reason spelled `x]. Note. …` therefore closes the
+// note and renders its remainder as free prose inside a row skills/doctor/SKILL.md
+// tells the model to relay. Widening SAFE_DISPLAY is not the fix, for the reason
+// parentheticalWriter states one delimiter over: other consumers render the same class
+// in PROSE, where a bracket closes nothing. The bound belongs to the renderer that
+// WRAPS, which is this one.
+//
+// Both provenance slots go through it, not only the reason: `ts` is Date.parse-
+// validated rather than shape-checked, which is tolerant enough to carry a sentence,
+// and an undelimited slot in prose is exactly the forgery position the wrapped one is
+// bounded against. An ABSENT slot renders the caller's own plugin-authored phrase and
+// is never bracketed — there is nothing recorded to delimit.
+//
+// THE RESERVED PREFIX is the one part of the value that is NOT folded, and it is what
+// keeps the strong fold from making every honest row unreadable. The owner writes each
+// reason as `<RESERVED_PREFIX><detail>` — `project-root-restored: 2 component(s)` —
+// and that prefix carries `: `, which is exactly the PAIR_SEPARATOR shape
+// safeDisplayValue escapes. Folding the whole string therefore escaped the plugin's own
+// spelling on every legitimate render. The prefix is passed in from the CORE's exported
+// constant, never taken from the entry: the entry can only MATCH it, so a forged reason
+// spelled with the prefix gains a fixed literal head and still has its tail folded. The
+// head is delimiter-checked too, because a constant is not a guarantee.
+//
+// THE CAP is this writer's, not the row's, and not the fold's. `safeVerifyReason` —
+// the bound this path replaced — ended `.slice(0, 200)`; nothing downstream truncates,
+// `validateWorkflowExtensions` accepts `entry.reason` on `typeof` alone, and the
+// escaping branch amplifies, so without a cap here one session-writable field can put
+// a megabyte of attacker-authored prose into a WARN row immediately before that row's
+// own remedy. It is applied to the RAW tail: at the row it would cut after the closing
+// delimiter was appended, and after the fold it would cut an escape sequence in half.
+// The marker is passed as `followedBy` AND concatenated, so the positional rules judge
+// the join they will actually render.
+//
+// THE JUNCTION is judged too, which the `followedBy` argument cannot do: `foldSlot`
+// sees the TAIL, so the only join it evaluates is `tail + delimiter` and never
+// `head + tail`. Both reserved prefixes end in a colon and a space — exactly the two
+// shapes `safeDisplayValue` escapes — so a tail opening with a colon or a space forges
+// at the seam the exemption creates. On a hit the whole capped value is re-folded with
+// NO prefix exemption: the honest prefix then renders escaped, which is the fold-more
+// direction and the only one available once the value has proven it forges.
+//
+// It returns a RECORD rather than a string because the ROW, not the slot, decides what
+// a suppression says — see `provenanceRendering` below.
+function provenanceSlot(value, reservedPrefix) {
+  var raw = String(value == null ? '' : value);
+  if (raw === '') return { text: '', present: false, ok: true, bracket: false };
+  var head = '';
+  var tail = raw;
+  if (typeof reservedPrefix === 'string' && reservedPrefix !== ''
+      && raw.slice(0, reservedPrefix.length) === reservedPrefix) {
+    head = reservedPrefix;
+    tail = raw.slice(reservedPrefix.length);
+  }
+  var marker = '';
+  if (tail.length > PROVENANCE_RENDER_MAX) {
+    tail = tail.slice(0, PROVENANCE_RENDER_MAX);
+    marker = PROVENANCE_ELISION;
+  }
+  if (head.indexOf(']') !== -1) return { text: '', present: true, ok: true, bracket: true };
+  if (tail === '') return { text: head, present: true, ok: true, bracket: false };
+  var next = marker === '' ? ']' : marker;
+  var folded = foldSlot(tail, next);
+  if (!folded.ok) return { text: '', present: true, ok: false, bracket: false };
+  var assembled = head + folded.text + marker;
+  if (provenanceJunctionForges(head, folded.text)) {
+    var whole = foldSlot(head + tail, next);
+    if (!whole.ok) return { text: '', present: true, ok: false, bracket: false };
+    assembled = whole.text + marker;
+  }
+  if (assembled.indexOf(']') !== -1) return { text: '', present: true, ok: true, bracket: true };
+  return { text: assembled, present: true, ok: true, bracket: false };
+}
+
+// The ROW's decision, taken once for both slots. Two properties are load-bearing and
+// each was a defect before it was a rule. The suppression sentence is stated ONCE per
+// row — CLAUDE.md states that verbatim and lists "states the reason per slot" among the
+// defects a port gets back — because two rows of two slots each emit it four times in
+// one report, which repeats the cause and buries the fact that BOTH values are missing.
+// And a suppressed slot renders a PLUGIN-AUTHORED phrase rather than the empty string:
+// empty makes the caller's ternary say "an unrecorded time" about a timestamp that was
+// recorded, which is a positive claim about a value this renderer is refusing to show.
+// Why ONE slot could not be rendered, or `''` when it was. The two causes are not
+// interchangeable and the distinction is the whole reason FOLD_UNDELIMITABLE_BRACKET
+// exists: a fold failure is a shared `require` and sends the reader to repair an
+// installation, while a bracket refusal is the value's own and sends them nowhere. A
+// row carrying one of each must not report only the first.
+function provenanceCause(slot) {
+  if (!slot.present) return '';
+  if (!slot.ok) return FOLD_UNAVAILABLE;
+  if (slot.bracket) return FOLD_UNDELIMITABLE_BRACKET;
+  return '';
+}
+
+// One note per ROW, naming the slots that actually failed. Reaching a single plural
+// sentence from `stamp.bracket || reason.bracket` and then rendering the surviving slot
+// in full told the reader that a value printed three clauses earlier was not printed —
+// and the mixed case is the reachable one rather than a corner, because `ts` is an ISO
+// stamp this repair writes itself while `reason` is the session-writable field the
+// bracket refusal was written for. The plural form survives for the case it is true of:
+// both slots withheld for the same cause, which is what a missing display module
+// produces and what H1c/H1c2 pin as exactly one emission.
+function provenanceRendering(stamp, reason) {
+  var stampCause = provenanceCause(stamp);
+  var reasonCause = provenanceCause(reason);
+  var note = '';
+  if (stampCause !== '' && reasonCause !== '') {
+    note = stampCause === reasonCause
+      ? ' The recorded values above are ' + stampCause + '.'
+      : ' The recorded time above is ' + stampCause
+        + ', and the recorded reason above is ' + reasonCause + '.';
+  } else if (stampCause !== '') {
+    note = ' The recorded time above is ' + stampCause + '.';
+  } else if (reasonCause !== '') {
+    note = ' The recorded reason above is ' + reasonCause + '.';
+  }
+  var when = 'an unrecorded time';
+  if (stamp.present) {
+    when = stampCause === '' ? '[' + stamp.text + ']' : PROVENANCE_TIME_SUPPRESSED;
+  }
+  var why = '';
+  if (reason.present) {
+    why = reasonCause === ''
+      ? ' [' + reason.text + ']'
+      : PROVENANCE_REASON_SUPPRESSED;
+  }
+  return { when: when, why: why, note: note };
+}
+
+// ONE read of this session's workflow document for both provenance rows. A caller
+// that already has the result passes it in; anything else takes the read here. The
+// result is a RECORD rather than a bare document, because "it did not read back" is a
+// verdict both rows have to render and a thrown error cannot be shared between two
+// separate `try` blocks without taking the read twice.
+function sharedWorkflowRead(core, projectRoot, key, shared) {
+  if (shared && typeof shared === 'object') return shared;
+  try {
+    return { state: core.readWorkflowState({ projectRoot: projectRoot, sessionId: key }), error: null, code: '' };
+  } catch (e) {
+    return { state: null, error: e || new Error('unreadable'), code: (e && e.code) || 'unreadable' };
+  }
+}
+
 // The BASELINE_REBUILT provenance row. Both writers — the confirmed repair and the
 // SessionStart self-heal — append that entry under a reserved phase `--phase` refuses
 // to mint, and three guard readers consult it, so the provenance was RESERVED. What
@@ -3471,36 +3726,28 @@ function bindingLine() {
 // the same reason `BASELINE_STATES` does in the caller: nothing in the tree compares
 // this renderer's spelling against the core's, so a rename would SILENCE the row with
 // every check still green. An absent export is therefore a missing check, not a pass.
-// ONE read of this session's workflow document for both provenance rows. A caller
-// that already has the result passes it in; anything else takes the read here. The
-// result is a RECORD rather than a bare document, because "it did not read back" is a
-// verdict both rows have to render and a thrown error cannot be shared between two
-// separate `try` blocks without taking the read twice.
-function sharedWorkflowRead(core, projectRoot, key, shared) {
-  if (shared && typeof shared === 'object') return shared;
-  try {
-    return { state: core.readWorkflowState({ projectRoot: projectRoot, sessionId: key }), error: null, code: '' };
-  } catch (e) {
-    return { state: null, error: e || new Error('unreadable'), code: (e && e.code) || 'unreadable' };
-  }
-}
-
 function baselineRebuiltRow(core, projectRoot, key, sharedRead) {
   var phase = (core && typeof core.BASELINE_HISTORY_PHASE === 'string' && core.BASELINE_HISTORY_PHASE)
     ? core.BASELINE_HISTORY_PHASE
     : '';
   if (phase === '') {
     line(WARN, 'state: this session\'s workflow document was not checked for rebuild '
-      + 'provenance — the Session Control core in ' + pluginDir() + ' exports no rebuild '
+      + 'provenance — the Session Control core in ' + foldPath(pluginDir(), ' exports no rebuild ')
+      + ' exports no rebuild '
       + 'phase token. That is a missing check, not an all-clear.');
     return;
   }
   // The read is SHARED with the sibling restore row through `read`, and is taken once
   // by the PRESENT arm that calls both. They asked the same document the same question
-  // in two separate `try` blocks, so one report opened it twice, one unreadable
-  // document produced two near-identical WARN rows from a single cause, and the two
-  // answers could disagree about the same file. The parameter is optional so a caller
-  // that has no shared read still works; the shipped call site always passes one.
+  // in two separate `try` blocks, so one report opened it twice and the two answers
+  // could disagree about the same file. TWO consequences removed, and the third one is
+  // NOT: an unreadable document still produces a near-identical WARN from EACH row, and
+  // both still count toward `warnCount`. That is deliberate — each row names the check
+  // that did not run, and a reader told only "the rebuild check did not run" would take
+  // the restore check for having run — but it is a cost rather than a fix, and listing
+  // it among the things the shared read removes was the over-claim this wording
+  // replaces. The parameter is optional so a caller that has no shared read still
+  // works; the shipped call site always passes one.
   var read = sharedWorkflowRead(core, projectRoot, key, sharedRead);
   if (read.error) {
     // The document classified PRESENT and still did not read back. The invalid-document
@@ -3521,25 +3768,26 @@ function baselineRebuiltRow(core, projectRoot, key, sharedRead) {
   // the noise this repository trains readers to ignore.
   if (!rebuilds.length) return;
   var last = rebuilds[rebuilds.length - 1];
-  // FOLDED, both slots, for the reason safeVerifyReason exists at all. `reason` is the
-  // ONE history field validateWorkflowExtensions leaves unbounded — it tests
-  // `typeof entry.reason !== 'string'` where `step` and `phase` go through
-  // validateWorkflowString and its control-character screen — and `.zensu/state/` is
-  // writable from inside the session while skills/doctor/SKILL.md tells the model to
-  // print this report verbatim. `ts` is Date.parse-validated rather than shape-checked,
-  // which is tolerant, so it is folded on the same terms rather than trusted. The
-  // SIBLING row below carries the identical slots and takes the identical fold in the
-  // same edit: nothing in the tree compares the two, so a one-sided fix would leave the
-  // class half closed. P6s7/P6s8 drive both and P6s7-control keeps the fold from
-  // swallowing an ordinary reason.
-  var when = (last && typeof last.ts === 'string' && last.ts) ? safeVerifyReason(last.ts) : 'an unrecorded time';
-  var why = (last && typeof last.reason === 'string' && last.reason) ? ' [' + safeVerifyReason(last.reason) + ']' : '';
+  // BOTH slots go through `provenanceSlot`, which owns the fold, the cap and the
+  // delimiter, and `provenanceRendering` owns what the ROW says when one is suppressed
+  // — read its header for why neither half closes this alone. The SIBLING row below
+  // carries the identical slots and calls the identical writer: nothing in the tree
+  // compares the two, so a one-sided fix would leave the class half closed. P6s7/P6s8
+  // drive the fold on both, P6s11/P6s12 drive the delimiter, and P6s7-control keeps
+  // the fold from swallowing an ordinary reason.
+  var stamp = provenanceSlot((last && typeof last.ts === 'string') ? last.ts : '', '');
+  var reason = provenanceSlot(
+    (last && typeof last.reason === 'string') ? last.reason : '',
+    (core && typeof core.BASELINE_HISTORY_REASON_PREFIX === 'string') ? core.BASELINE_HISTORY_REASON_PREFIX : '');
+  var rendered = provenanceRendering(stamp, reason);
+  var when = rendered.when;
+  var why = rendered.why;
   line(WARN, 'state: this session\'s workflow document was REBUILT — '
     + rebuilds.length + (rebuilds.length === 1 ? ' entry' : ' entries')
     + ', most recently at ' + when + why + '. Rebuilding is a loss, not a restore: the '
     + 'baseline reads "never active", so a review chain that was live when the document '
     + 'vanished is gone and the Stop guard releases this session without asking for a '
-    + 'reviewer. Re-arm with /zensu:tdd if that work still needs one.');
+    + 'reviewer. Re-arm with /zensu:tdd if that work still needs one.' + rendered.note);
 }
 
 // The PROJECT_ROOT_RESTORED provenance row, the sibling of baselineRebuiltRow above
@@ -3562,7 +3810,8 @@ function projectRootRestoredRow(core, projectRoot, key, sharedRead) {
     : '';
   if (phase === '') {
     line(WARN, 'state: this session\'s workflow document was not checked for project-root '
-      + 'restore provenance — the Session Control core in ' + pluginDir() + ' exports no '
+      + 'restore provenance — the Session Control core in ' + foldPath(pluginDir(), ' exports no ')
+      + ' exports no '
       + 'restore phase token. That is a missing check, not an all-clear.');
     return;
   }
@@ -3584,11 +3833,17 @@ function projectRootRestoredRow(core, projectRoot, key, sharedRead) {
   // repository trains readers to ignore.
   if (!restores.length) return;
   var last = restores[restores.length - 1];
-  // The sibling half of the fold documented at baselineRebuiltRow above. Same two
-  // slots, same unbounded `reason`, same relayed channel — and the two must move
-  // together, which is why the reason is stated once there and pointed at here.
-  var when = (last && typeof last.ts === 'string' && last.ts) ? safeVerifyReason(last.ts) : 'an unrecorded time';
-  var why = (last && typeof last.reason === 'string' && last.reason) ? ' [' + safeVerifyReason(last.reason) + ']' : '';
+  // The sibling half of the bound documented at `provenanceSlot` and at
+  // baselineRebuiltRow above. Same two slots, same unbounded `reason`, same relayed
+  // channel — and the two must move together, which is why the reason is stated once
+  // there and pointed at here.
+  var stamp = provenanceSlot((last && typeof last.ts === 'string') ? last.ts : '', '');
+  var reason = provenanceSlot(
+    (last && typeof last.reason === 'string') ? last.reason : '',
+    (core && typeof core.RESTORE_HISTORY_REASON_PREFIX === 'string') ? core.RESTORE_HISTORY_REASON_PREFIX : '');
+  var rendered = provenanceRendering(stamp, reason);
+  var when = rendered.when;
+  var why = rendered.why;
   line(WARN, 'state: this session\'s recorded project root was RE-CREATED by '
     + '/zensu:adopt-session --restore-root — ' + restores.length
     + (restores.length === 1 ? ' entry' : ' entries')
@@ -3598,7 +3853,7 @@ function projectRootRestoredRow(core, projectRoot, key, sharedRead) {
     + 'repository, no branch, nothing to commit it to. Note that this row renders only '
     + 'while the workflow document is PRESENT under that root, so `.zensu/state` is '
     + 'there by now and a plain `git worktree add` refuses a non-empty target: move '
-    + 'that `.zensu` aside first, or pass --force.');
+    + 'that `.zensu` aside first, or pass --force.' + rendered.note);
 }
 
 function stateBlock(nowMs) {
@@ -3699,7 +3954,8 @@ function stateBlock(nowMs) {
         catch (e2) { ownAt = ownFile; }
       }
       line(BAD, 'state: this session\'s own workflow document is ' + ownState.toUpperCase()
-        + ' (' + ownAt + ') — the capability gate denies every tool in this session, and this '
+        + ' ' + parenthesizedPath(ownAt, ')')
+        + ' — the capability gate denies every tool in this session, and this '
         + 'is NOT a missing document, so /zensu:adopt-session --confirm will REFUSE to '
         + 'rebuild it: something is sitting at that path. Run /zensu:adopt-session for the '
         + 'diagnosis, inspect what is there before doing anything else, then start a fresh '
@@ -3710,7 +3966,8 @@ function stateBlock(nowMs) {
       // The check did NOT run. Returning on the legacy presence test here would
       // render an all-clear for a verdict this renderer never reached.
       line(WARN, 'state: this session\'s own workflow document could not be classified — the '
-        + 'Session Control core did not load from ' + pluginDir() + '. That is a missing '
+        + 'Session Control core did not load from ' + foldPath(pluginDir(), '. That is a missing ')
+        + '. That is a missing '
         + 'check, not an all-clear.');
       return;
     }
@@ -3720,7 +3977,8 @@ function stateBlock(nowMs) {
     if (!ownIs('MISSING')) {
       line(WARN, 'state: this session\'s own workflow document came back with a '
         + 'classification this build does not recognize (' + String(ownState) + ') from the '
-        + 'Session Control core in ' + pluginDir() + '. That is a missing check, not an '
+        + 'Session Control core in ' + foldPath(pluginDir(), '. That is a missing check, not an ')
+        + '. That is a missing check, not an '
         + 'all-clear.');
       return;
     }
@@ -3728,9 +3986,9 @@ function stateBlock(nowMs) {
     // reader sent to repair a specific path needs its name. The 13-character
     // truncation belongs to the foreign-chain row, whose subject is somebody
     // else's session.
-    line(BAD, 'state: this session\'s own workflow document is MISSING ('
-      + ownFile
-      + ') — while it is gone the capability gate denies every tool in this session, '
+    line(BAD, 'state: this session\'s own workflow document is MISSING '
+      + parenthesizedPath(ownFile, ')')
+      + ' — while it is gone the capability gate denies every tool in this session, '
       + 'because a deleted document must never be read as "no chain was ever active". '
       + 'A deleted and re-created worktree loses it, since .zensu/state/ is gitignored. '
       + 'If the record is intact and served, run /zensu:adopt-session for the diagnosis '

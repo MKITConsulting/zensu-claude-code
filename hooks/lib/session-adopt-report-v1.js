@@ -598,14 +598,18 @@ const prunedNote = (pruned) => (pruned ? PRUNED_NOTE : "");
 // is built on first use and memoized.
 //
 // WHY THE SIBLING `REMEDY` TABLE ABOVE STAYS EAGER, because the asymmetry is
-// otherwise unexplained and reads as an oversight: the criterion is whether a core
-// this file may legitimately be paired with can LACK the vocabulary. Under the
-// lineage rule a running installation may serve a record minted by a compatible
-// sibling, so the cores this file meets span a version range —
-// `RESTORE_ROOT_REFUSALS` is new in the release that added the restore and a core
-// one patch older exports none, while `core.ADOPTION_REFUSALS` predates every core
-// in that range. A NEW vocabulary is read lazily behind a guard; an established one
-// is read at module scope. Anything added here later starts on the lazy side.
+// otherwise unexplained and reads as an oversight. The criterion is NOT a version
+// range, and stating it as one was wrong: `core` is required RELATIVELY from this
+// file's own directory, so the core this file meets is always its own sibling in the
+// same tree, and the lineage rule governs which RECORD a runtime may serve rather
+// than which module a file requires. What the two tables actually differ in is
+// require-time blast radius against a PARTIAL tree — the suites build several, and
+// `test-doctor.sh` P1mf builds one carrying only the core and one renderer on
+// purpose. A vocabulary missing from such a tree kills this entry point at `require`
+// rather than degrading one branch, which is why a NEW one is read lazily behind a
+// guard while `core.ADOPTION_REFUSALS`, present in every tree this file has been
+// paired with, is read at module scope. Anything added here later starts on the lazy
+// side, because that is the side whose failure costs a branch instead of a command.
 let RESTORE_REMEDY_TABLE = null;
 const restoreRemedyTable = () => {
   if (RESTORE_REMEDY_TABLE) return RESTORE_REMEDY_TABLE;
@@ -922,6 +926,23 @@ function renderRestoreRoot(request, confirmed, deps) {
     process.stdout.write("\nThe directory is back but the workflow document is NOT. Until it exists the\n");
     process.stdout.write("capability gate denies every tool. Run /zensu:adopt-session --confirm to rebuild\n");
     process.stdout.write("it, then /zensu:doctor.\n");
+    return 1;
+  }
+  // THE HEADER CONTRACT of `writeBaselineRows` above: an unestablished baseline is its
+  // own state and its own non-zero exit. The RACED caller has always honoured it
+  // (`return racedBaseline ? 0 : 1`); this branch tested only `baselineError`, so a
+  // result carrying NEITHER a baseline nor a fault rendered the "not established" row
+  // and then fell through to the unqualified closing line under the headline RESTORED,
+  // and exited 0. LATENT rather than live — every arm of the shipped core sets exactly
+  // one of the two, and `core` is required relatively from the same tree — so the only
+  // caller that can reach it is the `deps.restore` seam. It is fixed rather than
+  // documented because the header states a rule the main branch did not enforce, and
+  // the next core arm returning a falsy baseline would print a clean RESTORED over a
+  // document nobody established.
+  if (!restored.baseline && !restored.baselineError) {
+    process.stdout.write("\nThe directory is back and the workflow document's state could not be established:\n");
+    process.stdout.write("the repair reported neither a rebuilt baseline nor a fault, so whether the document\n");
+    process.stdout.write("exists is unknown. Run /zensu:doctor before resuming.\n");
     return 1;
   }
   // The last line printed and the only imperative one, so it carries the operational

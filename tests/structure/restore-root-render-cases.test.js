@@ -170,6 +170,35 @@ test("the provenance WARNING still fires when the history write itself failed", 
     "a genuine history-write failure must still warn");
 });
 
+// THE HEADER CONTRACT OF `writeBaselineRows`: an unestablished baseline is its own
+// state and its own non-zero exit. The RACED caller honours it (`return racedBaseline ?
+// 0 : 1`); the RESTORED branch branched only on `baselineError`, so a result carrying
+// neither a baseline nor a fault rendered the "not established" row and then the
+// unqualified closing line under the headline RESTORED, and exited 0. It is LATENT
+// rather than live — every arm of the shipped core sets exactly one of the two, and
+// `core` is required relatively from the same tree — so this case reaches it through
+// the `deps.restore` seam, which is the only caller that can. A latent contract
+// violation is still one: the next core arm that returns a falsy baseline would print
+// a clean RESTORED over a document nobody established.
+test("a restore that establishes no baseline and reports no fault exits non-zero", () => {
+  const r = withCore({
+    restoreRootVerdict: () => ({ ok: true, missing: ["/tmp/x"] }),
+    restoreWorkflowProjectRoot: () => ({
+      projectRoot: "/tmp/x",
+      created: ["/tmp/x"],
+      provenance: "recorded",
+      provenanceCause: null,
+      baseline: null,
+      baselineError: null,
+    }),
+  }, { confirmed: true });
+  assert.strictEqual(r.code, 1, "an unestablished baseline is its own non-zero exit");
+  assert.ok(!/no restart is needed/.test(r.out),
+    "the unqualified closing line must not print over a document nobody established");
+  assert.match(r.out, /could not be established/,
+    "the run must say what it could not establish rather than going quiet");
+});
+
 test("an already-present baseline is reported as such rather than as rebuilt", () => {
   const r = withCore({
     restoreRootVerdict: () => ({ ok: true, missing: ["/tmp/x"] }),

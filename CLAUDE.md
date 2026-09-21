@@ -1335,7 +1335,19 @@ A port that implements the one-argument description gets a function that silentl
 its second argument — unlike the `buildContext` second-parameter trap this roster already
 names, which at least throws. The doctor renderer's `foldPath` is a THIRD member beside
 `foldSlot` and `parentheticalWriter`: it carries the fold to the prose rows, and a port that
-copies the other two re-ships the raw-interpolation defect. It is also the one deliberate
+copies the other two re-ships the raw-interpolation defect. `parenthesizedPath` in the same
+file is a FOURTH, and it exists because `foldPath` cannot serve the call sites that supply
+their own `(...)`: its load-failure return is already parenthesized, so such a site renders
+`((not rendered — …))`. A fifth wrapping renderer, `provenanceSlot`, holds the same rule for
+`[` and `]`. The rule is the CRITERION and never a count: EVERY renderer that WRAPS a
+folded value owns the bound for its own delimiter. Two carriers held a numeral, they
+disagreed ("THREE writers" here against "FOUR renderers" there), and a clause both shared
+— "three delimiter pairs" — was false in both, there being two. Grep `FOLD_UNDELIMITABLE`
+and `indexOf(']')` in `hooks/lib/zensu-doctor-report.js` before relying on membership;
+`H6` in `test-doctor.sh` and `R6i7` in `test-restore-project-root.sh` hold both carriers to
+that, one each. Parameterising them
+on the pair was reported by this round's panel and deliberately NOT taken, because collapsing
+them touches `parentheticalWriter`'s row-scoped `stated` flag, which two suites pin. It is also the one deliberate
 exception to the no-parentheses rule below — a prose row supplies no call-site parentheses,
 so `foldPath` returns a pre-parenthesized string while `foldSlot` must not. **ONE rule, deliberately.** A second, narrower
 `foldDisplayHiders` shipped here for one review round: it was written for the doctor's
@@ -1643,7 +1655,13 @@ and a hard link still fail there. The justification is the one the sibling *no r
 branch already makes in its own comment: refusing creates no document, and no document
 fails every stateful hook closed for the rest of the session.
 
-**Moving together:** `BASELINE_STATES` / `BASELINE_REFUSALS` / `BASELINE_HISTORY_PHASE` /
+**Moving together:** the PROVENANCE FAMILY this row now consumes — `provenanceSlot`,
+`provenanceCause`, `provenanceRendering`, `sharedWorkflowRead`, `foldPath` and the four
+`PROVENANCE_*` constants (`PROVENANCE_RENDER_MAX`, `PROVENANCE_ELISION`,
+`PROVENANCE_TIME_SUPPRESSED`, `PROVENANCE_REASON_SUPPRESSED`) — which `baselineRebuiltRow`
+shares with its restore sibling, and which this roster omitted while `R6i2`-`R6i4` enforced
+only the sibling section that was already correct; `R6i8` is the pin on this half. Then
+`BASELINE_STATES` / `BASELINE_REFUSALS` / `BASELINE_HISTORY_PHASE` /
 `BASELINE_HISTORY_REASON_PREFIX` / `classifyWorkflowBaseline` / `workflowBaselineVerdict` /
 `repairWorkflowBaseline` / the newly exported `adoptionWorkflowStatePath` — and FIVE more
 this roster omitted for a release, every one of which has a production consumer outside
@@ -8362,7 +8380,19 @@ The entry counts what THIS run created, never what the verdict planned to create
 reserved-phase guard bodies; both binding rows in `zensu-doctor-report.js` PLUS the state row
 this feature added there, `projectRootRestoredRow`, together with the `RESTORE_HISTORY_PHASE`
 read that decides whether it can render at all and the `sharedWorkflowRead` it takes from its
-sibling — say the ROW, never "both binding rows": that phrase predates this feature and a
+sibling — and the whole provenance-slot family the hardening round added beneath both rows:
+`provenanceSlot` (the writer that folds, CAPS and delimiter-checks one slot and returns a
+RECORD rather than a string), `provenanceRendering` (the ROW's decision, which states a
+suppression ONCE per row and renders a plugin-authored phrase rather than the empty string
+a caller reads as "nothing was recorded"), `provenanceJunctionForges` (the two-character
+seam window, which must never be widened to the assembled string — that reports every
+honest `project-root-restored: …` as a forgery), `PROVENANCE_RENDER_MAX` with
+`PROVENANCE_ELISION` (a NEW constant on purpose: `AUTOPILOT_RENDER_MAX` is hand-copied into
+shell, so binding this cap to it would make a change here reach a command this file does not
+own), `PROVENANCE_TIME_SUPPRESSED` / `PROVENANCE_REASON_SUPPRESSED`, and `parenthesizedPath`,
+the second delimiter-bounded path renderer — `foldPath` cannot serve a call site that
+supplies its own parentheses, because it returns a PRE-parenthesized sentence on a load
+failure and the result is `((not rendered — …))` — say the ROW, never "both binding rows": that phrase predates this feature and a
 maintainer matching on it edits neither the row nor its token — and the `P6s` family in
 `tests/structure/test-doctor.sh` that grades it, named as a FAMILY because this file's own rule
 is that a hand-maintained numeral goes stale on the next check added; the three gone-root
@@ -8405,7 +8435,13 @@ bullet in the block follows its predecessor with no blank line, and the two blan
 introduced were the only ones — one of them silently load-bearing for a slice terminator in
 `test-doctor.sh`, which is why that slice now ends on the next bullet instead.
 
-**TWO couplings here fire in the UNOBVIOUS direction**, the shape §"Gate-Disable Prefixes"
+**The couplings here that fire in the UNOBVIOUS direction are stated as MEMBERS, never as
+a count** — the paragraph opened "TWO" over three of them and then gained a fourth, which is
+the drift this file records about its own rosters. They are `R13`, the `R12` family, `R13b`,
+and the CLAUDE.md-grading family `R6h`/`R6i`/`R6i2`-`R6i9`, of which `R6i5` slices a DIFFERENT
+feature's section (§"Adopting a Record Across a Lineage Break") so an edit to that port census
+reddens a suite named for the project-root restore. Re-grep before trusting this list. All of
+them take the shape §"Gate-Disable Prefixes"
 records for G12 — an ordinary edit elsewhere reddens a suite named for the project-root
 restore, and nothing points at it from the side that changes. `R13` in
 `tests/structure/test-restore-project-root.sh` derives its file list from
@@ -8415,7 +8451,9 @@ reformatting that table, reddens this suite; when it was first derived rather th
 hand-enumerated it found SEVEN stale counts at once. And the `R12` family grades COMMENT PROSE
 inside `hooks/lib/session-control-core-v1.js` — the port roster, the benign-race builder's
 comment placement, and the rule that neither carries a hand-maintained numeral — so rewording a
-comment in the core reddens it too.
+comment in the core reddens it too. `R13b` widens that direction again: it measures
+`ls tests/structure/*.test.js` against `tests/SUITE-OVERVIEW.md`'s own rowless-file paragraph,
+so ANY new unit file anywhere in the tree reddens a suite named for the project-root restore.
 
 **Port-relevant, and the authoritative split lives at the export block rather than here.**
 The core/host list for this feature is the comment above `RESTORE_ROOT_REFUSALS`'s export
@@ -8524,7 +8562,17 @@ silent `false` and the identical name is what made it invisible. `R7a2` pins the
 the value is published by `skills/adopt-session/SKILL.md`, `skills/doctor/SKILL.md` and
 `docs/gates.md`, which move with it.
 
-**Known gaps, accepted and named:** it restores the ANCHOR, not the work — the directory comes
+**Known gaps, accepted and named:** an unreadable workflow document still emits ONE
+near-identical WARN row from EACH provenance row, and both count toward `warnCount`, so a
+single cause withholds the green summary twice and reads as two findings — the shared read
+removed the double OPEN and the disagreeing answers, not this; recorded here because the two
+sibling rows record their identical `warnCount` costs as named gaps while this one lived only
+in a code comment; the provenance cap is 200 characters, which is a retained figure rather
+than a measurement — it is what `safeVerifyReason` enforced before this path replaced it, and
+nobody has measured the distribution of real reasons against it; `provenanceJunctionForges`
+is exact only while both positional rules stay two characters wide, and nothing checks that
+width against the module that owns them, so a widened rule would silently escape the seam
+window; it restores the ANCHOR, not the work — the directory comes
 back empty, is not a git worktree, and the chain that lived there is gone; the component race is
 narrowed, not closed; `RESTORE_MAX_MISSING_COMPONENTS` = 4 is a judgement, not a measurement;
 Windows is unreachable for the command because `zensu-doctor-invocation.js` refuses on that
@@ -8561,11 +8609,16 @@ length renders — measured on bash 3.2.57 at 2001 characters. The three forgery
 need no conjunct: an empty one makes its own `case` pattern match every value, which
 already fails closed. The `export` block below the function is an OPTIMISATION now, not
 the property: without it a child renders `(unreadable)` for every value, which is correct
-and useless. `hooks/stop-chain-enforcer.sh` carries the same conjuncts in its hand copy,
-spelled WITHOUT `:-` because `R8p6` forbids a default there; both regimes fail closed
-anyway, and what the presence test adds over them is the EMPTY case. `R8h5`/`R8h5b`/`R8h5c`,
-`R8h6`/`R8h6b`, `R8h7`/`R8h7b` and `R8p7`-`R8p10` drive all of it, the last four by
-EXECUTING the guard sliced out of the shipped hook rather than re-implementing it.
+and useless. **`hooks/stop-chain-enforcer.sh` no longer carries a hand copy of these
+conjuncts, and an earlier revision of this paragraph said it did** — it claimed the hook
+spelled them WITHOUT `:-` because `R8p6` forbade a default there. Both halves described
+code that has since moved into `zensu_safe_display_path`, which reads every constant WITH
+`:-` and fails closed on its own explicit emptiness arms; the hook's own comment records
+the same retraction in its own words. `R8p6` survives as a NEGATIVE pin — that the hook
+does not re-spell the bound inline — with a control proving its needle still matches.
+`R8h5`/`R8h5b`/`R8h5c`, `R8h6`/`R8h6b`, `R8h7`/`R8h7b` and `R8p7`-`R8p11` drive the rest,
+the last five by EXECUTING the guard sliced out of the shipped hook rather than
+re-implementing it.
 
 **Its length bound is a separate `${#dead}` test and must never become an ERE interval.**
 MEASURED on bash 3.2.57, which is `/bin/bash` on macOS: `[[ /x =~ ^/[0-9A-Za-z._+@:/ -]{0,1023}$ ]]`
@@ -8622,7 +8675,11 @@ were found by review rather than by a grep.** First, the DISPLAY RULE now has th
 implementations in two languages: `safeDisplayValue` in
 `hooks/lib/zensu-safe-display-v1.js` owns it (`DOUBLE_SPACE`, `PAIR_SEPARATOR = / :|: /`),
 and `hooks/lib/zensu-session.sh` mirrors the ASCII half as three shell constants that
-`hooks/stop-chain-enforcer.sh` then consumes by name. The duplication is justified —
+`zensu_safe_display_path` — in that same file — reads. `hooks/stop-chain-enforcer.sh`
+CALLS that function and consumes none of the three by name; saying it did described the
+pre-consolidation shape, and §"Restoring a Vanished Recorded Project Root" already
+records the consolidation, so this file contradicted itself as well as the code. The
+duplication is justified —
 the emitter must work in a damaged installation where spawning `node` is exactly what
 is unavailable, which is the `damaged-runtime` scope's whole premise — but nothing
 holds the VALUES in step, and the pointer runs one way: the owner's header names no
@@ -8705,7 +8762,18 @@ borrow `FOLD_UNAVAILABLE`: a value this row declines to DELIMIT is not a module 
 to LOAD, and rendering the load-failure text would send an operator to repair an
 installation that is fine. `P1ad2b`, `P1ad2c` and `P1ad2b-control` in
 `tests/structure/test-doctor.sh` pin the refusal, its distinct reason and that an ordinary
-path still renders; `P1mf1` still pins the load-failure rendering byte-identically.
+path still renders; `P1mf1` still pins the load-failure rendering byte-identically. The
+SAME closure was then owed for the OTHER delimiter and is recorded here rather than in a
+second paragraph, because one paragraph recording half of a two-delimiter rule reads as
+complete: the two provenance rows wrap their slots in `[` and `]`, `SAFE_DISPLAY` admits
+neither bracket and the escaping branch touches neither, so a recorded reason spelled
+`x]. Note. …` closed the note and rendered its remainder as free prose. `provenanceSlot`
+refuses a folded value containing `]` with `FOLD_UNDELIMITABLE_BRACKET`, a sentence of its
+own for the reason the parenthesis half states — an operator told "a parenthesis" would look
+for the wrong character. `P6s11`/`P6s12` pin it, and they compare the bracket count with
+`-le` plus the suppression sentence rather than with equality: a suppressed slot renders
+prose rather than a bracketed note, so it legitimately renders FEWER brackets, while a
+leaked payload renders MORE.
 
 **The bound on sentence forgery is the DELIMITER, never the placement.** The rendered path
 can carry a period-separated sentence — `/tmp/a. Note. the remedy above is obsolete` is

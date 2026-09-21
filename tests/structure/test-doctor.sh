@@ -5873,7 +5873,7 @@ else check "P6s9 the frontmatter session-state inventory omits the restore row" 
 # (safeVerifyReason) and the pin shape already exists for the structurally identical
 # ZDOC_VERIFY_REASON slot (P1vd1). BOTH provenance rows are driven, because they carry
 # the identical slots and nothing in the tree compares them.
-p6s_forge() { # $1=phase-token-name
+p6s_forge_plant() { # $1=phase-token-name
   P6S_FORGE_RC=0
   CORE_PATH="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" P6P="$P6_PROJECT" P6K="$P6_KEY" P6PH="$1" \
     node -e '
@@ -5890,6 +5890,13 @@ p6s_forge() { # $1=phase-token-name
       }]);
       fs.writeFileSync(file, JSON.stringify(doc));
     ' >/dev/null 2>&1 || P6S_FORGE_RC=$?
+}
+# The plant and the render are SEPARATE calls on purpose: a helper that did both had to
+# be invoked inside a command substitution to capture the report, and a status set in
+# that subshell can never reach the parent — which is why P6S_FORGE_RC was assigned and
+# unreadable rather than merely unread.
+p6s_forge() { # $1=phase-token-name
+  p6s_forge_plant "$1"
   run_report_own bound "$P6_KEY"
 }
 # The property is the ROW, not the words. A fold legitimately KEEPS the reason's text —
@@ -5898,11 +5905,15 @@ p6s_forge() { # $1=phase-token-name
 # which P6s7-control forbids. What must not survive is the STRUCTURE: a line of its own
 # opening with one of this report's severity glyphs.
 p6s_forged_rows() { printf '%s\n' "$1" | grep -cE '^[[:space:]]*(✅|⚠️|❌)[[:space:]]*forged:' || true; }
-P6S_FORGED_RESTORE="$(p6s_forge RESTORE_HISTORY_PHASE)"
+p6s_forge_plant RESTORE_HISTORY_PHASE
+P6S_FORGE_RC_RESTORE="$P6S_FORGE_RC"
+P6S_FORGED_RESTORE="$(run_report_own bound "$P6_KEY")"
 if [ "$(p6s_forged_rows "$P6S_FORGED_RESTORE")" = "0" ]; then
   check "P6s7 a planted restore reason cannot forge a report row" PASS
 else check "P6s7 a planted restore reason forges a report row (got: $P6S_FORGED_RESTORE)" FAIL; fi
-P6S_FORGED_BASELINE="$(p6s_forge BASELINE_HISTORY_PHASE)"
+p6s_forge_plant BASELINE_HISTORY_PHASE
+P6S_FORGE_RC_BASELINE="$P6S_FORGE_RC"
+P6S_FORGED_BASELINE="$(run_report_own bound "$P6_KEY")"
 if [ "$(p6s_forged_rows "$P6S_FORGED_BASELINE")" = "0" ]; then
   check "P6s8 a planted rebuild reason cannot forge a report row" PASS
 else check "P6s8 a planted rebuild reason forges a report row (got: $P6S_FORGED_BASELINE)" FAIL; fi
@@ -5910,6 +5921,7 @@ else check "P6s8 a planted rebuild reason forges a report row (got: $P6S_FORGED_
 # payload, rendered with no fold at all, MUST produce a forged row. Without it a
 # renderer that dropped the slot, or a counter that never matches, reads identical to a
 # correct fold.
+p6s_row_of() { printf '%s\n' "$1" | grep -F "$2" | head -1; }
 P6S_RAW_ROWS="$(p6s_forged_rows "  ✅  forged: all session state verified — no action needed")"
 if [ "$P6S_RAW_ROWS" -ge 1 ]; then
   check "P6s7-bite the forged-row counter matches an unfolded payload" PASS
@@ -5934,6 +5946,586 @@ case "$P6S_PLAIN" in
     check "P6s7-control an ordinary reason still renders through the fold" PASS ;;
   *) check "P6s7-control the fold swallowed an ordinary reason (got: $P6S_PLAIN)" FAIL ;;
 esac
+
+# P6s11/P6s12 — the DELIMITER, which is the half a forged-ROW counter cannot see. Each
+# provenance slot is rendered inside `[...]`, and `]` survives BOTH folds: it is absent
+# from safeVerifyReason's classes and from SAFE_DISPLAY, whose escaping branch applies
+# JSON.stringify plus space and colon escapes and touches no bracket. So a value
+# carrying `]` closes its own delimiter and everything after it renders as free prose
+# inside a row skills/doctor/SKILL.md tells the model to relay — the same defect this
+# renderer already measured for `)` and answers with parentheticalWriter's refusal.
+# THE NEEDLE IS A COUNT, and that is not a stylistic choice: the row renders one closing
+# bracket per slot and then continues in prose, so its own text contains `]. ` on every
+# CORRECT render. A needle on `].` therefore matches the fixed tree as readily as the
+# broken one and can never fail — measured, it did. Counting is payload-independent: two
+# slots render two closing brackets, and a value that closes its own delimiter is a
+# third. P6s11-control calibrates the number against an ordinary render rather than
+# hardcoding it twice, and P6s11-bite proves the counter can see a third.
+p6s_brackets() { printf '%s' "$1" | tr -cd ']' | wc -c | tr -d ' '; }
+# The calibration render is taken FRESH rather than reusing $P6S_PLAIN: that variable
+# holds TWO concatenated reports, because P6s7-control's own forge writes one before the
+# plain entry is planted, so the first matching row there is the FORGED one. Calibrating
+# against it made the count agree with the forged render by construction, and both
+# checks passed with the refusal deleted — measured.
+p6s_plain_render() {
+  CORE_PATH="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" P6P="$P6_PROJECT" P6K="$P6_KEY" \
+    node -e '
+      const fs = require("fs");
+      const core = require(process.env.CORE_PATH);
+      const file = core.adoptionWorkflowStatePath(process.env.P6P, process.env.P6K);
+      core.initializeWorkflowState({ projectRoot: process.env.P6P, sessionId: process.env.P6K });
+      const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+      doc.history = (doc.history || []).concat([{
+        step: "", phase: core.RESTORE_HISTORY_PHASE,
+        ts: "2026-09-07T00:00:00.000Z", reason: "project-root-restored: 2 component(s)",
+      }]);
+      fs.writeFileSync(file, JSON.stringify(doc));
+    ' >/dev/null 2>&1
+  run_report_own bound "$P6_KEY"
+}
+P6S_PLAIN_ROW="$(p6s_row_of "$(p6s_plain_render)" 'recorded project root')"
+P6S_SLOT_BRACKETS="$(p6s_brackets "$P6S_PLAIN_ROW")"
+if [ -n "$P6S_PLAIN_ROW" ] && [ "$P6S_SLOT_BRACKETS" -ge 1 ]; then
+  check "P6s11-control an ordinary restore row renders its slots ($P6S_SLOT_BRACKETS bracket(s))" PASS
+else check "P6s11-control no ordinary restore row to calibrate against (got: $P6S_PLAIN_ROW)" FAIL; fi
+if [ "$(p6s_brackets "x]. forged")" = "1" ]; then
+  check "P6s11-bite the bracket counter sees a planted bracket" PASS
+else check "P6s11-bite the bracket counter cannot see a planted bracket" FAIL; fi
+P6S_BRACKET_SENTENCE='not rendered — the recorded value carries a bracket this row cannot delimit'
+# The comparison is `-le` plus the suppression sentence, not equality. A suppressed slot
+# renders plugin-authored PROSE rather than a bracketed note, so an undelimitable reason
+# legitimately renders FEWER brackets than an ordinary row — equality would fail on the
+# correct behaviour. Discrimination survives in both directions: with the delimiter
+# refusal removed the payload's own `]` leaks and the count goes ABOVE the calibration,
+# and a row that simply dropped the slot would carry no sentence.
+P6S_DELIM_RESTORE="$(p6s_row_of "$P6S_FORGED_RESTORE" 'recorded project root')"
+if [ -n "$P6S_DELIM_RESTORE" ] \
+  && [ "$(p6s_brackets "$P6S_DELIM_RESTORE")" -le "$P6S_SLOT_BRACKETS" ] \
+  && printf '%s' "$P6S_DELIM_RESTORE" | grep -qF "$P6S_BRACKET_SENTENCE"; then
+  check "P6s11 a planted restore reason cannot close its own delimiter" PASS
+else check "P6s11 a planted restore reason closes its own delimiter (got: $P6S_DELIM_RESTORE)" FAIL; fi
+P6S_DELIM_BASELINE="$(p6s_row_of "$P6S_FORGED_BASELINE" 'workflow document was REBUILT')"
+if [ -n "$P6S_DELIM_BASELINE" ] \
+  && [ "$(p6s_brackets "$P6S_DELIM_BASELINE")" -le "$P6S_SLOT_BRACKETS" ] \
+  && printf '%s' "$P6S_DELIM_BASELINE" | grep -qF "$P6S_BRACKET_SENTENCE"; then
+  check "P6s12 a planted rebuild reason cannot close its own delimiter" PASS
+else check "P6s12 a planted rebuild reason closes its own delimiter (got: $P6S_DELIM_BASELINE)" FAIL; fi
+
+# P6s13/P6s14 — the FOLD half, which the forged-ROW counter and the bracket count both
+# miss. safeVerifyReason is the ZDOC_VERIFY_REASON bound, not this file's display rule:
+# it strips C0/C1, U+2028/9 and the three severity glyphs and caps at 200, and leaves
+# the INVISIBLE class and the bidi overrides untouched. U+202E reverses the rendering
+# direction of everything after it in a row skills/doctor/SKILL.md tells the model to
+# relay, so a remedy can be made to read as its own opposite. safeDisplayValue escapes
+# it in both branches. MEASURED: with the fold reverted to safeVerifyReason and the
+# delimiter refusal left in place, the whole suite stayed green — which is why this
+# check exists separately from P6s11/P6s12 rather than being folded into them.
+# The payload carries the RESERVED PREFIX on purpose: the renderer keeps that prefix
+# literal and folds only the tail, so this also pins that the exemption does not extend
+# past it.
+P6S_BIDI="$(printf '\342\200\256')"
+p6s_bidi_plant() { # $1=phase-token-name
+  P6S_BIDI_RC=0
+  CORE_PATH="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" P6P="$P6_PROJECT" P6K="$P6_KEY" P6PH="$1" \
+    node -e '
+      const fs = require("fs");
+      const core = require(process.env.CORE_PATH);
+      const file = core.adoptionWorkflowStatePath(process.env.P6P, process.env.P6K);
+      core.initializeWorkflowState({ projectRoot: process.env.P6P, sessionId: process.env.P6K });
+      const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+      const prefix = process.env.P6PH === "RESTORE_HISTORY_PHASE"
+        ? core.RESTORE_HISTORY_REASON_PREFIX : core.BASELINE_HISTORY_REASON_PREFIX;
+      doc.history = (doc.history || []).concat([{
+        step: "", phase: core[process.env.P6PH], ts: "2026-09-07T00:00:00.000Z",
+        reason: prefix + "\u202Ededeen noitca on",
+      }]);
+      fs.writeFileSync(file, JSON.stringify(doc));
+    ' >/dev/null 2>&1 || P6S_BIDI_RC=$?
+}
+p6s_bidi_render() { # $1=phase-token-name
+  p6s_bidi_plant "$1"
+  run_report_own bound "$P6_KEY"
+}
+if printf '%s' "x${P6S_BIDI}y" | grep -qF "$P6S_BIDI"; then
+  check "P6s13-bite the bidi needle matches an unfolded payload" PASS
+else check "P6s13-bite the bidi needle cannot match an unfolded payload" FAIL; fi
+p6s_bidi_plant RESTORE_HISTORY_PHASE
+P6S_BIDI_RC_RESTORE="$P6S_BIDI_RC"
+P6S_BIDI_RESTORE="$(p6s_row_of "$(run_report_own bound "$P6_KEY")" 'recorded project root')"
+if [ -n "$P6S_BIDI_RESTORE" ] && ! printf '%s' "$P6S_BIDI_RESTORE" | grep -qF "$P6S_BIDI"; then
+  check "P6s13 a planted restore reason cannot carry a bidi override into the row" PASS
+else check "P6s13 a planted restore reason carries a bidi override into the row" FAIL; fi
+p6s_bidi_plant BASELINE_HISTORY_PHASE
+P6S_BIDI_RC_BASELINE="$P6S_BIDI_RC"
+P6S_BIDI_BASELINE="$(p6s_row_of "$(run_report_own bound "$P6_KEY")" 'workflow document was REBUILT')"
+if [ -n "$P6S_BIDI_BASELINE" ] && ! printf '%s' "$P6S_BIDI_BASELINE" | grep -qF "$P6S_BIDI"; then
+  check "P6s14 a planted rebuild reason cannot carry a bidi override into the row" PASS
+else check "P6s14 a planted rebuild reason carries a bidi override into the row" FAIL; fi
+# P6s13/P6s14 graded only the ABSENCE of the payload, which an empty row satisfies just
+# as well as a folded one. History accumulates (initializeWorkflowState is a no-op on an
+# existing document) and the row reads the LAST entry, so a plant that silently failed
+# left the row rendering an EARLIER payload — one that carries no bidi override — and
+# both checks passed having graded nothing. The exit status is captured and the ASCII
+# tail of THIS payload is required, so the absence assertions now rest on a row that is
+# proven to be the planted one.
+if [ "${P6S_BIDI_RC_RESTORE:-1}" = "0" ] && [ "${P6S_BIDI_RC_BASELINE:-1}" = "0" ]; then
+  check "P6s13-land both bidi plants reported success" PASS
+else check "P6s13-land a bidi plant failed (restore=${P6S_BIDI_RC_RESTORE:-unset} rebuild=${P6S_BIDI_RC_BASELINE:-unset})" FAIL; fi
+if printf '%s' "$P6S_BIDI_RESTORE" | grep -qF 'noitca' \
+  && printf '%s' "$P6S_BIDI_RESTORE" | grep -qF '\u202e'; then
+  check "P6s13-land2 the restore row renders THIS payload, escaped" PASS
+else check "P6s13-land2 the restore row does not carry the planted payload" FAIL; fi
+if printf '%s' "$P6S_BIDI_BASELINE" | grep -qF 'noitca' \
+  && printf '%s' "$P6S_BIDI_BASELINE" | grep -qF '\u202e'; then
+  check "P6s14-land2 the rebuild row renders THIS payload, escaped" PASS
+else check "P6s14-land2 the rebuild row does not carry the planted payload" FAIL; fi
+# P6S_FORGE_RC has been assigned by p6s_forge since that helper was written and read by
+# nothing, so every forged-row check shared the same blindness.
+if [ "${P6S_FORGE_RC_RESTORE:-1}" = "0" ] && [ "${P6S_FORGE_RC_BASELINE:-1}" = "0" ]; then
+  check "P6s7-land both forge plants reported success" PASS
+else check "P6s7-land a forge plant failed (restore=${P6S_FORGE_RC_RESTORE:-unset} rebuild=${P6S_FORGE_RC_BASELINE:-unset})" FAIL; fi
+
+# P6s15 — EVERY function in this renderer's provenance block owns the comment block
+# directly above it. This is the defect class session-control-core-v1.js records about
+# itself and R12d grades by offset, recurring in a file R12d is not bound to: a header
+# that describes the function BELOW the one it sits on sends a maintainer to the wrong
+# contract, and it is invisible to every behavioural check. The needle is per function
+# and derived from the source, so ANY function declared between the two anchors enrols
+# itself. No ordinal here: a numeral is the hand-maintained census this check exists to
+# retire, and `P6s15-control` already prints the derived count.
+p6s15_header_owner() { # $1=function name  $2=file -> the last comment line above it, or NOFN
+  awk -v fn="$1" '
+    $0 ~ ("^function " fn "\\(") { print (prev ~ /^[[:space:]]*\/\//) ? prev : "NOCOMMENT"; found=1; exit }
+    { prev = $0 }
+    END { if (!found) print "NOFN" }
+  ' "$2"
+}
+# The SET is derived, never named. The previous shape looped over a hardcoded list under
+# a comment claiming "a fifth function added to the block enrols itself" — the
+# hand-maintained-census failure this repository records against itself, reintroduced
+# inside a check written to stop a comment claiming what the tree does not hold. The
+# block is delimited by the first function of the provenance group and by `stateBlock`,
+# the first function after it.
+p6s15_block_fns() { # $1=file
+  awk '
+    /^function provenanceJunctionForges\(/ { inblock = 1 }
+    /^function stateBlock\(/ { inblock = 0 }
+    inblock && /^function / { sub(/^function /, ""); sub(/\(.*$/, ""); print }
+  ' "$1"
+}
+P6S15_FNS="$(p6s15_block_fns "$PLUGIN_DIR/hooks/lib/zensu-doctor-report.js")"
+P6S15_N="$(printf '%s\n' "$P6S15_FNS" | grep -c . || true)"
+if [ "$P6S15_N" -ge 8 ]; then
+  check "P6s15-control the provenance block derivation found $P6S15_N functions" PASS
+else check "P6s15-control the provenance block derivation found $P6S15_N functions" FAIL; fi
+# P6s15-scope — the window must open at the FIRST member of the fold/provenance family,
+# not at `provenanceSlot`. Two functions this family gained — `provenanceJunctionForges`
+# and `parenthesizedPath` — sit above that anchor, so a maintainer adding the next helper
+# beside the rules it consumes, which is the natural position, gets no header check and
+# no signal. The two names are asserted rather than counted: a floor alone cannot say
+# WHICH functions the window reaches.
+P6S15_SCOPE=""
+for p6s15_want in provenanceJunctionForges parenthesizedPath provenanceSlot projectRootRestoredRow; do
+  printf '%s\n' "$P6S15_FNS" | grep -qx "$p6s15_want" \
+    || P6S15_SCOPE="$P6S15_SCOPE $p6s15_want"
+done
+if [ -z "$P6S15_SCOPE" ]; then
+  check "P6s15-scope the derived window reaches every fold/provenance helper" PASS
+else check "P6s15-scope the derived window misses:$P6S15_SCOPE" FAIL; fi
+P6S15_BAD=""
+for p6s15_fn in $P6S15_FNS; do
+  p6s15_line="$(p6s15_header_owner "$p6s15_fn" "$PLUGIN_DIR/hooks/lib/zensu-doctor-report.js")"
+  case "$p6s15_line" in
+    NOFN|NOCOMMENT) P6S15_BAD="$P6S15_BAD $p6s15_fn($p6s15_line)" ;;
+  esac
+done
+if [ -z "$P6S15_BAD" ]; then
+  check "P6s15 each provenance-block function carries its own header" PASS
+else check "P6s15 a provenance-block function has no header of its own:$P6S15_BAD" FAIL; fi
+if [ "$(p6s15_header_owner zzNotAFunction "$PLUGIN_DIR/hooks/lib/zensu-doctor-report.js")" = "NOFN" ]; then
+  check "P6s15-bite the header probe reports a function it cannot find" PASS
+else check "P6s15-bite the header probe cannot report a missing function" FAIL; fi
+# P6s15-enrol — the property the comment above claims, driven rather than asserted. A
+# headerless function planted INSIDE the block of a copy must be reported; a hardcoded
+# list can never report it, which is what makes this the bite for the derivation itself.
+# P6s15-interp — this suite's fixtures must not depend on an interpreter the tree does
+# not otherwise require. `node` is a hard dependency and the whole functional half is
+# gated on it above; `python3` is not, and the two sibling call sites in
+# test-review-personas.sh both carry a `|| <fallback>` for exactly that reason. A plant
+# built on an unprobed interpreter reddens P6s15-enrol for an environment property
+# rather than a product one, on a suite the weekly Windows structure shard runs.
+if ! grep -vE '^[[:space:]]*#' "$0" | grep -qE '(^|[|(]|&&)[[:space:]]*python3[[:space:]]'; then
+  check "P6s15-interp the suite carries no unprobed python3 dependency" PASS
+else check "P6s15-interp the suite carries an unprobed python3 dependency" FAIL; fi
+# The needle above is NEGATIVE, so it needs a planted-literal control: it matches an
+# INVOCATION rather than the bare word, which is what keeps it from reporting its own
+# labels, and a needle that no longer matches anything would report a clean suite for a
+# reason unrelated to the property. The bound is stated rather than implied: a python3
+# reached through some other construct is outside what this check can see.
+if printf 'python3 - foo\n' | grep -qE '(^|[|(]|&&)[[:space:]]*python3[[:space:]]'; then
+  check "P6s15-interp-control the interpreter needle matches a real invocation" PASS
+else check "P6s15-interp-control the interpreter needle matches nothing" FAIL; fi
+P6S15_COPY="$SBOX/p6s15-enrol.js"
+# The plant runs on `node`, not on a second interpreter: `String.replace` with a string
+# pattern substitutes the FIRST occurrence only, which is the behaviour this fixture
+# needs, and `p6s_h2_tree` below performs the identical read/replace/write.
+SRC="$PLUGIN_DIR/hooks/lib/zensu-doctor-report.js" DST="$P6S15_COPY" node -e '
+const fs = require("fs");
+const anchor = "function stateBlock(";
+const src = fs.readFileSync(process.env.SRC, "utf8");
+fs.writeFileSync(process.env.DST, src.replace(anchor, "function zzPlantedProvenanceFn() { return 0; }\n\n" + anchor));
+'
+P6S15_ENROL=""
+for p6s15_fn in $(p6s15_block_fns "$P6S15_COPY"); do
+  [ "$p6s15_fn" = "zzPlantedProvenanceFn" ] && P6S15_ENROL=yes
+done
+if [ "$P6S15_ENROL" = "yes" ]; then
+  check "P6s15-enrol a function added to the block enrols itself" PASS
+else check "P6s15-enrol a function added to the block is invisible to the check" FAIL; fi
+P6S15_ENROL_BAD=""
+for p6s15_fn in $(p6s15_block_fns "$P6S15_COPY"); do
+  case "$(p6s15_header_owner "$p6s15_fn" "$P6S15_COPY")" in
+    NOFN|NOCOMMENT) P6S15_ENROL_BAD="$P6S15_ENROL_BAD $p6s15_fn" ;;
+  esac
+done
+case "$P6S15_ENROL_BAD" in
+  *zzPlantedProvenanceFn*)
+    check "P6s15-enrol2 the derived set reports the planted headerless function" PASS ;;
+  *) check "P6s15-enrol2 the derived set missed the planted headerless function" FAIL ;;
+esac
+
+# H1 — the provenance slot is CAPPED, its suppression is stated once per ROW, and the
+# reserved-prefix exemption is judged at its JUNCTION. Three findings that all land in
+# one function: the consume reviewer ruled them a single rewrite rather than three
+# patches, because each fix alone reintroduces one of the others (a cap applied after
+# the fold cannot be re-folded; a row-level suppression needs a record, not a string;
+# a junction test must run on the CAPPED value).
+p6s_plant_render() { # $1=phase-token $2=reason tail $3=withprefix(yes|no)
+  CORE_PATH="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" P6P="$P6_PROJECT" P6K="$P6_KEY" \
+  P6PH="$1" P6TAIL="$2" P6PFX="$3" \
+    node -e '
+      const fs = require("fs");
+      const core = require(process.env.CORE_PATH);
+      const file = core.adoptionWorkflowStatePath(process.env.P6P, process.env.P6K);
+      core.initializeWorkflowState({ projectRoot: process.env.P6P, sessionId: process.env.P6K });
+      const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+      const prefix = process.env.P6PH === "RESTORE_HISTORY_PHASE"
+        ? core.RESTORE_HISTORY_REASON_PREFIX : core.BASELINE_HISTORY_REASON_PREFIX;
+      doc.history = (doc.history || []).concat([{
+        step: "", phase: core[process.env.P6PH], ts: "2026-09-07T00:00:00.000Z",
+        reason: (process.env.P6PFX === "yes" ? prefix : "") + process.env.P6TAIL,
+      }]);
+      fs.writeFileSync(file, JSON.stringify(doc));
+    ' >/dev/null 2>&1 || return 1
+  run_report_own bound "$P6_KEY"
+}
+# The NOCHAIN tree is the ONLY way to reach the fold's load-failure branch, and it is
+# what makes the once-per-row rule observable: both rows render in one report, so a
+# per-SLOT sentence appears four times where a per-ROW one appears twice.
+p6s_nofold_own() {
+  ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_DOCTOR_PLUGIN_DIR="$NOCHAIN" CLAUDE_PROJECT_DIR="$P6_PROJECT" \
+  ZDOC_BINDING=bound ZDOC_SESSION_KEY="$P6_KEY" ZDOC_SESSION_PROJECT_ROOT="$P6_PROJECT" \
+    node "$NOCHAIN/hooks/lib/zensu-doctor-report.js" 2>/dev/null
+}
+p6s_count() { printf '%s\n' "$1" | grep -oF "$2" | wc -l | tr -d ' '; }
+P6S_LONG="$(node -e 'process.stdout.write("A".repeat(300))')"
+P6S_ELIDE='… (elided)'
+P6S_NOFOLD_SENTENCE='not rendered — the display-safety module could not be loaded'
+P6S_TIME_SUPPRESSED='a recorded but unrenderable time'
+P6S_REASON_SUPPRESSED='for a recorded but unrenderable reason'
+
+# H1a — the 200-character cap. safeVerifyReason ended `.slice(0, 200)`; the fold path
+# that replaced it has no length test anywhere, and `line()` does not truncate, so the
+# only ceiling left is the document's own MAX_JSON_BYTES. The cap belongs INSIDE the
+# slot writer, on the RAW tail before the fold: applied at the row it would cut after
+# the delimiter was appended, and applied after the fold it would cut an escape
+# sequence in half.
+# The row's own prose carries a capital A of its own, so the payload is measured
+# against a BASELINE taken from a row whose reason carries none. A bare `-le 200`
+# over the whole row would be off by that prose and would fail a correct cap.
+P6S_SHORT_ROW="$(p6s_row_of "$(p6s_plant_render RESTORE_HISTORY_PHASE '3 component(s)' yes)" 'recorded project root')"
+P6S_PROSE_A="$(printf '%s' "$P6S_SHORT_ROW" | tr -cd 'A' | wc -c | tr -d ' ')"
+P6S_CAP_ROW="$(p6s_row_of "$(p6s_plant_render RESTORE_HISTORY_PHASE "$P6S_LONG" yes)" 'recorded project root')"
+P6S_CAP_A="$(( $(printf '%s' "$P6S_CAP_ROW" | tr -cd 'A' | wc -c | tr -d ' ') - P6S_PROSE_A ))"
+if [ -n "$P6S_CAP_ROW" ] && [ "$P6S_CAP_A" -ge 100 ]; then
+  check "H1a-control the long payload reached the rendered row ($P6S_CAP_A chars)" PASS
+else check "H1a-control the long payload never reached the row (got: $P6S_CAP_A)" FAIL; fi
+if [ "$P6S_CAP_A" -le 200 ]; then
+  check "H1a a long recorded reason is capped before it is folded ($P6S_CAP_A chars)" PASS
+else check "H1a a long recorded reason renders uncapped ($P6S_CAP_A chars)" FAIL; fi
+if printf '%s' "$P6S_CAP_ROW" | grep -qF "$P6S_ELIDE"; then
+  check "H1b an elided reason says so" PASS
+else check "H1b an elided reason is cut with no marker" FAIL; fi
+if [ -n "$P6S_SHORT_ROW" ] && ! printf '%s' "$P6S_SHORT_ROW" | grep -qF "$P6S_ELIDE"; then
+  check "H1b-control an ordinary reason is not marked elided" PASS
+else check "H1b-control an ordinary reason is marked elided (got: $P6S_SHORT_ROW)" FAIL; fi
+
+# H1c — the fold-failure sentence is stated once per ROW. CLAUDE.md states the rule
+# verbatim ("A fold failure is stated once per ROW, never once per slot") and names
+# "states the reason per slot" among the defects a port gets back; both rows carry two
+# slots each, so the per-slot shape emits it four times in one report and buries the
+# fact that BOTH values are missing.
+p6s_plant_render RESTORE_HISTORY_PHASE '2 component(s)' yes >/dev/null; P6S_H1C_RC_RESTORE=$?
+p6s_plant_render BASELINE_HISTORY_PHASE 'baseline gone' yes >/dev/null; P6S_H1C_RC_BASELINE=$?
+# H1c-land — the two plants above discarded their exit status with `>/dev/null`, which
+# is the shape this round removed twice elsewhere in the same change: history
+# accumulates, so a plant that silently failed leaves the rows rendering an EARLIER
+# payload while `H1c-control` still passes. H1c's own property happens to be
+# payload-independent, so nothing was mis-graded — but a rule applied unevenly inside
+# one change is the drift this suite exists to catch.
+if [ "${P6S_H1C_RC_RESTORE:-1}" = "0" ] && [ "${P6S_H1C_RC_BASELINE:-1}" = "0" ]; then
+  check "H1c-land both H1c plants reported success" PASS
+else check "H1c-land an H1c plant failed (restore=${P6S_H1C_RC_RESTORE:-unset} baseline=${P6S_H1C_RC_BASELINE:-unset})" FAIL; fi
+P6S_NOFOLD_ALL="$(p6s_nofold_own)"
+P6S_NOFOLD_RESTORE="$(p6s_row_of "$P6S_NOFOLD_ALL" 'recorded project root')"
+P6S_NOFOLD_BASELINE="$(p6s_row_of "$P6S_NOFOLD_ALL" 'workflow document was REBUILT')"
+if [ -n "$P6S_NOFOLD_RESTORE" ] && [ -n "$P6S_NOFOLD_BASELINE" ]; then
+  check "H1c-control both provenance rows render without the display module" PASS
+else check "H1c-control a provenance row is missing from the no-fold render" FAIL; fi
+P6S_NOFOLD_N="$(p6s_count "$P6S_NOFOLD_RESTORE" "$P6S_NOFOLD_SENTENCE")"
+if [ "$P6S_NOFOLD_N" = "1" ]; then
+  check "H1c the restore row states the fold failure exactly once" PASS
+else check "H1c the restore row states the fold failure $P6S_NOFOLD_N times" FAIL; fi
+P6S_NOFOLD_M="$(p6s_count "$P6S_NOFOLD_BASELINE" "$P6S_NOFOLD_SENTENCE")"
+if [ "$P6S_NOFOLD_M" = "1" ]; then
+  check "H1c2 the rebuild row states the fold failure exactly once" PASS
+else check "H1c2 the rebuild row states the fold failure $P6S_NOFOLD_M times" FAIL; fi
+
+# H1d — a suppressed slot must never render the ABSENT slot's phrase. The naive
+# per-row fix returns the empty string for an unrenderable slot, which makes the
+# caller's `stamp === ""` ternary say "an unrecorded time" about a timestamp that WAS
+# recorded — a positive claim about a value the renderer is refusing to show.
+if printf '%s' "$P6S_NOFOLD_RESTORE" | grep -qF "$P6S_TIME_SUPPRESSED" \
+  && ! printf '%s' "$P6S_NOFOLD_RESTORE" | grep -qF 'an unrecorded time'; then
+  check "H1d a suppressed timestamp is not reported as unrecorded" PASS
+else check "H1d a suppressed timestamp is reported as unrecorded" FAIL; fi
+if printf '%s' "$P6S_NOFOLD_RESTORE" | grep -qF "$P6S_REASON_SUPPRESSED"; then
+  check "H1d2 a suppressed reason says it was recorded" PASS
+else check "H1d2 a suppressed reason is dropped silently" FAIL; fi
+
+# H1e — the reserved-prefix exemption creates a JUNCTION the positional folds never
+# see: `foldSlot` is handed the TAIL, so it judges `tail + delimiter` and never
+# `head + tail`. Both prefixes end in a colon and a space, so a tail opening with a
+# colon renders ` :` at the junction and a tail opening with a space renders a double
+# space — the two shapes safeDisplayValue exists to escape, reproduced by the
+# exemption that skips it.
+P6S_PREFIX="$(C="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" node -e 'process.stdout.write(require(process.env.C).RESTORE_HISTORY_REASON_PREFIX)')"
+# The capture above is the only thing standing between a reworded junction test and a
+
+# H4 — the row note names its SUBJECT, and the subject is the slots that actually
+# failed. `provenanceRendering` reaches its note whenever EITHER slot failed, with the
+# plural "The recorded values above are …", while the surviving slot is still rendered
+# in full three clauses earlier — so the row tells a reader that a value it just printed
+# was not printed. The mixed case is the reachable one, not a corner: `ts` is an ISO
+# stamp this repair writes itself and is implausible as a carrier of `]`, while `reason`
+# is the session-writable field the bracket refusal exists for.
+P6S_MIX_ROW="$(p6s_row_of "$(p6s_plant_render RESTORE_HISTORY_PHASE 'x] forged' yes)" 'recorded project root')"
+if [ -n "$P6S_MIX_ROW" ] && printf '%s' "$P6S_MIX_ROW" | grep -qF "$P6S_REASON_SUPPRESSED" \
+  && printf '%s' "$P6S_MIX_ROW" | grep -qF 'most recently at ['; then
+  check "H4-control the mixed case renders a clean stamp beside a refused reason" PASS
+else check "H4-control the mixed case did not render" FAIL; fi
+if [ -n "$P6S_MIX_ROW" ] && ! printf '%s' "$P6S_MIX_ROW" | grep -qF 'The recorded values above'; then
+  check "H4 a single suppressed slot is not reported as both" PASS
+else check "H4 a single suppressed slot is reported as both" FAIL; fi
+# silently vacuous control: an empty value turns H1e-control's `grep -qF` into a match
+# against the empty string, which every input satisfies. Assert it loudly here rather
+# than letting three needles degrade in silence.
+if [ -n "$P6S_PREFIX" ]; then
+  check "H1e-prefix the reserved reason prefix was captured" PASS
+else check "H1e-prefix the reserved reason prefix could not be read, so every H1e needle degrades" FAIL; fi
+
+
+# H6 — the delimiter-renderer census is a hand-maintained numeral in TWO carriers that
+# disagree with each other, and whose shared clause is false in both: the code says
+# "THREE writers ... for three delimiter pairs" and CLAUDE.md says "FOUR renderers ...
+# for three delimiter pairs" after enumerating five members. Three functions carry a
+# delimiter refusal over TWO pairs. This is the drift this repository records against
+# its own rosters, so the fix is the criterion plus a grep, never a corrected number.
+P6S_CENSUS="$(grep -cE 'writers now hold one rule|renderers now hold one rule|for three delimiter pairs' "$PLUGIN_DIR/hooks/lib/zensu-doctor-report.js" || true)"
+if [ "$P6S_CENSUS" = "0" ]; then
+  check "H6 the delimiter census carries no hand-maintained numeral" PASS
+else check "H6 the delimiter census still carries a hand-maintained numeral ($P6S_CENSUS line(s))" FAIL; fi
+P6S_FOLLOWEDBY="$(grep -c "parenthesizedPath(ow" "$PLUGIN_DIR/hooks/lib/zensu-doctor-report.js" || true)"
+P6S_FOLLOWEDBY_OK="$(grep -c "parenthesizedPath(ow.*, ')')" "$PLUGIN_DIR/hooks/lib/zensu-doctor-report.js" || true)"
+if [ "$P6S_FOLLOWEDBY" != "0" ] && [ "$P6S_FOLLOWEDBY" = "$P6S_FOLLOWEDBY_OK" ]; then
+  check "H6b every parenthesizedPath call site passes the character that really follows" PASS
+else check "H6b a parenthesizedPath call site passes prose from after the closing paren ($P6S_FOLLOWEDBY_OK of $P6S_FOLLOWEDBY)" FAIL; fi
+# H5 — the seam window is TWO characters, and the comment above
+# `provenanceJunctionForges` rests the whole design on "Both rules are exactly two
+# characters wide". That is true today and was held by NOTHING: `SPACE_RUN = / {2,}/g`
+# sits in the same module, one copy-paste from the rule the window depends on, and a
+# widening there would make a forgery spanning the join invisible to a 2-char window —
+# the junction test would answer false, the unexempted re-fold would be skipped, and the
+# forged seam would render inside the `[...]` slot. The property pinned is the one the
+# window actually needs: whenever a rule matches at all, it matches some TWO-character
+# substring, so a match that spans the join must occupy the last character of the head
+# and the first of the tail. Exhaustive over the alphabet the two rules care about.
+P6S_SEAM="$(SAFE="$PLUGIN_DIR/hooks/lib/zensu-safe-display-v1.js" node -e '
+  const rules = require(process.env.SAFE);
+  const names = ["PAIR_SEPARATOR", "DOUBLE_SPACE"];
+  const alpha = [" ", ":", "a"];
+  const bad = [];
+  for (const name of names) {
+    const re = rules[name];
+    if (!(re instanceof RegExp)) { bad.push(name + "(absent)"); continue; }
+    const probe = (s) => new RegExp(re.source, re.flags.replace("g", "")).test(s);
+    let words = [""];
+    for (let len = 1; len <= 4; len += 1) {
+      const next = [];
+      for (const w of words) for (const c of alpha) next.push(w + c);
+      words = next;
+      for (const w of words) {
+        if (!probe(w)) continue;
+        let fits = false;
+        for (let i = 0; i + 2 <= w.length; i += 1) if (probe(w.slice(i, i + 2))) fits = true;
+        if (w.length < 2) fits = true;
+        if (!fits) { bad.push(name + "(" + JSON.stringify(w) + ")"); }
+      }
+    }
+  }
+  process.stdout.write(bad.length ? bad.join(" ") : "ok");
+' 2>&1)"
+if [ "$P6S_SEAM" = "ok" ]; then
+  check "H5 every seam rule matches within a two-character window" PASS
+else check "H5 a seam rule needs more than the two-character window: $P6S_SEAM" FAIL; fi
+P6S_JOIN_COLON="$(p6s_row_of "$(p6s_plant_render RESTORE_HISTORY_PHASE ':forged' yes)" 'recorded project root')"
+if [ -n "$P6S_JOIN_COLON" ] && ! printf '%s' "$P6S_JOIN_COLON" | grep -qF ' :'; then
+  check "H1e a tail opening with a colon cannot forge a pair at the junction" PASS
+else check "H1e a tail opening with a colon forges a pair at the junction" FAIL; fi
+P6S_JOIN_SPACE="$(p6s_row_of "$(p6s_plant_render RESTORE_HISTORY_PHASE ' forged' yes)" 'recorded project root')"
+# The needle is the SEAM, not a bare double space: every row of this report opens with
+# its own indentation and carries two spaces after the glyph, so a bare needle reports
+# the renderer's own layout as a forgery and can never fail for its stated reason.
+if [ -n "$P6S_JOIN_SPACE" ] && ! printf '%s' "$P6S_JOIN_SPACE" | grep -qF "$P6S_PREFIX forged"; then
+  check "H1e2 a tail opening with a space cannot forge a double space at the junction" PASS
+else check "H1e2 a tail opening with a space forges a double space at the junction" FAIL; fi
+P6S_JOIN_OK="$(p6s_row_of "$(p6s_plant_render RESTORE_HISTORY_PHASE '4 component(s)' yes)" 'recorded project root')"
+if [ -n "$P6S_JOIN_OK" ] && printf '%s' "$P6S_JOIN_OK" | grep -qF "$P6S_PREFIX"; then
+  check "H1e-control an honest prefixed reason still renders its prefix unescaped" PASS
+else check "H1e-control an honest prefixed reason renders its prefix escaped" FAIL; fi
+
+# H2 — the PROSE path slots. `foldPath` exists for exactly this and three rows already
+# use it, while six others interpolate a path raw into the same relayed report: the two
+# provenance rows' missing-token arms, the own-document MISSING row, its UNSAFE row's
+# component name, and the two could-not-classify arms. The consume reviewer upgraded
+# this because the class is only half closed — a fold applied to three rows and not to
+# the six beside them is the two-implementation shape this file records elsewhere.
+# Fixture A carries NO core, which is what reaches the could-not-classify arm; fixture
+# B carries a core with the two provenance tokens stripped, the only shape that reaches
+# the missing-token arms (an absent core takes A's arm instead).
+p6s_h2_tree() { # $1=dir  $2=core(yes|strip|no)
+  mkdir -p "$1/hooks/lib" "$1/.claude-plugin"
+  printf '{"name":"zensu","version":"1.2.3"}\n' > "$1/.claude-plugin/plugin.json"
+  printf '{"plugins":[{"name":"zensu","version":"1.2.3"}]}\n' > "$1/.claude-plugin/marketplace.json"
+  printf '{"hooks":{}}\n' > "$1/hooks/hooks.json"
+  cp "$PLUGIN_DIR/hooks/lib/zensu-doctor-report.js" "$1/hooks/lib/zensu-doctor-report.js"
+  cp "$PLUGIN_DIR/hooks/lib/zensu-safe-display-v1.js" "$1/hooks/lib/zensu-safe-display-v1.js"
+  case "$2" in
+    yes) cp "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" "$1/hooks/lib/session-control-core-v1.js" ;;
+    strip) SRC="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" DST="$1/hooks/lib/session-control-core-v1.js" node -e '
+             const fs = require("fs");
+             let s = fs.readFileSync(process.env.SRC, "utf8");
+             s = s.replace(/\n  BASELINE_HISTORY_PHASE,/, "\n").replace(/\n  RESTORE_HISTORY_PHASE,/, "\n");
+             fs.writeFileSync(process.env.DST, s);
+           ' ;;
+  esac
+}
+p6s_h2_report() { # $1=plugin dir  $2=project  $3=report to run (default: the tree's own)
+  ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_DOCTOR_PLUGIN_DIR="$1" CLAUDE_PROJECT_DIR="$2" \
+  ZDOC_BINDING=bound ZDOC_SESSION_KEY="$P6_KEY" ZDOC_SESSION_PROJECT_ROOT="$2" \
+    node "${3:-$1/hooks/lib/zensu-doctor-report.js}" 2>/dev/null
+}
+
+# H3 — `autopilotRows` interpolates the state DIRECTORY raw at six sites, and the census
+# above `stateProjectRoot` says it "is printed RAW in three rows". Those three are
+# `stateBlock`'s own, which H2 folded — so the comment now points at the folded half and
+# is silent about six that are not, from ONE variable in ONE call chain. The asymmetry is
+# visible inside one sentence: the run FILENAMES are withheld by `autopilotSafeNames` for
+# carrying ` : `, and the directory carrying the same bytes is concatenated beside them.
+# `stateProjectRoot` screens the recorded root with CONTROL_BYTE_RE only, so every
+# positional rule survives it.
+P6S_AP_FORGE="$SBOX/ap : forged"
+mkdir -p "$P6S_AP_FORGE/.zensu/state"
+rm -f "$AP_STATE"/autopilot-run-*.json
+ap_run_valid run_fold GATES "$AP_OWN" "/w/t"
+cp "$AP_STATE/autopilot-run-run_fold.json" "$P6S_AP_FORGE/.zensu/state/"
+P6S_AP_ROW="$(ZDOC_BINDING=bound ZDOC_SESSION_KEY="$AP_OWN" \
+  ZDOC_SESSION_PROJECT_ROOT="$P6S_AP_FORGE" \
+  ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" \
+  CLAUDE_PROJECT_DIR="$AP_P" node "$REPORT" 2>/dev/null | grep -F 'autopilot:' | head -1)"
+if [ -n "$P6S_AP_ROW" ] && printf '%s' "$P6S_AP_ROW" | grep -qF 'forged'; then
+  check "H3-control the autopilot row renders and carries the recorded directory" PASS
+else check "H3-control the autopilot row did not render its directory" FAIL; fi
+if [ -n "$P6S_AP_ROW" ] && printf '%s' "$P6S_AP_ROW" | grep -qF 'forged' \
+  && ! printf '%s' "$P6S_AP_ROW" | grep -qF ' : '; then
+  check "H3 the autopilot row folds the state directory" PASS
+else check "H3 the autopilot row renders the state directory raw" FAIL; fi
+rm -f "$AP_STATE"/autopilot-run-*.json
+P6S_H2_NOCORE="$SBOX/h2a : forged"
+p6s_h2_tree "$P6S_H2_NOCORE" no
+P6S_H2_ROW_A="$(p6s_row_of "$(p6s_h2_report "$P6S_H2_NOCORE" "$P6_PROJECT")" 'could not be classified')"
+if [ -n "$P6S_H2_ROW_A" ]; then
+  check "H2a-control the could-not-classify arm renders from a coreless tree" PASS
+else check "H2a-control the could-not-classify arm did not render" FAIL; fi
+if [ -n "$P6S_H2_ROW_A" ] && printf '%s' "$P6S_H2_ROW_A" | grep -qF 'forged' && ! printf '%s' "$P6S_H2_ROW_A" | grep -qF ' : '; then
+  check "H2a the could-not-classify arm folds the plugin directory" PASS
+else check "H2a the could-not-classify arm renders the plugin directory raw" FAIL; fi
+
+P6S_H2_STRIP="$SBOX/h2b : forged"
+p6s_h2_tree "$P6S_H2_STRIP" strip
+P6S_H2_REPORT="$(p6s_h2_report "$P6S_H2_STRIP" "$P6_PROJECT")"
+P6S_H2_REBUILD="$(p6s_row_of "$P6S_H2_REPORT" 'not checked for rebuild')"
+P6S_H2_RESTORE="$(p6s_row_of "$P6S_H2_REPORT" 'restore provenance')"
+if [ -n "$P6S_H2_REBUILD" ] && [ -n "$P6S_H2_RESTORE" ]; then
+  check "H2b-control both missing-token arms render from the stripped core" PASS
+else check "H2b-control a missing-token arm did not render" FAIL; fi
+if [ -n "$P6S_H2_REBUILD" ] && printf '%s' "$P6S_H2_REBUILD" | grep -qF 'forged' && ! printf '%s' "$P6S_H2_REBUILD" | grep -qF ' : '; then
+  check "H2b the rebuild missing-token arm folds the plugin directory" PASS
+else check "H2b the rebuild missing-token arm renders the plugin directory raw" FAIL; fi
+if [ -n "$P6S_H2_RESTORE" ] && printf '%s' "$P6S_H2_RESTORE" | grep -qF 'forged' && ! printf '%s' "$P6S_H2_RESTORE" | grep -qF ' : '; then
+  check "H2b2 the restore missing-token arm folds the plugin directory" PASS
+else check "H2b2 the restore missing-token arm renders the plugin directory raw" FAIL; fi
+
+# H2c — the own-document rows. Their slot is a PROJECT path rather than a plugin one,
+# so it is reachable from inside the session rather than from a launch variable, which
+# is the weaker precondition of the two and the reason S4 named them.
+P6S_FORGE_PROJECT="$SBOX/h2p : forged"
+mkdir -p "$P6S_FORGE_PROJECT/.zensu/state"
+rm -f "$P6S_FORGE_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json"
+P6S_H2_OWN="$(p6s_h2_report "$SBOX/plug" "$P6S_FORGE_PROJECT" "$REPORT" | grep -F 'own workflow document is MISSING' | head -1)"
+if [ -n "$P6S_H2_OWN" ]; then
+  check "H2c-control the own-document MISSING row renders for a forging project root" PASS
+else check "H2c-control the own-document MISSING row did not render" FAIL; fi
+if [ -n "$P6S_H2_OWN" ] && printf '%s' "$P6S_H2_OWN" | grep -qF 'forged' && ! printf '%s' "$P6S_H2_OWN" | grep -qF ' : '; then
+  check "H2c the own-document MISSING row folds its path" PASS
+else check "H2c the own-document MISSING row renders its path raw" FAIL; fi
+
+# H2-land — every H2 check asserts the ABSENCE of a forged pair, and an absence is
+# satisfied by a row that carries no path at all. That state is reachable: both path
+# renderers return `(not rendered — …)` with no path when the display module cannot be
+# loaded, so dropping the safe-display copy from `p6s_h2_tree` — or replacing either
+# `foldPath` call with `''` — turns all four into unconditional passes while every
+# `-control` stays green, because a control that tests only `[ -n "$ROW" ]` cannot tell
+# a folded path from no path. Each negative needle therefore needs a POSITIVE landing
+# conjunct on the same line. The needle is the fixture's own `forged` leaf: it survives
+# whichever branch `safeDisplayValue` takes, so the check does not have to predict an
+# escape spelling to prove the path reached the row.
+P6S_H2_ABSENCE_ONLY=""
+for p6s_h2_var in P6S_H2_ROW_A P6S_H2_REBUILD P6S_H2_RESTORE P6S_H2_OWN; do
+  p6s_h2_neg="$(grep -F "\$$p6s_h2_var\" | grep -qF ' : '" "$0" | grep -F '! printf')"
+  [ -n "$p6s_h2_neg" ] || { P6S_H2_ABSENCE_ONLY="$P6S_H2_ABSENCE_ONLY $p6s_h2_var(no-negative)"; continue; }
+  printf '%s' "$p6s_h2_neg" | grep -qF "grep -qF 'forged'" \
+    || P6S_H2_ABSENCE_ONLY="$P6S_H2_ABSENCE_ONLY $p6s_h2_var"
+done
+if [ -z "$P6S_H2_ABSENCE_ONLY" ]; then
+  check "H2-land every H2 check carries a positive landing conjunct" PASS
+else check "H2-land an H2 check is absence-only:$P6S_H2_ABSENCE_ONLY" FAIL; fi
 
 # P6g — the UNSAFE arm. A hard link passes every test a plain regular file passes
 # except nlink, so it is the shape a presence test admits. The row must NOT offer

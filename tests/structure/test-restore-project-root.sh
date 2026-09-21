@@ -445,6 +445,13 @@ else check "R6d  the adopt header counts three bounded exceptions" FAIL; fi
 # elsewhere in the file.
 R6_SECTION="$(awk '/^## Restoring a Vanished Recorded Project Root/{on=1} on{print} on && /^\*\*Known gaps/{exit}' \
   "$PLUGIN_DIR/CLAUDE.md")"
+# The CLOSED delimiter paragraph lives BELOW the Known-gaps marker that ends the slice
+# above, so it needs a slice of its own, anchored on its own opening words.
+R6_FULL_DELIM="$(awk '/^\*\*CLOSED, and recorded so the closed form is not re-opened/{on=1} on{print} on && /^$/{if(n++)exit}' \
+  "$PLUGIN_DIR/CLAUDE.md")"
+if [ -n "$R6_FULL_DELIM" ]; then
+  check "R6i6-control the CLOSED delimiter paragraph slice is non-empty" PASS
+else check "R6i6-control the CLOSED delimiter paragraph slice is non-empty" FAIL; fi
 if [ -n "$R6_SECTION" ]; then
   check "R6h-control the governing section slice is non-empty" PASS
 else check "R6h-control the governing section slice is non-empty" FAIL; fi
@@ -454,6 +461,39 @@ else check "R6h  the roster names the doctor row this feature added" FAIL; fi
 if printf '%s' "$R6_SECTION" | grep -qF 'RESTORE_HISTORY_PHASE'; then
   check "R6i  the roster names the phase token that row reads from the core" PASS
 else check "R6i  the roster names the phase token that row reads from the core" FAIL; fi
+# R6i2-R6i4 — the round that hardened those two rows added a writer, a row-level
+# decision, a cap and a second delimiter-bounded path renderer, and the roster named
+# none of them. A roster is what a maintainer works FROM, so a symbol missing there is
+# a symbol nobody will keep in step; this repository records the same failure against
+# its own rosters three times over.
+for r6i2_sym in provenanceSlot provenanceRendering provenanceJunctionForges; do
+  if printf '%s' "$R6_SECTION" | grep -qF "$r6i2_sym"; then
+    check "R6i2  the roster names $r6i2_sym" PASS
+  else check "R6i2  the roster does not name $r6i2_sym" FAIL; fi
+done
+if printf '%s' "$R6_SECTION" | grep -qF 'PROVENANCE_RENDER_MAX'; then
+  check "R6i3  the roster names the provenance render cap" PASS
+else check "R6i3  the roster does not name the provenance render cap" FAIL; fi
+if printf '%s' "$R6_SECTION" | grep -qF 'parenthesizedPath'; then
+  check "R6i4  the roster names the second delimiter-bounded path renderer" PASS
+else check "R6i4  the roster does not name the second delimiter-bounded path renderer" FAIL; fi
+# R6i5 — the port census one section over. It named `foldPath` a THIRD member beside
+# `foldSlot` and `parentheticalWriter`; a fourth landed with this round, and a census
+# that undercounts is the exact shape this file records against itself elsewhere.
+R6I5_PORT="$(awk '/^## Adopting a Record Across a Lineage Break/{on=1} on{print} on && /^## /{if(++n>1)exit}' \
+  "$PLUGIN_DIR/CLAUDE.md")"
+if [ -n "$R6I5_PORT" ]; then
+  check "R6i5-control the port-census slice is non-empty" PASS
+else check "R6i5-control the port-census slice is non-empty" FAIL; fi
+if printf '%s' "$R6I5_PORT" | grep -qF 'parenthesizedPath'; then
+  check "R6i5  the port census names the fourth display-rule member" PASS
+else check "R6i5  the port census omits the fourth display-rule member" FAIL; fi
+# R6i6 — the CLOSED delimiter paragraph recorded the `)` half only, while the two
+# provenance rows wrap in `[` and `]` and refuse on their own delimiter with their own
+# sentence. A paragraph that records one half of a two-delimiter rule reads as complete.
+if printf '%s' "$R6_FULL_DELIM" | grep -qF 'FOLD_UNDELIMITABLE_BRACKET'; then
+  check "R6i6  the CLOSED delimiter paragraph records the bracket half" PASS
+else check "R6i6  the CLOSED delimiter paragraph records only the parenthesis half" FAIL; fi
 # ...and the UNOBVIOUS-direction coupling, which this repository requires to be written
 # down wherever it exists: R13 grades tests/SUITE-OVERVIEW.md and the R12 family grades
 # comment prose inside session-control-core-v1.js, so an edit to either reddens a suite
@@ -467,10 +507,36 @@ else check "R6i  the roster names the phase token that row reads from the core" 
 # about a missing provenance entry for a document nothing rebuilt. Anchored on the
 # GUARD, not on a bare comparison: this feature has other `provenance !== "recorded"`
 # tests that are deliberately different predicates.
+# THREE weaknesses were measured in the first spelling of this helper and all three are
+# answered here. (1) It did not strip comments, unlike six sibling slicers in this file,
+# so a fallback reduced to `!== "recorded"` sitting beside a comment that happens to
+# name `existing` still satisfied the window. (2) It counted RAW matches of the symbol,
+# which is 6 across 3 carriers — one of them a comment mention — so the control's floor
+# of 3 survived a deleted carrier. It counts CARRIERS now: a carrier is the `typeof …
+# ===` guard line that opens the ternary, which is one per site by construction. (3) It
+# had no bite; R10c-bite below plants a stripped fallback and requires the check to see
+# it.
 r10c_fallbacks_ok() {
   awk '
-    /core\.baselineProvenanceUnrecorded/ { n++; win = 3; buf = ""; }
-    win > 0 { buf = buf $0 " "; win--; if (win == 0 && buf !~ /existing/) bad++ }
+    { line = $0; sub(/\/\/.*$/, "", line) }
+    line ~ /typeof[[:space:]]+core\.baselineProvenanceUnrecorded[[:space:]]*===/ {
+      n++; open = 1; left = 8; buf = ""
+    }
+    open {
+      buf = buf line " "; left--
+      # The window ENDS at the statement, not after a fixed number of lines. A count was
+      # tried first and was wrong in the direction that matters: the three carriers are
+      # 3, 3 and 4 lines long, so a 3-line window reported the four-line one as missing
+      # its `existing` clause, and widening the count to 4 would admit an unrelated
+      # following line and break again on the first five-line carrier. The terminators
+      # are the two shapes these statements actually take — `)) {` for the two `if`
+      # carriers and a trailing `;` for the `const` one — and `left` is a runaway guard,
+      # not a window: a carrier that never terminates is reported bad rather than
+      # silently accepted.
+      if (line ~ /\)\)[[:space:]]*\{[[:space:]]*$/ || line ~ /;[[:space:]]*$/ || left <= 0) {
+        open = 0; if (buf !~ /existing/) bad++
+      }
+    }
     END { printf "%d %d", n+0, bad+0 }
   ' "$1"
 }
@@ -482,16 +548,156 @@ for r10c_f in $R10C_FILES; do
   R10C_SEEN=$((R10C_SEEN + r10c_n))
   [ "$r10c_b" -eq 0 ] || R10C_BAD="$R10C_BAD $(basename "$r10c_f")($r10c_b)"
 done
-if [ "$R10C_SEEN" -ge 3 ]; then
-  check "R10c-control the guarded fallbacks are found ($R10C_SEEN sites)" PASS
-else check "R10c-control the guarded fallbacks are found ($R10C_SEEN sites)" FAIL; fi
+if [ "$R10C_SEEN" -eq 3 ]; then
+  check "R10c-control all three guarded fallbacks are found ($R10C_SEEN carriers)" PASS
+else check "R10c-control expected 3 guarded fallbacks, found $R10C_SEEN" FAIL; fi
 if [ -z "$R10C_BAD" ]; then
   check "R10c every guarded fallback excludes \`existing\` as the shared predicate does" PASS
 else check "R10c a guarded fallback omits the \`existing\` exclusion:$R10C_BAD" FAIL; fi
+# R10c-bite — the check itself, driven against a carrier whose fallback was reduced to
+# the bare inequality while a comment beside it still names `existing`. That is the exact
+# shape the unstripped window admitted, so a helper that regressed to it reports a clean
+# tree here and this row turns red.
+R10C_BITE_SRC="$STATE_DIR/r10c-bite.js"
+# The `existing` mention sits INSIDE the window, as a trailing comment on a line the
+# window already holds. On line 1 it was processed while `open` was still 0 and never
+# entered `buf`, so a helper that had LOST its comment stripping returned the same
+# `1 1` as one that kept it — the bite could not fail for its stated reason. The line
+# chosen is the non-terminator one: on the closing line the strip and the window end
+# in the same pass, which is a second thing to get wrong for no gain.
+{
+  printf '%s\n' '    if (typeof core.baselineProvenanceUnrecorded === "function"'
+  printf '%s\n' '      ? core.baselineProvenanceUnrecorded(baseline) // not the existing exclusion'
+  printf '%s\n' '      : Boolean(baseline && baseline.provenance !== "recorded")) {'
+} > "$R10C_BITE_SRC"
+R10C_BITE_OUT="$(r10c_fallbacks_ok "$R10C_BITE_SRC")"
+if [ "${R10C_BITE_OUT%% *}" = "1" ] && [ "${R10C_BITE_OUT##* }" = "1" ]; then
+  check "R10c-bite the check sees a fallback that dropped the \`existing\` exclusion" PASS
+else check "R10c-bite the check cannot see a stripped fallback (got: $R10C_BITE_OUT)" FAIL; fi
+# R10c-bite2 — the other direction. A carrier whose exclusion is real CODE must be
+# reported clean, or the row above would pass for a helper that simply calls every
+# fallback bad. Same three lines, the comment replaced by the genuine predicate.
+R10C_OK_SRC="$STATE_DIR/r10c-ok.js"
+{
+  printf '%s\n' '    if (typeof core.baselineProvenanceUnrecorded === "function"'
+  printf '%s\n' '      ? core.baselineProvenanceUnrecorded(baseline)'
+  printf '%s\n' '      : Boolean(baseline && baseline.provenance !== "recorded" && baseline.provenance !== "existing")) {'
+} > "$R10C_OK_SRC"
+R10C_OK_OUT="$(r10c_fallbacks_ok "$R10C_OK_SRC")"
+if [ "${R10C_OK_OUT%% *}" = "1" ] && [ "${R10C_OK_OUT##* }" = "0" ]; then
+  check "R10c-bite2 a fallback whose exclusion is real code is reported clean" PASS
+else check "R10c-bite2 a correct fallback is reported bad (got: $R10C_OK_OUT)" FAIL; fi
+
+# R10d — the eager-vs-lazy criterion must not rest on a version range. `core` is
+# required RELATIVELY from this file's own directory, so the core it meets is always
+# its own sibling in the same tree; the lineage rule decides which RECORD a runtime may
+# serve, not which module a file requires. A criterion that names a version range is
+# therefore false for the file it governs, and it is the kind of false-but-plausible
+# rationale a later reader extends rather than checks. The needle is the CLAIM, both
+# ways: the retired grounding must be absent and the partial-tree grounding present.
+R10D_SLICE="$(awk '/WHY THE SIBLING `REMEDY` TABLE ABOVE STAYS EAGER/,/^const RESTORE_REMEDY_TABLE|^let RESTORE_REMEDY_TABLE/' \
+  "$PLUGIN_DIR/hooks/lib/session-adopt-report-v1.js")"
+if [ -n "$R10D_SLICE" ]; then
+  check "R10d-control the eager-vs-lazy rationale is located" PASS
+else check "R10d-control the eager-vs-lazy rationale is located" FAIL; fi
+R10D_FLAT="$(printf '%s' "$R10D_SLICE" | tr '\n' ' ' | sed 's|//| |g')"
+case "$R10D_FLAT" in
+  *'span a version range'*)
+    check "R10d the eager-vs-lazy criterion still grounds itself in a version range" FAIL ;;
+  *'partial tree'*|*'PARTIAL tree'*)
+    check "R10d the eager-vs-lazy criterion rests on require-time blast radius, not a version range" PASS ;;
+  *) check "R10d the eager-vs-lazy criterion names neither grounding (got: $R10D_FLAT)" FAIL ;;
+esac
 
 if printf '%s' "$R6_SECTION" | grep -qF 'SUITE-OVERVIEW.md'; then
   check "R6j  the section records the coupling that fires in the unobvious direction" PASS
 else check "R6j  the section records the coupling that fires in the unobvious direction" FAIL; fi
+
+# R6k/R6l — the section must not describe the PRE-CONSOLIDATION display-path shape. Two
+# paragraphs did, and both were falsified by the same change: `zensu_safe_display_path`
+# became the single bound, it reads every constant WITH `:-`, and the Stop hook CALLS it
+# rather than consuming the three constants by name. The hook's own comment carries the
+# retraction; this file asserted the retired shape while §"Restoring a Vanished Recorded
+# Project Root" already recorded the consolidation, so the governing document
+# contradicted itself as well as the code. Both needles are NEGATIVE, so each carries a
+# control proving it can match at all.
+# R6_SECTION stops at `**Known gaps`, which is DELIBERATE for the roster checks above
+# and wrong for these two: both retired paragraphs sit BELOW that marker, so the needles
+# passed over a section slice that never contained them — measured, the mutation that
+# restores the retired claim left R6k green. R6_FULL is the whole section, to the next
+# `## ` heading.
+R6_FULL="$(awk '/^## Restoring a Vanished Recorded Project Root/{on=1; next} on && /^## /{exit} on{print}' \
+  "$PLUGIN_DIR/CLAUDE.md")"
+if [ -n "$R6_FULL" ] && [ "$(printf '%s\n' "$R6_FULL" | wc -l)" -gt "$(printf '%s\n' "$R6_SECTION" | wc -l)" ]; then
+  check "R6k-slice the full-section slice is non-empty and wider than the roster slice" PASS
+else check "R6k-slice the full-section slice is not wider than the roster slice" FAIL; fi
+if printf '%s' "$R6_FULL" | grep -qF 'forbids a default there'; then
+  check "R6k  the section still claims the Stop hook hand-copies the conjuncts" FAIL
+else check "R6k  the section does not claim the Stop hook hand-copies the conjuncts" PASS; fi
+if printf '%s' 'spelled WITHOUT `:-` because `R8p6` forbids a default there' | grep -qF 'forbids a default there'; then
+  check "R6k-control the retired-conjunct needle matches its own literal" PASS
+else check "R6k-control the retired-conjunct needle cannot match its own literal" FAIL; fi
+if printf '%s' "$R6_FULL" | grep -qF 'then consumes by name'; then
+  check "R6l  the section still claims the Stop hook reads the three constants by name" FAIL
+else check "R6l  the section does not claim the Stop hook reads the three constants by name" PASS; fi
+if printf '%s' '`hooks/stop-chain-enforcer.sh` then consumes by name' | grep -qF 'then consumes by name'; then
+  check "R6l-control the retired-by-name needle matches its own literal" PASS
+else check "R6l-control the retired-by-name needle cannot match its own literal" FAIL; fi
+
+# R13b — the two DERIVED numerals in SUITE-OVERVIEW.md's rowless-file paragraph. They
+# are a file count and a row count over the same directory and the same table, so
+# nothing about them is a judgement: both are measurable here, and both went stale by
+# one the moment this round added a unit file with a row. R13 grades the per-row
+# registration counts and is structurally blind to these two, which is why the delta
+# surviving is exactly what makes the staleness silent.
+R13B_FILES="$(ls "$PLUGIN_DIR"/tests/structure/*.test.js 2>/dev/null | wc -l | tr -d ' ')"
+
+# R6i7 — the delimiter-renderer census had a numeral in BOTH carriers and they
+# disagreed: the renderer said "THREE writers" and this file said "FOUR renderers",
+# after enumerating five members, and the clause both shared — "three delimiter pairs"
+# — was false in both, there being two. The code side is pinned by H6 in test-doctor.sh;
+# this is the other half.
+if [ -z "$(grep -E 'renderers now hold one rule|writers now hold one rule|three delimiter pairs' "$PLUGIN_DIR/CLAUDE.md" | grep -vE '"(three delimiter pairs|THREE writers|FOUR renderers)"')" ]; then
+  check "R6i7 the CLAUDE.md delimiter census carries no hand-maintained numeral" PASS
+else check "R6i7 the CLAUDE.md delimiter census still carries a hand-maintained numeral" FAIL; fi
+
+# R6i8 — the provenance family is consumed by BOTH provenance rows, but only the restore
+# section's roster names it. `baselineRebuiltRow` is governed by §"Workflow-Baseline
+# Repair", whose own roster named none of the symbols that row now consumes — so R6i2-R6i4
+# machine-checked the half that was already correct.
+R6I8_SLICE="$(awk '/^## Workflow-Baseline Repair/{on=1; next} on && /^## /{exit} on{print}' "$PLUGIN_DIR/CLAUDE.md")"
+R6I8_MISSING=""
+for r6i8_sym in provenanceSlot provenanceRendering sharedWorkflowRead PROVENANCE_RENDER_MAX; do
+  printf '%s' "$R6I8_SLICE" | grep -qF "$r6i8_sym" || R6I8_MISSING="$R6I8_MISSING $r6i8_sym"
+done
+if [ -n "$R6I8_SLICE" ] && [ -z "$R6I8_MISSING" ]; then
+  check "R6i8 the Workflow-Baseline Repair roster names the provenance family" PASS
+else check "R6i8 the Workflow-Baseline Repair roster misses:$R6I8_MISSING" FAIL; fi
+
+# R6i9 — the unobvious-coupling paragraph said "TWO" and then listed three, and this
+# round added a fourth. A numeral beside its own enumeration is the failure this file
+# records about its own rosters.
+if ! grep -qF 'TWO couplings here fire in the UNOBVIOUS direction' "$PLUGIN_DIR/CLAUDE.md"; then
+  check "R6i9 the coupling paragraph states members rather than a numeral" PASS
+else check "R6i9 the coupling paragraph still opens with a numeral" FAIL; fi
+
+# R13c — ONE population, ONE table, TWO greps. R13B_ROWS and R13_ROWS derive the unit-file
+# row set through different character classes, so an underscore-named unit file would be
+# graded by R13 and uncounted by R13b — silently, which is the failure R13b exists to catch.
+R13C_A="$(grep -o "\[a-z0-9[^]]*\]+\\\\.test\\\\.js" "$0" | sort -u | tr '\n' ' ')"
+if [ "$(printf '%s' "$R13C_A" | tr ' ' '\n' | grep -c .)" = "1" ]; then
+  check "R13c both unit-file row derivations share one character class" PASS
+else check "R13c the unit-file row derivations use different character classes: $R13C_A" FAIL; fi
+R13B_ROWS="$(grep -cE '^\| `[a-z0-9._-]+\.test\.js` \|' "$PLUGIN_DIR/tests/SUITE-OVERVIEW.md" | tr -d ' ')"
+R13B_PARA="$(tr '\n' ' ' < "$PLUGIN_DIR/tests/SUITE-OVERVIEW.md" \
+  | sed 's/.*re-derived by comparing//; s/rows rather than by editing.*//')"
+if [ -n "$R13B_PARA" ] && [ "$R13B_FILES" -gt 0 ] && [ "$R13B_ROWS" -gt 0 ]; then
+  check "R13b-control the rowless-file paragraph and both measurements are readable" PASS
+else check "R13b-control the rowless-file paragraph or a measurement is unreadable" FAIL; fi
+if printf '%s' "$R13B_PARA" | grep -qF "($R13B_FILES files)" \
+  && printf '%s' "$R13B_PARA" | grep -qF "table's $R13B_ROWS"; then
+  check "R13b the rowless-file paragraph states the measured file and row counts" PASS
+else check "R13b the rowless-file paragraph is stale (measured $R13B_FILES files / $R13B_ROWS rows, says:$R13B_PARA)" FAIL; fi
 # The safety argument is stated where the gate's admission rests, not only in the
 # design note: a reviewer deciding whether to widen this table reads THIS file.
 if grep -qF -- 'none of them takes a value' "$RECOGNIZER"; then
