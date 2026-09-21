@@ -411,6 +411,72 @@ if [ -z "$BLOCKING_HOOK" ] && [ -n "$COVERED_HOOKS" ]; then
 else
   check "O21a these Bash-matcher hooks still deny the diagnostic:$BLOCKING_HOOK" FAIL
 fi
+
+# --- O21c/O21d: the SECOND recognized command, the one every surface prescribes ---
+#
+# `zensu-doctor-invocation.js` admits two shapes, not one, and the second WRITES.
+# hooks/pre-write-secret-scan.sh carries a comment asserting the gates admit
+# `bash <adopt script>` with the closed two-literal set `--restore-root` /
+# `--confirm` — and nothing executed it. O21a above drives only zensu-doctor.sh, and
+# the `--restore-root` spelling appeared in this suite solely as a grep over the
+# doctor's own OUTPUT. The recognizer's verdict is unit-tested in isolation
+# (tests/structure/zensu-doctor-invocation.test.js); the four hooks' ALLOW was not.
+#
+# That gap is worse than an ordinary coverage hole because a deny from ANY hook on
+# this matcher wins, and it would land in exactly the state where /zensu:doctor, the
+# capability gate, the Stop release and both skills all tell the user to run this
+# command. The loop is the same one O21a uses, so a hook added later is covered
+# without editing this block twice.
+ADOPT_SH="$PLUGIN_DIR/hooks/lib/zensu-session-adopt.sh"
+RESTORE_REPORT_PAYLOAD="$(bash_payload "bash $ADOPT_SH --restore-root")"
+RESTORE_CONFIRM_PAYLOAD="$(bash_payload "bash $ADOPT_SH --restore-root --confirm")"
+for adopt_case in "report:$RESTORE_REPORT_PAYLOAD" "confirm:$RESTORE_CONFIRM_PAYLOAD"; do
+  adopt_label="${adopt_case%%:*}"
+  adopt_payload="${adopt_case#*:}"
+  ADOPT_BLOCKING=""
+  ADOPT_COVERED=""
+  while IFS= read -r hook_name; do
+    [ -n "$hook_name" ] || continue
+    hook_path="$PLUGIN_DIR/hooks/$hook_name"
+    [ -f "$hook_path" ] || continue
+    ADOPT_COVERED="$ADOPT_COVERED $hook_name"
+    [ "$(run_gate "$hook_path" "$adopt_payload" "$GONE_DATA")" = "deny" ] \
+      && ADOPT_BLOCKING="$ADOPT_BLOCKING $hook_name"
+  done <<EOF
+$BASH_MATCHER_HOOKS
+EOF
+  if [ -z "$ADOPT_BLOCKING" ] && [ -n "$ADOPT_COVERED" ]; then
+    check "O21c EVERY Bash-matcher hook admits the restore command ($adopt_label form)" PASS
+  else
+    check "O21c these Bash-matcher hooks deny the restore command ($adopt_label form):$ADOPT_BLOCKING" FAIL
+  fi
+done
+# The discrimination that keeps O21c from passing for the wrong reason, and it is
+# NOT a deny: measured here, an argument outside the closed two-literal set is
+# ALLOWED by every Bash-matcher hook, because `bash <script> <arg>` carries no
+# redirect, tee or heredoc token and the source-write parser therefore sees no write
+# at all. The recognized-command allowance is an EARLY-ALLOW shortcut, not the thing
+# that refuses a foreign spelling; what refuses it is the adopt script's own argv
+# parser, one process later.
+#
+# So the property to hold at THIS layer is the recognizer's own verdict:
+# `zensu_doctor_allowed` must answer yes for the closed set and no for anything
+# else. Without this row O21c stays green against a recognizer that admitted
+# anything named zensu-session-adopt.sh.
+r_recognized() {
+  CMD="$1" SESSION_SH="$PLUGIN_DIR/hooks/lib/zensu-session.sh" \
+  PAYLOAD="$(bash_payload "$1")" bash -c '
+    # shellcheck disable=SC1090
+    source "$SESSION_SH" || exit 9
+    if zensu_doctor_allowed "$PAYLOAD"; then printf yes; else printf no; fi
+  ' 2>/dev/null
+}
+if [ "$(r_recognized "bash $ADOPT_SH --restore-root")" = "yes" ]; then
+  check "O21d-control the recognizer admits the closed two-literal set" PASS
+else check "O21d-control the recognizer admits the closed two-literal set" FAIL; fi
+if [ "$(r_recognized "bash $ADOPT_SH --restore-root /tmp/somewhere-else")" = "no" ]; then
+  check "O21d the recognizer refuses an argument outside the closed set" PASS
+else check "O21d the recognizer refuses an argument outside the closed set" FAIL; fi
 if [ "$(bash_gate "git status" "$GONE_DATA")" = "allow" ]; then
   check "O22 an ordinary read-only command is not collateral damage" PASS
 else

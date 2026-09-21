@@ -137,13 +137,19 @@ if ! zensu_bind_hook_session "$INPUT"; then
     # [\u0000-\u001f\u007f] plus non-absolute and non-normalized, so U+2028, the
     # bidi overrides and a forged `label : value` pair all reach here unfolded.
     #
-    # THE PRESENCE TESTS ARE THE GUARANTEE, and they are written WITHOUT `:-` on
-    # purpose: R8p6 forbids a default here, because a default is how a weaker bound
-    # gets substituted silently. They are fail-closed in both regimes anyway — under
-    # this file's `set -u` an unset constant aborts the substitution and the `if !`
-    # below catches it, and with `set -u` off the test sees an empty string and
-    # takes the placeholder. What they add over that is the EMPTY case, which
-    # neither regime catches: MEASURED on bash 5.2.15, an empty
+    # THE BOUND IS `zensu_safe_display_path`, and this file no longer names the
+    # constants it reads. An earlier revision of this block claimed the guarantee
+    # was a set of presence tests written here WITHOUT `:-`, and cited R8p6 as
+    # forbidding a default — both halves described code that has since moved into
+    # the shared function, which reads every constant WITH `:-` and fails closed on
+    # its own explicit emptiness arms instead. R8p7 through R8p11 in
+    # tests/structure/test-restore-project-root.sh EXECUTE those arms through this
+    # hook's own slice, which is what holds the property now; R8p6 survives as a
+    # negative pin that this file does not re-spell the bound inline, with a
+    # control proving its needle still matches.
+    #
+    # The emptiness arms are the case neither shell regime catches on its own:
+    # MEASURED on bash 5.2.15, an empty
     # ZENSU_SAFE_DISPLAY_PATH_RE made the `[[ =~ ]]` match everything and this arm
     # printed a raw injected value; on bash 3.2.57 the same input already degraded,
     # because an empty ERE is a regcomp error there.
@@ -338,11 +344,32 @@ if ! PROJECT_ROOT="$(zensu_resolve_project_dir)"; then
   # bind-time branch does, and removing it would turn that race into the wedge
   # this hook no longer has.
   if [ -n "${ZENSU_PROJECT_ROOT:-}" ] && [ ! -d "${ZENSU_PROJECT_ROOT}" ]; then
-    echo "zensu chain-enforcer: releasing Stop — the immutable project root of this session (${ZENSU_PROJECT_ROOT}) no longer exists, so no review-chain or Autopilot state is reachable and no completion can ever be proven from it. Run /zensu:adopt-session --restore-root first — it reports the verdict and writes nothing — and only then /zensu:adopt-session --restore-root --confirm to re-create exactly that directory and rebuild the workflow document in one step — a bare mkdir leaves the second half missing and every tool denied. It restores the anchor, not the work: the directory comes back empty and the chain that lived there is gone. If that directory was moved rather than deleted, its state still exists there and moving it back is better than re-creating it. Otherwise start a new session for further work." >&2
+    # Same value class, same channel, therefore the same bound as the bind-time
+    # release above. This arm rendered the recorded root RAW until a review caught
+    # it, on a line the restore feature had just rewritten — and the justification
+    # for excluding `(` and `)` from ZENSU_SAFE_DISPLAY_PATH_RE cites this very
+    # file, so an unbounded arm here contradicted the rule the sibling enforces.
+    if ! TOCTOU_PROJECT_ROOT="$(zensu_safe_display_path "${ZENSU_PROJECT_ROOT}")"; then
+      TOCTOU_PROJECT_ROOT="(unreadable)"
+    fi
+    echo "zensu chain-enforcer: releasing Stop — the immutable project root of this session (${TOCTOU_PROJECT_ROOT}) no longer exists, so no review-chain or Autopilot state is reachable and no completion can ever be proven from it. Run /zensu:adopt-session --restore-root first — it reports the verdict and writes nothing — and only then /zensu:adopt-session --restore-root --confirm to re-create exactly that directory and rebuild the workflow document in one step — a bare mkdir leaves the second half missing and every tool denied. It restores the anchor, not the work: the directory comes back empty and the chain that lived there is gone. If that directory was moved rather than deleted, its state still exists there and moving it back is better than re-creating it. Otherwise start a new session for further work." >&2
     exit 0
   fi
   if ! zensu_stop_guard_opted_out; then
-    echo "zensu chain-enforcer: the recorded project root ${ZENSU_PROJECT_ROOT:-(unset)} exists but does not match this immutable Session Control record — a symlinked, moved, or re-created root never matches. Restore the recorded path; ZENSU_CHAIN=off or hooks.chainEnforcer=false releases this guard explicitly." >&2
+    # Reached when the root EXISTS but disagrees, so the value is a real directory
+    # name rather than a vanished one — but it is the same value class on the same
+    # channel, and a bound that skips the cases where the value looks plausible is
+    # not a bound. `(unset)` stays the empty-value rendering; the fold decides the
+    # rest. DELIMITED like the two sibling arms above, because the fold's own owner
+    # states that what bounds sentence forgery is the delimiter and never the
+    # placement: a class-clean absolute path can carry a period and a following
+    # clause, and bare it reads as a continuation of this hook's own sentence.
+    if [ -z "${ZENSU_PROJECT_ROOT:-}" ]; then
+      MISMATCHED_PROJECT_ROOT="(unset)"
+    elif ! MISMATCHED_PROJECT_ROOT="$(zensu_safe_display_path "${ZENSU_PROJECT_ROOT}")"; then
+      MISMATCHED_PROJECT_ROOT="(unreadable)"
+    fi
+    echo "zensu chain-enforcer: the recorded project root (${MISMATCHED_PROJECT_ROOT}) exists but does not match this immutable Session Control record — a symlinked, moved, or re-created root never matches. Restore the recorded path; ZENSU_CHAIN=off or hooks.chainEnforcer=false releases this guard explicitly." >&2
     emit_session_record_unusable_block
   fi
   exit 0

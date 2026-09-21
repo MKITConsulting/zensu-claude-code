@@ -8359,7 +8359,13 @@ The entry counts what THIS run created, never what the verdict planned to create
 / `RESTORE_DISCLOSURE` / `renderRestoreRoot` and the `ZADOPT_MODE` route in
 `session-adopt-report-v1.js`; the two-literal argv parser and the five-class header in
 `zensu-session-adopt.sh`; `RECOGNIZED.adopt.args` in `zensu-doctor-invocation.js`; the three
-reserved-phase guard bodies; both binding rows in `zensu-doctor-report.js`; the three gone-root
+reserved-phase guard bodies; both binding rows in `zensu-doctor-report.js` PLUS the state row
+this feature added there, `projectRootRestoredRow`, together with the `RESTORE_HISTORY_PHASE`
+read that decides whether it can render at all and the `sharedWorkflowRead` it takes from its
+sibling — say the ROW, never "both binding rows": that phrase predates this feature and a
+maintainer matching on it edits neither the row nor its token — and the `P6s` family in
+`tests/structure/test-doctor.sh` that grades it, named as a FAMILY because this file's own rule
+is that a hand-maintained numeral goes stale on the next check added; the three gone-root
 releases in `stop-chain-enforcer.sh`; **`restoreRootRealDirectory`** (the one EEXIST
 discrimination, and an EXPORT, so a port obligation), **`restoreRootAlreadyPresentError`**
 (the one builder for the benign race) and **`baselineProvenanceUnrecorded`** (the one
@@ -8390,9 +8396,26 @@ turns a suite red with nothing naming it — the UNOBVIOUS-direction coupling th
 records for G12.
 
 **Operator-facing accounts:** `skills/adopt-session/SKILL.md` (frontmatter, §"When to Use", the
-`--restore-root` section), `skills/doctor/SKILL.md` (both binding bullets),
-`docs/session-control.md` §"Unbindable sessions", `docs/gates.md`, `docs/operations.md` and
-`docs/tdd-manager-workflow.md`.
+`--restore-root` section), `skills/doctor/SKILL.md` — the two binding bullets AND the three
+state bullets this feature added (the RE-CREATED row, its not-checked arm, and the frontmatter
+`session state` clause, which reads as a complete inventory of the block and therefore goes
+stale silently) — `docs/session-control.md` §"Unbindable sessions", `docs/gates.md`,
+`docs/operations.md` and `docs/tdd-manager-workflow.md`. That bullet list is TIGHT: every other
+bullet in the block follows its predecessor with no blank line, and the two blanks this feature
+introduced were the only ones — one of them silently load-bearing for a slice terminator in
+`test-doctor.sh`, which is why that slice now ends on the next bullet instead.
+
+**TWO couplings here fire in the UNOBVIOUS direction**, the shape §"Gate-Disable Prefixes"
+records for G12 — an ordinary edit elsewhere reddens a suite named for the project-root
+restore, and nothing points at it from the side that changes. `R13` in
+`tests/structure/test-restore-project-root.sh` derives its file list from
+`tests/SUITE-OVERVIEW.md` and compares every declared registration count against the file that
+registers it, so adding or removing a `test()` in ANY driven `tests/structure/*.test.js`, or
+reformatting that table, reddens this suite; when it was first derived rather than
+hand-enumerated it found SEVEN stale counts at once. And the `R12` family grades COMMENT PROSE
+inside `hooks/lib/session-control-core-v1.js` — the port roster, the benign-race builder's
+comment placement, and the rule that neither carries a hand-maintained numeral — so rewording a
+comment in the core reddens it too.
 
 **Port-relevant, and the authoritative split lives at the export block rather than here.**
 The core/host list for this feature is the comment above `RESTORE_ROOT_REFUSALS`'s export

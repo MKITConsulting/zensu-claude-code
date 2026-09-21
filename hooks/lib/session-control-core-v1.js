@@ -2610,10 +2610,6 @@ function restoreRootVerdict(options) {
   };
 }
 
-// ONE builder for the benign race. It was constructed verbatim at three sites, and a
-// suite row pinned the DUPLICATION (`grep -c 'code = RESTORE_ALREADY_PRESENT_CODE'`
-// equal to 3) rather than the property. The claim worth holding is that every
-// producer routes through here, which is what that row asserts now.
 // ONE predicate for "the rebuild happened and its BASELINE_REBUILT history entry did
 // not". It was spelled three times with three different tests — in the adopt report's
 // two renderers and in the SessionStart self-heal — and the three had already diverged
@@ -2624,6 +2620,15 @@ function baselineProvenanceUnrecorded(baseline) {
   return baseline.provenance !== 'recorded' && baseline.provenance !== 'existing';
 }
 
+// ONE builder for the benign race. It was constructed verbatim at three sites, and a
+// suite row pinned the DUPLICATION (`grep -c 'code = RESTORE_ALREADY_PRESENT_CODE'`
+// equal to 3) rather than the property. The claim worth holding is that every
+// producer routes through here, which is what that row asserts now.
+//
+// This block sat above `baselineProvenanceUnrecorded` for a release — two functions
+// from its subject — so a reader arriving at that predicate met a paragraph about
+// something else. R12d grades the OFFSET rather than the text, because a needle alone
+// cannot see which function a comment introduces.
 function restoreRootAlreadyPresentError(created) {
   const raced = new Error(
     `recorded project root is not restorable: ${RESTORE_ROOT_REFUSALS.ROOT_PRESENT}`,
@@ -2741,12 +2746,20 @@ function restoreWorkflowProjectRoot(options, deps) {
   // tree. Do not restate this as "a swap is REFUSED rather than traversed" — that is
   // true of one of the two positions, and the check below says so in its own words.
   //
-  // Mode is explicit rather than the ambient umask. The intent — a user project
-  // directory, not a private store — is preserved, because umask can only clear
-  // bits; what it removes is the dependence on a umask this process cannot see,
-  // under which the re-created root and its intermediates could land
-  // world-writable while the source-write gate still treats them as the trusted
-  // project root.
+  // Mode is explicit so the CAP does not depend on the ambient umask being tight.
+  // State what that buys and no more: `fs.mkdirSync(target, { mode })` hands the mode
+  // to mkdir(2), which applies `mode & ~umask`, so Node does not bypass the umask and
+  // the dependence is not removed — under `umask 077` the root still lands 0700. What
+  // the explicit mode does is bound the result from ABOVE independently of the umask:
+  // under a permissive `umask 002` this yields 0755 where Node's 0o777 default would
+  // have yielded 0775. It is strictly non-widening versus that default in every umask.
+  //
+  // An earlier revision of this comment claimed the explicit mode removed the umask
+  // dependence and that the root "could land world-writable" without it. Both are
+  // false, and the second contradicts this paragraph's own premise: a umask can only
+  // CLEAR bits, so it can never add a world-write bit neither 0o777 nor 0755 was
+  // given. A maintainer reasoning from the old text would have reached the wrong
+  // conclusion about what this argument protects.
   const created = [];
   for (const component of verdict.missing) {
     try {
@@ -5281,12 +5294,22 @@ module.exports = {
   // carries the split and a port works from the roster rather than the prose.
   // The CORE half is exactly the names below plus RESTORE_ROOT_REFUSALS's
   // six members: they are host-neutral and read nothing from the environment,
-  // every anchor arriving as an option. The HOST half is SEVEN obligations, and a
-  // port that takes only the core delta gets a writer with no reachable caller and
+  // every anchor arriving as an option. The HOST half carries NO count here on
+  // purpose: the numeral was wrong by one for a round after `restoreRootRealDirectory`
+  // landed, and it went stale again when this roster omitted two obligations the
+  // feature's own pointer paragraph already listed. Read the list, never a total.
+  // A port that takes only the core delta gets a writer with no reachable caller and
   // keeps the wedge: the `--restore-root` argv mode and its ZADOPT_MODE wire, the
   // report renderer and its exit-code contract, the recognizer's argument list,
-  // the three reserved-phase guard bodies, the doctor row, the Stop release, and
-  // the skill. `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were NOT
+  // the three reserved-phase guard bodies, the doctor row, the Stop release, the
+  // skill, the `orphaned-project-root` deny scope — in the shell emitter AND in
+  // the capability gate, which spells its own — and `zensu_safe_display_path`
+  // together with every constant it reads, which a port must place where BOTH its
+  // emitter and its Stop hook can call it (read that set from the function, never
+  // from a count here: this roster forbids a hand-maintained numeral two sentences
+  // above and then carried one for that very set), plus the operator accounts every
+  // surface is mirrored in.
+  // `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were NOT
   // included in this change; each carries its own recognizer against a different
   // harness, and the ladder's ancestor rules have to be re-decided against
   // whatever that host canonicalizes.

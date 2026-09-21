@@ -3471,7 +3471,21 @@ function bindingLine() {
 // the same reason `BASELINE_STATES` does in the caller: nothing in the tree compares
 // this renderer's spelling against the core's, so a rename would SILENCE the row with
 // every check still green. An absent export is therefore a missing check, not a pass.
-function baselineRebuiltRow(core, projectRoot, key) {
+// ONE read of this session's workflow document for both provenance rows. A caller
+// that already has the result passes it in; anything else takes the read here. The
+// result is a RECORD rather than a bare document, because "it did not read back" is a
+// verdict both rows have to render and a thrown error cannot be shared between two
+// separate `try` blocks without taking the read twice.
+function sharedWorkflowRead(core, projectRoot, key, shared) {
+  if (shared && typeof shared === 'object') return shared;
+  try {
+    return { state: core.readWorkflowState({ projectRoot: projectRoot, sessionId: key }), error: null, code: '' };
+  } catch (e) {
+    return { state: null, error: e || new Error('unreadable'), code: (e && e.code) || 'unreadable' };
+  }
+}
+
+function baselineRebuiltRow(core, projectRoot, key, sharedRead) {
   var phase = (core && typeof core.BASELINE_HISTORY_PHASE === 'string' && core.BASELINE_HISTORY_PHASE)
     ? core.BASELINE_HISTORY_PHASE
     : '';
@@ -3481,18 +3495,23 @@ function baselineRebuiltRow(core, projectRoot, key) {
       + 'phase token. That is a missing check, not an all-clear.');
     return;
   }
-  var state;
-  try {
-    state = core.readWorkflowState({ projectRoot: projectRoot, sessionId: key });
-  } catch (e) {
+  // The read is SHARED with the sibling restore row through `read`, and is taken once
+  // by the PRESENT arm that calls both. They asked the same document the same question
+  // in two separate `try` blocks, so one report opened it twice, one unreadable
+  // document produced two near-identical WARN rows from a single cause, and the two
+  // answers could disagree about the same file. The parameter is optional so a caller
+  // that has no shared read still works; the shipped call site always passes one.
+  var read = sharedWorkflowRead(core, projectRoot, key, sharedRead);
+  if (read.error) {
     // The document classified PRESENT and still did not read back. The invalid-document
     // row further down names the FILE; this one names the CHECK that did not run. The
     // two findings are different and neither substitutes for the other, so both render.
     line(WARN, 'state: this session\'s workflow document was not checked for rebuild '
-      + 'provenance — it did not read back (' + ((e && e.code) || 'unreadable')
+      + 'provenance — it did not read back (' + (read.code || 'unreadable')
       + '). That is a missing check, not an all-clear.');
     return;
   }
+  var state = read.state;
   var history = (state && Array.isArray(state.history)) ? state.history : [];
   var rebuilds = history.filter(function (entry) {
     return entry && entry.phase === phase;
@@ -3502,14 +3521,84 @@ function baselineRebuiltRow(core, projectRoot, key) {
   // the noise this repository trains readers to ignore.
   if (!rebuilds.length) return;
   var last = rebuilds[rebuilds.length - 1];
-  var when = (last && typeof last.ts === 'string' && last.ts) ? last.ts : 'an unrecorded time';
-  var why = (last && typeof last.reason === 'string' && last.reason) ? ' [' + last.reason + ']' : '';
+  // FOLDED, both slots, for the reason safeVerifyReason exists at all. `reason` is the
+  // ONE history field validateWorkflowExtensions leaves unbounded — it tests
+  // `typeof entry.reason !== 'string'` where `step` and `phase` go through
+  // validateWorkflowString and its control-character screen — and `.zensu/state/` is
+  // writable from inside the session while skills/doctor/SKILL.md tells the model to
+  // print this report verbatim. `ts` is Date.parse-validated rather than shape-checked,
+  // which is tolerant, so it is folded on the same terms rather than trusted. The
+  // SIBLING row below carries the identical slots and takes the identical fold in the
+  // same edit: nothing in the tree compares the two, so a one-sided fix would leave the
+  // class half closed. P6s7/P6s8 drive both and P6s7-control keeps the fold from
+  // swallowing an ordinary reason.
+  var when = (last && typeof last.ts === 'string' && last.ts) ? safeVerifyReason(last.ts) : 'an unrecorded time';
+  var why = (last && typeof last.reason === 'string' && last.reason) ? ' [' + safeVerifyReason(last.reason) + ']' : '';
   line(WARN, 'state: this session\'s workflow document was REBUILT — '
     + rebuilds.length + (rebuilds.length === 1 ? ' entry' : ' entries')
     + ', most recently at ' + when + why + '. Rebuilding is a loss, not a restore: the '
     + 'baseline reads "never active", so a review chain that was live when the document '
     + 'vanished is gone and the Stop guard releases this session without asking for a '
     + 'reviewer. Re-arm with /zensu:tdd if that work still needs one.');
+}
+
+// The PROJECT_ROOT_RESTORED provenance row, the sibling of baselineRebuiltRow above
+// and written for the same reason. That phase is reserved in three guard bodies and
+// is named by zensu-session-adopt.sh's header as the repair's ONLY provenance — the
+// feature takes no bypass-ledger entry by design — and until this row nothing in the
+// report READ it. After a confirmed restore the block said the workflow document was
+// rebuilt (the restore writes a BASELINE_REBUILT entry on its way through
+// repairWorkflowBaseline) and nothing said the directory in front of the user is a
+// stub this plugin planted: empty, no repository, no branch.
+//
+// PRESENT arm only, same as its sibling, and for the same reason: that is the one
+// state in which the document exists and reads back. The phase token comes from the
+// LOADED core rather than a literal copied here — nothing in the tree compares the
+// two spellings, so a rename would SILENCE the row with every check still green, and
+// an absent export is therefore a missing check rather than a pass.
+function projectRootRestoredRow(core, projectRoot, key, sharedRead) {
+  var phase = (core && typeof core.RESTORE_HISTORY_PHASE === 'string' && core.RESTORE_HISTORY_PHASE)
+    ? core.RESTORE_HISTORY_PHASE
+    : '';
+  if (phase === '') {
+    line(WARN, 'state: this session\'s workflow document was not checked for project-root '
+      + 'restore provenance — the Session Control core in ' + pluginDir() + ' exports no '
+      + 'restore phase token. That is a missing check, not an all-clear.');
+    return;
+  }
+  // Shares the sibling row's read — see the note in `baselineRebuiltRow`.
+  var read = sharedWorkflowRead(core, projectRoot, key, sharedRead);
+  if (read.error) {
+    line(WARN, 'state: this session\'s workflow document was not checked for project-root '
+      + 'restore provenance — it did not read back (' + (read.code || 'unreadable')
+      + '). That is a missing check, not an all-clear.');
+    return;
+  }
+  var state = read.state;
+  var history = (state && Array.isArray(state.history)) ? state.history : [];
+  var restores = history.filter(function (entry) {
+    return entry && entry.phase === phase;
+  });
+  // Silence is the ordinary case: a session whose recorded root was never re-created
+  // has no provenance to report, and a row on every healthy session is the noise this
+  // repository trains readers to ignore.
+  if (!restores.length) return;
+  var last = restores[restores.length - 1];
+  // The sibling half of the fold documented at baselineRebuiltRow above. Same two
+  // slots, same unbounded `reason`, same relayed channel — and the two must move
+  // together, which is why the reason is stated once there and pointed at here.
+  var when = (last && typeof last.ts === 'string' && last.ts) ? safeVerifyReason(last.ts) : 'an unrecorded time';
+  var why = (last && typeof last.reason === 'string' && last.reason) ? ' [' + safeVerifyReason(last.reason) + ']' : '';
+  line(WARN, 'state: this session\'s recorded project root was RE-CREATED by '
+    + '/zensu:adopt-session --restore-root — ' + restores.length
+    + (restores.length === 1 ? ' entry' : ' entries')
+    + ', most recently at ' + when + why + '. That repair restores the anchor, not the '
+    + 'work: the directory came back EMPTY and is not a git worktree, so until you run '
+    + '`git worktree add` at that path everything written there is untracked — no '
+    + 'repository, no branch, nothing to commit it to. Note that this row renders only '
+    + 'while the workflow document is PRESENT under that root, so `.zensu/state` is '
+    + 'there by now and a plain `git worktree add` refuses a non-empty target: move '
+    + 'that `.zensu` aside first, or pass --force.');
 }
 
 function stateBlock(nowMs) {
@@ -3587,7 +3676,14 @@ function stateBlock(nowMs) {
     if (ownIs('PRESENT')) {
       // PRESENT is not "nothing to say": a document that was REBUILT is present and
       // healthy-looking, and its provenance is the one thing this block never rendered.
-      baselineRebuiltRow(ownCore, projectRoot, ownKey);
+      var ownRead = sharedWorkflowRead(ownCore, projectRoot, ownKey, null);
+      baselineRebuiltRow(ownCore, projectRoot, ownKey, ownRead);
+      // ...and a restore writes a BASELINE_REBUILT entry on its way through
+      // repairWorkflowBaseline, so the row above fires for it too and says only that
+      // the DOCUMENT was rebuilt. The directory it anchors is the other half, and it
+      // is the half a user is standing in. Both rows render: they are different
+      // findings and neither substitutes for the other.
+      projectRootRestoredRow(ownCore, projectRoot, ownKey, ownRead);
       return;
     }
     if (ownIs('UNSAFE') || ownIs('UNREADABLE')) {

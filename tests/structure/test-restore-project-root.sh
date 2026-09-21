@@ -71,10 +71,10 @@ expect_eq() {
 R0_UNIT="$(node --test "$PLUGIN_DIR/tests/structure/restore-root-render-cases.test.js" 2>&1)"
 R0_RC=$?
 R0_PASS="$(printf '%s' "$R0_UNIT" | awk '/^. pass /{print $3}' | tail -1)"
-if [ "$R0_RC" -eq 0 ] && [ "${R0_PASS:-0}" -ge 19 ]; then
+if [ "$R0_RC" -eq 0 ] && [ "${R0_PASS:-0}" -ge 33 ]; then
   check "R0  restore-root-render-cases.test.js: $R0_PASS cases" PASS
 else
-  check "R0  restore-root-render-cases.test.js: rc=$R0_RC pass=${R0_PASS:-0} (floor 19)" FAIL
+  check "R0  restore-root-render-cases.test.js: rc=$R0_RC pass=${R0_PASS:-0} (floor 33)" FAIL
   printf '%s\n' "$R0_UNIT" | tail -20
 fi
 
@@ -310,6 +310,71 @@ expect_eq "R5d  both phase-library guard bodies carry the phase" "2" "$GUARDS"
 GUARDS2="$(grep -c 'project-root-restored: ' "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh")"
 expect_eq "R5e  both phase-library guard bodies carry the reason prefix" "2" "$GUARDS2"
 
+# R5f — R5d/R5e are `grep -c` COUNTS and nothing more: they see a guard deleted, and
+# they see a guard whose body was gutted exactly as well as they see a working one.
+# R5a-R5c drive the equivalent guards in hooks/lib/zensu-log.sh, a DIFFERENT file, so
+# the phase library's own two functions had no executed case at all. These call them.
+# The two functions take DIFFERENT argument shapes, and getting that wrong is silent:
+# `tdd_write_phase` is (session, step, phase, reason) while
+# `_tdd_write_phase_critical` is (state_file, session, step, phase, reason, ts). Passing
+# the public shape to the critical one puts the phase in the STEP slot, so the guard
+# never sees it and the row reports ACCEPTED for a reason that has nothing to do with
+# the guard. Measured here the first time this ran.
+# R5f/R5g/R5h — the guard, DISCRIMINATED. The previous shape drove the real functions
+# with an empty session and asserted REFUSED, which they answer for EVERY phase: with no
+# ZENSU_SESSION_KEY `zensu_resolve_session_id` fails, and `_tdd_write_phase_critical`'s
+# own post-guard path cannot resolve a project root either. MEASURED before this rewrite:
+# PROJECT_ROOT_RESTORED, IMPL and RED_WRITE all returned REFUSED, so the rows would have
+# passed with the eight guard lines deleted. The control conceded as much in its own
+# comment and asserted nothing.
+#
+# The fixture cannot reach ACCEPTED either, and that is a property of the product rather
+# than of the test: a bound session refuses a Bash rebind of ZENSU_SESSION_KEY, and an
+# explicit id must normalize to THIS session's key — so the only reachable ACCEPTED would
+# write a phase into the live workflow document. A suite must not do that.
+#
+# What IS observable is WHICH exit the function took. Both guards return BEFORE the first
+# call that leaves the function: `tdd_write_phase` reaches `zensu_resolve_session_id` and
+# `_tdd_write_phase_critical` reaches `_tdd_bound_project_root`. Stubbing those two in a
+# COPIED tree makes the guard's early return distinguishable from every later failure,
+# which is the discrimination the old rows lacked.
+R5_TREE="$(mktemp -d)"
+mkdir -p "$R5_TREE/hooks/lib"
+cp "$PLUGIN_DIR/hooks/lib/"*.sh "$PLUGIN_DIR/hooks/lib/"*.js "$R5_TREE/hooks/lib/" 2>/dev/null
+R5_MARKER="$R5_TREE/reached.marker"
+printf '\nzensu_resolve_session_id() { : > "%s"; return 1; }\n' "$R5_MARKER" >> "$R5_TREE/hooks/lib/zensu-session.sh"
+printf '\n_tdd_bound_project_root() { : > "%s"; return 1; }\n' "$R5_MARKER" >> "$R5_TREE/hooks/lib/zensu-tdd-phase.sh"
+r5_phase_guard() { # $1=function $2=phase $3=reason -> GUARD-RETURNED | PAST-GUARD | NO-SOURCE | NO-FN
+  rm -f "$R5_MARKER"
+  R5OUT="$(R5FN="$1" R5PHASE="$2" R5REASON="$3" R5TREE="$R5_TREE" CLAUDE_PLUGIN_ROOT="$R5_TREE" bash -c '
+    set -u
+    # shellcheck disable=SC1090
+    source "$R5TREE/hooks/lib/zensu-tdd-phase.sh" 2>/dev/null || { printf "NO-SOURCE"; exit 0; }
+    if ! declare -F "$R5FN" >/dev/null 2>&1; then printf "NO-FN"; exit 0; fi
+    if [ "$R5FN" = "_tdd_write_phase_critical" ]; then
+      "$R5FN" "" "x" "s" "$R5PHASE" "$R5REASON" "0" >/dev/null 2>&1
+    else
+      "$R5FN" "" "s" "$R5PHASE" "$R5REASON" >/dev/null 2>&1
+    fi
+  ' 2>/dev/null)"
+  case "$R5OUT" in
+    (NO-SOURCE|NO-FN) printf '%s' "$R5OUT"; return ;;
+  esac
+  if [ -f "$R5_MARKER" ]; then printf 'PAST-GUARD'; else printf 'GUARD-RETURNED'; fi
+}
+for r5_fn in tdd_write_phase _tdd_write_phase_critical; do
+  expect_eq "R5f  $r5_fn refuses the reserved phase at its own guard" \
+    "GUARD-RETURNED" "$(r5_phase_guard "$r5_fn" PROJECT_ROOT_RESTORED "")"
+  expect_eq "R5g  $r5_fn refuses the reserved reason prefix at its own guard" \
+    "GUARD-RETURNED" "$(r5_phase_guard "$r5_fn" IMPL "project-root-restored: forged")"
+  # R5h — the control that makes the two rows above mean something. An ordinary phase
+  # must travel PAST the guard. Without it, a function that returned 1 unconditionally,
+  # or a stub that never ran, reads identical to a working guard.
+  expect_eq "R5h-control $r5_fn lets an ordinary phase past the guard" \
+    "PAST-GUARD" "$(r5_phase_guard "$r5_fn" IMPL "")"
+done
+rm -rf "$R5_TREE"
+
 echo "=== R6: prose carriers that state the contract ==="
 
 if grep -qF -- '/zensu:adopt-session --restore-root' "$REPORT_JS"; then
@@ -320,10 +385,34 @@ else check "R6a  the doctor row names the remedy" FAIL; fi
 # complete consent invocation. The consent step lives in skills/adopt-session.
 # Sliced and comment-stripped: a whole-file grep grades bytes the row never carries,
 # and an ordinary explanatory comment naming the full spelling would redden it.
-R6_ROWS="$(sed -n '/orphaned-project-root/,/^  }$/p' "$REPORT_JS" | sed -e 's|^[[:space:]]*//.*$||')"
-if printf '%s' "$R6_ROWS" | grep -qF -- '--restore-root --confirm'; then
-  check "R6a2 the doctor row quotes no complete consent invocation" FAIL
-else check "R6a2 the doctor row quotes no complete consent invocation" PASS; fi
+#
+# The verdict is a FUNCTION so the emptiness half is drivable. This row is a NEGATIVE
+# grep over a slice, which is the shape that goes vacuous without a sound: change
+# either sed anchor and the slice comes back empty, the grep finds nothing, and the
+# row reports PASS over a check that graded no bytes at all. The slice is non-empty
+# today — that is what makes an unguarded version look correct.
+r6_consent_rows() { sed -n '/orphaned-project-root/,/^  }$/p' "$1" | sed -e 's|^[[:space:]]*//.*$||'; }
+r6_consent_verdict() {
+  local rows
+  rows="$(r6_consent_rows "$1")"
+  if [ -z "$rows" ]; then printf 'FAIL-EMPTY'; return; fi
+  if printf '%s' "$rows" | grep -qF -- '--restore-root --confirm'; then printf 'FAIL'; return; fi
+  printf 'PASS'
+}
+R6_VERDICT="$(r6_consent_verdict "$REPORT_JS")"
+case "$R6_VERDICT" in
+  (PASS) check "R6a2 the doctor row quotes no complete consent invocation" PASS ;;
+  (FAIL-EMPTY) check "R6a2 the doctor-row slice is empty — the check graded nothing" FAIL ;;
+  (*) check "R6a2 the doctor row quotes no complete consent invocation" FAIL ;;
+esac
+# ...and the guard is proven to bite: the same slicer over a file carrying neither
+# anchor must answer FAIL-EMPTY, never PASS.
+R6_EMPTY_PROBE="$STATE_DIR/r6a2-empty-probe.js"
+printf 'const unrelated = 1;\n' > "$R6_EMPTY_PROBE"
+if [ "$(r6_consent_verdict "$R6_EMPTY_PROBE")" = "FAIL-EMPTY" ]; then
+  check "R6a2-control an empty slice is refused rather than reported clean" PASS
+else check "R6a2-control an empty slice is refused rather than reported clean" FAIL; fi
+rm -f "$R6_EMPTY_PROBE"
 if grep -qF -- 're-create exactly that directory to resume' "$REPORT_JS"; then
   check "R6b  the incomplete remedy is gone from the doctor row" FAIL
 else check "R6b  the incomplete remedy is gone from the doctor row" PASS; fi
@@ -333,6 +422,30 @@ else check "R6c  the adopt header counts five write classes" FAIL; fi
 if grep -qF -- 'THREE bounded exceptions' "$ADOPT"; then
   check "R6d  the adopt header counts three bounded exceptions" PASS
 else check "R6d  the adopt header counts three bounded exceptions" FAIL; fi
+
+# R6h-R6j — the governing section's own roster. CLAUDE.md is what a maintainer works
+# from, and the restore landed a doctor ROW, its phase-token read and a family of
+# checks for it while that roster still said only "both binding rows" and the operator
+# list only "both binding bullets". Sliced to the section, because both phrases occur
+# elsewhere in the file.
+R6_SECTION="$(awk '/^## Restoring a Vanished Recorded Project Root/{on=1} on{print} on && /^\*\*Known gaps/{exit}' \
+  "$PLUGIN_DIR/CLAUDE.md")"
+if [ -n "$R6_SECTION" ]; then
+  check "R6h-control the governing section slice is non-empty" PASS
+else check "R6h-control the governing section slice is non-empty" FAIL; fi
+if printf '%s' "$R6_SECTION" | grep -qF 'projectRootRestoredRow'; then
+  check "R6h  the roster names the doctor row this feature added" PASS
+else check "R6h  the roster names the doctor row this feature added" FAIL; fi
+if printf '%s' "$R6_SECTION" | grep -qF 'RESTORE_HISTORY_PHASE'; then
+  check "R6i  the roster names the phase token that row reads from the core" PASS
+else check "R6i  the roster names the phase token that row reads from the core" FAIL; fi
+# ...and the UNOBVIOUS-direction coupling, which this repository requires to be written
+# down wherever it exists: R13 grades tests/SUITE-OVERVIEW.md and the R12 family grades
+# comment prose inside session-control-core-v1.js, so an edit to either reddens a suite
+# named for the project-root restore.
+if printf '%s' "$R6_SECTION" | grep -qF 'SUITE-OVERVIEW.md'; then
+  check "R6j  the section records the coupling that fires in the unobvious direction" PASS
+else check "R6j  the section records the coupling that fires in the unobvious direction" FAIL; fi
 # The safety argument is stated where the gate's admission rests, not only in the
 # design note: a reviewer deciding whether to widen this table reads THIS file.
 if grep -qF -- 'none of them takes a value' "$RECOGNIZER"; then
@@ -588,6 +701,10 @@ R8_STOP_GUARD="$(sed -n '/if ! ORPHANED_PROJECT_ROOT=/,/^    fi$/p' "$STOPHOOK" 
 # two copies disagree about a retyped ceiling.
 R8_SHARED_BODY="$(sed -n '/^zensu_safe_display_path() {/,/^}$/p' "$SESSION_SH" \
   | sed -e 's|^[[:space:]]*#.*$||')"
+# The comment-stripped body is what the constant census below needs. R11d grades the
+# owner's stated CONTRACT, which lives in the header comment above the function, so it
+# reads the surrounding block with its comments intact.
+R8_SHARED_BODY_RAW="$(sed -n '/^# It ECHOES the value to render/,/^}$/p' "$SESSION_SH")"
 R8_STOP=0
 for R8_CONST in ZENSU_SAFE_DISPLAY_PATH_RE ZENSU_SAFE_DISPLAY_PATH_MAX \
   ZENSU_FORGERY_DOUBLE_SPACE ZENSU_FORGERY_PAIR_SPACE_COLON ZENSU_FORGERY_PAIR_COLON_SPACE; do
@@ -602,13 +719,50 @@ expect_eq "R8p5 the shared bound consumes all five constants by name" "5" "$R8_S
 if printf '%s' "$R8_STOP_GUARD" | grep -qF 'zensu_safe_display_path'; then
   check "R8p5b the Stop hook calls the shared bound rather than re-spelling it" PASS
 else check "R8p5b the Stop hook calls the shared bound rather than re-spelling it" FAIL; fi
-R8_SHARED_CALLS="$(grep -c 'zensu_safe_display_path' "$SESSION_SH")"
-if [ "${R8_SHARED_CALLS:-0}" -ge 3 ]; then
-  check "R8p5c the emitter defines the shared bound and consumes it ($R8_SHARED_CALLS sites)" PASS
-else check "R8p5c the emitter defines the shared bound and consumes it ($R8_SHARED_CALLS sites)" FAIL; fi
+# Count CALL SITES, not occurrences. A whole-file `grep -c` returned 4 here — the
+# definition, a comment naming it, the one call, and the `export -f` line — against a
+# floor of 3, so deleting the call and reverting to a raw interpolation left the row
+# green while its own label claimed the emitter consumes the bound. The derivation
+# below strips comments and excludes the definition and the export, so only an actual
+# invocation counts; r8p5c_calls is driven over a mutated copy immediately after.
+r8p5c_calls() {
+  sed -e 's|^[[:space:]]*#.*$||' "$1" \
+    | grep -E 'zensu_safe_display_path[[:space:]]*"' \
+    | grep -cv '^[[:space:]]*zensu_safe_display_path() {'
+}
+R8_SHARED_CALLS="$(r8p5c_calls "$SESSION_SH")"
+if [ "${R8_SHARED_CALLS:-0}" -ge 1 ]; then
+  check "R8p5c the emitter defines the shared bound and consumes it ($R8_SHARED_CALLS call sites)" PASS
+else check "R8p5c the emitter defines the shared bound and consumes it ($R8_SHARED_CALLS call sites)" FAIL; fi
+# BITE. Remove the call and keep everything else — the definition, the comment and the
+# `export -f` all survive, which is exactly the tree the old whole-file count still
+# reported as a consumer.
+R8P5C_MUT="$(mktemp "${TMPDIR:-/tmp}/zensu-r8p5c-mut.XXXXXXXX")"
+grep -v 'dead="$(zensu_safe_display_path "$dead")"' "$SESSION_SH" > "$R8P5C_MUT"
+if [ "$(grep -c 'zensu_safe_display_path' "$R8P5C_MUT")" -ge 3 ]; then
+  check "R8p5c-pre the unconsumed copy still satisfies a whole-file count" PASS
+else check "R8p5c-pre the unconsumed copy still satisfies a whole-file count" FAIL; fi
+if [ "$(r8p5c_calls "$R8P5C_MUT")" -eq 0 ]; then
+  check "R8p5c-bite the call-site derivation sees the deleted call" PASS
+else check "R8p5c-bite the call-site derivation sees the deleted call" FAIL; fi
+rm -f -- "$R8P5C_MUT"
 if grep -qE '\$\{ZENSU_(SAFE_DISPLAY|FORGERY)[A-Z_]*:-' "$STOPHOOK"; then
   check "R8p6 the Stop hook defaults none of the bound constants" FAIL
 else check "R8p6 the Stop hook defaults none of the bound constants" PASS; fi
+# R8p6 is a NEGATIVE pin over a file that no longer names those constants at all — the
+# bound moved into zensu_safe_display_path — so it is satisfied by construction and
+# cannot turn red on its own. That is not a reason to delete it: the property it holds
+# is still worth holding, because a future edit that re-spells the bound inline here is
+# exactly the divergence the shared function removed. What it lacked is a control
+# proving the needle still matches something. Plant the pattern into a COPY and require
+# the grep to find it; without this row, a typo in the alternation would make R8p6 pass
+# forever.
+R8P6_PROBE="$STATE_DIR/r8p6-probe.sh"
+{ cat "$STOPHOOK"; printf '\n: "${ZENSU_SAFE_DISPLAY_PATH_RE:-}"\n'; } > "$R8P6_PROBE"
+if grep -qE '\$\{ZENSU_(SAFE_DISPLAY|FORGERY)[A-Z_]*:-' "$R8P6_PROBE"; then
+  check "R8p6-control the R8p6 needle matches a planted default" PASS
+else check "R8p6-control the R8p6 needle matches a planted default" FAIL; fi
+rm -f "$R8P6_PROBE"
 # R8p5 and R8p6 are SOURCE pins and neither can see a guard that fails open at RUN
 # time — the gap R8h5's split just closed for the sibling copy. These EXECUTE the
 # shipped bytes: the guard is sliced out of the hook and evaluated, so what is
@@ -657,6 +811,284 @@ expect_eq "R8p9 the Stop guard fails closed when its ceiling is unset" \
   "(unreadable)" "$(r8_stop_sanitize 'unset ZENSU_SAFE_DISPLAY_PATH_MAX' "$R8_STOP_LONG")"
 expect_eq "R8p10 the Stop guard fails closed when its ceiling is empty" \
   "(unreadable)" "$(r8_stop_sanitize "ZENSU_SAFE_DISPLAY_PATH_MAX=''" "$R8_STOP_LONG")"
+
+# --- R8t: the TOCTOU arm takes the same bound as its bind-time sibling ---------
+#
+# Two arms of this hook render a recorded project root into an operator sentence. The
+# bind-time one (R8p7 above) folds through zensu_safe_display_path; this one — the
+# narrow race where the directory existed while the bind ran and was gone by the time
+# resolution asked again — interpolated ${ZENSU_PROJECT_ROOT} RAW, on a line this
+# feature rewrote. The value class is identical, and the justification for excluding
+# `(` and `)` from ZENSU_SAFE_DISPLAY_PATH_RE cites this very file, so leaving one arm
+# unbounded contradicts the rule the other arm exists to enforce.
+#
+# The arm is EXECUTED rather than grepped: a source pin over the format string passes
+# whatever %s expands to, which is how the raw interpolation survived a review in the
+# first place. The slice runs with a forged value, and its `exit 0` ends the child
+# after the echo has already reached stderr.
+#
+# The sed range ends on the arm's OWN two-space `fi`. A four-space anchor matches the
+# inner fold's `fi` instead and truncates the slice before the echo — which is exactly
+# what R8t-control caught the first time this row ran against the folded hook. Keep
+# the control: without it a truncated slice renders nothing and every assertion below
+# reports a failure whose stated cause is wrong.
+r8_toctou_sentence() {
+  R8T_VALUE="$1" SESSION_SH="$SESSION_SH" STOPHOOK="$STOPHOOK" bash -c '
+    set -u
+    # shellcheck disable=SC1090
+    source "$SESSION_SH" || exit 9
+    ARM="$(sed -n "/if \[ -n \"\${ZENSU_PROJECT_ROOT:-}\" \] \&\& \[ ! -d /,/^  fi\$/p" "$STOPHOOK")"
+    case "$ARM" in "") printf "NO-SLICE"; exit 0 ;; esac
+    ZENSU_PROJECT_ROOT="$R8T_VALUE"
+    eval "$ARM"
+  ' 2>&1 >/dev/null
+}
+R8T_LEGAL="/tmp/zensu-toctou-probe"
+if printf '%s' "$(r8_toctou_sentence "$R8T_LEGAL")" | grep -qF -- "($R8T_LEGAL)"; then
+  check "R8t-control the TOCTOU arm renders a legal path unchanged" PASS
+else check "R8t-control the TOCTOU arm renders a legal path unchanged" FAIL; fi
+if printf '%s' "$(r8_toctou_sentence "$R8_INJECT_STOP")" | grep -qF -- '(unreadable)'; then
+  check "R8t  the TOCTOU arm folds an injected value" PASS
+else check "R8t  the TOCTOU arm folds an injected value" FAIL; fi
+R8T_LONG="/$(printf 'a%.0s' $(seq 1 1100))"
+if printf '%s' "$(r8_toctou_sentence "$R8T_LONG")" | grep -qF -- '(unreadable)'; then
+  check "R8t2 the TOCTOU arm folds an over-length legal path" PASS
+else check "R8t2 the TOCTOU arm folds an over-length legal path" FAIL; fi
+# The sibling sentence one branch down renders the same value with a `:-(unset)`
+# default and no fold at all. It is reached when the root EXISTS but does not match,
+# so the value is a real directory name rather than a vanished one — but the class is
+# the same and so is the channel.
+# The slice takes the lines PRECEDING the sentence, never the sentence itself: the fold
+# is an assignment above the echo, so a single-line grep for the shared function can
+# never match however the value is bounded. The control keeps that mistake visible.
+# It is ANCHORED on the ENCLOSING arm rather than taken as a fixed-width window: the
+# buffer resets at every `if ! zensu_stop_guard_opted_out; then`, so the slice is this
+# arm's own body and can never reach the sibling TOCTOU arm whatever the line count.
+# A `grep -B12` reached that sibling's identical call as soon as this arm's fold and
+# its comment were deleted — thirteen lines, the faithful shape of the revert — so the
+# row passed on exactly the edit it exists to catch. R8t3c is the bite, and it anchors
+# on a line the revert KEEPS: anchoring on the fold's own `(unset)` line made the
+# mutant slice empty, so the needle was gone for the wrong reason and R8t3c-control
+# was the only thing that said so.
+r8t3_slice() {
+  awk '/if ! zensu_stop_guard_opted_out; then/ { buf = $0 "\n"; next }
+       { buf = buf $0 "\n" }
+       /exists but does not match this immutable Session Control record/ { printf "%s", buf; exit }' "$1"
+}
+R8T_MISMATCH="$(r8t3_slice "$STOPHOOK")"
+if [ -n "$R8T_MISMATCH" ]; then
+  check "R8t3-control the record-mismatch slice is non-empty" PASS
+else check "R8t3-control the record-mismatch slice is non-empty" FAIL; fi
+if printf '%s' "$R8T_MISMATCH" | grep -qF 'zensu_safe_display_path'; then
+  check "R8t3 the record-mismatch sentence folds the recorded root too" PASS
+else check "R8t3 the record-mismatch sentence folds the recorded root too" FAIL; fi
+# The slice must stay inside THIS arm. The sibling TOCTOU arm twelve lines above calls
+# the same function, so a window wide enough to reach it satisfies the needle above
+# whatever this arm does.
+if printf '%s' "$R8T_MISMATCH" | grep -qF 'TOCTOU_PROJECT_ROOT'; then
+  check "R8t3b the record-mismatch slice does not reach the sibling TOCTOU arm" FAIL
+else check "R8t3b the record-mismatch slice does not reach the sibling TOCTOU arm" PASS; fi
+# BITE. A fixed-width window slides UP when this arm's fold is deleted, so it lands on
+# the sibling call and R8t3 keeps passing on exactly the edit it exists to catch. Drive
+# the same derivation over a copy with the fold removed and require the needle to be
+# GONE. This is the only row that distinguishes an anchored slice from a wide one.
+R8T3_MUT="$(mktemp "${TMPDIR:-/tmp}/zensu-r8t3-mut.XXXXXXXX")"
+awk '/Reached when the root EXISTS but disagrees/{skip=1}
+     skip{ if ($0=="    fi") {skip=0}; next }
+     {print}' "$STOPHOOK" > "$R8T3_MUT"
+if [ "$(wc -l < "$STOPHOOK")" -gt "$(wc -l < "$R8T3_MUT")" ]; then
+  check "R8t3c-pre the unfolded copy really lost the fold" PASS
+else check "R8t3c-pre the unfolded copy really lost the fold" FAIL; fi
+R8T3_MUT_SLICE="$(r8t3_slice "$R8T3_MUT")"
+if [ -n "$R8T3_MUT_SLICE" ]; then
+  check "R8t3c-control the unfolded-copy slice is non-empty" PASS
+else check "R8t3c-control the unfolded-copy slice is non-empty" FAIL; fi
+if printf '%s' "$R8T3_MUT_SLICE" | grep -qF 'zensu_safe_display_path'; then
+  check "R8t3c the slice loses the needle when this arm's fold is deleted" FAIL
+else check "R8t3c the slice loses the needle when this arm's fold is deleted" PASS; fi
+rm -f -- "$R8T3_MUT"
+# The comment block above the bind-time fold still described the code that moved into
+# zensu_safe_display_path: it claimed presence tests written WITHOUT `:-` were the
+# guarantee, and cited R8p6 as forbidding a default here. The shared body reads every
+# constant WITH `:-` and fails closed on its own emptiness arms instead, so both halves
+# were retired. A comment that names a mechanism the file no longer has is worse than
+# no comment: the next reader reasons from it.
+if grep -qF 'THE PRESENCE TESTS ARE THE GUARANTEE' "$STOPHOOK"; then
+  check "R8t4 the retired presence-test claim is gone from the Stop hook" FAIL
+else check "R8t4 the retired presence-test claim is gone from the Stop hook" PASS; fi
+if grep -qF 'R8p6 forbids a default here' "$STOPHOOK"; then
+  check "R8t5 the Stop hook no longer cites R8p6 as the reason for a rule it does not spell" FAIL
+else check "R8t5 the Stop hook no longer cites R8p6 as the reason for a rule it does not spell" PASS; fi
+# Both rows above are NEGATIVE and grade text that is already gone, so they are
+# satisfied by construction and can never turn red on their own. That is not a reason
+# to drop them — the claims are still worth holding — but without a control a typo in
+# either literal would make them pass forever over a hook that had the retired comment
+# back. Plant each literal into a COPY and require the same grep to find it.
+R8T45_PROBE="$STATE_DIR/r8t45-probe.sh"
+{ cat "$STOPHOOK"; printf '\n# THE PRESENCE TESTS ARE THE GUARANTEE\n'; } > "$R8T45_PROBE"
+if grep -qF 'THE PRESENCE TESTS ARE THE GUARANTEE' "$R8T45_PROBE"; then
+  check "R8t4-control the R8t4 needle matches the planted retired claim" PASS
+else check "R8t4-control the R8t4 needle matches the planted retired claim" FAIL; fi
+{ cat "$STOPHOOK"; printf '\n# R8p6 forbids a default here\n'; } > "$R8T45_PROBE"
+if grep -qF 'R8p6 forbids a default here' "$R8T45_PROBE"; then
+  check "R8t5-control the R8t5 needle matches the planted retired citation" PASS
+else check "R8t5-control the R8t5 needle matches the planted retired citation" FAIL; fi
+rm -f -- "$R8T45_PROBE"
+
+# R8t6 — the DELIMITER, which is what bounds sentence forgery. The fold's own owner
+# states it in as many words: a class-clean absolute path can still carry a period and a
+# following clause, so what stops it reading as a continuation of the plugin's own
+# sentence is the delimiter around it, never where it sits in the line. The two sibling
+# arms in this same file parenthesize their slot; this one rendered it bare.
+R8T6_LINE="$(grep -F 'exists but does not match this immutable Session Control record' "$STOPHOOK")"
+if [ -n "$R8T6_LINE" ]; then
+  check "R8t6-control the mismatched-root sentence is present" PASS
+else check "R8t6-control the mismatched-root sentence is present" FAIL; fi
+case "$R8T6_LINE" in
+  (*'(${MISMATCHED_PROJECT_ROOT})'*)
+    check "R8t6 the mismatched-root slot is delimited like its two siblings" PASS ;;
+  (*) check "R8t6 the mismatched-root slot is rendered bare (got: $R8T6_LINE)" FAIL ;;
+esac
+
+# --- R12: three core comments that documented something other than the code ----
+#
+# Source pins, because the subject IS the source. Each one has a control so the needle
+# cannot go vacuous, which is the failure mode a negative grep invites.
+R12_CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
+
+# R12a — the umask rationale. `fs.mkdirSync(target, { mode })` passes the mode to
+# mkdir(2), which applies `mode & ~umask`; Node does not bypass the umask. So the
+# explicit mode does NOT remove the dependence, and "could land world-writable" is
+# impossible in either spelling — the comment's own preceding clause says umask can
+# only clear bits. What the explicit mode really buys is a CAP at 0755 independent of
+# a permissive umask, which is a smaller but real property.
+if grep -qF 'what it removes is the dependence on a umask' "$R12_CORE"; then
+  check "R12a the false 'removes the dependence on a umask' claim is gone" FAIL
+else check "R12a the false 'removes the dependence on a umask' claim is gone" PASS; fi
+# The retired claim may survive as a QUOTATION — this repository records what was wrong
+# so it is not reintroduced — but never as an assertion. The discriminator is the quote
+# marks: every surviving occurrence must sit inside them on its own line. A bare
+# file-wide grep cannot tell a retraction from a live claim, and reported this very
+# correction as the defect it documents.
+R12B_LIVE=0
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  case "$line" in (*'"could land world-writable"'*) continue ;; esac
+  R12B_LIVE=$((R12B_LIVE + 1))
+done <<EOF
+$(grep -F 'world-writable' "$R12_CORE" || true)
+EOF
+if [ "$R12B_LIVE" -eq 0 ]; then
+  check "R12b the impossible world-writable outcome survives only as a quoted retraction" PASS
+else check "R12b the impossible world-writable outcome survives only as a quoted retraction ($R12B_LIVE unquoted)" FAIL; fi
+# ...and the retraction itself must be present, or R12b passes over a comment that
+# simply deleted the history instead of recording it.
+if grep -qF '"could land world-writable"' "$R12_CORE"; then
+  check "R12b2 the retraction records the retired claim verbatim" PASS
+else check "R12b2 the retraction records the retired claim verbatim" FAIL; fi
+if grep -qF '0775' "$R12_CORE"; then
+  check "R12c the rationale states the cap-versus-default property it actually buys" PASS
+else check "R12c the rationale states the cap-versus-default property it actually buys" FAIL; fi
+
+# R12d — the stacked comment blocks at the writer's head. The first one describes
+# `restoreRootAlreadyPresentError` and sat directly above `baselineProvenanceUnrecorded`,
+# two functions away from its subject. Graded by OFFSET: a needle alone cannot see
+# which function a comment introduces.
+R12_BUILDER_COMMENT="$(grep -n 'ONE builder for the benign race' "$R12_CORE" | head -1 | cut -d: -f1)"
+R12_UNRECORDED_FN="$(grep -n '^function baselineProvenanceUnrecorded' "$R12_CORE" | head -1 | cut -d: -f1)"
+R12_BUILDER_FN="$(grep -n '^function restoreRootAlreadyPresentError' "$R12_CORE" | head -1 | cut -d: -f1)"
+if [ -n "$R12_BUILDER_COMMENT" ] && [ -n "$R12_UNRECORDED_FN" ] && [ -n "$R12_BUILDER_FN" ]; then
+  check "R12d-control all three offsets resolve" PASS
+else check "R12d-control all three offsets resolve (comment=$R12_BUILDER_COMMENT unrecorded=$R12_UNRECORDED_FN builder=$R12_BUILDER_FN)" FAIL; fi
+if [ "${R12_BUILDER_COMMENT:-0}" -gt "${R12_UNRECORDED_FN:-0}" ] \
+  && [ "${R12_BUILDER_COMMENT:-0}" -lt "${R12_BUILDER_FN:-0}" ]; then
+  check "R12d the benign-race builder comment introduces the builder, not its neighbour" PASS
+else check "R12d the benign-race builder comment introduces the builder, not its neighbour" FAIL; fi
+
+# R12e — the port roster. CLAUDE.md designates this export-block comment as the copy a
+# port works from, and its own prose says the numeral was wrong by one for a round
+# after a function was added, "which is why it now names no count at all". It named
+# SEVEN, and omitted two host obligations this feature's own pointer paragraph lists.
+R12_ROSTER="$(sed -n '/PORT-RELEVANT, stated here because every sibling repair/,/included in this change/p' "$R12_CORE")"
+if [ -n "$R12_ROSTER" ]; then
+  check "R12e-control the port-roster slice is non-empty" PASS
+else check "R12e-control the port-roster slice is non-empty" FAIL; fi
+if printf '%s' "$R12_ROSTER" | grep -qF 'orphaned-project-root'; then
+  check "R12e the port roster names the deny scope this feature added" PASS
+else check "R12e the port roster names the deny scope this feature added" FAIL; fi
+if printf '%s' "$R12_ROSTER" | grep -qF 'zensu_safe_display_path'; then
+  check "R12f the port roster names the shared display bound both hosts must place" PASS
+else check "R12f the port roster names the shared display bound both hosts must place" FAIL; fi
+# The alternation used to stop at TEN, so ELEVEN — the next number this roster would
+# reach — passed, and so did every other phrasing. The property is "no hand-maintained
+# numeral", not "not one of five words", so the needle matches the SHAPE: any
+# spelled-out count up to twenty, or any digit run, in front of the noun.
+R12G_COUNT='(ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|ELEVEN|TWELVE|THIRTEEN|FOURTEEN|FIFTEEN|SIXTEEN|SEVENTEEN|EIGHTEEN|NINETEEN|TWENTY|[0-9]+)'
+# Match case-INSENSITIVELY over a FLATTENED roster. The comment wraps, so a numeral and
+# its noun routinely sit on two different physical lines with a `//` between them — a
+# line-local needle could never see `its\n  // five constants`, which is exactly the
+# phrase R12h exists to catch — and the roster spells its counts in lower case in some
+# places and upper case in others.
+R12_ROSTER_FLAT="$(printf '%s' "$R12_ROSTER" | sed -e 's|^[[:space:]]*//[[:space:]]\{0,1\}||' | tr '\n' ' ')"
+if printf '%s' "$R12_ROSTER_FLAT" | grep -qiE "is $R12G_COUNT obligations"; then
+  check "R12g the port roster carries no hand-maintained numeral" FAIL
+else check "R12g the port roster carries no hand-maintained numeral" PASS; fi
+if printf 'the host half is ELEVEN obligations\n' | grep -qiE "is $R12G_COUNT obligations"; then
+  check "R12g-control the widened needle matches a count the old word list missed" PASS
+else check "R12g-control the widened needle matches a count the old word list missed" FAIL; fi
+# Same defect, other noun. The roster declares it carries no count and then names
+# `zensu_safe_display_path` "with its five constants" — a hand-maintained numeral over
+# a set that has already moved once, three lines below the sentence forbidding one.
+if printf '%s' "$R12_ROSTER_FLAT" | grep -qiE "its $R12G_COUNT constants"; then
+  check "R12h the port roster counts no constant set either" FAIL
+else check "R12h the port roster counts no constant set either" PASS; fi
+if printf 'with its five constants\n' | grep -qiE "its $R12G_COUNT constants"; then
+  check "R12h-control the constant-count needle matches a planted numeral" PASS
+else check "R12h-control the constant-count needle matches a planted numeral" FAIL; fi
+
+# --- R13: the suite overview declares the counts the driven files register -----
+#
+# `tests/SUITE-OVERVIEW.md` carries a row per driven `node --test` file with its
+# registration COUNT, and nothing compared the two. Both rows for this feature had
+# already drifted — one by six cases, one by one — which is what a hand-maintained
+# numeral beside a growing file does. The check DERIVES both sides: the declared
+# number from the table row, the real one from the file.
+R13_OVERVIEW="$PLUGIN_DIR/tests/SUITE-OVERVIEW.md"
+r13_declared() { grep -F "| \`$1\` |" "$R13_OVERVIEW" | head -1 | awk -F'|' '{gsub(/ /,"",$3); print $3}'; }
+r13_registered() { grep -c '^test(' "$PLUGIN_DIR/tests/structure/$1"; }
+# The file list is DERIVED from the table, never hand-enumerated here. It named two
+# rows while the table declares a count for many more, so every other row's numeral was
+# held by nothing — and a hand-maintained list inside a check written against
+# hand-maintained numerals is the same defect one level up. A row whose file is absent
+# from tests/structure/ is skipped rather than reported: several driven files live
+# elsewhere in the tree and this check owns neither their location nor their count.
+R13_ROWS="$(grep -E '^\| `[a-z0-9._-]+\.test\.js` \| [0-9]+ \|' "$R13_OVERVIEW" \
+  | awk -F'|' '{gsub(/ |`/,"",$2); print $2}')"
+R13_DRIFT=""
+R13_SEEN=0
+for r13_file in $R13_ROWS; do
+  [ -f "$PLUGIN_DIR/tests/structure/$r13_file" ] || continue
+  R13_SEEN=$((R13_SEEN + 1))
+  r13_want="$(r13_registered "$r13_file")"
+  r13_have="$(r13_declared "$r13_file")"
+  if [ -z "$r13_have" ]; then
+    R13_DRIFT="$R13_DRIFT $r13_file(no-row)"
+  elif [ "$r13_have" != "$r13_want" ]; then
+    R13_DRIFT="$R13_DRIFT $r13_file(declared=$r13_have registered=$r13_want)"
+  fi
+done
+# The control proves both halves of the derivation resolve; without it a broken awk
+# field or a renamed file would make every comparison vacuously agree on empty. The
+# row FLOOR is the half that matters now the list is derived: a table whose format
+# changed yields an empty list, and an empty loop reports no drift.
+if [ "$(r13_registered restore-root-render-cases.test.js)" -gt 0 ] \
+  && [ -n "$(r13_declared restore-root-render-cases.test.js)" ] \
+  && [ "$R13_SEEN" -ge 10 ]; then
+  check "R13-control both sides of the count derivation resolve ($R13_SEEN rows compared)" PASS
+else check "R13-control both sides of the count derivation resolve ($R13_SEEN rows compared)" FAIL; fi
+if [ -z "$R13_DRIFT" ]; then
+  check "R13 the suite overview declares the counts these files register ($R13_SEEN rows)" PASS
+else check "R13 the suite overview count drift:$R13_DRIFT" FAIL; fi
 
 R8_AT_MAX="/$(printf 'a%.0s' $(seq 1 1023))"
 # The source pin above grades the format string; this grades the DECODED reason, the
@@ -1141,6 +1573,179 @@ if printf '%s' "$GATES_SEC" | grep -qF 'not bounded by location'; then
   check "R11c docs/gates.md states the same bound" PASS
 else check "R11c docs/gates.md states the same bound" FAIL; fi
 
+# --- R14: the lazy-table comment describes a path production can reach ---------
+#
+# M2/M13 (PR #312 panel). The comment above `restoreRemedyTable` made two claims. The
+# require-time one is real and measured. The second — that a skewed core "yields an
+# EMPTY table, so every refusal falls through to the no-remedy text" — is only true
+# when a caller supplies `deps.verdict`: `renderRestoreRoot` resolves
+# `core.restoreRootVerdict` unguarded and CALLS it above the table, so on the very core
+# the guard is written for, main() throws there first and the outer catch turns it into
+# a refusal with exit 1. And the same comment never said why the sibling `REMEDY` table
+# may stay eager, which is the criterion a later reader needs: ADOPTION_REFUSALS
+# predates every core this file can be paired with under the lineage rule.
+R14_REPORT="$PLUGIN_DIR/hooks/lib/session-adopt-report-v1.js"
+R14_COMMENT="$(sed -n '/^\/\/ BUILT LAZILY, behind a guard/,/^let RESTORE_REMEDY_TABLE/p' "$R14_REPORT")"
+if [ -n "$R14_COMMENT" ]; then
+  check "R14-control the lazy-table comment slice is non-empty" PASS
+else check "R14-control the lazy-table comment slice is non-empty" FAIL; fi
+if printf '%s' "$R14_COMMENT" | grep -qF 'throws before the table is consulted'; then
+  check "R14  the comment states where a skewed core actually fails" PASS
+else check "R14  the comment states where a skewed core actually fails" FAIL; fi
+if printf '%s' "$R14_COMMENT" | grep -qF 'ADOPTION_REFUSALS'; then
+  check "R14b the comment states the criterion that keeps the sibling table eager" PASS
+else check "R14b the comment states the criterion that keeps the sibling table eager" FAIL; fi
+# BEHAVIOURAL, and the reason the correction was needed: drive a core that exports no
+# restore vocabulary at all through the renderer with NO deps and require the throw.
+R14C_OUT="$(REPORT="$R14_REPORT" CORE="$CORE" node -e '
+  const fs = require("node:fs"); const os = require("node:os"); const path = require("node:path");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "zensu-r14-"));
+  const lib = path.dirname(process.env.REPORT);
+  for (const n of fs.readdirSync(lib)) {
+    const f = path.join(lib, n);
+    if (fs.statSync(f).isFile()) fs.copyFileSync(f, path.join(dir, n));
+  }
+  fs.writeFileSync(path.join(dir, "session-control-core-v1.js"),
+    "const real = require(" + JSON.stringify(process.env.CORE) + ");\n"
+    + "const clone = Object.assign({}, real);\n"
+    + "delete clone.RESTORE_ROOT_REFUSALS;\n"
+    + "delete clone.restoreRootVerdict;\n"
+    + "delete clone.restoreWorkflowProjectRoot;\n"
+    + "module.exports = clone;\n");
+  const mod = require(path.join(dir, "session-adopt-report-v1.js"));
+  try { mod.renderRestoreRoot({}, false); process.stdout.write("NO-THROW"); }
+  catch (e) { process.stdout.write("THREW"); }
+  finally { fs.rmSync(dir, { recursive: true, force: true }); }
+' 2>/dev/null)"
+if [ "$R14C_OUT" = "THREW" ]; then
+  check "R14c a core without the restore exports throws before any remedy is looked up" PASS
+else check "R14c a core without the restore exports throws before any remedy is looked up (got: '$R14C_OUT')" FAIL; fi
+
+# M11 (PR #312 panel): the three call sites test `zensu_safe_display_path`'s exit
+# status while its own header says it "ECHOES the value to render and never a status".
+# Read as a status CONTRACT the finding is right — every return inside that body is 0.
+# What the finding missed is that a command substitution also carries 127 when the
+# function is not defined at all, which is the case those branches actually cover: an
+# unsourced emitter would otherwise interpolate an EMPTY string into a sentence that
+# claims to name the recorded root. So the branches stay and the owner states the
+# contract, which is the half that was missing.
+if printf '%s' "$R8_SHARED_BODY_RAW" | grep -qF 'a caller MAY test the status'; then
+  check "R11d the owner states what a caller's status test can see" PASS
+else check "R11d the owner states what a caller's status test can see" FAIL; fi
+# BITE for the same claim, behaviourally: drive the orphaned arm with the emitter NOT
+# sourced and require it to render the fold's own placeholder rather than an empty
+# slot. Without the `if !` this renders nothing at all.
+R11E_OUT="$(ORPHANED_PROJECT_ROOT='/tmp/zensu-r11e' STOPHOOK="$STOPHOOK" bash -c '
+  set -u
+  ARM="$(sed -n "/if ! ORPHANED_PROJECT_ROOT=/,/^    fi\$/p" "$STOPHOOK")"
+  case "$ARM" in "") printf "NO-SLICE"; exit 0 ;; esac
+  # The emitter `export -f`s this function, so a plain child INHERITS it and the probe
+  # would measure the ordinary rendering path instead of the unavailable one. Drop it
+  # here rather than in the parent: every row above needs the real function.
+  unset -f zensu_safe_display_path 2>/dev/null || true
+  eval "$ARM" 2>/dev/null
+  printf "%s" "$ORPHANED_PROJECT_ROOT"
+')"
+if [ "$R11E_OUT" = "(unreadable)" ]; then
+  check "R11e the status branch renders the placeholder when the emitter is unavailable" PASS
+else check "R11e the status branch renders the placeholder when the emitter is unavailable (got: '$R11E_OUT')" FAIL; fi
+
 echo
+# --- R2g/R2h: the two verdict arms no fixture reached ------------------------
+#
+# THIS BLOCK RUNS LAST, and that placement is the contract rather than layout. `arm`
+# EXPORTS CLAUDE_PROJECT_DIR, CLAUDE_PLUGIN_DATA and the baseline's own session
+# variables, and the depth fixtures below DELETE the root they just armed — so any
+# block that follows would run against a session whose project root is gone. Measured:
+# placed before the R5 group it made R5b fail with a message about an unavailable
+# binding and nothing naming the cause, and restoring the two obvious variables by hand
+# was not enough, because `initialize-baseline.sh` exports more than those two.
+#
+# R2g — `plugin-data-mismatch` was the one refusal of six with no producer-side case,
+# and driving it MEASURED why: it is UNREACHABLE through this entry point. Pointing
+# `recordsDir` at one store's record while claiming a different `pluginData` — the
+# shape a development checkout against an installed plugin produces — answers
+# `record-unreadable`, because `readOrphanedProjectRootContext` refuses the record
+# before the explicit conjunct below it is ever evaluated. The conjunct is therefore
+# defence in depth rather than the thing holding the boundary, exactly as CLAUDE.md
+# already records for its `ADOPTION_REFUSALS.PLUGIN_DATA` sibling.
+#
+# What these rows pin is the SAFETY property, which is what matters and is reachable:
+# a record from a foreign store NEVER restores. The specific reason is asserted as the
+# one this entry point really produces, so the row states a measurement rather than a
+# wish. Do not "fix" it to expect plugin-data-mismatch without first moving the
+# conjunct above the reader — and if you do, R2g2 is the row that will tell you.
+verdict_foreign_data() {
+  local records_data="$1" session="$2" claimed_data="$3"
+  DATA="$records_data" CLAIMED="$claimed_data" SESSION="$session" CORE_PATH="$CORE" ROOT="$PLUGIN_DIR" node -e '
+    const core = require(process.env.CORE_PATH);
+    const binder = require(require("node:path").join(process.env.ROOT, "hooks/lib/claude-hook-session-v1.js"));
+    const v = core.restoreRootVerdict({
+      recordsDir: binder.privateRecordsDirectory(process.env.DATA),
+      sessionId: process.env.SESSION,
+      host: "claude",
+      pluginData: process.env.CLAIMED,
+      executingPluginRoot: process.env.ROOT,
+    });
+    console.log(v.ok ? "ok " + v.missing.length : v.reason);
+  ' 2>/dev/null
+}
+# A fixture of its own rather than the R2 block's `gone` one: this block runs last, and
+# by then that fixture has been through the ladder cases, so reusing it made the control
+# fail for a reason that had nothing to do with the store boundary.
+arm foreignstore || check "R2g fixture armed" FAIL
+R2G_DATA="$ARMED_DATA"
+rm -rf "$ARMED_ROOT"
+R2G_VERDICT="$(verdict_foreign_data "$R2G_DATA" foreignstore "$STATE_DIR/plugin-data/some-other-store")"
+case "$R2G_VERDICT" in
+  (ok*) check "R2g  a record from another plugin-data store RESTORED — the store boundary is open" FAIL ;;
+  (*) check "R2g  a record from another plugin-data store never restores (refused: $R2G_VERDICT)" PASS ;;
+esac
+# R2g2 — the measurement, recorded so a later reader does not have to re-derive it and
+# so the day it changes is loud. If the conjunct ever moves above the orphan reader
+# this row turns red and R2g stays green, which is the right pair of signals.
+expect_eq "R2g2 the foreign-store refusal comes from the reader, not the explicit conjunct" \
+  "record-unreadable" "$R2G_VERDICT"
+# The control keeps R2g from passing for the wrong reason: the SAME record read with
+# its own store still answers the gone-root verdict, so the refusal is about the store
+# and not about the fixture being broken.
+expect_eq "R2g-control the same record read with its own store is not a data mismatch" \
+  "ok 1" "$(verdict_foreign_data "$R2G_DATA" foreignstore "$R2G_DATA")"
+
+# R2h — RESTORE_MAX_MISSING_COMPONENTS had no arm on either side of the bound, so the
+# depth limit was asserted by reading the constant. Both sides are driven here: a
+# recorded root exactly AT the limit restores, one component deeper is refused. The
+# bound is read from the core rather than written as a numeral, so raising it moves
+# both fixtures together instead of turning one of them into a false claim.
+R2H_LIMIT="$(CORE_PATH="$CORE" node -e 'console.log(require(process.env.CORE_PATH).RESTORE_MAX_MISSING_COMPONENTS)' 2>/dev/null)"
+case "$R2H_LIMIT" in
+  (''|*[!0-9]*) check "R2h-control the depth limit is readable from the core (got: '$R2H_LIMIT')" FAIL ;;
+  (*) check "R2h-control the depth limit is readable from the core ($R2H_LIMIT)" PASS ;;
+esac
+if [ "${R2H_LIMIT:-0}" -ge 2 ]; then
+  R2H_AT=""; r2h_i=1
+  while [ "$r2h_i" -le "$R2H_LIMIT" ]; do R2H_AT="$R2H_AT/d$r2h_i"; r2h_i=$((r2h_i + 1)); done
+  arm atlimit "$R2H_AT" || check "R2h fixture armed" FAIL
+  AT_DATA="$ARMED_DATA"
+  rm -rf "$PROJECTS/atlimit/d1"
+  expect_eq "R2h  a recorded root exactly at the depth limit is restorable" \
+    "ok $R2H_LIMIT" "$(verdict "$AT_DATA" atlimit)"
+  R2H_OVER="$R2H_AT/d$((R2H_LIMIT + 1))"
+  arm overlimit "$R2H_OVER" || check "R2h fixture armed" FAIL
+  OVER_DATA="$ARMED_DATA"
+  rm -rf "$PROJECTS/overlimit/d1"
+  expect_eq "R2h2 one component past the depth limit is refused" \
+    "too-many-missing-components" "$(verdict "$OVER_DATA" overlimit)"
+else
+  # R2h/R2h2 need a limit of at least 2 to have an at-limit and an over-limit fixture
+  # that differ. Below that they used to VANISH without a sound, so lowering the
+  # constant to 1 silently removed the only coverage either side of the bound has.
+  # Report the skip as its own row, the way R1f reports a fixture it cannot build:
+  # an absent row and a passing row read identically in the summary.
+  # `check` has two verdicts only, so the skip is reported as a PASS whose LABEL says
+  # it was not driven — the same spelling R1f uses for the fixture it cannot build.
+  check "R2h  the depth-limit pair is not driven (limit is $R2H_LIMIT, an at-limit and an over-limit fixture cannot differ below 2)" PASS
+fi
+
 echo "restore-project-root: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

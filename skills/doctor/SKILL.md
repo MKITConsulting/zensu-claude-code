@@ -12,7 +12,9 @@ description: >
   in ~/.claude/settings.json expose the zensu:code-reviewer spawn to a refusal
   before any chain has wedged), and session state (state dir writable, canonical
   CAS workflow documents valid, whether THIS session's own workflow document is
-  there and usable and whether it was rebuilt rather than restored, each review
+  there and usable and whether it was rebuilt rather than restored, whether this
+  session's recorded project root was re-created by a restore rather than being the
+  one that was there before, each review
   chain's shape plus any wedged chain and
   its recovery command, any open chain not owned by this session, any chain this
   session owns that has ended many turns at implementing, any nonterminal durable
@@ -740,6 +742,22 @@ classifier will refuse a spawn, not only when the whole table is green.
   gone and the Stop guard now releases this session without asking for a reviewer. The
   row names the entry count, the timestamp and which state was repaired. Offer
   `/zensu:tdd` to re-arm if that work still needs a review.
+- **⚠️ state: this session's recorded project root was RE-CREATED** → the history
+  carries the reserved `PROJECT_ROOT_RESTORED` provenance entry, so the directory this
+  session is anchored to was planted by `/zensu:adopt-session --restore-root --confirm`
+  rather than being the one that was there before. It renders BESIDE the REBUILT row
+  above, not instead of it: that one is about the workflow document, this one about the
+  directory, and the restore writes both. Relay it with its cost — the repair restores
+  the anchor, **not the work**. The directory came back EMPTY and is not a git
+  worktree, so until a worktree is checked out at that path everything written there
+  is **untracked**: no repository, no branch, nothing to commit it to. The row names
+  the entry count, the timestamp and how many components were planted. Offer
+  `git worktree add` at that path, and note that the rebuild leaves `.zensu/state`
+  under the root, so a plain `git worktree add` refuses a non-empty target.
+- **⚠️ state: … not checked for project-root restore provenance** → the report could
+  not read the restore phase token from the Session Control core, or the workflow
+  document did not read back. That is a MISSING CHECK, never an all-clear: relay it as
+  a check that did not run, and do not tell the user their project root is verified.
 - **⚠️ state: this session's workflow document was not checked for rebuild provenance**
   → either the core exported no rebuild phase token or the document did not read back,
   so the check did NOT run. A missing check, never an all-clear, and never a claim that

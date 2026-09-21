@@ -663,6 +663,15 @@ ZENSU_FORGERY_PAIR_COLON_SPACE=': '
 # uses. Every fault answers `(unreadable)`, so a caller that ignores the exit status
 # still fails closed.
 #
+# That said, a caller MAY test the status, and the three Stop-hook call sites do. Every
+# return inside this body is 0, so the branch they guard can never fire on a FAULT of
+# this function — what it covers is this function being UNAVAILABLE. A command
+# substitution carries 127 when the name is not defined, which is what an unsourced or
+# partially sourced emitter looks like from a hook that still renders the sentence; the
+# slot would otherwise interpolate an empty string into a line that claims to name the
+# recorded project root. Read the branches that way rather than as a fault contract,
+# and do not delete them as dead: they are live for exactly one cause.
+#
 # THREE constant faults, not one. ABSENT and EMPTY are what an emptiness conjunct
 # closes; RETYPED is the third and needs its own screen, which is why the ceiling is
 # tested as a decimal before it is compared — the same shape `zensu-doctor.sh` applies
