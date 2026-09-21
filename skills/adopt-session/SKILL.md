@@ -8,9 +8,9 @@ description: >
   stateful tool fails closed: Edit, Write, MultiEdit and writing Bash
   deny, Bash denies everything but the two recognized commands, subagents cannot start,
   and Stop cannot prove completion. Zensu adopts such a record automatically on the first
-  hook contact after the update, so this skill is the REPORT for a refused or opted-out
-  adoption and, with `--confirm`, the manual retry, which ignores hooks.sessionAutoAdopt
-  being false. The adoption mints a new record for the same session under the executing
+  hook contact after the update, so this skill is the REPORT for an adoption that was
+  refused, opted out or did not complete and, with `--confirm`, the manual retry, which
+  ignores hooks.sessionAutoAdopt being false. The adoption mints a new record for the same session under the executing
   runtime, sets the previous one aside unchanged, and records the takeover in the
   workflow history. The session is
   bound again from the next tool call onward — no restart; when the recorded project root is
@@ -45,9 +45,12 @@ running one refuses to serve it. Everything stateful then fails closed at once.
 Not on its own any more: the first hook contact after `/reload-plugins` adopts such a
 record itself when the persisted schemas still match — the same adoption this skill
 performs, with the same provenance, and a deny that names the refusal when it did not
-happen. This skill is for the remainder: the adoption was REFUSED (every gate's deny
-names the refusal token), the automatic path is switched off with
-`hooks.sessionAutoAdopt: false`, or the user wants the full report. One precondition
+happen. This skill is for the remainder, which has THREE causes and not two: the
+adoption was REFUSED (every gate's deny names the refusal token), the automatic path is
+switched off with `hooks.sessionAutoAdopt: false` — in either config layer, since for
+this key `false` is sticky — or the adoption did NOT COMPLETE (a lock timeout, or a
+fault inside the adoption itself; the deny reads `it did not complete: <token>`). It is
+also the full report whenever the user wants one. One precondition
 the plugin cannot supply: a session keeps executing its previous version until
 `/reload-plugins` runs in it, and nothing on that older version reaches this state.
 
@@ -234,13 +237,15 @@ forge another one. Render whatever you get verbatim; do NOT un-escape it, and do
 report it as damage.
 
 Every refusal a user can see is in the table below. Most are `adoptableRecord`
-verdicts; `private-record-store-unsafe` is emitted by the ENTRY POINT before those
-are ever reached, and is marked as such. Each prints its own remedy inline, so
+verdicts; TWO are emitted by the ENTRY POINT and are marked as such —
+`private-record-store-unsafe` before those verdicts are ever reached, and
+`superseded-record-exists` after they passed. Each prints its own remedy inline, so
 render that verbatim too.
 
 | Reason | Meaning |
 |--------|---------|
 | `private-record-store-unsafe` | Entry-point refusal, raised before `adoptableRecord` runs: the private record store itself could not be opened safely — missing, aliased, or carrying unsafe permissions or ownership. |
+| `superseded-record-exists` | Entry-point refusal, raised AFTER `adoptableRecord` passed: the record itself is adoptable, but an interrupted adoption left `<session-key>.superseded-<version>.json` in place and the adoption refuses to overwrite it. Both forms name the file — the read-only report as `NOT adoptable`, `--confirm` as `NOT adopted` — because the shared preview owns the check. Moving the file aside is the remedy; a retry alone is a loop. |
 | `record-unreadable` | The record no longer re-verifies against the installation that minted it — altered, or a real schema change. Two states that used to land here no longer do on their own: a recorded project root that is merely GONE is adoptable, and so is a minting installation merely pruned from the cache. A pruned installation IS still this refusal when the recorded project root is ALSO gone, and so is a vanished project root when the minting installation is also pruned, because each relaxed reader pins the other's waiver off and nothing is left to anchor the record to. |
 | `plugin-data-mismatch` | The record belongs to a different plugin-data store. Never relaxed. |
 | `already-served` | Nothing to RE-MINT, and TWO things beside the record can still be wedged. **The workflow document** this session is anchored to may be gone — a deleted and re-created worktree loses it, because `.zensu/state/` is gitignored — and while it is, the capability gate denies every tool in the session. **The lease store** is the second: an adoption writes the record first and sweeps the store afterwards, so a run that died in between leaves exactly that state. The report below the remedy says which of the two applies. Re-running with `--confirm` repairs both, idempotently, and re-mints nothing. If tools still fail after that, run `/zensu:doctor`. |
@@ -262,8 +267,9 @@ the call), `not-completed`, `lock-timeout` and `adoption-failed` (the adoption d
 not finish; retry, then run the report — the last two appear only in the all-tool
 gate's deny, which sees the adoption's own error where the shell gates see a
 preview), `superseded-record-exists` (an interrupted adoption left
-`<session-key>.superseded-<version>.json` in place; the report names it, and moving
-it aside lets the adoption complete — a retry alone is a loop), and `(unknown)` when
+`<session-key>.superseded-<version>.json` in place; the report names it in BOTH forms —
+see the table row above — and moving it aside lets the adoption complete; a retry
+alone is a loop), and `(unknown)` when
 the binder could not answer at all. A refusal that establishes no named state —
 `record-unreadable`, `plugin-data-mismatch` — rides on the generic bind-failure deny
 as one appended sentence rather than on the lineage or pruned wording.
@@ -278,8 +284,12 @@ say so, in the user's language, and wait; and when a gate's deny or the Stop rel
 named `opted-out`, the operator switched the automatic path off — report that and
 wait. The report itself never names `opted-out`, and neither does the `/zensu:doctor`
 row, which cannot tell the three cases apart: the report shows such
-a record as ADOPTABLE, because the opt-out governs the automatic path only, so an
-ADOPTABLE report in a session whose tools are denied is the signature of it. For
+a record as ADOPTABLE, because the opt-out governs the automatic path only. Do NOT
+read an ADOPTABLE report in a session whose tools are denied as the signature of the
+opt-out, though: an adoption that did not complete (`not-completed`, `lock-timeout`,
+`adoption-failed`) reads ADOPTABLE too, and there `--confirm` needs no one's yes. The
+TOKEN in the gate's deny or in the Stop release is what tells the two apart — when you
+have no token, ask rather than assume. For
 every other refusal, and for the idempotent lease-store repair on an `already-served`
 record whose baseline is present, run it directly. Tell the user, in their language,
 what it does — both versions, and the one consequence that is not obvious: any

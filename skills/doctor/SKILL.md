@@ -476,10 +476,17 @@ classifier will refuse a spawn, not only when the whole table is green.
   `/reload-plugins` adopts the record automatically when its persisted schemas
   still match. A session that still shows this row is therefore one whose
   adoption was refused, opted out or did not complete — the row itself says so, and
-  a gate's deny names the token. Run `/zensu:adopt-session`: it prints the same
-  refusal in full, or reports the record as adoptable when the automatic path was opted out
-  through `hooks.sessionAutoAdopt: false`, because the opt-out governs the automatic
-  path only. Then `/zensu:adopt-session --confirm` retries by hand — it ignores the
+  a gate's deny names the token. Run `/zensu:adopt-session`: it prints
+  the same refusal in full
+  and names a superseded record file when one blocks the adoption.
+  An ADOPTABLE answer there has TWO causes, never one:
+  the automatic path was either opted out
+  through `hooks.sessionAutoAdopt: false` — the opt-out governs the automatic path only —
+  or did not complete (a lock timeout, or a fault inside the adoption itself),
+  which a gate's deny names as `not-completed`, `lock-timeout` or `adoption-failed`.
+  Reading ADOPTABLE as the opt-out alone sends a user whose adoption merely timed out
+  looking for a config key nobody set. Then
+  `/zensu:adopt-session --confirm` retries by hand — it ignores the
   opt-out, so on an opted-out record ask the user before running it: the operator
   switched the automatic path off on purpose.
   Both stay reachable in this state; so does this diagnostic. A refusal names the
@@ -503,9 +510,13 @@ classifier will refuse a spawn, not only when the whole table is green.
   repairable in place — attempted automatically on the first hook contact, so a row
   still rendered means that
   adoption was refused, opted out or did not complete; `/zensu:adopt-session` prints
-  the same refusal in full,
-  or reports the record as adoptable when the automatic path was opted out
-  (ask the user before `--confirm` then), and `/zensu:adopt-session --confirm`
+  the same refusal in full
+  and names a superseded record file when one blocks the adoption;
+  when it answers ADOPTABLE instead,
+  the automatic path was either opted out
+  (ask the user before `--confirm` then)
+  or did not complete (a lock timeout, or a fault inside the adoption itself),
+  and `/zensu:adopt-session --confirm`
   retries by hand — that is the
   difference from the plain orphaned row, which the running installation already
   serves and which adoption refuses as `already-served`. State the limit whenever you offer
@@ -554,11 +565,16 @@ classifier will refuse a spawn, not only when the whole table is green.
   row — attempted automatically on the first hook contact, so a row still rendered
   means that
   adoption was refused, opted out or did not complete; `/zensu:adopt-session` prints
-  the same refusal in full,
-  or reports the record as adoptable when the automatic path was opted out
+  the same refusal in full
+  and names a superseded record file when one blocks the adoption;
+  when it answers ADOPTABLE instead,
+  the automatic path was either opted out
   — ask the user before `--confirm` then, since the operator switched the automatic
-  path off on purpose — and `/zensu:adopt-session --confirm` retries by
-  hand. The adoption report marks the minting version
+  path off on purpose —
+  or did not complete (a lock timeout, or a fault inside the adoption itself),
+  and
+  `/zensu:adopt-session --confirm` retries by hand.
+  The adoption report marks the minting version
   `(installation no longer on disk)`.
   Both commands and this diagnostic stay reachable, and `Stop` is released rather
   than wedged. Do NOT tell the user to restart after a successful adoption.
@@ -730,10 +746,22 @@ classifier will refuse a spawn, not only when the whole table is green.
   gone and the Stop guard now releases this session without asking for a reviewer. The
   row names the entry count, the timestamp and which state was repaired. Offer
   `/zensu:tdd` to re-arm if that work still needs a review.
+- **✅ state: this session's Session Control record was ADOPTED across a plugin update** →
+  informational, and the one place an automatic adoption stays visible after the fact: a
+  plugin update landed while the session was running and a hook re-minted its record
+  under the new installation. The row names the entry count, the timestamp, the version
+  pair and the name the previous record was kept under. Relay it as a repair that
+  SUCCEEDED — no workflow state was lost and nothing is left to do — and do NOT tell the
+  user to restart. Two bounds travel with it. Review-evidence leases minted before the
+  update were set aside, so a review that was in flight then has to be re-gathered. And an
+  adoption made while no workflow document existed — a deleted worktree — wrote no entry,
+  so the ABSENCE of this row is never evidence that no adoption happened; the kept record
+  is then its only trace.
 - **⚠️ state: this session's workflow document was not checked for rebuild provenance**
-  → either the core exported no rebuild phase token or the document did not read back,
-  so the check did NOT run. A missing check, never an all-clear, and never a claim that
-  the document was not rebuilt.
+  (the row also reads `adoption provenance`, or `rebuild or adoption provenance`)
+  → either the core exported no phase token for that check or the document did not read
+  back, so the check did NOT run. A missing check, never an all-clear, and never a claim
+  that the document was not rebuilt or that the record was not adopted.
 - **⚠️ state: this session's own workflow document could not be classified** → the
   Session Control core did not load from the plugin directory the row names, so the check
   did NOT run. A missing check, never an all-clear.

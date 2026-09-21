@@ -2121,8 +2121,10 @@ else
   check "a symlinked plugin-data store names its cause instead of exiting silently" SKIP
 fi
 
-# The ENTRY-POINT-ONLY refusal, which CONV-1's ENTRY_ONLY list now REQUIRES to be
-# documented while nothing checked the code still emits it. It is raised before
+# The FIRST entry-point-only refusal, which CONV-1's ENTRY_ONLY list REQUIRES to be
+# documented while nothing checked the code still emits it. (The list's second
+# member, superseded-record-exists, has its emission check in AUTO-14, which needs
+# an interrupted adoption this block does not build.) It is raised before
 # adoptableRecord runs, when privateRecordsDirectory refuses the store — here a
 # records leaf that is group- and world-accessible. Platform-gated: the binder's
 # mode and ownership checks are POSIX-only.
@@ -4749,7 +4751,10 @@ REFUSAL_GAPS="$(
     // incomplete in order to keep this pin simple: the test dictated what could be
     // documented instead of checking that what exists is documented. Naming the
     // exception explicitly inverts that back.
-    const ENTRY_ONLY = ["private-record-store-unsafe"];
+    // A SECOND one since the shared preview owns the crash-resume check: the read-only
+    // report prints `NOT adoptable (superseded-record-exists)` itself, so it is a
+    // headline a user sees and the table has to carry.
+    const ENTRY_ONLY = ["private-record-store-unsafe", "superseded-record-exists"];
     const known = reasons.concat(ENTRY_ONLY);
     const stale = rows.filter((r) => !known.includes(r));
     if (stale.length) { process.stdout.write("stale:" + stale.join(",")); process.exit(0); }

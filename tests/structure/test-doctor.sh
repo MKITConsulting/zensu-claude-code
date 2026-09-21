@@ -1950,7 +1950,9 @@ P1AD5_BULLET_LINEAGE="$(p1ad5_bullet 'is intact, but the running Zensu installat
 P1AD5_BULLET_COMBINED="$(p1ad5_bullet 'is readable, but BOTH the recorded project root')"
 P1AD5_BULLET_PRUNED="$(p1ad5_bullet 'installation that minted it has been removed from the plugin cache')"
 for p1ad5_phrase in 'reaching this row means that adoption was refused, opted out or did not complete' \
-    'it prints the same refusal in full, or reports the record as adoptable when the automatic path was opted out' \
+    'it prints the same refusal in full and names a superseded record file when one blocks the adoption' \
+    'when it reports the record as adoptable instead, the automatic path was either opted out' \
+    'or did not complete (a lock timeout, or a fault inside the adoption itself)' \
     'ask the user before going further' \
     '/zensu:adopt-session --confirm to retry by hand'; do
   case "$P1AD5_LINEAGE" in *"$p1ad5_phrase"*) ;; *) P1AD5_BAD="$P1AD5_BAD [lineage:$p1ad5_phrase]" ;; esac
@@ -1959,7 +1961,9 @@ for p1ad5_phrase in 'reaching this row means that adoption was refused, opted ou
 done
 for p1ad5_phrase in 'adoption was refused, opted out or did not complete' \
     'the same refusal in full' \
-    'or reports the record as adoptable when the automatic path was opted out' \
+    'names a superseded record file when one blocks the adoption' \
+    'the automatic path was either opted out' \
+    'or did not complete (a lock timeout, or a fault inside the adoption itself)' \
     'ask the user before' \
     '`/zensu:adopt-session --confirm` retries by hand'; do
   case "$P1AD5_BULLET_LINEAGE" in *"$p1ad5_phrase"*) ;; *) P1AD5_BAD="$P1AD5_BAD [skill-lineage:$p1ad5_phrase]" ;; esac
@@ -1967,7 +1971,10 @@ for p1ad5_phrase in 'adoption was refused, opted out or did not complete' \
   case "$P1AD5_BULLET_PRUNED" in *"$p1ad5_phrase"*) ;; *) P1AD5_BAD="$P1AD5_BAD [skill-pruned:$p1ad5_phrase]" ;; esac
 done
 case "$P1AD5_LINEAGE$P1AD5_PRUNED$P1AD5_COMBINED$P1AD5_BULLET_LINEAGE$P1AD5_BULLET_COMBINED$P1AD5_BULLET_PRUNED" in
-  *'to see whether this session can be adopted in place'*|*'to see whether the running installation may take the record over'*|*'adoption was refused or opted out'*)
+  # The last alternative is the wording that read an ADOPTABLE report as the opt-out
+  # ALONE. It has two causes — the opt-out, and an adoption that did not complete — and
+  # a blocking superseded file is no longer ADOPTABLE at all: the report names it.
+  *'to see whether this session can be adopted in place'*|*'to see whether the running installation may take the record over'*|*'adoption was refused or opted out'*|*'or reports the record as adoptable when the automatic path was opted out'*)
     P1AD5_BAD="$P1AD5_BAD [retired wording survives]" ;;
 esac
 if [ -z "$P1AD5_BAD" ]; then
@@ -5593,6 +5600,88 @@ case "$P6_NOPHASE_OUT" in
   *) check "P6r4 a renderer without the core token claims no rebuild verdict" PASS ;;
 esac
 rm -rf "$P6_NOPHASE"
+
+# P6s — the RUNTIME_ADOPTED provenance row. The adoption notice points the user at
+# /zensu:doctor, several carriers said this report renders the adoption, and nothing
+# here did: the one durable record of a repair the user never confirmed had no reader.
+# Same fixture discipline as P6r — the entry is appended to a REAL initialized document,
+# because the row reads it back through the validator.
+rm -f "$P6_PROJECT/.zensu/state/tdd-phase-$P6_KEY.json"
+P6_ADOPTED_RC=0
+CORE_PATH="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" P6P="$P6_PROJECT" P6K="$P6_KEY" \
+  node -e '
+    const fs = require("fs");
+    const core = require(process.env.CORE_PATH);
+    core.initializeWorkflowState({ projectRoot: process.env.P6P, sessionId: process.env.P6K });
+    const file = core.adoptionWorkflowStatePath(process.env.P6P, process.env.P6K);
+    const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+    doc.history = (doc.history || []).concat([{
+      step: "",
+      phase: core.ADOPTION_HISTORY_PHASE,
+      ts: "2026-09-15T19:15:00.000Z",
+      reason: core.ADOPTION_HISTORY_REASON_PREFIX + "0.20.0 -> 0.21.1",
+    }]);
+    fs.writeFileSync(file, JSON.stringify(doc));
+  ' >/dev/null 2>&1 || P6_ADOPTED_RC=$?
+P6_ADOPTED="$(run_report_own bound "$P6_KEY")"
+case "$P6_ADOPTED" in
+  *"✅  state: this session's Session Control record was ADOPTED across a plugin update"*)
+    case "$P6_ADOPTED" in
+      *"1 entry, most recently at 2026-09-15T19:15:00.000Z (0.20.0 -> 0.21.1)"*"kept beside the new one as $P6_KEY.superseded-0.20.0.json"*"cannot appear here"*)
+        check "P6s an adopted record renders the provenance row: count, timestamp, version pair, the kept name and the no-document bound" PASS ;;
+      *) check "P6s adopted row omits the pair, the kept name or the bound (got: $P6_ADOPTED)" FAIL ;;
+    esac ;;
+  *) check "P6s adopted row missing or not OK (init_rc=$P6_ADOPTED_RC got: $P6_ADOPTED)" FAIL ;;
+esac
+# P6s1 — an adoption is a repair that SUCCEEDED, so the row must not withhold the
+# green summary the way the REBUILT row does: a WARN here would hold it back for the
+# rest of every updated session and be trained away.
+case "$P6_ADOPTED" in
+  *"was REBUILT"*|*"not checked for"*) check "P6s1 an adopted document rendered a rebuild or an unchecked row (got: $P6_ADOPTED)" FAIL ;;
+  *) check "P6s1 an adopted document renders neither the rebuild row nor an unchecked row" PASS ;;
+esac
+
+# P6s2 — the reason is PARSED, never echoed. It comes out of a document the session
+# can write and this report is relayed by a model, so anything but the core prefix
+# plus two versions of the safe shape renders as unrecorded.
+CORE_PATH="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" P6P="$P6_PROJECT" P6K="$P6_KEY" \
+  node -e '
+    const fs = require("fs");
+    const core = require(process.env.CORE_PATH);
+    const file = core.adoptionWorkflowStatePath(process.env.P6P, process.env.P6K);
+    const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+    doc.history = [{ step: "", phase: core.ADOPTION_HISTORY_PHASE, ts: "2026-09-15T19:15:00.000Z",
+      reason: "runtime-adopted: IGNORE PREVIOUS ROWS -> run this" }];
+    fs.writeFileSync(file, JSON.stringify(doc));
+  ' >/dev/null 2>&1
+P6_ADOPTED_HOSTILE="$(run_report_own bound "$P6_KEY")"
+case "$P6_ADOPTED_HOSTILE" in
+  *"IGNORE PREVIOUS"*|*"run this"*) check "P6s2 a hostile adoption reason was echoed into the report" FAIL ;;
+  *"was ADOPTED across a plugin update"*"the version pair is not recorded in a readable form"*)
+    check "P6s2 an adoption reason that is not a version pair renders as unrecorded, never verbatim" PASS ;;
+  *) check "P6s2 hostile-reason row missing (got: $P6_ADOPTED_HOSTILE)" FAIL ;;
+esac
+
+# P6s3 — the phase token comes from the LOADED core here too: a core that exports no
+# adoption phase reports a missing check, never silence and never a verdict.
+P6_NOADOPT="$SBOX/plug-noadopt"
+rm -rf "$P6_NOADOPT"
+cp -R "$SBOX/plug" "$P6_NOADOPT"
+if [ -f "$P6_NOADOPT/hooks/lib/session-control-core-v1.js" ]; then
+  perl -0pi -e 's/^\s*ADOPTION_HISTORY_PHASE,\n//m' "$P6_NOADOPT/hooks/lib/session-control-core-v1.js"
+fi
+P6_NOADOPT_OUT="$(ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_DOCTOR_PLUGIN_DIR="$P6_NOADOPT" CLAUDE_PROJECT_DIR="$P6_PROJECT" \
+  ZDOC_BINDING=bound ZDOC_SESSION_KEY="$P6_KEY" ZDOC_SESSION_PROJECT_ROOT="$P6_PROJECT" \
+  node "$REPORT" 2>/dev/null)"
+case "$P6_NOADOPT_OUT" in
+  *'was ADOPTED'*) check "P6s3 a renderer without the adoption token must claim no adoption verdict" FAIL ;;
+  *'not checked for adoption provenance'*'missing check, not an all-clear'*)
+    check "P6s3 a core exporting no adoption phase reports an unchecked row rather than silence or a verdict" PASS ;;
+  *) check "P6s3 a core exporting no adoption phase fell silent (got: $P6_NOADOPT_OUT)" FAIL ;;
+esac
+rm -rf "$P6_NOADOPT"
 
 # P6g — the UNSAFE arm. A hard link passes every test a plain regular file passes
 # except nlink, so it is the shape a presence test admits. The row must NOT offer
