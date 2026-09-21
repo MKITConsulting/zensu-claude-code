@@ -35,7 +35,7 @@
 # The identity check itself exits 2, matching every other hook in this plugin.
 #
 # ZEN_REGISTRATION_TIMEOUT_SOURCE_BUILD = 2.1.260. The `"timeout": 20` on this
-# hook`s `hooks.json` registration is SIZED, not inherited from the 4 sibling entries
+# hook`s `hooks.json` registration is SIZED, not inherited from the 7 sibling entries
 # that carry 10: three `zensu_run_bounded` children are reachable in SERIES on one
 # invocation - the merged prompt-and-anchor child, the prompt-only RECOVERY child,
 # and the off-phrase marker write, 5 s each - on top of the `node` spawns paid
