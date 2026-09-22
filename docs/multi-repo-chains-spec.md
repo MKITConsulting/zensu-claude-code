@@ -5,9 +5,13 @@
 requirement on a logged claim), `hooks/lib/zensu-edit-landing.sh` (a claim resolving
 outside the audited root fails the audit and names the foreign root, plus the
 read-only `--inventory` mode its two consumers share) and
-`hooks/lib/zensu-doctor-report.js` (the topology row). **Which half of stage 1 is universally live is narrower than "stage 1 is implemented":** `zensu-log.sh append` redacts a run-log message before it lands, rewriting `$HOME` to `~` and the project root to `<project>`, and the audit's absolute-claim arm only ever sees a path still beginning with `/`. So a foreign root OUTSIDE both `$HOME` and the project root — `/opt`, `/srv`, a CI checkout under `/builds` — is detected, while a SIBLING REPOSITORY UNDER `$HOME`, the topology §2's own worked example uses, is rewritten out of that shape and is not. See the fourth known gap in `CLAUDE.md` §"Multi-Repo Stage 1". Stage 2 must not be
-implemented until the carrier question of §6.1.1 is answered and the
-carrier-integrity finding of §8.1 is resolved. Every "today" statement below was
+`hooks/lib/zensu-doctor-report.js` (the topology row). **Which half of stage 1 is universally live is narrower than "stage 1 is implemented":** `zensu-log.sh append` redacts a run-log message before it lands, rewriting `$HOME` to `~` and the project root to `<project>`, and the audit's absolute-claim arm only ever sees a path still beginning with `/`. So a foreign root OUTSIDE both `$HOME` and the project root — `/opt`, `/srv`, a CI checkout under `/builds` — is detected, while a SIBLING REPOSITORY UNDER `$HOME`, the topology §2's own worked example uses, is rewritten out of that shape and is not. See the fourth known gap in `CLAUDE.md` §"Multi-Repo Stage 1". The carrier question of §6.1.1 was ANSWERED on
+2026-09-20 — the Session Control record, sealed by an interactive confirmation at
+arming, behind a containment gate on the Bash channel into the plugin-data store —
+but the answer is a decision, not a mechanism: stage 2 must not be implemented
+until that section's three preconditions are built IN ORDER, and until the
+carrier-integrity finding of §8.1 is either accepted on the terms §6.1.1 states or
+replaced by a keyed signal. Every "today" statement below was
 read at the cited site in the worktree that authored this document; every "would"
 statement is design, not behavior — EXCEPT §5, which is behavior now and says so
 per item, and the two §2 paragraphs stage 1 superseded, which say so in place.
@@ -199,7 +203,7 @@ cannot perform. One gap remains open by construction and is named rather than
 implied: a relative claim that collides with a same-named file in the anchor can
 still grade as landed, and only the §6.1 label closes it.
 
-## 6. Stage 2 — Declared code roots (minor) — BLOCKED, see §6.1.1 and §8.1
+## 6. Stage 2 — Declared code roots (minor) — BLOCKED on §6.1.1's preconditions, see also §8.1
 
 ### 6.1 Data model
 
@@ -219,27 +223,69 @@ Absent or empty means single-root, which every chain armed before this field
 existed is. Reading code must treat absence as the current behavior, never as an
 error.
 
-### 6.1.1 Provenance of the list — UNRESOLVED
+### 6.1.1 Provenance of the list — DECIDED 2026-09-20, NOT BUILT
 
-**No channel has been chosen, and every obvious candidate fails §8's constraint 2.**
-This is the single largest hole in the proposal, and it is stated here rather than
-implied because §8 authorises two capability grants on the strength of it.
+**The carrier is the Session Control record, sealed by an interactive confirmation
+at arming, behind a containment gate on the Bash channel into the plugin-data
+store.** That answers the question §8's two capability grants rested on. It does
+NOT unblock stage 2, and reading it that way is the mistake this paragraph exists
+to prevent: the gate does not exist, so the store the record lives in is writable
+from inside a session today, and until that changes the decision buys nothing.
+Stage 2 is blocked on the ORDERED preconditions below rather than on an unmade
+choice.
 
-- A `--code-root <path>` flag on `--tdd-begin` does not work: that command is
-  composed and typed by the model, so its argument *is* model-authored text.
-- A file in the anchor's project tree does not work: the model can write it, and no
-  gate covers `.zensu/state/` against a shell redirect (§8).
-- A value transcribed from a user prompt does not work either: the model performs
-  the transcription.
+**The question is two questions, and judging one candidate against both is why
+every candidate failed.** §8's requirement 1 is INTEGRITY — where the list is
+stored, so the session cannot rewrite it after arming. Requirement 2 is
+PROVENANCE — where its content comes from, so it is not model-authored. Each
+candidate answers exactly one:
 
-What would work is a carrier the session cannot write — the immutable Session
-Control record minted at SessionStart, a plugin-data sidecar written once outside
-the project tree, or an interactive confirmation at arming that the model cannot
-answer on the user's behalf. Choosing between those is design work this document
-does not do. Until it is done, §8 constraint 2 is an intention rather than a
-property, and stage 2 must not be implemented.
+- A `--code-root <path>` flag on `--tdd-begin` answers NEITHER: that command is
+  composed and typed by the model, so its argument *is* model-authored text. So is
+  a value transcribed from a user prompt, because the model performs the
+  transcription.
+- A file — the anchor's project tree, a plugin-data sidecar, or the immutable
+  Session Control record minted at SessionStart — answers Q1 only. A file says
+  where bytes live; it never says who chose them.
+- An interactive confirmation at arming, which the model cannot answer on the
+  user's behalf, answers Q2 only. It persists nothing, so it cannot also be the
+  thing a later reader consults.
 
-### 6.1.2 What a carrier costs today — MEASURED
+A working answer is therefore a PAIR, never one of three. The decision above is
+that pair: the record for Q1, the confirmation for Q2.
+
+**What the pair does not buy, stated because §8.1 says it plainly.** The record
+does not authenticate its own contents — `runtime_digest` covers the executing
+plugin tree, not the record's fields, and there is no strict key set on the record.
+The security of the list therefore rests ENTIRELY on the records directory being
+unwritable from inside a session, which is what precondition 1 is for and why it
+comes first. The uncompromised alternative is an integrity signal over the field
+itself — a MAC, or a monotone counter in a store the session cannot reach — and it
+is deliberately NOT specified here. Choosing this pair is choosing to rely on the
+directory instead of on a keyed signal; say that, rather than describing the
+record as trusted.
+
+**Preconditions, in this order. The order is a requirement, not a preference**
+(§6.1.2): built the other way round, the list looks trustworthy and is not, which
+is the exact failure §8.1 exists to name.
+
+1. **The gate.** A containment rule in `hooks/lib/bash-source-write-parse.js`
+   refusing a Bash write into `CLAUDE_PLUGIN_DATA`. That parser carries no rule
+   naming that store, or `.zensu`, at all. Adding one widens a DENY gate, which
+   costs a `minor` release under CLAUDE.md §"Runtime Lineage". This gate is worth
+   building whether or not stage 2 is ever built: the same store holds every
+   session's immutable record and the review-evidence leases.
+2. **The carrier.** `code_roots` on the Session Control record, threaded through
+   `buildContext` (`hooks/lib/session-control-core-v1.js`) — §8.1's adoption
+   finding applies, so a field that is not threaded there is silently dropped at
+   every adoption. Whether it costs a `SCHEMA_VERSION` bump is open question 8.
+3. **The seal.** The interactive confirmation at arming, which is what makes the
+   stored value non-model-authored in the first place. It is incompatible with an
+   unattended run by construction, so a multi-repo `/zensu:autopilot` either gets
+   a human at arming or is out of scope. That cost was accepted with this
+   decision; it is not a residual to be engineered away later.
+
+### 6.1.2 What a carrier costs today — MEASURED 2026-08-28, Edit row SUPERSEDED
 
 The three candidates above are not equally priced, and the price is not the one
 §6.1.1 implies. Measured on 2026-08-28 against this repository at `a0ffb05`, on
@@ -270,6 +316,27 @@ Session Control record store is `<plugin data>/session-control/v1/` — and a
 stage 2 would READ the list, namely at arming with no chain yet armed. Candidates
 1 and 2 are therefore not carriers today. They become carriers only once a
 containment check exists on the Edit matcher.
+
+**SUPERSEDED IN PART on 2026-09-20 — the Edit row has changed, and "no hook on
+this matcher performs a containment check of any kind" is no longer true.**
+`hooks/pre-write-plugin-data-guard.sh` has since shipped and is registered on both
+`Edit|Write|MultiEdit` and `NotebookEdit` (`hooks/hooks.json`). Driven against this
+repository on 2026-09-20, a `Write` naming a file under
+`<plugin data>/session-control/v1/` is DENIED by that hook, with a reason that
+states this section's own argument back: "a gate would end up reading its own
+boundary from a file the gated party rewrote". A `Write` to an ordinary file inside
+the project still allows, so the deny is containment rather than a blanket refusal.
+The table above holds for the tree it was measured in and nowhere else.
+
+**The Bash row is unchanged, and it is what precondition 1 of §6.1.1 exists for.**
+Verified in source on the same date: `bash-source-write-parse.js` contains zero
+occurrences of `CLAUDE_PLUGIN_DATA` or `.zensu`, and CLAUDE.md §"Plugin-Data Guard"
+records the uncovered Bash channel as that guard's own first residual. **This was
+NOT re-measured behaviorally, and the reason is this section's own trap one field
+over:** a synthetic payload carrying no session id makes the gate fail closed on
+the binding, so the deny it returns says nothing about containment. Re-measure it
+with a real bound session before writing precondition 1, exactly as the paragraph
+below requires a `cwd`.
 
 **The ordering is a requirement, not a preference.** The gate first, then the
 file, then the seal. Built the other way round, the list looks trustworthy and is
@@ -402,7 +469,7 @@ Two properties stay as they are, deliberately:
   behavior that multi-repo makes more consequential; this proposal does not
   change it and must not claim to.
 
-## 7. Stage 3 — Cross-repo review (minor) — BLOCKED, see §6.1.1 and §8.1
+## 7. Stage 3 — Cross-repo review (minor) — BLOCKED on §6.1.1's preconditions, see also §8.1
 
 A single additional review stage between per-root convergence and the terminus.
 Each root's review chain runs to convergence exactly as today. The new stage then
@@ -536,10 +603,13 @@ be the first field read out of that document that grants filesystem write outsid
 project and read capability to a confined agent — the gate reading its own boundary
 from a file the gated party can rewrite.
 
-**Consequence.** Requirement 1 above cannot be enforced on this carrier, and §6.1.1
-shows no channel currently satisfies requirement 2 either. Stage 2 must not be
-implemented until a carrier the session cannot write is chosen, or an integrity
-mechanism over `codeRoots[]` is specified as a stage-2 precondition.
+**Consequence.** Requirement 1 above cannot be enforced on this carrier. §6.1.1 has
+since chosen a different one — the Session Control record rather than the workflow
+document, paired with an interactive confirmation that answers requirement 2 — and
+that section states in its own words what the pair does and does not buy. This
+finding is NOT thereby closed: it is the reason §6.1.1's precondition 1 comes
+first. Stage 2 must not be implemented until those preconditions are built in
+order, or until an integrity mechanism over `codeRoots[]` is specified instead.
 
 **The Session Control record does not authenticate its own contents either.**
 This matters because §6.1.1 offers that record as a carrier, which reads as
@@ -650,17 +720,25 @@ flag-free recovery spelling keeps the pre-stage-1 zero-change exemption.
 
 ## 11. Open questions
 
-Ordered by what they can cost. Questions 1, 2 and 4 must be resolved before any
-stage-2 line of code is written; question 3 belongs to stage 3 and must be
-answered before that stage is built, which §7 defers. The rest are citations to
-re-verify.
+Ordered by what they can cost. Questions 4 and 8 must be resolved before any
+stage-2 line of code is written; questions 1 and 2 were answered on 2026-09-20 and
+are kept below with their answers, because the answer is what a later reader needs
+and deleting the question hides that it was ever open. Question 3 belongs to stage
+3 and must be answered before that stage is built, which §7 defers. The rest are
+citations to re-verify.
 
 1. **What carries `codeRoots[]` from the operator to arming, such that the model
-   cannot author it?** §6.1.1 shows every obvious channel failing. §8's authority
-   for two capability grants rests on the answer.
+   cannot author it?** ANSWERED 2026-09-20 in §6.1.1: the Session Control record for
+   integrity, an interactive confirmation at arming for provenance, behind a
+   containment gate on the Bash channel into the plugin-data store. Every single
+   candidate failed because the question is two questions; a working answer is a
+   pair. What remains is building the three preconditions in order, not choosing.
 2. **Is the workflow document a sound carrier for a capability at all**, given it
-   has no integrity check and an open Bash write channel (§8.1)? If not, stage 2
-   needs an integrity mechanism as a precondition.
+   has no integrity check and an open Bash write channel (§8.1)? ANSWERED: no.
+   §6.1.1 moves the field off it onto the Session Control record. That does not
+   close §8.1 — the record does not authenticate its own contents either, so the
+   list's security rests on the records directory being unwritable, which is
+   §6.1.1's precondition 1.
 3. **Does `protectedRoots` travel with the union** (§7.2), or does the pre-materialized
    packet remove the seam entirely?
 4. **What happens when two sessions declare overlapping roots?** §6.2 now excludes a
@@ -702,10 +780,17 @@ re-verify.
    is: a nested union over-blocks, never under-blocks. What does follow is that
    the nested topology is unusable without an explicit exemption — an anchor's own
    chain cannot arm an inner standalone generation in one of its own code roots —
-   and any such exemption must name the union. That is the same list §6.1.1 cannot
-   yet source from a channel the session may not write, so answering question 7
-   "yes" costs no carve-out in the predicate; it inherits the provenance problem
-   Stage 2 is already blocked on.
+   and any such exemption must name the union. That is the same list §6.1.1 has now
+   chosen a channel for but not yet built, so answering question 7 "yes" costs no
+   carve-out in the predicate; it inherits whatever §6.1.1's preconditions cost,
+   which is what stage 2 is blocked on.
+8. **Does `code_roots` on the Session Control record cost a `SCHEMA_VERSION` bump?**
+   §6.1.1's precondition 2 defers to this question. §8.1 records both halves of the
+   trade: there is no strict key set on the record, which is what would let the field
+   be added WITHOUT a bump — and equally what keeps an altered field from being
+   rejected. Bumping makes `readContext` throw, so adoption refuses across that one
+   release boundary as `record-unreadable`. Neither branch is free, and choosing
+   between them is the last thing stage 2 needs before its first line of code.
 
 ### Citations to re-verify
 
