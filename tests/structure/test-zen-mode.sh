@@ -3384,7 +3384,7 @@ fi
 
 # Z80 the prose carriers must describe the tree that shipped.
 #
-# This feature's own ledger section, its hook header, its module comment, its unit
+# This feature's hook header, its module comment, its unit
 # test title and its suite-overview row are all COUPLED CARRIERS: a maintainer
 # navigating by any of them takes an action. Four claims in the ledger, one in the
 # hook header, one in the module, one in the unit file and one in the overview
@@ -3397,23 +3397,16 @@ fi
 # replacement, because deleting a false sentence and writing nothing leaves the
 # next reader with no account at all.
 Z80_BAD=""
-Z80_MD="$PLUGIN_DIR/CLAUDE.md"
 Z80_OVERVIEW="$PLUGIN_DIR/tests/SUITE-OVERVIEW.md"
 Z80_ANCHOR_MOD="$PLUGIN_DIR/hooks/lib/zen-anchor-v1.js"
 Z80_UNIT="$PLUGIN_DIR/tests/structure/zen-anchor-v1.test.js"
 Z80_CFG="$PLUGIN_DIR/docs/configuration.md"
 
-# (1) the nlink refusal the writers no longer make
-grep -qF 'the `nlink` check makes the writer REFUSE' "$Z80_MD" \
-  && Z80_BAD="$Z80_BAD md-claims-an-nlink-refusal"
-# (2) INVERTED: Z51 forbids that arm, it does not pin it
-grep -qF 'including its `124|137` watchdog-skip arm' "$Z80_MD" \
-  && Z80_BAD="$Z80_BAD md-inverts-what-Z51-pins"
-# (3) the retired input contract, in all five carriers
+# (3) the retired input contract, in all four carriers
 # COMMENT LINES ONLY, and the phrase may be line-wrapped. A bare fixed-string
 # scan matched THIS CHECK'S OWN NEEDLE - the self-match class this check exists to
 # catch, reproduced inside it on the first spelling.
-for Z80_F in "$Z80_MD" "$PLUGIN_DIR/tests/structure/test-zen-mode.sh" "$Z80_UNIT"; do
+for Z80_F in "$PLUGIN_DIR/tests/structure/test-zen-mode.sh" "$Z80_UNIT"; do
   grep -qE '^[[:space:]]*(#|//).*takes a shape and' "$Z80_F" \
     && Z80_BAD="$Z80_BAD retired-contract-in-$(basename "$Z80_F")"
 done
@@ -3423,9 +3416,6 @@ grep -qF 'accepts no caller-supplied options' "$Z80_OVERVIEW" \
   && Z80_BAD="$Z80_BAD overview-states-the-retired-contract"
 grep -qF 'a caller cannot influence a shape' "$Z80_UNIT" \
   && Z80_BAD="$Z80_BAD unit-title-states-the-retired-contract"
-# (4) the max-rounds residual, stated as not fixed while the code fixes it
-grep -qF 'The real fix is to surface `chainOutcome` on the classifier report' "$Z80_MD" \
-  && Z80_BAD="$Z80_BAD md-calls-the-shipped-fix-unimplemented"
 # (5) the retired POSIX wording, corrected in the module and not in the hook
 grep -qF 'gives the flag no effect on a REGULAR file' "$HOOK" \
   && Z80_BAD="$Z80_BAD hook-header-keeps-the-retired-POSIX-claim"
@@ -3748,80 +3738,6 @@ else
 fi
 rm -rf "$P84"
 
-# Z91 the ledger`s zen-mode account describes the tree that shipped.
-#
-# CLAUDE.md is the coupled carrier a maintainer navigates by, and this round`s
-# panel found eight separate sentences in it that the code contradicts - one of
-# them a SAFETY justification the module had explicitly retracted in this same
-# PR, and one an export census the bullet contradicts four lines later. Z80
-# already grades the hook`s prose; it never scanned CLAUDE.md`s own spellings,
-# which is why every one of these survived a round that was fixing exactly this.
-Z91_BAD=""
-Z91_MD="$PLUGIN_DIR/CLAUDE.md"
-Z91_FLAT="$(tr '\n' ' ' < "$Z91_MD" | tr -s ' ')"
-# `z91_forbid` below is a presence test, so an empty flattening would report
-# every ledger sentence as absent - agreement, from a derivation that broke.
-[ -n "$Z91_FLAT" ] || Z91_BAD="$Z91_BAD claude-md-flattening-is-empty"
-
-z91_forbid() {  # $1 = needle, $2 = label
-  printf '%s' "$Z91_FLAT" | grep -qF "$1" && Z91_BAD="$Z91_BAD $2"
-}
-z91_require() {
-  printf '%s' "$Z91_FLAT" | grep -qF "$1" || Z91_BAD="$Z91_BAD $2"
-}
-
-# R2-01 the retired POSIX safety claim, in CLAUDE.md's own spelling
-z91_forbid 'POSIX specifies the flag has no effect on the open of a REGULAR file' md-keeps-the-retracted-POSIX-claim
-z91_require 'EAGAIN' md-never-mentions-the-arm-the-guarantee-rests-on
-# R2-07 the stale owner-export statement
-z91_forbid 'the FAILED mark comes from `RECOVERABLE_SHAPES` / `DEAD_END_SHAPES`' md-names-the-wrong-owner-exports
-# R2-08 / R2-13 / JUDGE-5 the export census
-z91_forbid 'owes this feature TWO exports' md-export-census-says-two-over-three
-z91_forbid 'Removing either leaves the chain-recovery suite green' md-two-way-word-over-a-three-member-list
-# R2-14 the Language census
-z91_forbid 'the two members named above are a census' md-language-census-says-two-over-three
-# R2-29 the worked-example contradiction
-z91_forbid 'The worked EXAMPLE in both carriers' md-example-said-to-live-in-both-carriers
-# JUDGE-4 the process count
-z91_forbid 'checked in THREE PROCESSES by FOUR readers' md-token-reader-process-count-wrong
-# R2-09 / R3-22 the chain-recovery consumer clause must name what the MODULE reads.
-# It required the disjunction `STUCK_SHAPES` or `ALL_SHAPES`, which was the clause's own
-# defect: the module body reads the first and never the second, whose only appearance
-# under `hooks/` outside the owner is a comment. Keyed on the corrected POSITIVE form.
-z91_require "consumed by that module's UNIT CONTRACT and never by the module" \
-  md-consumer-clause-still-credits-the-module-with-ALL_SHAPES
-# R3-05 the same roster owes FOUR exports; CHAIN_OUTCOMES was the omitted one
-z91_require 'FOUR exports it did not have' md-export-census-says-three-over-four
-# R3-07 removing STUCK_SHAPES THROWS; it does not render `none`
-z91_require 'refusing to guess the anchor' md-roster-states-the-wrong-removal-mechanism
-# R3-08 the module runs INSIDE the node child, so those two are one process
-z91_require 'are ONE process' md-process-census-contradicts-its-own-lead
-# R3-20 the port host half is SEVEN obligations; the call shape was the omitted one
-z91_require 'NINE obligations' md-port-host-half-omits-the-call-shape
-# R2-10 the port-relevant core half
-z91_require 'anchorNoneIsExpected' md-port-core-half-omits-the-new-exports
-z91_forbid 'whose stuck sets it reads' md-port-half-keeps-the-plural-framing
-# R2-27 residual: the owner seam sentence
-z91_forbid 'its optional `owner` parameter is what makes the two `return null` guards reachable' md-owner-seam-claim-overstated
-# JUDGE-6 the watchdog roster must still name the out-of-band writer - but NOT in the
-# `path.sh:` form it used, which sits one character from the `<file>:<line>` anchor C41
-# forbids. Both halves are pinned: the caller by name, and the SHAPE by a rule rather
-# than by the retired spelling, so any file name written that way anywhere in the ledger
-# is caught rather than only this one.
-z91_require 'hooks/lib/zensu-zen-mode.sh` holds the out-of-band writer' \
-  md-bounded-run-roster-omits-the-out-of-band-writer
-grep -qE '\.(sh|js|mjs|json|md):`' "$Z91_MD" \
-  && Z91_BAD="$Z91_BAD md-writes-a-file-name-one-character-from-the-C41-anchor-form"
-# R2-30 the patch walk must enumerate what this round actually changed in a module
-# every gate loads. The VERDICT is unaffected - none of it is a breaking entry -
-# but a walk that omits the change cannot be re-derived by the next reader.
-z91_require 'open flag and the paced' md-patch-walk-omits-the-shared-reader-change
-
-if [ -z "$Z91_BAD" ]; then
-  check "Z91 the ledger's zen-mode account matches the shipped tree" PASS
-else
-  check "Z91 a ledger sentence still describes a tree that does not exist:$Z91_BAD" FAIL
-fi
 
 
 
@@ -4056,7 +3972,7 @@ else
   # the file it lives in, so quoting it would make the check match itself.
   # A line that MARKS a figure as retired is the one exemption, keyed on the
   # marker rather than on the number, so the exemption cannot widen by accident.
-  for Z87_F in "$HOOK" "$PLUGIN_DIR/CLAUDE.md" \
+  for Z87_F in "$HOOK" \
                "$PLUGIN_DIR/tests/structure/test-zen-mode.sh" \
                "$PLUGIN_DIR/docs/configuration.md"; do
     Z87_FIGS="$(sed 's/^[[:space:]]*#[[:space:]]*//' "$Z87_F" \

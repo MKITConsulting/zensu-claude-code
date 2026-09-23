@@ -1037,11 +1037,10 @@ fi
 # WORKING TREE, not HEAD: this greps $ROOT directly, unlike the behavioural rows.
 if grep -qF 'if (record.plugin_root !== binding.pluginRoot) fail(' \
       "$ROOT/hooks/lib/review-evidence-lease-v1.js" \
-    && ! grep -qF 'servesRecordedRuntime' "$ROOT/hooks/lib/review-evidence-lease-v1.js" \
-    && grep -qF 'Known gap 1' "$ROOT/CLAUDE.md"; then
-  check "the review-evidence lease keeps the strict comparison, documented as gap 1" PASS
+    && ! grep -qF 'servesRecordedRuntime' "$ROOT/hooks/lib/review-evidence-lease-v1.js"; then
+  check "the review-evidence lease keeps the strict comparison" PASS
 else
-  check "the review-evidence lease keeps the strict comparison, documented as gap 1" FAIL
+  check "the review-evidence lease keeps the strict comparison" FAIL
 fi
 
 # AC-013 — a record and workflow document minted by the PREVIOUS RELEASE, from

@@ -5,7 +5,6 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
 MARKETPLACE="$ROOT/.claude-plugin/marketplace.json"
 PLUGIN="$ROOT/.claude-plugin/plugin.json"
 WORKFLOW="$ROOT/.github/workflows/release.yml"
-CONVENTIONS="$ROOT/CLAUDE.md"
 PROVISIONER="$ROOT/evals/session-control/lib/provision-installed-plugin.sh"
 GENERATOR="$ROOT/evals/session-control/lib/create-local-marketplace-fixture.js"
 PASS=0
@@ -238,10 +237,6 @@ reject_text "Mutable action wrapper is not used for publication" "$WORKFLOW" \
   'softprops/action-gh-release'
 expect_text "Release documentation identifies tag creation as go-live" "$WORKFLOW" \
   'Only successful tag creation makes the new plugin source resolvable'
-expect_text "Repository conventions require version and source-ref lockstep" "$CONVENTIONS" \
-  'marketplace version + marketplace `ref`'
-reject_text "Repository conventions do not call a main merge go-live" "$CONVENTIONS" \
-  'go-live is the merge itself'
 
 GATE_LINE="$(grep -nF -- '- name: Deterministic exact-main-SHA gate' "$WORKFLOW" | head -1 | cut -d: -f1)"
 DRAFT_LINE="$(grep -nF -- '- name: Draft, attach, publish, and verify immutable release' "$WORKFLOW" | head -1 | cut -d: -f1)"

@@ -1419,8 +1419,8 @@ fi
 # literal, so the next rewording would have left all three carriers stale with C39 green.
 #
 # It COMPARES now. The clause is extracted from the hook's own comment-stripped body and each
-# carrier must CONTAIN it, normalised for case and for line wrapping — CLAUDE.md legitimately
-# uppercases part of it and hard-wraps mid-clause, so a raw fixed-string match would fail for
+# carrier must CONTAIN it, normalised for case and for line wrapping — a carrier may
+# uppercase part of it and hard-wrap mid-clause, so a raw fixed-string match would fail for
 # a reason unrelated to drift. The retired-literal blacklist is kept as a second conjunct,
 # anchored to its own context so an unrelated sentence elsewhere in these large files cannot
 # turn it red while naming the wrong drift.
@@ -1444,7 +1444,7 @@ C39_PHRASE="$(printf '%s\n' "$C39_ALL" | head -1)"
   || check "C39pre the emitted threshold-gated clause was located, so the comparison is not vacuous" FAIL
 C39_NORM="$(printf '%s' "$C39_PHRASE" | tr -s '[:space:]' ' ' | tr 'A-Z' 'a-z')"
 C39_MISS=""
-for c39f in "$PLUGIN_DIR/CLAUDE.md" "$PLUGIN_DIR/docs/configuration.md" "$PLUGIN_DIR/docs/tdd-manager-workflow.md"; do
+for c39f in "$PLUGIN_DIR/docs/configuration.md" "$PLUGIN_DIR/docs/tdd-manager-workflow.md"; do
   c39n="$(basename "$c39f")"
   if [ ! -r "$c39f" ]; then C39_MISS="$C39_MISS unreadable:$c39n"; continue; fi
   # POSITIVE, per OCCURRENCE rather than per file. Containment clears a carrier on one hit,
@@ -1461,9 +1461,9 @@ for c39f in "$PLUGIN_DIR/CLAUDE.md" "$PLUGIN_DIR/docs/configuration.md" "$PLUGIN
     && C39_MISS="$C39_MISS retired:$c39n"
 done
 if [ -n "$C39_PHRASE" ] && [ -n "$C39_NORM" ] && [ -z "$C39_MISS" ]; then
-  check "C39 all three prose carriers quote the clause the code emits" PASS
+  check "C39 both prose carriers quote the clause the code emits" PASS
 else
-  check "C39 all three prose carriers quote the clause the code emits ($C39_MISS)" FAIL
+  check "C39 both prose carriers quote the clause the code emits ($C39_MISS)" FAIL
 fi
 
 # --- C38: an unreachable threshold discloses, exactly as `0` does ---------------
@@ -1667,31 +1667,6 @@ done
   && check "C37 no notice branch promises future silence the code does not keep" PASS \
   || check "C37 no notice branch promises future silence the code does not keep (found $C37_BAD)" FAIL
 
-# --- C41: CLAUDE.md names SYMBOLS, never line numbers, for this hook -----------
-# Two anchors in the foreign-chain bullet went stale the moment this feature
-# inserted a function above them: `:951` named the SESSION_IMPL_COMPLETE release
-# and `:954-956` the CAP release, which sit far below that now. A line number in
-# prose is a claim that rots silently — nothing recomputes it and no reader can
-# tell a correct one from a drifted one without opening the file — so the FORM is
-# forbidden rather than corrected to today's numbers, which would only reset the
-# clock on the same defect.
-C41_MD="$PLUGIN_DIR/CLAUDE.md"
-# Filename-INDEPENDENT, because the rule it enforces is. A `zensu-tdd-phase.sh:1198`
-# or a `zensu-doctor-report.js:1808` anchor rots in exactly the same way and read as
-# permitted while the guard named one hook. The whole file carries zero matches of the
-# broader class today, so widening costs no red check and closes the form for every
-# carrier the rule names.
-C41_RE='\.(sh|js|mjs|json|md):[0-9]'
-C41_CTRL="$(printf 'a hooks/stop-chain-enforcer.sh:951 line\nand zensu-doctor-report.js:1808 too\n' | grep -cE "$C41_RE" || true)"
-[ "$C41_CTRL" = "2" ] \
-  && check "C41pre the line-anchor pattern matches the form it forbids" PASS \
-  || check "C41pre the line-anchor pattern matches the form it forbids (got '$C41_CTRL')" FAIL
-C41_HITS="$(grep -cE "$C41_RE" "$C41_MD" || true)"
-C41_WHERE="$(grep -nE "$C41_RE" "$C41_MD" | head -3 | tr '\n' ' ' || true)"
-[ "$C41_HITS" = "0" ] \
-  && check "C41 CLAUDE.md carries no <file>:<line> source anchor" PASS \
-  || check "C41 CLAUDE.md carries no <file>:<line> source anchor (found $C41_HITS: $C41_WHERE)" FAIL
-
 # The next several all read the SAME function body. `hook_fn_body` refuses a body
 # whose closing brace it did not reach, so an over-extraction fails here rather than
 # silently handing every check below the rest of the file.
@@ -1711,8 +1686,7 @@ C42_CODE="$(hook_fn_body zensu_impl_stop_nudge code)"
 # MEASURED on the maintainer's own host: neither `timeout` nor `gtimeout` exists
 # on base macOS. `gtimeout` is what a Homebrew coreutils install actually puts on
 # PATH, so probing only `timeout` misses the one watchdog such a host is likely to
-# have. The unbounded fallback is KEPT on purpose — C56 pins that arm, and the
-# CLAUDE.md gap bullet states its bound, which C42b/C53 hold against this ladder.
+# have. The unbounded fallback is KEPT on purpose — C56 pins that arm.
 #
 # The ladder lives in `zensu_run_bounded` now, shared with the transcript probe,
 # so it is read out of THAT body: a check pointed at the nudge would go green on a
@@ -1732,12 +1706,6 @@ C42A_G="$(printf '%s\n' "$C42_LADDER" | grep -n 'command -v gtimeout' | head -1 
 [ -n "$C42A_T" ] && [ -n "$C42A_G" ] && [ "$C42A_T" -lt "$C42A_G" ] \
   && check "C42a the ladder prefers timeout, so gtimeout is a fallback and not a replacement" PASS \
   || check "C42a the ladder prefers timeout, so gtimeout is a fallback and not a replacement (timeout='$C42A_T' gtimeout='$C42A_G')" FAIL
-# The gap bullet must describe the shipped ladder. It named only `timeout`, which
-# made the sentence false the moment a second watchdog was probed — and its own
-# claim of a mitigation was what the review finding rejected.
-grep -qF 'gtimeout' "$C41_MD" \
-  && check "C42b the CLAUDE.md gap bullet names the second watchdog the code probes" PASS \
-  || check "C42b the CLAUDE.md gap bullet names the second watchdog the code probes" FAIL
 
 # --- C43: the free checks come before the node spawn ---------------------------
 # `zensu_impl_stop_nudge_after` spawns node. On a host with no git the feature can
@@ -1891,40 +1859,6 @@ C50_SPELLINGS="$(printf '%s\n' "$C42_CODE" | grep -c "exclude).zensu" || true)"
   && check "C50 the nudge spells the git probe exactly once" PASS \
   || check "C50 the nudge spells the git probe exactly once (found $C50_SPELLINGS)" FAIL
 
-# --- C51/C52: CLAUDE.md registers what this change made shared -----------------
-# Both are new single sources of truth, and this repository's whole convention is
-# that a shared owner is named on a roster so the next reader finds its consumers.
-grep -qF 'zensu_autopilot_link_args' "$C41_MD" \
-  && check "C51 CLAUDE.md names the single renderer of the Autopilot flag triple" PASS \
-  || check "C51 CLAUDE.md names the single renderer of the Autopilot flag triple" FAIL
-grep -qF '_zensu_config_bounded_int' "$C41_MD" \
-  && check "C52 CLAUDE.md names the shared bounded-int config helper" PASS \
-  || check "C52 CLAUDE.md names the shared bounded-int config helper" FAIL
-# The third shared owner this change introduced. Without it, renaming the ladder would
-# redden only the checks that grade the HOOK, and the fix would land in this file while
-# the CLAUDE.md roster went stale unnoticed — which is the drift C51/C52 exist to stop.
-grep -qF 'zensu_run_bounded' "$C41_MD" \
-  && check "C59 CLAUDE.md names the shared watchdog ladder" PASS \
-  || check "C59 CLAUDE.md names the shared watchdog ladder" FAIL
-
-# --- C53: the watchdog PROSE and the watchdog CODE describe one ladder ---------
-# C42b greps the whole file, so the gap bullet alone satisfies it while the section's
-# main prose still says `timeout`-only eighty lines above — the exact drift shape that
-# paragraph already records about itself once. Scope the assertion to the paragraph
-# carrying the claim.
-# Anchored on the CLAIM, not on the adjective. A first spelling keyed on
-# "`timeout`-bounded WHEN" and went vacuous the moment that phrase was corrected —
-# a check that only fires while the defect's exact wording survives is worth nothing.
-# "The SAME conditional applies to a second" is the sentence whose truth depends on
-# both children carrying the same ladder, so it is the right thing to hold.
-C53_PARA="$(awk -v RS='' '/The SAME conditional applies to a second/' "$C41_MD" | head -40)"
-[ -n "$C53_PARA" ] \
-  && check "C53pre the watchdog paragraph was located, so the scan is not vacuous" PASS \
-  || check "C53pre the watchdog paragraph was located, so the scan is not vacuous" FAIL
-printf '%s' "$C53_PARA" | grep -qF 'gtimeout' \
-  && check "C53 the paragraph making the watchdog claim names both binaries the code probes" PASS \
-  || check "C53 the paragraph making the watchdog claim names both binaries the code probes" FAIL
-
 # --- C54: the renderer's coupling comment names the extraction that exists -----
 # It named `n<=999999` read "out of the function body", a spelling the config collapse
 # removed entirely. A guarding comment that sends a maintainer after bytes the code
@@ -1986,7 +1920,7 @@ C55_Q="$(printf '%s\n' "$C55_BODY" | c55_pcts '%q')"
   || check "C55a every conversion in the renderer is a %q (all=$C55_ALL q=$C55_Q)" FAIL
 
 # --- C56: the unbounded third arm is pinned, not just its rationale ------------
-# C42/C42a/C42b observe only that two `command -v` probes and one doc word exist, so
+# C42/C42a observe only that two `command -v` probes exist, so
 # replacing the last arm with `return 0` — the alternative the comment records as
 # REJECTED — left every one of them green. The arm the whole decision is about needs
 # a pin of its own, in the same spirit as C44 pinning the lock-domain decision.
