@@ -23,7 +23,7 @@ Every persona returns exactly one raw JSON object as its entire final assistant 
     }
   ],
   "overall_notes": ["<cross-cutting points, plus every finding anchored outside `_name-status.txt`>"],
-  "positives": ["<things done well — for the synthesis Strengths section>"]
+  "positives": ["<things done well — for the synthesis What is solid block>"]
 }
 ```
 
