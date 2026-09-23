@@ -859,6 +859,8 @@ never-refused|is never refused
 up-front|before the first edit
 one-question|take a single go/no-go
 contested-no-reask|never ask again
+no-question-unless-unmeasured|neither does `PROBABLY_FREE` unless its reason says the queue could not be measured
+quota-green-light-unless-unmeasured|a green light — unless its reason says the queue could not be measured
 DOCTRINE_PINS
 grep -qF "$OLD_DOC_VETO" "$SKILL_MD" && DOCTRINE_MISS="$DOCTRINE_MISS [retired-doc-veto-is-back]"
 grep -qF "$OLD_SCRIPT_VETO" "$TRAIL_MJS" && DOCTRINE_MISS="$DOCTRINE_MISS [retired-script-veto-is-back]"
@@ -892,6 +894,7 @@ force-is-the-escape|re-run with --force
 contested-authorized|Authorized. Take it over
 free-nothing-holds|Nothing holds this worktree
 probably-free-proceed|Proceed, but tell the user not to type
+probably-free-unmeasured-asks|Its queue was not measured, so this costs the same single go/no-go BUSY does
 ADVICE_DOCTRINE_PINS
 while IFS='|' read -r label clause; do
   [ -n "$label" ] || continue
@@ -899,9 +902,11 @@ while IFS='|' read -r label clause; do
 done <<'SCRIPT_DOCTRINE_PINS'
 hazard-not-veto|Hazard, not a veto
 no-exclusivity|Nothing enforces exclusivity
+unmeasured-go-no-go|Its queue was not measured, so state that to the user
 SCRIPT_DOCTRINE_PINS
 # The table must actually be RENDERED, not merely present.
 printf '%s\n' "$TRAIL_CODE" | grep -qE 'ADVICE\[v\.level\]' || DOCTRINE_MISS="$DOCTRINE_MISS [script:advice-not-rendered]"
+printf '%s\n' "$TRAIL_CODE" | grep -qE 'ADVICE\.PROBABLY_FREE_UNMEASURED' || DOCTRINE_MISS="$DOCTRINE_MISS [script:unmeasured-advice-not-rendered]"
 if [ -n "$WORKFLOWS" ] && [ -z "$DOCTRINE_MISS" ]; then
   check "T23 the takeover doctrine survives in BOTH carriers and neither retired veto is back" PASS
 else
@@ -938,6 +943,168 @@ if [ -n "$GOTCHAS" ] && [ -z "$THRESH_MISS" ]; then
   check "T24 both verdict thresholds ($GRACE_N / $BUSY_N min) are stated in the script and in the two SKILL.md sections that re-quote them" PASS
 else
   check "T24 threshold drift:${THRESH_MISS:- (## Verified gotchas not found)}" FAIL
+fi
+
+QUEUE_BULLET="$(printf '%s\n' "$GOTCHAS" | grep -E '^- \*\*A queue depth is a balance' || true)"
+PULLBACKS="$(sed -n "s/^const QUEUE_PULLBACKS = new Set(\[\(.*\)\]);$/\1/p" "$TRAIL_MJS" | tr -d "' " | tr ',' '\n')"
+CONSUMERS_RAW="$(sed -n "s/^const QUEUE_CONSUMERS = new Set(\[\(.*\)\]);$/\1/p" "$TRAIL_MJS" | tr -d "' " | tr ',' '\n')"
+CONSUMERS=""
+for CONSUMER_TOKEN in $CONSUMERS_RAW; do
+  case "$CONSUMER_TOKEN" in
+    ...QUEUE_PULLBACKS) CONSUMERS="$CONSUMERS $PULLBACKS" ;;
+    ...*) CONSUMERS="$CONSUMERS unexpanded-spread:$CONSUMER_TOKEN" ;;
+    *) CONSUMERS="$CONSUMERS $CONSUMER_TOKEN" ;;
+  esac
+done
+CONSUMER_MISS=""
+CONSUMER_N=0
+[ -n "$QUEUE_BULLET" ] || CONSUMER_MISS="$CONSUMER_MISS [queue-depth-bullet-not-found]"
+for CONSUMER_OP in $CONSUMERS; do
+  CONSUMER_N=$((CONSUMER_N + 1))
+  printf '%s\n' "$QUEUE_BULLET" | grep -qF "\`$CONSUMER_OP\`" || CONSUMER_MISS="$CONSUMER_MISS [$CONSUMER_OP]"
+done
+[ "$CONSUMER_N" -gt 0 ] || CONSUMER_MISS="$CONSUMER_MISS [script-consumer-set-unreadable]"
+if [ -z "$CONSUMER_MISS" ]; then
+  check "T24b every operation in QUEUE_CONSUMERS ($CONSUMER_N) is named in the SKILL.md queue-depth gotcha" PASS
+else
+  check "T24b queue consumer drift:$CONSUMER_MISS" FAIL
+fi
+
+js_outside_comments() {
+  sed -e 's|/\*.*\*/||g' -e 's|^//.*$||' -e 's|[[:space:]]//.*$||' "$1"
+}
+UNMEASURED_LEAD="$(sed -n "s/^const QUEUE_UNMEASURED = '\(.*\)';$/\1/p" "$TRAIL_MJS")"
+PROBABLY_FREE_ROW="$(printf '%s\n' "$WORKFLOWS" | grep -F '| `PROBABLY_FREE` |' || true)"
+PROBABLY_FREE_ROW_N="$(printf '%s\n' "$WORKFLOWS" | grep -cF '| `PROBABLY_FREE` |' || true)"
+UNKNOWN_BULLET="$(printf '%s\n' "$GOTCHAS" | grep -E '^- \*\*Two things counting cannot close' || true)"
+LEAD_MISS=""
+[ -n "$UNMEASURED_LEAD" ] || LEAD_MISS="$LEAD_MISS [script-lead-in-unreadable]"
+[ "$PROBABLY_FREE_ROW_N" = "1" ] || LEAD_MISS="$LEAD_MISS [table-probably-free-rows-$PROBABLY_FREE_ROW_N-not-exactly-1]"
+[ -n "$UNKNOWN_BULLET" ] || LEAD_MISS="$LEAD_MISS [unknown-record-bullet-not-found]"
+if [ -n "$UNMEASURED_LEAD" ]; then
+  printf '%s\n' "$PROBABLY_FREE_ROW" | grep -qF -- "$UNMEASURED_LEAD" || LEAD_MISS="$LEAD_MISS [table-probably-free-row]"
+  printf '%s\n' "$UNKNOWN_BULLET" | grep -qF -- "$UNMEASURED_LEAD" || LEAD_MISS="$LEAD_MISS [unknown-record-gotcha]"
+  LEAD_SPELLING_N="$(js_outside_comments "$TRAIL_MJS" | grep -oF -- "$UNMEASURED_LEAD" | grep -c . || true)"
+  [ "$LEAD_SPELLING_N" = "1" ] || LEAD_MISS="$LEAD_MISS [script-spells-the-lead-in-$LEAD_SPELLING_N-times-not-once-outside-comments]"
+fi
+if [ -z "$LEAD_MISS" ]; then
+  check "T24c the unmeasured-queue lead-in the flow-3 routing rule keys on ('$UNMEASURED_LEAD') has one owner in the script (counted by occurrence over js_outside_comments, which drops line comments and single-line block comments; a multi-line block comment and a string literal carrying a space-led // are not excluded) and is carried by the one PROBABLY_FREE row and the unknown-record gotcha" PASS
+else
+  check "T24c unmeasured-queue lead-in drift:$LEAD_MISS" FAIL
+fi
+
+DELIVERY_ATTACHMENT="$(sed -n "s/^const QUEUE_DELIVERY_ATTACHMENT = '\(.*\)';$/\1/p" "$TRAIL_MJS")"
+DELIVERY_REACH="$(sed -n 's/^const QUEUE_DELIVERY_REACH = \([0-9][0-9]*\);$/\1/p' "$TRAIL_MJS")"
+WITHDRAWAL_BULLET="$(printf '%s\n' "$GOTCHAS" | grep -E '^- \*\*The prompt listing drops a queued prompt only when it was withdrawn' || true)"
+WITHDRAW_MISS=""
+WITHDRAW_N=0
+[ -n "$WITHDRAWAL_BULLET" ] || WITHDRAW_MISS="$WITHDRAW_MISS [withdrawal-bullet-not-found]"
+for PULLBACK_OP in $PULLBACKS; do
+  WITHDRAW_N=$((WITHDRAW_N + 1))
+  printf '%s\n' "$WITHDRAWAL_BULLET" | grep -qF "\`$PULLBACK_OP\`" || WITHDRAW_MISS="$WITHDRAW_MISS [$PULLBACK_OP]"
+  printf '%s\n' $CONSUMERS | grep -qxF -- "$PULLBACK_OP" || WITHDRAW_MISS="$WITHDRAW_MISS [$PULLBACK_OP-is-not-a-consumer]"
+done
+[ "$WITHDRAW_N" -gt 0 ] || WITHDRAW_MISS="$WITHDRAW_MISS [script-pullback-set-unreadable]"
+if [ -n "$DELIVERY_ATTACHMENT" ]; then
+  printf '%s\n' "$WITHDRAWAL_BULLET" | grep -qF "\`$DELIVERY_ATTACHMENT\`" || WITHDRAW_MISS="$WITHDRAW_MISS [$DELIVERY_ATTACHMENT]"
+else
+  WITHDRAW_MISS="$WITHDRAW_MISS [script-delivery-attachment-unreadable]"
+fi
+if [ -n "$DELIVERY_REACH" ]; then
+  printf '%s\n' "$WITHDRAWAL_BULLET" | grep -qF "\`QUEUE_DELIVERY_REACH\` ($DELIVERY_REACH)" || WITHDRAW_MISS="$WITHDRAW_MISS [reach-constant-not-quoted-with-its-value]"
+  printf '%s\n' "$WITHDRAWAL_BULLET" | grep -qF "At least $DELIVERY_REACH records must follow" || WITHDRAW_MISS="$WITHDRAW_MISS [reach-rule-not-stated-with-its-value]"
+  FARTHEST="$(printf '%s\n' "$WITHDRAWAL_BULLET" | sed -n 's/.*the farthest \([0-9][0-9]*\) records before its `remove` and \([0-9][0-9]*\) after it.*/\1 \2/p')"
+  FAR_BEFORE="${FARTHEST%% *}"
+  FAR_AFTER="${FARTHEST##* }"
+  SCRIPT_FARTHEST="$(sed -n 's/^[[:space:]]*\/\/ \{0,1\}//p' "$TRAIL_MJS" | tr '\n' ' ' | grep -oE 'the farthest sat [0-9]+ records before its .remove. and [0-9]+ after it' || true)"
+  SCRIPT_PAIRS="$(printf '%s\n' "$SCRIPT_FARTHEST" | grep -c . || true)"
+  SCRIPT_PAIR="$(printf '%s\n' "$SCRIPT_FARTHEST" | sed -n 's/^the farthest sat \([0-9][0-9]*\) records before its .remove. and \([0-9][0-9]*\) after it$/\1 \2/p')"
+  EP_PAIRS="$(awk '/^function extractPrompts\(/ { f = 1 } f { print } f && /^}/ { exit }' "$TRAIL_MJS" | sed -n 's/^[[:space:]]*\/\/ \{0,1\}//p' | tr '\n' ' ' | grep -oE 'the farthest sat [0-9]+ records before its .remove. and [0-9]+ after it' | grep -c . || true)"
+  BULLET_PAIRS="$(printf '%s\n' "$WITHDRAWAL_BULLET" | grep -oE 'the farthest [0-9]+ records before its .remove. and [0-9]+ after it' | grep -c . || true)"
+  if [ -z "$FARTHEST" ]; then
+    WITHDRAW_MISS="$WITHDRAW_MISS [measured-farthest-pair-unreadable]"
+  elif [ "$BULLET_PAIRS" != "1" ]; then
+    WITHDRAW_MISS="$WITHDRAW_MISS [bullet-states-the-measured-pair-$BULLET_PAIRS-times-not-once]"
+  elif [ "$SCRIPT_PAIRS" != "1" ]; then
+    WITHDRAW_MISS="$WITHDRAW_MISS [script-comment-states-the-measured-pair-$SCRIPT_PAIRS-times-not-once]"
+  elif [ "$EP_PAIRS" != "1" ]; then
+    WITHDRAW_MISS="$WITHDRAW_MISS [the-measured-pair-is-not-stated-inside-the-extractPrompts-comment]"
+  elif [ "$SCRIPT_PAIR" != "$FARTHEST" ]; then
+    WITHDRAW_MISS="$WITHDRAW_MISS [script-comment-pair-${SCRIPT_PAIR% *}-${SCRIPT_PAIR#* }-disagrees-with-bullet-pair-$FAR_BEFORE-$FAR_AFTER]"
+  elif [ "$DELIVERY_REACH" -lt "$FAR_BEFORE" ] || [ "$DELIVERY_REACH" -lt "$FAR_AFTER" ]; then
+    WITHDRAW_MISS="$WITHDRAW_MISS [reach-$DELIVERY_REACH-below-the-measured-farthest-pair-$FAR_BEFORE-before-$FAR_AFTER-after]"
+  fi
+else
+  WITHDRAW_MISS="$WITHDRAW_MISS [script-delivery-reach-unreadable]"
+fi
+if [ -z "$WITHDRAW_MISS" ]; then
+  check "T24d every pull-back operation in QUEUE_PULLBACKS ($WITHDRAW_N) is a consumer and is named, with the QUEUE_DELIVERY_ATTACHMENT type ('$DELIVERY_ATTACHMENT') and the QUEUE_DELIVERY_REACH value ($DELIVERY_REACH), in the SKILL.md bullet that states the prompt listing's withdrawal rule, and that value is at least the farthest measured delivery pair the bullet states ($FAR_BEFORE records before its remove, $FAR_AFTER after it), which the bullet states once and the script states once, inside the extractPrompts comment, and identically" PASS
+else
+  check "T24d withdrawal vocabulary drift:$WITHDRAW_MISS" FAIL
+fi
+
+LISTING_MISS=""
+[ -n "$WITHDRAWAL_BULLET" ] || LISTING_MISS="$LISTING_MISS [withdrawal-bullet-not-found]"
+for LISTING_NEEDLE in \
+  "every place that lists a session's prompt history reads it" \
+  "\`show\`'s prompt timeline" \
+  "the \`prompts\` field of \`show --json\` and \`takeover --json\`" \
+  "the takeover brief's original objective and recent instructions" \
+  "the handoff brief's list of what was asked" \
+  "\`list\`, \`limited\` and an ambiguous selector" \
+  "the session's title when it has one, otherwise the harness's own \`last-prompt\` record, and this rule filters neither" \
+  "\`show\`'s truncation note and both briefs' say so" \
+  "under \`--json\` \`truncated: true\` means the same for the \`prompts\` field"; do
+  printf '%s\n' "$WITHDRAWAL_BULLET" | grep -qF -- "$LISTING_NEEDLE" || LISTING_MISS="$LISTING_MISS [bullet-lacks:$LISTING_NEEDLE]"
+done
+LABEL_LINES="$(js_outside_comments "$TRAIL_MJS" | grep -F 'print(' | grep -F 'r.lastPrompt' || true)"
+LABEL_N="$(printf '%s\n' "$LABEL_LINES" | grep -c . || true)"
+LABEL_TITLE_FIRST="$(printf '%s\n' "$LABEL_LINES" | grep -cF 'r.title || r.lastPrompt' || true)"
+[ "$LABEL_N" -gt 0 ] || LISTING_MISS="$LISTING_MISS [no-label-renderer-found]"
+[ "$LABEL_TITLE_FIRST" = "$LABEL_N" ] || LISTING_MISS="$LISTING_MISS [a-label-renderer-shows-the-last-prompt-before-the-title]"
+if [ -z "$LISTING_MISS" ]; then
+  check "T24g the SKILL.md withdrawal bullet names every reader of the prompt listing, says the one-line label beside a session is its title or else the unfiltered last-prompt record, and says a truncated read's notes and its --json truncated flag disclose that no withdrawal was applied; each of the $LABEL_N label renderers in the script prints the title before the last prompt" PASS
+else
+  check "T24g prompt-listing reader drift:$LISTING_MISS" FAIL
+fi
+
+ROUTER_MISS=""
+ROUTER_CODE="$(js_outside_comments "$TRAIL_MJS")"
+ROUTER_CALLS="$(printf '%s\n' "$ROUTER_CODE" | grep -oF 'isUnmeasuredProbablyFree(' | grep -c . || true)"
+[ "$ROUTER_CALLS" = "2" ] || ROUTER_MISS="$ROUTER_MISS [predicate-called-$ROUTER_CALLS-times-not-2]"
+printf '%s\n' "$ROUTER_CODE" | grep -qE '^const isUnmeasuredProbablyFree = \(v\) => .*v\.queueMeasured !== true;$' || ROUTER_MISS="$ROUTER_MISS [predicate-does-not-read-anything-but-true-as-unmeasured]"
+printf '%s\n' "$ROUTER_CODE" | grep -qE 'const advised = isUnmeasuredProbablyFree\(v\) ' || ROUTER_MISS="$ROUTER_MISS [show-advice-does-not-ask-the-predicate]"
+printf '%s\n' "$ROUTER_CODE" | grep -qE 'else if \(isUnmeasuredProbablyFree\(tv\)\) L\.push\(' || ROUTER_MISS="$ROUTER_MISS [brief-step-4-does-not-ask-the-predicate]"
+QM_USES="$(printf '%s\n' "$ROUTER_CODE" | grep -oF 'queueMeasured' | grep -c . || true)"
+[ "$QM_USES" = "2" ] || ROUTER_MISS="$ROUTER_MISS [queueMeasured-read-or-written-$QM_USES-times-not-2]"
+MV_BODY="$(printf '%s\n' "$ROUTER_CODE" | awk '/^function measuredVerdict\(/ { f = 1 } f { print } f && /^}/ { exit }')"
+MV_RETURNS="$(printf '%s\n' "$MV_BODY" | grep -oF 'return {' | grep -c . || true)"
+MV_COMMON="$(printf '%s\n' "$MV_BODY" | grep -oF '...common,' | grep -c . || true)"
+[ "$MV_RETURNS" -gt 0 ] 2>/dev/null && [ "$MV_COMMON" = "$MV_RETURNS" ] || ROUTER_MISS="$ROUTER_MISS [measuredVerdict-spreads-common-in-$MV_COMMON-of-$MV_RETURNS-returns]"
+UNMEASURED_USES="$(printf '%s\n' "$ROUTER_CODE" | grep -oE 'QUEUE_UNMEASURED([^A-Za-z0-9_]|$)' | grep -c . || true)"
+[ "$UNMEASURED_USES" = "2" ] || ROUTER_MISS="$ROUTER_MISS [QUEUE_UNMEASURED-spelled-$UNMEASURED_USES-times-not-2]"
+printf '%s\n' "$PROBABLY_FREE_ROW" | grep -qF '`takeover.queueMeasured: false`' || ROUTER_MISS="$ROUTER_MISS [table-probably-free-row-lacks-the-field]"
+if [ -z "$ROUTER_MISS" ]; then
+  check "T24e both routers of an unmeasured PROBABLY_FREE — show's advice and the takeover brief's step 4 — ask one predicate, isUnmeasuredProbablyFree, which reads a queueMeasured of anything but true as unmeasured; queueMeasured appears in code only in that predicate and where measuredVerdict's common fields set it, every return of measuredVerdict spreads those common fields, QUEUE_UNMEASURED is spelled only where it is declared and where the reason is composed, and the PROBABLY_FREE row names takeover.queueMeasured" PASS
+else
+  check "T24e unmeasured-queue routing drift:$ROUTER_MISS" FAIL
+fi
+
+READER_MISS=""
+JOIN_N="$(printf '%s\n' "$ROUTER_CODE" | grep -oF "type === 'text'" | grep -c . || true)"
+[ "$JOIN_N" = "1" ] || READER_MISS="$READER_MISS [text-block-test-spelled-$JOIN_N-times-not-once]"
+printf '%s\n' "$ROUTER_CODE" | awk '/^const messageText = /{ f = 1 } f { print } f && /;$/ { exit }' | grep -qF "type === 'text'" || READER_MISS="$READER_MISS [messageText-does-not-own-the-text-block-test]"
+for READER in extractPrompts scanQueue; do
+  READER_BODY="$(printf '%s\n' "$ROUTER_CODE" | awk -v fn="^function $READER\\\\(" '$0 ~ fn { f = 1 } f { print } f && /^}/ { exit }')"
+  [ -n "$READER_BODY" ] || { READER_MISS="$READER_MISS [$READER-not-found]"; continue; }
+  printf '%s\n' "$READER_BODY" | grep -qF 'queueRecordName(' || READER_MISS="$READER_MISS [$READER-does-not-name-records-through-queueRecordName]"
+done
+QRN_DEFS="$(printf '%s\n' "$ROUTER_CODE" | grep -cE '^const queueRecordName = ' || true)"
+[ "$QRN_DEFS" = "1" ] || READER_MISS="$READER_MISS [queueRecordName-defined-$QRN_DEFS-times]"
+if [ -z "$READER_MISS" ]; then
+  check "T24f the text-block join has one owner, messageText, and both queue readers — extractPrompts and scanQueue — take a record's name from the one queueRecordName" PASS
+else
+  check "T24f shared reader helpers drift:$READER_MISS" FAIL
 fi
 
 # T25 — the authorization channel, pinned as a POLICY rather than as a mechanism.
@@ -2138,12 +2305,14 @@ t36_cite "$SKILL_MD" 'scopes by transcript-directory' "$T36_SPEC" 'skills/sessio
 # on the line to key on. It has already earned its keep — a bulk citation rewrite collapsed
 # both onto one number and this pair reported `no-citation-in` plus `2-matches` rather than
 # passing over a clobbered citation. The two classes are NOT alike and the difference is
-# stated at each one: the `gitState` row below is a fixed band that needs a hand edit when
-# its target crosses a hundred boundary, while the `claude --resume` row is an open-topped
-# lower bound that does not. An earlier wording of this paragraph claimed both moved with
+# stated at each one: the `gitState` row below is a fixed band, the whole 2000s, that needs
+# a hand edit only when its target crosses 3000, while the `claude --resume` row is an
+# open-topped lower bound that needs none. The band was a hundred wide until its target
+# crossed a hundred boundary inside one change, which is the hand edit it no longer costs.
+# An earlier wording of this paragraph claimed both moved with
 # the target, which contradicted the row comment directly beneath it from the round that
 # widened that second class.
-t36_cite "$TRAIL_MJS" 'function gitState' "$T36_HTML" 'trail\.mjs:22[0-9][0-9]'
+t36_cite "$TRAIL_MJS" 'function gitState' "$T36_HTML" 'trail\.mjs:2[0-9][0-9][0-9]'
 # The HTML cites `trail.mjs` TWICE, so this row cannot use the generic `trail\.mjs:[0-9]+` its
 # spec-side siblings use — it would match the other citation. The class is the whole 3000-and-up
 # range rather than a fixed band: it still separates this citation from the `gitState` one in the
