@@ -3,8 +3,8 @@ set -u
 
 # Structure + functional test for /zensu:doctor read-only diagnostics.
 # Structure pins: helper .sh (+ shebang), report .js, skill frontmatter,
-# plugin.json skills[] registration, README Diagnostics section, bundled
-# Playwright MCP detection. Functional
+# plugin.json skills[] registration, README Diagnostics section, playwright-cli
+# detection. Functional
 # (sandbox, node required): zensu-doctor-report.js renders a four-block table
 # and ALWAYS exits 0 while correctly flagging version mismatch (❌), hooks
 # wired-but-missing (❌) + disk-but-unwired (⚠️), the quoted-boolean config
@@ -121,16 +121,41 @@ if printf '%s' "$SKILLS_BLOCK" | grep -qF '/zensu:doctor'; then
 else
   check "P2h doctor kept out of the curated Skills table (count-sync unaffected)" PASS
 fi
-if grep -qF 'playwright_mcp_declared' "$HELPER" && grep -qF 'ZDOC_PLAYWRIGHT=configured' "$HELPER" && grep -qF 'command -v npm' "$HELPER"; then
-  check "P2i helper validates integrity-locked Playwright MCP without executing npm" PASS
+if grep -qF 'command -v playwright-cli' "$HELPER" \
+  && grep -qF 'NO_UPDATE_NOTIFIER=1 playwright-cli --version' "$HELPER" \
+  && grep -qF 'ZDOC_PLAYWRIGHT=present' "$HELPER" \
+  && grep -qF 'ZDOC_PLAYWRIGHT=absent' "$HELPER" \
+  && ! grep -qF 'playwright_mcp_declared' "$HELPER" \
+  && ! grep -qF 'command -v npm' "$HELPER"; then
+  check "P2i helper probes playwright-cli on PATH and reads its version with the update check disabled" PASS
 else
-  check "P2i helper validates integrity-locked Playwright MCP without executing npm" FAIL
+  check "P2i helper probes playwright-cli on PATH and reads its version with the update check disabled" FAIL
 fi
-if grep -qF 'Playwright MCP: valid integrity-locked plugin config + npm present' "$REPORT"; then
-  check "P2j report distinguishes configured from runtime-ready Playwright MCP" PASS
+if grep -qF "'playwright-cli: installed ('" "$REPORT" \
+  && grep -qF "'playwright-cli: installed, but its version could not be read" "$REPORT" \
+  && grep -qF "'playwright-cli: not found on PATH" "$REPORT"; then
+  check "P2j report carries playwright-cli installed, version-unreadable and not-found rows" PASS
 else
-  check "P2j report distinguishes configured from runtime-ready Playwright MCP" FAIL
+  check "P2j report carries playwright-cli installed, version-unreadable and not-found rows" FAIL
 fi
+hook_args_tolerated() {
+  case "$1" in
+    *.sh)
+      grep -qE '\.command([^[:alnum:]_]|$)' "$1" && grep -qE '\.args([^[:alnum:]_]|$)' "$1"
+      ;;
+    *)
+      node -e '
+        const source = require("fs").readFileSync(process.argv[1], "utf8");
+        const receivers = (field) => new Set(Array.from(
+          source.matchAll(new RegExp("([A-Za-z_$][\\w$]*)\\??\\." + field + "(?![\\w$])", "g")),
+          (match) => match[1],
+        ));
+        const command = receivers("command");
+        process.exit([...receivers("args")].some((name) => command.has(name)) ? 0 : 1);
+      ' "$1"
+      ;;
+  esac
+}
 HOOK_ARGS_READER="$(
   find "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/evals" "$PLUGIN_DIR/tests" -type f \
     \( -name '*.sh' -o -name '*.js' -o -name '*.mjs' -o -name '*.cjs' -o -name '*.ts' \) \
@@ -138,8 +163,7 @@ HOOK_ARGS_READER="$(
     | while IFS= read -r reader; do
         if [ "$reader" != "$PLUGIN_DIR/tests/structure/test-doctor.sh" ] \
           && grep -qF 'hooks.json' "$reader" \
-          && grep -qE '\.command([^[:alnum:]_]|$)' "$reader" \
-          && grep -qE '\.args([^[:alnum:]_]|$)' "$reader"; then
+          && hook_args_tolerated "$reader"; then
           printf '%s\n' "${reader#$PLUGIN_DIR/}"
           break
         fi
@@ -150,6 +174,20 @@ if [ -z "$HOOK_ARGS_READER" ]; then
 else
   check "P2n undocumented hook args tolerance remains in $HOOK_ARGS_READER" FAIL
 fi
+HOOK_ARGS_DIR="$(mktemp -d 2>/dev/null)" || HOOK_ARGS_DIR=""
+if [ -n "$HOOK_ARGS_DIR" ]; then
+  printf '%s\n' "const manifest = require('./hooks.json');" \
+    "for (const hook of manifest.hooks) run(hook.command, hook?.args);" >"$HOOK_ARGS_DIR/probe.js"
+  printf '%s\n' "const manifest = require('./hooks.json');" \
+    "for (const hook of manifest.hooks) run(hook.command, parsed.args);" >"$HOOK_ARGS_DIR/benign.js"
+fi
+if [ -n "$HOOK_ARGS_DIR" ] && hook_args_tolerated "$HOOK_ARGS_DIR/probe.js" \
+  && ! hook_args_tolerated "$HOOK_ARGS_DIR/benign.js"; then
+  check "P2n-control the scan flags args read from a hook entry and ignores args of another object" PASS
+else
+  check "P2n-control the scan flags args read from a hook entry and ignores args of another object" FAIL
+fi
+[ -z "$HOOK_ARGS_DIR" ] || rm -rf "$HOOK_ARGS_DIR"
 
 # This one runs BEFORE the sandbox exists, so it carries its own dead HOME rather
 # than the exported one below. Without it this invocation opens the running
@@ -168,12 +206,14 @@ case "$REAL_MANIFEST" in
   *"hooks wiring: all $EXPECTED_HOOKS hooks referenced in hooks.json exist on disk"*) check "P2o real hook manifest covers all $EXPECTED_HOOKS hook scripts" PASS ;;
   *) check "P2o real hook manifest count does not match $EXPECTED_HOOKS hook scripts on disk" FAIL ;;
 esac
-if grep -qF 'mcp__zensu-browser__*' "$SKILL_MD" && grep -qF 'mcp__plugin_zensu_zensu-browser__*' "$SKILL_MD" \
-  && grep -qF 'never under `mcp__playwright__*`' "$SKILL_MD" && ! grep -qF 'mcp__plugin_zensu_playwright__' "$SKILL_MD" \
-  && grep -qF 'ZDOC_PLAYWRIGHT_TOOLS=ready bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"' "$SKILL_MD"; then
-  check "P2l doctor skill propagates loaded MCP-tool readiness into the helper and accepts only the zensu-browser namespaces" PASS
+if grep -qF 'CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"' "$SKILL_MD" \
+  && grep -qF 'CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"' "$SKILL_MD" \
+  && grep -qF 'the `playwright-cli --version` probe runs' "$SKILL_MD" \
+  && ! grep -qF 'ZDOC_PLAYWRIGHT_TOOLS' "$SKILL_MD" \
+  && ! grep -qE 'mcp__[A-Za-z0-9_-]*(browser|playwright)' "$SKILL_MD"; then
+  check "P2l doctor skill emits the plain wrapper commands, describes the playwright-cli probe, and names no MCP browser namespace" PASS
 else
-  check "P2l doctor skill propagates loaded MCP-tool readiness into the helper and accepts only the zensu-browser namespaces" FAIL
+  check "P2l doctor skill emits the plain wrapper commands, describes the playwright-cli probe, and names no MCP browser namespace" FAIL
 fi
 
 PHASE3_SKILL="$(sed -n '/^## Phase 3:/,/^## Response Style/p' "$SKILL_MD")"
@@ -261,15 +301,18 @@ case "$OUT" in *'version sync: plugin.json and marketplace.json agree'*) check "
 case "$OUT" in *'hooks wiring: all 1 hooks'*) check "P1c wiring ✅ when consistent" PASS ;; *) check "P1c wiring ✅ when consistent" FAIL ;; esac
 case "$OUT" in *'no quoted-boolean traps'*) check "P1d config ✅ with real booleans (reviewJudge:true/secretScan:false)" PASS ;; *) check "P1d config ✅ with real booleans" FAIL ;; esac
 # all-green summary only when the tool block is green too (inject authed tools)
-GREEN="$(ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=ready ZDOC_VERIFY=consent \
+PW_MEASURED="$(node -e 'process.stdout.write(String(require(process.argv[1]).PLAYWRIGHT_CLI_SOURCE_VERSION || ""))' "$PLUGIN_DIR/hooks/lib/verify-consent-v1.js" 2>/dev/null)"
+case "$PW_MEASURED" in [0-9]*.[0-9]*.[0-9]*) check "P1e-control the consent module declares the playwright-cli version it was measured against ($PW_MEASURED)" PASS ;; *) check "P1e-control the consent module declares the playwright-cli version it was measured against (got: ${PW_MEASURED:-<none>})" FAIL ;; esac
+GREEN="$(ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_VERIFY=consent \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
   node "$REPORT" 2>/dev/null)"
 case "$GREEN" in *'all checks green'*) check "P1e summary reports all green when every block is green" PASS ;; *) check "P1e summary all green (got: $GREEN)" FAIL ;; esac
-case "$GREEN" in *'Playwright MCP: loaded and ready (/zensu:verify-feature and autopilot browser driver)'*) check "P1ea runtime-ready Playwright MCP renders green" PASS ;; *) check "P1ea runtime-ready Playwright MCP message (got: $GREEN)" FAIL ;; esac
+case "$GREEN" in *"✅  playwright-cli: installed ($PW_MEASURED) — /zensu:verify-feature and the autopilot browser driver run through it"*) check "P1ea playwright-cli at the measured version renders green" PASS ;; *) check "P1ea playwright-cli at the measured version (got: $GREEN)" FAIL ;; esac
+case "$GREEN" in *'Playwright MCP'*|*'verify-feature gate:'*) check "P1ea1 the green report carries no Playwright MCP row and no gate-execution row" FAIL ;; *) check "P1ea1 the green report carries no Playwright MCP row and no gate-execution row" PASS ;; esac
 
 # --- verify-feature consent/policy row (renderer + wrapper source) --------
 verify_row() { # $1 ZDOC_VERIFY value or "" ; $2 reason
-  ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=ready \
+  ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" \
   ZDOC_VERIFY="$1" ZDOC_VERIFY_REASON="$2" \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
     node "$REPORT" 2>/dev/null
@@ -277,12 +320,24 @@ verify_row() { # $1 ZDOC_VERIFY value or "" ; $2 reason
 VF_POLICY="$(verify_row policy "")"
 case "$VF_POLICY" in *'✅  verify-feature: environment policy active'*) check "P1va verify-feature policy state renders green" PASS ;; *) check "P1va verify-feature policy state renders green" FAIL ;; esac
 VF_CONSENT="$(verify_row consent "")"
-case "$VF_CONSENT" in *'✅  verify-feature: consent mode ready — no parent policy'*'all checks green'*) check "P1vb consent-with-recipe renders green and keeps the green summary" PASS ;; *) check "P1vb consent-with-recipe renders green and keeps the green summary" FAIL ;; esac
+case "$VF_CONSENT" in *'✅  verify-feature: consent mode ready — no navigation policy'*'all checks green'*) check "P1vb consent-with-recipe renders green and keeps the green summary" PASS ;; *) check "P1vb consent-with-recipe renders green and keeps the green summary" FAIL ;; esac
 VF_NORECIPE="$(verify_row consent-no-recipe "")"
 case "$VF_NORECIPE" in *'⚠️  verify-feature: consent mode ready, no runtime recipe'*'/zensu:verify-feature --setup'*'--attach=<loopback-origin>'*) check "P1vc consent-without-recipe warns and names setup and attach" PASS ;; *) check "P1vc consent-without-recipe warns and names setup and attach" FAIL ;; esac
 case "$VF_NORECIPE" in *'all checks green'*) check "P1vc1 the no-recipe warning withholds the green summary" FAIL ;; *) check "P1vc1 the no-recipe warning withholds the green summary" PASS ;; esac
-VF_UNAVAILABLE="$(verify_row unavailable "consent hook not registered on the navigation matcher")"
-case "$VF_UNAVAILABLE" in *'❌  verify-feature: cannot start (consent hook not registered on the navigation matcher)'*) check "P1vd unavailable renders red with the wrapper's reason" PASS ;; *) check "P1vd unavailable renders red with the wrapper's reason" FAIL ;; esac
+VF_UNCHECKED="$(verify_row consent-recipe-unchecked "")"
+case "$VF_UNCHECKED" in *'⚠️  verify-feature: consent mode ready, recipe not checked'*'missing check rather than a missing recipe'*) check "P1vc2 an unresolved project root renders the recipe-not-checked warning" PASS ;; *) check "P1vc2 an unresolved project root renders the recipe-not-checked warning" FAIL ;; esac
+case "$VF_UNCHECKED" in *'all checks green'*) check "P1vc3 the recipe-not-checked warning withholds the green summary" FAIL ;; *) check "P1vc3 the recipe-not-checked warning withholds the green summary" PASS ;; esac
+for VF_UNAV_REASON in \
+  'consent hook pair, its module or the run-config helper missing from the plugin' \
+  'consent hook not registered on the Bash matcher' \
+  'consent recorder not registered on the Bash matcher'
+do
+  case "$(verify_row unavailable "$VF_UNAV_REASON")" in
+    *"❌  verify-feature: cannot start ($VF_UNAV_REASON) — the consent hook pair, its module and the run-config helper must ship together; reinstall the plugin"*)
+      check "P1vd unavailable renders red with the wrapper's reason ($VF_UNAV_REASON)" PASS ;;
+    *) check "P1vd unavailable renders red with the wrapper's reason ($VF_UNAV_REASON)" FAIL ;;
+  esac
+done
 # The reason is free text the wrapper relays, and this report is read line by line: a newline plus
 # one of its own severity glyphs forged a row the doctor never judged. The unavailable and the
 # invalid-policy rows share the filter, so one fixture covers both; the control keeps the check from
@@ -294,119 +349,8 @@ VF_ABSENT="$(verify_row "" "")"
 case "$VF_ABSENT" in *'⚠️  verify-feature: not checked'*'missing check rather than an all-clear'*) check "P1ve an absent ZDOC_VERIFY says the check did not run rather than staying silent" PASS ;; *) check "P1ve an absent ZDOC_VERIFY says the check did not run rather than staying silent" FAIL ;; esac
 case "$VF_ABSENT" in *'all checks green'*) check "P1ve1 the did-not-check row withholds the green summary" FAIL ;; *) check "P1ve1 the did-not-check row withholds the green summary" PASS ;; esac
 VF_BADPOLICY="$(verify_row policy-invalid "policy is not valid JSON")"
-case "$VF_BADPOLICY" in *'❌'*'browser broker will refuse it'*'policy is not valid JSON'*'fall back to consent mode'*) check "P1vh a set-but-unusable policy renders red and names the fault" PASS ;; *) check "P1vh a set-but-unusable policy renders red and names the fault" FAIL ;; esac
+case "$VF_BADPOLICY" in *'❌  verify-feature: ZENSU_VERIFY_NAVIGATION_POLICY_V1 is set but invalid (policy is not valid JSON)'*'denies every zensu-verify navigation'*'fall back to consent mode'*) check "P1vh a set-but-unusable policy renders red and names the fault" PASS ;; *) check "P1vh a set-but-unusable policy renders red and names the fault" FAIL ;; esac
 case "$VF_BADPOLICY" in *'all checks green'*) check "P1vh1 the invalid-policy row withholds the green summary" FAIL ;; *) check "P1vh1 the invalid-policy row withholds the green summary" PASS ;; esac
-
-# --- AC-104: the row reports gate EXECUTION, never registration alone ----
-# The row above is derived from files on disk in the broker's OWN tree, so it reports that the
-# pair is installed and says nothing about whether the hook ran. A host with hooks switched
-# off, or a broker launched from a different tree than the one whose registry the host loaded,
-# renders that row green while consent mode self-approves every loopback origin unprompted.
-exec_row() { # $1 ZDOC_VERIFY  $2 ZDOC_VERIFY_EXEC
-  ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=ready \
-  ZDOC_VERIFY="$1" ZDOC_VERIFY_REASON="" ZDOC_VERIFY_EXEC="$2" \
-  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
-    node "$REPORT" 2>/dev/null
-}
-VF_EXEC_RAN="$(exec_row consent ran)"
-case "$VF_EXEC_RAN" in *'✅  verify-feature gate: executed in this session'*) check "P1vm an executed gate renders its own row naming EXECUTION" PASS ;; *) check "P1vm an executed gate renders its own row naming EXECUTION" FAIL ;; esac
-case "$VF_EXEC_RAN" in *'all checks green'*) check "P1vm1 an executed gate keeps the green summary" PASS ;; *) check "P1vm1 an executed gate keeps the green summary" FAIL ;; esac
-# P1vm's needle is a strict PREFIX of the prompted-origin row, so it alone does not separate the
-# two success states at the RENDERER: rendering `ran-asked` for `ran` satisfies it. The wrapper
-# cases below catch that end to end; this arm catches it here, where the row is chosen.
-case "$VF_EXEC_RAN" in *'on a prompted origin'*) check "P1vm2 the ran row does not claim the prompted-origin variant" FAIL ;; *) check "P1vm2 the ran row does not claim the prompted-origin variant" PASS ;; esac
-VF_EXEC_NONE="$(exec_row consent none)"
-case "$VF_EXEC_NONE" in *'verify-feature gate: registered'*'no live execution marker was read'*'reports registration'*) check "P1vn a registered-but-unexercised gate says so instead of inheriting the mode row" PASS ;; *) check "P1vn a registered-but-unexercised gate says so instead of inheriting the mode row" FAIL ;; esac
-# An ordinary session that never drove the browser has no marker, so this state must NOT warn:
-# a row that fires on every normal run is trained away within a day.
-case "$VF_EXEC_NONE" in *'all checks green'*) check "P1vn1 the unexercised state keeps the green summary" PASS ;; *) check "P1vn1 the unexercised state keeps the green summary" FAIL ;; esac
-case "$VF_EXEC_RAN" in *'verify-feature gate: registered'*) check "P1vn2 the two execution states render DIFFERENTLY" FAIL ;; *) check "P1vn2 the two execution states render DIFFERENTLY" PASS ;; esac
-VF_EXEC_UNKNOWN="$(exec_row consent unknown)"
-case "$VF_EXEC_UNKNOWN" in *'⚠️  verify-feature gate: execution not checked'*'missing check rather than an all-clear'*) check "P1vo an unanswerable execution probe says so rather than staying silent" PASS ;; *) check "P1vo an unanswerable execution probe says so rather than staying silent" FAIL ;; esac
-case "$VF_EXEC_UNKNOWN" in *'all checks green'*) check "P1vo1 the unchecked execution row withholds the green summary" FAIL ;; *) check "P1vo1 the unchecked execution row withholds the green summary" PASS ;; esac
-# Policy mode does not use consent mode at all, so an execution row there would report on a
-# mechanism this session never reaches.
-VF_EXEC_ASKED="$(exec_row consent ran-asked)"
-case "$VF_EXEC_ASKED" in *'verify-feature gate: executed in this session, on a prompted origin'*) check "P1vw the row names the kind of execution the marker recorded" PASS ;; *) check "P1vw the row names the kind of execution the marker recorded" FAIL ;; esac
-case "$VF_EXEC_ASKED" in *'all checks green'*) check "P1vw1 a prompted-origin execution keeps the green summary" PASS ;; *) check "P1vw1 a prompted-origin execution keeps the green summary" FAIL ;; esac
-VF_EXEC_UNJUDGED="$(exec_row consent unjudged)"
-case "$VF_EXEC_UNJUDGED" in *'verify-feature gate: execution could not be judged'*'missing check rather than an all-clear'*) check "P1vt a contract fault renders as could-not-judge rather than as the benign row" PASS ;; *) check "P1vt a contract fault renders as could-not-judge rather than as the benign row" FAIL ;; esac
-case "$VF_EXEC_UNJUDGED" in *'all checks green'*) check "P1vt1 the could-not-judge row withholds the green summary" FAIL ;; *) check "P1vt1 the could-not-judge row withholds the green summary" PASS ;; esac
-VF_EXEC_WEIRD="$(exec_row consent 'weird;value $(x)')"
-case "$VF_EXEC_WEIRD" in *'verify-feature gate: execution state not recognized (weirdvalue'*) check "P1vu an unrecognized state renders a row and its value is bounded" PASS ;; *) check "P1vu an unrecognized state renders a row and its value is bounded" FAIL ;; esac
-case "$VF_EXEC_WEIRD" in *'not recognized (weird;'*|*'not recognized (weirdvalue $('*) check "P1vu1 the sanitizer strips the shell metacharacters" FAIL ;; *) check "P1vu1 the sanitizer strips the shell metacharacters" PASS ;; esac
-VF_EXEC_POLICY="$(exec_row policy ran)"
-case "$VF_EXEC_POLICY" in *'verify-feature gate:'*) check "P1vp policy mode renders no execution row" FAIL ;; *) check "P1vp policy mode renders no execution row" PASS ;; esac
-# The unknown-exec arm must not ASSERT a binding cause. ZDOC_VERIFY_EXEC is `unknown` for every
-# binding verdict except `bound` — orphaned-project-root, incompatible-runtime, pruned-plugin-root
-# and `unavailable` all reach it with a valid record in plugin data, and the same report's binding
-# row prescribes /zensu:adopt-session there. A row saying the session has no record sends the user
-# hunting for one that is sitting intact, which is the rule CLAUDE.md states for these rows.
-VF_EXEC_UNBOUND="$(exec_row consent unknown)"
-case "$VF_EXEC_UNBOUND" in *'no bound Session Control record'*) check "P1vs5 the unknown-exec row does not assert that no record exists" FAIL ;; *) check "P1vs5 the unknown-exec row does not assert that no record exists" PASS ;; esac
-case "$VF_EXEC_UNBOUND" in *'no bound session key'*) check "P1vs5a it states what the probe established instead" PASS ;; *) check "P1vs5a it states what the probe established instead" FAIL ;; esac
-# And it is ADDITIVE rather than an arm of the mode chain: inserted into the else/if ladder it
-# DISPLACED the consent-no-recipe and consent-recipe-unchecked rows, so an unbound session in a
-# recipe-less project lost the only remedy that would have helped it.
-VF_EXEC_NORECIPE="$(exec_row consent-no-recipe unknown)"
-case "$VF_EXEC_NORECIPE" in *'/zensu:verify-feature --setup'*) check "P1vs6 an unbound session still gets the no-recipe remedy" PASS ;; *) check "P1vs6 an unbound session still gets the no-recipe remedy" FAIL ;; esac
-VF_EXEC_UNCHECKED="$(exec_row consent-recipe-unchecked unknown)"
-case "$VF_EXEC_UNCHECKED" in *'recipe not checked'*) check "P1vs7 and the recipe-unchecked row is not displaced either" PASS ;; *) check "P1vs7 and the recipe-unchecked row is not displaced either" FAIL ;; esac
-# The could-not-judge row names every cause the wrapper routes there, and the wrapper routes a
-# BUDGET-TRUNCATED walk there too — a cause neither the row nor the skill bullet named, and one
-# that neither of their remedies clears.
-case "$VF_EXEC_UNJUDGED" in *'marker budget'*) check "P1vs8 the could-not-judge row names the budget cause" PASS ;; *) check "P1vs8 the could-not-judge row names the budget cause" FAIL ;; esac
-case "$VF_EXEC_UNJUDGED" in *'verify-consent-exec-'*) check "P1vs9 and prescribes clearing the markers that caused it" PASS ;; *) check "P1vs9 and prescribes clearing the markers that caused it" FAIL ;; esac
-# The BENIGN verdict must not share a status with a generic failure. Status 1 is what `node`
-# exits on a fatal outside the program's own try, and what a failed `cd -P` short-circuiting the
-# `&&` produces — and stderr is discarded here, so either one rendered the ✅ `none` row, which
-# asserts that the directory was read and held nothing. That is the exact claim the status
-# capture exists to prevent. Source-pinned rather than driven: neither cause is inducible through
-# the wrapper's own inputs (ZDOC_ROOT is validated before this block, and a SyntaxError cannot be
-# planted into a `-e` program from outside), so a fixture asserting the row would pass for the
-# wrong reason. The control fails if the extraction ever matches nothing.
-VF_PROBE_BLOCK="$(sed -n '/--- verify-feature gate EXECUTION probe/,/esac/p' "$HELPER")"
-if [ -n "$VF_PROBE_BLOCK" ]; then
-  check "P1vs10-control the execution probe's status ladder was extracted" PASS
-else
-  check "P1vs10-control the execution probe's status ladder was extracted" FAIL
-fi
-# The verdict travels as a WORD the decision module produced, never as an exit status this shell
-# re-interprets. A status ladder made the answer share a channel with every way a process can die:
-# the benign verdict sat on 1 beside node's generic fatal and a failed `cd`, and moving it to
-# another small integer only traded one collision for another. A word cannot collide, and the word
-# set has ONE owner.
-case "$VF_PROBE_BLOCK" in *'classifyExecution'*) check "P1vs10 the probe classifies through the module rather than a second time" PASS ;; *) check "P1vs10 the probe classifies through the module rather than a second time" FAIL ;; esac
-case "$VF_PROBE_BLOCK" in *'ZDOC_VERIFY_EXEC=none)'*|*'(ran|ran-asked|none)'*) check "P1vs11 the shell accepts only words the module declares" PASS ;; *) check "P1vs11 the shell accepts only words the module declares" FAIL ;; esac
-case "$VF_PROBE_BLOCK" in *'ZDOC_VERIFY_EXEC=unjudged'*) check "P1vs12 anything else is the could-not-judge residual" PASS ;; *) check "P1vs12 anything else is the could-not-judge residual" FAIL ;; esac
-# The probe is a THIRD consumer of the decision module and applies the same load guard its two
-# siblings do: the gate refuses a symlinked or non-regular module, and so does the broker. Without
-# it a symlinked module made the gate deny every navigation while both verify rows rendered green
-# for the remaining life of an older marker.
-case "$VF_PROBE_BLOCK" in *'isSymbolicLink'*) check "P1vs13 the probe refuses a module that is not a plain file" PASS ;; *) check "P1vs13 the probe refuses a module that is not a plain file" FAIL ;; esac
-# The four words are DERIVED from the module rather than hand-listed here.
-VF_EXEC_WORDS="$(node -e 'process.stdout.write([...require(process.argv[1]).EXECUTION_VERDICTS].sort().join(","))' "$PLUGIN_DIR/hooks/lib/verify-consent-v1.js" 2>/dev/null)"
-if [ "$VF_EXEC_WORDS" = "none,ran,ran-asked,unjudged" ]; then
-  check "P1vs14-control the module declares the execution word set ($VF_EXEC_WORDS)" PASS
-else
-  check "P1vs14-control the module declares the execution word set (got: ${VF_EXEC_WORDS:-<none>})" FAIL
-fi
-VF_EXEC_MISS=""
-for _w in ran ran-asked none unjudged; do
-  case "$VF_EXEC_WORDS" in *"$_w"*) ;; *) VF_EXEC_MISS="$VF_EXEC_MISS $_w" ;; esac
-  grep -qF "ve === '$_w'" "$REPORT" || VF_EXEC_MISS="$VF_EXEC_MISS renderer:$_w"
-done
-[ -z "$VF_EXEC_MISS" ] \
-  && check "P1vs14 every declared execution word has a renderer row" PASS \
-  || check "P1vs14 execution words with no renderer row:$VF_EXEC_MISS" FAIL
-
-# The wrapper must DERIVE the state, or the row is a renderer nothing ever feeds.
-if grep -qF 'ZDOC_VERIFY_EXEC' "$HELPER" && grep -qF 'executionEvidenceSeen' "$HELPER" \
-  && grep -qF 'ZDOC_VERIFY_EXEC' "$REPORT"; then
-  check "P1vq the wrapper derives the execution state and exports it to the renderer" PASS
-else
-  check "P1vq the wrapper derives the execution state and exports it to the renderer" FAIL
-fi
 
 # P1vi-P1vk drive the WRAPPER, so the derivation block itself executes. Every other
 # verify-feature check supplies ZDOC_VERIFY and therefore skips it entirely.
@@ -415,36 +359,31 @@ mkdir -p "$VF_LIVE_ROOT/.zensu"
 vf_live() { # $1 policy value (may be empty)
   env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
     ${1:+ZENSU_VERIFY_NAVIGATION_POLICY_V1="$1"} \
-    ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=ready \
+    ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" \
     ZENSU_DOCTOR_PLUGIN_DIR="$PLUGIN_DIR" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
     CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$HELPER" 2>/dev/null
 }
-case "$(ZDOC_VERIFY_EXEC=none vf_live '')" in
+case "$(vf_live '')" in
   *'consent mode ready, no runtime recipe'*) check "P1vi the wrapper derives consent-no-recipe when no recipe is present" PASS ;;
   *) check "P1vi the wrapper derives consent-no-recipe when no recipe is present" FAIL ;;
 esac
 printf 'version: 1\n' > "$VF_LIVE_ROOT/.zensu/runtime.yaml"
-# The fixture binds no Session Control record, so the MODE row correctly degrades to the
-# no-bound-record warning; what P1vj is about is the wrapper's resolution, so it supplies the
-# execution state and reads the row that resolution produces.
-case "$(ZDOC_VERIFY_EXEC=none vf_live '')" in
-  *'consent mode ready — no parent policy'*) check "P1vj the same wrapper run flips to consent once a runtime recipe exists" PASS ;;
+case "$(vf_live '')" in
+  *'consent mode ready — no navigation policy'*) check "P1vj the same wrapper run flips to consent once a runtime recipe exists" PASS ;;
   *) check "P1vj the same wrapper run flips to consent once a runtime recipe exists" FAIL ;;
 esac
 case "$(vf_live '{"version":1}')" in
-  *'browser broker will refuse it'*'policy contains unknown or missing keys'*) check "P1vk the wrapper judges the policy value rather than its presence" PASS ;;
+  *'is set but invalid (policy contains unknown or missing keys)'*'denies every zensu-verify navigation'*) check "P1vk the wrapper judges the policy value rather than its presence" PASS ;;
   *) check "P1vk the wrapper judges the policy value rather than its presence" FAIL ;;
 esac
 case "$(vf_live '{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:5173","evidenceMode":"declared-safe","routes":["/"]}]}')" in
   *'environment policy active'*) check "P1vk-control a policy that satisfies the contract still renders active" PASS ;;
   *) check "P1vk-control a policy that satisfies the contract still renders active" FAIL ;;
 esac
-# Every vf_live case above reaches its reason only because all four `unavailable` elifs
+# Every vf_live case above reaches its reason only because all three `unavailable` elifs
 # PASSED, so only their true side ever ran. This one drives the last of them: a synthetic
 # plugin root registering the PreToolUse consent gate and NOT the PostToolUse recorder is the
-# state the doctor exists to name — the broker starts in consent mode on the gate alone, so
-# every navigation prompts and none is ever remembered. The root carries only the six files
-# hookRegistered and the doctor's own guards open, so it costs six copies rather than a tree.
+# state the doctor exists to name — every navigation prompts and none is ever remembered.
 # ZDOC_ROOT comes from the doctor script's OWN location, never from ZENSU_DOCTOR_PLUGIN_DIR,
 # so the fixture has to copy the tree and run the COPY — pointing the variable at a synthetic
 # root while executing the real script measures the real registry and reports ready.
@@ -463,13 +402,44 @@ node -e '
 ' "$VF_NOREC_ROOT/hooks/hooks.json" \
   && check "P1vl-control the recorder-missing fixture really dropped the PostToolUse registration" PASS \
   || check "P1vl-control the recorder-missing fixture really dropped the PostToolUse registration" FAIL
-VF_NOREC_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
-  ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=ready \
-  ZENSU_DOCTOR_PLUGIN_DIR="$VF_NOREC_ROOT" CLAUDE_PLUGIN_ROOT="$VF_NOREC_ROOT" \
-  CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$VF_NOREC_ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null)"
+vf_copy_doctor() {
+  env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
+    ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" \
+    ZENSU_DOCTOR_PLUGIN_DIR="$VF_NOREC_ROOT" CLAUDE_PLUGIN_ROOT="$VF_NOREC_ROOT" \
+    CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$VF_NOREC_ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null
+}
+VF_NOREC_OUT="$(vf_copy_doctor)"
 case "$VF_NOREC_OUT" in
-  *'consent recorder not registered'*) check "P1vl an unregistered consent recorder is named rather than absorbed" PASS ;;
+  *'❌  verify-feature: cannot start (consent recorder not registered on the Bash matcher)'*) check "P1vl an unregistered consent recorder is named rather than absorbed" PASS ;;
   *) check "P1vl an unregistered consent recorder is named rather than absorbed" FAIL ;;
+esac
+node -e '
+  const fs = require("node:fs");
+  const registry = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const gate = "/hooks/pre-browser-navigation-consent.sh";
+  const moved = [];
+  for (const group of registry.hooks.PreToolUse || []) {
+    const kept = [];
+    for (const hook of group.hooks || []) {
+      if (typeof hook.command === "string" && hook.command.includes(gate)) moved.push(hook);
+      else kept.push(hook);
+    }
+    group.hooks = kept;
+  }
+  if (moved.length === 0) process.exit(1);
+  registry.hooks.PreToolUse.push({ matcher: "Edit|Write|MultiEdit", hooks: moved });
+  fs.writeFileSync(process.argv[1], JSON.stringify(registry, null, 2));
+' "$VF_NOREC_ROOT/hooks/hooks.json" \
+  && check "P1vl2-control the gate fixture moved the PreToolUse consent gate off the Bash matcher" PASS \
+  || check "P1vl2-control the gate fixture moved the PreToolUse consent gate off the Bash matcher" FAIL
+case "$(vf_copy_doctor)" in
+  *'❌  verify-feature: cannot start (consent hook not registered on the Bash matcher)'*) check "P1vl2 a consent gate registered on another matcher is named, ahead of the recorder" PASS ;;
+  *) check "P1vl2 a consent gate registered on another matcher is named, ahead of the recorder" FAIL ;;
+esac
+rm -f "$VF_NOREC_ROOT/scripts/verify-browser-config.js"
+case "$(vf_copy_doctor)" in
+  *'❌  verify-feature: cannot start (consent hook pair, its module or the run-config helper missing from the plugin)'*) check "P1vl3 a missing run-config helper is named, ahead of any registration fault" PASS ;;
+  *) check "P1vl3 a missing run-config helper is named, ahead of any registration fault" FAIL ;;
 esac
 rm -rf "$VF_NOREC_ROOT"
 rm -rf "$VF_LIVE_ROOT"
@@ -477,11 +447,12 @@ rm -rf "$VF_LIVE_ROOT"
 if grep -qF 'ZDOC_VERIFY=policy' "$HELPER" && grep -qF 'ZDOC_VERIFY=consent-no-recipe' "$HELPER" \
   && grep -qF 'ZDOC_VERIFY=unavailable' "$HELPER" && grep -qF 'consentHookRegistered' "$HELPER" \
   && grep -qF 'consentRecorderRegistered' "$HELPER" \
+  && grep -qF 'scripts/verify-browser-config.js' "$HELPER" \
   && grep -qF 'ZENSU_VERIFY_NAVIGATION_POLICY_V1' "$HELPER" \
-  && grep -qF 'ZDOC_SESSION_PROJECT_ROOT ZDOC_VERIFY ZDOC_VERIFY_REASON' "$HELPER"; then
-  check "P1vf wrapper derives the verify state from the policy env, the registered hook and the recipe, and exports it" PASS
+  && grep -qF 'ZDOC_SESSION_PROJECT_ROOT ZDOC_VERIFY ZDOC_VERIFY_REASON ZDOC_PLAYWRIGHT_VERSION' "$HELPER"; then
+  check "P1vf wrapper derives the verify state from the policy env, the registered hook pair, the run-config helper and the recipe, and exports it with the playwright-cli version" PASS
 else
-  check "P1vf wrapper derives the verify state from the policy env, the registered hook and the recipe, and exports it" FAIL
+  check "P1vf wrapper derives the verify state from the policy env, the registered hook pair, the run-config helper and the recipe, and exports it with the playwright-cli version" FAIL
 fi
 VF_SKILL="$PLUGIN_DIR/skills/doctor/SKILL.md"
 # The phrase set is DERIVED from the renderer's own arms, never hand-listed: a hand list
@@ -491,30 +462,9 @@ VF_SKILL="$PLUGIN_DIR/skills/doctor/SKILL.md"
 # em dash: \xHH is a GNU sed extension, so on BSD/macOS sed the pattern degraded to the literal
 # text and matched nothing, leaving the tail attached and the derived phrase absent from
 # SKILL.md — red on macOS, green on the GNU-sed runner.
-# P1vr holds the two spellings of the consent arming set in step. The wrapper decides WHICH
-# verdicts get an execution state and the renderer decides which get a row; they are separate
-# literals in separate languages, and a fourth consent state added to one alone makes the row
-# silently disappear.
-VF_ARM_SH="$(sed -n 's/.*(\(consent|consent-no-recipe|consent-recipe-unchecked\)).*/\1/p' "$HELPER" | head -1)"
-VF_ARM_JS="$(sed -n "s/.*CONSENT_MODE_STATES = \[\(.*\)\];.*/\1/p" "$REPORT" | head -1 | tr -d " '" )"
-VF_ARM_JS_PIPED="$(printf '%s' "$VF_ARM_JS" | tr ',' '|')"
-if [ -n "$VF_ARM_SH" ] && [ "$VF_ARM_SH" = "$VF_ARM_JS_PIPED" ]; then
-  check "P1vr the consent arming set agrees between the doctor wrapper and the renderer" PASS
-else
-  check "P1vr the consent arming set agrees between the doctor wrapper and the renderer (sh=[$VF_ARM_SH] js=[$VF_ARM_JS_PIPED])" FAIL
-fi
-
-VF_PHRASES="$(grep -oE "'verify-feature( gate)?: [^']*'" "$REPORT" \
+VF_PHRASES="$(grep -oE "'verify-feature: [^']*'" "$REPORT" \
   | sed "s/^'//; s/'\$//" | sed 's/ — .*//; s/ ($//' | sort -u)"
 VF_PHRASE_COUNT="$(printf '%s\n' "$VF_PHRASES" | grep -c . || true)"
-# A floor alone cannot fail for the narrowing this selector was widened to fix: the eight
-# `verify-feature: ` phrases already satisfy any count the gate family would also satisfy, so
-# the family itself is what must be asserted.
-if printf '%s\n' "$VF_PHRASES" | grep -q '^verify-feature gate: '; then
-  check "P1vg-family the derivation reaches the verify-feature gate rows, not only the mode rows" PASS
-else
-  check "P1vg-family the derivation reaches the verify-feature gate rows, not only the mode rows" FAIL
-fi
 VF_SKILL_MISS=""
 while IFS= read -r phrase; do
   [ -n "$phrase" ] || continue
@@ -522,149 +472,117 @@ while IFS= read -r phrase; do
 done <<VFEOF
 $VF_PHRASES
 VFEOF
-[ "${VF_PHRASE_COUNT:-0}" -ge 13 ] \
+[ "${VF_PHRASE_COUNT:-0}" -ge 7 ] \
   && check "P1vg-control the verify-feature row phrases derive from the renderer ($VF_PHRASE_COUNT found)" PASS \
   || check "P1vg-control the verify-feature row phrases derive from the renderer (only ${VF_PHRASE_COUNT:-0} found)" FAIL
 # The count is CONJOINED: an empty derivation would otherwise report every row documented
-# while comparing nothing, which is the shape this check replaced. The floor moved 14 -> 13 when
-# the unknown-exec arm was retired from the MODE chain: it asserted a binding cause the probe
-# never established, and sitting at the top of that else/if ladder it displaced the no-recipe and
-# recipe-unchecked rows. The observable it reported is carried by the gate family's own row.
-if [ "${VF_PHRASE_COUNT:-0}" -ge 13 ] && [ -z "$VF_SKILL_MISS" ]; then
+# while comparing nothing, which is the shape this check replaced.
+if [ "${VF_PHRASE_COUNT:-0}" -ge 7 ] && [ -z "$VF_SKILL_MISS" ]; then
   check "P1vg every verify-feature row the renderer can emit is documented in skills/doctor/SKILL.md ($VF_PHRASE_COUNT rows)" PASS
 else
   check "P1vg verify-feature rows missing from skills/doctor/SKILL.md:$VF_SKILL_MISS" FAIL
 fi
+PW_PHRASES="$(grep -oE "line\((OK|WARN|BAD), 'playwright-cli: [^']*'" "$REPORT" \
+  | sed "s/^line([A-Z]*, '//; s/'\$//" | sed 's/ — .*//; s/ ($//' | sort -u)"
+PW_PHRASE_COUNT="$(printf '%s\n' "$PW_PHRASES" | grep -c . || true)"
+PW_SKILL_MISS=""
+while IFS= read -r phrase; do
+  [ -n "$phrase" ] || continue
+  grep -qF -- "$phrase" "$VF_SKILL" || PW_SKILL_MISS="$PW_SKILL_MISS [$phrase]"
+done <<PWEOF
+$PW_PHRASES
+PWEOF
+if [ "${PW_PHRASE_COUNT:-0}" -ge 3 ] && [ -z "$PW_SKILL_MISS" ]; then
+  check "P1vg1 every playwright-cli row the renderer can emit is documented in skills/doctor/SKILL.md ($PW_PHRASE_COUNT rows)" PASS
+else
+  check "P1vg1 playwright-cli rows missing from skills/doctor/SKILL.md (${PW_PHRASE_COUNT:-0} derived):$PW_SKILL_MISS" FAIL
+fi
 
-# --- wrapper Playwright MCP detection (offline; npm must never execute) -----
-MCP_PLUG="$SBOX/mcp-plug"
-FAKE_BIN="$SBOX/fake-bin"
-NPM_MARKER="$SBOX/npm-invoked"
-mkdir -p "$MCP_PLUG/.claude-plugin" "$MCP_PLUG/hooks" "$MCP_PLUG/scripts" "$MCP_PLUG/mcp-runtime" "$FAKE_BIN"
-printf '{"name":"zensu","version":"1.2.3","mcpServers":"./.mcp.json"}\n' > "$MCP_PLUG/.claude-plugin/plugin.json"
-printf '{"plugins":[{"name":"zensu","version":"1.2.3"}]}\n' > "$MCP_PLUG/.claude-plugin/marketplace.json"
-printf '{"hooks":{}}\n' > "$MCP_PLUG/hooks/hooks.json"
-printf '%s\n' '{"mcpServers":{"zensu-browser":{"type":"stdio","command":"${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh","args":["--isolated"]}}}' > "$MCP_PLUG/.mcp.json"
-printf '%s\n' '{"private":true,"dependencies":{"@playwright/mcp":"0.0.75"}}' > "$MCP_PLUG/mcp-runtime/package.json"
-printf '%s\n' '{"lockfileVersion":3,"packages":{"":{"dependencies":{"@playwright/mcp":"0.0.75"}},"node_modules/@playwright/mcp":{"version":"0.0.75","integrity":"sha512-fixture"}}}' > "$MCP_PLUG/mcp-runtime/package-lock.json"
-printf '#!/bin/bash\nexit 0\n' > "$MCP_PLUG/scripts/playwright-mcp.sh"
-chmod +x "$MCP_PLUG/scripts/playwright-mcp.sh"
-cat > "$MCP_PLUG/scripts/playwright-mcp-proxy.js" <<'PROXY_FIXTURE'
-'use strict';
-module.exports.ALLOWED_TOOLS = [
-  'browser_click', 'browser_close', 'browser_console_messages',
-  'browser_drag', 'browser_fill_form', 'browser_handle_dialog', 'browser_hover',
-  'browser_navigate', 'browser_network_requests', 'browser_press_key', 'browser_resize',
-  'browser_select_option', 'browser_snapshot', 'browser_tabs', 'browser_take_screenshot',
-  'browser_type', 'browser_wait_for'
-];
-PROXY_FIXTURE
-ln -s "$(command -v node)" "$FAKE_BIN/node"
-printf '#!/bin/bash\n: > "${FAKE_NPM_MARKER:?}"\nexit 99\n' > "$FAKE_BIN/npm"
-chmod +x "$FAKE_BIN/npm"
-MCP_OUT="$(PATH="$FAKE_BIN:/usr/bin:/bin" FAKE_NPM_MARKER="$NPM_MARKER" \
-  ZENSU_DOCTOR_PLUGIN_DIR="$MCP_PLUG" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
-  bash "$HELPER" 2>/dev/null)"
-case "$MCP_OUT" in *'Playwright MCP: valid integrity-locked plugin config + npm present'*) check "P1eb helper executes valid MCP declaration path" PASS ;; *) check "P1eb valid MCP declaration path (got: $MCP_OUT)" FAIL ;; esac
-if [ -e "$NPM_MARKER" ]; then
-  check "P1ec helper never executes npm during offline detection" FAIL
-else
-  check "P1ec helper never executes npm during offline detection" PASS
-fi
-printf '%s\n' '{"mcpServers":{"zensu-browser":{"type":"stdio","command":"npx","args":["@playwright/mcp@latest"]}}}' > "$MCP_PLUG/.mcp.json"
-rm -f "$NPM_MARKER"
-BAD_MCP_OUT="$(PATH="$FAKE_BIN:/usr/bin:/bin" FAKE_NPM_MARKER="$NPM_MARKER" ZDOC_PLAYWRIGHT_TOOLS=ready \
-  ZENSU_DOCTOR_PLUGIN_DIR="$MCP_PLUG" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
-  bash "$HELPER" 2>/dev/null)"; BAD_MCP_RC=$?
-[ "$BAD_MCP_RC" -eq 0 ] && check "P1ed invalid MCP helper path exits 0" PASS || check "P1ed invalid MCP helper path exits 0 (rc=$BAD_MCP_RC)" FAIL
-case "$BAD_MCP_OUT" in *'Playwright MCP: valid plugin config not detected'*) check "P1ef invalid/floating MCP declaration renders exact warning" PASS ;; *) check "P1ef invalid/floating MCP warning (got: $BAD_MCP_OUT)" FAIL ;; esac
-if [ -e "$NPM_MARKER" ]; then
-  check "P1eg invalid MCP detection still never executes npm" FAIL
-else
-  check "P1eg invalid MCP detection still never executes npm" PASS
-fi
-printf '%s\n' '{"mcpServers":{"playwright":{"type":"stdio","command":"${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh","args":["--isolated"]}}}' > "$MCP_PLUG/.mcp.json"
-OLD_KEY_OUT="$(PATH="$FAKE_BIN:/usr/bin:/bin" FAKE_NPM_MARKER="$NPM_MARKER" ZDOC_PLAYWRIGHT_TOOLS=ready \
-  ZENSU_DOCTOR_PLUGIN_DIR="$MCP_PLUG" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
-  bash "$HELPER" 2>/dev/null)"
-case "$OLD_KEY_OUT" in *'Playwright MCP: valid plugin config not detected'*) check "P1ek a valid declaration under the retired playwright key is not the plugin's broker" PASS ;; *) check "P1ek retired playwright key (got: $OLD_KEY_OUT)" FAIL ;; esac
-# P1ek passes identically against a hardcoded `browser_key="zensu-browser"`, so nothing above
-# holds the DERIVATION. Reverting it would restore the hand copy this round removed while
-# CLAUDE.md asserts the doctor takes the key from the executing installation's module.
-if PW_BODY="$(awk '/^playwright_mcp_declared\(\) \{/,/^\}$/' "$HELPER")" && [ -n "$PW_BODY" ]; then
-  check "P1el-control the playwright_mcp_declared body is extractable" PASS
-  # Needle the READ, not the bare constant name: the probe subshell exports
-  # ZDOC_BROWSER_SERVER_KEY, so a literal hand copy still carries that substring and a
-  # name-only needle passed against exactly the revert this check exists to catch.
-  case "$PW_BODY" in
-    *'verify-consent-v1.js").BROWSER_SERVER_KEY'*) check "P1el the doctor derives the browser server key from the decision module" PASS ;;
-    *) check "P1el the doctor derives the browser server key from the decision module" FAIL ;;
-  esac
-  case "$PW_BODY" in
-    *'"zensu-browser"'*|*"'zensu-browser'"*) check "P1el2 the doctor keeps no literal copy of the server key" FAIL ;;
-    *) check "P1el2 the doctor keeps no literal copy of the server key" PASS ;;
-  esac
-  # Needle the DECIDING call and its live conjunct. `isSymbolicLink()` beside an lstat verdict is
-  # dead — `lstatSync` never reports a symlink as a file — and an `lstatSync` -> `statSync`
-  # "simplification" kills the guard while leaving that token in place, which is exactly the edit
-  # this check exists to catch.
-  case "$PW_BODY" in
-    *'lstatSync("./verify-consent-v1.js")'*'!info.isFile()'*)
-      check "P1el3 the key read guards the decision module the way every other consumer does" PASS ;;
-    *) check "P1el3 the key read guards the decision module the way every other consumer does" FAIL ;;
-  esac
-  case "$PW_BODY" in
-    *'fs.statSync('*) check "P1el4 the key read does not follow a symlink through a bare statSync" FAIL ;;
-    *) check "P1el4 the key read does not follow a symlink through a bare statSync" PASS ;;
-  esac
-  # SOURCE-pinned, and the reason is MEASURED rather than argued. The key is read from $DIR,
-  # the doctor's own hooks/lib, so a fixture has to run a COPY of the helper — and a copied
-  # hooks/lib is refused as a plugin root before playwright_mcp_declared is ever called: both
-  # routes tried here, deleting verify-consent-v1.js from the copy and deleting the sibling its
-  # top-level require needs, render only
-  # "Session Control: plugin root unavailable or invalid" with an EMPTY stderr. The preflight at
-  # the top of zensu-doctor.sh names neither module, so the refusal is the plugin-root validity
-  # check and not a module check; the disclosure branch stays behaviourally unreachable either way.
-  # LINE-LOCAL on purpose. A bare `>&2` needle over the whole body asserts only that SOME
-  # statement writes to fd 2, so it would stay green the moment a second stderr write lands in
-  # this function while the disclosure itself moved to the report's stdout. (The body's other
-  # redirections, 2>&1 and 2>/dev/null, carry no `>&2` substring and were never the hazard.)
-  case "$PW_BODY" in
-    *'was NOT judged" >&2'*)
-      check "P1el5 the unreadable-module cause is disclosed, on stderr rather than in the report" PASS ;;
-    *) check "P1el5 the unreadable-module cause is disclosed, on stderr rather than in the report" FAIL ;;
-  esac
-  # The skill hand-quotes that emitted line so the model can recognize it. Hold the two sides in
-  # step: a reword on either side otherwise orphans the relay instruction silently.
-  if grep -qF 'browser server key unreadable' "$SKILL_MD" && grep -qF 'was NOT judged' "$SKILL_MD"; then
-    check "P1el6 the doctor skill quotes the disclosure it tells the model to relay" PASS
-  else
-    check "P1el6 the doctor skill quotes the disclosure it tells the model to relay" FAIL
-  fi
-else
-  check "P1el-control the playwright_mcp_declared body is extractable" FAIL
-fi
-printf '%s\n' '{"mcpServers":{"zensu-browser":{"type":"stdio","command":"${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh","args":["--isolated"]}}}' > "$MCP_PLUG/.mcp.json"
-NO_NPM_BIN="$SBOX/no-npm-bin"
-mkdir -p "$NO_NPM_BIN"
-ln -s "$(command -v node)" "$NO_NPM_BIN/node"
-ln -s "$(command -v dirname)" "$NO_NPM_BIN/dirname"
-DECLARED_OUT="$(PATH="$NO_NPM_BIN" ZENSU_DOCTOR_PLUGIN_DIR="$MCP_PLUG" \
-  ZDOC_FORGE_PROVIDER=unknown ZDOC_FORGE_CLI='' ZDOC_FORGE_STATE='' \
-  ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" /bin/bash "$HELPER" 2>/dev/null)"; DECLARED_RC=$?
-[ "$DECLARED_RC" -eq 0 ] && check "P1eh valid declaration/no-npm helper path exits 0" PASS || check "P1eh valid declaration/no-npm helper path exits 0 (rc=$DECLARED_RC)" FAIL
-case "$(uname -s)" in
-  MINGW*|MSYS*|CYGWIN*) check "P1ei isolated no-npm PATH rendering (covered on macOS/Linux/WSL)" PASS ;;
-  *) case "$DECLARED_OUT" in *'Playwright MCP: valid integrity-locked plugin config but npm is missing from PATH'*) check "P1ei valid declaration without npm renders degraded warning" PASS ;; *) check "P1ei declared/no-npm warning (got: $DECLARED_OUT)" FAIL ;; esac ;;
-esac
-READY_HELPER="$(ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_GH=authed ZDOC_PLAYWRIGHT_TOOLS=ready \
-  ZENSU_DOCTOR_PLUGIN_DIR="$MCP_PLUG" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
-  bash "$HELPER" 2>/dev/null)"; READY_HELPER_RC=$?
-[ "$READY_HELPER_RC" -eq 0 ] && case "$READY_HELPER" in *'Playwright MCP: loaded and ready'*) check "P1ej helper requires valid plugin config + loaded-tool signal for readiness" PASS ;; *) check "P1ej helper ready message (got: $READY_HELPER)" FAIL ;; esac || check "P1ej helper ready path (rc=$READY_HELPER_RC)" FAIL
-PATH_ONLY="$(ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_GH=authed ZDOC_PLAYWRIGHT=present \
+# --- playwright-cli detection ----------------------------------------------
+pw_row() {
+  ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready \
+  ZDOC_PLAYWRIGHT="$1" ZDOC_PLAYWRIGHT_VERSION="$2" ZDOC_VERIFY=consent \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
-  node "$REPORT" 2>/dev/null)"
-case "$PATH_ONLY" in *'PATH binary found, but /zensu:verify-feature requires loaded Playwright MCP tools'*) check "P1ee PATH-only Playwright is a warning, not false green" PASS ;; *) check "P1ee PATH-only Playwright warning (got: $PATH_ONLY)" FAIL ;; esac
+    node "${3:-$REPORT}" 2>/dev/null
+}
+PW_OTHER_V=9.8.7
+[ "$PW_OTHER_V" != "$PW_MEASURED" ] || PW_OTHER_V=9.8.6
+PW_OTHER="$(pw_row present "$PW_OTHER_V")"
+case "$PW_OTHER" in *"✅  playwright-cli: installed ($PW_OTHER_V) — /zensu:verify-feature runs through it; the browser consent gate parses its arguments as measured against $PW_MEASURED, and an argument shape it does not recognize is denied rather than admitted"*) check "P1pc playwright-cli at another version stays green and names the version the consent gate was measured against" PASS ;; *) check "P1pc playwright-cli at another version stays green and names the version the consent gate was measured against" FAIL ;; esac
+case "$PW_OTHER" in *'all checks green'*) check "P1pc1 another playwright-cli version keeps the green summary" PASS ;; *) check "P1pc1 another playwright-cli version keeps the green summary" FAIL ;; esac
+PW_LONE="$SBOX/pw-lone/hooks/lib"
+mkdir -p "$SBOX/pw-lone/hooks"
+cp -R "$PLUGIN_DIR/hooks/lib" "$PW_LONE"
+rm -f "$PW_LONE/verify-consent-v1.js"
+if [ -f "$PW_LONE/zensu-doctor-report.js" ] && [ ! -e "$PW_LONE/verify-consent-v1.js" ]; then
+  check "P1pc2-control the renderer copy carries no consent module" PASS
+else
+  check "P1pc2-control the renderer copy carries no consent module" FAIL
+fi
+PW_UNREAD_ROW="✅  playwright-cli: installed ($PW_OTHER_V) — /zensu:verify-feature runs through it; the version the browser consent gate was measured against could not be read, and an argument shape the gate does not recognize is denied rather than admitted"
+case "$(pw_row present "$PW_OTHER_V" "$PW_LONE/zensu-doctor-report.js")" in *"$PW_UNREAD_ROW"*) check "P1pc2 a missing consent module is named rather than compared against" PASS ;; *) check "P1pc2 a missing consent module is named rather than compared against" FAIL ;; esac
+ln -s "$PLUGIN_DIR/hooks/lib/verify-consent-v1.js" "$PW_LONE/verify-consent-v1.js" 2>/dev/null
+if [ -L "$PW_LONE/verify-consent-v1.js" ]; then
+  case "$(pw_row present "$PW_OTHER_V" "$PW_LONE/zensu-doctor-report.js")" in *"$PW_UNREAD_ROW"*) check "P1pc3 a symlinked consent module is refused rather than followed" PASS ;; *) check "P1pc3 a symlinked consent module is refused rather than followed" FAIL ;; esac
+else
+  check "P1pc3 a symlinked consent module is refused rather than followed (no symlink on this host, covered on macOS/Linux)" PASS
+fi
+rm -rf "$SBOX/pw-lone"
+PW_NOVERSION="$(pw_row present "")"
+case "$PW_NOVERSION" in *'⚠️  playwright-cli: installed, but its version could not be read — run `playwright-cli --version`; /zensu:verify-feature still runs through it'*) check "P1pc4 an unreadable playwright-cli version warns and names the probe to run" PASS ;; *) check "P1pc4 an unreadable playwright-cli version warns and names the probe to run" FAIL ;; esac
+case "$PW_NOVERSION" in *'all checks green'*) check "P1pc5 the unreadable-version warning withholds the green summary" FAIL ;; *) check "P1pc5 the unreadable-version warning withholds the green summary" PASS ;; esac
+PW_FORGED_V=$'1.2.3\n❌  zdoc-forged-row'
+case "$PW_FORGED_V" in *$'\n'*) check "P1pc6-control the forged version carries a line break" PASS ;; *) check "P1pc6-control the forged version carries a line break" FAIL ;; esac
+case "$(pw_row present "$PW_FORGED_V")" in
+  *'zdoc-forged-row'*) check "P1pc6 a relayed version cannot forge a report row" FAIL ;;
+  *'✅  playwright-cli: installed (1.2.3) — '*) check "P1pc6 a relayed version cannot forge a report row" PASS ;;
+  *) check "P1pc6 a relayed version cannot forge a report row" FAIL ;;
+esac
+PW_ABSENT="$(pw_row absent "")"
+case "$PW_ABSENT" in *'⚠️  playwright-cli: not found on PATH — /zensu:verify-feature cannot drive the UI'*'`brew install playwright-cli`'*'`npm install -g @playwright/cli`'*) check "P1pc7 a missing playwright-cli warns and names both install routes" PASS ;; *) check "P1pc7 a missing playwright-cli warns and names both install routes" FAIL ;; esac
+case "$PW_ABSENT" in *'all checks green'*) check "P1pc8 the missing-playwright-cli warning withholds the green summary" FAIL ;; *) check "P1pc8 the missing-playwright-cli warning withholds the green summary" PASS ;; esac
+PW_STUB_DIR="$SBOX/pw-stub-bin"
+PW_STUB_LOG="$SBOX/pw-stub.log"
+mkdir -p "$PW_STUB_DIR"
+printf '%s\n' '#!/bin/sh' 'printf "%s|%s\n" "$*" "${NO_UPDATE_NOTIFIER:-}" >> "$PW_STUB_LOG"' 'printf "%s\n" "${PW_STUB_VERSION:-}"' > "$PW_STUB_DIR/playwright-cli"
+chmod +x "$PW_STUB_DIR/playwright-cli"
+pw_wrap() {
+  env -u ZDOC_PLAYWRIGHT -u ZDOC_PLAYWRIGHT_VERSION -u NO_UPDATE_NOTIFIER \
+    PATH="$PW_STUB_DIR:$PATH" PW_STUB_LOG="$PW_STUB_LOG" PW_STUB_VERSION="$1" \
+    ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_VERIFY=consent \
+    ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
+    bash "$HELPER" 2>/dev/null
+}
+rm -f "$PW_STUB_LOG"
+case "$(pw_wrap "$PW_MEASURED")" in *"✅  playwright-cli: installed ($PW_MEASURED) — /zensu:verify-feature and the autopilot browser driver run through it"*) check "P1pw the wrapper finds playwright-cli on PATH and reads its version" PASS ;; *) check "P1pw the wrapper finds playwright-cli on PATH and reads its version" FAIL ;; esac
+PW_STUB_CALLS="$(cat "$PW_STUB_LOG" 2>/dev/null)"
+if [ "$PW_STUB_CALLS" = '--version|1' ]; then
+  check "P1pw1 the wrapper runs playwright-cli exactly once, as --version with the update notifier off" PASS
+else
+  check "P1pw1 the wrapper runs playwright-cli exactly once, as --version with the update notifier off (got: $PW_STUB_CALLS)" FAIL
+fi
+case "$(pw_wrap $'Version '"$PW_OTHER_V"$'\nnotice: 7.7.7 is available')" in *"✅  playwright-cli: installed ($PW_OTHER_V) — /zensu:verify-feature runs through it; the browser consent gate parses its arguments as measured against $PW_MEASURED"*) check "P1pw2 the wrapper keeps the first line of the version output and only its digits and dots" PASS ;; *) check "P1pw2 the wrapper keeps the first line of the version output and only its digits and dots" FAIL ;; esac
+case "$(pw_wrap '')" in *'⚠️  playwright-cli: installed, but its version could not be read'*) check "P1pw3 a playwright-cli that prints no version is found but warns" PASS ;; *) check "P1pw3 a playwright-cli that prints no version is found but warns" FAIL ;; esac
+PW_NOCLI_BIN="$SBOX/pw-nocli-bin"
+mkdir -p "$PW_NOCLI_BIN"
+ln -s "$(command -v node)" "$PW_NOCLI_BIN/node"
+ln -s "$(command -v dirname)" "$PW_NOCLI_BIN/dirname"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) check "P1pw4 the wrapper reports playwright-cli absent from an isolated PATH (covered on macOS/Linux/WSL)" PASS ;;
+  *)
+    if env PATH="$PW_NOCLI_BIN" /bin/bash -c 'command -v node' >/dev/null 2>&1 \
+      && ! env PATH="$PW_NOCLI_BIN" /bin/bash -c 'command -v playwright-cli' >/dev/null 2>&1; then
+      check "P1pw4-control the isolated PATH holds node and no playwright-cli" PASS
+    else
+      check "P1pw4-control the isolated PATH holds node and no playwright-cli" FAIL
+    fi
+    PW_ABSENT_WRAP="$(env -u ZDOC_PLAYWRIGHT -u ZDOC_PLAYWRIGHT_VERSION PATH="$PW_NOCLI_BIN" \
+      ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_VERIFY=consent \
+      ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
+      /bin/bash "$HELPER" 2>/dev/null)"
+    case "$PW_ABSENT_WRAP" in *'⚠️  playwright-cli: not found on PATH'*) check "P1pw4 the wrapper reports playwright-cli absent when it is not on PATH" PASS ;; *) check "P1pw4 the wrapper reports playwright-cli absent when it is not on PATH" FAIL ;; esac
+    ;;
+esac
 
 # --- version mismatch ------------------------------------------------------
 printf '{"plugins":[{"name":"zensu","version":"9.9.9"}]}\n' > "$SBOX/plug/.claude-plugin/marketplace.json"
@@ -709,126 +627,6 @@ CAS_FILE="$CAS_ST/tdd-phase-${CAS_KEY}.json"
 OUT="$(run_report "$PLUGIN_DIR" "$SBOX/good-cfg.json" "$CAS_PROJECT")"
 case "$OUT" in *'1 validated CAS workflow document(s); reviewRound/stopBlockCount/implStopCount are integrated fields'*) check "P1m valid CAS workflow document is reported with integrated counters" PASS ;; *) check "P1m valid CAS workflow state (got: $OUT)" FAIL ;; esac
 case "$OUT" in *'per-session marker'*|*'1 rounds'*|*'1 stopblocks'*) check "P1ma retired sidecars are not counted as session state" FAIL ;; *) check "P1ma retired sidecars are not counted as session state" PASS ;; esac
-
-# P1vs/P1vs1/P1vs2 drive the WRAPPER's execution probe, which every exec_row case skips by
-# supplying ZDOC_VERIFY_EXEC directly. Without them the ran/none arms and the export are pinned
-# by a source grep only, and dropping ZDOC_VERIFY_EXEC from the export list keeps those greps
-# green while the row never renders. A bound session is what makes the probe reachable at all.
-printf 'version: 1\n' > "$CAS_PROJECT/.zensu/runtime.yaml"
-VF_WRAP_BASE=(ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=ready
-  ZENSU_DOCTOR_PLUGIN_DIR="$PLUGIN_DIR" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-  ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$CAS_PROJECT")
-vf_wrap() { env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 "${VF_WRAP_BASE[@]}" bash "$HELPER" 2>/dev/null; }
-rm -f "$CAS_ST"/verify-consent-exec-*.json
-case "$(vf_wrap)" in
-  *'verify-feature gate: registered, and no live execution marker was read'*) check "P1vs the wrapper derives none when the state directory holds no marker" PASS ;;
-  *) check "P1vs the wrapper derives none when the state directory holds no marker" FAIL ;;
-esac
-# The row may not assert a cause the probe did not establish. Markers expire, and the reaper
-# removes them on the next write, so a session that drove the browser past the window renders
-# byte-identically to one that never did — naming only "no navigation yet" was false for it.
-case "$(vf_wrap)" in
-  *'or that its marker has passed'*) check "P1vs0 the none row names expiry beside the never-navigated cause" PASS ;;
-  *) check "P1vs0 the none row names expiry beside the never-navigated cause" FAIL ;;
-esac
-VF_WRAP_EV="$(node -e '
-  const c = require(process.argv[1] + "/hooks/lib/verify-consent-v1.js");
-  const path = require("node:path");
-  const root = require("node:fs").realpathSync.native(process.argv[2]);
-  process.stdout.write(c.evidencePathFor(path.join(c.evidenceDirFor(root), `verify-consent-${process.argv[3]}.json`), "http://127.0.0.1:4400"));
-' "$PLUGIN_DIR" "$CAS_PROJECT" "$CAS_KEY" 2>/dev/null)"
-node -e '
-  const c = require(process.argv[1] + "/hooks/lib/verify-consent-v1.js");
-  const r = c.writeExecutionEvidence(process.argv[2], "http://127.0.0.1:4400", { projectRoot: process.argv[3], verdict: "allowed" });
-  process.exit(r.ok ? 0 : 1);
-' "$PLUGIN_DIR" "$VF_WRAP_EV" "$CAS_PROJECT" 2>/dev/null   && check "P1vs-control the marker fixture landed" PASS || check "P1vs-control the marker fixture landed" FAIL
-# The needle names what only the ALLOWED row carries: the shorter lead is a strict PREFIX of the
-# prompted-origin row too, so inverting the wrapper's verdict ternary left this check green.
-case "$(vf_wrap)" in
-  *'executed in this session — a live marker'*) check "P1vs1 the wrapper derives ran from a live marker for this session" PASS ;;
-  *) check "P1vs1 the wrapper derives ran from a live marker for this session" FAIL ;;
-esac
-# And the exit-3 arm is DRIVEN rather than supplied: every exec_row case hands the state in
-# directly and skips the derivation, so the ternary that reads the marker's verdict had no
-# executed case in either direction.
-node -e '
-  const c = require(process.argv[1] + "/hooks/lib/verify-consent-v1.js");
-  const r = c.writeExecutionEvidence(process.argv[2], "http://127.0.0.1:4400", { projectRoot: process.argv[3] });
-  process.exit(r.ok && r.verdict === "asked" ? 0 : 1);
-' "$PLUGIN_DIR" "$VF_WRAP_EV" "$CAS_PROJECT" 2>/dev/null   && check "P1vs3-control the asked-verdict marker fixture landed" PASS || check "P1vs3-control the asked-verdict marker fixture landed" FAIL
-case "$(vf_wrap)" in
-  *'on a prompted origin'*) check "P1vs3 the wrapper derives ran-asked from a marker the gate only asked about" PASS ;;
-  *) check "P1vs3 the wrapper derives ran-asked from a marker the gate only asked about" FAIL ;;
-esac
-rm -f "$CAS_ST"/verify-consent-exec-*.json
-# A walk that did not FINISH is not a walk that found nothing. Without this the budget-exhausted
-# read rendered the benign green row asserting a cause the probe never established.
-node -e '
-  const fs = require("node:fs");
-  const path = require("node:path");
-  const c = require(process.argv[1] + "/hooks/lib/verify-consent-v1.js");
-  const dir = process.argv[2];
-  const key = process.argv[3];
-  // Bodies the reader REFUSES: they cost walk budget before they are parsed, and no live marker
-  // survives them, so the walk ends truncated with nothing found — which is the only shape that
-  // separates "did not finish" from "finished and found nothing".
-  for (let i = 0; i <= c.MAX_EVIDENCE_FILES; i += 1) {
-    const origin = `http://127.0.0.1:${6000 + i}`;
-    fs.writeFileSync(
-      path.join(dir, `verify-consent-exec-${key}-${c.evidenceOriginTag(origin)}.json`),
-      "{}\n",
-    );
-  }
-' "$PLUGIN_DIR" "$CAS_ST" "$CAS_KEY" 2>/dev/null   && check "P1vs4-control the crowded state directory landed" PASS || check "P1vs4-control the crowded state directory landed" FAIL
-case "$(vf_wrap)" in
-  *'verify-feature gate: execution could not be judged'*) check "P1vs4 a walk that exhausted its budget is a missing check, not a clean read" PASS ;;
-  *) check "P1vs4 a walk that exhausted its budget is a missing check, not a clean read" FAIL ;;
-esac
-rm -f "$CAS_ST"/verify-consent-exec-*.json
-# A SIBLING session's marker must not satisfy a row that claims this session executed.
-# WRITTEN, not renamed: this used to `mv "$VF_WRAP_EV"`, a path two earlier `rm -f` sweeps had
-# already deleted, so the `mv` failed into 2>/dev/null and the row was rendered over an EMPTY
-# directory — which trivially does not claim an execution. The session filter could be deleted
-# with the check still green. The control below is what keeps that from coming back.
-VF_SIBLING_KEY="scv1_$(printf 'e%.0s' $(seq 64))"
-VF_SIBLING="$CAS_ST/verify-consent-exec-$VF_SIBLING_KEY-0123456789abcdef.json"
-node -e '
-  const fs = require("node:fs");
-  const c = require(process.argv[1] + "/hooks/lib/verify-consent-v1.js");
-  fs.writeFileSync(process.argv[2], JSON.stringify({
-    version: c.EVIDENCE_VERSION,
-    origin: "http://127.0.0.1:4400",
-    verdict: c.EVIDENCE_VERDICT_ALLOWED,
-    at: new Date().toISOString(),
-  }) + "\n");
-' "$PLUGIN_DIR" "$VF_SIBLING" 2>/dev/null
-if [ -s "$VF_SIBLING" ]; then
-  check "P1vs2-control the sibling-session marker fixture landed" PASS
-else
-  check "P1vs2-control the sibling-session marker fixture landed" FAIL
-fi
-case "$(vf_wrap)" in
-  *'verify-feature gate: executed in this session'*) check "P1vs2 a sibling session marker does not satisfy the row" FAIL ;;
-  *) check "P1vs2 a sibling session marker does not satisfy the row" PASS ;;
-esac
-# Discrimination: the SAME body under THIS session's key does satisfy it, so the refusal above is
-# about the session binding and not about the fixture being unreadable.
-rm -f "$VF_SIBLING"
-node -e '
-  const fs = require("node:fs");
-  const c = require(process.argv[1] + "/hooks/lib/verify-consent-v1.js");
-  fs.writeFileSync(process.argv[2], JSON.stringify({
-    version: c.EVIDENCE_VERSION,
-    origin: "http://127.0.0.1:4400",
-    verdict: c.EVIDENCE_VERDICT_ALLOWED,
-    at: new Date().toISOString(),
-  }) + "\n");
-' "$PLUGIN_DIR" "$VF_WRAP_EV" 2>/dev/null
-case "$(vf_wrap)" in
-  *'verify-feature gate: executed in this session'*) check "P1vs2a the same marker under this session's key does satisfy it" PASS ;;
-  *) check "P1vs2a the same marker under this session's key does satisfy it" FAIL ;;
-esac
-rm -f "$CAS_ST"/verify-consent-exec-*.json "$CAS_PROJECT/.zensu/runtime.yaml"
 
 # the chain block: shape row, truncated session key, no false alarm, exit 0
 case "$OUT" in *'chain: 1 review chain(s) — scv1_'*': implementing'*) check "P1mc chain row names the shape and a truncated session key" PASS ;; *) check "P1mc chain row names the shape and a truncated session key (got: $OUT)" FAIL ;; esac
@@ -6633,30 +6431,6 @@ case "$P6_NODIR_UNBOUND" in
   *) check "P6f an absent .zensu/state with no bound key withholds the row (narrowed on purpose)" PASS ;;
 esac
 mkdir -p "$P6_PROJECT/.zensu/state"
-
-# --- the deletion instruction is SCOPED, and the unrecognized-state row claims no cause ---
-# `skills/doctor/SKILL.md` Phase 3 forbids a glob, `find`, parent traversal or worktree discovery
-# for this directory, and requires `rm -f` on the quoted literal the row PRINTED. The renderer's
-# unjudged row and its skill bullet both instruct clearing `verify-consent-exec-*` from a
-# re-derived `<project>/.zensu/state`, which is that glob — so both must carry the same scope
-# clause the broker's own sibling refusal already carries, naming what the directory also holds.
-SCOPE_CLAUSE='and nothing else in that directory'
-grep -qF -- "$SCOPE_CLAUSE" "$REPORT" \
-  && check "P1vx the renderer's unjudged row scopes the verify-consent-exec-* deletion" PASS \
-  || check "P1vx the renderer's unjudged row scopes the verify-consent-exec-* deletion" FAIL
-grep -qF -- "$SCOPE_CLAUSE" "$SKILL_MD" \
-  && check "P1vx1 the doctor skill's own bullet carries the same scope clause" PASS \
-  || check "P1vx1 the doctor skill's own bullet carries the same scope clause" FAIL
-# The wrapper derives its word from a closed accept-list, so every value it can emit HAS a row.
-# The residual row is reachable through the inherited ZDOC_VERIFY_EXEC pass-through alone, and it
-# must claim only what it observed. The renderer already says "a missing check rather than an
-# all-clear"; the skill bullet asserted a CAUSE the derivation cannot produce.
-grep -qF -- 'the two halves have drifted' "$SKILL_MD" \
-  && check "P1vx2 the unrecognized-state bullet asserts a drift the wrapper cannot produce" FAIL \
-  || check "P1vx2 the unrecognized-state bullet claims no cause the probe did not establish" PASS
-grep -qF -- 'missing check rather than an all-clear' "$SKILL_MD" \
-  && check "P1vx2-control the bullet still states what it IS" PASS \
-  || check "P1vx2-control the bullet still states what it IS" FAIL
 
 # P1tp — the multi-repo topology row (docs/multi-repo-chains-spec.md §5.4). A chain
 # whose claims name another repository is invisible to every other row in this block:

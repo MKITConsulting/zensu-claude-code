@@ -57,7 +57,7 @@ validate:
   # driver-specific keys: browser.viewport, api.protocol, cli.pty, iac plan target, ...
   sinks:                    # optional side-effect assertions (augments)
     - { type: email, at: "<url>" }
-  navigationBroker:        # required by /zensu:verify-feature before any browser navigation
+  navigationBroker:        # policy mode of /zensu:verify-feature; optional in consent mode
     contractVersion: 1
     policyEnv: ZENSU_VERIFY_NAVIGATION_POLICY_V1
   evidenceSafety:           # optional; required before protected DOM/visual evidence reaches AI
@@ -69,29 +69,36 @@ validate:
     containsSecrets: false        # must be literal false (declared-safe)
 ```
 
-### `validate.navigationBroker` — executable navigation boundary
+### `validate.navigationBroker` — parent-environment navigation policy
 
+The key keeps its name so existing recipes stay valid; it declares POLICY mode.
 `/zensu:verify-feature` accepts only contract version `1` with the literal parent-environment
 key `ZENSU_VERIFY_NAVIGATION_POLICY_V1`. The environment value is JSON with exactly
 `{"version":1,"mode":"local|remote","targets":[{"origin":"<exact-origin>","evidenceMode":"declared-safe","routes":["/exact/page-path"]}]}`
-and is consumed by the
-plugin's capability-filtering MCP broker before Playwright launches. It is never a command the
-model may set during the run: child-process environment changes cannot reconfigure the already
-started broker. Every selected application/authentication origin and every model-visible route
-must be present exactly or navigation remains PARTIAL. A dynamically chosen origin cannot be
-authorized from inside an already-running Claude session: launch the session with the exact
-origin policy first, or use a separate discovery run and restart with that policy.
+and is read from the environment Claude Code started with, by the browser consent gate (the
+Bash-matcher hook pair that judges every `playwright-cli` call on a `zensu-verify` session) and
+by `scripts/verify-browser-config.js`. It is never a command the model may set during the run: a
+child-process export reaches neither the hooks nor the browser. Every selected
+application/authentication origin and every model-visible route must be present exactly or
+navigation remains PARTIAL. A dynamically chosen origin cannot be authorized from inside an
+already-running Claude session: launch the session with the exact origin policy first, or use a
+separate discovery run and restart with that policy. Without the variable
+`/zensu:verify-feature` runs in consent mode, which admits literal loopback origins only and
+asks the user once per new origin; the key is optional there and honoured when present.
 
 In `local` mode every origin must use a literal loopback IP with `http` or `https`; hostnames
 such as `localhost` are rejected rather than trusted through mutable DNS/hosts resolution. In `remote`
-mode every origin must be non-loopback HTTPS; the broker rejects any DNS answer that is not
-globally routable and pins each hostname to an approved address for the browser process. The
-broker checks every request before continuation, rejects unapproved origins, and reapplies the
-credential/query/fragment rule to every navigation and redirect. Missing/invalid declarations,
-mode mismatches, wildcard origins/routes, unsupported evidence modes, or unsupported policy
-versions fail closed. Each target binds its own origin to its own page-navigation routes, so
-routes are never combined across origins. Contract v1 supports only `declared-safe`; protected
-or sensitive content that cannot satisfy that declaration remains PARTIAL before navigation.
+mode every origin must be non-loopback HTTPS; the run-config helper rejects any DNS answer that
+is not globally routable and pins each hostname to an approved address for the browser process,
+and the gate refuses to open a run config whose remote hostname carries no pin. The browser
+refuses every request to an origin outside the run config, and the gate reapplies the
+credential/query/fragment rule and the route list to every navigation command. A server
+redirect is NOT filtered by the browser, so the verifier checks the reported page URL after
+every navigation. Missing/invalid declarations, mode mismatches, wildcard origins/routes,
+unsupported evidence modes, or unsupported policy versions fail closed. Each target binds its
+own origin to its own page-navigation routes, so routes are never combined across origins.
+Contract v1 supports only `declared-safe`; protected or sensitive content that cannot satisfy
+that declaration remains PARTIAL before navigation.
 
 ### `validate.evidenceSafety` — fail-closed model-visible evidence contract
 
@@ -180,10 +187,12 @@ orchestration is identical.
   step runs unauthenticated.
 - A project with **no UI** sets `validate.driver: api` (or `cli`/`custom`) and provides an
   `assert` command instead of a `baseUrl`.
-- Collision-safe live verification may use `validate.baseUrlCommand` instead of `baseUrl`, but
-  the command must print exactly one credential-free URL that was already allowlisted in the
-  broker's immutable parent policy before the session began. It may confirm the runtime's URL
-  after readiness; it may not select a new free port during the session. A discovery-first
-  runtime requires a second, policy-configured session.
+- Collision-safe live verification may use `validate.baseUrlCommand` instead of `baseUrl`. The
+  command must print exactly one credential-free URL. In policy mode that URL must already be
+  allowlisted in the immutable parent-environment policy before the session began: the command
+  may confirm the runtime's URL after readiness, it may not select a new free port during the
+  session, and a discovery-first runtime requires a second, policy-configured session. In
+  consent mode a run-specific loopback port is expected, and the first navigation to it asks the
+  user.
 - `services[]` is ordered and each entry blocks on its `ready` check — model real
   dependencies (db before backend before frontend).

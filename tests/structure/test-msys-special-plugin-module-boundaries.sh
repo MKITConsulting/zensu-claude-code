@@ -51,8 +51,7 @@ mkdir -p "$PLUGIN" "$PROJECT/src" "$PLUGIN_DATA" "$WORKSPACE" "$HOME_DIR"
 chmod 700 "$WORKSPACE" 2>/dev/null || true
 
 if cp -R "$ROOT/.claude-plugin" "$ROOT/hooks" "$ROOT/agents" "$ROOT/skills" \
-    "$ROOT/scripts" "$ROOT/mcp-runtime" "$PLUGIN/" \
-    && cp "$ROOT/.mcp.json" "$PLUGIN/.mcp.json"; then
+    "$ROOT/scripts" "$PLUGIN/"; then
   check "special plugin fixture copies the complete executable runtime" PASS
 else
   check "special plugin fixture copies the complete executable runtime" FAIL
@@ -256,19 +255,20 @@ else
   check "banner loads plugin.json from the special plugin root" FAIL
 fi
 
-DOCTOR_OUT="$(env -u ZDOC_PLAYWRIGHT \
+DOCTOR_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 -u ZDOC_VERIFY \
   CLAUDE_PLUGIN_ROOT="$PLUGIN" HOME="$HOME_DIR" ZENSU_CONFIG="$CONFIG" \
   CLAUDE_PROJECT_DIR="$PROJECT" ZENSU_DOCTOR_PLUGIN_DIR="$PLUGIN" \
   ZDOC_ZENSU=absent ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=github \
-  ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT_TOOLS=ready \
+  ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION=0.1.21 \
   bash "$PLUGIN/hooks/lib/zensu-doctor.sh" 2>"$RAW_TMP/doctor.err")"
 DOCTOR_RC=$?
 if [ "$DOCTOR_RC" -eq 0 ] \
     && printf '%s' "$DOCTOR_OUT" | grep -qF 'Zensu doctor' \
-    && printf '%s' "$DOCTOR_OUT" | grep -qF 'Playwright MCP: loaded and ready'; then
-  check "doctor loads its report, manifests, and proxy from the special plugin root" PASS
+    && printf '%s' "$DOCTOR_OUT" | grep -qF 'playwright-cli: installed (0.1.21) — /zensu:verify-feature and the autopilot browser driver run through it' \
+    && printf '%s' "$DOCTOR_OUT" | grep -qF 'verify-feature: consent mode ready, no runtime recipe'; then
+  check "doctor loads its report, manifests, and the consent module from the special plugin root" PASS
 else
-  check "doctor loads its report, manifests, and proxy from the special plugin root" FAIL
+  check "doctor loads its report, manifests, and the consent module from the special plugin root" FAIL
 fi
 
 SECRET_PAYLOAD="$(SESSION_VALUE="$SESSION" PROJECT_VALUE="$NATIVE_PROJECT" \

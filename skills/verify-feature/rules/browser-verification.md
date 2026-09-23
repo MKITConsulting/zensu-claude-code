@@ -3,35 +3,66 @@
 These rules are the self-contained browser loop for `/zensu:verify-feature`. They replace
 the source skill's dependency on a personal `/test-feature` command.
 
+## 0. The command set on a `zensu-verify` session
+
+Every call names the session the run-config helper printed, literally:
+`playwright-cli -s=<session> <command> [args] [flags]`. Run each call as its own plain Bash
+command on the main thread. The browser consent gate admits exactly these commands on a
+`zensu-verify` session, each with only the flags listed:
+
+| Purpose | Commands | Flags |
+|---|---|---|
+| Session | `open [url]`, `close`, `list` | `open`: `--config=<abs path>` (required), `--headed`, `--device`, `--mobile`, `--idle-timeout`, `--browser` (Chromium channels only); `list`: `--all` |
+| Navigation | `goto <url>`, `go-back`, `go-forward`, `reload`, `tab-new [url]`, `tab-list`, `tab-select <n>`, `tab-close [n]` | none |
+| Observation | `snapshot [target]`, `find [text]`, `screenshot [target]`, `console [level]`, `requests` | `snapshot`: `--depth`, `--boxes`; `find`: `--regex`; `screenshot`: `--type`, `--full-page`, `--hires`; `console`: `--clear`; `requests`: `--static`, `--filter`, `--clear` |
+| Interaction | `click`, `dblclick`, `fill`, `type`, `press`, `keydown`, `keyup`, `hover`, `drag`, `select`, `check`, `uncheck`, `dialog-accept`, `dialog-dismiss`, `resize`, `mousemove`, `mousedown`, `mouseup`, `mousewheel` | `click`/`dblclick`: `--modifiers` (once per call); `fill`/`type`: `--submit` |
+| Emulation | `set-color-scheme`, `set-reduced-motion`, `set-forced-colors`, `set-contrast`, `set-media`, and the matching `clear-*` commands | none |
+
+`--json`, `--raw`, `--help` and `--version` are accepted on every command. Everything else is
+denied on a `zensu-verify` session, and a denial is final: `eval`, `run-code`, every cookie,
+local/session-storage and state command, `delete-data`, `route` and its siblings, `request`,
+`request-*` and `response-*`, `network-state-set`, `upload`, `drop`, `pdf`, recording,
+tracing and video, `attach`, `detach`, `install`, `install-browser`, `close-all`, `kill-all`,
+and the flags `--filename`, `--persistent` and `--profile`. A flag given twice is denied too.
+Never re-issue a denied call under another spelling, another session name, or through another
+program.
+
+`screenshot` writes its image beneath the run directory's `browser/` folder and prints its
+path; open that file with the Read tool to inspect it. `snapshot` prints the accessibility tree
+with element refs such as `e21`; target elements by those refs. Every navigating call prints a
+`Page URL` line.
+
 ## 1. Establish the observation baseline
 
 0. Before navigating to protected content, validate the checked-in recipe's
    `validate.evidenceSafety` block under `../../autopilot/rules/config.md`: exact route coverage
    must prove synthetic/pre-classified non-sensitive data. Contract v1 supports only
-   `declared-safe`; there is no trusted redaction-driver path. Because `browser_navigate` can itself
-   return a snapshot, enforce this fail-closed boundary before navigation, authentication
-   restore, or screenshots. Without a valid covering declaration, do not open the protected
-   route and report PARTIAL.
-   Also require the plugin's version-1 navigation broker and exact
-   parent-environment policy. It aborts every unapproved request or redirect before response
-   evidence reaches the model. Never replace it with navigate-then-check logic. The policy must
-   bind the same exact page route to the same origin with `evidenceMode: declared-safe`.
-   In consent mode (the preflight printed `consent`) the ORIGIN half of that boundary holds with
-   the user in the loop instead of the policy: the broker admits literal loopback origins only,
-   and the consent hook opens the host's permission prompt once per new loopback origin. The
-   ROUTE half does NOT hold — neither layer enforces routes in consent mode, because the human
-   consented to the whole origin — so binding a page route to its evidence is a prose obligation
-   on you here, not a boundary anything checks. Wait for the user's answer; a refused prompt makes
-   that origin's rows PARTIAL.
+   `declared-safe`; there is no trusted redaction-driver path. Because `open` and `goto` print
+   the page title and write a snapshot of the page, enforce this fail-closed boundary before navigation,
+   authentication restore, or screenshots. Without a valid covering declaration, do not open
+   the protected route and report PARTIAL.
+   In POLICY mode the gate admits only the policy's targets, and navigation commands only to
+   its declared routes; the policy must bind the same exact page route to the same origin with
+   `evidenceMode: declared-safe`. In consent mode (the preflight printed `consent`) the ORIGIN
+   half of that boundary holds with the user in the loop instead of the policy: the gate
+   admits literal loopback origins only and opens the host's permission prompt once per new
+   loopback origin. The ROUTE half does NOT hold — nothing enforces routes in consent mode,
+   because the human consented to the whole origin — so binding a page route to its evidence is
+   a prose obligation on you here, not a boundary anything checks. Wait for the user's answer;
+   a refused prompt makes that origin's rows PARTIAL.
    Never re-issue a refused navigation and never try another spelling of the same target to avoid the prompt.
    The session consent memory named in SKILL.md is yours to READ for the report and never to
    write, edit or delete: a record you place there skips the human's prompt for that origin.
-1. Navigate to the resolved base URL and route only after that declaration and policy preflight pass.
-2. Take `browser_snapshot` before interacting. Confirm the URL, title/heading, authentication
-   state, and that the page is not a generic error or login wall.
-3. Apply the pre-model evidence boundary below, then read `browser_console_messages` and
-   `browser_network_requests` to establish the baseline only when direct inspection is safe.
-   Mark pre-existing unrelated noise separately; do not use it to hide a new feature error.
+1. Open the run-config session at the resolved base URL and route only after that declaration
+   and the policy preflight pass.
+2. Read the `Page URL` line of every navigating call. An origin outside the run config means a
+   server redirect left the approved set: stop driving that page, collect no evidence from it,
+   and report the scenario PARTIAL.
+3. Take a `snapshot` before interacting. Confirm the URL, title/heading, authentication state,
+   and that the page is not a generic error or login wall.
+4. Apply the pre-model evidence boundary below, then run `console` and `requests` to establish
+   the baseline only when direct inspection is safe. Mark pre-existing unrelated noise
+   separately; do not use it to hide a new feature error.
 
 The accessibility snapshot is the primary source for structure and actionable element refs.
 Use screenshot pixels for appearance. Use network/console evidence for runtime behavior.
@@ -43,19 +74,20 @@ For each scenario:
 
 1. Put the app in the matrix row's declared setup state through real UI or repository-owned
    fixture paths.
-2. Take a fresh snapshot and select the next action from the current refs.
-3. Perform one meaningful interaction: click, type, select, key press, or dialog
+2. Take a fresh `snapshot` and select the next action from the current refs.
+3. Perform one meaningful interaction: `click`, `fill`, `type`, `select`, `press`, or a dialog
    response.
-4. Wait for a specific UI or request condition, not an arbitrary delay.
-5. Snapshot again and record the changed state.
+4. Confirm a specific UI or request condition with a fresh `snapshot` or `find`, not an
+   arbitrary delay.
+5. Record the changed state, and repeat the `Page URL` check when the action navigated.
 6. Repeat until the scenario reaches its assertion checkpoint.
 
-Do not reuse stale snapshot refs after navigation or a material re-render. Never invoke
-`browser_evaluate`, including for read-only inspection: the Zensu MCP broker does not expose
-it because page evaluation can read authenticated DOM/storage and bypass the navigation
-boundary. If snapshots cannot expose a required value, report that evidence plane PARTIAL.
-The broker also deliberately omits file upload. Report an upload-dependent scenario PARTIAL
-instead of bypassing the broker.
+Do not reuse stale snapshot refs after navigation or a material re-render. Never run
+`playwright-cli eval` or `run-code`, including for read-only inspection: the gate denies both
+on a `zensu-verify` session because page evaluation can read authenticated DOM/storage and
+bypass the navigation boundary. If snapshots cannot expose a required value, report that
+evidence plane PARTIAL. The gate also denies file upload. Report an upload-dependent scenario
+PARTIAL instead of working around the gate.
 
 ## 3. Assert three evidence planes
 
@@ -71,14 +103,15 @@ Every acceptance criterion needs the applicable evidence below.
 
 ### Visual
 
-At every matrix checkpoint, call `browser_take_screenshot` and **inspect the returned image**.
-Write a concrete observation covering:
+At every matrix checkpoint, run `screenshot` and **inspect the image file it names** with the
+Read tool. Write a concrete observation covering:
 
 - no overlap, clipping, off-screen controls, or broken stacking;
 - readable text and correct visual hierarchy;
 - expected placement, spacing, and applied styling rather than an unstyled shell;
 - the specific open/selected/error/loading state the scenario claims;
-- narrow and wide layouts when responsive behavior is relevant.
+- narrow and wide layouts when responsive behavior is relevant (`resize`, `--device`,
+  `--mobile`), and the color scheme when theming is touched (`set-color-scheme`).
 
 A screenshot filename without a description is not evidence. DOM-correct but visually
 uninspected is PARTIAL.
@@ -86,10 +119,11 @@ uninspected is PARTIAL.
 ### Runtime signals
 
 After each scenario, inspect console and network activity scoped to its actions, subject to
-this boundary: raw MCP results reach the model before final-report redaction. Direct inspection
-is permitted only for a proven unauthenticated, synthetic, secret-free target. Contract v1 has
-no trusted model-visible sanitizer for authenticated runtime signals; skip that plane and report
-PARTIAL instead of invoking raw console/network tools.
+this boundary: raw `console` and `requests` output reaches the model before final-report
+redaction. Direct inspection is permitted only for a proven unauthenticated, synthetic,
+secret-free target. Contract v1 has no trusted model-visible sanitizer for authenticated
+runtime signals; skip that plane and report PARTIAL instead of running those commands. Use
+`console --clear` and `requests --clear` to scope the next scenario.
 
 - Feature-related uncaught errors, failed resource loads, or unexpected warnings fail the
   scenario unless explicitly expected by the criterion. Record only a bounded, sanitized
@@ -98,17 +132,19 @@ PARTIAL instead of invoking raw console/network tools.
   never quote raw console output.
 - Missing expected calls, request failures, and unexpected 4xx/5xx responses fail the
   scenario. Record method, path without query/fragment, and status only; never include
-  headers, bodies, credentials, tokens, or personal data.
+  headers, bodies, credentials, tokens, or personal data. The gate denies the request-detail
+  commands for that reason.
 - A deliberately tested error response passes only when both the response and the rendered
   recovery/error UI match the expectation.
 
 ## 4. Scenario isolation and safety
 
 - Use unique fixture names containing the run identifier.
-- Reset filters, navigation, and record state between rows. Create a fresh isolated context
-  when cookies/local storage or cached app state would contaminate the next row.
-- Never enable the broad Playwright storage capability or accept an auth artifact. Re-authenticate
-  visibly when a fresh context is required; otherwise report the row PARTIAL.
+- Reset filters, navigation, and record state between rows. When cookies, local storage or
+  cached app state would contaminate the next row, `close` the session and `open` it again with
+  the same run config, which starts an isolated browser.
+- Never restore browser state or accept an auth artifact. Re-authenticate visibly when a fresh
+  browser is required; otherwise report the row PARTIAL.
 - Do not screenshot credentials, tokens, personal data, or unrelated sensitive content.
 - In remote mode, stop before irreversible or externally visible mutations unless the user
   explicitly approved that exact action.
@@ -123,5 +159,5 @@ Maintain the report table while driving. For each row, capture:
 - relevant console/network signals;
 - exact reproduction for a failure.
 
-Call `browser_close` even after a failed assertion or cancelled login. The parent skill owns
-the remaining process, container, and temp-dir cleanup.
+Run `playwright-cli -s=<session> close` even after a failed assertion or cancelled login. The
+parent skill owns the remaining process, container, and temp-dir cleanup.

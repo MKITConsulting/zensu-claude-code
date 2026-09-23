@@ -1,15 +1,16 @@
 #!/bin/bash
 set -u
 
-# skip() is defined FIRST because this hook may never block. Its three plugin-root arms used to
-# sit above the definition and could only `exit 2` — and exit 2 from a PostToolUse hook is the
-# blocking status, which contradicts the contract this recorder ships under: a memory line is
-# worth strictly less than the tool call it follows, so every fault here is a stderr note and a
-# clean exit. The sibling PreToolUse gate keeps exit 2 deliberately; there, blocking is correct.
 skip() {
   echo "zensu: browser consent memory not written ($1)" >&2
   exit 0
 }
+
+INPUT="$(cat 2>/dev/null || true)"
+case "$INPUT" in
+  *playwright-cli*|*@playwright/cli*|*@playwright\\/cli*) ;;
+  *) exit 0 ;;
+esac
 
 _ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" \
   || skip "plugin root unresolved"
@@ -23,8 +24,6 @@ fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
 unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 
-INPUT="$(cat 2>/dev/null || true)"
-
 command -v node >/dev/null 2>&1 || skip "node unavailable"
 MODULE="$CLAUDE_PLUGIN_ROOT/hooks/lib/verify-consent-v1.js"
 [ -f "$MODULE" ] && [ ! -L "$MODULE" ] || skip "decision module absent or symlinked"
@@ -36,8 +35,6 @@ ZENSU_VERIFY_PROJECT_ROOT="$(zensu_resolve_project_dir 2>/dev/null || true)"
 [ ! -L "$ZENSU_VERIFY_PROJECT_ROOT/.zensu/state" ] || skip "symlinked state directory"
 mkdir -p "$ZENSU_VERIFY_PROJECT_ROOT/.zensu/state" 2>/dev/null || skip "state directory unavailable"
 ZENSU_VERIFY_CONSENT_MEMORY="$ZENSU_VERIFY_PROJECT_ROOT/.zensu/state/verify-consent-${ZENSU_SESSION_KEY}.json"
-# Which recipe governs is resolved INSIDE the decision module from the project root, so
-# this hook, its PreToolUse sibling and the /zensu:doctor row cannot disagree about it.
 export ZENSU_VERIFY_CONSENT_MEMORY ZENSU_VERIFY_PROJECT_ROOT
 
 printf '%s' "$INPUT" | (

@@ -48,7 +48,7 @@
     },
     {
       "path": "tests/structure/test-doctor.sh",
-      "reason": "The only native-Windows branch skips a POSIX-only missing-npm rendering assertion."
+      "reason": "The only native-Windows branch skips P1pw4, the POSIX-only isolated-PATH assertion that the wrapper reports playwright-cli absent."
     },
     {
       "path": "tests/structure/test-evidence-discipline.sh",
@@ -85,10 +85,6 @@
     {
       "path": "tests/structure/test-tdd-state-corruption-fail-closed.sh",
       "reason": "The native-Windows branch explicitly skips the unavailable POSIX symlink fixture."
-    },
-    {
-      "path": "tests/structure/test-verify-feature-skill.sh",
-      "reason": "The native-Windows branch only tolerates absent POSIX signal delivery and asserts no Windows behavior."
     },
     {
       "path": "tests/structure/test-zensu-runtime-controller.sh",

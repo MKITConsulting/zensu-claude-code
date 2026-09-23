@@ -94,7 +94,7 @@ with its review chain, the step-by-step pilot, or implementing it directly.
 | `/zensu:autopilot` | Idea → validated pull request, unattended after one planning gate. Never merges or deploys |
 | `/zensu:pilot` | The guided counterpart to autopilot: probes a feature's real state and offers the next step |
 | `/zensu:cover` | Backfill durable tests at the right level (unit → integration → E2E) for existing code |
-| `/zensu:verify-feature` | Drive the real UI in a browser and report what actually happened. Report-only. Without a launch-time policy it runs in consent mode: the first navigation to each loopback origin asks you through the permission prompt, and `--setup` writes the runtime recipe with you. [How to run it standalone](docs/verify-feature.md) |
+| `/zensu:verify-feature` | Drive the real UI in a browser through `playwright-cli` and report what actually happened. Report-only. Without a launch-time policy it runs in consent mode: the first time the browser reaches each loopback origin you are asked through the permission prompt, and `--setup` writes the runtime recipe with you. [How to run it standalone](docs/verify-feature.md) |
 | `/zensu:plan-review` | Have a tailored reviewer team revalidate a plan *before* any code is written |
 | `/zensu:pr-team-review` | Multi-agent review of an existing GitHub or GitLab PR, published as one consolidated review |
 | `/zensu:pr-fix-findings` | Work through every unresolved review thread on a PR and resolve it |
@@ -190,16 +190,17 @@ Point the CLI at your own deployment with the `--api-url` flag, the
 export ZENSU_API_URL=https://api.example.internal
 ```
 
-The plugin `.mcp.json` contains only the local Playwright driver used for live
-verification; it has no Zensu API or hosted-MCP endpoint to redirect. If you
-operate under GDPR, CCPA, or similar regulations, self-hosting keeps the data
-under your control.
+The plugin ships no MCP server, so there is no Zensu API or hosted-MCP endpoint
+to redirect. If you operate under GDPR, CCPA, or similar regulations,
+self-hosting keeps the data under your control.
 
 ## Requirements
 
 Claude Code 2.1.211 or newer on macOS or Linux. Hooks need a POSIX shell —
 Windows users need WSL or Git Bash; native `cmd.exe` and PowerShell are not
-supported.
+supported. `/zensu:verify-feature` and the autopilot browser driver additionally
+need `playwright-cli` on `PATH` (`brew install playwright-cli` or
+`npm install -g @playwright/cli`).
 
 ## Documentation
 
