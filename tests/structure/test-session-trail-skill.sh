@@ -981,7 +981,7 @@ else
   check "T25 --force authorization channel:$FORCE_MISS" FAIL
 fi
 
-# ── T26-T30 — the write-anchor routing rule and its carriers ────────────────
+# ── T26-T29 — the write-anchor routing rule and its carriers ────────────────
 # The skill tells a takeover to work in the target worktree, and the Bash
 # source-write gate refuses to commit there: the session's project root is minted
 # at SessionStart and nothing re-anchors it. Editing and testing still succeed,
@@ -1183,68 +1183,6 @@ if [ -z "$T27B_BAD" ]; then
   check "T27b a word flow 3 uses for another purpose does not satisfy T27's verdict-word arm" PASS
 else
   check "T27b verdict-word arm anchoring:$T27B_BAD" FAIL
-fi
-
-# T30 — the maintainer contract must describe the carrier it enumerates. CLAUDE.md's
-# six-carrier paragraph justified `writeAnchorCaution` and the Limits bullet naming
-# neither the rule letters nor the env variables by calling the bullet "a one-line
-# index entry". The shipped bullet is not one: it restates both Edit-matcher hook
-# filenames, the capability gate and its main-principal exemption, the containment
-# definition and the classifier caveat. Being wrong about a carrier is worse than
-# the duplication it describes, because the next reader trusts the enumeration over
-# the file.
-#
-# Tied to the SHIPPED content rather than asserted as a bare literal ban: the claim
-# is only false while the bullet really does carry the hook roster, so the premise
-# arm fails loudly if that stops being true and the pin turns into a stale rule.
-CLAUDE_MD="$PLUGIN_DIR/CLAUDE.md"
-T30_BAD=""
-if [ ! -f "$CLAUDE_MD" ]; then
-  T30_BAD="$T30_BAD claude-md-not-found"
-else
-  LIMITS_BULLET="$(section_of '## Limits of what this can know' | grep -aF 'but not commit it' | head -1)"
-  [ -n "$LIMITS_BULLET" ] || T30_BAD="$T30_BAD limits-bullet-not-located"
-  case "$LIMITS_BULLET" in
-    *pre-edit-tdd-reminder.sh*) ;;
-    *) T30_BAD="$T30_BAD premise-lapsed-bullet-no-longer-names-the-hook-roster" ;;
-  esac
-  # Needled on the RULE, not on one spelling of it: "an index entry", "a single-line
-  # index entry" and "an index bullet" all violate it while none contains the
-  # original literal. Anchored on the COPULA (`is a…`), which is what makes a
-  # sentence a description — CLAUDE.md's own prohibition reads "Do not describe it
-  # AS an index entry", and an `as`-anchored or article-only pattern flags that
-  # sentence too, which is exactly what T30b caught on the first spelling.
-  if [ -z "$T30_BAD" ] && grep -qaE 'is an?( [a-z-]+)? index (entry|bullet)' "$CLAUDE_MD"; then
-    T30_BAD="$T30_BAD claude-md-describes-a-multi-clause-bullet-as-an-index-entry"
-  fi
-fi
-if [ -z "$T30_BAD" ]; then
-  check "T30 CLAUDE.md's carrier description matches the Limits bullet that ships" PASS
-else
-  check "T30 carrier description accuracy:$T30_BAD" FAIL
-fi
-
-# T30b — the control T30's negative arm needs, and the one every other negative arm
-# in this file already has. T30 passes by finding NOTHING, so a reworded rule or a
-# broken pattern turns it into an unconditional PASS with no signal. Each control
-# string is a phrasing the rule forbids; the pattern must match all of them, and
-# must spare the compliant sentence CLAUDE.md actually ships.
-T30B_BAD=""
-for probe in "the bullet is a one-line index entry" "it is an index entry" "that row is a single-line index bullet"; do
-  printf '%s\n' "$probe" | grep -qaE 'is an?( [a-z-]+)? index (entry|bullet)' \
-    || T30B_BAD="$T30B_BAD [missed:$probe]"
-done
-# The second anti-probe deliberately CONTAINS the word `index`: one that does not
-# cannot discriminate, because no pattern ending in `index (entry|bullet)` could ever
-# match it. An earlier spelling used a sentence with no `index` token at all.
-for anti in "Do not describe it as an index entry" "the enumeration must not call it an index entry"; do
-  printf '%s\n' "$anti" | grep -qaE 'is an?( [a-z-]+)? index (entry|bullet)' \
-    && T30B_BAD="$T30B_BAD [flagged-compliant-sentence:$anti]"
-done
-if [ -z "$T30B_BAD" ]; then
-  check "T30b the carrier-description pattern matches every phrasing probed here and spares the shipped one" PASS
-else
-  check "T30b carrier-description pattern:$T30B_BAD" FAIL
 fi
 
 # T28 — the Limits bullet. The asymmetry is the part that gets rediscovered: a

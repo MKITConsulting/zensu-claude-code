@@ -1795,8 +1795,6 @@ claim_absent "R57b the CHANGELOG no longer spells the sweep exclusion as a .log-
 
 claim_absent "R58a the module header no longer claims dev/ino catches an intermediate-directory swap" \
   "$REDACT" "dev/ino comparison catches an intermediate-directory swap"
-claim_absent "R58b CLAUDE.md no longer claims the same swap is closed" \
-  "$PLUGIN_DIR/CLAUDE.md" "re-derived from the canonical parent, which closes the same swap"
 
 claim_absent "R59 the module no longer describes mode: 'replace' as truncating" \
   "$REDACT" "'replace'\`? (mode )?truncates"

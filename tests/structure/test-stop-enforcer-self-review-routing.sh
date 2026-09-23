@@ -672,12 +672,11 @@ IN_SCOPE_REDECL="$(( $(grep -cE '^[[:space:]]*(readonly |declare |export |local 
 # `agents/` and `templates/` were silently out of scope, and both ship model-facing
 # prose in this repo (agents/*.md frontmatter and bodies, templates/tdd-plan.md,
 # templates/pr-body.md, templates/autopilot-pr-body.md) — the file class most likely to
-# attract a verbatim copy of a directive paragraph. Repo-root CLAUDE.md is included for
-# the same reason; it paraphrases today, which is what keeps the expected count at 1.
+# attract a verbatim copy of a directive paragraph.
 # `tests/` stays carved out: this file legitimately holds the needle.
 IN_SCOPE_TREE="$(grep -rlF "$IN_SCOPE_NEEDLE" \
   "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/skills" "$PLUGIN_DIR/docs" \
-  "$PLUGIN_DIR/agents" "$PLUGIN_DIR/templates" "$PLUGIN_DIR/CLAUDE.md" \
+  "$PLUGIN_DIR/agents" "$PLUGIN_DIR/templates" \
   2>/dev/null | wc -l | tr -d ' ')"
 # The owner-side uniqueness scan used to be NARROWER than the consumer-side one, in the
 # wrong direction: an indented or single-quoted second assignment inside the owner
@@ -704,19 +703,17 @@ else
   check "T40 one owner, three consumers, no redeclaration or hand-copy, and no borrowed discriminator (def=$IN_SCOPE_DEF stop=$IN_SCOPE_STOP delegate=$IN_SCOPE_DELEGATE clauseStop=$IN_SCOPE_CLAUSE_STOP clauseDelegate=$IN_SCOPE_CLAUSE_DELEGATE redecl=$IN_SCOPE_REDECL tree=$IN_SCOPE_TREE lines=$IN_SCOPE_DEF_LINES)" FAIL
 fi
 
-# The windowed-REVIEWER_DENIALS bound is stated in THREE places — the code comment
-# beside the arm it affects, the CLAUDE.md gap bullet, and the docs host-refusal
-# paragraph — and the CLAUDE.md bullet names the other two as "the other two carriers".
+# The windowed-REVIEWER_DENIALS bound is stated in TWO places — the code comment
+# beside the arm it affects and the docs host-refusal paragraph.
 # A declared coupling pinned by nothing is the drift class this repo treats as its main
 # defect mode; T41 six lines down is the same pattern applied to the other prose
 # coupling. Each needle is distinctive enough to survive a reword of its surrounding
 # paragraph and specific enough to fail on deletion.
 if grep -qF 'scroll out and the sanction' "$STOP" \
-  && grep -qF 'two earlier refusals scroll out of the window' "$PLUGIN_DIR/CLAUDE.md" \
   && grep -qF 'the withdrawal is scoped to the scanned transcript tail' "$PLUGIN_DIR/docs/tdd-manager-workflow.md"; then
-  check "T49 all three carriers of the windowed-REVIEWER_DENIALS bound are still present" PASS
+  check "T49 both carriers of the windowed-REVIEWER_DENIALS bound are still present" PASS
 else
-  check "T49 all three carriers of the windowed-REVIEWER_DENIALS bound are still present" FAIL
+  check "T49 both carriers of the windowed-REVIEWER_DENIALS bound are still present" FAIL
 fi
 
 # T50-T53 pin the gate's RENDER side, which T38 covered for `clear` alone. The design
@@ -782,7 +779,7 @@ else
   check "T55 config.example.json carries the reviewSpawnScopeSentence flag" FAIL
 fi
 
-# The false bypass-ledger claim, pinned NEGATIVELY in all three carriers it was copied
+# The false bypass-ledger claim, pinned NEGATIVELY in both doc carriers it was copied
 # into. `hooks.chainEnforcer=false` is a config-disabled gate, and this repo's own
 # authoritative residual list says config-disabled gates are deliberately not ledgered —
 # only the eight ZENSU_* env escapes are. The positive anchor keeps the check from
@@ -794,7 +791,6 @@ if grep -qF 'reviewSpawnScopeSentence' "$PLUGIN_DIR/docs/configuration.md" \
   && grep -qF 'disables the whole guard' "$PLUGIN_DIR/docs/configuration.md" \
   && grep -qF 'a bypass-ledger entry' "$PLUGIN_DIR/docs/configuration.md" \
   && ! grep -qF "$LEDGER_FALSE_CLAIM" "$PLUGIN_DIR/docs/configuration.md" \
-  && ! grep -qF "$LEDGER_FALSE_CLAIM" "$PLUGIN_DIR/CLAUDE.md" \
   && ! grep -qF "$LEDGER_FALSE_CLAIM" "$PLUGIN_DIR/docs/tdd-manager-workflow.md" \
   && ! grep -qF "$LEDGER_FALSE_CLAIM" "$0"; then
   check "T56 no carrier claims a config-disabled gate lands a bypass-ledger entry" PASS
@@ -808,13 +804,8 @@ fi
 # Anchored on the POSITIVE account's own heading, not on the identifier alone: the
 # identifier also appears in the host-refusal paragraph's omission clause, so a bare
 # name grep survives deletion of the paragraph this check exists to protect.
-# The CLAUDE.md section is the THIRD carrier, and the owner comment asserts a coupling
-# to it in so many words ("CLAUDE.md §... holds the same four bounds and must move with
-# this comment"). Nothing compared them: the tree scan is a hand-copy scan, not a
-# presence check, so that pointer could dangle with every other arm green.
 if grep -qF '**The review-spawn scope sentence.**' "$PLUGIN_DIR/docs/tdd-manager-workflow.md" \
-  && grep -qF 'ZENSU_REVIEW_SPAWN_IN_SCOPE' "$PLUGIN_DIR/docs/tdd-manager-workflow.md" \
-  && grep -qF '## Review-Spawn Scope Sentence (`ZENSU_REVIEW_SPAWN_IN_SCOPE`)' "$PLUGIN_DIR/CLAUDE.md"; then
+  && grep -qF 'ZENSU_REVIEW_SPAWN_IN_SCOPE' "$PLUGIN_DIR/docs/tdd-manager-workflow.md"; then
   check "T41 the operator account still carries the positive paragraph and names the constant" PASS
 else
   check "T41 the operator account still carries the positive paragraph and names the constant" FAIL
@@ -980,43 +971,6 @@ else
   check "T46 the scope sentence records its host build and the comment names the same one (build=${SCOPE_BUILD:-<absent>} defs=${SCOPE_BUILD_LINES:-0} blockLines=$(printf '%s' "$SCOPE_BLOCK" | grep -c . || true))" FAIL
 fi
 
-# The carrier census in CLAUDE.md is the repo's own manual-grep control for renaming
-# this identity, and its derived unpinned count is arithmetic over it — so a stale
-# number sends a maintainer to check one file too few. Measured here rather than
-# restated, which is what keeps it from going stale again.
-census_word() {
-  case "$1" in
-    8) printf 'EIGHT' ;; 9) printf 'NINE' ;; 10) printf 'TEN' ;;
-    11) printf 'ELEVEN' ;; 12) printf 'TWELVE' ;; 13) printf 'THIRTEEN' ;;
-    *) printf '%s' "$1" ;;
-  esac
-}
-census_lower() {
-  case "$1" in
-    5) printf 'five' ;; 6) printf 'six' ;; 7) printf 'seven' ;; 8) printf 'eight' ;;
-    9) printf 'nine' ;; 10) printf 'ten' ;; 11) printf 'eleven' ;;
-    *) printf '%s' "$1" ;;
-  esac
-}
-CENSUS_FILES="$(grep -rlF 'zensu:code-reviewer' "$PLUGIN_DIR/hooks" 2>/dev/null | wc -l | tr -d ' ')"
-CENSUS_LINES="$(grep -rhF 'zensu:code-reviewer' "$PLUGIN_DIR/hooks" 2>/dev/null | wc -l | tr -d ' ')"
-# The pinned count is stated in CLAUDE.md as prose and subtracted here. Pinning the prose
-# literal keeps the two from drifting: add a fourth pin and this arm fails, instead of the
-# check quietly enforcing a sentence that has become false.
-CENSUS_PINNED=3
-CENSUS_UNPINNED="$((CENSUS_FILES - CENSUS_PINNED))"
-if [ "$(census_word "$CENSUS_FILES")" = "$CENSUS_FILES" ] || [ "$(census_lower "$CENSUS_UNPINNED")" = "$CENSUS_UNPINNED" ]; then
-  check "T47pre the census word tables have no entry for $CENSUS_FILES / $CENSUS_UNPINNED — extend the table, the census itself may be fine" FAIL
-fi
-if [ "$CENSUS_FILES" -gt "$CENSUS_PINNED" ] \
-  && grep -qF "three pinned (the lazy-require pair plus this one)" "$PLUGIN_DIR/CLAUDE.md" \
-  && grep -qF "$(census_word "$CENSUS_FILES") files under \`hooks/\` ($CENSUS_LINES matching lines" "$PLUGIN_DIR/CLAUDE.md" \
-  && grep -qF "the other $(census_lower "$CENSUS_UNPINNED") files are NOT pinned" "$PLUGIN_DIR/CLAUDE.md"; then
-  check "T47 the CLAUDE.md carrier census matches the tree ($CENSUS_FILES files, $CENSUS_LINES lines)" PASS
-else
-  check "T47 the CLAUDE.md carrier census matches the tree ($CENSUS_FILES files, $CENSUS_LINES lines, unpinned=$CENSUS_UNPINNED)" FAIL
-fi
-
 # The three KNOWN BOUND notes. BOUND 2's remedy named a shared JS module, which is
 # exactly as unreachable from the three POSIX-shell render sites as the shell
 # constant is from JS. BOUND 3 shipped a hand-maintained roster of three files while
@@ -1026,7 +980,6 @@ fi
 # --tdd-complete, and stop-chain-enforcer.sh releases Stop unconditionally in that
 # state, so neither render site is ever reached.
 if grep -qF 'KNOWN BOUND 0' "$IN_SCOPE_OWNER" \
-  && grep -qF 'KNOWN BOUND 0' "$PLUGIN_DIR/CLAUDE.md" \
   && grep -qF "grep -rn 'zensu:review-aspect' skills/" "$IN_SCOPE_OWNER" \
   && grep -qF 'a JS module is exactly as unreachable from' "$IN_SCOPE_OWNER"; then
   check "T48 the bound roster carries BOUND 0, a grep instruction, and no unreachable remedy" PASS
