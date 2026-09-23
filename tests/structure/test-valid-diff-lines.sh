@@ -106,8 +106,11 @@ if grep -qiF 'body-only (fold ALL inline findings)' "$PUBLISH_MD" && grep -qiF '
 else
   check "P3k empty-diff handling has a terminal state" FAIL
 fi
-FALLBACK_SECTION="$(awk '/## Fallback: Per-Comment Posting/,/## Verification After Post/' "$PUBLISH_MD")"
-if grep -qF 'jq -n --arg' "$PUBLISH_MD" && ! printf '%s' "$FALLBACK_SECTION" | grep -qE -- '(-f|-F) ?(path|body)='; then
+FALLBACK_SECTION="$(awk '/^## Standalone-only fallback: Per-comment posting$/,/^## Verification After Post$/' "$PUBLISH_MD")"
+if [ -z "$FALLBACK_SECTION" ]; then
+  check "P3l fallback section '## Standalone-only fallback: Per-comment posting' not found in github-publish.md" FAIL
+elif printf '%s\n' "$FALLBACK_SECTION" | grep -qF 'jq -n --arg' \
+   && ! printf '%s\n' "$FALLBACK_SECTION" | grep -qE -- '(-f|-F) ?(path|body)='; then
   check "P3l fallback posting builds JSON via jq (no raw interpolation)" PASS
 else
   check "P3l fallback posting builds JSON via jq (no raw interpolation)" FAIL
