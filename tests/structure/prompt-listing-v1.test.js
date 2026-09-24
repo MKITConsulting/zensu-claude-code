@@ -49,7 +49,7 @@ test('a reasonless remove with no credited delivery sets its copy apart as withd
   assert.deepEqual(withdrawnTexts(full), ['withdrawn']);
   const cut = mod.extractPrompts(t.text(), false);
   assert.deepEqual(texts(cut), ['the first question', 'delivered', 'withdrawn']);
-  assert.deepEqual(withdrawnTexts(cut), []);
+  assert.equal(cut.withdrawn, null);
 });
 
 test('the pairing window reaches exactly QUEUE_DELIVERY_REACH records before a remove and no farther', () => {
@@ -203,6 +203,38 @@ test('a remove followed by a record of another build is judged under both builds
   }
 });
 
+test('a record without a version leaves the build in effect rather than starting one', () => {
+  const arms = [
+    ['the next versioned record is of the open build', '9.6.1', true],
+    ['the next versioned record is of a closed build', '9.6.2', false],
+  ];
+  const unversioned = [
+    ['a user record', (t) => t.user('a record without a version', null)],
+    ['an attachment', (t) => t.attach({ type: 'queued_prompt', prompt: 'an attachment without a version' }, null)],
+  ];
+  for (const [kind, record] of unversioned) {
+    for (const [arm, nextBuild, withdrawn] of arms) {
+      const label = `${kind}: ${arm}`;
+      const t = transcript();
+      t.enqueue('opens the unversioned build');
+      t.deliver('opens the unversioned build', null);
+      t.op('remove', 'opens the unversioned build');
+      t.user('the first build asks', '9.6.1');
+      t.enqueue('opens the first build');
+      t.deliver('opens the first build', '9.6.1');
+      t.op('remove', 'opens the first build');
+      t.enqueue('removed before an unversioned record');
+      t.op('remove', 'removed before an unversioned record');
+      record(t);
+      t.user('the next versioned record', nextBuild);
+      t.pad(REACH);
+      const out = mod.extractPrompts(t.text(), true);
+      assert.equal(withdrawnTexts(out).includes('removed before an unversioned record'), withdrawn, label);
+      assert.equal(texts(out).includes('removed before an unversioned record'), !withdrawn, label);
+    }
+  }
+});
+
 test('an attachment with neither a queued_command type nor a prompt field starts no build', () => {
   const t = transcript();
   t.user('the first build asks', '9.3.1');
@@ -228,7 +260,7 @@ test('each pull-back withdraws the copy it names on a full read only', () => {
     assert.deepEqual(withdrawnTexts(full), ['pulled back'], operation);
     const cut = mod.extractPrompts(t.text(), false);
     assert.deepEqual(texts(cut), ['the session starts', 'pulled back', 'still waiting'], operation);
-    assert.deepEqual(withdrawnTexts(cut), [], operation);
+    assert.equal(cut.withdrawn, null, operation);
   }
 });
 

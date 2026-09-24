@@ -3,7 +3,6 @@ paths:
   - "skills/session-trail/scripts/trail.mjs"
   - "skills/session-trail/SKILL.md"
   - "tests/structure/worktree-advice-v1.test.js"
-  - "tests/structure/prompt-listing-v1.test.js"
   - "tests/structure/test-session-trail-verdict.sh"
   - "tests/structure/test-session-trail-skill.sh"
 ---
@@ -485,28 +484,14 @@ conservative: `T35`'s extractor anchors `^const CARRY_OVER = \[`, `^function wor
 already gone dead once without a sound. Moving the constants re-points four anchors,
 `T35_EXPECT`, this roster and the unit file's import in one edit.
 
-**The trigger is a second importer, or the next change that has to re-point those anchors
-anyway.** The move now carries TWO obligations, not three: re-home `livePid` and re-point the
-extractor. The third — replacing the `fail()` call with a thrown error — is DISCHARGED: that
-refusal throws today and `main` flushes before reporting it, so the move is cheaper than this
-ledger said. The trigger was EVALUATED in the round that discharged it and did not fire:
-there is still no second importer, and that round re-pointed no `T35` anchor. Recorded so the
-next reader does not have to re-derive whether it was considered — it was.
-
-**That trigger has since FIRED, and the advice split was declined a second time — recorded
-for the reason the first evaluation was.** `tests/structure/prompt-listing-v1.test.js` is a
-second importer of `trail.mjs`, but it imports the PROMPT LISTING — `extractPrompts` and
-`QUEUE_DELIVERY_REACH` — and none of the advice surface, so the move it argues for is a
-different one: the listing into a sibling module of its own. That is now the listing's
-standing fix, and it is not mechanical either: `T24b`, `T24d` and `T24f` in
-`tests/structure/test-session-trail-skill.sh` and `V0t` in the verdict suite read the
-listing's constants, its comment and its body out of `trail.mjs` itself, and the listing sits
-above both line-anchored citations the two multi-repo documents make into `trail.mjs`, so
-moving it shifts both and `T36` then requires re-deriving each per site. Neither extraction
-belongs inside a fix round. The advice trigger is therefore restated as a second importer of
-the ADVICE surface, so the listing's importer cannot be counted as meeting it again; the
-listing's own trigger is a second importer of the listing, or the next change that has to
-re-author those checks anyway.
+**The trigger is a second importer of the ADVICE surface, or the next change that has to
+re-point those anchors anyway.** The move carries TWO obligations: re-home `livePid` and
+re-point the extractor. Replacing the `fail()` call with a thrown error is not one of them,
+because that refusal throws today and `main` flushes before reporting it.
+`tests/structure/prompt-listing-v1.test.js` imports `trail.mjs` too, but only the prompt
+listing — `extractPrompts` and `QUEUE_DELIVERY_REACH` — and none of the advice surface, so it
+does not meet this trigger. The listing's own extraction, its cost and its trigger live in
+`.claude/rules/session-trail-prompt-listing.md`.
 
 **ONE RENDERER owns the placeholder mapping and the rule that governs it**, and the rule's
 placeholder set is DERIVED from the recipe it is printed beside rather than handed in.
@@ -603,11 +588,12 @@ backtick with them (`WT8v7c`, `WT8v10d`); the rest never quoted a token. It is e
   `firstPrefix`-on-a-leading-command arm is still dormant by construction — every arm opens
   with a prose sentence naming its cause — and it exists so the helper does not silently eat
   `cmdHandoff`'s `- ` bullet the first time an arm is reordered. `trail.mjs` now guards its
-  CLI dispatch on being the process entry point and exports NINE names — the seven of the
-  advice surface, `adviceBlock`, `worktreeAdvice`, `adviceLeg`, `whereAdviceLines`,
-  `substitutionRuleLines`, `recipePlaceholders` and `WORKTREE_ADVICE_COMMAND`, plus the prompt
-  listing `extractPrompts` and the `QUEUE_DELIVERY_REACH` its pairing window is bounded by,
-  which `tests/structure/prompt-listing-v1.test.js` drives directly — of which
+  CLI dispatch on being the process entry point and exports two surfaces in separate
+  statements. The advice statement names `adviceBlock`, `worktreeAdvice`, `adviceLeg`,
+  `whereAdviceLines`, `substitutionRuleLines`, `recipePlaceholders` and
+  `WORKTREE_ADVICE_COMMAND`; the header comment above it counts them, and `T24h` holds that
+  count against the statement. The prompt listing has its own statement, recorded in
+  `.claude/rules/session-trail-prompt-listing.md`. Of the advice names,
   `whereAdviceLines` is NOT pure: it canonicalizes two paths through `canonicalPair` to decide
   whether the taker is standing in the source worktree, so the surface's own "plain record, no
   filesystem" criterion is stated as "reads the filesystem only to canonicalize" now. So

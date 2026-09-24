@@ -1040,8 +1040,18 @@ if [ -n "$DELIVERY_REACH" ]; then
 else
   WITHDRAW_MISS="$WITHDRAW_MISS [script-delivery-reach-unreadable]"
 fi
+MEASURE_COMMENT="$(awk '/^function queueWithdrawals\(/ { f = 1 } f { print } f && /^}/ { exit }' "$TRAIL_MJS" | sed -n 's/^[[:space:]]*\/\/ \{0,1\}//p' | tr '\n' ' ')"
+MEASURE_BULLET="$(printf '%s\n' "$WITHDRAWAL_BULLET" | sed -n 's/.*Measured \([0-9][0-9-]*\) on this machine over \([0-9][0-9]*\) transcripts, \([0-9][0-9]*\) attachments paired that way.*/\1 \2 \3/p')"
+MEASURE_SCRIPT="$(printf '%s\n' "$MEASURE_COMMENT" | sed -n 's/.*Measured on \([0-9][0-9-]*\) over \([0-9][0-9]*\) local transcripts, \([0-9][0-9]*\) attachments paired that way.*/\1 \2 \3/p')"
+BUILDS_BULLET="$(printf '%s\n' "$WITHDRAWAL_BULLET" | sed -n 's/.* \([0-9][0-9]*\) of those transcripts span more than one build.*/\1/p')"
+BUILDS_SCRIPT="$(printf '%s\n' "$MEASURE_COMMENT" | sed -n 's/.* \([0-9][0-9]*\) of those transcripts span more than one build.*/\1/p')"
+VETO_BULLET="$(printf '%s\n' "$WITHDRAWAL_BULLET" | sed -n 's/.*the text veto closed \([0-9][0-9]*\) builds in \([0-9][0-9]*\) of those transcripts and prevented \([a-z0-9][a-z0-9]*\) withdrawal.*/\1 \2 \3/p')"
+VETO_SCRIPT="$(printf '%s\n' "$MEASURE_COMMENT" | sed -n 's/.*the text veto closed \([0-9][0-9]*\) builds in \([0-9][0-9]*\) of those transcripts and prevented \([a-z0-9][a-z0-9]*\) withdrawal.*/\1 \2 \3/p')"
+[ -n "$MEASURE_BULLET" ] && [ "$MEASURE_BULLET" = "$MEASURE_SCRIPT" ] || WITHDRAW_MISS="$WITHDRAW_MISS [measurement-date-corpus-or-pair-count-disagree:bullet=($MEASURE_BULLET)-comment=($MEASURE_SCRIPT)]"
+[ -n "$BUILDS_BULLET" ] && [ "$BUILDS_BULLET" = "$BUILDS_SCRIPT" ] || WITHDRAW_MISS="$WITHDRAW_MISS [multi-build-count-disagrees:bullet=($BUILDS_BULLET)-comment=($BUILDS_SCRIPT)]"
+[ -n "$VETO_BULLET" ] && [ "$VETO_BULLET" = "$VETO_SCRIPT" ] || WITHDRAW_MISS="$WITHDRAW_MISS [text-veto-closures-unstated-or-disagree:bullet=($VETO_BULLET)-comment=($VETO_SCRIPT)]"
 if [ -z "$WITHDRAW_MISS" ]; then
-  check "T24d every pull-back operation in QUEUE_PULLBACKS ($WITHDRAW_N) is a consumer and is named, with the QUEUE_DELIVERY_ATTACHMENT type ('$DELIVERY_ATTACHMENT') and the QUEUE_DELIVERY_REACH value ($DELIVERY_REACH), in the SKILL.md bullet that states the prompt listing's withdrawal rule, and that value is at least the farthest measured delivery pair the bullet states ($FAR_BEFORE records before its remove, $FAR_AFTER after it), which the bullet states once and the script states once, inside the queueWithdrawals comment, and identically" PASS
+  check "T24d every pull-back operation in QUEUE_PULLBACKS ($WITHDRAW_N) is a consumer and is named, with the QUEUE_DELIVERY_ATTACHMENT type ('$DELIVERY_ATTACHMENT') and the QUEUE_DELIVERY_REACH value ($DELIVERY_REACH), in the SKILL.md bullet that states the prompt listing's withdrawal rule, and that value is at least the farthest measured delivery pair the bullet states ($FAR_BEFORE records before its remove, $FAR_AFTER after it), which the bullet states once and the script states once, inside the queueWithdrawals comment, and identically, together with one measurement both carriers state alike: its date, corpus and pair count ($MEASURE_BULLET), the transcripts that span more than one build ($BUILDS_BULLET), and the builds the text veto closed ($VETO_BULLET)" PASS
 else
   check "T24d withdrawal vocabulary drift:$WITHDRAW_MISS" FAIL
 fi
@@ -1211,6 +1221,58 @@ if [ -z "$CARRIER_MISS" ]; then
   check "T24k the queueWithdrawals comment says a text listing from a truncated read discloses it through QUEUE_WITHDRAWALS_UNFILTERED and a --json payload through truncated: true, the constant is used by exactly $UNFILTERED_N text renderers, and the comment states the crediting filter, the unmatched-delivery veto, the two-build judgement and the separate withdrawn list" PASS
 else
   check "T24k withdrawal comment carrier drift:$CARRIER_MISS" FAIL
+fi
+
+BRIEF_CAUTION="$(printf '%s\n' "$SAFETY" | grep -E '^- \*\*The briefs embed untrusted text unfenced' || true)"
+SHOW_JSON_PARA="$(printf '%s\n' "$SAFETY" | grep -E '^\*\*`show --json` discloses more than `show` does\.\*\*' || true)"
+TAKEOVER_PARA="$(printf '%s\n' "$SAFETY" | grep -E '^The `takeover` brief embeds the target session' || true)"
+WD_HEADING_DOC="$(sed -n "s/^const WITHDRAWN_HEADING = '\(.*\)';$/\1/p" "$TRAIL_MJS")"
+WD_HEADING_LEAD="${WD_HEADING_DOC%% — *}"
+WDDOC_MISS=""
+[ -n "$BRIEF_CAUTION" ] || WDDOC_MISS="$WDDOC_MISS [brief-caution-bullet-not-found]"
+[ -n "$SHOW_JSON_PARA" ] || WDDOC_MISS="$WDDOC_MISS [show-json-paragraph-not-found]"
+[ -n "$TAKEOVER_PARA" ] || WDDOC_MISS="$WDDOC_MISS [takeover-brief-paragraph-not-found]"
+[ -n "$WITHDRAWAL_BULLET" ] || WDDOC_MISS="$WDDOC_MISS [withdrawal-bullet-not-found]"
+if [ -z "$WD_HEADING_DOC" ] || [ "$WD_HEADING_LEAD" = "$WD_HEADING_DOC" ]; then
+  WDDOC_MISS="$WDDOC_MISS [WITHDRAWN_HEADING-unreadable-or-has-no-lead]"
+else
+  printf '%s\n' "$BRIEF_CAUTION" | grep -qF -- "\"$WD_HEADING_LEAD\"" || WDDOC_MISS="$WDDOC_MISS [brief-caution-does-not-name-the-withdrawn-section]"
+fi
+printf '%s\n' "$BRIEF_CAUTION" | grep -qF -- 'everything below it, the title included,' || WDDOC_MISS="$WDDOC_MISS [brief-caution-does-not-cover-the-whole-brief]"
+printf '%s\n' "$BRIEF_CAUTION" | grep -qF -- 'every section it leaves out' || WDDOC_MISS="$WDDOC_MISS [brief-caution-does-not-say-why-a-list-of-sections-is-wrong]"
+printf '%s\n' "$BRIEF_CAUTION" | grep -qF -- '"What was asked"' || WDDOC_MISS="$WDDOC_MISS [brief-caution-does-not-name-the-handoff-prompt-section]"
+grep -qF -- "L.push('## What was asked');" "$TRAIL_MJS" || WDDOC_MISS="$WDDOC_MISS [handoff-brief-no-longer-renders-the-What-was-asked-section-the-caution-names]"
+if printf '%s\n' "$BRIEF_CAUTION" | grep -qF -- 'everything under "Recent instructions"'; then WDDOC_MISS="$WDDOC_MISS [brief-caution-still-lists-sections-instead-of-covering-the-whole-brief]"; fi
+printf '%s\n' "$SHOW_JSON_PARA" | grep -qF -- '`withdrawnPrompts`' || WDDOC_MISS="$WDDOC_MISS [show-json-paragraph-does-not-name-withdrawnPrompts]"
+printf '%s\n' "$TAKEOVER_PARA" | grep -qF -- 'each prompt it judged withdrawn' || WDDOC_MISS="$WDDOC_MISS [takeover-brief-paragraph-does-not-name-the-withdrawn-prompts]"
+printf '%s\n' "$TAKEOVER_PARA" | grep -qF -- '`withdrawnPrompts`' || WDDOC_MISS="$WDDOC_MISS [takeover-json-sentence-does-not-name-withdrawnPrompts]"
+printf '%s\n' "$WITHDRAWAL_BULLET" | grep -qF -- '`withdrawnPrompts` is `null`' || WDDOC_MISS="$WDDOC_MISS [withdrawal-bullet-does-not-say-withdrawnPrompts-is-null-on-a-truncated-read]"
+if printf '%s\n' "$WITHDRAWAL_BULLET" | grep -qF -- 'or sat more than `QUEUE_DELIVERY_REACH` records from its `remove`'; then WDDOC_MISS="$WDDOC_MISS [withdrawal-bullet-still-says-a-far-delivery-is-set-apart]"; fi
+printf '%s\n' "$WITHDRAWAL_BULLET" | grep -qF -- 'still keeps its text listed' || WDDOC_MISS="$WDDOC_MISS [withdrawal-bullet-does-not-say-a-far-readable-delivery-keeps-its-text-listed]"
+if [ -z "$WDDOC_MISS" ]; then
+  check "T24l SKILL.md carries the withdrawn prompts wherever it says what a carrier holds: the brief caution covers the whole brief, title included, rather than a list of sections, says why a list is wrong, and names \"What was asked\" (a section the handoff brief still renders) and the \"$WD_HEADING_LEAD\" section among its examples, the show --json and takeover paragraphs of the boundary section name withdrawnPrompts and the brief's withdrawn entries, the withdrawal bullet says withdrawnPrompts is null on a truncated read, and its residual no longer claims a far readable delivery is set apart" PASS
+else
+  check "T24l withdrawn-prompt carrier documentation drift:$WDDOC_MISS" FAIL
+fi
+
+HANDOFF_FLOW="$(awk '/^### 4\. Handoff brief/{f=1;next} /^###? /{f=0} f' "$SKILL_MD")"
+HANDOFF_STEP3="$(printf '%s\n' "$HANDOFF_FLOW" | grep -E '^3\. Write it with the \*\*Write tool\*\*' || true)"
+RECEIVING_PARA="$(printf '%s\n' "$HANDOFF_FLOW" | grep -E '^When \*receiving\* a handoff' || true)"
+BDC_DOC_MISS=""
+[ -n "$HANDOFF_STEP3" ] || BDC_DOC_MISS="$BDC_DOC_MISS [handoff-step-3-not-found]"
+[ -n "$RECEIVING_PARA" ] || BDC_DOC_MISS="$BDC_DOC_MISS [receiving-paragraph-not-found]"
+printf '%s\n' "$BRIEF_CAUTION" | grep -qF -- '`BRIEF_DATA_CAUTION`' || BDC_DOC_MISS="$BDC_DOC_MISS [brief-caution-does-not-name-the-rendered-constant]"
+printf '%s\n' "$BRIEF_CAUTION" | grep -qF -- 'Keep that line when you persist a brief' || BDC_DOC_MISS="$BDC_DOC_MISS [brief-caution-does-not-say-to-keep-the-rendered-line]"
+printf '%s\n' "$BRIEF_CAUTION" | grep -qF -- "the brief's own steps included" || BDC_DOC_MISS="$BDC_DOC_MISS [brief-caution-does-not-hold-the-brief's-own-steps]"
+if printf '%s\n' "$BRIEF_CAUTION" | grep -qF -- 'prepend one line'; then BDC_DOC_MISS="$BDC_DOC_MISS [brief-caution-still-tells-the-model-to-prepend-a-line]"; fi
+if printf '%s\n' "$BRIEF_CAUTION" | grep -qF -- 'the caution does not travel with the file'; then BDC_DOC_MISS="$BDC_DOC_MISS [brief-caution-still-says-the-caution-does-not-travel]"; fi
+if printf '%s\n' "$BRIEF_CAUTION" | grep -qF -- 'brief opens with a provenance line'; then BDC_DOC_MISS="$BDC_DOC_MISS [brief-caution-still-says-the-takeover-brief-opens-with-the-provenance-line]"; fi
+printf '%s\n' "$HANDOFF_STEP3" | grep -qF -- 'keeping its first line' || BDC_DOC_MISS="$BDC_DOC_MISS [handoff-step-3-does-not-keep-the-rendered-line]"
+printf '%s\n' "$RECEIVING_PARA" | grep -qF -- 'have the user confirm the plan' || BDC_DOC_MISS="$BDC_DOC_MISS [receiving-paragraph-does-not-ask-for-the-user's-confirmation]"
+if [ -z "$BDC_DOC_MISS" ]; then
+  check "T24m SKILL.md describes the data caution both briefs render: the Safety bullet names BRIEF_DATA_CAUTION, says to keep it and holds the brief's own steps, the handoff flow keeps the line, and the receiving paragraph asks for the user's confirmation" PASS
+else
+  check "T24m rendered data caution documentation:$BDC_DOC_MISS" FAIL
 fi
 
 # T25 — the authorization channel, pinned as a POLICY rather than as a mechanism.
@@ -1707,6 +1769,12 @@ RAW_PRINT_PATHS="$(printf '%s\n' "$TRAIL_CODE" | raw_print_carriers | grep -c . 
 BAD_CD="$(printf '%s\n' "$TRAIL_CODE" | bad_cd_carriers | grep -c . || true)"
 [ "$BAD_CD" = "0" ] || CAUTION_MISS="$CAUTION_MISS [cd-operand-not-shell-quoted=$BAD_CD: $(printf '%s\n' "$TRAIL_CODE" | bad_cd_carriers | head -1)]"
 [ "$RAW_BRIEF_PATHS" = "0" ] || CAUTION_MISS="$CAUTION_MISS [unbounded-brief-carriers=$RAW_BRIEF_PATHS: $(printf '%s\n' "$TRAIL_CODE" | raw_brief_carriers | head -2 | tr '\n' ' ')]"
+WITHDRAWN_LINES_BODY="$(printf '%s\n' "$TRAIL_CODE" | sed -n '/^function withdrawnBriefLines(/,/^}/p')"
+[ -n "$WITHDRAWN_LINES_BODY" ] || CAUTION_MISS="$CAUTION_MISS [withdrawnBriefLines-body-not-extracted]"
+WITHDRAWN_TAINTED="$(printf '%s\n' "$WITHDRAWN_LINES_BODY" | grep -oE '\$\{[^{}]*\}' | grep -E "$BRIEF_TAINTED" || true)"
+printf '%s\n' "$WITHDRAWN_TAINTED" | grep -qE '[pa]\.at([^A-Za-z0-9_]|$)' || CAUTION_MISS="$CAUTION_MISS [withdrawnBriefLines-renders-no-timestamp-carrier]"
+WITHDRAWN_RAW="$(printf '%s\n' "$WITHDRAWN_TAINTED" | grep -Ev "$BRIEF_WRAPPED" || true)"
+[ -z "$WITHDRAWN_RAW" ] || CAUTION_MISS="$CAUTION_MISS [withdrawnBriefLines-unbounded-carriers: $(printf '%s\n' "$WITHDRAWN_RAW" | head -2 | tr '\n' ' ')]"
 if [ ! -f "$GATES_MD" ]; then
   CAUTION_MISS="$CAUTION_MISS [docs/gates.md-missing]"
 else
@@ -1818,6 +1886,31 @@ if [ -z "$RAW_CTL_BAD" ]; then
   check "T29b both scans bite and spare a control per alternation branch, and the nested-outer-text gap is pinned as a gap" PASS
 else
   check "T29b raw-brief-carrier pattern:$RAW_CTL_BAD — T29's negative arm is inert" FAIL
+fi
+
+BDC_MISS=""
+BDC_DEFS="$(grep -c "^const BRIEF_DATA_CAUTION = '" "$TRAIL_MJS" || true)"
+[ "$BDC_DEFS" = "1" ] || BDC_MISS="$BDC_MISS [definitions=$BDC_DEFS]"
+BDC_PUSHES="$(printf '%s\n' "$TRAIL_CODE" | grep -c 'L\.push(BRIEF_DATA_CAUTION);' || true)"
+[ "$BDC_PUSHES" = "2" ] || BDC_MISS="$BDC_MISS [pushes=$BDC_PUSHES]"
+BDC_TOKENS="$(printf '%s\n' "$TRAIL_CODE" | grep -o 'BRIEF_DATA_CAUTION' | grep -c . || true)"
+[ "$BDC_TOKENS" = "3" ] || BDC_MISS="$BDC_MISS [token-occurrences=$BDC_TOKENS]"
+for bdc_fn in 'cmdTakeover:# Takeover:' 'cmdHandoff:# Handoff:'; do
+  bdc_name="${bdc_fn%%:*}"
+  bdc_title="${bdc_fn#*:}"
+  BDC_BODY="$(printf '%s\n' "$TRAIL_CODE" | sed -n "/^function $bdc_name(/,/^}/p")"
+  if [ -z "$BDC_BODY" ]; then
+    BDC_MISS="$BDC_MISS [$bdc_name-not-extracted]"
+    continue
+  fi
+  BDC_FIRST="$(printf '%s\n' "$BDC_BODY" | awk '/const L = \[\];/{getline; sub(/^[ \t]+/, ""); print; exit}')"
+  [ "$BDC_FIRST" = "L.push(BRIEF_DATA_CAUTION);" ] || BDC_MISS="$BDC_MISS [$bdc_name-first-push-is-not-the-caution:$BDC_FIRST]"
+  printf '%s\n' "$BDC_BODY" | grep -qF "L.push(\`$bdc_title" || BDC_MISS="$BDC_MISS [$bdc_name-title-push-not-found]"
+done
+if [ -z "$BDC_MISS" ]; then
+  check "T29c both briefs open with the data caution: one definition, two pushes, each the first push of its brief and ahead of the title" PASS
+else
+  check "T29c brief data caution:$BDC_MISS" FAIL
 fi
 
 # T31 — the `--json` cause contract. `writeAnchor` gained a CLOSED `reasonCode` set
