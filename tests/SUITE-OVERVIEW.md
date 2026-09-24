@@ -363,25 +363,27 @@ that suite's failure.
 | `owned-process.test.js` | 2 | `test-claude-promptfoo-wrapper.sh` | owned-process lifecycle |
 | `reviewer-spawn-allow-v1.test.js` | 18 | `test-reviewer-spawn-allow.sh` | the reviewer-spawn grant's derived agent set, its silence on every non-grant path, and the one-definition scan |
 
-FOUR further files — `session-lineage-v1.test.js`, `worktree-advice-v1.test.js`,
-`aspect-activation-v1.test.js` and `review-round-scope-v1.test.js` — exist on disk without a row
-here, re-derived by comparing `ls tests/structure/*.test.js` (35 files) against this table's 31
-rows rather than by editing the previous list. That previous list was wrong in BOTH directions
+FIVE further files — `session-lineage-v1.test.js`, `worktree-advice-v1.test.js`,
+`prompt-listing-v1.test.js`, `aspect-activation-v1.test.js` and `review-round-scope-v1.test.js` —
+exist on disk without a row here, re-derived by comparing `ls tests/structure/*.test.js` (36
+files) against this table's 31 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
 and is recorded here rather than quietly replaced: it named
 `review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js` and `session-adopt-report-v1.test.js`,
 all three of which DO have rows twenty lines above it, and it named neither of the two files PR
-#306 added. For TWO of the four that drift predates the reviewer-spawn
-grant, while `aspect-activation-v1.test.js` and `review-round-scope-v1.test.js` postdate it; `worktree-advice-v1.test.js` is different and the distinction is worth keeping —
-it was added by the session-trail takeover-destination change and left rowless
-deliberately, because nothing grades a row's PRESENCE here, so a row would be one more
-hand-maintained copy of a count nothing checks. Say it that way rather than "this file is graded
-by no suite", which is false: the §4 `Blocks` column IS graded for six rows by two suites —
+#306 added. For TWO of the five that drift predates the reviewer-spawn
+grant, while `aspect-activation-v1.test.js`, `review-round-scope-v1.test.js` and
+`prompt-listing-v1.test.js` postdate it; `worktree-advice-v1.test.js` and
+`prompt-listing-v1.test.js` are different and the distinction is worth keeping — the
+session-trail takeover-destination change added the first and the queued-prompt withdrawal
+change the second, and both were left rowless deliberately, because nothing grades a row's
+PRESENCE here, so a row would be one more hand-maintained copy of a count nothing checks. Say
+it that way rather than "these files are graded by no suite", which is false: the §4 `Blocks` column IS graded for six rows by two suites —
 `test-zen-mode.sh` Z78 for the two zen-anchor rows, and `test-verify-consent.sh`'s `run_unit` for
 the floor, consent, free-port and browser-config rows.
-What no suite checks is the reconciliation above and the absence of a row. The unit file IS driven — by
-`test-session-trail-verdict.sh`, which pins its case count exactly — so it is rowless
-here, not ungraded there. Both are recorded rather than silently
-absorbed. The inventory row above no longer carries a unit-file numeral at all, for the
+What no suite checks is the reconciliation above and the absence of a row. Both unit files ARE
+driven — by `test-session-trail-verdict.sh`, which pins each case count exactly — so they are
+rowless here, not ungraded there. The reconciliation and the missing rows are recorded
+rather than silently absorbed. The inventory row above no longer carries a unit-file numeral at all, for the
 same reason this paragraph gives: it was a hand-maintained count nothing grades, and it
 went stale on its next merge.
 

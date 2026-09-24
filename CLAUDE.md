@@ -143,6 +143,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Fixture Mutation Events (`scripts/fixture-mutation-watch.js`)** — the promptfoo wrapper's transient-mutation detection: `.claude/rules/fixture-mutation-events.md`
 - **Session Lineage Ledger (`skills/session-trail/scripts/session-lineage-v1.mjs`)** — the machine-wide takeover ledger of `/zensu:session-trail`: `.claude/rules/session-lineage-ledger.md`
 - **Takeover Destination (`worktreeAdvice` in `skills/session-trail/scripts/trail.mjs`)** — where a taken-over session continues, and the carry-over recipe: `.claude/rules/takeover-destination.md`
+- **Session-Trail Prompt Listing (`extractPrompts` in `skills/session-trail/scripts/trail.mjs`)** — the prompt timeline and the separate list of withdrawn prompts: `.claude/rules/session-trail-prompt-listing.md`
 - **zen-mode Chain-Progress Anchor (`user-prompt-zen-mode.sh` rule 6)** — the hook-supplied progress anchor of zen-mode: `.claude/rules/zen-mode-chain-anchor.md`
 - **bash 3.2 Command-Substitution Truncation (`test-bash32-portability.sh`)** — why `case` patterns inside `$( )` need the leading paren: `.claude/rules/bash32-command-substitution.md`
 - **Incremental Review Rounds (`review-round-scope-v1.js` + `aspect-activation-v1.js`)** — delta-scoped fix rounds and aspect activation: `.claude/rules/incremental-review-rounds.md`

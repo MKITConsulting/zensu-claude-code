@@ -129,6 +129,81 @@ Anything not `VERIFIED` is annotated `[Unverified — do not fix]`, demoted from
 
 ## Phase D — Synthesis + Publish
 
+The body template and the inline-comment template are in `SKILL.md` Phase D. These rules
+decide what goes into them.
+
+**Finding IDs.** Number the findings `F1`…`Fn` after the Finding Verification Gate and the
+inline cap, in body order: blocking findings (P1) first, then the suggestions (P2) group by
+group, then the nits (P3). One ID names one finding everywhere — its body line, the first
+line of its inline comment, and that comment's hidden `zensu-finding:v1` marker. A
+neutralized `[Unverified — do not fix]` finding gets no ID, so nobody works it as if it
+were confirmed. Use the `F` prefix, never `#<n>`: both forges turn `#300` into a link to
+issue 300.
+
+**Verdict banner.** The first block under the heading is an alert. Spell its marker in lower
+case (`> [!caution]`) on a line of its own: GitHub renders both cases, GitLab documents only
+the lower case, and GitHub shows a plain quote instead of an alert when text follows the
+marker on the same line. Line two is the bold verdict, followed by 2-3 sentences that name
+the blocking F-IDs and what the suggestions cluster around.
+Choose the kind from the findings, never from `--verdict`:
+- `caution` — any P1 survived the gate, or `--coverage-gate` escalated the verdict:
+  **Changes requested — <n> blocking issue(s).**
+- `warning` — no P1, at least one P2: **No blocking issues — <n> suggestions.**
+- `tip` — no P1 and no P2: **Looks good to merge.** Nits may still follow.
+
+When a degraded step limited what the review could check — `FINDING VERIFICATION DEGRADED`,
+a `--run-coverage` run that failed and fell back to static mapping, or
+`PERSONA DISCOVERY UNAVAILABLE` — add a second alert, `> [!important]`, directly below the
+first. It names what was degraded and what the reader should treat with care. When
+`--verdict` submits an event that disagrees with the banner, the banner's last sentence says
+so, for example `Submitted as an approval because --verdict=APPROVE was passed.`
+
+**Metric line.** Directly below the banner, print all three severity counts, zeros included,
+so the line reads the same on every review. Its template is in `SKILL.md` Phase D: `<k>` is
+the length of `comments[]`, `<r>` is `ROLE_COUNT`, and the head link shows the short SHA in
+backticks.
+
+**Permalinks.** Every file-and-line citation in the body and in the inline comments is a
+link pinned to the reviewed commit, so it still shows the code the reviewers saw after the
+branch moves on:
+- Take the web base from the scout metadata's `url`: on GitHub drop the trailing
+  `/pull/<n>`, on GitLab drop the trailing `/-/merge_requests/<n>`.
+- GitHub: `<base>/blob/<sha>/<path>#L<a>` or `#L<a>-L<b>`; the commit link is
+  `<base>/commit/<sha>`.
+- GitLab: `<base>/-/blob/<sha>/<path>#L<a>` or `#L<a>-<b>`; the commit link is
+  `<base>/-/commit/<sha>`.
+- `<sha>` is the full reviewed head (`$SHA`, or `BOUND_HEAD` in delegated mode), never a
+  branch name. A citation of a removed line (side `LEFT`) links to the merge base instead:
+  `git -C "$WORKTREE" merge-base origin/<base> HEAD`.
+- `<path>` is repository-relative. Percent-encode every byte outside `A-Z a-z 0-9 - . _ ~ /`,
+  so a space or a parenthesis cannot end the Markdown link early.
+- The link text is `` `<basename>:<line>` ``, widened by parent directories until it is
+  unique within the review (`` `autopilot-adopt/SKILL.md:132` ``).
+- Cite only lines the lead has seen itself: in the Stage-2 read of the Finding Verification
+  Gate, or in a direct `Read` of `$WORKTREE`.
+
+**Theme groups.** Group the suggestions under 2-6 bold theme labels such as
+`**Crash and race safety**`. Order the groups by their most convergent finding, and the
+findings inside a group by path, then line. Each suggestion is one line: the bold ID, the
+claim in plain words, and one permalink. A body-only suggestion (see `SKILL.md` Phase D)
+ends with `· no inline comment` and is followed by a collapsed block with its explanation.
+
+**Collapsing.** Always visible: the banner(s), the metric line, the blocking findings, the
+suggestions, the Test Coverage source line, table and uncovered-files list, and the questions
+for the author. Collapsed into `<details>`: the uncovered-paths list, the nits, the
+unpublished (unverified) findings, the body-only explanations, what is solid, and how the
+review was produced. Every `<summary>` states a count and the topic, so the collapsed line
+still informs (`🔵 6 nits — shell locale, duplication, test depth`). Leave a blank line
+after the `<summary>` line and before `</details>`; without them the Markdown inside is shown
+as raw text. Never collapse a P1 finding, the verdict, or the uncovered-files list.
+
+**Angle brackets.** Put every token that looks like an HTML tag into backticks — a
+placeholder such as `<ttl>`, a generic such as `List<String>`. GitHub strips unknown tags
+from Markdown and GitLab's allowlist sanitizer removes them too, so a bare token disappears
+from the rendered text: `under <ttl>h` renders as `under h`. The only raw HTML in the body
+and the inline comments is `<details>`, `<summary>`, `<b>`, `<sub>`, `<code>`, and the HTML
+comments.
+
 **Test Coverage section (mandatory, never dropped):**
 
 Render `### Test Coverage` in the overall body on EVERY run from `consensus.coverage` (the `coverage-audit` report carried through Phase C). Rules:
@@ -143,22 +218,22 @@ Render `### Test Coverage` in the overall body on EVERY run from `consensus.cove
 
   Counts come from `covered_files[]`, `partial_files[]`, `uncovered_files[]`, `changed_production_files`. When `changed_production_files == 0` (docs/config-only PR) DROP the table entirely and render just `N/A — no production code changed in this PR.`
 - Below the table, list every `uncovered_files[]` entry as a bullet — `` `path` — reason — risk ``. If empty: "None — every changed production file is exercised by a test."
-- List `partial_files[]` uncovered paths as a **Uncovered paths** bullet list — `` `path` → `fn/method/branch` (covered by: `<test>`) ``. If empty: "None."
+- List `partial_files[]` uncovered paths as an **Uncovered paths** bullet list — `` `path` → `fn/method/branch` (covered by: `<test>`) `` — inside a collapsed `<details>` block whose summary names the number of partially covered files. If empty: render "**Uncovered paths:** none." visibly, without a `<details>` block.
 - **Detail stays in bullets, never in the table.** Long file paths and path names wrap character-by-character inside a table cell — exactly the failure the No-tables rule guards against. The table carries only the at-a-glance counts; everything with a path goes in a bullet.
 - The section is present even when the verdict is APPROVE and even for docs-only PRs. A green coverage result is still reported explicitly — silence is not allowed.
-- `--coverage-gate`: if set and `uncovered_files[]` (production) is non-empty, the verdict is `REQUEST_CHANGES` and the Recommendation cites the uncovered files. Without the flag, coverage is advisory and the verdict is unaffected.
+- `--coverage-gate`: if set and `uncovered_files[]` (production) is non-empty, the verdict is `REQUEST_CHANGES`, the verdict banner is `caution`, and its summary names the uncovered files. Without the flag, coverage is advisory and the verdict is unaffected.
 
 **Inline-comment cap (`--max-inline`):**
 
 Default 25. Strategy when consolidated findings exceed cap:
 1. Always include all P1 findings.
 2. Fill remaining slots with P2 findings, sorted by convergence (multi-agent first).
-3. Drop P3 findings into the overall body as a "P3 Nits" bulleted list — no inline comment for those.
-4. If still over cap → keep only the most actionable P2s; mention skipped P2s in overall body.
+3. P3 findings never become inline comments — they go into the collapsed nits block of the overall body.
+4. If still over cap → keep only the most actionable P2s as inline comments; every skipped P2 becomes a body-only finding, so none is lost.
 
-**Overall body length:** target 600-1200 words. Reviewer fatigue is real — a 5000-word body gets skimmed. Cut Strengths section to 5-7 bullets max. Cut Open Questions to 5 max.
+**Overall body length:** keep the visible part — everything outside collapsed `<details>` bodies — at 700 words or fewer, and the whole body under about 1,500. Reviewer fatigue is real — a 5000-word body gets skimmed. Keep What is solid to 3-7 bullets and the questions for the author to 5 at most. When the one-line suggestion list alone would break the visible budget, collapse the least convergent theme groups into `<details>` blocks rather than dropping findings; never collapse a blocking finding.
 
-**No tables — one carve-out.** GitHub PR view squeezes Markdown tables into narrow columns that wrap character-by-character — unreadable. Use numbered subsections (`#### 1. ...`) for P1 findings and bullet lists with bold prefixes (`- **Area**: ...`) for P2 / Strengths / Open Questions. Lead is responsible for the synthesis Markdown — persona reports may still use tables internally (they live in `$WORKDIR/<role>.json` and are not posted), but the synthesis MUST flatten everything to prose/bullets/headings. **The sole exception is the `### Test Coverage` status table** (Phase D): four short all-numeric columns (Covered / Partial / Uncovered / Changed) that GitHub cannot squeeze because every cell is a small integer. That carve-out is limited to those counts — file paths, findings, and every other table stay banned and flatten to bullets.
+**No tables — one carve-out.** GitHub PR view squeezes Markdown tables into narrow columns that wrap character-by-character — unreadable. Use a bold `F<n> · <claim>` lead-in plus 2-3 sentences for each blocking finding, and one-line bullets with a bold `F<n>` prefix, grouped under bold theme labels, for suggestions and nits. Lead is responsible for the synthesis Markdown — persona reports may still use tables internally (they live in `$WORKDIR/<role>.json` and are not posted), but the synthesis MUST flatten everything to prose/bullets/headings. **The sole exception is the `### Test Coverage` status table** (Phase D): four short all-numeric columns (Covered / Partial / Uncovered / Changed) that GitHub cannot squeeze because every cell is a small integer. That carve-out is limited to those counts — file paths, findings, and every other table stay banned and flatten to bullets.
 
 **No tables in inline comments either.** Inline comments suffer the same column compression. Use code fences, bullet lists, bold prefixes only. The coverage-table carve-out is **body-only** — inline comments never contain a table.
 
@@ -168,10 +243,11 @@ comment's `(path, line, side)` against the PR diff with
 where `<absolute-plugin-root>` is replaced with the concrete `ROOT` already
 established by the parent skill before issuing the Bash call.
 per `rules/github-publish.md` (Pre-Publish Anchor Validation — the quoting
-rules there are load-bearing): `valid` → keep, `remap <n>` → move the anchor
-and append the remap note to the comment body, `none` (or no output) → fold
-the finding into the overall body. The payload may only carry validated
-anchors — this eliminates the 422 line-out-of-diff round-trip.
+rules there are load-bearing): `valid` → keep, `remap <n>` → move the anchor,
+append the remap note to the comment body, and drop any suggestion block,
+`none` (or no output) → turn it into a body-only finding that keeps its ID and
+carries its full explanation in the overall body. The payload may only carry
+validated anchors — this eliminates the 422 line-out-of-diff round-trip.
 
 **Pre-publish preview:** ALWAYS produce the final overall body + inline count before posting. In standalone mode, show that exact final preview and wait for an explicit publication approval; approval to run the skill or approve the cast is not publication approval. In delegated mode, emit the preview as a progress record and continue unattended through the operation-bound reconciliation/publish flow without asking a question.
 
@@ -187,7 +263,7 @@ anchors — this eliminates the 422 line-out-of-diff round-trip.
 - **`gh api` POST 422 line out-of-diff**: should not occur — anchors are pre-validated in Phase D. If it still fires: re-fetch the diff, re-validate every anchor, retry; last resort drop the offending comment (fold it into the body) and retry with the reduced `comments[]` array.
 - **`gh api` POST 401**: tell user to `gh auth refresh`.
 - **Reviewer agent dies or returns invalid JSON**: collect fails closed. Close the lease, create a fresh generation, and rerun the complete worker batch so all results share one evidence snapshot.
-- **All reviewers report APPROVE**: still post the review with `event=COMMENT` summarising strengths — user values the audit trail.
+- **All reviewers report APPROVE**: still post the review with `event=COMMENT` — a `tip` banner, the Test Coverage section, and the What is solid block — user values the audit trail.
 - **PR closed/merged while review runs**: detect via `gh pr view --json state`; abort gracefully, save artifacts.
 - **Worktree / branch-checkout collisions** (path already exists, branch already checked out, orphaned dir): no longer occur — each run gets a fresh `mktemp -d` workspace and the worktree is DETACHED at the head SHA (it never checks out the `pr-<n>-review` branch). After a crash the worktree just lingers under its random `$WORKDIR`; `git -C "$REPO" worktree prune` clears the stale bookkeeping and the next run is unaffected.
 - **Disk full while creating worktree**: detect via `df -h /tmp`; warn user and offer `--worktree-path=<custom>` (later enhancement) or proceed without worktree (degraded: read diff via `gh pr diff` only, no file-level reads).

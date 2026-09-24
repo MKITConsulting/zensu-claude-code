@@ -72,13 +72,16 @@ Apply the verdict per comment (each side validates against its own numbering —
 - `valid` — keep the anchor unchanged.
 - `remap <n>` — set `line` to `<n>` and append one note line to the comment
   body: `_(anchor remapped from line <original> — original line is not part of
-  the diff)_`. The finding survives with its evidence intact. Remaps are capped
-  at 40 lines of distance — anything farther prints `none` instead, because a
-  comment 40+ lines away from its evidence is noise.
+  the diff)_`. The finding survives with its evidence intact. Drop any
+  `suggestion` block: it would replace line `<n>`, not the line the finding is
+  about. Remaps are capped at 40 lines of distance — anything farther prints
+  `none` instead, because a comment 40+ lines away from its evidence is noise.
 - `none` — the side has no commentable line within reach (deleted/binary/out of
-  PR, or beyond the remap cap): do NOT emit an inline comment; fold the finding
-  into the overall review body under a `**Findings without a diff anchor**`
-  list (path + intended line + text). Never silently drop a finding.
+  PR, or beyond the remap cap): do NOT emit an inline comment;
+  fold the finding into the overall body as a body-only finding (`SKILL.md`
+  Phase D). It keeps its ID and its line there, marked `· no inline comment`,
+  with its full explanation in a collapsed block below. Never silently drop a
+  finding.
 
 Multi-line comments: GitHub additionally requires `start_line` and `line` in
 the SAME hunk, so validate EVERY integer in `[start_line, line]` (same side);
@@ -109,6 +112,28 @@ Capture the response — `id` and `html_url` are the values you return to the us
 **Multi-line comments**: provide `start_line` + `line` (both on same `side`). GitHub renders as a range.
 
 **`position` (legacy)**: don't use unless `line`/`side` doesn't fit. `position` is the line offset within the unified diff — fragile.
+
+## Suggested changes
+
+An inline comment may carry one fenced block whose info string is exactly `suggestion`.
+GitHub renders it as a diff with a **Commit suggestion** button. Applying it commits the
+block's content to the PR branch in place of the commented line — or of every line from
+`start_line` to `line`. A wrong suggestion therefore costs the author a commit. Emit one
+only when every condition holds:
+
+- The fix replaces exactly the commented lines. If it also needs a line outside the
+  commented range, describe the fix in prose instead.
+- The anchor validated as `valid` on side `RIGHT`. A remapped anchor, a `LEFT` anchor, and a
+  body-only finding never carry a suggestion.
+- The lead has read the commented lines itself — in the Stage-2 read of the Finding
+  Verification Gate, or in a direct `Read` of `$WORKTREE` when the gate is off — and the
+  block repeats every unchanged character of those lines exactly, indentation included.
+- The block is complete code: no placeholder, no ellipsis, no elided middle, and no run of
+  three backticks, which would end the fence early.
+- The block differs from the current lines.
+
+Put the block after the prose explanation, never instead of it: the author has to learn why
+before seeing what. GitLab spells the fence differently (`rules/gitlab-publish.md`).
 
 ## Single-Submit vs Multi-Submit
 
@@ -183,7 +208,7 @@ standalone `--post-review` path. Delegated mode follows the fail-closed policy a
 | 422 (commit_id mismatch) | Head SHA changed since fetch | Re-run `git rev-parse pr-<n>-review`, update payload, retry |
 | 500 / 502 | GitHub transient | Wait 30s, retry once |
 
-Standalone last-resort only (a 422 that survives re-validation): identify the offending comment(s) by binary search — `jq 'del(.comments[<i>])' payload.json > shrunk.json` and retry until POST succeeds — and fold whatever was removed into the overall body so no finding is lost.
+Standalone last-resort only (a 422 that survives re-validation): identify the offending comment(s) by binary search — `jq 'del(.comments[<i>])' payload.json > shrunk.json` and retry until POST succeeds — and fold whatever was removed into the overall body as body-only findings (`SKILL.md` Phase D) so no finding is lost.
 
 ## Standalone-only fallback: Per-comment posting
 

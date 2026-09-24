@@ -484,13 +484,14 @@ conservative: `T35`'s extractor anchors `^const CARRY_OVER = \[`, `^function wor
 already gone dead once without a sound. Moving the constants re-points four anchors,
 `T35_EXPECT`, this roster and the unit file's import in one edit.
 
-**The trigger is a second importer, or the next change that has to re-point those anchors
-anyway.** The move now carries TWO obligations, not three: re-home `livePid` and re-point the
-extractor. The third — replacing the `fail()` call with a thrown error — is DISCHARGED: that
-refusal throws today and `main` flushes before reporting it, so the move is cheaper than this
-ledger said. The trigger was EVALUATED in the round that discharged it and did not fire:
-there is still no second importer, and that round re-pointed no `T35` anchor. Recorded so the
-next reader does not have to re-derive whether it was considered — it was.
+**The trigger is a second importer of the ADVICE surface, or the next change that has to
+re-point those anchors anyway.** The move carries TWO obligations: re-home `livePid` and
+re-point the extractor. Replacing the `fail()` call with a thrown error is not one of them,
+because that refusal throws today and `main` flushes before reporting it.
+`tests/structure/prompt-listing-v1.test.js` imports `trail.mjs` too, but only the prompt
+listing — `extractPrompts` and `QUEUE_DELIVERY_REACH` — and none of the advice surface, so it
+does not meet this trigger. The listing's own extraction, its cost and its trigger live in
+`.claude/rules/session-trail-prompt-listing.md`.
 
 **ONE RENDERER owns the placeholder mapping and the rule that governs it**, and the rule's
 placeholder set is DERIVED from the recipe it is printed beside rather than handed in.
@@ -587,9 +588,12 @@ backtick with them (`WT8v7c`, `WT8v10d`); the rest never quoted a token. It is e
   `firstPrefix`-on-a-leading-command arm is still dormant by construction — every arm opens
   with a prose sentence naming its cause — and it exists so the helper does not silently eat
   `cmdHandoff`'s `- ` bullet the first time an arm is reordered. `trail.mjs` now guards its
-  CLI dispatch on being the process entry point and exports SEVEN names — `adviceBlock`,
-  `worktreeAdvice`, `adviceLeg`, `whereAdviceLines`, `substitutionRuleLines`,
-  `recipePlaceholders` and `WORKTREE_ADVICE_COMMAND` — of which
+  CLI dispatch on being the process entry point and exports two surfaces in separate
+  statements. The advice statement names `adviceBlock`, `worktreeAdvice`, `adviceLeg`,
+  `whereAdviceLines`, `substitutionRuleLines`, `recipePlaceholders` and
+  `WORKTREE_ADVICE_COMMAND`; the header comment above it counts them, and `T24h` holds that
+  count against the statement. The prompt listing has its own statement, recorded in
+  `.claude/rules/session-trail-prompt-listing.md`. Of the advice names,
   `whereAdviceLines` is NOT pure: it canonicalizes two paths through `canonicalPair` to decide
   whether the taker is standing in the source worktree, so the surface's own "plain record, no
   filesystem" criterion is stated as "reads the filesystem only to canonicalize" now. So
@@ -617,8 +621,9 @@ backtick with them (`WT8v7c`, `WT8v10d`); the rest never quoted a token. It is e
   compares REALPATHS on both sides: an installed plugin root is routinely reached through a
   symlink, and a string compare would answer "not the entry point" for a genuine invocation,
   turning the whole CLI into a silent no-op — far worse than the import side effect it
-  removes. The unit file is driven from `test-session-trail-verdict.sh`, because
-  `tests/run-all.sh` discovers only `test-*.sh`; its case count is hand-maintained and EXACT
+  removes. Both unit files that import `trail.mjs` — `worktree-advice-v1.test.js` and
+  `prompt-listing-v1.test.js` — are driven from `test-session-trail-verdict.sh`, because
+  `tests/run-all.sh` discovers only `test-*.sh`; each case count is hand-maintained and EXACT
   there, for the same reason `T35_EXPECT` is.
 - **The line-anchored citations from `docs/multi-repo-chains-*` into this skill broke THREE
   times during one change**, silently each time, because `test-multi-repo-doc-citations.sh`
