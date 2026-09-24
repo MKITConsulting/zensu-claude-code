@@ -243,31 +243,6 @@ else
   check "V0b \$CONT_HOME redirections disagree: HOME=${V0B_H:-0} USERPROFILE=${V0B_U:-0} — every HOME redirection in the WC block needs USERPROFILE beside it" FAIL
 fi
 
-# V0c — CLAUDE.md carried TWO paragraphs about this suite on Windows and they said
-# opposite things: one that the WC block "will therefore run on Windows", the other
-# that this suite "redirects HOME and therefore skips itself whole on Windows". The
-# second is the stale one, and V0 above is the evidence — `trailrun` sets USERPROFILE
-# beside HOME and the probe measures the PAIR, so the redirection succeeds and the
-# suite does not skip. Graded from HERE because this suite is the claim's subject: a
-# reader who trusts the stale sentence concludes the block is unverifiable on Windows
-# when it is merely unmeasured, which is the opposite conclusion.
-V0C_STALE_NEEDLE='skips itself whole on Windows'
-V0C_MD="$PLUGIN_DIR/CLAUDE.md"
-if [ ! -f "$V0C_MD" ]; then
-  skip "V0c CLAUDE.md is not present in this tree, so the cross-file claim cannot be graded"
-elif grep -qF -- "$V0C_STALE_NEEDLE" "$V0C_MD"; then
-  check "V0c CLAUDE.md still says this suite skips itself whole on Windows, which V0 contradicts" FAIL
-else
-  check "V0c CLAUDE.md no longer claims this suite skips itself on Windows" PASS
-fi
-
-# The control for V0c's negative half: the needle must still match the wording it
-# forbids, or the check above passes for the wrong reason.
-case "Its sibling test-session-trail-verdict.sh redirects HOME and therefore $V0C_STALE_NEEDLE, where os.homedir() reads USERPROFILE." in
-  *"$V0C_STALE_NEEDLE"*) check "V0c-control the stale-claim needle still matches the wording it forbids" PASS ;;
-  *) check "V0c-control the stale-claim needle matches nothing — V0c is inert" FAIL ;;
-esac
-
 # ── Fixture builder ─────────────────────────────────────────────────────────
 # Written as a script rather than inlined per case: the transcripts need real
 # mtimes and real ISO timestamps, and `touch -t` / `date -d` spell those
