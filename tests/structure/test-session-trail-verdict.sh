@@ -189,7 +189,7 @@ PL_UNIT_TOTAL="$(printf '%s' "$PL_UNIT_OUT" | sed -n 's/^.*[[:space:]]tests \([0
 PL_UNIT_PASS="$(printf '%s' "$PL_UNIT_OUT" | sed -n 's/^.*[[:space:]]pass \([0-9][0-9]*\)$/\1/p' | tail -1)"
 case "$PL_UNIT_TOTAL" in ''|*[!0-9]*) PL_UNIT_TOTAL=0 ;; esac
 case "$PL_UNIT_PASS" in ''|*[!0-9]*) PL_UNIT_PASS=0 ;; esac
-PL_UNIT_TOTAL_WANT=11
+PL_UNIT_TOTAL_WANT=16
 if [ "$PL_UNIT_RC" = "0" ] && [ "$PL_UNIT_TOTAL" = "$PL_UNIT_TOTAL_WANT" ] && [ "$PL_UNIT_PASS" = "$PL_UNIT_TOTAL" ]; then
   check "PL-unit prompt-listing-v1.test.js passes ($PL_UNIT_PASS/$PL_UNIT_TOTAL cases): extractPrompts is driven directly for the pairing window's edges on both sides, the reach guard, the per-build channel and what starts a build, the fallback, the pull-backs and the truncated read" PASS
 else
@@ -317,6 +317,7 @@ const QUEUE_MODES = new Set([
   'tailmultisetgap', 'tailremovedrenamed', 'futurestamp', 'unknownfuture', 'listed', 'nochannel',
   'buildchannel', 'resent', 'endwithdrawn', 'endwithdrawnreach', 'captured', 'fardelivery',
   'farresent', 'tailwithdrawal', 'reachedge', 'foreignstart', 'tailwithdrawalfull',
+  'overdrawnidle', 'overdrawnstale',
 ]);
 if (!QUEUE_MODES.has(queueMode)) throw new Error(`unknown queueMode: ${queueMode}`);
 const TAIL_MODES = new Set(['tailqueue', 'tailremoved', 'tailorphan', 'tailorphanafter', 'tailblindconsumer', 'tailmultiset', 'tailmultisetdouble', 'tailunknown', 'tailmultisetgap', 'tailremovedrenamed', 'tailwithdrawal']);
@@ -401,6 +402,10 @@ if (queueMode === 'fresh' || queueMode === 'unbalanced') {
   push({ type: 'queue-operation', operation: 'reorder', timestamp: iso(mtime) });
 } else if (queueMode === 'unknownstale') {
   push({ type: 'queue-operation', operation: 'reorder', timestamp: iso(now - (busyMin() + 1) * 60000) });
+} else if (queueMode === 'overdrawnidle') {
+  push({ type: 'queue-operation', operation: 'dequeue', timestamp: iso(mtime) });
+} else if (queueMode === 'overdrawnstale') {
+  push({ type: 'queue-operation', operation: 'dequeue', timestamp: iso(now - (busyMin() + 1) * 60000) });
 } else if (queueMode === 'unknownstaledepth') {
   push({ type: 'queue-operation', operation: 'enqueue', content: 'do the next thing', timestamp: iso(now - (busyMin() + 5) * 60000) });
   push({ type: 'queue-operation', operation: 'reorder', timestamp: iso(now - 60000) });
@@ -473,6 +478,7 @@ if (queueMode === 'fresh' || queueMode === 'unbalanced') {
   q({ operation: 'remove', content: 'delivered in the first build' });
   q({ operation: 'enqueue', content: 'withdrawn in the first build' });
   q({ operation: 'remove', content: 'withdrawn in the first build' });
+  asked('9.0.1', 'the first build asks again');
   asked('9.0.2', 'the second build asks');
   q({ operation: 'enqueue', content: 'delivered in the second build' });
   attach('9.0.2', { type: 'queued_command_v2', text: 'delivered in the second build' });
@@ -502,6 +508,7 @@ if (queueMode === 'fresh' || queueMode === 'unbalanced') {
   attach('9.0.5', { type: 'queued_prompt', prompt: 'never enqueued in the fifth build' });
   q({ operation: 'enqueue', content: 'withdrawn in the fifth build' });
   q({ operation: 'remove', content: 'withdrawn in the fifth build' });
+  asked('9.0.5', 'the fifth build asks again');
   attach('9.0.6', { type: 'queued_command', commandMode: 'prompt' });
   q({ operation: 'enqueue', content: 'removed in the sixth build' });
   q({ operation: 'remove', content: 'removed in the sixth build' });
@@ -591,6 +598,7 @@ if (queueMode === 'fresh' || queueMode === 'unbalanced') {
   attach('9.1.9', { type: 'hook_success', hookName: 'Stop' });
   q({ operation: 'enqueue', content: 'withdrawn in the first build' });
   q({ operation: 'remove', content: 'withdrawn in the first build' });
+  push({ type: 'user', message: { role: 'user', content: 'the first build asks again' }, cwd, isSidechain: false, version: '9.1.1', timestamp: iso(at += 1000) });
   q({ operation: 'enqueue', content: 'handed over by a renamed attachment that opens the second build' });
   attach('9.1.2', { type: 'queued_prompt', prompt: 'handed over by a renamed attachment that opens the second build' });
   q({ operation: 'remove', content: 'handed over by a renamed attachment that opens the second build' });
@@ -717,7 +725,9 @@ if (queueMode === 'tailunknown') {
   tail.push({ type: 'queue-operation', operation: 'reorder', timestamp: iso(Date.now() - 30000) });
 }
 if (queueMode === 'tailwithdrawal' || queueMode === 'tailwithdrawalfull') {
+  tail.push({ type: 'queue-operation', operation: 'enqueue', content: 'delivered at the start of the tail window', timestamp: iso(Date.now() - 95000) });
   tail.push({ type: 'attachment', attachment: { type: 'queued_command', prompt: 'delivered at the start of the tail window', commandMode: 'prompt' }, timestamp: iso(Date.now() - 90000) });
+  tail.push({ type: 'queue-operation', operation: 'remove', content: 'delivered at the start of the tail window', timestamp: iso(Date.now() - 85000) });
   tail.push({ type: 'queue-operation', operation: 'enqueue', content: 'withdrawn in the tail window', timestamp: iso(Date.now() - 80000) });
   tail.push({ type: 'queue-operation', operation: 'remove', content: 'withdrawn in the tail window', timestamp: iso(Date.now() - 70000) });
   tail.push({ type: 'queue-operation', operation: 'enqueue', content: 'pulled back in the tail window', timestamp: iso(Date.now() - 60000) });
@@ -1390,6 +1400,8 @@ fix 5e5e5e5e-0000-0000-0000-000000000051 "$DEAD_PID" "$FRESH_IDLE" end_turn   fa
 fix 5f5f5f5f-0000-0000-0000-000000000052 "$DEAD_PID" "$FRESH_IDLE" end_turn   reachedge
 fix 6a6a6a6a-0000-0000-0000-000000000053 "$DEAD_PID" "$FRESH_IDLE" end_turn   foreignstart
 fix 6b6b6b6b-0000-0000-0000-000000000054 "$DEAD_PID" "$FRESH_IDLE" end_turn   tailwithdrawalfull
+fix 7a7a7a7a-0000-0000-0000-000000000055 "$LIVE_PID" "$FRESH_IDLE" end_turn   overdrawnidle
+fix 7b7b7b7b-0000-0000-0000-000000000056 "$LIVE_PID"  20 end_turn   overdrawnstale
 
 opcount() { # <sessionId> <operation>
   local f
@@ -1502,10 +1514,55 @@ fi
 
 CLAMP_LEVEL="$(field 1b1b1b1b-0000-0000-0000-000000000024 takeover.level)"
 CLAMP_PENDING="$(field 1b1b1b1b-0000-0000-0000-000000000024 queue.pending)"
-if [ "$CLAMP_LEVEL" = "BUSY" ] && [ "$CLAMP_PENDING" = "1" ]; then
-  check "V19f a consumer record with nothing pending is clamped at zero, so the enqueue after it still counts (pending=1; a pin inside a tree that already counts remove, not a bite against one that ignores it)" PASS
+CLAMP_OVERDRAWN="$(field 1b1b1b1b-0000-0000-0000-000000000024 queue.overdrawn)"
+if [ "$CLAMP_LEVEL" = "BUSY" ] && [ "$CLAMP_PENDING" = "1" ] && [ "$CLAMP_OVERDRAWN" = "1" ]; then
+  check "V19f a consumer record with nothing pending is clamped at zero and counted as an overdraw, so the enqueue after it still counts (pending=1, overdrawn=1; a pin inside a tree that already counts remove, not a bite against one that ignores it)" PASS
 else
-  check "V19f consumer at depth zero (level='${CLAMP_LEVEL}' pending='${CLAMP_PENDING}'; want BUSY and 1)" FAIL
+  check "V19f consumer at depth zero (level='${CLAMP_LEVEL}' pending='${CLAMP_PENDING}' overdrawn='${CLAMP_OVERDRAWN}'; want BUSY, 1 and 1)" FAIL
+fi
+
+OVERDRAW_CLAUSE='consumer record(s) that arrived while the counted depth was already zero'
+ODI_ID=7a7a7a7a-0000-0000-0000-000000000055
+ODI_LEVEL="$(field "$ODI_ID" takeover.level)"
+ODI_REASON="$(field "$ODI_ID" takeover.reason)"
+ODI_MEASURED="$(field "$ODI_ID" takeover.queueMeasured)"
+ODI_PENDING="$(field "$ODI_ID" queue.pending)"
+ODI_OVERDRAWN="$(field "$ODI_ID" queue.overdrawn)"
+ODI_AT="$(field "$ODI_ID" queue.overdrawnAt)"
+ODI_AGE="$(node -e 'const at = Date.parse(process.argv[1]); process.stdout.write(Number.isFinite(at) ? String(Math.floor((Date.now() - at) / 60000)) : "unreadable");' "$ODI_AT")"
+V19F2_BAD=""
+if [ "$ODI_AGE" != "unreadable" ] && [ "$ODI_AGE" -ge "$BUSY_MIN" ] 2>/dev/null; then
+  check "V19f2 FIXTURE CLOCK BUDGET LAPSED for the overdraw fixture (its consumer record is ${ODI_AGE} min old against BUSY_IDLE_MIN=$BUSY_MIN) — the suite ran too long, NOT a verdict regression; V-clock reports the same lapse" FAIL
+else
+  [ "$ODI_AGE" != "unreadable" ] || V19F2_BAD="$V19F2_BAD overdrawnAt-unreadable($ODI_AT)"
+  [ "$ODI_LEVEL" = "PROBABLY_FREE" ] || V19F2_BAD="$V19F2_BAD level=$ODI_LEVEL"
+  [ "$ODI_PENDING" = "0" ] || V19F2_BAD="$V19F2_BAD pending=$ODI_PENDING"
+  [ "$ODI_OVERDRAWN" = "1" ] || V19F2_BAD="$V19F2_BAD overdrawn=$ODI_OVERDRAWN"
+  [ "$ODI_MEASURED" = "false" ] || V19F2_BAD="$V19F2_BAD queueMeasured=$ODI_MEASURED"
+  case "$ODI_REASON" in *"queue could not be measured"*"$OVERDRAW_CLAUSE, the last one "*"m ago"*) ;; *) V19F2_BAD="$V19F2_BAD overdraw-not-reported-with-its-age" ;; esac
+  case "$ODI_REASON" in *"Nothing is queued"*) V19F2_BAD="$V19F2_BAD claims-nothing-queued-beside-an-overdraw" ;; esac
+  if [ -z "$V19F2_BAD" ]; then
+    check "V19f2 on a full read a recent consumer record that arrived at depth 0 is reported as an unmeasured queue with its age and queueMeasured=false, never as nothing queued" PASS
+  else
+    check "V19f2 recent overdraw at depth 0:$V19F2_BAD (reason='${ODI_REASON}')" FAIL
+  fi
+fi
+
+ODS_ID=7b7b7b7b-0000-0000-0000-000000000056
+ODS_LEVEL="$(field "$ODS_ID" takeover.level)"
+ODS_REASON="$(field "$ODS_ID" takeover.reason)"
+ODS_MEASURED="$(field "$ODS_ID" takeover.queueMeasured)"
+ODS_OVERDRAWN="$(field "$ODS_ID" queue.overdrawn)"
+V19F3_BAD=""
+[ "$ODS_LEVEL" = "PROBABLY_FREE" ] || V19F3_BAD="$V19F3_BAD level=$ODS_LEVEL"
+[ "$ODS_OVERDRAWN" = "1" ] || V19F3_BAD="$V19F3_BAD overdrawn=$ODS_OVERDRAWN"
+[ "$ODS_MEASURED" = "true" ] || V19F3_BAD="$V19F3_BAD queueMeasured=$ODS_MEASURED"
+case "$ODS_REASON" in *"Nothing is queued."*) ;; *) V19F3_BAD="$V19F3_BAD stale-overdraw-still-blinds-the-note" ;; esac
+case "$ODS_REASON" in *"$OVERDRAW_CLAUSE"*) V19F3_BAD="$V19F3_BAD stale-overdraw-still-reported" ;; esac
+if [ -z "$V19F3_BAD" ]; then
+  check "V19f3 an overdraw older than 15 minutes ages out like a stale depth, and the note returns to nothing queued" PASS
+else
+  check "V19f3 stale overdraw:$V19F3_BAD (reason='${ODS_REASON}')" FAIL
 fi
 
 ORPH_TRUNCATED="$(field 1c1c1c1c-0000-0000-0000-000000000025 truncated)"
@@ -1893,6 +1950,54 @@ else
   check "V19x5 listing readers beyond the two brief sections:$V19X5_BAD" FAIL
 fi
 
+section_after() { printf '%s\n' "$1" | awk -v h="$2" '$0 == h { f = 1; next } /^(--- |## )/ { f = 0 } f'; }
+WD_HEAD_SHOW='--- WITHDRAWN BEFORE SENDING (judged from the queue records; do not act on these) ---'
+WD_HEAD_BRIEF='## Withdrawn before sending — do not act on these'
+WD_HEDGE='judged from the queue records rather than observed'
+LST_SHOW="$(trailrun show "$LST_ID" --all --no-git --prompts 40 2>/dev/null)"
+LST_SHOW_WD="$(section_after "$LST_SHOW" "$WD_HEAD_SHOW")"
+LST_SHOW_TL="$(section_after "$LST_SHOW" '--- PROMPT TIMELINE ---')"
+LST_BRIEF_WD="$(section_after "$LST_BRIEF" "$WD_HEAD_BRIEF")"
+LST_HANDOFF="$(trailrun handoff "$LST_ID" --all 2>/dev/null)"
+LST_HANDOFF_WD="$(section_after "$LST_HANDOFF" "$WD_HEAD_BRIEF")"
+V19X13_BAD=""
+[ "$(printf '%s\n' "$LST_SHOW" | grep -cxF -- "$WD_HEAD_SHOW" || true)" = "1" ] || V19X13_BAD="$V19X13_BAD show-section-heading-not-printed-once"
+[ "$(printf '%s\n' "$LST_BRIEF" | grep -cxF -- "$WD_HEAD_BRIEF" || true)" = "1" ] || V19X13_BAD="$V19X13_BAD takeover-section-heading-not-printed-once"
+[ "$(printf '%s\n' "$LST_HANDOFF" | grep -cxF -- "$WD_HEAD_BRIEF" || true)" = "1" ] || V19X13_BAD="$V19X13_BAD handoff-section-heading-not-printed-once"
+printf '%s\n' "$LST_BRIEF_WD" | grep -qiF -- "$WD_HEDGE" || V19X13_BAD="$V19X13_BAD takeover-section-lacks-its-hedge"
+printf '%s\n' "$LST_HANDOFF_WD" | grep -qiF -- "$WD_HEDGE" || V19X13_BAD="$V19X13_BAD handoff-section-lacks-its-hedge"
+for WD_TEXT in 'withdrawn before it ran' 'typed twice, removed twice'; do
+  printf '%s\n' "$LST_SHOW_WD" | grep -qF -- "] $WD_TEXT" || V19X13_BAD="$V19X13_BAD show-section-lacks:$WD_TEXT"
+  if printf '%s\n' "$LST_SHOW_TL" | grep -qF -- "] $WD_TEXT"; then V19X13_BAD="$V19X13_BAD show-timeline-lists:$WD_TEXT"; fi
+  [ "$(line_count "$LST_BRIEF_WD" "$WD_TEXT")" = "1" ] || V19X13_BAD="$V19X13_BAD takeover-section-lacks:$WD_TEXT"
+  printf '%s\n' "$LST_HANDOFF_WD" | grep -qF -- "$WD_TEXT" || V19X13_BAD="$V19X13_BAD handoff-section-lacks:$WD_TEXT"
+done
+for SENT_TEXT in 'typed twice, removed once' 'pulled back by popAll, then sent' 'pulled back by popOne, then queued again'; do
+  for WD_SECTION in "$LST_SHOW_WD" "$LST_BRIEF_WD" "$LST_HANDOFF_WD"; do
+    if printf '%s\n' "$WD_SECTION" | grep -qF -- "$SENT_TEXT"; then V19X13_BAD="$V19X13_BAD a-withdrawn-section-lists-the-sent-text:$SENT_TEXT"; fi
+  done
+done
+WD_JSON_WANT='withdrawn before it ran|typed twice, removed twice'
+for WD_CMD in show takeover; do
+  if [ "$WD_CMD" = show ]; then WD_JSON="$(trailrun show "$LST_ID" --all --no-git --json 2>/dev/null)"; else WD_JSON="$(trailrun takeover "$LST_ID" --all --no-record --json 2>/dev/null)"; fi
+  WD_GOT="$(printf '%s' "$WD_JSON" | node -e '
+let s = "";
+process.stdin.on("data", (d) => { s += d; });
+process.stdin.on("end", () => {
+  let o = null;
+  try { o = JSON.parse(s); } catch { process.stdout.write("unparseable"); return; }
+  if (!Array.isArray(o.withdrawnPrompts)) { process.stdout.write("no-withdrawnPrompts-array"); return; }
+  if (o.withdrawnPrompts.some((p) => !p || typeof p.at !== "string" || typeof p.text !== "string")) { process.stdout.write("entry-shape"); return; }
+  process.stdout.write(o.withdrawnPrompts.map((p) => p.text).join("|"));
+});')"
+  [ "$WD_GOT" = "$WD_JSON_WANT" ] || V19X13_BAD="$V19X13_BAD $WD_CMD-json-withdrawnPrompts=($WD_GOT)"
+done
+if [ -z "$V19X13_BAD" ]; then
+  check "V19x13 a withdrawn prompt is set apart, not dropped: show prints it under its own WITHDRAWN BEFORE SENDING section and not in the timeline, both briefs carry a separate withdrawn section with a hedge line, show --json and takeover --json carry withdrawnPrompts, and a text that is also listed as sent appears in none of them" PASS
+else
+  check "V19x13 withdrawn prompts disclosure:$V19X13_BAD" FAIL
+fi
+
 NCH_ID=4c4c4c4c-0000-0000-0000-000000000043
 NCH_FILE="$(find "$FAKE/.claude/projects" -name "$NCH_ID.jsonl" 2>/dev/null | head -1)"
 NCH_RECENT="$(recent_of "$(trailrun takeover "$NCH_ID" --all --no-record 2>/dev/null)")"
@@ -1934,6 +2039,18 @@ else
   [ "$(grep '"version":"9\.0\.6"' "$BCH_FILE" | head -1 | grep -c '"queued_command"' || true)" = "1" ] || V19X7_BAD="$V19X7_BAD sixth-build-does-not-open-with-its-prompt-less-queued_command"
   [ "$(grep '"type":"user"' "$BCH_FILE" | grep -c '"version":"9\.0\.6"' || true)" = "0" ] || V19X7_BAD="$V19X7_BAD sixth-build-carries-a-user-record"
   [ "$(reasoned_removes "$BCH_FILE")" = "0" ] || V19X7_BAD="$V19X7_BAD fixture-remove-carries-a-reason"
+  BCH_NEXT="$(node -e '
+const fs = require("node:fs");
+let rs = [];
+try { rs = fs.readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)); } catch { process.stdout.write("unreadable"); process.exit(0); }
+const bearing = (r) => r.type === "user" || (r.type === "attachment" && r.attachment && (r.attachment.type === "queued_command" || Object.prototype.hasOwnProperty.call(r.attachment, "prompt")));
+const next = (text) => {
+  const i = rs.findIndex((r) => r.type === "queue-operation" && r.operation === "remove" && r.content === text);
+  const n = i === -1 ? undefined : rs.slice(i + 1).find(bearing);
+  return n ? String(n.version) : "none";
+};
+process.stdout.write(`${next("withdrawn in the first build")},${next("withdrawn in the fifth build")}`);' "$BCH_FILE" 2>/dev/null)"
+  [ "$BCH_NEXT" = "9.0.1,9.0.5" ] || V19X7_BAD="$V19X7_BAD fixture-an-intended-withdrawal-is-not-followed-by-a-record-of-its-own-build($BCH_NEXT)"
 fi
 [ "$(opcount "$BCH_ID" remove)" = "13" ] || V19X7_BAD="$V19X7_BAD fixture-remove-count"
 [ "$(line_count "$BCH_RECENT" 'the first build asks')" = "1" ] || V19X7_BAD="$V19X7_BAD recent-instructions-section-not-found"
@@ -1949,7 +2066,7 @@ fi
 [ "$(line_count "$BCH_RECENT" 'removed in the sixth build')" = "1" ] || V19X7_BAD="$V19X7_BAD sixth-build-withdrew"
 [ "$(line_count "$BCH_RECENT" 'removed in the seventh build')" = "1" ] || V19X7_BAD="$V19X7_BAD seventh-build-withdrew"
 if [ -z "$V19X7_BAD" ]; then
-  check "V19x7 the delivery channel is judged per build, never per read: in a transcript spanning seven builds a reasonless remove withdraws in a build that wrote a readable queued_command attachment — also when that build wrote an attachment of another type whose prompt no enqueue carries — and withdraws nothing in a build that wrote none (its delivery came as a renamed attachment, or its only attachment is of another type), one that wrote an attachment of another type whose prompt carries an enqueued text, or one that wrote a queued_command with no prompt, including a build whose first record is that queued_command, which closes that build and not the one before it" PASS
+  check "V19x7 the delivery channel is judged per build, never per read: in a transcript spanning seven builds a reasonless remove followed by a record of its own build withdraws in a build that wrote a readable queued_command attachment — also when that build wrote an attachment of another type whose prompt no enqueue carries — and withdraws nothing in a build that wrote none (its delivery came as a renamed attachment, or its only attachment is of another type), one that wrote an attachment of another type whose prompt carries an enqueued text, or one that wrote a queued_command with no prompt, including a build whose first record is that queued_command, which closes that build and not the one before it" PASS
 else
   check "V19x7 per-build delivery channel:$V19X7_BAD" FAIL
 fi
@@ -2252,6 +2369,9 @@ process.stdin.on("end", () => {
   }
   const first = removeAt("withdrawn in the first build");
   if (first.length !== 1 || opensAt === -1 || first[0] > opensAt) bad.push("fixture-the-first-build-withdrawal-does-not-precede-the-second-build");
+  const bearing = (r) => r.type === "user" || (r.type === "attachment" && r.attachment && (r.attachment.type === "queued_command" || Object.prototype.hasOwnProperty.call(r.attachment, "prompt")));
+  const afterFirst = first.length === 1 ? records.slice(first[0] + 1).find(bearing) : undefined;
+  if (!afterFirst || afterFirst.version !== "9.1.1") bad.push("fixture-the-first-build-withdrawal-is-not-followed-by-a-record-of-its-own-build");
   const hookAt = records.map((r, i) => (r.version === "9.1.9" ? i : -1)).filter((i) => i !== -1);
   const hookLine = hookAt.length === 1 ? JSON.stringify(records[hookAt[0]]) : "";
   const firstDelivery = records.findIndex((r) => r.type === "attachment" && r.attachment && r.attachment.type === "queued_command");
@@ -2264,7 +2384,7 @@ process.stdin.on("end", () => {
   process.stdout.write(bad.map((b) => " " + b).join(""));
 });' "${FS_FILE:-}" "${REACH_N:-}")"
 if [ -z "$V19X14_BAD" ]; then
-  check "V19x14 a queued_prompt attachment carrying an enqueued text starts the build it names when it is that build's first record, so its veto lands there: the reasonless removal in the build before it is still honored and the one in the vetoed build is not; and an attachment carrying neither a queued_command type nor a prompt field starts no build, although it names one of its own, so the removal after it still belongs to the build that delivered" PASS
+  check "V19x14 a queued_prompt attachment carrying an enqueued text starts the build it names when it is that build's first record, so its veto lands there: the reasonless removal in the build before it, which a record of its own build follows, is still honored and the one in the vetoed build is not; and an attachment carrying neither a queued_command type nor a prompt field starts no build, although it names one of its own, so the removal after it still belongs to the build that delivered" PASS
 else
   check "V19x14 a foreign attachment opening a build:$V19X14_BAD" FAIL
 fi
@@ -2289,7 +2409,7 @@ TR_TRUNCATED="$(field "$TR_ID" truncated)"
 V19Z_BAD=""
 V19Z2_BAD=""
 [ "$TR_TRUNCATED" = "true" ] || { V19Z_BAD="$V19Z_BAD fixture-read-not-truncated"; V19Z2_BAD="$V19Z2_BAD fixture-read-not-truncated"; }
-[ "$(opcount_tail "$TR_ID" remove)" = "1" ] || V19Z_BAD="$V19Z_BAD tail-window-remove-count"
+[ "$(opcount_tail "$TR_ID" remove)" = "2" ] || V19Z_BAD="$V19Z_BAD tail-window-remove-count"
 [ "$(opcount_tail "$TR_ID" popOne)" = "1" ] || V19Z2_BAD="$V19Z2_BAD tail-window-popOne-count"
 if [ -z "$TR_FILE" ] || [ -z "$TAIL_BYTES" ]; then
   V19Z_BAD="$V19Z_BAD no-transcript"

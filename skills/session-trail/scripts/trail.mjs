@@ -1761,45 +1761,19 @@ function creditDeliveries(removes, deliveries) {
   }
 }
 
-function extractPrompts(text, full) {
-  const out = [];
-  const seen = new Set();
-  const push = (at, raw) => {
-    let t = scrub(String(raw || ''));
-    if (!t) return;
-    const slash = SLASH_TAG.exec(t);
-    if (slash) t = `[slash] ${slash[1].trim()}`;
-    else if (BARE_SLASH.test(t)) t = `[slash] ${t.trim()}`;
-    else if (t.startsWith(COMPACTED)) t = `[compaction summary] ${t.slice(COMPACTED.length).replace(/^[.\s]*/, '')}`;
-    if (MACHINE_TAG.test(t)) return;
-    if (MACHINE_PREFIX.some((p) => t.startsWith(p))) return;
-    if (t.startsWith('[Request interrupted')) return;
-    if (t.startsWith('Caveman')) return;
-    const key = t.slice(0, 160);
-    if (seen.has(key)) return;
-    seen.add(key);
-    out.push({ at, text: t });
-  };
-  const entries = [];
-  const copies = new Map();
-  const waiting = new Map();
-  const removes = [];
-  const deliveries = [];
-  const foreign = [];
-  const openBuilds = new Set();
-  const vetoedBuilds = new Set();
-  let build = '';
-  let index = -1;
-  // A queued prompt leaves this listing only when it was WITHDRAWN, never merely
-  // because it left the queue: the listing answers what the session was asked, not
-  // what is still waiting. The build named with the queue vocabulary above
+function queueWithdrawals(records, lastIndex) {
+  // A queued prompt is set apart as WITHDRAWN only when it was taken back, never
+  // merely because it left the queue: the listing answers what the session was asked,
+  // not what is still waiting. The build named with the queue vocabulary above
   // `creditDeliveries` writes `remove` from one queue writer for both
   // `commandsConsumed` (the running turn took the prompt) and `commandsDiscarded` (the
   // user took it back), with `reason` optional on both, so a `remove` alone proves
   // nothing. What tells them apart is the `queued_command` attachment — the harness
-  // handing that prompt to the model — and `creditDeliveries` credits each one to ONE
-  // `remove`: the nearest `remove` of the same text within `QUEUE_DELIVERY_REACH`
-  // records, before or after it, nearest pairs first. Measured on 2026-09-23 over 1595
+  // handing that prompt to the model — and only a `remove` that took a copy and
+  // carries no `reason` can be credited with one: `creditDeliveries` pairs the
+  // attachments and removes of one text within `QUEUE_DELIVERY_REACH` records, before
+  // or after, nearest pairs first and each at most once, so an attachment can end up
+  // credited to a farther `remove` or to none. Measured on 2026-09-23 over 1595
   // local transcripts, 14465 attachments paired that way; the farthest sat 57 records
   // before its `remove` and 21 after it, the far ones being queue drains, where
   // several `remove` records precede their attachments and each attachment is followed
@@ -1809,22 +1783,27 @@ function extractPrompts(text, full) {
   // A `QUEUE_PULLBACKS` record (pulled back into the input box) withdraws the copy it
   // names, in a full read only: in a truncated one the per-name match can take a head
   // copy whose own consumer sat in the unread middle, so a truncated read honors no
-  // withdrawal of either kind, and each listing drawn from one says so through
-  // `QUEUE_WITHDRAWALS_UNFILTERED`. A `remove` with no `reason` and no credited
-  // attachment withdraws its copy only when three things hold. The read is full: a
+  // withdrawal of either kind, and each text listing drawn from one says so through
+  // `QUEUE_WITHDRAWALS_UNFILTERED`, and a `--json` payload through `truncated: true`.
+  // A `remove` with no `reason` and no credited attachment withdraws its copy only
+  // when three things hold. The read is full: a
   // truncated one can hold the delivering attachment in its unread middle. At least
   // `QUEUE_DELIVERY_REACH` records follow it: a live read taken before the attachment
   // was written must not mistake a delivery for a withdrawal, and in those transcripts
   // no unpaired reasonless `remove` sat that close to the end. And the build that
-  // wrote it — the `version` of the last user record, or attachment carrying a
-  // `queued_command` type or a `prompt` field, before it — wrote at least one
+  // wrote it — the `version` of the last record before it that names one, a user
+  // record that is not a tool result or a sidechain record, or an attachment whose
+  // line carries a `queued_command` type or a `prompt` field — wrote at least one
   // `queued_command` attachment whose prompt text is readable, and none that looks
   // reshaped or renamed: a `queued_command` whose `prompt` is neither a string nor an
-  // array, or an attachment of another type whose `prompt` carries an enqueued text. A
-  // build that fails that test may have changed how it hands a prompt over, so the
-  // rule stands down for its records rather than hide deliveries it can no longer tell
-  // apart; 470 of those transcripts span more than one build, which is why the test is
-  // per build and not per read. A `remove` carrying a reason takes its copy without
+  // array, a readable `queued_command` attachment whose text matches no enqueued copy,
+  // or an attachment of another type whose `prompt` carries an enqueued text. The
+  // build is read on both sides: a `remove` followed by a record of another build is
+  // judged under both, because either may have written it. A build that fails that
+  // test may have changed how it hands a prompt over, so the rule stands down for its
+  // records rather than hide deliveries it can no longer tell apart; 470 of those
+  // transcripts span more than one build, which is why the test is per build and not
+  // per read. A `remove` carrying a reason takes its copy without
   // withdrawing it: both reasons recorded here name a delivery, and an unknown one is
   // read the same way. A consumer that names nothing — every `dequeue`, and the
   // `remove` records with no content — withdraws nothing: it cannot say which prompt
@@ -1833,70 +1812,82 @@ function extractPrompts(text, full) {
   // recent copy first, so a repeated prompt keeps its earliest time. Last, a text that
   // any readable `queued_command` attachment carries keeps at least one copy listed,
   // whatever the pairing decided. Each rule errs toward listing a withdrawn prompt.
-  for (const line of text.split('\n')) {
-    if (!line) continue;
-    index++;
-    if (line.indexOf('"type":"queue-operation"') !== -1) {
-      let o; try { o = JSON.parse(line); } catch { continue; }
-      if (!o) continue;
-      const named = queueRecordName(o);
-      if (o.operation === 'enqueue') {
-        const entry = { at: o.timestamp, raw: o.content, withdrawn: false };
-        entries.push(entry);
-        if (named) {
-          if (!copies.has(named)) { copies.set(named, []); waiting.set(named, []); }
-          copies.get(named).push(entry);
-          waiting.get(named).push(entry);
-        }
-      } else if (named && QUEUE_CONSUMERS.has(o.operation)) {
-        const taken = (waiting.get(named) || []).pop() || null;
-        if (QUEUE_PULLBACKS.has(o.operation)) {
-          if (taken) taken.withdrawn = true;
-        } else if (o.operation === 'remove') {
-          removes.push({ index, named, build, taken, reasonless: o.reason === undefined, delivered: false });
-        }
-      }
-      continue;
+  // The copies withdrawn are returned rather than dropped: `extractPrompts` lists them
+  // apart from the sent ones, and leaves out any whose text is also listed as sent.
+  const copies = new Map();
+  const waiting = new Map();
+  const withdrawn = new Set();
+  const removes = [];
+  const deliveries = [];
+  const foreign = [];
+  const openBuilds = new Set();
+  const vetoedBuilds = new Set();
+  const boundary = [];
+  let build = '';
+  for (const rec of records) {
+    if (rec.kind === 'user' || rec.kind === 'attachment') {
+      build = rec.build;
+      for (const r of boundary.splice(0)) r.next = build;
     }
-    if (line.indexOf('"type":"attachment"') !== -1
-      && (line.indexOf(`"${QUEUE_DELIVERY_ATTACHMENT}"`) !== -1 || line.indexOf('"prompt":') !== -1)) {
-      let o; try { o = JSON.parse(line); } catch { continue; }
-      if (o && o.type === 'attachment' && o.attachment) {
-        build = typeof o.version === 'string' ? o.version : '';
-        const p = o.attachment.prompt;
-        const t = messageText(p).trim();
-        if (o.attachment.type !== QUEUE_DELIVERY_ATTACHMENT) {
-          if (t) foreign.push({ named: t, build });
-        } else if (typeof p !== 'string' && !Array.isArray(p)) {
-          vetoedBuilds.add(build);
-        } else if (t) {
-          deliveries.push({ index, named: t });
-          openBuilds.add(build);
-        }
-        continue;
+    if (rec.kind === 'attachment') {
+      if (!rec.delivery) {
+        if (rec.named) foreign.push({ named: rec.named, build });
+      } else if (!rec.readable) {
+        vetoedBuilds.add(build);
+      } else if (rec.named) {
+        deliveries.push({ index: rec.index, named: rec.named, build });
+        openBuilds.add(build);
+      }
+    } else if (rec.kind === 'enqueue') {
+      if (!rec.named) continue;
+      if (!copies.has(rec.named)) { copies.set(rec.named, []); waiting.set(rec.named, []); }
+      copies.get(rec.named).push(rec.entry);
+      waiting.get(rec.named).push(rec.entry);
+    } else if (rec.kind !== 'user') {
+      const taken = (waiting.get(rec.named) || []).pop() || null;
+      if (QUEUE_PULLBACKS.has(rec.operation)) {
+        if (taken) withdrawn.add(taken);
+      } else if (rec.operation === 'remove') {
+        const remove = { index: rec.index, named: rec.named, build, next: build, taken, reasonless: rec.reasonless, delivered: false };
+        removes.push(remove);
+        boundary.push(remove);
       }
     }
-    if (line.indexOf('"type":"user"') === -1) continue;
-    if (line.indexOf('"toolUseResult"') !== -1) continue;
-    if (line.indexOf('"isSidechain":true') !== -1) continue;
-    let o; try { o = JSON.parse(line); } catch { continue; }
-    if (!o || o.type !== 'user') continue;
-    build = typeof o.version === 'string' ? o.version : '';
-    entries.push({ at: o.timestamp, raw: messageText(o.message && o.message.content) });
   }
-  creditDeliveries(removes, deliveries);
+  creditDeliveries(removes.filter((r) => r.taken && r.reasonless), deliveries);
   for (const f of foreign) if (copies.has(f.named)) vetoedBuilds.add(f.build);
+  for (const d of deliveries) if (!copies.has(d.named)) vetoedBuilds.add(d.build);
   for (const r of removes) {
     if (!r.taken || !r.reasonless || r.delivered) continue;
-    if (index - r.index < QUEUE_DELIVERY_REACH) continue;
-    if (!openBuilds.has(r.build) || vetoedBuilds.has(r.build)) continue;
-    r.taken.withdrawn = true;
+    if (lastIndex - r.index < QUEUE_DELIVERY_REACH) continue;
+    if (![r.build, r.next].every((b) => openBuilds.has(b) && !vetoedBuilds.has(b))) continue;
+    withdrawn.add(r.taken);
   }
   for (const named of new Set(deliveries.map((d) => d.named))) {
     const mine = copies.get(named) || [];
-    if (mine.length && mine.every((e) => e.withdrawn)) mine[mine.length - 1].withdrawn = false;
+    if (mine.length && mine.every((e) => withdrawn.has(e))) withdrawn.delete(mine[mine.length - 1]);
   }
-  for (const e of entries) if (!(full === true && e.withdrawn === true)) push(e.at, e.raw);
+  return withdrawn;
+}
+
+function promptListing(entries, listed) {
+  const out = [];
+  for (const { at, raw } of entries) {
+    let t = scrub(String(raw || ''));
+    if (!t) continue;
+    const slash = SLASH_TAG.exec(t);
+    if (slash) t = `[slash] ${slash[1].trim()}`;
+    else if (BARE_SLASH.test(t)) t = `[slash] ${t.trim()}`;
+    else if (t.startsWith(COMPACTED)) t = `[compaction summary] ${t.slice(COMPACTED.length).replace(/^[.\s]*/, '')}`;
+    if (MACHINE_TAG.test(t)) continue;
+    if (MACHINE_PREFIX.some((p) => t.startsWith(p))) continue;
+    if (t.startsWith('[Request interrupted')) continue;
+    if (t.startsWith('Caveman')) continue;
+    const key = t.slice(0, 160);
+    if (listed.has(key)) continue;
+    listed.add(key);
+    out.push({ at, text: t });
+  }
   // Code units, not `localeCompare`: these are ISO-8601 stamps, where the two
   // agree on every input that matters — but `localeCompare` resolves the host
   // locale, so the ONE rule this file now holds for ledger records may as well
@@ -1908,6 +1899,58 @@ function extractPrompts(text, full) {
     return x > y ? 1 : 0;
   });
   return out;
+}
+
+function extractPrompts(text, full) {
+  const entries = [];
+  const records = [];
+  let index = -1;
+  for (const line of text.split('\n')) {
+    if (!line) continue;
+    index++;
+    if (line.indexOf('"type":"queue-operation"') !== -1) {
+      let o; try { o = JSON.parse(line); } catch { continue; }
+      if (!o) continue;
+      const named = queueRecordName(o);
+      if (o.operation === 'enqueue') {
+        const entry = { at: o.timestamp, raw: o.content };
+        entries.push(entry);
+        records.push({ index, kind: 'enqueue', named, entry });
+      } else if (named && QUEUE_CONSUMERS.has(o.operation)) {
+        records.push({ index, kind: 'consume', operation: o.operation, named, reasonless: o.reason === undefined });
+      }
+      continue;
+    }
+    if (line.indexOf('"type":"attachment"') !== -1
+      && (line.indexOf(`"${QUEUE_DELIVERY_ATTACHMENT}"`) !== -1 || line.indexOf('"prompt":') !== -1)) {
+      let o; try { o = JSON.parse(line); } catch { continue; }
+      if (o && o.type === 'attachment' && o.attachment) {
+        const p = o.attachment.prompt;
+        records.push({
+          index,
+          kind: 'attachment',
+          build: typeof o.version === 'string' ? o.version : '',
+          delivery: o.attachment.type === QUEUE_DELIVERY_ATTACHMENT,
+          readable: typeof p === 'string' || Array.isArray(p),
+          named: messageText(p).trim(),
+        });
+        continue;
+      }
+    }
+    if (line.indexOf('"type":"user"') === -1) continue;
+    if (line.indexOf('"toolUseResult"') !== -1) continue;
+    if (line.indexOf('"isSidechain":true') !== -1) continue;
+    let o; try { o = JSON.parse(line); } catch { continue; }
+    if (!o || o.type !== 'user') continue;
+    records.push({ index, kind: 'user', build: typeof o.version === 'string' ? o.version : '' });
+    entries.push({ at: o.timestamp, raw: messageText(o.message && o.message.content) });
+  }
+  const withdrawn = full === true ? queueWithdrawals(records, index) : new Set();
+  const listed = new Set();
+  return {
+    prompts: promptListing(entries.filter((e) => !withdrawn.has(e)), listed),
+    withdrawn: promptListing(entries.filter((e) => withdrawn.has(e)), listed),
+  };
 }
 
 function extractAssistantTail(text, n) {
@@ -2113,14 +2156,17 @@ function extractPendingQueue(text, reliable, tailOffset = 0) {
 // matches its enqueue is skipped the same way, which can only over-report a
 // prompt, never hide one. `extractPrompts` above walks the same records to answer a
 // different question — what the session was asked — and takes the name from the
-// same `queueRecordName`; its matching is its own, and its comment states it. The
+// same `queueRecordName`; the matching is `queueWithdrawals`' own, and its comment states it. The
 // pull-backs are `QUEUE_PULLBACKS` and every one of them is a consumer, which is why
 // `QUEUE_CONSUMERS` is built from that set rather than spelling it again. An
 // operation outside `QUEUE_CONSUMERS` leaves the depth alone for the same reason:
 // taking an unknown record for a consumer would report "nothing is queued" for a
 // session about to act on its own. It is counted in `unknown` instead, so the
-// verdict can say the queue was not measured rather than call it empty.
-const EMPTY_QUEUE = Object.freeze({ pending: 0, last: null, at: null, unknown: 0, unknownAt: null });
+// verdict can say the queue was not measured rather than call it empty. A consumer
+// that finds the depth already at zero is clamped there and counted in `overdrawn`
+// for the same reason, on a whole-text scan only: a tail slice opens on consumers
+// whose prompts sat in the unread gap, where one at zero is expected, not a miss.
+const EMPTY_QUEUE = Object.freeze({ pending: 0, last: null, at: null, unknown: 0, unknownAt: null, overdrawn: 0, overdrawnAt: null });
 
 function scanQueue(text, tailSlice) {
   if (typeof tailSlice !== 'boolean') throw new Error(`internal: scanQueue needs an explicit tailSlice boolean, got ${JSON.stringify(tailSlice)}`);
@@ -2143,6 +2189,10 @@ function scanQueue(text, tailSlice) {
         const held = enqueuedHere.get(named) || 0;
         if (held === 0) continue;
         enqueuedHere.set(named, held - 1);
+      }
+      if (q.pending === 0 && tailSlice === false) {
+        q.overdrawn++;
+        q.overdrawnAt = o.timestamp || null;
       }
       q.pending = Math.max(0, q.pending - 1);
       if (q.pending === 0) { q.last = null; q.at = null; }
@@ -2247,7 +2297,6 @@ function measuredVerdict(r) {
   const q = r.queue || extractPendingQueue('', false);
   const turn = r.lastTurn || { kind: 'unknown', stopReason: null };
   const qAt = q.at ? Date.parse(q.at) : NaN;
-  const uAt = q.unknownAt ? Date.parse(q.unknownAt) : NaN;
   // An unreadable timestamp counts as fresh: a real queued prompt is a genuine
   // hazard, and over-reporting it now costs one question, not a refusal. The same
   // rule ages an unknown-kind record below, so it is spelled once. A stamp ahead
@@ -2268,9 +2317,10 @@ function measuredVerdict(r) {
   // "Nothing is queued" is a positive claim, so it may only be made from a read
   // that could have SEEN a queue. An unreliable read reports its own blindness
   // instead — including when the depth came back zero, which on a partial read
-  // means nothing at all. A full read is blind in one way as well: a queue record
+  // means nothing at all. A full read is blind in two ways as well: a queue record
   // of a kind `scanQueue` does not know may have ADDED a prompt the depth never
-  // counted, so a recent one is disclosed beside whatever a PROBABLY_FREE reason
+  // counted, and a consumer record that arrived while the depth was already zero
+  // shows the balance missed one, so a recent one of either is disclosed beside whatever a PROBABLY_FREE reason
   // says about the depth — a zero becomes unmeasured, and a stale depth loses its
   // "not a waiting prompt" — and it ages out under the same 15 minutes as a stale
   // depth, for the same reason; a record whose stamp is unreadable never ages and
@@ -2283,17 +2333,23 @@ function measuredVerdict(r) {
   // the queue is not measured, and the first withholds its "not a waiting prompt"
   // whenever that list is non-empty — and "Nothing is queued." is reserved for a
   // reliable zero with no such reason.
-  const unknownFresh = q.unknown > 0 && freshAt(uAt);
-  const unknownStamp = stampState(uAt);
-  const unknownSeen = unknownStamp === 'past'
-    ? `the last one ${ago(uAt)} ago`
-    : unknownStamp === 'ahead' ? 'the last one stamped ahead of this clock' : 'with no readable time';
-  const unknownClause = unknownFresh
-    ? `its transcript carries ${q.unknown} queue record(s) of a kind this version does not know, ${unknownSeen}`
+  const recentRecords = (count, at, kind) => {
+    const ms = at ? Date.parse(at) : NaN;
+    if (!(count > 0) || !freshAt(ms)) return '';
+    const stamp = stampState(ms);
+    const seen = stamp === 'past'
+      ? `the last one ${ago(ms)} ago`
+      : stamp === 'ahead' ? 'the last one stamped ahead of this clock' : 'with no readable time';
+    return `its transcript carries ${count} ${kind}, ${seen}`;
+  };
+  const unknownClause = recentRecords(q.unknown, q.unknownAt, 'queue record(s) of a kind this version does not know');
+  const overdrawClause = q.reliable === true
+    ? recentRecords(q.overdrawn, q.overdrawnAt, 'consumer record(s) that arrived while the counted depth was already zero')
     : '';
   const unmeasured = [];
   if (q.reliable !== true) unmeasured.push('the transcript was read head+tail only');
   if (unknownClause) unmeasured.push(unknownClause);
+  if (overdrawClause) unmeasured.push(overdrawClause);
   const common = { idleMin, queueMeasured: unmeasured.length === 0 };
   let queueNote = '';
   if (q.pending > 0 && !queueCounts && q.reliable === true) {
@@ -2480,7 +2536,9 @@ function summarize(file, size, deep) {
     lastTurn: extractLastTurn(text, read.tailOffset),
   };
   if (deep) {
-    out.prompts = extractPrompts(text, read.full);
+    const listing = extractPrompts(text, read.full);
+    out.prompts = listing.prompts;
+    out.withdrawnPrompts = listing.withdrawn;
     out.assistantTail = extractAssistantTail(text, 3);
     out.touched = extractTouchedFiles(text, 25);
     out.tasks = extractTasks(text);
@@ -4501,6 +4559,13 @@ function cmdShow(opts) {
   // BRIEFS remain a stated gap in SKILL.md; this is the terminal renderer, where
   // there is nothing to trade away.
   for (const p of shown) print(`[${oneLine(flatPath(p.at), 40).slice(0, 16)}] ${oneLine(flatPath(p.text), 300)}`);
+  const wd = r.withdrawnPrompts || [];
+  if (wd.length) {
+    const wdShown = wd.slice(-Math.max(1, opts.prompts));
+    print('\n--- WITHDRAWN BEFORE SENDING (judged from the queue records; do not act on these) ---');
+    if (wd.length > wdShown.length) print(`(${wd.length - wdShown.length} earlier withdrawn prompts omitted — raise with --prompts N)`);
+    for (const p of wdShown) print(`[${oneLine(flatPath(p.at), 40).slice(0, 16)}] ${oneLine(flatPath(p.text), 300)}`);
+  }
   if (r.assistantTail && r.assistantTail.length) {
     print('\n--- LAST ASSISTANT OUTPUT ---');
     for (const a of r.assistantTail) print(`[${oneLine(flatPath(a.at), 40).slice(0, 16)}] ${oneLine(flatPath(a.text), 400)}`);
@@ -4707,6 +4772,18 @@ function cmdTakeover(opts) {
     L.push(`### \`${briefPath(oneLine(p.at, 40).slice(0, 16))}\``);
     L.push(clip(p.text, 2500));
   }
+  const withdrawnAll = r.withdrawnPrompts || [];
+  if (withdrawnAll.length) {
+    const withdrawnRecent = withdrawnAll.slice(-Math.max(1, opts.prompts));
+    L.push('');
+    L.push('## Withdrawn before sending — do not act on these');
+    L.push('_Judged from the queue records rather than observed: each was queued, then taken back before the session received it. Ask the user before acting on any of them._');
+    if (withdrawnAll.length > withdrawnRecent.length) L.push(`_(${withdrawnAll.length - withdrawnRecent.length} earlier withdrawn prompts omitted)_`);
+    for (const p of withdrawnRecent) {
+      L.push(`### \`${briefPath(oneLine(p.at, 40).slice(0, 16))}\``);
+      L.push(clip(p.text, 2500));
+    }
+  }
   L.push('');
   L.push('## What it said last');
   for (const a of (r.assistantTail || [])) {
@@ -4878,6 +4955,15 @@ function cmdHandoff(opts) {
   const hpShown = hp.slice(-30);
   if (hp.length > hpShown.length) L.push(`- _(${hp.length - hpShown.length} earlier prompts omitted)_`);
   for (const p of hpShown) L.push(`- \`${briefPath(oneLine(p.at, 40).slice(0, 16))}\` ${oneLine(p.text, 400)}`);
+  const hw = r.withdrawnPrompts || [];
+  if (hw.length) {
+    const hwShown = hw.slice(-30);
+    L.push('');
+    L.push('## Withdrawn before sending — do not act on these');
+    L.push('- _judged from the queue records rather than observed: each was queued, then taken back before the session received it_');
+    if (hw.length > hwShown.length) L.push(`- _(${hw.length - hwShown.length} earlier withdrawn prompts omitted)_`);
+    for (const p of hwShown) L.push(`- \`${briefPath(oneLine(p.at, 40).slice(0, 16))}\` ${oneLine(p.text, 400)}`);
+  }
   L.push('');
   L.push('## Git state');
   if (!g) L.push('- worktree directory is gone; git state unavailable');
@@ -6086,10 +6172,10 @@ function isEntryPoint() {
 // The advice surface: SEVEN names — six functions plus the regex that grades their output.
 // THREE take a plain record (`worktreeAdvice`, `adviceLeg`, `whereAdviceLines`) and THREE take
 // lines (`adviceBlock`, `recipePlaceholders`, `substitutionRuleLines`). The count moved twice
-// without this header moving with it, which is the drift its own closing sentence forbids.
-// Nothing else in this file can be driven without a WORKING TREE — an index, a transcript, a
-// desktop-app store — which is what makes this the right export set. Named exports rather than
-// a default, so a consumer's import list says what it uses.
+// without this header moving with it, so T24h in the skill suite now compares the two.
+// This header describes the advice statement alone: the prompt listing has its own statement
+// below it, so neither count can go stale because of the other. Named exports rather than a
+// default, so a consumer's import list says what it uses.
 //
 // TWO impurities, stated because an importer would otherwise be entitled to assume none, and
 // the count moved when `whereAdviceLines` joined the set.
@@ -6120,6 +6206,7 @@ function isEntryPoint() {
 // sentence would have defended against the one failure mode that cannot occur here. Nothing
 // in this surface calls `fail()`, and the extraction obligation that sentence carried is
 // DISCHARGED — do not restore it from an older reading.
-export { adviceBlock, worktreeAdvice, adviceLeg, whereAdviceLines, substitutionRuleLines, recipePlaceholders, WORKTREE_ADVICE_COMMAND, extractPrompts, QUEUE_DELIVERY_REACH };
+export { adviceBlock, worktreeAdvice, adviceLeg, whereAdviceLines, substitutionRuleLines, recipePlaceholders, WORKTREE_ADVICE_COMMAND };
+export { extractPrompts, QUEUE_DELIVERY_REACH };
 
 if (isEntryPoint()) main();

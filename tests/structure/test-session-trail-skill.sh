@@ -964,8 +964,10 @@ for CONSUMER_OP in $CONSUMERS; do
   printf '%s\n' "$QUEUE_BULLET" | grep -qF "\`$CONSUMER_OP\`" || CONSUMER_MISS="$CONSUMER_MISS [$CONSUMER_OP]"
 done
 [ "$CONSUMER_N" -gt 0 ] || CONSUMER_MISS="$CONSUMER_MISS [script-consumer-set-unreadable]"
+printf '%s\n' "$QUEUE_BULLET" | grep -qF -- 'is clamped at zero and counted as an overdraw' || CONSUMER_MISS="$CONSUMER_MISS [overdraw-counter-undocumented]"
+printf '%s\n' "$QUEUE_BULLET" | grep -qF -- '`overdrawn`' || CONSUMER_MISS="$CONSUMER_MISS [overdraw-field-unnamed]"
 if [ -z "$CONSUMER_MISS" ]; then
-  check "T24b every operation in QUEUE_CONSUMERS ($CONSUMER_N) is named in the SKILL.md queue-depth gotcha" PASS
+  check "T24b every operation in QUEUE_CONSUMERS ($CONSUMER_N) is named in the SKILL.md queue-depth gotcha, which also documents that a consumer at depth zero is clamped and counted as an overdraw in \`overdrawn\`" PASS
 else
   check "T24b queue consumer drift:$CONSUMER_MISS" FAIL
 fi
@@ -984,6 +986,7 @@ LEAD_MISS=""
 if [ -n "$UNMEASURED_LEAD" ]; then
   printf '%s\n' "$PROBABLY_FREE_ROW" | grep -qF -- "$UNMEASURED_LEAD" || LEAD_MISS="$LEAD_MISS [table-probably-free-row]"
   printf '%s\n' "$UNKNOWN_BULLET" | grep -qF -- "$UNMEASURED_LEAD" || LEAD_MISS="$LEAD_MISS [unknown-record-gotcha]"
+  printf '%s\n' "$UNKNOWN_BULLET" | grep -qF -- "a \`PROBABLY_FREE\` reason says the $UNMEASURED_LEAD, beside a depth of 0" || LEAD_MISS="$LEAD_MISS [unknown-record-gotcha-breaks-the-sentence-before-beside-a-depth-of-0]"
   LEAD_SPELLING_N="$(js_outside_comments "$TRAIL_MJS" | grep -oF -- "$UNMEASURED_LEAD" | grep -c . || true)"
   [ "$LEAD_SPELLING_N" = "1" ] || LEAD_MISS="$LEAD_MISS [script-spells-the-lead-in-$LEAD_SPELLING_N-times-not-once-outside-comments]"
 fi
@@ -995,7 +998,7 @@ fi
 
 DELIVERY_ATTACHMENT="$(sed -n "s/^const QUEUE_DELIVERY_ATTACHMENT = '\(.*\)';$/\1/p" "$TRAIL_MJS")"
 DELIVERY_REACH="$(sed -n 's/^const QUEUE_DELIVERY_REACH = \([0-9][0-9]*\);$/\1/p' "$TRAIL_MJS")"
-WITHDRAWAL_BULLET="$(printf '%s\n' "$GOTCHAS" | grep -E '^- \*\*The prompt listing drops a queued prompt only when it was withdrawn' || true)"
+WITHDRAWAL_BULLET="$(printf '%s\n' "$GOTCHAS" | grep -E '^- \*\*The prompt listing sets a queued prompt apart as withdrawn only when it can see no delivery of the same text\.\*\*' || true)"
 WITHDRAW_MISS=""
 WITHDRAW_N=0
 [ -n "$WITHDRAWAL_BULLET" ] || WITHDRAW_MISS="$WITHDRAW_MISS [withdrawal-bullet-not-found]"
@@ -1019,7 +1022,7 @@ if [ -n "$DELIVERY_REACH" ]; then
   SCRIPT_FARTHEST="$(sed -n 's/^[[:space:]]*\/\/ \{0,1\}//p' "$TRAIL_MJS" | tr '\n' ' ' | grep -oE 'the farthest sat [0-9]+ records before its .remove. and [0-9]+ after it' || true)"
   SCRIPT_PAIRS="$(printf '%s\n' "$SCRIPT_FARTHEST" | grep -c . || true)"
   SCRIPT_PAIR="$(printf '%s\n' "$SCRIPT_FARTHEST" | sed -n 's/^the farthest sat \([0-9][0-9]*\) records before its .remove. and \([0-9][0-9]*\) after it$/\1 \2/p')"
-  EP_PAIRS="$(awk '/^function extractPrompts\(/ { f = 1 } f { print } f && /^}/ { exit }' "$TRAIL_MJS" | sed -n 's/^[[:space:]]*\/\/ \{0,1\}//p' | tr '\n' ' ' | grep -oE 'the farthest sat [0-9]+ records before its .remove. and [0-9]+ after it' | grep -c . || true)"
+  EP_PAIRS="$(awk '/^function queueWithdrawals\(/ { f = 1 } f { print } f && /^}/ { exit }' "$TRAIL_MJS" | sed -n 's/^[[:space:]]*\/\/ \{0,1\}//p' | tr '\n' ' ' | grep -oE 'the farthest sat [0-9]+ records before its .remove. and [0-9]+ after it' | grep -c . || true)"
   BULLET_PAIRS="$(printf '%s\n' "$WITHDRAWAL_BULLET" | grep -oE 'the farthest [0-9]+ records before its .remove. and [0-9]+ after it' | grep -c . || true)"
   if [ -z "$FARTHEST" ]; then
     WITHDRAW_MISS="$WITHDRAW_MISS [measured-farthest-pair-unreadable]"
@@ -1028,7 +1031,7 @@ if [ -n "$DELIVERY_REACH" ]; then
   elif [ "$SCRIPT_PAIRS" != "1" ]; then
     WITHDRAW_MISS="$WITHDRAW_MISS [script-comment-states-the-measured-pair-$SCRIPT_PAIRS-times-not-once]"
   elif [ "$EP_PAIRS" != "1" ]; then
-    WITHDRAW_MISS="$WITHDRAW_MISS [the-measured-pair-is-not-stated-inside-the-extractPrompts-comment]"
+    WITHDRAW_MISS="$WITHDRAW_MISS [the-measured-pair-is-not-stated-inside-the-queueWithdrawals-comment]"
   elif [ "$SCRIPT_PAIR" != "$FARTHEST" ]; then
     WITHDRAW_MISS="$WITHDRAW_MISS [script-comment-pair-${SCRIPT_PAIR% *}-${SCRIPT_PAIR#* }-disagrees-with-bullet-pair-$FAR_BEFORE-$FAR_AFTER]"
   elif [ "$DELIVERY_REACH" -lt "$FAR_BEFORE" ] || [ "$DELIVERY_REACH" -lt "$FAR_AFTER" ]; then
@@ -1038,7 +1041,7 @@ else
   WITHDRAW_MISS="$WITHDRAW_MISS [script-delivery-reach-unreadable]"
 fi
 if [ -z "$WITHDRAW_MISS" ]; then
-  check "T24d every pull-back operation in QUEUE_PULLBACKS ($WITHDRAW_N) is a consumer and is named, with the QUEUE_DELIVERY_ATTACHMENT type ('$DELIVERY_ATTACHMENT') and the QUEUE_DELIVERY_REACH value ($DELIVERY_REACH), in the SKILL.md bullet that states the prompt listing's withdrawal rule, and that value is at least the farthest measured delivery pair the bullet states ($FAR_BEFORE records before its remove, $FAR_AFTER after it), which the bullet states once and the script states once, inside the extractPrompts comment, and identically" PASS
+  check "T24d every pull-back operation in QUEUE_PULLBACKS ($WITHDRAW_N) is a consumer and is named, with the QUEUE_DELIVERY_ATTACHMENT type ('$DELIVERY_ATTACHMENT') and the QUEUE_DELIVERY_REACH value ($DELIVERY_REACH), in the SKILL.md bullet that states the prompt listing's withdrawal rule, and that value is at least the farthest measured delivery pair the bullet states ($FAR_BEFORE records before its remove, $FAR_AFTER after it), which the bullet states once and the script states once, inside the queueWithdrawals comment, and identically" PASS
 else
   check "T24d withdrawal vocabulary drift:$WITHDRAW_MISS" FAIL
 fi
@@ -1054,7 +1057,18 @@ for LISTING_NEEDLE in \
   "\`list\`, \`limited\` and an ambiguous selector" \
   "the session's title when it has one, otherwise the harness's own \`last-prompt\` record, and this rule filters neither" \
   "\`show\`'s truncation note and both briefs' say so" \
-  "under \`--json\` \`truncated: true\` means the same for the \`prompts\` field"; do
+  "under \`--json\` \`truncated: true\` means the same for the \`prompts\` field" \
+  "A withdrawn prompt is not dropped: \`show\` and both briefs print it in a separate section" \
+  "\`show --json\` and \`takeover --json\` carry it as \`withdrawnPrompts\`" \
+  "a text also listed as sent appears only among the sent" \
+  "Only a \`remove\` that took a copy and carries no \`reason\` can be credited" \
+  "nearest pair first, each attachment and each \`remove\` at most once" \
+  "an attachment can end up credited to a farther \`remove\` or to none" \
+  "a user record that is not a tool result or a sidechain record, or an attachment whose line carries a \`queued_command\` type or a \`prompt\` field" \
+  "a \`remove\` followed by a record of another build is judged under both" \
+  "by one whose text matches no enqueued copy" \
+  "a content-less \`remove\` and a content-less pull-back withdraw nothing" \
+  "a delivered prompt is still set apart as withdrawn when its delivery was never written"; do
   printf '%s\n' "$WITHDRAWAL_BULLET" | grep -qF -- "$LISTING_NEEDLE" || LISTING_MISS="$LISTING_MISS [bullet-lacks:$LISTING_NEEDLE]"
 done
 LABEL_LINES="$(js_outside_comments "$TRAIL_MJS" | grep -F 'print(' | grep -F 'r.lastPrompt' || true)"
@@ -1063,7 +1077,7 @@ LABEL_TITLE_FIRST="$(printf '%s\n' "$LABEL_LINES" | grep -cF 'r.title || r.lastP
 [ "$LABEL_N" -gt 0 ] || LISTING_MISS="$LISTING_MISS [no-label-renderer-found]"
 [ "$LABEL_TITLE_FIRST" = "$LABEL_N" ] || LISTING_MISS="$LISTING_MISS [a-label-renderer-shows-the-last-prompt-before-the-title]"
 if [ -z "$LISTING_MISS" ]; then
-  check "T24g the SKILL.md withdrawal bullet names every reader of the prompt listing, says the one-line label beside a session is its title or else the unfiltered last-prompt record, and says a truncated read's notes and its --json truncated flag disclose that no withdrawal was applied; each of the $LABEL_N label renderers in the script prints the title before the last prompt" PASS
+  check "T24g the SKILL.md withdrawal bullet names every reader of the prompt listing, says the one-line label beside a session is its title or else the unfiltered last-prompt record, says a truncated read's notes and its --json truncated flag disclose that no withdrawal was applied, says a withdrawn prompt is set apart in a separate section and carried as withdrawnPrompts, and states the crediting order, the build definition, the two-build judgement, the unmatched-delivery veto, the content-less pull-back and the residual; each of the $LABEL_N label renderers in the script prints the title before the last prompt" PASS
 else
   check "T24g prompt-listing reader drift:$LISTING_MISS" FAIL
 fi
@@ -1105,6 +1119,98 @@ if [ -z "$READER_MISS" ]; then
   check "T24f the text-block join has one owner, messageText, and both queue readers — extractPrompts and scanQueue — take a record's name from the one queueRecordName" PASS
 else
   check "T24f shared reader helpers drift:$READER_MISS" FAIL
+fi
+
+EXPORT_MISS=""
+EXPORT_LINES="$(grep -E '^export \{' "$TRAIL_MJS" || true)"
+EXPORT_N="$(printf '%s\n' "$EXPORT_LINES" | grep -c . || true)"
+[ "$EXPORT_N" = "2" ] || EXPORT_MISS="$EXPORT_MISS [$EXPORT_N-export-statements-not-2]"
+printf '%s\n' "$EXPORT_LINES" | grep -qxF 'export { extractPrompts, QUEUE_DELIVERY_REACH };' || EXPORT_MISS="$EXPORT_MISS [listing-export-statement-missing]"
+ADVICE_EXPORT="$(printf '%s\n' "$EXPORT_LINES" | grep -F 'adviceBlock' || true)"
+[ -n "$ADVICE_EXPORT" ] || EXPORT_MISS="$EXPORT_MISS [advice-export-statement-missing]"
+case "$ADVICE_EXPORT" in *extractPrompts*|*QUEUE_DELIVERY_REACH*) EXPORT_MISS="$EXPORT_MISS [advice-export-names-the-listing]" ;; esac
+ADVICE_N="$(printf '%s\n' "$ADVICE_EXPORT" | sed -n 's/^export { \(.*\) };$/\1/p' | tr ',' '\n' | grep -c . || true)"
+if [ "$ADVICE_N" -gt 0 ] 2>/dev/null && [ "$ADVICE_N" -le 12 ]; then
+  ADVICE_WORD="$(printf '%s\n' ONE TWO THREE FOUR FIVE SIX SEVEN EIGHT NINE TEN ELEVEN TWELVE | sed -n "${ADVICE_N}p")"
+  grep -qF "The advice surface: $ADVICE_WORD names" "$TRAIL_MJS" || EXPORT_MISS="$EXPORT_MISS [advice-header-does-not-count-its-$ADVICE_N-names]"
+else
+  EXPORT_MISS="$EXPORT_MISS [advice-export-name-count-unreadable]"
+fi
+if grep -qF 'can be driven without a WORKING TREE' "$TRAIL_MJS"; then
+  EXPORT_MISS="$EXPORT_MISS [advice-header-keeps-the-working-tree-claim]"
+fi
+if [ -z "$EXPORT_MISS" ]; then
+  check "T24h the prompt listing is exported by its own statement, export { extractPrompts, QUEUE_DELIVERY_REACH };, the advice statement names only the advice surface, and the advice export header counts its $ADVICE_N names and no longer claims that nothing else in the file can be driven without a working tree" PASS
+else
+  check "T24h export statements drift:$EXPORT_MISS" FAIL
+fi
+
+WD_MISS=""
+WD_CODE="$(js_outside_comments "$TRAIL_MJS")"
+WD_DEFS="$(printf '%s\n' "$WD_CODE" | grep -cE '^function queueWithdrawals\(records, lastIndex\) \{$' || true)"
+[ "$WD_DEFS" = "1" ] || WD_MISS="$WD_MISS [queueWithdrawals-defined-$WD_DEFS-times]"
+WD_NAMED="$(printf '%s\n' "$WD_CODE" | grep -oF 'queueWithdrawals(' | grep -c . || true)"
+[ "$WD_NAMED" = "2" ] || WD_MISS="$WD_MISS [queueWithdrawals-named-$WD_NAMED-times-not-its-definition-plus-one-call]"
+EP_BODY="$(printf '%s\n' "$WD_CODE" | awk '/^function extractPrompts\(/ { f = 1 } f { print } f && /^}/ { exit }')"
+[ -n "$EP_BODY" ] || WD_MISS="$WD_MISS [extractPrompts-not-found]"
+printf '%s\n' "$EP_BODY" | grep -qF 'full === true ? queueWithdrawals(records, index) : new Set()' || WD_MISS="$WD_MISS [extractPrompts-does-not-call-queueWithdrawals-on-a-full-read-only]"
+for WD_STATE in creditDeliveries openBuilds vetoedBuilds waiting copies; do
+  if printf '%s\n' "$EP_BODY" | grep -qF "$WD_STATE"; then WD_MISS="$WD_MISS [extractPrompts-still-decides-with-$WD_STATE]"; fi
+done
+if [ -z "$WD_MISS" ]; then
+  check "T24i every withdrawal decision lives in queueWithdrawals(records, lastIndex): extractPrompts calls it once, only on a full read, and holds none of its pairing or build state" PASS
+else
+  check "T24i withdrawal decision drift:$WD_MISS" FAIL
+fi
+
+ANSWERED_MISS=""
+FORCE_HEAD='**`--force` writes nothing and forces nothing on disk.**'
+ROUTING_HEAD='`STATUS LIVE` on its own is **not** a reason to refuse'
+FORCE_PARA="$(grep -F -- "$FORCE_HEAD" "$SKILL_MD" || true)"
+FORCE_PARA_N="$(grep -cF -- "$FORCE_HEAD" "$SKILL_MD" || true)"
+ROUTING_LINE="$(printf '%s\n' "$WORKFLOWS" | grep -F -- "$ROUTING_HEAD" || true)"
+ROUTING_N="$(printf '%s\n' "$WORKFLOWS" | grep -cF -- "$ROUTING_HEAD" || true)"
+[ "$FORCE_PARA_N" = "1" ] || ANSWERED_MISS="$ANSWERED_MISS [force-paragraph-found-$FORCE_PARA_N-times]"
+[ "$ROUTING_N" = "1" ] || ANSWERED_MISS="$ANSWERED_MISS [routing-sentence-found-$ROUTING_N-times]"
+[ "$PROBABLY_FREE_ROW_N" = "1" ] || ANSWERED_MISS="$ANSWERED_MISS [probably-free-row-found-$PROBABLY_FREE_ROW_N-times]"
+for PLACE in force row routing; do
+  case "$PLACE" in
+    force) PLACE_TEXT="$FORCE_PARA" ;;
+    row) PLACE_TEXT="$PROBABLY_FREE_ROW" ;;
+    routing) PLACE_TEXT="$ROUTING_LINE" ;;
+  esac
+  printf '%s\n' "$PLACE_TEXT" | grep -qF -- '`takeover.authorized: true`' || ANSWERED_MISS="$ANSWERED_MISS [$PLACE-lacks-takeover.authorized-true]"
+  printf '%s\n' "$PLACE_TEXT" | grep -qF -- 'recorded answer' || ANSWERED_MISS="$ANSWERED_MISS [$PLACE-lacks-the-recorded-answer]"
+done
+printf '%s\n' "$PROBABLY_FREE_ROW" | grep -qF -- 'the level stays `PROBABLY_FREE`' || ANSWERED_MISS="$ANSWERED_MISS [row-does-not-say-the-level-stays]"
+printf '%s\n' "$ROUTING_LINE" | grep -qF -- '`CONTESTED`, or `takeover.authorized: true` on that `PROBABLY_FREE`, means that one was already answered' || ANSWERED_MISS="$ANSWERED_MISS [routing-sentence-names-only-contested-as-answered]"
+if [ -z "$ANSWERED_MISS" ]; then
+  check "T24j the answered go/no-go of an unmeasured PROBABLY_FREE has one spelling in three places: the --force paragraph, the PROBABLY_FREE row and the routing sentence each name takeover.authorized: true as the recorded answer, the row says the level stays PROBABLY_FREE, and the routing sentence counts it beside CONTESTED as already answered" PASS
+else
+  check "T24j answered unmeasured PROBABLY_FREE drift:$ANSWERED_MISS" FAIL
+fi
+
+CARRIER_MISS=""
+QW_COMMENT="$(awk '/^function queueWithdrawals\(/ { f = 1 } f { print } f && /^}/ { exit }' "$TRAIL_MJS" | sed -n 's/^[[:space:]]*\/\/ \{0,1\}//p' | tr '\n' ' ')"
+[ -n "$QW_COMMENT" ] || CARRIER_MISS="$CARRIER_MISS [queueWithdrawals-comment-not-found]"
+for QW_NEEDLE in \
+  'each text listing drawn from one says so through `QUEUE_WITHDRAWALS_UNFILTERED`, and a `--json` payload through `truncated: true`' \
+  'only a `remove` that took a copy and carries no `reason` can be credited' \
+  'a readable `queued_command` attachment whose text matches no enqueued copy' \
+  'a `remove` followed by a record of another build is judged under both' \
+  'lists them apart from the sent ones'; do
+  printf '%s\n' "$QW_COMMENT" | grep -qF -- "$QW_NEEDLE" || CARRIER_MISS="$CARRIER_MISS [comment-lacks:$QW_NEEDLE]"
+done
+if printf '%s\n' "$QW_COMMENT" | grep -qF -- 'each listing drawn from one says so through'; then CARRIER_MISS="$CARRIER_MISS [comment-still-claims-the-constant-for-every-listing]"; fi
+UNFILTERED_CODE="$(js_outside_comments "$TRAIL_MJS" | grep -F 'QUEUE_WITHDRAWALS_UNFILTERED' | grep -vF 'const QUEUE_WITHDRAWALS_UNFILTERED =' || true)"
+UNFILTERED_N="$(printf '%s\n' "$UNFILTERED_CODE" | grep -c . || true)"
+UNFILTERED_TEXT_N="$(printf '%s\n' "$UNFILTERED_CODE" | grep -cE '(^|[^A-Za-z0-9_])(print|L\.push)\(' || true)"
+[ "$UNFILTERED_N" = "3" ] || CARRIER_MISS="$CARRIER_MISS [constant-used-$UNFILTERED_N-times-not-3]"
+[ "$UNFILTERED_TEXT_N" = "$UNFILTERED_N" ] || CARRIER_MISS="$CARRIER_MISS [a-use-of-the-constant-is-not-a-text-renderer]"
+if [ -z "$CARRIER_MISS" ]; then
+  check "T24k the queueWithdrawals comment says a text listing from a truncated read discloses it through QUEUE_WITHDRAWALS_UNFILTERED and a --json payload through truncated: true, the constant is used by exactly $UNFILTERED_N text renderers, and the comment states the crediting filter, the unmatched-delivery veto, the two-build judgement and the separate withdrawn list" PASS
+else
+  check "T24k withdrawal comment carrier drift:$CARRIER_MISS" FAIL
 fi
 
 # T25 — the authorization channel, pinned as a POLICY rather than as a mechanism.
