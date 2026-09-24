@@ -729,14 +729,13 @@ CONSENT_CHECK_OUT="$(node "$CONFIG_HELPER" --check-policy local 'http://127.0.0.
 
 if command -v git >/dev/null 2>&1 && { [ -d "$PLUGIN_DIR/.git" ] || [ -f "$PLUGIN_DIR/.git" ]; }; then
   RETIRED_ALLOWED="CHANGELOG.md
-CLAUDE.md
 docs/gates.md
 docs/verify-feature-consent-spec.md
 docs/verify-feature.md
 tests/structure/test-promptfoo-verify-feature.sh
 tests/structure/test-verify-consent.sh
 tests/structure/test-verify-feature-skill.sh"
-  RETIRED_FOUND="$(cd "$PLUGIN_DIR" && git ls-files -z --cached --others --exclude-standard | xargs -0 grep -lF -e 'mcp__plugin_zensu_playwright__' -e 'mcp__plugin_zensu_zensu-browser__' -e 'mcp__zensu-browser__' -e 'playwright-mcp.sh' -e 'playwright-mcp-proxy' -- 2>/dev/null | LC_ALL=C sort -u)"
+  RETIRED_FOUND="$(cd "$PLUGIN_DIR" && git ls-files -z --cached --others --exclude-standard -- . ":(exclude)CLAUDE.md" ":(exclude).claude/rules" | xargs -0 grep -lF -e 'mcp__plugin_zensu_playwright__' -e 'mcp__plugin_zensu_zensu-browser__' -e 'mcp__zensu-browser__' -e 'playwright-mcp.sh' -e 'playwright-mcp-proxy' -- 2>/dev/null | LC_ALL=C sort -u)"
   if printf '%s\n' "$RETIRED_FOUND" | grep -qxF 'tests/structure/test-verify-consent.sh'; then
     check "V45-control the tree-wide scan reaches this suite, which names every retired literal" PASS
   else

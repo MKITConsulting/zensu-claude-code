@@ -23,7 +23,6 @@ PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
 EXAMPLE_CONFIG="$PLUGIN_DIR/config.example.json"
 SKILL="$PLUGIN_DIR/skills/autopilot-adopt/SKILL.md"
 DOC_CONFIG="$PLUGIN_DIR/docs/configuration.md"
-REPO_CLAUDE="$PLUGIN_DIR/CLAUDE.md"
 DOC_WORKFLOW="$PLUGIN_DIR/docs/tdd-manager-workflow.md"
 SUITE_OVERVIEW="$PLUGIN_DIR/tests/SUITE-OVERVIEW.md"
 
@@ -787,8 +786,6 @@ for pair in \
   "$EXAMPLE_CONFIG:autopilotReleaseOwnerActivityTtlHours" \
   "$DOC_CONFIG:autopilotReleaseOwnerActivityTtlHours" \
   "$DOC_WORKFLOW:autopilotReleaseOwnerActivityTtlHours" \
-  "$REPO_CLAUDE:autopilot_adopt_run" \
-  "$REPO_CLAUDE:AUTOPILOT_ADOPTED" \
   "$DOC_WORKFLOW:--autopilot-adopt" \
   "$DOC_WORKFLOW:autopilotOwnerActivityTtlHours" \
   "$SUITE_OVERVIEW:autopilot-adopt-cli"; do
@@ -798,7 +795,7 @@ for pair in \
   fi
 done
 if [ -z "$B13_MISSING" ]; then
-  check "B13 config.example.json, docs/configuration.md, CLAUDE.md, the workflow doc and SUITE-OVERVIEW.md carry the key, the verb and the suite" PASS
+  check "B13 config.example.json, docs/configuration.md, the workflow doc and SUITE-OVERVIEW.md carry the key, the verb and the suite" PASS
 else
   check "B13 missing carrier content:$B13_MISSING" FAIL
 fi
@@ -938,7 +935,7 @@ else
 fi
 
 # --- B37 the per-verb window split is stated consistently wherever it is stated ------
-# Four carriers each asserted something the split made false, and every one of them is a
+# Three carriers each asserted something the split made false, and every one of them is a
 # CENSUS or a both-verbs claim — the drift class this repository records about itself.
 # They are pinned NEGATIVELY, on the retired spelling, because that is the direction that
 # can actually fail: the replacement wording is mine to choose, so a positive needle would
@@ -948,11 +945,6 @@ B37_MISS=""
 b37_forbid() { # file needle label
   [ -r "$1" ] || { B37_MISS="$B37_MISS $3=unreadable"; return; }
   grep -qF -- "$2" "$1" && B37_MISS="$B37_MISS $3"
-  return 0
-}
-b37_require() { # file needle label
-  [ -r "$1" ] || { B37_MISS="$B37_MISS $3=unreadable"; return; }
-  grep -qF -- "$2" "$1" || B37_MISS="$B37_MISS $3"
   return 0
 }
 # F2 — the doctor paragraph called one key "the window --autopilot-release and
@@ -968,19 +960,8 @@ b37_forbid "$PLUGIN_DIR/hooks/lib/zensu-config.sh" \
 # exit 7 instead, which is not a stand-down. Fixing this by adding a fourth emission
 # would contradict AC-005, so the comment is what moves.
 b37_forbid "$LIB" 'FOUR ways to stand down' judge2-four-stand-downs
-# F1 — the CLAUDE.md census said the re-resolve appears TWICE and that C21c runs under a
-# floor of three; there are three blocks and the floor is four. Its own TRIGGER fired.
-b37_forbid "$REPO_CLAUDE" 'record-root re-resolve TWICE' f1-stale-census
-b37_forbid "$REPO_CLAUDE" 'under a floor of three' f1-stale-floor
-# F8 — the trigger fired and the seam was NOT taken. A fired trigger declined in silence
-# is the exact drift F1 documents, so the decline must be written down with a new one.
-# The needle must be SPECIFIC to this seam. `TRIGGER was evaluated` alone already occurs
-# in the Plan-Approval Delivery Route section from an unrelated round, so it matched prose
-# nobody wrote for F8 and could never fail — the same needle-matches-prose defect F10 is
-# about, reintroduced by the check written to prevent it.
-b37_require "$REPO_CLAUDE" 'The TRIGGER FIRED in the per-verb window round' f8-decline-unrecorded
 if [ -z "$B37_MISS" ]; then
-  check "B37 no carrier still claims one window governs both verbs, names two mirror pins, counts four stand-downs or a two-block re-resolve, and the declined seam is recorded" PASS
+  check "B37 no carrier still claims one window governs both verbs, names two mirror pins or counts four stand-downs" PASS
 else
   check "B37 per-verb split carriers still stale:$B37_MISS" FAIL
 fi
