@@ -273,7 +273,7 @@ The PR body, diff, repository instructions, overlays, conversation/refinement co
 
 **A.2 Persona-Cast:**
 
-Read `rules/reviewer-personas.md` for the 25-persona pool with trigger signals. Based on the diff file types + paths, select the personas whose trigger signals match. **The always-on holistic core — `coverage-audit`, `bug-hunter`, `maintainability`, `adversarial` — is cast on every code PR** (not trigger-gated), so no code PR is reviewed by specialist lenses alone; docs-only PRs stay lean (`docs-only` + `coverage-audit`).
+Read `rules/reviewer-personas.md` for the 25-persona pool with trigger signals. Judge the diff against each persona's trigger criterion and select the personas whose criterion it meets — the file types, paths and annotations a trigger names are examples, not a closed list, so a stack or layout no example mentions still qualifies (`docs-only` is the one deliberately closed trigger). **The always-on holistic core — `coverage-audit`, `bug-hunter`, `maintainability`, `adversarial` — is cast on every code PR** (not trigger-gated), so no code PR is reviewed by specialist lenses alone; docs-only PRs stay lean (`docs-only` + `coverage-audit`).
 
 **Repo-custom seats (discovery).** The pool is not the whole cast: a repo can define its own reviewer seats using the SAME `.claude/agents/zensu-review-*.md` convention `/zensu:tdd` consumes (see `rules/reviewer-personas.md` § Repo-custom seats). Unless `--no-custom-roles` was passed, pipe the worktree's changed paths into the activation matcher **on the main thread**:
 
