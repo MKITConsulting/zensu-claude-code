@@ -75,7 +75,9 @@ else
 fi
 if node -e '
   const consent = require(process.argv[1]);
-  process.exit(consent.consentHookRegistered(process.argv[2]) && consent.consentRecorderRegistered(process.argv[2]) ? 0 : 1);
+  const registered = consent.REGISTRATION && consent.REGISTRATION.REGISTERED;
+  process.exit(typeof registered === "string" && consent.consentHookRegistered(process.argv[2]) === registered
+    && consent.consentRecorderRegistered(process.argv[2]) === registered ? 0 : 1);
 ' "$MODULE" "$PLUGIN_DIR" 2>/dev/null; then
   check "V4b the module's own registration probes find both hooks in this plugin" PASS
 else
@@ -115,7 +117,7 @@ run_unit() { # $1 label  $2 file  $3 registered floor  $4 SUITE-OVERVIEW row key
   fi
 }
 run_unit "V6 floor" "$UNIT_FLOOR" 14 "verify-navigation-floor-v1.test.js"
-run_unit "V7 consent" "$UNIT_CONSENT" 97 "verify-consent-v1.test.js"
+run_unit "V7 consent" "$UNIT_CONSENT" 100 "verify-consent-v1.test.js"
 run_unit "V7b free-port" "$UNIT_PORT" 3 "verify-free-port.test.js"
 run_unit "V7c browser-config" "$UNIT_CONFIG" 8 "verify-browser-config.test.js"
 
@@ -300,6 +302,12 @@ esac
   && check "H2d a truncated payload that names playwright-cli is denied as unreadable" PASS \
   || check "H2d a truncated payload that names playwright-cli is denied as unreadable (rc=$TRUNC_RC)" FAIL
 
+CR=$'\r'
+BS2='\\'
+DIFF_LABELS=()
+DIFF_COMMANDS=()
+DIFF_ENVS=()
+diff_add() { DIFF_LABELS+=("$1"); DIFF_COMMANDS+=("$2"); DIFF_ENVS+=("${3:-}"); }
 for _vc_case in "H16 quote-split CLI name|playwright-cl''i -s=$SESSION eval 1" \
   "H16b CLI name in another letter case|Playwright-cli -s=$SESSION eval 1" \
   "H16c here-string body|bash <<< '$CLI eval 1'" \
@@ -308,13 +316,67 @@ for _vc_case in "H16 quote-split CLI name|playwright-cl''i -s=$SESSION eval 1" \
   "H16f session name in another letter case|playwright-cli -s=ZENSU-VERIFY-VC eval 1" \
   "H16g line continuation inside the CLI name|playwright-\\${NL}cli -s=$SESSION eval 1" \
   "H16h line continuation inside the session name|playwright-cli -s zensu-verify\\${NL}-vc eval 1" \
-  "H16i session option the parser does not resolve|playwright-cli -S $SESSION eval 1"; do
+  "H16i session option the parser does not resolve|playwright-cli -S $SESSION eval 1" \
+  "H16j escaped backslash before n inside the session under eval|eval \"playwright-cli -s ze${BS2}nsu-verify-vc run-code 1\"" \
+  "H16k escaped backslash before n inside the session under bash -c|bash -c \"playwright-cli -s ze${BS2}nsu-verify-vc eval 1\"" \
+  "H16l CRLF line continuation inside the CLI name|playwright-\\${CR}${NL}cli -s=$SESSION eval 1" \
+  "H16m two line continuations inside the session name|playwright-cli -s zensu-verify\\${NL}\\${NL}-vc eval 1" \
+  "H16n double-quote split of the CLI name|playwright-cl\"\"i -s=$SESSION eval 1" \
+  "H16o backslash split of the CLI name|playwright-cl\\i -s=$SESSION eval 1" \
+  "H16p double-quote split of the session name|playwright-cli -s=zensu-ver\"\"ify-vc eval 1"; do
   _vc_label="${_vc_case%%|*}"
   _vc_command="${_vc_case#*|}"
-  [ "$(pre_verdict "$_vc_command" "$SID" "$PROJ")" = "DENY" ] \
+  _vc_verdict="$(pre_verdict "$_vc_command" "$SID" "$PROJ")"
+  [ "$_vc_verdict" = "DENY" ] \
     && check "$_vc_label is denied through the real pre hook" PASS \
     || check "$_vc_label is denied through the real pre hook" FAIL
+  diff_add "${_vc_label%% *}" "$_vc_command"
 done
+diff_add "admitted-plain" "$CLI snapshot"
+diff_add "admitted-quote-split-cli" "playwright-cl''i -s=$SESSION snapshot"
+diff_add "admitted-quote-split-session" "playwright-cli -s=zensu-ver\"\"ify-vc snapshot"
+diff_add "admitted-continued-cli" "playwright-\\${NL}cli -s=$SESSION snapshot"
+diff_add "admitted-literal-redirect" "$CLI snapshot > $PROJ/zv-diff.txt"
+diff_add "asked-first-navigation" "$CLI goto http://127.0.0.1:4390/diff"
+diff_add "admitted-session-variable" "playwright-cli snapshot" "$SESSION"
+diff_add "asked-session-variable" "playwright-cli goto http://127.0.0.1:4391/" "$SESSION"
+[ "$(pre_verdict "playwright-cl''i -s=$SESSION snapshot" "$SID" "$PROJ")" = "NONE" ] \
+  && [ "$(pre_verdict "$CLI goto http://127.0.0.1:4390/diff" "$SID" "$PROJ")" = "ASK" ] \
+  && [ "$(PLAYWRIGHT_CLI_SESSION="$SESSION" pre_verdict "playwright-cli goto http://127.0.0.1:4391/" "$SID" "$PROJ")" = "ASK" ] \
+  && check "H16-diff-control the corpus carries marked spellings the real hook admits and asks for, directly and through the session variable" PASS \
+  || check "H16-diff-control the corpus carries marked spellings the real hook admits and asks for, directly and through the session variable" FAIL
+DIFF_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-diff.XXXXXX")"
+remember_tmp "$DIFF_ROOT"
+DIFF_ROOT="$(cd "$DIFF_ROOT" && pwd -P)"
+cp -R "$PLUGIN_DIR/hooks" "$DIFF_ROOT/"
+rm -f "$DIFF_ROOT/hooks/lib/verify-consent-v1.js"
+diff_passes() {
+  case "$(bash_payload PreToolUse "$1" "$SID" "$PROJ" \
+    | PLAYWRIGHT_CLI_SESSION="$2" CLAUDE_PLUGIN_ROOT="$DIFF_ROOT" bash "$DIFF_ROOT/hooks/pre-browser-navigation-consent.sh" 2>/dev/null)" in
+    *'decision module absent or symlinked'*) printf 1 ;;
+    *) printf 0 ;;
+  esac
+}
+diff_marked() {
+  node -e 'const m = require(process.argv[1]).commandMarkers(process.argv[2], { PLAYWRIGHT_CLI_SESSION: process.argv[3] }); process.stdout.write(m.cli && m.session ? "1" : "0")' "$MODULE" "$1" "$2" 2>/dev/null
+}
+[ "$(diff_passes "playwright-cli -s=other-session snapshot" "")" = "0" ] && [ "$(diff_passes "$CLI snapshot" "")" = "1" ] \
+  && check "H16-diff-control2 the module-absent copy tells a call its prefilter drops from one that reaches the module" PASS \
+  || check "H16-diff-control2 the module-absent copy tells a call its prefilter drops from one that reaches the module" FAIL
+DIFF_MISSES=""
+_vc_i=0
+while [ "$_vc_i" -lt "${#DIFF_COMMANDS[@]}" ]; do
+  _vc_marked="$(diff_marked "${DIFF_COMMANDS[$_vc_i]}" "${DIFF_ENVS[$_vc_i]}")"
+  if [ "$_vc_marked" != "1" ]; then
+    DIFF_MISSES="$DIFF_MISSES ${DIFF_LABELS[$_vc_i]}(unmarked)"
+  elif [ "$(diff_passes "${DIFF_COMMANDS[$_vc_i]}" "${DIFF_ENVS[$_vc_i]}")" != "1" ]; then
+    DIFF_MISSES="$DIFF_MISSES ${DIFF_LABELS[$_vc_i]}"
+  fi
+  _vc_i=$((_vc_i + 1))
+done
+[ "${#DIFF_COMMANDS[@]}" -ge 24 ] && [ -z "$DIFF_MISSES" ] \
+  && check "H16-diff every marked spelling in the corpus (${#DIFF_COMMANDS[@]}) passes the prefilter of a module-absent copy, admitted and asked ones included" PASS \
+  || check "H16-diff every marked spelling in the corpus (${#DIFF_COMMANDS[@]}) passes the prefilter of a module-absent copy, admitted and asked ones included (misses:${DIFF_MISSES})" FAIL
 
 for _vc_hook in "$PRE_HOOK" "$POST_HOOK"; do
   [ "$(grep -c 'LC_ALL=C tr -d' "$_vc_hook")" = "1" ] && [ "$(grep -c 'LC_ALL=C sed' "$_vc_hook")" = "1" ] \
@@ -324,16 +386,18 @@ for _vc_hook in "$PRE_HOOK" "$POST_HOOK"; do
 done
 
 prefilter_block() {
-  sed -n '/^_ZENSU_SCAN=/,/^unset _ZENSU_SCAN$/p' "$1"
+  sed -n '/^_ZENSU_PAIR=/,/^unset _ZENSU_SCAN _ZENSU_PAIR$/p' "$1"
 }
 PRE_BLOCK="$(prefilter_block "$PRE_HOOK")"
 POST_BLOCK="$(prefilter_block "$POST_HOOK")"
 [ -n "$PRE_BLOCK" ] && [ "$PRE_BLOCK" = "$POST_BLOCK" ] \
   && check "H17d both hooks carry a byte-identical prefilter block" PASS \
   || check "H17d both hooks carry a byte-identical prefilter block" FAIL
-CLI_MARKER_LIST="$(node -e 'process.stdout.write(require(process.argv[1]).CLI_MARKERS.join("\n"))' "$MODULE" 2>/dev/null)"
+CLI_MARKER_LIST="$(node -e 'const m = require(process.argv[1]); process.stdout.write(m.CLI_MARKERS.concat(m.SESSION_PREFIX).join("\n"))' "$MODULE" 2>/dev/null)"
+SESSION_ENV_NAME="$(node -e 'process.stdout.write(require(process.argv[1]).SESSION_ENV)' "$MODULE" 2>/dev/null)"
 H17E_OK=1
 [ -n "$CLI_MARKER_LIST" ] || H17E_OK=0
+[ -n "$SESSION_ENV_NAME" ] && printf '%s\n' "$PRE_BLOCK" | grep -qF -- "\${${SESSION_ENV_NAME}:-}" || H17E_OK=0
 while IFS= read -r _vc_marker; do
   [ -n "$_vc_marker" ] || continue
   printf '%s\n' "$PRE_BLOCK" | grep -qF -- "*${_vc_marker}*" || H17E_OK=0
@@ -341,8 +405,8 @@ done <<EOF
 $CLI_MARKER_LIST
 EOF
 [ "$H17E_OK" -eq 1 ] \
-  && check "H17e the prefilter names every CLI marker the module derives" PASS \
-  || check "H17e the prefilter names every CLI marker the module derives" FAIL
+  && check "H17e the prefilter names every CLI marker, the session prefix and the session variable the module derives" PASS \
+  || check "H17e the prefilter names every CLI marker, the session prefix and the session variable the module derives" FAIL
 
 BASH_BIN="$(command -v bash)"
 NONODE_BIN="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-nonode.XXXXXX")"
@@ -379,6 +443,31 @@ esac
   && check "H17c without node the recorder skips, exits 0 and names the cause" PASS \
   || check "H17c without node the recorder skips, exits 0 and names the cause (rc=$NONODE_POST_RC)" FAIL
 
+NOSED_BIN="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-nosed.XXXXXX")"
+remember_tmp "$NOSED_BIN"
+printf '#!/bin/sh\nexit 127\n' > "$NOSED_BIN/sed"
+chmod +x "$NOSED_BIN/sed"
+NOSED_PRE="$(bash_payload PreToolUse "$CLI eval 1" "$SID" "$PROJ" | env PATH="$NOSED_BIN:$PATH" "$BASH_BIN" "$PRE_HOOK" 2>/dev/null)"
+case "$NOSED_PRE" in
+  *'"permissionDecision":"deny"'*'eval'*) check "H17f with sed failing the pre hook falls back to the raw payload and still judges a marked call" PASS ;;
+  *) check "H17f with sed failing the pre hook falls back to the raw payload and still judges a marked call" FAIL ;;
+esac
+JOINED_PAYLOAD="$(bash_payload PreToolUse "playwright-\\"$'\n'"cli -s=$SESSION eval 1" "$SID" "$PROJ")"
+JOINED_WITH_SED="$(printf '%s' "$JOINED_PAYLOAD" | "$BASH_BIN" "$PRE_HOOK" 2>/dev/null)"
+JOINED_WITHOUT_SED="$(printf '%s' "$JOINED_PAYLOAD" | env PATH="$NOSED_BIN:$PATH" "$BASH_BIN" "$PRE_HOOK" 2>/dev/null)"
+case "$JOINED_WITH_SED" in
+  *'"permissionDecision":"deny"'*'eval'*) JOINED_MARKED=1 ;;
+  *) JOINED_MARKED=0 ;;
+esac
+[ "$JOINED_MARKED" -eq 1 ] && [ -z "$JOINED_WITHOUT_SED" ] \
+  && check "H17f2-control the failing sed shadows the hooks' sed: a payload only the sed join marks is denied with a working sed and passes silently with the failing one" PASS \
+  || check "H17f2-control the failing sed shadows the hooks' sed: a payload only the sed join marks is denied with a working sed and passes silently with the failing one" FAIL
+NOSED_ESCAPED="$(printf '%s' "$ESCAPED_PAYLOAD" | env PATH="$NOSED_BIN:$PATH" "$BASH_BIN" "$PRE_HOOK" 2>/dev/null)"
+case "$NOSED_ESCAPED" in
+  *'"permissionDecision":"deny"'*) check "H17f2 with sed failing a payload naming the package only with a JSON-escaped slash still reaches the gate" PASS ;;
+  *) check "H17f2 with sed failing a payload naming the package only with a JSON-escaped slash still reaches the gate" FAIL ;;
+esac
+
 DOCTOR_NAMED_DIR="$PROJ/playwright-cli/zensu-verify-notes"
 mkdir -p "$DOCTOR_NAMED_DIR"
 DOCTOR_CMD="CLAUDE_PROJECT_DIR=$DOCTOR_NAMED_DIR bash $PLUGIN_DIR/hooks/lib/zensu-doctor.sh"
@@ -400,6 +489,23 @@ case "$(uname -s 2>/dev/null)" in
     [ "$(HOME="$GLOBAL_HOME" pre_verdict "$DOCTOR_CMD; true" "$SID" "$PROJ")" = "DENY" ] \
       && check "H18c-control a doctor command with a co-rider is not recognized and is denied" PASS \
       || check "H18c-control a doctor command with a co-rider is not recognized and is denied" FAIL
+    ORDER_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-order.XXXXXX")"
+    remember_tmp "$ORDER_ROOT"
+    ORDER_ROOT="$(cd "$ORDER_ROOT" && pwd -P)"
+    cp -R "$PLUGIN_DIR/hooks" "$ORDER_ROOT/"
+    rm -f "$ORDER_ROOT/hooks/lib/verify-consent-v1.js"
+    order_pre() {
+      bash_payload PreToolUse "$1" "$SID" "$PROJ" \
+        | HOME="$GLOBAL_HOME" CLAUDE_PLUGIN_ROOT="$ORDER_ROOT" bash "$ORDER_ROOT/hooks/pre-browser-navigation-consent.sh" 2>/dev/null
+    }
+    [ -z "$(order_pre "CLAUDE_PROJECT_DIR=$DOCTOR_NAMED_DIR bash $ORDER_ROOT/hooks/lib/zensu-doctor.sh")" ] \
+      && check "H18d the doctor allowance runs before the module-absent arm" PASS \
+      || check "H18d the doctor allowance runs before the module-absent arm" FAIL
+    case "$(order_pre "$CLI goto http://127.0.0.1:4200/")" in
+      *'"permissionDecision":"deny"'*'decision module absent or symlinked'*)
+        check "H18d-control in the same tree a gated call is denied for the absent module" PASS ;;
+      *) check "H18d-control in the same tree a gated call is denied for the absent module" FAIL ;;
+    esac
     ;;
 esac
 
@@ -450,6 +556,10 @@ post_run "playwright-cl''i -s=$SESSION goto http://127.0.0.1:4200/split" "$SID" 
 memory_has "http://127.0.0.1:4200" "/split" "remembered" \
   && check "H6e the recorder reads a quote-split CLI name" PASS \
   || check "H6e the recorder reads a quote-split CLI name" FAIL
+post_run "playwright-cl\"\"i -s=$SESSION goto http://127.0.0.1:4200/dsplit" "$SID" "$PROJ" >/dev/null
+memory_has "http://127.0.0.1:4200" "/dsplit" "remembered" \
+  && check "H6g the recorder reads a double-quote-split CLI name" PASS \
+  || check "H6g the recorder reads a double-quote-split CLI name" FAIL
 PLAYWRIGHT_CLI_SESSION="$SESSION" post_run "playwright-cli goto http://127.0.0.1:4200/envonly" "$SID" "$PROJ" >/dev/null
 memory_has "http://127.0.0.1:4200" "/envonly" "remembered" \
   && check "H6f the recorder reads a session named only by the environment" PASS \
@@ -565,7 +675,7 @@ post_run "$CLI goto https://app.example.com/" "$SID" "$PROJ" >/dev/null
 post_run "$CLI eval 1" "$SID" "$PROJ" >/dev/null
 post_run "$CLI goto http://localhost:4200/" "$SID" "$PROJ" >/dev/null
 COUNT_AFTER="$(memory_count)"
-[ "$COUNT_BEFORE" = "7" ] && [ "$COUNT_AFTER" = "$COUNT_BEFORE" ] \
+[ "$COUNT_BEFORE" = "8" ] && [ "$COUNT_AFTER" = "$COUNT_BEFORE" ] \
   && check "H14 interrupted and denied calls are never recorded" PASS \
   || check "H14 interrupted and denied calls are never recorded (before=$COUNT_BEFORE after=$COUNT_AFTER)" FAIL
 [ "$(pre_verdict "$CLI goto http://127.0.0.1:4360/" "$SID" "$PROJ")" = "ASK" ] \

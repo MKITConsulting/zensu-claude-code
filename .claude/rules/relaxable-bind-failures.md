@@ -51,8 +51,8 @@ properties are easy to get wrong and cost the whole feature:
   because O21a enumerates the matcher and would have to be re-derived by anyone who
   trusted a roster that omitted it. The consent gate exits before its bind for every command
   that carries no `playwright-cli` marker and admits the recognized `/zensu:doctor` and adoption
-  commands through `zensu_doctor_allowed` before its module runs, so it never stands between a
-  session and the doctor; it denies a `zensu-verify-*` call and a command that merely mentions
+  commands through `zensu_doctor_allowed` before its module runs, so on a POSIX host with `node`
+  it never stands between a session and the doctor — the recognizer refuses on win32; it denies a `zensu-verify-*` call and a command that merely mentions
   both markers. `/zensu:doctor` runs through Bash, so it is reachable only
   if EVERY one of them allows. Both the `.*` gate and the secret-scan gate were missed in
   turn while the single-gate test stayed green and the feature silently did not work.

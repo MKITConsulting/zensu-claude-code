@@ -97,6 +97,10 @@
     {
       "path": "tests/structure/test-plugin-data-guard.sh",
       "reason": "The complete containment suite remains in weekly Windows Safety. Its native marker is a two-class skip rule rather than a path-transport boundary: one row needs a case-insensitive volume and ten need real symlinks, so a PR-gate run would measure the host rather than the gate. The module transport this hook shares with its siblings is covered on the PR gate by test-msys-special-plugin-module-boundaries.sh."
+    },
+    {
+      "path": "tests/structure/test-verify-consent.sh",
+      "reason": "The only native-Windows branch skips H18, because the doctor and adoption recognizer refuses every command on win32, so the consent pre hook has no allowance to prove there. Excluded here scopes to the blocking PR shards only: the suite is in ciStructureTests, so the weekly Windows Safety run still executes it. Its Windows wall clock is unmeasured, and a blocking shard would have to be paid for by moving another suite off. On the PR gate, test-msys-special-plugin-module-boundaries.sh loads the consent module from a special plugin root through the doctor; no blocking shard drives the consent hooks themselves."
     }
   ]
 }

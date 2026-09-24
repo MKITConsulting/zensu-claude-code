@@ -199,7 +199,7 @@ test('lexShell marks every expansion unexpanded and collects substitution bodies
   const lexed = consent.lexShell('echo $HOME "${USER}" $(date) `id`');
   assert.deepEqual(lexed.segments[0].map((word) => word.unexpanded), [false, true, true, true, true]);
   assert.equal(lexed.segments[0][1].raw, '$HOME');
-  assert.deepEqual(lexed.nested, ['date', 'id']);
+  assert.deepEqual(lexed.nested, ['USER', 'date', 'id']);
 });
 
 test('lexShell drops redirection targets and reads a heredoc body aside', () => {
@@ -258,7 +258,7 @@ test('parseCliArgs and CLI_BOOLEAN_OPTIONS match a golden recording of the measu
   assert.equal(golden.source.package, '@playwright/cli');
   assert.equal(golden.source.version, consent.PLAYWRIGHT_CLI_SOURCE_VERSION);
   assert.deepEqual([...new Set(consent.CLI_BOOLEAN_OPTIONS)].sort(), golden.booleanOptions);
-  assert.ok(golden.cases.length >= 40);
+  assert.equal(golden.cases.length, 53);
   assert.ok(golden.cases.some((entry) => entry.error));
   for (const entry of golden.cases) {
     const parsed = consent.parseCliArgs(entry.argv.slice());
@@ -272,7 +272,14 @@ test('the committed golden fixture was recorded from the committed case list', (
   const recorder = require('./fixtures/record-playwright-cli-argv.js');
   assert.deepEqual(golden.cases.map((entry) => entry.argv), recorder.CASES);
   assert.deepEqual(golden.stringOptions, [...consent.CLI_STRING_OPTIONS]);
-  assert.equal(golden.sessionPrecedence, 'argument-over-environment');
+  const gatedSessions = (command, envSession) => consent.analyzeCommand(command, { PLAYWRIGHT_CLI_SESSION: envSession }).calls.map((call) => call.session.value);
+  const argumentWins = gatedSessions('playwright-cli -s=mine goto http://127.0.0.1:4200/', SESSION).length === 0
+    && gatedSessions(`playwright-cli -s=${SESSION} goto http://127.0.0.1:4200/`, 'mine').join() === SESSION;
+  const environmentWins = gatedSessions('playwright-cli -s=mine goto http://127.0.0.1:4200/', SESSION).join() === SESSION
+    && gatedSessions(`playwright-cli -s=${SESSION} goto http://127.0.0.1:4200/`, 'mine').length === 0;
+  const observed = argumentWins && !environmentWins ? 'argument-over-environment'
+    : environmentWins && !argumentWins ? 'environment-over-argument' : 'undetermined';
+  assert.equal(observed, golden.sessionPrecedence);
   assert.deepEqual(golden.source.bin, [...new Set(consent.CLI_BASENAMES.map((name) => name.replace(/\.(cmd|exe|ps1)$/, '')))]);
   for (const argv of [['-szensu-verify-run1', 'eval', '1'], ['-szensu-verify-a', 'eval', '1'], ['-s/zensu-verify-a', 'snapshot'],
     ['-s.x', 'y'], ['-s-', 'snapshot'], ['-_s', 'zensu-verify-a', 'eval', '1'], ['-.s', 'zensu-verify-a', 'eval', '1'],
@@ -350,6 +357,12 @@ test('an unexpanded session beside a zensu-verify literal and an unexpanded argu
   assert.equal(denied(cli('goto $URL')), REASONS.ARGUMENT_UNEXPANDED);
   assert.equal(denied(cli('snapshot --depth=$DEPTH')), REASONS.ARGUMENT_UNEXPANDED);
   assert.equal(denied(cli('goto "$(cat url.txt)"')), REASONS.ARGUMENT_UNEXPANDED);
+  for (const form of ['$=X', '"$~X"', '$^X', '$+X']) {
+    assert.equal(denied(cli(`snapshot ${form}`)), REASONS.ARGUMENT_UNEXPANDED, form);
+  }
+  assert.equal(denied(cli('snapshot > $=X')), REASONS.NOT_PLAIN);
+  assert.deepEqual(decide(cli('fill e1 5$')), { verdict: 'none', plan: [] });
+  assert.deepEqual(decide(cli('fill e1 "5$ each"')), { verdict: 'none', plan: [] });
 });
 
 test('a call run through another program is refused as indirect', () => {
@@ -495,6 +508,40 @@ test('a marked command is admitted only as one plain top-level playwright-cli ca
   assert.deepEqual(decide('playwright-cli -s=mine snapshot && playwright-cli -s=mine eval 1'), { verdict: 'none' });
 });
 
+test('a line holding only a redirection is its own command, so the marked call beside it is not plain', () => {
+  for (const command of [
+    `${cli('snapshot')}\n> /tmp/zv-redirect`,
+    `> /tmp/zv-redirect\n${cli('snapshot')}`,
+    `${cli('snapshot')}\n2>> /tmp/zv-redirect`,
+  ]) {
+    assert.equal(denied(command), REASONS.NOT_PLAIN, command);
+  }
+  assert.deepEqual(decide(`${cli('snapshot')} > /tmp/zv-out.txt`), { verdict: 'none', plan: [] });
+  assert.deepEqual(decide(`> /tmp/zv-out.txt ${cli('snapshot')}`), { verdict: 'none', plan: [] });
+  assert.deepEqual(decide(`${cli('snapshot')} > /tmp/zv-out.txt\n`), { verdict: 'none', plan: [] });
+});
+
+test('a command hidden in a parameter or arithmetic expansion is scanned, and an unexpanded CLI word or redirect target is not plain', () => {
+  const hidden = `playwright-cli\${x:-$(playwright-cli -s=${SESSION} eval 'document.cookie' >&2)} -s=${SESSION} snapshot`;
+  assert.equal(denied(hidden), `command 'eval' ${REASONS.COMMAND_DENIED}`, hidden);
+  assert.deepEqual(consent.lexShell('echo $(( $(id) ))').nested, ['( $(id) )']);
+  assert.equal(denied(`echo $(( $(playwright-cli -s=${SESSION} eval 1) ))`), `command 'eval' ${REASONS.COMMAND_DENIED}`);
+  for (const command of [
+    `playwright-cli\${x} -s=${SESSION} snapshot`,
+    `playwright-cli$x -s=${SESSION} snapshot`,
+    `~/bin/playwright-cli -s=${SESSION} snapshot`,
+    `${cli('snapshot')} > "\${x:-$(touch /tmp/zv-p)}"`,
+    `${cli('snapshot')} > $(( $(touch /tmp/zv-p) ))`,
+    `${cli('snapshot')} > $TMPDIR/zv-out.txt`,
+    `${cli('snapshot')} 2> /tmp/zv-*`,
+  ]) {
+    assert.equal(denied(command), REASONS.NOT_PLAIN, command);
+  }
+  assert.match(REASONS.NOT_PLAIN, /redirect[^;]*literal/);
+  assert.match(REASONS.NOT_PLAIN, /^a command that names playwright-cli and a zensu-verify session, or names playwright-cli while PLAYWRIGHT_CLI_SESSION names one, must be/);
+  assert.deepEqual(decide(`${cli('snapshot')} > /tmp/zv-out.txt 2>&1`), { verdict: 'none', plan: [] });
+});
+
 test('a command that only mentions playwright-cli and a zensu-verify session is refused with the remedy named', () => {
   for (const command of [
     `grep -rn "playwright-cli -s=${SESSION}" docs`,
@@ -578,6 +625,14 @@ test('the environment session marker alone changes a verdict', () => {
   assert.equal(denied(heredoc, { env }), REASONS.UNJUDGED_BODY);
   assert.deepEqual(decide(piped), { verdict: 'none' });
   assert.deepEqual(decide(heredoc), { verdict: 'none' });
+  for (const command of ['playwright-cli -s=a -s=b snapshot', 'playwright-cli -s=a --session=b snapshot']) {
+    assert.equal(denied(command, { env }), REASONS.SESSION_MALFORMED, command);
+    assert.deepEqual(decide(command), { verdict: 'none' }, command);
+  }
+  for (const command of ["$'playwright-cli' goto http://127.0.0.1:4200/", 'playwright-cli -s=other snapshot && ls']) {
+    assert.equal(denied(command, { env }), REASONS.NOT_PLAIN, command);
+    assert.deepEqual(decide(command), { verdict: 'none' }, command);
+  }
 });
 
 test('a backslash-newline continuation inside either marker is joined before the markers are read', () => {
@@ -1180,49 +1235,111 @@ test('runPost reports a refused memory path and writes nothing there', (t) => {
   assert.equal(fs.existsSync(outside), false);
 });
 
-test('the registration probes find both hooks on the Bash matcher of this plugin', () => {
-  assert.equal(consent.consentHookRegistered(REPO_ROOT), true);
-  assert.equal(consent.consentRecorderRegistered(REPO_ROOT), true);
+const registrationEntry = (file) => ({ type: 'command', command: `bash "\${CLAUDE_PLUGIN_ROOT}/hooks/${file}"` });
+const registrationRoot = (t, manifest, files = [consent.CONSENT_HOOK_FILE, consent.CONSENT_RECORDER_FILE]) => {
+  const root = tempDir(t, 'zensu-plugin-');
+  fs.mkdirSync(path.join(root, 'hooks'));
+  for (const file of files) fs.writeFileSync(path.join(root, 'hooks', file), '#!/bin/bash\n');
+  if (manifest !== undefined) {
+    fs.writeFileSync(path.join(root, 'hooks', 'hooks.json'), typeof manifest === 'string' ? manifest : JSON.stringify(manifest));
+  }
+  return root;
+};
+const registrationManifest = (hookMatcher, recorderMatcher) => ({
+  hooks: {
+    PreToolUse: [{ matcher: hookMatcher, hooks: [registrationEntry(consent.CONSENT_HOOK_FILE)] }],
+    PostToolUse: [{ matcher: recorderMatcher, hooks: [registrationEntry(consent.CONSENT_RECORDER_FILE)] }],
+  },
 });
 
-test('the registration probes refuse another matcher, a swapped event, a missing hook file and a missing root', (t) => {
-  const entry = (file) => ({ type: 'command', command: `bash "\${CLAUDE_PLUGIN_ROOT}/hooks/${file}"` });
-  const fakeRoot = (manifest, files = [consent.CONSENT_HOOK_FILE, consent.CONSENT_RECORDER_FILE]) => {
-    const root = tempDir(t, 'zensu-plugin-');
-    fs.mkdirSync(path.join(root, 'hooks'));
-    for (const file of files) fs.writeFileSync(path.join(root, 'hooks', file), '#!/bin/bash\n');
-    fs.writeFileSync(path.join(root, 'hooks', 'hooks.json'), JSON.stringify(manifest));
-    return root;
-  };
-  const good = {
+test('the registration probes find both hooks on the Bash matcher of this plugin', () => {
+  assert.deepEqual(consent.REGISTRATION, { REGISTERED: 'registered', UNREGISTERED: 'unregistered', UNKNOWN: 'unknown' });
+  assert.equal(Object.isFrozen(consent.REGISTRATION), true);
+  assert.equal(consent.consentHookRegistered(REPO_ROOT), consent.REGISTRATION.REGISTERED);
+  assert.equal(consent.consentRecorderRegistered(REPO_ROOT), consent.REGISTRATION.REGISTERED);
+});
+
+test('the registration probes follow the host matcher rule and refuse another matcher, a swapped event, a missing hook file and a missing root', (t) => {
+  const { REGISTERED, UNREGISTERED } = consent.REGISTRATION;
+  const control = registrationRoot(t, registrationManifest('Bash', 'Bash'));
+  assert.equal(consent.consentHookRegistered(control), REGISTERED);
+  assert.equal(consent.consentRecorderRegistered(control), REGISTERED);
+  const widened = registrationRoot(t, registrationManifest('Bash|Read', ''));
+  assert.equal(consent.consentHookRegistered(widened), REGISTERED);
+  assert.equal(consent.consentRecorderRegistered(widened), REGISTERED);
+  const everyTool = registrationRoot(t, registrationManifest('*', undefined));
+  assert.equal(consent.consentHookRegistered(everyTool), REGISTERED, 'a * matcher covers every tool');
+  assert.equal(consent.consentRecorderRegistered(everyTool), REGISTERED, 'an absent matcher covers every tool');
+  const pattern = registrationRoot(t, registrationManifest('Ba.h', '.*'));
+  assert.equal(consent.consentHookRegistered(pattern), REGISTERED);
+  assert.equal(consent.consentRecorderRegistered(pattern), REGISTERED);
+  const otherMatcher = registrationRoot(t, registrationManifest('Read', 'Edit|Write'));
+  assert.equal(consent.consentHookRegistered(otherMatcher), UNREGISTERED);
+  assert.equal(consent.consentRecorderRegistered(otherMatcher), UNREGISTERED);
+  const substring = registrationRoot(t, registrationManifest('Bas', 'ash|Read'));
+  assert.equal(consent.consentHookRegistered(substring), UNREGISTERED, 'a plain name matches the whole tool name only');
+  assert.equal(consent.consentRecorderRegistered(substring), UNREGISTERED, 'a plain name list matches whole tool names only');
+  if (process.platform !== 'win32') {
+    const linked = registrationRoot(t, registrationManifest('Bash', 'Bash'), []);
+    fs.writeFileSync(path.join(linked, 'hooks', 'gate-target.sh'), '#!/bin/bash\n');
+    fs.symlinkSync('gate-target.sh', path.join(linked, 'hooks', consent.CONSENT_HOOK_FILE));
+    fs.symlinkSync('absent-target.sh', path.join(linked, 'hooks', consent.CONSENT_RECORDER_FILE));
+    assert.equal(consent.consentHookRegistered(linked), REGISTERED, 'a symlinked hook file is followed');
+    assert.equal(consent.consentRecorderRegistered(linked), UNREGISTERED, 'a dangling symlinked hook file is missing');
+  }
+  const swapped = registrationRoot(t, {
     hooks: {
-      PreToolUse: [{ matcher: 'Bash', hooks: [entry(consent.CONSENT_HOOK_FILE)] }],
-      PostToolUse: [{ matcher: 'Bash', hooks: [entry(consent.CONSENT_RECORDER_FILE)] }],
-    },
-  };
-  const control = fakeRoot(good);
-  assert.equal(consent.consentHookRegistered(control), true);
-  assert.equal(consent.consentRecorderRegistered(control), true);
-  const otherMatcher = fakeRoot({
-    hooks: {
-      PreToolUse: [{ matcher: 'Bash|Read', hooks: [entry(consent.CONSENT_HOOK_FILE)] }],
-      PostToolUse: [{ matcher: 'Read', hooks: [entry(consent.CONSENT_RECORDER_FILE)] }],
+      PreToolUse: [{ matcher: 'Bash', hooks: [registrationEntry(consent.CONSENT_RECORDER_FILE)] }],
+      PostToolUse: [{ matcher: 'Bash', hooks: [registrationEntry(consent.CONSENT_HOOK_FILE)] }],
     },
   });
-  assert.equal(consent.consentHookRegistered(otherMatcher), false);
-  assert.equal(consent.consentRecorderRegistered(otherMatcher), false);
-  const swapped = fakeRoot({
+  assert.equal(consent.consentHookRegistered(swapped), UNREGISTERED);
+  assert.equal(consent.consentRecorderRegistered(swapped), UNREGISTERED);
+  const noHooksKey = registrationRoot(t, {});
+  assert.equal(consent.consentHookRegistered(noHooksKey), UNREGISTERED);
+  assert.equal(consent.consentRecorderRegistered(noHooksKey), UNREGISTERED);
+  const noFiles = registrationRoot(t, registrationManifest('Bash', 'Bash'), []);
+  assert.equal(consent.consentHookRegistered(noFiles), UNREGISTERED);
+  assert.equal(consent.consentRecorderRegistered(noFiles), UNREGISTERED);
+  assert.equal(consent.consentHookRegistered(path.join(control, 'missing')), UNREGISTERED);
+});
+
+test('the registration probes answer unknown when hooks.json cannot be read, parsed or matched', (t) => {
+  const { REGISTERED, UNKNOWN } = consent.REGISTRATION;
+  const cases = {
+    'no hooks.json': registrationRoot(t, undefined),
+    'unparseable hooks.json': registrationRoot(t, '{'),
+    'a hooks.json that is not an object': registrationRoot(t, '[]'),
+    'a hooks value that is not an object': registrationRoot(t, { hooks: 'Bash' }),
+    'an event value that is not a list': registrationRoot(t, { hooks: { PreToolUse: {}, PostToolUse: 'Bash' } }),
+    'a matcher that does not compile': registrationRoot(t, registrationManifest('[', '(')),
+    'a pattern whose anchored and unanchored readings disagree': registrationRoot(t, registrationManifest('Ba.', 'as.')),
+    'a matcher the host may read as a name list or as a pattern': registrationRoot(t, registrationManifest('Bash, Read', 'Read, Bash')),
+    'a matcher that is not a string': registrationRoot(t, registrationManifest(5, null)),
+  };
+  for (const [label, root] of Object.entries(cases)) {
+    assert.equal(consent.consentHookRegistered(root), UNKNOWN, label);
+    assert.equal(consent.consentRecorderRegistered(root), UNKNOWN, label);
+  }
+  const hooksDir = registrationRoot(t, undefined);
+  fs.mkdirSync(path.join(hooksDir, 'hooks', 'hooks.json'));
+  assert.equal(consent.consentHookRegistered(hooksDir), UNKNOWN, 'a hooks.json that is a directory');
+  if (process.platform !== 'win32') {
+    const fileAsHooks = tempDir(t, 'zensu-plugin-');
+    fs.writeFileSync(path.join(fileAsHooks, 'hooks'), 'not a directory\n');
+    assert.equal(consent.consentHookRegistered(fileAsHooks), UNKNOWN, 'a hooks path that is a file');
+    assert.equal(consent.consentRecorderRegistered(fileAsHooks), UNKNOWN, 'a hooks path that is a file');
+  }
+  const settled = registrationRoot(t, {
     hooks: {
-      PreToolUse: [{ matcher: 'Bash', hooks: [entry(consent.CONSENT_RECORDER_FILE)] }],
-      PostToolUse: [{ matcher: 'Bash', hooks: [entry(consent.CONSENT_HOOK_FILE)] }],
+      PreToolUse: [
+        { matcher: '(', hooks: [registrationEntry(consent.CONSENT_HOOK_FILE)] },
+        { matcher: 'Bash', hooks: [registrationEntry(consent.CONSENT_HOOK_FILE)] },
+      ],
+      PostToolUse: [{ matcher: 'Bash', hooks: [registrationEntry(consent.CONSENT_RECORDER_FILE)] }],
     },
   });
-  assert.equal(consent.consentHookRegistered(swapped), false);
-  assert.equal(consent.consentRecorderRegistered(swapped), false);
-  const noFiles = fakeRoot(good, []);
-  assert.equal(consent.consentHookRegistered(noFiles), false);
-  assert.equal(consent.consentRecorderRegistered(noFiles), false);
-  assert.equal(consent.consentHookRegistered(path.join(control, 'missing')), false);
+  assert.equal(consent.consentHookRegistered(settled), REGISTERED, 'a registration on Bash settles an uncompilable sibling');
 });
 
 test('promptText states the session, the origin, the per-origin grant and the declared routes', () => {

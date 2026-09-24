@@ -103,7 +103,11 @@ in `hooks/lib/zensu-doctor-report.js`, `zensu_hook_enabled_strict` in
 every flag and five sibling suites pin their own there. **The tool-name domain is a THIRD
 coupling:** `SPAWN_TOOL_NAMES` is imported from `reviewer-spawn-denial-v1.js` and re-encoded as
 the `hooks.json` matcher, so a member added in that module without widening the matcher leaves
-the grant inert for that tool with every check green.
+the grant inert for that tool with every check green. **`reviewerSpawnHookWired` has a sibling
+reader of the same host rule**, `hookRegistered` in `hooks/lib/verify-consent-v1.js`, which
+follows the host's own matcher reading where this one compiles an unanchored regular expression,
+and the two answer differently on purpose; `.claude/rules/browser-consent-gate.md` records the
+pairing and every intended difference, so a change to either reader re-decides the other there.
 Operator-facing accounts: `docs/gates.md` §"Reviewer-Spawn Grant", the hook row and the
 `reviewerSpawnAutoAllow` row in `docs/configuration.md` — plus, in that SAME file, the
 `### Hooks (N)` header, the prose count and its `#hooks-N` link, and separately the

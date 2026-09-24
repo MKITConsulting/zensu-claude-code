@@ -271,6 +271,21 @@ if [ "$DOCTOR_RC" -eq 0 ] && [ -n "$PW_SOURCE_VERSION" ] \
 else
   check "doctor loads its report, manifests, and the consent module from the special plugin root" FAIL
 fi
+POLICY_DOCTOR_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 -u ZDOC_VERIFY \
+  ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:5173","evidenceMode":"declared-safe","routes":["/"]}]}' \
+  CLAUDE_PLUGIN_ROOT="$PLUGIN" HOME="$HOME_DIR" ZENSU_CONFIG="$CONFIG" \
+  CLAUDE_PROJECT_DIR="$PROJECT" ZENSU_DOCTOR_PLUGIN_DIR="$PLUGIN" \
+  ZDOC_ZENSU=absent ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=github \
+  ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_SOURCE_VERSION" \
+  bash "$PLUGIN/hooks/lib/zensu-doctor.sh" 2>"$RAW_TMP/doctor-policy.err")"
+POLICY_DOCTOR_RC=$?
+if [ "$POLICY_DOCTOR_RC" -eq 0 ] \
+    && printf '%s' "$POLICY_DOCTOR_OUT" | grep -qF 'verify-feature: environment policy active' \
+    && ! printf '%s' "$POLICY_DOCTOR_OUT" | grep -qF 'could not be checked'; then
+  check "doctor loads the navigation floor from the special plugin root to judge a set policy" PASS
+else
+  check "doctor loads the navigation floor from the special plugin root to judge a set policy" FAIL
+fi
 
 SECRET_PAYLOAD="$(SESSION_VALUE="$SESSION" PROJECT_VALUE="$NATIVE_PROJECT" \
   FILE_VALUE="$NATIVE_PROJECT/src/app.js" node -e '

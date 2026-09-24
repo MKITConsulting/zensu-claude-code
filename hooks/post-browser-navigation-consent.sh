@@ -7,7 +7,8 @@ skip() {
 }
 
 INPUT="$(cat 2>/dev/null || true)"
-_ZENSU_SCAN="$(printf '%s' "$INPUT" | LC_ALL=C sed -e 's/\\\\\\r\\n//g' -e 's/\\\\\\n//g' 2>/dev/null | LC_ALL=C tr -d "\"'\\\\" 2>/dev/null)" || _ZENSU_SCAN="$INPUT"
+_ZENSU_PAIR=$'\001'
+_ZENSU_SCAN="$(printf '%s' "$INPUT" | LC_ALL=C sed -e 's/\\\\/'"$_ZENSU_PAIR"'/g' -e 's/'"$_ZENSU_PAIR"'\\r\\n//g' -e 's/'"$_ZENSU_PAIR"'\\n//g' 2>/dev/null | LC_ALL=C tr -d "\"'\\\\$_ZENSU_PAIR" 2>/dev/null)" || _ZENSU_SCAN="$INPUT"
 [ -n "$_ZENSU_SCAN" ] || _ZENSU_SCAN="$INPUT"
 shopt -s nocasematch
 case "$_ZENSU_SCAN" in
@@ -24,7 +25,7 @@ case "$_ZENSU_SCAN" in
     ;;
 esac
 shopt -u nocasematch
-unset _ZENSU_SCAN
+unset _ZENSU_SCAN _ZENSU_PAIR
 
 _ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" \
   || skip "plugin root unresolved"

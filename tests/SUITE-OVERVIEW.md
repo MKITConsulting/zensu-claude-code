@@ -200,14 +200,18 @@ and no-escape assertions, a payload-declared non-main principal whose premise co
 `claude-principal-v1.js` itself, a second-path-field row, six faults covered — four asserting their own reason literal and two asserting the documented
 silence, the exit-2 plugin-root refusal, two source-absence checks with controls, and a
 two-group matcher shape compared against the module's exported tool set), the browser consent
-gate (134 checks: the Bash-matcher hook pair driven against a real Session Control session — an
+gate (150 checks: the Bash-matcher hook pair driven against a real Session Control session — an
 unrelated call left alone, a refused command, the first loopback navigation asking, the recorded
 approval and the remembered origin, the floor refusals, a subagent denied, policy mode, and the
 `open` run-config, Chromium-only and global-config refusals — the single-plain-invocation shapes
 denied through the real pre hook (quote split, letter case, line continuation, here-string,
 co-rider, launcher, an unresolved session option), the recognized `/zensu:doctor` and adoption
-commands admitted, the recorder reading the same spellings, the one `sed` and one `tr` pass and
-the byte-identical prefilter carrying every derived CLI marker, both no-node arms, degraded roots
+commands admitted, the recorder reading the same spellings, a differential through a
+module-absent copy proving every marked spelling in its corpus — admitted and asked ones
+included — passes the prefilter, the one `sed` and one `tr` pass and
+the byte-identical prefilter carrying every derived CLI marker, the escaped-slash fallback arm
+reached with `sed` failing and a control proving that failing `sed` is the one the hooks run,
+both no-node arms, degraded roots
 left silent on unmarked payloads, the two doc pins on fault direction and the mention cost — the
 four unit files held at their
 registered counts and against this document's table, the one navigation floor both the gate and
@@ -339,7 +343,7 @@ that suite's failure.
 | `review-evidence-sweep-v1.test.js` | 32 | `test-versioned-plugin-upgrade.sh` | superseded-lease sweep: the ownership selector, the canonicalized repair root, and the ancestor probe that separates *no store here* from *an ancestor is a file* |
 | `session-adopt-report-v1.test.js` | 34 | `test-versioned-plugin-upgrade.sh` | the adoption report payload: `safe()` in both directions (ordinary path verbatim; bidi, line separators and DEL folded; a localized path unchanged), the `label : value` pair-forgery guard on both branches, the space-adjacency rule that folds every Modifier_Letter a forged row could use (walked over the whole category rather than a list), the separator in BOTH spellings the consumers emit (`space-colon-space` and `colon-space`) with an ordinary colon still rendering raw, the trailing-position seam where the caller appends text after the value, the invisible-letter guard, that the exported constants and the applied rules predict each other in both directions, the in-place lease repair, and that the display rule has exactly ONE owner |
 | `rule-block-v1.test.js` | 10 | `test-best-solution-first.sh` | the one-line marker-block reader both rule carriers share: marker position, the FILE and BLOCK ceilings, the short-read and swapped-file refusals |
-| `verify-consent-v1.test.js` | 97 | `test-verify-consent.sh` (V7) | the Bash-matcher browser consent gate: the exported constants and the command allowlist, the shell lexer and every refused indirection (a nested shell, a heredoc or here-string, `xargs`, an unexpanded session or argument), the single-plain-invocation rule and the remedy both shape refusals name, the wrapper and package-launcher refusals, the playwright-cli argument parser against a golden recording of the measured CLI parser, the ask/deny ladder with per-origin consent and the loopback-only bound, the Chromium-only `--browser` rule, the `--config` run-config shape and the global-config and ambient-override refusals, policy mode, the session memory with its containment and caps, the pre/post CLI envelopes, the registration probes, and the prompt text |
+| `verify-consent-v1.test.js` | 100 | `test-verify-consent.sh` (V7) | the Bash-matcher browser consent gate: the exported constants and the command allowlist, the shell lexer and every refused indirection (a nested shell, a heredoc or here-string, `xargs`, an unexpanded session or argument), the single-plain-invocation rule and the remedy both shape refusals name, the wrapper and package-launcher refusals, the playwright-cli argument parser against a golden recording of the measured CLI parser, the ask/deny ladder with per-origin consent and the loopback-only bound, the Chromium-only `--browser` rule, the `--config` run-config shape and the global-config and ambient-override refusals, policy mode, the session memory with its containment and caps, the pre/post CLI envelopes, the registration probes, and the prompt text |
 | `verify-navigation-floor-v1.test.js` | 14 | `test-verify-consent.sh` (V6) | the one navigation floor the consent gate and the run-config helper share: loopback and public-address classes, URL refusals, remote host resolution, route normalization, the top-level policy contract check, and `parsePolicyTargets` with its `MAX_POLICY_ROUTES` bound |
 | `verify-free-port.test.js` | 3 | `test-verify-consent.sh` (V7b) | free loopback port helper: argument parsing, occupied and excluded ports, CLI contract |
 | `verify-browser-config.test.js` | 8 | `test-verify-consent.sh` (V7c) | the playwright-cli run-config helper: argument parsing, the isolated origin-restricted local config, the public-address pins of a remote run, the policy gating of both modes, the `--check-policy` answer, the run-directory refusals and the CLI contract |

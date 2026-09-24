@@ -452,7 +452,7 @@ node -e '
   && check "P1vl2-control the gate fixture moved the PreToolUse consent gate off the Bash matcher" PASS \
   || check "P1vl2-control the gate fixture moved the PreToolUse consent gate off the Bash matcher" FAIL
 case "$(vf_copy_doctor)" in
-  *'❌  verify-feature: cannot start (consent hook not registered on the Bash matcher)'*) check "P1vl2 a consent gate registered on another matcher is named, ahead of the recorder" PASS ;;
+  *'❌  verify-feature: cannot start (consent hook not registered on the Bash matcher; consent recorder not registered on the Bash matcher)'*) check "P1vl2 a consent gate registered on another matcher is named, ahead of the recorder" PASS ;;
   *) check "P1vl2 a consent gate registered on another matcher is named, ahead of the recorder" FAIL ;;
 esac
 rm -f "$VF_NOREC_ROOT/scripts/verify-browser-config.js"
@@ -482,6 +482,179 @@ case "$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
   *) check "P1vl5 a decision module that will not load is named apart from a missing registration" FAIL ;;
 esac
 rm -rf "$VF_NOLOAD_ROOT"
+VF_UNCHECKED_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-unchecked.XXXXXX")" || exit 1
+cp -R "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/scripts" "$VF_UNCHECKED_ROOT/" 2>/dev/null
+printf '\nmodule.exports.parsePolicyTargets = () => { throw new Error("probe"); };\n' >> "$VF_UNCHECKED_ROOT/hooks/lib/verify-navigation-floor-v1.js"
+if (cd -P -- "$VF_UNCHECKED_ROOT" && node -e 'require("./hooks/lib/verify-consent-v1.js"); require("./hooks/lib/verify-navigation-floor-v1.js").parsePolicyTargets("{}")' >/dev/null 2>&1); then
+  check "P1vl6-control the unchecked fixture loads the decision module and makes the policy parse throw" FAIL
+elif (cd -P -- "$VF_UNCHECKED_ROOT" && node -e 'require("./hooks/lib/verify-consent-v1.js")' >/dev/null 2>&1); then
+  check "P1vl6-control the unchecked fixture loads the decision module and makes the policy parse throw" PASS
+else
+  check "P1vl6-control the unchecked fixture loads the decision module and makes the policy parse throw" FAIL
+fi
+VF_UNCHECKED_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
+  ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:5173","evidenceMode":"declared-safe","routes":["/"]}]}' \
+  ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" \
+  ZENSU_DOCTOR_PLUGIN_DIR="$VF_UNCHECKED_ROOT" CLAUDE_PLUGIN_ROOT="$VF_UNCHECKED_ROOT" \
+  CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$VF_UNCHECKED_ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null)"
+case "$VF_UNCHECKED_OUT" in
+  *'is set but invalid'*) check "P1vl6 a policy the doctor could not check is not reported as invalid" FAIL ;;
+  *'⚠️  verify-feature: ZENSU_VERIFY_NAVIGATION_POLICY_V1 is set but could not be checked'*)
+    check "P1vl6 a policy the doctor could not check is not reported as invalid" PASS ;;
+  *) check "P1vl6 a policy the doctor could not check is not reported as invalid" FAIL ;;
+esac
+rm -rf "$VF_UNCHECKED_ROOT"
+VF_REG_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-registration.XXXXXX")" || exit 1
+cp -R "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/scripts" "$VF_REG_ROOT/" 2>/dev/null
+vf_reg_doctor() {
+  env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
+    ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" \
+    ZENSU_DOCTOR_PLUGIN_DIR="$VF_REG_ROOT" CLAUDE_PLUGIN_ROOT="$VF_REG_ROOT" \
+    CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$VF_REG_ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null
+}
+if node -e '
+  const fs = require("node:fs");
+  const registry = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const gate = "/hooks/pre-browser-navigation-consent.sh";
+  let widened = 0;
+  for (const group of registry.hooks.PreToolUse || []) {
+    if (group.matcher === "Bash" && (group.hooks || []).some((hook) => typeof hook.command === "string" && hook.command.includes(gate))) {
+      group.matcher = "Bash|Read";
+      widened += 1;
+    }
+  }
+  if (widened !== 1) process.exit(1);
+  fs.writeFileSync(process.argv[1], JSON.stringify(registry, null, 2));
+' "$VF_REG_ROOT/hooks/hooks.json"; then
+  check "P1vl7-control the registration fixture widened the consent gate matcher to Bash|Read" PASS
+else
+  check "P1vl7-control the registration fixture widened the consent gate matcher to Bash|Read" FAIL
+fi
+case "$(vf_reg_doctor)" in
+  *'not registered on the Bash matcher'*) check "P1vl7 a consent gate on a matcher that includes Bash counts as registered" FAIL ;;
+  *'verify-feature: consent mode ready'*) check "P1vl7 a consent gate on a matcher that includes Bash counts as registered" PASS ;;
+  *) check "P1vl7 a consent gate on a matcher that includes Bash counts as registered" FAIL ;;
+esac
+cp "$PLUGIN_DIR/hooks/hooks.json" "$VF_REG_ROOT/hooks/hooks.json"
+if node -e '
+  const fs = require("node:fs");
+  const registry = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const recorder = "/hooks/post-browser-navigation-consent.sh";
+  let broken = 0;
+  for (const group of registry.hooks.PostToolUse || []) {
+    if ((group.hooks || []).some((hook) => typeof hook.command === "string" && hook.command.includes(recorder))) {
+      group.matcher = "(";
+      broken += 1;
+    }
+  }
+  if (broken !== 1) process.exit(1);
+  fs.writeFileSync(process.argv[1], JSON.stringify(registry, null, 2));
+' "$VF_REG_ROOT/hooks/hooks.json" \
+  && (cd -P -- "$VF_REG_ROOT" && node -e '
+    const mod = require("./hooks/lib/verify-consent-v1.js");
+    const { REGISTERED, UNKNOWN } = mod.REGISTRATION;
+    if (mod.consentHookRegistered(process.cwd()) !== REGISTERED) process.exit(1);
+    if (mod.consentRecorderRegistered(process.cwd()) !== UNKNOWN) process.exit(1);
+  ') >/dev/null 2>&1; then
+  check "P1vl9-control only the recorder matcher is uncompilable, so the gate stays registered and the recorder answers unknown" PASS
+else
+  check "P1vl9-control only the recorder matcher is uncompilable, so the gate stays registered and the recorder answers unknown" FAIL
+fi
+case "$(vf_reg_doctor)" in
+  *'❌  verify-feature: cannot start (consent recorder registration in hooks/hooks.json could not be determined)'*)
+    check "P1vl9 a parsed hooks.json whose recorder registration cannot be determined names the recorder as unknown, not missing" PASS ;;
+  *) check "P1vl9 a parsed hooks.json whose recorder registration cannot be determined names the recorder as unknown, not missing" FAIL ;;
+esac
+vf_reg_matchers() {
+  cp "$PLUGIN_DIR/hooks/hooks.json" "$VF_REG_ROOT/hooks/hooks.json"
+  node -e '
+    const fs = require("node:fs");
+    const [file, gateMatcher, recorderMatcher] = process.argv.slice(1);
+    const registry = JSON.parse(fs.readFileSync(file, "utf8"));
+    const names = (group, hook) => (group.hooks || []).some((entry) => typeof entry.command === "string" && entry.command.includes(hook));
+    const gates = (registry.hooks.PreToolUse || []).filter((group) => names(group, "/hooks/pre-browser-navigation-consent.sh"));
+    const recorders = (registry.hooks.PostToolUse || []).filter((group) => names(group, "/hooks/post-browser-navigation-consent.sh"));
+    if (gates.length !== 1 || recorders.length !== 1) process.exit(1);
+    if (gateMatcher !== "keep") gates[0].matcher = gateMatcher;
+    if (recorderMatcher !== "keep") recorders[0].matcher = recorderMatcher;
+    fs.writeFileSync(file, JSON.stringify(registry, null, 2));
+  ' "$VF_REG_ROOT/hooks/hooks.json" "$1" "$2"
+}
+vf_reg_states() {
+  (cd -P -- "$VF_REG_ROOT" && node -e '
+    const mod = require("./hooks/lib/verify-consent-v1.js");
+    process.stdout.write(mod.consentHookRegistered(process.cwd()) + " " + mod.consentRecorderRegistered(process.cwd()));
+  ') 2>/dev/null
+}
+if vf_reg_matchers "(" keep && [ "$(vf_reg_states)" = "unknown registered" ]; then
+  check "P1vl9b-control only the gate matcher is uncompilable, so the gate answers unknown and the recorder stays registered" PASS
+else
+  check "P1vl9b-control only the gate matcher is uncompilable, so the gate answers unknown and the recorder stays registered" FAIL
+fi
+case "$(vf_reg_doctor)" in
+  *'❌  verify-feature: cannot start (consent hook registration in hooks/hooks.json could not be determined)'*)
+    check "P1vl9b a gate registration that cannot be determined names the gate as unknown, not missing" PASS ;;
+  *) check "P1vl9b a gate registration that cannot be determined names the gate as unknown, not missing" FAIL ;;
+esac
+if vf_reg_matchers Read "(" && [ "$(vf_reg_states)" = "unregistered unknown" ]; then
+  check "P1vl9c-control the gate sits on another matcher and the recorder matcher is uncompilable" PASS
+else
+  check "P1vl9c-control the gate sits on another matcher and the recorder matcher is uncompilable" FAIL
+fi
+case "$(vf_reg_doctor)" in
+  *'❌  verify-feature: cannot start (consent hook not registered on the Bash matcher; consent recorder registration in hooks/hooks.json could not be determined)'*)
+    check "P1vl9c an undetermined recorder does not hide a gate that is definitely not registered" PASS ;;
+  *) check "P1vl9c an undetermined recorder does not hide a gate that is definitely not registered" FAIL ;;
+esac
+printf '{' > "$VF_REG_ROOT/hooks/hooks.json"
+case "$(vf_reg_doctor)" in
+  *'❌  verify-feature: cannot start (consent hook registration in hooks/hooks.json could not be determined; consent recorder registration in hooks/hooks.json could not be determined)'*)
+    check "P1vl8 an unparseable hooks.json names both registrations as unknown, not as missing" PASS ;;
+  *) check "P1vl8 an unparseable hooks.json names both registrations as unknown, not as missing" FAIL ;;
+esac
+rm -rf "$VF_REG_ROOT"
+VF_PROBE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-probe.XXXXXX")" || exit 1
+cp -R "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/scripts" "$VF_PROBE_ROOT/" 2>/dev/null
+printf '\nmodule.exports.consentHookRegistered = () => { throw new Error("probe"); };\n' >> "$VF_PROBE_ROOT/hooks/lib/verify-consent-v1.js"
+if (cd -P -- "$VF_PROBE_ROOT" && node -e 'require("./hooks/lib/verify-consent-v1.js").consentHookRegistered(process.cwd())' >/dev/null 2>&1); then
+  check "P1vl10-control the probe fixture loads the decision module and makes the registration probe throw" FAIL
+elif (cd -P -- "$VF_PROBE_ROOT" && node -e 'require("./hooks/lib/verify-consent-v1.js")' >/dev/null 2>&1); then
+  check "P1vl10-control the probe fixture loads the decision module and makes the registration probe throw" PASS
+else
+  check "P1vl10-control the probe fixture loads the decision module and makes the registration probe throw" FAIL
+fi
+case "$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
+  ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" \
+  ZENSU_DOCTOR_PLUGIN_DIR="$VF_PROBE_ROOT" CLAUDE_PLUGIN_ROOT="$VF_PROBE_ROOT" \
+  CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$VF_PROBE_ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null)" in
+  *'❌  verify-feature: cannot start (the consent hook pair registration probe did not complete)'*)
+    check "P1vl10 a registration probe that throws is named apart from an unknown or missing registration" PASS ;;
+  *) check "P1vl10 a registration probe that throws is named apart from an unknown or missing registration" FAIL ;;
+esac
+rm -rf "$VF_PROBE_ROOT"
+VF_LINK_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-link.XXXXXX")" || exit 1
+cp -R "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/scripts" "$VF_LINK_ROOT/" 2>/dev/null
+mv "$VF_LINK_ROOT/hooks/lib/verify-consent-v1.js" "$VF_LINK_ROOT/hooks/lib/verify-consent-v1.real.js"
+ln -s verify-consent-v1.real.js "$VF_LINK_ROOT/hooks/lib/verify-consent-v1.js" 2>/dev/null
+if [ -L "$VF_LINK_ROOT/hooks/lib/verify-consent-v1.js" ]; then
+  if (cd -P -- "$VF_LINK_ROOT" && node -e 'require("./hooks/lib/verify-consent-v1.js")' >/dev/null 2>&1); then
+    check "P1vl11-control the link fixture replaces the decision module with a symlink that still loads" PASS
+  else
+    check "P1vl11-control the link fixture replaces the decision module with a symlink that still loads" FAIL
+  fi
+  case "$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
+    ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" \
+    ZENSU_DOCTOR_PLUGIN_DIR="$VF_LINK_ROOT" CLAUDE_PLUGIN_ROOT="$VF_LINK_ROOT" \
+    CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$VF_LINK_ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null)" in
+    *'❌  verify-feature: cannot start (the consent decision module is a symlink, which both consent hooks refuse)'*)
+      check "P1vl11 a symlinked decision module is named as a symlink, not as a missing file" PASS ;;
+    *) check "P1vl11 a symlinked decision module is named as a symlink, not as a missing file" FAIL ;;
+  esac
+else
+  check "P1vl11-control the link fixture replaces the decision module with a symlink that still loads (no symlink on this host, covered on macOS/Linux)" PASS
+  check "P1vl11 a symlinked decision module is named as a symlink, not as a missing file (no symlink on this host, covered on macOS/Linux)" PASS
+fi
+rm -rf "$VF_LINK_ROOT"
 rm -rf "$VF_LIVE_ROOT"
 
 if grep -qF 'ZDOC_VERIFY=policy' "$HELPER" && grep -qF 'ZDOC_VERIFY=consent-no-recipe' "$HELPER" \
@@ -495,47 +668,28 @@ else
   check "P1vf wrapper derives the verify state from the policy env, the registered hook pair, the run-config helper and the recipe, and exports it with the playwright-cli version" FAIL
 fi
 VF_SKILL="$PLUGIN_DIR/skills/doctor/SKILL.md"
-# The phrase set is DERIVED from the renderer's own arms, never hand-listed: a hand list
+# The needle set is DERIVED from the renderer's own arms, never hand-listed: a hand list
 # passes unchanged when a state is added, which is exactly how a shipped state reached the
-# report with no bullet documenting it. Each arm renders 'verify-feature: <claim> — <remedy>',
-# and the claim before the em dash is what the skill must carry. The strip uses the LITERAL
-# em dash: \xHH is a GNU sed extension, so on BSD/macOS sed the pattern degraded to the literal
-# text and matched nothing, leaving the tail attached and the derived phrase absent from
-# SKILL.md — red on macOS, green on the GNU-sed runner.
-VF_PHRASES="$(grep -oE "'verify-feature: [^']*'" "$REPORT" \
-  | sed "s/^'//; s/'\$//" | sed 's/ — .*//; s/ ($//' | sort -u)"
-VF_PHRASE_COUNT="$(printf '%s\n' "$VF_PHRASES" | grep -c . || true)"
-VF_SKILL_MISS=""
-while IFS= read -r phrase; do
-  [ -n "$phrase" ] || continue
-  grep -qF -- "$phrase" "$VF_SKILL" || VF_SKILL_MISS="$VF_SKILL_MISS [$phrase]"
-done <<VFEOF
-$VF_PHRASES
-VFEOF
-[ "${VF_PHRASE_COUNT:-0}" -ge 7 ] \
-  && check "P1vg-control the verify-feature row phrases derive from the renderer ($VF_PHRASE_COUNT found)" PASS \
-  || check "P1vg-control the verify-feature row phrases derive from the renderer (only ${VF_PHRASE_COUNT:-0} found)" FAIL
-# The count is CONJOINED: an empty derivation would otherwise report every row documented
-# while comparing nothing, which is the shape this check replaced.
-if [ "${VF_PHRASE_COUNT:-0}" -ge 7 ] && [ -z "$VF_SKILL_MISS" ]; then
-  check "P1vg every verify-feature row the renderer can emit is documented in skills/doctor/SKILL.md ($VF_PHRASE_COUNT rows)" PASS
-else
-  check "P1vg verify-feature rows missing from skills/doctor/SKILL.md:$VF_SKILL_MISS" FAIL
-fi
-pw_row_needles() { # $1 skill file; prints calls<TAB>needles<TAB>misses
+# report with no bullet documenting it. Each arm renders '<glyph>  <subject>: <claim> — <remedy>',
+# and the glyph plus the claim before the em dash is what the skill must carry. The glyph is
+# part of the needle because an OK claim can be a prefix of a WARN claim, and an unprefixed
+# needle is then satisfied by the WARN bullet after the OK bullet is gone.
+row_needles() { # $1 subject; $2 skill file; prints calls<TAB>needles<TAB>misses
   node -e '
     const fs = require("fs");
-    const src = fs.readFileSync(process.argv[1], "utf8");
-    const skill = fs.readFileSync(process.argv[2], "utf8").replace(/\s+/g, " ");
-    const calls = src.split("\n").filter((l) => /line\((OK|WARN|BAD), \x27playwright-cli: /.test(l))
-      .map((l) => l.slice(l.indexOf("line(")));
+    const [subject, reportFile, skillFile] = process.argv.slice(1);
+    const src = fs.readFileSync(reportFile, "utf8");
+    const skill = fs.readFileSync(skillFile, "utf8").replace(/\s+/g, " ");
+    const glyphs = { OK: "\u2705", WARN: "\u26a0\ufe0f", BAD: "\u274c" };
+    const head = new RegExp("line\\((OK|WARN|BAD), \\x27" + subject + ": ");
+    const calls = src.split("\n").filter((l) => head.test(l)).map((l) => l.slice(l.search(head)));
     const trim = (text) => text.replace(/ — .*/, "").replace(/ \($/, "").trim();
     const misses = [];
     let needles = 0;
     for (const call of calls) {
       const literals = [...call.matchAll(/\x27([^\x27]*)\x27/g)].map((m) => m[1]);
-      const wanted = [trim(literals[0])];
-      if (literals.length > 1) {
+      const wanted = [glyphs[call.match(head)[1]] + " " + trim(literals[0])];
+      if (literals.length > 1 && /^[),]/.test(literals[1])) {
         const tail = trim(literals[1].replace(/^\)/, "").replace(/^,/, ""));
         if (tail && !tail.startsWith("—")) wanted.push(tail);
       }
@@ -545,9 +699,23 @@ pw_row_needles() { # $1 skill file; prints calls<TAB>needles<TAB>misses
       }
     }
     process.stdout.write(calls.length + "\t" + needles + "\t" + misses.join(" "));
-  ' "$REPORT" "$1" 2>/dev/null
+  ' "$1" "$REPORT" "$2" 2>/dev/null
 }
-PW_ROW_REPORT="$(pw_row_needles "$VF_SKILL")"
+VF_ROW_REPORT="$(row_needles verify-feature "$VF_SKILL")"
+VF_ROW_CALLS="${VF_ROW_REPORT%%	*}"
+VF_ROW_REST="${VF_ROW_REPORT#*	}"
+VF_SKILL_MISS="${VF_ROW_REST#*	}"
+[ -n "$VF_ROW_REPORT" ] && [ "${VF_ROW_CALLS:-0}" -ge 8 ] \
+  && check "P1vg-control the verify-feature row phrases derive from the renderer ($VF_ROW_CALLS found)" PASS \
+  || check "P1vg-control the verify-feature row phrases derive from the renderer (only ${VF_ROW_CALLS:-0} found)" FAIL
+# The count is CONJOINED: an empty derivation would otherwise report every row documented
+# while comparing nothing, which is the shape this check replaced.
+if [ -n "$VF_ROW_REPORT" ] && [ "${VF_ROW_CALLS:-0}" -ge 8 ] && [ -z "$VF_SKILL_MISS" ]; then
+  check "P1vg every verify-feature row the renderer can emit is documented in skills/doctor/SKILL.md ($VF_ROW_CALLS rows)" PASS
+else
+  check "P1vg verify-feature rows missing from skills/doctor/SKILL.md:$VF_SKILL_MISS" FAIL
+fi
+PW_ROW_REPORT="$(row_needles playwright-cli "$VF_SKILL")"
 PW_ROW_CALLS="${PW_ROW_REPORT%%	*}"
 PW_ROW_REST="${PW_ROW_REPORT#*	}"
 PW_ROW_NEEDLES="${PW_ROW_REST%%	*}"
@@ -565,11 +733,28 @@ node -e '
   const kept = text.split(/\n(?=- \*\*)/).filter((b) => !/^- \*\*⚠️ playwright-cli: installed \(…\), /.test(b));
   fs.writeFileSync(process.argv[2], kept.join("\n"));
 ' "$VF_SKILL" "$PW_TRIMMED_SKILL" 2>/dev/null
-PW_TRIMMED_REPORT="$(pw_row_needles "$PW_TRIMMED_SKILL")"
+PW_TRIMMED_REPORT="$(row_needles playwright-cli "$PW_TRIMMED_SKILL")"
 case "${PW_TRIMMED_REPORT##*	}" in
   *'[not the version the browser consent gate was measured against]'*'[but the version the browser consent gate was measured against could not be read]'*)
     check "P1vg1-control deleting both version WARN bullets from the skill turns P1vg1 red" PASS ;;
   *) check "P1vg1-control deleting both version WARN bullets from the skill turns P1vg1 red (got: $PW_TRIMMED_REPORT)" FAIL ;;
+esac
+OK_TRIMMED_SKILL="$SBOX/doctor-skill-without-ok-bullets.md"
+node -e '
+  const fs = require("fs");
+  const text = fs.readFileSync(process.argv[1], "utf8");
+  const kept = text.split(/\n(?=- \*\*)/).filter((b) => !/^- \*\*✅ (verify-feature: consent mode ready|playwright-cli: installed)/.test(b));
+  fs.writeFileSync(process.argv[2], kept.join("\n"));
+' "$VF_SKILL" "$OK_TRIMMED_SKILL" 2>/dev/null
+VF_OK_TRIMMED_REPORT="$(row_needles verify-feature "$OK_TRIMMED_SKILL")"
+case "${VF_OK_TRIMMED_REPORT##*	}" in
+  *'[✅ verify-feature: consent mode ready]'*) check "P1vg-control2 deleting the consent-ready OK bullet from the skill turns P1vg red" PASS ;;
+  *) check "P1vg-control2 deleting the consent-ready OK bullet from the skill turns P1vg red (got: $VF_OK_TRIMMED_REPORT)" FAIL ;;
+esac
+PW_OK_TRIMMED_REPORT="$(row_needles playwright-cli "$OK_TRIMMED_SKILL")"
+case "${PW_OK_TRIMMED_REPORT##*	}" in
+  *'[✅ playwright-cli: installed]'*) check "P1vg1-control2 deleting the installed OK bullet from the skill turns P1vg1 red" PASS ;;
+  *) check "P1vg1-control2 deleting the installed OK bullet from the skill turns P1vg1 red (got: $PW_OK_TRIMMED_REPORT)" FAIL ;;
 esac
 
 # --- playwright-cli detection ----------------------------------------------

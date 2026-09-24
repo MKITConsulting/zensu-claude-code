@@ -11,6 +11,7 @@ const { msysDrivePrefix } = require('./claude-path-v1.js');
 const CONSENT_MATCHER = 'Bash';
 const CONSENT_HOOK_FILE = 'pre-browser-navigation-consent.sh';
 const CONSENT_RECORDER_FILE = 'post-browser-navigation-consent.sh';
+const REGISTRATION = Object.freeze({ REGISTERED: 'registered', UNREGISTERED: 'unregistered', UNKNOWN: 'unknown' });
 const PLAYWRIGHT_CLI_SOURCE_VERSION = '0.1.21';
 const CLI_BASENAMES = Object.freeze(['playwright-cli', 'playwright-cli.cmd', 'playwright-cli.exe', 'playwright-cli.ps1']);
 const CLI_PACKAGE = '@playwright/cli';
@@ -128,7 +129,7 @@ const REASONS = Object.freeze({
   SESSION_UNEXPANDED: 'a playwright-cli call beside a zensu-verify session must name its session literally',
   ARGUMENT_UNEXPANDED: 'a zensu-verify session call must carry literal arguments only',
   INDIRECT: 'a zensu-verify playwright-cli call must run as a plain command, not through another program; to search or commit text that merely names playwright-cli and a zensu-verify session, use the Grep tool or a message file',
-  NOT_PLAIN: 'a command that names playwright-cli and a zensu-verify session must be exactly one plain playwright-cli call; run every other command separately, and search or commit such text through the Grep tool or a message file',
+  NOT_PLAIN: 'a command that names playwright-cli and a zensu-verify session, or names playwright-cli while PLAYWRIGHT_CLI_SESSION names one, must be exactly one plain playwright-cli call whose redirections name literal paths; run every other command separately, and search or commit such text through the Grep tool or a message file',
   UNJUDGED_BODY: 'a zensu-verify playwright-cli call sits inside a heredoc or nested shell the gate cannot judge',
   ENV_ASSIGNMENT: 'a zensu-verify session call must not carry environment assignments or wrappers that change its environment',
   WRAPPER: 'a zensu-verify session call must not run under a wrapper such as timeout, nohup, time, nice, exec, command or builtin',
@@ -272,6 +273,8 @@ function lexShell(text) {
   let pendingHeredocs = [];
   let expectHeredoc = null;
   let redirectNext = false;
+  let redirected = false;
+  let redirectUnexpanded = false;
   let index = 0;
 
   const startWord = () => {
@@ -286,6 +289,8 @@ function lexShell(text) {
     } else if (redirectNext) {
       if (redirectNext === 'herestring') herestrings.push(word);
       redirectNext = false;
+      redirected = true;
+      if (word.unexpanded) redirectUnexpanded = true;
     } else {
       words.push(word);
     }
@@ -293,8 +298,9 @@ function lexShell(text) {
   };
   const endSegment = () => {
     endWord();
-    if (words.length > 0) segments.push(words);
+    if (words.length > 0 || redirected) segments.push(words);
     words = [];
+    redirected = false;
   };
   const consumeHeredocs = (position) => {
     let cursor = position;
@@ -322,13 +328,14 @@ function lexShell(text) {
     if (next === '(') {
       const end = findParen(source, position + 2);
       if (end === -1) { fault = fault || 'unterminated-substitution'; target.raw += source.slice(position); return source.length; }
-      if (source[position + 2] !== '(') nested.push(source.slice(position + 2, end));
+      nested.push(source.slice(position + 2, end));
       target.raw += source.slice(position, end + 1);
       return end + 1;
     }
     if (next === '{') {
       const end = findBrace(source, position + 2);
       if (end === -1) { fault = fault || 'unterminated-expansion'; target.raw += source.slice(position); return source.length; }
+      nested.push(source.slice(position + 2, end));
       target.raw += source.slice(position, end + 1);
       return end + 1;
     }
@@ -350,7 +357,7 @@ function lexShell(text) {
       target.raw += `$${name[1]}`;
       return position + 1 + name[1].length;
     }
-    target.unexpanded = wasUnexpanded;
+    if (next === undefined || /\s/.test(next)) target.unexpanded = wasUnexpanded;
     target.value += '$';
     target.raw += '$';
     return position + 1;
@@ -506,7 +513,7 @@ function lexShell(text) {
   if (pendingHeredocs.length > 0) {
     consumeHeredocs(source.length);
   }
-  return { segments, nested, heredocs, herestrings, fault, operators };
+  return { segments, nested, heredocs, herestrings, fault, operators, redirectUnexpanded };
 }
 
 function parseCliArgs(argv) {
@@ -514,7 +521,10 @@ function parseCliArgs(argv) {
   const strings = new Set(CLI_STRING_OPTIONS);
   const bare = (key) => (strings.has(key) ? '' : true);
   const parsed = { _: [] };
+  const sessionArguments = new Set();
+  let current = -1;
   const setArg = (key, value) => {
+    if (key === 's' || key === 'session') sessionArguments.add(current);
     if (parsed[key] === undefined || booleans.has(key) || typeof parsed[key] === 'boolean') parsed[key] = value;
     else if (Array.isArray(parsed[key])) parsed[key].push(value);
     else parsed[key] = [parsed[key], value];
@@ -527,6 +537,7 @@ function parseCliArgs(argv) {
     args = args.slice(0, doubleDash);
   }
   for (let index = 0; index < args.length; index += 1) {
+    current = index;
     const arg = args[index];
     if (/^--.+=/.test(arg)) {
       const match = arg.match(/^--([^=]+)=([\s\S]*)$/);
@@ -594,7 +605,7 @@ function parseCliArgs(argv) {
     parsed.global = true;
     delete parsed.g;
   }
-  return { args: parsed };
+  return { args: parsed, sessionFlags: sessionArguments.size };
 }
 
 function valueAssignmentOf(word) {
@@ -615,7 +626,7 @@ function cliBasename(value) {
 }
 
 function isCliWord(word) {
-  if (!word) return false;
+  if (!word || word.unexpanded) return false;
   const value = word.value.toLowerCase();
   const base = cliBasename(value);
   return CLI_BASENAMES.includes(base) || value === CLI_PACKAGE || value.startsWith(`${CLI_PACKAGE}@`);
@@ -823,7 +834,7 @@ function scanCommand(text, context, depth, found, inherited = NO_SCOPE) {
 }
 
 function plainShape(top, invocations) {
-  if (!top || top.fault || top.operators !== 0 || top.segments.length !== 1) return false;
+  if (!top || top.fault || top.operators !== 0 || top.segments.length !== 1 || top.redirectUnexpanded) return false;
   if (top.nested.length + top.heredocs.length + top.herestrings.length > 0) return false;
   return invocations.length === 1 && invocations[0].depth === 0;
 }
@@ -843,7 +854,7 @@ function analyzeCommand(command, env) {
       calls.push({ invocation, gated: marks.session, fault: parsed.fault });
       continue;
     }
-    if (conflict) {
+    if (conflict || (marks.session && parsed.sessionFlags > 1)) {
       calls.push({ invocation, gated: true, fault: REASONS.SESSION_MALFORMED });
       continue;
     }
@@ -1439,20 +1450,54 @@ function runPost(payload, env, err) {
   return last;
 }
 
+function matcherCovers(matcher, tool) {
+  if (matcher === undefined || matcher === '' || matcher === '*') return REGISTRATION.REGISTERED;
+  if (typeof matcher !== 'string') return REGISTRATION.UNKNOWN;
+  const answers = new Set();
+  if (/^[A-Za-z0-9_|]+$/.test(matcher)) {
+    answers.add(matcher.split('|').includes(tool));
+  } else {
+    if (/^[A-Za-z0-9_|, -]+$/.test(matcher)) answers.add(matcher.split(/[|,]/).map((name) => name.trim()).includes(tool));
+    try {
+      answers.add(new RegExp(matcher).test(tool));
+      answers.add(new RegExp(`^(?:${matcher})$`).test(tool));
+    } catch (_error) {
+      return REGISTRATION.UNKNOWN;
+    }
+  }
+  if (answers.size !== 1) return REGISTRATION.UNKNOWN;
+  return answers.has(true) ? REGISTRATION.REGISTERED : REGISTRATION.UNREGISTERED;
+}
+
 function hookRegistered(pluginRoot, event, hookFile) {
   const hookPath = path.join(pluginRoot, 'hooks', hookFile);
   const hooksJson = path.join(pluginRoot, 'hooks', 'hooks.json');
   try {
-    const hookInfo = fs.lstatSync(hookPath);
-    const jsonInfo = fs.lstatSync(hooksJson);
-    if (!hookInfo.isFile() || !jsonInfo.isFile()) return false;
-    const manifest = JSON.parse(fs.readFileSync(hooksJson, 'utf8'));
-    const groups = manifest && manifest.hooks && Array.isArray(manifest.hooks[event]) ? manifest.hooks[event] : [];
-    return groups.some((group) => group && group.matcher === CONSENT_MATCHER && Array.isArray(group.hooks)
-      && group.hooks.some((hook) => hook && typeof hook.command === 'string' && hook.command.includes(`/hooks/${hookFile}`)));
-  } catch (_error) {
-    return false;
+    if (!fs.statSync(hookPath).isFile()) return REGISTRATION.UNREGISTERED;
+  } catch (error) {
+    return error && error.code === 'ENOENT' ? REGISTRATION.UNREGISTERED : REGISTRATION.UNKNOWN;
   }
+  let manifest;
+  try {
+    if (!fs.lstatSync(hooksJson).isFile()) return REGISTRATION.UNKNOWN;
+    manifest = JSON.parse(fs.readFileSync(hooksJson, 'utf8'));
+  } catch (_error) {
+    return REGISTRATION.UNKNOWN;
+  }
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) return REGISTRATION.UNKNOWN;
+  if (manifest.hooks === undefined) return REGISTRATION.UNREGISTERED;
+  if (!manifest.hooks || typeof manifest.hooks !== 'object' || Array.isArray(manifest.hooks)) return REGISTRATION.UNKNOWN;
+  const groups = manifest.hooks[event] === undefined ? [] : manifest.hooks[event];
+  if (!Array.isArray(groups)) return REGISTRATION.UNKNOWN;
+  let undecided = false;
+  for (const group of groups) {
+    if (!group || !Array.isArray(group.hooks)) continue;
+    if (!group.hooks.some((hook) => hook && typeof hook.command === 'string' && hook.command.includes(`/hooks/${hookFile}`))) continue;
+    const covers = matcherCovers(group.matcher, CONSENT_MATCHER);
+    if (covers === REGISTRATION.REGISTERED) return REGISTRATION.REGISTERED;
+    if (covers === REGISTRATION.UNKNOWN) undecided = true;
+  }
+  return undecided ? REGISTRATION.UNKNOWN : REGISTRATION.UNREGISTERED;
 }
 
 function consentHookRegistered(pluginRoot) {
@@ -1478,6 +1523,7 @@ module.exports = {
   CLI_STRING_OPTIONS,
   CHROMIUM_BROWSERS,
   CLI_PACKAGE,
+  CLI_MARKERS,
   CONSENT_HOOK_FILE,
   CONSENT_MATCHER,
   CONSENT_RECORDER_FILE,
@@ -1497,6 +1543,7 @@ module.exports = {
   PLAYWRIGHT_CLI_SOURCE_VERSION,
   REASONS,
   RECIPE_NAMES,
+  REGISTRATION,
   RUN_CONFIG_NAME,
   RUN_OUTPUT_DIR_NAME,
   SESSION_ENV,
@@ -1505,7 +1552,6 @@ module.exports = {
   STATE_SEGMENTS,
   analyzeCommand,
   appendRecord,
-  CLI_MARKERS,
   commandMarkers,
   consentHookRegistered,
   consentRecorderRegistered,

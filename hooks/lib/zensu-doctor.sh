@@ -13,8 +13,8 @@
 # directly) can inject a fixed toolchain verdict; real
 # probing only fills the gaps left unset. That claim scopes to the EXPORTED inputs
 # the renderer reads, not to derived locals such as ZDOC_ROOT or ZDOC_SESSION_PAIR.
-# Two of the exported ones are exceptions, and they are exceptions
-# on purpose: ZDOC_SESSION_KEY and ZDOC_SESSION_PROJECT_ROOT are cleared
+# Two PAIRS of the exported ones are exceptions, on purpose.
+# ZDOC_SESSION_KEY and ZDOC_SESSION_PROJECT_ROOT are cleared
 # unconditionally rather than seeded, because their meaning depends on a verdict
 # reached further down and an inherited value would survive the branches that
 # never reach the bind. See the comment at their assignment. ZDOC_PLAYWRIGHT_VERSION
@@ -247,13 +247,14 @@ zdoc_version_pair() {  # $1 = model predicate function name
 # The bind already computes both and the branch below discarded them, so nothing
 # new is resolved here.
 #
-# Deliberately NOT `:=`-seeded, unlike every other ZDOC_* in this file. These two
-# are the only ones whose meaning depends on a verdict reached further down, and
-# "empty for every verdict except bound" has to be TRUE rather than merely
-# stated: an inherited value would otherwise survive the unknown and unavailable
-# branches, which set a verdict and never reach the bind. The renderer enforces
-# the same invariant from its side (it requires ZDOC_BINDING=bound), because a
-# caller who supplies ZDOC_BINDING skips this whole block.
+# Deliberately NOT `:=`-seeded: these two are one of the two PAIRS the header names
+# as exceptions, and unlike the other pair they are cleared unconditionally rather
+# than re-derived, because their meaning depends on the binding verdict reached
+# further down and "empty for every verdict except bound" has to be TRUE rather
+# than merely stated: an inherited value would otherwise survive the unknown and
+# unavailable branches, which set a verdict and never reach the bind. The renderer
+# enforces the same invariant from its side (it requires ZDOC_BINDING=bound),
+# because a caller who supplies ZDOC_BINDING skips this whole block.
 ZDOC_SESSION_KEY=""
 ZDOC_SESSION_PROJECT_ROOT=""
 if [ -z "${ZDOC_BINDING:-}" ]; then
@@ -543,37 +544,45 @@ if [ -z "${ZDOC_VERIFY:-}" ]; then
   if [ ! -f "$ZDOC_ROOT/hooks/pre-browser-navigation-consent.sh" ] \
     || [ ! -f "$ZDOC_ROOT/hooks/post-browser-navigation-consent.sh" ] \
     || [ ! -f "$ZDOC_ROOT/hooks/lib/verify-consent-v1.js" ] \
-    || [ -L "$ZDOC_ROOT/hooks/lib/verify-consent-v1.js" ] \
     || [ ! -f "$ZDOC_ROOT/scripts/verify-browser-config.js" ]; then
     ZDOC_VERIFY=unavailable
     ZDOC_VERIFY_REASON="consent hook pair, its module or the run-config helper missing from the plugin"
+  elif [ -L "$ZDOC_ROOT/hooks/lib/verify-consent-v1.js" ]; then
+    ZDOC_VERIFY=unavailable
+    ZDOC_VERIFY_REASON="the consent decision module is a symlink, which both consent hooks refuse"
   elif ! (cd -P -- "$ZDOC_ROOT" && node -e 'require("./hooks/lib/verify-consent-v1.js")' >/dev/null 2>&1); then
     ZDOC_VERIFY=unavailable
     ZDOC_VERIFY_REASON="the consent decision module could not be loaded"
-  elif ! (cd -P -- "$ZDOC_ROOT" && node -e '
+  elif ! ZDOC_VERIFY_REGISTRATION_FAULT="$(cd -P -- "$ZDOC_ROOT" && node -e '
       const mod = require("./hooks/lib/verify-consent-v1.js");
-      process.exit(mod.consentHookRegistered(process.cwd()) ? 0 : 1);
-    ' >/dev/null 2>&1); then
+      const { REGISTERED, UNKNOWN } = mod.REGISTRATION;
+      const probes = [["consent hook", mod.consentHookRegistered(process.cwd())], ["consent recorder", mod.consentRecorderRegistered(process.cwd())]];
+      process.stdout.write(probes
+        .filter((probe) => probe[1] !== REGISTERED)
+        .map((probe) => probe[1] === UNKNOWN ? probe[0] + " registration in hooks/hooks.json could not be determined" : probe[0] + " not registered on the Bash matcher")
+        .join("; "));
+    ' 2>/dev/null)"; then
     ZDOC_VERIFY=unavailable
-    ZDOC_VERIFY_REASON="consent hook not registered on the Bash matcher"
-  elif ! (cd -P -- "$ZDOC_ROOT" && node -e '
-      const mod = require("./hooks/lib/verify-consent-v1.js");
-      process.exit(mod.consentRecorderRegistered(process.cwd()) ? 0 : 1);
-    ' >/dev/null 2>&1); then
+    ZDOC_VERIFY_REASON="the consent hook pair registration probe did not complete"
+  elif [ -n "$ZDOC_VERIFY_REGISTRATION_FAULT" ]; then
     ZDOC_VERIFY=unavailable
-    ZDOC_VERIFY_REASON="consent recorder not registered on the Bash matcher"
+    ZDOC_VERIFY_REASON="$ZDOC_VERIFY_REGISTRATION_FAULT"
   elif [ -n "${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" ]; then
-    ZDOC_VERIFY_POLICY_FAULT="$(ZDOC_FLOOR="$ZDOC_ROOT/hooks/lib/verify-navigation-floor-v1.js" node -e '
-      const floor = require(process.env.ZDOC_FLOOR);
+    if ZDOC_VERIFY_POLICY_FAULT="$(cd -P -- "$ZDOC_ROOT" && node -e '
+      const floor = require("./hooks/lib/verify-navigation-floor-v1.js");
       const parsed = floor.parsePolicyTargets(process.env.ZENSU_VERIFY_NAVIGATION_POLICY_V1 || "");
       if (!parsed || typeof parsed.ok !== "boolean") process.exit(1);
-      process.stdout.write(parsed.ok ? "" : String(parsed.fault || "policy could not be judged"));
-    ' 2>/dev/null)" || ZDOC_VERIFY_POLICY_FAULT="policy could not be judged"
-    if [ -n "$ZDOC_VERIFY_POLICY_FAULT" ]; then
-      ZDOC_VERIFY=policy-invalid
-      ZDOC_VERIFY_REASON="$ZDOC_VERIFY_POLICY_FAULT"
+      process.stdout.write(parsed.ok ? "" : String(parsed.fault || "refused without a named rule"));
+    ' 2>/dev/null)"; then
+      if [ -n "$ZDOC_VERIFY_POLICY_FAULT" ]; then
+        ZDOC_VERIFY=policy-invalid
+        ZDOC_VERIFY_REASON="$ZDOC_VERIFY_POLICY_FAULT"
+      else
+        ZDOC_VERIFY=policy
+      fi
     else
-      ZDOC_VERIFY=policy
+      ZDOC_VERIFY=policy-unchecked
+      ZDOC_VERIFY_REASON="the policy parser in hooks/lib/verify-navigation-floor-v1.js did not complete"
     fi
   elif [ -z "$ZDOC_VERIFY_RECIPE_ROOT" ]; then
     ZDOC_VERIFY=consent-recipe-unchecked

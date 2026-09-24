@@ -6,6 +6,9 @@ paths:
   - "hooks/post-browser-navigation-consent.sh"
   - "scripts/verify-browser-config.js"
   - "skills/verify-feature/**"
+  - "skills/doctor/**"
+  - "hooks/lib/zensu-doctor.sh"
+  - "hooks/lib/zensu-doctor-report.js"
   - "tests/structure/test-verify-consent.sh"
   - "tests/structure/verify-consent-v1.test.js"
   - "tests/structure/verify-navigation-floor-v1.test.js"
@@ -40,15 +43,18 @@ and the skill's instruction to use only the printed session is prose, not a boun
 **The order of judgement is the contract.**
 
 1. **Prefilter, in BOTH wrappers, before `node` starts:** the payload is normalized by ONE
-   `LC_ALL=C sed` pass that joins a JSON-encoded backslash-newline line continuation and ONE
-   `LC_ALL=C tr -d` pass that removes every quote and backslash, then matched case-insensitively.
+   `LC_ALL=C sed` pass that first pairs every JSON-escaped backslash — so an escaped backslash
+   before `n` is never read as a line break — and then joins a JSON-encoded backslash-newline or
+   backslash-CR-LF line continuation, and ONE `LC_ALL=C tr -d` pass that removes every quote,
+   backslash and pairing sentinel, then matched case-insensitively.
    It must name `playwright-cli` or `@playwright/cli` AND a `zensu-verify-` session — or name the
    CLI while the hook environment's `PLAYWRIGHT_CLI_SESSION` names one. The third `case` arm, the
-   JSON-escaped `\/` spelling, only matters on the fallback to the raw payload when `tr` fails.
+   JSON-escaped `\/` spelling, only matters on the fallback to the raw payload when either pass fails.
    Every other Bash call exits 0 with no output — which is what keeps the pair off the hot path of
    every Bash call and out of every bind-failure state for unrelated commands. It is also why the
    node-unavailable, module-absent-or-symlinked and module-failure arms act on marked payloads
-   only. The recognized `/zensu:doctor` and adoption commands exit 0 through
+   only. In the PRE wrapper alone, and on a POSIX host with `node` — the recognizer refuses on
+   win32 — the recognized `/zensu:doctor` and adoption commands exit 0 through
    `zensu_doctor_allowed` right after the plugin-root check, even when a path in them names both
    markers. **Why `tr` and not bash:** pure-bash stripping (`${INPUT//[...]/}`) is quadratic on bash
    3.2 and did not finish within 100 s on a 480 KB payload, where `tr` took 61 ms. `evaluate`
@@ -63,13 +69,23 @@ and the skill's instruction to use only the printed session is prose, not a boun
    checked first); an environment builtin; `PLAYWRIGHT_MCP_*`/`PWTEST_*` text in the raw or the
    quote-stripped command; and a session name or argument that is not a literal. A `-c` or `eval`
    body inherits the outer command's assignments and wrappers, so `env -i bash -c '…'` is judged as
-   if the wrapper sat on the inner call. The lexer marks an unquoted brace, glob, leading `~` or
-   leading `=` word as unexpanded; a `+=` session assignment counts as unexpanded; a session given
+   if the wrapper sat on the inner call. The lexer marks as unexpanded an unquoted brace, glob,
+   leading `~` or leading `=` word and every word carrying a `$` outside single quotes that
+   whitespace or the end of the command does not follow — zsh's `$=X`, `$~X`, `$^X` and `$+X`
+   expand where bash leaves them literal, and the Bash tool may run zsh; a `+=` session assignment
+   counts as unexpanded; a session given
    more than once denies `SESSION_MALFORMED`; and a session value is GATED when it names
    `zensu-verify-` in any letter case or behind a path, then must match `SESSION_RE` exactly. A call
-   on any other session reaches no decision — unless the command is marked and carries an
-   unexpanded argument, which denies `ARGUMENT_UNEXPANDED` because its session could resolve to a
-   gated one after expansion.
+   on any other session reaches no decision unless the command is marked. A marked command's call
+   on another session is still judged for a parse fault, an unexpanded session or argument
+   (`ARGUMENT_UNEXPANDED`, because its session could resolve to a gated one after expansion), a
+   session assignment given twice, a session flag given in more than one argument
+   (`parseCliArgs` counts ARGUMENTS, not assignments, because one clustered short option such as
+   `-szensu-verify-a` sets `s` twice and must keep its `SESSION_UNRESOLVED` remedy),
+   `PLAYWRIGHT_MCP_*`/`PWTEST_*` text, a redefinition, an
+   environment builtin and every shape step 7 refuses, so under the environment arm only one plain
+   literal call that parses reaches no decision. Those arms key on `marks.session`, which the
+   environment arm sets; keying them on `marks.named`, the text marker alone, reopens every one.
 3. **Principal:** main thread only (`claude-principal-v1.js`). A subagent's `zensu-verify` call
    denies.
 4. **Wrapper, launcher and allowlist.** `env`, `sudo` and `doas` keep `ENV_ASSIGNMENT`; any other
@@ -97,9 +113,15 @@ and the skill's instruction to use only the printed session is prose, not a boun
 6. **Every target origin** — each run-config origin on `open`, and the URL of `open`, `goto` and
    `tab-new` — goes through the floor below, then consent or policy.
 7. **The shape: exactly one plain call.** A command whose markers name both the CLI and a
-   `zensu-verify` session is admitted only as ONE top-level `playwright-cli` invocation with no
-   operator, no second segment, no subshell, no heredoc and no here-string (`plainShape`).
-   Everything else denies `NOT_PLAIN`. The test runs AFTER the per-call judgement, so a call that
+   `zensu-verify` session — in its text, or through the hook environment's
+   `PLAYWRIGHT_CLI_SESSION` — is admitted only as ONE top-level `playwright-cli` invocation with no
+   operator, no second segment, no subshell, no heredoc, no here-string and no redirection whose
+   target is not a literal (`plainShape`): a literal target is admitted, a target carrying an
+   expansion — a variable, even quoted, a substitution, an unquoted glob or brace, a leading `~`
+   or `=` — is not, and a redirection on a line of its own is a second segment. Everything else
+   denies `NOT_PLAIN`, whose text names both marker arms and the literal-redirection rule beside
+   the one-call rule: a command marked only through the environment names no session, and "run
+   every other command separately" is no remedy for a single call with a non-literal target. The test runs AFTER the per-call judgement, so a call that
    is already refused keeps its specific reason. A command that merely MENTIONS both markers — a
    `grep` pattern, a commit message, an `echo` — is refused too, by whichever rule sees it first: a
    word outside command position that names the CLI makes step 2 answer `INDIRECT`, and only text
@@ -156,11 +178,17 @@ when that read fails does it fall back to `zensu_run_bounded env NO_UPDATE_NOTIF
 playwright-cli --version </dev/null`, keeping the first dotted version number. A version other than
 `PLAYWRIGHT_CLI_SOURCE_VERSION`, or a measured version the report could not read, renders WARN and
 names what was not measured against it; a difference is disclosed, never a failure. The
-verify-feature row runs its availability checks FIRST — hook pair, module and helper present, both
-hooks registered on `Bash` — and reports `unavailable` before it classifies a policy, so a valid
-policy over an unregistered recorder is not reported as ready. It then reports `policy`,
-`policy-invalid` (naming a per-target fault too, not only a top-level one), `consent`,
-`consent-no-recipe` and `consent-recipe-unchecked`. Every row is derived from files on disk; the
+verify-feature row runs its availability checks FIRST — hook pair, module and helper present, the
+module no symlink (both hooks refuse one) and loadable, both hooks registered on a matcher that
+covers `Bash` — and reports `unavailable` before it classifies a policy, so a valid policy over an
+unregistered recorder is not reported as ready. Each hook is named with its own state — "consent
+hook" is the PreToolUse gate, "consent recorder" the PostToolUse half — joined by `; ` when both
+apply, so an undetermined recorder never hides a definite missing gate; a registration it cannot
+determine — a `hooks.json` it cannot read or parse, a shape it cannot judge, a matcher the host
+may read two ways or that does not compile — is named as undetermined rather than missing
+(`REGISTRATION`), and a probe that does not complete is named apart from both, as the pair's. It then reports `policy`, `policy-invalid` (naming a per-target fault too, not
+only a top-level one), `policy-unchecked` (the parse did not complete: a missing check, never an
+invalid policy), `consent`, `consent-no-recipe` and `consent-recipe-unchecked`. Every row is derived from files on disk; the
 doctor cannot observe whether the hooks run.
 The SessionStart banner's consent line sits BELOW the `hooks.sessionBanner` gate, because it
 announces a prompt rather than a capability the plugin hands itself.
@@ -180,15 +208,49 @@ announces a prompt rather than a capability the plugin hands itself.
   number alone asserts a measurement nobody made. The recorder also asserts `registry.js`'s
   `sessionName || process.env.PLAYWRIGHT_CLI_SESSION` precedence and records `pkg.bin`, which the
   unit suite compares with `CLI_BASENAMES`. The version is hand-copied as prose into
-  `skills/verify-feature/SKILL.md` (pinned by `P6f`), `docs/gates.md` and
-  `evals/verify-feature/README.md`, and as a literal into the unit pin beside the constant; the
+  `skills/verify-feature/SKILL.md` (pinned by `P6f`), `docs/gates.md`,
+  `evals/verify-feature/README.md` and this rule file (step 4 and the run-config measurement),
+  and as a literal into the unit pin beside the constant; the
   MSYS boundary suite derives it from the module.
 - `SESSION_PREFIX`, `SESSION_RE`, `RUN_CONFIG_NAME`, `RUN_OUTPUT_DIR_NAME`, `MAX_RUN_ORIGINS` and
   `runConfigShape` are consumed by the helper FROM the module, never re-spelled.
 - `CONSENT_MATCHER` (`'Bash'`) ↔ both registrations in `hooks/hooks.json` ↔
-  `consentHookRegistered`/`consentRecorderRegistered` ↔ the doctor's `unavailable` reasons.
+  `consentHookRegistered`/`consentRecorderRegistered` and their `REGISTRATION` answers ↔ the
+  doctor's `unavailable` reasons in `hooks/lib/zensu-doctor.sh` ↔ the `❌ verify-feature: cannot
+  start (…)` bullet in `skills/doctor/SKILL.md`, which must name every cause those reasons carry
+  — a missing file, a symlinked or unloadable decision module, a hook that is not registered, a
+  registration that could not be determined, a probe that did not complete — and the rule that
+  each hook is named with its own state, because a model relaying an undetermined registration as
+  a missing hook, or the gate's state as the recorder's, sends the user after a problem that is
+  not there. No check compares the bullet with the reasons.
+- `hookRegistered` in `hooks/lib/verify-consent-v1.js` and `reviewerSpawnHookWired` in
+  `hooks/lib/zensu-doctor-report.js` are two hand-written readers of one host rule — which
+  `hooks.json` groups fire for a tool — and they answer differently ON PURPOSE, so a change to
+  either re-decides each difference.
+  `hookRegistered` follows the host's own matcher rule as read out of the Claude Code 2.1.280
+  binary (`matcherCovers`): an absent or empty matcher and `*` cover every tool, and a matcher of
+  plain names joined by `|` covers exactly those names. Any other matcher the host may read as a
+  name list or as a regular expression, and whether it anchors one was not observed, so a matcher
+  whose name-list, anchored and unanchored readings disagree answers `unknown`, as does one that
+  does not compile or is not a string. The grant row compiles every matcher as an unanchored
+  regular expression, reads every matcher that is not a non-empty string — absent, empty, `null`,
+  a number — as `.*`, and skips a group whose matcher does not compile: a non-string matcher
+  answers `unknown` here and covers every tool there, and `*` covers every tool here while its
+  group is skipped there. The document shapes differ in three places only: an array document, a
+  `hooks` value of the wrong type, and an event value that is present but falsy answer `unknown`
+  here and read as an empty list there; a document that is not an object and a truthy event value
+  that is not an array answer `unknown` in both. The other differences: this copy matches the command on
+  `/hooks/<file>` and requires that file, followed through a symlink as the doctor's `[ -f ]`
+  follows it, to be a regular file, where that one matches the bare filename; this copy reads
+  `hooks.json` through `lstat` plus `readFileSync`, that one through the doctor's hardened
+  `readJson`; and that one requires EVERY spawn tool to match where this one tests
+  `CONSENT_MATCHER` alone. Every `unknown` exists because this probe feeds a verdict that must
+  never read a registration it could not judge as a missing one. One shared helper taking those
+  tolerances as parameters is the standing fix; it is not taken here because it would move the
+  grant row's answers, a change that belongs in the grant's own review. Neither suite compares
+  the two copies.
 - The prefilter in both wrappers ↔ `commandMarkers` / `normalizedText` in the module (hand copies,
-  see step 1): the continuation join, the stripped character set, case-insensitivity, both
+  see step 1): the continuation join with its backslash pairing, the stripped character set, case-insensitivity, both
   markers, and the `PLAYWRIGHT_CLI_SESSION` arm must agree. `CLI_MARKERS` is DERIVED from
   `CLI_BASENAMES` and `CLI_PACKAGE`; `H17d` pins the two wrapper blocks byte-identical and `H17e`
   requires every derived marker in them.

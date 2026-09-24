@@ -339,8 +339,12 @@ A PreToolUse gate (`pre-browser-navigation-consent.sh`) and its PostToolUse comp
 `scripts/verify-browser-config.js` prints for a `/zensu:verify-feature` run — and stay out of
 every other Bash call: both hooks exit before starting `node` unless the payload, with quotes and
 backslashes removed and in any letter case, names `playwright-cli` (or `@playwright/cli`) and a
-`zensu-verify-` session, or the hook environment's `PLAYWRIGHT_CLI_SESSION` names one; a
-`playwright-cli` call on any other session reaches no decision.
+`zensu-verify-` session, or the hook environment's `PLAYWRIGHT_CLI_SESSION` names one. A
+`playwright-cli` call on any other session reaches no decision unless its command text also names
+a `zensu-verify-` session, which denies it. While the hook environment's `PLAYWRIGHT_CLI_SESSION`
+names one, such a call reaches no decision only as one plain call that names its session once,
+spells that session and every argument literally, parses, and names no `PLAYWRIGHT_MCP_*` or
+`PWTEST_*` variable; every other such command is denied.
 The pair exists so that `/zensu:verify-feature` can run without
 `ZENSU_VERIFY_NAVIGATION_POLICY_V1` in the environment that launched Claude Code: that variable
 is the only channel a model cannot write, and it costs every user a shell prefix, a port fixed
@@ -367,8 +371,11 @@ session is prose, not a boundary.
   `zensu-verify` session — after quote removal and in any letter case — or that names
   `playwright-cli` while the hook environment's `PLAYWRIGHT_CLI_SESSION` names such a session, is
   admitted only as ONE top-level `playwright-cli` call: no second command, no `;`, `&&`, `||`,
-  pipe or background `&`, no subshell, command substitution, heredoc or here-string, and no
-  nested shell or `eval` body. The per-call rules below run first, so a call the gate can judge
+  pipe or background `&`, no subshell, command substitution, heredoc or here-string, no
+  nested shell or `eval` body, and a redirection only to a literal path: a redirection whose
+  target is not a literal — a variable, a substitution, an unquoted glob or brace, a leading `~`
+  or `=` — is denied, and a redirection on a line of its own is a second command. The per-call rules
+  below run first, so a call the gate can judge
   keeps its specific reason, and any other shape is denied as not one plain call. A gated call
   reached through `xargs` or another program, a command string handed to a shell or another
   program, a heredoc, here-string, nested shell or `eval` body the gate cannot judge — one
@@ -381,7 +388,9 @@ session is prose, not a boundary.
   `PLAYWRIGHT_MCP_*` or `PWTEST_*` name in the command text, quoted apart or not, are denied.
   The session name and every argument must be literal: a shell variable, substitution, glob,
   brace expansion, or a leading `~` or `=` beside a `zensu-verify` session denies, so quote such
-  an argument. `-s=<session>`, `--session <session>` and a literal
+  an argument. Outside single quotes every `$` counts as an expansion unless whitespace or the
+  end of the command follows it, so the zsh spellings `$=X`, `$~X`, `$^X` and `$+X` deny as well.
+  `-s=<session>`, `--session <session>` and a literal
   `PLAYWRIGHT_CLI_SESSION=<session>` prefix are all read; a session given twice, appended with
   `+=`, or spelled in another letter case or behind a path is refused. The arguments are parsed
   with a port of the CLI's own parser, pinned by a golden recording of `playwright-cli` 0.1.21's
@@ -448,13 +457,15 @@ and the call then succeeded.
 
 **Fault direction.** The PreToolUse hook fails closed on a marked call and never touches any
 other: a Bash call whose payload does not name both markers — and whose hook environment names
-no `zensu-verify` session — exits before `node` starts, and so do the recognized `/zensu:doctor`
-and adoption commands even when a path in them names both markers; for a marked payload, a
-missing `node`,
+no `zensu-verify` session — exits before `node` starts. On a POSIX host with `node`, the
+recognized `/zensu:doctor` and adoption commands exit 0 before the decision module runs, even
+when a path in them names both markers; the recognizer refuses on win32, so there such a command
+is judged like any other. For a marked payload, a missing `node`,
 an absent or symlinked module, or a module failure denies with a stderr note, and the recorder
-skips with one. The markers are read after one `LC_ALL=C sed` pass joins a backslash-newline
-line continuation and one `LC_ALL=C tr -d` pass removes quotes and backslashes, with the raw
-payload as the fallback when `tr` fails: stripping them in pure bash
+skips with one. The markers are read after one `LC_ALL=C sed` pass — which first pairs every
+JSON-escaped backslash, so an escaped backslash before `n` is never read as a line break — joins
+a backslash-newline or backslash-CR-LF line continuation and one `LC_ALL=C tr -d` pass removes
+quotes and backslashes, with the raw payload as the fallback when either pass fails: stripping them in pure bash
 was measured quadratic under bash 3.2, where a 480 KB payload did not finish in 100 s, while the
 `tr` pass took 61 ms. A session that cannot bind its Session Control record still gets the floor and a
 prompt, but nothing is remembered, so every call that reaches a loopback origin asks again. The

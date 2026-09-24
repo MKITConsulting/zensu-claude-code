@@ -23,7 +23,8 @@ or `npm install -g @playwright/cli`. It uses your installed Chrome. When Chrome 
 the skill asks before it runs `playwright-cli install-browser`, because that downloads a
 browser. `/zensu:doctor` reports whether `playwright-cli` is on `PATH` and which version, read
 from the installed package without running the binary — only when that read yields no version
-does it run a bounded `playwright-cli --version` — and warns when that version is not the one
+does it run `playwright-cli --version`, under a five-second watchdog where `timeout` or
+`gtimeout` exists and with no time limit otherwise — and warns when that version is not the one
 the browser consent gate was measured against.
 
 In local mode the skill also needs a **runtime recipe** it can accept, or a repository the
@@ -44,9 +45,13 @@ address the helper resolved.
 
 The **browser consent gate** — two hooks on the `Bash` matcher — judges every `playwright-cli`
 call on a `zensu-verify` session before it runs, reaches no decision for a call on any other
-session, and denies a command that merely mentions both markers — a search, a commit message.
+session whose command text names no `zensu-verify-` session, and denies a command that merely
+mentions both markers — a search, a commit message.
 That is the accepted cost of a textual gate: search with the Grep tool and commit with a message
-file. For a `zensu-verify` call:
+file. While the hook environment's `PLAYWRIGHT_CLI_SESSION` names a `zensu-verify-` session, a
+call on any other session reaches no decision only as one plain call that names its session
+once, spells that session and every argument literally, parses, and names no `PLAYWRIGHT_MCP_*`
+or `PWTEST_*` variable; every other such command is denied. For a `zensu-verify` call:
 
 - only the commands a verification needs are admitted: opening and closing the session,
   navigation, snapshots, screenshots, console and request listings, clicks and typing, and
@@ -55,7 +60,10 @@ file. For a `zensu-verify` call:
 - `open` must name the run config, and the gate reads it itself before the browser starts;
 - calls must come from the main thread, name their session and arguments literally, and run as
   exactly one plain `playwright-cli` command — no second command, pipe, subshell, substitution,
-  wrapper, package launcher or nested shell — so a denial names the rule rather than guessing;
+  wrapper, package launcher or nested shell, and a redirection only to a literal path, never to a
+  variable, substitution, glob, brace, `~` or `=` target nor on a line of its own — so a denial
+  names the rule rather than guessing. Outside single quotes every `$` counts as an expansion
+  unless whitespace or the end of the command follows it;
 - every target origin passes the navigation floor of section 2 and, without a policy, the
   consent prompt below.
 

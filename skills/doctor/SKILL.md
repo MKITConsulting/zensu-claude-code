@@ -381,15 +381,26 @@ classifier will refuse a spawn, not only when the whole table is green.
   broke. The user fixes that value in the environment that launches Claude Code, or unsets it to
   fall back to consent mode. Never edit it from a Bash call: the hooks read it from the
   environment Claude Code started with.
+- **⚠️ verify-feature: ZENSU_VERIFY_NAVIGATION_POLICY_V1 is set but could not be checked (…)** →
+  a parent-environment policy IS set, but the plugin's own policy parser did not complete, so
+  the report judged nothing. This is a missing check, not an invalid policy: never tell the user
+  their value is wrong on the strength of this row. Run `/zensu:doctor` again; if the row
+  repeats, the plugin tree is damaged and the user reinstalls it.
 - **⚠️ verify-feature: consent mode ready, recipe not checked** → the report resolved no
   project root, so it looked for no recipe at all. This is a missing check rather than a
   missing recipe; run `/zensu:doctor` from a session whose project root resolves.
 - **❌ verify-feature: cannot start (…)** → the consent hook pair, its decision module or the
-  run-config helper `scripts/verify-browser-config.js` is missing, the decision module cannot
-  be loaded, or `hooks/hooks.json` does not register the GATE or the RECORDER on the Bash
-  matcher. Without the gate nothing judges a
+  run-config helper `scripts/verify-browser-config.js` is missing, the decision module is a
+  symlink (both consent hooks refuse one) or cannot be loaded, `hooks/hooks.json` does not
+  register the GATE or the RECORDER on a matcher that covers Bash, a registration in
+  `hooks/hooks.json` could not be determined, or the pair's registration probe did not complete.
+  Without the gate nothing judges a
   `zensu-verify` session; without the recorder every navigation would prompt and nothing would
-  be remembered. Reinstall the plugin. The parenthesis names which piece is missing.
+  be remembered. Reinstall the plugin. The parenthesis names the cause, and it names each hook
+  with its own state — "consent hook" is the gate, "consent recorder" the recorder — joined by
+  `; ` when both apply; relay each state for the hook it names. A registration that could not
+  be determined, or a probe that did not complete, is NOT a missing hook — relay it as a check
+  that could not be made, never as "not registered".
 - **⚠️ verify-feature: not checked** → the wrapper reported no verify state at all, so the
   report says nothing about the browser path. This is a missing check rather than an
   all-clear; run `/zensu:doctor` from a session whose plugin root resolves.
