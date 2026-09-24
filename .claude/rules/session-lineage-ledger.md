@@ -453,8 +453,17 @@ V0 probe measures the PAIR, so the redirection succeeds where `os.homedir()` rea
 `USERPROFILE`. §"Git Mutation Tables" says the WC block "will therefore run on
 Windows", and the two paragraphs now agree. Both suites
 also unset `CLAUDE_CONFIG_DIR`, because `trail.mjs` honours it and `$HOME` is only a
-fallback — with it exported, a fixture read would resolve against the developer's
-real config root and a `takeover` would write a real edge there. In the lineage suite
+fallback. With it exported, an invocation that does not name `--config-dir` resolves
+the developer's real config root instead. A fixture read there finds no fixture
+session, but not every writer needs one: `label` writes `labels.json` under the key it
+is given, and `lineage --backfill --apply` mints edges from that root's own
+transcripts. `takeover` without `--no-record` and `adopt` write an edge once their
+selector resolves there, which `resolve()`'s substring tiers can do against a real
+session, and the process names its own session through `CLAUDE_CODE_SESSION_ID`; the
+L10 line sets that variable itself, so a copy of it supplies one. In the verdict suite
+one `unset` above the first `trail.mjs` command covers every command the suite runs,
+and it clears `ZENSU_CCD_STORE` too: the desktop-store probe honours that variable
+ahead of `$HOME`, and `--config-dir` does not reach it. In the lineage suite
 the unset is BELT, not the mechanism: `--config-dir` already outranks the variable in
 `resolveRoots`, and the unset is what keeps that true for a check added later without
 the flag. Exactly ONE invocation there omits it — the L10 case, whose whole subject is
