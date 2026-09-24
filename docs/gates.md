@@ -337,8 +337,10 @@ A PreToolUse gate (`pre-browser-navigation-consent.sh`) and its PostToolUse comp
 (`post-browser-navigation-consent.sh`), both registered on the `Bash` matcher. They judge every
 `playwright-cli` call whose session is a `zensu-verify-*` name — the session
 `scripts/verify-browser-config.js` prints for a `/zensu:verify-feature` run — and stay out of
-every other Bash call: both hooks exit before starting `node` when the command carries no
-`playwright-cli` marker, and a `playwright-cli` call on any other session reaches no decision.
+every other Bash call: both hooks exit before starting `node` unless the payload, with quotes and
+backslashes removed and in any letter case, names `playwright-cli` (or `@playwright/cli`) and a
+`zensu-verify-` session, or the hook environment's `PLAYWRIGHT_CLI_SESSION` names one; a
+`playwright-cli` call on any other session reaches no decision.
 The pair exists so that `/zensu:verify-feature` can run without
 `ZENSU_VERIFY_NAVIGATION_POLICY_V1` in the environment that launched Claude Code: that variable
 is the only channel a model cannot write, and it costs every user a shell prefix, a port fixed
@@ -361,24 +363,43 @@ session is prose, not a boundary.
 **What it judges, per call.**
 
 - **The principal.** Main thread only; a subagent's `zensu-verify` call is denied.
-- **The shape.** A plain command. A gated call reached through `xargs` or another program, a
-  heredoc or nested shell body the gate cannot judge, a function named `playwright-cli`, an
+- **The shape: exactly one plain call.** A command whose text names `playwright-cli` and a
+  `zensu-verify` session — after quote removal and in any letter case — or that names
+  `playwright-cli` while the hook environment's `PLAYWRIGHT_CLI_SESSION` names such a session, is
+  admitted only as ONE top-level `playwright-cli` call: no second command, no `;`, `&&`, `||`,
+  pipe or background `&`, no subshell, command substitution, heredoc or here-string, and no
+  nested shell or `eval` body. The per-call rules below run first, so a call the gate can judge
+  keeps its specific reason, and any other shape is denied as not one plain call. A gated call
+  reached through `xargs` or another program, a command string handed to a shell or another
+  program, a heredoc, here-string, nested shell or `eval` body the gate cannot judge — one
+  beyond the nesting bound included — a function named `playwright-cli` in any letter case, an
   `export` or other environment builtin, an environment assignment or `env`/`sudo`/`doas`
-  wrapper on the call, and any `PLAYWRIGHT_MCP_*` or `PWTEST_*` name in the command text are
-  denied. The session name and every argument must be literal: a shell variable, substitution or
-  glob beside a `zensu-verify` session denies. `-s=<session>`, `--session <session>` and a
-  literal `PLAYWRIGHT_CLI_SESSION=<session>` prefix are all read, and the arguments are parsed
-  with a port of the CLI's own parser, measured against `playwright-cli` 0.1.21; an argument
-  shape it does not recognize is denied rather than admitted.
+  wrapper on the call (a nested shell body inherits the ones on the shell that runs it), any
+  other wrapper (`timeout`, `gtimeout`, `nohup`, `time`, `nice`, `exec`, `command`, `builtin`, or
+  one the gate does not know), a package launcher (`npx`, `bunx`, `pnpx`, `npm`/`pnpm`/`yarn`
+  `dlx`/`exec`/`x`), and any
+  `PLAYWRIGHT_MCP_*` or `PWTEST_*` name in the command text, quoted apart or not, are denied.
+  The session name and every argument must be literal: a shell variable, substitution, glob,
+  brace expansion, or a leading `~` or `=` beside a `zensu-verify` session denies, so quote such
+  an argument. `-s=<session>`, `--session <session>` and a literal
+  `PLAYWRIGHT_CLI_SESSION=<session>` prefix are all read; a session given twice, appended with
+  `+=`, or spelled in another letter case or behind a path is refused. The arguments are parsed
+  with a port of the CLI's own parser, pinned by a golden recording of `playwright-cli` 0.1.21's
+  parser; an argument shape it does not recognize is denied rather than admitted — an option
+  outside the allowlist on a `zensu-verify` call, and a plain call whose text names a
+  `zensu-verify` session that the parser does not resolve as the call's session. **Accepted
+  cost:** a command that merely mentions both markers — a search, a commit message — is denied
+  too; search with the Grep tool and commit with a message file.
 - **The command set.** An allowlist, each command with its own flags: session (`open`, `close`,
   `list`), navigation, observation (`snapshot`, `find`, `screenshot`, `console`, `requests`),
   interaction, and display emulation. Everything else is denied — `eval`, `run-code`, every
   cookie, local/session-storage and state command, `delete-data`, `route`, the request-detail
   commands, `upload`, `drop`, `pdf`, recording, tracing and video, `attach`, `install`,
   `install-browser`, `close-all` and `kill-all` — as are `--filename`, `--persistent`,
-  `--profile`, and a flag given twice. `skills/verify-feature/rules/browser-verification.md`
-  carries the list the model works from; `ALLOWED_COMMANDS` in `hooks/lib/verify-consent-v1.js`
-  is the one that decides.
+  `--profile`, and a flag given twice. The denial names `/zensu:verify-feature` and says not to
+  retry the call under another session name or through another program.
+  `skills/verify-feature/rules/browser-verification.md` carries the list the model works from;
+  `ALLOWED_COMMANDS` in `hooks/lib/verify-consent-v1.js` is the one that decides.
 - **`open`.** It must carry `--config=<absolute path>`, and the gate reads that file itself and
   requires exactly the shape the helper writes: an isolated browser, `--no-proxy-server` plus,
   for remote hosts, one `--host-resolver-rules` pin per hostname to a public address, service
@@ -425,14 +446,20 @@ raised for this origin), `remembered` (the memory already held the origin) and `
 `asked` does not assert that a person said yes — it asserts that the pre hook would have asked
 and the call then succeeded.
 
-**Fault direction.** The PreToolUse hook fails closed on a gated call and never touches any
-other: a Bash call without a `playwright-cli` marker exits before `node` starts; with the
-marker, a missing `node`, an absent or symlinked module, or a module failure denies with a
-stderr note. A session that cannot bind its Session Control record still gets the floor and a
+**Fault direction.** The PreToolUse hook fails closed on a marked call and never touches any
+other: a Bash call whose payload does not name both markers — and whose hook environment names
+no `zensu-verify` session — exits before `node` starts, and so do the recognized `/zensu:doctor`
+and adoption commands even when a path in them names both markers; for a marked payload, a
+missing `node`,
+an absent or symlinked module, or a module failure denies with a stderr note, and the recorder
+skips with one. The markers are read after one `LC_ALL=C sed` pass joins a backslash-newline
+line continuation and one `LC_ALL=C tr -d` pass removes quotes and backslashes, with the raw
+payload as the fallback when `tr` fails: stripping them in pure bash
+was measured quadratic under bash 3.2, where a 480 KB payload did not finish in 100 s, while the
+`tr` pass took 61 ms. A session that cannot bind its Session Control record still gets the floor and a
 prompt, but nothing is remembered, so every call that reaches a loopback origin asks again. The
-PostToolUse hook never blocks: every fault is a stderr note and exit `0` — with the one exception
-every sibling hook shares, the plugin-root identity guard, which refuses with exit 2 before the
-hook body runs. The host fires no PostToolUse event for a Bash call that failed, so a failed
+PostToolUse hook never blocks: every fault, its plugin-root identity guard included, is a stderr
+note and exit `0`; only the PreToolUse hook's identity guard exits 2, and only for a marked call. The host fires no PostToolUse event for a Bash call that failed, so a failed
 navigation is not recorded.
 
 **No escape and no config flag**, deliberately — the same rule as §Plugin-Data Guard. The parent
@@ -440,10 +467,10 @@ policy is the supported alternative, so nothing here lands a bypass-ledger entry
 
 **Update your permission rules.** The plugin no longer ships an MCP server, so every rule
 written for its browser tools — `mcp__plugin_zensu_playwright__…` in release 0.21.1 and earlier,
-`mcp__plugin_zensu_zensu-browser__…` on builds after it — now matches nothing. An `allow` rule
-there is dead weight; a `deny` or `ask` rule there no longer restricts anything, because the
-browser now runs through Bash. A rule meant to restrict the browser has to name the Bash command
-instead, for example `Bash(playwright-cli:*)`.
+`mcp__plugin_zensu_zensu-browser__…` on builds after it — now matches nothing. Delete an `allow`
+rule written for them: it grants nothing now. Re-spell a `deny` or `ask` rule as a Bash rule, for
+example `Bash(playwright-cli:*)`: until then it restricts nothing, because the browser now runs
+through Bash.
 
 **Residuals, named rather than implied.**
 
@@ -461,6 +488,14 @@ instead, for example `Bash(playwright-cli:*)`.
 - **The recorder cannot tell whether the prompt was shown**, only that the call then succeeded.
 - **In policy mode routes are enforced on navigation commands only.** An in-page navigation to
   an undeclared route on an approved origin is not seen by any hook.
+- **The gate is textual.** A CLI or session name assembled at run time — a variable that holds
+  `playwright-cli`, an ANSI-C `$'…'` escape, a script file that makes the call, an alias, or a
+  copy or link of the binary under another name — never puts both markers in the command text,
+  so neither hook sees the call. The single-call rule narrows what can be written inline; it
+  does not make the gate a boundary.
+- **How the host resolves a hook `ask` under bypass permissions, in auto mode or in a headless
+  run is UNVERIFIED.** The live eval runs in policy mode precisely so it never depends on a
+  prompt.
 
 `tests/structure/test-verify-consent.sh` drives the pair against a real Session Control session
 and pins the matcher, the memory, the floor, the command set and the skill wording.

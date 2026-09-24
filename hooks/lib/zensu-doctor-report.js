@@ -32,6 +32,8 @@
 //                            permissionExposureRows below for why no second
 //                            settings file is opened or named.
 //   ZDOC_NODE/ZENSU/PLAYWRIGHT            tool probe results from the wrapper/skill
+//   ZDOC_PLAYWRIGHT_VERSION, ZDOC_VERIFY/ZDOC_VERIFY_REASON  version and verify state,
+//                            re-derived unless ZDOC_PLAYWRIGHT / ZDOC_VERIFY is injected
 //   ZDOC_FORGE_PROVIDER/CLI/STATE/EDITION forge detection from the VCS driver
 //   ZDOC_TTL_HOURS           pending-review TTL from the canonical getter
 //   ZDOC_IMPL_STOP_NUDGE_AFTER  implementing-turns bound from the
@@ -410,8 +412,8 @@ function toolBlock() {
   var pv = safePlaywrightVersion(env.ZDOC_PLAYWRIGHT_VERSION || '');
   var measured = playwrightCliMeasuredVersion();
   if (p === 'present' && pv && measured && pv === measured) line(OK, 'playwright-cli: installed (' + pv + ') — /zensu:verify-feature and the autopilot browser driver run through it');
-  else if (p === 'present' && pv && measured) line(OK, 'playwright-cli: installed (' + pv + ') — /zensu:verify-feature runs through it; the browser consent gate parses its arguments as measured against ' + measured + ', and an argument shape it does not recognize is denied rather than admitted');
-  else if (p === 'present' && pv) line(OK, 'playwright-cli: installed (' + pv + ') — /zensu:verify-feature runs through it; the version the browser consent gate was measured against could not be read, and an argument shape the gate does not recognize is denied rather than admitted');
+  else if (p === 'present' && pv && measured) line(WARN, 'playwright-cli: installed (' + pv + '), not the version the browser consent gate was measured against (' + measured + ') — its argument parser, ambient-variable names, global-config keys and run-config schema were not measured against ' + pv + '; an argument shape the gate does not recognize is denied rather than admitted, and /zensu:verify-feature still runs through it');
+  else if (p === 'present' && pv) line(WARN, 'playwright-cli: installed (' + pv + '), but the version the browser consent gate was measured against could not be read — its argument parser, ambient-variable names, global-config keys and run-config schema were not checked against ' + pv + '; an argument shape the gate does not recognize is denied rather than admitted');
   else if (p === 'present') line(WARN, 'playwright-cli: installed, but its version could not be read — run `playwright-cli --version`; /zensu:verify-feature still runs through it');
   else line(WARN, 'playwright-cli: not found on PATH — /zensu:verify-feature cannot drive the UI and autopilot browser validation may skip; install it with `brew install playwright-cli` or `npm install -g @playwright/cli`');
 

@@ -17,7 +17,8 @@
 # on purpose: ZDOC_SESSION_KEY and ZDOC_SESSION_PROJECT_ROOT are cleared
 # unconditionally rather than seeded, because their meaning depends on a verdict
 # reached further down and an inherited value would survive the branches that
-# never reach the bind. See the comment at their assignment.
+# never reach the bind. See the comment at their assignment. ZDOC_PLAYWRIGHT_VERSION
+# and ZDOC_VERIFY_REASON are re-derived unless ZDOC_PLAYWRIGHT / ZDOC_VERIFY is injected.
 set -u
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -156,8 +157,34 @@ export ZDOC_FORGE_PROVIDER="${ZDOC_FORGE_PROVIDER:-}" \
 if [ -z "${ZDOC_PLAYWRIGHT:-}" ]; then
   ZDOC_PLAYWRIGHT_VERSION=""
   if command -v playwright-cli >/dev/null 2>&1; then
-    ZDOC_PLAYWRIGHT_VERSION="$(NO_UPDATE_NOTIFIER=1 playwright-cli --version 2>/dev/null | head -n 1 | tr -cd '0-9.')"
     ZDOC_PLAYWRIGHT=present
+    ZDOC_PLAYWRIGHT_VERSION="$(ZDOC_PLAYWRIGHT_BIN="$(command -v playwright-cli)" node -e '
+      const fs = require("fs");
+      const path = require("path");
+      let dir = path.dirname(fs.realpathSync(process.env.ZDOC_PLAYWRIGHT_BIN));
+      for (let hop = 0; hop < 4; hop += 1) {
+        const file = path.join(dir, "package.json");
+        let stat = null;
+        try { stat = fs.statSync(file); } catch (_) { stat = null; }
+        if (stat && stat.isFile()) {
+          if (stat.size > 65536) process.exit(1);
+          const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+          const ok = doc && doc.name === "@playwright/cli" && typeof doc.version === "string"
+            && /^[0-9]+(\.[0-9]+){1,3}$/.test(doc.version);
+          if (!ok) process.exit(1);
+          process.stdout.write(doc.version);
+          process.exit(0);
+        }
+        const parent = path.dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+      }
+      process.exit(1);
+    ' 2>/dev/null)" || ZDOC_PLAYWRIGHT_VERSION=""
+    if [ -z "$ZDOC_PLAYWRIGHT_VERSION" ] && source "$DIR/zensu-bounded-run.sh" 2>/dev/null; then
+      ZDOC_PLAYWRIGHT_VERSION="$(zensu_run_bounded env NO_UPDATE_NOTIFIER=1 playwright-cli --version </dev/null 2>/dev/null \
+        | head -n 1 | sed -n 's/^[^0-9]*\([0-9][0-9]*\(\.[0-9][0-9]*\)\{1,\}\).*/\1/p')"
+    fi
   else
     ZDOC_PLAYWRIGHT=absent
   fi
@@ -513,26 +540,16 @@ ZDOC_VERIFY_REASON="${ZDOC_VERIFY_REASON:-}"
 if [ -z "${ZDOC_VERIFY:-}" ]; then
   ZDOC_VERIFY_REASON=""
   ZDOC_VERIFY_RECIPE_ROOT="${ZDOC_SESSION_PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:-}}"
-  if [ -n "${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" ]; then
-    ZDOC_VERIFY_POLICY_FAULT="$(ZDOC_FLOOR="$ZDOC_ROOT/hooks/lib/verify-navigation-floor-v1.js" node -e '
-      const floor = require(process.env.ZDOC_FLOOR);
-      const parsed = floor.parsePolicyTargets(process.env.ZENSU_VERIFY_NAVIGATION_POLICY_V1 || "");
-      if (!parsed || typeof parsed.ok !== "boolean") process.exit(1);
-      process.stdout.write(parsed.ok ? "" : String(parsed.fault || "policy could not be judged"));
-    ' 2>/dev/null)" || ZDOC_VERIFY_POLICY_FAULT="policy could not be judged"
-    if [ -n "$ZDOC_VERIFY_POLICY_FAULT" ]; then
-      ZDOC_VERIFY=policy-invalid
-      ZDOC_VERIFY_REASON="$ZDOC_VERIFY_POLICY_FAULT"
-    else
-      ZDOC_VERIFY=policy
-    fi
-  elif [ ! -f "$ZDOC_ROOT/hooks/pre-browser-navigation-consent.sh" ] \
+  if [ ! -f "$ZDOC_ROOT/hooks/pre-browser-navigation-consent.sh" ] \
     || [ ! -f "$ZDOC_ROOT/hooks/post-browser-navigation-consent.sh" ] \
     || [ ! -f "$ZDOC_ROOT/hooks/lib/verify-consent-v1.js" ] \
     || [ -L "$ZDOC_ROOT/hooks/lib/verify-consent-v1.js" ] \
     || [ ! -f "$ZDOC_ROOT/scripts/verify-browser-config.js" ]; then
     ZDOC_VERIFY=unavailable
     ZDOC_VERIFY_REASON="consent hook pair, its module or the run-config helper missing from the plugin"
+  elif ! (cd -P -- "$ZDOC_ROOT" && node -e 'require("./hooks/lib/verify-consent-v1.js")' >/dev/null 2>&1); then
+    ZDOC_VERIFY=unavailable
+    ZDOC_VERIFY_REASON="the consent decision module could not be loaded"
   elif ! (cd -P -- "$ZDOC_ROOT" && node -e '
       const mod = require("./hooks/lib/verify-consent-v1.js");
       process.exit(mod.consentHookRegistered(process.cwd()) ? 0 : 1);
@@ -545,6 +562,19 @@ if [ -z "${ZDOC_VERIFY:-}" ]; then
     ' >/dev/null 2>&1); then
     ZDOC_VERIFY=unavailable
     ZDOC_VERIFY_REASON="consent recorder not registered on the Bash matcher"
+  elif [ -n "${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" ]; then
+    ZDOC_VERIFY_POLICY_FAULT="$(ZDOC_FLOOR="$ZDOC_ROOT/hooks/lib/verify-navigation-floor-v1.js" node -e '
+      const floor = require(process.env.ZDOC_FLOOR);
+      const parsed = floor.parsePolicyTargets(process.env.ZENSU_VERIFY_NAVIGATION_POLICY_V1 || "");
+      if (!parsed || typeof parsed.ok !== "boolean") process.exit(1);
+      process.stdout.write(parsed.ok ? "" : String(parsed.fault || "policy could not be judged"));
+    ' 2>/dev/null)" || ZDOC_VERIFY_POLICY_FAULT="policy could not be judged"
+    if [ -n "$ZDOC_VERIFY_POLICY_FAULT" ]; then
+      ZDOC_VERIFY=policy-invalid
+      ZDOC_VERIFY_REASON="$ZDOC_VERIFY_POLICY_FAULT"
+    else
+      ZDOC_VERIFY=policy
+    fi
   elif [ -z "$ZDOC_VERIFY_RECIPE_ROOT" ]; then
     ZDOC_VERIFY=consent-recipe-unchecked
   elif (cd -P -- "$ZDOC_ROOT" && ZDOC_VERIFY_RECIPE_ROOT="$ZDOC_VERIFY_RECIPE_ROOT" node -e '

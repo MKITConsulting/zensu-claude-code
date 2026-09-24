@@ -214,7 +214,7 @@ else
 fi
 if grep -qF '`--json`, `--raw`, `--help` and `--version` are accepted on every command.' "$BROWSER_MD" \
   && grep -qF 'A flag given twice is denied too.' "$BROWSER_MD" \
-  && grep -qF 'Run each call as its own plain Bash command on the main thread.' <<<"$BROWSER_FLAT"; then
+  && grep -qF 'Run each call as its own plain Bash command on the main thread: exactly one `playwright-cli` call per Bash command, with no other command, operator, pipe, substitution, wrapper or package launcher around it. Quote an argument that carries `?`, `*`, `[` or `{`, or that starts with `~` or `=`.' <<<"$BROWSER_FLAT"; then
   check "P3h harmless flags, repeated flags, and plain main-thread calls are pinned in the browser rule" PASS
 else
   check "P3h harmless flags, repeated flags, and plain main-thread calls are pinned in the browser rule" FAIL
@@ -487,7 +487,7 @@ if [ -n "${PW_MEASURED:-}" ] \
   && grep -qF 'check with `command -v playwright-cli`' <<<"$PREFLIGHT_FLAT" \
   && grep -qF '`brew install playwright-cli` or `npm install -g @playwright/cli`' <<<"$PREFLIGHT_FLAT" \
   && grep -qF 'never install it on their behalf' <<<"$PREFLIGHT_FLAT" \
-  && grep -qF "parses its arguments as measured against version ${PW_MEASURED} and denies an argument shape it does not recognize rather than admitting it." <<<"$PREFLIGHT_FLAT"; then
+  && grep -qF "parses its arguments as measured against version ${PW_MEASURED} and denies an argument shape it does not recognize rather than admitting it — including a \`zensu-verify\` session name it does not resolve as the call's session." <<<"$PREFLIGHT_FLAT"; then
   check "P6f the playwright-cli preflight checks PATH, names both install routes, and states the measured version ${PW_MEASURED:-}" PASS
 else
   check "P6f the playwright-cli preflight checks PATH, names both install routes, and states the measured version ${PW_MEASURED:-}" FAIL
@@ -509,8 +509,9 @@ if grep -qF '### Browser session (both modes)' "$SKILL_MD" \
 else
   check "P6h the browser session copies the helper's session name and config path literally into every call" FAIL
 fi
-if grep -qF 'Run each `playwright-cli` call as its own plain Bash command on the main thread, never through `xargs`, `bash -c`, a heredoc, a pipe into another program, or a subagent, and name the same session on every call: `playwright-cli -s=<session> <command> ...`.' <<<"$SKILL_FLAT" \
-  && grep -qF 'every call from a subagent' "$SKILL_MD"; then
+if grep -qF 'Run each `playwright-cli` call as its own plain Bash command on the main thread — exactly one call per Bash command, with nothing before or after it: no `&&`, `;` or pipe, no subshell or command substitution, no wrapper such as `timeout` or `nohup`, no package launcher such as `npx`, never through `xargs`, `bash -c`, a heredoc or a here-string, and never from a subagent. The gate denies every other shape. Name the same session on every call: `playwright-cli -s=<session> <command> ...`, and quote an argument that carries `?`, `*`, `[` or `{`, or that starts with `~` or `=`, because the gate reads an unquoted one as a shell pattern it cannot judge.' <<<"$SKILL_FLAT" \
+  && grep -qF 'every call from a subagent' "$SKILL_MD" \
+  && grep -qF 'every command that is not exactly one plain `playwright-cli` call' <<<"$SKILL_FLAT"; then
   check "P6i every playwright-cli call is a plain main-thread Bash command on the same session" PASS
 else
   check "P6i every playwright-cli call is a plain main-thread Bash command on the same session" FAIL

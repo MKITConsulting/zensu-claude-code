@@ -17,8 +17,13 @@ const CLI_PACKAGE = '@playwright/cli';
 const SESSION_PREFIX = 'zensu-verify-';
 const SESSION_RE = /^zensu-verify-[a-z0-9][a-z0-9-]{0,39}$/;
 const SESSION_ENV = 'PLAYWRIGHT_CLI_SESSION';
+const CLI_MARKERS = Object.freeze([...new Set([
+  ...CLI_BASENAMES.map((name) => name.replace(/\.(cmd|exe|ps1)$/i, '').toLowerCase()),
+  CLI_PACKAGE.toLowerCase(),
+])]);
+const CLI_MARKER_RE = new RegExp(CLI_MARKERS.map((marker) => marker.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')).join('|'));
 const AMBIENT_TEXT_RE = /(^|[^A-Za-z0-9_])(PLAYWRIGHT_MCP_|PWTEST_)/;
-const REDEFINITION_RE = /(^|[\s;&|({])(function\s+)?playwright-cli\s*\(\s*\)|(^|[\s;&|({])function\s+playwright-cli(\s|$|\{)/;
+const REDEFINITION_RE = /(^|[\s;&|({])(function\s+)?playwright-cli\s*\(\s*\)|(^|[\s;&|({])function\s+playwright-cli(\s|$|\{)/i;
 const RUN_CONFIG_NAME = 'playwright-cli.json';
 const RUN_OUTPUT_DIR_NAME = 'browser';
 const MAX_RUN_ORIGINS = 8;
@@ -33,6 +38,7 @@ const CLI_BOOLEAN_OPTIONS = Object.freeze([
   'kill', 'hide', 'all', 'g', 'help', 'json', 'raw', 'version',
 ]);
 
+const CLI_STRING_OPTIONS = Object.freeze(['_']);
 const HARMLESS_FLAGS = Object.freeze(['json', 'raw', 'help', 'h', 'version', 'v']);
 
 const ALLOWED_COMMANDS = Object.freeze({
@@ -118,16 +124,20 @@ const REASONS = Object.freeze({
   COMMAND_TOO_LARGE: 'command too large to judge',
   NOT_MAIN_THREAD: 'zensu-verify browser sessions are main-thread only',
   SESSION_MALFORMED: 'the zensu-verify session name is malformed or given more than once',
+  SESSION_UNRESOLVED: 'the command names a zensu-verify session that its playwright-cli call does not resolve to; pass the session exactly as /zensu:verify-feature prints it (-s=<name>), and keep a zensu-verify name out of every other argument',
   SESSION_UNEXPANDED: 'a playwright-cli call beside a zensu-verify session must name its session literally',
   ARGUMENT_UNEXPANDED: 'a zensu-verify session call must carry literal arguments only',
-  INDIRECT: 'a zensu-verify playwright-cli call must run as a plain command, not through another program',
+  INDIRECT: 'a zensu-verify playwright-cli call must run as a plain command, not through another program; to search or commit text that merely names playwright-cli and a zensu-verify session, use the Grep tool or a message file',
+  NOT_PLAIN: 'a command that names playwright-cli and a zensu-verify session must be exactly one plain playwright-cli call; run every other command separately, and search or commit such text through the Grep tool or a message file',
   UNJUDGED_BODY: 'a zensu-verify playwright-cli call sits inside a heredoc or nested shell the gate cannot judge',
   ENV_ASSIGNMENT: 'a zensu-verify session call must not carry environment assignments or wrappers that change its environment',
+  WRAPPER: 'a zensu-verify session call must not run under a wrapper such as timeout, nohup, time, nice, exec, command or builtin',
+  LAUNCHER: 'a zensu-verify session call must run the installed playwright-cli binary, not a package launcher that may fetch or select another version',
   ENV_BUILTIN: 'a command carrying a zensu-verify session call must not change the shell environment',
   AMBIENT_TEXT: 'a command carrying a zensu-verify session call must not name PLAYWRIGHT_MCP_* or PWTEST_* variables',
   REDEFINED: 'a command carrying a zensu-verify session call must not define a playwright-cli function',
-  COMMAND_DENIED: 'is not available on a zensu-verify session',
-  FLAG_DENIED: 'is not available on a zensu-verify session',
+  COMMAND_DENIED: 'is not available in a /zensu:verify-feature browser session; do not retry it under another session name or through another program',
+  FLAG_DENIED: 'is not available in a /zensu:verify-feature browser session; do not retry it under another session name or through another program',
   CONFIG_REQUIRED: 'open on a zensu-verify session needs --config=<absolute path> naming the run config written by scripts/verify-browser-config.js',
   OPEN_OUTSIDE_CONFIG: 'the open target is outside the run config allowedOrigins',
   BROWSER_NOT_CHROMIUM: 'the run config pins hosts with Chromium switches, so --browser must name a chrome, msedge or chromium channel',
@@ -140,6 +150,28 @@ const REASONS = Object.freeze({
   MEMORY_UNREADABLE: 'consent-memory-unreadable',
   MEMORY_PATH_REFUSED: 'consent-memory-path-refused',
 });
+
+function strippedText(text) {
+  return String(text).replace(/\\\r?\n/g, '').replace(/['"\\]/g, '');
+}
+
+function normalizedText(text) {
+  return strippedText(text).toLowerCase();
+}
+
+function envSessionMarked(env) {
+  const value = env && typeof env[SESSION_ENV] === 'string' ? env[SESSION_ENV] : '';
+  return value.toLowerCase().includes(SESSION_PREFIX);
+}
+
+function commandMarkers(command, env) {
+  const normalized = normalizedText(command);
+  return {
+    cli: CLI_MARKER_RE.test(normalized),
+    named: normalized.includes(SESSION_PREFIX),
+    session: normalized.includes(SESSION_PREFIX) || envSessionMarked(env),
+  };
+}
 
 function payloadFromRaw(raw, accumulationFailed) {
   if (accumulationFailed) return null;
@@ -222,12 +254,19 @@ function findBrace(text, start) {
   return -1;
 }
 
+function shellPattern(bare) {
+  if (/[*?[]/.test(bare) || /^[~=]/.test(bare)) return true;
+  return /\{[^{}]*(,|\.\.)[^{}]*\}/.test(bare);
+}
+
 function lexShell(text) {
   const source = String(text);
   const segments = [];
   const nested = [];
   const heredocs = [];
+  const herestrings = [];
   let fault = '';
+  let operators = 0;
   let words = [];
   let word = null;
   let pendingHeredocs = [];
@@ -236,14 +275,16 @@ function lexShell(text) {
   let index = 0;
 
   const startWord = () => {
-    if (!word) word = { value: '', raw: '', unexpanded: false, quoted: false };
+    if (!word) word = { value: '', raw: '', unexpanded: false, quoted: false, bare: '' };
   };
   const endWord = () => {
     if (!word) return;
+    if (!word.unexpanded && shellPattern(word.bare)) word.unexpanded = true;
     if (expectHeredoc) {
       pendingHeredocs.push({ delimiter: word.value, strip: expectHeredoc.strip });
       expectHeredoc = null;
     } else if (redirectNext) {
+      if (redirectNext === 'herestring') herestrings.push(word);
       redirectNext = false;
     } else {
       words.push(word);
@@ -323,6 +364,7 @@ function lexShell(text) {
       if (index + 1 < source.length) {
         word.value += source[index + 1];
         word.raw += source.slice(index, index + 2);
+        word.bare += '\u0001';
       }
       index += 2;
       continue;
@@ -330,6 +372,7 @@ function lexShell(text) {
     if (char === "'") {
       startWord();
       word.quoted = true;
+      word.bare += '\u0001';
       const end = source.indexOf("'", index + 1);
       if (end === -1) {
         fault = fault || 'unterminated-quote';
@@ -346,6 +389,7 @@ function lexShell(text) {
     if (char === '"') {
       startWord();
       word.quoted = true;
+      word.bare += '\u0001';
       let cursor = index + 1;
       while (cursor < source.length && source[cursor] !== '"') {
         const inner = source[cursor];
@@ -379,11 +423,13 @@ function lexShell(text) {
     if (char === '$') {
       startWord();
       index = readDollar(index, word);
+      word.bare += '\u0001';
       continue;
     }
     if (char === '`') {
       startWord();
       word.unexpanded = true;
+      word.bare += '\u0001';
       const end = findBacktick(source, index + 1);
       if (end === -1) { fault = fault || 'unterminated-substitution'; word.raw += source.slice(index); index = source.length; continue; }
       nested.push(source.slice(index + 1, end));
@@ -394,6 +440,7 @@ function lexShell(text) {
     if ((char === '<' || char === '>') && source[index + 1] === '(') {
       startWord();
       word.unexpanded = true;
+      word.bare += '\u0001';
       const end = findParen(source, index + 2);
       if (end === -1) { fault = fault || 'unterminated-substitution'; word.raw += source.slice(index); index = source.length; continue; }
       nested.push(source.slice(index + 2, end));
@@ -412,9 +459,9 @@ function lexShell(text) {
       index = newline === -1 ? source.length : newline;
       continue;
     }
-    if (char === ';') { endSegment(); index += source[index + 1] === ';' ? 2 : 1; continue; }
+    if (char === ';') { endSegment(); operators += 1; index += source[index + 1] === ';' ? 2 : 1; continue; }
     if (char === '&') {
-      if (source[index + 1] === '&') { endSegment(); index += 2; continue; }
+      if (source[index + 1] === '&') { endSegment(); operators += 1; index += 2; continue; }
       if (source[index + 1] === '>') {
         endWord();
         redirectNext = true;
@@ -422,20 +469,22 @@ function lexShell(text) {
         continue;
       }
       endSegment();
+      operators += 1;
       index += 1;
       continue;
     }
     if (char === '|') {
       endSegment();
+      operators += 1;
       index += source[index + 1] === '|' || source[index + 1] === '&' ? 2 : 1;
       continue;
     }
-    if (char === '(' || char === ')') { endSegment(); index += 1; continue; }
+    if (char === '(' || char === ')') { endSegment(); operators += 1; index += 1; continue; }
     if (char === '<' || char === '>') {
       if (word && !word.quoted && !word.unexpanded && /^\d+$/.test(word.raw)) word = null;
       else endWord();
       if (char === '<' && source[index + 1] === '<') {
-        if (source[index + 2] === '<') { redirectNext = true; index += 3; continue; }
+        if (source[index + 2] === '<') { redirectNext = 'herestring'; index += 3; continue; }
         const strip = source[index + 2] === '-';
         expectHeredoc = { strip };
         index += strip ? 3 : 2;
@@ -450,17 +499,20 @@ function lexShell(text) {
     startWord();
     word.value += char;
     word.raw += char;
+    word.bare += char;
     index += 1;
   }
   endSegment();
   if (pendingHeredocs.length > 0) {
     consumeHeredocs(source.length);
   }
-  return { segments, nested, heredocs, fault };
+  return { segments, nested, heredocs, herestrings, fault, operators };
 }
 
 function parseCliArgs(argv) {
   const booleans = new Set(CLI_BOOLEAN_OPTIONS);
+  const strings = new Set(CLI_STRING_OPTIONS);
+  const bare = (key) => (strings.has(key) ? '' : true);
   const parsed = { _: [] };
   const setArg = (key, value) => {
     if (parsed[key] === undefined || booleans.has(key) || typeof parsed[key] === 'boolean') parsed[key] = value;
@@ -492,7 +544,7 @@ function parseCliArgs(argv) {
         setArg(key, next === 'true');
         index += 1;
       } else {
-        setArg(key, true);
+        setArg(key, bare(key));
       }
     } else if (/^-[A-Za-z]/.test(arg)) {
       const letters = arg.slice(1, -1).split('');
@@ -515,7 +567,7 @@ function parseCliArgs(argv) {
           broken = true;
           break;
         }
-        setArg(letters[position], true);
+        setArg(letters[position], bare(letters[position]));
       }
       const key = arg.slice(-1)[0];
       if (!broken && key !== '-') {
@@ -526,7 +578,7 @@ function parseCliArgs(argv) {
           setArg(key, args[index + 1] === 'true');
           index += 1;
         } else {
-          setArg(key, true);
+          setArg(key, bare(key));
         }
       }
     } else {
@@ -545,11 +597,16 @@ function parseCliArgs(argv) {
   return { args: parsed };
 }
 
+function valueAssignmentOf(word) {
+  const match = word.value.match(/^([A-Za-z_][A-Za-z0-9_]*)=/);
+  return match ? { name: match[1], value: word.value.slice(match[0].length), unexpanded: word.unexpanded } : null;
+}
+
 function assignmentOf(word) {
   if (!word) return null;
-  const match = word.raw.match(/^([A-Za-z_][A-Za-z0-9_]*)=/);
+  const match = word.raw.match(/^([A-Za-z_][A-Za-z0-9_]*)(\+?)=/);
   if (!match) return null;
-  return { name: match[1], value: word.value.slice(match[1].length + 1), unexpanded: word.unexpanded };
+  return { name: match[1], value: word.value.slice(match[0].length), unexpanded: word.unexpanded || match[2] === '+' };
 }
 
 function cliBasename(value) {
@@ -559,15 +616,16 @@ function cliBasename(value) {
 
 function isCliWord(word) {
   if (!word) return false;
-  const base = cliBasename(word.value);
-  return CLI_BASENAMES.includes(base) || word.value === CLI_PACKAGE || word.value.startsWith(`${CLI_PACKAGE}@`);
+  const value = word.value.toLowerCase();
+  const base = cliBasename(value);
+  return CLI_BASENAMES.includes(base) || value === CLI_PACKAGE || value.startsWith(`${CLI_PACKAGE}@`);
 }
 
 function launcherCliIndex(words, start) {
-  const command = cliBasename(words[start].value);
+  const command = cliBasename(words[start].value).toLowerCase();
   let index = start + 1;
   if (command === 'pnpm' || command === 'yarn' || command === 'npm') {
-    const verb = words[index] && words[index].value;
+    const verb = words[index] && words[index].value.toLowerCase();
     if (!['dlx', 'exec', 'x'].includes(verb)) return -1;
     index += 1;
   } else if (!['npx', 'bunx', 'pnpx'].includes(command)) {
@@ -635,9 +693,9 @@ function commandPosition(words) {
     if (value === 'env' || value === 'sudo' || value === 'doas') {
       wrappers.push(value);
       index += 1;
-      while (index < words.length && (words[index].value.startsWith('-') || assignmentOf(words[index]))) {
+      while (index < words.length && (words[index].value.startsWith('-') || valueAssignmentOf(words[index]))) {
         const option = words[index].value;
-        if (value === 'env' && assignmentOf(words[index])) assignments.push(assignmentOf(words[index]));
+        if (value === 'env' && valueAssignmentOf(words[index])) assignments.push(valueAssignmentOf(words[index]));
         if (['-u', '-C', '-S', '--unset', '--chdir', '--split-string', '-g', '-h', '-p', '-U'].includes(option)) index += 1;
         index += 1;
       }
@@ -669,15 +727,27 @@ function sessionOf(args, assigned, env) {
 }
 
 function isGatedSession(value) {
-  if (Array.isArray(value)) return value.some((item) => typeof item === 'string' && item.startsWith(SESSION_PREFIX));
-  return typeof value === 'string' && value.startsWith(SESSION_PREFIX);
+  const gated = (item) => typeof item === 'string' && item.toLowerCase().includes(SESSION_PREFIX);
+  return Array.isArray(value) ? value.some(gated) : gated(value);
 }
 
-function scanSegments(lexed, context, depth, found) {
+function namesCli(text) {
+  return CLI_MARKER_RE.test(normalizedText(text));
+}
+
+const NO_SCOPE = Object.freeze({ assignments: Object.freeze([]), wrappers: Object.freeze([]) });
+
+function scanSegments(lexed, context, depth, found, inherited) {
   for (const words of lexed.segments) {
     const position = commandPosition(words);
     if (position.lookup) continue;
-    const segmentAssigned = position.assignments.filter((item) => item.name === SESSION_ENV).pop();
+    const assignments = inherited.assignments.concat(position.assignments);
+    const wrappers = inherited.wrappers.concat(position.wrappers);
+    for (const assignment of position.assignments) {
+      if (assignment.name === SESSION_ENV) context.sessionAssignments.push(assignment);
+    }
+    const segmentAssigned = assignments.filter((item) => item.name === SESSION_ENV).pop();
+    const consumed = new Set();
     if (position.index >= 0 && position.index < words.length) {
       const head = words[position.index];
       const headName = cliBasename(head.value);
@@ -685,38 +755,43 @@ function scanSegments(lexed, context, depth, found) {
         found.envBuiltin = true;
         for (const word of words.slice(position.index + 1)) {
           const assignment = assignmentOf(word);
-          if (assignment && assignment.name === SESSION_ENV) context.commandSession = assignment;
-        }
-      }
-      let cliAt = -1;
-      if (isCliWord(head)) cliAt = position.index;
-      else cliAt = launcherCliIndex(words, position.index);
-      if (SHELLS.includes(headName) && depth < MAX_NEST) {
-        const flagAt = words.findIndex((word, offset) => offset > position.index && /^-[A-Za-z]*c[A-Za-z]*$/.test(word.value));
-        if (flagAt !== -1 && words[flagAt + 1]) {
-          const body = words[flagAt + 1];
-          if (body.unexpanded) {
-            if (/playwright-cli|@playwright\/cli/.test(body.raw) && body.raw.includes(SESSION_PREFIX)) found.unjudged = true;
-          } else {
-            scanCommand(body.value, context, depth + 1, found);
+          if (assignment && assignment.name === SESSION_ENV) {
+            context.commandSession = assignment;
+            context.sessionAssignments.push(assignment);
           }
         }
       }
-      if (headName === 'eval' && depth < MAX_NEST) {
+      const cliAt = isCliWord(head) ? position.index : launcherCliIndex(words, position.index);
+      const scope = { assignments, wrappers };
+      if (SHELLS.includes(headName)) {
+        const flagAt = words.findIndex((word, offset) => offset > position.index && /^-[A-Za-z]*c[A-Za-z]*$/.test(word.value));
+        if (flagAt !== -1 && words[flagAt + 1]) {
+          const body = words[flagAt + 1];
+          consumed.add(flagAt + 1);
+          if (body.unexpanded || depth >= MAX_NEST) {
+            if (namesCli(body.raw) && context.marks.session) found.unjudged = true;
+          } else {
+            scanCommand(body.value, context, depth + 1, found, scope);
+          }
+        }
+      }
+      if (headName === 'eval') {
         const body = words.slice(position.index + 1);
-        if (body.some((word) => word.unexpanded)) {
-          if (body.some((word) => /playwright-cli|@playwright\/cli/.test(word.raw)) && context.text.includes(SESSION_PREFIX)) found.unjudged = true;
+        body.forEach((_word, offset) => consumed.add(position.index + 1 + offset));
+        if (body.some((word) => word.unexpanded) || depth >= MAX_NEST) {
+          if (body.some((word) => namesCli(word.raw)) && context.marks.session) found.unjudged = true;
         } else {
-          scanCommand(body.map((word) => word.value).join(' '), context, depth + 1, found);
+          scanCommand(body.map((word) => word.value).join(' '), context, depth + 1, found, scope);
         }
       }
       if (cliAt !== -1) {
         found.invocations.push({
           words: words.slice(cliAt + 1),
-          assignments: position.assignments,
-          wrappers: position.wrappers,
+          assignments,
+          wrappers,
           launcher: cliAt !== position.index,
           segmentSession: segmentAssigned || null,
+          depth,
         });
         continue;
       }
@@ -724,49 +799,71 @@ function scanSegments(lexed, context, depth, found) {
     if (position.index >= words.length) {
       for (const assignment of position.assignments) if (assignment.name === SESSION_ENV) context.commandSession = assignment;
     }
-    const indirect = words.some((word, offset) => offset !== position.index && isCliWord(word));
-    const marked = words.some((word) => word.raw.includes(SESSION_PREFIX) || word.value.includes(SESSION_PREFIX));
-    if (indirect && marked) found.indirect = true;
+    const indirect = words.some((word, offset) => offset !== position.index && !consumed.has(offset)
+      && (isCliWord(word) || namesCli(word.value)));
+    if (indirect && context.marks.session) found.indirect = true;
   }
 }
 
-function scanCommand(text, context, depth, found) {
+function scanCommand(text, context, depth, found, inherited = NO_SCOPE) {
   const lexed = lexShell(text);
-  if (lexed.fault && /playwright-cli|@playwright\/cli/.test(text) && text.includes(SESSION_PREFIX)) found.unjudged = true;
-  scanSegments(lexed, context, depth, found);
+  if (depth === 0) context.top = lexed;
+  if (lexed.fault && namesCli(text) && context.marks.session) found.unjudged = true;
+  scanSegments(lexed, context, depth, found, inherited);
   for (const body of lexed.nested) {
     if (depth < MAX_NEST) scanCommand(body, context, depth + 1, found);
-    else if (/playwright-cli|@playwright\/cli/.test(body) && body.includes(SESSION_PREFIX)) found.unjudged = true;
+    else if (namesCli(body) && context.marks.session) found.unjudged = true;
   }
   for (const body of lexed.heredocs) {
-    if (/playwright-cli|@playwright\/cli/.test(body) && body.includes(SESSION_PREFIX)) found.unjudged = true;
+    if (namesCli(body) && context.marks.session) found.unjudged = true;
   }
+  for (const word of lexed.herestrings) {
+    if (namesCli(word.raw) && context.marks.session) found.unjudged = true;
+  }
+}
+
+function plainShape(top, invocations) {
+  if (!top || top.fault || top.operators !== 0 || top.segments.length !== 1) return false;
+  if (top.nested.length + top.heredocs.length + top.herestrings.length > 0) return false;
+  return invocations.length === 1 && invocations[0].depth === 0;
 }
 
 function analyzeCommand(command, env) {
   const text = String(command);
+  const marks = commandMarkers(text, env);
   const found = { invocations: [], indirect: false, unjudged: false, envBuiltin: false };
-  const context = { text, commandSession: null };
+  const context = { text, marks, commandSession: null, sessionAssignments: [], top: null };
   scanCommand(text, context, 0, found);
+  const conflict = marks.session && context.sessionAssignments.length > 1;
   const calls = [];
   for (const invocation of found.invocations) {
     const argv = invocation.words.map((word, position) => (word.unexpanded ? unexpandedSentinel(word, position) : word.value));
     const parsed = parseCliArgs(argv);
-    const assigned = invocation.segmentSession || context.commandSession;
     if (parsed.fault) {
-      calls.push({ invocation, gated: text.includes(SESSION_PREFIX), fault: parsed.fault });
+      calls.push({ invocation, gated: marks.session, fault: parsed.fault });
       continue;
     }
-    const session = sessionOf(parsed.args, assigned, env);
+    if (conflict) {
+      calls.push({ invocation, gated: true, fault: REASONS.SESSION_MALFORMED });
+      continue;
+    }
+    const session = sessionOf(parsed.args, invocation.segmentSession || context.commandSession, env);
     const unexpandedSession = hasSentinel(session.value) || (session.source === 'assignment' && session.unexpanded);
     if (unexpandedSession) {
-      calls.push({ invocation, gated: text.includes(SESSION_PREFIX), fault: REASONS.SESSION_UNEXPANDED });
+      calls.push({ invocation, gated: marks.session, fault: REASONS.SESSION_UNEXPANDED });
       continue;
     }
-    if (!isGatedSession(session.value)) continue;
-    calls.push({ invocation, gated: true, session, args: parsed.args });
+    if (isGatedSession(session.value)) calls.push({ invocation, gated: true, session, args: parsed.args });
+    else if (marks.session && argv.some(hasSentinel)) calls.push({ invocation, gated: true, fault: REASONS.ARGUMENT_UNEXPANDED });
   }
-  return { text, calls, indirect: found.indirect, unjudged: found.unjudged, envBuiltin: found.envBuiltin };
+  return {
+    text,
+    calls,
+    indirect: found.indirect,
+    unjudged: found.unjudged,
+    envBuiltin: found.envBuiltin,
+    plain: plainShape(context.top, found.invocations),
+  };
 }
 
 function isIsoInstant(value) {
@@ -1165,6 +1262,8 @@ function judgeCall(call, context) {
   if (typeof session.value !== 'string' || !SESSION_RE.test(session.value)) return { deny: REASONS.SESSION_MALFORMED };
   if (call.invocation.assignments.some((item) => item.name !== SESSION_ENV)) return { deny: REASONS.ENV_ASSIGNMENT };
   if (call.invocation.wrappers.some((name) => ['env', 'sudo', 'doas'].includes(name))) return { deny: REASONS.ENV_ASSIGNMENT };
+  if (call.invocation.wrappers.length > 0) return { deny: REASONS.WRAPPER };
+  if (call.invocation.launcher) return { deny: REASONS.LAUNCHER };
   const flagKeys = Object.keys(args).filter((key) => key !== '_' && key !== 'session');
   if (flagKeys.some((key) => hasSentinel(key) || hasSentinel(args[key])) || args._.some(hasSentinel)) {
     return { deny: REASONS.ARGUMENT_UNEXPANDED };
@@ -1217,18 +1316,25 @@ function principalOf(payload) {
 
 function evaluate({ command, payload, env, records, declaredRoutes, policy }) {
   if (typeof command !== 'string' || command === '') return { verdict: 'none' };
-  if (!/playwright-cli|@playwright\/cli/.test(command)) return { verdict: 'none' };
+  const marks = commandMarkers(command, env);
+  if (!marks.cli) return { verdict: 'none' };
   if (Buffer.byteLength(command) > MAX_COMMAND_BYTES) {
-    return command.includes(SESSION_PREFIX) ? { verdict: 'deny', reason: REASONS.COMMAND_TOO_LARGE } : { verdict: 'none' };
+    return marks.session ? { verdict: 'deny', reason: REASONS.COMMAND_TOO_LARGE } : { verdict: 'none' };
   }
+  if (marks.session && REDEFINITION_RE.test(command)) return { verdict: 'deny', reason: REASONS.REDEFINED };
   const analysis = analyzeCommand(command, env);
   if (analysis.unjudged) return { verdict: 'deny', reason: REASONS.UNJUDGED_BODY };
   if (analysis.indirect) return { verdict: 'deny', reason: REASONS.INDIRECT };
   const gated = analysis.calls.filter((call) => call.gated);
-  if (gated.length === 0) return { verdict: 'none' };
-  if (REDEFINITION_RE.test(command)) return { verdict: 'deny', reason: REASONS.REDEFINED };
+  if (gated.length === 0 && !marks.session) return { verdict: 'none' };
   if (analysis.envBuiltin) return { verdict: 'deny', reason: REASONS.ENV_BUILTIN };
-  if (AMBIENT_TEXT_RE.test(command)) return { verdict: 'deny', reason: REASONS.AMBIENT_TEXT };
+  if (AMBIENT_TEXT_RE.test(command) || AMBIENT_TEXT_RE.test(strippedText(command))) {
+    return { verdict: 'deny', reason: REASONS.AMBIENT_TEXT };
+  }
+  if (gated.length === 0) {
+    if (!analysis.plain) return { verdict: 'deny', reason: REASONS.NOT_PLAIN };
+    return marks.named ? { verdict: 'deny', reason: REASONS.SESSION_UNRESOLVED } : { verdict: 'none' };
+  }
   const context = { principal: principalOf(payload || {}), env: env || {}, policy };
   const known = new Set((Array.isArray(records) ? records : []).map((entry) => entry.origin));
   const plan = [];
@@ -1244,6 +1350,7 @@ function evaluate({ command, payload, env, records, declaredRoutes, policy }) {
       if (decidedBy === 'asked' && !fresh.includes(target.origin)) fresh.push(target.origin);
     }
   }
+  if (!analysis.plain) return { verdict: 'deny', reason: REASONS.NOT_PLAIN };
   if (fresh.length > 0) {
     return { verdict: 'ask', reason: REASONS.NEW_ORIGIN, plan, origins: fresh, prompt: promptText({ origins: fresh, session, declaredRoutes }) };
   }
@@ -1368,6 +1475,7 @@ module.exports = {
   ALLOWED_COMMANDS,
   CLI_BASENAMES,
   CLI_BOOLEAN_OPTIONS,
+  CLI_STRING_OPTIONS,
   CHROMIUM_BROWSERS,
   CLI_PACKAGE,
   CONSENT_HOOK_FILE,
@@ -1397,6 +1505,8 @@ module.exports = {
   STATE_SEGMENTS,
   analyzeCommand,
   appendRecord,
+  CLI_MARKERS,
+  commandMarkers,
   consentHookRegistered,
   consentRecorderRegistered,
   declaredRoutesFromRecipe,

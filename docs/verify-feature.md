@@ -21,7 +21,10 @@ brew install playwright-cli
 
 or `npm install -g @playwright/cli`. It uses your installed Chrome. When Chrome is missing,
 the skill asks before it runs `playwright-cli install-browser`, because that downloads a
-browser. `/zensu:doctor` reports whether `playwright-cli` is on `PATH` and which version.
+browser. `/zensu:doctor` reports whether `playwright-cli` is on `PATH` and which version, read
+from the installed package without running the binary — only when that read yields no version
+does it run a bounded `playwright-cli --version` — and warns when that version is not the one
+the browser consent gate was measured against.
 
 In local mode the skill also needs a **runtime recipe** it can accept, or a repository the
 bundled Zensu monorepo adapter recognizes, or an application you already run
@@ -40,16 +43,19 @@ snapshots inside the run directory. For a remote host it also pins the hostname 
 address the helper resolved.
 
 The **browser consent gate** — two hooks on the `Bash` matcher — judges every `playwright-cli`
-call on a `zensu-verify` session before it runs, and ignores every other Bash call and every
-other `playwright-cli` session:
+call on a `zensu-verify` session before it runs, reaches no decision for a call on any other
+session, and denies a command that merely mentions both markers — a search, a commit message.
+That is the accepted cost of a textual gate: search with the Grep tool and commit with a message
+file. For a `zensu-verify` call:
 
 - only the commands a verification needs are admitted: opening and closing the session,
   navigation, snapshots, screenshots, console and request listings, clicks and typing, and
   display emulation. `eval`, `run-code`, every cookie, storage and state command, file upload,
   request details, recording, tracing, `attach` and `close-all` are denied;
 - `open` must name the run config, and the gate reads it itself before the browser starts;
-- calls must come from the main thread, name their session and arguments literally, and run as a
-  plain command;
+- calls must come from the main thread, name their session and arguments literally, and run as
+  exactly one plain `playwright-cli` command — no second command, pipe, subshell, substitution,
+  wrapper, package launcher or nested shell — so a denial names the rule rather than guessing;
 - every target origin passes the navigation floor of section 2 and, without a policy, the
   consent prompt below.
 
@@ -345,4 +351,4 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
 | the browser does not start because Chrome is missing | the run config uses the system Chrome channel | approve `playwright-cli install-browser` when the skill asks, or install Chrome yourself |
 | a `playwright-cli` call is denied with `Zensu browser consent gate denied the playwright-cli call: …` | the call used a command, flag, session or shape the gate does not admit | the reason names the rule; the skill reports the affected scenario PARTIAL rather than working around it |
 | PARTIAL; the scenario left the approved origins | the application redirected the browser to an origin outside the run config | fix the redirect, or add that origin to the run when it is part of the feature (in policy mode, to the policy too) |
-| after updating the plugin, a `permissions` rule for the browser no longer applies | the plugin no longer ships a Playwright MCP server, so rules for `mcp__plugin_zensu_playwright__…` or `mcp__plugin_zensu_zensu-browser__…` match nothing | write the rule for the Bash command instead, for example `Bash(playwright-cli:*)`; the Browser Consent Gate section of [gates.md](gates.md) explains the change |
+| after updating the plugin, a `permissions` rule for the browser no longer applies | the plugin no longer ships a Playwright MCP server, so rules for `mcp__plugin_zensu_playwright__…` or `mcp__plugin_zensu_zensu-browser__…` match nothing | delete an `allow` rule written for them, which grants nothing now; re-spell a `deny` or `ask` rule for the Bash command, for example `Bash(playwright-cli:*)`, because until then it restricts nothing; the Browser Consent Gate section of [gates.md](gates.md) explains the change |

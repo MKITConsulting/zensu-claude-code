@@ -7,7 +7,10 @@ the source skill's dependency on a personal `/test-feature` command.
 
 Every call names the session the run-config helper printed, literally:
 `playwright-cli -s=<session> <command> [args] [flags]`. Run each call as its own plain Bash
-command on the main thread. The browser consent gate admits exactly these commands on a
+command on the main thread: exactly one `playwright-cli` call per Bash command, with no other
+command, operator, pipe, substitution, wrapper or package launcher around it. Quote an argument
+that carries `?`, `*`, `[` or `{`, or that starts with `~` or `=`. The browser consent gate
+admits exactly these commands on a
 `zensu-verify` session, each with only the flags listed:
 
 | Purpose | Commands | Flags |

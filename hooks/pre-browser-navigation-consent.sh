@@ -8,10 +8,24 @@ deny() {
 }
 
 { INPUT="$(cat 2>/dev/null || true)"; } 2>/dev/null
-case "$INPUT" in
+_ZENSU_SCAN="$(printf '%s' "$INPUT" | LC_ALL=C sed -e 's/\\\\\\r\\n//g' -e 's/\\\\\\n//g' 2>/dev/null | LC_ALL=C tr -d "\"'\\\\" 2>/dev/null)" || _ZENSU_SCAN="$INPUT"
+[ -n "$_ZENSU_SCAN" ] || _ZENSU_SCAN="$INPUT"
+shopt -s nocasematch
+case "$_ZENSU_SCAN" in
   *playwright-cli*|*@playwright/cli*|*@playwright\\/cli*) ;;
   *) exit 0 ;;
 esac
+case "$_ZENSU_SCAN" in
+  *zensu-verify-*) ;;
+  *)
+    case "${PLAYWRIGHT_CLI_SESSION:-}" in
+      *zensu-verify-*) ;;
+      *) exit 0 ;;
+    esac
+    ;;
+esac
+shopt -u nocasematch
+unset _ZENSU_SCAN
 
 _ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || {
   echo "zensu: browser consent gate cannot resolve its own plugin root" >&2
@@ -29,6 +43,10 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
 fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
 unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
+
+if source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh" 2>/dev/null && zensu_doctor_allowed "$INPUT"; then
+  exit 0
+fi
 
 command -v node >/dev/null 2>&1 || deny "node unavailable"
 MODULE="$CLAUDE_PLUGIN_ROOT/hooks/lib/verify-consent-v1.js"

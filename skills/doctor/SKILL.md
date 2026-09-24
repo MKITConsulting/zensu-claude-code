@@ -61,9 +61,14 @@ exception is removal of an expired `pending-review.json` you explicitly confirm.
 ## Prerequisites
 
 None. No MCP connection, no API key, no network. The tool probes are local
-(`command -v`, `--version`, auth-status exit codes); the `playwright-cli --version` probe runs
-with the update check disabled and never opens a browser, and the remaining
-manifest/config/state reads are local files.
+(`command -v`, `--version`, auth-status exit codes). The `playwright-cli` version is read from
+the `package.json` of the `@playwright/cli` package the binary on `PATH` belongs to, without
+running it; only when that read yields no version — no such file within four parent
+directories, a file over 64 KiB, one that does not parse, names another package or carries an
+unrecognized version — does the doctor run `playwright-cli --version`, with the update check
+disabled, stdin closed and a five-second watchdog where `timeout` or `gtimeout` exists, and
+never opening a browser. The remaining manifest/config/state reads are
+local files.
 
 ## Phase 1: Run the diagnostics
 
@@ -338,11 +343,20 @@ classifier will refuse a spawn, not only when the whole table is green.
   detected — add one, or export `ZENSU_VCS_PROVIDER=github|gitlab` for a
   self-hosted host).
 - **⚠️ zensu not authenticated** → `zensu auth login`.
-- **✅ playwright-cli: installed (…)** → `/zensu:verify-feature` drives the browser through it.
-  When the row names a different version than the one the browser consent gate was measured
-  against, nothing is broken: the gate denies an argument shape it does not recognize rather
-  than admitting it, so an unexpected denial after a `playwright-cli` update is the gate being
-  conservative. Nothing to do.
+- **✅ playwright-cli: installed (…)** → the installed version is the one the browser consent
+  gate was measured against, and `/zensu:verify-feature` drives the browser through it. Nothing
+  to do.
+- **⚠️ playwright-cli: installed (…), not the version the browser consent gate was measured
+  against** → the gate's argument parser, its ambient-variable names, the global-config keys and
+  the run-config schema were measured against another release, so a changed flag meaning in
+  this one would go unseen. Verification still runs, and the gate denies an argument shape it
+  does not recognize rather than admitting it, a `zensu-verify` name it does not resolve as the
+  call's session included. Relay the row; installing the measured version
+  or updating the plugin is the user's decision.
+- **⚠️ playwright-cli: installed (…), but the version the browser consent gate was measured
+  against could not be read** → the gate module is missing or unreadable in this installation,
+  so nothing about the installed version was checked. Relay the row and suggest reinstalling
+  the plugin.
 - **⚠️ playwright-cli: installed, but its version could not be read** → run
   `playwright-cli --version` yourself and relay what it prints; verification still runs.
 - **⚠️ playwright-cli: not found on PATH** → the user installs it with
@@ -371,8 +385,9 @@ classifier will refuse a spawn, not only when the whole table is green.
   project root, so it looked for no recipe at all. This is a missing check rather than a
   missing recipe; run `/zensu:doctor` from a session whose project root resolves.
 - **❌ verify-feature: cannot start (…)** → the consent hook pair, its decision module or the
-  run-config helper `scripts/verify-browser-config.js` is missing, or `hooks/hooks.json` does
-  not register the GATE or the RECORDER on the Bash matcher. Without the gate nothing judges a
+  run-config helper `scripts/verify-browser-config.js` is missing, the decision module cannot
+  be loaded, or `hooks/hooks.json` does not register the GATE or the RECORDER on the Bash
+  matcher. Without the gate nothing judges a
   `zensu-verify` session; without the recorder every navigation would prompt and nothing would
   be remembered. Reinstall the plugin. The parenthesis names which piece is missing.
 - **⚠️ verify-feature: not checked** → the wrapper reported no verify state at all, so the

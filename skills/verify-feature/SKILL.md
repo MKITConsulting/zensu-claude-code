@@ -141,8 +141,8 @@ The browser is `playwright-cli`, and the browser consent gate — the hook pair
 `pre-browser-navigation-consent.sh` / `post-browser-navigation-consent.sh` on the Bash matcher —
 judges every `playwright-cli` call on a `zensu-verify-*` session before it runs. It denies every
 command outside the set in `rules/browser-verification.md`, every flag outside that command's
-own list, every call from a subagent, and every call whose session or arguments are not
-literal. `open` must carry the run config that `scripts/verify-browser-config.js` wrote, and the
+own list, every call from a subagent, every call whose session or arguments are not
+literal, and every command that is not exactly one plain `playwright-cli` call. `open` must carry the run config that `scripts/verify-browser-config.js` wrote, and the
 gate reads that config itself: an isolated browser, the run's origins as
 `network.allowedOrigins`, service workers blocked, artifacts inside the run directory. Local
 mode accepts literal loopback-IP origins only. Remote mode accepts only non-loopback HTTPS,
@@ -328,9 +328,14 @@ login:
 playwright-cli -s=<session> open --config=<config> [--headed] <app-origin><route>
 ```
 
-Run each `playwright-cli` call as its own plain Bash command on the main thread, never through
-`xargs`, `bash -c`, a heredoc, a pipe into another program, or a subagent, and name the same
-session on every call: `playwright-cli -s=<session> <command> ...`.
+Run each `playwright-cli` call as its own plain Bash command on the main thread — exactly one
+call per Bash command, with nothing before or after it: no `&&`, `;` or pipe, no subshell or
+command substitution, no wrapper such as `timeout` or `nohup`, no package launcher such as
+`npx`, never through `xargs`, `bash -c`, a heredoc or a here-string, and never from a subagent.
+The gate denies every other shape. Name the same session on every call:
+`playwright-cli -s=<session> <command> ...`, and quote an argument that carries `?`, `*`, `[`
+or `{`, or that starts with `~` or `=`, because the gate reads an unquoted one as a shell
+pattern it cannot judge.
 
 ### Authentication (both modes)
 
@@ -447,7 +452,8 @@ and name the two install routes — `brew install playwright-cli` or
 `npm install -g @playwright/cli` — for the user to run; never install it on their behalf.
 `/zensu:doctor` reports whether it is installed and which version. The browser consent gate
 parses its arguments as measured against version 0.1.21 and denies an argument shape it does
-not recognize rather than admitting it.
+not recognize rather than admitting it — including a `zensu-verify` session name it does not
+resolve as the call's session.
 
 The run config uses the system Chrome channel. When `open` reports that the browser is not
 installed, obtain explicit approval for the networked download, then run

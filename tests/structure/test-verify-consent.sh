@@ -18,6 +18,7 @@ TDD_PHASE_LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
 SETUP_MD="$PLUGIN_DIR/skills/verify-feature/rules/setup.md"
 SESSION="zensu-verify-vc"
 CLI="playwright-cli -s=$SESSION"
+NL=$'\n'
 
 PASS=0; FAIL=0
 check() {
@@ -114,7 +115,7 @@ run_unit() { # $1 label  $2 file  $3 registered floor  $4 SUITE-OVERVIEW row key
   fi
 }
 run_unit "V6 floor" "$UNIT_FLOOR" 14 "verify-navigation-floor-v1.test.js"
-run_unit "V7 consent" "$UNIT_CONSENT" 77 "verify-consent-v1.test.js"
+run_unit "V7 consent" "$UNIT_CONSENT" 97 "verify-consent-v1.test.js"
 run_unit "V7b free-port" "$UNIT_PORT" 3 "verify-free-port.test.js"
 run_unit "V7c browser-config" "$UNIT_CONFIG" 8 "verify-browser-config.test.js"
 
@@ -266,7 +267,7 @@ UNRELATED_POST_OUT="$(bash_payload PostToolUse "ls -la" "$SID" "$PROJ" | bash "$
 
 EVAL_REASON="$(pre_reason "$CLI eval \"document.cookie\"" "$SID" "$PROJ")"
 case "$EVAL_REASON" in
-  *"command 'eval' is not available on a zensu-verify session"*) EVAL_NAMED=1 ;;
+  *"command 'eval' is not available in a /zensu:verify-feature browser session"*) EVAL_NAMED=1 ;;
   *) EVAL_NAMED=0 ;;
 esac
 [ "$(pre_verdict "$CLI eval \"document.cookie\"" "$SID" "$PROJ")" = "DENY" ] && [ "$EVAL_NAMED" -eq 1 ] \
@@ -298,6 +299,109 @@ esac
 [ "$TRUNC_RC" -eq 0 ] && [ "$TRUNC_DENY" -eq 1 ] \
   && check "H2d a truncated payload that names playwright-cli is denied as unreadable" PASS \
   || check "H2d a truncated payload that names playwright-cli is denied as unreadable (rc=$TRUNC_RC)" FAIL
+
+for _vc_case in "H16 quote-split CLI name|playwright-cl''i -s=$SESSION eval 1" \
+  "H16b CLI name in another letter case|Playwright-cli -s=$SESSION eval 1" \
+  "H16c here-string body|bash <<< '$CLI eval 1'" \
+  "H16d navigating call with a co-rider|$CLI goto http://127.0.0.1:4200/ && curl -s http://127.0.0.1:9/" \
+  "H16e package launcher on a read-only command|npx @playwright/cli -s=$SESSION snapshot" \
+  "H16f session name in another letter case|playwright-cli -s=ZENSU-VERIFY-VC eval 1" \
+  "H16g line continuation inside the CLI name|playwright-\\${NL}cli -s=$SESSION eval 1" \
+  "H16h line continuation inside the session name|playwright-cli -s zensu-verify\\${NL}-vc eval 1" \
+  "H16i session option the parser does not resolve|playwright-cli -S $SESSION eval 1"; do
+  _vc_label="${_vc_case%%|*}"
+  _vc_command="${_vc_case#*|}"
+  [ "$(pre_verdict "$_vc_command" "$SID" "$PROJ")" = "DENY" ] \
+    && check "$_vc_label is denied through the real pre hook" PASS \
+    || check "$_vc_label is denied through the real pre hook" FAIL
+done
+
+for _vc_hook in "$PRE_HOOK" "$POST_HOOK"; do
+  [ "$(grep -c 'LC_ALL=C tr -d' "$_vc_hook")" = "1" ] && [ "$(grep -c 'LC_ALL=C sed' "$_vc_hook")" = "1" ] \
+    && grep -q '^_ZENSU_SCAN=.*LC_ALL=C sed .*| LC_ALL=C tr -d' "$_vc_hook" \
+    && check "H17 ${_vc_hook##*/} joins continuations with one LC_ALL=C sed pass, then strips with one LC_ALL=C tr -d pass" PASS \
+    || check "H17 ${_vc_hook##*/} joins continuations with one LC_ALL=C sed pass, then strips with one LC_ALL=C tr -d pass" FAIL
+done
+
+prefilter_block() {
+  sed -n '/^_ZENSU_SCAN=/,/^unset _ZENSU_SCAN$/p' "$1"
+}
+PRE_BLOCK="$(prefilter_block "$PRE_HOOK")"
+POST_BLOCK="$(prefilter_block "$POST_HOOK")"
+[ -n "$PRE_BLOCK" ] && [ "$PRE_BLOCK" = "$POST_BLOCK" ] \
+  && check "H17d both hooks carry a byte-identical prefilter block" PASS \
+  || check "H17d both hooks carry a byte-identical prefilter block" FAIL
+CLI_MARKER_LIST="$(node -e 'process.stdout.write(require(process.argv[1]).CLI_MARKERS.join("\n"))' "$MODULE" 2>/dev/null)"
+H17E_OK=1
+[ -n "$CLI_MARKER_LIST" ] || H17E_OK=0
+while IFS= read -r _vc_marker; do
+  [ -n "$_vc_marker" ] || continue
+  printf '%s\n' "$PRE_BLOCK" | grep -qF -- "*${_vc_marker}*" || H17E_OK=0
+done <<EOF
+$CLI_MARKER_LIST
+EOF
+[ "$H17E_OK" -eq 1 ] \
+  && check "H17e the prefilter names every CLI marker the module derives" PASS \
+  || check "H17e the prefilter names every CLI marker the module derives" FAIL
+
+BASH_BIN="$(command -v bash)"
+NONODE_BIN="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-nonode.XXXXXX")"
+remember_tmp "$NONODE_BIN"
+for _vc_tool in cat sed tr dirname; do
+  ln -s "$(command -v "$_vc_tool")" "$NONODE_BIN/$_vc_tool"
+done
+if env PATH="$NONODE_BIN" "$BASH_BIN" -c 'command -v node' >/dev/null 2>&1; then
+  check "H17a-control the stripped PATH hides node" FAIL
+else
+  check "H17a-control the stripped PATH hides node" PASS
+fi
+CWD_ONLY="$PROJ/playwright-cli-notes"
+mkdir -p "$CWD_ONLY"
+CWD_ONLY_RC=0
+CWD_ONLY_OUT="$(bash_payload PreToolUse "ls -la" "$SID" "$CWD_ONLY" | env PATH="$NONODE_BIN" "$BASH_BIN" "$PRE_HOOK" 2>&1)" \
+  || CWD_ONLY_RC=$?
+[ "$CWD_ONLY_RC" -eq 0 ] && [ -z "$CWD_ONLY_OUT" ] \
+  && check "H17a a payload naming playwright-cli only in its cwd exits 0 before node is needed" PASS \
+  || check "H17a a payload naming playwright-cli only in its cwd exits 0 before node is needed (rc=$CWD_ONLY_RC)" FAIL
+NONODE_PRE="$(bash_payload PreToolUse "$CLI snapshot" "$SID" "$PROJ" | env PATH="$NONODE_BIN" "$BASH_BIN" "$PRE_HOOK" 2>/dev/null)"
+case "$NONODE_PRE" in
+  *'"permissionDecision":"deny"'*'node unavailable'*) check "H17b without node the pre hook denies a marked call" PASS ;;
+  *) check "H17b without node the pre hook denies a marked call" FAIL ;;
+esac
+NONODE_POST_RC=0
+NONODE_POST_ERR="$(bash_payload PostToolUse "$CLI snapshot" "$SID" "$PROJ" | env PATH="$NONODE_BIN" "$BASH_BIN" "$POST_HOOK" 2>&1 >/dev/null)" \
+  || NONODE_POST_RC=$?
+case "$NONODE_POST_ERR" in
+  *'consent memory not written (node unavailable)'*) NONODE_POST_NAMED=1 ;;
+  *) NONODE_POST_NAMED=0 ;;
+esac
+[ "$NONODE_POST_RC" -eq 0 ] && [ "$NONODE_POST_NAMED" -eq 1 ] \
+  && check "H17c without node the recorder skips, exits 0 and names the cause" PASS \
+  || check "H17c without node the recorder skips, exits 0 and names the cause (rc=$NONODE_POST_RC)" FAIL
+
+DOCTOR_NAMED_DIR="$PROJ/playwright-cli/zensu-verify-notes"
+mkdir -p "$DOCTOR_NAMED_DIR"
+DOCTOR_CMD="CLAUDE_PROJECT_DIR=$DOCTOR_NAMED_DIR bash $PLUGIN_DIR/hooks/lib/zensu-doctor.sh"
+ADOPT_CMD="CLAUDE_PLUGIN_DATA=$DOCTOR_NAMED_DIR bash $PLUGIN_DIR/hooks/lib/zensu-session-adopt.sh --confirm"
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    check "H18 the recognized /zensu:doctor and adoption commands pass the consent pre hook SKIPPED (the recognizer refuses on win32)" PASS
+    ;;
+  *)
+    [ "$(HOME="$GLOBAL_HOME" pre_verdict "$DOCTOR_CMD" "$SID" "$PROJ")" = "NONE" ] \
+      && check "H18 the recognized /zensu:doctor command passes although its project path names both markers" PASS \
+      || check "H18 the recognized /zensu:doctor command passes although its project path names both markers" FAIL
+    [ "$(HOME="$GLOBAL_HOME" pre_verdict "$ADOPT_CMD" "$SID" "$PROJ")" = "NONE" ] \
+      && check "H18a the recognized adoption command passes although its data path names both markers" PASS \
+      || check "H18a the recognized adoption command passes although its data path names both markers" FAIL
+    [ "$(HOME="$GLOBAL_HOME" pre_verdict "$DOCTOR_CMD" "$SID" "$PROJ" '{"agent_id":"agent-1","agent_type":"general-purpose"}')" = "DENY" ] \
+      && check "H18b-control the same doctor command from a subagent is still judged and denied" PASS \
+      || check "H18b-control the same doctor command from a subagent is still judged and denied" FAIL
+    [ "$(HOME="$GLOBAL_HOME" pre_verdict "$DOCTOR_CMD; true" "$SID" "$PROJ")" = "DENY" ] \
+      && check "H18c-control a doctor command with a co-rider is not recognized and is denied" PASS \
+      || check "H18c-control a doctor command with a co-rider is not recognized and is denied" FAIL
+    ;;
+esac
 
 [ "$(pre_verdict "$CLI goto http://127.0.0.1:4200/login" "$SID" "$PROJ")" = "ASK" ] \
   && check "H3 the first navigation to a loopback origin asks" PASS \
@@ -334,6 +438,22 @@ post_run "$CLI goto http://127.0.0.1:4200/admin" "$SID" "$PROJ" >/dev/null
 memory_has "http://127.0.0.1:4200" "/admin" "remembered" && [ "$(memory_count)" = "2" ] \
   && check "H6b a navigation on a remembered origin is recorded as remembered" PASS \
   || check "H6b a navigation on a remembered origin is recorded as remembered" FAIL
+post_run "playwright-\\${NL}cli -s=$SESSION goto http://127.0.0.1:4200/joined" "$SID" "$PROJ" >/dev/null
+memory_has "http://127.0.0.1:4200" "/joined" "remembered" \
+  && check "H6c the recorder joins a line continuation inside the CLI name" PASS \
+  || check "H6c the recorder joins a line continuation inside the CLI name" FAIL
+post_run "Playwright-cli -s=$SESSION goto http://127.0.0.1:4200/cased" "$SID" "$PROJ" >/dev/null
+memory_has "http://127.0.0.1:4200" "/cased" "remembered" \
+  && check "H6d the recorder reads a CLI name in another letter case" PASS \
+  || check "H6d the recorder reads a CLI name in another letter case" FAIL
+post_run "playwright-cl''i -s=$SESSION goto http://127.0.0.1:4200/split" "$SID" "$PROJ" >/dev/null
+memory_has "http://127.0.0.1:4200" "/split" "remembered" \
+  && check "H6e the recorder reads a quote-split CLI name" PASS \
+  || check "H6e the recorder reads a quote-split CLI name" FAIL
+PLAYWRIGHT_CLI_SESSION="$SESSION" post_run "playwright-cli goto http://127.0.0.1:4200/envonly" "$SID" "$PROJ" >/dev/null
+memory_has "http://127.0.0.1:4200" "/envonly" "remembered" \
+  && check "H6f the recorder reads a session named only by the environment" PASS \
+  || check "H6f the recorder reads a session named only by the environment" FAIL
 [ "$(pre_verdict "$CLI tab-new http://127.0.0.1:4201/" "$SID" "$PROJ")" = "ASK" ] \
   && check "H7 a second loopback origin still asks" PASS \
   || check "H7 a second loopback origin still asks" FAIL
@@ -445,7 +565,7 @@ post_run "$CLI goto https://app.example.com/" "$SID" "$PROJ" >/dev/null
 post_run "$CLI eval 1" "$SID" "$PROJ" >/dev/null
 post_run "$CLI goto http://localhost:4200/" "$SID" "$PROJ" >/dev/null
 COUNT_AFTER="$(memory_count)"
-[ "$COUNT_BEFORE" = "3" ] && [ "$COUNT_AFTER" = "$COUNT_BEFORE" ] \
+[ "$COUNT_BEFORE" = "7" ] && [ "$COUNT_AFTER" = "$COUNT_BEFORE" ] \
   && check "H14 interrupted and denied calls are never recorded" PASS \
   || check "H14 interrupted and denied calls are never recorded (before=$COUNT_BEFORE after=$COUNT_AFTER)" FAIL
 [ "$(pre_verdict "$CLI goto http://127.0.0.1:4360/" "$SID" "$PROJ")" = "ASK" ] \
@@ -472,6 +592,15 @@ esac
 
 bash_payload PreToolUse "$CLI goto http://127.0.0.1:4200/" "$SID" "$PROJ" > "$PROJ/mismatch-pre.json"
 bash_payload PostToolUse "$CLI goto http://127.0.0.1:4200/" "$SID" "$PROJ" > "$PROJ/mismatch-post.json"
+bash_payload PreToolUse "ls -la" "$SID" "$PROJ" > "$PROJ/unmarked-pre.json"
+bash_payload PreToolUse "playwright-cli -s=mine snapshot" "$SID" "$PROJ" > "$PROJ/cli-only-pre.json"
+bash_payload PostToolUse "ls -la" "$SID" "$PROJ" > "$PROJ/unmarked-post.json"
+bash_payload PostToolUse "playwright-cli -s=mine snapshot" "$SID" "$PROJ" > "$PROJ/cli-only-post.json"
+degraded_quiet() {
+  local root="$1" hook="$2" payload="$3" out rc=0
+  out="$(CLAUDE_PLUGIN_ROOT="$root" bash "$root/hooks/$hook" < "$payload" 2>&1)" || rc=$?
+  [ "$rc" -eq 0 ] && [ -z "$out" ]
+}
 ROOT_MISMATCH_RC=0
 CLAUDE_PLUGIN_ROOT="$PROJ" bash "$PRE_HOOK" < "$PROJ/mismatch-pre.json" >/dev/null 2>&1 || ROOT_MISMATCH_RC=$?
 [ "$ROOT_MISMATCH_RC" -eq 2 ] && check "V28 an inherited plugin root that does not match refuses with exit 2" PASS \
@@ -490,6 +619,17 @@ case "$NOMOD_DENY" in
     check "V31d a plugin root with no decision module denies, naming the module" PASS ;;
   *) check "V31d a plugin root with no decision module denies, naming the module" FAIL ;;
 esac
+SYMMOD_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-symmod.XXXXXX")"
+remember_tmp "$SYMMOD_ROOT"
+mkdir -p "$SYMMOD_ROOT/hooks/lib"
+cp "$PRE_HOOK" "$SYMMOD_ROOT/hooks/"
+ln -s "$MODULE" "$SYMMOD_ROOT/hooks/lib/verify-consent-v1.js"
+SYMMOD_DENY="$(CLAUDE_PLUGIN_ROOT="$SYMMOD_ROOT" bash "$SYMMOD_ROOT/hooks/pre-browser-navigation-consent.sh" < "$PROJ/mismatch-pre.json" 2>/dev/null)"
+case "$SYMMOD_DENY" in
+  *'"permissionDecision":"deny"'*'decision module absent or symlinked'*)
+    check "V31f a plugin root whose decision module is a symlink denies, naming the module" PASS ;;
+  *) check "V31f a plugin root whose decision module is a symlink denies, naming the module" FAIL ;;
+esac
 BADMOD_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-badmod.XXXXXX")"
 remember_tmp "$BADMOD_ROOT"
 mkdir -p "$BADMOD_ROOT/hooks/lib"
@@ -501,6 +641,15 @@ case "$BADMOD_DENY" in
     check "V31e a decision module that will not load denies rather than allowing" PASS ;;
   *) check "V31e a decision module that will not load denies rather than allowing" FAIL ;;
 esac
+DEGRADED_PRE_OK=1
+for _vc_root in "$NOMOD_ROOT" "$SYMMOD_ROOT" "$BADMOD_ROOT"; do
+  for _vc_payload in "$PROJ/unmarked-pre.json" "$PROJ/cli-only-pre.json"; do
+    degraded_quiet "$_vc_root" pre-browser-navigation-consent.sh "$_vc_payload" || DEGRADED_PRE_OK=0
+  done
+done
+[ "$DEGRADED_PRE_OK" -eq 1 ] \
+  && check "V31g every degraded pre-hook root lets an unmarked and a CLI-only payload through silently" PASS \
+  || check "V31g every degraded pre-hook root lets an unmarked and a CLI-only payload through silently" FAIL
 # AC-011: post_run routes stderr onto stdout and every call site discarded it, so the
 # recorder's exit status was read by nothing — a hook that crashed before reading the payload
 # satisfied the record-count assertions just as well as one that worked. This reads both.
@@ -518,6 +667,10 @@ esac
 [ "$POST_SKIP_RC" -eq 0 ] && [ "$POST_SKIP_NAMED" -eq 1 ] \
   && check "V32b a recorder skip exits 0 and names its cause" PASS \
   || check "V32b a recorder skip exits 0 and names its cause (rc=$POST_SKIP_RC named=$POST_SKIP_NAMED)" FAIL
+degraded_quiet "$NOMODP_ROOT" post-browser-navigation-consent.sh "$PROJ/unmarked-post.json" \
+  && degraded_quiet "$NOMODP_ROOT" post-browser-navigation-consent.sh "$PROJ/cli-only-post.json" \
+  && check "V32c the degraded recorder root stays silent on an unmarked and a CLI-only payload" PASS \
+  || check "V32c the degraded recorder root stays silent on an unmarked and a CLI-only payload" FAIL
 # AC-008: the recorder is documented as never blocking, and exit 2 from a PostToolUse hook IS
 # the blocking status.
 POST_MISMATCH_RC=0
@@ -603,6 +756,22 @@ EOF
   fi
 else
   check "V45 tree-wide retired-broker census SKIPPED (no git checkout)" PASS
+fi
+
+GATES_FLAT="$(tr '\n' ' ' < "$PLUGIN_DIR/docs/gates.md" | tr -s ' ')"
+if printf '%s' "$GATES_FLAT" | grep -qF 'The PostToolUse hook never blocks: every fault, its plugin-root identity guard included, is a stderr note and exit `0`' \
+  && ! printf '%s' "$GATES_FLAT" | grep -qF 'the plugin-root identity guard, which refuses with exit 2 before the hook body runs'; then
+  check "V46 docs/gates.md says the recorder never blocks, its identity guard included" PASS
+else
+  check "V46 docs/gates.md says the recorder never blocks, its identity guard included" FAIL
+fi
+VERIFY_DOC_FLAT="$(tr '\n' ' ' < "$PLUGIN_DIR/docs/verify-feature.md" | tr -s ' ')"
+if ! printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'ignores every other Bash call' \
+  && printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'a command that merely mentions both markers' \
+  && printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'Grep tool'; then
+  check "V47 docs/verify-feature.md states the mention-denial cost and its remedy" PASS
+else
+  check "V47 docs/verify-feature.md states the mention-denial cost and its remedy" FAIL
 fi
 
 echo "----"

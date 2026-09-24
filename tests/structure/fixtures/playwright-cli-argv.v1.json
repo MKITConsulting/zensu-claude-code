@@ -1,0 +1,718 @@
+{
+  "schema": 1,
+  "source": {
+    "package": "@playwright/cli",
+    "version": "0.1.21",
+    "bin": [
+      "playwright-cli"
+    ],
+    "playwrightCore": "1.64.0-alpha-1789764292000"
+  },
+  "booleanOptions": [
+    "all",
+    "annotate",
+    "boxes",
+    "clear",
+    "cursor",
+    "dry-run",
+    "force",
+    "full-page",
+    "g",
+    "global",
+    "headed",
+    "help",
+    "hide",
+    "hires",
+    "httpOnly",
+    "json",
+    "kill",
+    "list",
+    "mobile",
+    "no-shell",
+    "only-shell",
+    "persistent",
+    "raw",
+    "secure",
+    "static",
+    "submit",
+    "version",
+    "with-deps"
+  ],
+  "stringOptions": [
+    "_"
+  ],
+  "sessionPrecedence": "argument-over-environment",
+  "cases": [
+    {
+      "argv": [
+        "-s=zensu-verify-a",
+        "goto",
+        "http://127.0.0.1:1/"
+      ],
+      "args": {
+        "_": [
+          "goto",
+          "http://127.0.0.1:1/"
+        ],
+        "session": "zensu-verify-a"
+      }
+    },
+    {
+      "argv": [
+        "-s",
+        "zensu-verify-a",
+        "list"
+      ],
+      "args": {
+        "_": [
+          "list"
+        ],
+        "session": "zensu-verify-a"
+      }
+    },
+    {
+      "argv": [
+        "--session",
+        "zensu-verify-a",
+        "snapshot"
+      ],
+      "args": {
+        "_": [
+          "snapshot"
+        ],
+        "session": "zensu-verify-a"
+      }
+    },
+    {
+      "argv": [
+        "--session=zensu-verify-a"
+      ],
+      "args": {
+        "_": [],
+        "session": "zensu-verify-a"
+      }
+    },
+    {
+      "argv": [
+        "--s=zensu-verify-a",
+        "snapshot"
+      ],
+      "args": {
+        "_": [
+          "snapshot"
+        ],
+        "session": "zensu-verify-a"
+      }
+    },
+    {
+      "argv": [
+        "-s",
+        "a",
+        "-s",
+        "b",
+        "snapshot"
+      ],
+      "args": {
+        "_": [
+          "snapshot"
+        ],
+        "session": [
+          "a",
+          "b"
+        ]
+      }
+    },
+    {
+      "argv": [
+        "--session",
+        "a",
+        "--session",
+        "b"
+      ],
+      "args": {
+        "_": [],
+        "session": [
+          "a",
+          "b"
+        ]
+      }
+    },
+    {
+      "argv": [
+        "-s=",
+        "snapshot"
+      ],
+      "args": {
+        "_": [
+          "snapshot"
+        ],
+        "s": ""
+      }
+    },
+    {
+      "argv": [
+        "-s5",
+        "snapshot"
+      ],
+      "args": {
+        "_": [
+          "snapshot"
+        ],
+        "session": "5"
+      }
+    },
+    {
+      "argv": [
+        "-sfoo",
+        "snapshot"
+      ],
+      "args": {
+        "_": [],
+        "f": true,
+        "o": "snapshot",
+        "session": true
+      }
+    },
+    {
+      "argv": [
+        "-s",
+        "--json",
+        "snapshot"
+      ],
+      "args": {
+        "_": [
+          "snapshot"
+        ],
+        "json": true,
+        "session": true
+      }
+    },
+    {
+      "argv": [
+        "-s_x",
+        "snapshot"
+      ],
+      "args": {
+        "_": [
+          ""
+        ],
+        "x": "snapshot",
+        "session": true
+      }
+    },
+    {
+      "argv": [
+        "-abc",
+        "x"
+      ],
+      "args": {
+        "_": [],
+        "a": true,
+        "b": true,
+        "c": "x"
+      }
+    },
+    {
+      "argv": [
+        "-g"
+      ],
+      "args": {
+        "_": [],
+        "global": true
+      }
+    },
+    {
+      "argv": [
+        "-g",
+        "install"
+      ],
+      "args": {
+        "_": [
+          "install"
+        ],
+        "global": true
+      }
+    },
+    {
+      "argv": [
+        "-h"
+      ],
+      "args": {
+        "_": [],
+        "h": true
+      }
+    },
+    {
+      "argv": [
+        "-v"
+      ],
+      "args": {
+        "_": [],
+        "v": true
+      }
+    },
+    {
+      "argv": [
+        "--version"
+      ],
+      "args": {
+        "_": [],
+        "version": true
+      }
+    },
+    {
+      "argv": [
+        "--help",
+        "open"
+      ],
+      "args": {
+        "_": [
+          "open"
+        ],
+        "help": true
+      }
+    },
+    {
+      "argv": [
+        "--json",
+        "snapshot"
+      ],
+      "args": {
+        "_": [
+          "snapshot"
+        ],
+        "json": true
+      }
+    },
+    {
+      "argv": [
+        "--raw",
+        "eval",
+        "1"
+      ],
+      "args": {
+        "_": [
+          "eval",
+          "1"
+        ],
+        "raw": true
+      }
+    },
+    {
+      "argv": [
+        "open",
+        "--config=/a.json",
+        "--config=/b.json"
+      ],
+      "args": {
+        "_": [
+          "open"
+        ],
+        "config": [
+          "/a.json",
+          "/b.json"
+        ]
+      }
+    },
+    {
+      "argv": [
+        "open",
+        "--config",
+        "--headed"
+      ],
+      "args": {
+        "_": [
+          "open"
+        ],
+        "config": true,
+        "headed": true
+      }
+    },
+    {
+      "argv": [
+        "open",
+        "--config",
+        "/a.json",
+        "http://127.0.0.1:1/"
+      ],
+      "args": {
+        "_": [
+          "open",
+          "http://127.0.0.1:1/"
+        ],
+        "config": "/a.json"
+      }
+    },
+    {
+      "argv": [
+        "--filter",
+        "x",
+        "--filter",
+        "y",
+        "--filter",
+        "z"
+      ],
+      "args": {
+        "_": [],
+        "filter": [
+          "x",
+          "y",
+          "z"
+        ]
+      }
+    },
+    {
+      "argv": [
+        "open",
+        "--headed",
+        "--headed",
+        "http://127.0.0.1:1/"
+      ],
+      "args": {
+        "_": [
+          "open",
+          "http://127.0.0.1:1/"
+        ],
+        "headed": true
+      }
+    },
+    {
+      "argv": [
+        "--no-headed"
+      ],
+      "args": {
+        "_": [],
+        "headed": false
+      }
+    },
+    {
+      "argv": [
+        "--headed",
+        "false"
+      ],
+      "args": {
+        "_": [],
+        "headed": false
+      }
+    },
+    {
+      "argv": [
+        "--headed",
+        "true",
+        "x"
+      ],
+      "args": {
+        "_": [
+          "x"
+        ],
+        "headed": true
+      }
+    },
+    {
+      "argv": [
+        "--no-",
+        "x"
+      ],
+      "args": {
+        "_": [],
+        "no-": "x"
+      }
+    },
+    {
+      "argv": [
+        "---x",
+        "y"
+      ],
+      "args": {
+        "_": [],
+        "-x": "y"
+      }
+    },
+    {
+      "argv": [
+        "open",
+        "--headed=yes"
+      ],
+      "error": "boolean option '--headed' should not be passed with '=value', use '--headed' or '--no-headed' instead"
+    },
+    {
+      "argv": [
+        "--json=1",
+        "snapshot"
+      ],
+      "error": "boolean option '--json' should not be passed with '=value', use '--json' or '--no-json' instead"
+    },
+    {
+      "argv": [
+        "fill",
+        "e1",
+        "--",
+        "--submit"
+      ],
+      "args": {
+        "_": [
+          "fill",
+          "e1",
+          "--submit"
+        ]
+      }
+    },
+    {
+      "argv": [
+        "goto",
+        "--",
+        "-s=x"
+      ],
+      "args": {
+        "_": [
+          "goto",
+          "-s=x"
+        ]
+      }
+    },
+    {
+      "argv": [
+        "a",
+        "--",
+        "b",
+        "--",
+        "c"
+      ],
+      "args": {
+        "_": [
+          "a",
+          "b",
+          "--",
+          "c"
+        ]
+      }
+    },
+    {
+      "argv": [
+        "--"
+      ],
+      "args": {
+        "_": []
+      }
+    },
+    {
+      "argv": [
+        "-"
+      ],
+      "args": {
+        "_": [
+          "-"
+        ]
+      }
+    },
+    {
+      "argv": [
+        "-1",
+        "x"
+      ],
+      "args": {
+        "_": [
+          "-1",
+          "x"
+        ]
+      }
+    },
+    {
+      "argv": [
+        "--_"
+      ],
+      "args": {
+        "_": [
+          ""
+        ]
+      }
+    },
+    {
+      "argv": [
+        "--_",
+        "x"
+      ],
+      "args": {
+        "_": [
+          "x"
+        ]
+      }
+    },
+    {
+      "argv": [
+        "screenshot",
+        "--filename=a.png",
+        "--full-page"
+      ],
+      "args": {
+        "_": [
+          "screenshot"
+        ],
+        "filename": "a.png",
+        "full-page": true
+      }
+    },
+    {
+      "argv": [
+        "snapshot",
+        "--depth",
+        "3"
+      ],
+      "args": {
+        "_": [
+          "snapshot"
+        ],
+        "depth": "3"
+      }
+    },
+    {
+      "argv": [
+        "click",
+        "e1",
+        "--button",
+        "right",
+        "--modifiers",
+        "Alt"
+      ],
+      "args": {
+        "_": [
+          "click",
+          "e1"
+        ],
+        "button": "right",
+        "modifiers": "Alt"
+      }
+    },
+    {
+      "argv": [
+        "-szensu-verify-run1",
+        "eval",
+        "1"
+      ],
+      "args": {
+        "_": [
+          "eval",
+          "1"
+        ],
+        "session": "zensu-verify-run1"
+      }
+    },
+    {
+      "argv": [
+        "-szensu-verify-a",
+        "eval",
+        "1"
+      ],
+      "args": {
+        "_": [
+          "eval",
+          "1"
+        ],
+        "z": true,
+        "e": true,
+        "n": true,
+        "u": "-verify-a",
+        "session": true
+      }
+    },
+    {
+      "argv": [
+        "-s/zensu-verify-a",
+        "snapshot"
+      ],
+      "args": {
+        "_": [
+          "snapshot"
+        ],
+        "session": "/zensu-verify-a"
+      }
+    },
+    {
+      "argv": [
+        "-s.x",
+        "y"
+      ],
+      "args": {
+        "_": [
+          "y"
+        ],
+        "session": ".x"
+      }
+    },
+    {
+      "argv": [
+        "-s-",
+        "snapshot"
+      ],
+      "args": {
+        "_": [
+          "snapshot"
+        ],
+        "session": "-"
+      }
+    },
+    {
+      "argv": [
+        "-_s",
+        "zensu-verify-a",
+        "eval",
+        "1"
+      ],
+      "args": {
+        "_": [
+          "-_s",
+          "zensu-verify-a",
+          "eval",
+          "1"
+        ]
+      }
+    },
+    {
+      "argv": [
+        "-.s",
+        "zensu-verify-a",
+        "eval",
+        "1"
+      ],
+      "args": {
+        "_": [
+          "-.s",
+          "zensu-verify-a",
+          "eval",
+          "1"
+        ]
+      }
+    },
+    {
+      "argv": [
+        "-@s",
+        "zensu-verify-a",
+        "eval",
+        "1"
+      ],
+      "args": {
+        "_": [
+          "-@s",
+          "zensu-verify-a",
+          "eval",
+          "1"
+        ]
+      }
+    },
+    {
+      "argv": [
+        "-S",
+        "zensu-verify-a",
+        "eval",
+        "1"
+      ],
+      "args": {
+        "_": [
+          "eval",
+          "1"
+        ],
+        "S": "zensu-verify-a"
+      }
+    }
+  ]
+}

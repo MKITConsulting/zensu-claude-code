@@ -3587,11 +3587,13 @@ Stop path — the `git status` this counter runs and the refused-spawn transcrip
 also bounds callers that are not on that path at all, which is why the ladder's own header states
 the CRITERION rather than a count: raising the deadline stopped being a Stop-path-only decision.
 The criterion is what governs; the roster below is a census taken at one moment, kept because the
-next caller needs somewhere concrete to look. Its live call sites outside the Stop hook are FOUR,
-in TWO files, and both this roster and the ladder's own header enumerated fewer:
+next caller needs somewhere concrete to look. Its live call sites outside the Stop hook are SIX,
+in FOUR files, and both this roster and the ladder's own header enumerated fewer:
 `hooks/user-prompt-zen-mode.sh` holds the merged prompt-and-anchor child, the prompt-only
-recovery child and the off-phrase marker write, and `hooks/lib/zensu-zen-mode.sh` holds the
-out-of-band writer, which sources the ladder itself. Named that way rather than with a colon
+recovery child and the off-phrase marker write; `hooks/lib/zensu-zen-mode.sh` holds the
+out-of-band writer, which sources the ladder itself; `hooks/lib/zensu-log.sh` holds the
+`--tdd-complete` claim-inventory child; and `hooks/lib/zensu-doctor.sh` holds the
+`/zensu:doctor` playwright-cli version fallback. Named that way rather than with a colon
 after the file name: `C41` forbids the `<file>` plus line-number anchor form, and a
 backtick-closed `path.sh` plus colon sits ONE CHARACTER from it - close enough that the next
 reader copies the shape and the pin then fires on their edit instead of on the one that
@@ -3984,10 +3986,11 @@ properties are easy to get wrong and cost the whole feature:
   advisory by construction and always exits 0 (§"Witness Attempt Half"), which is exactly
   why it may sit on this matcher at all — but it is counted here rather than left out,
   because O21a enumerates the matcher and would have to be re-derived by anyone who
-  trusted a roster that omitted it. The consent gate denies only a `playwright-cli` call on
-  a `zensu-verify-*` session and exits before its bind for every command that carries no
-  `playwright-cli` marker, so it never reaches either relaxable state for the doctor
-  command. `/zensu:doctor` runs through Bash, so it is reachable only
+  trusted a roster that omitted it. The consent gate exits before its bind for every command
+  that carries no `playwright-cli` marker and admits the recognized `/zensu:doctor` and adoption
+  commands through `zensu_doctor_allowed` before its module runs, so it never stands between a
+  session and the doctor; it denies a `zensu-verify-*` call and a command that merely mentions
+  both markers. `/zensu:doctor` runs through Bash, so it is reachable only
   if EVERY one of them allows. Both the `.*` gate and the secret-scan gate were missed in
   turn while the single-gate test stayed green and the feature silently did not work.
   `tests/structure/test-orphaned-project-root.sh` O21a therefore enumerates the Bash
@@ -4414,7 +4417,19 @@ user ever read as a VERDICT rather than as a deny is gone. Its `W22` pins the
 export, the specifier and the degrade-on-load-failure behaviour. Removing either
 `within` or `msysToDrive` from the export list therefore breaks a shipped skill,
 not just a test — which is the cost that buys the single implementation. Unlike `within()`↔`isInside`, `WRAP` is NOT pinned
-against its `pre-bash-zensu-gate.sh` copy — check that one by hand. **A further coupling is
+against its `pre-bash-zensu-gate.sh` copy — check that one by hand. A THIRD wrapper set sits on
+the same `Bash` matcher and is deliberately NOT a copy of `WRAP`: `commandPosition` in
+`hooks/lib/verify-consent-v1.js` skips `command`, `builtin`, `exec`, `nohup`, `time`, `nice`,
+`timeout`, `gtimeout`, `env`, `sudo` and `doas`, with one operand list shared by the last three.
+It is registered here rather than shared because it cannot drift into an admit: the consent gate
+REFUSES every wrapper it recognizes — `env`, `sudo` and `doas` as `ENV_ASSIGNMENT`, the rest as
+`WRAPPER` — and a wrapper it does not recognize leaves the `playwright-cli` word outside command
+position, which refuses as `INDIRECT`. That ladder therefore decides only which reason a refused
+call names, never whether a call is admitted, and the unit case `a wrapper the ladder does not
+know is refused too, so the ladder decides only the reason` holds both arms. One shared table was
+weighed and declined: `WRAP` marks a wrapper TRANSPARENT so a rule can see through it, while the
+consent ladder exists to NAME a refusal, and one table would tie an admit-relevant set to a
+reason-only one. **A further coupling is
 PROSE rather than a table, and nothing pins it either:** the deny message rule (C) emits ends
 with a sentence naming the deliberate one-off escape prefix, and `skills/session-trail`'s
 move-alternative advice ASSERTS that it does — it tells the reader the refusal names the
@@ -9063,24 +9078,53 @@ and the skill's instruction to use only the printed session is prose, not a boun
 
 **The order of judgement is the contract.**
 
-1. **Prefilter, in BOTH wrappers, before `node` starts:** the raw payload must contain
-   `playwright-cli` or `@playwright/cli` (the third `case` arm is the JSON-escaped `\/` spelling).
+1. **Prefilter, in BOTH wrappers, before `node` starts:** the payload is normalized by ONE
+   `LC_ALL=C sed` pass that joins a JSON-encoded backslash-newline line continuation and ONE
+   `LC_ALL=C tr -d` pass that removes every quote and backslash, then matched case-insensitively.
+   It must name `playwright-cli` or `@playwright/cli` AND a `zensu-verify-` session — or name the
+   CLI while the hook environment's `PLAYWRIGHT_CLI_SESSION` names one. The third `case` arm, the
+   JSON-escaped `\/` spelling, only matters on the fallback to the raw payload when `tr` fails.
    Every other Bash call exits 0 with no output — which is what keeps the pair off the hot path of
-   every Bash call and out of every bind-failure state for unrelated commands. `evaluate` repeats
-   the test as its own first regex; the two are a hand copy, and a widening of one without the other
-   makes a gated call either unreachable or silently unjudged.
+   every Bash call and out of every bind-failure state for unrelated commands. It is also why the
+   node-unavailable, module-absent-or-symlinked and module-failure arms act on marked payloads
+   only. The recognized `/zensu:doctor` and adoption commands exit 0 through
+   `zensu_doctor_allowed` right after the plugin-root check, even when a path in them names both
+   markers. **Why `tr` and not bash:** pure-bash stripping (`${INPUT//[...]/}`) is quadratic on bash
+   3.2 and did not finish within 100 s on a 480 KB payload, where `tr` took 61 ms. `evaluate`
+   repeats the test through `commandMarkers` over the same normalization; the two are a hand copy,
+   and a widening of one without the other makes a gated call either unreachable or silently
+   unjudged.
 2. **Command analysis** through the module's own shell lexer (`lexShell`/`analyzeCommand`). Any
-   `zensu-verify` session call it cannot judge denies with a named reason: a heredoc or nested shell
-   body, indirection through `xargs`, `bash -c` or another program, a function named
-   `playwright-cli`, an environment builtin, an environment assignment or `env`/`sudo`/`doas`
-   wrapper, `PLAYWRIGHT_MCP_*`/`PWTEST_*` text, and a session name or argument that is not a literal.
-   A call on any other session reaches no decision at all.
+   `zensu-verify` session call it cannot judge denies with a named reason: a heredoc, here-string,
+   parse fault, or `-c`/`eval` or subshell body beyond `MAX_NEST`; indirection through `xargs`,
+   `bash -c`, a command string handed to another program, or any other word that names the CLI
+   outside command position; a function named `playwright-cli` (matched case-insensitively and
+   checked first); an environment builtin; `PLAYWRIGHT_MCP_*`/`PWTEST_*` text in the raw or the
+   quote-stripped command; and a session name or argument that is not a literal. A `-c` or `eval`
+   body inherits the outer command's assignments and wrappers, so `env -i bash -c '…'` is judged as
+   if the wrapper sat on the inner call. The lexer marks an unquoted brace, glob, leading `~` or
+   leading `=` word as unexpanded; a `+=` session assignment counts as unexpanded; a session given
+   more than once denies `SESSION_MALFORMED`; and a session value is GATED when it names
+   `zensu-verify-` in any letter case or behind a path, then must match `SESSION_RE` exactly. A call
+   on any other session reaches no decision — unless the command is marked and carries an
+   unexpanded argument, which denies `ARGUMENT_UNEXPANDED` because its session could resolve to a
+   gated one after expansion.
 3. **Principal:** main thread only (`claude-principal-v1.js`). A subagent's `zensu-verify` call
    denies.
-4. **Command and flag allowlist** (`ALLOWED_COMMANDS`), with `--json/--raw/--help/--version`
-   harmless everywhere and a repeated flag denied. The arguments are parsed by `parseCliArgs`, a port
-   of the CLI's own minimist parser MEASURED against `PLAYWRIGHT_CLI_SOURCE_VERSION` (0.1.21); an
-   argument shape it does not recognize denies rather than admits.
+4. **Wrapper, launcher and allowlist.** `env`, `sudo` and `doas` keep `ENV_ASSIGNMENT`; any other
+   wrapper — `timeout`, `gtimeout`, `nohup`, `time`, `nice`, `exec`, `command`, `builtin` — denies
+   `WRAPPER`, and a wrapper the ladder does not know leaves the CLI outside command position, which
+   denies `INDIRECT`; a package launcher (`npx`, `bunx`, `pnpx`, `npm`/`pnpm`/`yarn`
+   `dlx`/`exec`/`x`) denies `LAUNCHER`, because it may fetch or select a version the gate never
+   measured. Then the command and flag allowlist (`ALLOWED_COMMANDS`), with
+   `--json/--raw/--help/--version` harmless everywhere and a repeated flag denied. `COMMAND_DENIED` and `FLAG_DENIED` scope the refusal to
+   `/zensu:verify-feature` and forbid a retry under another session name or program. The arguments
+   are parsed by `parseCliArgs`, a port of the CLI's own minimist parser MEASURED against
+   `PLAYWRIGHT_CLI_SOURCE_VERSION` (0.1.21) and pinned by a golden fixture recorded from that
+   version's own parser; an argument shape it does not recognize denies rather than admits — an
+   unknown option on a gated call, and, through step 7, a `zensu-verify` name no call resolves.
+   **The per-call order matters:** the wrapper ladder decides only the deny REASON, never whether a
+   call is admitted.
 5. **`open`** must carry `--config=<absolute path>`, and the gate reads that file itself through
    `readRunConfig`/`runConfigShape` — the SAME shape function the helper runs before it writes, so
    the writer and the judge share one definition. `--browser` must name a Chromium channel
@@ -9091,6 +9135,24 @@ and the skill's instruction to use only the printed session is prose, not a boun
    Chromium switches: Firefox or WebKit would silently drop the pins.
 6. **Every target origin** — each run-config origin on `open`, and the URL of `open`, `goto` and
    `tab-new` — goes through the floor below, then consent or policy.
+7. **The shape: exactly one plain call.** A command whose markers name both the CLI and a
+   `zensu-verify` session is admitted only as ONE top-level `playwright-cli` invocation with no
+   operator, no second segment, no subshell, no heredoc and no here-string (`plainShape`).
+   Everything else denies `NOT_PLAIN`. The test runs AFTER the per-call judgement, so a call that
+   is already refused keeps its specific reason. A command that merely MENTIONS both markers — a
+   `grep` pattern, a commit message, an `echo` — is refused too, by whichever rule sees it first: a
+   word outside command position that names the CLI makes step 2 answer `INDIRECT`, and only text
+   the lexer drops, such as a comment, reaches this test and `NOT_PLAIN`. Both reasons therefore
+   name the same remedy — the Grep tool, or a commit message file (`git commit -F`) — because the
+   false deny is the accepted cost of a textual gate and a refusal must not leave the reader
+   guessing; the unit case `a command that only mentions playwright-cli and a zensu-verify session
+   is refused with the remedy named` holds both arms. A PLAIN call whose text names a
+   `zensu-verify-` session that no call resolved as its session — `-S`, `-_s`, an attached `-s`
+   the parser reads as a boolean, a name in another argument — denies `SESSION_UNRESOLVED`; the
+   environment arm of the marker is exempt, because an explicit `-s` outranks
+   `PLAYWRIGHT_CLI_SESSION` in the CLI itself. The skill already required one plain Bash
+   call per `playwright-cli` call; this step is what enforces it, and it is what makes steps 2 and
+   4 total rather than a list of spellings.
 
 **The run config is where the browser's own fences live.** `buildConfig` writes an isolated browser,
 `--no-proxy-server`, one `--host-resolver-rules` pin per remote hostname, `serviceWorkers: 'block'`,
@@ -9126,12 +9188,19 @@ broker, nothing consumes such a marker, so the whole family (`writeExecutionEvid
 removed rather than ported. The consequence is the first residual below, and it must not be papered
 over with a marker nothing reads.
 
-**`/zensu:doctor`** probes `command -v playwright-cli` and `playwright-cli --version`
-(`ZDOC_PLAYWRIGHT=present|absent`, `ZDOC_PLAYWRIGHT_VERSION`) and compares the version with
-`PLAYWRIGHT_CLI_SOURCE_VERSION`, disclosing a difference rather than failing on it. The
-verify-feature row reports `policy`, `consent`, `consent-no-recipe`, `consent-recipe-unchecked`,
-`policy-invalid` and `unavailable` (hook pair, module or helper missing; either hook not registered
-on `Bash`). Every row is derived from files on disk; the doctor cannot observe whether the hooks run.
+**`/zensu:doctor`** probes `command -v playwright-cli` (`ZDOC_PLAYWRIGHT=present|absent`) and reads
+`ZDOC_PLAYWRIGHT_VERSION` from the resolved `@playwright/cli` `package.json` — realpath of the
+binary, then at most four parent directories, size-bounded — WITHOUT executing the binary. Only
+when that read fails does it fall back to `zensu_run_bounded env NO_UPDATE_NOTIFIER=1
+playwright-cli --version </dev/null`, keeping the first dotted version number. A version other than
+`PLAYWRIGHT_CLI_SOURCE_VERSION`, or a measured version the report could not read, renders WARN and
+names what was not measured against it; a difference is disclosed, never a failure. The
+verify-feature row runs its availability checks FIRST — hook pair, module and helper present, both
+hooks registered on `Bash` — and reports `unavailable` before it classifies a policy, so a valid
+policy over an unregistered recorder is not reported as ready. It then reports `policy`,
+`policy-invalid` (naming a per-target fault too, not only a top-level one), `consent`,
+`consent-no-recipe` and `consent-recipe-unchecked`. Every row is derived from files on disk; the
+doctor cannot observe whether the hooks run.
 The SessionStart banner's consent line sits BELOW the `hooks.sessionBanner` gate, because it
 announces a prompt rather than a capability the plugin hands itself.
 
@@ -9141,14 +9210,27 @@ announces a prompt rather than a capability the plugin hands itself.
   the denied-command lists in `skills/verify-feature/SKILL.md` and `docs/gates.md` ↔ the transcript
   grader in `evals/verify-feature/assertions/transcript-check.js` (which requires the module rather
   than copying the set) ↔ `tests/structure/test-verify-feature-skill.sh`.
-- `PLAYWRIGHT_CLI_SOURCE_VERSION` ↔ `parseCliArgs` / `CLI_BOOLEAN_OPTIONS` / `CLI_BASENAMES` ↔ the
-  doctor's version rows. A playwright-cli upgrade re-measures the parser and the option set FIRST
-  and bumps the constant second; bumping the number alone asserts a measurement nobody made.
+- `PLAYWRIGHT_CLI_SOURCE_VERSION` ↔ `parseCliArgs` / `CLI_BOOLEAN_OPTIONS` / `CLI_STRING_OPTIONS` /
+  `CLI_BASENAMES` ↔ the golden fixture `tests/structure/fixtures/playwright-cli-argv.v1.json` and
+  its recorder `tests/structure/fixtures/record-playwright-cli-argv.js` ↔ the doctor's version
+  rows. A playwright-cli upgrade re-records the fixture with the recorder FIRST — it runs the new
+  version's own `minimist.js` and refuses when `program.js` no longer carries the boolean set, the
+  minimist call or the `-s`/`-g` folds it asserts — and bumps the constant second; bumping the
+  number alone asserts a measurement nobody made. The recorder also asserts `registry.js`'s
+  `sessionName || process.env.PLAYWRIGHT_CLI_SESSION` precedence and records `pkg.bin`, which the
+  unit suite compares with `CLI_BASENAMES`. The version is hand-copied as prose into
+  `skills/verify-feature/SKILL.md` (pinned by `P6f`), `docs/gates.md` and
+  `evals/verify-feature/README.md`, and as a literal into the unit pin beside the constant; the
+  MSYS boundary suite derives it from the module.
 - `SESSION_PREFIX`, `SESSION_RE`, `RUN_CONFIG_NAME`, `RUN_OUTPUT_DIR_NAME`, `MAX_RUN_ORIGINS` and
   `runConfigShape` are consumed by the helper FROM the module, never re-spelled.
 - `CONSENT_MATCHER` (`'Bash'`) ↔ both registrations in `hooks/hooks.json` ↔
   `consentHookRegistered`/`consentRecorderRegistered` ↔ the doctor's `unavailable` reasons.
-- The prefilter literal in both wrappers ↔ `evaluate`'s first regex (hand copies, see step 1).
+- The prefilter in both wrappers ↔ `commandMarkers` / `normalizedText` in the module (hand copies,
+  see step 1): the continuation join, the stripped character set, case-insensitivity, both
+  markers, and the `PLAYWRIGHT_CLI_SESSION` arm must agree. `CLI_MARKERS` is DERIVED from
+  `CLI_BASENAMES` and `CLI_PACKAGE`; `H17d` pins the two wrapper blocks byte-identical and `H17e`
+  requires every derived marker in them.
 - `AMBIENT_TEXT_RE` / `ambientOverride` / `globalConfigFile` / `GLOBAL_CONFIG_HARMLESS` ↔ the
   CLI's own configuration channels; a new CLI env or config channel lands here first.
 - `scripts/` is now in the Session Control digest unconditionally (see §"Runtime Lineage"), because
@@ -9192,10 +9274,15 @@ release notes.
   swapped in between is followed. It lives under the project, where the session can write.
 - **In policy mode routes are enforced on navigation commands only**; an in-page navigation to an
   undeclared route on an approved origin is seen by no hook.
-- **How the host resolves a hook `ask` under bypass permissions or in a headless run is
-  UNVERIFIED.** The live eval runs in policy mode precisely so it never depends on a prompt.
+- **How the host resolves a hook `ask` under bypass permissions, in auto mode or in a headless run
+  is UNVERIFIED.** The live eval runs in policy mode precisely so it never depends on a prompt.
+- **The gate is textual.** It judges what the command TEXT names. A CLI or session name assembled
+  at run time — from a file, a variable set by an earlier Bash call, a program's output, or an
+  ANSI-C `$'…'` escape — never reaches the markers, so the call it produces is not gated. The single-invocation rule narrows
+  this to what one plain call can spell; it does not close it.
 - **The parser port is exact for one CLI version.** An unknown shape denies, but a CHANGED meaning
-  of an existing flag in a later CLI is not detected; the doctor's version row is the only signal.
+  of an existing flag in a later CLI is not detected; the doctor's version row is the only signal,
+  and it is a WARN row, not a refusal.
 - **Windows is UNVERIFIED end to end.** `CLI_BASENAMES` recognizes the `.cmd`/`.exe`/`.ps1`
   spellings, but no Windows run has driven a real `playwright-cli` through the gate.
 - **No ports.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were not included; each must
