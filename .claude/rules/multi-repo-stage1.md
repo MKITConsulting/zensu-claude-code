@@ -64,12 +64,43 @@ doctor splits on the first TAB and matches the literal `foreign-root`.
 that name holding a DIFFERENT quantity** — this one counts named FILES, the receipt's own
 `claims` counts claim ENTRIES, and an earlier revision of this section named both `claims`,
 which is the conflation the rename removed.
+**The grammar is ANCHORED.** A claim is `<label> <marker>` at the start of the message,
+after an optional bracketed timestamp prefix. The label runs to the first marker, holds at
+most `CLAIM_LABEL_TOKEN_BUDGET` (5) tokens and no `'`, `"` or `|`, and an empty label
+grades as step `(none)`. The two `files:` markers take an em dash, an en dash or a plain
+hyphen — the `[—–-]` class `review-round-scope-v1.js` admits — written as three LITERALS,
+never as a bracket class: a multibyte bracket expression matches single bytes under
+`LC_ALL=C`, where the em dash itself would stop matching (`X33f`). A narrower match gives a
+hyphenated IMPL claim no verdict at all and misreads a hyphenated WIRED claim as a bare
+entry; the census below holds 9 such lines in 4 logs. Accepting them grades MORE lines, so
+re-running the audit over the same log after an in-lineage upgrade can turn a clean receipt
+unclean — the audit doing its job, with no receipt or wire-format change, hence `patch`.
+The `WIRED (verified, no change)` exemption carries no dash and is unchanged. A bare
+`<step> WIRED` still needs ONE step token, because the bare word is a weak signal. The
+budget is measured: across 1,462 local run logs (2026-09-24),
+9,667 claim lines had the contract shape and 296 did not, and 272 of those are multi-word
+labels such as `Step 3`, `FIX ROUND 2` or an unbracketed ISO timestamp — a one-token rule
+dropped them, silently in every log that also held a contract-shaped claim. A line that
+only mentions a marker — a `PRECONDITION DRIFT` note, the `TDD COMPLETE — … 1 WIRED`
+tally, a correction note quoting `'IMPL completed — files:'` — is not a claim, and neither
+is a line opening with one of the audit's own verdict heads (`EDIT LANDED`,
+`EDIT NOT LANDED`, `EDIT LANDING AUDIT`, `PENDING PREDICATE`, `UNVERIFIED`,
+`RECEIPT REFUSED`). That exclusion is what keeps step 5b b) safe: it copies every
+non-`EDIT LANDED` verdict line back into the run log, and an extractor that re-grades a
+copy grows `unverified` every round. Matching a marker anywhere in the line would also let
+a claim's own commentary quoting `WIRED (verified, no change)` exempt the claim, a silent
+green. **Bounds:** short prose of at most five tokens that names a marker unquoted still
+grades as a claim, and a claim written after a verdict sentence or a ` | ` on the same line
+is not recognized (about a dozen lines in the same census; those opening `<step> WIRED`
+still surface as bare-WIRED `UNVERIFIED`). Backticks stay legal in a label because `X19a`
+pins a backtick step id reaching the screened emit, and the census holds no
+backtick-quoted marker. `review-round-scope-v1.js` anchors its `CLAIM` regex at the same
+position; `X29`–`X33` in `tests/structure/test-edit-landing-audit.sh` pin the grammar.
 **`claimed-files=` deliberately counts LESS than the audit's own `CLAIM_COUNT`:** a bare
-`WIRED` line with no `files:` list is a claim to the GRADER (reported `UNVERIFIED`) and
-is NOT one here, because `*"WIRED"*` also matches an ordinary `TDD COMPLETE — … 1 WIRED`
-summary line, and arming a gate on that would wedge a zero-change strict chain whose
-audit can then only ever report it again. An empty file list and a
-`WIRED (verified, no change)` line count as claims in neither.
+`<step> WIRED` entry with no `files:` list is a claim to the GRADER (reported
+`UNVERIFIED`) and is NOT one here: it names no file, and arming the terminus on it would
+wedge a zero-change chain whose audit can then only ever report it again. An empty file
+list and a `WIRED (verified, no change)` line count as claims in neither.
 
 **An absolute claim is judged by where it RESOLVES.** `absolute_claim_verdict`
 canonicalizes the claim's nearest existing ancestor before comparing it with the audited
