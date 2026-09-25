@@ -23,7 +23,11 @@
 #     exact argument spelling). A behavioral probe needs the full pending-review
 #     adoption fixture that `test-deferred-review-claim.sh` owns.
 #   - The writer's pre-rename symlink re-check is TOCTOU defense against a race no
-#     deterministic test can win; T9 bites the first guard, not that one.
+#     deterministic test can win; T9 bites the first guard, not that one. The two
+#     other race-only branches, the `-L` refusal of the temp leaf and both halves of the
+#     post-rename post-condition, are driven by PATH shims for `mktemp` and `mv` that
+#     stage the swap at the point the race would strike (T9g, T9h, T9i); what a shim
+#     cannot show is the race itself.
 set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -388,6 +392,129 @@ DIR_TMP="$(find "$(dirname "$DIR_MARKER")" -maxdepth 1 -name '*.tmp.*' 2>/dev/nu
   && check "T9e a marker path that is a directory is refused before the rename, leaving no temp" PASS \
   || check "T9e non-regular marker (rc=$DIR_RC tmp=$DIR_TMP err='${DIR_ERR:0:70}')" FAIL
 rm -rf "$DIR_PROJ"
+
+# T9g/T9h the two race-only writer branches, staged through PATH shims: `mktemp`
+# plants a symlink at the temp leaf it names (the `-L` refusal before the redirect),
+# `mv` swaps a directory in at the marker path just before the rename (the post-rename
+# regular-file post-condition). Each shim acts only on the marker's own temp template
+# or destination and defers to the real binary otherwise.
+SHIM_PROJ="$(mktemp -d)"
+SHIM_SID="tddmode-shim-$$"
+(
+  export CLAUDE_PROJECT_DIR="$SHIM_PROJ"
+  # shellcheck disable=SC1091
+  source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$SHIM_SID"
+) >/dev/null 2>&1
+SHIM_KEY="$(node "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" session-key "$SHIM_SID")"
+SHIM_MARKER="$(CLAUDE_PROJECT_DIR="$SHIM_PROJ" bash -c 'source "$0"; zensu_tdd_mode_marker_path "$1" "$2"' \
+  "$CONFIG_LIB" "$SHIM_PROJ" "$SHIM_KEY")"
+SHIM_DECOY="$SHIM_PROJ/decoy.txt"; printf '%s\n' decoy > "$SHIM_DECOY"
+SHIM_MKTEMP_BIN="$SHIM_PROJ/shim-mktemp"; SHIM_MV_BIN="$SHIM_PROJ/shim-mv"
+mkdir -p "$SHIM_MKTEMP_BIN" "$SHIM_MV_BIN"
+REAL_MKTEMP="$(command -v mktemp)"; REAL_MV="$(command -v mv)"
+cat > "$SHIM_MKTEMP_BIN/mktemp" <<EOF
+#!/bin/sh
+case "\${1:-}" in
+  (*.json.tmp.XXXXXX)
+    t="\$("$REAL_MKTEMP" "\$1")" || exit 1
+    rm -f "\$t" && ln -s "$SHIM_DECOY" "\$t" || exit 1
+    printf '%s\n' "\$t"
+    exit 0
+    ;;
+esac
+exec "$REAL_MKTEMP" "\$@"
+EOF
+cat > "$SHIM_MV_BIN/mv" <<EOF
+#!/bin/sh
+if [ "\${1:-}" = "-f" ]; then
+  case "\${3:-}" in
+    (*/tdd-mode-*.json|*/delivery-route-*.json) mkdir -p "\$3" ;;
+  esac
+fi
+exec "$REAL_MV" "\$@"
+EOF
+chmod +x "$SHIM_MKTEMP_BIN/mktemp" "$SHIM_MV_BIN/mv"
+shim_write() {  # $1 shim dir, $2 verb, $3 stderr file -> the helper's stdout
+  CLAUDE_CODE_SESSION_ID="$SHIM_SID" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    CLAUDE_PLUGIN_DATA="$SHIM_PROJ/.session-control-test/plugin-data" CLAUDE_PROJECT_DIR="$SHIM_PROJ" \
+    ZENSU_CONFIG="$CFG_DEFAULT" PATH="$1:$PATH" bash "$HELPER" "$2" 2>"$3"
+}
+if ln -s "$SHIM_DECOY" "$SHIM_PROJ/shim-probe" 2>/dev/null && [ -L "$SHIM_PROJ/shim-probe" ]; then
+  rm -f "$SHIM_PROJ/shim-probe"
+  OUT_T9G="$(shim_write "$SHIM_MKTEMP_BIN" --strict "$SHIM_PROJ/t9g.err")"; RC_T9G=$?
+  T9G_TMP="$(find "$(dirname "$SHIM_MARKER")" -maxdepth 1 -name '*.tmp.*' 2>/dev/null | grep -c . || true)"
+  { [ "$RC_T9G" -eq 2 ] && [ -z "$OUT_T9G" ] && grep -qF 'refusing to write through a symlinked temp leaf' "$SHIM_PROJ/t9g.err" \
+    && [ "$(cat "$SHIM_DECOY")" = "decoy" ] && [ ! -e "$SHIM_MARKER" ] && [ "$T9G_TMP" = "0" ]; } \
+    && check "T9g a symlink planted at the temp leaf is refused before the write; the link target is untouched and nothing is left behind" PASS \
+    || check "T9g temp-leaf refusal (rc=$RC_T9G out='$OUT_T9G' tmp=$T9G_TMP err='$(head -c 160 "$SHIM_PROJ/t9g.err" 2>/dev/null)')" FAIL
+else
+  SKIP_SYMLINK=$((SKIP_SYMLINK+1))
+  check "T9g temp-leaf symlink refusal — this host cannot create a symlink" SKIP
+fi
+OUT_T9H="$(shim_write "$SHIM_MV_BIN" --vanilla "$SHIM_PROJ/t9h.err")"; RC_T9H=$?
+{ [ "$RC_T9H" -eq 2 ] && [ -z "$OUT_T9H" ] && grep -qF 'did not land as a regular file' "$SHIM_PROJ/t9h.err" \
+  && [ -d "$SHIM_MARKER" ] \
+  && [ "$(bash -c 'source "$0"; zensu_tdd_mode_marker_state "$1" "$2"' "$CONFIG_LIB" "$SHIM_PROJ" "$SHIM_KEY")" = "none" ]; } \
+  && check "T9h a directory swapped in just before the rename fails the post-condition; no success line is printed" PASS \
+  || check "T9h post-rename post-condition (rc=$RC_T9H out='$OUT_T9H' err='$(head -c 160 "$SHIM_PROJ/t9h.err" 2>/dev/null)')" FAIL
+# T9i the `-L` half of the same post-condition: the rename lands and a symlink to a
+# regular file is swapped in at the marker path right after it, so `[ -f ]` alone
+# would pass and only the `-L` test refuses.
+SHIM_MVLINK_BIN="$SHIM_PROJ/shim-mvlink"; mkdir -p "$SHIM_MVLINK_BIN"
+cat > "$SHIM_MVLINK_BIN/mv" <<EOF
+#!/bin/sh
+"$REAL_MV" "\$@" || exit \$?
+if [ "\${1:-}" = "-f" ]; then
+  case "\${3:-}" in
+    (*/tdd-mode-*.json|*/delivery-route-*.json) rm -f "\$3" && ln -s "$SHIM_DECOY" "\$3" ;;
+  esac
+fi
+exit 0
+EOF
+chmod +x "$SHIM_MVLINK_BIN/mv"
+rm -rf "$SHIM_MARKER"
+if ln -s "$SHIM_DECOY" "$SHIM_PROJ/shim-probe" 2>/dev/null && [ -L "$SHIM_PROJ/shim-probe" ]; then
+  rm -f "$SHIM_PROJ/shim-probe"
+  OUT_T9I="$(shim_write "$SHIM_MVLINK_BIN" --strict "$SHIM_PROJ/t9i.err")"; RC_T9I=$?
+  { [ "$RC_T9I" -eq 2 ] && [ -z "$OUT_T9I" ] && grep -qF 'did not land as a regular file' "$SHIM_PROJ/t9i.err" \
+    && [ -L "$SHIM_MARKER" ] && [ "$(cat "$SHIM_DECOY")" = "decoy" ] \
+    && [ "$(bash -c 'source "$0"; zensu_tdd_mode_marker_state "$1" "$2"' "$CONFIG_LIB" "$SHIM_PROJ" "$SHIM_KEY")" = "none" ]; } \
+    && check "T9i a symlink swapped in just after the rename fails the post-condition's -L half; the link target is untouched" PASS \
+    || check "T9i post-rename -L post-condition (rc=$RC_T9I out='$OUT_T9I' err='$(head -c 160 "$SHIM_PROJ/t9i.err" 2>/dev/null)')" FAIL
+else
+  SKIP_SYMLINK=$((SKIP_SYMLINK+1))
+  check "T9i post-rename symlink swap — this host cannot create a symlink" SKIP
+fi
+rm -rf "$SHIM_MARKER"
+# T9j a signal during the write ENDS the helper: the cleanup trap is EXIT-only and the
+# signal traps exit, so the write cannot resume after the handler. The `mv` shim sends
+# its parent, the helper, the signal named in T9J_SIGNAL and then performs the rename;
+# each of the three trapped signals must end the helper with its own status.
+SHIM_MVINT_BIN="$SHIM_PROJ/shim-mvint"; mkdir -p "$SHIM_MVINT_BIN"
+cat > "$SHIM_MVINT_BIN/mv" <<EOF
+#!/bin/sh
+if [ "\${1:-}" = "-f" ]; then
+  case "\${3:-}" in
+    (*/tdd-mode-*.json|*/delivery-route-*.json) kill -"\${T9J_SIGNAL:-INT}" "\$PPID" ;;
+  esac
+fi
+exec "$REAL_MV" "\$@"
+EOF
+chmod +x "$SHIM_MVINT_BIN/mv"
+T9J_BAD=""
+for t9j_pair in INT:130 TERM:143 HUP:129; do
+  rm -rf "$SHIM_MARKER"
+  export T9J_SIGNAL="${t9j_pair%%:*}"
+  OUT_T9J="$(shim_write "$SHIM_MVINT_BIN" --vanilla "$SHIM_PROJ/t9j.err")"; RC_T9J=$?
+  T9J_TMP="$(find "$(dirname "$SHIM_MARKER")" -maxdepth 1 -name '*.tmp.*' 2>/dev/null | grep -c . || true)"
+  { [ "$RC_T9J" -eq "${t9j_pair#*:}" ] && [ -z "$OUT_T9J" ] && [ "$T9J_TMP" = "0" ]; } \
+    || T9J_BAD="$T9J_BAD $T9J_SIGNAL(rc=$RC_T9J out='$OUT_T9J' tmp=$T9J_TMP)"
+done
+unset T9J_SIGNAL
+[ -z "$T9J_BAD" ] \
+  && check "T9j an INT, TERM or HUP during the write ends the helper with 130, 143 or 129, prints no success line and leaves no temp" PASS \
+  || check "T9j signal handling:$T9J_BAD" FAIL
+rm -rf "$SHIM_PROJ"
 
 # T9f the accepted gap, pinned rather than left implicit: while no chain is armed the
 # PreToolUse edit gate passes an Edit of the marker through. CLAUDE.md documents this

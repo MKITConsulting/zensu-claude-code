@@ -44,12 +44,15 @@ case "$ZEN_VERB" in
 esac
 
 # TWIN PROLOGUE — the block from here to the end of the two resolver guards is
-# duplicated, near-verbatim, in hooks/lib/zensu-tdd-mode.sh (only the script name in
-# the messages and the skill named in the CLAUDE_PLUGIN_DATA hint differ). It is NOT
-# extracted into zensu-session.sh: the plugin-root self-validation above has to
-# precede this `source` to mean anything, so the two halves cannot move together
-# without restructuring both helpers. Change the Session Control binding contract and
-# you change it TWICE — the twin carries the same reference back to this file.
+# duplicated, near-verbatim, in hooks/lib/zensu-tdd-mode.sh and
+# hooks/lib/zensu-delivery-route.sh (only the script name in the messages, the skill
+# named in the CLAUDE_PLUGIN_DATA hint, and the two `source` lines for
+# zensu-bounded-run.sh and zensu-zen-shared.sh that this copy alone carries differ).
+# It is NOT extracted into
+# zensu-session.sh: the plugin-root self-validation above has to precede this
+# `source` to mean anything, so the copies cannot move together without
+# restructuring all three helpers. Change the Session Control binding contract and
+# you change it THREE times — each twin carries the same reference back to the others.
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 # THE SAME WATCHDOG THE IN-BAND TWIN USES. This script is what the hook NAMES
 # when the in-band escape is unavailable, and the conditions that make that path

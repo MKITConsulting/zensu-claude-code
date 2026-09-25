@@ -2,6 +2,7 @@
   "hooks": {
     "autoTdd": true,
     "tddImplementation": false,
+    "defaultDeliveryRoute": "ask",
     "chainEnforcer": true,
     "autopilotEnforcer": true,
     "autoFix": true,

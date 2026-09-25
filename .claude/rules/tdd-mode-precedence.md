@@ -6,6 +6,7 @@ paths:
   - "skills/tdd-mode/**"
   - "tests/structure/test-tdd-mode-toggle.sh"
   - "tests/structure/test-tdd-vanilla-mode.sh"
+  - "hooks/lib/zensu-delivery-route.sh"
 ---
 
 # TDD Mode Precedence (`hooks/lib/zensu-config.sh` + `zensu-log.sh --tdd-begin`)
@@ -77,11 +78,15 @@ Moving together with the ladder: `zensu_tdd_mode_marker_path` / `zensu_tdd_mode_
 them rather than re-spelling, unlike zen-mode, whose template is hand-copied into its
 reader hook). `zensu_tdd_mode_marker_state` owns the marker VOCABULARY —
 `strict|vanilla|released|none`, four values, where `released` is a present `{"mode":"auto"}`
-and `none` is absence-or-unreadable — and it is the only parse; `zensu_tdd_mode_override` is a
+and `none` is absence-or-unreadable — and it is the only owner of that vocabulary, while the
+PARSE is `_zensu_marker_one_line_value`, ONE bounded reader shared with the delivery-route
+marker (`.claude/rules/session-delivery-route.md`); `zensu_tdd_mode_override` is a
 total reduction over it that collapses `released|none` to `auto`, so its callers keep a
 three-value contract and the two cannot drift. `zensu_tdd_mode_state_linked` is the symlink
 guard for the `.zensu` / state-dir / marker triple plus an optional extra leaf, and the WRITER
-now calls the reader's copy rather than spelling its own; its pre-rename re-check is
+now calls the reader's copy rather than spelling its own. It guards BOTH marker pairs under a
+name that predates the second one (reader `zensu_delivery_route_marker_state`, writer
+`zensu-delivery-route.sh`); its pre-rename re-check is
 deliberately a SECOND call, because that duplication is the TOCTOU defense and collapsing the
 two would remove it. A new marker value lands in the reader, in the reduction, and in
 `--status`'s label set. Then the `TDD-MODE:` producer (`skills/pr-fix-findings/SKILL.md`) and its parser

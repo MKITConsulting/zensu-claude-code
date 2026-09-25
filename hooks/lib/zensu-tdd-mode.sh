@@ -75,12 +75,15 @@ case "$TDD_MODE_VERB" in
 esac
 
 # TWIN PROLOGUE — the block from here to the end of the two resolver guards is
-# duplicated, near-verbatim, in hooks/lib/zensu-zen-mode.sh (only the script name in
-# the messages and the skill named in the CLAUDE_PLUGIN_DATA hint differ). It is NOT
-# extracted into zensu-session.sh: the plugin-root self-validation above has to
-# precede this `source` to mean anything, so the two halves cannot move together
-# without restructuring both helpers. Change the Session Control binding contract and
-# you change it TWICE — the twin carries the same reference back to this file.
+# duplicated, near-verbatim, in hooks/lib/zensu-zen-mode.sh and
+# hooks/lib/zensu-delivery-route.sh (only the script name in the messages, the skill
+# named in the CLAUDE_PLUGIN_DATA hint, and the two `source` lines for
+# zensu-bounded-run.sh and zensu-zen-shared.sh that the zen-mode copy alone carries
+# differ). It is NOT extracted into
+# zensu-session.sh: the plugin-root self-validation above has to precede this
+# `source` to mean anything, so the copies cannot move together without
+# restructuring all three helpers. Change the Session Control binding contract and
+# you change it THREE times — each twin carries the same reference back to the others.
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 if ! zensu_bind_model_session; then
   echo "zensu-tdd-mode.sh: rendered Session Control binding unavailable" >&2
@@ -162,7 +165,22 @@ tdd_mode_write_marker() {
     echo "zensu-tdd-mode.sh: cannot create a temporary file beside $TDD_MODE_MARKER" >&2
     exit 2
   }
-  trap 'rm -f "$tmp" 2>/dev/null' EXIT INT TERM HUP
+  # EXIT alone cleans up; a signal only EXITS, and the exit runs that cleanup. A
+  # cleanup handler on the signals themselves returned into this function, which then
+  # resumed the write and could re-create the temp leaf through a plain redirect,
+  # without O_EXCL.
+  trap 'rm -f "$tmp" 2>/dev/null' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  trap 'exit 129' HUP
+  # The mktemp name is unguessable but observable by readdir, so a same-UID co-tenant
+  # can swap a link in between mktemp and the redirect below. This `-L` test narrows
+  # that window; it does not close it. The closing form, an O_NOFOLLOW|O_EXCL open,
+  # costs a node spawn on every write and is deliberately not taken.
+  if [ -L "$tmp" ]; then
+    echo "zensu-tdd-mode.sh: refusing to write through a symlinked temp leaf $tmp — remove it by hand" >&2
+    exit 2
+  fi
   printf '{"mode":"%s"}\n' "$1" > "$tmp" || {
     echo "zensu-tdd-mode.sh: cannot write $tmp" >&2
     exit 2
@@ -189,6 +207,14 @@ tdd_mode_write_marker() {
     echo "zensu-tdd-mode.sh: cannot write $TDD_MODE_MARKER" >&2
     exit 2
   }
+  # Post-condition, because the non-regular check above is a check-then-use: a
+  # DIRECTORY swapped in after it makes `mv -f` move the temp INTO that directory and
+  # return 0, which would print the success line with nothing recorded at the marker
+  # path. Refuse rather than claim.
+  if [ ! -f "$TDD_MODE_MARKER" ] || [ -L "$TDD_MODE_MARKER" ]; then
+    echo "zensu-tdd-mode.sh: $TDD_MODE_MARKER did not land as a regular file — something was swapped in at that path during the write; remove it by hand" >&2
+    exit 2
+  fi
   trap - EXIT INT TERM HUP
 }
 

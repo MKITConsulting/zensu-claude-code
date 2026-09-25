@@ -222,7 +222,8 @@ Then `zensu_impl_stop_nudge_after` in `zensu-config.sh` against `IMPL_STOP_NUDGE
 / `IMPL_STOP_NUDGE_MAX` in `zensu-doctor-report.js`, which are a hand-copy of its default and
 bounds; and the `ZDOC_IMPL_STOP_NUDGE_AFTER` export in `zensu-doctor.sh` against
 `implStopThreshold` — that file sources `zensu-config.sh` ONCE for every getter it resolves
-(four today: the pending-review TTL, this threshold and the two owner-activity windows, with `C21c`
+(five today: the pending-review TTL, this threshold, the two owner-activity windows and the
+delivery-route field, with `C21c`
 deriving that population from the resolve blocks and requiring each to be a disjunct of the
 single-source guard), and the count
 is pinned by `C33` because it shipped as two, one inside each resolve block, while a
@@ -402,9 +403,10 @@ since the branch point — never against the working-tree diff of the round in f
 - **No `tests/profiles/ci-shard-weights.v1.json` entry**, so the suite is costed at
   `defaultSeconds`. That file requires a real CI figure and its own note sanctions the
   omission; add it from the first green ubuntu-latest `--ci` run rather than estimating.
-- **The threshold is resolved BEFORE the session bind** and is the ONE of the four resolved
-  windows never re-resolved against the record root — the pending-review TTL and both
-  owner-activity windows are — so it inherits the Config-block root gap the previous
+- **The threshold is resolved BEFORE the session bind** and is the ONE of the five resolved
+  windows that never reads the record root — the pending-review TTL and both owner-activity
+  windows are re-resolved against it, and the delivery-route field is resolved from it
+  directly after the bind — so it inherits the Config-block root gap the previous
   section names. **The asymmetry is real and was briefly written out of this file in error, so
   it is worth stating with its evidence:** `zensu-doctor.sh` remembers `ZDOC_TTL_PINNED` before
   the bind and, when the record root and `CLAUDE_PROJECT_DIR` differ, re-resolves the TTL from

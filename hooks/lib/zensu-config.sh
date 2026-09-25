@@ -15,16 +15,25 @@
 # getters apply the same hardcoded defaults they always have, so a no-config
 # install behaves exactly as before.
 #
-# ONE exception to "this file only reads config": the five TDD-mode helpers at the
-# bottom also read the session-scoped mode marker under `<project>/.zensu/state/`.
-# Two of them TOUCH THE FILESYSTEM — `zensu_tdd_mode_state_linked` (the `-L` probes)
-# and `zensu_tdd_mode_marker_state` (the bounded read) — while
-# `zensu_tdd_mode_marker_path` only spells the path and `zensu_tdd_mode_override` /
-# `zensu_tdd_strict_effective` only reduce what the reader returned. An auditor asking
-# "what in this file opens something" must get the first two names, not the others;
-# node-free and outside the merge machinery above. It lives here so the writer
-# (`hooks/lib/zensu-tdd-mode.sh`) and every reader share ONE path template and ONE
-# parse; zen-mode hand-copies its template into its reader hook, and that is the
+# ONE exception to "this file only reads config": the session-marker helpers that
+# follow `zensu_tdd_strict_enabled` also read TWO session-scoped markers under
+# `<project>/.zensu/state/` — the tdd-mode marker and the delivery-route marker. Every
+# config getter spawns node through `_zensu_config_node`; the getters after the marker
+# section do too. Beyond those config reads, an auditor asking "what in
+# the marker section opens something" must get exactly these names and no others:
+# `zensu_tdd_mode_state_linked` (the `-L` probes, shared by both marker pairs) and
+# `_zensu_marker_one_line_value` (the ONE bounded read behind both marker readers).
+# `zensu_default_delivery_route` is one more config getter. `zensu_tdd_mode_marker_path`
+# / `zensu_delivery_route_marker_path` only spell a path, `zensu_tdd_mode_marker_state`
+# / `zensu_delivery_route_marker_state` only map what the shared reader returned onto
+# their own vocabularies, and `zensu_tdd_mode_override` / `zensu_tdd_strict_effective` /
+# `zensu_delivery_route_resolve` / `zensu_delivery_route_field` /
+# `zensu_delivery_route_status_line` only reduce those answers. The marker reads are
+# node-free and outside the merge machinery above. Rendering a value INTO a hook
+# directive is not a read of anything and lives in `hooks/lib/zensu-directive.sh`. The
+# marker section lives here so each writer (`hooks/lib/zensu-tdd-mode.sh`,
+# `hooks/lib/zensu-delivery-route.sh`) and every reader share ONE path template and
+# ONE parse; zen-mode hand-copies its template into its reader hook, and that is the
 # drift this placement avoids.
 #
 # _ZENSU_CFG_JS holds the shared reader/merge/select JS. It uses only
@@ -152,13 +161,18 @@ zensu_tdd_mode_marker_path() {
   printf '%s\n' "$project_dir/.zensu/state/tdd-mode-$session_key.json"
 }
 
-# The symlink refusal, spelled ONCE. Reader and writer both guard the same three
-# components — `.zensu`, the state directory, the marker leaf — and the writer
-# additionally guards its `mktemp` temp leaf, which is what the optional third
-# argument is for. It lives here beside the path template for the same reason the
-# template does: three hand-synced copies of the component list would diverge
-# silently, and the tests that would catch a divergence (T9/T9b/T9d) are exactly
-# the ones that skip themselves on a host without symlink support.
+# The symlink refusal, spelled ONCE, for BOTH session markers this file owns: the
+# tdd-mode pair (reader `zensu_tdd_mode_marker_state`, writer zensu-tdd-mode.sh) and
+# the delivery-route pair (reader `zensu_delivery_route_marker_state`, writer
+# zensu-delivery-route.sh). The name predates the second pair and is kept because
+# every caller spells it — read it as "marker state linked". Each reader and each
+# writer guards the same three components — `.zensu`, the state directory, the
+# marker leaf — and each writer additionally guards its `mktemp` temp leaf, which is
+# what the optional third argument is for. It lives here beside the path templates
+# for the same reason they do: hand-synced copies of the component list would
+# diverge silently, and the tests that would catch a divergence (T9/T9b/T9d in
+# test-tdd-mode-toggle.sh, R8/R8b/R8e in test-delivery-route.sh) are exactly the
+# ones that skip themselves on a host without symlink support.
 #
 # The writer calls this TWICE on purpose — once before the write and again
 # immediately before the rename. That duplication is the TOCTOU defense and must
@@ -172,6 +186,67 @@ zensu_tdd_mode_state_linked() {
   return 1
 }
 
+# The ONE bounded reader behind both session markers this file owns — the tdd-mode
+# marker (`{"mode":"<value>"}`) and the delivery-route marker (`{"route":"<value>"}`).
+# It echoes the lowercase VALUE when the file holds exactly that one line (plus
+# trailing whitespace) and nothing else, and echoes nothing otherwise; the callers
+# map the value onto their own vocabulary and treat an empty answer as `none`.
+#
+# Byte semantics, pinned for the whole function. `${#body}` is CHARACTER-counted in a
+# multibyte locale and `[[:space:]]` is locale-defined, so without this a marker
+# padded with multibyte spaces measures short, passes the 512 ceiling, and has its
+# tail swallowed by the whitespace class — a >513-byte file answered as a value with
+# the remainder unexamined. `local` restores the caller's locale on return.
+#
+# The marker a writer emits is exactly one line. Match the FIRST line, as a whole,
+# and only when the file holds nothing after it. Both halves are load-bearing. A
+# grep over the FILE would let a body contradict its own key —
+# `{"mode":"vanilla"} "mode":"strict"` on one line, or a second line spelling the
+# other value — because `^`/`$` anchor a LINE, not the file. Anything this rejects is
+# by definition not a marker this plugin wrote. The remainder is DRAINED, not sampled
+# one line deep: reading only line 2 would let `{"mode":"strict"}` + a blank line +
+# `{"mode":"vanilla"}` through unexamined. Trailing whitespace of any shape is
+# tolerated; any other content is not.
+#
+# Bound the bytes that are actually CONSUMED, in ONE open. A writer's own output is
+# at most 21 bytes, so a small ceiling refuses nothing legitimate. This used to be a
+# `wc -c` pass followed by a separate `$(cat)` drain — two opens, so a marker that
+# GREW between them passed the ceiling and was then slurped unbounded into a shell
+# variable, on a path that runs on every prompt. `head -c` caps the read itself, so
+# the memory bound holds no matter what the file does between calls; the length
+# check below only decides the verdict. The `X` sentinel is load-bearing: `$(...)`
+# strips trailing newlines, so without it a 1000-byte file whose first 513 bytes end
+# in newlines would measure short, pass the ceiling, and have its tail go unexamined.
+_zensu_marker_one_line_value() {
+  local LC_ALL=C LC_CTYPE=C
+  local marker="${1:-}" key="${2:-}"
+  [ -n "$marker" ] && [ -n "$key" ] || return 0
+  [ -f "$marker" ] || return 0
+  local body="" first="" rest=""
+  # A NUL byte is translated to \001 inside the same open, before the bytes reach the
+  # substitution. Bash drops NULs from `$(...)` output, so an untranslated NUL made
+  # `${#body}` undercount the 513-byte read: a file padded with NULs passed the ceiling
+  # with its tail unexamined, and `{"route":"tdd"}<NUL>` read as `tdd`. Translated, every
+  # byte counts toward the ceiling and a \001 fails the whole-line match. `tr` gets
+  # `LC_ALL=C` of its own for the reason the `sed` below does, and because BSD `tr`
+  # refuses an invalid byte sequence in a UTF-8 locale. The redirect failure (an
+  # unreadable marker) is reported by the shell running the GROUP, so the inner
+  # `2>/dev/null` covers it; the outer one covers any warning the substitution itself
+  # prints. Without them a mode-0 marker would print on every prompt while the reader
+  # silently answers nothing anyway.
+  { body="$( { head -c 513 < "$marker" | LC_ALL=C tr '\000' '\001'; printf 'X'; } 2>/dev/null )"; } 2>/dev/null
+  body="${body%X}"
+  [ "${#body}" -le 512 ] || return 0
+  first="${body%%$'\n'*}"
+  if [ "$first" = "$body" ]; then rest=""; else rest="${body#*$'\n'}"; fi
+  case "$rest" in (*[![:space:]]*) return 0 ;; esac
+  # `LC_ALL=C` is repeated on the child, not inherited from the `local` above: a shell
+  # local is not exported, so on a host that never exported LC_ALL the child would
+  # classify `[[:space:]]` in its own locale. The in-shell halves (the length check
+  # and the remainder scan) do get C semantics from the local; the child would not.
+  printf '%s\n' "$first" | LC_ALL=C sed -nE 's/^[[:space:]]*\{[[:space:]]*"'"$key"'"[[:space:]]*:[[:space:]]*"([a-z]+)"[[:space:]]*\}[[:space:]]*$/\1/p'
+}
+
 # The four-state marker reader `zensu_tdd_mode_override` is built on. It answers
 # `strict`, `vanilla`, `released` (the marker is PRESENT and holds `{"mode":"auto"}`),
 # or `none` (absent, symlinked, unreadable, oversized, or not a marker this plugin
@@ -180,12 +255,6 @@ zensu_tdd_mode_state_linked() {
 # from a choice that was never made. `zensu_tdd_mode_override` collapses both back to
 # `auto`, so every mode-resolving caller keeps its three-value contract unchanged.
 zensu_tdd_mode_marker_state() {
-  # Byte semantics, pinned for the whole function. `${#body}` is CHARACTER-counted in a
-  # multibyte locale and `[[:space:]]` is locale-defined, so without this a marker
-  # padded with multibyte spaces measures short, passes the 512 ceiling, and has its
-  # tail swallowed by the whitespace class — a >513-byte file answered as a mode with
-  # the remainder unexamined. `local` restores the caller's locale on return.
-  local LC_ALL=C LC_CTYPE=C
   local project_dir="${1:-}" session_key="${2:-}" marker
   [ -n "$project_dir" ] && [ -n "$session_key" ] || { echo "none"; return 0; }
   marker="$(zensu_tdd_mode_marker_path "$project_dir" "$session_key")" || { echo "none"; return 0; }
@@ -193,56 +262,12 @@ zensu_tdd_mode_marker_state() {
     echo "none"
     return 0
   fi
-  # The marker the writer emits is exactly one line: `{"mode":"<value>"}`. Match the
-  # FIRST line, as a whole, and only when the file holds nothing after it.
-  #
-  # Both halves are load-bearing. A grep over the FILE would let a body contradict
-  # its own key — `{"mode":"vanilla"} "mode":"strict"` on one line, or a second line
-  # spelling the other mode — because `grep`'s `^`/`$` anchor a LINE, not the file.
-  # Anything this rejects is by definition not a marker this plugin wrote, and falls
-  # through to `auto`. The remainder is DRAINED, not sampled one line deep: reading
-  # only line 2 would let `{"mode":"strict"}` + a blank line + `{"mode":"vanilla"}`
-  # through unexamined. Trailing whitespace of any shape is tolerated; any other
-  # content is not.
-  # Bound the bytes that are actually CONSUMED, in ONE open. The writer's own
-  # output is at most 19 bytes, so a small ceiling refuses nothing legitimate.
-  # This used to be a `wc -c` pass followed by a separate `$(cat)` drain — two
-  # opens, so a marker that GREW between them passed the ceiling and was then
-  # slurped unbounded into a shell variable, on a path that runs on every prompt.
-  # `head -c` caps the read itself, so the memory bound holds no matter what the
-  # file does between calls; the length check below only decides the verdict.
-  #
-  # The `X` sentinel is load-bearing: `$(...)` strips trailing newlines, so
-  # without it a 1000-byte file whose first 513 bytes end in newlines would
-  # measure short, pass the ceiling, and have its tail go unexamined.
-  local body="" first="" rest=""
-  # Two different shells can complain here, and they need two different suppressions.
-  # The redirect failure (an unreadable marker) is reported by the shell running the
-  # GROUP, so the inner `2>/dev/null` covers it. The "ignored null byte in input"
-  # warning on bash >= 4.4 is emitted by the shell PERFORMING the substitution, which
-  # is outside that group — hence the outer redirect. Without either, a session with a
-  # mode-0 or NUL-bearing marker would print on every prompt while the reader silently
-  # answers `none` anyway. (macOS bash 3.2 drops NULs without a warning, so the second
-  # case is invisible on this repo's usual host.)
-  { body="$( { head -c 513 < "$marker"; printf 'X'; } 2>/dev/null )"; } 2>/dev/null
-  body="${body%X}"
-  [ "${#body}" -le 512 ] || { echo "none"; return 0; }
-  first="${body%%$'\n'*}"
-  if [ "$first" = "$body" ]; then rest=""; else rest="${body#*$'\n'}"; fi
-  case "$rest" in *[![:space:]]*) echo "none"; return 0 ;; esac
-  # `LC_ALL=C` is repeated on each grep, not inherited from the `local` above: a shell
-  # local is not exported, so on a host that never exported LC_ALL these children would
-  # classify `[[:space:]]` in their own locale. The in-shell halves (the length check
-  # and the remainder scan) do get C semantics from the local; these three would not.
-  if printf '%s\n' "$first" | LC_ALL=C grep -Eq '^[[:space:]]*\{[[:space:]]*"mode"[[:space:]]*:[[:space:]]*"strict"[[:space:]]*\}[[:space:]]*$'; then
-    echo "strict"
-  elif printf '%s\n' "$first" | LC_ALL=C grep -Eq '^[[:space:]]*\{[[:space:]]*"mode"[[:space:]]*:[[:space:]]*"vanilla"[[:space:]]*\}[[:space:]]*$'; then
-    echo "vanilla"
-  elif printf '%s\n' "$first" | LC_ALL=C grep -Eq '^[[:space:]]*\{[[:space:]]*"mode"[[:space:]]*:[[:space:]]*"auto"[[:space:]]*\}[[:space:]]*$'; then
-    echo "released"
-  else
-    echo "none"
-  fi
+  case "$(_zensu_marker_one_line_value "$marker" mode)" in
+    (strict)  echo "strict" ;;
+    (vanilla) echo "vanilla" ;;
+    (auto)    echo "released" ;;
+    (*)       echo "none" ;;
+  esac
 }
 
 zensu_tdd_mode_override() {
@@ -264,6 +289,119 @@ zensu_tdd_strict_effective() {
     vanilla) return 1 ;;
   esac
   zensu_tdd_strict_enabled
+}
+
+# Session-scoped DELIVERY ROUTE — the answer to the question both ask-hooks
+# (plan-approved-delegate.sh, user-prompt-tdd-reminder.sh) would otherwise put to the
+# user on every approval and every code request. hooks/lib/zensu-delivery-route.sh
+# writes the marker for /zensu:delivery-route, and the model writes it right after the
+# user answers the question. The vocabulary is `tdd` | `direct` only: /zensu:autopilot
+# and /zensu:pilot push branches, open pull requests or mutate tracked feature state,
+# so they stay per-plan choices that neither a marker nor a config key can pre-select.
+# The path template lives HERE and the writer sources it, for the reason the tdd-mode
+# template gives above. The symlink guard is shared with the tdd-mode marker: the
+# component list is identical, so a second copy would only be a second thing to drift.
+zensu_delivery_route_marker_path() {
+  local project_dir="${1:-}" session_key="${2:-}"
+  [ -n "$project_dir" ] && [ -n "$session_key" ] || return 1
+  printf '%s\n' "$project_dir/.zensu/state/delivery-route-$session_key.json"
+}
+
+# `tdd` / `direct` / `released` (a present `{"route":"auto"}`) / `none` (absent,
+# symlinked, unreadable, oversized, or not a marker this plugin wrote).
+zensu_delivery_route_marker_state() {
+  local project_dir="${1:-}" session_key="${2:-}" marker
+  [ -n "$project_dir" ] && [ -n "$session_key" ] || { echo "none"; return 0; }
+  marker="$(zensu_delivery_route_marker_path "$project_dir" "$session_key")" || { echo "none"; return 0; }
+  if zensu_tdd_mode_state_linked "$project_dir" "$marker" || [ ! -f "$marker" ]; then
+    echo "none"
+    return 0
+  fi
+  case "$(_zensu_marker_one_line_value "$marker" route)" in
+    (tdd)    echo "tdd" ;;
+    (direct) echo "direct" ;;
+    (auto)   echo "released" ;;
+    (*)      echo "none" ;;
+  esac
+}
+
+# hooks.defaultDeliveryRoute, read PERMISSIVELY: `tdd` or `direct` verbatim, and `ask`
+# for everything else — absent, the explicit `ask`, an empty string, a quoted or
+# capitalized spelling, a boolean, or a host without node. An unknown value never
+# selects a route; it only keeps the question. With a PROJECT_DIR argument the project
+# overlay is read from that root, and an empty argument means no root and answers
+# `ask`; without an argument it is read from the ambient CLAUDE_PROJECT_DIR, like every
+# getter above.
+zensu_default_delivery_route() {
+  command -v node >/dev/null 2>&1 || { echo "ask"; return 0; }
+  local root val
+  if [ "$#" -gt 0 ]; then
+    root="$1"
+    [ -n "$root" ] || { echo "ask"; return 0; }
+  else
+    root="${CLAUDE_PROJECT_DIR:-}"
+  fi
+  val=$(CLAUDE_PROJECT_DIR="$root" _zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();var s=j.hooks&&j.hooks.defaultDeliveryRoute;console.log(s==="tdd"||s==="direct"?s:"ask")' 2>/dev/null)
+  case "$val" in
+    (tdd|direct) echo "$val" ;;
+    (*)          echo "ask" ;;
+  esac
+}
+
+# The ladder both ask-hooks, `--status` and the /zensu:doctor row resolve: the session
+# marker outranks the config key, and neither outranks an explicit preference in the
+# user's own text — that rank is judged by the model from the directive, so it never
+# reaches this function. Both mechanical ranks are read under the ONE project root the
+# caller passes: the marker lives there, and the config overlay is read from there
+# rather than from the ambient CLAUDE_PROJECT_DIR, so no caller can pair a recorded
+# session's marker with another tree's config. No root means no decision: `ask`.
+# Prints `<route>\t<source>` with route ∈ tdd|direct|ask and source ∈
+# session|config|none.
+zensu_delivery_route_resolve() {
+  local project_dir="${1:-}" session_key="${2:-}" route
+  [ -n "$project_dir" ] || { printf 'ask\tnone\n'; return 0; }
+  route="$(zensu_delivery_route_marker_state "$project_dir" "$session_key")"
+  case "$route" in
+    (tdd|direct) printf '%s\t%s\n' "$route" session; return 0 ;;
+  esac
+  route="$(zensu_default_delivery_route "$project_dir")"
+  case "$route" in
+    (tdd|direct) printf '%s\t%s\n' "$route" config; return 0 ;;
+  esac
+  printf 'ask\tnone\n'
+}
+
+# The provenance line `/zensu:delivery-route --status` prints. It is rendered from the
+# resolver's answer, so the ladder ORDER lives in zensu_delivery_route_resolve alone;
+# the one fact the resolver does not carry — a RELEASED session choice, which it
+# treats as no marker — is read beside it and only qualifies the source word.
+zensu_delivery_route_status_line() {
+  local project_dir="${1:-}" session_key="${2:-}" pair route source released=""
+  pair="$(zensu_delivery_route_resolve "$project_dir" "$session_key")"
+  route="${pair%%$'\t'*}"
+  source="${pair#*$'\t'}"
+  if [ "$(zensu_delivery_route_marker_state "$project_dir" "$session_key")" = "released" ]; then
+    released=", session choice released"
+  fi
+  case "$source" in
+    (session) printf '%s (session)\n' "$route" ;;
+    (config)  printf '%s (config%s)\n' "$route" "$released" ;;
+    (*)       printf 'ask (default%s)\n' "$released" ;;
+  esac
+}
+
+# The rendered field both directives carry after `ZENSU DELIVERY ROUTE: `. One
+# renderer, so the plan hook, the reminder and the doctor cannot spell it apart.
+zensu_delivery_route_field() {
+  local pair route source
+  pair="$(zensu_delivery_route_resolve "${1:-}" "${2:-}")"
+  route="${pair%%$'\t'*}"
+  source="${pair#*$'\t'}"
+  case "$source" in
+    (session) printf '%s (session marker)\n' "$route" ;;
+    (config)  printf '%s (hooks.defaultDeliveryRoute)\n' "$route" ;;
+    (*)       printf 'ask\n' ;;
+  esac
 }
 
 _zensu_log_style() {

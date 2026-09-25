@@ -775,10 +775,15 @@ still covers only the LEGACY pointer by name.
 - **`OWNER_SESSION_MISMATCH` in `plan-approved-delegate.sh` is now unreachable, and the plan
   it used to refuse falls through to the standalone policy instead.** A foreign session that
   approves a plan carrying another run's `<!-- zensu-autopilot:<run> -->` marker no longer
-  reaches the owner comparison, because the run is invisible to its owner-scoped read; it is
-  asked the four-route delivery question, which now carries `/zensu:autopilot` and `/zensu:pilot`
-  beside it (see §"Plan-Approval Delivery Route"). Nothing is mutated — the foreign run is not
-  touched and no binding is created — so this is a lost DIAGNOSTIC, not a lost guarantee.
+  reaches the owner comparison, because the run is invisible to its owner-scoped read; it takes
+  the standalone branch, and is asked the four-route delivery question, which now carries
+  `/zensu:autopilot` and `/zensu:pilot` beside it (see §"Plan-Approval Delivery Route"), only
+  while its route field reads `ask`. A `tdd` or `direct` recorded for that session or configured
+  in `hooks.defaultDeliveryRoute` (§"Session Delivery Route") dispatches without asking: `tdd`
+  then meets the standalone `--tdd-begin` workspace fence, and `direct` meets no fence, so direct
+  edits can land in a working tree the foreign run holds. Nothing is mutated in the run itself —
+  the foreign run is not touched and no binding is created — so for the run this is a lost
+  DIAGNOSTIC, not a lost guarantee.
   Restoring it needs the marker before the read, and the marker is only resolved inside the
   payload evaluator (see "Plan-Gate Payload Sources"), which reads fields by name and must
   not be duplicated in shell. The exit-6 arm and its `BLOCK_CODE` are deliberately left in
@@ -1106,7 +1111,7 @@ still covers only the LEGACY pointer by name.
   Until then all three blocks are pinned: `C21c` derives the resolved-window population and now
   admits a
   GROUPED `export` (a mutant grouping the owner-activity export silently dropped it from the
-  population, three windows to two, with the check green) under a floor of four, and `C21d`
+  population, three windows to two, with the check green) under a floor of five, and `C21d`
   bounds its `sed` slice at 20 lines (re-indenting the block's closing `fi` grew the slice from
   16 lines to 166, where every conjunct matched unrelated lines below).
 

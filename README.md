@@ -18,8 +18,10 @@ Any language, any stack. Nothing to configure, and no account needed to start.
 
 ## What you get
 
-- **A plan you approve first.** Claude Code plans; Zensu asks once which delivery
-  route to take. You stay in the loop exactly once, not every turn.
+- **A plan you approve first.** Claude Code plans; Zensu asks which delivery route to
+  take and remembers a workflow-or-direct answer for the rest of the session —
+  or never, when the project sets `hooks.defaultDeliveryRoute`.
+  You stay in the loop once, not every turn.
 - **A review that cannot be skipped.** Five specialist reviewers run in
   parallel, an independent judge checks their blind spots, and a Stop hook makes
   sure the chain actually finished before the turn ends.
@@ -77,12 +79,15 @@ verify, unattended. It stops at a ready PR and never merges.
 **Just this change** — describe what you want and approve the plan. Zensu asks
 which delivery route to take: autopilot to a reviewed PR, the guided workflow
 with its review chain, the step-by-step pilot, or implementing it directly.
+Answer the workflow-or-direct question once: the session remembers it (the autopilot
+and pilot answers are per-plan choices and are never remembered), and
+`/zensu:delivery-route` or `hooks.defaultDeliveryRoute` fixes that choice without asking.
 
 ## What's included
 
-### Skills (28)
+### Skills (29)
 
-> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (29 skills are registered in `plugin.json`).
+> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (30 skills are registered in `plugin.json`).
 
 | Skill | What it does |
 |-------|--------------|
@@ -91,6 +96,7 @@ with its review chain, the step-by-step pilot, or implementing it directly.
 | `/zensu:implement` | Implement a tracked feature end to end, with artifact linking and revision tracking |
 | `/zensu:tdd` | The guided implementation workflow: build, then the mandatory review chain and auto-fix loop |
 | `/zensu:tdd-mode` | Switch this session between strict RED→GREEN TDD and vanilla, without editing config |
+| `/zensu:delivery-route` | Fix this session's delivery route (Zensu workflow or direct) so the route question is asked once, not every time |
 | `/zensu:autopilot` | Idea → validated pull request, unattended after one planning gate. Never merges or deploys |
 | `/zensu:pilot` | The guided counterpart to autopilot: probes a feature's real state and offers the next step |
 | `/zensu:cover` | Backfill durable tests at the right level (unit → integration → E2E) for existing code |
