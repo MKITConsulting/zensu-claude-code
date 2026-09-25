@@ -57,6 +57,7 @@ const DENIED_SEGMENTS = new Set([".git", ".zensu"]);
 // real run log has already used, because a claim the extractor cannot see is a
 // claim that silently drops out of the delta.
 const CLAIM = /^\s*(?:\[[^\]]*\]\s*)?R(\d+)(?:-[A-Za-z0-9_.+-]+)?\s+IMPL\s+completed\s*[—–-]\s*files:\s*([^|]*)/;
+const RESET = /^\s*(?:\[[^\]]*\]\s*)?REVIEW BUDGET RESET\b/;
 
 function claimRound(line) {
   const m = CLAIM.exec(String(line == null ? "" : line));
@@ -152,6 +153,13 @@ function roundScope(options) {
   let claims = 0;
   let dropped = 0;
   for (const line of text.split("\n")) {
+    if (RESET.test(line)) {
+      seen.clear();
+      files.length = 0;
+      claims = 0;
+      dropped = 0;
+      continue;
+    }
     const claim = claimRound(line);
     if (!claim || claim.round !== round) continue;
     claims += 1;
@@ -235,10 +243,13 @@ if (require.main === module) {
 } else {
   module.exports = {
     CLAIM,
+    RESET,
+    FILE_MAX_BYTES,
     MAX_FILES,
     MAX_CLAIM_FILES,
     claimRound,
     safeRelativePath,
+    readLog,
     roundScope,
     render,
     cliMain,

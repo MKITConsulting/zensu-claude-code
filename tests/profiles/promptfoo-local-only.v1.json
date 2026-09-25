@@ -81,6 +81,7 @@
     "test-reset-review-limit-skill.sh",
     "test-reset-review-limit-transaction.sh",
     "test-review-aspect-agent.sh",
+    "test-review-convergence.sh",
     "test-review-judge.sh",
     "test-review-personas.sh",
     "test-review-worker-evidence-lease.sh",
