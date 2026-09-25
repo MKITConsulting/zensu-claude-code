@@ -31,8 +31,7 @@ if {$PLUGIN_DIR eq ""} { set PLUGIN_DIR "[file dirname [file dirname [file dirna
 
 # The terminal repaints only the cells that change, so the space between two words
 # of newly drawn text can arrive as a cursor-position escape. GAP matches a space,
-# such an escape, or nothing; every multi-word pattern after the route question
-# uses it.
+# such an escape, or nothing; every multi-word pattern uses it.
 set GAP {(?:[ \t]|\x1b\[[0-9;]*[A-Za-z])*}
 
 # record_prompt_ok reads the text from the LAST mention of the helper up to the
@@ -85,11 +84,11 @@ expect {
 # option LABEL — typing the label selects it regardless of the slot it landed in,
 # which an ordinal cannot do once the directive reorders the four options.
 expect {
-  -re "Zensu workflow — /zensu:tdd|Autopilot — /zensu:autopilot" {
+  -re "Zensu${GAP}workflow${GAP}—${GAP}/zensu:tdd|Autopilot${GAP}—${GAP}/zensu:autopilot" {
     send_user "\n>>> Delivery-route question detected — selecting the Zensu workflow by label\n"
     send "Zensu workflow\r"
   }
-  -re "Executing via /zensu:tdd" {
+  -re "Executing${GAP}via${GAP}/zensu:tdd" {
     send_user "\n>>> Routed to /zensu:tdd before an explicit prompt match\n"
   }
   timeout {
