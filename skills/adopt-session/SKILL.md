@@ -15,7 +15,8 @@ description: >
   also gone the lineage break is cleared while Edit, Write, MultiEdit and writing Bash stay denied until that
   directory is re-created, which a SECOND mode, `--restore-root --confirm`, does in one step together with the
   workflow document the removal took with it — it restores the anchor and not the work, so the directory comes
-  back empty and the chain that lived there is gone. Adoption is authorised by
+  back empty and the chain that lived there is gone, unless another run finished that directory first, in which
+  case the report says it never saw the contents. Adoption is authorised by
   SCHEMA equality, not by the version numbers, so a release that really changed a
   persisted shape is refused. Use when /zensu:doctor reports an incompatible lineage,
   when tools started failing closed right after a plugin update, when this session's own
@@ -216,7 +217,9 @@ the session in a second wedge where the capability gate denies every tool.
 thread can supply to itself, so it is not a consent control — the control is this step.
 Run the read-only form first, relay the verdict and all three disclosure lines verbatim
 (the directory comes back EMPTY, it is not a git worktree, and the chain that lived there
-is gone rather than restored), and say plainly that if the directory was MOVED rather than
+is gone rather than restored — a forecast of what this command plants, which the report
+replaces with "what is in that directory is NOT reported here" when another run wins the
+race and creates it first), and say plainly that if the directory was MOVED rather than
 deleted, moving it back is the better repair. Only after the user agrees, run the same
 command with `--confirm`. This mirrors Step 2 of 4 of the adoption flow below, and it
 matters at least as much here: this is the mode that creates a directory.
@@ -228,7 +231,10 @@ already names is created. Re-anchoring a record to a caller-named directory was
 considered and refused — a session may delete its own root, so a caller-named anchor
 would be a cross-project write escape — and this mode is not a step toward it.
 
-**It restores the anchor, not the work.** The directory comes back EMPTY and is not
+**It restores the anchor, not the work — as a FORECAST of what it plants.** When another
+run wins the race, the report says it never saw the contents instead, and `/zensu:doctor`
+probes the recorded root and states what is there now; relay whichever of the two the
+command actually printed. The directory comes back EMPTY and is not
 a git worktree; nothing here runs git. The chain that lived there is gone rather
 than restored, and the rebuilt baseline reads as never active. Say all three when
 you relay the result — the report says them before and after `--confirm`, and an
@@ -254,7 +260,10 @@ Its refusals: `root-present` (nothing is missing), `not-served-by-executing-runt
 `record-unreadable` (the strict read failed for another reason — `/zensu:doctor`),
 `plugin-data-mismatch`, `unsafe-ancestor` (the nearest existing directory on the way
 is a symlink or not a directory, so creating the root through it would land it in a
-different tree) and `too-many-missing-components` (the gap is deeper than one
+different tree), `unsafe-ancestor-ownership` (that same directory is owned by another user, or you own it
+and users other than its owner can write it without the sticky bit — the tree is intact, so
+a `chmod` is the fix when you own it and a move when you do not)
+and `too-many-missing-components` (the gap is deeper than one
 removed worktree leaves, so the tree probably MOVED). Each writes nothing.
 
 **The OTHER recorded root is closed.** A minting installation pruned from the

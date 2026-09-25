@@ -8369,13 +8369,22 @@ the one it inherited.
 **Provenance is a reserved history phase, `PROJECT_ROOT_RESTORED`**, guarded in the same three
 bodies as `CHAIN_RECOVERED` / `RUNTIME_ADOPTED` / `BASELINE_REBUILT` — `zensu-log.sh --phase`,
 `tdd_write_phase`, `_tdd_write_phase_critical`. **No bypass-ledger entry**: it escapes no gate.
-The entry counts what THIS run created, never what the verdict planned to create.
+The entry counts what THIS run created, never what the verdict planned to create — and
+when the race was lost after some of that work had landed, its reason additionally
+carries `RESTORE_HISTORY_RACED_SUFFIX`, so one entry shape cannot stand for two
+different outcomes.
 
 **Moving together:** the `RESTORE_*` constants, `restoreRootRefusal`,
 `isRestoreRootAlreadyPresent`, `restoreRootComponentLadder`, `restoreRootVerdict`,
 `restoreWorkflowProjectRoot` and their exports in `session-control-core-v1.js`; `RESTORE_REMEDY`
-/ `RESTORE_DISCLOSURE` / `renderRestoreRoot` and the `ZADOPT_MODE` route in
-`session-adopt-report-v1.js`; the two-literal argv parser and the five-class header in
+/ `RESTORE_DISCLOSURE` / `RESTORE_TAMPER_NOTE` / `restoreNotRepairable` /
+`restoreBaselineRows` and the THREE module-scope functions the renderer split into —
+`renderRestoreVerdict`, which TAKES a verdict, `performRestore`, which owns the two
+writes, and `renderRestoreOutcome`, which turns the outcome into lines — plus the
+`ZADOPT_MODE` route in `session-adopt-report-v1.js`, where `main()` now resolves the
+verdict itself and owns the exit code, so the renderers return `{text, code}` and
+write no global. The retired single renderer was `renderRestoreRoot`; nothing in the
+tree defines that name any more, so a roster naming it sends a reader nowhere; the two-literal argv parser and the five-class header in
 `zensu-session-adopt.sh`; `RECOGNIZED.adopt.args` in `zensu-doctor-invocation.js`; the three
 reserved-phase guard bodies; both binding rows in `zensu-doctor-report.js` PLUS the state row
 this feature added there, `projectRootRestoredRow`, together with the `RESTORE_HISTORY_PHASE`
@@ -8400,9 +8409,22 @@ releases in `stop-chain-enforcer.sh`; **`restoreRootRealDirectory`** (the one EE
 discrimination, and an EXPORT, so a port obligation), **`restoreRootAlreadyPresentError`**
 (the one builder for the benign race) and **`baselineProvenanceUnrecorded`** (the one
 predicate for "the rebuild happened and its history entry did not", consumed by
-`writeBaselineRows`, `renderBaselineNotes` and the SessionStart self-heal in
-`claude-session-control-v1.js` — THREE sites, where the ROW CONTRACT roster in
-§"Restoring a Vanished Recorded Project Root" named two); the deny texts in
+`restoreBaselineRows`, `restoreProvenanceRows`, `renderBaselineNotes` and the SessionStart
+self-heal in `claude-session-control-v1.js`. NAMED rather than counted, and the numeral is
+gone on purpose: this roster has now been wrong in both directions about that one count —
+it named two and pointed at THIS section for the third, and then it said three while
+`restoreProvenanceRows` had already joined them. `R6i20` derives the set from the two
+source files and requires every member to be named here, so a fifth consumer fails that
+row rather than being counted by nobody. What they share is the
+CONTRACT, not the count — and stating it as "the three" was itself the drift this paragraph
+records, written two sentences after the sentence that says a fourth had already joined: each is THREE-VALUED, so a core that exports no predicate makes
+every one of them DISCLOSE that the check could not be made rather than answer from a rule
+of its own. Each carried a guarded fallback once; aligning those copies was not enough,
+because a fallback ANSWERS where the core prescribes withholding and answers by comparing
+the raw `provenance` value the core's own header forbids a consumer to compare. `R10c`
+forbids the re-derivation by source, `R10g`/`R10g2` drive the withholding arm of the
+SessionStart carrier, and a port that re-adds a fallback has re-created the divergence the
+extraction removed); the deny texts in
 `zensu-session.sh` — where the display-path bound is now the single
 `zensu_safe_display_path`, which `hooks/stop-chain-enforcer.sh` CALLS rather than
 re-spelling, because the two shell copies had already diverged in FAIL DIRECTION on a
@@ -8438,7 +8460,11 @@ introduced were the only ones — one of them silently load-bearing for a slice 
 **The couplings here that fire in the UNOBVIOUS direction are stated as MEMBERS, never as
 a count** — the paragraph opened "TWO" over three of them and then gained a fourth, which is
 the drift this file records about its own rosters. They are `R13`, the `R12` family, `R13b`,
-and the CLAUDE.md-grading family `R6h`/`R6i`/`R6i2`-`R6i9`, of which `R6i5` slices a DIFFERENT
+and the CLAUDE.md-grading `R6h`/`R6i` family — named as a FAMILY for the reason this section
+states two paragraphs up about `P6s`, and because the numeric range that stood here once
+ended seven rows short of the suite it claimed to enumerate; `R6i18` forbids the endpoint
+form outright, so raising the number is not a way to make it green — of which `R6i5`
+slices a DIFFERENT
 feature's section (§"Adopting a Record Across a Lineage Break") so an edit to that port census
 reddens a suite named for the project-root restore. Re-grep before trusting this list. All of
 them take the shape §"Gate-Disable Prefixes"
@@ -8488,10 +8514,100 @@ allowlist was weighed and REFUSED — `git worktree remove` leaves the parent in
 `$HOME`-or-inside-a-git-repository rule would admit the ordinary case, but it also refuses
 legitimate roots under `/opt`, `/srv` or `/Volumes` and this repository's own canonicalized
 temp fixtures, and it is a policy invented at the boundary rather than derived from the record.
-The barrier stays the records directory, which is what classes 1-4 rest on too: a principal
-able to author a record there already holds the capability this write would grant. THREE
+The barrier stays the records directory, which is what classes 1-4 rest on too — and what that
+buys has to be stated PRECISELY, because "a principal able to author a record there already
+holds the capability this write would grant" stood here and in the adopt header as an
+overstatement. What authoring a record already confers is the CHOICE of destination: the path
+comes from the record and from nowhere else, so this write adds no target a record author could
+not already name. What it ADDS is the act of creating a directory outside the store, which
+write access to the store does not itself perform. That residual is narrowed rather than
+closed, by the depth bound above and by the ancestor-permission rule below. THREE
 carriers say so — the adopt header, `RESTORE_DISCLOSURE` (which asserted the store's ownership
 check as the bound outright), and `docs/gates.md` — and `R11a`/`R11b`/`R11c` pin all three.
+
+**The nearest-existing ancestor is judged on WHO MAY WRITE IT, and that is its own refusal.**
+Every other test on that component establishes WHAT it is — a real, canonical, link-free
+directory — and none asks who else can change it, while the loop then plants a directory inside
+it. Re-verifying each created component by realpath NARROWS the swap window and cannot close
+it: Node exposes no `mkdirat`, so the name is resolved again on every syscall, and under an
+ancestor a co-tenant may write that window is theirs to win. `restoreAncestorPermissionsSafe`
+refuses an ancestor owned by neither the caller nor root, and one that group- or
+other-writable without the sticky bit.
+
+**THREE exported helpers carry this rule and a port needs all three; the roster named one
+for a release.** `restoreAncestorPermissionsSafe` is the ANCESTOR rule above.
+`restoreRootOwnerSafe` is the LEAF rule — the owner half ALONE — and it is a separate
+predicate rather than a flag because the two questions differ: the recorded project root is
+the DESTINATION this repair hands back, never a directory it plants a child inside, so the
+swap window the write-bits half closes does not exist there. Reusing the ancestor rule at the
+leaf refused the ordinary umask-002 worktree (0775, self-owned) and turned the BENIGN race
+into `FAILED` / exit 1 — the defect the leaf predicate exists to remove. Three sites take the
+leaf rule (the pre-loop ALREADY-RESTORED arm, the in-loop `leafNow` arm, and the `there` arm
+when `component === verdict.projectRoot`); every other site takes the ancestor rule.
+`restoreAncestorChainOffender` is the whole-chain walk, and its value is the TOPMOST offender
+— it walks DOWN from `path.parse(dir).root` — so the renderer labels that row
+`offending ancestor`, never `nearest existing`, which is what every OTHER producer of that
+field carries. Its stat-failure arm fails OPEN and nothing else answers for it: the ladder
+walks UP from the recorded root and stops at the nearest EXISTING component, so the ancestors
+above it — exactly this walk's domain — are ones the ladder never stats. `R6i23` holds the
+roster against the export block. STICKY is a full exemption on purpose — `/tmp` is
+writable by every user and sticky by design, and under it another user cannot rename or remove
+an entry they do not own; without that exemption the repair would refuse every recorded root
+under a temp directory, this repository's own fixtures included. **State what sticky buys and
+no more.** It constrains `unlink` and `rename` of entries that ALREADY EXIST and says nothing
+about CREATE, while every component this writer plants is one `verdict.missing` proved ABSENT
+— so under a sticky ancestor a co-tenant can still win the race to the NAME, and what catches
+that is the post-mkdir realpath re-verification, never this rule. This paragraph called such a swap
+IMPOSSIBLE for a release, which the module's own comment beside
+`restoreAncestorPermissionsSafe` already retracted in the same change set: a governing document
+asserting a guarantee the code it governs denies is worse than no paragraph, because the code
+comment is the one a reader checks last. `R6i22` pins the retraction and `R6i22a` pins that the
+exemption keeps its justification. It ABSTAINS where it cannot decide: win32 has no `process.getuid` and its mode bits
+are not the access control, and a stat carrying no numeric `uid`/`mode` is the same case.
+`RESTORE_ROOT_REFUSALS.UNSAFE_ANCESTOR_OWNERSHIP` is its OWN member rather than a cause folded
+into `UNSAFE_ANCESTOR`: that one says the tree changed under the record and its remedy is to
+inspect a link, this one says the tree is intact and its remedy is a `chmod`, so one wire value
+carrying both would render the other half's remedy in every report that hit it. Moving with it:
+the member, the helper, the `RESTORE_REMEDY_TABLE` entry keyed by member NAME, the refusal
+enumerations in `docs/gates.md` and `skills/adopt-session/SKILL.md`, and the counts in `R7a`/`R7b`
+— which are hand-maintained numerals, so an eighth member that does not reach them fails there
+rather than silently. `R2j`/`R2j-control`/`R2j2` drive all three arms, and the whole block SKIPS
+on win32 rather than asserting a rule that host does not have.
+
+**THE CALLER IDENTITY IS NOT A CONJUNCT, and the route a reviewer named for exploiting that
+is REFUSED — say both halves, because either one alone is misleading.** `restoreRootVerdict`
+requires readable-as-orphan, `plugin_data` equality and `servesRecordedRuntime`, and nothing in
+it compares `options.sessionId` against the session this process belongs to; `zensu-session-adopt.sh`
+passes `CLAUDE_CODE_SESSION_ID` straight through. So the core carries no caller bind of its
+own, and the protection is a BASH-CHANNEL gate rather than a check in the core. What refuses
+the named shape — `CLAUDE_CODE_SESSION_ID=<foreign> CLAUDE_PLUGIN_DATA=<store> bash
+.../zensu-session-adopt.sh --restore-root --confirm` from a healthy BOUND session, where the
+PreToolUse recognizer's `ASSIGNMENTS` allowlist is never consulted — is `CONTROL_BINDINGS` in
+`hooks/lib/bash-source-write-parse.js`, which lists `CLAUDE_CODE_SESSION_ID` and makes
+`pre-bash-source-write-gate.sh` deny with `Blocked a Bash rebind of protected Session Control
+input CLAUDE_CODE_SESSION_ID.` MEASURED, not argued: driving that command through the Bash
+matcher in a bound session produced exactly that deny. Do NOT restate this as "the core binds
+the caller", and do not delete the gate's entry on the strength of the conjunct list — the two
+halves are what make the claim true together, and removing `CLAUDE_CODE_SESSION_ID` from
+`CONTROL_BINDINGS` would re-open class 5 to a foreign record with nothing else standing in the
+way. `R11f`/`R11g`/`R11g2` and their controls pin both clauses — NOT `R11d`/`R11e`,
+which grade `zensu_safe_display_path` in an unrelated block and were cited here for a
+release. A wrong pin id is worse than none: it reads as covered.
+
+**AND THE SCOPE OF THAT REFUSAL IS NARROWER THAN THE PARAGRAPH ABOVE READS.** The gate
+covers one SPELLING of one CHANNEL. `buildRequest` reads this module's own inputs from
+`ZADOPT_PLUGIN_DATA`, `ZADOPT_SESSION_ID` and `ZADOPT_PLUGIN_ROOT`, and `main()` routes
+on `ZADOPT_MODE` and `ZADOPT_CONFIRM` — and no `ZADOPT_*` name is in `CONTROL_BINDINGS`,
+so a plain leading-assignment `ZADOPT_… node …/session-adopt-report-v1.js` needs no
+quoting subtlety at all to pass `bindingFromAssignment`. A second gap is the WRAPPER
+set: `WRAP` is `command builtin exec env sudo nohup nice time`, containing neither
+`bash` nor `sh`, so `bash -c '<assignment> <command>'` makes `bash` token 0, the
+leading-assignment loop exits immediately and no `export`/`unset` arm applies; `env` IS
+covered. Both halves are DERIVED from source and neither was measured, unlike the
+`CLAUDE_CODE_SESSION_ID` deny above, which was. What bounds the residual is that the
+destination still comes from a record in a readable store and the write is at most
+`RESTORE_MAX_MISSING_COMPONENTS` directories at mode 0755 — narrow, but not nothing.
+Covering `ZADOPT_*` is its own change to `CONTROL_BINDINGS` and is NOT taken here.
 
 **EEXIST is the ONE signal the mkdir primitive gives, and all three readings of it are decided
 from EVIDENCE rather than from the component's POSITION.** Position alone got two of them
@@ -8510,6 +8626,35 @@ EXPORTED, because the leaf arm sits directly below a re-derivation of the verdic
 fixture can reach it. `realpathSync.native(x) === x` is the ladder's own whole-chain test:
 equality proves transitively that nothing on the way to `x` is a link, which is why a real
 leaf settles an intermediate's `EEXIST` whatever that intermediate is.
+
+**TWO MECHANISMS REACH THE BENIGN RACE, and a reader who knows only the throw has half
+the contract.** A run that lost the race having created NOTHING still throws, and
+`isRestoreRootAlreadyPresent` classifies that error — the shape this section described
+on its own for a release. A run that had already PLANTED components sets
+`alreadyPresent`, BREAKS out of the loop, falls through to the baseline repair and
+RETURNS, carrying that flag as a field of the result. It has to: every raced throw
+fires above the provenance write, so the throw-only shape reported the count on stdout
+while the workflow history — this feature's ONLY durable disclosure, there being no
+bypass-ledger entry — recorded nothing and `/zensu:doctor` had nothing to read. The
+consequence for a CALLER is that a successful return no longer means this run created
+the recorded root: `performRestore` reads the field and maps it to the same `raced`
+outcome the throw produces, and a caller that keys ALREADY RESTORED off the throw alone
+announces a repair that did not happen. The consequence for a READER is
+`RESTORE_HISTORY_RACED_SUFFIX`, `, completed by another run`, which the raced entry's
+reason carries and an ordinary one must not: it is the only signal in the persisted
+document that tells the two apart, which is why the `/zensu:doctor` row reads it from
+the core rather than copying it. The suffix decides the PROVENANCE clause — whether the
+row says another run finished the directory — and it deliberately no longer decides what
+the row claims is IN there. **That half is a PRESENT-TENSE PROBE**, an `lstat` of
+`<root>/.git` taken as the row renders, and the conditional shape it replaces was wrong in
+BOTH directions rather than merely coarse: it keyed a claim about the filesystem on a token
+in a document, so a planted stub somebody had since checked a worktree out into still read
+EMPTY, while a raced entry whose directory really was empty was offered no `git worktree
+add` at all. The probe answers three ways and each renders its own sentence — a repository
+is present, none is, or the path could not be read — so a check that could not be made is
+never an all-clear. A core that does not export the suffix still cannot tell a raced entry
+from a planted one, and the row says THAT, as a missing check, while the probe's own
+sentence renders beside it.
 
 **A component SWAPPED after it was created is refused rather than traversed.** `mkdir(2)` does
 not follow a symlink at the LAST component, so a planted name there fails `EEXIST` — but every
@@ -8531,21 +8676,24 @@ loop, the `created` accumulation and the two report tails that count it finally 
 executed case.
 
 **The benign race has ONE builder, and `R8o` pins that rather than the duplication.** It was
-constructed verbatim at three sites while that row pinned
-`grep -c 'code = RESTORE_ALREADY_PRESENT_CODE'` equal to 3 — the shape, not the property. It
-now pins one tag site plus `R8o2` on the builder's definition and its three callers. The
+constructed verbatim at four sites while that row pinned
+`grep -c 'code = RESTORE_ALREADY_PRESENT_CODE'` equal to 3 — the shape, not the property, and
+the shape was already short by one. It now pins one tag site plus `R8o2` on the builder's
+definition and its four callers, a count `R6i17` DERIVES from the core rather than reading it
+out of this paragraph: it was stated three times here, was wrong in all three, and the core's
+own comment said four throughout. The
 failure arm also stopped using `fail()` as a builder through an intermediate `let failure`:
 that shape read like ordinary flow, and if `fail()` ever stopped throwing it left `failure`
 undefined and raised an untyped `TypeError` AFTER this run had created directories — the one
 moment the function must still report what it planted.
 
 **`ALREADY RESTORED` owes the workflow document too, and used to exit 0 without looking.** All
-three raced throws fire ABOVE `repairWorkflowBaseline`, so that arm reported success with the
+four raced throws fire ABOVE `repairWorkflowBaseline`, so that arm reported success with the
 document never rebuilt, never classified and never examined — the same end state the sibling
 arm exits 1 for, because until it exists the capability gate denies every tool. It attempts the
 repair now, which is what the feature's own headline promises and is safe because
 `repairWorkflowBaseline` re-derives its own verdict and answers the already-present race rather
-than rewriting a live document. One writer, `writeBaselineRows`, renders the two baseline rows
+than rewriting a live document. One writer, `restoreBaselineRows`, renders the two baseline rows
 for BOTH arms, because they report the same two facts and used to agree by hand — which is how
 the raced one came to report neither. A rebuild whose `BASELINE_REBUILT` history write failed
 is now its own WARNING sentence plus a cause row, the rule `renderBaselineNotes` already
@@ -8572,18 +8720,29 @@ than a measurement — it is what `safeVerifyReason` enforced before this path r
 nobody has measured the distribution of real reasons against it; `provenanceJunctionForges`
 is exact only while both positional rules stay two characters wide, and nothing checks that
 width against the module that owns them, so a widened rule would silently escape the seam
-window; it restores the ANCHOR, not the work — the directory comes
+window; **the benign-race baseline fault is classified in TWO places and the two already
+differ** — `performRestore`'s throw arm composes `{ provenance: 'existing' }` by hand while
+`restoreWorkflowProjectRoot` composes one carrying `path` and `projectRoot` as well, so a row
+added later that reads `baseline.path` renders differently depending on which of the two
+mechanisms above fired; the durable fix is to make the core the single site by returning
+`alreadyPresent: true` with an empty `created` instead of throwing, guarding the provenance
+write on a non-empty `created` — NOT taken here, because the throw predicate is pinned at
+its builder and at four call sites and collapsing it is its own review; it restores the
+ANCHOR, not the work — the directory comes
 back empty, is not a git worktree, and the chain that lived there is gone; the component race is
 narrowed, not closed; `RESTORE_MAX_MISSING_COMPONENTS` = 4 is a judgement, not a measurement;
 Windows is unreachable for the command because `zensu-doctor-invocation.js` refuses on that
 host by design; the LEAF arm above the loop still has no executed case and cannot get one — the
 verdict is re-derived immediately above it, so a present leaf is already `ROOT_PRESENT` there,
 which is why the decision was routed through an exported helper that DOES have cases; and
-`renderRestoreRoot` still writes through `process.stdout` and returns an exit code rather than
-returning lines like every sibling renderer in its file, so its unit cases monkey-patch
-`process.stdout.write`. Splitting it into `renderRestoreVerdict` / `renderRestoreResult` would
-delete both seams and is the standing fix; it was not taken in a round already five deep in
-that function, and it would remove the `deps` seam a neighbouring finding asked to EXTEND.
+the write-through-`process.stdout` gap this list used to carry is CLOSED, recorded here
+rather than deleted because the wording that replaced it prescribed the shipped change as an
+un-taken standing fix for a release, under a symbol that never existed. The single renderer
+was split into `renderRestoreVerdict` / `performRestore` / `renderRestoreOutcome`; both
+renderers RETURN `{text, code}`, `main()` writes and owns the exit code, the injectable
+verdict factory is gone, and no unit case intercepts the stdout writer. The name
+`renderRestoreResult` never shipped and is recorded here only so a grep for it lands on
+this retraction; the third function is `renderRestoreOutcome`.
 
 **The rendered PATH has its own shape bound, and the two obvious spellings are both
 traps.** `zensu_emit_hook_session_deny` gained a sixth scope, `orphaned-project-root`,
@@ -8663,9 +8822,17 @@ there is conjoined on `PRINCIPALS.MAIN` and every other principal fell through t
 cause-free generic deny. CAUSE for everyone, REMEDY main-only — the same split the lineage
 branch beside it uses.
 
-**Known gaps, named:** `plugin-data-mismatch` still has no executed case anywhere (reaching
-it needs a readable record whose `plugin_data` differs, which no fixture here builds);
-`not-served-by-executing-runtime` is driven by `R2e`, which is what makes the adopt-then-restore ORDER a refusal
+**Known gaps, named, and the first entry is a RETRACTION rather than a gap.** This list
+said `plugin-data-mismatch` had no executed case anywhere, and that was false when it was
+written: `R2i` in `tests/structure/test-restore-project-root.sh` drives exactly that
+refusal, so all seven members of `RESTORE_ROOT_REFUSALS` now have a producer-side case. The
+retraction is kept because the DISCRIMINATOR is worth stating and is not obvious — whether
+the CLAIMED store EXISTS. `R2g` names one that does not, so `canonicalDirectory` throws two
+steps above the explicit conjunct and the orphan reader answers `record-unreadable`; `R2i`
+names an existing store, reaches the conjunct, and the conjunct is the producer. So on one
+input that conjunct is defence in depth and on the other it holds the boundary, which is
+why `R2g2` pins the measurement and `R2g3` grades the comment that used to get it wrong.
+What remains open: `not-served-by-executing-runtime` is driven by `R2e`, which is what makes the adopt-then-restore ORDER a refusal
 rather than advice; and the `pre-bash-zensu-gate.sh` call site has no
 `zensu_hook_is_main_principal` guard, so the remedy reaches a read-only principal there —
 pre-existing for the two older scopes and widened by this one.

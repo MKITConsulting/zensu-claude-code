@@ -65,9 +65,21 @@
 #     really has (a worktree under /opt, /srv or /Volumes, and this repository's
 #     own fixtures under the canonicalized temp root), and it would be a policy
 #     invented at the boundary rather than derived from the record. The barrier
-#     stays the records directory, which is the same one classes 1-4 rest on: a
-#     principal able to author a record there already holds the capability this
-#     write would give it. State it that way, and never as a location bound.
+#     stays the records directory, which is the same one classes 1-4 rest on — but
+#     state what that buys PRECISELY, because "already holds the capability this
+#     write would give it" is an overstatement and stood here as one. What authoring
+#     a record already confers is the CHOICE of destination: the path comes from the
+#     record and from nowhere else, so this write adds no target a record author
+#     could not already name. What it does add is the ACT — creating a directory
+#     outside the store, which write access to the store does not itself perform.
+#     That residual is narrowed rather than closed: the depth bound above, and the
+#     ancestor-permission rule (refusal `unsafe-ancestor-ownership`), which refuses a
+#     nearest-existing ancestor that users other than its owner can write unless it
+#     is sticky. Both NARROW the window and neither closes it: Node exposes no
+#     `mkdirat`, so every syscall resolves the name again, and the sticky exemption
+#     admits a tree where a co-tenant can still create the name first. The realpath
+#     re-verification after each mkdir is what catches that. State it that way, and
+#     never as a location bound.
 #   - What BOUNDS that write is not derivation — CLAUDE_PLUGIN_DATA is a
 #     caller-supplied literal, exactly as it is for the diagnostic — it is
 #     adoptableRecord's condition-1 LADDER. Naming only its first rung, as this

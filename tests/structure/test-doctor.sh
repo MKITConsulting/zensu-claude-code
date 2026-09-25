@@ -5673,6 +5673,286 @@ case "$P6_RESTORED" in
   *) check "P6s1 the row omits the entry's timestamp or reason (got: $P6_RESTORED)" FAIL ;;
 esac
 
+# P6s20/P6s21/P6s22 — the EMPTY claim is CONDITIONAL, and the condition is the raced
+# suffix the core writes into the reason.
+#
+# The row asserted unconditionally that "the directory came back EMPTY and is not a git
+# worktree". That is true for the run that planted it and FALSE for the raced entry the
+# partial-race change made reachable: the cause the core itself documents there is a
+# `git worktree add` in another terminal — a populated worktree with a branch. Worse, the
+# row renders `why` from the reason, so it could print "completed by another run" and then
+# assert an empty non-worktree in the same sentence. Before that change every raced path
+# threw above the provenance write, so no such entry could exist.
+#
+# The token comes from the LOADED core, exactly as the phase token does, and a core that
+# does not export it must WITHHOLD the claim rather than guess — P6s22 is that arm, and it
+# is what keeps the fix from degrading to a hand-copied literal.
+P6_RACED_RC=0
+CORE_PATH="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" P6P="$P6_PROJECT" P6K="$P6_KEY" \
+  node -e '
+    const fs = require("fs");
+    const core = require(process.env.CORE_PATH);
+    const file = core.adoptionWorkflowStatePath(process.env.P6P, process.env.P6K);
+    const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+    doc.history = [{
+      step: "",
+      phase: core.RESTORE_HISTORY_PHASE,
+      ts: "2026-09-08T00:00:00.000Z",
+      reason: "project-root-restored: 1 component(s), completed by another run",
+    }];
+    fs.writeFileSync(file, JSON.stringify(doc));
+  ' >/dev/null 2>&1 || P6_RACED_RC=$?
+P6_RACED="$(run_report_own bound "$P6_KEY")"
+case "$P6_RACED" in
+  *"recorded project root was RE-CREATED"*)
+    check "P6s20-control the raced entry still renders the restore row" PASS ;;
+  *) check "P6s20-control the raced entry still renders the restore row (init_rc=$P6_RACED_RC)" FAIL ;;
+esac
+# The needle here was `came back EMPTY`, which the probe rewrite removed from the tree:
+# the row then passed over the raced and planted documents alike and graded nothing. The
+# discriminating property is the PROVENANCE clause, which the planted arm must not carry.
+case "$P6_RACED" in
+  *'plants an empty stub'*'not this one'*)
+    check "P6s20 a raced restore does not report the stub as this run's own work (got: $P6_RACED)" FAIL ;;
+  *) check "P6s20 a raced restore does not report the stub as this run's own work" PASS ;;
+esac
+# ...and the needle it now uses is one the tree can actually produce, so the negative is
+# falsifiable. A dead literal is the vacuity this row shipped with.
+if grep -qF -- 'plants an empty stub' "$PLUGIN_DIR/hooks/lib/zensu-doctor-report.js"; then
+  check "P6s20-needle the P6s20 negative names a literal the renderer can emit" PASS
+else check "P6s20-needle the P6s20 negative names a literal the renderer can emit" FAIL; fi
+case "$P6_RACED" in
+  *'another run'*'not this one'*)
+    check "P6s21 a raced restore states that another run finished it, so the contents are not this plugin's stub" PASS ;;
+  *) check "P6s21 a raced restore does not say whose directory it is (got: $P6_RACED)" FAIL ;;
+esac
+
+# P6s22 — a core with the phase token but WITHOUT the raced-suffix token cannot tell the
+# two apart, so it must withhold the EMPTY claim rather than assert it. Same fail-safe
+# direction as P6s3: an absent export is a missing check, never an all-clear.
+P6_NOSUFFIX_OUT="$(
+  P6_TMP="$(mktemp -d)"
+  mkdir -p "$P6_TMP/hooks/lib"
+  for f in "$PLUGIN_DIR"/hooks/lib/*.js; do cp "$f" "$P6_TMP/hooks/lib/"; done
+  {
+    printf 'const real = require(%s);\n' "\"$PLUGIN_DIR/hooks/lib/session-control-core-v1.js\""
+    printf 'const clone = Object.assign({}, real);\n'
+    printf 'delete clone.RESTORE_HISTORY_RACED_SUFFIX;\n'
+    printf 'module.exports = clone;\n'
+  } > "$P6_TMP/hooks/lib/session-control-core-v1.js"
+  ZDOC_BINDING=bound ZDOC_SESSION_KEY="$P6_KEY" ZDOC_SESSION_PROJECT_ROOT="$P6_PROJECT" \
+    CLAUDE_PROJECT_DIR="$P6_PROJECT" CLAUDE_PLUGIN_ROOT="$P6_TMP" \
+    node "$P6_TMP/hooks/lib/zensu-doctor-report.js" 2>&1
+  rm -rf "$P6_TMP"
+)"
+case "$P6_NOSUFFIX_OUT" in
+  *'exports no raced-completion token'*)
+    check "P6s22 a core without the raced-suffix token names the arm it took" PASS ;;
+  *"recorded project root was RE-CREATED"*)
+    check "P6s22 a core without the raced-suffix token rendered the row but not the withhold arm (got: $(printf '%s' "$P6_NOSUFFIX_OUT" | head -c 240))" FAIL ;;
+  *) check "P6s22 a core without the raced-suffix token dropped the restore row entirely (got: $(printf '%s' "$P6_NOSUFFIX_OUT" | head -c 200))" FAIL ;;
+esac
+
+# P6s23-P6s26 — the contents claim is PRESENT-TENSE and comes from a PROBE, not from the
+# history entry. Round 2 made it conditional on the raced suffix, and four separate
+# defects survived that: the entry is immutable, so an ordinary restore whose user then
+# followed the row's own `git worktree add` remedy kept being told the directory "came
+# back EMPTY … everything written there is untracked" forever, counting toward warnCount;
+# the raced-with-no-work mechanism records nothing at all, so `last` is an earlier
+# suffix-free entry describing a directory another run created; the suffix is written only
+# on the arm that planted components before losing the race, and the sibling-repair winner
+# plants exactly the empty stub the raced wording said it was not; and the branch read the
+# RAW reason while the row displayed a
+# capped/suppressible copy, so a session-writable value steered the claim with bytes the
+# row refuses to show. A probe of the recorded root answers all four, because what the
+# reader needs is what is in that directory NOW.
+P6_PROBE_RC=0
+CORE_PATH="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" P6P="$P6_PROJECT" P6K="$P6_KEY" \
+  node -e '
+    const fs = require("fs");
+    const core = require(process.env.CORE_PATH);
+    const file = core.adoptionWorkflowStatePath(process.env.P6P, process.env.P6K);
+    const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+    doc.history = [{
+      step: "",
+      phase: core.RESTORE_HISTORY_PHASE,
+      ts: "2026-09-09T00:00:00.000Z",
+      reason: "project-root-restored: 2 component(s)",
+    }];
+    fs.writeFileSync(file, JSON.stringify(doc));
+  ' >/dev/null 2>&1 || P6_PROBE_RC=$?
+# No repository at the recorded root: the untracked warning is the correct one.
+P6_NOGIT="$(run_report_own bound "$P6_KEY")"
+case "$P6_NOGIT" in
+  *'nothing is checked out at that path now'*)
+    check "P6s23 with nothing checked out the row states the contents verdict" PASS ;;
+  *) check "P6s23 with nothing checked out the row states the contents verdict (init_rc=$P6_PROBE_RC)" FAIL ;;
+esac
+# ...and the same document once a worktree IS checked out there. The entry cannot change,
+# so a row keyed on it alone must still say "came back EMPTY"; a probed row must not.
+mkdir -p "$P6_PROJECT/.git"
+P6_WITHGIT="$(run_report_own bound "$P6_KEY")"
+rm -rf "$P6_PROJECT/.git"
+case "$P6_WITHGIT" in
+  *'nothing is checked out at that path now'*)
+    check "P6s24 a .git entry at the recorded root retires the absent-contents claim (got: $P6_WITHGIT)" FAIL ;;
+  *'entry exists there now'*)
+    check "P6s24 a .git entry at the recorded root retires the absent-contents claim" PASS ;;
+  *) check "P6s24 the probed row said nothing about the directory (got: $P6_WITHGIT)" FAIL ;;
+esac
+# The probe's THIRD verdict. A non-ENOENT errno is not producible from file content:
+# making the recorded root unsearchable fails the state read that reaches the row at all,
+# so the errno is injected at the single lstat the probe performs. Keyed on the PATH and
+# not on call ordinality, for the reason the P1bp preload states about its own key.
+P6_EACCES_PRELOAD="$SBOX/p6-eacces-preload.js"
+cat > "$P6_EACCES_PRELOAD" <<'P6EACCES'
+const fs = require('fs');
+const realLstat = fs.lstatSync;
+fs.lstatSync = function (target, ...rest) {
+  if (String(target).replace(/\\/g, '/').endsWith('/.git')) {
+    const err = new Error('EACCES: permission denied');
+    err.code = 'EACCES';
+    throw err;
+  }
+  return realLstat.call(fs, target, ...rest);
+};
+P6EACCES
+P6_UNREADABLE="$(ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" CLAUDE_PROJECT_DIR="$P6_PROJECT" \
+  ZDOC_BINDING=bound ZDOC_SESSION_KEY="$P6_KEY" ZDOC_SESSION_PROJECT_ROOT="$P6_PROJECT" \
+    node --require "$P6_EACCES_PRELOAD" "$REPORT" 2>/dev/null)"
+case "$P6_UNREADABLE" in
+  *'could not be read'*)
+    check "P6s27 an unreadable .git makes the row withhold rather than claim" PASS ;;
+  *) check "P6s27 an unreadable .git makes the row withhold rather than claim (got: $P6_UNREADABLE)" FAIL ;;
+esac
+# ...and the withhold must not smuggle either contents verdict back in. Without this the
+# arm could answer the missing-check sentence AND the untracked remedy in one row.
+case "$P6_UNREADABLE" in
+  *'no git repository at that path'*|*'a git repository is present there now'*)
+    check "P6s27a the withhold arm claims neither contents verdict" FAIL ;;
+  *) check "P6s27a the withhold arm claims neither contents verdict" PASS ;;
+esac
+# The preload is a real injection and not a no-op: without it the same fixture answers
+# one of the two CONTENTS verdicts, so P6s27 cannot pass by the preload failing to load.
+case "$P6_NOGIT" in
+  *'could not be read'*)
+    check "P6s27-control the un-preloaded fixture does not already withhold" FAIL ;;
+  *) check "P6s27-control the un-preloaded fixture does not already withhold" PASS ;;
+esac
+# BUG-R4-01 — one lstat of `<root>/.git` proves only that nothing is checked out AT that
+# path. A recorded root nested inside a repository has no `.git` of its own and IS tracked,
+# and `project_root` is minted from the SessionStart cwd, so that is the ordinary shape for
+# a session started in a subdirectory — not an edge case.
+case "$P6_NOGIT" in
+  *'everything written there is untracked'*|*'nothing to commit it to'*)
+    check "P6s28 the absent-repository arm claims more than the probe established" FAIL ;;
+  *'nothing is checked out at that path'*)
+    check "P6s28 the absent-repository arm states only what the probe established" PASS ;;
+  *) check "P6s28 the absent-repository arm said nothing about the path (got: $P6_NOGIT)" FAIL ;;
+esac
+# JUDGE-1 — the present arm asserted a git REPOSITORY from an lstat that succeeds for an
+# empty file, a FIFO or a dangling symlink, and asserted that nothing there came from this
+# command while `.zensu/state` under that root is this command's own output.
+case "$P6_WITHGIT" in
+  *'did not come from this command'*)
+    check "P6s29 the present-repository arm no longer claims the contents are not this command's" FAIL ;;
+  *) check "P6s29 the present-repository arm no longer claims the contents are not this command's" PASS ;;
+esac
+case "$P6_WITHGIT" in
+  *'.zensu/state'*)
+    check "P6s29a the present-repository arm still discloses this command's own output" PASS ;;
+  *) check "P6s29a the present-repository arm withholds the .zensu/state disclosure (got: $P6_WITHGIT)" FAIL ;;
+esac
+# JUDGE-3 — the present arm is a SETTLED state, not a finding: the history entry never
+# expires, so a WARN there denies the green summary forever after a successful repair.
+case "$P6_WITHGIT" in
+  *'⚠️  state: this session'*'RE-CREATED'*)
+    check "P6s29b a recorded root with a repository present is not a permanent warning" FAIL ;;
+  *'✅  state: this session'*'RE-CREATED'*)
+    check "P6s29b a recorded root with a repository present renders as settled" PASS ;;
+  *) check "P6s29b the present-repository row carried neither marker (got: $P6_WITHGIT)" FAIL ;;
+esac
+# ...and the control: the other two arms stay warnings, or the demotion would silence the
+# finding rather than settle it.
+case "$P6_NOGIT" in
+  *'⚠️  state: this session'*'RE-CREATED'*)
+    check "P6s29b-control the absent-repository arm stays a warning" PASS ;;
+  *) check "P6s29b-control the absent-repository arm stays a warning (got: $P6_NOGIT)" FAIL ;;
+esac
+# A reason padded past the render cap, with the raced suffix BEYOND it. The displayed
+# reason is elided, so the row must not assert a provenance its own evidence cannot show.
+P6_STEER_RC=0
+CORE_PATH="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" P6P="$P6_PROJECT" P6K="$P6_KEY" \
+  node -e '
+    const fs = require("fs");
+    const core = require(process.env.CORE_PATH);
+    const file = core.adoptionWorkflowStatePath(process.env.P6P, process.env.P6K);
+    const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+    doc.history = [{
+      step: "",
+      phase: core.RESTORE_HISTORY_PHASE,
+      ts: "2026-09-09T00:00:00.000Z",
+      reason: "project-root-restored: " + "A".repeat(260) + core.RESTORE_HISTORY_RACED_SUFFIX,
+    }];
+    fs.writeFileSync(file, JSON.stringify(doc));
+  ' >/dev/null 2>&1 || P6_STEER_RC=$?
+P6_STEER="$(run_report_own bound "$P6_KEY")"
+case "$P6_STEER" in
+  *'records that another run finished'*)
+    check "P6s25 an elided reason must not steer the provenance claim (init_rc=$P6_STEER_RC)" FAIL ;;
+  *"recorded project root was RE-CREATED"*)
+    check "P6s25 an elided reason cannot steer the provenance claim" PASS ;;
+  *) check "P6s25 the steered row vanished entirely (got: $P6_STEER)" FAIL ;;
+esac
+# ARCH-5 — withholding is not enough: with the reason unrendered the row has no evidence
+# for EITHER provenance, and saying nothing reads exactly like "this run planted it" — the
+# same argument the missing-token arm already makes for itself.
+case "$P6_STEER" in
+  *'could not be checked'*|*'not rendered'*)
+    check "P6s25a an unrendered reason discloses that the provenance was not determined" PASS ;;
+  *) check "P6s25a an unrendered reason leaves the provenance silently undetermined (got: $P6_STEER)" FAIL ;;
+esac
+# ...and the control: the SAME suffix inside the cap is read normally.
+P6_INCAP_RC=0
+CORE_PATH="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" P6P="$P6_PROJECT" P6K="$P6_KEY" \
+  node -e '
+    const fs = require("fs");
+    const core = require(process.env.CORE_PATH);
+    const file = core.adoptionWorkflowStatePath(process.env.P6P, process.env.P6K);
+    const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+    doc.history = [{
+      step: "",
+      phase: core.RESTORE_HISTORY_PHASE,
+      ts: "2026-09-09T00:00:00.000Z",
+      reason: "project-root-restored: 1 component(s)" + core.RESTORE_HISTORY_RACED_SUFFIX,
+    }];
+    fs.writeFileSync(file, JSON.stringify(doc));
+  ' >/dev/null 2>&1 || P6_INCAP_RC=$?
+P6_INCAP="$(run_report_own bound "$P6_KEY")"
+case "$P6_INCAP" in
+  *'another run finished'*)
+    check "P6s26-control a rendered raced reason still reports the other run" PASS ;;
+  *) check "P6s26-control a rendered raced reason still reports the other run (init_rc=$P6_INCAP_RC got: $P6_INCAP)" FAIL ;;
+esac
+
+# Restore the planted (non-raced) entry so the rows below grade the ordinary shape.
+CORE_PATH="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" P6P="$P6_PROJECT" P6K="$P6_KEY" \
+  node -e '
+    const fs = require("fs");
+    const core = require(process.env.CORE_PATH);
+    const file = core.adoptionWorkflowStatePath(process.env.P6P, process.env.P6K);
+    const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+    doc.history = [{
+      step: "",
+      phase: core.RESTORE_HISTORY_PHASE,
+      ts: "2026-09-07T00:00:00.000Z",
+      reason: "project-root-restored: 2 component(s)",
+    }];
+    fs.writeFileSync(file, JSON.stringify(doc));
+  ' >/dev/null 2>&1 || true
+
 # P6s2 — the control, and it is a SIBLING-PHASE control rather than an empty one: a
 # row keyed on "this document has provenance history" would fire on the rebuild entry
 # too, and the two findings are different. A rebuilt document is not a restored root.
@@ -5790,7 +6070,10 @@ rm -rf "$P6_ONEREAD"; rm -f "$P6_READLOG"
 # renderer emits must be documented, and a phrase the skill documents must be emitted.
 # The emitted corpus is the concatenation of the restore fixtures above; the count is
 # deliberately not written out, for the reason P1be states about its own corpus.
-P6S_ROWS="$P6_RESTORED$P6_NORESTORE_OUT"
+# The corpus carries EVERY arm the row can take, not only the ordinary one: the raced
+# arm, the no-suffix withhold arm and the probe's two contents verdicts were all added
+# without entering it, so the skill sentences that relay them were graded by nothing.
+P6S_ROWS="$P6_RESTORED$P6_NORESTORE_OUT$P6_RACED$P6_NOSUFFIX_OUT$P6_NOGIT$P6_WITHGIT$P6_UNREADABLE"
 P6S_UNEMITTED=""; P6S_UNDOCUMENTED=""
 while IFS= read -r p6s_phrase; do
   [ -n "$p6s_phrase" ] || continue
@@ -5801,6 +6084,11 @@ done <<'P6S_PHRASES'
 recorded project root was RE-CREATED
 not checked for project-root restore provenance
 refuses a non-empty target
+another run finished the directory
+exports no raced-completion token
+nothing is checked out at that path now
+entry exists there now
+could not be read, so this report makes no claim about it
 P6S_PHRASES
 if [ -n "$P6S_ROWS" ]; then
   check "P6s5-control the restore-row corpus is non-empty" PASS
@@ -5825,9 +6113,25 @@ P6S_BULLET="$(awk '/recorded project root was RE-CREATED/{on=1} on{ if (seen && 
   "$PLUGIN_DIR/skills/doctor/SKILL.md")"
 if [ -n "$P6S_BULLET" ] \
   && printf '%s' "$P6S_BULLET" | grep -qF -- 'not the work' \
-  && printf '%s' "$P6S_BULLET" | grep -qF -- 'untracked'; then
+  && printf '%s' "$P6S_BULLET" | grep -qF -- 'Read the cost sentence the row actually printed'; then
   check "P6s6 the skill bullet carries the restore row's cost" PASS
 else check "P6s6 the skill bullet carries the restore row's cost" FAIL; fi
+# ...and it must NOT re-assert the retired unconditional claim. The row probes, so a
+# bullet that teaches EMPTY/untracked as the row's own words sends the model to relay a
+# sentence no arm emits — which is what `untracked` as this row's needle held in place.
+if printf '%s' "$P6S_BULLET" | grep -qF -- 'came back EMPTY'; then
+  check "P6s6a the bullet no longer teaches the retired EMPTY claim as the row's words" FAIL
+else check "P6s6a the bullet no longer teaches the retired EMPTY claim as the row's words" PASS; fi
+# A hand-maintained sentence count in a bullet whose renderer has three probe arms plus
+# two provenance clauses is the census failure this repository records against itself.
+if printf '%s' "$P6S_BULLET" | grep -qiE 'Four sentences|Five sentences'; then
+  check "P6s6b the bullet states the sentence set without a hand-maintained numeral" FAIL
+else check "P6s6b the bullet states the sentence set without a hand-maintained numeral" PASS; fi
+# The raced clause must be scoped to the PROVENANCE half. Unscoped it told the model the
+# row makes no claim about the directory, which the probe contradicts on every arm.
+if printf '%s' "$P6S_BULLET" | grep -qF -- 'makes NO claim about what is in'; then
+  check "P6s6c the raced clause no longer denies the row's own contents verdict" FAIL
+else check "P6s6c the raced clause no longer denies the row's own contents verdict" PASS; fi
 if printf '%s' "$P6S_BULLET" | grep -qF -- 'not checked for project-root restore provenance'; then
   check "P6s6-control the bullet slice stops before the next bullet" FAIL
 else check "P6s6-control the bullet slice stops before the next bullet" PASS; fi

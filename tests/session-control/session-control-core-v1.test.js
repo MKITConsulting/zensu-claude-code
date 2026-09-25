@@ -5349,3 +5349,135 @@ test('WB7 a bind the repair cannot establish refuses before any write', () => {
     'a refused bind never creates the document it declined to judge',
   );
 });
+
+
+// --- the ancestor-permission rule, at the layer that can reach every arm -----------
+//
+// `restoreAncestorPermissionsSafe` is EXPORTED for these cases and for no production
+// caller: the shell suite can only vary the MODE of a directory it owns, so the OWNER
+// axis - the half that actually refuses - had no executed case anywhere, and deleting
+// it left both suites green. The three ABSTAIN arms are unreachable from any POSIX
+// fixture at all: `process.getuid` is always a function on darwin and linux, and
+// `lstatSync` always returns numeric `uid`/`mode` there. Synthetic stats reach all of
+// it without a second uid, which a CI structure suite cannot create.
+const ANCESTOR_SELF_UID = typeof process.getuid === 'function' ? process.getuid() : 501;
+const ancestorStat = (uid, mode) => ({ uid, mode });
+
+test('an ancestor owned by the caller with no group or other write is accepted', () => {
+  assert.equal(core.restoreAncestorPermissionsSafe(ancestorStat(ANCESTOR_SELF_UID, 0o40755)), true);
+  assert.equal(core.restoreAncestorPermissionsSafe(ancestorStat(ANCESTOR_SELF_UID, 0o40700)), true);
+});
+
+test('an ancestor owned by root is accepted, because a system parent is legitimate', () => {
+  // /opt, /srv and /usr/local are ordinary places for a project, and refusing them
+  // would invent a location policy the record never asked for - the same reasoning
+  // that refused a location allowlist for the destination itself.
+  assert.equal(core.restoreAncestorPermissionsSafe(ancestorStat(0, 0o40755)), true);
+});
+
+test('an ancestor owned by a third user is refused at ANY mode, sticky included', () => {
+  // The owner test runs FIRST and returns before either mode test, which is why the
+  // refusal's own text must describe two arms rather than one: for this arm a `chmod`
+  // is not a remedy the operator can perform at all.
+  const foreign = ANCESTOR_SELF_UID + 1;
+  assert.equal(core.restoreAncestorPermissionsSafe(ancestorStat(foreign, 0o40700)), false);
+  assert.equal(core.restoreAncestorPermissionsSafe(ancestorStat(foreign, 0o40755)), false);
+  assert.equal(core.restoreAncestorPermissionsSafe(ancestorStat(foreign, 0o41777)), false);
+});
+
+test('a group- or other-writable ancestor is refused without the sticky bit', () => {
+  assert.equal(core.restoreAncestorPermissionsSafe(ancestorStat(ANCESTOR_SELF_UID, 0o40777)), false);
+  assert.equal(core.restoreAncestorPermissionsSafe(ancestorStat(ANCESTOR_SELF_UID, 0o40775)), false);
+  assert.equal(core.restoreAncestorPermissionsSafe(ancestorStat(ANCESTOR_SELF_UID, 0o40757)), false);
+});
+
+test('a sticky world-writable ancestor owned by the caller or root is accepted', () => {
+  // /tmp is the platform's shared-temp contract. The exemption is NARROWER than its
+  // own comment used to admit - the owner test above has already excluded a foreign
+  // owner - and what it buys is bounded: sticky constrains `unlink` and `rename` of
+  // EXISTING entries and says nothing about CREATE, which is this writer's whole
+  // operating domain. That residual is what the adopted-component check covers.
+  assert.equal(core.restoreAncestorPermissionsSafe(ancestorStat(ANCESTOR_SELF_UID, 0o41777)), true);
+  assert.equal(core.restoreAncestorPermissionsSafe(ancestorStat(0, 0o41777)), true);
+});
+
+test('the ancestor rule ABSTAINS rather than refusing where it cannot decide', () => {
+  assert.equal(core.restoreAncestorPermissionsSafe(null), true);
+  assert.equal(core.restoreAncestorPermissionsSafe({ mode: 0o40777 }), true, 'no numeric uid');
+  assert.equal(core.restoreAncestorPermissionsSafe({ uid: ANCESTOR_SELF_UID }), true, 'no numeric mode');
+  // ...and the mode half of the ladder is asserted on the LADDER, because through the
+  // rule above it cannot fail: without the guard an absent mode coerces to 0, so
+  // `(0 & 0o022) === 0` answers `true` — the same value the guard produces. The
+  // assertion above therefore passes with or without the code it names, and only the
+  // shared predicate makes the abstention observable.
+  assert.equal(core.restoreOwnershipUndecidable({ uid: ANCESTOR_SELF_UID }), true,
+    'an absent mode is undecidable, not clean');
+  assert.equal(core.restoreOwnershipUndecidable({ uid: ANCESTOR_SELF_UID, mode: '0o40777' }), true,
+    'and so is a mode that is not a number');
+  assert.equal(core.restoreOwnershipUndecidable({ uid: ANCESTOR_SELF_UID, mode: 0o40755 }), false,
+    'control: a numeric pair IS decidable');
+});
+
+// THE RECORDED ROOT IS NOT AN ANCESTOR THIS REPAIR PLANTS INSIDE, and reusing one
+// predicate for both made the benign race fail. `restoreAncestorPermissionsSafe`
+// carries a write-bits half written for a directory the loop creates a child in: a
+// co-tenant who can write there can swap a component between the check and the mkdir.
+// The recorded root is the DESTINATION. Its own mode is the user's business — a
+// worktree created under umask 002 is 0775 — and refusing it turned "the directory
+// came back while we looked" into FAILED / exit 1. What still has to hold at the leaf
+// is the OWNER half, because announcing ALREADY RESTORED over somebody else's
+// directory tells the user their anchor is back when it is not.
+test('the recorded root is judged on its OWNER, never on its write bits', () => {
+  assert.equal(core.restoreRootOwnerSafe(ancestorStat(ANCESTOR_SELF_UID, 0o40775)), true,
+    'a self-owned group-writable root is the ordinary umask-002 worktree');
+  assert.equal(core.restoreRootOwnerSafe(ancestorStat(ANCESTOR_SELF_UID, 0o40777)), true);
+  assert.equal(core.restoreRootOwnerSafe(ancestorStat(0, 0o40755)), true);
+  assert.equal(core.restoreRootOwnerSafe(ancestorStat(ANCESTOR_SELF_UID + 1, 0o40700)), false,
+    'a root owned by another user is still refused');
+  // The DISCRIMINATOR: the ancestor rule and the leaf rule must disagree on exactly
+  // this input, or the leaf predicate is the ancestor one under a second name.
+  assert.equal(core.restoreAncestorPermissionsSafe(ancestorStat(ANCESTOR_SELF_UID, 0o40775)), false);
+});
+
+// The abstain ladder is SHARED, so a host that cannot decide abstains at the leaf too.
+test('the leaf owner rule abstains on the same inputs the ancestor rule abstains on', () => {
+  assert.equal(core.restoreRootOwnerSafe(null), true);
+  assert.equal(core.restoreRootOwnerSafe({ mode: 0o40777 }), true, 'no numeric uid');
+});
+
+test('a host with no POSIX identity abstains instead of refusing every restore', () => {
+  // The win32 arm, driven by removing `process.getuid` rather than by a platform
+  // branch in the test - the function reads it through `typeof`, so this is the same
+  // observation that host makes.
+  const real = process.getuid;
+  try {
+    delete process.getuid;
+    assert.equal(core.restoreAncestorPermissionsSafe(ancestorStat(12345, 0o40777)), true);
+  } finally {
+    if (real) process.getuid = real;
+  }
+});
+
+test('restoreRootRealDirectory carries the stat its callers need to judge ownership', () => {
+  // The EEXIST arm adopts a component this run did not create. It cannot apply the
+  // ancestor rule without the stat, and taking a second lstat there would judge a
+  // different instant than the one the realpath test proved.
+  // macOS spells the temp root through a symlink, and the predicate under test is
+  // realpath EQUALITY — so an uncanonicalized fixture answers real=false for a reason
+  // that has nothing to do with the stat this case is about.
+  const dir = fs.realpathSync.native(
+    fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-realdir-')),
+  );
+  try {
+    const seen = core.restoreRootRealDirectory(dir);
+    assert.equal(seen.present, true);
+    assert.equal(seen.real, true);
+    assert.equal(typeof seen.stat, 'object');
+    assert.equal(typeof seen.stat.mode, 'number');
+    const absent = core.restoreRootRealDirectory(path.join(dir, 'nope'));
+    assert.equal(absent.present, false);
+    assert.equal(absent.stat, undefined, 'an absent path carries no stat to judge');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

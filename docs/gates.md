@@ -588,26 +588,39 @@ authority the session already had and adds none.
 
 **Carried from the record is not the same as bounded, and only the first is true.** This is the
 one write class whose destination is an arbitrary absolute path: it is **not bounded by location**
-— not to `$HOME`, not to a git repository, not away from a child of the filesystem root — and the
-private records directory bounds *which record is read*, never where the directory lands. What is bounded is the DEPTH: at most four components below a nearest-existing
-ancestor the ladder proved to be a real, canonical, link-free directory (the bound is
-`RESTORE_MAX_MISSING_COMPONENTS`), with each created component re-verified by realpath. A location allowlist was weighed and refused: it would admit
+— not to `$HOME`, not to a git repository, not away from a child of the filesystem root — and
+the private records directory bounds *which record is read*, never where the directory lands.
+What is bounded is the DEPTH: at most `RESTORE_MAX_MISSING_COMPONENTS` components below a
+nearest-existing ancestor the ladder proved to be a real, canonical, link-free directory, with
+each created component re-verified by realpath. The bound is named by its constant rather than
+spelled as a number, because a numeral in prose beside the symbol that owns it is a second copy
+nothing recomputes. A location allowlist was weighed and refused: it would admit
 the ordinary case and reject legitimate roots under `/opt`, `/srv` or `/Volumes`, and it would
 be a policy invented at the boundary instead of derived from the record. The barrier is the one
-every other write class rests on — write access to the private records directory, which is
-already the capability this repair would grant.
+every other write class rests on — write access to the private records directory. What authoring
+a record already confers is the CHOICE of destination: the path comes from the record and from
+nowhere else, so this write adds no target a record author could not already name. What it adds
+is the ACT of creating a directory outside the store, which write access to the store does not
+itself perform — narrowed by the depth bound and the ancestor-permission rule, never removed.
 
-Six refusals, each naming which condition failed: `record-unreadable`, `plugin-data-mismatch`,
-`not-served-by-executing-runtime`, `root-present`, `unsafe-ancestor`,
-`too-many-missing-components`. The nearest
-existing ancestor must be a real directory that is its own realpath and not a symlink, and at
-at most `RESTORE_MAX_MISSING_COMPONENTS` components may be missing below it — a record pointing into a tree that is mostly
-gone is not a recycled worktree.
+Seven refusals, each naming which condition failed: `record-unreadable`,
+`plugin-data-mismatch`, `not-served-by-executing-runtime`, `root-present`,
+`unsafe-ancestor`, `unsafe-ancestor-ownership`, `too-many-missing-components`. The nearest
+existing ancestor must be a real directory that is its own realpath and not a symlink, it
+must not be writable by users other than its owner unless it is sticky, and at most
+`RESTORE_MAX_MISSING_COMPONENTS` components may be missing below it — a record pointing
+into a tree that is mostly gone is not a recycled worktree. The permission rule is its own
+refusal because its remedy is its own: the tree is intact, so a `chmod` fixes it when you own it,
+and a move when you do not — where `unsafe-ancestor` means the tree changed under the record. The
+refusal carries one reason for two causes, so every carrier of it names both arms: the directory
+is owned by another user, or you own it and it is group- or other-writable without the sticky bit.
 
 **It restores the ANCHOR, not the work.** The directory comes back empty, it is not a git
 worktree, and the chain that lived there is gone rather than restored; the rebuilt baseline
 reads "never active", because that is all a fresh baseline can say. Both reports state this
-before and after `--confirm`. If the directory was moved rather than deleted, moving it back
+before and after `--confirm`.
+That is what this command PLANTS,
+and it is a forecast rather than a report: when another run wins the race and creates the directory first, this run never saw the contents and says so instead. `/zensu:doctor` probes the recorded root afterwards and states what is there now. If the directory was moved rather than deleted, moving it back
 is the better repair. Provenance is a `PROJECT_ROOT_RESTORED` workflow history entry, which
 `zensu-log.sh --phase` and both phase writers reserve; it records no bypass-ledger entry,
 because no gate was escaped.

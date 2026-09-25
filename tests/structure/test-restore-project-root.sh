@@ -27,8 +27,8 @@
 #   R4x the PreToolUse recognizer's argv surface
 #   R5x the reserved provenance phase cannot be minted by a caller
 #   R6x source pins on the carriers that state the contract in prose
-#   R0  the renderRestoreRoot unit contract (node --test driver — this suite is
-#       its only discovery path)
+#   R0  the renderRestoreVerdict / performRestore / renderRestoreOutcome unit
+#       contract (node --test driver — this suite is its only discovery path)
 #   R8x the deny scope driven BEHAVIOURALLY and parsed as JSON — R7 greps the
 #       printf FORMAT STRING, which passes whatever %s expands to, so it is
 #       structurally incapable of seeing an unescaped value
@@ -61,20 +61,24 @@ expect_eq() {
 }
 
 # tests/run-all.sh discovers only test-*.sh, so a *.test.js with no driver is never
-# executed by the tree runner. This one drives renderRestoreRoot, whose refusal arm
-# is the ONLY reader of RESTORE_REMEDY and whose race, FAILED, baselineError and
-# already-present arms no fixture can reach. It runs FIRST, following the house rule
+# executed by the tree runner. This one drives renderRestoreVerdict, whose refusal arm
+# is the ONLY reader of RESTORE_REMEDY, together with performRestore and
+# renderRestoreOutcome, whose race, FAILED, baselineError and already-present arms no
+# fixture can reach. It runs FIRST, following the house rule
 # that a unit driver at the tail is the first thing a timeout drops.
 #
 # The floor is asserted because `node --test` exits 0 for a file that registers zero
-# cases, so a rename or a lost require would otherwise pass silently.
+# cases, so a rename or a lost require would otherwise pass silently. RAISE IT with the
+# file: it stood at 33 against 48 registered cases for a release, which is a floor that
+# still catches a lost require and no longer catches anything else. R13 backstops the
+# declared-versus-registered pair in tests/SUITE-OVERVIEW.md, so the two move together.
 R0_UNIT="$(node --test "$PLUGIN_DIR/tests/structure/restore-root-render-cases.test.js" 2>&1)"
 R0_RC=$?
 R0_PASS="$(printf '%s' "$R0_UNIT" | awk '/^. pass /{print $3}' | tail -1)"
-if [ "$R0_RC" -eq 0 ] && [ "${R0_PASS:-0}" -ge 33 ]; then
+if [ "$R0_RC" -eq 0 ] && [ "${R0_PASS:-0}" -ge 62 ]; then
   check "R0  restore-root-render-cases.test.js: $R0_PASS cases" PASS
 else
-  check "R0  restore-root-render-cases.test.js: rc=$R0_RC pass=${R0_PASS:-0} (floor 33)" FAIL
+  check "R0  restore-root-render-cases.test.js: rc=$R0_RC pass=${R0_PASS:-0} (floor 62)" FAIL
   printf '%s\n' "$R0_UNIT" | tail -20
 fi
 
@@ -167,16 +171,21 @@ arm() {
 # The third argument overrides the EXECUTING plugin root, which is the only way to
 # reach the not-served arm: restoreRootVerdict requires servesRecordedRuntime, and
 # that is what makes the adopt-then-restore order a refusal rather than advice.
+# The FOURTH argument separates the store the record is READ from and the store the
+# caller NAMES as plugin data. They are the same value in every ordinary call, which
+# is why `plugin-data-mismatch` — one of the six refusals — had no producer-side case
+# at all and was exercised only as an input string by the key-parity and unit rows.
 verdict() {
-  local data="$1" session="$2" exec_root="${3:-$PLUGIN_DIR}"
-  DATA="$data" SESSION="$session" CORE_PATH="$CORE" ROOT="$PLUGIN_DIR" EXEC_ROOT="$exec_root" node -e '
+  local data="$1" session="$2" exec_root="${3:-$PLUGIN_DIR}" plugin_data="${4:-$1}"
+  DATA="$data" SESSION="$session" CORE_PATH="$CORE" ROOT="$PLUGIN_DIR" EXEC_ROOT="$exec_root" \
+  PLUGIN_DATA="$plugin_data" node -e '
     const core = require(process.env.CORE_PATH);
     const binder = require(require("node:path").join(process.env.ROOT, "hooks/lib/claude-hook-session-v1.js"));
     const v = core.restoreRootVerdict({
       recordsDir: binder.privateRecordsDirectory(process.env.DATA),
       sessionId: process.env.SESSION,
       host: "claude",
-      pluginData: process.env.DATA,
+      pluginData: process.env.PLUGIN_DATA,
       executingPluginRoot: process.env.EXEC_ROOT,
     });
     console.log(v.ok ? "ok " + v.missing.length : v.reason);
@@ -210,6 +219,22 @@ FOREIGN_ROOT="$STATE_DIR/foreign-install"
 mkdir -p "$FOREIGN_ROOT"
 expect_eq "R2e  a runtime that may not serve the record refuses not-served" \
   "not-served-by-executing-runtime" "$(verdict "$GONE_DATA" gone "$FOREIGN_ROOT")"
+
+# R2i — the SIXTH refusal, and the last one to reach a producer. `plugin_data`
+# equality is one of the three conjuncts restoreRootVerdict requires, and it is what
+# keeps a record read out of one store from being repaired against another; until
+# this row the arm was reached only as an input STRING, by the key-parity check and
+# by the unit file's loop over the refusal values. Neither ever ran the comparison.
+# The fixture is the two stores R2 already armed: read the vanished-root record from
+# its own store, and NAME the healthy one as plugin data.
+expect_eq "R2i  a record read from one store with another named as plugin data is refused" \
+  "plugin-data-mismatch" "$(verdict "$GONE_DATA" gone "$PLUGIN_DIR" "$HEALTHY_DATA")"
+# ...and the CONTROL, because an arm that refuses for any mismatch would report the
+# same reason for the matching pair too. R2b already asserts `ok 1` for that pair,
+# so this states the discrimination where the reason is read rather than leaving it
+# to be inferred two hundred lines away.
+expect_eq "R2i-control the same record with its OWN store named is still restorable" \
+  "ok 1" "$(verdict "$GONE_DATA" gone "$PLUGIN_DIR" "$GONE_DATA")"
 
 echo "=== R3: end to end through the shell entry ==="
 
@@ -498,44 +523,32 @@ else check "R6i6  the CLOSED delimiter paragraph records only the parenthesis ha
 # down wherever it exists: R13 grades tests/SUITE-OVERVIEW.md and the R12 family grades
 # comment prose inside session-control-core-v1.js, so an edit to either reddens a suite
 # named for the project-root restore.
-# R10c — every guarded FALLBACK for `baselineProvenanceUnrecorded` must apply the same
-# rule as the shared predicate. The core extracted that predicate because the rule "was
-# spelled three times with three different tests ... and the three had already diverged
-# on which provenance values count" — and the `typeof ... === "function" ? shared :
-# <inline copy>` form kept one of those divergences alive: the SessionStart self-heal's
-# fallback omitted the `existing` exclusion, so on a core predating the export it warns
-# about a missing provenance entry for a document nothing rebuilt. Anchored on the
-# GUARD, not on a bare comparison: this feature has other `provenance !== "recorded"`
-# tests that are deliberately different predicates.
-# THREE weaknesses were measured in the first spelling of this helper and all three are
-# answered here. (1) It did not strip comments, unlike six sibling slicers in this file,
-# so a fallback reduced to `!== "recorded"` sitting beside a comment that happens to
-# name `existing` still satisfied the window. (2) It counted RAW matches of the symbol,
-# which is 6 across 3 carriers — one of them a comment mention — so the control's floor
-# of 3 survived a deleted carrier. It counts CARRIERS now: a carrier is the `typeof …
-# ===` guard line that opens the ternary, which is one per site by construction. (3) It
-# had no bite; R10c-bite below plants a stripped fallback and requires the check to see
-# it.
-r10c_fallbacks_ok() {
+# R10c — NO consumer of `baselineProvenanceUnrecorded` may re-derive the rule. The core
+# extracted that predicate because the rule "was spelled three times with three different
+# tests ... and the three had already diverged on which provenance values count", and the
+# first repair kept every re-spelling alive under a `typeof ... === "function" ? shared :
+# <inline copy>` guard. Aligning the copies was not enough: a fallback ANSWERS where the
+# core prescribes withholding, and it answers by comparing the raw `provenance` value the
+# core's own header forbids a consumer to compare. All three carriers are THREE-VALUED
+# now — `null` is "this check could not be made" — and each writer says so instead of
+# guessing. This check holds that: a carrier may call the export, and may withhold, but
+# must never compute a verdict of its own.
+# Anchored on the GUARD, not on a bare comparison: this feature has other
+# `provenance !== "recorded"` tests that are deliberately different predicates. The
+# anchor admits BOTH guard spellings (`===` for a ternary, `!==` for an early return),
+# because pinning one spelling silently drops a carrier that switched to the other —
+# which is exactly how this row first went from 2 carriers to 1 with nothing named.
+# Comments are stripped, like six sibling slicers in this file, so a window whose only
+# `provenance !==` sits in prose describing the retired fallback stays clean.
+r10c_carriers_ok() {
   awk '
     { line = $0; sub(/\/\/.*$/, "", line) }
-    line ~ /typeof[[:space:]]+core\.baselineProvenanceUnrecorded[[:space:]]*===/ {
-      n++; open = 1; left = 8; buf = ""
+    line ~ /typeof[[:space:]]+core\.baselineProvenanceUnrecorded[[:space:]]*[!=]==/ {
+      n++; open = 4; buf = ""
     }
-    open {
-      buf = buf line " "; left--
-      # The window ENDS at the statement, not after a fixed number of lines. A count was
-      # tried first and was wrong in the direction that matters: the three carriers are
-      # 3, 3 and 4 lines long, so a 3-line window reported the four-line one as missing
-      # its `existing` clause, and widening the count to 4 would admit an unrelated
-      # following line and break again on the first five-line carrier. The terminators
-      # are the two shapes these statements actually take — `)) {` for the two `if`
-      # carriers and a trailing `;` for the `const` one — and `left` is a runaway guard,
-      # not a window: a carrier that never terminates is reported bad rather than
-      # silently accepted.
-      if (line ~ /\)\)[[:space:]]*\{[[:space:]]*$/ || line ~ /;[[:space:]]*$/ || left <= 0) {
-        open = 0; if (buf !~ /existing/) bad++
-      }
+    open > 0 {
+      buf = buf line " "; open--
+      if (open == 0 && buf ~ /provenance[[:space:]]*!==/) bad++
     }
     END { printf "%d %d", n+0, bad+0 }
   ' "$1"
@@ -543,51 +556,52 @@ r10c_fallbacks_ok() {
 R10C_FILES="$PLUGIN_DIR/hooks/lib/session-adopt-report-v1.js $PLUGIN_DIR/hooks/lib/claude-session-control-v1.js"
 R10C_SEEN=0; R10C_BAD=""
 for r10c_f in $R10C_FILES; do
-  r10c_out="$(r10c_fallbacks_ok "$r10c_f")"
+  r10c_out="$(r10c_carriers_ok "$r10c_f")"
   r10c_n="${r10c_out%% *}"; r10c_b="${r10c_out##* }"
   R10C_SEEN=$((R10C_SEEN + r10c_n))
   [ "$r10c_b" -eq 0 ] || R10C_BAD="$R10C_BAD $(basename "$r10c_f")($r10c_b)"
 done
-if [ "$R10C_SEEN" -eq 3 ]; then
-  check "R10c-control all three guarded fallbacks are found ($R10C_SEEN carriers)" PASS
-else check "R10c-control expected 3 guarded fallbacks, found $R10C_SEEN" FAIL; fi
+# TWO carriers, not three: the report layer's two call sites were collapsed into one
+# module-local `provenanceUnrecorded`, which is the reduction this check exists to make
+# safe. Lower the number WITH a collapse and never to make a red check green.
+if [ "$R10C_SEEN" -eq 2 ]; then
+  check "R10c-control both carriers are found ($R10C_SEEN carriers)" PASS
+else check "R10c-control expected 2 carriers, found $R10C_SEEN" FAIL; fi
 if [ -z "$R10C_BAD" ]; then
-  check "R10c every guarded fallback excludes \`existing\` as the shared predicate does" PASS
-else check "R10c a guarded fallback omits the \`existing\` exclusion:$R10C_BAD" FAIL; fi
-# R10c-bite — the check itself, driven against a carrier whose fallback was reduced to
-# the bare inequality while a comment beside it still names `existing`. That is the exact
-# shape the unstripped window admitted, so a helper that regressed to it reports a clean
-# tree here and this row turns red.
+  check "R10c no carrier re-derives the rule from \`provenance\`; each withholds instead" PASS
+else check "R10c a carrier re-derives the rule from \`provenance\`:$R10C_BAD" FAIL; fi
+# R10c-bite — the check itself, driven against the RETIRED shape: the guarded fallback
+# exactly as it stood, `existing` exclusion included. It was the corrected version of that
+# fallback and it is still what this row now forbids, so a helper that regressed to
+# grading the exclusion rather than the re-derivation reports this fixture clean and this
+# row turns red. The `provenance !==` lands on the THIRD line of the window, which is the
+# one a shorter window would drop.
 R10C_BITE_SRC="$STATE_DIR/r10c-bite.js"
-# The `existing` mention sits INSIDE the window, as a trailing comment on a line the
-# window already holds. On line 1 it was processed while `open` was still 0 and never
-# entered `buf`, so a helper that had LOST its comment stripping returned the same
-# `1 1` as one that kept it — the bite could not fail for its stated reason. The line
-# chosen is the non-terminator one: on the closing line the strip and the window end
-# in the same pass, which is a second thing to get wrong for no gain.
-{
-  printf '%s\n' '    if (typeof core.baselineProvenanceUnrecorded === "function"'
-  printf '%s\n' '      ? core.baselineProvenanceUnrecorded(baseline) // not the existing exclusion'
-  printf '%s\n' '      : Boolean(baseline && baseline.provenance !== "recorded")) {'
-} > "$R10C_BITE_SRC"
-R10C_BITE_OUT="$(r10c_fallbacks_ok "$R10C_BITE_SRC")"
-if [ "${R10C_BITE_OUT%% *}" = "1" ] && [ "${R10C_BITE_OUT##* }" = "1" ]; then
-  check "R10c-bite the check sees a fallback that dropped the \`existing\` exclusion" PASS
-else check "R10c-bite the check cannot see a stripped fallback (got: $R10C_BITE_OUT)" FAIL; fi
-# R10c-bite2 — the other direction. A carrier whose exclusion is real CODE must be
-# reported clean, or the row above would pass for a helper that simply calls every
-# fallback bad. Same three lines, the comment replaced by the genuine predicate.
-R10C_OK_SRC="$STATE_DIR/r10c-ok.js"
 {
   printf '%s\n' '    if (typeof core.baselineProvenanceUnrecorded === "function"'
   printf '%s\n' '      ? core.baselineProvenanceUnrecorded(baseline)'
-  printf '%s\n' '      : Boolean(baseline && baseline.provenance !== "recorded" && baseline.provenance !== "existing")) {'
+  printf '%s\n' '      : Boolean(baseline && baseline.provenance !== "recorded"'
+  printf '%s\n' '        && baseline.provenance !== "existing")) {'
+} > "$R10C_BITE_SRC"
+R10C_BITE_OUT="$(r10c_carriers_ok "$R10C_BITE_SRC")"
+if [ "${R10C_BITE_OUT%% *}" = "1" ] && [ "${R10C_BITE_OUT##* }" = "1" ]; then
+  check "R10c-bite the check sees a carrier that re-derives the verdict" PASS
+else check "R10c-bite the check cannot see a re-derived verdict (got: $R10C_BITE_OUT)" FAIL; fi
+# R10c-bite2 — the other direction. A carrier that WITHHOLDS must be reported clean, or
+# the row above would pass for a helper that simply calls every carrier bad. This is the
+# shipped shape, comment and all: the prose names the retired comparison, so this fixture
+# also proves the comment stripping the window depends on.
+R10C_OK_SRC="$STATE_DIR/r10c-ok.js"
+{
+  printf '%s\n' '  // the fallback that used to stand here read baseline.provenance !== "recorded"'
+  printf '%s\n' '  if (typeof core.baselineProvenanceUnrecorded !== "function") return null;'
+  printf '%s\n' '  return Boolean(core.baselineProvenanceUnrecorded(baseline));'
+  printf '%s\n' '}'
 } > "$R10C_OK_SRC"
-R10C_OK_OUT="$(r10c_fallbacks_ok "$R10C_OK_SRC")"
+R10C_OK_OUT="$(r10c_carriers_ok "$R10C_OK_SRC")"
 if [ "${R10C_OK_OUT%% *}" = "1" ] && [ "${R10C_OK_OUT##* }" = "0" ]; then
-  check "R10c-bite2 a fallback whose exclusion is real code is reported clean" PASS
-else check "R10c-bite2 a correct fallback is reported bad (got: $R10C_OK_OUT)" FAIL; fi
-
+  check "R10c-bite2 a carrier that withholds is reported clean" PASS
+else check "R10c-bite2 a withholding carrier is reported bad (got: $R10C_OK_OUT)" FAIL; fi
 # R10d — the eager-vs-lazy criterion must not rest on a version range. `core` is
 # required RELATIVELY from this file's own directory, so the core it meets is always
 # its own sibling in the same tree; the lineage rule decides which RECORD a runtime may
@@ -680,6 +694,322 @@ else check "R6i8 the Workflow-Baseline Repair roster misses:$R6I8_MISSING" FAIL;
 if ! grep -qF 'TWO couplings here fire in the UNOBVIOUS direction' "$PLUGIN_DIR/CLAUDE.md"; then
   check "R6i9 the coupling paragraph states members rather than a numeral" PASS
 else check "R6i9 the coupling paragraph still opens with a numeral" FAIL; fi
+# ...with a PLANTED-NEEDLE control, the shape R12g-control and R12h-control already use:
+# an absence assertion whose needle is mis-spelled passes with the defect still there.
+if printf 'x TWO couplings here fire in the UNOBVIOUS direction y\n' \
+  | grep -qF 'TWO couplings here fire in the UNOBVIOUS direction'; then
+  check "R6i9-control the coupling needle matches the numeral it forbids" PASS
+else check "R6i9-control the coupling needle matches the numeral it forbids" FAIL; fi
+# ...and the POSITIVE anchor, so deleting the paragraph outright cannot pass as a fix.
+if grep -qF 'are stated as MEMBERS, never as' "$PLUGIN_DIR/CLAUDE.md"; then
+  check "R6i9-anchor the coupling paragraph is still there to be graded" PASS
+else check "R6i9-anchor the coupling paragraph is still there to be graded" FAIL; fi
+
+# R6i10-R6i16 — the round that SPLIT the renderer left the governing section navigating
+# by the deleted symbol, by a name that never shipped, and by the wrong pin ids, and it
+# recorded the two-mechanism raced contract nowhere at all. A roster is what a
+# maintainer and a port work FROM, so every one of these sends someone to a symbol that
+# does not exist or to a check that grades something else.
+R6I10_MISSING=""
+for r6i10_sym in renderRestoreVerdict renderRestoreOutcome performRestore \
+  restoreBaselineRows restoreNotRepairable RESTORE_TAMPER_NOTE; do
+  printf '%s' "$R6_SECTION" | grep -qF "$r6i10_sym" || R6I10_MISSING="$R6I10_MISSING $r6i10_sym"
+done
+if [ -z "$R6I10_MISSING" ]; then
+  check "R6i10 the roster names every symbol the renderer split shipped" PASS
+else check "R6i10 the roster misses:$R6I10_MISSING" FAIL; fi
+# The deleted renderer, and a name that NEVER existed. Both are file-wide: a reader
+# greps, and a hit anywhere sends them looking.
+# The R12b precedent: a retired name may survive as a RETRACTION and nowhere else, so
+# a maintainer who greps it lands on the sentence saying it never existed. Every
+# occurrence must sit on a line that also says so.
+R6I11_LIVE="$(grep -F 'renderRestoreResult' "$PLUGIN_DIR/CLAUDE.md" \
+  | grep -cvF 'never shipped' || true)"
+if [ "${R6I11_LIVE:-0}" -eq 0 ]; then
+  check "R6i11 the never-shipped renderer survives only as a retraction" PASS
+else check "R6i11 CLAUDE.md names a renderer that never shipped ($R6I11_LIVE live)" FAIL; fi
+if grep -qF 'renderRestoreResult' "$PLUGIN_DIR/CLAUDE.md"; then
+  check "R6i11-control the retraction records the retired name verbatim" PASS
+else check "R6i11-control the retraction records the retired name verbatim" FAIL; fi
+if grep -qF 'writeBaselineRows' "$PLUGIN_DIR/CLAUDE.md"; then
+  check "R6i12 CLAUDE.md still names the pre-split baseline-row writer" FAIL
+else check "R6i12 CLAUDE.md names the baseline-row writer that shipped" PASS; fi
+if grep -qF 'restoreBaselineRows' "$PLUGIN_DIR/CLAUDE.md"; then
+  check "R6i12-control the shipped name is the one CLAUDE.md carries" PASS
+else check "R6i12-control the shipped name is the one CLAUDE.md carries" FAIL; fi
+# The two-mechanism raced contract. `alreadyPresent` is a RETURNED field two suites pin
+# and the suffix is what a reader distinguishes the entries by; the section recorded
+# neither, so the EEXIST paragraph still described only the pre-change throw ladder.
+for r6i13_sym in alreadyPresent RESTORE_HISTORY_RACED_SUFFIX; do
+  if printf '%s' "$R6_SECTION" | grep -qF "$r6i13_sym"; then
+    check "R6i13 the section records $r6i13_sym" PASS
+  else check "R6i13 the section does not record $r6i13_sym" FAIL; fi
+done
+if printf '%s' "$R6_SECTION" | grep -qF 'completed by another run'; then
+  check "R6i14 the section records the raced reason suffix verbatim" PASS
+else check "R6i14 the section does not record the raced reason suffix" FAIL; fi
+# The pin ids. R11d/R11e grade `zensu_safe_display_path` in an unrelated block; the
+# caller-identity clauses are pinned by the R11f/R11g family. A wrong id is worse than
+# none: it reads as covered.
+if printf '%s' "$R6_SECTION" | grep -qF '`R11d`/`R11e` pin both clauses'; then
+  check "R6i15 the caller-identity paragraph names the wrong pins" FAIL
+else check "R6i15 the caller-identity paragraph does not name the wrong pins" PASS; fi
+if printf '%s' "$R6_SECTION" | grep -qF 'R11f'; then
+  check "R6i15-control the paragraph names the pins that grade it" PASS
+else check "R6i15-control the paragraph names the pins that grade it" FAIL; fi
+# The SCOPE of that same paragraph. The module reads its own inputs from `ZADOPT_*`,
+# and no `ZADOPT_*` name is in CONTROL_BINDINGS — so the gate covers one spelling of one
+# channel, not the channel this module actually reads, and the paragraph read as though
+# it closed the residual.
+# Needle on the CLAIM, not on the token: `ZADOPT_MODE` already occurs in the roster
+# above, so a bare `ZADOPT_` match is satisfied by a sentence about something else.
+if printf '%s' "$R6_SECTION" | grep -qF 'is in `CONTROL_BINDINGS`'; then
+  check "R6i16 the caller-identity paragraph states the scope of what the gate covers" PASS
+else check "R6i16 the caller-identity paragraph omits the channel the module reads" FAIL; fi
+
+# R6i17 — the benign-race builder's CALLER COUNT, DERIVED from the core rather than read
+# out of the prose. `R8o2` already pins the count inside the suite; nothing pinned the
+# governing section, which said "three sites", "its three callers" and "All three raced
+# throws" while the core had four and the core's own comment said four. A number stated
+# three times in one section and nowhere derived is the drift this file records against
+# its own rosters — so the check computes it and requires the section to agree.
+R6I17_CALLS="$(grep -c 'restoreRootAlreadyPresentError(' "$CORE")"
+R6I17_N=$((R6I17_CALLS - 1))   # minus the definition
+case "$R6I17_N" in
+  3) R6I17_WORD=three ;; 4) R6I17_WORD=four ;; 5) R6I17_WORD=five ;;
+  *) R6I17_WORD="" ;;
+esac
+if [ -n "$R6I17_WORD" ]; then
+  check "R6i17-control the caller count is derivable from the core ($R6I17_N)" PASS
+else check "R6i17-control the caller count is not derivable (got $R6I17_N)" FAIL; fi
+# BOTH directions. The positive needle alone passes for a section that says four in one
+# sentence and three in the next, which is exactly the state this row found.
+# The needles name the BUILDER's own three sentences. A bare `<word> (sites|callers)`
+# was tried and was wrong in the direction that matters here: the same section carries a
+# correct "THREE sites" about the provenance predicate's consumers, so the row reported a
+# stale count for a sentence that was right.
+R6I17_WRONG=""
+for r6i17_w in three four five; do
+  [ "$r6i17_w" = "$R6I17_WORD" ] && continue
+  printf '%s' "$R6_SECTION" | tr '\n' ' ' \
+    | grep -qiE "(constructed verbatim at $r6i17_w sites|its $r6i17_w callers|All $r6i17_w raced throws)" \
+    && R6I17_WRONG="$R6I17_WRONG $r6i17_w"
+done
+if [ -z "$R6I17_WRONG" ]; then
+  check "R6i17 no stale builder-caller count survives in the section" PASS
+else check "R6i17 the section states a builder-caller count the core contradicts:$R6I17_WRONG" FAIL; fi
+if printf '%s' "$R6_SECTION" | tr '\n' ' ' | grep -qF "All $R6I17_WORD raced throws"; then
+  check "R6i17-anchor the section states the derived count" PASS
+else check "R6i17-anchor the section does not state the derived count ($R6I17_WORD)" FAIL; fi
+
+# R6i20 — the consumer census for the shared provenance predicate, DERIVED. The roster
+# names the consumers and then states how many there are, and the numeral went stale the
+# first time a fourth renderer began calling the shared helper: the section said THREE
+# while `restoreProvenanceRows` had joined `renderBaselineNotes`, `restoreBaselineRows`
+# and the SessionStart self-heal. The row derives the set from the two source files that
+# hold it and requires the roster to name every member, so a fifth consumer fails here
+# rather than being counted by nobody.
+R6I20_CONSUMERS="$(
+  {
+    awk '/provenanceUnrecorded\(/ { print }' "$ADOPT_REPORT" >/dev/null 2>&1
+    awk '
+      /^function [a-zA-Z_]+\(/ { fn = $2; sub(/\(.*/, "", fn) }
+      /provenanceUnrecorded\(/ && fn != "provenanceUnrecorded" { print fn }
+    ' "$ADOPT_REPORT"
+    grep -q 'core.baselineProvenanceUnrecorded' \
+      "$PLUGIN_DIR/hooks/lib/claude-session-control-v1.js" && echo claude-session-control-v1
+  } | sort -u
+)"
+R6I20_N="$(printf '%s\n' "$R6I20_CONSUMERS" | grep -c '[a-z]' || true)"
+if [ "${R6I20_N:-0}" -ge 4 ]; then
+  check "R6i20-control the consumer set was derived from source ($R6I20_N)" PASS
+else check "R6i20-control the consumer set was derived from source ($R6I20_N)" FAIL; fi
+R6I20_MISSING=""
+for r6i20_c in $R6I20_CONSUMERS; do
+  printf '%s' "$R6_SECTION" | grep -qF "$r6i20_c" || R6I20_MISSING="$R6I20_MISSING $r6i20_c"
+done
+if [ -z "$R6I20_MISSING" ]; then
+  check "R6i20 the roster names every consumer of the shared provenance predicate" PASS
+else check "R6i20 the roster misses a provenance consumer:$R6I20_MISSING" FAIL; fi
+# ...and it must not state the count as a numeral beside them, which is what went stale.
+if printf '%s' "$R6_SECTION" | tr '\n' ' ' \
+  | grep -qE '(TWO|THREE|FOUR|FIVE) sites, and this roster'; then
+  check "R6i20b the roster states the consumer count as a numeral" FAIL
+else check "R6i20b the roster names the consumers without a numeral beside them" PASS; fi
+
+# R6i21 — the refusal-member census, DERIVED from RESTORE_ROOT_REFUSALS itself. The
+# section states how many members have a producer-side case, and that numeral went stale
+# the moment `unsafe-ancestor-ownership` landed. Deriving it is the only form that does
+# not need editing again for the next member.
+# NOT `$R12_CORE`: that binding is introduced hundreds of lines below this row, so under
+# `set -u` it would be empty here and the count would derive silently as zero.
+R6I21_N="$(awk '/^const RESTORE_ROOT_REFUSALS = Object.freeze\(\{/,/^\}\);/' \
+  "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" \
+  | grep -cE "^  [A-Z_]+: '")"
+case "$R6I21_N" in
+  6) R6I21_WORD="six" ;;
+  7) R6I21_WORD="seven" ;;
+  8) R6I21_WORD="eight" ;;
+  *) R6I21_WORD="" ;;
+esac
+if [ -n "$R6I21_WORD" ]; then
+  check "R6i21-control the refusal member count was derived ($R6I21_N)" PASS
+else check "R6i21-control the refusal member count was derived ($R6I21_N)" FAIL; fi
+# The WHOLE section, Known gaps included: `$R6_SECTION` stops at the first `**Known gaps`
+# line by design, and this census lives inside that block — so the slice every other row
+# uses cannot see it, and a needle against it would pass over the sentence forever.
+R6I21_FULL="$(awk '/^## Restoring a Vanished Recorded Project Root/{on=1; print; next} \
+  on && /^## /{exit} on{print}' "$PLUGIN_DIR/CLAUDE.md" | tr '\n' ' ')"
+if printf '%s' "$R6I21_FULL" | grep -qF "all $R6I21_WORD members of \`RESTORE_ROOT_REFUSALS\`"; then
+  check "R6i21 the producer-side census states the derived member count" PASS
+else check "R6i21 the producer-side census does not state the derived count ($R6I21_WORD)" FAIL; fi
+# ...and the NEXT-member ordinal that rides beside the hand-maintained R7a/R7b numerals
+# has to move with it, or the section tells a maintainer that the member already shipped
+# is the one that would fail those rows.
+case "$R6I21_N" in
+  6) R6I21_NEXT="seventh" ;;
+  7) R6I21_NEXT="eighth" ;;
+  8) R6I21_NEXT="ninth" ;;
+  *) R6I21_NEXT="" ;;
+esac
+# Either article: the ordinals this derives alternate between `a` and `an`, and pinning
+# one spelling makes the row fail on a correct sentence.
+if printf '%s' "$R6I21_FULL" | grep -qE "so an? $R6I21_NEXT member that does not reach them"; then
+  check "R6i21b the next-member ordinal matches the derived count" PASS
+else check "R6i21b the next-member ordinal is stale ($R6I21_NEXT)" FAIL; fi
+
+# R6i18 — the CLAUDE.md-grading family must be named as a FAMILY, never as a numeric
+# range. This file's own rule, stated in this very section about the `P6s` family, is
+# that a hand-maintained numeral goes stale on the next check added — and the range
+# written there went stale exactly that way, reading `R6i2`-`R6i9` against a suite that
+# had grown past R6i16. The needle is the endpoint SHAPE, not a particular number, so
+# raising it is not a way to make this row green.
+R6I18_SLICE="$(printf '%s' "$R6_SECTION" | tr '\n' ' ' \
+  | grep -o 'the CLAUDE.md-grading[^;]*' || true)"
+if [ -n "$R6I18_SLICE" ]; then
+  check "R6i18-control the CLAUDE.md-grading family clause is located" PASS
+else check "R6i18-control the CLAUDE.md-grading family clause is located" FAIL; fi
+# STRIPPED of backticks and of the spaces around a hyphen FIRST, then matched on the
+# SHAPE. The three hand-written patterns this replaces could not see the very spelling
+# the row exists for: `` `R6i2`-`R6i9` `` puts a backtick between the digit and the
+# hyphen, so the two shape patterns missed it and only the third — a literal for that
+# one spelling — caught it. A guard whose coverage is a list of spellings goes stale
+# the same way the numeral it grades does.
+R6I18_NORM="$(printf '%s' "$R6I18_SLICE" | tr -d '\140' | sed -e 's/[[:space:]]*-[[:space:]]*/-/g')"
+case "$R6I18_NORM" in
+  *R6i[0-9]-R6i[0-9]*)
+    check "R6i18 the family is named by a numeric range that goes stale" FAIL ;;
+  *) check "R6i18 the family is named as a family, not as a numeric range" PASS ;;
+esac
+
+# R6i19 — the `baselineProvenanceUnrecorded` roster must state the CONTRACT its three
+# consumers share, not merely count them. The consumers are three-valued now: a core
+# that exports no predicate makes each one DISCLOSE that the check could not be made,
+# and none of them may answer from a rule of its own. A roster that lists three sites
+# and says nothing about that is what sends a port to re-add a guarded fallback — the
+# defect R10c exists to forbid. It must also stop pointing at ITSELF: the clause named
+# a roster "in" the section it is already inside, so the reader is sent nowhere.
+# A FIXED window rather than a `;` terminator. The contract this row grades is stated in
+# the clauses AFTER the consumer list, and that list itself contains semicolons — so a
+# first-semicolon window located the entry and could never see what it is checking for.
+# `awk` and not `grep -o` with a repetition count: BSD grep refuses any interval above
+# 255 with `maximum repetition exceeds 255`, so the window a GNU host accepts empties the
+# slice on macOS — and an empty slice reads as "the clause is gone" rather than as a
+# portability fault. Same both-ways trap the bash 3.2 note in CLAUDE.md records.
+R6I19_SLICE="$(printf '%s' "$R6_SECTION" | tr '\n' ' ' \
+  | awk '{ i = index($0, "baselineProvenanceUnrecorded"); if (i) print substr($0, i, 1200) }')"
+if [ -n "$R6I19_SLICE" ]; then
+  check "R6i19-control the provenance-predicate roster clause is located" PASS
+else check "R6i19-control the provenance-predicate roster clause is located" FAIL; fi
+case "$R6I19_SLICE" in
+  *'Restoring a Vanished Recorded Project Root'*)
+    check "R6i19 the roster clause points at the section it is already inside" FAIL ;;
+  *withhold*|*WITHHOLD*|*'three-valued'*|*'THREE-VALUED'*)
+    check "R6i19 the roster states the withholding contract its consumers share" PASS ;;
+  *) check "R6i19 the roster counts consumers without stating their contract" FAIL ;;
+esac
+
+# R6m — every operator carrier that states the repair's COST must also carry the
+# qualifier the renderer learned. The doctor row now PROBES the recorded root and says
+# what is there NOW, and the report's raced arm no longer claims to know; a carrier that
+# still teaches "the directory comes back empty, it is not a git worktree" as an
+# unconditional fact of the OUTCOME contradicts both, and CLAUDE.md's own roster names
+# every one of these files as an operator account for this feature. The rule is stated as
+# a PAIR — the claim and its qualifier — rather than as a forbidden phrase, because the
+# claim is still exactly right as a FORECAST of what the command plants.
+# The qualifier is looked for in the PARAGRAPH that carries the claim, never file-wide.
+# A whole-file `grep -qF 'another run'` passed over a live drift: one carrier stated the
+# retired EMPTY sentence as the DOCTOR ROW's own words in one paragraph while an unrelated
+# paragraph seven lines below happened to contain the qualifier.
+# R15 — the one call that binds the rendered root. `performRestore`'s second parameter
+# never reaches the writer (`runRestore(request)` takes the request alone); it exists to
+# bind `<path>` in the raced arm, whose throw carries `created` and nothing else. So the
+# value `main()` passes there IS the reported root, and a caller that substituted its own
+# anchor would tell the reader to run `git worktree add` against a directory no verdict
+# judged. The unit file drives the parameter; only this row sees which value main supplies.
+if grep -qF 'performRestore(request, restoreVerdict.projectRoot)' "$ADOPT_REPORT"; then
+  check "R15 main hands performRestore the root the verdict itself carried" PASS
+else check "R15 main hands performRestore the root the verdict itself carried" FAIL; fi
+# ...and the needle has to be able to miss, or it says nothing about which root is passed.
+# ...and the control must exclude the DEFINITION line, or it cannot fail for the reason
+# it exists for: `function performRestore(request, projectRoot, deps)` contains the same
+# substring, so a bare needle stayed green after the CALL lost its second argument.
+if grep -F 'performRestore(request, ' "$ADOPT_REPORT" | grep -vqF 'function performRestore'; then
+  check "R15-control a two-argument CALL (not the definition) is present" PASS
+else check "R15-control a two-argument CALL (not the definition) is present" FAIL; fi
+
+# ONE list, read by the scan AND by the needle below it. The needle used to hand-copy
+# it and had already drifted: `skills/adopt-session/SKILL.md` was listed twice while
+# `docs/tdd-manager-workflow.md` and `skills/doctor/SKILL.md` were absent — so the row
+# that exists to prove the cost claim still occurs SOMEWHERE was reading a different
+# set of carriers from the row that checks every carrier's qualifier.
+R6J_CARRIERS="docs/gates.md
+docs/operations.md
+docs/session-control.md
+docs/tdd-manager-workflow.md
+skills/adopt-session/SKILL.md
+skills/doctor/SKILL.md"
+R6J_FAIL=""
+R6J_FILES=0
+R6J_LISTED=0
+for r6j in $R6J_CARRIERS; do
+  R6J_LISTED=$((R6J_LISTED + 1))
+  r6j_file="$PLUGIN_DIR/$r6j"
+  if [ ! -f "$r6j_file" ]; then R6J_FAIL="$R6J_FAIL missing:$r6j"; continue; fi
+  R6J_FILES=$((R6J_FILES + 1))
+  # One blank-line-delimited paragraph per record, so the qualifier has to sit beside the
+  # claim it qualifies rather than anywhere in the file.
+  # FLATTENED first: these carriers wrap, so an unflattened match reports a paragraph
+  # whose qualifier merely straddles a line break — which is a defect in the scan, not in
+  # the carrier, and the first spelling of this row produced exactly that false positive.
+  r6j_bad="$(awk 'BEGIN{RS=""} { f=$0; gsub(/[ \t\n]+/, " ", f); if (f ~ /comes back [Ee][Mm][Pp][Tt][Yy]|came back EMPTY/ && f !~ /another run/) n++ } END{print n+0}' "$r6j_file")"
+  [ "$r6j_bad" = "0" ] || R6J_FAIL="$R6J_FAIL $r6j($r6j_bad)"
+done
+if [ -z "$R6J_FAIL" ]; then
+  check "R6m every paragraph stating the cost claim also carries the raced qualifier" PASS
+else check "R6m paragraphs still teaching the cost unconditionally:$R6J_FAIL" FAIL; fi
+# ...and the control counts FILES EXAMINED, never needle matches. Counting matches made
+# the retired unconditional claim MANDATORY in all five carriers, so removing it from one
+# turned this control red — it blocked the very repair the row above asks for.
+# DERIVED from the list itself rather than a numeral beside it: the list gained a sixth
+# carrier and this control still read five, so the row that exists to prove the scan was
+# complete reported the completed scan as short.
+if [ "$R6J_FILES" -eq "$R6J_LISTED" ]; then
+  check "R6m-control every listed carrier was examined ($R6J_FILES)" PASS
+else check "R6m-control the carrier scan examined only $R6J_FILES of $R6J_LISTED" FAIL; fi
+# The paragraph scan is a real scan: at least one carrier must still state the claim as a
+# FORECAST, or R6m would pass over a tree in which the whole census had been deleted.
+R6J_SEEN=0
+for r6j in $R6J_CARRIERS; do
+  grep -qiE 'comes back (empty|EMPTY)|came back EMPTY' "$PLUGIN_DIR/$r6j" && R6J_SEEN=$((R6J_SEEN + 1))
+done
+if [ "$R6J_SEEN" -ge 1 ]; then
+  check "R6m-needle the cost claim still occurs in at least one carrier ($R6J_SEEN)" PASS
+else check "R6m-needle the cost-claim needle matches nothing, so R6m grades nothing" FAIL; fi
+# R6m2 — the worst of them asserted the claim OF THE ROW, which the probe falsified.
+if grep -qF 'and so does the `/zensu:doctor` row that offers it' "$PLUGIN_DIR/docs/session-control.md"; then
+  check "R6m2 docs/session-control.md still asserts the retracted claim of the doctor row" FAIL
+else check "R6m2 docs/session-control.md no longer asserts the retracted claim of the row" PASS; fi
 
 # R13c — ONE population, ONE table, TWO greps. R13B_ROWS and R13_ROWS derive the unit-file
 # row set through different character classes, so an underscore-named unit file would be
@@ -731,7 +1061,7 @@ R2_KEYS="$(DATA="$GONE_DATA" SESSION=gone CORE_PATH="$CORE" ROOT="$PLUGIN_DIR" n
   process.stdout.write(Object.keys(r).sort().join(","));
 ' 2>&1)"
 expect_eq "R2f  the writer returns its full key set (writer-side snapshot)" \
-  "baseline,baselineError,baselineNotRepairable,created,nearestExisting,projectRoot,provenance,provenanceCause" "$R2_KEYS"
+  "alreadyPresent,baseline,baselineError,baselineNotRepairable,created,nearestExisting,projectRoot,provenance,provenanceCause" "$R2_KEYS"
 
 echo "=== R7: the remedy table, the race predicate, the deny scope, the doc ==="
 
@@ -748,7 +1078,7 @@ const missing = refusals.filter((r) => !remedies.includes(r));
 const orphan = remedies.filter((r) => !refusals.includes(r));
 process.stdout.write(`${refusals.length}|${missing.join(",")}|${orphan.join(",")}`);
 ' "$CORE" "$ADOPT_REPORT" 2>&1)"
-expect_eq "R7a  every refusal has a remedy and no remedy is orphaned" "6||" "$R7_PARITY"
+expect_eq "R7a  every refusal has a remedy and no remedy is orphaned" "7||" "$R7_PARITY"
 
 # The restore set is a SEPARATE vocabulary from BASELINE_REFUSALS on purpose — the two
 # commands answer different questions, and one shared set would invite a caller to
@@ -773,13 +1103,13 @@ expect_eq "R7a2 the two NOT_SERVED members spell one condition one way" \
 R7_EMPTY="$(node -e '
 const rep = require(process.argv[1]);
 const rows = Object.entries(rep.RESTORE_REMEDY);
-const actionable = /\/zensu:|fresh Claude Code session|Inspect |move it back/;
+const actionable = /\/zensu:|fresh Claude Code session|Inspect |move it back|chmod/;
 const thin = rows
   .filter(([, v]) => typeof v !== "string" || !actionable.test(v))
   .map(([k]) => k);
 process.stdout.write(rows.length + "|" + (thin.join(",") || "none"));
 ' "$ADOPT_REPORT" 2>&1)"
-expect_eq "R7b  every remedy row names an actionable next step" "6|none" "$R7_EMPTY"
+expect_eq "R7b  every remedy row names an actionable next step" "7|none" "$R7_EMPTY"
 
 # The typed race is what separates "another process created the root between the
 # verdict and the mkdir" — benign, the caller reports success — from a genuine
@@ -863,6 +1193,66 @@ else check "R7i  the section states the adopt-then-restore order" FAIL; fi
 if printf '%s' "$GATES_SEC" | grep -qF -- 'No argument names a directory'; then
   check "R7j  the section states the no-argv-path safety argument" PASS
 else check "R7j  the section states the no-argv-path safety argument" FAIL; fi
+
+# R7k — a DOUBLED WORD in the operator account. The depth sentence shipped reading
+# "and at\nat most `RESTORE_MAX_MISSING_COMPONENTS` components may be missing", which a
+# line-scoped reader cannot see: the duplication straddles the wrap. Flattened first,
+# for that reason. The needle is the SHAPE, so it covers the next one too.
+R7K_FLAT="$(printf '%s' "$GATES_SEC" | tr '\n' ' ' | tr -s ' ')"
+# `awk` token comparison, not a backreference: `grep -E '\b([A-Za-z]+) \1\b'` reported
+# `own rea`, `the pri` and `the wor` on this very section — BSD grep does not honour the
+# backreference in ERE, so the needle matched partial words and the row failed for four
+# doublings that are not there. A row whose output is noise is not a finding.
+# Only a TRAILING sentence mark is trimmed, and both tokens must then be pure letters.
+# Stripping every non-letter was tried and reported `` missing` (§Missing `` as a
+# doubling — a code span followed by a cross-reference, which is ordinary prose. A row
+# that reports a false doubling in the very section it grades teaches the reader to
+# ignore it.
+# ONE scanner, called twice. The control used to carry its OWN simplified awk — no
+# punctuation trim, no letters-only guard — so it proved that A doubled-word detector
+# works while saying nothing about the one that grades the section. A control that
+# cannot fail with the scanner it fronts for is the vacuous shape this suite records
+# elsewhere.
+r7k_doubles() {
+  awk '{
+    for (i = 2; i <= NF; i++) {
+      a = $(i-1); b = $i
+      sub(/[,.;:]$/, "", a); sub(/[,.;:]$/, "", b)
+      if (a ~ /^[A-Za-z]+$/ && b ~ /^[A-Za-z]+$/ && tolower(a) == tolower(b)) print tolower(a)
+    }
+  }' | sort -u | tr '\n' ' '
+}
+R7K_DUP="$(printf '%s' "$R7K_FLAT" | r7k_doubles)"
+if [ -z "$(printf '%s' "$R7K_DUP" | tr -d '[:space:]')" ]; then
+  check "R7k  the section carries no doubled word" PASS
+else check "R7k  the section carries a doubled word:$R7K_DUP" FAIL; fi
+# ...and the check must be able to SEE one, or an empty result proves nothing.
+if [ "$(printf 'the bound is at at most four' | r7k_doubles | tr -d '[:space:]')" = "at" ]; then
+  check "R7k-control the doubled-word needle matches a planted doubling" PASS
+else check "R7k-control the doubled-word needle matches a planted doubling" FAIL; fi
+# ...and it must NOT fire on the shape that made an earlier spelling report a false
+# doubling, which is the half the trim and the letters-only guard exist for.
+# The section sign is built in the FORMAT string: `printf` expands `\ooo` only there,
+# so passing it as a `%s` ARGUMENT fed this control the literal eight characters
+# `\302\247` and it never tested the shape it names.
+if [ -z "$(printf 'a missing%s (\302\247Missing %s' '`' '`' | r7k_doubles | tr -d '[:space:]')" ]; then
+  check "R7k-control2 the needle does not fire on a code span beside a cross-reference" PASS
+else check "R7k-control2 the needle does not fire on a code span beside a cross-reference" FAIL; fi
+
+# R7l — the DEPTH bound must be named by its constant, never spelled as a numeral. The
+# section named `RESTORE_MAX_MISSING_COMPONENTS` in one sentence and "at most four
+# components" in the one before it, so the value was hand-maintained in prose beside the
+# symbol that owns it — this file's own rule about a numeral nothing recomputes, applied
+# to the operator account a reader acts on. Anchored on the SHAPE, so raising the
+# constant cannot make a stale numeral green.
+if printf '%s' "$R7K_FLAT" \
+  | grep -qiE 'at most (one|two|three|four|five|six|seven|eight|nine|ten) component'; then
+  check "R7l  the depth bound is spelled as a numeral beside the constant that owns it" FAIL
+else check "R7l  the depth bound is named by its constant, not by a numeral" PASS; fi
+# The POSITIVE anchor: deleting the sentence outright is not a fix.
+if printf '%s' "$R7K_FLAT" | grep -qF 'RESTORE_MAX_MISSING_COMPONENTS'; then
+  check "R7l-anchor the depth sentence still names the constant" PASS
+else check "R7l-anchor the depth sentence still names the constant" FAIL; fi
 
 echo "=== R8: the deny scope, driven and parsed ==="
 
@@ -1297,6 +1687,34 @@ else check "R12h the port roster counts no constant set either" PASS; fi
 if printf 'with its five constants\n' | grep -qiE "its $R12G_COUNT constants"; then
   check "R12h-control the constant-count needle matches a planted numeral" PASS
 else check "R12h-control the constant-count needle matches a planted numeral" FAIL; fi
+# R12i — the CORE half of that roster, which is the half a port copies literally. The
+# partial-race change added a RETURNED field, `alreadyPresent`, and the roster named
+# only the names below it — so a port implementing exactly that list gets a writer whose
+# successful return can mean "another run finished this" and a report layer that
+# announces RESTORED for it. Naming the field is not enough on its own: the roster has
+# to say that BOTH mechanisms exist, or a reader takes the throw predicate already in
+# the list for the whole contract.
+if printf '%s' "$R12_ROSTER_FLAT" | grep -qF 'alreadyPresent'; then
+  check "R12i the port roster names the returned already-present field" PASS
+else check "R12i the port roster names the returned already-present field" FAIL; fi
+if printf '%s' "$R12_ROSTER_FLAT" | grep -qiF 'both mechanisms'; then
+  check "R12i2 the port roster states that the throw and the flag are two mechanisms" PASS
+else check "R12i2 the port roster states that the throw and the flag are two mechanisms" FAIL; fi
+# R12j — the raced suffix is a READ token now, so it is a core-half export a port owes
+# its own doctor row. The roster is where that is discoverable.
+if printf '%s' "$R12_ROSTER_FLAT" | grep -qF 'RESTORE_HISTORY_RACED_SUFFIX'; then
+  check "R12j the port roster names the raced-suffix token the doctor row reads" PASS
+else check "R12j the port roster names the raced-suffix token the doctor row reads" FAIL; fi
+# R12k — a core comment cross-referenced a renderer this change DELETED. The split it
+# describes is real; the name was not.
+if grep -qF 'renderRestoreRoot' "$R12_CORE"; then
+  check "R12k no core comment navigates by the deleted renderer" FAIL
+else check "R12k no core comment navigates by the deleted renderer" PASS; fi
+# Graded against the ROSTER SLICE like its three siblings above. File-wide, a reference
+# drifting out of the port roster into any unrelated comment kept this green.
+if printf '%s' "$R12_ROSTER_FLAT" | grep -qF 'renderRestoreOutcome'; then
+  check "R12k2 the port roster points at the renderer that shipped" PASS
+else check "R12k2 the port roster points at the renderer that shipped" FAIL; fi
 
 # --- R13: the suite overview declares the counts the driven files register -----
 #
@@ -1640,6 +2058,14 @@ restore_seam() {
           fs.mkdirSync(v.projectRoot, { recursive: true, mode: 0o755 });
         } else if (process.env.PLANT === "sibling") {
           fs.mkdirSync(target, { mode: 0o755 });
+        } else if (process.env.PLANT === "wopen") {
+          // A sibling repair that leaves the component WORLD-WRITABLE. The loop then
+          // meets EEXIST on a directory this run did not create, and the arm that
+          // adopts it must apply the same rule the ladder applies to the ancestor it
+          // approved — otherwise the two paths answer "is this safe to plant inside?"
+          // with different rules, and the weaker one wins whenever the race is lost.
+          fs.mkdirSync(target, { mode: 0o777 });
+          fs.chmodSync(target, 0o777);
         } else if (process.env.PLANT === "file") {
           fs.writeFileSync(target, "");
         } else if (process.env.PLANT === "throws") {
@@ -1656,7 +2082,11 @@ restore_seam() {
     };
     try {
       const r = core.restoreWorkflowProjectRoot(req, { mkdir });
-      process.stdout.write("ok " + r.created.length);
+      // `racedflag` is the FLAG path: a run that planted components and then lost
+      // the race no longer throws out of the loop, so the renderer keys ALREADY
+      // RESTORED off a returned value instead. Kept distinct from the thrown
+      // `raced` spelling so a row cannot pass through the other mechanism.
+      process.stdout.write((r.alreadyPresent ? "racedflag " : "ok ") + r.created.length);
     } catch (e) {
       const made = Array.isArray(e.created) ? e.created.length : -1;
       if (typeof core.isRestoreRootAlreadyPresent === "function"
@@ -1692,7 +2122,106 @@ arm raced /a/b || check "R9  fixture armed" FAIL
 RACED_DATA="$ARMED_DATA"
 rm -rf "$PROJECTS/raced"
 expect_eq "R9b  a chain that arrived at once is the benign race, with the work carried" \
-  "raced 1" "$(restore_seam "$RACED_DATA" raced chain 2)"
+  "racedflag 1" "$(restore_seam "$RACED_DATA" raced chain 2)"
+
+# R9b2/R9b3 — a run that PLANTED directories and then lost the race must still record
+# that it did. Every raced throw fires ABOVE repairWorkflowBaseline and above the
+# mutateWorkflowState that appends the PROJECT_ROOT_RESTORED entry, so the count
+# reached the operator on stdout only and the workflow history — which this feature
+# names as its ONLY durable disclosure, there being no bypass-ledger entry — recorded
+# nothing. /zensu:doctor had nothing to read. The partial case is ordinary rather than
+# contrived: two sessions can legitimately name one project_root, so both interleave
+# per component and each ends up having created a strict subset.
+#
+# A run that created NOTHING is deliberately unchanged: there is no work to record,
+# and the pre-loop arms still throw.
+history_phases() {
+  local root="$1" session="$2"
+  ROOTP="$root" SESSION="$session" CORE_PATH="$CORE" node -e '
+    const fs = require("node:fs");
+    const core = require(process.env.CORE_PATH);
+    let f = "";
+    try { f = core.adoptionWorkflowStatePath(process.env.ROOTP, process.env.SESSION); }
+    catch (e) { process.stdout.write("NOPATH"); process.exit(0); }
+    if (!fs.existsSync(f)) { process.stdout.write("NODOC"); process.exit(0); }
+    let doc;
+    try { doc = JSON.parse(fs.readFileSync(f, "utf8")); }
+    catch (e) { process.stdout.write("UNREADABLE"); process.exit(0); }
+    const h = Array.isArray(doc.history) ? doc.history : [];
+    process.stdout.write(h.map((e) => String(e && e.phase)).join(",") || "EMPTY");
+  ' 2>&1
+}
+arm racedprov /a/b || check "R9  fixture armed" FAIL
+RACEDPROV_DATA="$ARMED_DATA"; RACEDPROV_ROOT="$ARMED_ROOT"
+rm -rf "$PROJECTS/racedprov"
+R9B2_OUT="$(restore_seam "$RACEDPROV_DATA" racedprov chain 2)"
+expect_eq "R9b2-control the raced-partial run still reports the work it planted" \
+  "racedflag 1" "$R9B2_OUT"
+R9B2_PHASES="$(history_phases "$RACEDPROV_ROOT" racedprov)"
+case "$R9B2_PHASES" in
+  *PROJECT_ROOT_RESTORED*)
+    check "R9b2 a raced-partial run records its PROJECT_ROOT_RESTORED provenance entry" PASS ;;
+  *) check "R9b2 a raced-partial run left no provenance entry (history: $R9B2_PHASES)" FAIL ;;
+esac
+# ...and the entry SAYS it was raced. An entry identical to an ordinary one would put
+# the same claim on two different outcomes, and the one thing an operator reading the
+# history needs here is that another run finished the job.
+restore_reasons() {
+  local root="$1" session="$2"
+  ROOTP="$root" SESSION="$session" CORE_PATH="$CORE" node -e '
+    const fs = require("node:fs");
+    const core = require(process.env.CORE_PATH);
+    let f = "";
+    try { f = core.adoptionWorkflowStatePath(process.env.ROOTP, process.env.SESSION); }
+    catch (e) { process.stdout.write("NOPATH"); process.exit(0); }
+    if (!fs.existsSync(f)) { process.stdout.write("NODOC"); process.exit(0); }
+    let doc;
+    try { doc = JSON.parse(fs.readFileSync(f, "utf8")); }
+    catch (e) { process.stdout.write("UNREADABLE"); process.exit(0); }
+    const h = Array.isArray(doc.history) ? doc.history : [];
+    process.stdout.write(h.filter((e) => e && e.phase === core.RESTORE_HISTORY_PHASE)
+      .map((e) => String(e.reason)).join("|") || "NONE");
+  ' 2>&1
+}
+R9B3_REASONS="$(restore_reasons "$RACEDPROV_ROOT" racedprov)"
+case "$R9B3_REASONS" in
+  *"completed by another run"*)
+    check "R9b3 the raced entry distinguishes itself from an ordinary restore" PASS ;;
+  *) check "R9b3 the raced entry reads like an ordinary restore (reason: $R9B3_REASONS)" FAIL ;;
+esac
+# R9b4 — the OTHER direction, and the discrimination R9b2 cannot make on its own: a
+# run that created nothing keeps throwing, so no provenance entry claims work that
+# never happened. Without this the fix could record an entry on every raced run.
+arm racednone || check "R9  fixture armed" FAIL
+RACEDNONE_DATA="$ARMED_DATA"; RACEDNONE_ROOT="$ARMED_ROOT"
+rm -rf "$PROJECTS/racednone"
+expect_eq "R9b4-control a single-component race still throws with nothing created" \
+  "raced 0" "$(restore_seam "$RACEDNONE_DATA" racednone chain 1)"
+R9B4_PHASES="$(history_phases "$RACEDNONE_ROOT" racednone)"
+case "$R9B4_PHASES" in
+  *PROJECT_ROOT_RESTORED*)
+    check "R9b4 a run that created nothing must record no restore provenance (history: $R9B4_PHASES)" FAIL ;;
+  *) check "R9b4 a run that created nothing records no restore provenance" PASS ;;
+esac
+
+# R9b5 — THE OTHER DIRECTION of R9b3, and the one that makes that row discriminating.
+# R9b3 matches the raced suffix on a raced entry; nothing asserted that an ORDINARY
+# restore OMITS it. A core that dropped the conditional and appended the suffix on
+# every run would have stayed green, and every ordinary repair would then have told its
+# operator that another run finished the job.
+arm ordinaryprov /a/b || check "R9  fixture armed" FAIL
+ORDPROV_DATA="$ARMED_DATA"; ORDPROV_ROOT="$ARMED_ROOT"
+rm -rf "$PROJECTS/ordinaryprov"
+expect_eq "R9b5-control an unraced run restores and records the components it planted" \
+  "ok 3" "$(restore_seam "$ORDPROV_DATA" ordinaryprov none 1)"
+R9B5_REASONS="$(restore_reasons "$ORDPROV_ROOT" ordinaryprov)"
+case "$R9B5_REASONS" in
+  *"completed by another run"*)
+    check "R9b5 an ordinary restore must not claim another run finished it (reason: $R9B5_REASONS)" FAIL ;;
+  NONE|NODOC|NOPATH|UNREADABLE)
+    check "R9b5 an ordinary restore recorded no reason to grade (got: $R9B5_REASONS)" FAIL ;;
+  *) check "R9b5 an ordinary restore's reason omits the raced suffix" PASS ;;
+esac
 
 # TWO honest repairs of one recorded root is an ORDINARY case: several records can
 # name one project_root, so two sessions each running --restore-root --confirm race
@@ -1789,7 +2318,12 @@ echo "=== R10: the SessionStart self-heal reports the same cause the confirmed p
 # surface with the least surviving evidence, while the same file's comment still
 # documented the retired contract verbatim.
 SESSION_ADAPTER="$PLUGIN_DIR/hooks/lib/claude-session-control-v1.js"
-R10_NOTICE="$(sed -n '/healed && healed.provenance !== /,/^          }$/p' "$SESSION_ADAPTER")"
+# Anchored on the GUARD, not on the retired fallback's own text. The first spelling
+# sliced from `healed && healed.provenance !== `, which was the inline fallback itself —
+# so removing that fallback (R10c now forbids it) emptied the slice and R10a went red
+# for a reason unrelated to the cause it grades. The window spans BOTH arms: the
+# missing-check disclosure and the warning that renders the cause.
+R10_NOTICE="$(sed -n '/const healUnrecorded = /,/^          }$/p' "$SESSION_ADAPTER")"
 if [ -n "$(printf '%s' "$R10_NOTICE" | tr -d '[:space:]')" ]; then
   check "R10-control the self-heal notice slice is non-empty" PASS
 else check "R10-control the self-heal notice slice is non-empty" FAIL; fi
@@ -1802,6 +2336,146 @@ else check "R10a the self-heal notice renders the provenance cause" FAIL; fi
 if grep -qF 'unavailable: ..."' "$SESSION_ADAPTER"; then
   check "R10b the retired composed-provenance contract is gone from the comment" FAIL
 else check "R10b the retired composed-provenance contract is gone from the comment" PASS; fi
+
+# R10d/R10e — the SessionStart self-heal render, DRIVEN rather than grepped.
+#
+# R10a and R10b are both `sed`-slice greps: neither executes anything, and this is
+# the one heal path that runs WITHOUT the user asking. The previous consumer of
+# repairWorkflowBaseline was left rendering a bare token when that function's
+# contract split, so this exact branch has already drifted once while its only
+# guards were source scans.
+#
+# The drive needs a record-exists SessionStart whose workflow document is gone and
+# whose repairWorkflowBaseline reports an UNRECORDED provenance. A synthetic install
+# is what makes that reachable: the record's plugin_root and runtime digest are
+# measured over the COPIED tree, so a stubbed core inside it is self-consistent
+# rather than a digest mismatch. Same technique as test-doctor.sh P1mf.
+heal_install() {
+  # $1 = install directory, $2 = extra JS appended to the stub core
+  local dir="$1" extra="$2"
+  mkdir -p "$dir" || return 1
+  local d
+  for d in .claude-plugin hooks agents skills docs templates; do
+    [ -e "$PLUGIN_DIR/$d" ] || continue
+    cp -R "$PLUGIN_DIR/$d" "$dir/" || return 1
+  done
+  # The ROOT FILES are not optional. `manifestRuntimeEntries` folds README/CHANGELOG/
+  # LICENSE into the digest, and the manifest's own `mcpServers` points at `.mcp.json`
+  # — an install missing it refuses registration with `plugin manifest mcpServers is
+  # missing`, which reaches this fixture as an empty stderr and a vacuous pass.
+  for d in .mcp.json README.md CHANGELOG.md LICENSE; do
+    [ -f "$PLUGIN_DIR/$d" ] || continue
+    cp "$PLUGIN_DIR/$d" "$dir/" || return 1
+  done
+  # The stub re-exports the real core and overrides ONE function. Reading the real
+  # core's path from the environment keeps an absolute path out of the generated
+  # source, where quoting it would be the only hazard in the fixture.
+  {
+    printf '%s\n' 'const real = require(process.env.ZENSU_R10_REAL_CORE);'
+    printf '%s\n' 'const clone = Object.assign({}, real);'
+    printf '%s\n' 'clone.repairWorkflowBaseline = function () {'
+    printf '%s\n' '  return { provenance: "unavailable", provenanceCause: "STUB-CAUSE-R10D", path: "/stub" };'
+    printf '%s\n' '};'
+    [ -n "$extra" ] && printf '%s\n' "$extra"
+    printf '%s\n' 'module.exports = clone;'
+  } > "$dir/hooks/lib/session-control-core-v1.js" || return 1
+}
+
+# Arms a session against the given install and returns the stderr of a RESUME
+# SessionStart taken after the workflow document was removed.
+heal_drive() {
+  local dir="$1" session="$2"
+  local project="$PROJECTS/$session"
+  mkdir -p "$project" || return 1
+  project="$(cd "$project" && pwd -P)"
+  (
+    export CLAUDE_PROJECT_DIR="$project"
+    export ZENSU_TEST_PLUGIN_DATA="$STATE_DIR/plugin-data/$session"
+    export ZENSU_R10_REAL_CORE="$CORE"
+    # shellcheck disable=SC1091
+    source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$session" "$dir" >/dev/null 2>&1 || exit 1
+    rm -f "$project"/.zensu/state/*.json
+    printf '%s' "$(node -e 'process.stdout.write(JSON.stringify({
+      hook_event_name:"SessionStart", source:"resume",
+      session_id:process.argv[1], cwd:process.argv[2]
+    }))' "$session" "$project")" \
+      | CLAUDE_PLUGIN_ROOT="$dir" CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" \
+        ZENSU_R10_REAL_CORE="$CORE" \
+        env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY \
+        node "$dir/hooks/lib/claude-session-control-v1.js" 2>&1 >/dev/null
+  )
+}
+
+R10F_INSTALL="$STATE_DIR/heal-shared"
+if heal_install "$R10F_INSTALL" ""; then
+  R10F_ERR="$(heal_drive "$R10F_INSTALL" healshared)"
+  # A PRECONDITION of its own, because every later assertion here is a grep over
+  # that stderr and an empty capture satisfies a NEGATIVE one silently. The drive
+  # has already produced one — an install missing `.mcp.json` refuses registration
+  # before the branch is reached — so the emptiness is checked rather than assumed.
+  if [ -n "$R10F_ERR" ]; then
+    check "R10f-control the self-heal drive produced output to grade" PASS
+  else check "R10f-control the self-heal drive produced no output at all" FAIL; fi
+  if printf '%s' "$R10F_ERR" | grep -qF 'BASELINE_REBUILT provenance entry could not be written'; then
+    check "R10f the self-heal warns when the rebuild's provenance entry is unrecorded" PASS
+  else check "R10f the self-heal emitted no unrecorded-provenance warning (got: $R10F_ERR)" FAIL; fi
+  if printf '%s' "$R10F_ERR" | grep -qF 'cause: STUB-CAUSE-R10D'; then
+    check "R10f2 the warning names the provenance CAUSE, not only the token" PASS
+  else check "R10f2 the warning dropped the provenance cause (got: $R10F_ERR)" FAIL; fi
+else
+  check "R10f could not build the stubbed install" FAIL
+  R10F_ERR=""
+fi
+
+# R10f-bite — the same drive against an install whose adapter no longer renders the
+# cause. Without it R10f2 proves only that the string appears somewhere, and this
+# repository records more than once that a check which cannot fail is worse than
+# none. The mutation lands in the COPY, so no production file is touched.
+R10FB_INSTALL="$STATE_DIR/heal-bite"
+if heal_install "$R10FB_INSTALL" ""; then
+  R10FB_ADAPTER="$R10FB_INSTALL/hooks/lib/claude-session-control-v1.js"
+  R10FB_NEEDLE="? ' cause: ' + String(healed.provenanceCause)"
+  if grep -qF -- "$R10FB_NEEDLE" "$R10FB_ADAPTER"; then
+    node -e '
+      const fs = require("node:fs");
+      const f = process.argv[1];
+      fs.writeFileSync(f, fs.readFileSync(f, "utf8").replace(process.argv[2], "? \"\""));
+    ' "$R10FB_ADAPTER" "$R10FB_NEEDLE"
+    R10FB_ERR="$(heal_drive "$R10FB_INSTALL" healbite)"
+    # The bite is only a bite while the run still REACHES the warning. A mutated
+    # install that refuses registration emits nothing, and "no cause" would then
+    # pass for a reason unrelated to the mutation — the vacuous shape this whole
+    # block exists to avoid.
+    if printf '%s' "$R10FB_ERR" | grep -qF 'BASELINE_REBUILT provenance entry could not be written'; then
+      if printf '%s' "$R10FB_ERR" | grep -qF 'cause: STUB-CAUSE-R10D'; then
+        check "R10f-bite the cause check cannot see an adapter that stopped rendering it" FAIL
+      else check "R10f-bite the cause check sees an adapter that stopped rendering it" PASS; fi
+    else
+      check "R10f-bite the mutated install never reached the warning (got: $R10FB_ERR)" FAIL
+    fi
+  else
+    check "R10f-bite the render this mutation rewrites is no longer spelled as expected" FAIL
+  fi
+else check "R10f-bite could not build the mutated install" FAIL; fi
+
+# R10g — the WITHHOLDING arm of the same guard, DRIVEN. A core predating the shared
+# predicate used to take an inline fallback here and answer from `healed.provenance`;
+# R10c now forbids that by source and this drives what replaced it. The identical
+# install minus the export must DISCLOSE that the check could not be made, and must
+# NOT render the warning — a verdict it has no way to reach. Both halves are required:
+# the disclosure alone would pass for a branch that also warned, and the absence alone
+# would pass for a branch that fell silent, which is the failure this repository names
+# as worse than the finding it replaces.
+R10G_INSTALL="$STATE_DIR/heal-compat"
+if heal_install "$R10G_INSTALL" 'delete clone.baselineProvenanceUnrecorded;'; then
+  R10G_ERR="$(heal_drive "$R10G_INSTALL" healcompat)"
+  if printf '%s' "$R10G_ERR" | grep -qF 'could not be checked'; then
+    check "R10g a core without the predicate makes the self-heal disclose a missing check" PASS
+  else check "R10g the withholding arm disclosed nothing (got: $R10G_ERR)" FAIL; fi
+  if printf '%s' "$R10G_ERR" | grep -qF 'provenance entry could not be written'; then
+    check "R10g2 the withholding arm answered a verdict it could not reach" FAIL
+  else check "R10g2 a core without the predicate renders no verdict, only the disclosure" PASS; fi
+else check "R10g could not build the compat install" FAIL; fi
 
 echo "=== R11: what bounds the destination is stated, not implied ==="
 
@@ -1825,15 +2499,113 @@ if printf '%s' "$GATES_SEC" | grep -qF 'not bounded by location'; then
   check "R11c docs/gates.md states the same bound" PASS
 else check "R11c docs/gates.md states the same bound" FAIL; fi
 
+# The sticky exemption's own paragraph. The judge settled this from first principles:
+# S_ISVTX constrains unlink(2) and rename(2) of entries that ALREADY EXIST and says
+# nothing about create, while every component this writer plants is one `verdict.missing`
+# proved absent. So the exemption's stated reason -- that sticky prevents the swap this
+# rule exists to prevent -- was false for the writer's own domain. Scoped to the
+# predicate's OWN header comment: the EEXIST arm in the loop already states the create
+# half correctly, so a file-wide needle passes over the paragraph this row is about.
+R11J_HDR="$(awk '/^\/\/ The ancestor-permission rule, ONE implementation/,/^function restoreAncestorPermissionsSafe/' "$R12_CORE")"
+if [ -n "$R11J_HDR" ]; then
+  check "R11j-control the predicate's own header comment was sliced" PASS
+else check "R11j-control the predicate's own header comment was sliced" FAIL; fi
+if printf '%s' "$R11J_HDR" | grep -qF 'says nothing about CREATE, and every'; then
+  check "R11j the sticky exemption states what sticky does not prevent" PASS
+else check "R11j the sticky exemption states what sticky does not prevent" FAIL; fi
+if printf '%s' "$R11J_HDR" | grep -qF 'exactly the swap this rule exists to prevent'; then
+  check "R11j2 the retired claim that sticky closes the writer's own race is gone" FAIL
+else check "R11j2 the retired claim that sticky closes the writer's own race is gone" PASS; fi
+# NARROWS, never CLOSES. Two carriers claimed the rule removes the swap window outright;
+# the ladder's own comment at the refusal site has always said the opposite, so the two
+# disagreed about one mechanism. The negative needle is a substring both spellings share.
+if grep -qF 'Both NARROW the window and neither closes it' "$ADOPT_SH"; then
+  check "R11k the adopt header states the rule narrows rather than closes" PASS
+else check "R11k the adopt header states the rule narrows rather than closes" FAIL; fi
+# FLATTENED per carrier, comment markers stripped first: both spellings wrap, and one of
+# them wraps INSIDE the phrase, so a line-local needle sees only the other. That is the
+# half-pinned shape this suite records elsewhere -- it reads greener than an unpinned one.
+R11K_BAD=0
+for r11k_file in "$ADOPT_SH" "$R12_CORE"; do
+  if sed -e 's|^[[:space:]]*//[[:space:]]*||' -e 's|^[[:space:]]*#[[:space:]]*||' "$r11k_file" \
+    | tr '\n' ' ' | tr -s ' ' \
+    | grep -qF 'plants a directory inside a tree a co-tenant'; then
+    R11K_BAD=$((R11K_BAD + 1))
+  fi
+done
+if [ "$R11K_BAD" -eq 0 ]; then
+  check "R11k2 no carrier claims the rule keeps the repair out of a swappable tree" PASS
+else check "R11k2 no carrier claims the rule keeps the repair out of a swappable tree ($R11K_BAD)" FAIL; fi
+# The CHOICE/ACT split, which the adopt header already carries and the operator doc did
+# not: naming the store as "already the capability this repair would grant" states the
+# choice half and silently claims the act half with it.
+# FLATTENED: the operator doc wraps, and both claims below cross a line break, so a
+# line-local needle can never match them. Same rule the R11k2 loop states above.
+GATES_FLAT="$(printf '%s' "$GATES_SEC" | tr '\n' ' ' | tr -s ' ')"
+if printf '%s' "$GATES_FLAT" | grep -qF 'What it adds is the ACT of creating a directory outside the store'; then
+  check "R11m docs/gates.md splits the choice a record confers from the act this write performs" PASS
+else check "R11m docs/gates.md splits the choice a record confers from the act this write performs" FAIL; fi
+if printf '%s' "$GATES_SEC" | grep -qF 'already the capability this repair would grant'; then
+  check "R11m2 the retired one-clause barrier claim is gone from docs/gates.md" FAIL
+else check "R11m2 the retired one-clause barrier claim is gone from docs/gates.md" PASS; fi
+# The ownership refusal has TWO causes with DIFFERENT fixes, and a remedy that leads with
+# chmod prescribes an action the foreign-owner arm cannot perform. Three carriers state
+# the remedy to a user, so all three name both arms.
+if grep -qF 'If you own the directory named above' "$ADOPT_REPORT" \
+  && grep -qF 'move the project under a parent you own' "$ADOPT_REPORT"; then
+  check "R11n the ownership remedy names both arms" PASS
+else check "R11n the ownership remedy names both arms" FAIL; fi
+if printf '%s' "$GATES_FLAT" | grep -qF 'a `chmod` fixes it when you own it, and a move when you do not'; then
+  check "R11n2 docs/gates.md names both arms of that remedy" PASS
+else check "R11n2 docs/gates.md names both arms of that remedy" FAIL; fi
+if grep -qF 'a `chmod` is the fix when you own it and a move when you do not' \
+  "$PLUGIN_DIR/skills/adopt-session/SKILL.md"; then
+  check "R11n3 the skill names both arms of that remedy" PASS
+else check "R11n3 the skill names both arms of that remedy" FAIL; fi
+
+# R11d/R11e — the caller-identity residual, BOTH halves. A reviewer reported that
+# `restoreRootVerdict` never binds the caller and that a Bash call rebinding
+# CLAUDE_CODE_SESSION_ID therefore selects a foreign record. The first half is true
+# and the second is refused by `CONTROL_BINDINGS`, so the governing document has to
+# carry both: stating only the conjunct list reads as an open hole, and stating only
+# the gate reads as a bind the core does not have. Either wording alone would send
+# the next reader to the wrong place — which is why this is two checks, not one.
+R11_CLAUDE="$PLUGIN_DIR/CLAUDE.md"
+R11_PARA="$(awk '/THE CALLER IDENTITY IS NOT A CONJUNCT/{on=1} on{print} on && /^$/{if(seen)exit; seen=1}' "$R11_CLAUDE")"
+if [ -n "$R11_PARA" ]; then
+  check "R11f-control the caller-identity paragraph is located" PASS
+else check "R11f-control the caller-identity paragraph is located" FAIL; fi
+if printf '%s' "$R11_PARA" | grep -qF 'no caller bind of its' \
+  && printf '%s' "$R11_PARA" | grep -qF 'BASH-CHANNEL gate rather than a check in the core'; then
+  check "R11f the residual names the core's missing caller bind" PASS
+else check "R11f the residual does not name the core's missing caller bind" FAIL; fi
+if printf '%s' "$R11_PARA" | grep -qF 'CONTROL_BINDINGS' \
+  && printf '%s' "$R11_PARA" | grep -qF 'bash-source-write-parse.js'; then
+  check "R11g the residual names the gate that refuses the rebind route" PASS
+else check "R11g the residual does not name the refusing gate" FAIL; fi
+# ...and the gate it names must still carry the entry. A paragraph asserting a refusal
+# the tree stopped performing is worse than none, and this is the one clause whose
+# truth lives in another file entirely. SCOPED to the set and quote-agnostic: a
+# whole-file grep is satisfied by the deny MESSAGE further down, which is exactly the
+# occurrence that survives when the set entry itself is deleted.
+R11G_SET="$(awk '/^const CONTROL_BINDINGS = new Set/{on=1} on{print} on && /\]\);/{exit}' \
+  "$PLUGIN_DIR/hooks/lib/bash-source-write-parse.js")"
+if [ -n "$R11G_SET" ]; then
+  check "R11g2-control the CONTROL_BINDINGS set is located" PASS
+else check "R11g2-control the CONTROL_BINDINGS set is located" FAIL; fi
+if printf '%s' "$R11G_SET" | grep -qE '["'"'"']CLAUDE_CODE_SESSION_ID["'"'"']'; then
+  check "R11g2 CONTROL_BINDINGS still lists CLAUDE_CODE_SESSION_ID" PASS
+else check "R11g2 CONTROL_BINDINGS no longer lists CLAUDE_CODE_SESSION_ID" FAIL; fi
+
 # --- R14: the lazy-table comment describes a path production can reach ---------
 #
 # M2/M13 (PR #312 panel). The comment above `restoreRemedyTable` made two claims. The
 # require-time one is real and measured. The second — that a skewed core "yields an
 # EMPTY table, so every refusal falls through to the no-remedy text" — is only true
-# when a caller supplies `deps.verdict`: `renderRestoreRoot` resolves
-# `core.restoreRootVerdict` unguarded and CALLS it above the table, so on the very core
-# the guard is written for, main() throws there first and the outer catch turns it into
-# a refusal with exit 1. And the same comment never said why the sibling `REMEDY` table
+# for a caller that hands `renderRestoreVerdict` a verdict of its own, which is the unit
+# suite: `main()` resolves `core.restoreRootVerdict` unguarded and CALLS it above the
+# table, so on the very core the guard is written for, main() throws there first and the
+# outer catch turns it into a refusal with exit 1. And the same comment never said why the sibling `REMEDY` table
 # may stay eager, which is the criterion a later reader needs: ADOPTION_REFUSALS
 # predates every core this file can be paired with under the lineage rule.
 R14_REPORT="$PLUGIN_DIR/hooks/lib/session-adopt-report-v1.js"
@@ -1847,31 +2619,87 @@ else check "R14  the comment states where a skewed core actually fails" FAIL; fi
 if printf '%s' "$R14_COMMENT" | grep -qF 'ADOPTION_REFUSALS'; then
   check "R14b the comment states the criterion that keeps the sibling table eager" PASS
 else check "R14b the comment states the criterion that keeps the sibling table eager" FAIL; fi
-# BEHAVIOURAL, and the reason the correction was needed: drive a core that exports no
-# restore vocabulary at all through the renderer with NO deps and require the throw.
-R14C_OUT="$(REPORT="$R14_REPORT" CORE="$CORE" node -e '
+# BEHAVIOURAL, and the reason the correction was needed TWICE. The first version drove
+# `renderRestoreRoot`, a renderer this change DELETED, so `mod.renderRestoreRoot` was
+# `undefined`, calling it threw a TypeError, the catch printed THREW and the row asserted
+# exactly that — it passed against an intact core, against the skewed clone, and with the
+# guard it grades removed. The property did not disappear, it MOVED: `main()` resolves
+# `core.restoreRootVerdict` unguarded and CALLS it above the table, so the shipped entry
+# point is the only caller that can reach it. Drive `main()`.
+#
+# THREE arms, because a single one is what went vacuous. The skewed arm must THROW and the
+# message must NAME the symbol, so a throw from somewhere else cannot satisfy it. The
+# GUARDED arm patches a typeof guard into that one call and must NOT throw, which is what
+# proves the row can still detect the guard's absence — the anchor is asserted first, so a
+# patch that silently stopped matching fails loudly instead of degrading to a second copy
+# of the skewed arm. The CONTROL arm drives the INTACT tree and must reach the restore
+# headline: without it, a `main()` that returned early on the session id or the record
+# store would render the skewed arm's throw unattributable.
+R14C_OUT="$(REPORT="$R14_REPORT" CORE="$CORE" DATA="$GONE_DATA" SESSION=gone ROOT="$PLUGIN_DIR" node -e '
   const fs = require("node:fs"); const os = require("node:os"); const path = require("node:path");
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "zensu-r14-"));
   const lib = path.dirname(process.env.REPORT);
-  for (const n of fs.readdirSync(lib)) {
-    const f = path.join(lib, n);
-    if (fs.statSync(f).isFile()) fs.copyFileSync(f, path.join(dir, n));
-  }
-  fs.writeFileSync(path.join(dir, "session-control-core-v1.js"),
-    "const real = require(" + JSON.stringify(process.env.CORE) + ");\n"
-    + "const clone = Object.assign({}, real);\n"
-    + "delete clone.RESTORE_ROOT_REFUSALS;\n"
-    + "delete clone.restoreRootVerdict;\n"
-    + "delete clone.restoreWorkflowProjectRoot;\n"
-    + "module.exports = clone;\n");
-  const mod = require(path.join(dir, "session-adopt-report-v1.js"));
-  try { mod.renderRestoreRoot({}, false); process.stdout.write("NO-THROW"); }
-  catch (e) { process.stdout.write("THREW"); }
-  finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  const ANCHOR = "core.restoreRootVerdict(request)";
+  const GUARD = "(typeof core.restoreRootVerdict === \"function\" "
+    + "? core.restoreRootVerdict(request) : { ok: false, reason: \"guarded\" })";
+  const build = (skew, guard) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "zensu-r14-"));
+    for (const n of fs.readdirSync(lib)) {
+      const f = path.join(lib, n);
+      if (fs.statSync(f).isFile()) fs.copyFileSync(f, path.join(dir, n));
+    }
+    if (skew) {
+      fs.writeFileSync(path.join(dir, "session-control-core-v1.js"),
+        "const real = require(" + JSON.stringify(process.env.CORE) + ");\n"
+        + "const clone = Object.assign({}, real);\n"
+        + "delete clone.RESTORE_ROOT_REFUSALS;\n"
+        + "delete clone.restoreRootVerdict;\n"
+        + "delete clone.restoreWorkflowProjectRoot;\n"
+        + "module.exports = clone;\n");
+    }
+    if (guard) {
+      const p = path.join(dir, "session-adopt-report-v1.js");
+      const src = fs.readFileSync(p, "utf8");
+      if (src.indexOf(ANCHOR) === -1) { process.stdout.write("ANCHOR-LOST"); process.exit(0); }
+      fs.writeFileSync(p, src.replace(ANCHOR, GUARD));
+    }
+    return dir;
+  };
+  const drive = (dir) => {
+    const chunks = [];
+    const real = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (s) => { chunks.push(String(s)); return true; };
+    let threw = null;
+    try { require(path.join(dir, "session-adopt-report-v1.js")).main(); }
+    catch (e) { threw = (e && e.message) ? String(e.message) : "unknown"; }
+    finally { process.stdout.write = real; fs.rmSync(dir, { recursive: true, force: true }); }
+    return { threw, out: chunks.join("") };
+  };
+  process.env.ZADOPT_PLUGIN_DATA = process.env.DATA;
+  process.env.ZADOPT_SESSION_ID = process.env.SESSION;
+  process.env.ZADOPT_PLUGIN_ROOT = process.env.ROOT;
+  process.env.ZADOPT_MODE = "restore-root";
+  delete process.env.ZADOPT_CONFIRM;
+  const skewed = drive(build(true, false));
+  const guarded = drive(build(true, true));
+  const intact = drive(build(false, false));
+  const named = skewed.threw !== null && skewed.threw.indexOf("restoreRootVerdict") !== -1;
+  process.stdout.write((named ? "THREW-NAMED" : "SKEW:" + String(skewed.threw))
+    + "|" + (guarded.threw === null ? "GUARD-OK" : "GUARD:" + guarded.threw)
+    + "|" + (intact.threw === null
+      && intact.out.indexOf("Zensu project-root restore — ") !== -1
+      ? "REACHED" : "CONTROL:" + String(intact.threw) + ":" + intact.out.slice(0, 60)));
 ' 2>/dev/null)"
-if [ "$R14C_OUT" = "THREW" ]; then
-  check "R14c a core without the restore exports throws before any remedy is looked up" PASS
-else check "R14c a core without the restore exports throws before any remedy is looked up (got: '$R14C_OUT')" FAIL; fi
+if [ "${R14C_OUT%%|*}" = "THREW-NAMED" ]; then
+  check "R14c  main() resolves a skewed core unguarded and throws naming restoreRootVerdict" PASS
+else check "R14c  main() resolves a skewed core unguarded and throws naming restoreRootVerdict (got: '$R14C_OUT')" FAIL; fi
+case "$R14C_OUT" in
+  *'|GUARD-OK|'*) check "R14c2 the row still detects the guard — patching one in stops the throw" PASS ;;
+  *) check "R14c2 the row still detects the guard — patching one in stops the throw (got: '$R14C_OUT')" FAIL ;;
+esac
+case "$R14C_OUT" in
+  *'|REACHED') check "R14c-control the intact tree reaches the restore headline, so the throw is attributable" PASS ;;
+  *) check "R14c-control the intact tree reaches the restore headline, so the throw is attributable (got: '$R14C_OUT')" FAIL ;;
+esac
 
 # M11 (PR #312 panel): the three call sites test `zensu_safe_display_path`'s exit
 # status while its own header says it "ECHOES the value to render and never a status".
@@ -1913,20 +2741,24 @@ echo
 # binding and nothing naming the cause, and restoring the two obvious variables by hand
 # was not enough, because `initialize-baseline.sh` exports more than those two.
 #
-# R2g — `plugin-data-mismatch` was the one refusal of six with no producer-side case,
-# and driving it MEASURED why: it is UNREACHABLE through this entry point. Pointing
-# `recordsDir` at one store's record while claiming a different `pluginData` — the
-# shape a development checkout against an installed plugin produces — answers
-# `record-unreadable`, because `readOrphanedProjectRootContext` refuses the record
-# before the explicit conjunct below it is ever evaluated. The conjunct is therefore
-# defence in depth rather than the thing holding the boundary, exactly as CLAUDE.md
-# already records for its `ADOPTION_REFUSALS.PLUGIN_DATA` sibling.
+# R2g — `plugin-data-mismatch` was the one refusal of six with no producer-side case.
+# Driving it measured something narrower than the first version of this comment
+# claimed, and the correction matters because R2i in this same file drives that exact
+# refusal: it is NOT unreachable. The discriminator is whether the CLAIMED store
+# EXISTS. R2g below names `$STATE_DIR/plugin-data/some-other-store`, which was never
+# created, so `canonicalDirectory(options.pluginData)` throws two steps above the
+# explicit conjunct and `readOrphanedProjectRootContext` answers `record-unreadable`.
+# R2i names an existing store, reaches the conjunct, and gets `plugin-data-mismatch`.
+# So on THIS row's input the conjunct is defence in depth rather than the thing
+# holding the boundary — exactly as CLAUDE.md records for the
+# `ADOPTION_REFUSALS.PLUGIN_DATA` sibling — and on R2i's input it is the producer.
 #
-# What these rows pin is the SAFETY property, which is what matters and is reachable:
-# a record from a foreign store NEVER restores. The specific reason is asserted as the
-# one this entry point really produces, so the row states a measurement rather than a
-# wish. Do not "fix" it to expect plugin-data-mismatch without first moving the
-# conjunct above the reader — and if you do, R2g2 is the row that will tell you.
+# What these rows pin is the SAFETY property, which is what matters and holds on both
+# inputs: a record from a foreign store NEVER restores. The specific reason is asserted
+# as the one THIS input really produces, so the row states a measurement rather than a
+# wish. Do not "fix" it to expect plugin-data-mismatch while the claimed store is
+# absent — that is R2i's input, not this one — and if the ordering ever changes so that
+# an absent store reaches the conjunct, R2g2 is the row that will tell you.
 verdict_foreign_data() {
   local records_data="$1" session="$2" claimed_data="$3"
   DATA="$records_data" CLAIMED="$claimed_data" SESSION="$session" CORE_PATH="$CORE" ROOT="$PLUGIN_DIR" node -e '
@@ -1963,6 +2795,31 @@ expect_eq "R2g2 the foreign-store refusal comes from the reader, not the explici
 # and not about the fixture being broken.
 expect_eq "R2g-control the same record read with its own store is not a data mismatch" \
   "ok 1" "$(verdict_foreign_data "$R2G_DATA" foreignstore "$R2G_DATA")"
+# R2g3 — the comment above these rows is graded, because R2i in this same file
+# falsifies what it used to assert. It said `plugin-data-mismatch` is UNREACHABLE
+# through this entry point; R2i drives exactly that refusal. The real discriminator is
+# whether the CLAIMED store EXISTS: R2g names one that does not, so canonicalDirectory
+# throws two steps above the conjunct and the reader answers record-unreadable, while
+# R2i names an existing store and the conjunct decides. Leaving the old claim in place
+# is worse than no comment: it attributes R2g2's refusal to the wrong producer and
+# would keep reading true if the reader were removed.
+R2G_COMMENT="$(sed -n '/^# R2g — .plugin-data-mismatch. was the one refusal/,/^verdict_foreign_data() {/p' \
+  "$PLUGIN_DIR/tests/structure/test-restore-project-root.sh")"
+if [ -n "$R2G_COMMENT" ]; then
+  check "R2g3-control the R2g comment slice is non-empty" PASS
+else check "R2g3-control the R2g comment slice is non-empty" FAIL; fi
+if printf '%s' "$R2G_COMMENT" | grep -qiF 'unreachable through this entry point'; then
+  check "R2g3 the R2g comment no longer claims the refusal is unreachable" FAIL
+else check "R2g3 the R2g comment no longer claims the refusal is unreachable" PASS; fi
+# A slice control proves the window is non-empty; it does NOT prove the needle can match.
+# A typo in the literal above passes with the stale claim still in the comment.
+if printf 'x unreachable through this entry point y\n' \
+  | grep -qiF 'unreachable through this entry point'; then
+  check "R2g3-needle the absence needle matches the claim it forbids" PASS
+else check "R2g3-needle the absence needle matches the claim it forbids" FAIL; fi
+if printf '%s' "$R2G_COMMENT" | grep -qF 'R2i'; then
+  check "R2g4 the R2g comment names the row that reaches the conjunct" PASS
+else check "R2g4 the R2g comment names the row that reaches the conjunct" FAIL; fi
 
 # R2h — RESTORE_MAX_MISSING_COMPONENTS had no arm on either side of the bound, so the
 # depth limit was asserted by reading the constant. Both sides are driven here: a
@@ -1997,6 +2854,201 @@ else
   # `check` has two verdicts only, so the skip is reported as a PASS whose LABEL says
   # it was not driven — the same spelling R1f uses for the fixture it cannot build.
   check "R2h  the depth-limit pair is not driven (limit is $R2H_LIMIT, an at-limit and an over-limit fixture cannot differ below 2)" PASS
+fi
+
+
+# R2j — the nearest EXISTING ancestor must not be writable by anyone but its owner.
+# The ladder proved that ancestor is a real, canonical, link-free directory and then
+# planted a directory inside it. None of those tests say WHO may write there: under a
+# world- or group-writable ancestor a co-tenant can swap a component between the check
+# and the mkdir, which is the window the per-component realpath re-check narrows and
+# cannot close (Node exposes no `mkdirat`). Refusing the ancestor closes it by not
+# starting. STICKY is exempt on purpose — `/tmp` is world-writable and sticky, and under
+# the sticky bit another user cannot rename or remove an entry they do not own, so the
+# swap this refusal exists for is already impossible there. Without that exemption the
+# repair would refuse every recorded root under a temp dir, this suite's fixtures
+# included.
+R2J_SKIP=""
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) R2J_SKIP="win32 has no POSIX mode bits" ;; esac
+if [ -n "$R2J_SKIP" ]; then
+  check "R2j  the ancestor-permission rows are not driven ($R2J_SKIP)" PASS
+else
+  if arm wwrite; then
+    R2J_DATA="$ARMED_DATA"; R2J_ROOT="$ARMED_ROOT"
+    R2J_PARENT="$(dirname "$R2J_ROOT")"
+    rm -rf "$R2J_ROOT"
+    # CONTROL FIRST: the same fixture with an ordinary parent must still be restorable,
+    # or the refusal below proves nothing about the permission bits.
+    chmod 0755 "$R2J_PARENT"
+    R2J_OK="$(verdict "$R2J_DATA" wwrite)"
+    case "$R2J_OK" in
+      ok\ *) check "R2j-control an ordinary 0755 ancestor is restorable ($R2J_OK)" PASS ;;
+      *) check "R2j-control an ordinary 0755 ancestor is restorable (got: $R2J_OK)" FAIL ;;
+    esac
+    chmod 0777 "$R2J_PARENT"
+    expect_eq "R2j  a world-writable ancestor is refused" \
+      "unsafe-ancestor-ownership" "$(verdict "$R2J_DATA" wwrite)"
+    chmod 1777 "$R2J_PARENT"
+    R2J_STICKY="$(verdict "$R2J_DATA" wwrite)"
+    case "$R2J_STICKY" in
+      ok\ *) check "R2j2 a sticky world-writable ancestor is still restorable ($R2J_STICKY)" PASS ;;
+      *) check "R2j2 a sticky world-writable ancestor is still restorable (got: $R2J_STICKY)" FAIL ;;
+    esac
+    chmod 0755 "$R2J_PARENT"
+  else check "R2j  fixture armed" FAIL; fi
+
+# R2m — EVERY ownership refusal raised INSIDE the mkdir loop must carry `created`.
+# The loop plants components top-down, so a refusal there can follow real directories
+# this run made, and the operator cleaning up needs their names. The three other throw
+# sites in that loop already attach them through the file's own
+# `try { fail(...) } catch (thrown) { thrown.created = ... }` shape; the two ownership
+# arms were added later and did not, so a race that refused after planting reported
+# "this run created nothing" over directories it had just created.
+# SOURCE-pinned, because both arms are reached only when a component's ownership
+# changes between the ladder's verdict and the loop's mkdir — the `deps.mkdir` seam
+# injects the write, not the reads, so no fixture can open that window.
+R2M_OUT="$(CORE="$CORE" node -e '
+  const fs = require("node:fs");
+  const src = fs.readFileSync(process.env.CORE, "utf8");
+  const start = src.indexOf("function restoreWorkflowProjectRoot(");
+  if (start < 0) { console.log("no-function"); process.exit(0); }
+  // Sliced from the ACCUMULATOR, not from the function head. A THIRD ownership
+  // refusal sits above it - the pre-loop ALREADY-RESTORED arm - and that one
+  // correctly carries nothing, because no component has been planted when it
+  // fires. A pin counting all three would demand a false claim from it.
+  const loopAt = src.indexOf("const created = [];", start);
+  if (loopAt < 0) { console.log("no-accumulator"); process.exit(0); }
+  const body = src.slice(loopAt);
+  const lines = body.split("\n");
+  let sites = 0;
+  let carried = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!/RESTORE_ROOT_REFUSALS\.UNSAFE_ANCESTOR_OWNERSHIP/.test(lines[i])) continue;
+    sites += 1;
+    const window = lines.slice(i, i + 8).join("\n");
+    if (/thrown\.created = created\.slice\(\)/.test(window)) carried += 1;
+  }
+  console.log(sites + "|" + carried);
+')"
+expect_eq "R2m  every in-loop ownership refusal carries the created list" "2|2" "$R2M_OUT"
+fi
+
+
+# R2k — the EEXIST arm must judge a component this run did NOT create by the SAME rule
+# the ladder applies to the ancestor it approved. Round 4 added the ownership rule at
+# the ladder and left `restoreRootRealDirectory` — lstat kind plus realpath equality,
+# no uid, no mode — as the only test on the adopted path, so the two paths answered
+# "is this safe to plant inside?" differently and the weaker one won whenever the race
+# was lost. The sticky exemption is what makes that reachable rather than exotic:
+# S_ISVTX constrains `unlink` and `rename` of EXISTING entries and says nothing about
+# CREATE, and this writer's whole operating domain is names that did not exist at
+# ladder time.
+R2K_SKIP=""
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) R2K_SKIP="win32 has no POSIX mode bits" ;; esac
+if [ -n "$R2K_SKIP" ]; then
+  check "R2k  the adopted-component rows are not driven ($R2K_SKIP)" PASS
+else
+  arm wopen /a/b || check "R2k  fixture armed" FAIL
+  R2K_DATA="$ARMED_DATA"
+  rm -rf "$PROJECTS/wopen"
+  R2K_OUT="$(restore_seam "$R2K_DATA" wopen wopen 1)"
+  case "$R2K_OUT" in
+    *unsafe-ancestor-ownership*)
+      check "R2k  a world-writable component adopted on EEXIST is refused" PASS ;;
+    *) check "R2k  a world-writable component adopted on EEXIST is accepted (got: $R2K_OUT)" FAIL ;;
+  esac
+  # CONTROL: the same seam with an ordinary 0755 sibling component must still succeed,
+  # or the row above would pass for a writer that refuses every adopted component and
+  # breaks the documented two-sessions-one-worktree case.
+  arm wopenok /a/b || check "R2k  control fixture armed" FAIL
+  R2K_OK_DATA="$ARMED_DATA"
+  rm -rf "$PROJECTS/wopenok"
+  R2K_OK_OUT="$(restore_seam "$R2K_OK_DATA" wopenok sibling 1)"
+  case "$R2K_OK_OUT" in
+    ok\ *|raced\ *|racedflag\ *)
+      check "R2k-control an ordinary adopted component is still accepted ($R2K_OK_OUT)" PASS ;;
+    *) check "R2k-control an ordinary adopted component is refused (got: $R2K_OK_OUT)" FAIL ;;
+  esac
+fi
+
+# R2l — the rule must cover the WHOLE chain, not the one component the ladder stops at.
+# The ladder returns at the nearest EXISTING component, so a world-writable GRANDPARENT
+# above a self-owned parent passed while three carriers claimed the check "closes the
+# window". The realpath equality test proves the chain is link-free and says nothing
+# about who may write to it.
+if [ -n "$R2K_SKIP" ]; then
+  check "R2l  the ancestor-chain rows are not driven ($R2K_SKIP)" PASS
+else
+  arm chainperm /a || check "R2l  fixture armed" FAIL
+  R2L_DATA="$ARMED_DATA"; R2L_ROOT="$ARMED_ROOT"
+  R2L_PARENT="$(dirname "$R2L_ROOT")"          # .../chainperm
+  R2L_GRAND="$(dirname "$R2L_PARENT")"         # $PROJECTS
+  rm -rf "$R2L_ROOT"
+  chmod 0755 "$R2L_PARENT"; chmod 0755 "$R2L_GRAND"
+  R2L_OK="$(verdict "$R2L_DATA" chainperm)"
+  case "$R2L_OK" in
+    ok\ *) check "R2l-control an ordinary chain is restorable ($R2L_OK)" PASS ;;
+    *) check "R2l-control an ordinary chain is restorable (got: $R2L_OK)" FAIL ;;
+  esac
+  chmod 0777 "$R2L_GRAND"
+  expect_eq "R2l  a world-writable GRANDPARENT is refused" \
+    "unsafe-ancestor-ownership" "$(verdict "$R2L_DATA" chainperm)"
+  chmod 0755 "$R2L_GRAND"
+fi
+
+# R6i22 — CLAUDE.md must not assert a guarantee the module it governs retracts. The
+# sticky exemption paragraph ended "so the swap is already impossible"; the core's own
+# comment beside `restoreAncestorPermissionsSafe` says sticky constrains `unlink` and
+# `rename` of entries that ALREADY EXIST, says nothing about CREATE, and that every
+# component this writer plants is one proved ABSENT — so a co-tenant CAN still win the
+# race to the name under a sticky ancestor. CLAUDE.md was the only carrier of the false
+# form and nothing pinned it.
+# THE NEEDLE IS THE LITERAL, so a retraction has to PARAPHRASE the retired claim rather
+# than quote it — the first attempt at this repair cited the old wording verbatim and
+# turned its own pin red. Deliberate: a citation-tolerant needle would have to model
+# quoting, and every shape that does is satisfied by the claim it forbids.
+R6I22_FULL="$(awk '/^## Restoring a Vanished Recorded Project Root/{on=1; print; next} \
+  on && /^## /{exit} on{print}' "$PLUGIN_DIR/CLAUDE.md" | tr '\n' ' ')"
+if [ -z "$R6I22_FULL" ]; then
+  check "R6i22-control the section slice is non-empty" FAIL
+else
+  check "R6i22-control the section slice is non-empty" PASS
+  if printf '%s' "$R6I22_FULL" | grep -qF "swap is already impossible"; then
+    check "R6i22 the sticky paragraph still claims the swap is impossible" FAIL
+  else check "R6i22 the sticky exemption claims no impossibility the core retracts" PASS; fi
+  # ...and it must still say what sticky DOES buy, or the fix would have deleted the
+  # exemption's justification along with its overstatement.
+  if printf '%s' "$R6I22_FULL" | grep -qF "sticky"; then
+    check "R6i22a the sticky exemption is still explained" PASS
+  else check "R6i22a the sticky exemption lost its justification" FAIL; fi
+fi
+
+# R6i23 — every exported helper of this feature has to be on the port roster, because
+# a port works from the list and not from the prose. `restoreRootOwnerSafe` is the
+# third one, and the two before it were already missing while the roster named only
+# `restoreRootRealDirectory`.
+R6I23_MISSING=""
+for r6i23 in restoreAncestorPermissionsSafe restoreAncestorChainOffender restoreRootOwnerSafe; do
+  printf '%s' "$R6I22_FULL" | grep -qF "$r6i23" || R6I23_MISSING="$R6I23_MISSING $r6i23"
+done
+if [ -z "$R6I23_MISSING" ]; then
+  check "R6i23 the port roster names every exported ownership helper" PASS
+else check "R6i23 the port roster omits:$R6I23_MISSING" FAIL; fi
+
+# R6i24 — the operator-facing WRITE BOUND has to enumerate every check that bounds the
+# write. It listed the plugin_data check, servesRecordedRuntime, the symlink/canonical
+# ancestor test and the depth limit, and stopped there — so the ancestor-PERMISSION rule,
+# the one that decides who may write the directory this repair plants inside, was absent
+# from the one paragraph an operator reads to learn what the bound is.
+R6I24_PARA="$(awk 'BEGIN{RS=""} /RESTORE_MAX_MISSING_COMPONENTS/ && /servesRecordedRuntime/ { print; exit }' \
+  "$PLUGIN_DIR/docs/session-control.md" | tr '\n' ' ')"
+if [ -z "$R6I24_PARA" ]; then
+  check "R6i24-control the write-bound paragraph was located" FAIL
+else
+  check "R6i24-control the write-bound paragraph was located" PASS
+  if printf '%s' "$R6I24_PARA" | grep -qiE 'owner|ownership|sticky'; then
+    check "R6i24 the write bound names the ancestor-permission rule" PASS
+  else check "R6i24 the write bound omits the ancestor-permission rule" FAIL; fi
 fi
 
 echo "restore-project-root: $PASS passed, $FAIL failed"

@@ -1994,7 +1994,9 @@ function adoptContext(options) {
         return state;
       });
     } catch (error) {
-      // Bare token plus a separate cause, the same split renderRestoreRoot takes.
+      // Bare token plus a separate cause, the same split renderRestoreOutcome's
+      // RESTORED arm takes when it prints `provenance` and `provenance cause` as two
+      // rows.
       // `error.message` on this path carries `session-control-v1: ` from fail(), so a
       // composed `unavailable: <message>` trips safeDisplayValue's PAIR_SEPARATOR
       // (`/ :|: /`) and folds the ROW, label included.
@@ -2074,6 +2076,12 @@ const BASELINE_HISTORY_REASON_PREFIX = 'baseline-rebuilt: ';
 // point. Callers that cannot tell them apart end up contradicting each other.
 const BASELINE_ALREADY_PRESENT_CODE = 'ZENSU_WORKFLOW_BASELINE_ALREADY_PRESENT';
 const BASELINE_NOT_REPAIRABLE_CODE = 'ZENSU_WORKFLOW_BASELINE_NOT_REPAIRABLE';
+// The OWNER-side predicate, beside `isBaselineAlreadyPresent` and
+// `isRestoreRootAlreadyPresent`. This was the one code in the family whose
+// comparison was spelled twice — here and again in the report layer — which is the
+// class `baselineProvenanceUnrecorded` above records being extracted to remove.
+const isBaselineNotRepairable = (error) => Boolean(
+  error && error.code === BASELINE_NOT_REPAIRABLE_CODE);
 
 // The PREDICATE, not the raw constant, is what consumers must use. Comparing
 // `error.code === core.BASELINE_ALREADY_PRESENT_CODE` reads as a match whenever
@@ -2419,10 +2427,26 @@ const RESTORE_ROOT_REFUSALS = Object.freeze({
   ROOT_PRESENT: 'root-present',
   UNSAFE_ANCESTOR: 'unsafe-ancestor',
   TOO_MANY_MISSING_COMPONENTS: 'too-many-missing-components',
+  // Its OWN member rather than a second cause folded into UNSAFE_ANCESTOR: that one
+  // says the tree changed under the record, and its remedy is to inspect a link. This
+  // one says the tree is intact and the PERMISSIONS on it are wrong, whose remedy is a
+  // chmod or a different parent. One wire value carrying both would render a remedy
+  // for the other half in every report that hit it.
+  UNSAFE_ANCESTOR_OWNERSHIP: 'unsafe-ancestor-ownership',
 });
 
 const RESTORE_HISTORY_PHASE = 'PROJECT_ROOT_RESTORED';
 const RESTORE_HISTORY_REASON_PREFIX = 'project-root-restored: ';
+// The RACED half of the reason, and it is EXPORTED because a READER needs it. The
+// `/zensu:doctor` restore row states the repair's cost — the directory came back
+// EMPTY and is not a git worktree — and that sentence is true of a run that planted
+// the components and FALSE of one that lost the race, whose documented cause is a
+// `git worktree add` in another terminal: a populated worktree with a branch. The
+// row therefore has to tell the two entries apart, and the only signal in the
+// persisted document is this suffix. Hand-copying it into the renderer would put the
+// same drift trap there that the phase token already avoids by reading the core, so
+// a renderer that cannot resolve this export withholds the claim instead of guessing.
+const RESTORE_HISTORY_RACED_SUFFIX = ', completed by another run';
 
 // A JUDGEMENT, not a measurement, and stated as one so the next reader can raise
 // it on evidence rather than on taste. One removed worktree leaves a handful of
@@ -2471,6 +2495,117 @@ function isRestoreRootAlreadyPresent(error) {
 // That is the trap deletableTarget records in the doctor renderer — it walks from
 // the canonical root for exactly this reason — and it is why the suite
 // canonicalizes its fixture roots rather than relaxing this test.
+// The ancestor-permission rule, ONE implementation, named rather than inlined so the
+// ladder's refusal and its own unit cases judge the same thing.
+//
+// THREE ways it declines to decide, each deliberate. On a host with no POSIX identity —
+// win32 — `process.getuid` is absent and the mode bits are not the access control, so the
+// check ABSTAINS rather than refusing every restore there. A stat that carries no numeric
+// `uid` or `mode` is the same case. And the STICKY bit is a full exemption, taken with its
+// cost stated rather than argued away: `/tmp` is writable by every user and sticky by
+// design, and without the exemption the repair would refuse every recorded root under a
+// temp directory. What sticky buys is NARROWER than what this rule asks for. It constrains
+// `unlink` and `rename` of entries that ALREADY EXIST, so an entry this run created cannot
+// be removed or renamed out from under it by another user. It says nothing about CREATE, and every
+// component this writer plants is one `verdict.missing` proved ABSENT — so under a sticky
+// ancestor a co-tenant can still win the race to the name, and the realpath re-verification
+// after each mkdir is what catches that, never this rule. (The phrasing avoids the literal
+// that R12b reserves for the retraction below about the mode of the directory this repair
+// CREATES — a different claim from this one, which is about an ancestor the repair never
+// touches.)
+//
+// `root` is accepted as an owner beside the caller: a system-managed parent such as
+// `/opt` or `/srv` is a legitimate place for a project, and refusing it would invent a
+// location policy the record never asked for — the same reasoning that refused a location
+// allowlist for the destination itself.
+// The ABSTAIN ladder, shared by both rules below so a host that cannot decide
+// abstains identically wherever the question is asked. Hoisted rather than copied:
+// the two predicates disagree about the WRITE BITS on purpose, and a second copy of
+// the part they agree on is what lets that deliberate divergence drift into an
+// accidental one.
+function restoreOwnershipUndecidable(componentStat) {
+  if (typeof process.getuid !== 'function') return true;
+  return !componentStat
+    || typeof componentStat.uid !== 'number'
+    || typeof componentStat.mode !== 'number';
+}
+
+// THE LEAF RULE — the OWNER half alone, and it is a SEPARATE predicate rather than a
+// flag because the two questions are different. The recorded project root is the
+// DESTINATION this repair hands back, never a directory it plants a child inside, so
+// the swap window the write-bits half exists to close does not exist there: nothing is
+// created under the leaf by this function. Its mode is the user's own business, and a
+// worktree created under the ordinary umask 002 is 0775 — applying the ancestor rule to
+// it turned "the directory came back between the check and the write" into
+// `FAILED` / exit 1 for the most common shape of the benign race.
+//
+// What still has to hold is the owner: announcing ALREADY RESTORED over a directory
+// belonging to somebody else tells the user their anchor is back when what is at that
+// path is not theirs. `root` is accepted for the same reason it is accepted below.
+function restoreRootOwnerSafe(componentStat) {
+  if (restoreOwnershipUndecidable(componentStat)) return true;
+  return componentStat.uid === process.getuid() || componentStat.uid === 0;
+}
+
+function restoreAncestorPermissionsSafe(componentStat) {
+  if (restoreOwnershipUndecidable(componentStat)) return true;
+  // The owner half is the leaf rule, called rather than re-spelled: an ancestor this
+  // repair may plant inside must satisfy everything the destination must satisfy, and
+  // then one thing more.
+  if (!restoreRootOwnerSafe(componentStat)) return false;
+  if ((componentStat.mode & 0o1000) !== 0) return true;
+  return (componentStat.mode & 0o022) === 0;
+}
+
+// The same rule over EVERY component of a chain, which is what the ladder's own
+// comment always claimed and what it did not do. Judging the nearest existing
+// component alone leaves a GRANDPARENT open to every user's write above a self-owned
+// parent
+// unexamined, and the realpath equality test beside it proves the chain is LINK-FREE
+// while saying nothing about who may write to it — so the whole subtree stayed
+// replaceable while the check passed.
+//
+// Modelled on `assertSecureWorkspaceRoot` in `review-evidence-lease-v1.js`, which has
+// held the stricter rule all along for a LESS dangerous operation — reading a lease
+// workspace — than this one, which creates a directory at an arbitrary absolute path.
+// The divergence is what this closes; the template is not copied blindly, because that
+// walker also enforces a 0700 leaf, which is a rule about a directory IT creates and
+// would refuse every ordinary project root here.
+//
+// Returns the FIRST offending component walking DOWN from the filesystem root, so the
+// value is the HIGHEST one that fails rather than the nearest existing one. The
+// renderer labels it accordingly; do not reuse the sibling refusal's row here.
+//
+// A component it cannot stat is NOT reported, and the honest reason is narrower than
+// the one this comment used to give. It claimed "the ladder above already answers for
+// absence and for an unreadable component", which is true only from the nearest
+// EXISTING component downwards — the ladder walks UP from the recorded root and stops
+// there, so every ancestor ABOVE it, which is exactly what this walk covers, is one the
+// ladder never stats. So this arm fails OPEN, and nothing else answers for it. The
+// exposure is narrow rather than absent: `lstat` here succeeds for every ancestor of a
+// component the ladder just stat'ed successfully, because that stat already required
+// search permission on the whole chain — what remains is a permission change racing
+// between the two walks. Refusing instead was weighed and declined: an unreadable
+// ancestor is the ladder's own UNSAFE_ANCESTOR cause, and answering it a second time
+// here would replace a precise refusal with a less precise one.
+function restoreAncestorChainOffender(dir) {
+  const parsed = path.parse(dir);
+  const relative = path.relative(parsed.root, dir);
+  const segments = relative === '' ? [] : relative.split(path.sep);
+  let current = parsed.root;
+  for (let index = 0; ; index += 1) {
+    let componentStat;
+    try {
+      componentStat = fs.lstatSync(current);
+    } catch {
+      return null;
+    }
+    if (!restoreAncestorPermissionsSafe(componentStat)) return current;
+    if (index >= segments.length) return null;
+    current = path.join(current, segments[index]);
+  }
+}
+
 function restoreRootComponentLadder(projectRoot) {
   const missing = [];
   let candidate = projectRoot;
@@ -2532,6 +2667,17 @@ function restoreRootComponentLadder(projectRoot) {
       }
     } catch {
       return restoreRootRefusal(RESTORE_ROOT_REFUSALS.UNSAFE_ANCESTOR, candidate);
+    }
+    // WHO may write here. Every test above establishes WHAT this component is — a real,
+    // canonical, link-free directory — and none of them asks who else can change it. The
+    // loop then plants a directory inside it, re-verifying each created component by
+    // realpath, which NARROWS the swap window and cannot close it: Node exposes no
+    // `mkdirat`, so the name is resolved again on every syscall. Under an ancestor a
+    // co-tenant may write, that window is theirs to win. Refusing it closes the window by
+    // not opening it.
+    const offender = restoreAncestorChainOffender(candidate);
+    if (offender !== null) {
+      return restoreRootRefusal(RESTORE_ROOT_REFUSALS.UNSAFE_ANCESTOR_OWNERSHIP, offender);
     }
     return {
       ok: true,
@@ -2667,7 +2813,11 @@ function restoreRootRealDirectory(candidate) {
   }
   if (entry.isSymbolicLink() || !entry.isDirectory()) return { present: true, real: false };
   try {
-    return { present: true, real: fs.realpathSync.native(candidate) === candidate };
+    // The STAT travels with the verdict. The arm that adopts a component this run did
+    // not create has to judge its owner and mode by the ladder's own rule, and taking a
+    // second lstat there would judge a different instant than the one the realpath test
+    // just proved — the two reads are what a swap in between would sit inside.
+    return { present: true, real: fs.realpathSync.native(candidate) === candidate, stat: entry };
   } catch {
     return { present: true, real: false };
   }
@@ -2725,6 +2875,14 @@ function restoreWorkflowProjectRoot(options, deps) {
     if (!leaf.real) {
       fail(`recorded project root is not restorable: ${RESTORE_ROOT_REFUSALS.UNSAFE_ANCESTOR}`);
     }
+    // The LEAF rule, not the ancestor one. Announcing ALREADY RESTORED over a directory
+    // nothing checked the owner of is the report telling the user their anchor is back
+    // while it is in fact somebody else's directory — but the ancestor rule's write-bits
+    // half has no business here, and applying it refused the ordinary umask-002 worktree.
+    if (!restoreRootOwnerSafe(leaf.stat)) {
+      fail('recorded project root is not restorable: '
+        + RESTORE_ROOT_REFUSALS.UNSAFE_ANCESTOR_OWNERSHIP);
+    }
     throw restoreRootAlreadyPresentError([]);
   }
   // ONE COMPONENT AT A TIME, and never `recursive: true`. A recursive mkdir
@@ -2761,6 +2919,20 @@ function restoreWorkflowProjectRoot(options, deps) {
   // given. A maintainer reasoning from the old text would have reached the wrong
   // conclusion about what this argument protects.
   const created = [];
+  // A run that PLANTED components and then lost the race must still record that it
+  // did. Every raced throw fires ABOVE repairWorkflowBaseline and above the
+  // mutateWorkflowState below, so the count reached the operator on stdout only and
+  // the workflow history — which this feature names as its ONLY durable disclosure,
+  // there being deliberately no bypass-ledger entry — recorded nothing at all. The
+  // partial case is ordinary rather than contrived: two sessions can legitimately
+  // name one project_root, so both interleave per component and each ends up having
+  // created a strict subset.
+  //
+  // The flag is what the loop sets INSTEAD of throwing, and only when there is work
+  // to record. A run that created NOTHING keeps throwing exactly as before: there is
+  // no provenance to write, and an entry claiming otherwise would be false. The two
+  // pre-loop arms above are unchanged for the same reason.
+  let alreadyPresent = false;
   for (const component of verdict.missing) {
     try {
       mkdir(component);
@@ -2780,12 +2952,38 @@ function restoreWorkflowProjectRoot(options, deps) {
         // `FAILED … Run /zensu:doctor` is the same wrong outcome the ROOT_PRESENT
         // re-derivation was added to prevent, one component up.
         const leafNow = restoreRootRealDirectory(verdict.projectRoot);
+        if (leafNow.real && !restoreRootOwnerSafe(leafNow.stat)) {
+          // Same rule, same reason as the leaf arm above the loop: a recorded root that
+          // appeared during the race is still a directory this run is about to hand the
+          // session back, and nothing else judges who owns it. The LEAF rule, because
+          // this IS the recorded root — the ancestor rule one arm down judges a
+          // component the loop would go on to plant inside.
+          // CARRIED, like every other throw site in this loop. A race that refuses
+          // here can follow components this run really planted, and a composed
+          // `fail()` message cannot name them — safeDisplayValue folds a pair.
+          try {
+            fail('recorded project root is not restorable: '
+              + RESTORE_ROOT_REFUSALS.UNSAFE_ANCESTOR_OWNERSHIP);
+          } catch (thrown) {
+            thrown.created = created.slice();
+            throw thrown;
+          }
+        }
         if (leafNow.real) {
           // The work is CARRIED, not discarded. `verdict.projectRoot` is the LAST
           // element of `verdict.missing`, so with two or more missing components
           // this run has already created the ones above it — and dropping `created`
           // here made the caller print "this run created nothing" over directories
           // it had just planted.
+          //
+          // CARRIED FURTHER than the message now: with work to record, the loop ends
+          // and the function falls through to the baseline repair and the provenance
+          // write, so what this run planted lands in the workflow history instead of
+          // living only in a line of stdout. See the flag's own comment above the loop.
+          if (created.length > 0) {
+            alreadyPresent = true;
+            break;
+          }
           throw restoreRootAlreadyPresentError(created);
         }
         // SECOND, a sibling repair. ONE project_root can be named by SEVERAL
@@ -2802,8 +3000,43 @@ function restoreWorkflowProjectRoot(options, deps) {
         // fixture can open that window — the seam injects mkdir, not the reads — so the
         // ORDER is what closes it.
         const there = restoreRootRealDirectory(component);
+        // WHICH rule depends on WHAT this component is, and the loop reaches both here:
+        // `missing` is ordered top-down and ends at the recorded root, so the last
+        // iteration judges the destination while every earlier one judges a directory
+        // the next iteration plants inside. Asking the ancestor question about the
+        // destination is the defect the leaf arms above fix; asking the leaf question
+        // about an intermediate would re-open the swap window this rule exists for.
+        const thereSafe = component === verdict.projectRoot
+          ? restoreRootOwnerSafe(there.stat)
+          : restoreAncestorPermissionsSafe(there.stat);
+        if (there.real && !thereSafe) {
+          // THE BYPASS THIS CLOSES. `restoreRootRealDirectory` tests lstat kind plus
+          // realpath equality and nothing about uid or mode, so this arm used to adopt a
+          // component the ladder would have refused — then plant the next one inside it.
+          // Two paths answering "is this safe to plant inside?" with different rules is
+          // the shape a race wins: the ladder sees a chain that is clean, and the loop
+          // meets a component a co-tenant created in between. Sticky does not prevent
+          // that: it constrains `unlink` and `rename` of EXISTING entries and says
+          // nothing about CREATE, and every component here is one that did not exist
+          // when the ladder looked.
+          // CARRIED, for the reason the sibling arm above states.
+          try {
+            fail('a component of the recorded project root exists at '
+              + `${component}, and is not one this repair may plant inside: `
+              + RESTORE_ROOT_REFUSALS.UNSAFE_ANCESTOR_OWNERSHIP);
+          } catch (thrown) {
+            thrown.created = created.slice();
+            throw thrown;
+          }
+        }
         if (there.real) {
           if (component === verdict.projectRoot) {
+            // Same rule as the leaf arm above: with work to record, end the loop and
+            // let the provenance write run. With none, throw as before.
+            if (created.length > 0) {
+              alreadyPresent = true;
+              break;
+            }
             throw restoreRootAlreadyPresentError(created);
           }
           continue;
@@ -2891,7 +3124,7 @@ function restoreWorkflowProjectRoot(options, deps) {
       // document that is merely MISSING is rebuilt by the adoption, while one that is
       // UNSAFE or UNREADABLE is tamper evidence the repair refuses by design. Folding
       // both into one message sent the operator into the command that just declined.
-      baselineNotRepairable = Boolean(error && error.code === BASELINE_NOT_REPAIRABLE_CODE);
+      baselineNotRepairable = isBaselineNotRepairable(error);
     }
   }
   // Provenance is a history entry and NOT a record or state field, exactly as it
@@ -2941,7 +3174,12 @@ function restoreWorkflowProjectRoot(options, deps) {
           // already there. The sibling baseline repair states the same rule about
           // itself — it exists to tell a creation from a find, because it appends
           // an entry claiming it performed one.
-          reason: `${RESTORE_HISTORY_REASON_PREFIX}${created.length} component(s)`,
+          // The RACED completion says so. An entry identical to an ordinary one
+          // would put the same claim on two different outcomes, and the one thing
+          // an operator reading this history needs here is that the recorded root
+          // came back from somewhere else while this run was still planting.
+          reason: `${RESTORE_HISTORY_REASON_PREFIX}${created.length} component(s)`
+            + (alreadyPresent ? RESTORE_HISTORY_RACED_SUFFIX : ''),
         });
         state.history = history;
         return state;
@@ -2960,6 +3198,11 @@ function restoreWorkflowProjectRoot(options, deps) {
     baselineNotRepairable,
     provenance,
     provenanceCause,
+    // The RETURNED flag the renderer keys ALREADY RESTORED off. It replaces the
+    // throw for the partial case only; a run that created nothing still throws, so
+    // both mechanisms exist and a caller must read this field rather than assume a
+    // successful return means this run created the recorded root.
+    alreadyPresent,
   };
 }
 
@@ -5263,6 +5506,7 @@ module.exports = {
   BASELINE_REFUSALS,
   BASELINE_ALREADY_PRESENT_CODE,
   BASELINE_NOT_REPAIRABLE_CODE,
+  isBaselineNotRepairable,
   // PRODUCTION consumers, not test seams — a port that drops either ships a
   // report and a doctor row calling an undefined function. `baselineUnsafeComponent`
   // is read by hooks/lib/zensu-doctor-report.js (the own-document row) and by
@@ -5292,9 +5536,43 @@ module.exports = {
   //
   // PORT-RELEVANT, stated here because every sibling repair in this family
   // carries the split and a port works from the roster rather than the prose.
-  // The CORE half is exactly the names below plus RESTORE_ROOT_REFUSALS's
-  // six members: they are host-neutral and read nothing from the environment,
-  // every anchor arriving as an option. The HOST half carries NO count here on
+  // The CORE half is exactly the names below plus EVERY member of
+  // RESTORE_ROOT_REFUSALS — read that set from the object, never from a numeral here,
+  // which is the rule this roster states about its host half and then broke about its
+  // own: the count said six and a seventh member landed. They are host-neutral and read
+  // nothing from the environment, every anchor arriving as an option, with ONE named
+  // exception: `restoreAncestorPermissionsSafe` reads `process.getuid`, and it ABSTAINS
+  // where that is absent rather than refusing, so a host without POSIX identity gets the
+  // previous behaviour instead of a repair that never runs. That helper is not exported
+  // — the ladder is, and driving the ladder is what reaches it — but a port that
+  // re-implements the ladder without it ships a repair with one bound fewer on who may
+  // write the tree it plants in. It is NOT only the names — the writer's
+  // RETURN SHAPE is part of it, and one member of that shape is easy to miss because
+  // no export announces it. `restoreWorkflowProjectRoot` answers `alreadyPresent`,
+  // and the two ways this repair loses the race are BOTH live: a run that created
+  // nothing still THROWS, which `isRestoreRootAlreadyPresent` below classifies, while
+  // a run that planted components and then lost it COMPLETES and reports the race in
+  // that field. Both mechanisms reach the same outcome, so a caller must read the
+  // field rather than take a successful return for work this run performed — a port
+  // that implements the list and not the shape announces RESTORED for a directory
+  // another run created. `RESTORE_HISTORY_RACED_SUFFIX` is the persisted half of the
+  // same fact: it is the only signal in the workflow document that tells a raced entry
+  // from a planted one, which is why a doctor row reads it rather than copying it.
+  // ONE ORDERING fact travels with that shape and is a host obligation rather than a
+  // core one, so a port reading only the name list drops it. This writer DOES call
+  // `repairWorkflowBaseline` — say so plainly, because an earlier wording here said it
+  // never does and a port implementing that ships a writer with no baseline half and a
+  // return three fields short of what two host renderers read. The ordinary path owns
+  // the repair and returns `baseline` / `baselineError` / `baselineNotRepairable`, which
+  // `restoreBaselineRows` and `renderRestoreOutcome` consume. What is asymmetric is the
+  // THROW path: all four `restoreRootAlreadyPresentError` throws fire ABOVE that call, so
+  // on those paths the baseline has NOT been repaired and the CALLER owes it — a port
+  // that returns early on the throw ships an arm reporting success with the workflow
+  // document never rebuilt, which is the state in which the capability gate denies every
+  // tool. The host renderers this roster names are `renderRestoreVerdict`,
+  // `performRestore` and `renderRestoreOutcome`. The single renderer they replaced is
+  // defined nowhere in the tree; R12k forbids its name here, so it is not repeated.
+  // The HOST half carries NO count here on
   // purpose: the numeral was wrong by one for a round after `restoreRootRealDirectory`
   // landed, and it went stale again when this roster omitted two obligations the
   // feature's own pointer paragraph already listed. Read the list, never a total.
@@ -5324,10 +5602,14 @@ module.exports = {
   RESTORE_ROOT_REFUSALS,
   RESTORE_HISTORY_PHASE,
   RESTORE_HISTORY_REASON_PREFIX,
+  RESTORE_HISTORY_RACED_SUFFIX,
   RESTORE_MAX_MISSING_COMPONENTS,
   RESTORE_ALREADY_PRESENT_CODE,
   isRestoreRootAlreadyPresent,
   restoreRootComponentLadder,
+  restoreAncestorPermissionsSafe,
+  restoreOwnershipUndecidable,
+  restoreRootOwnerSafe,
   restoreRootRealDirectory,
   baselineProvenanceUnrecorded,
   restoreRootVerdict,

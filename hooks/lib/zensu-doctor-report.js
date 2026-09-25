@@ -3844,16 +3844,98 @@ function projectRootRestoredRow(core, projectRoot, key, sharedRead) {
   var rendered = provenanceRendering(stamp, reason);
   var when = rendered.when;
   var why = rendered.why;
-  line(WARN, 'state: this session\'s recorded project root was RE-CREATED by '
+  // THE CONTENTS CLAIM IS PRESENT-TENSE AND COMES FROM A PROBE, NEVER FROM THE ENTRY.
+  //
+  // Four defects share one cause, and keying the sentence on the history entry answered
+  // none of them. The entry is IMMUTABLE, so an ordinary restore whose user then followed
+  // this row's own `git worktree add` remedy kept being told the directory "came back
+  // EMPTY … everything written there is untracked" forever — a WARN that withholds the
+  // green summary while instructing work already done. The raced-with-no-work mechanism
+  // records NOTHING (every one of those throws fires above the history write), so `last`
+  // is then an earlier suffix-free entry describing a directory another run created. The
+  // suffix is written only on the arm that planted components before losing the race,
+  // and the sibling-repair winner — two sessions
+  // each running --restore-root --confirm, which the core calls ordinary — plants exactly
+  // the empty stub a suffix-keyed sentence claimed it had not. And the branch read the RAW
+  // reason while the row DISPLAYS a capped, suppressible copy, so a session-writable
+  // document steered the claim with bytes the row refuses to show.
+  //
+  // What the reader needs is what is in that directory NOW, so ask the directory. The
+  // probe is one `lstat` of `<root>/.git` and answers three ways — present, absent, or
+  // unanswerable — and the unanswerable arm WITHHOLDS, the rule this block already
+  // follows everywhere else: a missing check, never an all-clear.
+  var gitPresent = null;
+  try {
+    fs.lstatSync(path.join(projectRoot, '.git'));
+    gitPresent = true;
+  } catch (error) {
+    gitPresent = (error && error.code === 'ENOENT') ? false : null;
+  }
+  // The suffix survives as a PROVENANCE discriminator only — who finished the directory,
+  // never what is in it — so steering it can no longer move a claim about contents. It is
+  // read from the LOADED core for the same reason the phase token is, and it is taken from
+  // the value the row RENDERED rather than the raw field: when `provenanceSlot` elided or
+  // withheld the reason, the row has no displayed evidence for the claim and makes none.
+  var racedSuffix = (core && typeof core.RESTORE_HISTORY_RACED_SUFFIX === 'string'
+    && core.RESTORE_HISTORY_RACED_SUFFIX) ? core.RESTORE_HISTORY_RACED_SUFFIX : '';
+  var shownReason = (reason && reason.ok && !reason.bracket && typeof reason.text === 'string')
+    ? reason.text
+    : '';
+  var raced = racedSuffix !== '' && shownReason.indexOf(racedSuffix) !== -1;
+  // A reason the row could not DISPLAY in full leaves the determination unmade just as
+  // surely as an absent token: the read is deliberately taken from the rendered copy, so
+  // an elided, bracket-refused or fold-failed reason carries no evidence either way.
+  var reasonShown = reason && reason.present ? shownReason !== '' : true;
+  var reasonWhole = reasonShown
+    && (typeof PROVENANCE_ELISION !== 'string' || shownReason.indexOf(PROVENANCE_ELISION) === -1);
+  // The MISSING CHECK is disclosed rather than rendered as silence, the rule this block
+  // follows everywhere else. Without the token — or without a whole rendered reason to
+  // read it from — the row cannot tell a raced entry from a planted one at all, and
+  // saying nothing reads exactly like "this run planted it".
+  var provenanceClause = raced
+    ? ' This entry records that another run finished the directory, not this one.'
+    : (racedSuffix === ''
+      ? ' Whether another run finished it instead could not be checked: the Session'
+        + ' Control core exports no raced-completion token, so that is a missing check'
+        + ' rather than an all-clear.'
+      : (reasonWhole
+        ? ''
+        : ' Whether another run finished it instead could not be checked: this row could'
+          + ' not render the entry\'s reason in full, and the check reads the rendered'
+          + ' copy, so that is a missing check rather than an all-clear.'));
+  // What ONE lstat establishes is whether a `.git` entry is rooted AT this path — not
+  // whether a repository is there, and not whether the files under it are tracked. The
+  // arms said both, and both were falsifiable: the entry may be an empty file, a FIFO or
+  // a dangling symlink, and a recorded root NESTED inside a work tree has no `.git` of
+  // its own while everything in it is committable. `project_root` is minted from the
+  // SessionStart cwd, so a session started in a subdirectory is the ordinary shape.
+  // The `.zensu/state` disclosure belongs on EVERY arm: the row is reachable only when
+  // that path exists, and this command wrote it.
+  var cost;
+  if (gitPresent === true) {
+    cost = ' That repair restores the anchor, not the work — but a `.git` entry exists'
+      + ' there now, so something is checked out at that path and this command did not'
+      + ' put it there: it plants an empty stub and runs no git. `.zensu/state` under'
+      + ' that root IS this command\'s own output. Nothing is claimed about the chain'
+      + ' state: the workflow baseline under that root reads as never active.';
+  } else if (gitPresent === false) {
+    cost = ' That repair restores the anchor, not the work, and nothing is checked out at'
+      + ' that path now — there is no `.git` entry there. That does NOT prove the files'
+      + ' are untracked: a recorded root nested inside a repository has none of its own.'
+      + ' If it is not nested, run `git worktree add` at that path, and note that'
+      + ' `.zensu/state` is already there — this command wrote it — so a plain'
+      + ' `git worktree add` refuses a non-empty target: move that `.zensu` aside'
+      + ' first, or pass --force.';
+  } else {
+    cost = ' That repair restores the anchor, not the work. Whether a git repository is'
+      + ' there now could not be read, so this report makes no claim about it — that is a'
+      + ' missing check, not an all-clear. Look at the path before you write to it.';
+  }
+  line(gitPresent === true ? OK : WARN,
+    'state: this session\'s recorded project root was RE-CREATED by '
     + '/zensu:adopt-session --restore-root — ' + restores.length
     + (restores.length === 1 ? ' entry' : ' entries')
-    + ', most recently at ' + when + why + '. That repair restores the anchor, not the '
-    + 'work: the directory came back EMPTY and is not a git worktree, so until you run '
-    + '`git worktree add` at that path everything written there is untracked — no '
-    + 'repository, no branch, nothing to commit it to. Note that this row renders only '
-    + 'while the workflow document is PRESENT under that root, so `.zensu/state` is '
-    + 'there by now and a plain `git worktree add` refuses a non-empty target: move '
-    + 'that `.zensu` aside first, or pass --force.' + rendered.note);
+    + ', most recently at ' + when + why + '.' + provenanceClause + cost + rendered.note);
 }
 
 function stateBlock(nowMs) {
