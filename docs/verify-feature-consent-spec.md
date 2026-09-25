@@ -1,5 +1,16 @@
 # Verify-Feature Consent Flow and Guided Setup — Specification
 
+**Superseded in part.** The Playwright MCP server, its capability broker
+(`scripts/playwright-mcp-proxy.js`), its launcher and its lockfile-backed npm runtime were
+removed: each Claude Code session started the server and materialized a private runtime of
+several hundred megabytes whether or not a browser was ever opened. `/zensu:verify-feature` now
+drives `playwright-cli`, and the consent gate moved to the `Bash` matcher, where it judges every
+`playwright-cli` call on a `zensu-verify-*` session: a command allowlist, a run config the gate
+reads itself, the same floor, the same per-origin consent and the same memory. Every statement
+below about the broker, its start modes, its execution marker or the MCP tool names describes the
+retired design. The current behaviour is in `docs/gates.md` § Browser Consent Gate and
+`docs/verify-feature.md`; this document stays as the record of the consent-mode decisions.
+
 Status: implemented on 2026-09-02 by the chain recorded in
 `.zensu/plans/2026-09-02-2137_tdd-verify-consent.md`, with two deviations the plan's
 Requirements table records under the never-recycle rule: AC-007 (a local/remote class lock)

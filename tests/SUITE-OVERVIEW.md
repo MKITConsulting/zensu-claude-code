@@ -200,13 +200,24 @@ and no-escape assertions, a payload-declared non-main principal whose premise co
 `claude-principal-v1.js` itself, a second-path-field row, six faults covered — four asserting their own reason literal and two asserting the documented
 silence, the exit-2 plugin-root refusal, two source-absence checks with controls, and a
 two-group matcher shape compared against the module's exported tool set), the browser consent
-gate (103 checks: the hook pair driven against a real Session Control session, the shared
-navigation floor, the loopback bound, the session memory and its containment, the per-origin
-consent rule a later recipe cannot widen, the one recipe resolver both hooks and the
-doctor row consume, the per-session execution marker the broker requires before it
-self-approves an origin — its writer, its origin binding, the policy-mode branch that
-deliberately mints none, and the reap of every correctly-named file no reader can honour —
-and the skill wording), and the writer-side
+gate (150 checks: the Bash-matcher hook pair driven against a real Session Control session — an
+unrelated call left alone, a refused command, the first loopback navigation asking, the recorded
+approval and the remembered origin, the floor refusals, a subagent denied, policy mode, and the
+`open` run-config, Chromium-only and global-config refusals — the single-plain-invocation shapes
+denied through the real pre hook (quote split, letter case, line continuation, here-string,
+co-rider, launcher, an unresolved session option), the recognized `/zensu:doctor` and adoption
+commands admitted, the recorder reading the same spellings, a differential through a
+module-absent copy proving every marked spelling in its corpus — admitted and asked ones
+included — passes the prefilter, the one `sed` and one `tr` pass and
+the byte-identical prefilter carrying every derived CLI marker, the escaped-slash fallback arm
+reached with `sed` failing and a control proving that failing `sed` is the one the hooks run,
+both no-node arms, degraded roots
+left silent on unmarked payloads, the two doc pins on fault direction and the mention cost — the
+four unit files held at their
+registered counts and against this document's table, the one navigation floor both the gate and
+the run-config helper require, the fail-closed load faults, the policy `rules/setup.md` renders,
+and a tree-wide census that no file outside its allowlist still names the retired MCP broker),
+and the writer-side
 redaction that keeps `.zensu/plans` and `.zensu/logs` artifacts free of
 absolute developer paths (~100 assertions).
 
@@ -219,7 +230,7 @@ absolute developer paths (~100 assertions).
 
 Structural pins on each shipped skill's SKILL.md: required phases, marker wiring,
 persona pools, stable AC-###/FR-### requirement IDs, overlays, and cross-file version
-consistency. Heaviest: `pr-team-review-skill` (~121), `verify-feature-skill` (~117).
+consistency. Heaviest: `pr-team-review-skill` (~121).
 
 `session-trail-verdict` is the one BEHAVIOURAL suite in this group: it builds synthetic
 transcripts under a synthetic `HOME` and asserts what `trail.mjs` actually decides about
@@ -332,14 +343,14 @@ that suite's failure.
 | `review-evidence-sweep-v1.test.js` | 32 | `test-versioned-plugin-upgrade.sh` | superseded-lease sweep: the ownership selector, the canonicalized repair root, and the ancestor probe that separates *no store here* from *an ancestor is a file* |
 | `session-adopt-report-v1.test.js` | 34 | `test-versioned-plugin-upgrade.sh` | the adoption report payload: `safe()` in both directions (ordinary path verbatim; bidi, line separators and DEL folded; a localized path unchanged), the `label : value` pair-forgery guard on both branches, the space-adjacency rule that folds every Modifier_Letter a forged row could use (walked over the whole category rather than a list), the separator in BOTH spellings the consumers emit (`space-colon-space` and `colon-space`) with an ordinary colon still rendering raw, the trailing-position seam where the caller appends text after the value, the invisible-letter guard, that the exported constants and the applied rules predict each other in both directions, the in-place lease repair, and that the display rule has exactly ONE owner |
 | `rule-block-v1.test.js` | 10 | `test-best-solution-first.sh` | the one-line marker-block reader both rule carriers share: marker position, the FILE and BLOCK ceilings, the short-read and swapped-file refusals |
-| `playwright-mcp-proxy.test.js` | 28 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy, including its three start modes (policy, consent, deny), the consent-mode approval boundary, and the per-session execution-marker precondition that boundary now requires (every `consentEvidenceState` value and the refusal each one produces, and the production project-root anchor ladder) |
-| `verify-consent-v1.test.js` | 43 | `test-verify-consent.sh` (V7) | the four copies of the broker tool allowlist held in step with the broker's own export, and browser consent decision: the exported server key against `.mcp.json`, its load-time regex-safety guard, and the matcher derived from it, tool spellings, ask/allow/deny ladder, per-origin consent, loopback-only bound, memory shape and containment refusals, a server keyed playwright reaching no decision and no refusal naming it, stamp validity independent of route, the shared memory read's containment rule and its not-configured case, recipe route extraction, pre/post CLI, and the per-session execution marker (writer, origin binding, staleness, hard-link and oversize arms, session-scoped and project-scoped reads, and the directory-component containment the reader shares with the writer) |
-| `verify-navigation-floor-v1.test.js` | 10 | `test-verify-consent.sh` (V6) | the one navigation floor the broker and the consent hook share: loopback and public-address classes, URL refusals, remote host resolution, route normalization (including every encoded dot-segment spelling), and the two-way agreement between `policyContractFault` and the broker's hand-copied `parsePolicy` guards |
+| `verify-consent-v1.test.js` | 100 | `test-verify-consent.sh` (V7) | the Bash-matcher browser consent gate: the exported constants and the command allowlist, the shell lexer and every refused indirection (a nested shell, a heredoc or here-string, `xargs`, an unexpanded session or argument), the single-plain-invocation rule and the remedy both shape refusals name, the wrapper and package-launcher refusals, the playwright-cli argument parser against a golden recording of the measured CLI parser, the ask/deny ladder with per-origin consent and the loopback-only bound, the Chromium-only `--browser` rule, the `--config` run-config shape and the global-config and ambient-override refusals, policy mode, the session memory with its containment and caps, the pre/post CLI envelopes, the registration probes, and the prompt text |
+| `verify-navigation-floor-v1.test.js` | 14 | `test-verify-consent.sh` (V6) | the one navigation floor the consent gate and the run-config helper share: loopback and public-address classes, URL refusals, remote host resolution, route normalization, the top-level policy contract check, and `parsePolicyTargets` with its `MAX_POLICY_ROUTES` bound |
 | `verify-free-port.test.js` | 3 | `test-verify-consent.sh` (V7b) | free loopback port helper: argument parsing, occupied and excluded ports, CLI contract |
+| `verify-browser-config.test.js` | 8 | `test-verify-consent.sh` (V7c) | the playwright-cli run-config helper: argument parsing, the isolated origin-restricted local config, the public-address pins of a remote run, the policy gating of both modes, the `--check-policy` answer, the run-directory refusals and the CLI contract |
 | `release-run-step.test.js` | 9 | `test-immutable-marketplace-release.sh` | the release step's `run_step` wrapper, EXECUTED: the annotation on failure, the full stderr replay, exit-status propagation, the `--quiet` sink applying to the wrapped command and never to the annotation, the no-stderr fallback, `head -1` bounding the annotation to one line, and temp-file cleanup under `RUNNER_TEMP`. Driven first in that suite, because it is the wrapper's only executable coverage anywhere and the suite's other pins are source greps that stay green against a present-but-broken wrapper |
 | `zen-anchor-assertions.test.js` | 11 | `test-zen-mode.sh` (Z29) | zen-mode eval GRADERS: every javascript assertion body compiled, a pinned pass/fail vector for the two anchor scenarios plus the safety carve-out, and every scenario bound to an anchor the module can produce |
 | `zen-anchor-v1.test.js` | 25 | `test-zen-mode.sh` (Z31) | zen-mode chain anchor: the shape -> line mapping against the classifier's own total set, the failed mark read from the owner rather than restated, the closed chain rendering no anchor at all, that no shape renders a whole-chain completion claim, that the token takes no second argument and that the classifier-report input is monotone, the bound max-rounds outcome rendering the blocked mark, that the outcome arm is a positive allowlist so an unrecognised member renders nothing, that the two blocked-mark authorities are OR-ed, that anchorNoneIsExpected splits a legitimate `none` from a degraded one for every shape, that the outcome allowlist is keyed on the owner's exported CHAIN_OUTCOMES and its rows are frozen, the degraded-owner fallback, and the token predicate |
-| `verify-feature-transcript-check.test.js` | 15 | `test-promptfoo-verify-feature.sh` | transcript assertion contract, including the declared-safe policy check that must not launder a browser launch through a quoted or escaped argument |
+| `verify-feature-transcript-check.test.js` | 23 | `test-promptfoo-verify-feature.sh` | transcript assertion contract for plain `playwright-cli` calls on a literal `zensu-verify` session, including the command set taken from the consent gate module and the declared-safe policy check that must not launder a browser launch through a quoted or escaped argument |
 | `fixture-mutation-watch.test.js` | 19 | `test-claude-promptfoo-wrapper.sh` | fixture-event classification: the gated classes (`.git`, the watch root's own name, run-owned ancestors) adjudicated by the manifest, ordinary paths by touch-after-start, and that both watch backends route through one decision spelled once |
 | `session-control-lineage.test.js` | 13 | `test-versioned-plugin-upgrade.sh` | runtime-lineage axis: same-major (same-minor while major is `0`), never-backwards, sibling plugin root |
 | `deferred-review-claim-cases.test.js` | 11 | `test-deferred-review-claim.sh` | deferred-claim case table |
@@ -366,9 +377,9 @@ grant, while `aspect-activation-v1.test.js`, `review-round-scope-v1.test.js` and
 session-trail takeover-destination change added the first and the queued-prompt withdrawal
 change the second, and both were left rowless deliberately, because nothing grades a row's
 PRESENCE here, so a row would be one more hand-maintained copy of a count nothing checks. Say
-it that way rather than "these files are graded by no suite", which is false: the §4 `Blocks` column IS graded for six rows by three suites —
-`test-zen-mode.sh` Z78 for the two zen-anchor rows, `test-verify-consent.sh`'s `run_unit` for the
-floor, consent and free-port rows, and `test-verify-feature-skill.sh` P6g2 for the proxy row.
+it that way rather than "these files are graded by no suite", which is false: the §4 `Blocks` column IS graded for six rows by two suites —
+`test-zen-mode.sh` Z78 for the two zen-anchor rows, and `test-verify-consent.sh`'s `run_unit` for
+the floor, consent, free-port and browser-config rows.
 What no suite checks is the reconciliation above and the absence of a row. Both unit files ARE
 driven — by `test-session-trail-verdict.sh`, which pins each case count exactly — so they are
 rowless here, not ungraded there. The reconciliation and the missing rows are recorded

@@ -119,7 +119,10 @@ matcher from `hooks.json` and expects EVERY hook on it to deny the adoption comm
 on win32, so registering an advisory hook there reported as `unexpected:
 pre-bash-witness.sh` in a suite named for plugin upgrades. The exception set now
 lives in one helper both AC-C04 loops call, and every member states why it cannot
-deny — a third entry needs its own sentence. Note the platform bound on verifying
+deny. It holds THREE since the browser consent gate moved onto the Bash matcher —
+`pre-browser-navigation-consent.sh` exits 0 with no decision for a command that carries
+no `playwright-cli` marker, which the adoption command never does — and a fourth entry
+needs its own sentence. Note the platform bound on verifying
 this: `ADOPT_EXPECTED` is `allow` on POSIX, so on macOS every hook expects `allow`
 and the regression is INVISIBLE; the helper's deny-default branch is driven
 directly rather than reached through the suite.

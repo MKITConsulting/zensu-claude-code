@@ -73,8 +73,8 @@ Breaking, and therefore `minor`:
 Not breaking, and therefore `patch`: adding an advisory hook whose only output is
 `additionalContext`, and adding a config key that is read permissively.
 
-Never edit `hooks/`, `agents/`, `skills/`, `docs/` or `templates/` while a suite is
-running. The Session Control runtime digest covers those directories, so a mid-run
+Never edit `hooks/`, `agents/`, `skills/`, `docs/`, `templates/` or `scripts/` while a
+suite is running. The Session Control runtime digest covers those directories, so a mid-run
 edit makes later binds in that suite fail far from the cause. Run suites from a
 detached worktree when you need to keep working.
 

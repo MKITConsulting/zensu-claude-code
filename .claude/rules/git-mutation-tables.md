@@ -312,7 +312,19 @@ user ever read as a VERDICT rather than as a deny is gone. Its `W22` pins the
 export, the specifier and the degrade-on-load-failure behaviour. Removing either
 `within` or `msysToDrive` from the export list therefore breaks a shipped skill,
 not just a test — which is the cost that buys the single implementation. Unlike `within()`↔`isInside`, `WRAP` is NOT pinned
-against its `pre-bash-zensu-gate.sh` copy — check that one by hand. **A further coupling is
+against its `pre-bash-zensu-gate.sh` copy — check that one by hand. A THIRD wrapper set sits on
+the same `Bash` matcher and is deliberately NOT a copy of `WRAP`: `commandPosition` in
+`hooks/lib/verify-consent-v1.js` skips `command`, `builtin`, `exec`, `nohup`, `time`, `nice`,
+`timeout`, `gtimeout`, `env`, `sudo` and `doas`, with one operand list shared by the last three.
+It is registered here rather than shared because it cannot drift into an admit: the consent gate
+REFUSES every wrapper it recognizes — `env`, `sudo` and `doas` as `ENV_ASSIGNMENT`, the rest as
+`WRAPPER` — and a wrapper it does not recognize leaves the `playwright-cli` word outside command
+position, which refuses as `INDIRECT`. That ladder therefore decides only which reason a refused
+call names, never whether a call is admitted, and the unit case `a wrapper the ladder does not
+know is refused too, so the ladder decides only the reason` holds both arms. One shared table was
+weighed and declined: `WRAP` marks a wrapper TRANSPARENT so a rule can see through it, while the
+consent ladder exists to NAME a refusal, and one table would tie an admit-relevant set to a
+reason-only one. **A further coupling is
 PROSE rather than a table, and nothing pins it either:** the deny message rule (C) emits ends
 with a sentence naming the deliberate one-off escape prefix, and `skills/session-trail`'s
 move-alternative advice ASSERTS that it does — it tells the reader the refusal names the
