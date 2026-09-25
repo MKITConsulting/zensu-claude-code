@@ -80,9 +80,9 @@ with its review chain, the step-by-step pilot, or implementing it directly.
 
 ## What's included
 
-### Skills (27)
+### Skills (28)
 
-> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (28 skills are registered in `plugin.json`).
+> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (29 skills are registered in `plugin.json`).
 
 | Skill | What it does |
 |-------|--------------|
@@ -111,6 +111,7 @@ with its review chain, the step-by-step pilot, or implementing it directly.
 | `/zensu:reset-review-limit` | Grant the current review chain another auto-fix budget |
 | `/zensu:recover-chain` | Repair the one review-chain state no other command can leave |
 | `/zensu:adopt-session` | Rescue a session after a plugin update landed mid-run |
+| `/zensu:autopilot-adopt` | Take over a durable Autopilot run whose owning session is gone |
 | `/zensu:autopilot-release` | Free a working tree an abandoned Autopilot run is still holding |
 | `/zensu:zensu-help` | Ask how Zensu or the plugin works. Read-only Q&A |
 

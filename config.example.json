@@ -27,6 +27,8 @@
     "reviewerSpawnAutoAllow": true,
     "pendingReviewTtlHours": 6,
     "implStopNudgeAfter": 12,
+    "autopilotOwnerActivityTtlHours": 1,
+    "autopilotReleaseOwnerActivityTtlHours": 6,
     "worktreeKeep": true,
     "worktreeKeepIdleHours": 72
   },

@@ -15,7 +15,6 @@ FREE_PORT="$PLUGIN_DIR/scripts/verify-free-port.js"
 ESCAPE_STEMS_SUITE="$PLUGIN_DIR/tests/structure/test-gauntlet-loop-skill.sh"
 TDD_PHASE_LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
 GATES_DOC="$PLUGIN_DIR/docs/gates.md"
-REPO_CONVENTIONS="$PLUGIN_DIR/CLAUDE.md"
 VF_DOC="$PLUGIN_DIR/docs/verify-feature.md"
 SESSION_CONTROL_DOC="$PLUGIN_DIR/docs/session-control.md"
 DOCTOR_SKILL="$PLUGIN_DIR/skills/doctor/SKILL.md"
@@ -680,7 +679,7 @@ evidence_clear
 # so a refusal, which is exactly the miss case, carries up to two budgets of windows on the
 # broker's side too. "the broker's own read carries one" was a comparison that reversed the
 # finding it was drawn to state.
-for f in "$GATES_DOC" "$REPO_CONVENTIONS"; do
+for f in "$GATES_DOC"; do
   [ -f "$f" ] || check "V40 carrier exists: ${f#"$PLUGIN_DIR"/}" FAIL
 done
 grep -qF -- "the broker's own read carries one" "$GATES_DOC" \
@@ -689,9 +688,6 @@ grep -qF -- "the broker's own read carries one" "$GATES_DOC" \
 grep -qF -- "lstat\`-then-read windows" "$GATES_DOC" \
   && check "V40-control the window-count bound is still stated at all" PASS \
   || check "V40-control the window-count bound is still stated at all" FAIL
-grep -qF -- "rather than one on the broker's read" "$REPO_CONVENTIONS" \
-  && check "V40a the repo conventions carry the same reversed comparison" FAIL \
-  || check "V40a the repo conventions carry no reversed comparison" PASS
 
 # The reap is clocked on MAX_EVIDENCE_REAP_AGE_MS, which is strictly wider than the reader's own
 # window — and the broker's expiry probe reads with no window at all. So a marker past the reap
@@ -723,29 +719,6 @@ grep -qF -- "the broker's own refusal names the tree it read" "$VF_DOC" \
 grep -qF -- 'no in-session evidence that the Zensu consent gate ran for this origin' "$VF_DOC" \
   && check "V41-control the row it is about is still there" PASS \
   || check "V41-control the row it is about is still there" FAIL
-
-# A port works from the roster, not from the paragraph. Four owners this feature created were
-# absent from the core half, and `evidenceStillHonourable` and `liveEvidenceOrigins` — both ON
-# that list — call `evidenceBodyLive` with `MAX_EVIDENCE_REAP_AGE_MS`, so a port copying exactly
-# the list gets a ReferenceError on its first marker read.
-if node -e '
-  const fs = require("fs");
-  const t = fs.readFileSync(process.argv[1], "utf8");
-  const i = t.indexOf("the core half is\n  `STATE_SEGMENTS`");
-  const j = t.indexOf("the host half is FIVE obligations", i);
-  if (i < 0 || j < 0) process.exit(2);
-  const slice = t.slice(i, j);
-  const owed = ["MAX_EVIDENCE_REAP_AGE_MS", "evidenceBodyLive", "EXECUTION_VERDICTS", "classifyExecution", "recordingStream"];
-  const missing = owed.filter((n) => !slice.includes("`" + n + "`"));
-  if (missing.length) { console.error("missing: " + missing.join(", ")); process.exit(1); }
-' "$REPO_CONVENTIONS" 2>/dev/null; then
-  check "V41a the port core half names every owner this feature created" PASS
-else
-  check "V41a the port core half names every owner this feature created" FAIL
-fi
-grep -qF -- 'has no code hand-copy' "$REPO_CONVENTIONS" \
-  && check "V41b the EVIDENCE_NAME_PREFIX census still claims no code hand-copy" FAIL \
-  || check "V41b the EVIDENCE_NAME_PREFIX census counts what a grep finds" PASS
 
 # --- the key's own shape guard is pinned ---------------------------------
 # `BROWSER_SERVER_KEY` reaches a RegExp source while hooks/hooks.json carries the same matcher

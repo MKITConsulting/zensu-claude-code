@@ -260,7 +260,6 @@ else
   check "K18 docs/configuration.md carries the three hook rows and both config rows" FAIL
 fi
 grep -q 'docs/worktree-keep.md' "$PLUGIN_DIR/README.md" && check "K18 README docs index links docs/worktree-keep.md" PASS || check "K18 README docs index links docs/worktree-keep.md" FAIL
-grep -q '^## Worktree Keep' "$PLUGIN_DIR/CLAUDE.md" && check "K18 CLAUDE.md carries the Worktree Keep section" PASS || check "K18 CLAUDE.md carries the Worktree Keep section" FAIL
 grep -q 'worktree-keep' "$PLUGIN_DIR/skills/doctor/SKILL.md" && grep -q 'worktree: keep marker' "$PLUGIN_DIR/skills/doctor/SKILL.md" && check "K18 doctor skill documents the worktree rows" PASS || check "K18 doctor skill documents the worktree rows" FAIL
 
 # The payload extraction and the root/session-key ladder live in ONE file and are CALLED

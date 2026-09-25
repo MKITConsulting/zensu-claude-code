@@ -204,7 +204,8 @@ OUT7D="$(invoke "$P5" foreign_session)"; AFTER5P="$(digest "$RF5")"
 if [ "$(printf '%s' "$OUT7D" | decision)" = block ] \
   && printf '%s' "$OUT7D" | grep -qF 'holds this working tree' \
   && printf '%s' "$OUT7D" | grep -qF 'stop_run_owner' \
-  && printf '%s' "$OUT7D" | grep -qF 'run /zensu:autopilot-release' \
+  && printf '%s' "$OUT7D" | grep -qF 'run /zensu:autopilot-adopt' \
+  && printf '%s' "$OUT7D" | grep -qF '/zensu:autopilot-release to cancel it' \
   && ! printf '%s' "$OUT7D" | grep -qF -- '--confirm' \
   && printf '%s' "$OUT7D" | grep -qF 'Retrying Stop cannot clear the hold' \
   && [ "$BEFORE5P" = "$AFTER5P" ] \
@@ -830,18 +831,33 @@ MODEL7K="$(_autopilot_workspace_refusal "$HOLD_FOREIGN" "$ZENSU_SESSION_KEY" mod
 # The exclusion needle is the BARE stem: `--autopilot-release` is not a substring
 # of `/zensu:autopilot-release`, so an own-run render that offered the guided form
 # would have passed the narrower spelling. Both audiences are checked.
-if printf '%s' "$OWN7K" | grep -qF 'belongs to this session' \
-  && printf '%s' "$OWN7K_MODEL" | grep -qF 'belongs to this session' \
+#
+# ADOPT is now OFFERED in the own-run arm and RELEASE is still withheld, and the
+# asymmetry is the assertion: release skips its self-release guard in exactly this
+# state and would cancel this session's own live generation, while adopt's own-run
+# path is non-destructive and REPAIRS the missing pointer that makes this arm
+# reachable. The guided form only — the audited `--confirm` spelling stays out of
+# both audiences here, which the two `--confirm`/`zensu-log.sh` exclusions below pin.
+if printf '%s' "$OWN7K" | grep -qF 'names this session as its owner' \
+  && printf '%s' "$OWN7K_MODEL" | grep -qF 'names this session as its owner' \
   && ! printf '%s' "$OWN7K" | grep -qF 'autopilot-release' \
   && ! printf '%s' "$OWN7K_MODEL" | grep -qF 'autopilot-release' \
+  && printf '%s' "$OWN7K" | grep -qF '/zensu:autopilot-adopt' \
+  && printf '%s' "$OWN7K_MODEL" | grep -qF '/zensu:autopilot-adopt' \
+  && ! printf '%s' "$OWN7K" | grep -qF -- '--autopilot-adopt' \
+  && ! printf '%s' "$OWN7K_MODEL" | grep -qF -- '--autopilot-adopt' \
+  && ! printf '%s' "$OWN7K" | grep -qF -- '--confirm' \
+  && ! printf '%s' "$OWN7K_MODEL" | grep -qF -- '--confirm' \
   && printf '%s' "$OWN7K_MODEL" | grep -qF 'finish or repair that run' \
   && printf '%s' "$FOREIGN7K" | grep -qF -- '--autopilot-release --run hold_run_foreign --confirm' \
+  && printf '%s' "$FOREIGN7K" | grep -qF -- '--autopilot-adopt --run hold_run_foreign --confirm' \
   && printf '%s' "$MODEL7K" | grep -qF 'hold_run_foreign' \
-  && printf '%s' "$MODEL7K" | grep -qF 'run /zensu:autopilot-release' \
+  && printf '%s' "$MODEL7K" | grep -qF 'run /zensu:autopilot-adopt' \
+  && printf '%s' "$MODEL7K" | grep -qF '/zensu:autopilot-release to cancel it' \
   && ! printf '%s' "$MODEL7K" | grep -qF -- '--confirm' \
   && ! printf '%s' "$MODEL7K" | grep -qF 'zensu-log.sh'; then
-  check "S7k the operator form quotes the audited command, the model form names only the guided skill, and an own-run holder gets neither" PASS
-else check "S7k own-run refusal must withhold the release command (own=$OWN7K own_model=$OWN7K_MODEL foreign=$FOREIGN7K model=$MODEL7K)" FAIL; fi
+  check "S7k the operator form quotes both audited commands, the model form names only guided skills, and an own-run holder is offered adopt but never release" PASS
+else check "S7k own-run refusal must withhold release and offer the guided adopt (own=$OWN7K own_model=$OWN7K_MODEL foreign=$FOREIGN7K model=$MODEL7K)" FAIL; fi
 
 # The holder PREFERENCE decides which of several holders the fence judges, and
 # the own-run arm rests on it. A record carrying no `workspaceRoot` holds every
@@ -920,35 +936,225 @@ OWN_RENDER="$(_autopilot_workspace_refusal "$HOLD_SELF_NOW" "$ZENSU_SESSION_KEY"
 # form would stop matching, the model would fall through to the own-run reading,
 # and a genuinely foreign hold would never be released.
 FOREIGN_RENDER="$(_autopilot_workspace_refusal "$HOLD_FOREIGN" "$ZENSU_SESSION_KEY" model 2>/dev/null)"
+# There are TWO own-run shapes, and only one of them was ever compared against the
+# skill. The second withholds adoption as well, because the repair refuses a run whose
+# inner chain another session drives — so it carries neither verb, and a recognizer
+# keyed on the two literals must still read it as own-run rather than as foreign.
+OWN_WITHHOLD_RENDER="$(_autopilot_workspace_refusal \
+  "$(printf '{"runId":"hold_run_self","stage":"TDD_RUNNING","ownerSessionId":"%s","tdd":{"sessionId":"scv1_other"}}' "$ZENSU_SESSION_KEY")" \
+  "$ZENSU_SESSION_KEY" model 2>/dev/null)"
 SKILL_OK=1
-for needle in 'which belongs to this session' 'finish or repair that run'; do
+[ -n "$OWN_WITHHOLD_RENDER" ] || SKILL_OK=0
+for needle in 'whose run record names this session as its owner' 'finish or repair that run'; do
   printf '%s' "$OWN_RENDER" | grep -qF "$needle" || SKILL_OK=0
+  printf '%s' "$OWN_WITHHOLD_RENDER" | grep -qF "$needle" || SKILL_OK=0
   grep -qF "$needle" "$SKILL_OWN" || SKILL_OK=0
 done
-for needle in 'run /zensu:autopilot-release'; do
+for needle in 'run /zensu:autopilot-adopt to continue it here, or' '/zensu:autopilot-release to cancel it'; do
   printf '%s' "$FOREIGN_RENDER" | grep -qF "$needle" || SKILL_OK=0
   grep -qF "$needle" "$SKILL_OWN" || SKILL_OK=0
 done
 # ... and the two recognizers must stay DISJOINT, or keying on either one reads
 # both cases the same way.
-printf '%s' "$FOREIGN_RENDER" | grep -qF 'which belongs to this session' && SKILL_OK=0
+printf '%s' "$FOREIGN_RENDER" | grep -qF 'whose run record names this session as its owner' && SKILL_OK=0
 printf '%s' "$OWN_RENDER" | grep -qF 'run /zensu:autopilot-release' && SKILL_OK=0
+# The own-run arm names the guided ADOPT — that is the remedy for the state it is
+# reached in — but never the foreign lead-in, which is what keeps the two renders
+# distinguishable by the phrase a reader keys on.
+printf '%s' "$OWN_RENDER" | grep -qF 'run /zensu:autopilot-adopt to continue it here' && SKILL_OK=0
+printf '%s' "$OWN_RENDER" | grep -qF '/zensu:autopilot-adopt' || SKILL_OK=0
+# The withholding shape quotes NEITHER verb, so it must name the read-only next step
+# instead — a refusal that withholds both remedies and names none strands the reader.
+printf '%s' "$OWN_WITHHOLD_RENDER" | grep -qF '/zensu:autopilot-adopt' && SKILL_OK=0
+printf '%s' "$OWN_WITHHOLD_RENDER" | grep -qF '/zensu:autopilot-release' && SKILL_OK=0
+printf '%s' "$OWN_WITHHOLD_RENDER" | grep -qF '/zensu:doctor' || SKILL_OK=0
+grep -qF '/zensu:doctor' "$SKILL_OWN" || SKILL_OK=0
 if [ "$SKILL_OK" -eq 1 ]; then
   check "S7o every own-run literal the release skill teaches is one the renderer actually emits" PASS
 else check "S7o the skill's own-run recognizer must match the renderer (render=$OWN_RENDER)" FAIL; fi
+
+# S7v — a holder whose PENDING stage is `TDD_RUNNING` is not adoptable: the adopt verb
+# refuses it with exit 3 before it reads any beacon, so a refusal that offers adoption
+# sends the reader to a verb that declines. The doctor row already withholds it there;
+# the state library did not, on either form, and the `begin` twin did not either. The
+# pending stage is what decides it, so a run BLOCKED out of `TDD_RUNNING` counts too,
+# and a record with no `blocked` object falls back to its literal stage.
+S7V_OK=1
+S7V_RUNNING="$(_autopilot_workspace_refusal '{"runId":"p_run","stage":"TDD_RUNNING","ownerSessionId":"scv1_beef"}' '' model 2>/dev/null)"
+S7V_BLOCKED="$(_autopilot_workspace_refusal '{"runId":"p_run","stage":"BLOCKED","blocked":{"from":"TDD_RUNNING"},"ownerSessionId":"scv1_beef"}' '' model 2>/dev/null)"
+S7V_OPERATOR="$(_autopilot_workspace_refusal '{"runId":"p_run","stage":"TDD_RUNNING","ownerSessionId":"scv1_beef"}' '' operator 2>/dev/null)"
+S7V_PLANNING="$(_autopilot_workspace_refusal '{"runId":"p_run","stage":"PLANNING","ownerSessionId":"scv1_beef"}' '' model 2>/dev/null)"
+for s7v_render in "$S7V_RUNNING" "$S7V_BLOCKED"; do
+  [ -n "$s7v_render" ] || S7V_OK=0
+  printf '%s' "$s7v_render" | grep -qF '/zensu:autopilot-adopt' && S7V_OK=0
+  printf '%s' "$s7v_render" | grep -qF '/zensu:autopilot-release to cancel it' || S7V_OK=0
+  # The CONDITION, not just the refusal: the holder may still be a live session driving
+  # that chain, which is what makes cancelling it the consequential choice.
+  printf '%s' "$s7v_render" | grep -qF 'its inner TDD chain is live and the session driving it may still be running' || S7V_OK=0
+done
+# The operator form withholds the audited adopt invocation for the same reason, and
+# keeps the release one, which is still reachable.
+[ -n "$S7V_OPERATOR" ] || S7V_OK=0
+printf '%s' "$S7V_OPERATOR" | grep -qF -- '--autopilot-adopt' && S7V_OK=0
+printf '%s' "$S7V_OPERATOR" | grep -qF -- '--autopilot-release --run p_run --confirm' || S7V_OK=0
+# CONTROL: an adoptable holder still gets both, or this check would pass for a renderer
+# that had simply stopped naming adoption anywhere.
+printf '%s' "$S7V_PLANNING" | grep -qF '/zensu:autopilot-adopt' || S7V_OK=0
+# The `begin` twin carries the same withheld wording, which S7m's byte comparison cannot
+# see: that one compares the ADOPTABLE sentence.
+#
+# BOUNDED to the twin's own slice, and that bound is the whole point. This was a
+# file-wide `grep -qF` on a sentence that occurs THREE times in the library — the twin
+# plus both renderer arms — while the loop above already forces the two renderer
+# occurrences to exist. So the needle was satisfied by lines this very check had just
+# asserted, and deleting the twin's copy left S7v green: a pin named for the twin that
+# could not fail for the twin. Anchor on `holderPending`, which the twin alone declares.
+# The END of the slice is STRUCTURAL rather than a line count. A fixed 17-line window
+# is a second hand-maintained number over code that moves: one inserted line pushes the
+# needle out and the check fails for a reason unrelated to drift, while one deleted line
+# pulls an unrelated arm in. The twin's block closes on a two-space `}`, so the slice
+# ends there — and a slice that never finds that boundary is reported as unbounded
+# rather than silently graded as the whole rest of the file.
+S7V_TWIN_START="$(grep -n 'const holderPending' "$LIB" | head -1 | cut -d: -f1)"
+if [ -n "$S7V_TWIN_START" ]; then
+  S7V_TWIN="$(awk -v s="$S7V_TWIN_START" 'NR>=s{print} NR>s && /^  \}$/{exit}' "$LIB")"
+  if [ "$(printf '%s\n' "$S7V_TWIN" | tail -1)" != '  }' ]; then
+    S7V_TWIN="twin-slice-unbounded"
+    S7V_OK=0
+  else
+    printf '%s' "$S7V_TWIN" | grep -qF 'adoption is not an exit for this run' || S7V_OK=0
+  fi
+else
+  S7V_OK=0
+fi
+if [ "$S7V_OK" -eq 1 ]; then
+  check "S7v a TDD_RUNNING holder — literal or blocked out of it — withholds adoption on both forms and in the begin twin, and an adoptable holder still gets it" PASS
+else check "S7v the TDD_RUNNING holder must not be offered adoption (model=$S7V_RUNNING operator=$S7V_OPERATOR)" FAIL; fi
+
+# zensu-doctor-home-exempt: this suite NAMES `zensu-doctor-report.js` in the S7w comment
+# below, but never reads, sources or executes it. The reference is prose explaining that the
+# doctor renderer already attaches the identical forgeability bound to the identical fact, so
+# the two stay in step. `P1bh` exists because a suite that actually READS the doctor resolves
+# `$HOME` and becomes environment-dependent; nothing here does that, and the checks in this
+# file drive `_autopilot_workspace_refusal` alone.
+#
+# S7w — the arm that withholds the CONSTRUCTIVE verb must say where its fact came from,
+# and the own-run arm must withhold on the same condition the worker refuses on.
+#
+# Two halves, and they have to land together. The stage that decides `adoptable` is read
+# from the run document, an ordinary file in a session-writable directory, so an arm
+# keyed on it is keyed on a forgeable fact. That matters more here than anywhere else in
+# this renderer: it is the one arm that leaves ONLY the irreversible cancel on offer, so
+# a planted `TDD_RUNNING` steers a reader to the destructive verb and withholds the
+# reversible one. `zensu-doctor-report.js` already attaches exactly that bound to the
+# identical fact; the three library renderers did not.
+#
+# The second half is the own-run arm. It offered `/zensu:autopilot-adopt` without ever
+# consulting `adoptable`, returning ABOVE both gates — while the worker's already-owner
+# branch refuses that very repair with exit 3 when the pending stage is `TDD_RUNNING`
+# and the chain is driven by another session. So the refusal routed a reader to a verb
+# its own code declines. The renderer has the field it needs: `tdd.sessionId` travels in
+# the validated record. The condition mirrors the worker EXACTLY, empty value included.
+S7W_OK=1
+S7W_BOUND='an ordinary file any session in this project can write'
+# Both non-adoptable forms carry the bound.
+printf '%s' "$S7V_RUNNING"  | grep -qF "$S7W_BOUND" || S7W_OK=0
+printf '%s' "$S7V_BLOCKED"  | grep -qF "$S7W_BOUND" || S7W_OK=0
+printf '%s' "$S7V_OPERATOR" | grep -qF "$S7W_BOUND" || S7W_OK=0
+# The begin twin carries it too, in its own bounded slice.
+if [ -n "${S7V_TWIN:-}" ]; then
+  printf '%s' "$S7V_TWIN" | grep -qF "$S7W_BOUND" || S7W_OK=0
+else
+  S7W_OK=0
+fi
+# CONTROL: an ADOPTABLE holder must NOT carry it. The bound belongs to the arm that
+# withholds a remedy, not to every sentence this renderer emits — without this arm the
+# check would pass for a renderer that appended the clause unconditionally, which would
+# make it noise exactly where it is supposed to be a warning.
+printf '%s' "$S7V_PLANNING" | grep -qF "$S7W_BOUND" && S7W_OK=0
+# ... on the OPERATOR audience too. One control on one audience leaves the other free to
+# append the clause unconditionally, which is the same erosion this arm exists to catch.
+S7W_OPERATOR_PLANNING="$(_autopilot_workspace_refusal '{"runId":"p_run","stage":"PLANNING","ownerSessionId":"scv1_beef"}' '' operator 2>/dev/null)"
+[ -n "$S7W_OPERATOR_PLANNING" ] || S7W_OK=0
+printf '%s' "$S7W_OPERATOR_PLANNING" | grep -qF "$S7W_BOUND" && S7W_OK=0
+# F5: own run, pending stage TDD_RUNNING, chain driven by ANOTHER session — the repair
+# refuses with exit 3, so adoption must not be offered.
+S7W_OWN_FOREIGN="$(_autopilot_workspace_refusal \
+  '{"runId":"p_run","stage":"TDD_RUNNING","ownerSessionId":"scv1_me","tdd":{"sessionId":"scv1_other"}}' \
+  'scv1_me' model 2>/dev/null)"
+[ -n "$S7W_OWN_FOREIGN" ] || S7W_OK=0
+printf '%s' "$S7W_OWN_FOREIGN" | grep -qF '/zensu:autopilot-adopt' && S7W_OK=0
+printf '%s' "$S7W_OWN_FOREIGN" | grep -qF "$S7W_BOUND" || S7W_OK=0
+# CONTROL 1: own run at TDD_RUNNING whose chain THIS session drives is the ordinary
+# repair, and the worker does not refuse it — so adoption stays on offer.
+S7W_OWN_SELF="$(_autopilot_workspace_refusal \
+  '{"runId":"p_run","stage":"TDD_RUNNING","ownerSessionId":"scv1_me","tdd":{"sessionId":"scv1_me"}}' \
+  'scv1_me' model 2>/dev/null)"
+printf '%s' "$S7W_OWN_SELF" | grep -qF '/zensu:autopilot-adopt' || S7W_OK=0
+printf '%s' "$S7W_OWN_SELF" | grep -qF "$S7W_BOUND" && S7W_OK=0
+# CONTROL 2: own run at an adoptable stage keeps the pre-existing offer untouched.
+S7W_OWN_PLANNING="$(_autopilot_workspace_refusal \
+  '{"runId":"p_run","stage":"PLANNING","ownerSessionId":"scv1_me"}' \
+  'scv1_me' model 2>/dev/null)"
+printf '%s' "$S7W_OWN_PLANNING" | grep -qF '/zensu:autopilot-adopt' || S7W_OK=0
+printf '%s' "$S7W_OWN_PLANNING" | grep -qF "$S7W_BOUND" && S7W_OK=0
+# The own-run arm never quotes the release, whatever the stage: the release worker skips
+# its self-release guard in exactly this state.
+printf '%s' "$S7W_OWN_FOREIGN" | grep -qF '/zensu:autopilot-release' && S7W_OK=0
+if [ "$S7W_OK" -eq 1 ]; then
+  check "S7w every arm that withholds adoption names the run document as the forgeable source, an adoptable holder does not, and an own run whose inner chain another session drives is offered neither verb" PASS
+else
+  check "S7w forgeability bound / own-run withhold (own_foreign=$S7W_OWN_FOREIGN)" FAIL
+fi
 
 # The `begin` worker mode emits its own copy of the foreign sentence. Nothing
 # compared the two, so a reword of the renderer left them silently divergent --
 # and the worker copy is what a MODEL sees when `--autopilot-begin` refuses,
 # which is why it is compared against the renderer's MODEL form.
+# The worker carries TWO copies, the adoptable sentence first and the TDD_RUNNING one
+# second, and BOTH are compared. Only the first used to be: the second carried the
+# forgeability bound in a different position from the renderer while a comment beside
+# it called the pair one sentence, and nothing could see the difference. Each copy is
+# taken from its own `fail(4, …` line through the line that closes the call, so a
+# reworded sentence that grows or shrinks by a line is still compared whole.
+twin_sentence() {
+  awk -v want="$1" '
+    index($0, "fail(4, `workspace held by nonterminal run ${workspaceHolder.runId}") { n++ }
+    n == want { print }
+    n == want && /\);[[:space:]]*$/ { exit }
+  ' "$LIB" \
+    | sed -e 's/^ *+ *//' -e 's/^ *//' -e 's/`//g' -e 's/\${workspaceHolder.runId}/twin_run/g' \
+      -e "s/\\\${workspaceHolder.stage}/$2/g" \
+    | tr -d '\n' | sed -e 's/^fail(4, *//' -e 's/);* *$//' -e 's/^ *//'
+}
+TWIN_COUNT="$(grep -cF 'fail(4, `workspace held by nonterminal run ${workspaceHolder.runId}' "$LIB")"
 TWIN_RENDERER="$(_autopilot_workspace_refusal '{"runId":"twin_run","stage":"PLANNING","ownerSessionId":"scv1_deadbeef"}' '' model 2>/dev/null)"
-TWIN_WORKER="$(grep -A 2 'workspace held by nonterminal run \${workspaceHolder.runId}' "$LIB" \
-  | sed -e 's/^ *+ *//' -e 's/^ *//' -e 's/`//g' -e 's/\${workspaceHolder.runId}/twin_run/g' -e 's/\${workspaceHolder.stage}/PLANNING/g' \
-  | tr -d '\n' | sed -e 's/^fail(4, *//' -e 's/);* *$//' -e 's/^ *//')"
-if [ -n "$TWIN_RENDERER" ] && [ -n "$TWIN_WORKER" ] \
-  && [ "$(printf '%s' "$TWIN_RENDERER" | tr -d '\n')" = "$TWIN_WORKER" ]; then
-  check "S7m the begin worker's refusal sentence is byte-identical to the renderer's foreign wording" PASS
-else check "S7m the two refusal spellings must not drift (renderer=$TWIN_RENDERER worker=$TWIN_WORKER)" FAIL; fi
+TWIN_WORKER="$(twin_sentence 1 PLANNING)"
+TWIN_RUNNING_RENDERER="$(_autopilot_workspace_refusal '{"runId":"twin_run","stage":"TDD_RUNNING","ownerSessionId":"scv1_deadbeef"}' '' model 2>/dev/null)"
+TWIN_RUNNING_WORKER="$(twin_sentence 2 TDD_RUNNING)"
+if [ "$TWIN_COUNT" = 2 ] && [ -n "$TWIN_RENDERER" ] && [ -n "$TWIN_WORKER" ] \
+  && [ "$(printf '%s' "$TWIN_RENDERER" | tr -d '\n')" = "$TWIN_WORKER" ] \
+  && [ -n "$TWIN_RUNNING_RENDERER" ] && [ -n "$TWIN_RUNNING_WORKER" ] \
+  && [ "$(printf '%s' "$TWIN_RUNNING_RENDERER" | tr -d '\n')" = "$TWIN_RUNNING_WORKER" ]; then
+  check "S7m both begin-worker refusal sentences, adoptable and TDD_RUNNING, are byte-identical to the renderer's model wording" PASS
+else check "S7m the refusal spellings must not drift (count=$TWIN_COUNT renderer=$TWIN_RENDERER worker=$TWIN_WORKER running_renderer=$TWIN_RUNNING_RENDERER running_worker=$TWIN_RUNNING_WORKER)" FAIL; fi
+
+# S7x — the renderer's own-run withhold is a MIRROR of the repair worker's refusal, so
+# it must test the chain driver with the worker's own predicate. The two stage halves
+# are deliberately different spellings and are not compared; the driver half is one
+# fact, and a renderer spelling it differently offered a repair the worker declines —
+# or withheld one it performs — for any record where the two spellings disagree.
+S7X_PRED_WORKER='if (repairPending === "TDD_RUNNING" && '
+S7X_PRED_RENDERER='if (!adoptable && '
+S7X_WORKER_N="$(grep -cF "$S7X_PRED_WORKER" "$LIB")"
+S7X_RENDERER_N="$(grep -cF "$S7X_PRED_RENDERER" "$LIB")"
+S7X_WORKER="$(grep -F "$S7X_PRED_WORKER" "$LIB" | sed -e 's/.*"TDD_RUNNING" && //' -e 's/) {[[:space:]]*$//' \
+  -e 's/state\./value./g' -e 's/callerSessionId/caller/g')"
+S7X_RENDERER="$(grep -F "$S7X_PRED_RENDERER" "$LIB" | sed -e 's/.*!adoptable && //' -e 's/) {[[:space:]]*$//')"
+if [ "$S7X_WORKER_N" = 1 ] && [ "$S7X_RENDERER_N" = 1 ] && [ -n "$S7X_WORKER" ] \
+  && [ "$S7X_WORKER" = "$S7X_RENDERER" ]; then
+  check "S7x the renderer's own-run withhold tests the chain driver with the repair worker's own predicate" PASS
+else check "S7x renderer and repair worker must test the chain driver identically (worker=$S7X_WORKER renderer=$S7X_RENDERER counts=$S7X_WORKER_N/$S7X_RENDERER_N)" FAIL; fi
 
 # CONTAINMENT, the premise the refusal states to the user. Every fixture above
 # is a plain directory, so holder and stopper resolve the SAME workspace key and
@@ -986,7 +1192,8 @@ else
     && [ "$RC7C" -eq 0 ] && [ -z "$OUT7C" ] \
     && [ "$(printf '%s' "$OUT7C2" | decision)" = block ] \
     && printf '%s' "$OUT7C2" | grep -qF 'contain_run' \
-    && printf '%s' "$OUT7C2" | grep -qF 'run /zensu:autopilot-release' \
+    && printf '%s' "$OUT7C2" | grep -qF 'run /zensu:autopilot-adopt' \
+  && printf '%s' "$OUT7C2" | grep -qF '/zensu:autopilot-release to cancel it' \
     && [ "$BEFORE5C" = "$(digest "$RF5C")" ]; then
     check "S7i a run driving a NESTED worktree holds the containing tree: release with nothing queued, refusal naming it once a marker exists" PASS
   else check "S7i containment hold must release without work and refuse with it (premise=$S7I_PREMISE held=$HELD5C rc=$RC7C)" FAIL; fi
@@ -1051,8 +1258,10 @@ AFTER8G="$(digest "$RF6G")"
 if [ "$(printf '%s' "$OUT8G" | decision)" = block ] \
   && printf '%s' "$OUT8G" | grep -qF 'nonterminal durable Autopilot run holds this working tree' \
   && printf '%s' "$OUT8G" | grep -qF 'stop_run_contention' \
-  && printf '%s' "$OUT8G" | grep -qF 'belongs to this session' \
+  && printf '%s' "$OUT8G" | grep -qF 'names this session as its owner' \
   && ! printf '%s' "$OUT8G" | grep -qF 'autopilot-release' \
+  && printf '%s' "$OUT8G" | grep -qF '/zensu:autopilot-adopt' \
+  && ! printf '%s' "$OUT8G" | grep -qF -- '--autopilot-adopt' \
   && [ -s "$TMP/adoption-contention-read" ] \
   && [ -s "$TMP/adoption-contention-lock" ] \
   && [ "$BEFORE8G" = "$AFTER8G" ]; then
@@ -1099,7 +1308,8 @@ OUT8J="$(printf '%s' '{"hook_event_name":"Stop","session_id":"stop_session_forei
 if [ "$(printf '%s' "$OUT8J" | decision)" = block ] \
   && [ -s "$TMP/foreign-contention-work-lock" ] \
   && printf '%s' "$OUT8J" | grep -qF 'stop_run_foreign_contention' \
-  && printf '%s' "$OUT8J" | grep -qF 'run /zensu:autopilot-release' \
+  && printf '%s' "$OUT8J" | grep -qF 'run /zensu:autopilot-adopt' \
+  && printf '%s' "$OUT8J" | grep -qF '/zensu:autopilot-release to cancel it' \
   && ! printf '%s' "$OUT8J" | grep -qF -- '--confirm' \
   && [ -f "$PF6H" ] \
   && [ "$BEFORE8J" = "$(digest "$RF6H")" ]; then
@@ -1149,7 +1359,8 @@ SECOND_READS="$(wc -l < "$TMP/second-fence-reads" 2>/dev/null | tr -d ' ')"
 if [ "$(printf '%s' "$OUT8K" | decision)" = block ] \
   && [ "${SECOND_READS:-0}" -ge 2 ] \
   && printf '%s' "$OUT8K" | grep -qF 'stop_run_second_fence' \
-  && printf '%s' "$OUT8K" | grep -qF 'run /zensu:autopilot-release' \
+  && printf '%s' "$OUT8K" | grep -qF 'run /zensu:autopilot-adopt' \
+  && printf '%s' "$OUT8K" | grep -qF '/zensu:autopilot-release to cancel it' \
   && ! printf '%s' "$OUT8K" | grep -qF -- '--confirm' \
   && [ "$BEFORE8K" = "$(digest "$RF6K")" ]; then
   check "S8k the second contention fence publishes its holder, naming the run without a runnable cancel" PASS
@@ -1175,8 +1386,10 @@ OUT8I="$(printf '%s' '{"hook_event_name":"Stop","session_id":"stop_session_own_r
     bash "$OWN_PLUGIN/hooks/stop-chain-enforcer.sh" 2>/dev/null)"
 if [ "$(printf '%s' "$OUT8I" | decision)" = block ] \
   && printf '%s' "$OUT8I" | grep -qF 'own_remedy_run' \
-  && printf '%s' "$OUT8I" | grep -qF 'belongs to this session' \
+  && printf '%s' "$OUT8I" | grep -qF 'names this session as its owner' \
   && ! printf '%s' "$OUT8I" | grep -qF 'autopilot-release' \
+  && printf '%s' "$OUT8I" | grep -qF '/zensu:autopilot-adopt' \
+  && ! printf '%s' "$OUT8I" | grep -qF -- '--autopilot-adopt' \
   && [ "$BEFORE8I" = "$(digest "$RF6I")" ]; then
   check "S8i an own-run holder is named in the block reason but never offered the release command" PASS
 else check "S8i own-run rc=4 must name the run and withhold the release command (reason=$(printf '%s' "$OUT8I" | context))" FAIL; fi

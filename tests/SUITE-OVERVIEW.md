@@ -13,20 +13,27 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (152 = 145 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 145 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 152). The figures here have drifted TWICE in the same direction and both corrections are
-recorded rather than overwritten: they once read 148 = 141 + 7 against a manifest already holding
-142 CI entries, and then 150 = 143 + 7 while the manifest already held 144. Both of those
-were internally consistent and merely stale. Correcting only the headline to 151 = 144 + 7 and
-leaving the three derivation clauses at 143 and 150 then produced a THIRD state that was not
-stale but self-contradictory — the failure shape the section-4 header-numeral paragraph below
-names — and that is the state this revision closes.
+reconciled to that manifest (153 = 146 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 146 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 153). The figures here have drifted FOUR times in the same direction and every
+correction is recorded rather than overwritten: they once read 148 = 141 + 7 against a manifest
+already holding 142 CI entries, then 150 = 143 + 7 while it already held 144, then
+151 = 144 + 7 while a merge was landing the 145th, and then 152 = 145 + 7 while the merge of
+`main` into the worktree-keep branch was landing the 146th. Each of those was internally
+consistent and merely stale. Correcting only the headline and leaving the derivation clauses
+behind produces a THIRD state that is not stale but self-contradictory — the failure shape the
+section-4 header-numeral paragraph below names — so every re-derivation since closes the
+clauses together with the headline. THREE of the four drifts arrived the same way, through a
+merge of two branches that each re-derived its own count and neither of which could see the
+other: `test-autopilot-adopt-cli.sh` and `test-incremental-review-rounds.sh` each took the
+manifest from 143 to 144 in its own branch, so merging them is what made 145, and
+`test-worktree-keep.sh` took its own branch from 144 to 145 while `main` independently reached
+145, so that merge is what makes 146.
 **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 143 against 145 CI-classified suites, so TWO CI
+asserted away: its eleven CI group headers sum to 144 against 146 CI-classified suites, so TWO CI
 suites appear in no §3 group. They are `test-session-trail-lineage.sh` and
 `test-incremental-review-rounds.sh`, re-derived BY NAME
-this time by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
+by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
 §"Bash gates, witness & secrets", and the reviewer-spawn grant, filed under §"Review chain &
 findings". §7's profile table was re-derived from `tests/profiles/windows-ci.v1.json` rather than
 described, so its eight shard ids and their membership are the JSON's own, and the entry total
@@ -63,8 +70,8 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **152** — 145 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **145 structure suites + 5 offline evals = 150 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 152 − 145 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **153** — 146 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **146 structure suites + 5 offline evals = 151 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 153 − 146 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -76,8 +83,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 152 structure suites + 5 offline evals | none |
-| `--ci` | 145 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 153 structure suites + 5 offline evals | none |
+| `--ci` | 146 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -155,7 +162,15 @@ one-shot review ticket CAS and budget rearm, deferred/pending review markers plu
 their TTL, `--chain-status` / `--chain-recover`, and the zero-file-change gate on the
 unqualified chain terminus.
 
-### Autopilot (16)
+### Autopilot (17)
+`autopilot-adopt-cli` (**no Windows PR-shard entry** — every `windows-ci.v1.json` shard is
+already close to its `profileTimeoutMs`, so adding one has to be paid for by moving another
+suite off. It is in `ciStructureTests`, and `run-windows-safety-shard.js` maps every such entry
+with no exclusion filter, so the WEEKLY Windows Safety structure shard does execute it: the
+status is "no green Windows run reported yet", not "never observed on Windows". `adopt`'s
+`projectRootIndex`/`workspaceRootIndex` entries are pinned at SOURCE by
+`test-msys-runtime-boundaries.sh`, which greps `adopt: 3` and `adopt: 6` and runs on POSIX —
+that pin was never a Windows question; what is unverified is the runtime behaviour) ·
 `autopilot-adversarial-recovery` · `autopilot-bound-payload-windows` ·
 `autopilot-chain-integration` · `autopilot-delegated-skill-contract` ·
 `autopilot-durable-skill` · `autopilot-full-cycle` · `autopilot-id-and-start-boundaries` ·
@@ -342,25 +357,27 @@ that suite's failure.
 | `reviewer-spawn-allow-v1.test.js` | 18 | `test-reviewer-spawn-allow.sh` | the reviewer-spawn grant's derived agent set, its silence on every non-grant path, and the one-definition scan |
 | `worktree-keep-v1.test.js` | 36 | `test-worktree-keep.sh` (K3) | worktree keep: managed-worktree detection, anchor guards and the ref-shape rule, marker lifecycle with the reap window, exclude line, git-environment scrub, sibling sweep, drift and backfill rules, the unrenderable-branch read, the rejected-anchor marker hold, the anchor-file bound, the hook envelope, CLI verbs |
 
-FOUR further files — `session-lineage-v1.test.js`, `worktree-advice-v1.test.js`,
-`aspect-activation-v1.test.js` and `review-round-scope-v1.test.js` — exist on disk without a row
-here, re-derived by comparing `ls tests/structure/*.test.js` (36 files) against this table's 32
-rows rather than by editing the previous list. That previous list was wrong in BOTH directions
+FIVE further files — `session-lineage-v1.test.js`, `worktree-advice-v1.test.js`,
+`prompt-listing-v1.test.js`, `aspect-activation-v1.test.js` and `review-round-scope-v1.test.js` —
+exist on disk without a row here, re-derived by comparing `ls tests/structure/*.test.js` (37
+files) against this table's 32 rows rather than by editing the previous list. That previous list was wrong in BOTH directions
 and is recorded here rather than quietly replaced: it named
 `review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js` and `session-adopt-report-v1.test.js`,
 all three of which DO have rows twenty lines above it, and it named neither of the two files PR
-#306 added. For TWO of the four that drift predates the reviewer-spawn
-grant, while `aspect-activation-v1.test.js` and `review-round-scope-v1.test.js` postdate it; `worktree-advice-v1.test.js` is different and the distinction is worth keeping —
-it was added by the session-trail takeover-destination change and left rowless
-deliberately, because nothing grades a row's PRESENCE here, so a row would be one more
-hand-maintained copy of a count nothing checks. Say it that way rather than "this file is graded
-by no suite", which is false: the §4 `Blocks` column IS graded for six rows by three suites —
+#306 added. For TWO of the five that drift predates the reviewer-spawn
+grant, while `aspect-activation-v1.test.js`, `review-round-scope-v1.test.js` and
+`prompt-listing-v1.test.js` postdate it; `worktree-advice-v1.test.js` and
+`prompt-listing-v1.test.js` are different and the distinction is worth keeping — the
+session-trail takeover-destination change added the first and the queued-prompt withdrawal
+change the second, and both were left rowless deliberately, because nothing grades a row's
+PRESENCE here, so a row would be one more hand-maintained copy of a count nothing checks. Say
+it that way rather than "these files are graded by no suite", which is false: the §4 `Blocks` column IS graded for six rows by three suites —
 `test-zen-mode.sh` Z78 for the two zen-anchor rows, `test-verify-consent.sh`'s `run_unit` for the
 floor, consent and free-port rows, and `test-verify-feature-skill.sh` P6g2 for the proxy row.
-What no suite checks is the reconciliation above and the absence of a row. The unit file IS driven — by
-`test-session-trail-verdict.sh`, which pins its case count exactly — so it is rowless
-here, not ungraded there. Both are recorded rather than silently
-absorbed. The inventory row above no longer carries a unit-file numeral at all, for the
+What no suite checks is the reconciliation above and the absence of a row. Both unit files ARE
+driven — by `test-session-trail-verdict.sh`, which pins each case count exactly — so they are
+rowless here, not ungraded there. The reconciliation and the missing rows are recorded
+rather than silently absorbed. The inventory row above no longer carries a unit-file numeral at all, for the
 same reason this paragraph gives: it was a hand-maintained count nothing grades, and it
 went stale on its next merge.
 

@@ -1180,6 +1180,123 @@ check "X28 no RECEIPT REFUSED emit interpolates a path unscreened" "$(verdict $?
 [ "$(grep -cF 'RECEIPT REFUSED' "$LIB")" -gt 0 ]
 check "X28-control the RECEIPT REFUSED scan found emit sites at all" "$(verdict $?)"
 
+echo "== A claim is a step id directly followed by its marker =="
+cat > "$MR/copy.log" <<'EOF'
+[10:00:01] S1 IMPL completed — files: src.txt
+[10:00:02] S2 IMPL completed — files: src/never-landed.txt
+[10:00:03] S3 WIRED
+EOF
+OUT_CP1="$(run_audit --log "$MR/copy.log" --project "$MR/anchor" --receipt -)"
+CP_LINES_BEFORE="$(wc -l < "$MR/copy.log")"
+printf '%s\n' "$OUT_CP1" | grep -v '^EDIT LANDED' | while IFS= read -r cp_line; do
+  printf '[10:01:00] %s\n' "$cp_line"
+done >> "$MR/copy.log"
+printf '%s\n' "[10:01:01] UNVERIFIED — a WIRED entry names no files: list and cannot be graded: [10:00:03] R1-S13 WIRED — PASS (1 attempts)" >> "$MR/copy.log"
+OUT_CP2="$(run_audit --log "$MR/copy.log" --project "$MR/anchor" --receipt -)"
+{ [ "$(wc -l < "$MR/copy.log")" -gt "$CP_LINES_BEFORE" ] \
+  && grep -F '[10:01:00] UNVERIFIED' "$MR/copy.log" | grep -qF 'WIRED'; }
+check "X29-control the first run's non-EDIT-LANDED verdict lines were copied back into the run log" "$(verdict $?)"
+CP_TALLY1="$(printf '%s\n' "$OUT_CP1" | grep '^EDIT LANDING AUDIT' || true)"
+CP_TALLY2="$(printf '%s\n' "$OUT_CP2" | grep '^EDIT LANDING AUDIT' || true)"
+{ [ -n "$CP_TALLY1" ] && [ "$CP_TALLY1" = "$CP_TALLY2" ]; }
+check "X29 copied verdict lines are not claims: the re-run tallies are unchanged" "$(verdict $?)"
+[ "$(printf '%s\n' "$OUT_CP2" | grep -cF 'a WIRED entry at run-log line')" -eq 1 ]
+check "X29a the re-run reports only the original bare WIRED entry, never a copy of its verdict" "$(verdict $?)"
+cat > "$MR/prose.log" <<'EOF'
+[10:00:01] S1 IMPL completed — files: src.txt
+[10:00:02] PRECONDITION DRIFT — node: used by S1 but not named in any IMPL or WIRED entry
+[10:00:03] TDD COMPLETE — 7/11 GREEN | Integration: 1 WIRED | Build: – n/a
+[10:00:04] REVIEW ROUND 1 — logged the fix as R1-S2 WIRED — files: src/ghost.txt
+[10:00:05] NOTE — step 5b a) reads every IMPL completed — files: list
+EOF
+OUT_PR="$(run_audit --log "$MR/prose.log" --project "$MR/anchor" --receipt -)"
+RC_PR=$?
+printf '%s' "$OUT_PR" | grep -qF 'EDIT LANDED — S1: src.txt'
+check "X30-control the prose run log was read and its one real claim graded" "$(verdict $?)"
+{ [ "$RC_PR" -eq 0 ] && printf '%s' "$OUT_PR" | grep -qF 'claims=1 landed=1 not_landed=0 unverified=0'; }
+check "X30 a prose line mentioning WIRED or quoting a claim marker is not a claim" "$(verdict $?)"
+{ ! printf '%s' "$OUT_PR" | grep -qE -- '— (R1-S2|every):'; }
+check "X30a the word before a quoted marker is never taken as a step id" "$(verdict $?)"
+cat > "$MR/exempt-quote.log" <<'EOF'
+[10:00:01] S1 IMPL completed — files: src.txt
+[10:00:02] S5 IMPL completed — files: src/ghost.txt | S4 stays WIRED (verified, no change)
+EOF
+OUT_EQ="$(run_audit --log "$MR/exempt-quote.log" --project "$MR/anchor" --receipt -)"
+RC_EQ=$?
+{ [ "$RC_EQ" -ne 0 ] && printf '%s' "$OUT_EQ" | grep -qF 'EDIT NOT LANDED — S5: claimed src/ghost.txt'; }
+check "X30b a claim whose commentary quotes the exemption is still graded, never exempted" "$(verdict $?)"
+printf '%s' "$OUT_EQ" | grep -qF 'exempt_verified=0'
+check "X30c the quoted exemption phrase is not counted as an exemption" "$(verdict $?)"
+cat > "$MR/bare.log" <<'EOF'
+[10:00:01] S1 IMPL completed — files: src.txt
+[10:00:02] S3 WIRED
+[+1d 02:03:04] R1-S13 WIRED — PASS (1 attempts)
+S7 WIRED
+EOF
+OUT_BW="$(run_audit --log "$MR/bare.log" --project "$MR/anchor" --receipt -)"
+RC_BW=$?
+{ [ "$RC_BW" -ne 0 ] && printf '%s' "$OUT_BW" | grep -qF 'a WIRED entry at run-log line 2 (step S3) names no files: list'; }
+check "X31 a real bare 'S3 WIRED' entry is still an UNVERIFIED claim" "$(verdict $?)"
+printf '%s' "$OUT_BW" | grep -qF 'a WIRED entry at run-log line 3 (step R1-S13)'
+check "X31a a relative-day timestamp prefix, which carries a space, still leads to the step id" "$(verdict $?)"
+printf '%s' "$OUT_BW" | grep -qF 'a WIRED entry at run-log line 4 (step S7)'
+check "X31b a claim logged without a timestamp prefix is still read" "$(verdict $?)"
+INV_BW="$(run_audit --inventory --log "$MR/bare.log" --project "$MR/anchor")"
+{ printf '%s' "$OUT_BW" | grep -qF 'claims=4' && printf '%s' "$INV_BW" | grep -qxF 'claimed-files=1'; }
+check "X31c claimed-files= still counts named files only, so the bare entries the grader counts add none" "$(verdict $?)"
+INV_PR="$(run_audit --inventory --log "$MR/prose.log" --project "$MR/anchor")"
+printf '%s' "$INV_PR" | grep -qxF 'claimed-files=1'
+check "X31d --inventory reads the same anchored grammar, so a quoted marker names no claimed file" "$(verdict $?)"
+cat > "$MR/label.log" <<'EOF'
+[10:00:01] FIX ROUND 2 IMPL completed — files: src.txt
+[10:00:02] IMPL completed — files: src/unlabelled.txt
+[10:00:03] REVIEW ROUND 2 — F3 WIRED — files: src/ghost.txt
+[10:00:04] SEE 'IMPL completed — files:' src/quoted.txt
+[10:00:05] S0 RF | S0 IMPL completed — files: src/piped.txt
+[10:00:06] one two three four five six IMPL completed — files: src/six.txt
+EOF
+OUT_LB="$(run_audit --log "$MR/label.log" --project "$MR/anchor" --receipt -)"
+printf '%s' "$OUT_LB" | grep -qF 'EDIT LANDED — FIX ROUND 2: src.txt'
+check "X32 a multi-word step label before the marker is still a claim" "$(verdict $?)"
+printf '%s' "$OUT_LB" | grep -qF 'EDIT NOT LANDED — (none): claimed src/unlabelled.txt'
+check "X32a a claim that opens with its marker is graded under the (none) step" "$(verdict $?)"
+printf '%s' "$OUT_LB" | grep -qF 'EDIT NOT LANDED — REVIEW ROUND 2 — F3: claimed src/ghost.txt'
+check "X32b a label exactly at the token budget is still a claim" "$(verdict $?)"
+{ ! printf '%s' "$OUT_LB" | grep -qE 'src/(quoted|piped|six)\.txt'; }
+check "X32c a quoted marker, a piped lead and a label over the token budget are not claims" "$(verdict $?)"
+printf '%s' "$OUT_LB" | grep -qF 'claims=3 '
+check "X32d the label run log grades exactly its three claims" "$(verdict $?)"
+INV_LB="$(run_audit --inventory --log "$MR/label.log" --project "$MR/anchor")"
+printf '%s' "$INV_LB" | grep -qxF 'claimed-files=3'
+check "X32e --inventory counts the labelled claims' files and nothing else" "$(verdict $?)"
+cat > "$MR/dash.log" <<'EOF'
+[10:00:01] S1 IMPL completed — files: src.txt
+[10:00:02] S2 IMPL completed - files: src/hyphen-impl.txt
+[10:00:03] S3 WIRED – files: src/endash-wired.txt
+[10:00:04] S4 IMPL completed – files: src.txt
+[10:00:05] S5 WIRED - files: src/hyphen-wired.txt
+EOF
+OUT_DS="$(run_audit --log "$MR/dash.log" --project "$MR/anchor" --receipt -)"
+printf '%s' "$OUT_DS" | grep -qF 'EDIT LANDED — S1: src.txt'
+check "X33-control the em-dash claim is graded exactly as before" "$(verdict $?)"
+printf '%s' "$OUT_DS" | grep -qF 'EDIT NOT LANDED — S2: claimed src/hyphen-impl.txt'
+check "X33 a hyphen-spelled IMPL claim is graded, not skipped" "$(verdict $?)"
+printf '%s' "$OUT_DS" | grep -qF 'EDIT NOT LANDED — S3: claimed src/endash-wired.txt'
+check "X33a an en-dash-spelled WIRED claim is graded, not skipped" "$(verdict $?)"
+printf '%s' "$OUT_DS" | grep -qF 'EDIT LANDED — S4: src.txt'
+check "X33b an en-dash-spelled IMPL claim that landed grades LANDED" "$(verdict $?)"
+{ printf '%s' "$OUT_DS" | grep -qF 'EDIT NOT LANDED — S5: claimed src/hyphen-wired.txt' \
+  && ! printf '%s' "$OUT_DS" | grep -qF 'a WIRED entry at run-log line'; }
+check "X33c a hyphen-spelled WIRED claim is graded rather than misread as a bare WIRED entry" "$(verdict $?)"
+printf '%s' "$OUT_DS" | grep -qF 'claims=5 '
+check "X33d every dash spelling counts toward the audit's claims" "$(verdict $?)"
+INV_DS="$(run_audit --inventory --log "$MR/dash.log" --project "$MR/anchor")"
+printf '%s' "$INV_DS" | grep -qxF 'claimed-files=5'
+check "X33e --inventory counts the files named under every dash spelling" "$(verdict $?)"
+OUT_DS_C="$(LC_ALL=C bash "$LIB" --log "$MR/dash.log" --project "$MR/anchor" --receipt - 2>&1)"
+printf '%s' "$OUT_DS_C" | grep -qF 'claims=5 '
+check "X33f the dash spellings match the same way under LC_ALL=C" "$(verdict $?)"
+
 echo "----"
 echo "test-edit-landing-audit: $T_PASS PASS / $T_FAIL FAIL"
 [ "$T_FAIL" -eq 0 ]
