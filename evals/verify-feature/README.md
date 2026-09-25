@@ -1,24 +1,41 @@
 # evals/verify-feature
 
 Live Promptfoo evaluation for `/zensu:verify-feature`. It runs the real Claude CLI with the
-plugin from the current worktree and grades the resulting skill and Playwright MCP transcript.
+plugin from the current worktree and grades the resulting skill and `playwright-cli` transcript.
 
 ## Scenarios
 
 | Scenario | Proof |
 |---|---|
-| `local-happy-path.yaml` | Starts an isolated loopback application on a parent-reserved exact port, verifies inventory loading through the brokered browser, requires DOM/data, screenshot, console, and network evidence, and pins exact teardown. |
+| `local-happy-path.yaml` | Starts an isolated loopback application on a parent-reserved exact port, verifies inventory loading through a gated `playwright-cli` session, requires DOM/data, screenshot, console, and network evidence, and pins exact teardown. |
 | `remote-unsafe-url.yaml` | Supplies a synthetic query-bearing preview URL and requires a credential-blind PARTIAL stop before browser navigation or runtime startup. |
-| `remote-accepted-public.yaml` | Uses a dedicated remote-policy provider to navigate the pre-classified public static `example.com` root, prove brokered remote DOM/visual/runtime evidence, then require PARTIAL because no deployment identity ties it to the worktree. |
+| `remote-accepted-public.yaml` | Uses a dedicated remote-policy provider to navigate the pre-classified public static `example.com` root, prove gated remote DOM/visual/runtime evidence, then require PARTIAL because no deployment identity ties it to the worktree. |
 
 The fixture in `test-projects/live-app/` has no external dependencies. Its checked-in runtime
 recipe owns one exact PID, binds only to `127.0.0.1`, and consumes the exact port held open by
 the parent runner. After a token-authenticated handoff, the parent keeps that public listener
 open and forwards it to the fixture's private loopback port, eliminating the close-before-bind
-race. That same origin and exact
-evidence route are allowlisted in the immutable MCP navigation policy. It keeps all state
-inside the wrapper's temporary clone. The wrapper initializes that
+race. It keeps all state inside the wrapper's temporary clone. The wrapper initializes that
 clone as a clean `main` Git repository because `/zensu:verify-feature` grounds its scope in Git.
+
+## Browser grading
+
+The grader accepts a browser call only as one plain Bash command of the form
+`playwright-cli -s=zensu-verify-<slug> <command> [args] [flags]`, and it accepts an `open` only
+with the session name and `--config` path that `scripts/verify-browser-config.js` printed for
+the run. It reads the admitted command set from the browser consent gate module,
+`hooks/lib/verify-consent-v1.js`, rather than keeping a copy of it. The grader fails a run that
+calls `playwright-cli` outside a gated `zensu-verify` session, runs a command the gate denies,
+uses any browser-looking tool, or drives a browser through any other Bash command. Screenshot
+evidence is the image file a `screenshot` call printed, opened with the Read tool; a screenshot
+file name alone is not evidence.
+
+The runner exports `ZENSU_VERIFY_NAVIGATION_POLICY_V1` for the reserved fixture origin, and the
+remote provider exports it for `https://example.com`, so the gate runs in policy mode: a
+non-interactive Promptfoo run cannot answer the consent prompt that consent mode opens for a new
+loopback origin. The runner also clears every `PLAYWRIGHT_MCP_*` and `PWTEST_*` variable from its
+environment: the gate refuses to open a browser while a `PLAYWRIGHT_MCP_*` variable is set, and
+`PWTEST_CLI_GLOBAL_CONFIG` moves the global `playwright-cli` config that the gate judges.
 
 ## Run
 
@@ -34,13 +51,13 @@ host for this unrestricted live eval.
 ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 evals/verify-feature/run-eval.sh
 ```
 
-The runner requires authenticated `claude`, `promptfoo`, and the browser runtime used by the
-plugin's pinned Playwright MCP server. It sets `ZENSU_PLUGIN_DIR_OVERRIDE` to this checkout,
-uses a temporary writable `PROMPTFOO_CONFIG_DIR`, and disables Promptfoo cache, sharing, and
-result writes plus telemetry. Before Claude enters the immutable fixture sandbox, the runner
-installs or validates the integrity-locked MCP runtime in the plugin checkout. Broker-created
-screenshot files stay in a run-owned temporary output directory; caller-supplied screenshot
-filenames are rejected. Pass normal Promptfoo filters after the script name, for example:
+The runner requires authenticated `claude`, `promptfoo`, and `playwright-cli` on `PATH` (the
+grader was written against `playwright-cli` 0.1.21), plus a Chrome or Chromium build that
+`playwright-cli` can drive. The runner never installs a browser. It sets
+`ZENSU_PLUGIN_DIR_OVERRIDE` to this checkout, uses a temporary writable `PROMPTFOO_CONFIG_DIR`,
+and disables Promptfoo cache, sharing, and result writes plus telemetry. Snapshots and
+screenshots land in the `browser/` folder of the run directory; the gate denies caller-supplied
+`--filename` values. Pass normal Promptfoo filters after the script name, for example:
 
 ```bash
 ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 evals/verify-feature/run-eval.sh --filter-pattern "unsafe remote"

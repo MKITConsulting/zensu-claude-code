@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **verify-feature**: `/zensu:verify-feature` now drives the browser through `playwright-cli`,
+  which you install once: `npm install -g @playwright/cli@0.1.21`. That is the version the
+  browser consent gate was measured against, and the run-config helper refuses to start a run
+  on any other. `brew install playwright-cli` is unpinned: it installs whichever version
+  Homebrew ships.
+- **verify-feature**: the plugin no longer ships a Playwright MCP server, so permission rules
+  for `mcp__plugin_zensu_playwright__…` or `mcp__plugin_zensu_zensu-browser__…` match nothing.
+  Delete an `allow` rule written for them, which grants nothing now; re-spell a `deny` or `ask`
+  rule for the Bash command, for example `Bash(playwright-cli:*)`, because until then it
+  restricts nothing.
+
 ## [0.21.1] - 2026-09-15
 
 ### Added

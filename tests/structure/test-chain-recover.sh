@@ -587,7 +587,7 @@ fi
 PLUGIN_COPY="$WORK/plugin"
 mkdir -p "$PLUGIN_COPY/.claude-plugin"
 COPY_OK=true
-for item in .claude-plugin .mcp.json hooks agents skills docs templates README.md CHANGELOG.md tests; do
+for item in .claude-plugin hooks agents skills docs templates scripts README.md CHANGELOG.md tests; do
   [ -e "$ROOT/$item" ] || continue
   cp -R "$ROOT/$item" "$PLUGIN_COPY/" 2>/dev/null || COPY_OK=false
 done

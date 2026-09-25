@@ -1,31 +1,43 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const test = require('node:test');
 const path = require('node:path');
 
 const floor = require('../../hooks/lib/verify-navigation-floor-v1.js');
 const {
   FLOOR_REASONS,
+  MAX_POLICY_ROUTES,
   checkNavigationTarget,
   classifyOrigin,
   isLoopbackHost,
   isPublicAddress,
   normalizeHostname,
   normalizeRoute,
+  parsePolicyTargets,
   policyContractFault,
   resolveRemoteHost,
 } = floor;
 
-test('the broker requires the floor module instead of carrying its own predicates', () => {
-  const proxyPath = path.resolve(__dirname, '../../scripts/playwright-mcp-proxy.js');
-  const source = require('node:fs').readFileSync(proxyPath, 'utf8');
-  assert.match(source, /verify-navigation-floor-v1\.js/);
-  for (const own of ['function isPublicIpv4', 'function expandIpv6', 'function isLoopbackHost', 'function resolveRemoteHost']) {
-    assert.equal(source.includes(own), false, own);
+test('the consent gate and the run-config helper require the floor module instead of carrying its own predicates', () => {
+  const consentPath = path.resolve(__dirname, '../../hooks/lib/verify-consent-v1.js');
+  const helperPath = path.resolve(__dirname, '../../scripts/verify-browser-config.js');
+  for (const file of [consentPath, helperPath]) {
+    const source = fs.readFileSync(file, 'utf8');
+    assert.match(source, /verify-navigation-floor-v1\.js/, file);
+    for (const own of ['function isPublicIpv4', 'function expandIpv6', 'function isLoopbackHost(', 'function isPublicAddress(',
+      'function resolveRemoteHost(', 'function classifyOrigin(', 'function normalizeRoute(', 'function parsePolicyTargets(',
+      'function policyContractFault(']) {
+      assert.equal(source.includes(own), false, `${path.basename(file)}: ${own}`);
+    }
   }
-  const proxy = require(proxyPath);
-  assert.equal(proxy.isPublicAddress, isPublicAddress);
+  const consent = require(consentPath);
+  assert.equal(consent.REASONS.REMOTE_NEEDS_POLICY.endsWith(floor.CONSENT_REMOTE_REASON), true);
+  const raw = JSON.stringify({ version: 1, mode: 'local', targets: [{ origin: 'http://127.0.0.1:4300', routes: ['/'], evidenceMode: 'declared-safe' }] });
+  const parsed = parsePolicyTargets(raw);
+  assert.deepEqual(consent.readPolicy({ ZENSU_VERIFY_NAVIGATION_POLICY_V1: raw }), { ok: true, mode: parsed.mode, targets: parsed.targets });
+  assert.deepEqual(consent.readPolicy({ ZENSU_VERIFY_NAVIGATION_POLICY_V1: '{}' }), { ok: false, fault: policyContractFault('{}') });
 });
 
 test('loopback detection accepts every 127/8 address and ::1 and nothing else', () => {
@@ -85,8 +97,7 @@ test('remote host resolution pins only globally routable answers', async () => {
 });
 
 // A non-string target is refused rather than coerced. String(["http://127.0.0.1:9999"]) is the
-// bare URL, so coercion classified an array argument as loopback and let it reach the consent
-// broker's approved map without a prompt.
+// bare URL, so coercion would classify an array argument as loopback.
 test('the navigation target refuses a non-string target instead of coercing it', () => {
   for (const value of [['http://127.0.0.1:9999/'], undefined, null, 42, { toString: () => 'http://127.0.0.1:9999/' }]) {
     assert.equal(checkNavigationTarget(value).reason, FLOOR_REASONS.INVALID);
@@ -96,9 +107,10 @@ test('the navigation target refuses a non-string target instead of coercing it',
   assert.equal(classifyOrigin('http://127.0.0.1:9999/').mode, 'local');
 });
 
-// normalizeRoute has TWO production consumers: normalizeRoutes() in hooks/lib/verify-consent-v1.js,
-// which builds the route list the human reads in the consent prompt, and parsePolicy() in
-// scripts/playwright-mcp-proxy.js, which validates a recipe's declared routes at broker start.
+// normalizeRoute's production consumers include normalizeRoutes() in hooks/lib/verify-consent-v1.js,
+// which builds the route list the human reads in the consent prompt, parsePolicyTargets() in the
+// floor module, which validates the navigation policy's declared routes, and checkPolicy() in
+// scripts/verify-browser-config.js, which validates the route a --check-policy call names.
 // Its own truth table was graded by nothing. The load-bearing conjunct is the final
 // `normalized === route`: without it a declared `/a/../b` renders as written while naming a
 // different path, and `//evil.example.com/x` -- which a URL parser reads as a host -- renders
@@ -144,72 +156,119 @@ test('the contract check names which guard refused and keeps the three causes di
   assert.equal(policyContractFault(JSON.stringify({ version: 1, mode: 'local', targets: [target] })), '');
 });
 
-// policyContractFault is the EXTRACTED form of parsePolicy's three TOP-LEVEL guards -- the
-// doctor and the consent gate call it, while the broker still spells those guards itself, so
-// nothing held the two in step. Both directions are pinned here, and the guarantee is scoped to
-// the top-level shape:
-//   refuse-side, the safety-relevant one: a value the shared check refuses is never one the
-//   broker would run in, or the gate disarms the floor for a policy the broker will not start
-//   on -- the exact defect the V27 repair removed;
-//   accept-side: a value it accepts the broker accepts too, so a one-sided TIGHTENING makes the
-//   doctor report a fault for a policy that works and the gate re-prompt for no reason.
-// A PER-TARGET divergence remains BY DESIGN and is demonstrated at the end of this test: the
-// shared check has no opinion below the top level. It is contained by the broker failing to
-// start rather than by this check catching it -- an uncaught parsePolicy throw exits the broker
-// process -- so it costs the human the prompt and the audit line, never a navigation.
-test('the shared contract check and the broker agree on the top-level policy shape', async () => {
-  const proxy = require(path.resolve(__dirname, '../../scripts/playwright-mcp-proxy.js'));
-  const target = { origin: 'http://127.0.0.1:4300', routes: ['/'], evidenceMode: 'declared-safe' };
-  const refused = ['', '{oops', '{}',
+const POLICY_TARGET = Object.freeze({ origin: 'http://127.0.0.1:4300', routes: ['/'], evidenceMode: 'declared-safe' });
+
+function policyOf(mode, targets) {
+  return JSON.stringify({ version: 1, mode, targets });
+}
+
+test('parsePolicyTargets maps each target to its canonical origin, hostname and route set', () => {
+  const local = parsePolicyTargets(policyOf('local', [
+    { origin: 'http://127.0.0.1:4300', routes: ['/', '/login'], evidenceMode: 'declared-safe' },
+    { origin: 'http://[::1]:4301', routes: ['/a'], evidenceMode: 'declared-safe' },
+  ]));
+  assert.equal(local.ok, true);
+  assert.equal(local.mode, 'local');
+  assert.deepEqual([...local.targets.keys()], ['http://127.0.0.1:4300', 'http://[::1]:4301']);
+  const first = local.targets.get('http://127.0.0.1:4300');
+  assert.equal(first.origin, 'http://127.0.0.1:4300');
+  assert.equal(first.hostname, '127.0.0.1');
+  assert.deepEqual([...first.routes], ['/', '/login']);
+  assert.equal(local.targets.get('http://[::1]:4301').hostname, '::1');
+
+  const remote = parsePolicyTargets(policyOf('remote', [
+    { origin: 'https://App.Example.com', routes: ['/'], evidenceMode: 'declared-safe' },
+    { origin: 'https://93.184.216.34:8443', routes: ['/x'], evidenceMode: 'declared-safe' },
+  ]));
+  assert.equal(remote.ok, true);
+  assert.equal(remote.mode, 'remote');
+  assert.deepEqual([...remote.targets.keys()], ['https://app.example.com', 'https://93.184.216.34:8443']);
+  assert.equal(remote.targets.get('https://app.example.com').hostname, 'app.example.com');
+  assert.deepEqual([...remote.targets.get('https://93.184.216.34:8443').routes], ['/x']);
+});
+
+test('parsePolicyTargets refuses a top-level contract fault with the shared check\'s own reason', () => {
+  const refused = ['', '{oops', '{}', 'null', '[]',
     JSON.stringify({ version: 1 }),
-    JSON.stringify({ version: 1, mode: 'local', targets: [target], extra: 1 }),
-    JSON.stringify({ version: 2, mode: 'local', targets: [target] }),
-    JSON.stringify({ version: 1, mode: 'sideways', targets: [target] }),
-    JSON.stringify({ version: 1, mode: 'local', targets: [] }),
-    JSON.stringify({ version: 1, mode: 'local', targets: Array.from({ length: 9 }, () => target) })];
-
-  for (const raw of refused) {
-    assert.notEqual(policyContractFault(raw), '', raw.slice(0, 48));
-    let mode = null;
-    try { mode = (await proxy.parsePolicy(raw, async () => [])).mode; }
-    catch (error) {
-      // The broker prefixes the same three causes with "navigation "; comparing the pair is
-      // what catches a reword on either side rather than only a widened guard.
-      assert.equal(error.message, 'navigation ' + policyContractFault(raw), raw.slice(0, 48));
-      continue;
-    }
-    assert.equal(mode, 'deny', raw.slice(0, 48));
-  }
-
-  // Accept-side. One shape is not enough: narrowing the shared check's accepted mode set or its
-  // 1..8 target range alone would leave every one of these still runnable in the broker.
-  const publicDns = async () => [{ address: '93.184.216.34', family: 4 }];
-  const accepted = [
-    [JSON.stringify({ version: 1, mode: 'local', targets: [target] }), 'local', async () => []],
-    [JSON.stringify({
-      version: 1,
-      mode: 'remote',
-      targets: [{ origin: 'https://app.example.com', routes: ['/'], evidenceMode: 'declared-safe' }],
-    }), 'remote', publicDns],
-    [JSON.stringify({
-      version: 1,
-      mode: 'local',
-      targets: Array.from({ length: 8 }, (_unused, index) => ({
-        origin: 'http://127.0.0.1:' + String(4300 + index), routes: ['/'], evidenceMode: 'declared-safe',
-      })),
-    }), 'local', async () => []],
+    JSON.stringify({ version: 1, mode: 'local', targets: [POLICY_TARGET], extra: 1 }),
+    JSON.stringify({ version: 2, mode: 'local', targets: [POLICY_TARGET] }),
+    JSON.stringify({ version: 1, mode: 'sideways', targets: [POLICY_TARGET] }),
+    JSON.stringify({ version: 1, mode: 'local', targets: 'http://127.0.0.1:4300' }),
+    policyOf('local', []),
+    policyOf('local', Array.from({ length: 9 }, (_unused, index) => ({ ...POLICY_TARGET, origin: `http://127.0.0.1:${4300 + index}` }))),
   ];
-  for (const [raw, mode, resolver] of accepted) {
-    assert.equal(policyContractFault(raw), '', raw.slice(0, 48));
-    assert.equal((await proxy.parsePolicy(raw, resolver)).mode, mode, raw.slice(0, 48));
+  for (const raw of refused) {
+    const fault = policyContractFault(raw);
+    assert.notEqual(fault, '', raw.slice(0, 48));
+    assert.deepEqual(parsePolicyTargets(raw), { ok: false, fault }, raw.slice(0, 48));
   }
+  const eight = parsePolicyTargets(policyOf('local', Array.from({ length: 8 }, (_unused, index) => ({ ...POLICY_TARGET, origin: `http://127.0.0.1:${4300 + index}` }))));
+  assert.equal(eight.ok, true);
+  assert.equal(eight.targets.size, 8);
+});
 
-  // The shared check is deliberately TOP-LEVEL only: the broker still refuses a target the
-  // check has no opinion about, and that refusal must not borrow one of the three causes.
-  const badTarget = JSON.stringify({ version: 1, mode: 'local', targets: [{ ...target, evidenceMode: 'other' }] });
-  assert.equal(policyContractFault(badTarget), '');
-  await assert.rejects(proxy.parsePolicy(badTarget, async () => []), (error) => {
-    assert.match(error.message, /navigation target contract is invalid/);
-    return true;
-  });
+test('parsePolicyTargets refuses a target outside the declared-safe contract and bounds its routes at MAX_POLICY_ROUTES', () => {
+  assert.equal(MAX_POLICY_ROUTES, 64);
+  const contract = { ok: false, fault: 'policy target contract is invalid; v1 supports declared-safe evidence only' };
+  const refused = [
+    { ...POLICY_TARGET, evidenceMode: 'other' },
+    { origin: POLICY_TARGET.origin, routes: POLICY_TARGET.routes },
+    { ...POLICY_TARGET, extra: true },
+    { ...POLICY_TARGET, routes: [] },
+    { ...POLICY_TARGET, routes: '/' },
+    null,
+    'http://127.0.0.1:4300',
+  ];
+  for (const target of refused) {
+    assert.deepEqual(parsePolicyTargets(policyOf('local', [target])), contract, JSON.stringify(target));
+  }
+  const routes = (count) => Array.from({ length: count }, (_unused, index) => `/r${index}`);
+  const atBound = parsePolicyTargets(policyOf('local', [{ ...POLICY_TARGET, routes: routes(MAX_POLICY_ROUTES) }]));
+  assert.equal(atBound.ok, true);
+  assert.equal(atBound.targets.get(POLICY_TARGET.origin).routes.size, MAX_POLICY_ROUTES);
+  assert.deepEqual(parsePolicyTargets(policyOf('local', [{ ...POLICY_TARGET, routes: routes(MAX_POLICY_ROUTES + 1) }])), contract);
+});
+
+test('parsePolicyTargets names the route or origin fault it met', () => {
+  const route = 'policy route must be an absolute query-free pathname';
+  const shape = 'policy origin must not contain credentials, path, query, or fragment';
+  const cases = [
+    [{ routes: ['login'] }, route],
+    [{ routes: ['/a?b=1'] }, route],
+    [{ routes: ['/a/../b'] }, route],
+    [{ routes: ['/a/*'] }, route],
+    [{ routes: [42] }, route],
+    [{ routes: ['/', '/'] }, 'policy routes must be normalized and unique'],
+    [{ origin: 4300 }, 'policy origin must be a string'],
+    [{ origin: 'not a url' }, 'policy origin is invalid'],
+    [{ origin: 'http://user:pw@127.0.0.1:4300' }, shape],
+    [{ origin: 'http://127.0.0.1:4300/app' }, shape],
+    [{ origin: 'http://127.0.0.1:4300/?x=1' }, shape],
+    [{ origin: 'http://127.0.0.1:4300/#top' }, shape],
+    [{ origin: 'http://127.0.0.1:4300/?' }, shape],
+  ];
+  for (const [override, fault] of cases) {
+    assert.deepEqual(parsePolicyTargets(policyOf('local', [{ ...POLICY_TARGET, ...override }])), { ok: false, fault }, JSON.stringify(override));
+  }
+  assert.deepEqual(parsePolicyTargets(policyOf('local', [POLICY_TARGET, { ...POLICY_TARGET, origin: 'http://127.0.0.1:4300/' }])),
+    { ok: false, fault: 'policy origins must be unique' });
+});
+
+test('parsePolicyTargets admits only literal loopback in local mode and only non-loopback https in remote mode', () => {
+  const single = (mode, origin) => parsePolicyTargets(policyOf(mode, [{ ...POLICY_TARGET, origin }]));
+  for (const origin of ['http://127.0.0.1:4300', 'https://127.0.0.2:8443', 'http://[::1]:4300']) {
+    assert.equal(single('local', origin).ok, true, origin);
+  }
+  for (const origin of ['http://localhost:4300', 'http://10.0.0.5:4300', 'https://app.example.com', 'ws://127.0.0.1:4300']) {
+    assert.deepEqual(single('local', origin), { ok: false, fault: FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK }, origin);
+  }
+  for (const origin of ['https://app.example.com', 'https://93.184.216.34', 'https://[2606:2800:220:1:248:1893:25c8:1946]']) {
+    assert.equal(single('remote', origin).ok, true, origin);
+  }
+  for (const origin of ['http://app.example.com', 'https://127.0.0.1', 'https://[::1]:8443', 'ws://app.example.com']) {
+    assert.deepEqual(single('remote', origin), { ok: false, fault: FLOOR_REASONS.REMOTE_HTTPS }, origin);
+  }
+  for (const origin of ['https://10.0.0.5', 'https://169.254.169.254', 'https://[fc00::1]']) {
+    assert.deepEqual(single('remote', origin), { ok: false, fault: FLOOR_REASONS.REMOTE_NOT_PUBLIC }, origin);
+  }
 });

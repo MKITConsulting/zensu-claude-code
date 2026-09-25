@@ -476,6 +476,37 @@ test('Claude runtime digest includes manifest-activated MCP config and launchers
   assert.notEqual(core.computeRuntimeDigest(f.pluginRoot, 'claude'), afterConfig);
 });
 
+test('Claude runtime digest includes scripts without an MCP manifest and ignores a retired MCP runtime', () => {
+  const f = fixture('claude');
+  const manifestFile = path.join(f.pluginRoot, '.claude-plugin', 'plugin.json');
+  fs.writeFileSync(manifestFile, JSON.stringify({ name: 'zensu', version: '9.8.7' }));
+  fs.mkdirSync(path.join(f.pluginRoot, 'scripts'));
+  fs.writeFileSync(path.join(f.pluginRoot, 'scripts', 'helper.js'), 'process.exit(0);\n');
+  fs.mkdirSync(path.join(f.pluginRoot, 'mcp-runtime'));
+  fs.writeFileSync(path.join(f.pluginRoot, 'mcp-runtime', 'package.json'), '{}\n');
+  const before = core.computeRuntimeDigest(f.pluginRoot, 'claude');
+  fs.appendFileSync(path.join(f.pluginRoot, 'mcp-runtime', 'package.json'), '\n');
+  assert.equal(core.computeRuntimeDigest(f.pluginRoot, 'claude'), before);
+  fs.appendFileSync(path.join(f.pluginRoot, 'scripts', 'helper.js'), '// changed\n');
+  assert.notEqual(core.computeRuntimeDigest(f.pluginRoot, 'claude'), before);
+});
+
+test('Claude runtime digest keeps measuring MCP runtime metadata while a manifest declares mcpServers', () => {
+  const f = fixture('claude');
+  const manifestFile = path.join(f.pluginRoot, '.claude-plugin', 'plugin.json');
+  fs.writeFileSync(manifestFile, JSON.stringify({ name: 'zensu', version: '9.8.7', mcpServers: './.mcp.json' }));
+  fs.writeFileSync(path.join(f.pluginRoot, '.mcp.json'), JSON.stringify({ mcpServers: {} }));
+  fs.mkdirSync(path.join(f.pluginRoot, 'mcp-runtime'));
+  fs.writeFileSync(path.join(f.pluginRoot, 'mcp-runtime', 'package.json'), '{}\n');
+  fs.writeFileSync(path.join(f.pluginRoot, 'mcp-runtime', 'package-lock.json'), '{}\n');
+  const before = core.computeRuntimeDigest(f.pluginRoot, 'claude');
+  fs.appendFileSync(path.join(f.pluginRoot, 'mcp-runtime', 'package.json'), '\n');
+  const afterPackage = core.computeRuntimeDigest(f.pluginRoot, 'claude');
+  assert.notEqual(afterPackage, before);
+  fs.appendFileSync(path.join(f.pluginRoot, 'mcp-runtime', 'package-lock.json'), '\n');
+  assert.notEqual(core.computeRuntimeDigest(f.pluginRoot, 'claude'), afterPackage);
+});
+
 test('builds an immutable context with canonical roots and profiles', () => {
   const f = fixture();
   const context = core.buildContext({
