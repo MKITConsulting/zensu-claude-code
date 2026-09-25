@@ -7015,21 +7015,79 @@ if grep -q '^export ZDOC_WORKTREE_KEEP_IDLE_HOURS$' "$HELPER" && grep -q '^expor
 else
   check "P1wk13 the wrapper derives and exports both worktree-keep values from the canonical getters" FAIL
 fi
-# The phrases are extracted by a reader that honours a JavaScript escaped apostrophe.
-# A character-class grep stops AT the backslash, so every row whose literal contains
-# an escaped apostrophe collapsed to the 22-character generic prefix "worktree: this
-# session", which a DIFFERENT row's bullet already satisfied — two rows graded by nothing.
+# The phrases are extracted by a tokenizer that honours escaped apostrophes and skips
+# comments, double-quoted strings, template literals and regex literals. Pairing bare
+# single quotes across the whole file desynchronizes on any stray apostrophe elsewhere
+# in the renderer, and the population then shrinks with no row graded for the loss.
 cat > "$SBOX/wk-phrases.js" <<'WKJS'
 const fs = require('fs');
 const src = fs.readFileSync(process.argv[2], 'utf8');
-const re = /'((?:\\.|[^'\\])*)'/g;
 const out = new Set();
-let m;
-while ((m = re.exec(src)) !== null) {
-  const lit = m[1].replace(/\\(.)/g, '$1');
-  if (lit.indexOf('worktree: ') !== 0) continue;
-  const cut = lit.split(' — ')[0].split(' (')[0].replace(/\s+$/, '');
-  if (cut.length > 12) out.add(cut);
+const opener = /[(,=:[!&|?{};+\-*%<>~^]/;
+const keywords = /^(?:return|typeof|case|in|of|delete|void|throw|new)$/;
+const ident = /[A-Za-z0-9_$]/;
+let i = 0;
+let last = '';
+let word = '';
+while (i < src.length) {
+  const c = src[i];
+  const n = src[i + 1];
+  if (c === '/' && n === '/') {
+    const e = src.indexOf('\n', i);
+    i = e < 0 ? src.length : e;
+    continue;
+  }
+  if (c === '/' && n === '*') {
+    const e = src.indexOf('*/', i + 2);
+    i = e < 0 ? src.length : e + 2;
+    continue;
+  }
+  if (c === "'" || c === '"' || c === '`') {
+    let j = i + 1;
+    let buf = '';
+    while (j < src.length && src[j] !== c) {
+      if (src[j] === '\\') {
+        buf += src[j + 1] || '';
+        j += 2;
+        continue;
+      }
+      buf += src[j];
+      j += 1;
+    }
+    if (c === "'" && buf.indexOf('worktree: ') === 0) {
+      const cut = buf.split(' — ')[0].split(' (')[0].replace(/\s+$/, '');
+      if (cut.length > 12) out.add(cut);
+    }
+    i = j + 1;
+    last = c;
+    word = '';
+    continue;
+  }
+  if (c === '/' && (last === '' || opener.test(last) || (ident.test(last) && keywords.test(word)))) {
+    let j = i + 1;
+    let inClass = false;
+    while (j < src.length && src[j] !== '\n') {
+      const d = src[j];
+      if (d === '\\') {
+        j += 2;
+        continue;
+      }
+      if (d === '[') inClass = true;
+      else if (d === ']') inClass = false;
+      else if (d === '/' && !inClass) break;
+      j += 1;
+    }
+    i = j + 1;
+    last = '/';
+    word = '';
+    continue;
+  }
+  if (!/\s/.test(c)) {
+    if (ident.test(c)) word = ident.test(src[i - 1] || '') ? word + c : c;
+    else word = '';
+    last = c;
+  }
+  i += 1;
 }
 for (const p of [...out].sort()) console.log(p);
 WKJS
