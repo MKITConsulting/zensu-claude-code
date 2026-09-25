@@ -434,10 +434,11 @@ fi
 exec "$REAL_MV" "\$@"
 EOF
 chmod +x "$SHIM_MKTEMP_BIN/mktemp" "$SHIM_MV_BIN/mv"
+sigint_default() { if command -v perl >/dev/null 2>&1; then perl -e '$SIG{INT} = "DEFAULT"; exec { $ARGV[0] } @ARGV or exit 127' "$@"; else "$@"; fi; }
 shim_write() {  # $1 shim dir, $2 verb, $3 stderr file -> the helper's stdout
   CLAUDE_CODE_SESSION_ID="$SHIM_SID" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
     CLAUDE_PLUGIN_DATA="$SHIM_PROJ/.session-control-test/plugin-data" CLAUDE_PROJECT_DIR="$SHIM_PROJ" \
-    ZENSU_CONFIG="$CFG_DEFAULT" PATH="$1:$PATH" bash "$HELPER" "$2" 2>"$3"
+    ZENSU_CONFIG="$CFG_DEFAULT" PATH="$1:$PATH" sigint_default bash "$HELPER" "$2" 2>"$3"
 }
 if ln -s "$SHIM_DECOY" "$SHIM_PROJ/shim-probe" 2>/dev/null && [ -L "$SHIM_PROJ/shim-probe" ]; then
   rm -f "$SHIM_PROJ/shim-probe"

@@ -374,9 +374,10 @@ fi
 exit 0
 EOF
 chmod +x "$SHIM_MKTEMP_BIN/mktemp" "$SHIM_MV_BIN/mv" "$SHIM_MVLINK_BIN/mv"
+sigint_default() { if command -v perl >/dev/null 2>&1; then perl -e '$SIG{INT} = "DEFAULT"; exec { $ARGV[0] } @ARGV or exit 127' "$@"; else "$@"; fi; }
 shim_write() {  # $1 shim dir, $2 verb, $3 stderr file -> the helper's stdout
   CLAUDE_CODE_SESSION_ID="$S_H" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" \
-    CLAUDE_PROJECT_DIR="$PROJ" ZENSU_CONFIG="$CFG_DEFAULT" PATH="$1:$PATH" bash "$HELPER" "$2" 2>"$3"
+    CLAUDE_PROJECT_DIR="$PROJ" ZENSU_CONFIG="$CFG_DEFAULT" PATH="$1:$PATH" sigint_default bash "$HELPER" "$2" 2>"$3"
 }
 rm -rf "$MARKER_H"
 if ln -s "$SHIM_DECOY" "$STATE_DIR/shim-probe" 2>/dev/null && [ -L "$STATE_DIR/shim-probe" ]; then
