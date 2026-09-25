@@ -68,12 +68,9 @@ copy_runtime() {
   local destination="$1" runtime_entry
   mkdir -p "$destination"
   destination="$(cd "$destination" && pwd -P)" || return 1
-  for runtime_entry in .claude-plugin .mcp.json hooks agents skills docs templates scripts README.md CHANGELOG.md LICENSE; do
+  for runtime_entry in .claude-plugin hooks agents skills docs templates scripts README.md CHANGELOG.md LICENSE; do
     cp -R "$PLUGIN_DIR/$runtime_entry" "$destination/$runtime_entry" || return 1
   done
-  mkdir -p "$destination/mcp-runtime"
-  cp "$PLUGIN_DIR/mcp-runtime/package.json" "$PLUGIN_DIR/mcp-runtime/package-lock.json" \
-    "$destination/mcp-runtime/" || return 1
 }
 
 bind_runtime_session() {
@@ -1468,12 +1465,9 @@ TICKET9F="$(CLAUDE_PROJECT_DIR="$P7F" bash "$LOG" --review-ticket --session stop
 CLAUDE_PROJECT_DIR="$P7F" tdd_consume_review_ticket "$ZENSU_SESSION_KEY" "$TICKET9F" >/dev/null
 FRESH_PLUGIN="$TMP/fresh-prompt-plugin"; mkdir -p "$FRESH_PLUGIN"
 FRESH_PLUGIN="$(cd "$FRESH_PLUGIN" && pwd -P)"
-for runtime_entry in .claude-plugin .mcp.json hooks agents skills docs templates scripts README.md CHANGELOG.md LICENSE; do
+for runtime_entry in .claude-plugin hooks agents skills docs templates scripts README.md CHANGELOG.md LICENSE; do
   cp -R "$PLUGIN_DIR/$runtime_entry" "$FRESH_PLUGIN/$runtime_entry"
 done
-mkdir -p "$FRESH_PLUGIN/mcp-runtime"
-cp "$PLUGIN_DIR/mcp-runtime/package.json" "$PLUGIN_DIR/mcp-runtime/package-lock.json" \
-  "$FRESH_PLUGIN/mcp-runtime/"
 FRESH_STATE_LIB="$FRESH_PLUGIN/hooks/lib/zensu-autopilot-state.sh"
 printf '%s\n' \
   'source "$REAL_AUTOPILOT_STATE_LIB"' \

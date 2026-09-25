@@ -43,8 +43,6 @@ AUTOPILOT_FULL="$ROOT/tests/structure/test-autopilot-full-cycle.sh"
 ENRICHMENT="$ROOT/scripts/claude-enrichment-render.js"
 PROMPTFOO_WRAPPER="$ROOT/scripts/claude-promptfoo-wrapper.sh"
 VERIFY_RUNTIME="$ROOT/skills/verify-feature/scripts/zensu-monorepo-runtime.sh"
-PLAYWRIGHT_MCP="$ROOT/scripts/playwright-mcp.sh"
-PLAYWRIGHT_MCP_TEST="$ROOT/tests/structure/playwright-mcp-proxy.test.js"
 CORE_SNAPSHOT_BLOCK="$(awk '
   /^function readRegularFileSnapshot\(/ { capture=1 }
   /^function readRegularFile\(/ { capture=0 }
@@ -293,27 +291,17 @@ else
 fi
 
 if grep -qF 'MUTATING_CONTROL_CANARY_URL="$(jq -ebr '\''.url'\'' "$CANARY_READY")"' "$CLAUDE_WRAPPER" \
-  && grep -qF 'MUTATING_CONTROL_CANARY_ORIGIN="$(jq -ebr '\''.origin'\'' "$CANARY_READY")"' "$CLAUDE_WRAPPER" \
-  && grep -qF 'MUTATING_CONTROL_CANARY_POLICY="$(MSYS2_ARG_CONV_EXCL='\''*'\'' jq -cn' "$CLAUDE_WRAPPER" \
-  && grep -qF 'json_quote "$MUTATING_CONTROL_CANARY_URL"' "$CLAUDE_WRAPPER" \
-  && grep -qF 'MSYS2_ENV_CONV_EXCL=ZENSU_VERIFY_NAVIGATION_POLICY_V1=' "$CLAUDE_WRAPPER" \
-  && grep -qF 'MSYS2_ARG_CONV_EXCL='\''ZENSU_VERIFY_NAVIGATION_POLICY_V1='\'' \' "$CLAUDE_WRAPPER" \
+  && grep -qF 'json_quote "curl -fsS $MUTATING_CONTROL_CANARY_URL"' "$CLAUDE_WRAPPER" \
+  && ! grep -qF 'ZENSU_VERIFY_NAVIGATION_POLICY_V1' "$CLAUDE_WRAPPER" \
   && grep -qF '"${CLAUDE_ENV[@]}" claude "${CLAUDE_ARGS[@]}" "$FULL_PROMPT"' "$CLAUDE_WRAPPER" \
   && grep -qF 'SELFTEST_MUTATING_CONTROL_CANARY_URL=' "$CLAUDE_WRAPPER" \
   && grep -qF 'attack="$(MSYS2_ARG_CONV_EXCL='\''*'\'' jq -cn --arg url "$SELFTEST_MUTATING_CONTROL_CANARY_URL"' "$CLAUDE_WRAPPER_SELFTEST" \
   && grep -qF 'MSYS2_ARG_CONV_EXCL='\''*'\'' jq -cn --argjson block "$attack"' "$CLAUDE_WRAPPER_SELFTEST" \
   && grep -qF 'MSYS2_ARG_CONV_EXCL='\''http://;https://'\'' node -e' "$CLAUDE_WRAPPER_SELFTEST" \
-  && grep -qF 'MSYS2_ARG_CONV_EXCL='\''http://;https://'\'' node "$EVIDENCE" reviewer-attack' "$CLAUDE_WRAPPER" \
-  && grep -qF '"MSYS2_ENV_CONV_EXCL=ZENSU_VERIFY_NAVIGATION_POLICY_V1="' "$PLAYWRIGHT_MCP" \
-  && grep -qF 'local arg_conv_excl="$1"' "$PLAYWRIGHT_MCP" \
-  && grep -qF 'env_args+=( "MSYS2_ARG_CONV_EXCL=$arg_conv_excl" )' "$PLAYWRIGHT_MCP" \
-  && grep -qF 'POLICY_PROXY_HOST="$(cygpath -am "$PROXY")"' "$PLAYWRIGHT_MCP" \
-  && grep -qF 'POLICY_RUNTIME_DIR_HOST="$(cygpath -am "$RUNTIME_DIR")"' "$PLAYWRIGHT_MCP" \
-  && grep -qF "run_sanitized_child '*' node \"\$POLICY_PROXY_HOST\"" "$PLAYWRIGHT_MCP" \
-  && grep -qF "test('launcher check-policy subprocess pins parent mode, origin, route, and evidence mode', () => {" "$PLAYWRIGHT_MCP_TEST"; then
-  check "Mutating-control URL and policy survive jq plus both sanitized MSYS environment boundaries" PASS
+  && grep -qF 'MSYS2_ARG_CONV_EXCL='\''http://;https://'\'' node "$EVIDENCE" reviewer-attack' "$CLAUDE_WRAPPER"; then
+  check "Mutating-control canary URL survives jq and the sanitized MSYS argument boundary" PASS
 else
-  check "Mutating-control URL and policy survive jq plus both sanitized MSYS environment boundaries" FAIL
+  check "Mutating-control canary URL survives jq and the sanitized MSYS argument boundary" FAIL
 fi
 
 if grep -qF "MSYS2_ARG_CONV_EXCL='*' node -e" "$CLAUDE_WRAPPER_SELFTEST" \

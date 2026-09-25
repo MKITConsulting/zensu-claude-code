@@ -41,14 +41,19 @@ The authoritative per-gate roster is the "Unbindable sessions" table in
 carries one column per state; keep exactly one roster and do not duplicate it here. Two
 properties are easy to get wrong and cost the whole feature:
 
-- **A deny from ANY hook on a matcher wins.** `hooks.json` registers four PreToolUse
+- **A deny from ANY hook on a matcher wins.** `hooks.json` registers five PreToolUse
   hooks on the `Bash` matcher (`pre-bash-witness.sh`, `pre-bash-zensu-gate.sh`,
-  `pre-bash-source-write-gate.sh`, `pre-write-secret-scan.sh`) and one on `.*`
-  (`pre-reviewer-capability-gate.sh` via `reviewer-capability-v1.js`). Only four of the
-  five can deny: `pre-bash-witness.sh` is advisory by construction and always exits 0
-  (§"Witness Attempt Half"), which is exactly why it may sit on this matcher at all — but
-  it is counted here rather than left out, because O21a enumerates the matcher and would
-  have to be re-derived by anyone who trusted a roster that omitted it. `/zensu:doctor` runs through Bash, so it is reachable only
+  `pre-bash-source-write-gate.sh`, `pre-write-secret-scan.sh`,
+  `pre-browser-navigation-consent.sh`) and one on `.*` (`pre-reviewer-capability-gate.sh`
+  via `reviewer-capability-v1.js`). Five of the six can deny: `pre-bash-witness.sh` is
+  advisory by construction and always exits 0 (§"Witness Attempt Half"), which is exactly
+  why it may sit on this matcher at all — but it is counted here rather than left out,
+  because O21a enumerates the matcher and would have to be re-derived by anyone who
+  trusted a roster that omitted it. The consent gate exits before its bind for every command
+  that carries no `playwright-cli` marker and admits the recognized `/zensu:doctor` and adoption
+  commands through `zensu_doctor_allowed` before its module runs, so on a POSIX host with `node`
+  it never stands between a session and the doctor — the recognizer refuses on win32; it denies a `zensu-verify-*` call and a command that merely mentions
+  both markers. `/zensu:doctor` runs through Bash, so it is reachable only
   if EVERY one of them allows. Both the `.*` gate and the secret-scan gate were missed in
   turn while the single-gate test stayed green and the feature silently did not work.
   `tests/structure/test-orphaned-project-root.sh` O21a therefore enumerates the Bash

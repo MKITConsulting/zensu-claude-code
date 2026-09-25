@@ -32,6 +32,8 @@
 //                            permissionExposureRows below for why no second
 //                            settings file is opened or named.
 //   ZDOC_NODE/ZENSU/PLAYWRIGHT            tool probe results from the wrapper/skill
+//   ZDOC_PLAYWRIGHT_VERSION, ZDOC_VERIFY/ZDOC_VERIFY_REASON  version and verify state,
+//                            re-derived unless ZDOC_PLAYWRIGHT / ZDOC_VERIFY is injected
 //   ZDOC_FORGE_PROVIDER/CLI/STATE/EDITION forge detection from the VCS driver
 //   ZDOC_TTL_HOURS           pending-review TTL from the canonical getter
 //   ZDOC_IMPL_STOP_NUDGE_AFTER  implementing-turns bound from the
@@ -188,18 +190,38 @@ var AUTOPILOT_FORGEABLE_SOURCE = 'read from the run document, which is an ordina
 // the two spellings cannot drift apart unnoticed. The other six files are not pinned.
 var REVIEWER_AGENT = 'zensu:code-reviewer';
 
-// The arming set is spelled ONCE and consumed by both halves of the ladder below. It is also
-// the set `hooks/lib/zensu-doctor.sh` derives ZDOC_VERIFY_EXEC for; the two are held in step by
-// a pin rather than by trust, because a fourth consent state added to one side alone would make
-// the execution row silently disappear.
-var CONSENT_MODE_STATES = ['consent', 'consent-no-recipe', 'consent-recipe-unchecked'];
-
-// The wrapper's value reaches a rendered line, so it is bounded here rather than trusted: the
-// row exists to report a state, never to relay whatever a caller put in the variable.
-function safeVerifyExec(value) {
-  return String(value).replace(/[^A-Za-z0-9_.:-]/g, '').slice(0, 40) || 'unnamed';
+function playwrightVersionModule() {
+  try {
+    var info = fs.lstatSync(path.join(__dirname, 'playwright-cli-version-v1.js'));
+    if (!info.isFile()) return null;
+    return require('./playwright-cli-version-v1.js');
+  } catch (_error) {
+    return null;
+  }
 }
-// The wrapper's REASON reaches a rendered line too, and it carries a free-form cause rather than
+function safePlaywrightVersion(value) {
+  var mod = playwrightVersionModule();
+  var text = String(value);
+  return mod && mod.validVersion(text) ? text : '';
+}
+function safePlaywrightOwner(value) {
+  var mod = playwrightVersionModule();
+  var text = String(value);
+  return mod && mod.validName(text) ? text : '';
+}
+function playwrightCliMeasuredVersion() {
+  try {
+    var info = fs.lstatSync(path.join(__dirname, 'verify-consent-v1.js'));
+    if (!info.isFile()) return '';
+    return safePlaywrightVersion(require('./verify-consent-v1.js').PLAYWRIGHT_CLI_SOURCE_VERSION || '');
+  } catch (_error) {
+    return '';
+  }
+}
+function playwrightPinnedInstall(measured) {
+  return '`npm install -g @playwright/cli' + (measured ? '@' + measured : '') + '`';
+}
+// The wrapper's REASON reaches a rendered line, and it carries a free-form cause rather than
 // a state word, so it gets its own bound instead of the state filter above: a newline plus one of
 // this report's own severity glyphs forges an extra row, which is the one thing a reader of the
 // report cannot check. Everything else a cause names is kept.
@@ -406,52 +428,32 @@ function toolBlock() {
   }
 
   var p = env.ZDOC_PLAYWRIGHT || 'absent';
-  if (p === 'ready') line(OK, 'Playwright MCP: loaded and ready (/zensu:verify-feature and autopilot browser driver)');
-  else if (p === 'configured') line(WARN, 'Playwright MCP: valid integrity-locked plugin config + npm present; first use installs the locked runtime, then restart/confirm MCP tools');
-  else if (p === 'declared') line(WARN, 'Playwright MCP: valid integrity-locked plugin config but npm is missing from PATH');
-  else if (p === 'present') line(WARN, 'Playwright: PATH binary found, but /zensu:verify-feature requires loaded Playwright MCP tools');
-  else line(WARN, 'Playwright MCP: valid plugin config not detected — /zensu:verify-feature cannot drive the UI and autopilot browser validation may skip');
+  var pv = safePlaywrightVersion(env.ZDOC_PLAYWRIGHT_VERSION || '');
+  var ps = env.ZDOC_PLAYWRIGHT_SOURCE || '';
+  var po = safePlaywrightOwner(env.ZDOC_PLAYWRIGHT_OWNER || '');
+  var measured = playwrightCliMeasuredVersion();
+  var pin = playwrightPinnedInstall(measured);
+  if (p !== 'present') line(WARN, 'playwright-cli: not found on PATH — /zensu:verify-feature cannot drive the UI and autopilot browser validation may skip; install the version the browser consent gate was measured against with ' + pin + '; `brew install playwright-cli` is unpinned and installs whichever version Homebrew ships');
+  else if (!playwrightVersionModule()) line(WARN, "playwright-cli: installed, but the plugin's version module hooks/lib/playwright-cli-version-v1.js could not be loaded — reinstall the plugin; the installed CLI was not judged");
+  else if (ps === 'foreign') line(WARN,'playwright-cli: the binary on PATH belongs to the package ' + (po || 'whose name could not be read') + ', not @playwright/cli — it was not run, and the run-config helper refuses to start /zensu:verify-feature on it; install @playwright/cli with ' + pin);
+  else if (ps === 'malformed') line(WARN, 'playwright-cli: the package manifest beside the binary on PATH could not be judged — it was not run: the manifest is unreadable, over 64 KiB, or carries no valid package name and version, so the run-config helper refuses to start /zensu:verify-feature on it; reinstall it with ' + pin);
+  else if (ps === 'cwd-relative') line(WARN, 'playwright-cli: PATH reaches it through an empty or relative entry, which the shell reads against the working directory of each call — it was not run, and the run-config helper refuses to start /zensu:verify-feature while such an entry comes before or holds playwright-cli, because a gated call could run another binary than the one measured; remove that entry from PATH, or move it behind the directory that holds playwright-cli');
+  else if (ps === 'self-reported' && pv) line(WARN, 'playwright-cli: installed, and reports ' + pv + ' when run, but no @playwright/cli package manifest was found beside it, as happens when the playwright-cli on PATH is a wrapper script outside the package — a self-reported version is never taken as measured, so the run-config helper refuses to start /zensu:verify-feature on it; install it with ' + pin + ' and put the directory npm installs it into first on PATH, ahead of any wrapper');
+  else if (ps === 'manifest' && pv && measured && pv === measured) line(OK, 'playwright-cli: installed (' + pv + ') — /zensu:verify-feature and the autopilot browser driver run through it');
+  else if (ps === 'manifest' && pv && measured) line(WARN, 'playwright-cli: installed (' + pv + '), not the version the browser consent gate was measured against (' + measured + ') — its argument parser, ambient-variable names, global-config keys and run-config schema were not measured against ' + pv + ', so the run-config helper refuses to start /zensu:verify-feature on it; install the measured version with ' + pin);
+  else if (ps === 'manifest' && pv) line(WARN, 'playwright-cli: installed (' + pv + '), but the version the browser consent gate was measured against could not be read — its argument parser, ambient-variable names, global-config keys and run-config schema were not checked against ' + pv + '; an argument shape the gate does not recognize is denied rather than admitted');
+  else line(WARN, 'playwright-cli: installed, but its version could not be read — the run-config helper refuses to start /zensu:verify-feature until it reads the version from the @playwright/cli package manifest; reinstall it with ' + pin);
 
   var v = env.ZDOC_VERIFY || '';
   var vr = env.ZDOC_VERIFY_REASON || '';
-  if (v === 'policy') line(OK, 'verify-feature: environment policy active — the parent-environment navigation policy governs every browser origin this session; only its top-level contract was checked here, and the broker judges each target when it starts');
-  else if (v === 'consent') line(OK, 'verify-feature: consent mode ready — no parent policy; the browser asks you once per origin through the permission prompt and then admits every route on it, and a runtime recipe is present');
+  if (v === 'policy') line(OK, 'verify-feature: environment policy active — ZENSU_VERIFY_NAVIGATION_POLICY_V1 was set when Claude Code started and passes the policy contract; the browser consent gate admits only its targets and declared routes');
+  else if (v === 'consent') line(OK, 'verify-feature: consent mode ready — no navigation policy; the browser consent gate on the Bash matcher asks you once per new loopback origin of a zensu-verify playwright-cli session and then admits every route on it, and a runtime recipe is present');
   else if (v === 'consent-no-recipe') line(WARN, 'verify-feature: consent mode ready, no runtime recipe — run /zensu:verify-feature --setup to write .zensu/runtime.yaml, or pass --attach=<loopback-origin> for an app you already run');
   else if (v === 'consent-recipe-unchecked') line(WARN, 'verify-feature: consent mode ready, recipe not checked — no project root resolved, so no .zensu/runtime.yaml was looked for; this is a missing check rather than a missing recipe');
-  else if (v === 'policy-invalid') line(BAD, 'verify-feature: a parent-environment navigation policy is set but the browser broker will refuse it (' + (safeVerifyReason(vr) || 'reason unknown') + ') — only the top-level contract was checked here, so fix that value or unset it to fall back to consent mode');
-  else if (v === 'unavailable') line(BAD, 'verify-feature: cannot start (' + (safeVerifyReason(vr) || 'reason unknown') + ') — the consent hook pair, its module and the broker must ship together; reinstall the plugin or launch Claude Code with the parent-environment policy');
+  else if (v === 'policy-invalid') line(BAD, 'verify-feature: ZENSU_VERIFY_NAVIGATION_POLICY_V1 is set but invalid (' + (safeVerifyReason(vr) || 'reason unknown') + ') — the browser consent gate denies every zensu-verify navigation until you fix that value or unset it to fall back to consent mode');
+  else if (v === 'policy-unchecked') line(WARN, 'verify-feature: ZENSU_VERIFY_NAVIGATION_POLICY_V1 is set but could not be checked (' + (safeVerifyReason(vr) || 'reason unknown') + ') — this is a missing check rather than an invalid policy, and this report cannot say whether the browser consent gate accepts it; reinstall the plugin if it repeats');
+  else if (v === 'unavailable') line(BAD, 'verify-feature: cannot start (' + (safeVerifyReason(vr) || 'reason unknown') + ') — the consent hook pair, its module and the run-config helper must ship together; reinstall the plugin');
   else line(WARN, 'verify-feature: not checked — the wrapper reported no verify state, so this is a missing check rather than an all-clear; run /zensu:doctor from a session whose plugin root resolves');
-  // AC-104. The row above is derived from files on disk in the plugin's own tree, so it reports
-  // that the pair is INSTALLED. This one reports that the gate RAN, read from the per-session
-  // marker the PreToolUse hook writes for every decided loopback navigation. Without it a host
-  // with hooks switched off renders the mode row green while the broker's consent mode
-  // self-approves every loopback origin unprompted.
-  // The renderer enforces the arming rule itself rather than trusting the wrapper to have
-  // cleared the value: a caller that supplies ZDOC_VERIFY_EXEC directly skips that derivation
-  // entirely, and a row about consent-mode enforcement beside a policy-mode verdict would
-  // report on a mechanism the session never reaches.
-  var ve = CONSENT_MODE_STATES.indexOf(v) !== -1 ? String(env.ZDOC_VERIFY_EXEC || '') : '';
-  // TWO bounds ride on both green rows, and neither is a hedge. The marker's session binding is
-  // its FILENAME, and `.zensu/state/` is writable from any session in the project, so this row is
-  // evidence about a FILE rather than an attestation that this session's gate ran — docs/gates.md
-  // states that in as many words. And the row reads under the session RECORD's project root while
-  // the broker anchors on its own cwd (nothing in this plugin sets ZENSU_VERIFY_PROJECT_ROOT for
-  // the MCP server), so a green row here does not establish that the broker will approve. Without
-  // both clauses a user whose broker refuses every navigation was told the gate is enforced.
-  if (ve === 'ran') line(OK, 'verify-feature gate: executed in this session — a live marker whose name carries this session\'s key records the gate deciding a navigation, so consent mode is being exercised rather than only registered. Two bounds: the marker is a file any session in this project could write, so this is evidence about a file rather than an attestation; and it is read under the session record\'s project root, while the browser broker anchors on its own working directory, so a green row here does not establish that the broker will approve');
-  else if (ve === 'ran-asked') line(OK, 'verify-feature gate: executed in this session, on a prompted origin — the live marker records the gate ASKING about the navigation rather than clearing it from memory; the marker is written before the answer exists, so a prompt that was DECLINED leaves the same marker live for its window, which is the residual docs/gates.md names. The same two bounds as the row above apply: the marker is a file any session in this project could write, and it is read under the session record\'s project root while the broker anchors on its own working directory');
-  else if (ve === 'none') line(OK, 'verify-feature gate: registered, and no live execution marker was read for this session — the row above reports registration; this one reports EXECUTION. The ordinary causes are that no browser navigation has reached the gate yet, or that its marker has passed the window the gate keeps them for, so this row is not evidence that no navigation occurred');
-  // This row carries the consequence the retired mode-chain arm used to state, minus its cause.
-  // That arm asserted "this session has no bound Session Control record" and prescribed a fresh
-  // session, but the wrapper sets `unknown` for EVERY binding verdict except `bound` — including
-  // orphaned-project-root, incompatible-runtime and pruned-plugin-root, where a valid record is
-  // sitting in plugin data and this same report's binding row prescribes /zensu:adopt-session.
-  // It also sat at the TOP of the mode chain, so it displaced the no-recipe and recipe-unchecked
-  // rows and took their remedies with it. One observable, one row, and the remedy is the binding
-  // row's to give.
-  else if (ve === 'unknown') line(WARN, 'verify-feature gate: execution not checked — no bound session key or recorded project root was available, so the per-session marker was never looked for and none can be written either; consent mode can still ask, and the browser broker will then refuse the navigation for want of a marker. This is a missing check rather than an all-clear — read the binding row above for what to do about it, or launch with the parent-environment navigation policy, which needs no hook');
-  else if (ve === 'unjudged') line(WARN, 'verify-feature gate: execution could not be judged — the decision module did not load, did not export the reader, the state directory could not be read, or the read hit the marker budget before it could answer; this is a missing check rather than an all-clear. Reinstall the plugin, check that <project>/.zensu/state is readable, and clear stale verify-consent-exec-* files from it — and nothing else in that directory, which also holds this session\'s workflow document');
-  else if (ve !== '') line(WARN, 'verify-feature gate: execution state not recognized (' + safeVerifyExec(ve) + ') — the wrapper reported a state this report has no row for, so this is a missing check rather than an all-clear');
 }
 
 function pluginBlock() {
@@ -1388,25 +1390,19 @@ function reviewerSpawnAutoAllowDisabled(cfgReads) {
 function reviewerSpawnHookWired(root, spawnTools) {
   var r = readJson(path.join(root, 'hooks', 'hooks.json'));
   if (r.missing || !r.ok) return 'unknown';
-  var data = r.data;
-  if (!data || typeof data !== 'object') return 'unknown';
-  var groups = (data.hooks && data.hooks.PreToolUse) || [];
-  if (!Array.isArray(groups)) return 'unknown';
   var tools = Array.isArray(spawnTools) && spawnTools.length ? spawnTools : ['Agent', 'Task'];
-  var wired = false;
-  groups.forEach(function (g) {
-    if (!g || !Array.isArray(g.hooks)) return;
-    var named = g.hooks.some(function (h) {
-      return h && typeof h.command === 'string'
-        && h.command.indexOf('pre-agent-reviewer-allow.sh') !== -1;
-    });
-    if (!named) return;
-    var re;
-    try { re = new RegExp(typeof g.matcher === 'string' && g.matcher ? g.matcher : '.*'); }
-    catch (e) { return; }
-    if (tools.every(function (t) { return re.test(t); })) wired = true;
+  var shared;
+  try { shared = require('./hook-registration-v1.js'); }
+  catch (_error) { return 'unknown'; }
+  var answer = shared.registration(r.data, {
+    event: 'PreToolUse',
+    tools: tools,
+    names: function (command) { return command.indexOf('pre-agent-reviewer-allow.sh') !== -1; },
+    reading: shared.READINGS.REGEX,
   });
-  return wired ? 'wired' : 'unwired';
+  if (answer === shared.REGISTRATION.REGISTERED) return 'wired';
+  if (answer === shared.REGISTRATION.UNREGISTERED) return 'unwired';
+  return 'unknown';
 }
 // The grant is a capability the plugin hands ITSELF, so it is reported whether it is on
 // or off — a silent grant would be the same undisclosed widening this row exists to make
