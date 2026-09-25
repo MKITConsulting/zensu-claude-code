@@ -2503,6 +2503,21 @@ case "$ADOPT_OUT" in *"You are standing IN that tree"*) ;; *) A70_MISS="$A70_MIS
 # here, or the two shapes have collapsed into one unconditional render and neither leg's
 # arm discriminates any more.
 case "$ADOPT_OUT" in *"recorded worktree (gone)"*) A70_MISS="$A70_MISS [gone-label-on-present-leg]" ;; esac
+# The WHERE head's ROUTE clause, and the standing-in conjunct that qualifies it. Both are
+# substitution-safety claims on a terminal receipt and both were unpinned: the head asserts
+# which command below creates `<path>`, and `<path>` is the one operand the move relocates
+# INTO. The standing-in half matters more than it reads — in that one measured state the tree
+# being relocated is the reader's own, while the route's own cost paragraph calls the loser
+# "the OTHER session". Both are DERIVED from the rendered body now, so a caller that narrows
+# the body drops them with it rather than announcing a command it does not carry.
+# The POSITIVE gate for the two conjuncts below and for `L70c-control`'s absence needle, per
+# this file's own rule that every absence assertion is gated on a positive one. The gate was
+# INDIRECT and undocumented: `whereAdviceLines` derives both sentences from the rendered body,
+# so they vanish with the literal — but an indirect gate is one a later reader deletes as
+# redundant, which is exactly what this conjunct exists to prevent.
+case "$ADOPT_OUT" in *"worktree move"*) ;; *) A70_MISS="$A70_MISS [no-move-route-on-adopt]" ;; esac
+case "$ADOPT_OUT" in *"On the move route instead"*) ;; *) A70_MISS="$A70_MISS [where-head-omits-the-move-route]" ;; esac
+case "$ADOPT_OUT" in *"it relocates the tree"*) ;; *) A70_MISS="$A70_MISS [standing-in-omits-the-move]" ;; esac
 # PRESENCE ONLY, and stated as such rather than sold as a second independent binding:
 # `fix` builds A, B and C with the SAME worktree name (`handover`), and `$SELF_CWD` is
 # that same directory, so the source row's `wt` and the taker's cwd are one path here.
@@ -2663,11 +2678,12 @@ fi
 # fence-index implementation to grade a renderer-independent property was the defect -- and
 # the walk could not survive the terminal carrier dropping its markdown fence anyway, which is
 # a second reason an output-shaped pin was the wrong instrument for a source-shaped claim.
-# The array is HOISTED now (`const body = worktreeAdvice(row)`), because the substitution
+# The array is HOISTED now (`const body = worktreeAdvice(row,` plus its forwarded options),
+# because the substitution
 # rule this renderer prints is DERIVED from the very lines the block below renders -- a rule
 # stated over one set beside a recipe carrying another is the defect that cost three carriers
 # three different rules. So the pin is the IDENTITY: the same value must reach both.
-if printf '%s\n' "$WHERE_SRC" | grep -qF 'const body = worktreeAdvice(row)' \
+if printf '%s\n' "$WHERE_SRC" | grep -qF 'const body = worktreeAdvice(row,' \
   && printf '%s\n' "$WHERE_SRC" | grep -qF 'substitutionRuleLines(body,' \
   && printf '%s\n' "$WHERE_SRC" | grep -qF 'adviceBlock(body,'; then
   check "L70e the adopt carrier renders through adviceBlock, not a prefix loop (the split it owns is graded at the unit layer)" PASS
@@ -2823,10 +2839,13 @@ else
 fi
 rm -f "$CFG/zensu"
 reset_ledger
-# DISCRIMINATOR, not decoration: `show` deliberately passes `carryOver: false` because it
-# renders a survey. Without this, L70's carry-over needle could be satisfied by a string
-# every advice carrier emits, and a change that gave `show` the full recipe -- undoing the
-# reason that option exists -- would go unnoticed here.
+# DISCRIMINATOR, not decoration: `show` deliberately passes BOTH `carryOver: false` and
+# `move: false` — two axes, because the recipe is bulk this view cannot afford while the move
+# route is a decision that must not be offered without its cost paragraph. It once passed one
+# flag for both, which is how the route came to be withheld silently. Without this block,
+# L70's carry-over needle could be satisfied by a string every advice carrier emits, and a
+# change that gave `show` the full recipe -- undoing the reason that option exists -- would go
+# unnoticed here.
 SHOW_OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" show "$SID_A" --all --no-git)"
 case "$SHOW_OUT" in
   *"apply --stat"*) check "L70c-control show still withholds the carry-over recipe from its survey view" FAIL ;;
@@ -2840,9 +2859,24 @@ esac
 # privacy-sensitive reader through a verb that mints a machine-wide ledger edge, which is
 # exactly what CLAUDE.md's amended section argues the pointer must not do.
 A70C_MISS=""
-case "$SHOW_OUT" in *"Run handoff or takeover for it"*) ;; *) A70C_MISS="$A70C_MISS [no-brief-route]" ;; esac
+# The pointer now covers TWO withheld things, not one: the carry-over recipe and the whole
+# MOVE ROUTE that `worktreeAdvice`'s `move` axis drops for this survey. It named only the
+# recipe for a round, which is worse than naming neither — a `show` reader was told the
+# create line was the only route while a second one existed one verb away. The route needle
+# is therefore its own conjunct rather than folded into the brief-route one.
+case "$SHOW_OUT" in *"Run handoff or takeover for both"*) ;; *) A70C_MISS="$A70C_MISS [no-brief-route]" ;; esac
+case "$SHOW_OUT" in *"TWO things are withheld here"*) ;; *) A70C_MISS="$A70C_MISS [withheld-count-unstated]" ;; esac
+case "$SHOW_OUT" in *"second ROUTE"*) ;; *) A70C_MISS="$A70C_MISS [move-route-unnamed]" ;; esac
 case "$SHOW_OUT" in *"machine-wide ledger"*) ;; *) A70C_MISS="$A70C_MISS [adopt-pointer-unqualified]" ;; esac
-case "$SHOW_OUT" in *"not a read-only route to the recipe"*) ;; *) A70C_MISS="$A70C_MISS [ledger-cost-unnamed]" ;; esac
+case "$SHOW_OUT" in *"not a read-only route to either"*) ;; *) A70C_MISS="$A70C_MISS [ledger-cost-unnamed]" ;; esac
+# The `move: false` half of the call, graded on the RENDER rather than on the source. It was
+# unpinned at its only production call site: the unit cases drive `worktreeAdvice` directly,
+# `wt_advice` in the sibling suite reads the `--json` carrier which `cmdShow` builds from the
+# FULL advice, and `apply --stat` above discriminates only the `carryOver` axis. Deleting
+# `move: false` therefore left `show` printing the route immediately above its own sentence
+# "TWO things are withheld here, not one", with every check in both suites green — a
+# user-visible claim whose WORDS were pinned and whose TRUTH was not.
+case "$SHOW_OUT" in *"worktree move"*) A70C_MISS="$A70C_MISS [move-route-not-withheld]" ;; esac
 if [ -z "$A70C_MISS" ]; then
   check "L70c-control show points at the carry-over routes and qualifies the adopt one with its ledger cost" PASS
 else
@@ -2861,9 +2895,10 @@ A70CG_MISS=""
 # have passed over a missing render, which is exactly what a positive gate exists to prevent.
 case "$SHOW_G" in *"Take your own path — never re-create theirs:"*) ;; *) A70CG_MISS="$A70CG_MISS [no-gone-leg-advice-lead]" ;; esac
 case "$SHOW_G" in *"git worktree add"*) ;; *) A70CG_MISS="$A70CG_MISS [no-create-recipe]" ;; esac
-case "$SHOW_G" in *"Run handoff or takeover for it"*) A70CG_MISS="$A70CG_MISS [brief-route-on-the-gone-leg]" ;; esac
+case "$SHOW_G" in *"Run handoff or takeover for both"*) A70CG_MISS="$A70CG_MISS [brief-route-on-the-gone-leg]" ;; esac
 case "$SHOW_G" in *"machine-wide ledger"*) A70CG_MISS="$A70CG_MISS [adopt-pointer-on-the-gone-leg]" ;; esac
-case "$SHOW_G" in *"not a read-only route to the recipe"*) A70CG_MISS="$A70CG_MISS [ledger-cost-on-the-gone-leg]" ;; esac
+case "$SHOW_G" in *"not a read-only route to either"*) A70CG_MISS="$A70CG_MISS [ledger-cost-on-the-gone-leg]" ;; esac
+case "$SHOW_G" in *"TWO things are withheld here"*) A70CG_MISS="$A70CG_MISS [withheld-count-on-the-gone-leg]" ;; esac
 if [ -z "$A70CG_MISS" ]; then
   check "L70c-gone show withholds the carry-over pointer on the gone leg and still renders its create recipe" PASS
 else
@@ -3193,11 +3228,12 @@ fi
 # -- L28/L29 -- the suite's own isolation, scanned rather than assumed ------
 # `--config-dir` already outranks CLAUDE_CONFIG_DIR in resolveRoots, so the unset
 # is belt, not the mechanism -- and belt that nothing pins rots. A check added
-# later by copying the L10 line inherits the developer's REAL config root and a
-# `takeover` there writes a real edge into it. Both halves are asserted: every
-# invocation carries the unset, and EXACTLY ONE is exempt. Either alone is
-# satisfiable by accident -- a second forgotten `env -u` is indistinguishable
-# from a second deliberate exemption.
+# later by copying the L10 line inherits the developer's REAL config root: there
+# `label` and `lineage --backfill --apply` write with no selector at all, and
+# `takeover` without `--no-record` or `adopt` writes an edge once its selector
+# resolves. Both halves are asserted: every invocation carries the unset, and
+# EXACTLY ONE is exempt. Either alone is satisfiable by accident -- a second
+# forgotten `env -u` is indistinguishable from a second deliberate exemption.
 SELF_FILE="$PLUGIN_DIR/tests/structure/test-session-trail-lineage.sh"
 INV_TOTAL="$(grep -c 'node "\$TRAIL_MJS"' "$SELF_FILE" || true)"
 INV_UNSET="$(grep -c 'env -u CLAUDE_CONFIG_DIR node "\$TRAIL_MJS"' "$SELF_FILE" || true)"

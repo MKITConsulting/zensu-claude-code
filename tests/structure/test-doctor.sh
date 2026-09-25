@@ -3,8 +3,8 @@ set -u
 
 # Structure + functional test for /zensu:doctor read-only diagnostics.
 # Structure pins: helper .sh (+ shebang), report .js, skill frontmatter,
-# plugin.json skills[] registration, README Diagnostics section, bundled
-# Playwright MCP detection. Functional
+# plugin.json skills[] registration, README Diagnostics section, playwright-cli
+# detection. Functional
 # (sandbox, node required): zensu-doctor-report.js renders a four-block table
 # and ALWAYS exits 0 while correctly flagging version mismatch (❌), hooks
 # wired-but-missing (❌) + disk-but-unwired (⚠️), the quoted-boolean config
@@ -121,16 +121,51 @@ if printf '%s' "$SKILLS_BLOCK" | grep -qF '/zensu:doctor'; then
 else
   check "P2h doctor kept out of the curated Skills table (count-sync unaffected)" PASS
 fi
-if grep -qF 'playwright_mcp_declared' "$HELPER" && grep -qF 'ZDOC_PLAYWRIGHT=configured' "$HELPER" && grep -qF 'command -v npm' "$HELPER"; then
-  check "P2i helper validates integrity-locked Playwright MCP without executing npm" PASS
+PW_VERSION_MODULE="$PLUGIN_DIR/hooks/lib/playwright-cli-version-v1.js"
+if grep -qF 'command -v playwright-cli' "$HELPER" \
+  && grep -qF 'bash "$DIR/zensu-host-path.sh" "$DIR"' "$HELPER" \
+  && grep -qF 'cliMain(["--lookup", "--execute"], process.stdout)' "$HELPER" \
+  && ! grep -qF 'node "$DIR/playwright-cli-version-v1.js"' "$HELPER" \
+  && grep -qF "NO_UPDATE_NOTIFIER: '1'" "$PW_VERSION_MODULE" \
+  && grep -qF 'ZDOC_PLAYWRIGHT=present' "$HELPER" \
+  && grep -qF 'ZDOC_PLAYWRIGHT=absent' "$HELPER" \
+  && ! grep -qF 'playwright_mcp_declared' "$HELPER" \
+  && ! grep -qF 'command -v npm' "$HELPER"; then
+  check "P2i helper probes playwright-cli on PATH and reads its version through the shared version module, update check disabled" PASS
 else
-  check "P2i helper validates integrity-locked Playwright MCP without executing npm" FAIL
+  check "P2i helper probes playwright-cli on PATH and reads its version through the shared version module, update check disabled" FAIL
 fi
-if grep -qF 'Playwright MCP: valid integrity-locked plugin config + npm present' "$REPORT"; then
-  check "P2j report distinguishes configured from runtime-ready Playwright MCP" PASS
+if ! grep -qF 'playwright-cli --version' "$HELPER" && ! grep -qF 'zensu-bounded-run.sh' "$HELPER" \
+  && grep -qF "stdio: ['ignore', fd, 'ignore']" "$PW_VERSION_MODULE" && grep -qF 'timeout: timeoutMs' "$PW_VERSION_MODULE"; then
+  check "P2i1 the helper runs no playwright-cli itself; the module bounds the one --version call on every host, stdin closed" PASS
 else
-  check "P2j report distinguishes configured from runtime-ready Playwright MCP" FAIL
+  check "P2i1 the helper runs no playwright-cli itself; the module bounds the one --version call on every host, stdin closed" FAIL
 fi
+if grep -qF "'playwright-cli: installed ('" "$REPORT" \
+  && grep -qF "'playwright-cli: installed, but its version could not be read" "$REPORT" \
+  && grep -qF "'playwright-cli: not found on PATH" "$REPORT"; then
+  check "P2j report carries playwright-cli installed, version-unreadable and not-found rows" PASS
+else
+  check "P2j report carries playwright-cli installed, version-unreadable and not-found rows" FAIL
+fi
+hook_args_tolerated() {
+  case "$1" in
+    *.sh)
+      grep -qE '\.command([^[:alnum:]_]|$)' "$1" && grep -qE '\.args([^[:alnum:]_]|$)' "$1"
+      ;;
+    *)
+      node -e '
+        const source = require("fs").readFileSync(process.argv[1], "utf8");
+        const receivers = (field) => new Set(Array.from(
+          source.matchAll(new RegExp("([A-Za-z_$][\\w$]*)\\??\\." + field + "(?![\\w$])", "g")),
+          (match) => match[1],
+        ));
+        const command = receivers("command");
+        process.exit([...receivers("args")].some((name) => command.has(name)) ? 0 : 1);
+      ' "$1"
+      ;;
+  esac
+}
 HOOK_ARGS_READER="$(
   find "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/evals" "$PLUGIN_DIR/tests" -type f \
     \( -name '*.sh' -o -name '*.js' -o -name '*.mjs' -o -name '*.cjs' -o -name '*.ts' \) \
@@ -138,8 +173,7 @@ HOOK_ARGS_READER="$(
     | while IFS= read -r reader; do
         if [ "$reader" != "$PLUGIN_DIR/tests/structure/test-doctor.sh" ] \
           && grep -qF 'hooks.json' "$reader" \
-          && grep -qE '\.command([^[:alnum:]_]|$)' "$reader" \
-          && grep -qE '\.args([^[:alnum:]_]|$)' "$reader"; then
+          && hook_args_tolerated "$reader"; then
           printf '%s\n' "${reader#$PLUGIN_DIR/}"
           break
         fi
@@ -150,6 +184,20 @@ if [ -z "$HOOK_ARGS_READER" ]; then
 else
   check "P2n undocumented hook args tolerance remains in $HOOK_ARGS_READER" FAIL
 fi
+HOOK_ARGS_DIR="$(mktemp -d 2>/dev/null)" || HOOK_ARGS_DIR=""
+if [ -n "$HOOK_ARGS_DIR" ]; then
+  printf '%s\n' "const manifest = require('./hooks.json');" \
+    "for (const hook of manifest.hooks) run(hook.command, hook?.args);" >"$HOOK_ARGS_DIR/probe.js"
+  printf '%s\n' "const manifest = require('./hooks.json');" \
+    "for (const hook of manifest.hooks) run(hook.command, parsed.args);" >"$HOOK_ARGS_DIR/benign.js"
+fi
+if [ -n "$HOOK_ARGS_DIR" ] && hook_args_tolerated "$HOOK_ARGS_DIR/probe.js" \
+  && ! hook_args_tolerated "$HOOK_ARGS_DIR/benign.js"; then
+  check "P2n-control the scan flags args read from a hook entry and ignores args of another object" PASS
+else
+  check "P2n-control the scan flags args read from a hook entry and ignores args of another object" FAIL
+fi
+[ -z "$HOOK_ARGS_DIR" ] || rm -rf "$HOOK_ARGS_DIR"
 
 # This one runs BEFORE the sandbox exists, so it carries its own dead HOME rather
 # than the exported one below. Without it this invocation opens the running
@@ -168,12 +216,17 @@ case "$REAL_MANIFEST" in
   *"hooks wiring: all $EXPECTED_HOOKS hooks referenced in hooks.json exist on disk"*) check "P2o real hook manifest covers all $EXPECTED_HOOKS hook scripts" PASS ;;
   *) check "P2o real hook manifest count does not match $EXPECTED_HOOKS hook scripts on disk" FAIL ;;
 esac
-if grep -qF 'mcp__zensu-browser__*' "$SKILL_MD" && grep -qF 'mcp__plugin_zensu_zensu-browser__*' "$SKILL_MD" \
-  && grep -qF 'never under `mcp__playwright__*`' "$SKILL_MD" && ! grep -qF 'mcp__plugin_zensu_playwright__' "$SKILL_MD" \
-  && grep -qF 'ZDOC_PLAYWRIGHT_TOOLS=ready bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"' "$SKILL_MD"; then
-  check "P2l doctor skill propagates loaded MCP-tool readiness into the helper and accepts only the zensu-browser namespaces" PASS
+if grep -qF 'CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"' "$SKILL_MD" \
+  && grep -qF 'CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"' "$SKILL_MD" \
+  && grep -qF 'A manifest that names another package, exceeds 64 KiB, does not parse or carries no valid name and version is reported as such, and the binary is NOT run. Only when no manifest exists at all does the doctor run `playwright-cli --version` once, with the update check disabled, stdin closed and a five-second bound enforced on every host, never opening a browser; the version it prints is reported as self-reported, never as measured.' <<<"$(tr '\n' ' ' < "$SKILL_MD" | tr -s ' ')" \
+  && ! grep -qF 'where `timeout` or `gtimeout` exists' "$SKILL_MD" \
+  && ! grep -qF 'only when that file cannot be found' "$SKILL_MD" \
+  && ! grep -qF 'the `playwright-cli --version` probe runs' "$SKILL_MD" \
+  && ! grep -qF 'ZDOC_PLAYWRIGHT_TOOLS' "$SKILL_MD" \
+  && ! grep -qE 'mcp__[A-Za-z0-9_-]*(browser|playwright)' "$SKILL_MD"; then
+  check "P2l doctor skill emits the plain wrapper commands, describes the playwright-cli probe, and names no MCP browser namespace" PASS
 else
-  check "P2l doctor skill propagates loaded MCP-tool readiness into the helper and accepts only the zensu-browser namespaces" FAIL
+  check "P2l doctor skill emits the plain wrapper commands, describes the playwright-cli probe, and names no MCP browser namespace" FAIL
 fi
 
 PHASE3_SKILL="$(sed -n '/^## Phase 3:/,/^## Response Style/p' "$SKILL_MD")"
@@ -261,15 +314,18 @@ case "$OUT" in *'version sync: plugin.json and marketplace.json agree'*) check "
 case "$OUT" in *'hooks wiring: all 1 hooks'*) check "P1c wiring ✅ when consistent" PASS ;; *) check "P1c wiring ✅ when consistent" FAIL ;; esac
 case "$OUT" in *'no quoted-boolean traps'*) check "P1d config ✅ with real booleans (reviewJudge:true/secretScan:false)" PASS ;; *) check "P1d config ✅ with real booleans" FAIL ;; esac
 # all-green summary only when the tool block is green too (inject authed tools)
-GREEN="$(ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=ready ZDOC_VERIFY=consent \
+PW_MEASURED="$(node -e 'process.stdout.write(String(require(process.argv[1]).PLAYWRIGHT_CLI_SOURCE_VERSION || ""))' "$PLUGIN_DIR/hooks/lib/verify-consent-v1.js" 2>/dev/null)"
+case "$PW_MEASURED" in [0-9]*.[0-9]*.[0-9]*) check "P1e-control the consent module declares the playwright-cli version it was measured against ($PW_MEASURED)" PASS ;; *) check "P1e-control the consent module declares the playwright-cli version it was measured against (got: ${PW_MEASURED:-<none>})" FAIL ;; esac
+GREEN="$(ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest ZDOC_VERIFY=consent \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
   node "$REPORT" 2>/dev/null)"
 case "$GREEN" in *'all checks green'*) check "P1e summary reports all green when every block is green" PASS ;; *) check "P1e summary all green (got: $GREEN)" FAIL ;; esac
-case "$GREEN" in *'Playwright MCP: loaded and ready (/zensu:verify-feature and autopilot browser driver)'*) check "P1ea runtime-ready Playwright MCP renders green" PASS ;; *) check "P1ea runtime-ready Playwright MCP message (got: $GREEN)" FAIL ;; esac
+case "$GREEN" in *"✅  playwright-cli: installed ($PW_MEASURED) — /zensu:verify-feature and the autopilot browser driver run through it"*) check "P1ea playwright-cli at the measured version renders green" PASS ;; *) check "P1ea playwright-cli at the measured version (got: $GREEN)" FAIL ;; esac
+case "$GREEN" in *'Playwright MCP'*|*'verify-feature gate:'*) check "P1ea1 the green report carries no Playwright MCP row and no gate-execution row" FAIL ;; *) check "P1ea1 the green report carries no Playwright MCP row and no gate-execution row" PASS ;; esac
 
 # --- verify-feature consent/policy row (renderer + wrapper source) --------
 verify_row() { # $1 ZDOC_VERIFY value or "" ; $2 reason
-  ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=ready \
+  ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest \
   ZDOC_VERIFY="$1" ZDOC_VERIFY_REASON="$2" \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
     node "$REPORT" 2>/dev/null
@@ -277,12 +333,25 @@ verify_row() { # $1 ZDOC_VERIFY value or "" ; $2 reason
 VF_POLICY="$(verify_row policy "")"
 case "$VF_POLICY" in *'✅  verify-feature: environment policy active'*) check "P1va verify-feature policy state renders green" PASS ;; *) check "P1va verify-feature policy state renders green" FAIL ;; esac
 VF_CONSENT="$(verify_row consent "")"
-case "$VF_CONSENT" in *'✅  verify-feature: consent mode ready — no parent policy'*'all checks green'*) check "P1vb consent-with-recipe renders green and keeps the green summary" PASS ;; *) check "P1vb consent-with-recipe renders green and keeps the green summary" FAIL ;; esac
+case "$VF_CONSENT" in *'✅  verify-feature: consent mode ready — no navigation policy'*'all checks green'*) check "P1vb consent-with-recipe renders green and keeps the green summary" PASS ;; *) check "P1vb consent-with-recipe renders green and keeps the green summary" FAIL ;; esac
 VF_NORECIPE="$(verify_row consent-no-recipe "")"
 case "$VF_NORECIPE" in *'⚠️  verify-feature: consent mode ready, no runtime recipe'*'/zensu:verify-feature --setup'*'--attach=<loopback-origin>'*) check "P1vc consent-without-recipe warns and names setup and attach" PASS ;; *) check "P1vc consent-without-recipe warns and names setup and attach" FAIL ;; esac
 case "$VF_NORECIPE" in *'all checks green'*) check "P1vc1 the no-recipe warning withholds the green summary" FAIL ;; *) check "P1vc1 the no-recipe warning withholds the green summary" PASS ;; esac
-VF_UNAVAILABLE="$(verify_row unavailable "consent hook not registered on the navigation matcher")"
-case "$VF_UNAVAILABLE" in *'❌  verify-feature: cannot start (consent hook not registered on the navigation matcher)'*) check "P1vd unavailable renders red with the wrapper's reason" PASS ;; *) check "P1vd unavailable renders red with the wrapper's reason" FAIL ;; esac
+VF_UNCHECKED="$(verify_row consent-recipe-unchecked "")"
+case "$VF_UNCHECKED" in *'⚠️  verify-feature: consent mode ready, recipe not checked'*'missing check rather than a missing recipe'*) check "P1vc2 an unresolved project root renders the recipe-not-checked warning" PASS ;; *) check "P1vc2 an unresolved project root renders the recipe-not-checked warning" FAIL ;; esac
+case "$VF_UNCHECKED" in *'all checks green'*) check "P1vc3 the recipe-not-checked warning withholds the green summary" FAIL ;; *) check "P1vc3 the recipe-not-checked warning withholds the green summary" PASS ;; esac
+for VF_UNAV_REASON in \
+  'consent hook pair, its prefilter library, its module or the run-config helper missing from the plugin' \
+  'consent hook not registered on the Bash matcher' \
+  'consent recorder not registered on the Bash matcher' \
+  'the consent decision module could not be loaded'
+do
+  case "$(verify_row unavailable "$VF_UNAV_REASON")" in
+    *"❌  verify-feature: cannot start ($VF_UNAV_REASON) — the consent hook pair, its module and the run-config helper must ship together; reinstall the plugin"*)
+      check "P1vd unavailable renders red with the wrapper's reason ($VF_UNAV_REASON)" PASS ;;
+    *) check "P1vd unavailable renders red with the wrapper's reason ($VF_UNAV_REASON)" FAIL ;;
+  esac
+done
 # The reason is free text the wrapper relays, and this report is read line by line: a newline plus
 # one of its own severity glyphs forged a row the doctor never judged. The unavailable and the
 # invalid-policy rows share the filter, so one fixture covers both; the control keeps the check from
@@ -294,119 +363,8 @@ VF_ABSENT="$(verify_row "" "")"
 case "$VF_ABSENT" in *'⚠️  verify-feature: not checked'*'missing check rather than an all-clear'*) check "P1ve an absent ZDOC_VERIFY says the check did not run rather than staying silent" PASS ;; *) check "P1ve an absent ZDOC_VERIFY says the check did not run rather than staying silent" FAIL ;; esac
 case "$VF_ABSENT" in *'all checks green'*) check "P1ve1 the did-not-check row withholds the green summary" FAIL ;; *) check "P1ve1 the did-not-check row withholds the green summary" PASS ;; esac
 VF_BADPOLICY="$(verify_row policy-invalid "policy is not valid JSON")"
-case "$VF_BADPOLICY" in *'❌'*'browser broker will refuse it'*'policy is not valid JSON'*'fall back to consent mode'*) check "P1vh a set-but-unusable policy renders red and names the fault" PASS ;; *) check "P1vh a set-but-unusable policy renders red and names the fault" FAIL ;; esac
+case "$VF_BADPOLICY" in *'❌  verify-feature: ZENSU_VERIFY_NAVIGATION_POLICY_V1 is set but invalid (policy is not valid JSON)'*'denies every zensu-verify navigation'*'fall back to consent mode'*) check "P1vh a set-but-unusable policy renders red and names the fault" PASS ;; *) check "P1vh a set-but-unusable policy renders red and names the fault" FAIL ;; esac
 case "$VF_BADPOLICY" in *'all checks green'*) check "P1vh1 the invalid-policy row withholds the green summary" FAIL ;; *) check "P1vh1 the invalid-policy row withholds the green summary" PASS ;; esac
-
-# --- AC-104: the row reports gate EXECUTION, never registration alone ----
-# The row above is derived from files on disk in the broker's OWN tree, so it reports that the
-# pair is installed and says nothing about whether the hook ran. A host with hooks switched
-# off, or a broker launched from a different tree than the one whose registry the host loaded,
-# renders that row green while consent mode self-approves every loopback origin unprompted.
-exec_row() { # $1 ZDOC_VERIFY  $2 ZDOC_VERIFY_EXEC
-  ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=ready \
-  ZDOC_VERIFY="$1" ZDOC_VERIFY_REASON="" ZDOC_VERIFY_EXEC="$2" \
-  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
-    node "$REPORT" 2>/dev/null
-}
-VF_EXEC_RAN="$(exec_row consent ran)"
-case "$VF_EXEC_RAN" in *'✅  verify-feature gate: executed in this session'*) check "P1vm an executed gate renders its own row naming EXECUTION" PASS ;; *) check "P1vm an executed gate renders its own row naming EXECUTION" FAIL ;; esac
-case "$VF_EXEC_RAN" in *'all checks green'*) check "P1vm1 an executed gate keeps the green summary" PASS ;; *) check "P1vm1 an executed gate keeps the green summary" FAIL ;; esac
-# P1vm's needle is a strict PREFIX of the prompted-origin row, so it alone does not separate the
-# two success states at the RENDERER: rendering `ran-asked` for `ran` satisfies it. The wrapper
-# cases below catch that end to end; this arm catches it here, where the row is chosen.
-case "$VF_EXEC_RAN" in *'on a prompted origin'*) check "P1vm2 the ran row does not claim the prompted-origin variant" FAIL ;; *) check "P1vm2 the ran row does not claim the prompted-origin variant" PASS ;; esac
-VF_EXEC_NONE="$(exec_row consent none)"
-case "$VF_EXEC_NONE" in *'verify-feature gate: registered'*'no live execution marker was read'*'reports registration'*) check "P1vn a registered-but-unexercised gate says so instead of inheriting the mode row" PASS ;; *) check "P1vn a registered-but-unexercised gate says so instead of inheriting the mode row" FAIL ;; esac
-# An ordinary session that never drove the browser has no marker, so this state must NOT warn:
-# a row that fires on every normal run is trained away within a day.
-case "$VF_EXEC_NONE" in *'all checks green'*) check "P1vn1 the unexercised state keeps the green summary" PASS ;; *) check "P1vn1 the unexercised state keeps the green summary" FAIL ;; esac
-case "$VF_EXEC_RAN" in *'verify-feature gate: registered'*) check "P1vn2 the two execution states render DIFFERENTLY" FAIL ;; *) check "P1vn2 the two execution states render DIFFERENTLY" PASS ;; esac
-VF_EXEC_UNKNOWN="$(exec_row consent unknown)"
-case "$VF_EXEC_UNKNOWN" in *'⚠️  verify-feature gate: execution not checked'*'missing check rather than an all-clear'*) check "P1vo an unanswerable execution probe says so rather than staying silent" PASS ;; *) check "P1vo an unanswerable execution probe says so rather than staying silent" FAIL ;; esac
-case "$VF_EXEC_UNKNOWN" in *'all checks green'*) check "P1vo1 the unchecked execution row withholds the green summary" FAIL ;; *) check "P1vo1 the unchecked execution row withholds the green summary" PASS ;; esac
-# Policy mode does not use consent mode at all, so an execution row there would report on a
-# mechanism this session never reaches.
-VF_EXEC_ASKED="$(exec_row consent ran-asked)"
-case "$VF_EXEC_ASKED" in *'verify-feature gate: executed in this session, on a prompted origin'*) check "P1vw the row names the kind of execution the marker recorded" PASS ;; *) check "P1vw the row names the kind of execution the marker recorded" FAIL ;; esac
-case "$VF_EXEC_ASKED" in *'all checks green'*) check "P1vw1 a prompted-origin execution keeps the green summary" PASS ;; *) check "P1vw1 a prompted-origin execution keeps the green summary" FAIL ;; esac
-VF_EXEC_UNJUDGED="$(exec_row consent unjudged)"
-case "$VF_EXEC_UNJUDGED" in *'verify-feature gate: execution could not be judged'*'missing check rather than an all-clear'*) check "P1vt a contract fault renders as could-not-judge rather than as the benign row" PASS ;; *) check "P1vt a contract fault renders as could-not-judge rather than as the benign row" FAIL ;; esac
-case "$VF_EXEC_UNJUDGED" in *'all checks green'*) check "P1vt1 the could-not-judge row withholds the green summary" FAIL ;; *) check "P1vt1 the could-not-judge row withholds the green summary" PASS ;; esac
-VF_EXEC_WEIRD="$(exec_row consent 'weird;value $(x)')"
-case "$VF_EXEC_WEIRD" in *'verify-feature gate: execution state not recognized (weirdvalue'*) check "P1vu an unrecognized state renders a row and its value is bounded" PASS ;; *) check "P1vu an unrecognized state renders a row and its value is bounded" FAIL ;; esac
-case "$VF_EXEC_WEIRD" in *'not recognized (weird;'*|*'not recognized (weirdvalue $('*) check "P1vu1 the sanitizer strips the shell metacharacters" FAIL ;; *) check "P1vu1 the sanitizer strips the shell metacharacters" PASS ;; esac
-VF_EXEC_POLICY="$(exec_row policy ran)"
-case "$VF_EXEC_POLICY" in *'verify-feature gate:'*) check "P1vp policy mode renders no execution row" FAIL ;; *) check "P1vp policy mode renders no execution row" PASS ;; esac
-# The unknown-exec arm must not ASSERT a binding cause. ZDOC_VERIFY_EXEC is `unknown` for every
-# binding verdict except `bound` — orphaned-project-root, incompatible-runtime, pruned-plugin-root
-# and `unavailable` all reach it with a valid record in plugin data, and the same report's binding
-# row prescribes /zensu:adopt-session there. A row saying the session has no record sends the user
-# hunting for one that is sitting intact, which is the rule CLAUDE.md states for these rows.
-VF_EXEC_UNBOUND="$(exec_row consent unknown)"
-case "$VF_EXEC_UNBOUND" in *'no bound Session Control record'*) check "P1vs5 the unknown-exec row does not assert that no record exists" FAIL ;; *) check "P1vs5 the unknown-exec row does not assert that no record exists" PASS ;; esac
-case "$VF_EXEC_UNBOUND" in *'no bound session key'*) check "P1vs5a it states what the probe established instead" PASS ;; *) check "P1vs5a it states what the probe established instead" FAIL ;; esac
-# And it is ADDITIVE rather than an arm of the mode chain: inserted into the else/if ladder it
-# DISPLACED the consent-no-recipe and consent-recipe-unchecked rows, so an unbound session in a
-# recipe-less project lost the only remedy that would have helped it.
-VF_EXEC_NORECIPE="$(exec_row consent-no-recipe unknown)"
-case "$VF_EXEC_NORECIPE" in *'/zensu:verify-feature --setup'*) check "P1vs6 an unbound session still gets the no-recipe remedy" PASS ;; *) check "P1vs6 an unbound session still gets the no-recipe remedy" FAIL ;; esac
-VF_EXEC_UNCHECKED="$(exec_row consent-recipe-unchecked unknown)"
-case "$VF_EXEC_UNCHECKED" in *'recipe not checked'*) check "P1vs7 and the recipe-unchecked row is not displaced either" PASS ;; *) check "P1vs7 and the recipe-unchecked row is not displaced either" FAIL ;; esac
-# The could-not-judge row names every cause the wrapper routes there, and the wrapper routes a
-# BUDGET-TRUNCATED walk there too — a cause neither the row nor the skill bullet named, and one
-# that neither of their remedies clears.
-case "$VF_EXEC_UNJUDGED" in *'marker budget'*) check "P1vs8 the could-not-judge row names the budget cause" PASS ;; *) check "P1vs8 the could-not-judge row names the budget cause" FAIL ;; esac
-case "$VF_EXEC_UNJUDGED" in *'verify-consent-exec-'*) check "P1vs9 and prescribes clearing the markers that caused it" PASS ;; *) check "P1vs9 and prescribes clearing the markers that caused it" FAIL ;; esac
-# The BENIGN verdict must not share a status with a generic failure. Status 1 is what `node`
-# exits on a fatal outside the program's own try, and what a failed `cd -P` short-circuiting the
-# `&&` produces — and stderr is discarded here, so either one rendered the ✅ `none` row, which
-# asserts that the directory was read and held nothing. That is the exact claim the status
-# capture exists to prevent. Source-pinned rather than driven: neither cause is inducible through
-# the wrapper's own inputs (ZDOC_ROOT is validated before this block, and a SyntaxError cannot be
-# planted into a `-e` program from outside), so a fixture asserting the row would pass for the
-# wrong reason. The control fails if the extraction ever matches nothing.
-VF_PROBE_BLOCK="$(sed -n '/--- verify-feature gate EXECUTION probe/,/esac/p' "$HELPER")"
-if [ -n "$VF_PROBE_BLOCK" ]; then
-  check "P1vs10-control the execution probe's status ladder was extracted" PASS
-else
-  check "P1vs10-control the execution probe's status ladder was extracted" FAIL
-fi
-# The verdict travels as a WORD the decision module produced, never as an exit status this shell
-# re-interprets. A status ladder made the answer share a channel with every way a process can die:
-# the benign verdict sat on 1 beside node's generic fatal and a failed `cd`, and moving it to
-# another small integer only traded one collision for another. A word cannot collide, and the word
-# set has ONE owner.
-case "$VF_PROBE_BLOCK" in *'classifyExecution'*) check "P1vs10 the probe classifies through the module rather than a second time" PASS ;; *) check "P1vs10 the probe classifies through the module rather than a second time" FAIL ;; esac
-case "$VF_PROBE_BLOCK" in *'ZDOC_VERIFY_EXEC=none)'*|*'(ran|ran-asked|none)'*) check "P1vs11 the shell accepts only words the module declares" PASS ;; *) check "P1vs11 the shell accepts only words the module declares" FAIL ;; esac
-case "$VF_PROBE_BLOCK" in *'ZDOC_VERIFY_EXEC=unjudged'*) check "P1vs12 anything else is the could-not-judge residual" PASS ;; *) check "P1vs12 anything else is the could-not-judge residual" FAIL ;; esac
-# The probe is a THIRD consumer of the decision module and applies the same load guard its two
-# siblings do: the gate refuses a symlinked or non-regular module, and so does the broker. Without
-# it a symlinked module made the gate deny every navigation while both verify rows rendered green
-# for the remaining life of an older marker.
-case "$VF_PROBE_BLOCK" in *'isSymbolicLink'*) check "P1vs13 the probe refuses a module that is not a plain file" PASS ;; *) check "P1vs13 the probe refuses a module that is not a plain file" FAIL ;; esac
-# The four words are DERIVED from the module rather than hand-listed here.
-VF_EXEC_WORDS="$(node -e 'process.stdout.write([...require(process.argv[1]).EXECUTION_VERDICTS].sort().join(","))' "$PLUGIN_DIR/hooks/lib/verify-consent-v1.js" 2>/dev/null)"
-if [ "$VF_EXEC_WORDS" = "none,ran,ran-asked,unjudged" ]; then
-  check "P1vs14-control the module declares the execution word set ($VF_EXEC_WORDS)" PASS
-else
-  check "P1vs14-control the module declares the execution word set (got: ${VF_EXEC_WORDS:-<none>})" FAIL
-fi
-VF_EXEC_MISS=""
-for _w in ran ran-asked none unjudged; do
-  case "$VF_EXEC_WORDS" in *"$_w"*) ;; *) VF_EXEC_MISS="$VF_EXEC_MISS $_w" ;; esac
-  grep -qF "ve === '$_w'" "$REPORT" || VF_EXEC_MISS="$VF_EXEC_MISS renderer:$_w"
-done
-[ -z "$VF_EXEC_MISS" ] \
-  && check "P1vs14 every declared execution word has a renderer row" PASS \
-  || check "P1vs14 execution words with no renderer row:$VF_EXEC_MISS" FAIL
-
-# The wrapper must DERIVE the state, or the row is a renderer nothing ever feeds.
-if grep -qF 'ZDOC_VERIFY_EXEC' "$HELPER" && grep -qF 'executionEvidenceSeen' "$HELPER" \
-  && grep -qF 'ZDOC_VERIFY_EXEC' "$REPORT"; then
-  check "P1vq the wrapper derives the execution state and exports it to the renderer" PASS
-else
-  check "P1vq the wrapper derives the execution state and exports it to the renderer" FAIL
-fi
 
 # P1vi-P1vk drive the WRAPPER, so the derivation block itself executes. Every other
 # verify-feature check supplies ZDOC_VERIFY and therefore skips it entirely.
@@ -415,36 +373,35 @@ mkdir -p "$VF_LIVE_ROOT/.zensu"
 vf_live() { # $1 policy value (may be empty)
   env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
     ${1:+ZENSU_VERIFY_NAVIGATION_POLICY_V1="$1"} \
-    ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=ready \
+    ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest \
     ZENSU_DOCTOR_PLUGIN_DIR="$PLUGIN_DIR" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
     CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$HELPER" 2>/dev/null
 }
-case "$(ZDOC_VERIFY_EXEC=none vf_live '')" in
+case "$(vf_live '')" in
   *'consent mode ready, no runtime recipe'*) check "P1vi the wrapper derives consent-no-recipe when no recipe is present" PASS ;;
   *) check "P1vi the wrapper derives consent-no-recipe when no recipe is present" FAIL ;;
 esac
 printf 'version: 1\n' > "$VF_LIVE_ROOT/.zensu/runtime.yaml"
-# The fixture binds no Session Control record, so the MODE row correctly degrades to the
-# no-bound-record warning; what P1vj is about is the wrapper's resolution, so it supplies the
-# execution state and reads the row that resolution produces.
-case "$(ZDOC_VERIFY_EXEC=none vf_live '')" in
-  *'consent mode ready — no parent policy'*) check "P1vj the same wrapper run flips to consent once a runtime recipe exists" PASS ;;
+case "$(vf_live '')" in
+  *'consent mode ready — no navigation policy'*) check "P1vj the same wrapper run flips to consent once a runtime recipe exists" PASS ;;
   *) check "P1vj the same wrapper run flips to consent once a runtime recipe exists" FAIL ;;
 esac
 case "$(vf_live '{"version":1}')" in
-  *'browser broker will refuse it'*'policy contains unknown or missing keys'*) check "P1vk the wrapper judges the policy value rather than its presence" PASS ;;
+  *'is set but invalid (policy contains unknown or missing keys)'*'denies every zensu-verify navigation'*) check "P1vk the wrapper judges the policy value rather than its presence" PASS ;;
   *) check "P1vk the wrapper judges the policy value rather than its presence" FAIL ;;
 esac
 case "$(vf_live '{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:5173","evidenceMode":"declared-safe","routes":["/"]}]}')" in
   *'environment policy active'*) check "P1vk-control a policy that satisfies the contract still renders active" PASS ;;
   *) check "P1vk-control a policy that satisfies the contract still renders active" FAIL ;;
 esac
-# Every vf_live case above reaches its reason only because all four `unavailable` elifs
+case "$(vf_live '{"version":1,"mode":"local","targets":[{"origin":"http://localhost:4300","evidenceMode":"declared-safe","routes":["/"]}]}')" in
+  *'is set but invalid (local navigation policy accepts literal loopback-IP origins only)'*) check "P1vk2 a per-target policy fault renders policy-invalid naming it" PASS ;;
+  *) check "P1vk2 a per-target policy fault renders policy-invalid naming it" FAIL ;;
+esac
+# Every vf_live case above reaches its reason only because all three `unavailable` elifs
 # PASSED, so only their true side ever ran. This one drives the last of them: a synthetic
 # plugin root registering the PreToolUse consent gate and NOT the PostToolUse recorder is the
-# state the doctor exists to name — the broker starts in consent mode on the gate alone, so
-# every navigation prompts and none is ever remembered. The root carries only the six files
-# hookRegistered and the doctor's own guards open, so it costs six copies rather than a tree.
+# state the doctor exists to name — every navigation prompts and none is ever remembered.
 # ZDOC_ROOT comes from the doctor script's OWN location, never from ZENSU_DOCTOR_PLUGIN_DIR,
 # so the fixture has to copy the tree and run the COPY — pointing the variable at a synthetic
 # root while executing the real script measures the real registry and reports ready.
@@ -463,208 +420,572 @@ node -e '
 ' "$VF_NOREC_ROOT/hooks/hooks.json" \
   && check "P1vl-control the recorder-missing fixture really dropped the PostToolUse registration" PASS \
   || check "P1vl-control the recorder-missing fixture really dropped the PostToolUse registration" FAIL
-VF_NOREC_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
-  ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=ready \
-  ZENSU_DOCTOR_PLUGIN_DIR="$VF_NOREC_ROOT" CLAUDE_PLUGIN_ROOT="$VF_NOREC_ROOT" \
-  CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$VF_NOREC_ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null)"
+vf_copy_doctor() { # $1 policy value (may be empty)
+  env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
+    ${1:+ZENSU_VERIFY_NAVIGATION_POLICY_V1="$1"} \
+    ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest \
+    ZENSU_DOCTOR_PLUGIN_DIR="$VF_NOREC_ROOT" CLAUDE_PLUGIN_ROOT="$VF_NOREC_ROOT" \
+    CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$VF_NOREC_ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null
+}
+VF_NOREC_OUT="$(vf_copy_doctor)"
 case "$VF_NOREC_OUT" in
-  *'consent recorder not registered'*) check "P1vl an unregistered consent recorder is named rather than absorbed" PASS ;;
+  *'❌  verify-feature: cannot start (consent recorder not registered on the Bash matcher)'*) check "P1vl an unregistered consent recorder is named rather than absorbed" PASS ;;
   *) check "P1vl an unregistered consent recorder is named rather than absorbed" FAIL ;;
 esac
+VF_VALID_POLICY='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:5173","evidenceMode":"declared-safe","routes":["/"]}]}'
+case "$(vf_copy_doctor "$VF_VALID_POLICY")" in
+  *'❌  verify-feature: cannot start (consent recorder not registered on the Bash matcher)'*) check "P1vl1 a valid policy does not hide an unregistered consent recorder" PASS ;;
+  *) check "P1vl1 a valid policy does not hide an unregistered consent recorder" FAIL ;;
+esac
+node -e '
+  const fs = require("node:fs");
+  const registry = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const gate = "/hooks/pre-browser-navigation-consent.sh";
+  const moved = [];
+  for (const group of registry.hooks.PreToolUse || []) {
+    const kept = [];
+    for (const hook of group.hooks || []) {
+      if (typeof hook.command === "string" && hook.command.includes(gate)) moved.push(hook);
+      else kept.push(hook);
+    }
+    group.hooks = kept;
+  }
+  if (moved.length === 0) process.exit(1);
+  registry.hooks.PreToolUse.push({ matcher: "Edit|Write|MultiEdit", hooks: moved });
+  fs.writeFileSync(process.argv[1], JSON.stringify(registry, null, 2));
+' "$VF_NOREC_ROOT/hooks/hooks.json" \
+  && check "P1vl2-control the gate fixture moved the PreToolUse consent gate off the Bash matcher" PASS \
+  || check "P1vl2-control the gate fixture moved the PreToolUse consent gate off the Bash matcher" FAIL
+case "$(vf_copy_doctor)" in
+  *'❌  verify-feature: cannot start (consent hook not registered on the Bash matcher; consent recorder not registered on the Bash matcher)'*) check "P1vl2 a consent gate registered on another matcher is named, ahead of the recorder" PASS ;;
+  *) check "P1vl2 a consent gate registered on another matcher is named, ahead of the recorder" FAIL ;;
+esac
+rm -f "$VF_NOREC_ROOT/scripts/verify-browser-config.js"
+case "$(vf_copy_doctor)" in
+  *'❌  verify-feature: cannot start (consent hook pair, its prefilter library, its module or the run-config helper missing from the plugin)'*) check "P1vl3 a missing run-config helper is named, ahead of any registration fault" PASS ;;
+  *) check "P1vl3 a missing run-config helper is named, ahead of any registration fault" FAIL ;;
+esac
+case "$(vf_copy_doctor '{"version":1}')" in
+  *'❌  verify-feature: cannot start (consent hook pair, its prefilter library, its module or the run-config helper missing from the plugin)'*) check "P1vl4 an invalid policy does not hide a missing run-config helper" PASS ;;
+  *) check "P1vl4 an invalid policy does not hide a missing run-config helper" FAIL ;;
+esac
 rm -rf "$VF_NOREC_ROOT"
+VF_NOLOAD_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-noload.XXXXXX")" || exit 1
+cp -R "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/scripts" "$VF_NOLOAD_ROOT/" 2>/dev/null
+rm -f "$VF_NOLOAD_ROOT/hooks/lib/verify-navigation-floor-v1.js"
+if (cd -P -- "$VF_NOLOAD_ROOT" && node -e 'require("./hooks/lib/verify-consent-v1.js")' >/dev/null 2>&1); then
+  check "P1vl5-control the no-load fixture really breaks the decision module's require" FAIL
+else
+  check "P1vl5-control the no-load fixture really breaks the decision module's require" PASS
+fi
+case "$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
+  ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest \
+  ZENSU_DOCTOR_PLUGIN_DIR="$VF_NOLOAD_ROOT" CLAUDE_PLUGIN_ROOT="$VF_NOLOAD_ROOT" \
+  CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$VF_NOLOAD_ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null)" in
+  *'❌  verify-feature: cannot start (the consent decision module could not be loaded)'*)
+    check "P1vl5 a decision module that will not load is named apart from a missing registration" PASS ;;
+  *) check "P1vl5 a decision module that will not load is named apart from a missing registration" FAIL ;;
+esac
+rm -rf "$VF_NOLOAD_ROOT"
+vf_fixture_doctor() {
+  env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
+    ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present "$@" \
+    ZENSU_DOCTOR_PLUGIN_DIR="$VF_FIXTURE_ROOT" CLAUDE_PLUGIN_ROOT="$VF_FIXTURE_ROOT" \
+    CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$VF_FIXTURE_ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null
+}
+VF_FIXTURE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-noprefilter.XXXXXX")" || exit 1
+cp -R "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/scripts" "$VF_FIXTURE_ROOT/" 2>/dev/null
+rm -f "$VF_FIXTURE_ROOT/hooks/lib/zensu-browser-consent-prefilter.sh"
+case "$(vf_fixture_doctor ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest)" in
+  *'❌  verify-feature: cannot start (consent hook pair, its prefilter library, its module or the run-config helper missing from the plugin)'*)
+    check "P1vl7 a missing prefilter library is named as a missing file of the consent pair" PASS ;;
+  *) check "P1vl7 a missing prefilter library is named as a missing file of the consent pair" FAIL ;;
+esac
+rm -rf "$VF_FIXTURE_ROOT"
+VF_FIXTURE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-badhelper.XXXXXX")" || exit 1
+cp -R "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/scripts" "$VF_FIXTURE_ROOT/" 2>/dev/null
+printf '\nthrow new Error("probe");\n' >> "$VF_FIXTURE_ROOT/scripts/verify-browser-config.js"
+if (cd -P -- "$VF_FIXTURE_ROOT" && node -e 'require("./hooks/lib/verify-consent-v1.js")' >/dev/null 2>&1) \
+  && ! (cd -P -- "$VF_FIXTURE_ROOT" && node -e 'require("./scripts/verify-browser-config.js")' >/dev/null 2>&1); then
+  check "P1vl8-control the bad-helper fixture loads the decision module and breaks only the helper's require" PASS
+else
+  check "P1vl8-control the bad-helper fixture loads the decision module and breaks only the helper's require" FAIL
+fi
+case "$(vf_fixture_doctor ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest)" in
+  *'❌  verify-feature: cannot start (the run-config helper could not be loaded)'*)
+    check "P1vl8 a run-config helper that will not load is named, not reported ready" PASS ;;
+  *) check "P1vl8 a run-config helper that will not load is named, not reported ready" FAIL ;;
+esac
+rm -rf "$VF_FIXTURE_ROOT"
+VF_FIXTURE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-noversion.XXXXXX")" || exit 1
+cp -R "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/scripts" "$VF_FIXTURE_ROOT/" 2>/dev/null
+rm -f "$VF_FIXTURE_ROOT/hooks/lib/playwright-cli-version-v1.js"
+VF_NOVERSION_OUT="$(vf_fixture_doctor)"
+case "$VF_NOVERSION_OUT" in
+  *"⚠️  playwright-cli: installed, but the plugin's version module hooks/lib/playwright-cli-version-v1.js could not be loaded — reinstall the plugin"*)
+    case "$VF_NOVERSION_OUT" in
+      *'playwright-cli: installed, but its version could not be read'*) check "P1vl9 a missing version module is blamed on the plugin, not on the installed CLI" FAIL ;;
+      *) check "P1vl9 a missing version module is blamed on the plugin, not on the installed CLI" PASS ;;
+    esac ;;
+  *) check "P1vl9 a missing version module is blamed on the plugin, not on the installed CLI" FAIL ;;
+esac
+rm -rf "$VF_FIXTURE_ROOT"
+VF_UNCHECKED_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-unchecked.XXXXXX")" || exit 1
+cp -R "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/scripts" "$VF_UNCHECKED_ROOT/" 2>/dev/null
+printf '\nmodule.exports.parsePolicyTargets = () => { throw new Error("probe"); };\n' >> "$VF_UNCHECKED_ROOT/hooks/lib/verify-navigation-floor-v1.js"
+if (cd -P -- "$VF_UNCHECKED_ROOT" && node -e 'require("./hooks/lib/verify-consent-v1.js"); require("./hooks/lib/verify-navigation-floor-v1.js").parsePolicyTargets("{}")' >/dev/null 2>&1); then
+  check "P1vl6-control the unchecked fixture loads the decision module and makes the policy parse throw" FAIL
+elif (cd -P -- "$VF_UNCHECKED_ROOT" && node -e 'require("./hooks/lib/verify-consent-v1.js")' >/dev/null 2>&1); then
+  check "P1vl6-control the unchecked fixture loads the decision module and makes the policy parse throw" PASS
+else
+  check "P1vl6-control the unchecked fixture loads the decision module and makes the policy parse throw" FAIL
+fi
+VF_UNCHECKED_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
+  ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:5173","evidenceMode":"declared-safe","routes":["/"]}]}' \
+  ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest \
+  ZENSU_DOCTOR_PLUGIN_DIR="$VF_UNCHECKED_ROOT" CLAUDE_PLUGIN_ROOT="$VF_UNCHECKED_ROOT" \
+  CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$VF_UNCHECKED_ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null)"
+case "$VF_UNCHECKED_OUT" in
+  *'is set but invalid'*) check "P1vl6 a policy the doctor could not check is not reported as invalid" FAIL ;;
+  *'⚠️  verify-feature: ZENSU_VERIFY_NAVIGATION_POLICY_V1 is set but could not be checked'*)
+    check "P1vl6 a policy the doctor could not check is not reported as invalid" PASS ;;
+  *) check "P1vl6 a policy the doctor could not check is not reported as invalid" FAIL ;;
+esac
+rm -rf "$VF_UNCHECKED_ROOT"
+VF_REG_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-registration.XXXXXX")" || exit 1
+cp -R "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/scripts" "$VF_REG_ROOT/" 2>/dev/null
+vf_reg_doctor() {
+  env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
+    ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest \
+    ZENSU_DOCTOR_PLUGIN_DIR="$VF_REG_ROOT" CLAUDE_PLUGIN_ROOT="$VF_REG_ROOT" \
+    CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$VF_REG_ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null
+}
+if node -e '
+  const fs = require("node:fs");
+  const registry = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const gate = "/hooks/pre-browser-navigation-consent.sh";
+  let widened = 0;
+  for (const group of registry.hooks.PreToolUse || []) {
+    if (group.matcher === "Bash" && (group.hooks || []).some((hook) => typeof hook.command === "string" && hook.command.includes(gate))) {
+      group.matcher = "Bash|Read";
+      widened += 1;
+    }
+  }
+  if (widened !== 1) process.exit(1);
+  fs.writeFileSync(process.argv[1], JSON.stringify(registry, null, 2));
+' "$VF_REG_ROOT/hooks/hooks.json"; then
+  check "P1vl7-control the registration fixture widened the consent gate matcher to Bash|Read" PASS
+else
+  check "P1vl7-control the registration fixture widened the consent gate matcher to Bash|Read" FAIL
+fi
+case "$(vf_reg_doctor)" in
+  *'not registered on the Bash matcher'*) check "P1vl7 a consent gate on a matcher that includes Bash counts as registered" FAIL ;;
+  *'verify-feature: consent mode ready'*) check "P1vl7 a consent gate on a matcher that includes Bash counts as registered" PASS ;;
+  *) check "P1vl7 a consent gate on a matcher that includes Bash counts as registered" FAIL ;;
+esac
+cp "$PLUGIN_DIR/hooks/hooks.json" "$VF_REG_ROOT/hooks/hooks.json"
+if node -e '
+  const fs = require("node:fs");
+  const registry = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const recorder = "/hooks/post-browser-navigation-consent.sh";
+  let broken = 0;
+  for (const group of registry.hooks.PostToolUse || []) {
+    if ((group.hooks || []).some((hook) => typeof hook.command === "string" && hook.command.includes(recorder))) {
+      group.matcher = "(";
+      broken += 1;
+    }
+  }
+  if (broken !== 1) process.exit(1);
+  fs.writeFileSync(process.argv[1], JSON.stringify(registry, null, 2));
+' "$VF_REG_ROOT/hooks/hooks.json" \
+  && (cd -P -- "$VF_REG_ROOT" && node -e '
+    const mod = require("./hooks/lib/verify-consent-v1.js");
+    const { REGISTERED, UNKNOWN } = mod.REGISTRATION;
+    if (mod.consentHookRegistered(process.cwd()) !== REGISTERED) process.exit(1);
+    if (mod.consentRecorderRegistered(process.cwd()) !== UNKNOWN) process.exit(1);
+  ') >/dev/null 2>&1; then
+  check "P1vl9-control only the recorder matcher is uncompilable, so the gate stays registered and the recorder answers unknown" PASS
+else
+  check "P1vl9-control only the recorder matcher is uncompilable, so the gate stays registered and the recorder answers unknown" FAIL
+fi
+case "$(vf_reg_doctor)" in
+  *'❌  verify-feature: cannot start (consent recorder registration in hooks/hooks.json could not be determined)'*)
+    check "P1vl9 a parsed hooks.json whose recorder registration cannot be determined names the recorder as unknown, not missing" PASS ;;
+  *) check "P1vl9 a parsed hooks.json whose recorder registration cannot be determined names the recorder as unknown, not missing" FAIL ;;
+esac
+vf_reg_matchers() {
+  cp "$PLUGIN_DIR/hooks/hooks.json" "$VF_REG_ROOT/hooks/hooks.json"
+  node -e '
+    const fs = require("node:fs");
+    const [file, gateMatcher, recorderMatcher] = process.argv.slice(1);
+    const registry = JSON.parse(fs.readFileSync(file, "utf8"));
+    const names = (group, hook) => (group.hooks || []).some((entry) => typeof entry.command === "string" && entry.command.includes(hook));
+    const gates = (registry.hooks.PreToolUse || []).filter((group) => names(group, "/hooks/pre-browser-navigation-consent.sh"));
+    const recorders = (registry.hooks.PostToolUse || []).filter((group) => names(group, "/hooks/post-browser-navigation-consent.sh"));
+    if (gates.length !== 1 || recorders.length !== 1) process.exit(1);
+    if (gateMatcher !== "keep") gates[0].matcher = gateMatcher;
+    if (recorderMatcher !== "keep") recorders[0].matcher = recorderMatcher;
+    fs.writeFileSync(file, JSON.stringify(registry, null, 2));
+  ' "$VF_REG_ROOT/hooks/hooks.json" "$1" "$2"
+}
+vf_reg_states() {
+  (cd -P -- "$VF_REG_ROOT" && node -e '
+    const mod = require("./hooks/lib/verify-consent-v1.js");
+    process.stdout.write(mod.consentHookRegistered(process.cwd()) + " " + mod.consentRecorderRegistered(process.cwd()));
+  ') 2>/dev/null
+}
+if vf_reg_matchers "(" keep && [ "$(vf_reg_states)" = "unknown registered" ]; then
+  check "P1vl9b-control only the gate matcher is uncompilable, so the gate answers unknown and the recorder stays registered" PASS
+else
+  check "P1vl9b-control only the gate matcher is uncompilable, so the gate answers unknown and the recorder stays registered" FAIL
+fi
+case "$(vf_reg_doctor)" in
+  *'❌  verify-feature: cannot start (consent hook registration in hooks/hooks.json could not be determined)'*)
+    check "P1vl9b a gate registration that cannot be determined names the gate as unknown, not missing" PASS ;;
+  *) check "P1vl9b a gate registration that cannot be determined names the gate as unknown, not missing" FAIL ;;
+esac
+if vf_reg_matchers Read "(" && [ "$(vf_reg_states)" = "unregistered unknown" ]; then
+  check "P1vl9c-control the gate sits on another matcher and the recorder matcher is uncompilable" PASS
+else
+  check "P1vl9c-control the gate sits on another matcher and the recorder matcher is uncompilable" FAIL
+fi
+case "$(vf_reg_doctor)" in
+  *'❌  verify-feature: cannot start (consent hook not registered on the Bash matcher; consent recorder registration in hooks/hooks.json could not be determined)'*)
+    check "P1vl9c an undetermined recorder does not hide a gate that is definitely not registered" PASS ;;
+  *) check "P1vl9c an undetermined recorder does not hide a gate that is definitely not registered" FAIL ;;
+esac
+printf '{' > "$VF_REG_ROOT/hooks/hooks.json"
+case "$(vf_reg_doctor)" in
+  *'❌  verify-feature: cannot start (consent hook registration in hooks/hooks.json could not be determined; consent recorder registration in hooks/hooks.json could not be determined)'*)
+    check "P1vl8 an unparseable hooks.json names both registrations as unknown, not as missing" PASS ;;
+  *) check "P1vl8 an unparseable hooks.json names both registrations as unknown, not as missing" FAIL ;;
+esac
+rm -rf "$VF_REG_ROOT"
+VF_PROBE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-probe.XXXXXX")" || exit 1
+cp -R "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/scripts" "$VF_PROBE_ROOT/" 2>/dev/null
+printf '\nmodule.exports.consentHookRegistered = () => { throw new Error("probe"); };\n' >> "$VF_PROBE_ROOT/hooks/lib/verify-consent-v1.js"
+if (cd -P -- "$VF_PROBE_ROOT" && node -e 'require("./hooks/lib/verify-consent-v1.js").consentHookRegistered(process.cwd())' >/dev/null 2>&1); then
+  check "P1vl10-control the probe fixture loads the decision module and makes the registration probe throw" FAIL
+elif (cd -P -- "$VF_PROBE_ROOT" && node -e 'require("./hooks/lib/verify-consent-v1.js")' >/dev/null 2>&1); then
+  check "P1vl10-control the probe fixture loads the decision module and makes the registration probe throw" PASS
+else
+  check "P1vl10-control the probe fixture loads the decision module and makes the registration probe throw" FAIL
+fi
+case "$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
+  ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest \
+  ZENSU_DOCTOR_PLUGIN_DIR="$VF_PROBE_ROOT" CLAUDE_PLUGIN_ROOT="$VF_PROBE_ROOT" \
+  CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$VF_PROBE_ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null)" in
+  *'❌  verify-feature: cannot start (the consent hook pair registration probe did not complete)'*)
+    check "P1vl10 a registration probe that throws is named apart from an unknown or missing registration" PASS ;;
+  *) check "P1vl10 a registration probe that throws is named apart from an unknown or missing registration" FAIL ;;
+esac
+rm -rf "$VF_PROBE_ROOT"
+VF_LINK_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-link.XXXXXX")" || exit 1
+cp -R "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/scripts" "$VF_LINK_ROOT/" 2>/dev/null
+mv "$VF_LINK_ROOT/hooks/lib/verify-consent-v1.js" "$VF_LINK_ROOT/hooks/lib/verify-consent-v1.real.js"
+ln -s verify-consent-v1.real.js "$VF_LINK_ROOT/hooks/lib/verify-consent-v1.js" 2>/dev/null
+if [ -L "$VF_LINK_ROOT/hooks/lib/verify-consent-v1.js" ]; then
+  if (cd -P -- "$VF_LINK_ROOT" && node -e 'require("./hooks/lib/verify-consent-v1.js")' >/dev/null 2>&1); then
+    check "P1vl11-control the link fixture replaces the decision module with a symlink that still loads" PASS
+  else
+    check "P1vl11-control the link fixture replaces the decision module with a symlink that still loads" FAIL
+  fi
+  case "$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
+    ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest \
+    ZENSU_DOCTOR_PLUGIN_DIR="$VF_LINK_ROOT" CLAUDE_PLUGIN_ROOT="$VF_LINK_ROOT" \
+    CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$VF_LINK_ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null)" in
+    *'❌  verify-feature: cannot start (the consent decision module is a symlink, which both consent hooks refuse)'*)
+      check "P1vl11 a symlinked decision module is named as a symlink, not as a missing file" PASS ;;
+    *) check "P1vl11 a symlinked decision module is named as a symlink, not as a missing file" FAIL ;;
+  esac
+else
+  check "P1vl11-control the link fixture replaces the decision module with a symlink that still loads (no symlink on this host, covered on macOS/Linux)" PASS
+  check "P1vl11 a symlinked decision module is named as a symlink, not as a missing file (no symlink on this host, covered on macOS/Linux)" PASS
+fi
+rm -rf "$VF_LINK_ROOT"
 rm -rf "$VF_LIVE_ROOT"
 
 if grep -qF 'ZDOC_VERIFY=policy' "$HELPER" && grep -qF 'ZDOC_VERIFY=consent-no-recipe' "$HELPER" \
   && grep -qF 'ZDOC_VERIFY=unavailable' "$HELPER" && grep -qF 'consentHookRegistered' "$HELPER" \
   && grep -qF 'consentRecorderRegistered' "$HELPER" \
+  && grep -qF 'scripts/verify-browser-config.js' "$HELPER" \
   && grep -qF 'ZENSU_VERIFY_NAVIGATION_POLICY_V1' "$HELPER" \
-  && grep -qF 'ZDOC_SESSION_PROJECT_ROOT ZDOC_VERIFY ZDOC_VERIFY_REASON' "$HELPER"; then
-  check "P1vf wrapper derives the verify state from the policy env, the registered hook and the recipe, and exports it" PASS
+  && grep -qF 'ZDOC_SESSION_PROJECT_ROOT ZDOC_VERIFY ZDOC_VERIFY_REASON ZDOC_PLAYWRIGHT_VERSION' "$HELPER"; then
+  check "P1vf wrapper derives the verify state from the policy env, the registered hook pair, the run-config helper and the recipe, and exports it with the playwright-cli version" PASS
 else
-  check "P1vf wrapper derives the verify state from the policy env, the registered hook and the recipe, and exports it" FAIL
+  check "P1vf wrapper derives the verify state from the policy env, the registered hook pair, the run-config helper and the recipe, and exports it with the playwright-cli version" FAIL
 fi
 VF_SKILL="$PLUGIN_DIR/skills/doctor/SKILL.md"
-# The phrase set is DERIVED from the renderer's own arms, never hand-listed: a hand list
+# The needle set is DERIVED from the renderer's own arms, never hand-listed: a hand list
 # passes unchanged when a state is added, which is exactly how a shipped state reached the
-# report with no bullet documenting it. Each arm renders 'verify-feature: <claim> — <remedy>',
-# and the claim before the em dash is what the skill must carry. The strip uses the LITERAL
-# em dash: \xHH is a GNU sed extension, so on BSD/macOS sed the pattern degraded to the literal
-# text and matched nothing, leaving the tail attached and the derived phrase absent from
-# SKILL.md — red on macOS, green on the GNU-sed runner.
-# P1vr holds the two spellings of the consent arming set in step. The wrapper decides WHICH
-# verdicts get an execution state and the renderer decides which get a row; they are separate
-# literals in separate languages, and a fourth consent state added to one alone makes the row
-# silently disappear.
-VF_ARM_SH="$(sed -n 's/.*(\(consent|consent-no-recipe|consent-recipe-unchecked\)).*/\1/p' "$HELPER" | head -1)"
-VF_ARM_JS="$(sed -n "s/.*CONSENT_MODE_STATES = \[\(.*\)\];.*/\1/p" "$REPORT" | head -1 | tr -d " '" )"
-VF_ARM_JS_PIPED="$(printf '%s' "$VF_ARM_JS" | tr ',' '|')"
-if [ -n "$VF_ARM_SH" ] && [ "$VF_ARM_SH" = "$VF_ARM_JS_PIPED" ]; then
-  check "P1vr the consent arming set agrees between the doctor wrapper and the renderer" PASS
-else
-  check "P1vr the consent arming set agrees between the doctor wrapper and the renderer (sh=[$VF_ARM_SH] js=[$VF_ARM_JS_PIPED])" FAIL
-fi
-
-VF_PHRASES="$(grep -oE "'verify-feature( gate)?: [^']*'" "$REPORT" \
-  | sed "s/^'//; s/'\$//" | sed 's/ — .*//; s/ ($//' | sort -u)"
-VF_PHRASE_COUNT="$(printf '%s\n' "$VF_PHRASES" | grep -c . || true)"
-# A floor alone cannot fail for the narrowing this selector was widened to fix: the eight
-# `verify-feature: ` phrases already satisfy any count the gate family would also satisfy, so
-# the family itself is what must be asserted.
-if printf '%s\n' "$VF_PHRASES" | grep -q '^verify-feature gate: '; then
-  check "P1vg-family the derivation reaches the verify-feature gate rows, not only the mode rows" PASS
-else
-  check "P1vg-family the derivation reaches the verify-feature gate rows, not only the mode rows" FAIL
-fi
-VF_SKILL_MISS=""
-while IFS= read -r phrase; do
-  [ -n "$phrase" ] || continue
-  grep -qF -- "$phrase" "$VF_SKILL" || VF_SKILL_MISS="$VF_SKILL_MISS [$phrase]"
-done <<VFEOF
-$VF_PHRASES
-VFEOF
-[ "${VF_PHRASE_COUNT:-0}" -ge 13 ] \
-  && check "P1vg-control the verify-feature row phrases derive from the renderer ($VF_PHRASE_COUNT found)" PASS \
-  || check "P1vg-control the verify-feature row phrases derive from the renderer (only ${VF_PHRASE_COUNT:-0} found)" FAIL
+# report with no bullet documenting it. Each arm renders '<glyph>  <subject>: <claim> — <remedy>',
+# and the glyph plus the claim before the em dash is what the skill must carry. The glyph is
+# part of the needle because an OK claim can be a prefix of a WARN claim, and an unprefixed
+# needle is then satisfied by the WARN bullet after the OK bullet is gone.
+row_needles() { # $1 subject; $2 skill file; prints calls<TAB>needles<TAB>misses
+  node -e '
+    const fs = require("fs");
+    const [subject, reportFile, skillFile] = process.argv.slice(1);
+    const src = fs.readFileSync(reportFile, "utf8");
+    const skill = fs.readFileSync(skillFile, "utf8").replace(/\s+/g, " ");
+    const glyphs = { OK: "\u2705", WARN: "\u26a0\ufe0f", BAD: "\u274c" };
+    const head = new RegExp("line\\((OK|WARN|BAD), \\x27" + subject + ": ");
+    const calls = src.split("\n").filter((l) => head.test(l)).map((l) => l.slice(l.search(head)));
+    const trim = (text) => text.replace(/ — .*/, "").replace(/ \($/, "").trim();
+    const misses = [];
+    let needles = 0;
+    for (const call of calls) {
+      const literals = [...call.matchAll(/\x27([^\x27]*)\x27/g)].map((m) => m[1]);
+      const wanted = [glyphs[call.match(head)[1]] + " " + trim(literals[0])];
+      if (literals.length > 1 && /^[),]/.test(literals[1])) {
+        const tail = trim(literals[1].replace(/^\)/, "").replace(/^,/, ""));
+        if (tail && !tail.startsWith("—")) wanted.push(tail);
+      }
+      for (const needle of wanted) {
+        needles += 1;
+        if (!skill.includes(needle)) misses.push("[" + needle + "]");
+      }
+    }
+    process.stdout.write(calls.length + "\t" + needles + "\t" + misses.join(" "));
+  ' "$1" "$REPORT" "$2" 2>/dev/null
+}
+VF_ROW_REPORT="$(row_needles verify-feature "$VF_SKILL")"
+VF_ROW_CALLS="${VF_ROW_REPORT%%	*}"
+VF_ROW_REST="${VF_ROW_REPORT#*	}"
+VF_SKILL_MISS="${VF_ROW_REST#*	}"
+[ -n "$VF_ROW_REPORT" ] && [ "${VF_ROW_CALLS:-0}" -ge 8 ] \
+  && check "P1vg-control the verify-feature row phrases derive from the renderer ($VF_ROW_CALLS found)" PASS \
+  || check "P1vg-control the verify-feature row phrases derive from the renderer (only ${VF_ROW_CALLS:-0} found)" FAIL
 # The count is CONJOINED: an empty derivation would otherwise report every row documented
-# while comparing nothing, which is the shape this check replaced. The floor moved 14 -> 13 when
-# the unknown-exec arm was retired from the MODE chain: it asserted a binding cause the probe
-# never established, and sitting at the top of that else/if ladder it displaced the no-recipe and
-# recipe-unchecked rows. The observable it reported is carried by the gate family's own row.
-if [ "${VF_PHRASE_COUNT:-0}" -ge 13 ] && [ -z "$VF_SKILL_MISS" ]; then
-  check "P1vg every verify-feature row the renderer can emit is documented in skills/doctor/SKILL.md ($VF_PHRASE_COUNT rows)" PASS
+# while comparing nothing, which is the shape this check replaced.
+if [ -n "$VF_ROW_REPORT" ] && [ "${VF_ROW_CALLS:-0}" -ge 8 ] && [ -z "$VF_SKILL_MISS" ]; then
+  check "P1vg every verify-feature row the renderer can emit is documented in skills/doctor/SKILL.md ($VF_ROW_CALLS rows)" PASS
 else
   check "P1vg verify-feature rows missing from skills/doctor/SKILL.md:$VF_SKILL_MISS" FAIL
 fi
-
-# --- wrapper Playwright MCP detection (offline; npm must never execute) -----
-MCP_PLUG="$SBOX/mcp-plug"
-FAKE_BIN="$SBOX/fake-bin"
-NPM_MARKER="$SBOX/npm-invoked"
-mkdir -p "$MCP_PLUG/.claude-plugin" "$MCP_PLUG/hooks" "$MCP_PLUG/scripts" "$MCP_PLUG/mcp-runtime" "$FAKE_BIN"
-printf '{"name":"zensu","version":"1.2.3","mcpServers":"./.mcp.json"}\n' > "$MCP_PLUG/.claude-plugin/plugin.json"
-printf '{"plugins":[{"name":"zensu","version":"1.2.3"}]}\n' > "$MCP_PLUG/.claude-plugin/marketplace.json"
-printf '{"hooks":{}}\n' > "$MCP_PLUG/hooks/hooks.json"
-printf '%s\n' '{"mcpServers":{"zensu-browser":{"type":"stdio","command":"${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh","args":["--isolated"]}}}' > "$MCP_PLUG/.mcp.json"
-printf '%s\n' '{"private":true,"dependencies":{"@playwright/mcp":"0.0.75"}}' > "$MCP_PLUG/mcp-runtime/package.json"
-printf '%s\n' '{"lockfileVersion":3,"packages":{"":{"dependencies":{"@playwright/mcp":"0.0.75"}},"node_modules/@playwright/mcp":{"version":"0.0.75","integrity":"sha512-fixture"}}}' > "$MCP_PLUG/mcp-runtime/package-lock.json"
-printf '#!/bin/bash\nexit 0\n' > "$MCP_PLUG/scripts/playwright-mcp.sh"
-chmod +x "$MCP_PLUG/scripts/playwright-mcp.sh"
-cat > "$MCP_PLUG/scripts/playwright-mcp-proxy.js" <<'PROXY_FIXTURE'
-'use strict';
-module.exports.ALLOWED_TOOLS = [
-  'browser_click', 'browser_close', 'browser_console_messages',
-  'browser_drag', 'browser_fill_form', 'browser_handle_dialog', 'browser_hover',
-  'browser_navigate', 'browser_network_requests', 'browser_press_key', 'browser_resize',
-  'browser_select_option', 'browser_snapshot', 'browser_tabs', 'browser_take_screenshot',
-  'browser_type', 'browser_wait_for'
-];
-PROXY_FIXTURE
-ln -s "$(command -v node)" "$FAKE_BIN/node"
-printf '#!/bin/bash\n: > "${FAKE_NPM_MARKER:?}"\nexit 99\n' > "$FAKE_BIN/npm"
-chmod +x "$FAKE_BIN/npm"
-MCP_OUT="$(PATH="$FAKE_BIN:/usr/bin:/bin" FAKE_NPM_MARKER="$NPM_MARKER" \
-  ZENSU_DOCTOR_PLUGIN_DIR="$MCP_PLUG" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
-  bash "$HELPER" 2>/dev/null)"
-case "$MCP_OUT" in *'Playwright MCP: valid integrity-locked plugin config + npm present'*) check "P1eb helper executes valid MCP declaration path" PASS ;; *) check "P1eb valid MCP declaration path (got: $MCP_OUT)" FAIL ;; esac
-if [ -e "$NPM_MARKER" ]; then
-  check "P1ec helper never executes npm during offline detection" FAIL
+PW_ROW_REPORT="$(row_needles playwright-cli "$VF_SKILL")"
+PW_ROW_CALLS="${PW_ROW_REPORT%%	*}"
+PW_ROW_REST="${PW_ROW_REPORT#*	}"
+PW_ROW_NEEDLES="${PW_ROW_REST%%	*}"
+PW_SKILL_MISS="${PW_ROW_REST#*	}"
+if [ -n "$PW_ROW_REPORT" ] && [ "${PW_ROW_CALLS:-0}" -ge 5 ] && [ "${PW_ROW_NEEDLES:-0}" -gt "${PW_ROW_CALLS:-0}" ] \
+  && [ -z "$PW_SKILL_MISS" ]; then
+  check "P1vg1 every playwright-cli row the renderer can emit is documented in skills/doctor/SKILL.md ($PW_ROW_CALLS rows, $PW_ROW_NEEDLES claims)" PASS
 else
-  check "P1ec helper never executes npm during offline detection" PASS
+  check "P1vg1 playwright-cli rows missing from skills/doctor/SKILL.md (${PW_ROW_CALLS:-0} rows, ${PW_ROW_NEEDLES:-0} claims):$PW_SKILL_MISS" FAIL
 fi
-printf '%s\n' '{"mcpServers":{"zensu-browser":{"type":"stdio","command":"npx","args":["@playwright/mcp@latest"]}}}' > "$MCP_PLUG/.mcp.json"
-rm -f "$NPM_MARKER"
-BAD_MCP_OUT="$(PATH="$FAKE_BIN:/usr/bin:/bin" FAKE_NPM_MARKER="$NPM_MARKER" ZDOC_PLAYWRIGHT_TOOLS=ready \
-  ZENSU_DOCTOR_PLUGIN_DIR="$MCP_PLUG" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
-  bash "$HELPER" 2>/dev/null)"; BAD_MCP_RC=$?
-[ "$BAD_MCP_RC" -eq 0 ] && check "P1ed invalid MCP helper path exits 0" PASS || check "P1ed invalid MCP helper path exits 0 (rc=$BAD_MCP_RC)" FAIL
-case "$BAD_MCP_OUT" in *'Playwright MCP: valid plugin config not detected'*) check "P1ef invalid/floating MCP declaration renders exact warning" PASS ;; *) check "P1ef invalid/floating MCP warning (got: $BAD_MCP_OUT)" FAIL ;; esac
-if [ -e "$NPM_MARKER" ]; then
-  check "P1eg invalid MCP detection still never executes npm" FAIL
-else
-  check "P1eg invalid MCP detection still never executes npm" PASS
-fi
-printf '%s\n' '{"mcpServers":{"playwright":{"type":"stdio","command":"${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh","args":["--isolated"]}}}' > "$MCP_PLUG/.mcp.json"
-OLD_KEY_OUT="$(PATH="$FAKE_BIN:/usr/bin:/bin" FAKE_NPM_MARKER="$NPM_MARKER" ZDOC_PLAYWRIGHT_TOOLS=ready \
-  ZENSU_DOCTOR_PLUGIN_DIR="$MCP_PLUG" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
-  bash "$HELPER" 2>/dev/null)"
-case "$OLD_KEY_OUT" in *'Playwright MCP: valid plugin config not detected'*) check "P1ek a valid declaration under the retired playwright key is not the plugin's broker" PASS ;; *) check "P1ek retired playwright key (got: $OLD_KEY_OUT)" FAIL ;; esac
-# P1ek passes identically against a hardcoded `browser_key="zensu-browser"`, so nothing above
-# holds the DERIVATION. Reverting it would restore the hand copy this round removed while
-# CLAUDE.md asserts the doctor takes the key from the executing installation's module.
-if PW_BODY="$(awk '/^playwright_mcp_declared\(\) \{/,/^\}$/' "$HELPER")" && [ -n "$PW_BODY" ]; then
-  check "P1el-control the playwright_mcp_declared body is extractable" PASS
-  # Needle the READ, not the bare constant name: the probe subshell exports
-  # ZDOC_BROWSER_SERVER_KEY, so a literal hand copy still carries that substring and a
-  # name-only needle passed against exactly the revert this check exists to catch.
-  case "$PW_BODY" in
-    *'verify-consent-v1.js").BROWSER_SERVER_KEY'*) check "P1el the doctor derives the browser server key from the decision module" PASS ;;
-    *) check "P1el the doctor derives the browser server key from the decision module" FAIL ;;
-  esac
-  case "$PW_BODY" in
-    *'"zensu-browser"'*|*"'zensu-browser'"*) check "P1el2 the doctor keeps no literal copy of the server key" FAIL ;;
-    *) check "P1el2 the doctor keeps no literal copy of the server key" PASS ;;
-  esac
-  # Needle the DECIDING call and its live conjunct. `isSymbolicLink()` beside an lstat verdict is
-  # dead — `lstatSync` never reports a symlink as a file — and an `lstatSync` -> `statSync`
-  # "simplification" kills the guard while leaving that token in place, which is exactly the edit
-  # this check exists to catch.
-  case "$PW_BODY" in
-    *'lstatSync("./verify-consent-v1.js")'*'!info.isFile()'*)
-      check "P1el3 the key read guards the decision module the way every other consumer does" PASS ;;
-    *) check "P1el3 the key read guards the decision module the way every other consumer does" FAIL ;;
-  esac
-  case "$PW_BODY" in
-    *'fs.statSync('*) check "P1el4 the key read does not follow a symlink through a bare statSync" FAIL ;;
-    *) check "P1el4 the key read does not follow a symlink through a bare statSync" PASS ;;
-  esac
-  # SOURCE-pinned, and the reason is MEASURED rather than argued. The key is read from $DIR,
-  # the doctor's own hooks/lib, so a fixture has to run a COPY of the helper — and a copied
-  # hooks/lib is refused as a plugin root before playwright_mcp_declared is ever called: both
-  # routes tried here, deleting verify-consent-v1.js from the copy and deleting the sibling its
-  # top-level require needs, render only
-  # "Session Control: plugin root unavailable or invalid" with an EMPTY stderr. The preflight at
-  # the top of zensu-doctor.sh names neither module, so the refusal is the plugin-root validity
-  # check and not a module check; the disclosure branch stays behaviourally unreachable either way.
-  # LINE-LOCAL on purpose. A bare `>&2` needle over the whole body asserts only that SOME
-  # statement writes to fd 2, so it would stay green the moment a second stderr write lands in
-  # this function while the disclosure itself moved to the report's stdout. (The body's other
-  # redirections, 2>&1 and 2>/dev/null, carry no `>&2` substring and were never the hazard.)
-  case "$PW_BODY" in
-    *'was NOT judged" >&2'*)
-      check "P1el5 the unreadable-module cause is disclosed, on stderr rather than in the report" PASS ;;
-    *) check "P1el5 the unreadable-module cause is disclosed, on stderr rather than in the report" FAIL ;;
-  esac
-  # The skill hand-quotes that emitted line so the model can recognize it. Hold the two sides in
-  # step: a reword on either side otherwise orphans the relay instruction silently.
-  if grep -qF 'browser server key unreadable' "$SKILL_MD" && grep -qF 'was NOT judged' "$SKILL_MD"; then
-    check "P1el6 the doctor skill quotes the disclosure it tells the model to relay" PASS
-  else
-    check "P1el6 the doctor skill quotes the disclosure it tells the model to relay" FAIL
-  fi
-else
-  check "P1el-control the playwright_mcp_declared body is extractable" FAIL
-fi
-printf '%s\n' '{"mcpServers":{"zensu-browser":{"type":"stdio","command":"${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh","args":["--isolated"]}}}' > "$MCP_PLUG/.mcp.json"
-NO_NPM_BIN="$SBOX/no-npm-bin"
-mkdir -p "$NO_NPM_BIN"
-ln -s "$(command -v node)" "$NO_NPM_BIN/node"
-ln -s "$(command -v dirname)" "$NO_NPM_BIN/dirname"
-DECLARED_OUT="$(PATH="$NO_NPM_BIN" ZENSU_DOCTOR_PLUGIN_DIR="$MCP_PLUG" \
-  ZDOC_FORGE_PROVIDER=unknown ZDOC_FORGE_CLI='' ZDOC_FORGE_STATE='' \
-  ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" /bin/bash "$HELPER" 2>/dev/null)"; DECLARED_RC=$?
-[ "$DECLARED_RC" -eq 0 ] && check "P1eh valid declaration/no-npm helper path exits 0" PASS || check "P1eh valid declaration/no-npm helper path exits 0 (rc=$DECLARED_RC)" FAIL
-case "$(uname -s)" in
-  MINGW*|MSYS*|CYGWIN*) check "P1ei isolated no-npm PATH rendering (covered on macOS/Linux/WSL)" PASS ;;
-  *) case "$DECLARED_OUT" in *'Playwright MCP: valid integrity-locked plugin config but npm is missing from PATH'*) check "P1ei valid declaration without npm renders degraded warning" PASS ;; *) check "P1ei declared/no-npm warning (got: $DECLARED_OUT)" FAIL ;; esac ;;
+PW_TRIMMED_SKILL="$SBOX/doctor-skill-without-version-warnings.md"
+node -e '
+  const fs = require("fs");
+  const text = fs.readFileSync(process.argv[1], "utf8");
+  const kept = text.split(/\n(?=- \*\*)/).filter((b) => !/^- \*\*⚠️ playwright-cli: installed \(…\), /.test(b));
+  fs.writeFileSync(process.argv[2], kept.join("\n"));
+' "$VF_SKILL" "$PW_TRIMMED_SKILL" 2>/dev/null
+PW_TRIMMED_REPORT="$(row_needles playwright-cli "$PW_TRIMMED_SKILL")"
+case "${PW_TRIMMED_REPORT##*	}" in
+  *'[not the version the browser consent gate was measured against]'*'[but the version the browser consent gate was measured against could not be read]'*)
+    check "P1vg1-control deleting both version WARN bullets from the skill turns P1vg1 red" PASS ;;
+  *) check "P1vg1-control deleting both version WARN bullets from the skill turns P1vg1 red (got: $PW_TRIMMED_REPORT)" FAIL ;;
 esac
-READY_HELPER="$(ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_GH=authed ZDOC_PLAYWRIGHT_TOOLS=ready \
-  ZENSU_DOCTOR_PLUGIN_DIR="$MCP_PLUG" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
-  bash "$HELPER" 2>/dev/null)"; READY_HELPER_RC=$?
-[ "$READY_HELPER_RC" -eq 0 ] && case "$READY_HELPER" in *'Playwright MCP: loaded and ready'*) check "P1ej helper requires valid plugin config + loaded-tool signal for readiness" PASS ;; *) check "P1ej helper ready message (got: $READY_HELPER)" FAIL ;; esac || check "P1ej helper ready path (rc=$READY_HELPER_RC)" FAIL
-PATH_ONLY="$(ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_GH=authed ZDOC_PLAYWRIGHT=present \
+OK_TRIMMED_SKILL="$SBOX/doctor-skill-without-ok-bullets.md"
+node -e '
+  const fs = require("fs");
+  const text = fs.readFileSync(process.argv[1], "utf8");
+  const kept = text.split(/\n(?=- \*\*)/).filter((b) => !/^- \*\*✅ (verify-feature: consent mode ready|playwright-cli: installed)/.test(b));
+  fs.writeFileSync(process.argv[2], kept.join("\n"));
+' "$VF_SKILL" "$OK_TRIMMED_SKILL" 2>/dev/null
+VF_OK_TRIMMED_REPORT="$(row_needles verify-feature "$OK_TRIMMED_SKILL")"
+case "${VF_OK_TRIMMED_REPORT##*	}" in
+  *'[✅ verify-feature: consent mode ready]'*) check "P1vg-control2 deleting the consent-ready OK bullet from the skill turns P1vg red" PASS ;;
+  *) check "P1vg-control2 deleting the consent-ready OK bullet from the skill turns P1vg red (got: $VF_OK_TRIMMED_REPORT)" FAIL ;;
+esac
+PW_OK_TRIMMED_REPORT="$(row_needles playwright-cli "$OK_TRIMMED_SKILL")"
+case "${PW_OK_TRIMMED_REPORT##*	}" in
+  *'[✅ playwright-cli: installed]'*) check "P1vg1-control2 deleting the installed OK bullet from the skill turns P1vg1 red" PASS ;;
+  *) check "P1vg1-control2 deleting the installed OK bullet from the skill turns P1vg1 red (got: $PW_OK_TRIMMED_REPORT)" FAIL ;;
+esac
+
+# --- playwright-cli detection ----------------------------------------------
+pw_row() {
+  ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready \
+  ZDOC_PLAYWRIGHT="$1" ZDOC_PLAYWRIGHT_VERSION="$2" ZDOC_PLAYWRIGHT_SOURCE="${4-manifest}" ZDOC_PLAYWRIGHT_OWNER="${5:-}" ZDOC_VERIFY=consent \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
-  node "$REPORT" 2>/dev/null)"
-case "$PATH_ONLY" in *'PATH binary found, but /zensu:verify-feature requires loaded Playwright MCP tools'*) check "P1ee PATH-only Playwright is a warning, not false green" PASS ;; *) check "P1ee PATH-only Playwright warning (got: $PATH_ONLY)" FAIL ;; esac
+    node "${3:-$REPORT}" 2>/dev/null
+}
+PW_PIN="\`npm install -g @playwright/cli@$PW_MEASURED\`"
+PW_OTHER_V=9.8.7
+[ "$PW_OTHER_V" != "$PW_MEASURED" ] || PW_OTHER_V=9.8.6
+PW_OTHER="$(pw_row present "$PW_OTHER_V")"
+PW_OTHER_ROW="⚠️  playwright-cli: installed ($PW_OTHER_V), not the version the browser consent gate was measured against ($PW_MEASURED) — its argument parser, ambient-variable names, global-config keys and run-config schema were not measured against $PW_OTHER_V, so the run-config helper refuses to start /zensu:verify-feature on it; install the measured version with $PW_PIN"
+case "$PW_OTHER" in *"$PW_OTHER_ROW"*) check "P1pc playwright-cli at another version warns and says what was not measured against it" PASS ;; *) check "P1pc playwright-cli at another version warns and says what was not measured against it" FAIL ;; esac
+case "$PW_OTHER" in *'all checks green'*) check "P1pc1 another playwright-cli version withholds the green summary" FAIL ;; *) check "P1pc1 another playwright-cli version withholds the green summary" PASS ;; esac
+PW_LONE="$SBOX/pw-lone/hooks/lib"
+mkdir -p "$SBOX/pw-lone/hooks"
+cp -R "$PLUGIN_DIR/hooks/lib" "$PW_LONE"
+rm -f "$PW_LONE/verify-consent-v1.js"
+if [ -f "$PW_LONE/zensu-doctor-report.js" ] && [ ! -e "$PW_LONE/verify-consent-v1.js" ]; then
+  check "P1pc2-control the renderer copy carries no consent module" PASS
+else
+  check "P1pc2-control the renderer copy carries no consent module" FAIL
+fi
+PW_UNREAD_ROW="⚠️  playwright-cli: installed ($PW_OTHER_V), but the version the browser consent gate was measured against could not be read — its argument parser, ambient-variable names, global-config keys and run-config schema were not checked against $PW_OTHER_V; an argument shape the gate does not recognize is denied rather than admitted"
+case "$(pw_row present "$PW_OTHER_V" "$PW_LONE/zensu-doctor-report.js")" in *"$PW_UNREAD_ROW"*) check "P1pc2 a missing consent module is named rather than compared against" PASS ;; *) check "P1pc2 a missing consent module is named rather than compared against" FAIL ;; esac
+ln -s "$PLUGIN_DIR/hooks/lib/verify-consent-v1.js" "$PW_LONE/verify-consent-v1.js" 2>/dev/null
+if [ -L "$PW_LONE/verify-consent-v1.js" ]; then
+  case "$(pw_row present "$PW_OTHER_V" "$PW_LONE/zensu-doctor-report.js")" in *"$PW_UNREAD_ROW"*) check "P1pc3 a symlinked consent module is refused rather than followed" PASS ;; *) check "P1pc3 a symlinked consent module is refused rather than followed" FAIL ;; esac
+else
+  check "P1pc3 a symlinked consent module is refused rather than followed (no symlink on this host, covered on macOS/Linux)" PASS
+fi
+rm -rf "$SBOX/pw-lone"
+PW_NOVERSION="$(pw_row present "")"
+case "$PW_NOVERSION" in *"⚠️  playwright-cli: installed, but its version could not be read — the run-config helper refuses to start /zensu:verify-feature until it reads the version from the @playwright/cli package manifest; reinstall it with $PW_PIN"*) check "P1pc4 an unreadable playwright-cli version warns, says the run cannot start and names the pinned install" PASS ;; *) check "P1pc4 an unreadable playwright-cli version warns, says the run cannot start and names the pinned install" FAIL ;; esac
+case "$PW_NOVERSION" in *'all checks green'*) check "P1pc5 the unreadable-version warning withholds the green summary" FAIL ;; *) check "P1pc5 the unreadable-version warning withholds the green summary" PASS ;; esac
+PW_FORGED_V=$'1.2.3\n❌  zdoc-forged-row'
+case "$PW_FORGED_V" in *$'\n'*) check "P1pc6-control the forged version carries a line break" PASS ;; *) check "P1pc6-control the forged version carries a line break" FAIL ;; esac
+case "$(pw_row present "$PW_FORGED_V")" in
+  *'zdoc-forged-row'*) check "P1pc6 a relayed version cannot forge a report row" FAIL ;;
+  *'⚠️  playwright-cli: installed, but its version could not be read'*) check "P1pc6 a relayed version cannot forge a report row" PASS ;;
+  *) check "P1pc6 a relayed version cannot forge a report row" FAIL ;;
+esac
+PW_ABSENT="$(pw_row absent "")"
+case "$PW_ABSENT" in *'⚠️  playwright-cli: not found on PATH — /zensu:verify-feature cannot drive the UI'*"$PW_PIN"*'`brew install playwright-cli` is unpinned'*) check "P1pc7 a missing playwright-cli warns, names the pinned npm install and labels brew unpinned" PASS ;; *) check "P1pc7 a missing playwright-cli warns, names the pinned npm install and labels brew unpinned" FAIL ;; esac
+PW_SELF="$(pw_row present "$PW_MEASURED" "" self-reported)"
+case "$PW_SELF" in *"⚠️  playwright-cli: installed, and reports $PW_MEASURED when run, but no @playwright/cli package manifest was found beside it"*"$PW_PIN"*) check "P1pc9 a self-reported version warns even when it equals the measured one" PASS ;; *) check "P1pc9 a self-reported version warns even when it equals the measured one" FAIL ;; esac
+case "$PW_SELF" in *'✅  playwright-cli'*) check "P1pc9a a self-reported version never renders OK" FAIL ;; *) check "P1pc9a a self-reported version never renders OK" PASS ;; esac
+case "$(pw_row present "" "" foreign not-playwright)" in *"⚠️  playwright-cli: the binary on PATH belongs to the package not-playwright, not @playwright/cli — it was not run"*) check "P1pc10 a binary owned by another package is named with its owner and never run" PASS ;; *) check "P1pc10 a binary owned by another package is named with its owner and never run" FAIL ;; esac
+case "$(pw_row present "" "" foreign $'evil\n❌  zdoc-forged-row')" in
+  *'zdoc-forged-row'*) check "P1pc10a a relayed owner cannot forge a report row" FAIL ;;
+  *'⚠️  playwright-cli: the binary on PATH belongs to the package'*) check "P1pc10a a relayed owner cannot forge a report row" PASS ;;
+  *) check "P1pc10a a relayed owner cannot forge a report row" FAIL ;;
+esac
+case "$(pw_row present "" "" malformed)" in *'⚠️  playwright-cli: the package manifest beside the binary on PATH could not be judged — it was not run'*) check "P1pc11 a malformed manifest warns and the binary is never run" PASS ;; *) check "P1pc11 a malformed manifest warns and the binary is never run" FAIL ;; esac
+case "$(pw_row present "$PW_MEASURED-beta.1")" in *"⚠️  playwright-cli: installed ($PW_MEASURED-beta.1), not the version the browser consent gate was measured against ($PW_MEASURED)"*) check "P1pc12 a prerelease suffix is kept, so it never matches the measured version" PASS ;; *) check "P1pc12 a prerelease suffix is kept, so it never matches the measured version" FAIL ;; esac
+case "$(pw_row present "$PW_MEASURED" "" "")" in *'✅  playwright-cli'*) check "P1pc13 a version of unknown provenance never renders OK" FAIL ;; *'⚠️  playwright-cli: installed, but its version could not be read'*) check "P1pc13 a version of unknown provenance never renders OK" PASS ;; *) check "P1pc13 a version of unknown provenance never renders OK" FAIL ;; esac
+case "$PW_SELF" in *"was found beside it, as happens when the playwright-cli on PATH is a wrapper script outside the package"*"$PW_PIN and put the directory npm installs it into first on PATH, ahead of any wrapper"*) check "P1pc9b a self-reported version names the wrapper case and the PATH remedy" PASS ;; *) check "P1pc9b a self-reported version names the wrapper case and the PATH remedy" FAIL ;; esac
+PW_UNSTABLE="$(pw_row present "" "" cwd-relative)"
+case "$PW_UNSTABLE" in *'⚠️  playwright-cli: PATH reaches it through an empty or relative entry, which the shell reads against the working directory of each call — it was not run'*'remove that entry from PATH, or move it behind the directory that holds playwright-cli'*) check "P1pc14 a PATH entry read against the working directory warns, names the helper refusal and the remedy" PASS ;; *) check "P1pc14 a PATH entry read against the working directory warns, names the helper refusal and the remedy" FAIL ;; esac
+case "$PW_UNSTABLE" in *'✅  playwright-cli'*|*'all checks green'*) check "P1pc14a a working-directory PATH entry never renders OK" FAIL ;; *) check "P1pc14a a working-directory PATH entry never renders OK" PASS ;; esac
+case "$PW_ABSENT" in *'all checks green'*) check "P1pc8 the missing-playwright-cli warning withholds the green summary" FAIL ;; *) check "P1pc8 the missing-playwright-cli warning withholds the green summary" PASS ;; esac
+PW_STUB_DIR="$SBOX/pw-stub-bin"
+PW_STUB_LOG="$SBOX/pw-stub.log"
+mkdir -p "$PW_STUB_DIR"
+printf '%s\n' '#!/bin/sh' 'printf "%s|%s\n" "$*" "${NO_UPDATE_NOTIFIER:-}" >> "$PW_STUB_LOG"' 'printf "%s\n" "${PW_STUB_VERSION:-}"' > "$PW_STUB_DIR/playwright-cli"
+chmod +x "$PW_STUB_DIR/playwright-cli"
+pw_wrap() {
+  env -u ZDOC_PLAYWRIGHT -u ZDOC_PLAYWRIGHT_VERSION -u NO_UPDATE_NOTIFIER \
+    PATH="${2:-$PW_STUB_DIR}:$PATH" PW_STUB_LOG="$PW_STUB_LOG" PW_STUB_VERSION="$1" \
+    ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_VERIFY=consent \
+    ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
+    bash "$HELPER" 2>/dev/null
+}
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) check "P1pw-P1pw2b the wrapper runs a shell-script playwright-cli for its version (covered on macOS/Linux/WSL)" PASS ;;
+  *)
+    rm -f "$PW_STUB_LOG"
+    case "$(pw_wrap "$PW_MEASURED")" in *"⚠️  playwright-cli: installed, and reports $PW_MEASURED when run, but no @playwright/cli package manifest was found beside it"*) check "P1pw the wrapper finds playwright-cli on PATH, asks it for its version without a manifest, and never renders that OK" PASS ;; *) check "P1pw the wrapper finds playwright-cli on PATH, asks it for its version without a manifest, and never renders that OK" FAIL ;; esac
+    PW_STUB_CALLS="$(cat "$PW_STUB_LOG" 2>/dev/null)"
+    if [ "$PW_STUB_CALLS" = '--version|1' ]; then
+      check "P1pw1 the wrapper runs playwright-cli exactly once, as --version with the update notifier off" PASS
+    else
+      check "P1pw1 the wrapper runs playwright-cli exactly once, as --version with the update notifier off (got: $PW_STUB_CALLS)" FAIL
+    fi
+    case "$(pw_wrap $'Version '"$PW_OTHER_V"$'\nnotice: 7.7.7 is available')" in *"⚠️  playwright-cli: installed, and reports $PW_OTHER_V when run"*) check "P1pw2 the wrapper keeps the first line of the version output" PASS ;; *) check "P1pw2 the wrapper keeps the first line of the version output" FAIL ;; esac
+    case "$(pw_wrap "Version $PW_OTHER_V-beta.2 (build 4)")" in *"⚠️  playwright-cli: installed, and reports $PW_OTHER_V-beta.2 when run"*) check "P1pw2b the wrapper keeps the whole version of that line, prerelease suffix included" PASS ;; *) check "P1pw2b the wrapper keeps the whole version of that line, prerelease suffix included" FAIL ;; esac
+    ;;
+esac
+PW_PKG_ROOT="$SBOX/pw-pkg"
+PW_PKG="$PW_PKG_ROOT/lib/node_modules/@playwright/cli"
+mkdir -p "$PW_PKG" "$PW_PKG_ROOT/bin"
+printf '{"name":"@playwright/cli","version":"%s"}\n' "$PW_OTHER_V" > "$PW_PKG/package.json"
+printf '%s\n' '#!/bin/sh' 'printf "%s|%s\n" "$*" "${NO_UPDATE_NOTIFIER:-}" >> "$PW_STUB_LOG"' 'printf "%s\n" "${PW_STUB_VERSION:-}"' > "$PW_PKG/playwright-cli.js"
+chmod +x "$PW_PKG/playwright-cli.js"
+ln -s "$PW_PKG/playwright-cli.js" "$PW_PKG_ROOT/bin/playwright-cli" 2>/dev/null
+if [ -L "$PW_PKG_ROOT/bin/playwright-cli" ]; then
+  check "P1pw5-control the manifest fixture's playwright-cli is a symlink into the package" PASS
+  rm -f "$PW_STUB_LOG"
+  case "$(pw_wrap 1.1.1 "$PW_PKG_ROOT/bin")" in *"⚠️  playwright-cli: installed ($PW_OTHER_V), not the version"*) check "P1pw5 the wrapper reads the version from the resolved @playwright/cli package.json" PASS ;; *) check "P1pw5 the wrapper reads the version from the resolved @playwright/cli package.json" FAIL ;; esac
+  [ ! -s "$PW_STUB_LOG" ] \
+    && check "P1pw5a reading package.json runs no playwright-cli code" PASS \
+    || check "P1pw5a reading package.json runs no playwright-cli code (got: $(cat "$PW_STUB_LOG" 2>/dev/null))" FAIL
+  printf '{"name":"not-playwright","version":"%s"}\n' "$PW_OTHER_V" > "$PW_PKG/package.json"
+  rm -f "$PW_STUB_LOG"
+  case "$(pw_wrap "$PW_MEASURED" "$PW_PKG_ROOT/bin")" in *"⚠️  playwright-cli: the binary on PATH belongs to the package not-playwright, not @playwright/cli — it was not run"*) check "P1pw6 a package.json naming another package is reported with its owner" PASS ;; *) check "P1pw6 a package.json naming another package is reported with its owner" FAIL ;; esac
+  [ ! -s "$PW_STUB_LOG" ] \
+    && check "P1pw6a a binary whose manifest names another package is never run" PASS \
+    || check "P1pw6a a binary whose manifest names another package is never run (got: $(cat "$PW_STUB_LOG" 2>/dev/null))" FAIL
+  printf '{not json\n' > "$PW_PKG/package.json"
+  rm -f "$PW_STUB_LOG"
+  case "$(pw_wrap "$PW_MEASURED" "$PW_PKG_ROOT/bin")" in *'⚠️  playwright-cli: the package manifest beside the binary on PATH could not be judged — it was not run'*) check "P1pw6b a malformed package.json is reported as such" PASS ;; *) check "P1pw6b a malformed package.json is reported as such" FAIL ;; esac
+  [ ! -s "$PW_STUB_LOG" ] \
+    && check "P1pw6c a binary beside a malformed manifest is never run" PASS \
+    || check "P1pw6c a binary beside a malformed manifest is never run (got: $(cat "$PW_STUB_LOG" 2>/dev/null))" FAIL
+  printf '{"name":"@playwright/cli","version":"%s-beta.1"}\n' "$PW_MEASURED" > "$PW_PKG/package.json"
+  case "$(pw_wrap "$PW_MEASURED" "$PW_PKG_ROOT/bin")" in *"⚠️  playwright-cli: installed ($PW_MEASURED-beta.1), not the version"*) check "P1pw8 the wrapper keeps a prerelease suffix from the manifest" PASS ;; *) check "P1pw8 the wrapper keeps a prerelease suffix from the manifest" FAIL ;; esac
+  printf '{"name":"@playwright/cli","version":"%s"}\n' "$PW_MEASURED" > "$PW_PKG/package.json"
+  case "$(pw_wrap "$PW_MEASURED" "$PW_PKG_ROOT/bin")" in *"✅  playwright-cli: installed ($PW_MEASURED)"*) check "P1pw9-control the measured manifest first on PATH renders OK" PASS ;; *) check "P1pw9-control the measured manifest first on PATH renders OK" FAIL ;; esac
+else
+  check "P1pw5-P1pw9-control the manifest fixture needs a symlink into the package (no symlink on this host, covered on macOS/Linux)" PASS
+fi
+rm -f "$PW_STUB_LOG"
+case "$(pw_wrap "$PW_MEASURED" ":$PW_PKG_ROOT/bin")" in *'⚠️  playwright-cli: PATH reaches it through an empty or relative entry'*) check "P1pw9 an empty PATH entry ahead of the measured playwright-cli is reported, as the helper refuses it" PASS ;; *) check "P1pw9 an empty PATH entry ahead of the measured playwright-cli is reported, as the helper refuses it" FAIL ;; esac
+[ ! -s "$PW_STUB_LOG" ] \
+  && check "P1pw9a a playwright-cli behind a working-directory PATH entry is never run" PASS \
+  || check "P1pw9a a playwright-cli behind a working-directory PATH entry is never run (got: $(cat "$PW_STUB_LOG" 2>/dev/null))" FAIL
+PW_CWD="$SBOX/pw-cwd"
+mkdir -p "$PW_CWD/rel/bin"
+cp "$PW_STUB_DIR/playwright-cli" "$PW_CWD/rel/bin/playwright-cli"
+chmod +x "$PW_CWD/rel/bin/playwright-cli"
+case "$(cd "$PW_CWD" && pw_wrap "$PW_MEASURED" "rel/bin")" in *'⚠️  playwright-cli: PATH reaches it through an empty or relative entry'*) check "P1pw10 the probe resolves a relative PATH entry against the caller's working directory, not the plugin's" PASS ;; *) check "P1pw10 the probe resolves a relative PATH entry against the caller's working directory, not the plugin's" FAIL ;; esac
+rm -rf "$PW_CWD"
+rm -rf "$PW_PKG_ROOT"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) check "P1pw7 a shell-script playwright-cli that never answers is cut off by the bound (covered on macOS/Linux/WSL)" PASS ;;
+  *)
+    PW_SLOW_DIR="$SBOX/pw-slow-bin"
+    mkdir -p "$PW_SLOW_DIR"
+    printf '%s\n' '#!/bin/sh' 'printf "%s|%s\n" "$*" "${NO_UPDATE_NOTIFIER:-}" >> "$PW_STUB_LOG"' 'exec sleep 12' > "$PW_SLOW_DIR/playwright-cli"
+    chmod +x "$PW_SLOW_DIR/playwright-cli"
+    rm -f "$PW_STUB_LOG"
+    PW_SLOW_START="$(date +%s)"
+    PW_SLOW_OUT="$(pw_wrap '' "$PW_SLOW_DIR")"
+    PW_SLOW_SECS=$(( $(date +%s) - PW_SLOW_START ))
+    PW_SLOW_CALLS="$(cat "$PW_STUB_LOG" 2>/dev/null)"
+    if [ "$PW_SLOW_CALLS" = '--version|1' ]; then
+      check "P1pw7-control the never-answering playwright-cli was started once, as --version, so the bound cut off a running binary" PASS
+    else
+      check "P1pw7-control the never-answering playwright-cli was started once, as --version, so the bound cut off a running binary (got: ${PW_SLOW_CALLS:-<never started>})" FAIL
+    fi
+    case "$PW_SLOW_OUT" in
+      *'⚠️  playwright-cli: installed, but its version could not be read'*)
+        [ "$PW_SLOW_SECS" -lt 10 ] \
+          && check "P1pw7 a playwright-cli that never answers is cut off by the bound on every host (${PW_SLOW_SECS}s)" PASS \
+          || check "P1pw7 a playwright-cli that never answers is cut off by the bound on every host (${PW_SLOW_SECS}s)" FAIL ;;
+      *) check "P1pw7 a playwright-cli that never answers is cut off by the bound on every host (${PW_SLOW_SECS}s)" FAIL ;;
+    esac
+    rm -rf "$PW_SLOW_DIR"
+    ;;
+esac
+case "$(pw_wrap '')" in *'⚠️  playwright-cli: installed, but its version could not be read'*) check "P1pw3 a playwright-cli that prints no version is found but warns" PASS ;; *) check "P1pw3 a playwright-cli that prints no version is found but warns" FAIL ;; esac
+PW_NOCLI_BIN="$SBOX/pw-nocli-bin"
+mkdir -p "$PW_NOCLI_BIN"
+ln -s "$(command -v node)" "$PW_NOCLI_BIN/node"
+ln -s "$(command -v dirname)" "$PW_NOCLI_BIN/dirname"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) check "P1pw4 the wrapper reports playwright-cli absent from an isolated PATH (covered on macOS/Linux/WSL)" PASS ;;
+  *)
+    if env PATH="$PW_NOCLI_BIN" /bin/bash -c 'command -v node' >/dev/null 2>&1 \
+      && ! env PATH="$PW_NOCLI_BIN" /bin/bash -c 'command -v playwright-cli' >/dev/null 2>&1; then
+      check "P1pw4-control the isolated PATH holds node and no playwright-cli" PASS
+    else
+      check "P1pw4-control the isolated PATH holds node and no playwright-cli" FAIL
+    fi
+    PW_ABSENT_WRAP="$(env -u ZDOC_PLAYWRIGHT -u ZDOC_PLAYWRIGHT_VERSION PATH="$PW_NOCLI_BIN" \
+      ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_VERIFY=consent \
+      ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
+      /bin/bash "$HELPER" 2>/dev/null)"
+    case "$PW_ABSENT_WRAP" in *'⚠️  playwright-cli: not found on PATH'*) check "P1pw4 the wrapper reports playwright-cli absent when it is not on PATH" PASS ;; *) check "P1pw4 the wrapper reports playwright-cli absent when it is not on PATH" FAIL ;; esac
+    ;;
+esac
 
 # --- version mismatch ------------------------------------------------------
 printf '{"plugins":[{"name":"zensu","version":"9.9.9"}]}\n' > "$SBOX/plug/.claude-plugin/marketplace.json"
@@ -709,126 +1030,6 @@ CAS_FILE="$CAS_ST/tdd-phase-${CAS_KEY}.json"
 OUT="$(run_report "$PLUGIN_DIR" "$SBOX/good-cfg.json" "$CAS_PROJECT")"
 case "$OUT" in *'1 validated CAS workflow document(s); reviewRound/stopBlockCount/implStopCount are integrated fields'*) check "P1m valid CAS workflow document is reported with integrated counters" PASS ;; *) check "P1m valid CAS workflow state (got: $OUT)" FAIL ;; esac
 case "$OUT" in *'per-session marker'*|*'1 rounds'*|*'1 stopblocks'*) check "P1ma retired sidecars are not counted as session state" FAIL ;; *) check "P1ma retired sidecars are not counted as session state" PASS ;; esac
-
-# P1vs/P1vs1/P1vs2 drive the WRAPPER's execution probe, which every exec_row case skips by
-# supplying ZDOC_VERIFY_EXEC directly. Without them the ran/none arms and the export are pinned
-# by a source grep only, and dropping ZDOC_VERIFY_EXEC from the export list keeps those greps
-# green while the row never renders. A bound session is what makes the probe reachable at all.
-printf 'version: 1\n' > "$CAS_PROJECT/.zensu/runtime.yaml"
-VF_WRAP_BASE=(ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=ready
-  ZENSU_DOCTOR_PLUGIN_DIR="$PLUGIN_DIR" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-  ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$CAS_PROJECT")
-vf_wrap() { env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 "${VF_WRAP_BASE[@]}" bash "$HELPER" 2>/dev/null; }
-rm -f "$CAS_ST"/verify-consent-exec-*.json
-case "$(vf_wrap)" in
-  *'verify-feature gate: registered, and no live execution marker was read'*) check "P1vs the wrapper derives none when the state directory holds no marker" PASS ;;
-  *) check "P1vs the wrapper derives none when the state directory holds no marker" FAIL ;;
-esac
-# The row may not assert a cause the probe did not establish. Markers expire, and the reaper
-# removes them on the next write, so a session that drove the browser past the window renders
-# byte-identically to one that never did — naming only "no navigation yet" was false for it.
-case "$(vf_wrap)" in
-  *'or that its marker has passed'*) check "P1vs0 the none row names expiry beside the never-navigated cause" PASS ;;
-  *) check "P1vs0 the none row names expiry beside the never-navigated cause" FAIL ;;
-esac
-VF_WRAP_EV="$(node -e '
-  const c = require(process.argv[1] + "/hooks/lib/verify-consent-v1.js");
-  const path = require("node:path");
-  const root = require("node:fs").realpathSync.native(process.argv[2]);
-  process.stdout.write(c.evidencePathFor(path.join(c.evidenceDirFor(root), `verify-consent-${process.argv[3]}.json`), "http://127.0.0.1:4400"));
-' "$PLUGIN_DIR" "$CAS_PROJECT" "$CAS_KEY" 2>/dev/null)"
-node -e '
-  const c = require(process.argv[1] + "/hooks/lib/verify-consent-v1.js");
-  const r = c.writeExecutionEvidence(process.argv[2], "http://127.0.0.1:4400", { projectRoot: process.argv[3], verdict: "allowed" });
-  process.exit(r.ok ? 0 : 1);
-' "$PLUGIN_DIR" "$VF_WRAP_EV" "$CAS_PROJECT" 2>/dev/null   && check "P1vs-control the marker fixture landed" PASS || check "P1vs-control the marker fixture landed" FAIL
-# The needle names what only the ALLOWED row carries: the shorter lead is a strict PREFIX of the
-# prompted-origin row too, so inverting the wrapper's verdict ternary left this check green.
-case "$(vf_wrap)" in
-  *'executed in this session — a live marker'*) check "P1vs1 the wrapper derives ran from a live marker for this session" PASS ;;
-  *) check "P1vs1 the wrapper derives ran from a live marker for this session" FAIL ;;
-esac
-# And the exit-3 arm is DRIVEN rather than supplied: every exec_row case hands the state in
-# directly and skips the derivation, so the ternary that reads the marker's verdict had no
-# executed case in either direction.
-node -e '
-  const c = require(process.argv[1] + "/hooks/lib/verify-consent-v1.js");
-  const r = c.writeExecutionEvidence(process.argv[2], "http://127.0.0.1:4400", { projectRoot: process.argv[3] });
-  process.exit(r.ok && r.verdict === "asked" ? 0 : 1);
-' "$PLUGIN_DIR" "$VF_WRAP_EV" "$CAS_PROJECT" 2>/dev/null   && check "P1vs3-control the asked-verdict marker fixture landed" PASS || check "P1vs3-control the asked-verdict marker fixture landed" FAIL
-case "$(vf_wrap)" in
-  *'on a prompted origin'*) check "P1vs3 the wrapper derives ran-asked from a marker the gate only asked about" PASS ;;
-  *) check "P1vs3 the wrapper derives ran-asked from a marker the gate only asked about" FAIL ;;
-esac
-rm -f "$CAS_ST"/verify-consent-exec-*.json
-# A walk that did not FINISH is not a walk that found nothing. Without this the budget-exhausted
-# read rendered the benign green row asserting a cause the probe never established.
-node -e '
-  const fs = require("node:fs");
-  const path = require("node:path");
-  const c = require(process.argv[1] + "/hooks/lib/verify-consent-v1.js");
-  const dir = process.argv[2];
-  const key = process.argv[3];
-  // Bodies the reader REFUSES: they cost walk budget before they are parsed, and no live marker
-  // survives them, so the walk ends truncated with nothing found — which is the only shape that
-  // separates "did not finish" from "finished and found nothing".
-  for (let i = 0; i <= c.MAX_EVIDENCE_FILES; i += 1) {
-    const origin = `http://127.0.0.1:${6000 + i}`;
-    fs.writeFileSync(
-      path.join(dir, `verify-consent-exec-${key}-${c.evidenceOriginTag(origin)}.json`),
-      "{}\n",
-    );
-  }
-' "$PLUGIN_DIR" "$CAS_ST" "$CAS_KEY" 2>/dev/null   && check "P1vs4-control the crowded state directory landed" PASS || check "P1vs4-control the crowded state directory landed" FAIL
-case "$(vf_wrap)" in
-  *'verify-feature gate: execution could not be judged'*) check "P1vs4 a walk that exhausted its budget is a missing check, not a clean read" PASS ;;
-  *) check "P1vs4 a walk that exhausted its budget is a missing check, not a clean read" FAIL ;;
-esac
-rm -f "$CAS_ST"/verify-consent-exec-*.json
-# A SIBLING session's marker must not satisfy a row that claims this session executed.
-# WRITTEN, not renamed: this used to `mv "$VF_WRAP_EV"`, a path two earlier `rm -f` sweeps had
-# already deleted, so the `mv` failed into 2>/dev/null and the row was rendered over an EMPTY
-# directory — which trivially does not claim an execution. The session filter could be deleted
-# with the check still green. The control below is what keeps that from coming back.
-VF_SIBLING_KEY="scv1_$(printf 'e%.0s' $(seq 64))"
-VF_SIBLING="$CAS_ST/verify-consent-exec-$VF_SIBLING_KEY-0123456789abcdef.json"
-node -e '
-  const fs = require("node:fs");
-  const c = require(process.argv[1] + "/hooks/lib/verify-consent-v1.js");
-  fs.writeFileSync(process.argv[2], JSON.stringify({
-    version: c.EVIDENCE_VERSION,
-    origin: "http://127.0.0.1:4400",
-    verdict: c.EVIDENCE_VERDICT_ALLOWED,
-    at: new Date().toISOString(),
-  }) + "\n");
-' "$PLUGIN_DIR" "$VF_SIBLING" 2>/dev/null
-if [ -s "$VF_SIBLING" ]; then
-  check "P1vs2-control the sibling-session marker fixture landed" PASS
-else
-  check "P1vs2-control the sibling-session marker fixture landed" FAIL
-fi
-case "$(vf_wrap)" in
-  *'verify-feature gate: executed in this session'*) check "P1vs2 a sibling session marker does not satisfy the row" FAIL ;;
-  *) check "P1vs2 a sibling session marker does not satisfy the row" PASS ;;
-esac
-# Discrimination: the SAME body under THIS session's key does satisfy it, so the refusal above is
-# about the session binding and not about the fixture being unreadable.
-rm -f "$VF_SIBLING"
-node -e '
-  const fs = require("node:fs");
-  const c = require(process.argv[1] + "/hooks/lib/verify-consent-v1.js");
-  fs.writeFileSync(process.argv[2], JSON.stringify({
-    version: c.EVIDENCE_VERSION,
-    origin: "http://127.0.0.1:4400",
-    verdict: c.EVIDENCE_VERDICT_ALLOWED,
-    at: new Date().toISOString(),
-  }) + "\n");
-' "$PLUGIN_DIR" "$VF_WRAP_EV" 2>/dev/null
-case "$(vf_wrap)" in
-  *'verify-feature gate: executed in this session'*) check "P1vs2a the same marker under this session's key does satisfy it" PASS ;;
-  *) check "P1vs2a the same marker under this session's key does satisfy it" FAIL ;;
-esac
-rm -f "$CAS_ST"/verify-consent-exec-*.json "$CAS_PROJECT/.zensu/runtime.yaml"
 
 # the chain block: shape row, truncated session key, no false alarm, exit 0
 case "$OUT" in *'chain: 1 review chain(s) — scv1_'*': implementing'*) check "P1mc chain row names the shape and a truncated session key" PASS ;; *) check "P1mc chain row names the shape and a truncated session key (got: $OUT)" FAIL ;; esac
@@ -3924,12 +4125,32 @@ ap_pointer() { # ap_pointer <owner> <runId>
       JSON.stringify({ schemaVersion: 1, runId: process.env.AP_RUN }));
   '
 }
+# Both windows are UNSET in the PARENT shell, once, and this is a correctness bound
+# rather than tidiness: this suite is normally run from inside a Zensu session, and
+# `zensu-doctor.sh` exports both `ZDOC_TTL_HOURS` and `ZDOC_OWNER_ACTIVITY_TTL_HOURS`.
+# An inherited value reaches `ap_report`, which pins neither — and P1nk and P1nk6
+# grade the rendered BUILT-IN default, so a developer's ambient window would make them
+# assert whatever that session happened to hold. Unsetting here rather than inside
+# `ap_report` is what keeps `ap_report_win` working: that helper sets the two in its
+# own subshell around this call, and an `unset` inside the callee would wipe them.
+unset ZDOC_TTL_HOURS ZDOC_OWNER_ACTIVITY_TTL_HOURS ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS
 ap_report() { # ap_report <binding> <session-key>
   ZDOC_BINDING="$1" ZDOC_SESSION_KEY="$2" \
   ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
   ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$AP_P" \
     node "$REPORT" 2>/dev/null
+}
+
+# Same render, with every window pinned. The clause under test quotes some of them and
+# the fixture must be able to tell which, so a case that pins none proves nothing. The
+# release window takes the adoption value unless a fifth argument sets it apart, so the
+# cases written before the two verbs split keep grading one number; P1nk3d is the one
+# that sets them apart. The subshell keeps the assignments out of the calling shell,
+# where they would leak into every later ap_report.
+ap_report_win() { # ap_report_win <ownerActivityTtl> <pendingTtl> <binding> <session-key> [releaseTtl]
+  ( ZDOC_OWNER_ACTIVITY_TTL_HOURS="$1" ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS="${5-$1}" \
+      ZDOC_TTL_HOURS="$2" ap_report "$3" "$4" )
 }
 
 # P1na — the stage vocabulary is a HAND COPY of zensu-autopilot-state.sh, which owns
@@ -3993,7 +4214,8 @@ else
 fi
 
 # P1nc — a FOREIGN nonterminal run is reported, names the run, and prescribes the
-# GUIDED release form. `--confirm` must be absent FROM THE AUTOPILOT ROW: that row
+# GUIDED adoption form FIRST and the GUIDED release form second — a cancel reached for
+# first cannot be undone. `--confirm` must be absent FROM THE AUTOPILOT ROW: that row
 # is read by the model, and a complete invocation there routes around the only
 # place consent lives. The negative is SCOPED to the row rather than to the whole
 # report, because other rows legitimately carry their own `--confirm` remedy — the
@@ -4004,9 +4226,11 @@ AP_FOREIGN_OUT="$(ap_report bound "$AP_OWN")"
 if printf '%s' "$AP_FOREIGN_OUT" | grep -qF 'autopilot: nonterminal durable run run_foreign_a at stage BLOCKED' \
   && printf '%s' "$AP_FOREIGN_OUT" | grep -qF 'owned by another session' \
   && printf '%s' "$AP_FOREIGN_OUT" | grep -qF '/zensu:autopilot-release' \
+  && printf '%s' "$AP_FOREIGN_OUT" | grep -F 'autopilot: nonterminal durable run' \
+    | awk 'BEGIN { ok = 0 } { a = index($0, "/zensu:autopilot-adopt"); r = index($0, "/zensu:autopilot-release"); if (a > 0 && r > 0 && a < r) ok = 1 } END { exit !ok }' \
   && ! printf '%s' "$AP_FOREIGN_OUT" | grep -F 'autopilot: nonterminal durable run' \
     | grep -qF -- '--confirm'; then
-  check "P1nc a foreign nonterminal run is named with the guided release form and no --confirm" PASS
+  check "P1nc a foreign nonterminal run names the guided adoption form before the guided release form, with no --confirm" PASS
 else
   check "P1nc foreign run row (got: $AP_FOREIGN_OUT)" FAIL
 fi
@@ -4221,14 +4445,39 @@ fi
 
 # P1nk — the owner-silence branch. Every earlier fixture leaves no workflow document,
 # so the populated arm and its TTL clause had no executed case at all.
-rm -f "$AP_STATE"/autopilot-run-*.json
+# The pointer state is part of the fixture, not an accident of what ran before: the
+# `adoption does not` half is the `designates === false` arm, so a case inserted above
+# this one that leaves a designating pointer would flip the branch and fail this check
+# for a reason unrelated to the fallback window it is named for.
+# The digest glob does NOT match the LEGACY `autopilot-active.json`, so every reset in
+# this block names it as well. Nothing above plants one today; a check that later does
+# would otherwise leak a pointer into these fixtures, where `autopilotPointerDesignates`
+# reads it and silently moves the clause from one arm to another.
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
 ap_run run_silence_a GATES "$AP_FOREIGN" "/w/t"
 printf '{}' > "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
 touch -t 200001010000 "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null
 AP_SILENCE_OUT="$(ap_report bound "$AP_OWN")"
+# The windows are UNSET here — `ap_report` pins no `ZDOC_*` value — so this case grades
+# the rendered release FALLBACK of 6h. The owner pointer is retired, so only the release
+# half renders, and the release fallback happens to equal the pending-review fallback:
+# this arm cannot tell those two apart. P1nk6 renders the adoption fallback of 1h beside
+# it, which can, and C57c binds each accessor to its own constant pair at source. An
+# unset value ALSO means no configured window reached this report, which the row must
+# say rather than quoting the built-in default as if it had been measured.
+# The AGE itself carries its own bound, and it is not decoration. The number is an
+# ordinary filesystem mtime read out of `.zensu/state/`, which this file records as
+# session-writable, so a single `touch -t` makes a live owner read as hours-silent —
+# and this row is the surface that then offers an irreversible cancel. The sibling
+# pointer clause already discloses exactly this shape one clause down; stating the
+# forgeable premise on one input and not the other is what made the row read as a
+# measurement rather than as evidence.
 if printf '%s' "$AP_SILENCE_OUT" | grep -qF 'last wrote its workflow document' \
-  && printf '%s' "$AP_SILENCE_OUT" | grep -qF 'h ago (a release refuses while that is under'; then
-  check "P1nk a foreign run with a workflow document renders the measured silence and its TTL clause" PASS
+  && printf '%s' "$AP_SILENCE_OUT" | grep -qF 'any session in this project can write' \
+  && printf '%s' "$AP_SILENCE_OUT" | grep -qF 'a release refuses while that is under 6h' \
+  && printf '%s' "$AP_SILENCE_OUT" | grep -qF 'adoption does not' \
+  && printf '%s' "$AP_SILENCE_OUT" | grep -qF 'no configured owner-activity window reached this report'; then
+  check "P1nk a foreign run with a workflow document renders the measured silence, its forgeable-mtime bound, the assumed fallback window and the per-verb clause" PASS
 else
   check "P1nk owner-silence branch (got: $AP_SILENCE_OUT)" FAIL
 fi
@@ -4239,50 +4488,749 @@ rm -f "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
 mkdir -p "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
 AP_BADBEACON_OUT="$(ap_report bound "$AP_OWN")"
 rmdir "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null
+# And the remedy above it must not read as executable — but the two verbs do NOT
+# abort alike, and no pointer designates this run in this fixture. Under the window
+# gate both share, release reaches `regularFile` with nothing further in its way and
+# aborts with exit 2; adoption nests that same call one branch deeper, inside
+# `if (ownerPointerDesignatesRun)`, so with the pointer retired it never opens the
+# file and the exit-2 claim is false for that half. Say "one branch deeper", never
+# "unconditionally": at window 0 neither verb opens the beacon at all, which is the
+# very ordering the arm above this one exists to state. P1nk1c is the designating
+# counterpart, where the both-verbs wording is the true one.
 if printf '%s' "$AP_BADBEACON_OUT" | grep -qF 'could not be read' \
-  && printf '%s' "$AP_BADBEACON_OUT" | grep -qF 'was NOT measured'; then
-  check "P1nk1 an unreadable liveness beacon is reported as a missing check, not as absence" PASS
+  && printf '%s' "$AP_BADBEACON_OUT" | grep -qF 'was NOT measured' \
+  && printf '%s' "$AP_BADBEACON_OUT" | grep -qF 'a release aborts on this beacon with exit 2' \
+  && printf '%s' "$AP_BADBEACON_OUT" | grep -qF 'adoption never opens it' \
+  && ! printf '%s' "$AP_BADBEACON_OUT" | grep -qF 'both verbs abort on this beacon'; then
+  check "P1nk1 an unreadable liveness beacon is a missing check, and the exit-2 abort is stated per verb rather than for both" PASS
 else
   check "P1nk1 unreadable beacon must not read as absence (got: $AP_BADBEACON_OUT)" FAIL
 fi
-# P1nk2 — the TTL clause states the RELEASE verb's exit-7 refusal, which lives inside
-# that verb's foreign-caller branch only. It must not appear beside an own run.
+# P1nk1c — the other half of the same arm. With the owner pointer still designating
+# the run, adoption DOES open the beacon, so the both-verbs wording becomes the
+# accurate one. Without this case the per-verb split above could be satisfied by a
+# renderer that dropped the both-verbs form entirely.
+ap_pointer "$AP_FOREIGN" run_silence_a
+mkdir -p "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+AP_BADBEACON_PTR_OUT="$(ap_report bound "$AP_OWN")"
+rmdir "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null
+rm -f "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+# The BOUND belongs here too, and its absence was the asymmetry four review seats
+# reported independently: this is the arm that PROMISES adoption's abort, and that
+# half holds only while the pointer designates the run. One unlink by any session in
+# the project makes the sentence false, so the row must state what the promise rests
+# on — the same clause the aged designating arm already carries.
+if printf '%s' "$AP_BADBEACON_PTR_OUT" | grep -qF 'both verbs abort on this beacon with exit 2' \
+  && printf '%s' "$AP_BADBEACON_PTR_OUT" | grep -qF 'any session in this project can delete'; then
+  check "P1nk1c a designating owner pointer restores the both-verbs exit-2 wording and bounds the adoption half" PASS
+else
+  check "P1nk1c designating-pointer exit-2 arm (got: $AP_BADBEACON_PTR_OUT)" FAIL
+fi
+# P1nk2 — the TTL clause states an exit-7 refusal that both verbs take against a
+# FOREIGN owner only. It must not appear beside an own run.
 rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/tdd-phase-*.json
 ap_run run_ownttl_a GATES "$AP_OWN" "/w/t"
 printf '{}' > "$AP_STATE/tdd-phase-$AP_OWN.json"
 AP_OWNTTL_OUT="$(ap_report bound "$AP_OWN")"
 if printf '%s' "$AP_OWNTTL_OUT" | grep -qF 'last wrote its workflow document' \
-  && ! printf '%s' "$AP_OWNTTL_OUT" | grep -qF 'a release refuses while that is under'; then
-  check "P1nk2 the release-TTL clause is withheld for a run this session owns" PASS
+  && ! printf '%s' "$AP_OWNTTL_OUT" | grep -qF 'while that is under'; then
+  check "P1nk2 the TTL clause is withheld for a run this session owns" PASS
 else
   check "P1nk2 own-run TTL clause (got: $AP_OWNTTL_OUT)" FAIL
 fi
 rm -f "$AP_STATE"/tdd-phase-*.json
 
+# P1nk3 — the clause quotes the window the two verbs actually read
+# (`autopilotOwnerActivityTtlHours`), never the pending-review window. Both are pinned
+# to different values, so a renderer that reads either one is distinguishable: the
+# defect this covers shipped because the row quoted `ZDOC_TTL_HOURS` while
+# `--autopilot-release` and `--autopilot-adopt` had moved to the new key, promising
+# hours of protection the destructive verb no longer gives.
+# The owner pointer DESIGNATES the run here, which is the only state in which the
+# adoption half of the claim holds: the adopt worker nests its exit-7 refusal inside
+# `if (ownerPointerDesignatesRun)`, so the two verbs agree only while that pointer is
+# in place. P1nk3b is the other half.
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/tdd-phase-*.json "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+ap_run run_window_a GATES "$AP_FOREIGN" "/w/t"
+ap_pointer "$AP_FOREIGN" run_window_a
+printf '{}' > "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+touch -t 200001010000 "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null
+AP_ACTTL_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+# The BOUND travels with the arm that PROMISES the protection, not only with the arm
+# that withholds it. P1nk3b's wording already discloses that the pointer is an
+# ordinary file any session can delete; stating it only there attached the caveat to
+# the weaker claim and omitted it from the stronger one, so a co-tenant unlinking one
+# file between this report and the user's action silently removes the refusal this
+# arm just guaranteed.
+# The TRUE direction of `supplied` belongs here too, and nothing asserted it: every
+# other check names the assumed-default disclosure positively, so hardcoding `supplied`
+# false would tell every reader that no window was configured while one was — on the row
+# that quotes the window beside an irreversible cancel.
+# The OFFER is the other half of the age split and it was pinned in one direction only.
+# This fixture is the outside-window twin of P1nkt — same designating pointer, a beacon
+# stamped in the year 2000 against a 3h window — and the two share the clause literal
+# above, so only the slash commands tell them apart. Without these positives a mutant
+# that sets `adoptBlockedBy = 'aged'` for every designating pointer, dropping the
+# `verdict.ageMs < window.hours * 3600000` guard, withholds the NON-DESTRUCTIVE verb for
+# a run adoption would in fact permit, and passes the whole suite.
+if printf '%s' "$AP_ACTTL_OUT" | grep -qF 'adoption refuses while that is under 3h and a release while it is under 3h' \
+  && printf '%s' "$AP_ACTTL_OUT" | grep -qF 'any session in this project can delete' \
+  && printf '%s' "$AP_ACTTL_OUT" | grep -F 'autopilot: nonterminal durable run run_window_a' \
+    | grep -qF '/zensu:autopilot-adopt' \
+  && printf '%s' "$AP_ACTTL_OUT" | grep -F 'autopilot: nonterminal durable run run_window_a' \
+    | grep -qF '/zensu:autopilot-release' \
+  && ! printf '%s' "$AP_ACTTL_OUT" | grep -qF 'no configured owner-activity window reached this report' \
+  && ! printf '%s' "$AP_ACTTL_OUT" | grep -qF 'under 6h'; then
+  check "P1nk3 with a designating owner pointer the clause quotes the owner-activity window, names both verbs, bounds the adoption half and OUTSIDE the window still offers both" PASS
+else
+  check "P1nk3 owner-activity window clause (got: $AP_ACTTL_OUT)" FAIL
+fi
+# P1nk3b — with the owner pointer retired, adoption owes nothing to the clock: the
+# adopt worker discloses `the previous owner's active pointer no longer designates
+# this run` and PERMITS at any age, while the release verb still refuses. A row that
+# kept claiming both would hand the reader a takeover protection that does not exist,
+# in exactly the state a co-tenant can produce by unlinking one file.
+rm -f "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+AP_ACTTL_NOPTR_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+if printf '%s' "$AP_ACTTL_NOPTR_OUT" | grep -qF 'a release refuses while that is under 3h' \
+  && printf '%s' "$AP_ACTTL_NOPTR_OUT" | grep -qF 'adoption does not' \
+  && ! printf '%s' "$AP_ACTTL_NOPTR_OUT" | grep -qF 'both refuse'; then
+  check "P1nk3b a retired owner pointer renders the release-only half of the refusal" PASS
+else
+  check "P1nk3b retired-pointer clause (got: $AP_ACTTL_NOPTR_OUT)" FAIL
+fi
+# P1nk3c — `supplied` means the bounded reader ACCEPTED the value, not that a value was
+# present, and nothing executed that distinction: every other fixture passes `0`, `3` or
+# an empty window, and blank and in-range agree under a presence-only test. So reverting
+# the flag to `(env.ZDOC_OWNER_ACTIVITY_TTL_HOURS || '').trim() !== ''` left the whole
+# suite green while the row told a project that configured 9999999 that its window was
+# honoured — beside an irreversible cancel, and quoting the 1h fallback it silently used
+# instead. `OWNER_ACTIVITY_TTL_MAX` is 8760, so this value is PRESENT and REFUSED.
+rm -f "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+ap_pointer "$AP_FOREIGN" run_window_a
+AP_WINOOR_OUT="$(ap_report_win 9999999 6 bound "$AP_OWN")"
+if printf '%s' "$AP_WINOOR_OUT" | grep -qF 'no configured owner-activity window reached this report' \
+  && printf '%s' "$AP_WINOOR_OUT" | grep -qF 'under 1h' \
+  && ! printf '%s' "$AP_WINOOR_OUT" | grep -qF 'under 9999999h'; then
+  check "P1nk3c an out-of-range window is REFUSED by the bounded reader, so the row discloses the assumed default" PASS
+else
+  check "P1nk3c out-of-range owner-activity window (got: $AP_WINOOR_OUT)" FAIL
+fi
+# P1nk3d — each verb's OWN window is quoted, and never one number for both. Adoption reads
+# `autopilotOwnerActivityTtlHours` and the release reads
+# `autopilotReleaseOwnerActivityTtlHours`, so the fixture sets them apart and stamps the
+# beacon between them: three hours old against a two-hour adoption window and a
+# five-hour release window. Adoption is outside its window and stays on offer; the
+# release is inside its window and is withheld, with the remedy quoting the release's
+# own number.
+rm -f "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+ap_pointer "$AP_FOREIGN" run_window_a
+AP_STAMP_FILE="$AP_STATE/tdd-phase-$AP_FOREIGN.json" \
+  node -e 'const fs=require("fs");const t=(Date.now()-3*3600000)/1000;fs.utimesSync(process.env.AP_STAMP_FILE,t,t)'
+AP_SPLIT_ROW="$(ap_report_win 2 6 bound "$AP_OWN" 5 | grep -F 'autopilot: nonterminal durable run run_window_a')"
+touch -t 200001010000 "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null
+if printf '%s' "$AP_SPLIT_ROW" | grep -qF 'adoption refuses while that is under 2h and a release while it is under 5h' \
+  && printf '%s' "$AP_SPLIT_ROW" | grep -qF 'a release refuses this run with exit 7 while that document is under 5h old' \
+  && printf '%s' "$AP_SPLIT_ROW" | grep -qF '/zensu:autopilot-adopt' \
+  && ! printf '%s' "$AP_SPLIT_ROW" | grep -qF '/zensu:autopilot-release' \
+  && ! printf '%s' "$AP_SPLIT_ROW" | grep -qF 'both refuse'; then
+  check "P1nk3d with the two windows set apart the clause and the remedy quote each verb's own window, withholding only the verb whose window the beacon is inside" PASS
+else
+  check "P1nk3d per-verb windows (got: $AP_SPLIT_ROW)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+# P1nk4 — a configured 0 disables the check in BOTH verbs, and the row must say so
+# rather than fall silent: a disabled guard that renders like an armed one is the
+# failure this repository already refuses for `implStopNudgeAfter` and
+# `reviewerSpawnPermissionCheck`. The remedy naming `/zensu:autopilot-release` still
+# renders beside it, which is what makes the silence dangerous here.
+AP_WIN0_OUT="$(ap_report_win 0 6 bound "$AP_OWN")"
+if printf '%s' "$AP_WIN0_OUT" | grep -qF 'last wrote its workflow document' \
+  && printf '%s' "$AP_WIN0_OUT" | grep -qF 'autopilotOwnerActivityTtlHours is 0' \
+  && ! printf '%s' "$AP_WIN0_OUT" | grep -qF 'while that is under'; then
+  check "P1nk4 a disabled owner-activity window discloses itself instead of dropping the clause" PASS
+else
+  check "P1nk4 disabled owner-activity window (got: $AP_WIN0_OUT)" FAIL
+fi
+# P1nk5 — the ABSENT arm is the LESS protected one: with no workflow document the
+# release stands down and cancels unbounded at any window value, and adoption stands
+# down too WHENEVER it reaches that beacon at all — which is not always, since its read
+# is nested inside the pointer precondition and a live inner chain refuses it one branch
+# earlier. So a row that says only "liveness is unknown" beside an aged arm promising an
+# Nh refusal implies the opposite ordering. This fixture is the arm where both halves do
+# hold; P1nke and P1nkh are the two where they do not.
+rm -f "$AP_STATE"/tdd-phase-*.json
+AP_NOBEACON_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+if printf '%s' "$AP_NOBEACON_OUT" | grep -qF 'has left no workflow document' \
+  && printf '%s' "$AP_NOBEACON_OUT" | grep -qF 'both verbs stand down'; then
+  check "P1nk5 an absent workflow document says both verbs stand down, not merely that liveness is unknown" PASS
+else
+  check "P1nk5 absent-document stand-down (got: $AP_NOBEACON_OUT)" FAIL
+fi
+# P1nk6 — a BLANK window falls back to the getter's own default, never to 0: an empty
+# string passes a bare `>= 0` bound, so a wrapper fault would otherwise read as the
+# documented off-switch and drop the clause. The owner pointer designates the run here,
+# so BOTH fallbacks render: adoption's 1h, which differs from the pending-review
+# fallback, and the release's 6h.
+printf '{}' > "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+touch -t 200001010000 "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null
+ap_pointer "$AP_FOREIGN" run_window_a
+AP_BLANKWIN_OUT="$(ap_report_win '' 6 bound "$AP_OWN")"
+rm -f "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+if printf '%s' "$AP_BLANKWIN_OUT" | grep -qF 'adoption refuses while that is under 1h and a release while it is under 6h' \
+  && printf '%s' "$AP_BLANKWIN_OUT" | grep -qF 'no configured owner-activity window reached this report' \
+  && ! printf '%s' "$AP_BLANKWIN_OUT" | grep -qF 'autopilotOwnerActivityTtlHours is 0' \
+  && ! printf '%s' "$AP_BLANKWIN_OUT" | grep -qF 'autopilotReleaseOwnerActivityTtlHours is 0'; then
+  check "P1nk6 blank owner-activity windows fall back to each getter's default and say the defaults are assumed" PASS
+else
+  check "P1nk6 blank owner-activity window (got: $AP_BLANKWIN_OUT)" FAIL
+fi
+# P1nk7 — a FUTURE-dated beacon is refused by BOTH verbs with exit 7 while the owner
+# pointer designates the run: waiting clears neither, and adoption used to permit it,
+# which made it the route around the release's own refusal. Rendering only "not
+# measured" beside a remedy that offers either verb would hand the reader a command
+# that cannot run.
+printf '{}' > "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+# The pointer has to DESIGNATE the run here: with it retired adoption never opens the
+# beacon and legitimately permits, which is the other half of this arm and the state
+# P1nk3b already measures for the aged one.
+ap_pointer "$AP_FOREIGN" run_window_a
+if touch -t 209901010000 "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null; then
+  AP_FUTUREFOREIGN_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+  if printf '%s' "$AP_FUTUREFOREIGN_OUT" | grep -qF 'future timestamp' \
+    && printf '%s' "$AP_FUTUREFOREIGN_OUT" | grep -qF 'both verbs refuse outright with exit 7' \
+    && ! printf '%s' "$AP_FUTUREFOREIGN_OUT" | grep -qF 'adoption permits' \
+    && ! printf '%s' "$AP_FUTUREFOREIGN_OUT" | grep -F 'autopilot: nonterminal durable run' \
+      | grep -qF '/zensu:autopilot-'; then
+    check "P1nk7 a future-dated beacon renders the refusal of both verbs and offers neither" PASS
+  else
+    check "P1nk7 future-dated foreign beacon (got: $AP_FUTUREFOREIGN_OUT)" FAIL
+  fi
+else
+  check "P1nk7 skipped: this platform's touch rejects a year-2099 timestamp" PASS
+fi
+rm -f "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+# P1nk9 — the THIRD arm of the per-verb clause: a pointer that is present but does not
+# parse settles nothing, so the row must hedge rather than pick a verdict. Without a
+# case the arm's wording is pinned by nothing on either side.
+printf '{}' > "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+touch -t 200001010000 "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null
+ap_pointer "$AP_FOREIGN" run_window_a
+AP_PTRDIGEST="$(printf '%s' "$AP_FOREIGN" | node -e 'var s="";process.stdin.on("data",function(d){s+=d;}).on("end",function(){process.stdout.write(require("crypto").createHash("sha256").update(s).digest("hex"));});')"
+printf 'not json' > "$AP_STATE/autopilot-active-$AP_PTRDIGEST.json"
+AP_PTRUNREADABLE_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+if printf '%s' "$AP_PTRUNREADABLE_OUT" | grep -qF 'could not be established' \
+  && ! printf '%s' "$AP_PTRUNREADABLE_OUT" | grep -qF 'adoption does not' \
+  && ! printf '%s' "$AP_PTRUNREADABLE_OUT" | grep -qF 'both refuse'; then
+  check "P1nk9 an unparseable owner pointer hedges the adoption half instead of picking a verdict" PASS
+else
+  check "P1nk9 unparseable pointer arm (got: $AP_PTRUNREADABLE_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/tdd-phase-*.json "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+
+# P1nka / P1nkb — the ORDER inside the clause is the contract, and P1nk4 alone cannot
+# see it: that case drives window `0` against a healthy AGED beacon, where the kind
+# arms are not reachable anyway. Both verbs read the beacon through one evaluation that
+# returns first on `if (!(Number.isFinite(ttlHours) && ttlHours > 0)) return { verdict:
+# "disabled" };`, the spelling P1nn greps, so at a configured `0` the beacon is never
+# opened — no exit 2
+# for a file `regularFile` would refuse, no exit 7 for a future stamp. Judging the
+# beacon KIND before the window asserted refusals no verb takes and SUPPRESSED the
+# one arm written for that configuration, beside a remedy naming an irreversible
+# cancel. Both states are reachable with no adversary: the documented `0` off-switch
+# plus a container clock skewed against a shared filesystem.
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/tdd-phase-*.json "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+ap_run run_win0kind_a GATES "$AP_FOREIGN" "/w/t"
+mkdir -p "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+AP_WIN0_BADBEACON_OUT="$(ap_report_win 0 6 bound "$AP_OWN")"
+rmdir "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null
+if printf '%s' "$AP_WIN0_BADBEACON_OUT" | grep -qF 'autopilotOwnerActivityTtlHours is 0' \
+  && ! printf '%s' "$AP_WIN0_BADBEACON_OUT" | grep -qF 'abort on this beacon' \
+  && ! printf '%s' "$AP_WIN0_BADBEACON_OUT" | grep -qF 'aborts on this beacon'; then
+  check "P1nka a disabled window wins over an unreadable beacon, because no verb opens it at 0" PASS
+else
+  check "P1nka disabled window vs unreadable beacon (got: $AP_WIN0_BADBEACON_OUT)" FAIL
+fi
+printf '{}' > "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+if touch -t 209901010000 "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null; then
+  AP_WIN0_FUTURE_OUT="$(ap_report_win 0 6 bound "$AP_OWN")"
+  if printf '%s' "$AP_WIN0_FUTURE_OUT" | grep -qF 'autopilotOwnerActivityTtlHours is 0' \
+    && ! printf '%s' "$AP_WIN0_FUTURE_OUT" | grep -qF 'exit 7'; then
+    check "P1nkb a disabled window wins over a future-dated beacon, which no verb reads at 0" PASS
+  else
+    check "P1nkb disabled window vs future beacon (got: $AP_WIN0_FUTURE_OUT)" FAIL
+  fi
+else
+  check "P1nkb skipped: this platform's touch rejects a year-2099 timestamp" PASS
+fi
+
+# P1nkc / P1nkd — adoption's PENDING-STAGE refusal sits ABOVE its whole liveness
+# block (`fail(3, "run has a live inner TDD chain")`), so for such a run adoption is
+# not an exit at any window value and against any beacon. The release worker already
+# branches on exactly this and withholds the adopt route from its own exit-7 message;
+# the row that ROUTES a user to `/zensu:autopilot-adopt` must not contradict it.
+# P1nkc drives the literal stage, P1nkd the BLOCKED-from-TDD_RUNNING spelling — the
+# owner tests the PENDING stage, so a reader that trusted the literal one would miss
+# every run that took a BLOCK while its chain was live.
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/tdd-phase-*.json "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+ap_run run_chainlive_a TDD_RUNNING "$AP_FOREIGN" "/w/t"
+printf '{}' > "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+touch -t 200001010000 "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null
+AP_CHAINLIVE_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+# The REMEDY is the other half, and asserting only the clause left the row free to
+# contradict itself one sentence later: it said adoption refuses with exit 3 and then
+# told the reader to offer adoption first. The release worker already branches its own
+# remedy on this same pending stage, so the row that ROUTES a user to the verb must not
+# disagree with the verb that declines.
+if printf '%s' "$AP_CHAINLIVE_OUT" | grep -qF 'a release refuses while that is under 3h' \
+  && printf '%s' "$AP_CHAINLIVE_OUT" | grep -qF 'live inner TDD chain' \
+  && printf '%s' "$AP_CHAINLIVE_OUT" | grep -F 'autopilot: nonterminal durable run' \
+    | grep -qF '/zensu:autopilot-release' \
+  && ! printf '%s' "$AP_CHAINLIVE_OUT" | grep -qF 'adoption does not,' \
+  && ! printf '%s' "$AP_CHAINLIVE_OUT" | grep -F 'autopilot: nonterminal durable run' \
+    | grep -qF '/zensu:autopilot-adopt'; then
+  check "P1nkc a run with a live inner TDD chain withholds the adoption half and the adopt remedy, and still offers the release" PASS
+else
+  check "P1nkc live-inner-chain adoption half (got: $AP_CHAINLIVE_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json
+RUN_PATCH_JSON='{"blocked":{"from":"TDD_RUNNING","code":"tdd_retry_limit"}}' \
+  ap_run run_chainblocked_a BLOCKED "$AP_FOREIGN" "/w/t"
+AP_CHAINBLOCKED_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+# The NEGATIVES carry the discrimination here, and the comment says so rather than
+# claiming a clause-unique positive it does not have: both halves of the row paraphrase
+# each other, so `before it reads any beacon` is satisfied by the remedy alone. What a
+# call site rewritten to the LITERAL stage would produce is the row saying "adoption does
+# not, because the owner active pointer no longer designates this run" one sentence after
+# the remedy says adoption is refused — the self-contradiction this pair forbids, and the
+# `adoption does not,` negative is what catches it.
+if printf '%s' "$AP_CHAINBLOCKED_OUT" | grep -qF 'before it reads any beacon' \
+  && printf '%s' "$AP_CHAINBLOCKED_OUT" | grep -F 'autopilot: nonterminal durable run' \
+    | grep -qF '/zensu:autopilot-release' \
+  && ! printf '%s' "$AP_CHAINBLOCKED_OUT" | grep -qF 'adoption does not,' \
+  && ! printf '%s' "$AP_CHAINBLOCKED_OUT" | grep -F 'autopilot: nonterminal durable run' \
+    | grep -qF '/zensu:autopilot-adopt'; then
+  check "P1nkd the pending stage decides both halves, so a BLOCKED run whose chain was live withholds the clause and the remedy" PASS
+else
+  check "P1nkd pending-stage adoption half (got: $AP_CHAINBLOCKED_OUT)" FAIL
+fi
+# P1nky — the forgeability bound is a HAND COPY across two files. The library owns the
+# source clause and states it in three renderers of its own; this report states the
+# identical sentence over the identical fact. Nothing compared them, so a reword on
+# either side left the other stale — and this is the one clause whose whole job is to
+# stop a planted run document from reading as measured fact beside an irreversible
+# cancel, so a stale copy here is worse than an absent one.
+AP_FORGEABLE_LIB="$(sed -n 's/^ *const forgeableSource = "\(.*\)";$/\1/p' "$AP_OWNER_SRC" | head -1)"
+AP_FORGEABLE_DOC="$(sed -n "s/^var AUTOPILOT_FORGEABLE_SOURCE = '\(.*\)';\$/\1/p" "$REPORT" | head -1)"
+if [ -n "$AP_FORGEABLE_LIB" ] && [ -n "$AP_FORGEABLE_DOC" ]; then
+  check "P1nkypre both forgeability clauses were located, so the comparison below is not vacuous" PASS
+  if [ "$AP_FORGEABLE_LIB" = "$AP_FORGEABLE_DOC" ] \
+    && printf '%s' "$AP_CHAINLIVE_OUT" | grep -qF "$AP_FORGEABLE_LIB"; then
+    check "P1nky the doctor's forgeability clause is the library's own, and the live-inner-chain row emits it" PASS
+  else
+    check "P1nky the doctor's forgeability clause must be the library's (lib=$AP_FORGEABLE_LIB doctor=$AP_FORGEABLE_DOC)" FAIL
+  fi
+else
+  check "P1nkypre both forgeability clauses were located, so the comparison below is not vacuous (lib=$AP_FORGEABLE_LIB doctor=$AP_FORGEABLE_DOC)" FAIL
+fi
+# P1nke / P1nkf / P1nkg — the chain qualifier reached ONLY the aged arm, so the absent,
+# window-0 and future-dated branches could each be reverted with the whole suite green.
+# The absent case is the one that matters most: its own sentence says both verbs stand
+# down, which is false for a run adoption refuses with exit 3 before it reads anything.
+rm -f "$AP_STATE"/tdd-phase-*.json
+AP_CHAINABSENT_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+if printf '%s' "$AP_CHAINABSENT_OUT" | grep -qF 'live inner TDD chain' \
+  && ! printf '%s' "$AP_CHAINABSENT_OUT" | grep -qF 'both verbs stand down'; then
+  check "P1nke an absent beacon plus a live inner chain withholds the both-verbs stand-down" PASS
+else
+  check "P1nke absent-beacon chain arm (got: $AP_CHAINABSENT_OUT)" FAIL
+fi
+AP_CHAINABSENT0_OUT="$(ap_report_win 0 6 bound "$AP_OWN")"
+if printf '%s' "$AP_CHAINABSENT0_OUT" | grep -qF 'autopilotOwnerActivityTtlHours is 0'; then
+  check "P1nkf the disabled window still outranks the absent arm" PASS
+else
+  check "P1nkf absent beacon at window 0 (got: $AP_CHAINABSENT0_OUT)" FAIL
+fi
+printf '{}' > "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+if touch -t 209901010000 "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null; then
+  AP_CHAINFUTURE_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+  if printf '%s' "$AP_CHAINFUTURE_OUT" | grep -qF 'live inner TDD chain' \
+    && ! printf '%s' "$AP_CHAINFUTURE_OUT" | grep -qF 'adoption permits'; then
+    check "P1nkg a future-dated beacon plus a live inner chain withholds the adoption-permits claim" PASS
+  else
+    check "P1nkg future-dated chain arm (got: $AP_CHAINFUTURE_OUT)" FAIL
+  fi
+else
+  check "P1nkg skipped: this platform's touch rejects a year-2099 timestamp" PASS
+fi
+# P1nkh / P1nki — an owner pointer that is PRESENT but unreadable settles nothing about
+# adoption: the adopt worker resolves that pointer ABOVE its window gate and aborts with
+# exit 2 on exactly the states this reader maps to `null`. The absent and future arms
+# asserted the adoption half without consulting it, so both spoke for a verb that never
+# reaches the beacon.
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/tdd-phase-*.json "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+ap_run run_ptrnull_a GATES "$AP_FOREIGN" "/w/t"
+AP_PTRNULL_DIGEST="$(printf '%s' "$AP_FOREIGN" | node -e 'var s="";process.stdin.on("data",function(d){s+=d;}).on("end",function(){process.stdout.write(require("crypto").createHash("sha256").update(s).digest("hex"));});')"
+printf 'not json' > "$AP_STATE/autopilot-active-$AP_PTRNULL_DIGEST.json"
+AP_ABSENT_PTRNULL_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+if printf '%s' "$AP_ABSENT_PTRNULL_OUT" | grep -qF 'could not be established' \
+  && ! printf '%s' "$AP_ABSENT_PTRNULL_OUT" | grep -qF 'both verbs stand down'; then
+  check "P1nkh an unreadable owner pointer hedges the absent arm instead of standing both verbs down" PASS
+else
+  check "P1nkh absent arm with an unreadable pointer (got: $AP_ABSENT_PTRNULL_OUT)" FAIL
+fi
+printf '{}' > "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+if touch -t 209901010000 "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null; then
+  AP_FUTURE_PTRNULL_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+  if printf '%s' "$AP_FUTURE_PTRNULL_OUT" | grep -qF 'could not be established' \
+    && ! printf '%s' "$AP_FUTURE_PTRNULL_OUT" | grep -qF 'adoption permits'; then
+    check "P1nki an unreadable owner pointer hedges the future-dated arm instead of claiming adoption permits" PASS
+  else
+    check "P1nki future arm with an unreadable pointer (got: $AP_FUTURE_PTRNULL_OUT)" FAIL
+  fi
+else
+  check "P1nki skipped: this platform's touch rejects a year-2099 timestamp" PASS
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/tdd-phase-*.json "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+# P1nkj / P1nkk — the EXIT-2 branch has its own chain and unreadable-pointer arms, and
+# both were unreachable from every fixture: each unreadable-beacon case above drives a
+# GATES run with a readable or absent pointer, so the two arms could be deleted with the
+# whole suite green. They are not cosmetic — one claims a refusal adoption never takes
+# (it refuses at exit 3 before any beacon), the other a definite verdict for a pointer
+# that was never read.
+rm -rf "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+ap_run run_e2chain_a TDD_RUNNING "$AP_FOREIGN" "/w/t"
+AP_E2_DIGEST="$(printf '%s' "$AP_FOREIGN" | node -e 'var s="";process.stdin.on("data",function(d){s+=d;}).on("end",function(){process.stdout.write(require("crypto").createHash("sha256").update(s).digest("hex"));});')"
+printf '{"schemaVersion":1,"runId":"run_e2chain_a"}' > "$AP_STATE/autopilot-active-$AP_E2_DIGEST.json"
+mkdir -p "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+AP_E2CHAIN_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+# The REMEDY half needs its own needles, and the clause's are the wrong ones: the two
+# halves paraphrase each other, so a negative written against the CLAUSE literal passes
+# over a remedy that says the same false thing in different words. Here the remedy must
+# not claim a beacon abort for adoption — repairing that beacon leaves the exit-3
+# refusal standing — and it must name the chain as the cause.
+# `neither guided verb is on offer here` and `finishing or cancelling that chain` belong to
+# the REMEDY and occur nowhere in `ownerLivenessClause`, so they are what keeps this check
+# from grading the clause alone: both strings land in one `line()`, and every other needle
+# here is a clause literal, so `remedy = ''` in this arm left the check green.
+if printf '%s' "$AP_E2CHAIN_OUT" | grep -qF 'before it reads any beacon' \
+  && printf '%s' "$AP_E2CHAIN_OUT" | grep -qF 'neither guided verb is on offer here' \
+  && printf '%s' "$AP_E2CHAIN_OUT" | grep -qF 'finishing or cancelling that chain in its own session is what clears it' \
+  && ! printf '%s' "$AP_E2CHAIN_OUT" | grep -qF 'both verbs abort on this beacon' \
+  && ! printf '%s' "$AP_E2CHAIN_OUT" | grep -qF 'both abort on this run' \
+  && printf '%s' "$AP_E2CHAIN_OUT" | grep -F 'autopilot: nonterminal durable run' \
+    | grep -qF 'live inner TDD chain' \
+  && ! printf '%s' "$AP_E2CHAIN_OUT" | grep -F 'autopilot: nonterminal durable run' \
+    | grep -qF '/zensu:autopilot-adopt'; then
+  check "P1nkj an unreadable beacon plus a live inner chain names the chain as adoption's blocker, never a beacon abort" PASS
+else
+  check "P1nkj exit-2 chain arm (got: $AP_E2CHAIN_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+ap_run run_e2null_a GATES "$AP_FOREIGN" "/w/t"
+printf 'not json' > "$AP_STATE/autopilot-active-$AP_E2_DIGEST.json"
+AP_E2NULL_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+if printf '%s' "$AP_E2NULL_OUT" | grep -qF 'could not be established' \
+  && ! printf '%s' "$AP_E2NULL_OUT" | grep -qF 'adoption never opens it' \
+  && ! printf '%s' "$AP_E2NULL_OUT" | grep -qF 'both verbs abort on this beacon'; then
+  check "P1nkk an unreadable beacon plus an unreadable pointer hedges the adoption half" PASS
+else
+  check "P1nkk exit-2 unreadable-pointer arm (got: $AP_E2NULL_OUT)" FAIL
+fi
+# P1nkl — the DISABLED-window arm returned before the pointer was resolved at all, so
+# the round-5 hedge could not reach the one configuration in which that read is the only
+# part of the LIVENESS BLOCK adoption still performs — the verb also refuses an inner
+# chain and a caller that already owns a run, both above this point: the adopt worker resolves that pointer
+# ABOVE its window gate, so at 0 an unreadable one still aborts it with exit 2.
+AP_WIN0NULL_OUT="$(ap_report_win 0 6 bound "$AP_OWN")"
+# The hedge here is POINTER-specific, and the generic one would contradict the lead: at
+# a configured 0 the beacon question is settled — the verbs skip it — so "whether
+# adoption would reach a beacon could not be established" is the one thing this arm may
+# not say. What is unsettled is the pointer, which adoption resolves above its own gate.
+if printf '%s' "$AP_WIN0NULL_OUT" | grep -qF 'autopilotOwnerActivityTtlHours is 0' \
+  && printf '%s' "$AP_WIN0NULL_OUT" | grep -qF 'adoption still resolves the owner active pointer' \
+  && ! printf '%s' "$AP_WIN0NULL_OUT" | grep -qF 'would reach a beacon at all'; then
+  check "P1nkl the disabled window hedges the POINTER read, not the beacon it just said is skipped" PASS
+else
+  check "P1nkl disabled window with an unreadable pointer (got: $AP_WIN0NULL_OUT)" FAIL
+fi
+# P1nkm / P1nkn / P1nko — the ROW must not offer a verb the clause one sentence earlier
+# said cannot act. The remedy branched on the inner-chain fact alone, so an exit-2 or
+# future-dated beacon produced "a release aborts on this beacon with exit 2" followed by
+# an offer to run exactly that release. Availability is per verb and both halves of the
+# row must render from ONE derivation of it.
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+ap_run run_e2both_a GATES "$AP_FOREIGN" "/w/t"
+printf '{"schemaVersion":1,"runId":"run_e2both_a"}' > "$AP_STATE/autopilot-active-$AP_E2_DIGEST.json"
+AP_E2BOTH_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+# Every slash-command negative here is SCOPED to the row, on the precedent P1nc states:
+# the could-not-be-read row legitimately names `/zensu:autopilot-release` in its own
+# sentence, so a report-wide negative passes only while no unreadable run document sits
+# in the fixture directory and fails for a reason unrelated to this arm the moment one
+# does.
+if printf '%s' "$AP_E2BOTH_OUT" | grep -qF 'both verbs abort on this beacon with exit 2' \
+  && printf '%s' "$AP_E2BOTH_OUT" | grep -qF 'neither guided verb is on offer here' \
+  && printf '%s' "$AP_E2BOTH_OUT" | grep -qF 'a release aborts on this run' \
+  && printf '%s' "$AP_E2BOTH_OUT" | grep -qF 'adoption aborts on that same beacon with exit 2' \
+  && ! printf '%s' "$AP_E2BOTH_OUT" | grep -F 'autopilot: nonterminal durable run' \
+    | grep -qF '/zensu:autopilot-release' \
+  && ! printf '%s' "$AP_E2BOTH_OUT" | grep -F 'autopilot: nonterminal durable run' \
+    | grep -qF '/zensu:autopilot-adopt'; then
+  check "P1nkm when the clause says neither verb can run the remedy names neither guided verb" PASS
+else
+  check "P1nkm both-verbs-abort remedy (got: $AP_E2BOTH_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+AP_E2RELONLY_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+if printf '%s' "$AP_E2RELONLY_OUT" | grep -qF 'adoption never opens it' \
+  && printf '%s' "$AP_E2RELONLY_OUT" | grep -qF '/zensu:autopilot-adopt' \
+  && ! printf '%s' "$AP_E2RELONLY_OUT" | grep -F 'autopilot: nonterminal durable run' \
+    | grep -qF '/zensu:autopilot-release'; then
+  check "P1nkn an exit-2 beacon with a retired pointer offers adoption alone, never the release it just said aborts" PASS
+else
+  check "P1nkn exit-2 release-only remedy (got: $AP_E2RELONLY_OUT)" FAIL
+fi
+rm -rf "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+printf '{}' > "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+if touch -t 209901010000 "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null; then
+  AP_FUTREM_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+  if printf '%s' "$AP_FUTREM_OUT" | grep -qF 'a release refuses outright with exit 7' \
+    && printf '%s' "$AP_FUTREM_OUT" | grep -qF '/zensu:autopilot-adopt' \
+    && ! printf '%s' "$AP_FUTREM_OUT" | grep -F 'autopilot: nonterminal durable run' \
+      | grep -qF '/zensu:autopilot-release'; then
+    check "P1nko a future-dated beacon offers adoption alone, never the release it just said refuses" PASS
+  else
+    check "P1nko future-dated remedy (got: $AP_FUTREM_OUT)" FAIL
+  fi
+else
+  check "P1nko skipped: this platform's touch rejects a year-2099 timestamp" PASS
+fi
+rm -rf "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/tdd-phase-*.json "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+# P1nks — PARSER TOLERANCE is its own coupling class, and the only carrier of this one is
+# the ABSENCE of a line: a byte-order mark. The owner parses with a bare `JSON.parse`, so
+# a BOM-prefixed run document fails every Autopilot verb closed for the whole project;
+# a reader that strips it silently reported the project as healthy. A grep over constant
+# names cannot see a removed strip, so the fixture is what holds it — and the sibling
+# settings and config readers in this same file deliberately DO tolerate a BOM, which is
+# why this cannot be a file-wide rule.
+ap_run run_bom_a GATES "$AP_FOREIGN" "/w/t"
+AP_BOM_FILE="$AP_STATE/autopilot-run-run_bom_a.json"
+printf '\357\273\277%s' "$(cat "$AP_BOM_FILE")" > "$AP_BOM_FILE.bom" && mv "$AP_BOM_FILE.bom" "$AP_BOM_FILE"
+AP_BOM_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+if printf '%s' "$AP_BOM_OUT" | grep -qF 'durable run document(s) that could not be read' \
+  && ! printf '%s' "$AP_BOM_OUT" | grep -qF 'autopilot: nonterminal durable run run_bom_a'; then
+  check "P1nks a BOM-prefixed run document is reported unreadable, exactly as the owner refuses it" PASS
+else
+  check "P1nks BOM-prefixed run document (got: $AP_BOM_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/tdd-phase-*.json "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+# P1nkp — `adoptUnknown` is the third field of the availability record and nothing
+# asserted it: every fixture reaching it graded the CLAUSE hedge, which comes from a
+# text fragment and not from the flag, so hardcoding the flag false left the suite
+# green. It must reach EVERY remedy arm that names adoption, and the arm where it matters
+# most is the one offering adoption ALONE, which is exactly the arm that dropped it.
+ap_run run_hedge_a GATES "$AP_FOREIGN" "/w/t"
+printf 'not json' > "$AP_STATE/autopilot-active-$AP_E2_DIGEST.json"
+mkdir -p "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+AP_HEDGE_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+rm -f "$AP_STATE"/autopilot-active-*.json
+AP_HEDGE_CTRL_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+if printf '%s' "$AP_HEDGE_OUT" | grep -F 'autopilot: nonterminal durable run' \
+    | grep -qF '/zensu:autopilot-adopt' \
+  && printf '%s' "$AP_HEDGE_OUT" | grep -qF 'Adoption may still abort with exit 2 before it acts' \
+  && ! printf '%s' "$AP_HEDGE_CTRL_OUT" | grep -qF 'Adoption may still abort with exit 2 before it acts'; then
+  check "P1nkp an unreadable owner pointer hedges the adoption offer, including where adoption is the only verb offered" PASS
+else
+  check "P1nkp adoption hedge (got: $AP_HEDGE_OUT | control: $AP_HEDGE_CTRL_OUT)" FAIL
+fi
+rm -rf "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/tdd-phase-*.json "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+# P1nkq — the combined "neither verb" remedy asserted a BEACON abort for both verbs, but
+# its adoption half can come from the inner chain instead. With a future-dated stamp the
+# beacon is already a plain regular file, so the prescribed repair was a no-op, and the
+# real remedy for adoption — finishing the inner chain — was never named. Each verb's
+# blocker is stated by its own CAUSE.
+ap_run run_futchain_a TDD_RUNNING "$AP_FOREIGN" "/w/t"
+printf '{}' > "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+if touch -t 209901010000 "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null; then
+  AP_FUTCHAIN_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+  if printf '%s' "$AP_FUTCHAIN_OUT" | grep -F 'autopilot: nonterminal durable run' \
+      | grep -qF 'live inner TDD chain' \
+    && printf '%s' "$AP_FUTCHAIN_OUT" | grep -qF 'neither guided verb is on offer here' \
+    && printf '%s' "$AP_FUTCHAIN_OUT" | grep -qF 'a release refuses this run with exit 7 while that stamp is in the future' \
+    && printf '%s' "$AP_FUTCHAIN_OUT" | grep -qF 'finishing or cancelling that chain in its own session is what clears it' \
+    && ! printf '%s' "$AP_FUTCHAIN_OUT" | grep -qF 'restored to a plain regular file' \
+    && ! printf '%s' "$AP_FUTCHAIN_OUT" | grep -qF 'both abort on this run' \
+    && ! printf '%s' "$AP_FUTCHAIN_OUT" | grep -F 'autopilot: nonterminal durable run' \
+      | grep -qF '/zensu:autopilot-adopt'; then
+    check "P1nkq a future stamp plus a live inner chain names each verb's own blocker, never a beacon repair" PASS
+  else
+    check "P1nkq future stamp plus chain remedy (got: $AP_FUTCHAIN_OUT)" FAIL
+  fi
+else
+  check "P1nkq skipped: this platform's touch rejects a year-2099 timestamp" PASS
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/tdd-phase-*.json "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+# P1nkr — adoption's EXIT-4 refusal (the caller already owns another nonterminal run)
+# is a fact about the whole scanned set, and neither the pre-pass nor the sentence it
+# drives had an executed case: every fixture minted runs for a single owner. The OWN run
+# is minted through `ap_run_valid`, because the caveat is conjoined on a record the
+# owner would accept — a record it refuses makes adoption exit 2 before it reaches the
+# exit-4 test, so naming exit 4 there would state a code this report did not establish.
+ap_run run_foreign_r GATES "$AP_FOREIGN" "/w/t"
+AP_EXIT4_CTRL_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+ap_run_valid run_own_r GATES "$AP_OWN" "/w/own"
+AP_EXIT4_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+if printf '%s' "$AP_EXIT4_OUT" | grep -qF 'owns a nonterminal run of its own' \
+  && ! printf '%s' "$AP_EXIT4_CTRL_OUT" | grep -qF 'owns a nonterminal run of its own'; then
+  check "P1nkr an own nonterminal run beside a foreign one adds adoption's exit-4 caveat, and only then" PASS
+else
+  check "P1nkr exit-4 caveat (got: $AP_EXIT4_OUT | control: $AP_EXIT4_CTRL_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/tdd-phase-*.json "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+
+# P1nkt — the AGED arm is the ORDINARY case, and it was the one still contradicting the
+# remedy: a foreign session writes its workflow document at every turn end, so a run
+# whose owner wrote one minutes ago renders "adoption and a release both refuse while
+# that is under 3h" and then offered both verbs. The arm's wording is conditional, but
+# the CONDITION is measurable here — the same ageMs the row already renders — so inside
+# the window the refusal is present and both verbs must leave the offer.
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/tdd-phase-*.json "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+ap_run run_agedin_a GATES "$AP_FOREIGN" "/w/t"
+printf '{}' > "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+# The pointer comes from the block-local `ap_pointer`, not from a hand-rolled printf over
+# a digest variable another block assigns: `AP_E2_DIGEST` lives in P1nkj ~190 lines and
+# four fixture resets above, so reordering that block emptied the name to
+# `autopilot-active-.json`, `designates` went false, and this check failed for a reason
+# unrelated to what it is named for.
+ap_pointer "$AP_FOREIGN" run_agedin_a
+AP_AGEDIN_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+# The REMEDY body carries its own positive. Every clause literal this block could anchor
+# on is concatenated with the remedy into one `line()` string, so a row-scoped grep
+# cannot tell the two apart and `remedy = ''` in the neither-verb arm left this check
+# green. `neither guided verb is on offer here` and the per-cause `adoptWhy` sentence
+# occur nowhere in `ownerLivenessClause`, so they bite only on the remedy.
+if printf '%s' "$AP_AGEDIN_OUT" | grep -qF 'adoption refuses while that is under 3h and a release while it is under 3h' \
+  && printf '%s' "$AP_AGEDIN_OUT" | grep -qF 'neither guided verb is on offer here' \
+  && printf '%s' "$AP_AGEDIN_OUT" | grep -qF 'adoption refuses it too while that document is under 3h old' \
+  && ! printf '%s' "$AP_AGEDIN_OUT" | grep -F 'autopilot: nonterminal durable run' \
+    | grep -qF '/zensu:autopilot-release' \
+  && ! printf '%s' "$AP_AGEDIN_OUT" | grep -F 'autopilot: nonterminal durable run' \
+    | grep -qF '/zensu:autopilot-adopt'; then
+  check "P1nkt a beacon INSIDE the window withholds both verbs, because both refuse now" PASS
+else
+  check "P1nkt aged-inside-window remedy (got: $AP_AGEDIN_OUT)" FAIL
+fi
+# P1nku — the neither-verb arm offers no verb, so the consent-and-worktree tail that
+# qualifies an OFFER has no antecedent there: appended to "report that", it tells the
+# reader that reporting needs the user's yes and a particular working tree, which points
+# at withholding the finding in the one state where both verbs are blocked.
+#
+# TWO corrections, both measured. The negative names `tail`'s OWN opening phrase and not
+# a join: the ` —` before it is supplied by each other arm (`+ ' —' + tail`), never by
+# `tail`, so a revert spelled `... offering either verb' + tail` renders no em dash and a
+# joined needle misses the exact regression it exists to catch. And the absence is gated
+# on a positive, because an absence assertion over a row that took a DIFFERENT arm passes
+# while grading nothing — the rule CLAUDE.md states for the plan-gate eval runner.
+if printf '%s' "$AP_AGEDIN_OUT" | grep -F 'autopilot: nonterminal durable run' \
+    | grep -qF 'neither guided verb is on offer here' \
+  && ! printf '%s' "$AP_AGEDIN_OUT" | grep -F 'autopilot: nonterminal durable run' \
+    | grep -qF 'only after the user says yes'; then
+  check "P1nku the no-verb arm does not qualify reporting with an offer's consent tail" PASS
+else
+  check "P1nku no-verb arm consent tail (got: $AP_AGEDIN_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/tdd-phase-*.json "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+# P1nkv — adoption's exit-4 refusal was appended AFTER the ladder had already chosen the
+# offer, so a release-blocked row could name adoption as its only remedy and retract it
+# one sentence later. The fact belongs on the same record every other cause travels on.
+ap_run run_e4rel_a GATES "$AP_FOREIGN" "/w/t"
+mkdir -p "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+ap_run_valid run_own_v GATES "$AP_OWN" "/w/own"
+AP_E4REL_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+if printf '%s' "$AP_E4REL_OUT" | grep -qF 'owns a nonterminal run of its own' \
+  && printf '%s' "$AP_E4REL_OUT" | grep -F 'autopilot: nonterminal durable run run_e4rel_a' \
+    | grep -qF '/zensu:autopilot-adopt'; then
+  check "P1nkv a release-blocked row states the exit-4 obstacle beside the adoption it still offers" PASS
+else
+  check "P1nkv exit-4 caveat on the release-blocked arm (got: $AP_E4REL_OUT)" FAIL
+fi
+rm -rf "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/tdd-phase-*.json "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+# P1nkw — the adoption CAUSE is RANKED, because the verb refuses in an order: exit 4 for
+# a caller that already owns a nonterminal run sits ABOVE the whole liveness block, so a
+# beacon or an age can never be the reason adoption declines while that is true. A later
+# arm overwriting the cause inverts that and prescribes a repair — restore the beacon,
+# wait out the window — that cannot clear the refusal, while the one remedy that does
+# (finish or cancel this session's own run) never prints.
+ap_run run_rank_a GATES "$AP_FOREIGN" "/w/t"
+printf '{"schemaVersion":1,"runId":"run_rank_a"}' > "$AP_STATE/autopilot-active-$AP_E2_DIGEST.json"
+mkdir -p "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+ap_run_valid run_own_w GATES "$AP_OWN" "/w/own"
+AP_RANK_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+if printf '%s' "$AP_RANK_OUT" | grep -qF 'both verbs abort on this beacon with exit 2' \
+  && ! printf '%s' "$AP_RANK_OUT" | grep -qF 'owns a nonterminal run of its own'; then
+  check "P1nkw an ESTABLISHED beacon abort decides the offer, and the exit-4 obstacle is not added beside it" PASS
+else
+  check "P1nkw established refusal versus caveat (got: $AP_RANK_OUT)" FAIL
+fi
+rm -rf "$AP_STATE/tdd-phase-$AP_FOREIGN.json"
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/tdd-phase-*.json "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+# P1nkx — the own-run obstacle must never REMOVE the adoption offer. It is read from a
+# bounded scan of records any session in this project can write, so treating it as a
+# refusal lets one planted document leave the irreversible cancel as the row's only
+# offer. Stating it as a caveat is wrong by a sentence; withholding is wrong by a cancel.
+ap_run run_ownabs_a GATES "$AP_FOREIGN" "/w/t"
+ap_run_valid run_own_x GATES "$AP_OWN" "/w/own"
+AP_OWNABS_OUT="$(ap_report_win 3 6 bound "$AP_OWN")"
+if printf '%s' "$AP_OWNABS_OUT" | grep -qF 'owns a nonterminal run of its own' \
+  && printf '%s' "$AP_OWNABS_OUT" | grep -F 'autopilot: nonterminal durable run run_ownabs_a' \
+    | grep -qF '/zensu:autopilot-adopt'; then
+  check "P1nkx an own nonterminal run states its obstacle and still offers adoption" PASS
+else
+  check "P1nkx own-run caveat keeps the offer (got: $AP_OWNABS_OUT)" FAIL
+fi
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/tdd-phase-*.json "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
+
 # P1nl — the row roster is held against skills/doctor/SKILL.md, the same drift pin
 # P1qr applies to the reviewer-denial rows. Without it the renderer can be reworded
 # while the skill keeps telling the model to report the old wording.
-rm -f "$AP_STATE"/autopilot-run-*.json
+# Its OWN four-glob reset, like every sibling: the roster below relies on the foreign run
+# taking the absent arm, and a check inserted above that left a beacon or a pointer behind
+# would move the clause and redden this check while naming a skill drift that never
+# happened.
+rm -f "$AP_STATE"/autopilot-run-*.json "$AP_STATE"/tdd-phase-*.json "$AP_STATE"/autopilot-active-*.json "$AP_STATE/autopilot-active.json"
 ap_run run_drift_a BLOCKED "$AP_FOREIGN" "/w/t"
 AP_DRIFT_OUT="$(ap_report bound "$AP_OWN")"
 AP_DRIFT_OK=true
 for AP_PHRASE in \
   'autopilot: nonterminal durable run' \
   'durable run document(s) that could not be read' \
+  '/zensu:autopilot-adopt' \
   '/zensu:autopilot-release' \
   'owned by THIS session' \
   'ordinary run in progress' \
   'the run is BLOCKED, which is NOT terminal' \
   'no active pointer designates it' \
   'could not be read, so whether the run is ordinary' \
-  'NOT a complete'
+  'NOT a complete' \
+  'both verbs stand down' \
+  'live inner TDD chain' \
+  'autopilotOwnerActivityTtlHours is 0'
 do
   printf '%s' "$AP_DRIFT_OUT" | grep -qF "$AP_PHRASE" || {
     # Phrases this ONE fixture cannot emit are still required on the skill side; the
     # renderer side of each is covered by its own executed check above (P1ni, P1ne,
-    # P1ne2, P1nq1, P1nq3), so requiring them here as well would only re-test those.
+    # P1ne2, P1nq1, P1nq3; the disabled-window phrase by P1nk4 and P1nka, and the
+    # inner-chain phrase by P1nkc/P1nke), so requiring them here as well would only
+    # re-test those. `both verbs stand down` is deliberately NOT exempt: this fixture
+    # clears every beacon and pointer before it runs, so the foreign run takes the
+    # absent arm and really does emit it — exempting a phrase the fixture emits turns a
+    # two-sided check into a one-sided one for no reason. Its own positive check is
+    # P1nk5, which the earlier wording of this comment did not name.
     case "$AP_PHRASE" in
-      'durable run document(s) that could not be read'|'owned by THIS session'|'ordinary run in progress'|'the run is BLOCKED, which is NOT terminal'|'no active pointer designates it'|'could not be read, so whether the run is ordinary'|'NOT a complete') ;;
+      'durable run document(s) that could not be read'|'owned by THIS session'|'ordinary run in progress'|'the run is BLOCKED, which is NOT terminal'|'no active pointer designates it'|'could not be read, so whether the run is ordinary'|'NOT a complete'|'live inner TDD chain'|'autopilotOwnerActivityTtlHours is 0') ;;
       *) AP_DRIFT_OK=false ;;
     esac
   }
@@ -4322,28 +5270,170 @@ else
   check "P1nm run-record key set drifted (owner=$AP_KEYS_OWNER copy=$AP_KEYS_COPY)" FAIL
 fi
 
-# P1nn — the row states the RELEASE verb's exit-7 refusal ("a release refuses while
-# that is under Nh"), and it reconstructs all three ingredients of that policy
-# independently: the beacon filename, the mtime signal, and the TTL. Nothing
-# compared the reconstruction with its owner, so a change to the release verb's
-# signal or filename would leave the doctor asserting a false sentence with every
-# behavioural check green. This pins the two spellings that can silently diverge.
-AP_BEACON_OWNER=$(grep -cF 'regularFile(path.join(stateDir, `tdd-phase-${state.ownerSessionId}.json`))' "$AP_OWNER_SRC")
-AP_BEACON_COPY=$(grep -cF "path.join(dir, 'tdd-phase-' + owner + '.json')" "$REPORT")
+# P1nn — the row states the exit-7 refusal of BOTH run verbs, and it reconstructs all
+# three ingredients of that policy independently: the beacon filename, the mtime
+# signal, and the window. Nothing compared the reconstruction with its owner, so a
+# change to either verb's signal or filename would leave the doctor asserting a false
+# sentence with every behavioural check green. This pins the spellings that can
+# silently diverge — including the ADOPT half, which spells the beacon off
+# `previousOwner` and nests its refusal inside the pointer precondition the row now
+# renders per verb.
+# Both verbs now read the beacon through ONE evaluation, `ownerLiveness`, so the owner
+# half is that helper's single beacon read plus the two calls: release passes no pointer
+# precondition, and adoption passes the one it requires.
+AP_BEACON_ADOPT=$(grep -cF '{ requirePointer: true, pointerDesignates: ownerPointerDesignatesRun });' "$AP_OWNER_SRC")
+AP_BEACON_RELEASE=$(grep -cF 'ownerLiveness(stateDir, state.ownerSessionId, ownerActivityTtlHours' "$AP_OWNER_SRC")
+AP_ADOPT_GATE=$(grep -cF 'if (options.requirePointer && !options.pointerDesignates) return { verdict: "retired" };' "$AP_OWNER_SRC")
+AP_BEACON_OWNER=$(grep -cF 'regularFile(path.join(stateDir, `tdd-phase-${ownerSessionId}.json`))' "$AP_OWNER_SRC")
 AP_MTIME_OWNER=$(grep -cF 'ownerActivity.mtimeMs' "$AP_OWNER_SRC")
-AP_MTIME_COPY=$(grep -cF 'nowMs - st.mtimeMs' "$REPORT")
-# The renderer must read the beacon the way the release verb reads it. `regularFile`
-# there is lstat plus isFile plus nlink === 1; a following `statSync` here would
-# render a confident age for a symlinked or hard-linked beacon that the release
-# refuses outright, pairing a measurement with an unexecutable remedy.
-AP_LSTAT_COPY=$(grep -cF "fs.lstatSync(path.join(dir, 'tdd-phase-' + owner + '.json'))" "$REPORT")
-AP_STATSYNC_COPY=$(grep -cF "fs.statSync(path.join(dir, 'tdd-phase-' + owner + '.json'))" "$REPORT")
-if [ "$AP_BEACON_OWNER" -ge 1 ] && [ "$AP_BEACON_COPY" -ge 1 ] \
+# The renderer half is SLICED to the one function that reads the beacon, the way P1no
+# slices `readAutopilotJson`. Counted over the whole file these needles are satisfied
+# by any occurrence anywhere, so a guard moved out of the reader — or a second reader
+# growing its own unbounded copy — kept the check green while the function this pin is
+# named for no longer carried it.
+AP_SILENCE_SLICE="$(node -e '
+  var fs = require("fs");
+  var src = fs.readFileSync(process.argv[1], "utf8");
+  var i = src.indexOf("function autopilotOwnerSilence(dir, owner, nowMs) {");
+  if (i < 0) { process.stdout.write(""); process.exit(0); }
+  var j = src.indexOf("\nfunction autopilotPointerDesignates(", i);
+  process.stdout.write(j < 0 ? "" : src.slice(i, j));
+' "$REPORT")"
+AP_BEACON_COPY=$(printf '%s' "$AP_SILENCE_SLICE" | grep -cF "path.join(dir, 'tdd-phase-' + owner + '.json')")
+AP_MTIME_COPY=$(printf '%s' "$AP_SILENCE_SLICE" | grep -cF 'nowMs - st.mtimeMs')
+# The renderer must read the beacon the way the verbs read it — BOTH of them, since
+# adoption opens the same file one branch deeper. `regularFile` there is an lstat plus a
+# FOUR-WAY refusal — isFile, isSymbolicLink, nlink === 1 and a size bound, of which
+# isSymbolicLink is redundant under lstat; a following `statSync` here
+# would render a confident age for a symlinked or hard-linked beacon that both verbs
+# refuse outright, pairing a measurement with an unexecutable remedy.
+AP_LSTAT_COPY=$(printf '%s' "$AP_SILENCE_SLICE" | grep -cF "fs.lstatSync(path.join(dir, 'tdd-phase-' + owner + '.json'))")
+AP_STATSYNC_COPY=$(printf '%s' "$AP_SILENCE_SLICE" | grep -cF "fs.statSync(path.join(dir, 'tdd-phase-' + owner + '.json'))")
+# The owner's CONTROL FLOW is what `ownerLivenessClause` mirrors arm for arm, and the
+# spellings above cannot see it: under the window gate both verbs share, the release
+# reaches the beacon with nothing further in its way while adoption reaches the same
+# call only under its pointer precondition. Two ordering facts decide the
+# clause and both are pinned as OFFSETS rather than as presence — presence alone is
+# satisfied by a file that carries the same three lines in any order. First the
+# TDD_RUNNING refusal must stay ABOVE adoption's liveness call, or the clause's chain
+# arm would claim a refusal the verb no longer takes first. Second, inside the shared
+# evaluation, the window gate must stay ABOVE the pointer precondition and both ABOVE
+# the beacon read, which is what makes "at 0 the beacon is never opened at all" true
+# for both verbs.
+AP_TTL_GATE_OWNER=$(grep -cF 'if (!(Number.isFinite(ttlHours) && ttlHours > 0)) return { verdict: "disabled" };' "$AP_OWNER_SRC")
+AP_CHAIN_GATE_OWNER=$(grep -cF 'if (pendingStage === "TDD_RUNNING") {' "$AP_OWNER_SRC")
+AP_CHAIN_LINE=$(grep -nF 'if (pendingStage === "TDD_RUNNING") {' "$AP_OWNER_SRC" | head -1 | cut -d: -f1)
+AP_ADOPT_CALL_LINE=$(grep -nF '{ requirePointer: true, pointerDesignates: ownerPointerDesignatesRun });' "$AP_OWNER_SRC" | head -1 | cut -d: -f1)
+# Inside the one evaluation the three steps are LOCATED, not only counted: the window
+# gate, then the pointer precondition, then the beacon read. "At 0 the beacon is never
+# opened at all" holds only while the read sits BELOW the gate that can skip it, and
+# adoption's "a retired pointer never opens it" only while the read sits below the
+# precondition too — hoisting the read satisfies every count-based conjunct while making
+# both sentences false, which is the exact move the adopt verb once made for
+# `activePointerFileFor`.
+AP_TTL_LINE=$(grep -nF 'if (!(Number.isFinite(ttlHours) && ttlHours > 0)) return { verdict: "disabled" };' "$AP_OWNER_SRC" | head -1 | cut -d: -f1)
+AP_PTR_LINE=$(grep -nF 'if (options.requirePointer && !options.pointerDesignates) return { verdict: "retired" };' "$AP_OWNER_SRC" | head -1 | cut -d: -f1)
+AP_BEACON_LINE=$(grep -nF 'regularFile(path.join(stateDir, `tdd-phase-${ownerSessionId}.json`))' "$AP_OWNER_SRC" | head -1 | cut -d: -f1)
+AP_ORDER_OK=false
+if [ -n "$AP_CHAIN_LINE" ] && [ -n "$AP_ADOPT_CALL_LINE" ] && [ -n "$AP_TTL_LINE" ] \
+  && [ -n "$AP_PTR_LINE" ] && [ -n "$AP_BEACON_LINE" ] \
+  && [ "$AP_CHAIN_LINE" -lt "$AP_ADOPT_CALL_LINE" ] \
+  && [ "$AP_TTL_LINE" -lt "$AP_PTR_LINE" ] \
+  && [ "$AP_PTR_LINE" -lt "$AP_BEACON_LINE" ]; then
+  AP_ORDER_OK=true
+fi
+# The owner's refusal disjunction is FOUR tests, and the size bound is the one a mirror drops
+# most easily: an oversized beacon that both verbs abort on would otherwise render a
+# confident age and a confident per-verb clause. BOTH sides are DERIVED — the owner's
+# `MAX_BYTES` and this renderer's own `AUTOPILOT_RUN_MAX_BYTES` — and compared to
+# each other. Hardcoding the literal on either side made the pin agree with a number
+# rather than with its owner, so raising the bound in one file alone stayed green;
+# and the renderer must reach it through the NAMED constant it already declares for
+# its two run-record reads, or a third spelling of the same bound drifts silently.
+# The four VERB-KIND claims the clause makes are pinned here too, because nothing else
+# in the tree ties them to this renderer. They are wordings the clause CAN emit, each
+# conditional on the inner chain and on the pointer — do not read them as the
+# unconditional contract an earlier round replaced: a release refusing outright with
+# exit 7 on a future stamp while adoption only discloses, both verbs aborting with exit 2
+# on an unsafe beacon, and both standing down with no document. Each of
+# those is a sentence in the owner, and an owner that stops taking one of them leaves
+# the row asserting a policy no verb runs — with every behavioural check green, since
+# the fixtures drive the RENDERER and never the verbs.
+AP_OWNER_FUT_REFUSE=$(grep -cF 'dated in the future, so its age cannot bound this cancel' "$AP_OWNER_SRC")
+# The ADOPT half of the same verdict: its own exit-7 sentence, and the disclosure it
+# replaced must be gone, or the row would claim a refusal one verb does not take.
+AP_OWNER_FUT_ADOPT=$(grep -cF 'dated in the future, so its age cannot show that the owner has stopped' "$AP_OWNER_SRC")
+AP_OWNER_FUT_DISCLOSE=$(grep -cF 'owner liveness unchecked: the recorded owner workflow document is dated in the future' "$AP_OWNER_SRC")
+AP_OWNER_UNSAFE=$(grep -cF 'unsafe state file' "$AP_OWNER_SRC")
+AP_OWNER_NODOC=$(grep -cF 'no workflow document for the recorded owner' "$AP_OWNER_SRC")
+AP_MAXBYTES_OWNER=$(sed -n 's/^const MAX_BYTES = \(.*\);$/\1/p' "$AP_OWNER_SRC" | head -1)
+AP_MAXBYTES_COPY=$(sed -n 's/^var AUTOPILOT_RUN_MAX_BYTES = \(.*\);$/\1/p' "$REPORT" | head -1)
+AP_SIZE_COPY=$(printf '%s' "$AP_SILENCE_SLICE" | grep -cF 'st.size > AUTOPILOT_RUN_MAX_BYTES')
+AP_SIZE_LITERAL=$(grep -cF 'st.size > 1024 * 1024' "$REPORT")
+if [ -n "$AP_SILENCE_SLICE" ] \
+  && [ "$AP_BEACON_OWNER" -ge 1 ] && [ "$AP_BEACON_COPY" -ge 1 ] \
+  && [ "$AP_BEACON_ADOPT" -ge 1 ] && [ "$AP_BEACON_RELEASE" -ge 1 ] && [ "$AP_ADOPT_GATE" -eq 1 ] \
+  && [ "$AP_BEACON_OWNER" -eq 1 ] \
+  && [ "$AP_TTL_GATE_OWNER" -eq 1 ] && [ "$AP_CHAIN_GATE_OWNER" -ge 1 ] \
+  && [ "$AP_ORDER_OK" = true ] \
+  && [ "$AP_OWNER_FUT_REFUSE" -ge 1 ] && [ "$AP_OWNER_FUT_ADOPT" -ge 1 ] \
+  && [ "$AP_OWNER_FUT_DISCLOSE" -eq 0 ] \
+  && [ "$AP_OWNER_UNSAFE" -ge 1 ] && [ "$AP_OWNER_NODOC" -ge 1 ] \
   && [ "$AP_MTIME_OWNER" -ge 1 ] && [ "$AP_MTIME_COPY" -ge 1 ] \
+  && [ -n "$AP_MAXBYTES_OWNER" ] && [ "$AP_MAXBYTES_OWNER" = "$AP_MAXBYTES_COPY" ] \
+  && [ "$AP_SIZE_COPY" -ge 1 ] && [ "$AP_SIZE_LITERAL" -eq 0 ] \
   && [ "$AP_LSTAT_COPY" -ge 1 ] && [ "$AP_STATSYNC_COPY" -eq 0 ]; then
-  check "P1nn the owner-silence reconstruction still matches the release verb it quotes" PASS
+  check "P1nn the owner-silence reconstruction still matches both verbs it quotes" PASS
 else
-  check "P1nn silence reconstruction drifted (beacon owner=$AP_BEACON_OWNER copy=$AP_BEACON_COPY; mtime owner=$AP_MTIME_OWNER copy=$AP_MTIME_COPY; lstat=$AP_LSTAT_COPY statSync=$AP_STATSYNC_COPY)" FAIL
+  check "P1nn silence reconstruction drifted (slice=${#AP_SILENCE_SLICE} beacon owner=$AP_BEACON_OWNER adopt=$AP_BEACON_ADOPT release=$AP_BEACON_RELEASE gate=$AP_ADOPT_GATE copy=$AP_BEACON_COPY; ttlgate=$AP_TTL_GATE_OWNER chaingate=$AP_CHAIN_GATE_OWNER order=$AP_ORDER_OK chain=$AP_CHAIN_LINE adoptcall=$AP_ADOPT_CALL_LINE ttl=$AP_TTL_LINE ptr=$AP_PTR_LINE beacon=$AP_BEACON_LINE; mtime owner=$AP_MTIME_OWNER copy=$AP_MTIME_COPY; maxbytes owner=$AP_MAXBYTES_OWNER copy=$AP_MAXBYTES_COPY size=$AP_SIZE_COPY literal=$AP_SIZE_LITERAL; lstat=$AP_LSTAT_COPY statSync=$AP_STATSYNC_COPY)" FAIL
+fi
+# P1nn2 — the four defensive arms that no fixture can reach, pinned at SOURCE, which is
+# the remedy this repository already uses for a behaviourally unreachable branch (S7n in
+# test-autopilot-stop-enforcer.sh). `autopilotOwnerSilence` has exactly three returns —
+# `absent`, `unreadable` (with a `code`) and `aged` — and both ladders switch that same
+# discriminator and cover all three, so neither final `else` is reachable and the
+# `kind === 'unreadable'` conjunct on the future-timestamp test changes nothing
+# observable today. Each exists for the day a fourth kind appears: without them the
+# clause leaves `text` undefined and the row renders a literal `undefined` in the
+# sentence that qualifies an irreversible cancel. None had a pin, so all four could be
+# deleted silently.
+AP_UNREC_CLAUSE=$(grep -cF 'this report does not recognize that beacon state, so it judged neither verb' "$REPORT")
+AP_UNREC_ROW=$(grep -cF 'liveness state is one this report does not recognize' "$REPORT")
+AP_UNREC_WHY=$(grep -cF 'this report does not recognize why' "$REPORT")
+AP_FUT_CONJ=$(grep -cF "silenceVerdict.kind === 'unreadable'" "$REPORT")
+if [ "$AP_UNREC_CLAUSE" -ge 1 ] && [ "$AP_UNREC_ROW" -ge 1 ] \
+  && [ "$AP_UNREC_WHY" -eq 2 ] && [ "$AP_FUT_CONJ" -ge 1 ]; then
+  check "P1nn2 the unreachable unrecognized-state arms and the future-timestamp kind conjunct are still present" PASS
+else
+  check "P1nn2 unrecognized-state arms drifted (clause=$AP_UNREC_CLAUSE row=$AP_UNREC_ROW why=$AP_UNREC_WHY futconj=$AP_FUT_CONJ)" FAIL
+fi
+# P1nn3 — the capped-scan disclosure must name the CAP as its cause only when the cap is
+# in fact the cause. `ownHoldsOwnRun` is conjoined on `ownKey !== ''`, so for an UNBOUND
+# report it is false for a reason that has nothing to do with `AUTOPILOT_SCAN_MAX` — and
+# the sentence this arm renders blames the cap by name, on the row that can offer an
+# irreversible cancel. The derivation therefore carries the same `ownKey` conjunct, and
+# this is a SOURCE pin because the behavioural case needs more than AUTOPILOT_SCAN_MAX run
+# documents in one fixture, which no check in this suite builds.
+AP_UNSCANNED_DECL=$(grep -cE '^ *var ownRunUnscanned = ownKey !== .{2} && !ownHoldsOwnRun && unscanned > 0;$' "$REPORT")
+AP_UNSCANNED_USE=$(grep -cF 'ownRunUnscanned' "$REPORT")
+if [ "$AP_UNSCANNED_DECL" -eq 1 ] && [ "$AP_UNSCANNED_USE" -eq 2 ]; then
+  check "P1nn3 the capped-scan disclosure is withheld from an unbound report, which the cap did not cause" PASS
+else
+  check "P1nn3 capped-scan disclosure derivation (decl=$AP_UNSCANNED_DECL use=$AP_UNSCANNED_USE)" FAIL
+fi
+# P1nn-control — the slice must be scoped to the silence reader in BOTH directions, and
+# one needle can only see one of them. `pre.nlink !== 1` lives in the run-record reader
+# ABOVE this function, so it catches a start anchor that moved UP or a slice widened to
+# the whole file. It is blind to the opposite drift: a function inserted BETWEEN
+# `autopilotOwnerSilence` and `autopilotPointerDesignates` grows the slice DOWNWARD, and
+# that new body could then satisfy the presence needles above. The second conjunct is
+# the downward bound.
+AP_SLICE_FUNCS=$(printf '%s' "$AP_SILENCE_SLICE" | grep -c '^function ')
+if [ -n "$AP_SILENCE_SLICE" ] && ! printf '%s' "$AP_SILENCE_SLICE" | grep -qF 'pre.nlink !== 1' \
+  && [ "$AP_SLICE_FUNCS" -eq 1 ]; then
+  check "P1nn-control the owner-silence slice is bounded above and below its own function" PASS
+else
+  check "P1nn-control the owner-silence slice is not scoped (nlink needle seen, or functions=$AP_SLICE_FUNCS)" FAIL
 fi
 
 # P1no — the run documents in the session-writable state directory are read with the
@@ -4598,6 +5688,23 @@ if printf '%s' "$AP_SCAN_OUT" | grep -qF 'not opened at all because the' \
   check "P1ns1 past the scan bound the row states the block is not a complete account" PASS
 else
   check "P1ns1 scan-bound disclosure missing" FAIL
+fi
+# P1ns2 — and the PER-ROW remedy discloses it too. The block-level row above qualifies the
+# LISTING; the exit-4 caveat is a property of one row's remedy, and past the cap its absence
+# is not evidence, because the verb's own `readRunInventory` reads the whole directory with
+# no bound. This fixture already produces that state — 70 foreign runs against
+# AUTOPILOT_SCAN_MAX, a bound session, no own run — so the sentence costs no new fixture.
+# The needles are remedy-UNIQUE and occur nowhere in `ownerLivenessClause`, which is what
+# FX15 established as the only kind that bites here: clause and remedy land in one `line()`
+# string, so a clause literal cannot tell them apart. Gated on a positive row anchor, per
+# the absence rule P1nku states.
+if printf '%s' "$AP_SCAN_OUT" | grep -F 'autopilot: nonterminal durable run' \
+    | grep -qF '/zensu:autopilot-adopt' \
+  && printf '%s' "$AP_SCAN_OUT" | grep -qF 'was NOT established here' \
+  && printf '%s' "$AP_SCAN_OUT" | grep -qF 'run documents and the verb reads them all'; then
+  check "P1ns2 past the scan bound the per-row remedy states the exit-4 obstacle was not established" PASS
+else
+  check "P1ns2 scan-bound per-row disclosure missing (got: $AP_SCAN_OUT)" FAIL
 fi
 rm -f "$AP_STATE"/autopilot-run-*.json
 
@@ -5456,7 +6563,7 @@ touch -t 202001010000 "$AP_STATE/tdd-phase-$AP_FOREIGN.json" 2>/dev/null || true
 AP_TTL_UNBOUND_OUT="$(ap_report unbound '')"
 if printf '%s' "$AP_TTL_UNBOUND_OUT" | grep -qF 'owner not established' \
   && printf '%s' "$AP_TTL_UNBOUND_OUT" | grep -qF 'last wrote its workflow document' \
-  && ! printf '%s' "$AP_TTL_UNBOUND_OUT" | grep -qF 'a release refuses while that is under'; then
+  && ! printf '%s' "$AP_TTL_UNBOUND_OUT" | grep -qF 'while that is under'; then
   check "P1nz1 with ownership not established the row ages the owner but claims no release refusal" PASS
 else
   check "P1nz1 unbound TTL clause (got: $AP_TTL_UNBOUND_OUT)" FAIL
@@ -6970,29 +8077,263 @@ case "$P6_NODIR_UNBOUND" in
 esac
 mkdir -p "$P6_PROJECT/.zensu/state"
 
-# --- the deletion instruction is SCOPED, and the unrecognized-state row claims no cause ---
-# `skills/doctor/SKILL.md` Phase 3 forbids a glob, `find`, parent traversal or worktree discovery
-# for this directory, and requires `rm -f` on the quoted literal the row PRINTED. The renderer's
-# unjudged row and its skill bullet both instruct clearing `verify-consent-exec-*` from a
-# re-derived `<project>/.zensu/state`, which is that glob — so both must carry the same scope
-# clause the broker's own sibling refusal already carries, naming what the directory also holds.
-SCOPE_CLAUSE='and nothing else in that directory'
-grep -qF -- "$SCOPE_CLAUSE" "$REPORT" \
-  && check "P1vx the renderer's unjudged row scopes the verify-consent-exec-* deletion" PASS \
-  || check "P1vx the renderer's unjudged row scopes the verify-consent-exec-* deletion" FAIL
-grep -qF -- "$SCOPE_CLAUSE" "$SKILL_MD" \
-  && check "P1vx1 the doctor skill's own bullet carries the same scope clause" PASS \
-  || check "P1vx1 the doctor skill's own bullet carries the same scope clause" FAIL
-# The wrapper derives its word from a closed accept-list, so every value it can emit HAS a row.
-# The residual row is reachable through the inherited ZDOC_VERIFY_EXEC pass-through alone, and it
-# must claim only what it observed. The renderer already says "a missing check rather than an
-# all-clear"; the skill bullet asserted a CAUSE the derivation cannot produce.
-grep -qF -- 'the two halves have drifted' "$SKILL_MD" \
-  && check "P1vx2 the unrecognized-state bullet asserts a drift the wrapper cannot produce" FAIL \
-  || check "P1vx2 the unrecognized-state bullet claims no cause the probe did not establish" PASS
-grep -qF -- 'missing check rather than an all-clear' "$SKILL_MD" \
-  && check "P1vx2-control the bullet still states what it IS" PASS \
-  || check "P1vx2-control the bullet still states what it IS" FAIL
+# P1tp — the multi-repo topology row (docs/multi-repo-chains-spec.md §5.4). A chain
+# whose claims name another repository is invisible to every other row in this block:
+# the anchor's own change set is clean, its workflow document is healthy, and the
+# review chain sees no diff for work that really happened. The row reads THIS
+# session's audited run log — the receipt is what names it — and asks the audit
+# library itself which roots the claims resolve to, so the claim grammar has one
+# owner rather than a copy here.
+# This runner deliberately does NOT sandbox ZENSU_DOCTOR_PLUGIN_DIR: the row needs
+# the real hooks/lib/zensu-edit-landing.sh, and a stubbed plugin root would make it
+# fall silent for the very reason the check exists to observe.
+TOPO_PROJECT="$SBOX/topo-project"
+TOPO_SIBLING="$SBOX/topo-sibling"
+TOPO_KEY="scv1_$(node -e 'process.stdout.write("b".repeat(64))')"
+mkdir -p "$TOPO_PROJECT/.zensu/state" "$TOPO_PROJECT/.zensu/logs" "$TOPO_SIBLING/src"
+git init -q --template= "$TOPO_PROJECT" >/dev/null 2>&1
+git init -q --template= "$TOPO_SIBLING" >/dev/null 2>&1
+printf 'v1\n' > "$TOPO_SIBLING/src/app.ts"
+printf 'v1\n' > "$TOPO_PROJECT/own.txt"
+TOPO_SIB_ABS="$(cd "$TOPO_SIBLING" && pwd -P)"
+TOPO_RECEIPT="$TOPO_PROJECT/.zensu/state/edit-landing-$TOPO_KEY.json"
+run_report_topo() {
+  ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  CLAUDE_PROJECT_DIR="$TOPO_PROJECT" \
+  ZDOC_BINDING=bound ZDOC_SESSION_KEY="$TOPO_KEY" ZDOC_SESSION_PROJECT_ROOT="$TOPO_PROJECT" \
+    node "$REPORT" 2>/dev/null
+}
+# Every absence assertion below must be gated on the report having rendered at
+# all: the runner discards stderr, so a renderer that threw produced empty output
+# in which `topology:` is trivially absent — and P1tp4, whose whole subject is a
+# branch that returns early, would have reported that as its own success.
+topo_rendered() {
+  case "$1" in
+    (*'Zensu doctor'*) return 0 ;;
+    (*) return 1 ;;
+  esac
+}
+printf 'S1 IMPL completed — files: %s/src/app.ts\n' "$TOPO_SIB_ABS" > "$TOPO_PROJECT/.zensu/logs/run.log"
+printf '{"schema":"edit-landing-v2","session":"x","log":".zensu/logs/run.log","claims":1,"clean":false}\n' \
+  > "$TOPO_RECEIPT"
+TOPO_OUT="$(run_report_topo)"
+case "$TOPO_OUT" in
+  *"⚠️  topology: this session's audited run log claims edits under"*"$TOPO_SIB_ABS"*)
+    check "P1tp a claim under a non-anchor root renders the topology row, naming that root" PASS ;;
+  *) check "P1tp topology row missing or unnamed (got: $(printf '%s' "$TOPO_OUT" | grep -c .) lines)" FAIL ;;
+esac
+case "$TOPO_OUT" in
+  *'single-root'*) check "P1tp1 the row states the consequence: the chain is single-root" PASS ;;
+  *) check "P1tp1 the row omits the consequence" FAIL ;;
+esac
+# The negative control is the same session and the same receipt with an anchor-only
+# claim: a row that fires on ANY audited log would pass the positive case above
+# while telling every single-root session it has a multi-repo problem.
+printf 'S1 IMPL completed — files: own.txt\n' > "$TOPO_PROJECT/.zensu/logs/run.log"
+TOPO_OUT_OK="$(run_report_topo)"
+if ! topo_rendered "$TOPO_OUT_OK"; then
+  check "P1tp2 the report did not render, so its silence proves nothing" FAIL
+else
+  case "$TOPO_OUT_OK" in
+    *'topology:'*) check "P1tp2 an anchor-only claim renders NO topology row" FAIL ;;
+    *) check "P1tp2 an anchor-only claim renders NO topology row" PASS ;;
+  esac
+fi
+# A log the receipt names OUTSIDE the project's own .zensu/logs/ is refused rather
+# than read: the receipt is an ordinary file this session can write. The OUTSIDE
+# log must carry the foreign claim, or the containment guard is not what keeps the
+# row silent — deleting it would leave the row silent anyway and the check could
+# not fail. Restore the foreign claim in the in-project log too, so the only thing
+# separating this case from P1tp is which log the receipt names.
+printf 'S1 IMPL completed — files: %s/src/app.ts\n' "$TOPO_SIB_ABS" > "$TOPO_PROJECT/.zensu/logs/run.log"
+printf 'S1 IMPL completed — files: %s/src/app.ts\n' "$TOPO_SIB_ABS" > "$SBOX/outside.log"
+printf '{"schema":"edit-landing-v2","session":"x","log":"%s","claims":1,"clean":false}\n' "$SBOX/outside.log" \
+  > "$TOPO_RECEIPT"
+TOPO_OUT_ESC="$(run_report_topo)"
+case "$TOPO_OUT_ESC" in
+  *'topology:'*'run log outside'*'missing check, not an all-clear'*)
+    check "P1tp3 a receipt naming a log outside .zensu/logs/ is refused AND disclosed" PASS ;;
+  *) check "P1tp3 a receipt naming a log outside .zensu/logs/ is refused AND disclosed" FAIL ;;
+esac
+# The discriminator: the outside log is never READ. Its foreign claim is the only
+# one in play for this case, so a row naming the sibling root would mean the
+# containment guard was bypassed rather than merely reported.
+case "$TOPO_OUT_ESC" in
+  *"$TOPO_SIB_ABS"*) check "P1tp3a the refused log's claims are not rendered" FAIL ;;
+  *) check "P1tp3a the refused log's claims are not rendered" PASS ;;
+esac
+# An unreadable receipt is NOT the same state as an absent one: it is a check that
+# did not run, and reporting it with the same silence would be an all-clear.
+printf 'not json at all\n' > "$TOPO_RECEIPT"
+TOPO_OUT_BAD="$(run_report_topo)"
+case "$TOPO_OUT_BAD" in
+  *'topology:'*'NOT checked against the anchor'*'missing check, not an all-clear'*)
+    check "P1tp5 an unreadable receipt renders a missing-check row, never silence" PASS ;;
+  *) check "P1tp5 an unreadable receipt renders a missing-check row, never silence" FAIL ;;
+esac
+printf '{"schema":"edit-landing-v9","session":"x","log":".zensu/logs/run.log","claims":1,"clean":false}\n' \
+  > "$TOPO_RECEIPT"
+TOPO_OUT_SCH="$(run_report_topo)"
+case "$TOPO_OUT_SCH" in
+  *'topology:'*'schema this runtime does not know'*)
+    check "P1tp6 an unknown receipt schema renders a missing-check row, never silence" PASS ;;
+  *) check "P1tp6 an unknown receipt schema renders a missing-check row, never silence" FAIL ;;
+esac
+# The row echoes a filesystem path a model is asked to relay, so a root whose own
+# name is unsafe to render is COUNTED and WITHHELD rather than printed. Without a
+# case here the whole screen — `claimRootRenderable`, `claimRootRender` and the
+# withheld clause — could be deleted with every suite green.
+TOPO_ODD="$SBOX/topo-odd\`x"
+mkdir -p "$TOPO_ODD/src"
+git init -q --template= "$TOPO_ODD" >/dev/null 2>&1
+printf 'v1\n' > "$TOPO_ODD/src/app.ts"
+TOPO_ODD_ABS="$(cd "$TOPO_ODD" && pwd -P)"
+printf 'S1 IMPL completed — files: %s/src/app.ts\n' "$TOPO_ODD_ABS" > "$TOPO_PROJECT/.zensu/logs/run.log"
+printf '{"schema":"edit-landing-v2","session":"x","log":".zensu/logs/run.log","claims":1,"clean":false}\n' \
+  > "$TOPO_RECEIPT"
+TOPO_OUT_ODD="$(run_report_topo)"
+case "$TOPO_OUT_ODD" in
+  *'topology:'*'1 root(s) that are not the anchor'*'withheld'*)
+    check "P1tp7 a root whose name is unsafe to render is counted and withheld" PASS ;;
+  *) check "P1tp7 a root whose name is unsafe to render is counted and withheld" FAIL ;;
+esac
+case "$TOPO_OUT_ODD" in
+  *'topo-odd'*) check "P1tp7a the unsafe name never reaches the rendered row" FAIL ;;
+  *) check "P1tp7a the unsafe name never reaches the rendered row" PASS ;;
+esac
+# Restore the ordinary foreign claim for the cases below.
+printf 'S1 IMPL completed — files: %s/src/app.ts\n' "$TOPO_SIB_ABS" > "$TOPO_PROJECT/.zensu/logs/run.log"
+
+# P1tp9/P1tp10 — the two ways the inventory channel used to read as a CLEAN
+# topology. `pluginDir()` resolves to this renderer's own tree, so if the row is
+# executing at all the feature IS installed: an ENOENT on the inventory command
+# there is a damaged or partially-restored tree, not an absent feature. And a
+# child that exits 0 with output this parser does not recognise — a renamed key,
+# a future `--inventory` revision, an empty stdout — used to yield roots=[] and
+# render nothing, while every other fault arm in the same function says "that is
+# a missing check, not an all-clear". The terminus already guards the other half
+# of this contract: it requires a `claimed-files=` line and discloses when it is
+# absent, so the two consumers of one parsed format disagreed.
+#
+# Both cases run the renderer from a COPIED tree with no ZENSU_DOCTOR_PLUGIN_DIR,
+# because that override is the fixture seam and the silence is gated on it.
+TOPO_COPY="$SBOX/topo-copy"
+mkdir -p "$TOPO_COPY/hooks"
+cp -R "$PLUGIN_DIR/hooks/lib" "$TOPO_COPY/hooks/lib" 2>/dev/null
+run_report_topo_copy() {
+  ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  CLAUDE_PROJECT_DIR="$TOPO_PROJECT" \
+  ZDOC_BINDING=bound ZDOC_SESSION_KEY="$TOPO_KEY" ZDOC_SESSION_PROJECT_ROOT="$TOPO_PROJECT" \
+    node "$TOPO_COPY/hooks/lib/zensu-doctor-report.js" 2>/dev/null
+}
+rm -f "$TOPO_COPY/hooks/lib/zensu-edit-landing.sh"
+TOPO_OUT_NOLIB="$(run_report_topo_copy)"
+if ! topo_rendered "$TOPO_OUT_NOLIB"; then
+  check "P1tp9 the copied-tree report did not render, so its silence proves nothing" FAIL
+else
+  case "$TOPO_OUT_NOLIB" in
+    *'topology:'*'not present in this plugin tree'*)
+      check "P1tp9 a damaged plugin tree renders a missing-check row, never a clean topology" PASS ;;
+    *) check "P1tp9 a damaged plugin tree renders a missing-check row, never a clean topology" FAIL ;;
+  esac
+fi
+printf '#!/bin/bash\nexit 0\n' > "$TOPO_COPY/hooks/lib/zensu-edit-landing.sh"
+chmod +x "$TOPO_COPY/hooks/lib/zensu-edit-landing.sh"
+TOPO_OUT_ODDFMT="$(run_report_topo_copy)"
+if ! topo_rendered "$TOPO_OUT_ODDFMT"; then
+  check "P1tp10 the copied-tree report did not render, so its silence proves nothing" FAIL
+else
+  case "$TOPO_OUT_ODDFMT" in
+    *'topology:'*'format this runtime does not recognise'*)
+      check "P1tp10 an unrecognised inventory answer renders a missing-check row, never an all-clear" PASS ;;
+    *) check "P1tp10 an unrecognised inventory answer renders a missing-check row, never an all-clear" FAIL ;;
+  esac
+fi
+
+# P1tp11 — the row returned SILENTLY when no bound session key was available,
+# where `ownDocumentVerdict` in the same file splits that case and renders "that
+# is a missing check, not an all-clear". `currentSessionKey()` is empty for every
+# binding verdict except `bound`, so an orphaned-project-root, incompatible-
+# runtime or pruned-installation session got no topology row and no disclosure
+# while every other arm of this function says the check is missing.
+#
+# The split is gated on a receipt EXISTING in the state directory rather than
+# warning unconditionally: without a key there is no receipt path to test, so a
+# literal reading of "gate on the receipt" would build `edit-landing-.json`,
+# never find it, and ship a row that is silent forever. Scanning the directory is
+# what makes the arm reachable — and it is stated at the row that it cannot claim
+# the receipt it found belongs to THIS session, the same bound the Autopilot
+# pointer row carries.
+run_report_topo_nokey() {
+  ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+  ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  CLAUDE_PROJECT_DIR="$TOPO_PROJECT" \
+  ZDOC_BINDING=unbound ZDOC_SESSION_KEY="" ZDOC_SESSION_PROJECT_ROOT="" \
+    node "$PLUGIN_DIR/hooks/lib/zensu-doctor-report.js" 2>/dev/null
+}
+TOPO_OUT_NOKEY="$(run_report_topo_nokey)"
+if ! topo_rendered "$TOPO_OUT_NOKEY"; then
+  check "P1tp11 the no-key report did not render, so its silence proves nothing" FAIL
+else
+  case "$TOPO_OUT_NOKEY" in
+    *'topology:'*'no bound session key'*)
+      check "P1tp11 with a receipt present and no bound key the row says the check was not run" PASS ;;
+    *) check "P1tp11 with a receipt present and no bound key the row says the check was not run" FAIL ;;
+  esac
+fi
+# Control: with NO receipt in the directory the same unbound session stays
+# silent, so P1tp11 cannot pass by warning on every unbound report — which would
+# withhold the green summary from every non-`bound` session in every project.
+mv "$TOPO_RECEIPT" "$TOPO_RECEIPT.aside"
+TOPO_OUT_NOKEY_NONE="$(run_report_topo_nokey)"
+mv "$TOPO_RECEIPT.aside" "$TOPO_RECEIPT"
+case "$TOPO_OUT_NOKEY_NONE" in
+  *'topology:'*) check "P1tp11-control an unbound session with no receipt stays silent" FAIL ;;
+  *) check "P1tp11-control an unbound session with no receipt stays silent" PASS ;;
+esac
+
+# P1tp4's own discriminator: the in-project log still carries the foreign claim, so
+# the ABSENT receipt is the only reason the row stays silent.
+rm -f "$TOPO_RECEIPT"
+TOPO_OUT_NONE="$(run_report_topo)"
+if ! topo_rendered "$TOPO_OUT_NONE"; then
+  check "P1tp4 the report did not render, so its silence proves nothing" FAIL
+else
+  case "$TOPO_OUT_NONE" in
+    *'topology:'*) check "P1tp4 with no receipt the row stays silent (nothing was audited yet)" FAIL ;;
+    *) check "P1tp4 with no receipt the row stays silent (nothing was audited yet)" PASS ;;
+  esac
+fi
+
+# P1tp8 — the two topology bullets in skills/doctor/SKILL.md are held against the
+# renderer's own row lead-ins. Both sibling row families in this suite carry such a
+# drift pin (P1qr for the denial rows, P1vg for verify-feature); without one, a
+# reworded row or a deleted bullet drifts with every check green.
+TOPO_SKILL="$SKILL_MD"
+TOPO_REPORT_SRC="$REPORT"
+TOPO_LEADS_OK=1
+# The needles deliberately carry NO apostrophe: the renderer escapes it as `\'`
+# inside its own single-quoted strings, so a needle spelling `session's` matches
+# the skill and never the source, and the pin would fail for a reason unrelated
+# to drift.
+for _lead in \
+  "audited run log claims edits under" \
+  "claims were NOT checked against the anchor"; do
+  grep -qF "$_lead" "$TOPO_REPORT_SRC" || TOPO_LEADS_OK=0
+  grep -qF "$_lead" "$TOPO_SKILL" || TOPO_LEADS_OK=0
+done
+if [ "$TOPO_LEADS_OK" -eq 1 ]; then
+  check "P1tp8 every topology row lead-in is both emitted and documented in the skill" PASS
+else
+  check "P1tp8 every topology row lead-in is both emitted and documented in the skill" FAIL
+fi
+if grep -qF "topology: this session's claims were never audited at all" "$TOPO_REPORT_SRC"; then
+  check "P1tp8-control the pin is not matching an arbitrary topology lead-in" FAIL
+else
+  check "P1tp8-control the pin is not matching an arbitrary topology lead-in" PASS
+fi
 
 rm -rf "$SBOX"
 echo "----"

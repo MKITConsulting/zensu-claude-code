@@ -606,6 +606,137 @@ else
   check "C21 the wrapper resolves the threshold through the canonical getter and exports it" FAIL
 fi
 
+# --- C21b: the same pin for the owner-activity window ----------------------
+# Every doctor fixture presets `ZDOC_OWNER_ACTIVITY_TTL_HOURS` or leaves it unset, so
+# the wrapper half — the only production producer — is exercised by nothing. Dropping
+# the export or renaming the variable would silently return every real run to the
+# built-in fallback of 1 while the whole suite stayed green, on the row that routes a
+# user to an irreversible cancel.
+if grep -qF 'zensu_autopilot_owner_activity_ttl_hours' "$DOCTOR_SH" \
+  && grep -qF 'if [ -z "${ZDOC_OWNER_ACTIVITY_TTL_HOURS:-}" ]' "$DOCTOR_SH" \
+  && grep -qF 'ZDOC_OWNER_ACTIVITY_TTL_HOURS="$(zensu_autopilot_owner_activity_ttl_hours' "$DOCTOR_SH" \
+  && grep -qE '^export ZDOC_OWNER_ACTIVITY_TTL_HOURS$' "$DOCTOR_SH"; then
+  check "C21b the wrapper resolves the owner-activity window through the canonical getter and exports it" PASS
+else
+  check "C21b the wrapper resolves the owner-activity window through the canonical getter and exports it" FAIL
+fi
+
+# --- C21c: every resolved window is a disjunct of the single-source guard ---
+# The wrapper sources `zensu-config.sh` exactly once (C33), behind a disjunction of
+# the resolve guards. A window added without its disjunct leaves a caller that pinned
+# the others unable to source the library, so `command -v <getter>` fails, the value
+# stays empty and the renderer falls back with no signal. Derived from the resolve
+# blocks rather than hand-listed, so a fourth window enrols itself.
+# The population is the CONFIG windows only — a value resolved through a canonical
+# `zensu_*` getter AND exported unconditionally. The wrapper's tool probes
+# (`ZDOC_NODE`, `ZDOC_ZENSU`, …) carry the same `-z` guard shape but need no library,
+# so folding them in would demand disjuncts the guard must not have.
+# The export match admits the GROUPED form (`export A B`) as well as the one-per-line
+# one, and that is not cosmetic: the SCANNED file, hooks/lib/zensu-doctor.sh, already
+# carries one grouped `export` statement, so folding a window into it is an ordinary
+# edit. One bound travels with that: the match is per LINE, and that statement is
+# continued across several with a trailing backslash, so a name folded onto a
+# continuation line is still invisible here. Under a `^export NAME$`-only match
+# the window silently LEAVES the derived population — the check then still passes,
+# over a smaller world, which is the one failure mode a derived pin is supposed to
+# make impossible. Measured on a mutant that grouped the owner-activity export: the
+# population dropped from three windows to two with the check green.
+C21C_RESOLVED="$(grep -oE '^[[:space:]]*ZDOC_[A-Z_]+="\$\(zensu_[a-z_]+' "$DOCTOR_SH" \
+  | sed -E 's/^[[:space:]]*(ZDOC_[A-Z_]+)=.*$/\1/' | sort -u \
+  | while read -r c21c_cand; do
+      grep -qE "^export ([A-Z_]+ )*$c21c_cand( |\$)" "$DOCTOR_SH" && printf '%s\n' "$c21c_cand"
+    done)"
+C21C_GUARD="$(sed -n '/^if { \[ -z /,/^  \&\& \[ -f /p' "$DOCTOR_SH")"
+C21C_OK=true
+[ -n "$C21C_RESOLVED" ] || C21C_OK=false
+[ -n "$C21C_GUARD" ] || C21C_OK=false
+# A FLOOR under the derived population, because "a fourth window enrols itself" only
+# holds while the derivation cannot silently SHRINK. Every way it can — a grouped
+# export, a reflowed assignment, a renamed getter prefix — removes a window from the
+# world this check grades while leaving it green. Raising this number is the
+# registration for a new window, exactly as `C21C_GUARD_LINES` is the bound for the
+# guard it slices.
+C21C_COUNT="$(printf '%s\n' "$C21C_RESOLVED" | grep -c .)"
+[ "$C21C_COUNT" -ge 4 ] || C21C_OK=false
+# BOUNDED, because `sed` prints to EOF when the end address never matches — and a
+# reflow of the guard's closing line is exactly the collateral of adding a fourth
+# disjunct, the mutation this check exists for. A runaway slice swallows the resolve
+# blocks themselves, whose `${NAME:-}` spellings are the very needle below, so every
+# name would match and the check would pass over a broken disjunction.
+C21C_GUARD_LINES="$(printf '%s\n' "$C21C_GUARD" | grep -c .)"
+[ "$C21C_GUARD_LINES" -le 6 ] || C21C_OK=false
+printf '%s' "$C21C_GUARD" | grep -qF 'zensu_pending_review_ttl_hours' && C21C_OK=false
+for c21c_name in $C21C_RESOLVED; do
+  printf '%s' "$C21C_GUARD" | grep -qF "\${$c21c_name:-}" || C21C_OK=false
+done
+if [ "$C21C_OK" = true ]; then
+  check "C21c every ZDOC_ window the wrapper resolves is named in the single-source guard ($(printf '%s\n' "$C21C_RESOLVED" | grep -c .) windows)" PASS
+else
+  check "C21c resolve guards and the single-source disjunction disagree (resolved: $(printf '%s' "$C21C_RESOLVED" | tr '\n' ' '))" FAIL
+fi
+
+# --- C21d: the owner-activity window is re-resolved from the RECORD root ----
+# Every window is resolved BEFORE the session bind, so it reads the overlay under
+# `CLAUDE_PROJECT_DIR`. The Session state block then scans the RECORD root, and the
+# two differ for any session whose cwd is a worktree — which is this repository's own
+# default. The pending-review TTL carries a re-resolution for exactly that reason;
+# without the twin, the `autopilot:` row can quote a window neither run verb applies,
+# beside an irreversible-cancel remedy. The pinned-by-caller flag must survive it, or
+# a fixture that pins a value gets it overwritten.
+# Every conjunct is anchored INSIDE the owner-activity re-resolve block, and the
+# pinned-flag guard is one of them: without that anchoring the sibling TTL block
+# satisfies the root-prefix needle on its own, and without the guard conjunct the
+# `-z` test can be deleted while a caller-pinned window is silently overwritten —
+# the failure `C21`'s own comment names for its `-z` guard one screen above.
+C21D_BLOCK="$(sed -n '/^      if \[ -z "\${ZDOC_OWNER_ACTIVITY_TTL_PINNED:-}" \]/,/^      fi$/p' "$DOCTOR_SH")"
+C21D_CALLS="$(grep -cF 'zensu_autopilot_owner_activity_ttl_hours 2>/dev/null' "$DOCTOR_SH")"
+C21D_OK=true
+[ -n "$C21D_BLOCK" ] || C21D_OK=false
+# BOUNDED, for the reason `C21C_GUARD_LINES` states one check up and this one did not:
+# `sed` prints to EOF when the end address never matches, and the end address here is
+# a `fi` at one exact indentation. Re-indenting that one line — the ordinary collateral
+# of wrapping the block in anything — makes the slice run to the end of the file, where
+# every conjunct below is satisfied by unrelated lines and the check passes while the
+# block it is named for has gone. Measured on a mutant that added two spaces to that
+# `fi`: the slice grew from 16 lines to 166.
+C21D_BLOCK_LINES="$(printf '%s\n' "$C21D_BLOCK" | grep -c .)"
+[ "$C21D_BLOCK_LINES" -le 20 ] || C21D_OK=false
+[ "${C21D_CALLS:-0}" -ge 2 ] || C21D_OK=false
+printf '%s' "$C21D_BLOCK" | grep -qF 'CLAUDE_PROJECT_DIR="$ZDOC_SESSION_PROJECT_ROOT" \' || C21D_OK=false
+printf '%s' "$C21D_BLOCK" | grep -qF 'zensu_autopilot_owner_activity_ttl_hours 2>/dev/null' || C21D_OK=false
+printf '%s' "$C21D_BLOCK" | grep -qF 'export ZDOC_OWNER_ACTIVITY_TTL_HOURS' || C21D_OK=false
+printf '%s' "$C21D_BLOCK" | grep -qF 'zensu_pending_review_ttl_hours' && C21D_OK=false
+grep -qF 'ZDOC_OWNER_ACTIVITY_TTL_PINNED=1' "$DOCTOR_SH" || C21D_OK=false
+if [ "$C21D_OK" = true ]; then
+  check "C21d the owner-activity window is re-resolved from the record root, and a caller pin survives it" PASS
+else
+  check "C21d the owner-activity window is re-resolved from the record root, and a caller pin survives it (calls=${C21D_CALLS:-0} block_lines=${C21D_BLOCK_LINES:-0})" FAIL
+fi
+
+# --- C21e: the release's own window gets the same resolve and re-resolve ------
+# The two run verbs read separate windows, so the release window is a fourth ZDOC_
+# value with the same obligations C21b and C21d state for the adoption window: the
+# canonical getter, an unconditional export, a remembered caller pin, and a record-root
+# re-resolution that stays inside its own bounded block.
+C21E_BLOCK="$(sed -n '/^      if \[ -z "\${ZDOC_RELEASE_OWNER_ACTIVITY_TTL_PINNED:-}" \]/,/^      fi$/p' "$DOCTOR_SH")"
+C21E_BLOCK_LINES="$(printf '%s\n' "$C21E_BLOCK" | grep -c .)"
+C21E_OK=true
+grep -qF 'if [ -z "${ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS:-}" ]' "$DOCTOR_SH" || C21E_OK=false
+grep -qF 'ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS="$(zensu_autopilot_release_owner_activity_ttl_hours' "$DOCTOR_SH" || C21E_OK=false
+grep -qE '^export ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS$' "$DOCTOR_SH" || C21E_OK=false
+grep -qF 'ZDOC_RELEASE_OWNER_ACTIVITY_TTL_PINNED=1' "$DOCTOR_SH" || C21E_OK=false
+[ -n "$C21E_BLOCK" ] || C21E_OK=false
+[ "$C21E_BLOCK_LINES" -le 20 ] || C21E_OK=false
+printf '%s' "$C21E_BLOCK" | grep -qF 'CLAUDE_PROJECT_DIR="$ZDOC_SESSION_PROJECT_ROOT" \' || C21E_OK=false
+printf '%s' "$C21E_BLOCK" | grep -qF 'zensu_autopilot_release_owner_activity_ttl_hours 2>/dev/null' || C21E_OK=false
+printf '%s' "$C21E_BLOCK" | grep -qF 'export ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS' || C21E_OK=false
+printf '%s' "$C21E_BLOCK" | grep -qF 'zensu_autopilot_owner_activity_ttl_hours' && C21E_OK=false
+if [ "$C21E_OK" = true ]; then
+  check "C21e the release window resolves through its own getter, exports, remembers a caller pin and re-resolves from the record root" PASS
+else
+  check "C21e the release window resolve or re-resolve is missing (block_lines=${C21E_BLOCK_LINES:-0})" FAIL
+fi
+
 # --- C13/C14: the accessors themselves -------------------------------------
 C13_RAW="impl-accessor"
 start_session "$C13_RAW"
@@ -1031,9 +1162,14 @@ getter_with() {  # $1 = config path; prints the resolved threshold
 # `local default=` line that no longer exists. Its own control caught that, which is
 # the only reason it was a red check rather than a silently vacuous one — and the
 # lesson is the same one the production collapse was about, one file over.
-# PARAMETERIZED on the getter and its key, because the collapse made all three getters
-# one-line calls with the same operand shape — so one extractor can pin all three
-# hand-copied constant pairs instead of only the implementing-turns one.
+# PARAMETERIZED on the getter and its key, because the collapse made every getter a
+# one-line call with the same operand shape — so one extractor serves every consumer
+# instead of only the implementing-turns one. Its consumers are C29, which reads the
+# same operands for a BEHAVIOURAL fallback check rather than for a constant mirror;
+# C31/C31a, C57, C57b and C57e, which are the constant mirrors; and C58's bound matrix,
+# which runs over the derived population. Do NOT restate that as a COUNT here: the
+# population is derived, it has already grown twice, and a numeral would go stale on
+# the next getter while every derived check stayed green.
 # Both names are interpolated into a grep ERE and a sed BRE, so they must be plain
 # identifiers. Every caller passes one; the contract is stated rather than enforced,
 # because a key containing `.` would silently match any character and one containing `/`
@@ -1283,8 +1419,8 @@ fi
 # literal, so the next rewording would have left all three carriers stale with C39 green.
 #
 # It COMPARES now. The clause is extracted from the hook's own comment-stripped body and each
-# carrier must CONTAIN it, normalised for case and for line wrapping — CLAUDE.md legitimately
-# uppercases part of it and hard-wraps mid-clause, so a raw fixed-string match would fail for
+# carrier must CONTAIN it, normalised for case and for line wrapping — a carrier may
+# uppercase part of it and hard-wrap mid-clause, so a raw fixed-string match would fail for
 # a reason unrelated to drift. The retired-literal blacklist is kept as a second conjunct,
 # anchored to its own context so an unrelated sentence elsewhere in these large files cannot
 # turn it red while naming the wrong drift.
@@ -1308,7 +1444,7 @@ C39_PHRASE="$(printf '%s\n' "$C39_ALL" | head -1)"
   || check "C39pre the emitted threshold-gated clause was located, so the comparison is not vacuous" FAIL
 C39_NORM="$(printf '%s' "$C39_PHRASE" | tr -s '[:space:]' ' ' | tr 'A-Z' 'a-z')"
 C39_MISS=""
-for c39f in "$PLUGIN_DIR/CLAUDE.md" "$PLUGIN_DIR/docs/configuration.md" "$PLUGIN_DIR/docs/tdd-manager-workflow.md"; do
+for c39f in "$PLUGIN_DIR/docs/configuration.md" "$PLUGIN_DIR/docs/tdd-manager-workflow.md"; do
   c39n="$(basename "$c39f")"
   if [ ! -r "$c39f" ]; then C39_MISS="$C39_MISS unreadable:$c39n"; continue; fi
   # POSITIVE, per OCCURRENCE rather than per file. Containment clears a carrier on one hit,
@@ -1325,9 +1461,9 @@ for c39f in "$PLUGIN_DIR/CLAUDE.md" "$PLUGIN_DIR/docs/configuration.md" "$PLUGIN
     && C39_MISS="$C39_MISS retired:$c39n"
 done
 if [ -n "$C39_PHRASE" ] && [ -n "$C39_NORM" ] && [ -z "$C39_MISS" ]; then
-  check "C39 all three prose carriers quote the clause the code emits" PASS
+  check "C39 both prose carriers quote the clause the code emits" PASS
 else
-  check "C39 all three prose carriers quote the clause the code emits ($C39_MISS)" FAIL
+  check "C39 both prose carriers quote the clause the code emits ($C39_MISS)" FAIL
 fi
 
 # --- C38: an unreachable threshold discloses, exactly as `0` does ---------------
@@ -1531,31 +1667,6 @@ done
   && check "C37 no notice branch promises future silence the code does not keep" PASS \
   || check "C37 no notice branch promises future silence the code does not keep (found $C37_BAD)" FAIL
 
-# --- C41: CLAUDE.md names SYMBOLS, never line numbers, for this hook -----------
-# Two anchors in the foreign-chain bullet went stale the moment this feature
-# inserted a function above them: `:951` named the SESSION_IMPL_COMPLETE release
-# and `:954-956` the CAP release, which sit far below that now. A line number in
-# prose is a claim that rots silently — nothing recomputes it and no reader can
-# tell a correct one from a drifted one without opening the file — so the FORM is
-# forbidden rather than corrected to today's numbers, which would only reset the
-# clock on the same defect.
-C41_MD="$PLUGIN_DIR/CLAUDE.md"
-# Filename-INDEPENDENT, because the rule it enforces is. A `zensu-tdd-phase.sh:1198`
-# or a `zensu-doctor-report.js:1808` anchor rots in exactly the same way and read as
-# permitted while the guard named one hook. The whole file carries zero matches of the
-# broader class today, so widening costs no red check and closes the form for every
-# carrier the rule names.
-C41_RE='\.(sh|js|mjs|json|md):[0-9]'
-C41_CTRL="$(printf 'a hooks/stop-chain-enforcer.sh:951 line\nand zensu-doctor-report.js:1808 too\n' | grep -cE "$C41_RE" || true)"
-[ "$C41_CTRL" = "2" ] \
-  && check "C41pre the line-anchor pattern matches the form it forbids" PASS \
-  || check "C41pre the line-anchor pattern matches the form it forbids (got '$C41_CTRL')" FAIL
-C41_HITS="$(grep -cE "$C41_RE" "$C41_MD" || true)"
-C41_WHERE="$(grep -nE "$C41_RE" "$C41_MD" | head -3 | tr '\n' ' ' || true)"
-[ "$C41_HITS" = "0" ] \
-  && check "C41 CLAUDE.md carries no <file>:<line> source anchor" PASS \
-  || check "C41 CLAUDE.md carries no <file>:<line> source anchor (found $C41_HITS: $C41_WHERE)" FAIL
-
 # The next several all read the SAME function body. `hook_fn_body` refuses a body
 # whose closing brace it did not reach, so an over-extraction fails here rather than
 # silently handing every check below the rest of the file.
@@ -1575,8 +1686,7 @@ C42_CODE="$(hook_fn_body zensu_impl_stop_nudge code)"
 # MEASURED on the maintainer's own host: neither `timeout` nor `gtimeout` exists
 # on base macOS. `gtimeout` is what a Homebrew coreutils install actually puts on
 # PATH, so probing only `timeout` misses the one watchdog such a host is likely to
-# have. The unbounded fallback is KEPT on purpose — C56 pins that arm, and the
-# CLAUDE.md gap bullet states its bound, which C42b/C53 hold against this ladder.
+# have. The unbounded fallback is KEPT on purpose — C56 pins that arm.
 #
 # The ladder lives in `zensu_run_bounded` now, shared with the transcript probe,
 # so it is read out of THAT body: a check pointed at the nudge would go green on a
@@ -1596,12 +1706,6 @@ C42A_G="$(printf '%s\n' "$C42_LADDER" | grep -n 'command -v gtimeout' | head -1 
 [ -n "$C42A_T" ] && [ -n "$C42A_G" ] && [ "$C42A_T" -lt "$C42A_G" ] \
   && check "C42a the ladder prefers timeout, so gtimeout is a fallback and not a replacement" PASS \
   || check "C42a the ladder prefers timeout, so gtimeout is a fallback and not a replacement (timeout='$C42A_T' gtimeout='$C42A_G')" FAIL
-# The gap bullet must describe the shipped ladder. It named only `timeout`, which
-# made the sentence false the moment a second watchdog was probed — and its own
-# claim of a mitigation was what the review finding rejected.
-grep -qF 'gtimeout' "$C41_MD" \
-  && check "C42b the CLAUDE.md gap bullet names the second watchdog the code probes" PASS \
-  || check "C42b the CLAUDE.md gap bullet names the second watchdog the code probes" FAIL
 
 # --- C43: the free checks come before the node spawn ---------------------------
 # `zensu_impl_stop_nudge_after` spawns node. On a host with no git the feature can
@@ -1755,40 +1859,6 @@ C50_SPELLINGS="$(printf '%s\n' "$C42_CODE" | grep -c "exclude).zensu" || true)"
   && check "C50 the nudge spells the git probe exactly once" PASS \
   || check "C50 the nudge spells the git probe exactly once (found $C50_SPELLINGS)" FAIL
 
-# --- C51/C52: CLAUDE.md registers what this change made shared -----------------
-# Both are new single sources of truth, and this repository's whole convention is
-# that a shared owner is named on a roster so the next reader finds its consumers.
-grep -qF 'zensu_autopilot_link_args' "$C41_MD" \
-  && check "C51 CLAUDE.md names the single renderer of the Autopilot flag triple" PASS \
-  || check "C51 CLAUDE.md names the single renderer of the Autopilot flag triple" FAIL
-grep -qF '_zensu_config_bounded_int' "$C41_MD" \
-  && check "C52 CLAUDE.md names the shared bounded-int config helper" PASS \
-  || check "C52 CLAUDE.md names the shared bounded-int config helper" FAIL
-# The third shared owner this change introduced. Without it, renaming the ladder would
-# redden only the checks that grade the HOOK, and the fix would land in this file while
-# the CLAUDE.md roster went stale unnoticed — which is the drift C51/C52 exist to stop.
-grep -qF 'zensu_run_bounded' "$C41_MD" \
-  && check "C59 CLAUDE.md names the shared watchdog ladder" PASS \
-  || check "C59 CLAUDE.md names the shared watchdog ladder" FAIL
-
-# --- C53: the watchdog PROSE and the watchdog CODE describe one ladder ---------
-# C42b greps the whole file, so the gap bullet alone satisfies it while the section's
-# main prose still says `timeout`-only eighty lines above — the exact drift shape that
-# paragraph already records about itself once. Scope the assertion to the paragraph
-# carrying the claim.
-# Anchored on the CLAIM, not on the adjective. A first spelling keyed on
-# "`timeout`-bounded WHEN" and went vacuous the moment that phrase was corrected —
-# a check that only fires while the defect's exact wording survives is worth nothing.
-# "The SAME conditional applies to a second" is the sentence whose truth depends on
-# both children carrying the same ladder, so it is the right thing to hold.
-C53_PARA="$(awk -v RS='' '/The SAME conditional applies to a second/' "$C41_MD" | head -40)"
-[ -n "$C53_PARA" ] \
-  && check "C53pre the watchdog paragraph was located, so the scan is not vacuous" PASS \
-  || check "C53pre the watchdog paragraph was located, so the scan is not vacuous" FAIL
-printf '%s' "$C53_PARA" | grep -qF 'gtimeout' \
-  && check "C53 the paragraph making the watchdog claim names both binaries the code probes" PASS \
-  || check "C53 the paragraph making the watchdog claim names both binaries the code probes" FAIL
-
 # --- C54: the renderer's coupling comment names the extraction that exists -----
 # It named `n<=999999` read "out of the function body", a spelling the config collapse
 # removed entirely. A guarding comment that sends a maintainer after bytes the code
@@ -1850,7 +1920,7 @@ C55_Q="$(printf '%s\n' "$C55_BODY" | c55_pcts '%q')"
   || check "C55a every conversion in the renderer is a %q (all=$C55_ALL q=$C55_Q)" FAIL
 
 # --- C56: the unbounded third arm is pinned, not just its rationale ------------
-# C42/C42a/C42b observe only that two `command -v` probes and one doc word exist, so
+# C42/C42a observe only that two `command -v` probes exist, so
 # replacing the last arm with `return 0` — the alternative the comment records as
 # REJECTED — left every one of them green. The arm the whole decision is about needs
 # a pin of its own, in the same spirit as C44 pinning the lock-domain decision.
@@ -1934,13 +2004,113 @@ else
   check "C57pre all four TTL literals were located, so the comparison below is not vacuous (cfg=$C57_CFG_DEF/$C57_CFG_MAX doctor=$C57_DOC_DEF/$C57_DOC_MAX)" FAIL
 fi
 
-# --- C58: the shared bounded-int helper's arithmetic, for ALL THREE call sites -
+# --- C57b: the SECOND renderer mirror, for the owner-activity window ----------
+# The doctor's `autopilot:` row quotes the window `--autopilot-adopt` judges owner
+# liveness against, so its constants are a mirror of
+# `zensu_autopilot_owner_activity_ttl_hours` exactly as the pair above mirrors the
+# pending-review getter. The RELEASE verb reads a window of its OWN and is mirrored by
+# C57e below — naming both verbs here would state away the very asymmetry the per-verb
+# split exists to keep, on the header of the check that holds one half of it. Unpinned,
+# a changed default would leave the row promising a window the adoption verb does not
+# read — which is the defect this mirror was added for.
+C57B_CFG_DEF="$(getter_operand zensu_autopilot_owner_activity_ttl_hours autopilotOwnerActivityTtlHours 1)"
+C57B_CFG_MAX="$(getter_operand zensu_autopilot_owner_activity_ttl_hours autopilotOwnerActivityTtlHours 3)"
+C57B_DOC_DEF="$(sed -n 's/^var OWNER_ACTIVITY_TTL_FALLBACK = \([0-9][0-9]*\);$/\1/p' "$REPORT" | head -1)"
+C57B_DOC_MAX="$(sed -n 's/^var OWNER_ACTIVITY_TTL_MAX = \([0-9][0-9]*\);$/\1/p' "$REPORT" | head -1)"
+if [ -n "$C57B_CFG_DEF" ] && [ -n "$C57B_CFG_MAX" ] && [ -n "$C57B_DOC_DEF" ] && [ -n "$C57B_DOC_MAX" ]; then
+  check "C57bpre all four owner-activity literals were located, so the comparison below is not vacuous" PASS
+  [ "$C57B_CFG_DEF" = "$C57B_DOC_DEF" ] && [ "$C57B_CFG_MAX" = "$C57B_DOC_MAX" ] \
+    && check "C57b the doctor's owner-activity constants match the getter's own default and bound" PASS \
+    || check "C57b the doctor's owner-activity constants match the getter's own default and bound (cfg=$C57B_CFG_DEF/$C57B_CFG_MAX doctor=$C57B_DOC_DEF/$C57B_DOC_MAX)" FAIL
+else
+  check "C57bpre all four owner-activity literals were located, so the comparison below is not vacuous (cfg=$C57B_CFG_DEF/$C57B_CFG_MAX doctor=$C57B_DOC_DEF/$C57B_DOC_MAX)" FAIL
+fi
+# --- C57e: the THIRD renderer mirror, for the release's own window -------------
+# The two run verbs read separate windows, so the release window has its own constant
+# pair in the renderer, mirrored from `zensu_autopilot_release_owner_activity_ttl_hours`
+# exactly as C57b mirrors the adoption window.
+C57E_CFG_DEF="$(getter_operand zensu_autopilot_release_owner_activity_ttl_hours autopilotReleaseOwnerActivityTtlHours 1)"
+C57E_CFG_MAX="$(getter_operand zensu_autopilot_release_owner_activity_ttl_hours autopilotReleaseOwnerActivityTtlHours 3)"
+C57E_DOC_DEF="$(sed -n 's/^var RELEASE_OWNER_ACTIVITY_TTL_FALLBACK = \([0-9][0-9]*\);$/\1/p' "$REPORT" | head -1)"
+C57E_DOC_MAX="$(sed -n 's/^var RELEASE_OWNER_ACTIVITY_TTL_MAX = \([0-9][0-9]*\);$/\1/p' "$REPORT" | head -1)"
+if [ -n "$C57E_CFG_DEF" ] && [ -n "$C57E_CFG_MAX" ] && [ -n "$C57E_DOC_DEF" ] && [ -n "$C57E_DOC_MAX" ]; then
+  check "C57epre the release-window literals were located, so the comparison below is not vacuous" PASS
+  [ "$C57E_CFG_DEF" = "$C57E_DOC_DEF" ] && [ "$C57E_CFG_MAX" = "$C57E_DOC_MAX" ] \
+    && check "C57e the doctor's release-window constants match the getter's own default and bound" PASS \
+    || check "C57e the doctor's release-window constants match the getter's own default and bound (cfg=$C57E_CFG_DEF/$C57E_CFG_MAX doctor=$C57E_DOC_DEF/$C57E_DOC_MAX)" FAIL
+else
+  check "C57epre the release-window literals were located, so the comparison below is not vacuous (cfg=$C57E_CFG_DEF/$C57E_CFG_MAX doctor=$C57E_DOC_DEF/$C57E_DOC_MAX)" FAIL
+fi
+# C57c — and the accessor must actually READ that pair. C57b compares two constants
+# with the getter's operands; nothing bound them to the value the row prints, so an
+# accessor rewritten onto the pending-review constants would keep C57b green while
+# every unconfigured run quoted 6h. `P1nk` grades the rendered fallback behaviourally;
+# this is its source-side twin, which also catches the reverse swap.
+#
+# The needle names the LIVE reader, and that is the load-bearing half. The
+# owner-activity window is resolved by `ownerActivityWindow`, which calls
+# `boundedEnvIntResolve` because it needs the `accepted` flag as well as the value;
+# a needle spelled against a `boundedEnvInt` accessor grades whatever accessor still
+# carries that spelling, INCLUDING one no caller reaches. That is not hypothetical:
+# `ownerActivityTtlHours()` survived the switch with zero callers for a round, and
+# while it stood this check could have stayed green with `ownerActivityWindow`
+# rewritten onto the pending-review pair — the exact swap the paragraph above says it
+# catches. C57d is the guard that keeps the needle on a reader something calls.
+if grep -qF "boundedEnvIntResolve('ZDOC_OWNER_ACTIVITY_TTL_HOURS'," "$REPORT" \
+  && grep -qE "^    OWNER_ACTIVITY_TTL_FALLBACK, OWNER_ACTIVITY_TTL_MAX\);$" "$REPORT" \
+  && grep -qF "boundedEnvIntResolve('ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS'," "$REPORT" \
+  && grep -qE "^    RELEASE_OWNER_ACTIVITY_TTL_FALLBACK, RELEASE_OWNER_ACTIVITY_TTL_MAX\);$" "$REPORT" \
+  && grep -qF "boundedEnvInt('ZDOC_TTL_HOURS', TTL_HOURS_FALLBACK, TTL_HOURS_MAX)" "$REPORT"; then
+  check "C57c each window accessor reads its own constant pair" PASS
+else
+  check "C57c each window accessor reads its own constant pair" FAIL
+fi
+
+# C57d — no zero-argument accessor may sit in the tree with no caller. A dead accessor
+# is what silently re-points C57c at code the report never executes, so the population
+# is derived rather than named: every `function <name>() {` in the renderer must be
+# CALLED somewhere in that same file. It grades the shape, not a list, so an accessor
+# added later enrols itself.
+#
+# COMMENT LINES ARE STRIPPED FIRST, and that is the load-bearing half rather than
+# tidiness. `ownerActivityTtlHours()` was dead while a comment beside its replacement
+# NAMED it, so a naive occurrence count read the prose as a call site and reported the
+# dead accessor as live — measured, with this check written and green over the very
+# accessor it was added to catch. Strip `//` lines and block-comment continuations
+# before counting, or the check grades documentation.
+C57D_BODY="$(mktemp)"
+sed -E 's#^[[:space:]]*//.*$##; s#^[[:space:]]*\*.*$##' "$REPORT" > "$C57D_BODY"
+C57D_DEAD=""
+C57D_SEEN=0
+while IFS= read -r fn; do
+  [ -n "$fn" ] || continue
+  C57D_SEEN=$((C57D_SEEN + 1))
+  if [ "$(grep -cE "(^|[^A-Za-z0-9_.])${fn}\(\)" "$C57D_BODY")" -lt 2 ]; then
+    C57D_DEAD="$C57D_DEAD $fn"
+  fi
+done <<EOF
+$(grep -oE '^function [A-Za-z0-9_]+\(\) \{$' "$C57D_BODY" | sed 's/^function //; s/() {$//')
+EOF
+rm -f "$C57D_BODY"
+if [ "$C57D_SEEN" -ge 3 ]; then
+  check "C57dpre the zero-argument accessor population was derived, so C57d is not vacuous (seen=$C57D_SEEN)" PASS
+else
+  check "C57dpre the zero-argument accessor population was derived, so C57d is not vacuous (seen=$C57D_SEEN)" FAIL
+fi
+if [ -z "$C57D_DEAD" ]; then
+  check "C57d every zero-argument accessor in the renderer has a caller" PASS
+else
+  check "C57d every zero-argument accessor in the renderer has a caller (uncalled:$C57D_DEAD)" FAIL
+fi
+
+# --- C58: the shared bounded-int helper's arithmetic, for EVERY call site -------
 # The helper's own comment claimed a characterization matrix as the thing any future
-# change to it owes the three getters. That matrix was run by hand and committed
-# nowhere, so the claim named evidence the suite did not carry — and only
-# `implStopNudgeAfter`'s bound was exercised at all. This is that matrix, table-driven
-# and in the suite, so the claim is now true and the two other call sites have their
-# bound arithmetic covered rather than assumed.
+# change to it owes its callers. That matrix was run by hand and committed nowhere, so
+# the claim named evidence the suite did not carry — and only `implStopNudgeAfter`'s
+# bound was exercised at all. This is that matrix, table-driven and in the suite, so the
+# claim is now true and every other call site has its bound arithmetic covered rather
+# than assumed. The population is DERIVED below rather than counted in this header: the
+# numerals that stood here went stale twice while the derivation stayed correct.
 c58_get() {  # $1 = getter, $2 = json config body
   printf '%s' "$2" > "$STATE_DIR/c58.json"
   bash -c 'set -u; ZENSU_CONFIG="$2"; source "$1/hooks/lib/zensu-config.sh"; "$3"' \
@@ -1950,10 +2120,17 @@ C58_FAILS=""
 # The bounds are DERIVED through the same `getter_operand` C57 uses, not hand-copied:
 # restating them here would turn C58 red on a legitimate bound change for a reason
 # unrelated to the arithmetic it grades.
-for c58row in \
-  "zensu_autofix_max_rounds:autoFixMaxRounds" \
-  "zensu_pending_review_ttl_hours:pendingReviewTtlHours" \
-  "zensu_impl_stop_nudge_after:implStopNudgeAfter"; do
+# The population is DERIVED from the config library, not hand-listed: a caller added
+# there would otherwise be uncovered silently, which is exactly what happened the last
+# time one landed. An empty derivation is a FAIL, never a skip.
+C58_ROWS="$(grep -oE '^[a-z_]+\(\)[[:space:]]*\{[[:space:]]*_zensu_config_bounded_int [A-Za-z]+' "$PLUGIN_DIR/hooks/lib/zensu-config.sh" \
+  | sed -E 's/^([a-z_]+)\(\)[[:space:]]*\{[[:space:]]*_zensu_config_bounded_int ([A-Za-z]+)$/\1:\2/')"
+if [ -z "$C58_ROWS" ]; then
+  check "C58rows the getter population could not be derived from the config library" FAIL
+else
+  check "C58rows the getter population derives from the config library ($(printf '%s\n' "$C58_ROWS" | grep -c .) getters)" PASS
+fi
+for c58row in $C58_ROWS; do
   c58fn="${c58row%%:*}"; c58key="${c58row#*:}"
   c58def="$(getter_operand "$c58fn" "$c58key" 1)"
   c58min="$(getter_operand "$c58fn" "$c58key" 2)"
@@ -1967,7 +2144,7 @@ for c58row in \
   #
   # The quoted case uses the MIN, never the default: quoting the default made acceptance
   # and rejection produce the same string, so replacing `Number.isInteger` with a coercing
-  # `Number` left the row green. The min differs from the default in all three rows.
+  # `Number` left the row green. The min differs from the default in every row.
   for c58case in "$c58min:$c58min" "$c58max:$c58max" "$((c58min - 1)):$c58def" \
                  "$((c58max + 1)):$c58def" "1.5:$c58def" "\"$c58min\":$c58def"; do
     c58in="${c58case%%:*}"; c58want="${c58case#*:}"
@@ -1980,7 +2157,7 @@ done
 # The control matters: a typo in the loop would leave C58_FAILS empty and report a green
 # matrix that never ran. Require the accepted cases to have produced real values first.
 # The object-shape conjunct (`typeof h === "object" && !Array.isArray(h)`) is unreachable
-# through the three shipped getters, because none of their keys is one a string or an array
+# through the four shipped getters, because none of their keys is one a string or an array
 # owns. Drive the helper DIRECTLY with the key `length` against both shapes: with
 # `hasOwnProperty` alone, `"abcdefgh".length` and `[1,2,3,4,5].length` are own integers that
 # would pass the bounds and be echoed instead of the default.
@@ -2006,8 +2183,71 @@ C58_CTL="$(c58_get zensu_impl_stop_nudge_after '{"hooks":{"implStopNudgeAfter":7
   && check "C58pre the matrix harness really drives the getters, so an empty failure list means something" PASS \
   || check "C58pre the matrix harness really drives the getters (got '$C58_CTL')" FAIL
 [ -z "$C58_FAILS" ] \
-  && check "C58 all three bounded-int getters honour their own min, max, fallback and absent-key behaviour" PASS \
-  || check "C58 all three bounded-int getters honour their own bounds (failures:$C58_FAILS)" FAIL
+  && check "C58 every bounded-int getter honours its own min, max, fallback and absent-key behaviour" PASS \
+  || check "C58 every bounded-int getter honours its own bounds (failures:$C58_FAILS)" FAIL
+
+# C62 — the receipt-exit clause both implementing-turn notices carry. A grep over
+# the whole tests/ tree for `records a CLEAN verdict` and for `verdict rather than
+# its existence` returned NOTHING: the notices execute, other needles inside them
+# are pinned, and this specific wording could be reverted or drift out of step
+# with every check green. The same claim landed in five carriers at once, and this
+# file already uses module-scope constants (REVIEWER_SPAWN_ALLOW_RULE,
+# REVIEWER_SPAWN_DENY_FIRST) for exactly that, interpolated into these very echoes.
+C62_CLAUSE='it reads the receipt'"'"'s verdict rather than its existence'
+# `grep -c` already prints 0 on no match AND exits 1, so `|| echo 0` appends a
+# SECOND line and the variable becomes `0\n0` — every later `[ "$C62_HITS" -eq 1 ]`
+# then errors under the two-line value rather than comparing. `zensu-log.sh`
+# documents this exact defect in production code, which is where the shape was
+# copied from; reproducing it in the check written against that file is the
+# irony worth not shipping. `|| true` keeps the status tolerated without adding
+# a line.
+C62_HITS="$(grep -cF "$C62_CLAUSE" "$STOP" 2>/dev/null || true)"
+C62_HITS="${C62_HITS:-0}"
+[ "$C62_HITS" -ge 1 ] \
+  && check "C62pre the receipt-exit clause is present in the Stop enforcer at all" PASS \
+  || check "C62pre the receipt-exit clause is present in the Stop enforcer at all" FAIL
+[ "$C62_HITS" -eq 1 ] \
+  && check "C62 the receipt-exit clause has ONE owner in the Stop enforcer, not one copy per notice" PASS \
+  || check "C62 the receipt-exit clause is hand-authored $C62_HITS times in the Stop enforcer" FAIL
+# Second instance of the same shape — the finding named only the first.
+C62_NOTICES="$(grep -cF 'until its receipt records a CLEAN verdict' "$STOP" 2>/dev/null || true)"
+C62_NOTICES="${C62_NOTICES:-0}"
+[ "$C62_NOTICES" -eq 1 ] \
+  && check "C62a the CLEAN-verdict instruction has one owner too" PASS \
+  || check "C62a the CLEAN-verdict instruction appears $C62_NOTICES times" FAIL
+# C62c — the LITERAL count says the clause has one owner; it says nothing about
+# how many notices CONSUME that owner. A third implementing-turn notice added
+# without calling the renderer would hand-author the exit again with C62 and
+# C62a both green, which is the drift those two exist to catch. Count the call
+# sites and require every one of them to go through the renderer.
+C62_CALLS="$(grep -cF 'zensu_impl_receipt_exit "${complete_cmd}"' "$STOP" 2>/dev/null || true)"
+C62_CALLS="${C62_CALLS:-0}"
+# Count NOTICES, not calls. `-ge 2` counted call sites and never notices, so a
+# third notice rendering the exit in its own words passed — which is exactly the
+# hand-authoring C62 and C62a exist to catch, one level up.
+C62_NOTICE_LEAD='Zensu review chain: this session has now ended ${count} turns'
+C62_NOTICE_N="$(grep -cF "$C62_NOTICE_LEAD" "$STOP" 2>/dev/null || true)"
+C62_NOTICE_N="${C62_NOTICE_N:-0}"
+[ "$C62_NOTICE_N" -ge 1 ] \
+  && check "C62c-pre the implementing-turn notices were located at all" PASS \
+  || check "C62c-pre no implementing-turn notice matched the lead-in" FAIL
+[ "$C62_CALLS" -eq "$C62_NOTICE_N" ] \
+  && check "C62c every implementing-turn notice renders the exit through the shared owner" PASS \
+  || check "C62c $C62_CALLS of $C62_NOTICE_N notices call zensu_impl_receipt_exit" FAIL
+C62_DEFS="$(grep -cE '^zensu_impl_receipt_exit\(\)' "$STOP" 2>/dev/null || true)"
+C62_DEFS="${C62_DEFS:-0}"
+[ "$C62_DEFS" -eq 1 ] \
+  && check "C62c-control the renderer is defined exactly once at module scope" PASS \
+  || check "C62c-control the renderer is defined $C62_DEFS times" FAIL
+# Cross-carrier drift pin, the shape P1tp8 uses for the topology bullets: the
+# same claim must survive in the hook and in the doctor renderer together.
+C62_MISS=""
+for C62_F in "$STOP" "$PLUGIN_DIR/hooks/lib/zensu-doctor-report.js" "$PLUGIN_DIR/skills/doctor/SKILL.md"; do
+  grep -qF 'records a CLEAN verdict' "$C62_F" 2>/dev/null || C62_MISS="$C62_MISS $(basename "$C62_F")"
+done
+[ -z "$C62_MISS" ] \
+  && check "C62b the CLEAN-verdict claim survives in the hook, the renderer and the doctor skill together" PASS \
+  || check "C62b the CLEAN-verdict claim is missing from:$C62_MISS" FAIL
 
 echo ""
 echo "impl-stop-counter: $PASS passed, $FAIL failed"

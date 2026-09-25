@@ -1037,11 +1037,10 @@ fi
 # WORKING TREE, not HEAD: this greps $ROOT directly, unlike the behavioural rows.
 if grep -qF 'if (record.plugin_root !== binding.pluginRoot) fail(' \
       "$ROOT/hooks/lib/review-evidence-lease-v1.js" \
-    && ! grep -qF 'servesRecordedRuntime' "$ROOT/hooks/lib/review-evidence-lease-v1.js" \
-    && grep -qF 'Known gap 1' "$ROOT/CLAUDE.md"; then
-  check "the review-evidence lease keeps the strict comparison, documented as gap 1" PASS
+    && ! grep -qF 'servesRecordedRuntime' "$ROOT/hooks/lib/review-evidence-lease-v1.js"; then
+  check "the review-evidence lease keeps the strict comparison" PASS
 else
-  check "the review-evidence lease keeps the strict comparison, documented as gap 1" FAIL
+  check "the review-evidence lease keeps the strict comparison" FAIL
 fi
 
 # AC-013 — a record and workflow document minted by the PREVIOUS RELEASE, from
@@ -1395,7 +1394,7 @@ for required in pre-bash-zensu-gate.sh pre-bash-source-write-gate.sh pre-write-s
     *) ADOPT_ENUMERATION_MISSING="$ADOPT_ENUMERATION_MISSING $required" ;;
   esac
 done
-# TWO hooks on this matcher allow on EVERY platform, and they do so for reasons
+# THREE hooks on this matcher allow on EVERY platform, and they do so for reasons
 # that have nothing to do with each other or with the MSYS spelling gap. One
 # decision site rather than the hand-copy this file used to carry in both loops
 # below: they graded the same question and a third exception added to one of them
@@ -1409,12 +1408,16 @@ done
 #     PreToolUse a non-zero exit blocks the call and a witness that failed closed
 #     would break every Bash call in the session. See CLAUDE.md §"Witness Attempt
 #     Half"; `P12-A5` in test-post-bash-witness.sh pins that contract directly.
+#   pre-browser-navigation-consent.sh — exits 0 with no decision, before it
+#     resolves its plugin root or binds a session, whenever the payload names
+#     neither `playwright-cli` nor `@playwright/cli`, and the adoption command
+#     names neither.
 #
-# A THIRD entry needs its own sentence here. Do not add a name without one: the
+# A FOURTH entry needs its own sentence here. Do not add a name without one: the
 # value of this list is that every member states why it cannot deny.
 adopt_hook_expected() {
   case "$1" in
-    pre-bash-zensu-gate.sh|pre-bash-witness.sh) printf 'allow\n' ;;
+    pre-bash-zensu-gate.sh|pre-bash-witness.sh|pre-browser-navigation-consent.sh) printf 'allow\n' ;;
     *) printf '%s\n' "$2" ;;
   esac
 }

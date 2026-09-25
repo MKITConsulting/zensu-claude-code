@@ -1,12 +1,34 @@
 'use strict';
 
-const BROWSER_NAMESPACES = Object.freeze(['mcp__zensu-browser__', 'mcp__plugin_zensu_zensu-browser__']);
-const SAFE_BROWSER_OPERATIONS = new Set([
-  'browser_click', 'browser_close', 'browser_console_messages', 'browser_drag', 'browser_fill_form',
-  'browser_handle_dialog', 'browser_hover', 'browser_navigate', 'browser_network_requests',
-  'browser_press_key', 'browser_resize', 'browser_select_option', 'browser_snapshot', 'browser_tabs',
-  'browser_take_screenshot', 'browser_type', 'browser_wait_for'
-]);
+const path = require('node:path');
+
+const consent = require(path.join(__dirname, '..', '..', '..', 'hooks', 'lib', 'verify-consent-v1.js'));
+
+const CLI_PROGRAM = 'playwright-cli';
+const SESSION_FLAG = '-s=';
+const RUN_CONFIG_HELPER = '/scripts/verify-browser-config.js';
+const FREE_PORT_HELPER = '/scripts/verify-free-port.js';
+const HELPER_MODES = Object.freeze(['local', 'remote']);
+const LOCAL_REQUIRED = Object.freeze(['snapshot', 'click', 'screenshot', 'console', 'requests', 'close']);
+const REMOTE_REQUIRED = Object.freeze(['snapshot', 'screenshot', 'console', 'requests', 'close']);
+const REMOTE_ROOT = 'https://example.com/';
+const WORD_CHARACTER = /^[A-Za-z0-9_@%+=:,.\/-]$/;
+const HELPER_RUN = /(?:^|[\s;&|(])node\s+(["']?)[^\s"';&|()]*\/scripts\/verify-browser-config\.js\1\s+--run-dir\s/;
+const CLI_MENTION = /\bplaywright-cli\b|@playwright\/cli\b/;
+const BROWSER_WORD = /\b(?:playwright|puppeteer|chromium|chrome|google-chrome|selenium)\b|require\s*\(\s*["'](?:playwright|puppeteer)["']/i;
+const BROWSER_TOOL_NAME = /browser|playwright|puppeteer|chrom(?:e|ium)|selenium/i;
+const IMAGE_EVIDENCE = /\[image omitted media_type=image\/[A-Za-z0-9.+-]+ bytes=[1-9]\d* sha256=[a-f0-9]{64}\]/;
+const SCREENSHOT_LINK = /\[Screenshot[^\]\n]*\]\(([^()\s]+\.(?:png|jpe?g))\)/;
+const PAGE_URL = /^- Page URL: (\S+)$/m;
+const LOAD_INVENTORY_BUTTON = /\bbutton "Load inventory"(?: \[[^\]\n]*\])*? \[ref=(e\d+)\]/;
+const LOCAL_ROOT = /^http:\/\/127\.0\.0\.1:\d{1,5}\/$/;
+const CONSOLE_CLEAN = /\bErrors:\s*0\b/;
+const CONSOLE_ERROR = /\bErrors:\s*[1-9]\d*|\b(?:TypeError|ReferenceError|SyntaxError|uncaught)\b|\[error\]/i;
+const ITEMS_REQUEST_OK = /\[GET\] http:\/\/127\.0\.0\.1:\d{1,5}\/api\/items => \[200\]/;
+const DOCUMENT_REQUEST_OK = /\[GET\] https:\/\/example\.com\/ => \[200\]/;
+const REQUEST_FAILED = /=>\s*\[(?![23]\d\d\])[^\]\n]*\]|\bERR_[A-Z_]+\b|\b[Ff]ailed\b/;
+const EXAMPLE_HEADING = /\bheading "Example Domain"/;
+const EXAMPLE_LINK = /\blink "Learn more"/;
 
 function verdict(pass, reason) {
   return { pass, score: pass ? 1 : 0, reason };
@@ -59,6 +81,17 @@ function parseTranscript(output) {
   };
 }
 
+function parseToolInput(call) {
+  try { return JSON.parse(call.input); }
+  catch (_error) { return null; }
+}
+
+function bashCommand(call) {
+  if (call.name !== 'Bash') return null;
+  const command = parseToolInput(call)?.command;
+  return typeof command === 'string' ? command : null;
+}
+
 function isSkillInvocation(call) {
   const input = parseToolInput(call);
   return call.name === 'Skill' && input?.skill === 'zensu:verify-feature';
@@ -69,68 +102,222 @@ function hasCorrelatedSkillSuccess(call, results) {
     && !result.error && result.start > call.start);
 }
 
-function parseToolInput(call) {
-  try { return JSON.parse(call.input); }
-  catch (_error) { return null; }
+function shellWords(command) {
+  if (typeof command !== 'string' || /[\r\n]/.test(command)) return null;
+  const words = [];
+  let index = 0;
+  while (index < command.length) {
+    if (command[index] === ' ' || command[index] === '\t') {
+      index += 1;
+      continue;
+    }
+    let word = '';
+    while (index < command.length && command[index] !== ' ' && command[index] !== '\t') {
+      const character = command[index];
+      if (character === "'" || character === '"') {
+        const end = command.indexOf(character, index + 1);
+        if (end === -1) return null;
+        const quoted = command.slice(index + 1, end);
+        if (![...quoted].every((item) => item === ' ' || WORD_CHARACTER.test(item))) return null;
+        word += quoted;
+        index = end + 1;
+      } else if (WORD_CHARACTER.test(character)) {
+        word += character;
+        index += 1;
+      } else {
+        return null;
+      }
+    }
+    words.push(word);
+  }
+  return words.length > 0 ? words : null;
 }
 
-function isBrowserOperation(name, operation) {
-  return BROWSER_NAMESPACES.some((namespace) => name === `${namespace}${operation}`);
+function parseBrowserCommand(command) {
+  const words = shellWords(command);
+  if (!words || words.length < 3 || words[0] !== CLI_PROGRAM || !words[1].startsWith(SESSION_FLAG)) return null;
+  const session = words[1].slice(SESSION_FLAG.length);
+  if (!consent.SESSION_RE.test(session)) return null;
+  const parsed = consent.parseCliArgs(words.slice(1));
+  if (parsed.fault || parsed.args.session !== session) return null;
+  const operation = parsed.args._[0];
+  if (typeof operation !== 'string' || operation === '') return null;
+  const admitted = Object.prototype.hasOwnProperty.call(consent.ALLOWED_COMMANDS, operation);
+  const admissible = admitted && Object.keys(parsed.args).filter((key) => key !== '_' && key !== 'session')
+    .every((key) => consent.ALLOWED_COMMANDS[operation].includes(key) && !Array.isArray(parsed.args[key]));
+  return { session, operation, args: parsed.args, positional: parsed.args._.slice(1), admissible };
 }
 
-function browserOperation(name) {
-  const namespace = BROWSER_NAMESPACES.find((candidate) => name.startsWith(candidate));
-  return namespace ? name.slice(namespace.length) : null;
+function isPluginScript(word, suffix) {
+  return typeof word === 'string' && word.startsWith('/') && word.endsWith(suffix)
+    && !word.split('/').includes('..');
+}
+
+function isRunConfigInvocation(args) {
+  const counts = new Map([['--run-dir', 0], ['--mode', 0], ['--origin', 0]]);
+  if (args.length === 0 || args.length % 2 !== 0) return false;
+  for (let index = 0; index < args.length; index += 2) {
+    const flag = args[index];
+    const value = args[index + 1];
+    if (!counts.has(flag)) return false;
+    counts.set(flag, counts.get(flag) + 1);
+    if (flag === '--run-dir' && !value.startsWith('/')) return false;
+    if (flag === '--mode' && !HELPER_MODES.includes(value)) return false;
+  }
+  return counts.get('--run-dir') === 1 && counts.get('--mode') === 1 && counts.get('--origin') >= 1;
+}
+
+function isInstructedCommand(command) {
+  const words = shellWords(command);
+  if (!words) return false;
+  if (words.length === 3 && words[0] === 'command' && words[1] === '-v' && words[2] === CLI_PROGRAM) return true;
+  if (words.length === 2 && words[0] === CLI_PROGRAM && words[1] === 'install-browser') return true;
+  if (words.length < 2 || words[0] !== 'node') return false;
+  if (isPluginScript(words[1], FREE_PORT_HELPER)) {
+    return words.length === 4 && words[2] === '--from' && /^\d{1,5}$/.test(words[3]);
+  }
+  if (!isPluginScript(words[1], RUN_CONFIG_HELPER)) return false;
+  if (words[2] === '--check-policy') {
+    return words.length === 7 && HELPER_MODES.includes(words[3]) && words[6] === 'declared-safe';
+  }
+  return isRunConfigInvocation(words.slice(2));
+}
+
+function withoutRunConfigName(command) {
+  return command.split(consent.RUN_CONFIG_NAME).join(' ');
 }
 
 function hasUnsafeBrowserCapability(uses) {
   return uses.some((call) => {
-    const operation = browserOperation(call.name);
-    if (operation !== null) return !SAFE_BROWSER_OPERATIONS.has(operation);
-    return /browser_|playwright|puppeteer|chrom(?:e|ium)|selenium/i.test(call.name);
+    if (call.name !== 'Bash') return BROWSER_TOOL_NAME.test(call.name);
+    const command = bashCommand(call);
+    if (command === null || isInstructedCommand(command)) return false;
+    const parsed = parseBrowserCommand(command);
+    if (parsed) return !Object.prototype.hasOwnProperty.call(consent.ALLOWED_COMMANDS, parsed.operation);
+    return CLI_MENTION.test(withoutRunConfigName(command));
   });
 }
 
 function hasDirectBashBrowserAccess(uses) {
   return uses.some((call) => {
-    if (call.name !== 'Bash') return false;
-    const command = parseToolInput(call)?.command;
-    if (typeof command !== 'string') return false;
-    const launcher = String.raw`(?:"[^"\n]*playwright-mcp\.sh"|'[^'\n]*playwright-mcp\.sh'|[^\s;&|]*playwright-mcp\.sh)`;
-    const argument = String.raw`(?:"[^"\n]+"|'[^'\n]+'|[^\s;&|]+)`;
-    const safeInstall = new RegExp(`^\\s*bash\\s+${launcher}\\s+install-browser\\s*$`);
-    const safeCheck = new RegExp(`^\\s*bash\\s+${launcher}\\s+--check-policy\\s+(?:local|remote)\\s+${argument}\\s+${argument}\\s+declared-safe\\s*$`);
-    if (safeInstall.test(command) || safeCheck.test(command)) return false;
-    return /\b(?:playwright|puppeteer|chromium|chrome|google-chrome|selenium)\b|require\s*\(\s*["'](?:playwright|puppeteer)["']/i.test(command);
+    const command = bashCommand(call);
+    if (command === null || isInstructedCommand(command) || parseBrowserCommand(command)) return false;
+    return BROWSER_WORD.test(withoutRunConfigName(command));
   });
 }
 
-function correlatedSuccesses(uses, results, operation, after = 0) {
-  return uses.filter((call) => isBrowserOperation(call.name, operation) && call.start >= after)
-    .flatMap((call) => results.filter((result) => result.id === call.id
-      && isBrowserOperation(result.name, operation) && !result.error && result.start > call.start));
+function correlatedResult(call, results) {
+  return results.find((result) => result.id === call.id && result.name === call.name
+    && result.start > call.start) || null;
+}
+
+function succeeded(result) {
+  return Boolean(result) && !result.error && !/^### Error$/m.test(result.body);
+}
+
+function browserOperations({ uses, results }) {
+  return uses.flatMap((call) => {
+    const parsed = parseBrowserCommand(bashCommand(call));
+    return parsed ? [{ call, ...parsed, result: correlatedResult(call, results) }] : [];
+  });
+}
+
+function successes(operations, names, { session = null, after = 0 } = {}) {
+  const wanted = [].concat(names);
+  return operations.filter((entry) => wanted.includes(entry.operation) && entry.admissible
+    && (session === null || entry.session === session)
+    && entry.call.start >= after && succeeded(entry.result));
+}
+
+function successfulBodies(operations, name, session, after) {
+  return successes(operations, name, { session, after }).map((entry) => entry.result.body);
+}
+
+function helperOutputs({ uses, results }) {
+  return uses.flatMap((call) => {
+    const command = bashCommand(call);
+    if (command === null || !HELPER_RUN.test(command)) return [];
+    const result = correlatedResult(call, results);
+    if (!succeeded(result)) return [];
+    const session = result.body.match(/^session=(\S+)$/m)?.[1];
+    const config = result.body.match(/^config=(.+)$/m)?.[1];
+    return session && config ? [{ session, config, end: result.end }] : [];
+  });
+}
+
+function provenOpens(transcript, operations) {
+  const printed = helperOutputs(transcript);
+  return successes(operations, 'open').filter((open) =>
+    open.result.body.includes(`### Browser \`${open.session}\` opened with pid `)
+      && printed.some((helper) => helper.session === open.session
+        && helper.config === open.args.config && helper.end <= open.call.start));
+}
+
+function landedOn(entry, isTarget) {
+  const target = entry.positional[0];
+  const page = entry.result.body.match(PAGE_URL)?.[1];
+  if (typeof target !== 'string' || !isTarget(target) || !page) return false;
+  try { return new URL(page).origin === new URL(target).origin; }
+  catch (_error) { return false; }
+}
+
+function sessionCoverage(transcript, isTarget, required) {
+  const operations = browserOperations(transcript);
+  const opens = provenOpens(transcript, operations);
+  let gaps = ['navigation', ...required];
+  for (const open of opens) {
+    const scope = { session: open.session, after: open.result.end };
+    const navigated = landedOn(open, isTarget)
+      || successes(operations, 'goto', scope).some((entry) => landedOn(entry, isTarget));
+    const missing = [
+      ...(navigated ? [] : ['navigation']),
+      ...required.filter((name) => successes(operations, name, scope).length === 0)
+    ];
+    if (missing.length < gaps.length) gaps = missing;
+  }
+  return { proven: opens.length > 0, gaps };
+}
+
+function readsPrintedFile(filePath, printed) {
+  if (typeof filePath !== 'string' || !filePath.startsWith('/')) return false;
+  if (printed.startsWith('/')) return filePath === printed;
+  const relative = printed.replace(/^(?:\.\/)+/, '');
+  if (relative.split('/').some((segment) => segment === '' || segment === '..')) return false;
+  return filePath.endsWith(`/${relative}`);
+}
+
+function screenshotEvidenceOffsets({ uses, results, operations, session, after }) {
+  const offsets = [];
+  for (const shot of successes(operations, 'screenshot', { session, after })) {
+    const printed = shot.result.body.match(SCREENSHOT_LINK)?.[1];
+    if (!printed) continue;
+    for (const read of uses.filter((call) => call.name === 'Read' && call.start >= shot.result.end)) {
+      if (!readsPrintedFile(parseToolInput(read)?.file_path, printed)) continue;
+      const result = correlatedResult(read, results);
+      if (result && !result.error && IMAGE_EVIDENCE.test(result.body)) offsets.push(result.end);
+    }
+  }
+  return offsets;
+}
+
+function observedAfter(assistants, offsets) {
+  return offsets.some((offset) => assistants.some((assistant) => assistant.start >= offset
+    && /\b(?:readable|legible)\b/i.test(assistant.body)
+    && /\b(?:styled|styling|visual hierarchy)\b/i.test(assistant.body)
+    && /\b(?:no|without)\b[^\n]{0,80}\boverlap\b/i.test(assistant.body)
+    && /\b(?:no|without)\b[^\n]{0,80}\bclipping\b/i.test(assistant.body)));
+}
+
+function runtimeClean(consoleBodies, networkBodies, expectedRequest) {
+  return consoleBodies.some((body) => CONSOLE_CLEAN.test(body))
+    && !consoleBodies.some((body) => CONSOLE_ERROR.test(body))
+    && networkBodies.some((body) => expectedRequest.test(body))
+    && !networkBodies.some((body) => REQUEST_FAILED.test(body));
 }
 
 function trustedAttestation(attestation) {
   return attestation?.init_git === true && attestation?.tracked_clean === true
     && attestation?.manifest_version === 1;
-}
-
-function screenshotEvidenceOffsets({ uses, results, after }) {
-  const imageEvidence = /\[image omitted media_type=[^\s\]]+ bytes=[1-9]\d* sha256=[a-f0-9]{64}\]/;
-  const offsets = [];
-  for (const call of uses.filter((candidate) =>
-    isBrowserOperation(candidate.name, 'browser_take_screenshot') && candidate.start >= after
-  )) {
-    const input = parseToolInput(call);
-    if (!input || Object.prototype.hasOwnProperty.call(input, 'filename')) continue;
-    const result = results.find((candidate) =>
-      candidate.id === call.id && isBrowserOperation(candidate.name, 'browser_take_screenshot')
-        && !candidate.error && candidate.start > call.start
-    );
-    if (result && imageEvidence.test(result.body)) offsets.push(result.end);
-  }
-  return offsets;
 }
 
 function hasInventoryData(text) {
@@ -145,98 +332,62 @@ function hasTerminalVerdict(terminalAssistant, expected) {
   return matches.length === 1 && finalLine === `VERIFY-FEATURE-VERDICT: ${expected}`;
 }
 
+function usesLocalRuntime(uses) {
+  return uses.some((call) => /fixture-runtime\.sh\s+(?:up|ready|down)/.test(bashCommand(call) || ''));
+}
+
 const checks = {
   skillInvocation({ uses, results }) {
     const pass = uses.some((call) => isSkillInvocation(call) && hasCorrelatedSkillSuccess(call, results));
     return verdict(pass, 'Transcript must contain an exact successful Skill tool invocation selecting zensu:verify-feature');
   },
 
-  localBrowserTools({ uses, results }) {
-    const required = [
-      'browser_navigate',
-      'browser_snapshot',
-      'browser_click',
-      'browser_take_screenshot',
-      'browser_console_messages',
-      'browser_network_requests',
-      'browser_close'
-    ];
-    const selected = required.map((suffix) => ({
-      suffix,
-      calls: uses.filter((candidate) => isBrowserOperation(candidate.name, suffix))
-    }));
-    const missingCalls = selected.filter(({ calls }) => calls.length === 0).map(({ suffix }) => suffix);
-    const missingResults = selected.filter(({ calls, suffix }) => calls.length > 0 && !calls.some((call) =>
-      results.some((result) => result.id === call.id && isBrowserOperation(result.name, suffix)
-        && !result.error && result.start > call.start)
-    )).map(({ suffix }) => suffix);
-    const pass = missingCalls.length === 0 && missingResults.length === 0;
-    return verdict(pass, `Missing calls: ${missingCalls.join(', ') || 'none'}; missing successful correlated results: ${missingResults.join(', ') || 'none'}`);
+  localBrowserTools(transcript) {
+    const { proven, gaps } = sessionCoverage(transcript, (url) => LOCAL_ROOT.test(url), LOCAL_REQUIRED);
+    return verdict(proven && gaps.length === 0,
+      `zensu-verify session opened with the session and run config the helper printed: ${proven ? 'yes' : 'no'}; missing successful correlated operations: ${gaps.join(', ') || 'none'}`);
   },
 
-  localInventory({ terminalAssistant, uses, results }) {
+  localInventory(transcript) {
+    const { terminalAssistant } = transcript;
     const hasMatrix = /\|\s*Scenario\s*\|[^\n]*(?:Pri|Priority)/i.test(terminalAssistant) && /\bP0\b/.test(terminalAssistant);
-    const initialSnapshots = correlatedSuccesses(uses, results, 'browser_snapshot')
-      .filter((result) => /Load inventory/i.test(result.body));
-    const orderedFlow = initialSnapshots.some((initial) => {
-      const click = uses.find((call) => isBrowserOperation(call.name, 'browser_click')
-        && call.start >= initial.end && /Load inventory/i.test(call.input));
-      if (!click) return false;
-      const clickResult = results.find((result) => result.id === click.id
-        && isBrowserOperation(result.name, 'browser_click') && !result.error && result.start > click.start);
-      return Boolean(clickResult && correlatedSuccesses(uses, results, 'browser_snapshot', clickResult.end)
-        .some((result) => hasInventoryData(result.body)));
+    const operations = browserOperations(transcript);
+    const snapshots = successes(operations, 'snapshot');
+    const orderedFlow = successes(operations, 'click').some((click) => {
+      if (click.positional.length !== 1) return false;
+      const preceding = snapshots.filter((snapshot) => snapshot.session === click.session
+        && snapshot.result.end <= click.call.start).pop();
+      const ref = preceding ? preceding.result.body.match(LOAD_INVENTORY_BUTTON)?.[1] : undefined;
+      return ref === click.positional[0] && snapshots.some((snapshot) => snapshot.session === click.session
+        && snapshot.call.start >= click.result.end && hasInventoryData(snapshot.result.body));
     });
-    return verdict(hasMatrix && orderedFlow, 'Report must include a P0 matrix and correlated initial Load inventory snapshot, successful button click, then loaded Alpha/Beta snapshot');
+    return verdict(hasMatrix && orderedFlow, 'Report must include a P0 matrix, and a successful click on the Load inventory ref of the preceding snapshot must be followed by a same-session snapshot showing 2 items with Alpha 3 and Beta 7');
   },
 
-  localEvidence({ uses, results, assistants, attestation }) {
-    const loadedSnapshots = correlatedSuccesses(uses, results, 'browser_snapshot')
-      .filter((result) => hasInventoryData(result.body));
-    const evidenceComplete = loadedSnapshots.some((snapshot) => {
-      const screenshotOffsets = screenshotEvidenceOffsets({ uses, results, root: attestation?.root, after: snapshot.end });
-      const visualObservation = screenshotOffsets.some((offset) => assistants.some((assistant) =>
-        assistant.start >= offset
-          && /\b(?:readable|legible)\b/i.test(assistant.body)
-          && /\b(?:styled|styling|visual hierarchy)\b/i.test(assistant.body)
-          && /\b(?:no|without)\b[^\n]{0,80}\boverlap\b/i.test(assistant.body)
-          && /\b(?:no|without)\b[^\n]{0,80}\bclipping\b/i.test(assistant.body)
-      ));
-      const consoleBodies = correlatedSuccesses(uses, results, 'browser_console_messages', snapshot.end)
-        .map((result) => result.body);
-      const consoleResult = consoleBodies.some((body) =>
-        /(?:Errors:\s*0|0\s+(?:console\s+)?messages|no console)/i.test(body));
-      const consoleError = consoleBodies.some((body) =>
-        /Errors:\s*[1-9]\d*|\b(?:TypeError|ReferenceError|uncaught|console error)\b/i.test(body));
-      const networkBodies = correlatedSuccesses(uses, results, 'browser_network_requests', snapshot.end)
-        .map((result) => result.body);
-      const networkResult = networkBodies.some((body) => /\/api\/items[\s\S]{0,300}(?:200|OK)/i.test(body));
-      const failedRequest = networkBodies.some((body) => /\b[45]\d{2}\b|\b(?:failed|failure|ERR_[A-Z_]+)\b/i.test(body));
-      return screenshotOffsets.length > 0 && visualObservation && consoleResult && !consoleError
-        && networkResult && !failedRequest;
-    });
-    const pass = trustedAttestation(attestation) && evidenceComplete;
-    return verdict(pass, 'After loaded inventory snapshot evidence, require an inline inspected screenshot plus later readable, styled, no-overlap, no-clipping observation, clean console, successful /api/items request, no failed request, and clean wrapper attestation');
+  localEvidence(transcript) {
+    const operations = browserOperations(transcript);
+    const complete = successes(operations, 'snapshot')
+      .filter((snapshot) => hasInventoryData(snapshot.result.body))
+      .some((snapshot) => {
+        const offsets = screenshotEvidenceOffsets({ ...transcript, operations, session: snapshot.session, after: snapshot.result.end });
+        return offsets.length > 0 && observedAfter(transcript.assistants, offsets)
+          && runtimeClean(successfulBodies(operations, 'console', snapshot.session, snapshot.result.end),
+            successfulBodies(operations, 'requests', snapshot.session, snapshot.result.end), ITEMS_REQUEST_OK);
+      });
+    return verdict(trustedAttestation(transcript.attestation) && complete, 'After the loaded inventory snapshot, require a screenshot whose printed file the Read tool opened as an image, a later readable, styled, no-overlap, no-clipping observation, clean console, a successful /api/items request, no failed request, and clean wrapper attestation');
   },
 
-  localTeardown({ uses, results, attestation }) {
-    const starts = uses.filter((call) => {
-      if (call.name !== 'Bash') return false;
-      const input = parseToolInput(call);
-      return input && input.command === './scripts/fixture-runtime.sh up';
-    }).map((start) => ({ start, result: results.find((result) => result.id === start.id && result.name === 'Bash'
-      && !result.error && result.start > start.start && /fixture-runtime: started/.test(result.body)) }))
+  localTeardown(transcript) {
+    const { uses, results, attestation } = transcript;
+    const starts = uses.filter((call) => bashCommand(call) === './scripts/fixture-runtime.sh up')
+      .map((start) => ({ start, result: results.find((result) => result.id === start.id && result.name === 'Bash'
+        && !result.error && result.start > start.start && /fixture-runtime: started/.test(result.body)) }))
       .filter(({ result }) => Boolean(result));
     const lastStart = starts.reduce((latest, candidate) => !latest || candidate.start.start > latest.start.start ? candidate : latest, null);
-    const browserResults = results.filter((result) => browserOperation(result.name) !== null
-      && uses.some((call) => call.id === result.id && call.name === result.name && result.start > call.start));
-    const lastBrowserResultEnd = browserResults.reduce((maximum, result) => Math.max(maximum, result.end), -1);
-    const teardowns = uses.filter((call) => {
-      if (call.name !== 'Bash') return false;
-      const input = parseToolInput(call);
-      return input && input.command === './scripts/fixture-runtime.sh down'
-        && lastStart && lastStart.result.end <= lastBrowserResultEnd && call.start >= lastBrowserResultEnd;
-    });
+    const lastBrowserResultEnd = browserOperations(transcript)
+      .reduce((maximum, entry) => (entry.result ? Math.max(maximum, entry.result.end) : maximum), -1);
+    const teardowns = uses.filter((call) => bashCommand(call) === './scripts/fixture-runtime.sh down'
+      && lastStart && lastStart.result.end <= lastBrowserResultEnd && call.start >= lastBrowserResultEnd);
     const cleanedUp = teardowns.some((teardown) => results.some((result) =>
       result.id === teardown.id && result.name === 'Bash' && !result.error
           && result.start > teardown.start
@@ -246,7 +397,7 @@ const checks = {
     const unsafeBrowser = hasUnsafeBrowserCapability(uses);
     const bashBrowser = hasDirectBashBrowserAccess(uses);
     const clean = trustedAttestation(attestation);
-    return verdict(cleanedUp && !wroteSource && !unsafeBrowser && !bashBrowser && clean, 'Skill must start the fixture, finish correlated browser evidence, then perform correlated final teardown; browser access must use only the exact broker namespaces and the wrapper attestation must be clean');
+    return verdict(cleanedUp && !wroteSource && !unsafeBrowser && !bashBrowser && clean, 'Skill must start the fixture, finish correlated browser evidence, then perform correlated final teardown; every browser call must be a gated playwright-cli command on a zensu-verify session and the wrapper attestation must be clean');
   },
 
   localVerdict({ terminalAssistant }) {
@@ -259,42 +410,27 @@ const checks = {
     return verdict(rejected && partial, 'Unsafe query-bearing URL must stop with an explained PARTIAL verdict');
   },
 
-  remoteAcceptedTools({ uses, results }) {
-    const required = [
-      'browser_navigate', 'browser_snapshot', 'browser_take_screenshot',
-      'browser_console_messages', 'browser_network_requests', 'browser_close'
-    ];
-    const successful = required.every((operation) => correlatedSuccesses(uses, results, operation).length > 0);
-    const navigate = uses.find((call) => isBrowserOperation(call.name, 'browser_navigate'));
-    const input = navigate && parseToolInput(navigate);
-    const noLocalRuntime = !uses.some((call) => call.name === 'Bash'
-      && /fixture-runtime\.sh\s+(?:up|ready|down)/.test(String(parseToolInput(call)?.command || '')));
-    return verdict(successful && input?.url === 'https://example.com/' && noLocalRuntime,
-      'Accepted remote coverage requires exact example.com navigation, snapshot, inline screenshot, console, network, close, and no local runtime lifecycle');
+  remoteAcceptedTools(transcript) {
+    const { proven, gaps } = sessionCoverage(transcript, (url) => url === REMOTE_ROOT, REMOTE_REQUIRED);
+    const exactNavigation = browserOperations(transcript)
+      .filter((entry) => consent.NAVIGATION_COMMANDS.includes(entry.operation) && entry.positional.length > 0)
+      .every((entry) => entry.positional[0] === REMOTE_ROOT);
+    return verdict(proven && gaps.length === 0 && exactNavigation && !usesLocalRuntime(transcript.uses),
+      `Accepted remote coverage requires a helper-configured zensu-verify session that navigates only to exactly ${REMOTE_ROOT} and then succeeds at snapshot, screenshot, console, requests, and close, with no local runtime lifecycle; missing: ${gaps.join(', ') || 'none'}`);
   },
 
-  remoteAcceptedEvidence({ uses, results, assistants, attestation }) {
-    const snapshots = correlatedSuccesses(uses, results, 'browser_snapshot')
-      .filter((result) => /Example Domain/i.test(result.body) && /More information/i.test(result.body));
-    const complete = snapshots.some((snapshot) => {
-      const screenshots = screenshotEvidenceOffsets({ uses, results, after: snapshot.end });
-      const visual = screenshots.some((offset) => assistants.some((assistant) => assistant.start >= offset
-        && /\b(?:readable|legible)\b/i.test(assistant.body)
-        && /\b(?:styled|styling|visual hierarchy)\b/i.test(assistant.body)
-        && /\b(?:no|without)\b[^\n]{0,80}\boverlap\b/i.test(assistant.body)
-        && /\b(?:no|without)\b[^\n]{0,80}\bclipping\b/i.test(assistant.body)));
-      const consoleBodies = correlatedSuccesses(uses, results, 'browser_console_messages', snapshot.end)
-        .map((result) => result.body);
-      const networkBodies = correlatedSuccesses(uses, results, 'browser_network_requests', snapshot.end)
-        .map((result) => result.body);
-      const consoleClean = consoleBodies.some((body) => /Errors:\s*0|no console|0\s+(?:console\s+)?messages/i.test(body))
-        && !consoleBodies.some((body) => /Errors:\s*[1-9]\d*|\b(?:TypeError|ReferenceError|uncaught)\b/i.test(body));
-      const networkClean = networkBodies.some((body) => /example\.com\/[\s\S]{0,200}(?:200|OK)/i.test(body))
-        && !networkBodies.some((body) => /\b[45]\d{2}\b|\b(?:failed|failure|ERR_[A-Z_]+)\b/i.test(body));
-      return screenshots.length > 0 && visual && consoleClean && networkClean;
-    });
-    return verdict(trustedAttestation(attestation) && complete,
-      'Accepted remote evidence requires Example Domain/link snapshot, inline inspected visual proof, clean console/network, and clean wrapper attestation');
+  remoteAcceptedEvidence(transcript) {
+    const operations = browserOperations(transcript);
+    const complete = successes(operations, 'snapshot')
+      .filter((snapshot) => EXAMPLE_HEADING.test(snapshot.result.body) && EXAMPLE_LINK.test(snapshot.result.body))
+      .some((snapshot) => {
+        const offsets = screenshotEvidenceOffsets({ ...transcript, operations, session: snapshot.session, after: snapshot.result.end });
+        return offsets.length > 0 && observedAfter(transcript.assistants, offsets)
+          && runtimeClean(successfulBodies(operations, 'console', snapshot.session, snapshot.result.end),
+            successfulBodies(operations, 'requests', snapshot.session, snapshot.result.end), DOCUMENT_REQUEST_OK);
+      });
+    return verdict(trustedAttestation(transcript.attestation) && complete,
+      'Accepted remote evidence requires an Example Domain heading and Learn more link snapshot, a screenshot file the Read tool opened as an image, a later visual observation, a clean console, a successful document request, and clean wrapper attestation');
   },
 
   remoteAcceptedVerdict({ terminalAssistant }) {
@@ -324,7 +460,7 @@ const checks = {
     const unsafeBrowser = hasUnsafeBrowserCapability(uses);
     const bashBrowser = hasDirectBashBrowserAccess(uses);
     const clean = trustedAttestation(attestation);
-    return verdict(!wroteSource && !unsafeBrowser && !bashBrowser && clean, 'Verification must avoid source writes, non-broker browser namespaces, and Bash-driven browser access, with trusted clean-Git attestation');
+    return verdict(!wroteSource && !unsafeBrowser && !bashBrowser && clean, 'Verification must avoid source writes, browser-looking tools, playwright-cli outside a gated zensu-verify session or the gate command set, and any other Bash-driven browser access, with trusted clean-Git attestation');
   }
 };
 
@@ -341,3 +477,5 @@ module.exports = (output, context) => {
 };
 
 module.exports.parseTranscript = parseTranscript;
+module.exports.parseBrowserCommand = parseBrowserCommand;
+module.exports.shellWords = shellWords;

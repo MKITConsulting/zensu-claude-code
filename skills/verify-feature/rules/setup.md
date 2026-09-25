@@ -78,7 +78,8 @@ validate:
 `.zensu/autopilot.yaml` keeps working as an alias and is tried second. `/zensu:autopilot`
 reads `.zensu/autopilot.yaml` only — it does NOT read `runtime.yaml` — so a project that wants one
 recipe to serve both skills writes `autopilot.yaml` rather than `runtime.yaml`.
-`validate.navigationBroker` is optional in consent mode and honoured when present.
+`validate.navigationBroker` declares policy mode; it is optional in consent mode and honoured
+when present.
 
 ## 5. `--print-policy`
 
@@ -86,9 +87,9 @@ With `--print-policy`, render the parent-environment policy for the recipe inste
 starting anything: `{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:<port>","evidenceMode":"declared-safe","routes":[<declared routes>]}]}`,
 with `<port>` taken from `--port=<n>` when given, else from
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-free-port.js" --from 5173`. Print it, then run
-`bash "${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh" --check-policy local "<origin>" "<route>" declared-safe`
-for every declared route with the rendered JSON exported as `ZENSU_VERIFY_NAVIGATION_POLICY_V1`
-on that command only, and report each exit code. Explain that the JSON belongs in the
-environment that launches Claude Code (a shell export, a CI job's `env`, or the `env` block of
-`~/.claude/settings.json`) and that the project-level settings files are not the place, because
-the session can write them.
+`ZENSU_VERIFY_NAVIGATION_POLICY_V1='<rendered JSON>' node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy local "<origin>" "<route>" declared-safe`
+for every declared route, with the rendered JSON assigned on that command only, and report
+each exit code: `policy` on stdout with exit `0` means the rendered JSON approves that route.
+Explain that the JSON belongs in the environment that launches Claude Code (a shell export, a CI
+job's `env`, or the `env` block of `~/.claude/settings.json`) and that the project-level
+settings files are not the place, because the session can write them.

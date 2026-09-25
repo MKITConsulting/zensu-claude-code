@@ -43,8 +43,22 @@
 # block-on-open vectors are already closed inside the transcript module: it refuses a NUL
 # byte, `lstat`s and requires a regular file BEFORE opening, opens `O_NOFOLLOW|O_NONBLOCK`
 # and re-checks by `fstat` — so a FIFO, device or symlink at that path cannot block. What
-# the unbounded arm actually leaves is a REGULAR FILE ON STALLED STORAGE, and a git status
-# that hangs. Availability only, no adversary in the loop.
+# the unbounded arm actually leaves is a REGULAR FILE ON STALLED STORAGE, a git status
+# that hangs, and — on the /zensu:doctor version fallback — a third-party executable,
+# `playwright-cli --version`, that never exits.
+#
+# "Availability only, no adversary in the loop" was the closing sentence here and it is
+# NO LONGER TRUE, so it is retired rather than reworded. `zensu-log.sh --tdd-complete`
+# runs `zensu-edit-landing.sh --inventory` through this ladder, and that child walks the
+# ancestors of every absolute path a SESSION-WRITABLE run log names — one `cd … && pwd -P`
+# plus one `-e` probe each. The path set is chosen by the content of that log, so a
+# co-tenant able to write it chooses where the probes land, and an automount or a stalled
+# network mount is reachable from inside the session. What remains true is narrower and
+# worth keeping: the block-on-open vectors above are closed, and what is left is a
+# filesystem that does not answer. That child carries its own in-process budgets
+# (`CLAIM_ANCESTOR_BUDGET`, `INV_CLAIM_BUDGET`) precisely because this ladder cannot be
+# relied on to bound it — the budgets cap the NUMBER of probes, and a single probe that
+# never returns is still unbounded on a host without `timeout`/`gtimeout`.
 #
 # WHAT THE UNBOUNDED ARM COSTS DIFFERS PER CALLER, and stating only the Stop-path answer
 # understated it. On the Stop path it costs a DIAGNOSTIC: the Stop hook's own registration
@@ -53,15 +67,21 @@
 # unverified. On the zen-mode path the registration DOES carry a bound — `"timeout": 20` —
 # so the host kills the whole hook instead, and that turn loses the entire injected
 # directive: the mode contract, the anchor AND the in-band `zen off` escape, which is the
-# only way out of the mode. Same arm, two very different prices.
+# only way out of the mode. On the `--tdd-complete` path it costs the VERB: that call is
+# what closes a chain, its registration is a plain Bash invocation with no host timeout at
+# all, and `|| return 0` at the call site tests an exit status a hang never produces — so
+# the chain simply never completes. On the /zensu:doctor path it costs the REPORT: when the
+# package read yields no version the doctor runs `playwright-cli --version` through this
+# ladder, and one that never exits holds the whole diagnostic until whatever bounds the Bash
+# call itself ends it. Same arm, a different price per caller.
 zensu_run_bounded() {
   # `"$@"` with zero positional parameters aborts under `set -u` on bash 3.2, which is
   # macOS's /bin/bash and this script's interpreter — so a future argument-less call would
   # kill the hook rather than no-op. Latent today — every live call site passes a command —
   # and guarded so the property does not depend on every later caller remembering. Do not
-  # restate that parenthetical as "both call sites": there are SIX, in THREE files, and the
-  # ladder's own header says the census is a criterion rather than a count for exactly this
-  # reason. Say "every live call site", which stays true as callers are added.
+  # restate that parenthetical as "both call sites": there are more than two, in several
+  # files, and the ladder's own header says the census is a criterion rather than a count for
+  # exactly this reason. Say "every live call site", which stays true as callers are added.
   # NON-ZERO, not 0. Returning success with no output would leave the transcript caller's
   # `probe` empty, which its `case` classifies as `unparseable` — a verdict the scope-sentence
   # allowlist WITHHOLDS on — where a failure leaves the initializer's `unprobed`, which is the

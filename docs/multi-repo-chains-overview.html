@@ -182,10 +182,17 @@
   <p class="lede">How a Zensu chain could span several repositories without giving up the one
   trusted project root — and how a review sitting on top of it can see contract breaks between
   those roots.</p>
-  <p class="lede"><strong>Status: proposed, and stages 2 and 3 are BLOCKED.</strong> Nothing here is
-  implemented. Stage 2 must not be built until the carrier question of the specification's §6.1.1 is
-  answered and the carrier-integrity finding of §8.1 is resolved: the workflow document is writable
-  from inside the session and carries no integrity check, so it cannot hold a capability. Read the
+  <p class="lede"><strong>Status: stage 1 is implemented; stages 2 and 3 are BLOCKED.</strong> Stage 1
+  ships the detect-and-refuse half: the terminus judges the edit-landing receipt's verdict, a logged
+  claim arms that requirement even when the anchor's tree is clean, a claim resolving outside the
+  audited root fails the audit and names the foreign root, and <code>/zensu:doctor</code> carries a
+  topology row. <strong>Which half of stage 1 is universally live is narrower than “stage 1 is implemented”:</strong> the log writer redacts a message before it lands, rewriting <code>$HOME</code> to <code>~</code> and the project root to <code>&lt;project&gt;</code>, and the audit's absolute-claim arm only ever sees a path still beginning with <code>/</code>. A foreign root outside both <code>$HOME</code> and the project root is detected; a sibling repository under <code>$HOME</code> is rewritten out of that shape and is not. Nothing else here is
+  implemented. The carrier question of the specification's §6.1.1 was answered on
+  2026-09-20 — the Session Control record, sealed by an interactive confirmation at arming, behind a
+  containment gate on the Bash channel into the plugin-data store — but that is a decision, not a
+  mechanism. Stage 2 must not be built until §6.1.1's three preconditions are built in order. The
+  workflow document is ruled out as the carrier: it is writable from inside the session and carries
+  no integrity check, so it cannot hold a capability. Read the
   staging below as blocked work, not as a plan ready to execute.</p>
 </header>
 
@@ -283,7 +290,7 @@
       <p>The audit writes to <code>&lt;--project&gt;/.zensu/state/</code> while the terminus looks in
       the anchor's state directory. Two runs therefore leave two receipts nobody reads — and each run
       reports the other repository's claims as not landed.</p>
-      <p class="src">zensu-edit-landing.sh:292 · zensu-log.sh:704</p>
+      <p class="src">zensu-edit-landing.sh:877 · zensu-log.sh:994</p>
     </div>
     <div class="card">
       <span class="tag warn">Asymmetry</span>
@@ -294,12 +301,19 @@
       <p class="src">bash-source-write-parse.js:817 · hooks/pre-edit-tdd-reminder.sh:137-164</p>
     </div>
     <div class="card">
-      <span class="tag bad">Silent pass</span>
-      <h3>The terminus checks nothing</h3>
-      <p>The receipt gate fires only when <code>git -C "$CLAUDE_PROJECT_DIR"</code> counts changes.
-      With a clean orchestrator the count is zero, the receipt is skipped, and the chain closes — with
-      a reviewer that saw nothing either.</p>
-      <p class="src">zensu-log.sh:764-766</p>
+      <span class="tag bad">Silent pass — superseded by stage 1</span>
+      <h3>The terminus checked nothing</h3>
+      <p>The receipt gate fired only when the anchor's change count was non-zero. With a clean
+      orchestrator the count is zero, the receipt was skipped, and the chain closed — with a
+      reviewer that saw nothing either. <strong>Stage 1, item 2 supersedes this:</strong> the gate
+      now ALSO arms on a logged claim, and it judges the receipt's <code>clean</code> verdict rather
+      than its existence. Two details the earlier wording got wrong about
+      <code>--tdd-complete</code>: the count resolves its root through
+      <code>zensu_resolve_project_dir()</code> rather than the ambient
+      <code>CLAUDE_PROJECT_DIR</code>, and it runs with the git environment scrubbed. The
+      <code>--chain-done</code> zero-change terminus is the half that stayed ambient and
+      unscrubbed. A chain that claimed nothing is still exempt.</p>
+      <p class="src">zensu-log.sh:988 · zensu-log.sh:971-1061 · zensu-log.sh:1953-1955</p>
     </div>
   </div>
 </section>
@@ -346,7 +360,7 @@
           <rect class="box-anchor" x="180" y="140" width="420" height="62" rx="9"/>
           <g text-anchor="middle">
             <text class="t-ink bold-svg" x="390" y="166" font-size="14.5">Union: anchor + codeRoots[]</text>
-            <text class="t-ink2" x="390" y="188" font-size="11.5">must freeze at arming · carrier not yet chosen</text>
+            <text class="t-ink2" x="390" y="188" font-size="11.5">must freeze at arming · carrier chosen, not built</text>
           </g>
 
           <g class="flow">
@@ -382,7 +396,7 @@
       <summary>Text description of the diagram</summary>
       <ol>
         <li>The same four consumers — Edit landing with labelled claims, Review packet per root, Write gate matching within any declared root, Terminus counting the union — now read one set.</li>
-        <li>That set is the union of the anchor and codeRoots[], which must freeze at arming and be immutable afterwards — a requirement no chosen carrier yet satisfies.</li>
+        <li>That set is the union of the anchor and codeRoots[], which must freeze at arming and be immutable afterwards — a requirement the chosen carrier satisfies only once §6.1.1's preconditions are built.</li>
         <li>It resolves to three trees: the anchor (orchestrator repository, holding state, logs, record and doctor), and two code roots, backend/ and frontend/, whose claims carry a root label such as backend:src/… The anchor alone still carries the session's identity; the satellites carry only code.</li>
       </ol>
     </details>
@@ -426,8 +440,10 @@
         <tr>
           <th scope="row"><strong>Terminus</strong><span class="tag flat inline">stage 2</span></th>
           <td>The zero-change scoping of <code>--tdd-complete</code> and <code>--chain-done</code>
-          counts the union. Otherwise a clean anchor still closes an empty chain.</td>
-          <td class="where mono">zensu-log.sh:764-766</td>
+          counts the union. Otherwise a clean anchor still closes an empty chain. Stage 1, item 2
+          narrowed this for <code>--tdd-complete</code> — it also arms on a logged claim — and left
+          the <code>--chain-done</code> zero-change terminus unchanged.</td>
+          <td class="where mono">zensu-log.sh:1058-1060<br>zensu-log.sh:1953-1955</td>
         </tr>
         <tr>
           <th scope="row"><strong>Capability confinement</strong><span class="tag flat inline">stage 3</span></th>
@@ -573,7 +589,7 @@
       anchor is clean while the changed files sit in the satellites, so a takeover brief would claim
       no uncommitted changes for a session with a dirty tree in two other repositories — the same
       silent green as section 2, relocated into the handover path.</p>
-      <p class="src">trail.mjs:2248</p>
+      <p class="src">trail.mjs:2569</p>
     </div>
     <div class="card">
       <span class="tag warn">Discovery</span>
@@ -582,14 +598,14 @@
       repo's main checkout. From a code root's repository the session is reachable only via
       <code>--all</code>, otherwise only from the anchor. Pre-existing behavior that multi-repo makes
       more consequential.</p>
-      <p class="src">skills/session-trail/SKILL.md:287</p>
+      <p class="src">skills/session-trail/SKILL.md:305</p>
     </div>
     <div class="card">
       <span class="tag ok">Resume</span>
       <h3>Already correct today</h3>
       <p>The printed continuation line <code>cd -- ${r.cwd} &amp;&amp; claude --resume …</code> lands in
       the anchor. That is exactly the right place and needs no change.</p>
-      <p class="src">trail.mjs:4018</p>
+      <p class="src">trail.mjs:4606</p>
     </div>
   </div>
 
@@ -609,8 +625,9 @@
     change to <code>~/.claude</code>, no lineage cost. That places it in stage 2, not stage 3.</p>
     <p>The cost worth naming, as &sect;6.4 of the specification insists: <code>trail.mjs</code> may
     run outside any session and outside every hook, so teaching it to read the root list makes it a
-    second consumer of the untrusted carrier of &sect;6.1.1, running <code>git -C</code> in paths
-    that carrier names.</p>
+    second consumer of the &sect;6.1.1 carrier, running <code>git -C</code> in paths
+    that carrier names — and until that section's precondition 1 ships, that carrier is still
+    writable from inside the session.</p>
   </div>
 </section>
 
@@ -618,7 +635,7 @@
   <h2><span class="num">7</span> Two constraints — and why the second is not met</h2>
 
   <div class="note">
-    <strong>The root list must be frozen at arming — and nothing yet holds it.</strong>
+    <strong>The root list must be frozen at arming — a carrier is chosen, and nothing holds it yet.</strong>
     <p>It must not come from an environment variable and must not be derived from model-authored
     text, because it governs the write gate and the capability confinement: extending it is a
     capability grant, not configuration. Every root must canonicalize, be a real work tree, and be
@@ -626,10 +643,12 @@
     <p>The workflow document is <em>not</em> that carrier. It is writable from inside the session and
     its validator is shape-only, so the gate would read its own boundary from a file the gated party
     can rewrite. <code>vanilla</code> is not a precedent either: that flag only relaxes TDD
-    discipline, where a prose control is proportionate. The specification's §6.1.1 records that no
-    channel currently satisfies the second requirement at all, and §8.1 states the consequence —
-    stage 2 is BLOCKED until a carrier the session cannot write is chosen, or an integrity mechanism
-    over the list is specified as a stage-2 precondition.</p>
+    discipline, where a prose control is proportionate. The specification's §6.1.1 now answers this
+    as two questions rather than one — the Session Control record for integrity, an interactive
+    confirmation at arming for provenance — and §8.1 states what that pair does not buy: the record
+    does not authenticate its own contents either, so the list's security rests on the records
+    directory being unwritable. Stage 2 stays BLOCKED until §6.1.1's three preconditions are built
+    in order, the first of which is the containment gate that makes that directory unwritable.</p>
   </div>
 
   <div class="note">
@@ -663,8 +682,9 @@
       <p class="cost">schema change · minor</p>
       <ul>
         <li><code>codeRoots[]</code> frozen at arming, in a carrier the session cannot rewrite —
-        <em>not</em> the workflow document, which &sect;8.1 rules out and &sect;6.1.1 leaves
-        unresolved. Choosing that carrier is the precondition of this stage, not part of it.</li>
+        <em>not</em> the workflow document, which &sect;8.1 rules out, but the Session Control record
+        that &sect;6.1.1 chose on 2026-09-20. Building that section's three preconditions is the
+        precondition of this stage, not part of it.</li>
         <li>Root labels in the claim format and in the merged receipt.</li>
         <li>The four multi-repo consumers from section 4 (the fifth, the capability confinement, belongs to stage 3).</li>
         <li>Validation of each root before it enters the write gate or a lease.</li>
@@ -696,8 +716,8 @@
   repository conventions in <span class="mono">CLAUDE.md</span>, and the two
   <code>--chain-done</code> assertions — in the section&nbsp;4 terminus row and in the section&nbsp;5
   diagram — were inferred from a comment beside that command, never from its implementation.
-  Proposal — nothing in this repository implements it, and stages 2 and 3 are BLOCKED until the
-  carrier questions of §6.1.1 and §8.1 are resolved. Companion documents:
+  Proposal — nothing in this repository implements it, and stages 2 and 3 are BLOCKED until §6.1.1's
+  preconditions for the carrier it chose are built in order. Companion documents:
   <a href="multi-repo-chains-spec.md">the specification</a> and
   <a href="multi-repo-chains-principle.html">the principle page</a>.
 </footer>

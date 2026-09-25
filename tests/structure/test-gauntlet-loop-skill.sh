@@ -330,13 +330,13 @@ fi
 # The stem list is the source of truth and the alternation is BUILT from it, so the
 # two cannot drift — the reverse of G3, which decomposes its regex with sed and is
 # therefore coupled to that regex's shape. Enumerated from the tree, not from memory:
-#   grep -rhoE 'ZENSU_[A-Z_]+=off' docs/ hooks/ CLAUDE.md | sort -u
+#   grep -rhoE 'ZENSU_[A-Z_]+=off' docs/ hooks/ skills/ | sort -u
 # The first version covered three of these, so a skill teaching ZENSU_CHAIN=off —
 # the most tempting one for a long unattended loop, since it silences the chain
 # enforcer — passed with the label "pattern proven live".
 # SESSION_LINEAGE is a member of this SET but not of the bypass ledger: it is a privacy
 # control that disables no gate and records no entry. It belongs here because the set is
-# derived mechanically from every ZENSU_*=off literal under hooks/, docs/ and CLAUDE.md,
+# derived mechanically from every ZENSU_*=off literal under hooks/, docs/ and skills/,
 # and G12's own purpose — a prompt carrier must never TEACH one of these spellings —
 # applies to it exactly as it does to the nine gates.
 ESCAPE_STEMS='TDD_GATE BASH_WRITE_GATE TEST_WITNESS CHAIN MCP_GATE SECRET_SCAN EDIT_LANDING_GATE AUTOPILOT REQUIREMENTS_GATE SESSION_LINEAGE'
@@ -355,7 +355,7 @@ ESCAPE_RE="ZENSU_($(printf '%s|' $ESCAPE_STEMS | sed 's/|$//'))=[\"']?off"
 # the gates compare after shell quote removal; deriving with a quote-INTOLERANT pattern
 # left this check blind to exactly the spelling that tolerance was added for. Sorted
 # under LC_ALL=C so the two sides can never disagree on collation.
-ESCAPE_TREE="$(grep -rhoE 'ZENSU_[A-Z_]+=["'"'"']?off' "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/docs" "$PLUGIN_DIR/CLAUDE.md" 2>/dev/null \
+ESCAPE_TREE="$(grep -rhoE 'ZENSU_[A-Z_]+=["'"'"']?off' "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/docs" "$PLUGIN_DIR/skills" 2>/dev/null \
   | sed -e 's/^ZENSU_//' -e 's/=["'"'"']\{0,1\}off$//' | LC_ALL=C sort -u | tr '\n' ' ')"
 ESCAPE_LIST_SORTED="$(printf '%s\n' $ESCAPE_STEMS | LC_ALL=C sort -u | tr '\n' ' ')"
 # THREE arms under an id of its own, and an empty derivation FAILS rather than skips.
@@ -367,7 +367,7 @@ ESCAPE_LIST_SORTED="$(printf '%s\n' $ESCAPE_STEMS | LC_ALL=C sort -u | tr '\n' '
 # indistinguishable from "never ran", and on drift it fell through to a second G12
 # line, so one id printed both a FAIL and a PASS.
 if [ -z "$ESCAPE_TREE" ]; then
-  check "G12a gate-disable stem derivation found nothing under hooks/, docs/ and CLAUDE.md — the drift check cannot run" FAIL
+  check "G12a gate-disable stem derivation found nothing under hooks/, docs/ and skills/ — the drift check cannot run" FAIL
 elif [ "$ESCAPE_TREE" != "$ESCAPE_LIST_SORTED" ]; then
   check "G12a gate-disable stems have drifted — tree has [$ESCAPE_TREE], list has [$ESCAPE_LIST_SORTED]" FAIL
 else

@@ -113,7 +113,10 @@ const ASSIGNMENT_TOKEN = /^[A-Za-z_][A-Za-z0-9_]*=/;
 // The UNION of names the recognized scripts read and the Bash tool does not
 // supply. `CLAUDE_PLUGIN_DATA` is read by both; `CLAUDE_PROJECT_DIR` is
 // doctor-only in practice — the adoption is bounded by the record and ignores it
-// — and `ZDOC_PLAYWRIGHT_TOOLS` is doctor-only outright. Accepting either on the
+// — and `ZDOC_PLAYWRIGHT_TOOLS` is read by neither any more: the doctor probes
+// playwright-cli itself, and the name stays accepted for the same reason
+// `CLAUDE_PROJECT_DIR` does below, because the previous release's skill body
+// emits it. Accepting any of them on the
 // adoption form costs nothing, because that script reads neither. Kept as one shared set
 // rather than per-entry: unlike `args`, an assignment cannot change what a
 // script DOES, only what it can see. `path` requires a rooted, traversal-free

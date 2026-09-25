@@ -2,7 +2,7 @@
 # zensu-doctor.sh — read-only setup diagnostics for /zensu:doctor.
 #
 # Probes the local toolchain (zensu CLI + auth, node, the code-forge CLI gh/glab
-# resolved from the repo's provider, and Playwright MCP) in
+# resolved from the repo's provider, and playwright-cli) in
 # the shell — `command -v` and auth-status exit codes are a shell concern — then
 # hands the results to zensu-doctor-report.js (env ZDOC_*), which reads the
 # plugin manifest/hooks, the effective config, and the session state dir and
@@ -10,14 +10,16 @@
 # exits 0 (a probe that errors degrades to a warning row, never a failure).
 #
 # Every ZDOC_* is set with `:=` so a caller (the structure test, or /zensu:doctor
-# after observing loaded MCP tools) can inject a fixed toolchain verdict; real
+# directly) can inject a fixed toolchain verdict; real
 # probing only fills the gaps left unset. That claim scopes to the EXPORTED inputs
 # the renderer reads, not to derived locals such as ZDOC_ROOT or ZDOC_SESSION_PAIR.
-# Two of the exported ones are exceptions, and they are exceptions
-# on purpose: ZDOC_SESSION_KEY and ZDOC_SESSION_PROJECT_ROOT are cleared
+# Two GROUPS of the exported ones are exceptions, on purpose.
+# ZDOC_SESSION_KEY and ZDOC_SESSION_PROJECT_ROOT are cleared
 # unconditionally rather than seeded, because their meaning depends on a verdict
 # reached further down and an inherited value would survive the branches that
-# never reach the bind. See the comment at their assignment.
+# never reach the bind. See the comment at their assignment. ZDOC_PLAYWRIGHT_VERSION,
+# ZDOC_PLAYWRIGHT_SOURCE, ZDOC_PLAYWRIGHT_OWNER and ZDOC_VERIFY_REASON are re-derived
+# unless ZDOC_PLAYWRIGHT / ZDOC_VERIFY is injected.
 set -u
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -41,16 +43,18 @@ if [ -z "$DIR" ] || [ "$ZDOC_ROOT" = "$DIR" ] || [ -L "$ZDOC_ROOT" ] || [ ! -d "
   exit 0
 fi
 
-# ONE source per run, for BOTH canonical getters below. There were two — one
+# ONE source per run, for EVERY canonical getter below. There were two — one
 # inside each resolve block — and in an ordinary invocation neither ZDOC_ variable
 # is pre-set, so both guards passed and the library was sourced twice. That was
 # shipped while the round-3 plan recorded the single-source requirement as met,
 # which is why the count is now pinned (C33) rather than left to reading.
-# The condition is deliberately the DISJUNCTION of the two resolve guards: a
-# caller that pins both values still sources nothing, and a caller that pins one
-# sources once. Hoisting it unconditionally would put a source on a path that
-# needs no getter at all.
-if { [ -z "${ZDOC_TTL_HOURS:-}" ] || [ -z "${ZDOC_IMPL_STOP_NUDGE_AFTER:-}" ]; } \
+# The condition is deliberately the DISJUNCTION of the resolve guards below: a
+# caller that pins every value still sources nothing, and a caller that pins some
+# of them sources once. Hoisting it unconditionally would put a source on a path
+# that needs no getter at all.
+if { [ -z "${ZDOC_TTL_HOURS:-}" ] || [ -z "${ZDOC_IMPL_STOP_NUDGE_AFTER:-}" ] \
+  || [ -z "${ZDOC_OWNER_ACTIVITY_TTL_HOURS:-}" ] \
+  || [ -z "${ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS:-}" ]; } \
   && [ -f "$DIR/zensu-config.sh" ]; then
   # shellcheck source=/dev/null
   . "$DIR/zensu-config.sh" 2>/dev/null || true
@@ -84,6 +88,35 @@ if [ -z "${ZDOC_IMPL_STOP_NUDGE_AFTER:-}" ]; then
   fi
 fi
 export ZDOC_IMPL_STOP_NUDGE_AFTER
+
+# The window `--autopilot-adopt` judges owner liveness against; `--autopilot-release`
+# reads its own window, resolved in the block after this one. Both are DIFFERENT
+# questions from the pending-review TTL above: the `autopilot:` row once quoted the
+# pending-review value while the verbs read their own keys, so it promised a protection
+# window the destructive verb did not give. Same canonical-getter rule — and, like that TTL and unlike the advisory
+# threshold between them, it IS re-resolved from the record root in the bind block
+# below, because the row it feeds scans record-anchored run documents and stands
+# beside an irreversible-cancel remedy. Remember whether the caller pinned it, for
+# the same reason the TTL does.
+ZDOC_OWNER_ACTIVITY_TTL_PINNED=""
+[ -n "${ZDOC_OWNER_ACTIVITY_TTL_HOURS:-}" ] && ZDOC_OWNER_ACTIVITY_TTL_PINNED=1
+if [ -z "${ZDOC_OWNER_ACTIVITY_TTL_HOURS:-}" ]; then
+  if command -v zensu_autopilot_owner_activity_ttl_hours >/dev/null 2>&1; then
+    ZDOC_OWNER_ACTIVITY_TTL_HOURS="$(zensu_autopilot_owner_activity_ttl_hours 2>/dev/null)"
+  fi
+fi
+export ZDOC_OWNER_ACTIVITY_TTL_HOURS
+
+# The release's own window, under the same rules as the adoption window above: canonical
+# getter, remembered caller pin, and a record-root re-resolution in the bind block below.
+ZDOC_RELEASE_OWNER_ACTIVITY_TTL_PINNED=""
+[ -n "${ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS:-}" ] && ZDOC_RELEASE_OWNER_ACTIVITY_TTL_PINNED=1
+if [ -z "${ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS:-}" ]; then
+  if command -v zensu_autopilot_release_owner_activity_ttl_hours >/dev/null 2>&1; then
+    ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS="$(zensu_autopilot_release_owner_activity_ttl_hours 2>/dev/null)"
+  fi
+fi
+export ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS
 
 # zensu CLI: installed? authenticated? (auth probe is best-effort + quiet)
 if [ -z "${ZDOC_ZENSU:-}" ]; then
@@ -122,95 +155,28 @@ export ZDOC_FORGE_PROVIDER="${ZDOC_FORGE_PROVIDER:-}" \
        ZDOC_FORGE_CLI="${ZDOC_FORGE_CLI:-}" \
        ZDOC_FORGE_STATE="${ZDOC_FORGE_STATE:-}"
 
-# Playwright: validate the plugin's lockfile-backed MCP declaration without executing it.
-# Doctor stays read-only/offline, so a valid declaration + npm can prove only
-# "configured", not that Claude loaded the MCP server or that npm can install
-# the integrity-locked package graph. A PATH binary is a separate project-driver signal and is
-# never sufficient for /zensu:verify-feature.
-#
-# SEVEN of this predicate's eight inputs come from $probe_root (ZENSU_DOCTOR_PLUGIN_DIR, else
-# this script's own installation). The EIGHTH, the browser server key, deliberately does not: it
-# is read from $DIR, the EXECUTING installation's own hooks/lib, because the key is what the
-# gate registered in THIS process's tree and a probed root need not carry the module at all --
-# test-doctor.sh builds manifest-only sandbox plugin roots that carry no hooks/lib at all, where
-# a probe-root read would answer empty and refuse every fixture. The bound: a probed .mcp.json is
-# judged against a key it does not own, so a probe root keyed for a DIFFERENT executing
-# installation reports "not detected" rather than a key mismatch.
-playwright_mcp_declared() {
-  local probe_root mcp_file plugin_file package_file lock_file launcher proxy browser_key
-  probe_root="${ZENSU_DOCTOR_PLUGIN_DIR:-$DIR/../..}"
-  mcp_file="$probe_root/.mcp.json"
-  plugin_file="$probe_root/.claude-plugin/plugin.json"
-  package_file="$probe_root/mcp-runtime/package.json"
-  lock_file="$probe_root/mcp-runtime/package-lock.json"
-  launcher="$probe_root/scripts/playwright-mcp.sh"
-  proxy="$probe_root/scripts/playwright-mcp-proxy.js"
-  [ -f "$mcp_file" ] && [ -f "$plugin_file" ] && [ -f "$package_file" ] \
-    && [ -f "$lock_file" ] && [ -x "$launcher" ] && [ -f "$proxy" ] \
-    && command -v node >/dev/null 2>&1 || return 1
-  # The SAME load guard the gate, the broker and the execution probe below apply. A bare require
-  # here would execute a symlinked module, which is the defect that probe's own comment records.
-  browser_key="$(cd -P -- "$DIR" && node -e '
-    const fs = require("node:fs");
-    let info = null;
-    try { info = fs.lstatSync("./verify-consent-v1.js"); } catch (_) { process.exit(1); }
-    if (!info.isFile() || info.isSymbolicLink()) process.exit(1);
-    process.stdout.write(String(require("./verify-consent-v1.js").BROWSER_SERVER_KEY || ""));
-  ' 2>/dev/null)" || browser_key=""
-  # Disclose rather than collapse. Every other input to this predicate is a plugin-config fact,
-  # so routing an unloadable decision module through the same "not detected" verdict asserts that
-  # .mcp.json was judged. The verdict is unchanged -- this row has no state of its own to move
-  # to -- but the CAUSE reaches stderr instead of /dev/null.
-  if [ -z "$browser_key" ]; then
-    printf '%s\n' "zensu-doctor: browser server key unreadable from $DIR/verify-consent-v1.js (absent, symlinked or unloadable) -- the plugin MCP declaration was NOT judged" >&2
-    return 1
-  fi
-  (
-    cd -P -- "$probe_root" || return 1
-    ZDOC_BROWSER_SERVER_KEY="$browser_key" node -e '
-    const fs = require("fs");
-    const mcp = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-    const plugin = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-    const pkg = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
-    const lock = JSON.parse(fs.readFileSync(process.argv[4], "utf8"));
-    const proxy = require(process.argv[5]);
-    const expectedTools = [
-      "browser_click", "browser_close", "browser_console_messages",
-      "browser_drag", "browser_fill_form", "browser_handle_dialog", "browser_hover",
-      "browser_navigate", "browser_network_requests", "browser_press_key", "browser_resize",
-      "browser_select_option", "browser_snapshot", "browser_tabs", "browser_take_screenshot",
-      "browser_type", "browser_wait_for"
-    ];
-    const server = mcp && mcp.mcpServers && mcp.mcpServers[process.env.ZDOC_BROWSER_SERVER_KEY];
-    const args = server && Array.isArray(server.args) ? server.args : [];
-    const locked = lock && lock.packages && lock.packages["node_modules/@playwright/mcp"];
-    if (!server || server.type !== "stdio" ||
-        server.command !== "${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh" ||
-        pkg.dependencies?.["@playwright/mcp"] !== "0.0.75" ||
-        !locked || locked.version !== "0.0.75" || !/^sha512-/.test(locked.integrity || "") ||
-        !args.includes("--isolated") || args.includes("--caps=storage") ||
-        JSON.stringify(proxy.ALLOWED_TOOLS) !== JSON.stringify(expectedTools) ||
-        plugin.mcpServers !== "./.mcp.json") process.exit(1);
-  ' ./.mcp.json ./.claude-plugin/plugin.json ./mcp-runtime/package.json \
-    ./mcp-runtime/package-lock.json ./scripts/playwright-mcp-proxy.js >/dev/null 2>&1
-  )
-}
-
 if [ -z "${ZDOC_PLAYWRIGHT:-}" ]; then
-  if playwright_mcp_declared; then
-    if [ "${ZDOC_PLAYWRIGHT_TOOLS:-}" = ready ]; then
-      ZDOC_PLAYWRIGHT=ready
-    elif command -v npm >/dev/null 2>&1; then
-      ZDOC_PLAYWRIGHT=configured
-    else
-      ZDOC_PLAYWRIGHT=declared
-    fi
-  elif command -v playwright >/dev/null 2>&1; then
+  ZDOC_PLAYWRIGHT_VERSION=""
+  ZDOC_PLAYWRIGHT_SOURCE=""
+  ZDOC_PLAYWRIGHT_OWNER=""
+  if command -v playwright-cli >/dev/null 2>&1; then
     ZDOC_PLAYWRIGHT=present
+    ZDOC_PLAYWRIGHT_LIB="$(bash "$DIR/zensu-host-path.sh" "$DIR" 2>/dev/null)" || ZDOC_PLAYWRIGHT_LIB=""
+    ZDOC_PLAYWRIGHT_PROBE=""
+    if [ -n "$ZDOC_PLAYWRIGHT_LIB" ]; then
+      ZDOC_PLAYWRIGHT_PROBE="$(ZDOC_PLAYWRIGHT_MODULE="$ZDOC_PLAYWRIGHT_LIB/playwright-cli-version-v1.js" node -e 'process.exitCode = require(process.env.ZDOC_PLAYWRIGHT_MODULE).cliMain(["--lookup", "--execute"], process.stdout) ? 0 : 2' </dev/null 2>/dev/null)" \
+        || ZDOC_PLAYWRIGHT_PROBE=""
+    fi
+    ZDOC_PLAYWRIGHT_SOURCE="$(printf '%s\n' "$ZDOC_PLAYWRIGHT_PROBE" | sed -n 's/^source=//p')"
+    ZDOC_PLAYWRIGHT_VERSION="$(printf '%s\n' "$ZDOC_PLAYWRIGHT_PROBE" | sed -n 's/^version=//p')"
+    ZDOC_PLAYWRIGHT_OWNER="$(printf '%s\n' "$ZDOC_PLAYWRIGHT_PROBE" | sed -n 's/^owner=//p')"
   else
     ZDOC_PLAYWRIGHT=absent
   fi
 fi
+ZDOC_PLAYWRIGHT_VERSION="${ZDOC_PLAYWRIGHT_VERSION:-}"
+ZDOC_PLAYWRIGHT_SOURCE="${ZDOC_PLAYWRIGHT_SOURCE:-}"
+ZDOC_PLAYWRIGHT_OWNER="${ZDOC_PLAYWRIGHT_OWNER:-}"
 
 # The PreToolUse denial that every stateful helper renders when Session Control
 # cannot bind points the user here, so reproduce that exact binding attempt.
@@ -268,13 +234,14 @@ zdoc_version_pair() {  # $1 = model predicate function name
 # The bind already computes both and the branch below discarded them, so nothing
 # new is resolved here.
 #
-# Deliberately NOT `:=`-seeded, unlike every other ZDOC_* in this file. These two
-# are the only ones whose meaning depends on a verdict reached further down, and
-# "empty for every verdict except bound" has to be TRUE rather than merely
-# stated: an inherited value would otherwise survive the unknown and unavailable
-# branches, which set a verdict and never reach the bind. The renderer enforces
-# the same invariant from its side (it requires ZDOC_BINDING=bound), because a
-# caller who supplies ZDOC_BINDING skips this whole block.
+# Deliberately NOT `:=`-seeded: these two are one of the two PAIRS the header names
+# as exceptions, and unlike the other pair they are cleared unconditionally rather
+# than re-derived, because their meaning depends on the binding verdict reached
+# further down and "empty for every verdict except bound" has to be TRUE rather
+# than merely stated: an inherited value would otherwise survive the unknown and
+# unavailable branches, which set a verdict and never reach the bind. The renderer
+# enforces the same invariant from its side (it requires ZDOC_BINDING=bound),
+# because a caller who supplies ZDOC_BINDING skips this whole block.
 ZDOC_SESSION_KEY=""
 ZDOC_SESSION_PROJECT_ROOT=""
 if [ -z "${ZDOC_BINDING:-}" ]; then
@@ -366,6 +333,42 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
           *) ZDOC_TTL_HOURS="$ZDOC_TTL_REBOUND"; export ZDOC_TTL_HOURS ;;
         esac
         unset ZDOC_TTL_REBOUND
+      fi
+      # The owner-activity window takes the same treatment, and it is the one whose
+      # staleness costs most: the `autopilot:` row quotes it beside a cancel remedy,
+      # and at the `0` boundary a stale read decides whether the clause renders at
+      # all. Same pinned-by-caller rule and the same decimal screen.
+      if [ -z "${ZDOC_OWNER_ACTIVITY_TTL_PINNED:-}" ] \
+        && [ "$ZDOC_SESSION_PROJECT_ROOT" != "${CLAUDE_PROJECT_DIR:-}" ] \
+        && command -v zensu_autopilot_owner_activity_ttl_hours >/dev/null 2>&1; then
+        ZDOC_OWNER_ACTIVITY_REBOUND="$(
+          CLAUDE_PROJECT_DIR="$ZDOC_SESSION_PROJECT_ROOT" \
+            zensu_autopilot_owner_activity_ttl_hours 2>/dev/null
+        )"
+        case "$ZDOC_OWNER_ACTIVITY_REBOUND" in
+          ''|*[!0-9]*) ;;
+          *)
+            ZDOC_OWNER_ACTIVITY_TTL_HOURS="$ZDOC_OWNER_ACTIVITY_REBOUND"
+            export ZDOC_OWNER_ACTIVITY_TTL_HOURS
+            ;;
+        esac
+        unset ZDOC_OWNER_ACTIVITY_REBOUND
+      fi
+      if [ -z "${ZDOC_RELEASE_OWNER_ACTIVITY_TTL_PINNED:-}" ] \
+        && [ "$ZDOC_SESSION_PROJECT_ROOT" != "${CLAUDE_PROJECT_DIR:-}" ] \
+        && command -v zensu_autopilot_release_owner_activity_ttl_hours >/dev/null 2>&1; then
+        ZDOC_RELEASE_OWNER_ACTIVITY_REBOUND="$(
+          CLAUDE_PROJECT_DIR="$ZDOC_SESSION_PROJECT_ROOT" \
+            zensu_autopilot_release_owner_activity_ttl_hours 2>/dev/null
+        )"
+        case "$ZDOC_RELEASE_OWNER_ACTIVITY_REBOUND" in
+          ''|*[!0-9]*) ;;
+          *)
+            ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS="$ZDOC_RELEASE_OWNER_ACTIVITY_REBOUND"
+            export ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS
+            ;;
+        esac
+        unset ZDOC_RELEASE_OWNER_ACTIVITY_REBOUND
       fi
     fi
   else
@@ -525,55 +528,54 @@ ZDOC_VERIFY_REASON="${ZDOC_VERIFY_REASON:-}"
 if [ -z "${ZDOC_VERIFY:-}" ]; then
   ZDOC_VERIFY_REASON=""
   ZDOC_VERIFY_RECIPE_ROOT="${ZDOC_SESSION_PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:-}}"
-  if [ -n "${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" ]; then
-    # Presence is not validity: the broker parses this value at start and REFUSES to
-    # serve when it does not satisfy the contract, so a doctor claiming an active policy
-    # from the variable alone reports green for a session whose browser cannot start.
-    # The three TOP-LEVEL guards are CALLED, not copied: verify-navigation-floor-v1.js owns
-    # policyContractFault and the consent gate calls the same function, so the doctor and the
-    # gate cannot drift about what a usable policy is. The per-target rules stay parsePolicy's
-    # alone, which is what keeps this synchronous — those are the ones that resolve DNS for a
-    # remote origin, and a stubbed refusing resolver would report a VALID remote policy as
-    # invalid, the one verdict a diagnostic must never invent. A module that will not load
-    # answers "could not be judged" rather than green: the row says what it checked, and a
-    # green row means the top-level contract holds, never that the broker will serve.
-    ZDOC_VERIFY_POLICY_FAULT="$(ZDOC_FLOOR="$ZDOC_ROOT/hooks/lib/verify-navigation-floor-v1.js" node -e '
-      const floor = require(process.env.ZDOC_FLOOR);
-      const fault = floor.policyContractFault(process.env.ZENSU_VERIFY_NAVIGATION_POLICY_V1 || "");
-      if (typeof fault !== "string") process.exit(1);
-      process.stdout.write(fault);
-    ' 2>/dev/null)" || ZDOC_VERIFY_POLICY_FAULT="policy could not be judged"
-    if [ -n "$ZDOC_VERIFY_POLICY_FAULT" ]; then
-      ZDOC_VERIFY=policy-invalid
-      ZDOC_VERIFY_REASON="$ZDOC_VERIFY_POLICY_FAULT"
-    else
-      ZDOC_VERIFY=policy
-    fi
-  elif [ ! -f "$ZDOC_ROOT/scripts/playwright-mcp-proxy.js" ] || [ -L "$ZDOC_ROOT/scripts/playwright-mcp-proxy.js" ]; then
-    ZDOC_VERIFY=unavailable
-    ZDOC_VERIFY_REASON="broker script missing"
-  elif [ ! -f "$ZDOC_ROOT/hooks/pre-browser-navigation-consent.sh" ] \
+  if [ ! -f "$ZDOC_ROOT/hooks/pre-browser-navigation-consent.sh" ] \
     || [ ! -f "$ZDOC_ROOT/hooks/post-browser-navigation-consent.sh" ] \
-    || [ ! -f "$ZDOC_ROOT/hooks/lib/verify-consent-v1.js" ]; then
+    || [ ! -f "$ZDOC_ROOT/hooks/lib/zensu-browser-consent-prefilter.sh" ] \
+    || [ ! -f "$ZDOC_ROOT/hooks/lib/verify-consent-v1.js" ] \
+    || [ ! -f "$ZDOC_ROOT/scripts/verify-browser-config.js" ]; then
     ZDOC_VERIFY=unavailable
-    ZDOC_VERIFY_REASON="consent hook pair or its module missing from the plugin"
-  elif ! (cd -P -- "$ZDOC_ROOT" && node -e '
-      const p = require("./scripts/playwright-mcp-proxy.js");
-      process.exit(p.consentHookRegistered(process.cwd()) ? 0 : 1);
-    ' >/dev/null 2>&1); then
+    ZDOC_VERIFY_REASON="consent hook pair, its prefilter library, its module or the run-config helper missing from the plugin"
+  elif [ -L "$ZDOC_ROOT/hooks/lib/verify-consent-v1.js" ]; then
     ZDOC_VERIFY=unavailable
-    ZDOC_VERIFY_REASON="consent hook not registered on the navigation matcher"
-  elif ! (cd -P -- "$ZDOC_ROOT" && node -e '
-      const p = require("./scripts/playwright-mcp-proxy.js");
-      process.exit(p.consentRecorderRegistered(process.cwd()) ? 0 : 1);
-    ' >/dev/null 2>&1); then
-    # The broker starts in consent mode on the GATE alone, so this half fails silently: every
-    # navigation would prompt and none would ever be remembered. Reported rather than absorbed.
+    ZDOC_VERIFY_REASON="the consent decision module is a symlink, which both consent hooks refuse"
+  elif ! (cd -P -- "$ZDOC_ROOT" && node -e 'require("./hooks/lib/verify-consent-v1.js")' >/dev/null 2>&1); then
     ZDOC_VERIFY=unavailable
-    ZDOC_VERIFY_REASON="consent recorder not registered on the navigation matcher"
+    ZDOC_VERIFY_REASON="the consent decision module could not be loaded"
+  elif ! (cd -P -- "$ZDOC_ROOT" && node -e 'require("./scripts/verify-browser-config.js")' >/dev/null 2>&1); then
+    ZDOC_VERIFY=unavailable
+    ZDOC_VERIFY_REASON="the run-config helper could not be loaded"
+  elif ! ZDOC_VERIFY_REGISTRATION_FAULT="$(cd -P -- "$ZDOC_ROOT" && node -e '
+      const mod = require("./hooks/lib/verify-consent-v1.js");
+      const { REGISTERED, UNKNOWN } = mod.REGISTRATION;
+      const probes = [["consent hook", mod.consentHookRegistered(process.cwd())], ["consent recorder", mod.consentRecorderRegistered(process.cwd())]];
+      process.stdout.write(probes
+        .filter((probe) => probe[1] !== REGISTERED)
+        .map((probe) => probe[1] === UNKNOWN ? probe[0] + " registration in hooks/hooks.json could not be determined" : probe[0] + " not registered on the Bash matcher")
+        .join("; "));
+    ' 2>/dev/null)"; then
+    ZDOC_VERIFY=unavailable
+    ZDOC_VERIFY_REASON="the consent hook pair registration probe did not complete"
+  elif [ -n "$ZDOC_VERIFY_REGISTRATION_FAULT" ]; then
+    ZDOC_VERIFY=unavailable
+    ZDOC_VERIFY_REASON="$ZDOC_VERIFY_REGISTRATION_FAULT"
+  elif [ -n "${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" ]; then
+    if ZDOC_VERIFY_POLICY_FAULT="$(cd -P -- "$ZDOC_ROOT" && node -e '
+      const floor = require("./hooks/lib/verify-navigation-floor-v1.js");
+      const parsed = floor.parsePolicyTargets(process.env.ZENSU_VERIFY_NAVIGATION_POLICY_V1 || "");
+      if (!parsed || typeof parsed.ok !== "boolean") process.exit(1);
+      process.stdout.write(parsed.ok ? "" : String(parsed.fault || "refused without a named rule"));
+    ' 2>/dev/null)"; then
+      if [ -n "$ZDOC_VERIFY_POLICY_FAULT" ]; then
+        ZDOC_VERIFY=policy-invalid
+        ZDOC_VERIFY_REASON="$ZDOC_VERIFY_POLICY_FAULT"
+      else
+        ZDOC_VERIFY=policy
+      fi
+    else
+      ZDOC_VERIFY=policy-unchecked
+      ZDOC_VERIFY_REASON="the policy parser in hooks/lib/verify-navigation-floor-v1.js did not complete"
+    fi
   elif [ -z "$ZDOC_VERIFY_RECIPE_ROOT" ]; then
-    # No project root resolved, so no recipe was looked for. Saying "no runtime recipe" here
-    # would report a finding about a directory this run never opened.
     ZDOC_VERIFY=consent-recipe-unchecked
   elif (cd -P -- "$ZDOC_ROOT" && ZDOC_VERIFY_RECIPE_ROOT="$ZDOC_VERIFY_RECIPE_ROOT" node -e '
       const mod = require("./hooks/lib/verify-consent-v1.js");
@@ -585,73 +587,11 @@ if [ -z "${ZDOC_VERIFY:-}" ]; then
   fi
 fi
 
-# AC-104: the row above reports REGISTRATION — it is derived from files on disk in the plugin's
-# own tree and says nothing about whether the hook ran. This second state reports EXECUTION,
-# read from the per-session marker the gate writes on every decided loopback navigation. It is
-# derived only for the consent states: in policy mode consent mode is never entered, and under
-# `unavailable` the row above is already red.
-ZDOC_VERIFY_EXEC="${ZDOC_VERIFY_EXEC:-}"
-if [ -z "$ZDOC_VERIFY_EXEC" ]; then
-  case "${ZDOC_VERIFY:-}" in
-    (consent|consent-no-recipe|consent-recipe-unchecked)
-      if [ -z "${ZDOC_SESSION_KEY:-}" ] || [ -z "${ZDOC_SESSION_PROJECT_ROOT:-}" ]; then
-        # No bound key or no recorded root: the marker is session-keyed, so the question could
-        # not be asked. Saying "not exercised" here would report a finding about a file this
-        # run never looked for.
-        ZDOC_VERIFY_EXEC=unknown
-      else
-        # The STATUS is captured rather than reduced to success/failure by an `elif`. A missing
-        # export, a module that will not load and a directory that cannot be read are contract
-        # faults, and collapsing them into the benign state made the report render a green row
-        # --- verify-feature gate EXECUTION probe -------------------------------------------
-        # The verdict travels as a WORD the decision module produced, never as an exit status this
-        # shell re-interprets. A status ladder put the answer on the same channel as every way a
-        # process can die: the benign verdict shared 1 with node's generic fatal and with a failed
-        # `cd`, and moving it to another small integer only traded one collision for another. The
-        # classification itself belongs to the module — this probe used to spell its own, deciding
-        # the same rules the broker's classifier already owns, with nothing comparing the two.
-        ZDOC_VERIFY_WORD="$(cd -P -- "$ZDOC_ROOT" 2>/dev/null || exit 0
-          ZDOC_VERIFY_ROOT="$ZDOC_SESSION_PROJECT_ROOT" ZDOC_VERIFY_KEY="$ZDOC_SESSION_KEY" node -e '
-            try {
-              const fs = require("node:fs");
-              // The SAME load guard the gate and the broker apply. This probe is the third
-              // consumer of the decision module and used a bare require: with a symlinked module
-              // the gate denies every navigation while both verify rows render green for the
-              // remaining life of an older marker.
-              const info = fs.lstatSync("./hooks/lib/verify-consent-v1.js");
-              if (!info.isFile() || info.isSymbolicLink()) process.exit(0);
-              const mod = require("./hooks/lib/verify-consent-v1.js");
-              if (typeof mod.classifyExecution !== "function"
-                || typeof mod.executionEvidenceSeen !== "function"
-                || typeof mod.evidenceDirFor !== "function") process.exit(0);
-              // Canonicalized ONCE here: the reader compares its own realpath of the root
-              // against the directory it was handed, so a spelling that is not already a
-              // realpath fixed point made the two disagree and reported a working check as
-              // a contract fault.
-              const root = fs.realpathSync.native(process.env.ZDOC_VERIFY_ROOT || "");
-              const seen = mod.executionEvidenceSeen(mod.evidenceDirFor(root), {
-                projectRoot: root,
-                sessionKey: process.env.ZDOC_VERIFY_KEY || "",
-              });
-              process.stdout.write(String(mod.classifyExecution(seen)));
-            } catch (_error) {
-              // Silence, which the shell reads as the could-not-judge residual.
-            }
-          ' 2>/dev/null)"
-        case "$ZDOC_VERIFY_WORD" in
-          (ran|ran-asked|none) ZDOC_VERIFY_EXEC="$ZDOC_VERIFY_WORD" ;;
-          (*) ZDOC_VERIFY_EXEC=unjudged ;;
-        esac
-      fi
-      ;;
-    (*) ZDOC_VERIFY_EXEC="" ;;
-  esac
-fi
-
 export ZDOC_ZENSU ZDOC_NODE ZDOC_PLAYWRIGHT ZDOC_BINDING ZDOC_BINDING_PROJECT_ROOT \
   ZDOC_BINDING_RECORDED_VERSION ZDOC_BINDING_EXECUTING_VERSION \
   ZDOC_BINDING_ROOT_UNKNOWN \
-  ZDOC_SESSION_KEY ZDOC_SESSION_PROJECT_ROOT ZDOC_VERIFY ZDOC_VERIFY_REASON ZDOC_VERIFY_EXEC
+  ZDOC_SESSION_KEY ZDOC_SESSION_PROJECT_ROOT ZDOC_VERIFY ZDOC_VERIFY_REASON ZDOC_PLAYWRIGHT_VERSION \
+  ZDOC_PLAYWRIGHT_SOURCE ZDOC_PLAYWRIGHT_OWNER
 
 if ! command -v node >/dev/null 2>&1; then
   printf 'Zensu doctor — read-only setup diagnostics\n\n  %s  node: not found on PATH — cannot run the JSON/config/state checks\n' '⚠️'

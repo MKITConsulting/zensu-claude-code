@@ -506,15 +506,14 @@ function manifestRuntimeEntries(pluginRoot, host, manifest) {
     }
   }
 
-  // MCP manifests activate executable plugin runtime outside hooks/agents/skills.
-  // Include the launcher scripts and their lockfile-backed metadata so an active
-  // session detects changes to every byte that can affect the launched server.
   if (manifest.mcpServers !== undefined) {
-    for (const relative of ['scripts', 'mcp-runtime/package.json', 'mcp-runtime/package-lock.json']) {
+    for (const relative of ['mcp-runtime/package.json', 'mcp-runtime/package-lock.json']) {
       const candidate = path.join(pluginRoot, relative);
       if (fs.existsSync(candidate)) entries.add(candidate);
     }
   }
+  const scripts = path.join(pluginRoot, 'scripts');
+  if (fs.existsSync(scripts)) entries.add(scripts);
   return [...entries];
 }
 
