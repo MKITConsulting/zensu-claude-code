@@ -8,6 +8,7 @@ const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
 const consent = require('../../hooks/lib/verify-consent-v1.js');
+const cliVersion = require('../../hooks/lib/playwright-cli-version-v1.js');
 const floor = require('../../hooks/lib/verify-navigation-floor-v1.js');
 const { buildConfig } = require('../../scripts/verify-browser-config.js');
 
@@ -51,6 +52,7 @@ function decide(command, options = {}) {
     records: options.records || [],
     declaredRoutes: options.declaredRoutes || [],
     policy: options.policy || null,
+    platform: options.platform,
   });
 }
 
@@ -202,6 +204,89 @@ test('lexShell marks every expansion unexpanded and collects substitution bodies
   assert.deepEqual(lexed.nested, ['USER', 'date', 'id']);
 });
 
+test('a locale string is read like a double-quoted string, so a substitution inside it is judged', () => {
+  const lexed = consent.lexShell('echo $"a $(date) `id` b" next');
+  assert.deepEqual(words(lexed), [['echo', 'a   b', 'next']]);
+  assert.equal(lexed.segments[0][1].unexpanded, true);
+  assert.deepEqual(lexed.nested, ['date', 'id']);
+  assert.equal(lexed.fault, '');
+  const hidden = 'PLAYWRIGHT_CLI_SESSION=$"$(playwright-cli -s=zensu-verify-b open https://attacker.example)" playwright-cli -s=zensu-verify-a snapshot';
+  assert.equal(consent.analyzeCommand(hidden, {}).calls.length, 2);
+  assert.equal(decide(hidden).verdict, 'deny');
+});
+
+test('inside double quotes a dollar before a quote is a literal dollar, never a quote opener', () => {
+  const closing = consent.lexShell('echo "abc$" next');
+  assert.deepEqual(words(closing), [['echo', 'abc$', 'next']]);
+  assert.equal(closing.segments[0][1].unexpanded, false);
+  const single = consent.lexShell(`echo "a$'b" next`);
+  assert.deepEqual(words(single), [['echo', "a$'b", 'next']]);
+  assert.equal(single.segments[0][1].unexpanded, true);
+  for (const command of [
+    'PLAYWRIGHT_CLI_SESSION="$" ; playwright-cli -s=zensu-verify-b open https://attacker.example ; PLAYWRIGHT_CLI_SESSION="x" playwright-cli -s=zensu-verify-a snapshot',
+    `PLAYWRIGHT_CLI_SESSION="$'" ; playwright-cli -s=zensu-verify-b open https://attacker.example ; PLAYWRIGHT_CLI_SESSION="'" playwright-cli -s=zensu-verify-a snapshot`,
+  ]) {
+    assert.equal(consent.analyzeCommand(command, {}).calls.length, 2, command);
+    assert.equal(decide(command).verdict, 'deny', command);
+  }
+  assert.deepEqual(decide(cli('fill e1 "abc$"')), { verdict: 'none', plan: [] });
+  assert.deepEqual(decide(cli("fill e1 '$=X'")), { verdict: 'none', plan: [] });
+  assert.equal(denied(cli('fill e1 "$=X"')), REASONS.ARGUMENT_UNEXPANDED);
+});
+
+test('a carriage return is part of a word, as in bash, so it never starts a comment', () => {
+  assert.deepEqual(words(consent.lexShell('echo a\r#b; echo c')), [['echo', 'a\r#b'], ['echo', 'c']]);
+  const hidden = 'playwright-cli -s=zensu-verify-a snapshot\r#; playwright-cli -s=zensu-verify-b open https://attacker.example';
+  assert.equal(consent.analyzeCommand(hidden, {}).calls.length, 2);
+  assert.equal(denied(hidden), `command 'snapshot\r#' ${REASONS.COMMAND_DENIED}`);
+});
+
+test('every marked command the gate admits runs exactly the call it judged in a real bash', {
+  skip: process.platform === 'win32' || !fs.existsSync('/bin/bash'),
+}, (t) => {
+  const bin = tempDir(t, 'zensu-stub-');
+  const log = path.join(bin, 'calls.log');
+  fs.writeFileSync(path.join(bin, 'playwright-cli'), '#!/bin/sh\nfor a in "$@"; do printf \'%s\\0\' "$a"; done >> "$STUB_LOG"\nprintf \'\\001\' >> "$STUB_LOG"\n', { mode: 0o755 });
+  const env = isolatedEnv(t);
+  const config = runConfig(t, ['http://127.0.0.1:4200']);
+  const corpus = [
+    ['dollar-quoted substitution', 'PLAYWRIGHT_CLI_SESSION=$"$(playwright-cli -s=zensu-verify-b open https://attacker.example)" playwright-cli -s=zensu-verify-a snapshot', {}],
+    ['lone dollar in an assignment', 'PLAYWRIGHT_CLI_SESSION="$" ; playwright-cli -s=zensu-verify-b open https://attacker.example ; PLAYWRIGHT_CLI_SESSION="x" playwright-cli -s=zensu-verify-a snapshot', {}],
+    ['dollar-quote opener in an assignment', `PLAYWRIGHT_CLI_SESSION="$'" ; playwright-cli -s=zensu-verify-b open https://attacker.example ; PLAYWRIGHT_CLI_SESSION="'" playwright-cli -s=zensu-verify-a snapshot`, {}],
+    ['carriage return before a hash', 'playwright-cli -s=zensu-verify-a snapshot\r#; playwright-cli -s=zensu-verify-b open https://attacker.example', {}],
+    ['comment', 'playwright-cli -s=zensu-verify-a snapshot #; playwright-cli -s=zensu-verify-b snapshot', {}],
+    ['session from the environment', 'playwright-cli snapshot', { PLAYWRIGHT_CLI_SESSION: SESSION }],
+    ['plain call', cli('snapshot'), {}],
+    ['trailing dollar in double quotes', cli('fill e1 "abc$"'), {}],
+    ['dollar words', cli("fill e1 '$=X' \"5$ each\""), {}],
+    ['navigation', cli('goto http://127.0.0.1:4200/login'), {}],
+    ['session assignment', `PLAYWRIGHT_CLI_SESSION=${SESSION} playwright-cli tab-list`, {}],
+    ['open with the run config', openCommand(config.file, 'http://127.0.0.1:4200/'), {}],
+  ];
+  const admitted = [];
+  for (const [label, command, extra] of corpus) {
+    assert.equal(consent.commandMarkers(command, extra).session, true, label);
+    const decision = decide(command, { env: { ...env, ...extra } });
+    if (decision.verdict === 'deny') continue;
+    admitted.push(label);
+    const judged = consent.analyzeCommand(command, extra).calls.map((call) => call.invocation.words.map((word) => word.value));
+    fs.writeFileSync(log, '');
+    const ran = spawnSync('/bin/bash', ['-c', command], {
+      cwd: bin,
+      encoding: 'utf8',
+      timeout: 10000,
+      env: { PATH: `${bin}:/usr/bin:/bin`, STUB_LOG: log, ...extra },
+    });
+    assert.equal(ran.error, undefined, label);
+    const executed = fs.readFileSync(log, 'utf8').split('\u0001').slice(0, -1).map((record) => record.split('\0').slice(0, -1));
+    assert.deepEqual(executed, judged, label);
+  }
+  assert.deepEqual(admitted, [
+    'comment', 'session from the environment', 'plain call', 'trailing dollar in double quotes', 'dollar words',
+    'navigation', 'session assignment', 'open with the run config',
+  ]);
+});
+
 test('lexShell drops redirection targets and reads a heredoc body aside', () => {
   assert.deepEqual(words(consent.lexShell('echo hi > out.txt 2>&1')), [['echo', 'hi']]);
   const heredoc = consent.lexShell("cat <<'EOF'\nline one\nEOF\necho done");
@@ -332,7 +417,7 @@ test('the session may come from an assignment or from the environment, and an ar
   assert.equal(decide('PLAYWRIGHT_CLI_SESSION=zensu-verify-x playwright-cli goto http://127.0.0.1:4200/').verdict, 'ask');
 });
 
-test('a package launcher is recognized and refused, and a path to the binary is judged like the binary itself', () => {
+test('a package launcher is recognized and refused, and a path to the binary is refused as not bare', () => {
   for (const command of [`npx @playwright/cli -s=${SESSION} snapshot`, `npx -y @playwright/cli@0.1.21 -s=${SESSION} snapshot`,
     `pnpm dlx @playwright/cli -s=${SESSION} snapshot`, `/usr/local/bin/playwright-cli -s=${SESSION} snapshot`]) {
     const analysis = consent.analyzeCommand(command, {});
@@ -348,8 +433,44 @@ test('a package launcher is recognized and refused, and a path to the binary is 
     `npx @playwright/cli -s=${SESSION} eval 1`]) {
     assert.equal(denied(command), REASONS.LAUNCHER, command);
   }
-  assert.deepEqual(decide(`/usr/local/bin/playwright-cli -s=${SESSION} snapshot`), { verdict: 'none', plan: [] });
+  assert.equal(denied(`/usr/local/bin/playwright-cli -s=${SESSION} snapshot`), REASONS.CLI_NOT_BARE);
   assert.deepEqual(decide('npx @playwright/cli -s=mine eval 1'), { verdict: 'none' });
+});
+
+test('a gated call names the CLI by its bare name only, so PATH resolves the measured binary', () => {
+  for (const command of [
+    `./node_modules/.bin/playwright-cli -s=${SESSION} snapshot`,
+    `/opt/homebrew/bin/playwright-cli -s=${SESSION} goto http://127.0.0.1:4200/`,
+    `@playwright/cli -s=${SESSION} snapshot`,
+    `@playwright/cli@0.1.21 -s=${SESSION} snapshot`,
+    `Playwright-CLI -s=${SESSION} snapshot`,
+    `PLAYWRIGHT-CLI.EXE -s=${SESSION} snapshot`,
+  ]) {
+    assert.equal(denied(command), REASONS.CLI_NOT_BARE, command);
+  }
+  assert.match(REASONS.CLI_NOT_BARE, /bare name/);
+  assert.match(REASONS.CLI_NOT_BARE, /PATH/);
+  for (const name of cliVersion.binaryNames(process.platform)) {
+    assert.deepEqual(decide(`${name} -s=${SESSION} snapshot`), { verdict: 'none', plan: [] }, name);
+  }
+  assert.deepEqual(decide(`playwright-cl''i -s=${SESSION} snapshot`), { verdict: 'none', plan: [] });
+  assert.deepEqual(decide('/opt/homebrew/bin/playwright-cli -s=mine snapshot'), { verdict: 'none' });
+});
+
+test('the version module owns the CLI names, and only the spellings the host resolves count as bare', () => {
+  assert.equal(consent.CLI_PACKAGE, cliVersion.PACKAGE_NAME);
+  assert.equal(consent.CLI_BASENAMES, cliVersion.BINARY_NAMES);
+  assert.deepEqual([...cliVersion.binaryNames('linux')], ['playwright-cli']);
+  assert.deepEqual([...cliVersion.binaryNames('darwin')], ['playwright-cli']);
+  assert.deepEqual([...cliVersion.binaryNames('win32')].sort(), [...consent.CLI_BASENAMES].sort());
+  for (const name of ['playwright-cli.cmd', 'playwright-cli.exe', 'playwright-cli.ps1']) {
+    assert.equal(denied(`${name} -s=${SESSION} snapshot`, { platform: 'linux' }), REASONS.CLI_NOT_BARE, name);
+    assert.equal(denied(`${name} -s=${SESSION} snapshot`, { platform: 'darwin' }), REASONS.CLI_NOT_BARE, name);
+    assert.deepEqual(decide(`${name} -s=${SESSION} snapshot`, { platform: 'win32' }), { verdict: 'none', plan: [] }, name);
+  }
+  for (const platform of ['linux', 'darwin', 'win32']) {
+    assert.deepEqual(decide(`playwright-cli -s=${SESSION} snapshot`, { platform }), { verdict: 'none', plan: [] }, platform);
+  }
 });
 
 test('an unexpanded session beside a zensu-verify literal and an unexpanded argument are refused', () => {
@@ -363,6 +484,20 @@ test('an unexpanded session beside a zensu-verify literal and an unexpanded argu
   assert.equal(denied(cli('snapshot > $=X')), REASONS.NOT_PLAIN);
   assert.deepEqual(decide(cli('fill e1 5$')), { verdict: 'none', plan: [] });
   assert.deepEqual(decide(cli('fill e1 "5$ each"')), { verdict: 'none', plan: [] });
+});
+
+test('an unexpanded session assignment is refused even where a literal -s outranks it', () => {
+  for (const command of [
+    `PLAYWRIGHT_CLI_SESSION=$X playwright-cli -s=${SESSION} snapshot`,
+    `PLAYWRIGHT_CLI_SESSION="$(date)" playwright-cli -s=${SESSION} snapshot`,
+    `PLAYWRIGHT_CLI_SESSION=$X; playwright-cli -s=${SESSION} snapshot`,
+  ]) {
+    assert.equal(denied(command), REASONS.SESSION_UNEXPANDED, command);
+  }
+  const env = { PLAYWRIGHT_CLI_SESSION: SESSION };
+  assert.equal(denied('PLAYWRIGHT_CLI_SESSION=$X playwright-cli -s=mine snapshot', { env }), REASONS.SESSION_UNEXPANDED);
+  assert.deepEqual(decide('PLAYWRIGHT_CLI_SESSION=$X playwright-cli -s=mine snapshot'), { verdict: 'none' });
+  assert.deepEqual(decide(`PLAYWRIGHT_CLI_SESSION=${SESSION} playwright-cli -s=${SESSION} snapshot`), { verdict: 'none', plan: [] });
 });
 
 test('a call run through another program is refused as indirect', () => {
@@ -635,6 +770,23 @@ test('the environment session marker alone changes a verdict', () => {
   }
 });
 
+test('the environment session marker alone arms the size bound, the unexpanded arms, the unjudged bodies and the redefinition check', () => {
+  const env = { PLAYWRIGHT_CLI_SESSION: SESSION };
+  const pairs = [
+    [`playwright-cli eval 1 #${'x'.repeat(262145)}`, REASONS.COMMAND_TOO_LARGE],
+    ['playwright-cli -s=$S goto http://127.0.0.1:4200/', REASONS.SESSION_UNEXPANDED],
+    ['playwright-cli -s=mine $ARGS eval 1', REASONS.ARGUMENT_UNEXPANDED],
+    ["bash <<< 'playwright-cli goto http://127.0.0.1:4200/'", REASONS.UNJUDGED_BODY],
+    ["$($($($(bash -c 'playwright-cli goto http://127.0.0.1:4200/'))))", REASONS.UNJUDGED_BODY],
+    ['playwright-cli() { :; }; playwright-cli goto http://127.0.0.1:4200/', REASONS.REDEFINED],
+  ];
+  for (const [command, reason] of pairs) {
+    assert.equal(consent.commandMarkers(command, {}).named, false, command.slice(0, 60));
+    assert.equal(denied(command, { env }), reason, command.slice(0, 60));
+    assert.deepEqual(decide(command), { verdict: 'none' }, command.slice(0, 60));
+  }
+});
+
 test('a backslash-newline continuation inside either marker is joined before the markers are read', () => {
   const pick = (marks) => ({ cli: marks.cli, session: marks.session });
   assert.deepEqual(pick(consent.commandMarkers('playwright-\\\ncli -s=zensu-verify-a eval 1', {})), { cli: true, session: true });
@@ -646,11 +798,11 @@ test('a backslash-newline continuation inside either marker is joined before the
   assert.deepEqual(decide('playwright-\\\ncli -s=mine eval 1'), { verdict: 'none' });
 });
 
-test('a case variant or a quote-split spelling of the CLI is judged like the literal name', () => {
-  assert.equal(denied(`Playwright-cli -s=${SESSION} eval 1`), `command 'eval' ${REASONS.COMMAND_DENIED}`);
+test('a case variant of the CLI is refused as not bare, and a quote-split spelling is judged like the literal name', () => {
+  assert.equal(denied(`Playwright-cli -s=${SESSION} eval 1`), REASONS.CLI_NOT_BARE);
   assert.equal(denied(`playwright-cl''i -s=${SESSION} eval 1`), `command 'eval' ${REASONS.COMMAND_DENIED}`);
-  assert.equal(denied(`/usr/local/bin/PLAYWRIGHT-CLI.EXE -s=${SESSION} eval 1`), `command 'eval' ${REASONS.COMMAND_DENIED}`);
-  assert.equal(decide(`Playwright-cli -s=${SESSION} goto http://127.0.0.1:4200/`).verdict, 'ask');
+  assert.equal(denied(`/usr/local/bin/PLAYWRIGHT-CLI.EXE -s=${SESSION} eval 1`), REASONS.CLI_NOT_BARE);
+  assert.equal(denied(`Playwright-cli -s=${SESSION} goto http://127.0.0.1:4200/`), REASONS.CLI_NOT_BARE);
   assert.deepEqual(decide('Playwright-cli -s=mine eval 1'), { verdict: 'none' });
 });
 
@@ -784,6 +936,17 @@ test('consent mode refuses a remote target and every navigation the floor refuse
   ];
   for (const [url, reason] of floorCases) assert.equal(denied(cli(`goto '${url}'`)), reason, url);
   assert.equal(denied(cli('goto http://127.0.0.1:4200/?token=1')), REASONS.ARGUMENT_UNEXPANDED);
+});
+
+test('consent mode refuses an open whose run config names a remote origin, even toward a loopback target', (t) => {
+  const env = isolatedEnv(t);
+  const pin = ['MAP app.example.com 93.184.216.34'];
+  const mixed = runConfig(t, ['http://127.0.0.1:4200', 'https://app.example.com'], pin);
+  assert.equal(denied(openCommand(mixed.file, 'http://127.0.0.1:4200/'), { env }), REASONS.REMOTE_NEEDS_POLICY);
+  const remote = runConfig(t, ['https://app.example.com'], pin);
+  assert.equal(denied(openCommand(remote.file), { env }), REASONS.REMOTE_NEEDS_POLICY);
+  const local = runConfig(t, ['http://127.0.0.1:4200']);
+  assert.equal(decide(openCommand(local.file, 'http://127.0.0.1:4200/'), { env }).verdict, 'ask');
 });
 
 test('a subagent is refused on a zensu-verify session and ignored on any other call', () => {
@@ -1342,6 +1505,41 @@ test('the registration probes answer unknown when hooks.json cannot be read, par
   assert.equal(consent.consentHookRegistered(settled), REGISTERED, 'a registration on Bash settles an uncompilable sibling');
 });
 
+test('one registration reader serves the consent probes and the grant row, each through its own reading', () => {
+  const registration = require('../../hooks/lib/hook-registration-v1.js');
+  const R = registration.REGISTRATION;
+  assert.equal(consent.REGISTRATION, R);
+  const names = (command) => command.includes('/hooks/x.sh');
+  const group = (matcher, command = 'bash /p/hooks/x.sh') => ({ ...(matcher === undefined ? {} : { matcher }), hooks: [{ type: 'command', command }] });
+  const doc = (matcher) => ({ hooks: { PreToolUse: [group(matcher)] } });
+  const host = (manifest, tools = ['Bash']) => registration.registration(manifest, { event: 'PreToolUse', tools, names, reading: registration.READINGS.HOST });
+  const regex = (manifest, tools = ['Agent', 'Task']) => registration.registration(manifest, { event: 'PreToolUse', tools, names, reading: registration.READINGS.REGEX });
+  const cases = [
+    ['a plain name list naming the tool', doc('Bash'), R.REGISTERED, doc('Agent|Task'), R.REGISTERED],
+    ['a plain name list without the tool', doc('Edit|Write'), R.UNREGISTERED, doc('Agent'), R.UNREGISTERED],
+    ['an absent matcher', doc(undefined), R.REGISTERED, doc(undefined), R.REGISTERED],
+    ['an empty matcher', doc(''), R.REGISTERED, doc(''), R.REGISTERED],
+    ['the star', doc('*'), R.REGISTERED, doc('*'), R.UNREGISTERED],
+    ['a matcher that is not a string', doc(42), R.UNKNOWN, doc(42), R.REGISTERED],
+    ['a matcher that does not compile', doc('('), R.UNKNOWN, doc('('), R.UNREGISTERED],
+    ['a matcher whose readings disagree', doc('as.'), R.UNKNOWN, doc('gen.'), R.UNREGISTERED],
+    ['an array document', [], R.UNKNOWN, [], R.UNREGISTERED],
+    ['a hooks value of the wrong type', { hooks: 'x' }, R.UNKNOWN, { hooks: 'x' }, R.UNREGISTERED],
+    ['a present but falsy event value', { hooks: { PreToolUse: null } }, R.UNKNOWN, { hooks: { PreToolUse: null } }, R.UNREGISTERED],
+    ['a truthy event value that is not an array', { hooks: { PreToolUse: {} } }, R.UNKNOWN, { hooks: { PreToolUse: {} } }, R.UNKNOWN],
+    ['a document that is not an object', 'x', R.UNKNOWN, 'x', R.UNKNOWN],
+    ['no hooks at all', {}, R.UNREGISTERED, {}, R.UNREGISTERED],
+    ['a group that names another hook', { hooks: { PreToolUse: [group('Bash', 'bash /p/hooks/y.sh')] } }, R.UNREGISTERED,
+      { hooks: { PreToolUse: [group('Agent|Task', 'bash /p/hooks/y.sh')] } }, R.UNREGISTERED],
+  ];
+  for (const [label, hostDoc, hostWant, regexDoc, regexWant] of cases) {
+    assert.equal(host(hostDoc), hostWant, `host reading: ${label}`);
+    assert.equal(regex(regexDoc), regexWant, `regex reading: ${label}`);
+  }
+  const report = fs.readFileSync(path.join(REPO_ROOT, 'hooks', 'lib', 'zensu-doctor-report.js'), 'utf8');
+  assert.match(report, /require\('\.\/hook-registration-v1\.js'\)/);
+});
+
 test('promptText states the session, the origin, the per-origin grant and the declared routes', () => {
   const single = consent.promptText({ origins: ['http://127.0.0.1:4200'], session: SESSION, declaredRoutes: ['/', '/login', '/a/../b'] });
   assert.equal(single, [
@@ -1368,6 +1566,26 @@ test('the prompt route list is bounded in characters, count and width', () => {
   const rendered = consent.promptRoutes(wide);
   assert.equal(rendered.startsWith(`${wide[0]}, ${wide[1]}, ${wide[2]}`), true);
   assert.match(rendered, / \(and 2 more\)$/);
+});
+
+test('every refusal belongs to exactly one class, and only a shape denial carries the re-issue note', () => {
+  const keys = Object.keys(REASONS);
+  const shape = [...consent.SHAPE_REASONS];
+  const final = [...consent.FINAL_REASONS];
+  assert.equal(new Set([...shape, ...final]).size, shape.length + final.length);
+  assert.deepEqual([...shape, ...final].sort(), [...keys].sort());
+  assert.deepEqual([...shape].sort(), ['ARGUMENT_UNEXPANDED', 'CLI_NOT_BARE', 'ENV_ASSIGNMENT', 'LAUNCHER', 'NOT_PLAIN', 'SESSION_UNEXPANDED', 'SESSION_UNRESOLVED', 'WRAPPER']);
+  assert.match(consent.SHAPE_MARKER, /^\(shape denial: re-issue this call once /);
+  assert.match(consent.SHAPE_MARKER, /single-quoted literal arguments; a second denial is final\)$/);
+  const reasonOf = (reason) => consent.preEnvelope({ verdict: 'deny', reason }).hookSpecificOutput.permissionDecisionReason;
+  for (const key of shape) assert.equal(reasonOf(REASONS[key]), `${DENIED}${REASONS[key]} ${consent.SHAPE_MARKER}`, key);
+  for (const key of final) assert.ok(!reasonOf(REASONS[key]).includes('shape denial'), key);
+  const bare = consent.preEnvelope(decide(`/usr/local/bin/playwright-cli -s=${SESSION} snapshot`));
+  assert.equal(bare.hookSpecificOutput.permissionDecisionReason, `${DENIED}${REASONS.CLI_NOT_BARE} ${consent.SHAPE_MARKER}`);
+  const plain = consent.preEnvelope(decide(`${cli('snapshot')} && ${cli('snapshot')}`));
+  assert.equal(plain.hookSpecificOutput.permissionDecisionReason, `${DENIED}${REASONS.NOT_PLAIN} ${consent.SHAPE_MARKER}`);
+  const refused = consent.preEnvelope(decide(cli('eval 1')));
+  assert.equal(refused.hookSpecificOutput.permissionDecisionReason, `${DENIED}command 'eval' ${REASONS.COMMAND_DENIED}`);
 });
 
 test('preEnvelope carries ask and deny only', () => {

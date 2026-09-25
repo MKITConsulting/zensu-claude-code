@@ -199,8 +199,9 @@ self-hosting keeps the data under your control.
 Claude Code 2.1.211 or newer on macOS or Linux. Hooks need a POSIX shell —
 Windows users need WSL or Git Bash; native `cmd.exe` and PowerShell are not
 supported. `/zensu:verify-feature` and the autopilot browser driver additionally
-need `playwright-cli` on `PATH` (`brew install playwright-cli` or
-`npm install -g @playwright/cli`).
+need `playwright-cli` on `PATH` (`npm install -g @playwright/cli@0.1.21`, the
+version the browser consent gate was measured against; `brew install playwright-cli`
+is unpinned).
 
 ## Documentation
 

@@ -6,6 +6,9 @@ PRE_HOOK="$PLUGIN_DIR/hooks/pre-browser-navigation-consent.sh"
 POST_HOOK="$PLUGIN_DIR/hooks/post-browser-navigation-consent.sh"
 MODULE="$PLUGIN_DIR/hooks/lib/verify-consent-v1.js"
 FLOOR="$PLUGIN_DIR/hooks/lib/verify-navigation-floor-v1.js"
+PREFILTER_LIB="$PLUGIN_DIR/hooks/lib/zensu-browser-consent-prefilter.sh"
+VERSION_MODULE="$PLUGIN_DIR/hooks/lib/playwright-cli-version-v1.js"
+REGISTRATION_MODULE="$PLUGIN_DIR/hooks/lib/hook-registration-v1.js"
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 CONFIG_HELPER="$PLUGIN_DIR/scripts/verify-browser-config.js"
 FREE_PORT="$PLUGIN_DIR/scripts/verify-free-port.js"
@@ -13,6 +16,7 @@ UNIT_FLOOR="$PLUGIN_DIR/tests/structure/verify-navigation-floor-v1.test.js"
 UNIT_CONSENT="$PLUGIN_DIR/tests/structure/verify-consent-v1.test.js"
 UNIT_PORT="$PLUGIN_DIR/tests/structure/verify-free-port.test.js"
 UNIT_CONFIG="$PLUGIN_DIR/tests/structure/verify-browser-config.test.js"
+UNIT_VERSION="$PLUGIN_DIR/tests/structure/playwright-cli-version-v1.test.js"
 ESCAPE_STEMS_SUITE="$PLUGIN_DIR/tests/structure/test-gauntlet-loop-skill.sh"
 TDD_PHASE_LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
 SETUP_MD="$PLUGIN_DIR/skills/verify-feature/rules/setup.md"
@@ -36,19 +40,20 @@ for _vc_name in $(env | sed -n 's/^\(PLAYWRIGHT_MCP_[A-Za-z0-9_]*\)=.*/\1/p;s/^\
   unset "$_vc_name"
 done
 
-for f in "$PRE_HOOK" "$POST_HOOK" "$MODULE" "$FLOOR" "$CONFIG_HELPER" "$FREE_PORT" \
-  "$UNIT_FLOOR" "$UNIT_CONSENT" "$UNIT_PORT" "$UNIT_CONFIG"; do
+for f in "$PRE_HOOK" "$POST_HOOK" "$PREFILTER_LIB" "$MODULE" "$FLOOR" "$VERSION_MODULE" "$REGISTRATION_MODULE" \
+  "$CONFIG_HELPER" "$FREE_PORT" "$UNIT_FLOOR" "$UNIT_CONSENT" "$UNIT_PORT" "$UNIT_CONFIG" "$UNIT_VERSION"; do
   [ -f "$f" ] && check "V0 file exists: ${f#"$PLUGIN_DIR"/}" PASS || check "V0 file exists: ${f#"$PLUGIN_DIR"/}" FAIL
 done
 [ -x "$PRE_HOOK" ] && [ -x "$POST_HOOK" ] && check "V1 both hooks are executable" PASS || check "V1 both hooks are executable" FAIL
-bash -n "$PRE_HOOK" 2>/dev/null && bash -n "$POST_HOOK" 2>/dev/null \
-  && check "V2 bash -n passes for both hooks" PASS || check "V2 bash -n passes for both hooks" FAIL
+bash -n "$PRE_HOOK" 2>/dev/null && bash -n "$POST_HOOK" 2>/dev/null && bash -n "$PREFILTER_LIB" 2>/dev/null \
+  && check "V2 bash -n passes for both hooks and the prefilter library" PASS || check "V2 bash -n passes for both hooks and the prefilter library" FAIL
 V2B_OK=1
-for f in "$MODULE" "$FLOOR" "$CONFIG_HELPER" "$FREE_PORT" "$UNIT_FLOOR" "$UNIT_CONSENT" "$UNIT_PORT" "$UNIT_CONFIG"; do
+for f in "$MODULE" "$FLOOR" "$VERSION_MODULE" "$REGISTRATION_MODULE" "$CONFIG_HELPER" "$FREE_PORT" \
+  "$UNIT_FLOOR" "$UNIT_CONSENT" "$UNIT_PORT" "$UNIT_CONFIG" "$UNIT_VERSION"; do
   node --check "$f" >/dev/null 2>&1 || V2B_OK=0
 done
-[ "$V2B_OK" -eq 1 ] && check "V2b node --check passes for both modules, both helpers and the four unit files" PASS \
-  || check "V2b node --check passes for both modules, both helpers and the four unit files" FAIL
+[ "$V2B_OK" -eq 1 ] && check "V2b node --check passes for the four modules, both helpers and the five unit files" PASS \
+  || check "V2b node --check passes for the four modules, both helpers and the five unit files" FAIL
 
 MATCHER="$(node -e 'process.stdout.write(String(require(process.argv[1]).CONSENT_MATCHER))' "$MODULE" 2>/dev/null)"
 [ "$MATCHER" = "Bash" ] && check "V3 the module's CONSENT_MATCHER is Bash" PASS \
@@ -117,9 +122,10 @@ run_unit() { # $1 label  $2 file  $3 registered floor  $4 SUITE-OVERVIEW row key
   fi
 }
 run_unit "V6 floor" "$UNIT_FLOOR" 14 "verify-navigation-floor-v1.test.js"
-run_unit "V7 consent" "$UNIT_CONSENT" 100 "verify-consent-v1.test.js"
+run_unit "V7 consent" "$UNIT_CONSENT" 111 "verify-consent-v1.test.js"
 run_unit "V7b free-port" "$UNIT_PORT" 3 "verify-free-port.test.js"
-run_unit "V7c browser-config" "$UNIT_CONFIG" 8 "verify-browser-config.test.js"
+run_unit "V7c browser-config" "$UNIT_CONFIG" 13 "verify-browser-config.test.js"
+run_unit "V7d cli-version" "$UNIT_VERSION" 14 "playwright-cli-version-v1.test.js"
 
 if grep -qF "require('./verify-navigation-floor-v1.js')" "$MODULE" \
   && grep -qF "'verify-navigation-floor-v1.js'" "$CONFIG_HELPER" \
@@ -250,6 +256,22 @@ new_project || { echo "FATAL: fixture"; exit 2; }
 GLOBAL_HOME="$(mktemp -d "${TMPDIR:-/tmp}/zensu-vc-home.XXXXXX")" || { echo "FATAL: fixture"; exit 2; }
 remember_tmp "$GLOBAL_HOME"
 export PWTEST_CLI_GLOBAL_CONFIG="$GLOBAL_HOME"
+PW_MEASURED="$(node -e 'process.stdout.write(String(require(process.argv[1]).PLAYWRIGHT_CLI_SOURCE_VERSION || ""))' "$MODULE" 2>/dev/null)"
+PW_STUB_BIN="$(mktemp -d "${TMPDIR:-/tmp}/zensu-vc-cli.XXXXXX")" || { echo "FATAL: fixture"; exit 2; }
+remember_tmp "$PW_STUB_BIN"
+mkdir -p "$PW_STUB_BIN/node_modules/@playwright/cli"
+printf '#!/bin/sh\nexit 0\n' > "$PW_STUB_BIN/playwright-cli"
+chmod 755 "$PW_STUB_BIN/playwright-cli"
+printf '{"name":"@playwright/cli","version":"%s"}\n' "$PW_MEASURED" > "$PW_STUB_BIN/node_modules/@playwright/cli/package.json"
+config_helper() {
+  PATH="$PW_STUB_BIN:$PATH" node "$CONFIG_HELPER" "$@"
+}
+PW_STUB_READ="$(PATH="$PW_STUB_BIN:$PATH" node -e 'const v = require(process.argv[1]).installedVersion(process.env); process.stdout.write(v.source + " " + v.version)' "$PLUGIN_DIR/hooks/lib/playwright-cli-version-v1.js" 2>/dev/null)"
+if [ -n "$PW_MEASURED" ] && [ "$PW_STUB_READ" = "manifest $PW_MEASURED" ]; then
+  check "V12 the stub playwright-cli every run-config helper call puts first on PATH reads as the measured version ($PW_MEASURED)" PASS
+else
+  check "V12 the stub playwright-cli every run-config helper call puts first on PATH reads as the measured version (got: ${PW_STUB_READ:-<none>})" FAIL
+fi
 SID="vc-bound"
 source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$SID" >/dev/null 2>&1 \
   || { check "V11 session baseline" FAIL; echo "----"; echo "test-verify-consent: $PASS PASS / $FAIL FAIL"; exit 1; }
@@ -378,21 +400,22 @@ done
   && check "H16-diff every marked spelling in the corpus (${#DIFF_COMMANDS[@]}) passes the prefilter of a module-absent copy, admitted and asked ones included" PASS \
   || check "H16-diff every marked spelling in the corpus (${#DIFF_COMMANDS[@]}) passes the prefilter of a module-absent copy, admitted and asked ones included (misses:${DIFF_MISSES})" FAIL
 
+[ -f "$PREFILTER_LIB" ] && [ "$(grep -c 'LC_ALL=C tr -d' "$PREFILTER_LIB")" = "1" ] && [ "$(grep -c 'LC_ALL=C sed' "$PREFILTER_LIB")" = "1" ] \
+  && grep -q '_zensu_scan=.*LC_ALL=C sed .*| LC_ALL=C tr -d' "$PREFILTER_LIB" \
+  && check "H17 the prefilter library joins continuations with one LC_ALL=C sed pass, then strips with one LC_ALL=C tr -d pass" PASS \
+  || check "H17 the prefilter library joins continuations with one LC_ALL=C sed pass, then strips with one LC_ALL=C tr -d pass" FAIL
+H17D_OK=1
 for _vc_hook in "$PRE_HOOK" "$POST_HOOK"; do
-  [ "$(grep -c 'LC_ALL=C tr -d' "$_vc_hook")" = "1" ] && [ "$(grep -c 'LC_ALL=C sed' "$_vc_hook")" = "1" ] \
-    && grep -q '^_ZENSU_SCAN=.*LC_ALL=C sed .*| LC_ALL=C tr -d' "$_vc_hook" \
-    && check "H17 ${_vc_hook##*/} joins continuations with one LC_ALL=C sed pass, then strips with one LC_ALL=C tr -d pass" PASS \
-    || check "H17 ${_vc_hook##*/} joins continuations with one LC_ALL=C sed pass, then strips with one LC_ALL=C tr -d pass" FAIL
+  grep -qF 'source "$(dirname "$0")/lib/zensu-browser-consent-prefilter.sh"' "$_vc_hook" || H17D_OK=0
+  grep -qF 'zensu_browser_consent_marked "$INPUT"' "$_vc_hook" || H17D_OK=0
+  if grep -q 'nocasematch\|_zensu_pair\|PLAYWRIGHT_CLI_SESSION' "$_vc_hook"; then H17D_OK=0; fi
+  [ "$(grep -c 'LC_ALL=C sed\|LC_ALL=C tr -d' "$_vc_hook")" = "1" ] || H17D_OK=0
+  grep 'LC_ALL=C sed\|LC_ALL=C tr -d' "$_vc_hook" | grep -q '^ *_zensu_scan=' || H17D_OK=0
 done
-
-prefilter_block() {
-  sed -n '/^_ZENSU_PAIR=/,/^unset _ZENSU_SCAN _ZENSU_PAIR$/p' "$1"
-}
-PRE_BLOCK="$(prefilter_block "$PRE_HOOK")"
-POST_BLOCK="$(prefilter_block "$POST_HOOK")"
-[ -n "$PRE_BLOCK" ] && [ "$PRE_BLOCK" = "$POST_BLOCK" ] \
-  && check "H17d both hooks carry a byte-identical prefilter block" PASS \
-  || check "H17d both hooks carry a byte-identical prefilter block" FAIL
+[ "$H17D_OK" -eq 1 ] \
+  && check "H17d both hooks source the one prefilter library, carry no copy of its two-marker test, and scan only in the library-unavailable fallback" PASS \
+  || check "H17d both hooks source the one prefilter library, carry no copy of its two-marker test, and scan only in the library-unavailable fallback" FAIL
+PRE_BLOCK="$(cat "$PREFILTER_LIB" 2>/dev/null)"
 CLI_MARKER_LIST="$(node -e 'const m = require(process.argv[1]); process.stdout.write(m.CLI_MARKERS.concat(m.SESSION_PREFIX).join("\n"))' "$MODULE" 2>/dev/null)"
 SESSION_ENV_NAME="$(node -e 'process.stdout.write(require(process.argv[1]).SESSION_ENV)' "$MODULE" 2>/dev/null)"
 H17E_OK=1
@@ -407,6 +430,36 @@ EOF
 [ "$H17E_OK" -eq 1 ] \
   && check "H17e the prefilter names every CLI marker, the session prefix and the session variable the module derives" PASS \
   || check "H17e the prefilter names every CLI marker, the session prefix and the session variable the module derives" FAIL
+NOLIB_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-nolib.XXXXXX")"
+remember_tmp "$NOLIB_ROOT"
+NOLIB_ROOT="$(cd "$NOLIB_ROOT" && pwd -P)"
+cp -R "$PLUGIN_DIR/hooks" "$NOLIB_ROOT/"
+rm -f "$NOLIB_ROOT/hooks/lib/zensu-browser-consent-prefilter.sh"
+nolib_run() {
+  bash_payload "$2" "$3" "$SID" "$PROJ" | CLAUDE_PLUGIN_ROOT="$NOLIB_ROOT" bash "$NOLIB_ROOT/hooks/$1"
+}
+case "$(nolib_run pre-browser-navigation-consent.sh PreToolUse "$CLI snapshot" 2>/dev/null)" in
+  *'"permissionDecision":"deny"'*'prefilter library unavailable'*) check "H17g without the prefilter library the pre hook denies a call that names playwright-cli" PASS ;;
+  *) check "H17g without the prefilter library the pre hook denies a call that names playwright-cli" FAIL ;;
+esac
+[ -z "$(nolib_run pre-browser-navigation-consent.sh PreToolUse 'ls -la' 2>/dev/null)" ] \
+  && check "H17g1 without the prefilter library an unrelated call passes the pre hook silently" PASS \
+  || check "H17g1 without the prefilter library an unrelated call passes the pre hook silently" FAIL
+NOLIB_POST_ERR="$(nolib_run post-browser-navigation-consent.sh PostToolUse "$CLI goto http://127.0.0.1:4200/nolib" 2>&1 >/dev/null)"
+NOLIB_POST_RC=$?
+[ "$NOLIB_POST_RC" -eq 0 ] && case "$NOLIB_POST_ERR" in *'browser consent memory not written (prefilter library unavailable)'*) true ;; *) false ;; esac \
+  && check "H17g2 without the prefilter library the recorder skips, exits 0 and names the cause" PASS \
+  || check "H17g2 without the prefilter library the recorder skips, exits 0 and names the cause (rc=$NOLIB_POST_RC)" FAIL
+NOLIB_QUOTED="pla''ywright-cli -s=zensu-ver''ify-nolib snapshot"
+case "$(nolib_run pre-browser-navigation-consent.sh PreToolUse "$NOLIB_QUOTED" 2>/dev/null)" in
+  *'"permissionDecision":"deny"'*'prefilter library unavailable'*) check "H17g3 without the prefilter library a quote-split spelling of both markers is still denied" PASS ;;
+  *) check "H17g3 without the prefilter library a quote-split spelling of both markers is still denied" FAIL ;;
+esac
+NOLIB_JOINED="play\\${NL}wright-cli -s=zensu-ver\\${NL}ify-nolib snapshot"
+case "$(nolib_run pre-browser-navigation-consent.sh PreToolUse "$NOLIB_JOINED" 2>/dev/null)" in
+  *'"permissionDecision":"deny"'*'prefilter library unavailable'*) check "H17g4 without the prefilter library a line-continuation spelling of both markers is still denied" PASS ;;
+  *) check "H17g4 without the prefilter library a line-continuation spelling of both markers is still denied" FAIL ;;
+esac
 
 BASH_BIN="$(command -v bash)"
 NONODE_BIN="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-nonode.XXXXXX")"
@@ -506,6 +559,18 @@ case "$(uname -s 2>/dev/null)" in
         check "H18d-control in the same tree a gated call is denied for the absent module" PASS ;;
       *) check "H18d-control in the same tree a gated call is denied for the absent module" FAIL ;;
     esac
+    nolib_pre() {
+      bash_payload PreToolUse "$1" "$SID" "$PROJ" \
+        | HOME="$GLOBAL_HOME" CLAUDE_PLUGIN_ROOT="$NOLIB_ROOT" bash "$NOLIB_ROOT/hooks/pre-browser-navigation-consent.sh" 2>/dev/null
+    }
+    [ -z "$(nolib_pre "CLAUDE_PROJECT_DIR=$DOCTOR_NAMED_DIR bash $NOLIB_ROOT/hooks/lib/zensu-doctor.sh")" ] \
+      && check "H18e the doctor allowance runs before the prefilter-library-unavailable arm" PASS \
+      || check "H18e the doctor allowance runs before the prefilter-library-unavailable arm" FAIL
+    case "$(nolib_pre "$CLI goto http://127.0.0.1:4200/")" in
+      *'"permissionDecision":"deny"'*'prefilter library unavailable'*)
+        check "H18e-control in the same tree a gated call is denied for the missing prefilter library" PASS ;;
+      *) check "H18e-control in the same tree a gated call is denied for the missing prefilter library" FAIL ;;
+    esac
     ;;
 esac
 
@@ -548,10 +613,17 @@ post_run "playwright-\\${NL}cli -s=$SESSION goto http://127.0.0.1:4200/joined" "
 memory_has "http://127.0.0.1:4200" "/joined" "remembered" \
   && check "H6c the recorder joins a line continuation inside the CLI name" PASS \
   || check "H6c the recorder joins a line continuation inside the CLI name" FAIL
-post_run "Playwright-cli -s=$SESSION goto http://127.0.0.1:4200/cased" "$SID" "$PROJ" >/dev/null
-memory_has "http://127.0.0.1:4200" "/cased" "remembered" \
-  && check "H6d the recorder reads a CLI name in another letter case" PASS \
-  || check "H6d the recorder reads a CLI name in another letter case" FAIL
+H6D_BEFORE="$(memory_count)"
+H6D_OUT="$(post_run "Playwright-cli -s=$SESSION goto http://127.0.0.1:4200/cased" "$SID" "$PROJ")"
+H6D_REASON="$(pre_reason "Playwright-cli -s=$SESSION goto http://127.0.0.1:4200/cased" "$SID" "$PROJ")"
+H6D_NOT_BARE="$(node -e 'process.stdout.write(String(require(process.argv[1]).REASONS.CLI_NOT_BARE || ""))' "$MODULE" 2>/dev/null)"
+if [ -z "$H6D_OUT" ] && [ -n "$H6D_BEFORE" ] && [ "$(memory_count)" = "$H6D_BEFORE" ] \
+  && ! memory_has "http://127.0.0.1:4200" "/cased" "remembered" \
+  && [ -n "$H6D_NOT_BARE" ] && [ "${H6D_REASON#*"$H6D_NOT_BARE"}" != "$H6D_REASON" ]; then
+  check "H6d the recorder records nothing and reports no fault for a CLI name in another letter case, which the gate refuses as not bare" PASS
+else
+  check "H6d the recorder records nothing and reports no fault for a CLI name in another letter case, which the gate refuses as not bare (recorder: ${H6D_OUT:-<silent>}; records: ${H6D_BEFORE:-?}->$(memory_count); gate: ${H6D_REASON:-<none>})" FAIL
+fi
 post_run "playwright-cl''i -s=$SESSION goto http://127.0.0.1:4200/split" "$SID" "$PROJ" >/dev/null
 memory_has "http://127.0.0.1:4200" "/split" "remembered" \
   && check "H6e the recorder reads a quote-split CLI name" PASS \
@@ -599,7 +671,7 @@ esac
 
 RUN_DIR="$PROJ/run1"
 mkdir -p "$RUN_DIR"
-HELPER_OUT="$(node "$CONFIG_HELPER" --run-dir "$RUN_DIR" --mode local --origin 'http://127.0.0.1:4310' 2>/dev/null)"
+HELPER_OUT="$(config_helper --run-dir "$RUN_DIR" --mode local --origin 'http://127.0.0.1:4310' 2>/dev/null)"
 RUN_SESSION="$(printf '%s\n' "$HELPER_OUT" | sed -n 's/^session=//p')"
 RUN_CONFIG="$(printf '%s\n' "$HELPER_OUT" | sed -n 's/^config=//p')"
 if [ "$RUN_SESSION" = "zensu-verify-run1" ] && [ "$RUN_CONFIG" = "$RUN_DIR/playwright-cli.json" ] && [ -f "$RUN_CONFIG" ] \
@@ -675,7 +747,7 @@ post_run "$CLI goto https://app.example.com/" "$SID" "$PROJ" >/dev/null
 post_run "$CLI eval 1" "$SID" "$PROJ" >/dev/null
 post_run "$CLI goto http://localhost:4200/" "$SID" "$PROJ" >/dev/null
 COUNT_AFTER="$(memory_count)"
-[ "$COUNT_BEFORE" = "8" ] && [ "$COUNT_AFTER" = "$COUNT_BEFORE" ] \
+[ "$COUNT_BEFORE" = "7" ] && [ "$COUNT_AFTER" = "$COUNT_BEFORE" ] \
   && check "H14 interrupted and denied calls are never recorded" PASS \
   || check "H14 interrupted and denied calls are never recorded (before=$COUNT_BEFORE after=$COUNT_AFTER)" FAIL
 [ "$(pre_verdict "$CLI goto http://127.0.0.1:4360/" "$SID" "$PROJ")" = "ASK" ] \
@@ -723,6 +795,7 @@ NOMOD_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-nomod.XXXXXX")"
 remember_tmp "$NOMOD_ROOT"
 mkdir -p "$NOMOD_ROOT/hooks/lib"
 cp "$PRE_HOOK" "$NOMOD_ROOT/hooks/"
+cp "$PREFILTER_LIB" "$NOMOD_ROOT/hooks/lib/"
 NOMOD_DENY="$(CLAUDE_PLUGIN_ROOT="$NOMOD_ROOT" bash "$NOMOD_ROOT/hooks/pre-browser-navigation-consent.sh" < "$PROJ/mismatch-pre.json" 2>/dev/null)"
 case "$NOMOD_DENY" in
   *'"permissionDecision":"deny"'*'decision module absent or symlinked'*)
@@ -733,6 +806,7 @@ SYMMOD_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-symmod.XXXXXX")"
 remember_tmp "$SYMMOD_ROOT"
 mkdir -p "$SYMMOD_ROOT/hooks/lib"
 cp "$PRE_HOOK" "$SYMMOD_ROOT/hooks/"
+cp "$PREFILTER_LIB" "$SYMMOD_ROOT/hooks/lib/"
 ln -s "$MODULE" "$SYMMOD_ROOT/hooks/lib/verify-consent-v1.js"
 SYMMOD_DENY="$(CLAUDE_PLUGIN_ROOT="$SYMMOD_ROOT" bash "$SYMMOD_ROOT/hooks/pre-browser-navigation-consent.sh" < "$PROJ/mismatch-pre.json" 2>/dev/null)"
 case "$SYMMOD_DENY" in
@@ -744,6 +818,7 @@ BADMOD_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-badmod.XXXXXX")"
 remember_tmp "$BADMOD_ROOT"
 mkdir -p "$BADMOD_ROOT/hooks/lib"
 cp "$PRE_HOOK" "$BADMOD_ROOT/hooks/"
+cp "$PREFILTER_LIB" "$BADMOD_ROOT/hooks/lib/"
 printf 'throw new Error("module load fault");\n' > "$BADMOD_ROOT/hooks/lib/verify-consent-v1.js"
 BADMOD_DENY="$(CLAUDE_PLUGIN_ROOT="$BADMOD_ROOT" bash "$BADMOD_ROOT/hooks/pre-browser-navigation-consent.sh" < "$PROJ/mismatch-pre.json" 2>/dev/null)"
 case "$BADMOD_DENY" in
@@ -767,6 +842,7 @@ NOMODP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-consent-nomodp.XXXXXX")"
 remember_tmp "$NOMODP_ROOT"
 mkdir -p "$NOMODP_ROOT/hooks/lib"
 cp "$POST_HOOK" "$NOMODP_ROOT/hooks/"
+cp "$PREFILTER_LIB" "$NOMODP_ROOT/hooks/lib/"
 POST_SKIP_RC=0
 POST_SKIP_OUT="$(CLAUDE_PLUGIN_ROOT="$NOMODP_ROOT" bash "$NOMODP_ROOT/hooks/post-browser-navigation-consent.sh" < "$PROJ/mismatch-post.json" 2>&1 >/dev/null)" \
   || POST_SKIP_RC=$?
@@ -822,17 +898,25 @@ case "$RENDERED_POLICY" in
 esac
 CHECK_POLICY_OUT=""
 if [ -n "$RENDERED_POLICY" ]; then
-  CHECK_POLICY_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$RENDERED_POLICY" node "$CONFIG_HELPER" --check-policy local 'http://127.0.0.1:45173' '/' declared-safe 2>/dev/null)"
+  CHECK_POLICY_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$RENDERED_POLICY" config_helper --check-policy local 'http://127.0.0.1:45173' '/' declared-safe 2>/dev/null)"
 fi
 [ "$CHECK_POLICY_OUT" = "policy" ] \
   && check "V34b the policy rules/setup.md renders is accepted by the helper it tells the model to run" PASS \
   || check "V34b the policy rules/setup.md renders is accepted by the helper it tells the model to run (got: ${CHECK_POLICY_OUT:-<none>})" FAIL
-if [ -z "$RENDERED_POLICY" ] || ZENSU_VERIFY_NAVIGATION_POLICY_V1="$RENDERED_POLICY" node "$CONFIG_HELPER" --check-policy local 'http://127.0.0.1:45173' '/admin' declared-safe >/dev/null 2>&1; then
-  check "V34b-neg an undeclared route is refused against that same rendered policy" FAIL
-else
-  check "V34b-neg an undeclared route is refused against that same rendered policy" PASS
+NEG_RC=0
+NEG_ERR=""
+if [ -n "$RENDERED_POLICY" ]; then
+  NEG_ERR="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$RENDERED_POLICY" config_helper --check-policy local 'http://127.0.0.1:45173' '/admin' declared-safe 2>&1 >/dev/null)" || NEG_RC=$?
 fi
-CONSENT_CHECK_OUT="$(node "$CONFIG_HELPER" --check-policy local 'http://127.0.0.1:45173' '/' declared-safe 2>/dev/null)"
+NOT_POLICY_ROUTE_TEXT="$(node -e 'process.stdout.write(require(process.argv[1]).REASONS.NOT_POLICY_ROUTE)' "$MODULE" 2>/dev/null)"
+case "$NEG_RC:$NEG_ERR" in
+  1:*"$NOT_POLICY_ROUTE_TEXT"*)
+    [ -n "$NOT_POLICY_ROUTE_TEXT" ] \
+      && check "V34b-neg an undeclared route is refused against that same rendered policy, for the route" PASS \
+      || check "V34b-neg an undeclared route is refused against that same rendered policy (no reason text)" FAIL ;;
+  *) check "V34b-neg an undeclared route is refused against that same rendered policy, for the route (rc=$NEG_RC: ${NEG_ERR:-<none>})" FAIL ;;
+esac
+CONSENT_CHECK_OUT="$(config_helper --check-policy local 'http://127.0.0.1:45173' '/' declared-safe 2>/dev/null)"
 [ "$CONSENT_CHECK_OUT" = "consent" ] \
   && check "V34c without a policy the helper reports consent mode" PASS \
   || check "V34c without a policy the helper reports consent mode (got: ${CONSENT_CHECK_OUT:-<none>})" FAIL
@@ -881,6 +965,31 @@ if ! printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'ignores every other Bash call' \
   check "V47 docs/verify-feature.md states the mention-denial cost and its remedy" PASS
 else
   check "V47 docs/verify-feature.md states the mention-denial cost and its remedy" FAIL
+fi
+if printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'That promise holds for an interactive session: how the host resolves the prompt under bypass permissions, in auto mode or in a headless run is unverified, so such a run belongs in policy mode.' \
+  && printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'it is required for remote targets and for unattended runs — bypass permissions, auto mode, a headless run —' \
+  && printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'Nor is it verified without a person at the prompt: how the host resolves a hook `ask` under bypass permissions, in auto mode or in a headless run was never observed, so run an unattended or bypass session in policy mode, which asks nothing.'; then
+  check "V48 docs/verify-feature.md limits the prompt promise to interactive sessions and sends unattended runs to policy mode" PASS
+else
+  check "V48 docs/verify-feature.md limits the prompt promise to interactive sessions and sends unattended runs to policy mode" FAIL
+fi
+DRIFT_MISSING=""
+for needle in 'The driver is user-supplied: the plugin ships no pin and no integrity check for `playwright-cli`.' \
+  'a version the package declares, not a verified binary' \
+  '`network.allowedOrigins`, `browser.isolated`, the `--host-resolver-rules` pins, `browser.contextOptions.serviceWorkers`' \
+  'so a new environment or config channel of a later CLI is unjudged.'; do
+  printf '%s' "$GATES_FLAT" | grep -qF -- "$needle" || DRIFT_MISSING="$DRIFT_MISSING [$needle]"
+done
+if [ -z "$DRIFT_MISSING" ]; then
+  check "V49 docs/gates.md names the version-drift gap: user-supplied driver, manifest-only guard, run-config fences and channels" PASS
+else
+  check "V49 docs/gates.md names the version-drift gap: user-supplied driver, manifest-only guard, run-config fences and channels (missing:$DRIFT_MISSING)" FAIL
+fi
+if printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'a shape denial — one that objects only to how the call is spelled — is re-issued once as one plain call with single-quoted literal arguments, and any other denial leaves the affected scenario PARTIAL' \
+  && ! printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'the skill reports the affected scenario PARTIAL rather than working around it'; then
+  check "V50 docs/verify-feature.md separates a shape denial's one re-issue from a final denial" PASS
+else
+  check "V50 docs/verify-feature.md separates a shape denial's one re-issue from a final denial" FAIL
 fi
 
 echo "----"

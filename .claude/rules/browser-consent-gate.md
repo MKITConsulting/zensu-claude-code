@@ -282,8 +282,12 @@ lets `/zensu:adopt-session` carry an in-flight session across this release.
 **Permission rules do not migrate.** Every rule written for the old browser tools —
 `mcp__plugin_zensu_playwright__…` in 0.21.1 and earlier, `mcp__plugin_zensu_zensu-browser__…` on
 unreleased builds after it — matches nothing now; a `deny` or `ask` there silently stops restricting
-the browser. The replacement names the Bash command, e.g. `Bash(playwright-cli:*)`. State it in the
-release notes.
+the browser. The replacement names the Bash command, e.g. `Bash(playwright-cli:*)`. The
+`### Upgrade notes` block under `## [Unreleased]` in `CHANGELOG.md` carries this break and the
+`playwright-cli` prerequisite into the release: the workflow prints the generated section directly
+under that heading, ahead of the block, so the block closes the new release section and its notes.
+`P9b` in `tests/structure/test-verify-feature-skill.sh` runs the workflow's own two awk programs over
+the real file to hold that.
 
 **Known gaps, accepted and named:**
 
@@ -303,9 +307,18 @@ release notes.
   at run time — from a file, a variable set by an earlier Bash call, a program's output, or an
   ANSI-C `$'…'` escape — never reaches the markers, so the call it produces is not gated. The single-invocation rule narrows
   this to what one plain call can spell; it does not close it.
-- **The parser port is exact for one CLI version.** An unknown shape denies, but a CHANGED meaning
-  of an existing flag in a later CLI is not detected; the doctor's version row is the only signal,
-  and it is a WARN row, not a refusal.
+- **Version drift is only partly fenced.** The driver is user-supplied: the plugin ships no pin and
+  no integrity check for `playwright-cli`. The one refusal is `checkReadiness` in the run-config
+  helper, which writes no run config unless the resolved `@playwright/cli` manifest names exactly
+  `PLAYWRIGHT_CLI_SOURCE_VERSION` — a version the package declares, not a verified binary; the
+  doctor's version row stays a WARN. The parser port is exact for that version and an unknown shape
+  denies, but a later CLI that changes the meaning of an existing flag, or renames or ignores a
+  run-config fence — `network.allowedOrigins`, `browser.isolated`, the `--host-resolver-rules`
+  pins, `browser.contextOptions.serviceWorkers` — drops a browser-side fence while every gate check
+  passes. The configuration channels are judged only as far as the gate knows them:
+  `ambientOverride` reads the `PLAYWRIGHT_MCP_*` launch variables, `AMBIENT_TEXT_RE` the
+  `PLAYWRIGHT_MCP_` and `PWTEST_` prefixes, and `globalConfigFile` the global CLI config, so a new
+  channel of a later CLI is unjudged.
 - **Windows is UNVERIFIED end to end.** `CLI_BASENAMES` recognizes the `.cmd`/`.exe`/`.ps1`
   spellings, but no Windows run has driven a real `playwright-cli` through the gate.
 - **No ports.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were not included; each must

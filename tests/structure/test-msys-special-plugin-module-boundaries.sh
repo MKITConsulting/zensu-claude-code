@@ -256,20 +256,27 @@ else
 fi
 
 PW_SOURCE_VERSION="$(cd -P -- "$PLUGIN" && node -e 'process.stdout.write(String(require("./hooks/lib/verify-consent-v1.js").PLAYWRIGHT_CLI_SOURCE_VERSION || ""))' 2>/dev/null)"
+PW_BIN="$RAW_TMP/playwright-cli-bin"
+mkdir -p "$PW_BIN/node_modules/@playwright/cli"
+printf '#!/bin/sh\nexit 0\n' > "$PW_BIN/playwright-cli"
+chmod 755 "$PW_BIN/playwright-cli"
+printf '{"name":"@playwright/cli","version":"%s"}\n' "$PW_SOURCE_VERSION" > "$PW_BIN/node_modules/@playwright/cli/package.json"
 DOCTOR_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 -u ZDOC_VERIFY \
+  -u ZDOC_PLAYWRIGHT -u ZDOC_PLAYWRIGHT_VERSION -u ZDOC_PLAYWRIGHT_SOURCE -u ZDOC_PLAYWRIGHT_OWNER \
+  PATH="$PW_BIN:$PATH" \
   CLAUDE_PLUGIN_ROOT="$PLUGIN" HOME="$HOME_DIR" ZENSU_CONFIG="$CONFIG" \
   CLAUDE_PROJECT_DIR="$PROJECT" ZENSU_DOCTOR_PLUGIN_DIR="$PLUGIN" \
   ZDOC_ZENSU=absent ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=github \
-  ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_SOURCE_VERSION" \
+  ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing \
   bash "$PLUGIN/hooks/lib/zensu-doctor.sh" 2>"$RAW_TMP/doctor.err")"
 DOCTOR_RC=$?
 if [ "$DOCTOR_RC" -eq 0 ] && [ -n "$PW_SOURCE_VERSION" ] \
     && printf '%s' "$DOCTOR_OUT" | grep -qF 'Zensu doctor' \
     && printf '%s' "$DOCTOR_OUT" | grep -qF "playwright-cli: installed ($PW_SOURCE_VERSION) — /zensu:verify-feature and the autopilot browser driver run through it" \
     && printf '%s' "$DOCTOR_OUT" | grep -qF 'verify-feature: consent mode ready, no runtime recipe'; then
-  check "doctor loads its report, manifests, and the consent module from the special plugin root" PASS
+  check "doctor loads its report, manifests, the consent module and the playwright-cli version probe from the special plugin root" PASS
 else
-  check "doctor loads its report, manifests, and the consent module from the special plugin root" FAIL
+  check "doctor loads its report, manifests, the consent module and the playwright-cli version probe from the special plugin root" FAIL
 fi
 POLICY_DOCTOR_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 -u ZDOC_VERIFY \
   ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:5173","evidenceMode":"declared-safe","routes":["/"]}]}' \

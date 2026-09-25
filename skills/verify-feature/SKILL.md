@@ -318,7 +318,10 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --run-dir "$RUN_DI
 Pass one `--origin` per origin the matrix needs — the application origin and, only when it
 differs, the validated authentication origin — and nothing else. The helper prints
 `session=zensu-verify-<id>`, `config=<absolute path>`, `mode=consent|policy`, and one `origin=`
-line per origin, or exits `1` with a named reason and writes nothing. Copy the printed session
+line per origin, or exits `1` with a named reason and writes nothing. It refuses unless
+`hooks/hooks.json` demonstrably registers both consent hooks on a matcher that covers Bash and
+the installed `playwright-cli` manifest names the measured version; then report PARTIAL with its
+reason, and never open a browser without the run config it writes. Copy the printed session
 name and config path LITERALLY into every later call. Never rebuild them, never hold them in a
 shell variable, and never set `PLAYWRIGHT_CLI_SESSION`: the gate denies a session or argument it
 cannot read as a literal. Then open the browser, headed when the matrix needs visible manual
@@ -335,7 +338,11 @@ command substitution, no wrapper such as `timeout` or `nohup`, no package launch
 The gate denies every other shape. Name the same session on every call:
 `playwright-cli -s=<session> <command> ...`, and quote an argument that carries `?`, `*`, `[`
 or `{`, or that starts with `~` or `=`, because the gate reads an unquoted one as a shell
-pattern it cannot judge.
+pattern it cannot judge. Single-quote an argument that carries `$`: double quotes do not help,
+because the gate reads every `$` outside single quotes that whitespace or the end of the command
+does not follow as an expansion it cannot judge, so a `fill` or `type` value such as `"$12"` is
+denied and `'$12'` is not. A denial that objects only to how a call is spelled is answered once,
+as `rules/browser-verification.md` section 0 describes; every other denial is final.
 
 ### Authentication (both modes)
 
@@ -448,8 +455,10 @@ Use the same bare form with `FAIL` or `PARTIAL` as appropriate.
 
 Verification drives the browser through `playwright-cli`, the `@playwright/cli` package, which
 must be on `PATH`: check with `command -v playwright-cli`. When it is missing, stop with PARTIAL
-and name the two install routes — `brew install playwright-cli` or
-`npm install -g @playwright/cli` — for the user to run; never install it on their behalf.
+and name the pinned install route for the user to run — `npm install -g @playwright/cli@0.1.21`,
+the version the browser consent gate was measured against; `brew install playwright-cli` is
+unpinned and may install a version the run-config helper refuses. Never install it on their
+behalf.
 `/zensu:doctor` reports whether it is installed and which version. The browser consent gate
 parses its arguments as measured against version 0.1.21 and denies an argument shape it does
 not recognize rather than admitting it — including a `zensu-verify` session name it does not

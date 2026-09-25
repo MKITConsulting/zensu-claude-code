@@ -13,12 +13,13 @@
 # directly) can inject a fixed toolchain verdict; real
 # probing only fills the gaps left unset. That claim scopes to the EXPORTED inputs
 # the renderer reads, not to derived locals such as ZDOC_ROOT or ZDOC_SESSION_PAIR.
-# Two PAIRS of the exported ones are exceptions, on purpose.
+# Two GROUPS of the exported ones are exceptions, on purpose.
 # ZDOC_SESSION_KEY and ZDOC_SESSION_PROJECT_ROOT are cleared
 # unconditionally rather than seeded, because their meaning depends on a verdict
 # reached further down and an inherited value would survive the branches that
-# never reach the bind. See the comment at their assignment. ZDOC_PLAYWRIGHT_VERSION
-# and ZDOC_VERIFY_REASON are re-derived unless ZDOC_PLAYWRIGHT / ZDOC_VERIFY is injected.
+# never reach the bind. See the comment at their assignment. ZDOC_PLAYWRIGHT_VERSION,
+# ZDOC_PLAYWRIGHT_SOURCE, ZDOC_PLAYWRIGHT_OWNER and ZDOC_VERIFY_REASON are re-derived
+# unless ZDOC_PLAYWRIGHT / ZDOC_VERIFY is injected.
 set -u
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -156,40 +157,26 @@ export ZDOC_FORGE_PROVIDER="${ZDOC_FORGE_PROVIDER:-}" \
 
 if [ -z "${ZDOC_PLAYWRIGHT:-}" ]; then
   ZDOC_PLAYWRIGHT_VERSION=""
+  ZDOC_PLAYWRIGHT_SOURCE=""
+  ZDOC_PLAYWRIGHT_OWNER=""
   if command -v playwright-cli >/dev/null 2>&1; then
     ZDOC_PLAYWRIGHT=present
-    ZDOC_PLAYWRIGHT_VERSION="$(ZDOC_PLAYWRIGHT_BIN="$(command -v playwright-cli)" node -e '
-      const fs = require("fs");
-      const path = require("path");
-      let dir = path.dirname(fs.realpathSync(process.env.ZDOC_PLAYWRIGHT_BIN));
-      for (let hop = 0; hop < 4; hop += 1) {
-        const file = path.join(dir, "package.json");
-        let stat = null;
-        try { stat = fs.statSync(file); } catch (_) { stat = null; }
-        if (stat && stat.isFile()) {
-          if (stat.size > 65536) process.exit(1);
-          const doc = JSON.parse(fs.readFileSync(file, "utf8"));
-          const ok = doc && doc.name === "@playwright/cli" && typeof doc.version === "string"
-            && /^[0-9]+(\.[0-9]+){1,3}$/.test(doc.version);
-          if (!ok) process.exit(1);
-          process.stdout.write(doc.version);
-          process.exit(0);
-        }
-        const parent = path.dirname(dir);
-        if (parent === dir) break;
-        dir = parent;
-      }
-      process.exit(1);
-    ' 2>/dev/null)" || ZDOC_PLAYWRIGHT_VERSION=""
-    if [ -z "$ZDOC_PLAYWRIGHT_VERSION" ] && source "$DIR/zensu-bounded-run.sh" 2>/dev/null; then
-      ZDOC_PLAYWRIGHT_VERSION="$(zensu_run_bounded env NO_UPDATE_NOTIFIER=1 playwright-cli --version </dev/null 2>/dev/null \
-        | head -n 1 | sed -n 's/^[^0-9]*\([0-9][0-9]*\(\.[0-9][0-9]*\)\{1,\}\).*/\1/p')"
+    ZDOC_PLAYWRIGHT_LIB="$(bash "$DIR/zensu-host-path.sh" "$DIR" 2>/dev/null)" || ZDOC_PLAYWRIGHT_LIB=""
+    ZDOC_PLAYWRIGHT_PROBE=""
+    if [ -n "$ZDOC_PLAYWRIGHT_LIB" ]; then
+      ZDOC_PLAYWRIGHT_PROBE="$(ZDOC_PLAYWRIGHT_MODULE="$ZDOC_PLAYWRIGHT_LIB/playwright-cli-version-v1.js" node -e 'process.exitCode = require(process.env.ZDOC_PLAYWRIGHT_MODULE).cliMain(["--lookup", "--execute"], process.stdout) ? 0 : 2' </dev/null 2>/dev/null)" \
+        || ZDOC_PLAYWRIGHT_PROBE=""
     fi
+    ZDOC_PLAYWRIGHT_SOURCE="$(printf '%s\n' "$ZDOC_PLAYWRIGHT_PROBE" | sed -n 's/^source=//p')"
+    ZDOC_PLAYWRIGHT_VERSION="$(printf '%s\n' "$ZDOC_PLAYWRIGHT_PROBE" | sed -n 's/^version=//p')"
+    ZDOC_PLAYWRIGHT_OWNER="$(printf '%s\n' "$ZDOC_PLAYWRIGHT_PROBE" | sed -n 's/^owner=//p')"
   else
     ZDOC_PLAYWRIGHT=absent
   fi
 fi
 ZDOC_PLAYWRIGHT_VERSION="${ZDOC_PLAYWRIGHT_VERSION:-}"
+ZDOC_PLAYWRIGHT_SOURCE="${ZDOC_PLAYWRIGHT_SOURCE:-}"
+ZDOC_PLAYWRIGHT_OWNER="${ZDOC_PLAYWRIGHT_OWNER:-}"
 
 # The PreToolUse denial that every stateful helper renders when Session Control
 # cannot bind points the user here, so reproduce that exact binding attempt.
@@ -543,16 +530,20 @@ if [ -z "${ZDOC_VERIFY:-}" ]; then
   ZDOC_VERIFY_RECIPE_ROOT="${ZDOC_SESSION_PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:-}}"
   if [ ! -f "$ZDOC_ROOT/hooks/pre-browser-navigation-consent.sh" ] \
     || [ ! -f "$ZDOC_ROOT/hooks/post-browser-navigation-consent.sh" ] \
+    || [ ! -f "$ZDOC_ROOT/hooks/lib/zensu-browser-consent-prefilter.sh" ] \
     || [ ! -f "$ZDOC_ROOT/hooks/lib/verify-consent-v1.js" ] \
     || [ ! -f "$ZDOC_ROOT/scripts/verify-browser-config.js" ]; then
     ZDOC_VERIFY=unavailable
-    ZDOC_VERIFY_REASON="consent hook pair, its module or the run-config helper missing from the plugin"
+    ZDOC_VERIFY_REASON="consent hook pair, its prefilter library, its module or the run-config helper missing from the plugin"
   elif [ -L "$ZDOC_ROOT/hooks/lib/verify-consent-v1.js" ]; then
     ZDOC_VERIFY=unavailable
     ZDOC_VERIFY_REASON="the consent decision module is a symlink, which both consent hooks refuse"
   elif ! (cd -P -- "$ZDOC_ROOT" && node -e 'require("./hooks/lib/verify-consent-v1.js")' >/dev/null 2>&1); then
     ZDOC_VERIFY=unavailable
     ZDOC_VERIFY_REASON="the consent decision module could not be loaded"
+  elif ! (cd -P -- "$ZDOC_ROOT" && node -e 'require("./scripts/verify-browser-config.js")' >/dev/null 2>&1); then
+    ZDOC_VERIFY=unavailable
+    ZDOC_VERIFY_REASON="the run-config helper could not be loaded"
   elif ! ZDOC_VERIFY_REGISTRATION_FAULT="$(cd -P -- "$ZDOC_ROOT" && node -e '
       const mod = require("./hooks/lib/verify-consent-v1.js");
       const { REGISTERED, UNKNOWN } = mod.REGISTRATION;
@@ -599,7 +590,8 @@ fi
 export ZDOC_ZENSU ZDOC_NODE ZDOC_PLAYWRIGHT ZDOC_BINDING ZDOC_BINDING_PROJECT_ROOT \
   ZDOC_BINDING_RECORDED_VERSION ZDOC_BINDING_EXECUTING_VERSION \
   ZDOC_BINDING_ROOT_UNKNOWN \
-  ZDOC_SESSION_KEY ZDOC_SESSION_PROJECT_ROOT ZDOC_VERIFY ZDOC_VERIFY_REASON ZDOC_PLAYWRIGHT_VERSION
+  ZDOC_SESSION_KEY ZDOC_SESSION_PROJECT_ROOT ZDOC_VERIFY ZDOC_VERIFY_REASON ZDOC_PLAYWRIGHT_VERSION \
+  ZDOC_PLAYWRIGHT_SOURCE ZDOC_PLAYWRIGHT_OWNER
 
 if ! command -v node >/dev/null 2>&1; then
   printf 'Zensu doctor — read-only setup diagnostics\n\n  %s  node: not found on PATH — cannot run the JSON/config/state checks\n' '⚠️'

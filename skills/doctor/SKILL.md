@@ -61,13 +61,15 @@ exception is removal of an expired `pending-review.json` you explicitly confirm.
 ## Prerequisites
 
 None. No MCP connection, no API key, no network. The tool probes are local
-(`command -v`, `--version`, auth-status exit codes). The `playwright-cli` version is read from
-the `package.json` of the `@playwright/cli` package the binary on `PATH` belongs to, without
-running it; only when that read yields no version — no such file within four parent
-directories, a file over 64 KiB, one that does not parse, names another package or carries an
-unrecognized version — does the doctor run `playwright-cli --version`, with the update check
-disabled, stdin closed and a five-second watchdog where `timeout` or `gtimeout` exists, and
-never opening a browser. The remaining manifest/config/state reads are
+(`command -v`, `--version`, auth-status exit codes). The `playwright-cli` version is read by
+`hooks/lib/playwright-cli-version-v1.js` from the `package.json` of the `@playwright/cli`
+package the binary on `PATH` resolves to — the nearest manifest within four directories of the
+resolved binary, else one beside an npm shim — without running it. A manifest that names
+another package, exceeds 64 KiB, does not parse or carries no valid name and version is
+reported as such, and the binary is NOT run. Only when no manifest exists at all does the
+doctor run `playwright-cli --version` once, with the update check disabled, stdin closed and a
+five-second bound enforced on every host, never opening a browser; the version it prints is
+reported as self-reported, never as measured. The remaining manifest/config/state reads are
 local files.
 
 ## Phase 1: Run the diagnostics
@@ -343,25 +345,51 @@ classifier will refuse a spawn, not only when the whole table is green.
   detected — add one, or export `ZENSU_VCS_PROVIDER=github|gitlab` for a
   self-hosted host).
 - **⚠️ zensu not authenticated** → `zensu auth login`.
-- **✅ playwright-cli: installed (…)** → the installed version is the one the browser consent
-  gate was measured against, and `/zensu:verify-feature` drives the browser through it. Nothing
-  to do.
+- **✅ playwright-cli: installed (…)** → the version read from the `@playwright/cli` package
+  manifest beside the binary is the one the browser consent gate was measured against, and
+  `/zensu:verify-feature` drives the browser through it. Nothing to do.
 - **⚠️ playwright-cli: installed (…), not the version the browser consent gate was measured
   against** → the gate's argument parser, its ambient-variable names, the global-config keys and
   the run-config schema were measured against another release, so a changed flag meaning in
-  this one would go unseen. Verification still runs, and the gate denies an argument shape it
-  does not recognize rather than admitting it, a `zensu-verify` name it does not resolve as the
-  call's session included. Relay the row; installing the measured version
-  or updating the plugin is the user's decision.
+  this one would go unseen. The run-config helper therefore refuses to write a run config, and
+  `/zensu:verify-feature` cannot start until the measured version is installed. Relay the row
+  and the pinned install command it names; installing it or updating the plugin is the user's
+  decision.
 - **⚠️ playwright-cli: installed (…), but the version the browser consent gate was measured
   against could not be read** → the gate module is missing or unreadable in this installation,
   so nothing about the installed version was checked. Relay the row and suggest reinstalling
   the plugin.
-- **⚠️ playwright-cli: installed, but its version could not be read** → run
-  `playwright-cli --version` yourself and relay what it prints; verification still runs.
-- **⚠️ playwright-cli: not found on PATH** → the user installs it with
-  `brew install playwright-cli` or `npm install -g @playwright/cli`. Never install it on their
-  behalf.
+- **⚠️ playwright-cli: PATH reaches it through an empty or relative entry, which the shell reads
+  against the working directory of each call** → an empty entry (a leading or trailing `:`, or
+  `::`) or a relative one such as `node_modules/.bin` comes before, or holds, the
+  `playwright-cli` PATH resolves, so which binary a later call runs depends on the directory it
+  runs in. The doctor did not run the binary, and the run-config helper refuses to start
+  `/zensu:verify-feature` and names the entry. Relay the row; removing that entry from PATH, or
+  moving it behind the directory that holds `playwright-cli`, is the user's decision.
+- **⚠️ playwright-cli: installed, and reports … when run, but no @playwright/cli package manifest
+  was found beside it** → no manifest exists beside an npm shim or within four directories of the
+  resolved binary, so the doctor asked the binary itself. A version a binary prints about
+  itself is never taken as measured, even when it matches, and the run-config helper refuses to
+  start `/zensu:verify-feature` on it. A wrapper script outside the package looks exactly like
+  this, so the row also advises putting the directory npm installs `playwright-cli` into first
+  on PATH, ahead of any wrapper. Relay the row and the pinned install command it names.
+- **⚠️ playwright-cli: the binary on PATH belongs to the package …, not @playwright/cli** → the
+  nearest `package.json` names another package, so the doctor did not run the binary at all, and
+  the run-config helper refuses to start `/zensu:verify-feature` on it. Relay the row with the
+  package it names; installing `@playwright/cli` with the pinned command is the user's decision.
+- **⚠️ playwright-cli: the package manifest beside the binary on PATH could not be judged** →
+  the nearest `package.json` does not parse, exceeds 64 KiB, or carries no valid package name and
+  version, so the doctor did not run the binary, and the run-config helper refuses to start
+  `/zensu:verify-feature` on it. Relay the row and the pinned reinstall command it names.
+- **⚠️ playwright-cli: installed, but its version could not be read** → no manifest exists and
+  the binary printed no version within five seconds, or the probe could not run. The run-config
+  helper refuses to start `/zensu:verify-feature` until it reads the version from the package
+  manifest. Relay the row and the pinned reinstall command it names.
+- **⚠️ playwright-cli: not found on PATH** → the user installs the version the browser consent
+  gate was measured against with the pinned `npm install -g @playwright/cli@0.1.21` command the
+  row prints. `brew install playwright-cli` is unpinned: it installs whichever version Homebrew
+  ships, which the run-config helper refuses unless it is the measured one. Never install it on
+  their behalf.
 - **✅ verify-feature: environment policy active** → `ZENSU_VERIFY_NAVIGATION_POLICY_V1` was
   set when Claude Code started and passes the policy contract, so it governs every browser
   origin and the consent prompt never fires this session; the browser consent gate admits only
@@ -389,14 +417,19 @@ classifier will refuse a spawn, not only when the whole table is green.
 - **⚠️ verify-feature: consent mode ready, recipe not checked** → the report resolved no
   project root, so it looked for no recipe at all. This is a missing check rather than a
   missing recipe; run `/zensu:doctor` from a session whose project root resolves.
-- **❌ verify-feature: cannot start (…)** → the consent hook pair, its decision module or the
-  run-config helper `scripts/verify-browser-config.js` is missing, the decision module is a
-  symlink (both consent hooks refuse one) or cannot be loaded, `hooks/hooks.json` does not
-  register the GATE or the RECORDER on a matcher that covers Bash, a registration in
+- **❌ verify-feature: cannot start (…)** → the consent hook pair, its prefilter library
+  `hooks/lib/zensu-browser-consent-prefilter.sh`, its decision module or the run-config helper
+  `scripts/verify-browser-config.js` is missing, the decision module is a symlink (both consent
+  hooks refuse one) or cannot be loaded, the run-config helper cannot be loaded, `hooks/hooks.json`
+  does not register the GATE or the RECORDER on a matcher that covers Bash, a registration in
   `hooks/hooks.json` could not be determined, or the pair's registration probe did not complete.
   Without the gate nothing judges a
   `zensu-verify` session; without the recorder every navigation would prompt and nothing would
-  be remembered. Reinstall the plugin. The parenthesis names the cause, and it names each hook
+  be remembered. Reinstall the plugin. The label is literal: the run-config helper writes no run
+  config unless both hooks demonstrably answer registered, and a missing prefilter library or a
+  missing, symlinked or unloadable decision module makes the consent hook deny every gated call, so `/zensu:verify-feature` cannot drive
+  a browser; tell the user not to start `/zensu:verify-feature` until this row clears. The
+  parenthesis names the cause, and it names each hook
   with its own state — "consent hook" is the gate, "consent recorder" the recorder — joined by
   `; ` when both apply; relay each state for the hook it names. A registration that could not
   be determined, or a probe that did not complete, is NOT a missing hook — relay it as a check

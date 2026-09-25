@@ -72,8 +72,8 @@ validate:
 ### `validate.driver: browser` — needs a user-installed `playwright-cli`
 
 The browser driver runs through `playwright-cli`, which the plugin no longer starts for you: the
-user installs it once, with `brew install playwright-cli` or `npm install -g @playwright/cli`,
-and `/zensu:doctor` reports whether it is on `PATH` and which version. A recipe that sets
+user installs it once, with `npm install -g @playwright/cli@0.1.21` (the version the browser
+consent gate was measured against; `brew install playwright-cli` is unpinned), and `/zensu:doctor` reports whether it is on `PATH` and which version. A recipe that sets
 `driver: browser` still validates without it, but VALIDATE cannot drive the UI then. It degrades
 the driver as `drivers.md` §"Choosing + degrading" states — a backend-observable AC falls back
 to `api`, every other AC's live proof is skipped and named in the report, and its PR row carries

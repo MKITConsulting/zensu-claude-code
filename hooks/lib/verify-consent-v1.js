@@ -7,14 +7,16 @@ const net = require('node:net');
 const floor = require('./verify-navigation-floor-v1.js');
 const principals = require('./claude-principal-v1.js');
 const { msysDrivePrefix } = require('./claude-path-v1.js');
+const hookRegistration = require('./hook-registration-v1.js');
+const cliVersion = require('./playwright-cli-version-v1.js');
 
 const CONSENT_MATCHER = 'Bash';
 const CONSENT_HOOK_FILE = 'pre-browser-navigation-consent.sh';
 const CONSENT_RECORDER_FILE = 'post-browser-navigation-consent.sh';
-const REGISTRATION = Object.freeze({ REGISTERED: 'registered', UNREGISTERED: 'unregistered', UNKNOWN: 'unknown' });
+const { REGISTRATION } = hookRegistration;
 const PLAYWRIGHT_CLI_SOURCE_VERSION = '0.1.21';
-const CLI_BASENAMES = Object.freeze(['playwright-cli', 'playwright-cli.cmd', 'playwright-cli.exe', 'playwright-cli.ps1']);
-const CLI_PACKAGE = '@playwright/cli';
+const CLI_BASENAMES = cliVersion.BINARY_NAMES;
+const CLI_PACKAGE = cliVersion.PACKAGE_NAME;
 const SESSION_PREFIX = 'zensu-verify-';
 const SESSION_RE = /^zensu-verify-[a-z0-9][a-z0-9-]{0,39}$/;
 const SESSION_ENV = 'PLAYWRIGHT_CLI_SESSION';
@@ -134,6 +136,7 @@ const REASONS = Object.freeze({
   ENV_ASSIGNMENT: 'a zensu-verify session call must not carry environment assignments or wrappers that change its environment',
   WRAPPER: 'a zensu-verify session call must not run under a wrapper such as timeout, nohup, time, nice, exec, command or builtin',
   LAUNCHER: 'a zensu-verify session call must run the installed playwright-cli binary, not a package launcher that may fetch or select another version',
+  CLI_NOT_BARE: 'a zensu-verify session call must name the CLI by its bare name, playwright-cli, so PATH resolves the installed binary /zensu:doctor measured; a path, another letter case or the package name is refused',
   ENV_BUILTIN: 'a command carrying a zensu-verify session call must not change the shell environment',
   AMBIENT_TEXT: 'a command carrying a zensu-verify session call must not name PLAYWRIGHT_MCP_* or PWTEST_* variables',
   REDEFINED: 'a command carrying a zensu-verify session call must not define a playwright-cli function',
@@ -151,6 +154,17 @@ const REASONS = Object.freeze({
   MEMORY_UNREADABLE: 'consent-memory-unreadable',
   MEMORY_PATH_REFUSED: 'consent-memory-path-refused',
 });
+const SHAPE_REASONS = Object.freeze([
+  'NOT_PLAIN', 'ARGUMENT_UNEXPANDED', 'SESSION_UNRESOLVED', 'SESSION_UNEXPANDED', 'CLI_NOT_BARE', 'WRAPPER', 'LAUNCHER', 'ENV_ASSIGNMENT',
+]);
+const FINAL_REASONS = Object.freeze([
+  'PAYLOAD_UNREADABLE', 'COMMAND_TOO_LARGE', 'NOT_MAIN_THREAD', 'SESSION_MALFORMED', 'INDIRECT', 'UNJUDGED_BODY', 'ENV_BUILTIN',
+  'AMBIENT_TEXT', 'REDEFINED', 'COMMAND_DENIED', 'FLAG_DENIED', 'CONFIG_REQUIRED', 'OPEN_OUTSIDE_CONFIG', 'BROWSER_NOT_CHROMIUM',
+  'GLOBAL_BROWSER_NOT_CHROMIUM', 'POLICY_INVALID', 'NOT_POLICY_TARGET', 'NOT_POLICY_ROUTE', 'REMOTE_NEEDS_POLICY', 'NEW_ORIGIN',
+  'MEMORY_UNREADABLE', 'MEMORY_PATH_REFUSED',
+]);
+const SHAPE_MARKER = '(shape denial: re-issue this call once as one plain playwright-cli call with single-quoted literal arguments; a second denial is final)';
+const SHAPE_TEXTS = new Set(SHAPE_REASONS.map((key) => REASONS[key]));
 
 function strippedText(text) {
   return String(text).replace(/\\\r?\n/g, '').replace(/['"\\]/g, '');
@@ -347,10 +361,8 @@ function lexShell(text) {
       return cursor + 1;
     }
     if (next === '"') {
-      const end = skipDouble(source, position + 2);
-      if (end === -1) { fault = fault || 'unterminated-quote'; target.raw += source.slice(position); return source.length; }
-      target.raw += source.slice(position, end + 1);
-      return end + 1;
+      target.raw += '$';
+      return readDouble(position + 1, target);
     }
     const name = source.slice(position + 1).match(/^([A-Za-z_][A-Za-z0-9_]*|[@*#?$!0-9-])/);
     if (name) {
@@ -361,6 +373,43 @@ function lexShell(text) {
     target.value += '$';
     target.raw += '$';
     return position + 1;
+  };
+  const readDouble = (position, target) => {
+    target.quoted = true;
+    let cursor = position + 1;
+    while (cursor < source.length && source[cursor] !== '"') {
+      const inner = source[cursor];
+      if (inner === '\\' && cursor + 1 < source.length && '$`"\\\n'.includes(source[cursor + 1])) {
+        if (source[cursor + 1] !== '\n') target.value += source[cursor + 1];
+        cursor += 2;
+        continue;
+      }
+      if (inner === '$' && (source[cursor + 1] === '"' || source[cursor + 1] === "'")) {
+        if (source[cursor + 1] === "'") target.unexpanded = true;
+        target.value += '$';
+        cursor += 1;
+        continue;
+      }
+      if (inner === '$') {
+        const before = target.raw.length;
+        cursor = readDollar(cursor, target);
+        target.raw = target.raw.slice(0, before);
+        continue;
+      }
+      if (inner === '`') {
+        target.unexpanded = true;
+        const end = findBacktick(source, cursor + 1);
+        if (end === -1) { fault = fault || 'unterminated-substitution'; cursor = source.length; break; }
+        nested.push(source.slice(cursor + 1, end));
+        cursor = end + 1;
+        continue;
+      }
+      target.value += inner;
+      cursor += 1;
+    }
+    if (cursor >= source.length) fault = fault || 'unterminated-quote';
+    target.raw += source.slice(position, cursor + 1);
+    return cursor + 1;
   };
 
   while (index < source.length) {
@@ -395,36 +444,8 @@ function lexShell(text) {
     }
     if (char === '"') {
       startWord();
-      word.quoted = true;
       word.bare += '\u0001';
-      let cursor = index + 1;
-      while (cursor < source.length && source[cursor] !== '"') {
-        const inner = source[cursor];
-        if (inner === '\\' && cursor + 1 < source.length && '$`"\\\n'.includes(source[cursor + 1])) {
-          if (source[cursor + 1] !== '\n') word.value += source[cursor + 1];
-          cursor += 2;
-          continue;
-        }
-        if (inner === '$') {
-          const before = word.raw.length;
-          cursor = readDollar(cursor, word);
-          word.raw = word.raw.slice(0, before);
-          continue;
-        }
-        if (inner === '`') {
-          word.unexpanded = true;
-          const end = findBacktick(source, cursor + 1);
-          if (end === -1) { fault = fault || 'unterminated-substitution'; cursor = source.length; break; }
-          nested.push(source.slice(cursor + 1, end));
-          cursor = end + 1;
-          continue;
-        }
-        word.value += inner;
-        cursor += 1;
-      }
-      if (cursor >= source.length) fault = fault || 'unterminated-quote';
-      word.raw += source.slice(index, cursor + 1);
-      index = cursor + 1;
+      index = readDouble(index, word);
       continue;
     }
     if (char === '$') {
@@ -455,7 +476,7 @@ function lexShell(text) {
       index = end + 1;
       continue;
     }
-    if (char === ' ' || char === '\t' || char === '\r') { endWord(); index += 1; continue; }
+    if (char === ' ' || char === '\t') { endWord(); index += 1; continue; }
     if (char === '\n') {
       endSegment();
       index = pendingHeredocs.length > 0 ? consumeHeredocs(index + 1) : index + 1;
@@ -801,6 +822,7 @@ function scanSegments(lexed, context, depth, found, inherited) {
           assignments,
           wrappers,
           launcher: cliAt !== position.index,
+          bare: cliVersion.binaryNames(context.platform).includes(words[cliAt].value),
           segmentSession: segmentAssigned || null,
           depth,
         });
@@ -839,11 +861,11 @@ function plainShape(top, invocations) {
   return invocations.length === 1 && invocations[0].depth === 0;
 }
 
-function analyzeCommand(command, env) {
+function analyzeCommand(command, env, platform = process.platform) {
   const text = String(command);
   const marks = commandMarkers(text, env);
   const found = { invocations: [], indirect: false, unjudged: false, envBuiltin: false };
-  const context = { text, marks, commandSession: null, sessionAssignments: [], top: null };
+  const context = { text, marks, platform, commandSession: null, sessionAssignments: [], top: null };
   scanCommand(text, context, 0, found);
   const conflict = marks.session && context.sessionAssignments.length > 1;
   const calls = [];
@@ -858,7 +880,12 @@ function analyzeCommand(command, env) {
       calls.push({ invocation, gated: true, fault: REASONS.SESSION_MALFORMED });
       continue;
     }
-    const session = sessionOf(parsed.args, invocation.segmentSession || context.commandSession, env);
+    const assigned = invocation.segmentSession || context.commandSession;
+    if (marks.session && assigned && assigned.unexpanded) {
+      calls.push({ invocation, gated: true, fault: REASONS.SESSION_UNEXPANDED });
+      continue;
+    }
+    const session = sessionOf(parsed.args, assigned, env);
     const unexpandedSession = hasSentinel(session.value) || (session.source === 'assignment' && session.unexpanded);
     if (unexpandedSession) {
       calls.push({ invocation, gated: marks.session, fault: REASONS.SESSION_UNEXPANDED });
@@ -1275,6 +1302,7 @@ function judgeCall(call, context) {
   if (call.invocation.wrappers.some((name) => ['env', 'sudo', 'doas'].includes(name))) return { deny: REASONS.ENV_ASSIGNMENT };
   if (call.invocation.wrappers.length > 0) return { deny: REASONS.WRAPPER };
   if (call.invocation.launcher) return { deny: REASONS.LAUNCHER };
+  if (!call.invocation.bare) return { deny: REASONS.CLI_NOT_BARE };
   const flagKeys = Object.keys(args).filter((key) => key !== '_' && key !== 'session');
   if (flagKeys.some((key) => hasSentinel(key) || hasSentinel(args[key])) || args._.some(hasSentinel)) {
     return { deny: REASONS.ARGUMENT_UNEXPANDED };
@@ -1325,7 +1353,7 @@ function principalOf(payload) {
   catch (_error) { return ''; }
 }
 
-function evaluate({ command, payload, env, records, declaredRoutes, policy }) {
+function evaluate({ command, payload, env, records, declaredRoutes, policy, platform }) {
   if (typeof command !== 'string' || command === '') return { verdict: 'none' };
   const marks = commandMarkers(command, env);
   if (!marks.cli) return { verdict: 'none' };
@@ -1333,7 +1361,7 @@ function evaluate({ command, payload, env, records, declaredRoutes, policy }) {
     return marks.session ? { verdict: 'deny', reason: REASONS.COMMAND_TOO_LARGE } : { verdict: 'none' };
   }
   if (marks.session && REDEFINITION_RE.test(command)) return { verdict: 'deny', reason: REASONS.REDEFINED };
-  const analysis = analyzeCommand(command, env);
+  const analysis = analyzeCommand(command, env, platform);
   if (analysis.unjudged) return { verdict: 'deny', reason: REASONS.UNJUDGED_BODY };
   if (analysis.indirect) return { verdict: 'deny', reason: REASONS.INDIRECT };
   const gated = analysis.calls.filter((call) => call.gated);
@@ -1376,7 +1404,7 @@ function preEnvelope(decision) {
       permissionDecision: decision.verdict,
       permissionDecisionReason: decision.verdict === 'ask'
         ? decision.prompt
-        : `Zensu browser consent gate denied the playwright-cli call: ${decision.reason}`,
+        : `Zensu browser consent gate denied the playwright-cli call: ${decision.reason}${SHAPE_TEXTS.has(decision.reason) ? ` ${SHAPE_MARKER}` : ''}`,
     },
   };
 }
@@ -1450,25 +1478,6 @@ function runPost(payload, env, err) {
   return last;
 }
 
-function matcherCovers(matcher, tool) {
-  if (matcher === undefined || matcher === '' || matcher === '*') return REGISTRATION.REGISTERED;
-  if (typeof matcher !== 'string') return REGISTRATION.UNKNOWN;
-  const answers = new Set();
-  if (/^[A-Za-z0-9_|]+$/.test(matcher)) {
-    answers.add(matcher.split('|').includes(tool));
-  } else {
-    if (/^[A-Za-z0-9_|, -]+$/.test(matcher)) answers.add(matcher.split(/[|,]/).map((name) => name.trim()).includes(tool));
-    try {
-      answers.add(new RegExp(matcher).test(tool));
-      answers.add(new RegExp(`^(?:${matcher})$`).test(tool));
-    } catch (_error) {
-      return REGISTRATION.UNKNOWN;
-    }
-  }
-  if (answers.size !== 1) return REGISTRATION.UNKNOWN;
-  return answers.has(true) ? REGISTRATION.REGISTERED : REGISTRATION.UNREGISTERED;
-}
-
 function hookRegistered(pluginRoot, event, hookFile) {
   const hookPath = path.join(pluginRoot, 'hooks', hookFile);
   const hooksJson = path.join(pluginRoot, 'hooks', 'hooks.json');
@@ -1484,20 +1493,12 @@ function hookRegistered(pluginRoot, event, hookFile) {
   } catch (_error) {
     return REGISTRATION.UNKNOWN;
   }
-  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) return REGISTRATION.UNKNOWN;
-  if (manifest.hooks === undefined) return REGISTRATION.UNREGISTERED;
-  if (!manifest.hooks || typeof manifest.hooks !== 'object' || Array.isArray(manifest.hooks)) return REGISTRATION.UNKNOWN;
-  const groups = manifest.hooks[event] === undefined ? [] : manifest.hooks[event];
-  if (!Array.isArray(groups)) return REGISTRATION.UNKNOWN;
-  let undecided = false;
-  for (const group of groups) {
-    if (!group || !Array.isArray(group.hooks)) continue;
-    if (!group.hooks.some((hook) => hook && typeof hook.command === 'string' && hook.command.includes(`/hooks/${hookFile}`))) continue;
-    const covers = matcherCovers(group.matcher, CONSENT_MATCHER);
-    if (covers === REGISTRATION.REGISTERED) return REGISTRATION.REGISTERED;
-    if (covers === REGISTRATION.UNKNOWN) undecided = true;
-  }
-  return undecided ? REGISTRATION.UNKNOWN : REGISTRATION.UNREGISTERED;
+  return hookRegistration.registration(manifest, {
+    event,
+    tools: [CONSENT_MATCHER],
+    names: (command) => command.includes(`/hooks/${hookFile}`),
+    reading: hookRegistration.READINGS.HOST,
+  });
 }
 
 function consentHookRegistered(pluginRoot) {
@@ -1528,6 +1529,7 @@ module.exports = {
   CONSENT_MATCHER,
   CONSENT_RECORDER_FILE,
   DECIDED_BY,
+  FINAL_REASONS,
   GLOBAL_CONFIG_HARMLESS,
   MAX_MEMORY_BYTES,
   MAX_PROMPT_ROUTE,
@@ -1547,6 +1549,8 @@ module.exports = {
   RUN_CONFIG_NAME,
   RUN_OUTPUT_DIR_NAME,
   SESSION_ENV,
+  SHAPE_MARKER,
+  SHAPE_REASONS,
   SESSION_PREFIX,
   SESSION_RE,
   STATE_SEGMENTS,

@@ -354,7 +354,8 @@ before launch, and a restart per change — and the desktop app has no shell pre
 behind a capability broker. Claude Code started that server once per session, and each start
 materialized a private npm runtime of several hundred megabytes whether or not a browser was ever
 opened. The skill now drives `playwright-cli`, which the user installs once
-(`brew install playwright-cli` or `npm install -g @playwright/cli`), and the controls the broker
+(`npm install -g @playwright/cli@0.1.21`, the measured version; `brew install playwright-cli` is
+unpinned), and the controls the broker
 held moved into this gate and into the run config the browser is opened with.
 
 **Scope.** Only `zensu-verify-*` sessions are judged. A `playwright-cli` call on the default
@@ -504,6 +505,17 @@ through Bash.
   copy or link of the binary under another name — never puts both markers in the command text,
   so neither hook sees the call. The single-call rule narrows what can be written inline; it
   does not make the gate a boundary.
+- **Version drift is only partly fenced.** The driver is user-supplied: the plugin ships no pin
+  and no integrity check for `playwright-cli`. The one guard is the run-config helper, which
+  writes no run config unless the installed `@playwright/cli` manifest names exactly the measured
+  version — a version the package declares, not a verified binary. A later CLI can change the
+  meaning of an existing flag, or rename or ignore a fence the run config relies on —
+  `network.allowedOrigins`, `browser.isolated`, the `--host-resolver-rules` pins,
+  `browser.contextOptions.serviceWorkers` — and every gate check still passes while that
+  browser-side fence is gone. The configuration channels are judged only as far as the gate
+  knows them — the `PLAYWRIGHT_MCP_*` launch variables, `PLAYWRIGHT_MCP_` and `PWTEST_` text in
+  a command, and the global `cli.config.json` — so a new environment or config channel of a
+  later CLI is unjudged.
 - **How the host resolves a hook `ask` under bypass permissions, in auto mode or in a headless
   run is UNVERIFIED.** The live eval runs in policy mode precisely so it never depends on a
   prompt.

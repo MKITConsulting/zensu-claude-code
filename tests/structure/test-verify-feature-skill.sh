@@ -219,6 +219,57 @@ if grep -qF '`--json`, `--raw`, `--help` and `--version` are accepted on every c
 else
   check "P3h harmless flags, repeated flags, and plain main-thread calls are pinned in the browser rule" FAIL
 fi
+DOLLAR_RULE='Single-quote an argument that carries `$`: double quotes do not help'
+if grep -qF "$DOLLAR_RULE" <<<"$BROWSER_FLAT" && grep -qF "$DOLLAR_RULE" <<<"$SKILL_FLAT"; then
+  check "P3i the browser rule and the skill both state that an argument carrying \$ is single-quoted" PASS
+else
+  check "P3i the browser rule and the skill both state that an argument carrying \$ is single-quoted" FAIL
+fi
+SHAPE_VERDICT="$(node -e '
+  const fs = require("node:fs");
+  const mod = require(process.argv[2]);
+  const reasons = mod.REASONS || {};
+  const text = fs.readFileSync(process.argv[1], "utf8").replace(/\s+/g, " ");
+  const problems = [];
+  const finalSentence = "A command or flag that is not available, an origin outside the run config or the navigation policy, a refused or unanswerable consent prompt, and a call from a subagent are final.";
+  if (!text.includes(finalSentence)) problems.push("the final-denial sentence is missing");
+  const start = text.indexOf("A shape denial objects only to how the call is spelled");
+  const end = start === -1 ? -1 : text.indexOf("a second denial of that call is final", start);
+  if (start === -1 || end === -1) {
+    problems.push("the shape-denial passage is missing");
+  } else {
+    const passage = text.slice(start, end);
+    const named = Array.from(passage.matchAll(/`([A-Z][A-Z_]+)`/g), (match) => match[1]);
+    for (const key of named) {
+      if (!Object.prototype.hasOwnProperty.call(reasons, key)) problems.push(key + " is not a REASONS key");
+    }
+    const shapeKeys = Array.isArray(mod.SHAPE_REASONS) ? mod.SHAPE_REASONS : [];
+    const finalKeys = Array.isArray(mod.FINAL_REASONS) ? mod.FINAL_REASONS : [];
+    if (shapeKeys.length === 0 || finalKeys.length === 0) problems.push("the module exports no SHAPE_REASONS or FINAL_REASONS");
+    for (const key of Object.keys(reasons)) {
+      if (shapeKeys.includes(key) === finalKeys.includes(key)) problems.push(key + " is not in exactly one class");
+    }
+    for (const key of shapeKeys) {
+      if (!named.includes(key)) problems.push(key + " is not named as a shape denial");
+    }
+    for (const key of finalKeys) {
+      if (named.includes(key)) problems.push(key + " is final but named as a shape denial");
+    }
+    if (typeof mod.SHAPE_MARKER !== "string" || !passage.includes(mod.SHAPE_MARKER)) {
+      problems.push("the passage does not quote the note the gate appends to a shape denial");
+    }
+    if (!passage.includes("Answer a shape denial once: re-issue the same call as one plain call with single-quoted literal arguments.")) {
+      problems.push("the one-retry instruction is missing");
+    }
+  }
+  if (problems.length > 0) { process.stdout.write(problems.join("; ")); process.exit(1); }
+' "$BROWSER_MD" "$CONSENT_MODULE" 2>&1)"
+SHAPE_RC=$?
+if [ "$SHAPE_RC" = "0" ]; then
+  check "P3j a shape denial is answered once by a plain single-quoted re-issue, and every other denial stays final" PASS
+else
+  check "P3j a shape denial is answered once by a plain single-quoted re-issue, and every other denial stays final ($SHAPE_VERDICT)" FAIL
+fi
 if grep -qF 'DOM and data' "$BROWSER_MD" && grep -qF '### Visual' "$BROWSER_MD" && grep -qF '### Runtime signals' "$BROWSER_MD"; then
   check "P3b DOM/data, visual, and runtime evidence are all mandatory" PASS
 else
@@ -485,12 +536,12 @@ fi
 PREFLIGHT_FLAT="$(awk '/^## playwright-cli preflight/{p=1;next} /^## /{p=0} p' "$SKILL_MD" | tr '\n' ' ' | tr -s ' ')"
 if [ -n "${PW_MEASURED:-}" ] \
   && grep -qF 'check with `command -v playwright-cli`' <<<"$PREFLIGHT_FLAT" \
-  && grep -qF '`brew install playwright-cli` or `npm install -g @playwright/cli`' <<<"$PREFLIGHT_FLAT" \
-  && grep -qF 'never install it on their behalf' <<<"$PREFLIGHT_FLAT" \
+  && grep -qF "name the pinned install route for the user to run — \`npm install -g @playwright/cli@${PW_MEASURED}\`, the version the browser consent gate was measured against; \`brew install playwright-cli\` is unpinned" <<<"$PREFLIGHT_FLAT" \
+  && grep -qF 'Never install it on their behalf' <<<"$PREFLIGHT_FLAT" \
   && grep -qF "parses its arguments as measured against version ${PW_MEASURED} and denies an argument shape it does not recognize rather than admitting it — including a \`zensu-verify\` session name it does not resolve as the call's session." <<<"$PREFLIGHT_FLAT"; then
-  check "P6f the playwright-cli preflight checks PATH, names both install routes, and states the measured version ${PW_MEASURED:-}" PASS
+  check "P6f the playwright-cli preflight checks PATH, names the pinned install route, labels brew unpinned, and states the measured version ${PW_MEASURED:-}" PASS
 else
-  check "P6f the playwright-cli preflight checks PATH, names both install routes, and states the measured version ${PW_MEASURED:-}" FAIL
+  check "P6f the playwright-cli preflight checks PATH, names the pinned install route, labels brew unpinned, and states the measured version ${PW_MEASURED:-}" FAIL
 fi
 if grep -qF 'obtain explicit approval for the networked download' <<<"$PREFLIGHT_FLAT" \
   && grep -qF '`playwright-cli install-browser` WITHOUT a session flag' <<<"$PREFLIGHT_FLAT" \
@@ -608,7 +659,7 @@ else
   check "P7b help routes live verification and durable test authoring separately" FAIL
 fi
 if grep -qF 'command -v playwright-cli' "$DOCTOR_SH" \
-  && grep -qF 'NO_UPDATE_NOTIFIER=1 playwright-cli --version' "$DOCTOR_SH" \
+  && grep -qF 'playwright-cli-version-v1.js' "$DOCTOR_SH" \
   && ! grep -qF 'playwright_mcp_declared' "$DOCTOR_SH" \
   && grep -qF 'playwright-cli: installed (' "$DOCTOR_REPORT" \
   && grep -qF 'playwright-cli: not found on PATH' "$DOCTOR_REPORT" \
@@ -620,21 +671,36 @@ else
   check "P7c doctor probes playwright-cli and its version without an MCP readiness claim" FAIL
 fi
 if grep -qF 'The plugin ships no MCP server, so there is no Zensu API or hosted-MCP endpoint' "$README_MD" \
-  && grep -qF 'need `playwright-cli` on `PATH` (`brew install playwright-cli` or `npm install -g @playwright/cli`).' <<<"$README_FLAT"; then
+  && grep -qF "need \`playwright-cli\` on \`PATH\` (\`npm install -g @playwright/cli@${PW_MEASURED}\`, the version the browser consent gate was measured against; \`brew install playwright-cli\` is unpinned)." <<<"$README_FLAT"; then
   check "P7d README states the plugin ships no MCP server and requires playwright-cli for browser verification" PASS
 else
   check "P7d README states the plugin ships no MCP server and requires playwright-cli for browser verification" FAIL
 fi
 INSTALL_DRIFT=""
-for carrier in "$SKILL_MD" "$README_MD" "$DOCTOR_REPORT" "$DOCTOR_SKILL"; do
-  if ! grep -qF '`brew install playwright-cli`' "$carrier" || ! grep -qF '`npm install -g @playwright/cli`' "$carrier"; then
+for carrier in "$SKILL_MD" "$README_MD" "$DOCTOR_SKILL" "$AUTOPILOT_CONFIG" "$PLUGIN_DIR/docs/verify-feature.md" "$PLUGIN_DIR/docs/gates.md"; do
+  carrier_flat="$(tr '\n' ' ' < "$carrier" | tr -s ' ')"
+  if [ -z "${PW_MEASURED:-}" ] || ! grep -qF "\`npm install -g @playwright/cli@${PW_MEASURED}\`" <<<"$carrier_flat" \
+    || ! grep -qF '`brew install playwright-cli` is unpinned' <<<"$carrier_flat" \
+    || grep -qF '`npm install -g @playwright/cli`' <<<"$carrier_flat"; then
     INSTALL_DRIFT="$INSTALL_DRIFT ${carrier#"$PLUGIN_DIR"/}"
   fi
 done
+if ! grep -qF "'\`npm install -g @playwright/cli' + (measured ? '@' + measured : '') + '\`'" "$DOCTOR_REPORT" \
+  || ! grep -qF '`brew install playwright-cli` is unpinned' "$DOCTOR_REPORT"; then
+  INSTALL_DRIFT="$INSTALL_DRIFT hooks/lib/zensu-doctor-report.js"
+fi
 if [ -z "$INSTALL_DRIFT" ]; then
-  check "P7e skill, README, doctor renderer, and doctor skill name the same two playwright-cli install routes" PASS
+  check "P7e every playwright-cli install route names the pinned npm command and labels brew unpinned" PASS
 else
-  check "P7e skill, README, doctor renderer, and doctor skill name the same two playwright-cli install routes (missing in:$INSTALL_DRIFT)" FAIL
+  check "P7e every playwright-cli install route names the pinned npm command and labels brew unpinned (drift in:$INSTALL_DRIFT)" FAIL
+fi
+DOCTOR_FLAT="$(tr '\n' ' ' < "$DOCTOR_SKILL" | tr -s ' ')"
+if grep -qF 'It refuses unless `hooks/hooks.json` demonstrably registers both consent hooks on a matcher that covers Bash and the installed `playwright-cli` manifest names the measured version; then report PARTIAL with its reason, and never open a browser without the run config it writes.' <<<"$SKILL_FLAT" \
+  && grep -qF 'The label is literal: the run-config helper writes no run config unless both hooks demonstrably answer registered' <<<"$DOCTOR_FLAT" \
+  && grep -qF 'tell the user not to start `/zensu:verify-feature` until this row clears' <<<"$DOCTOR_FLAT"; then
+  check "P7f the skill and the doctor both say the run-config helper refuses to start while a consent hook is unregistered" PASS
+else
+  check "P7f the skill and the doctor both say the run-config helper refuses to start while a consent hook is unregistered" FAIL
 fi
 
 # P8 — portable/plugin-bundled text only.
@@ -663,6 +729,131 @@ if grep -qF 'node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --che
 else
   check "P8c skill uses native root rendering and concretizes adapter placeholders" FAIL
 fi
+
+CHANGELOG_MD="$PLUGIN_DIR/CHANGELOG.md"
+RELEASE_YML="$PLUGIN_DIR/.github/workflows/release.yml"
+P9_VERDICTS="$(node -e '
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  const { spawnSync } = require("node:child_process");
+  const [workflow, changelogFile, measured] = process.argv.slice(1);
+  const RULE = "mcp__plugin_zensu_playwright__";
+  const LAST_MCP_RELEASE = [0, 21, 1];
+  const DATED = /^## \[([0-9]+)\.([0-9]+)\.([0-9]+)\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$/;
+  const workflowLines = fs.readFileSync(workflow, "utf8").split("\n");
+  function program(stepName, openRe, closeRe) {
+    const step = workflowLines.findIndex((line) => line.includes("- name: " + stepName));
+    const open = step === -1 ? -1 : workflowLines.findIndex((line, index) => index > step && openRe.test(line));
+    const close = open === -1 ? -1 : workflowLines.findIndex((line, index) => index > open && closeRe.test(line));
+    if (close === -1) throw new Error("the awk program of step \"" + stepName + "\" was not found in release.yml");
+    return workflowLines.slice(open + 1, close).join("\n");
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "changelog-release-"));
+  function awk(args) {
+    const run = spawnSync("awk", args, { encoding: "utf8" });
+    if (run.status !== 0) throw new Error("awk failed: " + run.stderr);
+    return run.stdout;
+  }
+  function blocksOf(text) {
+    const lines = text.split("\n");
+    const found = [];
+    for (let i = 0; i < lines.length; i += 1) {
+      if (lines[i] !== "### Upgrade notes") continue;
+      let end = i + 1;
+      while (end < lines.length && !/^##{1,2} /.test(lines[end])) end += 1;
+      const block = lines.slice(i, end).join("\n");
+      if (!block.includes(RULE)) continue;
+      let heading = i - 1;
+      while (heading >= 0 && !/^## /.test(lines[heading])) heading -= 1;
+      found.push({ block, heading: heading === -1 ? "" : lines[heading], start: i, end });
+    }
+    return found;
+  }
+  function placement(text, measuredVersion) {
+    const found = blocksOf(text);
+    if (found.length !== 1) throw new Error(found.length + " upgrade-notes blocks name " + RULE);
+    const { block, heading } = found[0];
+    if (heading === "## [Unreleased]") {
+      const install = "npm install -g @playwright/cli@" + measuredVersion;
+      if (!block.includes(install)) throw new Error("the unreleased notes do not name " + install);
+      return "Unreleased";
+    }
+    const dated = DATED.exec(heading);
+    if (!dated) throw new Error("the notes sit under " + JSON.stringify(heading));
+    const version = dated.slice(1, 4).map(Number);
+    const order = version[0] - LAST_MCP_RELEASE[0] || version[1] - LAST_MCP_RELEASE[1] || version[2] - LAST_MCP_RELEASE[2];
+    if (order <= 0) throw new Error("the notes sit under " + version.join(".") + ", a release that still shipped the MCP server");
+    if (!/npm install -g @playwright\/cli@[0-9]+\.[0-9]+\.[0-9]+/.test(block)) throw new Error("the released notes name no pinned install");
+    return version.join(".");
+  }
+  function release(text, measuredVersion, version) {
+    const before = placement(text, measuredVersion);
+    const section = path.join(dir, "section.md");
+    const source = path.join(dir, "source.md");
+    fs.writeFileSync(section, "## [" + version + "] - 2099-01-01\n\n### Added\n\n- **release**: Synthetic generated entry\n");
+    fs.writeFileSync(source, text);
+    const released = awk([program("Prepend section into CHANGELOG.md", /^\s*awk \x27\s*$/, /^\s*\x27 "\$SECTION" CHANGELOG\.md > /), section, source]);
+    const headings = released.split("\n").filter((line) => /^## /.test(line));
+    const at = headings.indexOf("## [Unreleased]");
+    if (at === -1 || headings.lastIndexOf("## [Unreleased]") !== at) throw new Error("the released file does not carry exactly one Unreleased heading");
+    if (headings[at + 1] !== "## [" + version + "] - 2099-01-01") throw new Error("the generated section does not follow the Unreleased heading");
+    const after = placement(released, measuredVersion);
+    const expected = before === "Unreleased" ? version : before;
+    if (after !== expected) throw new Error("the release left the notes under " + after + ", not " + expected);
+    const releasedFile = path.join(dir, "released.md");
+    fs.writeFileSync(releasedFile, released);
+    const notes = awk(["-v", "ver=" + after, program("Extract release notes from CHANGELOG", /^\s*awk -v ver="\$VER" \x27\s*$/, /^\s*\x27 CHANGELOG\.md > /), releasedFile]);
+    if (!notes.includes(blocksOf(released)[0].block)) throw new Error("the release notes for " + after + " do not carry the upgrade notes");
+    return { released, version: after };
+  }
+  function moveUnder(text, heading) {
+    const lines = text.split("\n");
+    const [found] = blocksOf(text);
+    if (!found) throw new Error("no upgrade notes to move");
+    const block = lines.slice(found.start, found.end);
+    const rest = lines.slice(0, found.start).concat(lines.slice(found.end));
+    const target = rest.findIndex((line) => line.startsWith(heading));
+    if (target === -1) throw new Error("no " + heading + " section to move the notes into");
+    return rest.slice(0, target + 2).concat(block, rest.slice(target + 2)).join("\n");
+  }
+  const verdicts = [];
+  function scenario(name, run) {
+    try { verdicts.push(name + "\tok\t" + run()); }
+    catch (error) { verdicts.push(name + "\tfail\t" + String(error.message || error).replace(/\s+/g, " ")); }
+  }
+  const changelog = fs.readFileSync(changelogFile, "utf8");
+  const bumped = measured.replace(/[0-9]+$/, (patch) => String(Number(patch) + 1));
+  try {
+    scenario("placement", () => placement(changelog, measured));
+    scenario("release", () => release(changelog, measured, "99.0.0").version);
+    scenario("stale-section", () => placement(moveUnder(changelog, "## [0.21.1] - "), measured));
+    scenario("bumped", () => {
+      const shipped = release(changelog, measured, "99.0.0").released;
+      return release(shipped, bumped, "99.1.0").version + " with measured " + bumped;
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  process.stdout.write(verdicts.join("\n") + "\n");
+' "$RELEASE_YML" "$CHANGELOG_MD" "$PW_MEASURED" 2>&1)"
+p9_verdict() { printf '%s\n' "$P9_VERDICTS" | awk -F '\t' -v name="$1" '$1 == name { print $2 "\t" $3 }'; }
+case "$(p9_verdict placement)" in
+  ok$'\t'*) check "P9a the upgrade notes are one block, under Unreleased with the measured pin or under a release after 0.21.1 ($(p9_verdict placement | cut -f2))" PASS ;;
+  *) check "P9a the upgrade notes are one block, under Unreleased with the measured pin or under a release after 0.21.1 ($(p9_verdict placement | cut -f2))" FAIL ;;
+esac
+case "$(p9_verdict release)" in
+  ok$'\t'*) check "P9b release.yml's own insertion and notes awk carry the upgrade notes into the release section and its notes ($(p9_verdict release | cut -f2))" PASS ;;
+  *) check "P9b release.yml's own insertion and notes awk carry the upgrade notes into the release section and its notes ($(p9_verdict release | cut -f2))" FAIL ;;
+esac
+case "$(p9_verdict stale-section)" in
+  fail$'\t'*'a release that still shipped the MCP server'*) check "P9c notes moved under 0.21.1 are refused" PASS ;;
+  *) check "P9c notes moved under 0.21.1 are refused (got: $(p9_verdict stale-section))" FAIL ;;
+esac
+case "$(p9_verdict bumped)" in
+  ok$'\t'*) check "P9d the released notes survive the next release and a bump of the measured version ($(p9_verdict bumped | cut -f2))" PASS ;;
+  *) check "P9d the released notes survive the next release and a bump of the measured version ($(p9_verdict bumped | cut -f2))" FAIL ;;
+esac
 
 echo "----"
 echo "test-verify-feature-skill: $PASS PASS / $FAIL FAIL"

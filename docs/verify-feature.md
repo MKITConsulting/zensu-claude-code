@@ -6,20 +6,24 @@ it has two ways to authorize the browser:
 
 - **Consent mode** (the default when nothing is configured): the first time the run's browser
   reaches each loopback origin, Claude Code's own permission prompt asks you, in the CLI and in
-  the desktop app alike, with no environment variable and no restart. It covers local targets
-  only. Section 0 describes it.
+  the desktop app alike, with no environment variable and no restart. That promise holds for an
+  interactive session: how the host resolves the prompt under bypass permissions, in auto mode
+  or in a headless run is unverified, so such a run belongs in policy mode. It covers local
+  targets only. Section 0 describes it.
 - **Policy mode**: a **navigation policy** exported by the environment that launches Claude
   Code. It is the only channel a model cannot write, it is required for remote targets and
-  for unattended runs, and it was the only way to run the skill before consent mode existed.
-  Sections 1 to 4 describe it.
+  for unattended runs — bypass permissions, auto mode, a headless run — and it was the only
+  way to run the skill before consent mode existed. Sections 1 to 4 describe it.
 
 The browser is driven by `playwright-cli`, which you install once:
 
 ```bash
-brew install playwright-cli
+npm install -g @playwright/cli@0.1.21
 ```
 
-or `npm install -g @playwright/cli`. It uses your installed Chrome. When Chrome is missing,
+That is the version the browser consent gate was measured against, and the run-config helper
+refuses to start a run on any other. `brew install playwright-cli` is unpinned: it installs
+whichever version Homebrew ships. It uses your installed Chrome. When Chrome is missing,
 the skill asks before it runs `playwright-cli install-browser`, because that downloads a
 browser. `/zensu:doctor` reports whether `playwright-cli` is on `PATH` and which version, read
 from the installed package without running the binary — only when that read yields no version
@@ -93,7 +97,10 @@ Code, the gate runs in consent mode (`/zensu:doctor` reports this as
 
 What consent mode does not do: it does not survive hooks switched off host-side. With the hooks
 off, nothing in the plugin judges `playwright-cli` at all, and `/zensu:doctor` can report only
-that the hooks are registered, not that they run. The consent memory is a file the session can
+that the hooks are registered, not that they run. Nor is it verified without a person at the
+prompt: how the host resolves a hook `ask` under bypass permissions, in auto mode or in a
+headless run was never observed, so run an unattended or bypass session in policy mode, which
+asks nothing. The consent memory is a file the session can
 write, so it is a control, not a proof — the floor bounds what a forged record could reach to
 other loopback services. And the browser follows a server redirect to another origin even though
 it refuses every other request there, so the skill checks the page URL after every navigation and
@@ -355,8 +362,8 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
 | PARTIAL; reason names `loopback-IP origins only` | local origin spelled with `localhost` | use `127.0.0.1` in the policy, the recipe, and the `baseUrlCommand` output |
 | PARTIAL; the `baseUrlCommand` output differs from the policy origin | the app bound another port, or the printed URL carries a path | bind the port strictly; print the bare origin |
 | PARTIAL; the recipe was rejected | one of the acceptance rules above is not met | the report names the missing fact; fix the recipe |
-| PARTIAL; `playwright-cli` not found | it is not installed or not on `PATH` | `brew install playwright-cli` or `npm install -g @playwright/cli`, then run `/zensu:doctor` |
+| PARTIAL; `playwright-cli` not found | it is not installed or not on `PATH` | `npm install -g @playwright/cli@0.1.21` (`brew install playwright-cli` is unpinned), then run `/zensu:doctor` |
 | the browser does not start because Chrome is missing | the run config uses the system Chrome channel | approve `playwright-cli install-browser` when the skill asks, or install Chrome yourself |
-| a `playwright-cli` call is denied with `Zensu browser consent gate denied the playwright-cli call: …` | the call used a command, flag, session or shape the gate does not admit | the reason names the rule; the skill reports the affected scenario PARTIAL rather than working around it |
+| a `playwright-cli` call is denied with `Zensu browser consent gate denied the playwright-cli call: …` | the call used a command, flag, session or shape the gate does not admit | the reason names the rule; a shape denial — one that objects only to how the call is spelled — is re-issued once as one plain call with single-quoted literal arguments, and any other denial leaves the affected scenario PARTIAL rather than worked around |
 | PARTIAL; the scenario left the approved origins | the application redirected the browser to an origin outside the run config | fix the redirect, or add that origin to the run when it is part of the feature (in policy mode, to the policy too) |
 | after updating the plugin, a `permissions` rule for the browser no longer applies | the plugin no longer ships a Playwright MCP server, so rules for `mcp__plugin_zensu_playwright__…` or `mcp__plugin_zensu_zensu-browser__…` match nothing | delete an `allow` rule written for them, which grants nothing now; re-spell a `deny` or `ask` rule for the Bash command, for example `Bash(playwright-cli:*)`, because until then it restricts nothing; the Browser Consent Gate section of [gates.md](gates.md) explains the change |

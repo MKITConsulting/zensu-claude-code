@@ -121,21 +121,25 @@ if printf '%s' "$SKILLS_BLOCK" | grep -qF '/zensu:doctor'; then
 else
   check "P2h doctor kept out of the curated Skills table (count-sync unaffected)" PASS
 fi
+PW_VERSION_MODULE="$PLUGIN_DIR/hooks/lib/playwright-cli-version-v1.js"
 if grep -qF 'command -v playwright-cli' "$HELPER" \
-  && grep -qF 'NO_UPDATE_NOTIFIER=1 playwright-cli --version' "$HELPER" \
+  && grep -qF 'bash "$DIR/zensu-host-path.sh" "$DIR"' "$HELPER" \
+  && grep -qF 'cliMain(["--lookup", "--execute"], process.stdout)' "$HELPER" \
+  && ! grep -qF 'node "$DIR/playwright-cli-version-v1.js"' "$HELPER" \
+  && grep -qF "NO_UPDATE_NOTIFIER: '1'" "$PW_VERSION_MODULE" \
   && grep -qF 'ZDOC_PLAYWRIGHT=present' "$HELPER" \
   && grep -qF 'ZDOC_PLAYWRIGHT=absent' "$HELPER" \
   && ! grep -qF 'playwright_mcp_declared' "$HELPER" \
   && ! grep -qF 'command -v npm' "$HELPER"; then
-  check "P2i helper probes playwright-cli on PATH and reads its version with the update check disabled" PASS
+  check "P2i helper probes playwright-cli on PATH and reads its version through the shared version module, update check disabled" PASS
 else
-  check "P2i helper probes playwright-cli on PATH and reads its version with the update check disabled" FAIL
+  check "P2i helper probes playwright-cli on PATH and reads its version through the shared version module, update check disabled" FAIL
 fi
-if grep -qF 'zensu_run_bounded env NO_UPDATE_NOTIFIER=1 playwright-cli --version </dev/null' "$HELPER" \
-  && grep -qF 'zensu-bounded-run.sh' "$HELPER" && grep -qF '"package.json"' "$HELPER" && grep -qF '"@playwright/cli"' "$HELPER"; then
-  check "P2i1 helper reads the version from the @playwright/cli package.json and falls back to a bounded, stdin-closed --version" PASS
+if ! grep -qF 'playwright-cli --version' "$HELPER" && ! grep -qF 'zensu-bounded-run.sh' "$HELPER" \
+  && grep -qF "stdio: ['ignore', fd, 'ignore']" "$PW_VERSION_MODULE" && grep -qF 'timeout: timeoutMs' "$PW_VERSION_MODULE"; then
+  check "P2i1 the helper runs no playwright-cli itself; the module bounds the one --version call on every host, stdin closed" PASS
 else
-  check "P2i1 helper reads the version from the @playwright/cli package.json and falls back to a bounded, stdin-closed --version" FAIL
+  check "P2i1 the helper runs no playwright-cli itself; the module bounds the one --version call on every host, stdin closed" FAIL
 fi
 if grep -qF "'playwright-cli: installed ('" "$REPORT" \
   && grep -qF "'playwright-cli: installed, but its version could not be read" "$REPORT" \
@@ -214,7 +218,8 @@ case "$REAL_MANIFEST" in
 esac
 if grep -qF 'CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"' "$SKILL_MD" \
   && grep -qF 'CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"' "$SKILL_MD" \
-  && grep -qF 'The `playwright-cli` version is read from the `package.json` of the `@playwright/cli` package the binary on `PATH` belongs to, without running it; only when that read yields no version — no such file within four parent directories, a file over 64 KiB, one that does not parse, names another package or carries an unrecognized version — does the doctor run `playwright-cli --version`, with the update check disabled, stdin closed and a five-second watchdog where `timeout` or `gtimeout` exists, and never opening a browser.' <<<"$(tr '\n' ' ' < "$SKILL_MD" | tr -s ' ')" \
+  && grep -qF 'A manifest that names another package, exceeds 64 KiB, does not parse or carries no valid name and version is reported as such, and the binary is NOT run. Only when no manifest exists at all does the doctor run `playwright-cli --version` once, with the update check disabled, stdin closed and a five-second bound enforced on every host, never opening a browser; the version it prints is reported as self-reported, never as measured.' <<<"$(tr '\n' ' ' < "$SKILL_MD" | tr -s ' ')" \
+  && ! grep -qF 'where `timeout` or `gtimeout` exists' "$SKILL_MD" \
   && ! grep -qF 'only when that file cannot be found' "$SKILL_MD" \
   && ! grep -qF 'the `playwright-cli --version` probe runs' "$SKILL_MD" \
   && ! grep -qF 'ZDOC_PLAYWRIGHT_TOOLS' "$SKILL_MD" \
@@ -311,7 +316,7 @@ case "$OUT" in *'no quoted-boolean traps'*) check "P1d config ✅ with real bool
 # all-green summary only when the tool block is green too (inject authed tools)
 PW_MEASURED="$(node -e 'process.stdout.write(String(require(process.argv[1]).PLAYWRIGHT_CLI_SOURCE_VERSION || ""))' "$PLUGIN_DIR/hooks/lib/verify-consent-v1.js" 2>/dev/null)"
 case "$PW_MEASURED" in [0-9]*.[0-9]*.[0-9]*) check "P1e-control the consent module declares the playwright-cli version it was measured against ($PW_MEASURED)" PASS ;; *) check "P1e-control the consent module declares the playwright-cli version it was measured against (got: ${PW_MEASURED:-<none>})" FAIL ;; esac
-GREEN="$(ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_VERIFY=consent \
+GREEN="$(ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest ZDOC_VERIFY=consent \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
   node "$REPORT" 2>/dev/null)"
 case "$GREEN" in *'all checks green'*) check "P1e summary reports all green when every block is green" PASS ;; *) check "P1e summary all green (got: $GREEN)" FAIL ;; esac
@@ -320,7 +325,7 @@ case "$GREEN" in *'Playwright MCP'*|*'verify-feature gate:'*) check "P1ea1 the g
 
 # --- verify-feature consent/policy row (renderer + wrapper source) --------
 verify_row() { # $1 ZDOC_VERIFY value or "" ; $2 reason
-  ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" \
+  ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest \
   ZDOC_VERIFY="$1" ZDOC_VERIFY_REASON="$2" \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
     node "$REPORT" 2>/dev/null
@@ -336,7 +341,7 @@ VF_UNCHECKED="$(verify_row consent-recipe-unchecked "")"
 case "$VF_UNCHECKED" in *'⚠️  verify-feature: consent mode ready, recipe not checked'*'missing check rather than a missing recipe'*) check "P1vc2 an unresolved project root renders the recipe-not-checked warning" PASS ;; *) check "P1vc2 an unresolved project root renders the recipe-not-checked warning" FAIL ;; esac
 case "$VF_UNCHECKED" in *'all checks green'*) check "P1vc3 the recipe-not-checked warning withholds the green summary" FAIL ;; *) check "P1vc3 the recipe-not-checked warning withholds the green summary" PASS ;; esac
 for VF_UNAV_REASON in \
-  'consent hook pair, its module or the run-config helper missing from the plugin' \
+  'consent hook pair, its prefilter library, its module or the run-config helper missing from the plugin' \
   'consent hook not registered on the Bash matcher' \
   'consent recorder not registered on the Bash matcher' \
   'the consent decision module could not be loaded'
@@ -368,7 +373,7 @@ mkdir -p "$VF_LIVE_ROOT/.zensu"
 vf_live() { # $1 policy value (may be empty)
   env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
     ${1:+ZENSU_VERIFY_NAVIGATION_POLICY_V1="$1"} \
-    ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" \
+    ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest \
     ZENSU_DOCTOR_PLUGIN_DIR="$PLUGIN_DIR" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
     CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$HELPER" 2>/dev/null
 }
@@ -418,7 +423,7 @@ node -e '
 vf_copy_doctor() { # $1 policy value (may be empty)
   env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
     ${1:+ZENSU_VERIFY_NAVIGATION_POLICY_V1="$1"} \
-    ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" \
+    ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest \
     ZENSU_DOCTOR_PLUGIN_DIR="$VF_NOREC_ROOT" CLAUDE_PLUGIN_ROOT="$VF_NOREC_ROOT" \
     CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$VF_NOREC_ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null
 }
@@ -457,11 +462,11 @@ case "$(vf_copy_doctor)" in
 esac
 rm -f "$VF_NOREC_ROOT/scripts/verify-browser-config.js"
 case "$(vf_copy_doctor)" in
-  *'❌  verify-feature: cannot start (consent hook pair, its module or the run-config helper missing from the plugin)'*) check "P1vl3 a missing run-config helper is named, ahead of any registration fault" PASS ;;
+  *'❌  verify-feature: cannot start (consent hook pair, its prefilter library, its module or the run-config helper missing from the plugin)'*) check "P1vl3 a missing run-config helper is named, ahead of any registration fault" PASS ;;
   *) check "P1vl3 a missing run-config helper is named, ahead of any registration fault" FAIL ;;
 esac
 case "$(vf_copy_doctor '{"version":1}')" in
-  *'❌  verify-feature: cannot start (consent hook pair, its module or the run-config helper missing from the plugin)'*) check "P1vl4 an invalid policy does not hide a missing run-config helper" PASS ;;
+  *'❌  verify-feature: cannot start (consent hook pair, its prefilter library, its module or the run-config helper missing from the plugin)'*) check "P1vl4 an invalid policy does not hide a missing run-config helper" PASS ;;
   *) check "P1vl4 an invalid policy does not hide a missing run-config helper" FAIL ;;
 esac
 rm -rf "$VF_NOREC_ROOT"
@@ -474,7 +479,7 @@ else
   check "P1vl5-control the no-load fixture really breaks the decision module's require" PASS
 fi
 case "$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
-  ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" \
+  ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest \
   ZENSU_DOCTOR_PLUGIN_DIR="$VF_NOLOAD_ROOT" CLAUDE_PLUGIN_ROOT="$VF_NOLOAD_ROOT" \
   CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$VF_NOLOAD_ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null)" in
   *'❌  verify-feature: cannot start (the consent decision module could not be loaded)'*)
@@ -482,6 +487,49 @@ case "$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
   *) check "P1vl5 a decision module that will not load is named apart from a missing registration" FAIL ;;
 esac
 rm -rf "$VF_NOLOAD_ROOT"
+vf_fixture_doctor() {
+  env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
+    ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present "$@" \
+    ZENSU_DOCTOR_PLUGIN_DIR="$VF_FIXTURE_ROOT" CLAUDE_PLUGIN_ROOT="$VF_FIXTURE_ROOT" \
+    CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$VF_FIXTURE_ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null
+}
+VF_FIXTURE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-noprefilter.XXXXXX")" || exit 1
+cp -R "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/scripts" "$VF_FIXTURE_ROOT/" 2>/dev/null
+rm -f "$VF_FIXTURE_ROOT/hooks/lib/zensu-browser-consent-prefilter.sh"
+case "$(vf_fixture_doctor ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest)" in
+  *'❌  verify-feature: cannot start (consent hook pair, its prefilter library, its module or the run-config helper missing from the plugin)'*)
+    check "P1vl7 a missing prefilter library is named as a missing file of the consent pair" PASS ;;
+  *) check "P1vl7 a missing prefilter library is named as a missing file of the consent pair" FAIL ;;
+esac
+rm -rf "$VF_FIXTURE_ROOT"
+VF_FIXTURE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-badhelper.XXXXXX")" || exit 1
+cp -R "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/scripts" "$VF_FIXTURE_ROOT/" 2>/dev/null
+printf '\nthrow new Error("probe");\n' >> "$VF_FIXTURE_ROOT/scripts/verify-browser-config.js"
+if (cd -P -- "$VF_FIXTURE_ROOT" && node -e 'require("./hooks/lib/verify-consent-v1.js")' >/dev/null 2>&1) \
+  && ! (cd -P -- "$VF_FIXTURE_ROOT" && node -e 'require("./scripts/verify-browser-config.js")' >/dev/null 2>&1); then
+  check "P1vl8-control the bad-helper fixture loads the decision module and breaks only the helper's require" PASS
+else
+  check "P1vl8-control the bad-helper fixture loads the decision module and breaks only the helper's require" FAIL
+fi
+case "$(vf_fixture_doctor ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest)" in
+  *'❌  verify-feature: cannot start (the run-config helper could not be loaded)'*)
+    check "P1vl8 a run-config helper that will not load is named, not reported ready" PASS ;;
+  *) check "P1vl8 a run-config helper that will not load is named, not reported ready" FAIL ;;
+esac
+rm -rf "$VF_FIXTURE_ROOT"
+VF_FIXTURE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-noversion.XXXXXX")" || exit 1
+cp -R "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/scripts" "$VF_FIXTURE_ROOT/" 2>/dev/null
+rm -f "$VF_FIXTURE_ROOT/hooks/lib/playwright-cli-version-v1.js"
+VF_NOVERSION_OUT="$(vf_fixture_doctor)"
+case "$VF_NOVERSION_OUT" in
+  *"⚠️  playwright-cli: installed, but the plugin's version module hooks/lib/playwright-cli-version-v1.js could not be loaded — reinstall the plugin"*)
+    case "$VF_NOVERSION_OUT" in
+      *'playwright-cli: installed, but its version could not be read'*) check "P1vl9 a missing version module is blamed on the plugin, not on the installed CLI" FAIL ;;
+      *) check "P1vl9 a missing version module is blamed on the plugin, not on the installed CLI" PASS ;;
+    esac ;;
+  *) check "P1vl9 a missing version module is blamed on the plugin, not on the installed CLI" FAIL ;;
+esac
+rm -rf "$VF_FIXTURE_ROOT"
 VF_UNCHECKED_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-unchecked.XXXXXX")" || exit 1
 cp -R "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/scripts" "$VF_UNCHECKED_ROOT/" 2>/dev/null
 printf '\nmodule.exports.parsePolicyTargets = () => { throw new Error("probe"); };\n' >> "$VF_UNCHECKED_ROOT/hooks/lib/verify-navigation-floor-v1.js"
@@ -494,7 +542,7 @@ else
 fi
 VF_UNCHECKED_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
   ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:5173","evidenceMode":"declared-safe","routes":["/"]}]}' \
-  ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" \
+  ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest \
   ZENSU_DOCTOR_PLUGIN_DIR="$VF_UNCHECKED_ROOT" CLAUDE_PLUGIN_ROOT="$VF_UNCHECKED_ROOT" \
   CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$VF_UNCHECKED_ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null)"
 case "$VF_UNCHECKED_OUT" in
@@ -508,7 +556,7 @@ VF_REG_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zensu-doctor-registration.XXXXXX")" ||
 cp -R "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/scripts" "$VF_REG_ROOT/" 2>/dev/null
 vf_reg_doctor() {
   env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
-    ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" \
+    ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest \
     ZENSU_DOCTOR_PLUGIN_DIR="$VF_REG_ROOT" CLAUDE_PLUGIN_ROOT="$VF_REG_ROOT" \
     CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$VF_REG_ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null
 }
@@ -624,7 +672,7 @@ else
   check "P1vl10-control the probe fixture loads the decision module and makes the registration probe throw" FAIL
 fi
 case "$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
-  ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" \
+  ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest \
   ZENSU_DOCTOR_PLUGIN_DIR="$VF_PROBE_ROOT" CLAUDE_PLUGIN_ROOT="$VF_PROBE_ROOT" \
   CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$VF_PROBE_ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null)" in
   *'❌  verify-feature: cannot start (the consent hook pair registration probe did not complete)'*)
@@ -643,7 +691,7 @@ if [ -L "$VF_LINK_ROOT/hooks/lib/verify-consent-v1.js" ]; then
     check "P1vl11-control the link fixture replaces the decision module with a symlink that still loads" FAIL
   fi
   case "$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 \
-    ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" \
+    ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_PLAYWRIGHT=present ZDOC_PLAYWRIGHT_VERSION="$PW_MEASURED" ZDOC_PLAYWRIGHT_SOURCE=manifest \
     ZENSU_DOCTOR_PLUGIN_DIR="$VF_LINK_ROOT" CLAUDE_PLUGIN_ROOT="$VF_LINK_ROOT" \
     CLAUDE_PROJECT_DIR="$VF_LIVE_ROOT" bash "$VF_LINK_ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null)" in
     *'❌  verify-feature: cannot start (the consent decision module is a symlink, which both consent hooks refuse)'*)
@@ -760,14 +808,15 @@ esac
 # --- playwright-cli detection ----------------------------------------------
 pw_row() {
   ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready \
-  ZDOC_PLAYWRIGHT="$1" ZDOC_PLAYWRIGHT_VERSION="$2" ZDOC_VERIFY=consent \
+  ZDOC_PLAYWRIGHT="$1" ZDOC_PLAYWRIGHT_VERSION="$2" ZDOC_PLAYWRIGHT_SOURCE="${4-manifest}" ZDOC_PLAYWRIGHT_OWNER="${5:-}" ZDOC_VERIFY=consent \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
     node "${3:-$REPORT}" 2>/dev/null
 }
+PW_PIN="\`npm install -g @playwright/cli@$PW_MEASURED\`"
 PW_OTHER_V=9.8.7
 [ "$PW_OTHER_V" != "$PW_MEASURED" ] || PW_OTHER_V=9.8.6
 PW_OTHER="$(pw_row present "$PW_OTHER_V")"
-PW_OTHER_ROW="⚠️  playwright-cli: installed ($PW_OTHER_V), not the version the browser consent gate was measured against ($PW_MEASURED) — its argument parser, ambient-variable names, global-config keys and run-config schema were not measured against $PW_OTHER_V; an argument shape the gate does not recognize is denied rather than admitted, and /zensu:verify-feature still runs through it"
+PW_OTHER_ROW="⚠️  playwright-cli: installed ($PW_OTHER_V), not the version the browser consent gate was measured against ($PW_MEASURED) — its argument parser, ambient-variable names, global-config keys and run-config schema were not measured against $PW_OTHER_V, so the run-config helper refuses to start /zensu:verify-feature on it; install the measured version with $PW_PIN"
 case "$PW_OTHER" in *"$PW_OTHER_ROW"*) check "P1pc playwright-cli at another version warns and says what was not measured against it" PASS ;; *) check "P1pc playwright-cli at another version warns and says what was not measured against it" FAIL ;; esac
 case "$PW_OTHER" in *'all checks green'*) check "P1pc1 another playwright-cli version withholds the green summary" FAIL ;; *) check "P1pc1 another playwright-cli version withholds the green summary" PASS ;; esac
 PW_LONE="$SBOX/pw-lone/hooks/lib"
@@ -789,78 +838,133 @@ else
 fi
 rm -rf "$SBOX/pw-lone"
 PW_NOVERSION="$(pw_row present "")"
-case "$PW_NOVERSION" in *'⚠️  playwright-cli: installed, but its version could not be read — run `playwright-cli --version`; /zensu:verify-feature still runs through it'*) check "P1pc4 an unreadable playwright-cli version warns and names the probe to run" PASS ;; *) check "P1pc4 an unreadable playwright-cli version warns and names the probe to run" FAIL ;; esac
+case "$PW_NOVERSION" in *"⚠️  playwright-cli: installed, but its version could not be read — the run-config helper refuses to start /zensu:verify-feature until it reads the version from the @playwright/cli package manifest; reinstall it with $PW_PIN"*) check "P1pc4 an unreadable playwright-cli version warns, says the run cannot start and names the pinned install" PASS ;; *) check "P1pc4 an unreadable playwright-cli version warns, says the run cannot start and names the pinned install" FAIL ;; esac
 case "$PW_NOVERSION" in *'all checks green'*) check "P1pc5 the unreadable-version warning withholds the green summary" FAIL ;; *) check "P1pc5 the unreadable-version warning withholds the green summary" PASS ;; esac
 PW_FORGED_V=$'1.2.3\n❌  zdoc-forged-row'
 case "$PW_FORGED_V" in *$'\n'*) check "P1pc6-control the forged version carries a line break" PASS ;; *) check "P1pc6-control the forged version carries a line break" FAIL ;; esac
 case "$(pw_row present "$PW_FORGED_V")" in
   *'zdoc-forged-row'*) check "P1pc6 a relayed version cannot forge a report row" FAIL ;;
-  *'⚠️  playwright-cli: installed (1.2.3), not the version'*) check "P1pc6 a relayed version cannot forge a report row" PASS ;;
+  *'⚠️  playwright-cli: installed, but its version could not be read'*) check "P1pc6 a relayed version cannot forge a report row" PASS ;;
   *) check "P1pc6 a relayed version cannot forge a report row" FAIL ;;
 esac
 PW_ABSENT="$(pw_row absent "")"
-case "$PW_ABSENT" in *'⚠️  playwright-cli: not found on PATH — /zensu:verify-feature cannot drive the UI'*'`brew install playwright-cli`'*'`npm install -g @playwright/cli`'*) check "P1pc7 a missing playwright-cli warns and names both install routes" PASS ;; *) check "P1pc7 a missing playwright-cli warns and names both install routes" FAIL ;; esac
+case "$PW_ABSENT" in *'⚠️  playwright-cli: not found on PATH — /zensu:verify-feature cannot drive the UI'*"$PW_PIN"*'`brew install playwright-cli` is unpinned'*) check "P1pc7 a missing playwright-cli warns, names the pinned npm install and labels brew unpinned" PASS ;; *) check "P1pc7 a missing playwright-cli warns, names the pinned npm install and labels brew unpinned" FAIL ;; esac
+PW_SELF="$(pw_row present "$PW_MEASURED" "" self-reported)"
+case "$PW_SELF" in *"⚠️  playwright-cli: installed, and reports $PW_MEASURED when run, but no @playwright/cli package manifest was found beside it"*"$PW_PIN"*) check "P1pc9 a self-reported version warns even when it equals the measured one" PASS ;; *) check "P1pc9 a self-reported version warns even when it equals the measured one" FAIL ;; esac
+case "$PW_SELF" in *'✅  playwright-cli'*) check "P1pc9a a self-reported version never renders OK" FAIL ;; *) check "P1pc9a a self-reported version never renders OK" PASS ;; esac
+case "$(pw_row present "" "" foreign not-playwright)" in *"⚠️  playwright-cli: the binary on PATH belongs to the package not-playwright, not @playwright/cli — it was not run"*) check "P1pc10 a binary owned by another package is named with its owner and never run" PASS ;; *) check "P1pc10 a binary owned by another package is named with its owner and never run" FAIL ;; esac
+case "$(pw_row present "" "" foreign $'evil\n❌  zdoc-forged-row')" in
+  *'zdoc-forged-row'*) check "P1pc10a a relayed owner cannot forge a report row" FAIL ;;
+  *'⚠️  playwright-cli: the binary on PATH belongs to the package'*) check "P1pc10a a relayed owner cannot forge a report row" PASS ;;
+  *) check "P1pc10a a relayed owner cannot forge a report row" FAIL ;;
+esac
+case "$(pw_row present "" "" malformed)" in *'⚠️  playwright-cli: the package manifest beside the binary on PATH could not be judged — it was not run'*) check "P1pc11 a malformed manifest warns and the binary is never run" PASS ;; *) check "P1pc11 a malformed manifest warns and the binary is never run" FAIL ;; esac
+case "$(pw_row present "$PW_MEASURED-beta.1")" in *"⚠️  playwright-cli: installed ($PW_MEASURED-beta.1), not the version the browser consent gate was measured against ($PW_MEASURED)"*) check "P1pc12 a prerelease suffix is kept, so it never matches the measured version" PASS ;; *) check "P1pc12 a prerelease suffix is kept, so it never matches the measured version" FAIL ;; esac
+case "$(pw_row present "$PW_MEASURED" "" "")" in *'✅  playwright-cli'*) check "P1pc13 a version of unknown provenance never renders OK" FAIL ;; *'⚠️  playwright-cli: installed, but its version could not be read'*) check "P1pc13 a version of unknown provenance never renders OK" PASS ;; *) check "P1pc13 a version of unknown provenance never renders OK" FAIL ;; esac
+case "$PW_SELF" in *"was found beside it, as happens when the playwright-cli on PATH is a wrapper script outside the package"*"$PW_PIN and put the directory npm installs it into first on PATH, ahead of any wrapper"*) check "P1pc9b a self-reported version names the wrapper case and the PATH remedy" PASS ;; *) check "P1pc9b a self-reported version names the wrapper case and the PATH remedy" FAIL ;; esac
+PW_UNSTABLE="$(pw_row present "" "" cwd-relative)"
+case "$PW_UNSTABLE" in *'⚠️  playwright-cli: PATH reaches it through an empty or relative entry, which the shell reads against the working directory of each call — it was not run'*'remove that entry from PATH, or move it behind the directory that holds playwright-cli'*) check "P1pc14 a PATH entry read against the working directory warns, names the helper refusal and the remedy" PASS ;; *) check "P1pc14 a PATH entry read against the working directory warns, names the helper refusal and the remedy" FAIL ;; esac
+case "$PW_UNSTABLE" in *'✅  playwright-cli'*|*'all checks green'*) check "P1pc14a a working-directory PATH entry never renders OK" FAIL ;; *) check "P1pc14a a working-directory PATH entry never renders OK" PASS ;; esac
 case "$PW_ABSENT" in *'all checks green'*) check "P1pc8 the missing-playwright-cli warning withholds the green summary" FAIL ;; *) check "P1pc8 the missing-playwright-cli warning withholds the green summary" PASS ;; esac
 PW_STUB_DIR="$SBOX/pw-stub-bin"
 PW_STUB_LOG="$SBOX/pw-stub.log"
 mkdir -p "$PW_STUB_DIR"
 printf '%s\n' '#!/bin/sh' 'printf "%s|%s\n" "$*" "${NO_UPDATE_NOTIFIER:-}" >> "$PW_STUB_LOG"' 'printf "%s\n" "${PW_STUB_VERSION:-}"' > "$PW_STUB_DIR/playwright-cli"
 chmod +x "$PW_STUB_DIR/playwright-cli"
-pw_wrap() { # $1 stub version  $2 bin directory (default: the plain stub)
+pw_wrap() {
   env -u ZDOC_PLAYWRIGHT -u ZDOC_PLAYWRIGHT_VERSION -u NO_UPDATE_NOTIFIER \
     PATH="${2:-$PW_STUB_DIR}:$PATH" PW_STUB_LOG="$PW_STUB_LOG" PW_STUB_VERSION="$1" \
     ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_VERIFY=consent \
     ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
     bash "$HELPER" 2>/dev/null
 }
-rm -f "$PW_STUB_LOG"
-case "$(pw_wrap "$PW_MEASURED")" in *"✅  playwright-cli: installed ($PW_MEASURED) — /zensu:verify-feature and the autopilot browser driver run through it"*) check "P1pw the wrapper finds playwright-cli on PATH and reads its version" PASS ;; *) check "P1pw the wrapper finds playwright-cli on PATH and reads its version" FAIL ;; esac
-PW_STUB_CALLS="$(cat "$PW_STUB_LOG" 2>/dev/null)"
-if [ "$PW_STUB_CALLS" = '--version|1' ]; then
-  check "P1pw1 the wrapper runs playwright-cli exactly once, as --version with the update notifier off" PASS
-else
-  check "P1pw1 the wrapper runs playwright-cli exactly once, as --version with the update notifier off (got: $PW_STUB_CALLS)" FAIL
-fi
-case "$(pw_wrap $'Version '"$PW_OTHER_V"$'\nnotice: 7.7.7 is available')" in *"⚠️  playwright-cli: installed ($PW_OTHER_V), not the version the browser consent gate was measured against ($PW_MEASURED)"*) check "P1pw2 the wrapper keeps the first line of the version output" PASS ;; *) check "P1pw2 the wrapper keeps the first line of the version output" FAIL ;; esac
-case "$(pw_wrap "Version $PW_OTHER_V (build 4)")" in *"⚠️  playwright-cli: installed ($PW_OTHER_V), not the version"*) check "P1pw2b the wrapper keeps only the first dotted version number of that line" PASS ;; *) check "P1pw2b the wrapper keeps only the first dotted version number of that line" FAIL ;; esac
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) check "P1pw-P1pw2b the wrapper runs a shell-script playwright-cli for its version (covered on macOS/Linux/WSL)" PASS ;;
+  *)
+    rm -f "$PW_STUB_LOG"
+    case "$(pw_wrap "$PW_MEASURED")" in *"⚠️  playwright-cli: installed, and reports $PW_MEASURED when run, but no @playwright/cli package manifest was found beside it"*) check "P1pw the wrapper finds playwright-cli on PATH, asks it for its version without a manifest, and never renders that OK" PASS ;; *) check "P1pw the wrapper finds playwright-cli on PATH, asks it for its version without a manifest, and never renders that OK" FAIL ;; esac
+    PW_STUB_CALLS="$(cat "$PW_STUB_LOG" 2>/dev/null)"
+    if [ "$PW_STUB_CALLS" = '--version|1' ]; then
+      check "P1pw1 the wrapper runs playwright-cli exactly once, as --version with the update notifier off" PASS
+    else
+      check "P1pw1 the wrapper runs playwright-cli exactly once, as --version with the update notifier off (got: $PW_STUB_CALLS)" FAIL
+    fi
+    case "$(pw_wrap $'Version '"$PW_OTHER_V"$'\nnotice: 7.7.7 is available')" in *"⚠️  playwright-cli: installed, and reports $PW_OTHER_V when run"*) check "P1pw2 the wrapper keeps the first line of the version output" PASS ;; *) check "P1pw2 the wrapper keeps the first line of the version output" FAIL ;; esac
+    case "$(pw_wrap "Version $PW_OTHER_V-beta.2 (build 4)")" in *"⚠️  playwright-cli: installed, and reports $PW_OTHER_V-beta.2 when run"*) check "P1pw2b the wrapper keeps the whole version of that line, prerelease suffix included" PASS ;; *) check "P1pw2b the wrapper keeps the whole version of that line, prerelease suffix included" FAIL ;; esac
+    ;;
+esac
 PW_PKG_ROOT="$SBOX/pw-pkg"
 PW_PKG="$PW_PKG_ROOT/lib/node_modules/@playwright/cli"
 mkdir -p "$PW_PKG" "$PW_PKG_ROOT/bin"
 printf '{"name":"@playwright/cli","version":"%s"}\n' "$PW_OTHER_V" > "$PW_PKG/package.json"
 printf '%s\n' '#!/bin/sh' 'printf "%s|%s\n" "$*" "${NO_UPDATE_NOTIFIER:-}" >> "$PW_STUB_LOG"' 'printf "%s\n" "${PW_STUB_VERSION:-}"' > "$PW_PKG/playwright-cli.js"
 chmod +x "$PW_PKG/playwright-cli.js"
-ln -s "$PW_PKG/playwright-cli.js" "$PW_PKG_ROOT/bin/playwright-cli"
-rm -f "$PW_STUB_LOG"
-case "$(pw_wrap 1.1.1 "$PW_PKG_ROOT/bin")" in *"⚠️  playwright-cli: installed ($PW_OTHER_V), not the version"*) check "P1pw5 the wrapper reads the version from the resolved @playwright/cli package.json" PASS ;; *) check "P1pw5 the wrapper reads the version from the resolved @playwright/cli package.json" FAIL ;; esac
-[ ! -s "$PW_STUB_LOG" ] \
-  && check "P1pw5a reading package.json runs no playwright-cli code" PASS \
-  || check "P1pw5a reading package.json runs no playwright-cli code (got: $(cat "$PW_STUB_LOG" 2>/dev/null))" FAIL
-printf '{"name":"not-playwright","version":"%s"}\n' "$PW_OTHER_V" > "$PW_PKG/package.json"
-rm -f "$PW_STUB_LOG"
-case "$(pw_wrap "$PW_MEASURED" "$PW_PKG_ROOT/bin")" in *"✅  playwright-cli: installed ($PW_MEASURED) — "*) check "P1pw6 a package.json naming another package falls back to the version call" PASS ;; *) check "P1pw6 a package.json naming another package falls back to the version call" FAIL ;; esac
-[ "$(cat "$PW_STUB_LOG" 2>/dev/null)" = '--version|1' ] \
-  && check "P1pw6a the fallback runs --version once with the update notifier off" PASS \
-  || check "P1pw6a the fallback runs --version once with the update notifier off (got: $(cat "$PW_STUB_LOG" 2>/dev/null))" FAIL
-rm -rf "$PW_PKG_ROOT"
-if command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; then
-  PW_SLOW_DIR="$SBOX/pw-slow-bin"
-  mkdir -p "$PW_SLOW_DIR"
-  printf '%s\n' '#!/bin/sh' 'exec sleep 12' > "$PW_SLOW_DIR/playwright-cli"
-  chmod +x "$PW_SLOW_DIR/playwright-cli"
-  PW_SLOW_START="$(date +%s)"
-  PW_SLOW_OUT="$(pw_wrap '' "$PW_SLOW_DIR")"
-  PW_SLOW_SECS=$(( $(date +%s) - PW_SLOW_START ))
-  case "$PW_SLOW_OUT" in
-    *'⚠️  playwright-cli: installed, but its version could not be read'*)
-      [ "$PW_SLOW_SECS" -lt 10 ] \
-        && check "P1pw7 a playwright-cli that never answers is cut off by the watchdog (${PW_SLOW_SECS}s)" PASS \
-        || check "P1pw7 a playwright-cli that never answers is cut off by the watchdog (${PW_SLOW_SECS}s)" FAIL ;;
-    *) check "P1pw7 a playwright-cli that never answers is cut off by the watchdog (${PW_SLOW_SECS}s)" FAIL ;;
-  esac
-  rm -rf "$PW_SLOW_DIR"
+ln -s "$PW_PKG/playwright-cli.js" "$PW_PKG_ROOT/bin/playwright-cli" 2>/dev/null
+if [ -L "$PW_PKG_ROOT/bin/playwright-cli" ]; then
+  check "P1pw5-control the manifest fixture's playwright-cli is a symlink into the package" PASS
+  rm -f "$PW_STUB_LOG"
+  case "$(pw_wrap 1.1.1 "$PW_PKG_ROOT/bin")" in *"⚠️  playwright-cli: installed ($PW_OTHER_V), not the version"*) check "P1pw5 the wrapper reads the version from the resolved @playwright/cli package.json" PASS ;; *) check "P1pw5 the wrapper reads the version from the resolved @playwright/cli package.json" FAIL ;; esac
+  [ ! -s "$PW_STUB_LOG" ] \
+    && check "P1pw5a reading package.json runs no playwright-cli code" PASS \
+    || check "P1pw5a reading package.json runs no playwright-cli code (got: $(cat "$PW_STUB_LOG" 2>/dev/null))" FAIL
+  printf '{"name":"not-playwright","version":"%s"}\n' "$PW_OTHER_V" > "$PW_PKG/package.json"
+  rm -f "$PW_STUB_LOG"
+  case "$(pw_wrap "$PW_MEASURED" "$PW_PKG_ROOT/bin")" in *"⚠️  playwright-cli: the binary on PATH belongs to the package not-playwright, not @playwright/cli — it was not run"*) check "P1pw6 a package.json naming another package is reported with its owner" PASS ;; *) check "P1pw6 a package.json naming another package is reported with its owner" FAIL ;; esac
+  [ ! -s "$PW_STUB_LOG" ] \
+    && check "P1pw6a a binary whose manifest names another package is never run" PASS \
+    || check "P1pw6a a binary whose manifest names another package is never run (got: $(cat "$PW_STUB_LOG" 2>/dev/null))" FAIL
+  printf '{not json\n' > "$PW_PKG/package.json"
+  rm -f "$PW_STUB_LOG"
+  case "$(pw_wrap "$PW_MEASURED" "$PW_PKG_ROOT/bin")" in *'⚠️  playwright-cli: the package manifest beside the binary on PATH could not be judged — it was not run'*) check "P1pw6b a malformed package.json is reported as such" PASS ;; *) check "P1pw6b a malformed package.json is reported as such" FAIL ;; esac
+  [ ! -s "$PW_STUB_LOG" ] \
+    && check "P1pw6c a binary beside a malformed manifest is never run" PASS \
+    || check "P1pw6c a binary beside a malformed manifest is never run (got: $(cat "$PW_STUB_LOG" 2>/dev/null))" FAIL
+  printf '{"name":"@playwright/cli","version":"%s-beta.1"}\n' "$PW_MEASURED" > "$PW_PKG/package.json"
+  case "$(pw_wrap "$PW_MEASURED" "$PW_PKG_ROOT/bin")" in *"⚠️  playwright-cli: installed ($PW_MEASURED-beta.1), not the version"*) check "P1pw8 the wrapper keeps a prerelease suffix from the manifest" PASS ;; *) check "P1pw8 the wrapper keeps a prerelease suffix from the manifest" FAIL ;; esac
+  printf '{"name":"@playwright/cli","version":"%s"}\n' "$PW_MEASURED" > "$PW_PKG/package.json"
+  case "$(pw_wrap "$PW_MEASURED" "$PW_PKG_ROOT/bin")" in *"✅  playwright-cli: installed ($PW_MEASURED)"*) check "P1pw9-control the measured manifest first on PATH renders OK" PASS ;; *) check "P1pw9-control the measured manifest first on PATH renders OK" FAIL ;; esac
 else
-  check "P1pw7 a hanging playwright-cli is cut off by the watchdog — SKIPPED (no timeout or gtimeout on this host; the ladder runs unbounded here)" PASS
+  check "P1pw5-P1pw9-control the manifest fixture needs a symlink into the package (no symlink on this host, covered on macOS/Linux)" PASS
 fi
+rm -f "$PW_STUB_LOG"
+case "$(pw_wrap "$PW_MEASURED" ":$PW_PKG_ROOT/bin")" in *'⚠️  playwright-cli: PATH reaches it through an empty or relative entry'*) check "P1pw9 an empty PATH entry ahead of the measured playwright-cli is reported, as the helper refuses it" PASS ;; *) check "P1pw9 an empty PATH entry ahead of the measured playwright-cli is reported, as the helper refuses it" FAIL ;; esac
+[ ! -s "$PW_STUB_LOG" ] \
+  && check "P1pw9a a playwright-cli behind a working-directory PATH entry is never run" PASS \
+  || check "P1pw9a a playwright-cli behind a working-directory PATH entry is never run (got: $(cat "$PW_STUB_LOG" 2>/dev/null))" FAIL
+PW_CWD="$SBOX/pw-cwd"
+mkdir -p "$PW_CWD/rel/bin"
+cp "$PW_STUB_DIR/playwright-cli" "$PW_CWD/rel/bin/playwright-cli"
+chmod +x "$PW_CWD/rel/bin/playwright-cli"
+case "$(cd "$PW_CWD" && pw_wrap "$PW_MEASURED" "rel/bin")" in *'⚠️  playwright-cli: PATH reaches it through an empty or relative entry'*) check "P1pw10 the probe resolves a relative PATH entry against the caller's working directory, not the plugin's" PASS ;; *) check "P1pw10 the probe resolves a relative PATH entry against the caller's working directory, not the plugin's" FAIL ;; esac
+rm -rf "$PW_CWD"
+rm -rf "$PW_PKG_ROOT"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) check "P1pw7 a shell-script playwright-cli that never answers is cut off by the bound (covered on macOS/Linux/WSL)" PASS ;;
+  *)
+    PW_SLOW_DIR="$SBOX/pw-slow-bin"
+    mkdir -p "$PW_SLOW_DIR"
+    printf '%s\n' '#!/bin/sh' 'printf "%s|%s\n" "$*" "${NO_UPDATE_NOTIFIER:-}" >> "$PW_STUB_LOG"' 'exec sleep 12' > "$PW_SLOW_DIR/playwright-cli"
+    chmod +x "$PW_SLOW_DIR/playwright-cli"
+    rm -f "$PW_STUB_LOG"
+    PW_SLOW_START="$(date +%s)"
+    PW_SLOW_OUT="$(pw_wrap '' "$PW_SLOW_DIR")"
+    PW_SLOW_SECS=$(( $(date +%s) - PW_SLOW_START ))
+    PW_SLOW_CALLS="$(cat "$PW_STUB_LOG" 2>/dev/null)"
+    if [ "$PW_SLOW_CALLS" = '--version|1' ]; then
+      check "P1pw7-control the never-answering playwright-cli was started once, as --version, so the bound cut off a running binary" PASS
+    else
+      check "P1pw7-control the never-answering playwright-cli was started once, as --version, so the bound cut off a running binary (got: ${PW_SLOW_CALLS:-<never started>})" FAIL
+    fi
+    case "$PW_SLOW_OUT" in
+      *'⚠️  playwright-cli: installed, but its version could not be read'*)
+        [ "$PW_SLOW_SECS" -lt 10 ] \
+          && check "P1pw7 a playwright-cli that never answers is cut off by the bound on every host (${PW_SLOW_SECS}s)" PASS \
+          || check "P1pw7 a playwright-cli that never answers is cut off by the bound on every host (${PW_SLOW_SECS}s)" FAIL ;;
+      *) check "P1pw7 a playwright-cli that never answers is cut off by the bound on every host (${PW_SLOW_SECS}s)" FAIL ;;
+    esac
+    rm -rf "$PW_SLOW_DIR"
+    ;;
+esac
 case "$(pw_wrap '')" in *'⚠️  playwright-cli: installed, but its version could not be read'*) check "P1pw3 a playwright-cli that prints no version is found but warns" PASS ;; *) check "P1pw3 a playwright-cli that prints no version is found but warns" FAIL ;; esac
 PW_NOCLI_BIN="$SBOX/pw-nocli-bin"
 mkdir -p "$PW_NOCLI_BIN"

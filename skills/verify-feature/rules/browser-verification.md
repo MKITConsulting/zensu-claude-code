@@ -9,9 +9,11 @@ Every call names the session the run-config helper printed, literally:
 `playwright-cli -s=<session> <command> [args] [flags]`. Run each call as its own plain Bash
 command on the main thread: exactly one `playwright-cli` call per Bash command, with no other
 command, operator, pipe, substitution, wrapper or package launcher around it. Quote an argument
-that carries `?`, `*`, `[` or `{`, or that starts with `~` or `=`. The browser consent gate
-admits exactly these commands on a
-`zensu-verify` session, each with only the flags listed:
+that carries `?`, `*`, `[` or `{`, or that starts with `~` or `=`. Single-quote an argument that
+carries `$`: double quotes do not help, because the gate reads every `$` outside single quotes
+that whitespace or the end of the command does not follow as an expansion it cannot judge, so a
+`fill` value such as `"$12"` is denied and `'$12'` is not. The browser consent gate admits
+exactly these commands on a `zensu-verify` session, each with only the flags listed:
 
 | Purpose | Commands | Flags |
 |---|---|---|
@@ -22,13 +24,25 @@ admits exactly these commands on a
 | Emulation | `set-color-scheme`, `set-reduced-motion`, `set-forced-colors`, `set-contrast`, `set-media`, and the matching `clear-*` commands | none |
 
 `--json`, `--raw`, `--help` and `--version` are accepted on every command. Everything else is
-denied on a `zensu-verify` session, and a denial is final: `eval`, `run-code`, every cookie,
+denied on a `zensu-verify` session, and that denial is final: `eval`, `run-code`, every cookie,
 local/session-storage and state command, `delete-data`, `route` and its siblings, `request`,
 `request-*` and `response-*`, `network-state-set`, `upload`, `drop`, `pdf`, recording,
 tracing and video, `attach`, `detach`, `install`, `install-browser`, `close-all`, `kill-all`,
 and the flags `--filename`, `--persistent` and `--profile`. A flag given twice is denied too.
 Never re-issue a denied call under another spelling, another session name, or through another
-program.
+program — with one exception, the shape denial below. A command or flag that is not available,
+an origin outside the run config or the navigation policy, a refused or unanswerable consent
+prompt, and a call from a subagent are final. A shape denial objects only to how the call is
+spelled, and the gate ends its text with the note `(shape denial: re-issue this call once as one
+plain playwright-cli call with single-quoted literal arguments; a second denial is final)`; no
+other denial carries it. Its reason asks for exactly one plain `playwright-cli` call
+(`NOT_PLAIN`), for literal arguments (`ARGUMENT_UNEXPANDED`), for the session exactly as the
+run-config helper printed it or named literally (`SESSION_UNRESOLVED`, `SESSION_UNEXPANDED`), or
+for the bare name `playwright-cli` (`CLI_NOT_BARE`), or it refuses a wrapper, a package launcher
+or an environment assignment (`WRAPPER`, `LAUNCHER`, `ENV_ASSIGNMENT`). Answer a shape denial
+once: re-issue the same call as one plain call with single-quoted literal arguments. The gate
+judges the retry exactly as it judged the first call, so no boundary loosens, and a second
+denial of that call is final.
 
 `screenshot` writes its image beneath the run directory's `browser/` folder and prints its
 path; open that file with the Read tool to inspect it. `snapshot` prints the accessibility tree

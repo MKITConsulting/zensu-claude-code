@@ -12,7 +12,10 @@ const {
   resolveRemoteHost,
 } = require(path.join(__dirname, '..', 'hooks', 'lib', 'verify-navigation-floor-v1.js'));
 const consent = require(path.join(__dirname, '..', 'hooks', 'lib', 'verify-consent-v1.js'));
+const cliVersion = require(path.join(__dirname, '..', 'hooks', 'lib', 'playwright-cli-version-v1.js'));
 
+const PLUGIN_ROOT = path.join(__dirname, '..');
+const PINNED_INSTALL = `npm install -g @playwright/cli@${consent.PLAYWRIGHT_CLI_SOURCE_VERSION}`;
 const CONFIG_NAME = consent.RUN_CONFIG_NAME;
 const OUTPUT_DIR_NAME = consent.RUN_OUTPUT_DIR_NAME;
 const SESSION_PREFIX = consent.SESSION_PREFIX;
@@ -83,8 +86,9 @@ function policyVerdict(url, policy, navigation) {
   return verdict;
 }
 
-async function checkPolicy(argv, env = process.env, resolver = dns.promises.lookup) {
+async function checkPolicy(argv, env = process.env, resolver = dns.promises.lookup, readiness = defaultReadiness()) {
   if (argv.length !== 4 || !MODES.includes(argv[0]) || argv[3] !== 'declared-safe') throw new Error(CHECK_USAGE);
+  checkReadiness(readiness, env);
   const [mode, rawOrigin, route] = argv;
   const classified = checkOrigin(rawOrigin, mode);
   if (normalizeRoute(route) === null) throw new Error('route must be an absolute, normalized, query-free pathname');
@@ -130,19 +134,61 @@ function writeConfig(runDir, config) {
   return target;
 }
 
-async function run(argv, resolver = dns.promises.lookup, env = process.env) {
+function versionCause(installed, measured) {
+  if (installed.source === 'absent') return 'playwright-cli is not on PATH';
+  if (installed.source === 'cwd-relative') {
+    const entry = installed.entry === '' ? 'an empty PATH entry' : `the relative PATH entry ${JSON.stringify(String(installed.entry))}`;
+    return `${entry} comes before or holds the playwright-cli on PATH, and the shell reads it against the working directory of each call, so a gated call can run another playwright-cli than the one measured here`;
+  }
+  if (installed.source === 'manifest') {
+    return `playwright-cli ${installed.version} is installed, but the browser consent gate was measured against ${measured}`;
+  }
+  if (installed.source === 'foreign') {
+    return `the playwright-cli on PATH belongs to the package ${installed.owner}, not ${cliVersion.PACKAGE_NAME}`;
+  }
+  if (installed.source === 'malformed') return 'the package manifest beside the playwright-cli on PATH could not be judged';
+  return `the installed playwright-cli version could not be read from its ${cliVersion.PACKAGE_NAME} package manifest: the playwright-cli on PATH resolves to no such manifest, as a wrapper script outside the package does`;
+}
+
+function versionRemedy(installed) {
+  if (installed.source === 'cwd-relative') return 'remove that entry from PATH, or move it behind the directory that holds playwright-cli';
+  const install = `install the measured version with \`${PINNED_INSTALL}\``;
+  if (installed.source === 'unread') return `${install}, and put the directory npm installs it into first on PATH, ahead of any wrapper`;
+  return install;
+}
+
+function checkReadiness(readiness, env) {
+  const hook = consent.consentHookRegistered(readiness.pluginRoot);
+  const recorder = consent.consentRecorderRegistered(readiness.pluginRoot);
+  if (hook !== consent.REGISTRATION.REGISTERED || recorder !== consent.REGISTRATION.REGISTERED) {
+    throw new Error(`the browser consent gate is not ready (consent hook: ${hook}; consent recorder: ${recorder}), so no run config is written; run /zensu:doctor`);
+  }
+  const measured = consent.PLAYWRIGHT_CLI_SOURCE_VERSION;
+  const installed = readiness.installedVersion(env);
+  if (installed.source === 'manifest' && installed.version === measured) return;
+  throw new Error(`${versionCause(installed, measured)}, so no run config is written; ${versionRemedy(installed)}`);
+}
+
+function defaultReadiness() {
+  return { pluginRoot: PLUGIN_ROOT, installedVersion: (env) => cliVersion.installedVersion(env) };
+}
+
+async function run(argv, resolver = dns.promises.lookup, env = process.env, readiness = defaultReadiness()) {
   const options = parseArgs(argv);
+  checkReadiness(readiness, env);
   const runDir = checkRunDir(options.runDir);
   const policy = consent.readPolicy(env);
   const origins = [];
   const rules = [];
+  const pinned = new Set();
   for (const rawOrigin of options.origins) {
     const classified = checkOrigin(rawOrigin, options.mode);
     if (origins.includes(classified.origin)) throw new Error('origins must be unique');
     policyVerdict(`${classified.origin}/`, policy, false);
-    if (options.mode === 'remote') {
+    if (options.mode === 'remote' && !pinned.has(classified.hostname)) {
       const rule = await resolverRule(classified, resolver);
       if (rule) rules.push(rule);
+      pinned.add(classified.hostname);
     }
     origins.push(classified.origin);
   }

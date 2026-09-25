@@ -190,8 +190,24 @@ var AUTOPILOT_FORGEABLE_SOURCE = 'read from the run document, which is an ordina
 // the two spellings cannot drift apart unnoticed. The other six files are not pinned.
 var REVIEWER_AGENT = 'zensu:code-reviewer';
 
+function playwrightVersionModule() {
+  try {
+    var info = fs.lstatSync(path.join(__dirname, 'playwright-cli-version-v1.js'));
+    if (!info.isFile()) return null;
+    return require('./playwright-cli-version-v1.js');
+  } catch (_error) {
+    return null;
+  }
+}
 function safePlaywrightVersion(value) {
-  return String(value).replace(/[^0-9.]/g, '').slice(0, 24);
+  var mod = playwrightVersionModule();
+  var text = String(value);
+  return mod && mod.validVersion(text) ? text : '';
+}
+function safePlaywrightOwner(value) {
+  var mod = playwrightVersionModule();
+  var text = String(value);
+  return mod && mod.validName(text) ? text : '';
 }
 function playwrightCliMeasuredVersion() {
   try {
@@ -201,6 +217,9 @@ function playwrightCliMeasuredVersion() {
   } catch (_error) {
     return '';
   }
+}
+function playwrightPinnedInstall(measured) {
+  return '`npm install -g @playwright/cli' + (measured ? '@' + measured : '') + '`';
 }
 // The wrapper's REASON reaches a rendered line, and it carries a free-form cause rather than
 // a state word, so it gets its own bound instead of the state filter above: a newline plus one of
@@ -410,12 +429,20 @@ function toolBlock() {
 
   var p = env.ZDOC_PLAYWRIGHT || 'absent';
   var pv = safePlaywrightVersion(env.ZDOC_PLAYWRIGHT_VERSION || '');
+  var ps = env.ZDOC_PLAYWRIGHT_SOURCE || '';
+  var po = safePlaywrightOwner(env.ZDOC_PLAYWRIGHT_OWNER || '');
   var measured = playwrightCliMeasuredVersion();
-  if (p === 'present' && pv && measured && pv === measured) line(OK, 'playwright-cli: installed (' + pv + ') — /zensu:verify-feature and the autopilot browser driver run through it');
-  else if (p === 'present' && pv && measured) line(WARN, 'playwright-cli: installed (' + pv + '), not the version the browser consent gate was measured against (' + measured + ') — its argument parser, ambient-variable names, global-config keys and run-config schema were not measured against ' + pv + '; an argument shape the gate does not recognize is denied rather than admitted, and /zensu:verify-feature still runs through it');
-  else if (p === 'present' && pv) line(WARN, 'playwright-cli: installed (' + pv + '), but the version the browser consent gate was measured against could not be read — its argument parser, ambient-variable names, global-config keys and run-config schema were not checked against ' + pv + '; an argument shape the gate does not recognize is denied rather than admitted');
-  else if (p === 'present') line(WARN, 'playwright-cli: installed, but its version could not be read — run `playwright-cli --version`; /zensu:verify-feature still runs through it');
-  else line(WARN, 'playwright-cli: not found on PATH — /zensu:verify-feature cannot drive the UI and autopilot browser validation may skip; install it with `brew install playwright-cli` or `npm install -g @playwright/cli`');
+  var pin = playwrightPinnedInstall(measured);
+  if (p !== 'present') line(WARN, 'playwright-cli: not found on PATH — /zensu:verify-feature cannot drive the UI and autopilot browser validation may skip; install the version the browser consent gate was measured against with ' + pin + '; `brew install playwright-cli` is unpinned and installs whichever version Homebrew ships');
+  else if (!playwrightVersionModule()) line(WARN, "playwright-cli: installed, but the plugin's version module hooks/lib/playwright-cli-version-v1.js could not be loaded — reinstall the plugin; the installed CLI was not judged");
+  else if (ps === 'foreign') line(WARN,'playwright-cli: the binary on PATH belongs to the package ' + (po || 'whose name could not be read') + ', not @playwright/cli — it was not run, and the run-config helper refuses to start /zensu:verify-feature on it; install @playwright/cli with ' + pin);
+  else if (ps === 'malformed') line(WARN, 'playwright-cli: the package manifest beside the binary on PATH could not be judged — it was not run: the manifest is unreadable, over 64 KiB, or carries no valid package name and version, so the run-config helper refuses to start /zensu:verify-feature on it; reinstall it with ' + pin);
+  else if (ps === 'cwd-relative') line(WARN, 'playwright-cli: PATH reaches it through an empty or relative entry, which the shell reads against the working directory of each call — it was not run, and the run-config helper refuses to start /zensu:verify-feature while such an entry comes before or holds playwright-cli, because a gated call could run another binary than the one measured; remove that entry from PATH, or move it behind the directory that holds playwright-cli');
+  else if (ps === 'self-reported' && pv) line(WARN, 'playwright-cli: installed, and reports ' + pv + ' when run, but no @playwright/cli package manifest was found beside it, as happens when the playwright-cli on PATH is a wrapper script outside the package — a self-reported version is never taken as measured, so the run-config helper refuses to start /zensu:verify-feature on it; install it with ' + pin + ' and put the directory npm installs it into first on PATH, ahead of any wrapper');
+  else if (ps === 'manifest' && pv && measured && pv === measured) line(OK, 'playwright-cli: installed (' + pv + ') — /zensu:verify-feature and the autopilot browser driver run through it');
+  else if (ps === 'manifest' && pv && measured) line(WARN, 'playwright-cli: installed (' + pv + '), not the version the browser consent gate was measured against (' + measured + ') — its argument parser, ambient-variable names, global-config keys and run-config schema were not measured against ' + pv + ', so the run-config helper refuses to start /zensu:verify-feature on it; install the measured version with ' + pin);
+  else if (ps === 'manifest' && pv) line(WARN, 'playwright-cli: installed (' + pv + '), but the version the browser consent gate was measured against could not be read — its argument parser, ambient-variable names, global-config keys and run-config schema were not checked against ' + pv + '; an argument shape the gate does not recognize is denied rather than admitted');
+  else line(WARN, 'playwright-cli: installed, but its version could not be read — the run-config helper refuses to start /zensu:verify-feature until it reads the version from the @playwright/cli package manifest; reinstall it with ' + pin);
 
   var v = env.ZDOC_VERIFY || '';
   var vr = env.ZDOC_VERIFY_REASON || '';
@@ -1363,25 +1390,19 @@ function reviewerSpawnAutoAllowDisabled(cfgReads) {
 function reviewerSpawnHookWired(root, spawnTools) {
   var r = readJson(path.join(root, 'hooks', 'hooks.json'));
   if (r.missing || !r.ok) return 'unknown';
-  var data = r.data;
-  if (!data || typeof data !== 'object') return 'unknown';
-  var groups = (data.hooks && data.hooks.PreToolUse) || [];
-  if (!Array.isArray(groups)) return 'unknown';
   var tools = Array.isArray(spawnTools) && spawnTools.length ? spawnTools : ['Agent', 'Task'];
-  var wired = false;
-  groups.forEach(function (g) {
-    if (!g || !Array.isArray(g.hooks)) return;
-    var named = g.hooks.some(function (h) {
-      return h && typeof h.command === 'string'
-        && h.command.indexOf('pre-agent-reviewer-allow.sh') !== -1;
-    });
-    if (!named) return;
-    var re;
-    try { re = new RegExp(typeof g.matcher === 'string' && g.matcher ? g.matcher : '.*'); }
-    catch (e) { return; }
-    if (tools.every(function (t) { return re.test(t); })) wired = true;
+  var shared;
+  try { shared = require('./hook-registration-v1.js'); }
+  catch (_error) { return 'unknown'; }
+  var answer = shared.registration(r.data, {
+    event: 'PreToolUse',
+    tools: tools,
+    names: function (command) { return command.indexOf('pre-agent-reviewer-allow.sh') !== -1; },
+    reading: shared.READINGS.REGEX,
   });
-  return wired ? 'wired' : 'unwired';
+  if (answer === shared.REGISTRATION.REGISTERED) return 'wired';
+  if (answer === shared.REGISTRATION.UNREGISTERED) return 'unwired';
+  return 'unknown';
 }
 // The grant is a capability the plugin hands ITSELF, so it is reported whether it is on
 // or off — a silent grant would be the same undisclosed widening this row exists to make
