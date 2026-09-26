@@ -608,7 +608,19 @@ if [ "$TEMPLATE_RC" = "0" ]; then
 else
   check "P6m the --print-policy template passes the navigation policy contract once its placeholders are filled ($TEMPLATE_VERDICT)" FAIL
 fi
-CHECK_CONSENT_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:5173" "/" declared-safe 2>/dev/null)"
+PW_STUB_BIN="$(mktemp -d "${TMPDIR:-/tmp}/zensu-vf-cli.XXXXXX")" || { echo "FATAL: fixture"; exit 2; }
+trap 'rm -rf "$PW_STUB_BIN"' EXIT
+mkdir -p "$PW_STUB_BIN/node_modules/@playwright/cli"
+printf '#!/bin/sh\nexit 0\n' > "$PW_STUB_BIN/playwright-cli"
+chmod 755 "$PW_STUB_BIN/playwright-cli"
+printf '{"name":"@playwright/cli","version":"%s"}\n' "$PW_MEASURED" > "$PW_STUB_BIN/node_modules/@playwright/cli/package.json"
+PW_STUB_READ="$(PATH="$PW_STUB_BIN:$PATH" node -e 'const v = require(process.argv[1]).installedVersion(process.env); process.stdout.write(v.source + " " + v.version)' "$PLUGIN_DIR/hooks/lib/playwright-cli-version-v1.js" 2>/dev/null)"
+if [ -n "${PW_MEASURED:-}" ] && [ "$PW_STUB_READ" = "manifest $PW_MEASURED" ]; then
+  check "P6n-control the stub playwright-cli every --check-policy call puts first on PATH reads as the measured version ($PW_MEASURED)" PASS
+else
+  check "P6n-control the stub playwright-cli every --check-policy call puts first on PATH reads as the measured version (got: ${PW_STUB_READ:-<none>})" FAIL
+fi
+CHECK_CONSENT_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:5173" "/" declared-safe 2>/dev/null)"
 CHECK_CONSENT_RC=$?
 if [ "$CHECK_CONSENT_RC" = "0" ] && [ "$CHECK_CONSENT_OUT" = "consent" ]; then
   check "P6n --check-policy prints consent and exits 0 for a loopback route without a policy" PASS
@@ -616,14 +628,14 @@ else
   check "P6n --check-policy prints consent and exits 0 for a loopback route without a policy (rc=$CHECK_CONSENT_RC out=$CHECK_CONSENT_OUT)" FAIL
 fi
 CHECK_POLICY='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:5173","routes":["/"],"evidenceMode":"declared-safe"}]}'
-CHECK_POLICY_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$CHECK_POLICY" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:5173" "/" declared-safe 2>/dev/null)"
+CHECK_POLICY_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$CHECK_POLICY" PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:5173" "/" declared-safe 2>/dev/null)"
 CHECK_POLICY_RC=$?
 if [ "$CHECK_POLICY_RC" = "0" ] && [ "$CHECK_POLICY_OUT" = "policy" ]; then
   check "P6o --check-policy prints policy and exits 0 for a route the launch policy approves" PASS
 else
   check "P6o --check-policy prints policy and exits 0 for a route the launch policy approves (rc=$CHECK_POLICY_RC out=$CHECK_POLICY_OUT)" FAIL
 fi
-CHECK_ROUTE_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$CHECK_POLICY" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:5173" "/admin" declared-safe 2>&1)"
+CHECK_ROUTE_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$CHECK_POLICY" PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:5173" "/admin" declared-safe 2>&1)"
 CHECK_ROUTE_RC=$?
 case "$CHECK_ROUTE_OUT" in
   *'route is not approved for evidence by the navigation policy'*) CHECK_ROUTE_NAMED=true ;;
@@ -634,7 +646,7 @@ if [ "$CHECK_ROUTE_RC" = "1" ] && [ "$CHECK_ROUTE_NAMED" = "true" ]; then
 else
   check "P6p --check-policy exits 1 naming the reason for a route the launch policy does not approve (rc=$CHECK_ROUTE_RC out=$CHECK_ROUTE_OUT)" FAIL
 fi
-CHECK_REMOTE_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 node "$BROWSER_CONFIG" --check-policy remote "https://example.com" "/" declared-safe 2>&1)"
+CHECK_REMOTE_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy remote "https://example.com" "/" declared-safe 2>&1)"
 CHECK_REMOTE_RC=$?
 case "$CHECK_REMOTE_OUT" in
   *'remote-target-needs-parent-environment-policy'*) CHECK_REMOTE_NAMED=true ;;
