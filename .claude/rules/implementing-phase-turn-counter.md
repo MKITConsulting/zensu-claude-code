@@ -141,7 +141,11 @@ prompt-only recovery child and the off-phrase marker write; `hooks/lib/zensu-zen
 the out-of-band writer, which sources the ladder itself; `hooks/lib/zensu-log.sh` holds the
 `--tdd-complete` claim-inventory child; and the three worktree-keep hooks
 (`hooks/session-start-worktree-keep.sh`, `hooks/user-prompt-worktree-keep.sh`,
-`hooks/session-end-worktree-keep.sh`) each run their module child through it. Named by file and role, never by line
+`hooks/session-end-worktree-keep.sh`) each run their module child through it.
+`hooks/lib/zensu-doctor.sh` is no caller: its `playwright-cli --version` read lives in
+`hooks/lib/playwright-cli-version-v1.js`, which bounds the child itself with a 5 s `SIGKILL`
+timeout. Recount with `grep -rn zensu_run_bounded hooks`, skipping comments and the
+`command -v` guard, rather than trusting this census. Named by file and role, never by line
 number, because a line number in prose goes stale silently. The deadline is a fixed, unparameterized 5 s, so the next caller needing a
 different one has to find every site — which is what this roster is for. The two on the Stop
 path carried hand-copied ladders and the
@@ -229,11 +233,11 @@ Then `zensu_impl_stop_nudge_after` in `zensu-config.sh` against `IMPL_STOP_NUDGE
 / `IMPL_STOP_NUDGE_MAX` in `zensu-doctor-report.js`, which are a hand-copy of its default and
 bounds; and the `ZDOC_IMPL_STOP_NUDGE_AFTER` export in `zensu-doctor.sh` against
 `implStopThreshold` — that file sources `zensu-config.sh` ONCE for every getter it resolves
-(five windows today: the pending-review TTL, this threshold, the two owner-activity windows and
-the worktree-keep idle window, with `C21c` deriving that population from the resolve blocks and
-requiring each to be a disjunct of the single-source guard; the guard also names the worktree-keep
-flag, which resolves through `zensu_hook_enabled` rather than a bounded getter and therefore sits
-outside C21c's population), and the count
+(six today: the pending-review TTL, this threshold, the two owner-activity windows, the
+worktree-keep idle window and the delivery-route field, with `C21c` deriving that population
+from the resolve blocks and requiring each to be a disjunct of the single-source guard; the
+guard also names the worktree-keep flag, which resolves through `zensu_hook_enabled` rather than
+a bounded getter and therefore sits outside C21c's population), and the count
 is pinned by `C33` because it shipped as two, one inside each resolve block, while a
 requirements table recorded the single-source rule as met; and **the `implStopNudgeAfter` entry
 in `config.example.json`**, which this roster omitted while both sibling flag sections name
@@ -411,9 +415,10 @@ since the branch point — never against the working-tree diff of the round in f
 - **No `tests/profiles/ci-shard-weights.v1.json` entry**, so the suite is costed at
   `defaultSeconds`. That file requires a real CI figure and its own note sanctions the
   omission; add it from the first green ubuntu-latest `--ci` run rather than estimating.
-- **The threshold is resolved BEFORE the session bind** and is the ONE of the four resolved
-  windows never re-resolved against the record root — the pending-review TTL and both
-  owner-activity windows are — so it inherits the Config-block root gap the previous
+- **The threshold is resolved BEFORE the session bind** and is the ONE of the five resolved
+  windows that never reads the record root — the pending-review TTL and both owner-activity
+  windows are re-resolved against it, and the delivery-route field is resolved from it
+  directly after the bind — so it inherits the Config-block root gap the previous
   section names. **The asymmetry is real and was briefly written out of this file in error, so
   it is worth stating with its evidence:** `zensu-doctor.sh` remembers `ZDOC_TTL_PINNED` before
   the bind and, when the record root and `CLAUDE_PROJECT_DIR` differ, re-resolves the TTL from

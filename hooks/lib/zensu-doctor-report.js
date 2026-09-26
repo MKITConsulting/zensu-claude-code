@@ -43,6 +43,17 @@
 //                            falls back, 0 renders a switched-off disclosure
 //   ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS  the release's own owner-liveness window,
 //                            under the same rules
+//   ZDOC_DELIVERY_ROUTE      this session's resolved delivery route from the wrapper:
+//                            one of the five zensu_delivery_route_field spellings
+//                            (`tdd (session marker)`, `direct (session marker)`,
+//                            `tdd (hooks.defaultDeliveryRoute)`,
+//                            `direct (hooks.defaultDeliveryRoute)`, `ask`), or
+//                            `unknown` (no session key or project root reached the
+//                            probe: the session is unbound, or bound with the pair
+//                            withheld by the shape check) / `unjudged` (the shared
+//                            library is missing or answered outside its vocabulary,
+//                            or the recorded root could not be entered); blank
+//                            withholds the row
 //   ZDOC_NOW_MS              clock override for deterministic tests
 //   ZDOC_BINDING             the wrapper's binding verdict (bound / unbound /
 //                            orphaned-project-root / incompatible-runtime /
@@ -621,12 +632,18 @@ function ruleCarrierRows(cfgReads) {
   });
 }
 
+// A STRING-typed key whose own row judges its value is not a quoted boolean: for
+// hooks.defaultDeliveryRoute "false", "drop the quotes" would lead to boolean false,
+// which that key's own row rejects too, so the report would carry two remedies that
+// contradict each other. Its own row names the right one.
+var STRING_TYPED_KEYS = { 'hooks.defaultDeliveryRoute': true };
 function walkQuotedBooleans(obj, prefix, hits) {
   if (obj === null || typeof obj !== 'object') return;
   Object.keys(obj).forEach(function (k) {
     if (k === '__proto__' || k === 'constructor' || k === 'prototype') return;
     var v = obj[k];
     var dotted = prefix ? prefix + '.' + k : k;
+    if (Object.prototype.hasOwnProperty.call(STRING_TYPED_KEYS, dotted)) return;
     if (typeof v === 'string' && (v === 'true' || v === 'false')) {
       hits.push(dotted + ' = "' + v + '"');
     } else if (v && typeof v === 'object' && !Array.isArray(v)) {
@@ -1629,6 +1646,131 @@ function configBlock() {
   // cfgReads is gathered in this block. It reports on plugin DATA, so it reads as a
   // continuation of `hooks wiring` above.
   ruleCarrierRows(cfgReads);
+  deliveryRouteConfigRow(cfgReads);
+}
+
+// The two ask-hooks each exit on their own flag BEFORE they resolve the route, so a
+// route, configured or recorded, decides only the half whose reader is on. Both
+// delivery-route rows name a switched-off half in these words, and the SessionStart
+// banner carries the same three literals plus the message-preference literal of the
+// Config row; test-delivery-route.sh compares the two carriers.
+var ROUTE_PLAN_HALF_OFF = 'the plan-approval half is off: hooks.autoTdd=false';
+var ROUTE_PROMPT_HALF_OFF = 'the code-request half is off: hooks.tddReminder=false';
+var ROUTE_BOTH_READERS_OFF = 'both readers are off (hooks.autoTdd=false, hooks.tddReminder=false), and each hook exits on its own flag before the route is resolved';
+// The two reader flags as configBlock resolved them from its one cfgReads pass;
+// stateBlock's session row reads them here instead of opening the files again.
+var routeReaders = null;
+
+// hooks.defaultDeliveryRoute is a STRING key — the first under `hooks` — so the
+// quoted-boolean walk above cannot see its one trap: a value that is not one of the
+// three words the hooks accept. They read it PERMISSIVELY (anything else is `ask`), so
+// a misspelling silently keeps the question the user meant to switch off. Merge
+// semantics match hookFlagDisabled: the last file that carries the key wins. Absent
+// and `ask` render nothing — the question is the shipped default, not a finding.
+function deliveryRouteConfigRow(cfgReads) {
+  var value;
+  var seen = false;
+  routeReaders = {
+    planOff: hookFlagDisabled(cfgReads, 'autoTdd'),
+    promptOff: hookFlagDisabled(cfgReads, 'tddReminder'),
+  };
+  cfgReads.forEach(function (entry) {
+    var data = entry.r && entry.r.ok ? entry.r.data : null;
+    if (!data || typeof data !== 'object') return;
+    var hooks = data.hooks;
+    if (!hooks || typeof hooks !== 'object') return;
+    if (Object.prototype.hasOwnProperty.call(hooks, 'defaultDeliveryRoute')) {
+      value = hooks.defaultDeliveryRoute;
+      seen = true;
+    }
+  });
+  if (!seen || value === 'ask') return;
+  if (value === 'tdd' || value === 'direct') {
+    // The default reaches the plan-approval hook only while hooks.autoTdd is on and
+    // the per-prompt reminder only while hooks.tddReminder is on — each hook exits on
+    // its own flag BEFORE it resolves the route — so the row names the half that is
+    // live. Read through the same merged cfgReads, never a second readJson pass.
+    var effect = value === 'tdd' ? 'takes the Zensu workflow' : 'is implemented directly, without the review chain';
+    var planOff = routeReaders.planOff;
+    var promptOff = routeReaders.promptOff;
+    var subject = null;
+    if (!planOff && !promptOff) subject = 'an approved plan or a code request ' + effect;
+    else if (!planOff) subject = 'an approved plan ' + effect + ' (' + ROUTE_PROMPT_HALF_OFF + ')';
+    else if (!promptOff) subject = 'a code request ' + effect + ' (' + ROUTE_PLAN_HALF_OFF + ', so an approved plan is implemented directly)';
+    if (subject === null) {
+      line(WARN, 'config: hooks.defaultDeliveryRoute=' + value + ' is configured but decides nothing — ' + ROUTE_BOTH_READERS_OFF);
+      return;
+    }
+    line(OK, 'config: hooks.defaultDeliveryRoute=' + value + ' — the delivery-route question is skipped: ' + subject
+      + '; a preference stated in the user\'s own message decides only that request, and /zensu:delivery-route changes the route for this session');
+    return;
+  }
+  var shown = safeConfigValue(value, ' is not tdd');
+  line(WARN, 'config: hooks.defaultDeliveryRoute=' + (shown.ok ? shown.text : '(' + FOLD_UNAVAILABLE + ')')
+    + ' is not tdd, direct or ask — the hooks read it as ask, so the delivery-route question is asked; use one of those three lowercase words');
+}
+
+// A value from a session-writable or committed file reaches a model-relayed row. A
+// string renders as itself and anything else as its JSON spelling, so a quoted value
+// is never quoted twice; it is bounded to 40 characters with a visible `…` when cut,
+// then folded through foldSlot, the ONE display rule this file consumes. Returns the
+// slot shape `{ text, ok }` with BARE text: the call site supplies any parentheses,
+// and on a load fault it renders FOLD_UNAVAILABLE rather than re-authoring it.
+function safeConfigValue(value, followedBy) {
+  var text = typeof value === 'string' ? value : String(JSON.stringify(value));
+  if (text === '') return { text: '""', ok: true };
+  var cut = text.length > 40 ? '…' : '';
+  var slot = foldSlot(text.slice(0, 40), cut + (followedBy || ''));
+  return { text: slot.ok ? slot.text + cut : '', ok: slot.ok };
+}
+
+// The bound session's recorded delivery route, resolved by the wrapper through the
+// same zensu-config.sh ladder both ask-hooks use (ZDOC_DELIVERY_ROUTE). A route that
+// is fixed is ordinary, disclosed state, so it renders OK; what must never render
+// green is a session whose marker could not be looked for. The reader flags qualify
+// every sentence that says where the question is or is not asked, because each hook
+// exits on its own flag before it resolves the route.
+function deliveryRouteRow() {
+  var v = String(env.ZDOC_DELIVERY_ROUTE || '');
+  if (v === '') return;
+  var planOff = !!(routeReaders && routeReaders.planOff);
+  var promptOff = !!(routeReaders && routeReaders.promptOff);
+  var halfOff = '';
+  if (planOff && !promptOff) halfOff = ' (' + ROUTE_PLAN_HALF_OFF + ')';
+  else if (promptOff && !planOff) halfOff = ' (' + ROUTE_PROMPT_HALF_OFF + ')';
+  if (v === 'unknown') {
+    // The tail names the cause the binding verdict gives. `unknown` prints no binding
+    // row at all, and a `bound` verdict whose key/root pair failed the wrapper's shape
+    // check prints the valid-record row, so pointing at "the binding row above" is
+    // right only for the other verdicts.
+    var binding = String(env.ZDOC_BINDING || '');
+    var cause = 'read the binding row above';
+    if (binding === '' || binding === 'unknown') {
+      cause = 'this report ran without CLAUDE_CODE_SESSION_ID or CLAUDE_PLUGIN_DATA, so no session could be bound; run /zensu:doctor inside the session to check it';
+    } else if (binding === 'bound') {
+      cause = 'the session is bound, but its recorded session key or project root failed the report\'s shape check and was withheld';
+    }
+    line(WARN, 'delivery route: not checked — no bound session key or recorded project root was available, so this session\'s /zensu:delivery-route marker was never looked for; a missing check rather than an all-clear — ' + cause);
+  } else if (v === 'unjudged') {
+    line(WARN, 'delivery route: could not be read — the shared config library did not answer for this session, or its recorded project root could not be entered; a missing check rather than an all-clear. Run /zensu:delivery-route --status from the session to see what the hooks resolve');
+  } else if (planOff && promptOff && (v === 'ask' || /^(tdd|direct) \((session marker|hooks\.defaultDeliveryRoute)\)$/.test(v))) {
+    line(OK, 'delivery route: ' + v + ' — decides nothing this session: ' + ROUTE_BOTH_READERS_OFF);
+  } else if (v === 'ask') {
+    var where = planOff ? 'on a code request' : (promptOff ? 'after a plan approval' : 'after a plan approval and on a code request');
+    line(OK, 'delivery route: ask — the route question is asked ' + where + halfOff
+      + '; /zensu:delivery-route fixes it for this session, hooks.defaultDeliveryRoute for the project');
+  } else if (/^(tdd|direct) \((session marker|hooks\.defaultDeliveryRoute)\)$/.test(v)) {
+    var dispatch = '; code changes go through /zensu:tdd';
+    if (v.indexOf('direct') === 0) dispatch = '; code changes are implemented directly, without the review chain';
+    else if (planOff) dispatch = '; a code request goes through /zensu:tdd, while an approved plan is implemented directly';
+    else if (promptOff) dispatch = '; an approved plan goes through /zensu:tdd';
+    line(OK, 'delivery route: ' + v + ' — the route question is not asked this session' + halfOff
+      + dispatch + '. Change it with /zensu:delivery-route (--tdd, --direct, --auto)');
+  } else {
+    var shown = safeConfigValue(v, ') — the');
+    line(WARN, 'delivery route: state not recognized (' + (shown.ok ? shown.text : FOLD_UNAVAILABLE)
+      + ') — the wrapper reported a state this report has no row for; a missing check rather than an all-clear');
+  }
 }
 
 // ONE reader for every bounded `ZDOC_*` integer, because the rule below is what its
@@ -4558,6 +4700,10 @@ function claimTopologyRow(projectRoot, ownKey) {
 function stateBlock(nowMs) {
   block('Session state');
   bindingLine();
+  // Rendered ABOVE the state-directory read on purpose: the route is resolved from
+  // the marker AND the config key, so a project with no `.zensu/state` yet still has
+  // an answer (config or `ask`), and the ENOENT return below must not swallow it.
+  deliveryRouteRow();
   var projectRoot = stateProjectRoot();
   var dir = path.join(projectRoot, '.zensu', 'state');
   // ONE renderer for the own-document verdict, called from BOTH the ENOENT branch

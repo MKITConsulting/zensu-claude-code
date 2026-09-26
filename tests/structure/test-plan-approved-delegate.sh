@@ -22,7 +22,8 @@
 #   hooks/session-start-banner.sh              -> D26, D27 (the autoTdd flag arm and
 #     the off-state disclosure), D29, D30 (the node and delegate-hook arms of the
 #     _ZENSU_ROUTE_QUESTION_LIVE guard, and the ONLY grader of the else-branch tip)
-#   evals/plan-approval-hook/run-eval.sh       -> D18, D19, D28, D31, D32, D33
+#   evals/plan-approval-hook/run-eval.sh       -> D18, D19, D28, D31, D32, D33, D38, D40, D41
+#   evals/plan-approval-hook/test-code-plan.exp -> D39, D39b
 #   evals/plan-approval-hook/README.md         -> D20
 set -u
 
@@ -245,6 +246,11 @@ cat >"$TMP_DIR/route-clause.js" <<'JS'
 let s = "";
 process.stdin.on("data", (c) => { s += c; });
 process.stdin.on("end", () => {
+  // The rendered record command carries machine paths, and a path segment such as
+  // `ci` would trip the unattended-run vocabulary scans below. It is replaced by a
+  // fixed token before any slice is taken; D36 pins the command's own text exactly.
+  const cmd = process.env.ROUTE_CMD || "";
+  if (cmd) s = s.split(JSON.stringify(cmd).slice(1, -1)).join("<record-command>");
   const ib = s.indexOf("(B) the user");
   const ic = s.indexOf("(C) you are running non-interactively");
   const ie = s.indexOf("In EVERY OTHER case");
@@ -328,8 +334,12 @@ process.stdin.on("end", () => {
   process.stdout.write(bad.length ? bad.join(",") : "OK");
 });
 JS
+# The record command exactly as the hook renders it: `printf %q` on the data root
+# and on the helper under the CANONICAL plugin root the hook re-derives. Computed in
+# a child `bash`, the same one that runs the hook, so the quoting style matches.
+D_REC_CMD="$(bash -c 'printf "CLAUDE_PLUGIN_DATA=%q bash %q" "$1" "$2"' _ "$CLAUDE_PLUGIN_DATA" "$(cd "$PLUGIN_DIR" && pwd -P)/hooks/lib/zensu-delivery-route.sh")"
 route_clause_verdict() {
-  printf '%s' "$1" | node "$TMP_DIR/route-clause.js" 2>/dev/null
+  printf '%s' "$1" | ROUTE_CMD="$D_REC_CMD" node "$TMP_DIR/route-clause.js" 2>/dev/null
 }
 D13V="$(route_clause_verdict "$OUT")/$(route_clause_verdict "$OUT_STRICT")"
 if [ "$BRANCHES_DISTINCT" != yes ]; then
@@ -576,12 +586,207 @@ else
   check "D20 eval README contradicts its own runner" FAIL
 fi
 
+# D38 the config fixture both eval tests run with. The eval never runs in CI, so a
+# runner that lost the ZENSU_CONFIG export or the `ask` pin would bring back the
+# T2.6 failure the fixture exists for, and one that built the fixture from nothing
+# would drop a withdrawn reviewerSpawnAutoAllow and restore the reviewer-spawn
+# bypass; either shows only in a local run. route_fixture is extracted by text, as
+# D31 extracts its helpers, and run twice. First against a global config that sets
+# `direct`, withdraws the grant and switches the banner off, under a project overlay
+# that re-grants it and sets a key only the overlay carries: the fixture must pin
+# `ask`, keep the withdrawal, and carry both the global and the overlay key over.
+# Then with nothing withdrawn: the fixture must keep the merged grant, so a builder
+# that always writes `false` fails. The runner must build the fixture with that
+# function, as the only writer of the fixture file, before the export, and the
+# export must precede both expect runs.
+D38_FN="$TMP_DIR/route-fixture.sh"
+D38_HOME="$TMP_DIR/d38-home"
+D38_HOME2="$TMP_DIR/d38-home2"
+D38_PROJ="$TMP_DIR/d38-proj"
+d38_shape() { # $1: HOME for the run -> defaultDeliveryRoute,reviewerSpawnAutoAllow,sessionBanner,tddImplementation
+  env -u ZENSU_CONFIG -u CLAUDE_PROJECT_DIR HOME="$1" bash -c '. "$1" && route_fixture "$2" "$3"' \
+    _ "$D38_FN" "$PLUGIN_DIR" "$D38_PROJ" 2>/dev/null | node -e '
+    let j;
+    try { j = JSON.parse(require("fs").readFileSync(0, "utf8")); } catch (e) { process.stdout.write("unparsable"); process.exit(0); }
+    const h = (j && j.hooks) || {};
+    process.stdout.write([h.defaultDeliveryRoute, h.reviewerSpawnAutoAllow, h.sessionBanner, h.tddImplementation].join(","));
+  ' 2>/dev/null
+}
+if [ ! -f "$EVAL_RUNNER" ]; then
+  check "D38 eval runner exists" FAIL
+elif ! command -v node >/dev/null 2>&1; then
+  skip "D38 the route fixture needs node to build and to read"
+else
+  sed -n '/^route_fixture() {/,/^}/p' "$EVAL_RUNNER" > "$D38_FN" 2>/dev/null
+  mkdir -p "$D38_HOME/.zensu" "$D38_HOME2/.zensu" "$D38_PROJ/.zensu"
+  printf '%s\n' '{"hooks":{"defaultDeliveryRoute":"direct","reviewerSpawnAutoAllow":false,"sessionBanner":false}}' \
+    > "$D38_HOME/.zensu/config.json"
+  printf '%s\n' '{"hooks":{"sessionBanner":false}}' > "$D38_HOME2/.zensu/config.json"
+  printf '%s\n' '{"hooks":{"reviewerSpawnAutoAllow":true,"tddImplementation":true}}' > "$D38_PROJ/.zensu/config.json"
+  D38_SHAPE="$(d38_shape "$D38_HOME")"
+  D38_SHAPE2="$(d38_shape "$D38_HOME2")"
+  D38_BUILD="$(grep -nF 'route_fixture "$PLUGIN_DIR" "$PLUGIN_DIR" > "$ROUTE_CONFIG"' "$EVAL_RUNNER" | head -1 | cut -d: -f1)"
+  D38_WRITERS="$(grep -cF '> "$ROUTE_CONFIG"' "$EVAL_RUNNER")"
+  D38_EXPORT="$(grep -nF 'export ZENSU_CONFIG="$ROUTE_CONFIG"' "$EVAL_RUNNER" | head -1 | cut -d: -f1)"
+  D38_RUN1="$(grep -nF 'run_bounded 180 "$EVAL_DIR/test-doc-plan.exp"' "$EVAL_RUNNER" | head -1 | cut -d: -f1)"
+  D38_RUN2="$(grep -nF 'run_bounded 360 "$EVAL_DIR/test-code-plan.exp"' "$EVAL_RUNNER" | head -1 | cut -d: -f1)"
+  if [ "$D38_SHAPE" = "ask,false,false,true" ] && [ "$D38_SHAPE2" = "ask,true,false,true" ] \
+    && [ -n "$D38_BUILD" ] && [ "$D38_WRITERS" = 1 ] \
+    && [ -n "$D38_EXPORT" ] && [ -n "$D38_RUN1" ] && [ -n "$D38_RUN2" ] \
+    && [ "$D38_BUILD" -lt "$D38_EXPORT" ] \
+    && [ "$D38_EXPORT" -lt "$D38_RUN1" ] && [ "$D38_EXPORT" -lt "$D38_RUN2" ]; then
+    check "D38 the eval fixture pins ask over the effective config, keeps a withdrawn grant and a kept one, and is built and exported before both runs" PASS
+  else
+    check "D38 eval route fixture drifted (withdrawn=${D38_SHAPE:-none} kept=${D38_SHAPE2:-none} build=${D38_BUILD:-absent} writers=$D38_WRITERS export=${D38_EXPORT:-absent} run1=${D38_RUN1:-absent} run2=${D38_RUN2:-absent})" FAIL
+  fi
+fi
+
+# D39 the record-prompt guard of the eval's expect script, graded by BEHAVIOUR. It
+# decides which Bash permission prompt an unattended script answers with Yes, and
+# the eval never runs in CI. record_prompt_ok is extracted by text and run under
+# tclsh against captures shaped like the terminal's — a space drawn as a cursor
+# escape, a colour code whose `;` must not count, the helper's name split by a line
+# wrap between box borders, a window title set between the helper and the question
+# — and against the commands it must refuse: chained, piped, redirected, command and
+# process substitution, a zsh glob qualifier, another verb, a later tool call, and a
+# later prompt after the helper already ran, each refusal arm on its own. It grades
+# only the text after the helper's LAST mention: a command chained in front of that
+# mention, and a model-written description that ends in the helper's name, are
+# outside what it can refuse.
+# D39b pins the call site on every host, because it needs only awk and a guard
+# nothing calls protects nothing: the full condition, the route question answered
+# by its label, and exactly two ordinal sends in any spelling — the plan approval
+# before that label, and one inside the condition's branch, before the `}` that
+# closes it.
+D39_EXP="$PLUGIN_DIR/evals/plan-approval-hook/test-code-plan.exp"
+D39_SEND=missing
+if [ -f "$D39_EXP" ]; then
+  D39_COND='if {!$answered && !$recorded && [record_prompt_ok $expect_out(buffer)]} {'
+  D39_SEND="$(awk -v cond="$D39_COND" '
+    !c && index($0, cond) { c = NR }
+    c && !b && NR > c && $0 ~ /^[ \t]*}[ \t\r]*$/ { b = NR }
+    c && !e && NR > c && index($0, "exp_continue -continue_timer") { e = NR }
+    index($0, "send \"Zensu workflow\\r\"") { l++; lbl = NR }
+    /(^|[^_a-zA-Z0-9])(exp_)?send([ \t]+-[-a-z]+)*[ \t]+["{]?[0-9]/ { o++; if (!first) first = NR; last = NR }
+    END { if (c && b && e && o == 2 && l == 1 && first < lbl && lbl < c && last > c && last < e && e < b) print "ok"; else print "cond=" c " close=" b " continue=" e " ordinals=" o " labels=" l " first=" first " last=" last }
+  ' "$D39_EXP")"
+fi
+if [ "$D39_SEND" = ok ]; then
+  check "D39b the eval sends exactly two ordinals in any spelling: the plan approval before the route question's label answer, and one inside the record-prompt branch" PASS
+else
+  check "D39b eval ordinal sends drifted (${D39_SEND:-no send check})" FAIL
+fi
+if [ ! -f "$D39_EXP" ]; then
+  check "D39 eval expect script exists" FAIL
+elif ! command -v tclsh >/dev/null 2>&1; then
+  skip "D39 no tclsh on this host to run the expect script's record-prompt guard"
+else
+  sed -n '/^proc record_prompt_ok /,/^}/p' "$D39_EXP" > "$TMP_DIR/record-guard.tcl" 2>/dev/null
+  cat > "$TMP_DIR/record-guard-cases.tcl" <<'TCL'
+if {[catch {source [lindex $argv 0]} err]} { puts "cannot load the guard: $err"; exit 0 }
+set E "\x1b"
+set cases [list \
+  1 "⏺ Bash(CLAUDE_PLUGIN_DATA=/d bash /p/hooks/lib/zensu-delivery-route.sh --tdd)\n╭─╮\n│ Bash command │\n│ CLAUDE_PLUGIN_DATA=/d bash /p/hooks/lib/zensu-deliv│\n│ ery-route.sh${E}\[25G--tdd │\n│ Record the route │\n Do you want to proceed" \
+  1 "${E}\[38;5;246mzensu-delivery-route.sh${E}\[39m${E}\[2C--tdd\n ${E}\[38;5;246mRecord${E}\[8Gthe route${E}\[39m\n Do${E}\[4Gyou want to proceed" \
+  1 "bash \"/p/zensu-delivery-route.sh\" --tdd\n Do you want to proceed" \
+  1 "bash /p/zensu-delivery-route.sh --tdd\n${E}\]0;route title\x07 Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --tdd && rm -rf x\n Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --tdd; echo hi\n Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --tdd | tee /tmp/x\n Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --tdd \$(id)\n Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --tdd `id`\n Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --tdd > /tmp/x\n Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --tdd < /dev/tcp/h/80\n Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --tdd <(id)\n Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --tdd >(id)\n Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --tdd =(id)\n Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --tdd *(e:'touch /tmp/p':)\n Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --tdd *(+id)\n Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --direct\n Do you want to proceed" \
+  0 "bash /p/zensu-delivery-route.sh --tdd-x\n Do you want to proceed" \
+  0 "Bash(bash /p/zensu-delivery-route.sh --tdd)\n ⎿ delivery-route: tdd\n Bash(bash /p/zensu-log.sh --tdd-begin)\n Do you want to proceed" \
+  0 "Bash(bash /p/zensu-delivery-route.sh --tdd)\n ⎿ delivery-route: tdd\n Do you want to proceed" \
+  0 "Bash(bash /p/zensu-delivery-route.sh --tdd)\n Bash(ls)\n Do you want to proceed" \
+  0 "Bash(bash /p/zensu-delivery-route.sh --tdd)\n Skill(zensu:tdd)\n Do you want to proceed" \
+  0 "Bash(bash /p/zensu-delivery-route.sh --tdd)\n Read(/etc/hosts)\n Do you want to proceed" \
+  0 "Bash(ls -la)\n Do you want to proceed" \
+]
+set bad 0
+foreach {want text} $cases {
+  if {[record_prompt_ok $text] != $want} { incr bad }
+}
+puts "cases=[expr {[llength $cases] / 2}] mismatches=$bad"
+TCL
+  D39_OUT="$(tclsh "$TMP_DIR/record-guard-cases.tcl" "$TMP_DIR/record-guard.tcl" 2>&1 | head -1)"
+  if [ "$D39_OUT" = "cases=24 mismatches=0" ]; then
+    check "D39 record_prompt_ok approves the helper's --tdd call and refuses a chained, redirected, substituted, glob-qualified, other-verb or later-prompt tail after the helper's last mention; text before that mention is not graded" PASS
+  else
+    check "D39 eval record-prompt guard drifted (${D39_OUT:-no output})" FAIL
+  fi
+fi
+
+# D40 T2.9 grades the session marker the helper writes, not the transcript, which
+# also carries whatever the model writes. route_recorded is extracted by text and
+# run against a project whose state directory first holds nothing, then a `tdd`
+# marker older than the stamp, a newer `direct` marker and a newer symlink to a
+# `tdd` file — all refused — and last a newer regular `tdd` marker, which passes.
+# The fixture paths come from the owner's template, so a runner that stops following
+# it turns D40 red. The runner must write the stamp before the Test 2 run and grade
+# T2.9 with it.
+D40_FN="$TMP_DIR/route-recorded.sh"
+D40_PROJ="$TMP_DIR/d40-proj"
+D40_STAMP="$TMP_DIR/d40-stamp"
+d40_grade() { bash -c '. "$1" && route_recorded "$2" "$3" "$4"' _ "$D40_FN" "$PLUGIN_DIR" "$D40_PROJ" "$D40_STAMP" 2>/dev/null; }
+d40_marker() { bash -c '. "$1/hooks/lib/zensu-config.sh" && zensu_delivery_route_marker_path "$2" "$3"' _ "$PLUGIN_DIR" "$D40_PROJ" "$1" 2>/dev/null; }
+if [ ! -f "$EVAL_RUNNER" ]; then
+  check "D40 eval runner exists" FAIL
+else
+  sed -n '/^route_recorded() {/,/^}/p' "$EVAL_RUNNER" > "$D40_FN" 2>/dev/null
+  D40_M_OLD="$(d40_marker scv1_old)"
+  D40_M_DIRECT="$(d40_marker scv1_direct)"
+  D40_M_LINK="$(d40_marker scv1_link)"
+  D40_M_NEW="$(d40_marker scv1_new)"
+  mkdir -p "$(dirname "${D40_M_NEW:-$TMP_DIR/d40-unresolved/x}")"
+  : > "$D40_STAMP"
+  touch -t 202001010000 "$D40_STAMP"
+  D40_EMPTY="$(d40_grade)"
+  printf '%s\n' '{"route":"tdd"}' > "$D40_M_OLD"
+  touch -t 201901010000 "$D40_M_OLD"
+  D40_OLD="$(d40_grade)"
+  printf '%s\n' '{"route":"direct"}' > "$D40_M_DIRECT"
+  D40_DIRECT="$(d40_grade)"
+  printf '%s\n' '{"route":"tdd"}' > "$TMP_DIR/d40-link-target.json"
+  D40_LINK=unbuilt
+  if ln -s "$TMP_DIR/d40-link-target.json" "$D40_M_LINK" 2>/dev/null \
+    && [ -L "$D40_M_LINK" ]; then
+    D40_LINK="$(d40_grade)"
+    rm -f "$D40_M_LINK"
+  fi
+  printf '%s\n' '{"route":"tdd"}' > "$D40_M_NEW"
+  D40_NEW="$(d40_grade)"
+  D40_STAMPED="$(grep -nF ': > "$ROUTE_STAMP"' "$EVAL_RUNNER" | head -1 | cut -d: -f1)"
+  D40_RUN2="$(grep -nF 'run_bounded 360 "$EVAL_DIR/test-code-plan.exp"' "$EVAL_RUNNER" | head -1 | cut -d: -f1)"
+  if [ "$D40_EMPTY" = FAIL ] && [ "$D40_OLD" = FAIL ] && [ "$D40_DIRECT" = FAIL ] \
+    && { [ "$D40_LINK" = FAIL ] || [ "$D40_LINK" = unbuilt ]; } && [ "$D40_NEW" = PASS ] \
+    && [ -n "$D40_STAMPED" ] && [ -n "$D40_RUN2" ] && [ "$D40_STAMPED" -lt "$D40_RUN2" ] \
+    && grep -qF '"$(route_recorded "$PLUGIN_DIR" "$PLUGIN_DIR" "$ROUTE_STAMP")"' "$EVAL_RUNNER"; then
+    if [ "$D40_LINK" = unbuilt ]; then
+      check "D40 T2.9 grades a newer regular tdd marker and refuses none, an older one and direct (the symlink case could not be built here)" PASS
+    else
+      check "D40 T2.9 grades a newer regular tdd marker and refuses none, an older one, direct and a symlink" PASS
+    fi
+  else
+    check "D40 eval T2.9 grading drifted (empty=$D40_EMPTY old=$D40_OLD direct=$D40_DIRECT link=$D40_LINK new=$D40_NEW marker=${D40_M_NEW:-unresolved} stamp=${D40_STAMPED:-absent} run2=${D40_RUN2:-absent})" FAIL
+  fi
+fi
+
 
 # ─── The banner's route-tip guard (hooks/session-start-banner.sh) ─────────────
 # D26 covers the FLAG arm of the banner's _ZENSU_ROUTE_QUESTION_LIVE guard. That
-# guard has THREE conditions and the other two were graded by nothing: deleting
-# either the `command -v node` line or the `[ -f .../plan-approved-delegate.sh ]`
-# line leaves this suite AND test-session-start-banner.sh fully green (measured,
+# guard has FOUR conditions; R14 in tests/structure/test-delivery-route.sh grades the
+# configured-default arm. When it had three, the other two were graded by nothing:
+# deleting either the `command -v node` line or the `[ -f .../plan-approved-delegate.sh ]`
+# line left this suite AND test-session-start-banner.sh fully green (measured,
 # 31/31 and 19/19 with each mutation applied). Both reach the same defect D26
 # exists for — the banner promising a question that cannot fire — through a
 # broken installation rather than a configured choice.
@@ -683,7 +888,7 @@ fi
 # nonempty() to a constant `echo PASS` satisfies both and reinstates the exact
 # defect — measured: this suite stayed green with that mutation applied. The runner
 # cannot be sourced (it `require`s expect and claude at the top and then drives a
-# real session), so the three helpers, each a single line, are extracted by text and
+# real session), so the four helpers, each a single line, are extracted by text and
 # sourced on their own. That imposes a SOURCE-LAYOUT contract on the runner, which
 # is recorded there too: the definitions must stay single-line and at column 0.
 EVAL_FN="$TMP_DIR/eval-helpers.sh"
@@ -692,17 +897,19 @@ FULL_FILE="$TMP_DIR/transcript-full.log"; printf 'Executing via /zensu:tdd\n' > 
 if [ ! -f "$EVAL_RUNNER" ]; then
   check "D31 eval runner exists" FAIL
   check "D32 eval runner exists" FAIL
+  check "D41 eval runner exists" FAIL
 else
-  sed -n '/^nonempty()/p;/^not_contains()/p;/^strip_ansi()/p' "$EVAL_RUNNER" > "$EVAL_FN" 2>/dev/null
+  sed -n '/^nonempty()/p;/^not_contains()/p;/^strip_ansi()/p;/^contains()/p' "$EVAL_RUNNER" > "$EVAL_FN" 2>/dev/null
   # `grep -c` prints 0 AND exits 1 on no match, so a `|| echo 0` fallback yields the
   # two-line value "0\n0"; the arithmetic test below then errors, returns 2, and
   # control falls through to the ELSE branch — the deliberately written extraction
   # arm never fires and both checks report the wrong cause. Normalise explicitly.
   EVAL_FN_LINES="$(grep -c . "$EVAL_FN" 2>/dev/null)"
   case "$EVAL_FN_LINES" in ''|*[!0-9]*) EVAL_FN_LINES=0 ;; esac
-  if [ "$EVAL_FN_LINES" -ne 3 ]; then
-    check "D31 could not extract nonempty/not_contains/strip_ansi from the runner (got $EVAL_FN_LINES of 3)" FAIL
+  if [ "$EVAL_FN_LINES" -ne 4 ]; then
+    check "D31 could not extract nonempty/not_contains/strip_ansi/contains from the runner (got $EVAL_FN_LINES of 4)" FAIL
     check "D32 not_contains() premise ungraded — extraction failed" FAIL
+    check "D41 strip_ansi escape handling ungraded — extraction failed" FAIL
   else
     # shellcheck disable=SC1090
     D31_EMPTY="$(. "$EVAL_FN"; nonempty "$EMPTY_FILE")"
@@ -726,6 +933,29 @@ else
       check "D32 not_contains() is satisfied by an empty transcript — the premise the gate exists for" PASS
     else
       check "D32 not_contains() premise changed (empty=$D32_EMPTY hit=$D32_HIT)" FAIL
+    fi
+    # D41 strip_ansi removes a whole cursor escape, the ESC byte included, whichever
+    # sed runs it: the terminal can draw a space as a cursor-position escape, and a
+    # sed that reads `\x1b` as literal text would leave the byte between the words.
+    # A private-mode escape goes whole too, and the definition must spell the byte
+    # through printf: on a sed that honors `\x1b`, the behavioural half passes anyway.
+    ESC_FILE="$TMP_DIR/transcript-escape.log"
+    printf 'alpha:\033[1Cbeta\ngamma\033[Cdelta\nzeta\033[?25leta\n' > "$ESC_FILE"
+    # shellcheck disable=SC1090
+    D41_PARAM="$(. "$EVAL_FN"; contains "$ESC_FILE" 'alpha:beta')"
+    # shellcheck disable=SC1090
+    D41_BARE="$(. "$EVAL_FN"; contains "$ESC_FILE" 'gammadelta')"
+    # shellcheck disable=SC1090
+    D41_PRIVATE="$(. "$EVAL_FN"; contains "$ESC_FILE" 'zetaeta')"
+    D41_LINE="$(grep '^strip_ansi()' "$EVAL_FN")"
+    D41_SPELLED=no
+    if printf '%s' "$D41_LINE" | grep -qF "\$(printf '\\033')" && ! printf '%s' "$D41_LINE" | grep -qF '\x1b'; then
+      D41_SPELLED=yes
+    fi
+    if [ "$D41_PARAM" = PASS ] && [ "$D41_BARE" = PASS ] && [ "$D41_PRIVATE" = PASS ] && [ "$D41_SPELLED" = yes ]; then
+      check "D41 strip_ansi removes a cursor or private-mode escape whole, with the ESC byte spelled through printf" PASS
+    else
+      check "D41 strip_ansi leaves part of an escape behind or respells the ESC byte (param=$D41_PARAM bare=$D41_BARE private=$D41_PRIVATE printf=$D41_SPELLED)" FAIL
     fi
   fi
 fi
@@ -775,6 +1005,75 @@ else
   else
     check "D33 all $D33_TOTAL absence assertions sit inside a gate that runs them on the PASS branch" PASS
   fi
+fi
+# --- Session-sticky delivery route (D34-D36) ----------------------------------
+# The two ask-hooks read a session marker and hooks.defaultDeliveryRoute and end
+# their directive with a ZENSU DELIVERY ROUTE: field. tests/structure/
+# test-delivery-route.sh owns the helper, the reader and the three field states
+# in both hooks; these three rows keep the plan-hook contract visible from the
+# suite named for the hook. Both branches are graded through both_have, so a
+# one-sided edit of the (S) clause fails here as well as in P1.
+both_have "D34 both branches carry the (S) clause, the ask conjunct and the workflow-only RECORD sentence" \
+  "(S) — read this before (A)" \
+  "and the route field reads 'ask'" \
+  "RECORD a Zensu-workflow answer before dispatching" \
+  "after the 'Zensu workflow — /zensu:tdd' answer run" \
+  "The 'No — implement directly' answer records nothing and decides this plan only" \
+  "this one Bash call comes BEFORE the 'next tool call' that arm names" \
+  "if the user declines that Bash call, say in one line that nothing was recorded and that the question will come back" \
+  "no prerequisites. Its description MUST also say that this answer is remembered for the rest of this session, later code requests included unless their reminder is switched off, through one Bash call the user may be asked to allow" \
+  "no evidence audit. Its description MUST also say that this answer decides this plan only and is not remembered" \
+  "a route the field decided records nothing" \
+  "The field never names /zensu:autopilot or /zensu:pilot" \
+  "ZENSU DELIVERY ROUTE:" \
+  "The user changes a recorded route with /zensu:delivery-route"
+# D35 the default fixture has no marker and no config default, so the field must
+# read exactly `ask` — and it must be the LAST thing in the directive, because the
+# (S) clause tells the model to read "the field at the very end".
+D35_BAD=""
+for name in OUT OUT_STRICT; do
+  ctx="$(printf '%s' "${!name}" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{process.stdout.write((JSON.parse(s).hookSpecificOutput||{}).additionalContext||"")}catch(_){process.stdout.write("")}})')"
+  tailtxt="$(printf '%s' "$ctx" | tail -c 120 | tr -d '\n')"
+  case "$tailtxt" in
+    (*"ZENSU DELIVERY ROUTE: ask<!-- /zensu:delivery-route -->") ;;
+    (*) D35_BAD="$D35_BAD [$name tail: $tailtxt]" ;;
+  esac
+  printf '%s' "$ctx" | grep -qF '__ZENSU_' && D35_BAD="$D35_BAD [$name raw placeholder]"
+done
+if [ "$BRANCHES_DISTINCT" != yes ]; then
+  check "D35 (not graded: D9pre failed, the two branches are not distinct)" FAIL
+elif [ -z "$D35_BAD" ]; then
+  check "D35 with neither marker nor config the directive ends with 'ZENSU DELIVERY ROUTE: ask' and no raw placeholder" PASS
+else
+  check "D35 field tail:$D35_BAD" FAIL
+fi
+# D36 a configured default is rendered into BOTH branches with its source named,
+# and the RECORD sentence carries the record command exactly as rendered, bound to
+# `--tdd`, the one verb an answer records.
+CFG_ROUTE="$TMP_DIR/route-direct.json"
+printf '{"hooks":{"defaultDeliveryRoute":"direct"}}' > "$CFG_ROUTE"
+OUT_ROUTE="$(SESSION_ID="$SESSION_ID" node -e 'process.stdout.write(JSON.stringify({
+  hook_event_name: "PostToolUse", session_id: process.env.SESSION_ID,
+  tool_name: "ExitPlanMode", tool_input: {plan: "add a function"}
+}))' | ZENSU_CONFIG="$CFG_ROUTE" bash "$HOOK" 2>/dev/null)"
+printf '{"hooks":{"tddImplementation":true,"defaultDeliveryRoute":"direct"}}' > "$CFG_ROUTE"
+OUT_ROUTE_STRICT="$(SESSION_ID="$SESSION_ID" node -e 'process.stdout.write(JSON.stringify({
+  hook_event_name: "PostToolUse", session_id: process.env.SESSION_ID,
+  tool_name: "ExitPlanMode", tool_input: {plan: "add a function"}
+}))' | ZENSU_CONFIG="$CFG_ROUTE" bash "$HOOK" 2>/dev/null)"
+rm -f "$CFG_ROUTE"
+D36_CTX="$(printf '%s' "$OUT_ROUTE" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{process.stdout.write((JSON.parse(s).hookSpecificOutput||{}).additionalContext||"")}catch(_){process.stdout.write("")}})')"
+if [ -n "$OUT_ROUTE" ] && [ -n "$OUT_ROUTE_STRICT" ] \
+   && printf '%s' "$OUT_ROUTE" | grep -qF 'ZENSU DELIVERY ROUTE: direct (hooks.defaultDeliveryRoute)' \
+   && printf '%s' "$OUT_ROUTE_STRICT" | grep -qF 'ZENSU DELIVERY ROUTE: direct (hooks.defaultDeliveryRoute)' \
+   && printf '%s' "$OUT_ROUTE_STRICT" | grep -qF 'strict TDD flow' \
+   && ! printf '%s' "$OUT_ROUTE" | grep -qF 'strict TDD flow' \
+   && printf '%s' "$D36_CTX" | grep -qF "after the 'Zensu workflow — /zensu:tdd' answer run $D_REC_CMD --tdd — this one Bash call" \
+   && ! printf '%s' "$D36_CTX" | grep -qF -- "$D_REC_CMD --direct" \
+   && ! printf '%s' "$OUT_ROUTE" | grep -qF '__ZENSU_ROUTE_COMMAND__'; then
+  check "D36 hooks.defaultDeliveryRoute=direct renders its field in both branches and the exact record command bound to the workflow answer only" PASS
+else
+  check "D36 configured default (vanilla=$(printf '%s' "$OUT_ROUTE" | grep -o 'ZENSU DELIVERY ROUTE: [^<\\]*' | tail -1) strict=$(printf '%s' "$OUT_ROUTE_STRICT" | grep -o 'ZENSU DELIVERY ROUTE: [^<\\]*' | tail -1))" FAIL
 fi
 
 echo "----"

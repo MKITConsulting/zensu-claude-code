@@ -19,7 +19,8 @@ description: >
   Autopilot run holding a working tree, whether this session's app-managed worktree
   carries the desktop-pool keep marker and still sits on its recorded branch, any reviewer spawn
   the host permission layer refused, any claim this session audited against a root
-  that is not the anchor, expired pending-review surfaced).
+  that is not the anchor, this session's recorded delivery route, expired pending-review
+  surfaced).
   The only write is an explicit, user-confirmed cleanup of one
   expired pending-review.json — CAS workflow documents are never deleted. Use
   when the user asks to "diagnose zensu", "check my zensu
@@ -64,8 +65,8 @@ exception is removal of an expired `pending-review.json` you explicitly confirm.
 None. No MCP connection, no API key, no network. The tool probes are local
 (`command -v`, `--version`, auth-status exit codes). The `playwright-cli` version is read by
 `hooks/lib/playwright-cli-version-v1.js` from the `package.json` of the `@playwright/cli`
-package the binary on `PATH` resolves to — the nearest manifest within four directories of the
-resolved binary, else one beside an npm shim — without running it. A manifest that names
+package the binary on `PATH` resolves to — one beside an npm shim, else the nearest manifest
+within four directories of the resolved binary — without running it. A manifest that names
 another package, exceeds 64 KiB, does not parse or carries no valid name and version is
 reported as such, and the binary is NOT run. Only when no manifest exists at all does the
 doctor run `playwright-cli --version` once, with the update check disabled, stdin closed and a
@@ -272,6 +273,25 @@ classifier will refuse a spawn, not only when the whole table is green.
   parse it and cannot judge it. Say explicitly that the config loader has no size limit,
   so the file is not skipped for its size — but do not tell the user it is applied, or
   that it is ignored: neither is knowable from a row that never read the file.
+- **✅ config: hooks.defaultDeliveryRoute=tdd / =direct** → the project configured a default
+  delivery route, so the route question is skipped wherever its reader is on: `tdd` sends an
+  approved plan or a code request through the Zensu workflow, `direct` implements it
+  directly without the review chain. Relay the value, that a preference stated in the
+  user's own message decides only that request, and that `/zensu:delivery-route` changes
+  the route for the session. When the
+  row adds that a **half is off** (`hooks.autoTdd=false` or `hooks.tddReminder=false`),
+  the default decides only the other half, because each hook exits on its own flag before
+  it resolves the route; relay which half.
+- **⚠️ config: hooks.defaultDeliveryRoute=… is configured but decides nothing** → both
+  readers are off (`hooks.autoTdd=false` and `hooks.tddReminder=false`), so no hook ever
+  resolves the route and the value has no effect. Either turn a reader back on or remove
+  the key; do not tell the user the question is skipped.
+- **⚠️ config: hooks.defaultDeliveryRoute=… is not tdd, direct or ask** → the value is
+  misspelled, quoted differently, or not a string; the hooks read it permissively as `ask`,
+  so the question the user meant to switch off is still asked. The value is shown as
+  written — a string without added quotes, anything else in its JSON spelling — cut at
+  40 characters with a trailing `…`. The fix is the config value itself — one of the three
+  lowercase words.
 - **⚠️ permissions: …** `could not be read —` → a filesystem problem: the file could
   not be opened, is not a regular file, is too large, or was read incompletely.
 - **⚠️ permissions: …** `could not be parsed` → the file WAS read; its bytes are
@@ -348,7 +368,9 @@ classifier will refuse a spawn, not only when the whole table is green.
 - **⚠️ zensu not authenticated** → `zensu auth login`.
 - **✅ playwright-cli: installed (…)** → the version read from the `@playwright/cli` package
   manifest beside the binary is the one the browser consent gate was measured against, and
-  `/zensu:verify-feature` drives the browser through it. Nothing to do.
+  `/zensu:verify-feature` drives the browser through it. The manifest vouches for the package,
+  not for the binary: a wrapper script in a directory that holds such a manifest reads the same.
+  Nothing to do.
 - **⚠️ playwright-cli: installed (…), not the version the browser consent gate was measured
   against** → the gate's argument parser, its ambient-variable names, the global-config keys and
   the run-config schema were measured against another release, so a changed flag meaning in
@@ -371,17 +393,23 @@ classifier will refuse a spawn, not only when the whole table is green.
   was found beside it** → no manifest exists beside an npm shim or within four directories of the
   resolved binary, so the doctor asked the binary itself. A version a binary prints about
   itself is never taken as measured, even when it matches, and the run-config helper refuses to
-  start `/zensu:verify-feature` on it. A wrapper script outside the package looks exactly like
-  this, so the row also advises putting the directory npm installs `playwright-cli` into first
-  on PATH, ahead of any wrapper. Relay the row and the pinned install command it names.
+  start `/zensu:verify-feature` on it. A wrapper script outside the package with no `package.json`
+  near it looks exactly like this, so the row also advises putting the directory npm installs
+  `playwright-cli` into first on PATH, ahead of any wrapper. Relay the row and the pinned install
+  command it names.
 - **⚠️ playwright-cli: the binary on PATH belongs to the package …, not @playwright/cli** → the
   nearest `package.json` names another package, so the doctor did not run the binary at all, and
   the run-config helper refuses to start `/zensu:verify-feature` on it. Relay the row with the
   package it names; installing `@playwright/cli` with the pinned command is the user's decision.
+  A wrapper script with another package's `package.json` within four directories reads like this
+  too, and then the directory npm installs `playwright-cli` into also has to come first on PATH.
 - **⚠️ playwright-cli: the package manifest beside the binary on PATH could not be judged** →
   the nearest `package.json` does not parse, exceeds 64 KiB, or carries no valid package name and
   version, so the doctor did not run the binary, and the run-config helper refuses to start
   `/zensu:verify-feature` on it. Relay the row and the pinned reinstall command it names.
+  A wrapper script with a `package.json` the doctor cannot judge within four directories, such as
+  a project manifest with no name, reads like this too, and then the directory npm installs
+  `playwright-cli` into also has to come first on PATH.
 - **⚠️ playwright-cli: installed, but its version could not be read** → no manifest exists and
   the binary printed no version within five seconds, or the probe could not run. The run-config
   helper refuses to start `/zensu:verify-feature` until it reads the version from the package
@@ -427,10 +455,16 @@ classifier will refuse a spawn, not only when the whole table is green.
   Without the gate nothing judges a
   `zensu-verify` session; without the recorder every navigation would prompt and nothing would
   be remembered. Reinstall the plugin. The label is literal: the run-config helper writes no run
-  config unless both hooks demonstrably answer registered, and a missing prefilter library or a
-  missing, symlinked or unloadable decision module makes the consent hook deny every gated call, so `/zensu:verify-feature` cannot drive
-  a browser; tell the user not to start `/zensu:verify-feature` until this row clears. The
-  parenthesis names the cause, and it names each hook
+  config unless both hooks demonstrably answer registered, and a missing, symlinked or unloadable
+  decision module makes the consent hook deny every gated call, so `/zensu:verify-feature` cannot
+  drive a browser; tell the user not to start `/zensu:verify-feature` until this row clears. A
+  missing prefilter library makes it deny every call the skill issues, although a gated call that
+  splits `playwright` and `zensu-verify` with a backslash before `n`, `r` or `t` then passes
+  unjudged. A missing
+  prefilter library also makes it deny every other Bash call whose payload names `playwright` or
+  `zensu-verify`, with `prefilter library unavailable` — in a project whose path names either
+  word, every Bash call except the recognized `/zensu:doctor` and adoption commands — so tell the
+  user those denials share this cause. The parenthesis names the cause, and it names each hook
   with its own state — "consent hook" is the gate, "consent recorder" the recorder — joined by
   `; ` when both apply; relay each state for the hook it names. A registration that could not
   be determined, or a probe that did not complete, is NOT a missing hook — relay it as a check
@@ -743,6 +777,31 @@ whether browser verification is enforced, not only when a row is red.
   `/srv`, a CI checkout under `/builds` — are unaffected and the row works on
   them. Say WHICH HALF is live when you relay a silent topology; never report it
   as proof that the chain stayed in one repository.
+- **✅ delivery route: tdd (session marker) / direct (session marker) / tdd (hooks.defaultDeliveryRoute) / direct (hooks.defaultDeliveryRoute)** → this
+  session's delivery route is already decided, so the plan-approval hook and the
+  per-prompt reminder dispatch without the route question. Green because it is disclosed,
+  ordinary state — relay the value AND its source verbatim, and name the two ways to
+  change it: `/zensu:delivery-route` (`--tdd`, `--direct`, `--auto`) for the session,
+  `hooks.defaultDeliveryRoute` for the project. A `direct` route means code changes skip
+  the review chain and the evidence audits for this session; say so. A **half is off**
+  parenthetical means one reader is switched off, so the route decides only the other
+  half; for a `tdd` route the clause after it says which kind of change still reaches
+  `/zensu:tdd`.
+- **✅ delivery route: ask** → nothing decided; the question is asked where its reader is
+  on — the row names the half it is asked on when one flag is off.
+- **✅ delivery route: … — decides nothing this session** → both readers are off
+  (`hooks.autoTdd=false` and `hooks.tddReminder=false`), so neither hook asks or dispatches
+  on a route; whatever the row names has no effect until a reader is turned back on.
+- **⚠️ delivery route: not checked / could not be read / state not recognized** → a
+  MISSING CHECK, never a verdict. **Not checked:** no bound session key or recorded project
+  root was available, and the row names which cause applies — the report ran without
+  `CLAUDE_CODE_SESSION_ID` or `CLAUDE_PLUGIN_DATA` (there is no binding row then — run
+  `/zensu:doctor` inside the session), the session is bound but its recorded key or project
+  root failed the shape check (the binding row above is the valid-record one), or any other
+  binding verdict (read the binding row). **Could not be read:** the shared config library
+  did not answer, or the recorded project root could not be entered. **State not
+  recognized:** the wrapper reported a word this report has no row for. Point at
+  `/zensu:delivery-route --status` from the session for the hooks' own answer.
 - **❌ state: this session's own workflow document is MISSING** → the record is
   intact and the document it anchors is gone, so the capability gate is denying
   every tool in this session. A deleted and re-created worktree causes it, because

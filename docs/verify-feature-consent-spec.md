@@ -4,9 +4,10 @@
 (`scripts/playwright-mcp-proxy.js`), its launcher and its lockfile-backed npm runtime were
 removed: each Claude Code session started the server and materialized a private runtime of
 several hundred megabytes whether or not a browser was ever opened. `/zensu:verify-feature` now
-drives `playwright-cli`, and the consent gate moved to the `Bash` matcher, where it judges every
-`playwright-cli` call on a `zensu-verify-*` session: a command allowlist, a run config the gate
-reads itself, the same floor, the same per-origin consent and the same memory. Every statement
+drives `playwright-cli`, and the consent gate moved to the `Bash` matcher, where it judges a
+`playwright-cli` call on a `zensu-verify-*` session whose command text names the CLI and the
+session — a textual gate — with a command allowlist, a run config the gate reads itself, the same
+floor, the same per-origin consent and the same memory. Every statement
 below about the broker, its start modes, its execution marker or the MCP tool names describes the
 retired design. The current behaviour is in `docs/gates.md` § Browser Consent Gate and
 `docs/verify-feature.md`; this document stays as the record of the consent-mode decisions.

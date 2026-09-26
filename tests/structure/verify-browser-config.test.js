@@ -23,6 +23,7 @@ function runDir(t, name = 'run-abc123') {
 const NO_POLICY = Object.freeze({});
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const MEASURED = consent.PLAYWRIGHT_CLI_SOURCE_VERSION;
+const UNMEASURED = MEASURED.replace(/\d+$/, (patch) => String(Number(patch) + 1));
 const PINNED = `npm install -g @playwright/cli@${MEASURED}`;
 const installedAs = (found) => () => ({ version: '', owner: '', ...found });
 const READY = Object.freeze({ pluginRoot: REPO_ROOT, installedVersion: installedAs({ source: 'manifest', version: MEASURED, owner: '@playwright/cli' }) });
@@ -271,13 +272,15 @@ test('the helper writes no run config unless both consent hooks are registered o
 
 test('the helper writes no run config for a playwright-cli version other than the measured one, or one it cannot read', async (t) => {
   const origin = ['--mode', 'local', '--origin', 'http://127.0.0.1:5173'];
+  assert.notEqual(UNMEASURED, MEASURED);
   const cases = [
-    [{ source: 'manifest', version: '0.1.22', owner: '@playwright/cli' }, `playwright-cli 0.1.22 is installed, but the browser consent gate was measured against ${MEASURED}`],
+    [{ source: 'manifest', version: UNMEASURED, owner: '@playwright/cli' }, `playwright-cli ${UNMEASURED} is installed, but the browser consent gate was measured against ${MEASURED}`],
     [{ source: 'manifest', version: `${MEASURED}-beta.1`, owner: '@playwright/cli' }, `playwright-cli ${MEASURED}-beta.1 is installed`],
     [{ source: 'absent' }, 'playwright-cli is not on PATH'],
     [{ source: 'foreign', owner: 'not-playwright' }, 'the playwright-cli on PATH belongs to the package not-playwright, not @playwright/cli'],
     [{ source: 'malformed' }, 'the package manifest beside the playwright-cli on PATH could not be judged'],
     [{ source: 'unread' }, 'the installed playwright-cli version could not be read from its @playwright/cli package manifest'],
+    [{ source: 'self-reported', version: MEASURED }, 'the installed playwright-cli version could not be read from its @playwright/cli package manifest'],
   ];
   for (const [found, cause] of cases) {
     const dir = runDir(t);
@@ -287,13 +290,18 @@ test('the helper writes no run config for a playwright-cli version other than th
   }
 });
 
-test('the helper names a PATH entry read against the working directory, and a playwright-cli outside its package, with the remedy each needs', async (t) => {
+test('the helper names the remedy each version answer needs, and adds the PATH advice only for a PATH entry read against the working directory or a playwright-cli outside its package', async (t) => {
   const origin = ['--mode', 'local', '--origin', 'http://127.0.0.1:5173'];
   const moved = 'remove that entry from PATH, or move it behind the directory that holds playwright-cli';
   const cases = [
     [{ source: 'cwd-relative', entry: '' }, 'an empty PATH entry comes before or holds the playwright-cli on PATH, and the shell reads it against the working directory of each call', moved],
     [{ source: 'cwd-relative', entry: 'node_modules/.bin' }, 'the relative PATH entry "node_modules/.bin" comes before or holds the playwright-cli on PATH', moved],
     [{ source: 'unread' }, 'the playwright-cli on PATH resolves to no such manifest, as a wrapper script outside the package does', `install the measured version with \`${PINNED}\`, and put the directory npm installs it into first on PATH, ahead of any wrapper`],
+    [{ source: 'foreign', owner: 'not-playwright' }, 'the playwright-cli on PATH belongs to the package not-playwright, not @playwright/cli', `install the measured version with \`${PINNED}\``],
+    [{ source: 'malformed' }, 'the package manifest beside the playwright-cli on PATH could not be judged', `install the measured version with \`${PINNED}\``],
+    [{ source: 'absent' }, 'playwright-cli is not on PATH', `install the measured version with \`${PINNED}\``],
+    [{ source: 'manifest', version: UNMEASURED, owner: '@playwright/cli' }, `playwright-cli ${UNMEASURED} is installed, but the browser consent gate was measured against`, `install the measured version with \`${PINNED}\``],
+    [{ source: 'self-reported', version: MEASURED }, 'the playwright-cli on PATH resolves to no such manifest, as a wrapper script outside the package does', `install the measured version with \`${PINNED}\``],
   ];
   for (const [found, cause, remedy] of cases) {
     const dir = runDir(t);

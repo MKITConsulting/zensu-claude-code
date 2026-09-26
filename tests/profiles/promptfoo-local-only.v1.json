@@ -33,6 +33,7 @@
     "test-cover-skill.sh",
     "test-deferred-review-claim.sh",
     "test-deferred-review-fallback.sh",
+    "test-delivery-route.sh",
     "test-doc-generation-guidance.sh",
     "test-docs-skill.sh",
     "test-doctor.sh",
