@@ -36,7 +36,7 @@ if _ZENSU_DIRECTIVE_MSYS_ENV="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/z
 fi
 
 # The command the directives tell the model to run right after the user answers the
-# route question, rendered the way session-start-primer.sh renders its log command:
+# route question with the Zensu workflow, rendered the way session-start-primer.sh renders its log command:
 # `printf %q` on both the data root and the helper path. When CLAUDE_PLUGIN_DATA is
 # unusable the helper could not bind anyway, so the directive names the skill instead
 # of a command that would refuse. This is the one renderer of this command; the other

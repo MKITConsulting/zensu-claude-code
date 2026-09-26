@@ -4,6 +4,7 @@ paths:
   - "hooks/lib/zensu-directive.sh"
   - "hooks/lib/zensu-delivery-route.sh"
   - "hooks/lib/zensu-tdd-mode.sh"
+  - "hooks/lib/zensu-marker-write.sh"
   - "hooks/lib/zensu-doctor.sh"
   - "hooks/lib/zensu-doctor-report.js"
   - "hooks/session-start-banner.sh"
@@ -20,8 +21,10 @@ paths:
 
 The route question that `hooks/plan-approved-delegate.sh` asks after a plan approval and
 `hooks/user-prompt-tdd-reminder.sh` asks on a code request is answered ONCE PER SESSION when the
-answer is the workflow or implementing directly, and never asked when the project configures a
-default. An autopilot or pilot answer is never remembered, so the question comes back after it.
+answer is the Zensu workflow, and never asked when the project configures a default. A direct,
+autopilot or pilot answer is never remembered, so the question comes back after it; implementing
+directly becomes the session's route only through an explicit `/zensu:delivery-route --direct`
+or the config key.
 The mechanism is a session marker plus a config key; the question itself is unchanged
 (`.claude/rules/plan-approval-delivery-route.md`). The measured
 reason: across this machine's transcripts from 12 June to 20 September 2026 the question was
@@ -72,26 +75,36 @@ hold that; the new directive text sits outside the (B) and (C) slices.
 ## Two writers
 
 The user, through `/zensu:delivery-route` (the twin of `/zensu:tdd-mode`, with the same "only
-the user changes it" injection rule); and the model, immediately after the user answers the
-question with the workflow or with implementing directly — the RECORD sentence in both
-directives tells it to run the rendered helper command before dispatching, and names that one
-Bash call as coming BEFORE the "next tool call" the dispatch arms name, so the two orders cannot
-be read as a conflict. The outward-facing answers and a preference taken from the approval or
-request text record nothing. Because the answer outlives the question, the question says so: the
-reminder's question and the descriptions of the plan question's workflow and direct options state
-that the answer is remembered for the rest of the session and that `/zensu:delivery-route`
-changes it. The option LABELS are unchanged, because `evals/plan-approval-hook` selects by label.
+the user changes it" injection rule, carried in the skill's description as well as its body);
+and the model, immediately after the user answers the question with the Zensu workflow — the
+RECORD sentence in both directives tells it to run the rendered helper command with `--tdd`
+before dispatching, and names that one Bash call as coming BEFORE the "next tool call" the
+workflow arm names, so the two orders cannot be read as a conflict. If the user declines that
+call's permission prompt, the model says in one line that nothing was recorded and that the
+question will come back, then dispatches. A direct answer, the outward-facing answers and a
+preference taken from the approval or request text record nothing, and both directives tell the
+model never to record `--direct` itself. The question says what outlives it: the plan question's
+workflow option and the reminder's Yes state that the answer is remembered for the rest of the
+session, the other question's requests included unless that question is switched off, through
+one Bash call the user may be asked to allow, the direct option and the No state
+that they decide only that plan or request, and `/zensu:delivery-route` changes the route. The
+option LABELS are unchanged, because `evals/plan-approval-hook` selects by label.
 
-**One marker, two questions — the asymmetry is decided, not accidental.** The reminder's yes/no
-and the plan gate's four-route question write the same marker, so a "No" to the reminder also
-answers the four-route question for the rest of the session, and `/zensu:autopilot` and
-`/zensu:pilot` are then reachable only by naming them in the approval message or after
-`--auto`. Recording provenance, or keeping a separate record per question, was rejected: either
-splits the one ladder the two hooks share, and treating a foreign record as a mere recommendation
-would undo the (S) clause's "do NOT ask". The skill states the sharing in its own text.
+**Only the fail-safe answer is recorded automatically.** The reminder asks per request and the
+plan gate per plan, but both read one marker. A recorded `direct` would let one quick "No" to the
+reminder skip the review chain AND the four-route question for a later, possibly large, approved
+plan, with only the model's status line as notice. A recorded `tdd` adds the review chain rather
+than removing it. So the model records only `tdd`, and `direct` becomes session-wide only through
+the user's explicit `/zensu:delivery-route --direct` or `hooks.defaultDeliveryRoute`. Recording
+provenance, or keeping a separate record per question, was rejected: either splits the one ladder
+the two hooks share, and treating a foreign record as a mere recommendation would undo the (S)
+clause's "do NOT ask". The skill states the sharing in its own text.
 
-Both marker writers — this helper and `hooks/lib/zensu-tdd-mode.sh` — run the same write
-sequence: the shared symlink guard before the write and again before the rename (the second
+Both marker writers — this helper and `hooks/lib/zensu-tdd-mode.sh` — write through ONE
+sequence, `zensu_write_session_marker` in `hooks/lib/zensu-marker-write.sh`, sourced right after
+the verb check — a failed load exits 2 with a cannot-load refusal before anything binds (R8l) —
+and handed the helper's own script name so each keeps its message prefix:
+the shared symlink guard before the write and again before the rename (the second
 call is the TOCTOU defense), an O_EXCL `mktemp` temp leaf with an `-L` refusal before the
 redirect, a non-regular check, the rename, and a regular-file post-condition after it, because a
 directory swapped in after the check makes `mv -f` succeed with nothing recorded. The
@@ -102,6 +115,10 @@ which then resumed and could re-create the temp leaf through a plain redirect wi
 R8f/R8g/R8h and T9g/T9h/T9i drive the temp-leaf refusal and both halves of the post-condition
 (`! -f` and `-L`) through PATH shims for `mktemp` and `mv`; R8i and T9j send INT, TERM and HUP
 through another `mv` shim and require the helper to end with 130, 143 and 129 and no success line.
+R8j and T9k drive the pre-rename re-check: a `mktemp` shim plants a link to an empty directory at
+the marker leaf after the temp exists, and each helper must refuse with its own prefix, leave the
+link target empty and leave no temp. R8k requires both helpers to source the library and neither
+to keep its own `mktemp` or `mv -f`.
 
 ## Placeholders, not interpolation
 
@@ -131,7 +148,8 @@ and two `/zensu:doctor` rows.
   under the root the binder's `resolveFreshHookProject` answers, through the same call and the
   same host-path conversions as `hooks/session-start-autopilot-resume.sh` — an existing record's
   root on a retry or a `clear`, else the canonical `CLAUDE_PROJECT_DIR`. Each copy names the
-  other. The mutable payload `cwd` is never read; the binder's own rule says it is never a project
+  other; one shared helper for both copies crosses the MSYS path-conversion boundary and is a
+  separate change. The mutable payload `cwd` is never read; the binder's own rule says it is never a project
   authority. When that resolution is unavailable, the ambient read stands. KNOWN LIMIT: on a FRESH
   start the banner runs concurrently with the Session Control registrar, which mints the record
   from the payload `cwd`; until the record exists the banner falls back to `CLAUDE_PROJECT_DIR`,
@@ -145,8 +163,13 @@ and two `/zensu:doctor` rows.
   dispatches to `/zensu:tdd` rather than claiming every code change does (R18g). An unknown config value renders as written — a string once,
   never re-quoted — bounded to 40 characters with a `…` marker, folded through `foldSlot`, and
   the load-failure arm renders `FOLD_UNAVAILABLE` inside the call site's own parentheses.
-- **One wording, two carriers.** The three switched-off-half literals exist in the banner and in
-  the doctor renderer. R14e extracts them from both files and requires equality.
+- **One wording, two carriers.** The three switched-off-half literals and the message-preference
+  literal (a preference in a message decides only that request; `/zensu:delivery-route` changes
+  the route for the session) exist in the banner and in the doctor renderer. R14e extracts all
+  four from both files and requires equality.
+- **The banner never reads the marker.** It discloses the configured default only. A marker that
+  a `clear` leaves in place is disclosed by the directive field, the status line, `--status` and
+  the doctor row.
 
 Nothing is ledgered: a recorded route is a MODE choice like the tdd-mode marker, a config key is
 standing configuration, and no `ZENSU_*=off` spelling exists for it.
@@ -168,7 +191,8 @@ standing configuration, and no `ZENSU_*=off` spelling exists for it.
   installs a stub that refuses. `R9h` in `tests/structure/test-delivery-route.sh` grades both
   branches.
 - The twin prologue in `zensu-delivery-route.sh` (the third copy, for the reason the first copy
-  gives) and the write sequence it shares with `zensu-tdd-mode.sh`.
+  gives), and `hooks/lib/zensu-marker-write.sh`, the one write sequence it and
+  `zensu-tdd-mode.sh` source.
 - Both heredocs of BOTH ask-hooks; the parity helper's `P1`/`P2` needle lists carry the new
   literals.
 - The route-default block and the `_ZENSU_ROUTE_QUESTION_LIVE` guard in
@@ -206,24 +230,40 @@ is read permissively, no attestation change, and both hooks still emit only `add
 
 - The marker is an ordinary file in the session-writable `.zensu/state`, so "only the user
   changes the route" is prose-controlled, exactly as for the tdd-mode marker. A `direct` marker
-  removes the review chain for the session, as `autoTdd:false` already can from a committed file.
+  removes the review chain for the session, as `autoTdd:false` already can from a committed file;
+  only an explicit `/zensu:delivery-route --direct` writes one. No hook-emitted, user-visible
+  notice fires when a marker decides `direct`; the model's status line is the per-dispatch notice.
+- With any recorded or configured route the four-route question is not asked, so
+  `/zensu:autopilot` and `/zensu:pilot` are reachable only by naming them in the approval message.
+  Whether to ask anyway when the plan's own ranking would put Autopilot or Pilot first is an open
+  product decision.
 - The project overlay wins per key, so a committed `direct` overrides a user's global `tdd` for
   every clone — the exposure a committed `autoTdd:false` already has. The banner is silent on
   `resume|compact`, so a resumed session sees the default only in the directive field and the
   doctor row.
-- The RECORD step is a model instruction: a model that skips it costs one repeated question,
-  never a wrong route.
+- The RECORD step is a model instruction and a Bash call the user may be asked to allow: a model
+  that skips it, or a user who declines the prompt, costs one repeated question, never a wrong
+  route. Recording from the user's own click in a hook would remove the prompt and is not
+  implemented.
 - A session that approves a plan carrying ANOTHER session's `<!-- zensu-autopilot:<run> -->`
   marker takes the standalone branch, because that run is invisible to its owner-scoped read
-  (`.claude/rules/autopilot-run-scope.md`). A recorded or configured `tdd` or `direct` then
-  dispatches the plan without the four-route question: `tdd` meets the standalone `--tdd-begin`
-  workspace fence, and `direct` meets none. Forcing `ask` whenever a foreign durable run exists
+  (`.claude/rules/autopilot-run-scope.md`). A recorded `tdd`, an explicitly recorded `direct`, or
+  a configured default then dispatches the plan without the four-route question: `tdd` meets the
+  standalone `--tdd-begin` workspace fence, and `direct` meets none. Forcing `ask` whenever a foreign durable run exists
   would cancel the feature for every project with an Autopilot run in a sibling worktree, so it is
   not done. The scoped fix is the payload-evaluator verdict the retained exit-6
   `OWNER_SESSION_MISMATCH` arm waits for (`.claude/rules/autopilot-run-scope.md`): once the
   standalone path can tell that the plan's marker names a run this session does not own, the hook
   refuses that plan, or renders the field as `ask`, before the field can dispatch it. It is not
   implemented.
+- An Autopilot planning approval that falls through to the standalone branch, because
+  `skills/autopilot/SKILL.md` Phase 0.D ran `ExitPlanMode` before `--autopilot-begin`, meets a
+  recorded or configured route like any other plan: the field sends the Autopilot spec to
+  `/zensu:tdd` or implements it directly without the question, where an `ask` field re-asks it.
+  The guard is running `--autopilot-begin` before `ExitPlanMode`. Phase 0.D states that order and
+  this consequence, and `D16` in `tests/structure/test-autopilot-durable-skill.sh` pins both as
+  text; nothing observes the order a model actually takes
+  (`.claude/rules/plan-approval-delivery-route.md`).
 - The `ZENSU DELIVERY ROUTE:` field is identified by a fixed literal with no per-turn binding,
   the class `.claude/rules/zen-mode-chain-anchor.md` records for its anchor. A planted
   `direct (session marker)` spelling competes for a decision that removes the review chain; the
@@ -253,3 +293,10 @@ is read permissively, no attestation change, and both hooks still emit only `add
 - `/zensu:delivery-route` cannot be exercised live from a `--plugin-dir` checkout in a session
   bound to the installed plugin, because the sibling-root rule refuses the bind; its behavioural
   coverage is the suite's own Session Control fixtures, as for `/zensu:tdd-mode`.
+- Two write primitives serve the three mode markers. `hooks/lib/zensu-zen-mode.sh` opens a fresh
+  temp inode with `O_EXCL` in a node child, writes through that one descriptor, fsyncs and
+  renames; `zensu_write_session_marker` re-opens its `mktemp` leaf through a plain redirect that
+  the `-L` refusal only narrows. The difference is historical: this change moved the tdd-mode
+  sequence into a shared library, not onto zen-mode's primitive. Unifying all three is a separate
+  change, because R8f-R8j and T9g-T9k drive the shell sequence through PATH shims for `mktemp` and
+  `mv`, R8k pins its shape, and all of them would be re-authored with it.

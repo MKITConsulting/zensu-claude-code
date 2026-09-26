@@ -7,6 +7,7 @@ paths:
   - "tests/structure/test-tdd-mode-toggle.sh"
   - "tests/structure/test-tdd-vanilla-mode.sh"
   - "hooks/lib/zensu-delivery-route.sh"
+  - "hooks/lib/zensu-marker-write.sh"
 ---
 
 # TDD Mode Precedence (`hooks/lib/zensu-config.sh` + `zensu-log.sh --tdd-begin`)
@@ -66,8 +67,10 @@ after the base line is computed — a load fault loses the disclosure, never the
 **Effective vs configured is a deliberate split.** `plan-approved-delegate.sh`,
 `user-prompt-tdd-reminder.sh` and the Stop seed call `zensu_tdd_strict_effective`
 (marker over config); `session-start-banner.sh` and `session-start-primer.sh` stay on
-`zensu_tdd_strict_enabled` BY DESIGN — at SessionStart no marker for the new session
-can exist yet, so an "effective" read there would only ever return the config anyway.
+`zensu_tdd_strict_enabled` BY DESIGN. A session with a new key has no marker yet, so an
+"effective" read there would return the config anyway; a marker that a `clear` keeps under
+the same key is reported by `/zensu:tdd-mode --status` and the `mode:` echo at
+`--tdd-begin`, never by these two.
 A directive that names a cause must name the one that actually decided: after the
 switch to the effective mode, the vanilla branches may not assert
 `hooks.tddImplementation=false`.
@@ -83,9 +86,10 @@ PARSE is `_zensu_marker_one_line_value`, ONE bounded reader shared with the deli
 marker (`.claude/rules/session-delivery-route.md`); `zensu_tdd_mode_override` is a
 total reduction over it that collapses `released|none` to `auto`, so its callers keep a
 three-value contract and the two cannot drift. `zensu_tdd_mode_state_linked` is the symlink
-guard for the `.zensu` / state-dir / marker triple plus an optional extra leaf, and the WRITER
-now calls the reader's copy rather than spelling its own. It guards BOTH marker pairs under a
-name that predates the second one (reader `zensu_delivery_route_marker_state`, writer
+guard for the `.zensu` / state-dir / marker triple plus an optional extra leaf, and the ONE
+writer, `zensu_write_session_marker` in `hooks/lib/zensu-marker-write.sh`, calls the reader's
+copy rather than spelling its own; both helpers write through it. It guards BOTH marker pairs
+under a name that predates the second one (reader `zensu_delivery_route_marker_state`, helper
 `zensu-delivery-route.sh`); its pre-rename re-check is
 deliberately a SECOND call, because that duplication is the TOCTOU defense and collapsing the
 two would remove it. A new marker value lands in the reader, in the reduction, and in

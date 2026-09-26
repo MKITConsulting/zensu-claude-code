@@ -337,6 +337,10 @@ the approval as `PLAN_MARKER_MISSING_OR_AMBIGUOUS`, which is the single planning
 run cannot get past. Immediately before `ExitPlanMode`, create the durable run
 with `--autopilot-begin` and include its exact `<!-- zensu-autopilot:<RUN_ID> -->` marker in
 the plan content you pass to `ExitPlanMode`. Do not proceed if either operation fails.
+Keep that order: an `ExitPlanMode` approval that finds no durable run at `PLANNING`
+falls through to the standalone plan-approval directive, which asks the four-route question
+while no delivery route is decided, and once one is recorded or configured
+sends this spec to `/zensu:tdd` or implements it directly without asking.
 
 ### Phase 1 — Build  (autonomous, ZERO questions) — strictly ordered
 

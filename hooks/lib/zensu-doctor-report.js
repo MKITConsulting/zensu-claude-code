@@ -1656,8 +1656,8 @@ function configBlock() {
 // The two ask-hooks each exit on their own flag BEFORE they resolve the route, so a
 // route, configured or recorded, decides only the half whose reader is on. Both
 // delivery-route rows name a switched-off half in these words, and the SessionStart
-// banner carries the same three literals; test-delivery-route.sh compares the two
-// carriers.
+// banner carries the same three literals plus the message-preference literal of the
+// Config row; test-delivery-route.sh compares the two carriers.
 var ROUTE_PLAN_HALF_OFF = 'the plan-approval half is off: hooks.autoTdd=false';
 var ROUTE_PROMPT_HALF_OFF = 'the code-request half is off: hooks.tddReminder=false';
 var ROUTE_BOTH_READERS_OFF = 'both readers are off (hooks.autoTdd=false, hooks.tddReminder=false), and each hook exits on its own flag before the route is resolved';
@@ -1706,7 +1706,7 @@ function deliveryRouteConfigRow(cfgReads) {
       return;
     }
     line(OK, 'config: hooks.defaultDeliveryRoute=' + value + ' — the delivery-route question is skipped: ' + subject
-      + '; an explicit preference in the user\'s own message or /zensu:delivery-route still changes it per session');
+      + '; a preference stated in the user\'s own message decides only that request, and /zensu:delivery-route changes the route for this session');
     return;
   }
   var shown = safeConfigValue(value, ' is not tdd');

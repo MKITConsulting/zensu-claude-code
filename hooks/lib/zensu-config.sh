@@ -162,17 +162,19 @@ zensu_tdd_mode_marker_path() {
 }
 
 # The symlink refusal, spelled ONCE, for BOTH session markers this file owns: the
-# tdd-mode pair (reader `zensu_tdd_mode_marker_state`, writer zensu-tdd-mode.sh) and
-# the delivery-route pair (reader `zensu_delivery_route_marker_state`, writer
-# zensu-delivery-route.sh). The name predates the second pair and is kept because
-# every caller spells it — read it as "marker state linked". Each reader and each
-# writer guards the same three components — `.zensu`, the state directory, the
-# marker leaf — and each writer additionally guards its `mktemp` temp leaf, which is
-# what the optional third argument is for. It lives here beside the path templates
-# for the same reason they do: hand-synced copies of the component list would
-# diverge silently, and the tests that would catch a divergence (T9/T9b/T9d in
-# test-tdd-mode-toggle.sh, R8/R8b/R8e in test-delivery-route.sh) are exactly the
-# ones that skip themselves on a host without symlink support.
+# tdd-mode pair (reader `zensu_tdd_mode_marker_state`, helper zensu-tdd-mode.sh) and
+# the delivery-route pair (reader `zensu_delivery_route_marker_state`, helper
+# zensu-delivery-route.sh). Both helpers write through `zensu_write_session_marker`
+# in zensu-marker-write.sh, the one writer that calls this guard. The name predates
+# the second pair and is kept because every caller spells it — read it as "marker
+# state linked". Each reader and the writer guard the same three components —
+# `.zensu`, the state directory, the marker leaf — and the writer additionally guards
+# its `mktemp` temp leaf, which is what the optional third argument is for. It lives
+# here beside the path templates for the same reason they do: hand-synced copies of
+# the component list would diverge silently, and the tests that would catch a
+# divergence (T9/T9b/T9d in test-tdd-mode-toggle.sh, R8/R8b/R8e in
+# test-delivery-route.sh) are exactly the ones that skip themselves on a host
+# without symlink support.
 #
 # The writer calls this TWICE on purpose — once before the write and again
 # immediately before the rename. That duplication is the TOCTOU defense and must
@@ -280,9 +282,11 @@ zensu_tdd_mode_override() {
 
 # Effective strict check = the session override layered over the config flag.
 # Callers that can resolve a session pass its project dir and Session Control
-# session key. Callers that cannot resolve one — SessionStart, where no marker for
-# the new session can exist yet — call zensu_tdd_strict_enabled directly instead;
-# passing empty arguments here is equivalent and stays config-only.
+# session key. The SessionStart banner and primer stay on the configured mode by
+# design and call zensu_tdd_strict_enabled directly: a session with a new key has no
+# marker yet, and a marker a `clear` keeps under the same key is reported by
+# `/zensu:tdd-mode --status` and the `mode:` echo at `--tdd-begin`. Passing empty
+# arguments here is equivalent and stays config-only.
 zensu_tdd_strict_effective() {
   case "$(zensu_tdd_mode_override "${1:-}" "${2:-}")" in
     strict)  return 0 ;;
@@ -294,8 +298,8 @@ zensu_tdd_strict_effective() {
 # Session-scoped DELIVERY ROUTE — the answer to the question both ask-hooks
 # (plan-approved-delegate.sh, user-prompt-tdd-reminder.sh) would otherwise put to the
 # user on every approval and every code request. hooks/lib/zensu-delivery-route.sh
-# writes the marker for /zensu:delivery-route, and the model writes it right after the
-# user answers the question. The vocabulary is `tdd` | `direct` only: /zensu:autopilot
+# writes the marker for /zensu:delivery-route, and the model writes `tdd` right after the
+# user answers the question with the Zensu workflow. The vocabulary is `tdd` | `direct` only: /zensu:autopilot
 # and /zensu:pilot push branches, open pull requests or mutate tracked feature state,
 # so they stay per-plan choices that neither a marker nor a config key can pre-select.
 # The path template lives HERE and the writer sources it, for the reason the tdd-mode

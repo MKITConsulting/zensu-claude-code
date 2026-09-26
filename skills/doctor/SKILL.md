@@ -307,8 +307,9 @@ classifier will refuse a spawn, not only when the whole table is green.
 - **✅ config: hooks.defaultDeliveryRoute=tdd / =direct** → the project configured a default
   delivery route, so the route question is skipped wherever its reader is on: `tdd` sends an
   approved plan or a code request through the Zensu workflow, `direct` implements it
-  directly without the review chain. Relay the value and that an explicit preference in the
-  user's own message, or `/zensu:delivery-route`, still overrides it per session. When the
+  directly without the review chain. Relay the value, that a preference stated in the
+  user's own message decides only that request, and that `/zensu:delivery-route` changes
+  the route for the session. When the
   row adds that a **half is off** (`hooks.autoTdd=false` or `hooks.tddReminder=false`),
   the default decides only the other half, because each hook exits on its own flag before
   it resolves the route; relay which half.
