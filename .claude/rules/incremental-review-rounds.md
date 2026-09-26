@@ -64,6 +64,14 @@ the manifest entry in `tests/profiles/promptfoo-local-only.v1.json` plus the cou
 `tests/SUITE-OVERVIEW.md` move with it, because `run-all.sh` refuses to execute at all when the
 manifest and the directory disagree.
 
+**Generations and the claim prefix.** A `REVIEW BUDGET RESET` line, which
+`/zensu:reset-review-limit` appends after a same-chain rearm, starts a new generation:
+`roundScope` counts only claims after the last marker, so restarted round numbers no longer merge
+old and new `R1-` claims. The `R<n>-` claim prefix itself is prescribed by the fix-round text
+of BOTH severity arms in `hooks/post-review-tdd-delegate.sh` and by the `/zensu:tdd` fix-round
+paragraph, independent of `hooks.reviewConvergence`, because this key must not silently depend on
+that one. A round whose claims still lack the prefix answers `empty` — the safe direction.
+
 **DELIBERATELY NOT CHANGED: `hooks/stop-chain-enforcer.sh`'s resume directive.** It fires when a
 turn ended without continuing the chain, where the round number is not established, so it keeps
 prescribing the full fan-out. That is the fail-safe direction and it costs no test churn.

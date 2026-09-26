@@ -193,6 +193,24 @@ It MUST now exit non-zero because the old ticket was invalidated. After the
 next reviewer is issued a fresh ticket and completes, its routed round must be
 round 1. Do not pre-issue that ticket from this reset skill.
 
+Because round numbers restart at 1, mark the chain's run log so the round-scope
+and findings-ledger helpers stop mixing old rounds with new ones. After the marker
+the ledger's report read still lists every earlier open entry, under a `G<g>:`
+prefix naming the generation it came from. Use the run log
+path the `/zensu:tdd` chain you just re-armed has been writing to; never search for
+a log file. When that path is not known in this session, skip the marker. The
+helpers then fail open: the round-scope delta only widens, the ledger's routing read
+answers `degraded` so the next review routes as before, and its report read answers
+`partial`, so the earlier entries stay listed under a `FINDINGS LEDGER PARTIAL` row
+instead of vanishing. That detection has one blind spot: when every id the new
+reviews reuse repeats its earlier state and anchor, and no new id carries a round
+below one already seen, the log reads like a chain that simply continued.
+
+```sh
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" append --log "<run log of this chain>" \
+  --message "REVIEW BUDGET RESET — review rounds restart at 1"
+```
+
 For a durable rearm, read official status again. `TDD_RUNNING` means the same
 chain was rearmed and its next reviewer completion starts at round 1.
 `AWAIT_TDD` means the central composite retired and resumed the exhausted

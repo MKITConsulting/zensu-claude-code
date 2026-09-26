@@ -191,3 +191,54 @@ test('the CLI never narrows on a verdict the caller must treat as full-diff', ()
   assert.ok(!out.includes('status=ok'));
   assert.ok(out.includes('status=degraded'));
 });
+
+test('claims before the last REVIEW BUDGET RESET marker are ignored', () => {
+  const text = [
+    'R1-F1 IMPL completed — files: src/old.ts',
+    'REVIEW BUDGET RESET — generation 2',
+    'R1-F1 IMPL completed — files: src/new.ts',
+  ].join('\n');
+  const r = scope.roundScope({ text, round: 1 });
+  assert.equal(r.status, 'ok');
+  assert.deepEqual(r.files, ['src/new.ts']);
+  assert.equal(r.claims, 1);
+});
+
+test('a path claimed again after the reset marker stays in the new delta', () => {
+  const text = [
+    'R1-S1 IMPL completed — files: src/shared.ts',
+    'REVIEW BUDGET RESET',
+    'R1-S1 IMPL completed — files: src/shared.ts, src/fresh.ts',
+  ].join('\n');
+  const r = scope.roundScope({ text, round: 1 });
+  assert.equal(r.status, 'ok');
+  assert.deepEqual(r.files, ['src/fresh.ts', 'src/shared.ts']);
+  assert.equal(r.claims, 1);
+});
+
+test('a reset with no later claim for the round answers empty, never the stale delta', () => {
+  const text = ['R2-F1 IMPL completed — files: src/old.ts', '[12:00:00] REVIEW BUDGET RESET'].join('\n');
+  const r = scope.roundScope({ text, round: 2 });
+  assert.equal(r.status, 'empty');
+  assert.equal(r.files.length, 0);
+});
+
+test('a truncation before the reset does not degrade the new generation', () => {
+  const many = [];
+  for (let i = 0; i < scope.MAX_CLAIM_FILES + 5; i++) many.push('src/c' + i + '.ts');
+  const text = [
+    'R1-S1 IMPL completed — files: ' + many.join(', '),
+    'REVIEW BUDGET RESET',
+    'R1-S2 IMPL completed — files: src/fresh.ts',
+  ].join('\n');
+  const r = scope.roundScope({ text, round: 1 });
+  assert.equal(r.status, 'ok');
+  assert.deepEqual(r.files, ['src/fresh.ts']);
+});
+
+test('the reset marker matches only at line start and readLog is exported', () => {
+  assert.ok(scope.RESET.test('REVIEW BUDGET RESET'));
+  assert.ok(scope.RESET.test('[+00:01:02] REVIEW BUDGET RESET — rearmed'));
+  assert.ok(!scope.RESET.test('note: REVIEW BUDGET RESET mentioned mid-line'));
+  assert.equal(typeof scope.readLog, 'function');
+});

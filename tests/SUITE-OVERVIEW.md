@@ -13,29 +13,32 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (153 = 146 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 146 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 153). The figures here have drifted SIX times, five of them upward, and every
+reconciled to that manifest (154 = 147 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 147 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 154). The figures here have drifted SEVEN times, six of them upward, and every
 correction is recorded rather than overwritten: they once read 148 = 141 + 7 against a manifest
 already holding 142 CI entries, then 150 = 143 + 7 while it already held 144, then
 151 = 144 + 7 while a merge was landing the 145th, then 152 = 145 + 7 while the merge of
 `main` into the worktree-keep branch was landing the 146th, then 153 = 146 + 7 while the
-next such merge was landing the 147th, and then 153 = 146 + 7 on the evidence-runner branch after
-it retired three witness suites and added two, leaving 145. Each of those was internally
+next such merge was landing the 147th, then 154 = 147 + 7 while the merge of `main` into
+the review-convergence branch was landing the 148th, and then 153 = 146 + 7 on the
+evidence-runner branch after it retired three witness suites and added two, leaving 145. Each
+of those was internally
 consistent and merely stale. Correcting only the headline and leaving the derivation clauses
 behind produces a THIRD state that is not stale but self-contradictory — the failure shape the
 section-4 header-numeral paragraph below names — so every re-derivation since closes the
-clauses together with the headline. FOUR of the six drifts arrived the same way, through a
+clauses together with the headline. FIVE of the seven drifts arrived the same way, through a
 merge of two branches that each re-derived its own count and neither of which could see the
 other: `test-autopilot-adopt-cli.sh` and `test-incremental-review-rounds.sh` each took the
 manifest from 143 to 144 in its own branch, so merging them is what made 145;
 `test-worktree-keep.sh` took its own branch from 144 to 145 while `main` independently reached
-145, so that merge made 146; and `test-delivery-route.sh` took `main` from 145 to 146 while the
-worktree-keep branch independently reached 146, so the next merge made 147. The sixth is the
-reverse case: a branch that removed suites without re-deriving, whose merge with `main` at 147
-lands on 146.
+145, so that merge made 146; `test-delivery-route.sh` took `main` from 145 to 146 while the
+worktree-keep branch independently reached 146, so the next merge made 147; and
+`test-review-convergence.sh` took its own branch to 146 while `main` independently reached 147,
+so merging `main` into it is what made 148. The seventh is the reverse case: a branch that
+removed suites without re-deriving, whose merge with `main` at 148 lands on 147.
 **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 144 against 146 CI-classified suites, so TWO CI
+asserted away: its eleven CI group headers sum to 145 against 147 CI-classified suites, so TWO CI
 suites appear in no §3 group. They are `test-session-trail-lineage.sh` and
 `test-incremental-review-rounds.sh`, re-derived BY NAME
 by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
@@ -75,8 +78,8 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **153** — 146 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **146 structure suites + 5 offline evals = 151 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 153 − 146 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **154** — 147 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **147 structure suites + 5 offline evals = 152 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 154 − 147 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -88,8 +91,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 153 structure suites + 5 offline evals | none |
-| `--ci` | 146 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 154 structure suites + 5 offline evals | none |
+| `--ci` | 147 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -147,13 +150,13 @@ unreadable marker forces nothing), the two preconditions `--tdd-complete` refuse
 the edit-landing receipt and the plan's `## Requirements` table that `/zensu:converge`
 anchors on — and the 5-agent review fan-out wiring in `skills/tdd/SKILL.md`.
 
-### Review chain & findings (26)
+### Review chain & findings (27)
 `chain-recover` · `chain-terminus-zero-change-gate` · `deferred-review-claim` ·
 `deferred-review-fallback` · `finding-verification` ·
 `pending-review-ttl` ·
 `post-review-autopilot-claim` · `post-review-outer-ownership-root` ·
 `post-review-self-review-handoff` · `post-review-tdd-scope` · `reset-review-limit-skill` ·
-`reset-review-limit-transaction` · `review-aspect-agent` · `review-judge` ·
+`reset-review-limit-transaction` · `review-aspect-agent` · `review-convergence` · `review-judge` ·
 `review-personas` · `review-worker-evidence-lease` · `reviewer-capability-gate` ·
 `reviewer-readonly-v1` · `reviewer-spawn-allow` · `self-review-flags` · `self-review-markers` · `self-review-skill` ·
 `stop-enforcer-escapes` · `stop-enforcer-self-review-routing` ·
@@ -343,6 +346,7 @@ that suite's failure.
 | `git-repo-escape.test.js` | 30 | `test-bash-source-write-gate.sh` | pure half of source-write rule (C): `gitTargets()` repo resolution + git mutation/option lattice |
 | `evidence-run-v1.test.js` | 50 | `test-evidence-run.sh` | evidence runner: record schema and store, tree fingerprint, verdict states, retention |
 | `finding-verify-v1.test.js` | 26 | `test-finding-verification.sh` | finding-verification grading module |
+| `review-ledger-v1.test.js` | 42 | `test-review-convergence.sh` | findings ledger of the auto-fix loop: latest-wins, generations, carried open entries, fail-open verdicts |
 | `profile-runner.test.js` | 23 | Windows profile suite | `run-profile.js` lifecycle, digests, deadlines |
 | `chain-recovery-v1.test.js` | 21 | `test-chain-recover.sh` | chain shape lattice + rearm-receipt predicate |
 | `plugin-data-guard-v1.test.js` | 37 | `test-plugin-data-guard.sh` (G38) | plugin-data containment: the separator class both ways, both resolution bounds, the truncated-walk refusal, the filesystem-root and containing-store arms, the containment export-shape arm via a copied module beside a stub parser, the cwd ranking, and the realpath fast path over targets that exist |
