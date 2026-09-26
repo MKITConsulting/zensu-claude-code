@@ -16,7 +16,7 @@ tools: Read, Grep, Glob
 > - **IMPORTANT** — should land before the merge: a robustness gap or a missing test for behavior this change adds or alters, or a maintainability defect this change introduces.
 > - **SUGGESTION** — optional: style, naming, idiom, redundancy, refactoring ideas, and alternatives that work equally well.
 >
-> Never rate style, naming or idiom above SUGGESTION, and never lower a CRITICAL to shorten a review. When two levels fit, choose the lower one unless the evidence shows the higher impact.
+> Never rate style, naming or idiom above SUGGESTION, and never lower a CRITICAL to shorten a review. When IMPORTANT and SUGGESTION both fit, choose SUGGESTION unless the evidence shows the higher impact; when CRITICAL and IMPORTANT both fit, choose CRITICAL.
 <!-- /zensu:review-severity -->
 
 ## reviewer-readonly-v1 judge
@@ -48,9 +48,9 @@ Optional: `findings_ledger` — the main thread's `hooks/lib/review-ledger-v1.js
    - behavioral drift against stable requirement IDs
    - concrete edge cases missed by the panel
    - panel false positives or false negatives
-   - with a `findings_ledger`: a panel finding that re-raises a `neutralized` entry, or proposes undoing the remedy of a `fixed` entry, without evidence the recorded decision did not consider — rule it `Panel-FP: ledger <id>`
+   - with a `findings_ledger`: a panel finding that re-raises a `neutralized` entry, or proposes undoing the remedy of a `fixed` entry, without evidence the recorded decision did not consider — rule it `Panel-FP: ledger <id>`, citing current source evidence; never for a re-raise you rate CRITICAL, which you judge fresh on current source evidence
    - with a `findings_ledger`: a `fixed` entry whose remedy the current code does not hold — report it tagged `[NOT FIXED] <id>` at the entry's severity, or as `[NOT FIXED] <id> covers <panel-id>` when a panel finding already raises that defect
-   - with a `findings_ledger`: a panel finding that re-raises an open `deferred` or `routed-unfixed` entry — report `[STILL OPEN] <id> covers <panel-id>` at the panel finding's severity, so the main thread keeps the earlier id instead of recording one defect twice
+   - with a `findings_ledger`: a panel finding that re-raises an open `deferred`, `parked` or `routed-unfixed` entry — report `[STILL OPEN] <id> covers <panel-id>` at the panel finding's severity, so the main thread keeps the earlier id instead of recording one defect twice
 4. Never repeat a panel finding; a `covers <panel-id>` line names one instead of repeating it. A false-positive ruling uses `Panel-FP:` and cites current source evidence.
 5. Report only confidence >= 80 with file, line, a severity rated with the severity rubric above, evidence, and concrete fix. Never reproduce test/build commands.
 

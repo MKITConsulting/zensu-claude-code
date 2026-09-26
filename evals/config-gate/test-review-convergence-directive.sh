@@ -66,6 +66,7 @@ render_rounds on-default '{"hooks":{"autoFix":true,"autoFixMaxRounds":5}}'
 render_rounds off-all '{"hooks":{"autoFix":true,"autoFixIncludeSuggestions":true,"reviewConvergence":false,"autoFixMaxRounds":5}}'
 render_rounds off-default '{"hooks":{"autoFix":true,"reviewConvergence":false,"autoFixMaxRounds":5}}'
 render_rounds summary '{"hooks":{"autoFix":true,"selfReview":false,"autoFixMaxRounds":5}}'
+render_rounds summary-off '{"hooks":{"autoFix":true,"selfReview":false,"reviewConvergence":false,"autoFixMaxRounds":5}}'
 
 ALL1="$(context_of "$TMP_DIR/on-all/round-1.json")" && check "V1 suggestions arm renders valid PostToolUse context at round 1" PASS \
   || check "V1 suggestions arm renders valid PostToolUse context at round 1" FAIL
@@ -79,6 +80,8 @@ SUM1="$(context_of "$TMP_DIR/summary/round-1.json")" && check "V5 combined-summa
   || check "V5 combined-summary render is valid PostToolUse context" FAIL
 OFFD1="$(context_of "$TMP_DIR/off-default/round-1.json")" && check "V6 default-arm convergence-off render is valid PostToolUse context" PASS \
   || check "V6 default-arm convergence-off render is valid PostToolUse context" FAIL
+SUMOFF1="$(context_of "$TMP_DIR/summary-off/round-1.json")" && check "V7 convergence-off combined-summary render is valid PostToolUse context" PASS \
+  || check "V7 convergence-off combined-summary render is valid PostToolUse context" FAIL
 
 check "C1 round 1 carries the convergence clause" "$(has "$ALL1" 'Review convergence (hooks.reviewConvergence is on)')"
 check "C2 round 1 ledgers its findings under R1 ids" "$(has "$ALL1" "'FINDING LEDGER — R1-F<n> <routed|deferred|neutralized>")"
@@ -93,19 +96,30 @@ check "C10 round 2 numbers the next review R3" "$(has "$ALL2" 'R3-F1, R3-F2')"
 check "C11 round 2 scopes the next review to fix round 2" "$(has "$ALL2" 'with --round 2 and node ')"
 check "C12 no unexpanded round variable reaches the model" "$(lacks "$ALL2" '${NEXT')"
 check "C13 no unexpanded plugin-root variable reaches the model" "$(lacks "$ALL1" '${CLAUDE_PLUGIN_ROOT}')"
-check "C14 ledger text reaches the log verb only through a quoted heredoc" "$(has "$ALL1" 'passed in a quoted heredoc so no finding text is ever shell-expanded')"
+check "C14 ledger text reaches the log verb only through a quoted heredoc" "$(has "$ALL1" '--message-stdin fed by a heredoc whose delimiter is quoted, so no finding text is ever shell-expanded, and never through --message')"
 check "C15 a security paraphrase names only the class of weakness" "$(has "$ALL1" 'name only the class of weakness, never how to exploit it')"
 check "C16 a line range is ledgered as its first line" "$(has "$ALL1" "write a line range as its first line and a finding without an anchor as '-'")"
 check "C17 judge findings are numbered after the panel findings" "$(has "$ALL1" 'judge findings after the panel findings')"
-check "C18 a still-open finding keeps its earlier id" "$(has "$ALL1" "covers <panel-id>' line gets no new line: it keeps that earlier id")"
-check "C19 deferred findings are ledgered at classification time" "$(has "$ALL1" "Right after classifying, append a 'deferred' ledger line")"
+check "C18 a still-open finding and its covers line take no new id" "$(has "$ALL1" "covers <panel-id>' line names, and that line itself, get no new line and no new id")"
+check "C19 deferred findings are ledgered at classification time, before the review ticket" "$(has "$ALL1" 'Right after classifying, and before you issue the review ticket, append for every finding you retitled')"
+check "C20 a neutralized line records the Panel-FP reason" "$(has "$ALL1" "a 'neutralized' line's paraphrase states the Panel-FP reason")"
+check "C21 a refused ledger line is rewritten, never resent through a scan escape" "$(has "$ALL1" 'never resend the line with the zensu-secret-allow marker or ZENSU_SECRET_SCAN=off')"
+check "C22 an IMPORTANT deferral is ledgered as parked" "$(has "$ALL1" "'parked' for an IMPORTANT finding, 'deferred' for every other")"
+check "C23 a still-open IMPORTANT deferral parks the earlier id" "$(has "$ALL1" "deferring it as IMPORTANT appends 'parked' for that id")"
+check "C24 the clause names the real log command with --message-stdin" "$(has "$ALL1" 'zensu-log.sh append --log {log_file} --message-stdin')"
 
 for arm in ALL1 DEF1; do
   TEXT="${!arm}"
   check "R1 [$arm] classification runs only on two ok answers" "$(has "$TEXT" 'ONLY when both answer status=ok')"
   check "R2 [$arm] a CRITICAL finding stays routable" "$(has "$TEXT" 'A CRITICAL finding stays routable.')"
-  check "R3 [$arm] an IMPORTANT finding routes only when not fixed or on edited code" "$(has "$TEXT" 'An IMPORTANT finding stays routable only when the judge tagged it [NOT FIXED]')"
+  check "R3 [$arm] an IMPORTANT finding routes only when judge-raised, not fixed or on edited code" "$(has "$TEXT" 'An IMPORTANT finding stays routable only when the zensu:review-judge raised it, when the judge tagged it [NOT FIXED]')"
   check "R4 [$arm] a deferred finding is exempt in every severity mode" "$(has "$TEXT" 'is exempt from fix routing in every severity mode, including autoFixIncludeSuggestions')"
+  case "$TEXT" in
+    *"Review convergence (hooks.reviewConvergence is on)."*"IMPL completed — files: {list}' claims"*"Your NEXT action must be the Agent tool"*)
+      check "R8 [$arm] the clause precedes the fix-done sentence and the spawn instruction" PASS ;;
+    *) check "R8 [$arm] the clause precedes the fix-done sentence and the spawn instruction" FAIL ;;
+  esac
+  check "R9 [$arm] the spawn instruction is followed by the backstop, not by the clause" "$(lacks "$TEXT" "REVIEW-TICKET: <ticket>'. Review convergence")"
 done
 CLAUSE_ALL="$(clause_of "$ALL1")"
 CLAUSE_DEF="$(clause_of "$DEF1")"
@@ -152,10 +166,13 @@ check "O4 convergence off drops the clause from the default arm too" "$(lacks "$
 check "O5 the round claim prefix survives with convergence off" "$(has "$OFF1" "log this round's 'R1-{step_id} IMPL completed — files: {list}' claims")"
 check "O6 the default arm prescribes the round claim prefix with convergence off" "$(has "$OFFD1" "log this round's 'R1-{step_id} IMPL completed — files: {list}' claims")"
 
-check "S1 combined summary lists open ledger entries" "$(has "$SUM1" 'one row per open entry (state deferred or routed-unfixed)')"
+check "S1 combined summary lists open ledger entries" "$(has "$SUM1" 'one row per open entry (state deferred, parked or routed-unfixed, under the id the ledger lists, a G<g>: prefix included)')"
 check "S2 combined summary reads the ledger leniently" "$(has "$SUM1" 'review-ledger-v1.js --report --log {log_file} --root "$TOP" lists when it answers status=ok or status=partial')"
 check "S3 combined summary never lists one finding twice" "$(has "$SUM1" 'never list one finding twice')"
 check "S4 combined summary discloses a partial or unreadable ledger" "$(has "$SUM1" 'the row FINDINGS LEDGER PARTIAL — <reason> on status=partial and the row FINDINGS LEDGER UNAVAILABLE — <reason> on status=degraded')"
+check "S5 convergence off drops the ledger rows from the combined summary" "$(lacks "$SUMOFF1" 'FINDINGS LEDGER')"
+check "S6 convergence off never runs the ledger reader at chain end" "$(lacks "$SUMOFF1" 'review-ledger-v1.js')"
+check "S7 convergence off keeps the pre-convergence ## Open sentence" "$(has "$SUMOFF1" 'One row per deferred suggestion (the buffered ### Suggestions block) or max-rounds finding requiring a manual fix. Every cell follows')"
 
 echo "----"
 echo "test-review-convergence-directive: $PASS PASS / $FAIL FAIL"

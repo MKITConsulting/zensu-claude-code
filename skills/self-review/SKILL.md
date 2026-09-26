@@ -168,21 +168,34 @@ Classify each finding: a **must-fix** is a Risk that would ship a defect — a r
 bug, a security hole, or a broken convention the gate would reject. Everything else
 is advisory and is buffered into the final report, not fixed here.
 
-The review chain may have deferred findings instead of re-reviewing them. Run
+The review chain may have deferred findings instead of re-reviewing them, but only while
+`hooks.reviewConvergence` is enabled: resolve it against the `TOP` from Phase 1, because this
+Bash carries no `CLAUDE_PROJECT_DIR` and would otherwise skip the project config the review
+hook reads, with
+`CLAUDE_PROJECT_DIR="$TOP" bash -c 'source "$1/hooks/lib/zensu-config.sh"; zensu_hook_enabled reviewConvergence && echo on || echo off' _ "${CLAUDE_PLUGIN_ROOT}"`,
+and on `off` skip this paragraph and add no ledger rows to `## Open`. On `on`, run
 `node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/review-ledger-v1.js" --report --log <run-log> --root "$(git rev-parse --show-toplevel)"`
 over the run log of the `/zensu:tdd` chain this stage closes: the log that chain has been
 writing to in this session, never a log resolved by recency. When that path is not known in
 this session, skip the ledger. On `status=ok` or `status=partial`, every entry in state
-`routed-unfixed`, and every `deferred` entry rated IMPORTANT or CRITICAL, is a candidate.
+`routed-unfixed` or `parked`, and every `deferred` entry rated IMPORTANT or CRITICAL, is a candidate;
+an entry carried from an earlier generation keeps its `G<g>:` prefix in every use.
 Before a candidate becomes a must-fix, `Read` its cited region (`offset` = max(1, line − 10),
 `limit` = 25) and keep it only when that code still shows what its summary describes; an
-entry the region no longer supports goes to `## Open` with that reason. Fix each must-fix in
-the one fix round below, or keep it in `## Open` with the reason it stays open. After a fix
-lands, append the same `FINDING LEDGER` line with the state `fixed` through the log `append`
-verb, passing the line in a quoted heredoc so no finding text is shell-expanded, so the
-report no longer lists it as open. `status=partial` also adds the `## Open` row
-`FINDINGS LEDGER PARTIAL — <reason>`; `status=degraded` adds no candidates and the row
-`FINDINGS LEDGER UNAVAILABLE — <reason>`.
+entry the region no longer supports, or one whose anchor is `-`, goes to `## Open` with that
+reason. A `parked` or `routed-unfixed` candidate the region still supports is a must-fix,
+whatever the must-fix bar above says: fix it in the one fix round below, and keep it in
+`## Open` only for a named blocker — the one fix round already spent, or a fix that needs a
+product decision. Fix every other must-fix the same way, or keep it in `## Open` with the
+reason it stays open. After a fix lands, append the same `FINDING LEDGER` line, with its id
+exactly as listed and the state `fixed`, through
+`CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" append --log <run-log> --message-stdin`
+fed by a heredoc whose delimiter is quoted, never through `--message`, so no finding text is
+shell-expanded and the report no longer lists it as open. When the log's secret scan refuses
+such a line, rewrite its summary without the value; never resend it with the
+`zensu-secret-allow` marker or `ZENSU_SECRET_SCAN=off`. `status=partial` also adds the
+`## Open` row `FINDINGS LEDGER PARTIAL — <reason>`; `status=degraded` adds no candidates and
+the row `FINDINGS LEDGER UNAVAILABLE — <reason>`.
 
 ## Phase 4: Fix Round or Finalize
 
@@ -358,15 +371,17 @@ round. Skip this section only if no review round ran at all.
 Table, columns: Dimension | Verdict | Note. One row per reviewed dimension
 (architecture, consistency, edge-cases, test coverage, security, simplification,
 conventions), Verdict is 🟢 clean / 🟡 advisory / 🔴 must-fix, Note max 12 words. Close with
-ONE line: whether the single fix round ran and what it changed.
+ONE line: whether the single fix round ran and what it changed, and, when the findings
+ledger yielded candidates, how many of them this stage fixed without a re-review.
 
 ## Open
 Table, columns: Item | Type | Next step. One row per deferred suggestion or
 max-rounds finding requiring a manual fix, one row per open findings-ledger entry
-(state `deferred` or `routed-unfixed`) when `review-ledger-v1.js --report` answers
-`status=ok` or `status=partial` — never a second row for an `R<k>-F<n>` id already
-listed — plus the `FINDINGS LEDGER PARTIAL` or `FINDINGS LEDGER UNAVAILABLE` row the
-must-fix step names, and one row per `EVIDENCE GAP` /
+(state `deferred`, `parked` or `routed-unfixed`, under the id the ledger lists, a
+`G<g>:` prefix included) when `hooks.reviewConvergence` is enabled and
+`review-ledger-v1.js --report` answers `status=ok` or `status=partial` — never a
+second row for an id already listed — plus the `FINDINGS LEDGER PARTIAL` or
+`FINDINGS LEDGER UNAVAILABLE` row the must-fix step names, and one row per `EVIDENCE GAP` /
 `EVIDENCE CONTRADICTION` line the cross-check emitted, carrying that line
 verbatim under this escaping rule, applied in this order: first write every `\`
 as `\\`, then every `|` as `\|`. An unescaped pipe splits the row and the

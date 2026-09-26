@@ -334,7 +334,7 @@ that suite's failure.
 | `git-repo-escape.test.js` | 30 | `test-bash-source-write-gate.sh` | pure half of source-write rule (C): `gitTargets()` repo resolution + git mutation/option lattice |
 | `evidence-crosscheck-v1.test.js` | 40 | `test-evidence-crosscheck.sh` | witness cross-check of claimed test evidence |
 | `finding-verify-v1.test.js` | 26 | `test-finding-verification.sh` | finding-verification grading module |
-| `review-ledger-v1.test.js` | 19 | `test-review-convergence.sh` | findings ledger of the auto-fix loop: latest-wins, generations, fail-open verdicts |
+| `review-ledger-v1.test.js` | 42 | `test-review-convergence.sh` | findings ledger of the auto-fix loop: latest-wins, generations, carried open entries, fail-open verdicts |
 | `profile-runner.test.js` | 23 | Windows profile suite | `run-profile.js` lifecycle, digests, deadlines |
 | `chain-recovery-v1.test.js` | 21 | `test-chain-recover.sh` | chain shape lattice + rearm-receipt predicate |
 | `plugin-data-guard-v1.test.js` | 37 | `test-plugin-data-guard.sh` (G38) | plugin-data containment: the separator class both ways, both resolution bounds, the truncated-walk refusal, the filesystem-root and containing-store arms, the containment export-shape arm via a copied module beside a stub parser, the cwd ranking, and the realpath fast path over targets that exist |

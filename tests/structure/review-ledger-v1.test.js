@@ -194,8 +194,8 @@ test('a registration that reuses an id degrades, a repeated identical one does n
   ];
   assert.equal(ledger.ledgerState({ text: switched.join('\n') }).reason, 'id-reused');
   const repeated = [
-    line('R2-F1', 'deferred', 'IMPORTANT', 'src/a.ts:1', 'deferred at classification'),
-    line('R2-F1', 'deferred', 'IMPORTANT', 'src/a.ts:1', 'deferred again by the fix directive'),
+    line('R2-F1', 'deferred', 'SUGGESTION', 'src/a.ts:1', 'deferred at classification'),
+    line('R2-F1', 'deferred', 'SUGGESTION', 'src/a.ts:1', 'deferred again by the fix directive'),
   ];
   const r = ledger.ledgerState({ text: repeated.join('\n') });
   assert.equal(r.status, 'ok');
@@ -317,4 +317,192 @@ test('the CLI --report flag selects the lenient read', () => {
   fs.writeFileSync(log, ROUND_ONE.concat(['FINDING LEDGER — broken']).join('\n'));
   assert.match(ledger.cliMain(['--log', log, '--root', root]), /^summary status=degraded .*reason=malformed-line$/);
   assert.match(ledger.cliMain(['--report', '--log', log, '--root', root]), /summary status=partial generation=1 entries=3 open=1 reason=malformed-line$/);
+});
+
+test('a same-state registration with another anchor reuses the id and degrades', () => {
+  const text = [
+    line('R2-F1', 'deferred', 'IMPORTANT', 'src/a.ts:1', 'panel finding'),
+    line('R2-F1', 'deferred', 'IMPORTANT', 'src/b.ts:9', 'judge finding given the same id'),
+  ].join('\n');
+  const r = ledger.ledgerState({ text });
+  assert.equal(r.status, 'degraded');
+  assert.equal(r.reason, 'id-reused');
+});
+
+test('a same-state, same-anchor repeat of an earlier round is idempotent, not a regression', () => {
+  const text = [
+    line('R1-F4', 'deferred', 'IMPORTANT', 'src/a.ts:5', 'first registration'),
+    line('R2-F1', 'deferred', 'SUGGESTION', 'src/b.ts:2', 'round two finding'),
+    line('R1-F4', 'deferred', 'IMPORTANT', 'src/a.ts:5', 'repeated registration'),
+  ].join('\n');
+  const r = ledger.ledgerState({ text });
+  assert.equal(r.status, 'ok');
+  assert.equal(r.entries.length, 2);
+  assert.equal(r.entries.find((e) => e.id === 'R1-F4').summary, 'repeated registration');
+});
+
+test('a parked line on an earlier-round id is an open transition that carries the new severity', () => {
+  const text = [
+    line('R1-F2', 'deferred', 'SUGGESTION', 'src/b.ts:4', 'rated low in round one'),
+    line('R2-F1', 'deferred', 'SUGGESTION', 'src/c.ts:1', 'round two finding'),
+    line('R1-F2', 'parked', 'IMPORTANT', 'src/b.ts:6', 're-raised as important and deferred'),
+  ].join('\n');
+  const r = ledger.ledgerState({ text });
+  assert.equal(r.status, 'ok');
+  const parked = r.entries.find((e) => e.id === 'R1-F2');
+  assert.equal(parked.state, 'parked');
+  assert.equal(parked.severity, 'IMPORTANT');
+  assert.equal(parked.anchor, 'src/b.ts:6');
+  assert.equal(r.open, 2);
+});
+
+test('a parked line for an unknown id creates an open entry', () => {
+  const r = ledger.ledgerState({ text: line('R2-F3', 'parked', 'IMPORTANT', 'src/a.ts:8', 'parked at classification') });
+  assert.equal(r.status, 'ok');
+  assert.equal(r.entries[0].state, 'parked');
+  assert.equal(r.open, 1);
+});
+
+test('the report read carries open entries across a reset under a generation-qualified id', () => {
+  const text = [
+    line('R3-F2', 'deferred', 'IMPORTANT', 'src/a.ts:9', 'robustness gap'),
+    line('R3-F3', 'neutralized', 'SUGGESTION', 'src/a.ts:20', 'ruled a false positive'),
+    line('R3-F4', 'routed', 'CRITICAL', 'src/d.ts:2', 'routed but never fixed'),
+    'REVIEW BUDGET RESET — review rounds restart at 1',
+    line('R1-F1', 'routed', 'IMPORTANT', 'src/z.ts:5', 'new generation finding'),
+  ].join('\n');
+  const report = ledger.ledgerState({ text, report: true });
+  assert.equal(report.status, 'ok');
+  assert.equal(report.generation, 2);
+  assert.deepEqual(report.entries.map((e) => e.id + ':' + e.state), [
+    'G1:R3-F2:deferred',
+    'G1:R3-F4:routed-unfixed',
+    'R1-F1:routed-unfixed',
+  ]);
+  assert.equal(report.open, 3);
+  const routing = ledger.ledgerState({ text });
+  assert.deepEqual(routing.entries.map((e) => e.id), ['R1-F1']);
+});
+
+test('a qualified fixed line closes the carried entry and the routing read ignores it', () => {
+  const text = [
+    line('R3-F2', 'deferred', 'IMPORTANT', 'src/a.ts:9', 'robustness gap'),
+    'REVIEW BUDGET RESET',
+    line('G1:R3-F2', 'fixed', 'IMPORTANT', 'src/a.ts:9', 'fixed in the self-review round'),
+  ].join('\n');
+  const report = ledger.ledgerState({ text, report: true });
+  assert.equal(report.status, 'ok');
+  assert.equal(report.entries[0].id, 'G1:R3-F2');
+  assert.equal(report.entries[0].state, 'fixed');
+  assert.equal(report.open, 0);
+  const routing = ledger.ledgerState({ text });
+  assert.equal(routing.status, 'empty');
+});
+
+test('a generation qualifier on a registration or a parked line is malformed', () => {
+  for (const disposition of ['routed', 'deferred', 'neutralized', 'parked']) {
+    const parsed = ledger.parseLedgerLine(line('G1:R3-F2', disposition, 'IMPORTANT', 'src/a.ts:9', 'qualified'));
+    assert.equal(parsed.malformed, true, disposition);
+  }
+  const fixed = ledger.parseLedgerLine(line('G2:R3-F2', 'fixed', 'IMPORTANT', 'src/a.ts:9', 'qualified'));
+  assert.equal(fixed.id, 'G2:R3-F2');
+  assert.equal(fixed.carried, 2);
+});
+
+test('the report read treats an unmarked id reuse as a generation boundary instead of overwriting', () => {
+  const text = [
+    line('R1-F1', 'deferred', 'IMPORTANT', 'src/a.ts:1', 'earlier generation'),
+    line('R1-F1', 'routed', 'IMPORTANT', 'src/b.ts:2', 'unmarked reset reuses the id'),
+  ].join('\n');
+  const report = ledger.ledgerState({ text, report: true });
+  assert.equal(report.status, 'partial');
+  assert.equal(report.reason, 'id-reused');
+  assert.deepEqual(report.entries.map((e) => e.id + ':' + e.anchor), ['G1:R1-F1:src/a.ts:1', 'R1-F1:src/b.ts:2']);
+  assert.equal(ledger.ledgerState({ text }).reason, 'id-reused');
+});
+
+test('the report read treats a round regression as a generation boundary', () => {
+  const text = [
+    line('R2-F1', 'deferred', 'IMPORTANT', 'src/a.ts:1', 'round two of the earlier generation'),
+    line('R1-F1', 'routed', 'IMPORTANT', 'src/b.ts:2', 'unmarked reset starts at round one'),
+  ].join('\n');
+  const report = ledger.ledgerState({ text, report: true });
+  assert.equal(report.status, 'partial');
+  assert.equal(report.reason, 'round-regression');
+  assert.deepEqual(report.entries.map((e) => e.id), ['G1:R2-F1', 'R1-F1']);
+  assert.equal(report.open, 2);
+});
+
+test('a deferred repeat of a parked entry at the same anchor is idempotent and keeps it parked', () => {
+  const text = [
+    line('R2-F1', 'parked', 'IMPORTANT', 'src/a.ts:1', 'parked at classification'),
+    line('R2-F1', 'deferred', 'IMPORTANT', 'src/a.ts:1', 'deferred again by the fix directive'),
+  ].join('\n');
+  const routing = ledger.ledgerState({ text });
+  assert.equal(routing.status, 'ok');
+  assert.equal(routing.entries.length, 1);
+  assert.equal(routing.entries[0].state, 'parked');
+  assert.equal(routing.entries[0].summary, 'parked at classification');
+  const report = ledger.ledgerState({ text, report: true });
+  assert.equal(report.status, 'ok');
+  assert.deepEqual(report.entries.map((e) => e.id + ':' + e.state), ['R2-F1:parked']);
+  const moved = [
+    line('R2-F1', 'parked', 'IMPORTANT', 'src/a.ts:1', 'parked at classification'),
+    line('R2-F1', 'deferred', 'IMPORTANT', 'src/b.ts:4', 'same id at another anchor'),
+  ].join('\n');
+  assert.equal(ledger.ledgerState({ text: moved }).reason, 'id-reused');
+});
+
+test('an idempotent lower-round repeat keeps the highest round, so a new id below it still regresses', () => {
+  const text = [
+    line('R1-F4', 'deferred', 'IMPORTANT', 'src/a.ts:5', 'first registration'),
+    line('R2-F1', 'deferred', 'SUGGESTION', 'src/b.ts:2', 'round two finding'),
+    line('R1-F4', 'deferred', 'IMPORTANT', 'src/a.ts:5', 'repeated registration'),
+    line('R1-F9', 'deferred', 'SUGGESTION', 'src/c.ts:1', 'new id below the highest round'),
+  ].join('\n');
+  const routing = ledger.ledgerState({ text });
+  assert.equal(routing.status, 'degraded');
+  assert.equal(routing.reason, 'round-regression');
+  const report = ledger.ledgerState({ text, report: true });
+  assert.equal(report.status, 'partial');
+  assert.equal(report.reason, 'round-regression');
+  assert.equal(report.generation, 2);
+  assert.deepEqual(report.entries.map((e) => e.id), ['G1:R1-F4', 'G1:R2-F1', 'R1-F9']);
+});
+
+test('the report read counts carried entries against the entry cap', () => {
+  const lines = [];
+  for (let i = 1; i < ledger.MAX_ENTRIES; i++) {
+    lines.push(line('R1-F' + i, 'deferred', 'SUGGESTION', 'src/a.ts:' + i, 'earlier generation finding'));
+  }
+  lines.push('REVIEW BUDGET RESET');
+  for (let i = 1; i <= 3; i++) {
+    lines.push(line('R1-F' + i, 'deferred', 'SUGGESTION', 'src/b.ts:' + i, 'new generation finding'));
+  }
+  const report = ledger.ledgerState({ text: lines.join('\n'), report: true });
+  assert.equal(report.status, 'partial');
+  assert.equal(report.reason, 'truncated');
+  assert.equal(report.entries.length, ledger.MAX_ENTRIES);
+});
+
+test('the report read carries open entries across two boundaries in generation order', () => {
+  const text = [
+    line('R3-F2', 'deferred', 'IMPORTANT', 'src/a.ts:9', 'first generation finding'),
+    'REVIEW BUDGET RESET',
+    line('R1-F1', 'deferred', 'IMPORTANT', 'src/b.ts:3', 'second generation finding'),
+    'REVIEW BUDGET RESET',
+    line('R1-F1', 'routed', 'IMPORTANT', 'src/c.ts:7', 'third generation finding'),
+  ];
+  const report = ledger.ledgerState({ text: text.join('\n'), report: true });
+  assert.equal(report.status, 'ok');
+  assert.equal(report.generation, 3);
+  assert.deepEqual(report.entries.map((e) => e.id), ['G1:R3-F2', 'G2:R1-F1', 'R1-F1']);
+  const closed = text.concat([line('G1:R3-F2', 'fixed', 'IMPORTANT', 'src/a.ts:9', 'fixed in the self-review round')]);
+  const after = ledger.ledgerState({ text: closed.join('\n'), report: true });
+  assert.deepEqual(after.entries.map((e) => e.id + ':' + e.state), [
+    'G1:R3-F2:fixed',
+    'G2:R1-F1:deferred',
+    'R1-F1:routed-unfixed',
+  ]);
+  assert.equal(after.open, 2);
 });

@@ -8,11 +8,11 @@ const MAX_ENTRIES = 500;
 const MAX_TEXT = 200;
 const PROJECT_PREFIX = "<project>/";
 const PREFIX = /^\s*(?:\[[^\]]*\]\s*)?FINDING LEDGER\b/;
-const LINE = /^\s*(?:\[[^\]]*\]\s*)?FINDING LEDGER\s*[—–-]\s*R([1-9][0-9]{0,5})-F([1-9][0-9]{0,4})\s+(routed|deferred|neutralized|fixed)\s+(CRITICAL|IMPORTANT|SUGGESTION)\s+(\S+)\s*\|\s*(\S.*)$/;
+const LINE = /^\s*(?:\[[^\]]*\]\s*)?FINDING LEDGER\s*[—–-]\s*(?:G([1-9][0-9]{0,4}):)?R([1-9][0-9]{0,5})-F([1-9][0-9]{0,4})\s+(routed|deferred|neutralized|parked|fixed)\s+(CRITICAL|IMPORTANT|SUGGESTION)\s+(\S+)\s*\|\s*(\S.*)$/;
 const ANCHOR = /^(.+):([1-9][0-9]{0,6})(?:-[1-9][0-9]{0,6})?$/;
 const SHELL_ACTIVE = /`|\$[({]/;
 const REGISTRATIONS = new Set(["routed", "deferred", "neutralized"]);
-const OPEN_STATES = new Set(["deferred", "routed-unfixed"]);
+const OPEN_STATES = new Set(["deferred", "parked", "routed-unfixed"]);
 const LISTED = new Set(["ok", "partial"]);
 
 function parseAnchor(raw) {
@@ -38,24 +38,28 @@ function parseLedgerLine(line) {
   if (!PREFIX.test(text)) return null;
   const m = LINE.exec(text);
   if (!m) return { malformed: true };
-  const anchor = parseAnchor(m[5]);
+  const carried = m[1] ? parseInt(m[1], 10) : 0;
+  if (carried && m[4] !== "fixed") return { malformed: true };
+  const anchor = parseAnchor(m[6]);
   if (anchor === null) return { malformed: true };
-  let summary = m[6].trim();
+  let summary = m[7].trim();
   if (/[\u0000-\u001f\u007f]/.test(summary)) return { malformed: true };
   summary = inertText(summary);
   if (summary.length > MAX_TEXT) summary = summary.slice(0, MAX_TEXT - 1) + "…";
-  const round = parseInt(m[1], 10);
-  const index = parseInt(m[2], 10);
-  return {
+  const round = parseInt(m[2], 10);
+  const index = parseInt(m[3], 10);
+  const parsed = {
     malformed: false,
-    id: "R" + round + "-F" + index,
+    id: (carried ? "G" + carried + ":" : "") + "R" + round + "-F" + index,
     round,
     index,
-    disposition: m[3],
-    severity: m[4],
+    disposition: m[4],
+    severity: m[5],
     anchor,
     summary,
   };
+  if (carried) parsed.carried = carried;
+  return parsed;
 }
 
 function degraded(reason, generation) {
@@ -85,14 +89,25 @@ function ledgerState(options) {
   }
   let generation = 1;
   let entries = new Map();
+  const carried = new Map();
   let maxRound = 0;
   let issue = "";
+  const nextGeneration = () => {
+    if (report) {
+      for (const entry of entries.values()) {
+        if (!OPEN_STATES.has(entry.state)) continue;
+        const id = "G" + generation + ":" + entry.id;
+        carried.set(id, Object.assign({}, entry, { id, generation }));
+      }
+    }
+    generation += 1;
+    entries = new Map();
+    maxRound = 0;
+  };
   for (const raw of text.split("\n")) {
     const line = raw.replace(/\r$/, "");
     if (scope.RESET.test(line)) {
-      generation += 1;
-      entries = new Map();
-      maxRound = 0;
+      nextGeneration();
       issue = "";
       continue;
     }
@@ -102,13 +117,30 @@ function ledgerState(options) {
       issue = issue || "malformed-line";
       continue;
     }
-    const current = entries.get(parsed.id);
-    if (REGISTRATIONS.has(parsed.disposition)) {
-      if (parsed.round < maxRound) issue = issue || "round-regression";
-      else maxRound = parsed.round;
-      if (current && current.state !== stateOf(parsed.disposition)) issue = issue || "id-reused";
+    if (parsed.carried) {
+      const earlier = carried.get(parsed.id);
+      if (earlier) earlier.state = "fixed";
+      continue;
     }
-    if (!current && entries.size >= MAX_ENTRIES) {
+    let current = entries.get(parsed.id);
+    if (REGISTRATIONS.has(parsed.disposition)) {
+      let conflict = "";
+      if (current) {
+        if (current.state === "parked" && parsed.disposition === "deferred" && current.anchor === parsed.anchor) continue;
+        if (current.state !== stateOf(parsed.disposition) || current.anchor !== parsed.anchor) conflict = "id-reused";
+      } else if (parsed.round < maxRound) {
+        conflict = "round-regression";
+      }
+      if (conflict) {
+        issue = issue || conflict;
+        if (report) {
+          nextGeneration();
+          current = undefined;
+        }
+      }
+      if (parsed.round > maxRound) maxRound = parsed.round;
+    }
+    if (!current && entries.size + carried.size >= MAX_ENTRIES) {
       issue = issue || "truncated";
       continue;
     }
@@ -123,7 +155,8 @@ function ledgerState(options) {
     });
   }
   if (issue && !report) return degraded(issue, generation);
-  const list = Array.from(entries.values()).sort((a, b) => a.round - b.round || a.index - b.index);
+  const byOrigin = (a, b) => (a.generation || 0) - (b.generation || 0) || a.round - b.round || a.index - b.index;
+  const list = Array.from(carried.values()).sort(byOrigin).concat(Array.from(entries.values()).sort(byOrigin));
   const open = list.filter((entry) => OPEN_STATES.has(entry.state)).length;
   if (issue) return { status: "partial", reason: issue, generation, entries: list, open };
   if (list.length === 0) {

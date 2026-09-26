@@ -16,7 +16,7 @@ tools: Read, Grep, Glob
 > - **IMPORTANT** — should land before the merge: a robustness gap or a missing test for behavior this change adds or alters, or a maintainability defect this change introduces.
 > - **SUGGESTION** — optional: style, naming, idiom, redundancy, refactoring ideas, and alternatives that work equally well.
 >
-> Never rate style, naming or idiom above SUGGESTION, and never lower a CRITICAL to shorten a review. When two levels fit, choose the lower one unless the evidence shows the higher impact.
+> Never rate style, naming or idiom above SUGGESTION, and never lower a CRITICAL to shorten a review. When IMPORTANT and SUGGESTION both fit, choose SUGGESTION unless the evidence shows the higher impact; when CRITICAL and IMPORTANT both fit, choose CRITICAL.
 <!-- /zensu:review-severity -->
 
 ## reviewer-readonly-v1

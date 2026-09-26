@@ -8,7 +8,8 @@ read at run time from this file, to every repo-custom persona spawn prompt.
 The scale decides what the auto-fix loop routes. CRITICAL and IMPORTANT findings route by
 default, SUGGESTION findings only under `hooks.autoFixIncludeSuggestions`. While
 `hooks.reviewConvergence` is enabled (the default), every re-review routes only CRITICAL findings
-and IMPORTANT findings that concern the previous fix pass, and defers everything else; with
+and the IMPORTANT findings the judge raised, tagged `[NOT FIXED]` or cited on code the previous
+fix pass edited, and defers everything else; with
 `hooks.selfReview` off it keeps every IMPORTANT finding routable (see
 [configuration.md](configuration.md)). An undefined scale let every reviewer promote its own
 taste to IMPORTANT, and every such finding opened another full review round.
@@ -22,5 +23,5 @@ the same question in different vocabularies; they are not mechanically mapped.
 > - **IMPORTANT** — should land before the merge: a robustness gap or a missing test for behavior this change adds or alters, or a maintainability defect this change introduces.
 > - **SUGGESTION** — optional: style, naming, idiom, redundancy, refactoring ideas, and alternatives that work equally well.
 >
-> Never rate style, naming or idiom above SUGGESTION, and never lower a CRITICAL to shorten a review. When two levels fit, choose the lower one unless the evidence shows the higher impact.
+> Never rate style, naming or idiom above SUGGESTION, and never lower a CRITICAL to shorten a review. When IMPORTANT and SUGGESTION both fit, choose SUGGESTION unless the evidence shows the higher impact; when CRITICAL and IMPORTANT both fit, choose CRITICAL.
 <!-- /zensu:review-severity -->
