@@ -83,9 +83,10 @@ case the row exists for, and silently. Do not reintroduce the comparison.
 **Two conditions withhold the row, both fail CLOSED, and BOTH now DISCLOSE.**
 `currentSessionKey` requires `ZDOC_BINDING === 'bound'` beside the shape. The wrapper
 states "empty for every verdict except bound" and now clears both values unconditionally
-rather than `:=`-seeding them — the only two EXPORTED `ZDOC_*` that deviate from that convention,
+rather than `:=`-seeding them — one of two PAIRS of EXPORTED `ZDOC_*` that deviate from that convention,
 because their meaning depends on a verdict reached further down and the `unknown` /
-`unavailable` branches never reach the bind. The reader enforces it anyway, since a caller
+`unavailable` branches never reach the bind; the other pair, `ZDOC_PLAYWRIGHT_VERSION` and
+`ZDOC_VERIFY_REASON`, is re-derived unless its verdict is injected. The reader enforces it anyway, since a caller
 supplying `ZDOC_BINDING` skips the whole resolution block; without that, one report could
 print the ❌ no-record row and, below it, a row keyed on a session key it had just said does
 not exist. The wrapper half used to withhold SILENTLY, which is the one verdict a diagnostic

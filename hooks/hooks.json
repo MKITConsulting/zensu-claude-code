@@ -72,12 +72,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-write-secret-scan.sh\""
-          }
-        ]
-      },
-      {
-        "matcher": "mcp__(plugin_zensu_)?zensu-browser__browser_(navigate|tabs)",
-        "hooks": [
+          },
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-browser-navigation-consent.sh\"",
@@ -115,6 +110,11 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/post-artifact-redact.sh\""
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/post-browser-navigation-consent.sh\"",
+            "timeout": 60
           }
         ]
       },
@@ -124,16 +124,6 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/post-artifact-redact.sh\""
-          }
-        ]
-      },
-      {
-        "matcher": "mcp__(plugin_zensu_)?zensu-browser__browser_(navigate|tabs)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/post-browser-navigation-consent.sh\"",
-            "timeout": 60
           }
         ]
       }

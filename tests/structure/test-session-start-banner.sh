@@ -91,8 +91,8 @@ OUT_RESUME="$(printf '%s' '{"source":"resume"}' | bash "$BANNER" 2>/dev/null)"
 [ -z "$OUT_RESUME" ] && check "B11 banner silent on source=resume" PASS || check "B11 banner silent on source=resume" FAIL
 OUT_CONSENT="$(printf '%s' '{"source":"startup"}' | env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 bash "$BANNER" 2>/dev/null)"
 case "$OUT_CONSENT" in
-  *'Browser verification'*'consent mode'*'remote targets still need the policy'*'/zensu:doctor'*) check "B11a banner names consent mode, its remote bound and /zensu:doctor when no policy is set" PASS ;;
-  *) check "B11a banner names consent mode, its remote bound and /zensu:doctor when no policy is set" FAIL ;;
+  *'Browser verification'*'consent mode'*'playwright-cli'*'remote targets still need the policy'*'/zensu:doctor'*) check "B11a banner names consent mode, the playwright-cli driver, its remote bound and /zensu:doctor when no policy is set" PASS ;;
+  *) check "B11a banner names consent mode, the playwright-cli driver, its remote bound and /zensu:doctor when no policy is set" FAIL ;;
 esac
 OUT_POLICY="$(printf '%s' '{"source":"startup"}' | ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1}' bash "$BANNER" 2>/dev/null)"
 case "$OUT_POLICY" in

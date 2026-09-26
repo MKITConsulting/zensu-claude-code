@@ -137,9 +137,9 @@ the CRITERION rather than a count: raising the deadline stopped being a Stop-pat
 The criterion is what governs; the roster below is a census taken at one moment, kept because the
 next caller needs somewhere concrete to look. Its live call sites outside the Stop hook are EIGHT,
 in SIX files: `hooks/user-prompt-zen-mode.sh` holds the merged prompt-and-anchor child, the
-prompt-only recovery child and the off-phrase marker write, `hooks/lib/zensu-zen-mode.sh` holds
-the out-of-band writer, which sources the ladder itself, `hooks/lib/zensu-log.sh` holds the
-`--tdd-complete` claim-inventory child, and the three worktree-keep hooks
+prompt-only recovery child and the off-phrase marker write; `hooks/lib/zensu-zen-mode.sh` holds
+the out-of-band writer, which sources the ladder itself; `hooks/lib/zensu-log.sh` holds the
+`--tdd-complete` claim-inventory child; and the three worktree-keep hooks
 (`hooks/session-start-worktree-keep.sh`, `hooks/user-prompt-worktree-keep.sh`,
 `hooks/session-end-worktree-keep.sh`) each run their module child through it. Named by file and role, never by line
 number, because a line number in prose goes stale silently. The deadline is a fixed, unparameterized 5 s, so the next caller needing a
