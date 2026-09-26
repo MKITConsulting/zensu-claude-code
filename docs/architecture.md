@@ -175,7 +175,8 @@ the only figure a check reads out of this paragraph. A `/zensu:tdd` review round
 **at least** 12 KB across one fan-out — more with repo-custom personas, and again per auto-fix
 round, though `hooks.aspectActivation` can drop up to three of those five aspects on a change set
 with no production code, and `hooks.incrementalReviewRounds` narrows every round after the first
-to that round's own delta. The injected prompt is the small term here in any case: measured on
+to that round's own delta, while `hooks.reviewConvergence` cuts how many rounds a chain needs at
+all. The injected prompt is the small term here in any case: measured on
 this repository's own subagent transcripts, one `review-aspect` agent ingests ~513k context
 tokens over ~40 internal turns, so what a round actually costs is the agents' own reading, not
 the packet handed to them. The dominant term, though, is the other leg, and it is the one the design deliberately
@@ -246,7 +247,7 @@ Finally, the rule yields where another contract already fixes an order. A skill 
 2. /zensu:implement ZEN-1    → Load context, plan implementation
 3. /zensu:tdd                → Guided main-thread implementation (vanilla; opt-in strict RED→GREEN)
 4. review chain              → 5 parallel review-aspect agents → optional review-judge → consume-mode code-reviewer (Phase 6, Stop-hook guaranteed)
-5. auto-fix loop             → Critical/Important findings fixed in-thread, then re-reviewed, capped at autoFixMaxRounds
+5. auto-fix loop             → Critical/Important findings fixed in-thread, then re-reviewed, capped at autoFixMaxRounds; with hooks.reviewConvergence a re-review routes only CRITICAL findings and the IMPORTANT findings the judge raised, tagged [NOT FIXED] or cited on code the previous fix pass edited (every IMPORTANT finding when hooks.selfReview is off)
 6. /zensu:security-review    → OWASP, threat model, release gate check
 ```
 
