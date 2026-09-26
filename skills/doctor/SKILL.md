@@ -18,7 +18,8 @@ description: >
   session owns that has ended many turns at implementing, any nonterminal durable
   Autopilot run holding a working tree, any reviewer spawn
   the host permission layer refused, any claim this session audited against a root
-  that is not the anchor, expired pending-review surfaced).
+  that is not the anchor, this session's recorded delivery route, expired pending-review
+  surfaced).
   The only write is an explicit, user-confirmed cleanup of one
   expired pending-review.json — CAS workflow documents are never deleted. Use
   when the user asks to "diagnose zensu", "check my zensu
@@ -271,6 +272,25 @@ classifier will refuse a spawn, not only when the whole table is green.
   parse it and cannot judge it. Say explicitly that the config loader has no size limit,
   so the file is not skipped for its size — but do not tell the user it is applied, or
   that it is ignored: neither is knowable from a row that never read the file.
+- **✅ config: hooks.defaultDeliveryRoute=tdd / =direct** → the project configured a default
+  delivery route, so the route question is skipped wherever its reader is on: `tdd` sends an
+  approved plan or a code request through the Zensu workflow, `direct` implements it
+  directly without the review chain. Relay the value, that a preference stated in the
+  user's own message decides only that request, and that `/zensu:delivery-route` changes
+  the route for the session. When the
+  row adds that a **half is off** (`hooks.autoTdd=false` or `hooks.tddReminder=false`),
+  the default decides only the other half, because each hook exits on its own flag before
+  it resolves the route; relay which half.
+- **⚠️ config: hooks.defaultDeliveryRoute=… is configured but decides nothing** → both
+  readers are off (`hooks.autoTdd=false` and `hooks.tddReminder=false`), so no hook ever
+  resolves the route and the value has no effect. Either turn a reader back on or remove
+  the key; do not tell the user the question is skipped.
+- **⚠️ config: hooks.defaultDeliveryRoute=… is not tdd, direct or ask** → the value is
+  misspelled, quoted differently, or not a string; the hooks read it permissively as `ask`,
+  so the question the user meant to switch off is still asked. The value is shown as
+  written — a string without added quotes, anything else in its JSON spelling — cut at
+  40 characters with a trailing `…`. The fix is the config value itself — one of the three
+  lowercase words.
 - **⚠️ permissions: …** `could not be read —` → a filesystem problem: the file could
   not be opened, is not a regular file, is too large, or was read incompletely.
 - **⚠️ permissions: …** `could not be parsed` → the file WAS read; its bytes are
@@ -756,6 +776,31 @@ whether browser verification is enforced, not only when a row is red.
   `/srv`, a CI checkout under `/builds` — are unaffected and the row works on
   them. Say WHICH HALF is live when you relay a silent topology; never report it
   as proof that the chain stayed in one repository.
+- **✅ delivery route: tdd (session marker) / direct (session marker) / tdd (hooks.defaultDeliveryRoute) / direct (hooks.defaultDeliveryRoute)** → this
+  session's delivery route is already decided, so the plan-approval hook and the
+  per-prompt reminder dispatch without the route question. Green because it is disclosed,
+  ordinary state — relay the value AND its source verbatim, and name the two ways to
+  change it: `/zensu:delivery-route` (`--tdd`, `--direct`, `--auto`) for the session,
+  `hooks.defaultDeliveryRoute` for the project. A `direct` route means code changes skip
+  the review chain and the evidence audits for this session; say so. A **half is off**
+  parenthetical means one reader is switched off, so the route decides only the other
+  half; for a `tdd` route the clause after it says which kind of change still reaches
+  `/zensu:tdd`.
+- **✅ delivery route: ask** → nothing decided; the question is asked where its reader is
+  on — the row names the half it is asked on when one flag is off.
+- **✅ delivery route: … — decides nothing this session** → both readers are off
+  (`hooks.autoTdd=false` and `hooks.tddReminder=false`), so neither hook asks or dispatches
+  on a route; whatever the row names has no effect until a reader is turned back on.
+- **⚠️ delivery route: not checked / could not be read / state not recognized** → a
+  MISSING CHECK, never a verdict. **Not checked:** no bound session key or recorded project
+  root was available, and the row names which cause applies — the report ran without
+  `CLAUDE_CODE_SESSION_ID` or `CLAUDE_PLUGIN_DATA` (there is no binding row then — run
+  `/zensu:doctor` inside the session), the session is bound but its recorded key or project
+  root failed the shape check (the binding row above is the valid-record one), or any other
+  binding verdict (read the binding row). **Could not be read:** the shared config library
+  did not answer, or the recorded project root could not be entered. **State not
+  recognized:** the wrapper reported a word this report has no row for. Point at
+  `/zensu:delivery-route --status` from the session for the hooks' own answer.
 - **❌ state: this session's own workflow document is MISSING** → the record is
   intact and the document it anchors is gone, so the capability gate is denying
   every tool in this session. A deleted and re-created worktree causes it, because

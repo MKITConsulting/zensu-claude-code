@@ -136,6 +136,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Chain Shape & Rearm Receipt (`hooks/lib/chain-recovery-v1.js`)** — chain classification, the rearm receipt and `--chain-recover`: `.claude/rules/chain-shape-rearm-receipt.md`
 - **Plan-Gate Payload Sources (`hooks/lib/plan-payload-v1.js`)** — where the approved plan is read from on `ExitPlanMode`: `.claude/rules/plan-gate-payload-sources.md`
 - **Plan-Approval Delivery Route (`hooks/plan-approved-delegate.sh`, standalone branch)** — the four-route question after a plan is approved: `.claude/rules/plan-approval-delivery-route.md`
+- **Session Delivery Route (`/zensu:delivery-route` + `hooks.defaultDeliveryRoute`)** — the session marker and config key that remember a Zensu-workflow answer or an explicit `--direct` for the session, or answer the route question without asking: `.claude/rules/session-delivery-route.md`
 - **Host-Refused Reviewer Spawn (`hooks/lib/reviewer-spawn-denial-v1.js`)** — diagnosing a reviewer spawn the host refused: `.claude/rules/host-refused-reviewer-spawn.md`
 - **Reviewer-Spawn Grant (`hooks/pre-agent-reviewer-allow.sh` + `reviewer-spawn-allow-v1.js`)** — the PreToolUse allow for the plugin's own read-only reviewers: `.claude/rules/reviewer-spawn-grant.md`
 - **Review-Spawn Scope Sentence (`ZENSU_REVIEW_SPAWN_IN_SCOPE`)** — the sentence that answers a host rule against unrequested spawns: `.claude/rules/review-spawn-scope-sentence.md`

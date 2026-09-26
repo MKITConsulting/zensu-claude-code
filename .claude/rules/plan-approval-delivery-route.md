@@ -15,6 +15,11 @@ exclusive delivery routes — `/zensu:autopilot`, `/zensu:tdd`, `/zensu:pilot`, 
 directly. It replaced a yes/no question about `/zensu:tdd` alone, which left the plugin's other
 two delivery routes invisible at the one moment they are relevant.
 
+A Zensu-workflow answer is remembered for the rest of the session, a configured default answers
+the question without asking, and a direct, autopilot or pilot answer is never remembered. The
+session marker, the `hooks.defaultDeliveryRoute` key and the resolution ladder that decide it
+are in `.claude/rules/session-delivery-route.md`.
+
 **The DURABLE branch is untouched and must stay that way.** A plan carrying a validated
 `<!-- zensu-autopilot:<run> -->` marker still emits `PLAN_APPROVED` with "Do not ask another
 TDD/workflow question": Autopilot has spent its single planning gate by then, and a second
@@ -85,7 +90,7 @@ the default config resolves to the vanilla one and a single capture would grade 
 that suite ALSO grades carriers outside the hook, and the roster is an ENUMERATION rather than a
 count because a count there was wrong on the day it was written: `D17` five prose carriers
 (`docs/configuration.md`, `docs/architecture.md`, `README.md`, `skills/tdd/SKILL.md`,
-`skills/gauntlet-loop/SKILL.md`, with an examined-carrier floor of 5), `D18`-`D20`/`D28`/`D31`-`D33`
+`skills/gauntlet-loop/SKILL.md`, with an examined-carrier floor of 5), `D18`-`D20`/`D28`/`D31`-`D33`/`D38`-`D41`
 the local-only eval in `evals/plan-approval-hook/` and its README (which nothing graded before, so
 its two ABSENCE assertions reported the outward-facing safety property green whenever the driven
 session died), and `D26`/`D27`/`D29`/`D30` the SessionStart banner. The suite's own header carries
@@ -93,7 +98,9 @@ that enumeration too, because an edit to any of those files reddens a suite name
 one; `hooks/session-start-banner.sh` and `tests/structure/test-session-start-banner.sh` now carry a
 pointer back, which is the half this repository keeps discovering it is missing. **`D18`-`D20` and `D26` are all SOURCE or single-arm pins, and
 `D29`-`D32` are what closed the two holes that left**, both measured rather than argued. The banner's
-`_ZENSU_ROUTE_QUESTION_LIVE` guard has THREE conditions and only the flag arm was graded: deleting
+`_ZENSU_ROUTE_QUESTION_LIVE` guard has FOUR conditions today — the flag, node, the delegate hook
+file, and no configured `hooks.defaultDeliveryRoute`, which `R14` in
+`tests/structure/test-delivery-route.sh` grades. When it had three, only the flag arm was graded: deleting
 either the `command -v node` line or the `[ -f .../plan-approved-delegate.sh ]` line left this suite,
 `test-session-start-banner.sh` AND `test-tdd-vanilla-mode.sh` fully green, so `D29`/`D30` drive the
 real banner with node hidden behind a stub PATH and with the delegate hook missing from a subset
@@ -133,21 +140,29 @@ single-marker precondition, Phase 0.D holds the one authoritative statement, and
 `tests/structure/test-autopilot-durable-skill.sh` pin exactly that — so "pinned against nothing" no
 longer holds for it.
 
-**The Phase 0.D ORDERING is now PINNED, and the two entries that follow are notes ABOUT roster
-members rather than roster members themselves.** `D14` in
+**The durable-begin ordering is PINNED by line number and the Phase 0.D `ExitPlanMode` ordering
+by text, and the two entries that follow are notes ABOUT roster members rather than roster
+members themselves.** `D14` in
 `tests/structure/test-autopilot-durable-skill.sh` compares LINE NUMBERS: the single-marker
 precondition must appear before the `--autopilot-begin --run "$RUN_ID"` command, so reversing the
 two now fails rather than passing every check. The paragraph this replaces said the ordering was
 "enforced by nothing" and told the reader to check it by hand; that was true until the offset
-comparison landed. What `D14` does NOT see is the ordering relative to `ExitPlanMode` itself —
-that half is still by hand.
+comparison landed. What `D14` does NOT see is the ordering relative to `ExitPlanMode` itself.
+`D16` in the same suite pins that half as TEXT at both sites that state it: the durable-begin
+block must still say the begin succeeds before `ExitPlanMode`, and the Phase 0.D sentence that
+creates the durable run immediately before `ExitPlanMode`, together with every line of the
+standalone fall-through a reversal causes, must stand in the Phase 0.D slice. It pins the
+instruction, never the order a model takes.
 `skills/autopilot/SKILL.md` Phase 0.D is on this roster for a reason that is easy to miss: it
 requires `--autopilot-begin` to run IMMEDIATELY BEFORE `ExitPlanMode`, and that ordering is the
 only thing putting the durable run at `PLANNING` in time for Autopilot's OWN approval to land on
 the durable branch. Reverse it — a plausible refactor, "do not mint a run the user may reject" —
-and Autopilot's planning gate falls through to the standalone directive, which now re-asks the
-four-route question with `/zensu:autopilot` still on it. That approval loop did not exist before
-this change made the route reachable from this gate. `tests/structure/test-pilot-skill.sh` is on
+and Autopilot's planning gate falls through to the standalone directive. While the route field
+reads `ask`, that directive re-asks the four-route question with `/zensu:autopilot` still on it —
+an approval loop that did not exist before the four-route question made `/zensu:autopilot`
+reachable from this gate. With a recorded or configured route it asks nothing and sends the
+Autopilot spec to `/zensu:tdd` or implements it directly (`.claude/rules/session-delivery-route.md`).
+`tests/structure/test-pilot-skill.sh` is on
 it for a blunter reason: its `P8d` graded a WHOLE-FILE `/zensu:pilot` count against a literal,
 so the primer edit turned a CI-run suite red. It is a per-heredoc assertion now, and the needle is
 the FULL route clause (`PILOT_ROUTE_CLAUSE`) rather than the bare skill name: both primer heredocs
@@ -174,7 +189,12 @@ to Use" bullet in `skills/tdd/SKILL.md`; the two interception paragraphs in
 this change" paragraph in `README.md` — BOTH the "Just this change" paragraph and the "A plan you approve
 first" bullet; `evals/plan-approval-hook/` — whose expect script must
 select the Zensu-workflow option BY LABEL, never by the ordinal `1`, since the ordering rule can
-put the branch-pushing route in slot 1 and a blind ordinal would take it unattended, and whose
+put the branch-pushing route in slot 1 and a blind ordinal would take it unattended — it sends
+exactly two ordinals, the `1` that approves the plan and the `1` that answers the record command's
+Bash permission prompt, the latter at most once and only when `record_prompt_ok` accepts that
+prompt, because the first option of both prompts is always Yes (`D39` grades the guard where tclsh
+exists; `D39b` pins on every host that there are exactly two ordinal sends in any spelling, the
+first before the label answer and the second before the `}` that closes the guarded branch) — and whose
 RUNNER must keep three properties the PR #295 review round added: every ABSENCE assertion is gated
 on a positive one (`T1.5` on `T1.0`, `T2.5` on `T2.0`, `T2.7`/`T2.8` on `T2.4`) because an empty
 transcript satisfies an absence — and note that `T2.5` inlines its own `grep` instead of calling
@@ -254,10 +274,12 @@ the same one the yes/no question always had; the BLAST RADIUS is not — the old
 only implement locally, while the new one adds a route that pushes a branch and opens a pull
 request and one that mutates external Zensu state. Neither prerequisite is verified before its option
 is shown, so a user without a tracked feature can still pick Pilot and learn the answer from that
-skill's own Phase 0. And `/zensu:doctor` carries no row for this question, so a project that set
-`autoTdd:false` still sees no doctor signal that the route choice is switched off — the
-SessionStart banner now says so, which is a user-visible surface rather than a diagnostic row, and
-the review round that added it did not close the doctor half.
+skill's own Phase 0. `/zensu:doctor` reaches this question only through the two delivery-route rows: the
+Session-state `delivery route:` row names `hooks.autoTdd=false` as the switched-off half for a
+BOUND session, and the Config row names it beside a configured `hooks.defaultDeliveryRoute`. An
+unbound session renders the Session-state row as not checked, so there a project that set
+`autoTdd:false` without a configured default still gets no doctor signal that the route question
+is off; the SessionStart banner says so instead.
 
 **The (C) safety property has NO behavioural coverage, and this is the largest named gap.** Both
 cases in `evals/plan-approval-hook/` drive an INTERACTIVE session via expect, while clause (C)

@@ -51,10 +51,13 @@ fi
 # The condition is deliberately the DISJUNCTION of the resolve guards below: a
 # caller that pins every value still sources nothing, and a caller that pins some
 # of them sources once. Hoisting it unconditionally would put a source on a path
-# that needs no getter at all.
+# that needs no getter at all. The delivery-route probe near the end of this file is
+# one of those resolve guards: without the library `zensu_delivery_route_field` is not
+# defined and a bound session renders `unjudged`, a false could-not-be-read row.
 if { [ -z "${ZDOC_TTL_HOURS:-}" ] || [ -z "${ZDOC_IMPL_STOP_NUDGE_AFTER:-}" ] \
   || [ -z "${ZDOC_OWNER_ACTIVITY_TTL_HOURS:-}" ] \
-  || [ -z "${ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS:-}" ]; } \
+  || [ -z "${ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS:-}" ] \
+  || [ -z "${ZDOC_DELIVERY_ROUTE:-}" ]; } \
   && [ -f "$DIR/zensu-config.sh" ]; then
   # shellcheck source=/dev/null
   . "$DIR/zensu-config.sh" 2>/dev/null || true
@@ -587,11 +590,42 @@ if [ -z "${ZDOC_VERIFY:-}" ]; then
   fi
 fi
 
+# --- delivery-route probe (bound session only) ---------------------------------------
+# The route both ask-hooks resolve for THIS session, rendered by the same
+# zensu_delivery_route_field the hooks use, under the RECORD's project root — the root
+# every writer anchors on, and the root the resolver reads both the marker and the
+# config overlay under — so the row can never name a marker the hooks do not read.
+# A probe no session key or project root reached gets `unknown` (a missing check,
+# never an all-clear): the session is unbound, or bound with the pair withheld by the
+# shape check above. A missing library, an answer outside its closed vocabulary, and a
+# recorded root the probe cannot enter are `unjudged`.
+# The record holds the host-native spelling, a Windows path on Git Bash, while the
+# writer and both hooks read under zensu_resolve_project_dir's answer, whose last step
+# renders the directory in the shell's own spelling. The probe takes that same step,
+# so all of them spell the marker path alike; a root it cannot enter is `unjudged`.
+ZDOC_DELIVERY_ROUTE="${ZDOC_DELIVERY_ROUTE:-}"
+if [ -z "$ZDOC_DELIVERY_ROUTE" ]; then
+  if [ -z "${ZDOC_SESSION_KEY:-}" ] || [ -z "${ZDOC_SESSION_PROJECT_ROOT:-}" ]; then
+    ZDOC_DELIVERY_ROUTE=unknown
+  elif command -v zensu_delivery_route_field >/dev/null 2>&1; then
+    ZDOC_ROUTE_ROOT="$(cd -P -- "$ZDOC_SESSION_PROJECT_ROOT" 2>/dev/null && pwd -P)"
+    if [ -n "$ZDOC_ROUTE_ROOT" ]; then
+      ZDOC_DELIVERY_ROUTE="$(zensu_delivery_route_field "$ZDOC_ROUTE_ROOT" "$ZDOC_SESSION_KEY" 2>/dev/null)"
+    fi
+    case "$ZDOC_DELIVERY_ROUTE" in
+      ("tdd (session marker)"|"direct (session marker)"|"tdd (hooks.defaultDeliveryRoute)"|"direct (hooks.defaultDeliveryRoute)"|ask) ;;
+      (*) ZDOC_DELIVERY_ROUTE=unjudged ;;
+    esac
+  else
+    ZDOC_DELIVERY_ROUTE=unjudged
+  fi
+fi
 export ZDOC_ZENSU ZDOC_NODE ZDOC_PLAYWRIGHT ZDOC_BINDING ZDOC_BINDING_PROJECT_ROOT \
   ZDOC_BINDING_RECORDED_VERSION ZDOC_BINDING_EXECUTING_VERSION \
   ZDOC_BINDING_ROOT_UNKNOWN \
   ZDOC_SESSION_KEY ZDOC_SESSION_PROJECT_ROOT ZDOC_VERIFY ZDOC_VERIFY_REASON ZDOC_PLAYWRIGHT_VERSION \
   ZDOC_PLAYWRIGHT_SOURCE ZDOC_PLAYWRIGHT_OWNER
+export ZDOC_DELIVERY_ROUTE
 
 if ! command -v node >/dev/null 2>&1; then
   printf 'Zensu doctor — read-only setup diagnostics\n\n  %s  node: not found on PATH — cannot run the JSON/config/state checks\n' '⚠️'

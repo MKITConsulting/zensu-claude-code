@@ -13,9 +13,9 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (152 = 145 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 145 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 152). The figures here have drifted THREE times in the same direction and every
+reconciled to that manifest (153 = 146 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 146 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 153). The figures here have drifted THREE times in the same direction and every
 correction is recorded rather than overwritten: they once read 148 = 141 + 7 against a manifest
 already holding 142 CI entries, then 150 = 143 + 7 while it already held 144, and then
 151 = 144 + 7 while this merge was landing the 145th. Each of those was internally consistent
@@ -27,7 +27,7 @@ merge of two branches that each re-derived its own count and neither of which co
 other: `test-autopilot-adopt-cli.sh` and `test-incremental-review-rounds.sh` each took the
 manifest from 143 to 144 in its own branch, so merging them is what makes 145.
 **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 143 against 145 CI-classified suites, so TWO CI
+asserted away: its eleven CI group headers sum to 144 against 146 CI-classified suites, so TWO CI
 suites appear in no §3 group. They are `test-session-trail-lineage.sh` and
 `test-incremental-review-rounds.sh`, re-derived BY NAME
 by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
@@ -67,8 +67,8 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **152** — 145 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **145 structure suites + 5 offline evals = 150 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 152 − 145 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **153** — 146 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **146 structure suites + 5 offline evals = 151 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 153 − 146 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -80,8 +80,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 152 structure suites + 5 offline evals | none |
-| `--ci` | 145 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 153 structure suites + 5 offline evals | none |
+| `--ci` | 146 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -119,8 +119,8 @@ state verbs, the SessionStart banner, and a vanished live working directory unde
 intact binding. `session-control-claude` alone carries ~140
 assertions.
 
-### TDD engine & phase gate (17)
-`edit-landing-audit` · `evidence-discipline` · `impl-stop-counter` ·
+### TDD engine & phase gate (18)
+`delivery-route` · `edit-landing-audit` · `evidence-discipline` · `impl-stop-counter` ·
 `pre-edit-hook-mirror` ·
 `pretool-config-prompts` · `requirements-table-gate` ·
 `smoke-main-thread-chain` · `tdd-begin-chain-reset` ·
