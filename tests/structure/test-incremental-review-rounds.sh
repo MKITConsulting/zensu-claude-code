@@ -64,7 +64,7 @@ SCOPE_OUT="$(cd "$ROOT" && node --test "$SCOPE_UNIT" 2>&1)"
 SCOPE_RC=$?
 [ "$SCOPE_RC" -eq 0 ] && check "I1 review-round-scope unit suite passes ($(unit_cases_report_text "$SCOPE_OUT"))" PASS \
                       || check "I1 review-round-scope unit suite passes" FAIL
-unit_cases_registered_floor_text "$SCOPE_OUT" 18 \
+unit_cases_registered_floor_text "$SCOPE_OUT" 24 \
   && check "I1a review-round-scope unit suite registers its cases ($UNIT_CASES_TESTS)" PASS \
   || check "I1a review-round-scope unit suite registers its cases ($UNIT_CASES_TESTS)" FAIL
 

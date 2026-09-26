@@ -23,6 +23,7 @@
     "findingVerification": true,
     "incrementalReviewRounds": true,
     "aspectActivation": true,
+    "reviewConvergence": true,
     "reviewSpawnScopeSentence": true,
     "reviewerSpawnAutoAllow": true,
     "pendingReviewTtlHours": 6,
