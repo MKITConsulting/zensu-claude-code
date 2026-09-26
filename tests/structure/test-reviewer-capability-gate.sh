@@ -350,6 +350,31 @@ case "$WORKER_HANDBACK_REASON" in
   *)
     check "evidence worker must be denied SubagentHandback by its lease policy (got: ${WORKER_HANDBACK_REASON:-<empty>})" FAIL ;;
 esac
+REVIEWER_ROTATION=(zensu:code-reviewer zensu:review-aspect zensu:review-judge)
+HOST_NON_READ_TOOLS=(
+  Agent Task Bash BashOutput KillShell KillBash Monitor
+  Edit MultiEdit Write NotebookEdit NotebookRead
+  WebFetch WebSearch LSP ListMcpResourcesTool ReadMcpResourceTool ReadMcpResourceDirTool
+  TodoWrite TaskCreate TaskGet TaskList TaskUpdate TaskOutput TaskStop
+  Skill ToolSearch AskUserQuestion EnterPlanMode ExitPlanMode EnterWorktree ExitWorktree
+  SendMessage SendUserMessage ListAgents TeamCreate TeamDelete StructuredOutput
+  CronCreate CronDelete CronList ScheduleWakeup RemoteTrigger PushNotification
+  Artifact ArtifactCheck ArtifactComments ArtifactData SendUserFile ReportFindings DesignSync
+  ListPlugins ListSkills SearchPlugins SearchSkills SuggestSkills SuggestPluginInstall
+  Workflow Config Sleep REPL
+)
+SWEEP_INPUT='{"file_path":"src/probe.txt","path":"src","command":"pwd","prompt":"report","message":"report"}'
+SWEEP_INDEX=0
+for tool in "${HOST_NON_READ_TOOLS[@]}"; do
+  type="${REVIEWER_ROTATION[$((SWEEP_INDEX % ${#REVIEWER_ROTATION[@]}))]}"
+  SWEEP_INDEX=$((SWEEP_INDEX + 1))
+  reason="$(deny_reason "$type" "$tool" "$SWEEP_INPUT")"
+  if [ "$reason" = "reviewer-capability-v1 deny: reviewer-readonly-v1 cannot invoke $tool; $HANDBACK_TAIL" ]; then
+    check "reviewer-readonly-v1 ($type) is denied host tool $tool by the read allowlist" PASS
+  else
+    check "reviewer-readonly-v1 ($type) must be denied host tool $tool by the read allowlist (got: ${reason:-<empty>})" FAIL
+  fi
+done
 assert_case "neutral agent cannot access workflow root" deny arbitrary-custom Read '{"file_path":".zensu/state/tdd-phase.json"}'
 assert_case "neutral agent cannot access immutable Session Control record" deny arbitrary-custom Read "{\"file_path\":\"$SESSION_CONTEXT\"}"
 assert_case "neutral Grep cannot traverse the project root into workflow state" deny arbitrary-custom Grep '{"pattern":"phase","path":"."}'
@@ -597,6 +622,18 @@ if [ "$HANDBACK_LITERAL" = SubagentHandback ]; then
   check "the gate declares SubagentHandback as its one host report tool" PASS
 else
   check "the gate must declare HOST_HANDBACK_TOOL as SubagentHandback (got: ${HANDBACK_LITERAL:-<none>})" FAIL
+fi
+READ_TRIO_LITERAL="$(sed -n "s/^const REVIEWER_READ_TOOLS = new Set(\[\(.*\)]);\$/\1/p" "$POLICY")"
+if [ "$READ_TRIO_LITERAL" = "'Read', 'Grep', 'Glob'" ]; then
+  check "the read-only allowlist is exactly Read, Grep and Glob" PASS
+else
+  check "the read-only allowlist must be exactly Read, Grep and Glob (got: ${READ_TRIO_LITERAL:-<none>})" FAIL
+fi
+HANDBACK_PROFILES_LITERAL="$(sed -n "s/^const HANDBACK_PROFILES = new Set(\[\(.*\)]);\$/\1/p" "$POLICY")"
+if [ "$HANDBACK_PROFILES_LITERAL" = "'reviewer-readonly-v1', 'zensu-plm-readonly-v1'" ]; then
+  check "only reviewer-readonly-v1 and zensu-plm-readonly-v1 may hand a report back" PASS
+else
+  check "only reviewer-readonly-v1 and zensu-plm-readonly-v1 may hand a report back (got: ${HANDBACK_PROFILES_LITERAL:-<none>})" FAIL
 fi
 for doc in docs/session-control.md docs/gates.md docs/configuration.md docs/review-chain.md; do
   if [ -n "$HANDBACK_LITERAL" ] && grep -qF "$HANDBACK_LITERAL" "$PLUGIN/$doc"; then
