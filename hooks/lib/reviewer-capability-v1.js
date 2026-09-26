@@ -458,9 +458,20 @@ function neutralViolation(payload, trusted) {
   return null;
 }
 
+const HOST_HANDBACK_TOOL = 'SubagentHandback';
+const HANDBACK_PROFILES = new Set(['reviewer-readonly-v1', 'zensu-plm-readonly-v1']);
+
+function handbackViolation(payload, profile) {
+  const keys = Object.keys(payload.tool_input);
+  if (keys.length === 1 && keys[0] === 'message' && typeof payload.tool_input.message === 'string') {
+    return null;
+  }
+  return `${profile} may invoke ${HOST_HANDBACK_TOOL} only with exactly one string field, message`;
+}
+
 function readOnlyViolation(payload, trusted, profile) {
   if (!REVIEWER_READ_TOOLS.has(payload.tool_name)) {
-    return `${profile} cannot invoke ${payload.tool_name}; only Read, Grep, and Glob are allowed`;
+    return `${profile} cannot invoke ${payload.tool_name}; only Read, Grep, and Glob are allowed, plus ${HOST_HANDBACK_TOOL} to deliver the final report`;
   }
   const violation = protectedAccessViolation(payload, trusted);
   return violation ? `${profile} ${violation}` : null;
@@ -614,10 +625,16 @@ function main() {
     }
     return;
   }
+  const profile = pathResolutionProfile(payload, principal);
+  if (payload.tool_name === HOST_HANDBACK_TOOL && HANDBACK_PROFILES.has(profile)) {
+    const violation = handbackViolation(payload, profile);
+    if (violation) deny(violation);
+    return;
+  }
   try {
     trusted = { ...trusted, toolCwd: canonicalDirectory(payload.cwd, 'PreToolUse cwd') };
   } catch (error) {
-    deny(unusableWorkingDirectoryReason(pathResolutionProfile(payload, principal), error));
+    deny(unusableWorkingDirectoryReason(profile, error));
     return;
   }
   if (principal === principals.PRINCIPALS.REVIEWER) {

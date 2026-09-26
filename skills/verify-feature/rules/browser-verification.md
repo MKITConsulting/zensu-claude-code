@@ -10,9 +10,9 @@ Every call names the session the run-config helper printed, literally:
 command on the main thread: exactly one `playwright-cli` call per Bash command, with no other
 command, operator, pipe, substitution, wrapper or package launcher around it. Quote an argument
 that carries `?`, `*`, `[` or `{`, or that starts with `~` or `=`. Single-quote an argument that
-carries `$`: double quotes do not help, because the gate reads every `$` outside single quotes
-that whitespace or the end of the command does not follow as an expansion it cannot judge, so a
-`fill` value such as `"$12"` is denied and `'$12'` is not. The browser consent gate admits
+carries `$`: double quotes do not help, because the gate reads a `$` outside single quotes as an
+expansion it cannot judge unless whitespace, the end of the command or a closing double quote
+follows it, so a `fill` value such as `"$12"` is denied and `'$12'` is not. The browser consent gate admits
 exactly these commands on a `zensu-verify` session, each with only the flags listed:
 
 | Purpose | Commands | Flags |

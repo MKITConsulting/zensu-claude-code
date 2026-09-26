@@ -64,8 +64,8 @@ exception is removal of an expired `pending-review.json` you explicitly confirm.
 None. No MCP connection, no API key, no network. The tool probes are local
 (`command -v`, `--version`, auth-status exit codes). The `playwright-cli` version is read by
 `hooks/lib/playwright-cli-version-v1.js` from the `package.json` of the `@playwright/cli`
-package the binary on `PATH` resolves to — the nearest manifest within four directories of the
-resolved binary, else one beside an npm shim — without running it. A manifest that names
+package the binary on `PATH` resolves to — one beside an npm shim, else the nearest manifest
+within four directories of the resolved binary — without running it. A manifest that names
 another package, exceeds 64 KiB, does not parse or carries no valid name and version is
 reported as such, and the binary is NOT run. Only when no manifest exists at all does the
 doctor run `playwright-cli --version` once, with the update check disabled, stdin closed and a
@@ -367,7 +367,9 @@ classifier will refuse a spawn, not only when the whole table is green.
 - **⚠️ zensu not authenticated** → `zensu auth login`.
 - **✅ playwright-cli: installed (…)** → the version read from the `@playwright/cli` package
   manifest beside the binary is the one the browser consent gate was measured against, and
-  `/zensu:verify-feature` drives the browser through it. Nothing to do.
+  `/zensu:verify-feature` drives the browser through it. The manifest vouches for the package,
+  not for the binary: a wrapper script in a directory that holds such a manifest reads the same.
+  Nothing to do.
 - **⚠️ playwright-cli: installed (…), not the version the browser consent gate was measured
   against** → the gate's argument parser, its ambient-variable names, the global-config keys and
   the run-config schema were measured against another release, so a changed flag meaning in
@@ -390,17 +392,23 @@ classifier will refuse a spawn, not only when the whole table is green.
   was found beside it** → no manifest exists beside an npm shim or within four directories of the
   resolved binary, so the doctor asked the binary itself. A version a binary prints about
   itself is never taken as measured, even when it matches, and the run-config helper refuses to
-  start `/zensu:verify-feature` on it. A wrapper script outside the package looks exactly like
-  this, so the row also advises putting the directory npm installs `playwright-cli` into first
-  on PATH, ahead of any wrapper. Relay the row and the pinned install command it names.
+  start `/zensu:verify-feature` on it. A wrapper script outside the package with no `package.json`
+  near it looks exactly like this, so the row also advises putting the directory npm installs
+  `playwright-cli` into first on PATH, ahead of any wrapper. Relay the row and the pinned install
+  command it names.
 - **⚠️ playwright-cli: the binary on PATH belongs to the package …, not @playwright/cli** → the
   nearest `package.json` names another package, so the doctor did not run the binary at all, and
   the run-config helper refuses to start `/zensu:verify-feature` on it. Relay the row with the
   package it names; installing `@playwright/cli` with the pinned command is the user's decision.
+  A wrapper script with another package's `package.json` within four directories reads like this
+  too, and then the directory npm installs `playwright-cli` into also has to come first on PATH.
 - **⚠️ playwright-cli: the package manifest beside the binary on PATH could not be judged** →
   the nearest `package.json` does not parse, exceeds 64 KiB, or carries no valid package name and
   version, so the doctor did not run the binary, and the run-config helper refuses to start
   `/zensu:verify-feature` on it. Relay the row and the pinned reinstall command it names.
+  A wrapper script with a `package.json` the doctor cannot judge within four directories, such as
+  a project manifest with no name, reads like this too, and then the directory npm installs
+  `playwright-cli` into also has to come first on PATH.
 - **⚠️ playwright-cli: installed, but its version could not be read** → no manifest exists and
   the binary printed no version within five seconds, or the probe could not run. The run-config
   helper refuses to start `/zensu:verify-feature` until it reads the version from the package
@@ -446,10 +454,16 @@ classifier will refuse a spawn, not only when the whole table is green.
   Without the gate nothing judges a
   `zensu-verify` session; without the recorder every navigation would prompt and nothing would
   be remembered. Reinstall the plugin. The label is literal: the run-config helper writes no run
-  config unless both hooks demonstrably answer registered, and a missing prefilter library or a
-  missing, symlinked or unloadable decision module makes the consent hook deny every gated call, so `/zensu:verify-feature` cannot drive
-  a browser; tell the user not to start `/zensu:verify-feature` until this row clears. The
-  parenthesis names the cause, and it names each hook
+  config unless both hooks demonstrably answer registered, and a missing, symlinked or unloadable
+  decision module makes the consent hook deny every gated call, so `/zensu:verify-feature` cannot
+  drive a browser; tell the user not to start `/zensu:verify-feature` until this row clears. A
+  missing prefilter library makes it deny every call the skill issues, although a gated call that
+  splits `playwright` and `zensu-verify` with a backslash before `n`, `r` or `t` then passes
+  unjudged. A missing
+  prefilter library also makes it deny every other Bash call whose payload names `playwright` or
+  `zensu-verify`, with `prefilter library unavailable` — in a project whose path names either
+  word, every Bash call except the recognized `/zensu:doctor` and adoption commands — so tell the
+  user those denials share this cause. The parenthesis names the cause, and it names each hook
   with its own state — "consent hook" is the gate, "consent recorder" the recorder — joined by
   `; ` when both apply; relay each state for the hook it names. A registration that could not
   be determined, or a probe that did not complete, is NOT a missing hook — relay it as a check
