@@ -135,15 +135,17 @@ Stop path — the `git status` this counter runs and the refused-spawn transcrip
 also bounds callers that are not on that path at all, which is why the ladder's own header states
 the CRITERION rather than a count: raising the deadline stopped being a Stop-path-only decision.
 The criterion is what governs; the roster below is a census taken at one moment, kept because the
-next caller needs somewhere concrete to look. Its live call sites outside the Stop hook are FIVE,
-in THREE files, and both this roster and the ladder's own header enumerated fewer:
-`hooks/user-prompt-zen-mode.sh` holds the merged prompt-and-anchor child, the prompt-only
-recovery child and the off-phrase marker write; `hooks/lib/zensu-zen-mode.sh` holds the
-out-of-band writer, which sources the ladder itself; and `hooks/lib/zensu-log.sh` holds the
-`--tdd-complete` claim-inventory child. `hooks/lib/zensu-doctor.sh` is no caller: its
-`playwright-cli --version` read lives in `hooks/lib/playwright-cli-version-v1.js`, which bounds
-the child itself with a 5 s `SIGKILL` timeout. Recount with `grep -rn zensu_run_bounded hooks`,
-skipping comments and the `command -v` guard, rather than trusting this census. Named by file and role, never by line
+next caller needs somewhere concrete to look. Its live call sites outside the Stop hook are EIGHT,
+in SIX files: `hooks/user-prompt-zen-mode.sh` holds the merged prompt-and-anchor child, the
+prompt-only recovery child and the off-phrase marker write; `hooks/lib/zensu-zen-mode.sh` holds
+the out-of-band writer, which sources the ladder itself; `hooks/lib/zensu-log.sh` holds the
+`--tdd-complete` claim-inventory child; and the three worktree-keep hooks
+(`hooks/session-start-worktree-keep.sh`, `hooks/user-prompt-worktree-keep.sh`,
+`hooks/session-end-worktree-keep.sh`) each run their module child through it.
+`hooks/lib/zensu-doctor.sh` is no caller: its `playwright-cli --version` read lives in
+`hooks/lib/playwright-cli-version-v1.js`, which bounds the child itself with a 5 s `SIGKILL`
+timeout. Recount with `grep -rn zensu_run_bounded hooks`, skipping comments and the
+`command -v` guard, rather than trusting this census. Named by file and role, never by line
 number, because a line number in prose goes stale silently. The deadline is a fixed, unparameterized 5 s, so the next caller needing a
 different one has to find every site — which is what this roster is for. The two on the Stop
 path carried hand-copied ladders and the
@@ -167,14 +169,15 @@ process, where the Stop-path reader hardens the open, so a FIFO in the TOCTOU wi
 Both the watchdog and the hardened open are owed there. Then `_zensu_config_bounded_int` in
 `zensu-config.sh`, which is now
 the sole body behind `zensu_impl_stop_nudge_after` AND behind `zensu_autofix_max_rounds`,
-`zensu_pending_review_ttl_hours`, `zensu_autopilot_owner_activity_ttl_hours` and
-`zensu_autopilot_release_owner_activity_ttl_hours` — so a change to
-it reaches the auto-fix budget, the pending-review TTL and both Autopilot owner-liveness windows,
-three features documented in other sections entirely. The five getters are
+`zensu_pending_review_ttl_hours`, `zensu_autopilot_owner_activity_ttl_hours`,
+`zensu_autopilot_release_owner_activity_ttl_hours` and `zensu_worktree_keep_idle_hours` — so a
+change to it reaches the auto-fix budget, the pending-review TTL, both Autopilot owner-liveness
+windows and the worktree-keep idle window, four features documented in other sections entirely.
+The six getters are
 one-line calls whose operands must stay positional literals, because `impl_getter_operand`
 in `tests/structure/test-impl-stop-counter.sh` reads the default and the max straight out of
 the implementing-turns call for C29 and C31. The extraction is `getter_operand`, parameterized
-on getter and key, and it reaches ALL FIVE keys — say five, not two: the CONSTANT-MIRROR
+on getter and key, and it reaches ALL SIX keys: the CONSTANT-MIRROR
 pins cover four of them (`implStopNudgeAfter` through C31/C31a — C29 reads the same
 operands for a BEHAVIOURAL fallback check rather than for a mirror, so it is deliberately
 not one of them, which `hooks/lib/zensu-doctor-report.js` already records beside its own
@@ -197,7 +200,11 @@ with comment lines STRIPPED first — the dead accessor was NAMED in a comment b
 replacement, and a naive occurrence count read that prose as a call site), and **C58** reads every
 getter's operands through the same extraction to drive its bound matrix. So `autoFixMaxRounds`
 has no renderer mirror, but its call line is bound by the positional-literal contract too: an
-operand that stops being readable there fails C58. Then
+operand that stops being readable there fails C58. `worktreeKeepIdleHours` has no renderer
+mirror either: its default and maximum are hand-copied into `hooks/lib/worktree-keep-v1.js` as
+`DEFAULT_IDLE_HOURS` / `MAX_IDLE_HOURS`, and nothing compares the two copies directly — the unit
+suite pins the module's pair and `K17` in `tests/structure/test-worktree-keep.sh` pins the getter's
+default, each against the same literal (see `.claude/rules/worktree-keep.md`). Then
 `WORKFLOW_INTEGER_EXTENSIONS` in `session-control-core-v1.js`;
 the THREE closed counter key sets in `zensu-tdd-phase.sh` (`tdd_get_counter`,
 `tdd_increment_counter`, and the `names` map in `_tdd_increment_counter_critical`, transition
@@ -226,10 +233,11 @@ Then `zensu_impl_stop_nudge_after` in `zensu-config.sh` against `IMPL_STOP_NUDGE
 / `IMPL_STOP_NUDGE_MAX` in `zensu-doctor-report.js`, which are a hand-copy of its default and
 bounds; and the `ZDOC_IMPL_STOP_NUDGE_AFTER` export in `zensu-doctor.sh` against
 `implStopThreshold` — that file sources `zensu-config.sh` ONCE for every getter it resolves
-(five today: the pending-review TTL, this threshold, the two owner-activity windows and the
-delivery-route field, with `C21c`
-deriving that population from the resolve blocks and requiring each to be a disjunct of the
-single-source guard), and the count
+(six today: the pending-review TTL, this threshold, the two owner-activity windows, the
+worktree-keep idle window and the delivery-route field, with `C21c` deriving that population
+from the resolve blocks and requiring each to be a disjunct of the single-source guard; the
+guard also names the worktree-keep flag, which resolves through `zensu_hook_enabled` rather than
+a bounded getter and therefore sits outside C21c's population), and the count
 is pinned by `C33` because it shipped as two, one inside each resolve block, while a
 requirements table recorded the single-source rule as met; and **the `implStopNudgeAfter` entry
 in `config.example.json`**, which this roster omitted while both sibling flag sections name

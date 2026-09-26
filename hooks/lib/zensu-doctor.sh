@@ -57,6 +57,7 @@ fi
 if { [ -z "${ZDOC_TTL_HOURS:-}" ] || [ -z "${ZDOC_IMPL_STOP_NUDGE_AFTER:-}" ] \
   || [ -z "${ZDOC_OWNER_ACTIVITY_TTL_HOURS:-}" ] \
   || [ -z "${ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS:-}" ] \
+  || [ -z "${ZDOC_WORKTREE_KEEP_IDLE_HOURS:-}" ] || [ -z "${ZDOC_WORKTREE_KEEP:-}" ] \
   || [ -z "${ZDOC_DELIVERY_ROUTE:-}" ]; } \
   && [ -f "$DIR/zensu-config.sh" ]; then
   # shellcheck source=/dev/null
@@ -120,6 +121,19 @@ if [ -z "${ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS:-}" ]; then
   fi
 fi
 export ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS
+
+if [ -z "${ZDOC_WORKTREE_KEEP_IDLE_HOURS:-}" ]; then
+  if command -v zensu_worktree_keep_idle_hours >/dev/null 2>&1; then
+    ZDOC_WORKTREE_KEEP_IDLE_HOURS="$(zensu_worktree_keep_idle_hours 2>/dev/null)"
+  fi
+fi
+export ZDOC_WORKTREE_KEEP_IDLE_HOURS
+if [ -z "${ZDOC_WORKTREE_KEEP:-}" ]; then
+  if command -v zensu_hook_enabled >/dev/null 2>&1; then
+    if zensu_hook_enabled worktreeKeep 2>/dev/null; then ZDOC_WORKTREE_KEEP=on; else ZDOC_WORKTREE_KEEP=off; fi
+  fi
+fi
+export ZDOC_WORKTREE_KEEP
 
 # zensu CLI: installed? authenticated? (auth probe is best-effort + quiet)
 if [ -z "${ZDOC_ZENSU:-}" ]; then
