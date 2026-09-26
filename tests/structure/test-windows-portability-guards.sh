@@ -691,9 +691,16 @@ WORKTREE_KEEP="$ROOT/hooks/lib/worktree-keep-v1.js"
 if [ "$(grep -cF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)" "$WORKTREE_KEEP")" -eq 1 ] \
   && [ "$(grep -cF 'Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0' "$WORKTREE_KEEP")" -eq 1 ] \
   && [ "$(grep -cF 'fs.openSync(file, fs.constants.O_RDONLY | noFollowFlag() | nonBlockFlag())' "$WORKTREE_KEEP")" -eq 1 ] \
-  && [ "$(grep -cF 'fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_CREAT | noFollowFlag() | nonBlockFlag()' "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.constants.O_WRONLY | fs.constants.O_APPEND | noFollowFlag() | nonBlockFlag()' "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF 'appendFlags | fs.constants.O_CREAT | fs.constants.O_EXCL' "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF 'landed.nlink !== 1' "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF 'landed.dev !== opened.dev || landed.ino !== opened.ino' "$WORKTREE_KEEP")" -eq 1 ] \
+  && ! grep -qF 'fs.constants.O_APPEND | fs.constants.O_CREAT' "$WORKTREE_KEEP" \
   && [ "$(grep -cF "fs.openSync(temp, 'wx', 0o600)" "$WORKTREE_KEEP")" -eq 1 ] \
-  && [ "$(grep -cF "fs.openSync(marker.file, 'wx', 0o644)" "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF "fs.openSync(temp, 'wx', 0o644)" "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.linkSync(temp, file)' "$WORKTREE_KEEP")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.copyFileSync(temp, file, fs.constants.COPYFILE_EXCL)' "$WORKTREE_KEEP")" -eq 1 ] \
+  && ! grep -qF "fs.openSync(marker.file, 'wx'" "$WORKTREE_KEEP" \
   && [ "$(grep -oF 'fs.openSync(' "$WORKTREE_KEEP" | wc -l | tr -d ' ')" -eq 4 ] \
   && ! grep -qF 'readFileSync' "$WORKTREE_KEEP" \
   && ! grep -qF 'appendFileSync' "$WORKTREE_KEEP" \

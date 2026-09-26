@@ -31,30 +31,81 @@ drift disclosure at all, which is listed under Limits below. A payload that name
 - **`session-start-worktree-keep.sh`** (SessionStart, every source). When that root
   is a linked worktree under `<repo>/.claude/worktrees/`, it writes this session's anchor
   `<worktree>/.zensu/state/worktree-anchor-<session key>.json` (the branch and head it started
-  on, plus a liveness stamp), puts the `.worktree-keep` line into `<git common dir>/info/exclude`
-  once so the marker never shows in `git status`, reconciles the marker, and sweeps the sibling
-  worktrees of the same repository (bounded to 64 directories). A fresh start records the
-  current branch; a resume or a compaction only refreshes the liveness stamp, so a drift that
-  already happened stays visible.
+  on, a liveness stamp and the idle window it was written under), puts the `.worktree-keep`
+  line into the worktree's `<git common dir>/info/exclude` once so the marker never shows in
+  `git status`, reconciles the marker, and sweeps the sibling worktrees of the same repository
+  (bounded to 64 directories). A fresh start records the current branch. A resume or a
+  compaction keeps the recorded branch and refreshes the stamp; it states a drift that is still
+  in place again, because the compacted context no longer holds the first notice, and it
+  discloses a new one. A drift recorded before a rebase or bisect was paused, or before a branch
+  read that fails now, is stated again as recorded, naming the pause or the failed read. When a
+  resume or a compaction finds no usable anchor, it rewrites the anchor and, once that write has
+  landed, says once that the branch checked out now was adopted as the baseline without
+  verification. Nothing is said when the branch cannot be read, or when the write is refused, as
+  it is over a symlink, a hard link or a non-file at the anchor path, or a broken `.zensu/state`
+  component.
 - **`user-prompt-worktree-keep.sh`** (UserPromptSubmit). Refreshes the liveness stamp at most
   every ten minutes, reconciles the marker, and compares the worktree's current branch with the
   recorded one. On a new drift it injects one model-facing notice naming both branches, the
   current head, the likely cause and the way to continue (below). The same drift is disclosed
-  once; a switch back to the recorded branch clears it.
-- **`session-end-worktree-keep.sh`** (SessionEnd). Removes this session's anchor and reconciles
-  the marker.
+  once per context; a switch back to the recorded branch clears it. A detached HEAD while a
+  rebase or a bisect is paused (`rebase-merge`, `rebase-apply` or `BISECT_LOG` in the
+  worktree's git dir) is not judged at all, and a baseline recorded during such a pause takes
+  the branch the operation returns to (git's own `head-name` or `BISECT_START`), or waits until
+  the operation ends when that record cannot be read. When this session's anchor is missing,
+  names another worktree or holds a record the plugin can replace (unparseable, misshapen or
+  oversized), the prompt rewrites it and says once that the branch was adopted without
+  verification, so a takeover before that point cannot be ruled out. A symlink, a hard link or
+  a non-file at the anchor path, or a broken `.zensu/state` component, is never replaced:
+  nothing is recorded and no notice is given until the user removes or fixes it, which
+  `/zensu:doctor` names.
+- **`session-end-worktree-keep.sh`** (SessionEnd). Ages this session's anchor instead of
+  deleting it: the anchor stops holding the marker at once but stays as the branch baseline
+  until twice its idle window, so a takeover between the end and a later resume is still
+  disclosed. An anchor it cannot validate is removed when it is a regular file, a hard link
+  included; a symlink, a non-file or a broken `.zensu/state` component is left in place.
 
-The marker's lifecycle is one rule, implemented once in `hooks/lib/worktree-keep-v1.js`: the
-marker exists in a worktree exactly while at least one live anchor exists there. An anchor is
-live while its stamp is younger than `hooks.worktreeKeepIdleHours` (default 72). A stale anchor
-loses the marker but stays on disk until twice that window, so a takeover during the idle window
-is still detected against it; only then is it reaped. A marker the plugin did not write — the
-first line of its own marker is a fixed signature — is never removed. Branch names outside a plain
-git ref shape are never rendered: an anchor carrying one is rejected and rewritten, and a
-checked-out branch with such a name is reported as unresolved. Every git child runs with the
-`GIT_DIR`-style discovery and config-injection variables removed from its environment.
+With `hooks.worktreeKeep` off, the SessionStart and SessionEnd hooks run a release pass instead:
+they remove this session's anchor and every marker this plugin wrote that nothing holds any
+more, in this worktree and in its siblings, and never create one. The prompt hook stays off. A
+marker stays while a live anchor of another session holds it, while an anchor file this build
+cannot validate sits beside it (usually the live anchor of a session on another plugin version
+during an update; remove it by hand only after confirming no such session is live there), and
+while the anchor directory cannot be read — a directory past its bound drains as those passes
+reap the expired anchors they read; `/zensu:doctor` names which of these holds it.
+
+The marker's lifecycle is implemented once in `hooks/lib/worktree-keep-v1.js`: the marker is
+held in a worktree while at least one live anchor exists there, and also while an anchor this
+build cannot validate sits beside it. An anchor is live while its stamp is younger than the idle
+window it recorded (`hooks.worktreeKeepIdleHours` of the session that wrote it, default 72; the
+reader's own window applies only to an anchor that recorded none), so a sweep under a shorter
+window cannot release another session's marker early. An aged anchor from SessionEnd is stale at
+once. A stale anchor loses the marker but stays on disk until twice its window, so a takeover
+during the idle window is still detected against it; only a session in the same worktree reaps
+it then, and the sibling sweep never deletes another worktree's anchor. The hooks of several
+sessions can race: a reconcile that removed the marker lists the anchors again and restores the
+marker when a live or an unvalidated anchor appeared in between or the second listing cannot be
+read, and an anchor is read again right before it is reaped. The marker is created only after `git check-ignore` confirms git ignores it — the
+exclude entry is added first when it does not — and it is published complete, through a
+temporary file linked into place; on a volume without hard links the complete temporary file is
+copied into place instead, again only where no marker exists yet. A marker the plugin did not write — the first line of its own
+marker is a fixed signature — is never removed. Branch names outside a plain git ref shape are
+never rendered: an anchor carrying one is rejected and rewritten, and a takeover onto a
+checked-out branch with such a name is disclosed with the name withheld. Every git child runs
+with the `GIT_DIR`-style discovery and config-injection variables removed from its environment.
 
 ## How to continue when the directory was taken
+
+The notice cannot tell a takeover from a branch switch the session made itself, so it is worded
+conditionally. If the session switched on purpose, nothing is wrong: the drift clears once the
+recorded branch is checked out again, and `/clear` records the branch checked out then as a new
+baseline.
+
+Otherwise, first account for uncommitted work. Run `git status` and `git stash list` in the
+taken directory: uncommitted changes there may be the displaced session's own edits or the
+other session's. Do not commit, stash, reset or discard anything in that directory. Carry your
+own edits into the nested worktree created below — copy the files or apply a patch there — or
+ask the user when you cannot tell whose they are.
 
 The desktop write-guard admits `Edit` and `Write` into a worktree nested inside the session's
 own worktree; a sibling or temp-directory worktree is refused as `sibling_worktree`. The Zensu
@@ -79,14 +130,27 @@ record's root, which is the directory that was taken, not the nested worktree.
 
 | Key | Default | Effect |
 |-----|---------|--------|
-| `hooks.worktreeKeep` | `true` | `false` disables all three hooks; no marker, no anchor, no notice |
-| `hooks.worktreeKeepIdleHours` | `72` (range `1..8760`) | Idle window after which an anchor no longer holds the marker |
+| `hooks.worktreeKeep` | `true` | `false` turns the prompt hook off and stops every new marker, anchor and notice; SessionStart and SessionEnd then release this session's anchor and every marker this plugin wrote that nothing holds any more; a marker another live anchor, an anchor file this build cannot validate or an unreadable anchor directory still holds stays, and `/zensu:doctor` names the hold |
+| `hooks.worktreeKeepIdleHours` | `72` (range `1..8760`) | Idle window after which an anchor no longer holds the marker; each anchor records the window it was written under and is judged by it |
 
 ## Doctor
 
 `/zensu:doctor` renders a `worktree:` row family: not an app-managed worktree, marker present
-with the live anchor count, marker missing while this session's anchor is live, a branch drift
-with the recipe above, the switched-off state, and anchor files the plugin did not write.
+with the live anchor count, an anchor directory that could not be read (and whether it drains),
+marker missing while this session's anchor is live (naming why the plugin does not create it —
+git does not ignore the marker, `info/exclude` refuses the entry, or git cannot answer — and
+promising no restore while the anchor directory cannot be read), this session's anchor missing,
+stale, naming another worktree (its branch is then not judged and its recorded root is never
+printed) or without a branch (naming a paused rebase or bisect when one holds a detached HEAD, and
+saying so when the branch read still fails), a branch drift with the recipe above (also while a
+rebase or bisect paused after the drift was recorded, or while the current branch cannot be
+read), a paused rebase or bisect, the switched-off state, a marker still present although
+the flag is off together with what holds it, this session's own anchor when this build cannot
+validate it (naming whether the next prompt replaces it, the user must remove it first, or a
+component of `.zensu/state` must be fixed by hand, from the same pre-check the anchor write
+applies, and promising nothing for a remedy it does not know), and anchor files of other sessions this
+build cannot validate, which the row says to remove only after confirming no session on another
+plugin version is live there.
 
 ## Limits
 
@@ -95,7 +159,12 @@ with the recipe above, the switched-off state, and anchor files the plugin did n
 - Whether the desktop app delivers `SessionEnd` when it stops a session's process is unverified.
   A session that ends without it keeps its worktree out of the pool until the idle window
   elapses; the sibling sweep at every later SessionStart in the same repository clears it.
-- The notice also fires once when the session switched branches itself; the text says so.
+- The notice also fires when the session switched branches itself, once per context; the text
+  says so and names the way to record a new baseline.
+- A paused rebase or bisect suspends the check while HEAD is detached, whoever started it, so a
+  takeover by a session that then pauses a rebase in the taken directory is reported only once
+  that operation finishes; a drift recorded before the pause is stated again at a compaction or
+  resume and stays visible in `/zensu:doctor`.
 - The hooks engage only when the session started inside `.claude/worktrees/<name>`: a session
   that begins in the origin checkout and creates its worktree by hand is never anchored or
   marked, and whether the pool would touch such a worktree is unverified.
@@ -117,7 +186,8 @@ with the recipe above, the switched-off state, and anchor files the plugin did n
   the signal.
 - The anchor directory is read up to a bounded number of files. Past that bound the check
   reports that it could not be performed and the marker is left exactly as it stands, rather
-  than reading an unread directory as "no live session".
+  than reading an unread directory as "no live session"; a reconcile in the same worktree still
+  reaps the expired anchors it did read, so such a directory drains back under the bound.
 - The recycle case — the app moves a session to a fresh worktree while the Session Control
   record still names the old one — is a different state and is not addressed here.
 - The root cause is the app's per-instance lease visibility and last-writer-wins registry

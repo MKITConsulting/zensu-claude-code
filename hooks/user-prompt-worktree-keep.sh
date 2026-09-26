@@ -35,7 +35,6 @@ MSYS_EXCL="$(zensu_msys_env_exclusions WK_CWD 2>/dev/null)" || MSYS_EXCL=""
 
 (
   cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null || exit 0
-  unset WK_NOW WK_MAX_DIRS
   export WK_CWD="$ROOT" WK_SESSION_KEY="$SESSION_KEY" WK_IDLE_HOURS="$IDLE_HOURS" WK_EMIT="claude-hook"
   if [ -n "$MSYS_EXCL" ]; then export MSYS2_ENV_CONV_EXCL="$MSYS_EXCL"; fi
   zensu_run_bounded node ./worktree-keep-v1.js prompt </dev/null

@@ -6937,8 +6937,12 @@ case "$OUT_WK0" in
 esac
 OUT_WK1="$(wk_report)"
 case "$OUT_WK1" in
-  *'⚠️  worktree: this session has no anchor in '*) check "P1wk2 a bound session without an anchor renders the no-anchor WARN row" PASS ;;
+  *'⚠️  worktree: this session has no anchor in '*'adopts the branch checked out then as its baseline without verification'*) check "P1wk2 a bound session without an anchor renders the no-anchor WARN row" PASS ;;
   *) check "P1wk2 a bound session without an anchor renders the no-anchor WARN row (got: $(printf '%s' "$OUT_WK1" | grep 'worktree:' | head -1))" FAIL ;;
+esac
+case "$OUT_WK1" in
+  *'restores the keep marker'*) check "P1wk2-control the no-anchor row promises no marker restore the publish may refuse" FAIL ;;
+  *) check "P1wk2-control the no-anchor row promises no marker restore the publish may refuse" PASS ;;
 esac
 (cd "$SBOX/plug/hooks/lib" && WK_CWD="$WK_WT" WK_SESSION_KEY="$WK_KEY" WK_SOURCE=startup node ./worktree-keep-v1.js session-start >/dev/null 2>&1)
 OUT_WK2="$(wk_report)"
@@ -6950,13 +6954,13 @@ esac
 rm -f "$WK_WT/.worktree-keep"
 OUT_WK3="$(wk_report)"
 case "$OUT_WK3" in
-  *'⚠️  worktree: keep marker MISSING in '*'while this session'*'anchor is live'*) check "P1wk4 a missing marker beside a live anchor renders the MISSING WARN row" PASS ;;
-  *) check "P1wk4 a missing marker beside a live anchor renders the MISSING WARN row" FAIL ;;
+  *'⚠️  worktree: keep marker MISSING in '*"while this session's anchor is live — the desktop pool may reuse or reap it; the next prompt restores the marker"*) check "P1wk4 a missing marker beside a live anchor renders the MISSING WARN row with the restore promise" PASS ;;
+  *) check "P1wk4 a missing marker beside a live anchor renders the MISSING WARN row with the restore promise (got: $(printf '%s' "$OUT_WK3" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
 esac
 git -C "$WK_WT" checkout -q -b claude/wk-taker >/dev/null 2>&1
 OUT_WK4="$(wk_report)"
 case "$OUT_WK4" in
-  *'⚠️  worktree: branch drift — '*'is now on branch claude/wk-taker'*'recorded branch claude/wk-one'*'Do not switch this directory back'*'git worktree add .claude/worktrees/claude-wk-one claude/wk-one'*'If a Zensu review chain is armed'*)
+  *'⚠️  worktree: branch drift — '*'is now on branch claude/wk-taker'*'recorded branch claude/wk-one'*'If another session took this directory over, do not switch it back'*'git worktree add .claude/worktrees/claude-wk-one claude/wk-one'*'If a Zensu review chain is armed'*'/clear records the branch checked out then as a new baseline'*)
     check "P1wk5 a branch drift renders the takeover WARN row with the nested-worktree recipe" PASS ;;
   *) check "P1wk5 a branch drift renders the takeover WARN row with the nested-worktree recipe (got: $(printf '%s' "$OUT_WK4" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
 esac
@@ -6966,6 +6970,23 @@ case "$OUT_WK5" in
     [ "$(wk_rows "$OUT_WK5")" = "1" ] && check "P1wk6 hooks.worktreeKeep=false renders exactly one switched-off row" PASS || check "P1wk6 hooks.worktreeKeep=false renders exactly one switched-off row" FAIL ;;
   *) check "P1wk6 hooks.worktreeKeep=false renders exactly one switched-off row" FAIL ;;
 esac
+printf 'zensu-claude-code worktree-keep v1\nstranded fixture\n' > "$WK_WT/.worktree-keep"
+OUT_WK21="$(ZDOC_WORKTREE_KEEP=off wk_report)"
+case "$OUT_WK21" in
+  *'⚠️  worktree: keep marker still present although hooks.worktreeKeep=false — '*'.worktree-keep'*) check "P1wk21 a plugin marker left behind with hooks.worktreeKeep=false renders the stranded WARN row naming the file" PASS ;;
+  *) check "P1wk21 a plugin marker left behind with hooks.worktreeKeep=false renders the stranded WARN row naming the file (got: $(printf '%s' "$OUT_WK21" | grep 'worktree:' | tr '\n' '|' | cut -c1-240))" FAIL ;;
+esac
+case "$OUT_WK21" in
+  *'keep marker switched off'*) check "P1wk21-control a stranded marker is not rendered as the switched-off OK row" FAIL ;;
+  *) check "P1wk21-control a stranded marker is not rendered as the switched-off OK row" PASS ;;
+esac
+printf 'pinned by hand\n' > "$WK_WT/.worktree-keep"
+OUT_WK21F="$(ZDOC_WORKTREE_KEEP=off wk_report)"
+case "$OUT_WK21F" in
+  *'✅  worktree: keep marker in '*'was not written by this plugin'*) check "P1wk21-foreign a hand-placed marker with hooks.worktreeKeep=false renders the foreign OK row" PASS ;;
+  *) check "P1wk21-foreign a hand-placed marker with hooks.worktreeKeep=false renders the foreign OK row" FAIL ;;
+esac
+rm -f "$WK_WT/.worktree-keep"
 cp -R "$SBOX/plug" "$SBOX/plug-nokeep"
 rm -f "$SBOX/plug-nokeep/hooks/lib/worktree-keep-v1.js"
 OUT_WK6="$(ZDOC_BINDING=bound ZDOC_SESSION_KEY="$WK_KEY" ZDOC_SESSION_PROJECT_ROOT="$WK_WT" run_report "$SBOX/plug-nokeep" - "$WK_WT")"
@@ -6978,11 +6999,24 @@ case "$OUT_WK6B" in
   *'✅  worktree: not under a .claude/worktrees container — '*) check "P1wk7-control the same root renders an OK row for a plain checkout" PASS ;;
   *) check "P1wk7-control the same root renders an OK row for a plain checkout" FAIL ;;
 esac
+case "$OUT_WK6" in
+  *'Cannot find module'*) check "P1wk7-code the load-failure row names the fault code, never the raw loader message" FAIL ;;
+  *'⚠️  worktree: keep check NOT performed'*'(MODULE_NOT_FOUND)'*) check "P1wk7-code the load-failure row names the fault code, never the raw loader message" PASS ;;
+  *) check "P1wk7-code the load-failure row names the fault code, never the raw loader message (got: $(printf '%s' "$OUT_WK6" | grep 'worktree:' | head -1 | cut -c1-240))" FAIL ;;
+esac
+cp -R "$SBOX/plug" "$SBOX/plug-syntax"
+printf 'module.exports = {\n' > "$SBOX/plug-syntax/hooks/lib/worktree-keep-v1.js"
+OUT_WK38="$(ZDOC_BINDING=bound ZDOC_SESSION_KEY="$WK_KEY" ZDOC_SESSION_PROJECT_ROOT="$WK_WT" run_report "$SBOX/plug-syntax" - "$WK_WT")"
+case "$OUT_WK38" in
+  *'Unexpected end of input'*) check "P1wk38 a fault without a code names the error kind, never the raw message" FAIL ;;
+  *'⚠️  worktree: keep check NOT performed'*'(SyntaxError)'*) check "P1wk38 a fault without a code names the error kind, never the raw message" PASS ;;
+  *) check "P1wk38 a fault without a code names the error kind, never the raw message (got: $(printf '%s' "$OUT_WK38" | grep 'worktree:' | head -1 | cut -c1-240))" FAIL ;;
+esac
 printf 'not json' > "$WK_WT/.zensu/state/worktree-anchor-scv1_$(printf 'e%.0s' $(seq 1 64)).json"
 OUT_WK7="$(wk_report)"
 case "$OUT_WK7" in
-  *'⚠️  worktree: anchor file(s) this plugin did not write in '*'worktree-anchor-scv1_eeee'*) check "P1wk8 an unreadable anchor renders the did-not-write WARN row naming the file" PASS ;;
-  *) check "P1wk8 an unreadable anchor renders the did-not-write WARN row naming the file" FAIL ;;
+  *'⚠️  worktree: anchor file(s) this build cannot validate in '*'worktree-anchor-scv1_eeee'*'only after confirming no such session is live there'*) check "P1wk8 an unreadable anchor renders the cannot-validate WARN row naming the file and the caution" PASS ;;
+  *) check "P1wk8 an unreadable anchor renders the cannot-validate WARN row naming the file and the caution (got: $(printf '%s' "$OUT_WK7" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
 esac
 printf 'pinned by hand\n' > "$WK_WT/.worktree-keep"
 OUT_WK8="$(wk_report)"
@@ -7006,8 +7040,65 @@ esac
 printf 'not json' > "$WK_WT/.zensu/state/worktree-anchor-$WK_KEY.json"
 OUT_WK11="$(wk_report)"
 case "$OUT_WK11" in
-  *"⚠️  worktree: this session's anchor in "*'is not one this plugin wrote (unparseable)'*'remove it by hand'*) check "P1wk12 an unreadable own anchor renders the own-rejected WARN row" PASS ;;
-  *) check "P1wk12 an unreadable own anchor renders the own-rejected WARN row" FAIL ;;
+  *"⚠️  worktree: this build cannot validate this session's anchor in "*"(unparseable) — the next prompt replaces it with this session's own record"*) check "P1wk12 an unparseable own anchor renders the own-rejected WARN row that the next prompt replaces it" PASS ;;
+  *) check "P1wk12 an unparseable own anchor renders the own-rejected WARN row that the next prompt replaces it (got: $(printf '%s' "$OUT_WK11" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
+esac
+case "$OUT_WK11" in
+  *'remove it by hand'*) check "P1wk12-control a file the next prompt replaces is not sent to the user for removal" FAIL ;;
+  *) check "P1wk12-control a file the next prompt replaces is not sent to the user for removal" PASS ;;
+esac
+WK11_LISTING="$(printf '%s\n' "$OUT_WK11" | grep 'anchor file(s) this build cannot validate in ')"
+case "$WK11_LISTING" in
+  *"worktree-anchor-$WK_KEY"*) check "P1wk12-listing the listing row leaves this session's own anchor to its own row" FAIL ;;
+  *'worktree-anchor-scv1_eeee'*) check "P1wk12-listing the listing row leaves this session's own anchor to its own row" PASS ;;
+  *) check "P1wk12-listing the listing row leaves this session's own anchor to its own row (got: $(printf '%s' "$OUT_WK11" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
+esac
+rm -f "$WK_WT/.zensu/state/worktree-anchor-$WK_KEY.json"
+mkdir "$WK_WT/.zensu/state/worktree-anchor-$WK_KEY.json"
+OUT_WK39="$(wk_report)"
+case "$OUT_WK39" in
+  *"⚠️  worktree: this build cannot validate this session's anchor in "*'(not-a-regular-file) — the plugin never replaces a symlink, a hard link or a non-file there; remove it by hand, then the next prompt rewrites it'*)
+    check "P1wk39 a non-file at the own anchor path renders the remove-by-hand remedy" PASS ;;
+  *) check "P1wk39 a non-file at the own anchor path renders the remove-by-hand remedy (got: $(printf '%s' "$OUT_WK39" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
+esac
+rmdir "$WK_WT/.zensu/state/worktree-anchor-$WK_KEY.json"
+mv "$WK_WT/.zensu" "$SBOX/wk-zensu-aside"
+if ln -s "$SBOX/wk-zensu-aside" "$WK_WT/.zensu" 2>/dev/null && [ -L "$WK_WT/.zensu" ]; then
+  OUT_WK40="$(wk_report)"
+  case "$OUT_WK40" in
+    *"⚠️  worktree: this build cannot validate this session's anchor in "*'(state-component-symlink) — a component of .zensu/state on its path is a symlink or not a directory, so the plugin neither reads nor writes anchors there; fix that component by hand'*)
+      check "P1wk40 a symlinked state component renders the fix-the-component remedy" PASS ;;
+    *) check "P1wk40 a symlinked state component renders the fix-the-component remedy (got: $(printf '%s' "$OUT_WK40" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
+  esac
+  case "$OUT_WK40" in
+    *'the next prompt rewrites it'*|*'the next prompt replaces it'*) check "P1wk40-control a broken state component carries no rewrite promise" FAIL ;;
+    *) check "P1wk40-control a broken state component carries no rewrite promise" PASS ;;
+  esac
+else
+  check "P1wk40 a symlinked state component renders the fix-the-component remedy (SKIP: this filesystem refused a symlink)" PASS
+fi
+if [ -L "$WK_WT/.zensu" ]; then rm -f "$WK_WT/.zensu"; else rm -rf "$WK_WT/.zensu"; fi
+mv "$SBOX/wk-zensu-aside" "$WK_WT/.zensu"
+printf 'not json' > "$WK_WT/.zensu/state/worktree-anchor-$WK_KEY.json"
+cp -R "$SBOX/plug" "$SBOX/plug-remedy"
+mv "$SBOX/plug-remedy/hooks/lib/worktree-keep-v1.js" "$SBOX/plug-remedy/hooks/lib/worktree-keep-real.js"
+cat > "$SBOX/plug-remedy/hooks/lib/worktree-keep-v1.js" <<'WKJS'
+const real = require('./worktree-keep-real.js');
+module.exports = Object.assign({}, real, {
+  anchorRemedy() {
+    return 'not-a-known-remedy';
+  },
+});
+WKJS
+OUT_WK47="$(ZDOC_BINDING=bound ZDOC_SESSION_KEY="$WK_KEY" ZDOC_SESSION_PROJECT_ROOT="$WK_WT" run_report "$SBOX/plug-remedy" - "$WK_WT")"
+case "$OUT_WK47" in
+  *"⚠️  worktree: this build cannot validate this session's anchor in "*'(unparseable) — this report cannot say whether the next prompt can replace it; inspect it by hand'*)
+    check "P1wk47 a remedy the renderer does not name makes no replacement promise" PASS ;;
+  *) check "P1wk47 a remedy the renderer does not name makes no replacement promise (got: $(printf '%s' "$OUT_WK47" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
+esac
+case "$OUT_WK47" in
+  *'the next prompt replaces it'*|*'the next prompt rewrites it'*) check "P1wk47-control a remedy the renderer does not name is never the rewrite promise" FAIL ;;
+  *) check "P1wk47-control a remedy the renderer does not name is never the rewrite promise" PASS ;;
 esac
 if grep -q '^export ZDOC_WORKTREE_KEEP_IDLE_HOURS$' "$HELPER" && grep -q '^export ZDOC_WORKTREE_KEEP$' "$HELPER" \
   && grep -q 'zensu_worktree_keep_idle_hours' "$HELPER" && grep -q 'zensu_hook_enabled worktreeKeep' "$HELPER"; then
@@ -7102,10 +7193,20 @@ $WK_PHRASES
 EOF_WK
 # The floor is the MEASURED population, not a number under it: a regex change that
 # silently drops four rows costs no check while the loop only grades what it derived.
-if [ "$WK_PHRASE_COUNT" -ge 17 ] && [ -z "$WK_PHRASE_MISSING" ]; then
+if [ "$WK_PHRASE_COUNT" -ge 20 ] && [ -z "$WK_PHRASE_MISSING" ]; then
   check "P1wk14 every worktree row phrase the renderer emits has a doctor-skill bullet ($WK_PHRASE_COUNT phrases derived)" PASS
 else
   check "P1wk14 every worktree row phrase the renderer emits has a doctor-skill bullet (derived=$WK_PHRASE_COUNT missing:$WK_PHRASE_MISSING)" FAIL
+fi
+WK_SHARED_MISSING=""
+for phrase in 'is stale — it no longer holds the keep marker' 'names another worktree' 'how many session anchors are live could not be read' 'the keep marker is left as it stands' 'the release pass leaves the marker as it stands' 'the next prompt restores the marker' 'recorded no branch' 'the branch read failed when the session started' 'and still fails, so a takeover could not be ruled out' 'the next prompt records the branch once git can answer' 'anchor recorded a move of' 'the plugin does not create the marker there' 'the next prompt replaces it with' 'this report cannot say whether the next prompt can replace it' 'the plugin never replaces a symlink, a hard link or a non-file there' 'so the plugin neither reads nor writes anchors there' 'such a file is usually the live anchor of a session on another plugin version' 'only after confirming no such session is live there' 'the next prompt records the branch it returns to' 'although info/exclude lists it' 'cannot add the marker to info/exclude' 'git could not say whether it ignores' 'restores it only once the anchor directory can be read' 'the next prompt reaps the' 'the anchor directory could not be read' 'live session anchor(s) hold it' 'this build cannot validate sit beside it' 'only after confirming no session on another plugin version is live there' 'the next SessionStart or SessionEnd in it reaps the' 'until the next SessionStart or SessionEnd in it releases the marker'; do
+  grep -qF -- "$phrase" "$REPORT" || WK_SHARED_MISSING="$WK_SHARED_MISSING [renderer: $phrase]"
+  grep -qF -- "$phrase" "$VF_SKILL" || WK_SHARED_MISSING="$WK_SHARED_MISSING [skill: $phrase]"
+done
+if [ -z "$WK_SHARED_MISSING" ]; then
+  check "P1wk14-shared every row that shares its lead literal with another row keeps its distinguishing phrase in both the renderer and the skill" PASS
+else
+  check "P1wk14-shared every row that shares its lead literal with another row keeps its distinguishing phrase in both the renderer and the skill (missing:$WK_SHARED_MISSING)" FAIL
 fi
 
 # P1wk14's derivation must survive an escaped apostrophe at full length. The retired grep
@@ -7131,8 +7232,12 @@ WKJS
 node "$SBOX/wk-blank.js" "$WK_WT/.zensu/state/worktree-anchor-$WK_KEY.json"
 OUT_WK15="$(wk_report)"
 case "$OUT_WK15" in
-  *"worktree: this session's anchor in "*'recorded no branch'*) check "P1wk15 an anchor whose branch read failed renders its own WARN row" PASS ;;
+  *"worktree: this session's anchor in "*'recorded no branch — the branch read failed when the session started; the next prompt records the current one'*) check "P1wk15 an anchor whose branch read failed renders its own WARN row" PASS ;;
   *) check "P1wk15 an anchor whose branch read failed renders its own WARN row (got: $(printf '%s' "$OUT_WK15" | grep 'worktree:' | tr '\n' '|' | cut -c1-240))" FAIL ;;
+esac
+case "$OUT_WK15" in
+  *'paused there holds a detached HEAD'*) check "P1wk15-paused a failed branch read outside a pause is not reported as a paused operation" FAIL ;;
+  *) check "P1wk15-paused a failed branch read outside a pause is not reported as a paused operation" PASS ;;
 esac
 case "$OUT_WK15" in
   *'worktree: this session still sits on its recorded '*) check "P1wk15-control the recorded-branch OK row is NOT rendered beside it" FAIL ;;
@@ -7157,6 +7262,25 @@ if (process.argv[4] === 'clear') {
   }
 }
 WKJS
+cat > "$SBOX/wk-reapflood.js" <<'WKJS'
+const fs = require('fs');
+const path = require('path');
+const keep = require(process.argv[2]);
+const root = process.argv[3];
+const dir = path.join(root, ...keep.STATE_SEGMENTS);
+if (process.argv[4] === 'clear') {
+  for (const n of fs.readdirSync(dir)) {
+    if (/^worktree-anchor-scv1_f/.test(n)) fs.unlinkSync(path.join(dir, n));
+  }
+} else {
+  const ended = Date.now() - 200 * 3600 * 1000;
+  for (let i = 0; i < 300; i += 1) {
+    const key = 'scv1_f' + i.toString(16).padStart(63, '0');
+    const record = { schemaVersion: 1, sessionKey: key, worktreeRoot: root, branch: 'claude/wk-one', head: null, recordedAt: ended, lastSeenAt: ended, drift: null, endedAt: ended };
+    fs.writeFileSync(path.join(dir, 'worktree-anchor-' + key + '.json'), JSON.stringify(record));
+  }
+}
+WKJS
 node "$SBOX/wk-flood.js" "$SBOX/plug/hooks/lib/worktree-keep-v1.js" "$WK_WT" fill
 OUT_WK16="$(wk_report)"
 case "$OUT_WK16" in
@@ -7167,7 +7291,34 @@ case "$OUT_WK16" in
   *'live session anchor(s))'*) check "P1wk16-control no live-anchor count is claimed over a directory that was not read" FAIL ;;
   *) check "P1wk16-control no live-anchor count is claimed over a directory that was not read" PASS ;;
 esac
+WK16_ROWS="$(printf '%s\n' "$OUT_WK16" | grep 'worktree:')"
+case "$WK16_ROWS" in
+  *'could not be read (too-many-anchors) — that is a missing check, not an all-clear, and the keep marker is left as it stands'*)
+    check "P1wk16-nodrain an over-bound directory with nothing to reap says the keep marker is left as it stands" PASS ;;
+  *) check "P1wk16-nodrain an over-bound directory with nothing to reap says the keep marker is left as it stands (got: $(printf '%s' "$WK16_ROWS" | tr '\n' '|' | cut -c1-300))" FAIL ;;
+esac
+case "$WK16_ROWS" in
+  *'reaps the'*) check "P1wk16-nodrain-control a directory with nothing to reap is not described as draining" FAIL ;;
+  *) check "P1wk16-nodrain-control a directory with nothing to reap is not described as draining" PASS ;;
+esac
+case "$WK16_ROWS" in
+  *'✅  worktree: keep marker present in '*' — how many session anchors are live could not be read'*)
+    check "P1wk16-count a marker present over an unread anchor directory withholds the count" PASS ;;
+  *) check "P1wk16-count a marker present over an unread anchor directory withholds the count (got: $(printf '%s' "$WK16_ROWS" | tr '\n' '|' | cut -c1-300))" FAIL ;;
+esac
 node "$SBOX/wk-flood.js" "$SBOX/plug/hooks/lib/worktree-keep-v1.js" "$WK_WT" clear
+node "$SBOX/wk-reapflood.js" "$SBOX/plug/hooks/lib/worktree-keep-v1.js" "$WK_WT" fill
+OUT_WK16D="$(wk_report)"
+case "$OUT_WK16D" in
+  *'worktree: anchors in '*'could not be read (too-many-anchors)'*'the next prompt reaps the '*' expired anchor(s) it read'*)
+    check "P1wk16-drain an over-bound directory of expired anchors is described as draining, with the flag on" PASS ;;
+  *) check "P1wk16-drain an over-bound directory of expired anchors is described as draining, with the flag on (got: $(printf '%s' "$OUT_WK16D" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
+esac
+case "$OUT_WK16D" in
+  *'the keep marker is left as it stands'*) check "P1wk16-drain-control a draining directory is not described as left as it stands" FAIL ;;
+  *) check "P1wk16-drain-control a draining directory is not described as left as it stands" PASS ;;
+esac
+node "$SBOX/wk-reapflood.js" "$SBOX/plug/hooks/lib/worktree-keep-v1.js" "$WK_WT" clear
 
 # Every path in this row family is folded. The doctor skill tells the model to relay these
 # rows verbatim, so a directory name carrying a colon between spaces would otherwise forge a
@@ -7198,7 +7349,7 @@ if git -C "$WK_REPO" worktree add -q -b claude/wk-forge "$WK_FORGE" >/dev/null 2
 else
   check "P1wk17 SKIP this filesystem refused a worktree path containing a spaced colon" PASS
 fi
-# The renderer lives in another file and compares against three vocabularies the module owns.
+# The renderer lives in another file and compares against the vocabularies the module owns.
 # A hand-copied literal there is the crossing this repository records as the expensive kind:
 # rename a member upstream and the row silently stops matching, with every check green.
 cat > "$SBOX/wk-vocab.js" <<'WKJS'
@@ -7212,9 +7363,10 @@ if (start < 0 || end < 0) {
 }
 const body = src.slice(start, end).split('\n').map((l) => l.replace(/\/\/.*$/, '')).join('\n');
 const bare = [];
-for (const lit of ['absent', 'ours', 'foreign', 'refused', 'missing', 'rejected', 'live', 'stale']) {
+for (const lit of ['absent', 'ours', 'foreign', 'refused', 'missing', 'rejected', 'live', 'stale', 'ignored', 'not-ignored', 'not-yet-excluded', 'exclude-refused', 'unknown', 'replaced', 'remove-by-hand', 'state-component', 'unresolved', 'unresolved-paused', 'unresolved-unreadable', 'drift-held', 'paused', 'drift', 'on-baseline', 'unreadable']) {
   if (body.indexOf("'" + lit + "'") !== -1) bare.push(lit);
 }
+if (body.indexOf('.worktree-keep') !== -1) bare.push('.worktree-keep');
 console.log(bare.length === 0 ? 'CLEAN' : 'BARE:' + bare.join(','));
 WKJS
 WK_VOCAB="$(node "$SBOX/wk-vocab.js" "$REPORT")"
@@ -7226,6 +7378,33 @@ esac
 grep -qF 'MARKER_STATES,' "$SBOX/plug/hooks/lib/worktree-keep-v1.js" \
   && check "P1wk18-control the module still exports the vocabulary the renderer consumes" PASS \
   || check "P1wk18-control the module still exports the vocabulary the renderer consumes" FAIL
+cat > "$SBOX/wk-judge.js" <<'WKJS'
+const fs = require('fs');
+const src = fs.readFileSync(process.argv[2], 'utf8');
+const start = src.indexOf('function worktreeKeepRows(');
+const end = src.indexOf('\n}\n', start);
+if (start < 0 || end < 0) {
+  console.log('SLICE_FAILED');
+  process.exit(0);
+}
+const body = src.slice(start, end).split('\n').map((l) => l.replace(/\/\/.*$/, '')).join('\n');
+const faults = [];
+for (const shared of ['mod.branchState(', 'mod.anchorMatchesRoot(', 'mod.recordedMoveSentence(', 'mod.branchNoun(', 'mod.anchorRemedy(']) {
+  if (body.indexOf(shared) === -1) faults.push('not-called:' + shared);
+}
+for (const own of ['mod.judgeBranch(', 'mod.unresolvedRecord(']) {
+  if (body.indexOf(own) !== -1) faults.push('decides-itself:' + own);
+}
+for (const call of ['mod.pausedState(', 'mod.detectDrift(', 'worktreeRoot:']) {
+  if (body.indexOf(call) !== -1) faults.push(call);
+}
+console.log(faults.length === 0 ? 'CLEAN' : 'FAULTS:' + faults.join(','));
+WKJS
+WK_JUDGE="$(node "$SBOX/wk-judge.js" "$REPORT")"
+case "$WK_JUDGE" in
+  CLEAN) check "P1wk18-judge the renderer branches on the module's branchState verdict and hands remedyLines only the recorded branch" PASS ;;
+  *) check "P1wk18-judge the renderer branches on the module's branchState verdict and hands remedyLines only the recorded branch ($WK_JUDGE)" FAIL ;;
+esac
 
 # The wrapper's on/off derivation was pinned only by presence greps, which the literal text
 # satisfies whichever arm assigns which value — swapping them passed every check. The block
@@ -7261,6 +7440,8 @@ const fs = require('fs');
 const p = process.argv[2];
 const r = JSON.parse(fs.readFileSync(p, 'utf8'));
 r.lastSeenAt = Date.now() - (6 * 3600 * 1000);
+if (process.argv[3] === 'own') r.idleHours = 72;
+else delete r.idleHours;
 fs.writeFileSync(p, JSON.stringify(r));
 WKJS
 git -C "$WK_WT" checkout -q claude/wk-one >/dev/null 2>&1
@@ -7275,6 +7456,386 @@ OUT_WK20_SHORT="$(ZDOC_WORKTREE_KEEP_IDLE_HOURS=1 wk_report)"
 case "$OUT_WK20_SHORT" in
   *'(0 live session anchor(s))'*) check "P1wk20 a configured one-hour window really reaches the renderer" PASS ;;
   *) check "P1wk20 a configured one-hour window really reaches the renderer (got: $(printf '%s' "$OUT_WK20_SHORT" | grep 'worktree:' | tr '\n' '|' | cut -c1-200))" FAIL ;;
+esac
+node "$SBOX/wk-age.js" "$WK_WT/.zensu/state/worktree-anchor-$WK_KEY.json" own
+OUT_WK20_OWN="$(ZDOC_WORKTREE_KEEP_IDLE_HOURS=1 wk_report)"
+case "$OUT_WK20_OWN" in
+  *'(1 live session anchor(s))'*) check "P1wk20-own an anchor that records its own 72-hour window stays live under a one-hour doctor window" PASS ;;
+  *) check "P1wk20-own an anchor that records its own 72-hour window stays live under a one-hour doctor window (got: $(printf '%s' "$OUT_WK20_OWN" | grep 'worktree:' | tr '\n' '|' | cut -c1-200))" FAIL ;;
+esac
+git -C "$WK_WT" checkout -q --detach >/dev/null 2>&1
+WK_GITDIR="$(git -C "$WK_WT" rev-parse --absolute-git-dir 2>/dev/null)"
+mkdir -p "$WK_GITDIR/rebase-merge"
+OUT_WK22="$(wk_report)"
+case "$OUT_WK22" in
+  *'✅  worktree: a paused rebase holds a detached HEAD in '*) check "P1wk22 a paused rebase renders the paused OK row" PASS ;;
+  *) check "P1wk22 a paused rebase renders the paused OK row (got: $(printf '%s' "$OUT_WK22" | grep 'worktree:' | tr '\n' '|' | cut -c1-240))" FAIL ;;
+esac
+case "$OUT_WK22" in
+  *'worktree: branch drift'*) check "P1wk22-control a paused rebase is not rendered as a branch drift" FAIL ;;
+  *) check "P1wk22-control a paused rebase is not rendered as a branch drift" PASS ;;
+esac
+rmdir "$WK_GITDIR/rebase-merge"
+git -C "$WK_WT" checkout -q claude/wk-one >/dev/null 2>&1
+cat > "$SBOX/wk-stale.js" <<'WKJS'
+const fs = require('fs');
+const p = process.argv[2];
+const r = JSON.parse(fs.readFileSync(p, 'utf8'));
+r.lastSeenAt = Date.now() - (100 * 3600 * 1000);
+delete r.idleHours;
+fs.writeFileSync(p, JSON.stringify(r));
+WKJS
+node "$SBOX/wk-stale.js" "$WK_WT/.zensu/state/worktree-anchor-$WK_KEY.json"
+OUT_WK23="$(wk_report)"
+case "$OUT_WK23" in
+  *"⚠️  worktree: this session's anchor in "*'is stale'*'no longer holds the keep marker'*) check "P1wk23 a stale own anchor renders its own WARN row" PASS ;;
+  *) check "P1wk23 a stale own anchor renders its own WARN row (got: $(printf '%s' "$OUT_WK23" | grep 'worktree:' | tr '\n' '|' | cut -c1-240))" FAIL ;;
+esac
+cp -R "$SBOX/plug" "$SBOX/plug-throw"
+cat > "$SBOX/plug-throw/hooks/lib/worktree-keep-v1.js" <<'WKJS'
+module.exports = {
+  managedWorktree() {
+    const error = new Error('EACCES: permission denied, lstat');
+    error.code = 'EACCES';
+    throw error;
+  },
+};
+WKJS
+OUT_WK24="$(ZDOC_BINDING=bound ZDOC_SESSION_KEY="$WK_KEY" ZDOC_SESSION_PROJECT_ROOT="$WK_WT" run_report "$SBOX/plug-throw" - "$WK_WT")"
+case "$OUT_WK24" in
+  *'⚠️  worktree: keep check NOT performed for '*'(EACCES)'*) check "P1wk24 a managedWorktree fault under a .claude/worktrees container renders the not-performed WARN row" PASS ;;
+  *) check "P1wk24 a managedWorktree fault under a .claude/worktrees container renders the not-performed WARN row (got: $(printf '%s' "$OUT_WK24" | grep 'worktree:' | tr '\n' '|' | cut -c1-240))" FAIL ;;
+esac
+case "$OUT_WK24" in
+  *'not an app-managed worktree'*) check "P1wk24-control a managedWorktree fault is not rendered as the not-managed OK row" FAIL ;;
+  *) check "P1wk24-control a managedWorktree fault is not rendered as the not-managed OK row" PASS ;;
+esac
+cat > "$SBOX/plug-throw/hooks/lib/worktree-keep-v1.js" <<'WKJS'
+module.exports = {
+  managedWorktree(root) {
+    return { worktreeRoot: root, baseRepo: root, name: 'wk-1' };
+  },
+  idleMsFromHours() {
+    return 3600000;
+  },
+  listAnchors() {
+    const error = new Error("ENOTDIR: not a directory, lstat '/x/wk : 2/.zensu'");
+    error.code = 'ENOTDIR';
+    throw error;
+  },
+};
+WKJS
+OUT_WK25="$(ZDOC_BINDING=bound ZDOC_SESSION_KEY="$WK_KEY" ZDOC_SESSION_PROJECT_ROOT="$WK_WT" run_report "$SBOX/plug-throw" - "$WK_WT")"
+case "$OUT_WK25" in
+  *'wk : 2'*) check "P1wk25 a module fault message reaches the catch row raw" FAIL ;;
+  *'⚠️  worktree: keep check NOT performed for '*'(ENOTDIR)'*) check "P1wk25 the catch row names the fault code and never the raw message" PASS ;;
+  *) check "P1wk25 the catch row names the fault code and never the raw message (got: $(printf '%s' "$OUT_WK25" | grep 'worktree:' | tr '\n' '|' | cut -c1-240))" FAIL ;;
+esac
+(cd "$SBOX/plug/hooks/lib" && WK_CWD="$WK_WT" WK_SESSION_KEY="$WK_KEY" WK_SOURCE=startup node ./worktree-keep-v1.js session-start >/dev/null 2>&1)
+node -e '
+  const fs = require("fs");
+  const p = process.argv[1];
+  const r = JSON.parse(fs.readFileSync(p, "utf8"));
+  r.drift = { from: "claude/wk-one", to: "claude/wk-taker", head: "0123456789abcdef0123", detectedAt: Date.now() };
+  fs.writeFileSync(p, JSON.stringify(r));
+' "$WK_WT/.zensu/state/worktree-anchor-$WK_KEY.json"
+git -C "$WK_WT" checkout -q --detach >/dev/null 2>&1
+mkdir -p "$WK_GITDIR/rebase-merge"
+OUT_WK26="$(wk_report)"
+case "$OUT_WK26" in
+  *'⚠️  worktree: branch drift — '*'a rebase paused there since then holds a detached HEAD'*'git worktree add .claude/worktrees/claude-wk-one claude/wk-one'*)
+    check "P1wk26 a drift recorded before a rebase was paused keeps the drift WARN row with the recipe" PASS ;;
+  *) check "P1wk26 a drift recorded before a rebase was paused keeps the drift WARN row with the recipe (got: $(printf '%s' "$OUT_WK26" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
+esac
+case "$OUT_WK26" in
+  *'✅  worktree: a paused rebase holds a detached HEAD'*) check "P1wk26-control a recorded drift is not hidden behind the paused OK row" FAIL ;;
+  *) check "P1wk26-control a recorded drift is not hidden behind the paused OK row" PASS ;;
+esac
+rmdir "$WK_GITDIR/rebase-merge"
+git -C "$WK_WT" checkout -q claude/wk-one >/dev/null 2>&1
+printf 'not json' > "$WK_WT/.zensu/state/worktree-anchor-scv1_$(printf 'e%.0s' $(seq 1 64)).json"
+printf 'zensu-claude-code worktree-keep v1\nheld fixture\n' > "$WK_WT/.worktree-keep"
+OUT_WK27="$(ZDOC_WORKTREE_KEEP=off wk_report)"
+case "$OUT_WK27" in
+  *'⚠️  worktree: keep marker still present although hooks.worktreeKeep=false — '*'while 1 live session anchor(s) hold it'*)
+    check "P1wk27 with the flag off a live anchor is named as what still holds the marker" PASS ;;
+  *) check "P1wk27 with the flag off a live anchor is named as what still holds the marker (got: $(printf '%s' "$OUT_WK27" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
+esac
+rm -f "$WK_WT/.zensu/state/worktree-anchor-$WK_KEY.json"
+OUT_WK28="$(ZDOC_WORKTREE_KEEP=off wk_report)"
+case "$OUT_WK28" in
+  *'⚠️  worktree: keep marker still present although hooks.worktreeKeep=false — '*'anchor file(s) this build cannot validate sit beside it'*'worktree-anchor-scv1_eeee'*'only after confirming no session on another plugin version is live there'*)
+    check "P1wk28 with the flag off an anchor this build cannot validate is named as what still holds the marker" PASS ;;
+  *) check "P1wk28 with the flag off an anchor this build cannot validate is named as what still holds the marker (got: $(printf '%s' "$OUT_WK28" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
+esac
+node -e '
+  const fs = require("fs");
+  const path = require("path");
+  for (let i = 0; i < 300; i += 1) fs.writeFileSync(path.join(process.argv[1], "worktree-anchor-scv1_" + i.toString(16).padStart(64, "0") + ".json"), "x");
+' "$WK_WT/.zensu/state"
+OUT_WK29="$(ZDOC_WORKTREE_KEEP=off wk_report)"
+case "$OUT_WK29" in
+  *'⚠️  worktree: keep marker still present although hooks.worktreeKeep=false — '*'the anchor directory could not be read (too-many-anchors)'*)
+    check "P1wk29 with the flag off an anchor directory past its bound is named as what still holds the marker" PASS ;;
+  *) check "P1wk29 with the flag off an anchor directory past its bound is named as what still holds the marker (got: $(printf '%s' "$OUT_WK29" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
+esac
+WK29_ROWS="$(printf '%s\n' "$OUT_WK29" | grep 'worktree:')"
+case "$WK29_ROWS" in
+  *'the anchor directory could not be read (too-many-anchors), so the release pass leaves the marker as it stands'*)
+    check "P1wk29-nodrain with the flag off an over-bound directory with nothing to reap says the release pass leaves the marker as it stands" PASS ;;
+  *) check "P1wk29-nodrain with the flag off an over-bound directory with nothing to reap says the release pass leaves the marker as it stands (got: $(printf '%s' "$WK29_ROWS" | tr '\n' '|' | cut -c1-300))" FAIL ;;
+esac
+case "$WK29_ROWS" in
+  *'reaps the'*) check "P1wk29-nodrain-control with the flag off a directory with nothing to reap is not described as draining" FAIL ;;
+  *) check "P1wk29-nodrain-control with the flag off a directory with nothing to reap is not described as draining" PASS ;;
+esac
+rm -f "$WK_WT/.zensu/state/"worktree-anchor-scv1_0*.json "$WK_WT/.zensu/state/"worktree-anchor-scv1_eeee*.json
+OUT_WK30="$(ZDOC_WORKTREE_KEEP=off wk_report)"
+case "$OUT_WK30" in
+  *'⚠️  worktree: keep marker still present although hooks.worktreeKeep=false — '*'until the next SessionStart or SessionEnd in it releases the marker'*)
+    check "P1wk30 with the flag off and nothing holding the marker, the row promises the release" PASS ;;
+  *) check "P1wk30 with the flag off and nothing holding the marker, the row promises the release (got: $(printf '%s' "$OUT_WK30" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
+esac
+node "$SBOX/wk-reapflood.js" "$SBOX/plug/hooks/lib/worktree-keep-v1.js" "$WK_WT" fill
+OUT_WK29D="$(ZDOC_WORKTREE_KEEP=off wk_report)"
+case "$OUT_WK29D" in
+  *'⚠️  worktree: keep marker still present although hooks.worktreeKeep=false — '*'the anchor directory could not be read (too-many-anchors)'*'the next SessionStart or SessionEnd in it reaps the '*' expired anchor(s) it read and releases the marker once the directory is back under the bound'*)
+    check "P1wk29-drain with the flag off an over-bound directory of expired anchors is described as draining" PASS ;;
+  *) check "P1wk29-drain with the flag off an over-bound directory of expired anchors is described as draining (got: $(printf '%s' "$OUT_WK29D" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
+esac
+case "$OUT_WK29D" in
+  *'leaves the marker as it stands'*) check "P1wk29-drain-control a draining directory is not described as left as it stands" FAIL ;;
+  *) check "P1wk29-drain-control a draining directory is not described as left as it stands" PASS ;;
+esac
+node "$SBOX/wk-reapflood.js" "$SBOX/plug/hooks/lib/worktree-keep-v1.js" "$WK_WT" clear
+rm -f "$WK_WT/.worktree-keep"
+(cd "$SBOX/plug/hooks/lib" && WK_CWD="$WK_WT" WK_SESSION_KEY="$WK_KEY" WK_SOURCE=startup node ./worktree-keep-v1.js session-start >/dev/null 2>&1)
+printf '!.worktree-keep\n' > "$WK_WT/.gitignore"
+rm -f "$WK_WT/.worktree-keep"
+OUT_WK31="$(wk_report)"
+case "$OUT_WK31" in
+  *'⚠️  worktree: keep marker MISSING in '*'the plugin does not create the marker there: git does not ignore .worktree-keep although info/exclude lists it, so an ignore rule such as !.worktree-keep re-includes it'*)
+    check "P1wk31 a marker git does not ignore although info/exclude lists it renders the refusal, not a restore promise" PASS ;;
+  *) check "P1wk31 a marker git does not ignore although info/exclude lists it renders the refusal, not a restore promise (got: $(printf '%s' "$OUT_WK31" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
+esac
+case "$OUT_WK31" in
+  *'the next prompt restores the marker'*) check "P1wk31-control a refused marker is not promised back by the next prompt" FAIL ;;
+  *) check "P1wk31-control a refused marker is not promised back by the next prompt" PASS ;;
+esac
+rm -f "$WK_WT/.gitignore"
+git -C "$WK_WT" checkout -q --detach >/dev/null 2>&1
+mkdir -p "$WK_GITDIR/rebase-merge"
+printf 'detached HEAD\n' > "$WK_GITDIR/rebase-merge/head-name"
+rm -f "$WK_WT/.zensu/state/worktree-anchor-$WK_KEY.json"
+(cd "$SBOX/plug/hooks/lib" && WK_CWD="$WK_WT" WK_SESSION_KEY="$WK_KEY" WK_SOURCE=startup node ./worktree-keep-v1.js session-start >/dev/null 2>&1)
+rm -f "$WK_WT/.worktree-keep"
+OUT_WK32="$(wk_report)"
+case "$OUT_WK32" in
+  *'⚠️  worktree: keep marker MISSING in '*"⚠️  worktree: this session's anchor in "*'recorded no branch — a rebase paused there holds a detached HEAD'*)
+    check "P1wk32 an anchor recorded during a pause whose target could not be read names the pause, beside the MISSING row" PASS ;;
+  *) check "P1wk32 an anchor recorded during a pause whose target could not be read names the pause, beside the MISSING row (got: $(printf '%s' "$OUT_WK32" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
+esac
+case "$OUT_WK32" in
+  *'the branch read failed when the session started'*) check "P1wk32-control a start during a pause is not reported as a failed branch read" FAIL ;;
+  *) check "P1wk32-control a start during a pause is not reported as a failed branch read" PASS ;;
+esac
+rm -rf "$WK_GITDIR/rebase-merge"
+git -C "$WK_WT" checkout -q claude/wk-one >/dev/null 2>&1
+(cd "$SBOX/plug/hooks/lib" && WK_CWD="$WK_WT" WK_SESSION_KEY="$WK_KEY" WK_SOURCE=startup node ./worktree-keep-v1.js session-start >/dev/null 2>&1)
+WK_EXCLUDE="$WK_REPO/.git/info/exclude"
+cp "$WK_EXCLUDE" "$SBOX/wk-exclude.saved"
+printf '# decoy\n' > "$SBOX/wk-exclude-decoy"
+rm -f "$WK_WT/.worktree-keep"
+rm -f "$WK_EXCLUDE"
+if ln -s "$SBOX/wk-exclude-decoy" "$WK_EXCLUDE" 2>/dev/null && [ -L "$WK_EXCLUDE" ]; then
+  OUT_WK33="$(wk_report)"
+  case "$OUT_WK33" in
+    *'⚠️  worktree: keep marker MISSING in '*'cannot add the marker to info/exclude (exclude-symlink)'*)
+      check "P1wk33 a symlinked info/exclude beside a live anchor renders the exclude refusal" PASS ;;
+    *) check "P1wk33 a symlinked info/exclude beside a live anchor renders the exclude refusal (got: $(printf '%s' "$OUT_WK33" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
+  esac
+  case "$OUT_WK33" in
+    *'the next prompt restores the marker'*) check "P1wk33-control a symlinked info/exclude is not promised a restore" FAIL ;;
+    *) check "P1wk33-control a symlinked info/exclude is not promised a restore" PASS ;;
+  esac
+else
+  check "P1wk33 a symlinked info/exclude beside a live anchor renders the exclude refusal (SKIP: this filesystem refused a symlink)" PASS
+fi
+rm -f "$WK_EXCLUDE"
+cp "$SBOX/wk-exclude-decoy" "$WK_EXCLUDE"
+if ln "$WK_EXCLUDE" "$SBOX/wk-exclude-twin" 2>/dev/null; then
+  OUT_WK34="$(wk_report)"
+  case "$OUT_WK34" in
+    *'⚠️  worktree: keep marker MISSING in '*'cannot add the marker to info/exclude (exclude-hard-link)'*)
+      check "P1wk34 a hard-linked info/exclude beside a live anchor renders the exclude refusal" PASS ;;
+    *) check "P1wk34 a hard-linked info/exclude beside a live anchor renders the exclude refusal (got: $(printf '%s' "$OUT_WK34" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
+  esac
+  case "$OUT_WK34" in
+    *'the next prompt restores the marker'*) check "P1wk34-control a hard-linked info/exclude is not promised a restore" FAIL ;;
+    *) check "P1wk34-control a hard-linked info/exclude is not promised a restore" PASS ;;
+  esac
+else
+  check "P1wk34 a hard-linked info/exclude beside a live anchor renders the exclude refusal (SKIP: filesystem has no hard links)" PASS
+fi
+rm -f "$SBOX/wk-exclude-twin"
+cp "$SBOX/wk-exclude.saved" "$WK_EXCLUDE"
+printf '# decoy\n' > "$WK_EXCLUDE"
+chmod 0444 "$WK_EXCLUDE"
+if [ -w "$WK_EXCLUDE" ]; then
+  check "P1wk44 a read-only info/exclude beside a live anchor renders the exclude refusal (SKIP: this principal can write a read-only file)" PASS
+else
+  OUT_WK44="$(wk_report)"
+  case "$OUT_WK44" in
+    *'⚠️  worktree: keep marker MISSING in '*'cannot add the marker to info/exclude (exclude-not-writable)'*)
+      check "P1wk44 a read-only info/exclude beside a live anchor renders the exclude refusal" PASS ;;
+    *) check "P1wk44 a read-only info/exclude beside a live anchor renders the exclude refusal (got: $(printf '%s' "$OUT_WK44" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
+  esac
+  case "$OUT_WK44" in
+    *'the next prompt restores the marker'*) check "P1wk44-control a read-only info/exclude is not promised a restore" FAIL ;;
+    *) check "P1wk44-control a read-only info/exclude is not promised a restore" PASS ;;
+  esac
+fi
+chmod 0644 "$WK_EXCLUDE"
+cp "$SBOX/wk-exclude.saved" "$WK_EXCLUDE"
+cp -R "$SBOX/plug" "$SBOX/plug-ignore"
+mv "$SBOX/plug-ignore/hooks/lib/worktree-keep-v1.js" "$SBOX/plug-ignore/hooks/lib/worktree-keep-real.js"
+cat > "$SBOX/plug-ignore/hooks/lib/worktree-keep-v1.js" <<'WKJS'
+const real = require('./worktree-keep-real.js');
+module.exports = Object.assign({}, real, {
+  markerIgnoreState() {
+    return { state: 'not-a-known-state', reason: null };
+  },
+});
+WKJS
+OUT_WK45="$(ZDOC_BINDING=bound ZDOC_SESSION_KEY="$WK_KEY" ZDOC_SESSION_PROJECT_ROOT="$WK_WT" run_report "$SBOX/plug-ignore" - "$WK_WT")"
+case "$OUT_WK45" in
+  *'⚠️  worktree: keep marker MISSING in '*'the plugin does not create the marker there: git could not say whether it ignores .worktree-keep'*)
+    check "P1wk45 an ignore verdict the renderer does not name is a refusal, never a restore promise" PASS ;;
+  *) check "P1wk45 an ignore verdict the renderer does not name is a refusal, never a restore promise (got: $(printf '%s' "$OUT_WK45" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
+esac
+case "$OUT_WK45" in
+  *'the next prompt restores the marker'*) check "P1wk45-control an ignore verdict the renderer does not name is not promised a restore" FAIL ;;
+  *) check "P1wk45-control an ignore verdict the renderer does not name is not promised a restore" PASS ;;
+esac
+cp "$WK_WT/.git" "$SBOX/wk-gitfile.saved"
+printf 'gitdir: /nonexistent-wk-gitdir\n' > "$WK_WT/.git"
+OUT_WK35="$(wk_report)"
+case "$OUT_WK35" in
+  *'⚠️  worktree: keep marker MISSING in '*'git could not say whether it ignores .worktree-keep'*'⚠️  worktree: current branch unreadable in '*)
+    check "P1wk35 a worktree git cannot answer for renders the unknown refusal and the branch-unreadable row" PASS ;;
+  *) check "P1wk35 a worktree git cannot answer for renders the unknown refusal and the branch-unreadable row (got: $(printf '%s' "$OUT_WK35" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
+esac
+case "$OUT_WK35" in
+  *'the next prompt restores the marker'*) check "P1wk35-control a marker git cannot judge is not promised a restore" FAIL ;;
+  *) check "P1wk35-control a marker git cannot judge is not promised a restore" PASS ;;
+esac
+WK_OWN_ANCHOR="$WK_WT/.zensu/state/worktree-anchor-$WK_KEY.json"
+cp "$WK_OWN_ANCHOR" "$SBOX/wk-anchor.saved"
+node -e '
+  const fs = require("fs");
+  const p = process.argv[1];
+  const r = JSON.parse(fs.readFileSync(p, "utf8"));
+  r.drift = { from: "claude/wk-one", to: "claude/wk-taker", head: "0123456789abcdef0123", detectedAt: Date.now() };
+  fs.writeFileSync(p, JSON.stringify(r));
+' "$WK_OWN_ANCHOR"
+OUT_WK41="$(wk_report)"
+case "$OUT_WK41" in
+  *'⚠️  worktree: branch drift — '*'from branch claude/wk-one to branch claude/wk-taker, and the current branch could not be read'*'git worktree add .claude/worktrees/claude-wk-one claude/wk-one'*)
+    check "P1wk41 a drift recorded before the branch read started failing keeps the drift WARN row with the recipe" PASS ;;
+  *) check "P1wk41 a drift recorded before the branch read started failing keeps the drift WARN row with the recipe (got: $(printf '%s' "$OUT_WK41" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
+esac
+case "$OUT_WK41" in
+  *'⚠️  worktree: current branch unreadable in '*) check "P1wk41-control a recorded drift is not hidden behind the branch-unreadable row" FAIL ;;
+  *) check "P1wk41-control a recorded drift is not hidden behind the branch-unreadable row" PASS ;;
+esac
+(cd "$SBOX/plug/hooks/lib" && WK_CWD="$WK_WT" WK_SESSION_KEY="$WK_KEY" WK_SOURCE=startup node ./worktree-keep-v1.js session-start >/dev/null 2>&1)
+OUT_WK42="$(wk_report)"
+case "$OUT_WK42" in
+  *"⚠️  worktree: this session's anchor in "*'recorded no branch — the branch read failed when the session started and still fails, so a takeover could not be ruled out; the next prompt records the branch once git can answer'*)
+    check "P1wk42 a session that started over a worktree git cannot answer for renders the still-failing no-branch row" PASS ;;
+  *) check "P1wk42 a session that started over a worktree git cannot answer for renders the still-failing no-branch row (got: $(printf '%s' "$OUT_WK42" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
+esac
+case "$OUT_WK42" in
+  *'the next prompt records the current one'*) check "P1wk42-control a branch read that still fails is not promised a record at the next prompt" FAIL ;;
+  *) check "P1wk42-control a branch read that still fails is not promised a record at the next prompt" PASS ;;
+esac
+cp "$SBOX/wk-gitfile.saved" "$WK_WT/.git"
+cp "$SBOX/wk-anchor.saved" "$WK_OWN_ANCHOR"
+git -C "$WK_WT" checkout -q --detach >/dev/null 2>&1
+node -e '
+  const fs = require("fs");
+  const p = process.argv[1];
+  const r = JSON.parse(fs.readFileSync(p, "utf8"));
+  r.branch = null;
+  fs.writeFileSync(p, JSON.stringify(r));
+' "$WK_OWN_ANCHOR"
+OUT_WK43="$(wk_report)"
+case "$OUT_WK43" in
+  *'✅  worktree: this session still sits on its recorded detached HEAD in '*) check "P1wk43 a session that started on a detached HEAD renders the recorded baseline as a noun" PASS ;;
+  *) check "P1wk43 a session that started on a detached HEAD renders the recorded baseline as a noun (got: $(printf '%s' "$OUT_WK43" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
+esac
+case "$OUT_WK43" in
+  *'recorded a detached HEAD'*) check "P1wk43-control the baseline row never reads 'recorded a detached HEAD'" FAIL ;;
+  *) check "P1wk43-control the baseline row never reads 'recorded a detached HEAD'" PASS ;;
+esac
+git -C "$WK_WT" checkout -q claude/wk-one >/dev/null 2>&1
+cp "$SBOX/wk-anchor.saved" "$WK_OWN_ANCHOR"
+node -e '
+  const fs = require("fs");
+  const p = process.argv[1];
+  const r = JSON.parse(fs.readFileSync(p, "utf8"));
+  r.worktreeRoot = "/tmp/wk-planted-elsewhere-root";
+  r.branch = "claude/wk-other";
+  fs.writeFileSync(p, JSON.stringify(r));
+' "$WK_OWN_ANCHOR"
+OUT_WK46="$(wk_report)"
+case "$OUT_WK46" in
+  *"⚠️  worktree: this session's anchor in "*'names another worktree — the next prompt replaces it with this session'*)
+    check "P1wk46 an own anchor that names another worktree renders the root-mismatch row" PASS ;;
+  *) check "P1wk46 an own anchor that names another worktree renders the root-mismatch row (got: $(printf '%s' "$OUT_WK46" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
+esac
+case "$OUT_WK46" in
+  *'worktree: branch drift'*|*'still sits on its recorded'*|*'wk-planted-elsewhere-root'*) check "P1wk46-control a record that names another worktree is never judged for drift and its root is never rendered" FAIL ;;
+  *) check "P1wk46-control a record that names another worktree is never judged for drift and its root is never rendered" PASS ;;
+esac
+cp "$SBOX/wk-anchor.saved" "$WK_OWN_ANCHOR"
+node "$SBOX/wk-flood.js" "$SBOX/plug/hooks/lib/worktree-keep-v1.js" "$WK_WT" fill
+OUT_WK36="$(wk_report)"
+case "$OUT_WK36" in
+  *'⚠️  worktree: keep marker MISSING in '*'restores it only once the anchor directory can be read'*)
+    check "P1wk36 a missing marker over an anchor directory the check could not read is not promised back by the next prompt" PASS ;;
+  *) check "P1wk36 a missing marker over an anchor directory the check could not read is not promised back by the next prompt (got: $(printf '%s' "$OUT_WK36" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
+esac
+case "$OUT_WK36" in
+  *'the next prompt restores the marker'*) check "P1wk36-control an unread anchor directory carries no restore promise" FAIL ;;
+  *) check "P1wk36-control an unread anchor directory carries no restore promise" PASS ;;
+esac
+node "$SBOX/wk-flood.js" "$SBOX/plug/hooks/lib/worktree-keep-v1.js" "$WK_WT" clear
+cat > "$SBOX/plug-throw/hooks/lib/worktree-keep-v1.js" <<'WKJS'
+module.exports = {
+  MARKER_STATES: { ABSENT: 'absent', OURS: 'ours', FOREIGN: 'foreign', REFUSED: 'refused' },
+  managedWorktree(root) {
+    return { worktreeRoot: root, baseRepo: root, name: 'wk-1' };
+  },
+  idleMsFromHours() {
+    return 3600000;
+  },
+  markerState(root) {
+    return { file: root + '/.worktree-keep', state: 'ours' };
+  },
+  listAnchors() {
+    const error = new Error("ENOTDIR: not a directory, scandir '/x/wk : 2/.zensu'");
+    error.code = 'ENOTDIR';
+    throw error;
+  },
+};
+WKJS
+OUT_WK37="$(ZDOC_WORKTREE_KEEP=off ZDOC_BINDING=bound ZDOC_SESSION_KEY="$WK_KEY" ZDOC_SESSION_PROJECT_ROOT="$WK_WT" run_report "$SBOX/plug-throw" - "$WK_WT")"
+case "$OUT_WK37" in
+  *'wk : 2'*) check "P1wk37 a listAnchors fault with the flag off reaches the stranded row raw" FAIL ;;
+  *'⚠️  worktree: keep marker still present although hooks.worktreeKeep=false — '*'the anchor directory could not be read (ENOTDIR)'*)
+    check "P1wk37 a listAnchors fault with the flag off renders the stranded row with the fault code" PASS ;;
+  *) check "P1wk37 a listAnchors fault with the flag off renders the stranded row with the fault code (got: $(printf '%s' "$OUT_WK37" | grep 'worktree:' | tr '\n' '|' | cut -c1-300))" FAIL ;;
 esac
 rm -rf "$SBOX"
 echo "----"

@@ -66,14 +66,16 @@ reg SessionEnd session-end-worktree-keep.sh && check "K2 SessionEnd registers se
 UNIT_OUT="$(node --test --test-reporter=tap "$UNIT" 2>&1)"
 UNIT_PASS="$(printf '%s\n' "$UNIT_OUT" | grep -E '^# pass ' | grep -oE '[0-9]+' | tail -1)"
 UNIT_FAIL="$(printf '%s\n' "$UNIT_OUT" | grep -E '^# fail ' | grep -oE '[0-9]+' | tail -1)"
+UNIT_SKIPPED="$(printf '%s\n' "$UNIT_OUT" | grep -E '^# skipped ' | grep -oE '[0-9]+' | tail -1)"
+UNIT_MAX_SKIPPED=0
 # A floor fires on REMOVAL only, so it is raised in the SAME commit as any case added
 # to the unit file. Left below the real count it lets a third of the suite be deleted green.
-UNIT_FLOOR=36
-if [ "${UNIT_FAIL:-1}" = "0" ] && [ "${UNIT_PASS:-0}" -ge "$UNIT_FLOOR" ]; then
-  check "K3 unit suite green with at least $UNIT_FLOOR registered cases (pass=$UNIT_PASS)" PASS
+UNIT_FLOOR=85
+if [ "${UNIT_FAIL:-1}" = "0" ] && [ "${UNIT_SKIPPED:-1}" -le "$UNIT_MAX_SKIPPED" ] && [ "${UNIT_PASS:-0}" -ge "$UNIT_FLOOR" ]; then
+  check "K3 unit suite green with at least $UNIT_FLOOR registered cases and at most $UNIT_MAX_SKIPPED skipped (pass=$UNIT_PASS)" PASS
 else
-  check "K3 unit suite green with at least $UNIT_FLOOR registered cases (pass=${UNIT_PASS:-?} fail=${UNIT_FAIL:-?})" FAIL
-  printf '%s\n' "$UNIT_OUT" | grep -E '^not ok' | head -5
+  check "K3 unit suite green with at least $UNIT_FLOOR registered cases and at most $UNIT_MAX_SKIPPED skipped (pass=${UNIT_PASS:-?} fail=${UNIT_FAIL:-?} skipped=${UNIT_SKIPPED:-?})" FAIL
+  printf '%s\n' "$UNIT_OUT" | grep -E '^not ok|# SKIP' | head -5
 fi
 
 make_repo() {
@@ -114,8 +116,8 @@ anchor_of() {
   ' "$PLUGIN_DIR" "$1" "$2" "$3" 2>/dev/null
 }
 context_of() {
-  node -e '
-    let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{const line=s.trim().split("\n").pop()||"";try{const j=JSON.parse(line);const h=j.hookSpecificOutput;process.stdout.write(h&&h.hookEventName==="UserPromptSubmit"?String(h.additionalContext||""):"");}catch(_){process.stdout.write("");}});
+  EVENT="${1:-UserPromptSubmit}" node -e '
+    let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{const line=s.trim().split("\n").pop()||"";try{const j=JSON.parse(line);const h=j.hookSpecificOutput;process.stdout.write(h&&h.hookEventName===process.env.EVENT?String(h.additionalContext||""):"");}catch(_){process.stdout.write("");}});
   '
 }
 
@@ -157,7 +159,7 @@ PROMPT_OUT="$(payload UserPromptSubmit "$SID" "$WT" | run_hook "$HOOK_PROMPT" "$
 git -C "$WT" checkout -q -b claude/taker
 CTX="$(payload UserPromptSubmit "$SID" "$WT" | run_hook "$HOOK_PROMPT" "$NO_CONFIG" 2>/dev/null | context_of)"
 case "$CTX" in
-  *"claude/taker"*"claude/wt-one"*"another Claude session took over the directory"*"Do not switch this directory back"*"git worktree add .claude/worktrees/claude-wt-one claude/wt-one"*"If a Zensu review chain is armed"*"/zensu:doctor reports this state"*)
+  *"claude/taker"*"claude/wt-one"*"another Claude session took over the directory"*"If another session took this directory over, do not switch it back"*"git worktree add .claude/worktrees/claude-wt-one claude/wt-one"*"If a Zensu review chain is armed"*"/zensu:doctor reports this state"*)
     check "K8 prompt hook discloses the drift with both branches, the takeover sentence, the nested-worktree recipe, the armed-chain caveat and the doctor pointer" PASS ;;
   *) check "K8 prompt hook discloses the drift with both branches, the takeover sentence, the nested-worktree recipe, the armed-chain caveat and the doctor pointer (got ${CTX:0:160})" FAIL ;;
 esac
@@ -171,7 +173,10 @@ CTX3="$(payload UserPromptSubmit "$SID" "$WT" | run_hook "$HOOK_PROMPT" "$NO_CON
 
 END_OUT="$(payload SessionEnd "$SID" "$WT" | run_hook "$HOOK_END" "$NO_CONFIG" 2>/dev/null)"; END_RC=$?
 [ "$END_RC" -eq 0 ] && [ -z "$END_OUT" ] && check "K11 session-end hook exits 0 silently" PASS || check "K11 session-end hook exits 0 silently" FAIL
-[ ! -e "$WT/.worktree-keep" ] && [ "$(anchor_of "$WT" "$SID" branch)" = "MISSING" ] && check "K11 session-end removes the anchor and the marker" PASS || check "K11 session-end removes the anchor and the marker" FAIL
+END_STAMP="$(anchor_of "$WT" "$SID" endedAt)"
+[ ! -e "$WT/.worktree-keep" ] && [ "$(anchor_of "$WT" "$SID" branch)" = "claude/wt-one" ] && [ "$END_STAMP" -gt 0 ] 2>/dev/null \
+  && check "K11 session-end ages the anchor as the branch baseline and removes the marker" PASS \
+  || check "K11 session-end ages the anchor as the branch baseline and removes the marker (endedAt=$END_STAMP)" FAIL
 
 WT2="$(add_wt "$REPO" wt-2 claude/wt-two)"
 STALE_KEY="scv1_$(printf 'c%.0s' $(seq 1 64))"
@@ -183,9 +188,50 @@ node -e '
   fs.writeFileSync(path.join(process.argv[1],".worktree-keep"),"zensu-claude-code worktree-keep v1\nstale fixture\n");
 ' "$WT2" "$STALE_KEY"
 payload SessionStart "$SID" "$WT" startup | run_hook "$HOOK_START" "$NO_CONFIG" >/dev/null 2>&1
-[ ! -e "$WT2/.worktree-keep" ] && [ ! -e "$WT2/.zensu/state/worktree-anchor-$STALE_KEY.json" ] && check "K12 the sibling sweep drops a stale anchor and its marker" PASS || check "K12 the sibling sweep drops a stale anchor and its marker" FAIL
+[ ! -e "$WT2/.worktree-keep" ] && [ -e "$WT2/.zensu/state/worktree-anchor-$STALE_KEY.json" ] && check "K12 the sibling sweep drops a stale sibling's marker and leaves its anchor to that worktree's own sessions" PASS || check "K12 the sibling sweep drops a stale sibling's marker and leaves its anchor to that worktree's own sessions" FAIL
 [ -f "$WT/.worktree-keep" ] && check "K12 the sweep keeps the live worktree's marker" PASS || check "K12 the sweep keeps the live worktree's marker" FAIL
 payload SessionEnd "$SID" "$WT" | run_hook "$HOOK_END" "$NO_CONFIG" >/dev/null 2>&1
+
+WT5="$(add_wt "$REPO" wt-10 claude/wt-five)"
+LIVE_KEY="scv1_$(printf '5%.0s' $(seq 1 64))"
+mkdir -p "$WT5/.zensu/state"
+node -e '
+  const fs=require("fs");const path=require("path");
+  const rec={schemaVersion:1,sessionKey:process.argv[2],worktreeRoot:process.argv[1],branch:"claude/wt-five",head:"abcdef0123456789",recordedAt:Date.now(),lastSeenAt:Date.now(),drift:null};
+  fs.writeFileSync(path.join(process.argv[1],".zensu","state","worktree-anchor-"+process.argv[2]+".json"),JSON.stringify(rec));
+  fs.writeFileSync(path.join(process.argv[1],".worktree-keep"),"zensu-claude-code worktree-keep v1\nlive fixture\n");
+' "$WT5" "$LIVE_KEY"
+FUTURE_NOW="$(node -e 'process.stdout.write(String(Date.now() + 1000 * 24 * 3600 * 1000))')"
+AMBIENT_OUT="$(payload SessionStart "$SID" "$WT" startup | WK_NOW="$FUTURE_NOW" WK_MAX_DIRS=1 WK_EMIT=json run_hook "$HOOK_START" "$NO_CONFIG" 2>/dev/null)"
+[ -f "$WT5/.worktree-keep" ] && [ -z "$AMBIENT_OUT" ] \
+  && check "K22 an ambient far-future WK_NOW and an ambient WK_EMIT=json cannot strip a live sibling's marker or switch the output mode" PASS \
+  || check "K22 an ambient far-future WK_NOW and an ambient WK_EMIT=json cannot strip a live sibling's marker or switch the output mode (out=${AMBIENT_OUT:0:80})" FAIL
+node -e 'process.exit(Math.abs(Number(process.argv[1]) - Date.now()) < 600000 ? 0 : 1)' "$(anchor_of "$WT" "$SID" lastSeenAt)" \
+  && check "K22 the hook stamps this session's anchor with the real clock under an ambient WK_NOW" PASS \
+  || check "K22 the hook stamps this session's anchor with the real clock under an ambient WK_NOW (got $(anchor_of "$WT" "$SID" lastSeenAt))" FAIL
+payload SessionEnd "$SID" "$WT" | run_hook "$HOOK_END" "$NO_CONFIG" >/dev/null 2>&1
+
+SID5="wtkeep-resume-$$"
+mint "$SID5" "$WT"
+RESUME_CTX="$(payload SessionStart "$SID5" "$WT" resume | run_hook "$HOOK_START" "$NO_CONFIG" 2>/dev/null | context_of SessionStart)"
+case "$RESUME_CTX" in
+  *"without verification"*"cannot be ruled out"*) check "K23 a resume that finds no anchor tells the session at SessionStart that its branch was adopted unverified" PASS ;;
+  *) check "K23 a resume that finds no anchor tells the session at SessionStart that its branch was adopted unverified (got ${RESUME_CTX:0:160})" FAIL ;;
+esac
+payload SessionEnd "$SID5" "$WT" | run_hook "$HOOK_END" "$NO_CONFIG" >/dev/null 2>&1
+
+SID6="wtkeep-compact-$$"
+mint "$SID6" "$WT"
+payload SessionStart "$SID6" "$WT" startup | run_hook "$HOOK_START" "$NO_CONFIG" >/dev/null 2>&1
+git -C "$WT" checkout -q -b claude/compact-taker
+payload UserPromptSubmit "$SID6" "$WT" | run_hook "$HOOK_PROMPT" "$NO_CONFIG" >/dev/null 2>&1
+COMPACT_CTX="$(payload SessionStart "$SID6" "$WT" compact | run_hook "$HOOK_START" "$NO_CONFIG" 2>/dev/null | context_of SessionStart)"
+case "$COMPACT_CTX" in
+  *"claude/compact-taker"*"claude/wt-one"*) check "K24 a compaction re-emits a drift that is still in place at SessionStart" PASS ;;
+  *) check "K24 a compaction re-emits a drift that is still in place at SessionStart (got ${COMPACT_CTX:0:160})" FAIL ;;
+esac
+git -C "$WT" checkout -q claude/wt-one
+payload SessionEnd "$SID6" "$WT" | run_hook "$HOOK_END" "$NO_CONFIG" >/dev/null 2>&1
 
 SID2="wtkeep-plain-$$"
 mint "$SID2" "$REPO"
@@ -202,6 +248,21 @@ ON_CTX="$(payload UserPromptSubmit "$SID" "$WT" | run_hook "$HOOK_PROMPT" "$NO_C
 case "$ON_CTX" in *"claude/taker"*"claude/wt-one"*) check "K14-control the same drifted anchor discloses once the flag is on" PASS ;; *) check "K14-control the same drifted anchor discloses once the flag is on" FAIL ;; esac
 git -C "$WT" checkout -q claude/wt-one
 payload SessionEnd "$SID" "$WT" | run_hook "$HOOK_END" "$NO_CONFIG" >/dev/null 2>&1
+
+payload SessionStart "$SID" "$WT" startup | run_hook "$HOOK_START" "$NO_CONFIG" >/dev/null 2>&1
+if [ -f "$WT/.worktree-keep" ]; then
+  REL_OUT="$(payload SessionStart "$SID" "$WT" startup | run_hook "$HOOK_START" "$OFF_CONFIG" 2>&1)"
+  [ -z "$REL_OUT" ] && [ ! -e "$WT/.worktree-keep" ] && [ "$(anchor_of "$WT" "$SID" branch)" = "MISSING" ] \
+    && check "K25 a SessionStart with hooks.worktreeKeep=false releases the marker and this session's anchor instead of stranding them" PASS \
+    || check "K25 a SessionStart with hooks.worktreeKeep=false releases the marker and this session's anchor instead of stranding them (out=${REL_OUT:0:80})" FAIL
+  payload SessionStart "$SID" "$WT" startup | run_hook "$HOOK_START" "$NO_CONFIG" >/dev/null 2>&1
+  payload SessionEnd "$SID" "$WT" | run_hook "$HOOK_END" "$OFF_CONFIG" >/dev/null 2>&1
+  [ ! -e "$WT/.worktree-keep" ] && [ "$(anchor_of "$WT" "$SID" branch)" = "MISSING" ] \
+    && check "K25 a SessionEnd with hooks.worktreeKeep=false releases the marker and this session's anchor" PASS \
+    || check "K25 a SessionEnd with hooks.worktreeKeep=false releases the marker and this session's anchor" FAIL
+else
+  check "K25 precondition: the flag-on start set the marker" FAIL
+fi
 
 NOCWD_OUT="$(printf '%s' "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"$SID\",\"source\":\"startup\"}" | run_hook "$HOOK_START" "$NO_CONFIG" 2>&1)"; NOCWD_RC=$?
 [ "$NOCWD_RC" -eq 0 ] && [ -z "$NOCWD_OUT" ] && check "K15 a payload without cwd exits 0 silently" PASS || check "K15 a payload without cwd exits 0 silently" FAIL
@@ -223,7 +284,7 @@ KEY4="$(node -e 'const c=require(process.argv[1]+"/hooks/lib/session-control-cor
 (cd "$PLUGIN_DIR/hooks/lib" && WK_CWD="$WT" WK_SESSION_KEY="$KEY4" WK_SOURCE=startup node ./worktree-keep-v1.js session-start >/dev/null 2>&1)
 if [ "$(anchor_of "$WT" "$SID4" branch)" = "claude/wt-one" ]; then
   payload SessionEnd "$SID4" "$WT" | run_hook "$HOOK_END" "$NO_CONFIG" >/dev/null 2>&1
-  [ "$(anchor_of "$WT" "$SID4" branch)" = "MISSING" ] && check "K19 an unbound session-end falls back to the payload cwd and removes its own anchor" PASS || check "K19 an unbound session-end falls back to the payload cwd and removes its own anchor" FAIL
+  [ "$(anchor_of "$WT" "$SID4" endedAt)" -gt 0 ] 2>/dev/null && check "K19 an unbound session-end falls back to the payload cwd and ages its own anchor" PASS || check "K19 an unbound session-end falls back to the payload cwd and ages its own anchor (endedAt=$(anchor_of "$WT" "$SID4" endedAt))" FAIL
 else
   check "K19 precondition: the module planted an anchor for the unminted session" FAIL
 fi
@@ -238,9 +299,13 @@ node -e '
 ' "$PLUGIN_DIR" "$WT" "$SID" 2>/dev/null
 INJ_ERR="$SBOX/inj.err"
 INJ_OUT="$(payload UserPromptSubmit "$SID" "$WT" | run_hook "$HOOK_PROMPT" "$NO_CONFIG" 2>"$INJ_ERR")"
+INJ_CTX="$(printf '%s' "$INJ_OUT" | context_of)"
 case "$INJ_OUT" in
   *curl*|*evil*) check "K20 a planted anchor cannot carry free text into additionalContext" FAIL ;;
-  *) [ -z "$INJ_OUT" ] && grep -q 'anchor:shape' "$INJ_ERR" && check "K20 a planted anchor cannot carry free text into additionalContext and is reported as a shape fault" PASS || check "K20 a planted anchor cannot carry free text into additionalContext and is reported as a shape fault (out=${INJ_OUT:0:60} err=$(head -c 120 "$INJ_ERR"))" FAIL ;;
+  *) case "$INJ_CTX" in
+       *"without verification"*) grep -q 'anchor:shape' "$INJ_ERR" && check "K20 a planted anchor cannot carry free text into additionalContext, is reported as a shape fault, and the rewrite is disclosed as unverified" PASS || check "K20 a planted anchor cannot carry free text into additionalContext, is reported as a shape fault, and the rewrite is disclosed as unverified (err=$(head -c 120 "$INJ_ERR"))" FAIL ;;
+       *) check "K20 a planted anchor cannot carry free text into additionalContext, is reported as a shape fault, and the rewrite is disclosed as unverified (out=${INJ_OUT:0:80})" FAIL ;;
+     esac ;;
 esac
 [ "$(anchor_of "$WT" "$SID" branch)" = "claude/wt-one" ] && check "K20 the planted anchor is replaced by a fresh record on the current branch" PASS || check "K20 the planted anchor is replaced by a fresh record on the current branch" FAIL
 payload SessionEnd "$SID" "$WT" | run_hook "$HOOK_END" "$NO_CONFIG" >/dev/null 2>&1

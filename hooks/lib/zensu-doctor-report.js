@@ -1688,13 +1688,17 @@ function worktreeKeepRows(nowMs, ownKey, projectRoot) {
       return;
     }
     line(WARN, 'worktree: keep check NOT performed — hooks/lib/worktree-keep-v1.js could not be loaded ('
-      + (e && e.message ? e.message : String(e)) + ')');
+      + worktreeFaultText(e) + ')');
     return;
   }
   var managed = null;
   try {
     managed = mod.managedWorktree(projectRoot);
   } catch (e) {
+    if (underContainer) {
+      line(WARN, 'worktree: keep check NOT performed for ' + foldPath(projectRoot, ' (') + ' (' + worktreeFaultText(e) + ')');
+      return;
+    }
     managed = null;
   }
   if (!managed) {
@@ -1703,8 +1707,45 @@ function worktreeKeepRows(nowMs, ownKey, projectRoot) {
   }
   var root = managed.worktreeRoot;
   if (env.ZDOC_WORKTREE_KEEP === 'off') {
-    line(OK, 'worktree: keep marker switched off (hooks.worktreeKeep=false) — the desktop pool may reuse or reap '
-      + foldPath(root, ' while a session is live here') + ' while a session is live here');
+    var offMarker = null;
+    try {
+      offMarker = mod.markerState(root);
+    } catch (e) {
+      offMarker = null;
+    }
+    if (offMarker && offMarker.state === mod.MARKER_STATES.OURS) {
+      var hold;
+      try {
+        hold = mod.listAnchors(root, nowMs, mod.idleMsFromHours(env.ZDOC_WORKTREE_KEEP_IDLE_HOURS));
+      } catch (e) {
+        hold = { ok: false, reason: worktreeFaultText(e) };
+      }
+      var stranded = 'worktree: keep marker still present although hooks.worktreeKeep=false — ' + foldPath(offMarker.file, ' keeps')
+        + ' keeps this directory out of the desktop pool';
+      if (!hold.ok) {
+        var offDrain = hold.reapable ? hold.reapable.length : 0;
+        line(WARN, stranded + '; the anchor directory could not be read (' + hold.reason + '), so '
+          + (offDrain > 0
+            ? 'the next SessionStart or SessionEnd in it reaps the ' + offDrain
+              + ' expired anchor(s) it read and releases the marker once the directory is back under the bound and nothing else holds it'
+            : 'the release pass leaves the marker as it stands'));
+      } else if (hold.live.length) {
+        line(WARN, stranded + ' while ' + hold.live.length + ' live session anchor(s) hold it; the next SessionStart or SessionEnd in it after they end releases the marker');
+      } else if (hold.rejected.length) {
+        line(WARN, stranded + ' while anchor file(s) this build cannot validate sit beside it ('
+          + hold.rejected.map(function (r) { return r.name; }).join(', ')
+          + '); remove one by hand only after confirming no session on another plugin version is live there, '
+          + 'then the next SessionStart or SessionEnd in it releases the marker');
+      } else {
+        line(WARN, stranded + ' until the next SessionStart or SessionEnd in it releases the marker');
+      }
+    } else if (offMarker && offMarker.state === mod.MARKER_STATES.FOREIGN) {
+      line(OK, 'worktree: keep marker in ' + foldPath(root, ' was not written by this plugin')
+        + ' was not written by this plugin — left alone, the desktop pool still honours it');
+    } else {
+      line(OK, 'worktree: keep marker switched off (hooks.worktreeKeep=false) — the desktop pool may reuse or reap '
+        + foldPath(root, ' while a session is live here') + ' while a session is live here');
+    }
     return;
   }
   // Every module call below reads a session-writable directory, so one errno the module
@@ -1718,8 +1759,12 @@ function worktreeKeepRows(nowMs, ownKey, projectRoot) {
     // would render a green row with 0 over a directory the check never read.
     var readable = anchors.ok !== false;
     if (!readable) {
+      var drain = anchors.reapable ? anchors.reapable.length : 0;
       line(WARN, 'worktree: anchors in ' + foldPath(root, ' could not be read') + ' could not be read ('
-        + (anchors.reason || 'unknown') + ') — that is a missing check, not an all-clear, and the keep marker is left as it stands');
+        + anchors.reason + ') — that is a missing check, not an all-clear, and '
+        + (drain > 0
+          ? 'the next prompt reaps the ' + drain + ' expired anchor(s) it read and judges the keep marker again once the directory is back under its bound'
+          : 'the keep marker is left as it stands'));
     }
     if (marker.state === mod.MARKER_STATES.REFUSED) {
       line(WARN, 'worktree: keep marker refused — ' + foldPath(marker.file, ' is not a plain file')
@@ -1736,26 +1781,76 @@ function worktreeKeepRows(nowMs, ownKey, projectRoot) {
       var own = mod.anchorVerdict(root, ownKey, nowMs, idleMs);
       if (own.verdict === mod.VERDICTS.MISSING) {
         line(WARN, 'worktree: this session has no anchor in ' + foldPath(root, ' yet')
-          + ' yet — the next prompt writes one and restores the keep marker');
+          + ' yet — the next prompt writes one and adopts the branch checked out then as its baseline without verification, so a takeover before that point cannot be ruled out');
       } else if (own.verdict === mod.VERDICTS.REJECTED) {
-        line(WARN, 'worktree: this session\'s anchor in ' + foldPath(root, ' is not one this plugin wrote')
-          + ' is not one this plugin wrote (' + own.reason + ') — remove it by hand; the next prompt rewrites it');
-      } else if (mod.unresolvedRecord(own.record)) {
-        line(WARN, 'worktree: this session\'s anchor in ' + foldPath(root, ' recorded no branch')
-          + ' recorded no branch — the branch read failed when the session started; the next prompt records the current one');
-      } else {
-        if (marker.state === mod.MARKER_STATES.ABSENT && own.verdict === mod.VERDICTS.LIVE) {
-          line(WARN, 'worktree: keep marker MISSING in ' + foldPath(root, ' while this session')
-            + ' while this session\'s anchor is live — the desktop pool may reuse or reap it; the next prompt restores the marker');
+        var remedy = mod.anchorRemedy(root, ownKey);
+        var unvalidated = 'worktree: this build cannot validate this session\'s anchor in ' + foldPath(root, ' (')
+          + ' (' + own.reason + ') — ';
+        if (remedy === mod.ANCHOR_REMEDIES.REPLACED) {
+          line(WARN, unvalidated + 'the next prompt replaces it with this session\'s own record');
+        } else if (remedy === mod.ANCHOR_REMEDIES.REMOVE_BY_HAND) {
+          line(WARN, unvalidated + 'the plugin never replaces a symlink, a hard link or a non-file there; remove it by hand, then the next prompt rewrites it');
+        } else if (remedy === mod.ANCHOR_REMEDIES.STATE_COMPONENT) {
+          line(WARN, unvalidated + 'a component of ' + mod.STATE_SEGMENTS.join('/')
+            + ' on its path is a symlink or not a directory, so the plugin neither reads nor writes anchors there; fix that component by hand');
+        } else {
+          line(WARN, unvalidated + 'this report cannot say whether the next prompt can replace it; inspect it by hand');
         }
-        var current = mod.currentBranch(root);
-        var drift = mod.detectDrift(own.record, current);
-        if (drift) {
-          line(WARN, 'worktree: branch drift — ' + mod.driftSentence(foldPath(root, ' is now on '), drift)
+      } else {
+        if (own.verdict === mod.VERDICTS.STALE) {
+          line(WARN, 'worktree: this session\'s anchor in ' + foldPath(root, ' is stale')
+            + ' is stale — it no longer holds the keep marker, so the desktop pool may reuse or reap the directory until the next prompt refreshes it');
+        }
+        if (marker.state === mod.MARKER_STATES.ABSENT && own.verdict === mod.VERDICTS.LIVE) {
+          var ignore = mod.markerIgnoreState(root);
+          var missing = 'worktree: keep marker MISSING in ' + foldPath(root, ' while this session')
+            + ' while this session\'s anchor is live — the desktop pool may reuse or reap it';
+          var refusal = missing + ', and the plugin does not create the marker there: ';
+          if (ignore.state === mod.IGNORE_STATES.NOT_IGNORED) {
+            line(WARN, refusal + 'git does not ignore ' + mod.KEEP_FILENAME
+              + ' although info/exclude lists it, so an ignore rule such as !' + mod.KEEP_FILENAME + ' re-includes it');
+          } else if (ignore.state === mod.IGNORE_STATES.EXCLUDE_REFUSED) {
+            line(WARN, refusal + 'it cannot add the marker to info/exclude (' + ignore.reason + ')');
+          } else if (ignore.state !== mod.IGNORE_STATES.IGNORED && ignore.state !== mod.IGNORE_STATES.NOT_YET_EXCLUDED) {
+            line(WARN, refusal + 'git could not say whether it ignores ' + mod.KEEP_FILENAME);
+          } else if (!readable) {
+            line(WARN, missing + '; the plugin restores it only once the anchor directory can be read');
+          } else {
+            line(WARN, missing + '; the next prompt restores the marker');
+          }
+        }
+        var states = mod.BRANCH_STATES;
+        var verdict = mod.branchState(root, own.record, mod.currentBranch(root));
+        var recorded = own.record.drift;
+        if (!mod.anchorMatchesRoot(own.record, root)) {
+          line(WARN, 'worktree: this session\'s anchor in ' + foldPath(root, ' names another worktree')
+            + ' names another worktree — the next prompt replaces it with this session\'s own record and adopts the branch checked out then '
+            + 'as its baseline without verification, so a takeover before that point cannot be ruled out');
+        } else if (verdict.state === states.UNRESOLVED_PAUSED) {
+          line(WARN, 'worktree: this session\'s anchor in ' + foldPath(root, ' recorded no branch')
+            + ' recorded no branch — a ' + verdict.paused + ' paused there holds a detached HEAD; the next prompt records the branch it returns to, '
+            + 'or the branch checked out once it finishes when git\'s record of that branch cannot be read');
+        } else if (verdict.state === states.UNRESOLVED) {
+          line(WARN, 'worktree: this session\'s anchor in ' + foldPath(root, ' recorded no branch')
+            + ' recorded no branch — the branch read failed when the session started; the next prompt records the current one');
+        } else if (verdict.state === states.UNRESOLVED_UNREADABLE) {
+          line(WARN, 'worktree: this session\'s anchor in ' + foldPath(root, ' recorded no branch')
+            + ' recorded no branch — the branch read failed when the session started and still fails, so a takeover could not be ruled out; '
+            + 'the next prompt records the branch once git can answer');
+        } else if (verdict.state === states.DRIFT_HELD) {
+          line(WARN, 'worktree: branch drift — this session\'s anchor recorded a move of '
+            + mod.recordedMoveSentence(foldPath(root, ' from '), recorded, verdict)
             + '; another session may have taken the directory. '
-            + mod.remedyLines({ worktreeRoot: root, from: drift.from }).join(' '));
-        } else if (current.ok) {
-          line(OK, 'worktree: this session still sits on its recorded ' + mod.describeBranch(own.record.branch)
+            + mod.remedyLines({ from: recorded.from }).join(' '));
+        } else if (verdict.state === states.PAUSED) {
+          line(OK, 'worktree: a paused ' + verdict.paused + ' holds a detached HEAD in ' + foldPath(root, ' — ')
+            + ' — the branch check waits until it finishes');
+        } else if (verdict.state === states.DRIFT) {
+          line(WARN, 'worktree: branch drift — ' + mod.driftSentence(foldPath(root, ' is now on '), verdict.drift)
+            + '; another session may have taken the directory. '
+            + mod.remedyLines({ from: verdict.drift.from }).join(' '));
+        } else if (verdict.state === states.ON_BASELINE) {
+          line(OK, 'worktree: this session still sits on its recorded ' + mod.branchNoun(own.record.branch)
             + ' in ' + foldPath(root, ''));
         } else {
           line(WARN, 'worktree: current branch unreadable in ' + foldPath(root, ', so a takeover could not be ruled out')
@@ -1766,13 +1861,21 @@ function worktreeKeepRows(nowMs, ownKey, projectRoot) {
       line(OK, 'worktree: no keep marker in ' + foldPath(root, ' and this session is not bound')
         + ' and this session is not bound, so its own anchor was not judged');
     }
-    if (anchors.rejected.length) {
-      line(WARN, 'worktree: anchor file(s) this plugin did not write in ' + foldPath(root, ' — inspect: ')
-        + ' — inspect: ' + anchors.rejected.map(function (r) { return r.name; }).join(', '));
+    var others = anchors.rejected.filter(function (r) { return r.key !== ownKey; });
+    if (others.length) {
+      line(WARN, 'worktree: anchor file(s) this build cannot validate in ' + foldPath(root, ' — ')
+        + ' — ' + others.map(function (r) { return r.name; }).join(', ')
+        + '; such a file is usually the live anchor of a session on another plugin version and holds the keep marker'
+        + ' — remove one by hand only after confirming no such session is live there');
     }
   } catch (e) {
-    line(WARN, 'worktree: keep check NOT performed for ' + foldPath(root, ' (') + ' (' + (e && e.message ? e.message : String(e)) + ')');
+    line(WARN, 'worktree: keep check NOT performed for ' + foldPath(root, ' (') + ' (' + worktreeFaultText(e) + ')');
   }
+}
+
+function worktreeFaultText(e) {
+  var kind = e && e.code ? String(e.code) : e && typeof e.name === 'string' && e.name !== '' ? e.name : 'error';
+  return foldPath(kind, ')');
 }
 // The shapes that carry no work forward. Taken from chain-recovery-v1.js, which
 // OWNS the vocabulary and mints these literals a few lines from where it lists
