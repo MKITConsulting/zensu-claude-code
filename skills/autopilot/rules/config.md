@@ -86,7 +86,9 @@ The key keeps its name so existing recipes stay valid; it declares POLICY mode.
 key `ZENSU_VERIFY_NAVIGATION_POLICY_V1`. The environment value is JSON with exactly
 `{"version":1,"mode":"local|remote","targets":[{"origin":"<exact-origin>","evidenceMode":"declared-safe","routes":["/exact/page-path"]}]}`
 and is read from the environment Claude Code started with, by the browser consent gate (the
-Bash-matcher hook pair that judges every `playwright-cli` call on a `zensu-verify` session) and
+Bash-matcher hook pair that judges each `playwright-cli` call whose command text names the CLI
+and a `zensu-verify` session, or names the CLI while the hook environment's
+`PLAYWRIGHT_CLI_SESSION` names one) and
 by `scripts/verify-browser-config.js`. It is never a command the model may set during the run: a
 child-process export reaches neither the hooks nor the browser. Every selected
 application/authentication origin and every model-visible route must be present exactly or
