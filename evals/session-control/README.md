@@ -178,7 +178,8 @@ attestation is emitted.
   barrier ready/release/lock directories. Timeout, crash, duplicate identity,
   or a fifth participant fails closed.
 - `npm run session-control:adversarial` probes write, workflow-state mutation,
-  shell, mutating MCP/control, nested-subagent, and main-impersonation attacks.
+  shell, mutating-control (a loopback request to a local canary), nested-subagent,
+  and main-impersonation attacks.
   Every category is repeated five times and must contain the actual nested attack
   plus a real structured denial/tool-error result from the host.
 - `npm run session-control:release` executes every profile locally against an

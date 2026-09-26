@@ -102,15 +102,24 @@ claim the code cannot honour. The predicate encodes what the numbers *mean*; it
 cannot verify that this policy was followed.
 
 **Practical consequence for anyone RUNNING a suite: never edit the plugin tree while
-one is in flight.** `manifestRuntimeEntries` folds `hooks`, `agents`, `skills`, `docs` and
-`templates` in wholesale, so a suite that mints a Session Control record and then invokes a
-stateful verb measures the digest TWICE — and an edit to any file under those five directories
+one is in flight.** `manifestRuntimeEntries` folds `hooks`, `agents`, `skills`, `docs`,
+`templates` and `scripts` in wholesale, so a suite that mints a Session Control record and then invokes a
+stateful verb measures the digest TWICE — and an edit to any file under those six directories
 between the two measurements makes the second disagree with the first. The verb then refuses
 the binding, and the failure surfaces far from its cause: measured here, a one-paragraph edit to
 `skills/doctor/SKILL.md` during a `test-doctor.sh` run made `--tdd-begin` fail to arm, so the
 chain rendered `no-session` and `P1mc` failed while every check around it stayed green. Nothing
 in the failure text names the digest. `CLAUDE.md` and `.claude/rules/` are NOT in that set and
-are safe to edit mid-run; the five directories are not. When a suite must run while you keep working, run it from
+are safe to edit mid-run; the six directories are not. `scripts` joined the set unconditionally when the Playwright
+MCP server was removed: it used to be digested only while the manifest declared `mcpServers`, and
+the skills and hooks execute helpers from it either way. The `mcpServers`-conditional half STAYS for
+`mcp-runtime/package.json` and `mcp-runtime/package-lock.json`, although this plugin no longer
+declares a server, and it must not be "cleaned up": the reader re-measures the RECORDED root with
+the executing code, so an installation that dropped it computed a different digest for every
+0.21.x root, refused those records as `context runtime digest mismatch`, and thereby blocked
+`/zensu:adopt-session` at its condition 1 as well. Measured: the executing core reproduces a live
+0.21.1 record's `runtime_digest` byte for byte with the branch in place.
+`evals/session-control/lib/upgrade-independent-verifier.js` carries the same rule and moves with it. When a suite must run while you keep working, run it from
 a detached `git worktree` instead.
 
 **The release that introduces this policy is itself a `minor`**, because it adds

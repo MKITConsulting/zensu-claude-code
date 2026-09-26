@@ -135,11 +135,13 @@ Stop path — the `git status` this counter runs and the refused-spawn transcrip
 also bounds callers that are not on that path at all, which is why the ladder's own header states
 the CRITERION rather than a count: raising the deadline stopped being a Stop-path-only decision.
 The criterion is what governs; the roster below is a census taken at one moment, kept because the
-next caller needs somewhere concrete to look. Its live call sites outside the Stop hook are FOUR,
-in TWO files, and both this roster and the ladder's own header enumerated fewer:
+next caller needs somewhere concrete to look. Its live call sites outside the Stop hook are SIX,
+in FOUR files, and both this roster and the ladder's own header enumerated fewer:
 `hooks/user-prompt-zen-mode.sh` holds the merged prompt-and-anchor child, the prompt-only
-recovery child and the off-phrase marker write, and `hooks/lib/zensu-zen-mode.sh` holds the
-out-of-band writer, which sources the ladder itself. Named by file and role, never by line
+recovery child and the off-phrase marker write; `hooks/lib/zensu-zen-mode.sh` holds the
+out-of-band writer, which sources the ladder itself; `hooks/lib/zensu-log.sh` holds the
+`--tdd-complete` claim-inventory child; and `hooks/lib/zensu-doctor.sh` holds the
+`/zensu:doctor` playwright-cli version fallback. Named by file and role, never by line
 number, because a line number in prose goes stale silently. The deadline is a fixed, unparameterized 5 s, so the next caller needing a
 different one has to find every site — which is what this roster is for. The two on the Stop
 path carried hand-copied ladders and the

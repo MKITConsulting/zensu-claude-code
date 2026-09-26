@@ -1081,15 +1081,16 @@ fi
 # in both hooks; these three rows keep the plan-hook contract visible from the
 # suite named for the hook. Both branches are graded through both_have, so a
 # one-sided edit of the (S) clause fails here as well as in P1.
-both_have "D34 both branches carry the (S) clause, the ask conjunct and the RECORD sentence" \
+both_have "D34 both branches carry the (S) clause, the ask conjunct and the workflow-only RECORD sentence" \
   "(S) — read this before (A)" \
   "and the route field reads 'ask'" \
-  "RECORD the answer before dispatching" \
+  "RECORD a Zensu-workflow answer before dispatching" \
   "after the 'Zensu workflow — /zensu:tdd' answer run" \
-  "after the 'No — implement directly' answer run" \
-  "this one Bash call comes BEFORE the 'next tool call' each arm above names" \
-  "no prerequisites. Its description MUST also say that this answer is remembered for the rest of this session" \
-  "no evidence audit. Its description MUST also say that this answer is remembered for the rest of this session" \
+  "The 'No — implement directly' answer records nothing and decides this plan only" \
+  "this one Bash call comes BEFORE the 'next tool call' that arm names" \
+  "if the user declines that Bash call, say in one line that nothing was recorded and that the question will come back" \
+  "no prerequisites. Its description MUST also say that this answer is remembered for the rest of this session, later code requests included unless their reminder is switched off, through one Bash call the user may be asked to allow" \
+  "no evidence audit. Its description MUST also say that this answer decides this plan only and is not remembered" \
   "a route the field decided records nothing" \
   "The field never names /zensu:autopilot or /zensu:pilot" \
   "ZENSU DELIVERY ROUTE:" \
@@ -1116,7 +1117,7 @@ else
 fi
 # D36 a configured default is rendered into BOTH branches with its source named,
 # and the RECORD sentence carries the record command exactly as rendered, bound to
-# the verb each answer records.
+# `--tdd`, the one verb an answer records.
 CFG_ROUTE="$TMP_DIR/route-direct.json"
 printf '{"hooks":{"defaultDeliveryRoute":"direct"}}' > "$CFG_ROUTE"
 OUT_ROUTE="$(SESSION_ID="$SESSION_ID" node -e 'process.stdout.write(JSON.stringify({
@@ -1135,9 +1136,10 @@ if [ -n "$OUT_ROUTE" ] && [ -n "$OUT_ROUTE_STRICT" ] \
    && printf '%s' "$OUT_ROUTE_STRICT" | grep -qF 'ZENSU DELIVERY ROUTE: direct (hooks.defaultDeliveryRoute)' \
    && printf '%s' "$OUT_ROUTE_STRICT" | grep -qF 'strict TDD flow' \
    && ! printf '%s' "$OUT_ROUTE" | grep -qF 'strict TDD flow' \
-   && printf '%s' "$D36_CTX" | grep -qF "after the 'Zensu workflow — /zensu:tdd' answer run $D_REC_CMD --tdd, after the 'No — implement directly' answer run $D_REC_CMD --direct — " \
+   && printf '%s' "$D36_CTX" | grep -qF "after the 'Zensu workflow — /zensu:tdd' answer run $D_REC_CMD --tdd — this one Bash call" \
+   && ! printf '%s' "$D36_CTX" | grep -qF -- "$D_REC_CMD --direct" \
    && ! printf '%s' "$OUT_ROUTE" | grep -qF '__ZENSU_ROUTE_COMMAND__'; then
-  check "D36 hooks.defaultDeliveryRoute=direct renders its field in both branches and the exact record command bound to each verb" PASS
+  check "D36 hooks.defaultDeliveryRoute=direct renders its field in both branches and the exact record command bound to the workflow answer only" PASS
 else
   check "D36 configured default (vanilla=$(printf '%s' "$OUT_ROUTE" | grep -o 'ZENSU DELIVERY ROUTE: [^<\\]*' | tail -1) strict=$(printf '%s' "$OUT_ROUTE_STRICT" | grep -o 'ZENSU DELIVERY ROUTE: [^<\\]*' | tail -1))" FAIL
 fi

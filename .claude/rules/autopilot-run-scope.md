@@ -778,12 +778,16 @@ still covers only the LEGACY pointer by name.
   reaches the owner comparison, because the run is invisible to its owner-scoped read; it takes
   the standalone branch, and is asked the four-route delivery question, which now carries
   `/zensu:autopilot` and `/zensu:pilot` beside it (see §"Plan-Approval Delivery Route"), only
-  while its route field reads `ask`. A `tdd` or `direct` recorded for that session or configured
-  in `hooks.defaultDeliveryRoute` (§"Session Delivery Route") dispatches without asking: `tdd`
+  while its route field reads `ask`. A `tdd` recorded for that session, a `direct` the user
+  recorded explicitly with `/zensu:delivery-route --direct`, or a default configured in
+  `hooks.defaultDeliveryRoute` (§"Session Delivery Route") dispatches without asking: `tdd`
   then meets the standalone `--tdd-begin` workspace fence, and `direct` meets no fence, so direct
-  edits can land in a working tree the foreign run holds. Nothing is mutated in the run itself —
-  the foreign run is not touched and no binding is created — so for the run this is a lost
-  DIAGNOSTIC, not a lost guarantee.
+  edits can land in a working tree the foreign run holds. The run's own state is not mutated —
+  the foreign run is not touched and no binding is created — but on the `direct` path the
+  workspace guarantee is lost: before the session-sticky route, the four-route question showed a
+  human the re-route. A direct answer to that question is never recorded, so this path needs an
+  explicit `--direct` or a configured default. The scoped fix, rendering the field as `ask` when
+  the plan's marker names a run this session does not own, is recorded and not implemented.
   Restoring it needs the marker before the read, and the marker is only resolved inside the
   payload evaluator (see "Plan-Gate Payload Sources"), which reads fields by name and must
   not be duplicated in shell. The exit-6 arm and its `BLOCK_CODE` are deliberately left in
@@ -795,6 +799,14 @@ still covers only the LEGACY pointer by name.
   `tests/structure/test-autopilot-plan-delegate.sh`. Those five cases were written against
   the refusal receipt and now assert the silence instead; F45c in particular no longer pins
   an ORDERING between the ownership and origin refusals, because neither is reachable.
+- **Phase 0.D's order is also what keeps Autopilot's OWN approval on the durable branch.**
+  `skills/autopilot/SKILL.md` Phase 0.D creates the run with `--autopilot-begin` immediately
+  before `ExitPlanMode`. Reversed, the approval finds no run at `PLANNING` and falls through to
+  the standalone directive, which asks the four-route question while the route field reads `ask`
+  and otherwise sends the Autopilot spec to `/zensu:tdd` or implements it directly without
+  asking (§"Session Delivery Route"). `D16` in `tests/structure/test-autopilot-durable-skill.sh`
+  pins the Phase 0.D sentence and that consequence as text; nothing observes the order a model
+  actually takes.
 - **RESOLVED — `/zensu:doctor` now carries an `autopilot:` row, and the bound is what to keep in
   view.** `autopilotRows` in `hooks/lib/zensu-doctor-report.js` renders one row per nonterminal
   run found in the record-anchored state directory — WARN, except an own run whose active pointer

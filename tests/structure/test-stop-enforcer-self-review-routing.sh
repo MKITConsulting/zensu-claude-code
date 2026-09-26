@@ -155,12 +155,9 @@ case "$(uname -s)" in
 esac
 mkdir -p "$SPECIAL_ROOT" "$SPECIAL_BASE/run"
 SPECIAL_ROOT="$(cd "$SPECIAL_ROOT" && pwd -P)"
-for runtime_entry in .claude-plugin .mcp.json hooks agents skills docs templates scripts README.md CHANGELOG.md LICENSE; do
+for runtime_entry in .claude-plugin hooks agents skills docs templates scripts README.md CHANGELOG.md LICENSE; do
   cp -R "$PLUGIN_DIR/$runtime_entry" "$SPECIAL_ROOT/$runtime_entry"
 done
-mkdir -p "$SPECIAL_ROOT/mcp-runtime"
-cp "$PLUGIN_DIR/mcp-runtime/package.json" "$PLUGIN_DIR/mcp-runtime/package-lock.json" \
-  "$SPECIAL_ROOT/mcp-runtime/"
 SPECIAL_LOG="$SPECIAL_ROOT/hooks/lib/zensu-log.sh"
 SPECIAL_SID_RAW="stop-special-root"
 SPECIAL_LABEL='special data $(touch STOP_DATA_PWNED) `touch STOP_DATA_TICKED`;touch STOP_DATA_SEMI'

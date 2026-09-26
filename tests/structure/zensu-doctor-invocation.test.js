@@ -94,10 +94,21 @@ const payload = (command, toolName = "Bash") => ({
 });
 
 const verdict = (command, toolName) => recognize(payload(command, toolName), pluginRoot);
-const canonical = `CLAUDE_PLUGIN_DATA="${dataDir}" CLAUDE_PROJECT_DIR="${projectDir}" ZDOC_PLAYWRIGHT_TOOLS=ready bash "${doctorPath}"`;
+const canonical = `CLAUDE_PLUGIN_DATA="${dataDir}" CLAUDE_PROJECT_DIR="${projectDir}" bash "${doctorPath}"`;
+const previousReleaseCanonical = `CLAUDE_PLUGIN_DATA="${dataDir}" CLAUDE_PROJECT_DIR="${projectDir}" ZDOC_PLAYWRIGHT_TOOLS=ready bash "${doctorPath}"`;
 
-test("the canonical skill invocation is recognized", () => {
+test("the canonical skill invocation is recognized, and it is the one skills/doctor/SKILL.md Phase 1 emits", () => {
   assert.deepStrictEqual(verdict(canonical), { ok: true, reason: "" });
+  const skill = fs.readFileSync(nodePath.join(__dirname, "..", "..", "skills", "doctor", "SKILL.md"), "utf8");
+  const emitted = skill.split(/\r?\n/)
+    .filter((line) => line.includes('bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"'))
+    .map((line) => line
+      .split("${CLAUDE_PLUGIN_DATA}").join(dataDir)
+      .split("${CLAUDE_PROJECT_DIR}").join(projectDir)
+      .split("${CLAUDE_PLUGIN_ROOT}").join(commandSpelling(pluginRoot)));
+  assert.ok(emitted.length >= 2, `expected both Phase 1 doctor commands in the skill, found ${emitted.length}`);
+  assert.ok(emitted.includes(canonical), `the skill emits no command equal to the canonical form: ${JSON.stringify(emitted)}`);
+  assert.ok(emitted.every((line) => !line.includes("ZDOC_PLAYWRIGHT_TOOLS")), "the skill must no longer emit ZDOC_PLAYWRIGHT_TOOLS");
 });
 
 test("the bare invocation with no assignments is recognized", () => {
@@ -187,9 +198,10 @@ test("a path-kind assignment must be rooted and traversal-free", () => {
   assert.strictEqual(verdict(`CLAUDE_PROJECT_DIR= bash "${doctorPath}"`).reason, REASONS.ASSIGNMENT);
 });
 
-test("a Set-kind assignment accepts only its declared members", () => {
+test("a Set-kind assignment accepts only its declared members, and the previous release's ZDOC_PLAYWRIGHT_TOOLS=ready form stays recognized", () => {
   assert.strictEqual(verdict(`ZDOC_PLAYWRIGHT_TOOLS=1 bash "${doctorPath}"`).reason, REASONS.ASSIGNMENT);
   assert.strictEqual(verdict(`ZDOC_PLAYWRIGHT_TOOLS=ready bash "${doctorPath}"`).ok, true);
+  assert.deepStrictEqual(verdict(previousReleaseCanonical), { ok: true, reason: "" });
 });
 
 test("ZDOC_PLAYWRIGHT is NOT reachable — only the tools signal is", () => {

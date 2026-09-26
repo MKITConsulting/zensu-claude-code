@@ -22,12 +22,10 @@
 #     seeds the same `vanilla` flag — is pinned only structurally (T22c, on the
 #     exact argument spelling). A behavioral probe needs the full pending-review
 #     adoption fixture that `test-deferred-review-claim.sh` owns.
-#   - The writer's pre-rename symlink re-check is TOCTOU defense against a race no
-#     deterministic test can win; T9 bites the first guard, not that one. The two
-#     other race-only branches, the `-L` refusal of the temp leaf and both halves of the
-#     post-rename post-condition, are driven by PATH shims for `mktemp` and `mv` that
-#     stage the swap at the point the race would strike (T9g, T9h, T9i); what a shim
-#     cannot show is the race itself.
+#   - The writer's race-only branches, the pre-rename symlink re-check, the `-L`
+#     refusal of the temp leaf and both halves of the post-rename post-condition, are
+#     driven by PATH shims for `mktemp` and `mv` that stage the swap at the point the
+#     race would strike (T9k, T9g, T9h, T9i); what a shim cannot show is the race itself.
 set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -158,10 +156,12 @@ OUT_T5="$(toggle tddmode-helper --bogus)"; RC_T5=$?
 # T5b choosing vanilla is a MODE choice, not a gate escape: the bypass ledger must
 # stay a record of gate escapes only, or everything it renders under "Gates
 # bypassed" stops being true.
-if ! grep -qF -- '--bypass-note' "$HELPER" && ! grep -qF 'tdd_record_bypass' "$HELPER"; then
+if [ -f "$PLUGIN_DIR/hooks/lib/zensu-marker-write.sh" ] \
+  && ! grep -qF -- '--bypass-note' "$HELPER" "$PLUGIN_DIR/hooks/lib/zensu-marker-write.sh" \
+  && ! grep -qF 'tdd_record_bypass' "$HELPER" "$PLUGIN_DIR/hooks/lib/zensu-marker-write.sh"; then
   check "T5b the toggle records no bypass-ledger entry" PASS
 else
-  check "T5b the toggle writes a bypass-ledger entry" FAIL
+  check "T5b the toggle writes a bypass-ledger entry, or hooks/lib/zensu-marker-write.sh is missing" FAIL
 fi
 
 echo "== Helper: round-trip, fallback, isolation =="
@@ -434,11 +434,10 @@ fi
 exec "$REAL_MV" "\$@"
 EOF
 chmod +x "$SHIM_MKTEMP_BIN/mktemp" "$SHIM_MV_BIN/mv"
-sigint_default() { if command -v perl >/dev/null 2>&1; then perl -e '$SIG{INT} = "DEFAULT"; exec { $ARGV[0] } @ARGV or exit 127' "$@"; else "$@"; fi; }
 shim_write() {  # $1 shim dir, $2 verb, $3 stderr file -> the helper's stdout
   CLAUDE_CODE_SESSION_ID="$SHIM_SID" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
     CLAUDE_PLUGIN_DATA="$SHIM_PROJ/.session-control-test/plugin-data" CLAUDE_PROJECT_DIR="$SHIM_PROJ" \
-    ZENSU_CONFIG="$CFG_DEFAULT" PATH="$1:$PATH" sigint_default bash "$HELPER" "$2" 2>"$3"
+    ZENSU_CONFIG="$CFG_DEFAULT" PATH="$1:$PATH" bash "$HELPER" "$2" 2>"$3"
 }
 if ln -s "$SHIM_DECOY" "$SHIM_PROJ/shim-probe" 2>/dev/null && [ -L "$SHIM_PROJ/shim-probe" ]; then
   rm -f "$SHIM_PROJ/shim-probe"
@@ -490,7 +489,10 @@ rm -rf "$SHIM_MARKER"
 # T9j a signal during the write ENDS the helper: the cleanup trap is EXIT-only and the
 # signal traps exit, so the write cannot resume after the handler. The `mv` shim sends
 # its parent, the helper, the signal named in T9J_SIGNAL and then performs the rename;
-# each of the three trapped signals must end the helper with its own status.
+# each of the three trapped signals must end the helper with its own status. The `bash`
+# shim beside it starts the helper with SIGINT at its default disposition: run-all.sh
+# runs every suite as a background job, which starts with SIGINT ignored, and bash
+# cannot trap a signal that was ignored when it started.
 SHIM_MVINT_BIN="$SHIM_PROJ/shim-mvint"; mkdir -p "$SHIM_MVINT_BIN"
 cat > "$SHIM_MVINT_BIN/mv" <<EOF
 #!/bin/sh
@@ -501,7 +503,12 @@ if [ "\${1:-}" = "-f" ]; then
 fi
 exec "$REAL_MV" "\$@"
 EOF
-chmod +x "$SHIM_MVINT_BIN/mv"
+REAL_BASH="$(command -v bash)"
+cat > "$SHIM_MVINT_BIN/bash" <<EOF
+#!/bin/sh
+exec perl -e '\$SIG{INT} = "DEFAULT"; exec @ARGV or exit 127' "$REAL_BASH" "\$@"
+EOF
+chmod +x "$SHIM_MVINT_BIN/mv" "$SHIM_MVINT_BIN/bash"
 T9J_BAD=""
 for t9j_pair in INT:130 TERM:143 HUP:129; do
   rm -rf "$SHIM_MARKER"
@@ -515,6 +522,36 @@ unset T9J_SIGNAL
 [ -z "$T9J_BAD" ] \
   && check "T9j an INT, TERM or HUP during the write ends the helper with 130, 143 or 129, prints no success line and leaves no temp" PASS \
   || check "T9j signal handling:$T9J_BAD" FAIL
+rm -rf "$SHIM_MARKER"
+SHIM_DECOY_DIR="$SHIM_PROJ/decoy-dir"; mkdir -p "$SHIM_DECOY_DIR"
+SHIM_MKLINK_BIN="$SHIM_PROJ/shim-mklink"; mkdir -p "$SHIM_MKLINK_BIN"
+cat > "$SHIM_MKLINK_BIN/mktemp" <<EOF
+#!/bin/sh
+case "\${1:-}" in
+  (*.json.tmp.XXXXXX)
+    t="\$("$REAL_MKTEMP" "\$1")" || exit 1
+    m="\${1%.tmp.XXXXXX}"
+    rm -rf "\$m" && ln -s "$SHIM_DECOY_DIR" "\$m" || exit 1
+    printf '%s\n' "\$t"
+    exit 0
+    ;;
+esac
+exec "$REAL_MKTEMP" "\$@"
+EOF
+chmod +x "$SHIM_MKLINK_BIN/mktemp"
+if ln -s "$SHIM_DECOY_DIR" "$SHIM_PROJ/shim-probe" 2>/dev/null && [ -L "$SHIM_PROJ/shim-probe" ]; then
+  rm -f "$SHIM_PROJ/shim-probe"
+  OUT_T9K="$(shim_write "$SHIM_MKLINK_BIN" --strict "$SHIM_PROJ/t9k.err")"; RC_T9K=$?
+  T9K_TMP="$(find "$(dirname "$SHIM_MARKER")" -maxdepth 1 -name '*.tmp.*' 2>/dev/null | grep -c . || true)"
+  { [ "$RC_T9K" -eq 2 ] && [ -z "$OUT_T9K" ] \
+    && grep -qF 'zensu-tdd-mode.sh: refusing to follow a symlinked state path' "$SHIM_PROJ/t9k.err" \
+    && [ -L "$SHIM_MARKER" ] && [ -z "$(ls -A "$SHIM_DECOY_DIR")" ] && [ "$T9K_TMP" = "0" ]; } \
+    && check "T9k a symlink planted at the marker leaf after the temp exists is refused by the pre-rename re-check; nothing lands in the link target and no temp is left" PASS \
+    || check "T9k pre-rename re-check (rc=$RC_T9K out='$OUT_T9K' tmp=$T9K_TMP decoy='$(ls -A "$SHIM_DECOY_DIR" | head -3 | tr '\n' ' ')' err='$(head -c 160 "$SHIM_PROJ/t9k.err" 2>/dev/null)')" FAIL
+else
+  SKIP_SYMLINK=$((SKIP_SYMLINK+1))
+  check "T9k pre-rename re-check — this host cannot create a symlink" SKIP
+fi
 rm -rf "$SHIM_PROJ"
 
 # T9f the accepted gap, pinned rather than left implicit: while no chain is armed the
@@ -744,12 +781,13 @@ grep -qF 'zensu_tdd_strict_effective "$PROJECT_ROOT" "${ZENSU_SESSION_KEY:-}"' "
   && check "T22c plan-approval, prompt reminder and Stop seed read the effective mode with real arguments" PASS \
   || check "T22c consumers still on the configured mode:$CONS_BAD" FAIL
 
-# T23 SessionStart is the deliberate exception: no marker for a session that is
-# only now starting can exist, so those two stay config-only. Pinning it keeps a
-# later "consistency" edit from inventing a read that can never hit.
+# T23 SessionStart is the deliberate exception: a session with a new key has no
+# marker yet, and a marker a clear keeps under the same key is reported by
+# /zensu:tdd-mode --status and the mode: echo at --tdd-begin, so those two stay
+# config-only. Pinning it keeps a later "consistency" edit from adding a read there.
 if grep -qF 'zensu_tdd_strict_enabled' "$BANNER" && grep -qF 'zensu_tdd_strict_enabled' "$PRIMER" \
   && ! grep -qF 'zensu_tdd_strict_effective' "$BANNER" && ! grep -qF 'zensu_tdd_strict_effective' "$PRIMER"; then
-  check "T23 SessionStart banner + primer stay config-only (no marker can exist yet)" PASS
+  check "T23 SessionStart banner + primer stay config-only (a new session key has no marker yet)" PASS
 else
   check "T23 SessionStart hooks changed mode source" FAIL
 fi
@@ -865,6 +903,23 @@ done
 [ -z "$PREC_BAD" ] \
   && check "T27 the ## Precedence section states the ranks, the escalation-only rule and the freeze caveat" PASS \
   || check "T27 precedence section incomplete:$PREC_BAD" FAIL
+T27B_DOC="$PLUGIN_DIR/docs/configuration.md"
+SCOPE_BAD=""
+for t27b in \
+  "$SKILL|The marker is session-scoped: a session with a new key starts from the configured default again, and one that keeps its key keeps the mode." \
+  "$T27B_DOC|so a session with a new key starts from this flag again and one that keeps its key keeps the choice" \
+  "$T27B_DOC|a session with a new key has no marker yet, and where a \`clear\` keeps the session key"; do
+  grep -qF -- "${t27b#*|}" "${t27b%%|*}" || SCOPE_BAD="$SCOPE_BAD [${t27b#*|}]"
+done
+for t27b in \
+  "$SKILL|it never follows the user into their next" \
+  "$T27B_DOC|the choice is session-scoped, so a fresh session starts from this flag again" \
+  "$T27B_DOC|because at SessionStart no marker for the new session can exist yet"; do
+  grep -qF -- "${t27b#*|}" "${t27b%%|*}" && SCOPE_BAD="$SCOPE_BAD [stale: ${t27b#*|}]"
+done
+[ -z "$SCOPE_BAD" ] \
+  && check "T27b the tdd-mode skill and the tddImplementation row say a new session key starts from the configured mode and a kept key keeps the choice" PASS \
+  || check "T27b session-key scope wording:$SCOPE_BAD" FAIL
 
 echo "== Reader arms no behavioral path reaches =="
 # T8c the marker EXISTS as a regular file but cannot be read. `[ -f ]` is true, so

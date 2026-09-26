@@ -77,7 +77,9 @@ command -v node >/dev/null 2>&1 || _ZENSU_ROUTE_QUESTION_LIVE=no
 [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/plan-approved-delegate.sh" ] || _ZENSU_ROUTE_QUESTION_LIVE=no
 # A configured hooks.defaultDeliveryRoute answers the question before it is asked, so
 # the tip below must not promise one. Config-only on purpose (same rule as the mode
-# line): at SessionStart no session marker can exist yet. The key is read under the
+# line): a session with a new key has no session marker yet, and a marker a clear
+# keeps under the same key is disclosed by the directive field, the status line,
+# --status and the /zensu:doctor row, never by this banner. The key is read under the
 # root the binder's resolveFreshHookProject answers: an existing record's root on a
 # retry or a clear, else Claude's stable CLAUDE_PROJECT_DIR. The mutable payload cwd
 # is never authoritative. When that resolution is unavailable the ambient read stands.
@@ -149,7 +151,7 @@ case "$_ZENSU_ROUTE_DEFAULT" in
     _ZENSU_ROUTE_PLAN_ON=yes; _ZENSU_ROUTE_PROMPT_ON=yes
     zensu_hook_enabled autoTdd || _ZENSU_ROUTE_PLAN_ON=no
     zensu_hook_enabled tddReminder || _ZENSU_ROUTE_PROMPT_ON=no
-    _ZENSU_ROUTE_TAIL="an explicit preference in your message or /zensu:delivery-route still changes it for this session."
+    _ZENSU_ROUTE_TAIL="a preference stated in your message decides only that request, and /zensu:delivery-route changes the route for this session."
     case "${_ZENSU_ROUTE_PLAN_ON}${_ZENSU_ROUTE_PROMPT_ON}" in
       yesyes) echo "zensu: Delivery route — hooks.defaultDeliveryRoute=$_ZENSU_ROUTE_DEFAULT: an approved plan or a code request $_ZENSU_ROUTE_EFFECT without the route question; $_ZENSU_ROUTE_TAIL" ;;
       yesno)  echo "zensu: Delivery route — hooks.defaultDeliveryRoute=$_ZENSU_ROUTE_DEFAULT: an approved plan $_ZENSU_ROUTE_EFFECT without the route question (the code-request half is off: hooks.tddReminder=false); $_ZENSU_ROUTE_TAIL" ;;
@@ -170,7 +172,7 @@ if [ -z "${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" ] \
   && [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/pre-browser-navigation-consent.sh" ] \
   && [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/post-browser-navigation-consent.sh" ] \
   && [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/lib/verify-consent-v1.js" ]; then
-  echo "zensu: Browser verification — no parent-environment navigation policy is set, so /zensu:verify-feature runs in consent mode: the first navigation to each loopback origin asks you through the permission prompt, remote targets still need the policy. /zensu:doctor verifies the hook registration and the runtime recipe."
+  echo "zensu: Browser verification — no navigation policy is set, so /zensu:verify-feature runs in consent mode: it drives playwright-cli, and the first time its zensu-verify browser session reaches a loopback origin you are asked through the permission prompt; remote targets still need the policy. /zensu:doctor checks playwright-cli, the hook registration and the runtime recipe."
 fi
 
 

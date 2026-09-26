@@ -15,8 +15,8 @@ exclusive delivery routes — `/zensu:autopilot`, `/zensu:tdd`, `/zensu:pilot`, 
 directly. It replaced a yes/no question about `/zensu:tdd` alone, which left the plugin's other
 two delivery routes invisible at the one moment they are relevant.
 
-A workflow-or-direct answer is remembered for the rest of the session, a configured default
-answers the question without asking, and an autopilot or pilot answer is never remembered. The
+A Zensu-workflow answer is remembered for the rest of the session, a configured default answers
+the question without asking, and a direct, autopilot or pilot answer is never remembered. The
 session marker, the `hooks.defaultDeliveryRoute` key and the resolution ladder that decide it
 are in `.claude/rules/session-delivery-route.md`.
 
@@ -140,21 +140,29 @@ single-marker precondition, Phase 0.D holds the one authoritative statement, and
 `tests/structure/test-autopilot-durable-skill.sh` pin exactly that — so "pinned against nothing" no
 longer holds for it.
 
-**The Phase 0.D ORDERING is now PINNED, and the two entries that follow are notes ABOUT roster
-members rather than roster members themselves.** `D14` in
+**The durable-begin ordering is PINNED by line number and the Phase 0.D `ExitPlanMode` ordering
+by text, and the two entries that follow are notes ABOUT roster members rather than roster
+members themselves.** `D14` in
 `tests/structure/test-autopilot-durable-skill.sh` compares LINE NUMBERS: the single-marker
 precondition must appear before the `--autopilot-begin --run "$RUN_ID"` command, so reversing the
 two now fails rather than passing every check. The paragraph this replaces said the ordering was
 "enforced by nothing" and told the reader to check it by hand; that was true until the offset
-comparison landed. What `D14` does NOT see is the ordering relative to `ExitPlanMode` itself —
-that half is still by hand.
+comparison landed. What `D14` does NOT see is the ordering relative to `ExitPlanMode` itself.
+`D16` in the same suite pins that half as TEXT at both sites that state it: the durable-begin
+block must still say the begin succeeds before `ExitPlanMode`, and the Phase 0.D sentence that
+creates the durable run immediately before `ExitPlanMode`, together with every line of the
+standalone fall-through a reversal causes, must stand in the Phase 0.D slice. It pins the
+instruction, never the order a model takes.
 `skills/autopilot/SKILL.md` Phase 0.D is on this roster for a reason that is easy to miss: it
 requires `--autopilot-begin` to run IMMEDIATELY BEFORE `ExitPlanMode`, and that ordering is the
 only thing putting the durable run at `PLANNING` in time for Autopilot's OWN approval to land on
 the durable branch. Reverse it — a plausible refactor, "do not mint a run the user may reject" —
-and Autopilot's planning gate falls through to the standalone directive, which now re-asks the
-four-route question with `/zensu:autopilot` still on it. That approval loop did not exist before
-this change made the route reachable from this gate. `tests/structure/test-pilot-skill.sh` is on
+and Autopilot's planning gate falls through to the standalone directive. While the route field
+reads `ask`, that directive re-asks the four-route question with `/zensu:autopilot` still on it —
+an approval loop that did not exist before the four-route question made `/zensu:autopilot`
+reachable from this gate. With a recorded or configured route it asks nothing and sends the
+Autopilot spec to `/zensu:tdd` or implements it directly (`.claude/rules/session-delivery-route.md`).
+`tests/structure/test-pilot-skill.sh` is on
 it for a blunter reason: its `P8d` graded a WHOLE-FILE `/zensu:pilot` count against a literal,
 so the primer edit turned a CI-run suite red. It is a per-heredoc assertion now, and the needle is
 the FULL route clause (`PILOT_ROUTE_CLAUSE`) rather than the bare skill name: both primer heredocs

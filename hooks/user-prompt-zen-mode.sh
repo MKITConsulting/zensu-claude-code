@@ -17,9 +17,9 @@
 # off-phrases writes `{"active":false}` directly, so "normal mode" still works
 # after the model has drifted. It WRITES rather than deletes on purpose — under a
 # true default, removing the marker would re-enable the mode the user just left.
-# The marker is keyed by the resolved Session Control key, so a fresh session
-# always starts from the configured default and one session's choice never leaks
-# into another.
+# The marker is keyed by the resolved Session Control key, so a session with a new
+# key starts from the configured default, one that keeps its key keeps the mode,
+# and one session's choice never leaks into another.
 #
 # The marker root comes from zensu_resolve_project_dir, the same accessor the
 # writer uses. It is deliberately NOT $ZENSU_PROJECT_ROOT: Session Control records

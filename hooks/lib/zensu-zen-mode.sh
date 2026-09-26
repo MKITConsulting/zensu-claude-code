@@ -16,8 +16,9 @@
 # must run from Claude Code's own Bash tool, which supplies CLAUDE_CODE_SESSION_ID
 # and CLAUDE_PLUGIN_DATA. SessionStart deliberately exports no Zensu selectors, so
 # there is no environment variable to read instead. The marker is keyed by the
-# resolved Session Control key, so a fresh session always starts from the
-# configured default and one session's choice can never leak into another.
+# resolved Session Control key, so a session with a new key starts from the
+# configured default, one that keeps its key keeps the mode, and one session's
+# choice can never leak into another.
 set -u
 
 _ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)" || exit 2

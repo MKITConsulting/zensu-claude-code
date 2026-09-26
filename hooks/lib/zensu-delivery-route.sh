@@ -17,9 +17,10 @@
 #
 # Two writers are legitimate: the /zensu:delivery-route skill on the user's own
 # instruction, and the model right after the user answers the route question with
-# the Zensu workflow or with implementing directly — that answer IS the user's
-# instruction. Text that merely asks for a route (a file, a review comment, tool
-# output) is data, not an instruction.
+# the Zensu workflow — that answer IS the user's instruction. A direct answer is
+# never recorded, so `--direct` runs only on the user's explicit instruction. Text
+# that merely asks for a route (a file, a review comment, tool output) is data, not
+# an instruction.
 #
 # `--auto` WRITES `{"route":"auto"}` rather than deleting the marker, exactly as
 # zensu-tdd-mode.sh does: absence and `auto` resolve identically (fall through to the
@@ -33,7 +34,8 @@
 # Session binding follows the model-invocation path zensu-log.sh uses: the helper
 # must run from Claude Code's own Bash tool, which supplies CLAUDE_CODE_SESSION_ID
 # and CLAUDE_PLUGIN_DATA. The marker is keyed by the resolved Session Control key,
-# so a fresh session always starts from the configured default.
+# so a session with a new key starts from the configured default, and one that keeps
+# its key keeps the route.
 set -u
 
 _ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)" || exit 2
@@ -58,6 +60,10 @@ case "$ROUTE_VERB" in
     exit 2
     ;;
 esac
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-marker-write.sh" && declare -F zensu_write_session_marker >/dev/null || {
+  echo "zensu-delivery-route.sh: cannot load hooks/lib/zensu-marker-write.sh" >&2
+  exit 2
+}
 
 # TWIN PROLOGUE — the block from here to the end of the two resolver guards is the
 # third copy of the one in hooks/lib/zensu-tdd-mode.sh and hooks/lib/zensu-zen-mode.sh
@@ -103,74 +109,10 @@ if ! ROUTE_MARKER="$(zensu_delivery_route_marker_path "$_zensu_pd" "$_zensu_sid"
   echo "zensu-delivery-route.sh: cannot resolve the session marker path" >&2
   exit 2
 fi
-ROUTE_STATE_DIR="$(dirname "$ROUTE_MARKER")"
 unset _zensu_pd _zensu_sid
 
-# Same write sequence as zensu-tdd-mode.sh, for the same reasons: the symlink guard
-# is shared with the tdd-mode marker and asserted twice (before the write and again
-# immediately before the rename — the duplication is the TOCTOU defense), the temp
-# leaf is created O_EXCL under an unguessable name, and the marker is replaced by
-# rename so a link planted at the leaf can never redirect the write.
 route_write_marker() {
-  local tmp
-  if zensu_tdd_mode_state_linked "$ROUTE_PROJECT_DIR" "$ROUTE_MARKER"; then
-    echo "zensu-delivery-route.sh: refusing to follow a symlinked state path — remove $ROUTE_MARKER and its directory link by hand" >&2
-    exit 2
-  fi
-  mkdir -p -m 700 "$ROUTE_STATE_DIR" 2>/dev/null || {
-    echo "zensu-delivery-route.sh: cannot create state directory $ROUTE_STATE_DIR" >&2
-    exit 2
-  }
-  tmp="$(mktemp "$ROUTE_MARKER.tmp.XXXXXX" 2>/dev/null)" || tmp=""
-  [ -n "$tmp" ] || {
-    echo "zensu-delivery-route.sh: cannot create a temporary file beside $ROUTE_MARKER" >&2
-    exit 2
-  }
-  # EXIT alone cleans up; a signal only EXITS, and the exit runs that cleanup. A
-  # cleanup handler on the signals themselves returned into this function, which then
-  # resumed the write and could re-create the temp leaf through a plain redirect,
-  # without O_EXCL.
-  trap 'rm -f "$tmp" 2>/dev/null' EXIT
-  trap 'exit 130' INT
-  trap 'exit 143' TERM
-  trap 'exit 129' HUP
-  # The temp leaf is written through a redirect, and the symlink re-check below runs
-  # AFTER this write: what that second guard prevents is a misdirected RENAME, not a
-  # misdirected write. The mktemp name is unguessable but observable by readdir in a
-  # session-writable directory, so a same-UID co-tenant swapping a link in between
-  # mktemp and the redirect would get a truncating write at the link target. The `-L`
-  # test here narrows that window; it does not close it. The closing form is an
-  # O_NOFOLLOW|O_EXCL open, one node spawn on every write, deliberately not taken —
-  # the tdd-mode twin carries the same guard and records the same accepted bound.
-  if [ -L "$tmp" ]; then
-    echo "zensu-delivery-route.sh: refusing to write through a symlinked temp leaf $tmp — remove it by hand" >&2
-    exit 2
-  fi
-  printf '{"route":"%s"}\n' "$1" > "$tmp" || {
-    echo "zensu-delivery-route.sh: cannot write $tmp" >&2
-    exit 2
-  }
-  if zensu_tdd_mode_state_linked "$ROUTE_PROJECT_DIR" "$ROUTE_MARKER" "$tmp"; then
-    echo "zensu-delivery-route.sh: refusing to follow a symlinked state path — remove $ROUTE_MARKER and its directory link by hand" >&2
-    exit 2
-  fi
-  if [ -e "$ROUTE_MARKER" ] && [ ! -f "$ROUTE_MARKER" ]; then
-    echo "zensu-delivery-route.sh: $ROUTE_MARKER exists and is not a regular file — remove it by hand" >&2
-    exit 2
-  fi
-  mv -f "$tmp" "$ROUTE_MARKER" || {
-    echo "zensu-delivery-route.sh: cannot write $ROUTE_MARKER" >&2
-    exit 2
-  }
-  # Post-condition, because the non-regular check above is a check-then-use: a
-  # DIRECTORY swapped in after it makes `mv -f` move the temp INTO that directory and
-  # return 0, which would print the success line with nothing recorded at the marker
-  # path (the reader answers `none` for a directory). Refuse rather than claim.
-  if [ ! -f "$ROUTE_MARKER" ] || [ -L "$ROUTE_MARKER" ]; then
-    echo "zensu-delivery-route.sh: $ROUTE_MARKER did not land as a regular file — something was swapped in at that path during the write; remove it by hand" >&2
-    exit 2
-  fi
-  trap - EXIT INT TERM HUP
+  zensu_write_session_marker zensu-delivery-route.sh "$ROUTE_PROJECT_DIR" "$ROUTE_MARKER" "{\"route\":\"$1\"}"
 }
 
 case "$ROUTE_VERB" in

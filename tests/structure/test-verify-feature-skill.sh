@@ -6,7 +6,7 @@ set -u
 # process is started and no HOME is resolved.
 # Structure test for /zensu:verify-feature.
 # Pins the public command, self-contained browser loop, isolated Zensu local adapter,
-# credential-blind auth contract, evidence/verdict gates, pinned Playwright MCP runtime,
+# credential-blind auth contract, evidence/verdict gates, playwright-cli command set,
 # plugin registration, and user-facing documentation. No browser or network is launched.
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -14,17 +14,10 @@ SKILL_DIR="$PLUGIN_DIR/skills/verify-feature"
 SKILL_MD="$SKILL_DIR/SKILL.md"
 BROWSER_MD="$SKILL_DIR/rules/browser-verification.md"
 ZENSU_MD="$SKILL_DIR/rules/zensu-monorepo.md"
-MCP_JSON="$PLUGIN_DIR/.mcp.json"
-MCP_PACKAGE="$PLUGIN_DIR/mcp-runtime/package.json"
-MCP_LOCK="$PLUGIN_DIR/mcp-runtime/package-lock.json"
-MCP_LAUNCHER="$PLUGIN_DIR/scripts/playwright-mcp.sh"
-MCP_PROXY="$PLUGIN_DIR/scripts/playwright-mcp-proxy.js"
-MCP_PROXY_TEST="$PLUGIN_DIR/tests/structure/playwright-mcp-proxy.test.js"
-# Shared, locale-independent `node --test` summary parse (see the file header for
-# why the count matters and why it is not hand-copied here).
-. "$(dirname "$0")/lib-unit-summary.sh"
-
-MCP_RUNTIME_DOC="$PLUGIN_DIR/docs/playwright-mcp-runtime.md"
+SETUP_MD="$SKILL_DIR/rules/setup.md"
+CONSENT_MODULE="$PLUGIN_DIR/hooks/lib/verify-consent-v1.js"
+FLOOR_MODULE="$PLUGIN_DIR/hooks/lib/verify-navigation-floor-v1.js"
+BROWSER_CONFIG="$PLUGIN_DIR/scripts/verify-browser-config.js"
 RUNTIME_CONTROLLER="$SKILL_DIR/scripts/zensu-monorepo-runtime.sh"
 PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
 README_MD="$PLUGIN_DIR/README.md"
@@ -43,8 +36,8 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
-for f in "$SKILL_MD" "$BROWSER_MD" "$ZENSU_MD" "$MCP_JSON" "$MCP_PACKAGE" "$MCP_LOCK" "$MCP_LAUNCHER" "$MCP_PROXY" "$MCP_PROXY_TEST" "$MCP_RUNTIME_DOC" "$RUNTIME_CONTROLLER" "$PLUGIN_JSON" \
-  "$README_MD" "$HELP_MD" "$DOCTOR_SH" "$DOCTOR_REPORT" "$DOCTOR_SKILL" \
+for f in "$SKILL_MD" "$BROWSER_MD" "$ZENSU_MD" "$SETUP_MD" "$CONSENT_MODULE" "$FLOOR_MODULE" "$BROWSER_CONFIG" \
+  "$RUNTIME_CONTROLLER" "$PLUGIN_JSON" "$README_MD" "$HELP_MD" "$DOCTOR_SH" "$DOCTOR_REPORT" "$DOCTOR_SKILL" \
   "$AUTOPILOT_SKILL" "$AUTOPILOT_AUTH" "$AUTOPILOT_CONFIG"; do
   if [ ! -f "$f" ]; then
     check "P0 required file exists: $f" FAIL
@@ -53,7 +46,35 @@ for f in "$SKILL_MD" "$BROWSER_MD" "$ZENSU_MD" "$MCP_JSON" "$MCP_PACKAGE" "$MCP_
     exit 1
   fi
 done
-check "P0 all skill, runtime, registration, and documentation files exist" PASS
+check "P0 all skill, consent-gate, registration, and documentation files exist" PASS
+
+SKILL_FLAT="$(tr '\n' ' ' < "$SKILL_MD" | tr -s ' ')"
+BROWSER_FLAT="$(tr '\n' ' ' < "$BROWSER_MD" | tr -s ' ')"
+SETUP_FLAT="$(tr '\n' ' ' < "$SETUP_MD" | tr -s ' ')"
+README_FLAT="$(tr '\n' ' ' < "$README_MD" | tr -s ' ')"
+
+CONSENT_FACTS="$(node -e '
+  const mod = require(process.argv[1]);
+  process.stdout.write([mod.PLAYWRIGHT_CLI_SOURCE_VERSION, mod.SESSION_PREFIX, mod.SESSION_ENV].map((value) => String(value || "")).join("|"));
+' "$CONSENT_MODULE" 2>/dev/null)"
+IFS='|' read -r PW_MEASURED CONSENT_SESSION_PREFIX CONSENT_SESSION_ENV <<<"$CONSENT_FACTS"
+if [ -n "${PW_MEASURED:-}" ] && [ -n "${CONSENT_SESSION_PREFIX:-}" ] && [ -n "${CONSENT_SESSION_ENV:-}" ]; then
+  check "P0a the consent module yields its measured playwright-cli version ($PW_MEASURED), session prefix and session variable" PASS
+else
+  check "P0a the consent module yields its measured playwright-cli version, session prefix and session variable (facts=$CONSENT_FACTS)" FAIL
+fi
+PW_STUB_BIN="$(mktemp -d "${TMPDIR:-/tmp}/zensu-vfs-cli.XXXXXX")" || { echo "FATAL: fixture"; exit 2; }
+trap 'rm -rf -- "$PW_STUB_BIN"' EXIT
+mkdir -p "$PW_STUB_BIN/node_modules/@playwright/cli"
+printf '#!/bin/sh\nexit 0\n' > "$PW_STUB_BIN/playwright-cli"
+chmod 755 "$PW_STUB_BIN/playwright-cli"
+printf '{"name":"@playwright/cli","version":"%s"}\n' "${PW_MEASURED:-}" > "$PW_STUB_BIN/node_modules/@playwright/cli/package.json"
+PW_STUB_READ="$(PATH="$PW_STUB_BIN:$PATH" node -e 'const v = require(process.argv[1]).installedVersion(process.env); process.stdout.write(v.source + " " + v.version)' "$PLUGIN_DIR/hooks/lib/playwright-cli-version-v1.js" 2>/dev/null)"
+if [ -n "${PW_MEASURED:-}" ] && [ "$PW_STUB_READ" = "manifest $PW_MEASURED" ]; then
+  check "P0b the stub playwright-cli every --check-policy call puts first on PATH reads as the measured version ($PW_MEASURED)" PASS
+else
+  check "P0b the stub playwright-cli every --check-policy call puts first on PATH reads as the measured version (got: ${PW_STUB_READ:-<none>})" FAIL
+fi
 
 # P1 — public identity and auto-trigger language.
 grep -qxF '# /zensu:verify-feature' "$SKILL_MD" \
@@ -107,13 +128,160 @@ if grep -qF 'rules/browser-verification.md' "$SKILL_MD"; then
 else
   check "P3a skill loads its bundled browser verification rules" FAIL
 fi
-for needle in browser_snapshot browser_take_screenshot browser_console_messages browser_network_requests browser_close; do
-  if grep -qF "$needle" "$BROWSER_MD"; then
-    check "P3 browser rule references $needle" PASS
-  else
-    check "P3 browser rule references $needle" FAIL
-  fi
-done
+TABLE_VERDICT="$(node -e '
+  const fs = require("node:fs");
+  const mod = require(process.argv[2]);
+  const allowed = mod.ALLOWED_COMMANDS || {};
+  const text = fs.readFileSync(process.argv[1], "utf8");
+  const start = text.indexOf("## 0. The command set on a `zensu-verify` session");
+  const end = start === -1 ? -1 : text.indexOf("\n## ", start + 1);
+  if (start === -1 || end === -1) { process.stdout.write("command-set section not found"); process.exit(1); }
+  const section = text.slice(start, end);
+  const spans = (cell) => Array.from(cell.matchAll(/`([^`]+)`/g), (match) => match[1]);
+  const flagsOf = (part) => spans(part).filter((span) => span.startsWith("--")).map((span) => span.slice(2).split(/[=\s<]/)[0]);
+  const documented = new Map();
+  const problems = [];
+  for (const line of section.split("\n")) {
+    if (!line.startsWith("|")) continue;
+    const cells = line.split("|").slice(1, -1).map((cell) => cell.trim());
+    if (cells.length !== 3 || cells[0] === "Purpose" || /^-+$/.test(cells[0])) continue;
+    const rowCommands = [];
+    for (const span of spans(cells[1])) {
+      const name = span.split(/\s+/)[0];
+      if (name === "clear-*") {
+        for (const other of rowCommands.slice()) if (other.startsWith("set-")) rowCommands.push("clear-" + other.slice(4));
+      } else {
+        rowCommands.push(name);
+      }
+    }
+    for (const name of rowCommands) {
+      if (documented.has(name)) problems.push(name + " is listed twice");
+      documented.set(name, new Set());
+    }
+    for (const segment of cells[2].split(";")) {
+      const colon = segment.indexOf(":");
+      if (colon === -1) {
+        if (flagsOf(segment).length > 0) problems.push("a flag is documented without its command");
+        continue;
+      }
+      const flags = flagsOf(segment.slice(colon + 1));
+      for (const owner of spans(segment.slice(0, colon))) {
+        if (!rowCommands.includes(owner)) { problems.push(owner + " has flags documented outside its row"); continue; }
+        for (const flag of flags) documented.get(owner).add(flag);
+      }
+    }
+  }
+  const keys = Object.keys(allowed);
+  if (keys.length === 0) problems.push("the module exports no commands");
+  for (const key of keys) {
+    if (!documented.has(key)) { problems.push(key + " is missing from the table"); continue; }
+    const expected = Array.from(allowed[key]).sort().join(",");
+    const got = Array.from(documented.get(key)).sort().join(",");
+    if (expected !== got) problems.push(key + " flags differ: table [" + got + "] module [" + expected + "]");
+  }
+  for (const name of documented.keys()) {
+    if (!Object.prototype.hasOwnProperty.call(allowed, name)) problems.push(name + " is not a gate command");
+  }
+  if (problems.length > 0) { process.stdout.write(problems.join("; ")); process.exit(1); }
+  process.stdout.write(String(keys.length));
+' "$BROWSER_MD" "$CONSENT_MODULE" 2>&1)"
+TABLE_RC=$?
+if [ "$TABLE_RC" = "0" ] && [ -n "$TABLE_VERDICT" ]; then
+  check "P3f the browser rule command table names exactly the gate's $TABLE_VERDICT commands, each with its own flags" PASS
+else
+  check "P3f the browser rule command table names exactly the gate's commands, each with its own flags ($TABLE_VERDICT)" FAIL
+fi
+DENY_VERDICT="$(node -e '
+  const fs = require("node:fs");
+  const mod = require(process.argv[2]);
+  const allowed = mod.ALLOWED_COMMANDS || {};
+  const text = fs.readFileSync(process.argv[1], "utf8");
+  const start = text.indexOf("Everything else is");
+  const end = start === -1 ? -1 : text.indexOf("Never re-issue a denied call", start);
+  if (start === -1 || end === -1) { process.stdout.write("deny list not found"); process.exit(1); }
+  const listed = new Set(Array.from(text.slice(start, end).matchAll(/`([^`]+)`/g), (match) => match[1]));
+  const problems = [];
+  const commands = ["eval", "run-code", "delete-data", "route", "request", "network-state-set", "upload", "drop", "pdf",
+    "attach", "detach", "install", "install-browser", "close-all", "kill-all"];
+  for (const name of commands) {
+    if (!listed.has(name)) problems.push(name + " is not in the deny list");
+    if (Object.prototype.hasOwnProperty.call(allowed, name)) problems.push(name + " is a gate command");
+  }
+  const gateFlags = Object.values(allowed).flatMap((list) => Array.from(list));
+  for (const flag of ["filename", "persistent", "profile"]) {
+    if (!listed.has("--" + flag)) problems.push("--" + flag + " is not in the deny list");
+    if (gateFlags.includes(flag)) problems.push("--" + flag + " is a gate flag");
+  }
+  const family = /cookie|storage|state|route|request-|response-|network-|video|trac|record|pdf|upload|eval|run-code|install|attach|detach|delete|kill|close-all/;
+  for (const key of Object.keys(allowed)) {
+    if (family.test(key)) problems.push(key + " belongs to a denied family");
+  }
+  if (problems.length > 0) { process.stdout.write(problems.join("; ")); process.exit(1); }
+' "$BROWSER_MD" "$CONSENT_MODULE" 2>&1)"
+DENY_RC=$?
+if [ "$DENY_RC" = "0" ]; then
+  check "P3g the deny list names every denied command and flag, and none of them is a gate command" PASS
+else
+  check "P3g the deny list names every denied command and flag, and none of them is a gate command ($DENY_VERDICT)" FAIL
+fi
+if grep -qF '`--json`, `--raw`, `--help` and `--version` are accepted on every command.' "$BROWSER_MD" \
+  && grep -qF 'A flag given twice is denied too.' "$BROWSER_MD" \
+  && grep -qF 'Run each call as its own plain Bash command on the main thread: exactly one `playwright-cli` call per Bash command, with no other command, operator, pipe, substitution, wrapper or package launcher around it. Quote an argument that carries `?`, `*`, `[` or `{`, or that starts with `~` or `=`.' <<<"$BROWSER_FLAT"; then
+  check "P3h harmless flags, repeated flags, and plain main-thread calls are pinned in the browser rule" PASS
+else
+  check "P3h harmless flags, repeated flags, and plain main-thread calls are pinned in the browser rule" FAIL
+fi
+DOLLAR_RULE='Single-quote an argument that carries `$`: double quotes do not help'
+if grep -qF "$DOLLAR_RULE" <<<"$BROWSER_FLAT" && grep -qF "$DOLLAR_RULE" <<<"$SKILL_FLAT"; then
+  check "P3i the browser rule and the skill both state that an argument carrying \$ is single-quoted" PASS
+else
+  check "P3i the browser rule and the skill both state that an argument carrying \$ is single-quoted" FAIL
+fi
+SHAPE_VERDICT="$(node -e '
+  const fs = require("node:fs");
+  const mod = require(process.argv[2]);
+  const reasons = mod.REASONS || {};
+  const text = fs.readFileSync(process.argv[1], "utf8").replace(/\s+/g, " ");
+  const problems = [];
+  const finalSentence = "A command or flag that is not available, an origin outside the run config or the navigation policy, a refused or unanswerable consent prompt, and a call from a subagent are final.";
+  if (!text.includes(finalSentence)) problems.push("the final-denial sentence is missing");
+  const start = text.indexOf("A shape denial objects only to how the call is spelled");
+  const end = start === -1 ? -1 : text.indexOf("a second denial of that call is final", start);
+  if (start === -1 || end === -1) {
+    problems.push("the shape-denial passage is missing");
+  } else {
+    const passage = text.slice(start, end);
+    const named = Array.from(passage.matchAll(/`([A-Z][A-Z_]+)`/g), (match) => match[1]);
+    for (const key of named) {
+      if (!Object.prototype.hasOwnProperty.call(reasons, key)) problems.push(key + " is not a REASONS key");
+    }
+    const shapeKeys = Array.isArray(mod.SHAPE_REASONS) ? mod.SHAPE_REASONS : [];
+    const finalKeys = Array.isArray(mod.FINAL_REASONS) ? mod.FINAL_REASONS : [];
+    if (shapeKeys.length === 0 || finalKeys.length === 0) problems.push("the module exports no SHAPE_REASONS or FINAL_REASONS");
+    for (const key of Object.keys(reasons)) {
+      if (shapeKeys.includes(key) === finalKeys.includes(key)) problems.push(key + " is not in exactly one class");
+    }
+    for (const key of shapeKeys) {
+      if (!named.includes(key)) problems.push(key + " is not named as a shape denial");
+    }
+    for (const key of finalKeys) {
+      if (named.includes(key)) problems.push(key + " is final but named as a shape denial");
+    }
+    if (typeof mod.SHAPE_MARKER !== "string" || !passage.includes(mod.SHAPE_MARKER)) {
+      problems.push("the passage does not quote the note the gate appends to a shape denial");
+    }
+    if (!passage.includes("Answer a shape denial once: re-issue the same call as one plain call with single-quoted literal arguments.")) {
+      problems.push("the one-retry instruction is missing");
+    }
+  }
+  if (problems.length > 0) { process.stdout.write(problems.join("; ")); process.exit(1); }
+' "$BROWSER_MD" "$CONSENT_MODULE" 2>&1)"
+SHAPE_RC=$?
+if [ "$SHAPE_RC" = "0" ]; then
+  check "P3j a shape denial is answered once by a plain single-quoted re-issue, and every other denial stays final" PASS
+else
+  check "P3j a shape denial is answered once by a plain single-quoted re-issue, and every other denial stays final ($SHAPE_VERDICT)" FAIL
+fi
 if grep -qF 'DOM and data' "$BROWSER_MD" && grep -qF '### Visual' "$BROWSER_MD" && grep -qF '### Runtime signals' "$BROWSER_MD"; then
   check "P3b DOM/data, visual, and runtime evidence are all mandatory" PASS
 else
@@ -140,10 +308,10 @@ fi
 # P4 — credential-blind auth; no token extraction/injection recipe.
 if grep -qiF 'credential-blind' "$SKILL_MD" && grep -qF 'use visible manual' "$SKILL_MD" \
   && grep -qF 'browser login or report the authenticated coverage as PARTIAL' "$SKILL_MD" \
-  && grep -qF 'omits all' "$SKILL_MD" && grep -qF 'cookie/storage/session getters and setters' "$SKILL_MD"; then
-  check "P4a auth is visible-only and omits broad browser storage capability" PASS
+  && grep -qF 'The browser consent gate denies every cookie, local/session-storage and state command on a `zensu-verify` session because they expose credential material.' <<<"$SKILL_FLAT"; then
+  check "P4a auth is visible-only and the gate denies every browser storage command" PASS
 else
-  check "P4a auth is visible-only and omits broad browser storage capability" FAIL
+  check "P4a auth is visible-only and the gate denies every browser storage command" FAIL
 fi
 if grep -qF 'not accept an auth artifact path' "$SKILL_MD" \
   && ! grep -rqF 'browser_set_storage_state' "$SKILL_DIR"; then
@@ -152,10 +320,10 @@ else
   check "P4b verify-feature never accepts or restores storage-state artifacts" FAIL
 fi
 if grep -qF 'hard-denies every getter/exporter' "$SKILL_MD" \
-  && grep -qF 'Do not invoke `auth.loginScript`' "$SKILL_MD"; then
-  check "P4e future opaque auth requires a narrow deny-by-default broker" PASS
+  && grep -qF 'Do not invoke `auth.loginScript`' <<<"$SKILL_FLAT"; then
+  check "P4e future opaque auth requires a narrow deny-by-default gate" PASS
 else
-  check "P4e future opaque auth requires a narrow deny-by-default broker" FAIL
+  check "P4e future opaque auth requires a narrow deny-by-default gate" FAIL
 fi
 if grep -qF '$GIT_ROOT/.zensu/verify-feature-runs/<random>' "$SKILL_MD" \
   && grep -qF 'Remove only the unique leaf on cleanup.' "$SKILL_MD"; then
@@ -179,7 +347,7 @@ else
 fi
 if grep -qF '`validate.evidenceSafety` block' "$SKILL_MD" \
   && grep -qF 'fail-closed schema' "$SKILL_MD" \
-  && grep -qF '`browser_navigate` result' "$SKILL_MD" \
+  && grep -qF 'which prints the page title and writes a snapshot of the page' "$SKILL_MD" \
   && grep -qF 'mode: declared-safe' "$AUTOPILOT_CONFIG" \
   && grep -qF 'the only mode supported by contract v1' "$AUTOPILOT_CONFIG" \
   && ! grep -qF 'redactionDriver' "$AUTOPILOT_CONFIG" \
@@ -191,12 +359,10 @@ if grep -qF '`validate.evidenceSafety` block' "$SKILL_MD" \
 else
   check "P4q protected DOM and visual evidence is safe before model ingestion" FAIL
 fi
-if grep -qF 'future checked-in broker' "$SKILL_MD" \
-  && grep -qF 'path-contained setter' "$SKILL_MD" \
-  && grep -qF 'hard-denies every getter/exporter' "$SKILL_MD"; then
-  check "P4g broad upstream storage tools stay disabled until a narrow broker exists" PASS
+if grep -qF 'A future gate may re-enable opaque state only when it admits a path-contained setter and hard-denies every getter/exporter.' <<<"$SKILL_FLAT"; then
+  check "P4g browser state commands stay denied until a narrow gate exists" PASS
 else
-  check "P4g broad upstream storage tools stay disabled until a narrow broker exists" FAIL
+  check "P4g browser state commands stay denied until a narrow gate exists" FAIL
 fi
 if grep -qF 'Use visible manual browser login' "$ZENSU_MD" \
   && grep -qF 'never read, print, or pass' "$ZENSU_MD" \
@@ -207,12 +373,20 @@ else
 fi
 if grep -qF 'ORIGIN="$(parent_origin)"' "$RUNTIME_CONTROLLER" \
   && grep -qF 'APP_BASE_URL="$ORIGIN"' "$RUNTIME_CONTROLLER" \
-  && grep -qF 'Resolve the planned application origin from the immutable parent policy' "$ZENSU_MD" \
+  && grep -qF 'Resolve the planned application origin before starting any resource' "$ZENSU_MD" \
   && grep -qF -- '--check-policy local "$APP_ORIGIN" "/" declared-safe' "$ZENSU_MD" \
   && grep -qF 'Use visible manual browser login' "$ZENSU_MD"; then
   check "P4i local auth waits for the exact frontend origin and stays visible" PASS
 else
   check "P4i local auth waits for the exact frontend origin and stays visible" FAIL
+fi
+if grep -qF 'Without a parent policy the gate runs in consent mode and the same three commands still' "$ZENSU_MD" \
+  && grep -qF 'prints `consent` with exit `0`' "$ZENSU_MD" \
+  && grep -qF 'consent_origin' "$RUNTIME_CONTROLLER" \
+  && grep -qF 'node "$FREE_PORT_HELPER" --from 5173' "$RUNTIME_CONTROLLER"; then
+  check "P4t bundled adapter picks and records its own loopback origin in consent mode" PASS
+else
+  check "P4t bundled adapter picks and records its own loopback origin in consent mode" FAIL
 fi
 if grep -qF 'baseUrl:     "http://localhost:5173" # same-origin /api proxy' "$AUTOPILOT_CONFIG" \
   && grep -qF 'appOrigin:   "http://localhost:5173" # exact browser/storage-state origin' "$AUTOPILOT_CONFIG"; then
@@ -253,21 +427,29 @@ if grep -qF 'Retain no component of a rejected URL.' "$SKILL_MD" \
 else
   check "P4r rejected remote reports disclose no URL component" FAIL
 fi
-if grep -qF "ZENSU_VERIFY_NAVIGATION_POLICY_V1" "$SKILL_MD" \
-  && grep -qF 'intercepts every request before continuation' "$SKILL_MD" \
-  && grep -qF 'Raw Playwright navigation' "$SKILL_MD" && grep -qF 'followed by a final-URL check is too late' "$SKILL_MD" \
-  && grep -qF 'DNS rebinding' "$SKILL_MD" \
-  && grep -qF 'Never replace it with navigate-then-check logic.' "$BROWSER_MD"; then
-  check "P4s remote redirects are origin-gated before any model-visible response" PASS
+if grep -qF 'ZENSU_VERIFY_NAVIGATION_POLICY_V1' "$SKILL_MD" \
+  && grep -qF 'Redirects are not filtered by the browser.' <<<"$SKILL_FLAT" \
+  && grep -qF 'read the `Page URL` line `playwright-cli` prints' <<<"$SKILL_FLAT" \
+  && grep -qF 'stop driving that page: take no snapshot or screenshot and read no console or network output from it, run `close`, and report the scenario PARTIAL with the redirect as the observation.' <<<"$SKILL_FLAT" \
+  && grep -qF 'pins each hostname to an approved public address in Chromium to prevent DNS rebinding.' <<<"$SKILL_FLAT" \
+  && grep -qF '2. Read the `Page URL` line of every navigating call.' "$BROWSER_MD" \
+  && grep -qF 'Every navigating call prints a `Page URL` line.' <<<"$BROWSER_FLAT"; then
+  check "P4s a redirect off the run config is caught on the Page URL line before any evidence is read" PASS
 else
-  check "P4s remote redirects are origin-gated before any model-visible response" FAIL
+  check "P4s a redirect off the run config is caught on the Page URL line before any evidence is read" FAIL
+fi
+if grep -qF 'node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <local|remote> "<validated-origin>" "<exact-page-route>" declared-safe' "$SKILL_MD" \
+  && grep -qF 'It prints `consent` or `policy` and exits `0`, or' "$SKILL_MD"; then
+  check "P4u every route runs the run-config helper's --check-policy preflight" PASS
+else
+  check "P4u every route runs the run-config helper's --check-policy preflight" FAIL
 fi
 if grep -qF 'never copy raw console output' "$SKILL_MD" && grep -qF 'Strip query strings/fragments' "$SKILL_MD"; then
   check "P4f console/network evidence is sanitized before reporting" PASS
 else
   check "P4f console/network evidence is sanitized before reporting" FAIL
 fi
-if grep -rqE 'jq +-r.*(token|localStorage)|TOK=.*jq|browser_evaluate.*localStorage\.setItem' "$SKILL_DIR"; then
+if grep -rqE 'jq +-r.*(token|localStorage)|TOK=.*jq|(browser_evaluate|playwright-cli.*(eval|run-code)).*localStorage\.setItem' "$SKILL_DIR"; then
   check "P4c no token extraction or localStorage injection recipe" FAIL
 else
   check "P4c no token extraction or localStorage injection recipe" PASS
@@ -326,314 +508,154 @@ else
   check "P5g Vite binds the same literal loopback host used by APP_ORIGIN" FAIL
 fi
 
-# P6 — pinned lockfile-backed MCP and plugin manifest wiring.
-if jq -e '.mcpServers["zensu-browser"].command == "${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh"' "$MCP_JSON" >/dev/null 2>&1 \
-  && jq -e '.mcpServers["zensu-browser"].args | index("--isolated")' "$MCP_JSON" >/dev/null 2>&1 \
-  && jq -e '.mcpServers["zensu-browser"].args | index("--caps=storage") | not' "$MCP_JSON" >/dev/null 2>&1 \
-  && jq -e '.mcpServers | has("playwright") | not' "$MCP_JSON" >/dev/null 2>&1 \
-  && [ "$(jq -r '.dependencies["@playwright/mcp"]' "$MCP_PACKAGE")" = '0.0.75' ] \
-  && jq -e '.packages["node_modules/@playwright/mcp"] | .version == "0.0.75" and (.integrity | startswith("sha512-"))' "$MCP_LOCK" >/dev/null 2>&1 \
-  && grep -qF 'run_sanitized_child '\'''\'' npm ci --prefix "$RUNTIME_GENERATION" --ignore-scripts --no-audit --no-fund' "$MCP_LAUNCHER" \
-  && grep -qF 'run_sanitized_child '\'''\'' node "$PROXY" --runtime-dir "$RUNTIME_GENERATION"' "$MCP_LAUNCHER"; then
-  check "P6a Playwright MCP is pinned, integrity-locked, isolated, and brokered" PASS
+# P6 — playwright-cli driver and plugin manifest wiring.
+if node -e '
+  const manifest = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+  const skills = Array.isArray(manifest.skills) ? manifest.skills : [];
+  process.exit(skills.includes("./skills/verify-feature") && !Object.prototype.hasOwnProperty.call(manifest, "mcpServers") ? 0 : 1);
+' "$PLUGIN_JSON" 2>/dev/null; then
+  check "P6a plugin manifest registers the skill and declares no MCP server" PASS
 else
-  check "P6a Playwright MCP is pinned, integrity-locked, isolated, and brokered" FAIL
+  check "P6a plugin manifest registers the skill and declares no MCP server" FAIL
 fi
-SKILL_FLAT="$(tr '\n' ' ' < "$SKILL_MD" | tr -s ' ')"
-if grep -qF 'accept either the direct `mcp__zensu-browser__<operation>` name or' <<<"$SKILL_FLAT" \
-  && grep -qF 'plugin namespace `mcp__plugin_zensu_zensu-browser__<operation>`. Never drive `mcp__playwright__<operation>` instead: that name belongs to a different MCP server keyed `playwright`, which has no navigation broker and no consent gate.' <<<"$SKILL_FLAT" \
-  && [ "$(grep -oF 'mcp__playwright__' "$SKILL_MD" | wc -l | tr -d ' ')" = "1" ] \
-  && ! grep -qF 'mcp__plugin_zensu_playwright__' "$SKILL_MD"; then
-  check "P6l the skill drives only the two zensu-browser namespaces and names the server keyed playwright once, as the one never to drive" PASS
-else
-  check "P6l the skill drives only the two zensu-browser namespaces and names the server keyed playwright once, as the one never to drive" FAIL
-fi
-PROXY_TEST_OUTPUT="$(node --test "$MCP_PROXY_TEST" 2>&1)"
-# Floor on the REGISTERED total; the call site below carries the value. A passing floor is not used: one case already
-# skips itself on this host and the set of skips is platform-dependent, which is the
-# coupling unit_cases_registered_floor exists to avoid. A real failure is already
-# non-zero from node, and PROXY_TEST_RC covers it.
-PROXY_TEST_RC=$?
-if [ "$PROXY_TEST_RC" = "0" ] && unit_cases_registered_floor_text "$PROXY_TEST_OUTPUT" 28; then
-  check "P6g MCP broker exposes only the exact safe inventory and enforces navigation policy ($(unit_cases_report_text "$PROXY_TEST_OUTPUT"))" PASS
-else
-  check "P6g MCP broker inventory/policy behavior (rc=$PROXY_TEST_RC, out=${PROXY_TEST_OUTPUT:0:500})" FAIL
-fi
-# A floor BELOW the registered total is slack a deleted case hides in, and the two carriers of
-# that number — this call site and the `Blocks` cell in tests/SUITE-OVERVIEW.md — are both
-# hand-maintained, so both drifted at once. Derived here so neither can drift again silently.
-PROXY_REGISTERED="$(printf '%s\n' "$PROXY_TEST_OUTPUT" | sed -n 's/^.*[[:space:]]tests \([0-9][0-9]*\)$/\1/p' | tail -1)"
-PROXY_FLOOR_LITERAL="$(sed -n 's/.*unit_cases_registered_floor_text "\$PROXY_TEST_OUTPUT" \([0-9][0-9]*\).*/\1/p' "$0" | head -1)"
-if [ -n "$PROXY_REGISTERED" ] && [ "$PROXY_FLOOR_LITERAL" = "$PROXY_REGISTERED" ]; then
-  check "P6g1 the registered-case floor equals what the proxy unit file registers ($PROXY_REGISTERED)" PASS
-else
-  check "P6g1 the registered-case floor equals what the proxy unit file registers (floor=$PROXY_FLOOR_LITERAL registered=$PROXY_REGISTERED)" FAIL
-fi
-PROXY_OVERVIEW_BLOCKS="$(sed -n 's/^| `playwright-mcp-proxy\.test\.js` | \([0-9][0-9]*\) |.*/\1/p' "$PLUGIN_DIR/tests/SUITE-OVERVIEW.md" | head -1)"
-if [ -n "$PROXY_REGISTERED" ] && [ "$PROXY_OVERVIEW_BLOCKS" = "$PROXY_REGISTERED" ]; then
-  check "P6g2 the SUITE-OVERVIEW Blocks cell equals what the proxy unit file registers ($PROXY_REGISTERED)" PASS
-else
-  check "P6g2 the SUITE-OVERVIEW Blocks cell equals what the proxy unit file registers (cell=$PROXY_OVERVIEW_BLOCKS registered=$PROXY_REGISTERED)" FAIL
-fi
-if grep -qF '@latest' "$MCP_JSON"; then
-  check "P6b MCP runtime never floats on @latest" FAIL
-else
-  check "P6b MCP runtime never floats on @latest" PASS
-fi
-if grep -qF 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh" install-browser' "$SKILL_MD" \
-  && grep -qF 'natively rendered `${CLAUDE_PLUGIN_ROOT}` path' "$SKILL_MD" \
-  && grep -qF '`browser_install` is not a tool in the pinned' "$SKILL_MD" \
-  && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$SKILL_MD" \
-  && grep -qF 'run_sanitized_child '\'''\'' "$BIN" install-browser' "$MCP_LAUNCHER"; then
-  check "P6f missing browser recovery uses the pinned launcher install-browser command" PASS
-else
-  check "P6f missing browser recovery uses the pinned launcher install-browser command" FAIL
-fi
-if grep -qF 'ZENSU_MCP_TEST_MODE' "$MCP_LAUNCHER" \
-  && grep -qF 'ZENSU_MCP_TEST_PASSTHROUGH' "$MCP_LAUNCHER" \
-  && grep -qF 'ZENSU_MCP_RUNTIME_DIR_OVERRIDE' "$MCP_LAUNCHER" \
-  && grep -qF 'test-only launcher controls are not supported' "$MCP_LAUNCHER" \
-  && ! grep -qF 'RUNTIME_DIR="${ZENSU_MCP_RUNTIME_DIR_OVERRIDE' "$MCP_LAUNCHER"; then
-  check "P6h production launcher rejects every former test override and passthrough" PASS
-else
-  check "P6h production launcher rejects every former test override and passthrough" FAIL
-fi
-if grep -qF 'mktemp -d' "$MCP_LAUNCHER" \
-  && grep -qF 'cp "$PACKAGE_FILE" "$RUNTIME_GENERATION/package.json"' "$MCP_LAUNCHER" \
-  && grep -qF 'cp "$LOCK_FILE" "$RUNTIME_GENERATION/package-lock.json"' "$MCP_LAUNCHER" \
-  && grep -qF -- '--zensu-install-runtime' "$MCP_LAUNCHER" \
-  && grep -qF 'materialize_runtime' "$MCP_LAUNCHER" \
-  && grep -qF 'trap cleanup_runtime EXIT' "$MCP_LAUNCHER" \
-  && grep -qF 'run_child' "$MCP_LAUNCHER" \
-  && grep -qF '"$@" <&0 >&1 2>&2 &' "$MCP_LAUNCHER" \
-  && ! grep -qF 'npm ci --prefix "$RUNTIME_DIR"' "$MCP_LAUNCHER" \
-  && ! grep -qF 'INSTALL_LOCK=' "$MCP_LAUNCHER" \
-  && ! grep -qF 'lockf ' "$MCP_LAUNCHER" \
-  && ! grep -qF 'flock ' "$MCP_LAUNCHER" \
-  && ! grep -qF '.zensu-lock-sha256' "$MCP_LAUNCHER" \
-  && ! grep -qF 'needs_install' "$MCP_LAUNCHER"; then
-  check "P6d every MCP start uses a signal-cleaned per-invocation runtime generation without shared install state" PASS
-else
-  check "P6d every MCP start uses a signal-cleaned per-invocation runtime generation without shared install state" FAIL
-fi
-
-ISO_TEST_DIR="$(mktemp -d -t zensu-mcp-isolated-XXXXXX)"
-ISO_TEST_PLUGIN="$ISO_TEST_DIR/plugin"
-ISO_TEST_RUNTIME="$ISO_TEST_PLUGIN/mcp-runtime"
-ISO_TEST_SCRIPTS="$ISO_TEST_PLUGIN/scripts"
-ISO_TEST_LAUNCHER="$ISO_TEST_SCRIPTS/playwright-mcp.sh"
-ISO_TEST_BIN="$ISO_TEST_DIR/bin"
-ISO_TEST_CALLS="$ISO_TEST_DIR/npm-prefixes"
-ISO_TEST_READY="$ISO_TEST_DIR/a-ready"
-ISO_TEST_RELEASE="$ISO_TEST_DIR/a-release"
-ISO_TEST_SIGNAL_READY="$ISO_TEST_DIR/signal-ready"
-ISO_TEST_SIGNAL_SEEN="$ISO_TEST_DIR/signal-seen"
-ISO_TEST_WINDOWS=false
-case "$(uname -s 2>/dev/null || true)" in
-  MINGW*|MSYS*|CYGWIN*) ISO_TEST_WINDOWS=true ;;
-esac
-mkdir -p "$ISO_TEST_RUNTIME" "$ISO_TEST_SCRIPTS" "$ISO_TEST_BIN"
-cp "$MCP_LAUNCHER" "$ISO_TEST_LAUNCHER"
-chmod +x "$ISO_TEST_LAUNCHER"
-printf '{"name":"isolated-fixture","private":true}\n' >"$ISO_TEST_RUNTIME/package.json"
-printf '{"name":"isolated-fixture","lockfileVersion":3}\n' >"$ISO_TEST_RUNTIME/package-lock.json"
-mkdir -p "$ISO_TEST_RUNTIME/node_modules/.bin" "$ISO_TEST_RUNTIME/node_modules/@playwright/mcp"
-cat >"$ISO_TEST_RUNTIME/node_modules/.bin/playwright-mcp" <<'MCP_TAMPERED'
-#!/bin/bash
-echo "TAMPERED-RUNTIME $*"
-MCP_TAMPERED
-chmod +x "$ISO_TEST_RUNTIME/node_modules/.bin/playwright-mcp"
-printf 'tampered\n' >"$ISO_TEST_RUNTIME/node_modules/@playwright/mcp/tampered.txt"
-cat >"$ISO_TEST_SCRIPTS/playwright-mcp-proxy.js" <<'PROXY_STUB'
-#!/usr/bin/env node
-'use strict';
-const fs = require('node:fs');
-const path = require('node:path');
-const args = process.argv.slice(2);
-if (args[0] !== '--runtime-dir' || !args[1]) process.exit(80);
-const runtime = args[1];
-const command = args[2] || '';
-const dependency = path.join(runtime, 'node_modules', '@playwright', 'mcp', 'dependency.txt');
-if (command === 'hold') {
-  const before = fs.readFileSync(dependency, 'utf8').trim();
-  process.stdout.write(`before:${before}\n`);
-  fs.writeFileSync(args[3], 'ready\n');
-  while (!fs.existsSync(args[4])) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
-  const after = fs.readFileSync(dependency, 'utf8').trim();
-  process.stdout.write(`after:${after}\n`);
-  process.exit(before === after ? 0 : 1);
-}
-if (command === 'probe') {
-  process.stdout.write(`probe:${fs.readFileSync(dependency, 'utf8').trim()}\n`);
-  process.exit(0);
-}
-if (command === 'stdio') {
-  process.stdout.write(`stdio:${fs.readFileSync(0, 'utf8').trim()}\n`);
-  process.exit(0);
-}
-if (command === 'signal') {
-  process.on('SIGTERM', () => {
-    fs.writeFileSync(args[4], 'seen\n');
-    process.exit(143);
-  });
-  fs.writeFileSync(args[3], `${process.pid}\n`);
-  setInterval(() => {}, 50);
-} else {
-  process.exit(0);
-}
-PROXY_STUB
-cat >"$ISO_TEST_BIN/npm" <<'NPM_STUB'
-#!/bin/bash
-set -euo pipefail
-fixture_root="$(cd "$(dirname "$0")/.." && pwd -P)"
-source_runtime="$fixture_root/plugin/mcp-runtime"
-calls_file="$fixture_root/npm-prefixes"
-[ "${1:-}" = "ci" ] || exit 81
-prefix=""
-while [ "$#" -gt 0 ]; do
-  if [ "$1" = "--prefix" ]; then prefix="$2"; shift 2; else shift; fi
+MCP_LEFTOVERS=""
+for gone in scripts/playwright-mcp.sh scripts/playwright-mcp-proxy.js mcp-runtime/package.json mcp-runtime/package-lock.json \
+  docs/playwright-mcp-runtime.md tests/structure/playwright-mcp-proxy.test.js; do
+  if [ -e "$PLUGIN_DIR/$gone" ] || [ -L "$PLUGIN_DIR/$gone" ]; then MCP_LEFTOVERS="$MCP_LEFTOVERS $gone"; fi
 done
-[ "$prefix" != "$source_runtime" ] || exit 82
-cmp "$prefix/package.json" "$source_runtime/package.json" >/dev/null || exit 83
-cmp "$prefix/package-lock.json" "$source_runtime/package-lock.json" >/dev/null || exit 84
-printf '%s\n' "$prefix" >>"$calls_file"
-mkdir -p "$prefix/node_modules/.bin" "$prefix/node_modules/@playwright/mcp"
-basename "$prefix" >"$prefix/node_modules/@playwright/mcp/dependency.txt"
-cat >"$prefix/node_modules/.bin/playwright-mcp" <<'MCP_STUB'
-#!/bin/bash
-set -euo pipefail
-dependency="$(cd "$(dirname "$0")/../@playwright/mcp" && pwd)/dependency.txt"
-case "${1:-}" in
-  hold)
-    before="$(cat "$dependency")"
-    printf 'before:%s\n' "$before"
-    : >"$2"
-    while [ ! -f "$3" ]; do sleep 0.02; done
-    after="$(cat "$dependency")"
-    printf 'after:%s\n' "$after"
-    [ "$before" = "$after" ]
-    ;;
-  probe)
-    printf 'probe:%s\n' "$(cat "$dependency")"
-    ;;
-  stdio)
-    IFS= read -r line
-    printf 'stdio:%s\n' "$line"
-    ;;
-  signal)
-    trap ': >"$3"; exit 143' HUP INT TERM
-    : >"$2"
-    while :; do sleep 0.05; done
-    ;;
-  *) printf 'trusted-playwright-mcp %s\n' "$*" ;;
+if [ -z "$MCP_LEFTOVERS" ]; then
+  check "P6b the bundled Playwright MCP launcher, broker, runtime lockfiles, and their doc and unit file are gone" PASS
+else
+  check "P6b the bundled Playwright MCP launcher, broker, runtime lockfiles, and their doc and unit file are gone (still present:$MCP_LEFTOVERS)" FAIL
+fi
+if [ ! -e "$PLUGIN_DIR/.mcp.json" ] || ! grep -qE 'playwright|zensu-browser' "$PLUGIN_DIR/.mcp.json"; then
+  check "P6c no plugin .mcp.json declares a playwright or zensu-browser server" PASS
+else
+  check "P6c no plugin .mcp.json declares a playwright or zensu-browser server" FAIL
+fi
+MCP_TOOL_FILES="$(grep -rlE 'browser_(navigate|navigate_back|snapshot|take_screenshot|console_messages|network_requests|close|tabs|install|evaluate|click|type|fill_form|press_key|hover|drag|select_option|resize|wait_for|handle_dialog|file_upload|run_code|set_storage_state|storage_state)|mcp__[A-Za-z0-9_-]*(browser|playwright)' "$PLUGIN_DIR/skills" 2>/dev/null | tr '\n' ' ')"
+if [ -z "$MCP_TOOL_FILES" ]; then
+  check "P6d no file under skills/ names an MCP browser tool or an MCP browser namespace" PASS
+else
+  check "P6d no file under skills/ names an MCP browser tool or an MCP browser namespace (files: $MCP_TOOL_FILES)" FAIL
+fi
+MCP_NAME_FILES="$(grep -rlF 'playwright-mcp' "$PLUGIN_DIR/skills" 2>/dev/null | tr '\n' ' ')"
+if [ -z "$MCP_NAME_FILES" ]; then
+  check "P6e no file under skills/ names playwright-mcp" PASS
+else
+  check "P6e no file under skills/ names playwright-mcp (files: $MCP_NAME_FILES)" FAIL
+fi
+PREFLIGHT_FLAT="$(awk '/^## playwright-cli preflight/{p=1;next} /^## /{p=0} p' "$SKILL_MD" | tr '\n' ' ' | tr -s ' ')"
+if [ -n "${PW_MEASURED:-}" ] \
+  && grep -qF 'check with `command -v playwright-cli`' <<<"$PREFLIGHT_FLAT" \
+  && grep -qF "name the pinned install route for the user to run — \`npm install -g @playwright/cli@${PW_MEASURED}\`, the version the browser consent gate was measured against; \`brew install playwright-cli\` is unpinned" <<<"$PREFLIGHT_FLAT" \
+  && grep -qF 'Never install it on their behalf' <<<"$PREFLIGHT_FLAT" \
+  && grep -qF "parses its arguments as measured against version ${PW_MEASURED} and denies an argument shape it does not recognize rather than admitting it — including a \`zensu-verify\` session name it does not resolve as the call's session." <<<"$PREFLIGHT_FLAT"; then
+  check "P6f the playwright-cli preflight checks PATH, names the pinned install route, labels brew unpinned, and states the measured version ${PW_MEASURED:-}" PASS
+else
+  check "P6f the playwright-cli preflight checks PATH, names the pinned install route, labels brew unpinned, and states the measured version ${PW_MEASURED:-}" FAIL
+fi
+if grep -qF 'obtain explicit approval for the networked download' <<<"$PREFLIGHT_FLAT" \
+  && grep -qF '`playwright-cli install-browser` WITHOUT a session flag' <<<"$PREFLIGHT_FLAT" \
+  && grep -qF 'Never switch to Firefox or WebKit' <<<"$PREFLIGHT_FLAT"; then
+  check "P6g a missing browser is installed only after approval, outside the zensu-verify session, and stays Chromium" PASS
+else
+  check "P6g a missing browser is installed only after approval, outside the zensu-verify session, and stays Chromium" FAIL
+fi
+if grep -qF '### Browser session (both modes)' "$SKILL_MD" \
+  && grep -qF 'node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --run-dir "$RUN_DIR" --mode <local|remote> --origin "<app-origin>"' "$SKILL_MD" \
+  && [ -n "${CONSENT_SESSION_PREFIX:-}" ] && grep -qF "\`session=${CONSENT_SESSION_PREFIX}<id>\`" "$SKILL_MD" \
+  && [ -n "${CONSENT_SESSION_ENV:-}" ] \
+  && grep -qF "Copy the printed session name and config path LITERALLY into every later call. Never rebuild them, never hold them in a shell variable, and never set \`${CONSENT_SESSION_ENV}\`: the gate denies a session or argument it cannot read as a literal." <<<"$SKILL_FLAT" \
+  && grep -qF 'playwright-cli -s=<session> open --config=<config> [--headed] <app-origin><route>' "$SKILL_MD"; then
+  check "P6h the browser session copies the helper's session name and config path literally into every call" PASS
+else
+  check "P6h the browser session copies the helper's session name and config path literally into every call" FAIL
+fi
+if grep -qF 'Run each `playwright-cli` call as its own plain Bash command on the main thread — exactly one call per Bash command, with nothing before or after it: no `&&`, `;` or pipe, no subshell or command substitution, no wrapper such as `timeout` or `nohup`, no package launcher such as `npx`, never through `xargs`, `bash -c`, a heredoc or a here-string, and never from a subagent. The gate denies every other shape. Name the same session on every call: `playwright-cli -s=<session> <command> ...`, and quote an argument that carries `?`, `*`, `[` or `{`, or that starts with `~` or `=`, because the gate reads an unquoted one as a shell pattern it cannot judge.' <<<"$SKILL_FLAT" \
+  && grep -qF 'every call from a subagent' "$SKILL_MD" \
+  && grep -qF 'every command that is not exactly one plain `playwright-cli` call' <<<"$SKILL_FLAT"; then
+  check "P6i every playwright-cli call is a plain main-thread Bash command on the same session" PASS
+else
+  check "P6i every playwright-cli call is a plain main-thread Bash command on the same session" FAIL
+fi
+if grep -qF 'Never run `playwright-cli eval` or `run-code`; the browser consent gate denies both on a `zensu-verify` session' <<<"$SKILL_FLAT" \
+  && grep -qF 'never `close-all` or `kill-all`, which end sessions this run does not own' <<<"$SKILL_FLAT" \
+  && grep -qF 'never `attach` to a running browser' <<<"$SKILL_FLAT" \
+  && grep -qF 'the gate denies an `export` or an environment assignment on a command that carries a `zensu-verify` call.' <<<"$SKILL_FLAT"; then
+  check "P6j the skill forbids page evaluation, foreign-session teardown, attaching, and environment changes" PASS
+else
+  check "P6j the skill forbids page evaluation, foreign-session teardown, attaching, and environment changes" FAIL
+fi
+PHASE4="$(awk '/^## Phase 4/{p=1;next} /^## /{p=0} p' "$SKILL_MD")"
+if grep -qF 'run `playwright-cli -s=<session> close` for every session this run opened' <<<"$PHASE4" \
+  && grep -qF 'Run `playwright-cli -s=<session> close` even after a failed assertion or cancelled login.' "$BROWSER_MD"; then
+  check "P6k Phase 4 closes every session this run opened, even after a failure" PASS
+else
+  check "P6k Phase 4 closes every session this run opened, even after a failure" FAIL
+fi
+if grep -qF '| `--print-policy` | with `--setup` | off |' "$SKILL_MD" \
+  && grep -qF '## 5. `--print-policy`' "$SETUP_MD" \
+  && grep -qF "ZENSU_VERIFY_NAVIGATION_POLICY_V1='<rendered JSON>' node" "$SETUP_MD" \
+  && grep -qF 'node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy local "<origin>" "<route>" declared-safe' "$SETUP_MD" \
+  && grep -qF '`policy` on stdout with exit `0` means the rendered JSON approves that route.' "$SETUP_MD" \
+  && grep -qF 'the project-level settings files are not the place, because the session can write them.' <<<"$SETUP_FLAT"; then
+  check "P6l --print-policy renders the policy, proves it with --check-policy, and keeps it out of project settings" PASS
+else
+  check "P6l --print-policy renders the policy, proves it with --check-policy, and keeps it out of project settings" FAIL
+fi
+TEMPLATE_VERDICT="$(node -e '
+  const fs = require("node:fs");
+  const floor = require(process.argv[2]);
+  const match = fs.readFileSync(process.argv[1], "utf8").match(/`(\{"version":1,[^`]*\})`/);
+  if (!match) { process.stdout.write("policy template not found"); process.exit(1); }
+  const rendered = match[1].split("<port>").join("5173").split("<declared routes>").join(JSON.stringify("/"));
+  const parsed = floor.parsePolicyTargets(rendered);
+  if (!parsed.ok) { process.stdout.write(String(parsed.fault)); process.exit(1); }
+  if (parsed.mode !== "local") { process.stdout.write("mode " + parsed.mode); process.exit(1); }
+' "$SETUP_MD" "$FLOOR_MODULE" 2>&1)"
+TEMPLATE_RC=$?
+if [ "$TEMPLATE_RC" = "0" ]; then
+  check "P6m the --print-policy template passes the navigation policy contract once its placeholders are filled" PASS
+else
+  check "P6m the --print-policy template passes the navigation policy contract once its placeholders are filled ($TEMPLATE_VERDICT)" FAIL
+fi
+CHECK_CONSENT_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:5173" "/" declared-safe 2>/dev/null)"
+CHECK_CONSENT_RC=$?
+if [ "$CHECK_CONSENT_RC" = "0" ] && [ "$CHECK_CONSENT_OUT" = "consent" ]; then
+  check "P6n --check-policy prints consent and exits 0 for a loopback route without a policy" PASS
+else
+  check "P6n --check-policy prints consent and exits 0 for a loopback route without a policy (rc=$CHECK_CONSENT_RC out=$CHECK_CONSENT_OUT)" FAIL
+fi
+CHECK_POLICY='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:5173","routes":["/"],"evidenceMode":"declared-safe"}]}'
+CHECK_POLICY_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$CHECK_POLICY" PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:5173" "/" declared-safe 2>/dev/null)"
+CHECK_POLICY_RC=$?
+if [ "$CHECK_POLICY_RC" = "0" ] && [ "$CHECK_POLICY_OUT" = "policy" ]; then
+  check "P6o --check-policy prints policy and exits 0 for a route the launch policy approves" PASS
+else
+  check "P6o --check-policy prints policy and exits 0 for a route the launch policy approves (rc=$CHECK_POLICY_RC out=$CHECK_POLICY_OUT)" FAIL
+fi
+CHECK_ROUTE_OUT="$(ZENSU_VERIFY_NAVIGATION_POLICY_V1="$CHECK_POLICY" PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:5173" "/admin" declared-safe 2>&1)"
+CHECK_ROUTE_RC=$?
+case "$CHECK_ROUTE_OUT" in
+  *'route is not approved for evidence by the navigation policy'*) CHECK_ROUTE_NAMED=true ;;
+  *) CHECK_ROUTE_NAMED=false ;;
 esac
-MCP_STUB
-chmod +x "$prefix/node_modules/.bin/playwright-mcp"
-NPM_STUB
-chmod +x "$ISO_TEST_BIN/npm"
-export ISO_TEST_RUNTIME ISO_TEST_CALLS
-PATH="$ISO_TEST_BIN:$PATH" "$ISO_TEST_LAUNCHER" hold "$ISO_TEST_READY" "$ISO_TEST_RELEASE" >"$ISO_TEST_DIR/a.out" 2>"$ISO_TEST_DIR/a.err" &
-ISO_TEST_PID_A=$!
-ISO_TEST_WAIT=0
-while [ ! -f "$ISO_TEST_READY" ] && [ "$ISO_TEST_WAIT" -lt 250 ]; do sleep 0.02; ISO_TEST_WAIT=$((ISO_TEST_WAIT+1)); done
-PATH="$ISO_TEST_BIN:$PATH" "$ISO_TEST_LAUNCHER" probe >"$ISO_TEST_DIR/b.out" 2>"$ISO_TEST_DIR/b.err"
-ISO_TEST_RC_B=$?
-kill -0 "$ISO_TEST_PID_A" 2>/dev/null; ISO_TEST_A_ALIVE_DURING_B=$?
-: >"$ISO_TEST_RELEASE"
-wait "$ISO_TEST_PID_A"; ISO_TEST_RC_A=$?
-ISO_TEST_BEFORE="$(sed -n 's/^before://p' "$ISO_TEST_DIR/a.out")"
-ISO_TEST_AFTER="$(sed -n 's/^after://p' "$ISO_TEST_DIR/a.out")"
-ISO_TEST_PREFIX_COUNT="$(wc -l <"$ISO_TEST_CALLS" | tr -d ' ')"
-ISO_TEST_GENERATIONS_GONE=true
-while IFS= read -r prefix; do
-  case "$prefix" in "$ISO_TEST_RUNTIME"|"$ISO_TEST_RUNTIME"/*) ISO_TEST_GENERATIONS_GONE=false ;; esac
-  [ ! -e "$prefix" ] || ISO_TEST_GENERATIONS_GONE=false
-done <"$ISO_TEST_CALLS"
-if [ "$ISO_TEST_RC_A" = "0" ] && [ "$ISO_TEST_RC_B" = "0" ] \
-  && [ "$ISO_TEST_A_ALIVE_DURING_B" = "0" ] \
-  && [ "$ISO_TEST_PREFIX_COUNT" = "2" ] \
-  && [ -n "$ISO_TEST_BEFORE" ] && [ "$ISO_TEST_BEFORE" = "$ISO_TEST_AFTER" ] \
-  && [ "$ISO_TEST_GENERATIONS_GONE" = "true" ] \
-  && [ -e "$ISO_TEST_RUNTIME/node_modules/@playwright/mcp/tampered.txt" ] \
-  && grep -qF 'probe:' "$ISO_TEST_DIR/b.out" \
-  && ! grep -qF 'TAMPERED-RUNTIME' "$ISO_TEST_DIR/a.out" \
-  && ! grep -qF 'TAMPERED-RUNTIME' "$ISO_TEST_DIR/b.out"; then
-  check "P6e A keeps its isolated dependency while B materializes; both generations clean up and shared tampering is ignored" PASS
+if [ "$CHECK_ROUTE_RC" = "1" ] && [ "$CHECK_ROUTE_NAMED" = "true" ]; then
+  check "P6p --check-policy exits 1 naming the reason for a route the launch policy does not approve" PASS
 else
-  check "P6e A keeps its isolated dependency while B materializes; both generations clean up and shared tampering is ignored" FAIL
+  check "P6p --check-policy exits 1 naming the reason for a route the launch policy does not approve (rc=$CHECK_ROUTE_RC out=$CHECK_ROUTE_OUT)" FAIL
 fi
-
-printf 'inherited-input\n' | PATH="$ISO_TEST_BIN:$PATH" "$ISO_TEST_LAUNCHER" stdio >"$ISO_TEST_DIR/stdio.out" 2>"$ISO_TEST_DIR/stdio.err"
-ISO_TEST_STDIO_RC=$?
-ISO_TEST_STDIO_PREFIX="$(tail -n 1 "$ISO_TEST_CALLS")"
-if [ "$ISO_TEST_STDIO_RC" = "0" ] \
-  && grep -qxF 'stdio:inherited-input' "$ISO_TEST_DIR/stdio.out" \
-  && [ ! -e "$ISO_TEST_STDIO_PREFIX" ]; then
-  check "P6k isolated runtime child inherits stdin/stdout/stderr and cleans after EOF" PASS
-else
-  check "P6k isolated runtime child inherits stdin/stdout/stderr and cleans after EOF" FAIL
-fi
-
-PATH="$ISO_TEST_BIN:$PATH" "$ISO_TEST_LAUNCHER" signal "$ISO_TEST_SIGNAL_READY" "$ISO_TEST_SIGNAL_SEEN" >"$ISO_TEST_DIR/signal.out" 2>"$ISO_TEST_DIR/signal.err" &
-ISO_TEST_SIGNAL_PID=$!
-ISO_TEST_WAIT=0
-while [ ! -f "$ISO_TEST_SIGNAL_READY" ] && [ "$ISO_TEST_WAIT" -lt 250 ]; do sleep 0.02; ISO_TEST_WAIT=$((ISO_TEST_WAIT+1)); done
-ISO_TEST_SIGNAL_PREFIX="$(tail -n 1 "$ISO_TEST_CALLS")"
-ISO_TEST_SIGNAL_CHILD_PID=""
-if [ -f "$ISO_TEST_SIGNAL_READY" ]; then
-  ISO_TEST_SIGNAL_CHILD_PID="$(tr -d '\r\n' <"$ISO_TEST_SIGNAL_READY")"
-fi
-kill -TERM "$ISO_TEST_SIGNAL_PID" 2>/dev/null || true
-wait "$ISO_TEST_SIGNAL_PID" 2>/dev/null; ISO_TEST_SIGNAL_RC=$?
-ISO_TEST_SIGNAL_CHILD_GONE=false
-case "$ISO_TEST_SIGNAL_CHILD_PID" in
-  ''|*[!0-9]*) ;;
-  *)
-    if node -e '
-      const pid = Number(process.argv[1]);
-      try {
-        process.kill(pid, 0);
-        process.exit(1);
-      } catch (error) {
-        if (error && error.code === "ESRCH") process.exit(0);
-        throw error;
-      }
-    ' "$ISO_TEST_SIGNAL_CHILD_PID"; then
-      ISO_TEST_SIGNAL_CHILD_GONE=true
-    fi
-    ;;
+CHECK_REMOTE_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy remote "https://example.com" "/" declared-safe 2>&1)"
+CHECK_REMOTE_RC=$?
+case "$CHECK_REMOTE_OUT" in
+  *'remote-target-needs-parent-environment-policy'*) CHECK_REMOTE_NAMED=true ;;
+  *) CHECK_REMOTE_NAMED=false ;;
 esac
-ISO_TEST_SIGNAL_OBSERVED=false
-if [ -e "$ISO_TEST_SIGNAL_SEEN" ] || [ "$ISO_TEST_WINDOWS" = "true" ]; then
-  # Node documents SIGTERM as an unconditional termination on Windows; its
-  # JavaScript SIGTERM listener is therefore not a portable observation point.
-  ISO_TEST_SIGNAL_OBSERVED=true
-fi
-if [ "$ISO_TEST_SIGNAL_RC" != "0" ] \
-  && [ "$ISO_TEST_SIGNAL_CHILD_GONE" = "true" ] \
-  && [ "$ISO_TEST_SIGNAL_OBSERVED" = "true" ] \
-  && [ ! -e "$ISO_TEST_SIGNAL_PREFIX" ]; then
-  check "P6j TERM stops the runtime child, is observed where supported, and cleans its generation" PASS
+if [ "$CHECK_REMOTE_RC" = "1" ] && [ "$CHECK_REMOTE_NAMED" = "true" ]; then
+  check "P6q --check-policy refuses a remote target without a launch policy before any DNS lookup" PASS
 else
-  check "P6j TERM stops the runtime child, is observed where supported, and cleans its generation" FAIL
-fi
-rm -rf "$ISO_TEST_DIR"
-if jq -e '.skills | index("./skills/verify-feature")' "$PLUGIN_JSON" >/dev/null 2>&1 \
-  && [ "$(jq -r '.mcpServers' "$PLUGIN_JSON" 2>/dev/null)" = './.mcp.json' ]; then
-  check "P6c plugin manifest registers skill and MCP file" PASS
-else
-  check "P6c plugin manifest registers skill and MCP file" FAIL
-fi
-if grep -qF 'per-invocation runtime generation' "$MCP_RUNTIME_DOC" \
-  && grep -qF 'outside the plugin root' "$MCP_RUNTIME_DOC" \
-  && grep -qF 'signal-safe' "$MCP_RUNTIME_DOC" \
-  && grep -qF 'No executable, dependency tree, or' "$MCP_RUNTIME_DOC" \
-  && grep -qF 'shared `mcp-runtime/node_modules`' "$MCP_RUNTIME_DOC" \
-  && grep -qF '`--check-policy`' "$MCP_RUNTIME_DOC" \
-  && grep -qF 'normal npm content cache' "$MCP_RUNTIME_DOC"; then
-  check "P6i runtime lifecycle documents isolated generations, cleanup, trust, preflight, and cache behavior" PASS
-else
-  check "P6i runtime lifecycle documents isolated generations, cleanup, trust, preflight, and cache behavior" FAIL
+  check "P6q --check-policy refuses a remote target without a launch policy before any DNS lookup (rc=$CHECK_REMOTE_RC out=$CHECK_REMOTE_OUT)" FAIL
 fi
 
 # P7 — docs/help/doctor are synchronized.
@@ -642,23 +664,55 @@ if grep -qF '| `/zensu:verify-feature` |' "$README_MD"; then
 else
   check "P7a README documents the verify-feature command" FAIL
 fi
-if grep -qF 'skills/verify-feature/SKILL.md' "$HELP_MD" && grep -qF '/zensu:cover' "$HELP_MD"; then
+if grep -qF 'skills/verify-feature/SKILL.md' "$HELP_MD" && grep -qF '/zensu:cover' "$HELP_MD" \
+  && grep -qF 'browser evidence, playwright-cli' "$HELP_MD"; then
   check "P7b help routes live verification and durable test authoring separately" PASS
 else
   check "P7b help routes live verification and durable test authoring separately" FAIL
 fi
-if grep -qF 'playwright_mcp_declared' "$DOCTOR_SH" && grep -qF 'ZDOC_PLAYWRIGHT=configured' "$DOCTOR_SH" \
-  && grep -qF 'valid integrity-locked plugin config + npm present' "$DOCTOR_REPORT" \
-  && grep -qF 'ZDOC_PLAYWRIGHT_TOOLS=ready bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"' "$DOCTOR_SKILL" \
+if grep -qF 'command -v playwright-cli' "$DOCTOR_SH" \
+  && grep -qF 'playwright-cli-version-v1.js' "$DOCTOR_SH" \
+  && ! grep -qF 'playwright_mcp_declared' "$DOCTOR_SH" \
+  && grep -qF 'playwright-cli: installed (' "$DOCTOR_REPORT" \
+  && grep -qF 'playwright-cli: not found on PATH' "$DOCTOR_REPORT" \
+  && grep -qF 'CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"' "$DOCTOR_SKILL" \
+  && ! grep -qF 'ZDOC_PLAYWRIGHT_TOOLS' "$DOCTOR_SKILL" \
   && grep -qF 'Session Control: plugin root unavailable or invalid' "$DOCTOR_SKILL"; then
-  check "P7c doctor validates config without claiming unproven MCP readiness" PASS
+  check "P7c doctor probes playwright-cli and its version without an MCP readiness claim" PASS
 else
-  check "P7c doctor validates config without claiming unproven MCP readiness" FAIL
+  check "P7c doctor probes playwright-cli and its version without an MCP readiness claim" FAIL
 fi
-if grep -qF 'The plugin `.mcp.json` contains only the local Playwright driver' "$README_MD"; then
-  check "P7d self-hosting docs distinguish Playwright MCP config from the Zensu API host" PASS
+if grep -qF 'The plugin ships no MCP server, so there is no Zensu API or hosted-MCP endpoint' "$README_MD" \
+  && grep -qF "need \`playwright-cli\` on \`PATH\` (\`npm install -g @playwright/cli@${PW_MEASURED}\`, the version the browser consent gate was measured against; \`brew install playwright-cli\` is unpinned)." <<<"$README_FLAT"; then
+  check "P7d README states the plugin ships no MCP server and requires playwright-cli for browser verification" PASS
 else
-  check "P7d self-hosting docs distinguish Playwright MCP config from the Zensu API host" FAIL
+  check "P7d README states the plugin ships no MCP server and requires playwright-cli for browser verification" FAIL
+fi
+INSTALL_DRIFT=""
+for carrier in "$SKILL_MD" "$README_MD" "$DOCTOR_SKILL" "$AUTOPILOT_CONFIG" "$PLUGIN_DIR/docs/verify-feature.md" "$PLUGIN_DIR/docs/gates.md"; do
+  carrier_flat="$(tr '\n' ' ' < "$carrier" | tr -s ' ')"
+  if [ -z "${PW_MEASURED:-}" ] || ! grep -qF "\`npm install -g @playwright/cli@${PW_MEASURED}\`" <<<"$carrier_flat" \
+    || ! grep -qF '`brew install playwright-cli` is unpinned' <<<"$carrier_flat" \
+    || grep -qF '`npm install -g @playwright/cli`' <<<"$carrier_flat"; then
+    INSTALL_DRIFT="$INSTALL_DRIFT ${carrier#"$PLUGIN_DIR"/}"
+  fi
+done
+if ! grep -qF "'\`npm install -g @playwright/cli' + (measured ? '@' + measured : '') + '\`'" "$DOCTOR_REPORT" \
+  || ! grep -qF '`brew install playwright-cli` is unpinned' "$DOCTOR_REPORT"; then
+  INSTALL_DRIFT="$INSTALL_DRIFT hooks/lib/zensu-doctor-report.js"
+fi
+if [ -z "$INSTALL_DRIFT" ]; then
+  check "P7e every playwright-cli install route names the pinned npm command and labels brew unpinned" PASS
+else
+  check "P7e every playwright-cli install route names the pinned npm command and labels brew unpinned (drift in:$INSTALL_DRIFT)" FAIL
+fi
+DOCTOR_FLAT="$(tr '\n' ' ' < "$DOCTOR_SKILL" | tr -s ' ')"
+if grep -qF 'It refuses unless `hooks/hooks.json` demonstrably registers both consent hooks on a matcher that covers Bash and the installed `playwright-cli` manifest names the measured version; then report PARTIAL with its reason, and never open a browser without the run config it writes.' <<<"$SKILL_FLAT" \
+  && grep -qF 'The label is literal: the run-config helper writes no run config unless both hooks demonstrably answer registered' <<<"$DOCTOR_FLAT" \
+  && grep -qF 'tell the user not to start `/zensu:verify-feature` until this row clears' <<<"$DOCTOR_FLAT"; then
+  check "P7f the skill and the doctor both say the run-config helper refuses to start while a consent hook is unregistered" PASS
+else
+  check "P7f the skill and the doctor both say the run-config helper refuses to start while a consent hook is unregistered" FAIL
 fi
 
 # P8 — portable/plugin-bundled text only.
@@ -673,11 +727,11 @@ if grep -rqiE "$GERMAN_RE" "$SKILL_DIR"; then
 else
   check "P8b tracked skill content is English-only" PASS
 fi
-if grep -qF 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh" --check-policy' "$SKILL_MD" \
+if grep -qF 'node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy' "$SKILL_MD" \
   && grep -qF 'ROOT="${CLAUDE_PLUGIN_ROOT}"' "$SKILL_MD" \
   && grep -qF 'supporting files loaded through `Read` do not receive' "$SKILL_MD" \
   && grep -qF '<absolute-plugin-root>/skills/verify-feature/scripts/zensu-monorepo-runtime.sh' "$ZENSU_MD" \
-  && grep -qF 'bash "<absolute-plugin-root>/scripts/playwright-mcp.sh" --check-policy' "$ZENSU_MD" \
+  && grep -qF 'node "<absolute-plugin-root>/scripts/verify-browser-config.js" --check-policy' "$ZENSU_MD" \
   && ! grep -qF '{ACTIVE_PLUGIN_ROOT}' "$SKILL_MD" \
   && ! grep -qF '{ACTIVE_PLUGIN_ROOT}' "$ZENSU_MD" \
   && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$SKILL_MD" \
@@ -687,6 +741,131 @@ if grep -qF 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh" --check-poli
 else
   check "P8c skill uses native root rendering and concretizes adapter placeholders" FAIL
 fi
+
+CHANGELOG_MD="$PLUGIN_DIR/CHANGELOG.md"
+RELEASE_YML="$PLUGIN_DIR/.github/workflows/release.yml"
+P9_VERDICTS="$(node -e '
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  const { spawnSync } = require("node:child_process");
+  const [workflow, changelogFile, measured] = process.argv.slice(1);
+  const RULE = "mcp__plugin_zensu_playwright__";
+  const LAST_MCP_RELEASE = [0, 21, 1];
+  const DATED = /^## \[([0-9]+)\.([0-9]+)\.([0-9]+)\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$/;
+  const workflowLines = fs.readFileSync(workflow, "utf8").split("\n");
+  function program(stepName, openRe, closeRe) {
+    const step = workflowLines.findIndex((line) => line.includes("- name: " + stepName));
+    const open = step === -1 ? -1 : workflowLines.findIndex((line, index) => index > step && openRe.test(line));
+    const close = open === -1 ? -1 : workflowLines.findIndex((line, index) => index > open && closeRe.test(line));
+    if (close === -1) throw new Error("the awk program of step \"" + stepName + "\" was not found in release.yml");
+    return workflowLines.slice(open + 1, close).join("\n");
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "changelog-release-"));
+  function awk(args) {
+    const run = spawnSync("awk", args, { encoding: "utf8" });
+    if (run.status !== 0) throw new Error("awk failed: " + run.stderr);
+    return run.stdout;
+  }
+  function blocksOf(text) {
+    const lines = text.split("\n");
+    const found = [];
+    for (let i = 0; i < lines.length; i += 1) {
+      if (lines[i] !== "### Upgrade notes") continue;
+      let end = i + 1;
+      while (end < lines.length && !/^##{1,2} /.test(lines[end])) end += 1;
+      const block = lines.slice(i, end).join("\n");
+      if (!block.includes(RULE)) continue;
+      let heading = i - 1;
+      while (heading >= 0 && !/^## /.test(lines[heading])) heading -= 1;
+      found.push({ block, heading: heading === -1 ? "" : lines[heading], start: i, end });
+    }
+    return found;
+  }
+  function placement(text, measuredVersion) {
+    const found = blocksOf(text);
+    if (found.length !== 1) throw new Error(found.length + " upgrade-notes blocks name " + RULE);
+    const { block, heading } = found[0];
+    if (heading === "## [Unreleased]") {
+      const install = "npm install -g @playwright/cli@" + measuredVersion;
+      if (!block.includes(install)) throw new Error("the unreleased notes do not name " + install);
+      return "Unreleased";
+    }
+    const dated = DATED.exec(heading);
+    if (!dated) throw new Error("the notes sit under " + JSON.stringify(heading));
+    const version = dated.slice(1, 4).map(Number);
+    const order = version[0] - LAST_MCP_RELEASE[0] || version[1] - LAST_MCP_RELEASE[1] || version[2] - LAST_MCP_RELEASE[2];
+    if (order <= 0) throw new Error("the notes sit under " + version.join(".") + ", a release that still shipped the MCP server");
+    if (!/npm install -g @playwright\/cli@[0-9]+\.[0-9]+\.[0-9]+/.test(block)) throw new Error("the released notes name no pinned install");
+    return version.join(".");
+  }
+  function release(text, measuredVersion, version) {
+    const before = placement(text, measuredVersion);
+    const section = path.join(dir, "section.md");
+    const source = path.join(dir, "source.md");
+    fs.writeFileSync(section, "## [" + version + "] - 2099-01-01\n\n### Added\n\n- **release**: Synthetic generated entry\n");
+    fs.writeFileSync(source, text);
+    const released = awk([program("Prepend section into CHANGELOG.md", /^\s*awk \x27\s*$/, /^\s*\x27 "\$SECTION" CHANGELOG\.md > /), section, source]);
+    const headings = released.split("\n").filter((line) => /^## /.test(line));
+    const at = headings.indexOf("## [Unreleased]");
+    if (at === -1 || headings.lastIndexOf("## [Unreleased]") !== at) throw new Error("the released file does not carry exactly one Unreleased heading");
+    if (headings[at + 1] !== "## [" + version + "] - 2099-01-01") throw new Error("the generated section does not follow the Unreleased heading");
+    const after = placement(released, measuredVersion);
+    const expected = before === "Unreleased" ? version : before;
+    if (after !== expected) throw new Error("the release left the notes under " + after + ", not " + expected);
+    const releasedFile = path.join(dir, "released.md");
+    fs.writeFileSync(releasedFile, released);
+    const notes = awk(["-v", "ver=" + after, program("Extract release notes from CHANGELOG", /^\s*awk -v ver="\$VER" \x27\s*$/, /^\s*\x27 CHANGELOG\.md > /), releasedFile]);
+    if (!notes.includes(blocksOf(released)[0].block)) throw new Error("the release notes for " + after + " do not carry the upgrade notes");
+    return { released, version: after };
+  }
+  function moveUnder(text, heading) {
+    const lines = text.split("\n");
+    const [found] = blocksOf(text);
+    if (!found) throw new Error("no upgrade notes to move");
+    const block = lines.slice(found.start, found.end);
+    const rest = lines.slice(0, found.start).concat(lines.slice(found.end));
+    const target = rest.findIndex((line) => line.startsWith(heading));
+    if (target === -1) throw new Error("no " + heading + " section to move the notes into");
+    return rest.slice(0, target + 2).concat(block, rest.slice(target + 2)).join("\n");
+  }
+  const verdicts = [];
+  function scenario(name, run) {
+    try { verdicts.push(name + "\tok\t" + run()); }
+    catch (error) { verdicts.push(name + "\tfail\t" + String(error.message || error).replace(/\s+/g, " ")); }
+  }
+  const changelog = fs.readFileSync(changelogFile, "utf8");
+  const bumped = measured.replace(/[0-9]+$/, (patch) => String(Number(patch) + 1));
+  try {
+    scenario("placement", () => placement(changelog, measured));
+    scenario("release", () => release(changelog, measured, "99.0.0").version);
+    scenario("stale-section", () => placement(moveUnder(changelog, "## [0.21.1] - "), measured));
+    scenario("bumped", () => {
+      const shipped = release(changelog, measured, "99.0.0").released;
+      return release(shipped, bumped, "99.1.0").version + " with measured " + bumped;
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  process.stdout.write(verdicts.join("\n") + "\n");
+' "$RELEASE_YML" "$CHANGELOG_MD" "$PW_MEASURED" 2>&1)"
+p9_verdict() { printf '%s\n' "$P9_VERDICTS" | awk -F '\t' -v name="$1" '$1 == name { print $2 "\t" $3 }'; }
+case "$(p9_verdict placement)" in
+  ok$'\t'*) check "P9a the upgrade notes are one block, under Unreleased with the measured pin or under a release after 0.21.1 ($(p9_verdict placement | cut -f2))" PASS ;;
+  *) check "P9a the upgrade notes are one block, under Unreleased with the measured pin or under a release after 0.21.1 ($(p9_verdict placement | cut -f2))" FAIL ;;
+esac
+case "$(p9_verdict release)" in
+  ok$'\t'*) check "P9b release.yml's own insertion and notes awk carry the upgrade notes into the release section and its notes ($(p9_verdict release | cut -f2))" PASS ;;
+  *) check "P9b release.yml's own insertion and notes awk carry the upgrade notes into the release section and its notes ($(p9_verdict release | cut -f2))" FAIL ;;
+esac
+case "$(p9_verdict stale-section)" in
+  fail$'\t'*'a release that still shipped the MCP server'*) check "P9c notes moved under 0.21.1 are refused" PASS ;;
+  *) check "P9c notes moved under 0.21.1 are refused (got: $(p9_verdict stale-section))" FAIL ;;
+esac
+case "$(p9_verdict bumped)" in
+  ok$'\t'*) check "P9d the released notes survive the next release and a bump of the measured version ($(p9_verdict bumped | cut -f2))" PASS ;;
+  *) check "P9d the released notes survive the next release and a bump of the measured version ($(p9_verdict bumped | cut -f2))" FAIL ;;
+esac
 
 echo "----"
 echo "test-verify-feature-skill: $PASS PASS / $FAIL FAIL"
