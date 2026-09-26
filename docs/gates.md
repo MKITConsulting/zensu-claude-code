@@ -334,17 +334,28 @@ chain states.
 ## Browser Consent Gate
 
 A PreToolUse gate (`pre-browser-navigation-consent.sh`) and its PostToolUse companion
-(`post-browser-navigation-consent.sh`), both registered on the `Bash` matcher. They judge every
-`playwright-cli` call whose session is a `zensu-verify-*` name — the session
-`scripts/verify-browser-config.js` prints for a `/zensu:verify-feature` run — and stay out of
+(`post-browser-navigation-consent.sh`), both registered on the `Bash` matcher. The gate is
+textual: they judge a `playwright-cli` call on a `zensu-verify-*` session — the session
+`scripts/verify-browser-config.js` prints for a `/zensu:verify-feature` run — when its command
+text names the CLI and that session, or names the CLI while the hook environment's
+`PLAYWRIGHT_CLI_SESSION` names one, and while their prefilter library loads they stay out of
 every other Bash call: both hooks exit before starting `node` unless the payload, with quotes and
 backslashes removed and in any letter case, names `playwright-cli` (or `@playwright/cli`) and a
 `zensu-verify-` session, or the hook environment's `PLAYWRIGHT_CLI_SESSION` names one. A
 `playwright-cli` call on any other session reaches no decision unless its command text also names
 a `zensu-verify-` session, which denies it. While the hook environment's `PLAYWRIGHT_CLI_SESSION`
-names one, such a call reaches no decision only as one plain call that names its session once,
-spells that session and every argument literally, parses, and names no `PLAYWRIGHT_MCP_*` or
-`PWTEST_*` variable; every other such command is denied.
+names one, such a call reaches no decision only when all of these hold: the command parses and
+stays within the 256 KiB size bound; it holds no operator (`;`, `&`, `&&`, `|`, `||`, `|&`,
+parentheses), no command on a further line, and no `$(…)`, `${…}`, `$((…))`, backtick or
+process-substitution body, heredoc, here-string or non-literal redirection target anywhere; its
+one `playwright-cli` stands in command position, directly or behind a package launcher or a
+wrapper the gate knows (`env`, `sudo`, `doas`, `timeout`, `gtimeout`, `nohup`, `time`, `nice`,
+`exec`, `command`, `builtin`); the call gives at most one session argument and the command at
+most one `PLAYWRIGHT_CLI_SESSION` assignment; the session and every argument are literal and
+parse; and the command defines no `playwright-cli` function, uses no environment builtin and
+names no `PLAYWRIGHT_MCP_*` or `PWTEST_*` variable. Every other command that names the CLI, a
+mere mention included, is denied. A known wrapper, a package launcher, a CLI path or an
+environment assignment is refused only on a `zensu-verify` session.
 The pair exists so that `/zensu:verify-feature` can run without
 `ZENSU_VERIFY_NAVIGATION_POLICY_V1` in the environment that launched Claude Code: that variable
 is the only channel a model cannot write, and it costs every user a shell prefix, a port fixed
@@ -380,17 +391,22 @@ session is prose, not a boundary.
   keeps its specific reason, and any other shape is denied as not one plain call. A gated call
   reached through `xargs` or another program, a command string handed to a shell or another
   program, a heredoc, here-string, nested shell or `eval` body the gate cannot judge — one
-  beyond the nesting bound included — a function named `playwright-cli` in any letter case, an
+  beyond the nesting bound included — a function named `playwright-cli`, in any letter case, that
+  the command defines, an
   `export` or other environment builtin, an environment assignment or `env`/`sudo`/`doas`
   wrapper on the call (a nested shell body inherits the ones on the shell that runs it), any
   other wrapper (`timeout`, `gtimeout`, `nohup`, `time`, `nice`, `exec`, `command`, `builtin`, or
   one the gate does not know), a package launcher (`npx`, `bunx`, `pnpx`, `npm`/`pnpm`/`yarn`
-  `dlx`/`exec`/`x`), and any
+  `dlx`/`exec`/`x`), a CLI named other than by its bare name — a path, another letter case or the
+  package name `@playwright/cli`, where only `playwright-cli` (on Windows also its `.cmd`, `.exe`
+  and `.ps1` names) lets `PATH` resolve the binary `/zensu:doctor` measured, unless the shell
+  already has a function or alias of that name, which neither hook can see — and any
   `PLAYWRIGHT_MCP_*` or `PWTEST_*` name in the command text, quoted apart or not, are denied.
   The session name and every argument must be literal: a shell variable, substitution, glob,
   brace expansion, or a leading `~` or `=` beside a `zensu-verify` session denies, so quote such
-  an argument. Outside single quotes every `$` counts as an expansion unless whitespace or the
-  end of the command follows it, so the zsh spellings `$=X`, `$~X`, `$^X` and `$+X` deny as well.
+  an argument. Outside single quotes a `$` counts as an expansion unless whitespace, the end of
+  the command or a closing double quote follows it, so the zsh spellings `$=X`, `$~X`, `$^X` and
+  `$+X` deny as well.
   `-s=<session>`, `--session <session>` and a literal
   `PLAYWRIGHT_CLI_SESSION=<session>` prefix are all read; a session given twice, appended with
   `+=`, or spelled in another letter case or behind a path is refused. The arguments are parsed
@@ -456,12 +472,25 @@ raised for this origin), `remembered` (the memory already held the origin) and `
 `asked` does not assert that a person said yes — it asserts that the pre hook would have asked
 and the call then succeeded.
 
-**Fault direction.** The PreToolUse hook fails closed on a marked call and never touches any
-other: a Bash call whose payload does not name both markers — and whose hook environment names
-no `zensu-verify` session — exits before `node` starts. On a POSIX host with `node`, the
-recognized `/zensu:doctor` and adoption commands exit 0 before the decision module runs, even
-when a path in them names both markers; the recognizer refuses on win32, so there such a command
-is judged like any other. For a marked payload, a missing `node`,
+**Fault direction.** While its prefilter library loads, the PreToolUse hook fails closed on a
+marked call and never touches any other: a Bash call whose payload does not name both markers —
+and whose hook environment names no `zensu-verify` session — exits before `node` starts. Both
+hooks read the markers through one sourced library, `hooks/lib/zensu-browser-consent-prefilter.sh`.
+When it cannot be sourced, each hook falls back to a test of its own: a payload that names either
+marker alone — `playwright` or `zensu-verify`, in any letter case — is treated as marked, so the
+PreToolUse hook denies it with `prefilter library unavailable` once the plugin-root check and the
+`/zensu:doctor` exemption have run, and the recorder skips it with a stderr note naming the same
+cause. That test reads the whole hook payload, not only the command, so in a project whose
+working directory names either word every Bash call is denied until the library is restored, the
+recognized `/zensu:doctor` and adoption commands excepted; a call whose payload names neither
+word still passes silently. Unlike the library, that test drops the JSON escapes `\n`, `\r` and
+`\t` without first pairing escaped backslashes, so a gated call can name neither word to it:
+`playw\right-cli -s=ze\nsu-verify-x eval 1`, which bash runs as
+`playwright-cli -s=zensu-verify-x eval 1`, passes unjudged until the library is restored, and so
+does a call that splits only `playwright-cli` that way while the hook environment's
+`PLAYWRIGHT_CLI_SESSION` names a `zensu-verify-` session. On a POSIX host with `node`, the recognized `/zensu:doctor` and adoption commands exit 0 before the decision
+module runs, even when a path in them names both markers; the recognizer refuses on win32, so
+there such a command is judged like any other. For a marked payload, a missing `node`,
 an absent or symlinked module, or a module failure denies with a stderr note, and the recorder
 skips with one. The markers are read after one `LC_ALL=C sed` pass — which first pairs every
 JSON-escaped backslash, so an escaped backslash before `n` is never read as a line break — joins
@@ -491,6 +520,12 @@ through Bash.
   hook ended in a refusal. Nothing stands in that position now: with the hooks off, the run
   config and the skill's own instructions are all that remain, and neither is a boundary.
   `/zensu:doctor` reports REGISTRATION from files on disk and cannot see whether the hooks run.
+  Before it judges a policy, its `verify-feature` row checks that both hooks, the prefilter
+  library, the decision module and the run-config helper exist, that the module is no symlink and
+  loads, that the helper loads, and that both hooks are registered on a matcher that covers
+  `Bash`; any failure reads `cannot start`, with the cause named. Its registration probe and the
+  run-config helper's follow the host's own matcher rule as read out of the Claude Code 2.1.280
+  binary, and report a matcher the host may read two ways as undetermined, never as missing.
 - **The consent memory is a file in a directory the session can write** through a Bash
   redirect, so a forged record skips the prompt for that origin; the floor bounds the damage to
   other loopback services.
@@ -501,14 +536,41 @@ through Bash.
 - **In policy mode routes are enforced on navigation commands only.** An in-page navigation to
   an undeclared route on an approved origin is not seen by any hook.
 - **The gate is textual.** A CLI or session name assembled at run time — a variable that holds
-  `playwright-cli`, an ANSI-C `$'…'` escape, a script file that makes the call, an alias, or a
-  copy or link of the binary under another name — never puts both markers in the command text,
-  so neither hook sees the call. The single-call rule narrows what can be written inline; it
-  does not make the gate a boundary.
+  `playwright-cli`, an expansion inside `playwright-cli` or inside the `zensu-verify-` prefix,
+  even one set or left empty in the same command, an ANSI-C escape inside a name, such as
+  `$'playwright\x2dcli'`, a script file that makes the call, an alias under another name, or a
+  copy or link of the binary under another name — never puts both markers in the command text, so
+  neither hook sees the call. `$'playwright-cli'`, which holds the plain name, still names the
+  CLI, so a call on a `zensu-verify` session spelled that way is judged and denied as not one
+  plain call. While the
+  hook environment's `PLAYWRIGHT_CLI_SESSION` names a `zensu-verify-` session, a call that spells
+  `playwright-cli` literally is marked whatever its session, so a session assembled at run time —
+  a variable, a substitution, an ANSI-C escape or an expansion inside the prefix — is denied as
+  not literal; only a CLI name assembled at run time stays unseen. The single-call and literal-argument rules bind only a call the
+  gate judges, so they do not narrow this and do not make the gate a boundary. A function or
+  alias named `playwright-cli` that the shell already has, such as one from a startup file, is
+  judged as the plain call its text shows, and neither hook can see what it runs.
 - **Version drift is only partly fenced.** The driver is user-supplied: the plugin ships no pin
-  and no integrity check for `playwright-cli`. The one guard is the run-config helper, which
-  writes no run config unless the installed `@playwright/cli` manifest names exactly the measured
-  version — a version the package declares, not a verified binary. A later CLI can change the
+  and no integrity check for `playwright-cli`. The one guard is the run-config helper's readiness
+  check, which its `--check-policy` preflight and its write run both perform: it refuses unless
+  both consent hooks are demonstrably registered on a matcher that covers `Bash` and the
+  `@playwright/cli` manifest of the `playwright-cli` on `PATH` names exactly the measured version
+  — a version the package declares, not a verified binary. The check runs only when the helper
+  runs: the gate judges `open` by the shape of the run config it names and never reads the
+  installed version, so a run config of that shape written another way, or a `playwright-cli`
+  installed or put ahead on `PATH` after the helper ran, runs unmeasured. The check never runs the binary, so a
+  version the binary would print about itself counts for nothing. It reads the
+  `node_modules/@playwright/cli/package.json` beside the `playwright-cli` found on `PATH` first,
+  on every platform, so a wrapper script in a directory that holds that manifest at the measured
+  version passes: the check vouches for the manifest beside the wrapper, not for what the wrapper
+  runs, nor for a function or alias named `playwright-cli` that the shell already has. Any other
+  wrapper script outside the package fails it: with no `package.json` in the
+  directory of its resolved path or the three above it, it resolves to no manifest, and the refusal adds the remedy of putting the
+  directory npm installs `playwright-cli` into first on `PATH`; when a `package.json` sits there,
+  that manifest answers instead — as another package, or as one the check cannot judge — and the
+  refusal names only the install command, though the `PATH` order still has to change. A `PATH`
+  whose empty or relative entry comes before or holds `playwright-cli` is refused too, because the
+  shell reads that entry against the working directory of each call. A later CLI can change the
   meaning of an existing flag, or rename or ignore a fence the run config relies on —
   `network.allowedOrigins`, `browser.isolated`, the `--host-resolver-rules` pins,
   `browser.contextOptions.serviceWorkers` — and every gate check still passes while that

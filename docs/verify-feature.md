@@ -22,14 +22,22 @@ npm install -g @playwright/cli@0.1.21
 ```
 
 That is the version the browser consent gate was measured against, and the run-config helper
-refuses to start a run on any other. `brew install playwright-cli` is unpinned: it installs
+refuses to write a run config for any other. The gate itself never reads the installed version,
+so a `playwright-cli` installed or put ahead on `PATH` after the helper ran goes unmeasured, and
+so does a run whose run config of the right shape was written another way. The check reads the
+version the package manifest declares, which vouches neither for what a wrapper script runs nor
+for a function or alias named `playwright-cli` that the shell already has.
+`brew install playwright-cli` is unpinned: it installs
 whichever version Homebrew ships. It uses your installed Chrome. When Chrome is missing,
 the skill asks before it runs `playwright-cli install-browser`, because that downloads a
 browser. `/zensu:doctor` reports whether `playwright-cli` is on `PATH` and which version, read
-from the installed package without running the binary — only when that read yields no version
-does it run `playwright-cli --version`, under a five-second watchdog where `timeout` or
-`gtimeout` exists and with no time limit otherwise — and warns when that version is not the one
-the browser consent gate was measured against.
+from the `@playwright/cli` package manifest the binary resolves to, and warns when that version
+is not the one the browser consent gate was measured against. A manifest that names another
+package or cannot be judged is reported as such, and the binary is not run. Only when no
+manifest exists at all does the doctor run `playwright-cli --version`, once, with stdin closed
+and a five-second bound that kills it on every host; the version it prints is reported as
+self-reported and is never taken as measured, so the run-config helper still refuses to start a
+run on it.
 
 In local mode the skill also needs a **runtime recipe** it can accept, or a repository the
 bundled Zensu monorepo adapter recognizes, or an application you already run
@@ -47,15 +55,33 @@ run's origins (`network.allowedOrigins`), blocks service workers, and keeps scre
 snapshots inside the run directory. For a remote host it also pins the hostname to the public
 address the helper resolved.
 
-The **browser consent gate** — two hooks on the `Bash` matcher — judges every `playwright-cli`
-call on a `zensu-verify` session before it runs, reaches no decision for a call on any other
-session whose command text names no `zensu-verify-` session, and denies a command that merely
-mentions both markers — a search, a commit message.
+The **browser consent gate** — two hooks on the `Bash` matcher — is a textual gate: it judges a
+`playwright-cli` call on a `zensu-verify` session before it runs only when the command text
+names the CLI and that session, or names the CLI while the hook environment's
+`PLAYWRIGHT_CLI_SESSION` names one. A CLI name assembled at run time — an expansion inside
+`playwright-cli`, even one set or left empty in the same command, an ANSI-C escape inside the
+name such as `$'playwright\x2dcli'`, a script file, an alias under another name — never reaches
+it, so that call is not judged, and the literal-spelling and one-plain-call rules below never
+apply to it; `$'playwright-cli'`, which holds the plain name, still names the CLI to it, so a
+call on a `zensu-verify` session spelled that way is judged and denied as not one plain call. A
+session name assembled at run time — a variable, a substitution, an ANSI-C escape or an
+expansion inside the `zensu-verify-` prefix — hides the call the same way, unless the hook
+environment's `PLAYWRIGHT_CLI_SESSION` names a `zensu-verify-` session: then a call that spells
+`playwright-cli` literally is judged whatever its session, and a session that is not literal is
+denied. A function or alias named
+`playwright-cli` that the shell already has, such as one from a startup file, is judged as the
+plain call its text shows, and the gate cannot see what it runs, so the denials below bind only
+what the command text spells. While its
+prefilter library loads, the gate reaches no decision for a call on any other session whose
+command text names no `zensu-verify-` session, and denies a command that merely mentions both
+markers — a search, a commit message.
 That is the accepted cost of a textual gate: search with the Grep tool and commit with a message
 file. While the hook environment's `PLAYWRIGHT_CLI_SESSION` names a `zensu-verify-` session, a
-call on any other session reaches no decision only as one plain call that names its session
-once, spells that session and every argument literally, parses, and names no `PLAYWRIGHT_MCP_*`
-or `PWTEST_*` variable; every other such command is denied. For a `zensu-verify` call:
+call on any other session reaches no decision only when the command meets every condition that
+[Browser Consent Gate](gates.md#browser-consent-gate) lists for it, and every other command that
+names the CLI, a mere mention included, is denied. A known wrapper, a package launcher, a CLI
+path or an environment assignment is refused only on a `zensu-verify` session. For a
+`zensu-verify` call:
 
 - only the commands a verification needs are admitted: opening and closing the session,
   navigation, snapshots, screenshots, console and request listings, clicks and typing, and
@@ -66,8 +92,8 @@ or `PWTEST_*` variable; every other such command is denied. For a `zensu-verify`
   exactly one plain `playwright-cli` command — no second command, pipe, subshell, substitution,
   wrapper, package launcher or nested shell, and a redirection only to a literal path, never to a
   variable, substitution, glob, brace, `~` or `=` target nor on a line of its own — so a denial
-  names the rule rather than guessing. Outside single quotes every `$` counts as an expansion
-  unless whitespace or the end of the command follows it;
+  names the rule rather than guessing. Outside single quotes a `$` counts as an expansion unless
+  whitespace, the end of the command or a closing double quote follows it;
 - every target origin passes the navigation floor of section 2 and, without a policy, the
   consent prompt below.
 
@@ -163,7 +189,12 @@ The skill runs this preflight for every route before its first browser call:
 node "${CLAUDE_PLUGIN_ROOT}/scripts/verify-browser-config.js" --check-policy <local|remote> "<origin>" "<route>" declared-safe
 ```
 
-It judges the target exactly as the gate does and starts no browser. It prints `policy` when a
+It judges the target exactly as the gate does and starts no browser. Before it judges the target
+it runs the readiness check of the run-config helper: both consent hooks must be registered on a
+matcher that covers `Bash`, the `@playwright/cli` manifest of the `playwright-cli` on the `PATH`
+of the caller must name the measured version, and no empty or relative `PATH` entry may come
+before or hold that `playwright-cli`, so a run from a terminal judges the `PATH` of that
+terminal. Section 5 lists those refusals and their fixes. It prints `policy` when a
 policy approves the target, `consent` when no policy is set and the target is a loopback origin,
 and exits `0` in both cases; a refusal prints `zensu verify browser config: <reason>` on stderr
 and exits `1`. Run it from a terminal with `${CLAUDE_PLUGIN_ROOT}` replaced by the installed
@@ -179,6 +210,7 @@ The messages you will meet:
 | `<origin><route>: route is not approved for evidence by the navigation policy` | the route is not in that origin's `routes` |
 | `route must be an absolute, normalized, query-free pathname` | the route being checked carries `?`, `#`, `*` or a dot segment, or does not start with `/` |
 | `the navigation policy in the launch environment is invalid: <rule>` | the policy breaks its contract; the rule names which part, for example `policy contains unknown or missing keys` |
+| `the browser consent gate is not ready (…)`, or a reason that says `so no run config is written` | the readiness check failed before the target was judged; section 5 names each cause and its fix |
 
 `/zensu:doctor` checks the policy's contract too and reports an invalid one as
 `verify-feature: ZENSU_VERIFY_NAVIGATION_POLICY_V1 is set but invalid (…)`; the preflight above
@@ -363,7 +395,11 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
 | PARTIAL; the `baseUrlCommand` output differs from the policy origin | the app bound another port, or the printed URL carries a path | bind the port strictly; print the bare origin |
 | PARTIAL; the recipe was rejected | one of the acceptance rules above is not met | the report names the missing fact; fix the recipe |
 | PARTIAL; `playwright-cli` not found | it is not installed or not on `PATH` | `npm install -g @playwright/cli@0.1.21` (`brew install playwright-cli` is unpinned), then run `/zensu:doctor` |
+| PARTIAL before any browser call; reason starts `the browser consent gate is not ready (consent hook: …; consent recorder: …)` | the run-config helper checks readiness in the `--check-policy` preflight and again before it writes a run config: the hook's file is missing or `hooks/hooks.json` does not register it on a matcher that covers `Bash` (`unregistered`), or the helper could not determine its registration (`unknown`) | run `/zensu:doctor`, whose `verify-feature` row names the cause, and reinstall the plugin; do not start `/zensu:verify-feature` until that row clears |
+| PARTIAL before any browser call; reason says `so no run config is written; install the measured version with …` | the `@playwright/cli` package manifest of the `playwright-cli` on `PATH` does not declare the measured version: it names another version or another package, the helper could not judge it, or there is no manifest at all. The manifest in the `node_modules/@playwright/cli` directory beside the `playwright-cli` found on `PATH` is read first, so a wrapper script in a directory that holds one naming the measured version is accepted. Any other wrapper script outside the package reads as no manifest, whose reason says the binary resolves to no such manifest — unless a `package.json` sits in the directory of its resolved path or one of the three above it, which then answers as another package or as one the helper cannot judge. A version the binary prints about itself is never accepted | run the install command the reason names; for a wrapper script, also put the directory npm installs `playwright-cli` into first on `PATH`, ahead of the wrapper — the reason says so only when the wrapper resolves to no manifest, and the `PATH` order has to change either way |
+| PARTIAL before any browser call; reason names `an empty PATH entry` or `the relative PATH entry` | an empty `PATH` entry (a leading or trailing `:`, or `::`) or a relative one such as `node_modules/.bin` comes before, or holds, the `playwright-cli` found on `PATH`; the shell reads it against each call's working directory, so a gated call could run another binary than the one measured | remove that entry from `PATH`, or move it behind the directory that holds `playwright-cli` |
 | the browser does not start because Chrome is missing | the run config uses the system Chrome channel | approve `playwright-cli install-browser` when the skill asks, or install Chrome yourself |
 | a `playwright-cli` call is denied with `Zensu browser consent gate denied the playwright-cli call: …` | the call used a command, flag, session or shape the gate does not admit | the reason names the rule; a shape denial — one that objects only to how the call is spelled — is re-issued once as one plain call with single-quoted literal arguments, and any other denial leaves the affected scenario PARTIAL rather than worked around |
+| a Bash call is denied with `Zensu browser consent gate denied the playwright-cli call:` and the reason `prefilter library unavailable`, `node unavailable`, `decision module absent or symlinked` or `decision module failed` | the consent hook cannot judge the call, because a part of the plugin is missing or broken or `node` is not on `PATH`. Without its prefilter library the hook denies every Bash call whose payload names `playwright` or `zensu-verify`, not only browser calls; in a project whose path names either word that is every Bash call except the recognized `/zensu:doctor` and adoption commands on a POSIX host with `node` | run `/zensu:doctor` and reinstall the plugin even when its `verify-feature` row reads ready: that row names a missing prefilter library and a missing, symlinked or unloadable decision module, but it tests the library for existence only, cannot see a module that loads and then fails, and looks for `node` on the `PATH` of its own shell, stopping before that row when it finds none; for `node unavailable`, put `node` on the `PATH` of the environment that launches Claude Code |
 | PARTIAL; the scenario left the approved origins | the application redirected the browser to an origin outside the run config | fix the redirect, or add that origin to the run when it is part of the feature (in policy mode, to the policy too) |
 | after updating the plugin, a `permissions` rule for the browser no longer applies | the plugin no longer ships a Playwright MCP server, so rules for `mcp__plugin_zensu_playwright__…` or `mcp__plugin_zensu_zensu-browser__…` match nothing | delete an `allow` rule written for them, which grants nothing now; re-spell a `deny` or `ask` rule for the Bash command, for example `Bash(playwright-cli:*)`, because until then it restricts nothing; the Browser Consent Gate section of [gates.md](gates.md) explains the change |
