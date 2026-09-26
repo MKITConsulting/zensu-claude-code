@@ -1,5 +1,8 @@
 {
   "logging": {
     "timestampStyle": "none"
+  },
+  "evidence": {
+    "fullSuiteGate": "advisory"
   }
 }

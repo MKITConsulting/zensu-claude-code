@@ -33,7 +33,7 @@ The spawn prompt must contain one main-thread-produced block named `REVIEW PACKE
 - `implementation_summary`: what changed and why
 - `requirements_baseline`: stable acceptance/requirement IDs, or `none`
 - `diff_summary`: a main-thread summary of the changed hunks
-- `test_evidence`: exact Phase 6 commands, exit codes, pass/fail counts, and witness verdicts
+- `test_evidence`: the evidence runner's summary line for each Phase 6 run (scope, exit code, duration, tree, record, command) plus the scoped checkpoint lines
 - `build_evidence`: command/status, or an explicit not-applicable/ambient-skip reason
 - `coverage_evidence`: changed-file coverage, or an explicit skip reason
 - `edit_landing_evidence`: the Phase 6 step 5b close marker plus any `EDIT NOT LANDED` line — a step can claim a file it never changed, and this is the only field that shows it

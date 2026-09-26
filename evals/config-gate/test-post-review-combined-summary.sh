@@ -172,21 +172,18 @@ SKILL_LEGEND="$(LEGEND_RE="$LEGEND_RE" node -e 'const fs=require("fs");const c=f
 # hook repeats `EDIT NOT LANDED` in its fix-round MSG, and the skill repeats
 # every evidence literal in its Phase-4 prose), so an unscoped check cannot
 # fail for the reason stated above.
-# The two carriers legitimately carry DIFFERENT literal sets: the delegate
-# renderer has a `Mtime audit` row where the self-review renderer has
-# `Evidence cross-check`, so the evidence literals live only in the latter.
 HOOK_CTX="$(printf '%s' "$OUT" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{process.stdout.write(JSON.parse(s).hookSpecificOutput.additionalContext);})')"
 HOOK_SCHEMA="$(printf '%s' "$HOOK_CTX" | awk '/^## What I built/{f=1} /^## TL;DR/{f=0} f{print}')"
 SKILL_SCHEMA="$(awk '/^### Final report/{f=1} f&&/^```/{c++; if(c>=2) exit} f&&c>=1{print}' "$SKILL_MD_PARITY")"
 [ -n "$HOOK_SCHEMA" ] && check "literal control: the hook summary schema is extractable" PASS || check "literal control: the hook summary schema is extractable" FAIL
 [ -n "$SKILL_SCHEMA" ] && check "literal control: the self-review Final report is extractable" PASS || check "literal control: the self-review Final report is extractable" FAIL
-for lit in 'EDIT NOT LANDED' 'UNVERIFIED (no claims logged)' 'PENDING PREDICATE' 'FINDING VERIFICATION DEGRADED' 'UNREADABLE — ' 'PASS — 0 findings, nothing to fix'; do
+for lit in 'EDIT NOT LANDED' 'UNVERIFIED (no claims logged)' 'PENDING PREDICATE' 'FULL SUITE — ' 'FINDING VERIFICATION DEGRADED' 'UNREADABLE — ' 'PASS — 0 findings, nothing to fix'; do
   case "$HOOK_SCHEMA" in
     *"$lit"*) check "verbatim literal survives in the hook summary schema: $lit" PASS ;;
     *)        check "verbatim literal survives in the hook summary schema: $lit" FAIL ;;
   esac
 done
-for lit in 'EDIT NOT LANDED' 'UNVERIFIED (no claims logged)' 'PENDING PREDICATE' 'EVIDENCE GAP' 'EVIDENCE CONTRADICTION' 'EVIDENCE CROSS-CHECK UNAVAILABLE' 'FINDING VERIFICATION DEGRADED' 'UNREADABLE — '; do
+for lit in 'EDIT NOT LANDED' 'UNVERIFIED (no claims logged)' 'PENDING PREDICATE' 'FULL SUITE — ' 'FINDING VERIFICATION DEGRADED' 'UNREADABLE — '; do
   case "$SKILL_SCHEMA" in
     *"$lit"*) check "verbatim literal survives in the self-review Final report: $lit" PASS ;;
     *)        check "verbatim literal survives in the self-review Final report: $lit" FAIL ;;

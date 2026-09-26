@@ -2,13 +2,12 @@
 # Funktionsnachweis (hermetic smoke test) for the 0.4.0 main-thread TDD migration.
 #
 # Pure bash, no live `claude`, no API key. CRUCIALLY it NEVER sets
-# CLAUDE_AGENT_TYPE — proving that the phase-gate, witness, and Stop-hook all
+# CLAUDE_AGENT_TYPE — proving that the phase-gate and the Stop-hook both
 # activate on the per-session chain-state `active` flag in the MAIN thread, not
 # on the retired CLAUDE_AGENT_TYPE=zensu:tdd-manager subagent scoping.
 #
 # Asserts the whole new state machine end-to-end:
 #   1. gate activation via chain-state
-#   2. witness activation via chain-state
 #   3. Stop-hook block/allow matrix
 #   4. post-review in-thread routing + max-round chainDone
 #   5. hooks.json + plan-approved wiring
@@ -17,7 +16,6 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 GATE="$PLUGIN_DIR/hooks/pre-edit-tdd-reminder.sh"
-WITNESS="$PLUGIN_DIR/hooks/post-bash-witness.sh"
 STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
 POSTREV="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 PLANHOOK="$PLUGIN_DIR/hooks/plan-approved-delegate.sh"
@@ -39,7 +37,7 @@ PROJ="$(mktemp -d)"; export CLAUDE_PROJECT_DIR="$PROJ"
 export ZENSU_CONFIG="$STATE_DIR/strict-config.json"   # tddImplementation:true (strict gate) + all other defaults
 printf '%s' '{"hooks":{"tddImplementation":true}}' > "$ZENSU_CONFIG"
 unset CLAUDE_AGENT_TYPE 2>/dev/null || true   # the whole point: no subagent scoping
-unset ZENSU_TDD_GATE ZENSU_TEST_WITNESS ZENSU_CHAIN 2>/dev/null || true
+unset ZENSU_TDD_GATE ZENSU_CHAIN 2>/dev/null || true
 cleanup() { rm -rf "$STATE_DIR" "$PROJ"; }
 trap cleanup EXIT
 # shellcheck disable=SC1090
@@ -117,16 +115,6 @@ bash "$LOG" --phase RED_FAIL --step S1 --session "$SID" >/dev/null
 
 bash "$LOG" --phase IMPL --step S1 --session "$SID" >/dev/null
 [ "$(gate_decision "$P_PROD")" = "allow" ] && check "1e IMPL (after RED_FAIL for step) + prod edit -> allow" PASS || check "1e IMPL prod -> allow" FAIL
-
-echo "== 2. Witness activation via chain-state =="
-echo '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"npm test"},"tool_response":{"exit_code":0,"stdout":"ok"},"session_id":"'"$SID"'"}' | bash "$WITNESS"
-WLOG="$PROJ/.zensu/logs/witness-${SID_KEY}.log"
-{ [ -f "$WLOG" ] && grep -qF 'cmd="npm test"' "$WLOG"; } && check "2a active session records witness line" PASS || check "2a active witness line" FAIL
-
-SID_INACTIVE="smoke-inactive"
-start_session "$SID_INACTIVE"
-echo '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"echo hi"},"tool_response":{"exit_code":0,"stdout":"hi"},"session_id":"'"$SID_INACTIVE"'"}' | bash "$WITNESS"
-[ ! -f "$PROJ/.zensu/logs/witness-$(session_key "$SID_INACTIVE").log" ] && check "2b inactive session writes NO witness" PASS || check "2b inactive witness skipped" FAIL
 
 echo "== 3. Stop-hook block/allow matrix =="
 SID_S="smoke-stop"; export SF_BACKUP="$SF"; start_session "$SID_S"; SF="$(tdd_state_file "$SID_S")"

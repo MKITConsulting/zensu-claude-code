@@ -47,5 +47,5 @@ Authoring rules — this file is written to be COMMITTED. Consuming repos keep
 **Checkpoint**: `{scoped_test_cmd}` over this phase's changed files and the suites that import or invoke them + `{lint_cmd}` pass (the full suite runs in the Phase 6 audit, not here — unless the Phase 5 fallback fires)
 
 ## Final Verification
-- All test suites pass
+- All test suites pass, and the full suite is recorded green on the final tree by the evidence runner (`--evidence-run --scope full`)
 - Coverage report generated for changed files (threshold: {threshold})

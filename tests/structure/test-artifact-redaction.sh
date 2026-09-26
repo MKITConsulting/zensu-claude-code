@@ -19,25 +19,11 @@ set -u
 # artifact instead of redacting it. And a refusal is satisfied by a writer that
 # never wrote for an unrelated reason, so every guard check asserts the exit
 # status AND that the on-disk shape the guard protects still holds.
-#
-# R8 is the regression the whole design exists to avoid: the narrative log's
-# cmd="..." claims are matched BY EQUALITY against the witness log by
-# hooks/lib/zensu-evidence-crosscheck.js, so redacting one side only — or
-# redacting them differently — would turn every Phase-6 claim into an
-# EVIDENCE GAP and wedge the workflow.
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG_HELPER="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 REDACT="$PLUGIN_DIR/hooks/lib/zensu-artifact-redact-v1.js"
 ARTIFACT_HOOK="$PLUGIN_DIR/hooks/post-artifact-redact.sh"
-WITNESS_HOOK="$PLUGIN_DIR/hooks/post-bash-witness.sh"
-# The ATTEMPT half of the witness, and the extraction both halves share. The
-# redaction lives in the library exactly once: two copies could diverge, and the
-# cross-check matches an attempt line against a completed line and against a
-# claim by EQUALITY, so a divergence there is silent evidence loss.
-WITNESS_PRE_HOOK="$PLUGIN_DIR/hooks/pre-bash-witness.sh"
-WITNESS_LIB="$PLUGIN_DIR/hooks/lib/zensu-witness.sh"
-CROSSCHECK="$PLUGIN_DIR/hooks/lib/zensu-evidence-crosscheck.js"
 SESSION_CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 
@@ -213,46 +199,6 @@ sweep_payload 'printf "%s\n" "x" >> "$LOG"' \
   | env HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$ARTIFACT_HOOK" >/dev/null 2>&1
 assert_clean "hand-rolled \`printf >>\` log" "$RAW_LOG" R7 R7b R7c
 assert_survived "the hand-rolled log line" "$RAW_LOG" 'RAW ' R7d
-
-# ── R8: witness / narrative-claim equality survives redaction ────────
-XLOG="$PROJ/.zensu/logs/2026-01-01-0002_tdd-cross.log"
-XCMD="cd \"$PROJ\" && npm test"
-printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":%s},"tool_response":{"stdout":%s,"interrupted":false},"session_id":%s}' \
-  "$(json_str "$XCMD")" "$(json_str "ok from $PROJ/run")" "$(json_str "$SESSION")" \
-  | env HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" STATE_DIR="$PROJ/.zensu/state" bash "$WITNESS_HOOK" >/dev/null 2>&1
-WITNESS="$PROJ/.zensu/logs/witness-$(session_key "$SESSION").log"
-HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$LOG_HELPER" append \
-  --log "$XLOG" \
-  --message "AUDIT — cmd=\"$XCMD\" exit=0 result=\"PASS\"" >/dev/null 2>&1
-if [ -f "$WITNESS" ] && [ -f "$XLOG" ] \
-  && node "$CROSSCHECK" --log "$XLOG" --witness "$WITNESS" >/dev/null 2>&1; then
-  check "R8 redacted witness still corroborates the redacted AUDIT claim" PASS
-else
-  check "R8 redacted witness still corroborates the redacted AUDIT claim" FAIL
-fi
-
-# Discrimination: the crosscheck must still REJECT a claim nothing recorded.
-BADLOG="$PROJ/.zensu/logs/2026-01-01-0003_tdd-bad.log"
-HOME="$FAKE_HOME" bash "$LOG_HELPER" append \
-  --log "$BADLOG" \
-  --message "AUDIT — cmd=\"npm run never-executed\" exit=0 result=\"PASS\"" >/dev/null 2>&1
-if [ -f "$BADLOG" ] \
-  && ! node "$CROSSCHECK" --log "$BADLOG" --witness "$WITNESS" >/dev/null 2>&1; then
-  check "R8a crosscheck still fails an uncorroborated claim (R8 is not vacuous)" PASS
-else
-  check "R8a crosscheck still fails an uncorroborated claim (R8 is not vacuous)" FAIL
-fi
-
-# The witness `cmd` IS redacted (equality needs it) but the `tail` is NOT.
-# Nothing compares the tail; the only reader is the crosscheck's failure-marker
-# scan, and redaction there is purely subtractive — a `failed` token inside an
-# absolute path would vanish and a contradiction would downgrade to `verified`.
-if [ -f "$WITNESS" ] && grep -qF 'cmd="cd \"<project>\" && npm test"' "$WITNESS" \
-  && grep -qF "tail=\"ok from $PROJ/run\"" "$WITNESS"; then
-  check "R8b witness cmd is redacted while tail is left intact" PASS
-else
-  check "R8b witness cmd is redacted while tail is left intact" FAIL
-fi
 
 # ── R9: idempotence, and the no-op writes nothing at all ─────────────
 if [ -f "$REDACT" ] && [ -f "$LOGF" ]; then
@@ -567,22 +513,6 @@ if ln -s "$ESCAPE_DIR" "$LINKED_PROJ/.zensu/logs" 2>/dev/null && [ -L "$LINKED_P
   fi
 else
   skip "R18 symlinked artifact directory (host did not create a real symlink)"
-fi
-
-# ── R19: the witness prefix the sweep excludes is the one it writes ──
-WITNESS_PREFIX_MOD="$(node -e '
-  process.stdout.write(require(process.argv[1]).WITNESS_PREFIX);' "$REDACT" 2>/dev/null)"
-# BOTH writers spell the log path, so both are checked: an attempt line landing
-# in a different file than the completed line would make every claim over a
-# failing command read as a gap again, which is the defect the second writer
-# exists to remove.
-R19_SPELLING="WITNESS_LOG=\"\$WITNESS_DIR/${WITNESS_PREFIX_MOD}\${SANITIZED_SESSION}.log\""
-if [ -n "$WITNESS_PREFIX_MOD" ] \
-  && grep -qF "$R19_SPELLING" "$WITNESS_HOOK" \
-  && grep -qF "$R19_SPELLING" "$WITNESS_PRE_HOOK"; then
-  check "R19 the module's WITNESS_PREFIX matches BOTH witness writers' own spelling" PASS
-else
-  check "R19 the module's WITNESS_PREFIX matches BOTH witness writers' own spelling (got: $WITNESS_PREFIX_MOD)" FAIL
 fi
 
 # ── R20: the hook consumes the module's layout, never its own copy ───
@@ -1170,23 +1100,6 @@ else
   check "R51 the sweep unions CLAUDE_PROJECT_DIR into projectRoot and leaves expectedRoot the record root (union=$R51_UNION bound=$R51_BOUND)" FAIL
 fi
 
-SWEPT_LOG="$PROJ/.zensu/logs/2026-01-01-0051_tdd-swept.log"
-SWEPT_CMD="cd \"$PROJ\" && npm run build"
-printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":%s},"tool_response":{"stdout":%s,"interrupted":false},"session_id":%s}' \
-  "$(json_str "$SWEPT_CMD")" "$(json_str "built in $PROJ")" "$(json_str "$SESSION")" \
-  | env HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" STATE_DIR="$PROJ/.zensu/state" bash "$WITNESS_HOOK" >/dev/null 2>&1
-HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$LOG_HELPER" append \
-  --log "$SWEPT_LOG" \
-  --message "AUDIT — cmd=\"$SWEPT_CMD\" exit=0 result=\"PASS\"" >/dev/null 2>&1
-sweep_payload 'printf "%s\n" "x" >> "$LOG"' \
-  | env HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$ARTIFACT_HOOK" >/dev/null 2>&1
-if [ -f "$SWEPT_LOG" ] && [ -f "$WITNESS" ] \
-  && node "$CROSSCHECK" --log "$SWEPT_LOG" --witness "$WITNESS" >/dev/null 2>&1; then
-  check "R51a a sweep between the append and the crosscheck keeps the claim corroborated" PASS
-else
-  check "R51a a sweep between the append and the crosscheck keeps the claim corroborated" FAIL
-fi
-
 # ── R52: the scanner guard acts on its own predicate ─────────────────
 # The guard warned "the line will be written unscanned" for a scanner that is
 # missing OR a symlink, and then did nothing: a symlinked-but-valid scanner was
@@ -1413,38 +1326,6 @@ if [ "$OUT31" = "true:false" ]; then
   check "R31 a relative artifact path resolves against the base, not the process cwd" PASS
 else
   check "R31 a relative artifact path resolves against the base (got: $OUT31)" FAIL
-fi
-
-# ── R32: a throwing redact degrades to identity, never a lost entry ──
-# The shared extractor installs its fallback around the CALL, not just the module
-# load: a
-# throw from redact would otherwise reach the outer handler, which emits an empty
-# session field and drops the whole witness ENTRY — fail-CLOSED, the opposite of
-# what the hook promises. The closure is extracted from the library and evaluated
-# against a throwing stub, so the pin is the real expression rather than a
-# paraphrase of it.
-R32_CLOSURE="$(grep -F 'redact = (v) => { try { return mod.redact(v, opts); } catch (_) { return v; } };' "$WITNESS_LIB")"
-if [ -n "$R32_CLOSURE" ]; then
-  OUT32="$(node -e '
-    const mod = { redact() { throw new Error("boom"); } };
-    const opts = {};
-    let redact;
-    eval(process.argv[1].trim());
-    process.stdout.write(redact("cd /Users/x && npm test"));
-  ' "$R32_CLOSURE" 2>/dev/null)"
-  # Binding the closure to its CALL SITE is the other half: without it the
-  # wrapper can be bypassed (`mod.redact(...)` called directly) with the extracted
-  # literal still intact and this check still green.
-  R32_CALLS="$(grep -cF 'mod.redact(' "$WITNESS_LIB")"
-  if [ "$OUT32" = "cd /Users/x && npm test" ] \
-    && grep -qF 'redact(j.tool_input.command)' "$WITNESS_LIB" \
-    && [ "$R32_CALLS" -eq 1 ]; then
-    check "R32 a throwing redact degrades to identity, and the wrapper is the only caller" PASS
-  else
-    check "R32 a throwing redact degrades to identity (out=$OUT32 mod.redact calls=$R32_CALLS)" FAIL
-  fi
-else
-  check "R32 the witness hook wraps the redact CALL, not only the module load" FAIL
 fi
 
 # ── R33: the reason sets are a real partition, and dev/ino is enforced ─
@@ -1780,13 +1661,6 @@ claim_absent() {
     check "$label (found $hits)" FAIL
   fi
 }
-
-claim_absent "R56 the witness result writer no longer claims the witness is never committed" \
-  "$WITNESS_HOOK" "never committed"
-claim_absent "R56a the witness attempt writer no longer claims the witness is never committed" \
-  "$WITNESS_PRE_HOOK" "never committed"
-claim_absent "R56b the shared witness extractor no longer claims the witness is never committed" \
-  "$WITNESS_LIB" "never committed"
 
 claim_absent "R57a docs/configuration.md no longer spells the sweep exclusion as a .log-only glob" \
   "$PLUGIN_DIR/docs/configuration.md" "witness-\\*\\.log\` is excluded"
