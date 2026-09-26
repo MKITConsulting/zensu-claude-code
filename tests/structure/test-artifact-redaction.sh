@@ -242,9 +242,7 @@ fi
 
 # Both bounds, in one place. Without the RIGHT bound `/homework` becomes
 # `<home>work`; without the LEFT bound the rule fires inside `src/home/x`; and
-# a segment class admitting `"` eats the closing quote of a cmd="…" field, which
-# desynchronizes the claim from the witness and produces the exact EVIDENCE GAP
-# R8 exists to prevent.
+# a segment class admitting `"` eats the closing quote of a cmd="…" field.
 OUT11B="$(env HOME="$FAKE_HOME" node -e '
   const m = require(process.argv[1]);
   const o = { projectRoot: process.argv[2], home: process.argv[3] };
@@ -477,10 +475,8 @@ else
 fi
 
 # ── R17: the sweep's narrowings and its project binding ──────────────
-FRESH_WITNESS="$PROJ/.zensu/logs/witness-sweep-probe.log"
 OLD_LOG="$PROJ/.zensu/logs/2026-01-01-0009_tdd-old.log"
 FOREIGN_LOG="$OTHER_PROJ/.zensu/logs/2026-01-01-0010_tdd-foreign.log"
-printf 'WITNESS %s\n' "$FOREIGN_USER" > "$FRESH_WITNESS"
 printf 'OLD %s\n' "$FOREIGN_USER" > "$OLD_LOG"
 printf 'FOREIGN %s\n' "$FOREIGN_USER" > "$FOREIGN_LOG"
 node -e '
@@ -493,26 +489,12 @@ printf 'CONTROL %s\n' "$LEAK_TEXT" > "$SWEEP_CONTROL"
 ERR17="$(sweep_payload 'echo sweep' \
   | env HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$ARTIFACT_HOOK" 2>&1 >/dev/null)"
 # Positive control: without it, any failure that stops the hook before the sweep
-# satisfies all three negatives below.
+# satisfies both negatives below.
 if [ -f "$SWEEP_CONTROL" ] && ! grep -qF "$FOREIGN_USER" "$SWEEP_CONTROL" \
   && grep -qF 'CONTROL' "$SWEEP_CONTROL"; then
   check "R17ctl the same sweep invocation DID redact an in-window artifact" PASS
 else
   check "R17ctl the same sweep invocation DID redact an in-window artifact" FAIL
-fi
-# BOTH arms are required, and the content arm alone proves nothing about the
-# ENUMERATION. `redactFile` refuses any `witness-` basename before it opens
-# anything and answers `witness-artifact`, so the file is unmodified whether or
-# not `sweepTargets` skipped it — deleting the enumeration guard left this check
-# green while every tool call printed an UNREDACTED line for the largest file in
-# the directory. `witness-artifact` is in none of the hook's three reason sets,
-# so a swept witness surfaces on stderr; the stderr arm is what makes this
-# sensitive to the guard it names. R55 is the same pair for the plans bucket.
-if grep -qF "$FOREIGN_USER" "$FRESH_WITNESS" \
-  && ! printf '%s' "$ERR17" | grep -qF 'witness-sweep-probe.log'; then
-  check "R17 the sweep skips witness-*.log, and does not report it as a fault" PASS
-else
-  check "R17 the sweep skips witness-*.log, and does not report it as a fault (err=[$ERR17])" FAIL
 fi
 if grep -qF "$FOREIGN_USER" "$OLD_LOG"; then
   check "R17a the sweep skips an artifact older than the window" PASS
@@ -684,7 +666,7 @@ else
   check "R25 the array projectRoot substitutes every candidate root (got: $OUT25)" FAIL
 fi
 
-# ── R27: the log verb cannot reach a plan or the witness ─────────────
+# ── R27: the log verb cannot reach a plan ────────────────────────────
 PLAN_TARGET="$PROJ/.zensu/plans/2026-01-01-0018_tdd-victim.md"
 printf '# VICTIM PLAN\n' > "$PLAN_TARGET"
 R27_ERR="$(HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$LOG_HELPER" append --truncate \
@@ -698,38 +680,13 @@ else
   check "R27 append refuses a plans/ destination (rc=$RC)" FAIL
 fi
 
-WITNESS_TARGET="$PROJ/.zensu/logs/witness-victim.log"
-printf 'WITNESS EVIDENCE\n' > "$WITNESS_TARGET"
-R27A_ERR="$(HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$LOG_HELPER" append --truncate \
-  --log "$WITNESS_TARGET" --message "pwned-witness" 2>&1 >/dev/null)"
-RC=$?
-if [ "$RC" -eq 2 ] && grep -qF 'WITNESS EVIDENCE' "$WITNESS_TARGET" \
-  && printf '%s' "$R27A_ERR" | grep -qF '(witness-artifact)'; then
-  check "R27a append refuses a witness-*.log destination" PASS
-else
-  check "R27a append refuses a witness-*.log destination (rc=$RC err=$R27A_ERR)" FAIL
-fi
-# The same refusal must hold for a spelling the filesystem folds to the same
-# inode: a case-sensitive test would fail OPEN on APFS or NTFS.
-WITNESS_UPPER="$PROJ/.zensu/logs/WITNESS-victim.log"
-R27B_ERR="$(HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$LOG_HELPER" append --truncate \
-  --log "$WITNESS_UPPER" --message "pwned-witness-upper" 2>&1 >/dev/null)"
-RC=$?
-if [ "$RC" -eq 2 ] && printf '%s' "$R27B_ERR" | grep -qF '(witness-artifact)' \
-  && grep -qF 'WITNESS EVIDENCE' "$WITNESS_TARGET"; then
-  check "R27b the witness refusal is case-insensitive (WITNESS- is refused too)" PASS
-else
-  check "R27b the witness refusal is case-insensitive (rc=$RC err=$R27B_ERR)" FAIL
-fi
-rm -f "$WITNESS_TARGET" "$WITNESS_UPPER"
-
 # ── R28: the SHIPPED recipe works with no CLAUDE_PROJECT_DIR ─────────
 # skills/tdd/SKILL.md Phase 2 renders `{log_file}` from `${CLAUDE_PROJECT_DIR:-.}`
 # and runs `append --truncate` as the first write of every run. That variable is
 # absent from the model's Bash environment on this host, so a `--truncate` gated
 # on it would break every run — an earlier revision did exactly that. The
-# destructive mode is constrained by the module (logs bucket, never a witness
-# name, canonicalized directory, descriptor-judged) rather than by an ambient
+# destructive mode is constrained by the module (logs bucket, canonicalized
+# directory, descriptor-judged) rather than by an ambient
 # variable the caller sets anyway.
 UNBOUND_DIR="$WORK/shipped/.zensu/logs"
 mkdir -p "$UNBOUND_DIR"
@@ -1098,23 +1055,16 @@ else
   check "R50 an unbindable session reports the disabled redactor on stderr (unbound=[$ERR50] bound=[$ERR50B])" FAIL
 fi
 
-# ── R51: the sweep redacts with the same root set the writers use ────
-# `append` and the witness hook each pass [own authority, CLAUDE_PROJECT_DIR];
-# the sweep passed the record root alone. A third redactor with a DIFFERENT root
-# set can rewrite a narrative claim in a way the witness entry was not, and the
-# crosscheck matches those two by equality — so the divergence mints an EVIDENCE
-# GAP that no later sweep can repair, because both files are already written.
-# The union is the fix: redactFile adds the artifact-derived root itself, so
+# ── R51: the sweep redacts with the same root set `append` uses ─────
+# `append` passes [own authority, CLAUDE_PROJECT_DIR]; the sweep passed the
+# record root alone. redactFile adds the artifact-derived root itself, so
 # passing CLAUDE_PROJECT_DIR alongside the record root makes the sweep apply the
-# union of both writers' sets rather than a set of its own.
+# same set as `append` rather than a set of its own.
 #
-# Two halves. The structural half pins the root set at the one place it is
-# spelled, because a behavioral arm can only observe the divergence on a host
-# where the two authorities disagree — which the fixture deliberately does not
-# arrange. The behavioral half runs the sweep BETWEEN the append and the
-# crosscheck, which is the interleaving nothing exercised: R8 checks the two
-# writers against each other with no sweep in between.
-# The structural half pins the two COMPOSED expressions, not the token. A bare
+# The check pins the root set at the one place it is spelled, because a
+# behavioral arm can only observe a divergence on a host where the two
+# authorities disagree — which the fixture deliberately does not arrange.
+# It pins the two COMPOSED expressions, not the token. A bare
 # `grep -qF 'CLAUDE_PROJECT_DIR'` over the whole program was green for any
 # placement of the variable — including moving it into `expectedRoot`, which is
 # the one edit the hook's own comment forbids, because that widens the
@@ -1239,83 +1189,6 @@ if [ -n "$RECIPE_RAW" ] && printf '%s' "$RECIPE_CMD" | grep -qF 'zensu-log.sh' \
 else
   check "R54 the shipped Phase 2 recipe could be extracted from skills/tdd/SKILL.md" FAIL
 fi
-
-# ── R55: the sweep never enumerates a witness name in EITHER bucket ──
-# The exclusion was scoped `bucket === 'logs'`, while `redactFile` refuses any
-# `witness-` basename in either bucket and answers `witness-artifact`. That reason
-# is in none of the three exported sets, and the hook's named-path carve-out does
-# not apply to a swept path — so a `witness-*.md` under `.zensu/plans/` made every
-# main-thread tool call print "artifact left UNREDACTED (sweep)" for a file the
-# design deliberately and correctly refuses, for the whole sweep window. An
-# implicit residual class reporting a routine outcome as the worst one is exactly
-# what the three-set partition exists to prevent.
-#
-# The file is hand-placed on purpose: `{ts}_tdd-{slug}.md` cannot produce that
-# name, so this is reachable without being routine. The second assertion is the
-# discrimination partner — the file must still be REFUSED (left unredacted on
-# disk), or a sweep that simply redacted it would satisfy the first arm while
-# destroying the one file the crosscheck cannot survive losing.
-WITNESS_PLAN="$PROJ/.zensu/plans/witness-probe-r55.md"
-printf 'PLANTED %s\n' "$FOREIGN_USER" > "$WITNESS_PLAN"
-ERR55="$(sweep_payload 'printf "%s\n" "x" >> "$LOG"' \
-  | env HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$ARTIFACT_HOOK" 2>&1 >/dev/null)"
-# R55 IS INVERTED FROM WHAT ROUND 5 PINNED, deliberately, and the old assertion
-# is why this needed a seventh round to find. Round 5 saw the hook print
-# `artifact left UNREDACTED (sweep)` for a plans-bucket `witness-` name and
-# silenced it by dropping the name from the ENUMERATION. That removed the
-# report and kept the leak: `redactFile` still refused the file, so the planted
-# developer path stayed on disk — and R55's second arm asserted exactly that,
-# turning a leak into a pinned expectation. The refusal's own stated reason is
-# logs-only (the witness `tail` must stay raw or a `failed` token inside an
-# absolute path vanishes and an EVIDENCE CONTRADICTION downgrades to
-# `verified`); a `.zensu/plans/witness-*.md` has no `tail` and no crosscheck
-# relationship, and the `.gitignore` fragment this feature ships for consumers
-# covers `.zensu/logs/witness-*.log` only. So it was unredacted, unscanned,
-# unreported and un-ignored at once. The refusal is now scoped to the `logs`
-# bucket and the enumeration skip with it, which makes such a file an ordinary
-# plan: swept, redacted, and silent because nothing was wrong.
-if ! printf '%s' "$ERR55" | grep -qF 'witness-probe-r55.md' \
-  && ! grep -qF "$FOREIGN_USER" "$WITNESS_PLAN" \
-  && grep -qF 'PLANTED' "$WITNESS_PLAN"; then
-  check "R55 a witness name in the plans bucket is redacted like any plan, and reported as no fault" PASS
-else
-  check "R55 a witness name in the plans bucket is redacted like any plan (err=[$ERR55])" FAIL
-fi
-
-# R62 is the same property through the FUNCTION rather than the sweep, because
-# the two routes refuse independently and the sweep half alone would not catch a
-# regression in `redactFile`. It also pins the other side: a logs-bucket witness
-# is still refused, which is the case the raw-`tail` argument actually covers.
-R62_OUT="$(REDACT="$REDACT" node -e '
-  const fs = require("fs");
-  const os = require("os");
-  const path = require("path");
-  const m = require(process.env.REDACT);
-  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "r62-"));
-  fs.mkdirSync(path.join(root, ".zensu", "plans"), { recursive: true });
-  fs.mkdirSync(path.join(root, ".zensu", "logs"), { recursive: true });
-  const leak = "/Users/r62probe/checkout";
-  const plan = path.join(root, ".zensu", "plans", "witness-probe-r62.md");
-  const log = path.join(root, ".zensu", "logs", "witness-probe-r62.log");
-  fs.writeFileSync(plan, "PLANNED " + leak + "\n");
-  fs.writeFileSync(log, "WITNESSED " + leak + "\n");
-  const planVerdict = m.redactFile(plan, { projectRoot: root, home: "/nohome-r62" });
-  const logVerdict = m.redactFile(log, { projectRoot: root, home: "/nohome-r62" });
-  const planLeaks = fs.readFileSync(plan, "utf8").includes(leak);
-  const logRaw = fs.readFileSync(log, "utf8").includes(leak);
-  fs.rmSync(root, { recursive: true, force: true });
-  process.stdout.write(
-    (!planLeaks && planVerdict.reason !== "witness-artifact"
-      && logRaw && logVerdict.reason === "witness-artifact") ? "OK"
-    : "plan=" + JSON.stringify(planVerdict) + " planLeaks=" + planLeaks
-      + " log=" + JSON.stringify(logVerdict) + " logRaw=" + logRaw);
-' 2>&1)"
-if [ "$R62_OUT" = "OK" ]; then
-  check "R62 redactFile refuses a witness name in the logs bucket only, and redacts one in plans" PASS
-else
-  check "R62 redactFile refuses a witness name in the logs bucket only, and redacts one in plans ($R62_OUT)" FAIL
-fi
-rm -f "$WITNESS_PLAN"
 
 # ── R29: the module refuses a shape it used to accept silently ───────
 OUT29="$(node -e '
@@ -1453,23 +1326,6 @@ else
 fi
 rm -f "$ODD_EXT"
 
-# ── R35: redactFile refuses a witness artifact too ────────────────────
-# The exclusion is not a sweep-only property: the targeted Edit/Write branch
-# reaches redactFile with a caller-supplied path, and the witness `tail` must
-# stay raw or a failure token inside an absolute path is swallowed and an
-# EVIDENCE CONTRADICTION downgrades to `verified`.
-WITNESS_RF="$PROJ/.zensu/logs/witness-redactfile.log"
-printf 'WITNESS RF %s\n' "$FOREIGN_USER" > "$WITNESS_RF"
-R35_ERR="$(env HOME="$FAKE_HOME" node "$REDACT" --file "$WITNESS_RF" --project "$PROJ" 2>&1 >/dev/null)"
-RC=$?
-if [ "$RC" -eq 2 ] && printf '%s' "$R35_ERR" | grep -qF '(witness-artifact)' \
-  && grep -qF "$FOREIGN_USER" "$WITNESS_RF"; then
-  check "R35 redactFile refuses a witness artifact, not only the sweep" PASS
-else
-  check "R35 redactFile refuses a witness artifact (rc=$RC err=$R35_ERR)" FAIL
-fi
-rm -f "$WITNESS_RF"
-
 # ── R34: a FIFO at an artifact path is refused, never hung on ─────────
 FIFO="$PROJ/.zensu/logs/2026-01-01-0023_tdd-fifo.log"
 if mkfifo "$FIFO" 2>/dev/null; then
@@ -1567,8 +1423,7 @@ rm -f "$SECRET_LOG"
 # Rules 1-2 emit `<project>` and `~`, whose last characters (`>`, `~`) are not in
 # the LEFT class, so rule 3 used to fire immediately after them and collapse an
 # ordinary in-project `home/` directory into `<project><home>`. That is a loss of
-# audit fidelity, not a redaction gap — both writers mangled it identically, so the
-# witness/claim equality survived and nothing else could see it.
+# audit fidelity, not a redaction gap.
 #
 # `Users` is the case that matters most and is easiest to leave out: it is the ONE
 # spelling where the placeholder lookbehind meets the rule-3 alternative that
@@ -1690,11 +1545,6 @@ claim_absent() {
     check "$label (found $hits)" FAIL
   fi
 }
-
-claim_absent "R57a docs/configuration.md no longer spells the sweep exclusion as a .log-only glob" \
-  "$PLUGIN_DIR/docs/configuration.md" "witness-\\*\\.log\` is excluded"
-claim_absent "R57b the CHANGELOG no longer spells the sweep exclusion as a .log-only glob" \
-  "$PLUGIN_DIR/CHANGELOG.md" "witness-\\*\\.log\` is excluded"
 
 claim_absent "R58a the module header no longer claims dev/ino catches an intermediate-directory swap" \
   "$REDACT" "dev/ino comparison catches an intermediate-directory swap"

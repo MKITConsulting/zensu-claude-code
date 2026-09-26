@@ -2348,7 +2348,7 @@ case "$cmd" in
     # `${CLAUDE_PROJECT_DIR:-.}` precisely because it may be. The binding would
     # also have bought little: an env var the caller sets is not an authority.
     # What actually constrains the destructive mode is the module — the `logs`
-    # bucket only, never a `witness-` name, a canonicalized artifact directory,
+    # bucket only, a canonicalized artifact directory,
     # and a descriptor judged for isFile, nlink and dev+ino. When the variable IS set
     # it is still passed through as `expectedRoot`, so a bound session gets the
     # stricter check for free.
