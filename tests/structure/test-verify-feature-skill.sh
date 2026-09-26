@@ -63,6 +63,18 @@ if [ -n "${PW_MEASURED:-}" ] && [ -n "${CONSENT_SESSION_PREFIX:-}" ] && [ -n "${
 else
   check "P0a the consent module yields its measured playwright-cli version, session prefix and session variable (facts=$CONSENT_FACTS)" FAIL
 fi
+PW_STUB_BIN="$(mktemp -d "${TMPDIR:-/tmp}/zensu-vfs-cli.XXXXXX")" || { echo "FATAL: fixture"; exit 2; }
+trap 'rm -rf -- "$PW_STUB_BIN"' EXIT
+mkdir -p "$PW_STUB_BIN/node_modules/@playwright/cli"
+printf '#!/bin/sh\nexit 0\n' > "$PW_STUB_BIN/playwright-cli"
+chmod 755 "$PW_STUB_BIN/playwright-cli"
+printf '{"name":"@playwright/cli","version":"%s"}\n' "${PW_MEASURED:-}" > "$PW_STUB_BIN/node_modules/@playwright/cli/package.json"
+PW_STUB_READ="$(PATH="$PW_STUB_BIN:$PATH" node -e 'const v = require(process.argv[1]).installedVersion(process.env); process.stdout.write(v.source + " " + v.version)' "$PLUGIN_DIR/hooks/lib/playwright-cli-version-v1.js" 2>/dev/null)"
+if [ -n "${PW_MEASURED:-}" ] && [ "$PW_STUB_READ" = "manifest $PW_MEASURED" ]; then
+  check "P0b the stub playwright-cli every --check-policy call puts first on PATH reads as the measured version ($PW_MEASURED)" PASS
+else
+  check "P0b the stub playwright-cli every --check-policy call puts first on PATH reads as the measured version (got: ${PW_STUB_READ:-<none>})" FAIL
+fi
 
 # P1 — public identity and auto-trigger language.
 grep -qxF '# /zensu:verify-feature' "$SKILL_MD" \
@@ -624,18 +636,6 @@ if [ "$TEMPLATE_RC" = "0" ]; then
   check "P6m the --print-policy template passes the navigation policy contract once its placeholders are filled" PASS
 else
   check "P6m the --print-policy template passes the navigation policy contract once its placeholders are filled ($TEMPLATE_VERDICT)" FAIL
-fi
-PW_STUB_BIN="$(mktemp -d "${TMPDIR:-/tmp}/zensu-vf-cli.XXXXXX")" || { echo "FATAL: fixture"; exit 2; }
-trap 'rm -rf "$PW_STUB_BIN"' EXIT
-mkdir -p "$PW_STUB_BIN/node_modules/@playwright/cli"
-printf '#!/bin/sh\nexit 0\n' > "$PW_STUB_BIN/playwright-cli"
-chmod 755 "$PW_STUB_BIN/playwright-cli"
-printf '{"name":"@playwright/cli","version":"%s"}\n' "$PW_MEASURED" > "$PW_STUB_BIN/node_modules/@playwright/cli/package.json"
-PW_STUB_READ="$(PATH="$PW_STUB_BIN:$PATH" node -e 'const v = require(process.argv[1]).installedVersion(process.env); process.stdout.write(v.source + " " + v.version)' "$PLUGIN_DIR/hooks/lib/playwright-cli-version-v1.js" 2>/dev/null)"
-if [ -n "${PW_MEASURED:-}" ] && [ "$PW_STUB_READ" = "manifest $PW_MEASURED" ]; then
-  check "P6n-control the stub playwright-cli every --check-policy call puts first on PATH reads as the measured version ($PW_MEASURED)" PASS
-else
-  check "P6n-control the stub playwright-cli every --check-policy call puts first on PATH reads as the measured version (got: ${PW_STUB_READ:-<none>})" FAIL
 fi
 CHECK_CONSENT_OUT="$(env -u ZENSU_VERIFY_NAVIGATION_POLICY_V1 PATH="$PW_STUB_BIN:$PATH" node "$BROWSER_CONFIG" --check-policy local "http://127.0.0.1:5173" "/" declared-safe 2>/dev/null)"
 CHECK_CONSENT_RC=$?
