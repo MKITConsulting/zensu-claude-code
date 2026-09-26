@@ -2584,6 +2584,41 @@ else
   check "T38 adopt-advice carriers:$T38_MISS" FAIL
 fi
 
+T39_MISS=""
+t39_need() {
+  local label="$1" slice="$2"; shift 2
+  if [ -z "$slice" ]; then T39_MISS="$T39_MISS [slice-empty:$label]"; return; fi
+  local n
+  for n in "$@"; do
+    case "$slice" in *"$n"*) ;; *) T39_MISS="$T39_MISS [$label:$n]" ;; esac
+  done
+}
+t39_need selector-paragraph "$(t38_slice '`<selector>` is resolved in this order')" \
+  'Your own session is never picked by the last five' '`CLAUDE_CODE_SESSION_ID`' '(this is your own session)' '`selfSkipped`' 'a session never adopts itself'
+t39_need flow4-step1 "$(t38_slice 'trail.mjs" handoff <selector>`')" \
+  '`"$CLAUDE_CODE_SESSION_ID"`' 'never resolves to the session running the command'
+t39_need busy-row "$(t38_slice 'newest user or assistant record was written within the last 2 min')" \
+  'non-turn record written since does not count'
+t39_need activity-gotcha "$(t38_slice "**A session's activity")" \
+  'lastTurn.at' 'lastTurn.activityAt' '`lastActivity`' '(file last written' '`--days` scan window' 'lineage --backfill' \
+  'a tool call writes its result record only when it returns'
+t39_need show-json-disclosure "$(t38_slice '**`show --json` discloses more than `show` does.**')" \
+  '`selfSkipped` describes this session too'
+T39_ADOPT="$(t38_slice '**`adopt --json` and `lineage --backfill` disclose more')"
+T39_DOC_KEYS="$(printf '%s\n' "$T39_ADOPT" | grep -oE '`\{recorded: null[^}]*\}`' | head -1 | sed -E 's/^`\{//; s/\}`$//' | tr ',' '\n' | sed -E 's/^ *([A-Za-z]+).*$/\1/' | sort | tr '\n' ' ')"
+T39_CODE_KEYS="$(grep -F 'print(JSON.stringify({ recorded: null, file: null, error: why,' "$TRAIL_MJS" | head -1 | sed -E 's/.*JSON\.stringify\(\{ //; s/ \}, null, 2\).*//' | tr ',' '\n' | sed -E 's/^ *([A-Za-z]+).*$/\1/' | sort | tr '\n' ' ')"
+T39_COUNT_WORD="$(printf '%s\n' "$T39_ADOPT" | grep -oE '`\{recorded: null[^}]*\}` — [a-z]+ fields' | head -1 | sed -E 's/.* — ([a-z]+) fields$/\1/')"
+T39_COUNT="$(printf '%s' "$T39_CODE_KEYS" | wc -w | tr -d ' ')"
+T39_WANT_WORD="$(printf '%s\n' zero one two three four five six seven eight nine ten eleven twelve | sed -n "$((T39_COUNT + 1))p")"
+[ -n "$T39_CODE_KEYS" ] || T39_MISS="$T39_MISS [adopt-refusal-literal-not-found-in-trail.mjs]"
+[ "$T39_DOC_KEYS" = "$T39_CODE_KEYS" ] || T39_MISS="$T39_MISS [adopt-refusal-keys: doc=($T39_DOC_KEYS) code=($T39_CODE_KEYS)]"
+{ [ -n "$T39_WANT_WORD" ] && [ "$T39_COUNT_WORD" = "$T39_WANT_WORD" ]; } || T39_MISS="$T39_MISS [adopt-refusal-count: doc says '$T39_COUNT_WORD', code has $T39_COUNT keys]"
+if [ -z "$T39_MISS" ]; then
+  check "T39 SKILL.md keeps the own-session selector rule, the self-handoff route, the BUSY row's turn-record rule, the turn-activity gotcha, the selfSkipped disclosure in the show --json paragraph, and an adopt --json refusal key list and count that match the payload trail.mjs builds" PASS
+else
+  check "T39 own-session and turn-activity documentation drift:$T39_MISS" FAIL
+fi
+
 echo "----"
 echo "test-session-trail-skill: $PASS PASS / $FAIL FAIL / $SKIP SKIP"
 [ "$FAIL" -eq 0 ]
