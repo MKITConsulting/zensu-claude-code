@@ -8760,8 +8760,11 @@ if git -C "$WK_REPO" worktree add -q -b claude/wk-forge "$WK_FORGE" >/dev/null 2
     *'worktree: '*) check "P1wk17 every path in the worktree row family is folded before it is rendered" PASS ;;
     *) check "P1wk17 the forged-path fixture rendered no worktree row at all" FAIL ;;
   esac
+  # The control asserts the FOLDED spelling inside a worktree row. Matching the raw pair
+  # anywhere in the report passed only while an unrelated row still printed the path
+  # unfolded, so it proved nothing about this row family once that row was folded too.
   case "$OUT_WK17" in
-    *'wk : 2'*) check "P1wk17-control the fold is what removed it, and the value is still named" PASS ;;
+    *'worktree: '*'wk \u003a 2'*) check "P1wk17-control the fold is what removed it, and the value is still named" PASS ;;
     *) check "P1wk17-control the fold is what removed it, and the value is still named (got: $(printf '%s' "$OUT_WK17" | grep 'worktree:' | head -1 | cut -c1-200))" FAIL ;;
   esac
   git -C "$WK_REPO" worktree remove --force "$WK_FORGE" >/dev/null 2>&1 || true
