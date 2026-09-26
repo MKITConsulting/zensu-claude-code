@@ -202,7 +202,9 @@ instruction that cannot succeed until its cap releases the guard.
   agent with `tools: Bash`.
 - **What bounds the CHILD is in this tree, not an assumption about the host.**
   `hooks/pre-reviewer-capability-gate.sh` runs on the `.*` PreToolUse matcher and denies any
-  tool outside the read trio for a `REVIEWER` principal, and confines its reads to the project
+  tool outside the read trio for a `REVIEWER` principal — save the host's `SubagentHandback`
+  report tool, admitted only with one string `message` field (see
+  [Session Control](session-control.md)) — and confines its reads to the project
   root. It is fail-closed and carries no config off-switch, so it holds whether or not the host
   re-checks the child's own calls — a claim about the host would be unverified, and this one is
   checkable. Weakening `readOnlyViolation`, or giving that gate an off-switch, removes the only
@@ -593,7 +595,10 @@ only a path rule consumes it — to resolve a relative tool input, or as the tra
   verdict is decided by its lease and is the same with or without the directory.
 - **A reviewer, a PLM subagent and a neutral child** resolve paths against it, so they are still
   denied — with a reason that names their profile and the unusable working directory, and tells
-  them to report to the main thread rather than retry.
+  them to report to the main thread rather than retry. A reviewer and a PLM subagent can do
+  that: their `SubagentHandback` report resolves no path and is decided before the `cwd` is
+  examined. A neutral child's handback still passes that resolution and is denied with the
+  rest.
 
 Nothing else is relaxed. The binding, the recorded project root, the runtime digest and the
 workflow document are revalidated for every principal BEFORE the `cwd` is looked at, so a

@@ -85,7 +85,9 @@ canonicalizes the `cwd` only in the three branches whose path rules consume it �
 `reviewer-readonly-v1`, `zensu-plm-readonly-v1` and `host-profile-v1`, which deny through
 `unusableWorkingDirectoryReason` — while `main-v1` returns before any path rule and
 `evidence-worker-v1` resolves its leased paths against the canonical project root on
-`trusted`. **The ORDER is the contract:** the bind, the recorded root, the digest and the
+`trusted`. The two read-only profiles' `SubagentHandback` report is decided between the
+revalidation and that resolution, because it resolves no path — see
+`.claude/rules/reviewer-capability-gate.md`. **The ORDER is the contract:** the bind, the recorded root, the digest and the
 workflow revalidation all run BEFORE the `cwd` is judged, so the missing-baseline named deny
 and every bind-failure deny still win for the main thread. `pathResolutionProfile` re-spells
 the branch ladder below it to pick the profile name, so a new principal branch lands in both.
