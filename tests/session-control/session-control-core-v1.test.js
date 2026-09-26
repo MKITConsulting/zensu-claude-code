@@ -5391,22 +5391,32 @@ test('WB7 a bind the repair cannot establish refuses before any write', () => {
 // fixture at all: `process.getuid` is always a function on darwin and linux, and
 // `lstatSync` always returns numeric `uid`/`mode` there. Synthetic stats reach all of
 // it without a second uid, which a CI structure suite cannot create.
-const ANCESTOR_SELF_UID = typeof process.getuid === 'function' ? process.getuid() : 501;
+// Gated on the EXACT property the rule reads, not on the platform name: the ownership
+// rule abstains whenever `process.getuid` is absent, which is win32 today and could be
+// another host tomorrow. A test asserting a DECIDED verdict cannot run there — the
+// refusing ones fail and the accepting ones pass vacuously, which reads as coverage the
+// host never gave — so both kinds skip with the reason stated. The abstain cases below
+// stay ungated, because abstaining is exactly what such a host does.
+const POSIX_IDENTITY = typeof process.getuid === 'function';
+const NO_POSIX_IDENTITY_SKIP = POSIX_IDENTITY
+  ? false
+  : 'no POSIX uid on this host, so the ownership rule abstains by design and a decided verdict cannot be exercised';
+const ANCESTOR_SELF_UID = POSIX_IDENTITY ? process.getuid() : 501;
 const ancestorStat = (uid, mode) => ({ uid, mode });
 
-test('an ancestor owned by the caller with no group or other write is accepted', () => {
+test('an ancestor owned by the caller with no group or other write is accepted', { skip: NO_POSIX_IDENTITY_SKIP }, () => {
   assert.equal(core.restoreAncestorPermissionsSafe(ancestorStat(ANCESTOR_SELF_UID, 0o40755)), true);
   assert.equal(core.restoreAncestorPermissionsSafe(ancestorStat(ANCESTOR_SELF_UID, 0o40700)), true);
 });
 
-test('an ancestor owned by root is accepted, because a system parent is legitimate', () => {
+test('an ancestor owned by root is accepted, because a system parent is legitimate', { skip: NO_POSIX_IDENTITY_SKIP }, () => {
   // /opt, /srv and /usr/local are ordinary places for a project, and refusing them
   // would invent a location policy the record never asked for - the same reasoning
   // that refused a location allowlist for the destination itself.
   assert.equal(core.restoreAncestorPermissionsSafe(ancestorStat(0, 0o40755)), true);
 });
 
-test('an ancestor owned by a third user is refused at ANY mode, sticky included', () => {
+test('an ancestor owned by a third user is refused at ANY mode, sticky included', { skip: NO_POSIX_IDENTITY_SKIP }, () => {
   // The owner test runs FIRST and returns before either mode test, which is why the
   // refusal's own text must describe two arms rather than one: for this arm a `chmod`
   // is not a remedy the operator can perform at all.
@@ -5416,13 +5426,13 @@ test('an ancestor owned by a third user is refused at ANY mode, sticky included'
   assert.equal(core.restoreAncestorPermissionsSafe(ancestorStat(foreign, 0o41777)), false);
 });
 
-test('a group- or other-writable ancestor is refused without the sticky bit', () => {
+test('a group- or other-writable ancestor is refused without the sticky bit', { skip: NO_POSIX_IDENTITY_SKIP }, () => {
   assert.equal(core.restoreAncestorPermissionsSafe(ancestorStat(ANCESTOR_SELF_UID, 0o40777)), false);
   assert.equal(core.restoreAncestorPermissionsSafe(ancestorStat(ANCESTOR_SELF_UID, 0o40775)), false);
   assert.equal(core.restoreAncestorPermissionsSafe(ancestorStat(ANCESTOR_SELF_UID, 0o40757)), false);
 });
 
-test('a sticky world-writable ancestor owned by the caller or root is accepted', () => {
+test('a sticky world-writable ancestor owned by the caller or root is accepted', { skip: NO_POSIX_IDENTITY_SKIP }, () => {
   // /tmp is the platform's shared-temp contract. The exemption is NARROWER than its
   // own comment used to admit - the owner test above has already excluded a foreign
   // owner - and what it buys is bounded: sticky constrains `unlink` and `rename` of
@@ -5445,8 +5455,12 @@ test('the ancestor rule ABSTAINS rather than refusing where it cannot decide', (
     'an absent mode is undecidable, not clean');
   assert.equal(core.restoreOwnershipUndecidable({ uid: ANCESTOR_SELF_UID, mode: '0o40777' }), true,
     'and so is a mode that is not a number');
-  assert.equal(core.restoreOwnershipUndecidable({ uid: ANCESTOR_SELF_UID, mode: 0o40755 }), false,
-    'control: a numeric pair IS decidable');
+  // The control asserts DECIDABILITY, which needs an identity to decide against; the two
+  // abstain assertions above it hold on every host.
+  if (POSIX_IDENTITY) {
+    assert.equal(core.restoreOwnershipUndecidable({ uid: ANCESTOR_SELF_UID, mode: 0o40755 }), false,
+      'control: a numeric pair IS decidable');
+  }
 });
 
 // THE RECORDED ROOT IS NOT AN ANCESTOR THIS REPAIR PLANTS INSIDE, and reusing one
@@ -5458,7 +5472,7 @@ test('the ancestor rule ABSTAINS rather than refusing where it cannot decide', (
 // came back while we looked" into FAILED / exit 1. What still has to hold at the leaf
 // is the OWNER half, because announcing ALREADY RESTORED over somebody else's
 // directory tells the user their anchor is back when it is not.
-test('the recorded root is judged on its OWNER, never on its write bits', () => {
+test('the recorded root is judged on its OWNER, never on its write bits', { skip: NO_POSIX_IDENTITY_SKIP }, () => {
   assert.equal(core.restoreRootOwnerSafe(ancestorStat(ANCESTOR_SELF_UID, 0o40775)), true,
     'a self-owned group-writable root is the ordinary umask-002 worktree');
   assert.equal(core.restoreRootOwnerSafe(ancestorStat(ANCESTOR_SELF_UID, 0o40777)), true);
