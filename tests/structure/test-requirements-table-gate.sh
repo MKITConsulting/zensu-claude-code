@@ -33,9 +33,36 @@ verdict() { if [ "$1" -eq 0 ]; then echo PASS; else echo FAIL; fi; }
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 PROJ="$(mktemp -d)" || exit 1
 export CLAUDE_PROJECT_DIR="$PROJ"
+# The CANONICAL spelling of the same directory, and the two genuinely differ: on
+# macOS `mktemp -d` answers /var/... while the kernel answers /private/var/... .
+# `tdd_state_file` reports the root the immutable record carries, minted with
+# realpathSync.native, so every containment bound below compares against this value
+# and never "$PROJ". R0pre asserts the two really do name one directory.
+PROJ_REAL="$(cd -P -- "$PROJ" && pwd -P)" || exit 1
 STATE_DIR="$PROJ/.zensu/state"; export STATE_DIR
-cleanup() { [ -n "${PROJ:-}" ] && rm -rf "$PROJ"; return 0; }
+SUITE_TMP="$(mktemp -d)" || exit 1
+cleanup() {
+  [ -n "${PROJ:-}" ] && rm -rf "$PROJ"
+  [ -n "${SUITE_TMP:-}" ] && rm -rf "$SUITE_TMP"
+  return 0
+}
 trap cleanup EXIT INT TERM
+# The directory the suite was STARTED from, snapshotted before anything runs. R1
+# at the end compares it back: this suite once dropped a stray `edit-landing-.json`
+# here and every check still passed, so nothing observed it.
+SUITE_CWD="$(pwd -P)" || exit 1
+ls -A "$SUITE_CWD" 2>/dev/null | LC_ALL=C sort > "$SUITE_TMP/cwd-before"
+# Fixture-level faults are LATCHED rather than reported inline, because the two
+# helpers that raise them are called inside `$( )`, where anything written to
+# stdout is captured as the helper's return value instead of being shown. stderr
+# is not captured, so the operator sees the line immediately; R0 turns the latch
+# into a red check so a fault can never pass unnoticed.
+FAULTS="$SUITE_TMP/fixture-faults"
+: > "$FAULTS"
+hard_fault() {  # latch a fixture fault; SAFE to call from inside a command substitution
+  printf 'FIXTURE FAULT: %s\n' "$1" >&2
+  printf '%s\n' "$1" >> "$FAULTS"
+}
 unset CLAUDE_AGENT_TYPE ZENSU_TDD_GATE ZENSU_TEST_WITNESS ZENSU_CHAIN \
   ZENSU_EDIT_LANDING_GATE ZENSU_REQUIREMENTS_GATE \
   GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE 2>/dev/null || true
@@ -464,16 +491,44 @@ activate_session() {
   export CLAUDE_CODE_SESSION_ID="$1"
   # shellcheck disable=SC1090
   source "$PLUGIN_DIR/hooks/lib/zensu-session.sh"
-  zensu_bind_model_session
+  # Report the bind rather than discarding it. `zensu_bind_model_session` UNSETS
+  # all five ZENSU_* bindings up front AND again on failure, so a failed bind
+  # leaves `zensu_resolve_project_dir` with no candidate, `tdd_state_file` then
+  # returns 1 and echoes NOTHING, and every path derived from it collapses to a
+  # relative one. That is the whole causal chain behind the stray R1 pins, and it
+  # stayed invisible because the status was dropped here and again in `receipt_for`.
+  if ! zensu_bind_model_session; then
+    hard_fault "activate_session($1): zensu_bind_model_session failed — session unbound"
+    return 1
+  fi
 }
 # shellcheck disable=SC1090
 source "$PHASE_LIB"
 
+# Derive the receipt path the gate will read, or REFUSE — never fall back.
+# `tdd_state_file` returns 1 and echoes nothing for an unbound session, and both
+# `basename ""` and `dirname ""` answer `.`, so the previous spelling handed the
+# caller a relative `edit-landing-.json` that the caller's own redirect then wrote
+# into whatever directory the suite was started from. Every refusal here prints
+# NOTHING on stdout, so a caller's `> "$(receipt_for ...)"` fails outright instead
+# of writing somewhere unintended, and latches the cause for R0.
 receipt_for() {  # echo the path the GATE will look at for session $1
-  local sf key
-  sf="$(tdd_state_file "$1")"
-  key="$(basename "$sf")"; key="${key#tdd-phase-}"; key="${key%.json}"
-  printf '%s' "$(dirname "$sf")/edit-landing-${key}.json"
+  local sf key dir
+  if ! sf="$(tdd_state_file "$1")" || [ -z "$sf" ]; then
+    hard_fault "receipt_for($1): tdd_state_file resolved nothing — the session is not bound"
+    return 1
+  fi
+  dir="${sf%/*}"
+  key="${sf##*/}"; key="${key#tdd-phase-}"; key="${key%.json}"
+  if [ "$dir" != "$PROJ_REAL/.zensu/state" ]; then
+    hard_fault "receipt_for($1): state file lies outside this suite's project ($sf)"
+    return 1
+  fi
+  case "$key" in
+    scv1_*) ;;
+    *) hard_fault "receipt_for($1): state file carries no session key ($sf)"; return 1 ;;
+  esac
+  printf '%s' "$dir/edit-landing-${key}.json"
 }
 # Stage one session: arm it, plant a run log with the given plan body beside a
 # same-stem plan, and deposit a receipt naming that log — the exact shape the
@@ -489,7 +544,10 @@ stage() {  # stage <session> <stem> <plan-body-file|->
   mkdir -p "$PROJ/.zensu/logs" "$PROJ/.zensu/plans"
   printf 'S1 IMPL completed — files: tracked.txt\n' > "$PROJ/.zensu/logs/${stem}.log"
   if [ "$body" != "-" ]; then cp "$body" "$PROJ/.zensu/plans/${stem}.md"; fi
-  rp="$(receipt_for "$sid")"
+  if ! rp="$(receipt_for "$sid")"; then
+    check "stage(): receipt_for resolved nothing for session $sid" FAIL
+    return 1
+  fi
   mkdir -p "$(dirname "$rp")"
   printf '{"schema":"edit-landing-v1","session":"%s","log":"%s","claims":1,"landed":1,"notLanded":0,"unverified":0,"pending":0,"exemptIgnored":0,"exemptVerified":0,"clean":true}\n' \
     "$sid" "$PROJ/.zensu/logs/${stem}.log" > "$rp"
@@ -519,6 +577,13 @@ printf 'v2\n' > "$PROJ/tracked.txt"
 echo "== AC-001: no Requirements section =="
 SID_M="rq-missing"
 activate_session "$SID_M"
+# `receipt_for` bounds its answer against "$PROJ_REAL". That bound is only a real
+# containment check while the canonical spelling of "$PROJ" is the same string the
+# immutable record carries; if the two ever diverge, every receipt below would be
+# refused for a reason unrelated to its own contract, so name the divergence here
+# instead of letting it surface as twenty unrelated failures.
+[ "$(zensu_resolve_project_dir 2>/dev/null)" = "$PROJ_REAL" ]
+check "R0pre the record's project root is the canonical spelling receipt_for bounds against" "$(verdict $?)"
 stage "$SID_M" "2026-01-01-0101_tdd-missing" "$BODIES/none.md"
 ERR_M="$(bash "$LOG" --tdd-complete --session "$SID_M" 2>&1 >/dev/null)"
 RC_M=$?
@@ -1049,6 +1114,31 @@ grep -qF 'refusing the unqualified standalone terminus' "$LOG"
 check "S4 the --chain-done dirty-tree refusal is intact" "$(verdict $?)"
 grep -qF 'PLAN REQUIREMENTS MISSING' "$REQ"
 check "S5 the library's own verdict vocabulary is intact" "$(verdict $?)"
+
+echo "== The suite's own hygiene =="
+# R0 surfaces the latch `hard_fault` writes. Both raisers run inside `$( )`, where
+# a `check` line would be swallowed into the caller's variable, so without this the
+# whole fixture-fault channel could fire on every session and the suite would still
+# report all green.
+if [ -s "$FAULTS" ]; then
+  check "R0 no fixture fault was latched ($(wc -l < "$FAULTS" | tr -d ' ') raised; first: $(head -1 "$FAULTS"))" FAIL
+else
+  check "R0 no fixture fault was latched" PASS
+fi
+# R1 is the observable the whole guard above exists for. A relative receipt path
+# used to land an `edit-landing-.json` in the directory the suite was started from
+# — the repository root, in practice — and nothing in 100 passing checks saw it.
+# Compare ADDED entries only: a deletion, or an unrelated editor writing into that
+# directory during the run, is not this suite's doing. An unrelated process
+# CREATING a file there mid-run is the one residual false positive, and it is worth
+# far less than the silence it replaces.
+ls -A "$SUITE_CWD" 2>/dev/null | LC_ALL=C sort > "$SUITE_TMP/cwd-after"
+STRAYS="$(LC_ALL=C comm -13 "$SUITE_TMP/cwd-before" "$SUITE_TMP/cwd-after" | tr '\n' ' ')"
+if [ -z "${STRAYS// /}" ]; then
+  check "R1 the suite left nothing behind in the directory it was started from" PASS
+else
+  check "R1 the suite left nothing behind in the directory it was started from (strays: $STRAYS)" FAIL
+fi
 
 echo "----"
 echo "test-requirements-table-gate: $T_PASS PASS / $T_FAIL FAIL"
