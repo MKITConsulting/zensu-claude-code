@@ -514,7 +514,12 @@ function main() {
     // ancestors in the recorded project (`.zensu` and not `.zensu/state`: the mkdir
     // creates BOTH components, and `.zensu` is not inside `.zensu/state` — the adopt
     // header makes that argument and two carriers still spelled the narrower one),
-    // and carries its own justification in its
+    // and — under `--restore-root --confirm` only — the recorded project ROOT itself
+    // when that directory is what is gone. That fifth class is the only one that
+    // CREATES a directory rather than writing into one an earlier read already
+    // proved exists, which is why it is named here rather than folded into the
+    // document write: this enumeration IS the justification this gate's admission
+    // rests on. It carries its own justification in its
     // header. A
     // remedy the user cannot invoke is not a remedy.
     //
@@ -562,7 +567,7 @@ function main() {
     if (lineage) {
       const cause = `this session's Session Control record is readable, and the running Zensu installation declares an incompatible lineage — the record was minted by ${safeVersion(lineage.recorded)} and ${safeVersion(lineage.executing)} is executing.`;
       if (principals.classifyPreToolPayload(payload) === principals.PRINCIPALS.MAIN) {
-        deny(`${cause} Run /zensu:adopt-session to check whether this installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — the adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created; /zensu:doctor names the path when that is the case.`);
+        deny(`${cause} Run /zensu:adopt-session to check whether this installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — the adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created, which /zensu:adopt-session --restore-root reports on and which must happen AFTER the adoption, because that repair requires the running installation to SERVE the record; /zensu:doctor names the path when that is the case.`);
         return;
       }
       deny(`${cause} The repair writes the immutable record and is reserved for the main thread, so it is not available here — report this to the main thread rather than retrying.`);
@@ -575,7 +580,34 @@ function main() {
     // the two is immaterial.
     const pruned = hookSession.resolvePrunedPluginRoot(payload);
     if (pruned) {
-      deny(`this session's Session Control record is intact, but the Zensu installation that minted it (version ${pruned.recorded}) has been removed from the plugin cache, so the running installation (${pruned.executing}) cannot re-verify the record. Run /zensu:adopt-session to check whether this installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If it refuses, the refusal names its own cause and remedy: this predicate is deliberately blind to lineage, so a DOWNGRADE reaches this state too, and there adoption refuses as executing-runtime-older and re-installing the newer version is the way back — a persisted shape that really did change is the case that needs a fresh Claude Code session.`);
+      deny(`this session's Session Control record is intact, but the Zensu installation that minted it (version ${safeVersion(pruned.recorded)}) has been removed from the plugin cache, so the running installation (${safeVersion(pruned.executing)}) cannot re-verify the record. Run /zensu:adopt-session to check whether this installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If it refuses, the refusal names its own cause and remedy: this predicate is deliberately blind to lineage, so a DOWNGRADE reaches this state too, and there adoption refuses as executing-runtime-older and re-installing the newer version is the way back — a persisted shape that really did change is the case that needs a fresh Claude Code session.`);
+      return;
+    }
+    // The vanished recorded project root. This branch exists because the orphan
+    // RELAXATION far above is conjoined on PRINCIPALS.MAIN, so for every other
+    // principal the predicate is never consulted and control used to fall all the
+    // way to the generic `immutable context revalidation failed: ...` — a
+    // cause-free deny in a bind failure that has a name and an in-place repair,
+    // which is exactly what the neighbouring comment records as a regression this
+    // branch shipped once already for the lineage state.
+    //
+    // There is deliberately NO main-principal arm here, and copying the lineage
+    // branch's two-sided shape was the mistake. That branch is genuinely two-sided
+    // because `resolveIncompatibleRuntime` is not one of the relaxation disjuncts
+    // far above; `orphanedProjectRootSession` IS. The relaxation already RETURNS
+    // (allows) for MAIN in this state, so a MAIN arm here is reachable only if the
+    // recorded root is deleted between that call and this one — a race, not the
+    // steady state — and a ~500-character remedy maintained for no consumer tells
+    // the next reader that MAIN gets a deny it in fact never sees.
+    //
+    // What remains is the CAUSE half, which every non-main principal needs and used
+    // to be denied without: control fell all the way to the generic `immutable
+    // context revalidation failed: ...`, a cause-free deny in a bind failure that
+    // has a name and an in-place repair. The remedy is deliberately NOT named: a
+    // read-only principal is never the thread that can run it, and pointing one at
+    // a privileged write is the shape this file's own comment above calls a defect.
+    if (hookSession.orphanedProjectRootSession(payload)) {
+      deny("this session's Session Control record is readable and this installation serves it, but the project root it records no longer exists — a deleted or recycled worktree causes it. The workflow document lived under that directory, so no write can be attributed to a project that is not there. The repair re-creates a directory and rewrites the workflow document, so it is reserved for the main thread and is not available here — report this to the main thread rather than retrying.");
       return;
     }
     // The SECOND named cause, and the second one with an in-place remedy. It sits

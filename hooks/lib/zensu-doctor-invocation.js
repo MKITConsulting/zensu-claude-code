@@ -70,8 +70,10 @@ const DOCTOR_SEGMENTS = ["hooks", "lib", "zensu-doctor.sh"];
 // history entry, moves that session's stale review-evidence leases aside, and —
 // on an `already-served` refusal with `--confirm` only — recreates that session's
 // own MISSING workflow document and its `.zensu` ancestors under the RECORDED
-// project root. That and the workflow history entry above are the TWO write
-// classes that leave the plugin-data store, and the history entry is written on
+// project root — and, under `--restore-root --confirm`, re-creates the RECORDED
+// project root itself when it is the thing that is gone, then rebuilds that
+// document over it. Those and the workflow history entry above are the THREE
+// write classes that leave the plugin-data store, and the history entry is written on
 // the ordinary `--confirm` adoption as well, with no `already-served` qualifier —
 // calling the document write "the one" was false and understated the admission;
 // what BOUNDS those writes is readContext (session
@@ -88,13 +90,22 @@ const ADOPT_SEGMENTS = ["hooks", "lib", "zensu-session-adopt.sh"];
 const INTERPRETER = "bash";
 
 // Each recognized script declares the arguments it accepts, as exact literals.
-// The doctor takes none. The adoption takes at most one, and `--confirm` is the
-// whole difference between a report and a write, so it is spelled out here
-// rather than left to the script: the gate decides what may be invoked, and a
-// script cannot widen its own recognition.
+// The doctor takes none. The adoption takes at most two, each at most once, and
+// they are spelled out here rather than left to the script: the gate decides what
+// may be invoked, and a script cannot widen its own recognition.
+//
+// `--confirm` is the whole difference between a report and a write.
+// `--restore-root` selects WHICH repair, and it is admitted on the same terms as
+// the rest of that script's write classes — see its header, bounded exception
+// (c). What makes admitting it safe is a property of this list rather than of
+// that script: every entry is an exact LITERAL and none of them takes a value, so
+// no invocation this gate admits can carry a destination. A mode that accepted a
+// path would be the caller-named re-anchoring the design refuses, and it could
+// not be expressed here without changing the shape of this table — which is the
+// signal a future reviewer should treat as the decision point.
 const RECOGNIZED = {
   doctor: { segments: DOCTOR_SEGMENTS, args: [] },
-  adopt: { segments: ADOPT_SEGMENTS, args: ["--confirm"] },
+  adopt: { segments: ADOPT_SEGMENTS, args: ["--restore-root", "--confirm"] },
 };
 
 const ASSIGNMENT_TOKEN = /^[A-Za-z_][A-Za-z0-9_]*=/;

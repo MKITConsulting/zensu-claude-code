@@ -80,6 +80,7 @@
     "test-requirements-table-gate.sh",
     "test-reset-review-limit-skill.sh",
     "test-reset-review-limit-transaction.sh",
+    "test-restore-project-root.sh",
     "test-review-aspect-agent.sh",
     "test-review-judge.sh",
     "test-review-personas.sh",

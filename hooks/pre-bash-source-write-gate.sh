@@ -134,10 +134,18 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
   # exists and disagrees (what a mid-session plugin upgrade produces) previously
   # denied here, which put /zensu:doctor behind the very defect it reports and
   # left the repair unreachable with it. The diagnostic writes nothing; the
-  # adoption writes only its own session's record in plugin data, one workflow
-  # history entry, and a move of that session's stale review-evidence leases.
-  # Neither touches project source, so none of the rules below —
-  # which judge writes to the session's own tree — has anything to judge.
+  # adoption writes FIVE classes, enumerated authoritatively in the header of
+  # hooks/lib/zensu-session-adopt.sh: its own session's record in plugin data, one
+  # workflow history entry, a move of that session's stale review-evidence leases,
+  # that session's own missing workflow document, and — under `--restore-root
+  # --confirm` only — the RECORDED PROJECT ROOT itself.
+  #
+  # The last two DO land inside the session's own tree, so the old conclusion here
+  # ("neither touches project source") is no longer true and is not what licenses
+  # the skip. What licenses it is that every destination is carried FROM the
+  # immutable record: no argument names a directory anywhere in either recognized
+  # invocation, so rules (A)/(B)/(C) — which judge a CALLER-NAMED target — have
+  # nothing to judge.
   if zensu_doctor_allowed "$INPUT"; then
     exit 0
   fi
@@ -208,13 +216,13 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
       cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 1
       BSWG_MODE=targets PAYLOAD="$INPUT" node ./bash-source-write-parse.js 2>/dev/null
     )"; then
-      emit_deny "Blocked: the Bash write-target check could not be evaluated for a session with no usable Session Control project root, so this command is refused rather than allowed unchecked. Start a fresh Claude Code session; /zensu:doctor runs without a binding and names the cause."
+      emit_deny "Blocked: the Bash write-target check could not be evaluated for a session with no usable Session Control project root, so this command is refused rather than allowed unchecked. If the cause is a recorded project root that no longer exists — a deleted or recycled worktree — that is repairable in place: /zensu:adopt-session --restore-root reports whether the directory can be re-created. That report is read-only; confirming the repair it describes re-creates the directory and rebuilds the workflow document in one run, and is a separate step the user has to agree to. It restores the anchor, not the work; if the directory was moved rather than deleted, moving it back is better. Otherwise start a fresh Claude Code session; /zensu:doctor runs without a binding and names the cause."
       exit 0
     fi
     case "$UNBOUND_TARGETS" in
       ''|__bypass__*) exit 0 ;;
     esac
-    emit_deny "Blocked: this session has no usable Session Control project root — either no record at all (a session resumed across a plugin update never mints one) or a record whose recorded project root no longer exists (a deleted or recycled worktree) — AND no usable CLAUDE_PROJECT_DIR, so this write cannot be attributed to any project: ${UNBOUND_TARGETS}. Read-only commands still run, /zensu:doctor included: run it to see which of the two states this is, or start a fresh Claude Code session. Deliberate one-off: prefix the command with ZENSU_BASH_WRITE_GATE=off."
+    emit_deny "Blocked: this session has no usable Session Control project root — either no record at all (a session resumed across a plugin update never mints one) or a record whose recorded project root no longer exists (a deleted or recycled worktree) — AND no usable CLAUDE_PROJECT_DIR, so this write cannot be attributed to any project: ${UNBOUND_TARGETS}. Read-only commands still run, /zensu:doctor included: run it to see which of the two states this is. If it is the second, that is repairable in place: /zensu:adopt-session --restore-root reports whether the directory can be re-created. That report is read-only; confirming the repair it describes re-creates the directory and rebuilds the workflow document in one run, and is a separate step the user has to agree to. It restores the anchor, not the work; if the directory was moved rather than deleted, moving it back is better. Otherwise start a fresh Claude Code session. Deliberate one-off: prefix the command with ZENSU_BASH_WRITE_GATE=off."
     exit 0
   fi
   # An unparseable envelope is a different failure: with no readable command
@@ -227,13 +235,13 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
     BSWG_MODE= PAYLOAD= CLAUDE_PROJECT_DIR="$UNBOUND_PROJECT_DIR" \
       node ./bash-source-write-parse.js 2>/dev/null <<<"$INPUT"
   )"; then
-    emit_deny "Blocked: the Bash source-write rules could not be evaluated for a session with no usable Session Control project root, so this command is refused rather than allowed unchecked. Start a fresh Claude Code session; /zensu:doctor runs without a binding and names the cause."
+    emit_deny "Blocked: the Bash source-write rules could not be evaluated for a session with no usable Session Control project root, so this command is refused rather than allowed unchecked. If the cause is a recorded project root that no longer exists — a deleted or recycled worktree — that is repairable in place: /zensu:adopt-session --restore-root reports whether the directory can be re-created. That report is read-only; confirming the repair it describes re-creates the directory and rebuilds the workflow document in one run, and is a separate step the user has to agree to. It restores the anchor, not the work; if the directory was moved rather than deleted, moving it back is better. Otherwise start a fresh Claude Code session; /zensu:doctor runs without a binding and names the cause."
     exit 0
   fi
   case "$UNBOUND_REASON" in
     ''|__bypass__*) exit 0 ;;
   esac
-  emit_deny "${UNBOUND_REASON} This session additionally has no usable Session Control project root — either no record at all (a session resumed across a plugin update never mints one) or a record whose recorded project root no longer exists (a deleted or recycled worktree) — so the write cannot be attributed to a recorded project. Run /zensu:doctor: it works without a binding and names the exact cause."
+  emit_deny "${UNBOUND_REASON} This session additionally has no usable Session Control project root — either no record at all (a session resumed across a plugin update never mints one) or a record whose recorded project root no longer exists (a deleted or recycled worktree) — so the write cannot be attributed to a recorded project. Run /zensu:doctor: it works without a binding and names the exact cause. If it is the second, that is repairable in place: /zensu:adopt-session --restore-root reports whether the directory can be re-created. That report is read-only; confirming the repair it describes re-creates the directory and rebuilds the workflow document in one run, and is a separate step the user has to agree to. It restores the anchor, not the work; if the directory was moved rather than deleted, moving it back is better."
   exit 0
 fi
 

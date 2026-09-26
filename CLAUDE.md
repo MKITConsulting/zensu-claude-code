@@ -149,3 +149,4 @@ Each entry names the section title, what it covers, and its rule file.
 - **Incremental Review Rounds (`review-round-scope-v1.js` + `aspect-activation-v1.js`)** — delta-scoped fix rounds and aspect activation: `.claude/rules/incremental-review-rounds.md`
 - **Multi-Repo Stage 1 (`zensu-log.sh` terminus + `zensu-edit-landing.sh` + the doctor row)** — refusing a chain whose work landed in another repository: `.claude/rules/multi-repo-stage1.md`
 - **Browser Consent Gate (`hooks/lib/verify-consent-v1.js` + the two consent hooks)** — consent prompts for `/zensu:verify-feature` browser navigation: `.claude/rules/browser-consent-gate.md`
+- **Restoring a Vanished Recorded Project Root (`restoreRootVerdict` / `restoreWorkflowProjectRoot`)** — re-creating a recorded project root a removed worktree took with it: `.claude/rules/restore-vanished-project-root.md`

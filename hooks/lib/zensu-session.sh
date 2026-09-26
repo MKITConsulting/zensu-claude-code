@@ -349,6 +349,37 @@ zensu_emit_named_bind_deny() {
       "${pair%%$'\t'*}" "${pair##*$'\t'}"
     return
   fi
+  # The orphaned root is tested LAST of the three. State the ground correctly: the
+  # three predicates are DISJOINT by construction, so the order is defence in depth
+  # rather than a correctness constraint. resolveOrphanedProjectRoot returns null
+  # unless servesRecordedRuntime is true, so it cannot match in a lineage break, and
+  # readOrphanedProjectRootContext still canonicalizes an absent plugin_root and
+  # throws, so it cannot match in the pruned state either. The order is kept — and
+  # pinned by R7f — so that a future relaxation of either predicate above cannot
+  # silently reorder the diagnosis and offer the restore before the adoption it
+  # requires. An earlier wording claimed that reordering would ALREADY do that,
+  # which is a false disjointness model for anyone reasoning from it.
+  #
+  # It is tested at all because without it a gate denying in this state fell through
+  # to the generic reason, which prescribes a fresh session — while the doctor row and
+  # the Stop release for the SAME state now offer an in-place repair. That is the
+  # contradiction this file's own rule names: a gate left on the generic text tells the
+  # user to start a fresh session while its sibling says the session can be repaired in
+  # place.
+  #
+  # TWO of the four callers reach this arm, not four, and the two that do not are
+  # not symmetrical — say what each actually does rather than one sentence for both.
+  # pre-bash-source-write-gate.sh rules the orphan state out ABOVE the router so it
+  # can reach its own write-specific denies, which name the repair themselves; do
+  # not "fix" that by removing its guard, because that would cost it the specific
+  # message. pre-write-secret-scan.sh rules the state out in order to ALLOW the
+  # scan, and carries no bind-state remedy at all. The reachable callers are
+  # pre-edit-tdd-reminder.sh and pre-bash-zensu-gate.sh.
+  local dead_root
+  if dead_root="$(zensu_session_orphaned_project_root "$payload")" && [ -n "$dead_root" ]; then
+    zensu_emit_hook_session_deny orphaned-project-root "$dead_root"
+    return
+  fi
   zensu_emit_hook_session_deny ${fallback:+"$fallback"}
 }
 
@@ -433,7 +464,7 @@ zensu_session_incompatible_orphaned_root_model() {
 # the adoption repairs.
 #
 # The two are admitted on DIFFERENT grounds and the distinction is load-bearing:
-# the diagnostic writes nothing, while the adoption WRITES — three classes, named
+# the diagnostic writes nothing, while the adoption WRITES — five classes, named
 # in the header of hooks/lib/zensu-session-adopt.sh, which is also where that
 # second justification lives. Do not fold the two arguments into one.
 #
@@ -494,9 +525,11 @@ zensu_doctor_allowed() {
   zensu_hook_is_main_principal "$payload" PreToolUse
 }
 
-# Five scopes, because the same emitter serves callers with very different
+# Six scopes, because the same emitter serves callers with very different
 # knowledge. Keep this numeral in step with the list below it — it is what a
-# caller reads before adding a sixth. A caller that already ruled out the RELAXABLE states may say so; a
+# caller reads before adding a seventh. The numeral and the list went stale
+# together once, on the very edit that added the sixth, which is why the
+# instruction names both halves rather than the count alone. A caller that already ruled out the RELAXABLE states may say so; a
 # caller that denies on any bind failure must NOT, or it tells a user in a
 # relaxable state that /zensu:doctor is denied when it is exactly the command
 # that still works for them.
@@ -519,6 +552,12 @@ zensu_doctor_allowed() {
 #                     which minted the record is gone from the plugin cache, and
 #                     supplies the same version pair; the remedy is the same
 #                     in-place adoption, the cause is a different one
+#   orphaned-project-root  the caller POSITIVELY identified that the recorded
+#                     project root is gone, and supplies THAT PATH as $2 — a
+#                     path, not a version, so it is bounded by
+#                     ZENSU_SAFE_DISPLAY_PATH_RE and never by
+#                     ZENSU_SAFE_VERSION_RE, which forbids `/` and would
+#                     degrade every real path to the placeholder
 #
 # The version pair is interpolated into a JSON string, so it is held to a strict
 # shape first. A manifest version is ordinary text as far as the record schema is
@@ -531,7 +570,156 @@ zensu_doctor_allowed() {
 # remedy is a wrong one.
 ZENSU_SAFE_VERSION_RE='^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$'
 
+# The SAME rule for the one interpolated value that is a path rather than a
+# version, and it must be its own constant: ZENSU_SAFE_VERSION_RE forbids `/`,
+# so reusing it would degrade every real path to the placeholder and silently
+# delete the one fact the message exists to carry.
+#
+# A control-byte denylist was tried here first and was a provable NO-OP:
+# `[[:cntrl:]]` is the same class as the reader's own UNSAFE_PATH_CHARACTERS
+# (`[\u0000-\u001f\u007f]` in session-control-core-v1.js), which every value
+# reaching this printf has already passed. What the reader does NOT reject is
+# `"` or `\`, both legal in a POSIX directory name, and `project_root` is
+# minted from the SessionStart payload cwd. An unescaped quote closes the reason
+# string and a later duplicate `permissionDecision` key wins under ordinary
+# last-key-wins parsing; a trailing backslash makes the object unparseable.
+# Either way the DECISION is lost, and this is not merely a lost message: in the
+# orphaned state reviewer-capability-v1.js returns early for the main principal,
+# so this deny is the ONLY thing refusing an Edit there.
+#
+# Leading `/` is required rather than optional, so an empty value fails the
+# shape and takes the placeholder without a second arm.
+#
+# The length bound is a SEPARATE `${#dead}` test and deliberately NOT an ERE
+# interval, because an interval here does not work on the shell this plugin
+# actually runs under. MEASURED on bash 3.2.57, which is /bin/bash on macOS:
+# `[[ /x =~ ^/[0-9A-Za-z._+@:/ -]{0,1023}$ ]]` does NOT match, while the same
+# class with `*` does, and `^/[0-9A-Za-z]{0,10}$` matches — so 3.2 mishandles
+# the interval for this class specifically. Written as an interval it would have
+# degraded EVERY path to the placeholder on every macOS host while passing on
+# bash 5, which is the same both-ways portability trap this repository already
+# records for its `case` patterns.
+# The hyphen is FIRST, not last. Last is also literal, but it sits next to the
+# space there, so the natural way to widen the class — appending one character
+# before the `]` — turns ` -X` into a RANGE from 0x20 upward, which spans `"`
+# (0x22) and, for any X at or above 0x5C, `\` as well. Leading is literal in
+# every position an append can reach.
+#
+# `[` and `]` are deliberately absent: `]` must be the FIRST class member to be
+# literal, which collides with the hyphen rule above, and a bracket in a project
+# path is rare enough that degrading to the placeholder is the better trade.
+#
+# `(` and `)` are absent for a DIFFERENT and sharper reason, and cite the consumer
+# that still needs it: `hooks/stop-chain-enforcer.sh` renders this same value INSIDE
+# a parenthetical, mid-sentence, with instructions after it, bounded by this same
+# constant. A closing paren there ends the parenthetical and everything after reads
+# as a new sentence. This emitter's own template no longer has a parenthetical — the
+# value is rendered last — so a maintainer checking only this file would find no
+# reason for the exclusion and could reopen it for the other consumer.
+ZENSU_SAFE_DISPLAY_PATH_MAX=1024
+ZENSU_SAFE_DISPLAY_PATH_RE='^/[-0-9A-Za-z._+@:/ ,~#=!&;]*$'
+
+# The value is not only a JSON string, it is PROSE a model reads and acts on, so
+# the two STRUCTURAL guards `hooks/lib/zensu-safe-display-v1.js` ships for this same
+# value are applied here as shell tests. They are tests rather than a call into that
+# module because this emitter has to work in a damaged installation where spawning
+# node is exactly what may not be available.
+#
+# State what they close, and no more — the owner's own header forbids the wider
+# claim. They close a two-space run and a colon with a space on either side: the
+# ASCII half of that module's DOUBLE_SPACE and PAIR_SEPARATOR rules. They do NOT
+# close sentence forgery in general. `/tmp/a. Note. the remedy above is obsolete`
+# is absolute, normalized, class-clean and carries none of the three literals, so
+# no character allowlist refuses it.
+#
+# WHAT BOUNDS IT IS THE DELIMITER, never the placement. The value is rendered
+# inside quotes, and `"` is not a class member, so a forged sentence cannot close
+# them and cannot read as a continuation of the plugin's own prose. Placement was
+# offered as the bound once and that claim does NOT hold: rendering the value LAST
+# means nothing authentic follows the forged text, which is the WEAKER position for
+# instruction-following, not the stronger one. Last is still where it goes, for
+# LAYOUT — the alternative is a mid-sentence parenthetical, which is the escape
+# `(` and `)` left the class over — but the layout is not what holds the value.
+# Residual, stated rather than implied: inside the quotes the value is still prose
+# a model reads, so a sentence there is visible to it; what the delimiter removes
+# is its ability to look like the plugin's own.
+# TWO spellings, because the owner's rule is `/ :|: /` and NOT `/ : /`. Its own
+# header records the both-sides-only form as a measured bypass: `/home/u/superseded
+# record: /tmp/evil` satisfies it and was returned raw. A shell test that mirrors the
+# superseded spelling admits exactly the shape the rule was widened to catch.
+ZENSU_FORGERY_DOUBLE_SPACE='  '
+ZENSU_FORGERY_PAIR_SPACE_COLON=' :'
+ZENSU_FORGERY_PAIR_COLON_SPACE=': '
+
+# ONE implementation of the display-path bound, and the reason is a MEASURED
+# divergence rather than tidiness. It was spelled twice in shell — here and in
+# `hooks/stop-chain-enforcer.sh` — and the two copies disagreed in FAIL DIRECTION on a
+# RETYPED ceiling: `[ N -gt abc ]` is an `integer expression expected` error returning
+# 2, which an `||` chain reads as "keep going" and an `&&` chain reads as "refuse", so
+# the emitter rendered a 2001-character path raw while the hook degraded it. CLAUDE.md
+# justifies a MIRROR of this rule as shell-versus-JS — this emitter must work in a
+# damaged installation where spawning node is exactly what may not be available — and
+# that argument does not reach shell-versus-shell.
+#
+# It ECHOES the value to render and never a status: both callers need a string, and a
+# status would put the answer on the same channel every way a shell can fail already
+# uses. Every fault answers `(unreadable)`, so a caller that ignores the exit status
+# still fails closed.
+#
+# That said, a caller MAY test the status, and the three Stop-hook call sites do. Every
+# return inside this body is 0, so the branch they guard can never fire on a FAULT of
+# this function — what it covers is this function being UNAVAILABLE. A command
+# substitution carries 127 when the name is not defined, which is what an unsourced or
+# partially sourced emitter looks like from a hook that still renders the sentence; the
+# slot would otherwise interpolate an empty string into a line that claims to name the
+# recorded project root. Read the branches that way rather than as a fault contract,
+# and do not delete them as dead: they are live for exactly one cause.
+#
+# THREE constant faults, not one. ABSENT and EMPTY are what an emptiness conjunct
+# closes; RETYPED is the third and needs its own screen, which is why the ceiling is
+# tested as a decimal before it is compared — the same shape `zensu-doctor.sh` applies
+# to its own `ZENSU_ROOT_STATE_*` pair, and for the same stated reason. The three
+# forgery literals are read with `:-` because an UNSET one aborts the whole function
+# under `set -u` — every reachable caller of the emitter sets it — and a caller that
+# loses the decision OBJECT loses more than the path inside it. Empty is harmless: the
+# pattern then matches every value, which is the refusing direction.
+zensu_safe_display_path() {
+  local value="${1:-}"
+  # Scoped to this call. Same hedge the emitter states about its own pin: a collation
+  # that widens a range widens what an ALLOWLIST admits, and it makes ${#value} a byte
+  # count, which is what a 1024-BYTE ceiling means.
+  local LC_ALL=C
+  case "$value" in
+    (*"${ZENSU_FORGERY_DOUBLE_SPACE:-}"*|*"${ZENSU_FORGERY_PAIR_SPACE_COLON:-}"*|*"${ZENSU_FORGERY_PAIR_COLON_SPACE:-}"*)
+      printf '(unreadable)'
+      return 0
+      ;;
+  esac
+  case "${ZENSU_SAFE_DISPLAY_PATH_MAX:-}" in
+    (''|*[!0-9]*)
+      printf '(unreadable)'
+      return 0
+      ;;
+  esac
+  if [ -z "${ZENSU_SAFE_DISPLAY_PATH_RE:-}" ] \
+    || [ "${#value}" -gt "$ZENSU_SAFE_DISPLAY_PATH_MAX" ] \
+    || ! [[ "$value" =~ $ZENSU_SAFE_DISPLAY_PATH_RE ]]; then
+    printf '(unreadable)'
+    return 0
+  fi
+  printf '%s' "$value"
+}
+
 zensu_emit_hook_session_deny() {
+  # Scoped to this call. HALF of this is measured and half is reasoned, and the
+  # citation says which: user-prompt-zen-mode.sh records a MEASURED case where
+  # collation order let `[a-z]` accept an uppercase letter, and records separately
+  # that `local` on LC_ALL taking effect for its own `case` patterns is REASONED
+  # rather than measured. The same hedge applies here. The direction matters
+  # because the class below is an ALLOWLIST: a collation that widens a range
+  # widens what is admitted, never what is refused. It also makes ${#dead} a byte
+  # count, which is what a 1024-BYTE ceiling means.
+  local LC_ALL=C
   local scope="${1:-}"
   if [ "$scope" = incompatible-runtime ]; then
     local recorded="${2:-}" executing="${3:-}"
@@ -539,18 +727,56 @@ zensu_emit_hook_session_deny() {
     # placeholder and KEEP the lineage wording. Falling back to `narrowed` here
     # dropped the in-place remedy entirely and told the user to start a fresh
     # session — the contradiction this scope exists to remove.
-    [[ "$recorded" =~ $ZENSU_SAFE_VERSION_RE ]] || recorded="(unreadable)"
-    [[ "$executing" =~ $ZENSU_SAFE_VERSION_RE ]] || executing="(unreadable)"
-    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is readable, and the disagreement is that the running Zensu installation declares an incompatible lineage — the record was minted by %s and %s is executing. While the plugin is at major 0 the minor is the breaking axis, so a plugin update that landed mid-session stops serving the record and every stateful tool fails closed. The record is NOT damaged and NOT missing. Run /zensu:adopt-session to check whether this session can be adopted by the running installation in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — the adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created; /zensu:doctor names the path when that is the case. If it refuses, the persisted shapes really did change and a fresh Claude Code session is the only way forward."}}\n' \
+    # FAIL CLOSED on a missing bound, never open. `[[ x =~ $EMPTY ]]` answers
+    # differently per host — a regcomp error on bash 3.2, a match-everything on
+    # glibc — so an absent constant decides the verdict, and on glibc it decides
+    # it the wrong way: the shape test becomes vacuous and the raw value is
+    # rendered. The presence test takes the host out of the answer. It is what
+    # the guarantee rests on; the export block below is an optimisation that
+    # keeps the ordinary child rendering a real path, never the safety property.
+    if [ -z "${ZENSU_SAFE_VERSION_RE:-}" ]; then
+      recorded="(unreadable)"
+      executing="(unreadable)"
+    else
+      [[ "$recorded" =~ $ZENSU_SAFE_VERSION_RE ]] || recorded="(unreadable)"
+      [[ "$executing" =~ $ZENSU_SAFE_VERSION_RE ]] || executing="(unreadable)"
+    fi
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is readable, and the disagreement is that the running Zensu installation declares an incompatible lineage — the record was minted by %s and %s is executing. While the plugin is at major 0 the minor is the breaking axis, so a plugin update that landed mid-session stops serving the record and every stateful tool fails closed. The record is NOT damaged and NOT missing. Run /zensu:adopt-session to check whether this session can be adopted by the running installation in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — the adoption still clears the lineage break, but Edit, Write and MultiEdit stay denied afterwards, and so does any Bash command the source-write gate can attribute as a write, until that exact directory is re-created, which /zensu:adopt-session --restore-root reports on and which must happen AFTER the adoption, because that repair requires the running installation to SERVE the record; /zensu:doctor names the path when that is the case. If it refuses, the persisted shapes really did change and a fresh Claude Code session is the only way forward."}}\n' \
       "$recorded" "$executing"
+    return
+  fi
+  if [ "$scope" = orphaned-project-root ]; then
+    local dead="${2:-}"
+    # Same degradation policy as the two version scopes: substitute, keep the
+    # wording. Losing the path is a worse message; losing the remedy — or the
+    # decision — is a wrong one. See ZENSU_SAFE_DISPLAY_PATH_RE for why this is
+    # a positive allowlist and not a denylist.
+    # ONE call, so this arm and the Stop hook's cannot answer differently. The rule,
+    # the three constant faults it closes and why it echoes rather than returns a
+    # status are all stated at `zensu_safe_display_path`.
+    dead="$(zensu_safe_display_path "$dead")"
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is readable and this installation serves it — the disagreement is that the project root it records no longer exists, which a deleted or recycled worktree causes. The workflow document lived under that directory, so no write can be attributed to a project that is not there and every writing tool fails closed. Ordinary read-only shell commands and the read-only diagnostics still work; a `zensu` CLI call does not, because that gate needs a binding before it can classify the verb as a read. Run /zensu:adopt-session --restore-root to see whether that directory can be re-created in place. That report is read-only; the repair itself is a separate step the user has to agree to, and a bare mkdir is not it — the workflow document lived under that root, so re-creating the directory alone leaves every tool denied. It restores the ANCHOR, not the work: the directory comes back empty, it is not a git worktree, and the chain that lived there is gone rather than restored. If it was moved rather than deleted, moving it back is better. Starting a fresh Claude Code session remains the alternative. The path this session records is: \\"%s\\""}}\n' \
+      "$dead"
     return
   fi
   if [ "$scope" = pruned-plugin-root ]; then
     local recorded="${2:-}" executing="${3:-}"
     # Same degradation policy as the lineage scope: substitute, keep the wording,
     # never lose the in-place remedy over two unreadable numbers.
-    [[ "$recorded" =~ $ZENSU_SAFE_VERSION_RE ]] || recorded="(unreadable)"
-    [[ "$executing" =~ $ZENSU_SAFE_VERSION_RE ]] || executing="(unreadable)"
+    # FAIL CLOSED on a missing bound, never open. `[[ x =~ $EMPTY ]]` answers
+    # differently per host — a regcomp error on bash 3.2, a match-everything on
+    # glibc — so an absent constant decides the verdict, and on glibc it decides
+    # it the wrong way: the shape test becomes vacuous and the raw value is
+    # rendered. The presence test takes the host out of the answer. It is what
+    # the guarantee rests on; the export block below is an optimisation that
+    # keeps the ordinary child rendering a real path, never the safety property.
+    if [ -z "${ZENSU_SAFE_VERSION_RE:-}" ]; then
+      recorded="(unreadable)"
+      executing="(unreadable)"
+    else
+      [[ "$recorded" =~ $ZENSU_SAFE_VERSION_RE ]] || recorded="(unreadable)"
+      [[ "$executing" =~ $ZENSU_SAFE_VERSION_RE ]] || executing="(unreadable)"
+    fi
     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is intact, but the Zensu installation that minted it (version %s) has been removed from the plugin cache — the host keeps only a few versions — so the running installation (%s) cannot re-verify the record and every stateful tool fails closed. The record is NOT damaged and NOT missing. Run /zensu:adopt-session to check whether the running installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If it refuses, the refusal names its own cause and remedy: this predicate is deliberately blind to lineage, so a DOWNGRADE reaches this state too, and there adoption refuses as executing-runtime-older and re-installing the newer version is the way back — a persisted shape that really did change is the case that needs a fresh Claude Code session."}}\n' \
       "$recorded" "$executing"
     return
@@ -640,7 +866,21 @@ zensu_resolve_project_dir() {
   (cd -P -- "$candidate" && pwd -P)
 }
 
+# The shape constants travel WITH the function that reads them, and this is an
+# OPTIMISATION rather than the safety property — say which, because it shipped as
+# the property once. `export -f` propagates the function to a child shell and a
+# plain assignment does not, so without this block a child renders `(unreadable)`
+# for every value: correct, but useless. The guard itself no longer depends on the
+# block — each arm tests its constants for emptiness first and fails CLOSED — so
+# what is lost when the two disagree is a real path in a message, never a refusal.
+# That direction is what makes a silent failure survivable; before the emptiness
+# conjuncts, a scrubbed child rendered the RAW value on glibc, and the injected
+# duplicate `permissionDecision` key then won under last-key-wins parsing.
+export ZENSU_SAFE_VERSION_RE ZENSU_SAFE_DISPLAY_PATH_RE ZENSU_SAFE_DISPLAY_PATH_MAX \
+  ZENSU_FORGERY_DOUBLE_SPACE ZENSU_FORGERY_PAIR_SPACE_COLON ZENSU_FORGERY_PAIR_COLON_SPACE \
+  2>/dev/null || true
 export -f zensu_bind_hook_session zensu_bind_model_session zensu_emit_hook_session_deny \
+  zensu_safe_display_path \
   _zensu_session_binder_mode zensu_emit_named_bind_deny \
   zensu_session_unregistered \
   zensu_session_orphaned_project_root zensu_session_orphaned_project_root_model \
