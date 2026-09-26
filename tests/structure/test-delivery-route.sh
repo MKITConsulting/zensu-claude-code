@@ -413,7 +413,10 @@ rm -rf "$MARKER_H"
 # R8i a signal during the write ENDS the helper: the cleanup trap is EXIT-only and the
 # signal traps exit, so the write cannot resume after the handler. The `mv` shim sends
 # its parent, the helper, the signal named in R8I_SIGNAL and then performs the rename;
-# each of the three trapped signals must end the helper with its own status.
+# each of the three trapped signals must end the helper with its own status. The `bash`
+# shim beside it starts the helper with SIGINT at its default disposition: run-all.sh
+# runs every suite as a background job, which starts with SIGINT ignored, and bash
+# cannot trap a signal that was ignored when it started.
 SHIM_MVINT_BIN="$STATE_DIR/shim-mvint"; mkdir -p "$SHIM_MVINT_BIN"
 cat > "$SHIM_MVINT_BIN/mv" <<EOF
 #!/bin/sh
@@ -424,7 +427,12 @@ if [ "\${1:-}" = "-f" ]; then
 fi
 exec "$REAL_MV" "\$@"
 EOF
-chmod +x "$SHIM_MVINT_BIN/mv"
+REAL_BASH="$(command -v bash)"
+cat > "$SHIM_MVINT_BIN/bash" <<EOF
+#!/bin/sh
+exec perl -e '\$SIG{INT} = "DEFAULT"; exec @ARGV or exit 127' "$REAL_BASH" "\$@"
+EOF
+chmod +x "$SHIM_MVINT_BIN/mv" "$SHIM_MVINT_BIN/bash"
 R8I_BAD=""
 for r8i_pair in INT:130 TERM:143 HUP:129; do
   rm -rf "$MARKER_H"
