@@ -79,7 +79,8 @@ never run in GitHub Actions.
   actual injected context, then performs exactly one causal use-then-result
   successful `Read` of the
   wrapper-owned neutral marker. Its agent definition and the capability gate
-  both restrict it to `Read`, `Grep`, and `Glob`; it receives neither `main-v1`
+  both restrict it to `Read`, `Grep`, and `Glob`, the gate adding only the
+  host's `SubagentHandback` report tool; it receives neither `main-v1`
   nor Session Control selectors.
 - Every other neutral `host-profile-v1` child is denied all shell/command tool
   aliases before command contents are considered. This is a capability rule,
