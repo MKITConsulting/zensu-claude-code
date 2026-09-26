@@ -437,7 +437,9 @@ Reviewer returns findings in three tiers:
 - **Important**: should land before merge. Auto-fix attempted.
 - **Suggestions**: nice-to-have. NOT auto-fixed.
 
-Auto-fix loop runs up to 5 rounds (configurable via `autoFixMaxRounds` in plugin settings). Each round after the first reviews only its OWN delta while `hooks.incrementalReviewRounds` is enabled (the default) — the `zensu:review-aspect` packet's `changed_files` is narrowed to the paths that round's `R<n>-*` IMPL claims name, resolved by [hooks/lib/review-round-scope-v1.js](../hooks/lib/review-round-scope-v1.js), UNION every path a still-open finding cites. The `zensu:review-judge` packet always keeps the full cumulative diff, because a delta cannot show cross-cutting drift. The helper narrows only on `status=ok`; `status=empty` and `status=degraded` both keep the whole diff, so a log it cannot read costs tokens and never coverage. On the 5th round, the harness emits "max rounds reached, manual fix required" and hands off to the terminal self-review stage (below) instead of stopping — preventing infinite loops on intractable findings.
+The three reviewer agents carry the exact definitions from [review-severity.md](review-severity.md). `hooks.autoFixIncludeSuggestions` also fixes suggestions; while `hooks.reviewConvergence` is enabled it does so in the first review only.
+
+Auto-fix loop runs up to 5 rounds (configurable via `autoFixMaxRounds` in plugin settings). Each round after the first reviews only its OWN delta while `hooks.incrementalReviewRounds` is enabled (the default) — the `zensu:review-aspect` packet's `changed_files` is narrowed to the paths that round's `R<n>-*` IMPL claims name, resolved by [hooks/lib/review-round-scope-v1.js](../hooks/lib/review-round-scope-v1.js), UNION every path a still-open finding cites. The `zensu:review-judge` packet always keeps the full cumulative diff, because a delta cannot show cross-cutting drift. The helper narrows only on `status=ok`; `status=empty` and `status=degraded` both keep the whole diff, so a log it cannot read costs tokens and never coverage. While `hooks.reviewConvergence` is enabled (the default), every merged finding carries an `R<k>-F<n>` id and a `FINDING LEDGER` run-log line, [hooks/lib/review-ledger-v1.js](../hooks/lib/review-ledger-v1.js) reports that ledger to the judge, and every re-review routes only CRITICAL findings plus the IMPORTANT findings the judge raised, tagged `[NOT FIXED]` or cited on code the previous fix pass edited; every other finding becomes `[Deferred — do not fix]`, ledgered `parked` when it is IMPORTANT, and reaches the terminal self-review and the `## Open` table instead of another round. The review that completes after the 5th fix round takes the max-rounds branch whatever it found: the harness emits "max rounds reached, manual fix required" and hands off to the terminal self-review stage (below) instead of stopping — preventing infinite loops on intractable findings.
 
 **Terminal self-review stage (0.5.0+).** When `hooks.selfReview` is enabled (default), the code-reviewer chain does NOT close at convergence. On PASS, suggestions-only, or max-rounds, [hooks/post-review-tdd-delegate.sh](../hooks/post-review-tdd-delegate.sh) marks `--code-review-done` and hands off to the `/zensu:self-review` skill ([skills/self-review/SKILL.md](../skills/self-review/SKILL.md)) — a main-thread terminal stage ported from `/reflect`. It re-reads the session's own changes across seven dimensions (architecture, consistency, edge-cases, test coverage, security, simplification, conventions), takes at most ONE fix round under the still-active phase-gate if a must-fix surfaces (latched by `selfReviewFixed`; it never re-spawns the code-reviewer), then owns the chain terminus: it runs `--chain-done` and renders the final report including a `## Self-Review Summary`. The `Stop` hook ([hooks/stop-chain-enforcer.sh](../hooks/stop-chain-enforcer.sh)) routes to self-review while `codeReviewDone && !chainDone`. Set `hooks.selfReview=false` to restore the pre-0.5.0 behavior where code-reviewer convergence closes the chain directly.
 
@@ -478,7 +480,7 @@ The sections come in this fixed order:
 | `## Problem` | Exactly one sentence: the feature/bug/need this session addressed. |
 | `## What I built` | A `# \| Deliverable \| Status \| Link` table, then a `Check \| Verdict` audit table (feature title, files modified, tests created, build status, coverage status, edit landing verdict, then mtime audit verdict in the delegate renderer or evidence cross-check verdict in the self-review one, finding-verification verdict, gates-bypassed verdict, plan + log paths) whose non-clean edit-landing lines are carried verbatim, then — when the plan carries a `## Requirements` table — an `ID \| Status` table giving per-requirement status keyed by its stable AC-###/FR-### IDs. |
 | `## How I built it` | One line (TDD discipline, final reviewer verdict, findings count by severity, files reviewed), then a `Round \| Findings \| Fixed \| Result` table covering EVERY review round 1..N — clean verification rounds included, marked 🟢 `PASS — 0 findings, nothing to fix`, so the reader sees the chain converged; skipped only when no review round ran. |
-| `## Open` | An `Item \| Type \| Next step` table of deferred suggestions / max-rounds findings requiring manual fix, plus — in the `hooks.selfReview` default, where `/zensu:self-review` renders this section — one row per `EVIDENCE GAP` / `EVIDENCE CONTRADICTION` line the cross-check emitted (carried verbatim, with each `\|` escaped) and one row when the cross-check could not run at all. The single line `Nothing open.` applies only when that table has no rows whatsoever. Then the bypass-ledger disclosure line `Gates bypassed during this session: <output>`. Then, for a **standalone** chain only — never an Autopilot-bound one, which already ran converge report-only at the autopilot skill's own step 2b — and only when the session plan carries a `## Requirements` table, one closing line offering `/zensu:converge` as an optional flow-back audit. That offer is never run unasked and never gates or delays the chain terminus. This is the one section that may carry more than a single line of text. |
+| `## Open` | An `Item \| Type \| Next step` table of deferred suggestions / max-rounds findings requiring manual fix, plus one row per open findings-ledger entry (state `deferred`, `parked` or `routed-unfixed`, an entry carried from before a reset under its `G<g>:` id) while `hooks.reviewConvergence` is enabled, that `hooks/lib/review-ledger-v1.js --report` lists on `status=ok` or `status=partial`, never a second row for an `R<k>-F<n>` id already listed, and a `FINDINGS LEDGER PARTIAL — <reason>` or `FINDINGS LEDGER UNAVAILABLE — <reason>` row when the ledger read is not clean, plus — in the `hooks.selfReview` default, where `/zensu:self-review` renders this section — one row per `EVIDENCE GAP` / `EVIDENCE CONTRADICTION` line the cross-check emitted (carried verbatim, with each `\|` escaped) and one row when the cross-check could not run at all. The single line `Nothing open.` applies only when that table has no rows whatsoever. Then the bypass-ledger disclosure line `Gates bypassed during this session: <output>`. Then, for a **standalone** chain only — never an Autopilot-bound one, which already ran converge report-only at the autopilot skill's own step 2b — and only when the session plan carries a `## Requirements` table, one closing line offering `/zensu:converge` as an optional flow-back audit. That offer is never run unasked and never gates or delays the chain terminus. This is the one section that may carry more than a single line of text. |
 | `## TL;DR` | Exactly one sentence, always last. |
 
 This replaces the prior terse-stop behavior so the user retains visibility into the full chain. When `hooks.selfReview` is enabled (default), the terminal `/zensu:self-review` stage renders this summary and inserts a `## Self-Review Summary` section (a `Dimension | Verdict | Note` table) before `## Open`. `hooks.combinedSummary` in `~/.zensu/config.json` (default `true`; set `false` to restore terse stop) governs the delegate-rendered summary only — it has exactly one consumer, `hooks/post-review-tdd-delegate.sh`, so it applies on the `hooks.selfReview:false` path; with self-review enabled the terminal stage renders the report unconditionally. Contrast `autoFixIncludeSuggestions` which defaults to disabled — `combinedSummary` defaults the other way.
@@ -511,7 +513,11 @@ nothing could rewrite what it carried. It does two things: resolves the user's
 configured `logging.timestampStyle` (`wall`, `relative`, or `none`) so the format
 is consistent across runs, and redacts the message through
 `hooks/lib/zensu-artifact-redact-v1.js` (see [Publication safety](#publication-safety-of-the-plan-and-log)).
-Add `--truncate` to create the file instead of appending. Do not inline
+Add `--truncate` to create the file instead of appending. `--message-stdin`
+replaces `--message` and reads the whole message from stdin: every
+`FINDING LEDGER` line goes through it, fed by a heredoc whose delimiter is
+quoted, so the shell never expands finding text. The verb exits 2 without
+writing when both flags are passed or when stdin is empty. Do not inline
 `$(date +%H:%M:%S)` — that bypasses the user's preference — and do not redirect
 into the log by hand, which bypasses the redaction.
 
@@ -528,9 +534,11 @@ two must substitute identically or the equality match below reports a gap.
 real `<root>/.zensu/{plans,logs}/<file>`, with the artifact directory
 canonicalized, and the verb refuses otherwise. Without that check `append` would
 be a write/truncate primitive with a caller-supplied destination that no Bash
-gate can see: it carries none of the redirect, `tee`, `sed -i`, `dd` or heredoc
-tokens `bash-source-write-parse.js` recognizes as a channel, so rules (A)/(B) of
-the source-write gate never judge it. The same check closes the quieter half — an
+gate can see: its `--message` form carries none of the redirect, `tee`, `sed -i`,
+`dd` or heredoc tokens `bash-source-write-parse.js` recognizes as a channel, so
+rules (A)/(B) of the source-write gate never judge it. The heredoc that feeds
+`--message-stdin` is such a token, but the log destination is an argument, not a
+redirect target, so this check bounds that form as well. The same check closes the quieter half — an
 unrecognized destination used to leave the derived root empty, which SKIPPED the
 project-root rule and wrote a partially redacted line under exit 0.
 
@@ -570,6 +578,15 @@ redacted — a name grants no access, and this repo's own workflows carry
 `secrets.GITHUB_TOKEN` in public. Credential **values** belong to a different
 gate (`hooks/pre-write-secret-scan.sh`).
 
+`FINDING LEDGER` lines (`hooks.reviewConvergence`, see
+[configuration.md](configuration.md)) add review content to the log: each merged
+finding's id, state, severity, `path:line` anchor and a paraphrase of at most 100
+characters. The paraphrase never quotes code, secrets or values, and for a security
+finding it names only the class of weakness, never how to exploit it. The location and
+class of a security finding that is still open are therefore published with the log. A
+repository that must not disclose even that keeps its run logs out of the published tree,
+or sets `hooks.reviewConvergence` to `false`.
+
 Four writers apply it:
 
 | Writer | What it covers |
@@ -607,8 +624,9 @@ would silently downgrade to `verified`.
 **One protection was removed and then RESTORED at the new chokepoint.** The old recipe wrote the log with `printf … >> {log}`,
 which `hooks/lib/bash-source-write-parse.js` reports as a write channel, so
 `hooks/pre-write-secret-scan.sh` scanned the command text — log message included.
-`append` carries no redirect, so that incidental scan no longer fires on a log
-line. It was never a designed protection, but the reason is not the one an earlier
+In its `--message` form `append` carries no redirect, so that incidental scan no
+longer fires on a log line; the heredoc that feeds `--message-stdin` is a channel
+again, so a `FINDING LEDGER` append is scanned there as well as by the verb. It was never a designed protection, but the reason is not the one an earlier
 revision of this paragraph gave: `hooks/lib/secret-scan-decide.js` has no
 extension filter at all — it scans the whole command text whenever a channel is
 present — so the old redirect form genuinely WAS scanned, and the loss is real

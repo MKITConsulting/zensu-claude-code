@@ -434,7 +434,7 @@ fi
 R16A_BEFORE="$(cksum < "$LOGF")"
 R16A_ERR="$(HOME="$FAKE_HOME" bash "$LOG_HELPER" append --log "$LOGF" 2>&1 >/dev/null)"
 RC=$?
-if [ "$RC" -eq 2 ] && printf '%s' "$R16A_ERR" | grep -qF -- '--message <text> is required' \
+if [ "$RC" -eq 2 ] && printf '%s' "$R16A_ERR" | grep -qF -- '--message <text> or --message-stdin is required' \
   && [ "$R16A_BEFORE" = "$(cksum < "$LOGF")" ]; then
   check "R16a append refuses an ABSENT --message and writes no bare timestamp" PASS
 else
@@ -450,6 +450,35 @@ if [ "$RC" -eq 2 ] && printf '%s' "$R16D_ERR" | grep -qF -- '--message needs a v
   check "R16d append refuses a VALUELESS --message and writes no bare timestamp" PASS
 else
   check "R16d append refuses a VALUELESS --message (rc=$RC err=$R16D_ERR)" FAIL
+fi
+
+STDIN_LOG="$PROJ/.zensu/logs/2026-01-01-0060_tdd-stdin.log"
+R16E_LINE='FINDING LEDGER — R1-F1 deferred IMPORTANT src/a.ts:3 | kept $(literal) and `ticks` as text'
+printf '%s\n' "$R16E_LINE" | HOME="$FAKE_HOME" bash "$LOG_HELPER" append --log "$STDIN_LOG" --message-stdin >/dev/null 2>&1
+RC=$?
+if [ "$RC" -eq 0 ] && [ -f "$STDIN_LOG" ] && [ "$(tail -n 1 "$STDIN_LOG" | grep -cF -- "$R16E_LINE")" = 1 ]; then
+  check "R16e append --message-stdin writes the piped message verbatim" PASS
+else
+  check "R16e append --message-stdin writes the piped message verbatim (rc=$RC)" FAIL
+fi
+
+R16F_BEFORE="$(cksum < "$STDIN_LOG" 2>/dev/null)"
+R16F_ERR="$(printf '' | HOME="$FAKE_HOME" bash "$LOG_HELPER" append --log "$STDIN_LOG" --message-stdin 2>&1 >/dev/null)"
+RC=$?
+if [ "$RC" -eq 2 ] && printf '%s' "$R16F_ERR" | grep -qF -- '--message-stdin read an empty message' \
+  && [ "$R16F_BEFORE" = "$(cksum < "$STDIN_LOG" 2>/dev/null)" ]; then
+  check "R16f append refuses an EMPTY --message-stdin and writes no bare timestamp" PASS
+else
+  check "R16f append refuses an EMPTY --message-stdin (rc=$RC err=$R16F_ERR)" FAIL
+fi
+
+R16G_ERR="$(printf 'piped\n' | HOME="$FAKE_HOME" bash "$LOG_HELPER" append --log "$STDIN_LOG" --message "inline" --message-stdin 2>&1 >/dev/null)"
+RC=$?
+if [ "$RC" -eq 2 ] && printf '%s' "$R16G_ERR" | grep -qF -- 'pass exactly one of --message and --message-stdin' \
+  && [ "$R16F_BEFORE" = "$(cksum < "$STDIN_LOG" 2>/dev/null)" ]; then
+  check "R16g append refuses --message together with --message-stdin" PASS
+else
+  check "R16g append refuses --message together with --message-stdin (rc=$RC err=$R16G_ERR)" FAIL
 fi
 
 SYMLOG="$PROJ/.zensu/logs/2026-01-01-0008_tdd-sym.log"

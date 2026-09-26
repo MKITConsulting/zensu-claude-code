@@ -2123,6 +2123,7 @@ case "$cmd" in
     log_val=""
     msg_val=""
     msg_seen=0
+    msg_stdin=0
     start_val=""
     truncate_val=0
     while [ "$#" -gt 0 ]; do
@@ -2137,7 +2138,10 @@ case "$cmd" in
             echo "zensu-log.sh append: --message needs a value" >&2
             exit 2
           fi
-          msg_val="$2"; msg_seen=1; shift 2
+          msg_val="$2"; msg_seen=$((msg_seen + 1)); shift 2
+          ;;
+        --message-stdin)
+          msg_val="$(cat)"; msg_seen=$((msg_seen + 1)); msg_stdin=1; shift
           ;;
         --start)    start_val="${2:-}"; shift 2 || break ;;
         --truncate) truncate_val=1;     shift ;;
@@ -2152,12 +2156,20 @@ case "$cmd" in
       echo "zensu-log.sh append: --log <file> is required" >&2
       exit 2
     fi
+    if [ "$msg_seen" -gt 1 ]; then
+      echo "zensu-log.sh append: pass exactly one of --message and --message-stdin" >&2
+      exit 2
+    fi
     # A flag consumed as the last token leaves ${2:-} empty and `shift 2` fails
     # into the loop break, so an absent VALUE is indistinguishable from an
     # absent flag unless it is tracked. Writing a timestamp-only line into a
     # committed audit log is not a reasonable answer to a malformed call.
     if [ "$msg_seen" -ne 1 ]; then
-      echo "zensu-log.sh append: --message <text> is required" >&2
+      echo "zensu-log.sh append: --message <text> or --message-stdin is required" >&2
+      exit 2
+    fi
+    if [ "$msg_stdin" = 1 ] && [ -z "$msg_val" ]; then
+      echo "zensu-log.sh append: --message-stdin read an empty message" >&2
       exit 2
     fi
     if [ -L "$log_val" ]; then
@@ -2442,7 +2454,7 @@ case "$cmd" in
     _zensu_log_style
     ;;
   *)
-    echo "usage: zensu-log.sh {append --log <file> --message <text> [--start <epoch>] [--truncate] | timestamp <epoch> | style}" >&2
+    echo "usage: zensu-log.sh {append --log <file> (--message <text> | --message-stdin) [--start <epoch>] [--truncate] | timestamp <epoch> | style}" >&2
     exit 2
     ;;
 esac
