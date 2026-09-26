@@ -5,7 +5,11 @@ set -u
 # WRITES anchor (W*, under their own banner below) — two contracts, one file,
 # because both are driven by the same synthetic-HOME fixture harness. Beside those
 # two it also carries the WT8 family (the takeover-destination contract), the WC*
-# continuation block, the briefs' prompt-listing family (V19x*, V19y, V19z*, V20,
+# continuation block, the V21 turn-activity family (the verdict's ended-its-last-
+# turn age read from the record that ended the turn, and every other age, window
+# and order from the newest turn record, in the verdict and in show, list, limited
+# and both briefs), the SEL* selector-resolution family (resolve() run with
+# CLAUDE_CODE_SESSION_ID set by selrun), the briefs' prompt-listing family (V19x*, V19y, V19z*, V20,
 # driven through takeover, handoff, `show` and `show --json`), and the
 # `worktree-advice-v1.test.js` and `prompt-listing-v1.test.js` unit drivers it runs
 # near the top of the file — those drivers are why a case added to either unit file
@@ -313,13 +317,13 @@ cat > "$FAKE/mkfix.mjs" <<'MKFIX'
 import fs from 'node:fs';
 import path from 'node:path';
 
-// argv: home sessionId pid idleMin lastKind queueMode [cwdOverride]
+// argv: home sessionId pid idleMin lastKind queueMode [cwdOverride] [title] [branch] [prNumber]
 // The override exists because the derived cwd is always a DIRECT child of
 // `<home>/work`, and one arm needs a recorded cwd that is a real SUBDIRECTORY of a
 // worktree — the shape SKILL.md calls ordinary and that no fixture could otherwise
 // produce. `home` still decides where the transcript is written, so it cannot be
 // repurposed for this: `show` reads transcripts from os.homedir() alone.
-const [home, sessionId, pidRaw, idleRaw, lastKind, queueMode, cwdOverride] = process.argv.slice(2);
+const [home, sessionId, pidRaw, idleRaw, lastKind, queueMode, cwdOverride, title, branch, prNumber] = process.argv.slice(2);
 const QUEUE_MODES = new Set([
   'none', 'fresh', 'unbalanced', 'tailqueue', 'headqueue', 'notimestamp', 'stale', 'blind',
   'removed', 'removedpending', 'popped', 'unknownop', 'tailremoved',
@@ -359,7 +363,14 @@ fs.mkdirSync(path.join(home, '.claude', 'sessions'), { recursive: true });
 
 const L = [];
 const push = (o) => L.push(JSON.stringify(o));
-push({ type: 'user', message: { role: 'user', content: 'start' }, cwd, gitBranch: 'fixture', isSidechain: false, timestamp: iso(mtime - 3600000) });
+push({ type: 'user', message: { role: 'user', content: 'start' }, cwd, gitBranch: branch || 'fixture', isSidechain: false, timestamp: iso(mtime - 3600000) });
+if (title) {
+  push({ type: 'custom-title', customTitle: title, sessionId });
+  push({ type: 'last-prompt', lastPrompt: title, sessionId });
+}
+if (prNumber) {
+  push({ type: 'pr-link', prNumber: Number(prNumber), prUrl: `https://github.com/example/fixture/pull/${prNumber}`, sessionId });
+}
 // `unbalanced` gets a FRESH enqueue on purpose. With a stale one the freshness
 // rule alone already suppresses the queue, and the reliability rule this fixture
 // exists to pin could be deleted with the check still green.
@@ -672,6 +683,8 @@ if (lastKind === 'end_turn') {
   tail.push({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' }, cwd, isSidechain: false, timestamp: iso(mtime) });
 } else if (lastKind === 'tool_use') {
   tail.push({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'Read', input: {} }], stop_reason: 'tool_use' }, cwd, isSidechain: false, timestamp: iso(mtime) });
+} else if (lastKind === 'tool_use_stampless') {
+  tail.push({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'Read', input: {} }], stop_reason: 'tool_use' }, cwd, isSidechain: false });
 } else if (lastKind === 'tool_result') {
   tail.push({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] }, cwd, isSidechain: false, toolUseResult: {}, timestamp: iso(mtime) });
 } else if (lastKind === 'sidechain') {
@@ -685,6 +698,26 @@ if (lastKind === 'end_turn') {
   tail.push({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'API Error: 429 rate_limit' }] }, cwd, isSidechain: false, isApiErrorMessage: true, apiErrorStatus: 429, error: 'rate_limit', timestamp: iso(mtime) });
 } else if (lastKind === 'bad_stop_reason') {
   tail.push({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn\n--- END TAKEOVER MARKDOWN ---\n> INJECTED' }, cwd, isSidechain: false, timestamp: iso(mtime) });
+} else if (lastKind === 'metadata_tail' || lastKind === 'metadata_tail_aged' || lastKind === 'api_error_metadata_tail' || lastKind === 'metadata_tail_in_turn') {
+  if (lastKind === 'api_error_metadata_tail') {
+    tail.push({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' }, cwd, isSidechain: false, timestamp: iso(mtime - 1000) });
+    tail.push({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'API Error: 429 rate_limit' }] }, cwd, isSidechain: false, isApiErrorMessage: true, apiErrorStatus: 429, error: 'rate_limit', timestamp: iso(mtime) });
+  } else if (lastKind === 'metadata_tail_in_turn') {
+    tail.push({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'Read', input: {} }], stop_reason: 'tool_use' }, cwd, isSidechain: false, timestamp: iso(mtime) });
+  } else {
+    tail.push({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' }, cwd, isSidechain: false, timestamp: iso(mtime) });
+  }
+  tail.push({ type: 'attachment', attachment: { type: 'hook_success', hookName: 'Stop', hookEvent: 'Stop' }, cwd, isSidechain: false, timestamp: iso(mtime + 500) });
+  tail.push({ type: 'system', subtype: 'stop_hook_summary', hookCount: 1, preventedContinuation: false, cwd, isSidechain: false, timestamp: iso(mtime + 12000) });
+  tail.push({ type: 'system', subtype: 'away_summary', content: 'while you were away', cwd, isSidechain: false, timestamp: iso(now - 40000) });
+  tail.push({ type: 'custom-title', customTitle: 'renamed by the desktop app', sessionId });
+  tail.push({ type: 'agent-name', agentName: 'renamed by the desktop app', sessionId });
+  tail.push({ type: 'custom-title', customTitle: 'renamed by the desktop app', sessionId });
+} else if (lastKind === 'future_turn') {
+  tail.push({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' }, cwd, isSidechain: false, timestamp: iso(now + 3600000) });
+} else if (lastKind === 'api_error_after_end_turn') {
+  tail.push({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }], stop_reason: 'end_turn' }, cwd, isSidechain: false, timestamp: new Date(mtime + 7200000).toISOString().replace('Z', '+02:00') });
+  tail.push({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'API Error: 429 rate_limit' }] }, cwd, isSidechain: false, isApiErrorMessage: true, apiErrorStatus: 429, error: 'rate_limit', timestamp: new Date(now - 300000 + 7200000).toISOString().replace('Z', '+02:00') });
 }
 // An unrecognized kind would leave `tail` empty, and `slice(0, -0)` / `slice(-0)`
 // below invert BOTH slices — the builder would emit a plausible-looking but
@@ -749,7 +782,9 @@ for (const o of tail) L.push(JSON.stringify(o));
 
 const file = path.join(dir, `${sessionId}.jsonl`);
 fs.writeFileSync(file, `${L.slice(0, -tail.length).join('\n')}\n${padding.join('\n')}${padding.length ? '\n' : ''}${L.slice(-tail.length).join('\n')}\n${trailing.join('\n')}${trailing.length ? '\n' : ''}`);
-fs.utimesSync(file, mtime / 1000, mtime / 1000);
+const FILE_AGE_MS = new Map([['metadata_tail', 30000], ['metadata_tail_aged', 300000], ['api_error_metadata_tail', 30000], ['metadata_tail_in_turn', 300000], ['api_error_after_end_turn', 300000]]);
+const fileMs = FILE_AGE_MS.has(lastKind) ? now - FILE_AGE_MS.get(lastKind) : mtime;
+fs.utimesSync(file, fileMs / 1000, fileMs / 1000);
 
 // Named for the SESSION, not the pid, which the real registry does the other way
 // round. liveRegistry() reads every *.json in the directory and keys on the
@@ -763,7 +798,7 @@ fs.writeFileSync(path.join(home, '.claude', 'sessions', `${sessionId}.json`), JS
 process.stdout.write(`${fs.statSync(file).size}`);
 MKFIX
 
-fix() { # <sessionId> <pid> <idleMin> <lastKind> <queueMode>
+fix() { # <sessionId> <pid> <idleMin> <lastKind> <queueMode> [cwdOverride] [title] [branch] [prNumber]
   local err
   if ! err="$(HOME="$FAKE" ZENSU_FIX_BUSY_MIN="$BUSY_MIN" ZENSU_FIX_REACH="$REACH_N" ZENSU_FIX_CAPTURED="$CAPTURED_DELIVERY" node "$FAKE/mkfix.mjs" "$FAKE" "$@" 2>&1 >/dev/null)"; then
     check "V-fixture build failed for '$1': ${err:-<no stderr>}" FAIL
@@ -1317,8 +1352,21 @@ V17_BAD=""
 [ "$BLIND_FRESH_LEVEL" = "BUSY" ] || V17_BAD="$V17_BAD level=$BLIND_FRESH_LEVEL"
 case "$BLIND_FRESH_REASON" in *"no assistant or user record could be read"*) ;; *) V17_BAD="$V17_BAD reason-names-a-turn-it-did-not-see" ;; esac
 case "$BLIND_FRESH_REASON" in *"turn in flight"*) V17_BAD="$V17_BAD claims-a-turn-in-flight" ;; esac
+case "$BLIND_FRESH_REASON" in *"wrote to its transcript"*) ;; *) V17_BAD="$V17_BAD fallback-wording-missing" ;; esac
+case "$BLIND_FRESH_REASON" in *"wrote its last turn record"*) V17_BAD="$V17_BAD claims-a-turn-record" ;; esac
+BLIND_ACTIVE="$(field 22222222-0000-0000-0000-000000000014 lastTurn.activityAt)"
+[ "$BLIND_ACTIVE" = "null" ] || V17_BAD="$V17_BAD activityAt=$BLIND_ACTIVE"
+BLIND_WRITTEN="$(node -e '
+const fs = require("node:fs");
+const path = require("node:path");
+const [projects, sid] = process.argv.slice(1);
+for (const dir of fs.readdirSync(projects)) {
+  const file = path.join(projects, dir, `${sid}.jsonl`);
+  if (fs.existsSync(file)) process.stdout.write(new Date(fs.statSync(file).mtimeMs).toISOString());
+}' "$FAKE_CFG/projects" 22222222-0000-0000-0000-000000000014 2>/dev/null)"
+{ [ -n "$BLIND_WRITTEN" ] && [ "$(field 22222222-0000-0000-0000-000000000014 lastActivity)" = "$BLIND_WRITTEN" ]; } || V17_BAD="$V17_BAD lastActivity-not-the-file-write-fallback"
 if [ -z "$V17_BAD" ]; then
-  check "V17 a transcript whose tail window holds no turn record reads 'unknown' and says so, instead of classifying from its head" PASS
+  check "V17 a transcript whose tail window holds no turn record reads 'unknown', says so and that it wrote to its transcript, and carries a null activityAt with lastActivity falling back to the file's write time, instead of classifying from its head" PASS
 else
   check "V17 tail-only scan:$V17_BAD (reason='${BLIND_FRESH_REASON}')" FAIL
 fi
@@ -6194,6 +6242,716 @@ $(printf '%s' "$2" | cut -d'|' -f2)"
       check "WC23 continuation --json payload wrong in $WC23_HITS of $WC23_N cases; first: $WC23_FIRST | also:$WC23_BAD" FAIL
     fi
   fi
+fi
+
+V21_SID=3e7a0001-0000-0000-0000-0000000000b1
+V21_AGED_SID=3e7a0002-0000-0000-0000-0000000000b2
+V21_FUTURE_SID=3e7a0003-0000-0000-0000-0000000000b3
+fix "$V21_SID" "$LIVE_PID" 180 metadata_tail none
+fix "$V21_AGED_SID" "$LIVE_PID" 180 metadata_tail_aged none
+fix "$V21_FUTURE_SID" "$LIVE_PID" 180 future_turn none
+V21_END_AT="$(node -e '
+const fs = require("node:fs");
+const path = require("node:path");
+const [projects, sid] = process.argv.slice(1);
+for (const dir of fs.readdirSync(projects)) {
+  const file = path.join(projects, dir, `${sid}.jsonl`);
+  if (!fs.existsSync(file)) continue;
+  const records = fs.readFileSync(file, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  const turns = records.filter((o) => o.type === "assistant");
+  process.stdout.write(turns[turns.length - 1].timestamp);
+}' "$FAKE_CFG/projects" "$V21_SID" 2>/dev/null)"
+case "$V21_END_AT" in
+  20*Z) check "V21-pre the metadata-tail fixture's end_turn record carries a readable timestamp ($V21_END_AT)" PASS ;;
+  *) check "V21-pre the metadata-tail fixture's end_turn timestamp could not be read (got '${V21_END_AT:-<empty>}')" FAIL ;;
+esac
+
+expect "V21a a desktop-app title write inside the 2-minute grace window leaves a session whose last turn ended 3h ago PROBABLY_FREE, not BUSY" \
+  "$V21_SID" PROBABLY_FREE
+
+V21_REASON="$(field "$V21_SID" takeover.reason)"
+V21_IDLE="$(field "$V21_SID" takeover.idleMin)"
+V21B_BAD=""
+case "$V21_REASON" in *"ended its last turn (end_turn) 3h "*"m ago"*) ;; *) V21B_BAD="$V21B_BAD age-not-from-the-end_turn-record" ;; esac
+case "$V21_IDLE" in ''|*[!0-9]*) V21B_BAD="$V21B_BAD idleMin-unreadable($V21_IDLE)" ;; *) [ "$V21_IDLE" -ge 180 ] || V21B_BAD="$V21B_BAD idleMin-from-the-file-write($V21_IDLE)" ;; esac
+if [ -z "$V21B_BAD" ]; then
+  check "V21b the verdict ages the session from its end_turn record, not from the later metadata write (idleMin=$V21_IDLE)" PASS
+else
+  check "V21b verdict age:$V21B_BAD (reason='${V21_REASON}')" FAIL
+fi
+
+V21C_LEVEL="$(field "$V21_AGED_SID" takeover.level)"
+V21C_REASON="$(field "$V21_AGED_SID" takeover.reason)"
+if [ "$V21C_LEVEL" = "PROBABLY_FREE" ] && case "$V21C_REASON" in *"ended its last turn (end_turn) 3h "*"m ago"*) true ;; *) false ;; esac; then
+  check "V21c a metadata write 5 minutes ago does not become the age of a turn that ended 3h ago" PASS
+else
+  check "V21c aged metadata write (level=$V21C_LEVEL reason='${V21C_REASON}')" FAIL
+fi
+
+V21D_AT="$(field "$V21_SID" lastTurn.at)"
+V21D_ACTIVE="$(field "$V21_SID" lastTurn.activityAt)"
+if [ -n "$V21_END_AT" ] && [ "$V21D_AT" = "$V21_END_AT" ] && [ "$V21D_ACTIVE" = "$V21_END_AT" ]; then
+  check "V21d --json carries the end_turn record's timestamp as lastTurn.at and lastTurn.activityAt" PASS
+else
+  check "V21d lastTurn timestamps (at='$V21D_AT' activityAt='$V21D_ACTIVE', want '$V21_END_AT' for both)" FAIL
+fi
+
+V21E_BRIEF="$(trailrun takeover "$V21_SID" --all --no-record 2>/dev/null | grep -E '^- last activity:' | head -1)"
+V21F_BRIEF="$(trailrun handoff "$V21_SID" --all 2>/dev/null | grep -E '^- last activity:' | head -1)"
+V21EF_BAD=""
+case "$V21E_BRIEF" in "- last activity: $V21_END_AT (3h "*"m ago)") ;; *) V21EF_BAD="$V21EF_BAD takeover='$V21E_BRIEF'" ;; esac
+case "$V21F_BRIEF" in "- last activity: $V21_END_AT (3h "*"m ago)") ;; *) V21EF_BAD="$V21EF_BAD handoff='$V21F_BRIEF'" ;; esac
+if [ -n "$V21_END_AT" ] && [ -z "$V21EF_BAD" ]; then
+  check "V21e both briefs date the session's last activity at its end_turn record, not at the file's later write" PASS
+else
+  check "V21e brief last-activity line:$V21EF_BAD" FAIL
+fi
+
+V21G_LAST="$(trailrun show "$V21_SID" --all --no-git 2>/dev/null | grep -E '^LAST ' | head -1)"
+V21G_CONTROL="$(trailrun show aaaaaaaa-0000-0000-0000-000000000001 --all --no-git 2>/dev/null | grep -E '^LAST ' | head -1)"
+V21G_BAD=""
+case "$V21G_LAST" in "LAST     3h "*"(file last written "[0-9]*"m ago)"*) ;; *) V21G_BAD="$V21G_BAD metadata-row='$V21G_LAST'" ;; esac
+case "$V21G_CONTROL" in "LAST     "*"file last written"*) V21G_BAD="$V21G_BAD control-row-names-a-later-write='$V21G_CONTROL'" ;; "LAST     "*) ;; *) V21G_BAD="$V21G_BAD control-row-missing" ;; esac
+if [ -z "$V21G_BAD" ]; then
+  check "V21g show's LAST row ages the session from its turn record and names the later file write only when there is one" PASS
+else
+  check "V21g show LAST row:$V21G_BAD" FAIL
+fi
+
+V21H_ROW="$(trailrun list --all --no-git 2>/dev/null | grep -F '3e7a0001' | head -1)"
+case "$V21H_ROW" in
+  *" 3h "*"m ago"*) check "V21h list ages the row from its turn record, not from the metadata write" PASS ;;
+  *) check "V21h list row age ('${V21H_ROW:-<no row>}')" FAIL ;;
+esac
+
+V21I_LEVEL="$(field "$V21_FUTURE_SID" takeover.level)"
+V21I_REASON="$(field "$V21_FUTURE_SID" takeover.reason)"
+V21I_STAMPS="$(node -e '
+const fs = require("node:fs");
+const path = require("node:path");
+const [projects, sid] = process.argv.slice(1);
+for (const dir of fs.readdirSync(projects)) {
+  const file = path.join(projects, dir, `${sid}.jsonl`);
+  if (!fs.existsSync(file)) continue;
+  const records = fs.readFileSync(file, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  const turns = records.filter((o) => o.type === "assistant");
+  process.stdout.write(`${new Date(Date.parse(turns[turns.length - 1].timestamp)).toISOString()} ${new Date(fs.statSync(file).mtimeMs).toISOString()}`);
+}' "$FAKE_CFG/projects" "$V21_FUTURE_SID" 2>/dev/null)"
+read -r V21I_TURN_AT V21I_WRITTEN <<EOF
+$V21I_STAMPS
+EOF
+V21I_BAD=""
+[ "$V21I_LEVEL" = "PROBABLY_FREE" ] || V21I_BAD="$V21I_BAD level=$V21I_LEVEL"
+case "$V21I_REASON" in *"ended its last turn (end_turn) 3h "*"m ago"*) ;; *) V21I_BAD="$V21I_BAD reason='${V21I_REASON}'" ;; esac
+{ [ -n "$V21I_WRITTEN" ] && [ "$(field "$V21_FUTURE_SID" lastActivity)" = "$V21I_WRITTEN" ]; } || V21I_BAD="$V21I_BAD lastActivity-not-capped-at-the-file-write"
+{ [ -n "$V21I_TURN_AT" ] && [ "$(field "$V21_FUTURE_SID" lastTurn.at)" = "$V21I_TURN_AT" ]; } || V21I_BAD="$V21I_BAD lastTurn.at-not-the-uncapped-stamp"
+{ [ -n "$V21I_TURN_AT" ] && [ "$(field "$V21_FUTURE_SID" lastTurn.activityAt)" = "$V21I_TURN_AT" ]; } || V21I_BAD="$V21I_BAD lastTurn.activityAt-not-the-uncapped-stamp"
+if [ -z "$V21I_BAD" ]; then
+  check "V21i a turn record stamped ahead of the file's own write is aged no later than that write, and --json caps lastActivity at that write while lastTurn.at and lastTurn.activityAt keep the uncapped stamp" PASS
+else
+  check "V21i future-stamped turn record:$V21I_BAD" FAIL
+fi
+
+V21J_SID=3e7a0004-0000-0000-0000-0000000000b4
+fix "$V21J_SID" "$DEAD_PID" 180 api_error_metadata_tail none
+V21J_ROW="$(trailrun limited --all --no-git 2>/dev/null | grep -F '3e7a0004' | head -1)"
+case "$V21J_ROW" in
+  *" 3h "*"m ago"*) check "V21j limited ages a stalled row from its turn records, not from a later metadata write" PASS ;;
+  *) check "V21j limited row age ('${V21J_ROW:-<no row>}')" FAIL ;;
+esac
+
+V21K_SID=3e7a0005-0000-0000-0000-0000000000b5
+V21K_CWD="$FAKE/work/plan-checkout"
+mkdir -p "$V21K_CWD/.zensu/plans"
+fix "$V21K_SID" "$DEAD_PID" 180 metadata_tail none "$V21K_CWD"
+node -e '
+const fs = require("node:fs");
+const path = require("node:path");
+const [dir] = process.argv.slice(1);
+const now = Date.now();
+const stamp = (name, ms) => {
+  const file = path.join(dir, name);
+  fs.writeFileSync(file, "# plan\n");
+  fs.utimesSync(file, ms / 1000, ms / 1000);
+};
+stamp("during.md", now - 210 * 60000);
+stamp("after.md", now - 60 * 60000);
+' "$V21K_CWD/.zensu/plans"
+V21K_BRIEF="$(trailrun takeover "$V21K_SID" --all --no-record 2>/dev/null)"
+V21K_BAD=""
+printf '%s\n' "$V21K_BRIEF" | grep -F '.zensu/plans/during.md' | grep -qF 'touched during this session' || V21K_BAD="$V21K_BAD in-session-plan-not-marked"
+! printf '%s\n' "$V21K_BRIEF" | grep -qF '.zensu/plans/after.md' || V21K_BAD="$V21K_BAD plan-edited-after-the-last-turn-counted-as-this-session"
+if [ -z "$V21K_BAD" ]; then
+  check "V21k the takeover brief's plan-document window ends a minute after the last turn record, not after a later metadata write" PASS
+else
+  check "V21k plan-document window:$V21K_BAD" FAIL
+fi
+
+SEL_CWD="$FAKE/work/shared-checkout"
+SEL_SELF=5e1f0001-0000-0000-0000-0000000000a1
+SEL_TARGET=5e1f0002-0000-0000-0000-0000000000a2
+SEL_OTHER=5e1f0003-0000-0000-0000-0000000000a3
+fix "$SEL_SELF" "$LIVE_PID" 0 end_turn none "$SEL_CWD" "Feature comparison test adoption" sel-shared 4242
+fix "$SEL_TARGET" "$LIVE_PID" 180 end_turn none "$SEL_CWD" "Feature comparison test" sel-shared 4242
+fix "$SEL_OTHER" "$DEAD_PID" 60 end_turn none "$SEL_CWD" "Feature comparison test extended" sel-shared 4242
+COLLAPSE_CWD="$FAKE/work/collapse-checkout"
+COLLAPSE_ACTIVE=c0110001-0000-0000-0000-0000000000c1
+COLLAPSE_RETITLED=c0110002-0000-0000-0000-0000000000c2
+fix "$COLLAPSE_ACTIVE" "$DEAD_PID" 30 end_turn none "$COLLAPSE_CWD"
+fix "$COLLAPSE_RETITLED" "$DEAD_PID" 180 metadata_tail none "$COLLAPSE_CWD"
+
+selrun() {
+  local self="$1"; shift
+  env -u CLAUDE_CONFIG_DIR CLAUDE_CODE_SESSION_ID="$self" HOME="$FAKE" USERPROFILE="$FAKE" node "$TRAIL_MJS" "$@" --config-dir "$FAKE_CFG"
+}
+json_sid() {
+  node -e '
+let s = "";
+process.stdin.on("data", (d) => { s += d; });
+process.stdin.on("end", () => {
+  let o;
+  try { o = JSON.parse(s); } catch { process.stdout.write("PARSE_ERROR"); return; }
+  process.stdout.write(String(o.sessionId));
+});'
+}
+
+SEL1_ERR="$FAKE/sel1.err"
+SEL1_SID="$(selrun "$SEL_SELF" show "Feature comparison test" --all --no-git --json 2>"$SEL1_ERR" | json_sid)"
+if [ "$SEL1_SID" = "$SEL_TARGET" ]; then
+  check "SEL1 the session whose title equals a text selector wins it, although the invoking session's own title also contains the selector" PASS
+else
+  check "SEL1 text selector resolved to '$SEL1_SID' (want $SEL_TARGET; $SEL_SELF is the invoking session)" FAIL
+fi
+
+SEL2_BAD=""
+[ "$SEL1_SID" != "PARSE_ERROR" ] || SEL2_BAD="$SEL2_BAD stdout-is-not-json"
+grep -qF 'this is your own session' "$SEL1_ERR" 2>/dev/null || SEL2_BAD="$SEL2_BAD no-own-session-note-on-stderr"
+grep -qF '5e1f0001' "$SEL1_ERR" 2>/dev/null || SEL2_BAD="$SEL2_BAD note-does-not-name-the-skipped-session"
+if [ -z "$SEL2_BAD" ]; then
+  check "SEL2 under --json the skipped invoking session is named on stderr and the payload stays parseable" PASS
+else
+  check "SEL2 --json self-skip disclosure:$SEL2_BAD" FAIL
+fi
+
+SEL3_OUT="$(selrun "$SEL_SELF" show "Feature comparison test" --all --no-git 2>/dev/null)"
+SEL3_BAD=""
+[ "$(printf '%s\n' "$SEL3_OUT" | grep -E '^SESSION ' | head -1)" = "SESSION  $SEL_TARGET" ] || SEL3_BAD="$SEL3_BAD wrong-session"
+printf '%s\n' "$SEL3_OUT" | grep -E '^NOTE ' | grep -F '5e1f0001' | grep -qF 'this is your own session' || SEL3_BAD="$SEL3_BAD no-note-line"
+if [ -z "$SEL3_BAD" ]; then
+  check "SEL3 the text carrier resolves the same session and prints a NOTE naming the skipped invoking session as your own" PASS
+else
+  check "SEL3 text self-skip:$SEL3_BAD" FAIL
+fi
+
+SEL3B_OUT="$(selrun "$SEL_SELF" show "$SEL_TARGET" --all --no-git 2>&1)"
+if [ "$(printf '%s\n' "$SEL3B_OUT" | grep -E '^SESSION ' | head -1)" = "SESSION  $SEL_TARGET" ] && ! printf '%s\n' "$SEL3B_OUT" | grep -qF 'this is your own session'; then
+  check "SEL3b a selector the invoking session does not match prints no own-session note" PASS
+else
+  check "SEL3b own-session note printed for a selector it did not match" FAIL
+fi
+
+SEL4_OUT="$(selrun "$SEL_SELF" show "comparison test" --all --no-git 2>&1)"
+SEL4_RC=$?
+SEL4_BAD=""
+[ "$SEL4_RC" = "2" ] || SEL4_BAD="$SEL4_BAD rc=$SEL4_RC"
+printf '%s\n' "$SEL4_OUT" | grep -qF 'ambiguous selector' || SEL4_BAD="$SEL4_BAD not-reported-ambiguous"
+printf '%s\n' "$SEL4_OUT" | grep -qE '^  5e1f0002' || SEL4_BAD="$SEL4_BAD target-not-listed"
+printf '%s\n' "$SEL4_OUT" | grep -qE '^  5e1f0003' || SEL4_BAD="$SEL4_BAD other-not-listed"
+! printf '%s\n' "$SEL4_OUT" | grep -qE '^  5e1f0001' || SEL4_BAD="$SEL4_BAD invoking-session-listed-as-a-candidate"
+printf '%s\n' "$SEL4_OUT" | grep -E '^NOTE ' | grep -F '5e1f0001' | grep -qF 'this is your own session' || SEL4_BAD="$SEL4_BAD no-own-session-note-on-the-ambiguity"
+if [ -z "$SEL4_BAD" ]; then
+  check "SEL4 two text matches that share one working directory are reported as ambiguous with exit 2, without the invoking session among them and with the own-session NOTE naming it" PASS
+else
+  check "SEL4 shared-directory text ambiguity:$SEL4_BAD" FAIL
+fi
+
+SEL5_OUT="$(selrun "$SEL_SELF" show "comparison test adoption" --all --no-git 2>&1)"
+SEL5_RC=$?
+if [ "$SEL5_RC" = "2" ] && printf '%s\n' "$SEL5_OUT" | grep -qF 'no session matched' && printf '%s\n' "$SEL5_OUT" | grep -qF 'this is your own session'; then
+  check "SEL5 a text selector only the invoking session matches is refused with exit 2 and says it was your own session" PASS
+else
+  check "SEL5 self-only text match (rc=$SEL5_RC out='$(printf '%s' "$SEL5_OUT" | tr '\n' ' ' | cut -c1-200)')" FAIL
+fi
+
+SEL6_LINE="$(selrun "$SEL_SELF" show "$SEL_SELF" --all --no-git 2>/dev/null | grep -E '^SESSION ' | head -1)"
+if [ "$SEL6_LINE" = "SESSION  $SEL_SELF   (this is your own session)" ]; then
+  check "SEL6 the invoking session is still selectable by its session id, and is labelled as your own" PASS
+else
+  check "SEL6 own session by id ('${SEL6_LINE:-<no SESSION row>}')" FAIL
+fi
+
+SEL7_SID="$(selrun "" show "feature comparison TEST" --all --no-git --json 2>/dev/null | json_sid)"
+if [ "$SEL7_SID" = "$SEL_TARGET" ]; then
+  check "SEL7 a title equal to the selector, compared case-insensitively, outranks newer titles that merely contain it" PASS
+else
+  check "SEL7 exact title rank resolved to '$SEL7_SID' (want $SEL_TARGET)" FAIL
+fi
+
+SEL8_SID="$(selrun "$SEL_SELF" show shared-checkout --all --no-git --json 2>/dev/null | json_sid)"
+if [ "$SEL8_SID" = "$SEL_OTHER" ]; then
+  check "SEL8 an exact worktree selector still collapses one directory's sessions to the most recently active, with the invoking session skipped" PASS
+else
+  check "SEL8 worktree collapse resolved to '$SEL8_SID' (want $SEL_OTHER; $SEL_SELF is the invoking session)" FAIL
+fi
+
+SEL9_SID="$(selrun "" show collapse-checkout --all --no-git --json 2>/dev/null | json_sid)"
+if [ "$SEL9_SID" = "$COLLAPSE_ACTIVE" ]; then
+  check "SEL9 the same-directory collapse picks the session with the newest turn record, not the one whose file a title update touched last" PASS
+else
+  check "SEL9 collapse resolved to '$SEL9_SID' (want $COLLAPSE_ACTIVE)" FAIL
+fi
+
+SEL10_OUT="$(selrun "$SEL_SELF" takeover "Feature comparison test" --all --no-record 2>/dev/null)"
+if printf '%s\n' "$SEL10_OUT" | grep -qF -- "- session: \`$SEL_TARGET\`" && printf '%s\n' "$SEL10_OUT" | grep -E '^NOTE ' | grep -qF 'this is your own session'; then
+  check "SEL10 takeover resolves the same selector through the same rule and carries the own-session note" PASS
+else
+  check "SEL10 takeover by text selector ('$(printf '%s\n' "$SEL10_OUT" | grep -E '^- session:|^NOTE ' | tr '\n' ' ' | cut -c1-200)')" FAIL
+fi
+
+SEL11_OUT="$(selrun "$SEL_SELF" show 5e1f00 --all --no-git 2>&1)"
+SEL11_RC=$?
+SEL11_BAD=""
+[ "$SEL11_RC" = "2" ] || SEL11_BAD="$SEL11_BAD rc=$SEL11_RC"
+printf '%s\n' "$SEL11_OUT" | grep -qF 'ambiguous selector' || SEL11_BAD="$SEL11_BAD not-reported-ambiguous"
+printf '%s\n' "$SEL11_OUT" | grep -E '^  5e1f0001' | grep -qF '(this is your own session)' || SEL11_BAD="$SEL11_BAD own-session-candidate-not-labelled"
+! printf '%s\n' "$SEL11_OUT" | grep -E '^  5e1f0002' | grep -qF '(this is your own session)' || SEL11_BAD="$SEL11_BAD another-session-labelled-as-own"
+if [ -z "$SEL11_BAD" ]; then
+  check "SEL11 an id prefix three different sessions of one directory share is reported as ambiguous, with the invoking session labelled as your own" PASS
+else
+  check "SEL11 shared id prefix:$SEL11_BAD" FAIL
+fi
+
+json_get() {
+  node -e '
+const key = process.argv[1];
+let s = "";
+process.stdin.on("data", (d) => { s += d; });
+process.stdin.on("end", () => {
+  let o;
+  try { o = JSON.parse(s); } catch { process.stdout.write("PARSE_ERROR"); return; }
+  const v = o[key];
+  process.stdout.write(v === undefined ? "ABSENT" : String(v));
+});' "$1"
+}
+
+sel_tier() {
+  local label="$1" sel="$2" want="$3" err="$FAKE/sel-tier.err" out bad=""
+  out="$(selrun "$SEL_SELF" show "$sel" --all --no-git --json 2>"$err")"
+  [ "$(printf '%s' "$out" | json_get sessionId)" = "$want" ] || bad="$bad wrong-session"
+  [ "$(printf '%s' "$out" | json_get selfSkipped)" = "$SEL_SELF" ] || bad="$bad payload-does-not-name-the-skipped-session"
+  grep -qF 'this is your own session' "$err" 2>/dev/null || bad="$bad no-own-session-note"
+  if [ -z "$bad" ]; then check "$label" PASS; else check "$label:$bad" FAIL; fi
+}
+sel_tier "SEL12 a partial worktree selector skips the invoking session, names it in the payload's selfSkipped and on stderr, and resolves the directory's most recently active other session" shared-check "$SEL_OTHER"
+sel_tier "SEL13 an exact branch selector skips the invoking session, names it in the payload's selfSkipped and on stderr, and resolves the directory's most recently active other session" sel-shared "$SEL_OTHER"
+sel_tier "SEL14 a PR selector skips the invoking session, names it in the payload's selfSkipped and on stderr, and collapses the directory's other two sessions holding that PR to the most recently active" '#4242' "$SEL_OTHER"
+
+SEL15_ERR="$FAKE/sel15.err"
+SEL15_JSON="$(selrun "$SEL_SELF" show collapse-checkout --all --no-git --json 2>"$SEL15_ERR")"
+SEL15_BAD=""
+[ "$(printf '%s' "$SEL15_JSON" | json_get sessionId)" = "$COLLAPSE_ACTIVE" ] || SEL15_BAD="$SEL15_BAD wrong-session"
+[ "$(printf '%s' "$SEL15_JSON" | json_get selfSkipped)" = "null" ] || SEL15_BAD="$SEL15_BAD payload-names-a-skip-that-did-not-happen"
+! grep -qF 'this is your own session' "$SEL15_ERR" 2>/dev/null || SEL15_BAD="$SEL15_BAD own-session-note-for-a-tier-it-did-not-match"
+if [ -z "$SEL15_BAD" ]; then
+  check "SEL15 a worktree selector the invoking session does not match prints no own-session note and carries selfSkipped null" PASS
+else
+  check "SEL15 non-matching tier:$SEL15_BAD" FAIL
+fi
+
+TWIN_SID=7a1a0001-0000-0000-0000-0000000000d1
+TWIN_OLD="$FAKE/work/twin-old"
+TWIN_NEW="$FAKE/work/twin-new"
+fix "$TWIN_SID" "$DEAD_PID" 240 end_turn none "$TWIN_OLD" "Twin transcript probe"
+fix "$TWIN_SID" "$DEAD_PID" 45 end_turn none "$TWIN_NEW" "Twin transcript probe"
+SEL16_BAD=""
+for twin_sel in "$TWIN_SID" 7a1a00 "twin transcript probe"; do
+  twin_out="$(selrun "" show "$twin_sel" --all --no-git --json 2>/dev/null)"
+  twin_rc=$?
+  [ "$twin_rc" = "0" ] || SEL16_BAD="$SEL16_BAD [$twin_sel]rc=$twin_rc"
+  [ "$(printf '%s' "$twin_out" | json_get cwd)" = "$TWIN_NEW" ] || SEL16_BAD="$SEL16_BAD [$twin_sel]not-the-newer-copy"
+done
+if [ -z "$SEL16_BAD" ]; then
+  check "SEL16 one session's two transcripts collapse to the newer copy on the full-id, id-prefix and text tiers instead of an ambiguity" PASS
+else
+  check "SEL16 one session in two project directories:$SEL16_BAD" FAIL
+fi
+
+SEL17_BAD=""
+SEL17_ADOPT="$(selrun "$SEL_SELF" adopt "comparison test adoption" --all 2>&1)"
+SEL17_ADOPT_RC=$?
+[ "$SEL17_ADOPT_RC" = "2" ] || SEL17_BAD="$SEL17_BAD adopt-rc=$SEL17_ADOPT_RC"
+printf '%s\n' "$SEL17_ADOPT" | grep -qF 'a session never adopts itself' || SEL17_BAD="$SEL17_BAD adopt-remedy-missing"
+! printf '%s\n' "$SEL17_ADOPT" | grep -qF 'pass its session id' || SEL17_BAD="$SEL17_BAD adopt-offers-the-id-route"
+SEL17_TAKEOVER="$(selrun "$SEL_SELF" takeover "comparison test adoption" --all --no-record 2>&1)"
+SEL17_TAKEOVER_RC=$?
+[ "$SEL17_TAKEOVER_RC" = "2" ] || SEL17_BAD="$SEL17_BAD takeover-rc=$SEL17_TAKEOVER_RC"
+printf '%s\n' "$SEL17_TAKEOVER" | grep -qF 'run handoff with its session id' || SEL17_BAD="$SEL17_BAD takeover-remedy-missing"
+selrun "$SEL_SELF" show "comparison test adoption" --all --no-git 2>&1 | grep -qF 'pass its session id to select it' || SEL17_BAD="$SEL17_BAD show-remedy-missing"
+if [ -z "$SEL17_BAD" ]; then
+  check "SEL17 the own-session refusal names what works for each command: adopt says a session never adopts itself, takeover points at handoff, show keeps the id route" PASS
+else
+  check "SEL17 own-session remedy:$SEL17_BAD" FAIL
+fi
+
+NUMTITLE_SID=9e110001-0000-0000-0000-0000000000e1
+NUMAPP_SID=9e110002-0000-0000-0000-0000000000e2
+NUMPROMPT_SID=9e110003-0000-0000-0000-0000000000e3
+OBJTITLE_SID=9e110004-0000-0000-0000-0000000000e4
+OBJAPP_SID=9e110005-0000-0000-0000-0000000000e5
+QSTAMP_SID=9e110006-0000-0000-0000-0000000000e6
+USTAMP_SID=9e110007-0000-0000-0000-0000000000e7
+OSTAMP_SID=9e110008-0000-0000-0000-0000000000e8
+fix "$NUMTITLE_SID" "$DEAD_PID" 50 end_turn none "" "Numeric title probe"
+fix "$NUMAPP_SID" "$DEAD_PID" 55 end_turn none "" "Desktop title probe"
+fix "$NUMPROMPT_SID" "$DEAD_PID" 60 end_turn none "" "Poisoned prompt probe"
+fix "$OBJTITLE_SID" "$DEAD_PID" 65 end_turn none "" "Object title probe"
+fix "$OBJAPP_SID" "$DEAD_PID" 70 end_turn none "" "Object desktop probe"
+fix "$QSTAMP_SID" "$LIVE_PID" 75 end_turn fresh "" "Queue stamp probe"
+fix "$USTAMP_SID" "$DEAD_PID" 80 end_turn unknownidle "" "Reorder stamp probe"
+fix "$OSTAMP_SID" "$DEAD_PID" 85 end_turn overdrawnidle "" "Dequeue stamp probe"
+node -e '
+const fs = require("node:fs");
+const path = require("node:path");
+const [projects, numTitle, numApp, numPrompt, objTitle, objApp, qStamp, uStamp, oStamp] = process.argv.slice(1);
+const poisoned = { toString: "x" };
+for (const dir of fs.readdirSync(projects)) {
+  for (const [sid, mode] of [[numTitle, "number"], [numApp, "drop"], [numPrompt, "poison"], [objTitle, "object"], [objApp, "drop"], [qStamp, "stamp"], [uStamp, "stamp"], [oStamp, "stamp"]]) {
+    const file = path.join(projects, dir, `${sid}.jsonl`);
+    if (!fs.existsSync(file)) continue;
+    const st = fs.statSync(file);
+    const lines = fs.readFileSync(file, "utf8").split("\n").flatMap((line) => {
+      if (!line) return [line];
+      const o = JSON.parse(line);
+      if (o.type === "last-prompt" && mode === "poison") return [JSON.stringify({ ...o, lastPrompt: poisoned })];
+      if (o.type === "queue-operation" && mode === "stamp") return [JSON.stringify({ ...o, timestamp: poisoned })];
+      if (o.type !== "custom-title" || mode === "stamp") return [line];
+      if (mode === "number") return [JSON.stringify({ ...o, customTitle: 42 })];
+      if (mode === "object") return [JSON.stringify({ ...o, customTitle: poisoned })];
+      return [];
+    });
+    fs.writeFileSync(file, lines.join("\n"));
+    fs.utimesSync(file, st.atime, st.mtime);
+  }
+}' "$FAKE_CFG/projects" "$NUMTITLE_SID" "$NUMAPP_SID" "$NUMPROMPT_SID" "$OBJTITLE_SID" "$OBJAPP_SID" "$QSTAMP_SID" "$USTAMP_SID" "$OSTAMP_SID"
+NUMAPP_DIR="$FAKE/Library/Application Support/Claude/claude-code-sessions/inst-0001/ws-0001"
+mkdir -p "$NUMAPP_DIR"
+printf '{"cliSessionId":"%s","isArchived":false,"title":42}\n' "$NUMAPP_SID" > "$NUMAPP_DIR/local_$NUMAPP_SID.json"
+printf '{"cliSessionId":"%s","isArchived":false,"title":{"toString":"x"}}\n' "$OBJAPP_SID" > "$NUMAPP_DIR/local_$OBJAPP_SID.json"
+SEL18_BAD=""
+grep -qF '"customTitle":42' "$FAKE_CFG/projects/$(printf '%s' "$FAKE/work/wt-9e110001" | sed 's/[^A-Za-z0-9]/-/g')/$NUMTITLE_SID.jsonl" 2>/dev/null || SEL18_BAD="$SEL18_BAD fixture-title-not-numeric"
+SEL18_OUT="$(selrun "" show "numeric title probe" --all --no-git --json 2>/dev/null)"
+SEL18_RC=$?
+[ "$SEL18_RC" = "0" ] && [ "$(printf '%s' "$SEL18_OUT" | json_get sessionId)" = "$NUMTITLE_SID" ] || SEL18_BAD="$SEL18_BAD transcript-title(rc=$SEL18_RC)"
+SEL18_OUT="$(selrun "" show "desktop title probe" --all --no-git --json 2>/dev/null)"
+SEL18_RC=$?
+[ "$SEL18_RC" = "0" ] && [ "$(printf '%s' "$SEL18_OUT" | json_get sessionId)" = "$NUMAPP_SID" ] || SEL18_BAD="$SEL18_BAD desktop-title(rc=$SEL18_RC)"
+grep -qF '"lastPrompt":{"toString":"x"}' "$FAKE_CFG/projects/$(printf '%s' "$FAKE/work/wt-9e110003" | sed 's/[^A-Za-z0-9]/-/g')/$NUMPROMPT_SID.jsonl" 2>/dev/null || SEL18_BAD="$SEL18_BAD fixture-prompt-not-poisoned"
+grep -qF '"customTitle":{"toString":"x"}' "$FAKE_CFG/projects/$(printf '%s' "$FAKE/work/wt-9e110004" | sed 's/[^A-Za-z0-9]/-/g')/$OBJTITLE_SID.jsonl" 2>/dev/null || SEL18_BAD="$SEL18_BAD fixture-title-not-an-object"
+grep -qF '"timestamp":{"toString":"x"}' "$FAKE_CFG/projects/$(printf '%s' "$FAKE/work/wt-9e110006" | sed 's/[^A-Za-z0-9]/-/g')/$QSTAMP_SID.jsonl" 2>/dev/null || SEL18_BAD="$SEL18_BAD fixture-queue-stamp-not-an-object"
+grep -F '"operation":"reorder"' "$FAKE_CFG/projects/$(printf '%s' "$FAKE/work/wt-9e110007" | sed 's/[^A-Za-z0-9]/-/g')/$USTAMP_SID.jsonl" 2>/dev/null | grep -qF '"timestamp":{"toString":"x"}' || SEL18_BAD="$SEL18_BAD fixture-reorder-stamp-not-an-object"
+grep -F '"operation":"dequeue"' "$FAKE_CFG/projects/$(printf '%s' "$FAKE/work/wt-9e110008" | sed 's/[^A-Za-z0-9]/-/g')/$OSTAMP_SID.jsonl" 2>/dev/null | grep -qF '"timestamp":{"toString":"x"}' || SEL18_BAD="$SEL18_BAD fixture-dequeue-stamp-not-an-object"
+SEL18_OUT="$(selrun "" show "object title probe" --all --no-git --json 2>/dev/null)"
+SEL18_RC=$?
+[ "$SEL18_RC" = "0" ] && [ "$(printf '%s' "$SEL18_OUT" | json_get sessionId)" = "$OBJTITLE_SID" ] || SEL18_BAD="$SEL18_BAD object-transcript-title(rc=$SEL18_RC)"
+SEL18_OUT="$(selrun "" show "object desktop probe" --all --no-git --json 2>/dev/null)"
+SEL18_RC=$?
+[ "$SEL18_RC" = "0" ] && [ "$(printf '%s' "$SEL18_OUT" | json_get sessionId)" = "$OBJAPP_SID" ] || SEL18_BAD="$SEL18_BAD object-desktop-title(rc=$SEL18_RC)"
+SEL18_LIST="$(trailrun list --all --no-git 2>&1)"
+SEL18_RC=$?
+{ [ "$SEL18_RC" = "0" ] && printf '%s\n' "$SEL18_LIST" | grep -qF '9e110003'; } || SEL18_BAD="$SEL18_BAD list-with-a-non-string-prompt(rc=$SEL18_RC)"
+printf '%s\n' "$SEL18_LIST" | grep -qF '9e110006' || SEL18_BAD="$SEL18_BAD list-with-a-non-string-queue-stamp"
+printf '%s\n' "$SEL18_LIST" | grep -qF '9e110007' || SEL18_BAD="$SEL18_BAD list-with-a-non-string-reorder-stamp"
+printf '%s\n' "$SEL18_LIST" | grep -qF '9e110008' || SEL18_BAD="$SEL18_BAD list-with-a-non-string-dequeue-stamp"
+if [ -z "$SEL18_BAD" ]; then
+  check "SEL18 a non-string title in a transcript or a desktop record (a number or an object), a non-string last prompt or a non-string queue timestamp (on an enqueue, a reorder or an overdrawn dequeue) never makes a text lookup or the list fail" PASS
+else
+  check "SEL18 non-string title, last prompt or queue timestamp:$SEL18_BAD" FAIL
+fi
+
+V21L_SHOW="$(field "$V21_SID" lastActivity)"
+V21L_LIST="$(trailrun list --all --no-git --json 2>/dev/null | node -e '
+let s = "";
+process.stdin.on("data", (d) => { s += d; });
+process.stdin.on("end", () => {
+  let o;
+  try { o = JSON.parse(s); } catch { process.stdout.write("PARSE_ERROR"); return; }
+  const row = (o.rows || []).find((r) => r.sessionId === process.argv[1]);
+  process.stdout.write(row ? String(row.lastActivity) : "ABSENT");
+});' "$V21_SID")"
+if [ -n "$V21_END_AT" ] && [ "$V21L_SHOW" = "$V21_END_AT" ] && [ "$V21L_LIST" = "$V21_END_AT" ]; then
+  check "V21l show --json and list --json carry the end_turn record's time as lastActivity, the time the briefs print, not the later metadata write" PASS
+else
+  check "V21l lastActivity (show='$V21L_SHOW' list='$V21L_LIST', want '$V21_END_AT')" FAIL
+fi
+
+V21M_SID=3e7a0006-0000-0000-0000-0000000000b6
+fix "$V21M_SID" "$DEAD_PID" 31680 metadata_tail none
+V21M_DEFAULT="$(trailrun list --all --no-git 2>/dev/null | grep -cF '3e7a0006' || true)"
+V21M_UNBOUNDED="$(trailrun list --all --no-git --days 0 2>/dev/null | grep -cF '3e7a0006' || true)"
+if [ "$V21M_DEFAULT" = "0" ] && [ "${V21M_UNBOUNDED:-0}" != "0" ]; then
+  check "V21m the default 21-day window drops a session whose last turn is 22 days old although its file was written 30 s ago, and --days 0 still lists it" PASS
+else
+  check "V21m --days window (default-window rows=$V21M_DEFAULT, unbounded rows=$V21M_UNBOUNDED)" FAIL
+fi
+
+V21N_LIST="$(trailrun list --all --no-git 2>/dev/null)"
+V21N_ACTIVE="$(printf '%s\n' "$V21N_LIST" | grep -nF 'c0110001' | head -1 | cut -d: -f1)"
+V21N_RETITLED="$(printf '%s\n' "$V21N_LIST" | grep -nF 'c0110002' | head -1 | cut -d: -f1)"
+if [ -n "$V21N_ACTIVE" ] && [ -n "$V21N_RETITLED" ] && [ "$V21N_ACTIVE" -lt "$V21N_RETITLED" ]; then
+  check "V21n list orders by turn activity: the session active 30 min ago precedes the one whose file a title update touched last" PASS
+else
+  check "V21n list order (active row at line ${V21N_ACTIVE:-none}, retitled row at line ${V21N_RETITLED:-none})" FAIL
+fi
+
+V21O_SID=3e7a0007-0000-0000-0000-0000000000b7
+fix "$V21O_SID" "$LIVE_PID" 180 metadata_tail_in_turn none
+V21O_LEVEL="$(field "$V21O_SID" takeover.level)"
+V21O_REASON="$(field "$V21O_SID" takeover.reason)"
+V21O_BAD=""
+[ "$V21O_LEVEL" = "PROBABLY_FREE" ] || V21O_BAD="$V21O_BAD level=$V21O_LEVEL"
+case "$V21O_REASON" in *"has been silent for 3h "*) ;; *) V21O_BAD="$V21O_BAD silent-age-not-from-the-turn-record" ;; esac
+case "$V21O_REASON" in *"turn in flight"*) ;; *) V21O_BAD="$V21O_BAD in-flight-turn-not-named" ;; esac
+if [ -z "$V21O_BAD" ]; then
+  check "V21o a turn in flight 3h ago stays past the 15-minute window although a metadata write 5 minutes ago moved the file" PASS
+else
+  check "V21o in-flight turn under a metadata tail:$V21O_BAD (reason='${V21O_REASON}')" FAIL
+fi
+
+V21P_SID=3e7a0008-0000-0000-0000-0000000000b8
+fix "$V21P_SID" "$LIVE_PID" 1 tool_use none
+V21P_REASON="$(field "$V21P_SID" takeover.reason)"
+case "$V21P_REASON" in
+  *"wrote its last turn record "[0-9]*" min ago"*) check "V21p a fresh BUSY verdict says the session wrote its last turn record, the record it was measured from" PASS ;;
+  *) check "V21p fresh BUSY wording ('${V21P_REASON}')" FAIL ;;
+esac
+
+V21Q_SID=3e7a0009-0000-0000-0000-0000000000b9
+fix "$V21Q_SID" "$LIVE_PID" 180 api_error_after_end_turn none
+V21Q_STAMPS="$(node -e '
+const fs = require("node:fs");
+const path = require("node:path");
+const [projects, sid] = process.argv.slice(1);
+for (const dir of fs.readdirSync(projects)) {
+  const file = path.join(projects, dir, `${sid}.jsonl`);
+  if (!fs.existsSync(file)) continue;
+  const records = fs.readFileSync(file, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  const end = records.find((o) => o.type === "assistant" && o.message && o.message.stop_reason === "end_turn");
+  const err = records.find((o) => o.isApiErrorMessage === true);
+  const canonical = (stamp) => new Date(Date.parse(stamp)).toISOString();
+  process.stdout.write(`${end.timestamp} ${canonical(end.timestamp)} ${err.timestamp} ${canonical(err.timestamp)}`);
+}' "$FAKE_CFG/projects" "$V21Q_SID" 2>/dev/null)"
+read -r V21Q_RAW V21Q_END V21Q_ERR_RAW V21Q_ERR <<EOF
+$V21Q_STAMPS
+EOF
+V21Q_BAD=""
+case "$V21Q_RAW" in *"+02:00") ;; *) V21Q_BAD="$V21Q_BAD fixture-end_turn-stamp-not-offset-form($V21Q_RAW)" ;; esac
+case "$V21Q_ERR_RAW" in *"+02:00") ;; *) V21Q_BAD="$V21Q_BAD fixture-api-error-stamp-not-offset-form($V21Q_ERR_RAW)" ;; esac
+[ "$(field "$V21Q_SID" takeover.level)" = "PROBABLY_FREE" ] || V21Q_BAD="$V21Q_BAD level-not-probably-free"
+case "$(field "$V21Q_SID" takeover.reason)" in *"ended its last turn (end_turn) 3h "*"m ago"*) ;; *) V21Q_BAD="$V21Q_BAD age-not-from-the-end_turn-record" ;; esac
+V21Q_IDLE="$(field "$V21Q_SID" takeover.idleMin)"
+case "$V21Q_IDLE" in ''|*[!0-9]*) V21Q_BAD="$V21Q_BAD idleMin-unreadable($V21Q_IDLE)" ;; *) { [ "$V21Q_IDLE" -ge 5 ] && [ "$V21Q_IDLE" -lt "$BUSY_MIN" ]; } || V21Q_BAD="$V21Q_BAD idleMin-not-from-the-api-error-record($V21Q_IDLE)" ;; esac
+[ "$(field "$V21Q_SID" lastTurn.at)" = "$V21Q_END" ] || V21Q_BAD="$V21Q_BAD at-not-the-canonical-end_turn-stamp"
+[ "$(field "$V21Q_SID" lastTurn.activityAt)" = "$V21Q_ERR" ] || V21Q_BAD="$V21Q_BAD activityAt-not-the-api-error-stamp"
+if [ -z "$V21Q_BAD" ]; then
+  check "V21q an API-error record written 5 minutes ago, after an end_turn 3h ago, sets activityAt and idleMin while lastTurn.at and the ended-its-last-turn age stay on the end_turn, in canonical ISO form" PASS
+else
+  check "V21q distinct turn timestamps:$V21Q_BAD" FAIL
+fi
+
+V21S_SID=3e7a000b-0000-0000-0000-0000000000bb
+fix "$V21S_SID" "$LIVE_PID" 5 tool_use_stampless none
+V21S_WRITTEN="$(node -e '
+const fs = require("node:fs");
+const path = require("node:path");
+const [projects, sid] = process.argv.slice(1);
+for (const dir of fs.readdirSync(projects)) {
+  const file = path.join(projects, dir, `${sid}.jsonl`);
+  if (fs.existsSync(file)) process.stdout.write(new Date(fs.statSync(file).mtimeMs).toISOString());
+}' "$FAKE_CFG/projects" "$V21S_SID" 2>/dev/null)"
+V21S_REASON="$(field "$V21S_SID" takeover.reason)"
+V21S_BAD=""
+[ "$(field "$V21S_SID" takeover.level)" = "BUSY" ] || V21S_BAD="$V21S_BAD level-not-busy"
+case "$V21S_REASON" in *"wrote to its transcript"*) ;; *) V21S_BAD="$V21S_BAD fallback-wording-missing" ;; esac
+case "$V21S_REASON" in *"wrote its last turn record"*) V21S_BAD="$V21S_BAD claims-a-turn-record-stamp" ;; esac
+[ "$(field "$V21S_SID" lastTurn.kind)" = "in-turn" ] || V21S_BAD="$V21S_BAD kind-not-in-turn"
+[ "$(field "$V21S_SID" lastTurn.at)" = "null" ] || V21S_BAD="$V21S_BAD at-not-null"
+[ "$(field "$V21S_SID" lastTurn.activityAt)" = "null" ] || V21S_BAD="$V21S_BAD activityAt-not-null"
+{ [ -n "$V21S_WRITTEN" ] && [ "$(field "$V21S_SID" lastActivity)" = "$V21S_WRITTEN" ]; } || V21S_BAD="$V21S_BAD lastActivity-not-the-file-write"
+if [ -z "$V21S_BAD" ]; then
+  check "V21s a turn in flight whose record carries no timestamp is aged from the file's write time, says it wrote to its transcript, and carries null lastTurn stamps" PASS
+else
+  check "V21s stampless turn record:$V21S_BAD (reason='${V21S_REASON}')" FAIL
+fi
+
+SEL19_BAD=""
+SEL19_TAKEOVER="$(selrun "$SEL_SELF" takeover '#4242' --all --no-record --json 2>/dev/null)"
+[ "$(printf '%s' "$SEL19_TAKEOVER" | json_get selfSkipped)" = "$SEL_SELF" ] || SEL19_BAD="$SEL19_BAD takeover-payload"
+SEL19_CONTROL="$(selrun "$SEL_SELF" takeover "$SEL_TARGET" --all --no-record --json 2>/dev/null)"
+[ "$(printf '%s' "$SEL19_CONTROL" | json_get selfSkipped)" = "null" ] || SEL19_BAD="$SEL19_BAD takeover-control-not-null"
+SEL19_ADOPT="$(ZENSU_SESSION_LINEAGE=off CLAUDE_PID="$LIVE_PID" selrun "$SEL_SELF" adopt '#4242' --all --json 2>/dev/null)"
+[ "$(printf '%s' "$SEL19_ADOPT" | json_get recorded)" = "null" ] || SEL19_BAD="$SEL19_BAD adopt-refusal-payload-not-reached"
+[ "$(printf '%s' "$SEL19_ADOPT" | json_get selfSkipped)" = "$SEL_SELF" ] || SEL19_BAD="$SEL19_BAD adopt-refusal-payload"
+SEL19_ADOPT_OK="$(unset ZENSU_SESSION_LINEAGE; CLAUDE_PID="$LIVE_PID" selrun "$SEL_SELF" adopt '#4242' --all --json 2>/dev/null)"
+case "$(printf '%s' "$SEL19_ADOPT_OK" | json_get recorded)" in null|ABSENT|PARSE_ERROR) SEL19_BAD="$SEL19_BAD adopt-success-payload-not-reached" ;; esac
+[ "$(printf '%s' "$SEL19_ADOPT_OK" | json_get selfSkipped)" = "$SEL_SELF" ] || SEL19_BAD="$SEL19_BAD adopt-success-payload"
+if [ -z "$SEL19_BAD" ]; then
+  check "SEL19 the takeover payload and both adopt payloads (the refused write and the recorded edge) carry the skipped invoking session as selfSkipped, and a selector the invoking session did not match carries null" PASS
+else
+  check "SEL19 selfSkipped on takeover and adopt:$SEL19_BAD" FAIL
+fi
+
+SEL20_BAD=""
+SEL20_OUT="$(selrun "$SEL_SELF" handoff "comparison test adoption" --all 2>&1)"
+SEL20_RC=$?
+[ "$SEL20_RC" = "2" ] || SEL20_BAD="$SEL20_BAD self-only-rc=$SEL20_RC"
+printf '%s\n' "$SEL20_OUT" | grep -qF 'pass its session id to select it' || SEL20_BAD="$SEL20_BAD remedy-missing"
+selrun "$SEL_SELF" handoff "$SEL_SELF" --all 2>/dev/null | grep -qF -- "- session: \`$SEL_SELF\`" || SEL20_BAD="$SEL20_BAD self-handoff-by-id"
+if [ -z "$SEL20_BAD" ]; then
+  check "SEL20 handoff refuses a text selector only the invoking session matches with the id remedy, and hands the invoking session off by its session id" PASS
+else
+  check "SEL20 handoff own-session route:$SEL20_BAD" FAIL
+fi
+
+TWIN2_SID=7b2b0001-0000-0000-0000-0000000000d3
+TWIN2_OLD="$FAKE/work/twin2-old"
+TWIN2_NEW="$FAKE/work/twin2-new"
+fix "$TWIN2_SID" "$DEAD_PID" 240 end_turn none "$TWIN2_OLD" "Twin exact probe"
+fix "$TWIN2_SID" "$DEAD_PID" 45 end_turn none "$TWIN2_NEW" "Twin exact probe renamed"
+SEL21_OUT="$(selrun "" show "twin exact probe" --all --no-git --json 2>/dev/null)"
+SEL21_RC=$?
+SEL21_CWD="$(printf '%s' "$SEL21_OUT" | json_get cwd)"
+if [ "$SEL21_RC" = "0" ] && [ "$SEL21_CWD" = "$TWIN2_NEW" ]; then
+  check "SEL21 an exact title in one transcript ranks the whole session, so its newer, retitled transcript still wins the collapse" PASS
+else
+  check "SEL21 per-session exact-title rank (rc=$SEL21_RC cwd='$SEL21_CWD', want $TWIN2_NEW)" FAIL
+fi
+
+V21R_SID=3e7a000a-0000-0000-0000-0000000000ba
+fix "$V21R_SID" "$LIVE_PID" 31680 metadata_tail none
+V21R_BAD=""
+trailrun list --all --no-git 2>/dev/null | grep -qF '3e7a000a' || V21R_BAD="$V21R_BAD live-row-dropped-by-the-window"
+V21R_SHOW="$(trailrun show "$V21M_SID" --all --no-git 2>&1)"
+V21R_RC=$?
+[ "$V21R_RC" = "2" ] || V21R_BAD="$V21R_BAD aged-row-resolved-in-the-default-window(rc=$V21R_RC)"
+printf '%s\n' "$V21R_SHOW" | grep -qF 'no session matched' || V21R_BAD="$V21R_BAD no-match-refusal-missing"
+trailrun show "$V21M_SID" --all --no-git --days 0 >/dev/null 2>&1 || V21R_BAD="$V21R_BAD not-resolved-with-days-0"
+if [ -z "$V21R_BAD" ]; then
+  check "V21r the activity window keeps a live session whose last turn is 22 days old, and a non-live one outside it is not resolved unless --days 0 widens the window" PASS
+else
+  check "V21r --days window, live and resolve halves:$V21R_BAD" FAIL
+fi
+
+FT_SELF=f7000001-0000-0000-0000-0000000000e3
+FT_OTHER=f7000002-0000-0000-0000-0000000000e4
+fix "$FT_SELF" "$LIVE_PID" 0 end_turn none "$FAKE/work/ft-self" "" "" 4343
+fix "$FT_OTHER" "$DEAD_PID" 30 end_turn none "$FAKE/work/ft-other" "" fix-4343
+SEL22_ERR="$FAKE/sel22.err"
+SEL22_JSON="$(selrun "$FT_SELF" show 4343 --all --no-git --json 2>"$SEL22_ERR")"
+SEL22_BAD=""
+[ "$(printf '%s' "$SEL22_JSON" | json_get sessionId)" = "$FT_OTHER" ] || SEL22_BAD="$SEL22_BAD wrong-session"
+[ "$(printf '%s' "$SEL22_JSON" | json_get selfSkipped)" = "$FT_SELF" ] || SEL22_BAD="$SEL22_BAD payload-does-not-name-the-skipped-session"
+grep -qF 'this is your own session' "$SEL22_ERR" 2>/dev/null || SEL22_BAD="$SEL22_BAD no-own-session-note"
+if [ -z "$SEL22_BAD" ]; then
+  check "SEL22 a PR only the invoking session holds is skipped and a looser tier resolves another session, still with the own-session note and selfSkipped" PASS
+else
+  check "SEL22 skip on a tighter tier, resolve on a looser one:$SEL22_BAD" FAIL
+fi
+
+SEL23_OUT="$(selrun "$SEL_TARGET" show "feature comparison test" --all --no-git 2>&1)"
+SEL23_RC=$?
+SEL23_BAD=""
+[ "$SEL23_RC" = "2" ] || SEL23_BAD="$SEL23_BAD rc=$SEL23_RC"
+printf '%s\n' "$SEL23_OUT" | grep -qF 'ambiguous selector' || SEL23_BAD="$SEL23_BAD not-reported-ambiguous"
+printf '%s\n' "$SEL23_OUT" | grep -qE '^  5e1f0001' || SEL23_BAD="$SEL23_BAD first-remaining-session-not-listed"
+printf '%s\n' "$SEL23_OUT" | grep -qE '^  5e1f0003' || SEL23_BAD="$SEL23_BAD second-remaining-session-not-listed"
+! printf '%s\n' "$SEL23_OUT" | grep -qF 'no session matched' || SEL23_BAD="$SEL23_BAD exact-rank-ran-before-the-self-skip"
+printf '%s\n' "$SEL23_OUT" | grep -E '^NOTE ' | grep -F '5e1f0002' | grep -qF 'this is your own session' || SEL23_BAD="$SEL23_BAD no-own-session-note-on-the-ambiguity"
+if [ -z "$SEL23_BAD" ]; then
+  check "SEL23 an invoking session whose own title equals the selector is skipped before the exact-title rank, so the other matches are reported instead of hidden, with the own-session NOTE naming it" PASS
+else
+  check "SEL23 exact rank after the self-skip:$SEL23_BAD" FAIL
+fi
+
+PAD_OLD=a0ad0001-0000-0000-0000-0000000000f1
+PAD_NEW=a0ad0002-0000-0000-0000-0000000000f2
+fix "$PAD_OLD" "$DEAD_PID" 200 end_turn none "" "  Padded exact probe  "
+fix "$PAD_NEW" "$DEAD_PID" 20 end_turn none "" "Padded exact probe extended"
+SEL24_OUT="$(selrun "" show "padded exact probe" --all --no-git --json 2>/dev/null)"
+SEL24_RC=$?
+SEL24_SID="$(printf '%s' "$SEL24_OUT" | json_get sessionId)"
+if [ "$SEL24_RC" = "0" ] && [ "$SEL24_SID" = "$PAD_OLD" ]; then
+  check "SEL24 a title with surrounding whitespace still counts as an exact match for the trimmed selector" PASS
+else
+  check "SEL24 trimmed exact title (rc=$SEL24_RC session='$SEL24_SID', want $PAD_OLD)" FAIL
+fi
+
+TWIN3_SID=7c3c0001-0000-0000-0000-0000000000d5
+fix "$TWIN3_SID" "$DEAD_PID" 240 end_turn none "$FAKE/work/twin3-old" "" twin3-branch
+fix "$TWIN3_SID" "$DEAD_PID" 45 end_turn none "$FAKE/work/twin3-new" "" twin3-branch
+SEL25_OUT="$(selrun "" show twin3-branch --all --no-git --json 2>/dev/null)"
+SEL25_RC=$?
+SEL25_CWD="$(printf '%s' "$SEL25_OUT" | json_get cwd)"
+if [ "$SEL25_RC" = "0" ] && [ "$SEL25_CWD" = "$FAKE/work/twin3-new" ]; then
+  check "SEL25 one session's transcripts in two directories that share a branch collapse to the newer copy on the branch tier instead of an ambiguity" PASS
+else
+  check "SEL25 one session on the branch tier in two directories (rc=$SEL25_RC cwd='$SEL25_CWD', want $FAKE/work/twin3-new)" FAIL
+fi
+
+RSTAMP_SID=9e11000a-0000-0000-0000-0000000000ea
+fix "$RSTAMP_SID" "$DEAD_PID" 95 api_error listed "" "Record stamp probe"
+node -e '
+const fs = require("node:fs");
+const path = require("node:path");
+const [projects, sid] = process.argv.slice(1);
+const poisoned = { toString: "x" };
+for (const dir of fs.readdirSync(projects)) {
+  const file = path.join(projects, dir, `${sid}.jsonl`);
+  if (!fs.existsSync(file)) continue;
+  const st = fs.statSync(file);
+  const lines = fs.readFileSync(file, "utf8").split("\n").map((line) => {
+    if (!line) return line;
+    const o = JSON.parse(line);
+    return ["user", "assistant", "queue-operation"].includes(o.type) ? JSON.stringify({ ...o, timestamp: poisoned }) : line;
+  });
+  fs.writeFileSync(file, lines.join("\n"));
+  fs.utimesSync(file, st.atime, st.mtime);
+}' "$FAKE_CFG/projects" "$RSTAMP_SID"
+SEL26_BAD=""
+SEL26_FILE="$FAKE_CFG/projects/$(printf '%s' "$FAKE/work/wt-9e11000a" | sed 's/[^A-Za-z0-9]/-/g')/$RSTAMP_SID.jsonl"
+for SEL26_KIND in user assistant queue-operation; do
+  grep -F "\"type\":\"$SEL26_KIND\"" "$SEL26_FILE" 2>/dev/null | grep -qF '"timestamp":{"toString":"x"}' || SEL26_BAD="$SEL26_BAD fixture-$SEL26_KIND-stamp-not-an-object"
+done
+grep -qF '"isApiErrorMessage":true' "$SEL26_FILE" 2>/dev/null || SEL26_BAD="$SEL26_BAD fixture-has-no-api-error-record"
+grep -qF 'This session is being continued from a previous conversation' "$SEL26_FILE" 2>/dev/null || SEL26_BAD="$SEL26_BAD fixture-has-no-compaction-record"
+SEL26_OUT="$(selrun "" show "$RSTAMP_SID" --all --no-git --json 2>/dev/null)"
+SEL26_RC=$?
+[ "$SEL26_RC" = "0" ] || SEL26_BAD="$SEL26_BAD show-json(rc=$SEL26_RC)"
+SEL26_BAD="$SEL26_BAD$(printf '%s' "$SEL26_OUT" | node -e '
+let s = "";
+process.stdin.on("data", (d) => { s += d; });
+process.stdin.on("end", () => {
+  let o;
+  try { o = JSON.parse(s); } catch { process.stdout.write(" payload-not-json"); return; }
+  const bad = [];
+  if (!Array.isArray(o.prompts) || !o.prompts.length) bad.push("no-prompt-listing");
+  else if (!o.prompts.every((p) => p.at === null)) bad.push("prompt-at-not-null");
+  if (!Array.isArray(o.assistantTail) || !o.assistantTail.length) bad.push("no-assistant-tail");
+  else if (!o.assistantTail.every((a) => a.at === null)) bad.push("assistant-at-not-null");
+  if (!o.compaction) bad.push("no-compaction");
+  else if (o.compaction.at !== null) bad.push("compaction-at-not-null");
+  if (!o.stopCause) bad.push("no-stop-cause");
+  else if (o.stopCause.at !== null) bad.push("stop-cause-at-not-null");
+  process.stdout.write(bad.map((b) => ` ${b}`).join(""));
+});')"
+selrun "" show "$RSTAMP_SID" --all --no-git >/dev/null 2>&1 || SEL26_BAD="$SEL26_BAD show-text(rc=$?)"
+SEL26_OUT="$(selrun "" takeover "$RSTAMP_SID" --no-record --all --no-git 2>/dev/null)"
+SEL26_RC=$?
+{ [ "$SEL26_RC" = "0" ] && printf '%s\n' "$SEL26_OUT" | grep -qF '## State at last compaction'; } || SEL26_BAD="$SEL26_BAD takeover(rc=$SEL26_RC)"
+selrun "" handoff "$RSTAMP_SID" --all --no-git >/dev/null 2>&1 || SEL26_BAD="$SEL26_BAD handoff(rc=$?)"
+if [ -z "$SEL26_BAD" ]; then
+  check "SEL26 a non-string timestamp on a user, assistant, queue, compaction or API-error record never takes show, takeover or handoff down, and each such stamp reads as null" PASS
+else
+  check "SEL26 non-string record timestamps:$SEL26_BAD" FAIL
 fi
 
 report

@@ -1003,7 +1003,7 @@ function ccdIndex() {
       map.set(o.cliSessionId, {
         accountUuid: accountUuid || null,
         archived: o.isArchived === true,
-        title: o.title || null,
+        title: typeof o.title === 'string' && o.title ? o.title : null,
         model: o.model || null,
         effort: o.effort || null,
         permissionMode: o.permissionMode || null,
@@ -1423,9 +1423,13 @@ function ledgerRead() {
 // guessing from the registry: CLAUDE_PID and CLAUDE_CODE_SESSION_ID are set for
 // every session, and CLAUDE_CODE_HOST_SESSION_ID is the desktop record's file name
 // — the direct join to this session's own account.
+function selfSessionId() {
+  return (process.env.CLAUDE_CODE_SESSION_ID || '').trim() || null;
+}
+
 function selfIdentity() {
   const pid = Number(process.env.CLAUDE_PID);
-  const sessionId = (process.env.CLAUDE_CODE_SESSION_ID || '').trim() || null;
+  const sessionId = selfSessionId();
   const hostSessionId = (process.env.CLAUDE_CODE_HOST_SESSION_ID || '').trim() || null;
   let accountUuid = null;
   if (sessionId) {
@@ -1927,7 +1931,7 @@ function extractPrompts(text, full) {
       if (!o) continue;
       const named = queueRecordName(o);
       if (o.operation === 'enqueue') {
-        const entry = { at: o.timestamp, raw: o.content };
+        const entry = { at: stampText(o.timestamp), raw: o.content };
         entries.push(entry);
         records.push({ index, kind: 'enqueue', named, entry });
       } else if (named && QUEUE_CONSUMERS.has(o.operation)) {
@@ -1957,7 +1961,7 @@ function extractPrompts(text, full) {
     let o; try { o = JSON.parse(line); } catch { continue; }
     if (!o || o.type !== 'user') continue;
     records.push({ index, kind: 'user', build: typeof o.version === 'string' ? o.version : '' });
-    entries.push({ at: o.timestamp, raw: messageText(o.message && o.message.content) });
+    entries.push({ at: stampText(o.timestamp), raw: messageText(o.message && o.message.content) });
   }
   const withdrawn = full === true ? queueWithdrawals(records, index) : new Set();
   const listed = new Set();
@@ -1979,7 +1983,7 @@ function extractAssistantTail(text, n) {
     const c = o && o.message && o.message.content;
     if (!Array.isArray(c)) continue;
     const t = messageText(c).trim();
-    if (t) out.push({ at: o.timestamp, text: t });
+    if (t) out.push({ at: stampText(o.timestamp), text: t });
   }
   return out.reverse();
 }
@@ -2048,7 +2052,7 @@ function extractStopCauseIn(text) {
     // and `JSON.stringify` would then omit these two entirely, giving a machine
     // consumer a different `stopCause` shape per record.
     status: flat(err.apiErrorStatus, 16) ?? null,
-    at: flat(err.timestamp, 40) ?? null,
+    at: flat(stampText(err.timestamp), 40) ?? null,
     message: flat(msg, 2000) || '',
     final: laterTurns === 0,
     laterTurns,
@@ -2064,6 +2068,15 @@ function extractStopCauseIn(text) {
 // supposed to be an enum token. A value outside the shape is treated as absent,
 // which resolves to "still working" — the conservative direction.
 const STOP_REASON_SHAPE = /^[a-z_]{1,32}$/;
+
+function stampText(value) {
+  return typeof value === 'string' && value ? value : null;
+}
+
+function recordStamp(value) {
+  const ms = typeof value === 'string' ? Date.parse(value) : NaN;
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
 
 // Whether the process COULD act at all, which the transcript's file mtime cannot
 // say. A completed assistant turn means it is waiting for its human. Measured on
@@ -2081,6 +2094,8 @@ const STOP_REASON_SHAPE = /^[a-z_]{1,32}$/;
 // is the honest answer: the last turn was not read.
 function extractLastTurn(text, fromOffset = 0) {
   const lines = (fromOffset > 0 ? text.slice(fromOffset) : text).split('\n');
+  let activityAt = null;
+  let newestSeen = false;
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i];
     if (!line) continue;
@@ -2088,7 +2103,12 @@ function extractLastTurn(text, fromOffset = 0) {
     let o;
     try { o = JSON.parse(line); } catch { continue; }
     if (o.type !== 'assistant' && o.type !== 'user') continue;
-    // An API-error record is not a turn. Skipping it is what keeps a session that
+    if (!newestSeen) {
+      newestSeen = true;
+      activityAt = recordStamp(o.timestamp);
+    }
+    // An API-error record does not decide the turn's kind, although its stamp above
+    // still counts as turn activity. Skipping it here is what keeps a session that
     // died on a rate limit from reading as "a turn is in flight — it is working",
     // which is exactly the session the usage-limit handover exists to take over.
     // `isRealTurn` and `extractAssistantTail` carry the same skip — as a substring
@@ -2100,9 +2120,19 @@ function extractLastTurn(text, fromOffset = 0) {
     const sr = o.message && o.message.stop_reason;
     const stopReason = typeof sr === 'string' && STOP_REASON_SHAPE.test(sr) ? sr : null;
     const awaiting = o.type === 'assistant' && !sidechain && stopReason !== null && stopReason !== 'tool_use';
-    return { kind: awaiting ? 'awaiting-input' : 'in-turn', stopReason, sidechain };
+    return { kind: awaiting ? 'awaiting-input' : 'in-turn', stopReason, sidechain, at: recordStamp(o.timestamp), activityAt };
   }
-  return { kind: 'unknown', stopReason: null, sidechain: false };
+  return { kind: 'unknown', stopReason: null, sidechain: false, at: null, activityAt };
+}
+
+function turnStampMs(r, key) {
+  const value = r.lastTurn && r.lastTurn[key];
+  const ms = typeof value === 'string' ? Date.parse(value) : NaN;
+  return Number.isFinite(ms) ? Math.min(ms, r.mtime) : r.mtime;
+}
+
+function activityMs(r) {
+  return turnStampMs(r, 'activityAt');
 }
 
 // `reliable` is false when the caller only had head+tail of the transcript: the
@@ -2194,7 +2224,7 @@ function scanQueue(text, tailSlice) {
     if (o.operation === 'enqueue') {
       q.pending++;
       q.last = String(o.content || '').trim();
-      q.at = o.timestamp || null;
+      q.at = stampText(o.timestamp);
       const name = queueRecordName(o);
       if (tailSlice === true && name) enqueuedHere.set(name, (enqueuedHere.get(name) || 0) + 1);
     } else if (QUEUE_CONSUMERS.has(o.operation)) {
@@ -2206,13 +2236,13 @@ function scanQueue(text, tailSlice) {
       }
       if (q.pending === 0 && tailSlice === false) {
         q.overdrawn++;
-        q.overdrawnAt = o.timestamp || null;
+        q.overdrawnAt = stampText(o.timestamp);
       }
       q.pending = Math.max(0, q.pending - 1);
       if (q.pending === 0) { q.last = null; q.at = null; }
     } else if (o.type === 'queue-operation') {
       q.unknown++;
-      q.unknownAt = o.timestamp || null;
+      q.unknownAt = stampText(o.timestamp);
     }
   }
   return q;
@@ -2307,9 +2337,11 @@ function measuredVerdict(r) {
   // window the docs promise, and 14 min 30 s rounded to 15 and read as "silent
   // ≥15 min". An age is only past a threshold once it has actually passed it.
   const now = Date.now();
-  const idleMin = Math.floor((now - r.mtime) / 60000);
+  const lastActive = activityMs(r);
+  const idleMin = Math.floor((now - lastActive) / 60000);
   const q = r.queue || extractPendingQueue('', false);
   const turn = r.lastTurn || { kind: 'unknown', stopReason: null };
+  const wrote = turn.kind !== 'unknown' && typeof turn.activityAt === 'string' ? 'wrote its last turn record' : 'wrote to its transcript';
   const qAt = q.at ? Date.parse(q.at) : NaN;
   // An unreadable timestamp counts as fresh: a real queued prompt is a genuine
   // hazard, and over-reporting it now costs one question, not a refusal. The same
@@ -2398,13 +2430,13 @@ function measuredVerdict(r) {
     return { level: 'BUSY', ...common, reason: `pid ${livePid(r.live)} has ${q.pending} prompt(s) queued${when} and will act on its own.` };
   }
   if (idleMin < ACTIVE_GRACE_MIN) {
-    return { level: 'BUSY', ...common, reason: `pid ${livePid(r.live)} wrote to its transcript ${idleMin} min ago — too recent to judge, its turn may still be streaming.` };
+    return { level: 'BUSY', ...common, reason: `pid ${livePid(r.live)} ${wrote} ${idleMin} min ago — too recent to judge, its turn may still be streaming.` };
   }
   if (turn.kind === 'awaiting-input') {
     return {
       level: 'PROBABLY_FREE',
       ...common,
-      reason: `pid ${livePid(r.live)} ended its last turn (${turn.stopReason}) ${ago(r.mtime)} ago, so it cannot act unless the user types in that window.${queueNote}`,
+      reason: `pid ${livePid(r.live)} ended its last turn (${turn.stopReason}) ${ago(turnStampMs(r, 'at'))} ago, so it cannot act unless the user types in that window.${queueNote}`,
     };
   }
   if (idleMin < BUSY_IDLE_MIN) {
@@ -2413,13 +2445,13 @@ function measuredVerdict(r) {
     const why = turn.kind === 'in-turn'
       ? 'and its last record is a turn in flight — it is working.'
       : 'and no assistant or user record could be read from it, so its state is unmeasured.';
-    return { level: 'BUSY', ...common, reason: `pid ${livePid(r.live)} wrote to its transcript ${idleMin} min ago ${why}` };
+    return { level: 'BUSY', ...common, reason: `pid ${livePid(r.live)} ${wrote} ${idleMin} min ago ${why}` };
   }
   // `awaiting-input` returned above, so this is `in-turn` or `unknown`. Only the
   // second justifies "it cannot act unless the user types": a turn in flight that
   // has gone quiet for hours may still be blocked on a long tool call, and that
   // DOES act without its human when it returns.
-  const silent = `pid ${livePid(r.live)} is alive but has been silent for ${ago(r.mtime)}`;
+  const silent = `pid ${livePid(r.live)} is alive but has been silent for ${ago(lastActive)}`;
   return {
     level: 'PROBABLY_FREE',
     ...common,
@@ -2483,7 +2515,7 @@ function extractCompaction(text, limit) {
     const t = messageText(o && o.message && o.message.content);
     if (!t || t.indexOf(marker) === -1) continue;
     const clean = scrub(t);
-    return { at: o.timestamp || null, text: clean.length > limit ? `${clean.slice(0, limit)}\n…[truncated]` : clean };
+    return { at: stampText(o.timestamp), text: clean.length > limit ? `${clean.slice(0, limit)}\n…[truncated]` : clean };
   }
   return null;
 }
@@ -2527,18 +2559,18 @@ function summarize(file, size, deep) {
   const cwd = firstMatch(text, /"cwd":"((?:[^"\\]|\\.)*)"/g);
   const cwdLast = lastMatch(text, /"cwd":"((?:[^"\\]|\\.)*)"/g);
   const branch = lastValidBranch(text);
-  const lastTs = lastMatch(text, /"timestamp":"([^"]+)"/g);
   const titles = collectTyped(text, 'custom-title');
   const prs = collectTyped(text, 'pr-link');
   const lastPrompts = collectTyped(text, 'last-prompt');
   const modes = collectTyped(text, 'mode');
+  const lastTitle = titles.length ? titles[titles.length - 1].customTitle : null;
+  const lastPromptText = lastPrompts.length ? lastPrompts[lastPrompts.length - 1].lastPrompt : null;
   const out = {
     cwd: cwd ? unescapeJson(cwd) : null,
     cwdLast: cwdLast ? unescapeJson(cwdLast) : null,
     branch: branch ? unescapeJson(branch) : null,
-    lastActivity: lastTs,
-    title: titles.length ? titles[titles.length - 1].customTitle : null,
-    lastPrompt: lastPrompts.length ? lastPrompts[lastPrompts.length - 1].lastPrompt : null,
+    title: typeof lastTitle === 'string' ? lastTitle : null,
+    lastPrompt: typeof lastPromptText === 'string' ? lastPromptText : null,
     mode: modes.length ? modes[modes.length - 1].mode : null,
     // Bounded at the source like every other transcript-derived value. The URL is
     // rendered as a markdown LINK TARGET inside both persisted briefs, in the
@@ -2681,10 +2713,12 @@ function buildIndexUncached(opts) {
         app,
       };
       if (!row.title && app && app.title) row.title = app.title;
+      if (!isLive && cutoff && activityMs(row) < cutoff) continue;
+      row.lastActivity = new Date(activityMs(row)).toISOString();
       rows.push(row);
     }
   }
-  rows.sort((a, b) => b.mtime - a.mtime);
+  rows.sort((a, b) => activityMs(b) - activityMs(a));
   if (opts.live) return { rows: rows.filter((r) => r.live), ctx, live };
   return { rows, ctx, live };
 }
@@ -2759,7 +2793,7 @@ function cmdList(opts) {
     // an authorization here would show one session's approval against every busy
     // row in scope. A survey reports what was measured.
     const owner = r.live ? `pid ${livePid(r.live)} ${r.takeover.measuredLevel}` : '';
-    print(`${statusOf(r).padEnd(4)}  ${sessionTag(r.sessionId)}  ${ago(r.mtime).padStart(8)} ago  ${flatPath(r.worktree)}`);
+    print(`${statusOf(r).padEnd(4)}  ${sessionTag(r.sessionId)}  ${ago(activityMs(r)).padStart(8)} ago  ${flatPath(r.worktree)}`);
     print(`      ${gitPart}   ${pr}   ${owner}${r.app ? `   ${appTag(r.app)}` : ''}`);
     print(`      "${oneLine(flatPath(r.title || r.lastPrompt || '(untitled)'), 96)}"`);
     if (!r.cwdExists) print(`      !! worktree directory missing: ${flatPath(r.cwd)}`);
@@ -2844,38 +2878,69 @@ function cmdInstances(opts) {
 // matter what it passes.
 let SELECTED_SESSION_ID = null;
 
-function resolve(opts, selectorRaw) {
+let SELF_SKIPPED_ID = null;
+
+const SELF_LABEL = '   (this is your own session)';
+const SELF_RULE = 'this is your own session, which a PR, worktree, branch or text selector never picks';
+const SELF_REMEDY = 'pass its session id to select it';
+
+function selfMark(r) {
+  const self = selfSessionId();
+  return self !== null && r.sessionId === self ? SELF_LABEL : '';
+}
+
+function noteSelfSkipped(self, sel, remedy) {
+  const text = `${sessionTag(self)} also matched "${oneLine(flatPath(sel), 80)}" and was skipped: ${SELF_RULE}; ${remedy}`;
+  if (JSON_MODE) process.stderr.write(`session-trail: NOTE ${text}\n`);
+  else print(`NOTE     ${text}`);
+}
+
+function resolve(opts, selectorRaw, selfRemedy = SELF_REMEDY) {
   const { rows } = buildIndex({ ...opts, live: false });
   const sel = String(selectorRaw || '').trim();
   if (!sel) fail('missing selector');
   const low = sel.toLowerCase();
+  const self = selfSessionId();
+  let selfSkipped = false;
+  const others = (matched) => {
+    if (self !== null && matched.some((r) => r.sessionId === self)) selfSkipped = true;
+    return matched.filter((r) => r.sessionId !== self);
+  };
+  const byText = () => {
+    const matched = others(rows.filter((r) => `${r.title || ''} ${r.lastPrompt || ''}`.toLowerCase().includes(low)));
+    const exactIds = new Set(matched.filter((r) => (r.title || '').trim().toLowerCase() === low).map((r) => r.sessionId));
+    return exactIds.size ? matched.filter((r) => exactIds.has(r.sessionId)) : matched;
+  };
+  const oneSession = (t) => new Set(t.map((r) => r.sessionId)).size === 1;
+  const oneDirectory = (t) => new Set(t.map((r) => r.cwd)).size === 1;
+  const oneLineOfWork = (t) => oneSession(t) || oneDirectory(t);
   const tiers = [
-    rows.filter((r) => r.sessionId === sel),
-    rows.filter((r) => sel.length >= 6 && r.sessionId.startsWith(low)),
-    rows.filter((r) => /^#?\d+$/.test(sel) && r.pr && String(r.pr.number) === sel.replace('#', '')),
-    rows.filter((r) => r.worktree.toLowerCase() === low || r.cwd === sel),
-    rows.filter((r) => (r.branch || '').toLowerCase() === low),
-    rows.filter((r) => r.worktree.toLowerCase().includes(low) || (r.branch || '').toLowerCase().includes(low)),
-    rows.filter((r) => `${r.title || ''} ${r.lastPrompt || ''}`.toLowerCase().includes(low)),
+    { collapse: oneSession, match: () => rows.filter((r) => r.sessionId === sel) },
+    { collapse: oneSession, match: () => rows.filter((r) => sel.length >= 6 && r.sessionId.startsWith(low)) },
+    { collapse: oneLineOfWork, match: () => others(rows.filter((r) => /^#?\d+$/.test(sel) && r.pr && String(r.pr.number) === sel.replace('#', ''))) },
+    { collapse: oneLineOfWork, match: () => others(rows.filter((r) => r.worktree.toLowerCase() === low || r.cwd === sel)) },
+    { collapse: oneLineOfWork, match: () => others(rows.filter((r) => (r.branch || '').toLowerCase() === low)) },
+    { collapse: oneLineOfWork, match: () => others(rows.filter((r) => r.worktree.toLowerCase().includes(low) || (r.branch || '').toLowerCase().includes(low))) },
+    { collapse: oneSession, match: byText },
   ];
-  const select = (row) => { SELECTED_SESSION_ID = row.sessionId; return row; };
-  for (const t of tiers) {
+  const select = (row) => { SELECTED_SESSION_ID = row.sessionId; SELF_SKIPPED_ID = selfSkipped ? self : null; return row; };
+  for (const tier of tiers) {
+    const t = tier.match();
+    if (!t.length) continue;
+    if (selfSkipped) noteSelfSkipped(self, sel, selfRemedy);
     if (t.length === 1) return select(t[0]);
-    if (t.length > 1) {
-      const byWorktree = new Set(t.map((r) => r.cwd));
-      if (byWorktree.size === 1) return select(t.sort((a, b) => b.mtime - a.mtime)[0]);
-      print(`ambiguous selector "${sel}" — ${t.length} candidates:\n`);
-      for (const r of t) print(`  ${sessionTag(r.sessionId)}  ${statusOf(r).padEnd(4)}  ${flatPath(r.worktree)}  "${oneLine(flatPath(r.title || r.lastPrompt), 70)}"`);
-      flush();
-      process.exit(2);
-    }
+    if (tier.collapse && tier.collapse(t)) return select(t.sort((a, b) => activityMs(b) - activityMs(a))[0]);
+    print(`ambiguous selector "${sel}" — ${t.length} candidates:\n`);
+    for (const r of t) print(`  ${sessionTag(r.sessionId)}  ${statusOf(r).padEnd(4)}  ${flatPath(r.worktree)}  "${oneLine(flatPath(r.title || r.lastPrompt), 70)}"${selfMark(r)}`);
+    flush();
+    process.exit(2);
   }
   // Plain text: flush() has already put the NOTE on stdout, and this stderr
   // line repeats the count deliberately, because the two say different things
   // — the NOTE says the output is short, this says the thing you asked for may
   // be what went missing. Under --json the NOTE is suppressed and this is the
   // only carrier.
-  fail(`no session matched "${sel}" (try --all or --days 0)${SKIPPED ? ` — NOTE ${SKIPPED} record(s) were unreadable and skipped, the target may be one of them` : ''}`, 2);
+  fail(`no session matched "${sel}" (try --all or --days 0)${selfSkipped ? ` — ${sessionTag(self)} matched it, but ${SELF_RULE}; ${selfRemedy}` : ''}${SKIPPED ? ` — NOTE ${SKIPPED} record(s) were unreadable and skipped, the target may be one of them` : ''}`, 2);
 }
 
 // The SECOND site of the same rule as `buildIndex`'s row literal, and the reason a
@@ -2892,10 +2957,11 @@ function hydrate(row) {
     const s = summarize(row.transcript, st.size, true);
     // `title` for the same reason as `cwd`, and it was missed the first time:
     // `summarize` always emits the key, it is null for a transcript with no
-    // custom-title record, and `buildIndex` resolves a desktop-app title one line
+    // custom-title record, and `buildIndex` resolves a desktop-app title
     // before pushing the row. Without this the app title showed in `list` and
     // `(none)` in `show`, and both briefs fell back to a directory name in their H1.
-    return { ...row, ...s, cwd: s.cwd || row.cwd, title: s.title || row.title };
+    const deep = { ...row, ...s, size: st.size, mtime: st.mtimeMs, cwd: s.cwd || row.cwd, title: s.title || row.title };
+    return { ...deep, lastActivity: new Date(activityMs(deep)).toISOString() };
   } catch { SKIPPED += 1; return row; }
 }
 
@@ -4468,8 +4534,8 @@ function cmdShow(opts) {
   const v = activityVerdict(r, opts.force);
   const w = writeAnchor(r.wt, opts);
   const cont = continuationPlan(r, w, g && g.branch);
-  if (opts.json) return print(JSON.stringify({ ...r, git: g, takeover: v, writes: w, continuation: cont, worktreeAdvice: worktreeAdvice(r), skipped: SKIPPED }, null, 2));
-  print(`SESSION  ${flatPath(r.sessionId)}`);
+  if (opts.json) return print(JSON.stringify({ ...r, git: g, takeover: v, writes: w, continuation: cont, worktreeAdvice: worktreeAdvice(r), selfSkipped: SELF_SKIPPED_ID, skipped: SKIPPED }, null, 2));
+  print(`SESSION  ${flatPath(r.sessionId)}${selfMark(r)}`);
   print(`TITLE    ${oneLine(flatPath(r.title), 200) || '(none)'}`);
   // Bounded like every other third-party value: the registry record is another
   // instance's JSON, and a newline in `name` or `entrypoint` would fabricate a
@@ -4494,7 +4560,9 @@ function cmdShow(opts) {
   print(`WORKTREE ${flatPath(r.wt)}${wtLeg === 'present' ? '' : '   !! MISSING'}`);
   if (r.cwd !== r.wt) print(`CWD      ${flatPath(r.cwd)}   (session started in a subdirectory)`);
   print(`BRANCH   ${oneLine(flatPath((g && g.branch) || r.branch), 120) || '?'}`);
-  print(`LAST     ${ago(r.mtime)} ago   transcript ${flatPath(r.transcript)}`);
+  const lastActive = activityMs(r);
+  const laterWrite = r.mtime - lastActive >= 60000 ? `   (file last written ${ago(r.mtime)} ago)` : '';
+  print(`LAST     ${ago(lastActive)} ago   transcript ${flatPath(r.transcript)}${laterWrite}`);
   if (r.pr) print(`PR       #${r.pr.number}  ${r.pr.url}`);
   if (r.stopCause && r.stopCause.final) print(`STOPPED  ${r.stopCause.error}${r.stopCause.status ? ` (${r.stopCause.status})` : ''} at ${(r.stopCause.at || '').slice(0, 16)} — "${oneLine(r.stopCause.message, 90)}"`);
   else if (r.stopCause) print(`NOTE     hit ${r.stopCause.error} at ${(r.stopCause.at || '').slice(0, 16)} but recovered (${r.stopCause.laterTurns} turns after, last ${(r.stopCause.resumedUntil || '').slice(0, 16)})`);
@@ -4662,7 +4730,7 @@ function cmdLimited(opts) {
   print(`SCOPE  ${ctx ? `${ctx.name} (${ctx.root})` : 'ALL REPOS'}`);
   print(`STALLED AT AN API LIMIT/ERROR: ${stalled.length}   RECOVERED AFTERWARDS: ${recovered.length}   (of ${rows.length} scanned)\n`);
   const line = (r) => {
-    print(`${statusOf(r).padEnd(4)}  ${sessionTag(r.sessionId)}  ${ago(r.mtime).padStart(8)} ago  ${flatPath(r.worktree)}${r.live ? `   pid ${livePid(r.live)} ${r.takeover.measuredLevel}` : ''}`);
+    print(`${statusOf(r).padEnd(4)}  ${sessionTag(r.sessionId)}  ${ago(activityMs(r)).padStart(8)} ago  ${flatPath(r.worktree)}${r.live ? `   pid ${livePid(r.live)} ${r.takeover.measuredLevel}` : ''}`);
     print(`      cause: ${r.stopCause.error}${r.stopCause.status ? ` (${r.stopCause.status})` : ''} at ${(r.stopCause.at || '').slice(0, 16)}${r.truncated ? '   [transcript >8 MB — read head+tail only, this classification saw the tail]' : ''}`);
     if (r.app) print(`      ${appTag(r.app)}`);
     if (r.stopCause.message) print(`      "${oneLine(r.stopCause.message, 110)}"`);
@@ -4685,7 +4753,7 @@ function cmdLimited(opts) {
 }
 
 function cmdTakeover(opts) {
-  const base = resolve(opts, opts._[1]);
+  const base = resolve(opts, opts._[1], 'to brief a successor on it, run handoff with its session id');
   const r = hydrate(base);
   const g = gitState(r.wt, true);
   const d = g ? gitDiffText(r.wt, g.base, 400) : null;
@@ -4723,7 +4791,7 @@ function cmdTakeover(opts) {
   // pointing into the wrong tree. The markdown keeps `writeAnchorCaution`'s static
   // sentence and no continuation at all.
   const tw = writeAnchor(r.wt, opts);
-  if (opts.json) return print(JSON.stringify({ ...r, git: g, diff: d, target, takeover: tv, lineage, writes: tw, continuation: continuationPlan(r, tw, g && g.branch), worktreeAdvice: wtAdvice, skipped: SKIPPED }, null, 2));
+  if (opts.json) return print(JSON.stringify({ ...r, git: g, diff: d, target, takeover: tv, lineage, writes: tw, continuation: continuationPlan(r, tw, g && g.branch), worktreeAdvice: wtAdvice, selfSkipped: SELF_SKIPPED_ID, skipped: SKIPPED }, null, 2));
   const L = [];
   L.push(BRIEF_DATA_CAUTION);
   L.push('');
@@ -4741,7 +4809,8 @@ function cmdTakeover(opts) {
   L.push(`- worktree: \`${briefPath(r.wt)}\`${r.cwdExists ? '' : '  **MISSING**'}`);
   L.push(writeAnchorCaution(r.wt));
   L.push(`- branch: \`${briefPath((g && g.branch) || r.branch || '?')}\``);
-  L.push(`- last activity: ${new Date(r.mtime).toISOString()} (${ago(r.mtime)} ago)`);
+  const lastActive = activityMs(r);
+  L.push(`- last activity: ${new Date(lastActive).toISOString()} (${ago(lastActive)} ago)`);
   if (r.pr) L.push(`- pull request: [#${r.pr.number}](${r.pr.url})`);
   if (r.stopCause && r.stopCause.final) {
     L.push(`- **stopped on: ${r.stopCause.error}${r.stopCause.status ? ` (HTTP ${r.stopCause.status})` : ''}** at ${r.stopCause.at || '?'}`);
@@ -4764,7 +4833,7 @@ function cmdTakeover(opts) {
   const plans = r.cwdExists ? findPlanDocs(r.wt, 5) : [];
   if (plans.length) {
     const startedAt = first && first.at ? Date.parse(first.at) : null;
-    const inWindow = (p) => startedAt !== null && p.mtime >= startedAt && p.mtime <= r.mtime + 60000;
+    const inWindow = (p) => startedAt !== null && p.mtime >= startedAt && p.mtime <= lastActive + 60000;
     const own = plans.filter(inWindow);
     L.push('## Plan documents in the worktree');
     L.push('_Read these first — they are written plans on disk, independent of the transcript._');
@@ -4955,7 +5024,8 @@ function cmdHandoff(opts) {
   L.push(writeAnchorCaution(r.wt));
   L.push(`- branch: \`${briefPath((g && g.branch) || r.branch || '?')}\``);
   L.push(`- transcript: \`${briefPath(r.transcript)}\``);
-  L.push(`- last activity: ${new Date(r.mtime).toISOString()} (${ago(r.mtime)} ago)`);
+  const lastActive = activityMs(r);
+  L.push(`- last activity: ${new Date(lastActive).toISOString()} (${ago(lastActive)} ago)`);
   if (r.pr) L.push(`- pull request: [#${r.pr.number}](${r.pr.url})`);
   if (r.truncated) L.push(`- note: transcript large, only head+tail scanned, and ${QUEUE_WITHDRAWALS_UNFILTERED} the list below`);
   L.push('');
@@ -5215,7 +5285,7 @@ function labelRemove(opts, target, kind) {
 }
 
 function cmdAdopt(opts) {
-  const row = resolve(opts, opts._[1]);
+  const row = resolve(opts, opts._[1], 'a session never adopts itself');
   const me = selfIdentity();
   if (!me.sessionId) {
     fail('this process has no CLAUDE_CODE_SESSION_ID, so it cannot record itself as the continuing session');
@@ -5291,7 +5361,7 @@ function cmdAdopt(opts) {
       // root that still exists instead. A gated key would make absence ambiguous — a consumer
       // could not tell the gone leg from an older tool — so the leg is NAMED, and it comes from
       // `adviceLeg`, the single implementation of that decision, never from a raw re-derivation.
-      print(JSON.stringify({ recorded: null, file: null, error: why, recordedWorktree: row.wt, leg: adviceLeg(row), worktreeAdvice: worktreeAdvice(row), skipped: SKIPPED }, null, 2));
+      print(JSON.stringify({ recorded: null, file: null, error: why, recordedWorktree: row.wt, leg: adviceLeg(row), worktreeAdvice: worktreeAdvice(row), selfSkipped: SELF_SKIPPED_ID, skipped: SKIPPED }, null, 2));
     } else {
       // A NEGATIVE receipt occupies the receipt slot. Without it this path was
       // byte-identical to a success from the head down while the refusal lived on stderr
@@ -5337,7 +5407,7 @@ function cmdAdopt(opts) {
   // `recordedWorktree` — `edge.from.worktree` already IS the source worktree here, in the
   // BOUNDED `makeEndpoint`/`boundPath` spelling, so adding the raw field would put one value
   // under two keys and the added one would be the weaker of the two.
-  if (opts.json) return print(JSON.stringify({ recorded: edge, file, leg: adviceLeg(row), worktreeAdvice: worktreeAdvice(row), skipped: SKIPPED }, null, 2));
+  if (opts.json) return print(JSON.stringify({ recorded: edge, file, leg: adviceLeg(row), worktreeAdvice: worktreeAdvice(row), selfSkipped: SELF_SKIPPED_ID, skipped: SKIPPED }, null, 2));
   print(`RECORDED  ${sessionTag(row.sessionId)} (${endpointLabel(edge.from)}) → ${sessionTag(me.sessionId)} (${endpointLabel(edge.to)})`);
   // EVERY value on the receipt bounded, all three lines. They are self-derived rather than
   // foreign, so this is consistency rather than a closed injection channel — but a CSI run here
@@ -5447,7 +5517,9 @@ function lineageBackfill(opts) {
   const stalled = rows.filter((r) => r.stopCause && r.stopCause.final);
   const candidates = [];
   for (const s of stalled) {
-    // Ordered by last activity, and the start guard applies ONLY where a start is
+    // Ordered by the transcript file's write time, deliberately not by turn activity
+    // (one of the two clocks SKILL.md's turn-activity gotcha keeps apart on purpose),
+    // and the start guard applies ONLY where a start is
     // actually observable. `r.live` is null for every finished session — the whole
     // population this verb reconstructs — so the previous `startedAt(r) >= s.mtime`
     // conjunct rejected nothing there while wrongly excluding a live window that
