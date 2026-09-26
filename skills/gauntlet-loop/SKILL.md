@@ -79,9 +79,9 @@ closes none.
   itself and hands the redacted output into the packet. A critic is handed that evidence;
   it never reproduces it. Plan the charter's inspection protocol around that, or the
   first critic round returns nothing.
-- **An active `/zensu:tdd` chain binds the LEAD ONLY.** Both the PreToolUse
-  phase-gate and the Bash witness return early unless the principal is `main-v1`
-  (`hooks/pre-edit-tdd-reminder.sh`, `hooks/post-bash-witness.sh`), and no spawn the
+- **An active `/zensu:tdd` chain binds the LEAD ONLY.** The PreToolUse
+  phase-gate returns early unless the principal is `main-v1`
+  (`hooks/pre-edit-tdd-reminder.sh`), and no spawn the
   host identifies as a subagent is `main-v1` — a builder or critic is
   `host-profile-v1`, the plugin's own reviewer types are `reviewer-readonly-v1`. That
   rests on the same host premise as the bullet above, and inherits its bound: a

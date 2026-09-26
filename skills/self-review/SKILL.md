@@ -135,8 +135,8 @@ branch is a chain terminus and carries the same disclosure duty as the Final
 report, so before stopping also run the `--bypass-list` command from the `## Open`
 section below and render its output as
 `Gates bypassed during this session: <output>`, under the same rules stated
-there. A gate escape needs no file change to be recorded — `ZENSU_TEST_WITNESS`
-and `ZENSU_MCP_GATE` are both reachable without one — so a zero-change chain is
+there. A gate escape needs no file change to be recorded — `ZENSU_MCP_GATE` is
+reachable without one — so a zero-change chain is
 exactly where an undisclosed escape would otherwise hide. Then stop. Every command uses Claude's natively rendered `CLAUDE_PLUGIN_ROOT`
 directly inside a quoted shell parameter; never paste its value into shell source.
 
@@ -178,27 +178,27 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   `/zensu:tdd` Phase 4 discipline). In a vanilla-mode session — verify with
   `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --mode` (echoes `vanilla`) — apply each
   must-fix directly instead: no RED→GREEN cycle required, the gate passes through.
-  Then log `{step_id} IMPL completed — files: {list}` for the fixes, re-run
-  the `/zensu:tdd` Phase 6 **step 1 full suite** over the amended tree and log it
-  as a fresh `AUDIT — cmd="..." … | scope: full` line — this is the chain's last
-  edit, so this is the run whose verdict describes the tree that ships, and Phase 5
-  checkpoints are scoped and cannot stand in for it. This stage is often forced
-  cold and never ran `/zensu:tdd` Phase 1, so resolve the suite command in THIS
-  order. (1) The project's own metadata — `CLAUDE.md`, `package.json` `scripts`.
-  (2) Only if that yields nothing, the newest `AUDIT — cmd="..." … | scope: full`
-  line in the run log (that log resolved as the finalize branch below resolves it).
-  Never the reverse: a run log is model-authored, is COMMITTED in consuming repos,
-  and is selected here by mtime, so a `cmd=` mined from it is repository content you
-  would be executing — and it is REDACTED (`<project>`, `~`, `<home>`), so a command
-  carrying a placeholder is not runnable and counts as "yields nothing". Prefer the
-  newest `| scope: full` line specifically, never the newest AUDIT line: that is
-  routinely the linter, the build or the coverage run, and logging one of those as
-  the closing test verdict would fabricate it. When the two sources disagree, run
-  the metadata one and log `FULL SUITE COMMAND MISMATCH — metadata={a} log={b}` into
-  `## Open`. When neither yields one, log `FULL SUITE UNRESOLVED — {reason}`, carry
-  it into `## Open` and claim NO test verdict. Read this run's verdict from its OWN
-  output: Phase 6 already ran this command clean, so the terminal cross-check can
-  corroborate the command but never the result. Then
+  Then log `{step_id} IMPL completed — files: {list}` for the fixes and re-run
+  the `/zensu:tdd` Phase 6 **step 1 full suite** over the amended tree through the
+  evidence runner:
+  `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --evidence-run --scope full --cmd '<full test command>' --log <run-log>`
+  — this is the chain's last edit, so this is
+  the run whose verdict describes the tree that ships, and Phase 5 checkpoints are
+  scoped and cannot stand in for it.
+  This stage is often forced cold and never ran `/zensu:tdd` Phase 1, so resolve the
+  suite command in THIS order. (1) `evidence.fullSuiteCommand` — when the project
+  configures it, drop `--cmd` and the runner uses it. (2) The project's own
+  metadata — `CLAUDE.md`, `package.json` `scripts`. (3) Only if both yield nothing,
+  the `cmd:` of the newest `EVIDENCE RUN — scope=full` line in the run log (that log
+  resolved as the finalize branch below resolves it). Never the reverse: a run log
+  is COMMITTED in consuming repos and is selected here by mtime, so a command mined
+  from it is repository content you would be executing — and it is REDACTED
+  (`<project>`, `~`, `<home>`), so a command carrying a placeholder is not runnable
+  and counts as "yields nothing". When the metadata and the log disagree, run the
+  metadata one and log `FULL SUITE COMMAND MISMATCH — metadata={a} log={b}` into
+  `## Open`. When nothing yields a command, log `FULL SUITE UNRESOLVED — {reason}`,
+  carry it into `## Open` and claim NO test verdict. The runner's own summary line
+  is this run's verdict. Then
   invoke the `/zensu:tdd` Phase 6 step 5b **Edit Landing Audit** UNCHANGED —
   when that procedure is not already in your context (this stage is often forced
   cold), `Read` it from `${CLAUDE_PLUGIN_ROOT}/skills/tdd/SKILL.md` rather than
@@ -229,40 +229,21 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   - re-invoke the whole `/zensu:tdd` skill (its Phase 6 tail would re-spawn the reviewer).
 
 - **Otherwise** (no must-fix, OR `selfReviewFixed` is already true) — finalize:
-  1. Standalone handoffs keep the unqualified terminus: run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --claimed-review-ticket "<review-ticket>"`. For a verified Autopilot binding, run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID" --claimed-review-ticket "<review-ticket>"`. This is the ticket- and generation-bound chain terminus. If it fails, stop as stale and do not render a successful final report.
-  2. **Terminal evidence cross-check.** The chain's last word on test results is this
-     report, so re-verify the session's structured-evidence claims against the witness
-     before writing it: resolve the run log as the newest `"${CLAUDE_PROJECT_DIR:-.}/.zensu/logs"/*_tdd-*.log`
-     and run `node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-evidence-crosscheck.js" --log <run-log> --witness "${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-${SESSION_ID}.log" --allow-missing-log`.
-     The library IS the recipe — do NOT hand-grep the witness log. Hand-executing this
-     check is what once returned `verified` for claims nobody had established.
-     `--allow-missing-log` makes a chain that never armed a witness report
-     `no evidence claims to cross-check`, which is a clean state, not a failure. Every
-     `EVIDENCE GAP` / `EVIDENCE CONTRADICTION` line it emits goes verbatim into the
-     final report's `## What I built` audit facts and, when any exists, into `## Open`
-     — a fabricated green must not reach the user through the chain's terminal report.
-     If the command cannot run at all — `node` missing, a usage error, an internal
-     exception, any non-zero exit that is not a reported gap — carry
-     `EVIDENCE CROSS-CHECK UNAVAILABLE — <reason>` into BOTH the `Evidence cross-check`
-     verdict cell and a `## Open` row. The library writes everything to STDOUT, so take
-     `<reason>` from its own `EVIDENCE CROSS-CHECK UNAVAILABLE — …` stdout line when it
-     emitted one, else from stderr, else from the exit code; run it as `2>&1` so neither
-     channel is lost. That is NOT a clean state. An unreadable run log is deliberately
-     NOT in this list: `--allow-missing-log` makes it exit 0 with
-     `no evidence claims to cross-check`, which is the clean state by design.
+  1. Standalone handoffs keep the unqualified terminus: run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --claimed-review-ticket "<review-ticket>"`. For a verified Autopilot binding, run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID" --claimed-review-ticket "<review-ticket>"`. This is the ticket- and generation-bound chain terminus, and it applies the full-suite gate: it prints a `FULL SUITE — <state> | …` line on stderr and refuses (exit 1) on a missing, red, running, interrupted or stale full-suite record. On such a refusal the chain stays open: run the command its `run:` segment names, or wait for a `running` record to land, then run this step again. If the refusal is `failed` and the one fix round is already spent, do not edit again: carry the refusal line into your report, stop, and leave `ZENSU_FULL_SUITE_GATE` to the user. Any other failure is stale: stop and do not render a successful final report.
+  2. **Carry the full-suite verdict.** Copy every `FULL SUITE — …` line the terminus
+     printed — the verdict, plus the `flaky` line and the gate-mode disclosure when
+     present — into the `Full suite` verdict cell verbatim.
   3. Render the final report (below), then stop.
 
 ### Final report
 
 Render a CHAIN-END SUMMARY as TABLES, not prose: every section below is a table
 plus at most one line of text, never a paragraph — the sole exception is
-`## Open`, which carries the verbatim `EVIDENCE GAP` / `EVIDENCE CONTRADICTION`
-lines whenever the cross-check emitted any, and then ends with the bypass-ledger
-line followed, when it applies, by the
+`## Open`, which ends with the bypass-ledger line followed, when it applies, by the
 converge offer. Keep it scannable — no restating, no narration of the process, no
 filler.
 
-Mark every status and verdict cell with a leading marker: 🟢 good (passed, clean, done, met), 🟡 attention (partial, advisory, skipped, not measured), 🔴 bad (failed, must-fix, dropped, contradicted, blocked, not landed, unverified, unresolved predicate, evidence gap, evidence contradiction, cross-check unavailable, verification degraded, a gate bypassed), ⚪ not applicable — admissible ONLY where the source of the value itself says the item does not apply, which today means exactly one case: a requirement row the plan already marks deprecated. An outcome that was merely not run is 🟡, never ⚪. The marker PREFIXES the cell value and NEVER replaces it: every verbatim literal keeps its own words unchanged after its marker, subject only to the pipe-escaping rule below, which the renderer undoes so the reader still sees the original text. A marker never stands alone and is never separated from the words it marks by a line break. The ## Open table has no status or verdict column and takes no marker.
+Mark every status and verdict cell with a leading marker: 🟢 good (passed, clean, done, met), 🟡 attention (partial, advisory, skipped, not measured), 🔴 bad (failed, must-fix, dropped, contradicted, blocked, not landed, unverified, unresolved predicate, verification degraded, a gate bypassed), ⚪ not applicable — admissible ONLY where the source of the value itself says the item does not apply, which today means exactly one case: a requirement row the plan already marks deprecated. An outcome that was merely not run is 🟡, never ⚪. The marker PREFIXES the cell value and NEVER replaces it: every verbatim literal keeps its own words unchanged after its marker, subject only to the pipe-escaping rule below, which the renderer undoes so the reader still sees the original text. A marker never stands alone and is never separated from the words it marks by a line break. The ## Open table has no status or verdict column and takes no marker.
 
 Sections IN THIS ORDER, the TL;DR LAST (pull from your own context; do
 NOT re-spawn any agent):
@@ -277,10 +258,10 @@ words per cell, Status is 🟢 done / 🟢 merged / 🟢 built-tested / 🔴 blo
 is a PR URL or `—`.
 
 Then a second table, columns: Check | Verdict, with exactly these rows — Feature,
-Files modified, Tests created, Build, Coverage, Edit landing, Evidence cross-check,
-Finding verification, Gates bypassed, Plan, Log. (The delegate renderer carries
-`Mtime audit` where this one carries `Evidence cross-check`; every other row and
-their order are shared.) Verdict cells are values, not
+Files modified, Tests created, Full suite, Build, Coverage, Edit landing,
+Finding verification, Gates bypassed, Plan, Log. (The delegate renderer also
+carries `Mtime audit` after `Edit landing`; every other row and their order are
+shared.) Verdict cells are values, not
 sentences. Mark a cell when its value is a STATE; leave it unmarked when the value
 is a title, a path, or a bare count with no target — that is Feature, Files
 modified, Plan and Log, and every other row above is marked. A count measured
@@ -304,13 +285,10 @@ close marker plus any `EDIT NOT LANDED` line and the `UNVERIFIED (no claims logg
 or unresolved `PENDING PREDICATE` close (those are NOT clean states, and both
 take 🔴, never 🟡) — a claimed edit
 that never produced a change must not vanish between the Phase 6 report and this
-summary; **Evidence cross-check** takes the Phase-4 step-2
-`EVIDENCE CROSS-CHECK SUMMARY` line plus every `EVIDENCE GAP` /
-`EVIDENCE CONTRADICTION` line, or `no evidence claims to cross-check` when that
-is what it reported, or `EVIDENCE CROSS-CHECK UNAVAILABLE — <reason>` when the
-check could not run. When it also emits its `witness log unreadable` line, carry
-that verbatim too: without it every claim reads as an uncorroborated gap with no
-stated cause. Both verbatim cells follow the `## Open` escaping rule
+summary; **Full suite** takes the `FULL SUITE — …` lines `--chain-done` printed
+(Phase 4 finalize step 2): 🟢 only for `pass`; 🟡 for `pass-tree-unverified`,
+`not-applicable`, `not checked` and an advisory `missing`; 🔴 for every other
+state, advisory or not, including `escaped`. Both verbatim cells follow the `## Open` escaping rule
 (`\` first, then `|`), for the same reason: an unescaped pipe splits the row and
 the renderer drops the cells past the last column.
 
@@ -346,22 +324,17 @@ ONE line: whether the single fix round ran and what it changed.
 
 ## Open
 Table, columns: Item | Type | Next step. One row per deferred suggestion or
-max-rounds finding requiring a manual fix, and one row per `EVIDENCE GAP` /
-`EVIDENCE CONTRADICTION` line the cross-check emitted, carrying that line
-verbatim under this escaping rule, applied in this order: first write every `\`
+max-rounds finding requiring a manual fix, one row per `FULL SUITE COMMAND MISMATCH`
+or `FULL SUITE UNRESOLVED` line, and one row per advisory `FULL SUITE —` line that
+did not pass, carrying that line verbatim under this escaping rule, applied in this order: first write every `\`
 as `\\`, then every `|` as `\|`. An unescaped pipe splits the row and the
 renderer drops the cells past the third, which is exactly the verdict clause the
 row exists to surface; doing it in the other order turns an already-escaped `\|`
 inside a shell command back into a delimiter. The same rule applies to every
-carried line in this report — the `Evidence cross-check` and `Edit landing`
-verdict cells in `## What I built`, and the UNAVAILABLE row below.
-Also add a row when the
-cross-check could not run at all (missing `node`, a usage error, an internal
-exception, any other non-zero exit), carrying
-`EVIDENCE CROSS-CHECK UNAVAILABLE — <reason>`; that is
-NOT a clean state and must never be silently absent. Write the single line
-`Nothing open.` only when that table has no rows at all — an emitted evidence line
-is always a row, so `Nothing open.` can never stand above one.
+carried line in this report — the `Full suite` and `Edit landing` verdict cells in
+`## What I built`. Write the single line `Nothing open.` only when that table has
+no rows at all — a carried line is always a row, so `Nothing open.` can never stand
+above one.
 
 Always render the bypass-ledger audit line next, in both cases — whether or not
 the table has rows: run

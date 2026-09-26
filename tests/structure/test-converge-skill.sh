@@ -18,7 +18,7 @@ set -u
 # selfReview-off combined-summary directive in post-review-tdd-delegate.sh; and
 # the e2e-skills scenario files. Pins are stated per carrier, not as a
 # cross-carrier equality. The self-review report contracts the offer sits beside
-# (pipe escaping, the unrunnable-cross-check verdict) are owned by
+# (pipe escaping, the full-suite verdict) are owned by
 # test-self-review-skill.sh V22-V24, not here. It intentionally does NOT assert version sync or hook
 # counts — those are owned by sibling tests.
 
@@ -137,7 +137,7 @@ region_has "P3d.5 ## Open omits the offer for an Autopilot-bound handoff" "$OPEN
 region_has "P3d.6 ## Open omits the offer without a Requirements table" "$OPEN_FLAT" 'when the session plan carries no `## Requirements`'
 region_has "P3d.7 ## Open carries the bypass-ledger disclosure" "$OPEN_FLAT" 'Gates bypassed during this session:'
 region_has "P3d.8 ## Open renders the ledger unconditionally" "$OPEN_FLAT" 'in both cases — whether or not the table has rows'
-region_has "P3d.9 ## Open gives every evidence line its own row" "$OPEN_FLAT" 'one row per `EVIDENCE GAP` / `EVIDENCE CONTRADICTION` line'
+region_has "P3d.9 ## Open gives every carried full-suite line its own row" "$OPEN_FLAT" 'one row per advisory `FULL SUITE —` line that did not pass'
 OPEN_HEAD="${OPEN_FLAT%%Optional next step:*}"
 if [ "$OPEN_HEAD" = "$OPEN_FLAT" ]; then
   check "P3d.10 ## Open orders the ledger before the offer (offer line absent)" FAIL
@@ -181,7 +181,6 @@ fi
 PREAMBLE_FLAT="$(awk '/^### Final report$/{f=1} f&&/^```$/{exit} f' "$SELF_REVIEW_MD" | tr '\n' ' ' | tr -s ' ')"
 nonempty_region "P3g.0 self-review report preamble resolves non-empty" "$PREAMBLE_FLAT"
 region_has "P3g.1 report budget names the ## Open exception" "$PREAMBLE_FLAT" 'the sole exception is `## Open`'
-region_has "P3g.2 report budget makes the evidence lines a duty" "$PREAMBLE_FLAT" 'carries the verbatim `EVIDENCE GAP` / `EVIDENCE CONTRADICTION` lines'
 region_has "P3g.3 report budget fixes the ledger-then-offer order" "$PREAMBLE_FLAT" 'ends with the bypass-ledger line followed, when it applies, by the converge offer'
 if [ "$(grep -cF 'Optional next step: /zensu:converge' "$SELF_REVIEW_MD")" = 1 ] \
   && [ "$(grep -cF 'Optional next step: /zensu:converge' "$POST_REVIEW_HOOK")" = 1 ]; then

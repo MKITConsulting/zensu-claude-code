@@ -5,9 +5,9 @@ completion-time `--tdd-complete` refusals of the same class: the edit-landing
 receipt — whose VERDICT is what is judged, not its existence, and which a logged
 claim arms even when the anchor's tree is clean (discipline patch 10 in
 [tdd-manager-workflow.md](tdd-manager-workflow.md))
-and §Requirements-Table Gate below, which has its own section here. Six of the
-eight are convention-nudges with a documented escape hatch, not security
-boundaries — see [Session Control](session-control.md) for the part that is. The
+and §Requirements-Table Gate below, which has its own section here — and ONE
+terminus refusal at `--chain-done`, §Full-Suite Gate. Seven of the nine are
+convention-nudges with a documented escape hatch, not security boundaries — see [Session Control](session-control.md) for the part that is. The
 two exceptions, §Plugin-Data Guard and §Browser Consent Gate, deliberately have no
 escape hatch, and neither is a security boundary on its own: the first closes one
 channel to one directory and names the ones it leaves open; the second puts a human
@@ -678,7 +678,7 @@ Unlike prompt-based TDD ("please write tests first"), the `/zensu:tdd` workflow 
 - **Phase declaration.** Before any edit, the main agent declares the current TDD phase through the top-level Skill command template `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --phase <PHASE> --step <step_id>`. Claude renders both native plugin placeholders in top-level Skill/Agent content. The helper then uses the host-exposed `CLAUDE_CODE_SESSION_ID` only inside that Bash process to validate the exact immutable record and derive its internal selectors; it never trusts an ambient plugin-private selector. Valid phases: `RED_WRITE`, `RED_RUN`, `RED_FAIL`, `IMPL`, `GREEN_RUN`, `GREEN_PASS`, `REFACTOR`.
 - **Gate enforcement.** The PreToolUse hook (`pre-edit-tdd-reminder.sh`) blocks edits whose declared phase violates FSM transitions. In particular, `IMPL` requires a prior `RED_FAIL` marker for the **same step** — there is no path to production code without a failing test on record.
 - **State.** Phase markers persist at `.zensu/state/tdd-phase-<scv1-session-key>.json`. Every atomic mutation increments the record revision, and each step's history remains auditable from the file.
-- **Activation.** Phase 0 of the skill calls `zensu-log.sh --tdd-begin`, which sets a per-session chain-state `active` flag. Given a valid SessionStart baseline, the TDD gate (and Bash witness) enforce **only** while that flag is set; a valid inactive baseline passes through. A missing, malformed, or unreadable mandatory baseline is an integrity failure and fails closed in Session Control plus the edit/Stop guards. (Pre-0.4.0 this keyed on `CLAUDE_AGENT_TYPE=zensu:tdd-manager`.) Bypass via `ZENSU_TDD_GATE=off` for legitimate non-TDD edits explicitly authorized by the user. The strict gate described above is **opt-in**: `hooks.tddImplementation` defaults to `false`, so out of the box the workflow runs in **vanilla mode** — the gate passes through and the RED→GREEN ceremony is dropped while the evidence audits and review chain stay enforced. Set `hooks.tddImplementation:true` to enforce the strict RED→GREEN gate (see the Hook Opt-Out table). Two ranks sit above that flag at `--tdd-begin`: the session choice recorded by `/zensu:tdd-mode` and, below it, the calling skill's own `--tdd-mode` default (`/zensu:pr-fix-findings` asks for `strict`) — full precedence in [Configuration](configuration.md#hook-opt-out). The second of those is **escalation-only** — `strict` is the only value it accepts, so lowering the discipline stays the session choice. Choosing vanilla through that session choice is a MODE choice, not a gate escape, so it records no bypass-ledger entry; `ZENSU_TDD_GATE=off` remains the only escape and still does.
+- **Activation.** Phase 0 of the skill calls `zensu-log.sh --tdd-begin`, which sets a per-session chain-state `active` flag. Given a valid SessionStart baseline, the TDD gate enforces **only** while that flag is set; a valid inactive baseline passes through. A missing, malformed, or unreadable mandatory baseline is an integrity failure and fails closed in Session Control plus the edit/Stop guards. (Pre-0.4.0 this keyed on `CLAUDE_AGENT_TYPE=zensu:tdd-manager`.) Bypass via `ZENSU_TDD_GATE=off` for legitimate non-TDD edits explicitly authorized by the user. The strict gate described above is **opt-in**: `hooks.tddImplementation` defaults to `false`, so out of the box the workflow runs in **vanilla mode** — the gate passes through and the RED→GREEN ceremony is dropped while the evidence audits and review chain stay enforced. Set `hooks.tddImplementation:true` to enforce the strict RED→GREEN gate (see the Hook Opt-Out table). Two ranks sit above that flag at `--tdd-begin`: the session choice recorded by `/zensu:tdd-mode` and, below it, the calling skill's own `--tdd-mode` default (`/zensu:pr-fix-findings` asks for `strict`) — full precedence in [Configuration](configuration.md#hook-opt-out). The second of those is **escalation-only** — `strict` is the only value it accepts, so lowering the discipline stays the session choice. Choosing vanilla through that session choice is a MODE choice, not a gate escape, so it records no bypass-ledger entry; `ZENSU_TDD_GATE=off` remains the only escape and still does.
 
 Additional features: dependency graph for independent-step sequencing, 3-retry IMPL escalation on GREEN-fail with progressive context, completeness audit (mtime discipline + edit landing + build verification), real-time progress log at `.zensu/logs/`.
 
@@ -747,5 +747,46 @@ plan must carry a usable `## Requirements` table.
   `ZENSU_EDIT_LANDING_GATE=off` — exempting a session from one must not disarm the other, and
   the two gates share one change-set computation precisely so neither inherits the other's
   switch. Both escapes are recorded in the per-session bypass ledger.
+
+## Full-Suite Gate
+
+A reviewed chain closes only on a green full-suite run of the current tree. The plugin runs the
+suite itself (`zensu-log.sh --evidence-run --scope full`, see
+[Full-Suite Evidence](configuration.md#full-suite-evidence)), records the exit code the suite
+actually returned, and binds the record to a fingerprint of the working tree. `--chain-done`
+reads the newest record, never a claim in the run log.
+
+- **Where it applies.** The ticket-bound standalone terminus (`--chain-done
+  --claimed-review-ticket`) and a bound Autopilot chain that closes with outcome `pass`. The
+  unqualified zero-change terminus and outcome `no-changes` are exempt and print nothing. Outcome
+  `max-rounds` prints `FULL SUITE — not checked` and never blocks, because the post-review hook
+  drives that call with its output discarded. `--tdd-complete` is not gated: review rounds
+  change the tree anyway.
+- **What it prints.** One line, `FULL SUITE — <state> | <cause> | cmd: <command> | gate: <mode>`,
+  plus `| run: <command>` when running the suite again is the remedy. Passing states: `pass`
+  (the newest completed full run on the current tree exited 0; earlier red runs on the same tree
+  add a `flaky` line), `pass-tree-unverified` (exit 0, but the tree could not be fingerprinted,
+  and the cause says why), `not-applicable` (the project is not a git repository or work tree,
+  or git is not installed) and `escaped`. Refusing states: `missing`, `running`, `failed`,
+  `interrupted`, `stale` (lists up to ten changed paths), `mutated-during-run` (the suite changed
+  files while it ran), `command-mismatch` (the run used another command than
+  `evidence.fullSuiteCommand`), `invalid` (the newest record does not validate) and
+  `unavailable` (the store or git could not be read). A refusal exits `1` and leaves the chain
+  open.
+- **Order.** A closed chain short-circuits first. A claimed ticket is then compared, read-only,
+  with the session's consumed ticket; a wrong ticket is refused by the transition and never
+  reaches the verdict. The verdict runs before the transition, and the pass line and the
+  bypass line print after it.
+- **Modes.** `evidence.fullSuiteGate` is `required` (default) or `advisory`, which prints the
+  same verdict marked `(advisory, not blocking)` and closes the chain. An unknown value acts as
+  `required`, and the first line says so. This repository commits `advisory`, because CI is its
+  full-suite gate.
+- **Bypass** with `ZENSU_FULL_SUITE_GATE=off`. The escape is recorded in the bypass ledger only
+  where the gate applies: never for a wrong ticket and never outside a work tree.
+- **What it does not prove.** Records live in the plugin's private data directory, which the
+  reviewer and neutral subagents cannot read and Edit/Write cannot reach. A Bash redirect from
+  the main thread can still write one, which is the documented residual of every plugin store.
+  The gate stops a chain from closing on a missing, red or stale run by accident; it does not
+  stop a model that forges a record on purpose.
 
 **Full workflow reference:** [docs/tdd-manager-workflow.md](tdd-manager-workflow.md) — Mermaid flow chart, per-step FSM state diagram, hook gate behavior table, environment variables contract, discipline patches 1-13, four-channel logging.

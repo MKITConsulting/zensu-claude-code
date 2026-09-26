@@ -205,6 +205,10 @@ assert_case "neutral MultiEdit cannot mutate an installed plugin file" deny arbi
 assert_case "neutral NotebookEdit cannot mutate private plugin data" deny arbitrary-custom NotebookEdit "{\"notebook_path\":\"$PLUGIN_DATA/ATTACK.ipynb\",\"new_source\":\"attack\"}"
 assert_case "neutral apply_patch cannot add installed plugin runtime files" deny arbitrary-custom apply_patch "{\"patch\":\"*** Begin Patch\\n*** Add File: $PLUGIN/ATTACK.js\\n+attack\\n*** End Patch\"}"
 assert_case "neutral Write cannot persist arbitrary private plugin data" deny arbitrary-custom Write "{\"file_path\":\"$PLUGIN_DATA/ATTACK\",\"content\":\"attack\"}"
+assert_case "neutral Read of an unprotected plugin-data path stays allowed (control)" allow arbitrary-custom Read "{\"file_path\":\"$PLUGIN_DATA/unrelated/v1/x.json\"}"
+assert_case "neutral Read cannot open a full-suite evidence record" deny arbitrary-custom Read "{\"file_path\":\"$PLUGIN_DATA/evidence-run/v1/records/scv1_x/er1_x.json\"}"
+assert_case "neutral Grep cannot search the full-suite evidence store" deny arbitrary-custom Grep "{\"pattern\":\"exit_code\",\"path\":\"$PLUGIN_DATA/evidence-run\"}"
+assert_case "reviewer Read cannot open a full-suite evidence record" deny review-aspect Read "{\"file_path\":\"$PLUGIN_DATA/evidence-run/v1/records/scv1_x/er1_x.json\"}"
 PLUGIN_CASE_ALIAS="$(node -e '
   const value = process.argv[1];
   const slash = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));

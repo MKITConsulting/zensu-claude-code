@@ -15,6 +15,13 @@ CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
 unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 
+case "${1:-}" in
+  --evidence-run)
+    _ZENSU_EVR_CALLER_PD_SET="${CLAUDE_PROJECT_DIR+set}"
+    _ZENSU_EVR_CALLER_PD="${CLAUDE_PROJECT_DIR-}"
+    ;;
+esac
+
 # State verbs bind from the skill-rendered plugin-data path and Claude's host
 # session id inside this helper process only. SessionStart deliberately exports
 # no Zensu selectors because CLAUDE_ENV_FILE reaches subsequent subagent Bash
@@ -78,7 +85,137 @@ zensu_render_terminus_bypasses() {
   return 0
 }
 
+_zensu_evr_prepare() {
+  local label="$1"
+  if ! command -v node >/dev/null 2>&1; then
+    echo "$label: node is required for the full-suite record" >&2
+    return 2
+  fi
+  _evr_lib_dir="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_ROOT}/hooks/lib")" || {
+    echo "$label: the plugin library directory cannot be resolved" >&2
+    return 2
+  }
+  _evr_data="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}")" || {
+    echo "$label: CLAUDE_PLUGIN_DATA does not name a usable directory" >&2
+    return 2
+  }
+  _evr_dir="$(mktemp -d 2>/dev/null)" || {
+    echo "$label: no temporary directory available" >&2
+    return 2
+  }
+  trap 'rm -rf "$_evr_dir"' EXIT
+  _evr_dir_native="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$_evr_dir")" || {
+    echo "$label: the temporary directory cannot be resolved" >&2
+    return 2
+  }
+  printf '%s' "$(zensu_evidence_full_suite_command)" > "$_evr_dir/full-suite-command"
+  printf '%s' "$(zensu_evidence_full_suite_gate)" > "$_evr_dir/gate-mode"
+  printf 'CLAUDE_PLUGIN_DATA=%q bash %q --evidence-run --scope full' \
+    "${CLAUDE_PLUGIN_DATA:-}" "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" > "$_evr_dir/remedy-prefix"
+  _evr_msys_excl="$(zensu_msys_env_exclusions ZENSU_EVR_LIB ZENSU_EVR_DIR ZENSU_EVR_PLUGIN_DATA \
+    ZENSU_EVR_PROJECT_ROOT ZENSU_EVR_CWD ZENSU_EVR_BASH)" || _evr_msys_excl="${MSYS2_ENV_CONV_EXCL:-}"
+  return 0
+}
+
+_zensu_evr_node() {
+  MSYS2_ENV_CONV_EXCL="$_evr_msys_excl" \
+  ZENSU_EVR_LIB="$_evr_lib_dir/evidence-run-v1.js" \
+  ZENSU_EVR_DIR="$_evr_dir_native" \
+  ZENSU_EVR_PLUGIN_DATA="$_evr_data" \
+  ZENSU_EVR_SESSION_KEY="${ZENSU_SESSION_KEY:-}" \
+  ZENSU_EVR_PROJECT_ROOT="${ZENSU_PROJECT_ROOT:-}" \
+  ZENSU_EVR_CWD="${_evr_cwd:-}" \
+  ZENSU_EVR_SCOPE="${_evr_scope:-}" \
+  ZENSU_EVR_SHOW="${_evr_show:-tail}" \
+  ZENSU_EVR_IF_STALE="${_evr_if_stale:-0}" \
+  ZENSU_EVR_ESCAPE="${_evr_escape:-0}" \
+  ZENSU_EVR_BASH="${_evr_bash:-bash}" \
+  ZENSU_EVR_LABEL="$1" \
+  ZENSU_EVR_MODE="$2" \
+    node -e 'require(process.env.ZENSU_EVR_LIB).main([process.env.ZENSU_EVR_MODE]).then((code) => { process.exitCode = code; }, (error) => { process.stderr.write(process.env.ZENSU_EVR_LABEL + ": " + (error && error.message ? error.message : String(error)) + "\n"); process.exitCode = 2; })'
+}
+
+_zensu_full_suite_ticket_matches() {
+  local current
+  current="$(tdd_claimed_review_ticket "$(tdd_state_file "${1:-}" 2>/dev/null)" 2>/dev/null)" || return 1
+  [ -n "$current" ] && [ "$current" = "${2:-}" ]
+}
+
+_zensu_full_suite_gate() {
+  local session="$1" rc=0
+  _fsg_lines=""
+  _evr_escape=0
+  [ "${ZENSU_FULL_SUITE_GATE:-on}" = "off" ] && _evr_escape=1
+  if ! _zensu_evr_prepare "zensu-log.sh --chain-done"; then
+    if [ "$_evr_escape" = "1" ]; then
+      tdd_record_bypass "$session" ZENSU_FULL_SUITE_GATE >/dev/null 2>&1 || true
+      return 0
+    fi
+    [ "$(zensu_evidence_full_suite_gate)" = "advisory" ] && return 0
+    return 1
+  fi
+  _fsg_lines="$(_zensu_evr_node "zensu-log.sh --chain-done" verdict 2>&1 >/dev/null)" || rc=$?
+  if [ "$(cat "$_evr_dir/verdict-state" 2>/dev/null)" = "escaped" ]; then
+    tdd_record_bypass "$session" ZENSU_FULL_SUITE_GATE >/dev/null 2>&1 || true
+  fi
+  [ "$rc" -eq 0 ] && return 0
+  [ -n "$_fsg_lines" ] && printf '%s\n' "$_fsg_lines" >&2
+  echo "zensu-log.sh --chain-done: the chain stays open; resolve the FULL SUITE refusal above, then run --chain-done again." >&2
+  return 1
+}
+
 case "${1:-}" in
+  --evidence-run)
+    evr_cmd=""
+    evr_cmd_seen=false
+    evr_log=""
+    evr_start=""
+    _evr_scope=""
+    _evr_show="tail"
+    _evr_if_stale=0
+    shift
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --scope) _evr_scope="${2:-}"; shift 2 || break ;;
+        --cmd) evr_cmd="${2:-}"; evr_cmd_seen=true; shift 2 || break ;;
+        --show) _evr_show="${2:-}"; shift 2 || break ;;
+        --if-stale) _evr_if_stale=1; shift ;;
+        --log) evr_log="${2:-}"; shift 2 || break ;;
+        --start) evr_start="${2:-}"; shift 2 || break ;;
+        *) echo "zensu-log.sh --evidence-run: unknown argument: $1" >&2; exit 2 ;;
+      esac
+    done
+    case "$_evr_scope" in
+      full|lint|build|coverage|scoped) ;;
+      *) echo "zensu-log.sh --evidence-run: --scope must be one of full, lint, build, coverage, scoped" >&2; exit 2 ;;
+    esac
+    case "$_evr_show" in
+      tail|all) ;;
+      *) echo "zensu-log.sh --evidence-run: --show must be tail or all" >&2; exit 2 ;;
+    esac
+    _zensu_evr_prepare "zensu-log.sh --evidence-run" || exit 2
+    _evr_cwd="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$PWD" 2>/dev/null)" || _evr_cwd=""
+    _evr_bash="$(_zensu_config_native_path "${BASH:-bash}")" || _evr_bash="bash"
+    if [ "$evr_cmd_seen" = true ]; then
+      printf '%s' "$evr_cmd" > "$_evr_dir/command"
+    fi
+    if [ "${_ZENSU_EVR_CALLER_PD_SET:-}" = "set" ]; then
+      printf '%s' "${_ZENSU_EVR_CALLER_PD:-}" > "$_evr_dir/caller-project-dir"
+    fi
+    _zensu_evr_node "zensu-log.sh --evidence-run" run
+    evr_rc=$?
+    if [ -n "$evr_log" ] && [ -s "$_evr_dir/run-log-line" ]; then
+      evr_line="$(cat "$_evr_dir/run-log-line")"
+      if [ -n "$evr_start" ]; then
+        bash "$0" append --log "$evr_log" --message "$evr_line" --start "$evr_start" >/dev/null \
+          || echo "zensu-log.sh --evidence-run: the run-log line could not be appended to $evr_log" >&2
+      else
+        bash "$0" append --log "$evr_log" --message "$evr_line" >/dev/null \
+          || echo "zensu-log.sh --evidence-run: the run-log line could not be appended to $evr_log" >&2
+      fi
+    fi
+    exit "$evr_rc"
+    ;;
   --session-key)
     session_val="$(zensu_resolve_session_id)" || {
       echo "zensu-log.sh: Session Control session identity unavailable" >&2
@@ -1940,11 +2077,16 @@ case "${1:-}" in
           fi
           if [ "$(tdd_chain_done "$(tdd_state_file "$session_val")")" != "true" ]; then
             if [ "$claimed_ticket_seen" = "true" ]; then
+              _fsg_lines=""
+              if _zensu_full_suite_ticket_matches "$session_val" "$claimed_ticket_val"; then
+                _zensu_full_suite_gate "$session_val" || exit 1
+              fi
               tdd_mark_review_converged "$session_val" "$claimed_ticket_val" chainDone || {
                 chain_done_rc=$?
                 zensu_state_failure_hint --chain-done "$session_val"
                 exit "$chain_done_rc"
               }
+              [ -n "$_fsg_lines" ] && printf '%s\n' "$_fsg_lines" >&2
             else
               chain_change_count="unknown"
               if command -v git >/dev/null 2>&1 \
@@ -1991,6 +2133,18 @@ case "${1:-}" in
           exit 1
         }
         IFS=$'\t' read -r done_run done_attempt done_chain done_outcome <<<"$done_fields"
+        _fsg_lines=""
+        case "$done_outcome" in
+          pass)
+            if [ "$claimed_ticket_seen" != "true" ] \
+              || _zensu_full_suite_ticket_matches "$session_val" "$claimed_ticket_val"; then
+              _zensu_full_suite_gate "$session_val" || exit 1
+            fi
+            ;;
+          max-rounds)
+            _fsg_lines="FULL SUITE — not checked | outcome max-rounds closes this attempt without a pass, so the full suite does not gate it"
+            ;;
+        esac
         source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
         done_event_id="$(autopilot_chain_event_id "done" "$done_chain")" || {
           echo "zensu-log.sh --chain-done: invalid Autopilot chain identifier" >&2
@@ -2000,7 +2154,10 @@ case "${1:-}" in
           "${CLAUDE_PROJECT_DIR:-.}" "$session_val" "$done_attempt" "$done_chain" \
           "$done_outcome" "$claimed_ticket_seen" "$claimed_ticket_val"
         chain_done_rc=$?
-        [ "$chain_done_rc" -eq 0 ] && zensu_render_terminus_bypasses "$session_val"
+        if [ "$chain_done_rc" -eq 0 ]; then
+          [ -n "$_fsg_lines" ] && printf '%s\n' "$_fsg_lines" >&2
+          zensu_render_terminus_bypasses "$session_val"
+        fi
         exit "$chain_done_rc"
         ;;
       --code-review-done)
@@ -2257,11 +2414,6 @@ case "$cmd" in
     # the derived project root empty, which SKIPPED rule 1 and wrote a partially
     # redacted line under exit 0.
     #
-    # `--project` is passed when CLAUDE_PROJECT_DIR is set so that this writer
-    # and hooks/post-bash-witness.sh — which resolves the root from the Session
-    # Control record — substitute identically. They must, or the equality match
-    # in zensu-evidence-crosscheck.js reports an EVIDENCE GAP; supplying both
-    # candidate roots makes the result the same whenever EITHER is right.
     # The WRITE happens inside the module, not through a shell redirect. A `>>`
     # names a path and follows whatever it finds, so the validation above and the
     # write would name different objects — and `[ -L ]` is blind to a hard link
@@ -2355,8 +2507,8 @@ case "$cmd" in
           // It does NOT restore what the pre-change redirect form had: that
           // was judged against the session root, an authority outside the command,
           // while this is state the command sets in its own first token. Anchoring
-          // on the `project_root` of the Session Control record — the authority
-          // `hooks/post-bash-witness.sh` uses — is the stronger spelling and is
+          // on the `project_root` of the Session Control record is the stronger
+          // spelling and is
           // deliberately NOT taken here, because this verb carries no session bind
           // and adding one would make every log line depend on a bind that the
           // append path exists to work without. R44c pins the passing shape as a

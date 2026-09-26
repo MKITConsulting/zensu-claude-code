@@ -49,7 +49,6 @@ README_MD="$PLUGIN_DIR/README.md"
 CAPABILITY_LIB="$PLUGIN_DIR/hooks/lib/reviewer-capability-v1.js"
 PRINCIPAL_LIB="$PLUGIN_DIR/hooks/lib/claude-principal-v1.js"
 EDIT_GATE="$PLUGIN_DIR/hooks/pre-edit-tdd-reminder.sh"
-WITNESS="$PLUGIN_DIR/hooks/post-bash-witness.sh"
 REVIEW_DELEGATE="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 # Sibling suite, read as EVIDENCE rather than as a test: G15's nested-spawn residue is
@@ -86,7 +85,7 @@ finish() {
 # surfaced as "G16 review-chain rationale does not discriminate", pointing the reader
 # at prose. A missing file is named here instead.
 for f in "$SKILL_MD" "$HARNESS_MD" "$BARS_MD" "$PLUGIN_JSON" "$README_MD" \
-  "$CAPABILITY_LIB" "$PRINCIPAL_LIB" "$EDIT_GATE" "$WITNESS" "$REVIEW_DELEGATE" "$HOOKS_JSON" \
+  "$CAPABILITY_LIB" "$PRINCIPAL_LIB" "$EDIT_GATE" "$REVIEW_DELEGATE" "$HOOKS_JSON" \
   "$CAPABILITY_GATE_TEST" "$MANIFEST_JSON" $AGENT_MDS; do
   if [ ! -f "$f" ]; then
     check "G0 required file exists: $f" FAIL
@@ -281,8 +280,6 @@ fi
 G9_MISS=""
 grep -qF 'zensu_hook_is_main_principal "$PAYLOAD" PreToolUse' "$EDIT_GATE" \
   || G9_MISS="$G9_MISS edit-gate-guard"
-grep -qF 'zensu_hook_is_main_principal "$INPUT" PostToolUse' "$WITNESS" \
-  || G9_MISS="$G9_MISS witness-guard"
 flat_has 'binds the LEAD ONLY' "$SKILL_FLAT" || G9_MISS="$G9_MISS skill-scope"
 # The anchor spans the claim AND the bound it inherits. An earlier spelling pinned the
 # unbounded absolute "no spawned agent is ever `main-v1`", which the section's own
@@ -293,9 +290,9 @@ flat_has 'no spawned agent is ever `main-v1`' "$SKILL_FLAT" && G9_MISS="$G9_MISS
 flat_has 'this bullet and the one above invert together' "$SKILL_FLAT" || G9_MISS="$G9_MISS skill-premise-consequence"
 flat_has 'is NOT phase-gated' "$SKILL_FLAT" || G9_MISS="$G9_MISS skill-consequence"
 if [ -z "$G9_MISS" ]; then
-  check "G9 skill states the main-v1-only scope of the edit gate and the witness" PASS
+  check "G9 skill states the main-v1-only scope of the edit gate" PASS
 else
-  check "G9 edit gate and witness are main-v1 only —$G9_MISS" FAIL
+  check "G9 edit gate is main-v1 only —$G9_MISS" FAIL
 fi
 
 if grep -qF 'PRE-MERGED FINDINGS (fan-out)' "$REVIEW_DELEGATE" \
@@ -339,7 +336,7 @@ fi
 # derived mechanically from every ZENSU_*=off literal under hooks/, docs/ and skills/,
 # and G12's own purpose — a prompt carrier must never TEACH one of these spellings —
 # applies to it exactly as it does to the nine gates.
-ESCAPE_STEMS='TDD_GATE BASH_WRITE_GATE TEST_WITNESS CHAIN MCP_GATE SECRET_SCAN EDIT_LANDING_GATE AUTOPILOT REQUIREMENTS_GATE SESSION_LINEAGE'
+ESCAPE_STEMS='TDD_GATE BASH_WRITE_GATE CHAIN MCP_GATE SECRET_SCAN EDIT_LANDING_GATE AUTOPILOT REQUIREMENTS_GATE SESSION_LINEAGE FULL_SUITE_GATE'
 # Quote tolerance: the gates decide the escape AFTER shell quote removal
 # (pre-edit-tdd-reminder.sh compares "${ZENSU_TDD_GATE:-}" = "off"), so prose
 # teaching ZENSU_CHAIN='off' disables the gate at runtime. A bare =off pattern
@@ -420,7 +417,7 @@ done
 # suite green, and every prose addition makes the slack larger. Assert the four
 # claim-bearing paths BY NAME instead — these are the files G8, G9 and G11 pair their
 # claims against, so losing one silently unmoors a claim from its enforcement.
-REQUIRED_HOOKS='hooks/lib/reviewer-capability-v1.js hooks/pre-edit-tdd-reminder.sh hooks/post-bash-witness.sh plan-approved-delegate.sh'
+REQUIRED_HOOKS='hooks/lib/reviewer-capability-v1.js hooks/pre-edit-tdd-reminder.sh plan-approved-delegate.sh'
 HOOK_UNNAMED=""
 # Each required path is checked TWICE, and the two halves answer different questions.
 # `flat_has` proves the residency section still NAMES it; the -f test proves the file

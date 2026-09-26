@@ -31,7 +31,7 @@ asserted away: its eleven CI group headers sum to 144 against 146 CI-classified 
 suites appear in no §3 group. They are `test-session-trail-lineage.sh` and
 `test-incremental-review-rounds.sh`, re-derived BY NAME
 by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
-§"Bash gates, witness & secrets", and the reviewer-spawn grant, filed under §"Review chain &
+§"Bash gates, evidence & secrets", and the reviewer-spawn grant, filed under §"Review chain &
 findings". §7's profile table was re-derived from `tests/profiles/windows-ci.v1.json` rather than
 described, so its eight shard ids and their membership are the JSON's own, and the entry total
 is **43**.
@@ -138,9 +138,9 @@ unreadable marker forces nothing), the two preconditions `--tdd-complete` refuse
 the edit-landing receipt and the plan's `## Requirements` table that `/zensu:converge`
 anchors on — and the 5-agent review fan-out wiring in `skills/tdd/SKILL.md`.
 
-### Review chain & findings (27)
+### Review chain & findings (26)
 `chain-recover` · `chain-terminus-zero-change-gate` · `deferred-review-claim` ·
-`deferred-review-fallback` · `evidence-crosscheck` · `finding-verification` ·
+`deferred-review-fallback` · `finding-verification` ·
 `pending-review-ttl` ·
 `post-review-autopilot-claim` · `post-review-outer-ownership-root` ·
 `post-review-self-review-handoff` · `post-review-tdd-scope` · `reset-review-limit-skill` ·
@@ -181,15 +181,15 @@ generation- and ticket-bound termination, the single planning gate, review-budge
 rearm/retirement, the read-only SessionStart resume hook, and a composed full-lifecycle
 walk.
 
-### Bash gates, witness & secrets (10)
+### Bash gates, evidence & secrets (10)
 `artifact-redaction` · `bash-source-write-gate` · `bash-zensu-gate` · `bypass-ledger` ·
-`plugin-data-guard` · `post-bash-witness` · `secret-scan-gate` · `skill-workflow-markers` ·
-`verify-consent` · `witness-scenario-assertions`
+`evidence-run` · `full-suite-gate` · `plugin-data-guard` · `secret-scan-gate` ·
+`skill-workflow-markers` · `verify-consent`
 
 Covers the PreToolUse(Bash) source-write gate incl. rule (C) git-repo escape
 (183 probe cases + a 30-case pure unit suite), the `zensu <noun> <verb>` write gate,
-the bypass ledger (gate escapes only — ~100 assertions), the post-Bash witness log
-(anti-hallucination trail), the build-time guard that a skill never runs a zensu
+the bypass ledger (gate escapes only — ~100 assertions), the evidence runner and the
+`--chain-done` full-suite gate, the build-time guard that a skill never runs a zensu
 mutation without `--workflow-begin` / `--workflow-end` markers, the secret-scan gate, the
 plugin-data containment gate (117 checks; floors at the measured counts — `EXPECTED_CHECKS=114` registered, an executed-row floor of 102 tolerating all twelve skippable rows, and a POSIX host that fails on any skip representing LOST coverage: the store denied in all
 three chain states with an in-project allow control each and an armed-state premise, all four
@@ -332,7 +332,7 @@ that suite's failure.
 | Unit file | Blocks | Driven by | Covers |
 |---|---|---|---|
 | `git-repo-escape.test.js` | 30 | `test-bash-source-write-gate.sh` | pure half of source-write rule (C): `gitTargets()` repo resolution + git mutation/option lattice |
-| `evidence-crosscheck-v1.test.js` | 40 | `test-evidence-crosscheck.sh` | witness cross-check of claimed test evidence |
+| `evidence-run-v1.test.js` | 50 | `test-evidence-run.sh` | evidence runner: record schema and store, tree fingerprint, verdict states, retention |
 | `finding-verify-v1.test.js` | 26 | `test-finding-verification.sh` | finding-verification grading module |
 | `profile-runner.test.js` | 23 | Windows profile suite | `run-profile.js` lifecycle, digests, deadlines |
 | `chain-recovery-v1.test.js` | 21 | `test-chain-recover.sh` | chain shape lattice + rearm-receipt predicate |
@@ -424,7 +424,7 @@ last capture without re-spending).
 | `tests/e2e` | `code-reviewer` anti-loop guardrails | 5 pattern files: `clean-pr`, `build-fails`, `docs-only`, `false-test-claim`, `stale-branch` |
 | `tests/e2e-plm` | `zensu-plm` agent workflow + tool sequencing | 7 prompt/pattern pairs: `bootstrap`, `ghost-scan`, `implement`, `security-review`, `status-transition`, `pulse-session`, `feature-id-guard` |
 | `tests/e2e-skills` | skills + reviewer agents | 6 pattern files: `zensu-help`, `plan-review`, `self-review`, `converge`, `review-aspect`, `review-judge` (last two also as `.agent` prompts) |
-| `tests/e2e-tdd` | **heaviest** — full `/zensu:tdd` cycle | asserts post-run *state*, not stdout: `chainDone=true`, FSM history has `RED_FAIL` + `GREEN_PASS`/`IMPL`, real `node --test` passes in the fixture, witness log recorded the run. Default timeout 1200 s |
+| `tests/e2e-tdd` | **heaviest** — full `/zensu:tdd` cycle | asserts post-run *state*, not stdout: `chainDone=true`, FSM history has `RED_FAIL` + `GREEN_PASS`/`IMPL`, real `node --test` passes in the fixture, the run log carries the evidence runner's green full-suite line. Default timeout 1200 s |
 | `tests/e2e-context-nudge` | `user-prompt-context-nudge.sh` against a **real** session transcript | read → occupancy → threshold → `/compact` proposal; fail-open contract |
 | `tests/e2e-intent-router` | `user-prompt-intent-router.sh` on a planning fixture | timeout 180 s |
 | `tests/e2e-source-write-gate` | PreToolUse(Bash) source-write gate, 3 layers | `--self-check` structural / `--offline` real PreToolUse payloads against a throwaway git project / full live block check |

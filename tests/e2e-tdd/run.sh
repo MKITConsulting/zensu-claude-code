@@ -6,7 +6,7 @@
 #   - FSM history contains RED_FAIL      (test-first actually happened)
 #   - FSM history contains GREEN_PASS/IMPL (implementation happened)
 #   - `node --test` passes in the fixture (the GREEN is real, not claimed)
-#   - witness log recorded a test run    (anti-hallucination trail)
+#   - the run log carries a green full-suite line written by the evidence runner
 #   - stdout mentions the review stage
 #
 # This is the HEAVIEST suite: one long agent run (RED->GREEN->review->self-review).
@@ -114,14 +114,13 @@ else
   check "6 'node --test' passes with >=1 test (rc=$NT_RC)" FAIL
 fi
 
-# 7. witness recorded a test run, with the stdout tail captured. Real Claude Code Bash
-#    tool_response has no exit_code (so exit=?), but stdout IS present -> tail= must be non-empty.
-WLOG="$(ls -t "$FIXTURE"/.zensu/logs/witness-*.log 2>/dev/null | head -1)"
-WT_LINE="$( [ -n "$WLOG" ] && grep -E 'node --test|npm test|node:test' "$WLOG" | head -1 )"
-if [ -n "$WT_LINE" ] && printf '%s' "$WT_LINE" | grep -Eq 'tail="[^"]'; then
-  check "7 witness log recorded a test run with non-empty tail= (stdout captured under exit=?)" PASS
+# 7. the plugin ran the full suite itself: the run log carries the runner's own line.
+RLOG="$(ls -t "$FIXTURE"/.zensu/logs/*_tdd-*.log 2>/dev/null | head -1)"
+ER_LINE="$( [ -n "$RLOG" ] && grep -F 'EVIDENCE RUN — scope=full exit=0 ' "$RLOG" | tail -1 )"
+if [ -n "$ER_LINE" ]; then
+  check "7 the run log carries a green full-suite line written by the evidence runner" PASS
 else
-  check "7 witness log recorded a test run with non-empty tail= (anti-hallucination trail) line='${WT_LINE}'" FAIL
+  check "7 the run log carries a green full-suite line written by the evidence runner (log='${RLOG}')" FAIL
 fi
 
 # 8. review stage is visible in the transcript

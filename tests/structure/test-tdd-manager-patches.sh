@@ -149,22 +149,24 @@ fi
 
 # Round 14 — Test-Run Evidence Anti-Hallucination Patches
 
-if grep -qF 'MANDATORY' "$AGENT" && grep -qF 'CHECKPOINT — cmd="' "$AGENT" && grep -qF 'exit=' "$AGENT"; then
-  check "R14-P1 Phase 5 mandates CHECKPOINT cmd= exit= log entry contract" PASS
+if grep -qF -- '`{step_or_phase} CHECKPOINT — {verdict} | cmd: {command} | scope: {N} suites over {files}`' "$AGENT"; then
+  check "R14-P1 Phase 5 logs a plain scoped CHECKPOINT line" PASS
 else
-  check "R14-P1 Phase 5 mandates CHECKPOINT cmd= exit= log entry contract" FAIL
+  check "R14-P1 Phase 5 logs a plain scoped CHECKPOINT line" FAIL
 fi
 
-if grep -qF 'AUDIT — cmd="' "$AGENT" && grep -qF 'EVIDENCE GAP' "$AGENT" && grep -qF 'witness log' "$AGENT"; then
-  check "R14-P2 Phase 6 step 1 mandates AUDIT cmd= cross-check + EVIDENCE GAP marker against witness log" PASS
+if grep -qF -- "--evidence-run --scope full --cmd '{full_test_cmd}' --log {log_file}" "$AGENT" \
+  && grep -qF -- 'You write no claim line for these runs.' "$AGENT" \
+  && grep -qF -- 'never a claim in the run log' "$AGENT"; then
+  check "R14-P2 Phase 6 step 1 runs the full suite through the evidence runner, and the terminus reads its record" PASS
 else
-  check "R14-P2 Phase 6 step 1 mandates AUDIT cmd= cross-check + EVIDENCE GAP marker against witness log" FAIL
+  check "R14-P2 Phase 6 step 1 runs the full suite through the evidence runner, and the terminus reads its record" FAIL
 fi
 
-if grep -qF 'Test Evidence' "$AGENT" && grep -qF 'via=' "$AGENT"; then
-  check "R14-P3 Phase 6 schema includes Test Evidence section + via= non-Bash escape clause" PASS
+if grep -qF 'Test Evidence' "$AGENT" && grep -qF -- 'TEST VIA {tool}' "$AGENT"; then
+  check "R14-P3 Phase 6 report carries a Test Evidence section and the non-Bash runner line" PASS
 else
-  check "R14-P3 Phase 6 schema includes Test Evidence section + via= non-Bash escape clause" FAIL
+  check "R14-P3 Phase 6 report carries a Test Evidence section and the non-Bash runner line" FAIL
 fi
 
 # Round 17 — Phase 5 checkpoint is SCOPED; the full suite runs in the Phase 6 audit.
@@ -189,15 +191,12 @@ else
   check "R17-P1 Phase 5 checkpoint is scoped and states the full suite is not run there" FAIL
 fi
 
-# Label states what this row MEASURES — two prose needles. Nothing in the cross-check
-# library refuses a re-cited claim; skills/tdd/SKILL.md:357 concedes that bound itself,
-# so a label promising a refusal would read as assurance of a mechanism that is absent.
 if grep -qF -- "**This is the implementation pass's mandatory full-suite run**" "$AGENT" \
-  && grep -qF -- 'never satisfied by re-citing a checkpoint run' "$AGENT" \
+  && grep -qF -- 'never scoped down, and it must measure the FINISHED tree' "$AGENT" \
   && grep -qF -- 'reports COVERAGE only and never carries the verdict' "$AGENT"; then
-  check "R17-P2 Phase 6 step 1 states the mandatory full-suite run and the re-citation bound" PASS
+  check "R17-P2 Phase 6 step 1 states the mandatory full-suite run over the finished tree" PASS
 else
-  check "R17-P2 Phase 6 step 1 states the mandatory full-suite run and the re-citation bound" FAIL
+  check "R17-P2 Phase 6 step 1 states the mandatory full-suite run over the finished tree" FAIL
 fi
 
 # R17-P2b — the operator account of the status-marker legend. The two renderers are
@@ -264,23 +263,6 @@ else
   check "R17-P7 both Phase-5 cross-references point the full suite at Phase 6" FAIL
 fi
 
-# The two controls that keep the trailing scope segment from disarming the cross-check,
-# and the honest statement of the bound. All three are prose-only mitigations for a
-# CONFIRMED disarm route, so an unpinned revert is silent.
-if grep -qF -- 'CONTAINING NO `"` CHARACTER' "$AGENT" \
-  && grep -qF -- "lastIndexOf('\"')" "$AGENT"; then
-  check "R17-P8 the trailing scope segment carries its no-quote rule and the reason" PASS
-else
-  check "R17-P8 the trailing scope segment carries its no-quote rule and the reason" FAIL
-fi
-
-if grep -qF -- 'an EMPTY tail counts' "$AGENT" \
-  && grep -qF -- 'can no longer contradict ANY claim of that command' "$AGENT"; then
-  check "R17-P9 the cross-check disarm bound is stated in both its directions" PASS
-else
-  check "R17-P9 the cross-check disarm bound is stated in both its directions" FAIL
-fi
-
 # The chain's closing full-suite run is anchored on the ONE decidable moment. An earlier
 # revision anchored it on "the last round before the terminus", which a model cannot
 # identify prospectively — the loop's exit is decided by a reviewer that runs afterwards.
@@ -288,7 +270,7 @@ fi
 # rationale clauses left the rule itself revertible: rewriting the imperative to "re-run
 # this round's scoped suites" — exactly the regression this block exists to catch — kept
 # both rationale literals byte-identical and this row green.
-if grep -qF -- 're-run `{full_test_cmd}` over the current tree' "$AGENT" \
+if grep -qF -- 'run the Phase 6 step 1 full-suite command again with `--if-stale`' "$AGENT" \
   && grep -qF -- 'this branch is the one decidable moment at which the chain knows it is converging' "$AGENT" \
   && grep -qF -- 'CONVERGENCE branch of step 10' "$AGENT"; then
   check "R17-P10 the closing full-suite run is anchored on the convergence branch" PASS
@@ -296,73 +278,29 @@ else
   check "R17-P10 the closing full-suite run is anchored on the convergence branch" FAIL
 fi
 
-# `| scope: full` is a FOUR-carrier hand-copied literal — declared in the AUDIT schema,
-# consumed as the convergence trigger, mandated in skills/self-review/SKILL.md and
-# documented in the workflow doc. Without this row it can be reworded or dropped with
-# every other pin green, and both the convergence trigger and the self-review re-run
-# resolve off it. Same silent-drift class the repo tracks for WRAP.
 SELF_REVIEW_MD="$PLUGIN_DIR/skills/self-review/SKILL.md"
-# Anchored per ROLE, never counted. The row reaches FIVE roles across THREE files:
-# the AUDIT-schema declaration and the fallback-token rule in skills/tdd/SKILL.md, the
-# convergence trigger and its negative rule there too, the WRITE and the READ-BACK in
-# skills/self-review/SKILL.md, and the marker definition in the workflow doc. No numeral:
-# an occurrence floor of 2 stayed green when the declaration itself was deleted, and a
-# hand-counted census is the drift this repo tracks by name.
-if grep -qF -- 'and of the step 10 convergence branch carry the literal `| scope: full`' "$AGENT" \
-  && grep -qF -- '`| scope: lint`, `| scope: build`, `| scope: coverage-run`' "$AGENT" \
-  && grep -qF -- 'none of them may begin with `full`' "$AGENT" \
-  && grep -qF -- 'since the last `| scope: full` AUDIT line' "$AGENT" \
-  && grep -qF -- 'a scoped round NEVER writes `| scope: full`' "$AGENT" \
-  && grep -qF -- 'as a fresh `AUDIT — cmd="..." … | scope: full` line' "$SELF_REVIEW_MD" \
-  && grep -qF -- 'the newest `AUDIT — cmd="..." … | scope: full`' "$SELF_REVIEW_MD" \
-  && grep -qF -- 'A full-suite AUDIT run carries the literal `| scope: full`' "$WORKFLOW_DOC" \
-  && grep -qF -- 'deliberately does not BEGIN with `| scope: full`' "$AGENT"; then
-  check "R17-P11 the | scope: token vocabulary survives across all its carriers" PASS
+if grep -qF -- "--evidence-run --scope full --cmd '<full test command>' --log <run-log>" "$SELF_REVIEW_MD" \
+  && grep -qF -- 'the `cmd:` of the newest `EVIDENCE RUN — scope=full` line in the run log' "$SELF_REVIEW_MD" \
+  && grep -qF -- 'Copy every `FULL SUITE — …` line the terminus' "$SELF_REVIEW_MD"; then
+  check "R17-P11 the self-review fix round runs the full suite through the runner and the report carries the terminus verdict" PASS
 else
-  check "R17-P11 the | scope: token vocabulary survives across all its carriers" FAIL
+  check "R17-P11 the self-review fix round runs the full suite through the runner and the report carries the terminus verdict" FAIL
 fi
 
-# The REFUSAL to sanction a background evidence run. A review round proposed the escape,
-# it shipped for one round, and the next round showed it was strictly worse than the
-# violation it blessed: a skipped run leaves an unmatched claim and the cross-check exits
-# 1 LOUD, while a backgrounded run leaves an empty-tail witness entry that renders
-# `verified` with gaps=0. Prose-only, so an unpinned revert would be silent — and the
-# revert here means re-ADDING an escape, which is exactly the edit that needs a tripwire.
-# The three positive needles catch a DELETION. The occurrence count catches the re-ADD:
-# 'run_in_background' occurs exactly ONCE in the skill (an OCCURRENCE count, not a line
-# count — the file is one paragraph per line, so a line count would not see a second
-# mention appended to the refusal paragraph itself, the likeliest spot). Any second
-# occurrence turns this row red even with the refusal sentence left standing.
-if grep -qF -- 'There is deliberately NO sanctioned background escape' "$AGENT" \
-  && grep -qF -- 'a silent clean bill over an uncorroborated run' "$AGENT" \
-  && grep -qF -- 'shard it and run each slice in the foreground' "$AGENT" \
+if grep -qF -- 'may run with `run_in_background`: its record lands when it finishes, and until then the terminus refuses the chain as `running`' "$AGENT" \
+  && grep -qF -- '**Run each checkpoint command in the foreground, one tool call at a time**' "$AGENT" \
   && [ "$(grep -oF 'run_in_background' "$AGENT" | wc -l | tr -d ' ')" -eq 1 ]; then
-  check "R17-P12 the skill refuses a background evidence run and says why" PASS
+  check "R17-P12 only the recorded full-suite run may go to the background, and the terminus waits for its record" PASS
 else
-  check "R17-P12 the skill refuses a background evidence run and says why" FAIL
+  check "R17-P12 only the recorded full-suite run may go to the background, and the terminus waits for its record" FAIL
 fi
 
-# The fallback token is the one prose rule in this round that a bare substring search
-# cannot enforce for itself: `full-fallback` would have MATCHED a search for the
-# `| scope: full` discriminator, which is why the token leads with `fallback-`. Both
-# carriers pinned, plus the reason, so the next editor cannot "simplify" it back.
 if grep -qF -- '| scope: fallback-full' "$AGENT" \
-  && grep -qF -- 'deliberately does not BEGIN with `| scope: full`' "$AGENT" \
   && grep -qF -- 'scope: fallback-full' "$WORKFLOW_DOC" \
   && ! grep -qE -- '\| scope: full[A-Za-z-]' "$AGENT"; then
   check "R17-P13 the fallback token is spelled fallback-full and no token prefix-extends full" PASS
 else
   check "R17-P13 the fallback token is spelled fallback-full and no token prefix-extends full" FAIL
-fi
-
-# The sharding contract is what keeps "shard it" (R17-P12's remedy) from becoming a route
-# to claim a full-suite verdict off a partial run.
-if grep -qF -- '| scope: shard {i}/{N}' "$AGENT" \
-  && grep -qF -- 'FULL SUITE PARTIAL' "$AGENT" \
-  && grep -qF -- 'Sharding buys coverage, never a full-suite verdict' "$AGENT"; then
-  check "R17-P14 the sharding remedy carries its logging contract" PASS
-else
-  check "R17-P14 the sharding remedy carries its logging contract" FAIL
 fi
 
 # Round 15 — Native component root/data binding to eliminate cross-session races
@@ -451,10 +389,10 @@ if grep -qF 'requires BOTH `subject` and `description`' "$AGENT" && grep -qF 'de
 else
   check "MT2 skill TaskCreate includes required description + states the contract" FAIL
 fi
-if grep -qF 'never `run_in_background`' "$AGENT" && grep -qF 'one tool call at a time' "$AGENT"; then
-  check "MT3 skill mandates foreground, serial evidence runs (no parallel/background)" PASS
+if grep -qF 'one tool call at a time' "$AGENT" && grep -qF 'not a parallel batch' "$AGENT"; then
+  check "MT3 skill mandates serial tool calls; a backgrounded runner call is not a parallel batch" PASS
 else
-  check "MT3 skill mandates foreground, serial evidence runs (no parallel/background)" FAIL
+  check "MT3 skill mandates serial tool calls; a backgrounded runner call is not a parallel batch" FAIL
 fi
 if grep -qF 'in the same turn or batch as' "$AGENT"; then
   check "MT4 skill guards --chain-done against early/parallel firing" PASS
@@ -526,27 +464,6 @@ if grep -qF 'CROSS-LAYER PAIRING MOCK-ONLY' "$AGENT"; then
   check "X8 Phase 6 step 6b emits CROSS-LAYER PAIRING MOCK-ONLY marker" PASS
 else
   check "X8 Phase 6 step 6b emits CROSS-LAYER PAIRING MOCK-ONLY marker" FAIL
-fi
-
-# Round 16 — witness tail corroboration (Bash tool_response has no exit_code; corroborate result= via tail=)
-if grep -qF 'EVIDENCE CONTRADICTION' "$AGENT" && grep -qF 'witness tail' "$AGENT" && grep -qF 'not by exit code' "$AGENT"; then
-  check "R16-P1 Phase 6 corroborates result= against witness tail= + corrected exit-code contract (EVIDENCE CONTRADICTION)" PASS
-else
-  check "R16-P1 Phase 6 corroborates result= against witness tail= + corrected exit-code contract (EVIDENCE CONTRADICTION)" FAIL
-fi
-
-# R16-P2 — the marker scan must be field-scoped to the tail= value (no cmd= bleed -> no false EVIDENCE CONTRADICTION).
-# This property used to be prose in the skill; it now lives in the cross-check
-# library, so the pin follows it there. Guarding the property where it is
-# ENFORCED beats guarding a sentence that describes it.
-XCHECK_LIB="$PLUGIN_DIR/hooks/lib/zensu-evidence-crosscheck.js"
-XCHECK_UNIT="$PLUGIN_DIR/tests/structure/evidence-crosscheck-v1.test.js"
-if [ -f "$XCHECK_LIB" ] && [ -f "$XCHECK_UNIT" ] \
-  && grep -qF 'hooks/lib/zensu-evidence-crosscheck.js' "$AGENT" \
-  && grep -qF 'corroboration scans the tail only' "$XCHECK_UNIT"; then
-  check "R16-P2 Phase 6 corroboration is tail-scoped in the cross-check library, pinned by its unit suite" PASS
-else
-  check "R16-P2 Phase 6 corroboration is tail-scoped in the cross-check library, pinned by its unit suite" FAIL
 fi
 
 # Plan-doc single-source-of-truth — the Steps-table Status column tracks completion.

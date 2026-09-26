@@ -1386,7 +1386,7 @@ for required in pre-bash-zensu-gate.sh pre-bash-source-write-gate.sh pre-write-s
     *) ADOPT_ENUMERATION_MISSING="$ADOPT_ENUMERATION_MISSING $required" ;;
   esac
 done
-# THREE hooks on this matcher allow on EVERY platform, and they do so for reasons
+# TWO hooks on this matcher allow on EVERY platform, and they do so for reasons
 # that have nothing to do with each other or with the MSYS spelling gap. One
 # decision site rather than the hand-copy this file used to carry in both loops
 # below: they graded the same question and a third exception added to one of them
@@ -1395,21 +1395,16 @@ done
 #   pre-bash-zensu-gate.sh   — exits 0 before it ever binds when the command
 #     carries no `zensu` CLI verb (`[ -z "$INVOCATIONS" ] && exit 0`), and the
 #     adoption command carries none.
-#   pre-bash-witness.sh      — ADVISORY by construction: it emits no
-#     `permissionDecision` in either direction and always exits 0, because on
-#     PreToolUse a non-zero exit blocks the call and a witness that failed closed
-#     would break every Bash call in the session. See CLAUDE.md §"Witness Attempt
-#     Half"; `P12-A5` in test-post-bash-witness.sh pins that contract directly.
 #   pre-browser-navigation-consent.sh — exits 0 with no decision, before it
 #     resolves its plugin root or binds a session, whenever the payload names
 #     neither `playwright-cli` nor `@playwright/cli`, and the adoption command
 #     names neither.
 #
-# A FOURTH entry needs its own sentence here. Do not add a name without one: the
+# A THIRD entry needs its own sentence here. Do not add a name without one: the
 # value of this list is that every member states why it cannot deny.
 adopt_hook_expected() {
   case "$1" in
-    pre-bash-zensu-gate.sh|pre-bash-witness.sh|pre-browser-navigation-consent.sh) printf 'allow\n' ;;
+    pre-bash-zensu-gate.sh|pre-browser-navigation-consent.sh) printf 'allow\n' ;;
     *) printf '%s\n' "$2" ;;
   esac
 }
@@ -2952,11 +2947,10 @@ EOF
   else
     check "AC-D07 every hook on the Bash matcher lets the adoption command through in the pruned state (unexpected:$PRUNED_GATE_FAILURES missing-from-enumeration:$PRUNED_ENUMERATION_MISSING)" FAIL
   fi
-  # The deny half, hook by hook, and the two names absent from this list are the
-  # two `adopt_hook_expected` exempts above, for the same reasons stated there:
-  # pre-bash-zensu-gate.sh exits before it binds for a command carrying no zensu
-  # verb, and pre-bash-witness.sh is advisory and emits no permissionDecision at
-  # all. Neither is a denier here, so neither is graded as one.
+  # The deny half, hook by hook. pre-bash-zensu-gate.sh is absent from this list
+  # for the reason `adopt_hook_expected` states above: it exits before it binds for
+  # a command carrying no zensu verb, so it is not a denier here and is not graded
+  # as one.
   PRUNED_PLAIN_PAYLOAD="$(bash_payload "$PRUNED_SESSION" "echo probe")"
   PRUNED_DENY_FAILURES=''
   for hook_name in pre-bash-source-write-gate.sh pre-write-secret-scan.sh pre-reviewer-capability-gate.sh; do
