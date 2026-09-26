@@ -11,6 +11,15 @@ paths:
 
 _Moved from the root `CLAUDE.md`. Where this text says "this file" or names `CLAUDE.md`, it means the repository conventions as a whole: `CLAUDE.md` plus `.claude/rules/`._
 
+**A SECOND renderer of this same advice lives in `.claude/rules/worktree-keep.md`**, and the two
+deliberately differ: `remedyLines`/`branchSlug` in `hooks/lib/worktree-keep-v1.js` strips no
+branch prefix and offers `-b <branch>-cont` only as the checked-out-elsewhere fallback, where
+`TAKE_YOUR_OWN` / `continuationSlug` here strip `refs/heads/` and `claude/` and pass `-b`
+unconditionally. For a recorded branch `claude/foo` they name different directories. Each is
+graded by its own suite alone, so a one-sided edit leaves the other stale with everything green,
+and a user who reads the doctor's `worktree:` row and then runs `/zensu:session-trail` is handed
+two answers. One exported owner is the durable fix and is NOT taken; until it is, edit both.
+
 **A THIRD session-trail axis, and the one most easily confused with the other two.**
 §"Git Mutation Tables" tracks the WRITE-ANCHOR contract — *may I write there* — in NINE
 carriers (that section enumerates nine; this clause read "six" for a release, and the phrase

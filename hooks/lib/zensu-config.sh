@@ -517,6 +517,7 @@ _zensu_config_bounded_int() {
 zensu_autofix_max_rounds()        { _zensu_config_bounded_int autoFixMaxRounds 5 1 99; }
 zensu_pending_review_ttl_hours()  { _zensu_config_bounded_int pendingReviewTtlHours 6 0 8760; }
 zensu_impl_stop_nudge_after()     { _zensu_config_bounded_int implStopNudgeAfter 12 0 999999; }
+zensu_worktree_keep_idle_hours()  { _zensu_config_bounded_int worktreeKeepIdleHours 72 1 8760; }
 # Owner liveness asks "could this session still act", which `pendingReviewTtlHours` was never
 # sized for — it answers how long a deferred-review marker stays meaningful. The Stop hook
 # writes the owner's workflow document at every turn end, so its mtime is already a per-turn

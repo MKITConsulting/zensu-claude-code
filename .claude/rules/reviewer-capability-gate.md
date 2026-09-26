@@ -40,6 +40,13 @@ untrusted agent output, and the auto-mode classifier reviews it with `onBlock: "
   report. The session-control eval harness pins that exact text in four files:
   `lib/contract-provider.js`, `lib/live-evidence.js`, `tests/live-evidence-negative.test.js`
   and `tests/wrapper-selftest.sh`.
+- **Nothing else widens.** `REVIEWER_READ_TOOLS` stays exactly the read trio. The suite pins it
+  and `HANDBACK_PROFILES` by their source literals; those two pins are what make the deny
+  total, because the gate denies every name outside the set. The suite also drives a roster of
+  host tool names found as literals in the 2.1.281 bundle (`HOST_NON_READ_TOOLS`) through the
+  three reviewer types in turn and expects the deny by name. The roster is a sample, not a
+  proven inventory: a tool a later host adds is denied without a suite edit, and adding its
+  name to the roster makes the sweep name it too.
 
 **Not in the frontmatter.** `agents/*.md` keep `tools: Read, Grep, Glob`. The host injects
 the tool itself, after the frontmatter filter. `confinedByFrontmatter` in
@@ -64,8 +71,9 @@ both as current behavior.
 reason. No schema field, persisted strict key set, hook registration, matcher, config key or
 attestation moves. The tool allowlist and the input-shape check judge a live tool call, never
 state another runtime wrote. It is the same class as the vanished-cwd change in this module.
-A session minted by the previous patch release is served by this one and gets the fix without
-`/zensu:adopt-session`.
+That classifies this change alone. Whether a running session is served after the upgrade
+depends on the class of the release that carries it, which is the strictest class among all
+of that release's commits — see `.claude/rules/runtime-lineage.md`.
 
 **Re-measuring the host.** `tests/structure/test-reviewer-capability-gate.sh` reads every
 Claude Code host bundle it finds: `claude` on `PATH`, and on macOS every desktop-app bundle
