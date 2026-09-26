@@ -1,4 +1,4 @@
-description: "Accepted remote URL: brokered public static page is observed before deployment-identity PARTIAL"
+description: "Accepted remote URL: a gated playwright-cli session observes the public static page before deployment-identity PARTIAL"
 provider:
   id: 'exec: ./remote-provider.sh'
   config:
@@ -12,7 +12,7 @@ vars:
     unauthenticated and non-sensitive. The supplied criteria are complete:
 
     1. The page exposes the `Example Domain` heading and explanatory text.
-    2. The page has a visible `More information...` link.
+    2. The page has a visible `Learn more` link.
     3. The page is styled, readable, and free of overlap or clipping.
     4. The document request succeeds without console errors or failed requests.
 

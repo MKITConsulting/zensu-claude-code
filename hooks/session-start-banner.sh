@@ -172,7 +172,7 @@ if [ -z "${ZENSU_VERIFY_NAVIGATION_POLICY_V1:-}" ] \
   && [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/pre-browser-navigation-consent.sh" ] \
   && [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/post-browser-navigation-consent.sh" ] \
   && [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/lib/verify-consent-v1.js" ]; then
-  echo "zensu: Browser verification — no parent-environment navigation policy is set, so /zensu:verify-feature runs in consent mode: the first navigation to each loopback origin asks you through the permission prompt, remote targets still need the policy. /zensu:doctor verifies the hook registration and the runtime recipe."
+  echo "zensu: Browser verification — no navigation policy is set, so /zensu:verify-feature runs in consent mode: it drives playwright-cli, and the first time its zensu-verify browser session reaches a loopback origin you are asked through the permission prompt; remote targets still need the policy. /zensu:doctor checks playwright-cli, the hook registration and the runtime recipe."
 fi
 
 

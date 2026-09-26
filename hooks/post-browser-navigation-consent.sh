@@ -1,15 +1,21 @@
 #!/bin/bash
 set -u
 
-# skip() is defined FIRST because this hook may never block. Its three plugin-root arms used to
-# sit above the definition and could only `exit 2` — and exit 2 from a PostToolUse hook is the
-# blocking status, which contradicts the contract this recorder ships under: a memory line is
-# worth strictly less than the tool call it follows, so every fault here is a stderr note and a
-# clean exit. The sibling PreToolUse gate keeps exit 2 deliberately; there, blocking is correct.
 skip() {
   echo "zensu: browser consent memory not written ($1)" >&2
   exit 0
 }
+
+INPUT="$(cat 2>/dev/null || true)"
+if ! source "$(dirname "$0")/lib/zensu-browser-consent-prefilter.sh" 2>/dev/null \
+  || ! declare -F zensu_browser_consent_marked >/dev/null 2>&1; then
+  _zensu_scan="$(printf '%s' "$INPUT" | LC_ALL=C sed 's/\\[nrt]//g' 2>/dev/null | LC_ALL=C tr -d "\"'\\\\" 2>/dev/null)" || _zensu_scan=""
+  case "$_zensu_scan $INPUT" in
+    *[Pp][Ll][Aa][Yy][Ww][Rr][Ii][Gg][Hh][Tt]*|*[Zz][Ee][Nn][Ss][Uu]-[Vv][Ee][Rr][Ii][Ff][Yy]*) skip "prefilter library unavailable" ;;
+  esac
+  exit 0
+fi
+zensu_browser_consent_marked "$INPUT" || exit 0
 
 _ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" \
   || skip "plugin root unresolved"
@@ -23,8 +29,6 @@ fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
 unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 
-INPUT="$(cat 2>/dev/null || true)"
-
 command -v node >/dev/null 2>&1 || skip "node unavailable"
 MODULE="$CLAUDE_PLUGIN_ROOT/hooks/lib/verify-consent-v1.js"
 [ -f "$MODULE" ] && [ ! -L "$MODULE" ] || skip "decision module absent or symlinked"
@@ -36,8 +40,6 @@ ZENSU_VERIFY_PROJECT_ROOT="$(zensu_resolve_project_dir 2>/dev/null || true)"
 [ ! -L "$ZENSU_VERIFY_PROJECT_ROOT/.zensu/state" ] || skip "symlinked state directory"
 mkdir -p "$ZENSU_VERIFY_PROJECT_ROOT/.zensu/state" 2>/dev/null || skip "state directory unavailable"
 ZENSU_VERIFY_CONSENT_MEMORY="$ZENSU_VERIFY_PROJECT_ROOT/.zensu/state/verify-consent-${ZENSU_SESSION_KEY}.json"
-# Which recipe governs is resolved INSIDE the decision module from the project root, so
-# this hook, its PreToolUse sibling and the /zensu:doctor row cannot disagree about it.
 export ZENSU_VERIFY_CONSENT_MEMORY ZENSU_VERIFY_PROJECT_ROOT
 
 printf '%s' "$INPUT" | (

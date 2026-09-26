@@ -63,7 +63,7 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
   # which is keyed by the binding that does not exist.
   #
   # Both must be relaxed HERE, not only in the sibling Bash gates: hooks.json
-  # registers three PreToolUse hooks on the Bash matcher and a deny from ANY of
+  # registers several PreToolUse hooks on the Bash matcher and a deny from ANY of
   # them wins, so leaving this one closed silently reinstated the exact deadlock
   # the relaxation exists to remove. stdout is the JSON decision channel, so the
   # orphaned probe's printed path is discarded.

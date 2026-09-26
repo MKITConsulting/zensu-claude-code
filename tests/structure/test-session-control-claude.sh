@@ -663,8 +663,8 @@ SHELL_FOREIGN_PROJECT="$TMP/foreign project (mixed) apostrophe'value"
 SHELL_SID='claude/shell project path'
 SHELL_KEY="$(node "$CORE" session-key "$SHELL_SID")"
 mkdir -p "$SHELL_PLUGIN" "$SHELL_PROJECT" "$SHELL_PLUGIN_DATA" "$SHELL_FOREIGN_PROJECT"
-cp -R "$ROOT/.claude-plugin" "$ROOT/.mcp.json" "$ROOT/hooks" "$ROOT/agents" \
-  "$ROOT/skills" "$ROOT/scripts" "$ROOT/mcp-runtime" "$SHELL_PLUGIN/"
+cp -R "$ROOT/.claude-plugin" "$ROOT/hooks" "$ROOT/agents" \
+  "$ROOT/skills" "$ROOT/scripts" "$SHELL_PLUGIN/"
 SHELL_COPY_RC=$?
 : > "$SHELL_ENV"
 payload SessionStart "$SHELL_SID" "$SHELL_PROJECT" \

@@ -440,8 +440,8 @@ zensu_session_incompatible_orphaned_root_model() {
 # in the header of hooks/lib/zensu-session-adopt.sh, which is also where that
 # second justification lives. Do not fold the two arguments into one.
 #
-# The decision lives in zensu-doctor-invocation.js so all three Bash gates and
-# the all-tool capability gate share exactly one recognizer, and it derives the
+# The decision lives in zensu-doctor-invocation.js so every Bash-matcher gate that
+# can deny and the all-tool capability gate share exactly one recognizer, and it derives the
 # executing plugin root itself rather than trusting a caller. Every caller must
 # still conjoin its own main-principal check: a reviewer or neutral child has
 # neither command to run.
@@ -470,7 +470,10 @@ zensu_doctor_invocation() {
   ) >/dev/null 2>&1
 }
 
-# The one decision "may this call run despite a failed bind". Both conjuncts are
+# The one decision "is this one of the two recognized commands, run by the
+# interactive thread". The bind-relaxing Bash gates ask it after a failed bind,
+# and the browser consent gate asks it before its bind for every marked payload.
+# Both conjuncts are
 # required at every gate: the command must BE one of the two recognized ones —
 # the read-only diagnostic, or the adoption, which WRITES its own session's
 # record under the justification in its own header — and the caller must be the

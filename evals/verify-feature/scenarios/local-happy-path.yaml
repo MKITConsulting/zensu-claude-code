@@ -1,4 +1,4 @@
-description: "Local happy path: /zensu:verify-feature proves inventory loading with real Playwright MCP evidence and owned teardown"
+description: "Local happy path: /zensu:verify-feature proves inventory loading with gated playwright-cli evidence and owned teardown"
 vars:
   spec_block: |
     Invoke `/zensu:verify-feature` in local mode for the inventory dashboard at route `/`,
@@ -13,7 +13,7 @@ vars:
     5. The inventory request succeeds with no feature-related console errors or failed requests.
 
     The recipe's `validate.baseUrlCommand` is the authoritative way to obtain the exact
-    parent-reserved, broker-allowlisted loopback URL after startup. Follow the invoked skill
+    parent-reserved, policy-allowlisted loopback URL after startup. Follow the invoked skill
     rather than reproducing the workflow
     from this prompt. Do not add responsive, idempotence, error-path, data-variation, or other
     exploratory scenario rows outside the five criteria. Do not resize the browser. Do not edit

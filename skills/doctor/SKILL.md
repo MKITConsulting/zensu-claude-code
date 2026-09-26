@@ -4,8 +4,8 @@ description: >
   [Zensu] Read-only setup diagnostics for the Zensu plugin. Runs
   hooks/lib/zensu-doctor.sh and prints a four-block ✅/⚠️/❌ table: CLI &
   tooling (zensu CLI + auth, node, the code-forge CLI gh/glab + auth resolved
-  from the repo's provider, lockfile-backed Playwright MCP config/readiness, and the browser
-  consent gate's registration plus its per-session execution marker), plugin integrity
+  from the repo's provider, whether playwright-cli is installed and its version, and the
+  browser consent gate's registration on the Bash matcher), plugin integrity
   (hooks.json wired to files on disk, plugin.json ↔ marketplace.json version
   sync), config (valid JSON, the quoted-boolean trap where "true"/"false" as a
   string is silently ignored by strict === checks, and whether the permission rules
@@ -62,28 +62,25 @@ exception is removal of an expired `pending-review.json` you explicitly confirm.
 ## Prerequisites
 
 None. No MCP connection, no API key, no network. The tool probes are local
-(`command -v`, `--version`, auth-status exit codes), the lockfile-backed Playwright MCP
-probe validates `.mcp.json`, its manifest wiring, its integrity lock, and `npm`
-without installing or executing the package, and the remaining manifest/config/state reads are local
-files. A configured MCP row remains a warning until the loaded MCP tools are confirmed.
+(`command -v`, `--version`, auth-status exit codes). The `playwright-cli` version is read by
+`hooks/lib/playwright-cli-version-v1.js` from the `package.json` of the `@playwright/cli`
+package the binary on `PATH` resolves to — the nearest manifest within four directories of the
+resolved binary, else one beside an npm shim — without running it. A manifest that names
+another package, exceeds 64 KiB, does not parse or carries no valid name and version is
+reported as such, and the binary is NOT run. Only when no manifest exists at all does the
+doctor run `playwright-cli --version` once, with the update check disabled, stdin closed and a
+five-second bound enforced on every host, never opening a browser; the version it prints is
+reported as self-reported, never as measured. The remaining manifest/config/state reads are
+local files.
 
 ## Phase 1: Run the diagnostics
 
 Use Claude's natively rendered `${CLAUDE_PLUGIN_ROOT}` directly.
-Before invoking the helper, inspect the tools
-already available in this Claude Code session — do not call the browser. Runtime readiness
-requires the core operation suffixes used by `/zensu:verify-feature`: `browser_navigate`,
-`browser_snapshot`, `browser_take_screenshot`, `browser_click`, `browser_type` or
-`browser_fill_form`, `browser_wait_for`, `browser_console_messages`,
-`browser_network_requests`, and `browser_close`. Accept each
-suffix under either `mcp__zensu-browser__*` or `mcp__plugin_zensu_zensu-browser__*`, and
-never under `mcp__playwright__*`: that name belongs to a different server keyed `playwright`,
-not to this plugin's broker.
 
 Run **exactly one** of the two commands below as a single Bash call — the first
-when that complete tool set is loaded, the second otherwise. Nothing may be added
-to it: no `&&`, no `;`, no pipe, no redirection, no second command, no extra
-variable.
+when `${CLAUDE_PROJECT_DIR}` renders non-empty, the second otherwise. Nothing may
+be added to it: no `&&`, no `;`, no pipe, no redirection, no second command, no
+extra variable.
 
 That is not a style rule. `hooks/lib/zensu-doctor-invocation.js` is what keeps
 this diagnostic reachable when the session binding has failed — the state an
@@ -96,10 +93,8 @@ defect it reports. A SECOND command, `/zensu:adopt-session`, is recognized on it
 own separate justification — it WRITES, so it cannot borrow this one; see
 [Session Control](../../docs/session-control.md) "Unbindable sessions".
 
-Playwright readiness travels as `ZDOC_PLAYWRIGHT_TOOLS=ready`; simply omit that
-assignment when the tool set is not loaded. The root preflight now lives inside
-`zensu-doctor.sh`, so an invalid root still prints the standardized doctor table
-fragment rather than an unformatted shell error.
+The root preflight lives inside `zensu-doctor.sh`, so an invalid root still prints
+the standardized doctor table fragment rather than an unformatted shell error.
 
 **If `${CLAUDE_PROJECT_DIR}` would render EMPTY, omit that assignment entirely
 rather than emitting `CLAUDE_PROJECT_DIR=`.** An empty value is not a rooted
@@ -121,17 +116,7 @@ rather than emitting an empty one, and when the block does collapse, report the
 missing block instead of reading its absence as health.
 
 ```bash
-CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" ZDOC_PLAYWRIGHT_TOOLS=ready bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"
-```
-
-```bash
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"
-```
-
-The same two forms with `CLAUDE_PROJECT_DIR` dropped, for the empty-render case:
-
-```bash
-CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" ZDOC_PLAYWRIGHT_TOOLS=ready bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"
 ```
 
 ```bash
@@ -151,11 +136,6 @@ Plugin integrity
 Summary: 1 ❌  0 ⚠️  — resolve the ❌ items first.
 ```
 
-The plain helper validates the integrity-locked plugin declaration and `npm` presence offline but
-cannot prove that Claude loaded the MCP server, so it deliberately reports `configured` as
-a warning. The tools signal alone cannot bypass declaration validation. Never inject
-`ZDOC_PLAYWRIGHT=ready` directly and never infer readiness from a PATH `playwright` binary.
-
 Print its output verbatim to the user — it is already the formatted four-block
 table with a summary line. The helper always exits 0; a red ❌ is a finding in
 the report, not a failed command. Do not re-render or paraphrase the table.
@@ -165,18 +145,6 @@ the report, not a failed command. Do not re-render or paraphrase the table.
 Briefly call out, in one or two lines, the highest-severity findings and the
 concrete next step for each — but only for rows the table actually marked ⚠️/❌,
 plus the one green row named below, which is always relayed.
-
-A further bound belongs to the helper rather than to a row, and it arrives on
-stderr rather than in the table. A line reading
-`zensu-doctor: browser server key unreadable … the plugin MCP declaration was NOT judged`
-means the decision module this installation ships is absent, symlinked or
-unloadable. Relay that line, and
-report the Playwright MCP row as NOT judged rather than as a finding about
-`.mcp.json` — the row's own wording cannot distinguish the two, and an absent or
-symlinked module in the plugin tree is a tamper indicator rather than a config
-mistake. Its ABSENCE is not an all-clear: a plugin tree damaged badly enough
-surfaces instead as `Session Control: plugin root unavailable or invalid`, whose
-own remedy says nothing about the tree, so read the two rows together.
 
 One bound is stated here rather than in a bullet, because it belongs to the check
 as a whole rather than to any single row: the reviewer-spawn permission check
@@ -397,86 +365,104 @@ classifier will refuse a spawn, not only when the whole table is green.
   detected — add one, or export `ZENSU_VCS_PROVIDER=github|gitlab` for a
   self-hosted host).
 - **⚠️ zensu not authenticated** → `zensu auth login`.
+- **✅ playwright-cli: installed (…)** → the version read from the `@playwright/cli` package
+  manifest beside the binary is the one the browser consent gate was measured against, and
+  `/zensu:verify-feature` drives the browser through it. Nothing to do.
+- **⚠️ playwright-cli: installed (…), not the version the browser consent gate was measured
+  against** → the gate's argument parser, its ambient-variable names, the global-config keys and
+  the run-config schema were measured against another release, so a changed flag meaning in
+  this one would go unseen. The run-config helper therefore refuses to write a run config, and
+  `/zensu:verify-feature` cannot start until the measured version is installed. Relay the row
+  and the pinned install command it names; installing it or updating the plugin is the user's
+  decision.
+- **⚠️ playwright-cli: installed (…), but the version the browser consent gate was measured
+  against could not be read** → the gate module is missing or unreadable in this installation,
+  so nothing about the installed version was checked. Relay the row and suggest reinstalling
+  the plugin.
+- **⚠️ playwright-cli: PATH reaches it through an empty or relative entry, which the shell reads
+  against the working directory of each call** → an empty entry (a leading or trailing `:`, or
+  `::`) or a relative one such as `node_modules/.bin` comes before, or holds, the
+  `playwright-cli` PATH resolves, so which binary a later call runs depends on the directory it
+  runs in. The doctor did not run the binary, and the run-config helper refuses to start
+  `/zensu:verify-feature` and names the entry. Relay the row; removing that entry from PATH, or
+  moving it behind the directory that holds `playwright-cli`, is the user's decision.
+- **⚠️ playwright-cli: installed, and reports … when run, but no @playwright/cli package manifest
+  was found beside it** → no manifest exists beside an npm shim or within four directories of the
+  resolved binary, so the doctor asked the binary itself. A version a binary prints about
+  itself is never taken as measured, even when it matches, and the run-config helper refuses to
+  start `/zensu:verify-feature` on it. A wrapper script outside the package looks exactly like
+  this, so the row also advises putting the directory npm installs `playwright-cli` into first
+  on PATH, ahead of any wrapper. Relay the row and the pinned install command it names.
+- **⚠️ playwright-cli: the binary on PATH belongs to the package …, not @playwright/cli** → the
+  nearest `package.json` names another package, so the doctor did not run the binary at all, and
+  the run-config helper refuses to start `/zensu:verify-feature` on it. Relay the row with the
+  package it names; installing `@playwright/cli` with the pinned command is the user's decision.
+- **⚠️ playwright-cli: the package manifest beside the binary on PATH could not be judged** →
+  the nearest `package.json` does not parse, exceeds 64 KiB, or carries no valid package name and
+  version, so the doctor did not run the binary, and the run-config helper refuses to start
+  `/zensu:verify-feature` on it. Relay the row and the pinned reinstall command it names.
+- **⚠️ playwright-cli: installed, but its version could not be read** → no manifest exists and
+  the binary printed no version within five seconds, or the probe could not run. The run-config
+  helper refuses to start `/zensu:verify-feature` until it reads the version from the package
+  manifest. Relay the row and the pinned reinstall command it names.
+- **⚠️ playwright-cli: not found on PATH** → the user installs the version the browser consent
+  gate was measured against with the pinned `npm install -g @playwright/cli@0.1.21` command the
+  row prints. `brew install playwright-cli` is unpinned: it installs whichever version Homebrew
+  ships, which the run-config helper refuses unless it is the measured one. Never install it on
+  their behalf.
 - **✅ verify-feature: environment policy active** → `ZENSU_VERIFY_NAVIGATION_POLICY_V1` was
-  set when Claude Code started, so the parent-environment policy governs every browser origin
-  and the consent prompt never fires this session. Only its top-level contract is checked
-  here; the broker judges each target when it starts. Nothing to do.
+  set when Claude Code started and passes the policy contract, so it governs every browser
+  origin and the consent prompt never fires this session; the browser consent gate admits only
+  its targets and, for navigation commands, their declared routes. Nothing to do.
 - **✅ verify-feature: consent mode ready** → no parent policy is set, the consent hook pair is
-  registered on the broker's navigation tools, and a runtime recipe (`.zensu/runtime.yaml` or
-  `.zensu/autopilot.yaml`) is present. The first navigation to each loopback origin asks the
-  user through the permission prompt, and every further route on an approved origin then
-  proceeds without one; remote targets still need the policy.
+  registered on the Bash matcher, and a runtime recipe (`.zensu/runtime.yaml` or
+  `.zensu/autopilot.yaml`) is present. The first `playwright-cli` call of a `zensu-verify`
+  session that reaches a new loopback origin asks the user through the permission prompt, and
+  every further route on an approved origin then proceeds without one; remote targets still
+  need the policy.
 - **⚠️ verify-feature: consent mode ready, no runtime recipe** → same as above, but
   `/zensu:verify-feature` has nothing to boot. Run `/zensu:verify-feature --setup` to write the
   recipe with the user, or `--attach=<loopback-origin>` for an application they already run.
-- **❌ verify-feature: a parent-environment navigation policy is set but the browser broker will refuse it (…)** → a parent-environment policy
-  IS set, but its value does not satisfy the contract the broker parses at start, so the
-  browser cannot open at all. Only the three top-level guards are repeated in this check —
-  the per-target rules stay the broker's — and the parenthesis names which one answered. The
-  user fixes that value in the environment that launches Claude Code, or unsets it to fall
-  back to consent mode. Never edit it from a Bash call: it is read once when the broker starts.
+- **❌ verify-feature: ZENSU_VERIFY_NAVIGATION_POLICY_V1 is set but invalid (…)** → a
+  parent-environment policy IS set, but its value does not satisfy the policy contract, so the
+  browser consent gate denies every `zensu-verify` navigation. The parenthesis names the rule it
+  broke. The user fixes that value in the environment that launches Claude Code, or unsets it to
+  fall back to consent mode. Never edit it from a Bash call: the hooks read it from the
+  environment Claude Code started with.
+- **⚠️ verify-feature: ZENSU_VERIFY_NAVIGATION_POLICY_V1 is set but could not be checked (…)** →
+  a parent-environment policy IS set, but the plugin's own policy parser did not complete, so
+  the report judged nothing. This is a missing check, not an invalid policy: never tell the user
+  their value is wrong on the strength of this row. Run `/zensu:doctor` again; if the row
+  repeats, the plugin tree is damaged and the user reinstalls it.
 - **⚠️ verify-feature: consent mode ready, recipe not checked** → the report resolved no
   project root, so it looked for no recipe at all. This is a missing check rather than a
   missing recipe; run `/zensu:doctor` from a session whose project root resolves.
-- **❌ verify-feature: cannot start (…)** → the consent hook pair, its decision module or the
-  broker script is missing, or `hooks/hooks.json` does not register the GATE on the
-  navigation matcher, or it does not register the RECORDER — the broker starts in consent mode
-  on the gate alone, so a missing recorder would prompt on every navigation and remember
-  nothing. Reinstall the plugin, or launch Claude Code with the parent-environment
-  policy, which needs no hook. The parenthesis names which piece is missing.
+- **❌ verify-feature: cannot start (…)** → the consent hook pair, its prefilter library
+  `hooks/lib/zensu-browser-consent-prefilter.sh`, its decision module or the run-config helper
+  `scripts/verify-browser-config.js` is missing, the decision module is a symlink (both consent
+  hooks refuse one) or cannot be loaded, the run-config helper cannot be loaded, `hooks/hooks.json`
+  does not register the GATE or the RECORDER on a matcher that covers Bash, a registration in
+  `hooks/hooks.json` could not be determined, or the pair's registration probe did not complete.
+  Without the gate nothing judges a
+  `zensu-verify` session; without the recorder every navigation would prompt and nothing would
+  be remembered. Reinstall the plugin. The label is literal: the run-config helper writes no run
+  config unless both hooks demonstrably answer registered, and a missing prefilter library or a
+  missing, symlinked or unloadable decision module makes the consent hook deny every gated call, so `/zensu:verify-feature` cannot drive
+  a browser; tell the user not to start `/zensu:verify-feature` until this row clears. The
+  parenthesis names the cause, and it names each hook
+  with its own state — "consent hook" is the gate, "consent recorder" the recorder — joined by
+  `; ` when both apply; relay each state for the hook it names. A registration that could not
+  be determined, or a probe that did not complete, is NOT a missing hook — relay it as a check
+  that could not be made, never as "not registered".
 - **⚠️ verify-feature: not checked** → the wrapper reported no verify state at all, so the
   report says nothing about the browser path. This is a missing check rather than an
   all-clear; run `/zensu:doctor` from a session whose plugin root resolves.
-- **✅ verify-feature gate: executed in this session** → a live marker whose NAME carries this
-  session's key records the gate deciding a navigation, so the gate is being exercised and not
-  merely registered. The rows above are derived from files on disk in the plugin's own tree and
-  cannot tell a session whose hooks ran from one whose hooks are switched off host-side; this row
-  gets closer. TWO bounds ride on it and neither is optional. The session binding is the
-  FILENAME, and `<project>/.zensu/state` is writable from any session in the project, so this is
-  evidence about a file rather than an attestation — `docs/gates.md` states that in as many
-  words. And this row reads under the session RECORD's project root, while the browser broker
-  anchors on its own working directory, so a green row here does not establish that the broker
-  will approve. Ordinarily nothing to do; if a navigation is nonetheless being refused, read the
-  broker's own refusal. TWO of its six refusal states name the tree it read under — the one for a
-  state directory it could not open, and the one for a marker walk that hit its budget — so a
-  refusal naming no tree is telling you something narrower rather than withholding it.
-- **✅ verify-feature gate: executed in this session, on a prompted origin** → the live marker
-  records the gate ASKING about the navigation rather than clearing it from memory. The marker is
-  written BEFORE the answer exists, so a prompt that was DECLINED leaves the same marker live for
-  its window — the residual `docs/gates.md` names — and this row therefore reports the question,
-  not the answer. The same two bounds as the row above apply. Ordinarily nothing to do.
-- **✅ verify-feature gate: registered, and no live execution marker was read for this session** →
-  the pair is installed and the state directory held no live marker. TWO ordinary causes, and
-  naming only the first is what this row used to do: no browser navigation has reached the gate
-  yet, OR a marker it wrote has passed the window the gate keeps markers for. The row therefore
-  says what the probe proved — no LIVE marker — rather than asserting that no navigation
-  occurred, and it is stated rather than left silent so that "installed" is never read as
-  "enforced". Nothing to do.
-- **⚠️ verify-feature gate: execution not checked** → no bound session key or no recorded
-  project root was available, so the session-keyed marker was never looked for AND none can be
-  written either: consent mode can still ask, and the broker then refuses the navigation for want
-  of a marker. A missing check rather than an all-clear. Do NOT read it as "this session has no
-  Session Control record" — the wrapper sets this state for every binding verdict except `bound`,
-  including the three where a valid record is sitting in plugin data and the binding row above
-  prescribes `/zensu:adopt-session`. Take the remedy from that row, or launch with the
-  parent-environment navigation policy, which needs no hook.
-- **⚠️ verify-feature gate: execution could not be judged** → the decision module did not load,
-  did not export the reader, the state directory could not be read, or the read hit the marker
-  budget before it could answer. A contract fault is reported as one rather than collapsing into
-  the benign row. Reinstall the plugin, check that `<project>/.zensu/state` is readable, and clear
-  stale `verify-consent-exec-*` files from it — and nothing else in that directory, which also
-  holds this session's workflow document, whose removal makes every tool deny until the session is
-  adopted again. That scope clause is the broker's own and is not optional here: Phase 3 below
-  forbids a glob, `find`, parent traversal or worktree discovery against this directory, so the
-  only sanctioned spelling is `rm -f` on the exact marker names you have listed and read. The
-  fourth cause is the one neither of the first two remedies touches, and it is the same condition
-  the broker names as "too many execution markers".
-- **⚠️ verify-feature gate: execution state not recognized (…)** → the wrapper reported a state
-  this report has no row for. A missing check rather than an all-clear; the parenthesis names the
-  value. Do NOT read it as the two halves having drifted — the wrapper derives its word from a
-  closed accept-list, so every value that derivation can produce already has a row above, and this
-  row is reachable only when a caller supplies `ZDOC_VERIFY_EXEC` itself. The renderer claims
-  exactly that much and no more, and so does this bullet.
+
+Every `verify-feature` row is derived from files on disk in the plugin's own tree. None of them
+can tell a session whose hooks run from one whose hooks are switched off host-side, and with the
+hooks off nothing in this plugin constrains `playwright-cli` — say so whenever the user asks
+whether browser verification is enforced, not only when a row is red.
+
 - **❌ binding: this session has no valid Session Control record** → the cause
   behind the `Blocked: the immutable Zensu session binding is unavailable or
   invalid` denial. Nothing in this session can be repaired in place; start a

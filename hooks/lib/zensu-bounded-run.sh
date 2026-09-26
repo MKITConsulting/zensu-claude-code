@@ -43,8 +43,9 @@
 # block-on-open vectors are already closed inside the transcript module: it refuses a NUL
 # byte, `lstat`s and requires a regular file BEFORE opening, opens `O_NOFOLLOW|O_NONBLOCK`
 # and re-checks by `fstat` — so a FIFO, device or symlink at that path cannot block. What
-# the unbounded arm actually leaves is a REGULAR FILE ON STALLED STORAGE, and a git status
-# that hangs.
+# the unbounded arm actually leaves is a REGULAR FILE ON STALLED STORAGE, a git status
+# that hangs, and — on the /zensu:doctor version fallback — a third-party executable,
+# `playwright-cli --version`, that never exits.
 #
 # "Availability only, no adversary in the loop" was the closing sentence here and it is
 # NO LONGER TRUE, so it is retired rather than reworded. `zensu-log.sh --tdd-complete`
@@ -69,15 +70,18 @@
 # only way out of the mode. On the `--tdd-complete` path it costs the VERB: that call is
 # what closes a chain, its registration is a plain Bash invocation with no host timeout at
 # all, and `|| return 0` at the call site tests an exit status a hang never produces — so
-# the chain simply never completes. Same arm, three very different prices.
+# the chain simply never completes. On the /zensu:doctor path it costs the REPORT: when the
+# package read yields no version the doctor runs `playwright-cli --version` through this
+# ladder, and one that never exits holds the whole diagnostic until whatever bounds the Bash
+# call itself ends it. Same arm, a different price per caller.
 zensu_run_bounded() {
   # `"$@"` with zero positional parameters aborts under `set -u` on bash 3.2, which is
   # macOS's /bin/bash and this script's interpreter — so a future argument-less call would
   # kill the hook rather than no-op. Latent today — every live call site passes a command —
   # and guarded so the property does not depend on every later caller remembering. Do not
-  # restate that parenthetical as "both call sites": there are SEVEN, in FOUR files as of this writing, the newest being the `--tdd-complete` claim-inventory child in `hooks/lib/zensu-log.sh`, and the
-  # ladder's own header says the census is a criterion rather than a count for exactly this
-  # reason. Say "every live call site", which stays true as callers are added.
+  # restate that parenthetical as "both call sites": there are more than two, in several
+  # files, and the ladder's own header says the census is a criterion rather than a count for
+  # exactly this reason. Say "every live call site", which stays true as callers are added.
   # NON-ZERO, not 0. Returning success with no output would leave the transcript caller's
   # `probe` empty, which its `case` classifies as `unparseable` — a verdict the scope-sentence
   # allowlist WITHHOLDS on — where a failure leaves the initializer's `unprobed`, which is the
