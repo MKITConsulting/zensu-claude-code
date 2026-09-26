@@ -42,8 +42,8 @@ check() {
 # strip_ansi spells the ESC byte through printf because `\x1b` in a sed pattern is a
 # GNU extension that another sed may read as literal text, leaving the byte behind.
 strip_ansi()   { sed -E "s/$(printf '\033')\[[0-9;?]*[A-Za-z]//g; s/\[[0-9]+[A-Z]//g; s/\[[?][0-9;]+[hl]//g" "$1"; }
-contains()     { strip_ansi "$1" | grep -qiE "$2" && echo PASS || echo FAIL; }
-not_contains() { strip_ansi "$1" | grep -qiE "$2" && echo FAIL || echo PASS; }
+contains()     { strip_ansi "$1" | grep -qiE "${2// /[[:blank:]]*}" && echo PASS || echo FAIL; }
+not_contains() { strip_ansi "$1" | grep -qiE "${2// /[[:blank:]]*}" && echo FAIL || echo PASS; }
 # A not_contains assertion is satisfied by an EMPTY transcript, so every absence
 # check in this file is gated on evidence that the session actually produced one.
 nonempty()     { [ -s "$1" ] && echo PASS || echo FAIL; }

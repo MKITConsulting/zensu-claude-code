@@ -22,8 +22,9 @@
 #   hooks/session-start-banner.sh              -> D26, D27 (the autoTdd flag arm and
 #     the off-state disclosure), D29, D30 (the node and delegate-hook arms of the
 #     _ZENSU_ROUTE_QUESTION_LIVE guard, and the ONLY grader of the else-branch tip)
-#   evals/plan-approval-hook/run-eval.sh       -> D18, D19, D28, D31, D32, D33, D38, D40, D41
-#   evals/plan-approval-hook/test-code-plan.exp -> D39, D39b
+#   evals/plan-approval-hook/run-eval.sh       -> D18, D19, D28, D31, D32, D33, D38, D40, D41, D42
+#   evals/plan-approval-hook/test-code-plan.exp -> D39, D39b, D43, D43b
+#   evals/plan-approval-hook/test-doc-plan.exp  -> D43, D43b
 #   evals/plan-approval-hook/README.md         -> D20
 set -u
 
@@ -725,6 +726,57 @@ TCL
   fi
 fi
 
+D43_DOC_EXP="$PLUGIN_DIR/evals/plan-approval-hook/test-doc-plan.exp"
+if [ ! -f "$D39_EXP" ] || [ ! -f "$D43_DOC_EXP" ]; then
+  check "D43b eval expect scripts exist" FAIL
+  check "D43 eval expect scripts exist" FAIL
+else
+  D43_TEXT="$(awk '
+    FNR == 1 { f++ }
+    index($0, "set GAP {") == 1 { g[f]++; def[f] = $0 }
+    index($0, "${GAP}") { u[f]++ }
+    /-re "[^"]* [^"]*"/ { bad++ }
+    f == 2 && index($0, "-re \"PostToolUse:ExitPlanMode${GAP}hook\"") { arm = 1; next }
+    arm == 1 && index($0, "exp_continue -continue_timer") { cont++ }
+    arm == 1 && $0 ~ /^[ \t]*}[ \t]*$/ { arm = 2 }
+    END { if (f == 2 && g[1] == 1 && g[2] == 1 && def[1] == def[2] && u[1] && u[2] && !bad && arm == 2 && cont == 1) print "ok"; else print "files=" f " definitions=" g[1]+0 "," g[2]+0 " identical=" (def[1] == def[2]) " uses=" u[1]+0 "," u[2]+0 " literal-space-patterns=" bad+0 " hook-arm=" arm+0 " hook-arm-continues=" cont+0 }
+  ' "$D39_EXP" "$D43_DOC_EXP")"
+  if [ "$D43_TEXT" = ok ]; then
+    check "D43b both eval expect scripts define one identical GAP, use it, hold no -re pattern with a literal space, and the doc hook-fired arm continues the wait" PASS
+  else
+    check "D43b eval expect GAP drifted ($D43_TEXT)" FAIL
+  fi
+  if ! command -v tclsh >/dev/null 2>&1; then
+    skip "D43 no tclsh on this host to run the expect scripts' GAP pattern"
+  else
+    sed -n '/^set GAP {/p' "$D39_EXP" > "$TMP_DIR/gap.tcl" 2>/dev/null
+    cat > "$TMP_DIR/gap-cases.tcl" <<'TCL'
+if {[catch {source [lindex $argv 0]} err] || ![info exists GAP]} { puts "cannot load GAP"; exit 0 }
+set E "\x1b"
+set cases [list \
+  1 "Executing${E}\[11Gvia${E}\[15G/zensu:tdd" \
+  1 "Executing${E}\[2Cvia${E}\[C/zensu:tdd" \
+  1 "Executing via /zensu:tdd" \
+  1 "Executingvia/zensu:tdd" \
+  1 "Executing \t${E}\[12Gvia /zensu:tdd" \
+  0 "Executing-via /zensu:tdd" \
+  0 "Executing x via /zensu:tdd" \
+]
+set bad 0
+foreach {want text} $cases {
+  if {[regexp -- "^Executing${GAP}via${GAP}/zensu:tdd\$" $text] != $want} { incr bad }
+}
+puts "cases=[expr {[llength $cases] / 2}] mismatches=$bad"
+TCL
+    D43_OUT="$(tclsh "$TMP_DIR/gap-cases.tcl" "$TMP_DIR/gap.tcl" 2>&1 | head -1)"
+    if [ "$D43_OUT" = "cases=7 mismatches=0" ]; then
+      check "D43 the expect GAP matches a space, a tab, a cursor escape or nothing between two words, and never another character" PASS
+    else
+      check "D43 eval expect GAP drifted (${D43_OUT:-no output})" FAIL
+    fi
+  fi
+fi
+
 # D40 T2.9 grades the session marker the helper writes, not the transcript, which
 # also carries whatever the model writes. route_recorded is extracted by text and
 # run against a project whose state directory first holds nothing, then a `tdd`
@@ -898,6 +950,7 @@ if [ ! -f "$EVAL_RUNNER" ]; then
   check "D31 eval runner exists" FAIL
   check "D32 eval runner exists" FAIL
   check "D41 eval runner exists" FAIL
+  check "D42 eval runner exists" FAIL
 else
   sed -n '/^nonempty()/p;/^not_contains()/p;/^strip_ansi()/p;/^contains()/p' "$EVAL_RUNNER" > "$EVAL_FN" 2>/dev/null
   # `grep -c` prints 0 AND exits 1 on no match, so a `|| echo 0` fallback yields the
@@ -910,6 +963,7 @@ else
     check "D31 could not extract nonempty/not_contains/strip_ansi/contains from the runner (got $EVAL_FN_LINES of 4)" FAIL
     check "D32 not_contains() premise ungraded — extraction failed" FAIL
     check "D41 strip_ansi escape handling ungraded — extraction failed" FAIL
+    check "D42 needle gap handling ungraded — extraction failed" FAIL
   else
     # shellcheck disable=SC1090
     D31_EMPTY="$(. "$EVAL_FN"; nonempty "$EMPTY_FILE")"
@@ -956,6 +1010,20 @@ else
       check "D41 strip_ansi removes a cursor or private-mode escape whole, with the ESC byte spelled through printf" PASS
     else
       check "D41 strip_ansi leaves part of an escape behind or respells the ESC byte (param=$D41_PARAM bare=$D41_BARE private=$D41_PRIVATE printf=$D41_SPELLED)" FAIL
+    fi
+    GAP_FILE="$TMP_DIR/transcript-gap.log"
+    printf 'Executing\033[11Gvia\033[15G/zensu:tdd\nExecuting\033[2Cvia\033[1C/zensu:autopilot\nNo\033[5G—\033[7Gimplement directly\nZensu\033[7Gworkflow —/zensu:tdd\nExecuting-via /zensu:direct\n' > "$GAP_FILE"
+    D42_GOT="$(. "$EVAL_FN"
+      printf '%s ' "$(contains "$GAP_FILE" 'Executing via /zensu:tdd')" \
+        "$(not_contains "$GAP_FILE" 'Executing via /zensu:autopilot')" \
+        "$(contains "$GAP_FILE" 'No — implement directly')" \
+        "$(contains "$GAP_FILE" 'Zensu workflow — /zensu:tdd')" \
+        "$(not_contains "$GAP_FILE" 'Executing via /zensu:pilot')" \
+        "$(contains "$GAP_FILE" 'Executing via /zensu:direct')")"
+    if [ "$D42_GOT" = "PASS FAIL PASS PASS PASS FAIL " ]; then
+      check "D42 contains/not_contains read a needle's space as blanks or none, so an escape-drawn or missing space matches, an absence check sees such a phrase, and no other character bridges two words" PASS
+    else
+      check "D42 eval needle gap drifted (tdd absence label missing pilot hyphen: got '$D42_GOT', want 'PASS FAIL PASS PASS PASS FAIL ')" FAIL
     fi
   fi
 fi

@@ -96,12 +96,23 @@ Claude spends in plan-mode research. Don't run in CI without a generous budget.
   scripts' own `set timeout` and says so in the report, in a NOTE emitted after the
   header write, because that write is a truncating `tee`). (`tdd-manager`
   still appears in Test 1, where it is the correct negative-dispatch needle.)
-- The terminal can draw the space between two words as a cursor-position escape,
-  which `strip_ansi` deletes: a May 2026 capture shows `zensu-log.sh--phase` where
-  the command read `zensu-log.sh --phase`. The expect patterns after the route
-  question tolerate a missing space and `T2.9` does not read the transcript at all;
-  the older transcript checks (`T2.4`, `T2.6`-`T2.8`) and the route-question pattern
-  still match literal spaces.
+- The terminal repaints only the cells that change, so the space between two words
+  can arrive as a cursor-position escape, which `strip_ansi` deletes: a May 2026
+  capture shows `zensu-log.sh--phase` where the command read `zensu-log.sh --phase`.
+  `contains` and `not_contains` therefore read each space in a needle as any run of
+  blanks or none. `T2.4` and `T2.6` match a phrase whether its spaces were drawn,
+  drawn as escapes or skipped, and the absence checks `T2.7` and `T2.8` see such a
+  phrase too, where a literal-space needle read an escape-drawn
+  `Executing via /zensu:autopilot` as absent. Every multi-word expect pattern in both
+  scripts joins its words with the same `GAP`, and the doc test's hook-fired arm keeps
+  waiting after it matches, so it never ends the session before the model answers.
+  The Test 1 checks and `T2.1`-`T2.3` and `T2.5` read the debug log, which is plain
+  text, and `T2.9` reads no transcript at all.
+- A cell is also skipped when it already shows the character to be drawn, so a
+  letter can go missing as well: the same capture shows `This com` and `and` on
+  either side of an escape where the prompt read `This command`. A phrase drawn over
+  cells that already held some of its letters can lose them; the checks rely on each
+  phrase being drawn onto blank cells at least once.
 - **Clause (C) — the non-interactive bar — is NOT exercised by this eval.** Both
   tests drive an INTERACTIVE session via expect, while clause (C) governs a run with
   no human to answer, so the feature's only behavioural surface does not touch that

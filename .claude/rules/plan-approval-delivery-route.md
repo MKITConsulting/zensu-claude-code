@@ -90,7 +90,7 @@ the default config resolves to the vanilla one and a single capture would grade 
 that suite ALSO grades carriers outside the hook, and the roster is an ENUMERATION rather than a
 count because a count there was wrong on the day it was written: `D17` five prose carriers
 (`docs/configuration.md`, `docs/architecture.md`, `README.md`, `skills/tdd/SKILL.md`,
-`skills/gauntlet-loop/SKILL.md`, with an examined-carrier floor of 5), `D18`-`D20`/`D28`/`D31`-`D33`/`D38`-`D41`
+`skills/gauntlet-loop/SKILL.md`, with an examined-carrier floor of 5), `D18`-`D20`/`D28`/`D31`-`D33`/`D38`-`D43`
 the local-only eval in `evals/plan-approval-hook/` and its README (which nothing graded before, so
 its two ABSENCE assertions reported the outward-facing safety property green whenever the driven
 session died), and `D26`/`D27`/`D29`/`D30` the SessionStart banner. The suite's own header carries
@@ -206,7 +206,13 @@ for — base macOS ships neither binary, the runner required neither, so both `t
 invocations exited 127, `|| true` swallowed it, and the checks
 that read as the outward-facing safety evidence went green over a session that never started; and
 `T2.6` grades two rendered option LABELS rather than the bare phrase `implement directly`, which a
-model narrating its intent also emits. That eval is local-only and never runs in CI, which is why
+model narrating its intent also emits. The TUI capture is a stream of repainted cells, so the space
+between two words can arrive as a cursor-position escape or not at all: `contains` and
+`not_contains` read each space in a needle as `[[:blank:]]*`, without which `T2.7`/`T2.8` read an
+escape-drawn `Executing via /zensu:autopilot` as absent, and every multi-word `-re` pattern in both
+expect scripts joins its words with one shared `GAP` (`D42` grades the helpers, `D43`/`D43b` the
+patterns); the doc script's hook-fired arm continues the wait, so matching it never ends the
+session before the model answers and `T1.5` still has a reply to observe. That eval is local-only and never runs in CI, which is why
 `D18`-`D20` and `D28` in `tests/structure/test-plan-approved-delegate.sh` grade the runner and its
 README from a suite that does — and `D18` binds the ` FAIL` VERDICT token on each not-graded arm,
 because a pin on the label alone let the arms be rewritten to `PASS` with the check still green.
