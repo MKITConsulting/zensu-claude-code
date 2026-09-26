@@ -413,6 +413,8 @@ MISSING="$(payload arbitrary-custom Read '{"file_path":"x"}' | GATE_TEST_MODE=mi
 
 TAMPERED="$(payload arbitrary-custom Read '{"file_path":"x"}' | GATE_TEST_MODE=tampered-digest decision)"
 [ "$TAMPERED" = deny ] && check "tampered inherited SubagentStart runtime digest denies the first tool" PASS || check "tampered inherited SubagentStart runtime digest denies the first tool" FAIL
+GATE_TEST_MODE=tampered-digest assert_case "tampered runtime digest denies a reviewer report handback" \
+  deny zensu:code-reviewer SubagentHandback "$HANDBACK_REPORT"
 
 WRONG_SESSION="$(PAYLOAD_SESSION_ID='different-session' payload arbitrary-custom Read '{"file_path":"x"}' | decision)"
 [ "$WRONG_SESSION" = deny ] && check "PreToolUse session_id mismatch denies before capability evaluation" PASS || check "PreToolUse session_id mismatch denies before capability evaluation" FAIL
@@ -539,6 +541,12 @@ GATE_TEST_MODE=missing-context assert_case \
 GATE_TEST_MODE=missing-context assert_case \
   "unregistered session: an exact reviewer still fails closed" \
   deny zensu:code-reviewer Read '{"file_path":"README.md"}'
+GATE_TEST_MODE=missing-context assert_case \
+  "unregistered session: a reviewer report handback still fails closed" \
+  deny zensu:review-aspect SubagentHandback "$HANDBACK_REPORT"
+GATE_TEST_MODE=missing-context assert_case \
+  "unregistered session: a PLM report handback still fails closed" \
+  deny zensu:zensu-plm SubagentHandback "$HANDBACK_REPORT"
 GATE_TEST_MODE=missing-context assert_case \
   "unregistered session: a neutral child still fails closed" \
   deny general-purpose Read '{"file_path":"README.md"}'
