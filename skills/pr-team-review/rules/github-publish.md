@@ -36,6 +36,22 @@ Docs: <https://docs.github.com/en/rest/pulls/reviews#create-a-review-for-a-pull-
 }
 ```
 
+`commit_id` is a **review-level** field. It belongs at the top level of this
+payload and nowhere else: an entry of `comments[]` accepts exactly `path`,
+`body`, `side`, `line`, optionally `start_line` + `start_side`, and the legacy
+`position` — nothing more. A per-comment `commit_id` fails the WHOLE POST with a
+422 that names the GraphQL type behind the endpoint:
+
+```text
+{"message":"Unprocessable Entity","errors":["Variable $threads of type [DraftPullRequestReviewThread] was provided invalid value for 0.commitId (Field is not defined on DraftPullRequestReviewThread)"],"status":"422"}
+```
+
+The per-comment fallback near the end of this file DOES set `commit_id` on its
+comment object, and is correct there: it posts to
+`POST /repos/{owner}/{repo}/pulls/{n}/comments`, a different endpoint that
+creates one standalone review comment and therefore carries its own head SHA.
+Never copy that shape back into the reviews payload above.
+
 ## Pre-Publish Anchor Validation (MANDATORY)
 
 GitHub 422-rejects any inline comment whose `(path, line, side)` anchor is not a
@@ -206,6 +222,7 @@ standalone `--post-review` path. Delegated mode follows the fail-closed policy a
 | 404 | PR doesn't exist OR no read access | Verify PR URL + repo membership |
 | 422 (line out of diff) | Inline `line` not in any diff hunk | Should not occur — anchors are pre-validated (see Pre-Publish Anchor Validation). If it still fires: refetch the diff, re-validate every anchor, retry |
 | 422 (commit_id mismatch) | Head SHA changed since fetch | Re-run `git rev-parse pr-<n>-review`, update payload, retry |
+| 422 (`commitId` not defined on `DraftPullRequestReviewThread`) | `commit_id` set on an entry of `comments[]` | Move it to the review level (see Payload Shape) — retrying the same payload can never pass |
 | 500 / 502 | GitHub transient | Wait 30s, retry once |
 
 Standalone last-resort only (a 422 that survives re-validation): identify the offending comment(s) by binary search — `jq 'del(.comments[<i>])' payload.json > shrunk.json` and retry until POST succeeds — and fold whatever was removed into the overall body as body-only findings (`SKILL.md` Phase D) so no finding is lost.
@@ -229,6 +246,10 @@ jq -n --arg path '<path>' --arg body '<markdown>' \
   > "$WORKDIR/_comment.json"
 gh api -X POST repos/<o>/<r>/pulls/<n>/comments --input "$WORKDIR/_comment.json"
 ```
+
+`commit_id` is REQUIRED on this endpoint's comment object and FORBIDDEN inside the
+reviews payload's `comments[]` — the two endpoints take different shapes, so this
+fence is not a template for the review payload (see Payload Shape).
 
 This loses atomicity but unblocks the user. Mention the fallback in the final message.
 

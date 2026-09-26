@@ -13,21 +13,29 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (153 = 146 + 7, re-derived from the JSON rather than incremented:
-`ciStructureTests` holds 146 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
-returns 153). The figures here have drifted THREE times in the same direction and every
+reconciled to that manifest (155 = 148 + 7, re-derived from the JSON rather than incremented:
+`ciStructureTests` holds 148 entries, `localStructureTests` 7, and `ls tests/structure/test-*.sh`
+returns 155). The figures here have drifted SIX times in the same direction and every
 correction is recorded rather than overwritten: they once read 148 = 141 + 7 against a manifest
-already holding 142 CI entries, then 150 = 143 + 7 while it already held 144, and then
-151 = 144 + 7 while this merge was landing the 145th. Each of those was internally consistent
-and merely stale. Correcting only the headline and leaving the derivation clauses behind
-produces a THIRD state that is not stale but self-contradictory — the failure shape the
+already holding 142 CI entries, then 150 = 143 + 7 while it already held 144, then
+151 = 144 + 7 while a merge was landing the 145th, then 152 = 145 + 7 while the merge of
+`main` into the worktree-keep branch was landing the 146th, then 153 = 146 + 7 while the
+next such merge was landing the 147th, and then 154 = 147 + 7 while the merge of `main` into
+the review-convergence branch was landing the 148th. Each of those was internally
+consistent and merely stale. Correcting only the headline and leaving the derivation clauses
+behind produces a THIRD state that is not stale but self-contradictory — the failure shape the
 section-4 header-numeral paragraph below names — so every re-derivation since closes the
-clauses together with the headline. TWO of the three drifts arrived the same way, through a
+clauses together with the headline. FIVE of the six drifts arrived the same way, through a
 merge of two branches that each re-derived its own count and neither of which could see the
 other: `test-autopilot-adopt-cli.sh` and `test-incremental-review-rounds.sh` each took the
-manifest from 143 to 144 in its own branch, so merging them is what makes 145.
+manifest from 143 to 144 in its own branch, so merging them is what made 145;
+`test-worktree-keep.sh` took its own branch from 144 to 145 while `main` independently reached
+145, so that merge made 146; `test-delivery-route.sh` took `main` from 145 to 146 while the
+worktree-keep branch independently reached 146, so the next merge made 147; and
+`test-review-convergence.sh` took its own branch to 146 while `main` independently reached 147,
+so merging `main` into it is what makes 148.
 **§3 is NOT fully reconciled to it**, and the residual is stated rather than
-asserted away: its eleven CI group headers sum to 144 against 146 CI-classified suites, so TWO CI
+asserted away: its eleven CI group headers sum to 146 against 148 CI-classified suites, so TWO CI
 suites appear in no §3 group. They are `test-session-trail-lineage.sh` and
 `test-incremental-review-rounds.sh`, re-derived BY NAME
 by comparing every group's listed names against `ciStructureTests`. The gap predates both the plugin-data guard, filed under
@@ -67,8 +75,8 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **153** — 146 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **146 structure suites + 5 offline evals = 151 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 153 − 146 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **155** — 148 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **148 structure suites + 5 offline evals = 153 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 155 − 148 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | (count deliberately omitted) | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -80,8 +88,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 153 structure suites + 5 offline evals | none |
-| `--ci` | 146 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 155 structure suites + 5 offline evals | none |
+| `--ci` | 148 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -104,23 +112,24 @@ Runner-level guarantees (themselves pinned by `test-run-all-preflight-watchdog.s
 
 ## 3. Deterministic structure suites — grouped by what they cover
 
-### Session Control & workflow state (15)
+### Session Control & workflow state (16)
 `orphaned-project-root` · `session-control-claude` · `session-control-core` ·
 `session-control-sandbox-hook-integration` · `session-id-v1` ·
 `session-start-banner` · `state-verb-diagnostics` · `tdd-log-path-anchor` ·
 `tdd-no-flock-external-lease` · `tdd-state-corruption-fail-closed` ·
 `tdd-state-path-safety` · `vanished-session-cwd` · `versioned-plugin-upgrade` ·
-`workflow-scope` · `zensu-runtime-controller`
+`workflow-scope` · `worktree-keep` · `zensu-runtime-controller`
 
 Covers the canonical CAS workflow document, immutable session binding, the shared
 Bash-3.2-compatible external process lease, symlinked-ancestor / non-regular-leaf
 rejection, fail-closed behavior on an unreadable state file, diagnostics on failed
-state verbs, the SessionStart banner, and a vanished live working directory under an
-intact binding. `session-control-claude` alone carries ~140
+state verbs, the SessionStart banner, a vanished live working directory under an
+intact binding, and the worktree-keep marker, anchor and drift lifecycle that keeps an
+app-managed worktree out of the Claude Desktop pool while a session is bound to it. `session-control-claude` alone carries ~140
 assertions.
 
-### TDD engine & phase gate (17)
-`edit-landing-audit` · `evidence-discipline` · `impl-stop-counter` ·
+### TDD engine & phase gate (18)
+`delivery-route` · `edit-landing-audit` · `evidence-discipline` · `impl-stop-counter` ·
 `pre-edit-hook-mirror` ·
 `pretool-config-prompts` · `requirements-table-gate` ·
 `smoke-main-thread-chain` · `tdd-begin-chain-reset` ·
@@ -364,6 +373,7 @@ that suite's failure.
 | `process-supervisor.test.js` | 3 | wrapper / profile suites | bounded supervisor + process-tree teardown |
 | `owned-process.test.js` | 2 | `test-claude-promptfoo-wrapper.sh` | owned-process lifecycle |
 | `reviewer-spawn-allow-v1.test.js` | 18 | `test-reviewer-spawn-allow.sh` | the reviewer-spawn grant's derived agent set, its silence on every non-grant path, and the one-definition scan |
+| `worktree-keep-v1.test.js` | 85 | `test-worktree-keep.sh` (K3) | worktree keep: managed-worktree detection, anchor guards with the root-shape and ref-shape rules and the shared root rule, marker lifecycle with the per-anchor window and the reap window, the aged SessionEnd anchor, the release verb, the exclude line and its hard-link, swap and write-permission refusals and a missing info directory, the check-ignore gate with its exported ignore verdict and the linked or copied publish with its races, git-environment scrub, sibling sweep, drift and backfill rules with the restated recorded drift and its silent drift-free case, the shared branch-state verdict, the paused rebase and bisect baseline, the unrenderable-branch read, the adopted notice only after a written anchor, the rejected-anchor marker hold and the remedy from the write pre-check, the shared branch nouns and recorded-move sentence, the anchor-file bound and its drain, the JSON test mode, the hook envelope, CLI verbs |
 
 FIVE further files — `session-lineage-v1.test.js`, `worktree-advice-v1.test.js`,
 `prompt-listing-v1.test.js`, `aspect-activation-v1.test.js` and `review-round-scope-v1.test.js` —

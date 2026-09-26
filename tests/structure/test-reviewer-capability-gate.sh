@@ -291,6 +291,90 @@ assert_case "mutating MCP/control tool is denied" deny code-reviewer mcp__zensu_
 assert_case "nested Agent tool is denied" deny review-aspect Agent '{"subagent_type":"general-purpose"}'
 assert_case "nested collaboration spawn is denied" deny review-judge spawn_agent '{"task_name":"attack"}'
 assert_case "unknown reviewer tools fail closed" deny code-reviewer mystery_tool '{}'
+
+HANDBACK_REPORT='{"message":"## Review\nNo findings."}'
+VANISHED_CWD="$TMP/vanished-working-directory"
+assert_case "scoped code reviewer may deliver its report through SubagentHandback" allow zensu:code-reviewer SubagentHandback "$HANDBACK_REPORT"
+assert_case "scoped aspect reviewer may deliver its report through SubagentHandback" allow zensu:review-aspect SubagentHandback "$HANDBACK_REPORT"
+assert_case "scoped judge reviewer may deliver its report through SubagentHandback" allow zensu:review-judge SubagentHandback "$HANDBACK_REPORT"
+assert_case "bare reviewer fixture may deliver its report through SubagentHandback" allow code-reviewer SubagentHandback "$HANDBACK_REPORT"
+assert_case "bare reviewer keeps SubagentHandback when Claude omits correlation agent_id" allow no-id:review-aspect SubagentHandback "$HANDBACK_REPORT"
+assert_case "scoped PLM may deliver its report through SubagentHandback" allow zensu:zensu-plm SubagentHandback "$HANDBACK_REPORT"
+assert_case "bare PLM may deliver its report through SubagentHandback" allow zensu-plm SubagentHandback "$HANDBACK_REPORT"
+assert_case "reviewer report text is not policed for protected paths or patch markers" allow zensu:review-aspect SubagentHandback '{"message":"*** Update File: /etc/passwd\n.zensu/state/tdd-phase.json main-v1 session-control"}'
+assert_case "reviewer handback with an empty message is left to the host" allow zensu:code-reviewer SubagentHandback '{"message":""}'
+PAYLOAD_CWD="$VANISHED_CWD" assert_case "reviewer handback resolves no path, so a vanished cwd cannot block the report" allow zensu:code-reviewer SubagentHandback "$HANDBACK_REPORT"
+PAYLOAD_CWD="$VANISHED_CWD" assert_case "PLM handback resolves no path, so a vanished cwd cannot block the report" allow zensu:zensu-plm SubagentHandback "$HANDBACK_REPORT"
+PAYLOAD_CWD="$VANISHED_CWD" assert_case "reviewer Read still needs a usable cwd beside the handback" deny zensu:code-reviewer Read '{"file_path":"README.md"}'
+PAYLOAD_CWD="$VANISHED_CWD" assert_case "neutral child handback still passes cwd resolution and is denied with the rest" deny general-purpose SubagentHandback "$HANDBACK_REPORT"
+assert_case "reviewer handback with a recipient field is denied" deny zensu:code-reviewer SubagentHandback '{"message":"report","to":"main"}'
+assert_case "PLM handback with a path field is denied" deny zensu:zensu-plm SubagentHandback '{"message":"report","file_path":"notes.md"}'
+assert_case "reviewer handback without a message is denied" deny zensu:review-aspect SubagentHandback '{}'
+assert_case "reviewer handback with a structured message is denied" deny zensu:review-judge SubagentHandback '{"message":{"text":"report"}}'
+assert_case "reviewer handback with a list message is denied" deny zensu:review-judge SubagentHandback '{"message":["report"]}'
+assert_case "reviewer cannot invoke a case variant of SubagentHandback" deny zensu:code-reviewer subagenthandback "$HANDBACK_REPORT"
+assert_case "reviewer cannot invoke a padded SubagentHandback name" deny zensu:code-reviewer ' SubagentHandback' "$HANDBACK_REPORT"
+assert_case "reviewer cannot invoke an MCP tool named like SubagentHandback" deny zensu:code-reviewer mcp__evil__SubagentHandback "$HANDBACK_REPORT"
+assert_case "reviewer cannot message agents through SendMessage" deny zensu:review-aspect SendMessage '{"to":"main","message":"report"}'
+assert_case "PLM cannot message agents through SendMessage" deny zensu:zensu-plm SendMessage '{"to":"main","message":"report"}'
+assert_case "evidence worker stays on the bare read trio without SubagentHandback" deny zensu:pr-review-worker SubagentHandback "$HANDBACK_REPORT"
+assert_case "plan evidence worker stays on the bare read trio without SubagentHandback" deny zensu:plan-review-worker SubagentHandback "$HANDBACK_REPORT"
+assert_case "neutral child keeps SubagentHandback under host governance" allow general-purpose SubagentHandback "$HANDBACK_REPORT"
+
+HANDBACK_TAIL='only Read, Grep, and Glob are allowed, plus SubagentHandback to deliver the final report'
+REVIEWER_TOOL_REASON="$(deny_reason zensu:review-aspect Bash '{"command":"pwd"}')"
+case "$REVIEWER_TOOL_REASON" in
+  "reviewer-capability-v1 deny: reviewer-readonly-v1 cannot invoke Bash; $HANDBACK_TAIL")
+    check "reviewer deny names SubagentHandback as the report channel" PASS ;;
+  *)
+    check "reviewer deny must name SubagentHandback as the report channel (got: ${REVIEWER_TOOL_REASON:-<empty>})" FAIL ;;
+esac
+PLM_TOOL_REASON="$(deny_reason zensu:zensu-plm Write '{"file_path":"x"}')"
+case "$PLM_TOOL_REASON" in
+  "reviewer-capability-v1 deny: zensu-plm-readonly-v1 cannot invoke Write; $HANDBACK_TAIL")
+    check "PLM deny names SubagentHandback as the report channel" PASS ;;
+  *)
+    check "PLM deny must name SubagentHandback as the report channel (got: ${PLM_TOOL_REASON:-<empty>})" FAIL ;;
+esac
+HANDBACK_SHAPE_REASON="$(deny_reason zensu:code-reviewer SubagentHandback '{"message":"report","to":"main"}')"
+case "$HANDBACK_SHAPE_REASON" in
+  'reviewer-capability-v1 deny: reviewer-readonly-v1 may invoke SubagentHandback only with exactly one string field, message')
+    check "malformed handback deny names the one admitted input shape" PASS ;;
+  *)
+    check "malformed handback deny must name the admitted input shape (got: ${HANDBACK_SHAPE_REASON:-<empty>})" FAIL ;;
+esac
+WORKER_HANDBACK_REASON="$(deny_reason zensu:pr-review-worker SubagentHandback "$HANDBACK_REPORT")"
+case "$WORKER_HANDBACK_REASON" in
+  'reviewer-capability-v1 deny: evidence-worker-v1 cannot invoke SubagentHandback; only Read, Grep, and Glob are allowed')
+    check "evidence worker is denied SubagentHandback by its own lease policy" PASS ;;
+  *)
+    check "evidence worker must be denied SubagentHandback by its lease policy (got: ${WORKER_HANDBACK_REASON:-<empty>})" FAIL ;;
+esac
+REVIEWER_ROTATION=(zensu:code-reviewer zensu:review-aspect zensu:review-judge)
+HOST_NON_READ_TOOLS=(
+  Agent Task Bash BashOutput KillShell KillBash Monitor
+  Edit MultiEdit Write NotebookEdit NotebookRead
+  WebFetch WebSearch LSP ListMcpResourcesTool ReadMcpResourceTool ReadMcpResourceDirTool
+  TodoWrite TaskCreate TaskGet TaskList TaskUpdate TaskOutput TaskStop
+  Skill ToolSearch AskUserQuestion EnterPlanMode ExitPlanMode EnterWorktree ExitWorktree
+  SendMessage SendUserMessage ListAgents TeamCreate TeamDelete StructuredOutput
+  CronCreate CronDelete CronList ScheduleWakeup RemoteTrigger PushNotification
+  Artifact ArtifactCheck ArtifactComments ArtifactData SendUserFile ReportFindings DesignSync
+  ListPlugins ListSkills SearchPlugins SearchSkills SuggestSkills SuggestPluginInstall
+  Workflow Config Sleep REPL
+)
+SWEEP_INPUT='{"file_path":"src/probe.txt","path":"src","command":"pwd","prompt":"report","message":"report"}'
+SWEEP_INDEX=0
+for tool in "${HOST_NON_READ_TOOLS[@]}"; do
+  type="${REVIEWER_ROTATION[$((SWEEP_INDEX % ${#REVIEWER_ROTATION[@]}))]}"
+  SWEEP_INDEX=$((SWEEP_INDEX + 1))
+  reason="$(deny_reason "$type" "$tool" "$SWEEP_INPUT")"
+  if [ "$reason" = "reviewer-capability-v1 deny: reviewer-readonly-v1 cannot invoke $tool; $HANDBACK_TAIL" ]; then
+    check "reviewer-readonly-v1 ($type) is denied host tool $tool by the read allowlist" PASS
+  else
+    check "reviewer-readonly-v1 ($type) must be denied host tool $tool by the read allowlist (got: ${reason:-<empty>})" FAIL
+  fi
+done
 assert_case "neutral agent cannot access workflow root" deny arbitrary-custom Read '{"file_path":".zensu/state/tdd-phase.json"}'
 assert_case "neutral agent cannot access immutable Session Control record" deny arbitrary-custom Read "{\"file_path\":\"$SESSION_CONTEXT\"}"
 assert_case "neutral Grep cannot traverse the project root into workflow state" deny arbitrary-custom Grep '{"pattern":"phase","path":"."}'
@@ -354,6 +438,8 @@ MISSING="$(payload arbitrary-custom Read '{"file_path":"x"}' | GATE_TEST_MODE=mi
 
 TAMPERED="$(payload arbitrary-custom Read '{"file_path":"x"}' | GATE_TEST_MODE=tampered-digest decision)"
 [ "$TAMPERED" = deny ] && check "tampered inherited SubagentStart runtime digest denies the first tool" PASS || check "tampered inherited SubagentStart runtime digest denies the first tool" FAIL
+GATE_TEST_MODE=tampered-digest assert_case "tampered runtime digest denies a reviewer report handback" \
+  deny zensu:code-reviewer SubagentHandback "$HANDBACK_REPORT"
 
 WRONG_SESSION="$(PAYLOAD_SESSION_ID='different-session' payload arbitrary-custom Read '{"file_path":"x"}' | decision)"
 [ "$WRONG_SESSION" = deny ] && check "PreToolUse session_id mismatch denies before capability evaluation" PASS || check "PreToolUse session_id mismatch denies before capability evaluation" FAIL
@@ -481,6 +567,12 @@ GATE_TEST_MODE=missing-context assert_case \
   "unregistered session: an exact reviewer still fails closed" \
   deny zensu:code-reviewer Read '{"file_path":"README.md"}'
 GATE_TEST_MODE=missing-context assert_case \
+  "unregistered session: a reviewer report handback still fails closed" \
+  deny zensu:review-aspect SubagentHandback "$HANDBACK_REPORT"
+GATE_TEST_MODE=missing-context assert_case \
+  "unregistered session: a PLM report handback still fails closed" \
+  deny zensu:zensu-plm SubagentHandback "$HANDBACK_REPORT"
+GATE_TEST_MODE=missing-context assert_case \
   "unregistered session: a neutral child still fails closed" \
   deny general-purpose Read '{"file_path":"README.md"}'
 GATE_TEST_MODE=missing-context assert_case \
@@ -523,6 +615,126 @@ if node -e '
     || check "foreign-installation record (expected deny, got $FOREIGN_DECISION)" FAIL
 else
   check "foreign-installation fixture could not be minted" FAIL
+fi
+
+HANDBACK_LITERAL="$(sed -n "s/^const HOST_HANDBACK_TOOL = '\([A-Za-z]*\)';\$/\1/p" "$POLICY")"
+if [ "$HANDBACK_LITERAL" = SubagentHandback ]; then
+  check "the gate declares SubagentHandback as its one host report tool" PASS
+else
+  check "the gate must declare HOST_HANDBACK_TOOL as SubagentHandback (got: ${HANDBACK_LITERAL:-<none>})" FAIL
+fi
+READ_TRIO_LITERAL="$(sed -n "s/^const REVIEWER_READ_TOOLS = new Set(\[\(.*\)]);\$/\1/p" "$POLICY")"
+if [ "$READ_TRIO_LITERAL" = "'Read', 'Grep', 'Glob'" ]; then
+  check "the read-only allowlist is exactly Read, Grep and Glob" PASS
+else
+  check "the read-only allowlist must be exactly Read, Grep and Glob (got: ${READ_TRIO_LITERAL:-<none>})" FAIL
+fi
+HANDBACK_PROFILES_LITERAL="$(sed -n "s/^const HANDBACK_PROFILES = new Set(\[\(.*\)]);\$/\1/p" "$POLICY")"
+if [ "$HANDBACK_PROFILES_LITERAL" = "'reviewer-readonly-v1', 'zensu-plm-readonly-v1'" ]; then
+  check "only reviewer-readonly-v1 and zensu-plm-readonly-v1 may hand a report back" PASS
+else
+  check "only reviewer-readonly-v1 and zensu-plm-readonly-v1 may hand a report back (got: ${HANDBACK_PROFILES_LITERAL:-<none>})" FAIL
+fi
+for doc in docs/session-control.md docs/gates.md docs/configuration.md docs/review-chain.md; do
+  if [ -n "$HANDBACK_LITERAL" ] && grep -qF "$HANDBACK_LITERAL" "$PLUGIN/$doc"; then
+    check "$doc names the host report tool the gate admits" PASS
+  else
+    check "$doc must name the host report tool the gate admits (${HANDBACK_LITERAL:-<none>})" FAIL
+  fi
+done
+
+host_handback_verdicts() {
+  node -e '
+    const fs = require("node:fs");
+    const [literal, floor, ...candidates] = process.argv.slice(1);
+    const needle = Buffer.from(JSON.stringify(literal));
+    const marker = Buffer.from("// Version: ");
+    const parts = (value) => value.split(".").map(Number);
+    const older = (left, right) => {
+      const a = parts(left);
+      const b = parts(right);
+      for (let index = 0; index < 3; index += 1) {
+        if (a[index] !== b[index]) return a[index] < b[index];
+      }
+      return false;
+    };
+    const seenPaths = new Set();
+    const seenVersions = new Set();
+    for (const candidate of candidates) {
+      let real;
+      try { real = fs.realpathSync(candidate); } catch { continue; }
+      if (seenPaths.has(real)) continue;
+      seenPaths.add(real);
+      const stat = fs.statSync(real);
+      if (!stat.isFile() || stat.size < 5 * 1024 * 1024) {
+        console.log(`SKIP\t${candidate} resolves to a launcher, not a Claude Code host bundle`);
+        continue;
+      }
+      const bundle = fs.readFileSync(real);
+      const at = bundle.indexOf(marker);
+      const found = at < 0 ? null
+        : /^\d+\.\d+\.\d+/.exec(bundle.subarray(at + marker.length, at + marker.length + 24).toString("latin1"));
+      if (!found) {
+        console.log(`SKIP\t${candidate} carries no version marker, so its report tool is unverified`);
+        continue;
+      }
+      const version = found[0];
+      if (seenVersions.has(version)) continue;
+      seenVersions.add(version);
+      if (older(version, floor)) {
+        console.log(`SKIP\thost ${version} predates ${floor}, the oldest build measured to define ${literal}`);
+      } else if (bundle.indexOf(needle) >= 0) {
+        console.log(`PASS\thost ${version} still defines the ${literal} report tool the reviewer gate admits`);
+      } else {
+        console.log(`FAIL\thost ${version} no longer defines ${literal}: its subagent report tool was renamed or removed, so zensu reviewers deliver no report; re-measure the bundle and update HOST_HANDBACK_TOOL`);
+      }
+    }
+  ' "${HANDBACK_LITERAL:-SubagentHandback}" 2.1.269 "$@"
+}
+
+HOST_CONTROL="$TMP/host-control"
+mkdir -p "$HOST_CONTROL"
+node -e '
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const directory = process.argv[1];
+  const padding = Buffer.alloc(6 * 1024 * 1024, 0x20);
+  const bundle = (name, text) => fs.writeFileSync(path.join(directory, name), Buffer.concat([Buffer.from(text), padding]));
+  bundle("renamed", "// Version: 9.9.9\nvar IS=\"SubagentReport\";\n");
+  bundle("current", "// Version: 9.9.8\nvar IS=\"SubagentHandback\";\n");
+  bundle("predates", "// Version: 2.1.100\n");
+  fs.writeFileSync(path.join(directory, "launcher"), "#!/bin/sh\nexec node cli.js\n");
+' "$HOST_CONTROL"
+CONTROL_VERDICTS="$(host_handback_verdicts "$HOST_CONTROL/renamed" "$HOST_CONTROL/current" \
+  "$HOST_CONTROL/predates" "$HOST_CONTROL/launcher" | cut -f1 | tr '\n' ' ')"
+if [ "$CONTROL_VERDICTS" = "FAIL PASS SKIP SKIP " ]; then
+  check "host cross-check control: a renamed report tool fails, a current one passes, an older build and a launcher skip" PASS
+else
+  check "host cross-check control must fail a renamed report tool (got: ${CONTROL_VERDICTS:-<empty>})" FAIL
+fi
+
+HOST_CANDIDATES=()
+PATH_CLAUDE="$(command -v claude 2>/dev/null || true)"
+[ -n "$PATH_CLAUDE" ] && HOST_CANDIDATES+=("$PATH_CLAUDE")
+for bundle in "${HOME:-/nonexistent}"/Library/Application\ Support/Claude/claude-code/*/claude.app/Contents/MacOS/claude; do
+  [ -f "$bundle" ] && HOST_CANDIDATES+=("$bundle")
+done
+HOST_VERDICTS="$(host_handback_verdicts ${HOST_CANDIDATES[@]+"${HOST_CANDIDATES[@]}"})"
+HOST_STATUS=$?
+TAB="$(printf '\t')"
+if [ "$HOST_STATUS" -ne 0 ]; then
+  check "host report-tool cross-check ran to completion (node exited $HOST_STATUS)" FAIL
+elif [ -z "$HOST_VERDICTS" ]; then
+  printf '  SKIP  %s\n' "no Claude Code host bundle on this runner; SubagentHandback is unverified against a host here"
+else
+  while IFS="$TAB" read -r verdict label; do
+    case "$verdict" in
+      PASS|FAIL) check "$label" "$verdict" ;;
+      *) printf '  SKIP  %s\n' "$label" ;;
+    esac
+  done <<EOF
+$HOST_VERDICTS
+EOF
 fi
 
 printf '%s\n' "----" "test-reviewer-capability-gate: $PASS PASS / $FAIL FAIL"

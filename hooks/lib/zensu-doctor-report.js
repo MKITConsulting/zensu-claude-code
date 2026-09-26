@@ -43,6 +43,17 @@
 //                            falls back, 0 renders a switched-off disclosure
 //   ZDOC_RELEASE_OWNER_ACTIVITY_TTL_HOURS  the release's own owner-liveness window,
 //                            under the same rules
+//   ZDOC_DELIVERY_ROUTE      this session's resolved delivery route from the wrapper:
+//                            one of the five zensu_delivery_route_field spellings
+//                            (`tdd (session marker)`, `direct (session marker)`,
+//                            `tdd (hooks.defaultDeliveryRoute)`,
+//                            `direct (hooks.defaultDeliveryRoute)`, `ask`), or
+//                            `unknown` (no session key or project root reached the
+//                            probe: the session is unbound, or bound with the pair
+//                            withheld by the shape check) / `unjudged` (the shared
+//                            library is missing or answered outside its vocabulary,
+//                            or the recorded root could not be entered); blank
+//                            withholds the row
 //   ZDOC_NOW_MS              clock override for deterministic tests
 //   ZDOC_BINDING             the wrapper's binding verdict (bound / unbound /
 //                            orphaned-project-root / incompatible-runtime /
@@ -621,12 +632,18 @@ function ruleCarrierRows(cfgReads) {
   });
 }
 
+// A STRING-typed key whose own row judges its value is not a quoted boolean: for
+// hooks.defaultDeliveryRoute "false", "drop the quotes" would lead to boolean false,
+// which that key's own row rejects too, so the report would carry two remedies that
+// contradict each other. Its own row names the right one.
+var STRING_TYPED_KEYS = { 'hooks.defaultDeliveryRoute': true };
 function walkQuotedBooleans(obj, prefix, hits) {
   if (obj === null || typeof obj !== 'object') return;
   Object.keys(obj).forEach(function (k) {
     if (k === '__proto__' || k === 'constructor' || k === 'prototype') return;
     var v = obj[k];
     var dotted = prefix ? prefix + '.' + k : k;
+    if (Object.prototype.hasOwnProperty.call(STRING_TYPED_KEYS, dotted)) return;
     if (typeof v === 'string' && (v === 'true' || v === 'false')) {
       hits.push(dotted + ' = "' + v + '"');
     } else if (v && typeof v === 'object' && !Array.isArray(v)) {
@@ -1629,6 +1646,131 @@ function configBlock() {
   // cfgReads is gathered in this block. It reports on plugin DATA, so it reads as a
   // continuation of `hooks wiring` above.
   ruleCarrierRows(cfgReads);
+  deliveryRouteConfigRow(cfgReads);
+}
+
+// The two ask-hooks each exit on their own flag BEFORE they resolve the route, so a
+// route, configured or recorded, decides only the half whose reader is on. Both
+// delivery-route rows name a switched-off half in these words, and the SessionStart
+// banner carries the same three literals plus the message-preference literal of the
+// Config row; test-delivery-route.sh compares the two carriers.
+var ROUTE_PLAN_HALF_OFF = 'the plan-approval half is off: hooks.autoTdd=false';
+var ROUTE_PROMPT_HALF_OFF = 'the code-request half is off: hooks.tddReminder=false';
+var ROUTE_BOTH_READERS_OFF = 'both readers are off (hooks.autoTdd=false, hooks.tddReminder=false), and each hook exits on its own flag before the route is resolved';
+// The two reader flags as configBlock resolved them from its one cfgReads pass;
+// stateBlock's session row reads them here instead of opening the files again.
+var routeReaders = null;
+
+// hooks.defaultDeliveryRoute is a STRING key — the first under `hooks` — so the
+// quoted-boolean walk above cannot see its one trap: a value that is not one of the
+// three words the hooks accept. They read it PERMISSIVELY (anything else is `ask`), so
+// a misspelling silently keeps the question the user meant to switch off. Merge
+// semantics match hookFlagDisabled: the last file that carries the key wins. Absent
+// and `ask` render nothing — the question is the shipped default, not a finding.
+function deliveryRouteConfigRow(cfgReads) {
+  var value;
+  var seen = false;
+  routeReaders = {
+    planOff: hookFlagDisabled(cfgReads, 'autoTdd'),
+    promptOff: hookFlagDisabled(cfgReads, 'tddReminder'),
+  };
+  cfgReads.forEach(function (entry) {
+    var data = entry.r && entry.r.ok ? entry.r.data : null;
+    if (!data || typeof data !== 'object') return;
+    var hooks = data.hooks;
+    if (!hooks || typeof hooks !== 'object') return;
+    if (Object.prototype.hasOwnProperty.call(hooks, 'defaultDeliveryRoute')) {
+      value = hooks.defaultDeliveryRoute;
+      seen = true;
+    }
+  });
+  if (!seen || value === 'ask') return;
+  if (value === 'tdd' || value === 'direct') {
+    // The default reaches the plan-approval hook only while hooks.autoTdd is on and
+    // the per-prompt reminder only while hooks.tddReminder is on — each hook exits on
+    // its own flag BEFORE it resolves the route — so the row names the half that is
+    // live. Read through the same merged cfgReads, never a second readJson pass.
+    var effect = value === 'tdd' ? 'takes the Zensu workflow' : 'is implemented directly, without the review chain';
+    var planOff = routeReaders.planOff;
+    var promptOff = routeReaders.promptOff;
+    var subject = null;
+    if (!planOff && !promptOff) subject = 'an approved plan or a code request ' + effect;
+    else if (!planOff) subject = 'an approved plan ' + effect + ' (' + ROUTE_PROMPT_HALF_OFF + ')';
+    else if (!promptOff) subject = 'a code request ' + effect + ' (' + ROUTE_PLAN_HALF_OFF + ', so an approved plan is implemented directly)';
+    if (subject === null) {
+      line(WARN, 'config: hooks.defaultDeliveryRoute=' + value + ' is configured but decides nothing — ' + ROUTE_BOTH_READERS_OFF);
+      return;
+    }
+    line(OK, 'config: hooks.defaultDeliveryRoute=' + value + ' — the delivery-route question is skipped: ' + subject
+      + '; a preference stated in the user\'s own message decides only that request, and /zensu:delivery-route changes the route for this session');
+    return;
+  }
+  var shown = safeConfigValue(value, ' is not tdd');
+  line(WARN, 'config: hooks.defaultDeliveryRoute=' + (shown.ok ? shown.text : '(' + FOLD_UNAVAILABLE + ')')
+    + ' is not tdd, direct or ask — the hooks read it as ask, so the delivery-route question is asked; use one of those three lowercase words');
+}
+
+// A value from a session-writable or committed file reaches a model-relayed row. A
+// string renders as itself and anything else as its JSON spelling, so a quoted value
+// is never quoted twice; it is bounded to 40 characters with a visible `…` when cut,
+// then folded through foldSlot, the ONE display rule this file consumes. Returns the
+// slot shape `{ text, ok }` with BARE text: the call site supplies any parentheses,
+// and on a load fault it renders FOLD_UNAVAILABLE rather than re-authoring it.
+function safeConfigValue(value, followedBy) {
+  var text = typeof value === 'string' ? value : String(JSON.stringify(value));
+  if (text === '') return { text: '""', ok: true };
+  var cut = text.length > 40 ? '…' : '';
+  var slot = foldSlot(text.slice(0, 40), cut + (followedBy || ''));
+  return { text: slot.ok ? slot.text + cut : '', ok: slot.ok };
+}
+
+// The bound session's recorded delivery route, resolved by the wrapper through the
+// same zensu-config.sh ladder both ask-hooks use (ZDOC_DELIVERY_ROUTE). A route that
+// is fixed is ordinary, disclosed state, so it renders OK; what must never render
+// green is a session whose marker could not be looked for. The reader flags qualify
+// every sentence that says where the question is or is not asked, because each hook
+// exits on its own flag before it resolves the route.
+function deliveryRouteRow() {
+  var v = String(env.ZDOC_DELIVERY_ROUTE || '');
+  if (v === '') return;
+  var planOff = !!(routeReaders && routeReaders.planOff);
+  var promptOff = !!(routeReaders && routeReaders.promptOff);
+  var halfOff = '';
+  if (planOff && !promptOff) halfOff = ' (' + ROUTE_PLAN_HALF_OFF + ')';
+  else if (promptOff && !planOff) halfOff = ' (' + ROUTE_PROMPT_HALF_OFF + ')';
+  if (v === 'unknown') {
+    // The tail names the cause the binding verdict gives. `unknown` prints no binding
+    // row at all, and a `bound` verdict whose key/root pair failed the wrapper's shape
+    // check prints the valid-record row, so pointing at "the binding row above" is
+    // right only for the other verdicts.
+    var binding = String(env.ZDOC_BINDING || '');
+    var cause = 'read the binding row above';
+    if (binding === '' || binding === 'unknown') {
+      cause = 'this report ran without CLAUDE_CODE_SESSION_ID or CLAUDE_PLUGIN_DATA, so no session could be bound; run /zensu:doctor inside the session to check it';
+    } else if (binding === 'bound') {
+      cause = 'the session is bound, but its recorded session key or project root failed the report\'s shape check and was withheld';
+    }
+    line(WARN, 'delivery route: not checked — no bound session key or recorded project root was available, so this session\'s /zensu:delivery-route marker was never looked for; a missing check rather than an all-clear — ' + cause);
+  } else if (v === 'unjudged') {
+    line(WARN, 'delivery route: could not be read — the shared config library did not answer for this session, or its recorded project root could not be entered; a missing check rather than an all-clear. Run /zensu:delivery-route --status from the session to see what the hooks resolve');
+  } else if (planOff && promptOff && (v === 'ask' || /^(tdd|direct) \((session marker|hooks\.defaultDeliveryRoute)\)$/.test(v))) {
+    line(OK, 'delivery route: ' + v + ' — decides nothing this session: ' + ROUTE_BOTH_READERS_OFF);
+  } else if (v === 'ask') {
+    var where = planOff ? 'on a code request' : (promptOff ? 'after a plan approval' : 'after a plan approval and on a code request');
+    line(OK, 'delivery route: ask — the route question is asked ' + where + halfOff
+      + '; /zensu:delivery-route fixes it for this session, hooks.defaultDeliveryRoute for the project');
+  } else if (/^(tdd|direct) \((session marker|hooks\.defaultDeliveryRoute)\)$/.test(v)) {
+    var dispatch = '; code changes go through /zensu:tdd';
+    if (v.indexOf('direct') === 0) dispatch = '; code changes are implemented directly, without the review chain';
+    else if (planOff) dispatch = '; a code request goes through /zensu:tdd, while an approved plan is implemented directly';
+    else if (promptOff) dispatch = '; an approved plan goes through /zensu:tdd';
+    line(OK, 'delivery route: ' + v + ' — the route question is not asked this session' + halfOff
+      + dispatch + '. Change it with /zensu:delivery-route (--tdd, --direct, --auto)');
+  } else {
+    var shown = safeConfigValue(v, ') — the');
+    line(WARN, 'delivery route: state not recognized (' + (shown.ok ? shown.text : FOLD_UNAVAILABLE)
+      + ') — the wrapper reported a state this report has no row for; a missing check rather than an all-clear');
+  }
 }
 
 // ONE reader for every bounded `ZDOC_*` integer, because the rule below is what its
@@ -1671,6 +1813,207 @@ function ttlHours() {
 // stayed green with the live resolution rewritten onto the pending-review pair.
 function implStopThreshold() {
   return boundedEnvInt('ZDOC_IMPL_STOP_NUDGE_AFTER', IMPL_STOP_NUDGE_FALLBACK, IMPL_STOP_NUDGE_MAX);
+}
+
+function worktreeKeepRows(nowMs, ownKey, projectRoot) {
+  var mod;
+  var underContainer = (path.sep + projectRoot + path.sep).indexOf(path.sep + '.claude' + path.sep + 'worktrees' + path.sep) !== -1;
+  try {
+    mod = require(path.join(pluginDir(), 'hooks', 'lib', 'worktree-keep-v1.js'));
+  } catch (e) {
+    if (!underContainer) {
+      line(OK, 'worktree: not under a .claude/worktrees container — ' + foldPath(projectRoot, ' needs no keep marker') + ' needs no keep marker');
+      return;
+    }
+    line(WARN, 'worktree: keep check NOT performed — hooks/lib/worktree-keep-v1.js could not be loaded ('
+      + worktreeFaultText(e) + ')');
+    return;
+  }
+  var managed = null;
+  try {
+    managed = mod.managedWorktree(projectRoot);
+  } catch (e) {
+    if (underContainer) {
+      line(WARN, 'worktree: keep check NOT performed for ' + foldPath(projectRoot, ' (') + ' (' + worktreeFaultText(e) + ')');
+      return;
+    }
+    managed = null;
+  }
+  if (!managed) {
+    line(OK, 'worktree: not an app-managed worktree — ' + foldPath(projectRoot, ' needs no keep marker') + ' needs no keep marker');
+    return;
+  }
+  var root = managed.worktreeRoot;
+  if (env.ZDOC_WORKTREE_KEEP === 'off') {
+    var offMarker = null;
+    try {
+      offMarker = mod.markerState(root);
+    } catch (e) {
+      offMarker = null;
+    }
+    if (offMarker && offMarker.state === mod.MARKER_STATES.OURS) {
+      var hold;
+      try {
+        hold = mod.listAnchors(root, nowMs, mod.idleMsFromHours(env.ZDOC_WORKTREE_KEEP_IDLE_HOURS));
+      } catch (e) {
+        hold = { ok: false, reason: worktreeFaultText(e) };
+      }
+      var stranded = 'worktree: keep marker still present although hooks.worktreeKeep=false — ' + foldPath(offMarker.file, ' keeps')
+        + ' keeps this directory out of the desktop pool';
+      if (!hold.ok) {
+        var offDrain = hold.reapable ? hold.reapable.length : 0;
+        line(WARN, stranded + '; the anchor directory could not be read (' + hold.reason + '), so '
+          + (offDrain > 0
+            ? 'the next SessionStart or SessionEnd in it reaps the ' + offDrain
+              + ' expired anchor(s) it read and releases the marker once the directory is back under the bound and nothing else holds it'
+            : 'the release pass leaves the marker as it stands'));
+      } else if (hold.live.length) {
+        line(WARN, stranded + ' while ' + hold.live.length + ' live session anchor(s) hold it; the next SessionStart or SessionEnd in it after they end releases the marker');
+      } else if (hold.rejected.length) {
+        line(WARN, stranded + ' while anchor file(s) this build cannot validate sit beside it ('
+          + hold.rejected.map(function (r) { return r.name; }).join(', ')
+          + '); remove one by hand only after confirming no session on another plugin version is live there, '
+          + 'then the next SessionStart or SessionEnd in it releases the marker');
+      } else {
+        line(WARN, stranded + ' until the next SessionStart or SessionEnd in it releases the marker');
+      }
+    } else if (offMarker && offMarker.state === mod.MARKER_STATES.FOREIGN) {
+      line(OK, 'worktree: keep marker in ' + foldPath(root, ' was not written by this plugin')
+        + ' was not written by this plugin — left alone, the desktop pool still honours it');
+    } else {
+      line(OK, 'worktree: keep marker switched off (hooks.worktreeKeep=false) — the desktop pool may reuse or reap '
+        + foldPath(root, ' while a session is live here') + ' while a session is live here');
+    }
+    return;
+  }
+  // Every module call below reads a session-writable directory, so one errno the module
+  // re-throws would otherwise propagate out of stateBlock and discard the WHOLE report,
+  // which is accumulated and written once. The cost of a fault here is this row family.
+  try {
+    var idleMs = mod.idleMsFromHours(env.ZDOC_WORKTREE_KEEP_IDLE_HOURS);
+    var anchors = mod.listAnchors(root, nowMs, idleMs);
+    var marker = mod.markerState(root);
+    // listAnchors answers ok:false with EMPTY lists, so reading live.length as a count
+    // would render a green row with 0 over a directory the check never read.
+    var readable = anchors.ok !== false;
+    if (!readable) {
+      var drain = anchors.reapable ? anchors.reapable.length : 0;
+      line(WARN, 'worktree: anchors in ' + foldPath(root, ' could not be read') + ' could not be read ('
+        + anchors.reason + ') — that is a missing check, not an all-clear, and '
+        + (drain > 0
+          ? 'the next prompt reaps the ' + drain + ' expired anchor(s) it read and judges the keep marker again once the directory is back under its bound'
+          : 'the keep marker is left as it stands'));
+    }
+    if (marker.state === mod.MARKER_STATES.REFUSED) {
+      line(WARN, 'worktree: keep marker refused — ' + foldPath(marker.file, ' is not a plain file')
+        + ' is not a plain file; the plugin neither creates nor removes it, inspect it by hand');
+    } else if (marker.state === mod.MARKER_STATES.FOREIGN) {
+      line(OK, 'worktree: keep marker in ' + foldPath(root, ' was not written by this plugin')
+        + ' was not written by this plugin — left alone, the desktop pool still honours it');
+    } else if (marker.state === mod.MARKER_STATES.OURS && readable) {
+      line(OK, 'worktree: keep marker present in ' + foldPath(root, ' (') + ' (' + anchors.live.length + ' live session anchor(s))');
+    } else if (marker.state === mod.MARKER_STATES.OURS) {
+      line(OK, 'worktree: keep marker present in ' + foldPath(root, ' — ') + ' — how many session anchors are live could not be read');
+    }
+    if (ownKey !== '') {
+      var own = mod.anchorVerdict(root, ownKey, nowMs, idleMs);
+      if (own.verdict === mod.VERDICTS.MISSING) {
+        line(WARN, 'worktree: this session has no anchor in ' + foldPath(root, ' yet')
+          + ' yet — the next prompt writes one and adopts the branch checked out then as its baseline without verification, so a takeover before that point cannot be ruled out');
+      } else if (own.verdict === mod.VERDICTS.REJECTED) {
+        var remedy = mod.anchorRemedy(root, ownKey);
+        var unvalidated = 'worktree: this build cannot validate this session\'s anchor in ' + foldPath(root, ' (')
+          + ' (' + own.reason + ') — ';
+        if (remedy === mod.ANCHOR_REMEDIES.REPLACED) {
+          line(WARN, unvalidated + 'the next prompt replaces it with this session\'s own record');
+        } else if (remedy === mod.ANCHOR_REMEDIES.REMOVE_BY_HAND) {
+          line(WARN, unvalidated + 'the plugin never replaces a symlink, a hard link or a non-file there; remove it by hand, then the next prompt rewrites it');
+        } else if (remedy === mod.ANCHOR_REMEDIES.STATE_COMPONENT) {
+          line(WARN, unvalidated + 'a component of ' + mod.STATE_SEGMENTS.join('/')
+            + ' on its path is a symlink or not a directory, so the plugin neither reads nor writes anchors there; fix that component by hand');
+        } else {
+          line(WARN, unvalidated + 'this report cannot say whether the next prompt can replace it; inspect it by hand');
+        }
+      } else {
+        if (own.verdict === mod.VERDICTS.STALE) {
+          line(WARN, 'worktree: this session\'s anchor in ' + foldPath(root, ' is stale')
+            + ' is stale — it no longer holds the keep marker, so the desktop pool may reuse or reap the directory until the next prompt refreshes it');
+        }
+        if (marker.state === mod.MARKER_STATES.ABSENT && own.verdict === mod.VERDICTS.LIVE) {
+          var ignore = mod.markerIgnoreState(root);
+          var missing = 'worktree: keep marker MISSING in ' + foldPath(root, ' while this session')
+            + ' while this session\'s anchor is live — the desktop pool may reuse or reap it';
+          var refusal = missing + ', and the plugin does not create the marker there: ';
+          if (ignore.state === mod.IGNORE_STATES.NOT_IGNORED) {
+            line(WARN, refusal + 'git does not ignore ' + mod.KEEP_FILENAME
+              + ' although info/exclude lists it, so an ignore rule such as !' + mod.KEEP_FILENAME + ' re-includes it');
+          } else if (ignore.state === mod.IGNORE_STATES.EXCLUDE_REFUSED) {
+            line(WARN, refusal + 'it cannot add the marker to info/exclude (' + ignore.reason + ')');
+          } else if (ignore.state !== mod.IGNORE_STATES.IGNORED && ignore.state !== mod.IGNORE_STATES.NOT_YET_EXCLUDED) {
+            line(WARN, refusal + 'git could not say whether it ignores ' + mod.KEEP_FILENAME);
+          } else if (!readable) {
+            line(WARN, missing + '; the plugin restores it only once the anchor directory can be read');
+          } else {
+            line(WARN, missing + '; the next prompt restores the marker');
+          }
+        }
+        var states = mod.BRANCH_STATES;
+        var verdict = mod.branchState(root, own.record, mod.currentBranch(root));
+        var recorded = own.record.drift;
+        if (!mod.anchorMatchesRoot(own.record, root)) {
+          line(WARN, 'worktree: this session\'s anchor in ' + foldPath(root, ' names another worktree')
+            + ' names another worktree — the next prompt replaces it with this session\'s own record and adopts the branch checked out then '
+            + 'as its baseline without verification, so a takeover before that point cannot be ruled out');
+        } else if (verdict.state === states.UNRESOLVED_PAUSED) {
+          line(WARN, 'worktree: this session\'s anchor in ' + foldPath(root, ' recorded no branch')
+            + ' recorded no branch — a ' + verdict.paused + ' paused there holds a detached HEAD; the next prompt records the branch it returns to, '
+            + 'or the branch checked out once it finishes when git\'s record of that branch cannot be read');
+        } else if (verdict.state === states.UNRESOLVED) {
+          line(WARN, 'worktree: this session\'s anchor in ' + foldPath(root, ' recorded no branch')
+            + ' recorded no branch — the branch read failed when the session started; the next prompt records the current one');
+        } else if (verdict.state === states.UNRESOLVED_UNREADABLE) {
+          line(WARN, 'worktree: this session\'s anchor in ' + foldPath(root, ' recorded no branch')
+            + ' recorded no branch — the branch read failed when the session started and still fails, so a takeover could not be ruled out; '
+            + 'the next prompt records the branch once git can answer');
+        } else if (verdict.state === states.DRIFT_HELD) {
+          line(WARN, 'worktree: branch drift — this session\'s anchor recorded a move of '
+            + mod.recordedMoveSentence(foldPath(root, ' from '), recorded, verdict)
+            + '; another session may have taken the directory. '
+            + mod.remedyLines({ from: recorded.from }).join(' '));
+        } else if (verdict.state === states.PAUSED) {
+          line(OK, 'worktree: a paused ' + verdict.paused + ' holds a detached HEAD in ' + foldPath(root, ' — ')
+            + ' — the branch check waits until it finishes');
+        } else if (verdict.state === states.DRIFT) {
+          line(WARN, 'worktree: branch drift — ' + mod.driftSentence(foldPath(root, ' is now on '), verdict.drift)
+            + '; another session may have taken the directory. '
+            + mod.remedyLines({ from: verdict.drift.from }).join(' '));
+        } else if (verdict.state === states.ON_BASELINE) {
+          line(OK, 'worktree: this session still sits on its recorded ' + mod.branchNoun(own.record.branch)
+            + ' in ' + foldPath(root, ''));
+        } else {
+          line(WARN, 'worktree: current branch unreadable in ' + foldPath(root, ', so a takeover could not be ruled out')
+            + ', so a takeover could not be ruled out');
+        }
+      }
+    } else if (marker.state === mod.MARKER_STATES.ABSENT) {
+      line(OK, 'worktree: no keep marker in ' + foldPath(root, ' and this session is not bound')
+        + ' and this session is not bound, so its own anchor was not judged');
+    }
+    var others = anchors.rejected.filter(function (r) { return r.key !== ownKey; });
+    if (others.length) {
+      line(WARN, 'worktree: anchor file(s) this build cannot validate in ' + foldPath(root, ' — ')
+        + ' — ' + others.map(function (r) { return r.name; }).join(', ')
+        + '; such a file is usually the live anchor of a session on another plugin version and holds the keep marker'
+        + ' — remove one by hand only after confirming no such session is live there');
+    }
+  } catch (e) {
+    line(WARN, 'worktree: keep check NOT performed for ' + foldPath(root, ' (') + ' (' + worktreeFaultText(e) + ')');
+  }
+}
+
+function worktreeFaultText(e) {
+  var kind = e && e.code ? String(e.code) : e && typeof e.name === 'string' && e.name !== '' ? e.name : 'error';
+  return foldPath(kind, ')');
 }
 // The shapes that carry no work forward. Taken from chain-recovery-v1.js, which
 // OWNS the vocabulary and mints these literals a few lines from where it lists
@@ -4357,6 +4700,10 @@ function claimTopologyRow(projectRoot, ownKey) {
 function stateBlock(nowMs) {
   block('Session state');
   bindingLine();
+  // Rendered ABOVE the state-directory read on purpose: the route is resolved from
+  // the marker AND the config key, so a project with no `.zensu/state` yet still has
+  // an answer (config or `ask`), and the ENOENT return below must not swallow it.
+  deliveryRouteRow();
   var projectRoot = stateProjectRoot();
   var dir = path.join(projectRoot, '.zensu', 'state');
   // ONE renderer for the own-document verdict, called from BOTH the ENOENT branch
@@ -4490,6 +4837,7 @@ function stateBlock(nowMs) {
     if (e && e.code === 'ENOENT') {
       line(OK, 'state: ' + foldPath(dir, ' does not exist yet') + ' does not exist yet — nothing to clean');
       ownDocumentVerdict(false);
+      worktreeKeepRows(nowMs, currentSessionKey(), projectRoot);
     } else {
       // Every other errno is a check that did NOT run. Rendering it green hid the
       // whole Session state block behind an all-clear, which is the one verdict
@@ -4564,6 +4912,7 @@ function stateBlock(nowMs) {
   // the hold in exactly the fresh session most likely to walk into it.
   autopilotRows(entries, dir, nowMs, currentSessionKey(), projectRoot);
   claimTopologyRow(projectRoot, currentSessionKey());
+  worktreeKeepRows(nowMs, currentSessionKey(), projectRoot);
   var pr = path.join(dir, 'pending-review.json');
   try {
     var st = fs.statSync(pr);

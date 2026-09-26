@@ -96,12 +96,37 @@ readable one and a guard for the unreadable case would be dead code. **The row s
   when Claude reports `agent_type` directly on `SessionStart` for a top-level
   `claude --agent` session; only a host payload with neither agent field is the
   interactive `main-v1` principal. The PLM and
-  reviewers are nevertheless restricted to `Read`/`Grep`/`Glob`; ordinary
+  reviewers are nevertheless restricted to `Read`/`Grep`/`Glob` plus the host
+  report tool in the next item; ordinary
   host-profile children keep non-command tools granted by Claude and their
   agent definitions, but every shell/command tool is denied because command
   text cannot be safely confined by token inspection. Only the top-level
   interactive thread receives `main-v1`; there
   is no transcript scan, PPID key, newest-file selection, or fallback identity.
+- **`SubagentHandback` is the one host tool beside the read trio.** In `auto`
+  permission mode Claude Code (read out of the 2.1.281 bundle) appends a
+  `SubagentHandback` tool to a subagent's tools AFTER its `tools:` frontmatter is
+  applied, tells the agent to call `SubagentHandback({message})` as its last tool
+  call, and delivers only that `message` to the caller. A final plain-text answer
+  is dropped, and the parent reads "ended without delivering a report through
+  SubagentHandback". The capability gate therefore admits exactly that tool name
+  for `reviewer-readonly-v1` and `zensu-plm-readonly-v1`, and only with an input
+  of exactly one string field, `message`; any other field denies. The host
+  delivers the text to the caller alone, framed as untrusted agent output and
+  reviewed by the auto-mode classifier, so the gate does not police the content
+  — a report may quote a protected path — and applies no path rule to it. For
+  the same reason it is decided before the working directory is resolved, so a
+  reviewer whose `cwd` vanished can still report that. `SendMessage`, case
+  variants and look-alike MCP names stay denied. The agents' `tools:` lines stay
+  exactly `Read, Grep, Glob`: the host injects the tool, and the reviewer-spawn
+  grant admits only agents whose `tools:` line is that exact trio. The two
+  evidence workers do NOT receive it: `review-evidence-lease-v1.js` reads their
+  result from `SubagentStop`'s `last_assistant_message`, which a worker that
+  handed its JSON back would leave without the JSON, so they keep the bare trio,
+  are denied the handback, and end with the JSON as their final message.
+  `tests/structure/test-reviewer-capability-gate.sh` pins these verdicts and
+  cross-checks the name against every Claude Code host bundle it finds on the
+  machine; a host that renames or drops the tool fails that check.
 
 **Security boundary.** Session Control protects host-tool and subagent workflow
 decisions against cross-session confusion, protected-path access, and concurrent

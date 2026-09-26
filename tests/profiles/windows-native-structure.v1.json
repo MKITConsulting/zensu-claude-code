@@ -47,6 +47,10 @@
       "reason": "The only native-Windows branch passes T30 when Git Bash cannot create a real file symlink, so it asserts nothing there; the weekly Windows Safety run covers the suite."
     },
     {
+      "path": "tests/structure/test-delivery-route.sh",
+      "reason": "The only native-Windows marker is R9h's MSYS2_ENV_CONV_EXCL probe of the directive library's exclusion list through a POSIX node shim; it asserts no Windows behavior, and the suite stays in ciStructureTests, so the weekly Windows Safety run still executes it."
+    },
+    {
       "path": "tests/structure/test-doctor.sh",
       "reason": "The only native-Windows branch skips P1pw4, the POSIX-only isolated-PATH assertion that the wrapper reports playwright-cli absent."
     },

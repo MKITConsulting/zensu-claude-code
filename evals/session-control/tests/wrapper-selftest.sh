@@ -605,7 +605,7 @@ ZENSU_SESSION_KEY=must-not-leak"
         request.on("error", () => process.exit(1));
       ' "$SELFTEST_MUTATING_CONTROL_CANARY_URL"
     fi
-    denial_reason="reviewer-capability-v1 deny: reviewer-readonly-v1 cannot invoke $(printf '%s' "$attack" | jq -br .name); only Read, Grep, and Glob are allowed"
+    denial_reason="reviewer-capability-v1 deny: reviewer-readonly-v1 cannot invoke $(printf '%s' "$attack" | jq -br .name); only Read, Grep, and Glob are allowed, plus SubagentHandback to deliver the final report"
     [ "${STUB_GENERIC_ATTACK_ERROR:-0}" != '1' ] || denial_reason='generic downstream tool failure'
     jq -cn --argjson denied "$attack_error" --arg content "$denial_reason" \
       '{type:"user",parent_tool_use_id:"agent-1",message:{content:[{type:"tool_result",tool_use_id:"attack-1",is_error:$denied,content:$content}]}}'

@@ -248,7 +248,7 @@ append the remap note to the comment body, and drop any suggestion block,
 carries its full explanation in the overall body. The payload may only carry
 validated anchors — this eliminates the 422 line-out-of-diff round-trip.
 
-**Pre-publish preview:** ALWAYS produce the final overall body + inline count before posting. In standalone mode, show that exact final preview and wait for an explicit publication approval; approval to run the skill or approve the cast is not publication approval. In delegated mode, emit the preview as a progress record and continue unattended through the operation-bound reconciliation/publish flow without asking a question.
+**Pre-publish preview:** ALWAYS produce the final overall body + inline count before posting and emit it as a progress record, never as a question. Neither mode waits for a publication approval: in standalone mode, invoking the skill on a PR is the user's authorization to post the synthesized review, so the `--post-review` call follows the preview directly; in delegated mode, the run continues unattended through the operation-bound reconciliation/publish flow.
 
 ## Phase E — Cleanup
 

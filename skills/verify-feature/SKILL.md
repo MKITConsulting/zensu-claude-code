@@ -139,7 +139,9 @@ proven safe stops with PARTIAL.
 
 The browser is `playwright-cli`, and the browser consent gate — the hook pair
 `pre-browser-navigation-consent.sh` / `post-browser-navigation-consent.sh` on the Bash matcher —
-judges every `playwright-cli` call on a `zensu-verify-*` session before it runs. It denies every
+judges a `playwright-cli` call on a `zensu-verify-*` session before it runs. It is a textual gate: it
+judges the calls whose command text names the CLI and that session, which is one more reason every
+call spells both literally. It denies every
 command outside the set in `rules/browser-verification.md`, every flag outside that command's
 own list, every call from a subagent, every call whose session or arguments are not
 literal, and every command that is not exactly one plain `playwright-cli` call. `open` must carry the run config that `scripts/verify-browser-config.js` wrote, and the
@@ -319,8 +321,9 @@ Pass one `--origin` per origin the matrix needs — the application origin and, 
 differs, the validated authentication origin — and nothing else. The helper prints
 `session=zensu-verify-<id>`, `config=<absolute path>`, `mode=consent|policy`, and one `origin=`
 line per origin, or exits `1` with a named reason and writes nothing. It refuses unless
-`hooks/hooks.json` demonstrably registers both consent hooks on a matcher that covers Bash and
-the installed `playwright-cli` manifest names the measured version; then report PARTIAL with its
+`hooks/hooks.json` demonstrably registers both consent hooks on a matcher that covers Bash, the
+installed `playwright-cli` manifest names the measured version, and no empty or relative PATH
+entry comes before or holds `playwright-cli`; then report PARTIAL with its
 reason, and never open a browser without the run config it writes. Copy the printed session
 name and config path LITERALLY into every later call. Never rebuild them, never hold them in a
 shell variable, and never set `PLAYWRIGHT_CLI_SESSION`: the gate denies a session or argument it
@@ -339,9 +342,9 @@ The gate denies every other shape. Name the same session on every call:
 `playwright-cli -s=<session> <command> ...`, and quote an argument that carries `?`, `*`, `[`
 or `{`, or that starts with `~` or `=`, because the gate reads an unquoted one as a shell
 pattern it cannot judge. Single-quote an argument that carries `$`: double quotes do not help,
-because the gate reads every `$` outside single quotes that whitespace or the end of the command
-does not follow as an expansion it cannot judge, so a `fill` or `type` value such as `"$12"` is
-denied and `'$12'` is not. A denial that objects only to how a call is spelled is answered once,
+because the gate reads a `$` outside single quotes as an expansion it cannot judge unless
+whitespace, the end of the command or a closing double quote follows it, so a `fill` or `type`
+value such as `"$12"` is denied and `'$12'` is not. A denial that objects only to how a call is spelled is answered once,
 as `rules/browser-verification.md` section 0 describes; every other denial is final.
 
 ### Authentication (both modes)

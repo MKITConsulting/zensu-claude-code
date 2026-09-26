@@ -22,7 +22,12 @@ tool call, recognizes Claude Code's plugin-scoped `zensu:code-reviewer`,
 `zensu:review-aspect`, `zensu:review-judge`, `zensu:plan-review-worker`, and
 `zensu:pr-review-worker` identities (plus exact bare
 `--agents` fixtures), then repeats the exact three-tool reviewer allowlist. The
-plugin-scoped `zensu:zensu-plm` receives the same strict allowlist. Every other
+plugin-scoped `zensu:zensu-plm` receives the same strict allowlist. The three
+reviewers and the PLM may additionally call the host's `SubagentHandback` report
+tool, with exactly one string `message` field, because Claude Code in `auto`
+mode delivers a subagent's report only through that call; the two workers do
+not, since their result is read from `SubagentStop` (see
+[Session Control](session-control.md)). Every other
 neutral `host-profile-v1` child may retain ordinary non-command host tools, but
 cannot invoke `Bash`, `shell`, `exec`, `exec_command`, `terminal`, or `command`.
 

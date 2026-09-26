@@ -2,6 +2,9 @@
 paths:
   - "hooks/lib/verify-consent-v1.js"
   - "hooks/lib/verify-navigation-floor-v1.js"
+  - "hooks/lib/hook-registration-v1.js"
+  - "hooks/lib/playwright-cli-version-v1.js"
+  - "hooks/lib/zensu-browser-consent-prefilter.sh"
   - "hooks/pre-browser-navigation-consent.sh"
   - "hooks/post-browser-navigation-consent.sh"
   - "scripts/verify-browser-config.js"
@@ -10,10 +13,16 @@ paths:
   - "hooks/lib/zensu-doctor.sh"
   - "hooks/lib/zensu-doctor-report.js"
   - "tests/structure/test-verify-consent.sh"
+  - "tests/structure/test-verify-feature-skill.sh"
   - "tests/structure/verify-consent-v1.test.js"
   - "tests/structure/verify-navigation-floor-v1.test.js"
+  - "tests/structure/verify-browser-config.test.js"
+  - "tests/structure/playwright-cli-version-v1.test.js"
   - "tests/structure/fixtures/playwright-cli-argv.v1.json"
   - "tests/structure/fixtures/record-playwright-cli-argv.js"
+  - "docs/verify-feature.md"
+  - "docs/verify-feature-consent-spec.md"
+  - "evals/verify-feature/**"
 ---
 
 # Browser Consent Gate (`hooks/lib/verify-consent-v1.js` + the two consent hooks)
@@ -42,18 +51,36 @@ and the skill's instruction to use only the printed session is prose, not a boun
 
 **The order of judgement is the contract.**
 
-1. **Prefilter, in BOTH wrappers, before `node` starts:** the payload is normalized by ONE
-   `LC_ALL=C sed` pass that first pairs every JSON-escaped backslash — so an escaped backslash
-   before `n` is never read as a line break — and then joins a JSON-encoded backslash-newline or
-   backslash-CR-LF line continuation, and ONE `LC_ALL=C tr -d` pass that removes every quote,
-   backslash and pairing sentinel, then matched case-insensitively.
+1. **Prefilter, in ONE sourced library, before `node` starts:** both wrappers source
+   `hooks/lib/zensu-browser-consent-prefilter.sh` and call its `zensu_browser_consent_marked`. It
+   normalizes the payload with ONE `LC_ALL=C sed` pass that first pairs every JSON-escaped
+   backslash — so an escaped backslash before `n` is never read as a line break — and then joins
+   a JSON-encoded backslash-newline or backslash-CR-LF line continuation, and ONE `LC_ALL=C tr -d`
+   pass that removes every quote, backslash and pairing sentinel, then matches case-insensitively.
    It must name `playwright-cli` or `@playwright/cli` AND a `zensu-verify-` session — or name the
    CLI while the hook environment's `PLAYWRIGHT_CLI_SESSION` names one. The third `case` arm, the
    JSON-escaped `\/` spelling, only matters on the fallback to the raw payload when either pass fails.
    Every other Bash call exits 0 with no output — which is what keeps the pair off the hot path of
    every Bash call and out of every bind-failure state for unrelated commands. It is also why the
    node-unavailable, module-absent-or-symlinked and module-failure arms act on marked payloads
-   only. In the PRE wrapper alone, and on a POSIX host with `node` — the recognizer refuses on
+   only. **When the library cannot be sourced**, or sourcing it defines no
+   `zensu_browser_consent_marked`, each wrapper falls back to its own test: one `LC_ALL=C sed`
+   pass drops the JSON escapes `\n`, `\r` and `\t` WITHOUT first pairing escaped backslashes, one
+   `LC_ALL=C tr -d` pass removes quotes and backslashes, and EITHER marker alone — `playwright` or
+   `zensu-verify`, in any letter case, in that text or in the raw payload — counts as marked. That
+   text is the whole hook payload, not only the command, so a working directory that names either
+   marker marks every Bash call of that project. The pre hook then
+   denies `prefilter library unavailable` after the plugin-root check and the `zensu_doctor_allowed`
+   exemption, before the `node` check; the recorder skips with the same cause; every call whose
+   payload names neither marker still exits 0 silently. A missing library therefore costs false
+   denials of unrelated calls whose payload names either marker — in such a project every Bash
+   call except the recognized `/zensu:doctor` and adoption commands — AND it lets a gated call
+   through unjudged when a backslash before `n`, `r` or `t` splits each marker the test reads:
+   `playw\right-cli -s=ze\nsu-verify-x` reaches the scan as `playwight-cli -s=zesu-verify-x`, while
+   bash runs `playwright-cli -s=zensu-verify-x`; under the environment arm, splitting
+   `playwright-cli` alone suffices, because the fallback never reads `PLAYWRIGHT_CLI_SESSION`. The
+   library pairs escaped backslashes first and is not affected (see Known gaps).
+   `H17g`–`H17g4`, `V56-control` and `V62-control` pin the fallback. In the PRE wrapper alone, and on a POSIX host with `node` — the recognizer refuses on
    win32 — the recognized `/zensu:doctor` and adoption commands exit 0 through
    `zensu_doctor_allowed` right after the plugin-root check, even when a path in them names both
    markers. **Why `tr` and not bash:** pure-bash stripping (`${INPUT//[...]/}`) is quadratic on bash
@@ -64,16 +91,31 @@ and the skill's instruction to use only the printed session is prose, not a boun
 2. **Command analysis** through the module's own shell lexer (`lexShell`/`analyzeCommand`). Any
    `zensu-verify` session call it cannot judge denies with a named reason: a heredoc, here-string,
    parse fault, or `-c`/`eval` or subshell body beyond `MAX_NEST`; indirection through `xargs`,
-   `bash -c`, a command string handed to another program, or any other word that names the CLI
-   outside command position; a function named `playwright-cli` (matched case-insensitively and
-   checked first); an environment builtin; `PLAYWRIGHT_MCP_*`/`PWTEST_*` text in the raw or the
+   `bash -c`, a command string handed to another program, a wrapper `commandPosition` does not
+   know (`stdbuf`), which leaves the CLI outside command position, or a word that names the CLI in
+   any other command — `scanSegments` skips the words of the call itself, so
+   `playwright-cli -s=zensu-verify-x fill e1 playwright-cli` passes this test; a function named
+   `playwright-cli` that the command defines (matched
+   case-insensitively and checked first — `REDEFINITION_RE` reads the command string, so a
+   function or alias the shell already has is invisible); an environment builtin; `PLAYWRIGHT_MCP_*`/`PWTEST_*` text in the raw or the
    quote-stripped command; and a session name or argument that is not a literal. A `-c` or `eval`
    body inherits the outer command's assignments and wrappers, so `env -i bash -c '…'` is judged as
    if the wrapper sat on the inner call. The lexer marks as unexpanded an unquoted brace, glob,
-   leading `~` or leading `=` word and every word carrying a `$` outside single quotes that
-   whitespace or the end of the command does not follow — zsh's `$=X`, `$~X`, `$^X` and `$+X`
-   expand where bash leaves them literal, and the Bash tool may run zsh; a `+=` session assignment
-   counts as unexpanded; a session given
+   leading `~` or leading `=` word and every word carrying a `$` outside single quotes that is
+   followed by neither whitespace, the end of the command nor, inside double quotes, the closing
+   quote. Whitespace there is JavaScript's `\s`, so a `$` before a carriage return stays literal.
+   zsh's `$=X`, `$~X`, `$^X` and `$+X` expand where bash leaves them literal, and the Bash tool
+   may run zsh. Four lexer decisions keep quote pairing and word splitting identical to bash's, so
+   that no second call can hide from the judgement, and each is exercised by a unit case — the two
+   double-quote decisions share one: `$"…"`, the
+   locale string, is read like a double-quoted string, so a substitution inside it reaches the
+   nested scan, and its word counts as unexpanded; inside double quotes a `$` before the closing
+   `"` is a literal dollar, never a quote opener, and does NOT count as an expansion, which is why
+   every operator text names the closing double quote beside whitespace and the end; inside double
+   quotes a `$` before `'` is a literal dollar too, never an ANSI-C opener, but its word still
+   counts as unexpanded; and a carriage return is a word character, never a separator, so `\r#`
+   never starts a comment. `V53-control` re-checks the `$` cases the operator texts state. A `+=`
+   session assignment counts as unexpanded; a session given
    more than once denies `SESSION_MALFORMED`; and a session value is GATED when it names
    `zensu-verify-` in any letter case or behind a path, then must match `SESSION_RE` exactly. A call
    on any other session reaches no decision unless the command is marked. A marked command's call
@@ -93,7 +135,12 @@ and the skill's instruction to use only the printed session is prose, not a boun
    `WRAPPER`, and a wrapper the ladder does not know leaves the CLI outside command position, which
    denies `INDIRECT`; a package launcher (`npx`, `bunx`, `pnpx`, `npm`/`pnpm`/`yarn`
    `dlx`/`exec`/`x`) denies `LAUNCHER`, because it may fetch or select a version the gate never
-   measured. Then the command and flag allowlist (`ALLOWED_COMMANDS`), with
+   measured; and a CLI word that is not one of the platform's bare names (`binaryNames` in
+   `hooks/lib/playwright-cli-version-v1.js`: `playwright-cli`, on win32 also its `.cmd`, `.exe` and
+   `.ps1` names) — a path, another letter case, the package name — denies `CLI_NOT_BARE`, because
+   only a bare name lets `PATH` resolve the binary `/zensu:doctor` and the run-config helper
+   measured — unless the shell already has a function or alias of that name, which no hook sees.
+   Then the command and flag allowlist (`ALLOWED_COMMANDS`), with
    `--json/--raw/--help/--version` harmless everywhere and a repeated flag denied. `COMMAND_DENIED` and `FLAG_DENIED` scope the refusal to
    `/zensu:verify-feature` and forbid a retry under another session name or program. The arguments
    are parsed by `parseCliArgs`, a port of the CLI's own minimist parser MEASURED against
@@ -115,8 +162,9 @@ and the skill's instruction to use only the printed session is prose, not a boun
 7. **The shape: exactly one plain call.** A command whose markers name both the CLI and a
    `zensu-verify` session — in its text, or through the hook environment's
    `PLAYWRIGHT_CLI_SESSION` — is admitted only as ONE top-level `playwright-cli` invocation with no
-   operator, no second segment, no subshell, no heredoc, no here-string and no redirection whose
-   target is not a literal (`plainShape`): a literal target is admitted, a target carrying an
+   operator, no second segment, no `$(…)`, `${…}`, backtick or process-substitution body anywhere
+   in the command (`lexShell` pushes each onto `nested`), no subshell, no heredoc, no here-string
+   and no redirection whose target is not a literal (`plainShape`): a literal target is admitted, a target carrying an
    expansion — a variable, even quoted, a substitution, an unquoted glob or brace, a leading `~`
    or `=` — is not, and a redirection on a line of its own is a second segment. Everything else
    denies `NOT_PLAIN`, whose text names both marker arms and the literal-redirection rule beside
@@ -172,15 +220,27 @@ removed rather than ported. The consequence is the first residual below, and it 
 over with a marker nothing reads.
 
 **`/zensu:doctor`** probes `command -v playwright-cli` (`ZDOC_PLAYWRIGHT=present|absent`) and reads
-`ZDOC_PLAYWRIGHT_VERSION` from the resolved `@playwright/cli` `package.json` — realpath of the
-binary, then at most four parent directories, size-bounded — WITHOUT executing the binary. Only
-when that read fails does it fall back to `zensu_run_bounded env NO_UPDATE_NOTIFIER=1
-playwright-cli --version </dev/null`, keeping the first dotted version number. A version other than
-`PLAYWRIGHT_CLI_SOURCE_VERSION`, or a measured version the report could not read, renders WARN and
-names what was not measured against it; a difference is disclosed, never a failure. The
-verify-feature row runs its availability checks FIRST — hook pair, module and helper present, the
-module no symlink (both hooks refuse one) and loadable, both hooks registered on a matcher that
-covers `Bash` — and reports `unavailable` before it classifies a policy, so a valid policy over an
+the version through `hooks/lib/playwright-cli-version-v1.js` (`cliMain` with `--lookup --execute`),
+exporting `ZDOC_PLAYWRIGHT_SOURCE`, `ZDOC_PLAYWRIGHT_VERSION` and `ZDOC_PLAYWRIGHT_OWNER`. The
+module walks `PATH` as the shell does and answers `cwd-relative` without reading anything when an
+empty or relative entry comes before or holds the binary. Otherwise it reads the `@playwright/cli`
+`package.json`: the one in `node_modules/@playwright/cli` beside the binary found on `PATH`
+first — the npm-shim layout, though any file there counts — else the nearest one from the directory of the
+binary's realpath upward, four directories at most, each read bounded at 64 KiB. A manifest that
+names another package answers `foreign`, one that is oversized, unparseable or carries no valid
+name and version answers `malformed`, and neither runs the binary. Only when no manifest exists
+at all does `--execute` run `playwright-cli --version`, once: stdin and stderr ignored,
+`NO_UPDATE_NOTIFIER=1`, and a 5 s timeout that sends `SIGKILL` on every host, with no `timeout` or
+`gtimeout` involved; a `.cmd` or `.bat` shim on win32 is never run. It keeps the first semantic
+version on the first output line and answers `self-reported`, which is never taken as measured:
+the run-config helper calls the module without `--execute` and accepts only a `manifest` answer
+equal to `PLAYWRIGHT_CLI_SOURCE_VERSION`. The doctor does not call `zensu_run_bounded`. A
+version other than `PLAYWRIGHT_CLI_SOURCE_VERSION`, or a measured version the report could not
+read, renders WARN and names what was not measured against it; a difference is disclosed, never a
+failure. The verify-feature row runs its availability checks FIRST — hook pair, prefilter library,
+module and helper present, the module no symlink (both hooks refuse one) and loadable, the helper
+loadable, both hooks registered on a matcher that covers `Bash` — and reports `unavailable`
+before it classifies a policy, so a valid policy over an
 unregistered recorder is not reported as ready. Each hook is named with its own state — "consent
 hook" is the PreToolUse gate, "consent recorder" the PostToolUse half — joined by `; ` when both
 apply, so an undetermined recorder never hides a definite missing gate; a registration it cannot
@@ -208,52 +268,83 @@ announces a prompt rather than a capability the plugin hands itself.
   number alone asserts a measurement nobody made. The recorder also asserts `registry.js`'s
   `sessionName || process.env.PLAYWRIGHT_CLI_SESSION` precedence and records `pkg.bin`, which the
   unit suite compares with `CLI_BASENAMES`. The version is hand-copied as prose into
-  `skills/verify-feature/SKILL.md` (pinned by `P6f`), `docs/gates.md`,
-  `evals/verify-feature/README.md` and this rule file (step 4 and the run-config measurement),
-  and as a literal into the unit pin beside the constant; the
-  MSYS boundary suite derives it from the module.
+  `skills/verify-feature/SKILL.md` (pinned by `P6f`), `README.md` (`P7d`), `docs/verify-feature.md`
+  (the install block and the troubleshooting table), `docs/gates.md` (the install command and the
+  golden-recording sentence), the verify-feature troubleshooting row of `docs/operations.md`,
+  `skills/doctor/SKILL.md`, `skills/autopilot/rules/config.md`, the
+  `### Upgrade notes` block of `CHANGELOG.md` (`P9a`), `evals/verify-feature/README.md` and this
+  rule file (step 4 and the run-config measurement), and as a literal into the unit pin beside the
+  constant. `P7e` derives the version from the module and requires the pinned install command, in
+  backticks, in the skill, `README.md`, the three docs pages — in `docs/verify-feature.md` only the
+  troubleshooting row carries that form — the doctor skill and the autopilot config rule; `P7h`
+  pins the fenced install line of `docs/verify-feature.md`, the golden-recording sentence of
+  `docs/gates.md` and the eval README. No check reads this file's copies. The MSYS boundary suite
+  derives it from the module.
 - `SESSION_PREFIX`, `SESSION_RE`, `RUN_CONFIG_NAME`, `RUN_OUTPUT_DIR_NAME`, `MAX_RUN_ORIGINS` and
   `runConfigShape` are consumed by the helper FROM the module, never re-spelled.
 - `CONSENT_MATCHER` (`'Bash'`) ↔ both registrations in `hooks/hooks.json` ↔
   `consentHookRegistered`/`consentRecorderRegistered` and their `REGISTRATION` answers ↔ the
   doctor's `unavailable` reasons in `hooks/lib/zensu-doctor.sh` ↔ the `❌ verify-feature: cannot
   start (…)` bullet in `skills/doctor/SKILL.md`, which must name every cause those reasons carry
-  — a missing file, a symlinked or unloadable decision module, a hook that is not registered, a
-  registration that could not be determined, a probe that did not complete — and the rule that
+  — a missing hook, prefilter library, decision module or run-config helper, a symlinked or
+  unloadable decision module, a run-config helper that cannot be loaded, a hook that is not
+  registered, a registration that could not be determined, a probe that did not complete — and the rule that
   each hook is named with its own state, because a model relaying an undetermined registration as
   a missing hook, or the gate's state as the recorder's, sends the user after a problem that is
   not there. No check compares the bullet with the reasons.
-- `hookRegistered` in `hooks/lib/verify-consent-v1.js` and `reviewerSpawnHookWired` in
-  `hooks/lib/zensu-doctor-report.js` are two hand-written readers of one host rule — which
-  `hooks.json` groups fire for a tool — and they answer differently ON PURPOSE, so a change to
-  either re-decides each difference.
-  `hookRegistered` follows the host's own matcher rule as read out of the Claude Code 2.1.280
-  binary (`matcherCovers`): an absent or empty matcher and `*` cover every tool, and a matcher of
-  plain names joined by `|` covers exactly those names. Any other matcher the host may read as a
-  name list or as a regular expression, and whether it anchors one was not observed, so a matcher
-  whose name-list, anchored and unanchored readings disagree answers `unknown`, as does one that
-  does not compile or is not a string. The grant row compiles every matcher as an unanchored
-  regular expression, reads every matcher that is not a non-empty string — absent, empty, `null`,
-  a number — as `.*`, and skips a group whose matcher does not compile: a non-string matcher
-  answers `unknown` here and covers every tool there, and `*` covers every tool here while its
-  group is skipped there. The document shapes differ in three places only: an array document, a
+- `hooks/lib/hook-registration-v1.js` is the ONE reader of the host rule that decides which
+  `hooks.json` groups fire for a tool. `hookRegistered` in `hooks/lib/verify-consent-v1.js`, behind
+  `consentHookRegistered`/`consentRecorderRegistered`, calls its `registration` with
+  `READINGS.HOST`; `reviewerSpawnHookWired` in `hooks/lib/zensu-doctor-report.js`, the doctor's
+  grant row, calls it with `READINGS.REGEX`. Only `READINGS.HOST` is the host's reading.
+  `READINGS.REGEX` can call a group wired that the host does not fire — unanchored, `Age` matches
+  `Agent`, where the host reads `Age` as one tool name — and skips a `*` group, which the host
+  fires for every tool. The grant row keeps it
+  because sharing the reader was to change neither row's answers; moving that row onto
+  `READINGS.HOST` re-decides what the grant row reports and belongs in the grant's own review. A
+  change to either reading re-decides each difference, for the consent probes and the grant row
+  alike.
+  `READINGS.HOST` follows the host's own matcher rule as read out of the Claude Code 2.1.280
+  binary (`hostMatcherCovers`): an absent or empty matcher and `*` cover every tool, and a
+  matcher of plain names joined by `|` covers exactly those names. Any other matcher the host may
+  read as a name list or as a regular expression, and whether it anchors one was not observed, so
+  a matcher whose name-list, anchored and unanchored readings disagree answers `unknown`, as does
+  one that does not compile or is not a string. `READINGS.REGEX` compiles every matcher as an
+  unanchored regular expression, reads every matcher that is not a non-empty string — absent,
+  empty, `null`, a number — as `.*`, and skips a group whose matcher does not compile: a
+  non-string matcher answers `unknown` under the host reading and covers every tool under the
+  regex reading, and `*` covers every tool under the host reading while its group is skipped
+  under the regex reading. The document shapes differ in three places only: an array document, a
   `hooks` value of the wrong type, and an event value that is present but falsy answer `unknown`
-  here and read as an empty list there; a document that is not an object and a truthy event value
-  that is not an array answer `unknown` in both. The other differences: this copy matches the command on
-  `/hooks/<file>` and requires that file, followed through a symlink as the doctor's `[ -f ]`
-  follows it, to be a regular file, where that one matches the bare filename; this copy reads
-  `hooks.json` through `lstat` plus `readFileSync`, that one through the doctor's hardened
-  `readJson`; and that one requires EVERY spawn tool to match where this one tests
-  `CONSENT_MATCHER` alone. Every `unknown` exists because this probe feeds a verdict that must
-  never read a registration it could not judge as a missing one. One shared helper taking those
-  tolerances as parameters is the standing fix; it is not taken here because it would move the
-  grant row's answers, a change that belongs in the grant's own review. Neither suite compares
-  the two copies.
-- The prefilter in both wrappers ↔ `commandMarkers` / `normalizedText` in the module (hand copies,
-  see step 1): the continuation join with its backslash pairing, the stripped character set, case-insensitivity, both
-  markers, and the `PLAYWRIGHT_CLI_SESSION` arm must agree. `CLI_MARKERS` is DERIVED from
-  `CLI_BASENAMES` and `CLI_PACKAGE`; `H17d` pins the two wrapper blocks byte-identical and `H17e`
-  requires every derived marker in them.
+  under the host reading and read as an empty list under the regex reading; a document that is not
+  an object and a truthy event value that is not an array answer `unknown` under both. The callers
+  differ beyond the reading: the consent probe matches the command on `/hooks/<file>` and requires
+  that file, followed through a symlink as the doctor's `[ -f ]` follows it, to be a regular file,
+  where the grant row matches the bare filename; the consent probe reads `hooks.json` through
+  `lstat` plus `readFileSync`, the grant row through the doctor's hardened `readJson`; and the
+  grant row requires EVERY spawn tool to match where the consent probe tests `CONSENT_MATCHER`
+  alone. Every `unknown` exists because the consent probe feeds a verdict that must never read a
+  registration it could not judge as a missing one. The unit case `one registration reader serves
+  the consent probes and the grant row, each through its own reading` holds both readings in one
+  table and requires the doctor report to load the module; `.claude/rules/reviewer-spawn-grant.md`
+  points here for the grant row's side.
+- The ONE prefilter library, `hooks/lib/zensu-browser-consent-prefilter.sh`, ↔ `commandMarkers` /
+  `normalizedText` in the module (a hand copy, see step 1): the continuation join with its
+  backslash pairing, the stripped character set, case-insensitivity, both markers, and the
+  `PLAYWRIGHT_CLI_SESSION` arm must agree. `CLI_MARKERS` is DERIVED from `CLI_BASENAMES` and
+  `CLI_PACKAGE`; `H17` pins the library's one `sed` and one `tr -d` pass, `H17d` that both wrappers
+  source it, carry no copy of its two-marker test and scan only in their library-unavailable
+  fallback, and `H17e` that it names every derived marker, the session prefix and the session
+  variable. Each wrapper's fallback test is its own copy, broader than the library in the markers
+  it counts but blind to a marker split by an escaped backslash (step 1), and no check compares
+  the two fallback copies.
+- The pre hook's deny prefix and its four plugin-integrity reasons (`prefilter library
+  unavailable`, `node unavailable`, `decision module absent or symlinked`, `decision module
+  failed`) ↔ the §5 row of `docs/verify-feature.md` that quotes them; `V63-control` greps the hook
+  for each. That row tells the user to reinstall even when the doctor's `verify-feature` row
+  reads ready, because the doctor sees a missing or symlinked part but not a library that fails
+  to source, a module that loads and then fails, or a `node` missing only from the hooks'
+  environment.
 - `AMBIENT_TEXT_RE` / `ambientOverride` / `globalConfigFile` / `GLOBAL_CONFIG_HARMLESS` ↔ the
   CLI's own configuration channels; a new CLI env or config channel lands here first.
 - `scripts/` is now in the Session Control digest unconditionally (see §"Runtime Lineage"), because
@@ -266,10 +357,12 @@ announces a prompt rather than a capability the plugin hands itself.
   `evals/session-control/lib/live-evidence.js`, `evals/session-control/tests/wrapper-selftest.sh`,
   `tests/structure/test-windows-portability-guards.sh`).
 
-Operator-facing accounts: `docs/gates.md` §"Browser Consent Gate", `docs/verify-feature.md`, both
-hook rows and the `ZENSU_VERIFY_NAVIGATION_POLICY_V1` row in `docs/configuration.md`, both rows of
-the "Unbindable sessions" table in `docs/session-control.md`, `README.md`, `skills/verify-feature/**`,
-`skills/doctor/SKILL.md`, `skills/autopilot/rules/config.md`, and the banner line.
+Operator-facing accounts: `docs/gates.md` §"Browser Consent Gate", `docs/verify-feature.md`, the
+current-behaviour opening of `docs/verify-feature-consent-spec.md`, both hook rows and the
+`ZENSU_VERIFY_NAVIGATION_POLICY_V1` row in `docs/configuration.md`, the verify-feature row of the
+troubleshooting table in `docs/operations.md`, both rows of the "Unbindable sessions" table in
+`docs/session-control.md`, `README.md`, `skills/verify-feature/**`, `skills/doctor/SKILL.md`,
+`skills/autopilot/rules/config.md`, and the banner line.
 `tests/structure/test-verify-consent.sh` drives the unit files and the real hooks.
 
 **Version: `minor`.** Walked against §"Runtime Lineage": both consent hooks changed their matcher
@@ -304,14 +397,52 @@ the real file to hold that.
 - **How the host resolves a hook `ask` under bypass permissions, in auto mode or in a headless run
   is UNVERIFIED.** The live eval runs in policy mode precisely so it never depends on a prompt.
 - **The gate is textual.** It judges what the command TEXT names. A CLI or session name assembled
-  at run time — from a file, a variable set by an earlier Bash call, a program's output, or an
-  ANSI-C `$'…'` escape — never reaches the markers, so the call it produces is not gated. The single-invocation rule narrows
-  this to what one plain call can spell; it does not close it.
+  at run time — from a file, a variable set by an earlier Bash call, a program's output, an
+  ANSI-C escape inside a name (`$'playwright\x2dcli'`), or an expansion inside `playwright-cli` or
+  inside the `zensu-verify-` prefix even when the same command sets it or leaves it empty
+  (`playwright-cli -s=zensu-ver${Z}ify-run`) — never reaches the markers, because the prefilter
+  keeps `$` and matches literal substrings, so the call it produces is not gated. An ANSI-C word
+  that holds the plain name, `$'playwright-cli'`, still reaches the CLI marker once the quotes are
+  stripped, and `readDollar` marks it unexpanded, so it is no invocation and a marked command
+  denies `NOT_PLAIN`; `V64-control` runs both spellings. While the hook environment's
+  `PLAYWRIGHT_CLI_SESSION` names a `zensu-verify-` session, the environment arm marks any call
+  that spells `playwright-cli` literally, `marks.session` holds whatever the session, and a
+  session assembled at run time — a variable, a substitution, an ANSI-C escape or an expansion
+  inside the prefix — denies `SESSION_UNEXPANDED`; only a CLI name assembled at run time stays
+  unseen. `V64-control` runs the unmarked spellings and both denied ones through the real pre
+  hook. The single-invocation and literal-argument rules bind only a marked command, so
+  they do not narrow this. A function or alias named `playwright-cli` that the shell already has
+  is judged as the plain call its text shows, and no hook sees what it runs.
 - **Version drift is only partly fenced.** The driver is user-supplied: the plugin ships no pin and
   no integrity check for `playwright-cli`. The one refusal is `checkReadiness` in the run-config
-  helper, which writes no run config unless the resolved `@playwright/cli` manifest names exactly
-  `PLAYWRIGHT_CLI_SOURCE_VERSION` — a version the package declares, not a verified binary; the
-  doctor's version row stays a WARN. The parser port is exact for that version and an unknown shape
+  helper, and BOTH entry points run it first: `checkPolicy` (the `--check-policy` preflight) and
+  `run` (the write). It refuses unless `consentHookRegistered` and `consentRecorderRegistered`
+  both answer `registered` and the `@playwright/cli` manifest of the `playwright-cli` on `PATH`
+  names exactly `PLAYWRIGHT_CLI_SOURCE_VERSION` — a version the package declares, not a verified
+  binary; the doctor's version row stays a WARN. The check runs only inside the helper: the gate
+  judges `open` by `runConfigShape` and never reads the installed version (from the version module
+  it takes only `BINARY_NAMES` and `PACKAGE_NAME`, which build its markers, and `binaryNames`,
+  never `installedVersion`, `probe` or `findBinary`; `V67` pins that set), so a run config of that shape written another way, or a
+  `playwright-cli` installed or put ahead on `PATH` after the helper ran, runs unmeasured. It
+  calls the version module without `--execute`,
+  so a binary is never run to learn its version. The module reads the
+  `node_modules/@playwright/cli/package.json` beside the binary found on `PATH` first, on every
+  platform, so a wrapper script in a directory holding that manifest at the measured version
+  passes: the check vouches for the manifest beside the wrapper, not for what the wrapper runs,
+  nor for a function or alias named `playwright-cli` that the shell already has.
+  Any other wrapper script outside the package with no
+  `package.json` in the directory of its resolved path or the three above it yields no manifest
+  (`unread`) and is refused with the remedy of putting the directory npm installs into first on
+  `PATH`, ahead of any wrapper; with one there it answers `foreign` or `malformed`, and the
+  refusal names only the install command although the same `PATH` change is needed. A
+  `cwd-relative` answer is refused with the entry named. `versionCause`/`versionRemedy` hold those texts, the troubleshooting table in
+  `docs/verify-feature.md` §5 quotes them, `V54-control` re-checks that the helper still
+  carries every fragment the table quotes, and the exact-remedy table in
+  `tests/structure/verify-browser-config.test.js` pins the remedy of every answer — `absent`, a
+  mismatched `manifest`, `unread`, `foreign`, `malformed`, `self-reported` and both
+  `cwd-relative` cases — so a PATH clause added to another answer turns it red. A
+  `self-reported` answer, which only a `--execute` read produces, is refused even at the measured
+  version, because only a `manifest` answer passes. The parser port is exact for that version and an unknown shape
   denies, but a later CLI that changes the meaning of an existing flag, or renames or ignores a
   run-config fence — `network.allowedOrigins`, `browser.isolated`, the `--host-resolver-rules`
   pins, `browser.contextOptions.serviceWorkers` — drops a browser-side fence while every gate check
@@ -319,6 +450,16 @@ the real file to hold that.
   `ambientOverride` reads the `PLAYWRIGHT_MCP_*` launch variables, `AMBIENT_TEXT_RE` the
   `PLAYWRIGHT_MCP_` and `PWTEST_` prefixes, and `globalConfigFile` the global CLI config, so a new
   channel of a later CLI is unjudged.
+- **The doctor checks the prefilter library for existence only.** Both hooks require that
+  sourcing it succeeds and defines `zensu_browser_consent_marked`; the doctor tests `[ -f ]`, so a
+  library that exists but fails to source, or defines no such function, reads as available while
+  both hooks run their fallback (step 1).
+- **The library-unavailable fallback does not pair escaped backslashes.** Both wrappers' fallback
+  `sed` drops `\n`, `\r` and `\t` from the JSON payload before `tr -d` removes backslashes, so a
+  gated call whose markers are split by a backslash before one of those letters names neither
+  word to it and runs unjudged while the library is missing (step 1). Pairing the backslashes
+  first, as the library does, closes it; `V68` pins the docs sentence that states the gap and
+  must change with that fix.
 - **Windows is UNVERIFIED end to end.** `CLI_BASENAMES` recognizes the `.cmd`/`.exe`/`.ps1`
   spellings, but no Windows run has driven a real `playwright-cli` through the gate.
 - **No ports.** `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were not included; each must
