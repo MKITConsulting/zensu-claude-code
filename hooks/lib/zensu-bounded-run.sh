@@ -43,9 +43,8 @@
 # block-on-open vectors are already closed inside the transcript module: it refuses a NUL
 # byte, `lstat`s and requires a regular file BEFORE opening, opens `O_NOFOLLOW|O_NONBLOCK`
 # and re-checks by `fstat` — so a FIFO, device or symlink at that path cannot block. What
-# the unbounded arm actually leaves is a REGULAR FILE ON STALLED STORAGE, a git status
-# that hangs, and — on the /zensu:doctor version fallback — a third-party executable,
-# `playwright-cli --version`, that never exits.
+# the unbounded arm actually leaves is a REGULAR FILE ON STALLED STORAGE, and a git status
+# that hangs.
 #
 # "Availability only, no adversary in the loop" was the closing sentence here and it is
 # NO LONGER TRUE, so it is retired rather than reworded. `zensu-log.sh --tdd-complete`
@@ -70,10 +69,7 @@
 # only way out of the mode. On the `--tdd-complete` path it costs the VERB: that call is
 # what closes a chain, its registration is a plain Bash invocation with no host timeout at
 # all, and `|| return 0` at the call site tests an exit status a hang never produces — so
-# the chain simply never completes. On the /zensu:doctor path it costs the REPORT: when the
-# package read yields no version the doctor runs `playwright-cli --version` through this
-# ladder, and one that never exits holds the whole diagnostic until whatever bounds the Bash
-# call itself ends it. Same arm, a different price per caller.
+# the chain simply never completes. Same arm, three very different prices.
 zensu_run_bounded() {
   # `"$@"` with zero positional parameters aborts under `set -u` on bash 3.2, which is
   # macOS's /bin/bash and this script's interpreter — so a future argument-less call would

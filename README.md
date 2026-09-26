@@ -18,8 +18,10 @@ Any language, any stack. Nothing to configure, and no account needed to start.
 
 ## What you get
 
-- **A plan you approve first.** Claude Code plans; Zensu asks once which delivery
-  route to take. You stay in the loop exactly once, not every turn.
+- **A plan you approve first.** Claude Code plans; Zensu asks which delivery route to
+  take and remembers a Zensu-workflow answer for the rest of the session —
+  or never, when the project sets `hooks.defaultDeliveryRoute`.
+  You stay in the loop once, not every turn.
 - **A review that cannot be skipped.** Five specialist reviewers run in
   parallel, an independent judge checks their blind spots, and a Stop hook makes
   sure the chain actually finished before the turn ends.
@@ -77,12 +79,15 @@ verify, unattended. It stops at a ready PR and never merges.
 **Just this change** — describe what you want and approve the plan. Zensu asks
 which delivery route to take: autopilot to a reviewed PR, the guided workflow
 with its review chain, the step-by-step pilot, or implementing it directly.
+Answer the route question with the Zensu workflow once: the session remembers that answer (a
+direct, autopilot or pilot answer decides only that plan or request), and
+`/zensu:delivery-route` or `hooks.defaultDeliveryRoute` fixes either route without asking.
 
 ## What's included
 
-### Skills (28)
+### Skills (29)
 
-> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (29 skills are registered in `plugin.json`).
+> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (30 skills are registered in `plugin.json`).
 
 | Skill | What it does |
 |-------|--------------|
@@ -91,6 +96,7 @@ with its review chain, the step-by-step pilot, or implementing it directly.
 | `/zensu:implement` | Implement a tracked feature end to end, with artifact linking and revision tracking |
 | `/zensu:tdd` | The guided implementation workflow: build, then the mandatory review chain and auto-fix loop |
 | `/zensu:tdd-mode` | Switch this session between strict RED→GREEN TDD and vanilla, without editing config |
+| `/zensu:delivery-route` | Fix this session's delivery route (Zensu workflow or direct) so the route question is not asked again this session |
 | `/zensu:autopilot` | Idea → validated pull request, unattended after one planning gate. Never merges or deploys |
 | `/zensu:pilot` | The guided counterpart to autopilot: probes a feature's real state and offers the next step |
 | `/zensu:cover` | Backfill durable tests at the right level (unit → integration → E2E) for existing code |
@@ -216,6 +222,7 @@ is unpinned).
 | [TDD workflow](docs/tdd-manager-workflow.md) | The full per-step reference for the implementation workflow |
 | [Verify a feature live](docs/verify-feature.md) | Running `/zensu:verify-feature` on its own: consent mode with no setup at all, `--setup` and `--attach`, the runtime recipe, the launch-time navigation policy for remote mode |
 | [Evidence discipline](docs/evidence-discipline.md) | The one rule underneath everything else |
+| [Worktree keep](docs/worktree-keep.md) | Why the Claude Desktop worktree pool can take a live session's directory, the `.worktree-keep` marker that stops it, and how to continue in a nested worktree when it happened anyway |
 | [Best solution first](docs/best-solution-first.md) | Why the best long-term option must be in every choice you are offered, and first |
 
 ## Contributing

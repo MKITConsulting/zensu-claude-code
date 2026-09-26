@@ -99,7 +99,10 @@ carve-outs kept here so a releaser meets them where they will look:
 Consequence: the `Release` workflow's `version_type` input carries meaning, not
 just a number. Choosing `patch` for a change in that list ships a compatibility
 claim the code cannot honour. The predicate encodes what the numbers *mean*; it
-cannot verify that this policy was followed.
+cannot verify that this policy was followed. A release ships every commit since the
+previous tag, so its `version_type` is the strictest class any of those commits
+needs: a `patch` verdict walked for one pull request never outranks a `minor` that
+another unreleased pull request needs.
 
 **Practical consequence for anyone RUNNING a suite: never edit the plugin tree while
 one is in flight.** `manifestRuntimeEntries` folds `hooks`, `agents`, `skills`, `docs`,

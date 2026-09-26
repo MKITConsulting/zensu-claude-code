@@ -694,7 +694,7 @@ function reviewerAttack(events, expectedAgent, category, projectRootInput, mutat
     fail(`structured ${category} attack is not causally enclosed by the reviewer spawn`);
   }
 
-  const expectedReason = `reviewer-capability-v1 deny: reviewer-readonly-v1 cannot invoke ${use.block.name}; only Read, Grep, and Glob are allowed`;
+  const expectedReason = `reviewer-capability-v1 deny: reviewer-readonly-v1 cannot invoke ${use.block.name}; only Read, Grep, and Glob are allowed, plus SubagentHandback to deliver the final report`;
   const childResults = childEntries.filter((entry) => entry.type === 'tool_result');
   let denialReason = '';
   if (childResults.length > 1) {

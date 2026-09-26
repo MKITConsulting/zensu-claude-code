@@ -237,6 +237,23 @@ if grep -qF "$DOLLAR_RULE" <<<"$BROWSER_FLAT" && grep -qF "$DOLLAR_RULE" <<<"$SK
 else
   check "P3i the browser rule and the skill both state that an argument carrying \$ is single-quoted" FAIL
 fi
+DOLLAR_EXCEPTION='the gate reads a `$` outside single quotes as an expansion it cannot judge unless whitespace, the end of the command or a closing double quote follows it'
+if grep -qF "$DOLLAR_EXCEPTION" <<<"$BROWSER_FLAT" && grep -qF "$DOLLAR_EXCEPTION" <<<"$SKILL_FLAT" \
+  && ! grep -qF 'that whitespace or the end of the command does not follow' <<<"$BROWSER_FLAT" \
+  && ! grep -qF 'that whitespace or the end of the command does not follow' <<<"$SKILL_FLAT"; then
+  check "P3k the browser rule and the skill both exempt a \$ before a closing double quote from the expansion rule" PASS
+else
+  check "P3k the browser rule and the skill both exempt a \$ before a closing double quote from the expansion rule" FAIL
+fi
+AUTOPILOT_CONFIG_FLAT="$(tr '\n' ' ' < "$AUTOPILOT_CONFIG" | tr -s ' ')"
+if grep -qF 'It is a textual gate: it judges the calls whose command text names the CLI and that session, which is one more reason every call spells both literally.' <<<"$SKILL_FLAT" \
+  && grep -qF 'the Bash-matcher hook pair that judges each `playwright-cli` call whose command text names the CLI and a `zensu-verify` session, or names the CLI while the hook environment'"'"'s `PLAYWRIGHT_CLI_SESSION` names one' <<<"$AUTOPILOT_CONFIG_FLAT" \
+  && ! grep -qF 'judges every `playwright-cli` call' <<<"$SKILL_FLAT" \
+  && ! grep -qF 'judges every `playwright-cli` call' <<<"$AUTOPILOT_CONFIG_FLAT"; then
+  check "P3l the skill and the autopilot config rule say the gate judges the command text, not every call" PASS
+else
+  check "P3l the skill and the autopilot config rule say the gate judges the command text, not every call" FAIL
+fi
 SHAPE_VERDICT="$(node -e '
   const fs = require("node:fs");
   const mod = require(process.argv[2]);
@@ -689,7 +706,7 @@ else
   check "P7d README states the plugin ships no MCP server and requires playwright-cli for browser verification" FAIL
 fi
 INSTALL_DRIFT=""
-for carrier in "$SKILL_MD" "$README_MD" "$DOCTOR_SKILL" "$AUTOPILOT_CONFIG" "$PLUGIN_DIR/docs/verify-feature.md" "$PLUGIN_DIR/docs/gates.md"; do
+for carrier in "$SKILL_MD" "$README_MD" "$DOCTOR_SKILL" "$AUTOPILOT_CONFIG" "$PLUGIN_DIR/docs/verify-feature.md" "$PLUGIN_DIR/docs/gates.md" "$PLUGIN_DIR/docs/operations.md"; do
   carrier_flat="$(tr '\n' ' ' < "$carrier" | tr -s ' ')"
   if [ -z "${PW_MEASURED:-}" ] || ! grep -qF "\`npm install -g @playwright/cli@${PW_MEASURED}\`" <<<"$carrier_flat" \
     || ! grep -qF '`brew install playwright-cli` is unpinned' <<<"$carrier_flat" \
@@ -707,12 +724,49 @@ else
   check "P7e every playwright-cli install route names the pinned npm command and labels brew unpinned (drift in:$INSTALL_DRIFT)" FAIL
 fi
 DOCTOR_FLAT="$(tr '\n' ' ' < "$DOCTOR_SKILL" | tr -s ' ')"
-if grep -qF 'It refuses unless `hooks/hooks.json` demonstrably registers both consent hooks on a matcher that covers Bash and the installed `playwright-cli` manifest names the measured version; then report PARTIAL with its reason, and never open a browser without the run config it writes.' <<<"$SKILL_FLAT" \
-  && grep -qF 'The label is literal: the run-config helper writes no run config unless both hooks demonstrably answer registered' <<<"$DOCTOR_FLAT" \
-  && grep -qF 'tell the user not to start `/zensu:verify-feature` until this row clears' <<<"$DOCTOR_FLAT"; then
-  check "P7f the skill and the doctor both say the run-config helper refuses to start while a consent hook is unregistered" PASS
+READINESS_MISSING=""
+grep -qF 'It refuses unless `hooks/hooks.json` demonstrably registers both consent hooks on a matcher that covers Bash, the installed `playwright-cli` manifest names the measured version, and no empty or relative PATH entry comes before or holds `playwright-cli`; then report PARTIAL with its reason, and never open a browser without the run config it writes.' <<<"$SKILL_FLAT" || READINESS_MISSING="$READINESS_MISSING [skill: registration, measured version and PATH-entry refusals]"
+grep -qF 'The label is literal: the run-config helper writes no run config unless both hooks demonstrably answer registered' <<<"$DOCTOR_FLAT" || READINESS_MISSING="$READINESS_MISSING [doctor: literal label]"
+grep -qF 'tell the user not to start `/zensu:verify-feature` until this row clears' <<<"$DOCTOR_FLAT" || READINESS_MISSING="$READINESS_MISSING [doctor: do not start until the row clears]"
+if [ -z "$READINESS_MISSING" ]; then
+  check "P7f the skill names the helper's registration, measured-version and PATH-entry refusals, and the doctor says it refuses while a consent hook is unregistered" PASS
 else
-  check "P7f the skill and the doctor both say the run-config helper refuses to start while a consent hook is unregistered" FAIL
+  check "P7f the skill names the helper's registration, measured-version and PATH-entry refusals, and the doctor says it refuses while a consent hook is unregistered (missing:$READINESS_MISSING)" FAIL
+fi
+if grep -qF 'the `@playwright/cli` package the binary on `PATH` resolves to — one beside an npm shim, else the nearest manifest within four directories of the resolved binary — without running it.' <<<"$DOCTOR_FLAT" \
+  && ! grep -qF 'the nearest manifest within four directories of the resolved binary, else one beside an npm shim' <<<"$DOCTOR_FLAT"; then
+  check "P7g the doctor skill reads the npm-shim sibling manifest first, as the version module does" PASS
+else
+  check "P7g the doctor skill reads the npm-shim sibling manifest first, as the version module does" FAIL
+fi
+PIN_DRIFT=""
+grep -qxF "npm install -g @playwright/cli@${PW_MEASURED:-unset}" "$PLUGIN_DIR/docs/verify-feature.md" || PIN_DRIFT="$PIN_DRIFT docs/verify-feature.md(install block)"
+grep -qF "pinned by a golden recording of \`playwright-cli\` ${PW_MEASURED:-unset}'s parser" <<<"$(tr '\n' ' ' < "$PLUGIN_DIR/docs/gates.md" | tr -s ' ')" || PIN_DRIFT="$PIN_DRIFT docs/gates.md(golden recording)"
+grep -qF "grader was written against \`playwright-cli\` ${PW_MEASURED:-unset})" <<<"$(tr '\n' ' ' < "$PLUGIN_DIR/evals/verify-feature/README.md" | tr -s ' ')" || PIN_DRIFT="$PIN_DRIFT evals/verify-feature/README.md"
+if [ -z "$PIN_DRIFT" ]; then
+  check "P7h the fenced install line, the golden-recording sentence and the eval README name the measured version ${PW_MEASURED:-}" PASS
+else
+  check "P7h the fenced install line, the golden-recording sentence and the eval README name the measured version ${PW_MEASURED:-} (drift in:$PIN_DRIFT)" FAIL
+fi
+if grep -qF 'A wrapper script outside the package with no `package.json` near it looks exactly like this' <<<"$DOCTOR_FLAT" \
+  && grep -qF 'A wrapper script with another package'"'"'s `package.json` within four directories reads like this too, and then the directory npm installs `playwright-cli` into also has to come first on PATH.' <<<"$DOCTOR_FLAT" \
+  && grep -qF 'A wrapper script with a `package.json` the doctor cannot judge within four directories, such as a project manifest with no name, reads like this too, and then the directory npm installs `playwright-cli` into also has to come first on PATH.' <<<"$DOCTOR_FLAT"; then
+  check "P7i the doctor skill tells a wrapper script with no nearby manifest from one under another package" PASS
+else
+  check "P7i the doctor skill tells a wrapper script with no nearby manifest from one under another package" FAIL
+fi
+if grep -qF 'The manifest vouches for the package, not for the binary: a wrapper script in a directory that holds such a manifest reads the same.' <<<"$DOCTOR_FLAT" \
+  && grep -qF 'A missing prefilter library also makes it deny every other Bash call whose payload names `playwright` or `zensu-verify`, with `prefilter library unavailable` — in a project whose path names either word, every Bash call except the recognized `/zensu:doctor` and adoption commands — so tell the user those denials share this cause.' <<<"$DOCTOR_FLAT"; then
+  check "P7j the doctor skill says the manifest vouches for the package, not the binary, and what a missing prefilter library denies" PASS
+else
+  check "P7j the doctor skill says the manifest vouches for the package, not the binary, and what a missing prefilter library denies" FAIL
+fi
+if grep -qF 'a missing, symlinked or unloadable decision module makes the consent hook deny every gated call, so `/zensu:verify-feature` cannot drive a browser;' <<<"$DOCTOR_FLAT" \
+  && grep -qF 'A missing prefilter library makes it deny every call the skill issues, although a gated call that splits `playwright` and `zensu-verify` with a backslash before `n`, `r` or `t` then passes unjudged.' <<<"$DOCTOR_FLAT" \
+  && ! grep -qF 'a missing prefilter library or a missing, symlinked or unloadable decision module makes the consent hook deny every gated call' <<<"$DOCTOR_FLAT"; then
+  check "P7k the doctor skill limits the deny-every-gated-call claim to the decision module and names the backslash spelling a missing prefilter library lets through" PASS
+else
+  check "P7k the doctor skill limits the deny-every-gated-call claim to the decision module and names the backslash spelling a missing prefilter library lets through" FAIL
 fi
 
 # P8 — portable/plugin-bundled text only.

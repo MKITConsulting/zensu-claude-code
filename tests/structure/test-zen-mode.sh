@@ -4411,6 +4411,25 @@ else
   check "Z96 the injected directive can be impersonated or resolved against the session cwd:$Z96_BAD" FAIL
 fi
 
+Z99_BAD=""
+Z99_ROW="$(grep -E '^\|[[:space:]]*`user-prompt-zen-mode\.sh`[[:space:]]*\|' "$PLUGIN_DIR/docs/configuration.md")"
+[ -n "$Z99_ROW" ] || Z99_BAD="$Z99_BAD hook-row-not-found"
+printf '%s\n' "$Z99_ROW" | grep -qF 'so a session with a new key starts from the configured default, one that keeps its key keeps the mode, and a sibling session in the same project is unaffected.' \
+  || Z99_BAD="$Z99_BAD hook-row-lacks-the-session-key-sentence"
+printf '%s\n' "$Z99_ROW" | grep -qF 'so a fresh session always starts from the configured default' \
+  && Z99_BAD="$Z99_BAD hook-row-keeps-the-fresh-session-wording"
+grep -qF 'The recorded choice is session-scoped: a session with a new key starts from the configured default again, and one that keeps its key keeps the mode.' "$SKILL" \
+  || Z99_BAD="$Z99_BAD skill-lacks-the-session-key-sentence"
+grep -qF 'it never follows the user into their' "$SKILL" \
+  && Z99_BAD="$Z99_BAD skill-keeps-the-never-follows-wording"
+grep -qF 'a fresh session starts from the configured default again' "$SKILL" \
+  && Z99_BAD="$Z99_BAD skill-keeps-the-fresh-session-wording"
+if [ -z "$Z99_BAD" ]; then
+  check "Z99 the zen-mode skill and the user-prompt-zen-mode.sh row say a new session key starts from the configured default and a kept key keeps the mode" PASS
+else
+  check "Z99 the zen-mode session-scope wording is out of step:$Z99_BAD" FAIL
+fi
+
 # Z98 every DERIVED SOURCE SLICE used as a haystack is emptiness-guarded.
 #
 # THE REPLACEMENT FOR Z90, which was deleted in the same change rather than kept

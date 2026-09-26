@@ -626,7 +626,7 @@ fi
 # the resolve guards. A window added without its disjunct leaves a caller that pinned
 # the others unable to source the library, so `command -v <getter>` fails, the value
 # stays empty and the renderer falls back with no signal. Derived from the resolve
-# blocks rather than hand-listed, so a fourth window enrols itself.
+# blocks rather than hand-listed, so the next window enrols itself.
 # The population is the CONFIG windows only — a value resolved through a canonical
 # `zensu_*` getter AND exported unconditionally. The wrapper's tool probes
 # (`ZDOC_NODE`, `ZDOC_ZENSU`, …) carry the same `-z` guard shape but need no library,
@@ -650,16 +650,16 @@ C21C_GUARD="$(sed -n '/^if { \[ -z /,/^  \&\& \[ -f /p' "$DOCTOR_SH")"
 C21C_OK=true
 [ -n "$C21C_RESOLVED" ] || C21C_OK=false
 [ -n "$C21C_GUARD" ] || C21C_OK=false
-# A FLOOR under the derived population, because "a fourth window enrols itself" only
+# A FLOOR under the derived population, because "the next window enrols itself" only
 # holds while the derivation cannot silently SHRINK. Every way it can — a grouped
 # export, a reflowed assignment, a renamed getter prefix — removes a window from the
 # world this check grades while leaving it green. Raising this number is the
 # registration for a new window, exactly as `C21C_GUARD_LINES` is the bound for the
 # guard it slices.
 C21C_COUNT="$(printf '%s\n' "$C21C_RESOLVED" | grep -c .)"
-[ "$C21C_COUNT" -ge 4 ] || C21C_OK=false
+[ "$C21C_COUNT" -ge 5 ] || C21C_OK=false
 # BOUNDED, because `sed` prints to EOF when the end address never matches — and a
-# reflow of the guard's closing line is exactly the collateral of adding a fourth
+# reflow of the guard's closing line is exactly the collateral of adding a further
 # disjunct, the mutation this check exists for. A runaway slice swallows the resolve
 # blocks themselves, whose `${NAME:-}` spellings are the very needle below, so every
 # name would match and the check would pass over a broken disjunction.

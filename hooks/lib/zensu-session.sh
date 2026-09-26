@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# SECOND LOADER: hooks/lib/zensu-directive.sh loads zensu-msys-env.sh the same way,
+# but records whether the load worked and falls back to its own append where this one
+# installs a refusing stub. Change the two loaders together.
 _ZENSU_SESSION_MSYS_ENV_READY=false
 _ZENSU_SESSION_LIB_DIR=''
 _ZENSU_SESSION_MSYS_ENV=''

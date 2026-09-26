@@ -47,8 +47,9 @@
 # must run from Claude Code's own Bash tool, which supplies CLAUDE_CODE_SESSION_ID
 # and CLAUDE_PLUGIN_DATA. SessionStart deliberately exports no Zensu selectors, so
 # there is no environment variable to read instead. The marker is keyed by the
-# resolved Session Control key, so a fresh session always starts from the
-# configured default and one session's choice can never leak into another.
+# resolved Session Control key, so a session with a new key starts from the
+# configured default, one that keeps its key keeps the choice, and one session's
+# choice can never leak into another.
 set -u
 
 _ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)" || exit 2
@@ -73,14 +74,21 @@ case "$TDD_MODE_VERB" in
     exit 2
     ;;
 esac
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-marker-write.sh" && declare -F zensu_write_session_marker >/dev/null || {
+  echo "zensu-tdd-mode.sh: cannot load hooks/lib/zensu-marker-write.sh" >&2
+  exit 2
+}
 
 # TWIN PROLOGUE — the block from here to the end of the two resolver guards is
-# duplicated, near-verbatim, in hooks/lib/zensu-zen-mode.sh (only the script name in
-# the messages and the skill named in the CLAUDE_PLUGIN_DATA hint differ). It is NOT
-# extracted into zensu-session.sh: the plugin-root self-validation above has to
-# precede this `source` to mean anything, so the two halves cannot move together
-# without restructuring both helpers. Change the Session Control binding contract and
-# you change it TWICE — the twin carries the same reference back to this file.
+# duplicated, near-verbatim, in hooks/lib/zensu-zen-mode.sh and
+# hooks/lib/zensu-delivery-route.sh (only the script name in the messages, the skill
+# named in the CLAUDE_PLUGIN_DATA hint, and the two `source` lines for
+# zensu-bounded-run.sh and zensu-zen-shared.sh that the zen-mode copy alone carries
+# differ). It is NOT extracted into
+# zensu-session.sh: the plugin-root self-validation above has to precede this
+# `source` to mean anything, so the copies cannot move together without
+# restructuring all three helpers. Change the Session Control binding contract and
+# you change it THREE times — each twin carries the same reference back to the others.
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 if ! zensu_bind_model_session; then
   echo "zensu-tdd-mode.sh: rendered Session Control binding unavailable" >&2
@@ -114,9 +122,6 @@ if ! TDD_MODE_MARKER="$(zensu_tdd_mode_marker_path "$_zensu_pd" "$_zensu_sid")" 
   echo "zensu-tdd-mode.sh: cannot resolve the session marker path" >&2
   exit 2
 fi
-# Derived from the marker, never re-spelled: the reader guards the same directory,
-# and a second literal here would split the writer's state dir from the reader's.
-TDD_MODE_STATE_DIR="$(dirname "$TDD_MODE_MARKER")"
 unset _zensu_pd _zensu_sid
 
 # The config getters below resolve the project overlay from CLAUDE_PROJECT_DIR.
@@ -129,67 +134,8 @@ export CLAUDE_PROJECT_DIR="$TDD_MODE_PROJECT_DIR"
 # make this helper refuse a shape `--tdd-begin` handles fine, and tell the user to
 # delete a file it was merely asked to report on.
 
-# Written through a sibling temp file and renamed into place. A redirect onto the
-# marker path would FOLLOW a symlink planted between the guard above and the
-# write; rename replaces the link itself, so the marker leaf cannot be used to
-# redirect the write out of the state directory, and the guard is re-asserted
-# immediately before the rename.
-#
-# The TEMP leaf needs the same care, and a predictable `.tmp.$$` name does not
-# give it: a co-writer of the state directory can pre-plant a symlink at that
-# name and a `>` redirect follows it, which merely moves the window rather than
-# closing it. `mktemp` creates with O_EXCL under an unguessable name — the same
-# primitive `zensu-autopilot-state.sh` uses for the documents in this very
-# directory — and the link check is applied to it too.
 tdd_mode_write_marker() {
-  local tmp
-  # The component list lives ONCE, in zensu_tdd_mode_state_linked beside the path
-  # template, and both the reader and this writer call it — `.zensu` is checked
-  # alongside `state` and the marker because the project root itself is canonicalized
-  # by Session Control, so `.zensu` is the one remaining component a checked-out tree
-  # could carry as a link, and a link there relocates the whole state directory while
-  # both leaf checks stay false.
-  if zensu_tdd_mode_state_linked "$TDD_MODE_PROJECT_DIR" "$TDD_MODE_MARKER"; then
-    echo "zensu-tdd-mode.sh: refusing to follow a symlinked state path — remove $TDD_MODE_MARKER and its directory link by hand" >&2
-    exit 2
-  fi
-  mkdir -p -m 700 "$TDD_MODE_STATE_DIR" 2>/dev/null || {
-    echo "zensu-tdd-mode.sh: cannot create state directory $TDD_MODE_STATE_DIR" >&2
-    exit 2
-  }
-  tmp="$(mktemp "$TDD_MODE_MARKER.tmp.XXXXXX" 2>/dev/null)" || tmp=""
-  [ -n "$tmp" ] || {
-    echo "zensu-tdd-mode.sh: cannot create a temporary file beside $TDD_MODE_MARKER" >&2
-    exit 2
-  }
-  trap 'rm -f "$tmp" 2>/dev/null' EXIT INT TERM HUP
-  printf '{"mode":"%s"}\n' "$1" > "$tmp" || {
-    echo "zensu-tdd-mode.sh: cannot write $tmp" >&2
-    exit 2
-  }
-  # Re-assert every component the RENAME depends on, including the temp leaf. This
-  # is deliberately a SECOND call of the shared predicate rather than a shared
-  # result — the duplication is the TOCTOU defense, and only the component list is
-  # shared. Note what it does and does not cover: the write on the line above has
-  # already happened, so what this prevents is a misdirected rename, not a
-  # misdirected write. `mktemp` creates the temp leaf with O_EXCL, which is what
-  # keeps that window narrow; it does not close it.
-  if zensu_tdd_mode_state_linked "$TDD_MODE_PROJECT_DIR" "$TDD_MODE_MARKER" "$tmp"; then
-    echo "zensu-tdd-mode.sh: refusing to follow a symlinked state path — remove $TDD_MODE_MARKER and its directory link by hand" >&2
-    exit 2
-  fi
-  # An existing non-regular marker (a directory above all) would swallow the
-  # rename and report success, leaving the user told a choice landed that the
-  # reader will never see.
-  if [ -e "$TDD_MODE_MARKER" ] && [ ! -f "$TDD_MODE_MARKER" ]; then
-    echo "zensu-tdd-mode.sh: $TDD_MODE_MARKER exists and is not a regular file — remove it by hand" >&2
-    exit 2
-  fi
-  mv -f "$tmp" "$TDD_MODE_MARKER" || {
-    echo "zensu-tdd-mode.sh: cannot write $TDD_MODE_MARKER" >&2
-    exit 2
-  }
-  trap - EXIT INT TERM HUP
+  zensu_write_session_marker zensu-tdd-mode.sh "$TDD_MODE_PROJECT_DIR" "$TDD_MODE_MARKER" "{\"mode\":\"$1\"}"
 }
 
 case "$TDD_MODE_VERB" in

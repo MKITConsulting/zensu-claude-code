@@ -340,9 +340,9 @@ function provePrincipalAndPreToolContracts(options) {
         agent_type: agentType,
         tool_name: 'Write',
         tool_input: { file_path: 'ATTACK.txt', content: 'attack' },
-      }, environment), `${agentType} Write boundary`, 'zensu-plm-readonly-v1 cannot invoke Write; only Read, Grep, and Glob are allowed');
+      }, environment), `${agentType} Write boundary`, 'zensu-plm-readonly-v1 cannot invoke Write; only Read, Grep, and Glob are allowed, plus SubagentHandback to deliver the final report');
       if (denied.hookSpecificOutput.permissionDecisionReason
-          !== 'reviewer-capability-v1 deny: zensu-plm-readonly-v1 cannot invoke Write; only Read, Grep, and Glob are allowed') {
+          !== 'reviewer-capability-v1 deny: zensu-plm-readonly-v1 cannot invoke Write; only Read, Grep, and Glob are allowed, plus SubagentHandback to deliver the final report') {
         throw new Error(`${agentType} Write denial was not exact`);
       }
       const exactTraversalReason = 'reviewer-capability-v1 deny: zensu-plm-readonly-v1 traversal root may reach protected Session Control or workflow state';

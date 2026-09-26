@@ -652,14 +652,17 @@ else
   check "P15i domain-refiner receives only enumerated exact context files" FAIL
 fi
 
-if grep -qF 'In standalone mode, show the user the final body preview + inline count' "$SKILL_MD" \
-   && grep -qF '`AskUserQuestion` to obtain a separate, explicit publication approval before any forge' "$SKILL_MD" \
-   && grep -qF 'An earlier approval to run the skill, accept the cast, or continue the analysis is' "$SKILL_MD" \
-   && grep -qF 'In delegated mode, record the count as a progress' "$SKILL_MD" \
-   && grep -qF 'continue without a preview question or approval gate' "$SKILL_MD"; then
-  check "P15j standalone publish waits after final preview; delegated publish stays unattended" PASS
+if grep -qF 'In standalone mode, show the user the final body preview + inline count as a progress' "$SKILL_MD" \
+   && grep -qF 'record and publish at once. Do not ask for publication approval: invoking the skill on a' "$SKILL_MD" \
+   && grep -qF 'It never asks before' "$SKILL_MD" \
+   && grep -qF 'PR is the user'"'"'s authorization to post the synthesized review. In delegated mode, record' "$SKILL_MD" \
+   && grep -qF 'the count as a progress update and continue without a preview question or approval gate' "$SKILL_MD" \
+   && grep -qF 'Neither mode waits for a publication approval' "$WORKFLOW_MD" \
+   && ! grep -qF 'explicit publication approval' "$SKILL_MD" \
+   && ! grep -qF 'explicit publication approval' "$WORKFLOW_MD"; then
+  check "P15j standalone publish follows the final preview without a question; delegated publish stays unattended" PASS
 else
-  check "P15j standalone publish waits after final preview; delegated publish stays unattended" FAIL
+  check "P15j standalone publish follows the final preview without a question; delegated publish stays unattended" FAIL
 fi
 
 # P16 — repo-custom reviewer seats: the cast ingests .claude/agents/zensu-review-*.md

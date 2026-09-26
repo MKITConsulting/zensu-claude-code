@@ -991,6 +991,363 @@ if printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'a shape denial — one that object
 else
   check "V50 docs/verify-feature.md separates a shape denial's one re-issue from a final denial" FAIL
 fi
+if printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'A manifest that names another package or cannot be judged is reported as such, and the binary is not run. Only when no manifest exists at all does the doctor run `playwright-cli --version`, once, with stdin closed and a five-second bound that kills it on every host; the version it prints is reported as self-reported and is never taken as measured, so the run-config helper still refuses to start a run on it.' \
+  && ! printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'where `timeout` or `gtimeout` exists' \
+  && ! printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'with no time limit otherwise'; then
+  check "V51 docs/verify-feature.md describes the doctor's version read as the version module performs it" PASS
+else
+  check "V51 docs/verify-feature.md describes the doctor's version read as the version module performs it" FAIL
+fi
+if [ "$(node -e 'process.stdout.write(String(require(process.argv[1]).VERSION_TIMEOUT_MS))' "$VERSION_MODULE" 2>/dev/null)" = "5000" ] \
+  && grep -qF "killSignal: 'SIGKILL'" "$VERSION_MODULE" \
+  && grep -qF "stdio: ['ignore', fd, 'ignore']" "$VERSION_MODULE"; then
+  check "V51-control the version module bounds --version at five seconds with SIGKILL and closes its stdin" PASS
+else
+  check "V51-control the version module bounds --version at five seconds with SIGKILL and closes its stdin" FAIL
+fi
+if printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'is a textual gate: it judges a `playwright-cli` call on a `zensu-verify` session before it runs only when the command text names the CLI and that session' \
+  && printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'never reaches it, so that call is not judged' \
+  && ! printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'judges every `playwright-cli` call on a `zensu-verify` session before it runs'; then
+  check "V52 docs/verify-feature.md says the gate judges the command text, not every call" PASS
+else
+  check "V52 docs/verify-feature.md says the gate judges the command text, not every call" FAIL
+fi
+CONFIG_DOC_FLAT="$(tr '\n' ' ' < "$PLUGIN_DIR/docs/configuration.md" | tr -s ' ')"
+DOLLAR_DRIFT=""
+printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'Outside single quotes a `$` counts as an expansion unless whitespace, the end of the command or a closing double quote follows it' \
+  || DOLLAR_DRIFT="$DOLLAR_DRIFT docs/verify-feature.md"
+printf '%s' "$GATES_FLAT" | grep -qF 'Outside single quotes a `$` counts as an expansion unless whitespace, the end of the command or a closing double quote follows it, so the zsh spellings' \
+  || DOLLAR_DRIFT="$DOLLAR_DRIFT docs/gates.md"
+printf '%s' "$CONFIG_DOC_FLAT" | grep -qF 'any `$` outside single quotes unless whitespace, the end of the command or a closing double quote follows it' \
+  || DOLLAR_DRIFT="$DOLLAR_DRIFT docs/configuration.md"
+for _vc_flat in "$VERIFY_DOC_FLAT" "$GATES_FLAT" "$CONFIG_DOC_FLAT"; do
+  if printf '%s' "$_vc_flat" | grep -qF -e 'unless whitespace or the end of the command follows it' -e 'that whitespace or the end of the command does not follow'; then
+    DOLLAR_DRIFT="$DOLLAR_DRIFT retired-wording"
+  fi
+done
+if [ -z "$DOLLAR_DRIFT" ]; then
+  check "V53 the three docs exempt a \$ before a closing double quote from the expansion rule" PASS
+else
+  check "V53 the three docs exempt a \$ before a closing double quote from the expansion rule (drift in:$DOLLAR_DRIFT)" FAIL
+fi
+DOLLAR_LEX="$(node -e '
+  const lex = require(process.argv[1]).lexShell;
+  const q = String.fromCharCode(39);
+  const word = (command) => {
+    const segments = lex(command).segments;
+    return segments.length === 1 && segments[0].length === 2 ? segments[0][1] : null;
+  };
+  const cases = [
+    ["a $ before a closing double quote", "x \"a$\"", false],
+    ["a $ before whitespace", "x a$ ", false],
+    ["a $ at the end", "x a$", false],
+    ["a variable inside double quotes", "x \"$12\"", true],
+    ["a $ before a single quote inside double quotes", "x \"a$" + q + "b\"", true],
+    ["a variable inside single quotes", "x " + q + "$12" + q, false],
+  ];
+  const wrong = cases.filter(([, command, unexpanded]) => {
+    const found = word(command);
+    return !found || found.unexpanded !== unexpanded;
+  }).map(([label]) => label);
+  process.stdout.write(wrong.length === 0 ? "ok" : wrong.join(", "));
+' "$MODULE" 2>&1)"
+if [ "$DOLLAR_LEX" = "ok" ]; then
+  check "V53-control the lexer keeps a \$ before a closing double quote, whitespace or the end literal, and marks the other spellings unexpanded" PASS
+else
+  check "V53-control the lexer keeps a \$ before a closing double quote, whitespace or the end literal, and marks the other spellings unexpanded (wrong: ${DOLLAR_LEX:-<none>})" FAIL
+fi
+TROUBLE_MISSING=""
+for needle in '| PARTIAL before any browser call; reason starts `the browser consent gate is not ready (consent hook: …; consent recorder: …)` |' \
+  '| PARTIAL before any browser call; reason says `so no run config is written; install the measured version with …` |' \
+  'The manifest in the `node_modules/@playwright/cli` directory beside the `playwright-cli` found on `PATH` is read first, so a wrapper script in a directory that holds one naming the measured version is accepted.' \
+  'Any other wrapper script outside the package reads as no manifest, whose reason says the binary resolves to no such manifest — unless a `package.json` sits in the directory of its resolved path or one of the three above it' \
+  'put the directory npm installs `playwright-cli` into first on `PATH`, ahead of the wrapper — the reason says so only when the wrapper resolves to no manifest, and the `PATH` order has to change either way' \
+  '| PARTIAL before any browser call; reason names `an empty PATH entry` or `the relative PATH entry` |' \
+  'remove that entry from `PATH`, or move it behind the directory that holds `playwright-cli`'; do
+  printf '%s' "$VERIFY_DOC_FLAT" | grep -qF -- "$needle" || TROUBLE_MISSING="$TROUBLE_MISSING [$needle]"
+done
+if printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'A wrapper script outside the package reads as no manifest'; then
+  TROUBLE_MISSING="$TROUBLE_MISSING [unqualified wrapper wording]"
+fi
+if [ -z "$TROUBLE_MISSING" ]; then
+  check "V54 docs/verify-feature.md troubleshoots the run-config helper's registration, version and PATH-entry refusals" PASS
+else
+  check "V54 docs/verify-feature.md troubleshoots the run-config helper's registration, version and PATH-entry refusals (missing:$TROUBLE_MISSING)" FAIL
+fi
+HELPER_MISSING=""
+for needle in 'the browser consent gate is not ready (consent hook: ${hook}; consent recorder: ${recorder})' \
+  'so no run config is written; ' \
+  'install the measured version with' \
+  'as a wrapper script outside the package does' \
+  'put the directory npm installs it into first on PATH, ahead of any wrapper' \
+  "'an empty PATH entry'" \
+  'the relative PATH entry' \
+  'remove that entry from PATH, or move it behind the directory that holds playwright-cli'; do
+  grep -qF -- "$needle" "$CONFIG_HELPER" || HELPER_MISSING="$HELPER_MISSING [$needle]"
+done
+if [ -z "$HELPER_MISSING" ]; then
+  check "V54-control the run-config helper still carries every reason the troubleshooting rows quote" PASS
+else
+  check "V54-control the run-config helper still carries every reason the troubleshooting rows quote (missing:$HELPER_MISSING)" FAIL
+fi
+if printf '%s' "$GATES_FLAT" | grep -qF 'a CLI named other than by its bare name — a path, another letter case or the package name `@playwright/cli`, where only `playwright-cli` (on Windows also its `.cmd`, `.exe` and `.ps1` names) lets `PATH` resolve the binary `/zensu:doctor` measured' \
+  && printf '%s' "$CONFIG_DOC_FLAT" | grep -qF 'a CLI named other than by its bare `playwright-cli` (a path, another letter case or the package name)'; then
+  check "V55 docs/gates.md and docs/configuration.md list the bare-name refusal" PASS
+else
+  check "V55 docs/gates.md and docs/configuration.md list the bare-name refusal" FAIL
+fi
+BARE_FACTS="$(node -e '
+  const consent = require(process.argv[1]);
+  const version = require(process.argv[2]);
+  const posix = JSON.stringify([...version.binaryNames("linux")]);
+  const windows = JSON.stringify([...version.binaryNames("win32")].sort());
+  const ok = typeof consent.REASONS.CLI_NOT_BARE === "string"
+    && posix === JSON.stringify(["playwright-cli"])
+    && windows === JSON.stringify(["playwright-cli", "playwright-cli.cmd", "playwright-cli.exe", "playwright-cli.ps1"]);
+  process.stdout.write(ok ? "ok" : "posix=" + posix + " windows=" + windows);
+' "$MODULE" "$VERSION_MODULE" 2>&1)"
+if [ "$BARE_FACTS" = "ok" ]; then
+  check "V55-control the module refuses a non-bare CLI name and the bare set is playwright-cli, plus .cmd, .exe and .ps1 on Windows" PASS
+else
+  check "V55-control the module refuses a non-bare CLI name and the bare set is playwright-cli, plus .cmd, .exe and .ps1 on Windows (${BARE_FACTS:-<none>})" FAIL
+fi
+if printf '%s' "$GATES_FLAT" | grep -qF 'While its prefilter library loads, the PreToolUse hook fails closed on a marked call and never touches any other' \
+  && printf '%s' "$GATES_FLAT" | grep -qF 'When it cannot be sourced, each hook falls back to a test of its own: a payload that names either marker alone — `playwright` or `zensu-verify`, in any letter case — is treated as marked' \
+  && printf '%s' "$GATES_FLAT" | grep -qF 'denies it with `prefilter library unavailable` once the plugin-root check and the `/zensu:doctor` exemption have run'; then
+  check "V56 docs/gates.md states the fallback test each hook runs when the prefilter library cannot be sourced" PASS
+else
+  check "V56 docs/gates.md states the fallback test each hook runs when the prefilter library cannot be sourced" FAIL
+fi
+NOLIB_ALONE=""
+for payload in 'npm view playwright version' 'echo ZENSU-VERIFY'; do
+  case "$(nolib_run pre-browser-navigation-consent.sh PreToolUse "$payload" 2>/dev/null)" in
+    *'"permissionDecision":"deny"'*'prefilter library unavailable'*) ;;
+    *) NOLIB_ALONE="$NOLIB_ALONE [pre: $payload]" ;;
+  esac
+  NOLIB_RECORDER_ERR="$(nolib_run post-browser-navigation-consent.sh PostToolUse "$payload" 2>&1 >/dev/null)"
+  NOLIB_RECORDER_RC=$?
+  case "$NOLIB_RECORDER_RC:$NOLIB_RECORDER_ERR" in
+    0:*'browser consent memory not written (prefilter library unavailable)'*) ;;
+    *) NOLIB_ALONE="$NOLIB_ALONE [post: $payload rc=$NOLIB_RECORDER_RC]" ;;
+  esac
+done
+NOLIB_UNRELATED="$(nolib_run post-browser-navigation-consent.sh PostToolUse 'ls -la' 2>&1)"
+NOLIB_UNRELATED_RC=$?
+[ "$NOLIB_UNRELATED_RC" -eq 0 ] && [ -z "$NOLIB_UNRELATED" ] || NOLIB_ALONE="$NOLIB_ALONE [post: ls -la rc=$NOLIB_UNRELATED_RC]"
+if [ -z "$NOLIB_ALONE" ]; then
+  check "V56-control without the prefilter library the gate denies and the recorder skips a payload naming either marker alone, and the recorder stays silent on an unrelated call" PASS
+else
+  check "V56-control without the prefilter library the gate denies and the recorder skips a payload naming either marker alone, and the recorder stays silent on an unrelated call (wrong:$NOLIB_ALONE)" FAIL
+fi
+VERSION_GUARD_MISSING=""
+for needle in "The one guard is the run-config helper's readiness check, which its \`--check-policy\` preflight and its write run both perform" \
+  'The check never runs the binary, so a version the binary would print about itself counts for nothing.' \
+  'It reads the `node_modules/@playwright/cli/package.json` beside the `playwright-cli` found on `PATH` first, on every platform, so a wrapper script in a directory that holds that manifest at the measured version passes: the check vouches for the manifest beside the wrapper, not for what the wrapper runs, nor for a function or alias named `playwright-cli` that the shell already has.' \
+  'The check runs only when the helper runs: the gate judges `open` by the shape of the run config it names and never reads the installed version, so a run config of that shape written another way, or a `playwright-cli` installed or put ahead on `PATH` after the helper ran, runs unmeasured.' \
+  'Any other wrapper script outside the package fails it' \
+  'with no `package.json` in the directory of its resolved path or the three above it, it resolves to no manifest, and the refusal adds the remedy of putting the directory npm installs `playwright-cli` into first on `PATH`' \
+  'when a `package.json` sits there, that manifest answers instead — as another package, or as one the check cannot judge — and the refusal names only the install command, though the `PATH` order still has to change' \
+  'A `PATH` whose empty or relative entry comes before or holds `playwright-cli` is refused too'; do
+  printf '%s' "$GATES_FLAT" | grep -qF -- "$needle" || VERSION_GUARD_MISSING="$VERSION_GUARD_MISSING [$needle]"
+done
+for retired in 'a wrapper script outside the package resolves to no manifest and is refused' 'A wrapper script outside the package therefore fails it'; do
+  if printf '%s' "$GATES_FLAT" | grep -qF -- "$retired"; then
+    VERSION_GUARD_MISSING="$VERSION_GUARD_MISSING [retired: $retired]"
+  fi
+done
+if [ -z "$VERSION_GUARD_MISSING" ]; then
+  check "V57 docs/gates.md says both helper entry points run the readiness check, never run the binary, and how a wrapper script and a cwd-relative PATH entry are refused" PASS
+else
+  check "V57 docs/gates.md says both helper entry points run the readiness check, never run the binary, and how a wrapper script and a cwd-relative PATH entry are refused (missing:$VERSION_GUARD_MISSING)" FAIL
+fi
+if printf '%s' "$GATES_FLAT" | grep -qF 'its `verify-feature` row checks that both hooks, the prefilter library, the decision module and the run-config helper exist, that the module is no symlink and loads, that the helper loads' \
+  && printf '%s' "$GATES_FLAT" | grep -qF 'follow the host'"'"'s own matcher rule as read out of the Claude Code 2.1.280 binary, and report a matcher the host may read two ways as undetermined, never as missing' \
+  && grep -qF 'hooks/lib/zensu-browser-consent-prefilter.sh' "$PLUGIN_DIR/hooks/lib/zensu-doctor.sh" \
+  && grep -qF 'require("./scripts/verify-browser-config.js")' "$PLUGIN_DIR/hooks/lib/zensu-doctor.sh"; then
+  check "V58 docs/gates.md names the doctor's availability checks and the host build the registration probes follow" PASS
+else
+  check "V58 docs/gates.md names the doctor's availability checks and the host build the registration probes follow" FAIL
+fi
+SPEC_DOC_FLAT="$(tr '\n' ' ' < "$PLUGIN_DIR/docs/verify-feature-consent-spec.md" | tr -s ' ')"
+if printf '%s' "$GATES_FLAT" | grep -qF 'The gate is textual: they judge a `playwright-cli` call on a `zensu-verify-*` session' \
+  && printf '%s' "$GATES_FLAT" | grep -qF 'when its command text names the CLI and that session, or names the CLI while the hook environment'"'"'s `PLAYWRIGHT_CLI_SESSION` names one, and while their prefilter library loads they stay out of every other Bash call' \
+  && printf '%s' "$SPEC_DOC_FLAT" | grep -qF 'where it judges a `playwright-cli` call on a `zensu-verify-*` session whose command text names the CLI and the session — a textual gate —' \
+  && ! printf '%s' "$GATES_FLAT" | grep -qF 'They judge every `playwright-cli` call whose session is a `zensu-verify-*` name' \
+  && ! printf '%s' "$SPEC_DOC_FLAT" | grep -qF 'where it judges every `playwright-cli` call on a `zensu-verify-*` session'; then
+  check "V59 docs/gates.md and the consent spec say the gate judges the command text, not every call" PASS
+else
+  check "V59 docs/gates.md and the consent spec say the gate judges the command text, not every call" FAIL
+fi
+if printf '%s' "$CONFIG_DOC_FLAT" | grep -qF 'When `hooks/lib/zensu-browser-consent-prefilter.sh` cannot be sourced it falls back to a test of its own over the whole hook payload, not only the command, and **denies** every payload that names `playwright` or `zensu-verify` in any letter case with `prefilter library unavailable`, the recognized `/zensu:doctor` and adoption commands excepted — in a project whose working directory names either word, that is every Bash call.' \
+  && printf '%s' "$CONFIG_DOC_FLAT" | grep -qF 'Without the prefilter library it skips every payload that names `playwright` or `zensu-verify`, with `prefilter library unavailable`.'; then
+  check "V60 both consent hook rows in docs/configuration.md state the prefilter-library fallback" PASS
+else
+  check "V60 both consent hook rows in docs/configuration.md state the prefilter-library fallback" FAIL
+fi
+if printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'Before it judges the target it runs the readiness check of the run-config helper: both consent hooks must be registered on a matcher that covers `Bash`, the `@playwright/cli` manifest of the `playwright-cli` on the `PATH` of the caller must name the measured version, and no empty or relative `PATH` entry may come before or hold that `playwright-cli`, so a run from a terminal judges the `PATH` of that terminal.' \
+  && ! printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'both consent hooks must be registered on a matcher that covers `Bash`, and the `@playwright/cli` manifest' \
+  && printf '%s' "$VERIFY_DOC_FLAT" | grep -qF '| `the browser consent gate is not ready (…)`, or a reason that says `so no run config is written` | the readiness check failed before the target was judged; section 5 names each cause and its fix |'; then
+  check "V61 the preflight section of docs/verify-feature.md names the readiness check that runs before the target is judged" PASS
+else
+  check "V61 the preflight section of docs/verify-feature.md names the readiness check that runs before the target is judged" FAIL
+fi
+if printf '%s' "$GATES_FLAT" | grep -qF 'That test reads the whole hook payload, not only the command, so in a project whose working directory names either word every Bash call is denied until the library is restored, the recognized `/zensu:doctor` and adoption commands excepted; a call whose payload names neither word still passes silently.'; then
+  check "V62 docs/gates.md says the prefilter-library fallback reads the whole payload, working directory included" PASS
+else
+  check "V62 docs/gates.md says the prefilter-library fallback reads the whole payload, working directory included" FAIL
+fi
+case "$(bash_payload PreToolUse 'ls -la' "$SID" "$PROJ/Playwright-demo" | CLAUDE_PLUGIN_ROOT="$NOLIB_ROOT" bash "$NOLIB_ROOT/hooks/pre-browser-navigation-consent.sh" 2>/dev/null)" in
+  *'"permissionDecision":"deny"'*'prefilter library unavailable'*) check "V62-control without the prefilter library an unrelated call is denied when the working directory names playwright" PASS ;;
+  *) check "V62-control without the prefilter library an unrelated call is denied when the working directory names playwright" FAIL ;;
+esac
+TEXTUAL_MISSING=""
+for needle in 'A CLI name assembled at run time — an expansion inside `playwright-cli`, even one set or left empty in the same command, an ANSI-C escape inside the name such as `$'"'"'playwright\x2dcli'"'"'`, a script file, an alias under another name — never reaches it, so that call is not judged, and the literal-spelling and one-plain-call rules below never apply to it; `$'"'"'playwright-cli'"'"'`, which holds the plain name, still names the CLI to it, so a call on a `zensu-verify` session spelled that way is judged and denied as not one plain call.' \
+  'A session name assembled at run time — a variable, a substitution, an ANSI-C escape or an expansion inside the `zensu-verify-` prefix — hides the call the same way, unless the hook environment'"'"'s `PLAYWRIGHT_CLI_SESSION` names a `zensu-verify-` session: then a call that spells `playwright-cli` literally is judged whatever its session, and a session that is not literal is denied.' \
+  'A function or alias named `playwright-cli` that the shell already has, such as one from a startup file, is judged as the plain call its text shows, and the gate cannot see what it runs, so the denials below bind only what the command text spells.' \
+  'While its prefilter library loads, the gate reaches no decision for a call on any other session whose command text names no `zensu-verify-` session' \
+  '| a Bash call is denied with `Zensu browser consent gate denied the playwright-cli call:` and the reason `prefilter library unavailable`, `node unavailable`, `decision module absent or symlinked` or `decision module failed` |' \
+  'Without its prefilter library the hook denies every Bash call whose payload names `playwright` or `zensu-verify`, not only browser calls; in a project whose path names either word that is every Bash call except the recognized `/zensu:doctor` and adoption commands on a POSIX host with `node`' \
+  'run `/zensu:doctor` and reinstall the plugin even when its `verify-feature` row reads ready: that row names a missing prefilter library and a missing, symlinked or unloadable decision module, but it tests the library for existence only, cannot see a module that loads and then fails, and looks for `node` on the `PATH` of its own shell, stopping before that row when it finds none; for `node unavailable`, put `node` on the `PATH` of the environment that launches Claude Code'; do
+  printf '%s' "$VERIFY_DOC_FLAT" | grep -qF -- "$needle" || TEXTUAL_MISSING="$TEXTUAL_MISSING [$needle]"
+done
+for retired in 'a variable an earlier call set' 'run `/zensu:doctor`, whose `verify-feature` row names the cause, and reinstall the plugin; for `node unavailable`' 'A name assembled at run time — an expansion inside' 'An expansion inside the `zensu-verify-` prefix hides the session the same way' 'an ANSI-C `$'"'"'…'"'"'` escape, a script file, an alias' 'a substitution, an ANSI-C escape, an expansion inside'; do
+  if printf '%s' "$VERIFY_DOC_FLAT" | grep -qF -- "$retired"; then
+    TEXTUAL_MISSING="$TEXTUAL_MISSING [retired: $retired]"
+  fi
+done
+if [ -z "$TEXTUAL_MISSING" ]; then
+  check "V63 docs/verify-feature.md names an expansion inside either name as unjudged and troubleshoots the gate's plugin-integrity denials" PASS
+else
+  check "V63 docs/verify-feature.md names an expansion inside either name as unjudged and troubleshoots the gate's plugin-integrity denials (missing:$TEXTUAL_MISSING)" FAIL
+fi
+RESIDUAL_MISSING=""
+for needle in 'an expansion inside `playwright-cli` or inside the `zensu-verify-` prefix, even one set or left empty in the same command, an ANSI-C escape inside a name, such as `$'"'"'playwright\x2dcli'"'"'`, a script file that makes the call' \
+  '`$'"'"'playwright-cli'"'"'`, which holds the plain name, still names the CLI, so a call on a `zensu-verify` session spelled that way is judged and denied as not one plain call.' \
+  'While the hook environment'"'"'s `PLAYWRIGHT_CLI_SESSION` names a `zensu-verify-` session, a call that spells `playwright-cli` literally is marked whatever its session, so a session assembled at run time — a variable, a substitution, an ANSI-C escape or an expansion inside the prefix — is denied as not literal; only a CLI name assembled at run time stays unseen.' \
+  'The single-call and literal-argument rules bind only a call the gate judges, so they do not narrow this and do not make the gate a boundary.' \
+  'A function or alias named `playwright-cli` that the shell already has, such as one from a startup file, is judged as the plain call its text shows, and neither hook can see what it runs.'; do
+  printf '%s' "$GATES_FLAT" | grep -qF -- "$needle" || RESIDUAL_MISSING="$RESIDUAL_MISSING [$needle]"
+done
+for retired in 'The single-call rule narrows what can be written inline' 'The one exception is an expansion inside the prefix' 'an ANSI-C `$'"'"'…'"'"'` escape, a script file that makes the call'; do
+  if printf '%s' "$GATES_FLAT" | grep -qF -- "$retired"; then
+    RESIDUAL_MISSING="$RESIDUAL_MISSING [retired: $retired]"
+  fi
+done
+if [ -z "$RESIDUAL_MISSING" ]; then
+  check "V64 docs/gates.md says an expansion inside either name goes unjudged and the single-call rule does not narrow that" PASS
+else
+  check "V64 docs/gates.md says an expansion inside either name goes unjudged and the single-call rule does not narrow that (missing:$RESIDUAL_MISSING)" FAIL
+fi
+EXPANSION_REASON="$(PLAYWRIGHT_CLI_SESSION="$SESSION" pre_reason 'playwright-cli -s=zensu-ver${Z}ify-vc eval 1' "$SID" "$PROJ")"
+VARIABLE_REASON="$(PLAYWRIGHT_CLI_SESSION="$SESSION" pre_reason 'playwright-cli -s=$S eval 1' "$SID" "$PROJ")"
+if [ "$(pre_verdict 'Z=; playwright-cl${Z}i -s='"$SESSION"' eval 1' "$SID" "$PROJ")" = "NONE" ] \
+  && [ "$(pre_verdict 'playwright-cli -s=zensu-ver${Z}ify-vc eval 1' "$SID" "$PROJ")" = "NONE" ] \
+  && [ "$(pre_verdict 'playwright-cli -s=$S eval 1' "$SID" "$PROJ")" = "NONE" ] \
+  && [ "$(PLAYWRIGHT_CLI_SESSION="$SESSION" pre_verdict 'playwright-cli -s=zensu-ver${Z}ify-vc eval 1' "$SID" "$PROJ")" = "DENY" ] \
+  && printf '%s' "$EXPANSION_REASON" | grep -qF 'must name its session literally' \
+  && [ "$(PLAYWRIGHT_CLI_SESSION="$SESSION" pre_verdict 'playwright-cli -s=$S eval 1' "$SID" "$PROJ")" = "DENY" ] \
+  && printf '%s' "$VARIABLE_REASON" | grep -qF 'must name its session literally' \
+  && printf '%s' "$(PLAYWRIGHT_CLI_SESSION="$SESSION" pre_reason 'playwright-cli -s=$(cat s) eval 1' "$SID" "$PROJ")" | grep -qF 'must name its session literally' \
+  && printf '%s' "$(PLAYWRIGHT_CLI_SESSION="$SESSION" pre_reason 'playwright-cli -s=$'"'"'\x7a'"'"'ensu-verify-vc eval 1' "$SID" "$PROJ")" | grep -qF 'must name its session literally' \
+  && [ "$(PLAYWRIGHT_CLI_SESSION="$SESSION" pre_verdict 'Z=; playwright-cl${Z}i -s=$S eval 1' "$SID" "$PROJ")" = "NONE" ] \
+  && [ "$(pre_verdict '$'"'"'playwright\x2dcli'"'"' -s='"$SESSION"' eval 1' "$SID" "$PROJ")" = "NONE" ] \
+  && printf '%s' "$(pre_reason '$'"'"'playwright-cli'"'"' -s='"$SESSION"' eval 1' "$SID" "$PROJ")" | grep -qF 'must be exactly one plain playwright-cli call'; then
+  check "V64-control a name assembled at run time reaches no decision, and while the hook environment names a zensu-verify session a literal playwright-cli call with a non-literal session is denied" PASS
+else
+  check "V64-control a name assembled at run time reaches no decision, and while the hook environment names a zensu-verify session a literal playwright-cli call with a non-literal session is denied" FAIL
+fi
+VERSION_MEMBERS="$(grep -oE 'cliVersion\.[A-Za-z_]+' "$MODULE" | LC_ALL=C sort -u | tr '\n' ' ')"
+if [ "$VERSION_MEMBERS" = "cliVersion.BINARY_NAMES cliVersion.PACKAGE_NAME cliVersion.binaryNames " ] \
+  && [ "$(grep -o 'cliVersion' "$MODULE" | wc -l | tr -d ' ')" = "4" ] \
+  && [ "$(grep -c 'playwright-cli-version' "$MODULE")" = "1" ] \
+  && grep -qF "const cliVersion = require('./playwright-cli-version-v1.js');" "$MODULE" \
+  && ! grep -q 'playwright-cli-version' "$PRE_HOOK" "$POST_HOOK" "$PREFILTER_LIB"; then
+  check "V67 the consent module takes only BINARY_NAMES, PACKAGE_NAME and binaryNames from the version module, so the gate never reads the installed version" PASS
+else
+  check "V67 the consent module takes only BINARY_NAMES, PACKAGE_NAME and binaryNames from the version module, so the gate never reads the installed version (members:$VERSION_MEMBERS)" FAIL
+fi
+HOOK_DENY_MISSING=""
+for literal in 'Zensu browser consent gate denied the playwright-cli call: %s' 'deny "prefilter library unavailable"' 'deny "node unavailable"' 'deny "decision module absent or symlinked"' 'deny "decision module failed"'; do
+  grep -qF -- "$literal" "$PRE_HOOK" || HOOK_DENY_MISSING="$HOOK_DENY_MISSING [$literal]"
+done
+if [ -z "$HOOK_DENY_MISSING" ]; then
+  check "V63-control the pre hook still prints the deny prefix and the four plugin-integrity reasons the troubleshooting row quotes" PASS
+else
+  check "V63-control the pre hook still prints the deny prefix and the four plugin-integrity reasons the troubleshooting row quotes (missing:$HOOK_DENY_MISSING)" FAIL
+fi
+OPS_DOC_FLAT="$(tr '\n' ' ' < "$PLUGIN_DIR/docs/operations.md" | tr -s ' ')"
+if printf '%s' "$OPS_DOC_FLAT" | grep -qF '`the browser consent gate is not ready (…)`, a reason ending in `so no run config is written; …`' \
+  && printf '%s' "$OPS_DOC_FLAT" | grep -qF 'The run-config helper also refuses, in its preflight and before it writes a run config, unless both consent hooks are registered, the `@playwright/cli` manifest of that `playwright-cli` names that version and no empty or relative `PATH` entry comes before or holds it; for those refusals run `/zensu:doctor` and follow section 5 of [Verify a feature live](verify-feature.md).'; then
+  check "V65 the docs/operations.md troubleshooting row names the run-config helper's readiness refusals" PASS
+else
+  check "V65 the docs/operations.md troubleshooting row names the run-config helper's readiness refusals" FAIL
+fi
+FALLBACK_GAP_MISSING=""
+printf '%s' "$GATES_FLAT" | grep -qF 'Unlike the library, that test drops the JSON escapes `\n`, `\r` and `\t` without first pairing escaped backslashes, so a gated call can name neither word to it: `playw\right-cli -s=ze\nsu-verify-x eval 1`, which bash runs as `playwright-cli -s=zensu-verify-x eval 1`, passes unjudged until the library is restored, and so does a call that splits only `playwright-cli` that way while the hook environment'"'"'s `PLAYWRIGHT_CLI_SESSION` names a `zensu-verify-` session.' || FALLBACK_GAP_MISSING="$FALLBACK_GAP_MISSING [gates.md fallback gap]"
+printf '%s' "$CONFIG_DOC_FLAT" | grep -qF 'That test drops the JSON escapes `\n`, `\r` and `\t` without first pairing escaped backslashes, so a call that splits each word with a backslash before `n`, `r` or `t`, such as `playw\right-cli -s=ze\nsu-verify-x`, escapes it and runs unjudged, and so does a split `playwright-cli` alone while the hook environment'"'"'s `PLAYWRIGHT_CLI_SESSION` names a `zensu-verify-` session.' || FALLBACK_GAP_MISSING="$FALLBACK_GAP_MISSING [configuration.md fallback gap]"
+if printf '%s' "$GATES_FLAT" | grep -qF 'a broader test that still fails closed'; then
+  FALLBACK_GAP_MISSING="$FALLBACK_GAP_MISSING [retired: a broader test that still fails closed]"
+fi
+if printf '%s' "$CONFIG_DOC_FLAT" | grep -qF 'falls back to a broader test'; then
+  FALLBACK_GAP_MISSING="$FALLBACK_GAP_MISSING [retired: falls back to a broader test]"
+fi
+if printf '%s' "$GATES_FLAT" | grep -qF 'The PreToolUse hook fails closed on a marked call and, while its prefilter library loads, never touches any other'; then
+  FALLBACK_GAP_MISSING="$FALLBACK_GAP_MISSING [retired: an unconditional fail-closed claim]"
+fi
+if [ -z "$FALLBACK_GAP_MISSING" ]; then
+  check "V68 docs/gates.md and docs/configuration.md name the backslash spelling the library-unavailable fallback misses" PASS
+else
+  check "V68 docs/gates.md and docs/configuration.md name the backslash spelling the library-unavailable fallback misses (missing:$FALLBACK_GAP_MISSING)" FAIL
+fi
+OTHER_SESSION_MISSING=""
+printf '%s' "$GATES_FLAT" | grep -qF 'such a call reaches no decision only when all of these hold: the command parses and stays within the 256 KiB size bound; it holds no operator (`;`, `&`, `&&`, `|`, `||`, `|&`, parentheses), no command on a further line, and no `$(…)`, `${…}`, `$((…))`, backtick or process-substitution body, heredoc, here-string or non-literal redirection target anywhere;' || OTHER_SESSION_MISSING="$OTHER_SESSION_MISSING [docs/gates.md shape conditions]"
+printf '%s' "$GATES_FLAT" | grep -qF 'its one `playwright-cli` stands in command position, directly or behind a package launcher or a wrapper the gate knows (`env`, `sudo`, `doas`, `timeout`, `gtimeout`, `nohup`, `time`, `nice`, `exec`, `command`, `builtin`); the call gives at most one session argument and the command at most one `PLAYWRIGHT_CLI_SESSION` assignment; the session and every argument are literal and parse; and the command defines no `playwright-cli` function, uses no environment builtin and names no `PLAYWRIGHT_MCP_*` or `PWTEST_*` variable.' || OTHER_SESSION_MISSING="$OTHER_SESSION_MISSING [docs/gates.md call conditions]"
+for doc in docs/verify-feature.md docs/configuration.md; do
+  DOC_FLAT="$(tr '\n' ' ' < "$PLUGIN_DIR/$doc" | tr -s ' ')"
+  printf '%s' "$DOC_FLAT" | grep -qF 'reaches no decision only when the command meets every condition that [Browser Consent Gate](gates.md#browser-consent-gate) lists for it' || OTHER_SESSION_MISSING="$OTHER_SESSION_MISSING [$doc pointer]"
+done
+for doc in docs/verify-feature.md docs/gates.md docs/configuration.md; do
+  DOC_FLAT="$(tr '\n' ' ' < "$PLUGIN_DIR/$doc" | tr -s ' ')"
+  printf '%s' "$DOC_FLAT" | grep -qiF 'every other command that names the CLI, a mere mention included, is denied' || OTHER_SESSION_MISSING="$OTHER_SESSION_MISSING [$doc mere mention]"
+  printf '%s' "$DOC_FLAT" | grep -qiF 'a known wrapper, a package launcher, a CLI path or an environment assignment is refused only on a `zensu-verify` session' || OTHER_SESSION_MISSING="$OTHER_SESSION_MISSING [$doc zensu-verify-only refusals]"
+  for retired in 'reaches no decision only as one plain call that names its session once' 'reaches no decision only when the command is one `playwright-cli` call that parses'; do
+    if printf '%s' "$DOC_FLAT" | grep -qF -- "$retired"; then
+      OTHER_SESSION_MISSING="$OTHER_SESSION_MISSING [$doc retired: $retired]"
+    fi
+  done
+done
+if [ -z "$OTHER_SESSION_MISSING" ]; then
+  check "V69 the three docs list what lets a call on another session reach no decision while the hook environment names a zensu-verify session" PASS
+else
+  check "V69 the three docs list what lets a call on another session reach no decision while the hook environment names a zensu-verify session (missing:$OTHER_SESSION_MISSING)" FAIL
+fi
+OTHER_SESSION_WRONG=""
+for command in 'playwright-cli -s=other-vc eval 1' 'timeout 5 playwright-cli -s=other-vc eval 1' 'sudo playwright-cli -s=other-vc eval 1' 'npx @playwright/cli -s=other-vc eval 1' '/usr/local/bin/playwright-cli -s=other-vc eval 1' 'FOO=1 playwright-cli -s=other-vc eval 1' 'PLAYWRIGHT_CLI_SESSION=a playwright-cli -s=other-vc eval 1' 'playwright-cli -s=other-vc fill e1 playwright-cli'; do
+  [ "$(PLAYWRIGHT_CLI_SESSION="$SESSION" pre_verdict "$command" "$SID" "$PROJ")" = "NONE" ] || OTHER_SESSION_WRONG="$OTHER_SESSION_WRONG [not NONE: $command]"
+done
+for command in 'playwright-cli -s=other-vc eval 1; echo hi' 'playwright-cli -s=other-vc eval 1 &' 'timeout ${T} playwright-cli -s=other-vc eval 1' 'stdbuf -oL playwright-cli -s=other-vc eval 1' 'playwright-cli -s=other-vc open --headed=yes' 'export A=1 && playwright-cli -s=other-vc eval 1' 'playwright-cli() { :; }; playwright-cli -s=other-vc eval 1' 'playwright-cli -s=other-vc eval $X' 'PWTEST_X=1 playwright-cli -s=other-vc eval 1' 'echo 1 | xargs playwright-cli -s=other-vc eval' 'grep -r playwright-cli docs'; do
+  [ "$(PLAYWRIGHT_CLI_SESSION="$SESSION" pre_verdict "$command" "$SID" "$PROJ")" = "DENY" ] || OTHER_SESSION_WRONG="$OTHER_SESSION_WRONG [not DENY: $command]"
+done
+if [ -z "$OTHER_SESSION_WRONG" ]; then
+  check "V69-control while the hook environment names a zensu-verify session, a known wrapper, launcher, path, assignment, a second session spelling or a CLI word among the call's arguments on another session reaches no decision, and a second command, trailing operator, expansion body, unknown wrapper, parse fault, environment builtin, function, expansion, ambient name, indirection or mere mention is denied" PASS
+else
+  check "V69-control while the hook environment names a zensu-verify session, a known wrapper, launcher, path, assignment, a second session spelling or a CLI word among the call's arguments on another session reaches no decision, and a second command, trailing operator, expansion body, unknown wrapper, parse fault, environment builtin, function, expansion, ambient name, indirection or mere mention is denied (wrong:$OTHER_SESSION_WRONG)" FAIL
+fi
+SHELL_STATE_MISSING=""
+printf '%s' "$CONFIG_DOC_FLAT" | grep -qF 'a `playwright-cli` function the command defines, in any letter case' || SHELL_STATE_MISSING="$SHELL_STATE_MISSING [configuration.md function]"
+printf '%s' "$GATES_FLAT" | grep -qF 'a function named `playwright-cli`, in any letter case, that the command defines' || SHELL_STATE_MISSING="$SHELL_STATE_MISSING [gates.md function]"
+printf '%s' "$GATES_FLAT" | grep -qF 'lets `PATH` resolve the binary `/zensu:doctor` measured, unless the shell already has a function or alias of that name, which neither hook can see' || SHELL_STATE_MISSING="$SHELL_STATE_MISSING [gates.md bare name]"
+printf '%s' "$VERIFY_DOC_FLAT" | grep -qF 'and the run-config helper refuses to write a run config for any other. The gate itself never reads the installed version, so a `playwright-cli` installed or put ahead on `PATH` after the helper ran goes unmeasured, and so does a run whose run config of the right shape was written another way. The check reads the version the package manifest declares, which vouches neither for what a wrapper script runs nor for a function or alias named `playwright-cli` that the shell already has.' || SHELL_STATE_MISSING="$SHELL_STATE_MISSING [verify-feature.md install note]"
+for retired in 'refuses to start a run on any other' 'a `playwright-cli` function in any letter case'; do
+  if printf '%s' "$VERIFY_DOC_FLAT $CONFIG_DOC_FLAT" | grep -qF -- "$retired"; then
+    SHELL_STATE_MISSING="$SHELL_STATE_MISSING [retired: $retired]"
+  fi
+done
+if [ -z "$SHELL_STATE_MISSING" ]; then
+  check "V66 the docs say a function is denied only when the command defines it, and the version is checked only when the helper runs" PASS
+else
+  check "V66 the docs say a function is denied only when the command defines it, and the version is checked only when the helper runs (missing:$SHELL_STATE_MISSING)" FAIL
+fi
 
 echo "----"
 echo "test-verify-consent: $PASS PASS / $FAIL FAIL"

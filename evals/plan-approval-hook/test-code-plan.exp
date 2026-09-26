@@ -10,6 +10,15 @@
 # fixed answer: for a feature-shaped plan it is /zensu:autopilot, which pushes a
 # branch and opens a pull request. A blind "1" into a reordered question could
 # take that outward-facing route from an unattended script.
+#
+# After the answer the directive orders ONE Bash call before the dispatch: the
+# command that records the answer for the session. This script answers at most one
+# Bash permission prompt with "1", and only when record_prompt_ok accepts it. It
+# declines any other permission prompt with Escape: one declined before the helper
+# ran leaves T2.9 red, and one declined after it ends the wait before the status
+# line and leaves T2.4 red. An ordinal is safe only at a prompt whose first option
+# is always Yes — the plan approval below and a permission prompt — and never at
+# the route question, which reorders its options.
 
 set timeout 240
 set DEBUG_LOG [lindex $argv 0]
@@ -20,8 +29,44 @@ exec rm -f $DEBUG_LOG
 set PLUGIN_DIR [lindex $argv 1]
 if {$PLUGIN_DIR eq ""} { set PLUGIN_DIR "[file dirname [file dirname [file dirname [file normalize [info script]]]]]" }
 
+# The terminal repaints only the cells that change, so the space between two words
+# of newly drawn text can arrive as a cursor-position escape. GAP matches a space,
+# such an escape, or nothing; every multi-word pattern uses it.
+set GAP {(?:[ \t]|\x1b\[[0-9;]*[A-Za-z])*}
+
+# record_prompt_ok reads the text from the LAST mention of the helper up to the
+# permission question. It first drops escape sequences and every character that is
+# not printable ASCII, because spaces, line wraps and box borders reach this script
+# in forms no pattern can follow. What is left must start with the --tdd verb and
+# must hold none of ; & | ` < > ( and no helper output, so a chained, piped,
+# redirected or substituted command is refused, process substitution and zsh glob
+# qualifiers included, and so is a prompt that holds a later tool call or comes
+# after the helper already ran. The flattening removes line breaks too: a second
+# command on its own line, and anything before the helper's name, stay invisible
+# to it. The permission box draws the model-written description below the command,
+# so a description that ends in the helper's name supplies the last mention, and the
+# approved command then need not run the helper at all.
+# EXTRACTED BY TEXT: D39 in tests/structure/test-plan-approved-delegate.sh pulls this
+# proc out with a sed range and runs it under tclsh, and D39b pins its call below by
+# the exact spelling. Keep `proc record_prompt_ok ` and the closing `}` at column 0.
+proc record_prompt_ok {text} {
+  regsub -all {\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)} $text {} text
+  regsub -all {\x1b\[[0-9;?]*[ -/]*[@-~]} $text {} text
+  regsub -all {\x1b[()*+].} $text {} text
+  regsub -all {\x1b[^\[\]]} $text {} text
+  regsub -all {[^!-~]+} $text {} text
+  set name zensu-delivery-route.sh
+  set at [string last $name $text]
+  if {$at < 0} { return 0 }
+  set tail [string range $text [expr {$at + [string length $name]}] end]
+  if {![regexp {^["']?--tdd(?!-)} $tail]} { return 0 }
+  if {[regexp {[;&|`<>(]|delivery-route:} $tail]} { return 0 }
+  return 1
+}
+
 spawn claude --permission-mode plan --debug-file=$DEBUG_LOG --plugin-dir $PLUGIN_DIR \
   "Write the SHORTEST possible plan to add a function isEven(n: number): boolean to evals/plan-approval-hook/fixtures/sample.ts. No exploration needed — just plan it as one RED/IMPL/GREEN cycle and call ExitPlanMode immediately."
+match_max 65536
 
 expect {
   -re "Yes.*proceed|Yes.*approve|Approve" {
@@ -39,11 +84,11 @@ expect {
 # option LABEL — typing the label selects it regardless of the slot it landed in,
 # which an ordinal cannot do once the directive reorders the four options.
 expect {
-  -re "Zensu workflow — /zensu:tdd|Autopilot — /zensu:autopilot" {
+  -re "Zensu${GAP}workflow${GAP}—${GAP}/zensu:tdd|Autopilot${GAP}—${GAP}/zensu:autopilot" {
     send_user "\n>>> Delivery-route question detected — selecting the Zensu workflow by label\n"
     send "Zensu workflow\r"
   }
-  -re "Executing via /zensu:tdd" {
+  -re "Executing${GAP}via${GAP}/zensu:tdd" {
     send_user "\n>>> Routed to /zensu:tdd before an explicit prompt match\n"
   }
   timeout {
@@ -51,15 +96,41 @@ expect {
   }
 }
 
+# The directive allows the status line before or after the record call, so the
+# block ends only once it has seen BOTH the status line and the helper's own output,
+# in either order. -continue_timer keeps the whole wait inside one 240 s budget.
+# The helper's output counts only on a tool-result line (the ⎿ the terminal puts in
+# front of one), so words the model writes cannot stand in for it; T2.9 grades the
+# marker file the helper writes, not this text.
+set recorded 0
+set dispatched 0
+set answered 0
 expect {
-  -re "Executing via /zensu:tdd" {
-    send_user "\n>>> POSITIVE: /zensu:tdd execution acknowledged\n"
+  -re "Do${GAP}you${GAP}want${GAP}to${GAP}proceed" {
+    if {!$answered && !$recorded && [record_prompt_ok $expect_out(buffer)]} {
+      set answered 1
+      send_user "\n>>> Record command permission prompt — approving the helper's --tdd call\n"
+      send "1\r"
+      exp_continue -continue_timer
+    }
+    send_user "\n>>> Permission prompt not recognised as the record command — declining it\n"
+    send "\x1b"
   }
-  -re "Skipping TDD" {
+  -re "⎿${GAP}delivery-route:${GAP}tdd" {
+    set recorded 1
+    send_user "\n>>> POSITIVE: the helper recorded the answer\n"
+    if {!$dispatched} { exp_continue -continue_timer }
+  }
+  -re "Executing${GAP}via${GAP}/zensu:tdd" {
+    set dispatched 1
+    send_user "\n>>> POSITIVE: /zensu:tdd execution acknowledged\n"
+    if {!$recorded} { exp_continue -continue_timer }
+  }
+  -re "Skipping${GAP}TDD" {
     send_user "\n>>> UNEXPECTED skip for a code change\n"
   }
   timeout {
-    send_user "\n>>> TIMEOUT post-answer (Claude still processing)\n"
+    send_user "\n>>> TIMEOUT post-answer (recorded=$recorded dispatched=$dispatched)\n"
   }
   eof { send_user "\n>>> session ended\n" }
 }

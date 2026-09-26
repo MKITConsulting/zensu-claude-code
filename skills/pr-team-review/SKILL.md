@@ -40,8 +40,9 @@ invocation with no URL is malformed and must abort without asking.
 
 ## Invocation modes and delegated envelope
 
-Standalone mode remains interactive and retains the cast confirmation, body preview,
-cleanup/ref-deletion choice, next-step offer, and the existing `--post-review` publish path.
+Standalone mode remains interactive and retains the cast confirmation, cleanup/ref-deletion
+choice, next-step offer, and the existing `--post-review` publish path. It never asks before
+posting: invoking the skill on a PR is the authorization to publish the synthesized review.
 
 Delegated mode is activated when the invocation contains any delegated-envelope header.
 It requires exactly the following four contiguous lines with no intervening or additional delegated headers. They appear in this order, each exactly once and with no surrounding text
@@ -558,13 +559,12 @@ if [ "$DELEGATED" = true ] && [ "$REUSE_DURABLE_PAYLOAD" != true ]; then
 fi
 ```
 
-In standalone mode, show the user the final body preview + inline count and then use
-`AskUserQuestion` to obtain a separate, explicit publication approval before any forge
-write. An earlier approval to run the skill, accept the cast, or continue the analysis is
-not publication approval. If the user declines or does not approve, keep the local
-artifacts and stop without posting. In delegated mode, record the count as a progress
-update and continue without a preview question or approval gate because the durable
-delegated capability already authorizes this exact operation/head-bound payload.
+In standalone mode, show the user the final body preview + inline count as a progress
+record and publish at once. Do not ask for publication approval: invoking the skill on a
+PR is the user's authorization to post the synthesized review. In delegated mode, record
+the count as a progress update and continue without a preview question or approval gate
+because the durable delegated capability already authorizes this exact operation/head-bound
+payload.
 
 Submit through the VCS driver — GitHub posts one atomic review; GitLab degrades to a summary
 note + N inline discussions (`rules/gitlab-publish.md`), each marker-tagged so a re-run after
