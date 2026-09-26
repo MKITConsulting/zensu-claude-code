@@ -6886,8 +6886,8 @@ else
 fi
 
 TWIN3_SID=7c3c0001-0000-0000-0000-0000000000d5
-fix "$TWIN3_SID" "$DEAD_PID" 240 end_turn none "$FAKE/work/twin3-old" "" twin3-branch
-fix "$TWIN3_SID" "$DEAD_PID" 45 end_turn none "$FAKE/work/twin3-new" "" twin3-branch
+fix "$TWIN3_SID" "$DEAD_PID" 240 end_turn none "$FAKE/work/twin3-old" "" twin3-branch 4545
+fix "$TWIN3_SID" "$DEAD_PID" 45 end_turn none "$FAKE/work/twin3-new" "" twin3-branch 4545
 SEL25_OUT="$(selrun "" show twin3-branch --all --no-git --json 2>/dev/null)"
 SEL25_RC=$?
 SEL25_CWD="$(printf '%s' "$SEL25_OUT" | json_get cwd)"
@@ -6895,6 +6895,33 @@ if [ "$SEL25_RC" = "0" ] && [ "$SEL25_CWD" = "$FAKE/work/twin3-new" ]; then
   check "SEL25 one session's transcripts in two directories that share a branch collapse to the newer copy on the branch tier instead of an ambiguity" PASS
 else
   check "SEL25 one session on the branch tier in two directories (rc=$SEL25_RC cwd='$SEL25_CWD', want $FAKE/work/twin3-new)" FAIL
+fi
+SEL25B_OUT="$(selrun "" show '#4545' --all --no-git --json 2>/dev/null)"
+SEL25B_RC=$?
+SEL25B_CWD="$(printf '%s' "$SEL25B_OUT" | json_get cwd)"
+if [ "$SEL25B_RC" = "0" ] && [ "$SEL25B_CWD" = "$FAKE/work/twin3-new" ]; then
+  check "SEL25b one session's transcripts in two directories that share a PR collapse to the newer copy on the PR tier instead of an ambiguity" PASS
+else
+  check "SEL25b one session on the PR tier in two directories (rc=$SEL25B_RC cwd='$SEL25B_CWD', want $FAKE/work/twin3-new)" FAIL
+fi
+SEL25C_OUT="$(selrun "" show twin3 --all --no-git --json 2>/dev/null)"
+SEL25C_RC=$?
+SEL25C_CWD="$(printf '%s' "$SEL25C_OUT" | json_get cwd)"
+if [ "$SEL25C_RC" = "0" ] && [ "$SEL25C_CWD" = "$FAKE/work/twin3-new" ]; then
+  check "SEL25c one session's transcripts in two directories whose names contain a selector shorter than the id-prefix floor collapse to the newer copy on the partial tier instead of an ambiguity" PASS
+else
+  check "SEL25c one session on the partial tier in two directories (rc=$SEL25C_RC cwd='$SEL25C_CWD', want $FAKE/work/twin3-new)" FAIL
+fi
+TWIN4_SID=7d4d0001-0000-0000-0000-0000000000d7
+fix "$TWIN4_SID" "$DEAD_PID" 240 end_turn none "$FAKE/work/a/twin4" "" twin4-branch
+fix "$TWIN4_SID" "$DEAD_PID" 45 end_turn none "$FAKE/work/b/twin4" "" twin4-branch
+SEL25D_OUT="$(selrun "" show twin4 --all --no-git --json 2>/dev/null)"
+SEL25D_RC=$?
+SEL25D_CWD="$(printf '%s' "$SEL25D_OUT" | json_get cwd)"
+if [ "$SEL25D_RC" = "0" ] && [ "$SEL25D_CWD" = "$FAKE/work/b/twin4" ]; then
+  check "SEL25d one session's transcripts in two directories that share a worktree name under different parents collapse to the newer copy on the exact-worktree tier instead of an ambiguity" PASS
+else
+  check "SEL25d one session on the exact-worktree tier in two directories (rc=$SEL25D_RC cwd='$SEL25D_CWD', want $FAKE/work/b/twin4)" FAIL
 fi
 
 RSTAMP_SID=9e11000a-0000-0000-0000-0000000000ea
