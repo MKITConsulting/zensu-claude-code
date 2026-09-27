@@ -128,6 +128,10 @@ case "${1:-}" in
         echo "zensu-log.sh --phase: BASELINE_REBUILT is written only by the workflow-baseline repair; it is the provenance record of a rebuilt baseline and cannot be minted by a caller" >&2
         exit 2
         ;;
+      [Pp][Rr][Oo][Jj][Ee][Cc][Tt]_[Rr][Oo][Oo][Tt]_[Rr][Ee][Ss][Tt][Oo][Rr][Ee][Dd])
+        echo "zensu-log.sh --phase: PROJECT_ROOT_RESTORED is written only by the project-root restore; it is the provenance record of a re-created project root and cannot be minted by a caller" >&2
+        exit 2
+        ;;
     esac
     case "$reason_val" in
       [Cc][Hh][Aa][Ii][Nn]-[Rr][Ee][Cc][Oo][Vv][Ee][Rr][Ee][Dd]:\ *)
@@ -144,6 +148,10 @@ case "${1:-}" in
         ;;
       [Bb][Aa][Ss][Ee][Ll][Ii][Nn][Ee]-[Rr][Ee][Bb][Uu][Ii][Ll][Tt]:\ *)
         echo "zensu-log.sh --phase: a 'baseline-rebuilt: ' reason is reserved for the workflow-baseline repair" >&2
+        exit 2
+        ;;
+      "project-root-restored: "*)
+        echo "zensu-log.sh --phase: a 'project-root-restored: ' reason is reserved for the project-root restore" >&2
         exit 2
         ;;
     esac
