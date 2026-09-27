@@ -1,13 +1,12 @@
 #!/bin/bash
 # Shared payload extraction and root/session-key resolution for the worktree-keep hooks.
 #
-# It lives in one file and is CALLED twice rather than copied into the second hook, for
-# the reason hooks/lib/zensu-witness.sh states about its own pair: the two halves write
-# and remove the SAME anchor, so a one-sided edit to this ladder makes SessionStart write
-# under one root while SessionEnd removes from another. The orphaned anchor then holds the
-# keep marker — and with it the worktree out of the desktop pool — until the idle window,
-# which is the accumulation sweepSiblings exists to bound, and both hooks exit 0 on every
-# fault so nothing says so.
+# It lives in one file and is CALLED twice rather than copied into the second hook,
+# because the two halves write and remove the SAME anchor, so a one-sided edit to this
+# ladder makes SessionStart write under one root while SessionEnd removes from another.
+# The orphaned anchor then holds the keep marker — and with it the worktree out of the
+# desktop pool — until the idle window, which is the accumulation sweepSiblings exists to
+# bound, and both hooks exit 0 on every fault so nothing says so.
 #
 # What each hook keeps for itself is the house pattern the per-file scans expect: its own
 # plugin-root guard, its own principal check with its own event name, its own config gate,

@@ -11,11 +11,10 @@
 #   2. render the module DIRECTORY through hooks/lib/zensu-host-path.sh, append
 #      the file name, and transport the result in an environment variable
 #      (hooks/lib/zensu-tdd-phase.sh, hooks/plan-approved-delegate.sh, the
-#      `append` verb in hooks/lib/zensu-log.sh, hooks/post-artifact-redact.sh
-#      and hooks/lib/zensu-witness.sh, which both witness writers
-#      -- hooks/pre-bash-witness.sh and hooks/post-bash-witness.sh -- source
-#      rather than each rendering the path themselves). The last three carry
-#      zensu-artifact-redact-v1.js, which is probed alongside the plan lib below.
+#      `append` and `--evidence-run` verbs in hooks/lib/zensu-log.sh, and
+#      hooks/post-artifact-redact.sh). The `append` verb and the redactor hook
+#      carry zensu-artifact-redact-v1.js, and `--evidence-run` carries
+#      evidence-run-v1.js; both are probed alongside the plan lib below.
 #
 # The shim cannot police mechanism 2 by scanning argv, and widening it to reject
 # the root in ANY environment value would reject every invocation, because
@@ -398,6 +397,18 @@ if [ -n "$REDACT_LIB" ] && [ -f "$REDACT_LIB" ] && [ -r "$REDACT_LIB" ] && [ ! -
   check "artifact redactor converts and loads (with its sibling require) from the special plugin root" PASS
 else
   check "artifact redactor converts and loads (with its sibling require) from the special plugin root" FAIL
+fi
+
+EVIDENCE_LIB="${PLAN_LIB_DIR:+$PLAN_LIB_DIR/evidence-run-v1.js}"
+if [ -n "$EVIDENCE_LIB" ] && [ -f "$EVIDENCE_LIB" ] && [ -r "$EVIDENCE_LIB" ] && [ ! -L "$EVIDENCE_LIB" ] \
+  && ZENSU_EVR_LIB="$EVIDENCE_LIB" node -e '
+    const m=require(process.env.ZENSU_EVR_LIB);
+    process.exit(typeof m.main==="function" && typeof m.run==="function"
+      && typeof m.verdict==="function" && typeof m.computeTree==="function" ? 0 : 1);
+  ' 2>/dev/null; then
+  check "evidence runner converts and loads (with its sibling requires) from the special plugin root" PASS
+else
+  check "evidence runner converts and loads (with its sibling requires) from the special plugin root" FAIL
 fi
 
 

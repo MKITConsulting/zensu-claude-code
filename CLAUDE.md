@@ -118,6 +118,7 @@ Each entry names the section title, what it covers, and its rule file.
 - **Artifact Path Redaction (`hooks/lib/zensu-artifact-redact-v1.js`)** — what makes committed `.zensu` plans and logs publishable: `.claude/rules/artifact-path-redaction.md`
 - **TDD Mode Precedence (`hooks/lib/zensu-config.sh` + `zensu-log.sh --tdd-begin`)** — the four-rank strict/vanilla ladder: `.claude/rules/tdd-mode-precedence.md`
 - **Requirements-Table Gate (`hooks/lib/zensu-plan-requirements.sh`)** — why `--tdd-complete` refuses a plan without a usable `## Requirements` table: `.claude/rules/requirements-table-gate.md`
+- **Evidence Runner and Full-Suite Gate (`hooks/lib/evidence-run-v1.js` + `zensu-log.sh --evidence-run` / `--chain-done`)** — the plugin-run full suite, its tree-bound record and the terminus gate: `.claude/rules/evidence-runner.md`
 - **Windows Budget for `best-solution-first`** — why a Windows shard budget, not a suite cap, binds: `.claude/rules/windows-budget-best-solution-first.md`
 - **Runtime Lineage (`version_type` is load-bearing)** — the full `version_type` policy and its breaking-change list: `.claude/rules/runtime-lineage.md`
 - **Adopting a Record Across a Lineage Break (`adoptableRecord` / `adoptContext`)** — `/zensu:adopt-session` and the pruned-installation state: `.claude/rules/session-adoption.md`
@@ -130,7 +131,6 @@ Each entry names the section title, what it covers, and its rule file.
 - **Reviewer Capability Gate: Host Report Tool (`hooks/lib/reviewer-capability-v1.js`)** — why reviewers and the PLM may call `SubagentHandback`, and why the evidence workers may not: `.claude/rules/reviewer-capability-gate.md`
 - **Git Mutation Tables (`hooks/lib/bash-source-write-parse.js`)** — rule (C) of the Bash source-write gate and its Windows namespace: `.claude/rules/git-mutation-tables.md`
 - **Plugin-Data Guard (`hooks/pre-write-plugin-data-guard.sh` + `plugin-data-guard-v1.js`)** — the Edit/Write deny into `CLAUDE_PLUGIN_DATA` and its residuals: `.claude/rules/plugin-data-guard.md`
-- **Witness Attempt Half (`hooks/pre-bash-witness.sh` + `hooks/lib/zensu-witness.sh`)** — recording failed Bash calls for the evidence cross-check: `.claude/rules/witness-attempt-half.md`
 - **Bypass Ledger Read Contract (`tdd_bypasses`)** — how the "Gates bypassed" line reads the ledger: `.claude/rules/bypass-ledger-read-contract.md`
 - **Status-Marker Legend (CHAIN-END SUMMARY + PR bodies)** — the four status markers in the chain-end summary and PR bodies: `.claude/rules/status-marker-legend.md`
 - **Chain Shape & Rearm Receipt (`hooks/lib/chain-recovery-v1.js`)** — chain classification, the rearm receipt and `--chain-recover`: `.claude/rules/chain-shape-rearm-receipt.md`

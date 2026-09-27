@@ -6,7 +6,7 @@ changed_files: [calc.js]
 implementation_summary: calc.js was edited in the fixture working tree.
 requirements_baseline: none
 diff_summary: arithmetic and array-boundary behavior changed.
-test_evidence: command `node --test`, exit 0, 4/4 pass, witness verified.
+test_evidence: zensu evidence-run: scope=full exit=0 duration=2.1s tree=3f9c1a2b7d4e record=er1_1790000000000_a1b2c3d4e5f6 cmd=node --test (4/4 pass).
 build_evidence: not applicable; plain JavaScript fixture has no build step.
 coverage_evidence: skipped; fixture has no coverage tool.
 merged_panel_findings:

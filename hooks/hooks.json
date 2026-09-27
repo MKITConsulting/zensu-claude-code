@@ -58,10 +58,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-witness.sh\""
-          },
-          {
-            "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-zensu-gate.sh\""
           },
           {
@@ -103,10 +99,6 @@
       {
         "matcher": "Bash",
         "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/post-bash-witness.sh\""
-          },
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/post-artifact-redact.sh\""

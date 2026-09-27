@@ -16,9 +16,8 @@ Every status and verdict cell of the chain-end report and of the plugin-opened P
 carries a leading marker — 🟢 good, 🟡 attention, 🔴 bad, ⚪ not applicable. **The marker
 PREFIXES the value and never replaces it**, which is the whole safety property: a
 verbatim-carry literal (`EDIT NOT LANDED`, `UNVERIFIED (no claims logged)`, an unresolved
-`PENDING PREDICATE`, `EVIDENCE GAP`, `EVIDENCE CONTRADICTION`,
-`EVIDENCE CROSS-CHECK UNAVAILABLE`, `FINDING VERIFICATION DEGRADED`, the bypass ledger's
-`UNREADABLE — …`) keeps its own words after its marker. Reducing one to a bare coloured
+`PENDING PREDICATE`, the terminus's `FULL SUITE — …` verdict, `FINDING VERIFICATION DEGRADED`,
+the bypass ledger's `UNREADABLE — …`) keeps its own words after its marker. Reducing one to a bare coloured
 dot deletes the disclosure while keeping the colour, which is worse than having no colour
 at all.
 
@@ -98,8 +97,7 @@ directive therefore proves in one check that the delimiter is present AND that i
 not eaten by command substitution. Bite-tested the same way: a one-word reword on the
 SKILL side alone reports 50 PASS / 1 FAIL and restoring returns it green.
 **The verbatim-literal pins are PER CARRIER and the two lists legitimately differ** —
-the delegate renderer has a `Mtime audit` row where the self-review renderer has
-`Evidence cross-check`, so the evidence literals live only in the latter. Both loops are
+the delegate renderer carries a `Mtime audit` row that the self-review renderer does not. Both loops are
 SCOPED to the summary schema, because a file-wide presence grep is satisfied by occurrences
 elsewhere in the same file and cannot fail for the reason it is written for. The
 orphaned-marker predicate runs over the RENDERED directive, never the hook source: the whole

@@ -40,5 +40,9 @@
   },
   "logging": {
     "timestampStyle": "wall"
+  },
+  "evidence": {
+    "fullSuiteCommand": "",
+    "fullSuiteGate": "required"
   }
 }

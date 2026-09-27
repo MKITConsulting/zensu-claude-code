@@ -416,6 +416,20 @@ _zensu_log_style() {
   echo "$val"
 }
 
+zensu_evidence_full_suite_command() {
+  command -v node >/dev/null 2>&1 || return 0
+  _zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();var e=j.evidence;var c=(e&&typeof e==="object"&&!Array.isArray(e))?e.fullSuiteCommand:undefined;if(typeof c==="string"&&c.trim()!==""&&c.indexOf(String.fromCharCode(0))===-1)process.stdout.write(c)' 2>/dev/null
+  return 0
+}
+
+zensu_evidence_full_suite_gate() {
+  command -v node >/dev/null 2>&1 || { printf 'required'; return 0; }
+  local val
+  val=$(_zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();var e=j.evidence;var g=(e&&typeof e==="object"&&!Array.isArray(e))?e.fullSuiteGate:undefined;process.stdout.write(g===undefined||g===null||g===""?"required":(typeof g==="string"?g:JSON.stringify(g)).slice(0,200))' 2>/dev/null)
+  [ -z "$val" ] && val="required"
+  printf '%s' "$val"
+}
+
 # zen-mode's SESSION DEFAULT — what the mode resolves to before the session has
 # recorded an explicit choice. Defaults to TRUE (zen-mode on), so a fresh install
 # is low-noise out of the box; set hooks.zenModeDefault:false to restore the

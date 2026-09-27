@@ -43,11 +43,16 @@ SPELLING, never about what the variable does.
 
 **State the two counts, because they are NOT the same number and the gap is the point.**
 `ESCAPE_STEMS` now holds TEN stems; `ZENSU_BYPASS_GATE_ALLOWLIST` in
-`hooks/lib/zensu-tdd-phase.sh` holds EIGHT, and `docs/configuration.md` §"Visible opt-outs"
+`hooks/lib/zensu-tdd-phase.sh` holds NINE names, and `docs/configuration.md` §"Visible opt-outs"
 stays the authoritative ledger roster. TWO stems are therefore in the set and not in the
 ledger, and `ZENSU_SESSION_LINEAGE` is not the first: `ZENSU_AUTOPILOT` was already one,
 because its escape is recorded as an audited `BLOCKED` transition rather than as a ledger
 entry. Do not "reconcile" the two lists — they answer different questions, and a reader
 who makes them agree has either ledgered something that escapes no gate or stopped G12
-from covering a spelling a skill must not teach. A future member needs its own two
-sentences here, and the counts above updated with it.
+from covering a spelling a skill must not teach. ONE name runs the other way:
+`ZENSU_TEST_WITNESS` is in the ledger allowlist and not in the set. Its gate was removed
+together with the Bash witness, so no source spells its escape any more and G12a would
+fail on a stem nothing derives; the allowlist keeps it because the ledger write path
+filters existing entries through the allowlist, and dropping it would erase it from every
+ledger an older installation wrote. A future member needs its own two sentences here,
+and the counts above updated with it.

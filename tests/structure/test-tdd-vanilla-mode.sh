@@ -9,7 +9,7 @@
 #   begin: --tdd-begin persists the flag per config (both directions) and echoes
 #        the effective mode; re-begin after reset follows current config
 #   gate: state-flag bypass (frozen — config flips mid-session change nothing)
-#   chain: witness + Stop-hook + post-review routing decisions identical to
+#   chain: Stop-hook + post-review routing decisions identical to
 #        strict mode
 #   wording: ask-hooks / post-review / banner / primer / Stop block state legend
 #        emit mode-aware text
@@ -22,7 +22,6 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 PHASE_LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
 GATE="$PLUGIN_DIR/hooks/pre-edit-tdd-reminder.sh"
-WITNESS="$PLUGIN_DIR/hooks/post-bash-witness.sh"
 STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
 POSTREV="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 PLANHOOK="$PLUGIN_DIR/hooks/plan-approved-delegate.sh"
@@ -57,7 +56,7 @@ printf '%s' '{"hooks":{"tddImplementation":false}}' > "$CFG_VANILLA"
 CFG_STRICT="$STATE_DIR/strict-config.json"
 printf '%s' '{"hooks":{"tddImplementation":true}}' > "$CFG_STRICT"
 export ZENSU_CONFIG="$CFG_DEFAULT"
-unset CLAUDE_AGENT_TYPE ZENSU_TDD_GATE ZENSU_TEST_WITNESS ZENSU_CHAIN 2>/dev/null || true
+unset CLAUDE_AGENT_TYPE ZENSU_TDD_GATE ZENSU_CHAIN 2>/dev/null || true
 cleanup() { rm -rf "$PROJ"; }
 trap cleanup EXIT
 
@@ -333,14 +332,6 @@ else
   check "SP9 SKIPPED — symlinks unavailable on this platform (ln -s failed)" PASS
   check "SP10 SKIPPED — symlinks unavailable on this platform (ln -s failed)" PASS
 fi
-
-echo "== Witness: records in vanilla session (live vanilla config) =="
-activate_session "$SID_B"
-echo '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"npm test"},"tool_response":{"stdout":"ok"},"session_id":"'"$SID_B"'"}' | ZENSU_CONFIG="$CFG_VANILLA" bash "$WITNESS" >/dev/null 2>&1
-WLOG="$PROJ/.zensu/logs/witness-$(session_key "$SID_B").log"
-W_LINE="$(grep -F 'cmd="npm test"' "$WLOG" 2>/dev/null | head -n1)"
-{ [ -f "$WLOG" ] && printf '%s' "$W_LINE" | grep -qF 'cmd="npm test"' && printf '%s' "$W_LINE" | grep -qF 'tail="ok"'; } \
-  && check "C1 vanilla session records witness line with cmd= + tail=" PASS || check "C1 witness in vanilla (got '${W_LINE}')" FAIL
 
 echo "== Gate: malformed state fails closed =="
 SID_MS="vanilla-malformed"

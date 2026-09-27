@@ -121,9 +121,9 @@ renders on Git Bash; each also declines, before any helper is sourced, a payload
 `.claude/worktrees` component, so a session in a plain checkout pays no bind on this path — a
 pre-filter that judges the raw payload TEXT while the hook itself anchors on the record, which is
 a divergence stated in the gap list below rather than an equivalence. The payload reader and that
-ladder live in `hooks/lib/zensu-worktree-keep.sh` and are CALLED twice rather than copied, for
-the reason `hooks/lib/zensu-witness.sh` states about its own pair: the two halves write and
-remove the SAME anchor, so a one-sided edit orphans it under a root the other never reads. The
+ladder live in `hooks/lib/zensu-worktree-keep.sh` and are CALLED twice rather than copied,
+because the two halves write and remove the SAME anchor, so a one-sided edit orphans it under a
+root the other never reads. The
 module honours `WK_NOW` and `WK_MAX_DIRS` ONLY in the explicit JSON test mode (`WK_EMIT=json`);
 the hook envelope is its default output and the hooks pin `WK_EMIT=claude-hook`. The module, not
 each hook, owns that guard, so no caller can forget it: an inherited far-future `WK_NOW` would
@@ -287,8 +287,8 @@ the exclusive-create, `nlink` and dev/ino checks; the
 (pinned by `P1wk13`); the
 `worktreeKeep` and `worktreeKeepIdleHours` entries in `config.example.json`; the `worktree:`
 bullets and the frontmatter `session state` clause in `skills/doctor/SKILL.md`; the hook count in
-`docs/configuration.md` (header, prose, `#hooks-31`) and the `configuration.md#hooks-31`
-cross-link in `docs/architecture.md`, both pinned by `test-readme-hook-count-sync.sh`; the three
+`docs/configuration.md` (header, prose and its `#hooks-N` anchor), pinned by
+`test-readme-hook-count-sync.sh`; the three
 hook rows and two config rows in `docs/configuration.md`, the README docs-index row, and
 `docs/worktree-keep.md`; the manifest entry in `tests/profiles/promptfoo-local-only.v1.json` with
 the counts in `tests/SUITE-OVERVIEW.md`. `tests/structure/worktree-keep-v1.test.js` pins the

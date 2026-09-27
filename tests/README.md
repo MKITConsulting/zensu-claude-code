@@ -3,7 +3,7 @@
 Two flavors:
 
 - **Deterministic** — execute hooks/libs with crafted input and assert real state
-  (exit code, emitted JSON, FSM/state files, witness logs). No API, fast, the
+  (exit code, emitted JSON, FSM/state files, evidence records). No API, fast, the
   primary "proof" that a hook does what it claims.
 - **Live LLM** — drive real `claude --print` against the locally-loaded plugin and
   match the response with tolerant regex. Costs API credits; opt-in.
@@ -92,7 +92,7 @@ exact-SHA, clean-tree, and runtime-digest evidence.
 
 | Path | Kind | Covers |
 |---|---|---|
-| `tests/structure/test-*.sh` | deterministic | hooks, libs, skill/agent wiring, version sync, witness, stop-enforcer, plan-approved, session-start, FSM gate |
+| `tests/structure/test-*.sh` | deterministic | hooks, libs, skill/agent wiring, version sync, evidence runner, stop-enforcer, plan-approved, session-start, FSM gate |
 | `evals/config-gate/run-eval.sh` | deterministic | pre-edit TDD gate matrix, auto-fix rounds/suggestions routing, config resolution, log-style (~60 offline tests) |
 | `evals/verify-feature/run-eval.sh` | advisory live Promptfoo | `/zensu:verify-feature` local proof and remote URL-policy boundary; requires a disposable host and is intentionally excluded from `tests/run-all.sh --live` |
 | `tests/e2e/` | live | `code-reviewer` agent anti-loop guardrails |

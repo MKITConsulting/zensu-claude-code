@@ -172,7 +172,7 @@ check "S3 combined summary never lists one finding twice" "$(has "$SUM1" 'never 
 check "S4 combined summary discloses a partial or unreadable ledger" "$(has "$SUM1" 'the row FINDINGS LEDGER PARTIAL — <reason> on status=partial and the row FINDINGS LEDGER UNAVAILABLE — <reason> on status=degraded')"
 check "S5 convergence off drops the ledger rows from the combined summary" "$(lacks "$SUMOFF1" 'FINDINGS LEDGER')"
 check "S6 convergence off never runs the ledger reader at chain end" "$(lacks "$SUMOFF1" 'review-ledger-v1.js')"
-check "S7 convergence off keeps the pre-convergence ## Open sentence" "$(has "$SUMOFF1" 'One row per deferred suggestion (the buffered ### Suggestions block) or max-rounds finding requiring a manual fix. Every cell follows')"
+check "S7 convergence off keeps the pre-convergence ## Open sentence" "$(has "$SUMOFF1" 'One row per deferred suggestion (the buffered ### Suggestions block) or max-rounds finding requiring a manual fix, and one row per advisory FULL SUITE — line that did not pass, carrying that line verbatim. Every cell follows')"
 
 echo "----"
 echo "test-review-convergence-directive: $PASS PASS / $FAIL FAIL"
