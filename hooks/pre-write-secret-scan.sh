@@ -72,7 +72,8 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
   # two relaxable states, and a deny from ANY hook on this matcher wins — so
   # leaving this one closed would silently reinstate the deadlock the allowance
   # removes. Both are closed whitelisted shapes (a fixed set of assignments, one
-  # `bash <script in the executing installation>`, and at most `--confirm`), so
+  # `bash <script in the executing installation>`, and a closed two-literal argument
+  # set — `--restore-root` and `--confirm`, neither of which takes a value), so
   # neither can carry secret-bearing content for this gate to scan. That the
   # second one WRITES is irrelevant here — this gate scans payloads, it does not
   # judge writes; see the header of hooks/lib/zensu-session-adopt.sh for the
