@@ -545,7 +545,7 @@ revision made it refuse without that variable and broke the shipped Phase 2
 recipe outright: the variable is absent from the model's Bash environment on this
 host, which is exactly why `{log_file}` is rendered from
 `${CLAUDE_PROJECT_DIR:-.}`. What constrains the destructive mode is the module —
-the `logs` bucket only, never a `witness-` name, a canonicalized artifact
+the `logs` bucket only, a canonicalized artifact
 directory, and a descriptor judged for `isFile`/`nlink`/dev+ino — not an ambient
 variable the caller sets anyway. When it IS set it still travels as
 `expectedRoot`, so a bound session gets the stricter check for free.

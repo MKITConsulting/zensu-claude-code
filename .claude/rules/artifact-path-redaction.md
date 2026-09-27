@@ -23,8 +23,8 @@ to `~/IdeaProjects/<product>/<repo>`, which still names the product. Rule 3 is w
 makes the guarantee CHECKABLE — "no `/Users/` in the file" is testable, "no
 sensitive path" is not. Every rule is bounded on BOTH sides; drop the right bound
 and `/homework` becomes `<home>work`, drop the left and the rule fires inside
-`src/home/index.ts`. The segment class also excludes quotes, because eating the
-closing `"` of a `cmd="…"` field desynchronizes the claim from its witness entry.
+`src/home/index.ts`. The segment class also excludes quotes, so the closing `"`
+of a `cmd="…"` field survives.
 
 **Secret NAMES are never redacted** — a name grants no access and this repo's own
 workflows carry `secrets.GITHUB_TOKEN` in public. Credential VALUES are a different
@@ -71,32 +71,12 @@ The divergence is deliberate: `zensu_hook_enabled` spawns `node` per call and
 spawn on the hottest path in the workflow. Recorded rather than left for someone to
 discover from a refusal naming a variable the config row never mentions.
 
-**FOUR WRITERS apply it, and the last exists because the first two cannot be
-enough:** `zensu-log.sh append` (the narrative log, at write time), BOTH witness
-writers — `hooks/pre-bash-witness.sh` for the `BASH-ATTEMPT cmd` field and
-`hooks/post-bash-witness.sh` for the `BASH cmd` one, which share the single
-extraction in `hooks/lib/zensu-witness.sh` precisely so their substitution cannot
-diverge (see the symmetry rule below, and §"Witness Attempt Half" for why there are
-two of them at all), and
+**TWO WRITERS apply it, and the second exists because the first cannot be
+enough:** `zensu-log.sh append` (the narrative log, at write time) and
 `hooks/post-artifact-redact.sh` (a bounded sweep on BOTH registered matchers,
 plus the named `file_path` on the write matchers). Both artifacts are
 MODEL-authored, so a guarantee that holds only while the model follows a recipe is
 not a guarantee.
-
-**The witness is redacted for SYMMETRY, not for its own safety.** It is gitignored
-in THIS repository, and the plugin ships nothing that makes that true in a consuming
-one — say "in this repo", never "everywhere". `zensu-evidence-crosscheck.js` matches a claim against a
-witness entry by EQUALITY, so redacting one side only turns every claim naming an
-absolute path into an `EVIDENCE GAP`. Each writer passes its OWN authority plus
-`CLAUDE_PROJECT_DIR` when that is set — never the other writer's, so agreement
-rests on the two coinciding, which the skill's own log path makes the normal case
-(`projectRoot` accepts an array): `append` derives the root from the
-artifact path, the witness hook from the Session Control record, and they must
-substitute identically even when the two authorities disagree. **Only `cmd` is
-redacted — `tail` deliberately is not.** Nothing compares the tail; its only reader
-is `failureMarker`, and redaction there is purely subtractive, so a `failed` token
-inside an absolute path would vanish and an `EVIDENCE CONTRADICTION` would downgrade
-to `verified`.
 
 **The log WRITE happens inside the module, never through a shell redirect.** A
 `>>` names a path and follows what it finds, so the validation and the write name
@@ -116,8 +96,7 @@ new bytes existed and left the artifact empty on a failed write, so `mode: 'repl
 now routes to `replaceArtifactFile`, which validates the target through a read-only
 descriptor, writes an `O_EXCL` temp beside it, `fsync`s, re-checks, and renames. It is
 named for what it can do: `mode: 'replace'` destroys, and it refuses any bucket but
-`logs` and any `witness-` name, so the log verb cannot reach a committed plan or the
-crosscheck's evidence.
+`logs`, so the log verb cannot reach a committed plan.
 
 **`append` carries no leading `--` on purpose** — a leading `--` selects the Session
 Control binding case, and a log append must survive a shell with no
@@ -135,9 +114,7 @@ authorities name genuinely DIFFERENT directories, both render `<project>`, so th
 placeholder stops being a unique referent and a path outside the session's project
 reads as if it were inside it. The `append` path forces agreement through
 `expectedRoot` only when `CLAUDE_PROJECT_DIR` is set — without it there is no
-second authority to disagree with — while the witness passes both without a
-check, deliberately, because losing the equality match is worse than an ambiguous
-placeholder in a gitignored file.
+second authority to disagree with.
 
 **A fifth `within()`-family hand-copy lives in this feature** and belongs on the roster
 in §"Git Mutation Tables": the `append` verb's cwd anchor spells its own containment
@@ -156,10 +133,7 @@ NAMED in the hook's own header prose and imported by nothing — it calls
 `mod.sweepTargets(project)` with no options and the module defaults apply internally —
 so that coupling is documentation-only and breaks SILENTLY, which is the same trap the
 module header now records in its own words;
-`WITNESS_PREFIX`'s only consumer outside the module is R19 in
-`tests/structure/test-artifact-redaction.sh`, which the next clause already names.
-Then: the `WITNESS_PREFIX` ↔ `post-bash-witness.sh`'s own
-`witness-${SANITIZED_SESSION}.log` spelling, pinned by R19; the `Edit|Write|MultiEdit`
+the `Edit|Write|MultiEdit`
 matcher spelling in FIVE places — `hooks/hooks.json`, `docs/configuration.md`,
 `docs/tdd-manager-workflow.md`, R0c, and the JS disjunction in
 `hooks/post-artifact-redact.sh` that actually selects the branch, which is the one
@@ -186,17 +160,10 @@ consumer re-spells any part of it, because a renamed reason would otherwise make
 the hook shout about every ordinary Write, and an implicit residual class already
 made a routine race report as the worst outcome the hook can produce.
 
-**The invariant is per-artifact, not per-directory.** `writeArtifactLine` refuses
-any `witness-` name, and `hooks/post-bash-witness.sh` still writes its log with a
-plain shell `>>`. That is deliberate — the witness is rewritten every run and is
-gitignored in THIS repository — but it means "the write happens inside the module" is
-a property of the two PUBLISHABLE artifacts only. Do NOT restate it as "never
-committed": a consuming repo only gets that by adding `.zensu/state/` and `.zensu/logs/witness-*.log` itself.
-
 **Operator-facing accounts that must move with it:** `docs/tdd-manager-workflow.md`
 §"Publication safety of the plan and log" (which carries the narrative, including
-the `SWEEP_WINDOW_SECONDS` value as prose), both hook rows in
-`docs/configuration.md` — the `post-artifact-redact.sh` row, which is the ONE row
+the `SWEEP_WINDOW_SECONDS` value as prose), the `post-artifact-redact.sh` row in
+`docs/configuration.md`, which is the ONE row
 carrying BOTH sweep values as prose (`SWEEP_WINDOW_SECONDS` as "last 5 minutes" and
 `SWEEP_MAX_TARGETS` as a bare `(25)`, so raising the cap silently falsifies a shipped
 operator-facing doc). R49 in `tests/structure/test-artifact-redaction.sh` encodes that
@@ -204,19 +171,14 @@ same value twice more and breaks LOUDLY rather than silently, which is why it is
 here and not in the silent-coupling paragraph below — and raising the cap to the
 fixture count or above does not merely fail it, it destroys its discrimination, because
 the capped and uncapped arms then agree. A new cap needs a fixture count above it. Then
-the redaction paragraph of the
-`post-bash-witness.sh` row, which has already drifted once by claiming the `tail`
-is redacted and carries no window at all — plus `docs/tdd-manager-workflow.md`'s §1 artifact paragraph, its
-four-channel table and its §"Witness channel" paragraph (the line that drifted),
+`docs/tdd-manager-workflow.md`'s §1 artifact paragraph and its writer table,
 `docs/architecture.md`'s Graceful-Degradation bullet and its flagless-hook list,
 `skills/tdd/SKILL.md` Principle 3 and Phase 2, and `templates/tdd-plan.md`.
 
 **Test-side couplings, which break silently rather than loudly:** the manifest
 entry in `tests/profiles/promptfoo-local-only.v1.json` (`run-all.sh` refuses to
 execute at all when the manifest and the directory disagree) together with the
-counts in `tests/SUITE-OVERVIEW.md`; the `append --log … --message …` command shape
-built in `tests/structure/evidence-crosscheck-v1.test.js`, where a rename of the
-verb or the flag changes what the cross-check excludes; and the grep-exact literals
+counts in `tests/SUITE-OVERVIEW.md`; and the grep-exact literals
 of the secure-open inventory in `tests/structure/test-windows-portability-guards.sh` —
 which is also the ONLY Windows pin any part of this module has, since
 `test-artifact-redaction.sh` has no `windows-ci.v1.json` entry and the `\Users\<seg>`
@@ -228,21 +190,21 @@ only while a new module-transport consumer is added to it.
 
 **Port-relevant.** The core half is `redact` / `redactFile` / `writeArtifactLine` /
 `resolveArtifactTarget` / `sweepTargets` / `projectRootFromArtifactPath` /
-`defaultHome` (both writers call it, so a port that omits it gets a TypeError in
-its log writer) plus the
+`defaultHome` (`append` and the evidence runner call it, so a port that omits it
+gets a TypeError in its log writer) plus the
 layout constants and ALL THREE reason sets (`CLEAN_REASONS`, `TRANSIENT_REASONS`,
 `NON_ARTIFACT_REASONS` — an explicit partition, because an implicit residual class
 once made a routine race report as the worst outcome the hook can produce), all in the host-neutral module — together
 with its ONE sibling `require`, `claude-path-v1.js`'s `msysDrivePrefix`, without
-which the module does not load at all. A SEVENTH host obligation goes with the log
+which the module does not load at all. A SIXTH host obligation goes with the log
 verb: the credential-value scan, which couples it to `secret-patterns.js`'s
 location, its `scan()` name and its `{matches:[{rule}]}` shape. A port that takes
 the writer without it ships the writer minus the control this section says `append`
 restores. The load-failure DIRECTION differs per
 writer and a port must keep it: `append` fails closed (a lost log line is worse
-than a loud refusal), both hooks fail open (a missing witness entry fails the
-cross-check closed, and a PostToolUse hook must never block the call it follows). The host half is SIX obligations a port must re-decide: the
-log-writer verb, the witness-side call, the PostToolUse hook and its registration,
+than a loud refusal), the hook fails open (a PostToolUse hook must never block the
+call it follows). The host half is FIVE obligations a port must re-decide: the
+log-writer verb, the PostToolUse hook and its registration,
 which payload field carries the path, the module transport (this host renders the
 lib DIRECTORY through `zensu-host-path.sh`), and — easiest to miss — the host's
 TOOL-NAME vocabulary: both matchers sweep and only the write matchers add the
@@ -271,8 +233,8 @@ revisits artifacts modified within `SWEEP_WINDOW_SECONDS`, so earlier runs are o
 reach by design — this is a writer-side fix, not a history rewrite; email addresses and
 internal URLs are NOT redacted; a DOUBLY encoded separator (`\\\\Users\\\\bob`, four
 backslashes — JSON encoding applied twice) still leaves the user segment, because
-the escaped-separator rules cap at two; neither writer produces that spelling, since
-the witness redacts before `JSON.stringify`, so it sits inside the textual bound
+the escaped-separator rules cap at two; neither writer produces that spelling, so
+it sits inside the textual bound
 rather than outside it; `expectedRoot` binds `append` only when
 `CLAUDE_PROJECT_DIR` is set, so without it the containment is artifact-SHAPE only
 and any project's `.zensu/logs` is an accepted destination — narrow, but not
@@ -283,5 +245,5 @@ which is exactly why `{log_file}` is rendered from `${CLAUDE_PROJECT_DIR:-.}`.
 An env var the caller sets is not an authority; what constrains the destructive
 mode is the module; and nothing here recognizes a customer name or an internal hostname, which is why the English-only + repo-root-relative authoring rules
 ship in `templates/tdd-plan.md` and `skills/tdd/SKILL.md` Phase 2 alongside the code.
-`tests/structure/test-artifact-redaction.sh` pins the rules, every writer, every
-refusal and the witness/claim equality.
+`tests/structure/test-artifact-redaction.sh` pins the rules, every writer and every
+refusal.

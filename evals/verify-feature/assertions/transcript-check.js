@@ -36,7 +36,7 @@ function verdict(pass, reason) {
 
 function parseTranscript(output) {
   const text = String(output);
-  const stream = text.split(/^===== (?:hook events|fsm state:|witness:|wrapper attestation)/m)[0];
+  const stream = text.split(/^===== (?:hook events|fsm state:|wrapper attestation)/m)[0];
   const framed = `${stream}\n[assistant_text]\n`;
   const uses = [...framed.matchAll(/^\[tool_use:\s*([^\]]+)\]\s+id=([^\s]+)\s+input=(.*)$/gm)]
     .map((match) => ({ name: match[1], id: match[2], input: match[3], start: match.index }));
