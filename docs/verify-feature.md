@@ -111,9 +111,9 @@ Code, the gate runs in consent mode (`/zensu:doctor` reports this as
 - Approved origins are remembered for the session in
   `.zensu/state/verify-consent-<session-key>.json`; every further route on an approved origin
   passes without a second prompt. The report's `Consent` block lists every record.
-- The floor holds whatever you answer: literal loopback origins only (`127.0.0.1`, `[::1]`;
-  never `localhost`), no credentials, no query or fragment in a navigation, and the browser
-  requests nothing from an origin outside the run config.
+- The floor holds whatever you answer: loopback origins only (`127.0.0.1`, `[::1]` or the exact
+  name `localhost`; never `app.localhost` or another hostname), no credentials, no query or
+  fragment in a navigation, and the browser requests nothing from an origin outside the run config.
 - A remote target is refused in consent mode, by the run-config helper and by the gate, because
   the browser's DNS pins are written before it starts. Remote verification needs the policy of
   section 4.
@@ -205,7 +205,7 @@ The messages you will meet:
 |---|---|
 | `navigation policy mode does not match` | the policy's `mode` differs from the mode being checked |
 | `remote-target-needs-parent-environment-policy: …` | a remote target with no policy in the launch environment |
-| `local navigation policy accepts literal loopback-IP origins only` | a local origin uses `localhost` or another hostname |
+| `local navigation policy accepts loopback origins only: 127.0.0.0/8, [::1] or localhost` | a local origin uses a hostname other than `localhost`, for example `app.localhost` or `localhost.` |
 | `<origin>: origin is not a target of the navigation policy` | the origin is not listed; a different port is enough |
 | `<origin><route>: route is not approved for evidence by the navigation policy` | the route is not in that origin's `routes` |
 | `route must be an absolute, normalized, query-free pathname` | the route being checked carries `?`, `#`, `*` or a dot segment, or does not start with `/` |
@@ -221,10 +221,19 @@ is the only check of a particular origin and route.
 Local mode proves the code in the current worktree, so the application has to be started from
 that worktree on an origin the policy already names.
 
-- **Literal loopback IP.** The origin is `http://` or `https://` plus a loopback IP address
-  (`127.0.0.1`, any other `127.0.0.0/8` address, or `[::1]`) and the port. `localhost` and
-  every other hostname are rejected, because the gate refuses to trust DNS or `/etc/hosts`
-  for a boundary decision.
+- **A loopback origin.** The origin is `http://` or `https://` plus a loopback IP address
+  (`127.0.0.1`, any other `127.0.0.0/8` address, or `[::1]`) or the exact name `localhost`, and
+  the port. Use `localhost` when the app's CORS allow-list, cookies or auth callback name it;
+  `localhost` and `127.0.0.1` are different origins, so pick the one the app expects and use it
+  everywhere. Chrome resolves `localhost` itself, to `[::1]` and `127.0.0.1`, without asking DNS
+  or `/etc/hosts`, so an app bound to either family is reached. Every other hostname is
+  rejected — `app.localhost`, `localhost.` and `/etc/hosts` aliases included — because the gate
+  refuses to trust DNS for a boundary decision.
+- **An API on another origin goes into the recipe as `auth.baseUrl`.** The browser requests
+  nothing from an origin outside `allowedOrigins`, so a frontend on `http://localhost:4200` that
+  logs in against an API on `http://localhost:9090` needs both origins in the run config. Declare
+  the API origin as the recipe's `auth.baseUrl`; the skill then passes both origins to the
+  run-config helper, and one prompt covers both.
 - **The port is fixed before launch.** The policy carries it, so the application must bind
   exactly that port and fail rather than fall back to another one (Vite's `--strictPort`, or
   an explicit bind in your own script). A server that silently moves to a free port produces
@@ -391,7 +400,8 @@ ZENSU_VERIFY_NAVIGATION_POLICY_V1='{"version":1,"mode":"remote","targets":[{"ori
 | PARTIAL; reason starts `remote-target-needs-parent-environment-policy` | `--mode=remote` or a remote base URL without a launch-time policy | launch Claude Code with the remote policy of section 4 |
 | the permission prompt was answered No | you declined the origin | re-run and answer Yes. Declaring routes in the recipe does NOT help: consent is per origin, and the recipe's declared routes are prompt context only |
 | PARTIAL; `consent mode ready, no runtime recipe` in `/zensu:doctor` | nothing tells the skill how to start the app | run `/zensu:verify-feature --setup`, or pass `--attach=<loopback-origin>` |
-| PARTIAL; reason names `loopback-IP origins only` | local origin spelled with `localhost` | use `127.0.0.1` in the policy, the recipe, and the `baseUrlCommand` output |
+| PARTIAL; reason names `loopback origins only` | local origin spelled with a hostname other than `localhost` | use `localhost`, `127.0.0.1` or `[::1]` consistently in the policy, the recipe, and the `baseUrlCommand` output |
+| the page loads, but its API calls fail with `net::ERR_BLOCKED_BY_CLIENT` | the API runs on an origin the run config does not name | declare that origin as the recipe's `auth.baseUrl`, so the run config allows it next to the page's origin |
 | PARTIAL; the `baseUrlCommand` output differs from the policy origin | the app bound another port, or the printed URL carries a path | bind the port strictly; print the bare origin |
 | PARTIAL; the recipe was rejected | one of the acceptance rules above is not met | the report names the missing fact; fix the recipe |
 | PARTIAL; `playwright-cli` not found | it is not installed or not on `PATH` | `npm install -g @playwright/cli@0.1.21` (`brew install playwright-cli` is unpinned), then run `/zensu:doctor` |

@@ -95,11 +95,14 @@ application/authentication origin and every model-visible route must be present 
 navigation remains PARTIAL. A dynamically chosen origin cannot be authorized from inside an
 already-running Claude session: launch the session with the exact origin policy first, or use a
 separate discovery run and restart with that policy. Without the variable
-`/zensu:verify-feature` runs in consent mode, which admits literal loopback origins only and
+`/zensu:verify-feature` runs in consent mode, which admits loopback origins only and
 asks the user once per new origin; the key is optional there and honoured when present.
 
-In `local` mode every origin must use a literal loopback IP with `http` or `https`; hostnames
-such as `localhost` are rejected rather than trusted through mutable DNS/hosts resolution. In `remote`
+In `local` mode every origin must use `http` or `https` with a loopback IP or the exact name
+`localhost`, which the browser resolves to loopback itself; every other hostname, `app.localhost`
+and `localhost.` included, is rejected rather than trusted through mutable DNS/hosts resolution.
+`localhost` and `127.0.0.1` are different origins, so the recipe, the policy and `baseUrlCommand`
+must spell the same one. In `remote`
 mode every origin must be non-loopback HTTPS; the run-config helper rejects any DNS answer that
 is not globally routable and pins each hostname to an approved address for the browser process,
 and the gate refuses to open a run config whose remote hostname carries no pin. The browser

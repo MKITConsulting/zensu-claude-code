@@ -926,7 +926,8 @@ test('consent mode refuses a remote target and every navigation the floor refuse
   assert.equal(denied(cli('goto https://app.example.com/')), REASONS.REMOTE_NEEDS_POLICY);
   assert.equal(denied(cli('tab-new https://93.184.216.34/')), REASONS.REMOTE_NEEDS_POLICY);
   const floorCases = [
-    ['http://localhost:4200/', FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK],
+    ['http://app.localhost:4200/', FLOOR_REASONS.LOCAL_LOOPBACK_ONLY],
+    ['http://localhost.:4200/', FLOOR_REASONS.LOCAL_LOOPBACK_ONLY],
     ['http://10.0.0.5/', FLOOR_REASONS.REMOTE_HTTPS],
     ['https://10.0.0.5/', FLOOR_REASONS.REMOTE_NOT_PUBLIC],
     ['http://user:pw@127.0.0.1:4200/', FLOOR_REASONS.CREDENTIALS],
@@ -936,6 +937,19 @@ test('consent mode refuses a remote target and every navigation the floor refuse
   ];
   for (const [url, reason] of floorCases) assert.equal(denied(cli(`goto '${url}'`)), reason, url);
   assert.equal(denied(cli('goto http://127.0.0.1:4200/?token=1')), REASONS.ARGUMENT_UNEXPANDED);
+});
+
+test('consent mode asks once for localhost origins, the way it asks for a loopback IP', (t) => {
+  const decision = decide(cli('goto http://localhost:4200/login'));
+  assert.equal(decision.verdict, 'ask');
+  assert.deepEqual(decision.origins, ['http://localhost:4200']);
+  assert.deepEqual(decision.plan.map((entry) => entry.route), ['/login']);
+  const env = isolatedEnv(t);
+  const pair = runConfig(t, ['http://localhost:4200', 'http://localhost:9090']);
+  const opened = decide(openCommand(pair.file, 'http://localhost:4200/'), { env });
+  assert.equal(opened.verdict, 'ask');
+  assert.deepEqual(opened.origins, ['http://localhost:4200', 'http://localhost:9090']);
+  assert.match(opened.prompt, /http:\/\/localhost:4200, http:\/\/localhost:9090 \(local loopback\)/);
 });
 
 test('consent mode refuses an open whose run config names a remote origin, even toward a loopback target', (t) => {
@@ -962,7 +976,8 @@ test('policy mode admits a declared route of a policy target without a prompt an
     { verdict: 'none', plan: [{ origin: 'http://127.0.0.1:4300', route: '/login', decidedBy: 'policy-mode' }] });
   assert.equal(denied(cli('goto http://127.0.0.1:4301/'), { policy }), `http://127.0.0.1:4301: ${REASONS.NOT_POLICY_TARGET}`);
   assert.equal(denied(cli('goto http://127.0.0.1:4300/admin'), { policy }), `http://127.0.0.1:4300/admin: ${REASONS.NOT_POLICY_ROUTE}`);
-  assert.equal(denied(cli('goto http://localhost:4300/'), { policy }), FLOOR_REASONS.LOCAL_LITERAL_LOOPBACK);
+  assert.equal(denied(cli('goto http://localhost:4300/'), { policy }), `http://localhost:4300: ${REASONS.NOT_POLICY_TARGET}`);
+  assert.equal(denied(cli('goto http://app.localhost:4300/'), { policy }), FLOOR_REASONS.LOCAL_LOOPBACK_ONLY);
   assert.deepEqual(decide(cli('snapshot'), { policy }), { verdict: 'none', plan: [] });
   const invalid = consent.readPolicy({ ZENSU_VERIFY_NAVIGATION_POLICY_V1: '{"version":1}' });
   assert.equal(denied(cli('goto http://127.0.0.1:4300/'), { policy: invalid }), `${REASONS.POLICY_INVALID}: policy contains unknown or missing keys`);
@@ -1063,6 +1078,11 @@ test('the run config pins only public addresses, only for hosts it allows, once 
   assert.equal(withRules('MAP app.example.com 93.184.216.34,MAP app.example.com 93.184.216.35').fault,
     'the run config pins an address literal or pins a host twice');
   assert.equal(withRules('EXCLUDE app.example.com').fault, 'the run config carries a resolver rule other than MAP <host> <address>');
+  for (const rule of ['MAP localhost 93.184.216.34', 'MAP LOCALHOST 93.184.216.34']) {
+    const loopback = runConfig(t, ['http://localhost:4200'], [rule]);
+    assert.equal(consent.runConfigShape(loopback.config, loopback.file).fault,
+      'the run config pins localhost, which the browser must resolve to loopback itself', rule);
+  }
 });
 
 test('the run config outputDir must be the absolute browser directory beside the file', (t) => {

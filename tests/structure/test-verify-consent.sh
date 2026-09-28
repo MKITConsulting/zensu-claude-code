@@ -121,10 +121,10 @@ run_unit() { # $1 label  $2 file  $3 registered floor  $4 SUITE-OVERVIEW row key
     check "$1-overview the SUITE-OVERVIEW Blocks cell equals it too (cell=${cell:-<none>} registered=${registered:-<none>})" FAIL
   fi
 }
-run_unit "V6 floor" "$UNIT_FLOOR" 14 "verify-navigation-floor-v1.test.js"
-run_unit "V7 consent" "$UNIT_CONSENT" 111 "verify-consent-v1.test.js"
+run_unit "V6 floor" "$UNIT_FLOOR" 15 "verify-navigation-floor-v1.test.js"
+run_unit "V7 consent" "$UNIT_CONSENT" 112 "verify-consent-v1.test.js"
 run_unit "V7b free-port" "$UNIT_PORT" 3 "verify-free-port.test.js"
-run_unit "V7c browser-config" "$UNIT_CONFIG" 13 "verify-browser-config.test.js"
+run_unit "V7c browser-config" "$UNIT_CONFIG" 14 "verify-browser-config.test.js"
 run_unit "V7d cli-version" "$UNIT_VERSION" 14 "playwright-cli-version-v1.test.js"
 
 if grep -qF "require('./verify-navigation-floor-v1.js')" "$MODULE" \
@@ -650,11 +650,14 @@ memory_has "http://127.0.0.1:4200" "/envonly" "remembered" \
   && check "H8b a zensu-verify session named by the environment is gated" PASS \
   || check "H8b a zensu-verify session named by the environment is gated" FAIL
 
-for url in "http://localhost:4200/" "http://10.0.0.5/" "https://192.168.1.10/" "http://user:pw@127.0.0.1:4200/" \
+for url in "http://app.localhost:4200/" "http://localhost.:4200/" "http://10.0.0.5/" "https://192.168.1.10/" "http://user:pw@127.0.0.1:4200/" \
   "http://127.0.0.1:4200/?t=1" "http://127.0.0.1:4200/#x" "file:///etc/passwd"; do
   [ "$(pre_verdict "$CLI goto $url" "$SID" "$PROJ")" = "DENY" ] \
     && check "H9 the floor denies $url" PASS || check "H9 the floor denies $url" FAIL
 done
+[ "$(pre_verdict "$CLI goto http://localhost:4395/" "$SID" "$PROJ")" = "ASK" ] \
+  && check "H9b the exact name localhost asks like a loopback IP" PASS \
+  || check "H9b the exact name localhost asks like a loopback IP" FAIL
 case "$(pre_reason "$CLI goto https://app.example.com/" "$SID" "$PROJ")" in
   *'parent-environment navigation policy'*) check "H9a a remote target is refused in consent mode, naming the policy it needs" PASS ;;
   *) check "H9a a remote target is refused in consent mode, naming the policy it needs" FAIL ;;
@@ -745,7 +748,7 @@ COUNT_BEFORE="$(memory_count)"
 post_run "$CLI goto http://127.0.0.1:4360/" "$SID" "$PROJ" '{"tool_response":{"stdout":"","stderr":"","interrupted":true}}' >/dev/null
 post_run "$CLI goto https://app.example.com/" "$SID" "$PROJ" >/dev/null
 post_run "$CLI eval 1" "$SID" "$PROJ" >/dev/null
-post_run "$CLI goto http://localhost:4200/" "$SID" "$PROJ" >/dev/null
+post_run "$CLI goto http://app.localhost:4200/" "$SID" "$PROJ" >/dev/null
 COUNT_AFTER="$(memory_count)"
 [ "$COUNT_BEFORE" = "7" ] && [ "$COUNT_AFTER" = "$COUNT_BEFORE" ] \
   && check "H14 interrupted and denied calls are never recorded" PASS \
@@ -757,7 +760,7 @@ COUNT_AFTER="$(memory_count)"
 [ "$(pre_verdict "$CLI goto http://127.0.0.1:4200/x" "no-such-session" "$PROJ")" = "ASK" ] \
   && check "H15 an unbound session asks for an origin the bound session remembers" PASS \
   || check "H15 an unbound session asks for an origin the bound session remembers" FAIL
-[ "$(pre_verdict "$CLI goto http://localhost:4200/" "no-such-session" "$PROJ")" = "DENY" ] \
+[ "$(pre_verdict "$CLI goto http://app.localhost:4200/" "no-such-session" "$PROJ")" = "DENY" ] \
   && check "H15a the floor holds without a bound session" PASS \
   || check "H15a the floor holds without a bound session" FAIL
 BEFORE="$(ls -A "$PROJ/.zensu/state" | LC_ALL=C sort | tr '\n' ' ')"

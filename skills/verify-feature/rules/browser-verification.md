@@ -62,7 +62,7 @@ with element refs such as `e21`; target elements by those refs. Every navigating
    its declared routes; the policy must bind the same exact page route to the same origin with
    `evidenceMode: declared-safe`. In consent mode (the preflight printed `consent`) the ORIGIN
    half of that boundary holds with the user in the loop instead of the policy: the gate
-   admits literal loopback origins only and opens the host's permission prompt once per new
+   admits loopback origins only (a loopback IP or `localhost`) and opens the host's permission prompt once per new
    loopback origin. The ROUTE half does NOT hold — nothing enforces routes in consent mode,
    because the human consented to the whole origin — so binding a page route to its evidence is
    a prose obligation on you here, not a boundary anything checks. Wait for the user's answer;
